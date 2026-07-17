@@ -32,9 +32,16 @@ import {
   retainAcceptedCorpusAuthority,
   shouldCreateBackendAcceptedCorpus,
 } from "../../agreement/acceptedCorpusAuthority";
+import { persistFrozenSigningAuthority } from "../../agreement/frozenSigningAuthorityApi";
 import { fetchWorkspaceProEntitlement, readCachedWorkspaceProEntitlement } from "../../agreement/agreementProFunnelGate";
 import { fetchAgreementDraft, fetchAgreementDraftWithSigningLock } from "../../agreement/agreementWorkspaceApi";
 import { apiUrl, resolveApiBase } from "../../lib/clawApi";
+import {
+  buildFrozenSigningAuthorityCandidate,
+  cacheConfirmedFrozenSigningAuthority,
+  clearCachedFrozenSigningAuthority,
+  createFrozenSigningAuthorityPersistenceBoundary,
+} from "./frozenSigningAuthoritySnapshot";
 import { PREMIUM_COMPLETION_ATTEMPT_MAX_MS } from "../../lib/premiumCompletionAttemptTimeout";
 import { resolvePremiumAgreementParseTimeoutMs } from "../../lib/premiumAgreementParseTimeout";
 import { defaultPostCheckoutRunModelPassInput, getPremiumGenerationIntakeFingerprint } from "../../lib/postCheckoutProFlow";
@@ -3337,6 +3344,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const acceptedCorpusPersistenceBoundaryRef = useRef(
     createAcceptedCorpusPersistenceBoundary(reviewWorkspaceSessionRef.current),
   );
+  const frozenSigningAuthorityPersistenceBoundaryRef = useRef(
+    createFrozenSigningAuthorityPersistenceBoundary(reviewWorkspaceSessionRef.current),
+  );
   const reviewWorkspaceBootstrapDepthRef = useRef(0);
   const [reviewWorkspaceBootstrapping, setReviewWorkspaceBootstrapping] = useState(false);
   const resetReviewWorkspaceAuthoritySession = React.useCallback(() => {
@@ -3345,6 +3355,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     reviewAgreementEnsurePromiseRef.current = null;
     reviewAgreementIdRef.current = null;
     acceptedCorpusPersistenceBoundaryRef.current.activateSession(nextSession);
+    frozenSigningAuthorityPersistenceBoundaryRef.current.activateSession(nextSession);
     setReviewAgreementId(null);
   }, []);
   /** Bumps when user hits “Continue” with placeholder parties so the review card can pulse the parties row. */
@@ -5566,6 +5577,76 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       );
     },
     [ensureReviewAgreementWorkspaceId],
+  );
+
+  const ensureBackendFrozenSigningAuthority = React.useCallback(
+    async (
+      acceptedDraft: ParsedDraftShape,
+      backendAgreementIdOverride?: string | null,
+    ) => {
+      const session = reviewWorkspaceSessionRef.current;
+      const authority = await ensureBackendAcceptedCorpus(
+        acceptedDraft,
+        backendAgreementIdOverride,
+      );
+      if (reviewWorkspaceSessionRef.current !== session) {
+        throw new Error("frozen_signing_authority_stale_review_session");
+      }
+      const signingSnapshot = getAuthoritativeSigningSnapshot();
+      if (!signingSnapshot) {
+        throw new Error("frozen_signing_authority_finalized_signer_required");
+      }
+
+      let candidate;
+      try {
+        candidate = await buildFrozenSigningAuthorityCandidate({
+          acceptedAuthority: authority,
+          authoritativeSnapshot: signingSnapshot,
+          intakeText: (intakeCombined || "").trim(),
+        });
+      } catch (error: unknown) {
+        if (reviewWorkspaceSessionRef.current === session) {
+          clearCachedFrozenSigningAuthority(authority.agreement_id);
+          const message =
+            error instanceof Error
+              ? error.message
+              : "frozen_signing_authority_candidate_failed";
+          setCreateFlowDraftPersistError(message);
+          setProFullDraftCustomGateMessage((current) => current || message);
+          setProFullDraftQualityRetry(true);
+        }
+        throw error;
+      }
+
+      const candidateKey = JSON.stringify({
+        session,
+        agreementId: authority.agreement_id,
+        acceptedVersionId: authority.version_id,
+        candidate,
+      });
+      return await frozenSigningAuthorityPersistenceBoundaryRef.current.ensure(
+        session,
+        candidateKey,
+        () => persistFrozenSigningAuthority(authority.agreement_id, candidate),
+        {
+          onConfirmed: (confirmed) => {
+            cacheConfirmedFrozenSigningAuthority(confirmed);
+            setCreateFlowDraftPersistError(null);
+          },
+          onRejected: (error: unknown) => {
+            clearCachedFrozenSigningAuthority(authority.agreement_id);
+            const message =
+              error instanceof Error
+                ? error.message
+                : "frozen_signing_authority_backend_persist_failed";
+            setCreateFlowDraftPersistError(message);
+            setProFullDraftCustomGateMessage((current) => current || message);
+            setProFullDraftQualityRetry(true);
+          },
+        },
+      );
+    },
+    [ensureBackendAcceptedCorpus, intakeCombined],
   );
 
   async function hydrateCreatedAgreement(
@@ -27027,7 +27108,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           return;
         }
 
-        await ensureBackendAcceptedCorpus(
+        await ensureBackendFrozenSigningAuthority(
           mergeDraftForPaidCreateFlowPersist(mergedDraft, bodyPlain),
           id,
         );
@@ -27149,7 +27230,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       premiumSendPathUnlocked,
       premiumPersistedFlowActive,
       paidProSignerMetadataFinalized,
-      ensureBackendAcceptedCorpus,
+      ensureBackendFrozenSigningAuthority,
     ],
   );
 
@@ -27422,7 +27503,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         return;
       }
 
-      await ensureBackendAcceptedCorpus(
+      await ensureBackendFrozenSigningAuthority(
         mergeDraftForPaidCreateFlowPersist(mergedDraft, corpusText),
         id,
       );
@@ -27533,7 +27614,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     navigate,
     premiumSigningRecipientCount,
     currentPremiumMergedIntakeKey,
-    ensureBackendAcceptedCorpus,
+    ensureBackendFrozenSigningAuthority,
   ]);
 
   const completeGuidedSigningHandoff = React.useCallback(
@@ -27584,7 +27665,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       persistPremiumRecipientHandoffFromDraftAndUi(mergedDraft);
       setAgreementDocumentText(acceptedCorpus);
       try {
-        await ensureBackendAcceptedCorpus(
+        await ensureBackendFrozenSigningAuthority(
           mergeDraftForPaidCreateFlowPersist(mergedDraft, acceptedCorpus),
           reviewAgreementIdRef.current,
         );
@@ -27620,7 +27701,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       mergeDraftPartiesFromCanonicalIdentities,
       completeGuidedPaidProReviewFirstHandoff,
       premiumSigningRecipientCount,
-      ensureBackendAcceptedCorpus,
+      ensureBackendFrozenSigningAuthority,
     ],
   );
 

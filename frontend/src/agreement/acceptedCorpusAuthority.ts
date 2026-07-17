@@ -9,6 +9,12 @@ export type AcceptedCorpusAuthority = {
   corpus_sha256: string;
   accepted_at: string;
   authority_state: "accepted";
+  legal_parties?: Array<{
+    agreement_party_id: string;
+    legal_entity_name: string;
+    agreement_role: string;
+    canonical_order: number;
+  }>;
 };
 
 export function shouldCreateBackendAcceptedCorpus(args: {
@@ -37,6 +43,32 @@ export function normalizeAcceptedCorpusAuthority(
   const corpusSha256 = String(value.corpus_sha256 ?? "").trim().toLowerCase();
   const acceptedAt = String(value.accepted_at ?? "").trim();
   const state = String(value.authority_state ?? "").trim();
+  const rawLegalParties = Array.isArray(value.legal_parties) ? value.legal_parties : null;
+  const legalParties = rawLegalParties
+    ? rawLegalParties
+        .map((raw, index) => {
+          if (!raw || typeof raw !== "object") return null;
+          const party = raw as Record<string, unknown>;
+          const agreementPartyId = String(party.agreement_party_id ?? "").trim();
+          const legalEntityName = String(party.legal_entity_name ?? "").trim();
+          const canonicalOrder = party.canonical_order;
+          if (
+            !agreementPartyId ||
+            !legalEntityName ||
+            canonicalOrder !== index
+          ) {
+            return null;
+          }
+          return {
+            agreement_party_id: agreementPartyId,
+            legal_entity_name: legalEntityName,
+            agreement_role: String(party.agreement_role ?? "party").trim() || "party",
+            canonical_order: canonicalOrder,
+          };
+        })
+        .filter((party) => party !== null)
+    : undefined;
+  if (rawLegalParties && legalParties?.length !== rawLegalParties.length) return null;
   if (
     !agreementId ||
     !versionId.startsWith("av_") ||
@@ -55,6 +87,7 @@ export function normalizeAcceptedCorpusAuthority(
     corpus_sha256: corpusSha256,
     accepted_at: acceptedAt,
     authority_state: "accepted",
+    ...(legalParties ? { legal_parties: legalParties } : {}),
   };
 }
 

@@ -26,6 +26,7 @@ import { clearPaidProPipelineAcceptedCorpusHashForTests } from "./paidProPipelin
 import { resetPaidReviewSessionCorpusInvariantForTests } from "./paidProReviewSessionCorpusInvariantState";
 import { clearStarterToPaidPartyHandoffForTests } from "./starterToPaidPartyHandoff";
 import { clearSignerExecutionAuthorityForTests } from "./signerExecutionAuthority";
+import { clearFrozenSigningAuthorityForTests } from "./frozenSigningAuthoritySnapshot";
 
 /** Clear cross-test Paid Pro pipeline caches plus session-scoped handoff authority. */
 export function resetPaidProPipelineTestIsolation(): void {
@@ -50,4 +51,5 @@ export function resetPaidProPipelineTestIsolation(): void {
   resetPaidReviewSessionCorpusInvariantForTests();
   clearStarterToPaidPartyHandoffForTests();
   clearSignerExecutionAuthorityForTests();
+  clearFrozenSigningAuthorityForTests();
 }

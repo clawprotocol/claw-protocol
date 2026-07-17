@@ -170,7 +170,10 @@ def _save_draft_sync(
     subj = (subject_ref or "").strip() or None
     if not subj and request is not None:
         subj = resolve_subject_from_request(request)
-    save_draft_and_sync_dashboard_metadata(draft, subject_ref=subj)
+    save_draft_and_sync_dashboard_metadata(
+        draft,
+        subject_ref=subj,
+    )
 
 
 def _openai_key_diagnostics() -> Dict[str, Any]:
@@ -573,6 +576,8 @@ class AgreementDraft(AgreementDraftCreate):
     vs01_signing_packet_v1: Optional[Dict[str, Any]] = None
     """Per-recipient invite delivery registry (JTIs, timestamps, resend counts)."""
     recipient_delivery_v1: Optional[Dict[str, Any]] = None
+    """Immutable signer/party execution authority bound to an accepted version."""
+    frozen_signing_authority_v1: Optional[Dict[str, Any]] = None
     workspace_archived_at: Optional[str] = None
     workspace_folder_id: Optional[str] = None
     workspace_tags: List[str] = Field(default_factory=list)
@@ -5506,6 +5511,10 @@ class AgreementSigningLockBody(BaseModel):
     locked_by: str = "owner"
 
 
+class FrozenSigningAuthorityPersistBody(BaseModel):
+    snapshot: Dict[str, Any]
+
+
 def _canonical_legal_party_snapshot(draft: AgreementDraft) -> List[Dict[str, Any]]:
     return [
         {
@@ -5539,12 +5548,23 @@ def _accepted_version_projection(row: Optional[Dict[str, Any]]) -> Optional[Dict
     version_id = str(row.get("version_id") or "").strip()
     if not version_id:
         return None
+    legal_parties = [
+        {
+            "agreement_party_id": str(party.get("party_id") or "").strip(),
+            "legal_entity_name": str(party.get("legal_name") or "").strip(),
+            "agreement_role": str(party.get("role") or "party").strip() or "party",
+            "canonical_order": party.get("ordinal"),
+        }
+        for party in (row.get("parties") or [])
+        if isinstance(party, dict)
+    ]
     return {
         "agreement_id": str(row.get("agreement_id") or ""),
         "version_id": version_id,
         "corpus_sha256": str(row.get("body_sha256") or ""),
         "accepted_at": row.get("accepted_at") or row.get("created_at"),
         "authority_state": "accepted",
+        "legal_parties": legal_parties,
     }
 
 
@@ -5586,6 +5606,87 @@ def accept_agreement_corpus(agreement_id: str, request: Request) -> Dict[str, An
     if projection is None:
         raise RuntimeError("accepted_version_projection_failed")
     return {"ok": True, "accepted_version": projection}
+
+
+@router.get("/{agreement_id}/frozen-signing-authority")
+def get_frozen_signing_authority(agreement_id: str, request: Request) -> Dict[str, Any]:
+    """Return backend-owned frozen signing authority, if this agreement has one."""
+    assert_agreement_full_draft_read_allowed(request, agreement_id)
+    draft = _load_or_404(agreement_id)
+    existing = (
+        draft.frozen_signing_authority_v1
+        if isinstance(draft.frozen_signing_authority_v1, dict)
+        else None
+    )
+    if not existing:
+        raise HTTPException(status_code=404, detail="frozen_signing_authority_not_found")
+    from backend.services.frozen_signing_authority import (
+        FrozenSigningAuthorityError,
+        build_canonical_frozen_signing_authority,
+        materially_identical_frozen_authority,
+    )
+
+    try:
+        canonical = build_canonical_frozen_signing_authority(
+            agreement_id=agreement_id,
+            candidate=existing,
+            frozen_at=str(existing.get("frozenAt") or ""),
+        )
+    except FrozenSigningAuthorityError as exc:
+        raise HTTPException(status_code=409, detail=exc.code) from exc
+    if not materially_identical_frozen_authority(existing, canonical):
+        raise HTTPException(status_code=409, detail="stored_frozen_signing_authority_invalid")
+    return {"ok": True, "snapshot": existing}
+
+
+@router.post("/{agreement_id}/frozen-signing-authority")
+def post_frozen_signing_authority(
+    agreement_id: str,
+    body: FrozenSigningAuthorityPersistBody,
+    request: Request,
+) -> Dict[str, Any]:
+    """Create exactly one immutable frozen signing record for an accepted version."""
+    if not _agreements_write_allowed():
+        raise HTTPException(status_code=403, detail="verifier_only")
+    _owner_mutation_guards(request, agreement_id, surface="frozen_signing_authority")
+    from backend.services.frozen_signing_authority import (
+        FrozenSigningAuthorityError,
+        build_canonical_frozen_signing_authority,
+    )
+    from backend.services.agreement_draft_store import create_frozen_signing_authority
+
+    now = _utc_now_iso()
+    try:
+        canonical = build_canonical_frozen_signing_authority(
+            agreement_id=agreement_id,
+            candidate=body.snapshot,
+            frozen_at=now,
+        )
+    except FrozenSigningAuthorityError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.code) from exc
+    audit_event = AuditEvent(
+        event_type="frozen_signing_authority_persisted",
+        at=now,
+        field="frozen_signing_authority_v1",
+        value={
+            "accepted_version_id": canonical["acceptedVersionId"],
+            "accepted_corpus_sha256": canonical["acceptedCorpusSha256"],
+        },
+    ).model_dump()
+    try:
+        stored = create_frozen_signing_authority(
+            agreement_id,
+            frozen_record=canonical,
+            audit_event=audit_event,
+            updated_at=now,
+        )
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="not_found") from exc
+    except ValueError as exc:
+        if str(exc) == "frozen_signing_authority_immutable":
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        raise
+    return {"ok": True, "snapshot": stored}
 
 
 class WorkspaceArchiveBody(BaseModel):

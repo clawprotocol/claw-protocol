@@ -6,6 +6,7 @@ Optional integration: set ``CLAW_AGREEMENT_PG_TEST_URL`` to a writable ``postgre
 from __future__ import annotations
 
 import os
+import uuid
 
 import pytest
 
@@ -56,3 +57,61 @@ def test_agreement_postgres_draft_version_lock_roundtrip(monkeypatch):
 
     ids = ads.list_draft_agreement_ids_newest_first()
     assert aid in ids
+
+
+@pytest.mark.skipif(not _PG, reason="CLAW_AGREEMENT_PG_TEST_URL not set")
+def test_postgres_atomic_frozen_authority_create_or_return(monkeypatch):
+    monkeypatch.setenv("CLAW_AGREEMENT_DATABASE_URL", _PG)
+    monkeypatch.delenv("CLAW_DATABASE_URL", raising=False)
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+
+    from backend.db import agreement_sql
+    from backend.services import agreement_draft_store as ads
+
+    agreement_sql._pg_migrations_applied = False  # noqa: SLF001
+    aid = f"test_pg_frozen_{uuid.uuid4().hex}"
+    ads.save_draft({"id": aid, "title": "Latest title", "audit_log": []})
+    frozen = {
+        "version": 1,
+        "agreementId": aid,
+        "acceptedVersionId": "av_pg_test",
+        "acceptedCorpusSha256": "a" * 64,
+        "frozenAt": "2026-07-17T00:00:00Z",
+        "parties": [],
+        "signers": [],
+        "execution": {"partyOrder": [], "signerOrder": [], "executionPartyHash": "b" * 64},
+    }
+    audit = {
+        "event_type": "frozen_signing_authority_persisted",
+        "at": "2026-07-17T00:00:00Z",
+        "field": "frozen_signing_authority_v1",
+        "value": {"accepted_version_id": "av_pg_test"},
+    }
+    first = ads.create_frozen_signing_authority(
+        aid,
+        frozen_record=frozen,
+        audit_event=audit,
+        updated_at="2026-07-17T00:00:00Z",
+    )
+    retry = ads.create_frozen_signing_authority(
+        aid,
+        frozen_record={**frozen, "frozenAt": "2026-07-17T00:01:00Z"},
+        audit_event=audit,
+        updated_at="2026-07-17T00:01:00Z",
+    )
+    assert retry == first
+    changed = {**frozen, "acceptedCorpusSha256": "c" * 64}
+    with pytest.raises(ValueError, match="frozen_signing_authority_immutable"):
+        ads.create_frozen_signing_authority(
+            aid,
+            frozen_record=changed,
+            audit_event=audit,
+            updated_at="2026-07-17T00:02:00Z",
+        )
+    stored = ads.load_draft(aid)
+    assert stored["title"] == "Latest title"
+    assert stored["frozen_signing_authority_v1"] == first
+    assert sum(
+        event.get("event_type") == "frozen_signing_authority_persisted"
+        for event in stored["audit_log"]
+    ) == 1

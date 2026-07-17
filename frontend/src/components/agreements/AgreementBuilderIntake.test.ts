@@ -1068,6 +1068,37 @@ describe("paid Pro runtime authority establishment (intake wiring)", () => {
   const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
 
   it("routes canonical entry and authority-dependent continuations through the tracked acceptance boundary", () => {
+    const authorityStart = intake.indexOf("const ensureBackendAcceptedCorpus");
+    const frozenAuthorityStart = intake.indexOf(
+      "const ensureBackendFrozenSigningAuthority",
+      authorityStart,
+    );
+    const authorityBoundary = intake.slice(authorityStart, frozenAuthorityStart);
+    expect(authorityBoundary).not.toContain("buildFrozenSigningAuthorityCandidate");
+    expect(authorityBoundary).not.toContain("persistFrozenSigningAuthority");
+
+    const frozenAuthorityEnd = intake.indexOf(
+      "async function hydrateCreatedAgreement",
+      frozenAuthorityStart,
+    );
+    const frozenAuthorityBoundary = intake.slice(frozenAuthorityStart, frozenAuthorityEnd);
+    expect(frozenAuthorityBoundary).toContain("await ensureBackendAcceptedCorpus");
+    expect(frozenAuthorityBoundary).toContain("await buildFrozenSigningAuthorityCandidate");
+    expect(frozenAuthorityBoundary).toContain(
+      "await frozenSigningAuthorityPersistenceBoundaryRef.current.ensure",
+    );
+    expect(frozenAuthorityBoundary).toContain("persistFrozenSigningAuthority");
+    expect(frozenAuthorityBoundary).toContain("cacheConfirmedFrozenSigningAuthority(confirmed)");
+    const resetStart = intake.indexOf("const resetReviewWorkspaceAuthoritySession");
+    const resetEnd = intake.indexOf("}, []);", resetStart);
+    const resetBoundary = intake.slice(resetStart, resetEnd);
+    expect(resetBoundary).toContain(
+      "acceptedCorpusPersistenceBoundaryRef.current.activateSession(nextSession)",
+    );
+    expect(resetBoundary).toContain(
+      "frozenSigningAuthorityPersistenceBoundaryRef.current.activateSession(nextSession)",
+    );
+
     const canonicalStart = intake.indexOf("const enterCanonicalPaidProReviewFlow");
     const canonicalEnd = intake.indexOf(
       "/** @deprecated Use enterCanonicalPaidProReviewFlow",
@@ -1092,7 +1123,7 @@ describe("paid Pro runtime authority establishment (intake wiring)", () => {
       reviewHandoffStart,
     );
     expect(intake.slice(reviewHandoffStart, reviewHandoffEnd)).toContain(
-      "await ensureBackendAcceptedCorpus(",
+      "await ensureBackendFrozenSigningAuthority(",
     );
 
     const signatureTrackStart = intake.indexOf("const enterGuidedSignatureTrackRoute");
@@ -1101,14 +1132,14 @@ describe("paid Pro runtime authority establishment (intake wiring)", () => {
       signatureTrackStart,
     );
     expect(intake.slice(signatureTrackStart, signatureTrackEnd)).toContain(
-      "await ensureBackendAcceptedCorpus(",
+      "await ensureBackendFrozenSigningAuthority(",
     );
     const signingHandoffEnd = intake.indexOf(
       "const finalizePaidProSignerMetadataAndOpenReviewDecision",
       signatureTrackEnd,
     );
     expect(intake.slice(signatureTrackEnd, signingHandoffEnd)).toContain(
-      "await ensureBackendAcceptedCorpus(",
+      "await ensureBackendFrozenSigningAuthority(",
     );
   });
 
