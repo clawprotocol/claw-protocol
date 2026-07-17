@@ -155,7 +155,7 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     const s = readFileSync(p, "utf8");
     const i = s.indexOf("const premiumPaidDocumentSurface = useMemo");
     expect(i).toBeGreaterThanOrEqual(0);
-    const frag = s.slice(i, i + 2000);
+    const frag = s.slice(i, i + 3200);
     expect(frag).toContain("resolveIsFreeStreamlineDraftReview");
     expect(frag).toContain("hasPaidProSourceOfTruth()");
     expect(frag).toContain("hasPaidPremiumCompletionSession()");
@@ -532,8 +532,10 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     expect(handoff).toBeGreaterThanOrEqual(0);
     const tryOpen = intake.indexOf("try {", handoff);
     expect(tryOpen).toBeGreaterThan(handoff);
-    const slice = intake.slice(tryOpen, tryOpen + 320);
-    expect(slice).toMatch(/setHardError\(null\);[\s\S]*?const existingId = reviewAgreementIdRef/);
+    const slice = intake.slice(tryOpen, tryOpen + 700);
+    expect(slice).toMatch(
+      /setHardError\(null\);[\s\S]*?acceptancePersistInFlight[\s\S]*?const existingId/,
+    );
     const hydrateOk = intake.indexOf('console.log("[AgreementIntake] persistence + hydrate OK');
     expect(hydrateOk).toBeGreaterThan(0);
     expect(intake).toContain("reviewAgreementIdRef.current = id");
@@ -747,7 +749,7 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     expect(intake).toContain("commitFreeDraftForReview");
     expect(intake).toContain("StarterDraftDocumentSurface");
     expect(intake).toMatch(
-      /finalReviewAuthorityOnly:\s*simpleProFinalReviewActive/,
+      /finalReviewAuthorityOnly:[\s\S]{0,180}simpleProFinalReviewActive/,
     );
     expect(intake).toMatch(
       /useState<GuidedCompletionPhase>\(GUIDED_COMPLETION_PHASE_INACTIVE\)/,
@@ -842,7 +844,7 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     expect(intake).toContain("adding_signature_fields");
     expect(intake).toContain("signing_packet_ready");
     const sendIdx = intake.indexOf("const handleProSendForSignature = React.useCallback");
-    const sendBlock = intake.slice(sendIdx, sendIdx + 2800);
+    const sendBlock = intake.slice(sendIdx, sendIdx + 5200);
     expect(sendBlock).toContain('continueGuidedFinalReviewToSigning({ intent: "signature" })');
     expect(sendBlock).toContain("canProceedGuidedFinalReviewToSigning");
     expect(sendBlock).toContain("finalizePaidProSignerMetadataAndOpenReviewDecision");
@@ -902,7 +904,9 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
       htmlBlock.indexOf('getPaidProDocumentForSurface("display"'),
       htmlBlock.indexOf("const session = guidedCompletionSessionRef.current"),
     );
-    expect(sotBranch).not.toContain("polishProAgreementDisplayLayer");
+    expect(sotBranch).toMatch(
+      /signingSnapshotActive[\s\S]{0,180}polishProAgreementDisplayLayer/,
+    );
     expect(sotBranch).not.toContain("resolveGuidedCompletionRenderDocument");
     expect(sotBranch).not.toMatch(/pickerPlain:\s*premiumPaidReadonlyPick/);
     expect(sotBranch).not.toMatch(/agreementDocumentText\s*\|\|/);
@@ -1063,6 +1067,51 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
 describe("paid Pro runtime authority establishment (intake wiring)", () => {
   const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
 
+  it("routes canonical entry and authority-dependent continuations through the tracked acceptance boundary", () => {
+    const canonicalStart = intake.indexOf("const enterCanonicalPaidProReviewFlow");
+    const canonicalEnd = intake.indexOf(
+      "/** @deprecated Use enterCanonicalPaidProReviewFlow",
+      canonicalStart,
+    );
+    const canonical = intake.slice(canonicalStart, canonicalEnd);
+    expect(canonical).toContain("ensureBackendAcceptedCorpus(acceptedDraftForBackend)");
+    expect(canonical).not.toContain("void (async () =>");
+
+    const persistStart = intake.indexOf("async function runPersistAndOpen");
+    const persistEnd = intake.indexOf("const onGenerate =", persistStart);
+    const persist = intake.slice(persistStart, persistEnd);
+    expect(persist).toMatch(
+      /if \(acceptedPaidProPersist\) \{\s*await ensureBackendAcceptedCorpus\(parsed, id\)/,
+    );
+
+    const reviewHandoffStart = intake.indexOf(
+      "const completeGuidedPaidProReviewFirstHandoff",
+    );
+    const reviewHandoffEnd = intake.indexOf(
+      "const enterGuidedSigningConfirmationFromFinalReview",
+      reviewHandoffStart,
+    );
+    expect(intake.slice(reviewHandoffStart, reviewHandoffEnd)).toContain(
+      "await ensureBackendAcceptedCorpus(",
+    );
+
+    const signatureTrackStart = intake.indexOf("const enterGuidedSignatureTrackRoute");
+    const signatureTrackEnd = intake.indexOf(
+      "const completeGuidedSigningHandoff",
+      signatureTrackStart,
+    );
+    expect(intake.slice(signatureTrackStart, signatureTrackEnd)).toContain(
+      "await ensureBackendAcceptedCorpus(",
+    );
+    const signingHandoffEnd = intake.indexOf(
+      "const finalizePaidProSignerMetadataAndOpenReviewDecision",
+      signatureTrackEnd,
+    );
+    expect(intake.slice(signatureTrackEnd, signingHandoffEnd)).toContain(
+      "await ensureBackendAcceptedCorpus(",
+    );
+  });
+
   it("blocks Pro review shell until runtime authority is established", () => {
     expect(intake).toContain("assessPaidProRuntimeAuthority");
     expect(intake).toContain("paidProAwaitingRuntimeAuthority");
@@ -1071,7 +1120,7 @@ describe("paid Pro runtime authority establishment (intake wiring)", () => {
     expect(intake).toContain("paidProRuntimeAuthority.canRenderProReviewShell");
     expect(intake).toContain("paidProRuntimeAuthority.established");
     const proceedIdx = intake.indexOf("const canProceedWithPaidProDocument = useMemo");
-    const proceedBlock = intake.slice(proceedIdx, proceedIdx + 600);
+    const proceedBlock = intake.slice(proceedIdx, proceedIdx + 1600);
     expect(proceedBlock).toContain("!paidProRuntimeAuthority.established");
     expect(proceedBlock).toContain("!paidProRuntimeAuthority.canRenderProReviewShell");
   });

@@ -13,6 +13,16 @@ pytestmark = pytest.mark.unit
 _ORG_H = {"X-Claw-Org-Id": "test-org-api-v2"}
 
 
+def _accept_backend_corpus_version(client: TestClient, agreement_id: str) -> dict:
+    response = client.post(
+        f"/api/agreements/{agreement_id}/accepted-corpus",
+        headers={**_ORG_H, "X-Claw-Review-First-Persist": "1"},
+        json={},
+    )
+    assert response.status_code == 200
+    return response.json()["accepted_version"]
+
+
 @pytest.fixture(autouse=True)
 def _reset_usage_economics_singleton():
     usage_economics_store_mod._store = None  # noqa: SLF001
@@ -242,11 +252,13 @@ def test_signing_ceremony_multi_signer_and_immutability(monkeypatch, tmp_path):
             },
         )
         assert ap.status_code == 200
+    accepted_version = _accept_backend_corpus_version(client, aid)
     lock = client.put(
         f"/api/agreements/{aid}/signing-lock",
         headers=_ORG_H,
         json={
-            "locked_version_id": "lv-ceremony-1",
+            "accepted_version_id": accepted_version["version_id"],
+            "corpus_sha256": accepted_version["corpus_sha256"],
             "locked_at": "2026-04-01T12:00:00Z",
             "locked_by": "owner",
         },
@@ -272,7 +284,7 @@ def test_signing_ceremony_multi_signer_and_immutability(monkeypatch, tmp_path):
         json={
             "participant_id": "p-acme",
             "typed_name": "Acme Growth LLC",
-            "locked_version_id": "lv-ceremony-1",
+            "locked_version_id": accepted_version["version_id"],
         },
     )
     assert c1.status_code == 200
@@ -287,7 +299,7 @@ def test_signing_ceremony_multi_signer_and_immutability(monkeypatch, tmp_path):
         json={
             "participant_id": "p-beta",
             "typed_name": "Beta LLC",
-            "locked_version_id": "lv-ceremony-1",
+            "locked_version_id": accepted_version["version_id"],
         },
     )
     assert c2.status_code == 200
@@ -353,11 +365,13 @@ def test_negotiation_locked_blocks_owner_edits_unlock_restores(monkeypatch, tmp_
         json={"participant_id": "p-sig", "participant_display_name": "Signer"},
     )
     assert ap.status_code == 200
+    accepted_version = _accept_backend_corpus_version(client, aid)
     lock = client.put(
         f"/api/agreements/{aid}/signing-lock",
         headers=_ORG_H,
         json={
-            "locked_version_id": "lv-guard-1",
+            "accepted_version_id": accepted_version["version_id"],
+            "corpus_sha256": accepted_version["corpus_sha256"],
             "locked_at": "2026-04-01T12:00:00Z",
             "locked_by": "owner",
         },
@@ -365,7 +379,7 @@ def test_negotiation_locked_blocks_owner_edits_unlock_restores(monkeypatch, tmp_
     assert lock.status_code == 200
     body = client.get(f"/api/agreements/{aid}", headers=_ORG_H).json()
     assert body.get("signing_lock") is not None
-    assert body["signing_lock"]["locked_version_id"] == "lv-guard-1"
+    assert body["signing_lock"]["locked_version_id"] == accepted_version["version_id"]
     assert len(str(body["signing_lock"].get("content_sha256") or "")) == 64
 
     blocked = client.post(
@@ -445,11 +459,13 @@ def test_signing_complete_rejects_stale_draft_vs_lock_hash(monkeypatch, tmp_path
         json={"participant_id": "p-acme", "participant_display_name": "Acme"},
     )
     assert ap.status_code == 200
+    accepted_version = _accept_backend_corpus_version(client, aid)
     lock = client.put(
         f"/api/agreements/{aid}/signing-lock",
         headers=_ORG_H,
         json={
-            "locked_version_id": "lv-stale-1",
+            "accepted_version_id": accepted_version["version_id"],
+            "corpus_sha256": accepted_version["corpus_sha256"],
             "locked_at": "2026-04-01T12:00:00Z",
             "locked_by": "owner",
         },
@@ -474,7 +490,7 @@ def test_signing_complete_rejects_stale_draft_vs_lock_hash(monkeypatch, tmp_path
         json={
             "participant_id": "p-acme",
             "typed_name": "Acme LLC",
-            "locked_version_id": "lv-stale-1",
+            "locked_version_id": accepted_version["version_id"],
         },
     )
     assert bad.status_code == 409

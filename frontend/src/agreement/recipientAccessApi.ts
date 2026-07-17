@@ -181,7 +181,12 @@ export async function mintRecipientAccessToken(
 
 export async function putSigningLock(
   agreementId: string,
-  payload: { locked_version_id: string; locked_at: string; locked_by: string }
+  payload: {
+    accepted_version_id: string;
+    corpus_sha256: string;
+    locked_at: string;
+    locked_by: string;
+  }
 ): Promise<{ ok: boolean; error?: string }> {
   const res = await fetch(
     `${API_BASE.replace(/\/$/, "")}/api/agreements/${encodeURIComponent(agreementId)}/signing-lock`,
@@ -189,7 +194,8 @@ export async function putSigningLock(
       method: "PUT",
       headers: clawAgreementHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify({
-        locked_version_id: payload.locked_version_id,
+        accepted_version_id: payload.accepted_version_id,
+        corpus_sha256: payload.corpus_sha256,
         locked_at: payload.locked_at,
         locked_by: payload.locked_by,
       }),

@@ -207,6 +207,13 @@ import {
 import { resolveRecipientAccessMintFailureMessage } from "../../agreement/recipientAccessMintPayload";
 import { clawAgreementHeaders } from "../../agreement/agreementOrgHeaders";
 import {
+  normalizeAcceptedCorpusAuthority,
+  readRetainedAcceptedCorpusAuthority,
+  resolveAcceptedCorpusLockAuthority,
+  retainAcceptedCorpusAuthority,
+  type AcceptedCorpusAuthority,
+} from "../../agreement/acceptedCorpusAuthority";
+import {
   FUNNEL_CTA_SEND_WITH_PRO,
   FUNNEL_FREE_STARTER_BODY,
   FUNNEL_FREE_STARTER_HEADLINE,
@@ -842,6 +849,10 @@ const AgreementReview: React.FC<Props> = ({
   const [status, setStatus] = useState<"Draft" | "Complete Draft" | "Signed">("Draft");
   const [editInstruction, setEditInstruction] = useState("");
   const [versionBundle, setVersionBundle] = useState<AgreementVersionBundle | null>(null);
+  const [acceptedCorpusAuthority, setAcceptedCorpusAuthority] =
+    useState<AcceptedCorpusAuthority | null>(() =>
+      readRetainedAcceptedCorpusAuthority(agreementId),
+    );
   /** Latest GET `signing_lock` snapshot — applied when version bundle is rebuilt (avoids stale lock flash). */
   const [serverSigningLockHydrate, setServerSigningLockHydrate] = useState<{
     keyPresent: boolean;
@@ -1621,6 +1632,9 @@ const AgreementReview: React.FC<Props> = ({
       }
       const payload = await res.json();
       setEconomicsOverlay(parseEconomicsPayload(payload?.economics));
+      const accepted = normalizeAcceptedCorpusAuthority(payload?.accepted_version, id);
+      setAcceptedCorpusAuthority(accepted);
+      if (accepted) retainAcceptedCorpusAuthority(accepted);
       const normalized = normalizeAgreementDraftFromApi(payload?.draft ?? null, { fallbackAgreementId: id });
       if (!normalized) {
         throw new Error(
@@ -1724,6 +1738,7 @@ const AgreementReview: React.FC<Props> = ({
       setRenderedHtml("");
       setError(null);
       setServerSigningLockHydrate(null);
+      setAcceptedCorpusAuthority(null);
       return;
     }
 
@@ -1777,6 +1792,9 @@ const AgreementReview: React.FC<Props> = ({
             keyPresent: Object.prototype.hasOwnProperty.call(pl, "signing_lock"),
             value: Object.prototype.hasOwnProperty.call(pl, "signing_lock") ? pl.signing_lock : undefined,
           });
+          const accepted = normalizeAcceptedCorpusAuthority(pl.accepted_version, id);
+          setAcceptedCorpusAuthority(accepted);
+          if (accepted) retainAcceptedCorpusAuthority(accepted);
           setEconomicsOverlay(parseEconomicsPayload(payload?.economics));
           if (simpleHome && !cancelled) setSimpleHomeEconomicsHydrated(true);
           const normalized = normalizeAgreementDraftFromApi(payload?.draft ?? null, { fallbackAgreementId: id });
@@ -5629,6 +5647,11 @@ const AgreementReview: React.FC<Props> = ({
   const revisionCount = vb?.versions.length ?? 0;
   const versionIdToLock =
     isWorkspace && vb ? (previewVersionId ?? vb.currentVersionId) : "";
+  const acceptedLockAuthority = resolveAcceptedCorpusLockAuthority(
+    agreementId,
+    acceptedCorpusAuthority,
+  );
+  const acceptedVersionIdToLock = acceptedLockAuthority?.accepted_version_id ?? "";
   const versionOrdinalToLock =
     isWorkspace && vb && versionIdToLock
       ? vb.versions.findIndex((v) => v.id === versionIdToLock) + 1
@@ -5645,7 +5668,12 @@ const AgreementReview: React.FC<Props> = ({
   const lockVidPanel = vb?.signingLock?.lockedVersionId ?? "";
   const lockedVerForPanel =
     vb && lockVidPanel ? vb.versions.find((v) => v.id === lockVidPanel) : undefined;
-  const lockedVersionMissing = Boolean(signingLocked && lockVidPanel && !lockedVerForPanel);
+  const lockedVersionMissing = Boolean(
+    signingLocked &&
+      lockVidPanel &&
+      !lockedVerForPanel &&
+      lockVidPanel !== acceptedCorpusAuthority?.version_id,
+  );
   const lockedVersionOrdinal =
     vb && lockVidPanel ? vb.versions.findIndex((v) => v.id === lockVidPanel) + 1 : 0;
   const lockedVersionLabel =
@@ -6081,6 +6109,11 @@ const AgreementReview: React.FC<Props> = ({
               lock for signing. Still pending: {signingApproverMissingList.join(", ")}.
             </p>
           ) : null}
+          {!acceptedCorpusAuthority ? (
+            <p className="mt-2 text-xs text-amber-200/90" role="alert">
+              This agreement does not yet have a backend-accepted signing version. Return to final review and persist the accepted Paid Pro agreement before locking.
+            </p>
+          ) : null}
           {!simpleHomeProEntitlementBypass ? (
             <UpgradeLimitNotice gate={signatureRequestGate} className="mt-3" />
           ) : null}
@@ -6090,17 +6123,18 @@ const AgreementReview: React.FC<Props> = ({
             disabled={
               signingLockBusy ||
               !versionIdToLock ||
+              !acceptedVersionIdToLock ||
               signingApproverMissingList.length > 0 ||
               !signatureRequestAllowed
             }
             onClick={() => {
-              if (!versionIdToLock || !draft || signingLockBusy) return;
+              if (!versionIdToLock || !acceptedVersionIdToLock || !draft || signingLockBusy) return;
               const sigGate = access.check("signature_request");
               if (!sigGate.allowed && !simpleHomeProEntitlementBypass) {
                 setError(sigGate.message || "Signing request limit reached for your plan.");
                 return;
               }
-              const next = applySigningLock(agreementId, versionIdToLock);
+              const next = applySigningLock(agreementId, acceptedVersionIdToLock);
               if (!next) return;
               setSigningLockBusy(true);
               setVersionBundle(next);
@@ -6114,7 +6148,8 @@ const AgreementReview: React.FC<Props> = ({
               void (async () => {
                 try {
                   const lockRes = await putSigningLock(agreementId, {
-                    locked_version_id: sl.lockedVersionId!,
+                    accepted_version_id: acceptedVersionIdToLock,
+                    corpus_sha256: acceptedLockAuthority!.corpus_sha256,
                     locked_at: sl.lockedAt || new Date().toISOString(),
                     locked_by: sl.lockedBy || "owner",
                   });

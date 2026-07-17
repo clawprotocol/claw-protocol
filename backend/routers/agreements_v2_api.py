@@ -98,6 +98,7 @@ from backend.services.agreement_signing_lock_store import (
     read_signing_lock,
     write_signing_lock,
 )
+from backend.utils.agreement_version_store import AgreementVersionStore
 from backend.utils.timeline_store import TimelineStore
 from backend.llm_router import ExternalAIBlockedError, OPENAI_API_KEY, call_legal_llm, resolve_llm_model_for_access_class
 from backend.security.privilege_policy import first_privilege_airlock_block_diagnostic
@@ -5497,9 +5498,94 @@ def create_draft_from_prior_agreement(body: AgreementDraftForkRequest, request: 
 
 
 class AgreementSigningLockBody(BaseModel):
-    locked_version_id: str
+    accepted_version_id: Optional[str] = None
+    # Backward-compatible wire name; still validated as a backend-issued accepted version.
+    locked_version_id: Optional[str] = None
+    corpus_sha256: Optional[str] = None
     locked_at: str
     locked_by: str = "owner"
+
+
+def _canonical_legal_party_snapshot(draft: AgreementDraft) -> List[Dict[str, Any]]:
+    return [
+        {
+            "ordinal": index,
+            "party_id": str(p.id or "").strip() or None,
+            "legal_name": str(p.name or "").strip(),
+            "role": str(p.role or "party").strip() or "party",
+        }
+        for index, p in enumerate(draft.parties or [])
+    ]
+
+
+def _accepted_corpus_from_draft(draft: AgreementDraft) -> Tuple[str, str]:
+    # The final Paid Pro persist boundary writes its exact selected corpus to purpose.
+    # Prefer it over older review/pro-redline caches that may still exist on the draft.
+    purpose = str(draft.purpose or "")
+    if purpose:
+        return purpose, "purpose"
+    corpus, source = _review_first_final_corpus_from_draft(
+        draft,
+        include_field_fallbacks=True,
+    )
+    if corpus:
+        return corpus, source
+    return "", "none"
+
+
+def _accepted_version_projection(row: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+    if not row or str(row.get("authority_state") or "") != "accepted":
+        return None
+    version_id = str(row.get("version_id") or "").strip()
+    if not version_id:
+        return None
+    return {
+        "agreement_id": str(row.get("agreement_id") or ""),
+        "version_id": version_id,
+        "corpus_sha256": str(row.get("body_sha256") or ""),
+        "accepted_at": row.get("accepted_at") or row.get("created_at"),
+        "authority_state": "accepted",
+    }
+
+
+@router.post("/{agreement_id}/accepted-corpus")
+def accept_agreement_corpus(agreement_id: str, request: Request) -> Dict[str, Any]:
+    """Finalize the already-durable Paid Pro corpus as one immutable backend version."""
+    if not _agreements_write_allowed():
+        raise HTTPException(status_code=403, detail="verifier_only")
+    _owner_mutation_guards(request, agreement_id, surface="accepted_corpus")
+    if (request.headers.get("x-claw-review-first-persist") or "").strip() != "1":
+        raise HTTPException(status_code=400, detail="paid_pro_acceptance_boundary_required")
+    draft = _persist_party_id_backfill(_load_or_404(agreement_id))
+    corpus, source = _accepted_corpus_from_draft(draft)
+    if not corpus:
+        raise HTTPException(status_code=400, detail="accepted_corpus_empty")
+    parties = _canonical_legal_party_snapshot(draft)
+    if len(parties) < 2 or any(not str(p.get("legal_name") or "").strip() for p in parties):
+        raise HTTPException(status_code=400, detail="canonical_legal_parties_required")
+    now = _utc_now_iso()
+    try:
+        row = AgreementVersionStore().create_accepted_version(
+            agreement_id=agreement_id,
+            title=draft.title,
+            corpus=corpus,
+            parties=parties,
+            accepted_at=now,
+            metadata={
+                "acceptance_event": "agreements_v2_paid_pro_final_persist",
+                "accepted_by_subject": resolve_subject_from_request(request),
+                "corpus_source": source,
+                "party_count": len(parties),
+            },
+        )
+    except ValueError as exc:
+        if str(exc) == "accepted_version_conflict":
+            raise HTTPException(status_code=409, detail="accepted_version_conflict") from exc
+        raise
+    projection = _accepted_version_projection(row)
+    if projection is None:
+        raise RuntimeError("accepted_version_projection_failed")
+    return {"ok": True, "accepted_version": projection}
 
 
 class WorkspaceArchiveBody(BaseModel):
@@ -5880,12 +5966,46 @@ def put_agreement_signing_lock(
                 "missing_signer_approvals": missing_signer_approvals,
             },
         )
-    content_sha256 = _draft_locked_content_sha256(draft_full)
+    accepted_version_id = str(
+        body.accepted_version_id or body.locked_version_id or ""
+    ).strip()
+    if not accepted_version_id:
+        raise HTTPException(status_code=409, detail="accepted_corpus_version_required")
+    store = AgreementVersionStore()
+    try:
+        accepted = store.get_version_by_id(version_id=accepted_version_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=400, detail="accepted_corpus_version_not_found") from exc
+    if str(accepted.get("agreement_id") or "") != agreement_id:
+        raise HTTPException(status_code=409, detail="accepted_corpus_version_agreement_mismatch")
+    if str(accepted.get("authority_state") or "") != "accepted":
+        raise HTTPException(status_code=409, detail="accepted_corpus_version_not_final")
+    current = store.get_accepted_version(agreement_id=agreement_id)
+    if not current or str(current.get("version_id") or "") != accepted_version_id:
+        raise HTTPException(status_code=409, detail="accepted_corpus_version_stale")
+    current_corpus, _source = _accepted_corpus_from_draft(draft_full)
+    current_sha256 = hashlib.sha256(current_corpus.encode("utf-8")).hexdigest()
+    accepted_sha256 = str(accepted.get("body_sha256") or "")
+    if (
+        not current_corpus
+        or current_sha256 != accepted_sha256
+        or str(accepted.get("body_markdown") or "") != current_corpus
+    ):
+        raise HTTPException(status_code=409, detail="accepted_corpus_mismatch")
+    submitted_sha256 = str(body.corpus_sha256 or "").strip()
+    if submitted_sha256 and submitted_sha256 != accepted_sha256:
+        raise HTTPException(status_code=409, detail="accepted_corpus_mismatch")
+    current_parties = _canonical_legal_party_snapshot(draft_full)
+    accepted_parties = accepted.get("parties")
+    if not isinstance(accepted_parties, list) or current_parties != accepted_parties:
+        raise HTTPException(status_code=409, detail="accepted_corpus_party_order_mismatch")
     payload = {
-        "locked_version_id": body.locked_version_id,
+        "locked_version_id": accepted_version_id,
         "locked_at": body.locked_at,
         "locked_by": body.locked_by,
-        "content_sha256": content_sha256,
+        "content_sha256": accepted_sha256,
+        "accepted_corpus_sha256": accepted_sha256,
+        "accepted_party_snapshot_sha256": canon_sha256_hex(accepted_parties),
     }
     write_signing_lock(agreement_id, payload)
     record_public_feed_event_if_applicable(
@@ -5963,8 +6083,14 @@ def post_signing_ceremony_complete(
     if req_lv != lv:
         raise HTTPException(status_code=400, detail="locked_version_mismatch")
     lock_row = read_signing_lock(agreement_id)
-    stored_sha = str((lock_row or {}).get("content_sha256") or "").strip()
-    if stored_sha and _draft_locked_content_sha256(draft) != stored_sha:
+    stored_sha = str(
+        (lock_row or {}).get("accepted_corpus_sha256")
+        or (lock_row or {}).get("content_sha256")
+        or ""
+    ).strip()
+    current_corpus, _source = _accepted_corpus_from_draft(draft)
+    current_sha = hashlib.sha256(current_corpus.encode("utf-8")).hexdigest()
+    if stored_sha and (not current_corpus or current_sha != stored_sha):
         raise HTTPException(status_code=409, detail="stale_locked_version")
     part_id, sp = _resolve_signing_participant_for_ceremony(draft, body.participant_id)
     assert_agreement_recipient_write_allowed(
@@ -7088,6 +7214,9 @@ def get_agreement_draft(agreement_id: str, request: Request) -> Dict[str, Any]:
     assert_agreement_full_draft_read_allowed(request, agreement_id)
     draft = _load_or_404(agreement_id)
     lock = read_signing_lock(agreement_id)
+    accepted_version = _accepted_version_projection(
+        AgreementVersionStore().get_accepted_version(agreement_id=agreement_id)
+    )
     lv = str((lock or {}).get("locked_version_id") or "").strip()
     signing_lock_out: Optional[Dict[str, Any]] = None
     if lock and lv:
@@ -7101,6 +7230,7 @@ def get_agreement_draft(agreement_id: str, request: Request) -> Dict[str, Any]:
         "id": agreement_id,
         "draft": _draft_with_sanitized_parties(draft).model_dump(),
         "economics": economics_overlay_for_agreement(agreement_id),
+        "accepted_version": accepted_version,
         "signing_lock": signing_lock_out,
     }
 

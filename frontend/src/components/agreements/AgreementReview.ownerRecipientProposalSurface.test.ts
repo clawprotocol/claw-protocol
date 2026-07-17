@@ -47,12 +47,16 @@ describe("AgreementReview owner recipient proposal surface (audit)", () => {
     expect(s).toContain("putSigningLock");
     expect(s).toContain("onOwnerJumpToRecipientsStep");
     expect(s).toContain("owner-signing-recipients-setup");
-    const lockHandlerStart = s.indexOf("if (!versionIdToLock || !draft || signingLockBusy) return;");
+    const lockHandlerStart = s.indexOf(
+      "if (!versionIdToLock || !acceptedVersionIdToLock || !draft || signingLockBusy) return;",
+    );
     expect(lockHandlerStart).toBeGreaterThan(0);
     const lockHandlerEnd = s.indexOf("})();", lockHandlerStart);
     expect(lockHandlerEnd).toBeGreaterThan(lockHandlerStart);
     const lockHandlerSlice = s.slice(lockHandlerStart, lockHandlerEnd);
     expect(lockHandlerSlice).toContain("putSigningLock");
+    expect(lockHandlerSlice).toContain("accepted_version_id: acceptedVersionIdToLock");
+    expect(lockHandlerSlice).not.toContain("readAuthoritativeAgreementVersion");
     expect(s).toMatch(/signingLockBusy[\s\S]{0,240}ownerPostAcceptSigningGuide[\s\S]{0,120}OWNER_LOCK_AND_CONTINUE_TO_SIGNING/);
     expect(s).not.toMatch(/Continue to signing/);
   });

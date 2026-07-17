@@ -353,11 +353,19 @@ def test_recipient_revise_rejects_sign_mode_token(monkeypatch, tmp_path):
             json={"participant_id": pid, "participant_display_name": label},
         )
         assert ap.status_code == 200
+    accepted = client.post(
+        f"/api/agreements/{aid}/accepted-corpus",
+        headers={**_ORG_A, "X-Claw-Review-First-Persist": "1"},
+        json={},
+    )
+    assert accepted.status_code == 200
+    accepted_version = accepted.json()["accepted_version"]
     lock = client.put(
         f"/api/agreements/{aid}/signing-lock",
         headers=_ORG_A,
         json={
-            "locked_version_id": "lv-ws-1",
+            "accepted_version_id": accepted_version["version_id"],
+            "corpus_sha256": accepted_version["corpus_sha256"],
             "locked_at": "2026-04-01T12:00:00Z",
             "locked_by": "owner",
         },

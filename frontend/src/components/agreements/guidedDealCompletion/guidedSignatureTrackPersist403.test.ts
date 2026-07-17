@@ -172,13 +172,9 @@ describe("guided signature track persist 403 regression", () => {
     expect(bridge?.vs01DocumentId).toBe(result.documentId);
   });
 
-  it("AgreementBuilderIntake skips review fallback and uses local bridge on guided signature persist 403", () => {
+  it("AgreementBuilderIntake blocks local signing continuation when backend authority persistence fails", () => {
     const intake = readFileSync(join(__dirname, "../AgreementBuilderIntake.tsx"), "utf8");
     expect(intake).toContain("guidedSignaturePersistFailureRef");
-    expect(intake).toContain("tryNavigateGuidedSignatureTrackLocalVs01Esign");
-    expect(intake).toContain("canContinueGuidedSignatureTrackWithoutPersist");
-    expect(intake).toContain("isGuidedSignatureDraftPersistLocallyContinuable");
-    expect(intake).toContain("logGuidedSignatureTrackLocalBridgeStart");
     const persistCatch = intake.slice(
       intake.indexOf("if (guidedSignatureTrackInFlightRef.current) {"),
       intake.indexOf("if (guidedSignatureTrackInFlightRef.current) {") + 500,
@@ -189,7 +185,9 @@ describe("guided signature track persist 403 regression", () => {
       intake.indexOf("const enterGuidedSignatureTrackRoute = React.useCallback"),
       intake.indexOf("const enterGuidedSignatureTrackRoute = React.useCallback") + 14000,
     );
-    expect(trackBlock).toContain("tryNavigateGuidedSignatureTrackLocalVs01Esign");
+    expect(trackBlock).toContain("await ensureBackendAcceptedCorpus(");
+    expect(trackBlock).toMatch(/if \(!ok\) \{[\s\S]*?reason: "persist_failed"[\s\S]*?return;/);
+    expect(trackBlock).not.toContain("tryNavigateGuidedSignatureTrackLocalVs01Esign");
     expect(trackBlock).toContain("logGuidedSignatureRouteEntered");
     expect(trackBlock).not.toContain('setDisplayPhase("review")');
   });

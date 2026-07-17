@@ -25,6 +25,13 @@ import {
   normalizeAgreementDraftFromApi,
 } from "../../agreement/agreementDraftNormalize";
 import { clawAgreementHeaders } from "../../agreement/agreementOrgHeaders";
+import {
+  acceptPersistedPaidProCorpus,
+  clearRetainedAcceptedCorpusAuthority,
+  createAcceptedCorpusPersistenceBoundary,
+  retainAcceptedCorpusAuthority,
+  shouldCreateBackendAcceptedCorpus,
+} from "../../agreement/acceptedCorpusAuthority";
 import { fetchWorkspaceProEntitlement, readCachedWorkspaceProEntitlement } from "../../agreement/agreementProFunnelGate";
 import { fetchAgreementDraft, fetchAgreementDraftWithSigningLock } from "../../agreement/agreementWorkspaceApi";
 import { apiUrl, resolveApiBase } from "../../lib/clawApi";
@@ -514,7 +521,7 @@ import {
   writePremiumSendIntent,
   writePremiumSenderSignFirst,
 } from "../../launch/simpleProduct/premiumSendIntent";
-import { mergeLiveDraftWithRecipientSetupForVs01Bridge, tryNavigateGuidedSignatureTrackLocalVs01Esign } from "../../launch/simpleProduct/agreementToVs01SigningBridge";
+import { mergeLiveDraftWithRecipientSetupForVs01Bridge } from "../../launch/simpleProduct/agreementToVs01SigningBridge";
 import {
   pickBestPaidProAuthoritativeCorpusPlain,
   resolveFinalVs01CorpusOrBlock,
@@ -1402,12 +1409,6 @@ import {
   shouldBypassGenericOnGenerateForGuidedSignature,
   shouldBypassGenericOnGenerateForGuidedReview,
   logGuidedReviewGenericSendBypassed,
-  canContinueGuidedSignatureTrackWithoutPersist,
-  GUIDED_SIGNATURE_LOCAL_BRIDGE_WARNING,
-  isGuidedSignatureDraftPersistLocallyContinuable,
-  logGuidedSignatureTrackLocalBridgeStart,
-  logGuidedSignatureTrackLocalBridgeSuccess,
-  mintGuidedSignatureTrackLocalAgreementId,
   logReviewFirstClick,
   logReviewFirstError,
   logReviewFirstHandoffStart,
@@ -3333,8 +3334,19 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   /** Bumped when leaving review/create so in-flight POST /draft cannot repopulate a cleared workspace id. */
   const reviewWorkspaceSessionRef = useRef(0);
   const reviewAgreementEnsurePromiseRef = useRef<Promise<string | null> | null>(null);
+  const acceptedCorpusPersistenceBoundaryRef = useRef(
+    createAcceptedCorpusPersistenceBoundary(reviewWorkspaceSessionRef.current),
+  );
   const reviewWorkspaceBootstrapDepthRef = useRef(0);
   const [reviewWorkspaceBootstrapping, setReviewWorkspaceBootstrapping] = useState(false);
+  const resetReviewWorkspaceAuthoritySession = React.useCallback(() => {
+    const nextSession = reviewWorkspaceSessionRef.current + 1;
+    reviewWorkspaceSessionRef.current = nextSession;
+    reviewAgreementEnsurePromiseRef.current = null;
+    reviewAgreementIdRef.current = null;
+    acceptedCorpusPersistenceBoundaryRef.current.activateSession(nextSession);
+    setReviewAgreementId(null);
+  }, []);
   /** Bumps when user hits “Continue” with placeholder parties so the review card can pulse the parties row. */
   const [reviewPartyHighlightNonce, setReviewPartyHighlightNonce] = useState(0);
   /** Local buffer for premium-only “exact wording” on starter — does not sync into intakeCombined / free draft. */
@@ -5391,12 +5403,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   }
 
   /** Create (or reuse) the persisted agreement row for review refine / inline field updates. Dedupes concurrent callers. */
-  const ensureReviewAgreementWorkspaceId = React.useCallback(async (): Promise<string | null> => {
+  const ensureReviewAgreementWorkspaceId = React.useCallback(async (
+    snapshotOverride?: ParsedDraftShape,
+  ): Promise<string | null> => {
     const cached = reviewAgreementIdRef.current?.trim();
     if (cached) return cached;
     if (reviewAgreementEnsurePromiseRef.current) return reviewAgreementEnsurePromiseRef.current;
     const session = reviewWorkspaceSessionRef.current;
-    const snapshot = draft;
+    const snapshot = snapshotOverride ?? draft;
     if (!snapshot) return null;
     const { n1: handoffParty1 } = getRecipientHandoffNamesFromDraft(snapshot);
     const party = pickRecipientNameForHandoff(recipient1Name, handoffParty1).trim() || "Party";
@@ -5418,7 +5432,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       useReviewFirstPersist && corpusPlain.trim().length >= PAID_PRO_AUTHORITY_MIN_LEN
         ? mergeDraftForPaidCreateFlowPersist(snapshot, corpusPlain)
         : snapshot;
-    const p = (async (): Promise<string | null> => {
+    let p!: Promise<string | null>;
+    p = (async (): Promise<string | null> => {
       reviewWorkspaceBootstrapDepthRef.current += 1;
       if (reviewWorkspaceBootstrapDepthRef.current === 1) setReviewWorkspaceBootstrapping(true);
       try {
@@ -5427,6 +5442,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         });
         const tid = String(id || "").trim();
         if (tid && reviewWorkspaceSessionRef.current === session) {
+          reviewAgreementIdRef.current = tid;
           setReviewAgreementId(tid);
           return tid;
         }
@@ -5455,7 +5471,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         }
         return null;
       } finally {
-        reviewAgreementEnsurePromiseRef.current = null;
+        if (reviewAgreementEnsurePromiseRef.current === p) {
+          reviewAgreementEnsurePromiseRef.current = null;
+        }
         reviewWorkspaceBootstrapDepthRef.current -= 1;
         if (reviewWorkspaceBootstrapDepthRef.current <= 0) {
           reviewWorkspaceBootstrapDepthRef.current = 0;
@@ -5466,6 +5484,89 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     reviewAgreementEnsurePromiseRef.current = p;
     return p;
   }, [draft, recipient1Name]);
+
+  const ensureBackendAcceptedCorpus = React.useCallback(
+    (
+      acceptedDraft: ParsedDraftShape,
+      backendAgreementIdOverride?: string | null,
+    ) => {
+      const session = reviewWorkspaceSessionRef.current;
+      let attemptedAgreementId = backendAgreementIdOverride?.trim() || "";
+      return acceptedCorpusPersistenceBoundaryRef.current.ensure(
+        session,
+        async () => {
+          const currentAgreementId = reviewAgreementIdRef.current?.trim() || "";
+          if (
+            attemptedAgreementId &&
+            currentAgreementId &&
+            attemptedAgreementId !== currentAgreementId
+          ) {
+            throw new Error("accepted_corpus_backend_agreement_mismatch");
+          }
+          attemptedAgreementId =
+            attemptedAgreementId ||
+            (await ensureReviewAgreementWorkspaceId(acceptedDraft))?.trim() ||
+            "";
+          if (!attemptedAgreementId) {
+            throw new Error("accepted_corpus_missing_backend_agreement");
+          }
+          if (reviewWorkspaceSessionRef.current !== session) {
+            throw new Error("accepted_corpus_stale_review_session");
+          }
+          reviewAgreementIdRef.current = attemptedAgreementId;
+          setReviewAgreementId(attemptedAgreementId);
+
+          if (currentAgreementId || backendAgreementIdOverride?.trim()) {
+            for (const [field, value] of [
+              ["title", acceptedDraft.title ?? ""],
+              ["jurisdiction", acceptedDraft.jurisdiction ?? ""],
+              ["purpose", acceptedDraft.purpose ?? ""],
+              ["parties", acceptedDraft.parties ?? []],
+            ] as const) {
+              const response = await fetch(
+                apiUrl(
+                  `/api/agreements/${encodeURIComponent(attemptedAgreementId)}/update-field`,
+                ),
+                {
+                  method: "POST",
+                  headers: clawAgreementHeaders({ "Content-Type": "application/json" }),
+                  body: JSON.stringify({ field, value }),
+                },
+              );
+              if (!response.ok) {
+                throw new Error(`accepted_corpus_${field}_persist_http_${response.status}`);
+              }
+            }
+          }
+
+          const accepted = await acceptPersistedPaidProCorpus(attemptedAgreementId, {
+            retain: false,
+          });
+          if (reviewWorkspaceSessionRef.current !== session) {
+            throw new Error("accepted_corpus_stale_review_session");
+          }
+          return accepted;
+        },
+        {
+          onAccepted: (authority) => {
+            retainAcceptedCorpusAuthority(authority);
+            setCreateFlowDraftPersistError(null);
+          },
+          onRejected: (error: unknown) => {
+            clearRetainedAcceptedCorpusAuthority(attemptedAgreementId);
+            const message =
+              error instanceof Error
+                ? error.message
+                : "accepted_corpus_backend_persist_failed";
+            setCreateFlowDraftPersistError(message);
+            setProFullDraftCustomGateMessage((current) => current || message);
+            setProFullDraftQualityRetry(true);
+          },
+        },
+      );
+    },
+    [ensureReviewAgreementWorkspaceId],
+  );
 
   async function hydrateCreatedAgreement(
     agreementId: string,
@@ -6410,6 +6511,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           });
         }
       }
+      const acceptedDraftForBackend = mergeDraftForPaidCreateFlowPersist(
+        args.draft,
+        finalPlain,
+      );
+      // Review may render while this boundary is pending. Send/signing paths await
+      // the same session-owned promise before any authority-dependent continuation.
+      ensureBackendAcceptedCorpus(acceptedDraftForBackend);
       bumpPremiumSurfaceGateTick();
       if (import.meta.env.DEV) {
         // eslint-disable-next-line no-console
@@ -6427,6 +6535,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     },
     [
       bumpPremiumSurfaceGateTick,
+      ensureBackendAcceptedCorpus,
       setPartySignerNames,
       setPartySignerTitles,
     ],
@@ -6966,9 +7075,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         parsed = enrichParsedDraftForFullDraftUpgrade(parsed, rawIntake);
 
         setReviewShowsSimplifiedAdvancedDraft(false);
-        reviewWorkspaceSessionRef.current += 1;
-        reviewAgreementEnsurePromiseRef.current = null;
-        setReviewAgreementId(null);
+        resetReviewWorkspaceAuthoritySession();
 
         if (consumeCheckoutGrant && peekAdvancedFullDraftCheckoutGrant()) {
           consumeAdvancedFullDraftCheckoutGrant();
@@ -10628,7 +10735,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       });
       clearCreateReviewAgreementResumeId();
       productionResumeHydratedRef.current = false;
-      setReviewAgreementId(null);
+      resetReviewWorkspaceAuthoritySession();
       lastKnownGoodAuthoritativeDraftRef.current = "";
       hydratedPremiumBodyRef.current = "";
       lastPremiumWinningCorpusRef.current = "";
@@ -11765,6 +11872,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     simpleSendOpenPhase?: "review" | "send",
     reviewFirstHandoffPersist = false,
   ): Promise<boolean> {
+    const acceptedPaidProPersist = shouldCreateBackendAcceptedCorpus({
+      reviewFirstHandoffPersist,
+      premiumSendIntent,
+    });
     const partyCtxTrimmed = (partyNameContext || "").trim();
     if (partyCtxTrimmed.length >= 20) {
       writeOriginalUserIntakeRawIfRicher(partyCtxTrimmed);
@@ -11773,7 +11884,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     try {
       /** Clear stale save/hydrate errors before a new persist attempt (e.g. prior basic_parse_timeout then retry). */
       setHardError(null);
-      const existingId = reviewAgreementIdRef.current?.trim();
+      const acceptancePersistInFlight = reviewAgreementEnsurePromiseRef.current
+        ? await reviewAgreementEnsurePromiseRef.current
+        : null;
+      const existingId =
+        reviewAgreementIdRef.current?.trim() ||
+        acceptancePersistInFlight?.trim() ||
+        "";
       let id: string;
       let postDraft: AgreementDraft | null;
       if (existingId) {
@@ -11819,6 +11936,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         await pushField("payment_terms", parsed.payment_terms ?? "");
         await pushField("jurisdiction", parsed.jurisdiction ?? "");
         await pushField("duration", parsed.duration ?? null);
+      }
+      if (acceptedPaidProPersist) {
+        await ensureBackendAcceptedCorpus(parsed, id);
       }
       if (!inlineContextualSend) {
         setDisplayPhase("hydrating_generated");
@@ -12700,10 +12820,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     setIsEditingDescription(false);
     setDisplayPhase("intake");
     setMissing([]);
-    reviewWorkspaceSessionRef.current += 1;
+    resetReviewWorkspaceAuthoritySession();
     clearCreateReviewAgreementResumeId();
     productionResumeHydratedRef.current = false;
-    setReviewAgreementId(null);
     setComplexityPendingParsed(null);
     agreementDocumentDirtyRef.current = false;
     setAgreementDocumentText("");
@@ -20290,10 +20409,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       setRecipientSignerLabels("");
       setRecipientsDeferred(false);
       setAgreementTypeAccepted(false);
-      reviewWorkspaceSessionRef.current += 1;
+      resetReviewWorkspaceAuthoritySession();
       clearCreateReviewAgreementResumeId();
       productionResumeHydratedRef.current = false;
-      setReviewAgreementId(null);
       setDraft(null);
     }
     window.requestAnimationFrame(() => textareaRef.current?.focus());
@@ -26873,7 +26991,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             draftAgreementId: (mergedDraft as { id?: string | null } | null)?.id ?? null,
             resumeAgreementId: readCreateReviewAgreementResumeId(),
           });
-          if (!ok && !id) {
+          if (!ok) {
             const authoritativePaidPro =
               isPaidProAgreementAuthoritative({
                 draft: mergedDraft,
@@ -26909,6 +27027,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           return;
         }
 
+        await ensureBackendAcceptedCorpus(
+          mergeDraftForPaidCreateFlowPersist(mergedDraft, bodyPlain),
+          id,
+        );
         writeReviewFirstHandoffSource(source, id);
         writeReviewFirstPinnedCorpus(id, bodyPlain);
         logReviewFirstMarkerWritten({ agreementId: id, source });
@@ -27027,6 +27149,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       premiumSendPathUnlocked,
       premiumPersistedFlowActive,
       paidProSignerMetadataFinalized,
+      ensureBackendAcceptedCorpus,
     ],
   );
 
@@ -27282,84 +27405,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           draftAgreementId: (mergedDraft as { id?: string | null } | null)?.id ?? null,
           resumeAgreementId: readCreateReviewAgreementResumeId(),
         });
-        const signaturePersistFailure = guidedSignaturePersistFailureRef.current as {
-          httpStatus?: number | null;
-          rawMessage?: string;
-        } | null;
-        if (
-          !id &&
-          canContinueGuidedSignatureTrackWithoutPersist({
-            persistOk: ok,
-            agreementId: id,
-            corpusText,
-            handoffReady: handoffAssert.ok,
-          }) &&
-          isGuidedSignatureDraftPersistLocallyContinuable(
-            signaturePersistFailure?.httpStatus,
-            signaturePersistFailure?.rawMessage,
-          )
-        ) {
-          const localAgreementId = mintGuidedSignatureTrackLocalAgreementId();
-          logGuidedSignatureTrackLocalBridgeStart({
-            localAgreementId,
-            corpusLen: corpusText.length,
-            reason: "draft_persist_failed",
-            httpStatus: signaturePersistFailure?.httpStatus ?? null,
-          });
-          const primedForLocalBridge =
-            mergeLiveDraftWithRecipientSetupForVs01Bridge(
-              mergedDraft as unknown as AgreementDraft,
-              buildRecipientSetupForVs01Bridge(mergedDraft),
-            ) ?? (mergedDraft as unknown as AgreementDraft);
-          const localBridge = tryNavigateGuidedSignatureTrackLocalVs01Esign({
-            navigate: (to) => void navigate(to),
-            localAgreementId,
-            draft: {
-              ...primedForLocalBridge,
-              server_full_document_text: corpusText,
-              premium_full_document_text: corpusText,
-            } as AgreementDraft,
-            recipientSetup: buildRecipientSetupForVs01Bridge(mergedDraft),
-            logReason: "guided_signature_track_local_bridge",
-            agreementCorpusText: corpusText,
-            guidedSigningHandoff: vs01Handoff,
-          });
-          if (localBridge.ok) {
-            logGuidedSignatureTrackLocalBridgeSuccess({
-              localAgreementId,
-              documentId: localBridge.documentId,
-              route: localBridge.route,
-            });
-            setCreateFlowPhase("ready_to_send");
-            markPremiumRecipientsSurfaceReleased();
-            setPremiumRecipientUxActive(true);
-            bumpPremiumSurfaceGateTick();
-            setGuidedSigningConfirmationActive(false);
-            logGuidedSignatureRouteEntered({
-              destination: "vs01",
-              agreementId: localAgreementId,
-              localBridge: true,
-            });
-            if (import.meta.env.MODE !== "test") {
-              // eslint-disable-next-line no-console
-              console.warn("[guided-signature-track-local-bridge-warning]", {
-                message: GUIDED_SIGNATURE_LOCAL_BRIDGE_WARNING,
-              });
-            }
-            if (modalVisible) {
-              setGuidedFinalizeModalStage("signing_packet_ready");
-              logGuidedFinalizeModalStage("signing_packet_ready");
-              window.setTimeout(() => {
-                setGuidedFinalizeModalStage(null);
-                logGuidedFinalizeModalExit();
-              }, 900);
-            } else {
-              setGuidedFinalizeModalStage(null);
-            }
-            return;
-          }
-        }
-        if (!ok && !id) {
+        if (!ok) {
           logGuidedSignatureTrackFailed({ reason: "persist_failed" });
           showModalIfSlow("blocked");
           setGuidedFinalizeModalBlockedMessage(
@@ -27376,6 +27422,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         return;
       }
 
+      await ensureBackendAcceptedCorpus(
+        mergeDraftForPaidCreateFlowPersist(mergedDraft, corpusText),
+        id,
+      );
       setCreateFlowPhase("ready_to_send");
       markPremiumRecipientsSurfaceReleased();
       setPremiumRecipientUxActive(true);
@@ -27483,10 +27533,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     navigate,
     premiumSigningRecipientCount,
     currentPremiumMergedIntakeKey,
+    ensureBackendAcceptedCorpus,
   ]);
 
   const completeGuidedSigningHandoff = React.useCallback(
-    (intent: FinalReviewSendIntent, opts?: { openConfirmModal?: boolean }) => {
+    async (intent: FinalReviewSendIntent, opts?: { openConfirmModal?: boolean }) => {
       const sendMode: PremiumSendIntent = intent === "review_only" ? "review" : "signature";
       const transition = assertGuidedTransitionReady("signing_confirm");
       if (!transition.ok) return;
@@ -27518,25 +27569,40 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         latestAcceptedCorpus ||
         ""
       ).trim();
-      if (draft) {
-        agreementDocumentDirtyRef.current = false;
-        const mergedDraft = mergeDraftPartiesFromCanonicalIdentities(draft, guidedSignerCanonicalIdentities);
-        setDraft(mergedDraft);
-        persistPremiumRecipientHandoffFromDraftAndUi(mergedDraft);
+      if (!draft || !acceptedCorpus) {
+        setHardError(
+          "The final agreement is not ready yet. Return to final review and try again.",
+        );
+        return;
       }
-      if (acceptedCorpus) setAgreementDocumentText(acceptedCorpus);
+      agreementDocumentDirtyRef.current = false;
+      const mergedDraft = mergeDraftPartiesFromCanonicalIdentities(
+        draft,
+        guidedSignerCanonicalIdentities,
+      );
+      setDraft(mergedDraft);
+      persistPremiumRecipientHandoffFromDraftAndUi(mergedDraft);
+      setAgreementDocumentText(acceptedCorpus);
+      try {
+        await ensureBackendAcceptedCorpus(
+          mergeDraftForPaidCreateFlowPersist(mergedDraft, acceptedCorpus),
+          reviewAgreementIdRef.current,
+        );
+      } catch {
+        return;
+      }
       markPremiumRecipientsSurfaceReleased();
       setPremiumRecipientUxActive(true);
       bumpPremiumSurfaceGateTick();
       setGuidedSigningConfirmationActive(false);
       if (sendMode === "review") {
-        void completeGuidedPaidProReviewFirstHandoff("complete_guided_signing_handoff");
+        await completeGuidedPaidProReviewFirstHandoff("complete_guided_signing_handoff");
         return;
       }
       if (opts?.openConfirmModal) {
         setPremiumSendConfirmOpen(true);
       } else if (sendMode === "signature") {
-        void enterGuidedSignatureTrackRoute();
+        await enterGuidedSignatureTrackRoute();
       }
     },
     [
@@ -27554,6 +27620,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       mergeDraftPartiesFromCanonicalIdentities,
       completeGuidedPaidProReviewFirstHandoff,
       premiumSigningRecipientCount,
+      ensureBackendAcceptedCorpus,
     ],
   );
 
