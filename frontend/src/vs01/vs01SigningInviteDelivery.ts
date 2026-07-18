@@ -147,7 +147,6 @@ export async function dispatchSigningInvitesFromHandoff(
     const res = await postSigningLinksSent(handoff.agreementId, {
       packet_revision: handoff.packetRevision ?? null,
       document_id: (opts?.documentId ?? handoff.vs01DocumentId ?? "").trim() || null,
-      portable_packet: opts?.portablePacket ? (opts.portablePacket as unknown as Record<string, unknown>) : null,
       targets,
     });
     return {

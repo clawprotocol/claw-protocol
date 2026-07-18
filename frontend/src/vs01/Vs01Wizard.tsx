@@ -69,7 +69,9 @@ import {
   logVs01PrepareFinishBlocked,
 } from "./vs01PreparePacketCompletion";
 import { handlePreparePacketContinue } from "./vs01PreparePacketContinue";
-import { dispatchSigningInvitesFromHandoff } from "./vs01SigningInviteDelivery";
+import { persistSigningPacketActivation } from "../agreement/signingPacketActivationApi";
+import { loadFrozenSigningAuthority } from "../agreement/frozenSigningAuthorityApi";
+import type { Vs01CanonicalPacketPortableV1 } from "./vs01CanonicalPacketSeed";
 import { paidProPacketReadyDashboardPath } from "./vs01PaidProPacketReadyNavigation";
 import { bootstrapVs01RecipientSigningAuthority } from "./vs01RecipientAuthorityBootstrap";
 import type { Vs01RecipientIdentityAuthority } from "./vs01RecipientIdentityAuthority";
@@ -628,19 +630,55 @@ export function Vs01Wizard({
       senderMustSignFirst: result.handoff.senderMustSignFirst ?? false,
       fieldsPlacedCount: placedCount,
     });
-    const roles = result.roles;
-    void dispatchSigningInvitesFromHandoff(result.handoff, roles, {
-      portablePacket: result.portablePacket,
-      documentId: did,
-    }).then((delivery) => {
-      // eslint-disable-next-line no-console
-      console.info("[vs01-signing-invites-dispatched]", {
-        agreementIdShort: linkedAgreementId.slice(0, 16),
-        attempted: delivery.attempted,
-        ok: delivery.ok,
-        sentCount: delivery.sentCount,
-        skipReason: delivery.skipReason,
+    void (async () => {
+      if (!result.portablePacket) {
+        setError("Signing packet activation requires a prepared portable packet.");
+        return;
+      }
+      const frozen = await loadFrozenSigningAuthority(linkedAgreementId);
+      if (!frozen) {
+        setError("Signing packet activation requires backend frozen signing authority.");
+        return;
+      }
+      const signersByPartyEmail = new Map(
+        frozen.signers.map(
+          (signer) =>
+            [`${signer.agreementPartyId}:${signer.signerEmail.trim().toLowerCase()}`, signer] as const,
+        ),
+      );
+      const enrichedRoles = result.portablePacket.roles.map((role) => {
+        const partyId = (role.partyId ?? "").trim();
+        const email = (role.signerEmail ?? role.reviewEmail ?? "").trim().toLowerCase();
+        const signer =
+          signersByPartyEmail.get(`${partyId}:${email}`) ??
+          frozen.signers.find((entry) => entry.agreementPartyId === partyId);
+        return signer ? { ...role, signerRecordId: signer.signerRecordId } : role;
       });
+      const orderIndex = new Map(
+        frozen.execution.signerOrder.map((signerRecordId, index) => [signerRecordId, index]),
+      );
+      const orderedRoles = [...enrichedRoles].sort((left, right) => {
+        const leftIndex = orderIndex.get((left.signerRecordId ?? "").trim()) ?? Number.MAX_SAFE_INTEGER;
+        const rightIndex = orderIndex.get((right.signerRecordId ?? "").trim()) ?? Number.MAX_SAFE_INTEGER;
+        return leftIndex - rightIndex;
+      });
+      const activationPortable: Vs01CanonicalPacketPortableV1 = {
+        ...result.portablePacket,
+        roles: orderedRoles,
+      };
+      try {
+        await persistSigningPacketActivation(linkedAgreementId, {
+          documentId: did,
+          portablePacket: activationPortable,
+        });
+      } catch (activationError) {
+        const message =
+          activationError instanceof Error
+            ? activationError.message
+            : "signing_packet_activation_failed";
+        setError(message);
+        return;
+      }
       markAgreementPacketPrepared(linkedAgreementId);
       clearAgreementVs01BridgeSession();
       clearPaidProAgreementBridgeSkipMarker();
@@ -653,7 +691,7 @@ export function Vs01Wizard({
         destination: paidProPacketReadyDashboardPath(),
       });
       navigate(paidProPacketReadyDashboardPath());
-    });
+    })();
   }, [
     vs01LinkedAgreementId,
     documentId,

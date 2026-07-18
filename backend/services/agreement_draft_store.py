@@ -65,7 +65,8 @@ def draft_exists(agreement_id: str) -> bool:
 
 
 @contextmanager
-def _agreement_file_lock(agreement_id: str) -> Iterator[None]:
+def agreement_file_lock(agreement_id: str) -> Iterator[None]:
+    """Agreement-scoped exclusive lock shared by draft, signing-lock, and activation writes."""
     lock_path = _agreements_dir() / f".{agreement_id}.lock"
     with lock_path.open("a+b") as lock_file:
         fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
@@ -73,6 +74,12 @@ def _agreement_file_lock(agreement_id: str) -> Iterator[None]:
             yield
         finally:
             fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
+
+
+@contextmanager
+def _agreement_file_lock(agreement_id: str) -> Iterator[None]:
+    with agreement_file_lock(agreement_id):
+        yield
 
 
 def _decode_draft_payload(raw: Any) -> Dict[str, Any]:
@@ -86,17 +93,19 @@ def _frozen_material(record: Dict[str, Any]) -> bytes:
     return canon_json_bytes({key: value for key, value in record.items() if key != "frozenAt"})
 
 
-def _preserve_frozen_audit(current: Dict[str, Any], next_draft: Dict[str, Any]) -> None:
-    frozen_events = [
+def _preserve_immutable_audit_events(
+    current: Dict[str, Any], next_draft: Dict[str, Any], event_type: str
+) -> None:
+    preserved_events = [
         event
         for event in (current.get("audit_log") or [])
-        if isinstance(event, dict) and event.get("event_type") == "frozen_signing_authority_persisted"
+        if isinstance(event, dict) and event.get("event_type") == event_type
     ]
-    if not frozen_events:
+    if not preserved_events:
         return
     audit = list(next_draft.get("audit_log") or [])
     existing = {canon_json_bytes(event) for event in audit if isinstance(event, dict)}
-    for event in frozen_events:
+    for event in preserved_events:
         encoded = canon_json_bytes(event)
         if encoded not in existing:
             audit.append(event)
@@ -104,7 +113,23 @@ def _preserve_frozen_audit(current: Dict[str, Any], next_draft: Dict[str, Any]) 
     next_draft["audit_log"] = audit
 
 
-def _guard_generic_frozen_write(
+def _preserve_frozen_audit(current: Dict[str, Any], next_draft: Dict[str, Any]) -> None:
+    _preserve_immutable_audit_events(
+        current, next_draft, "frozen_signing_authority_persisted"
+    )
+
+
+def _preserve_activation_audit(current: Dict[str, Any], next_draft: Dict[str, Any]) -> None:
+    _preserve_immutable_audit_events(current, next_draft, "signing_packet_activated")
+
+
+def _activation_material(record: Dict[str, Any]) -> bytes:
+    from backend.services.vs01_signing_packet_activation import activation_material_bytes
+
+    return activation_material_bytes(record)
+
+
+def _guard_generic_immutable_write(
     current: Optional[Dict[str, Any]], draft: Dict[str, Any]
 ) -> Dict[str, Any]:
     next_draft = dict(draft)
@@ -118,7 +143,24 @@ def _guard_generic_frozen_write(
         _preserve_frozen_audit(current or {}, next_draft)
     elif isinstance(incoming_frozen, dict):
         raise ValueError("frozen_signing_authority_endpoint_required")
+
+    incoming_activation = next_draft.get("vs01_signing_packet_activation_v1")
+    existing_activation = (current or {}).get("vs01_signing_packet_activation_v1")
+    if isinstance(existing_activation, dict):
+        if incoming_activation is None:
+            next_draft["vs01_signing_packet_activation_v1"] = existing_activation
+        elif _activation_material(incoming_activation) != _activation_material(existing_activation):
+            raise ValueError("signing_packet_activation_immutable")
+        _preserve_activation_audit(current or {}, next_draft)
+    elif isinstance(incoming_activation, dict):
+        raise ValueError("signing_packet_activation_endpoint_required")
     return next_draft
+
+
+def _guard_generic_frozen_write(
+    current: Optional[Dict[str, Any]], draft: Dict[str, Any]
+) -> Dict[str, Any]:
+    return _guard_generic_immutable_write(current, draft)
 
 
 def _write_draft_file_unlocked(path: Path, draft: Dict[str, Any]) -> None:
@@ -259,6 +301,246 @@ def _create_frozen_signing_authority_postgres(
         stored, next_draft = _create_frozen_on_latest(
             latest,
             frozen_record=frozen_record,
+            audit_event=audit_event,
+            updated_at=updated_at,
+        )
+        if next_draft is not None:
+            pg_execute(
+                cx,
+                """
+                UPDATE agreement_drafts
+                SET payload = ?::jsonb, updated_at = ?
+                WHERE id = ?
+                """,
+                (
+                    canon_json_bytes(next_draft).decode("utf-8"),
+                    datetime.now(timezone.utc),
+                    agreement_id,
+                ),
+            )
+        return stored
+
+
+def _create_activation_on_latest(
+    latest: Dict[str, Any],
+    *,
+    activation_record: Dict[str, Any],
+    audit_event: Dict[str, Any],
+    updated_at: str,
+) -> tuple[Dict[str, Any], Optional[Dict[str, Any]]]:
+    existing = latest.get("vs01_signing_packet_activation_v1")
+    if isinstance(existing, dict):
+        if _activation_material(existing) == _activation_material(activation_record):
+            return existing, None
+        raise ValueError("signing_packet_activation_immutable")
+    next_draft = dict(latest)
+    next_draft["vs01_signing_packet_activation_v1"] = activation_record
+    audit = list(latest.get("audit_log") or [])
+    audit.append(dict(audit_event))
+    next_draft["audit_log"] = audit
+    next_draft["updated_at"] = updated_at
+    return activation_record, next_draft
+
+
+def activate_vs01_signing_packet_authoritative(
+    agreement_id: str,
+    *,
+    document_id: str,
+    portable_packet: Dict[str, Any],
+    activated_at: str,
+) -> Dict[str, Any]:
+    """Validate authority and atomically create immutable activation inside one critical section."""
+    from backend.services.vs01_signing_packet_activation import (
+        VS01_SIGNING_PACKET_ACTIVATION_FIELD,
+        Vs01SigningPacketActivationError,
+        build_canonical_signing_packet_activation,
+    )
+
+    aid = str(agreement_id or "").strip()
+    did = str(document_id or "").strip()
+    if not aid:
+        raise ValueError("missing_agreement_id")
+    if not did:
+        raise ValueError("missing_document_id")
+    if not isinstance(portable_packet, dict):
+        raise ValueError("invalid_signing_packet_activation")
+
+    audit_event = {
+        "event_type": "signing_packet_activated",
+        "at": activated_at,
+        "field": VS01_SIGNING_PACKET_ACTIVATION_FIELD,
+        "value": {"document_id": did},
+    }
+
+    if _use_postgres():
+        return _activate_vs01_signing_packet_authoritative_postgres(
+            aid,
+            document_id=did,
+            portable_packet=portable_packet,
+            activated_at=activated_at,
+            audit_event=audit_event,
+        )
+
+    from backend.services.agreement_signing_lock_store import read_signing_lock_unlocked
+
+    path = _agreement_path(aid)
+    with agreement_file_lock(aid):
+        if not path.exists():
+            raise KeyError("agreement_not_found")
+        latest = _decode_draft_payload(path.read_text(encoding="utf-8"))
+        signing_lock = read_signing_lock_unlocked(aid)
+        try:
+            canonical = build_canonical_signing_packet_activation(
+                agreement_id=aid,
+                document_id=did,
+                portable_packet=portable_packet,
+                draft=latest,
+                activated_at=activated_at,
+                signing_lock=signing_lock,
+            )
+        except Vs01SigningPacketActivationError:
+            raise
+        audit_event["value"] = {
+            "document_id": canonical["document_id"],
+            "packet_revision": canonical["packet_revision"],
+            "accepted_version_id": canonical["accepted_version_id"],
+            "accepted_corpus_sha256": canonical["accepted_corpus_sha256"],
+        }
+        stored, next_draft = _create_activation_on_latest(
+            latest,
+            activation_record=canonical,
+            audit_event=audit_event,
+            updated_at=activated_at,
+        )
+        if next_draft is not None:
+            _write_draft_file_unlocked(path, next_draft)
+        return stored
+
+
+def _activate_vs01_signing_packet_authoritative_postgres(
+    agreement_id: str,
+    *,
+    document_id: str,
+    portable_packet: Dict[str, Any],
+    activated_at: str,
+    audit_event: Dict[str, Any],
+) -> Dict[str, Any]:
+    from backend.db.agreement_sql import agreement_postgres_connection, pg_execute
+    from backend.services.agreement_signing_lock_store import read_signing_lock_for_update
+    from backend.services.vs01_signing_packet_activation import (
+        Vs01SigningPacketActivationError,
+        build_canonical_signing_packet_activation,
+    )
+
+    with agreement_postgres_connection() as cx:
+        row = pg_execute(
+            cx,
+            "SELECT payload FROM agreement_drafts WHERE id = ? FOR UPDATE",
+            (agreement_id,),
+        ).fetchone()
+        if not row:
+            raise KeyError("agreement_not_found")
+        signing_lock = read_signing_lock_for_update(cx, agreement_id)
+        latest = _decode_draft_payload(row[0])
+        try:
+            canonical = build_canonical_signing_packet_activation(
+                agreement_id=agreement_id,
+                document_id=document_id,
+                portable_packet=portable_packet,
+                draft=latest,
+                activated_at=activated_at,
+                signing_lock=signing_lock,
+            )
+        except Vs01SigningPacketActivationError:
+            raise
+        audit_event = dict(audit_event)
+        audit_event["value"] = {
+            "document_id": canonical["document_id"],
+            "packet_revision": canonical["packet_revision"],
+            "accepted_version_id": canonical["accepted_version_id"],
+            "accepted_corpus_sha256": canonical["accepted_corpus_sha256"],
+        }
+        stored, next_draft = _create_activation_on_latest(
+            latest,
+            activation_record=canonical,
+            audit_event=audit_event,
+            updated_at=activated_at,
+        )
+        if next_draft is not None:
+            pg_execute(
+                cx,
+                """
+                UPDATE agreement_drafts
+                SET payload = ?::jsonb, updated_at = ?
+                WHERE id = ?
+                """,
+                (
+                    canon_json_bytes(next_draft).decode("utf-8"),
+                    datetime.now(timezone.utc),
+                    agreement_id,
+                ),
+            )
+        return stored
+
+
+def activate_vs01_signing_packet(
+    agreement_id: str,
+    *,
+    activation_record: Dict[str, Any],
+    audit_event: Dict[str, Any],
+    updated_at: str,
+) -> Dict[str, Any]:
+    """Low-level atomic create for tests; production callers should use activate_vs01_signing_packet_authoritative."""
+    aid = str(agreement_id or "").strip()
+    if not aid:
+        raise ValueError("missing_agreement_id")
+    if not isinstance(activation_record, dict):
+        raise ValueError("invalid_signing_packet_activation")
+    if _use_postgres():
+        return _activate_vs01_signing_packet_postgres(
+            aid,
+            activation_record=activation_record,
+            audit_event=audit_event,
+            updated_at=updated_at,
+        )
+
+    path = _agreement_path(aid)
+    with agreement_file_lock(aid):
+        if not path.exists():
+            raise KeyError("agreement_not_found")
+        latest = _decode_draft_payload(path.read_text(encoding="utf-8"))
+        stored, next_draft = _create_activation_on_latest(
+            latest,
+            activation_record=activation_record,
+            audit_event=audit_event,
+            updated_at=updated_at,
+        )
+        if next_draft is not None:
+            _write_draft_file_unlocked(path, next_draft)
+        return stored
+
+
+def _activate_vs01_signing_packet_postgres(
+    agreement_id: str,
+    *,
+    activation_record: Dict[str, Any],
+    audit_event: Dict[str, Any],
+    updated_at: str,
+) -> Dict[str, Any]:
+    from backend.db.agreement_sql import agreement_postgres_connection, pg_execute
+
+    with agreement_postgres_connection() as cx:
+        row = pg_execute(
+            cx,
+            "SELECT payload FROM agreement_drafts WHERE id = ? FOR UPDATE",
+            (agreement_id,),
+        ).fetchone()
+        if not row:
+            raise KeyError("agreement_not_found")
+        latest = _decode_draft_payload(row[0])
+        stored, next_draft = _create_activation_on_latest(
+            latest,
+            activation_record=activation_record,
             audit_event=audit_event,
             updated_at=updated_at,
         )

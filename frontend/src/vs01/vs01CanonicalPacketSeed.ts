@@ -44,7 +44,10 @@ export type Vs01CanonicalPacketPortableRole = Pick<
   | "requiresSignature"
   | "vs01CounterpartyId"
   | "kind"
->;
+> & {
+  /** Stable frozen-authority signer reference required for Phase 3C1A activation. */
+  signerRecordId?: string;
+};
 
 export type Vs01CanonicalPacketPortableV1 = {
   v: 1;

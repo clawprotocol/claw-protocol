@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 from backend.main import app
 from backend.services.email.review_delivery import COUNTERPARTY_REVIEWS_COMPLETE_NOTIFIED_EVENT
 from backend.services.email.signing_delivery import SIGNING_INVITE_EMAILS_SENT_EVENT
+from backend.utils.agreement_version_store import AgreementVersionStore
 
 pytestmark = pytest.mark.unit
 
@@ -152,24 +153,133 @@ def test_signing_links_sent_persists_vs01_portable_packet_for_public_hydration(
     mock_client = _mock_resend_success()
     client = TestClient(app)
     aid = _create_agreement(client)
+    accepted = client.post(
+        f"/api/agreements/{aid}/accepted-corpus",
+        headers={**_ORG_H, "X-Claw-Review-First-Persist": "1"},
+        json={},
+    )
+    assert accepted.status_code == 200
+    accepted_version = accepted.json()["accepted_version"]
+    draft = client.get(f"/api/agreements/{aid}", headers=_ORG_H).json()["draft"]
+    from backend.services.vs01_signing_packet_activation import _fingerprint_agreement_body
+    from backend.routers import agreements_v2_api
+
+    monkeypatch.setattr(agreements_v2_api, "_signing_approval_gate_errors", lambda _draft: [])
+    parties = [
+        {
+            "agreementPartyId": party["id"],
+            "legalEntityName": party["name"],
+            "agreementRole": party["role"],
+            "canonicalOrder": index,
+        }
+        for index, party in enumerate(draft["parties"])
+    ]
+    signers = [
+        {
+            "signerRecordId": f"signer:{party['id']}:0",
+            "agreementPartyId": party["id"],
+            "signerName": party["name"],
+            "signerTitle": "Authorized Signer",
+            "signerEmail": party["email"],
+            "signingOrder": index,
+        }
+        for index, party in enumerate(draft["parties"])
+    ]
+    party_order = [party["agreementPartyId"] for party in parties]
+    frozen = {
+        "version": 1,
+        "agreementId": aid,
+        "acceptedVersionId": accepted_version["version_id"],
+        "acceptedCorpusSha256": accepted_version["corpus_sha256"],
+        "parties": parties,
+        "signers": signers,
+        "execution": {
+            "partyOrder": party_order,
+            "signerOrder": [signer["signerRecordId"] for signer in signers],
+            "executionPartyHash": __import__("hashlib")
+            .sha256(__import__("json").dumps(party_order, separators=(",", ":"), sort_keys=True).encode())
+            .hexdigest(),
+        },
+    }
+    assert (
+        client.post(
+            f"/api/agreements/{aid}/frozen-signing-authority",
+            headers=_ORG_H,
+            json={"snapshot": frozen},
+        ).status_code
+        == 200
+    )
+    assert (
+        client.put(
+            f"/api/agreements/{aid}/signing-lock",
+            headers=_ORG_H,
+            json={
+                "accepted_version_id": accepted_version["version_id"],
+                "corpus_sha256": accepted_version["corpus_sha256"],
+                "locked_at": "2026-07-17T12:00:00Z",
+                "locked_by": "owner",
+            },
+        ).status_code
+        == 200
+    )
+    corpus_plain = str(
+        AgreementVersionStore().get_version_by_id(version_id=accepted_version["version_id"]).get(
+            "body_markdown"
+        )
+        or draft.get("purpose")
+        or "Services"
+    )
     portable = {
         "v": 1,
         "seed": {
             "v": 1,
             "documentId": "doc_test346",
             "agreementId": aid,
-            "corpusHash": "abc123",
-            "corpusPlain": "x" * 1600,
+            "corpusPlain": corpus_plain,
+            "corpusHash": _fingerprint_agreement_body(corpus_plain),
+            "savedAt": "2026-07-17T12:00:00Z",
         },
-        "fields": [{"id": "f1", "type": "signature", "page": 0, "x": 0.1, "y": 0.1, "width": 0.2, "height": 0.05, "counterpartyId": "owner"}],
-        "roles": [{"roleId": "role_owner", "vs01CounterpartyId": "owner", "partyIndex": 0}],
+        "fields": [
+            {
+                "id": "f1",
+                "type": "signature",
+                "page": 0,
+                "x": 0.1,
+                "y": 0.1,
+                "width": 0.2,
+                "height": 0.05,
+                "counterpartyId": draft["parties"][0]["id"],
+            }
+        ],
+        "roles": [
+            {
+                "roleId": f"role_{party['id']}",
+                "signerRecordId": f"signer:{party['id']}:0",
+                "partyIndex": index,
+                "partyId": party["id"],
+                "entityName": party["name"],
+                "partyName": party["name"],
+                "signerName": party["name"],
+                "signerEmail": party["email"],
+                "requiresSignature": True,
+            }
+            for index, party in enumerate(draft["parties"])
+        ],
+        "pageCount": 10,
+        "witnessPageIndex": 9,
+        "initialsPolicy": {"enabled": True, "bodyPagesOnly": True},
         "fieldCount": 1,
-        "initialsPolicy": {"enabled": True},
     }
+    activate_res = client.post(
+        f"/api/agreements/{aid}/signing-packet/activate",
+        headers=_ORG_H,
+        json={"document_id": "doc_test346", "portable_packet": portable},
+    )
+    assert activate_res.status_code == 200
+    activation = activate_res.json()["activation"]
     body = {
-        "packet_revision": "rev_test346",
+        "packet_revision": activation["packet_revision"],
         "document_id": "doc_test346",
-        "portable_packet": portable,
         "targets": [
             {
                 "email": "owner@example.com",
@@ -186,16 +296,14 @@ def test_signing_links_sent_persists_vs01_portable_packet_for_public_hydration(
             headers=_ORG_H,
             json=body,
         )
-    assert res.status_code == 200
+    assert res.status_code == 409
+    assert res.json()["detail"] == "signing_invite_delivery_deferred_until_3c1b"
+    assert mock_client.post.call_count == 0
     get_res = client.get(
         f"/api/agreements/public/{aid}/vs01-signing-packet",
-        params={"document_id": "doc_test346", "packet_revision": "rev_test346"},
+        params={"document_id": "doc_test346", "packet_revision": activation["packet_revision"]},
     )
-    assert get_res.status_code == 200
-    payload = get_res.json()
-    assert payload.get("ok") is True
-    assert payload.get("portable", {}).get("v") == 1
-    assert payload["portable"]["seed"]["documentId"] == "doc_test346"
+    assert get_res.status_code == 404
 
 
 def test_test370_review_complete_then_signing_invite_owner_gets_only_action_required_email(

@@ -147,6 +147,7 @@ from backend.usage_economics.policy import (
     record_draft_created,
     require_claw_org_id_header,
     usage_summary_for_subject,
+    usage_economics_enabled,
     workspace_lists_agreement_for_subject,
 )
 from backend.utils.canon_json import canon_json_bytes, canon_sha256_hex, sha256_hex
@@ -244,6 +245,28 @@ def _owner_mutation_guards(request: Request, agreement_id: str, *, surface: str)
     require_claw_org_id_header(request)
     assert_registered_owner_matches(request, agreement_id)
     assert_free_incomplete_draft_not_expired(agreement_id, surface=surface)
+
+
+def _assert_agreement_owner_workspace(request: Request, agreement_id: str) -> None:
+    """Require verified owner/workspace auth regardless of strict-read or economics toggles."""
+    aid = (agreement_id or "").strip()
+    if not aid:
+        raise HTTPException(status_code=404, detail="agreement_not_found")
+    require_claw_org_id_header(request)
+    if usage_economics_enabled():
+        assert_registered_owner_matches(request, aid)
+        return
+    from backend.security.request_identity import resolve_verified_subject_from_request
+
+    subject = resolve_verified_subject_from_request(request)
+    if not workspace_lists_agreement_for_subject(aid, subject):
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "agreement_owner_required",
+                "message": "Agreement owner workspace authorization is required.",
+            },
+        )
 
 
 def _signing_lock_active(agreement_id: str) -> bool:
@@ -574,6 +597,8 @@ class AgreementDraft(AgreementDraftCreate):
     review_invite_emails_sent_at: Optional[str] = None
     """VS01 prepared signing packet for cross-browser recipient hydration (test346)."""
     vs01_signing_packet_v1: Optional[Dict[str, Any]] = None
+    """Immutable authority-bound signing packet activation (Phase 3C1A)."""
+    vs01_signing_packet_activation_v1: Optional[Dict[str, Any]] = None
     """Per-recipient invite delivery registry (JTIs, timestamps, resend counts)."""
     recipient_delivery_v1: Optional[Dict[str, Any]] = None
     """Immutable signer/party execution authority bound to an accepted version."""
@@ -5515,6 +5540,11 @@ class FrozenSigningAuthorityPersistBody(BaseModel):
     snapshot: Dict[str, Any]
 
 
+class SigningPacketActivateBody(BaseModel):
+    document_id: str
+    portable_packet: Dict[str, Any]
+
+
 def _canonical_legal_party_snapshot(draft: AgreementDraft) -> List[Dict[str, Any]]:
     return [
         {
@@ -5687,6 +5717,59 @@ def post_frozen_signing_authority(
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         raise
     return {"ok": True, "snapshot": stored}
+
+
+@router.get("/{agreement_id}/signing-packet/activation")
+def get_signing_packet_activation(agreement_id: str, request: Request) -> Dict[str, Any]:
+    """Return owner-visible signing packet activation metadata (no portable corpus)."""
+    _assert_agreement_owner_workspace(request, agreement_id)
+    draft = _load_or_404(agreement_id)
+    existing = (
+        draft.vs01_signing_packet_activation_v1
+        if isinstance(draft.vs01_signing_packet_activation_v1, dict)
+        else None
+    )
+    if not existing or str(existing.get("packet_state") or "") != "active":
+        raise HTTPException(status_code=404, detail="signing_packet_activation_not_found")
+    from backend.services.vs01_signing_packet_activation import activation_owner_projection
+
+    return {"ok": True, "activation": activation_owner_projection(existing)}
+
+
+@router.post("/{agreement_id}/signing-packet/activate")
+def post_signing_packet_activate(
+    agreement_id: str,
+    body: SigningPacketActivateBody,
+    request: Request,
+) -> Dict[str, Any]:
+    """Create exactly one authority-bound signing packet activation for an accepted agreement."""
+    if not _agreements_write_allowed():
+        raise HTTPException(status_code=403, detail="verifier_only")
+    _owner_mutation_guards(request, agreement_id, surface="signing_packet_activate")
+    _assert_agreement_owner_workspace(request, agreement_id)
+    from backend.services.agreement_draft_store import activate_vs01_signing_packet_authoritative
+    from backend.services.vs01_signing_packet_activation import (
+        Vs01SigningPacketActivationError,
+        activation_owner_projection,
+    )
+
+    now = _utc_now_iso()
+    try:
+        stored = activate_vs01_signing_packet_authoritative(
+            agreement_id,
+            document_id=body.document_id,
+            portable_packet=body.portable_packet,
+            activated_at=now,
+        )
+    except Vs01SigningPacketActivationError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.code) from exc
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="not_found") from exc
+    except ValueError as exc:
+        if str(exc) == "signing_packet_activation_immutable":
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        raise
+    return {"ok": True, "activation": activation_owner_projection(stored)}
 
 
 class WorkspaceArchiveBody(BaseModel):
@@ -6467,27 +6550,12 @@ def post_agreement_signing_links_sent(
         raise HTTPException(status_code=403, detail="verifier_only")
     _owner_mutation_guards(request, agreement_id, surface="signing_links_sent")
     draft = _load_or_404(agreement_id)
+    from backend.services.vs01_signing_packet_activation import has_active_signing_packet_activation
+
+    if has_active_signing_packet_activation(draft.model_dump()):
+        raise HTTPException(status_code=409, detail="signing_invite_delivery_deferred_until_3c1b")
     sent_count = 0
     skip_reason: str | None = None
-    portable = body.portable_packet if isinstance(body.portable_packet, dict) else None
-    document_id = (body.document_id or "").strip() or None
-    packet_revision = (body.packet_revision or "").strip() or None
-    if portable and document_id:
-        try:
-            stored = {
-                "v": 1,
-                "document_id": document_id,
-                "packet_revision": packet_revision,
-                "portable": portable,
-                "stored_at": _utc_now_iso(),
-            }
-            draft = _merge_agreement_draft(draft, vs01_signing_packet_v1=stored, updated_at=_utc_now_iso())
-            _save_draft_sync(draft.model_dump(), request)
-        except Exception:
-            logging.getLogger(__name__).exception(
-                "vs01_signing_packet_persist_failed agreement_id=%s",
-                agreement_id,
-            )
     try:
         from backend.services.email.signing_delivery import maybe_send_signing_invites_after_packet_prepared
 
