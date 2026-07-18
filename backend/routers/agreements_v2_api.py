@@ -601,6 +601,8 @@ class AgreementDraft(AgreementDraftCreate):
     vs01_signing_packet_activation_v1: Optional[Dict[str, Any]] = None
     """Per-recipient invite delivery registry (JTIs, timestamps, resend counts)."""
     recipient_delivery_v1: Optional[Dict[str, Any]] = None
+    """Durable authority-bound signing invite delivery records (Phase 3C1B)."""
+    vs01_signing_invite_delivery_v1: Optional[Dict[str, Any]] = None
     """Immutable signer/party execution authority bound to an accepted version."""
     frozen_signing_authority_v1: Optional[Dict[str, Any]] = None
     workspace_archived_at: Optional[str] = None
@@ -5545,6 +5547,12 @@ class SigningPacketActivateBody(BaseModel):
     portable_packet: Dict[str, Any]
 
 
+class SigningPacketDeliverBody(BaseModel):
+    document_id: str
+
+    model_config = {"extra": "forbid"}
+
+
 def _canonical_legal_party_snapshot(draft: AgreementDraft) -> List[Dict[str, Any]]:
     return [
         {
@@ -5770,6 +5778,71 @@ def post_signing_packet_activate(
             raise HTTPException(status_code=409, detail=str(exc)) from exc
         raise
     return {"ok": True, "activation": activation_owner_projection(stored)}
+
+
+@router.post("/{agreement_id}/signing-packet/deliver")
+def post_signing_packet_deliver(
+    agreement_id: str,
+    body: SigningPacketDeliverBody,
+    request: Request,
+) -> Dict[str, Any]:
+    """Server-authoritative signing invite delivery after Phase 3C1A activation."""
+    if not _agreements_write_allowed():
+        raise HTTPException(status_code=403, detail="verifier_only")
+    _owner_mutation_guards(request, agreement_id, surface="signing_packet_deliver")
+    _assert_agreement_owner_workspace(request, agreement_id)
+    from backend.config.signing_invite_delivery_config import signing_invite_delivery_allowed
+    from backend.services.agreement_draft_store import deliver_vs01_signing_invites_authoritative, load_draft
+    from backend.services.email.signing_delivery import default_authoritative_provider_send_fn
+    from backend.services.vs01_signing_invite_delivery import Vs01SigningInviteDeliveryError
+
+    now = _utc_now_iso()
+    allowed = signing_invite_delivery_allowed()
+    try:
+        draft = load_draft(agreement_id)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="not_found") from exc
+    provider_send_fn = default_authoritative_provider_send_fn(draft) if allowed else None
+    try:
+        return deliver_vs01_signing_invites_authoritative(
+            agreement_id,
+            document_id=body.document_id,
+            attempted_at=now,
+            provider_send_fn=provider_send_fn,
+            delivery_allowed=allowed,
+        )
+    except Vs01SigningInviteDeliveryError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.code) from exc
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="not_found") from exc
+    except ValueError as exc:
+        code = str(exc)
+        if code in {
+            "signing_invite_delivery_immutable",
+            "signing_invite_delivery_conflict",
+            "signing_invite_delivery_endpoint_required",
+        }:
+            raise HTTPException(status_code=409, detail=code) from exc
+        raise
+
+
+@router.get("/{agreement_id}/signing-packet/delivery")
+def get_signing_packet_delivery(agreement_id: str, request: Request) -> Dict[str, Any]:
+    """Owner-visible signing invite delivery status (no tokens or portable corpus)."""
+    _assert_agreement_owner_workspace(request, agreement_id)
+    from backend.config.signing_invite_delivery_config import signing_invite_delivery_allowed
+    from backend.services.vs01_signing_invite_delivery import (
+        VS01_SIGNING_INVITE_DELIVERY_FIELD,
+        delivery_owner_projection,
+    )
+
+    draft = _load_or_404(agreement_id)
+    raw = draft.model_dump()
+    batch = raw.get(VS01_SIGNING_INVITE_DELIVERY_FIELD)
+    return delivery_owner_projection(
+        batch if isinstance(batch, dict) else None,
+        delivery_allowed=signing_invite_delivery_allowed(),
+    )
 
 
 class WorkspaceArchiveBody(BaseModel):

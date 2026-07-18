@@ -123,6 +123,16 @@ def _preserve_activation_audit(current: Dict[str, Any], next_draft: Dict[str, An
     _preserve_immutable_audit_events(current, next_draft, "signing_packet_activated")
 
 
+def _preserve_delivery_audit(current: Dict[str, Any], next_draft: Dict[str, Any]) -> None:
+    _preserve_immutable_audit_events(current, next_draft, "signing_invite_delivery_attempted")
+
+
+def _delivery_batch_material(record: Dict[str, Any]) -> bytes:
+    from backend.services.vs01_signing_invite_delivery import delivery_batch_material
+
+    return delivery_batch_material(record)
+
+
 def _activation_material(record: Dict[str, Any]) -> bytes:
     from backend.services.vs01_signing_packet_activation import activation_material_bytes
 
@@ -154,6 +164,17 @@ def _guard_generic_immutable_write(
         _preserve_activation_audit(current or {}, next_draft)
     elif isinstance(incoming_activation, dict):
         raise ValueError("signing_packet_activation_endpoint_required")
+
+    incoming_delivery = next_draft.get("vs01_signing_invite_delivery_v1")
+    existing_delivery = (current or {}).get("vs01_signing_invite_delivery_v1")
+    if isinstance(existing_delivery, dict):
+        if incoming_delivery is None:
+            next_draft["vs01_signing_invite_delivery_v1"] = existing_delivery
+        elif _delivery_batch_material(incoming_delivery) != _delivery_batch_material(existing_delivery):
+            raise ValueError("signing_invite_delivery_immutable")
+        _preserve_delivery_audit(current or {}, next_draft)
+    elif isinstance(incoming_delivery, dict):
+        raise ValueError("signing_invite_delivery_endpoint_required")
     return next_draft
 
 
@@ -559,6 +580,329 @@ def _activate_vs01_signing_packet_postgres(
                 ),
             )
         return stored
+
+
+def _create_or_merge_delivery_batch_on_latest(
+    latest: Dict[str, Any],
+    *,
+    canonical_batch: Dict[str, Any],
+    audit_event: Dict[str, Any],
+    updated_at: str,
+) -> tuple[Dict[str, Any], Optional[Dict[str, Any]], bool]:
+    from backend.services.vs01_signing_invite_delivery import (
+        VS01_SIGNING_INVITE_DELIVERY_FIELD,
+    )
+
+    existing = latest.get(VS01_SIGNING_INVITE_DELIVERY_FIELD)
+    if isinstance(existing, dict):
+        existing_key = str(existing.get("batch_key") or "")
+        canonical_key = str(canonical_batch.get("batch_key") or "")
+        if existing_key != canonical_key:
+            raise ValueError("signing_invite_delivery_conflict")
+        return existing, None, False
+    next_draft = dict(latest)
+    next_draft[VS01_SIGNING_INVITE_DELIVERY_FIELD] = canonical_batch
+    audit = list(latest.get("audit_log") or [])
+    audit.append(dict(audit_event))
+    next_draft["audit_log"] = audit
+    next_draft["updated_at"] = updated_at
+    return canonical_batch, next_draft, True
+
+
+def _merge_delivery_terminal_outcomes_on_latest(
+    latest: Dict[str, Any],
+    *,
+    outcomes: List[Any],
+    attempted_at: str,
+) -> Dict[str, Any]:
+    from backend.services.vs01_signing_invite_delivery import (
+        VS01_SIGNING_INVITE_DELIVERY_FIELD,
+        merge_recipient_terminal_outcomes_cas,
+    )
+
+    existing = latest.get(VS01_SIGNING_INVITE_DELIVERY_FIELD)
+    if not isinstance(existing, dict):
+        raise ValueError("signing_invite_delivery_not_found")
+    merged_batch = merge_recipient_terminal_outcomes_cas(
+        existing,
+        outcomes=outcomes,
+        attempted_at=attempted_at,
+    )
+    next_draft = dict(latest)
+    next_draft[VS01_SIGNING_INVITE_DELIVERY_FIELD] = merged_batch
+    next_draft["updated_at"] = attempted_at
+    return next_draft
+
+
+def _update_delivery_batch_on_latest(
+    latest: Dict[str, Any],
+    *,
+    delivery_batch: Dict[str, Any],
+    updated_at: str,
+) -> Dict[str, Any]:
+    from backend.services.vs01_signing_invite_delivery import VS01_SIGNING_INVITE_DELIVERY_FIELD
+
+    existing = latest.get(VS01_SIGNING_INVITE_DELIVERY_FIELD)
+    if not isinstance(existing, dict):
+        raise ValueError("signing_invite_delivery_not_found")
+    if str(existing.get("batch_key") or "") != str(delivery_batch.get("batch_key") or ""):
+        raise ValueError("signing_invite_delivery_conflict")
+    next_draft = dict(latest)
+    next_draft[VS01_SIGNING_INVITE_DELIVERY_FIELD] = delivery_batch
+    next_draft["updated_at"] = updated_at
+    return next_draft
+
+
+def deliver_vs01_signing_invites_authoritative(
+    agreement_id: str,
+    *,
+    document_id: str,
+    attempted_at: str,
+    provider_send_fn=None,
+    delivery_allowed: bool | None = None,
+) -> Dict[str, Any]:
+    """Validate authority, atomically claim delivery records, optionally invoke provider."""
+    from backend.config.agreement_signing_token import resolve_signing_token_secret_raw
+    from backend.config.signing_invite_delivery_config import signing_invite_delivery_allowed
+    from backend.services.vs01_signing_invite_delivery import (
+        VS01_SIGNING_INVITE_DELIVERY_FIELD,
+        Vs01SigningInviteDeliveryError,
+        build_canonical_delivery_batch,
+        build_delivery_disabled_response,
+        delivery_owner_projection,
+        strip_ephemeral_delivery_fields,
+    )
+
+    aid = str(agreement_id or "").strip()
+    did = str(document_id or "").strip()
+    if not aid:
+        raise ValueError("missing_agreement_id")
+    if not did:
+        raise ValueError("missing_document_id")
+
+    allowed = signing_invite_delivery_allowed() if delivery_allowed is None else bool(delivery_allowed)
+
+    if not allowed:
+        try:
+            latest = load_draft(aid)
+        except KeyError:
+            raise
+        return build_delivery_disabled_response(
+            agreement_id=aid,
+            document_id=did,
+            draft=latest,
+        )
+
+    try:
+        token_secret = resolve_signing_token_secret_raw().encode("utf-8")
+    except Exception as exc:
+        raise Vs01SigningInviteDeliveryError("signing_token_secret_unavailable", 503) from exc
+
+    audit_event = {
+        "event_type": "signing_invite_delivery_attempted",
+        "at": attempted_at,
+        "field": VS01_SIGNING_INVITE_DELIVERY_FIELD,
+        "value": {"document_id": did},
+    }
+
+    def _claim_phase(
+        latest: Dict[str, Any], signing_lock: Dict[str, Any] | None
+    ) -> tuple[Optional[Dict[str, Any]], List[Any], Dict[str, Any], bool]:
+        from backend.services.vs01_signing_invite_delivery import elect_and_persist_delivery_claims
+
+        canonical = build_canonical_delivery_batch(
+            agreement_id=aid,
+            document_id=did,
+            draft=latest,
+            signing_lock=signing_lock,
+            token_secret=token_secret,
+            attempted_at=attempted_at,
+        )
+        working_batch, next_draft, created, winners = elect_and_persist_delivery_claims(
+            latest=latest,
+            canonical_batch=canonical,
+            attempted_at=attempted_at,
+            audit_event=audit_event,
+        )
+        if next_draft is not None:
+            persisted_batch = next_draft.get(VS01_SIGNING_INVITE_DELIVERY_FIELD)
+            if isinstance(persisted_batch, dict):
+                next_draft[VS01_SIGNING_INVITE_DELIVERY_FIELD] = strip_ephemeral_delivery_fields(
+                    persisted_batch
+                )
+        return next_draft, winners, strip_ephemeral_delivery_fields(working_batch), created
+
+    if _use_postgres():
+        working_batch = _deliver_vs01_signing_invites_postgres(
+            aid,
+            document_id=did,
+            attempted_at=attempted_at,
+            claim_phase=_claim_phase,
+            provider_send_fn=provider_send_fn,
+            delivery_allowed=allowed,
+            audit_event=audit_event,
+        )
+    else:
+        working_batch = _deliver_vs01_signing_invites_file(
+            aid,
+            document_id=did,
+            attempted_at=attempted_at,
+            claim_phase=_claim_phase,
+            provider_send_fn=provider_send_fn,
+            delivery_allowed=allowed,
+            audit_event=audit_event,
+        )
+
+    try:
+        persisted_batch = load_draft(aid).get(VS01_SIGNING_INVITE_DELIVERY_FIELD)
+    except KeyError:
+        persisted_batch = None
+    batch_for_projection = (
+        persisted_batch if isinstance(persisted_batch, dict) else working_batch
+    )
+    return delivery_owner_projection(batch_for_projection, delivery_allowed=allowed)
+
+
+def _deliver_vs01_signing_invites_file(
+    agreement_id: str,
+    *,
+    document_id: str,
+    attempted_at: str,
+    claim_phase,
+    provider_send_fn,
+    delivery_allowed: bool,
+    audit_event: Dict[str, Any],
+) -> Dict[str, Any]:
+    from backend.services.agreement_signing_lock_store import read_signing_lock_unlocked
+    from backend.services.vs01_signing_invite_delivery import (
+        VS01_SIGNING_INVITE_DELIVERY_FIELD,
+        execute_provider_for_claim_winners,
+        strip_ephemeral_delivery_fields,
+    )
+
+    path = _agreement_path(agreement_id)
+    winners: List[Any] = []
+    with agreement_file_lock(agreement_id):
+        if not path.exists():
+            raise KeyError("agreement_not_found")
+        latest = _decode_draft_payload(path.read_text(encoding="utf-8"))
+        signing_lock = read_signing_lock_unlocked(agreement_id)
+        next_draft, winners, working, _created = claim_phase(latest, signing_lock)
+        if next_draft is not None:
+            _write_draft_file_unlocked(path, next_draft)
+
+    if delivery_allowed and provider_send_fn is not None and winners:
+        outcomes = execute_provider_for_claim_winners(
+            winners=winners,
+            provider_send_fn=provider_send_fn,
+            agreement_id=agreement_id,
+        )
+        if outcomes:
+            with agreement_file_lock(agreement_id):
+                latest = _decode_draft_payload(path.read_text(encoding="utf-8"))
+                persisted = _merge_delivery_terminal_outcomes_on_latest(
+                    latest,
+                    outcomes=outcomes,
+                    attempted_at=attempted_at,
+                )
+                _write_draft_file_unlocked(path, persisted)
+                stored = persisted.get(VS01_SIGNING_INVITE_DELIVERY_FIELD)
+                return stored if isinstance(stored, dict) else working
+    with agreement_file_lock(agreement_id):
+        latest = _decode_draft_payload(path.read_text(encoding="utf-8"))
+        stored = latest.get(VS01_SIGNING_INVITE_DELIVERY_FIELD)
+        if isinstance(stored, dict):
+            return stored
+    return strip_ephemeral_delivery_fields(working)
+
+
+def _deliver_vs01_signing_invites_postgres(
+    agreement_id: str,
+    *,
+    document_id: str,
+    attempted_at: str,
+    claim_phase,
+    provider_send_fn,
+    delivery_allowed: bool,
+    audit_event: Dict[str, Any],
+) -> Dict[str, Any]:
+    from backend.db.agreement_sql import agreement_postgres_connection, pg_execute
+    from backend.services.agreement_signing_lock_store import read_signing_lock_for_update
+    from backend.services.vs01_signing_invite_delivery import (
+        VS01_SIGNING_INVITE_DELIVERY_FIELD,
+        execute_provider_for_claim_winners,
+        strip_ephemeral_delivery_fields,
+    )
+
+    winners: List[Any] = []
+    with agreement_postgres_connection() as cx:
+        row = pg_execute(
+            cx,
+            "SELECT payload FROM agreement_drafts WHERE id = ? FOR UPDATE",
+            (agreement_id,),
+        ).fetchone()
+        if not row:
+            raise KeyError("agreement_not_found")
+        signing_lock = read_signing_lock_for_update(cx, agreement_id)
+        latest = _decode_draft_payload(row[0])
+        next_draft, winners, working, _created = claim_phase(latest, signing_lock)
+        if next_draft is not None:
+            pg_execute(
+                cx,
+                """
+                UPDATE agreement_drafts
+                SET payload = ?::jsonb, updated_at = ?
+                WHERE id = ?
+                """,
+                (
+                    canon_json_bytes(next_draft).decode("utf-8"),
+                    datetime.now(timezone.utc),
+                    agreement_id,
+                ),
+            )
+
+    if delivery_allowed and provider_send_fn is not None and winners:
+        outcomes = execute_provider_for_claim_winners(
+            winners=winners,
+            provider_send_fn=provider_send_fn,
+            agreement_id=agreement_id,
+        )
+        if outcomes:
+            with agreement_postgres_connection() as cx:
+                row = pg_execute(
+                    cx,
+                    "SELECT payload FROM agreement_drafts WHERE id = ? FOR UPDATE",
+                    (agreement_id,),
+                ).fetchone()
+                if not row:
+                    raise KeyError("agreement_not_found")
+                latest = _decode_draft_payload(row[0])
+                persisted = _merge_delivery_terminal_outcomes_on_latest(
+                    latest,
+                    outcomes=outcomes,
+                    attempted_at=attempted_at,
+                )
+                pg_execute(
+                    cx,
+                    """
+                    UPDATE agreement_drafts
+                    SET payload = ?::jsonb, updated_at = ?
+                    WHERE id = ?
+                    """,
+                    (
+                        canon_json_bytes(persisted).decode("utf-8"),
+                        datetime.now(timezone.utc),
+                        agreement_id,
+                    ),
+                )
+                stored = persisted.get(VS01_SIGNING_INVITE_DELIVERY_FIELD)
+                return stored if isinstance(stored, dict) else working
+
+    latest = load_draft(agreement_id)
+    stored = latest.get(VS01_SIGNING_INVITE_DELIVERY_FIELD)
+    if isinstance(stored, dict):
+        return stored
+    return strip_ephemeral_delivery_fields(working)
 
 
 def load_draft(agreement_id: str) -> Dict[str, Any]:

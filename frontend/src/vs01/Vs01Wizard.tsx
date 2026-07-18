@@ -70,6 +70,11 @@ import {
 } from "./vs01PreparePacketCompletion";
 import { handlePreparePacketContinue } from "./vs01PreparePacketContinue";
 import { persistSigningPacketActivation } from "../agreement/signingPacketActivationApi";
+import {
+  cacheConfirmedSigningPacketDelivery,
+  deliverSigningPacketInvites,
+  signingPacketDeliveryUserMessage,
+} from "../agreement/signingPacketDeliveryApi";
 import { loadFrozenSigningAuthority } from "../agreement/frozenSigningAuthorityApi";
 import type { Vs01CanonicalPacketPortableV1 } from "./vs01CanonicalPacketSeed";
 import { paidProPacketReadyDashboardPath } from "./vs01PaidProPacketReadyNavigation";
@@ -679,6 +684,21 @@ export function Vs01Wizard({
         setError(message);
         return;
       }
+      let deliveryStatusMessage: string | null = null;
+      try {
+        const deliveryStatus = await deliverSigningPacketInvites(linkedAgreementId, {
+          documentId: did,
+        });
+        cacheConfirmedSigningPacketDelivery(deliveryStatus, linkedAgreementId);
+        deliveryStatusMessage = signingPacketDeliveryUserMessage(deliveryStatus);
+      } catch (deliveryError) {
+        const message =
+          deliveryError instanceof Error
+            ? deliveryError.message
+            : "signing_packet_delivery_failed";
+        setError(message);
+        return;
+      }
       markAgreementPacketPrepared(linkedAgreementId);
       clearAgreementVs01BridgeSession();
       clearPaidProAgreementBridgeSkipMarker();
@@ -688,6 +708,7 @@ export function Vs01Wizard({
         packetPrepareOnly: true,
         signerCount: result.handoff.signers.length,
         vs01DocumentId: did,
+        deliveryStatusMessage,
         destination: paidProPacketReadyDashboardPath(),
       });
       navigate(paidProPacketReadyDashboardPath());

@@ -16,10 +16,17 @@ def send_email_non_fatal(
     html: str,
     text: str | None = None,
     context: str = "email",
+    idempotency_key: str | None = None,
 ) -> SendResult:
     """Send via Resend; log failures and never raise."""
     try:
-        result = send_email(to=to, subject=subject, html=html, text=text)
+        result = send_email(
+            to=to,
+            subject=subject,
+            html=html,
+            text=text,
+            idempotency_key=idempotency_key,
+        )
     except Exception as exc:  # noqa: BLE001 — outbound must not break API callers
         _log.warning("[%s] send_exception to=%s err=%s", context, _redact_to(to), exc)
         return SendResult(ok=False, error="exception")

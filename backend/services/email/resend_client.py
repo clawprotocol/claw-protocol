@@ -30,6 +30,7 @@ def send_email(
     html: str,
     text: str | None = None,
     tags: Optional[List[Dict[str, str]]] = None,
+    idempotency_key: str | None = None,
 ) -> SendResult:
     api_key = resend_api_key()
     from_addr = email_from()
@@ -52,13 +53,17 @@ def send_email(
         payload["tags"] = tags
 
     try:
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+        }
+        idem = (idempotency_key or "").strip()
+        if idem:
+            headers["Idempotency-Key"] = idem[:256]
         with httpx.Client(timeout=20.0) as client:
             res = client.post(
                 RESEND_API_URL,
-                headers={
-                    "Authorization": f"Bearer {api_key}",
-                    "Content-Type": "application/json",
-                },
+                headers=headers,
                 json=payload,
             )
     except httpx.HTTPError as exc:

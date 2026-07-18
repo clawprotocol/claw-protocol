@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
-from typing import Any, Dict, List
+from typing import Any, Callable, Dict, List
 from urllib.parse import urlparse
 
 from backend.config.email_config import app_public_origin, email_configured
@@ -279,3 +279,87 @@ def send_signing_invite_to_target(
                 audit_log=draft.setdefault("audit_log", []),
             )
     return bool(result.ok)
+
+
+def send_authoritative_signing_invite(
+    *,
+    agreement_id: str,
+    draft: Dict[str, Any],
+    recipient_email: str,
+    recipient_display_name: str,
+    signing_url_with_fragment: str,
+    idempotency_key: str,
+) -> tuple[bool, str | None, str | None]:
+    """
+    Phase 3C1B single-recipient provider adapter.
+
+    Returns (ok, provider_message_id, failure_code). Never raises.
+    """
+    aid = (agreement_id or "").strip()
+    email = (recipient_email or "").strip()
+    url = (signing_url_with_fragment or "").strip()
+    if not aid or not email or "@" not in email or not url:
+        return False, None, "invalid_delivery_target"
+    if not email_configured():
+        return False, None, "email_not_configured"
+    if "#t=" not in url:
+        return False, None, "token_transport_invalid"
+    if "?t=" in url.split("#", 1)[0]:
+        return False, None, "token_transport_invalid"
+
+    title = str(draft.get("title") or "").strip() or "Untitled agreement"
+    requester = _owner_display_name_from_draft(draft)
+    party_names = _party_display_names_from_draft(draft)
+    built = build_signing_invite_email(
+        party_name=recipient_display_name or email.split("@", 1)[0],
+        agreement_title=title,
+        signing_url=url,
+        requesting_party_name=requester,
+        party_names=party_names,
+    )
+    result = send_email_non_fatal(
+        to=email,
+        subject=built.subject,
+        html=built.html,
+        text=built.text,
+        context="signing_invite_authoritative",
+        idempotency_key=(idempotency_key or "").strip() or None,
+    )
+    if result.ok:
+        return True, result.provider_id, None
+    failure = (result.error or "provider_send_failed").strip()[:120]
+    return False, None, failure or "provider_send_failed"
+
+
+def default_authoritative_provider_send_fn(
+    draft: Dict[str, Any],
+) -> Callable[[str, str, str, str, str], tuple[bool, str | None, str | None]]:
+    """Build a provider callback bound to draft context for deliver orchestration."""
+
+    def _send(
+        agreement_id: str,
+        delivery_identity: str,
+        recipient_email: str,
+        signing_url_with_fragment: str,
+        idempotency_key: str,
+    ) -> tuple[bool, str | None, str | None]:
+        display_name = recipient_email.split("@", 1)[0]
+        for record in (
+            (draft.get("vs01_signing_invite_delivery_v1") or {}).get("recipients") or {}
+        ).values():
+            if not isinstance(record, dict):
+                continue
+            if str(record.get("delivery_identity") or "") != delivery_identity:
+                continue
+            display_name = str(record.get("signer_name") or display_name)
+            break
+        return send_authoritative_signing_invite(
+            agreement_id=agreement_id,
+            draft=draft,
+            recipient_email=recipient_email,
+            recipient_display_name=display_name,
+            signing_url_with_fragment=signing_url_with_fragment,
+            idempotency_key=idempotency_key,
+        )
+
+    return _send

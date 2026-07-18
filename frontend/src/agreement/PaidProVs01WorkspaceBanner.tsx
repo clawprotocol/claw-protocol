@@ -2,6 +2,11 @@ import { useCallback, useEffect, useId, useRef, useState } from "react";
 import { ProofStatus, vs01ReceiptToProofStatusData } from "../components/proof/ProofStatus";
 import { LawdogRecordedMark } from "../components/ui/LawdogRecordedMark";
 import { openReceiptProofBundleDownload } from "../export/dataExportApi";
+import {
+  readCachedSigningPacketDelivery,
+  signingPacketDeliveryClaimsSent,
+  signingPacketDeliveryUserMessage,
+} from "./signingPacketDeliveryApi";
 import { useLaunchNav } from "../launch/LaunchNavContext";
 import { getReceipt } from "../vs01/vs01Api";
 import {
@@ -109,12 +114,18 @@ export function PaidProVs01WorkspaceBanner({ agreementId, visible }: Props) {
   const namedPending = signers.filter((s) => s.displayName?.trim().length);
   const firstNamed = namedPending[0];
   const totalSigners = signers.length + (handoff.ownerSigningUrl?.trim() ? 1 : 0);
+  const deliveryStatus = readCachedSigningPacketDelivery(agreementId);
+  const deliveryLine = packetPrepare ? signingPacketDeliveryUserMessage(deliveryStatus) : null;
+  const invitationsSent = signingPacketDeliveryClaimsSent(deliveryStatus);
   const completionLine = packetPrepare
-    ? signers.length === 0
-      ? "Signature links are ready. Add signing recipients from the workspace when you have their details."
-      : totalSigners === 1
-        ? "Signature links are ready. LawDog sent a signing link — track progress below."
-        : "Signature links are ready. LawDog sent signing links to all parties. Each party can sign independently."
+    ? deliveryLine ??
+      (signers.length === 0
+        ? "Signature links are ready. Add signing recipients from the workspace when you have their details."
+        : invitationsSent
+          ? totalSigners === 1
+            ? "Signature links are ready. LawDog sent a signing link — track progress below."
+            : "Signature links are ready. LawDog sent signing links to all parties. Each party can sign independently."
+          : "Signature packet is activated. Track signing progress below.")
     : signers.length === 0
       ? "Your signature is complete. Add recipients from the workspace when you are ready to collect remaining signatures."
       : namedPending.length === 1
