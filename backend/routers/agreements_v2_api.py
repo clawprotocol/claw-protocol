@@ -7419,6 +7419,17 @@ def get_public_vs01_signing_packet(
     except ValidationError:
         raise HTTPException(status_code=404, detail="not_found")
 
+    from backend.services.vs01_signing_packet_activation import has_active_signing_packet_activation
+
+    if has_active_signing_packet_activation(draft.model_dump()):
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "session_required",
+                "message": "Recipient session authentication is required for this signing packet.",
+            },
+        )
+
     pid = (participant_id or "").strip()
     remail = (recipient_email or "").strip()
     if pid and remail:

@@ -112,6 +112,82 @@ def _validate_portable_seed(
         raise Vs01SigningPacketActivationError("portable_corpus_hash_mismatch", 409)
 
 
+_SUPPORTED_PORTABLE_FIELD_TYPES = frozenset(
+    {"signature", "initials", "printed_name", "text", "email", "date"}
+)
+
+
+def _portable_roles_by_id(portable: Dict[str, Any]) -> Dict[str, Dict[str, Any]]:
+    roles = portable.get("roles")
+    if not isinstance(roles, list):
+        raise Vs01SigningPacketActivationError("portable_roles_required")
+    by_id: Dict[str, Dict[str, Any]] = {}
+    for role in roles:
+        if not isinstance(role, dict):
+            raise Vs01SigningPacketActivationError("portable_role_malformed")
+        role_id = _clean(role.get("roleId"))
+        if not role_id:
+            raise Vs01SigningPacketActivationError("portable_role_malformed")
+        if role_id in by_id:
+            raise Vs01SigningPacketActivationError("duplicate_role_id", 409)
+        by_id[role_id] = role
+    return by_id
+
+
+def _validate_portable_field_assignments(
+    portable: Dict[str, Any], frozen: Dict[str, Any]
+) -> None:
+    """Phase 3C2B: every activated field must bind explicitly to a frozen signer role."""
+    fields = portable.get("fields")
+    if fields is None:
+        raise Vs01SigningPacketActivationError("portable_fields_required")
+    if not isinstance(fields, list):
+        raise Vs01SigningPacketActivationError("portable_field_malformed")
+    # Product contract: empty interactive field lists are allowed at activation.
+    if not fields:
+        return
+
+    roles_by_id = _portable_roles_by_id(portable)
+    signers_by_id = {
+        _clean(signer.get("signerRecordId")): signer
+        for signer in (frozen.get("signers") or [])
+        if isinstance(signer, dict) and _clean(signer.get("signerRecordId"))
+    }
+    seen_field_ids: set[str] = set()
+    for field in fields:
+        if not isinstance(field, dict):
+            raise Vs01SigningPacketActivationError("portable_field_malformed")
+        field_id = _clean(field.get("id"))
+        if not field_id:
+            raise Vs01SigningPacketActivationError("portable_field_id_required", 409)
+        if field_id in seen_field_ids:
+            raise Vs01SigningPacketActivationError("duplicate_field_id", 409)
+        seen_field_ids.add(field_id)
+
+        field_type = _clean(field.get("type"))
+        if field_type not in _SUPPORTED_PORTABLE_FIELD_TYPES:
+            raise Vs01SigningPacketActivationError("portable_field_type_invalid", 409)
+
+        assigned_role_id = _clean(field.get("assignedSignerRoleId"))
+        if not assigned_role_id:
+            raise Vs01SigningPacketActivationError("portable_field_assignment_required", 409)
+        role = roles_by_id.get(assigned_role_id)
+        if not isinstance(role, dict):
+            raise Vs01SigningPacketActivationError("unknown_assigned_signer_role", 409, assigned_role_id)
+
+        signer_record_id = _clean(role.get("signerRecordId"))
+        if not signer_record_id:
+            raise Vs01SigningPacketActivationError("portable_signer_reference_required", 409)
+        signer = signers_by_id.get(signer_record_id)
+        if not isinstance(signer, dict):
+            raise Vs01SigningPacketActivationError("unknown_signer_reference", 409, signer_record_id)
+
+        role_party_id = _clean(role.get("partyId"))
+        signer_party_id = _clean(signer.get("agreementPartyId"))
+        if not role_party_id or role_party_id != signer_party_id:
+            raise Vs01SigningPacketActivationError("portable_signer_reference_mismatch", 409)
+
+
 def _signature_roles(portable: Dict[str, Any]) -> List[Dict[str, Any]]:
     roles = portable.get("roles")
     if not isinstance(roles, list) or not roles:
@@ -298,6 +374,7 @@ def build_canonical_signing_packet_activation(
         accepted_corpus_sha256=accepted_corpus_sha256,
     )
     _validate_portable_execution_against_frozen(portable_packet, frozen)
+    _validate_portable_field_assignments(portable_packet, frozen)
 
     frozen_material_hash = canon_sha256_hex(
         {key: value for key, value in frozen.items() if key != "frozenAt"}

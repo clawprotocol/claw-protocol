@@ -453,6 +453,72 @@ def exchange_bootstrap_token(*, token: str) -> Tuple[str, Dict[str, Any], int]:
         )
 
 
+def _lookup_active_session(session_secret: str) -> Optional[Dict[str, Any]]:
+    raw = (session_secret or "").strip()
+    if not raw:
+        return None
+    session = get_session_by_token_hash(session_token_hash(raw))
+    if not session:
+        return None
+    _assert_session_active(session, now_ts=int(time.time()))
+    return session
+
+
+def _load_draft_and_signing_lock(agreement_id: str) -> Tuple[Dict[str, Any], Optional[Dict[str, Any]]]:
+    from backend.services.agreement_draft_store import load_draft
+    from backend.services.agreement_signing_lock_store import read_signing_lock
+
+    try:
+        draft = load_draft(agreement_id)
+    except KeyError:
+        raise RecipientBootstrapExchangeError() from None
+    signing_lock = read_signing_lock(agreement_id)
+    return draft, signing_lock
+
+
+def load_revalidated_recipient_session(
+    *,
+    session_secret: str,
+    touch_seen: bool = True,
+) -> Tuple[Dict[str, Any], Dict[str, Any], Optional[Dict[str, Any]]]:
+    """Load session, draft, and signing lock after full authority revalidation."""
+    session = _lookup_active_session(session_secret)
+    if not session:
+        raise RecipientBootstrapExchangeError()
+    agreement_id = _clean(session.get("agreement_id"))
+    draft, signing_lock = _load_draft_and_signing_lock(agreement_id)
+    _revalidate_session_authority(draft=draft, session=session, signing_lock=signing_lock)
+    if touch_seen:
+        touch_last_seen(
+            session_id=_clean(session.get("session_id")),
+            last_seen_at=_utc_now_iso(),
+            agreement_id=agreement_id,
+        )
+    return session, draft, signing_lock
+
+
+def resolve_recipient_session_packet(*, session_secret: str) -> Dict[str, Any]:
+    from backend.services.recipient_session_packet_projection import (
+        RecipientSessionPacketProjectionError,
+        build_recipient_session_packet_projection,
+    )
+
+    try:
+        session, draft, signing_lock = load_revalidated_recipient_session(
+            session_secret=session_secret,
+            touch_seen=True,
+        )
+        projection = build_recipient_session_packet_projection(
+            session=session,
+            draft=draft,
+            signing_lock=signing_lock,
+        )
+    except (RecipientBootstrapExchangeError, RecipientSessionPacketProjectionError):
+        revoke_recipient_session(session_secret=session_secret)
+        raise RecipientBootstrapExchangeError() from None
+    return {"ok": True, **projection}
+
+
 def resolve_recipient_session_status(*, session_secret: str) -> Dict[str, Any]:
     raw = (session_secret or "").strip()
     if not raw:
@@ -460,24 +526,10 @@ def resolve_recipient_session_status(*, session_secret: str) -> Dict[str, Any]:
     session = get_session_by_token_hash(session_token_hash(raw))
     if not session:
         return {"ok": True, "authenticated": False, "readiness": "unauthenticated"}
-    now_ts = int(time.time())
-    _assert_session_active(session, now_ts=now_ts)
-
-    from backend.services.agreement_draft_store import load_draft
-    from backend.services.agreement_signing_lock_store import read_signing_lock
-
-    agreement_id = _clean(session.get("agreement_id"))
     try:
-        draft = load_draft(agreement_id)
-    except KeyError:
-        raise RecipientBootstrapExchangeError() from None
-    signing_lock = read_signing_lock(agreement_id)
-    _revalidate_session_authority(draft=draft, session=session, signing_lock=signing_lock)
-    touch_last_seen(
-        session_id=_clean(session.get("session_id")),
-        last_seen_at=_utc_now_iso(),
-        agreement_id=agreement_id,
-    )
+        session, _, _ = load_revalidated_recipient_session(session_secret=raw, touch_seen=True)
+    except RecipientBootstrapExchangeError:
+        return {"ok": True, "authenticated": False, "readiness": "unauthenticated"}
     return _status_projection(session, authenticated=True)
 
 

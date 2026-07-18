@@ -147,6 +147,7 @@ def _portable_candidate(agreement_id: str, draft: dict, accepted: dict, *, field
                 "width": 0.2,
                 "height": 0.05,
                 "counterpartyId": draft["parties"][0]["id"],
+                "assignedSignerRoleId": _stable_role_id(agreement_id, 0, draft["parties"][0]["id"]),
             }
         ],
         "roles": [
@@ -353,6 +354,48 @@ def test_invalid_portable_candidates_are_rejected(mutate, detail):
     response = _activate(client, agreement_id, portable)
     assert response.status_code in {400, 409}
     assert response.json()["detail"] == detail
+    assert load_draft(agreement_id).get(_ACTIVATION_FIELD) is None
+
+
+def test_zero_field_portable_activation_is_allowed():
+    """Product contract: a signing packet may activate with no interactive fields."""
+    client = TestClient(app)
+    agreement_id, draft, accepted, portable = _prepare_authorities(client)
+    portable["fields"] = []
+    portable["fieldCount"] = 0
+    response = _activate(client, agreement_id, portable)
+    assert response.status_code == 200
+    assert load_draft(agreement_id).get(_ACTIVATION_FIELD) is not None
+
+
+def test_missing_field_assignment_rejects_activation():
+    client = TestClient(app)
+    agreement_id, draft, accepted, portable = _prepare_authorities(client)
+    portable["fields"][0].pop("assignedSignerRoleId", None)
+    response = _activate(client, agreement_id, portable)
+    assert response.status_code == 409
+    assert response.json()["detail"] == "portable_field_assignment_required"
+    assert load_draft(agreement_id).get(_ACTIVATION_FIELD) is None
+
+
+def test_duplicate_field_id_rejects_activation():
+    client = TestClient(app)
+    agreement_id, draft, accepted, portable = _prepare_authorities(client)
+    duplicate = dict(portable["fields"][0])
+    portable["fields"] = [duplicate, dict(duplicate)]
+    response = _activate(client, agreement_id, portable)
+    assert response.status_code == 409
+    assert response.json()["detail"] == "duplicate_field_id"
+    assert load_draft(agreement_id).get(_ACTIVATION_FIELD) is None
+
+
+def test_unknown_assigned_signer_role_rejects_activation():
+    client = TestClient(app)
+    agreement_id, draft, accepted, portable = _prepare_authorities(client)
+    portable["fields"][0]["assignedSignerRoleId"] = "role_does_not_exist"
+    response = _activate(client, agreement_id, portable)
+    assert response.status_code == 409
+    assert response.json()["detail"] == "unknown_assigned_signer_role"
     assert load_draft(agreement_id).get(_ACTIVATION_FIELD) is None
 
 

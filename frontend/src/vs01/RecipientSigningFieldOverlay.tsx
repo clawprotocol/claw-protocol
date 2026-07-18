@@ -41,6 +41,8 @@ export type RecipientSigningFieldOverlayProps = {
   pageTextRects?: readonly { x: number; y: number; width: number; height: number }[];
   /** Canonical packet pages: use model rect + prepare-compact chrome (no DOM initials shift). */
   canonicalCompact?: boolean;
+  /** Read-only Phase 3C2B review — no signing interaction. */
+  readOnlyReview?: boolean;
 };
 
 export function RecipientSigningFieldOverlay({
@@ -54,6 +56,7 @@ export function RecipientSigningFieldOverlay({
   pageFieldObstacles = [],
   pageTextRects = [],
   canonicalCompact = false,
+  readOnlyReview = false,
 }: RecipientSigningFieldOverlayProps) {
   const useDomInitials =
     !canonicalCompact && field.type === "initials" && field.autoInitials === true;
@@ -71,12 +74,14 @@ export function RecipientSigningFieldOverlay({
     lockedCounterpartyId,
     lockedSignerRoleId,
   );
-  const editable = isMine && isRecipientSigningEditableType(field.type);
-  const pill = recipientFieldStatusPill({
-    field,
-    isCurrentSignerField: isMine,
-    agreementId: recipientAgreementId,
-  });
+  const editable = !readOnlyReview && isMine && isRecipientSigningEditableType(field.type);
+  const pill = readOnlyReview
+    ? "waiting"
+    : recipientFieldStatusPill({
+        field,
+        isCurrentSignerField: isMine,
+        agreementId: recipientAgreementId,
+      });
   const pillLabel = recipientFieldStatusPillLabel(pill);
   const fieldState =
     pill === "signed"

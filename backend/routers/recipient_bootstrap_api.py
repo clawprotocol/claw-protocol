@@ -25,6 +25,7 @@ from backend.services.recipient_bootstrap_session_store import (
 from backend.services.vs01_recipient_bootstrap_exchange import (
     RecipientBootstrapExchangeError,
     exchange_bootstrap_token,
+    resolve_recipient_session_packet,
     resolve_recipient_session_status,
     revoke_recipient_session,
 )
@@ -195,6 +196,18 @@ async def get_recipient_session_status(request: Request) -> Dict[str, Any]:
         return resolve_recipient_session_status(session_secret=cookie)
     except RecipientBootstrapExchangeError:
         return {"ok": True, "authenticated": False, "readiness": "unauthenticated"}
+
+
+@router.get("/session/packet")
+async def get_recipient_session_packet(request: Request, response: Response) -> Dict[str, Any]:
+    cookie = read_recipient_session_cookie(request)
+    if not cookie:
+        raise _uniform_fail(status_code=403)
+    response.headers["Cache-Control"] = "no-store, private"
+    try:
+        return resolve_recipient_session_packet(session_secret=cookie)
+    except RecipientBootstrapExchangeError as exc:
+        raise _uniform_fail(status_code=exc.status_code) from exc
 
 
 @router.post("/session/logout")

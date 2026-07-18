@@ -249,6 +249,7 @@ def test_signing_links_sent_persists_vs01_portable_packet_for_public_hydration(
                 "width": 0.2,
                 "height": 0.05,
                 "counterpartyId": draft["parties"][0]["id"],
+                "assignedSignerRoleId": f"role_{draft['parties'][0]['id']}",
             }
         ],
         "roles": [
