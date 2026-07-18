@@ -468,6 +468,9 @@ def test_vs01_signer_complete_concurrent_final_signer_one_email_set(client: Test
     send_calls: list[str] = []
 
     def _track_send(*, agreement_id: str, draft: dict, org_id: str | None = None):
+        import time
+
+        time.sleep(0.05)
         send_calls.append(agreement_id)
         return {
             "event_type": "signing_completion_emails_sent",

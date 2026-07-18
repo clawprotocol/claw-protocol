@@ -6802,25 +6802,23 @@ def post_vs01_signer_complete(
 
     if outcome.fully_executed:
         from backend.services.vs01_fully_executed_snapshot import ensure_fully_executed_snapshot_on_draft
-
-        reloaded_for_snap = _load_or_404(aid)
-        ensured = ensure_fully_executed_snapshot_on_draft(
-            reloaded_for_snap.model_dump(),
-            agreement_id=aid,
-        )
-        if ensured.mutated:
-            snap_draft = _merge_agreement_draft(
-                reloaded_for_snap,
-                updated_at=now,
-                vs01_signing_packet_v1=ensured.draft_dict.get("vs01_signing_packet_v1"),
-            )
-            _save_draft_sync(snap_draft.model_dump(), request)
-
-    if outcome.fully_executed:
         from backend.services.vs01_signer_completion import vs01_completion_email_lock
 
         with vs01_completion_email_lock(aid):
             reloaded = _load_or_404(aid)
+            ensured = ensure_fully_executed_snapshot_on_draft(
+                reloaded.model_dump(),
+                agreement_id=aid,
+            )
+            if ensured.mutated:
+                snap_draft = _merge_agreement_draft(
+                    reloaded,
+                    updated_at=now,
+                    vs01_signing_packet_v1=ensured.draft_dict.get("vs01_signing_packet_v1"),
+                )
+                _save_draft_sync(snap_draft.model_dump(), request)
+                reloaded = _load_or_404(aid)
+
             reloaded_audit = list(reloaded.model_dump().get("audit_log") or [])
             if completion_emails_already_sent(reloaded_audit):
                 completion_emails_sent = True
