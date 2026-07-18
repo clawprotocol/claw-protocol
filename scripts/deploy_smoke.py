@@ -313,6 +313,28 @@ def main(argv: List[str]) -> int:
         except Exception as e:
             _die(f"frontend HEAD {e}", url=args.frontend_url)
 
+    if _is_prod():
+        legacy_checks = [
+            ("POST", "/v1/workflow/demo/run", {"timeline_id": "smoke-legacy"}),
+            ("POST", "/v1/agreements/create", {"title": "smoke"}),
+            ("POST", "/v1/esign/create", {"document_title": "smoke"}),
+            ("POST", "/agent/propose", {"clauses": [], "role": "sender"}),
+        ]
+        for method, path, body in legacy_checks:
+            if method == "POST":
+                resp = _post_json(session, base, path, body)
+            else:
+                resp = _get(session, base, path)
+            if resp.status_code != 404:
+                _die(
+                    "production legacy/demo containment",
+                    method=method,
+                    path=path,
+                    status=resp.status_code,
+                    text=resp.text[:500],
+                )
+        print("OK: production rejects representative legacy/demo writes (404)")
+
     print("DEPLOY_SMOKE_DONE: automated launch sequence complete")
     return 0
 

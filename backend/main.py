@@ -57,6 +57,11 @@ from backend.anchoring.config import (
 )
 from backend.config.anchor_network_config import anchor_cadence_summary
 from backend.config.external_ai_policy import log_external_ai_policy_at_startup
+from backend.config.legacy_demo_route_policy import (
+    is_legacy_demo_contained_http_path,
+    legacy_demo_routes_enabled,
+    log_legacy_demo_route_policy_at_startup,
+)
 
 # ✅ LLM router (OpenAI wrapper)
 from backend.llm_router import call_legal_llm
@@ -141,10 +146,13 @@ from backend.routers.admin_console_api import router as admin_console_router
 # -------------------------------------------------
 app = FastAPI(title="CLAW Backend")
 log_external_ai_policy_at_startup()
+log_legacy_demo_route_policy_at_startup()
 
 from backend.config.env_bootstrap import log_env_warnings_at_startup  # noqa: E402
 
 log_env_warnings_at_startup()
+
+_LEGACY_DEMO_ROUTES_ENABLED = legacy_demo_routes_enabled()
 
 VERIFIER_ONLY = os.getenv("CLAW_VERIFIER_ONLY", "0") == "1"
 CLAW_PROTOCOL_VERSION = os.getenv("CLAW_PROTOCOL_VERSION", "claw-v1")
@@ -272,6 +280,13 @@ def _rate_limit_allow(key: str) -> bool:
     state["tokens"] -= 1.0
     _rate_state[key] = state
     return True
+
+
+@app.middleware("http")
+async def claw_legacy_demo_containment(request: Request, call_next):
+    if not _LEGACY_DEMO_ROUTES_ENABLED and is_legacy_demo_contained_http_path(request.url.path):
+        return JSONResponse(status_code=404, content={"detail": "not_found"})
+    return await call_next(request)
 
 
 @app.middleware("http")
@@ -1447,15 +1462,16 @@ async def anchor_legacy(req: Request, body: AnchorProofRequest):
 
 
 # -------------------------------------------------
-# Legal Analyst + v1 routers
+# Legal Analyst + v1 routers (legacy/demo surfaces gated in production)
 # -------------------------------------------------
-app.include_router(legal_analyst_router)
-app.include_router(workflow_router)
-app.include_router(esign_router)
-app.include_router(agreements_router)
+if _LEGACY_DEMO_ROUTES_ENABLED:
+    app.include_router(legal_analyst_router)
+    app.include_router(workflow_router)
+    app.include_router(esign_router)
+    app.include_router(agreements_router)
+    app.include_router(liability_router)
 app.include_router(agreements_v2_router)
 app.include_router(feed_router)
-app.include_router(liability_router)
 app.include_router(vs01_documents_router)
 app.include_router(vs01_sign_router)
 app.include_router(vs01_receipts_router)
@@ -1486,7 +1502,7 @@ app.include_router(admin_console_router)
 # -------------------------------------------------
 # Multipart routers (OFF by default)
 # -------------------------------------------------
-if _multipart_enabled():
+if _multipart_enabled() and _LEGACY_DEMO_ROUTES_ENABLED:
     try:
         from backend.routers.extract import router as extract_router  # type: ignore
 
@@ -1502,3 +1518,33 @@ if _multipart_enabled():
     except Exception:
         if _debug_enabled():
             raise
+
+
+def _filter_legacy_demo_openapi(schema: Dict[str, Any]) -> Dict[str, Any]:
+    if _LEGACY_DEMO_ROUTES_ENABLED:
+        return schema
+    paths = schema.get("paths") or {}
+    for path in list(paths.keys()):
+        if is_legacy_demo_contained_http_path(path):
+            del paths[path]
+    schema["paths"] = paths
+    return schema
+
+
+def _custom_openapi() -> Dict[str, Any]:
+    if app.openapi_schema:
+        return app.openapi_schema
+    from fastapi.openapi.utils import get_openapi
+
+    schema = get_openapi(
+        title=app.title,
+        version=getattr(app, "version", "0.1.0"),
+        openapi_version=app.openapi_version,
+        description=getattr(app, "description", None),
+        routes=app.routes,
+    )
+    app.openapi_schema = _filter_legacy_demo_openapi(schema)
+    return app.openapi_schema
+
+
+app.openapi = _custom_openapi  # type: ignore[method-assign]

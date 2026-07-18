@@ -87,6 +87,8 @@ def admin_anchor_http_trigger_enabled() -> bool:
 
 
 def public_runtime_summary() -> Dict[str, Any]:
+    from backend.config.legacy_demo_route_policy import legacy_demo_routes_enabled
+
     secret_present = operator_signing_token_secret_configured()
     mint_key_present = bool(os.getenv("CLAW_RECIPIENT_LINK_MINT_KEY", "").strip())
     btc_url_set = bool(os.getenv("BITCOIN_RPC_URL", "").strip())
@@ -127,4 +129,5 @@ def public_runtime_summary() -> Dict[str, Any]:
         "admin_anchor_http_trigger_enabled": admin_anchor_http_trigger_enabled(),
         "worker_entrypoint": "python -m backend.workers.run_anchor_worker",
         "artifact_storage": public_runtime_storage_summary(),
+        "legacy_demo_routes_enabled": legacy_demo_routes_enabled(),
     }
