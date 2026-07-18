@@ -77,6 +77,8 @@ import { stripRecipientAccessTokenQueryFromLocation } from "./agreement/recipien
 import { logRecipientReviewTokenResolved } from "./components/agreements/reviewFlowDebugLog";
 import { Vs01Layout, type Vs01LayoutHero } from "./vs01/Vs01Layout";
 import { Vs01Wizard } from "./vs01/Vs01Wizard";
+import { RecipientBootstrapBoundary } from "./vs01/RecipientBootstrapBoundary";
+import { isVs01EmailLinkBootstrapSurface } from "./vs01/vs01FragmentBootstrapToken";
 import { getVs01UrlBootstrap } from "./vs01/vs01UrlBootstrap";
 import { readAgreementVs01BridgeSession } from "./launch/simpleProduct/agreementToVs01SigningBridge";
 import { logVs01CopyContext, resolveVs01EsignShellCopy } from "./vs01/vs01EsignShellCopy";
@@ -483,6 +485,17 @@ export function ClawProductApp() {
         recipientPublicFooter
       >
         <Vs01Wizard />
+      </Vs01Layout>
+    );
+  }
+
+  const vs01EmailLinkBootstrap = isVs01EmailLinkBootstrapSurface(pathname, search || "");
+  const vs01EmailLinkSeedMatch = pathname.match(/\/app\/esign\/([^/?#]+)/);
+  const vs01EmailLinkSeed = (vs01EmailLinkSeedMatch?.[1] ?? "").trim();
+  if (vs01EmailLinkBootstrap && vs01EmailLinkSeed) {
+    return (
+      <Vs01Layout hero={RECIPIENT_SIGNING_HERO} recipientPublicFooter>
+        <RecipientBootstrapBoundary seedDocumentId={vs01EmailLinkSeed} />
       </Vs01Layout>
     );
   }

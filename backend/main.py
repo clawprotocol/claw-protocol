@@ -119,6 +119,7 @@ from backend.payments.webhooks import router as payments_onramp_webhook_router
 from backend.payments.stripe_webhooks import router as stripe_webhook_router
 from backend.routers.economics_v1_api import router as economics_v1_router
 from backend.routers.billing_checkout_api import router as billing_checkout_router
+from backend.routers.recipient_bootstrap_api import router as recipient_bootstrap_router
 from backend.routers.workspace_auth_api import router as workspace_auth_router
 from backend.routers.genesis_referral_api import router as genesis_referral_router
 from backend.routers.compliance_api import router as compliance_router
@@ -1466,6 +1467,7 @@ app.include_router(payments_onramp_webhook_router)
 app.include_router(stripe_webhook_router)
 app.include_router(billing_checkout_router)
 app.include_router(workspace_auth_router)
+app.include_router(recipient_bootstrap_router)
 app.include_router(economics_v1_router)
 app.include_router(genesis_referral_router)
 app.include_router(compliance_router)

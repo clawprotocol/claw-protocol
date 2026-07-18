@@ -15,6 +15,7 @@ import { StepPrepareSignature } from "./StepPrepareSignature";
 import { detailsStepIsValid } from "./detailsStepValidation";
 import type { PlacedSigningField } from "./signingFields";
 import { getVs01UrlBootstrap } from "./vs01UrlBootstrap";
+import { isVs01EmailLinkBootstrapSurface } from "./vs01FragmentBootstrapToken";
 import { resolveReviewerEffectiveAccessToken } from "../agreement/reviewerTokenPersistence";
 import { markAgreementFieldsPlacedCount, markAgreementPacketPrepared } from "./vs01WorkspaceSigningStatus";
 import { fetchDocumentContent, getReceipt } from "./vs01Api";
@@ -318,6 +319,12 @@ export function Vs01Wizard({
   }, [seedDocumentId, hideStepper]);
 
   useEffect(() => {
+    if (
+      typeof window !== "undefined" &&
+      isVs01EmailLinkBootstrapSurface(window.location.pathname, window.location.search)
+    ) {
+      return;
+    }
     if (!RECIPIENT_SIGNER_DEEP_LINK || !recipientLockedCpId) return;
     if (recipientAuthorityResolvedRef.current) return;
     const agreementId = RECIPIENT_AGREEMENT_ID;

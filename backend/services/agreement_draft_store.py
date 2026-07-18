@@ -175,6 +175,19 @@ def _guard_generic_immutable_write(
         _preserve_delivery_audit(current or {}, next_draft)
     elif isinstance(incoming_delivery, dict):
         raise ValueError("signing_invite_delivery_endpoint_required")
+
+    incoming_sessions = next_draft.get("recipient_bootstrap_sessions_v1")
+    existing_sessions = (current or {}).get("recipient_bootstrap_sessions_v1")
+    if isinstance(existing_sessions, dict):
+        if incoming_sessions is None:
+            next_draft["recipient_bootstrap_sessions_v1"] = existing_sessions
+        else:
+            from backend.services.recipient_bootstrap_session_store import sessions_field_material
+
+            if sessions_field_material(incoming_sessions) != sessions_field_material(existing_sessions):
+                raise ValueError("recipient_bootstrap_sessions_immutable")
+    elif isinstance(incoming_sessions, dict):
+        raise ValueError("recipient_bootstrap_sessions_endpoint_required")
     return next_draft
 
 

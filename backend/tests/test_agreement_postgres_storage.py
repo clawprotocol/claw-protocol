@@ -411,3 +411,91 @@ def test_postgres_concurrent_signing_invite_delivery_claim_winner(monkeypatch, t
     final_batch = ads.load_draft(agreement_id)[VS01_SIGNING_INVITE_DELIVERY_FIELD]
     assert final_batch == delivery_snapshot
     assert len(provider_calls) == 2
+
+
+@pytest.mark.skipif(not _PG, reason="CLAW_AGREEMENT_PG_TEST_URL not set")
+def test_postgres_concurrent_bootstrap_exchange_one_winner(monkeypatch, tmp_path):
+    """Phase 3C2A bootstrap exchange under real Postgres row locking."""
+    _configure_postgres_test_env(monkeypatch)
+    _reset_postgres_migrations()
+    monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("CLAW_AGREEMENT_DB_PATH", str(tmp_path / "agreements.sqlite3"))
+    monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_AGREEMENT_SIGNING_TOKEN_SECRET", "pg-test-bootstrap-exchange-secret")
+    monkeypatch.setenv("CLAW_RECIPIENT_BOOTSTRAP_RATE_LIMIT_DISABLED", "1")
+    monkeypatch.setenv("CLAW_APP_PUBLIC_ORIGIN", "https://app.example.com")
+    monkeypatch.setenv("RESEND_API_KEY", "re_test_key")
+    monkeypatch.setenv("EMAIL_FROM", "LawDog <noreply@example.test>")
+    monkeypatch.setenv("CLAW_SIGNING_INVITE_DELIVERY_ENABLED", "1")
+    monkeypatch.setenv("CLAW_SIGNING_INVITE_RECIPIENT_BOOTSTRAP_ENABLED", "1")
+
+    from fastapi.testclient import TestClient
+
+    from backend.main import app
+    from backend.services import agreement_draft_store as ads
+    from backend.services import agreement_signing_lock_store as als
+    from backend.services.recipient_bootstrap_session_store import count_sessions_for_agreement
+    from backend.services.vs01_signing_invite_delivery import VS01_SIGNING_INVITE_DELIVERY_FIELD
+    from backend.tests.test_vs01_signing_invite_delivery import _token_from_signing_url
+    from backend.tests.test_vs01_signing_packet_activation import _DOCUMENT_ID
+
+    agreement_id = f"test_pg_bootstrap_{uuid.uuid4().hex}"
+    document_id = _DOCUMENT_ID
+    _setup_pg_3c1b_delivery_agreement(
+        ads,
+        als,
+        agreement_id=agreement_id,
+        document_id=document_id,
+    )
+
+    provider_calls: list[dict] = []
+
+    def _mock_provider_send(
+        agreement_id_arg: str,
+        delivery_identity: str,
+        recipient_email: str,
+        signing_url: str,
+        idempotency_key: str,
+    ):
+        provider_calls.append(
+            {
+                "delivery_identity": delivery_identity,
+                "signing_url": signing_url,
+            }
+        )
+        return True, f"msg_{delivery_identity}", None
+
+    ads.deliver_vs01_signing_invites_authoritative(
+        agreement_id,
+        document_id=document_id,
+        attempted_at="2026-07-17T12:00:00Z",
+        provider_send_fn=_mock_provider_send,
+        delivery_allowed=True,
+    )
+    assert provider_calls
+    token = _token_from_signing_url(provider_calls[0]["signing_url"])
+    client = TestClient(app)
+    barrier = threading.Barrier(2)
+
+    def _exchange_once():
+        barrier.wait()
+        return client.post(
+            "/api/recipient/bootstrap/exchange",
+            json={"token": token},
+            headers={"Origin": "http://testserver"},
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(lambda _: _exchange_once(), range(2)))
+    ok = [r for r in results if r.status_code == 200]
+    fail = [r for r in results if r.status_code == 403]
+    assert len(ok) == 1
+    assert len(fail) == 1
+    assert count_sessions_for_agreement(agreement_id) == 1
+    stored = ads.load_draft(agreement_id)[VS01_SIGNING_INVITE_DELIVERY_FIELD]
+    exchanged = [
+        row
+        for row in stored["recipients"].values()
+        if row.get("bootstrap_exchanged_at")
+    ]
+    assert len(exchanged) == 1
