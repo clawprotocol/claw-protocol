@@ -11,6 +11,14 @@ from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
+from backend.security.sensitive_read_authorization import (
+    assert_document_read_allowed,
+    assert_verified_owner_for_sensitive_write,
+    private_cache_headers,
+    private_json_response,
+    resolve_verified_owner_subject_for_sensitive_write,
+)
+from backend.config.deployment_runtime import is_production_like_claw_environment
 from backend.services import document_service, signature_service
 from backend.services.vs01_document_content import (
     content_type_for_meta,
@@ -53,7 +61,7 @@ class SignPrepareRequest(BaseModel):
 
 
 @router.post("")
-def api_finalize_document(body: FinalizeDocumentRequest) -> Dict[str, Any]:
+def api_finalize_document(body: FinalizeDocumentRequest, request: Request) -> Dict[str, Any]:
     import base64
 
     try:
@@ -62,8 +70,14 @@ def api_finalize_document(body: FinalizeDocumentRequest) -> Dict[str, Any]:
         raise HTTPException(status_code=400, detail="invalid_base64") from exc
 
     try:
+        if is_production_like_claw_environment():
+            owner_subject = assert_verified_owner_for_sensitive_write(request)
+        else:
+            owner_subject = resolve_verified_owner_subject_for_sensitive_write(request)
         meta = document_service.finalize_document(
-            raw, content_type=body.content_type
+            raw,
+            content_type=body.content_type,
+            owner_subject=owner_subject,
         )
     except ValueError as exc:
         code = str(exc)
@@ -75,22 +89,24 @@ def api_finalize_document(body: FinalizeDocumentRequest) -> Dict[str, Any]:
 
 
 @router.get("/{document_id}")
-def api_get_document(document_id: str) -> Dict[str, Any]:
+def api_get_document(document_id: str, request: Request) -> Response:
+    assert_document_read_allowed(request, document_id)
     meta = document_service.get_document_meta(document_id)
     if not meta:
-        raise HTTPException(status_code=404, detail="document_not_found")
-    return {"ok": True, "document": meta}
+        raise HTTPException(status_code=404, detail="not_found")
+    return private_json_response({"ok": True, "document": meta})
 
 
 @router.get("/{document_id}/content")
 def api_get_document_content(document_id: str, request: Request) -> Response:
     did = (document_id or "").strip()
+    assert_document_read_allowed(request, did)
     try:
         raw, meta = load_document_content(did)
         if raw is None:
-            raise HTTPException(status_code=404, detail="document_not_found")
+            raise HTTPException(status_code=404, detail="not_found")
         ct = content_type_for_meta(meta)
-        return Response(content=raw, media_type=ct)
+        return Response(content=raw, media_type=ct, headers=private_cache_headers())
     except HTTPException:
         raise
     except Exception as exc:
@@ -102,14 +118,14 @@ def api_get_document_content(document_id: str, request: Request) -> Response:
             str(exc)[:500],
             traceback.format_exc(),
         )
-        return JSONResponse(
-            status_code=404,
-            content={
+        return private_json_response(
+            {
                 "ok": False,
                 "error": "document_content_unavailable",
                 "document_id": did,
                 "degraded": True,
             },
+            status_code=404,
         )
 
 

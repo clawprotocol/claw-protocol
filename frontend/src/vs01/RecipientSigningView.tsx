@@ -13,6 +13,7 @@ import pdfjsWorker from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import "react-pdf/dist/Page/AnnotationLayer.css";
 import "react-pdf/dist/Page/TextLayer.css";
 import { fetchDocumentContent } from "./vs01Api";
+import type { Vs01SensitiveReadAuth } from "./vs01ReadHeaders";
 import { setVs01DocumentPageLayouts } from "./vs01DocumentLayoutCache";
 import { extractPdfPageLayoutsFromBlob } from "./vs01PdfPageLayout";
 import type { Vs01PageTextLayout } from "./vs01PageTextLayout";
@@ -79,6 +80,10 @@ export type RecipientSigningViewProps = {
   lockedCounterpartyId: string;
   /** Agreement id from signing URL — scopes sender reference overlay vs signer fields. */
   recipientAgreementId?: string | null;
+  /** Validated recipient access token from signing URL (legacy links). */
+  recipientAccessToken?: string | null;
+  /** When true, send HttpOnly bootstrap session cookie on document reads. */
+  recipientSessionCookie?: boolean;
   /** Stable role id from signing URL; optional for legacy links. */
   lockedSignerRoleId?: string | null;
   recipientFields: Vs01RecipientPlacedField[];
@@ -176,6 +181,8 @@ export function RecipientSigningView({
   counterparties,
   lockedCounterpartyId,
   recipientAgreementId = null,
+  recipientAccessToken = null,
+  recipientSessionCookie = false,
   lockedSignerRoleId = null,
   recipientFields,
   senderPlacedFields,
@@ -429,6 +436,17 @@ export function RecipientSigningView({
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [pageLayouts, setPageLayouts] = useState<Vs01PageTextLayout[] | null>(null);
 
+  const documentReadAuth = useMemo((): Vs01SensitiveReadAuth | undefined => {
+    const agreementId = (recipientAgreementId ?? "").trim();
+    const token = (recipientAccessToken ?? "").trim();
+    if (!agreementId && !token && !recipientSessionCookie) return undefined;
+    return {
+      agreementId: agreementId || undefined,
+      recipientAccessToken: token || undefined,
+      includeSessionCookie: recipientSessionCookie,
+    };
+  }, [recipientAgreementId, recipientAccessToken, recipientSessionCookie]);
+
   const pagesInnerRef = useRef<HTMLDivElement>(null);
   const [pageRenderWidth, setPageRenderWidth] = useState(520);
   const pageStackRefs = useRef<Map<number, HTMLDivElement>>(new Map());
@@ -481,7 +499,7 @@ export function RecipientSigningView({
         });
       }
       try {
-        const blob = await fetchDocumentContent(documentId.trim());
+        const blob = await fetchDocumentContent(documentId.trim(), documentReadAuth);
         if (cancelled) return;
         objectUrl = URL.createObjectURL(blob);
         setPdfUrl(objectUrl);

@@ -105,7 +105,11 @@ def test_document_content_survives_malformed_meta(monkeypatch: pytest.MonkeyPatc
 
     def _bad_meta(document_id: str):
         if document_id == doc_id:
-            return {"content_type": 123, "created_at": object()}
+            return {
+                "content_type": 123,
+                "created_at": object(),
+                "owner_subject": "org:test-org-vs01-content-test354",
+            }
         return original_meta(document_id)
 
     monkeypatch.setattr(document_service, "get_document_meta", _bad_meta)

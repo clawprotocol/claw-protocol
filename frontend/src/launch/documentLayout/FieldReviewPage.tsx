@@ -16,6 +16,7 @@ import {
   putReviewManifest,
 } from "./documentLayoutApi";
 import { apiUrl } from "../../lib/clawApi";
+import { clawAgreementHeaders } from "../../agreement/agreementOrgHeaders";
 import { AI_ASSISTIVE_SHORT } from "../../compliance/disclosureCopy";
 
 pdfjs.GlobalWorkerOptions.workerSrc = pdfjsWorker;
@@ -119,7 +120,10 @@ export function FieldReviewPage(props: { analysisId: string }) {
   } | null>(null);
 
   const effectiveDocId = docIdParam || String(model?.document_id_ref || "").trim() || null;
-  const docUrl = effectiveDocId ? apiUrl(`/v1/documents/${encodeURIComponent(effectiveDocId)}/content`) : null;
+  const docUrl = effectiveDocId
+    ? apiUrl(`/v1/documents/${encodeURIComponent(effectiveDocId)}/content`)
+    : null;
+  const docReadHeaders = clawAgreementHeaders();
 
   const reload = useCallback(async () => {
     setLoadErr(null);
@@ -152,7 +156,9 @@ export function FieldReviewPage(props: { analysisId: string }) {
     let cancel = false;
     void (async () => {
       try {
-        const res = await fetch(apiUrl(`/v1/documents/${encodeURIComponent(effectiveDocId)}`));
+        const res = await fetch(apiUrl(`/v1/documents/${encodeURIComponent(effectiveDocId)}`), {
+          headers: docReadHeaders,
+        });
         const j = (await res.json()) as { document?: { content_type?: string } };
         const ct = String(j?.document?.content_type || "");
         if (!cancel) setDocumentContentType(ct || "application/pdf");

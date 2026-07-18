@@ -47,10 +47,12 @@ def test_vs01_full_path_finalize_sign_get_receipt_export_bundle(
 ) -> None:
     _configure_artifacts(monkeypatch, tmp_path)
     client = TestClient(app)
+    org = {"X-Claw-Org-Id": "vs01-e2e-test-org"}
 
     raw = b"VS01-B13 e2e document payload"
     fin = client.post(
         "/v1/documents",
+        headers=org,
         json={
             "content_base64": base64.b64encode(raw).decode("ascii"),
             "content_type": "application/octet-stream",
@@ -82,7 +84,7 @@ def test_vs01_full_path_finalize_sign_get_receipt_export_bundle(
     assert complete.status_code == 200, complete.text
     rid = complete.json()["receipt_id"]
 
-    get_rec = client.get(f"/v1/receipts/{rid}")
+    get_rec = client.get(f"/v1/receipts/{rid}", headers=org)
     assert get_rec.status_code == 200
     body = get_rec.json()
     assert body["ok"] is True
@@ -90,7 +92,7 @@ def test_vs01_full_path_finalize_sign_get_receipt_export_bundle(
     assert rec["receipt_id"] == rid
     assert rec["document_id"] == doc_id
 
-    bundle_resp = client.get(f"/v1/receipts/{rid}/bundle")
+    bundle_resp = client.get(f"/v1/receipts/{rid}/bundle", headers=org)
     assert bundle_resp.status_code == 200
     assert bundle_resp.headers.get("content-type", "").startswith("application/zip")
 

@@ -144,6 +144,7 @@ def finalize_document(
     *,
     content_type: Optional[str] = None,
     agreement_id: Optional[str] = None,
+    owner_subject: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Write finalized bytes and return stable identifiers (``document_id``, ``content_sha256``, ...).
@@ -164,6 +165,9 @@ def finalize_document(
     aid = (agreement_id or "").strip()
     if aid:
         meta["agreement_id"] = aid
+    subj = (owner_subject or "").strip()
+    if subj:
+        meta["owner_subject"] = subj
 
     for base in _legacy_storage_bases():
         try:

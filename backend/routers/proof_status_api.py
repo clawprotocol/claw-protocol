@@ -17,9 +17,40 @@ from backend.proof_status.capabilities import (
 from backend.proof_status.schemas import ExportJobCreateBody
 from backend.proof_status.service import get_proof_status_service
 from backend.proof_status.store import ProofLayerStore
+from backend.security.sensitive_read_authorization import (
+    assert_receipt_read_allowed,
+    assert_sensitive_read_allowed,
+    private_cache_headers,
+    private_json_response,
+    resolve_receipt_read_context,
+)
 from backend.utils.enforce import resolve_subject_from_request
 
 router = APIRouter(prefix="/v1/proof", tags=["proof"])
+
+
+def _assert_proof_subject_read_allowed(request: Request, subject_type: str, subject_id: str) -> None:
+    st = (subject_type or "").strip().lower()
+    sid = (subject_id or "").strip()
+    if st == "receipt":
+        ctx = resolve_receipt_read_context(sid)
+        if not ctx:
+            from fastapi import HTTPException
+
+            raise HTTPException(status_code=404, detail="not_found")
+        assert_sensitive_read_allowed(
+            request,
+            agreement_id=ctx.get("agreement_id"),
+            document_id=ctx.get("document_id"),
+            owner_subject=ctx.get("owner_subject"),
+        )
+        return
+    if st == "agreement":
+        assert_sensitive_read_allowed(request, agreement_id=sid)
+        return
+    from fastapi import HTTPException
+
+    raise HTTPException(status_code=404, detail="not_found")
 
 
 class ProofUpgradeBody(BaseModel):
@@ -27,19 +58,21 @@ class ProofUpgradeBody(BaseModel):
 
 
 @router.get("/{subject_type}/{subject_id}/status")
-def api_proof_status(subject_type: str, subject_id: str, request: Request) -> Dict[str, Any]:
+def api_proof_status(subject_type: str, subject_id: str, request: Request) -> Response:
+    _assert_proof_subject_read_allowed(request, subject_type, subject_id)
     caps = resolve_humane_capabilities(request).as_dict()
     svc = get_proof_status_service()
     payload = svc.build_status_payload(subject_type, subject_id, capabilities=caps)
-    return {"ok": True, **payload.model_dump()}
+    return private_json_response({"ok": True, **payload.model_dump()})
 
 
 @router.get("/{subject_type}/{subject_id}/details")
-def api_proof_details(subject_type: str, subject_id: str, request: Request) -> Dict[str, Any]:
+def api_proof_details(subject_type: str, subject_id: str, request: Request) -> Response:
+    _assert_proof_subject_read_allowed(request, subject_type, subject_id)
     caps = resolve_humane_capabilities(request).as_dict()
     svc = get_proof_status_service()
     payload = svc.build_details_payload(subject_type, subject_id, capabilities=caps)
-    return {"ok": True, **payload.model_dump()}
+    return private_json_response({"ok": True, **payload.model_dump()})
 
 
 @router.get("/{subject_type}/{subject_id}/export")
@@ -60,7 +93,7 @@ def api_proof_subject_export(subject_type: str, subject_id: str, request: Reques
         )
     from backend.routers.vs01_receipts_api import api_get_receipt_bundle
 
-    return api_get_receipt_bundle(subject_id)
+    return api_get_receipt_bundle(subject_id, request)
 
 
 @router.post("/{subject_type}/{subject_id}/upgrade")
@@ -186,7 +219,10 @@ def api_proof_exports_download(export_id: str, request: Request) -> Response:
     return Response(
         content=data,
         media_type="application/zip",
-        headers={"Content-Disposition": f'attachment; filename="lawdog-export-{export_id[:12]}.zip"'},
+        headers={
+            "Content-Disposition": f'attachment; filename="lawdog-export-{export_id[:12]}.zip"',
+            **private_cache_headers(),
+        },
     )
 
 

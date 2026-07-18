@@ -1,5 +1,6 @@
 import type { ExecutionPacket, ExecutionPacketProof } from "./executionPacket";
 import { computeAgreementReceiptHashes } from "./executionPacket";
+import { clawAgreementHeaders } from "../agreement/agreementOrgHeaders";
 
 const ANCHOR_NETWORK: string =
   (import.meta as unknown as { env?: { VITE_CLAW_ANCHOR_NETWORK?: string } }).env
@@ -42,7 +43,8 @@ export async function fetchAgreementProofStatus(
   agreementId: string
 ): Promise<ExecutionPacketProof | null> {
   const res = await fetch(
-    `${apiBase.replace(/\/$/, "")}/api/agreements/${encodeURIComponent(agreementId)}/proof-status`
+    `${apiBase.replace(/\/$/, "")}/api/agreements/${encodeURIComponent(agreementId)}/proof-status`,
+    { headers: clawAgreementHeaders() },
   );
   if (!res.ok) return null;
   const data = (await res.json()) as { proof?: ExecutionPacketProof | null };

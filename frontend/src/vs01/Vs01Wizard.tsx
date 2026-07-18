@@ -19,6 +19,7 @@ import { isVs01EmailLinkBootstrapSurface } from "./vs01FragmentBootstrapToken";
 import { resolveReviewerEffectiveAccessToken } from "../agreement/reviewerTokenPersistence";
 import { markAgreementFieldsPlacedCount, markAgreementPacketPrepared } from "./vs01WorkspaceSigningStatus";
 import { fetchDocumentContent, getReceipt } from "./vs01Api";
+import type { Vs01SensitiveReadAuth } from "./vs01ReadHeaders";
 import { useLaunchNav } from "../launch/LaunchNavContext";
 import { stashHeroIntakePrefill } from "../launch/heroIntakePrefill";
 import { prepareFreshMarketingEntry } from "../launch/marketingSession";
@@ -157,7 +158,18 @@ const RECIPIENT_NEEDS_SERVER_HYDRATION =
   Boolean((VS01_URL_BOOT?.documentId ?? "").trim()) &&
   (!hasVs01CanonicalPacketCached((VS01_URL_BOOT?.documentId ?? "").trim()) ||
     (INITIAL_RECIPIENT_FIELDS.length === 0 &&
-      (VS01_URL_BOOT?.recipientManifestParamPresent ?? false)));
+      Boolean(VS01_URL_BOOT?.recipientManifestParamPresent)));
+
+function vs01SensitiveReadAuth(linkedAgreementId?: string | null): Vs01SensitiveReadAuth | undefined {
+  const agreementId = (linkedAgreementId ?? RECIPIENT_AGREEMENT_ID ?? "").trim();
+  const token = RECIPIENT_ACCESS_TOKEN.trim();
+  if (!agreementId && !token) return undefined;
+  return {
+    agreementId: agreementId || undefined,
+    recipientAccessToken: token || undefined,
+    includeSessionCookie: Boolean(agreementId && !token),
+  };
+}
 
 export type Vs01WizardProps = {
   /** Reserved for future controlled mode; shell ignores if unset. */
@@ -419,7 +431,7 @@ export function Vs01Wizard({
     let cancelled = false;
     void (async () => {
       try {
-        const data = await getReceipt(receiptId);
+        const data = await getReceipt(receiptId, vs01SensitiveReadAuth(vs01LinkedAgreementId));
         if (cancelled) return;
         const raw = data.receipt !== undefined ? data.receipt : data;
         let hash: string | null = null;
@@ -877,7 +889,7 @@ export function Vs01Wizard({
       if (hydrateLocalPaidProBridge()) return;
 
       try {
-        const blob = await fetchDocumentContent(sid);
+        const blob = await fetchDocumentContent(sid, vs01SensitiveReadAuth(vs01LinkedAgreementId));
         const buf = await blob.arrayBuffer();
         const hex = (await sha256Bytes(buf)).toLowerCase();
         if (cancelled) return;
@@ -1303,6 +1315,8 @@ export function Vs01Wizard({
               counterparties={counterparties}
               lockedCounterpartyId={recipientLockedCpId}
               recipientAgreementId={RECIPIENT_AGREEMENT_ID || null}
+              recipientAccessToken={RECIPIENT_ACCESS_TOKEN || null}
+              recipientSessionCookie={Boolean(RECIPIENT_AGREEMENT_ID && !RECIPIENT_ACCESS_TOKEN)}
               lockedSignerRoleId={recipientLockedSignerRoleId}
               packetRevision={VS01_URL_BOOT?.packetRevision ?? null}
               recipientFields={recipientPlacedFields}

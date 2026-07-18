@@ -32,6 +32,7 @@ def run_layout_analysis(
     prefer_ocr: bool = False,
     assistive_llm: bool = True,
     persist: bool = True,
+    owner_subject: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Produce reviewable layout JSON (coordinates from PyMuPDF / OCR only).
@@ -133,6 +134,9 @@ def run_layout_analysis(
         },
         "unresolved_ambiguities": unresolved,
     }
+    subj = (owner_subject or "").strip()
+    if subj:
+        payload["owner_subject"] = subj
 
     if persist:
         save_layout_analysis(analysis_id, payload)

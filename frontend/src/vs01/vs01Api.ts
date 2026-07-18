@@ -1,4 +1,6 @@
 import { apiUrl, resolveApiBase } from "../lib/clawApi";
+import { vs01SensitiveReadFetchInit, vs01SensitiveReadHeaders, type Vs01SensitiveReadAuth } from "./vs01ReadHeaders";
+import { clawAgreementHeaders } from "../agreement/agreementOrgHeaders";
 
 function apiBase(): string {
   return resolveApiBase().replace(/\/$/, "");
@@ -48,7 +50,7 @@ export async function finalizeDocument(
 
   const res = await fetch(url, {
     method: "POST",
-    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    headers: clawAgreementHeaders({ "Content-Type": "application/json", Accept: "application/json" }),
     body: JSON.stringify(body),
   });
 
@@ -118,11 +120,14 @@ export async function createSignSession(
 /**
  * GET /v1/documents/{document_id}/content — raw document bytes (e.g. PDF for preview).
  */
-export async function fetchDocumentContent(documentId: string): Promise<Blob> {
+export async function fetchDocumentContent(
+  documentId: string,
+  auth?: Vs01SensitiveReadAuth
+): Promise<Blob> {
   const enc = encodeURIComponent(documentId.trim());
   const url = apiUrl(`/v1/documents/${enc}/content`);
 
-  const res = await fetch(url, { method: "GET" });
+  const res = await fetch(url, { method: "GET", ...vs01SensitiveReadFetchInit(auth) });
 
   if (!res.ok) {
     const text = await res.text();
@@ -207,14 +212,17 @@ export type GetReceiptResponse = {
 /**
  * GET /v1/receipts/{receipt_id}
  */
-export async function getReceipt(receiptId: string): Promise<GetReceiptResponse> {
+export async function getReceipt(
+  receiptId: string,
+  auth?: Vs01SensitiveReadAuth
+): Promise<GetReceiptResponse> {
   const base = apiBase();
   const enc = encodeURIComponent(receiptId);
   const url = `${base}/v1/receipts/${enc}`;
 
   const res = await fetch(url, {
     method: "GET",
-    headers: { Accept: "application/json" },
+    headers: { Accept: "application/json", ...vs01SensitiveReadHeaders(auth) },
   });
 
   const text = await res.text();
@@ -238,12 +246,15 @@ export async function getReceipt(receiptId: string): Promise<GetReceiptResponse>
 /**
  * GET /v1/receipts/{receipt_id}/bundle — verification zip bytes.
  */
-export async function downloadBundle(receiptId: string): Promise<Blob> {
+export async function downloadBundle(
+  receiptId: string,
+  auth?: Vs01SensitiveReadAuth
+): Promise<Blob> {
   const base = apiBase();
   const enc = encodeURIComponent(receiptId);
   const url = `${base}/v1/receipts/${enc}/bundle`;
 
-  const res = await fetch(url, { method: "GET" });
+  const res = await fetch(url, { method: "GET", ...vs01SensitiveReadFetchInit(auth) });
 
   if (!res.ok) {
     const text = await res.text();

@@ -100,20 +100,22 @@ def test_api_finalize_get_sign_prep(docs_dir):
     client = TestClient(app)
     raw = b"%PDF-1.4 minimal"
     b64 = base64.b64encode(raw).decode("ascii")
+    org = {"X-Claw-Org-Id": "vs01-docs-sign-test-org"}
 
     fin = client.post(
         "/v1/documents",
+        headers=org,
         json={"content_base64": b64, "content_type": "application/pdf"},
     )
     assert fin.status_code == 200, fin.text
     doc_id = fin.json()["document_id"]
     sha = fin.json()["content_sha256"]
 
-    got = client.get(f"/v1/documents/{doc_id}")
+    got = client.get(f"/v1/documents/{doc_id}", headers=org)
     assert got.status_code == 200
     assert got.json()["document"]["content_sha256"] == sha
 
-    content = client.get(f"/v1/documents/{doc_id}/content")
+    content = client.get(f"/v1/documents/{doc_id}/content", headers=org)
     assert content.status_code == 200
     assert content.content == raw
 
@@ -136,9 +138,11 @@ def test_api_finalize_get_sign_prep(docs_dir):
 
 def test_api_sign_prep_invalid_manifest(docs_dir):
     client = TestClient(app)
+    org = {"X-Claw-Org-Id": "vs01-docs-sign-test-org"}
     raw = b"x"
     fin = client.post(
         "/v1/documents",
+        headers=org,
         json={"content_base64": base64.b64encode(raw).decode("ascii")},
     )
     doc_id = fin.json()["document_id"]

@@ -39,6 +39,10 @@ from backend.security.agreement_read_scope import (
     recipient_access_token_from_request,
     validate_recipient_access_token_for_agreement,
 )
+from backend.security.sensitive_read_authorization import (
+    assert_agreement_proof_status_read_allowed,
+    private_json_response,
+)
 from backend.security.recipient_access_token import (
     RECIPIENT_LINK_INVALID_OR_EXPIRED,
     mint_recipient_access_token,
@@ -10508,16 +10512,19 @@ def post_agreement_finalized_receipt(agreement_id: str, body: AgreementFinalizeR
 
 
 @router.get("/{agreement_id}/proof-status")
-def get_agreement_proof_status(agreement_id: str):
+def get_agreement_proof_status(agreement_id: str, request: Request) -> Response:
+    assert_agreement_proof_status_read_allowed(request, agreement_id)
     store = _agreements_timeline_store()
     timeline_id = f"agreement:{agreement_id}"
     rec = store.get_latest_receipt_for_timeline(timeline_id)
     if not rec:
-        return {"proof": None, "cadence_defaults": anchor_cadence_summary()}
+        return private_json_response({"proof": None, "cadence_defaults": anchor_cadence_summary()})
 
     batch = _batch_row_for_receipt(store, rec)
 
-    return {
-        "proof": _agreement_anchor_proof_view(rec, batch),
-        "cadence_defaults": anchor_cadence_summary(),
-    }
+    return private_json_response(
+        {
+            "proof": _agreement_anchor_proof_view(rec, batch),
+            "cadence_defaults": anchor_cadence_summary(),
+        }
+    )

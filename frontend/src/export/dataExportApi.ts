@@ -1,5 +1,6 @@
 import { clawAgreementHeaders } from "../agreement/agreementOrgHeaders";
 import { apiUrl, errorMessageFromResponse, logClawClientWarning, resolveApiBase } from "../lib/clawApi";
+import { vs01SensitiveReadFetchInit, type Vs01SensitiveReadAuth } from "../vs01/vs01ReadHeaders";
 
 export type ProofExportScope = "user_all" | "folder" | "record";
 
@@ -120,8 +121,34 @@ export async function runWorkspaceExportFlow(
   return { ok: false, error: "Export is taking longer than expected. Try again shortly." };
 }
 
-export function openReceiptProofBundleDownload(receiptId: string): void {
+export function openReceiptProofBundleDownload(
+  receiptId: string,
+  auth?: Vs01SensitiveReadAuth,
+): void {
   const path = `/v1/proof/receipt/${encodeURIComponent(receiptId)}/export`;
-  const href = absoluteApiPath(path);
-  window.open(href, "_blank", "noopener,noreferrer");
+  const url = absoluteApiPath(path);
+  void (async () => {
+    try {
+      const res = await fetch(url, vs01SensitiveReadFetchInit(auth));
+      if (!res.ok) {
+        logClawClientWarning("export.receipt_bundle", {
+          error: await errorMessageFromResponse(res, "Download failed."),
+          url,
+        });
+        return;
+      }
+      const blob = await res.blob();
+      const dl = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = dl;
+      a.download = `claw-bundle-${receiptId.slice(0, 16)}.zip`;
+      a.rel = "noopener";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      window.setTimeout(() => URL.revokeObjectURL(dl), 60_000);
+    } catch (e) {
+      logClawClientWarning("export.receipt_bundle", { error: String(e), url });
+    }
+  })();
 }

@@ -104,7 +104,10 @@ export type ReviewAction = {
 };
 
 export async function fetchLayoutAnalysis(analysisId: string): Promise<LayoutAnalysisResponse> {
-  const res = await fetch(apiUrl(`/v1/document-layout/analysis/${encodeURIComponent(analysisId)}`));
+  const res = await fetch(
+    apiUrl(`/v1/document-layout/analysis/${encodeURIComponent(analysisId)}`),
+    { headers: clawAgreementHeaders() },
+  );
   if (!res.ok) throw new Error(await errorMessageFromResponse(res, "Could not load layout analysis."));
   return readJson<LayoutAnalysisResponse>(res);
 }

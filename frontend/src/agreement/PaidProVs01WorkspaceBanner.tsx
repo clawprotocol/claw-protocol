@@ -55,7 +55,7 @@ export function PaidProVs01WorkspaceBanner({ agreementId, visible }: Props) {
     let cancelled = false;
     void (async () => {
       try {
-        const data = await getReceipt(handoff.receiptId.trim());
+        const data = await getReceipt(handoff.receiptId.trim(), { agreementId });
         if (cancelled) return;
         const raw = data.receipt !== undefined ? data.receipt : data;
         setReceipt(raw);
@@ -167,7 +167,10 @@ export function PaidProVs01WorkspaceBanner({ agreementId, visible }: Props) {
                 type="button"
                 className="vs01-btn vs01-btn--secondary vs01-btn--auto min-h-[2.5rem] px-4 text-sm text-slate-200"
                 disabled={!handoff.receiptId?.trim()}
-                onClick={() => handoff.receiptId?.trim() && openReceiptProofBundleDownload(handoff.receiptId.trim())}
+                onClick={() =>
+                  handoff.receiptId?.trim() &&
+                  openReceiptProofBundleDownload(handoff.receiptId.trim(), { agreementId })
+                }
               >
                 Download proof
               </button>

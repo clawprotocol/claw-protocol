@@ -9,7 +9,7 @@ import base64
 import logging
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 
 from backend.document_layout.events import emit_document_layout_event
@@ -23,6 +23,13 @@ from backend.document_layout.review_manifest import (
 )
 from backend.document_layout.signing_prep import build_signing_prep_response
 from backend.document_layout.store import load_layout_analysis
+from backend.security.sensitive_read_authorization import (
+    assert_layout_analysis_read_allowed,
+    assert_owner_document_read_allowed,
+    assert_verified_owner_for_sensitive_write,
+    private_json_response,
+    resolve_verified_owner_subject_for_sensitive_write,
+)
 from backend.services import document_service
 from backend.usage_economics.policy import require_claw_org_id_header
 
@@ -49,18 +56,30 @@ class LayoutLocalizeRequest(BaseModel):
 
 @router.post("/analyze")
 def api_layout_analyze(body: LayoutAnalyzeRequest, request: Request) -> Dict[str, Any]:
-    org_for_hooks = require_claw_org_id_header(request)
+    from backend.config.deployment_runtime import is_production_like_claw_environment
+
     if body.document_id and body.content_base64:
         raise HTTPException(status_code=400, detail="use_either_document_id_or_content_not_both")
 
+    org_for_hooks = require_claw_org_id_header(request)
+    if is_production_like_claw_environment():
+        owner_subject = assert_verified_owner_for_sensitive_write(request)
+    else:
+        owner_subject = resolve_verified_owner_subject_for_sensitive_write(request)
+
     raw: Optional[bytes] = None
     ct = body.content_type
+    did: Optional[str] = None
     if body.document_id:
-        raw = document_service.get_document_bytes(body.document_id.strip())
+        did = (body.document_id or "").strip()
+        if not did:
+            raise HTTPException(status_code=400, detail="document_id_required")
+        assert_owner_document_read_allowed(request, did)
+        raw = document_service.get_document_bytes(did)
         if raw is None:
-            raise HTTPException(status_code=404, detail="document_not_found")
+            raise HTTPException(status_code=404, detail="not_found")
         if not ct:
-            meta = document_service.get_document_meta(body.document_id.strip()) or {}
+            meta = document_service.get_document_meta(did) or {}
             ct = str(meta.get("content_type") or "application/pdf")
     elif body.content_base64:
         try:
@@ -74,10 +93,11 @@ def api_layout_analyze(body: LayoutAnalyzeRequest, request: Request) -> Dict[str
         payload = run_layout_analysis(
             raw,
             content_type=ct,
-            document_id=body.document_id.strip() if body.document_id else None,
+            document_id=did,
             prefer_ocr=body.options.prefer_ocr,
             assistive_llm=body.options.assistive_llm,
             persist=body.options.persist,
+            owner_subject=owner_subject,
         )
     except ValueError as exc:
         if str(exc) == "empty_document":
@@ -118,10 +138,11 @@ def api_layout_analyze(body: LayoutAnalyzeRequest, request: Request) -> Dict[str
 
 
 @router.get("/analysis/{analysis_id}")
-def api_get_layout_analysis(analysis_id: str) -> Dict[str, Any]:
+def api_get_layout_analysis(analysis_id: str, request: Request) -> Response:
+    assert_layout_analysis_read_allowed(request, analysis_id)
     data = load_layout_analysis(analysis_id.strip())
     if not data:
-        raise HTTPException(status_code=404, detail="analysis_not_found")
+        raise HTTPException(status_code=404, detail="not_found")
     enriched = enrich_analysis_for_api(data)
     rows = enriched.get("field_candidates_enriched") or []
     layout_confidence_summary = {
@@ -133,18 +154,25 @@ def api_get_layout_analysis(analysis_id: str) -> Dict[str, Any]:
         "auto_usable_count": sum(1 for r in rows if r.get("auto_usable")),
         "ambiguous_overlap_count": sum(1 for r in rows if r.get("ambiguous_overlap")),
     }
-    return {"ok": True, "layout_confidence_summary": layout_confidence_summary, **enriched}
+    return private_json_response(
+        {
+            "ok": True,
+            "layout_confidence_summary": layout_confidence_summary,
+            **enriched,
+        }
+    )
 
 
 @router.get("/analysis/{analysis_id}/signing-prep")
-def api_signing_prep(analysis_id: str, request: Request) -> Dict[str, Any]:
+def api_signing_prep(analysis_id: str, request: Request) -> Response:
     """Placement overlay for a future signing workflow — does not alter source document or proof stores."""
+    assert_layout_analysis_read_allowed(request, analysis_id)
     require_claw_org_id_header(request)
     aid = analysis_id.strip()
     data = load_layout_analysis(aid)
     if not data:
-        raise HTTPException(status_code=404, detail="analysis_not_found")
-    return build_signing_prep_response(data, analysis_id=aid)
+        raise HTTPException(status_code=404, detail="not_found")
+    return private_json_response(build_signing_prep_response(data, analysis_id=aid))
 
 
 class ReviewActionItem(BaseModel):
@@ -170,21 +198,23 @@ class ReviewManifestPutBody(BaseModel):
 
 
 @router.post("/analysis/{analysis_id}/field-review/open")
-def api_field_review_open(analysis_id: str) -> Dict[str, Any]:
+def api_field_review_open(analysis_id: str, request: Request) -> Response:
+    assert_layout_analysis_read_allowed(request, analysis_id)
     aid = analysis_id.strip()
     data = load_layout_analysis(aid)
     if not data:
-        raise HTTPException(status_code=404, detail="analysis_not_found")
+        raise HTTPException(status_code=404, detail="not_found")
     emit_document_layout_event("field_review_opened", analysis_id=aid)
-    return {"ok": True, "analysis_id": aid}
+    return private_json_response({"ok": True, "analysis_id": aid})
 
 
 @router.put("/analysis/{analysis_id}/review-manifest")
-def api_put_review_manifest(analysis_id: str, body: ReviewManifestPutBody, request: Request) -> Dict[str, Any]:
+def api_put_review_manifest(analysis_id: str, body: ReviewManifestPutBody, request: Request) -> Response:
+    assert_layout_analysis_read_allowed(request, analysis_id)
     aid = analysis_id.strip()
     data = load_layout_analysis(aid)
     if not data:
-        raise HTTPException(status_code=404, detail="analysis_not_found")
+        raise HTTPException(status_code=404, detail="not_found")
     org_for_hooks = require_claw_org_id_header(request)
 
     def _emit(event: str, **kwargs: Any) -> None:
@@ -222,14 +252,15 @@ def api_put_review_manifest(analysis_id: str, body: ReviewManifestPutBody, reque
         )
     except Exception:
         pass
-    return {"ok": True, **enrich_analysis_for_api(data)}
+    return private_json_response({"ok": True, **enrich_analysis_for_api(data)})
 
 
 @router.post("/analysis/{analysis_id}/localize")
-def api_layout_localize(analysis_id: str, body: LayoutLocalizeRequest) -> Dict[str, Any]:
+def api_layout_localize(analysis_id: str, body: LayoutLocalizeRequest, request: Request) -> Response:
+    assert_layout_analysis_read_allowed(request, analysis_id)
     data = load_layout_analysis(analysis_id.strip())
     if not data:
-        raise HTTPException(status_code=404, detail="analysis_not_found")
+        raise HTTPException(status_code=404, detail="not_found")
 
     emit_document_layout_event(
         "field_localization_requested",
@@ -245,11 +276,13 @@ def api_layout_localize(analysis_id: str, body: LayoutLocalizeRequest) -> Dict[s
             reason="weak_or_empty_matches",
         )
 
-    return {
-        "ok": True,
-        "analysis_id": analysis_id.strip(),
-        "query": body.query.strip(),
-        "matches": matches,
-        "review_recommended": review_needed,
-        "localization_guidance": localization_guidance_summary(matches),
-    }
+    return private_json_response(
+        {
+            "ok": True,
+            "analysis_id": analysis_id.strip(),
+            "query": body.query.strip(),
+            "matches": matches,
+            "review_recommended": review_needed,
+            "localization_guidance": localization_guidance_summary(matches),
+        }
+    )

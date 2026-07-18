@@ -122,3 +122,4 @@ def test_exports_flow(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     r2 = client.get(f"/v1/proof/exports/{eid}/download")
     assert r2.status_code == 200
     assert r2.headers.get("content-type", "").startswith("application/zip")
+    assert r2.headers.get("cache-control") == "no-store, private"

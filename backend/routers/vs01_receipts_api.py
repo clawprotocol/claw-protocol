@@ -8,9 +8,14 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict
 
-from fastapi import APIRouter, HTTPException, Response
+from fastapi import APIRouter, HTTPException, Request, Response
 
 from backend.config.storage_runtime import cache_verification_bundles_enabled, unified_artifact_store_enabled
+from backend.security.sensitive_read_authorization import (
+    assert_receipt_read_allowed,
+    private_cache_headers,
+    private_json_response,
+)
 from backend.services import document_service, receipt_service
 from backend.storage.artifact_repository import get_artifact_repository
 from backend.utils.vs01_verification_bundle import build_verification_bundle_zip_bytes
@@ -62,18 +67,20 @@ def _bundle_cache_put(receipt_id: str, zip_bytes: bytes) -> None:
 
 
 @router.get("/{receipt_id}")
-def api_get_receipt(receipt_id: str) -> Dict[str, Any]:
+def api_get_receipt(receipt_id: str, request: Request) -> Response:
+    assert_receipt_read_allowed(request, receipt_id)
     rec = receipt_service.get_receipt(receipt_id)
     if not rec:
-        raise HTTPException(status_code=404, detail=_MSG_RECEIPT_NOT_FOUND)
-    return {"ok": True, "receipt": rec}
+        raise HTTPException(status_code=404, detail="not_found")
+    return private_json_response({"ok": True, "receipt": rec})
 
 
 @router.get("/{receipt_id}/bundle")
-def api_get_receipt_bundle(receipt_id: str) -> Response:
+def api_get_receipt_bundle(receipt_id: str, request: Request) -> Response:
+    assert_receipt_read_allowed(request, receipt_id)
     rec = receipt_service.get_receipt(receipt_id)
     if not rec:
-        raise HTTPException(status_code=404, detail=_MSG_RECEIPT_NOT_FOUND)
+        raise HTTPException(status_code=404, detail="not_found")
 
     doc_id = rec.get("document_id")
     if not isinstance(doc_id, str) or not doc_id:
@@ -88,7 +95,10 @@ def api_get_receipt_bundle(receipt_id: str) -> Response:
         return Response(
             content=cached,
             media_type="application/zip",
-            headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"',
+                **private_cache_headers(),
+            },
         )
 
     try:
@@ -124,5 +134,8 @@ def api_get_receipt_bundle(receipt_id: str) -> Response:
     return Response(
         content=zip_bytes,
         media_type="application/zip",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+        headers={
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            **private_cache_headers(),
+        },
     )

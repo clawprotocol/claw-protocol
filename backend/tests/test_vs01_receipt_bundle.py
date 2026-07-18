@@ -54,7 +54,7 @@ def test_get_receipt_404(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Non
     client = TestClient(app)
     r = client.get("/v1/receipts/rcpt_nonexistent")
     assert r.status_code == 404
-    assert "not found" in r.json()["detail"].lower()
+    assert r.json()["detail"] == "not_found"
 
 
 def test_get_receipt_after_complete_sign(
@@ -62,8 +62,10 @@ def test_get_receipt_after_complete_sign(
 ) -> None:
     _configure_artifacts(monkeypatch, tmp_path)
     client = TestClient(app)
+    org = {"X-Claw-Org-Id": "vs01-receipt-bundle-org"}
     fin = client.post(
         "/v1/documents",
+        headers=org,
         json={"content_base64": base64.b64encode(b"bundle-doc").decode("ascii")},
     )
     doc_id = fin.json()["document_id"]
@@ -85,7 +87,7 @@ def test_get_receipt_after_complete_sign(
     assert comp.status_code == 200
     rid = comp.json()["receipt_id"]
 
-    got = client.get(f"/v1/receipts/{rid}")
+    got = client.get(f"/v1/receipts/{rid}", headers=org)
     assert got.status_code == 200
     body = got.json()
     assert body["ok"] is True
@@ -98,9 +100,11 @@ def test_bundle_zip_contents_and_hashes(
 ) -> None:
     _configure_artifacts(monkeypatch, tmp_path)
     client = TestClient(app)
+    org = {"X-Claw-Org-Id": "vs01-receipt-bundle-org"}
     raw = b"exact bytes for bundle"
     fin = client.post(
         "/v1/documents",
+        headers=org,
         json={"content_base64": base64.b64encode(raw).decode("ascii")},
     )
     doc_id = fin.json()["document_id"]
@@ -121,7 +125,7 @@ def test_bundle_zip_contents_and_hashes(
     )
     rid = comp.json()["receipt_id"]
 
-    res = client.get(f"/v1/receipts/{rid}/bundle")
+    res = client.get(f"/v1/receipts/{rid}/bundle", headers=org)
     assert res.status_code == 200
     assert res.headers.get("content-type", "").startswith("application/zip")
 
@@ -173,8 +177,10 @@ def test_bundle_document_hash_mismatch_after_tamper(
 ) -> None:
     _configure_artifacts(monkeypatch, tmp_path)
     client = TestClient(app)
+    org = {"X-Claw-Org-Id": "vs01-receipt-bundle-org"}
     fin = client.post(
         "/v1/documents",
+        headers=org,
         json={"content_base64": base64.b64encode(b"clean").decode("ascii")},
     )
     doc_id = fin.json()["document_id"]
@@ -201,7 +207,7 @@ def test_bundle_document_hash_mismatch_after_tamper(
     assert len(blob_matches) == 1
     blob_matches[0].write_bytes(b"TAMPERED")
 
-    bad = client.get(f"/v1/receipts/{rid}/bundle")
+    bad = client.get(f"/v1/receipts/{rid}/bundle", headers=org)
     assert bad.status_code == 400
     assert "matches the receipt" in bad.json()["detail"].lower()
 
