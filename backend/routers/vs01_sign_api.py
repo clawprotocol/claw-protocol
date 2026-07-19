@@ -9,9 +9,15 @@ import os
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
+from backend.security.sensitive_mutation_authorization import (
+    assert_sign_session_complete_allowed,
+    assert_sign_session_create_allowed,
+    private_json_response,
+    raise_if_legacy_signing_sessions_disabled,
+)
 from backend.services import receipt_service, signature_service
 
 router = APIRouter(prefix="/v1/sign-sessions", tags=["sign-sessions"])
@@ -55,34 +61,44 @@ class CompleteSignRequest(BaseModel):
 
 
 @router.post("")
-def api_create_sign_session(body: CreateSignSessionRequest) -> Dict[str, Any]:
+def api_create_sign_session(body: CreateSignSessionRequest, request: Request) -> Dict[str, Any]:
+    raise_if_legacy_signing_sessions_disabled()
+    did = (body.document_id or "").strip()
+    assert_sign_session_create_allowed(request, document_id=did)
     try:
         row = signature_service.create_sign_session(
-            document_id=body.document_id,
+            document_id=did,
             content_sha256=body.content_sha256,
         )
     except ValueError as exc:
         code = str(exc)
         if code == "document_not_found":
-            raise HTTPException(status_code=404, detail=code) from exc
+            raise HTTPException(status_code=404, detail="not_found") from exc
         if code in ("content_sha256_mismatch", "content_integrity_failed"):
             raise HTTPException(status_code=400, detail=code) from exc
         raise HTTPException(status_code=400, detail=code) from exc
-    return {"ok": True, "session": row}
+    return private_json_response({"ok": True, "session": row})
 
 
 @router.post("/{session_id}/complete")
-def api_complete_sign(session_id: str, body: CompleteSignRequest) -> Dict[str, Any]:
-    session = signature_service.get_sign_session(session_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="session_not_found")
-    if session.get("status") != "pending":
-        raise HTTPException(status_code=409, detail="session_not_pending")
-
+def api_complete_sign(session_id: str, body: CompleteSignRequest, request: Request) -> Dict[str, Any]:
+    raise_if_legacy_signing_sessions_disabled()
+    ctx = assert_sign_session_complete_allowed(request, session_id)
+    session = ctx["session"]
     document_id = session["document_id"]
     content_sha256 = session["content_sha256"]
     signed_at = body.signed_at or _utc_now_iso()
     protocol_version = body.protocol_version or _default_protocol_version()
+
+    try:
+        signature_service.claim_sign_session_for_completion(session_id)
+    except ValueError as exc:
+        code = str(exc)
+        if code == "session_not_found":
+            raise HTTPException(status_code=404, detail="not_found") from exc
+        if code == "session_not_pending":
+            raise HTTPException(status_code=409, detail="session_not_pending") from exc
+        raise HTTPException(status_code=409, detail=code) from exc
 
     try:
         prep = signature_service.prepare_sign_packet(
@@ -103,9 +119,10 @@ def api_complete_sign(session_id: str, body: CompleteSignRequest) -> Dict[str, A
             receipt_id=receipt["receipt_id"],
         )
     except ValueError as exc:
+        signature_service.abort_sign_session_completion_claim(session_id)
         code = str(exc)
         if code == "document_not_found":
-            raise HTTPException(status_code=404, detail=code) from exc
+            raise HTTPException(status_code=404, detail="not_found") from exc
         if code in (
             "content_sha256_mismatch",
             "content_integrity_failed",
@@ -119,11 +136,20 @@ def api_complete_sign(session_id: str, body: CompleteSignRequest) -> Dict[str, A
             detail={"error": "invalid_sign_packet", "message": code},
         ) from exc
     except OSError as exc:
+        signature_service.abort_sign_session_completion_claim(session_id)
         raise HTTPException(status_code=500, detail="persist_failed") from exc
+    except HTTPException:
+        signature_service.abort_sign_session_completion_claim(session_id)
+        raise
+    except Exception:
+        signature_service.abort_sign_session_completion_claim(session_id)
+        raise
 
-    return {
-        "ok": True,
-        "receipt_id": receipt["receipt_id"],
-        "receipt_hash_sha256": receipt["receipt_hash_sha256"],
-        "receipt": receipt,
-    }
+    return private_json_response(
+        {
+            "ok": True,
+            "receipt_id": receipt["receipt_id"],
+            "receipt_hash_sha256": receipt["receipt_hash_sha256"],
+            "receipt": receipt,
+        }
+    )

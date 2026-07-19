@@ -89,6 +89,48 @@ def get_sign_session(session_id: str) -> Optional[Dict[str, Any]]:
         return None
 
 
+def _completion_claim_path(session_id: str) -> Path:
+    return _session_dir(session_id) / ".completion_claim.lock"
+
+
+def claim_sign_session_for_completion(session_id: str) -> Dict[str, Any]:
+    """
+    Relaxed-mode filesystem claim before receipt minting (local/dev/test only).
+
+    Uses ``O_EXCL`` on a sibling lock file for single-process determinism in unit tests.
+    This is not PostgreSQL or multi-instance authority and is irrelevant when production
+    legacy sign-session completion is fail-closed.
+
+    Raises:
+      ValueError: session_not_found, session_not_pending
+    """
+    session = get_sign_session(session_id)
+    if not session:
+        raise ValueError("session_not_found")
+    if session.get("status") != "pending":
+        raise ValueError("session_not_pending")
+
+    root = _session_dir(session_id)
+    claim_path = _completion_claim_path(session_id)
+    try:
+        fd = os.open(str(claim_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        os.close(fd)
+    except FileExistsError:
+        refreshed = get_sign_session(session_id)
+        if refreshed and refreshed.get("status") == "completed":
+            raise ValueError("session_not_pending") from None
+        raise ValueError("session_not_pending") from None
+    return session
+
+
+def abort_sign_session_completion_claim(session_id: str) -> None:
+    """Release a completion claim when receipt persistence fails."""
+    try:
+        _completion_claim_path(session_id).unlink(missing_ok=True)
+    except OSError:
+        pass
+
+
 def mark_sign_session_completed(*, session_id: str, receipt_id: str) -> None:
     """Set session status to completed and attach receipt_id. Raises if not pending."""
     session = get_sign_session(session_id)
@@ -104,6 +146,7 @@ def mark_sign_session_completed(*, session_id: str, receipt_id: str) -> None:
         json.dumps(session, sort_keys=True, separators=(",", ":"), ensure_ascii=False),
         encoding="utf-8",
     )
+    abort_sign_session_completion_claim(session_id)
 
 
 def prepare_sign_packet(

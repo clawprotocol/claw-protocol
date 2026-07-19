@@ -23,7 +23,7 @@ _NO_STORE_EXACT = frozenset({"/health", "/v1/healthz", "/v1/readyz", "/version",
 
 # Private sensitive reads must never be edge-cached publicly.
 _SHORT_PUBLIC_CACHE = re.compile(
-    r"^/(v1/batches/|v1/timeline/receipts/)"
+    r"^/v1/batches/"
 )
 
 

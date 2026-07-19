@@ -22,6 +22,35 @@ function messageFromJsonBody(data: unknown, fallback: string): string {
   return fallback;
 }
 
+/** Stable backend detail when legacy filesystem sign-sessions are production-disabled. */
+export const LEGACY_SIGNING_DEFERRED_DETAIL = "legacy_signing_session_deferred_until_3c2c";
+
+export const LEGACY_SIGNING_UNAVAILABLE_MESSAGE =
+  "Secure signing is not available in this environment yet. Please try again after a future update.";
+
+export class LegacySigningDeferredError extends Error {
+  readonly deferredDetail = LEGACY_SIGNING_DEFERRED_DETAIL;
+
+  constructor(message: string = LEGACY_SIGNING_UNAVAILABLE_MESSAGE) {
+    super(message);
+    this.name = "LegacySigningDeferredError";
+  }
+}
+
+export function isLegacySigningDeferredResponse(
+  status: number,
+  data: unknown
+): boolean {
+  if (status !== 409 || typeof data !== "object" || data === null) return false;
+  return (data as { detail?: unknown }).detail === LEGACY_SIGNING_DEFERRED_DETAIL;
+}
+
+function throwIfLegacySigningDeferred(status: number, data: unknown): void {
+  if (isLegacySigningDeferredResponse(status, data)) {
+    throw new LegacySigningDeferredError();
+  }
+}
+
 export type FinalizeDocumentResponse = {
   ok?: boolean;
   document_id?: string;
@@ -50,7 +79,11 @@ export async function finalizeDocument(
 
   const res = await fetch(url, {
     method: "POST",
-    headers: clawAgreementHeaders({ "Content-Type": "application/json", Accept: "application/json" }),
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "application/json",
+      ...clawAgreementHeaders(),
+    },
     body: JSON.stringify(body),
   });
 
@@ -84,7 +117,8 @@ export type CreateSignSessionResponse = {
  */
 export async function createSignSession(
   documentId: string,
-  contentSha256: string
+  contentSha256: string,
+  auth?: Vs01SensitiveReadAuth
 ): Promise<CreateSignSessionResponse> {
   const base = apiBase();
   const url = `${base}/v1/sign-sessions`;
@@ -95,7 +129,12 @@ export async function createSignSession(
 
   const res = await fetch(url, {
     method: "POST",
-    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "application/json",
+      ...vs01SensitiveReadHeaders(auth),
+    },
+    credentials: auth?.includeSessionCookie ? "include" : "same-origin",
     body: JSON.stringify(body),
   });
 
@@ -111,6 +150,7 @@ export async function createSignSession(
   }
 
   if (!res.ok) {
+    throwIfLegacySigningDeferred(res.status, data);
     throw new Error(messageFromJsonBody(data, text || `${res.status} ${res.statusText}`));
   }
 
@@ -172,7 +212,8 @@ export type CompleteSignSessionResponse = {
  */
 export async function completeSignSession(
   sessionId: string,
-  payload: CompleteSignSessionPayload
+  payload: CompleteSignSessionPayload,
+  auth?: Vs01SensitiveReadAuth
 ): Promise<CompleteSignSessionResponse> {
   const base = apiBase();
   const enc = encodeURIComponent(sessionId);
@@ -180,7 +221,12 @@ export async function completeSignSession(
 
   const res = await fetch(url, {
     method: "POST",
-    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      Accept: "application/json",
+      ...vs01SensitiveReadHeaders(auth),
+    },
+    credentials: auth?.includeSessionCookie ? "include" : "same-origin",
     body: JSON.stringify(payload),
   });
 
@@ -196,6 +242,7 @@ export async function completeSignSession(
   }
 
   if (!res.ok) {
+    throwIfLegacySigningDeferred(res.status, data);
     throw new Error(messageFromJsonBody(data, text || `${res.status} ${res.statusText}`));
   }
 

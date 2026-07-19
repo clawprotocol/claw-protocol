@@ -8,17 +8,19 @@ import traceback
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Request, Response
-from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
+from backend.config.deployment_runtime import is_production_like_claw_environment
+from backend.security.sensitive_mutation_authorization import (
+    assert_document_sign_prep_allowed,
+    private_json_response,
+)
 from backend.security.sensitive_read_authorization import (
     assert_document_read_allowed,
     assert_verified_owner_for_sensitive_write,
     private_cache_headers,
-    private_json_response,
     resolve_verified_owner_subject_for_sensitive_write,
 )
-from backend.config.deployment_runtime import is_production_like_claw_environment
 from backend.services import document_service, signature_service
 from backend.services.vs01_document_content import (
     content_type_for_meta,
@@ -130,7 +132,8 @@ def api_get_document_content(document_id: str, request: Request) -> Response:
 
 
 @router.post("/{document_id}/sign-prep")
-def api_sign_prepare(document_id: str, body: SignPrepareRequest) -> Dict[str, Any]:
+def api_sign_prepare(document_id: str, body: SignPrepareRequest, request: Request) -> Response:
+    assert_document_sign_prep_allowed(request, document_id)
     try:
         result = signature_service.prepare_sign_packet(
             document_id=document_id,
@@ -144,14 +147,13 @@ def api_sign_prepare(document_id: str, body: SignPrepareRequest) -> Dict[str, An
     except ValueError as exc:
         code = str(exc)
         if code == "document_not_found":
-            raise HTTPException(status_code=404, detail=code) from exc
+            raise HTTPException(status_code=404, detail="not_found") from exc
         if code in (
             "content_sha256_mismatch",
             "content_integrity_failed",
             "corrupt_document_meta",
         ):
             raise HTTPException(status_code=400, detail=code) from exc
-        # normalize_sign_packet validation
         raise HTTPException(status_code=400, detail={"error": "invalid_sign_packet", "message": code}) from exc
 
-    return {"ok": True, **result}
+    return private_json_response({"ok": True, **result})

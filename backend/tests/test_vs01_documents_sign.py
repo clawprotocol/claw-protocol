@@ -17,6 +17,7 @@ pytestmark = pytest.mark.unit
 def docs_dir(tmp_path, monkeypatch):
     from backend.storage.artifact_repository import reset_artifact_repository_singleton
 
+    monkeypatch.setenv("CLAW_ENVIRONMENT", "local")
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path / "data"))
     monkeypatch.setenv("CLAW_BLOB_ROOT", str(tmp_path / "blobs"))
     monkeypatch.setenv("CLAW_ARTIFACT_REGISTRY_DB_PATH", str(tmp_path / "registry.sqlite3"))
@@ -121,6 +122,7 @@ def test_api_finalize_get_sign_prep(docs_dir):
 
     prep = client.post(
         f"/v1/documents/{doc_id}/sign-prep",
+        headers=org,
         json={
             "signer_ref": "party-a",
             "intent": "execute_agreement",
@@ -149,6 +151,7 @@ def test_api_sign_prep_invalid_manifest(docs_dir):
 
     bad = client.post(
         f"/v1/documents/{doc_id}/sign-prep",
+        headers=org,
         json={
             "signer_ref": "a",
             "intent": "b",

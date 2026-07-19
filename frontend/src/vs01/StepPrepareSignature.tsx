@@ -18,7 +18,7 @@ import {
   PRODUCT_NOT_LAW_FIRM,
   RECORDS_DOWNLOAD_KEEP_COPY_SHORT,
 } from "../compliance/disclosureCopy";
-import { completeSignSession, createSignSession, fetchDocumentContent } from "./vs01Api";
+import { completeSignSession, createSignSession, fetchDocumentContent, LegacySigningDeferredError, LEGACY_SIGNING_UNAVAILABLE_MESSAGE } from "./vs01Api";
 import { clearVs01DocumentPageLayouts, setVs01DocumentPageLayouts } from "./vs01DocumentLayoutCache";
 import { buildVs01PlacementContext } from "./vs01FieldGeometry";
 import { normalizedPdfRectToCssPercent } from "./vs01FieldCssGeometry";
@@ -432,6 +432,7 @@ export function StepPrepareSignature({
   const [initials, setInitials] = useState(() => initialsFromName(nameFromSignerRef(defaultSignerRef)));
   const [initialsTouched, setInitialsTouched] = useState(false);
   const [hasDrawn, setHasDrawn] = useState(false);
+  const [signingUnavailable, setSigningUnavailable] = useState(false);
   const [uploadPreviewUrl, setUploadPreviewUrl] = useState<string | null>(null);
   const uploadRevokeRef = useRef<string | null>(null);
 
@@ -1663,6 +1664,7 @@ export function StepPrepareSignature({
       return;
     }
     onError(null);
+    setSigningUnavailable(false);
 
     let drawOrUploadDataUrl: string | null = null;
     if (signatureMode === "upload" && uploadPreviewUrl) {
@@ -1735,6 +1737,11 @@ export function StepPrepareSignature({
         senderSignatureRef,
       });
     } catch (e) {
+      if (e instanceof LegacySigningDeferredError) {
+        setSigningUnavailable(true);
+        onError(LEGACY_SIGNING_UNAVAILABLE_MESSAGE);
+        return;
+      }
       onError(e instanceof Error ? e.message : String(e));
     } finally {
       setLoading("idle");
@@ -1763,7 +1770,7 @@ export function StepPrepareSignature({
   const placementSurface =
     renderCanonicalModel || Boolean(pdfUrl) || Boolean(documentId?.trim() && previewError);
 
-  const primaryDisabled = busy || Boolean(receiptId) || !flowStep3ReadyEffective;
+  const primaryDisabled = busy || Boolean(receiptId) || !flowStep3ReadyEffective || signingUnavailable;
 
   const placementArmed = armedTool != null;
 
@@ -2873,6 +2880,11 @@ export function StepPrepareSignature({
                       ? "Signing…"
                       : "Sign document"}
             </button>
+            {signingUnavailable ? (
+              <p className="vs01-card-help" role="status">
+                {LEGACY_SIGNING_UNAVAILABLE_MESSAGE}
+              </p>
+            ) : null}
             {canContinueToHandoff ? (
               <button type="button" className="vs01-btn vs01-btn--next-step" disabled={busy} onClick={() => onContinue?.()}>
                 Continue to handoff →

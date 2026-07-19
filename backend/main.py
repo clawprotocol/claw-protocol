@@ -1080,6 +1080,12 @@ async def anchor_timeline(timeline_id: str, body: AnchorTimelineRequest):
 
 @app.get("/v1/timeline/receipts/{receipt_id}")
 async def get_receipt(receipt_id: str):
+    from backend.security.sensitive_mutation_authorization import (
+        is_explicit_legacy_signing_relaxed_environment,
+    )
+
+    if not is_explicit_legacy_signing_relaxed_environment():
+        return JSONResponse(status_code=404, content={"error": "receipt_not_found"})
     try:
         return JSONResponse(timeline_store.get_receipt(receipt_id))
     except KeyError:

@@ -25,7 +25,8 @@ _SIGNING_SECRET = "slice2-signing-token-secret"
 
 
 @pytest.fixture(autouse=True)
-def _reset_usage_economics_singleton():
+def _reset_usage_economics_singleton(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("CLAW_ENVIRONMENT", "local")
     usage_economics_store_mod._store = None  # noqa: SLF001
     yield
     usage_economics_store_mod._store = None  # noqa: SLF001
@@ -99,12 +100,14 @@ def _patch_activation_document(document_id: str):
 def _issue_receipt_for_document(client: TestClient, doc_id: str, content_sha256: str) -> str:
     sess = client.post(
         "/v1/sign-sessions",
+        headers=_ORG_A,
         json={"document_id": doc_id, "content_sha256": content_sha256},
     )
     assert sess.status_code == 200, sess.text
     session_id = sess.json()["session"]["session_id"]
     complete = client.post(
         f"/v1/sign-sessions/{session_id}/complete",
+        headers=_ORG_A,
         json={
             "signer_ref": "slice2-signer",
             "intent": "agree_and_sign",

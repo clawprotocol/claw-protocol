@@ -1,5 +1,10 @@
 import { useCallback, useState } from "react";
-import { completeSignSession, createSignSession } from "./vs01Api";
+import {
+  completeSignSession,
+  createSignSession,
+  LegacySigningDeferredError,
+  LEGACY_SIGNING_UNAVAILABLE_MESSAGE,
+} from "./vs01Api";
 import type { Vs01LoadingState, Vs01SenderSignatureRef } from "./types";
 import type { PlacedSigningField } from "./signingFields";
 
@@ -50,6 +55,7 @@ export function StepSign({
 
   const [signerRef, setSignerRef] = useState("pilot-user-1");
   const [intent, setIntent] = useState<string>(INTENT_OPTIONS[0]);
+  const [signingUnavailable, setSigningUnavailable] = useState(false);
   const [pageIndex, setPageIndex] = useState("0");
   const [x, setX] = useState("0.1");
   const [y, setY] = useState("0.1");
@@ -62,6 +68,7 @@ export function StepSign({
       return;
     }
     onError(null);
+    setSigningUnavailable(false);
     setLoading("session");
     try {
       const sessionRes = await createSignSession(documentId.trim(), contentSha256.trim());
@@ -110,6 +117,11 @@ export function StepSign({
         senderSignatureRef: null,
       });
     } catch (e) {
+      if (e instanceof LegacySigningDeferredError) {
+        setSigningUnavailable(true);
+        onError(LEGACY_SIGNING_UNAVAILABLE_MESSAGE);
+        return;
+      }
       onError(e instanceof Error ? e.message : String(e));
     } finally {
       setLoading("idle");
@@ -229,11 +241,16 @@ export function StepSign({
         type="button"
         className="vs01-btn vs01-btn--primary"
         style={{ marginTop: "0.75rem" }}
-        disabled={busy}
+        disabled={busy || signingUnavailable}
         onClick={() => void handleSign()}
       >
         {busySession ? "Creating session…" : busyComplete ? "Signing…" : "Create session & sign"}
       </button>
+      {signingUnavailable ? (
+        <p className="vs01-card-help" role="status" style={{ marginTop: "0.75rem" }}>
+          {LEGACY_SIGNING_UNAVAILABLE_MESSAGE}
+        </p>
+      ) : null}
       <button
         type="button"
         className="vs01-btn vs01-btn--primary"

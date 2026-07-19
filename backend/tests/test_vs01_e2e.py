@@ -26,6 +26,7 @@ def _configure_artifacts(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Non
     from backend.storage.artifact_repository import reset_artifact_repository_singleton
 
     base = tmp_path / "claw"
+    monkeypatch.setenv("CLAW_ENVIRONMENT", "local")
     monkeypatch.setenv("CLAW_DATA_DIR", str(base / "data"))
     monkeypatch.setenv("CLAW_BLOB_ROOT", str(base / "blobs"))
     monkeypatch.setenv("CLAW_ARTIFACT_REGISTRY_DB_PATH", str(base / "artifact_registry.sqlite3"))
@@ -66,6 +67,7 @@ def test_vs01_full_path_finalize_sign_get_receipt_export_bundle(
 
     sess = client.post(
         "/v1/sign-sessions",
+        headers=org,
         json={"document_id": doc_id, "content_sha256": content_sha256},
     )
     assert sess.status_code == 200
@@ -73,6 +75,7 @@ def test_vs01_full_path_finalize_sign_get_receipt_export_bundle(
 
     complete = client.post(
         f"/v1/sign-sessions/{session_id}/complete",
+        headers=org,
         json={
             "signer_ref": "e2e-signer",
             "intent": "agree_and_sign",

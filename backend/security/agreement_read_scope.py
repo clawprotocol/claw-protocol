@@ -2,7 +2,7 @@
 Scoped read access for full LawDog agreement drafts.
 
 - Owner workspace: ``X-Claw-Org-Id`` resolving to the registered agreement owner (usage economics).
-- Recipient: valid ``X-Claw-Recipient-Access-Token`` (or ``recipient_access_token`` query) for the same agreement id.
+- Recipient: valid ``X-Claw-Recipient-Access-Token`` header for the same agreement id (never query on protected routes).
 - Public proof: ``GET /api/agreements/public/{id}/verify`` only (handled separately; no full draft).
 
 Legacy: when usage economics is off *and* recipient tokens are not required, full draft reads stay
@@ -35,10 +35,8 @@ from backend.utils.enforce import resolve_subject_from_request
 
 
 def recipient_access_token_from_request(request: Request) -> str:
-    h = (request.headers.get("X-Claw-Recipient-Access-Token") or "").strip()
-    if h:
-        return h
-    return (request.query_params.get("recipient_access_token") or "").strip()
+    """Extract recipient access token from the certified header only (no query leakage)."""
+    return (request.headers.get("X-Claw-Recipient-Access-Token") or "").strip()
 
 
 def _rfail(code: str, *, status_code: int = 403) -> HTTPException:

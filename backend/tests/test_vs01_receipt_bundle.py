@@ -35,6 +35,7 @@ def _configure_artifacts(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Non
     from backend.storage.artifact_repository import reset_artifact_repository_singleton
 
     base = tmp_path / "claw"
+    monkeypatch.setenv("CLAW_ENVIRONMENT", "local")
     monkeypatch.setenv("CLAW_DATA_DIR", str(base / "data"))
     monkeypatch.setenv("CLAW_BLOB_ROOT", str(base / "blobs"))
     monkeypatch.setenv("CLAW_ARTIFACT_REGISTRY_DB_PATH", str(base / "artifact_registry.sqlite3"))
@@ -72,10 +73,12 @@ def test_get_receipt_after_complete_sign(
     h = fin.json()["content_sha256"]
     sid = client.post(
         "/v1/sign-sessions",
+        headers=org,
         json={"document_id": doc_id, "content_sha256": h},
     ).json()["session"]["session_id"]
     comp = client.post(
         f"/v1/sign-sessions/{sid}/complete",
+        headers=org,
         json={
             "signer_ref": "u1",
             "intent": "agree_and_sign",
@@ -111,10 +114,12 @@ def test_bundle_zip_contents_and_hashes(
     h = fin.json()["content_sha256"]
     sid = client.post(
         "/v1/sign-sessions",
+        headers=org,
         json={"document_id": doc_id, "content_sha256": h},
     ).json()["session"]["session_id"]
     comp = client.post(
         f"/v1/sign-sessions/{sid}/complete",
+        headers=org,
         json={
             "signer_ref": "signer-bundle",
             "intent": "agree_and_sign",
@@ -187,10 +192,12 @@ def test_bundle_document_hash_mismatch_after_tamper(
     h = fin.json()["content_sha256"]
     sid = client.post(
         "/v1/sign-sessions",
+        headers=org,
         json={"document_id": doc_id, "content_sha256": h},
     ).json()["session"]["session_id"]
     comp = client.post(
         f"/v1/sign-sessions/{sid}/complete",
+        headers=org,
         json={
             "signer_ref": "u1",
             "intent": "agree_and_sign",

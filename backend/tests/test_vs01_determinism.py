@@ -20,11 +20,14 @@ from backend.utils.vs01_verification_bundle import (
 
 pytestmark = pytest.mark.unit
 
+_ORG = {"X-Claw-Org-Id": "vs01-determinism-test-org"}
+
 
 def _configure_artifacts(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     from backend.storage.artifact_repository import reset_artifact_repository_singleton
 
     base = tmp_path / "claw"
+    monkeypatch.setenv("CLAW_ENVIRONMENT", "local")
     monkeypatch.setenv("CLAW_DATA_DIR", str(base / "data"))
     monkeypatch.setenv("CLAW_BLOB_ROOT", str(base / "blobs"))
     monkeypatch.setenv("CLAW_ARTIFACT_REGISTRY_DB_PATH", str(base / "artifact_registry.sqlite3"))
@@ -56,6 +59,7 @@ def test_two_completes_same_doc_same_inputs_same_receipt_hash(
     raw = b"determinism-doc-bytes-fixed"
     fin = client.post(
         "/v1/documents",
+        headers=_ORG,
         json={"content_base64": base64.b64encode(raw).decode("ascii")},
     )
     assert fin.status_code == 200
@@ -74,12 +78,14 @@ def test_two_completes_same_doc_same_inputs_same_receipt_hash(
     for _ in range(2):
         sess = client.post(
             "/v1/sign-sessions",
+            headers=_ORG,
             json={"document_id": doc_id, "content_sha256": h},
         )
         assert sess.status_code == 200
         sid = sess.json()["session"]["session_id"]
         comp = client.post(
             f"/v1/sign-sessions/{sid}/complete",
+            headers=_ORG,
             json=fixed_complete,
         )
         assert comp.status_code == 200, comp.text
@@ -105,17 +111,20 @@ def test_verification_bundle_zip_bytes_identical_with_fixed_ids(
     raw = b"bundle-determinism"
     fin = client.post(
         "/v1/documents",
+        headers=_ORG,
         json={"content_base64": base64.b64encode(raw).decode("ascii")},
     )
     doc_id = fin.json()["document_id"]
     h = fin.json()["content_sha256"]
     sess = client.post(
         "/v1/sign-sessions",
+        headers=_ORG,
         json={"document_id": doc_id, "content_sha256": h},
     )
     sid = sess.json()["session"]["session_id"]
     comp = client.post(
         f"/v1/sign-sessions/{sid}/complete",
+        headers=_ORG,
         json={
             "signer_ref": "bun",
             "intent": "agree_and_sign",
@@ -159,6 +168,7 @@ def test_stored_receipt_digests_match_proof_recompute(
     raw = b"golden-vs01-payload"
     fin = client.post(
         "/v1/documents",
+        headers=_ORG,
         json={"content_base64": base64.b64encode(raw).decode("ascii")},
     )
     assert fin.status_code == 200
@@ -166,11 +176,13 @@ def test_stored_receipt_digests_match_proof_recompute(
     h = fin.json()["content_sha256"]
     sess = client.post(
         "/v1/sign-sessions",
+        headers=_ORG,
         json={"document_id": doc_id, "content_sha256": h},
     )
     sid = sess.json()["session"]["session_id"]
     comp = client.post(
         f"/v1/sign-sessions/{sid}/complete",
+        headers=_ORG,
         json={
             "signer_ref": "golden-signer",
             "intent": "agree_and_sign",

@@ -17,6 +17,8 @@ from backend.services import document_service, receipt_service, signature_servic
 
 pytestmark = pytest.mark.unit
 
+_ORG = {"X-Claw-Org-Id": "vs01-receipt-sign-test-org"}
+
 DOC_HASH = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
 
 
@@ -24,6 +26,7 @@ def _configure_artifacts(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Non
     from backend.storage.artifact_repository import reset_artifact_repository_singleton
 
     base = tmp_path / "claw"
+    monkeypatch.setenv("CLAW_ENVIRONMENT", "local")
     monkeypatch.setenv("CLAW_DATA_DIR", str(base / "data"))
     monkeypatch.setenv("CLAW_BLOB_ROOT", str(base / "blobs"))
     monkeypatch.setenv("CLAW_ARTIFACT_REGISTRY_DB_PATH", str(base / "artifact_registry.sqlite3"))
@@ -120,6 +123,7 @@ def test_complete_sign_happy_path_http(
     raw = b"vs01 complete sign bytes"
     fin = client.post(
         "/v1/documents",
+        headers=_ORG,
         json={
             "content_base64": base64.b64encode(raw).decode("ascii"),
             "content_type": "application/pdf",
@@ -132,6 +136,7 @@ def test_complete_sign_happy_path_http(
 
     sess = client.post(
         "/v1/sign-sessions",
+        headers=_ORG,
         json={"document_id": doc_id, "content_sha256": content_sha256},
     )
     assert sess.status_code == 200
@@ -139,6 +144,7 @@ def test_complete_sign_happy_path_http(
 
     complete = client.post(
         f"/v1/sign-sessions/{session_id}/complete",
+        headers=_ORG,
         json={
             "signer_ref": "user-dev-1",
             "intent": "agree_and_sign",
@@ -174,12 +180,14 @@ def test_complete_sign_second_call_conflict(
     client = TestClient(app)
     fin = client.post(
         "/v1/documents",
+        headers=_ORG,
         json={"content_base64": base64.b64encode(b"x").decode("ascii")},
     )
     doc_id = fin.json()["document_id"]
     h = fin.json()["content_sha256"]
     sess = client.post(
         "/v1/sign-sessions",
+        headers=_ORG,
         json={"document_id": doc_id, "content_sha256": h},
     )
     sid = sess.json()["session"]["session_id"]
@@ -190,9 +198,9 @@ def test_complete_sign_second_call_conflict(
         "field_manifest": _field_manifest(),
         "protocol_version": "1.0.0",
     }
-    r1 = client.post(f"/v1/sign-sessions/{sid}/complete", json=body)
+    r1 = client.post(f"/v1/sign-sessions/{sid}/complete", headers=_ORG, json=body)
     assert r1.status_code == 200
-    r2 = client.post(f"/v1/sign-sessions/{sid}/complete", json=body)
+    r2 = client.post(f"/v1/sign-sessions/{sid}/complete", headers=_ORG, json=body)
     assert r2.status_code == 409
     assert r2.json()["detail"] == "session_not_pending"
 
@@ -204,17 +212,20 @@ def test_complete_sign_invalid_manifest_400(
     client = TestClient(app)
     fin = client.post(
         "/v1/documents",
+        headers=_ORG,
         json={"content_base64": base64.b64encode(b"y").decode("ascii")},
     )
     doc_id = fin.json()["document_id"]
     h = fin.json()["content_sha256"]
     sess = client.post(
         "/v1/sign-sessions",
+        headers=_ORG,
         json={"document_id": doc_id, "content_sha256": h},
     )
     sid = sess.json()["session"]["session_id"]
     bad = client.post(
         f"/v1/sign-sessions/{sid}/complete",
+        headers=_ORG,
         json={
             "signer_ref": "u1",
             "intent": "agree_and_sign",
