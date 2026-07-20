@@ -16,6 +16,7 @@ import { Vs01SignatureDomFieldShell } from "./Vs01SignatureDomFieldShell";
 
 function logVs01SigningFieldRender(payload: Record<string, unknown>): void {
   if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
+  if (payload.suppressDiagnosticLogging) return;
   // eslint-disable-next-line no-console
   console.info("[vs01-signing-field-render]", payload);
 }
@@ -43,6 +44,8 @@ export type RecipientSigningFieldOverlayProps = {
   canonicalCompact?: boolean;
   /** Read-only Phase 3C2B review — no signing interaction. */
   readOnlyReview?: boolean;
+  /** Suppress authenticated-session field render diagnostics. */
+  suppressDiagnosticLogging?: boolean;
 };
 
 export function RecipientSigningFieldOverlay({
@@ -57,6 +60,7 @@ export function RecipientSigningFieldOverlay({
   pageTextRects = [],
   canonicalCompact = false,
   readOnlyReview = false,
+  suppressDiagnosticLogging = false,
 }: RecipientSigningFieldOverlayProps) {
   const useDomInitials =
     !canonicalCompact && field.type === "initials" && field.autoInitials === true;
@@ -149,30 +153,21 @@ export function RecipientSigningFieldOverlay({
 
   useEffect(() => {
     logVs01SigningFieldRender({
-      signerId: field.assignedSignerRoleId ?? field.counterpartyId,
+      suppressDiagnosticLogging,
       fieldType: field.type,
       page: field.page,
-      x: field.x,
-      y: field.y,
-      w: field.width,
-      h: field.height,
       locked: !editable,
       visible: fieldVisible,
-      className: overlayClassName,
       canonicalCompact,
     });
   }, [
     field.id,
     field.page,
-    field.x,
-    field.y,
-    field.width,
-    field.height,
     field.type,
     editable,
     fieldVisible,
-    overlayClassName,
     canonicalCompact,
+    suppressDiagnosticLogging,
   ]);
 
   if (isMetadata) {

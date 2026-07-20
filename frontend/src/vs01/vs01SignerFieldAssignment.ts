@@ -555,7 +555,14 @@ export function placedFieldMatchesPrepareRole(
   return resolvePlacedFieldSignerRoleId(field, ownerRole) === activeRoleId.trim();
 }
 
+let recipientSessionDiagnosticsSuppressed = false;
+
+export function setRecipientSessionDiagnosticsSuppressed(value: boolean): void {
+  recipientSessionDiagnosticsSuppressed = value;
+}
+
 export function vs01DiagnosticsEnabled(): boolean {
+  if (recipientSessionDiagnosticsSuppressed) return false;
   if (typeof window === "undefined") return false;
   try {
     if (window.localStorage?.getItem("lawdogVs01FieldDiag") === "1") return true;

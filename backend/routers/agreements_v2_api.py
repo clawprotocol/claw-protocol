@@ -6867,6 +6867,18 @@ def post_vs01_signer_complete(
                 assert_agreement_recipient_write_allowed(request, aid, allowed_modes=("sign",))
                 auth_mode = "recipient"
 
+    from backend.services.vs01_signing_packet_activation import has_active_signing_packet_activation
+
+    draft_activation_gate = _load_or_404(aid)
+    if has_active_signing_packet_activation(draft_activation_gate.model_dump()) and auth_mode != "owner":
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "session_required",
+                "message": "Recipient session authentication is required for this signing packet.",
+            },
+        )
+
     from backend.services.vs01_signer_completion import (
         completion_emails_already_sent,
         merge_fresh_audit_for_vs01_signer,

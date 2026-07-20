@@ -322,6 +322,61 @@ def _scan_drafts_for_session(token_hash: str) -> Optional[Dict[str, Any]]:
     return None
 
 
+def get_session_by_token_hash_for_update(cx: Any, token_hash: str) -> Optional[Dict[str, Any]]:
+    """
+    Lock and load a recipient session within the caller's Postgres transaction.
+
+  Used by signing mutations so session revocation and draft updates serialize on one connection.
+    """
+    import time
+    from datetime import datetime, timezone
+
+    from backend.db.agreement_sql import pg_execute
+
+    th = (token_hash or "").strip()
+    if not th:
+        return None
+    row = pg_execute(
+        cx,
+        """
+        SELECT payload, expires_at, revoked_at
+        FROM recipient_bootstrap_sessions
+        WHERE token_hash = ?
+        FOR UPDATE
+        """,
+        (th,),
+    ).fetchone()
+    if not row:
+        return None
+    if row[2] is not None:
+        return None
+    payload = row[0] if isinstance(row[0], dict) else json.loads(str(row[0]))
+    if not isinstance(payload, dict):
+        return None
+    if _clean(payload.get("revoked_at")):
+        return None
+    now_ts = int(time.time())
+    exp_raw = _clean(payload.get("expires_at"))
+    if not exp_raw and row[1] is not None:
+        try:
+            exp_dt = row[1]
+            if hasattr(exp_dt, "timestamp"):
+                if int(exp_dt.timestamp()) <= now_ts:
+                    return None
+            else:
+                exp_raw = str(exp_dt)
+        except Exception:
+            return None
+    if exp_raw:
+        try:
+            exp_dt = datetime.fromisoformat(exp_raw.replace("Z", "+00:00"))
+            if int(exp_dt.timestamp()) <= now_ts:
+                return None
+        except Exception:
+            return None
+    return payload
+
+
 def get_session_by_token_hash(token_hash: str) -> Optional[Dict[str, Any]]:
     th = (token_hash or "").strip()
     if not th:

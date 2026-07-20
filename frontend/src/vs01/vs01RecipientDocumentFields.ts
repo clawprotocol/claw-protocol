@@ -108,11 +108,14 @@ export function resolveRecipientSigningDocumentFields(args: {
   lockedSignerRoleId: string | null;
   canonicalModel?: Pick<Vs01SigningPacketModel, "fields"> | null;
   packetRevision?: string | null;
+  /** Phase 3C2C session signing — never read browser-stored portable packets. */
+  sessionBound?: boolean;
 }): Vs01RecipientPlacedField[] {
   const roles = args.prepareRoles ?? [];
   const ownerRole = roles.find((r) => r.kind === "owner") ?? roles[0];
   const did = (args.documentId ?? "").trim();
-  const portable = did ? loadVs01CanonicalPacketPortable(did) : null;
+  const portable =
+    args.sessionBound || !did ? null : loadVs01CanonicalPacketPortable(did);
   const initialsEnabled = resolveRecipientInitialsEnabled({
     portable,
     packetRevision: args.packetRevision,

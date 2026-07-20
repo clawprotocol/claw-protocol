@@ -2,6 +2,7 @@ import { buildVs01SigningPacketModel, type Vs01SigningPacketModel } from "./buil
 import type { RecipientSessionPacketProjection } from "./recipientSessionPacketApi";
 import type { Vs01Counterparty, Vs01RecipientPlacedField } from "./types";
 import type { Vs01PrepareSigningRole } from "./vs01SignerFieldAssignment";
+import { setRecipientSessionDiagnosticsSuppressed } from "./vs01SignerFieldAssignment";
 
 export type AdaptedRecipientSessionPacket = {
   projection: RecipientSessionPacketProjection;
@@ -45,6 +46,7 @@ function buildLayoutRoles(projection: RecipientSessionPacketProjection): Vs01Pre
 export function adaptRecipientSessionPacketProjection(
   projection: RecipientSessionPacketProjection,
 ): AdaptedRecipientSessionPacket | null {
+  setRecipientSessionDiagnosticsSuppressed(true);
   const roles = buildLayoutRoles(projection);
   const model = buildVs01SigningPacketModel({
     mode: "guided_pro",
@@ -71,6 +73,7 @@ export function adaptRecipientSessionPacketProjection(
     width: field.width,
     height: field.height,
     autoInitials: field.autoInitials,
+    value: field.value ?? projection.field_values?.[field.id] ?? "",
     assignedSignerRoleId: lockedSignerRoleId,
     assignedPartyId: lockedCounterpartyId,
     assignedSignerRoleLabel: projection.signer_display_name,

@@ -43,7 +43,7 @@ const successResult: RecipientSessionPacketResult = {
     page_count: 1,
     witness_page_index: 0,
     initials_policy: { enabled: false, bodyPagesOnly: true },
-    readiness: "ready_for_review",
+    readiness: "ready_for_signing",
   },
 };
 

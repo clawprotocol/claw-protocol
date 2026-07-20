@@ -189,6 +189,13 @@ def _guard_generic_immutable_write(
     elif isinstance(incoming_sessions, dict):
         raise ValueError("recipient_bootstrap_sessions_endpoint_required")
 
+    incoming_signer_state = next_draft.get("vs01_recipient_signer_state_v1")
+    existing_signer_state = (current or {}).get("vs01_recipient_signer_state_v1")
+    if isinstance(existing_signer_state, dict):
+        next_draft["vs01_recipient_signer_state_v1"] = existing_signer_state
+    elif isinstance(incoming_signer_state, dict):
+        raise ValueError("recipient_signer_state_endpoint_required")
+
     incoming_nr_sessions = next_draft.get("negotiation_review_sessions_v1")
     existing_nr_sessions = (current or {}).get("negotiation_review_sessions_v1")
     if isinstance(existing_nr_sessions, dict):

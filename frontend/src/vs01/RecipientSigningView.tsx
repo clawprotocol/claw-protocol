@@ -33,6 +33,7 @@ import { RecipientSigningFieldOverlay } from "./RecipientSigningFieldOverlay";
 import {
   hideSenderTemplateFieldForRecipientSigner,
   recipientFieldBelongsToLockedSigner,
+  setRecipientSessionDiagnosticsSuppressed,
 } from "./vs01SignerFieldAssignment";
 import {
   countRecipientSigningActions,
@@ -61,6 +62,7 @@ import { Vs01CanonicalSigningPage } from "./Vs01CanonicalSigningPage";
 import {
   VS01_PACKET_PAGE_HEIGHT_PT,
   VS01_PACKET_PAGE_WIDTH_PT,
+  type Vs01SigningPacketModel,
 } from "./buildVs01SigningPacketModel";
 import { resolveRecipientCanonicalSigningPacket } from "./resolveRecipientCanonicalSigningPacket";
 import {
@@ -84,6 +86,9 @@ export type RecipientSigningViewProps = {
   recipientAccessToken?: string | null;
   /** When true, send HttpOnly bootstrap session cookie on document reads. */
   recipientSessionCookie?: boolean;
+  /** In-memory canonical packet model for session signing (no browser storage). */
+  sessionCanonicalModel?: Vs01SigningPacketModel | null;
+  sessionCorpusHash?: string | null;
   /** Stable role id from signing URL; optional for legacy links. */
   lockedSignerRoleId?: string | null;
   recipientFields: Vs01RecipientPlacedField[];
@@ -183,6 +188,8 @@ export function RecipientSigningView({
   recipientAgreementId = null,
   recipientAccessToken = null,
   recipientSessionCookie = false,
+  sessionCanonicalModel = null,
+  sessionCorpusHash = null,
   lockedSignerRoleId = null,
   recipientFields,
   senderPlacedFields,
@@ -196,6 +203,9 @@ export function RecipientSigningView({
   authoritativeInitialsEnabled = null,
   packetRevision = null,
 }: RecipientSigningViewProps) {
+  if (recipientSessionCookie) {
+    setRecipientSessionDiagnosticsSuppressed(true);
+  }
   const cpById = useMemo(() => {
     const m = new Map<string, Vs01Counterparty>();
     for (const c of counterparties) m.set(c.id, c);
@@ -294,10 +304,12 @@ export function RecipientSigningView({
   }, [serverHydrationPending]);
 
   const portablePacket = useMemo(() => {
+    void portableHydrationTick;
     const did = documentId?.trim() ?? "";
-    return did ? loadVs01CanonicalPacketPortable(did) : null;
+    if (recipientSessionCookie || !did) return null;
+    return loadVs01CanonicalPacketPortable(did);
     // Re-read local portable after server authority bootstrap completes.
-  }, [documentId, portableHydrationTick]);
+  }, [documentId, portableHydrationTick, recipientSessionCookie]);
 
   const initialsEnabledPending =
     serverHydrationPending || authoritativeInitialsEnabled === null;
@@ -311,6 +323,14 @@ export function RecipientSigningView({
         });
 
   const canonicalPacket = useMemo(() => {
+    if (sessionCanonicalModel?.allowed) {
+      return {
+        model: sessionCanonicalModel,
+        corpusHash: (sessionCorpusHash ?? "").trim(),
+        seed: null,
+        seedSource: "session_projection" as const,
+      };
+    }
     const did = documentId?.trim() ?? "";
     const aid = (recipientAgreementId ?? "").trim();
     if (!did || !aid || !prepareRoles?.length) return null;
@@ -321,7 +341,15 @@ export function RecipientSigningView({
       initialsEnabled,
       portablePacket,
     });
-  }, [documentId, recipientAgreementId, prepareRoles, portablePacket, initialsEnabled]);
+  }, [
+    documentId,
+    recipientAgreementId,
+    prepareRoles,
+    portablePacket,
+    initialsEnabled,
+    sessionCanonicalModel,
+    sessionCorpusHash,
+  ]);
 
   const useCanonicalDocument = Boolean(canonicalPacket?.model.allowed);
 
@@ -336,6 +364,7 @@ export function RecipientSigningView({
         lockedSignerRoleId,
         canonicalModel: canonicalPacket?.model ?? null,
         packetRevision,
+        sessionBound: Boolean(recipientSessionCookie),
       }),
     [
       documentId,
@@ -346,6 +375,7 @@ export function RecipientSigningView({
       lockedSignerRoleId,
       canonicalPacket?.model,
       packetRevision,
+      recipientSessionCookie,
     ],
   );
 
@@ -370,6 +400,7 @@ export function RecipientSigningView({
   );
 
   useEffect(() => {
+    if (recipientSessionCookie) return;
     if (!lockedSignerRoleId || myFields.some((f) => f.type === "signature")) return;
     const candidates = documentFieldsForView
       .filter((f) => f.type === "signature")
@@ -398,10 +429,19 @@ export function RecipientSigningView({
     lockedSignerRoleId,
     myFields,
     recipientAgreementId,
+    recipientSessionCookie,
   ]);
 
   const hydratedRef = useRef(false);
   useEffect(() => {
+    if (!recipientSessionCookie) return;
+    return () => {
+      setRecipientSessionDiagnosticsSuppressed(false);
+    };
+  }, [recipientSessionCookie]);
+
+  useEffect(() => {
+    if (recipientSessionCookie) return;
     if (hydratedRef.current || documentFields.length === 0) return;
     hydratedRef.current = true;
     logVs01PersistedGeometryHash("recipient_signing_hydration", documentFields);
@@ -412,13 +452,13 @@ export function RecipientSigningView({
         { preserveEditableValues: true, agreementId: recipientAgreementId },
       ),
     );
-  }, [documentFields.length, cpById, onRecipientFieldsChange, documentFields]);
+  }, [documentFields.length, cpById, onRecipientFieldsChange, documentFields, recipientAgreementId, lockedSignerRoleId, recipientSessionCookie]);
 
   useEffect(() => {
+    if (recipientSessionCookie) return;
     const diag = typeof window !== "undefined" && window.localStorage?.getItem("lawdogVs01FieldDiag") === "1";
     const dev = typeof import.meta !== "undefined" && import.meta.env?.DEV;
     if (!diag && !dev) return;
-    // eslint-disable-next-line no-console
     console.info("[vs01-recipient-field-scope]", {
       lockedCounterpartyId: lockedCp,
       totalRecipientFields: recipientFields.length,
@@ -426,7 +466,7 @@ export function RecipientSigningView({
       hasAgreementScope: Boolean((recipientAgreementId ?? "").trim()),
       signerRoleIdShort: lockedSignerRoleId ? lockedSignerRoleId.slice(0, 16) : null,
     });
-  }, [lockedCp, recipientFields.length, myFields.length, recipientAgreementId, lockedSignerRoleId]);
+  }, [lockedCp, recipientFields.length, myFields.length, recipientAgreementId, lockedSignerRoleId, recipientSessionCookie]);
 
   const [pdfUrl, setPdfUrl] = useState<string | null>(null);
   const [numPages, setNumPages] = useState(0);
@@ -476,20 +516,21 @@ export function RecipientSigningView({
         setNumPages(canonicalPacket.model.pages.length);
         setPdfDocReady(true);
         setPreviewLoading(false);
-        logVs01CanonicalPacketSeedUse({
-          documentId: documentId.trim(),
-          agreementId: (recipientAgreementId ?? "").trim(),
-          corpusHash: canonicalPacket.corpusHash,
-          source: canonicalPacket.seedSource,
-          renderMode: "canonical",
-        });
+        if (!recipientSessionCookie) {
+          logVs01CanonicalPacketSeedUse({
+            documentId: documentId.trim(),
+            agreementId: (recipientAgreementId ?? "").trim(),
+            corpusHash: canonicalPacket.corpusHash,
+            source: canonicalPacket.seedSource,
+            renderMode: "canonical",
+          });
+        }
         return;
       }
 
       setPreviewLoading(true);
       setPreviewError(null);
-      if (import.meta.env.MODE !== "test") {
-        // eslint-disable-next-line no-console
+      if (!recipientSessionCookie && import.meta.env.MODE !== "test") {
         console.warn("[vs01-recipient-canonical-fallback]", {
           documentIdShort: documentId.trim().slice(0, 12),
           agreementIdShort: (recipientAgreementId ?? "").trim().slice(0, 16) || null,
@@ -530,11 +571,11 @@ export function RecipientSigningView({
       cancelled = true;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [documentId, useCanonicalDocument, canonicalPacket, recipientAgreementId, serverHydrationPending]);
+  }, [documentId, useCanonicalDocument, canonicalPacket, recipientAgreementId, serverHydrationPending, documentReadAuth, recipientSessionCookie]);
 
   useEffect(() => {
     const did = documentId?.trim() ?? "";
-    if (!did || import.meta.env.MODE === "test") return;
+    if (!did || import.meta.env.MODE === "test" || recipientSessionCookie) return;
 
     let source: "portable_packet" | "server_packet" | "fallback_rebuild";
     let fallbackReason: string | undefined;
@@ -574,6 +615,7 @@ export function RecipientSigningView({
     numPages,
     documentFields.length,
     lockedSignerRoleId,
+    recipientSessionCookie,
   ]);
 
   useLayoutEffect(() => {
@@ -621,10 +663,15 @@ export function RecipientSigningView({
           !recipientFieldBelongsToLockedSigner(target, lockedCp, lockedSignerRoleId ?? null) ||
           !isRecipientSigningEditableType(target.type)
         ) {
-          const diag = typeof window !== "undefined" && window.localStorage?.getItem("lawdogVs01FieldDiag") === "1";
-          const dev = typeof import.meta !== "undefined" && import.meta.env?.DEV;
+          const diag =
+            !recipientSessionCookie &&
+            typeof window !== "undefined" &&
+            window.localStorage?.getItem("lawdogVs01FieldDiag") === "1";
+          const dev =
+            !recipientSessionCookie &&
+            typeof import.meta !== "undefined" &&
+            import.meta.env?.DEV;
           if (diag || dev) {
-            // eslint-disable-next-line no-console
             console.warn("[vs01-recipient-role-scope]", {
               event: "cross_signer_field_blocked",
               fieldIdShort: id.slice(0, 8),
@@ -652,7 +699,7 @@ export function RecipientSigningView({
         return prev.map((f) => (f.id === targetId ? { ...f, ...patch } : f));
       });
     },
-    [onRecipientFieldsChange, lockedCp, lockedSignerRoleId, documentFields],
+    [onRecipientFieldsChange, lockedCp, lockedSignerRoleId, documentFields, recipientSessionCookie],
   );
 
   const goPrev = useCallback(() => {
@@ -691,14 +738,14 @@ export function RecipientSigningView({
     );
   }, [numPages]);
 
-  const signingActionOpts = { initialsEnabled };
+  const signingActionOpts = useMemo(() => ({ initialsEnabled }), [initialsEnabled]);
 
   const editableMyFields = useMemo(
     () =>
       initialsEnabledPending
         ? []
         : recipientFinishGateEditableFields(myFields, signingActionOpts),
-    [myFields, initialsEnabled, initialsEnabledPending],
+    [myFields, initialsEnabledPending, signingActionOpts],
   );
 
   const allComplete =
@@ -711,7 +758,7 @@ export function RecipientSigningView({
     : countRecipientSigningActions(editableMyFields, signingActionOpts);
 
   useEffect(() => {
-    if (initialsEnabledPending) return;
+    if (recipientSessionCookie || initialsEnabledPending) return;
     const missing = editableMyFields
       .filter((f) => !recipientEditableFieldIsComplete(f))
       .map((f) => f.id);
@@ -732,6 +779,7 @@ export function RecipientSigningView({
     lockedSignerRoleId,
     myFields.length,
     recipientAgreementId,
+    recipientSessionCookie,
   ]);
   const placementSurface =
     useCanonicalDocument || Boolean(pdfUrl) || Boolean(documentId?.trim() && previewError);
@@ -770,8 +818,11 @@ export function RecipientSigningView({
     if (!allComplete) {
       const missing = editableMyFields.filter((f) => !recipientEditableFieldIsComplete(f));
       const remaining = missing.length;
-      if (typeof import.meta !== "undefined" && import.meta.env?.MODE !== "test") {
-        // eslint-disable-next-line no-console
+      if (
+        !recipientSessionCookie &&
+        typeof import.meta !== "undefined" &&
+        import.meta.env?.MODE !== "test"
+      ) {
         console.info("[vs01-recipient-finish-blocked]", {
           signerRoleIdShort: lockedSignerRoleId ? lockedSignerRoleId.slice(0, 20) : null,
           initialsEnabled,
@@ -792,7 +843,7 @@ export function RecipientSigningView({
     }
     onError(null);
     onFinishSigning();
-  }, [allComplete, editableMyFields, hydrationMiss, initialsEnabled, initialsEnabledPending, lockedSignerRoleId, manifestDecodeError, myFields.length, onError, onFinishSigning]);
+  }, [allComplete, editableMyFields, hydrationMiss, initialsEnabled, initialsEnabledPending, lockedSignerRoleId, manifestDecodeError, myFields.length, onError, onFinishSigning, recipientSessionCookie]);
 
   const updateFieldValue = useCallback(
     (id: string, value: string) => updateField(id, { value }),
@@ -961,6 +1012,7 @@ export function RecipientSigningView({
                                 cpById={cpById}
                                 onUpdateValue={updateFieldValue}
                                 canonicalCompact
+                                suppressDiagnosticLogging={Boolean(recipientSessionCookie)}
                                 signerCount={Math.max(
                                   2,
                                   new Set(documentFields.map((f) => f.assignedPartyIndex ?? 0)).size,
@@ -1096,6 +1148,7 @@ export function RecipientSigningView({
                                             cpById={cpById}
                                             onUpdateValue={updateFieldValue}
                                             canonicalCompact
+                                            suppressDiagnosticLogging={Boolean(recipientSessionCookie)}
                                             signerCount={Math.max(
                                               2,
                                               new Set(

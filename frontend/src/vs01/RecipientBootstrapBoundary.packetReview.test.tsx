@@ -10,6 +10,10 @@ import {
 } from "./vs01FragmentBootstrapToken";
 import { resetRecipientSessionPacketLoadForTests } from "./recipientSessionPacketLoad";
 
+vi.mock("./phase3cCapabilities", () => ({
+  PHASE_3C2C_SIGNING_ENABLED: false,
+}));
+
 const exchangeFetch = vi.fn();
 const statusFetch = vi.fn();
 const packetFetch = vi.fn();
@@ -43,7 +47,7 @@ const SAMPLE_PACKET = {
   page_count: 10,
   witness_page_index: 9,
   initials_policy: { enabled: false, bodyPagesOnly: true },
-  readiness: "ready_for_review",
+  readiness: "ready_for_signing",
 };
 
 describe("RecipientBootstrapBoundary packet review", () => {

@@ -6,6 +6,8 @@ import {
   type RecipientBootstrapSessionStatus,
 } from "./recipientBootstrapSessionApi";
 import { RecipientSessionPacketReview } from "./RecipientSessionPacketReview";
+import { RecipientSessionSigningPanel } from "./RecipientSessionSigningPanel";
+import { PHASE_3C2C_SIGNING_ENABLED } from "./phase3cCapabilities";
 import {
   adaptRecipientSessionPacketProjection,
   type AdaptedRecipientSessionPacket,
@@ -30,6 +32,8 @@ export type RecipientBootstrapState =
   | "authenticated"
   | "loading_packet"
   | "ready_for_review"
+  | "ready_for_signing"
+  | "signer_complete"
   | "stale_session"
   | "invalid_or_expired"
   | "already_used"
@@ -161,6 +165,17 @@ export function RecipientBootstrapBoundary(props: Props) {
           return;
         }
         setPacket(adapted);
+        if (adapted.projection.signer_complete) {
+          setState("signer_complete");
+          return;
+        }
+        if (
+          PHASE_3C2C_SIGNING_ENABLED &&
+          adapted.projection.readiness === "ready_for_signing"
+        ) {
+          setState("ready_for_signing");
+          return;
+        }
         setState("ready_for_review");
       })
       .catch(() => {
@@ -190,6 +205,10 @@ export function RecipientBootstrapBoundary(props: Props) {
   const title =
     state === "ready_for_review"
       ? "Agreement ready for review."
+      : state === "ready_for_signing"
+        ? "Agreement ready for signing."
+        : state === "signer_complete"
+          ? "Your signing is complete."
       : state === "loading_packet"
         ? "Loading agreement for review…"
         : state === "checking" || state === "exchanging"
@@ -207,7 +226,11 @@ export function RecipientBootstrapBoundary(props: Props) {
       ? "Loading your assigned agreement content…"
       : state === "ready_for_review"
         ? undefined
-        : state === "stale_session"
+        : state === "ready_for_signing"
+          ? "Complete your assigned signature fields, then finish signing."
+          : state === "signer_complete"
+            ? "Thank you. The agreement is not fully executed until all required signers finish."
+      : state === "stale_session"
           ? "Your session is no longer valid. Request a new signing link from the sender."
           : state === "unavailable"
             ? "You can reload this page to try again, or sign out and use a fresh signing link."
@@ -215,14 +238,20 @@ export function RecipientBootstrapBoundary(props: Props) {
 
   return (
     <div className="vs01-card vs01-card--envelope" data-testid="recipient-bootstrap-boundary">
-      {state !== "ready_for_review" ? (
+      {state !== "ready_for_review" &&
+      state !== "ready_for_signing" &&
+      state !== "signer_complete" ? (
         <>
           <h2 className="vs01-card__title">{title}</h2>
           {subtitle ? <p className="vs01-card__subtitle">{subtitle}</p> : null}
         </>
       ) : null}
 
-      {(state === "loading_packet" || state === "ready_for_review") && status ? (
+      {(state === "loading_packet" ||
+        state === "ready_for_review" ||
+        state === "ready_for_signing" ||
+        state === "signer_complete") &&
+      status ? (
         <div className="vs01-recipient-bootstrap-meta">
           <p>
             Signed in as <strong>{status.signer_display_name || "Recipient"}</strong>
@@ -233,7 +262,26 @@ export function RecipientBootstrapBoundary(props: Props) {
 
       {state === "ready_for_review" && packet ? <RecipientSessionPacketReview packet={packet} /> : null}
 
-      {state === "ready_for_review" || state === "loading_packet" ? (
+      {state === "ready_for_signing" && packet ? (
+        <RecipientSessionSigningPanel
+          packet={packet}
+          onSignerComplete={() => setState("signer_complete")}
+          onStaleSession={() => setState("stale_session")}
+        />
+      ) : null}
+
+      {state === "signer_complete" && packet ? (
+        <RecipientSessionSigningPanel
+          packet={{ ...packet, projection: { ...packet.projection, signer_complete: true } }}
+          onSignerComplete={() => setState("signer_complete")}
+          onStaleSession={() => setState("stale_session")}
+        />
+      ) : null}
+
+      {state === "ready_for_review" ||
+      state === "ready_for_signing" ||
+      state === "signer_complete" ||
+      state === "loading_packet" ? (
         <div className="vs01-recipient-bootstrap-meta">
           <button type="button" className="vs01-btn vs01-btn--secondary" onClick={() => void handleLogout()}>
             Sign out

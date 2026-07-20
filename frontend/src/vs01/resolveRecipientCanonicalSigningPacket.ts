@@ -12,6 +12,7 @@ import {
   loadVs01CanonicalPacketSeed,
   logVs01CanonicalPacketSeedUse,
   type Vs01CanonicalPacketPortableV1,
+  type Vs01CanonicalPacketSeedSource,
   type Vs01CanonicalPacketSeedV1,
 } from "./vs01CanonicalPacketSeed";
 import { buildVs01SigningPacketModel, type Vs01SigningPacketModel } from "./buildVs01SigningPacketModel";
@@ -21,7 +22,7 @@ export type ResolvedRecipientCanonicalPacket = {
   seed: Vs01CanonicalPacketSeedV1;
   model: Vs01SigningPacketModel;
   corpusHash: string;
-  seedSource: "portable_packet" | "stored_seed" | "bridge_session" | "guided_handoff_session";
+  seedSource: Exclude<Vs01CanonicalPacketSeedSource, "session_projection">;
 };
 
 export function resolveRecipientCanonicalSigningPacket(args: {

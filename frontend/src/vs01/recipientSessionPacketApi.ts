@@ -19,11 +19,18 @@ export type RecipientSessionPacketField = {
   width: number;
   height: number;
   autoInitials?: boolean;
+  value?: string;
 };
+
+export type RecipientSessionPacketReadiness =
+  | "ready_for_review"
+  | "ready_for_signing"
+  | "signer_complete";
 
 export type RecipientSessionPacketProjection = {
   ok: boolean;
   v: number;
+  document_id?: string;
   document_label: string;
   accepted_version_id: string;
   accepted_corpus_sha256: string;
@@ -42,7 +49,11 @@ export type RecipientSessionPacketProjection = {
     enabled: boolean;
     bodyPagesOnly: boolean;
   };
-  readiness: "ready_for_review";
+  readiness: RecipientSessionPacketReadiness;
+  signer_complete?: boolean;
+  finish_ready?: boolean;
+  field_values?: Record<string, string>;
+  field_revisions?: Record<string, number>;
 };
 
 export type RecipientSessionPacketFailureKind = "authority" | "network" | "malformed";
@@ -146,13 +157,27 @@ function parseField(
   if (typeof raw.autoInitials === "boolean") {
     field.autoInitials = raw.autoInitials;
   }
+  if (raw.value !== undefined) {
+    if (typeof raw.value !== "string") {
+      return null;
+    }
+    field.value = raw.value;
+  }
   return field;
 }
 
 export function parseRecipientSessionPacketProjection(
   body: Record<string, unknown>,
 ): RecipientSessionPacketProjection | null {
-  if (body.ok !== true || body.v !== 1 || body.readiness !== "ready_for_review") {
+  if (body.ok !== true || body.v !== 1) {
+    return null;
+  }
+  const readinessRaw = body.readiness;
+  if (
+    readinessRaw !== "ready_for_review" &&
+    readinessRaw !== "ready_for_signing" &&
+    readinessRaw !== "signer_complete"
+  ) {
     return null;
   }
   if (
@@ -211,8 +236,38 @@ export function parseRecipientSessionPacketProjection(
     page_count: body.page_count,
     witness_page_index: body.witness_page_index,
     initials_policy: initialsPolicy,
-    readiness: "ready_for_review",
+    readiness: readinessRaw,
   };
+  if (body.document_id !== undefined) {
+    if (!nonEmptyString(body.document_id)) return null;
+    projection.document_id = body.document_id.trim();
+  }
+  if (body.signer_complete !== undefined) {
+    if (typeof body.signer_complete !== "boolean") return null;
+    projection.signer_complete = body.signer_complete;
+  }
+  if (body.finish_ready !== undefined) {
+    if (typeof body.finish_ready !== "boolean") return null;
+    projection.finish_ready = body.finish_ready;
+  }
+  if (body.field_values !== undefined) {
+    if (!isRecord(body.field_values)) return null;
+    const fieldValues: Record<string, string> = {};
+    for (const [key, val] of Object.entries(body.field_values)) {
+      if (typeof val !== "string") return null;
+      fieldValues[key] = val;
+    }
+    projection.field_values = fieldValues;
+  }
+  if (body.field_revisions !== undefined) {
+    if (!isRecord(body.field_revisions)) return null;
+    const fieldRevisions: Record<string, number> = {};
+    for (const [key, val] of Object.entries(body.field_revisions)) {
+      if (typeof val !== "number" || !Number.isInteger(val) || val < 0) return null;
+      fieldRevisions[key] = val;
+    }
+    projection.field_revisions = fieldRevisions;
+  }
   if (body.signer_title !== undefined) {
     if (typeof body.signer_title !== "string") {
       return null;

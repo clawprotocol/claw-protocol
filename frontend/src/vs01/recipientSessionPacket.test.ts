@@ -37,7 +37,7 @@ const SAMPLE: RecipientSessionPacketProjection = {
   page_count: 10,
   witness_page_index: 9,
   initials_policy: { enabled: false, bodyPagesOnly: true },
-  readiness: "ready_for_review",
+  readiness: "ready_for_signing",
 };
 
 function asBody(value: RecipientSessionPacketProjection): Record<string, unknown> {

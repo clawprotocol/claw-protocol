@@ -70,6 +70,7 @@ def _isolated_store(monkeypatch, tmp_path):
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
     monkeypatch.setenv("CLAW_AGREEMENT_SIGNING_TOKEN_SECRET", "unit-test-session-packet-secret")
     monkeypatch.setenv("CLAW_APP_PUBLIC_ORIGIN", "https://app.example.com")
+    monkeypatch.setenv("CLAW_ENVIRONMENT", "local")
     monkeypatch.setenv("CLAW_RECIPIENT_BOOTSTRAP_RATE_LIMIT_DISABLED", "1")
     monkeypatch.setenv("RESEND_API_KEY", "re_test_key")
     monkeypatch.setenv("EMAIL_FROM", "LawDog <noreply@example.test>")
@@ -105,7 +106,7 @@ def test_authenticated_session_returns_recipient_safe_projection(monkeypatch):
     body = res.json()
     assert body["ok"] is True
     assert body["v"] == 1
-    assert body["readiness"] == "ready_for_review"
+    assert body["readiness"] == "ready_for_signing"
     assert body["accepted_version_id"].startswith("av_")
     assert body["accepted_corpus_sha256"]
     assert body["packet_revision"]

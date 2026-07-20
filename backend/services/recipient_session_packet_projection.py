@@ -20,6 +20,8 @@ from backend.services.vs01_signing_packet_activation import (
 
 RECIPIENT_SESSION_PACKET_PROJECTION_VERSION = 1
 READINESS_READY_FOR_REVIEW = "ready_for_review"
+READINESS_READY_FOR_SIGNING = "ready_for_signing"
+READINESS_SIGNER_COMPLETE = "signer_complete"
 
 _PROJECTED_FIELD_KEYS = frozenset(
     {"id", "type", "page", "x", "y", "width", "height", "autoInitials"}
@@ -193,6 +195,46 @@ def build_recipient_session_packet_projection(
 
     locked_role_id = _resolve_locked_role_id(portable=portable, signer_record_id=signer_record_id)
     fields = _filter_signer_fields(portable=portable, locked_role_id=locked_role_id)
+
+    from backend.services.recipient_session_signing_mutations import (
+        compute_signer_readiness,
+        load_signer_state_for_session,
+        project_editable_field_revisions,
+        project_editable_field_values,
+    )
+
+    packet_revision = _clean(authority.get("packet_revision"))
+    if not packet_revision:
+        raise RecipientSessionPacketProjectionError()
+    signer_state = load_signer_state_for_session(
+        draft,
+        signer_record_id=signer_record_id,
+        packet_revision=packet_revision,
+    )
+    readiness_info = compute_signer_readiness(
+        session=session,
+        draft=draft,
+        signer_state=signer_state,
+    )
+    field_values = project_editable_field_values(
+        fields,
+        session=session,
+        signer_state=signer_state,
+    )
+    field_revisions = project_editable_field_revisions(
+        fields,
+        signer_state=signer_state,
+    )
+    projected_fields = []
+    for field in fields:
+        projected = dict(field)
+        fid = _clean(field.get("id"))
+        if fid and fid in field_values:
+            projected["value"] = field_values[fid]
+        projected_fields.append(projected)
+    fields = projected_fields
+
+    readiness = READINESS_SIGNER_COMPLETE if readiness_info.get("signer_complete") else READINESS_READY_FOR_SIGNING
     page_count_raw = portable.get("pageCount")
     witness_raw = portable.get("witnessPageIndex")
     try:
@@ -212,6 +254,7 @@ def build_recipient_session_packet_projection(
 
     return {
         "v": RECIPIENT_SESSION_PACKET_PROJECTION_VERSION,
+        "document_id": document_id,
         "document_label": _clean(session.get("document_label")) or "Agreement",
         "accepted_version_id": _clean(authority.get("accepted_version_id")),
         "accepted_corpus_sha256": accepted_corpus_sha256,
@@ -227,5 +270,9 @@ def build_recipient_session_packet_projection(
         "page_count": page_count,
         "witness_page_index": witness_page_index,
         "initials_policy": _initials_policy(portable),
-        "readiness": READINESS_READY_FOR_REVIEW,
+        "readiness": readiness,
+        "signer_complete": bool(readiness_info.get("signer_complete")),
+        "finish_ready": bool(readiness_info.get("finish_ready")),
+        "field_values": field_values,
+        "field_revisions": field_revisions,
     }

@@ -10,9 +10,10 @@ from datetime import datetime
 from typing import Any, Dict, Optional, Tuple
 from urllib.parse import urlparse
 
-from fastapi import APIRouter, HTTPException, Request, Response
-from pydantic import BaseModel, Field
+from fastapi import APIRouter, Body, HTTPException, Request, Response
+from pydantic import BaseModel, ConfigDict, Field
 
+from backend.security.claw_environment import is_relaxed_claw_environment
 from backend.security.recipient_bootstrap_session_cookie import (
     attach_recipient_session_cookie,
     clear_recipient_session_cookie,
@@ -21,6 +22,14 @@ from backend.security.recipient_bootstrap_session_cookie import (
 from backend.services.recipient_bootstrap_session_store import (
     BOOTSTRAP_INVALID_OR_EXPIRED,
     BOOTSTRAP_INVALID_OR_EXPIRED_MESSAGE,
+)
+from backend.services.recipient_session_signing_mutations import (
+    RecipientSessionSigningConflictError,
+    RecipientSessionSigningMutationError,
+    RecipientSessionSigningValidationError,
+    complete_recipient_session_signer,
+    mutate_recipient_session_field,
+    resolve_recipient_session_readiness,
 )
 from backend.services.vs01_recipient_bootstrap_exchange import (
     RecipientBootstrapExchangeError,
@@ -40,6 +49,50 @@ class BootstrapExchangeIn(BaseModel):
     token: str = Field(..., min_length=8, max_length=4096)
 
 
+class RecipientSessionFieldMutationIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    field_id: str = Field(..., min_length=1, max_length=128)
+    value: str = Field(..., max_length=500)
+    expected_revision: int = Field(..., ge=0)
+    mutation_id: str = Field(..., min_length=1, max_length=128)
+
+
+class RecipientSessionCompleteIn(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+
+def _conflict_fail(code: str = "field_revision_conflict") -> HTTPException:
+    return HTTPException(
+        status_code=409,
+        detail={
+            "code": code,
+            "message": "This field could not be saved. Check your entry and try again.",
+        },
+    )
+
+
+def _validation_fail(code: str = "field_validation_failed") -> HTTPException:
+    return HTTPException(
+        status_code=400,
+        detail={
+            "code": code,
+            "message": "This field could not be saved. Check your entry and try again.",
+        },
+    )
+
+
+def _require_session_cookie(request: Request) -> str:
+    cookie = read_recipient_session_cookie(request)
+    if not cookie:
+        raise _uniform_fail(status_code=403)
+    return cookie
+
+
+def _uniform_signing_fail() -> HTTPException:
+    return _uniform_fail(status_code=403)
+
+
 def _uniform_fail(*, status_code: int = 403) -> HTTPException:
     return HTTPException(
         status_code=status_code,
@@ -51,12 +104,11 @@ def _uniform_fail(*, status_code: int = 403) -> HTTPException:
 
 
 def _is_production_environment() -> bool:
-    env = os.getenv("CLAW_ENVIRONMENT", "local").strip().lower()
-    return env in ("production", "prod")
+    return not is_relaxed_claw_environment()
 
 
 def _allow_referer_origin_fallback() -> bool:
-    return not _is_production_environment()
+    return is_relaxed_claw_environment()
 
 
 def _default_port_for_scheme(scheme: str) -> Optional[int]:
@@ -106,10 +158,7 @@ def _assert_same_origin(request: Request) -> None:
             raise _uniform_fail(status_code=403)
         return
 
-    if _is_production_environment():
-        raise _uniform_fail(status_code=403)
-
-    if not _allow_referer_origin_fallback():
+    if not is_relaxed_claw_environment():
         raise _uniform_fail(status_code=403)
 
     referer = (request.headers.get("referer") or "").strip()
@@ -218,3 +267,55 @@ async def post_recipient_session_logout(request: Request, response: Response) ->
         revoke_recipient_session(session_secret=cookie)
     clear_recipient_session_cookie(response=response, request=request)
     return {"ok": True, "authenticated": False, "readiness": "signed_out"}
+
+
+@router.get("/session/readiness")
+async def get_recipient_session_readiness(request: Request, response: Response) -> Dict[str, Any]:
+    cookie = _require_session_cookie(request)
+    response.headers["Cache-Control"] = "no-store, private"
+    try:
+        return resolve_recipient_session_readiness(session_secret=cookie)
+    except RecipientSessionSigningMutationError as exc:
+        raise _uniform_signing_fail() from exc
+
+
+@router.post("/session/fields")
+async def post_recipient_session_field_mutation(
+    body: RecipientSessionFieldMutationIn,
+    request: Request,
+    response: Response,
+) -> Dict[str, Any]:
+    _assert_same_origin(request)
+    cookie = _require_session_cookie(request)
+    response.headers["Cache-Control"] = "no-store, private"
+    try:
+        return mutate_recipient_session_field(
+            session_secret=cookie,
+            field_id=body.field_id,
+            value=body.value,
+            expected_revision=body.expected_revision,
+            mutation_id=body.mutation_id,
+        )
+    except RecipientSessionSigningConflictError as exc:
+        raise _conflict_fail(exc.code) from exc
+    except RecipientSessionSigningValidationError as exc:
+        raise _validation_fail(exc.code) from exc
+    except RecipientSessionSigningMutationError as exc:
+        raise _uniform_signing_fail() from exc
+
+
+@router.post("/session/complete")
+async def post_recipient_session_signer_complete(
+    request: Request,
+    response: Response,
+    _body: RecipientSessionCompleteIn = Body(default_factory=RecipientSessionCompleteIn),
+) -> Dict[str, Any]:
+    _assert_same_origin(request)
+    cookie = _require_session_cookie(request)
+    response.headers["Cache-Control"] = "no-store, private"
+    try:
+        return complete_recipient_session_signer(session_secret=cookie)
+    except RecipientSessionSigningValidationError as exc:
+        raise _validation_fail(exc.code) from exc
+    except RecipientSessionSigningMutationError as exc:
+        raise _uniform_signing_fail() from exc

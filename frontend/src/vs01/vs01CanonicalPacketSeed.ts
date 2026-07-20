@@ -19,6 +19,13 @@ export const VS01_PACKET_REVISION_QUERY = "vs01_pkt_rev";
 /** Max encoded portable payload length safe to embed in a public signing URL. */
 export const VS01_CANONICAL_PACKET_MAX_URL_LEN = 512;
 
+export type Vs01CanonicalPacketSeedSource =
+  | "stored_seed"
+  | "portable_packet"
+  | "bridge_session"
+  | "guided_handoff_session"
+  | "session_projection";
+
 export type Vs01CanonicalPacketSeedV1 = {
   v: 1;
   documentId: string;
@@ -429,9 +436,10 @@ export function logVs01CanonicalPacketSeedUse(payload: {
   documentId: string;
   agreementId: string;
   corpusHash: string;
-  source: "stored_seed" | "portable_packet" | "bridge_session" | "guided_handoff_session";
+  source: Vs01CanonicalPacketSeedSource;
   renderMode: "canonical" | "pdf_blocked_fallback";
 }): void {
   if (import.meta.env.MODE === "test") return;
+  if (payload.source === "session_projection") return;
   console.info("[vs01-canonical-packet-seed]", payload);
 }

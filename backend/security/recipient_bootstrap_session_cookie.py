@@ -2,18 +2,18 @@
 
 from __future__ import annotations
 
-import os
 from datetime import datetime
 
 from fastapi import Request, Response
+
+from backend.security.claw_environment import is_strict_claw_environment
 
 RECIPIENT_BOOTSTRAP_SESSION_COOKIE = "claw_recipient_session"
 RECIPIENT_BOOTSTRAP_SESSION_COOKIE_HOST = "__Host-claw_recipient_session"
 
 
 def is_production_cookie_environment() -> bool:
-    env = os.getenv("CLAW_ENVIRONMENT", "local").strip().lower()
-    return env in ("production", "prod")
+    return is_strict_claw_environment()
 
 
 def recipient_session_cookie_name() -> str:
@@ -46,8 +46,9 @@ def attach_recipient_session_cookie(
     if max_age_seconds <= 0:
         return
     secure = _cookie_secure_for_request(request)
+    cookie_name = recipient_session_cookie_name()
     cookie_kwargs: dict[str, object] = {
-        "key": recipient_session_cookie_name(),
+        "key": cookie_name,
         "value": session_secret,
         "httponly": True,
         "secure": secure,
@@ -55,6 +56,8 @@ def attach_recipient_session_cookie(
         "max_age": int(max_age_seconds),
         "path": "/",
     }
+    if cookie_name.startswith("__Host-"):
+        cookie_kwargs["path"] = "/"
     if expires_at is not None:
         cookie_kwargs["expires"] = expires_at
     response.set_cookie(**cookie_kwargs)
