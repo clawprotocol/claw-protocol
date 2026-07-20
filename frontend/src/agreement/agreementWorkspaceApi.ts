@@ -1,7 +1,7 @@
 import type { AgreementDraft } from "./agreementTypes";
 import { normalizeAgreementDraftFromApi } from "./agreementDraftNormalize";
 import { clawAgreementHeaders } from "./agreementOrgHeaders";
-import { recipientAgreementReadHeaders } from "./recipientAccessApi";
+import { recipientAgreementReadHeaders, recipientAgreementFetchInit } from "./recipientAccessApi";
 import { apiUrl, logClawClientWarning, resolveApiBase } from "../lib/clawApi";
 
 export type WorkspaceIndexAgreement = {
@@ -35,6 +35,21 @@ export type WorkspaceIndexAgreement = {
 };
 
 const base = () => resolveApiBase().replace(/\/$/, "");
+
+function recipientAuthRequestInit(
+  _agreementId: string,
+  recipientAccessToken?: string | null,
+  extraHeaders?: Record<string, string>,
+): Pick<RequestInit, "credentials" | "headers"> {
+  const auth = recipientAgreementFetchInit(recipientAccessToken);
+  return {
+    credentials: auth.credentials,
+    headers: {
+      ...(clawAgreementHeaders(extraHeaders) as Record<string, string>),
+      ...(auth.headers as Record<string, string>),
+    },
+  };
+}
 
 export type WorkspaceIndexSkippedRow = {
   id: string;
@@ -382,10 +397,7 @@ export async function stageRecipientProposalApi(
   try {
     const res = await fetch(`${base()}/api/agreements/${id}/recipient-proposal/stage`, {
       method: "POST",
-      headers: {
-        ...clawAgreementHeaders({ "Content-Type": "application/json" }),
-        ...recipientAgreementReadHeaders(agreementId, recipientAccessToken),
-      },
+      ...recipientAuthRequestInit(agreementId, recipientAccessToken, { "Content-Type": "application/json" }),
       body: JSON.stringify(body),
     });
     const j = await res.json().catch(() => ({}));
@@ -409,10 +421,7 @@ export async function finalizeRecipientProposalApi(
   try {
     const res = await fetch(`${base()}/api/agreements/${id}/recipient-proposal`, {
       method: "POST",
-      headers: {
-        ...clawAgreementHeaders({ "Content-Type": "application/json" }),
-        ...recipientAgreementReadHeaders(agreementId, recipientAccessToken),
-      },
+      ...recipientAuthRequestInit(agreementId, recipientAccessToken, { "Content-Type": "application/json" }),
       body: JSON.stringify({ proposal_id: proposalId }),
     });
     const j = await res.json().catch(() => ({}));
@@ -484,10 +493,7 @@ export async function recipientApproveCurrentApi(
   try {
     const res = await fetch(`${base()}/api/agreements/${encodeURIComponent(agreementId)}/recipient-approve`, {
       method: "POST",
-      headers: {
-        ...clawAgreementHeaders({ "Content-Type": "application/json" }),
-        ...recipientAgreementReadHeaders(agreementId, opts?.recipientAccessToken),
-      },
+      ...recipientAuthRequestInit(agreementId, opts?.recipientAccessToken, { "Content-Type": "application/json" }),
       body: JSON.stringify({
         message: opts?.message || "",
         participant_id: opts?.participant_id || "",

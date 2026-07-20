@@ -1,5 +1,5 @@
 import type { ReviewerLinkRow, ReviewerLinkRowApprovalStatus } from "./reviewerLinkRowModel";
-import { extractReviewLinkTokenFromHref, reviewerLinkRowStatusLabel } from "./reviewerLinkRowModel";
+import { isReviewLinkPreviewOnly, reviewerLinkRowStatusLabel } from "./reviewerLinkRowModel";
 
 export type PaidProReviewReviewerLinksTableProps = {
   rows: ReviewerLinkRow[];
@@ -47,6 +47,7 @@ export function PaidProReviewReviewerLinksTable(props: PaidProReviewReviewerLink
               const st = statuses[i] ?? "waiting";
               const partyLabel = (r.party_name || r.displayName || "—").trim();
               const email = (r.recipientEmail || r.reviewer_email || "").trim() || "—";
+              const previewOnly = isReviewLinkPreviewOnly(r.reviewHref);
               return (
                 <tr key={k} className="border-b border-slate-800/40 last:border-b-0">
                   <td className="px-3 py-2.5 font-medium text-slate-100">{partyLabel}</td>
@@ -67,7 +68,7 @@ export function PaidProReviewReviewerLinksTable(props: PaidProReviewReviewerLink
                         className="rounded-md border border-slate-700 bg-slate-900/80 px-2.5 py-1 text-xs font-medium text-slate-200 hover:border-slate-600 hover:bg-slate-800/80"
                         data-testid={`paid-pro-reviewer-open-${i}`}
                         title={
-                          !extractReviewLinkTokenFromHref(r.reviewHref)
+                          previewOnly
                             ? "Preview only — copy the personal review link to submit edits."
                             : undefined
                         }
@@ -79,9 +80,7 @@ export function PaidProReviewReviewerLinksTable(props: PaidProReviewReviewerLink
                           })
                         }
                       >
-                        {extractReviewLinkTokenFromHref(r.reviewHref)
-                          ? "Open reviewer view"
-                          : "Open preview (read-only)"}
+                        {previewOnly ? "Open preview (read-only)" : "Open reviewer view"}
                       </button>
                       {onCorrectEmail &&
                       (canCorrectEmail?.(i, st) ?? st === "waiting") &&

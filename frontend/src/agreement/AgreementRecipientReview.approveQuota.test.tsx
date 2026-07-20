@@ -4,7 +4,7 @@ import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import { AgreementRecipientReview } from "./AgreementRecipientReview";
 import { approveDraftFromReviewFirst } from "./AgreementRecipientReview.testHelpers";
 import { AccessProvider } from "../access/AccessContext";
-import { recipientPartyReviewCopy } from "./recipientReviewPartyActions";
+import { PUBLIC_ALL_REVIEWS_COMPLETE_BODY } from "./recipientApprovedWaitingPresentation";
 
 vi.mock("../launch/LaunchNavContext", () => ({
   useLaunchNav: () => ({
@@ -130,15 +130,17 @@ describe("AgreementRecipientReview approve + localStorage quota", () => {
     await approveDraftFromReviewFirst();
 
     await waitFor(() => {
-      expect(screen.getByTestId("recipient-approved-waiting-header").textContent).toContain("Review submitted");
+      expect(screen.getByTestId("recipient-approved-waiting-header").textContent).toMatch(
+        /Review submitted|All reviews complete/,
+      );
     });
 
     expect(screen.queryByText(/Failed to execute 'setItem'/i)).toBeNull();
     expect(screen.queryByText(/exceeded the quota/i)).toBeNull();
     expect(screen.getByTestId("recipient-approved-waiting-body").textContent).toContain(
-      "remaining reviewer(s)",
+      PUBLIC_ALL_REVIEWS_COMPLETE_BODY.slice(0, 32),
     );
     expect(setItem.mock.calls.some(([k]) => String(k).startsWith("claw_agreement_versions_v1:"))).toBe(true);
-    expect(screen.queryByRole("heading", { name: recipientPartyReviewCopy.looksGood })).toBeNull();
+    expect(screen.queryByRole("heading", { name: /Looks good/i })).toBeNull();
   });
 });

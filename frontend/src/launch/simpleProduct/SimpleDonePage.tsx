@@ -29,6 +29,8 @@ import { LawdogRecordedMark } from "../../components/ui/LawdogRecordedMark";
 import { PRODUCT_NOT_LAW_FIRM, RECORDS_DOWNLOAD_KEEP_COPY_SHORT } from "../../compliance/disclosureCopy";
 import type { SimpleDoneReviewRecipientLinkRow } from "./simpleDoneReviewRecipientLinks";
 import {
+  clearSimpleDoneReviewRecipientLinks,
+  installEphemeralOwnerReviewCopyLinkLifecycle,
   mintReviewPartySimulationRecipientLink,
   mintSimpleDoneReviewRecipientLinkRows,
   readSimpleDoneReviewRecipientLinks,
@@ -36,7 +38,7 @@ import {
 } from "./simpleDoneReviewRecipientLinks";
 import { RecipientControlCenter } from "../../agreement/RecipientControlCenter";
 import { recipientDeliveryLinkKey } from "../../agreement/recipientDeliveryStatus";
-import { extractReviewLinkTokenFromHref, normalizeHandoffToReviewerLinkRows } from "./reviewerLinkRowModel";
+import { isReviewLinkPreviewOnly, normalizeHandoffToReviewerLinkRows, redactReviewUrlForLog } from "./reviewerLinkRowModel";
 import { SimpleDoneReviewFlowDiagPanel } from "./SimpleDoneReviewFlowDiagPanel";
 import {
   canContinueLockedSigningFromDonePage,
@@ -185,6 +187,16 @@ export function SimpleDonePage(props: { agreementId: string }) {
     } catch {
       setReviewFlowDiagLocal(false);
     }
+  }, [agreementId]);
+
+  useEffect(() => {
+    return installEphemeralOwnerReviewCopyLinkLifecycle();
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      clearSimpleDoneReviewRecipientLinks(agreementId);
+    };
   }, [agreementId]);
 
   useEffect(() => {
@@ -706,7 +718,7 @@ export function SimpleDonePage(props: { agreementId: string }) {
     const normalizedReviewerRows = ownerReviewPresentation.normalizedReviewerRows;
     const multiReviewer = normalizedReviewerRows.length > 1;
     const primaryReviewHref = (normalizedReviewerRows[0]?.reviewHref || "").trim();
-    const primaryReviewHrefIsPreviewOnly = !extractReviewLinkTokenFromHref(primaryReviewHref);
+    const primaryReviewHrefIsPreviewOnly = isReviewLinkPreviewOnly(primaryReviewHref);
     const partyTwoRow = normalizedReviewerRows[0];
     const reviewCorpusBlankSignerLines = ownerReviewFirstDisplayCorpus?.text
       ? countBlankSignerMetadataLinesInExecutionBlock(ownerReviewFirstDisplayCorpus.text)
@@ -737,7 +749,7 @@ export function SimpleDonePage(props: { agreementId: string }) {
           logPartyReviewSimulationOpened(minted.partyIndex, resolvedName);
           logReviewLinkOpen({
             agreementId,
-            href: minted.reviewHref,
+            href: redactReviewUrlForLog(minted.reviewHref),
             source: "simple_done_party_simulation_panel",
             previewOnly: false,
           });
@@ -1078,7 +1090,7 @@ export function SimpleDonePage(props: { agreementId: string }) {
                         logPartyReviewSimulationOpened(partyTwoIndex, partyTwoName);
                         logReviewLinkOpen({
                           agreementId,
-                          href: primaryReviewHref,
+                          href: redactReviewUrlForLog(primaryReviewHref),
                           source: "simple_done_open_reviewer_view",
                           previewOnly: primaryReviewHrefIsPreviewOnly,
                         });

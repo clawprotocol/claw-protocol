@@ -1,63 +1,107 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
-  deriveReviewerLinkRowApprovalStatus,
-  normalizeHandoffToReviewerLinkRows,
+  classifyReviewLinkPresentation,
+  isReviewLinkPreviewOnly,
   redactReviewUrlForLog,
 } from "./reviewerLinkRowModel";
-import type { AgreementDraft } from "../../agreement/agreementTypes";
+import {
+  EPHEMERAL_OWNER_REVIEW_COPY_LINK_TTL_MS,
+  ephemeralOwnerReviewCopyLinkAgreementIds,
+  readEphemeralOwnerReviewCopyLinks,
+  resetEphemeralOwnerReviewCopyLinksForTests,
+  writeEphemeralOwnerReviewCopyLinks,
+} from "./ephemeralOwnerReviewCopyLinks";
+import {
+  exchangeReviewFragmentBootstrapTokenOnce,
+  resetReviewFragmentBootstrapExchangeForTests,
+} from "../../agreement/reviewFragmentBootstrapExchange";
 
-const BASE_TS = "2026-05-10T00:00:00.000Z";
+describe("reviewerLinkRowModel presentation classification", () => {
+  it("classifies fragment invitation as authenticated (not preview only)", () => {
+    const href = "https://app.example.com/agreements/ag1/review#t=bootstrap-token-value-here";
+    expect(classifyReviewLinkPresentation(href)).toBe("fragment_invitation");
+    expect(isReviewLinkPreviewOnly(href)).toBe(false);
+  });
 
-function makeDraft(overrides: Partial<AgreementDraft>): AgreementDraft {
-  return {
-    id: "ag-1",
-    title: "T",
-    jurisdiction: "CA",
-    parties: [],
-    purpose: "p",
-    payment_terms: "pay",
-    duration: "1y",
-    due_date: null,
-    effective_date: null,
-    created_at: BASE_TS,
-    updated_at: BASE_TS,
-    versions: [{ version: 1, created_at: BASE_TS }],
-    audit_log: [],
-    ...overrides,
-  } as AgreementDraft;
-}
+  it("classifies tokenless review path as preview only", () => {
+    const href = "https://app.example.com/agreements/ag1/review";
+    expect(classifyReviewLinkPresentation(href)).toBe("tokenless_preview");
+    expect(isReviewLinkPreviewOnly(href)).toBe(true);
+  });
 
-describe("reviewerLinkRowModel", () => {
-  it("redactReviewUrlForLog masks token query param", () => {
-    const out = redactReviewUrlForLog("https://host.example/agreements/x/review?t=secret123");
-    expect(out).not.toContain("secret123");
+  it("classifies legacy query token separately from fragment invitation", () => {
+    const href = "https://app.example.com/agreements/ag1/review?t=legacyquerytoken";
+    expect(classifyReviewLinkPresentation(href)).toBe("legacy_query");
+    expect(isReviewLinkPreviewOnly(href)).toBe(false);
+  });
+
+  it("classifies malformed fragment", () => {
+    expect(classifyReviewLinkPresentation("https://app.example.com/agreements/ag1/review#bad")).toBe(
+      "malformed_fragment",
+    );
+  });
+
+  it("classifies unrelated fragment", () => {
+    expect(classifyReviewLinkPresentation("https://app.example.com/other#t=abc12345")).toBe(
+      "unrelated_fragment",
+    );
+  });
+
+  it("redacts fragment tokens in logs", () => {
+    const out = redactReviewUrlForLog("https://host/agreements/x/review#t=secret12345678");
+    expect(out).not.toContain("secret12345678");
     expect(out.toLowerCase()).toMatch(/redacted/);
   });
+});
 
-  it("normalizeHandoffToReviewerLinkRows preserves party metadata", () => {
-    const rows = normalizeHandoffToReviewerLinkRows([
-      {
-        displayName: "A",
-        reviewHref: "https://x/r1?t=a",
-        party_index: 1,
-        recipientPartyId: "p1",
-      },
-    ]);
-    expect(rows[0]!.party_index).toBe(1);
-    expect(rows[0]!.recipientPartyId).toBe("p1");
+describe("ephemeralOwnerReviewCopyLinks", () => {
+  afterEach(() => {
+    resetEphemeralOwnerReviewCopyLinksForTests();
   });
 
-  it("deriveReviewerLinkRowApprovalStatus marks approved when participant_id matches", () => {
-    const d = makeDraft({
-      parties: [{ id: "p1", name: "R", role: "reviewer" }],
-      audit_log: [
-        { event_type: "participant_approved", at: BASE_TS, value: { participant_id: "p1" } },
-      ],
+  it("never uses sessionStorage for credential URLs", () => {
+    const setItem = vi.fn();
+    vi.stubGlobal("sessionStorage", { setItem, getItem: vi.fn(), removeItem: vi.fn() } as unknown as Storage);
+    writeEphemeralOwnerReviewCopyLinks({
+      agreementId: "ag_test",
+      recipients: [{ displayName: "R", reviewHref: "https://x/agreements/ag_test/review#t=secret" }],
     });
-    const st = deriveReviewerLinkRowApprovalStatus(d, { recipientPartyId: "p1", reviewer_id: "p1", party_index: 1 }, {
-      legacyGlobalApproval: false,
-      rowIndex: 0,
+    expect(setItem).not.toHaveBeenCalled();
+    expect(readEphemeralOwnerReviewCopyLinks("ag_test")?.recipients[0]?.reviewHref).toContain("#t=");
+    expect(ephemeralOwnerReviewCopyLinkAgreementIds()).toContain("ag_test");
+    vi.unstubAllGlobals();
+  });
+
+  it("expires entries after the enforced TTL", () => {
+    vi.useFakeTimers();
+    writeEphemeralOwnerReviewCopyLinks({
+      agreementId: "ag_test",
+      recipients: [{ displayName: "R", reviewHref: "https://x/review#t=secret" }],
     });
-    expect(st).toBe("approved");
+    expect(readEphemeralOwnerReviewCopyLinks("ag_test")).not.toBeNull();
+    vi.advanceTimersByTime(EPHEMERAL_OWNER_REVIEW_COPY_LINK_TTL_MS + 1);
+    expect(readEphemeralOwnerReviewCopyLinks("ag_test")).toBeNull();
+    vi.useRealTimers();
+  });
+});
+
+describe("reviewFragmentBootstrapExchange multi-link", () => {
+  afterEach(() => {
+    resetReviewFragmentBootstrapExchangeForTests();
+    vi.unstubAllGlobals();
+  });
+
+  it("does not join a second token for the same agreement", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ authenticated: true, agreement_id: "ag_same" }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const p1 = exchangeReviewFragmentBootstrapTokenOnce("token-alpha-long-enough", "ag_same");
+    const p2 = exchangeReviewFragmentBootstrapTokenOnce("token-beta-long-enough", "ag_same");
+    expect(p1).not.toBe(p2);
+    await Promise.all([p1, p2]);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });

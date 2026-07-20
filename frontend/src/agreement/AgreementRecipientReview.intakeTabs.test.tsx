@@ -10,6 +10,7 @@ import {
 } from "./AgreementRecipientReview.testHelpers";
 import { AccessProvider } from "../access/AccessContext";
 import { computeRecipientDraftTextareaMaxPx } from "../hooks/useRecipientDraftTextareaMaxPx";
+import { REVIEW_FIRST_PASTE_GUARD_COPY } from "./portableReviewCopy";
 const REVIEW_FIRST_REVISED_DRAFT_FILE_ACCEPT = ".txt,.md,text/plain,text/markdown,text/x-markdown";
 
 function jsonResponse(obj: unknown, status = 200) {
@@ -81,7 +82,7 @@ describe("AgreementRecipientReview revise workflow routing", () => {
     expect(screen.queryByTestId("recipient-manual-propose-controls")).toBeNull();
     expect(screen.getAllByText("Suggest revision").length).toBeGreaterThan(0);
     expect(screen.getAllByText(/Edit your agreement in any software you prefer/i).length).toBeGreaterThan(0);
-    expect(screen.getAllByText(/LawDog will compare the wording and show all material changes before submission/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(REVIEW_FIRST_PASTE_GUARD_COPY).length).toBeGreaterThan(0);
     expect(screen.queryByRole("button", { name: /Manual compare/i })).toBeNull();
   });
 

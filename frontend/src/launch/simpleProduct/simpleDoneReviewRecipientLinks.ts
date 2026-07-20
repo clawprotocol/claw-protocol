@@ -1,7 +1,12 @@
+/**
+ * Session handoff: after simple-home review-link flow, `/app/done` can show copyable per-recipient magic links
+ * (distinct from the public `/verify/...` URL).
+ *
+ * Credential-bearing URLs are held ephemerally in memory only (never sessionStorage/localStorage).
+ */
 import type { AgreementDraft, AgreementParty } from "../../agreement/agreementTypes";
-import { agreementMagicLinkPath } from "../../agreement/AgreementRecipientReview";
 import type { MintRecipientAccessTokenSuccess } from "../../agreement/recipientAccessApi";
-import { mintRecipientAccessTokenResult } from "../../agreement/recipientAccessApi";
+import { mintOwnerReviewCopyLinkResult } from "../../agreement/recipientAccessApi";
 import {
   resolveRecipientAccessMintFailureMessage,
   SIGNING_TOKEN_SECRET_NOT_CONFIGURED_CODE,
@@ -9,14 +14,19 @@ import {
 import { REVIEW_FIRST_SIGNING_TOKEN_SECRET_USER_MESSAGE } from "./reviewFirstSendSurface";
 import { resolveReviewLinkAssumedOwnerPartyIndex, rowReadyForReviewLinkInvite } from "./reviewLinkRecipientEmailMerge";
 import type { ReviewerLinkRow } from "./reviewerLinkRowModel";
-import { extractReviewLinkTokenFromHref, redactReviewUrlForLog } from "./reviewerLinkRowModel";
+import { redactReviewUrlForLog } from "./reviewerLinkRowModel";
 import { recipientLinkTokenFingerprint } from "../../agreement/recipientLinkTokenFingerprint";
 import { appendQaRecipientSimulationQueryToReviewHref } from "../../agreement/lawdogViewerContext";
+import {
+  clearEphemeralOwnerReviewCopyLinks,
+  installEphemeralOwnerReviewCopyLinkLifecycle,
+  readEphemeralOwnerReviewCopyLinks,
+  writeEphemeralOwnerReviewCopyLinks,
+} from "./ephemeralOwnerReviewCopyLinks";
 
-/**
- * Session handoff: after simple-home review-link flow, `/app/done` can show copyable per-recipient magic links
- * (distinct from the public `/verify/...` URL).
- */
+export { installEphemeralOwnerReviewCopyLinkLifecycle };
+
+/** @deprecated credential URLs are not stored in sessionStorage */
 export const simpleDoneReviewRecipientLinksStorageKey = (agreementId: string) =>
   `claw_simple_done_review_recipient_links_v1_${encodeURIComponent(agreementId.trim())}`;
 
@@ -49,98 +59,66 @@ export function writeSimpleDoneReviewRecipientLinks(payload: {
   reviewLinksPending?: boolean;
   agreementPartyDisplayNames?: string[];
 }): void {
-  const id = payload.agreementId.trim();
-  if (!id) return;
-  const partyNames = payload.agreementPartyDisplayNames?.filter((n) => typeof n === "string" && n.trim());
-  const full: SimpleDoneReviewLinksPayload = {
-    v: 1,
-    intent: "review",
-    recipients: payload.recipients,
-    savedAt: Date.now(),
-    ...(payload.reviewLinksPending === true ? { reviewLinksPending: true } : {}),
-    ...(partyNames && partyNames.length > 0 ? { agreementPartyDisplayNames: partyNames } : {}),
-  };
-  try {
-    sessionStorage.setItem(simpleDoneReviewRecipientLinksStorageKey(id), JSON.stringify(full));
-  } catch {
-    /* ignore */
-  }
+  writeEphemeralOwnerReviewCopyLinks(payload);
   if (import.meta.env.DEV) {
-    // eslint-disable-next-line no-console
     console.info("[simple-done-review-links-write]", {
-      agreementIdShort: shortAgreementId(id),
-      recipientLinkCount: full.recipients.length,
+      agreementIdShort: shortAgreementId(payload.agreementId),
+      recipientLinkCount: payload.recipients.length,
+      ephemeralOnly: true,
     });
   }
 }
 
 export function readSimpleDoneReviewRecipientLinks(agreementId: string): SimpleDoneReviewLinksPayload | null {
-  const id = agreementId.trim();
-  if (!id) return null;
-  try {
-    const raw = sessionStorage.getItem(simpleDoneReviewRecipientLinksStorageKey(id));
-    if (!raw) return null;
-    const o = JSON.parse(raw) as SimpleDoneReviewLinksPayload;
-    if (o?.v !== 1 || o.intent !== "review" || !Array.isArray(o.recipients)) return null;
-    const recipients = o.recipients
-      .filter(
-        (r) => r && typeof r.displayName === "string" && typeof r.reviewHref === "string" && r.reviewHref.trim(),
-      )
-      .map((r) => {
-        const row = r as Record<string, unknown>;
-        const base: SimpleDoneReviewRecipientLinkRow = {
-          displayName: String(row.displayName || "").trim(),
-          reviewHref: String(row.reviewHref || "").trim(),
-        };
-        const em = String(row.recipientEmail ?? row.reviewer_email ?? "").trim();
-        if (em) {
-          base.recipientEmail = em;
-          base.reviewer_email = em;
-        }
-        const pid = String(row.recipientPartyId ?? row.reviewer_id ?? "").trim();
-        if (pid) {
-          base.recipientPartyId = pid;
-          base.reviewer_id = pid;
-        }
-        if (typeof row.party_index === "number" && Number.isFinite(row.party_index)) {
-          base.party_index = row.party_index;
-        }
-        const pn = String(row.party_name ?? "").trim();
-        if (pn) base.party_name = pn;
-        const rn = String(row.reviewer_name ?? "").trim();
-        if (rn) base.reviewer_name = rn;
-        const ts = String(row.token_status ?? "").trim();
-        if (ts === "active" || ts === "unknown" || ts === "expired") base.token_status = ts;
-        const ca = String(row.created_at ?? "").trim();
-        if (ca) base.created_at = ca;
-        const lo = String(row.last_opened_at ?? "").trim();
-        if (lo) base.last_opened_at = lo;
-        return base;
-      });
-    const out: SimpleDoneReviewLinksPayload = {
-      v: 1,
-      intent: "review",
-      recipients,
-      savedAt: typeof o.savedAt === "number" ? o.savedAt : Date.now(),
-    };
-    if (o.reviewLinksPending === true) out.reviewLinksPending = true;
-    const cachedParties = (o as { agreementPartyDisplayNames?: unknown }).agreementPartyDisplayNames;
-    if (Array.isArray(cachedParties)) {
-      const names = cachedParties.filter((n): n is string => typeof n === "string" && n.trim().length > 0);
-      if (names.length > 0) out.agreementPartyDisplayNames = names;
-    }
-    return out;
-  } catch {
-    return null;
-  }
+  const ephemeral = readEphemeralOwnerReviewCopyLinks(agreementId);
+  if (!ephemeral) return null;
+  const recipients = ephemeral.recipients
+    .filter(
+      (r) => r && typeof r.displayName === "string" && typeof r.reviewHref === "string" && r.reviewHref.trim(),
+    )
+    .map((r) => {
+      const row = r as Record<string, unknown>;
+      const base: SimpleDoneReviewRecipientLinkRow = {
+        displayName: String(row.displayName || "").trim(),
+        reviewHref: String(row.reviewHref || "").trim(),
+      };
+      const em = String(row.recipientEmail ?? row.reviewer_email ?? "").trim();
+      if (em) {
+        base.recipientEmail = em;
+        base.reviewer_email = em;
+      }
+      const pid = String(row.recipientPartyId ?? row.reviewer_id ?? "").trim();
+      if (pid) {
+        base.recipientPartyId = pid;
+        base.reviewer_id = pid;
+      }
+      if (typeof row.party_index === "number" && Number.isFinite(row.party_index)) {
+        base.party_index = row.party_index;
+      }
+      const pn = String(row.party_name ?? "").trim();
+      if (pn) base.party_name = pn;
+      const rn = String(row.reviewer_name ?? "").trim();
+      if (rn) base.reviewer_name = rn;
+      const ts = String(row.token_status ?? "").trim();
+      if (ts === "active" || ts === "unknown" || ts === "expired") base.token_status = ts;
+      const ca = String(row.created_at ?? "").trim();
+      if (ca) base.created_at = ca;
+      const lo = String(row.last_opened_at ?? "").trim();
+      if (lo) base.last_opened_at = lo;
+      return base;
+    });
+  return {
+    v: 1,
+    intent: "review",
+    recipients,
+    savedAt: ephemeral.savedAt,
+    ...(ephemeral.reviewLinksPending ? { reviewLinksPending: true } : {}),
+    ...(ephemeral.agreementPartyDisplayNames ? { agreementPartyDisplayNames: ephemeral.agreementPartyDisplayNames } : {}),
+  };
 }
 
 export function clearSimpleDoneReviewRecipientLinks(agreementId: string): void {
-  try {
-    sessionStorage.removeItem(simpleDoneReviewRecipientLinksStorageKey(agreementId.trim()));
-  } catch {
-    /* ignore */
-  }
+  clearEphemeralOwnerReviewCopyLinks(agreementId);
 }
 
 export const REVIEW_LINK_MINT_FAILURE_USER_COPY =
@@ -173,7 +151,7 @@ export function reviewLinkMintHasUsableUrls(rows: Pick<SimpleDoneReviewRecipient
 }
 
 function resolveReviewHrefFromMint(
-  agreementId: string,
+  _agreementId: string,
   origin: string,
   data: MintRecipientAccessTokenSuccess,
 ): string {
@@ -182,9 +160,7 @@ function resolveReviewHrefFromMint(
     if (url.startsWith("http://") || url.startsWith("https://")) return url;
     return `${origin}${url.startsWith("/") ? url : `/${url}`}`;
   }
-  const tok = (data.token || "").trim();
-  if (!tok) return "";
-  return `${origin}${agreementMagicLinkPath(agreementId, tok)}`;
+  return "";
 }
 
 /** Mint personal review magic links for each counterparty row that passes review-link readiness (non-owner). */
@@ -201,9 +177,6 @@ export async function mintSimpleDoneReviewRecipientLinkRows(args: {
   lastMintErrorDetail?: string;
   lastMintErrorCode?: string;
 }> {
-  const mintKey =
-    (import.meta as unknown as { env?: { VITE_RECIPIENT_LINK_MINT_KEY?: string } }).env?.VITE_RECIPIENT_LINK_MINT_KEY ||
-    "";
   const parties = args.draft.parties || [];
   const list = parties as AgreementParty[];
   const ownerIdx = resolveReviewLinkAssumedOwnerPartyIndex(list);
@@ -229,7 +202,7 @@ export async function mintSimpleDoneReviewRecipientLinkRows(args: {
       wf === "signer" ? "signer" : wf === "reviewer" ? "reviewer" : "recipient";
     const partyId = p.id && !String(p.id).startsWith("legacy_") ? String(p.id).trim() : undefined;
     attemptedMintCount += 1;
-    const res = await mintRecipientAccessTokenResult(
+    const res = await mintOwnerReviewCopyLinkResult(
       args.agreementId,
       {
         mode: "review",
@@ -239,14 +212,13 @@ export async function mintSimpleDoneReviewRecipientLinkRows(args: {
         review_first_document_text: signingCorpusLen > 0 ? args.signingCorpusPlain?.trim() : undefined,
         review_first_document_source: signingCorpusLen > 0 ? args.signingCorpusSource ?? "review_first_pinned_corpus" : undefined,
       },
-      mintKey,
       {
         recipientCount: Math.max(0, list.length - 1),
-        signerCount: list.filter((p) => (p.name || "").trim().length > 0).length,
+        signerCount: list.filter((party) => (party.name || "").trim().length > 0).length,
         hasDocumentText: signingCorpusLen > 0 || draftDocumentLen > 0,
         documentTextLen: signingCorpusLen > 0 ? signingCorpusLen : draftDocumentLen || undefined,
         hasTitle: Boolean((args.draft.title || "").trim()),
-        hasPartyLabels: list.filter((p) => (p.name || "").trim()).length > 0,
+        hasPartyLabels: list.filter((party) => (party.name || "").trim()).length > 0,
         documentTextSource:
           signingCorpusLen > 0
             ? args.signingCorpusSource ?? "signing_corpus_plain"
@@ -304,7 +276,7 @@ export async function mintSimpleDoneReviewRecipientLinkRows(args: {
         uniqueHrefCount: hrefSet.size,
       });
     }
-    const fpList = out.map((r) => recipientLinkTokenFingerprint(extractReviewLinkTokenFromHref(r.reviewHref)));
+    const fpList = out.map((r) => recipientLinkTokenFingerprint(r.reviewHref));
     const nonempty = fpList.filter(Boolean);
     if (nonempty.length > 0 && new Set(nonempty).size !== nonempty.length) {
       const id = args.agreementId.trim();
@@ -327,9 +299,6 @@ export async function mintReviewPartySimulationRecipientLink(args: {
   signingCorpusPlain?: string | null;
   signingCorpusSource?: string | null;
 }): Promise<{ reviewHref: string; partyName: string; partyIndex: number } | null> {
-  const mintKey =
-    (import.meta as unknown as { env?: { VITE_RECIPIENT_LINK_MINT_KEY?: string } }).env?.VITE_RECIPIENT_LINK_MINT_KEY ||
-    "";
   const list = (args.draft.parties || []) as AgreementParty[];
   const partyIndex = Math.max(0, Math.min(args.partyIndex, Math.max(0, list.length - 1)));
   const p = list[partyIndex];
@@ -347,7 +316,7 @@ export async function mintReviewPartySimulationRecipientLink(args: {
   const role: "signer" | "reviewer" | "recipient" =
     wf === "signer" ? "signer" : wf === "reviewer" ? "reviewer" : "recipient";
   const partyId = p.id && !String(p.id).startsWith("legacy_") ? String(p.id).trim() : undefined;
-  const res = await mintRecipientAccessTokenResult(
+  const res = await mintOwnerReviewCopyLinkResult(
     args.agreementId,
     {
       mode: "review",
@@ -357,7 +326,6 @@ export async function mintReviewPartySimulationRecipientLink(args: {
       review_first_document_text: signingCorpusLen > 0 ? args.signingCorpusPlain?.trim() : undefined,
       review_first_document_source: signingCorpusLen > 0 ? args.signingCorpusSource ?? "review_first_pinned_corpus" : undefined,
     },
-    mintKey,
     {
       recipientCount: Math.max(0, list.length - 1),
       signerCount: list.filter((party) => (party.name || "").trim().length > 0).length,

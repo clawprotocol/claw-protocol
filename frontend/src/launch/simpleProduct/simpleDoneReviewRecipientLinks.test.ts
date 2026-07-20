@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { AgreementDraft } from "../../agreement/agreementTypes";
 import {
   mintSimpleDoneReviewRecipientLinkRows,
@@ -8,34 +8,34 @@ import {
   REVIEW_LINK_MINT_FAILURE_USER_COPY,
   writeSimpleDoneReviewRecipientLinks,
 } from "./simpleDoneReviewRecipientLinks";
+import { clearEphemeralOwnerReviewCopyLinks } from "./ephemeralOwnerReviewCopyLinks";
 import { REVIEW_FIRST_SIGNING_TOKEN_SECRET_USER_MESSAGE } from "./reviewFirstSendSurface";
 import { SIGNING_TOKEN_SECRET_NOT_CONFIGURED_CODE } from "../../agreement/recipientAccessMintPayload";
 
 describe("simpleDoneReviewRecipientLinks session handoff", () => {
-  const sessionStore = new Map<string, string>();
-
-  beforeEach(() => {
-    sessionStore.clear();
-    vi.stubGlobal("sessionStorage", {
-      getItem: (k: string) => (sessionStore.has(k) ? sessionStore.get(k)! : null),
-      setItem: (k: string, v: string) => void sessionStore.set(k, v),
-      removeItem: (k: string) => void sessionStore.delete(k),
-    } as Storage);
-  });
-
   afterEach(() => {
-    vi.unstubAllGlobals();
+    clearEphemeralOwnerReviewCopyLinks("ag_test_1");
+    clearEphemeralOwnerReviewCopyLinks("ag_x");
+    clearEphemeralOwnerReviewCopyLinks("ag_pending");
+    clearEphemeralOwnerReviewCopyLinks("ag_parties_cache");
   });
 
-  it("round-trips recipient rows without persisting tokens in a separate log channel", () => {
+  it("round-trips recipient rows ephemerally without sessionStorage", () => {
+    const setItem = vi.fn();
+    vi.stubGlobal("sessionStorage", {
+      getItem: vi.fn(),
+      setItem,
+      removeItem: vi.fn(),
+    } as unknown as Storage);
     writeSimpleDoneReviewRecipientLinks({
       agreementId: "ag_test_1",
-      recipients: [{ displayName: "Sarah Collins", reviewHref: "https://example.com/agreements/ag_test_1/review?t=tok_abc" }],
+      recipients: [{ displayName: "Sarah Collins", reviewHref: "https://example.com/agreements/ag_test_1/review#t=tok_abc" }],
     });
+    expect(setItem).not.toHaveBeenCalled();
     const read = readSimpleDoneReviewRecipientLinks("ag_test_1");
     expect(read?.recipients.length).toBe(1);
     expect(read?.recipients[0]?.displayName).toBe("Sarah Collins");
-    expect(read?.recipients[0]?.reviewHref).toContain("/review?t=");
+    expect(read?.recipients[0]?.reviewHref).toContain("#t=");
     expect(read?.recipients[0]?.reviewHref).not.toContain("/verify/");
   });
 
@@ -109,7 +109,11 @@ describe("mintSimpleDoneReviewRecipientLinkRows", () => {
       "fetch",
       vi.fn(async () => ({
         ok: true,
-        json: async () => ({ token: "tok_mint_test", expires_in_seconds: 3600, locked_version_id: "lv1" }),
+        json: async () => ({
+          review_url: "https://example.com/agreements/ag_mint/review#t=tok_mint_test",
+          expires_in_seconds: 3600,
+          locked_version_id: "lv1",
+        }),
       })) as unknown as typeof fetch,
     );
     const draft = {
@@ -127,12 +131,12 @@ describe("mintSimpleDoneReviewRecipientLinkRows", () => {
     expect(attemptedMintCount).toBe(1);
     expect(firstErrorStatus).toBeUndefined();
     expect(rows[0]!.displayName).toBe("Sarah Collins");
-    expect(rows[0]!.reviewHref).toContain("/agreements/ag_mint/review?t=tok_mint_test");
+    expect(rows[0]!.reviewHref).toContain("/agreements/ag_mint/review#t=tok_mint_test");
     expect(rows[0]!.reviewHref).not.toContain("/verify/");
     const fetchMock = vi.mocked(fetch);
     expect(fetchMock).toHaveBeenCalled();
     const url = String(fetchMock.mock.calls[0]?.[0] ?? "");
-    expect(url).toContain("/recipient-access-token");
+    expect(url).toContain("/owner-review-copy-link");
     const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body ?? "{}"));
     expect(body.mode).toBe("review");
     expect(body.recipient_party_id).toBe("p_rev");
@@ -257,7 +261,11 @@ describe("mintSimpleDoneReviewRecipientLinkRows", () => {
         n += 1;
         return {
           ok: true,
-          json: async () => ({ token: `tok_party_${n}`, expires_in_seconds: 3600, locked_version_id: "lv1" }),
+          json: async () => ({
+            review_url: `https://example.com/agreements/ag_multi/review#t=tok_party_${n}`,
+            expires_in_seconds: 3600,
+            locked_version_id: "lv1",
+          }),
         };
       }) as unknown as typeof fetch,
     );

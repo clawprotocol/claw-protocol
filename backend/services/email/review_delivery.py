@@ -21,7 +21,14 @@ from backend.config.email_config import (
     review_delivery_mode,
 )
 from backend.config.runtime_environment import clamp_recipient_token_ttl_seconds
-from backend.security.recipient_access_token import RecipientRole, mint_recipient_access_token
+from backend.security.recipient_access_token import RecipientRole
+from backend.security.negotiation_review_bootstrap_token import (
+    mint_negotiation_review_bootstrap_token,
+)
+from backend.security.negotiation_review_version_binding import (
+    authoritative_review_version_binding,
+)
+from backend.security.negotiation_review_content_binding import review_content_binding_sha256
 from backend.services.agreement_signing_lock_store import read_signing_lock
 from backend.services.email.delivery import send_email_non_fatal
 from backend.services.email.templates.review_invite import build_review_invite_email
@@ -174,8 +181,11 @@ def maybe_send_review_invites_after_review_sent(
         )
         return None
 
+    from backend.security.negotiation_review_content_binding import review_content_binding_sha256
+
     lock = read_signing_lock(agreement_id)
-    locked_version_id = str((lock or {}).get("locked_version_id") or "")
+    locked_version_id = authoritative_review_version_binding(lock)
+    content_sha256 = review_content_binding_sha256(draft)
     ttl = _default_recipient_token_ttl_seconds()
 
     sent = 0
@@ -183,14 +193,14 @@ def maybe_send_review_invites_after_review_sent(
     send_attempt_count = 0
     for target in targets:
         try:
-            token = mint_recipient_access_token(
+            token, jti, _exp = mint_negotiation_review_bootstrap_token(
                 secret=secret,
                 agreement_id=agreement_id,
                 locked_version_id=locked_version_id,
-                mode="review",
+                party_id=target.recipient_party_id or "",
                 role=target.mint_role,
+                content_sha256=content_sha256,
                 ttl_seconds=ttl,
-                recipient_party_id=target.recipient_party_id,
             )
         except Exception as exc:  # noqa: BLE001
             _log.warning(
@@ -221,15 +231,19 @@ def maybe_send_review_invites_after_review_sent(
         )
         if result.ok:
             sent += 1
-            from backend.services.recipient_delivery_registry import extract_jti_from_token, record_invite_sent
+            from backend.services.recipient_delivery_registry import record_invite_sent
 
             record_invite_sent(
                 draft,
                 phase="review",
                 participant_id=target.recipient_party_id or "",
-                jti=extract_jti_from_token(token),
+                jti=jti,
                 email=target.to,
                 audit_log=draft.setdefault("audit_log", []),
+                bootstrap_authority=True,
+                locked_version_id=locked_version_id,
+                content_sha256=content_sha256,
+                role=target.mint_role,
             )
         else:
             failed += 1
@@ -687,7 +701,10 @@ def _live_resend_review_invite_targets_from_draft(d: Dict[str, Any]) -> List[Rev
 
     Requires an explicit owner-normalized party role on the draft (see ``_draft_has_explicit_owner_party``).
     Excludes owner-normalized parties by role metadata only — never by array index fallback.
+    Fail-closed on duplicate party IDs and ambiguous participant resolution.
     """
+    from backend.security.negotiation_review_canonical_role import assert_eligible_review_participant
+
     parties = d.get("parties") or []
     if not isinstance(parties, list) or not parties:
         return []
@@ -710,7 +727,10 @@ def _live_resend_review_invite_targets_from_draft(d: Dict[str, Any]) -> List[Rev
         from backend.services.recipient_party_identity import participant_id_for_party
 
         party_id = participant_id_for_party(party, i)
-        mint_role: RecipientRole = "reviewer" if role == "reviewer" else "recipient"
+        try:
+            mint_role = assert_eligible_review_participant(d, party_id=party_id)
+        except ValueError:
+            continue
         out.append(
             ReviewInviteTarget(
                 to=email,
@@ -769,7 +789,7 @@ def _build_absolute_review_url(origin: str, agreement_id: str, token: str) -> st
     base = origin.rstrip("/")
     aid = quote(agreement_id.strip(), safe="")
     tok = quote(token.strip(), safe="")
-    return f"{base}/agreements/{aid}/review?t={tok}"
+    return f"{base}/agreements/{aid}/review#t={tok}"
 
 
 def _default_recipient_token_ttl_seconds() -> int:
@@ -805,6 +825,57 @@ def _redact_recipient_emails(targets: List[ReviewInviteTarget]) -> str:
     if not targets:
         return "none"
     return ",".join(_redact_to(t.to) for t in targets)
+
+
+def send_review_invite_with_prepared_token(
+    *,
+    agreement_id: str,
+    draft: Dict[str, Any],
+    participant_id: str,
+    token: str,
+    party_name: str,
+    email: str,
+    org_id: str | None = None,
+) -> bool:
+    """
+    Send a review invite email for an already-established bootstrap token.
+
+    Never raises. Returns True when the provider accepted the send.
+    """
+    aid = (agreement_id or "").strip()
+    pid = (participant_id or "").strip()
+    if not aid or not pid or not token:
+        return False
+
+    mode = review_delivery_mode()
+    if mode not in ("email", "manual_and_email") or not email_configured():
+        return False
+
+    origin = app_public_origin()
+    if not origin or not _draft_has_explicit_owner_party(draft):
+        return False
+
+    to = (email or "").strip().lower()
+    if not to or "@" not in to:
+        return False
+
+    title = str(draft.get("title") or "").strip() or "Untitled agreement"
+    review_url = _build_absolute_review_url(origin, agreement_id, token)
+    email_payload = build_review_invite_email(
+        party_name=party_name or to.split("@", 1)[0],
+        agreement_title=title,
+        review_url=review_url,
+        requesting_party_name=_owner_display_name_from_draft(draft),
+        party_names=_party_display_names_from_draft(draft),
+    )
+    result = send_email_non_fatal(
+        to=to,
+        subject=email_payload.subject,
+        html=email_payload.html,
+        text=email_payload.text,
+        context="review_invite_resend",
+    )
+    return bool(result.ok)
 
 
 def send_review_invite_to_participant(
@@ -843,25 +914,22 @@ def send_review_invite_to_participant(
         return False, None
 
     lock = read_signing_lock(agreement_id)
-    locked_version_id = str((lock or {}).get("locked_version_id") or "")
+    locked_version_id = authoritative_review_version_binding(lock)
+    content_sha256 = review_content_binding_sha256(draft)
     ttl = _default_recipient_token_ttl_seconds()
 
     try:
-        token = mint_recipient_access_token(
+        token, jti, _exp = mint_negotiation_review_bootstrap_token(
             secret=secret,
             agreement_id=agreement_id,
             locked_version_id=locked_version_id,
-            mode="review",
+            party_id=target.recipient_party_id or "",
             role=target.mint_role,
+            content_sha256=content_sha256,
             ttl_seconds=ttl,
-            recipient_party_id=target.recipient_party_id,
         )
     except Exception:  # noqa: BLE001
         return False, None
-
-    from backend.services.recipient_delivery_registry import extract_jti_from_token
-
-    jti = extract_jti_from_token(token)
 
     review_url = _build_absolute_review_url(origin, agreement_id, token)
     email = build_review_invite_email(

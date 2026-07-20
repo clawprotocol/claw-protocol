@@ -8,6 +8,13 @@ import pytest
 from fastapi.testclient import TestClient
 
 from backend.main import app
+from backend.tests.negotiation_review_test_helpers import (
+    bootstrap_review_session,
+    extract_bootstrap_token_from_review_url,
+    mint_owner_review_copy_link,
+    review_mutation_headers,
+)
+
 from backend.services.email.review_delivery import COUNTERPARTY_REVIEWS_COMPLETE_NOTIFIED_EVENT
 from backend.services.email.signing_delivery import SIGNING_INVITE_EMAILS_SENT_EVENT
 from backend.utils.agreement_version_store import AgreementVersionStore
@@ -45,6 +52,8 @@ def _env_common(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
     monkeypatch.setenv("EMAIL_FROM", "LawDog <notifications@lawdog.me>")
     monkeypatch.setenv("CLAW_APP_PUBLIC_ORIGIN", "https://app.example.com")
     monkeypatch.setenv("CLAW_AGREEMENT_SIGNING_TOKEN_SECRET", "unit-test-signing-invite-secret")
+    monkeypatch.setenv("CLAW_ENVIRONMENT", "local")
+    monkeypatch.setenv("CLAW_NEGOTIATION_REVIEW_BOOTSTRAP_RATE_LIMIT_DISABLED", "1")
 
 
 def _create_agreement(client: TestClient) -> str:
@@ -64,7 +73,7 @@ def _create_agreement(client: TestClient) -> str:
                 {
                     "id": "p_cp",
                     "name": "Harbor Peak Automation LLC",
-                    "role": "party",
+                    "role": "reviewer",
                     "email": "cp@example.com",
                 },
             ],
@@ -330,7 +339,7 @@ def test_test370_review_complete_then_signing_invite_owner_gets_only_action_requ
                 {
                     "id": "p_cp",
                     "name": "Harbor Peak Automation LLC",
-                    "role": "party",
+                    "role": "reviewer",
                     "email": "cp@example.com",
                 },
             ],
@@ -343,13 +352,7 @@ def test_test370_review_complete_then_signing_invite_owner_gets_only_action_requ
     )
     assert create_res.status_code == 200
     aid = create_res.json()["id"]
-    mint = client.post(
-        f"/api/agreements/{aid}/recipient-access-token",
-        headers=_ORG_H,
-        json={"mode": "review", "role": "reviewer", "recipient_party_id": "p_cp"},
-    )
-    assert mint.status_code == 200
-    review_token = mint.json()["token"]
+    bootstrap_review_session(client, aid, _ORG_H, role="reviewer", recipient_party_id="p_cp")
 
     signing_url = (
         "https://app.example.com/app/esign/doc_test370?vs01_recipient_sign=1"
@@ -358,7 +361,7 @@ def test_test370_review_complete_then_signing_invite_owner_gets_only_action_requ
     with patch("backend.services.email.resend_client.httpx.Client", return_value=mock_client):
         approve_res = client.post(
             f"/api/agreements/{aid}/recipient-approve",
-            headers={"X-Claw-Recipient-Access-Token": review_token},
+            headers=review_mutation_headers(),
             json={
                 "participant_id": "p_cp",
                 "participant_display_name": "Harbor Peak Automation LLC",

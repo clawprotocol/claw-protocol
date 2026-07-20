@@ -3,6 +3,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { fetchRecipientDeliveryStatus } from "./recipientDeliveryStatus";
 
+vi.mock("../lib/clawApi", () => ({
+  apiUrl: (path: string) =>
+    `https://claw-protocol-production.up.railway.app${path.startsWith("/") ? path : `/${path}`}`,
+  getLawDogApiBase: () => "https://claw-protocol-production.up.railway.app",
+  resolveApiBase: () => "https://claw-protocol-production.up.railway.app",
+}));
+
 describe("recipientDeliveryStatus API routing", () => {
   const fetchMock = vi.fn();
 

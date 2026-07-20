@@ -245,6 +245,14 @@ describe("AgreementRecipientReview review-first actions", () => {
   });
 
   it("without participant id: material paste enables review changes and diff preview but blocks submit", async () => {
+    const ambiguousPartyDraft = {
+      ...reviewFirstDraft,
+      parties: [
+        { id: "p-owner", name: "Alice", role: "owner" },
+        { id: "p-bob", name: "Bob", role: "party" },
+        { id: "p-carol", name: "Carol", role: "party" },
+      ],
+    };
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url =
         typeof input === "string"
@@ -256,17 +264,17 @@ describe("AgreementRecipientReview review-first actions", () => {
               : String(input);
       const method = (init?.method || (typeof Request !== "undefined" && input instanceof Request ? input.method : "GET")).toUpperCase();
       if (method === "POST" && url.includes("/render")) {
-        return jsonResponse({ rendered_html: `<article><pre>${reviewFirstDraft.purpose}</pre></article>` });
+        return jsonResponse({ rendered_html: `<article><pre>${ambiguousPartyDraft.purpose}</pre></article>` });
       }
       if (method === "GET" && url.includes("/api/agreements/") && !url.includes("/revise")) {
-        return jsonResponse({ draft: reviewFirstDraft });
+        return jsonResponse({ draft: ambiguousPartyDraft });
       }
       return new Response("not found", { status: 404 });
     });
 
     render(
       <AccessProvider>
-        <AgreementRecipientReview agreementId={agreementId} recipientAccessToken="tok_test" />
+        <AgreementRecipientReview agreementId={agreementId} />
       </AccessProvider>,
     );
 
@@ -292,7 +300,7 @@ describe("AgreementRecipientReview review-first actions", () => {
     expect((await screen.findByTestId("recipient-preview-summary-heading")).textContent).toBe("Changes detected");
     expect(screen.getByTestId("recipient-review-proposed-update-before-after")).toBeTruthy();
     expect(screen.getByTestId("recipient-open-send-suggested-edits-modal")).toHaveProperty("disabled", true);
-    expect((await screen.findByTestId("recipient-review-submit-attribution-hint")).textContent).toContain(
+    expect((await screen.findByTestId("recipient-review-submit-blocked")).textContent).toContain(
       "You can still review the changes here",
     );
   });
@@ -340,7 +348,7 @@ describe("AgreementRecipientReview review-first actions", () => {
     expect((await screen.findByTestId("recipient-preview-summary-heading")).textContent).toBe("Changes detected");
     expect(screen.getByTestId("recipient-review-proposed-update-before-after")).toBeTruthy();
     expect(screen.getByTestId("recipient-open-send-suggested-edits-modal")).toHaveProperty("disabled", false);
-    expect(screen.queryByTestId("recipient-review-submit-attribution-hint")).toBeNull();
+    expect(screen.queryByTestId("recipient-review-submit-blocked")).toBeNull();
   });
 
   it("no-change revised draft disables submit and shows a no-change state", async () => {

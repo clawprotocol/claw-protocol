@@ -76,11 +76,13 @@ describe("Test276 review-first submit authority wiring", () => {
     expect(block.slice(stageFailReturn, finalizeIdx)).toContain("return");
   });
 
-  it("AgreementReviewGate recovers token from session after URL strip", () => {
+  it("AgreementReviewGate uses fragment bootstrap exchange and session status", () => {
     const gate = readFileSync(join(__dirname, "../ClawProductApp.tsx"), "utf8");
-    expect(gate).toContain("loadAnyRecipientMagicLinkSessionForAgreement");
+    expect(gate).toContain("takeReviewFragmentBootstrapTokenOnce");
+    expect(gate).toContain("exchangeReviewFragmentBootstrapTokenOnce");
+    expect(gate).toContain("fetchNegotiationReviewSessionStatus");
+    expect(gate).toContain("invalidateNegotiationReviewSessionPresentation");
     expect(gate).toContain("logReviewerTokenDetected");
-    expect(gate).toContain("logReviewerTokenPersisted");
     expect(gate).toContain("logReviewerTokenMissing");
   });
 

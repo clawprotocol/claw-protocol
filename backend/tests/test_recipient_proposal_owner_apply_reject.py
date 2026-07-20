@@ -4,6 +4,13 @@ import pytest
 from fastapi.testclient import TestClient
 
 from backend.main import app
+from backend.tests.negotiation_review_test_helpers import (
+    bootstrap_review_session,
+    extract_bootstrap_token_from_review_url,
+    mint_owner_review_copy_link,
+    review_mutation_headers,
+)
+
 
 
 @pytest.fixture()
@@ -12,6 +19,9 @@ def isolated_agreement_env(monkeypatch: pytest.MonkeyPatch, tmp_path):
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_ENABLED", "1")
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
     monkeypatch.setenv("CLAW_AGREEMENT_SIGNING_TOKEN_SECRET", "unit-test-owner-proposal")
+    monkeypatch.setenv("CLAW_CORS_ALLOW_ORIGINS", "http://testserver,https://testserver")
+    monkeypatch.setenv("CLAW_ENVIRONMENT", "local")
+    monkeypatch.setenv("CLAW_NEGOTIATION_REVIEW_BOOTSTRAP_RATE_LIMIT_DISABLED", "1")
     yield tmp_path
 
 
@@ -24,7 +34,7 @@ def _seed_pending_proposal(client: TestClient, org_hdr: dict) -> tuple[str, str,
             "jurisdiction": "CA",
             "parties": [
                 {"name": "Owner", "role": "owner"},
-                {"name": "Reviewer", "role": "party"},
+                {"name": "Reviewer", "role": "reviewer"},
             ],
             "purpose": "Payment within thirty (30) days after receipt.",
             "payment_terms": "Net 30",
@@ -38,19 +48,15 @@ def _seed_pending_proposal(client: TestClient, org_hdr: dict) -> tuple[str, str,
     draft = r.json()["draft"]
     reviewer_id = draft["parties"][1]["id"]
 
-    mint = client.post(
-        f"/api/agreements/{aid}/recipient-access-token",
-        headers=org_hdr,
-        json={
-            "mode": "review",
-            "role": "reviewer",
-            "recipient_party_id": reviewer_id,
-            "inviter_display_name": "Owner",
-        },
+    bootstrap_review_session(
+        client,
+        aid,
+        org_hdr,
+        role="reviewer",
+        recipient_party_id=reviewer_id,
+        inviter_display_name="Owner",
     )
-    assert mint.status_code == 200, mint.text
-    tok = mint.json()["token"]
-    rh = {"X-Claw-Recipient-Access-Token": tok}
+    rh = review_mutation_headers()
 
     stage = client.post(
         f"/api/agreements/{aid}/recipient-proposal/stage",

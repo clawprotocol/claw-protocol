@@ -41,17 +41,57 @@ export function reviewerLinkRowStatusLabel(s: ReviewerLinkRowApprovalStatus): st
 }
 
 /**
- * Extract minted access token from a review URL (query ``t`` / ``token``).
+ * Extract minted access token from a review URL (legacy query ``t`` / ``token`` only).
+ * Fragment bootstrap tokens are not extracted here (classification uses href shape only).
  */
 export function extractReviewLinkTokenFromHref(href: string): string {
   const u = (href || "").trim();
   if (!u) return "";
   try {
     const parsed = new URL(u, "https://placeholder.local");
+    if (parsed.hash.replace(/^#/, "").trim()) {
+      return "";
+    }
     return (parsed.searchParams.get("t") || parsed.searchParams.get("token") || "").trim();
   } catch {
     return "";
   }
+}
+
+export type ReviewLinkPresentationClass =
+  | "fragment_invitation"
+  | "tokenless_preview"
+  | "legacy_query"
+  | "malformed_fragment"
+  | "unrelated_fragment";
+
+/** Classify review link presentation without persisting or copying token material. */
+export function classifyReviewLinkPresentation(href: string): ReviewLinkPresentationClass {
+  const u = (href || "").trim();
+  if (!u) return "tokenless_preview";
+  try {
+    const parsed = new URL(u, "https://placeholder.local");
+    const onReviewPath = /\/agreements\/[^/]+\/review\/?$/i.test(parsed.pathname.replace(/\/$/, ""));
+    const hashRaw = parsed.hash.replace(/^#/, "").trim();
+    if (hashRaw) {
+      if (!onReviewPath) return "unrelated_fragment";
+      const params = new URLSearchParams(hashRaw.includes("=") ? hashRaw : `t=${hashRaw}`);
+      const fragTok = (params.get("t") || params.get("token") || "").trim();
+      if (fragTok.length >= 8) return "fragment_invitation";
+      return "malformed_fragment";
+    }
+    const queryTok = (parsed.searchParams.get("t") || parsed.searchParams.get("token") || "").trim();
+    if (onReviewPath && queryTok) return "legacy_query";
+    if (onReviewPath) return "tokenless_preview";
+    return "unrelated_fragment";
+  } catch {
+    return "malformed_fragment";
+  }
+}
+
+/** True only for tokenless preview routes — fragment invitations are authenticated. */
+export function isReviewLinkPreviewOnly(href: string): boolean {
+  return classifyReviewLinkPresentation(href) === "tokenless_preview";
 }
 
 /**
@@ -65,7 +105,14 @@ export function redactReviewUrlForLog(url: string): string {
     const parsed = new URL(u, "https://placeholder.local");
     if (parsed.searchParams.has("t")) parsed.searchParams.set("t", "(redacted)");
     if (parsed.searchParams.has("token")) parsed.searchParams.set("token", "(redacted)");
-    const path = `${parsed.pathname}${parsed.search}`;
+    const hashRaw = parsed.hash.replace(/^#/, "").trim();
+    if (hashRaw) {
+      const params = new URLSearchParams(hashRaw.includes("=") ? hashRaw : `t=${hashRaw}`);
+      if (params.has("t")) params.set("t", "(redacted)");
+      if (params.has("token")) params.set("token", "(redacted)");
+      parsed.hash = params.toString() ? `#${params.toString()}` : "#t=(redacted)";
+    }
+    const path = `${parsed.pathname}${parsed.search}${parsed.hash}`;
     return `${parsed.origin !== "https://placeholder.local" ? parsed.origin : ""}${path}`;
   } catch {
     return u.length > 80 ? `${u.slice(0, 40)}…(redacted)` : "(redacted)";

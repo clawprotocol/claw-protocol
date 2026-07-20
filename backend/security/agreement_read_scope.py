@@ -21,6 +21,9 @@ from backend.config.agreement_signing_token import (
     SigningTokenSecretMissingInProductionError,
     resolve_signing_token_secret_raw,
 )
+from backend.security.negotiation_review_relaxed_environment import (
+    is_negotiation_review_relaxed_environment,
+)
 from backend.config.runtime_environment import recipient_access_token_required
 from backend.security.recipient_access_token import RECIPIENT_LINK_INVALID_OR_EXPIRED, verify_recipient_access_token
 from backend.services.agreement_draft_store import load_draft
@@ -33,6 +36,23 @@ from backend.usage_economics.policy import (
 )
 from backend.utils.enforce import resolve_subject_from_request
 
+
+def _review_query_token_legacy_allowed() -> bool:
+    if not is_negotiation_review_relaxed_environment():
+        return False
+    return os.getenv("CLAW_REVIEW_QUERY_TOKEN_LEGACY_DEV", "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+
+
+from backend.security.negotiation_review_authorization import (
+    assert_negotiation_review_write_allowed,
+    negotiation_review_authorization_from_request,
+    negotiation_review_cookie_state,
+    reject_negotiation_review_session_for_full_draft,
+)
 
 def recipient_access_token_from_request(request: Request) -> str:
     """Extract recipient access token from the certified header only (no query leakage)."""
@@ -135,6 +155,8 @@ def validate_recipient_access_token_for_agreement(
     except Exception:
         raise HTTPException(status_code=404, detail="agreement_not_found") from None
 
+    lock = read_signing_lock(aid)
+
     if mode == "sign":
         if _draft_dict_fully_executed(draft_body):
             raise HTTPException(
@@ -146,19 +168,27 @@ def validate_recipient_access_token_for_agreement(
                     ),
                 },
             )
-        lock = read_signing_lock(aid)
         lock_v = str((lock or {}).get("locked_version_id") or "").strip()
         if not lock or not lock_v or lock_v != v.strip():
             raise _rfail("signing_version_mismatch_or_not_locked")
 
-    if mode == "review":
-        tok_v = v.strip()
-        lock = read_signing_lock(aid)
-        lock_v = str((lock or {}).get("locked_version_id") or "").strip()
-        if tok_v and lock_v and tok_v != lock_v:
-            raise _rfail("review_link_stale")
-
     party_id = str(payload.get("pid") or "").strip()
+
+    if mode == "review":
+        from backend.security.negotiation_review_version_binding import (
+            assert_review_version_binding_matches,
+        )
+        from backend.services.recipient_delivery_registry import is_bootstrap_authority_bound
+
+        bootstrap_bound = bool(
+            jti
+            and is_bootstrap_authority_bound(
+                draft_body, jti, phase="review", participant_id=party_id or None
+            )
+        )
+        if bootstrap_bound:
+            assert_review_version_binding_matches(signing_lock=lock, bound_version_id=v)
+
     inviter = str(payload.get("inv") or "").strip()
     if party_id:
         if not _recipient_party_id_on_draft(draft_body, party_id):
@@ -177,6 +207,14 @@ def validate_recipient_access_token_for_agreement(
                     "message": RECIPIENT_INVITE_SUPERSEDED,
                 },
             )
+
+        from backend.services.recipient_delivery_registry import is_bootstrap_authority_bound
+
+        if mode == "review" and is_bootstrap_authority_bound(
+            draft_body, jti, phase="review", participant_id=party_id
+        ):
+            if not _review_query_token_legacy_allowed():
+                raise _rfail("invalid_token")
 
     if log_validation and jti:
         append_usage_record({"jti": jti, "aid": aid, "mode": mode, "pid": party_id or None})
@@ -213,6 +251,18 @@ def assert_agreement_recipient_write_allowed(
     aid = (agreement_id or "").strip()
     if not aid:
         raise HTTPException(status_code=404, detail="agreement_not_found")
+
+    cookie_state = negotiation_review_cookie_state(request, aid)
+    if cookie_state == "invalid":
+        raise _rfail("negotiation_review_session_invalid")
+    if cookie_state == "valid":
+        assert_negotiation_review_write_allowed(
+            request,
+            aid,
+            allowed_modes=allowed_modes,
+            bind_participant_id=bind_participant_id,
+        )
+        return
 
     tok = recipient_access_token_from_request(request)
     strict = usage_economics_enabled() or recipient_access_token_required()
@@ -283,6 +333,12 @@ def assert_agreement_full_draft_read_allowed(request: Request, agreement_id: str
     aid = (agreement_id or "").strip()
     if not aid:
         raise HTTPException(status_code=404, detail="agreement_not_found")
+
+    reject_negotiation_review_session_for_full_draft(request, aid)
+
+    cookie_state = negotiation_review_cookie_state(request, aid)
+    if cookie_state == "invalid":
+        raise _rfail("negotiation_review_session_invalid")
 
     tok = recipient_access_token_from_request(request)
     if tok:

@@ -8,6 +8,13 @@ import pytest
 from fastapi.testclient import TestClient
 
 from backend.main import app
+from backend.tests.negotiation_review_test_helpers import (
+    bootstrap_review_session,
+    extract_bootstrap_token_from_review_url,
+    mint_owner_review_copy_link,
+    review_mutation_headers,
+)
+
 from backend.usage_economics import store as usage_economics_store_mod
 
 pytestmark = pytest.mark.unit
@@ -211,7 +218,7 @@ def test_paid_pro_mint_then_role_email_patch_review_sent_sends_one_external_invi
     aid = create_res.json()["id"]
 
     mint = client.post(
-        f"/api/agreements/{aid}/recipient-access-token",
+        f"/api/agreements/{aid}/owner-review-copy-link",
         headers=_ORG_H,
         json={
             "mode": "review",
@@ -403,7 +410,7 @@ def test_paid_pro_corpus_persist_then_review_sent_still_sends_emails(
     final_corpus = "PAID_PRO_REVIEW_CORPUS\n" + ("review body text " * 40)
 
     mint = client.post(
-        f"/api/agreements/{aid}/recipient-access-token",
+        f"/api/agreements/{aid}/owner-review-copy-link",
         headers=_ORG_H,
         json={
             "mode": "review",
@@ -838,7 +845,7 @@ def test_mint_preset_review_sent_at_still_requires_review_sent_for_email_deliver
     final_corpus = "PRESET_REVIEW_SENT_AT_CORPUS\n" + ("review body text " * 40)
 
     mint = client.post(
-        f"/api/agreements/{aid}/recipient-access-token",
+        f"/api/agreements/{aid}/owner-review-copy-link",
         headers=_ORG_H,
         json={
             "mode": "review",

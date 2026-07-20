@@ -140,7 +140,7 @@ def _activation_material(record: Dict[str, Any]) -> bytes:
 
 
 def _guard_generic_immutable_write(
-    current: Optional[Dict[str, Any]], draft: Dict[str, Any]
+    current: Optional[Dict[str, Any]], draft: Dict[str, Any], *, allow_review_delivery_establish: bool = False
 ) -> Dict[str, Any]:
     next_draft = dict(draft)
     incoming_frozen = next_draft.get("frozen_signing_authority_v1")
@@ -188,13 +188,198 @@ def _guard_generic_immutable_write(
                 raise ValueError("recipient_bootstrap_sessions_immutable")
     elif isinstance(incoming_sessions, dict):
         raise ValueError("recipient_bootstrap_sessions_endpoint_required")
+
+    incoming_nr_sessions = next_draft.get("negotiation_review_sessions_v1")
+    existing_nr_sessions = (current or {}).get("negotiation_review_sessions_v1")
+    if isinstance(existing_nr_sessions, dict):
+        if incoming_nr_sessions is None:
+            next_draft["negotiation_review_sessions_v1"] = existing_nr_sessions
+        else:
+            from backend.services.negotiation_review_session_store import sessions_field_material
+
+            if sessions_field_material(incoming_nr_sessions) != sessions_field_material(
+                existing_nr_sessions
+            ):
+                raise ValueError("negotiation_review_sessions_immutable")
+    elif isinstance(incoming_nr_sessions, dict):
+        raise ValueError("negotiation_review_sessions_endpoint_required")
+
+    incoming_delivery = next_draft.get("recipient_delivery_v1")
+    existing_delivery = (current or {}).get("recipient_delivery_v1")
+    if isinstance(existing_delivery, dict):
+        if incoming_delivery is None:
+            next_draft["recipient_delivery_v1"] = existing_delivery
+        elif not allow_review_delivery_establish:
+            from backend.services.recipient_delivery_registry import delivery_registry_material
+
+            if delivery_registry_material(incoming_delivery) != delivery_registry_material(
+                existing_delivery
+            ):
+                raise ValueError("recipient_delivery_registry_immutable")
+    elif isinstance(incoming_delivery, dict):
+        if not allow_review_delivery_establish:
+            raise ValueError("recipient_delivery_registry_endpoint_required")
+    incoming_claims = next_draft.get("review_approval_notifications_v1")
+    existing_claims = (current or {}).get("review_approval_notifications_v1")
+    if isinstance(existing_claims, dict):
+        if incoming_claims is None:
+            next_draft["review_approval_notifications_v1"] = existing_claims
+        else:
+            from backend.services.review_approval_notification_claim import (
+                claims_field_material,
+                merge_notification_claims_preserving_terminal,
+            )
+
+            merged_claims = merge_notification_claims_preserving_terminal(
+                existing_claims,
+                incoming_claims if isinstance(incoming_claims, dict) else {},
+            )
+            if claims_field_material(merged_claims) != claims_field_material(existing_claims):
+                next_draft["review_approval_notifications_v1"] = merged_claims
+            else:
+                next_draft["review_approval_notifications_v1"] = existing_claims
+    elif isinstance(incoming_claims, dict):
+        next_draft["review_approval_notifications_v1"] = incoming_claims
     return next_draft
 
 
 def _guard_generic_frozen_write(
-    current: Optional[Dict[str, Any]], draft: Dict[str, Any]
+    current: Optional[Dict[str, Any]], draft: Dict[str, Any], *, allow_review_delivery_establish: bool = False
 ) -> Dict[str, Any]:
-    return _guard_generic_immutable_write(current, draft)
+    return _guard_generic_immutable_write(
+        current, draft, allow_review_delivery_establish=allow_review_delivery_establish
+    )
+
+
+def _guard_draft_write_preserving_merged_delivery(
+    current: Optional[Dict[str, Any]],
+    draft: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Apply immutable-field guards while allowing a pre-merged delivery registry write."""
+    incoming_delivery = draft.get("recipient_delivery_v1")
+    draft_without_delivery = dict(draft)
+    draft_without_delivery.pop("recipient_delivery_v1", None)
+    current_without_delivery = dict(current or {})
+    current_without_delivery.pop("recipient_delivery_v1", None)
+    guarded = _guard_generic_immutable_write(
+        current_without_delivery or None,
+        draft_without_delivery,
+        allow_review_delivery_establish=False,
+    )
+    if isinstance(incoming_delivery, dict):
+        guarded["recipient_delivery_v1"] = incoming_delivery
+    elif isinstance((current or {}).get("recipient_delivery_v1"), dict):
+        guarded["recipient_delivery_v1"] = current["recipient_delivery_v1"]
+    return guarded
+
+
+def save_draft_establish_review_bootstrap_delivery(draft: Dict[str, Any]) -> None:
+    """Persist bootstrap-bound review delivery registry from dedicated mint/send endpoints."""
+    agreement_id = str(draft.get("id") or "").strip()
+    if not agreement_id:
+        raise ValueError("missing_id")
+    if _use_postgres():
+        from backend.db.agreement_sql import agreement_postgres_connection, pg_execute
+        from backend.services.recipient_delivery_registry import merge_review_delivery_establishment
+        from backend.services.agreement_signing_lock_store import read_signing_lock_for_update
+
+        now = datetime.now(timezone.utc)
+        with agreement_postgres_connection() as cx:
+            current_row = pg_execute(
+                cx,
+                "SELECT payload FROM agreement_drafts WHERE id = ? FOR UPDATE",
+                (agreement_id,),
+            ).fetchone()
+            current = _decode_draft_payload(current_row[0]) if current_row else None
+            signing_lock = read_signing_lock_for_update(cx, agreement_id)
+            merged = merge_review_delivery_establishment(
+                current,
+                draft,
+                signing_lock=signing_lock,
+            )
+            payload_text = canon_json_bytes(
+                _guard_draft_write_preserving_merged_delivery(current, merged)
+            ).decode("utf-8")
+            pg_execute(
+                cx,
+                """
+                INSERT INTO agreement_drafts (id, payload, created_at, updated_at)
+                VALUES (?, ?::jsonb, ?, ?)
+                ON CONFLICT (id) DO UPDATE SET
+                  payload = EXCLUDED.payload,
+                  updated_at = EXCLUDED.updated_at
+                """,
+                (agreement_id, payload_text, now, now),
+            )
+        return
+    from backend.services.agreement_signing_lock_store import read_signing_lock_unlocked
+    from backend.services.recipient_delivery_registry import merge_review_delivery_establishment
+
+    path = _agreement_path(agreement_id)
+    with agreement_file_lock(agreement_id):
+        current = _decode_draft_payload(path.read_text(encoding="utf-8")) if path.exists() else None
+        signing_lock = read_signing_lock_unlocked(agreement_id)
+        merged = merge_review_delivery_establishment(
+            current,
+            draft,
+            signing_lock=signing_lock,
+        )
+        _write_draft_file_unlocked(
+            path,
+            _guard_draft_write_preserving_merged_delivery(current, merged),
+        )
+
+
+def save_draft_merge_review_delivery_outcome(draft: Dict[str, Any]) -> None:
+    """Persist post-provider delivery audit/outcome without superseding newer registry rows."""
+    agreement_id = str(draft.get("id") or "").strip()
+    if not agreement_id:
+        raise ValueError("missing_id")
+    from backend.services.recipient_delivery_registry import _merge_audit_events
+
+    def _merge_outcome(current: Optional[Dict[str, Any]], incoming: Dict[str, Any]) -> Dict[str, Any]:
+        base = dict(current or incoming)
+        base["audit_log"] = _merge_audit_events(
+            list((current or {}).get("audit_log") or []),
+            list(incoming.get("audit_log") or []),
+        )
+        if incoming.get("review_invite_emails_sent_at"):
+            base["review_invite_emails_sent_at"] = incoming["review_invite_emails_sent_at"]
+        if incoming.get("updated_at"):
+            base["updated_at"] = incoming["updated_at"]
+        return base
+
+    if _use_postgres():
+        from backend.db.agreement_sql import agreement_postgres_connection, pg_execute
+
+        now = datetime.now(timezone.utc)
+        with agreement_postgres_connection() as cx:
+            current_row = pg_execute(
+                cx,
+                "SELECT payload FROM agreement_drafts WHERE id = ? FOR UPDATE",
+                (agreement_id,),
+            ).fetchone()
+            current = _decode_draft_payload(current_row[0]) if current_row else None
+            merged = _merge_outcome(current, draft)
+            payload_text = canon_json_bytes(merged).decode("utf-8")
+            pg_execute(
+                cx,
+                """
+                INSERT INTO agreement_drafts (id, payload, created_at, updated_at)
+                VALUES (?, ?::jsonb, ?, ?)
+                ON CONFLICT (id) DO UPDATE SET
+                  payload = EXCLUDED.payload,
+                  updated_at = EXCLUDED.updated_at
+                """,
+                (agreement_id, payload_text, now, now),
+            )
+        return
+
+    path = _agreement_path(agreement_id)
+    with agreement_file_lock(agreement_id):
+        current = _decode_draft_payload(path.read_text(encoding="utf-8")) if path.exists() else None
+        merged = _merge_outcome(current, draft)
+        _write_draft_file_unlocked(path, merged)
 
 
 def _write_draft_file_unlocked(path: Path, draft: Dict[str, Any]) -> None:
@@ -206,11 +391,15 @@ def _write_draft_file_unlocked(path: Path, draft: Dict[str, Any]) -> None:
             f.flush()
             os.fsync(f.fileno())
         os.replace(tmp_name, path)
-        dir_fd = os.open(path.parent, os.O_RDONLY)
         try:
-            os.fsync(dir_fd)
-        finally:
-            os.close(dir_fd)
+            dir_fd = os.open(path.parent, os.O_RDONLY)
+            try:
+                os.fsync(dir_fd)
+            finally:
+                os.close(dir_fd)
+        except OSError:
+            # File content is committed via os.replace; directory fsync is best-effort durability.
+            pass
     finally:
         if os.path.exists(tmp_name):
             os.unlink(tmp_name)

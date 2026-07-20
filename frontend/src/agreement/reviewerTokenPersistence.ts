@@ -141,9 +141,11 @@ export function reviewerNeedsPersonalizedLink(args: {
   partiesHaveIds: boolean;
   participantPid: string;
   recipientAccessToken: string;
+  negotiationReviewSessionAuth?: boolean;
 }): boolean {
   if (args.entryKind !== "review") return false;
   if (!args.partiesHaveIds) return false;
+  if (args.negotiationReviewSessionAuth) return false;
   if (args.recipientAccessToken.trim()) return false;
   return !args.participantPid.trim();
 }

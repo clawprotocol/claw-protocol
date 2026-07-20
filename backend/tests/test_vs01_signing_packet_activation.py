@@ -10,6 +10,13 @@ import pytest
 from fastapi.testclient import TestClient
 
 from backend.main import app
+from backend.tests.negotiation_review_test_helpers import (
+    bootstrap_review_session,
+    extract_bootstrap_token_from_review_url,
+    mint_owner_review_copy_link,
+    review_mutation_headers,
+)
+
 from backend.services.agreement_draft_store import (
     activate_vs01_signing_packet,
     load_draft,
@@ -43,6 +50,9 @@ def _isolated_store(monkeypatch, tmp_path):
     monkeypatch.setenv("CLAW_AGREEMENT_DB_PATH", str(tmp_path / "agreements.sqlite3"))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
     monkeypatch.setenv("CLAW_AGREEMENT_SIGNING_TOKEN_SECRET", "unit-test-signing-packet-activation-secret")
+    monkeypatch.setenv("CLAW_ENVIRONMENT", "local")
+    monkeypatch.setenv("CLAW_CORS_ALLOW_ORIGINS", "http://testserver,https://testserver")
+    monkeypatch.setenv("CLAW_NEGOTIATION_REVIEW_BOOTSTRAP_RATE_LIMIT_DISABLED", "1")
     usage_economics_store_mod._store = None  # noqa: SLF001
     yield
     usage_economics_store_mod._store = None  # noqa: SLF001
@@ -556,19 +566,15 @@ def test_activation_get_requires_owner_workspace_not_recipient_or_anonymous():
     assert anon.status_code == 401
     assert anon.json()["detail"]["code"] == "org_header_required"
 
-    mint = client.post(
-        f"/api/agreements/{agreement_id}/recipient-access-token",
-        headers=_ORG_H,
-        json={
-            "mode": "review",
-            "role": "signer",
-            "recipient_party_id": draft["parties"][1]["id"],
-        },
+    bootstrap_review_session(
+        client,
+        agreement_id,
+        _ORG_H,
+        role="signer",
+        recipient_party_id=draft["parties"][1]["id"],
     )
-    assert mint.status_code == 200
     recipient = client.get(
         f"/api/agreements/{agreement_id}/signing-packet/activation",
-        headers={"X-Claw-Recipient-Access-Token": mint.json()["token"]},
     )
     assert recipient.status_code == 401
     assert recipient.json()["detail"]["code"] == "org_header_required"
@@ -584,19 +590,15 @@ def test_activation_get_stays_owner_only_when_usage_economics_disabled(monkeypat
     assert anon.status_code == 401
     assert anon.json()["detail"]["code"] == "org_header_required"
 
-    mint = client.post(
-        f"/api/agreements/{agreement_id}/recipient-access-token",
-        headers=_ORG_H,
-        json={
-            "mode": "review",
-            "role": "signer",
-            "recipient_party_id": draft["parties"][1]["id"],
-        },
+    bootstrap_review_session(
+        client,
+        agreement_id,
+        _ORG_H,
+        role="signer",
+        recipient_party_id=draft["parties"][1]["id"],
     )
-    assert mint.status_code == 200
     recipient = client.get(
         f"/api/agreements/{agreement_id}/signing-packet/activation",
-        headers={"X-Claw-Recipient-Access-Token": mint.json()["token"]},
     )
     assert recipient.status_code == 401
     assert recipient.json()["detail"]["code"] == "org_header_required"

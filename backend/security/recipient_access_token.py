@@ -89,4 +89,8 @@ def verify_recipient_access_token(*, token: str, secret: bytes) -> Dict[str, Any
     if int(time.time()) > exp:
         raise ValueError("token_expired")
 
+    pur = str(payload.get("pur") or "").strip()
+    if pur == "review_bootstrap":
+        raise ValueError("bootstrap_token_not_permitted")
+
     return payload

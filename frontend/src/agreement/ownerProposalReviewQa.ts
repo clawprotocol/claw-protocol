@@ -66,10 +66,19 @@ export function corpusFingerprint(text: string): string {
   return `${body.length}:${(h >>> 0).toString(16).padStart(8, "0")}`;
 }
 
+import { redactReviewUrlForLog } from "../launch/simpleProduct/reviewerLinkRowModel";
+
 function logOwnerReview(event: string, payload: Record<string, unknown>): void {
   if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
-  // eslint-disable-next-line no-console
-  console.info(event, payload);
+  const sanitized: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(payload)) {
+    if (typeof value === "string" && (key === "absoluteUrl" || key.toLowerCase().includes("href") || key.toLowerCase().includes("url"))) {
+      sanitized[key] = redactReviewUrlForLog(value);
+    } else {
+      sanitized[key] = value;
+    }
+  }
+  console.info(event, sanitized);
 }
 
 export function logOwnerReviewOpened(payload: {

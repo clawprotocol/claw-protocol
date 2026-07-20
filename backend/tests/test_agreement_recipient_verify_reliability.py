@@ -1,4 +1,4 @@
-"""Reliability for recipient-access-token mint, access/validate, and public /verify API."""
+"""Reliability for owner review copy-link mint, access/validate, and public /verify API."""
 
 from unittest import mock
 
@@ -6,6 +6,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from backend.main import app
+from backend.tests.negotiation_review_test_helpers import mint_owner_review_copy_link
 from backend.usage_economics import store as usage_economics_store_mod
 
 pytestmark = pytest.mark.unit
@@ -42,33 +43,30 @@ def _create_draft_with_parties(client: TestClient) -> str:
     return c.json()["id"]
 
 
-def test_recipient_access_token_mint_succeeds_without_explicit_secret_non_prod(
+def test_owner_review_copy_link_mint_succeeds_without_explicit_secret_non_prod(
     monkeypatch, tmp_path
 ):
-    """(a) Valid agreement + parties: mint returns 200 and token when secret uses non-prod fallback."""
+    """Valid agreement + parties: owner copy-link returns review_url when secret uses non-prod fallback."""
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
     monkeypatch.setenv("CLAW_ENVIRONMENT", "local")
     monkeypatch.delenv("CLAW_AGREEMENT_SIGNING_TOKEN_SECRET", raising=False)
     client = TestClient(app)
     aid = _create_draft_with_parties(client)
-    mint = client.post(
-        f"/api/agreements/{aid}/recipient-access-token",
-        headers=_ORG,
-        json={
-            "mode": "review",
-            "role": "signer",
-            "recipient_party_id": "p-signer",
-            "inviter_display_name": "Owner Co",
-        },
+    body = mint_owner_review_copy_link(
+        client,
+        aid,
+        _ORG,
+        role="signer",
+        recipient_party_id="p-signer",
+        inviter_display_name="Owner Co",
     )
-    assert mint.status_code == 200
-    body = mint.json()
-    assert body.get("token")
+    assert body.get("review_url")
     assert body.get("expires_in_seconds")
+    assert "token" not in body
 
 
-def test_recipient_access_token_persists_review_first_final_corpus(monkeypatch, tmp_path):
+def test_owner_review_copy_link_persists_review_first_final_corpus(monkeypatch, tmp_path):
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
     monkeypatch.setenv("CLAW_ENVIRONMENT", "local")
@@ -76,17 +74,14 @@ def test_recipient_access_token_persists_review_first_final_corpus(monkeypatch, 
     client = TestClient(app)
     aid = _create_draft_with_parties(client)
     final_corpus = "FINAL_GUIDED_REVIEW_CORPUS_MARKER\n" + ("final guided review body " * 40)
-    mint = client.post(
-        f"/api/agreements/{aid}/recipient-access-token",
-        headers=_ORG,
-        json={
-            "mode": "review",
-            "role": "signer",
-            "review_first_document_text": final_corpus,
-            "review_first_document_source": "unit_test",
-        },
+    mint_owner_review_copy_link(
+        client,
+        aid,
+        _ORG,
+        role="signer",
+        review_first_document_text=final_corpus,
+        review_first_document_source="unit_test",
     )
-    assert mint.status_code == 200
 
     got = client.get(f"/api/agreements/{aid}", headers=_ORG)
     assert got.status_code == 200
@@ -103,26 +98,21 @@ def test_recipient_access_token_persists_review_first_final_corpus(monkeypatch, 
     assert "Net 30" not in rendered.json()["rendered_html"]
 
 
-def test_recipient_access_token_does_not_503_without_signing_lock(monkeypatch, tmp_path):
-    """(b) Review mint must not 503 when optional signing-lock / proof fields are absent."""
+def test_owner_review_copy_link_does_not_503_without_signing_lock(monkeypatch, tmp_path):
+    """Review copy-link mint must not 503 when optional signing-lock / proof fields are absent."""
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
     monkeypatch.setenv("CLAW_ENVIRONMENT", "staging")
     monkeypatch.delenv("CLAW_AGREEMENT_SIGNING_TOKEN_SECRET", raising=False)
     client = TestClient(app)
     aid = _create_draft_with_parties(client)
-    mint = client.post(
-        f"/api/agreements/{aid}/recipient-access-token",
-        headers=_ORG,
-        json={"mode": "review", "role": "signer"},
-    )
-    assert mint.status_code == 200
-    assert mint.status_code != 503
-    assert mint.json().get("token")
+    body = mint_owner_review_copy_link(client, aid, _ORG, role="signer")
+    assert body.get("review_url")
+    assert "token" not in body
 
 
 def test_public_verify_does_not_500_when_overview_hash_raises(monkeypatch, tmp_path):
-    """(c) Existing agreement: degraded 200 payload if verification bundle raises."""
+    """Existing agreement: degraded 200 payload if verification bundle raises."""
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
     monkeypatch.setenv("CLAW_PUBLIC_AGREEMENT_VERIFY", "1")
@@ -146,7 +136,7 @@ def test_public_verify_does_not_500_when_overview_hash_raises(monkeypatch, tmp_p
 
 
 def test_public_verify_missing_agreement_404_structured(monkeypatch, tmp_path):
-    """(d) Missing agreement returns 404 with safe structured detail."""
+    """Missing agreement returns 404 with safe structured detail."""
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
     monkeypatch.setenv("CLAW_PUBLIC_AGREEMENT_VERIFY", "1")
@@ -158,7 +148,7 @@ def test_public_verify_missing_agreement_404_structured(monkeypatch, tmp_path):
     assert detail.get("code") == "agreement_not_found"
 
 
-def test_recipient_access_token_mint_422_when_prod_and_secret_unset(monkeypatch, tmp_path):
+def test_owner_review_copy_link_mint_422_when_prod_and_secret_unset(monkeypatch, tmp_path):
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
     monkeypatch.setenv("CLAW_ENVIRONMENT", "production")
@@ -166,7 +156,7 @@ def test_recipient_access_token_mint_422_when_prod_and_secret_unset(monkeypatch,
     client = TestClient(app)
     aid = _create_draft_with_parties(client)
     mint = client.post(
-        f"/api/agreements/{aid}/recipient-access-token",
+        f"/api/agreements/{aid}/owner-review-copy-link",
         headers=_ORG,
         json={"mode": "review", "role": "signer"},
     )
@@ -176,7 +166,7 @@ def test_recipient_access_token_mint_422_when_prod_and_secret_unset(monkeypatch,
     assert d.get("code") == "signing_token_secret_not_configured"
 
 
-def test_recipient_access_token_mint_retries_on_transient_mint_failure(monkeypatch, tmp_path):
+def test_owner_review_copy_link_mint_retries_on_transient_mint_failure(monkeypatch, tmp_path):
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
     monkeypatch.setenv("CLAW_ENVIRONMENT", "local")
@@ -184,19 +174,24 @@ def test_recipient_access_token_mint_retries_on_transient_mint_failure(monkeypat
     client = TestClient(app)
     aid = _create_draft_with_parties(client)
     with mock.patch(
-        "backend.routers.agreements_v2_api.mint_recipient_access_token",
-        side_effect=[RuntimeError("transient"), RuntimeError("transient"), "ok-token"],
+        "backend.services.owner_review_copy_link.mint_negotiation_review_bootstrap_token",
+        side_effect=[
+            RuntimeError("transient"),
+            RuntimeError("transient"),
+            ("ok-token", "jti", "exp"),
+        ],
     ):
         mint = client.post(
-            f"/api/agreements/{aid}/recipient-access-token",
+            f"/api/agreements/{aid}/owner-review-copy-link",
             headers=_ORG,
             json={"mode": "review", "role": "signer"},
         )
     assert mint.status_code == 200
-    assert mint.json().get("token") == "ok-token"
+    assert "#t=ok-token" in mint.json().get("review_url", "")
+    assert "token" not in mint.json()
 
 
-def test_recipient_access_token_mint_422_after_exhausted_retries(monkeypatch, tmp_path):
+def test_owner_review_copy_link_mint_422_after_exhausted_retries(monkeypatch, tmp_path):
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
     monkeypatch.setenv("CLAW_ENVIRONMENT", "local")
@@ -204,11 +199,11 @@ def test_recipient_access_token_mint_422_after_exhausted_retries(monkeypatch, tm
     client = TestClient(app)
     aid = _create_draft_with_parties(client)
     with mock.patch(
-        "backend.routers.agreements_v2_api.mint_recipient_access_token",
+        "backend.services.owner_review_copy_link.mint_negotiation_review_bootstrap_token",
         side_effect=RuntimeError("persistent"),
     ):
         mint = client.post(
-            f"/api/agreements/{aid}/recipient-access-token",
+            f"/api/agreements/{aid}/owner-review-copy-link",
             headers=_ORG,
             json={"mode": "review", "role": "signer"},
         )

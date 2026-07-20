@@ -15,6 +15,6 @@ describe("Agreement recipient review path parsing", () => {
   });
 
   it("builds canonical recipient magic link path", () => {
-    expect(agreementMagicLinkPath("ag_1", "tok_123")).toBe("/agreements/ag_1/review?t=tok_123");
+    expect(agreementMagicLinkPath("ag_1", "tok_123")).toBe("/agreements/ag_1/review#t=tok_123");
   });
 });

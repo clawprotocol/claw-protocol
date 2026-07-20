@@ -134,6 +134,12 @@ import { emitActionCompleted } from "../joy/joyTelemetry";
 import { errorMessageFromResponse, resolveApiBase } from "../lib/clawApi";
 import { trackAgreementFunnelEvent } from "../tracking/agreementFunnelAnalytics";
 import { recipientAgreementReadHeaders } from "./recipientAccessApi";
+import {
+  logoutNegotiationReviewSessionPresentation,
+  onNegotiationReviewSessionInvalidated,
+  recipientReviewFetchInit,
+  setNegotiationReviewSessionAuth,
+} from "./recipientReviewAuth";
 import { postProRedlineReviewerSuggestion } from "./proRedlineReviewApi";
 import { isPaidProAgreementAuthoritative } from "../components/agreements/paidProAgreementAuthority";
 import { RecipientWantACopyStrip } from "./recipientWantACopyStrip";
@@ -685,8 +691,10 @@ type Props = {
   participantPartyId?: string;
   /** When set (e.g. magic link metadata), shown as “invited by …” on the landing card. */
   inviterDisplayNameOverride?: string;
-  /** Minted link token for scoped draft GET/render (must match this tab’s URL token). */
+  /** Minted link token for scoped draft GET/render (legacy query-token path). */
   recipientAccessToken?: string;
+  /** HttpOnly negotiation-review session established via fragment bootstrap. */
+  negotiationReviewSessionAuth?: boolean;
   /** Multi-round negotiation lineage (compare base / parent); defaults to first recipient round. */
   revisionLineage?: RecipientRevisionLineage;
   /** Parent shell hides account/plan chrome while the approved/waiting screen is shown. */
@@ -781,6 +789,7 @@ export function AgreementRecipientReview({
   participantPartyId = "",
   inviterDisplayNameOverride = "",
   recipientAccessToken = "",
+  negotiationReviewSessionAuth = false,
   revisionLineage = DEFAULT_RECIPIENT_REVISION_LINEAGE,
   onRecipientApprovedWaitingChange,
   recipientViewerContext = "public_recipient",
@@ -803,6 +812,10 @@ export function AgreementRecipientReview({
   const [approvedAck, setApprovedAck] = useState(false);
   const [localApprovalAt, setLocalApprovalAt] = useState<string | null>(null);
   const [bundle, setBundle] = useState<AgreementVersionBundle | null>(null);
+  const [sessionPresentationInvalid, setSessionPresentationInvalid] = useState(false);
+  const [sessionLogoutFailed, setSessionLogoutFailed] = useState(false);
+  const refreshGenerationRef = useRef(0);
+  const refreshAbortRef = useRef<AbortController | null>(null);
   const [externalAiPaste, setExternalAiPaste] = useState("");
   const [recipientPreview, setRecipientPreview] = useState<RecipientPreview | null>(null);
   const [sendSuggestedEditsModalOpen, setSendSuggestedEditsModalOpen] = useState(false);
@@ -857,9 +870,13 @@ export function AgreementRecipientReview({
     [agreementId],
   );
   const recipientVersionStoreScope = useMemo(() => {
+    if (negotiationReviewSessionAuth) {
+      const pid = (participantPartyId || "").trim();
+      return pid ? `session:${pid}` : "session";
+    }
     const t = (recipientAccessToken || "").trim();
     return t ? recipientLinkTokenFingerprint(t) : undefined;
-  }, [recipientAccessToken]);
+  }, [recipientAccessToken, negotiationReviewSessionAuth, participantPartyId]);
   const revisionPlainFieldId = `recipient-revision-plain-${intakeFieldIdSuffix}`;
   const externalPasteFieldId = `recipient-external-paste-${intakeFieldIdSuffix}`;
   const editDraftFieldId = `recipient-edit-draft-${intakeFieldIdSuffix}`;
@@ -874,6 +891,69 @@ export function AgreementRecipientReview({
   });
   useAutosizeTextarea(proRedlineSuggestTextareaRef, proRedlineSuggestText, { minPx: 112, maxPx: 440 });
   const access = useAccess();
+
+  useEffect(() => {
+    setNegotiationReviewSessionAuth(negotiationReviewSessionAuth);
+  }, [negotiationReviewSessionAuth]);
+
+  useEffect(() => {
+    refreshGenerationRef.current += 1;
+    refreshAbortRef.current?.abort();
+    const controller = new AbortController();
+    refreshAbortRef.current = controller;
+    setSessionPresentationInvalid(false);
+    setSessionLogoutFailed(false);
+    setDraft(null);
+    setRenderedHtml("");
+    setBundle(null);
+    setRecipientPreview(null);
+    setRecipientSuggestedEditsSentAck(false);
+    setApprovedAck(false);
+    setLocalApprovalAt(null);
+    setError(null);
+    setLoading(true);
+    return () => {
+      controller.abort();
+    };
+  }, [agreementId, recipientAccessToken, participantPartyId, negotiationReviewSessionAuth]);
+
+  const clearSessionPresentation = useCallback(() => {
+    setSessionPresentationInvalid(true);
+    setDraft(null);
+    setBundle(null);
+    setRenderedHtml("");
+    setLoading(false);
+    setError(null);
+    setApproving(false);
+    setRecipientPreview(null);
+    setRecipientSuggestedEditsSentAck(false);
+    setApprovedAck(false);
+    setNegotiationReviewSessionAuth(false);
+  }, []);
+
+  useEffect(() => {
+    return onNegotiationReviewSessionInvalidated(() => {
+      clearSessionPresentation();
+    });
+  }, [clearSessionPresentation]);
+
+  const handleReviewSessionLogout = useCallback(async () => {
+    setSessionLogoutFailed(false);
+    const result = await logoutNegotiationReviewSessionPresentation();
+    if (!result.ok) {
+      setSessionLogoutFailed(true);
+      return;
+    }
+    clearSessionPresentation();
+  }, [clearSessionPresentation]);
+
+  const hasRecipientAuth =
+    negotiationReviewSessionAuth || Boolean((recipientAccessToken || "").trim());
+
+  const recipientReadFetchInit = useMemo(
+    () => recipientReviewFetchInit(negotiationReviewSessionAuth ? null : recipientAccessToken),
+    [recipientAccessToken, negotiationReviewSessionAuth],
+  );
 
   /** Latest whole-doc preview runner (assigned after function is defined each render). */
   const previewWholeDocumentRevisionRef = useRef<
@@ -962,7 +1042,7 @@ export function AgreementRecipientReview({
 
   useEffect(() => {
     if (entry.kind !== "review" || recipientLinkRole !== "reviewer") return;
-    if (!recipientAccessToken.trim()) return;
+    if (!hasRecipientAuth) return;
     if (reviewerViewLoggedRef.current) return;
     reviewerViewLoggedRef.current = true;
     recipientReviewDevInfo("[reviewer-view-visible]", { agreementId, mode: "reviewer" as const });
@@ -983,7 +1063,7 @@ export function AgreementRecipientReview({
         canonicalHash: null,
       });
     };
-  }, [agreementId, entry.kind, recipientAccessToken, recipientLinkRole]);
+  }, [agreementId, entry.kind, recipientAccessToken, recipientLinkRole, hasRecipientAuth]);
 
   const frictionPatterns = useMemo(
     () => computeNegotiationPatterns(bundle?.versions ?? []),
@@ -1104,6 +1184,10 @@ export function AgreementRecipientReview({
   );
   const partiesHaveIds = Boolean(draft?.parties?.some((p) => (p.id || "").trim()));
   useEffect(() => {
+    if (negotiationReviewSessionAuth) {
+      setTokenValidatedPartyId((participantPartyId || "").trim());
+      return;
+    }
     const tok = recipientAccessToken.trim();
     if (!tok) {
       setTokenValidatedPartyId("");
@@ -1118,7 +1202,7 @@ export function AgreementRecipientReview({
     return () => {
       cancel = true;
     };
-  }, [agreementId, recipientAccessToken]);
+  }, [agreementId, recipientAccessToken, negotiationReviewSessionAuth, participantPartyId]);
   const participantPid = useMemo(
     () =>
       resolveReviewFirstStageProposerId({
@@ -1137,8 +1221,9 @@ export function AgreementRecipientReview({
         partiesHaveIds,
         participantPid,
         recipientAccessToken,
+        negotiationReviewSessionAuth,
       }),
-    [entry.kind, partiesHaveIds, participantPid, recipientAccessToken],
+    [entry.kind, partiesHaveIds, participantPid, recipientAccessToken, negotiationReviewSessionAuth],
   );
   const myPendingProposals = useMemo(() => {
     if (!partiesHaveIds) return allOpenProposals;
@@ -2046,15 +2131,28 @@ export function AgreementRecipientReview({
   }, [agreementId, legalRedlineDocumentVm, previewDiff, recipientPreview, recipientRedlinePlainTexts]);
 
   const refresh = useCallback(async () => {
+    const generation = refreshGenerationRef.current;
+    const abortSignal = refreshAbortRef.current?.signal;
+    const isCurrentLoad = () => generation === refreshGenerationRef.current;
     setLoading(true);
     setError(null);
     try {
       const readHeaders = recipientAgreementReadHeaders(agreementId, recipientAccessToken);
-      const res = await fetch(`${API_BASE}/api/agreements/${encodeURIComponent(agreementId)}`, {
+      const draftPath = negotiationReviewSessionAuth
+        ? `${API_BASE}/api/agreements/${encodeURIComponent(agreementId)}/negotiation-review/draft`
+        : `${API_BASE}/api/agreements/${encodeURIComponent(agreementId)}`;
+      const res = await fetch(draftPath, {
+        credentials: recipientReadFetchInit.credentials,
         headers: readHeaders,
+        signal: abortSignal,
       });
+      if (!isCurrentLoad()) return;
       const resBody = await res.text();
       if (!res.ok) {
+        if (negotiationReviewSessionAuth && (res.status === 401 || res.status === 403)) {
+          clearSessionPresentation();
+          return;
+        }
         const msg = await errorMessageFromResponse(
           new Response(resBody, { status: res.status }),
           "We couldn't load this agreement. Please try again.",
@@ -2073,6 +2171,7 @@ export function AgreementRecipientReview({
       const d = normalizeAgreementDraftFromApi(payload?.draft ?? null, {
         fallbackAgreementId: agreementId,
       });
+      if (!isCurrentLoad()) return;
       setDraft(d);
       if (!d) {
         setRenderedHtml("");
@@ -2081,12 +2180,22 @@ export function AgreementRecipientReview({
         );
         return;
       }
-      const rr = await fetch(`${API_BASE}/api/agreements/${encodeURIComponent(agreementId)}/render`, {
+      const renderPath = negotiationReviewSessionAuth
+        ? `${API_BASE}/api/agreements/${encodeURIComponent(agreementId)}/negotiation-review/render`
+        : `${API_BASE}/api/agreements/${encodeURIComponent(agreementId)}/render`;
+      const rr = await fetch(renderPath, {
         method: "POST",
+        credentials: recipientReadFetchInit.credentials,
         headers: readHeaders,
+        signal: abortSignal,
       });
+      if (!isCurrentLoad()) return;
       const rrBody = await rr.text();
       if (!rr.ok) {
+        if (negotiationReviewSessionAuth && (rr.status === 401 || rr.status === 403)) {
+          clearSessionPresentation();
+          return;
+        }
         const msg = await errorMessageFromResponse(
           new Response(rrBody, { status: rr.status }),
           "We couldn't load the formatted agreement. Please try again.",
@@ -2143,22 +2252,47 @@ export function AgreementRecipientReview({
         saveBundle(b, recipientVersionStoreScope);
       }
       setBundle(b);
+      if (!isCurrentLoad()) return;
       const aid = agreementId.trim();
       logReviewStateSource({
         source: "agreementRecipientReview.refresh",
         agreementScoped: false,
         tokenScoped: Boolean((recipientAccessToken || "").trim()),
         agreementIdShort: aid.length <= 12 ? aid : `${aid.slice(0, 8)}…`,
-        tokenHashShort: recipientLinkTokenFingerprint(recipientAccessToken),
         participantPartyId: participantPid || null,
         recipientApprovedInAudit: auditHasRecipientApprovalForParticipant(d.audit_log, participantPid),
       });
     } catch (e: unknown) {
+      if (!isCurrentLoad()) return;
+      if (e instanceof DOMException && e.name === "AbortError") return;
       setError(e instanceof Error ? e.message : "Could not load agreement.");
     } finally {
-      setLoading(false);
+      if (isCurrentLoad()) {
+        setLoading(false);
+      }
     }
-  }, [agreementId, entry.kind, recipientAccessToken, recipientVersionStoreScope, participantPid]);
+  }, [agreementId, entry.kind, recipientAccessToken, recipientVersionStoreScope, participantPid, negotiationReviewSessionAuth, clearSessionPresentation, recipientReadFetchInit]);
+
+  const reviewSessionLogoutControl =
+    negotiationReviewSessionAuth && !sessionPresentationInvalid ? (
+      <div className="flex flex-col items-end gap-1">
+        <button
+          type="button"
+          className="vs01-btn vs01-btn--secondary vs01-btn--compact shrink-0"
+          data-testid="recipient-review-session-logout"
+          onClick={() => {
+            void handleReviewSessionLogout();
+          }}
+        >
+          Log out
+        </button>
+        {sessionLogoutFailed ? (
+          <p className="max-w-[14rem] text-right text-[11px] text-rose-300" data-testid="recipient-review-session-logout-failed">
+            We could not end your review session. Check your connection and try again.
+          </p>
+        ) : null}
+      </div>
+    ) : null;
 
   const draftSanitizeContext = useMemo(() => {
     if (!draft) return "";
@@ -2626,7 +2760,6 @@ export function AgreementRecipientReview({
       hasMaterialChanges: reviewFirstHasMaterialChanges,
       participantPid: participantPid || null,
       needsPersonalizedLink,
-      tokenHashShort: recipientLinkTokenFingerprint(recipientAccessToken),
     });
     if (key === lastReviewFirstSubmitAuthorityLogKeyRef.current) return;
     lastReviewFirstSubmitAuthorityLogKeyRef.current = key;
@@ -2639,7 +2772,6 @@ export function AgreementRecipientReview({
       needsPersonalizedLink,
       hasRecipientPreview: Boolean(recipientPreview),
       hasMaterialChanges: reviewFirstHasMaterialChanges,
-      tokenHashShort: recipientLinkTokenFingerprint(recipientAccessToken),
     });
   }, [
     agreementId,
@@ -2738,8 +2870,12 @@ export function AgreementRecipientReview({
       /** Owner-current HTML snapshot: re-fetch from /render immediately before revise (not React state alone). */
       let baselineHtml = renderedHtml;
       try {
-        const rr = await fetch(`${API_BASE}/api/agreements/${encodeURIComponent(agreementId)}/render`, {
+        const renderPath = negotiationReviewSessionAuth
+          ? `${API_BASE}/api/agreements/${encodeURIComponent(agreementId)}/negotiation-review/render`
+          : `${API_BASE}/api/agreements/${encodeURIComponent(agreementId)}/render`;
+        const rr = await fetch(renderPath, {
           method: "POST",
+          credentials: recipientReadFetchInit.credentials,
           headers: readHeaders,
         });
         if (rr.ok) {
@@ -2754,6 +2890,7 @@ export function AgreementRecipientReview({
       const apiInstruction = `${recipientPostureInstructionPreamble(recipientPosture)}\n\n${text}`;
       const res = await fetch(`${API_BASE}/api/agreements/${encodeURIComponent(agreementId)}/revise`, {
         method: "POST",
+        credentials: recipientReadFetchInit.credentials,
         headers: {
           "Content-Type": "application/json",
           ...recipientAgreementReadHeaders(agreementId, recipientAccessToken),
@@ -2863,8 +3000,12 @@ export function AgreementRecipientReview({
       const readHeaders = recipientAgreementReadHeaders(agreementId, recipientAccessToken);
       let baselineHtml = renderedHtml;
       try {
-        const rr = await fetch(`${API_BASE}/api/agreements/${encodeURIComponent(agreementId)}/render`, {
+        const renderPath = negotiationReviewSessionAuth
+          ? `${API_BASE}/api/agreements/${encodeURIComponent(agreementId)}/negotiation-review/render`
+          : `${API_BASE}/api/agreements/${encodeURIComponent(agreementId)}/render`;
+        const rr = await fetch(renderPath, {
           method: "POST",
+          credentials: recipientReadFetchInit.credentials,
           headers: readHeaders,
         });
         if (rr.ok) {
@@ -2986,10 +3127,14 @@ export function AgreementRecipientReview({
     try {
       await Promise.resolve();
       let baselineHtmlLive = renderedHtml.trim();
+      const readHeaders = recipientAgreementReadHeaders(agreementId, recipientAccessToken);
       try {
-        const readHeaders = recipientAgreementReadHeaders(agreementId, recipientAccessToken);
-        const rr = await fetch(`${API_BASE}/api/agreements/${encodeURIComponent(agreementId)}/render`, {
+        const renderPath = negotiationReviewSessionAuth
+          ? `${API_BASE}/api/agreements/${encodeURIComponent(agreementId)}/negotiation-review/render`
+          : `${API_BASE}/api/agreements/${encodeURIComponent(agreementId)}/render`;
+        const rr = await fetch(renderPath, {
           method: "POST",
+          credentials: recipientReadFetchInit.credentials,
           headers: readHeaders,
         });
         if (rr.ok) {
@@ -3367,7 +3512,7 @@ export function AgreementRecipientReview({
     }
     const stageProposer = resolveStageProposer();
     const effectiveProposerId = stageProposer.proposerId;
-    const hasAccessToken = Boolean(recipientAccessToken.trim());
+    const hasAccessToken = hasRecipientAuth;
     if (
       !effectiveProposerId &&
       !hasAccessToken &&
@@ -3695,6 +3840,16 @@ export function AgreementRecipientReview({
     } finally {
       setApproving(false);
     }
+  }
+
+  if (sessionPresentationInvalid) {
+    return (
+      <div className="vs01-agreement-review-inner p-6" data-testid="recipient-review-session-invalid">
+        <p className="text-sm text-rose-300">
+          This review session is invalid, expired, or no longer available. Request a new link from the sender.
+        </p>
+      </div>
+    );
   }
 
   if (loading && !draft) {
@@ -4756,6 +4911,7 @@ export function AgreementRecipientReview({
             <p className="mt-1 max-w-xl text-sm text-slate-400">{RECIPIENT_PUBLIC_HERO_SUBTITLE}</p>
             {recipientTrustCueStrip()}
           </div>
+          {reviewSessionLogoutControl}
           {onClose ? (
             <button type="button" className="vs01-btn vs01-btn--secondary vs01-btn--compact shrink-0" onClick={onClose}>
               Close
@@ -5081,6 +5237,7 @@ export function AgreementRecipientReview({
             ) : null}
             {recipientTrustCueStrip()}
           </div>
+          {reviewSessionLogoutControl}
           {onClose ? (
             <button type="button" className="vs01-btn vs01-btn--secondary vs01-btn--compact shrink-0" onClick={onClose}>
               Close
@@ -5335,11 +5492,14 @@ export function AgreementRecipientReview({
             : "Edit the agreement anywhere, then paste the updated wording here."
         }
         action={
-          onClose ? (
-          <button type="button" className={reviewActionButtonClass("secondary")} onClick={onClose}>
-            Close
-          </button>
-          ) : null
+          <div className="flex flex-wrap items-center gap-2">
+            {reviewSessionLogoutControl}
+            {onClose ? (
+              <button type="button" className={reviewActionButtonClass("secondary")} onClick={onClose}>
+                Close
+              </button>
+            ) : null}
+          </div>
         }
       />
 
@@ -6418,11 +6578,11 @@ function parseRecipientRoleParam(search: string): RecipientLinkRole | undefined 
   return undefined;
 }
 
-/** Primary recipient deep link: ``/agreements/{id}/review?t=…`` (no account required). */
+/** Primary recipient deep link: ``/agreements/{id}/review#t=…`` (fragment bootstrap; no account required). */
 export function agreementMagicLinkPath(agreementId: string, token: string): string {
   const a = encodeURIComponent(agreementId);
   const t = encodeURIComponent(token.trim());
-  return `/agreements/${a}/review?t=${t}`;
+  return `/agreements/${a}/review#t=${t}`;
 }
 
 export function parseAgreementReviewPath(

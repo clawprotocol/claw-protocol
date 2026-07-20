@@ -1,5 +1,7 @@
 """Read-scope boundaries for full agreement drafts (owner org vs recipient token vs public verify)."""
 
+from urllib.parse import unquote
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -7,6 +9,40 @@ from backend.main import app
 from backend.usage_economics import store as usage_economics_store_mod
 
 pytestmark = pytest.mark.unit
+
+
+@pytest.fixture(autouse=True)
+def _negotiation_review_local_test_env(monkeypatch):
+    monkeypatch.setenv("CLAW_ENVIRONMENT", "local")
+    monkeypatch.setenv("CLAW_CORS_ALLOW_ORIGINS", "http://testserver,https://testserver")
+    monkeypatch.setenv("CLAW_NEGOTIATION_REVIEW_BOOTSTRAP_RATE_LIMIT_DISABLED", "1")
+
+
+def _bootstrap_review_session_from_mint(client: TestClient, mint_response=None, *, agreement_id: str, org_headers: dict) -> None:
+    if mint_response is not None:
+        body = mint_response.json()
+    else:
+        mint = client.post(
+            f"/api/agreements/{agreement_id}/owner-review-copy-link",
+            headers=org_headers,
+            json={
+                "mode": "review",
+                "role": "signer",
+                "recipient_party_id": "p-r",
+                "inviter_display_name": "Owner",
+            },
+        )
+        assert mint.status_code == 200, mint.text
+        body = mint.json()
+    review_url = str(body.get("review_url") or "")
+    token_part = review_url.split("#t=", 1)[-1].split("&", 1)[0]
+    token = unquote(token_part)
+    ex = client.post(
+        "/api/negotiation-review/bootstrap/exchange",
+        json={"token": token},
+        headers={"Origin": "http://testserver"},
+    )
+    assert ex.status_code == 200, ex.text
 
 
 @pytest.fixture(autouse=True)
@@ -141,7 +177,7 @@ def test_full_draft_get_with_recipient_token(monkeypatch, tmp_path):
     )
 
     mint = client.post(
-        f"/api/agreements/{aid}/recipient-access-token",
+        f"/api/agreements/{aid}/owner-review-copy-link",
         headers=_ORG_A,
         json={
             "mode": "review",
@@ -151,16 +187,19 @@ def test_full_draft_get_with_recipient_token(monkeypatch, tmp_path):
         },
     )
     assert mint.status_code == 200
-    tok = mint.json()["token"]
+    _bootstrap_review_session_from_mint(client, mint, agreement_id=aid, org_headers=_ORG_A)
 
-    r = client.get(
-        f"/api/agreements/{aid}",
-        headers={"X-Claw-Recipient-Access-Token": tok},
-    )
+    denied = client.get(f"/api/agreements/{aid}")
+    assert denied.status_code == 403
+    assert denied.json()["detail"]["code"] == "negotiation_review_full_draft_denied"
+
+    r = client.get(f"/api/agreements/{aid}/negotiation-review/draft")
     assert r.status_code == 200
     assert r.json()["draft"]["title"] == "Token read"
+    assert "recipient_delivery_v1" not in r.json()["draft"]
+    assert "negotiation_review_sessions_v1" not in r.json()["draft"]
 
-    bad = client.get(
+    bad = TestClient(app).get(
         f"/api/agreements/{aid}",
         headers={"X-Claw-Recipient-Access-Token": "not-a-real-token"},
     )
@@ -286,7 +325,7 @@ def test_recipient_writes_accept_review_token_and_reject_wrong_party(monkeypatch
     client = TestClient(app)
     aid, draft = _draft_with_two_signers(client, _ORG_A)
     mint = client.post(
-        f"/api/agreements/{aid}/recipient-access-token",
+        f"/api/agreements/{aid}/owner-review-copy-link",
         headers=_ORG_A,
         json={
             "mode": "review",
@@ -296,11 +335,10 @@ def test_recipient_writes_accept_review_token_and_reject_wrong_party(monkeypatch
         },
     )
     assert mint.status_code == 200
-    tok = mint.json()["token"]
-    rh = {"X-Claw-Recipient-Access-Token": tok}
+    _bootstrap_review_session_from_mint(client, mint, agreement_id=aid, org_headers=_ORG_A)
     rv = client.post(
         f"/api/agreements/{aid}/revise",
-        headers=rh,
+        headers={"Origin": "http://testserver"},
         json={
             "instruction": "Set payment terms to Net 60",
             "session_type": "recipient",
@@ -310,7 +348,7 @@ def test_recipient_writes_accept_review_token_and_reject_wrong_party(monkeypatch
     assert rv.status_code == 200
     bad_prop = client.post(
         f"/api/agreements/{aid}/recipient-proposal/stage",
-        headers=rh,
+        headers={"Origin": "http://testserver"},
         json={
             "instruction": "Change terms",
             "proposer_id": "p-r2",
@@ -338,13 +376,17 @@ def test_recipient_revise_rejects_sign_mode_token(monkeypatch, tmp_path):
     monkeypatch.setenv("CLAW_AGREEMENT_SIGNING_TOKEN_SECRET", "unit-test-recipient-write-secret-c")
     client = TestClient(app)
     aid, _draft = _draft_with_two_signers(client, _ORG_A)
-    mint_rev = client.post(
-        f"/api/agreements/{aid}/recipient-access-token",
-        headers=_ORG_A,
-        json={"mode": "review", "role": "signer"},
+    from backend.security.recipient_access_token import mint_recipient_access_token
+
+    secret = b"unit-test-recipient-write-secret-c"
+    review_tok = mint_recipient_access_token(
+        secret=secret,
+        agreement_id=aid,
+        locked_version_id="",
+        mode="review",
+        role="signer",
+        ttl_seconds=3600,
     )
-    assert mint_rev.status_code == 200
-    review_tok = mint_rev.json()["token"]
     rh = {"X-Claw-Recipient-Access-Token": review_tok}
     for pid, label in (("p-r1", "R1"), ("p-r2", "R2")):
         ap = client.post(

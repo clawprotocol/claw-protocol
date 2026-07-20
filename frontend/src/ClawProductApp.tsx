@@ -62,19 +62,24 @@ import {
   validateRecipientAccessToken,
 } from "./agreement/recipientAccessApi";
 import {
-  loadRecipientMagicLinkSession,
-  saveRecipientMagicLinkSession,
-} from "./agreement/recipientMagicLinkSession";
+  fetchNegotiationReviewSessionStatus,
+} from "./agreement/negotiationReviewSessionApi";
 import {
-  loadAnyRecipientMagicLinkSessionForAgreement,
-  logReviewerTokenDetected,
+  exchangeReviewFragmentBootstrapTokenOnce,
+  getReviewFragmentBootstrapExchangePromise,
+} from "./agreement/reviewFragmentBootstrapExchange";
+import {
+  getReviewFragmentBootstrapMetadata,
+  takeReviewFragmentBootstrapTokenOnce,
+} from "./agreement/reviewFragmentBootstrapToken";
+import {
+  invalidateNegotiationReviewSessionPresentation,
+  setNegotiationReviewSessionAuth,
+} from "./agreement/recipientReviewAuth";
+import {
   logReviewerTokenMissing,
-  logReviewerTokenPersisted,
-  reviewerTokenHashShort,
 } from "./agreement/reviewerTokenPersistence";
-import { recipientLinkTokenFingerprint } from "./agreement/recipientLinkTokenFingerprint";
 import { stripRecipientAccessTokenQueryFromLocation } from "./agreement/recipientLinkUrlHygiene";
-import { logRecipientReviewTokenResolved } from "./components/agreements/reviewFlowDebugLog";
 import { Vs01Layout, type Vs01LayoutHero } from "./vs01/Vs01Layout";
 import { Vs01Wizard } from "./vs01/Vs01Wizard";
 import { RecipientBootstrapBoundary } from "./vs01/RecipientBootstrapBoundary";
@@ -228,7 +233,7 @@ function mapApiRoleToRecipientLinkRole(r: string | undefined): RecipientLinkRole
   return undefined;
 }
 
-function AgreementReviewGate(props: {
+export function AgreementReviewGate(props: {
   agreementId: string;
   token?: string;
   recipientLinkRole?: RecipientLinkRole;
@@ -253,6 +258,7 @@ function AgreementReviewGate(props: {
   const [phase, setPhase] = useState<"loading" | "ready" | "bad">("loading");
   const [gateVid, setGateVid] = useState<string | undefined>(undefined);
   const [tokenValidated, setTokenValidated] = useState(false);
+  const [sessionAuthenticated, setSessionAuthenticated] = useState(false);
   const [resolvedRole, setResolvedRole] = useState<RecipientLinkRole | undefined>(undefined);
   const [resolvedPartyId, setResolvedPartyId] = useState<string | undefined>(undefined);
   const [inviterName, setInviterName] = useState<string | undefined>(undefined);
@@ -262,23 +268,132 @@ function AgreementReviewGate(props: {
   useEffect(() => {
     let cancel = false;
     void (async () => {
+      setNegotiationReviewSessionAuth(false);
+
+      const applySessionStatus = (
+        status: Awaited<ReturnType<typeof fetchNegotiationReviewSessionStatus>>,
+      ): boolean => {
+        if (!status.authenticated || status.agreement_id !== agreementId) {
+          return false;
+        }
+        setNegotiationReviewSessionAuth(true);
+        setSessionAuthenticated(true);
+        setTokenValidated(true);
+        setValidatedAccessToken("");
+        const lv = (status.locked_version_id || "").trim();
+        setGateVid(lv || undefined);
+        const mr = mapApiRoleToRecipientLinkRole(
+          typeof status.role === "string" ? status.role : undefined,
+        );
+        setResolvedRole(mr);
+        const pid = (status.recipient_party_id || participantPartyId || "").trim();
+        setResolvedPartyId(pid || undefined);
+        setBadMessage(null);
+        setPhase("ready");
+        return true;
+      };
+
+      const fragmentToken = takeReviewFragmentBootstrapTokenOnce();
+      if (fragmentToken) {
+        let result: Awaited<ReturnType<typeof exchangeReviewFragmentBootstrapTokenOnce>>;
+        try {
+          result = await exchangeReviewFragmentBootstrapTokenOnce(fragmentToken, agreementId);
+        } catch {
+          if (cancel) return;
+          invalidateNegotiationReviewSessionPresentation();
+          setBadMessage(
+            "This link is invalid or expired. Request a new link from the sender.",
+          );
+          setPhase("bad");
+          return;
+        }
+        if (cancel) return;
+        if (result.ok) {
+          if (!applySessionStatus(result.status)) {
+            invalidateNegotiationReviewSessionPresentation();
+            setBadMessage(
+              "This link is invalid or expired. Request a new link from the sender.",
+            );
+            setPhase("bad");
+            return;
+          }
+          return;
+        }
+        setBadMessage(result.message);
+        setPhase("bad");
+        return;
+      }
+
+      const inFlight = getReviewFragmentBootstrapExchangePromise(agreementId);
+      if (inFlight) {
+        let result: Awaited<ReturnType<typeof exchangeReviewFragmentBootstrapTokenOnce>>;
+        try {
+          result = await inFlight;
+        } catch {
+          if (cancel) return;
+          invalidateNegotiationReviewSessionPresentation();
+          setBadMessage(
+            "This link is invalid or expired. Request a new link from the sender.",
+          );
+          setPhase("bad");
+          return;
+        }
+        if (cancel) return;
+        if (result.ok) {
+          if (!applySessionStatus(result.status)) {
+            invalidateNegotiationReviewSessionPresentation();
+            setBadMessage(
+              "This link is invalid or expired. Request a new link from the sender.",
+            );
+            setPhase("bad");
+            return;
+          }
+          return;
+        }
+        setBadMessage(result.message);
+        setPhase("bad");
+        return;
+      }
+
+      const meta = getReviewFragmentBootstrapMetadata();
+      if (meta?.hadFragmentToken) {
+        setBadMessage("This link is invalid or expired. Request a new link from the sender.");
+        setPhase("bad");
+        return;
+      }
+
+      let sessionReadiness: string | undefined;
+      try {
+        const sessionStatus = await fetchNegotiationReviewSessionStatus();
+        sessionReadiness = sessionStatus.readiness;
+        if (cancel) return;
+        if (applySessionStatus(sessionStatus)) {
+          return;
+        }
+        if (sessionReadiness === "session_invalid") {
+          invalidateNegotiationReviewSessionPresentation();
+          setBadMessage(
+            "This review session is invalid, expired, or no longer available. Request a new link from the sender.",
+          );
+          setPhase("bad");
+          return;
+        }
+      } catch {
+        if (!cancel) {
+          setBadMessage("We could not verify your review session. Check your connection and try again.");
+          setPhase("bad");
+        }
+        return;
+      }
+
       const policy = await fetchRecipientAccessPolicy();
       const urlTok = (token || "").trim();
-      const sessionForAgreement = urlTok
-        ? loadRecipientMagicLinkSession(agreementId, urlTok)
-        : loadAnyRecipientMagicLinkSessionForAgreement(agreementId);
-      const effectiveToken =
-        urlTok || sessionForAgreement?.token?.trim() || "";
-      const tokenSource = urlTok ? "url" : sessionForAgreement?.token ? "session" : "none";
+      const authorityBoundReviewRoute = Boolean(agreementId.trim());
+      const anonymousPreviewAllowed =
+        policy?.review_anonymous_preview_allowed === true && !authorityBoundReviewRoute;
 
-      if (effectiveToken) {
-        logReviewerTokenDetected({
-          agreementId,
-          source: tokenSource,
-          tokenHashShort: reviewerTokenHashShort(effectiveToken),
-          participantPartyIdFromSession: sessionForAgreement?.recipientPartyId ?? null,
-        });
-        const vr = await validateRecipientAccessToken(effectiveToken, agreementId);
+      if (urlTok) {
+        const vr = await validateRecipientAccessToken(urlTok, agreementId);
         if (cancel) return;
         if (vr.ok && vr.data.mode === "review" && vr.data.agreement_id === agreementId) {
           setBadMessage(null);
@@ -286,40 +401,15 @@ function AgreementReviewGate(props: {
           setGateVid(lv || undefined);
           setTokenValidated(true);
           const mr = mapApiRoleToRecipientLinkRole(
-            typeof vr.data.role === "string" ? vr.data.role : undefined
+            typeof vr.data.role === "string" ? vr.data.role : undefined,
           );
           setResolvedRole(mr);
-          const pid = (vr.data.recipient_party_id || sessionForAgreement?.recipientPartyId || participantPartyId || "").trim();
+          const pid = (vr.data.recipient_party_id || participantPartyId || "").trim();
           setResolvedPartyId(pid || undefined);
           const inv = (vr.data.inviter_display_name || "").trim();
           setInviterName(inv || undefined);
-          saveRecipientMagicLinkSession({
-            agreementId,
-            token: effectiveToken,
-            recipientPartyId: pid || undefined,
-            recipientLinkRole: mr,
-            inviterDisplayName: inv || undefined,
-          });
-          setValidatedAccessToken(effectiveToken);
-          if (urlTok) {
-            stripRecipientAccessTokenQueryFromLocation();
-          }
-          logReviewerTokenPersisted({
-            agreementId,
-            tokenHashShort: reviewerTokenHashShort(effectiveToken),
-            participantPartyId: pid || null,
-            tokenSource,
-          });
-          const aid = agreementId.trim();
-          const agreementIdShort = aid.length <= 12 ? aid : `${aid.slice(0, 8)}…`;
-          logRecipientReviewTokenResolved({
-            agreementIdShort,
-            reviewerRecipientId: pid || null,
-            partyIndex: null,
-            reviewerStatus: "validated",
-            tokenScopeValid: true,
-            tokenHashShort: recipientLinkTokenFingerprint(effectiveToken),
-          });
+          setValidatedAccessToken(urlTok);
+          stripRecipientAccessTokenQueryFromLocation();
           setPhase("ready");
         } else {
           setBadMessage(vr.ok ? null : vr.message);
@@ -327,15 +417,16 @@ function AgreementReviewGate(props: {
         }
         return;
       }
+
       logReviewerTokenMissing({
         agreementId,
         reason: policy?.recipient_link_token_required ? "token_required" : "preview_route",
       });
       setValidatedAccessToken("");
-      if (policy?.recipient_link_token_required) {
+      if (!anonymousPreviewAllowed) {
         if (!cancel) {
           setBadMessage(
-            "This link is invalid or expired. Request a new link from the sender."
+            "This link is invalid or expired. Request a new link from the sender.",
           );
           setPhase("bad");
         }
@@ -344,6 +435,7 @@ function AgreementReviewGate(props: {
       setBadMessage(null);
       setGateVid(undefined);
       setTokenValidated(false);
+      setSessionAuthenticated(false);
       setResolvedRole(undefined);
       setResolvedPartyId(undefined);
       setInviterName(undefined);
@@ -352,7 +444,13 @@ function AgreementReviewGate(props: {
     return () => {
       cancel = true;
     };
-  }, [agreementId, token]);
+  }, [agreementId, token, participantPartyId]);
+
+  useEffect(() => {
+    return () => {
+      setNegotiationReviewSessionAuth(false);
+    };
+  }, []);
 
   if (phase === "loading") {
     return <p className="px-4 py-8 text-center text-sm text-slate-400">Validating link…</p>;
@@ -370,15 +468,8 @@ function AgreementReviewGate(props: {
       ? { kind: "review" as const, accessGate: { lockedVersionId: gateVid } }
       : { kind: "review" as const };
   const roleOut = resolvedRole ?? recipientLinkRole ?? "reviewer";
-  const sessionParty =
-    loadAnyRecipientMagicLinkSessionForAgreement(agreementId)?.recipientPartyId?.trim() || "";
-  const partyOut = (resolvedPartyId || participantPartyId || sessionParty || "").trim();
-  const urlTokPass = (token || "").trim();
-  const accessTokOut =
-    validatedAccessToken ||
-    urlTokPass ||
-    loadAnyRecipientMagicLinkSessionForAgreement(agreementId)?.token?.trim() ||
-    "";
+  const partyOut = (resolvedPartyId || participantPartyId || "").trim();
+  const accessTokOut = sessionAuthenticated ? "" : validatedAccessToken || (token || "").trim();
   return (
     <AgreementRecipientReview
       agreementId={agreementId}
@@ -387,6 +478,7 @@ function AgreementReviewGate(props: {
       participantPartyId={partyOut}
       inviterDisplayNameOverride={inviterName || ""}
       recipientAccessToken={accessTokOut}
+      negotiationReviewSessionAuth={sessionAuthenticated}
       recipientViewerContext={recipientViewerContext ?? "public_recipient"}
       qaOwnerReturnPath={qaOwnerReturnPath ?? null}
       onRecipientPostApprovalPresentationChange={onRecipientPostApprovalPresentationChange}
@@ -535,6 +627,7 @@ export function ClawProductApp() {
         onClose={() => navigate("/")}
         reviewGate={(gateProps) => (
           <AgreementReviewGate
+            key={`${gateProps.agreementId}:${gateProps.token ?? ""}:${gateProps.participantPartyId ?? ""}`}
             agreementId={gateProps.agreementId}
             token={gateProps.token}
             recipientLinkRole={gateProps.recipientLinkRole}

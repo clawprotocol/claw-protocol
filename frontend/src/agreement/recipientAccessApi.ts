@@ -1,5 +1,6 @@
 import { clawAgreementHeaders } from "./agreementOrgHeaders";
 import { resolveApiBase } from "../lib/clawApi";
+import { recipientReviewFetchInit } from "./recipientReviewAuth";
 import {
   buildRecipientAccessMintBody,
   logRecipientAccessMint422,
@@ -21,6 +22,7 @@ export type RecipientAccessPolicy = {
   mint_key_configured: boolean;
   signing_token_configured: boolean;
   review_link_mint_enabled?: boolean;
+  review_anonymous_preview_allowed?: boolean;
   /** Set env var name when configured — never the secret value. */
   signing_token_env_var_detected?: string | null;
   recipient_token_ttl_seconds?: { min: number; max: number };
@@ -48,9 +50,14 @@ export function recipientAgreementReadHeaders(
   _agreementId: string,
   explicitToken?: string | null,
 ): Record<string, string> {
-  const t = (explicitToken || "").trim();
-  if (!t) return {};
-  return { "X-Claw-Recipient-Access-Token": t };
+  return (recipientReviewFetchInit(explicitToken).headers || {}) as Record<string, string>;
+}
+
+/** Fetch credentials/headers bundle for recipient agreement API calls. */
+export function recipientAgreementFetchInit(
+  explicitToken?: string | null,
+): Pick<RequestInit, "credentials" | "headers"> {
+  return recipientReviewFetchInit(explicitToken);
 }
 
 function parseAccessErrorBody(raw: unknown): { code: string; message: string } {
@@ -161,6 +168,70 @@ export async function mintRecipientAccessTokenResult(
     return { ok: false, status: res.status, detail: "invalid_mint_payload", code: "invalid_mint_payload" };
   }
   return { ok: true, data: normalized };
+}
+
+/** Owner-authorized review copy-link mint (fragment URL only; never returns standalone token). */
+export async function mintOwnerReviewCopyLinkResult(
+  agreementId: string,
+  body: RecipientAccessMintBodyInput,
+  preflight?: {
+    recipientCount?: number;
+    signerCount?: number;
+    hasDocumentText?: boolean;
+    documentTextLen?: number;
+    hasTitle?: boolean;
+    hasPartyLabels?: boolean;
+    documentTextSource?: string | null;
+  },
+): Promise<MintRecipientAccessTokenResult> {
+  const headers: Record<string, string> = {
+    ...(clawAgreementHeaders({ "Content-Type": "application/json" }) as Record<string, string>),
+  };
+  const payload = buildRecipientAccessMintBody({ ...body, mode: "review" });
+  logRecipientAccessMintPreflight({
+    agreementId,
+    body: payload,
+    ...preflight,
+  });
+  const res = await fetch(
+    `${API_BASE.replace(/\/$/, "")}/api/agreements/${encodeURIComponent(agreementId)}/owner-review-copy-link`,
+    { method: "POST", headers, body: JSON.stringify(payload) },
+  );
+  const raw = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const d = raw && typeof raw === "object" ? (raw as { detail?: unknown }).detail : undefined;
+    if (res.status === 422) logRecipientAccessMint422(d, res.status);
+    const detail =
+      typeof d === "string"
+        ? d
+        : d && typeof d === "object"
+          ? JSON.stringify(d).slice(0, 600)
+          : "";
+    let code: string | undefined;
+    let message: string | undefined;
+    if (d && typeof d === "object") {
+      const o = d as Record<string, unknown>;
+      if (typeof o.code === "string") code = o.code;
+      if (typeof o.message === "string") message = o.message;
+    }
+    return { ok: false, status: res.status, detail: detail || undefined, code, message };
+  }
+  const o = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
+  if ("token" in o && typeof o.token === "string" && o.token.trim()) {
+    return { ok: false, status: res.status, detail: "unexpected_token_field", code: "unexpected_token_field" };
+  }
+  const reviewUrl = typeof o.review_url === "string" ? o.review_url.trim() : "";
+  if (!reviewUrl) {
+    return { ok: false, status: res.status, detail: "invalid_mint_payload", code: "invalid_mint_payload" };
+  }
+  return {
+    ok: true,
+    data: {
+      review_url: reviewUrl,
+      expires_in_seconds: Number(o.expires_in_seconds) || 0,
+      locked_version_id: String(o.locked_version_id || ""),
+    },
+  };
 }
 
 export async function mintRecipientAccessToken(

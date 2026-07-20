@@ -75,7 +75,7 @@ describe("PaidProVs01WorkspaceBanner (static)", () => {
   it("banner surfaces saved or packet-ready headline", () => {
     const s = bannerSrc();
     expect(s).toContain("Saved in LawDog");
-    expect(s).toContain("Signing packet ready");
+    expect(s).toContain("Signature links are ready");
     expect(s).toContain("vs01_packet_ready");
   });
 });

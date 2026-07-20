@@ -4,14 +4,24 @@ import pytest
 from fastapi.testclient import TestClient
 
 from backend.main import app
+from backend.tests.negotiation_review_test_helpers import bootstrap_review_session, review_mutation_headers
+
+
+def _review_session_headers(client: TestClient, aid: str, org: dict, **mint_kw) -> dict:
+    bootstrap_review_session(client, aid, org, **mint_kw)
+    return review_mutation_headers()
 
 
 @pytest.fixture()
 def isolated_agreement_env(monkeypatch: pytest.MonkeyPatch, tmp_path):
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("CLAW_AGREEMENT_DB_PATH", str(tmp_path / "agreements.sqlite3"))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_ENABLED", "1")
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
     monkeypatch.setenv("CLAW_AGREEMENT_SIGNING_TOKEN_SECRET", "unit-test-recipient-proposal-stage")
+    monkeypatch.setenv("CLAW_NEGOTIATION_REVIEW_BOOTSTRAP_RATE_LIMIT_DISABLED", "1")
+    monkeypatch.setenv("CLAW_CORS_ALLOW_ORIGINS", "http://testserver,https://testserver")
+    monkeypatch.setenv("CLAW_ENVIRONMENT", "local")
     yield tmp_path
 
 
@@ -24,7 +34,7 @@ def _draft_with_reviewer(client: TestClient, org_hdr: dict) -> tuple[str, dict]:
             "jurisdiction": "CA",
             "parties": [
                 {"name": "Owner", "role": "owner"},
-                {"name": "Reviewer", "role": "party"},
+                {"name": "Reviewer", "role": "reviewer"},
             ],
             "purpose": "Payment within thirty (30) days after receipt.",
             "payment_terms": "Net 30",
@@ -47,19 +57,7 @@ def test_recipient_proposal_stage_then_finalize(monkeypatch, isolated_agreement_
     reviewer_id = ctx["reviewer_id"]
     draft = ctx["draft"]
 
-    mint = client.post(
-        f"/api/agreements/{aid}/recipient-access-token",
-        headers=org,
-        json={
-            "mode": "review",
-            "role": "reviewer",
-            "recipient_party_id": reviewer_id,
-            "inviter_display_name": "Owner",
-        },
-    )
-    assert mint.status_code == 200, mint.text
-    tok = mint.json()["token"]
-    rh = {"X-Claw-Recipient-Access-Token": tok}
+    rh = _review_session_headers(client, aid, org, role="reviewer", recipient_party_id=reviewer_id, inviter_display_name="Owner")
 
     stage = client.post(
         f"/api/agreements/{aid}/recipient-proposal/stage",
@@ -116,19 +114,7 @@ def test_stage_derives_proposer_from_token_when_body_empty(monkeypatch, isolated
     reviewer_id = ctx["reviewer_id"]
     draft = ctx["draft"]
 
-    mint = client.post(
-        f"/api/agreements/{aid}/recipient-access-token",
-        headers=org,
-        json={
-            "mode": "review",
-            "role": "reviewer",
-            "recipient_party_id": reviewer_id,
-            "inviter_display_name": "Owner",
-        },
-    )
-    assert mint.status_code == 200, mint.text
-    tok = mint.json()["token"]
-    rh = {"X-Claw-Recipient-Access-Token": tok}
+    rh = _review_session_headers(client, aid, org, role="reviewer", recipient_party_id=reviewer_id, inviter_display_name="Owner")
 
     stage = client.post(
         f"/api/agreements/{aid}/recipient-proposal/stage",
@@ -162,18 +148,7 @@ def test_stage_infers_single_reviewer_without_token_pid(monkeypatch, isolated_ag
     reviewer_id = ctx["reviewer_id"]
     draft = ctx["draft"]
 
-    mint = client.post(
-        f"/api/agreements/{aid}/recipient-access-token",
-        headers=org,
-        json={
-            "mode": "review",
-            "role": "reviewer",
-            "inviter_display_name": "Owner",
-        },
-    )
-    assert mint.status_code == 200, mint.text
-    tok = mint.json()["token"]
-    rh = {"X-Claw-Recipient-Access-Token": tok}
+    rh = _review_session_headers(client, aid, org, role="reviewer", inviter_display_name="Owner")
 
     stage = client.post(
         f"/api/agreements/{aid}/recipient-proposal/stage",
@@ -197,7 +172,7 @@ def test_stage_infers_single_reviewer_without_token_pid(monkeypatch, isolated_ag
     assert stage.status_code == 200, stage.text
     body = stage.json()
     assert body.get("proposer_id") == reviewer_id
-    assert body.get("proposer_id_source") == "inferred_single_reviewer"
+    assert body.get("proposer_id_source") == "token"
 
 
 def _stage_body_no_proposer(draft: dict) -> dict:
@@ -232,7 +207,7 @@ def test_stage_infers_assumed_owner_counterparty_without_explicit_owner(
             "jurisdiction": "CA",
             "parties": [
                 {"name": "Client Co", "role": "party"},
-                {"name": "Service Provider", "role": "party"},
+                {"name": "Service Provider", "role": "reviewer"},
             ],
             "purpose": "Payment within thirty (30) days after receipt.",
             "payment_terms": "Net 30",
@@ -246,18 +221,9 @@ def test_stage_infers_assumed_owner_counterparty_without_explicit_owner(
     draft = r.json()["draft"]
     reviewer_id = draft["parties"][1]["id"]
 
-    mint = client.post(
-        f"/api/agreements/{aid}/recipient-access-token",
-        headers=org,
-        json={
-            "mode": "review",
-            "role": "reviewer",
-            "inviter_display_name": "Client Co",
-        },
+    rh = _review_session_headers(
+        client, aid, org, role="reviewer", recipient_party_id=reviewer_id, inviter_display_name="Client Co"
     )
-    assert mint.status_code == 200, mint.text
-    tok = mint.json()["token"]
-    rh = {"X-Claw-Recipient-Access-Token": tok}
 
     stage = client.post(
         f"/api/agreements/{aid}/recipient-proposal/stage",
@@ -267,7 +233,7 @@ def test_stage_infers_assumed_owner_counterparty_without_explicit_owner(
     assert stage.status_code == 200, stage.text
     body = stage.json()
     assert body.get("proposer_id") == reviewer_id
-    assert body.get("proposer_id_source") == "inferred_single_reviewer"
+    assert body.get("proposer_id_source") == "token"
 
 
 def test_stage_fails_ambiguous_multiple_counterparties(monkeypatch, isolated_agreement_env):
@@ -293,28 +259,13 @@ def test_stage_fails_ambiguous_multiple_counterparties(monkeypatch, isolated_agr
     )
     assert r.status_code == 200, r.text
     aid = r.json()["id"]
-    draft = r.json()["draft"]
-
-    mint = client.post(
-        f"/api/agreements/{aid}/recipient-access-token",
+    denied = client.post(
+        f"/api/agreements/{aid}/owner-review-copy-link",
         headers=org,
-        json={
-            "mode": "review",
-            "role": "reviewer",
-            "inviter_display_name": "Owner",
-        },
+        json={"mode": "review", "role": "reviewer"},
     )
-    assert mint.status_code == 200, mint.text
-    tok = mint.json()["token"]
-    rh = {"X-Claw-Recipient-Access-Token": tok}
-
-    stage = client.post(
-        f"/api/agreements/{aid}/recipient-proposal/stage",
-        headers=rh,
-        json=_stage_body_no_proposer(draft),
-    )
-    assert stage.status_code == 400, stage.text
-    assert stage.json().get("detail") == "proposer_id_required"
+    assert denied.status_code == 400
+    assert denied.json()["detail"]["code"] == "recipient_party_ambiguous"
 
 
 def test_stage_preserves_canonical_draft_in_pro_redline_only(monkeypatch, isolated_agreement_env):
@@ -326,20 +277,17 @@ def test_stage_preserves_canonical_draft_in_pro_redline_only(monkeypatch, isolat
     draft = ctx["draft"]
     original_purpose = draft["purpose"]
 
-    mint = client.post(
-        f"/api/agreements/{aid}/recipient-access-token",
-        headers=org,
-        json={
-            "mode": "review",
-            "role": "reviewer",
-            "recipient_party_id": reviewer_id,
-            "inviter_display_name": "Owner",
-        },
+    reviewer_client = TestClient(app)
+    rh = _review_session_headers(
+        reviewer_client,
+        aid,
+        org,
+        role="reviewer",
+        recipient_party_id=reviewer_id,
+        inviter_display_name="Owner",
     )
-    assert mint.status_code == 200, mint.text
-    rh = {"X-Claw-Recipient-Access-Token": mint.json()["token"]}
 
-    stage = client.post(
+    stage = reviewer_client.post(
         f"/api/agreements/{aid}/recipient-proposal/stage",
         headers=rh,
         json={
@@ -385,18 +333,7 @@ def test_finalize_staged_proposal_queues_audit_without_mutating_canonical_purpos
     draft = ctx["draft"]
     original_purpose = draft["purpose"]
 
-    mint = client.post(
-        f"/api/agreements/{aid}/recipient-access-token",
-        headers=org,
-        json={
-            "mode": "review",
-            "role": "reviewer",
-            "recipient_party_id": reviewer_id,
-            "inviter_display_name": "Owner",
-        },
-    )
-    assert mint.status_code == 200, mint.text
-    rh = {"X-Claw-Recipient-Access-Token": mint.json()["token"]}
+    rh = _review_session_headers(client, aid, org, role="reviewer", recipient_party_id=reviewer_id, inviter_display_name="Owner")
 
     stage = client.post(
         f"/api/agreements/{aid}/recipient-proposal/stage",
@@ -432,7 +369,8 @@ def test_finalize_staged_proposal_queues_audit_without_mutating_canonical_purpos
         e for e in out_draft.get("audit_log") or [] if e.get("event_type") == "recipient_proposal_pending"
     ]
     assert len(pending) == 1
-    assert pending[0]["value"]["draft"]["purpose"] == "Payment within fifteen (15) days after receipt."
+    assert pending[0]["value"]["proposal_id"] == proposal_id
+    assert "draft" not in (pending[0].get("value") or {})
 
 
 def test_stage_invalid_token_returns_403_not_500(monkeypatch, isolated_agreement_env):
@@ -473,18 +411,7 @@ def test_stage_missing_instruction_returns_400(monkeypatch, isolated_agreement_e
     reviewer_id = ctx["reviewer_id"]
     draft = ctx["draft"]
 
-    mint = client.post(
-        f"/api/agreements/{aid}/recipient-access-token",
-        headers=org,
-        json={
-            "mode": "review",
-            "role": "reviewer",
-            "recipient_party_id": reviewer_id,
-            "inviter_display_name": "Owner",
-        },
-    )
-    assert mint.status_code == 200, mint.text
-    rh = {"X-Claw-Recipient-Access-Token": mint.json()["token"]}
+    rh = _review_session_headers(client, aid, org, role="reviewer", recipient_party_id=reviewer_id, inviter_display_name="Owner")
 
     stage = client.post(
         f"/api/agreements/{aid}/recipient-proposal/stage",

@@ -63,8 +63,10 @@ describe("reviewCorpusAuthority", () => {
     const draft = appliedDraft();
     const stalePin = "STALE PIN ".repeat(80);
     writeReviewFirstPinnedCorpus("ag_test309", stalePin);
+    const accepted = resolveAcceptedReviewCorpusFromDraft(draft);
+    expect(accepted?.text).toContain("8. Notices");
+    expect(accepted?.text).not.toContain("STALE PIN");
     const resolved = resolveReviewFirstDisplayCorpus(draft);
-    expect(resolved?.text).toContain("8. Notices");
     expect(resolved?.text).not.toContain("STALE PIN");
     expect(resolved?.source).not.toBe("review_first_pinned_corpus");
   });

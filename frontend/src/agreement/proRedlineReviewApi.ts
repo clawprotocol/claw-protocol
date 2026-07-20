@@ -1,7 +1,7 @@
 import type { AgreementDraft } from "./agreementTypes";
 import { normalizeAgreementDraftFromApi } from "./agreementDraftNormalize";
 import { clawAgreementHeaders } from "./agreementOrgHeaders";
-import { recipientAgreementReadHeaders } from "./recipientAccessApi";
+import { recipientAgreementFetchInit } from "./recipientAccessApi";
 import { resolveApiBase } from "../lib/clawApi";
 
 const base = () => resolveApiBase().replace(/\/$/, "");
@@ -149,11 +149,13 @@ export async function postProRedlineReviewerSuggestion(args: {
 }): Promise<{ ok: boolean; suggestion_id?: string; error?: string }> {
   const id = encodeURIComponent(args.agreementId.trim());
   try {
+    const auth = recipientAgreementFetchInit(args.recipientAccessToken);
     const res = await fetch(`${base()}/api/agreements/${id}/pro-redline/reviewer-suggestion`, {
       method: "POST",
+      credentials: auth.credentials,
       headers: {
         ...clawAgreementHeaders({ "Content-Type": "application/json" }),
-        ...recipientAgreementReadHeaders(args.agreementId, args.recipientAccessToken),
+        ...(auth.headers as Record<string, string>),
       },
       body: JSON.stringify({
         participant_id: args.participantId,

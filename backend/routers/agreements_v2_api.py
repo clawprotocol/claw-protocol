@@ -39,6 +39,11 @@ from backend.security.agreement_read_scope import (
     recipient_access_token_from_request,
     validate_recipient_access_token_for_agreement,
 )
+from backend.security.negotiation_review_authorization import (
+    assert_negotiation_review_read_allowed,
+    negotiation_review_authorization_from_request,
+    reject_negotiation_review_session_for_full_draft,
+)
 from backend.security.sensitive_read_authorization import (
     assert_agreement_proof_status_read_allowed,
     private_json_response,
@@ -621,6 +626,8 @@ class AgreementDraft(AgreementDraftCreate):
     premium_render_source: Optional[str] = None
     """Pro review redline v1: pending import diff, reviewer suggestions, version ledger (JSON-only)."""
     pro_redline_v1: Optional[Dict[str, Any]] = None
+    """Durable negotiation-review session authority bound to review cookies (JSON-only)."""
+    negotiation_review_sessions_v1: Optional[Dict[str, Any]] = None
 
 
 def _merge_agreement_draft(base: AgreementDraft, **updates: Any) -> AgreementDraft:
@@ -6010,6 +6017,13 @@ def _persist_review_first_final_corpus_if_supplied(
 @router.get("/access/policy")
 def recipient_access_policy() -> Dict[str, Any]:
     """Public: lets the SPA decide whether ``t=`` links are mandatory."""
+    from backend.config.deployment_runtime import is_relaxed_claw_environment
+
+    legacy_review_relaxed = os.getenv("CLAW_REVIEW_QUERY_TOKEN_LEGACY_DEV", "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+    )
     return {
         "recipient_link_token_required": recipient_access_token_required(),
         "mint_key_configured": bool(os.getenv("CLAW_RECIPIENT_LINK_MINT_KEY", "").strip()),
@@ -6020,6 +6034,11 @@ def recipient_access_policy() -> Dict[str, Any]:
             "min": recipient_token_ttl_min_seconds(),
             "max": recipient_token_ttl_max_seconds(),
         },
+        "review_anonymous_preview_allowed": (
+            is_relaxed_claw_environment()
+            and legacy_review_relaxed
+            and not recipient_access_token_required()
+        ),
     }
 
 
@@ -6433,12 +6452,73 @@ def post_signing_ceremony_complete(
     }
 
 
+@router.post("/{agreement_id}/owner-review-copy-link")
+def post_owner_review_copy_link(
+    agreement_id: str, request: Request, body: RecipientAccessMintRequest
+) -> Response:
+    """Owner-authorized ephemeral review copy-link mint (fragment URL only, no standalone token)."""
+    if not _agreements_write_allowed():
+        raise HTTPException(status_code=403, detail="verifier_only")
+    _owner_mutation_guards(request, agreement_id, surface="owner_review_copy_link")
+    if body.mode != "review":
+        raise HTTPException(status_code=400, detail="review_mode_required")
+    try:
+        assert_draft_exists(agreement_id)
+    except KeyError:
+        raise HTTPException(status_code=404, detail="agreement_not_found")
+
+    draft_full = _load_or_404(agreement_id)
+    lock = read_signing_lock(agreement_id)
+    secret = _signing_token_secret_bytes(agreement_id=agreement_id)
+
+    from backend.services.owner_review_copy_link import OwnerReviewCopyLinkMintError, mint_owner_review_copy_link
+
+    def _persist(next_draft: Dict[str, Any]) -> None:
+        from backend.services.agreement_draft_store import save_draft_establish_review_bootstrap_delivery
+
+        save_draft_establish_review_bootstrap_delivery(next_draft)
+
+    try:
+        payload = mint_owner_review_copy_link(
+            agreement_id=agreement_id,
+            secret=secret,
+            body=body,
+            draft_dict=draft_full.model_dump(mode="json"),
+            signing_lock=lock,
+            persist_draft_fn=_persist,
+        )
+    except OwnerReviewCopyLinkMintError as exc:
+        raise HTTPException(
+            status_code=exc.status_code,
+            detail={"code": exc.code, "message": exc.message},
+        ) from exc
+
+    _persist_review_first_final_corpus_if_supplied(
+        agreement_id,
+        body,
+        locked_version_id=str(payload.get("locked_version_id") or ""),
+        subject_ref=resolve_subject_from_request(request),
+    )
+    return JSONResponse(
+        content=payload,
+        headers={"Cache-Control": "no-store, private"},
+    )
+
+
 @router.post("/{agreement_id}/recipient-access-token")
 def post_recipient_access_token(
     agreement_id: str, request: Request, body: RecipientAccessMintRequest
 ) -> Dict[str, Any]:
     if not _agreements_write_allowed():
         raise HTTPException(status_code=403, detail="verifier_only")
+    if body.mode == "review":
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "owner_review_copy_link_required",
+                "message": "Review copy links must be minted via POST /owner-review-copy-link.",
+            },
+        )
     _owner_mutation_guards(request, agreement_id, surface="recipient_access_token")
     if not _recipient_link_mint_key_ok(request):
         raise HTTPException(status_code=403, detail="recipient_link_mint_key_invalid")
@@ -6463,7 +6543,7 @@ def post_recipient_access_token(
             raise HTTPException(status_code=409, detail="signing_not_finalized_server_side")
         lv = str(lock["locked_version_id"])
     else:
-        lv = str((lock or {}).get("locked_version_id") or "")
+        raise HTTPException(status_code=400, detail="sign_mode_required")
 
     secret = _signing_token_secret_bytes(agreement_id=agreement_id)
     token: Optional[str] = None
@@ -6610,7 +6690,11 @@ def post_agreement_review_sent(agreement_id: str, request: Request) -> Dict[str,
                 if email_draft.get("audit_log"):
                     marked["audit_log"] = email_draft["audit_log"]
                 next_draft = AgreementDraft.model_validate(marked)
-                _save_draft_sync(next_draft.model_dump(), request)
+                from backend.services.agreement_draft_store import (
+                    save_draft_establish_review_bootstrap_delivery,
+                )
+
+                save_draft_establish_review_bootstrap_delivery(next_draft.model_dump())
     except Exception:
         pass
     return {"ok": True, "draft": next_draft.model_dump()}
@@ -6676,7 +6760,14 @@ def post_agreement_signing_links_sent(
             if email_draft.get("recipient_delivery_v1"):
                 merge_fields["recipient_delivery_v1"] = email_draft["recipient_delivery_v1"]
             next_draft = _merge_agreement_draft(draft, **merge_fields)
-            _save_draft_sync(next_draft.model_dump(), request)
+            if email_draft.get("recipient_delivery_v1"):
+                from backend.services.agreement_draft_store import (
+                    save_draft_establish_review_bootstrap_delivery,
+                )
+
+                save_draft_establish_review_bootstrap_delivery(next_draft.model_dump())
+            else:
+                _save_draft_sync(next_draft.model_dump(), request)
             return {"ok": True, "sent_count": sent_count, "skip_reason": None, "draft": next_draft.model_dump()}
         skip_reason = "not_sent"
     except Exception:
@@ -7120,10 +7211,16 @@ def post_recipient_invite_resend(
     if not _agreements_write_allowed():
         raise HTTPException(status_code=403, detail="verifier_only")
     _owner_mutation_guards(request, agreement_id, surface="recipient_invite_resend")
+    phase = (body.phase or "").strip().lower()
+    if phase == "review":
+        from backend.security.negotiation_review_same_origin import assert_negotiation_review_same_origin
+
+        assert_negotiation_review_same_origin(request)
     draft = _load_or_404(agreement_id)
     _assert_negotiation_not_locked(agreement_id)
     from backend.services.recipient_invite_resend import resend_recipient_invite
 
+    lock = read_signing_lock(agreement_id)
     next_data, meta = resend_recipient_invite(
         agreement_id=agreement_id,
         draft=draft.model_dump(mode="json"),
@@ -7132,9 +7229,13 @@ def post_recipient_invite_resend(
         signing_url=body.signing_url,
         signer_role_id=body.signer_role_id,
         org_id=resolve_subject_from_request(request),
+        signing_lock=lock,
     )
-    next_draft = AgreementDraft.model_validate(next_data)
-    _save_draft_sync(next_draft.model_dump(), request)
+    if body.phase.strip().lower() == "signing":
+        next_draft = AgreementDraft.model_validate(next_data)
+        _save_draft_sync(next_draft.model_dump(), request)
+    else:
+        next_draft = AgreementDraft.model_validate(next_data)
     return {"ok": True, "draft": next_draft.model_dump(), **meta}
 
 
@@ -7466,6 +7567,7 @@ def get_public_vs01_signing_packet(
 
 @router.get("/{agreement_id}")
 def get_agreement_draft(agreement_id: str, request: Request) -> Dict[str, Any]:
+    reject_negotiation_review_session_for_full_draft(request, agreement_id)
     assert_agreement_full_draft_read_allowed(request, agreement_id)
     draft = _load_or_404(agreement_id)
     lock = read_signing_lock(agreement_id)
@@ -7488,6 +7590,49 @@ def get_agreement_draft(agreement_id: str, request: Request) -> Dict[str, Any]:
         "accepted_version": accepted_version,
         "signing_lock": signing_lock_out,
     }
+
+
+@router.get("/{agreement_id}/negotiation-review/draft")
+def get_negotiation_review_draft(agreement_id: str, request: Request) -> Dict[str, Any]:
+    """Dedicated sanitized review projection for negotiation-review session cookies."""
+    from backend.services.negotiation_review_draft_projection import (
+        build_negotiation_review_read_response,
+    )
+
+    auth = assert_negotiation_review_read_allowed(request, agreement_id)
+    draft = _load_or_404(agreement_id)
+    lock = read_signing_lock(agreement_id)
+    _touch_negotiation_review_session_last_seen(request)
+    return build_negotiation_review_read_response(
+        agreement_id=agreement_id,
+        draft=draft.model_dump(mode="json"),
+        auth=auth,
+        signing_lock=lock,
+    )
+
+
+@router.post("/{agreement_id}/negotiation-review/render", response_model=AgreementRenderResponse)
+def render_negotiation_review_agreement(
+    agreement_id: str, request: Request
+) -> AgreementRenderResponse:
+    """Render HTML for negotiation-review session reads (no full-draft authority)."""
+    from backend.services.negotiation_review_draft_projection import (
+        build_negotiation_review_draft_projection,
+    )
+
+    auth = assert_negotiation_review_read_allowed(request, agreement_id)
+    draft = _load_or_404(agreement_id)
+    projected = build_negotiation_review_draft_projection(
+        draft=draft.model_dump(mode="json"),
+        auth=auth,
+    )
+    render_draft = AgreementDraft.model_validate({**projected, "id": agreement_id})
+    wm = _watermark_active_for_agreement(agreement_id)
+    _touch_negotiation_review_session_last_seen(request)
+    return AgreementRenderResponse(
+        id=agreement_id,
+        rendered_html=_render_html(render_draft, watermark=wm),
+    )
 
 
 @router.post("/{agreement_id}/update-field")
@@ -7622,6 +7767,7 @@ def update_agreement_field(
 @router.post("/{agreement_id}/render", response_model=AgreementRenderResponse)
 def render_agreement(agreement_id: str, request: Request) -> AgreementRenderResponse:
     # Read-only preview: do not persist audit_log/updated_at (render is deterministic from draft + watermark).
+    reject_negotiation_review_session_for_full_draft(request, agreement_id)
     assert_agreement_full_draft_read_allowed(request, agreement_id)
     draft = _load_or_404(agreement_id)
     wm = _watermark_active_for_agreement(agreement_id)
@@ -7644,6 +7790,7 @@ def post_recipient_preview_export_pdf(
     aid = (agreement_id or "").strip()
     if not aid:
         raise HTTPException(status_code=400, detail="missing_agreement_id")
+    reject_negotiation_review_session_for_full_draft(request, aid)
     assert_agreement_full_draft_read_allowed(request, aid)
     cap = assess_agreement_pdf_story_capability()
     if not cap.get("available"):
@@ -8174,6 +8321,7 @@ class ProRedlineReviewerSuggestionBody(BaseModel):
 
 @router.get("/{agreement_id}/export-draft.txt")
 def export_draft_txt(agreement_id: str, request: Request) -> Response:
+    reject_negotiation_review_session_for_full_draft(request, agreement_id)
     assert_agreement_full_draft_read_allowed(request, agreement_id)
     raw = load_draft(agreement_id)
     text = _canonical_agreement_plain_from_raw(raw)
@@ -8190,6 +8338,7 @@ def export_draft_txt(agreement_id: str, request: Request) -> Response:
 
 @router.get("/{agreement_id}/export-draft.docx")
 def export_draft_docx(agreement_id: str, request: Request) -> Response:
+    reject_negotiation_review_session_for_full_draft(request, agreement_id)
     assert_agreement_full_draft_read_allowed(request, agreement_id)
     raw = load_draft(agreement_id)
     text = _canonical_agreement_plain_from_raw(raw)
@@ -8409,18 +8558,87 @@ def pro_redline_reject_import(agreement_id: str, request: Request) -> Dict[str, 
     return {"ok": True, "draft": AgreementDraft.model_validate(raw).model_dump()}
 
 
+def _mutate_reviewer_suggestion_raw(
+    raw: Dict[str, Any],
+    body: ProRedlineReviewerSuggestionBody,
+) -> Dict[str, Any]:
+    _validate_nonowner_proposer(AgreementDraft.model_validate(raw), body.participant_id)
+    pr = _pro_redline_get(raw)
+    sid = str(uuid.uuid4())
+    now = _utc_now_iso()
+    row = {
+        "id": sid,
+        "created_at": now,
+        "participant_id": (body.participant_id or "").strip(),
+        "reviewer_label": (body.reviewer_display_name or "").strip(),
+        "reviewer_email": (body.reviewer_email or "").strip(),
+        "suggestion_text": (body.suggestion_text or "").strip(),
+        "status": "pending",
+    }
+    pr.setdefault("suggestions", []).append(row)
+    sug_preview = row["suggestion_text"][:4000] if len(row["suggestion_text"]) > 4000 else row["suggestion_text"]
+    pr.setdefault("version_events", []).append(
+        {
+            "version_number": int(pr.get("version_counter") or 0),
+            "source": "reviewer_suggestion",
+            "actor_label": row["reviewer_label"] or "Reviewer",
+            "actor_email": row["reviewer_email"] or None,
+            "created_at": now,
+            "suggestion_id": sid,
+            "suggestion_text": sug_preview,
+        }
+    )
+    _pro_redline_set(raw, pr)
+    raw["updated_at"] = now
+    audit = list(raw.get("audit_log") or [])
+    audit.append(
+        AuditEvent(
+            event_type="pro_redline_reviewer_suggestion",
+            at=now,
+            field="pro_redline_v1",
+            value={"suggestion_id": sid, "participant_id": row["participant_id"]},
+        ).model_dump()
+    )
+    raw["audit_log"] = audit
+    raw["__slice3b_suggestion_id"] = sid
+    return raw
+
+
 @router.post("/{agreement_id}/pro-redline/reviewer-suggestion")
 def pro_redline_reviewer_suggestion(
     agreement_id: str, body: ProRedlineReviewerSuggestionBody, request: Request
 ) -> Dict[str, Any]:
-    assert_free_incomplete_draft_not_expired(agreement_id, surface="pro_redline_reviewer_suggestion")
-    draft = _load_or_404(agreement_id)
+    participant_id = (body.participant_id or "").strip()
+    suggestion_id_holder: list[str] = []
+
+    def _session_mutate(raw: Dict[str, Any], _auth) -> Dict[str, Any]:
+        next_raw = _mutate_reviewer_suggestion_raw(raw, body)
+        sid = str(next_raw.pop("__slice3b_suggestion_id", "") or "").strip()
+        if sid:
+            suggestion_id_holder.append(sid)
+        return next_raw
+
+    session_out = _run_session_locked_mutation_if_present(
+        request,
+        agreement_id,
+        bind_participant_id=participant_id or None,
+        mutate_fn=_session_mutate,
+        surface="pro_redline_reviewer_suggestion",
+    )
+    if session_out is not None:
+        session_out["ok"] = True
+        if suggestion_id_holder:
+            session_out["suggestion_id"] = suggestion_id_holder[0]
+        return session_out
+
     assert_agreement_recipient_write_allowed(
         request,
         agreement_id,
         allowed_modes=("review",),
         bind_participant_id=body.participant_id,
     )
+    assert_free_incomplete_draft_not_expired(agreement_id, surface="pro_redline_reviewer_suggestion")
+    draft = _load_or_404(agreement_id)
     lock = read_signing_lock(agreement_id)
     if lock and bool((lock or {}).get("locked_version_id")):
         raise HTTPException(status_code=400, detail="negotiation_locked")
@@ -8471,6 +8689,14 @@ def pro_redline_reviewer_suggestion(
         "reviewer",
         len(row["suggestion_text"]),
     )
+    session_response = _negotiation_review_mutation_response(
+        request,
+        agreement_id,
+        AgreementDraft.model_validate(raw),
+        extra={"ok": True, "suggestion_id": sid},
+    )
+    if session_response is not None:
+        return session_response
     return {"ok": True, "suggestion_id": sid}
 
 
@@ -9070,6 +9296,49 @@ def revise_agreement(
         ),
     )
     if persist:
+        from backend.security.negotiation_review_authorization import negotiation_review_cookie_state
+        from backend.security.negotiation_review_mutation import (
+            negotiation_review_mutation_auth_from_request,
+            run_negotiation_review_locked_mutation,
+        )
+
+        if session_type == "recipient":
+            cookie_state = negotiation_review_cookie_state(request, agreement_id)
+            if cookie_state == "invalid":
+                from backend.security.negotiation_review_authorization import _write_denied
+
+                raise _write_denied(code="negotiation_review_session_invalid")
+            if cookie_state == "valid":
+                def _revise_mutate(raw: Dict[str, Any], _auth) -> Dict[str, Any]:
+                    merged = _merge_agreement_draft(
+                        AgreementDraft.model_validate(raw),
+                        title=next_draft.title,
+                        jurisdiction=next_draft.jurisdiction,
+                        parties=next_draft.parties,
+                        purpose=next_draft.purpose,
+                        payment_terms=next_draft.payment_terms,
+                        duration=next_draft.duration,
+                        due_date=next_draft.due_date,
+                        effective_date=next_draft.effective_date,
+                        updated_at=now,
+                        audit_log=next_draft.audit_log,
+                    )
+                    return merged.model_dump(mode="json")
+
+                wm = _watermark_active_for_agreement(agreement_id)
+                out = run_negotiation_review_locked_mutation(
+                    request=request,
+                    agreement_id=agreement_id,
+                    mutate_fn=_revise_mutate,
+                )
+                projected = out.get("draft") if isinstance(out.get("draft"), dict) else {}
+                render_draft = AgreementDraft.model_validate({**projected, "id": agreement_id})
+                out["rendered_html"] = _render_html(render_draft, watermark=wm)
+                out["canonical_json"] = canonicalize_agreement(projected)
+                out["revision_validation"] = revision_validation
+                for hk, hv in usage_response_header(remaining).items():
+                    response.headers[hk] = hv
+                return out
         _save_draft_sync(next_draft.model_dump(), request)
     else:
         record_usage_ledger_event(
@@ -9107,13 +9376,37 @@ def revise_agreement(
                 agreement_id,
                 type(exc).__name__,
             )
-    return {
+    payload = {
         "id": agreement_id,
         "draft": next_draft.model_dump(),
         "rendered_html": _render_html(next_draft, watermark=wm),
         "canonical_json": canonicalize_agreement(next_draft.model_dump()),
         "revision_validation": revision_validation,
     }
+    if session_type == "recipient":
+        preview_auth = negotiation_review_authorization_from_request(request, agreement_id)
+        if preview_auth:
+            from backend.services.negotiation_review_draft_projection import (
+                build_negotiation_review_read_response,
+            )
+
+            wm = _watermark_active_for_agreement(agreement_id)
+            projected = build_negotiation_review_read_response(
+                agreement_id=agreement_id,
+                draft=next_draft.model_dump(mode="json"),
+                auth=preview_auth,
+                signing_lock=read_signing_lock(agreement_id),
+            )
+            render_draft = AgreementDraft.model_validate(
+                {**(projected.get("draft") or {}), "id": agreement_id}
+            )
+            projected["rendered_html"] = _render_html(render_draft, watermark=wm)
+            projected["canonical_json"] = canonicalize_agreement(projected.get("draft") or {})
+            projected["revision_validation"] = revision_validation
+            for hk, hv in usage_response_header(remaining).items():
+                response.headers[hk] = hv
+            return projected
+    return payload
 
 
 @router.post("/{agreement_id}/refine")
@@ -9640,6 +9933,15 @@ def _review_link_eligible_party_ids(draft: AgreementDraft) -> List[str]:
 
 
 def _parse_recipient_access_token_context(request: Request, agreement_id: str) -> Dict[str, Any]:
+    session_ctx = negotiation_review_authorization_from_request(request, agreement_id)
+    if session_ctx:
+        return {
+            "has_auth_token": True,
+            "token_valid": True,
+            "token_pid": str(session_ctx.recipient_party_id or "").strip(),
+            "token_role": str(session_ctx.role or "").strip().lower(),
+            "token_mode": "review",
+        }
     tok = recipient_access_token_from_request(request)
     if not tok:
         return {
@@ -9849,6 +10151,125 @@ def _staged_recipient_proposals_map(draft: AgreementDraft) -> Dict[str, Any]:
     return dict(staged) if isinstance(staged, dict) else {}
 
 
+def _peek_staged_recipient_proposal(
+    draft: AgreementDraft, proposal_id: str
+) -> Optional[Dict[str, Any]]:
+    pid = (proposal_id or "").strip()
+    if not pid:
+        return None
+    payload = _staged_recipient_proposals_map(draft).get(pid)
+    return payload if isinstance(payload, dict) else None
+
+
+def _pop_staged_recipient_proposal_in_memory(
+    draft: AgreementDraft, proposal_id: str
+) -> Optional[Dict[str, Any]]:
+    pid = (proposal_id or "").strip()
+    if not pid:
+        return None
+    staged = _staged_recipient_proposals_map(draft)
+    payload = staged.pop(pid, None)
+    if payload is None:
+        return None
+    pro_redline = dict(draft.pro_redline_v1 or {})
+    pro_redline[STAGED_RECIPIENT_PROPOSALS_KEY] = staged
+    draft.pro_redline_v1 = pro_redline
+    return payload if isinstance(payload, dict) else None
+
+
+def _touch_negotiation_review_session_last_seen(request: Request) -> None:
+    from backend.security.negotiation_review_session_cookie import (
+        read_negotiation_review_session_cookie,
+    )
+    from backend.services.negotiation_review_bootstrap_exchange import (
+        touch_negotiation_review_session_last_seen,
+    )
+
+    cookie = read_negotiation_review_session_cookie(request)
+    if cookie:
+        touch_negotiation_review_session_last_seen(session_secret=cookie)
+
+
+def _negotiation_review_mutation_response(
+    request: Request,
+    agreement_id: str,
+    draft: Any,
+    *,
+    extra: Optional[Dict[str, Any]] = None,
+) -> Optional[Dict[str, Any]]:
+    auth = negotiation_review_authorization_from_request(request, agreement_id)
+    if not auth:
+        return None
+    from backend.services.negotiation_review_draft_projection import (
+        build_negotiation_review_read_response,
+    )
+
+    draft_dict = draft if isinstance(draft, dict) else draft.model_dump(mode="json")
+    out = build_negotiation_review_read_response(
+        agreement_id=agreement_id,
+        draft=draft_dict,
+        auth=auth,
+        signing_lock=read_signing_lock(agreement_id),
+    )
+    if extra:
+        out.update(extra)
+    _touch_negotiation_review_session_last_seen(request)
+    return out
+
+
+def _staged_recipient_proposals_map_raw(draft: Dict[str, Any]) -> Dict[str, Any]:
+    pr = draft.get("pro_redline_v1") if isinstance(draft.get("pro_redline_v1"), dict) else {}
+    staged = pr.get(STAGED_RECIPIENT_PROPOSALS_KEY)
+    return dict(staged) if isinstance(staged, dict) else {}
+
+
+def _peek_staged_recipient_proposal_raw(
+    draft: Dict[str, Any], proposal_id: str
+) -> Optional[Dict[str, Any]]:
+    pid = (proposal_id or "").strip()
+    if not pid:
+        return None
+    payload = _staged_recipient_proposals_map_raw(draft).get(pid)
+    return payload if isinstance(payload, dict) else None
+
+
+def _run_session_locked_mutation_if_present(
+    request: Request,
+    agreement_id: str,
+    *,
+    bind_participant_id: Optional[str],
+    mutate_fn,
+    extra: Optional[Dict[str, Any]] = None,
+    surface: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    from backend.security.negotiation_review_mutation import (
+        negotiation_review_mutation_auth_from_request,
+        run_negotiation_review_locked_mutation,
+    )
+
+    if not negotiation_review_mutation_auth_from_request(
+        request,
+        agreement_id,
+        bind_participant_id=bind_participant_id,
+    ):
+        return None
+    if surface:
+        assert_free_incomplete_draft_not_expired(agreement_id, surface=surface)
+    out = run_negotiation_review_locked_mutation(
+        request=request,
+        agreement_id=agreement_id,
+        bind_participant_id=bind_participant_id,
+        mutate_fn=mutate_fn,
+    )
+    if extra:
+        out.update(extra)
+    return out
+
+
+def _agreement_draft_from_projection_dict(projected: Dict[str, Any]) -> AgreementDraft:
+    return AgreementDraft.model_validate({**projected, "id": projected.get("id")})
+
+
 def _persist_staged_recipient_proposal(
     draft: AgreementDraft,
     proposal_id: str,
@@ -9899,6 +10320,44 @@ def _proposal_value_for_id(audit: Any, proposal_id: str) -> Optional[Dict[str, A
     return None
 
 
+def _queue_recipient_proposal_from_payload_in_memory(
+    draft: AgreementDraft,
+    payload: Dict[str, Any],
+) -> AgreementDraft:
+    proposal_id = str(payload.get("proposal_id") or "").strip()
+    proposer_key = str(payload.get("proposer_id") or "").strip()
+    for v in _open_recipient_proposal_payloads(draft.audit_log):
+        if str(v.get("proposer_id") or "").strip() == proposer_key:
+            raise HTTPException(
+                status_code=409,
+                detail="recipient_proposal_already_pending_from_participant",
+            )
+    now = _utc_now_iso()
+    audit = [*(draft.audit_log or [])]
+    audit.append(
+        AuditEvent(
+            event_type="recipient_proposal_pending",
+            at=now,
+            field="recipient_proposal",
+            value=payload,
+        )
+    )
+    audit.append(
+        AuditEvent(
+            event_type="participant_proposed_revision",
+            at=now,
+            field="recipient_proposal",
+            value={
+                "proposal_id": proposal_id,
+                "participant_id": proposer_key,
+                "display_name": str(payload.get("proposer_display_name") or "").strip(),
+                "instruction": str(payload.get("instruction") or "")[:512],
+            },
+        )
+    )
+    return _merge_agreement_draft(draft, updated_at=now, audit_log=audit)
+
+
 def _queue_recipient_proposal_from_payload(
     draft: AgreementDraft,
     payload: Dict[str, Any],
@@ -9947,6 +10406,85 @@ def stage_recipient_proposal(
     """Stage a recipient proposal payload; finalize with POST /recipient-proposal + proposal_id."""
     log.info("[recipient-proposal-stage] start agreement_id=%s", agreement_id)
     try:
+        proposer_id = (body.proposer_id or "").strip()
+        from backend.security.negotiation_review_mutation import (
+            negotiation_review_mutation_auth_from_request,
+        )
+
+        session_auth = negotiation_review_mutation_auth_from_request(
+            request,
+            agreement_id,
+        )
+        if session_auth:
+            instruction = (body.instruction or "").strip()
+            if not instruction:
+                raise HTTPException(status_code=400, detail="instruction_required")
+            proposed_purpose = (body.draft.purpose or "").strip()
+            if not proposed_purpose:
+                raise HTTPException(status_code=400, detail="proposed_draft_purpose_required")
+            proposal_id = str(uuid.uuid4())
+            now = _utc_now_iso()
+            resolved_meta: Dict[str, Any] = {}
+
+            def _stage_mutate(raw: Dict[str, Any], auth) -> Dict[str, Any]:
+                draft_model = AgreementDraft.model_validate(raw)
+                lock = read_signing_lock(agreement_id)
+                if lock and bool((lock or {}).get("locked_version_id")):
+                    raise HTTPException(status_code=400, detail="negotiation_locked")
+                draft_model = _persist_party_id_backfill(draft_model)
+                proposer, proposer_source = _resolve_recipient_proposer_with_source(
+                    request, agreement_id, draft_model, body.proposer_id
+                )
+                resolved_pid = (proposer.id or "").strip()
+                if resolved_pid != (auth.recipient_party_id or "").strip():
+                    from backend.security.negotiation_review_authorization import _write_denied
+
+                    raise _write_denied(code="recipient_party_token_mismatch")
+                resolved_meta["proposer_id"] = resolved_pid
+                resolved_meta["proposer_id_source"] = proposer_source
+                dname = (body.proposer_display_name or "").strip() or proposer.name
+                payload: Dict[str, Any] = {
+                    "proposal_id": proposal_id,
+                    "instruction": instruction,
+                    "draft": body.draft.model_dump(),
+                    "rendered_html": (body.rendered_html or "").strip(),
+                    "staged_at": now,
+                    "proposer_id": resolved_pid,
+                    "proposer_display_name": dname,
+                }
+                staged = _staged_recipient_proposals_map(draft_model)
+                staged[proposal_id] = payload
+                pro_redline = dict(draft_model.pro_redline_v1 or {})
+                pro_redline[STAGED_RECIPIENT_PROPOSALS_KEY] = staged
+                next_draft = _merge_agreement_draft(
+                    draft_model,
+                    updated_at=now,
+                    pro_redline_v1=pro_redline,
+                )
+                return next_draft.model_dump(mode="json")
+
+            session_out = _run_session_locked_mutation_if_present(
+                request,
+                agreement_id,
+                bind_participant_id=session_auth.recipient_party_id,
+                mutate_fn=_stage_mutate,
+                surface="recipient_proposal_stage",
+            )
+            if session_out is not None:
+                return {
+                    "ok": True,
+                    "proposal_id": proposal_id,
+                    "staged": True,
+                    "proposer_id": resolved_meta.get("proposer_id") or session_auth.recipient_party_id,
+                    "proposer_id_source": resolved_meta.get("proposer_id_source") or "session",
+                }
+
+        assert_agreement_recipient_write_allowed(
+            request,
+            agreement_id,
+            allowed_modes=("review",),
+            bind_participant_id=proposer_id or None,
+        )
         assert_free_incomplete_draft_not_expired(agreement_id, surface="recipient_proposal_stage")
         draft = _load_or_404(agreement_id)
         lock = read_signing_lock(agreement_id)
@@ -9962,12 +10500,6 @@ def stage_recipient_proposal(
             agreement_id,
             proposer_id,
             proposer_source,
-        )
-        assert_agreement_recipient_write_allowed(
-            request,
-            agreement_id,
-            allowed_modes=("review",),
-            bind_participant_id=proposer_id,
         )
         instruction = (body.instruction or "").strip()
         if not instruction:
@@ -10029,13 +10561,57 @@ def submit_recipient_proposal(
     proposal_id = (body.proposal_id or "").strip()
     if not proposal_id:
         raise HTTPException(status_code=400, detail="proposal_id_required")
-    assert_free_incomplete_draft_not_expired(agreement_id, surface="recipient_proposal_submit")
+
+    from backend.security.negotiation_review_mutation import negotiation_review_mutation_auth_from_request
+
+    session_auth = negotiation_review_mutation_auth_from_request(request, agreement_id)
+    if session_auth:
+
+        def _finalize_mutate(raw: Dict[str, Any], auth) -> Dict[str, Any]:
+            lock = read_signing_lock(agreement_id)
+            if lock and bool((lock or {}).get("locked_version_id")):
+                raise HTTPException(status_code=400, detail="negotiation_locked")
+            staged = _peek_staged_recipient_proposal_raw(raw, proposal_id)
+            if not staged:
+                raise HTTPException(status_code=404, detail="proposal_not_found")
+            proposer_id = str(staged.get("proposer_id") or "").strip()
+            if proposer_id and proposer_id != (auth.recipient_party_id or "").strip():
+                raise HTTPException(status_code=404, detail="proposal_not_found")
+            staged_map = _staged_recipient_proposals_map_raw(raw)
+            staged_map.pop(proposal_id, None)
+            pr = dict(raw.get("pro_redline_v1") or {})
+            pr[STAGED_RECIPIENT_PROPOSALS_KEY] = staged_map
+            raw["pro_redline_v1"] = pr
+            staged["submitted_at"] = _utc_now_iso()
+            draft_model = AgreementDraft.model_validate(raw)
+            draft_model = _persist_party_id_backfill(draft_model)
+            queued = _queue_recipient_proposal_from_payload_in_memory(draft_model, staged)
+            return queued.model_dump(mode="json")
+
+        session_out = _run_session_locked_mutation_if_present(
+            request,
+            agreement_id,
+            bind_participant_id=session_auth.recipient_party_id,
+            mutate_fn=_finalize_mutate,
+            extra={"ok": True, "proposal_id": proposal_id},
+            surface="recipient_proposal_submit",
+        )
+        if session_out is not None:
+            return session_out
+        from backend.security.negotiation_review_authorization import _write_denied
+
+        raise _write_denied(code="negotiation_review_session_invalid")
+
+    assert_agreement_recipient_write_allowed(
+        request,
+        agreement_id,
+        allowed_modes=("review",),
+    )
     draft = _load_or_404(agreement_id)
     lock = read_signing_lock(agreement_id)
     if lock and bool((lock or {}).get("locked_version_id")):
         raise HTTPException(status_code=400, detail="negotiation_locked")
-    draft = _persist_party_id_backfill(draft)
-    staged = _pop_staged_recipient_proposal(draft, proposal_id, request)
+    staged = _peek_staged_recipient_proposal(draft, proposal_id)
     if not staged:
         raise HTTPException(status_code=400, detail="proposal_not_staged")
     proposer_id = str(staged.get("proposer_id") or "").strip()
@@ -10045,8 +10621,21 @@ def submit_recipient_proposal(
         allowed_modes=("review",),
         bind_participant_id=proposer_id,
     )
-    staged["submitted_at"] = _utc_now_iso()
-    next_draft = _queue_recipient_proposal_from_payload(draft, staged, request)
+    assert_free_incomplete_draft_not_expired(agreement_id, surface="recipient_proposal_submit")
+    draft = _persist_party_id_backfill(draft)
+    popped = _pop_staged_recipient_proposal_in_memory(draft, proposal_id)
+    if not popped:
+        raise HTTPException(status_code=400, detail="proposal_not_staged")
+    popped["submitted_at"] = _utc_now_iso()
+    next_draft = _queue_recipient_proposal_from_payload(draft, popped, request)
+    session_response = _negotiation_review_mutation_response(
+        request,
+        agreement_id,
+        next_draft,
+        extra={"ok": True, "proposal_id": proposal_id},
+    )
+    if session_response is not None:
+        return session_response
     return {"ok": True, "proposal_id": proposal_id, "draft": next_draft.model_dump()}
 
 
@@ -10213,6 +10802,37 @@ def apply_recipient_proposal(
     }
 
 
+def _append_post_approval_notifications(
+    agreement_id: str,
+    draft_dump: Dict[str, Any],
+    *,
+    approver_participant_id: str | None,
+    approver_display_name: str | None,
+    org_id: str | None = None,
+    request: Request | None = None,
+) -> Dict[str, Any]:
+    """Invoke notification providers only after approval persistence has committed."""
+    from backend.services.review_approval_notification_claim import (
+        process_committed_approval_notifications,
+    )
+
+    try:
+        return process_committed_approval_notifications(
+            agreement_id,
+            draft_dump,
+            approver_participant_id=approver_participant_id,
+            approver_display_name=approver_display_name,
+            org_id=org_id,
+            request=request,
+        )
+    except Exception:
+        logging.getLogger(__name__).exception(
+            "owner_review_notification_hook_failed agreement_id=%s",
+            agreement_id,
+        )
+    return draft_dump
+
+
 @router.post("/{agreement_id}/recipient-approve")
 def recipient_approve_agreement(
     agreement_id: str,
@@ -10220,13 +10840,120 @@ def recipient_approve_agreement(
     body: RecipientApproveBody = RecipientApproveBody(),
 ) -> Dict[str, Any]:
     """Recipient acknowledges the current draft as acceptable (audit only; does not lock signing)."""
-    assert_free_incomplete_draft_not_expired(agreement_id, surface="recipient_approve")
+    part_id = (body.participant_id or "").strip()
+    part_name = (body.participant_display_name or "").strip()
+
+    def _approve_mutate(raw: Dict[str, Any], _auth) -> Dict[str, Any]:
+        draft = AgreementDraft.model_validate(raw)
+        imm = draft.audit_log or []
+        if _signature_completed_participant_ids(imm) or _has_legacy_signature_without_participant(imm):
+            raise HTTPException(status_code=400, detail="agreement_immutable_after_signature")
+        lock = read_signing_lock(agreement_id)
+        if lock and bool((lock or {}).get("locked_version_id")):
+            raise HTTPException(status_code=400, detail="negotiation_locked")
+        draft = _persist_party_id_backfill(draft)
+        now = _utc_now_iso()
+        msg = (body.message or "").strip()
+        resolved_name = part_name
+        if part_id:
+            found = False
+            for p in draft.parties or []:
+                if (p.id or "").strip() == part_id:
+                    found = True
+                    if not resolved_name:
+                        resolved_name = p.name
+                    wr = _normalize_workflow_role(p.role)
+                    if wr == "owner":
+                        raise HTTPException(status_code=403, detail="owner_uses_workspace_not_recipient_approve")
+                    if wr == "viewer":
+                        raise HTTPException(status_code=403, detail="viewer_cannot_approve")
+                    break
+            if not found:
+                raise HTTPException(status_code=400, detail="participant_not_found")
+        elif any((p.id or "").strip() for p in (draft.parties or [])):
+            raise HTTPException(status_code=400, detail="participant_id_required")
+        audit = [*(draft.audit_log or [])]
+        approve_val: Dict[str, Any] = {"message": msg or "approved_current_draft"}
+        if part_id:
+            approve_val["participant_id"] = part_id
+            approve_val["participant_display_name"] = resolved_name
+            audit.append(
+                AuditEvent(
+                    event_type="participant_approved",
+                    at=now,
+                    field="recipient",
+                    value=approve_val,
+                )
+            )
+        audit.append(
+            AuditEvent(
+                event_type="recipient_approved",
+                at=now,
+                field="recipient",
+                value=approve_val,
+            )
+        )
+        next_draft = _merge_agreement_draft(draft, updated_at=now, audit_log=audit)
+        next_dump = next_draft.model_dump(mode="json")
+        if part_id:
+            from backend.security.negotiation_review_content_binding import review_content_binding_sha256
+            from backend.security.negotiation_review_version_binding import (
+                authoritative_review_version_binding,
+            )
+            from backend.services.review_approval_notification_claim import (
+                merge_approval_notification_claim,
+            )
+
+            content_sha256 = review_content_binding_sha256(next_dump)
+            locked_version_id = authoritative_review_version_binding(lock)
+            session_id = None
+            if _auth is not None:
+                session_id = str(getattr(_auth, "session_id", "") or "").strip() or None
+                bound_content = str(getattr(_auth, "content_sha256", "") or "").strip()
+                if bound_content:
+                    content_sha256 = bound_content
+                bound_version = str(getattr(_auth, "locked_version_id", "") or "").strip()
+                if bound_version:
+                    locked_version_id = bound_version
+            next_dump, _claim_won, _attempt_id = merge_approval_notification_claim(
+                next_dump,
+                agreement_id=agreement_id,
+                participant_id=part_id,
+                session_id=session_id,
+                content_sha256=content_sha256,
+                locked_version_id=locked_version_id,
+                approval_at=now,
+            )
+        return next_dump
+
+    session_out = _run_session_locked_mutation_if_present(
+        request,
+        agreement_id,
+        bind_participant_id=part_id or None,
+        mutate_fn=_approve_mutate,
+        extra={"ok": True},
+        surface="recipient_approve",
+    )
+    if session_out is not None:
+        from backend.services.agreement_draft_store import load_draft
+
+        _append_post_approval_notifications(
+            agreement_id,
+            load_draft(agreement_id),
+            approver_participant_id=part_id or None,
+            approver_display_name=part_name or None,
+            org_id=resolve_subject_from_request(request),
+            request=request,
+        )
+        return session_out
+
     assert_agreement_recipient_write_allowed(
         request,
         agreement_id,
         allowed_modes=("review",),
         bind_participant_id=body.participant_id,
     )
+    assert_free_incomplete_draft_not_expired(agreement_id, surface="recipient_approve")
     draft = _load_or_404(agreement_id)
     imm = draft.audit_log or []
     if _signature_completed_participant_ids(imm) or _has_legacy_signature_without_participant(imm):
@@ -10237,15 +10964,14 @@ def recipient_approve_agreement(
     draft = _persist_party_id_backfill(draft)
     now = _utc_now_iso()
     msg = (body.message or "").strip()
-    part_id = (body.participant_id or "").strip()
-    part_name = (body.participant_display_name or "").strip()
+    resolved_name = part_name
     if part_id:
         found = False
         for p in draft.parties or []:
             if (p.id or "").strip() == part_id:
                 found = True
-                if not part_name:
-                    part_name = p.name
+                if not resolved_name:
+                    resolved_name = p.name
                 wr = _normalize_workflow_role(p.role)
                 if wr == "owner":
                     raise HTTPException(status_code=403, detail="owner_uses_workspace_not_recipient_approve")
@@ -10260,7 +10986,7 @@ def recipient_approve_agreement(
     approve_val: Dict[str, Any] = {"message": msg or "approved_current_draft"}
     if part_id:
         approve_val["participant_id"] = part_id
-        approve_val["participant_display_name"] = part_name
+        approve_val["participant_display_name"] = resolved_name
         audit.append(
             AuditEvent(
                 event_type="participant_approved",
@@ -10278,39 +11004,39 @@ def recipient_approve_agreement(
         )
     )
     next_draft = _merge_agreement_draft(draft, updated_at=now, audit_log=audit)
-    _save_draft_sync(next_draft.model_dump(), request)
-    try:
-        from backend.services.email.review_delivery import (
-            maybe_notify_counterparties_all_reviews_complete,
-            maybe_notify_owner_after_reviewer_approval,
-        )
+    next_dump = next_draft.model_dump(mode="json")
+    if part_id:
+        from backend.security.negotiation_review_content_binding import review_content_binding_sha256
+        from backend.security.negotiation_review_version_binding import authoritative_review_version_binding
+        from backend.services.review_approval_notification_claim import merge_approval_notification_claim
 
-        notify_audit = maybe_notify_owner_after_reviewer_approval(
+        next_dump, _claim_won, _attempt_id = merge_approval_notification_claim(
+            next_dump,
             agreement_id=agreement_id,
-            draft=next_draft.model_dump(),
-            approver_participant_id=part_id or None,
-            approver_display_name=part_name or None,
+            participant_id=part_id,
+            session_id=None,
+            content_sha256=review_content_binding_sha256(next_dump),
+            locked_version_id=authoritative_review_version_binding(lock),
+            approval_at=now,
         )
-        notify_events = [notify_audit] if notify_audit else []
-        counterparty_audit = maybe_notify_counterparties_all_reviews_complete(
-            agreement_id=agreement_id,
-            draft=next_draft.model_dump(),
-        )
-        if counterparty_audit:
-            notify_events.append(counterparty_audit)
-        if notify_events:
-            audit_with_notify = [*(next_draft.audit_log or []), *notify_events]
-            next_draft = _merge_agreement_draft(
-                next_draft,
-                updated_at=_utc_now_iso(),
-                audit_log=audit_with_notify,
-            )
-            _save_draft_sync(next_draft.model_dump(), request)
-    except Exception:
-        logging.getLogger(__name__).exception(
-            "owner_review_notification_hook_failed agreement_id=%s",
-            agreement_id,
-        )
+    _save_draft_sync(next_dump, request)
+    next_dump = _append_post_approval_notifications(
+        agreement_id,
+        next_dump,
+        approver_participant_id=part_id or None,
+        approver_display_name=resolved_name or None,
+        org_id=resolve_subject_from_request(request),
+        request=request,
+    )
+    next_draft = AgreementDraft.model_validate(next_dump)
+    session_response = _negotiation_review_mutation_response(
+        request,
+        agreement_id,
+        next_draft,
+        extra={"ok": True},
+    )
+    if session_response is not None:
+        return session_response
     return {"ok": True, "draft": next_draft.model_dump()}
 
 

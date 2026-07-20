@@ -5,6 +5,12 @@ from fastapi.testclient import TestClient
 
 import backend.services.agreement_draft_store as ads
 from backend.main import app
+from backend.tests.negotiation_review_test_helpers import (
+    bootstrap_review_session,
+    extract_bootstrap_token_from_review_url,
+    mint_owner_review_copy_link,
+    review_mutation_headers,
+)
 from backend.services.agreement_pdf_story_capability import reset_agreement_pdf_story_capability_cache_for_tests
 from backend.usage_economics import store as usage_economics_store_mod
 
@@ -152,33 +158,31 @@ def test_recipient_magic_link_validate_party_and_agreement_id(monkeypatch, tmp_p
         },
     )
     assert upd.status_code == 200
-    mint = client.post(
-        f"/api/agreements/{aid}/recipient-access-token",
-        headers=_ORG_H,
-        json={
-            "mode": "review",
-            "role": "signer",
-            "recipient_party_id": "pid-signer",
-            "inviter_display_name": "Owner Co",
-        },
+    mint = mint_owner_review_copy_link(
+        client,
+        aid,
+        _ORG_H,
+        role="signer",
+        recipient_party_id="pid-signer",
+        inviter_display_name="Owner Co",
     )
-    assert mint.status_code == 200
-    tok = mint.json()["token"]
-    ok = client.get(
-        f"/api/agreements/access/validate",
-        params={"token": tok, "agreement_id": aid},
+    assert mint.get("review_url")
+    assert "token" not in mint
+    bootstrap_review_session(
+        client,
+        aid,
+        _ORG_H,
+        role="signer",
+        recipient_party_id="pid-signer",
+        inviter_display_name="Owner Co",
     )
-    assert ok.status_code == 200
-    payload = ok.json()
+    status = client.get("/api/negotiation-review/session/status")
+    assert status.status_code == 200
+    payload = status.json()
+    assert payload["authenticated"] is True
     assert payload["recipient_party_id"] == "pid-signer"
-    assert payload["inviter_display_name"] == "Owner Co"
-    mismatch = client.get(
-        "/api/agreements/access/validate",
-        params={"token": tok, "agreement_id": "wrong-id"},
-    )
-    assert mismatch.status_code == 403
     mint_bad = client.post(
-        f"/api/agreements/{aid}/recipient-access-token",
+        f"/api/agreements/{aid}/owner-review-copy-link",
         headers=_ORG_H,
         json={
             "mode": "review",
@@ -186,13 +190,8 @@ def test_recipient_magic_link_validate_party_and_agreement_id(monkeypatch, tmp_p
             "recipient_party_id": "not-on-draft",
         },
     )
-    assert mint_bad.status_code == 200
-    bad_tok = mint_bad.json()["token"]
-    bad_val = client.get(
-        "/api/agreements/access/validate",
-        params={"token": bad_tok, "agreement_id": aid},
-    )
-    assert bad_val.status_code == 403
+    assert mint_bad.status_code == 400
+    assert mint_bad.json()["detail"]["code"] == "recipient_party_not_found"
 
 
 def test_signing_ceremony_multi_signer_and_immutability(monkeypatch, tmp_path):
@@ -234,16 +233,11 @@ def test_signing_ceremony_multi_signer_and_immutability(monkeypatch, tmp_path):
         },
     )
     assert upd.status_code == 200
-    mint_rev = client.post(
-        f"/api/agreements/{aid}/recipient-access-token",
-        headers=_ORG_H,
-        json={"mode": "review", "role": "signer"},
-    )
-    assert mint_rev.status_code == 200
-    review_tok = mint_rev.json()["token"]
-    recv_hdr = {"X-Claw-Recipient-Access-Token": review_tok}
+    recv_hdr = review_mutation_headers()
     for pid, label in (("p-acme", "Acme"), ("p-beta", "Beta")):
-        ap = client.post(
+        reviewer = TestClient(app)
+        bootstrap_review_session(reviewer, aid, _ORG_H, role="signer", recipient_party_id=pid)
+        ap = reviewer.post(
             f"/api/agreements/{aid}/recipient-approve",
             headers=recv_hdr,
             json={
@@ -351,14 +345,8 @@ def test_negotiation_locked_blocks_owner_edits_unlock_restores(monkeypatch, tmp_
         },
     )
     assert upd.status_code == 200
-    mint_rev = client.post(
-        f"/api/agreements/{aid}/recipient-access-token",
-        headers=_ORG_H,
-        json={"mode": "review", "role": "signer"},
-    )
-    assert mint_rev.status_code == 200
-    review_tok = mint_rev.json()["token"]
-    recv_hdr = {"X-Claw-Recipient-Access-Token": review_tok}
+    bootstrap_review_session(client, aid, _ORG_H, role="signer", recipient_party_id="p-sig")
+    recv_hdr = review_mutation_headers()
     ap = client.post(
         f"/api/agreements/{aid}/recipient-approve",
         headers=recv_hdr,
@@ -445,14 +433,8 @@ def test_signing_complete_rejects_stale_draft_vs_lock_hash(monkeypatch, tmp_path
         },
     )
     assert upd.status_code == 200
-    mint_rev = client.post(
-        f"/api/agreements/{aid}/recipient-access-token",
-        headers=_ORG_H,
-        json={"mode": "review", "role": "signer"},
-    )
-    assert mint_rev.status_code == 200
-    review_tok = mint_rev.json()["token"]
-    recv_hdr = {"X-Claw-Recipient-Access-Token": review_tok}
+    bootstrap_review_session(client, aid, _ORG_H, role="signer", recipient_party_id="p-acme")
+    recv_hdr = review_mutation_headers()
     ap = client.post(
         f"/api/agreements/{aid}/recipient-approve",
         headers=recv_hdr,
@@ -2861,21 +2843,17 @@ def test_recipient_preview_export_pdf_requires_recipient_token_or_org(monkeypatc
         },
     )
     assert upd.status_code == 200
-    mint = client.post(
-        f"/api/agreements/{aid}/recipient-access-token",
-        headers=_ORG_H,
-        json={
-            "mode": "review",
-            "role": "signer",
-            "recipient_party_id": "pid-signer",
-            "inviter_display_name": "Owner Co",
-        },
+    bootstrap_review_session(
+        client,
+        aid,
+        _ORG_H,
+        role="signer",
+        recipient_party_id="pid-signer",
+        inviter_display_name="Owner Co",
     )
-    assert mint.status_code == 200
-    tok = mint.json()["token"]
-    recv_hdr = {"X-Claw-Recipient-Access-Token": tok}
+    recv_hdr = review_mutation_headers()
 
-    denied = client.post(
+    denied = TestClient(app).post(
         f"/api/agreements/{aid}/recipient-preview-export-pdf",
         json={"export_kind": "original", "html": "<p>Hello</p>"},
     )
@@ -2889,9 +2867,17 @@ def test_recipient_preview_export_pdf_requires_recipient_token_or_org(monkeypatc
     )
     assert bad.status_code == 403
 
-    ok = client.post(
+    session_blocked = client.post(
         f"/api/agreements/{aid}/recipient-preview-export-pdf",
         headers=recv_hdr,
+        json={"export_kind": "original", "html": "<p>Hello PDF</p>"},
+    )
+    assert session_blocked.status_code == 403
+    assert session_blocked.json()["detail"]["code"] == "negotiation_review_full_draft_denied"
+
+    ok = TestClient(app).post(
+        f"/api/agreements/{aid}/recipient-preview-export-pdf",
+        headers=_ORG_H,
         json={"export_kind": "original", "html": "<p>Hello PDF</p>"},
     )
     assert ok.status_code == 200
@@ -2900,17 +2886,17 @@ def test_recipient_preview_export_pdf_requires_recipient_token_or_org(monkeypatc
     assert "lawdog-original-draft.pdf" in cd
     assert ok.content.startswith(b"%PDF")
 
-    ok_prop = client.post(
+    ok_prop = TestClient(app).post(
         f"/api/agreements/{aid}/recipient-preview-export-pdf",
-        headers=recv_hdr,
+        headers=_ORG_H,
         json={"export_kind": "proposed", "html": "<p>Proposed only</p>"},
     )
     assert ok_prop.status_code == 200
     assert "lawdog-proposed-draft.pdf" in (ok_prop.headers.get("content-disposition") or "")
 
-    red = client.post(
+    red = TestClient(app).post(
         f"/api/agreements/{aid}/recipient-preview-export-pdf",
-        headers=recv_hdr,
+        headers=_ORG_H,
         json={
             "export_kind": "redline",
             "html": "<article><p style='margin:0'><span style='text-decoration:line-through'>Old</span>"
