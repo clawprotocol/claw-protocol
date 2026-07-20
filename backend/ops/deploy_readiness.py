@@ -209,6 +209,10 @@ def gather_deploy_readiness() -> Dict[str, Any]:
         "operator_alerts_postgresql": operator_alerts_database_readiness(),
         "economics_sqlite": _sqlite_select_one(economics_db_path()),
         "economics_persistence": economics_persistence_readiness(),
+        "subscription_authority_topology": __import__(
+            "backend.billing.subscription_authority_topology",
+            fromlist=["assess_subscription_authority_topology"],
+        ).assess_subscription_authority_topology(),
         "production_launch_config": production_launch_config_readiness(),
     }
 
@@ -352,7 +356,9 @@ def gather_deploy_readiness() -> Dict[str, Any]:
 
     critical_keys = ["usage_db", "treasury_db", "treasury_spine", "economics_sqlite"]
     if _is_production_named_environment():
-        critical_keys.extend(["economics_persistence", "production_launch_config"])
+        critical_keys.extend(
+            ["economics_persistence", "production_launch_config", "subscription_authority_topology"]
+        )
     elif (checks.get("production_launch_config") or {}).get("status") == "error":
         critical_keys.append("production_launch_config")
     if use_postgresql_for_timeline():

@@ -18,6 +18,14 @@ export function markAdvancedFullDraftCheckoutGranted(): void {
   }
 }
 
+export function clearAdvancedFullDraftCheckoutGranted(): void {
+  try {
+    sessionStorage.removeItem(CHECKOUT_GRANT_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
 export function peekAdvancedFullDraftCheckoutGrant(): boolean {
   try {
     return sessionStorage.getItem(CHECKOUT_GRANT_KEY) != null;

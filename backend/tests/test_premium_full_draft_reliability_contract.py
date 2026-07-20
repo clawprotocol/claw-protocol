@@ -30,7 +30,7 @@ from backend.agreements.premium_full_draft_quality_gate import (
     premium_full_draft_body_meets_substance_floor,
 )
 from backend.main import app
-from backend.usage_economics import store as usage_economics_store_mod
+from backend.tests.commercial_test_helpers import activate_pro_on_org, isolated_economics_store
 
 pytestmark = pytest.mark.unit
 
@@ -38,10 +38,10 @@ _ORG_H = {"X-Claw-Org-Id": "test-org-premium-reliability"}
 
 
 @pytest.fixture(autouse=True)
-def _reset_usage_economics_singleton():
-    usage_economics_store_mod._store = None  # noqa: SLF001
+def _grant_pro_entitlement(tmp_path, monkeypatch):
+    eco = isolated_economics_store(tmp_path, monkeypatch)
+    activate_pro_on_org(eco, "test-org-premium-reliability")
     yield
-    usage_economics_store_mod._store = None  # noqa: SLF001
 
 
 @pytest.fixture(autouse=True)

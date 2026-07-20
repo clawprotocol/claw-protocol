@@ -71,7 +71,7 @@ describe("TEST431 — P0 GTM auth, Stripe entitlement, affiliate nav", () => {
     expect(meta.reason).toBe("tier_allows_advanced_full_draft");
   });
 
-  it("session marker alone does not authorize without checkout return window when tier is free", () => {
+  it("session marker alone does not authorize without verified server entitlement when tier is free", () => {
     Object.defineProperty(window, "location", {
       value: { href: "https://lawdog.test/app/create", origin: "https://lawdog.test" },
       writable: true,
@@ -84,19 +84,14 @@ describe("TEST431 — P0 GTM auth, Stripe entitlement, affiliate nav", () => {
       premiumCompletionSnapshot: null,
       includeLocalCompletionMarker: false,
     });
-    if (import.meta.env.PROD) {
-      expect(meta.authoritative).toBe(false);
-    } else {
-      expect(meta.authoritative).toBe(true);
-    }
+    expect(meta.authoritative).toBe(false);
   });
 
-  it("paid checkout return window allows session marker in production", () => {
-    Object.defineProperty(window, "location", {
-      value: { href: "https://lawdog.test/app/create?premiumCompletion=1", origin: "https://lawdog.test" },
-      writable: true,
-      configurable: true,
-    });
+  it("paid checkout return with verified server cache allows session marker", () => {
+    writeCachedSubscriptionEntitlement(
+      { org_id: "org-test431", plan_code: "pro", status: "active" },
+      "org-test431",
+    );
     markPaidPremiumCompletionSession({ source: "settled_checkout" });
     const meta = resolvePaidProAgreementAuthoritative({
       draft: minimalDraft(),
@@ -149,8 +144,8 @@ describe("TEST431 — P0 GTM auth, Stripe entitlement, affiliate nav", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
 
-    const ok = await handleCheckoutReturnEntitlement();
-    expect(ok).toBe(true);
+    const result = await handleCheckoutReturnEntitlement();
+    expect(result.ok).toBe(true);
     expect(getOrgId()).toBe("org-test431");
     const access = resolveAccess();
     expect(access.tier).toBe("premium");

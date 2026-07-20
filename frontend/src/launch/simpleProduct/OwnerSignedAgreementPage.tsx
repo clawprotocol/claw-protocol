@@ -17,7 +17,7 @@ import {
   resolveCompletedAgreementViewContext,
   shouldShowBackToDashboard,
 } from "../completedAgreementViewContext";
-import { loadOwnerSignedAgreementPreview } from "../ownerSignedAgreementView";
+import { loadOwnerSignedAgreementPreview, type OwnerSignedAgreementCorpusSource } from "../ownerSignedAgreementView";
 import { AppShell } from "../AppShell";
 
 type Props = {
@@ -46,7 +46,7 @@ export function OwnerSignedAgreementPage(props: Props) {
   const [verify, setVerify] = useState<PublicVerifyPayload | null>(null);
   const [draft, setDraft] = useState<AgreementDraft | null>(null);
   const [corpusSource, setCorpusSource] = useState<
-    "fully_executed_snapshot" | "reconstructed" | "portable_packet" | "local_portable" | null
+    Exclude<OwnerSignedAgreementCorpusSource, "missing"> | null
   >(null);
   const [pdfBusy, setPdfBusy] = useState(false);
   const [pdfError, setPdfError] = useState<string | null>(null);

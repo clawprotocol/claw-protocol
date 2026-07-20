@@ -77,6 +77,7 @@ vi.mock("./recipientSessionSigningApi", async (importOriginal) => {
 });
 
 import { RecipientBootstrapBoundary } from "./RecipientBootstrapBoundary";
+import type { RecipientSessionPacketProjection } from "./recipientSessionPacketApi";
 import { resetFragmentBootstrapExchangeForTests } from "./vs01FragmentBootstrapExchange";
 import { resetFragmentBootstrapTokenMemoForTests } from "./vs01FragmentBootstrapToken";
 import { resetRecipientSessionPacketLoadForTests } from "./recipientSessionPacketLoad";
@@ -98,7 +99,7 @@ const SENSITIVE_MARKERS = [
   "doc_abc",
 ];
 
-const SAMPLE_PACKET = {
+const SAMPLE_PACKET: RecipientSessionPacketProjection = {
   ok: true,
   v: 1,
   document_id: "doc_abc",
@@ -116,7 +117,7 @@ const SAMPLE_PACKET = {
   fields: [
     {
       id: "f1",
-      type: "signature",
+      type: "signature" as const,
       page: 0,
       x: 0.1,
       y: 0.1,
@@ -279,7 +280,7 @@ describe("RecipientBootstrapBoundary session signing", () => {
 
   it("drives authenticated signing lifecycle with retry, completion, logout, and remount", async () => {
     const spies = installThrowingStorageSpies();
-    const consoleGuards = installConsoleGuards();
+    installConsoleGuards();
 
     render(<RecipientBootstrapBoundary seedDocumentId="doc_abc" />);
 

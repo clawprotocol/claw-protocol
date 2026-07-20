@@ -1,5 +1,7 @@
 import { apiUrl, errorMessageFromResponse, logClawClientWarning, readJson } from "../lib/clawApi";
 import { featureFlags } from "../config/featureFlags";
+import { clawAgreementHeaders } from "../agreement/agreementOrgHeaders";
+import { getAuthSession } from "../auth/supabaseAuthService";
 
 export type KeyBalanceResponse = {
   org_id?: string;
@@ -55,8 +57,17 @@ export async function fetchSubscription(orgId: string): Promise<SubscriptionFetc
   const oid = (orgId || "").trim();
   if (!oid) return { data: null, error: null, noSubscription: false };
   try {
+    const session = await getAuthSession();
+    const headers: Record<string, string> = {
+      Accept: "application/json",
+      ...(clawAgreementHeaders() as Record<string, string>),
+    };
+    if (session?.access_token) {
+      headers.Authorization = `Bearer ${session.access_token}`;
+    }
     const res = await fetch(apiUrl(`/v1/subscriptions/${encodeURIComponent(oid)}`), {
-      headers: { Accept: "application/json" },
+      headers,
+      credentials: "include",
     });
     if (res.status === 404) return { data: null, error: null, noSubscription: true };
     if (!res.ok) {

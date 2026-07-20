@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Iterable, Optional, Sequence
+from typing import Optional, Sequence
 
 from backend.billing.subscription_authority import is_subscription_entitled
 from backend.economics.store import EconomicsStore
@@ -32,6 +32,7 @@ def migrate_entitled_subscription_to_org(
     Move the entitled subscription (and Stripe org mirrors) from ``from_org_id`` to ``to_org_id``.
 
     No-op when the source org has no entitled subscription or the destination already has one.
+    Idempotent when destination already holds the same entitled row.
     """
     src = normalize_workspace_org_id(from_org_id)
     dst = normalize_workspace_org_id(to_org_id)
@@ -71,15 +72,15 @@ def can_migrate_subscription_source(
     bound_org_id: str,
     user_id: str,
     usage_store=None,
-    require_client_repair_signal: bool = False,
+    verified_anon_source_org_id: Optional[str] = None,
+    bind_previous_org_id: Optional[str] = None,
 ) -> bool:
     """
-    Guard migration so free users cannot inherit a stranger's ``local-org`` subscription.
+    Server-side migration guard. Never trusts client-supplied repair org lists.
 
-    Allows migration when the source subscription is entitled and either:
+    Allows migration when the source subscription is entitled and:
     - ``user_id`` on the subscription row matches the bound user, or
-    - the client explicitly supplied the source org for repair, or
-    - ``local-org`` has an anonymous subscription and the bound org already owns agreements.
+    - source is a verified anonymous org from the bind/checkout session.
     """
     src = normalize_workspace_org_id(source_org_id)
     dst = normalize_workspace_org_id(bound_org_id)
@@ -96,13 +97,40 @@ def can_migrate_subscription_source(
     if sub_uid:
         return sub_uid == uid
 
-    if require_client_repair_signal:
-        return True
-
-    if src == "local-org" and usage_store is not None:
-        return _bound_org_has_workspace_agreements(subject_ref=f"org:{dst}", usage_store=usage_store)
+    if src.startswith("anon-"):
+        verified = normalize_workspace_org_id(verified_anon_source_org_id or "")
+        bind_prev = normalize_workspace_org_id(bind_previous_org_id or "")
+        if verified and verified == src:
+            return True
+        if bind_prev == src and verified == src:
+            return True
+        return False
 
     return False
+
+
+def derive_server_migration_source_orgs(
+    *,
+    bound_org_id: str,
+    user_id: str,
+    bind_previous_org_id: Optional[str] = None,
+    verified_anon_org_id: Optional[str] = None,
+    usage_store=None,
+) -> list[str]:
+    """Derive migration source org candidates from server-verified bind context only."""
+    bound = normalize_workspace_org_id(bound_org_id)
+    uid = (user_id or "").strip()
+    if not bound or not uid or not bound.startswith("user-"):
+        return []
+
+    out: list[str] = []
+    prev = normalize_workspace_org_id(bind_previous_org_id or "")
+    if prev and prev != bound and prev not in out:
+        out.append(prev)
+    verified = normalize_workspace_org_id(verified_anon_org_id or "")
+    if verified and verified != bound and verified not in out:
+        out.append(verified)
+    return out
 
 
 def repair_bound_user_workspace_entitlement(
@@ -112,7 +140,8 @@ def repair_bound_user_workspace_entitlement(
     bound_org_id: str,
     candidate_source_org_ids: Sequence[str],
     usage_store=None,
-    require_client_repair_signal: bool = False,
+    verified_anon_source_org_id: Optional[str] = None,
+    bind_previous_org_id: Optional[str] = None,
 ) -> bool:
     """Repair orphaned Pro subscriptions for already-bound ``user-{id}`` workspaces."""
     bound = normalize_workspace_org_id(bound_org_id)
@@ -136,7 +165,8 @@ def repair_bound_user_workspace_entitlement(
             bound_org_id=bound,
             user_id=uid,
             usage_store=usage_store,
-            require_client_repair_signal=require_client_repair_signal,
+            verified_anon_source_org_id=verified_anon_source_org_id,
+            bind_previous_org_id=bind_previous_org_id,
         ):
             continue
         if migrate_entitled_subscription_to_org(
@@ -150,7 +180,9 @@ def repair_bound_user_workspace_entitlement(
 
 
 def entitlement_repair_candidates_from_header(request) -> list[str]:
-    """Parse optional repair org header(s) from agreement API requests."""
+    """
+    Legacy header parser — ignored for authority. Kept for compatibility/logging only.
+    """
     out: list[str] = []
     single = normalize_workspace_org_id(request.headers.get(ENTITLEMENT_REPAIR_REQUEST_HEADER) or "")
     if single:

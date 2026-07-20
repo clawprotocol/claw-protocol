@@ -5,21 +5,8 @@
 import type { AccessTier } from "../access/types";
 import { fetchSubscription, type SubscriptionRow } from "../launch/billingApi";
 import { getOrgId } from "../launch/orgContext";
-import { hasPaidPremiumCompletionSession } from "../components/agreements/premiumCompletionStorage";
 
 const CACHE_KEY = "claw_subscription_entitlement_v1";
-
-function isSubscriptionCheckoutReturnWindow(): boolean {
-  if (typeof window === "undefined") return false;
-  try {
-    const u = new URL(window.location.href);
-    if (u.searchParams.get("premiumCompletion") === "1") return true;
-    if (u.searchParams.get("checkout_session_id")) return true;
-  } catch {
-    /* ignore */
-  }
-  return false;
-}
 
 export type SubscriptionEntitlementSnapshot = {
   orgId: string;
@@ -92,14 +79,6 @@ export async function refreshSubscriptionEntitlement(orgId?: string): Promise<Su
     return writeCachedSubscriptionEntitlement(null, oid);
   }
   if (noSubscription || !data) {
-    const existing = readCachedSubscriptionEntitlement();
-    if (
-      existing?.orgId === oid &&
-      existing.tier &&
-      (hasPaidPremiumCompletionSession() || isSubscriptionCheckoutReturnWindow())
-    ) {
-      return existing;
-    }
     return writeCachedSubscriptionEntitlement(null, oid);
   }
   return writeCachedSubscriptionEntitlement(data, oid);

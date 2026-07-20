@@ -24,6 +24,11 @@ export type OwnerSignedAgreementCorpusSource =
   | "local_portable"
   | "missing";
 
+type ResolvedSignedCorpus = {
+  text: string;
+  source: Exclude<OwnerSignedAgreementCorpusSource, "missing">;
+};
+
 type CompletedArtifactProjection = {
   agreement_id?: unknown;
   accepted_version_id?: unknown;
@@ -49,10 +54,10 @@ async function fetchCompletedArtifactFromAgreement(
 }
 
 async function resolveSignedCorpusFromCompletedArtifact(
-  agreementId: string,
+  _agreementId: string,
   draft: AgreementDraft,
   artifact: CompletedArtifactProjection,
-): Promise<{ text: string; source: "completed_artifact" } | null> {
+): Promise<ResolvedSignedCorpus | null> {
   const materialHash = String(artifact.material_hash ?? "").trim().toLowerCase();
   if (materialHash.length !== 64) return null;
   const signed = resolveVs01FullyExecutedSignedCorpus(draft);
@@ -90,16 +95,14 @@ function logOwnerSignedAgreementViewSource(args: {
   });
 }
 
-function resolveSignedCorpusFromDraft(
-  draft: AgreementDraft,
-): { text: string; source: Exclude<OwnerSignedAgreementCorpusSource, "missing"> } | null {
+function resolveSignedCorpusFromDraft(draft: AgreementDraft): ResolvedSignedCorpus | null {
   return resolveVs01FullyExecutedSignedCorpus(draft);
 }
 
 function resolveSignedCorpusFromLocalPortable(
   draft: AgreementDraft,
   agreementId: string,
-): { text: string; source: Exclude<OwnerSignedAgreementCorpusSource, "missing"> } | null {
+): ResolvedSignedCorpus | null {
   const localPortable = findVs01CanonicalPacketPortableByAgreementId(agreementId);
   if (!localPortable) return null;
   const rebuilt = reconstructSignedCorpusFromAuditAndPortable({
@@ -158,7 +161,7 @@ export async function loadOwnerSignedAgreementPreview(
     ? completedArtifact
     : null;
 
-  let signed = certifiedArtifact
+  let signed: ResolvedSignedCorpus | null = certifiedArtifact
     ? await resolveSignedCorpusFromCompletedArtifact(id, draft, certifiedArtifact)
     : null;
   if (!signed?.text && !certifiedArtifact) {

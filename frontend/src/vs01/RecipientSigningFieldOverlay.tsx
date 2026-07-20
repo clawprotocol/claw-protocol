@@ -191,7 +191,7 @@ export function RecipientSigningFieldOverlay({
         locked={!editable}
         required={false}
         value={shown}
-        className={`vs01-recipient-meta-inline${isMine ? " vs01-recipient-meta-inline--mine" : " vs01-recipient-meta-inline--other"}`}
+        className={overlayClassName}
         style={staticStyle}
         aria-label={`${metaLabel}: ${shown}`}
         data-field-id={field.id}

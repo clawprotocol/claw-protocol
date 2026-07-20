@@ -47,12 +47,14 @@ export class RecipientSessionFieldMutationCoordinator {
   private readonly listeners = new Set<() => void>();
   private cachedSnapshots: FieldMutationSnapshot[] = [];
   private snapshotsDirty = true;
+  private readonly mutate: MutateFn;
 
   constructor(
-    private readonly mutate: MutateFn,
+    mutate: MutateFn,
     initialConfirmed: Record<string, string> = {},
     initialRevisions: Record<string, number> = {},
   ) {
+    this.mutate = mutate;
     for (const [fieldId, value] of Object.entries(initialConfirmed)) {
       const id = fieldId.trim();
       if (!id) continue;

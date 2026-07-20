@@ -14,16 +14,28 @@ from backend.billing.stripe_config import (
     stripe_price_pro_annual,
     stripe_price_pro_monthly,
 )
+from backend.billing.checkout_intent_store import (
+    CREATE_FLOW_CHECKOUT_AGREEMENT_ID,
+    assert_create_flow_checkout_intent_for_verify,
+    create_create_flow_checkout_intent,
+)
 from backend.billing.stripe_client import create_checkout_session, retrieve_checkout_session
 from backend.billing.stripe_subscription_sync import sync_subscription_from_stripe_checkout_session
+from backend.billing.subscription_authority import is_subscription_entitled
 from backend.economics.store import get_economics_store
 from backend.payments.stripe_checkout_helpers import lawdog_pro_checkout_metadata
 from backend.security.safe_redirect import is_allowlisted_internal_path, resolve_safe_redirect_path
 from backend.security.workspace_identity import assert_agreement_accessible, require_verified_org_id
 from backend.security.supabase_jwt import extract_bearer_token, verify_supabase_access_token
+from backend.usage_economics.policy import SUBSCRIPTION_REQUIRED_DETAIL
 
 router = APIRouter(prefix="/v1/billing", tags=["billing-checkout"])
 _log = logging.getLogger("claw.billing.checkout_api")
+
+_CHECKOUT_VERIFY_FAILED = {
+    "code": "checkout_verification_failed",
+    "message": "Checkout could not be verified for this workspace.",
+}
 
 
 class CheckoutSessionIn(BaseModel):
@@ -60,13 +72,31 @@ def _checkout_user_id(request: Request) -> Optional[str]:
         return None
 
 
+def _checkout_request_user_id(request: Request) -> Optional[str]:
+    bearer_uid = _checkout_user_id(request)
+    if bearer_uid:
+        return bearer_uid
+    from backend.security.supabase_jwt import _test_auth_user_id
+
+    return _test_auth_user_id(request)
+
+
 @router.post("/checkout-session")
 async def post_checkout_session(request: Request, body: CheckoutSessionIn) -> Dict[str, Any]:
     if not is_stripe_checkout_configured():
         raise HTTPException(status_code=503, detail="stripe_checkout_not_configured")
 
     agreement_id = body.agreement_id.strip()
-    _, org_id = assert_agreement_accessible(request, agreement_id)
+    checkout_intent_id: Optional[str] = None
+    if agreement_id == CREATE_FLOW_CHECKOUT_AGREEMENT_ID:
+        org_id = require_verified_org_id(request)
+        intent = create_create_flow_checkout_intent(
+            org_id=org_id,
+            user_id=_checkout_request_user_id(request),
+        )
+        checkout_intent_id = str(intent.get("intent_id") or "").strip() or None
+    else:
+        _, org_id = assert_agreement_accessible(request, agreement_id)
     return_to = resolve_safe_redirect_path(body.return_to.strip() or "/app/create", "/app/create")
     if not is_allowlisted_internal_path(return_to):
         return_to = "/app/create"
@@ -82,9 +112,11 @@ async def post_checkout_session(request: Request, body: CheckoutSessionIn) -> Di
         org_id=org_id,
         referral_code=body.referral_code,
         visitor_id=body.visitor_id,
-        user_id=_checkout_user_id(request),
+        user_id=_checkout_request_user_id(request),
     )
     metadata["agreement_id"] = agreement_id
+    if checkout_intent_id:
+        metadata["checkout_intent_id"] = checkout_intent_id
 
     try:
         session = create_checkout_session(
@@ -117,16 +149,45 @@ async def post_verify_checkout_session(request: Request, body: VerifyCheckoutSes
     except RuntimeError as exc:
         raise HTTPException(status_code=502, detail=str(exc)) from exc
 
-    session_org = (session.get("metadata") or {}).get("org_id") or (session.get("metadata") or {}).get("claw_org_id")
-    if session_org and str(session_org).strip() != org_id:
-        raise HTTPException(status_code=403, detail="org_mismatch")
-    session_agreement = str((session.get("metadata") or {}).get("agreement_id") or "").strip()
-    if session_agreement:
+    md = session.get("metadata") if isinstance(session.get("metadata"), dict) else {}
+    session_org = (md.get("org_id") or md.get("claw_org_id") or "").strip() if isinstance(md, dict) else ""
+    if not session_org:
+        raise HTTPException(status_code=403, detail=dict(_CHECKOUT_VERIFY_FAILED))
+    if session_org != org_id:
+        raise HTTPException(status_code=403, detail=dict(_CHECKOUT_VERIFY_FAILED))
+
+    session_agreement = str(md.get("agreement_id") or "").strip()
+    checkout_intent_id = str(md.get("checkout_intent_id") or "").strip()
+    if session_agreement == CREATE_FLOW_CHECKOUT_AGREEMENT_ID:
+        if not checkout_intent_id:
+            raise HTTPException(status_code=403, detail=dict(_CHECKOUT_VERIFY_FAILED))
+        assert_create_flow_checkout_intent_for_verify(
+            intent_id=checkout_intent_id,
+            org_id=org_id,
+            request_user_id=_checkout_request_user_id(request),
+            stripe_session_id=session_id,
+        )
+    elif session_agreement:
         assert_agreement_accessible(request, session_agreement)
+
+    checkout_user = str(md.get("user_id") or "").strip()
+    request_user = _checkout_request_user_id(request)
+    if checkout_user and request_user and checkout_user != request_user:
+        raise HTTPException(status_code=403, detail=dict(_CHECKOUT_VERIFY_FAILED))
+
+    status = str(session.get("status") or "").strip().lower()
+    payment_status = str(session.get("payment_status") or "").strip().lower()
+    if status != "complete" or payment_status not in ("paid", "no_payment_required"):
+        raise HTTPException(status_code=403, detail=dict(_CHECKOUT_VERIFY_FAILED))
 
     eco = get_economics_store()
     result = sync_subscription_from_stripe_checkout_session(eco, session)
     if not result.get("ok"):
-        raise HTTPException(status_code=400, detail=result.get("error") or "verify_failed")
+        raise HTTPException(status_code=403, detail=dict(_CHECKOUT_VERIFY_FAILED))
+    if result.get("ignored"):
+        raise HTTPException(status_code=403, detail=dict(_CHECKOUT_VERIFY_FAILED))
+
     sub = eco.get_subscription_by_org(org_id)
+    if not is_subscription_entitled(sub):
+        raise HTTPException(status_code=403, detail=dict(SUBSCRIPTION_REQUIRED_DETAIL))
     return {"ok": True, "sync": result, "subscription": sub}

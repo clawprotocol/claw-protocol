@@ -288,11 +288,10 @@ async def finalize_auth(request: Request, body: FinalizeAuthIn) -> Dict[str, Any
         prev_org = ""
 
     billing_migrated = _repair_billing_after_bind(
+        request,
         user_id=user_id,
         org_id=org_id,
         prev_org_id=prev_org,
-        subscription_source_org_id=body.subscription_source_org_id,
-        entitlement_repair_candidates=body.entitlement_repair_candidates,
         require_anon_source_match=True,
     )
     store.consume_continuation(continuation_id=body.continuation_id.strip(), user_id=user_id)
@@ -321,16 +320,16 @@ async def finalize_auth(request: Request, body: FinalizeAuthIn) -> Dict[str, Any
 
 
 def _repair_billing_after_bind(
+    request: Request,
     *,
     user_id: str,
     org_id: str,
     prev_org_id: str,
-    subscription_source_org_id: Optional[str],
-    entitlement_repair_candidates: Optional[list[str]],
     require_anon_source_match: bool,
 ) -> bool:
     try:
         from backend.billing.workspace_billing_migration import (
+            derive_server_migration_source_orgs,
             normalize_workspace_org_id,
             repair_bound_user_workspace_entitlement,
         )
@@ -340,25 +339,43 @@ def _repair_billing_after_bind(
         eco.init_schema()
         ustore = get_usage_economics_store()
         ustore.init_schema()
-        repair_candidates: list[str] = []
-        for raw in entitlement_repair_candidates or []:
-            oid = normalize_workspace_org_id(str(raw or ""))
-            if oid and oid not in repair_candidates:
-                repair_candidates.append(oid)
-        sub_src = normalize_workspace_org_id(subscription_source_org_id or "")
-        if sub_src and sub_src not in repair_candidates:
-            repair_candidates.append(sub_src)
-        prev = (prev_org_id or "").strip()
-        if prev and prev != org_id and prev.startswith("anon-") and prev not in repair_candidates:
-            repair_candidates.append(prev)
+
+        prev = normalize_workspace_org_id(prev_org_id or "")
+        verified_anon_org: Optional[str] = None
+        if extract_anonymous_session_token(request):
+            try:
+                anon_row = verify_anonymous_session_from_request(request)
+                verified_anon_org = str(anon_row.get("org_id") or "").strip() or None
+            except HTTPException:
+                verified_anon_org = None
+
+        if require_anon_source_match and prev.startswith("anon-"):
+            if not verified_anon_org or verified_anon_org != prev:
+                _log.info(
+                    "billing_repair_skipped anon_source_mismatch prev=%s verified=%s",
+                    prev,
+                    verified_anon_org,
+                )
+                return False
+
+        candidates = derive_server_migration_source_orgs(
+            bound_org_id=org_id,
+            user_id=user_id,
+            bind_previous_org_id=prev if prev and prev != org_id else None,
+            verified_anon_org_id=verified_anon_org,
+            usage_store=ustore,
+        )
+        if not candidates:
+            return False
 
         return repair_bound_user_workspace_entitlement(
             eco,
             user_id=user_id,
             bound_org_id=org_id,
-            candidate_source_org_ids=repair_candidates,
+            candidate_source_org_ids=candidates,
             usage_store=ustore,
-            require_client_repair_signal=bool(repair_candidates),
+            verified_anon_source_org_id=verified_anon_org,
+            bind_previous_org_id=prev if prev and prev != org_id else None,
         )
     except Exception:
         _log.exception("migrate_workspace_billing_failed prev=%s new=%s", prev_org_id, org_id)
@@ -383,19 +400,19 @@ async def bind_user_org(request: Request, body: BindUserOrgIn) -> Dict[str, Any]
     prev = (body.previous_org_id or "").strip()
     if prev and prev != org_id:
         if _is_claimable_draft_source_org(prev):
+            anon_row = verify_anonymous_session_from_request(request)
+            if str(anon_row.get("org_id") or "") != prev:
+                raise HTTPException(
+                    status_code=403,
+                    detail={
+                        "code": "anonymous_session_org_mismatch",
+                        "message": "Session does not authorize this workspace.",
+                    },
+                )
             ustore = get_usage_economics_store()
             ustore.init_schema()
             pending = ustore.list_agreement_ids_for_subject(f"org:{prev}")
             if pending:
-                anon_row = verify_anonymous_session_from_request(request)
-                if str(anon_row.get("org_id") or "") != prev:
-                    raise HTTPException(
-                        status_code=403,
-                        detail={
-                            "code": "anonymous_session_org_mismatch",
-                            "message": "Session does not authorize this workspace.",
-                        },
-                    )
                 migrated_agreements = _migrate_drafts_for_claim(
                     prev_org_id=prev,
                     target_org_id=org_id,
@@ -415,11 +432,10 @@ async def bind_user_org(request: Request, body: BindUserOrgIn) -> Dict[str, Any]
             )
 
     billing_migrated = _repair_billing_after_bind(
+        request,
         user_id=user_id,
         org_id=org_id,
         prev_org_id=prev,
-        subscription_source_org_id=body.subscription_source_org_id,
-        entitlement_repair_candidates=body.entitlement_repair_candidates,
         require_anon_source_match=True,
     )
 
@@ -435,18 +451,39 @@ async def bind_user_org(request: Request, body: BindUserOrgIn) -> Dict[str, Any]
 
 
 @router.post("/demo-activate-subscription")
-async def demo_activate_subscription(body: BindUserOrgIn) -> Dict[str, Any]:
-    """Dev/QA/staging only: activate Pro subscription without Stripe."""
-    import os
+async def demo_activate_subscription(request: Request, body: BindUserOrgIn) -> Dict[str, Any]:
+    """Dev/test only: activate Pro subscription without Stripe."""
+    from backend.security.claw_environment import is_relaxed_claw_environment
 
-    env = os.getenv("CLAW_ENVIRONMENT", "local").strip().lower()
-    prod_denied = env in ("production", "prod")
-    non_prod_allowed = env in ("local", "dev", "test", "staging", "qa", "preview", "review")
-    preview_like = env.startswith("preview") or env.startswith("review") or env.startswith("pr-")
-    if prod_denied or not (non_prod_allowed or preview_like):
+    if not is_relaxed_claw_environment():
         raise HTTPException(status_code=404, detail="not_found")
 
-    org_id = (body.previous_org_id or "").strip() or _stable_org_id_for_user(body.user_id)
+    user_id = require_supabase_user_id(request)
+    if body.user_id.strip() != user_id:
+        raise HTTPException(
+            status_code=403,
+            detail={"code": "user_id_mismatch", "message": "Authenticated user mismatch."},
+        )
+
+    stable_org = _stable_org_id_for_user(user_id)
+    requested_prev = (body.previous_org_id or "").strip()
+    if requested_prev and requested_prev not in (stable_org, "local-org"):
+        if requested_prev.startswith("anon-"):
+            anon_row = verify_anonymous_session_from_request(request)
+            if str(anon_row.get("org_id") or "") != requested_prev:
+                raise HTTPException(
+                    status_code=403,
+                    detail={
+                        "code": "anonymous_session_org_mismatch",
+                        "message": "Session does not authorize this workspace.",
+                    },
+                )
+            org_id = requested_prev
+        else:
+            raise HTTPException(status_code=403, detail={"code": "invalid_org", "message": "Invalid workspace."})
+    else:
+        org_id = requested_prev or stable_org
+
     if not org_id:
         raise HTTPException(status_code=400, detail="missing_org_id")
 
@@ -463,7 +500,7 @@ async def demo_activate_subscription(body: BindUserOrgIn) -> Dict[str, Any]:
         treasury=get_treasury_store(),
         payment_id=payment_id,
         org_id=org_id,
-        user_id=body.user_id.strip(),
+        user_id=user_id,
         plan_code="pro",
         use_demo_expiry=True,
     )

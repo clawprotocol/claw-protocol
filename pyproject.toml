@@ -22,6 +22,9 @@ dependencies = [
   "certifi>=2026.1.4",
   "embit>=0.8.0",
   "openai>=2.21.0",
+  "psycopg[binary]>=3.2,<4",
+  "eth-abi>=5.0.0",
+  "eth-utils>=4.0.0",
 ]
 
 [project.optional-dependencies]

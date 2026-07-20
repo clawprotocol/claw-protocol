@@ -146,6 +146,7 @@ from backend.usage_economics.constants import WATERMARK_LABEL
 from backend.usage_economics.policy import (
     assert_can_complete_agreement,
     assert_can_create_draft,
+    assert_pro_entitled_for_request,
     review_first_paid_pro_persist_bypass,
     maybe_repair_workspace_entitlement_from_request,
     assert_free_incomplete_draft_not_expired,
@@ -1975,6 +1976,7 @@ def _user_payload_premium_refine(
 
 @router.post("/premium-refine", response_model=PremiumRefineResponse)
 def premium_refine(request: Request, body: PremiumRefineRequest) -> PremiumRefineResponse:
+    assert_pro_entitled_for_request(request)
     require_claw_org_id_header(request)
     ok_txt, msg_txt = validate_negotiate_text(body.intake_text, "owner")
     if not ok_txt:
@@ -2731,6 +2733,7 @@ def _fallback_premium_review_route(payload: Dict[str, Any]) -> PremiumReviewRout
 
 @router.post("/premium-finalize-audit", response_model=PremiumFinalizeAuditResponse)
 def premium_finalize_audit(request: Request, body: PremiumFinalizeAuditRequest) -> PremiumFinalizeAuditResponse:
+    assert_pro_entitled_for_request(request)
     require_claw_org_id_header(request)
     ok_txt, msg_txt = validate_negotiate_text(body.intake_text, "owner")
     if not ok_txt:
@@ -2823,6 +2826,7 @@ def premium_finalize_audit(request: Request, body: PremiumFinalizeAuditRequest) 
 
 @router.post("/premium-review-route", response_model=PremiumReviewRouteResponse)
 def premium_review_route(request: Request, body: PremiumReviewRouteRequest) -> PremiumReviewRouteResponse:
+    assert_pro_entitled_for_request(request)
     require_claw_org_id_header(request)
     ok_txt, msg_txt = validate_negotiate_text(body.intake_text, "owner")
     if not ok_txt:
@@ -4324,6 +4328,8 @@ def _parse_intake_system_prompt_premium() -> str:
 @router.post("/parse", response_model=AgreementParseResponse)
 def parse_agreement_intake(request: Request, body: AgreementParseRequest) -> AgreementParseResponse:
     require_claw_org_id_header(request)
+    if body.ai_model_class == "premium":
+        assert_pro_entitled_for_request(request)
     parse_debug_client = os.getenv("CLAW_AGREEMENT_PARSE_CLIENT_DEBUG", "").strip() == "1"
     if body.ai_model_class == "premium":
         system_prompt = _parse_intake_system_prompt_premium()
@@ -4421,6 +4427,7 @@ def premium_missing_facts(request: Request, body: PremiumMissingFactsRequest) ->
     """
     Pre–full-draft: up to 5 high-value open questions. Fail-open returns empty questions on model errors.
     """
+    assert_pro_entitled_for_request(request)
     require_claw_org_id_header(request)
     ok_txt, msg_txt = validate_negotiate_text(body.intake_text, "owner")
     if not ok_txt:
@@ -4526,6 +4533,7 @@ def premium_finalize(request: Request, body: PremiumFinalizationRequest) -> Prem
     This route never runs from first-pass generation automatically. The client must
     call it deliberately after material clarification answers or a repair-needed state.
     """
+    assert_pro_entitled_for_request(request)
     require_claw_org_id_header(request)
     ok_txt, msg_txt = validate_negotiate_text(body.original_intake, "owner")
     if not ok_txt:
@@ -4564,6 +4572,7 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Respo
     One-shot premium model: full agreement document (not stitched field transforms).
     Returns JSON with `document_text` as the primary body for LawDog Pro read-only preview.
     """
+    assert_pro_entitled_for_request(request)
     require_claw_org_id_header(request)
     ok_txt, msg_txt = validate_negotiate_text(body.intake_text, "owner")
     if not ok_txt:
@@ -5287,6 +5296,7 @@ def premium_agreement_review(request: Request, body: PremiumAgreementReviewReque
     After premium full draft (or final premium body): light AI pass for clarity / completeness nudges.
     Does not replace the agreement; returns structured bullets for the UI.
     """
+    assert_pro_entitled_for_request(request)
     require_claw_org_id_header(request)
     ok_txt, msg_txt = validate_negotiate_text(body.intake_text, "owner")
     if not ok_txt:
@@ -9207,6 +9217,8 @@ def negotiate_assist(
     if session_type == "owner":
         require_claw_org_id_header(request)
         assert_registered_owner_matches(request, agreement_id)
+        if body.ai_model_class == "premium":
+            assert_pro_entitled_for_request(request, agreement_id=agreement_id)
     elif session_type == "recipient":
         assert_agreement_recipient_write_allowed(request, agreement_id, allowed_modes=("review",))
     draft = _load_or_404(agreement_id)
@@ -9301,6 +9313,8 @@ def revise_agreement(
     if body.session_type == "owner":
         require_claw_org_id_header(request)
         assert_registered_owner_matches(request, agreement_id)
+        if body.ai_model_class == "premium":
+            assert_pro_entitled_for_request(request, agreement_id=agreement_id)
     elif body.session_type == "recipient":
         assert_agreement_recipient_write_allowed(request, agreement_id, allowed_modes=("review",))
     if body.persist:

@@ -149,8 +149,8 @@ describe("TEST437 — subscription 404 does not poison post-checkout Pro complet
       }),
     );
 
-    const ok = await handleCheckoutReturnEntitlement();
-    expect(ok).toBe(true);
+    const result = await handleCheckoutReturnEntitlement();
+    expect(result.ok).toBe(true);
     expect(hasPaidPremiumCompletionSession()).toBe(true);
     const cached = readCachedSubscriptionEntitlement();
     expect(cached?.tier).toBe("premium");

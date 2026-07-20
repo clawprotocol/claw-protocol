@@ -153,6 +153,12 @@ from backend.config.env_bootstrap import log_env_warnings_at_startup  # noqa: E4
 
 log_env_warnings_at_startup()
 
+from backend.billing.subscription_authority_topology import (  # noqa: E402
+    assert_subscription_authority_topology_at_startup,
+)
+
+assert_subscription_authority_topology_at_startup()
+
 _LEGACY_DEMO_ROUTES_ENABLED = legacy_demo_routes_enabled()
 
 VERIFIER_ONLY = os.getenv("CLAW_VERIFIER_ONLY", "0") == "1"

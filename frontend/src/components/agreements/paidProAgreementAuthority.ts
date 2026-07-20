@@ -1,4 +1,5 @@
 import type { AccessTier } from "../../access/types";
+import { subscriptionTierForAccess } from "../../access/subscriptionEntitlementCache";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import { tierAllowsAdvancedFullDraftReveal } from "./agreementAdvancedDraftAccess";
 import { resolveCreateFlowWorkspaceProEntitled } from "./paidCreateFlowWorkspaceEntitlementProbe";
@@ -76,16 +77,8 @@ export type PaidProAuthorityMeta = {
 /**
  * Same decision as {@link isPaidProAgreementAuthoritative} plus a stable `reason` for logging / QA.
  */
-function isActiveCheckoutReturnWindow(): boolean {
-  if (typeof window === "undefined") return false;
-  try {
-    const u = new URL(window.location.href);
-    if (u.searchParams.get("premiumCompletion") === "1") return true;
-    if (u.searchParams.get("checkout_session_id")) return true;
-  } catch {
-    /* ignore */
-  }
-  return false;
+function hasVerifiedServerProEntitlement(): boolean {
+  return subscriptionTierForAccess() === "premium";
 }
 
 export function resolvePaidProAgreementAuthoritative(input: PaidProAgreementAuthorityInput): PaidProAuthorityMeta {
@@ -103,8 +96,8 @@ export function resolvePaidProAgreementAuthoritative(input: PaidProAgreementAuth
   const hasStoredPaidSession = hasStoredPaidPremiumCompletionSession();
   if (
     hasStoredPaidSession &&
-    !(hasCurrentSessionFreeStarterIntent() && !hasCurrentSessionProEntitlement()) &&
-    (!isProdBuild() || isActiveCheckoutReturnWindow())
+    hasVerifiedServerProEntitlement() &&
+    !(hasCurrentSessionFreeStarterIntent() && !hasCurrentSessionProEntitlement())
   ) {
     return { authoritative: true, reason: "paid_premium_completion_session", corpusLen, premium_render_source };
   }

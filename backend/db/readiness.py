@@ -398,6 +398,8 @@ def launch_postgres_readiness_for_readyz() -> Dict[str, Any]:
 
     Excludes usage-economics metering (degraded UX, not full-app hard dependency for LB drain).
     """
+    from backend.billing.subscription_authority_topology import assess_subscription_authority_topology
+
     return {
         "anchoring_database": anchoring_database_readiness(),
         "agreements_database": agreement_database_readiness(),
@@ -405,4 +407,5 @@ def launch_postgres_readiness_for_readyz() -> Dict[str, Any]:
         "affiliate_ledger_database": affiliate_ledger_database_readiness(),
         "operator_alerts_database": operator_alerts_database_readiness(),
         "onramp_payments_database": onramp_payments_database_readiness(),
+        "subscription_authority_topology": assess_subscription_authority_topology(),
     }

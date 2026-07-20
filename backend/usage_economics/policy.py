@@ -51,6 +51,25 @@ def _relaxed_draft_limits_in_dev() -> bool:
     return strict not in ("1", "true", "yes")
 
 
+_PRO_ENTITLED_PLAN_CODES = frozenset({"pro", "enterprise", "team", "institutional", "business"})
+
+SUBSCRIPTION_REQUIRED_DETAIL: Dict[str, Any] = {
+    "code": "subscription_required",
+    "message": "This workspace needs an active Pro subscription.",
+}
+
+
+def _subscription_row_is_pro_entitled(row: Optional[Dict[str, Any]]) -> bool:
+    from backend.billing.subscription_authority import is_subscription_entitled
+
+    if not is_subscription_entitled(row):
+        return False
+    code = str(row.get("plan_code") or "").strip().lower()
+    if not code or code in ("free", "trial", "starter", "standard"):
+        return False
+    return code in _PRO_ENTITLED_PLAN_CODES
+
+
 def subject_has_paid_plan(subject_ref: str, economics: Optional[EconomicsStore] = None) -> bool:
     from backend.billing.subscription_authority import is_subscription_entitled
     from backend.billing.workspace_billing_migration import migrate_entitled_subscription_to_org
@@ -70,7 +89,7 @@ def subject_has_paid_plan(subject_ref: str, economics: Optional[EconomicsStore] 
             by_user = eco.get_subscription_by_user_id(uid)
             if is_subscription_entitled(by_user):
                 sub_org = str(by_user.get("org_id") or "").strip()
-                if sub_org and sub_org != oid:
+                if sub_org and sub_org != oid and sub_uid_matches(by_user, uid):
                     try:
                         migrate_entitled_subscription_to_org(
                             eco,
@@ -84,13 +103,80 @@ def subject_has_paid_plan(subject_ref: str, economics: Optional[EconomicsStore] 
     return False
 
 
+def sub_uid_matches(row: Optional[Dict[str, Any]], user_id: str) -> bool:
+    uid = (user_id or "").strip()
+    if not uid:
+        return False
+    sub_uid = str((row or {}).get("user_id") or "").strip()
+    if not sub_uid:
+        return False
+    return sub_uid == uid
+
+
+def subject_has_pro_entitlement(subject_ref: str, economics: Optional[EconomicsStore] = None) -> bool:
+    from backend.billing.workspace_billing_migration import migrate_entitled_subscription_to_org
+    from backend.utils.enforce import org_id_from_subject
+
+    oid = org_id_from_subject(subject_ref)
+    if not oid:
+        return False
+    eco = economics or get_economics_store()
+    eco.init_schema()
+    row = subs.get_subscription_for_org(eco, oid)
+    if _subscription_row_is_pro_entitled(row):
+        return True
+    if oid.startswith("user-"):
+        uid = oid[5:].strip()
+        if uid:
+            by_user = eco.get_subscription_by_user_id(uid)
+            if _subscription_row_is_pro_entitled(by_user) and sub_uid_matches(by_user, uid):
+                sub_org = str(by_user.get("org_id") or "").strip()
+                if sub_org and sub_org != oid:
+                    try:
+                        migrate_entitled_subscription_to_org(
+                            eco,
+                            from_org_id=sub_org,
+                            to_org_id=oid,
+                            user_id=uid,
+                        )
+                    except Exception:
+                        log.exception("lazy pro workspace billing migration failed org=%s user=%s", oid, uid)
+                return True
+    return False
+
+
+def assert_pro_entitled_for_request(
+    request: Request,
+    *,
+    agreement_id: Optional[str] = None,
+) -> str:
+    """
+    Canonical Paid Pro gate — server identity + authoritative subscription row only.
+  """
+    from fastapi import HTTPException
+    from backend.security.workspace_identity import assert_agreement_accessible
+
+    maybe_repair_workspace_entitlement_from_request(request)
+
+    if agreement_id:
+        subject, _org_id = assert_agreement_accessible(request, agreement_id.strip())
+    else:
+        from backend.security.request_identity import resolve_workspace_identity
+
+        subject = resolve_workspace_identity(request).subject_ref
+
+    if not subject_has_pro_entitlement(subject):
+        raise HTTPException(status_code=403, detail=dict(SUBSCRIPTION_REQUIRED_DETAIL))
+    return subject
+
+
 def maybe_repair_workspace_entitlement_from_request(request: Request) -> bool:
     """
-    Repair orphaned subscriptions for bound ``user-{id}`` workspaces when the client
-    supplies explicit repair org candidate(s). Returns True when a migration occurred.
+    Repair orphaned subscriptions for bound ``user-{id}`` workspaces using server-derived
+    source org candidates only (never client repair headers).
     """
     from backend.billing.workspace_billing_migration import (
-        entitlement_repair_candidates_from_header,
+        derive_server_migration_source_orgs,
         repair_bound_user_workspace_entitlement,
     )
     from backend.utils.enforce import org_id_from_subject, resolve_subject_from_request
@@ -102,19 +188,21 @@ def maybe_repair_workspace_entitlement_from_request(request: Request) -> bool:
     uid = oid[5:].strip()
     if not uid:
         return False
-    candidates = entitlement_repair_candidates_from_header(request)
-    client_signal = bool(candidates)
-    if not candidates:
-        candidates = ["local-org"]
     eco = get_economics_store()
     ustore = get_usage_economics_store()
+    candidates = derive_server_migration_source_orgs(
+        bound_org_id=oid,
+        user_id=uid,
+        usage_store=ustore,
+    )
+    if not candidates:
+        return False
     return repair_bound_user_workspace_entitlement(
         eco,
         user_id=uid,
         bound_org_id=oid,
         candidate_source_org_ids=candidates,
         usage_store=ustore,
-        require_client_repair_signal=client_signal,
     )
 
 

@@ -58,6 +58,11 @@ def collect_env_warnings() -> List[str]:
                 "CLAW_ECONOMICS_DB_PATH unset — economics subscriptions/affiliates use default SQLite "
                 "path (ephemeral on PaaS); deploy-readiness fails in production until set."
             )
+        from backend.billing.subscription_authority_topology import assess_subscription_authority_topology
+
+        topo = assess_subscription_authority_topology()
+        if topo.get("status") == "error":
+            warnings.append(str(topo.get("detail") or "subscription authority topology invalid"))
         if not _is_set("STRIPE_SECRET_KEY"):
             warnings.append("STRIPE_SECRET_KEY unset — Stripe checkout unavailable.")
         if not _is_set("CLAW_API_BASE") and not _is_set("LAWDOG_API_ORIGIN"):

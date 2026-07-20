@@ -585,13 +585,23 @@ async def get_usage_bundle(usage_id: str) -> Dict[str, Any]:
 
 
 @router.get("/subscriptions/{org_id}")
-async def get_subscription(org_id: str) -> Dict[str, Any]:
+async def get_subscription(request: Request, org_id: str) -> Dict[str, Any]:
+    from backend.security.workspace_identity import require_verified_org_id
+
+    verified_org = require_verified_org_id(request)
+    requested = (org_id or "").strip()
+    if not requested or requested != verified_org:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "workspace_mismatch",
+                "message": "Subscription is not available for this workspace.",
+            },
+        )
     eco = get_economics_store()
     eco.init_schema()
-    row = subs.get_subscription_for_org(eco, org_id)
+    row = subs.get_subscription_for_org(eco, verified_org)
     if not row:
-        # Missing subscription is a normal probe result (local-org, pre-checkout, stale org id).
-        # Never 404 — callers treat null as free/no plan without poisoning checkout-return flows.
         return {"subscription": None}
     return {"subscription": row}
 

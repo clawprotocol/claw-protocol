@@ -87,9 +87,19 @@ export async function demoActivateSubscription(args: {
   userId: string;
   orgId: string;
 }): Promise<VerifyCheckoutSessionResponse> {
+  const session = await getAuthSession();
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    Accept: "application/json",
+    ...(clawAgreementHeaders() as Record<string, string>),
+  };
+  if (session?.access_token) {
+    headers.Authorization = `Bearer ${session.access_token}`;
+  }
   const res = await fetch(apiUrl("/v1/workspace/demo-activate-subscription"), {
     method: "POST",
-    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    headers,
+    credentials: "include",
     body: JSON.stringify({
       user_id: args.userId,
       previous_org_id: args.orgId,

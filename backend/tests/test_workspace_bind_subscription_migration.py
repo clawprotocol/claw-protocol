@@ -65,7 +65,7 @@ def test_bind_user_org_migrates_subscription_from_local_org(isolated_stores, mon
     user_id = "supabase-user-488"
     stable_org = f"user-{user_id}"
 
-    _activate_pro_on_org(eco, "local-org")
+    _activate_pro_on_org(eco, "local-org", user_id=user_id)
 
     res = client.post(
         "/v1/workspace/bind-user-org",
@@ -73,7 +73,6 @@ def test_bind_user_org_migrates_subscription_from_local_org(isolated_stores, mon
         json={
             "user_id": user_id,
             "previous_org_id": "local-org",
-            "subscription_source_org_id": "local-org",
         },
     )
     assert res.status_code == 200, res.text
@@ -99,7 +98,6 @@ def test_paid_user_workspace_org_can_create_draft_after_bind(isolated_stores):
         json={
             "user_id": user_id,
             "previous_org_id": "local-org",
-            "subscription_source_org_id": "local-org",
         },
     )
 
@@ -157,8 +155,8 @@ def test_lazy_subscription_migration_by_user_id(isolated_stores):
     assert eco.get_subscription_by_org(stable_org) is not None
 
 
-def test_already_bound_user_repair_from_local_org_on_reload(isolated_stores):
-    """TEST489 — subscription stuck on local-org after first bind; reload repair succeeds."""
+def test_already_bound_user_does_not_repair_ownerless_local_org(isolated_stores):
+    """Ownerless local-org subscription must not migrate merely because user owns agreements."""
     eco, usage = isolated_stores
     client = TestClient(app)
     user_id = "supabase-user-489"
@@ -171,23 +169,7 @@ def test_already_bound_user_repair_from_local_org_on_reload(isolated_stores):
         internal_keys_draft=1,
     )
 
-    res = client.post(
-        "/v1/workspace/bind-user-org",
-        headers=make_test_auth_headers(user_id),
-        json={
-            "user_id": user_id,
-            "previous_org_id": stable_org,
-            "entitlement_repair_candidates": ["local-org", "org:local-org"],
-        },
-    )
-    assert res.status_code == 200, res.text
-    assert res.json().get("billing_migrated") is True
-    assert subject_has_paid_plan(f"org:{stable_org}", economics=eco) is True
-
-    h = {
-        **make_authenticated_user_headers(user_id),
-        "X-Claw-Entitlement-Repair-Org": "local-org",
-    }
+    h = make_authenticated_user_headers(user_id)
     r = client.post(
         "/api/agreements/draft",
         headers=h,
@@ -203,9 +185,12 @@ def test_already_bound_user_repair_from_local_org_on_reload(isolated_stores):
         },
     )
     assert r.status_code == 200, r.text
+    assert subject_has_paid_plan(f"org:{stable_org}", economics=eco) is False
+    assert eco.get_subscription_by_org("local-org") is not None
 
 
-def test_draft_post_repair_header_normalizes_org_prefix(isolated_stores):
+def test_draft_post_does_not_repair_ownerless_local_org(isolated_stores):
+    """Server must not derive local-org repair from agreement ownership alone."""
     eco, usage = isolated_stores
     client = TestClient(app)
     user_id = "supabase-user-489b"
@@ -218,10 +203,7 @@ def test_draft_post_repair_header_normalizes_org_prefix(isolated_stores):
         internal_keys_draft=1,
     )
 
-    h = {
-        **make_authenticated_user_headers(user_id),
-        "X-Claw-Entitlement-Repair-Org": "org:local-org",
-    }
+    h = make_authenticated_user_headers(user_id)
     r = client.post(
         "/api/agreements/draft",
         headers=h,
@@ -237,11 +219,11 @@ def test_draft_post_repair_header_normalizes_org_prefix(isolated_stores):
         },
     )
     assert r.status_code == 200, r.text
-    assert subject_has_paid_plan(f"org:{stable_org}", economics=eco) is True
+    assert subject_has_paid_plan(f"org:{stable_org}", economics=eco) is False
 
 
-def test_draft_post_auto_repair_without_client_header_when_bound_has_agreements(isolated_stores):
-    """TEST489 — existing draft on user org triggers local-org repair on draft POST."""
+def test_draft_post_does_not_auto_repair_ownerless_local_org(isolated_stores):
+    """Existing draft on user org must not trigger ownerless local-org repair."""
     eco, usage = isolated_stores
     client = TestClient(app)
     user_id = "supabase-user-489c"
@@ -270,7 +252,7 @@ def test_draft_post_auto_repair_without_client_header_when_bound_has_agreements(
         },
     )
     assert r.status_code == 200, r.text
-    assert subject_has_paid_plan(f"org:{stable_org}", economics=eco) is True
+    assert subject_has_paid_plan(f"org:{stable_org}", economics=eco) is False
 
     _eco, _usage = isolated_stores
     client = TestClient(app)
