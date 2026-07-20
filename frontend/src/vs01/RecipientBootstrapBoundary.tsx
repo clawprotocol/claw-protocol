@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { LAWDOG_SUPPORT_EMAIL, LAWDOG_SUPPORT_MAILTO } from "../launch/supportContact";
 import {
   fetchRecipientBootstrapSessionStatus,
   logoutRecipientBootstrapSession,
@@ -236,6 +237,13 @@ export function RecipientBootstrapBoundary(props: Props) {
             ? "You can reload this page to try again, or sign out and use a fresh signing link."
             : undefined;
 
+  const showFailureSupport =
+    state === "invalid_or_expired" ||
+    state === "already_used" ||
+    state === "stale_session" ||
+    state === "unavailable" ||
+    state === "signed_out";
+
   return (
     <div className="vs01-card vs01-card--envelope" data-testid="recipient-bootstrap-boundary">
       {state !== "ready_for_review" &&
@@ -244,6 +252,14 @@ export function RecipientBootstrapBoundary(props: Props) {
         <>
           <h2 className="vs01-card__title">{title}</h2>
           {subtitle ? <p className="vs01-card__subtitle">{subtitle}</p> : null}
+          {showFailureSupport ? (
+            <p className="vs01-card__subtitle">
+              Need help?{" "}
+              <a href={LAWDOG_SUPPORT_MAILTO} className="text-emerald-400/95 underline-offset-2 hover:underline">
+                {LAWDOG_SUPPORT_EMAIL}
+              </a>
+            </p>
+          ) : null}
         </>
       ) : null}
 

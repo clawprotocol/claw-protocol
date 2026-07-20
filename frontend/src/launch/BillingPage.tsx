@@ -15,6 +15,7 @@ import { SampleArtifactsPreview } from "./SampleArtifactsPreview";
 import { LawdogValueBulletsList, PricingGuaranteePanel } from "./LaunchOfferBlocks";
 import { LAUNCH_PRICING_TIERS, PRICING_FAQ, PRICING_PROOF_CALLOUT } from "./pricingTiersData";
 import { BillingTermsNotice } from "../compliance/BillingTermsNotice";
+import { BillingCancellationPanel } from "./BillingCancellationPanel";
 import { ConsentAcknowledgement } from "../compliance/ConsentAcknowledgement";
 import { DOWNGRADE_ACCESS_SHORT, NOT_LEGAL_ADVICE, PRODUCT_NOT_LAW_FIRM } from "../compliance/disclosureCopy";
 import { PricingCadenceToggle } from "./PricingCadenceToggle";
@@ -246,6 +247,8 @@ export function BillingPage() {
         </section>
 
         <BillingTermsNotice />
+
+        <BillingCancellationPanel workspaceId={org} />
 
         <ConsentAcknowledgement
           className="rounded-lg border border-slate-800/80 bg-slate-950/30 p-4"

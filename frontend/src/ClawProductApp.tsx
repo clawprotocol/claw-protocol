@@ -95,6 +95,13 @@ import { PrivacyPage } from "./launch/legal/PrivacyPage";
 import { AffiliateTermsPage } from "./launch/legal/AffiliateTermsPage";
 import { PaidProReviewUxVisualPage } from "./qa/PaidProReviewUxVisualPage";
 import { handleCheckoutReturnEntitlement } from "./launch/checkoutReturnEntitlement";
+import { NotFoundPage } from "./launch/NotFoundPage";
+import { LaunchFailureState } from "./launch/LaunchFailureState";
+import { LaunchRouteRedirect } from "./launch/LaunchRouteRedirect";
+import {
+  isLegacyAgreementCreateRoute,
+  resolveLegacyAgreementCreateRedirect,
+} from "./launch/gtmLaunchRoutes";
 
 const RECIPIENT_SIGNING_HERO: Vs01LayoutHero = {
   title: "Review and sign",
@@ -189,10 +196,15 @@ function AgreementSignGate(props: {
   }
   if (phase === "bad") {
     return (
-      <p className="px-4 py-8 text-center text-sm text-rose-300">
-        {badMessage?.trim() ||
-          "This link is invalid or expired. Request a new link from the sender."}
-      </p>
+      <LaunchFailureState
+        kind="invalid_link"
+        variant="envelope"
+        message={
+          badMessage?.trim() ||
+          "This link is invalid or expired. Request a new link from the sender."
+        }
+        primaryAction={{ label: "Go to home", onClick: onClose }}
+      />
     );
   }
   const accessGate = token ? { lockedVersionId } : undefined;
@@ -457,10 +469,15 @@ export function AgreementReviewGate(props: {
   }
   if (phase === "bad") {
     return (
-      <p className="px-4 py-8 text-center text-sm text-rose-300">
-        {badMessage?.trim() ||
-          "This link is invalid or expired. Request a new link from the sender."}
-      </p>
+      <LaunchFailureState
+        kind="invalid_link"
+        variant="envelope"
+        message={
+          badMessage?.trim() ||
+          "This link is invalid or expired. Request a new link from the sender."
+        }
+        primaryAction={{ label: "Go to home", onClick: onClose }}
+      />
     );
   }
   const entry =
@@ -662,7 +679,14 @@ export function ClawProductApp() {
 
   if (feedPublic) {
     if (!featureFlags.publicFeed) {
-      return <LaunchHomePage />;
+      return (
+        <LaunchFailureState
+          kind="forbidden"
+          message="The public feed is not enabled in this deployment."
+          detail="This route is reserved for opt-in public highlights when the feature is turned on."
+          primaryAction={{ label: "Go to home", onClick: () => navigate("/") }}
+        />
+      );
     }
     return (
       <Vs01Layout
@@ -692,18 +716,12 @@ export function ClawProductApp() {
 
   if (appMatch?.kind === "affiliatePayoutOps" && !featureFlags.affiliateAdminUi) {
     return (
-      <AppShell
-        title="Unavailable"
-        subtitle="Affiliate operator tools are not enabled in this deployment."
-      >
-        <p className="max-w-md text-sm text-slate-400">
-          This page is for payout / ops work only. Enable <code className="text-slate-300">VITE_CLAW_FEATURE_AFFILIATE_ADMIN</code> in
-          internal or staging test builds if you need it.
-        </p>
-        <button type="button" className="vs01-btn vs01-btn--secondary mt-6" onClick={() => navigate("/app")}>
-          Back to dashboard
-        </button>
-      </AppShell>
+      <LaunchFailureState
+        kind="forbidden"
+        message="Affiliate operator tools are not available in this deployment."
+        detail="This page is for internal payout and ops work only."
+        primaryAction={{ label: "Back to dashboard", onClick: () => navigate("/app") }}
+      />
     );
   }
 
@@ -714,18 +732,21 @@ export function ClawProductApp() {
     !canAccessOperatorGrowthDashboard()
   ) {
     return (
-      <AppShell
-        title="Unavailable"
-        subtitle="Operator analytics routes are not enabled in this deployment."
-      >
-        <p className="max-w-md text-sm text-slate-400">
-          These dashboards use local browser analytics. Enable <code className="text-slate-300">VITE_CLAW_FEATURE_OPS_GROWTH</code> for
-          internal test builds, or use localhost in development.
-        </p>
-        <button type="button" className="vs01-btn vs01-btn--secondary mt-6" onClick={() => navigate("/app")}>
-          Back to dashboard
-        </button>
-      </AppShell>
+      <LaunchFailureState
+        kind="forbidden"
+        message="Operator analytics routes are not available in this deployment."
+        detail="These dashboards are reserved for internal operator builds."
+        primaryAction={{ label: "Back to dashboard", onClick: () => navigate("/app") }}
+      />
+    );
+  }
+
+  if (isLegacyAgreementCreateRoute(pathname)) {
+    return (
+      <LaunchRouteRedirect
+        to={resolveLegacyAgreementCreateRedirect(search)}
+        label="Opening create…"
+      />
     );
   }
 
@@ -853,5 +874,5 @@ export function ClawProductApp() {
     return <LaunchHomePage />;
   }
 
-  return <LaunchHomePage />;
+  return <NotFoundPage />;
 }

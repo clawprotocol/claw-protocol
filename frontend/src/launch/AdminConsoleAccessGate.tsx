@@ -3,6 +3,7 @@ import { useAuth } from "../auth/AuthProvider";
 import { AppShell } from "./AppShell";
 import { AdminConsolePage } from "./AdminConsolePage";
 import { useLaunchNav } from "./LaunchNavContext";
+import { LaunchFailureState } from "./LaunchFailureState";
 import {
   bootstrapQaPaymentBypassAdminSession,
   refreshGenesisBetaPaymentBypassAuth,
@@ -13,15 +14,12 @@ import { writeAdminConsoleSecret, readAdminConsoleSecret } from "./adminConsoleA
 function AdminConsoleUnavailable() {
   const { navigate } = useLaunchNav();
   return (
-    <AppShell title="Unavailable" subtitle="Internal admin is not enabled in this deployment.">
-      <p className="max-w-md text-sm text-slate-400">
-        This page is for operator tools only. Customer builds leave it off; use an internal build with admin
-        console enabled if you need it.
-      </p>
-      <button type="button" className="vs01-btn vs01-btn--secondary mt-6" onClick={() => navigate("/app")}>
-        Back to dashboard
-      </button>
-    </AppShell>
+    <LaunchFailureState
+      kind="forbidden"
+      message="Internal admin tools are not available in this deployment."
+      detail="This page is reserved for operator builds. Customer-facing releases keep it disabled."
+      primaryAction={{ label: "Back to dashboard", onClick: () => navigate("/app") }}
+    />
   );
 }
 

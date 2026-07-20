@@ -3,6 +3,7 @@ import { useLaunchNav } from "./LaunchNavContext";
 import { useAuth } from "../auth/AuthProvider";
 import { isGoogleAuthConfigured } from "../auth/supabaseAuthService";
 import { logProductEvent } from "../lib/experimentation/productEvents";
+import { LaunchFailureState } from "./LaunchFailureState";
 
 /** Returning-user sign-in — no pending draft; lands on dashboard after auth. */
 export function SignInPage() {
@@ -14,9 +15,12 @@ export function SignInPage() {
 
   if (!enabled) {
     return (
-      <div className="mx-auto max-w-md px-4 py-16 text-center text-slate-400">
-        Sign-in is not configured in this environment.
-      </div>
+      <LaunchFailureState
+        kind="unauthorized"
+        message="Sign-in is not configured in this environment."
+        detail="Contact your administrator or reach out to support if you expected to sign in here."
+        primaryAction={{ label: "Go to home", onClick: () => navigate("/") }}
+      />
     );
   }
 
