@@ -6,6 +6,7 @@ export function localPresentationPermitted(state: OwnerSigningStatusHydratedStat
     state.status === "legacy" ||
     state.status === "frozen" ||
     state.status === "signing" ||
+    state.status === "completed" ||
     (state.status === "conflict" && state.conflict === "completed_parity_not_certified")
   );
 }
@@ -44,8 +45,11 @@ export function authorityStatusCopy(state: OwnerSigningStatusHydratedState): str
   if (state.status === "signing") {
     return `Backend reports ${state.signedCount} of ${state.requiredCount} required signers recorded.`;
   }
+  if (state.status === "completed") {
+    return "Backend certified this agreement as fully executed.";
+  }
   if (state.conflict === "completed_parity_not_certified") {
-    return "The backend reports completion, but completed-agreement certification is pending Phase 3B2 parity.";
+    return "The backend reports completion, but completed-agreement certification is pending.";
   }
   return `Backend authority conflict: ${state.conflict ?? "unknown_conflict"}.`;
 }

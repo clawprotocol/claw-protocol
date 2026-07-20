@@ -63,6 +63,71 @@ describe("loadOwnerSignedAgreementPreview (Test362)", () => {
     expect(loaded!.html).toContain("Heath Ledger");
   });
 
+  it("prefers certified completed artifact over legacy local portable fallback", async () => {
+    const corpusPlain = signedCorpus();
+    const corpusHash = fingerprintAgreementBody(corpusPlain);
+    const draft = {
+      id: AG,
+      title: "Services Agreement",
+      parties: [{ name: "Red Mesa Logistics LLC" }, { name: "Harbor Peak Automation LLC" }],
+      vs01_signing_packet_v1: {
+        v: 1,
+        fully_executed_snapshot: {
+          v: 1,
+          corpus_plain: corpusPlain,
+          corpus_hash: corpusHash,
+          saved_at: "2026-06-16T00:00:00Z",
+        },
+      },
+    } as unknown as AgreementDraft;
+
+    vi.spyOn(agreementWorkspaceApi, "fetchAgreementDraft").mockResolvedValue({
+      ok: true,
+      draft,
+    });
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        completed_artifact: {
+          agreement_id: AG,
+          material_hash: "a".repeat(64),
+          completed_corpus_sha256: corpusHash,
+        },
+      }),
+    } as Response);
+
+    const loaded = await loadOwnerSignedAgreementPreview(AG);
+    expect(loaded).not.toBeNull();
+    expect(loaded!.corpusSource).toBe("completed_artifact");
+    expect(loaded!.corpusText).toContain("By: Hue Lorrey");
+  });
+
+  it("blocks legacy fallback when certified artifact is present but snapshot is missing", async () => {
+    const draft = {
+      id: AG,
+      title: "Services Agreement",
+      parties: [{ name: "Red Mesa Logistics LLC" }],
+    } as unknown as AgreementDraft;
+
+    vi.spyOn(agreementWorkspaceApi, "fetchAgreementDraft").mockResolvedValue({
+      ok: true,
+      draft,
+    });
+    vi.spyOn(globalThis, "fetch").mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        completed_artifact: {
+          agreement_id: AG,
+          material_hash: "b".repeat(64),
+          completed_corpus_sha256: "c".repeat(64),
+        },
+      }),
+    } as Response);
+
+    const loaded = await loadOwnerSignedAgreementPreview(AG);
+    expect(loaded).toBeNull();
+  });
+
   it("calls ensure endpoint when fully executed but server snapshot missing", async () => {
     const agreementPublicVerify = await import("../agreement/agreementPublicVerify");
     const unsignedCorpus =

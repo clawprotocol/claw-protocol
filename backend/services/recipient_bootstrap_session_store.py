@@ -145,6 +145,32 @@ def apply_session_revocation_to_draft(
     return next_draft, True
 
 
+def apply_all_sessions_revocation_to_draft(
+    draft: Dict[str, Any], *, revoked_at: str
+) -> Tuple[Dict[str, Any], int]:
+    """Revoke every non-revoked bootstrap session embedded in the draft."""
+    container = get_sessions_field(draft)
+    sessions = container.get("sessions") or {}
+    if not isinstance(sessions, dict) or not sessions:
+        return draft, 0
+    next_draft = dict(draft)
+    next_container = dict(container)
+    next_sessions = dict(sessions)
+    revoked_count = 0
+    for sid, session in sessions.items():
+        if not isinstance(session, dict) or _clean(session.get("revoked_at")):
+            continue
+        updated = dict(session)
+        updated["revoked_at"] = revoked_at
+        next_sessions[sid] = updated
+        revoked_count += 1
+    if revoked_count == 0:
+        return draft, 0
+    next_container["sessions"] = next_sessions
+    next_draft[RECIPIENT_BOOTSTRAP_SESSIONS_FIELD] = next_container
+    return next_draft, revoked_count
+
+
 def apply_session_last_seen_to_draft(
     draft: Dict[str, Any], *, session_id: str, last_seen_at: str
 ) -> Tuple[Dict[str, Any], bool]:
@@ -348,12 +374,28 @@ def get_session_by_token_hash_for_update(cx: Any, token_hash: str) -> Optional[D
     ).fetchone()
     if not row:
         return None
-    if row[2] is not None:
-        return None
     payload = row[0] if isinstance(row[0], dict) else json.loads(str(row[0]))
     if not isinstance(payload, dict):
         return None
-    if _clean(payload.get("revoked_at")):
+    if row[2] is not None:
+        from backend.services.agreement_draft_store import _decode_draft_payload
+        from backend.services.vs01_completed_agreement_artifact import completed_artifact_ready
+
+        agreement_id = _clean(payload.get("agreement_id"))
+        if not agreement_id:
+            return None
+        draft_row = pg_execute(
+            cx,
+            "SELECT payload FROM agreement_drafts WHERE id = ?",
+            (agreement_id,),
+        ).fetchone()
+        if not draft_row:
+            return None
+        draft = _decode_draft_payload(draft_row[0])
+        if not completed_artifact_ready(draft):
+            return None
+        payload = {**payload, "revoked_at": str(row[2])}
+    elif _clean(payload.get("revoked_at")):
         return None
     now_ts = int(time.time())
     exp_raw = _clean(payload.get("expires_at"))
@@ -387,13 +429,16 @@ def get_session_by_token_hash(token_hash: str) -> Optional[Dict[str, Any]]:
         with agreement_postgres_connection() as cx:
             row = pg_execute(
                 cx,
-                "SELECT payload FROM recipient_bootstrap_sessions WHERE token_hash = ?",
+                "SELECT payload, revoked_at FROM recipient_bootstrap_sessions WHERE token_hash = ?",
                 (th,),
             ).fetchone()
             if not row:
                 return None
             payload = row[0]
-            return payload if isinstance(payload, dict) else json.loads(str(payload))
+            session = payload if isinstance(payload, dict) else json.loads(str(payload))
+            if row[1] is not None:
+                session = {**session, "revoked_at": str(row[1])}
+            return session
 
     hint = lookup_session_hint(th)
     if hint:
@@ -535,6 +580,59 @@ def touch_last_seen(*, session_id: str, last_seen_at: str, agreement_id: Optiona
         if not changed:
             return
         _write_draft_file_unlocked(path, next_draft)
+
+
+def revoke_all_sessions_for_agreement_postgres(
+    *,
+    agreement_id: str,
+    revoked_at: str,
+    cx: Any,
+) -> int:
+    from backend.db.agreement_sql import pg_execute
+
+    cur = pg_execute(
+        cx,
+        """
+        UPDATE recipient_bootstrap_sessions
+        SET revoked_at = ?
+        WHERE agreement_id = ? AND revoked_at IS NULL
+        """,
+        (revoked_at, agreement_id),
+    )
+    return int(cur.rowcount or 0)
+
+
+def count_active_sessions_for_agreement(agreement_id: str) -> int:
+    aid = (agreement_id or "").strip()
+    if not aid:
+        return 0
+    if _use_postgres():
+        from backend.db.agreement_sql import agreement_postgres_connection, pg_execute
+
+        with agreement_postgres_connection() as cx:
+            row = pg_execute(
+                cx,
+                """
+                SELECT COUNT(*) FROM recipient_bootstrap_sessions
+                WHERE agreement_id = ? AND revoked_at IS NULL
+                """,
+                (aid,),
+            ).fetchone()
+            return int(row[0]) if row else 0
+    from backend.services.agreement_draft_store import load_draft
+
+    try:
+        draft = load_draft(aid)
+    except KeyError:
+        return 0
+    sessions = get_sessions_field(draft).get("sessions") or {}
+    if not isinstance(sessions, dict):
+        return 0
+    return sum(
+        1
+        for session in sessions.values()
+        if isinstance(session, dict) and not _clean(session.get("revoked_at"))
+    )
 
 
 def count_sessions_for_agreement(agreement_id: str) -> int:

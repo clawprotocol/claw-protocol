@@ -51,7 +51,8 @@ export type OwnerSigningHydrationConflict =
   | "signing_lock_hash_mismatch"
   | "signing_state_without_lock"
   | "signing_progress_out_of_range"
-  | "completed_parity_not_certified";
+  | "completed_parity_not_certified"
+  | "completed_artifact_invalid";
 
 export type OwnerSigningStatusHydratedState = {
   agreementId: string;
@@ -72,6 +73,23 @@ type SigningLockRecord = {
   content_sha256?: unknown;
 };
 
+type CompletedArtifactProjection = {
+  schema?: unknown;
+  agreement_id?: unknown;
+  accepted_version_id?: unknown;
+  accepted_corpus_sha256?: unknown;
+  packet_document_id?: unknown;
+  packet_revision?: unknown;
+  completed_corpus_sha256?: unknown;
+  material_hash?: unknown;
+  completion_timestamp?: unknown;
+  frozen_authority_material_hash?: unknown;
+  signing_lock?: {
+    locked_version_id?: unknown;
+    content_sha256?: unknown;
+  } | null;
+};
+
 type AgreementReadPayload = {
   id?: unknown;
   draft?: {
@@ -81,9 +99,42 @@ type AgreementReadPayload = {
   };
   accepted_version?: unknown;
   signing_lock?: SigningLockRecord | null;
+  completed_artifact?: CompletedArtifactProjection | null;
 };
 
 const base = () => resolveApiBase().replace(/\/$/, "");
+
+function validateCompletedArtifactProjection(args: {
+  agreementId: string;
+  accepted: AcceptedCorpusAuthority;
+  frozen: FrozenSigningAuthoritySnapshotV1;
+  signingLock: SigningLockRecord | null | undefined;
+  artifact: CompletedArtifactProjection | null | undefined;
+}): boolean {
+  const artifact = args.artifact;
+  if (!artifact) return false;
+  if (String(artifact.agreement_id ?? "").trim() !== args.agreementId) return false;
+  if (String(artifact.accepted_version_id ?? "").trim() !== args.accepted.version_id) return false;
+  if (
+    String(artifact.accepted_corpus_sha256 ?? "")
+      .trim()
+      .toLowerCase() !== args.accepted.corpus_sha256.toLowerCase()
+  ) {
+    return false;
+  }
+  const lockVersion = String(args.signingLock?.locked_version_id ?? "").trim();
+  const lockHash = String(args.signingLock?.content_sha256 ?? "").trim().toLowerCase();
+  const artifactLock = artifact.signing_lock;
+  if (lockVersion && String(artifactLock?.locked_version_id ?? "").trim() !== lockVersion) {
+    return false;
+  }
+  if (lockHash && String(artifactLock?.content_sha256 ?? "").trim().toLowerCase() !== lockHash) {
+    return false;
+  }
+  const materialHash = String(artifact.material_hash ?? "").trim().toLowerCase();
+  const completedCorpusHash = String(artifact.completed_corpus_sha256 ?? "").trim().toLowerCase();
+  return materialHash.length === 64 && completedCorpusHash.length === 64;
+}
 
 function clearNonAuthoritativeBrowserSigningState(agreementId: string): void {
   clearPaidProVs01PostSignHandoffForAgreement(agreementId);
@@ -505,6 +556,27 @@ export async function hydrateOwnerSigningStatusPage(
     });
   }
   if (backendCompleted) {
+    const certified = validateCompletedArtifactProjection({
+      agreementId: id,
+      accepted,
+      frozen,
+      signingLock: payload.signing_lock,
+      artifact: payload.completed_artifact,
+    });
+    if (certified) {
+      return {
+        agreementId: id,
+        agreementTitle,
+        status: "completed",
+        authorityClassification: "frozen",
+        accepted,
+        frozen,
+        signedCount: requiredCount,
+        requiredCount,
+        backendCompleted: true,
+        verify,
+      };
+    }
     return {
       ...conflictState({
         agreementId: id,

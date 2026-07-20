@@ -42,7 +42,7 @@ describe("recipientSessionSigningApi", () => {
     );
   });
 
-  it("rejects completion responses that claim global execution", async () => {
+  it("accepts completion responses that claim global execution when signer is complete", async () => {
     const fetchMock = vi.mocked(fetch);
     fetchMock.mockResolvedValueOnce({
       ok: true,
@@ -60,9 +60,9 @@ describe("recipientSessionSigningApi", () => {
     } as Response);
 
     const result = await completeRecipientSessionSigner();
-    expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.code).toBe("global_execution_not_allowed");
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.globally_executed).toBe(true);
     }
   });
 });

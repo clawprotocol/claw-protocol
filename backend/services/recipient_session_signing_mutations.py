@@ -20,6 +20,7 @@ from backend.services.vs01_recipient_bootstrap_exchange import (
     load_revalidated_recipient_session,
 )
 from backend.services.vs01_signer_completion import (
+    all_signers_signed_from_audit,
     build_signature_completed_event,
     signer_role_already_completed,
 )
@@ -60,6 +61,14 @@ class RecipientSessionSigningConflictError(Exception):
     """Stale revision conflict — mapped to 409 with generic message at API boundary."""
 
     def __init__(self, code: str = "field_revision_conflict") -> None:
+        self.code = code
+        super().__init__(code)
+
+
+class RecipientSessionSigningArtifactConflictError(Exception):
+    """Completed artifact material conflict — mapped to 409 at API boundary."""
+
+    def __init__(self, code: str = "completed_artifact_conflict") -> None:
         self.code = code
         super().__init__(code)
 
@@ -416,6 +425,22 @@ def _assert_signer_not_complete(
         raise RecipientSessionSigningMutationError()
 
 
+def _assert_agreement_not_globally_certified(draft: Dict[str, Any]) -> None:
+    from backend.services.vs01_completed_agreement_artifact import completed_artifact_ready
+
+    if completed_artifact_ready(draft):
+        raise RecipientSessionSigningMutationError()
+
+
+def _revoke_all_bootstrap_sessions_on_draft(
+    draft: Dict[str, Any], *, revoked_at: str
+) -> Dict[str, Any]:
+    from backend.services.recipient_bootstrap_session_store import apply_all_sessions_revocation_to_draft
+
+    next_draft, _ = apply_all_sessions_revocation_to_draft(draft, revoked_at=revoked_at)
+    return next_draft
+
+
 def _mutate_field_locked(
     *,
     session: Dict[str, Any],
@@ -434,6 +459,7 @@ def _mutate_field_locked(
         signer_record_id=signer_record_id,
         packet_revision=packet_revision,
     )
+    _assert_agreement_not_globally_certified(draft)
     _assert_signer_not_complete(
         session=session,
         draft=draft,
@@ -517,6 +543,7 @@ def _complete_signer_locked(
     now_iso: str,
     locked_version_id: Optional[str],
     agreement_version_hash: Optional[str],
+    signing_lock: Optional[Dict[str, Any]] = None,
 ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     locked_role_id, fields, initials_policy = _locked_role_and_fields(session=session, draft=draft)
     signer_record_id = _clean(session.get("signer_record_id"))
@@ -536,14 +563,23 @@ def _complete_signer_locked(
     )
 
     if already_complete:
+        from backend.services.vs01_completed_agreement_artifact import read_completed_artifact_from_draft
+
         readiness = compute_signer_readiness(session=session, draft=draft, signer_state=signer_state)
-        return draft, {
+        globally_executed = read_completed_artifact_from_draft(draft) is not None
+        next_draft = draft
+        if globally_executed:
+            next_draft = _revoke_all_bootstrap_sessions_on_draft(draft, revoked_at=now_iso)
+        return next_draft, {
             "ok": True,
             "signer_complete": True,
             "idempotent": True,
-            "globally_executed": False,
+            "globally_executed": globally_executed,
+            "agreement_id": _clean(session.get("agreement_id")) or _clean(draft.get("id")),
             **readiness,
         }
+
+    _assert_agreement_not_globally_certified(draft)
 
     readiness_pre = compute_signer_readiness(session=session, draft=draft, signer_state=signer_state)
     if not readiness_pre.get("finish_ready"):
@@ -585,11 +621,38 @@ def _complete_signer_locked(
         draft=next_draft,
         signer_state=next_signer_state,
     )
+    globally_executed = False
+    if all_signers_signed_from_audit(next_draft, next_draft.get("audit_log") or []):
+        from backend.services.vs01_completed_agreement_artifact import (
+            CompletedAgreementArtifactConflictError,
+            CompletedAgreementArtifactError,
+            establish_completed_artifact_on_draft,
+        )
+
+        try:
+            established = establish_completed_artifact_on_draft(
+                next_draft,
+                signing_lock=signing_lock if isinstance(signing_lock, dict) else None,
+                now_iso=now_iso,
+            )
+            next_draft = established.draft_dict
+            globally_executed = established.globally_executed
+            if globally_executed:
+                next_draft = _revoke_all_bootstrap_sessions_on_draft(
+                    next_draft,
+                    revoked_at=now_iso,
+                )
+        except CompletedAgreementArtifactConflictError as exc:
+            raise RecipientSessionSigningArtifactConflictError(exc.code) from exc
+        except CompletedAgreementArtifactError as exc:
+            raise RecipientSessionSigningValidationError(exc.code) from exc
+
     return next_draft, {
         "ok": True,
         "signer_complete": True,
         "idempotent": False,
-        "globally_executed": False,
+        "globally_executed": globally_executed,
+        "agreement_id": _clean(session.get("agreement_id")) or _clean(next_draft.get("id")),
         **readiness,
     }
 
@@ -605,6 +668,7 @@ def _with_locked_draft_mutation(
     )
     from backend.services.vs01_recipient_bootstrap_exchange import (
         _lookup_active_session,
+        _lookup_session_for_signing_mutation,
         _revalidate_session_authority,
     )
 
@@ -643,6 +707,16 @@ def _with_locked_draft_mutation(
             latest = _decode_draft_payload(row[0])
             _revalidate_session_authority(draft=latest, session=session, signing_lock=signing_lock)
             next_draft, result = mutate_fn(session, latest, signing_lock)
+            if result.get("globally_executed"):
+                from backend.services.recipient_bootstrap_session_store import (
+                    revoke_all_sessions_for_agreement_postgres,
+                )
+
+                revoke_all_sessions_for_agreement_postgres(
+                    agreement_id=agreement_id,
+                    revoked_at=_utc_now_iso(),
+                    cx=cx,
+                )
             pg_execute(
                 cx,
                 """
@@ -658,7 +732,7 @@ def _with_locked_draft_mutation(
             )
             return result
 
-    probe = _lookup_active_session(session_secret)
+    probe = _lookup_session_for_signing_mutation(session_secret)
     if not probe:
         raise RecipientSessionSigningMutationError()
     agreement_id = _clean(probe.get("agreement_id"))
@@ -673,7 +747,7 @@ def _with_locked_draft_mutation(
         from backend.services.agreement_signing_lock_store import read_signing_lock_unlocked
 
         signing_lock = read_signing_lock_unlocked(agreement_id)
-        session = _lookup_active_session(session_secret)
+        session = _lookup_session_for_signing_mutation(session_secret)
         if not session:
             raise RecipientSessionSigningMutationError()
         _revalidate_session_authority(draft=latest, session=session, signing_lock=signing_lock)
@@ -740,11 +814,14 @@ def complete_recipient_session_signer(
             now_iso=now_iso,
             locked_version_id=locked_version_id,
             agreement_version_hash=agreement_version_hash,
+            signing_lock=signing_lock,
         )
 
     try:
         return _with_locked_draft_mutation(session_secret=session_secret, mutate_fn=_mutate)
     except RecipientSessionSigningValidationError:
+        raise
+    except RecipientSessionSigningArtifactConflictError:
         raise
     except (RecipientBootstrapExchangeError, RecipientSessionPacketProjectionError):
         raise RecipientSessionSigningMutationError() from None

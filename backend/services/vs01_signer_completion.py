@@ -26,12 +26,30 @@ def reset_vs01_completion_email_locks_for_tests() -> None:
         _email_send_locks.clear()
 
 
-def required_vs01_signer_role_ids(draft: Dict[str, Any]) -> Set[str]:
+def _vs01_portable_packet_from_draft(draft: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    from backend.services.vs01_signing_packet_activation import (
+        VS01_SIGNING_PACKET_ACTIVATION_FIELD,
+        has_active_signing_packet_activation,
+    )
+
+    if has_active_signing_packet_activation(draft):
+        activation = draft.get(VS01_SIGNING_PACKET_ACTIVATION_FIELD)
+        if isinstance(activation, dict):
+            portable = activation.get("portable")
+            if isinstance(portable, dict):
+                return portable
     stored = draft.get("vs01_signing_packet_v1")
     if not isinstance(stored, dict):
-        return set()
+        return None
     portable = stored.get("portable")
-    if not isinstance(portable, dict):
+    if isinstance(portable, dict):
+        return portable
+    return None
+
+
+def required_vs01_signer_role_ids(draft: Dict[str, Any]) -> Set[str]:
+    portable = _vs01_portable_packet_from_draft(draft)
+    if not portable:
         return set()
     roles = portable.get("roles")
     if not isinstance(roles, list):
@@ -50,6 +68,17 @@ def required_vs01_signer_role_ids(draft: Dict[str, Any]) -> Set[str]:
 
 
 def vs01_packet_document_id(draft: Dict[str, Any]) -> str:
+    from backend.services.vs01_signing_packet_activation import (
+        VS01_SIGNING_PACKET_ACTIVATION_FIELD,
+        has_active_signing_packet_activation,
+    )
+
+    if has_active_signing_packet_activation(draft):
+        activation = draft.get(VS01_SIGNING_PACKET_ACTIVATION_FIELD)
+        if isinstance(activation, dict):
+            doc = str(activation.get("document_id") or "").strip()
+            if doc:
+                return doc
     stored = draft.get("vs01_signing_packet_v1")
     if not isinstance(stored, dict):
         return ""
@@ -59,6 +88,11 @@ def vs01_packet_document_id(draft: Dict[str, Any]) -> str:
     portable = stored.get("portable")
     if isinstance(portable, dict):
         seed = portable.get("seed")
+        if isinstance(seed, dict):
+            return str(seed.get("documentId") or "").strip()
+    activation_portable = _vs01_portable_packet_from_draft(draft)
+    if isinstance(activation_portable, dict):
+        seed = activation_portable.get("seed")
         if isinstance(seed, dict):
             return str(seed.get("documentId") or "").strip()
     return ""

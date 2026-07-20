@@ -38,7 +38,7 @@ export type RecipientSessionCompleteResult =
       ok: true;
       signer_complete: boolean;
       idempotent: boolean;
-      globally_executed: false;
+      globally_executed: boolean;
       readiness: RecipientSessionReadiness["readiness"];
       finish_ready: boolean;
       required_field_count: number;
@@ -262,10 +262,10 @@ async function completeRecipientSessionSignerOnce(): Promise<RecipientSessionCom
       kind: "authority",
     };
   }
-  if (body.globally_executed === true) {
+  if (body.globally_executed === true && body.signer_complete !== true) {
     return {
       ok: false,
-      code: "global_execution_not_allowed",
+      code: "global_execution_invalid",
       message: GENERIC_AUTHORITY_MESSAGE,
       kind: "authority",
     };
@@ -283,7 +283,7 @@ async function completeRecipientSessionSignerOnce(): Promise<RecipientSessionCom
     ok: true,
     signer_complete: body.signer_complete,
     idempotent: Boolean(body.idempotent),
-    globally_executed: false,
+    globally_executed: Boolean(body.globally_executed),
     readiness: readiness.readiness,
     finish_ready: readiness.finish_ready,
     required_field_count: readiness.required_field_count,

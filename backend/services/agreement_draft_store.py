@@ -196,6 +196,23 @@ def _guard_generic_immutable_write(
     elif isinstance(incoming_signer_state, dict):
         raise ValueError("recipient_signer_state_endpoint_required")
 
+    incoming_artifact = next_draft.get("vs01_completed_agreement_artifact_v1")
+    existing_artifact = (current or {}).get("vs01_completed_agreement_artifact_v1")
+    if isinstance(existing_artifact, dict):
+        if incoming_artifact is None:
+            next_draft["vs01_completed_agreement_artifact_v1"] = existing_artifact
+        else:
+            from backend.services.vs01_completed_agreement_artifact import (
+                completed_artifact_material_bytes,
+            )
+
+            if completed_artifact_material_bytes(incoming_artifact) != completed_artifact_material_bytes(
+                existing_artifact
+            ):
+                raise ValueError("completed_agreement_artifact_immutable")
+    elif isinstance(incoming_artifact, dict):
+        raise ValueError("completed_agreement_artifact_endpoint_required")
+
     incoming_nr_sessions = next_draft.get("negotiation_review_sessions_v1")
     existing_nr_sessions = (current or {}).get("negotiation_review_sessions_v1")
     if isinstance(existing_nr_sessions, dict):

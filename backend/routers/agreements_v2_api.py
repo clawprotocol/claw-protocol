@@ -614,6 +614,10 @@ class AgreementDraft(AgreementDraftCreate):
     vs01_signing_invite_delivery_v1: Optional[Dict[str, Any]] = None
     """Immutable signer/party execution authority bound to an accepted version."""
     frozen_signing_authority_v1: Optional[Dict[str, Any]] = None
+    """Backend-authoritative immutable completed agreement artifact (Phase 3C3)."""
+    vs01_completed_agreement_artifact_v1: Optional[Dict[str, Any]] = None
+    """Per-signer session field/completion state for activated signing packets."""
+    vs01_recipient_signer_state_v1: Optional[Dict[str, Any]] = None
     workspace_archived_at: Optional[str] = None
     workspace_folder_id: Optional[str] = None
     workspace_tags: List[str] = Field(default_factory=list)
@@ -6870,7 +6874,7 @@ def post_vs01_signer_complete(
     from backend.services.vs01_signing_packet_activation import has_active_signing_packet_activation
 
     draft_activation_gate = _load_or_404(aid)
-    if has_active_signing_packet_activation(draft_activation_gate.model_dump()) and auth_mode != "owner":
+    if has_active_signing_packet_activation(draft_activation_gate.model_dump()):
         raise HTTPException(
             status_code=404,
             detail={
@@ -6981,22 +6985,50 @@ def post_vs01_signer_complete(
                 pass
 
     if outcome.fully_executed:
+        from backend.services.vs01_completed_agreement_artifact import (
+            CompletedAgreementArtifactConflictError,
+            CompletedAgreementArtifactError,
+            establish_completed_artifact_on_draft,
+            read_completed_artifact_from_draft,
+        )
         from backend.services.vs01_fully_executed_snapshot import ensure_fully_executed_snapshot_on_draft
         from backend.services.vs01_signer_completion import vs01_completion_email_lock
 
         with vs01_completion_email_lock(aid):
             reloaded = _load_or_404(aid)
-            ensured = ensure_fully_executed_snapshot_on_draft(
-                reloaded.model_dump(),
-                agreement_id=aid,
-            )
-            if ensured.mutated:
-                snap_draft = _merge_agreement_draft(
-                    reloaded,
-                    updated_at=now,
-                    vs01_signing_packet_v1=ensured.draft_dict.get("vs01_signing_packet_v1"),
+            try:
+                established = establish_completed_artifact_on_draft(
+                    reloaded.model_dump(),
+                    signing_lock=lock_row,
+                    now_iso=now,
                 )
-                _save_draft_sync(snap_draft.model_dump(), request)
+                if established.created or not read_completed_artifact_from_draft(reloaded.model_dump()):
+                    artifact_draft = _merge_agreement_draft(
+                        reloaded,
+                        updated_at=now,
+                        audit_log=established.draft_dict.get("audit_log"),
+                        vs01_signing_packet_v1=established.draft_dict.get("vs01_signing_packet_v1"),
+                    )
+                    next_with_artifact = dict(artifact_draft.model_dump())
+                    next_with_artifact["vs01_completed_agreement_artifact_v1"] = established.artifact
+                    _save_draft_sync(next_with_artifact, request)
+                    reloaded = _load_or_404(aid)
+            except CompletedAgreementArtifactConflictError:
+                raise HTTPException(status_code=409, detail="completed_artifact_conflict") from None
+            except CompletedAgreementArtifactError:
+                ensured = ensure_fully_executed_snapshot_on_draft(
+                    reloaded.model_dump(),
+                    agreement_id=aid,
+                )
+                if ensured.mutated:
+                    snap_draft = _merge_agreement_draft(
+                        reloaded,
+                        updated_at=now,
+                        vs01_signing_packet_v1=ensured.draft_dict.get("vs01_signing_packet_v1"),
+                    )
+                    _save_draft_sync(snap_draft.model_dump(), request)
+                    reloaded = _load_or_404(aid)
+            else:
                 reloaded = _load_or_404(aid)
 
             reloaded_audit = list(reloaded.model_dump().get("audit_log") or [])
@@ -7384,6 +7416,17 @@ def _public_agreement_verify_payload(aid: str, draft: AgreementDraft) -> Dict[st
                 "batch_id": row.get("batch_id"),
             }
     settlement_net = settlement_anchor_network_hint()
+    from backend.services.vs01_completed_agreement_artifact import (
+        public_completed_artifact_projection,
+        read_completed_artifact_from_draft,
+        revalidate_completed_artifact,
+    )
+
+    draft_dict = draft.model_dump() if hasattr(draft, "model_dump") else dict(draft)
+    artifact = read_completed_artifact_from_draft(draft_dict)
+    completed_artifact = None
+    if artifact and revalidate_completed_artifact(draft_dict, signing_lock=read_signing_lock(aid)):
+        completed_artifact = public_completed_artifact_projection(artifact)
     return {
         "agreement_id": aid,
         "summary": {
@@ -7402,6 +7445,7 @@ def _public_agreement_verify_payload(aid: str, draft: AgreementDraft) -> Dict[st
             "agreement_hash": overview_hash,
             "signing_commitment_hash": sig_status.get("signing_commitment_hash"),
             "schema": "claw.agreement.public_verify/v1",
+            "completed_artifact": completed_artifact,
         },
         "claw_feed": claw_feed,
         "settlement_anchor": {
@@ -7601,7 +7645,35 @@ def get_agreement_draft(agreement_id: str, request: Request) -> Dict[str, Any]:
         "economics": economics_overlay_for_agreement(agreement_id),
         "accepted_version": accepted_version,
         "signing_lock": signing_lock_out,
+        "completed_artifact": _owner_completed_artifact_projection(draft.model_dump(), lock),
     }
+
+
+def _owner_completed_artifact_projection(
+    draft_dict: Dict[str, Any], signing_lock: Optional[Dict[str, Any]]
+) -> Optional[Dict[str, Any]]:
+    from backend.services.vs01_completed_agreement_artifact import (
+        owner_completed_artifact_projection,
+        read_completed_artifact_from_draft,
+        revalidate_completed_artifact,
+    )
+
+    artifact = read_completed_artifact_from_draft(draft_dict)
+    if not artifact or not revalidate_completed_artifact(draft_dict, signing_lock=signing_lock):
+        return None
+    return owner_completed_artifact_projection(artifact)
+
+
+@router.get("/{agreement_id}/completed-artifact")
+def get_completed_agreement_artifact(agreement_id: str, request: Request) -> Dict[str, Any]:
+    aid = (agreement_id or "").strip()
+    assert_agreement_full_draft_read_allowed(request, aid)
+    draft = _load_or_404(aid)
+    lock = read_signing_lock(aid)
+    projection = _owner_completed_artifact_projection(draft.model_dump(), lock)
+    if not projection:
+        raise HTTPException(status_code=404, detail={"code": "completed_artifact_not_found"})
+    return {"ok": True, "completed_artifact": projection}
 
 
 @router.get("/{agreement_id}/negotiation-review/draft")
@@ -9875,8 +9947,19 @@ def _public_signature_status(agreement_id: str, draft: AgreementDraft) -> Dict[s
     from backend.services.vs01_signer_completion import resolve_required_signer_count
 
     audit = list(draft.audit_log or [])
-    fully = any(_audit_event_dict(e).get("event_type") == "signed" for e in audit) or _all_signers_signed_from_audit(
-        draft, audit
+    draft_dict = draft.model_dump() if hasattr(draft, "model_dump") else dict(draft)
+    from backend.services.vs01_completed_agreement_artifact import (
+        completed_artifact_ready,
+        revalidate_completed_artifact,
+    )
+
+    lock = read_signing_lock(agreement_id)
+    artifact_certified = completed_artifact_ready(draft_dict) and revalidate_completed_artifact(
+        draft_dict, signing_lock=lock
+    )
+    fully = artifact_certified or (
+        any(_audit_event_dict(e).get("event_type") == "signed" for e in audit)
+        or _all_signers_signed_from_audit(draft, audit)
     )
     n_completed = sum(1 for e in audit if _audit_event_dict(e).get("event_type") == "signature_completed")
     lock = read_signing_lock(agreement_id)

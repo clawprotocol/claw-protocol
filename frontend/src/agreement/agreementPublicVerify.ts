@@ -45,6 +45,18 @@ export type PublicVerifyPayload = {
     signing_commitment_hash?: string | null;
     schema?: string;
     record_note?: string;
+    completed_artifact?: {
+      schema?: string;
+      agreement_id?: string;
+      accepted_version_id?: string;
+      accepted_corpus_sha256?: string;
+      packet_document_id?: string;
+      packet_revision?: string;
+      completed_corpus_sha256?: string;
+      material_hash?: string;
+      completion_timestamp?: string;
+      signer_count?: number;
+    } | null;
   };
   claw_feed?: {
     event_type?: string;

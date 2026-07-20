@@ -71,6 +71,11 @@ _GLUED_MAIN_AND_SUBSECTION_HEADING_RE = re.compile(r"^\d+\.\s+(?!\d+\.\d).+\s+\d
 
 def read_completed_signed_corpus_plain(draft: Dict[str, Any]) -> str:
     """Authoritative signed agreement text for completed PDF export."""
+    from backend.services.vs01_completed_agreement_artifact import read_artifact_bound_corpus_plain
+
+    artifact_corpus = read_artifact_bound_corpus_plain(draft)
+    if artifact_corpus:
+        return artifact_corpus
     snap = read_fully_executed_snapshot_from_draft(draft)
     return str((snap or {}).get("corpus_plain") or "").strip()
 

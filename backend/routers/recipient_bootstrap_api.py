@@ -24,6 +24,7 @@ from backend.services.recipient_bootstrap_session_store import (
     BOOTSTRAP_INVALID_OR_EXPIRED_MESSAGE,
 )
 from backend.services.recipient_session_signing_mutations import (
+    RecipientSessionSigningArtifactConflictError,
     RecipientSessionSigningConflictError,
     RecipientSessionSigningMutationError,
     RecipientSessionSigningValidationError,
@@ -314,8 +315,68 @@ async def post_recipient_session_signer_complete(
     cookie = _require_session_cookie(request)
     response.headers["Cache-Control"] = "no-store, private"
     try:
-        return complete_recipient_session_signer(session_secret=cookie)
+        result = complete_recipient_session_signer(session_secret=cookie)
     except RecipientSessionSigningValidationError as exc:
         raise _validation_fail(exc.code) from exc
+    except RecipientSessionSigningArtifactConflictError as exc:
+        raise _conflict_fail(exc.code) from exc
     except RecipientSessionSigningMutationError as exc:
         raise _uniform_signing_fail() from exc
+
+    if result.get("globally_executed"):
+        agreement_id = str(result.get("agreement_id") or "").strip()
+        if not agreement_id:
+            logging.getLogger(__name__).exception(
+                "recipient_session_global_completion_followup_missing_agreement_id"
+            )
+            return result
+        try:
+            from backend.services.vs01_signer_completion import (
+                completion_emails_already_sent,
+                vs01_completion_email_lock,
+            )
+
+            with vs01_completion_email_lock(agreement_id):
+                from backend.routers.agreements_v2_api import (
+                    _load_or_404,
+                    _merge_agreement_draft,
+                    _save_draft_sync,
+                    _utc_now_iso,
+                )
+
+                reloaded = _load_or_404(agreement_id)
+                reloaded_audit = list(reloaded.model_dump().get("audit_log") or [])
+                if not completion_emails_already_sent(reloaded_audit):
+                    try:
+                        from backend.services.email.signing_completion_delivery import (
+                            maybe_send_signing_completion_emails,
+                        )
+                        from backend.routers.agreements_v2_api import AuditEvent
+
+                        notify_audit = maybe_send_signing_completion_emails(
+                            agreement_id=agreement_id,
+                            draft={**reloaded.model_dump(), "audit_log": reloaded_audit},
+                            org_id=None,
+                        )
+                        if notify_audit:
+                            fresh_audit = list(_load_or_404(agreement_id).model_dump().get("audit_log") or [])
+                            if not completion_emails_already_sent(fresh_audit):
+                                email_audit = list(fresh_audit)
+                                email_audit.append(AuditEvent.model_validate(notify_audit).model_dump())
+                                next_email = _merge_agreement_draft(
+                                    reloaded,
+                                    updated_at=_utc_now_iso(),
+                                    audit_log=email_audit,
+                                )
+                                _save_draft_sync(next_email.model_dump(), request)
+                    except Exception:
+                        logging.getLogger(__name__).exception(
+                            "recipient_session_completion_email_failed agreement_id=%s",
+                            agreement_id,
+                        )
+        except Exception:
+            logging.getLogger(__name__).exception(
+                "recipient_session_global_completion_followup_failed agreement_id=%s",
+                agreement_id,
+            )
+    return result

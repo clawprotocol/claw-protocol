@@ -17,11 +17,65 @@ import { postVs01EnsureSignedSnapshot } from "../agreement/agreementWorkspaceApi
 import { fetchPublicAgreementVerify } from "../agreement/agreementPublicVerify";
 
 export type OwnerSignedAgreementCorpusSource =
+  | "completed_artifact"
   | "fully_executed_snapshot"
   | "reconstructed"
   | "portable_packet"
   | "local_portable"
   | "missing";
+
+type CompletedArtifactProjection = {
+  agreement_id?: unknown;
+  accepted_version_id?: unknown;
+  accepted_corpus_sha256?: unknown;
+  completed_corpus_sha256?: unknown;
+  material_hash?: unknown;
+  completion_timestamp?: unknown;
+};
+
+async function fetchCompletedArtifactFromAgreement(
+  agreementId: string,
+): Promise<CompletedArtifactProjection | null> {
+  try {
+    const res = await fetch(`${getLawDogApiBase()}/api/agreements/${encodeURIComponent(agreementId)}`, {
+      headers: clawAgreementHeaders(),
+    });
+    if (!res.ok) return null;
+    const payload = (await res.json()) as { completed_artifact?: CompletedArtifactProjection | null };
+    return payload.completed_artifact ?? null;
+  } catch {
+    return null;
+  }
+}
+
+async function resolveSignedCorpusFromCompletedArtifact(
+  agreementId: string,
+  draft: AgreementDraft,
+  artifact: CompletedArtifactProjection,
+): Promise<{ text: string; source: "completed_artifact" } | null> {
+  const materialHash = String(artifact.material_hash ?? "").trim().toLowerCase();
+  if (materialHash.length !== 64) return null;
+  const signed = resolveVs01FullyExecutedSignedCorpus(draft);
+  if (!signed?.text) return null;
+  const artifactCorpusHash = String(artifact.completed_corpus_sha256 ?? "").trim().toLowerCase();
+  if (artifactCorpusHash.length === 64) {
+    const snapHash = String(
+      (draft as { vs01_signing_packet_v1?: { fully_executed_snapshot?: { corpus_hash?: unknown } } })
+        .vs01_signing_packet_v1?.fully_executed_snapshot?.corpus_hash ?? "",
+    )
+      .trim()
+      .toLowerCase();
+    if (snapHash && snapHash !== artifactCorpusHash) return null;
+  }
+  return { text: signed.text, source: "completed_artifact" };
+}
+
+function hasCertifiedCompletedArtifact(
+  artifact: CompletedArtifactProjection | null | undefined,
+): artifact is CompletedArtifactProjection {
+  const materialHash = String(artifact?.material_hash ?? "").trim().toLowerCase();
+  return materialHash.length === 64;
+}
 
 function logOwnerSignedAgreementViewSource(args: {
   agreementId: string;
@@ -29,7 +83,6 @@ function logOwnerSignedAgreementViewSource(args: {
   snapshotReady: boolean;
 }): void {
   if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
-  // eslint-disable-next-line no-console
   console.info("[owner-signed-agreement-view]", {
     agreementId: args.agreementId,
     corpusSource: args.corpusSource,
@@ -100,12 +153,30 @@ export async function loadOwnerSignedAgreementPreview(
 
   let renderBaseDraft = draft;
 
-  let signed = resolveSignedCorpusFromDraft(draft);
-  if (!signed?.text) {
+  const completedArtifact = await fetchCompletedArtifactFromAgreement(id);
+  const certifiedArtifact = hasCertifiedCompletedArtifact(completedArtifact)
+    ? completedArtifact
+    : null;
+
+  let signed = certifiedArtifact
+    ? await resolveSignedCorpusFromCompletedArtifact(id, draft, certifiedArtifact)
+    : null;
+  if (!signed?.text && !certifiedArtifact) {
+    signed = resolveSignedCorpusFromDraft(draft);
+  }
+  if (!signed?.text && !certifiedArtifact) {
     signed = resolveSignedCorpusFromLocalPortable(draft, id);
   }
 
   if (!signed?.text) {
+    if (certifiedArtifact) {
+      logOwnerSignedAgreementViewSource({
+        agreementId: id,
+        corpusSource: "missing",
+        snapshotReady: false,
+      });
+      return null;
+    }
     const verify = await fetchPublicAgreementVerify(id);
     if (verify?.signature_status?.fully_executed) {
       const ensured = await postVs01EnsureSignedSnapshot(id);

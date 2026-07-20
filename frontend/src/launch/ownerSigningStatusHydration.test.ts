@@ -95,6 +95,7 @@ function agreementPayload(args?: {
   signingLock?: { locked_version_id: string; content_sha256: string } | null;
   auditLog?: unknown[];
   id?: string;
+  completedArtifact?: Record<string, unknown> | null;
 }) {
   return {
     id: args?.id ?? AGREEMENT_ID,
@@ -106,6 +107,7 @@ function agreementPayload(args?: {
     accepted_version:
       args && "acceptedVersion" in args ? args.acceptedVersion : accepted,
     signing_lock: args?.signingLock ?? null,
+    completed_artifact: args?.completedArtifact ?? null,
   };
 }
 
@@ -355,7 +357,7 @@ describe("Phase 3B1 owner signing-status hydration", () => {
     );
   });
 
-  it("does not promote backend completion before completed-agreement parity exists", async () => {
+  it("does not promote backend completion before completed artifact exists", async () => {
     const frozen = await frozenAuthority();
     installBackend({
       frozen,
@@ -371,6 +373,37 @@ describe("Phase 3B1 owner signing-status hydration", () => {
     const result = await hydrateOwnerSigningStatusPage(AGREEMENT_ID);
     expect(result.status).toBe("conflict");
     expect(result.conflict).toBe("completed_parity_not_certified");
+  });
+
+  it("promotes certified completion when backend completed artifact validates", async () => {
+    const frozen = await frozenAuthority();
+    const materialHash = "a".repeat(64);
+    const corpusHash = "b".repeat(64);
+    installBackend({
+      frozen,
+      agreement: agreementPayload({
+        signingLock: {
+          locked_version_id: accepted.version_id,
+          content_sha256: accepted.corpus_sha256,
+        },
+        completedArtifact: {
+          agreement_id: AGREEMENT_ID,
+          accepted_version_id: accepted.version_id,
+          accepted_corpus_sha256: accepted.corpus_sha256,
+          completed_corpus_sha256: corpusHash,
+          material_hash: materialHash,
+          signing_lock: {
+            locked_version_id: accepted.version_id,
+            content_sha256: accepted.corpus_sha256,
+          },
+        },
+      }),
+      signaturesRecorded: 2,
+      fullyExecuted: true,
+    });
+    const result = await hydrateOwnerSigningStatusPage(AGREEMENT_ID);
+    expect(result.status).toBe("completed");
+    expect(result.backendCompleted).toBe(true);
   });
 
   it("deduplicates concurrent loads and rejects stale agreement responses", async () => {

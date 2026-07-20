@@ -309,7 +309,7 @@ describe("OwnerSigningStatusPage Phase 3B1 compatibility", () => {
       }),
     );
     renderPage();
-    expect(await screen.findByText(/certification is pending Phase 3B2 parity/)).toBeTruthy();
+    expect(await screen.findByText(/certification is pending/)).toBeTruthy();
     expect(screen.queryByText("Agreement fully signed")).toBeNull();
     expect(screen.getByTestId("owner-signed-actions")).toBeTruthy();
     expect(screen.getByText("Authoritative complete: false")).toBeTruthy();

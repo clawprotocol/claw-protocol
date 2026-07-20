@@ -459,7 +459,7 @@ def test_completion_racing_with_required_field_mutation_cannot_complete_prematur
             assert write_entered.wait(timeout=5)
             complete_future = pool.submit(lambda: complete_codes.append(_complete(client).status_code))
             draft_mid = load_draft(agreement_id)
-            signer_state_mid = draft_mid.get(VS01_RECIPIENT_SIGNER_STATE_FIELD, {}).get(
+            signer_state_mid = (draft_mid.get(VS01_RECIPIENT_SIGNER_STATE_FIELD) or {}).get(
                 "by_signer_record_id", {}
             )
             if signer_state_mid:

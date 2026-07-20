@@ -460,8 +460,38 @@ def _lookup_active_session(session_secret: str) -> Optional[Dict[str, Any]]:
     session = get_session_by_token_hash(session_token_hash(raw))
     if not session:
         return None
-    _assert_session_active(session, now_ts=int(time.time()))
+    try:
+        _assert_session_active(session, now_ts=int(time.time()))
+    except RecipientBootstrapExchangeError:
+        return None
     return session
+
+
+def _lookup_session_for_signing_mutation(session_secret: str) -> Optional[Dict[str, Any]]:
+    """Load a session for signing mutations, allowing revoked sessions only after certified completion."""
+    raw = (session_secret or "").strip()
+    if not raw:
+        return None
+    session = get_session_by_token_hash(session_token_hash(raw))
+    if not session:
+        return None
+    try:
+        _assert_session_active(session, now_ts=int(time.time()))
+        return session
+    except RecipientBootstrapExchangeError:
+        agreement_id = _clean(session.get("agreement_id"))
+        if not agreement_id:
+            return None
+        from backend.services.agreement_draft_store import load_draft
+        from backend.services.vs01_completed_agreement_artifact import completed_artifact_ready
+
+        try:
+            draft = load_draft(agreement_id)
+        except KeyError:
+            return None
+        if completed_artifact_ready(draft) and _clean(session.get("revoked_at")):
+            return session
+        return None
 
 
 def _load_draft_and_signing_lock(agreement_id: str) -> Tuple[Dict[str, Any], Optional[Dict[str, Any]]]:
