@@ -363,9 +363,10 @@ export function shouldUseAuthorityEntityExecutionHeadings(
 ): boolean {
   if (parties.length < 3) return false;
   const intake = (roleContext?.intakeText ?? "").trim();
-  const tripartiteLabeled = Boolean(intake && isTripartiteLabeledPartiesIntake(intake));
-  if (tripartiteLabeled) return false;
   const quadLabeled = Boolean(intake && isQuadripartiteLabeledPartiesIntake(intake));
+  // Exact-three labeled intakes keep role headings; labeled four+ use entity headings.
+  const tripartiteLabeled = Boolean(intake && isTripartiteLabeledPartiesIntake(intake));
+  if (tripartiteLabeled && !quadLabeled) return false;
   const quadParty = quadLabeled || parties.length >= 4;
   const useEntityHeadings = parties.length >= 3 && (!quadParty || quadLabeled);
   if (!useEntityHeadings) return false;

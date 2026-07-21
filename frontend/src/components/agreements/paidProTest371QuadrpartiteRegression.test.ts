@@ -23,11 +23,35 @@ import { runIntakeDefaultsAndRoles } from "./intakeFamilyShell";
 import { defaultIntakePartyRoleLabels } from "./partyRoleIntake";
 import {
   isQuadripartiteLabeledPartiesIntake,
+  isTripartiteLabeledPartiesIntake,
   labeledPartyLegalEntities,
   parseLabeledPartyBlocks,
 } from "./labeledPartyBlockParse";
 import { legalPartyIdentitiesExcludingCoordinator, normalizePartyIdentities, createCoordinatorProfile } from "./canonicalPartyIdentityModel";
 import { PAID_PRO_HARDENING_CLIENT, PAID_PRO_HARDENING_PROVIDER } from "./qa/paidProHardening/paidProHardeningFixtures";
+import { shouldUseAuthorityEntityExecutionHeadings } from "./paidProSignerMetadataAuthority";
+
+const TEST367_TRIPARTITE_LABELED_PARTIES_INTAKE = `Create a TRIPARTITE SOFTWARE DEVELOPMENT AND REVENUE SHARING AGREEMENT.
+
+Party 1
+Legal Entity: Red Mesa Logistics LLC
+Signer Name: Sarah Mitchell
+Signer Title: Chief Executive Officer
+Signer Email: sarah@redmesalogistics.com
+Address: 845 Tyrone St., Bentonville, AR 75029
+
+Party 2
+Legal Entity: Harbor Peak Automation LLC
+Signer Name: Robert Henderson
+Signer Title: Managing Member
+Signer Email: contact@harborpeakautomation.com
+
+Party 3
+Legal Entity: Blue Canyon Analytics LLC
+Signer Name: Unknown
+Signer Title: Unknown
+Signer Email: unknown@bluecanyon.test
+`;
 
 export const TEST371_QUADRIPARTITE_LABELED_PARTIES_INTAKE = `Create a QUADRIPARTITE SOFTWARE PLATFORM DEVELOPMENT, ANALYTICS, IMPLEMENTATION, AND REVENUE SHARING AGREEMENT.
 
@@ -209,8 +233,15 @@ describe("Test371 quadrpartite labeled parties regression", () => {
   });
 
   it("execution block rebuild uses four entity headings without CLIENT/SERVICE PROVIDER fallback", () => {
+    expect(isQuadripartiteLabeledPartiesIntake(TEST371_QUADRIPARTITE_LABELED_PARTIES_INTAKE)).toBe(true);
+    expect(isTripartiteLabeledPartiesIntake(TEST371_QUADRIPARTITE_LABELED_PARTIES_INTAKE)).toBe(false);
     const parties = mergeLabeledPartyAuthorityIntoParties([], TEST371_QUADRIPARTITE_LABELED_PARTIES_INTAKE);
     expect(parties).toHaveLength(4);
+    expect(
+      shouldUseAuthorityEntityExecutionHeadings(parties, {
+        intakeText: TEST371_QUADRIPARTITE_LABELED_PARTIES_INTAKE,
+      }),
+    ).toBe(true);
     const rebuilt = enforcePaidProSingleExecutionBlock(buildQuadWitnessCorpus(), {
       authorityParties: parties,
       intakeText: TEST371_QUADRIPARTITE_LABELED_PARTIES_INTAKE,
@@ -219,12 +250,98 @@ describe("Test371 quadrpartite labeled parties regression", () => {
     const tail = tailIdx >= 0 ? rebuilt.slice(tailIdx) : rebuilt;
     expect((tail.match(/^\s*By\s*:/gim) || []).length).toBe(4);
     for (const entity of EXPECTED_PARTIES) {
-      expect(tail).toMatch(new RegExp(entity.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i"));
+      const esc = entity.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      expect((tail.match(new RegExp(esc, "gi")) || []).length).toBe(1);
+      expect(tail).toMatch(new RegExp(`^\\s*${esc}\\s*:?\\s*$`, "im"));
     }
     expect(tail).not.toMatch(/^\s*CLIENT\s*:/im);
     expect(tail).not.toMatch(/^\s*PARTY\s+\d+\s*:/im);
     expect(tail).not.toMatch(/SOFTWARE PLATFORM AGREEMENT/i);
     expect(tail).not.toMatch(/licensing revenue will be shared/i);
+  });
+
+  it("Case 11 — bare four-party entity lines retain clean entity headings (no PARTY N)", () => {
+    const parties = mergeLabeledPartyAuthorityIntoParties([], TEST371_QUADRIPARTITE_LABELED_PARTIES_INTAKE);
+    const corpus = [
+      "SOFTWARE PLATFORM AGREEMENT",
+      "",
+      "This Agreement is entered into among the parties listed below.",
+      "",
+      ...Array.from({ length: 8 }, (_, i) => `${i + 1}. Operative clause ${i + 1}.`),
+      "",
+      "IN WITNESS WHEREOF, the Parties execute this Agreement.",
+      "",
+      ...EXPECTED_PARTIES.flatMap((entity) => [
+        entity,
+        "By: __________________________",
+        "Name: Signer",
+        "Title: Officer",
+        "",
+      ]),
+    ].join("\n");
+    const rebuilt = enforcePaidProSingleExecutionBlock(corpus, {
+      authorityParties: parties,
+      intakeText: TEST371_QUADRIPARTITE_LABELED_PARTIES_INTAKE,
+    }).text;
+    const tailIdx = rebuilt.search(/\bIN WITNESS WHEREOF\b/i);
+    const tail = tailIdx >= 0 ? rebuilt.slice(tailIdx) : rebuilt;
+    expect((tail.match(/^\s*By\s*:/gim) || []).length).toBe(4);
+    for (const entity of EXPECTED_PARTIES) {
+      expect((tail.match(new RegExp(entity.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "gi")) || []).length).toBe(1);
+    }
+    expect(tail).not.toMatch(/^\s*CLIENT\s*:/im);
+    expect(tail).not.toMatch(/^\s*PARTY\s+\d+\s*:/im);
+  });
+
+  it("exact-three-party labeled intake keeps role headings (not entity-heading mode)", () => {
+    expect(isTripartiteLabeledPartiesIntake(TEST367_TRIPARTITE_LABELED_PARTIES_INTAKE)).toBe(true);
+    expect(isQuadripartiteLabeledPartiesIntake(TEST367_TRIPARTITE_LABELED_PARTIES_INTAKE)).toBe(false);
+    const parties = mergeLabeledPartyAuthorityIntoParties([], TEST367_TRIPARTITE_LABELED_PARTIES_INTAKE);
+    expect(parties).toHaveLength(3);
+    expect(
+      shouldUseAuthorityEntityExecutionHeadings(parties, {
+        intakeText: TEST367_TRIPARTITE_LABELED_PARTIES_INTAKE,
+      }),
+    ).toBe(false);
+    const names = parties.map((p) => p.partyLegalName);
+    const corpus = [
+      "TRIPARTITE SERVICES AGREEMENT",
+      "",
+      "This Agreement is entered into among the parties.",
+      "",
+      ...Array.from({ length: 8 }, (_, i) => `${i + 1}. Operative clause ${i + 1}.`),
+      "",
+      "IN WITNESS WHEREOF, the Parties execute this Agreement.",
+      "",
+      "CLIENT:",
+      names[0],
+      "By: __________________________",
+      "Name: _________________________",
+      "Title: _________________________",
+      "",
+      "SERVICE PROVIDER:",
+      names[1],
+      "By: __________________________",
+      "Name: _________________________",
+      "Title: _________________________",
+      "",
+      "ANALYTICS PROVIDER:",
+      names[2],
+      "By: __________________________",
+      "Name: _________________________",
+      "Title: _________________________",
+      "",
+    ].join("\n");
+    const rebuilt = enforcePaidProSingleExecutionBlock(corpus, {
+      authorityParties: parties,
+      intakeText: TEST367_TRIPARTITE_LABELED_PARTIES_INTAKE,
+    }).text;
+    const tailIdx = rebuilt.search(/\bIN WITNESS WHEREOF\b/i);
+    const tail = tailIdx >= 0 ? rebuilt.slice(tailIdx) : rebuilt;
+    expect(tail).toMatch(/^\s*CLIENT\s*:/im);
+    expect(tail).toMatch(/^\s*SERVICE\s+PROVIDER\s*:/im);
+    expect(tail).toMatch(/^\s*ANALYTICS\s+PROVIDER\s*:/im);
+    expect(tail).not.toMatch(/^\s*PARTY\s+\d+\s*:/im);
   });
 
   it("review render parties resolve four labeled slots even when UI only has two recipients", () => {

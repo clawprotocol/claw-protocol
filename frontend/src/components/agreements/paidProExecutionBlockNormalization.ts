@@ -557,7 +557,10 @@ export function enforcePaidProSingleExecutionBlock(
   const client = roles.find((r) => r.role === "client");
   const provider = roles.find((r) => r.role === "service_provider");
   const quadLabeled = Boolean(opts?.intakeText && isQuadripartiteLabeledPartiesIntake(opts.intakeText));
-  const tripartiteLabeled = Boolean(opts?.intakeText && isTripartiteLabeledPartiesIntake(opts.intakeText));
+  // Exact-three only — must not treat labeled four-party intake as tripartite role-heading mode.
+  const tripartiteLabeled = Boolean(
+    opts?.intakeText && isTripartiteLabeledPartiesIntake(opts.intakeText) && !quadLabeled,
+  );
   const quadParty =
     quadLabeled || authorityParties.length >= 4 || manifestLegalNames.length >= 4;
   if ((!client || !provider) && !quadParty && manifestLegalNames.length < 3) {
@@ -625,7 +628,15 @@ export function enforcePaidProSingleExecutionBlock(
     "",
   ];
   for (const id of identities) {
-    stubLines.push(`${id.blockHeading}:`, id.partyDisplayName.trim(), "");
+    const heading = (id.blockHeading || "").trim();
+    const legal = id.partyDisplayName.trim();
+    // Entity-heading mode: heading is the legal name — do not repeat it on the next line.
+    const headingCore = heading.replace(/:$/, "").trim();
+    if (useEntityHeadings && legal && headingCore.toLowerCase() === legal.toLowerCase()) {
+      stubLines.push(`${headingCore}:`, "");
+    } else {
+      stubLines.push(`${headingCore || heading}:`, legal, "");
+    }
   }
   const stub = stubLines.join("\n");
   const reconciled = reconcileExecutionBlockToRoleIdentities(stub, identities);

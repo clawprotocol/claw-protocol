@@ -185,8 +185,17 @@ export function reconcileExecutionBlockToRoleIdentities(
   const blocks: string[] = [];
   for (const id of ordered) {
     if (!id.partyDisplayName.trim()) continue;
-    const lines = [`${id.blockHeading}:`, id.partyDisplayName.trim()];
-    const tailChunk = tail.slice(tail.search(new RegExp(`^\\s*${id.blockHeading}\\s*:`, "im")));
+    const heading = id.blockHeading.trim().replace(/:$/, "");
+    const legal = id.partyDisplayName.trim();
+    const entityHeading = heading.toLowerCase() === legal.toLowerCase();
+    // Entity-heading blocks use the legal name as the heading only (no duplicate name line).
+    const lines = entityHeading ? [`${heading}:`] : [`${heading}:`, legal];
+    const headingRe = new RegExp(
+      `^\\s*${heading.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*:`,
+      "im",
+    );
+    const headingIdx = tail.search(headingRe);
+    const tailChunk = headingIdx >= 0 ? tail.slice(headingIdx) : "";
     const chunkLines = tailChunk.split("\n").slice(0, 40);
     for (const cl of chunkLines) {
       const t = cl.trim();
@@ -201,6 +210,19 @@ export function reconcileExecutionBlockToRoleIdentities(
         /* contact authority: strip legacy notice lines */
       } else if (/^date\s*:/i.test(t)) lines.push(cl);
       else if (/^(?:CLIENT|SERVICE\s+PROVIDER|ANALYTICS\s+PROVIDER|PARTY\s+\d+)\s*:/i.test(t)) break;
+      else if (
+        ordered.some(
+          (other) =>
+            other !== id &&
+            other.blockHeading.trim() &&
+            new RegExp(
+              `^${other.blockHeading.trim().replace(/:$/, "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*:?\\s*$`,
+              "i",
+            ).test(t),
+        )
+      ) {
+        break;
+      }
     }
     if (!lines.some((l) => /^by\s*:/i.test(l.trim()))) {
       lines.push("By: __________________________");

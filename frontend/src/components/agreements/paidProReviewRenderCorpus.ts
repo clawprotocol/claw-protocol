@@ -538,6 +538,63 @@ export function clearPaidProReviewRenderFusedRepairCache(): void {
   fusedPartyRepairCache = null;
 }
 
+/**
+ * Display-boundary fused legal-name repair only — no structural mutation.
+ * Safe for frozen SoT display-only review plain (byte-identical when no fused lines).
+ */
+export function repairFusedPartyLegalNamesForReviewDisplay(
+  corpus: string,
+  parties?: readonly PaidProSignerMetadataParty[],
+): { text: string; repaired: boolean } {
+  const normalized = (corpus || "").replace(/\r\n/g, "\n");
+  // No fused content: return normalized bytes unchanged (preserve trailing newlines).
+  if (!normalized || !corpusContainsFusedPartyLegalName(normalized)) {
+    return { text: normalized, repaired: false };
+  }
+
+  let text = normalized.trimEnd();
+  let repaired = false;
+  const authParties = parties ?? readConsumedPaidProSignerMetadataAuthority()?.parties ?? [];
+
+  if (authParties.length >= 2) {
+    const canonical = applyCanonicalPartyLegalNamesToSigningCorpus(text, authParties);
+    text = canonical.text;
+    repaired = canonical.repaired || repaired;
+    const recital = repairMalformedPaidProAgreementRecital(text, authParties);
+    text = recital.text;
+    repaired = recital.repairs.length > 0 || repaired;
+    const legacySig = stripTrailingLegacyEntitySignatureLines(text);
+    text = legacySig.text;
+    repaired = legacySig.removed > 0 || repaired;
+    const dedupe = stripDuplicateLegacySignatureBlocksAfterAuthoritative(text, authParties);
+    text = dedupe.text;
+    repaired = dedupe.removed > 0 || repaired;
+  }
+
+  if (text.includes(QA_FUSED_PARTY_LEGAL_NAME_EXAMPLE)) {
+    for (const id of authorityPartiesToCanonicalPartyIdentities(authParties)) {
+      const legal = id.partyDisplayName.trim();
+      if (legal) text = text.split(QA_FUSED_PARTY_LEGAL_NAME_EXAMPLE).join(legal);
+    }
+    repaired = true;
+  }
+
+  // Include signature-region lines — fused headings often appear after IN WITNESS WHEREOF.
+  const fusedLine = text.split("\n").find((line) => isFusedOrConcatenatedPartyLegalName(line.trim()));
+  if (fusedLine && authParties.length >= 2) {
+    const client = authorityPartiesToCanonicalPartyIdentities(authParties)[0]?.partyDisplayName.trim();
+    if (client) text = text.split(fusedLine.trim()).join(client);
+    repaired = true;
+    if (authParties.length >= 2) {
+      const dedupeAfter = stripDuplicateLegacySignatureBlocksAfterAuthoritative(text, authParties);
+      text = dedupeAfter.text;
+      repaired = dedupeAfter.removed > 0 || repaired;
+    }
+  }
+
+  return { text, repaired: repaired || text !== normalized.trimEnd() };
+}
+
 export function guardPaidProReviewRenderCorpus(
   corpus: string,
   parties?: readonly PaidProSignerMetadataParty[],
@@ -589,37 +646,9 @@ export function guardPaidProReviewRenderCorpus(
     return { text, repaired, warned: false };
   }
 
-  if (authParties.length >= 2) {
-    const canonical = applyCanonicalPartyLegalNamesToSigningCorpus(text, authParties);
-    text = canonical.text;
-    repaired = canonical.repaired || repaired;
-    const recital = repairMalformedPaidProAgreementRecital(text, authParties);
-    text = recital.text;
-    repaired = recital.repairs.length > 0 || repaired;
-    const legacySig = stripTrailingLegacyEntitySignatureLines(text);
-    text = legacySig.text;
-    repaired = legacySig.removed > 0 || repaired;
-    const dedupe = stripDuplicateLegacySignatureBlocksAfterAuthoritative(text, authParties);
-    text = dedupe.text;
-    repaired = dedupe.removed > 0 || repaired;
-  }
-
-  if (text.includes(QA_FUSED_PARTY_LEGAL_NAME_EXAMPLE)) {
-    for (const id of authorityPartiesToCanonicalPartyIdentities(authParties)) {
-      const legal = id.partyDisplayName.trim();
-      if (legal) text = text.split(QA_FUSED_PARTY_LEGAL_NAME_EXAMPLE).join(legal);
-    }
-    repaired = true;
-  }
-
-  const marker = signaturePatchStartIndex(text);
-  const scan = marker >= 0 ? text.slice(0, marker) : text;
-  const fusedLine = scan.split("\n").find((line) => isFusedOrConcatenatedPartyLegalName(line));
-  if (fusedLine && authParties.length >= 2) {
-    const client = authorityPartiesToCanonicalPartyIdentities(authParties)[0]?.partyDisplayName.trim();
-    if (client) text = text.split(fusedLine.trim()).join(client);
-    repaired = true;
-  }
+  const fusedRepair = repairFusedPartyLegalNamesForReviewDisplay(text, authParties);
+  text = fusedRepair.text;
+  repaired = fusedRepair.repaired || repaired;
 
   logPaidProReviewRenderFusedPartyWarning({
     repaired,
@@ -797,8 +826,13 @@ export function resolvePaidProReviewRenderPlain(
 ): string {
   const surface = "paid_pro_review_render_plain";
   const finishUserVisiblePlain = (plain: string): string => {
-    const body = (plain || "").trim();
+    let body = (plain || "").trim();
     if (body.length < PAID_PRO_AUTHORITY_MIN_LEN) return body;
+    // Frozen SoT display-only skips the full sanitizer; still separate fused legal-name lines.
+    if (corpusContainsFusedPartyLegalName(body)) {
+      const parties = resolvePartiesForReviewRender(args);
+      body = repairFusedPartyLegalNamesForReviewDisplay(body, parties).text.trim();
+    }
     if (args?.skipUserVisibleDisplayPrep) return body;
     return applyPaidProUserVisibleDisplayPrep(body);
   };

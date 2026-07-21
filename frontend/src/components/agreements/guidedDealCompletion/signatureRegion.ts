@@ -103,7 +103,18 @@ export function findSignatureRegionEnd(text: string, start: number): number {
 export function countSignatureBlockHeadingsInTail(text: string): number {
   const start = signaturePatchStartIndex(text);
   const tail = start >= 0 ? text.slice(start) : text.slice(Math.floor(text.length * 0.72));
-  return (tail.match(/^\s*(?:CLIENT|SERVICE PROVIDER|ANALYTICS PROVIDER|PARTY\s+\d+)\s*:/gim) || []).length;
+  const roleHeadings =
+    (tail.match(/^\s*(?:CLIENT|SERVICE PROVIDER|ANALYTICS PROVIDER|PARTY\s+\d+)\s*:/gim) || [])
+      .length;
+  if (roleHeadings > 0) return roleHeadings;
+  // Labeled N-party entity-heading mode: legal entity line is the block heading.
+  return (
+    (
+      tail.match(
+        /^\s*[A-Z0-9][A-Z0-9 &.',\-]{1,160}\b(?:LLC|L\.L\.C\.|INC\.?|CORP\.?|LTD\.?|LP)\.?\s*:?\s*$/gm,
+      ) || []
+    ).length
+  );
 }
 
 /** Count execution-line anchors (`By:` or `Signature:`) in the signature tail. */

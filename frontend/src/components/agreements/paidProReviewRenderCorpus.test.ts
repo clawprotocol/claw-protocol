@@ -2,7 +2,9 @@ import { afterEach, describe, expect, it } from "vitest";
 import { resetPaidProReviewSignerMetadataSessionActiveForTests } from "./paidProReviewRenderSessionGate";
 import { buildPremiumAgreementReadonlyHtml } from "./premiumAgreementDocumentHtml";
 import {
+  clearPaidProReviewRenderFusedRepairCache,
   guardPaidProReviewRenderCorpus,
+  repairFusedPartyLegalNamesForReviewDisplay,
   repairSignatureNameLinesUsingLegalEntity,
   resolvePaidProReviewRenderPlain,
   stripStrayStandalonePartyEntityLinesBeforeRecital,
@@ -20,6 +22,7 @@ import {
   establishPaidProSourceOfTruth,
   getPaidProDocumentForSurface,
   getPaidProSourceOfTruth,
+  getPaidProSourceOfTruthText,
   hashPaidProCorpus,
 } from "./paidProSourceOfTruth";
 import { polishProAgreementDisplayLayer } from "./polishProAgreementDisplayLayer";
@@ -71,6 +74,7 @@ describe("paidProReviewRenderCorpus", () => {
     clearPaidProSourceOfTruth();
     clearConsumedPaidProSignerMetadataAuthority();
     resetPaidProReviewSignerMetadataSessionActiveForTests();
+    clearPaidProReviewRenderFusedRepairCache();
   });
 
   it("guard repairs fused QA pattern before review HTML", () => {
@@ -92,6 +96,7 @@ describe("paidProReviewRenderCorpus", () => {
   it("review render plain hydrates signer metadata from consumed authority without losing entity blocks", () => {
     establishPaidProSourceOfTruth({ text: RAW, source: "server_full_draft" });
     setConsumedPaidProSignerMetadataAuthority(authority());
+    expect(getPaidProSourceOfTruthText()).toContain(QA_FUSED_PARTY_LEGAL_NAME_EXAMPLE);
     const renderPlain = resolvePaidProReviewRenderPlain();
     const copy = getPaidProDocumentForSurface("copy")!.text;
     expect(copy).toBe(renderPlain);
@@ -102,6 +107,43 @@ describe("paidProReviewRenderCorpus", () => {
       expect(corpus).not.toMatch(/Email for Notice:/i);
       expect(corpus).not.toContain(QA_FUSED_PARTY_LEGAL_NAME_EXAMPLE);
     }
+    // Display-boundary repair must not mutate frozen SoT bytes.
+    expect(getPaidProSourceOfTruthText()).toContain(QA_FUSED_PARTY_LEGAL_NAME_EXAMPLE);
+  });
+
+  it("fused legal-name repair at review boundary is idempotent and leaves valid corpora unchanged", () => {
+    const auth = authority();
+    const boundary = repairFusedPartyLegalNamesForReviewDisplay(RAW, auth.parties);
+    expect(boundary.repaired).toBe(true);
+    expect(boundary.text).not.toContain(QA_FUSED_PARTY_LEGAL_NAME_EXAMPLE);
+    const againBoundary = repairFusedPartyLegalNamesForReviewDisplay(boundary.text, auth.parties);
+    expect(againBoundary.repaired).toBe(false);
+    expect(againBoundary.text).toBe(boundary.text);
+
+    const cleanTwoParty = [
+      "MUTUAL CONSULTING AND IMPLEMENTATION AGREEMENT",
+      "",
+      'This Agreement is between Blue Canyon Analytics LLC ("Client") and Iron Vale Systems Inc. ("Service Provider").',
+      "",
+      ...Array.from({ length: 20 }, (_, i) => `Section ${i + 1}. Clause ${i + 1}.`),
+      "",
+      "IN WITNESS WHEREOF, the Parties execute this Agreement.",
+      "",
+      "CLIENT:",
+      "Blue Canyon Analytics LLC",
+      "By: __________________________",
+      "Name: Anthem H Blanchard",
+      "Title: Manager",
+      "",
+      "SERVICE PROVIDER:",
+      "Iron Vale Systems Inc",
+      "By: __________________________",
+      "Name: Ira Vale",
+      "Title: Membe",
+    ].join("\n");
+    const noop = repairFusedPartyLegalNamesForReviewDisplay(cleanTwoParty, auth.parties);
+    expect(noop.repaired).toBe(false);
+    expect(noop.text).toBe(cleanTwoParty.replace(/\r\n/g, "\n").trimEnd());
   });
 
   it("visible plain prefers hydrated authoritative display over polished boundary candidate", () => {

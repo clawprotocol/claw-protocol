@@ -810,9 +810,9 @@ export const TRIPARTITE_LABELED_PARTY_ROLE_LABELS = [
   "Analytics Provider",
 ] as const;
 
-/** Tripartite labeled-party intakes — three labeled Party blocks are authoritative. */
+/** Tripartite labeled-party intakes — exactly three labeled Party blocks are authoritative. */
 export function isTripartiteLabeledPartiesIntake(raw: string): boolean {
-  return parseLabeledPartyBlocks(raw).length >= 3;
+  return parseLabeledPartyBlocks(raw).length === 3;
 }
 
 /** Quadripartite (4+) labeled-party intakes — four labeled Party blocks are authoritative. */
