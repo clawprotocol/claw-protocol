@@ -1,3 +1,4 @@
+import { SHARED_ACCEPTED_PAID_BODY } from "../components/agreements/paidProSharedFixtureSystem";
 /** @vitest-environment jsdom */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { WorkspaceIndexAgreement } from "../agreement/agreementWorkspaceApi";
@@ -158,7 +159,7 @@ describe("ownerSigningStatusResolver (Test359 follow-up)", () => {
 
   it("reconstructs handoff from portable packet after session handoff is cleared", () => {
     const handoff = twoPartyHandoff();
-    const corpusPlain = "x".repeat(1500);
+    const corpusPlain = SHARED_ACCEPTED_PAID_BODY;
     const portable = {
       v: 1 as const,
       seed: {

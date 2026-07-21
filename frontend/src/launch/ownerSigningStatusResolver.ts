@@ -27,6 +27,13 @@ import {
   resolveRequiredSignerCount,
 } from "../agreement/resolveRequiredSignerCount";
 import {
+  fetchFrozenSigningStatusCountsFromBackend,
+} from "../agreement/frozenSigningAuthorityApi";
+import {
+  loadFrozenSigningAuthority,
+  resolveSigningStatusCounts,
+} from "../components/agreements/frozenSigningAuthoritySnapshot";
+import {
   applyVs01CompletionEventsByCanonicalIdentity,
   assertVs01PublicVerifyCompletionIdentity,
   completedParticipantIdsFromPublicVerify,
@@ -83,7 +90,39 @@ export function progressFromPublicVerify(verify: PublicVerifyPayload): OwnerSign
 export async function fetchPersistedSigningProgressSnapshot(
   agreementId: string,
 ): Promise<CreatorSigningProgressSnapshot | null> {
+  const frozen = await loadFrozenSigningAuthority({ agreementId, expectedVersion: 1 });
   const verify = await fetchPublicAgreementVerify(agreementId);
+  if (frozen) {
+    const frozenCounts = resolveSigningStatusCounts({ snapshot: frozen });
+    const serverSigned = verify?.signature_status?.signatures_recorded ?? 0;
+    const requiredCount = frozenCounts.requiredSignerCount;
+    const signedCount = Math.min(Math.max(serverSigned, frozenCounts.completedSignerCount), requiredCount);
+    const fullySigned =
+      Boolean(verify?.signature_status?.fully_executed) ||
+      signedCount >= requiredCount;
+    if (requiredCount > 0 || verify?.signature_status) {
+      return {
+        signedCount: fullySigned ? requiredCount : signedCount,
+        requiredCount,
+        partiallySigned: !fullySigned && signedCount > 0 && signedCount < requiredCount,
+        fullySigned,
+        source: "public_verify",
+      };
+    }
+  }
+  const backendCounts = await fetchFrozenSigningStatusCountsFromBackend(agreementId);
+  if (backendCounts && backendCounts.required_signer_count > 0 && verify) {
+    const requiredCount = backendCounts.required_signer_count;
+    const signedCount = Math.min(verify.signature_status?.signatures_recorded ?? 0, requiredCount);
+    const fullySigned = Boolean(verify.signature_status?.fully_executed) || signedCount >= requiredCount;
+    return {
+      signedCount: fullySigned ? requiredCount : signedCount,
+      requiredCount,
+      partiallySigned: !fullySigned && signedCount > 0,
+      fullySigned,
+      source: "public_verify",
+    };
+  }
   if (!verify) return null;
   const progress = progressFromPublicVerify(verify);
   if (!progress) return null;

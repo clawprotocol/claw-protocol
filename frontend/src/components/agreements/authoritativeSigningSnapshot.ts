@@ -6,6 +6,7 @@
  * consume only that snapshot until the user explicitly chooses signing preparation.
  */
 
+import { getOrInitSessionAgreementGenerationId } from "../../lib/agreementGenerationId";
 import type { PartyIdentityMetadataSlot } from "./canonicalPartyIdentityModel";
 import type { CanonicalFinalPartyManifest } from "./guidedDealCompletion/canonicalFinalPartyManifest";
 import type { CanonicalSignerManifest } from "./guidedDealCompletion/guidedReviewSigningContinuity";
@@ -39,6 +40,10 @@ import {
   buildSnapshotPaidProSignerMetadataAuthority,
   type PaidProSignerMetadataParty,
 } from "./paidProSignerMetadataAuthority";
+import {
+  clearFrozenSigningAuthoritySnapshotForSession,
+  createFrozenSigningAuthoritySnapshot,
+} from "./frozenSigningAuthoritySnapshot";
 
 export type PaidProSigningAuthorityPhase =
   | "SIGNER_METADATA_EDIT"
@@ -145,6 +150,7 @@ export function isPostSignerMetadataFreezeActive(args?: {
 
 export function clearAuthoritativeSigningSnapshot(): void {
   const oldText = authoritativeSigningSnapshot?.corpus ?? "";
+  clearFrozenSigningAuthoritySnapshotForSession();
   authoritativeSigningSnapshot = null;
   authorityPhase = "SIGNER_METADATA_EDIT";
   setPaidProPinnedSignerAppliedCorpus("");
@@ -311,6 +317,11 @@ export function createAuthoritativeSigningSnapshot(
     oldText: (args.corpus || "").trim(),
     newText: corpus,
     sourceAfter: authoritativeSigningSnapshot.source,
+  });
+  createFrozenSigningAuthoritySnapshot({
+    agreementId: getOrInitSessionAgreementGenerationId(),
+    authoritativeSnapshot: authoritativeSigningSnapshot,
+    intakeText: args.intakeText ?? null,
   });
   return authoritativeSigningSnapshot;
 }

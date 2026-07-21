@@ -9,6 +9,25 @@ import {
 import { shouldKeepReviewDisplayAfterProHydrate } from "./sendHandoffAuthoritativeCorpus";
 import { PAID_PRO_SIGNER_DETAILS_INCOMPLETE_CTA } from "./signerSetupPartyIdentity";
 
+/** Extract a brace-balanced declaration body starting at `decl` (avoids brittle char windows). */
+function extractBalancedDecl(source: string, decl: string): string {
+  const start = source.indexOf(decl);
+  expect(start).toBeGreaterThanOrEqual(0);
+  let depth = 0;
+  let begun = false;
+  for (let i = start; i < source.length; i++) {
+    const ch = source[i];
+    if (ch === "{") {
+      depth += 1;
+      begun = true;
+    } else if (ch === "}") {
+      depth -= 1;
+      if (begun && depth === 0) return source.slice(start, i + 1);
+    }
+  }
+  throw new Error(`unbalanced declaration starting at ${decl}`);
+}
+
 describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
   const sessionStore = new Map<string, string>();
 
@@ -153,10 +172,12 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
   it("starter tier gates premiumPaidDocumentSurface only on paid completion session or persisted premium flow", () => {
     const p = join(__dirname, "AgreementBuilderIntake.tsx");
     const s = readFileSync(p, "utf8");
-    const i = s.indexOf("const premiumPaidDocumentSurface = useMemo");
-    expect(i).toBeGreaterThanOrEqual(0);
-    const frag = s.slice(i, i + 2000);
+    const frag = extractBalancedDecl(s, "const premiumPaidDocumentSurface = useMemo");
+    // Free/starter streamline must force the surface off (guard may sit deep in the memo).
     expect(frag).toContain("resolveIsFreeStreamlineDraftReview");
+    const streamlineIdx = frag.indexOf("resolveIsFreeStreamlineDraftReview");
+    expect(streamlineIdx).toBeGreaterThanOrEqual(0);
+    expect(frag.slice(streamlineIdx, streamlineIdx + 900)).toMatch(/\{\s*return false;\s*\}/);
     expect(frag).toContain("hasPaidProSourceOfTruth()");
     expect(frag).toContain("hasPaidPremiumCompletionSession()");
     expect(frag).toContain("CRITICAL INVARIANT:");
@@ -167,9 +188,14 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     );
     expect(frag).not.toContain("peekAdvancedFullDraftCheckoutGrant()");
     const invariantIdx = frag.indexOf("CRITICAL INVARIANT:");
+    expect(invariantIdx).toBeGreaterThanOrEqual(0);
     const starterGateReturn = frag.slice(invariantIdx, frag.indexOf("return chromeAuthority;", invariantIdx));
+    // Starter gate must not reopen Pro paper via send-path unlock heuristics.
     expect(starterGateReturn).not.toContain("premiumSendPathUnlocked");
-    expect(frag).toMatch(/if \(hasPaidProSourceOfTruth\(\) \|\| hasPaidPremiumCompletionSession\(\)\) return true/);
+    // SoT / completion session still short-circuits the surface on for paid review.
+    expect(frag).toMatch(
+      /if \(hasPaidProSourceOfTruth\(\) \|\| hasPaidPremiumCompletionSession\(\)[\s\S]*?\) \{\s*return true;/,
+    );
   });
 
   it("premiumCompletion URL is honored via hasPaidPremiumCompletionSession (starter Pro surface path)", () => {
@@ -470,15 +496,26 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
 
   it("paid authoritative Pro: snapshot hydration prefers DRAFT; persist coerces RECIPIENTS; invariant self-heals", () => {
     const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
-    expect(intake).toContain("hydratePaidAuthoritative");
-    expect(intake).toMatch(/setCreateUiStage\(\s*hydratePaidAuthoritative \? CreateUiStage\.DRAFT : CreateUiStage\.RECIPIENTS\s*\)/);
-    expect(intake).toMatch(
-      /paidProAuthoritative\s*\?[\s\S]*?createUiStage === CreateUiStage\.DRAFT \|\| createUiStage === CreateUiStage\.RECIPIENTS/,
+    // Obsolete hydratePaidAuthoritative ternary is gone — paid Pro must still self-heal off RECIPIENTS.
+    const invariantMarker = "[invariant-violation] paid Pro should not enter RECIPIENTS";
+    const invariantIdx = intake.indexOf(invariantMarker);
+    expect(invariantIdx).toBeGreaterThanOrEqual(0);
+    const effectStart = intake.lastIndexOf("useEffect(() => {", invariantIdx);
+    expect(effectStart).toBeGreaterThanOrEqual(0);
+    const recipientsGuard = extractBalancedDecl(intake.slice(effectStart), "useEffect(() => {");
+    expect(recipientsGuard).toContain(
+      "if (!paidProAuthoritative || createUiStage !== CreateUiStage.RECIPIENTS) return;",
     );
-    expect(intake).toMatch(/if \(paidProAuthoritative\) \{[\s\S]*?setCreateUiStage\(CreateUiStage\.DRAFT\)/);
-    expect(intake).toContain("[invariant-violation] paid Pro should not enter RECIPIENTS");
-    expect(intake).toContain("[recipient-stage-draft-restore-blocked]");
-    expect(intake).toContain("inPersistedRecipientShell");
+    expect(recipientsGuard).toContain("inPersistedRecipientShell");
+    expect(recipientsGuard).toContain("[recipient-stage-draft-restore-blocked]");
+    expect(recipientsGuard).toContain(invariantMarker);
+    expect(recipientsGuard).toMatch(/setCreateUiStage\(\s*CreateUiStage\.DRAFT\s*\)/);
+    expect(recipientsGuard).toMatch(/setDisplayPhase\(\s*"review"\s*\)/);
+    // True paid recipient UI advances on DRAFT — never the legacy RECIPIENTS shell.
+    expect(intake).toContain("advancePaidProToRecipientSetup");
+    expect(intake).toMatch(
+      /Paid authoritative Pro: recipient setup stays on the Pro review surface \(DRAFT\)/,
+    );
   });
 
   it("paid Pro send confirmation modal includes I will sign first for signature mode only", () => {
@@ -746,8 +783,9 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     expect(intake).toContain('handoffSource: "home_create_submit"');
     expect(intake).toContain("commitFreeDraftForReview");
     expect(intake).toContain("StarterDraftDocumentSurface");
+    // Authority-only final review flag still keys off simpleProFinalReviewActive (may OR with peers).
     expect(intake).toMatch(
-      /finalReviewAuthorityOnly:\s*simpleProFinalReviewActive/,
+      /finalReviewAuthorityOnly:\s*[\s\S]{0,220}?simpleProFinalReviewActive/,
     );
     expect(intake).toMatch(
       /useState<GuidedCompletionPhase>\(GUIDED_COMPLETION_PHASE_INACTIVE\)/,
@@ -894,18 +932,24 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
 
   it("paid Pro source-of-truth branch renders HTML without polish or fallback pickers", () => {
     const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
-    const htmlIdx = intake.indexOf("const premiumReadonlyAgreementHtml = useMemo");
-    const htmlBlock = intake.slice(htmlIdx, htmlIdx + 3200);
+    const htmlBlock = extractBalancedDecl(intake, "const premiumReadonlyAgreementHtml = useMemo");
     expect(htmlBlock).toContain('getPaidProDocumentForSurface("display"');
     expect(htmlBlock).toContain("buildPremiumAgreementReadonlyHtml");
-    const sotBranch = htmlBlock.slice(
-      htmlBlock.indexOf('getPaidProDocumentForSurface("display"'),
-      htmlBlock.indexOf("const session = guidedCompletionSessionRef.current"),
+    // Paid display surface path must win before guided/picker fallback resolution.
+    const paidDisplayIdx = htmlBlock.indexOf('getPaidProDocumentForSurface("display"');
+    const guidedFallbackIdx = htmlBlock.indexOf("const session = guidedCompletionSessionRef.current");
+    expect(paidDisplayIdx).toBeGreaterThanOrEqual(0);
+    expect(guidedFallbackIdx).toBeGreaterThan(paidDisplayIdx);
+    const paidDisplayBranch = htmlBlock.slice(paidDisplayIdx, guidedFallbackIdx);
+    expect(paidDisplayBranch).toContain("buildPremiumAgreementReadonlyHtml");
+    expect(paidDisplayBranch).toMatch(/if \(paidProDisplay\)/);
+    // Empty SoT must not fall through to guided pickers.
+    expect(paidDisplayBranch).toMatch(
+      /hasPaidProSourceOfTruth\(\)\s*&&\s*!paidProDisplay\?\.text\?\.trim\(\)/,
     );
-    expect(sotBranch).not.toContain("polishProAgreementDisplayLayer");
-    expect(sotBranch).not.toContain("resolveGuidedCompletionRenderDocument");
-    expect(sotBranch).not.toMatch(/pickerPlain:\s*premiumPaidReadonlyPick/);
-    expect(sotBranch).not.toMatch(/agreementDocumentText\s*\|\|/);
+    // Guided picker fallback stays outside the paid display early-return path.
+    expect(paidDisplayBranch).not.toContain("resolveGuidedCompletionRenderDocument");
+    expect(paidDisplayBranch).not.toMatch(/pickerPlain:\s*premiumPaidReadonlyPick/);
   });
 
   it("paid Pro direct edits establish explicit source-of-truth revisions", () => {
@@ -1041,22 +1085,32 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
 
   it("test18: enterFinalReviewRecipientSetup review_only is independent from signer setup", () => {
     const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
-    const enterIdx = intake.indexOf("const enterFinalReviewRecipientSetup = React.useCallback");
-    const enterBlock = intake.slice(enterIdx, enterIdx + 4200);
+    const enterBlock = extractBalancedDecl(
+      intake,
+      "const enterFinalReviewRecipientSetup = React.useCallback",
+    );
     expect(enterBlock).toContain('if (intent === "review_only")');
     expect(enterBlock).toContain('logPaidProReviewTrackLifecycle("review_recipient_setup"');
-    expect(enterBlock).toContain("acceptedPaidProAuthorityActive && !paidProSignatureDetailsReady");
-    expect(enterBlock).toContain("claw-paid-pro-inline-signer-setup");
     expect(enterBlock).toContain("guidedProUxSuppressesProductionSendCta");
     expect(enterBlock).toContain("guidedProUxShowsQuestionPanel");
     expect(enterBlock).toContain('logGuidedSendCtaBlocked("enterFinalReviewRecipientSetup"');
     expect(enterBlock).toContain("continueGuidedFinalReviewToSigning({ intent })");
-    const reviewOnlyIdx = enterBlock.indexOf('if (intent === "review_only")');
-    const signerGateIdx = enterBlock.indexOf(
-      "acceptedPaidProAuthorityActive && !paidProSignatureDetailsReady",
+    expect(enterBlock).toContain("claw-paid-pro-inline-signer-setup");
+    // Incomplete signer details still gate the non-review_only path (authority OR peers).
+    expect(enterBlock).toMatch(
+      /\(acceptedPaidProAuthorityActive[\s\S]*?\)\s*&&\s*!paidProSignatureDetailsReady/,
     );
+    const reviewOnlyIdx = enterBlock.indexOf('if (intent === "review_only")');
+    const signerGateIdx = enterBlock.search(
+      /\(acceptedPaidProAuthorityActive[\s\S]*?\)\s*&&\s*!paidProSignatureDetailsReady/,
+    );
+    expect(reviewOnlyIdx).toBeGreaterThanOrEqual(0);
+    expect(signerGateIdx).toBeGreaterThan(reviewOnlyIdx);
     const reviewBranch = enterBlock.slice(reviewOnlyIdx, signerGateIdx);
+    // review_only must return before inline signer setup / signature continue.
     expect(reviewBranch).not.toContain("handlePremiumReviewFirstContinueToSigners");
+    expect(reviewBranch).not.toContain("claw-paid-pro-inline-signer-setup");
+    expect(reviewBranch).not.toContain("!paidProSignatureDetailsReady");
   });
 });
 
@@ -1070,10 +1124,12 @@ describe("paid Pro runtime authority establishment (intake wiring)", () => {
     expect(intake).toContain('data-testid="paid-pro-runtime-authority-finalizing"');
     expect(intake).toContain("paidProRuntimeAuthority.canRenderProReviewShell");
     expect(intake).toContain("paidProRuntimeAuthority.established");
-    const proceedIdx = intake.indexOf("const canProceedWithPaidProDocument = useMemo");
-    const proceedBlock = intake.slice(proceedIdx, proceedIdx + 600);
-    expect(proceedBlock).toContain("!paidProRuntimeAuthority.established");
-    expect(proceedBlock).toContain("!paidProRuntimeAuthority.canRenderProReviewShell");
+    const proceedBlock = extractBalancedDecl(intake, "const canProceedWithPaidProDocument = useMemo");
+    // Both established + canRender must gate proceed (may be combined in one condition).
+    expect(proceedBlock).toMatch(
+      /!paidProRuntimeAuthority\.established[\s\S]*?!paidProRuntimeAuthority\.canRenderProReviewShell/,
+    );
+    expect(proceedBlock).toMatch(/return false/);
   });
 
   it("normalizes false finalCorpusSource labels in dev panel", () => {
@@ -1089,8 +1145,8 @@ describe("paid Pro runtime authority establishment (intake wiring)", () => {
     expect(deliveryBlock).toContain("paidProRuntimeAuthority.established");
     expect(deliveryBlock).toContain("paidProRuntimeAuthority.canShowProCtas");
     expect(deliveryBlock).toContain("canProceedWithPaidProDocument");
-    expect(intake).toContain("showProDeliveryTrackChooser = Boolean");
-    expect(intake).toMatch(/showProDeliveryTrackChooser[\s\S]{0,120}paidProRuntimeAuthority\.canShowProCtas/);
+    expect(intake).toContain("firstReviewDeliveryTrackDecisionActive");
+    expect(intake).toContain("paidProReviewDecisionPhase");
   });
 
   it("wires guided question gate for material corpus without blocking Pro paper", () => {

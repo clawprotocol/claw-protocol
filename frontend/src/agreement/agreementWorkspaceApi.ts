@@ -108,6 +108,7 @@ export async function postSigningLinksSent(
     packet_revision?: string | null;
     document_id?: string | null;
     portable_packet?: Record<string, unknown> | null;
+    frozen_signing_authority?: Record<string, unknown> | null;
     targets: SigningInviteTargetPayload[];
   },
 ): Promise<PostSigningLinksSentResult> {
@@ -121,10 +122,18 @@ export async function postSigningLinksSent(
         packet_revision: body.packet_revision ?? null,
         document_id: body.document_id ?? null,
         portable_packet: body.portable_packet ?? null,
+        frozen_signing_authority: body.frozen_signing_authority ?? null,
         targets: body.targets,
       }),
     });
-    if (!res.ok) return { ok: false, sent_count: 0, skip_reason: `http_${res.status}` };
+    if (!res.ok) {
+      const j = (await res.json().catch(() => ({}))) as { detail?: { code?: string } | string };
+      const code =
+        typeof j.detail === "object" && j.detail && "code" in j.detail
+          ? String(j.detail.code)
+          : `http_${res.status}`;
+      return { ok: false, sent_count: 0, skip_reason: code };
+    }
     const j = (await res.json().catch(() => ({}))) as {
       sent_count?: number;
       skip_reason?: string | null;

@@ -54,20 +54,33 @@ describe("TEST570 dashboard paid-create review decision precedes signer setup", 
     ).toBe(true);
   });
 
-  it("keeps the latch armed once the user explicitly chose Prepare signature links", () => {
+  it("does not keep a stale auto-armed latch when delivery decision is active", () => {
     expect(
       shouldArmPaidProFirstReviewSignerSetupLatch({
         ...baseLatchArgs,
         deliveryTrackDecisionActive: true,
         alreadyLatched: true,
       }),
-    ).toBe(true);
+    ).toBe(false);
   });
 
   it("shows delivery track chooser at review_ready before signer metadata is finalized", () => {
     expect(
       shouldShowPaidProForcedFirstReviewTrackChooser({
         forcedFirstReviewActive: true,
+        inlineSignerSetupMounted: false,
+        signerDetailsReady: true,
+        signerMetadataFinalized: false,
+        signaturePreparationRequested: false,
+        deliveryTrackDecisionActive: true,
+      }),
+    ).toBe(true);
+  });
+
+  it("shows delivery track chooser on canonical simple shell when delivery decision is active", () => {
+    expect(
+      shouldShowPaidProForcedFirstReviewTrackChooser({
+        forcedFirstReviewActive: false,
         inlineSignerSetupMounted: false,
         signerDetailsReady: true,
         signerMetadataFinalized: false,

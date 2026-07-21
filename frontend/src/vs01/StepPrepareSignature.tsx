@@ -1373,6 +1373,12 @@ export function StepPrepareSignature({
       onError(packetBlockedMessage ?? "Signature fields are being placed. Please wait a moment.");
       return;
     }
+    if (agreementBridgePlacementCopy && packetReady) {
+      setPrepareContinueBlockedVisible(false);
+      onError(null);
+      onContinue?.();
+      return;
+    }
     const result = evaluatePrepareFinishClick(preparePacketGate, prepareSignerRoles ?? []);
     logVs01PrepareFinishClick({
       canFinish: result.allowed,
@@ -1412,6 +1418,14 @@ export function StepPrepareSignature({
       if (placementNoticeTimerRef.current) clearTimeout(placementNoticeTimerRef.current);
     };
   }, []);
+
+  const bridgeAutoPrepareDispatchedRef = useRef(false);
+  useEffect(() => {
+    if (!agreementBridgePlacementCopy || !packetReady || receiptId || busy) return;
+    if (bridgeAutoPrepareDispatchedRef.current) return;
+    bridgeAutoPrepareDispatchedRef.current = true;
+    handlePrepareContinue();
+  }, [agreementBridgePlacementCopy, packetReady, receiptId, busy, handlePrepareContinue]);
 
   const onBoxPointerDown = useCallback(
     (ev: PointerEvent<HTMLDivElement>, field: PlacedSigningField) => {

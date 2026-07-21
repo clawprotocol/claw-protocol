@@ -16,7 +16,7 @@ import { detailsStepIsValid } from "./detailsStepValidation";
 import type { PlacedSigningField } from "./signingFields";
 import { getVs01UrlBootstrap } from "./vs01UrlBootstrap";
 import { resolveReviewerEffectiveAccessToken } from "../agreement/reviewerTokenPersistence";
-import { markAgreementFieldsPlacedCount, markAgreementPacketPrepared } from "./vs01WorkspaceSigningStatus";
+import { markAgreementFieldsPlacedCount, markAgreementPacketPrepared, isAgreementPacketPrepared } from "./vs01WorkspaceSigningStatus";
 import { fetchDocumentContent, getReceipt } from "./vs01Api";
 import { useLaunchNav } from "../launch/LaunchNavContext";
 import { stashHeroIntakePrefill } from "../launch/heroIntakePrefill";
@@ -585,6 +585,12 @@ export function Vs01Wizard({
     const did = documentId?.trim() ?? "";
     if (!linkedAgreementId || !did) {
       setError("Agreement or document is not ready yet.");
+      return;
+    }
+    if (isAgreementPacketPrepared(linkedAgreementId)) {
+      // eslint-disable-next-line no-console
+      console.info("[vs01-packet-prepare-idempotent-skip]", { agreementId: linkedAgreementId });
+      navigate(paidProPacketReadyDashboardPath());
       return;
     }
     const bridge = bridgeHandoffSnapshotRef.current ?? readAgreementVs01BridgeSession();

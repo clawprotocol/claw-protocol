@@ -1,4 +1,5 @@
 import { postSigningLinksSent } from "../agreement/agreementWorkspaceApi";
+import { readFrozenSigningAuthoritySnapshot, loadFrozenSigningAuthority } from "../components/agreements/frozenSigningAuthoritySnapshot";
 import {
   fetchRecipientAccessPolicy,
   mintRecipientAccessTokenResult,
@@ -144,10 +145,18 @@ export async function dispatchSigningInvitesFromHandoff(
   }
 
   try {
+    const frozenLocal = readFrozenSigningAuthoritySnapshot();
+    const frozen =
+      frozenLocal ??
+      (await loadFrozenSigningAuthority({
+        agreementId: handoff.agreementId,
+        expectedVersion: 1,
+      }));
     const res = await postSigningLinksSent(handoff.agreementId, {
       packet_revision: handoff.packetRevision ?? null,
       document_id: (opts?.documentId ?? handoff.vs01DocumentId ?? "").trim() || null,
       portable_packet: opts?.portablePacket ? (opts.portablePacket as unknown as Record<string, unknown>) : null,
+      frozen_signing_authority: frozen ? (frozen as unknown as Record<string, unknown>) : null,
       targets,
     });
     return {

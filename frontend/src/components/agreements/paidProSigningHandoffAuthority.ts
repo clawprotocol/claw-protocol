@@ -19,6 +19,17 @@ import {
   buildCanonicalFinalPartyManifestFromAuthority,
   readConsumedPaidProSignerMetadataAuthority,
 } from "./paidProSignerMetadataAuthority";
+import {
+  type FrozenSigningAuthoritySnapshotV1,
+} from "./frozenSigningAuthoritySnapshot";
+import {
+  isPostFreezeLifecycle,
+  type SigningAuthorityLifecycleMode,
+} from "./signingAuthorityLifecycle";
+import {
+  resolveFrozenSignerForPartyIndexFromSnapshot,
+  resolveSigningHandoffRecipientsFromSnapshot,
+} from "./paidProSigningHandoffFromSnapshot";
 
 export type PaidProSigningHandoffRecipient = {
   partyLegalName: string;
@@ -70,7 +81,13 @@ export function resolvePaidProSigningHandoffRecipients(args?: {
   manifest?: CanonicalFinalPartyManifest | null;
   intakeText?: string | null;
   draftPartyNames?: readonly string[];
+  lifecycleMode?: SigningAuthorityLifecycleMode;
+  frozenSnapshot?: FrozenSigningAuthoritySnapshotV1 | null;
 }): PaidProSigningHandoffRecipient[] {
+  if (isPostFreezeLifecycle(args?.lifecycleMode ?? "pre_freeze") && args?.frozenSnapshot) {
+    return resolveSigningHandoffRecipientsFromSnapshot(args.frozenSnapshot);
+  }
+
   const manifest = manifestHasPartyRows(args?.manifest ?? null)
     ? args!.manifest!
     : resolvePaidProSigningHandoffPartyManifest({
@@ -82,19 +99,27 @@ export function resolvePaidProSigningHandoffRecipients(args?: {
   const authorityByIndex = new Map(
     (authority?.parties ?? []).map((p) => [p.partyIndex, p] as const),
   );
+  const injectedSnapshot = args?.frozenSnapshot ?? null;
 
   return manifest.parties
     .filter((p) => String(p.partyName ?? "").trim().length >= 2)
     .map((p) => {
+      const frozenSigner = injectedSnapshot
+        ? resolveFrozenSignerForPartyIndexFromSnapshot(p.index, injectedSnapshot)
+        : null;
       const auth = authorityByIndex.get(p.index);
       const partyLegalName = String(p.partyName ?? "").trim();
       const isIndividual =
         p.isIndividual ?? (partyLegalName ? isIndividualPartyName(partyLegalName) : false);
       return {
         partyLegalName,
-        signerName: String(p.signerName ?? auth?.signerName ?? "").trim(),
-        signerTitle: String(p.signerTitle ?? auth?.signerTitle ?? "").trim(),
-        email: String(p.email ?? auth?.signerEmail ?? "").trim(),
+        signerName: String(
+          frozenSigner?.signerName ?? p.signerName ?? auth?.signerName ?? "",
+        ).trim(),
+        signerTitle: String(
+          frozenSigner?.signerTitle ?? p.signerTitle ?? auth?.signerTitle ?? "",
+        ).trim(),
+        email: String(frozenSigner?.signerEmail ?? p.email ?? auth?.signerEmail ?? "").trim(),
         address: String(auth?.partyAddress ?? "").trim(),
         isIndividual: isIndividual ? true : false,
       };

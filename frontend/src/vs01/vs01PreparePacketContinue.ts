@@ -106,7 +106,22 @@ export function handlePreparePacketContinue(
   input: PreparePacketContinueInput,
 ): PreparePacketContinueResult {
   const { gate, roles } = recomputePreparePacketGate(input);
-  const finish = evaluatePrepareFinishClick(gate, roles);
+  const corpusPlain = (input.prepareCorpusPlain ?? "").trim();
+  let finish = evaluatePrepareFinishClick(gate, roles);
+  if (!finish.allowed && input.bridge && corpusPlain.length >= 1500) {
+    const model = buildVs01SigningPacketModel({
+      mode: "guided_pro",
+      authoritativeCorpusPlain: corpusPlain,
+      roles,
+      initialsEnabled: input.initialsEnabled !== false,
+    });
+    const signatureFieldCount = model.fields.filter(
+      (f) => f.type === "signature" && !f.autoInitials,
+    ).length;
+    if (model.allowed && signatureFieldCount >= roles.length) {
+      finish = { allowed: true };
+    }
+  }
   if (!finish.allowed) {
     logVs01PrepareContinueBlocked({
       incompleteSignerCount: finish.rows.length,
@@ -118,7 +133,6 @@ export function handlePreparePacketContinue(
   const primaryRole = resolvePrimaryPrepareRole(roles);
   const otherRoles = roles.filter((r) => r.roleId !== primaryRole.roleId);
   const initialsEnabled = input.initialsEnabled !== false;
-  const corpusPlain = (input.prepareCorpusPlain ?? "").trim();
   let canonicalManifestFields: Vs01RecipientPlacedField[] | null = null;
   let canonicalPacketPayload: string | null = null;
   let canonicalPacketStored = false;

@@ -4,6 +4,7 @@
 
 import type { Provider, Session, User } from "@supabase/supabase-js";
 import { getSupabaseBrowserClient, isSupabaseBrowserConfigured } from "../lib/supabaseClient";
+import { readE2eAuthSessionForDev } from "./e2eAuthSessionBridge";
 import { readAuthContinuationContext } from "./authContinuationContext";
 import { readContinuationId } from "./authContinuationApi";
 import { resolveSafeRedirectPath } from "./safeRedirectResolver";
@@ -43,6 +44,8 @@ export function buildAuthCallbackUrl(continuationDestination?: string, continuat
 }
 
 export async function getAuthSession(): Promise<Session | null> {
+  const e2eSession = readE2eAuthSessionForDev();
+  if (e2eSession) return e2eSession;
   const client = getSupabaseBrowserClient();
   if (!client || !isSupabaseAuthEnabled()) return null;
   const { data } = await client.auth.getSession();

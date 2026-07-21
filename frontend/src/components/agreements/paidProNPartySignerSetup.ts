@@ -20,6 +20,14 @@ import {
 } from "../../vs01/vs01SignerFieldAssignment";
 import type { AgreementDraft, AgreementParty } from "../../agreement/agreementTypes";
 import type { Vs01Counterparty } from "../../vs01/types";
+import {
+  frozenSnapshotToLegalPartyRows,
+  type FrozenSigningAuthoritySnapshotV1,
+} from "./frozenSigningAuthoritySnapshot";
+import {
+  isPostFreezeLifecycle,
+  type SigningAuthorityLifecycleMode,
+} from "./signingAuthorityLifecycle";
 
 /** UI cap for explicit multi-party signer setup (handoff supports more). */
 export const PAID_PRO_SIGNER_SETUP_MAX_UI_PARTIES = PAID_PRO_AUTHORITY_MAX_PARTIES;
@@ -248,8 +256,50 @@ function emailForPartyIndex(state: PaidProSignerSetupUiState, index: number): st
   return stripRecipientEmailNoise(state.extraPartyReviewEmails[index - 2] ?? "");
 }
 
+export type BuildLegalPartiesFromSignerSetupArgs = {
+  lifecycleMode?: SigningAuthorityLifecycleMode;
+  /** Required when lifecycleMode is post-freeze — injected by orchestrating layer. */
+  frozenSnapshot?: FrozenSigningAuthoritySnapshotV1 | null;
+};
+
 /** Build {@link AgreementParty} rows for VS01 role generation from live signer-setup UI. */
-export function buildLegalPartiesFromSignerSetupState(state: PaidProSignerSetupUiState): AgreementParty[] {
+export function buildLegalPartiesFromSignerSetupState(
+  state: PaidProSignerSetupUiState,
+  opts?: BuildLegalPartiesFromSignerSetupArgs,
+): AgreementParty[] {
+  const mode = opts?.lifecycleMode ?? "pre_freeze";
+  const injected = opts?.frozenSnapshot ?? null;
+
+  if (isPostFreezeLifecycle(mode)) {
+    if (!injected?.parties.length) {
+      return [];
+    }
+    return frozenSnapshotToLegalPartyRows(injected).map((row) => ({
+      id: row.id,
+      name: row.name,
+      role: row.role,
+      email: row.email,
+      signerName: row.signerName,
+      signerTitle: row.signerTitle,
+      signerEmail: row.signerEmail,
+      reviewEmail: row.email,
+      requiresSignature: row.requiresSignature,
+    }));
+  }
+
+  if (injected?.parties.length) {
+    return frozenSnapshotToLegalPartyRows(injected).map((row) => ({
+      id: row.id,
+      name: row.name,
+      role: row.role,
+      email: row.email,
+      signerName: row.signerName,
+      signerTitle: row.signerTitle,
+      signerEmail: row.signerEmail,
+      reviewEmail: row.email,
+      requiresSignature: row.requiresSignature,
+    }));
+  }
   const count = resolveSignerSetupUiPartyCount(state);
   const out: AgreementParty[] = [];
   for (let i = 0; i < count; i++) {
