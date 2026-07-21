@@ -43,6 +43,7 @@ export function stripSignerInstructionClausesFromIntake(raw: string): string {
 export function sanitizePartyLegalNameFromIntakeFragment(raw: string): string {
   let s = (raw || "").replace(/\s+/g, " ").trim();
   if (!s) return s;
+  if (/\bd\/b\/a\b/i.test(s)) return s;
   if (/^\s*for\s+/i.test(s)) {
     s = s.replace(/^\s*for\s+/i, "").trim();
   }

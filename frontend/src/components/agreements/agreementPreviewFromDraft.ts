@@ -60,8 +60,11 @@ import {
 import { finalizeAgreementOutput } from "./agreementOutputQuality";
 import { logPaidProPostFreezeMutationAttempt } from "./paidProFreezeDiagnostics";
 import { applyDocumentQualityFloor } from "./documentQualityFloor";
-import { extractTermDurationFromIntake, isInvalidVisibleScheduleValue, isSignerTitleLikeRole } from "./starterRoleLabelGuard";
-import { resolveCanonicalPartyRoleLabel } from "./canonicalPartyRoleAuthority";
+import { extractTermDurationFromIntake, isAgreementRoleLabel, isInvalidVisibleScheduleValue, isSignerTitleLikeRole } from "./starterRoleLabelGuard";
+import {
+  resolveCanonicalPartyRoleLabel,
+  resolveStarterTwoPartyCommercialAuthority,
+} from "./canonicalPartyRoleAuthority";
 import {
   formatMilestonePaymentTermsFromIntake,
   formatInstallmentPaymentTermsFromIntake,
@@ -376,8 +379,16 @@ function buildStarterServicesScopeFromIntake(
 ): string {
   if (!isServicesAgreementLikeDraft(draft, intakeText)) return "";
   const parties = draft.parties ?? [];
-  const client = sanitizePartyLegalNameFromIntakeFragment((parties[0]?.name || "").trim());
-  const provider = sanitizePartyLegalNameFromIntakeFragment((parties[1]?.name || "").trim());
+  const authority = resolveStarterTwoPartyCommercialAuthority(
+    intakeText,
+    parties.map((p) => String(p?.name ?? "")),
+  );
+  const client = sanitizePartyLegalNameFromIntakeFragment(
+    (authority?.clientName || parties[0]?.name || "").trim(),
+  );
+  const provider = sanitizePartyLegalNameFromIntakeFragment(
+    (authority?.providerName || parties[1]?.name || "").trim(),
+  );
   const serviceDescription = extractServiceDescriptionFromIntake(intakeText);
   if (!client || !provider || !serviceDescription) return "";
   return `${provider} will provide ${serviceDescription} services for ${client}.`;
@@ -502,6 +513,9 @@ function partyEntryWithRoleConfidence(
 ): PartyEntry {
   const role = (p.role || "").trim().toLowerCase();
   if (starterPreview && draft && (draft.parties || []).length === 2) {
+    if (isAgreementRoleLabel(p.role)) {
+      return { name: p.name, role: String(p.role).trim() };
+    }
     const partyIndex = (draft.parties || []).findIndex(
       (row) => String(row?.name || "").trim() === String(p.name || "").trim(),
     );
@@ -708,13 +722,15 @@ export function buildAgreementPreviewTextCore(
   draft: ParsedDraftShape,
   options?: AgreementPreviewBuildOptions,
 ): string {
-  const frozenCore = tryReadPaidProFrozenPreviewPlain({
-    surface: options?.starterPreview ? "preview_starter" : "preview_structured",
-    builder: "buildAgreementPreviewTextCore",
-    createFlowPhase: options?.placeholderGate?.createFlowPhase ?? null,
-    displayPhase: options?.placeholderGate?.displayPhase ?? null,
-  });
-  if (frozenCore !== null) return frozenCore;
+  if (!options?.freeStarterReviewPreview) {
+    const frozenCore = tryReadPaidProFrozenPreviewPlain({
+      surface: options?.starterPreview ? "preview_starter" : "preview_structured",
+      builder: "buildAgreementPreviewTextCore",
+      createFlowPhase: options?.placeholderGate?.createFlowPhase ?? null,
+      displayPhase: options?.placeholderGate?.displayPhase ?? null,
+    });
+    if (frozenCore !== null) return frozenCore;
+  }
   recordPaidProPreviewRecompute("buildAgreementPreviewTextCore");
   const starterPreview = Boolean(options?.starterPreview);
   const resolvedIntakeText = starterPreview
@@ -973,7 +989,8 @@ function applyAgreementPreviewPlaceholderGate(
   options: AgreementPreviewBuildOptions | undefined,
   surface: string,
 ): string {
-  if (shouldUsePaidProSourceOfTruthDisplayOnly()) {
+  const freeStarterReviewPreview = Boolean(options?.freeStarterReviewPreview);
+  if (shouldUsePaidProSourceOfTruthDisplayOnly() && !freeStarterReviewPreview) {
     logPaidProPostFreezeMutationAttempt({
       caller: "applyAgreementPreviewPlaceholderGate",
       blocked: true,
@@ -1054,14 +1071,7 @@ export function buildStarterAgreementPreviewForReview(
   draft: ParsedDraftShape,
   options?: AgreementPreviewBuildOptions,
 ): string {
-  const frozenRead = tryReadPaidProFrozenPreviewPlain({
-    surface: "preview_starter",
-    builder: "buildStarterAgreementPreviewForReview",
-    createFlowPhase: options?.placeholderGate?.createFlowPhase ?? null,
-    displayPhase: options?.placeholderGate?.displayPhase ?? null,
-  });
-  if (frozenRead !== null) return frozenRead;
-  // Free/starter recitals must keep full legal entity names. When the caller does not thread
+  // Free/starter review entry — never return paid frozen SoT corpus.
   // intake through (e.g. restore=starterReview after refresh, where draft.parties may carry the
   // short parse form "Red Mesa"), fall back to the persisted creator intake so short party names
   // are expanded back to "Red Mesa Logistics LLC" instead of rendering a truncated preamble.
@@ -1111,14 +1121,16 @@ export function buildAgreementPreviewText(
 ): string {
   const starterPreview = Boolean(options?.starterPreview);
   const freeStarterReviewPreview = Boolean(options?.freeStarterReviewPreview);
-  const frozenRead = tryReadPaidProFrozenPreviewPlain({
-    surface: starterPreview ? "preview_starter" : "preview_paid_authoritative",
-    builder: "buildAgreementPreviewText",
-    createFlowPhase: options?.placeholderGate?.createFlowPhase ?? null,
-    displayPhase: options?.placeholderGate?.displayPhase ?? null,
-  });
-  if (frozenRead !== null) return frozenRead;
-  if (shouldUsePaidProSourceOfTruthDisplayOnly()) {
+  if (!freeStarterReviewPreview) {
+    const frozenRead = tryReadPaidProFrozenPreviewPlain({
+      surface: starterPreview ? "preview_starter" : "preview_paid_authoritative",
+      builder: "buildAgreementPreviewText",
+      createFlowPhase: options?.placeholderGate?.createFlowPhase ?? null,
+      displayPhase: options?.placeholderGate?.displayPhase ?? null,
+    });
+    if (frozenRead !== null) return frozenRead;
+  }
+  if (shouldUsePaidProSourceOfTruthDisplayOnly() && !freeStarterReviewPreview) {
     return resolvePaidProAuthoritativeDisplayPlain();
   }
   const authoritative = getAuthoritativeAgreementDocument();
@@ -1195,7 +1207,7 @@ export function buildAgreementPreviewText(
       surface: "preview_starter",
       builder: "buildAgreementPreviewText",
       generatedText: display,
-      allowBeforeAcceptance: false,
+      allowBeforeAcceptance: freeStarterReviewPreview,
     });
   }
   if (textContainsUnresolvedIdentityPlaceholders(core)) {

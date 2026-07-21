@@ -11,7 +11,11 @@ import { extractLineSeparatedLegalEntityParties } from "./partySlotIdentityNorma
 import { shortFormsFromLegalName } from "./paidProPartyNamePreserve";
 import { isolateLegalEntityFromContaminatedName } from "./starterPartyIdentityIsolation";
 import { isSignerTitleLikeRole } from "./starterRoleLabelGuard";
-import { resolveCanonicalPartyRoleLabel } from "./canonicalPartyRoleAuthority";
+import {
+  resolveCanonicalPartyRoleLabel,
+  resolveStarterTwoPartyCommercialAuthority,
+} from "./canonicalPartyRoleAuthority";
+import { partyLegalNamesMatch } from "./paidProAcceptedCorpusPartyRoles";
 import { repairDraftPartiesFromIntakeAuthority } from "./partySlotIdentityNormalize";
 
 const GENERIC_STARTER_PARTY_ROLE = new Set(["", "party", "parties", "signer", "signatory"]);
@@ -47,6 +51,21 @@ export function inferStarterCommercialPartyRoles(
   const parties = Array.isArray(draft.parties) ? [...draft.parties] : [];
   if (parties.length !== 2) return draft;
   if (!isStarterServicesAgreementLike(draft, intakeText)) return draft;
+
+  const authority = resolveStarterTwoPartyCommercialAuthority(
+    intakeText,
+    parties.map((p) => String(p?.name ?? "")),
+  );
+  if (authority) {
+    return {
+      ...draft,
+      parties: authority.parties.map((slot) => {
+        const prev = parties.find((p) => partyLegalNamesMatch(p.name, slot.name)) ?? {};
+        return { ...prev, name: slot.name, role: slot.role };
+      }),
+    };
+  }
+
   return {
     ...draft,
     parties: parties.map((party, index) => {
@@ -114,15 +133,29 @@ export function enrichStarterPreviewPartiesFromIntake(
   draft: ParsedDraftShape,
   intakeText: string | null | undefined,
 ): ParsedDraftShape {
-  const withRoles = inferStarterCommercialPartyRoles(draft, intakeText);
-  const parties = Array.isArray(withRoles.parties) ? [...withRoles.parties] : [];
-  if (parties.length < 2) return withRoles;
+  const parties = Array.isArray(draft.parties) ? [...draft.parties] : [];
+  if (parties.length < 2) return inferStarterCommercialPartyRoles(draft, intakeText);
 
   const fullNames = resolveFullLegalPartiesForStarterPreview(
     parties.map((p) => String(p?.name ?? "")),
     intakeText,
   );
-  if (fullNames.length < 2) return withRoles;
+  if (fullNames.length < 2) return inferStarterCommercialPartyRoles(draft, intakeText);
+
+  if (parties.length > 2) {
+    const enriched = parties.map((party) => {
+      const rawCurrent = String(party?.name ?? "").replace(/\s+/g, " ").trim();
+      const current = isolateLegalEntityFromContaminatedName(rawCurrent);
+      const matchedFull =
+        fullNames.find((full) => partyLegalNamesMatch(full, current)) ||
+        fullNames.find((full) => partyNameIsShortFormOf(full, current)) ||
+        null;
+      const resolvedName = matchedFull || current;
+      if (!resolvedName || resolvedName === rawCurrent) return party;
+      return { ...party, name: resolvedName };
+    });
+    return { ...draft, parties: enriched };
+  }
 
   const repairedParties = repairDraftPartiesFromIntakeAuthority(
     parties.map((p) => ({
@@ -140,11 +173,14 @@ export function enrichStarterPreviewPartiesFromIntake(
         ? fullNames.map((name, index) => parties[index] ?? { name, role: index === 0 ? "Client" : index === 1 ? "Service Provider" : "party" })
         : parties;
 
-  const enriched = baseParties.map((party, idx) => {
+  const withRoles = inferStarterCommercialPartyRoles({ ...draft, parties: baseParties }, intakeText);
+  const roleParties = Array.isArray(withRoles.parties) ? withRoles.parties : baseParties;
+
+  const enriched = roleParties.map((party) => {
     const rawCurrent = String(party?.name ?? "").replace(/\s+/g, " ").trim();
     const current = isolateLegalEntityFromContaminatedName(rawCurrent);
     const matchedFull =
-      fullNames[idx] ||
+      fullNames.find((full) => partyLegalNamesMatch(full, current)) ||
       fullNames.find((full) => partyNameIsShortFormOf(full, current)) ||
       null;
     const resolvedName = matchedFull || current;

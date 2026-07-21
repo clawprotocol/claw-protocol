@@ -8,7 +8,7 @@ import {
   buildStarterProCheckoutPendingDraft,
   detectRevenueShareLanguage,
 } from "./starterMultiPartyProGate";
-import { TEST371_QUADRIPARTITE_LABELED_PARTIES_INTAKE } from "./paidProTest371QuadrpartiteRegression.test";
+import { TEST371_QUADRIPARTITE_LABELED_PARTIES_INTAKE } from "./paidProTest371QuadrpartiteFixtures";
 
 export const TEST375_ROLE_LABEL_TWO_PARTY_INTAKE = `Client:
 Blue Canyon Analytics LLC

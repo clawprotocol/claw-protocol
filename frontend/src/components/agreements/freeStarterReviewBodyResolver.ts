@@ -16,6 +16,7 @@ import {
   resolveStarterPreviewIntakeText,
 } from "./intakeCurrencyParse";
 import { labeledPartyLegalEntities } from "./labeledPartyBlockParse";
+import { starterCorpusContainsRawIntakeInstruction } from "./canonicalPartyRoleAuthority";
 import { readOriginalUserIntakeRaw } from "./originalUserIntakeRawStorage";
 import { enrichStarterPreviewPartiesFromIntake } from "./starterOpeningPartyPreserve";
 import { isolateLegalEntityFromContaminatedName } from "./starterPartyIdentityIsolation";
@@ -268,6 +269,7 @@ function needsPaymentCadenceRepair(body: string, intake: string): boolean {
 export function isCleanFreeStarterServerPreview(text: string): boolean {
   const t = String(text || "").trim();
   if (t.length < 200) return false;
+  if (starterCorpusContainsRawIntakeInstruction(t)) return false;
   if (starterPreviewHasGluedSectionHeadings(t)) return false;
   if (!starterPreviewHasParagraphSectionBreaks(t)) return false;
   if (/\bTerm:\s*\d+\s*\nmonths\s+Effective Date:/i.test(t)) return false;
@@ -323,7 +325,9 @@ export function resolveFreeStarterReviewBody(
 
   const intakeBacked = rawIntakeResolved.length >= 20;
   const serverDraftReady = Boolean(args.hasDraftPayload);
-  const cleanServerCandidate = alternates.find((c) => isCleanFreeStarterServerPreview(c.text));
+  const cleanServerCandidate = alternates.find(
+    (c) => isCleanFreeStarterServerPreview(c.text) && !starterCorpusContainsRawIntakeInstruction(c.text),
+  );
 
   if (
     serverDraftReady &&

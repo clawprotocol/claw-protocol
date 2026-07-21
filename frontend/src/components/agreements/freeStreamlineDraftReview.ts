@@ -37,7 +37,7 @@ export type ResolveIsFreeStreamlineDraftReviewInput = ResolveAuthoritativeCreate
 
 /**
  * Universal free DRAFT review surface — not limited to first-session streamline UX.
- * When true, render StarterDraftDocumentSurface + ProConversionComparisonCard chrome.
+ * When true, render StarterDraftDocumentSurface; upgrade continues via unified bottom checkout CTA.
  */
 export function resolveIsFreeStreamlineDraftReview(input: ResolveIsFreeStreamlineDraftReviewInput): boolean {
   if (shouldSuppressFreeStarterCreateFlowConversionUi(input)) return false;

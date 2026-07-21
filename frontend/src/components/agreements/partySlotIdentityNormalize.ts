@@ -5,6 +5,7 @@
 
 import { labeledPartyLegalEntities, quotedRolePartyLegalEntities } from "./labeledPartyBlockParse";
 import { extractBetweenPartyNameList } from "./partyBetweenParse";
+import { resolveStarterTwoPartyCommercialAuthority } from "./canonicalPartyRoleAuthority";
 import { dedupeEntityCandidatesToLegalParties, extractAgreementEntityCandidates } from "../../agreement/partyPlaceholderDisplay";
 import { PARTY_ENTITY_SUFFIX_RE } from "./canonicalPartyIdentityResolver";
 import { partyLegalNamesMatch } from "./paidProAcceptedCorpusPartyRoles";
@@ -317,7 +318,32 @@ export function repairDraftPartiesFromIntakeAuthority<T extends DraftPartyRowLik
       !isAuthoritativeLegalEntityName(name)
     );
   });
-  if (!currentInvalid && parties.length === intakeNames.length) return [...parties];
+  if (!currentInvalid && parties.length === intakeNames.length) {
+    if (intakeNames.length === 2) {
+      const authority = resolveStarterTwoPartyCommercialAuthority(intake, intakeNames);
+      if (authority) {
+        return authority.parties.map((slot) => {
+          const prev =
+            parties.find((p) => partyLegalNamesMatch(p.name, slot.name)) ?? parties[0];
+          return { ...prev, name: slot.name, role: slot.role } as T;
+        });
+      }
+    }
+    return [...parties];
+  }
+
+  if (intakeNames.length === 2) {
+    const authority = resolveStarterTwoPartyCommercialAuthority(intake, intakeNames);
+    if (authority) {
+      return authority.parties.map((slot) => {
+        const prev =
+          parties.find((p) => partyLegalNamesMatch(p.name, slot.name)) ??
+          parties[intakeNames.findIndex((n) => partyLegalNamesMatch(n, slot.name))] ??
+          parties[0];
+        return { ...prev, name: slot.name, role: slot.role } as T;
+      });
+    }
+  }
 
   return intakeNames.map((name, index) => {
     const prev = parties[index] ?? parties.find((p) => partyLegalNamesMatch(p.name, name)) ?? parties[0];

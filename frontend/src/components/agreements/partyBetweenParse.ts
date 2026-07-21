@@ -14,8 +14,45 @@ import {
   normalizeAgreementPartyName,
   splitCommaSeparatedPartyNames,
 } from "./partySlotIdentityNormalize";
-import { isAuthoritativeLegalEntityName } from "./paidProPartyNamePreserve";
-import { stripPartyRoleAnnotations, truncatePartyClauseTailAtLabeledFields } from "./partyRoleAnnotations";
+import {
+  isAuthoritativeLegalEntityName,
+  isDisallowedPartyPhrase,
+} from "./paidProPartyNamePreserve";
+import { stripPartyRoleAnnotations, truncatePartyClauseTailAtLabeledFields, preCleanBetweenTailForMultiPartySplit } from "./partyRoleAnnotations";
+import { isPlaceholderPartyName } from "./starterPartyLimits";
+
+const ROLE_ALIAS_NOT_PARTY_RE =
+  /^(?:the\s+)?(?:client|consultant|service\s+provider|company|customer|provider|vendor|contractor|party\s*[ab])$/i;
+
+/** Broader between-clause acceptance — entities and individual contracting parties. */
+export function isBetweenClausePartyCandidate(name: string): boolean {
+  const raw = String(name ?? "").replace(/\s+/g, " ").trim();
+  if (raw.length < 2 || isInvalidPartySlotLegalEntity(raw)) return false;
+  if (ROLE_ALIAS_NOT_PARTY_RE.test(raw)) return false;
+  if (isPlaceholderPartyName(raw)) return false;
+  if (isAuthoritativeLegalEntityName(raw)) return true;
+
+  const { name: stripped } = stripPartyRoleAnnotations(raw);
+  const t = stripped.trim();
+  if (t.length < 2 || ROLE_ALIAS_NOT_PARTY_RE.test(t)) return false;
+  if (isDisallowedPartyPhrase(t)) return false;
+
+  const words = t.split(/\s+/).filter(Boolean);
+  if (/\btrust\b/i.test(t) && words.length >= 2 && words.length <= 8) return true;
+  if (
+    /(?:Holdings|Studios|Partners|Group|Capital|Services|Enterprises|Solutions|Technologies|Logistics|Analytics|Automation)\b/i.test(t) &&
+    words.length >= 2 &&
+    words.length <= 8
+  ) {
+    return true;
+  }
+  if (/\bd\/b\/a\b/i.test(t) && /(?:LLC|Inc|Corp|Ltd|LLP)/i.test(t)) return true;
+  if (words.length >= 2 && words.length <= 8) {
+    const nameLike = words.every((w) => /^[A-Z][A-Za-z'.-]*$/.test(w) || /^[A-Z]\.$/.test(w));
+    if (nameLike) return true;
+  }
+  return false;
+}
 
 const TAIL_STOP =
   /\s+(?:\n|(?:(?:for|whereas|hereafter|effective|the\s+term|term:|scope:|consideration|warranties|Signer\s+for)\b))/i;
@@ -71,6 +108,7 @@ function sliceBetweenPartyClauseTail(raw: string): string | null {
   let tail = text.slice(m.index + m[0].length);
   const nl = tail.indexOf("\n");
   if (nl >= 0) tail = tail.slice(0, nl);
+  tail = preCleanBetweenTailForMultiPartySplit(tail);
   tail = truncatePartyClauseTailAtLabeledFields(tail);
   const stop = TAIL_STOP.exec(tail);
   if (stop && stop.index !== undefined && stop.index > 0) tail = tail.slice(0, stop.index);
@@ -78,29 +116,100 @@ function sliceBetweenPartyClauseTail(raw: string): string | null {
   return tail.length >= 3 ? tail : null;
 }
 
-function extractBetweenPartyNameListFromOxfordTail(tail: string): string[] {
-  const segments = tail.split(/\s+and\s+/i).filter((s) => s.trim().length > 0);
-  if (segments.length < 2) return [];
+/**
+ * Raw between tail for semantic role extraction — preserves "as <role>" and comma role tails
+ * that {@link preCleanBetweenTailForMultiPartySplit} strips before party-name splitting.
+ */
+export function sliceRawBetweenPartyClauseTailForRoleHints(raw: string): string | null {
+  const text = stripSignerInstructionClausesFromIntake(raw.trim());
+  const m = text.match(/\b(?:between|among)\s+/i);
+  if (!m || m.index === undefined) return null;
 
-  const right = trimBetweenPartyFragment(segments[segments.length - 1]);
-  const leftCsv = segments.slice(0, -1).join(" and ");
-  const leftNames = splitCommaSeparatedPartyNames(leftCsv)
-    .map(trimBetweenPartyFragment)
-    .map(normalizeAgreementPartyName)
-    .filter((n) => n.length >= 2);
+  let tail = text.slice(m.index + m[0].length);
+  const nl = tail.indexOf("\n");
+  if (nl >= 0) tail = tail.slice(0, nl);
+  tail = tail.replace(/\s*,\s*with\s+/gi, " and ");
+  tail = truncatePartyClauseTailAtLabeledFields(tail);
+  const stop = TAIL_STOP.exec(tail);
+  if (stop && stop.index !== undefined && stop.index > 0) tail = tail.slice(0, stop.index);
+  tail = truncateBetweenTailAtSentenceBoundary(tail);
+  return tail.length >= 3 ? tail : null;
+}
 
-  const names = collapsePartySlotCandidates(
-    right.length >= 2 ? [...leftNames, normalizeAgreementPartyName(right)] : leftNames,
-  );
-  return names.filter((n) => isAuthoritativeLegalEntityName(n) && !isInvalidPartySlotLegalEntity(n));
+function extractBetweenPartyNameListFromOxfordTail(tail: string, useAuthorityCandidates: boolean): string[] {
+  const truncated = truncateBetweenTailAtSentenceBoundary(tail);
+  const rawSegments = truncated.split(/\s+and\s+/i).map((s) => s.trim()).filter(Boolean);
+  if (rawSegments.length < 2) return [];
+
+  const names: string[] = [];
+  for (const segment of rawSegments) {
+    for (const candidate of expandSegmentIntoPartyCandidates(segment)) {
+      if (useAuthorityCandidates ? isBetweenClausePartyCandidate(candidate) : isAuthoritativeLegalEntityName(candidate)) {
+        names.push(candidate);
+      }
+    }
+  }
+
+  const collapsed = collapsePartySlotCandidates(names);
+  const filterFn = useAuthorityCandidates
+    ? filterBetweenClausePartyCandidates
+    : filterAuthoritativeBetweenPartyNames;
+  return filterFn(collapsed);
 }
 
 function filterAuthoritativeBetweenPartyNames(names: string[]): string[] {
   return names.filter((n) => isAuthoritativeLegalEntityName(n) && !isInvalidPartySlotLegalEntity(n));
 }
 
-/** Two-party between clause: split on the first " and ", not later service-list conjunctions. */
-function extractBetweenPartyNameListFromFirstAndPair(tail: string): string[] {
+function filterBetweenClausePartyCandidates(names: string[]): string[] {
+  return names.filter((n) => isBetweenClausePartyCandidate(n));
+}
+
+function expandSegmentIntoPartyCandidates(segment: string): string[] {
+  const inner = truncateBetweenTailAtSentenceBoundary(segment.replace(/[.,;:]+$/g, "").trim());
+  if (!inner) return [];
+  const commaParts = splitCommaSeparatedPartyNames(inner)
+    .map(trimBetweenPartyFragment)
+    .map(normalizeAgreementPartyName)
+    .filter((n) => n.length >= 2);
+  if (commaParts.length >= 2) {
+    const valid = commaParts.filter((n) => isBetweenClausePartyCandidate(n));
+    if (valid.length >= 2) return valid;
+  }
+  const chained = inner
+    .split(/\s+and\s+/i)
+    .map((s) => trimBetweenPartyFragment(s.trim()))
+    .map(normalizeAgreementPartyName)
+    .filter((n) => n.length >= 2);
+  if (chained.length >= 2 && chained.every((n) => isBetweenClausePartyCandidate(n))) {
+    return chained;
+  }
+  const single = trimBetweenPartyFragment(inner);
+  return single.length >= 2 ? [normalizeAgreementPartyName(single)] : [];
+}
+
+/** N-party between clause: chained " and " segments and comma lists (no two-party cap). */
+function extractBetweenPartyNameListFromChainedAndSplit(tail: string): string[] {
+  const truncated = truncateBetweenTailAtSentenceBoundary(tail);
+  const segments = truncated.split(/\s+and\s+/i).map((s) => s.trim()).filter(Boolean);
+  if (segments.length < 2) return [];
+
+  const names: string[] = [];
+  for (const segment of segments) {
+    for (const candidate of expandSegmentIntoPartyCandidates(segment)) {
+      if (isBetweenClausePartyCandidate(candidate)) names.push(candidate);
+    }
+  }
+  const collapsed = collapsePartySlotCandidates(names);
+  const filtered = filterBetweenClausePartyCandidates(collapsed);
+  return filtered.length >= 2 ? filtered : [];
+}
+
+/**
+ * Bilateral-only between extraction — first " and " pair for legacy two-party call sites.
+ * Do not use for canonical N-party authority; prefer {@link extractBetweenPartyNameList}.
+ */
+export function extractBetweenPartyNameListBilateralOnly(tail: string): string[] {
   const truncated = truncateBetweenTailAtSentenceBoundary(tail);
   const andIdx = truncated.search(/\s+and\s+/i);
   if (andIdx < 0) return [];
@@ -122,14 +231,31 @@ function extractBetweenPartyNameListFromFirstAndPair(tail: string): string[] {
  * Ordered party names after "between …" (2+ parties). Normalizes each name individually so
  * entity suffix dedupe never strips LLC/Inc. from later parties in a comma-separated list.
  */
-export function extractBetweenPartyNameList(raw: string): string[] {
+function extractBetweenPartyNameListInternal(raw: string, useAuthorityCandidates: boolean): string[] {
   const tail = sliceBetweenPartyClauseTail(raw);
   if (!tail) return [];
 
   if (isOxfordCommaPartyList(tail)) {
-    return extractBetweenPartyNameListFromOxfordTail(tail);
+    return extractBetweenPartyNameListFromOxfordTail(tail, useAuthorityCandidates);
   }
-  return extractBetweenPartyNameListFromFirstAndPair(tail);
+  const chained = extractBetweenPartyNameListFromChainedAndSplit(tail);
+  if (chained.length >= 2) {
+    return useAuthorityCandidates ? chained : filterAuthoritativeBetweenPartyNames(chained);
+  }
+  if (useAuthorityCandidates) {
+    return filterBetweenClausePartyCandidates(chained);
+  }
+  return extractBetweenPartyNameListBilateralOnly(tail);
+}
+
+/** Ordered party names after "between …" — N-party aware (entity suffixes preserved). */
+export function extractBetweenPartyNameList(raw: string): string[] {
+  return extractBetweenPartyNameListInternal(raw, false);
+}
+
+/** Between-clause extraction for legal-party authority — includes individual contracting parties. */
+export function extractBetweenPartyNameListForAuthority(raw: string): string[] {
+  return extractBetweenPartyNameListInternal(raw, true);
 }
 
 /**
@@ -143,6 +269,30 @@ export function extractBetweenPartyPair(raw: string): { left: string; right: str
   const left = names.slice(0, -1).join(" and ");
   if (left.length < 2 || right.length < 2) return null;
   return { left, right };
+}
+
+/**
+ * Raw between-clause sides before entity normalization — preserves comma role tails
+ * ("Entity LLC, the client") for semantic role authority.
+ */
+export function extractBetweenPartyRawPair(raw: string): { leftRaw: string; rightRaw: string } | null {
+  const tail = sliceBetweenPartyClauseTail(raw);
+  if (!tail) return null;
+  const truncated = truncateBetweenTailAtSentenceBoundary(tail);
+  if (isOxfordCommaPartyList(truncated)) {
+    const segments = truncated.split(/\s+and\s+/i).filter((s) => s.trim().length > 0);
+    if (segments.length < 2) return null;
+    const rightRaw = segments[segments.length - 1].trim();
+    const leftRaw = segments.slice(0, -1).join(" and ").trim();
+    if (leftRaw.length < 2 || rightRaw.length < 2) return null;
+    return { leftRaw, rightRaw };
+  }
+  const andIdx = truncated.search(/\s+and\s+/i);
+  if (andIdx < 0) return null;
+  const leftRaw = truncated.slice(0, andIdx).trim();
+  const rightRaw = truncated.slice(andIdx).replace(/^\s+and\s+/i, "").trim();
+  if (leftRaw.length < 2 || rightRaw.length < 2) return null;
+  return { leftRaw, rightRaw };
 }
 
 export function verbatimBetweenClause(raw: string): string | null {

@@ -6,6 +6,7 @@
 import { readAgreementCreatorIntakeStorage } from "./agreementIntakeStorage";
 import { readOriginalUserIntakeRaw } from "./originalUserIntakeRawStorage";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
+import { resolveStarterTwoPartyCommercialAuthority } from "./canonicalPartyRoleAuthority";
 
 export type IntakePaymentField = {
   amount: number | null;
@@ -193,6 +194,20 @@ export function formatMilestonePaymentTermsFromIntake(intake: string): string | 
   return `$${formatted} paid over ${word} milestone payments tied to deployment stages and launch targets.`;
 }
 
+const RAW_INTAKE_INSTRUCTION_RE = /\bcreate\s+(?:a|an)\s+[\w\s]{0,48}?\s+agreement\s+between\b/i;
+
+/** Isolate `Party A will pay Party B $X in N monthly installments` from a single-line intake blob. */
+function extractWillPayMonthlyInstallmentClause(intake: string): string | null {
+  const t = (intake || "").replace(/\s+/g, " ").trim();
+  const m = t.match(
+    /\b([A-Za-z][^.!?]{2,160}?)\s+will\s+pay\s+([A-Za-z][^.!?]{2,160}?)(\s+\$[\d,]+(?:\.\d{2})?[^.!?]*?(?:\bin\s+(?:three|four|five|six|\d+)\s+)?monthly\s+installments?[^.!?]*)/i,
+  );
+  if (!m) return null;
+  const clause = `${m[1].trim()} will pay ${m[2].trim()}${m[3].trim()}`;
+  if (RAW_INTAKE_INSTRUCTION_RE.test(clause)) return null;
+  return clause;
+}
+
 const MONTHLY_INSTALLMENT_AMOUNT_RE = /\$\s*([\d,]+(?:\.\d{2})?)\s+in\s+monthly\s+installments?/i;
 
 function formatMonthlyInstallmentAmountLine(amount: number): string {
@@ -234,17 +249,51 @@ export function formatInstallmentPaymentTermsFromIntake(intake: string): string 
   const t = (intake || "").trim();
   if (!t) return null;
 
+  const authority = resolveStarterTwoPartyCommercialAuthority(t);
+  const amount = extractAmountFromText(t);
+  const installmentCount = t.match(/\bin\s+(three|four|five|six|\d+)\s+monthly\s+installments?/i);
+  const payClause = extractWillPayMonthlyInstallmentClause(t);
+  if (amount != null && /\bmonthly\s+installments?\b/i.test(t)) {
+    let clientName = authority?.clientName ?? null;
+    let providerName = authority?.providerName ?? null;
+    if ((!clientName || !providerName) && payClause) {
+      const names = payClause.match(/^(.+?)\s+will\s+pay\s+(.+?)\s+\$/i);
+      if (names) {
+        clientName = clientName || names[1].trim();
+        providerName = providerName || names[2].trim();
+      }
+    }
+    if (clientName && providerName) {
+      const formatted = amount.toLocaleString("en-US");
+      if (installmentCount?.[1]) {
+        return `${clientName} will pay ${providerName} $${formatted} in ${installmentCount[1]} monthly installments.`;
+      }
+      return `${clientName} will pay ${providerName} $${formatted} in monthly installments.`;
+    }
+  }
+
+  if (payClause) {
+    const short = monthlyInstallmentAmountLineFromText(payClause);
+    if (short) return short;
+    return `${payClause.replace(/[.;]+$/, "")}.`;
+  }
+
   const willPayLine = t
     .split(/\n/)
     .map((line) => line.replace(/\s+/g, " ").trim())
     .find((line) => /\bwill\s+pay\b/i.test(line) && /\bmonthly\s+installments?\b/i.test(line));
   if (willPayLine) {
-    const short = monthlyInstallmentAmountLineFromText(willPayLine);
-    const sentence = willPayLine.replace(/[.;]+$/, "");
-    if (short && sentence.length > short.length + 12) {
-      return `${sentence}.`;
+    const isolated = extractWillPayMonthlyInstallmentClause(willPayLine) ?? willPayLine;
+    if (RAW_INTAKE_INSTRUCTION_RE.test(isolated)) {
+      const short = monthlyInstallmentAmountLineFromText(t);
+      return short;
     }
-    return short;
+    const short = monthlyInstallmentAmountLineFromText(isolated);
+    const sentence = isolated.replace(/[.;]+$/, "");
+    if (short && sentence.length > short.length + 12) {
+      return short;
+    }
+    return short || `${sentence}.`;
   }
 
   const labeled = t.match(/(?:^|\n)\s*(?:payment|compensation|fee)s?\s*[:\-]\s*([^\n]+)/i);

@@ -9,6 +9,10 @@ import { parseLabeledPartyBlocks, resolveStarterGatePartyLegalEntities } from ".
 import { maxNumberedListPartyIndex } from "./partySlotIdentityNormalize";
 import { countRealParties } from "./starterPartyLimits";
 import { buildAgreementPreviewText } from "./agreementPreviewFromDraft";
+import {
+  readLegalPartyNamesFromAuthority,
+} from "./legalPartyAuthority";
+import { resolveLegalPartyAuthorityForIntake } from "./legalPartyAuthoritySession";
 
 const COORDINATOR_BLOCK_HEADER_RE = /^\s*coordinator\s*[:\-]?\s*$/i;
 const PARTY_BLOCK_HEADER_RE = /^\s*party\s*(\d+)\s*[:\-]?\s*$/i;
@@ -280,7 +284,10 @@ function extractKeyTermsSummary(raw: string, flags: {
 
 export function assessStarterComplexityGate(raw: string): StarterComplexityGateAssessment {
   const intake = String(raw || "").trim();
-  const parties = resolveStarterGatePartyLegalEntities(intake);
+  const legalAuthority = resolveLegalPartyAuthorityForIntake(intake);
+  const authorityPartyNames = readLegalPartyNamesFromAuthority(legalAuthority.parties);
+  const parties =
+    authorityPartyNames.length >= 2 ? authorityPartyNames : resolveStarterGatePartyLegalEntities(intake);
   const extractedEntityCount = parties.length;
   const indexedPartyMax = maxIndexedPartyOrSigner(intake);
   const numberedPartyMax = maxNumberedListPartyIndex(intake);
