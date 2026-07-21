@@ -187,7 +187,7 @@ describe("TEST496 — paid acceptance hard invariant prevents split-brain starte
     ).toBe(false);
   });
 
-  it("free user unchanged — no paid acceptance keeps starter review and upgrade CTA eligibility", () => {
+  it("free user unchanged — no paid acceptance keeps starter review; upgrade via bottom checkout CTA", () => {
     markCurrentSessionFreeStarterIntent();
     const shellInput = { workspaceProEntitled: false };
 
@@ -220,7 +220,7 @@ describe("TEST496 — paid acceptance hard invariant prevents split-brain starte
         premiumPaidDocumentSurface: false,
         showStarterProRefineUpsellCardEligible: true,
       }),
-    ).toBe(true);
+    ).toBe(false);
   });
 
   it("premiumAccepted snapshot alone activates paid invariant without workspace pro cache", () => {

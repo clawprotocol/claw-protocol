@@ -30,10 +30,6 @@ import {
 import type { GateResult } from "../access/types";
 import { UpgradeLimitNotice } from "../components/access/UpgradeLimitNotice";
 import { logProductEvent } from "../lib/experimentation/productEvents";
-import {
-  readLawDogUserMonetizationState,
-  shouldBlockSecondAgreementCreation,
-} from "../monetization/lawDogMonetization";
 import { UpgradeToProModal } from "../monetization/UpgradeToProModal";
 import { AgreementMemoryAgreementStrip } from "./AgreementMemoryAgreementStrip";
 import { PaidProVs01WorkspaceBanner } from "./PaidProVs01WorkspaceBanner";
@@ -279,13 +275,6 @@ export function AgreementWizardShell(props: AgreementWizardShellProps = {}) {
         launchBootRef.current = false;
         return;
       }
-      const monUser = readLawDogUserMonetizationState(access.tier, access.usage);
-      if (shouldBlockSecondAgreementCreation(monUser)) {
-        launchBootRef.current = false;
-        logProductEvent("paywall_triggered", { surface: "agreement_wizard_new", reason: "free_second_agreement" });
-        setMonetizationPaywallOpen(true);
-        return;
-      }
       setLandingNotice(null);
       clearAgreementCreatorIntakeStorage();
       setAgreementId(null);
@@ -493,12 +482,6 @@ export function AgreementWizardShell(props: AgreementWizardShellProps = {}) {
             });
             if (!g.allowed) {
               setLandingNotice(g);
-              return;
-            }
-            const monUser = readLawDogUserMonetizationState(access.tier, access.usage);
-            if (shouldBlockSecondAgreementCreation(monUser)) {
-              logProductEvent("paywall_triggered", { surface: "agreement_wizard_landing", reason: "free_second_agreement" });
-              setMonetizationPaywallOpen(true);
               return;
             }
             setLandingNotice(null);

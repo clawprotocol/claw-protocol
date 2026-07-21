@@ -53,6 +53,11 @@ export function readSignerMetadataEffectiveMaxForTests(): SignerMetadataEffectiv
 }
 
 export function resetSignerMetadataEffectiveMaxForTests(): void {
+  clearSignerMetadataEffectiveMaxForSession();
+}
+
+/** Clear monotonic signer-metadata latch when starting a fresh agreement session. */
+export function clearSignerMetadataEffectiveMaxForSession(): void {
   sessionMaxPartySlots = 0;
   sessionMaxSlotsWithSignerName = 0;
   sessionMaxSlotsWithSignerTitle = 0;

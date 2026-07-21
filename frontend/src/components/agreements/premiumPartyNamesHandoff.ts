@@ -320,8 +320,11 @@ function authoritativeHandoffPartyCap(explicitAuthoritativeCount?: number): numb
 export function resolveHandoffAuthorityPartyCount(opts?: {
   partySlotCount?: number;
 }): number {
-  const cap = authoritativeHandoffPartyCap();
   const requested = Math.max(opts?.partySlotCount ?? 0, 2);
+  if (hasCurrentSessionFreeStarterIntent() && !hasCurrentSessionProEntitlement()) {
+    return Math.min(requested, 2);
+  }
+  const cap = authoritativeHandoffPartyCap();
   if (cap != null && cap >= 2) return Math.min(requested, cap);
   return requested;
 }

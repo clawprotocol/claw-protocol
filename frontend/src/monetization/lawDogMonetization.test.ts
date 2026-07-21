@@ -4,7 +4,6 @@ import {
   canReuseTemplates,
   canUseAdvancedWorkProduct,
   monetizationPlanFromAccessTier,
-  shouldBlockSecondAgreementCreation,
 } from "./lawDogMonetization";
 import type { LawDogUserMonetizationState } from "./types";
 
@@ -18,14 +17,6 @@ describe("monetizationPlanFromAccessTier", () => {
     expect(monetizationPlanFromAccessTier("standard")).toBe("pro");
     expect(monetizationPlanFromAccessTier("premium")).toBe("power");
     expect(monetizationPlanFromAccessTier("admin")).toBe("power");
-  });
-});
-
-describe("shouldBlockSecondAgreementCreation", () => {
-  it("blocks only free with count >= 1", () => {
-    expect(shouldBlockSecondAgreementCreation(user({ plan: "free", agreements_created: 1 }))).toBe(true);
-    expect(shouldBlockSecondAgreementCreation(user({ plan: "pro", agreements_created: 5 }))).toBe(false);
-    expect(shouldBlockSecondAgreementCreation(user({ plan: "power", agreements_created: 5 }))).toBe(false);
   });
 });
 

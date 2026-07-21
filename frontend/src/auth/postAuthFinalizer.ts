@@ -24,13 +24,30 @@ import {
   resolveEntitlementRepairOrgCandidates,
 } from "../launch/paidCheckoutOrgContext";
 import { logAuthDiagnostic } from "./anonymousSessionApi";
+import { commitPostAuthOwnershipMigration } from "./ownershipMigrationFinalize";
+import { readCreateReviewAgreementResumeId } from "../components/agreements/agreementIntakeStorage";
 
 export type PostAuthFinalizeResult = {
   destinationPath: string;
   migratedAgreementCount: number;
+  migratedAgreementIds: string[];
   usedContinuation: boolean;
   usedFallback: boolean;
 };
+
+function applyOwnershipMigrationFromServer(args: {
+  migratedAgreementCount: number;
+  migratedAgreementIds?: string[];
+  continuationAgreementId?: string | null;
+}): void {
+  const ids = (args.migratedAgreementIds ?? []).map((id) => id.trim()).filter(Boolean);
+  if (args.migratedAgreementCount <= 0 && ids.length === 0) return;
+  commitPostAuthOwnershipMigration({
+    migratedAgreementIds: ids,
+    continuationAgreementId: args.continuationAgreementId,
+    priorClientAgreementId: readCreateReviewAgreementResumeId(),
+  });
+}
 
 function displayNameFromUser(user: User): string {
   const meta = user.user_metadata as Record<string, unknown> | undefined;
@@ -84,9 +101,15 @@ export async function finalizeAuthenticatedSession(args: {
         });
       }
       logProductEvent("continuation_restored", { surface: "server_finalize" });
+      applyOwnershipMigrationFromServer({
+        migratedAgreementCount: server.migrated_agreement_count,
+        migratedAgreementIds: server.migrated_agreement_ids,
+        continuationAgreementId: readAuthContinuationContext()?.agreementId,
+      });
       return {
         destinationPath: server.destination_path,
         migratedAgreementCount: server.migrated_agreement_count,
+        migratedAgreementIds: server.migrated_agreement_ids ?? [],
         usedContinuation: true,
         usedFallback: false,
       };
@@ -133,9 +156,16 @@ export async function finalizeAuthenticatedSession(args: {
     });
   }
 
+  applyOwnershipMigrationFromServer({
+    migratedAgreementCount: bind.migrated_agreement_count,
+    migratedAgreementIds: bind.migrated_agreement_ids,
+    continuationAgreementId: ctx?.agreementId,
+  });
+
   return {
     destinationPath,
     migratedAgreementCount: bind.migrated_agreement_count,
+    migratedAgreementIds: bind.migrated_agreement_ids ?? [],
     usedContinuation,
     usedFallback,
   };

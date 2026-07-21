@@ -35,6 +35,10 @@ import { resolveCanonicalPartyRoleLabel } from "../canonicalPartyRoleAuthority";
 import { resolveSignerSetupPartyIdentity } from "../signerSetupPartyIdentity";
 import type { CanonicalPartyIdentity } from "./signerPartyIdentity";
 import { isIndividualPartyName } from "./signerPartyIdentity";
+import {
+  readStarterToPaidPartyHandoff,
+  readTypedHandoffPartyNames,
+} from "../starterToPaidPartyHandoff";
 import { runCachedCorpusScan } from "../paidProCorpusScanCache";
 
 const ENTITY_SUFFIX =
@@ -125,7 +129,22 @@ function roleForIndex(
   return `party_${index + 1}`;
 }
 
+function recipientDisplayNameForSlot(args: ResolveCanonicalFinalPartyManifestArgs, index: number): string {
+  if (index === 0) return (args.recipient1Name ?? "").trim();
+  if (index === 1) return (args.recipient2Name ?? "").trim();
+  return "";
+}
+
 function resolvePartyNameForSlot(args: ResolveCanonicalFinalPartyManifestArgs, index: number): string {
+  const typedHandoff = readStarterToPaidPartyHandoff(args.intakeText);
+  const typedParty = typedHandoff?.parties
+    .slice()
+    .sort((a, b) => a.canonicalOrder - b.canonicalOrder)[index];
+  if (typedParty?.legalEntityName) {
+    const typedLegal = usablePartyName(typedParty.legalEntityName);
+    if (typedLegal) return typedLegal;
+  }
+
   const handoff = args.handoff ?? readPremiumRecipientHandoff();
   const labeledNames = labeledPartyLegalEntities(String(args.intakeText ?? ""));
   const intakeNames = resolveAuthoritativeIntakePartyNames(args.intakeText);
@@ -142,8 +161,11 @@ function resolvePartyNameForSlot(args: ResolveCanonicalFinalPartyManifestArgs, i
         ? intakeNames
         : hasDrift && collapsedDraft.length >= 2
           ? collapsedDraft
-          : args.draftPartyNames ?? [];
+          : typedHandoff
+            ? readTypedHandoffPartyNames(args.intakeText)
+            : args.draftPartyNames ?? [];
   const slotCount = Math.max(
+    typedHandoff?.partyCount ?? 0,
     labeledNames.length >= 2 ? labeledNames.length : draftPartyNames.length,
     2,
   );
@@ -151,7 +173,7 @@ function resolvePartyNameForSlot(args: ResolveCanonicalFinalPartyManifestArgs, i
   const identity = resolveSignerSetupPartyIdentity({
     partyIndex: index,
     draftPartyName: draftPartyNames[index] ?? args.draftPartyNames[index],
-    recipientDisplayName: "",
+    recipientDisplayName: recipientDisplayNameForSlot(args, index),
     handoffName: slot?.name,
     draftPartyNames,
     intakeText: args.intakeText,
@@ -160,10 +182,14 @@ function resolvePartyNameForSlot(args: ResolveCanonicalFinalPartyManifestArgs, i
   const legal = usablePartyName(identity.legalEntityName);
   if (legal) return legal;
 
+  const recipientDisplay = usablePartyName(recipientDisplayNameForSlot(args, index));
+  if (recipientDisplay && isIndividualPartyName(recipientDisplay)) return recipientDisplay;
+
   const signerRef = usablePartyName((args.partySignerNames[index] ?? "").trim());
   const signerHandoff = usablePartyName(signerMetadataInputRaw(slot?.signerName));
-  // Client/sender slot: never promote human representative to legal entity party name.
-  if (index === 0) return "";
+  if (index === 0 && recipientDisplay && isAuthoritativeLegalEntityName(recipientDisplay)) {
+    return recipientDisplay;
+  }
   if (signerRef && isIndividualPartyName(signerRef)) return signerRef;
   if (signerHandoff && isIndividualPartyName(signerHandoff)) return signerHandoff;
   if (signerRef) return signerRef;
@@ -226,10 +252,14 @@ export function resolveCanonicalFinalPartyManifest(
 ): CanonicalFinalPartyManifest {
   const cacheCorpus = [
     String(args.partyCount),
+    args.recipient1Name,
+    args.recipient2Name,
+    ...(args.draftPartyNames ?? []),
     args.recipient1Email,
     args.recipient2Email,
     ...(args.partySignerNames ?? []),
     ...(args.draftPartyRoles ?? []),
+    String(args.intakeText ?? "").slice(0, 200),
   ].join("|");
   return runCachedCorpusScan({
     surface: "canonical_final_party_manifest",
@@ -244,11 +274,16 @@ function resolveCanonicalFinalPartyManifestUncached(
   args: ResolveCanonicalFinalPartyManifestArgs,
 ): CanonicalFinalPartyManifest {
   const handoff = args.handoff ?? readPremiumRecipientHandoff();
-  const slotCount = resolveAuthoritativePartySlotCount({
-    intakeText: args.intakeText,
-    draftPartyNames: args.draftPartyNames,
-    rawPartyCount: args.partyCount,
-  });
+  const typedHandoff = readStarterToPaidPartyHandoff(args.intakeText);
+  const slotCount = typedHandoff?.partyCount
+    ? typedHandoff.partyCount
+    : resolveAuthoritativePartySlotCount({
+        intakeText: args.intakeText,
+        draftPartyNames: typedHandoff
+          ? readTypedHandoffPartyNames(args.intakeText)
+          : args.draftPartyNames,
+        rawPartyCount: args.partyCount,
+      });
   const handoffSlots = handoff ? linearPremiumRecipientSlots(handoff, slotCount) : [];
   const parties: CanonicalFinalPartyEntry[] = [];
 

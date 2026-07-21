@@ -482,7 +482,13 @@ export function applySignerPartyIdentityToAuthoritativeAgreement(
       if (tailApply.rejected) {
         return { text: body, partyNames, signaturePolishCount: 0, repaired: [], rejected: true, rejectReason: "corpus_shrink" };
       }
-      const merged = `${prefix}${tailApply.text}`;
+      let merged = `${prefix}${tailApply.text}`;
+      merged = replaceBracketPartyPlaceholders(merged, identities);
+      merged = replaceRecitalPartyTokens(merged, identities);
+      const openingPatch = replaceGenericOpeningPartyLabels(merged, identities);
+      merged = openingPatch.text;
+      const slotPatch = replacePartySlotLabelsInBody(merged, identities);
+      merged = slotPatch.text;
       return {
         text: merged,
         partyNames: tailApply.partyNames,

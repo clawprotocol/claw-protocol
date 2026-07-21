@@ -1,3 +1,4 @@
+/** @vitest-environment jsdom */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -16,14 +17,12 @@ import {
 } from "./premiumAgreementDocumentHtml";
 
 describe("Pro delivery track UI wiring", () => {
-  it("AgreementBuilderIntake exposes dual delivery tracks on canonical Pro review-ready state", () => {
+  it("AgreementBuilderIntake exposes canonical decision chrome on Pro review-ready state", () => {
     const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
     const shell = readFileSync(join(__dirname, "../../launch/simpleProduct/simpleCreatePaidProReviewShell.ts"), "utf8");
-    expect(intake).toContain("showProDeliveryTrackChooser");
-    expect(intake).toContain("pro-delivery-track-chooser");
-    expect(intake).toContain("Share for review");
-    expect(intake).toContain("Prepare signatures");
-    expect(intake).toContain("Edit agreement");
+    expect(intake).toContain("PaidProForcedFirstReviewChrome");
+    expect(intake).toContain("paid-pro-forced-prepare-signatures");
+    expect(intake).toContain("shouldShowPaidProReviewDecisionChrome");
     expect(shell).toContain("Review your Pro agreement");
     expect(shell).toContain("Nothing is sent or signed until you choose the next step.");
     expect(intake).toContain("logAgreementFlowStep");
@@ -33,19 +32,17 @@ describe("Pro delivery track UI wiring", () => {
     expect(intake).toContain("suppressProDocumentEmbeddedSignatures");
   });
 
-  it("review-first chooser does not leak signer setup fields before signatures are chosen", () => {
+  it("review-first decision chrome does not leak signer setup fields before signatures are chosen", () => {
     const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
-    const chooserBlock = intake.slice(
-      intake.indexOf('data-testid="pro-delivery-track-chooser"'),
-      intake.indexOf('data-testid="pro-delivery-track-chooser"') + 2400,
+    const chromeBlock = intake.slice(
+      intake.indexOf("PaidProForcedFirstReviewChrome"),
+      intake.indexOf("PaidProForcedFirstReviewChrome") + 2400,
     );
-    expect(chooserBlock).toContain("Share for review");
-    expect(chooserBlock).toContain("Edit agreement");
-    expect(chooserBlock).toContain("Prepare signatures");
-    expect(chooserBlock).not.toContain("Signer name");
-    expect(chooserBlock).not.toContain("Signer title");
-    expect(chooserBlock).not.toContain("Party address");
-    expect(chooserBlock).not.toContain("Add recipient emails");
+    expect(chromeBlock).toContain("onPrepareSignatures");
+    expect(chromeBlock).not.toContain("Signer name");
+    expect(chromeBlock).not.toContain("Signer title");
+    expect(chromeBlock).not.toContain("Party address");
+    expect(chromeBlock).not.toContain("Add recipient emails");
   });
 
   it("signer setup legal entity inputs prefer canonical party names over display labels", () => {
@@ -63,8 +60,8 @@ describe("Pro delivery track UI wiring", () => {
     expect(identityModule).toContain("[signer-identity-source]");
     expect(identityModule).toContain("[illegal-signer-render-binding-blocked]");
     const chooserBlock = intake.slice(
-      intake.indexOf('data-testid="pro-delivery-track-chooser"'),
-      intake.indexOf('data-testid="pro-delivery-track-chooser"') + 2400,
+      intake.indexOf("PaidProForcedFirstReviewChrome"),
+      intake.indexOf("PaidProForcedFirstReviewChrome") + 2400,
     );
     expect(chooserBlock).not.toContain("Add signers / prepare signature links");
   });
@@ -97,15 +94,15 @@ describe("Pro delivery track UI wiring", () => {
     expect(reviewBlock).not.toContain("advancePaidProToRecipientSetup");
   });
 
-  it("requires paid Pro signer details before exposing delivery tracks", () => {
+  it("requires paid Pro signer details before exposing post-decision delivery tracks", () => {
     const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
-    const chooserBlock = intake.slice(
-      intake.indexOf("const showProDeliveryTrackChooser = Boolean("),
+    const trackBlock = intake.slice(
+      intake.indexOf("const showSimplifiedProReviewSigningFlow = Boolean("),
       intake.indexOf("const showProReviewTrackActions = Boolean(") + 520,
     );
-    expect(chooserBlock).toContain("signerDetailsAreComplete");
-    expect(chooserBlock).toContain("signaturePreparationRequested");
-    expect(chooserBlock).not.toMatch(/signerDetailsAreComplete[\s\S]{0,80}prepareSignatureLinksRequested\s*=/);
+    expect(trackBlock).toContain("signerDetailsAreComplete");
+    expect(trackBlock).toContain("signaturePreparationRequested");
+    expect(trackBlock).not.toMatch(/signerDetailsAreComplete[\s\S]{0,80}prepareSignatureLinksRequested\s*=/);
     expect(intake).toContain("paidProSignerSetupRequiredBeforeDelivery");
     expect(intake).toContain("Add signer details before continuing.");
     expect(intake).toContain('data-testid="pro-review-add-signer-details"');

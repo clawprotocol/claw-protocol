@@ -8,8 +8,10 @@ import AgreementBuilderIntake, {
 } from "../../components/agreements/AgreementBuilderIntake";
 import {
   clearCreateReviewAgreementResumeId,
+  readCreateReviewAgreementResumeId,
   writeCreateReviewAgreementResumeId,
 } from "../../components/agreements/agreementIntakeStorage";
+import { readCreateComplexityResume } from "../../components/agreements/agreementCreateComplexityResume";
 import {
   hasCheckoutBackRestoreSnapshot,
   isCheckoutBackRestoreRequested,
@@ -28,11 +30,14 @@ import { useLaunchNav } from "../LaunchNavContext";
 import { EXAMPLE_INTAKE_PROMPTS } from "../useInputConfidenceHint";
 import { AGREEMENT_LIFECYCLE_PROGRESS_LABELS, lifecycleStepForStage } from "../../agreement/agreementLifecycleRail";
 import {
-  readLawDogUserMonetizationState,
-  shouldBlockSecondAgreementCreation,
-} from "../../monetization/lawDogMonetization";
+  resolveWorkspaceCreateAccess,
+  resolveAuthenticationState,
+  resolveEntitlementStateFromTier,
+} from "../../access/authenticatedWorkspaceAccessPolicy";
+import { hasCurrentSessionFreeStarterIntent } from "../../components/agreements/paidProSessionEligibility";
 import { getLawdogTrustNudges } from "../../tracking/lawdogSession";
 import { UpgradeToProModal } from "../../monetization/UpgradeToProModal";
+import { readLawDogUserMonetizationState } from "../../monetization/lawDogMonetization";
 import {
   NO_ATTORNEY_CLIENT,
   PRODUCT_NOT_LAW_FIRM,
@@ -147,12 +152,23 @@ export function SimpleCreatePage() {
     () => readLawDogUserMonetizationState(access.tier, access.usage),
     [access.tier, access.usage],
   );
-  const creationBlocked = useMemo(
-    () => shouldBlockSecondAgreementCreation(monetizationUser),
-    [monetizationUser],
-  );
   const [workspaceProEntitled, setWorkspaceProEntitled] = useState(false);
-  const creationBlockedForUi = creationBlocked && !workspaceProEntitled;
+  const createAccessVerdict = useMemo(
+    () =>
+      resolveWorkspaceCreateAccess({
+        authentication: resolveAuthenticationState({
+          isAuthenticated: monetizationUser.isAuthenticated,
+        }),
+        entitlement: resolveEntitlementStateFromTier(access.tier),
+        isStarterAnonymousSession: hasCurrentSessionFreeStarterIntent(),
+        isResumingOwnedAgreement: Boolean(readCreateReviewAgreementResumeId()),
+        hasCheckoutPendingMarker: Boolean(readCreateComplexityResume()?.awaitingProCheckout),
+        workspaceProEntitledProbe: workspaceProEntitled,
+      }),
+    [access.tier, monetizationUser.isAuthenticated, workspaceProEntitled],
+  );
+  const creationBlockedForUi =
+    !createAccessVerdict.allowed && createAccessVerdict.showUpgradeModal;
   const [upgradeModalOpen, setUpgradeModalOpen] = useState(false);
   const [postRecipientHandoffFailure, setPostRecipientHandoffFailure] =
     useState<PaidProPostRecipientSetupFailure | null>(null);
@@ -202,7 +218,10 @@ export function SimpleCreatePage() {
 
   useEffect(() => {
     if (!creationBlockedForUi) return;
-    logProductEvent("paywall_triggered", { surface: "simple_create", reason: "free_second_agreement" });
+    logProductEvent("paywall_triggered", {
+      surface: "simple_create",
+      reason: createAccessVerdict.reason,
+    });
     setUpgradeModalOpen(true);
   }, [creationBlockedForUi]);
 
@@ -250,6 +269,7 @@ export function SimpleCreatePage() {
   const simplifyFirstSession = firstSessionLive;
 
   const [paidProReviewReadyShell, setPaidProReviewReadyShell] = useState(false);
+  const [freeStarterReviewShellActive, setFreeStarterReviewShellActive] = useState(false);
   const [shellLifecycleStage, setShellLifecycleStage] = useState<
     import("../../agreement/agreementLifecycleRail").AgreementLifecycleStageId
   >("draft");
@@ -259,9 +279,11 @@ export function SimpleCreatePage() {
   const onSimpleCreateShellChrome = useCallback(
     (state: {
       paidProReviewReady: boolean;
+      freeStarterReviewShellActive: boolean;
       lifecycleStage: import("../../agreement/agreementLifecycleRail").AgreementLifecycleStageId;
     }) => {
       setPaidProReviewReadyShell(state.paidProReviewReady);
+      setFreeStarterReviewShellActive(state.freeStarterReviewShellActive);
       setShellLifecycleStage(state.lifecycleStage);
     },
     [],
@@ -271,9 +293,14 @@ export function SimpleCreatePage() {
     else if (homeHeroAutoGenerate) setHomeTransitionVisible(true);
   }, [homeHeroAutoGenerate]);
 
+  // Anonymous GTM Starter review: omit owner lifecycle rail; intake owns review chrome.
+  const anonymousStarterReviewChrome =
+    freeStarterReviewShellActive && !paidProReviewReadyShell;
   const shellStep = paidProReviewReadyShell
     ? lifecycleStepForStage(shellLifecycleStage)
-    : lifecycleStepForStage("draft");
+    : anonymousStarterReviewChrome
+      ? undefined
+      : lifecycleStepForStage("draft");
   const shellProgressLabels = AGREEMENT_LIFECYCLE_PROGRESS_LABELS;
   const shellTitle = paidProReviewReadyShell
     ? SIMPLE_CREATE_PAID_PRO_REVIEW_TITLE
@@ -289,12 +316,16 @@ export function SimpleCreatePage() {
       : isFreshSimpleCreateStart
         ? SIMPLE_CREATE_STARTER_HERO_SUBHEAD
         : "Start typing or speaking — LawDog auto-structures parties, term, scope, and obligations as you go (edit inline in preview). Review, share, or prepare for signing when you're ready.";
-  const hideIntakeMarketingChrome = paidProReviewReadyShell || homeTransitionVisible;
+  const hideIntakeMarketingChrome =
+    paidProReviewReadyShell || homeTransitionVisible || anonymousStarterReviewChrome;
 
   return (
     <SimpleFlowShell
       step={shellStep}
       progressLabels={shellProgressLabels}
+      hideHeader={anonymousStarterReviewChrome}
+      logoHomeHref={anonymousStarterReviewChrome ? "/" : "/app"}
+      hideAffiliateNav={anonymousStarterReviewChrome}
       kicker={
         paidProReviewReadyShell
           ? undefined
@@ -308,7 +339,13 @@ export function SimpleCreatePage() {
       compactReviewHeader={paidProReviewReadyShell}
     >
       <HomeCreateTransitionOverlay active={homeTransitionVisible} />
-      <div className={isFreshSimpleCreateStart || paidProReviewReadyShell ? "pb-36 sm:pb-32" : undefined}>
+      <div
+        className={
+          isFreshSimpleCreateStart || paidProReviewReadyShell || anonymousStarterReviewChrome
+            ? "pb-36 sm:pb-32"
+            : undefined
+        }
+      >
         {isFreshSimpleCreateStart && simplifyFirstSession && !quickSendTypedArrival && !hideIntakeMarketingChrome ? (
           <p className="mb-2 text-center text-[11px] font-medium leading-snug text-slate-500 sm:text-left sm:text-xs">
             {SIMPLE_CREATE_STARTER_CONTROL_LINE}

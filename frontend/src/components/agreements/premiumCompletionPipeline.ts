@@ -3133,12 +3133,18 @@ async function runPremiumCompletionInner(
       const serverHardFailureForVpaidWin =
         serverFailureCodeForVpaidWin === "airlock_blocked" ||
         serverFailureCodeForVpaidWin === "dev_context_leak";
+      const wireGenerationOutcomeTrimmed = (effectiveFull.generation_outcome || "").trim();
+      const professionalProClauseRejected = [...acc.reasons, ...vPaid.reasons].some((r) =>
+        r.startsWith("professional_"),
+      );
+      const blockDegradedProfessionalClauseAccept =
+        wireGenerationOutcomeTrimmed === "degraded" && professionalProClauseRejected;
       const vPaidAuthoritativeSubstantive =
         vPaid.ok &&
         placeholderClientOk &&
         substantiveValidatedLen >= SUBSTANTIVE_SERVER_DRAFT_MIN_LEN &&
         !serverHardFailureForVpaidWin;
-      if (vPaidAuthoritativeSubstantive && !acc.ok) {
+      if (vPaidAuthoritativeSubstantive && !acc.ok && !blockDegradedProfessionalClauseAccept) {
         acc = { ok: true, reasons: ["vpaid_authoritative_substantive_bypass"] };
         if (import.meta.env.DEV && import.meta.env.MODE !== "test") {
           // eslint-disable-next-line no-console
@@ -3152,6 +3158,7 @@ async function runPremiumCompletionInner(
       const structuralFatalCount = countStructuralFatals(acc.reasons);
       const longAdvisoryAccept =
         !degradedJsonParseWithoutSubstantiveServerFull &&
+        !blockDegradedProfessionalClauseAccept &&
         shouldPreserveLongPremiumDespiteSoftGateFailure({
           bodyLen: (doc || "").length,
           fatalPlaceholderCount,
@@ -3224,7 +3231,7 @@ async function runPremiumCompletionInner(
       }
       // A validated long server_full_document_text wins over soft vPaid failures too.
       let serverFullDocumentWins = serverFullDocumentAuthoritative && placeholderClientOk;
-      if (blockAdvisoryForPartyIdentity) {
+      if (blockAdvisoryForPartyIdentity || blockDegradedProfessionalClauseAccept) {
         serverFullDocumentWins = false;
       }
       // A deterministically party-placeholder-repaired body (only gap was a known party name) is
@@ -3248,6 +3255,7 @@ async function runPremiumCompletionInner(
         });
       const advisoryAccept =
         !blockAdvisoryForPartyIdentity &&
+        !blockDegradedProfessionalClauseAccept &&
         (longAdvisoryAccept ||
           jsonParseNonfatalAccept ||
           jsonParseDisplayRecoverableAccept ||
@@ -4118,12 +4126,13 @@ async function runPremiumCompletionInner(
           intakeSForPreserve.length > 0 &&
           intakeDescribesBrandLicensingDistributionManufacturingStack(intakeSForPreserve);
         const shouldAttemptPreserve =
-          longAdvisoryAccept ||
+          !blockDegradedProfessionalClauseAccept &&
+          (longAdvisoryAccept ||
           (brandLicensingPreserveIntake && degradedJsonParseWithoutSubstantiveServerFull) ||
           (frozenReject &&
             frozenReject.body.trim().length >= PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN) ||
           (preservedRecovery.text.trim().length >= PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN &&
-            !(doc || "").trim());
+            !(doc || "").trim()));
         const preserveBlockedByStructuralFatals =
           fatalPlaceholderCount > 0 ||
           (structuralFatalCount > 0 && !brandLicensingPreserveIntake);

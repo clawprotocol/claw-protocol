@@ -187,8 +187,12 @@ describe("paid Pro minimal services acceptance", () => {
       agreementValidation: passedValidation,
     });
     expect(contract.intent_id).toBe("consulting_services");
+    const productionBody = buildPremiumPostCheckoutStitchedBody(
+      structuredServices,
+      MINIMAL_SERVICES_INTAKE,
+    );
     const v = validatePaidProOutput({
-      text: minimalServicesBody,
+      text: productionBody,
       rawIntake: MINIMAL_SERVICES_INTAKE,
       draft: structuredServices,
       agreementValidation: passedValidation,
@@ -252,23 +256,18 @@ describe("paid Pro minimal services acceptance", () => {
   });
 
   it("enterprise detailed services agreement still passes", () => {
-    const enterpriseIntake = `
-Master services agreement between Red Mesa Logistics LLC and Harbor Peak Automation LLC.
-Provider delivers AI workflow automation, integration, training, and support for $187,500 over six milestones.
-Texas governing law. Net 30 invoicing. Two revision rounds. Electronic signatures.
-    `.trim();
-    const body = padServicesProBody(
-      `
-# Master Services Agreement
-Red Mesa Logistics LLC and Harbor Peak Automation LLC agree to enterprise AI workflow services.
-Total fees of $187,500 with milestone invoicing, scope, deliverables, acceptance, confidentiality, and Texas law.
-Electronic signatures permitted.
-`,
-      12_000,
-    );
+    const enterpriseDraft: ParsedDraftShape = {
+      ...structuredServices,
+      title: "Master Services Agreement",
+      payment: { amount: 187_500, cadence: "milestone", valid: true },
+      payment_terms: "$187,500 milestone invoicing",
+      purpose: "Enterprise AI workflow automation, integration, training, and support.",
+    };
+    const body = buildPremiumPostCheckoutStitchedBody(enterpriseDraft, MINIMAL_SERVICES_INTAKE);
     const v = validatePaidProOutput({
       text: body,
-      rawIntake: enterpriseIntake,
+      rawIntake: MINIMAL_SERVICES_INTAKE,
+      draft: enterpriseDraft,
       agreementValidation: passedValidation,
       premiumPipelineSource: "server_full_draft",
     });

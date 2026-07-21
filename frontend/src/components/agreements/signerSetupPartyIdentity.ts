@@ -588,8 +588,9 @@ export function shouldArmPaidProFirstReviewSignerSetupLatch(args: {
   // both the finalize latch and the inline setup latch).
   if (args.signaturePreparationRequested) return false;
   if (args.signerMetadataFinalized) return false;
-  if (args.alreadyLatched) return true;
+  // Decision 1 must win over a stale auto-armed latch from the pre-decision render frame.
   if (args.deliveryTrackDecisionActive) return false;
+  if (args.alreadyLatched) return true;
   const reviewAuthority =
     args.hasAcceptedPaidProAuthority || Boolean(args.hasProfessionallyValidatedReviewCorpus);
   return Boolean(
@@ -658,12 +659,9 @@ export function shouldShowPaidProForcedFirstReviewTrackChooser(args: {
   signaturePreparationRequested: boolean;
   deliveryTrackDecisionActive?: boolean;
 }): boolean {
-  return Boolean(
-    args.forcedFirstReviewActive &&
-      !args.inlineSignerSetupMounted &&
-      !args.signaturePreparationRequested &&
-      (args.signerMetadataFinalized || args.deliveryTrackDecisionActive),
-  );
+  if (args.inlineSignerSetupMounted || args.signaturePreparationRequested) return false;
+  if (args.deliveryTrackDecisionActive) return true;
+  return Boolean(args.forcedFirstReviewActive && args.signerMetadataFinalized);
 }
 
 export function logSignerIdentitySource(args: {

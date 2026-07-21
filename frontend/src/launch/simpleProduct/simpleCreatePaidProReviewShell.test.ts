@@ -78,11 +78,24 @@ describe("Simple create shell copy contract", () => {
     expect(s).not.toMatch(/isFreshSimpleCreateStart\s*\?\s*["']Create an agreement in minutes/);
   });
 
+  it("SimpleCreatePage drops owner lifecycle chrome for anonymous free-starter review", () => {
+    const p = join(__dirname, "SimpleCreatePage.tsx");
+    const s = readFileSync(p, "utf8");
+    expect(s).toContain("freeStarterReviewShellActive");
+    expect(s).toContain("anonymousStarterReviewChrome");
+    expect(s).toContain("hideHeader={anonymousStarterReviewChrome}");
+    expect(s).toContain('logoHomeHref={anonymousStarterReviewChrome ? "/" : "/app"}');
+    expect(s).toContain("hideAffiliateNav={anonymousStarterReviewChrome}");
+    // Lifecycle step omitted when anonymous starter review is active (not paid Pro).
+    expect(s).toMatch(/anonymousStarterReviewChrome\s*\?\s*undefined/);
+  });
+
   it("AgreementBuilderIntake reports paid Pro review readiness to the create shell", () => {
     const p = join(__dirname, "../../components/agreements/AgreementBuilderIntake.tsx");
     const s = readFileSync(p, "utf8");
     expect(s).toContain("computeSimpleCreatePaidProReviewReady");
     expect(s).toContain("onSimpleCreateShellChrome");
     expect(s).toContain("paidProReviewReady");
+    expect(s).toContain("freeStarterReviewShellActive");
   });
 });

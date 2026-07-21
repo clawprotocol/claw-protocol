@@ -16,7 +16,7 @@ import { isGenericCanonicalRole } from "./canonicalPartyRoleAuthority";
 import {
   labeledPartyBlockRoleLabel,
   labeledPartyLegalEntities,
-  parseLabeledPartyBlocks,
+  parseAllStructuredPartyContactBlocks,
   parseQuotedRolePartyLines,
   quotedRolePartyLegalEntities,
 } from "./labeledPartyBlockParse";
@@ -157,8 +157,30 @@ function acceptanceManifestRoleLabel(
   return `Party ${index + 1}`;
 }
 
+function manifestRecordsFromConsumedSignerAuthority(): CanonicalPartyIdentityRecord[] {
+  const consumed = readConsumedPaidProSignerMetadataAuthority();
+  if (!consumed || consumed.parties.length < 2) return [];
+  const partyCount = Math.min(consumed.parties.length, PAID_PRO_AUTHORITY_MAX_PARTIES);
+  const records: CanonicalPartyIdentityRecord[] = [];
+  for (let index = 0; index < partyCount; index += 1) {
+    const party = consumed.parties[index];
+    if (!party) continue;
+    const fullLegalName = String(party.partyLegalName ?? "").trim();
+    if (!isAuthoritativeLegalEntityName(fullLegalName)) continue;
+    records.push({
+      fullLegalName,
+      roleLabel: acceptanceManifestRoleLabel(fullLegalName, index, partyCount),
+      displayAlias: fullLegalName.split(/\s+/).slice(0, 2).join(" "),
+      signerName: String(party.signerName ?? "").trim() || null,
+      signerTitle: String(party.signerTitle ?? "").trim() || null,
+      partyAddress: String(party.partyAddress ?? "").trim() || null,
+    });
+  }
+  return records.length >= 2 ? records : [];
+}
+
 function manifestRecordsFromLabeledPartyBlocks(intakeText: string): CanonicalPartyIdentityRecord[] {
-  const blocks = parseLabeledPartyBlocks(intakeText);
+  const blocks = parseAllStructuredPartyContactBlocks(intakeText);
   if (blocks.length < 2) return [];
   return blocks.slice(0, PAID_PRO_AUTHORITY_MAX_PARTIES).map((block) => {
     const fullLegalName = block.legalEntity.trim();
@@ -439,10 +461,12 @@ export function resolveAcceptanceManifestRecordsForExecution(args: {
     if (fromBrandProse.length >= 4) return fromBrandProse;
   }
 
+  const fromConsumedSignerAuthority = manifestRecordsFromConsumedSignerAuthority();
+  if (fromConsumedSignerAuthority.length >= 2) {
+    return fromConsumedSignerAuthority;
+  }
+
   // Authoritative intake party manifest (colon-role / numbered / bullet) is the single source
-  // for party identity, order, and role — for 3+ party intakes this must beat corpus-derived
-  // entity scraping so the opening recital and execution tail never drop a declared party
-  // (e.g. Client Redwood) or introduce a phantom entity (e.g. Scope Inc.).
   if (intakeText && intakePartyManifestIsAuthoritative(intakeText)) {
     const fromManifest = manifestRecordsFromIntakePartyManifest(intakeText);
     if (fromManifest.length >= 3) return fromManifest;
@@ -548,6 +572,39 @@ export function buildCanonicalExecutionTailFromManifest(
   return [PAID_PRO_ACCEPTANCE_WITNESS_LINE, "", ...blocks].join("\n\n");
 }
 
+export function executionHeadingsContainIntakeInstructionLeakage(text: string): boolean {
+  const witnessIdx = text.search(/\bIN WITNESS WHEREOF\b/i);
+  const tail = witnessIdx >= 0 ? text.slice(witnessIdx) : text.slice(-4000);
+  return (
+    /\b(?:CLIENT|SERVICE\s+PROVIDER|BUYER|SELLER|LENDER|BORROWER|LANDLORD|TENANT|CONTRACTOR)\s*:\s*(?:Create|Draft|Prepare|Write|Generate)\s+(?:a|an)\b/i.test(
+      tail,
+    ) ||
+    /\b(?:CLIENT|SERVICE\s+PROVIDER)\s*:\s*[^:\n]{0,240}\b(?:between|among)\b[^:\n]{0,240}\b(?:LLC|Inc\.?|Corp\.?)\b/i.test(
+      tail,
+    )
+  );
+}
+
+export function executionBlockMatchesManifestRecords(
+  text: string,
+  records: readonly CanonicalPartyIdentityRecord[],
+): boolean {
+  if (records.length < 2) return true;
+  const witnessIdx = text.search(/\bIN WITNESS WHEREOF\b/i);
+  const tail = witnessIdx >= 0 ? text.slice(witnessIdx) : text.slice(-4000);
+  for (const rec of records) {
+    const entity = rec.fullLegalName.trim();
+    if (!entity) continue;
+    const heading = roleToExecutionHeading(rec.roleLabel);
+    const pattern = new RegExp(
+      `(?:^|\\n\\n)${escapeRegex(heading)}\\s*:\\s*${escapeRegex(entity)}\\b`,
+      "im",
+    );
+    if (!pattern.test(tail)) return false;
+  }
+  return !executionHeadingsContainIntakeInstructionLeakage(text);
+}
+
 function countWitnessClauses(text: string): number {
   return (text.match(/\bIN WITNESS WHEREOF\b/gi) || []).length;
 }
@@ -634,12 +691,16 @@ export function ensurePaidProAcceptanceExecutionBlockInvariant(
     executionBlockCount === 1 &&
     invariant.ok &&
     !shapeAudit.malformed &&
-    executionBlockCoversManifestPartyNames(out, records)
+    executionBlockCoversManifestPartyNames(out, records) &&
+    !executionHeadingsContainIntakeInstructionLeakage(out)
   ) {
     return { text: out, repairs: [...new Set(repairs)] };
   }
 
-  if (witnessCount === 0 || executionBlockCount === 0 || shapeAudit.malformed) {
+  if (executionHeadingsContainIntakeInstructionLeakage(out)) {
+    out = rebuildCanonicalExecutionTailFromPrefix(out, records);
+    repairs.push("acceptance_execution_block:intake_instruction_heading_repair");
+  } else if (witnessCount === 0 || executionBlockCount === 0 || shapeAudit.malformed) {
     out = rebuildCanonicalExecutionTailFromPrefix(out, records);
     repairs.push(
       shapeAudit.malformed

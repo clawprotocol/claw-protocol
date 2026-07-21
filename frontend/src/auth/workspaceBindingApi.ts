@@ -15,6 +15,7 @@ export type BindUserOrgResponse = {
   org_id: string;
   user_id: string;
   migrated_agreement_count: number;
+  migrated_agreement_ids?: string[];
 };
 
 export async function bindAuthenticatedUserToWorkspace(args: {

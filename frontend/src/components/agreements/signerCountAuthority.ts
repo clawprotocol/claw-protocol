@@ -28,6 +28,7 @@ import {
 } from "../../agreement/partyPlaceholderDisplay";
 import { extractBetweenPartyNameList } from "./partyBetweenParse";
 import { countRealParties } from "./starterPartyLimits";
+import { readLegalPartyCountFromTypedHandoff } from "./starterToPaidPartyHandoff";
 import { intakeDescribesBrandLicensingDistributionManufacturingStack } from "./paidProAgreementTitleScope";
 import { resolveDeterministicQuadPartyNames } from "./deterministicQuadPartyProFallback";
 
@@ -86,7 +87,8 @@ export type SignerCountAuthorityResolution = {
     | "labeled_parties"
     | "party_slot_count"
     | "draft_parties"
-    | "default_two";
+    | "default_two"
+    | "typed_handoff";
   labeledCount: number;
   draftCount: number;
   corpusBlockCount: number;
@@ -224,6 +226,7 @@ function resolveAuthoritativeSignerCountCore(args: SignerCountAuthorityArgs): Si
   const draftNames =
     args.draftPartyNames ??
     (args.draftParties ?? []).map((p) => String(p?.name ?? "").trim()).filter(Boolean);
+  const typedHandoffPartyCount = readLegalPartyCountFromTypedHandoff(intake);
   const labeledCount = labeledPartyLegalEntities(intake).filter(isAuthoritativeLegalEntityName).length;
   const quotedCount = quotedRolePartyLegalEntities(intake).filter(isAuthoritativeLegalEntityName).length;
   const authoritativeIntakeCount = Math.max(labeledCount, quotedCount);
@@ -248,6 +251,7 @@ function resolveAuthoritativeSignerCountCore(args: SignerCountAuthorityArgs): Si
   const explicitManifestPartyCount = args.manifestPartyCount ?? 0;
   const manifestPartyCount = Math.max(
     explicitManifestPartyCount,
+    typedHandoffPartyCount >= 2 ? typedHandoffPartyCount : 0,
     paidProSoTActive ? frozenManifestCount : 0,
     paidProSoTActive ? consumedManifestCount : 0,
     authoritativeIntakeCount >= 3 ? authoritativeIntakeCount : 0,
@@ -257,7 +261,10 @@ function resolveAuthoritativeSignerCountCore(args: SignerCountAuthorityArgs): Si
   let count = partySlotCount;
   let source: SignerCountAuthorityResolution["source"] = "party_slot_count";
 
-  if (authoritativeIntakeCount >= 2) {
+  if (typedHandoffPartyCount >= 2) {
+    count = typedHandoffPartyCount;
+    source = "typed_handoff";
+  } else if (authoritativeIntakeCount >= 2) {
     count = authoritativeIntakeCount;
     source = "labeled_parties";
   } else if (partySlotCount >= 2) {

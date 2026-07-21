@@ -265,15 +265,41 @@ function extractSignerMetadataFromLabeledPartyBlocks(
     }));
 }
 
-export function extractSignerMetadataFromIntake(
-  intakeRaw: string | null | undefined,
-): {
+type IntakeSignerMetadataExtract = {
   extractedNames: string[];
   extractedTitles: string[];
   matchedEntities: string[];
   unmatchedEntities: string[];
   candidates: EntitySignerMetadataCandidate[];
-} {
+};
+
+/** Bounded memo — sanitizer/finalize graphs re-extract the same intake many times per call. */
+const INTAKE_EXTRACT_MEMO_MAX = 4;
+const intakeSignerMetadataExtractMemo = new Map<string, IntakeSignerMetadataExtract>();
+
+export function clearIntakeSignerMetadataExtractMemoForTests(): void {
+  intakeSignerMetadataExtractMemo.clear();
+}
+
+function cloneIntakeSignerMetadataExtract(
+  value: IntakeSignerMetadataExtract,
+): IntakeSignerMetadataExtract {
+  return {
+    extractedNames: value.extractedNames.slice(),
+    extractedTitles: value.extractedTitles.slice(),
+    matchedEntities: value.matchedEntities.slice(),
+    unmatchedEntities: value.unmatchedEntities.slice(),
+    candidates: value.candidates.map((c) => ({ ...c })),
+  };
+}
+
+export function extractSignerMetadataFromIntake(
+  intakeRaw: string | null | undefined,
+): IntakeSignerMetadataExtract {
+  const memoKey = String(intakeRaw ?? "");
+  const cached = intakeSignerMetadataExtractMemo.get(memoKey);
+  if (cached) return cloneIntakeSignerMetadataExtract(cached);
+
   const labeled = extractSignerMetadataFromLabeledPartyBlocks(intakeRaw);
   const nl = extractSignerMetadataFromIntakeNaturalLanguage(intakeRaw);
   const contacts = extractSignerMetadataFromIntakeContacts(intakeRaw);
@@ -291,7 +317,19 @@ export function extractSignerMetadataFromIntake(
       unmatchedEntities,
     });
   }
-  return { extractedNames, extractedTitles, matchedEntities, unmatchedEntities, candidates };
+  const result: IntakeSignerMetadataExtract = {
+    extractedNames,
+    extractedTitles,
+    matchedEntities,
+    unmatchedEntities,
+    candidates,
+  };
+  if (intakeSignerMetadataExtractMemo.size >= INTAKE_EXTRACT_MEMO_MAX) {
+    const oldest = intakeSignerMetadataExtractMemo.keys().next().value;
+    if (oldest !== undefined) intakeSignerMetadataExtractMemo.delete(oldest);
+  }
+  intakeSignerMetadataExtractMemo.set(memoKey, result);
+  return cloneIntakeSignerMetadataExtract(result);
 }
 
 function isPlaceholderSignerLineValue(value: string): boolean {

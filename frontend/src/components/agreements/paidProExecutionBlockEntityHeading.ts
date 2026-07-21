@@ -22,7 +22,8 @@ import {
   stripInternalPartyAliasParentheticals,
 } from "./partySlotIdentityNormalize";
 
-const PARTY_ROLE_HEADING_RE = /^(?:CLIENT|SERVICE\s+PROVIDER|PARTY(?:\s+\d+)?)\s*:\s*(.*)$/i;
+const PARTY_ROLE_HEADING_RE =
+  /^(?:CLIENT|SERVICE\s+PROVIDER|ANALYTICS\s+PROVIDER|PARTY(?:\s+\d+)?)\s*:\s*(.*)$/i;
 const SIG_FIELD_RE =
   /^(?:By|Name|Title|Date|Email\s+for\s+Notices?|Address\s+for\s+Notices?)\s*:/i;
 
@@ -76,6 +77,7 @@ function resolveExecutionBlockPartyIndex(
 ): number {
   const role = roleLabel.trim().toUpperCase();
   if (role === "CLIENT") return 0;
+  if (role.includes("ANALYTICS") && role.includes("PROVIDER")) return 2;
   if (role.includes("SERVICE") && role.includes("PROVIDER")) return 1;
   return partyHeadingCounter;
 }
@@ -95,7 +97,7 @@ export function detectExecutionHeadingMetadataLeak(text: string): {
   for (const line of lines) {
     const trimmed = line.trim();
     if (!trimmed || SIG_FIELD_RE.test(trimmed)) continue;
-    if (/^(?:CLIENT|SERVICE\s+PROVIDER|PARTY(?:\s+\d+)?)\s*:\s*$/i.test(trimmed)) continue;
+    if (/^(?:CLIENT|SERVICE\s+PROVIDER|ANALYTICS\s+PROVIDER|PARTY(?:\s+\d+)?)\s*:\s*$/i.test(trimmed)) continue;
     if (PARTY_ROLE_HEADING_RE.test(trimmed)) {
       const inline = trimmed.replace(/^[^:]+:\s*/, "").trim();
       if (inline && EXECUTION_HEADING_METADATA_LEAK_MARKERS.some((re) => re.test(inline))) {
@@ -225,7 +227,7 @@ export function repairExecutionBlockEntityHeadingLines(
       continue;
     }
 
-    if (/^(?:CLIENT|SERVICE\s+PROVIDER|PARTY(?:\s+\d+)?)\s*:\s*$/i.test(trimmed)) {
+    if (/^(?:CLIENT|SERVICE\s+PROVIDER|ANALYTICS\s+PROVIDER|PARTY(?:\s+\d+)?)\s*:\s*$/i.test(trimmed)) {
       const role = trimmed.replace(/:.*/, "").trim();
       activePartyIndex = resolveExecutionBlockPartyIndex(role, partyHeadingCounter);
       if (/^PARTY(?:\s+\d+)?$/i.test(role.trim())) partyHeadingCounter += 1;

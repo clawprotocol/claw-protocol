@@ -474,7 +474,7 @@ export function establishPaidProSourceOfTruth(args: {
     source: requestedSource,
   });
   const professionalCoverage = assessProfessionalProClauseCoverage({
-    text: trim(args.text) || prep.text,
+    text: prep.text,
     intake: args.intakeText ?? "",
   });
   if (professionalCoverage.applies && !professionalCoverage.ok) {

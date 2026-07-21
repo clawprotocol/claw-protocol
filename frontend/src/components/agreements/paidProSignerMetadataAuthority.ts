@@ -24,7 +24,11 @@ import { hashPaidProCorpus } from "./paidProSourceOfTruth";
 import { stripRecipientEmailNoise } from "./recipientEmailValidation";
 import { resolveCanonicalPartyIdentitiesFromIntake } from "./canonicalPartyIdentityResolver";
 import { resolveAcceptedCorpusRoleLabelForLegalName } from "./paidProAcceptedCorpusPartyRoles";
-import { labeledPartyBlocksForSignerMetadata } from "./labeledPartyBlockParse";
+import {
+  isQuadripartiteLabeledPartiesIntake,
+  isTripartiteLabeledPartiesIntake,
+  labeledPartyBlocksForSignerMetadata,
+} from "./labeledPartyBlockParse";
 import {
   authorityPartiesFromIntakeSignerMetadata,
   mergeIntakeSignerMetadataIntoAuthorityParties,
@@ -349,11 +353,22 @@ function blockHeadingFromRoleLabel(roleLabel: string, partyIndex: number): strin
   return roleLabel.trim().toUpperCase() || `PARTY ${partyIndex + 1}`;
 }
 
-/** True when execution blocks must use legal-entity headings (3+ finalized authority parties). */
+/**
+ * True when execution blocks must use legal-entity headings.
+ * Mirrors enforcePaidProSingleExecutionBlock: tripartite labeled intakes keep role headings.
+ */
 export function shouldUseAuthorityEntityExecutionHeadings(
   parties: readonly PaidProSignerMetadataParty[],
+  roleContext?: PaidProPartyRoleContext | null,
 ): boolean {
   if (parties.length < 3) return false;
+  const intake = (roleContext?.intakeText ?? "").trim();
+  const tripartiteLabeled = Boolean(intake && isTripartiteLabeledPartiesIntake(intake));
+  if (tripartiteLabeled) return false;
+  const quadLabeled = Boolean(intake && isQuadripartiteLabeledPartiesIntake(intake));
+  const quadParty = quadLabeled || parties.length >= 4;
+  const useEntityHeadings = parties.length >= 3 && (!quadParty || quadLabeled);
+  if (!useEntityHeadings) return false;
   return parties.every((p) => sanitizeAuthorityPartyLegalName(p.partyLegalName).length >= 2);
 }
 
@@ -741,12 +756,14 @@ export function authorityPartiesToCanonicalPartyIdentities(
     displayName: p.partyLegalName,
     source: "authoritative_manifest",
   }));
+  // Heading mode is invariant across parties for one call — avoid re-parsing intake per party.
+  const useEntityHeadings = shouldUseAuthorityEntityExecutionHeadings(parties, roleContext);
   return parties.map((p) => {
     const authorityLegal = sanitizeAuthorityPartyLegalName(p.partyLegalName);
     const legal = authorityLegal || slotIsolatedCanonicalEntity(p.partyIndex, slots);
     const isIndividual = legal ? isIndividualPartyName(legal) : false;
     const roleLabel = resolveRoleLabelForAuthorityParty(legal, p.partyIndex, roleContext);
-    const blockHeading = shouldUseAuthorityEntityExecutionHeadings(parties)
+    const blockHeading = useEntityHeadings
       ? authorityExecutionBlockHeading(p)
       : blockHeadingFromRoleLabel(roleLabel, p.partyIndex);
     return {

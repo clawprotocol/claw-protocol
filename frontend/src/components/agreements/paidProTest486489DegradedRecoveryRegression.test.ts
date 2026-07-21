@@ -1,3 +1,4 @@
+/** @vitest-environment jsdom */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import { defaultIntakePartyRoleLabels } from "./partyRoleIntake";

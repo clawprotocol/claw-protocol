@@ -1682,9 +1682,12 @@ type Props = {
   /**
    * `/app/create` SimpleFlowShell: when authoritative paid Pro is in DRAFT-stage review, parent hides
    * starter hero/step 1 chrome (title, stepper, starter chips) without resetting intake stage.
+   * When free-starter review is active, parent drops owner lifecycle rail / duplicate shell header
+   * so intake owns the lightweight GTM Starter review surface.
    */
   onSimpleCreateShellChrome?: (state: {
     paidProReviewReady: boolean;
+    freeStarterReviewShellActive: boolean;
     lifecycleStage: import("../../agreement/agreementLifecycleRail").AgreementLifecycleStageId;
   }) => void;
   /** Homepage auto-generate handoff: parent shows concierge overlay until review is ready. */
@@ -16420,6 +16423,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     if (!onSimpleCreateShellChrome) return;
     onSimpleCreateShellChrome({
       paidProReviewReady,
+      freeStarterReviewShellActive,
       lifecycleStage: simpleCreateShellLifecycleStage,
     });
     if (
@@ -16434,10 +16438,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     return () =>
       onSimpleCreateShellChrome({
         paidProReviewReady: false,
+        freeStarterReviewShellActive: false,
         lifecycleStage: "draft",
       });
   }, [
     paidProReviewReady,
+    freeStarterReviewShellActive,
     simpleCreateShellLifecycleStage,
     onSimpleCreateShellChrome,
     createUiStage,

@@ -36,6 +36,10 @@ export function SimpleFlowShell(props: {
   step?: Step;
   /** Override nav labels (4- or 5-step flows, e.g. checkout upgrade path). */
   progressLabels?: readonly string[];
+  /** Logo destination; anonymous GTM Starter review uses marketing home (`/`), not `/app`. */
+  logoHomeHref?: string;
+  /** Hide Earn / affiliate workspace nav (anonymous GTM Starter review). */
+  hideAffiliateNav?: boolean;
 }) {
   const { navigate } = useLaunchNav();
   const affiliateNav = useFeatureGate("affiliate_opportunity_enabled");
@@ -51,6 +55,8 @@ export function SimpleFlowShell(props: {
     compactReviewHeader,
     step,
     progressLabels = DEFAULT_PROGRESS,
+    logoHomeHref = "/app",
+    hideAffiliateNav = false,
   } = props;
 
   return (
@@ -59,7 +65,7 @@ export function SimpleFlowShell(props: {
       <div className="vs01-shell w-full min-w-0 max-w-full overflow-x-clip">
         <nav className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800/80 py-4" aria-label="Simple flow">
           <div className="flex flex-wrap items-center gap-2">
-            <LawdogLogoLink homeHref="/app" wordmark surface="dark" />
+            <LawdogLogoLink homeHref={logoHomeHref} wordmark surface="dark" />
             <button
               type="button"
               className="vs01-btn vs01-btn--secondary vs01-btn--compact min-h-11"
@@ -67,7 +73,7 @@ export function SimpleFlowShell(props: {
             >
               Home
             </button>
-            {affiliateNav ? (
+            {affiliateNav && !hideAffiliateNav ? (
               <button
                 type="button"
                 className="min-h-11 rounded-md border border-transparent px-3 py-2 text-sm font-medium text-slate-500 transition-colors hover:border-slate-800 hover:text-slate-300"

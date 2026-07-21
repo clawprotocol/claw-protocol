@@ -4,9 +4,10 @@
  */
 
 import type { CanonicalPartyIdentity } from "./guidedDealCompletion/signerPartyIdentity";
-import { signaturePatchStartIndex } from "./guidedDealCompletion/signatureRegion";
+import { countSignatureBlockHeadingsInTail, signaturePatchStartIndex } from "./guidedDealCompletion/signatureRegion";
 import {
   authorityPartiesToCanonicalPartyIdentities,
+  shouldUseAuthorityEntityExecutionHeadings,
   type PaidProPartyRoleContext,
   type PaidProSignerMetadataParty,
 } from "./paidProSignerMetadataAuthority";
@@ -22,6 +23,63 @@ const SUBSTANTIVE_ROLE_BLOCK_START_RE =
   /^(?:Client|Service Provider|Party\s+\d+)\s*:\s*$/i;
 
 const PARTY_THREE_LINE_RE = /^Party\s+3\s*:/i;
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function executionTailHeadingParityOk(
+  corpus: string,
+  parties: readonly PaidProSignerMetadataParty[],
+  identities: readonly CanonicalPartyIdentity[],
+  roleContext?: PaidProPartyRoleContext | null,
+): boolean {
+  if (identities.length < 2 || parties.length < identities.length) return false;
+  const witnessIdx = corpus.search(/\bIN WITNESS WHEREOF\b/i);
+  if (witnessIdx < 0) return false;
+  const tail = corpus.slice(witnessIdx);
+  const useEntityHeadings = shouldUseAuthorityEntityExecutionHeadings(parties, roleContext);
+  if (!useEntityHeadings && countSignatureBlockHeadingsInTail(corpus) < identities.length) {
+    return false;
+  }
+  for (const id of identities) {
+    const heading = id.blockHeading.trim();
+    if (!heading) return false;
+    if (!new RegExp(`^\\s*${escapeRegExp(heading)}\\s*:`, "im").test(tail)) return false;
+    const legal = id.partyDisplayName.trim();
+    if (legal && !tail.split("\n").some((line) => partyLegalNamesMatch(line.trim(), legal))) {
+      return false;
+    }
+  }
+  return (corpus.match(/\bIN WITNESS WHEREOF\b/gi) || []).length === 1;
+}
+
+function executionBlockNeedsSignerHydration(
+  corpus: string,
+  identities: readonly CanonicalPartyIdentity[],
+): boolean {
+  const witnessIdx = corpus.search(/\bIN WITNESS WHEREOF\b/i);
+  if (witnessIdx < 0) return false;
+  const tail = corpus.slice(witnessIdx);
+  for (const id of identities) {
+    const signer = id.representativeName?.trim();
+    if (!signer) continue;
+    const heading = id.blockHeading.trim();
+    if (!heading) continue;
+    const blockStart = tail.search(new RegExp(`^\\s*${escapeRegExp(heading)}\\s*:`, "im"));
+    if (blockStart < 0) return true;
+    const afterHeading = tail.slice(blockStart);
+    const nextBlock = afterHeading.slice(1).search(
+      /^\s*(?:CLIENT|SERVICE\s+PROVIDER|ANALYTICS\s+PROVIDER|PARTY\s+\d+|[A-Z][^\n:]{2,80})\s*:/im,
+    );
+    const block = nextBlock >= 0 ? afterHeading.slice(0, nextBlock + 1) : afterHeading;
+    const nameLine = block.match(/^\s*Name:\s*(.*)$/im)?.[1]?.trim() ?? "";
+    if (!nameLine || /_{4,}/.test(nameLine) || !partyLegalNamesMatch(nameLine, signer)) {
+      return true;
+    }
+  }
+  return false;
+}
 
 function clampPartiesForCanonicalCount(
   parties: readonly PaidProSignerMetadataParty[],
@@ -220,9 +278,13 @@ export function applyPaidProSignerMetadataMergeGate(args: {
   if (identities.length >= 2) {
     const witnessIdx = text.search(/\bIN WITNESS WHEREOF\b/i);
     if (witnessIdx >= 0) {
+      const headingParityOk = executionTailHeadingParityOk(text, parties, identities, roleContext);
+      const needsSignerHydration = executionBlockNeedsSignerHydration(text, identities);
       const needsReconcile =
+        !headingParityOk ||
         detectExecutionBlockRoleInversion(text) ||
-        !executionTailContainsAllPartyLegalNames(text, parties);
+        !executionTailContainsAllPartyLegalNames(text, parties) ||
+        needsSignerHydration;
       if (needsReconcile) {
         const reconciled = reconcileExecutionBlockToRoleIdentities(text, identities);
         if (reconciled.repairs > 0) {

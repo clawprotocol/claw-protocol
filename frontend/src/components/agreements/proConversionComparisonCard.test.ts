@@ -66,7 +66,7 @@ describe("AgreementBuilderIntake Pro conversion (static)", () => {
     expect(intake).not.toContain("Ready to share or sign?");
   });
 
-  it("hides sticky bar when pro conversion card is visible on free track", () => {
+  it("hides sticky bar only when below-document comparison card is visible on free track", () => {
     expect(intake).toContain("hideStickyForStarterProContinuation");
     expect(intake).toMatch(/hideStickyForStarterProContinuation[\s\S]*showStarterProRefineUpsell/);
   });

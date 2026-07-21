@@ -69,14 +69,6 @@ export function readLawDogUserMonetizationState(
   };
 }
 
-/**
- * Free authenticated users may create exactly one agreement; Pro and Power are unlimited.
- */
-export function shouldBlockSecondAgreementCreation(state: LawDogUserMonetizationState): boolean {
-  if (isLocalhostDevMonetizationRelax()) return false;
-  return state.isAuthenticated && state.plan === "free" && state.agreements_created >= 1;
-}
-
 // --- Power-tier feature gates (future: team, API, integrations hook in here) ---
 
 /** Template-grade reuse: Agreement Memory navigation, “find similar”, fork from prior, etc. */

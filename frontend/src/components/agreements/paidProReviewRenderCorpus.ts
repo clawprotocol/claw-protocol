@@ -105,7 +105,7 @@ import { applyPaidProSoTSignerExecutionOverlay } from "./paidProSoTSignerExecuti
 import { sanitizePaidProDomainScopeContamination } from "./paidProDomainScopeGuard";
 
 const LABELED_SIGNATURE_BLOCK_START =
-  /^(?:CLIENT|SERVICE PROVIDER|PROVIDER|CONTRACTOR|COMPANY|PARTY\s+\d+)\s*:/i;
+  /^(?:CLIENT|SERVICE PROVIDER|ANALYTICS PROVIDER|PROVIDER|CONTRACTOR|COMPANY|PARTY\s+\d+)\s*:/i;
 
 const ENTITY_SUFFIX_LINE_RE =
   /\b(?:LLC|L\.L\.C\.|Inc\.?|Incorporated|Corp\.?|Corporation|Ltd\.?|Limited|LLP|PLLC|LP|L\.P\.)\b/i;
@@ -367,14 +367,16 @@ export function applyPaidProReviewRenderSanitizer(
   let text = (corpus || "").replace(/\r\n/g, "\n").trimEnd();
   let repaired = false;
 
+  const partyRecords =
+    identities.length >= 2 ? canonicalPartyRecordsFromSignerIdentities(identities) : [];
+
   if (legalNames.length >= 2) {
     const stray = stripStrayStandalonePartyEntityLinesBeforeRecital(text, legalNames);
     if (stray.removed > 0) {
       text = stray.text;
       repaired = true;
     }
-    const records = canonicalPartyRecordsFromSignerIdentities(identities);
-    const dupOpen = repairDuplicateAgreementOpening(text, records);
+    const dupOpen = repairDuplicateAgreementOpening(text, partyRecords);
     if (dupOpen.repairs.length > 0) {
       text = dupOpen.text;
       repaired = true;
@@ -466,11 +468,8 @@ export function applyPaidProReviewRenderSanitizer(
       repaired = true;
     }
   }
-  if (parties.length >= 2) {
-    const records = canonicalPartyRecordsFromSignerIdentities(identities);
-    if (records.length >= 2) {
-      out = ensurePaidProServicesAgreementOpening(out, records, ctx?.intakeText ?? null).text;
-    }
+  if (parties.length >= 2 && partyRecords.length >= 2) {
+    out = ensurePaidProServicesAgreementOpening(out, partyRecords, ctx?.intakeText ?? null).text;
   }
   const execution = enforcePaidProSingleExecutionBlock(out, {
     authorityParties: parties,

@@ -10,6 +10,7 @@ import {
 import { GUIDED_SIGNING_AUTHORITATIVE_MIN_LEN, type CanonicalSignerManifest } from "./guidedReviewSigningContinuity";
 import { fingerprintAgreementBody } from "./guidedSigningPacketVersion";
 import {
+  mergeDraftPartiesFromCanonicalIdentities,
   rebuildSignatureBlocksWithPartyIdentities,
   shouldRejectSignerIdentityCorpusShrink,
   type CanonicalPartyIdentity,
@@ -680,6 +681,55 @@ export function mintGuidedSignatureTrackLocalAgreementId(): string {
     return `local_ag_${crypto.randomUUID()}`;
   }
   return `local_ag_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+}
+
+/** Paid-authoritative review can proceed without a live React draft when corpus + agreement id exist. */
+export function resolveGuidedSignatureTrackHandoffDraft<
+  T extends {
+    id?: string | null;
+    title?: string | null;
+    jurisdiction?: string | null;
+    agreement_family?: string | null;
+    parties?: Array<{
+      name?: string | null;
+      email?: string | null;
+      role?: string | null;
+      signerName?: string | null;
+      signerTitle?: string | null;
+    }>;
+    server_full_document_text?: string | null;
+    premium_full_document_text?: string | null;
+  },
+>(args: {
+  liveDraft: T | null;
+  fallbackDrafts: Array<T | null | undefined>;
+  identities: readonly CanonicalPartyIdentity[];
+  corpusText: string;
+  agreementId: string;
+}): T | null {
+  const agreementId = (args.agreementId || "").trim();
+  const corpusText = (args.corpusText || "").trim();
+  const withIdentities = (base: T): T => mergeDraftPartiesFromCanonicalIdentities(base, args.identities);
+
+  if (args.liveDraft) return withIdentities(args.liveDraft);
+
+  for (const fallback of args.fallbackDrafts) {
+    if (!fallback) continue;
+    const base = agreementId ? { ...fallback, id: agreementId } : fallback;
+    return withIdentities(base);
+  }
+
+  if (!agreementId || corpusText.length < GUIDED_SIGNING_AUTHORITATIVE_MIN_LEN) return null;
+
+  return withIdentities({
+    id: agreementId,
+    title: "Agreement",
+    jurisdiction: "",
+    agreement_family: "general",
+    parties: [],
+    server_full_document_text: corpusText,
+    premium_full_document_text: corpusText,
+  } as unknown as T);
 }
 
 export function canContinueGuidedSignatureTrackWithoutPersist(args: {

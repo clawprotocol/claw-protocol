@@ -22,6 +22,7 @@ export type FinalizeAuthResponse = {
   user_id: string;
   destination_path: string;
   migrated_agreement_count: number;
+  migrated_agreement_ids?: string[];
   idempotent?: boolean;
 };
 

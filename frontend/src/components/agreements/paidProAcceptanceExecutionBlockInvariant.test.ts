@@ -1,3 +1,4 @@
+/** @vitest-environment jsdom */
 import { afterEach, describe, expect, it } from "vitest";
 import {
   PAID_PRO_ACCEPTANCE_WITNESS_LINE,
@@ -18,6 +19,10 @@ import {
   getPaidProSourceOfTruthText,
   hashPaidProCorpus,
 } from "./paidProSourceOfTruth";
+import {
+  commitPaidProPipelineValidationAcceptance,
+  markPaidProPipelineValidationPassed,
+} from "./paidProPostAcceptanceValidatorCache";
 import { resolvePaidProReviewRenderPlain } from "./paidProReviewRenderCorpus";
 import { polishProAgreementDisplayLayer } from "./polishProAgreementDisplayLayer";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
@@ -102,6 +107,11 @@ function healthyCorpusWithSingleExecution(): string {
   ].join("\n");
 }
 
+function latchPipelineAcceptance(text: string): void {
+  markPaidProPipelineValidationPassed({ text, source: "server_full_draft" });
+  commitPaidProPipelineValidationAcceptance({ text, source: "server_full_draft" });
+}
+
 describe("paidProAcceptanceExecutionBlockInvariant", () => {
   afterEach(() => {
     clearPaidProSourceOfTruth();
@@ -138,6 +148,7 @@ describe("paidProAcceptanceExecutionBlockInvariant", () => {
   it("frozen SoT after establish has witnessCount 1 and executionBlockCount 1", () => {
     const raw = test250StyleServerBodyWithoutExecution();
     const prepared = preparePaidProServerDocumentForAcceptance(raw, DRAFT, INTAKE);
+    latchPipelineAcceptance(prepared.text);
     establishPaidProSourceOfTruth({
       text: prepared.text,
       source: "server_full_draft",
@@ -175,8 +186,10 @@ describe("paidProAcceptanceExecutionBlockInvariant", () => {
 
   it("post-freeze review render stays hash-identical to SoT after execution append at accept", () => {
     const raw = test250StyleServerBodyWithoutExecution();
+    const prepared = preparePaidProServerDocumentForAcceptance(raw, DRAFT, INTAKE);
+    latchPipelineAcceptance(prepared.text);
     establishPaidProSourceOfTruth({
-      text: raw,
+      text: prepared.text,
       source: "server_full_draft",
       draft: DRAFT,
       intakeText: INTAKE,

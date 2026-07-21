@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useLaunchNav } from "./LaunchNavContext";
 import type { User } from "@supabase/supabase-js";
 import { getAuthSession } from "../auth/supabaseAuthService";
-import { finalizeAuthenticatedSession } from "../auth/postAuthFinalizer";
+import { finalizeAuthenticatedSessionFromAuthCallback } from "../auth/authCallbackFinalizeDedup";
 import { logProductEvent } from "../lib/experimentation/productEvents";
 import { writeContinuationId } from "../auth/authContinuationApi";
 
@@ -40,7 +40,7 @@ export function AuthCallbackPage() {
         const params = new URLSearchParams(search.startsWith("?") ? search.slice(1) : search);
         const continuationId = params.get("continuation_id");
         if (continuationId) writeContinuationId(continuationId);
-        const result = await finalizeAuthenticatedSession({
+        const result = await finalizeAuthenticatedSessionFromAuthCallback({
           user: session.user,
           claimMethod: inferClaimMethod(session.user),
           continuationId,

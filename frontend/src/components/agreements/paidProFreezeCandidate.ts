@@ -11,6 +11,8 @@ import {
 } from "./agreementTemplatePlaceholderSafety";
 import {
   ensurePaidProAcceptanceExecutionBlockInvariant,
+  executionBlockMatchesManifestRecords,
+  executionHeadingsContainIntakeInstructionLeakage,
   isGenericPaidProAcceptanceManifestFallback,
   manifestRecordsForPaidProAcceptance,
   resolveAcceptanceManifestRecordsForExecution,
@@ -941,9 +943,12 @@ export function assertPaidProFreezeCandidateGates(
     intakeText: args.intakeText ?? null,
   });
   if (
-    preFreezeExecutionManifest.length >= 3 &&
+    preFreezeExecutionManifest.length >= 2 &&
     !isGenericPaidProAcceptanceManifestFallback(preFreezeExecutionManifest) &&
-    !isSubstantiveBrandLicensingCorpus(trim(args.text), args.intakeText)
+    !isSubstantiveBrandLicensingCorpus(trim(args.text), args.intakeText) &&
+    (preFreezeExecutionManifest.length >= 3 ||
+      executionHeadingsContainIntakeInstructionLeakage(safeForCommit) ||
+      !executionBlockMatchesManifestRecords(safeForCommit, preFreezeExecutionManifest))
   ) {
     const preFreezeExecution = ensurePaidProAcceptanceExecutionBlockInvariant(
       safeForCommit,

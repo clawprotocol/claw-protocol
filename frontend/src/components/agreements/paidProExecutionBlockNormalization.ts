@@ -22,6 +22,7 @@ import { consumeAuthoritativeSignerCount } from "./signerCountAuthority";
 import { reconcileExecutionBlockToRoleIdentities } from "./paidProSignerMetadataMergeGate";
 import type { CanonicalPartyIdentity } from "./guidedDealCompletion/signerPartyIdentity";
 import { analyzePaidProExecutionBlockInvariant } from "./paidProExecutionBlockAuthority";
+import { countSignatureBlockHeadingsInTail } from "./guidedDealCompletion/signatureRegion";
 import { isStandaloneSignaturesHeadingLine } from "./paidProSignatureSectionOrdering";
 import {
   logExecutionBlockCount,
@@ -398,6 +399,36 @@ function stripRecitalFragmentExecutionLinesFromTail(text: string, repairs: strin
   return `${prefix}\n\n${out.join("\n").trimEnd()}\n`;
 }
 
+function executionTailUsesGenericPartyIndexHeadings(text: string): boolean {
+  const witnessIdx = resolveAuthoritativeWitnessIndex(text);
+  if (witnessIdx < 0) return false;
+  return /^\s*PARTY\s+\d+\s*:/im.test(text.slice(witnessIdx));
+}
+
+/** True when witness tail heading count matches party count for the active heading mode. */
+function executionTailHeadingCountMatchesPartyCount(
+  text: string,
+  manifestLegalNames: readonly string[],
+  useEntityHeadings: boolean,
+): boolean {
+  const partyCount = manifestLegalNames.length;
+  if (partyCount < 2) return false;
+  if (!useEntityHeadings) {
+    return countSignatureBlockHeadingsInTail(text) >= partyCount;
+  }
+  const witnessIdx = resolveAuthoritativeWitnessIndex(text);
+  if (witnessIdx < 0) return false;
+  const tail = text.slice(witnessIdx);
+  let matched = 0;
+  for (const name of manifestLegalNames) {
+    const upper = name.trim().toUpperCase();
+    if (!upper) continue;
+    const escaped = upper.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    if (new RegExp(`^\\s*${escaped}\\s*:`, "im").test(tail)) matched += 1;
+  }
+  return matched >= partyCount;
+}
+
 /** True when witness tail already carries every manifest legal name with no role inversion. */
 function existingExecutionTailMatchesManifest(
   text: string,
@@ -526,6 +557,7 @@ export function enforcePaidProSingleExecutionBlock(
   const client = roles.find((r) => r.role === "client");
   const provider = roles.find((r) => r.role === "service_provider");
   const quadLabeled = Boolean(opts?.intakeText && isQuadripartiteLabeledPartiesIntake(opts.intakeText));
+  const tripartiteLabeled = Boolean(opts?.intakeText && isTripartiteLabeledPartiesIntake(opts.intakeText));
   const quadParty =
     quadLabeled || authorityParties.length >= 4 || manifestLegalNames.length >= 4;
   if ((!client || !provider) && !quadParty && manifestLegalNames.length < 3) {
@@ -542,7 +574,8 @@ export function enforcePaidProSingleExecutionBlock(
 
   const body = operativeBodyWithoutExecutionTails(text);
   const expectedPartyCount = Math.max(manifestLegalNames.length, authoritativePartyCount, roles.length);
-  const useEntityHeadings = manifestLegalNames.length >= 3 && !quadParty;
+  const useEntityHeadings =
+    manifestLegalNames.length >= 3 && (!quadParty || quadLabeled) && !tripartiteLabeled;
 
   const identities: CanonicalPartyIdentity[] =
     manifestRoles && manifestLegalNames.length >= 2
@@ -569,7 +602,11 @@ export function enforcePaidProSingleExecutionBlock(
     return { text, repairs: [...new Set(repairs)] };
   }
 
-  if (existingExecutionTailMatchesManifest(text, manifestLegalNames)) {
+  if (
+    existingExecutionTailMatchesManifest(text, manifestLegalNames) &&
+    !(quadLabeled && executionTailUsesGenericPartyIndexHeadings(text)) &&
+    executionTailHeadingCountMatchesPartyCount(text, manifestLegalNames, useEntityHeadings)
+  ) {
     text = stripRecitalFragmentExecutionLinesFromTail(text, repairs);
     const truncated = truncatePostCanonicalExecutionPollution(text, { expectedPartyCount });
     if (truncated.text !== text) {
