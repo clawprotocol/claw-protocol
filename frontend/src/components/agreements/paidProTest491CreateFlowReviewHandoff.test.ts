@@ -34,7 +34,15 @@ import {
   tryEstablishAcceptedPremiumCorpusForCreateFlowHandoff,
 } from "./paidProCreateFlowReviewHandoff";
 
-const PRO_BODY = `SERVICES AGREEMENT between Red Mesa Logistics LLC and Harbor Peak Automation LLC. ${"Substantive clause. ".repeat(900)}`;
+import { SHARED_ACCEPTED_PAID_BODY } from "./paidProSharedFixtureSystem";
+import { expandOperativeCorpusWithUniqueSupplements } from "./paidProSupplementalProvisionsFillerGate";
+import { LONG_PREMIUM_AUTHORITATIVE_MIN_LEN } from "./premiumAcceptancePolicy";
+
+/** Latch requires commercially-usable length (≥ LONG_PREMIUM_AUTHORITATIVE_MIN_LEN). */
+const PRO_BODY = expandOperativeCorpusWithUniqueSupplements(
+  SHARED_ACCEPTED_PAID_BODY,
+  LONG_PREMIUM_AUTHORITATIVE_MIN_LEN + 400,
+);
 const STARTER_PREVIEW = "Starter preview only. ".repeat(12);
 
 function test491Draft(premiumBody?: string): ParsedDraftShape {

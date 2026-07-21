@@ -18,7 +18,13 @@ import {
 } from "./paidProPartyNoticeDetails";
 import { resetPaidProPipelineTestIsolation } from "./paidProPipelineTestIsolation";
 
-const PAID_BODY = `PRO AGREEMENT. ${"Substantive clause. ".repeat(900)}`;
+import {
+  SHARED_ACCEPTED_PAID_BODY,
+  SHARED_HARBOR_PEAK,
+  SHARED_RED_MESA,
+} from "./paidProSharedFixtureSystem";
+
+const PAID_BODY = SHARED_ACCEPTED_PAID_BODY;
 const BLUE_CANYON = "Blue Canyon Analytics LLC";
 const IRON_VALE = "Iron Vale Systems Inc";
 
@@ -67,10 +73,13 @@ describe("TEST580 — notice entity-line authority at freeze", () => {
       acceptedCorpus: finalized.text,
     });
     const region = resolveAuthoritativeNoticesRegionForFreeze(hydrated.text);
-    expect(region).toMatch(/^If to Party 1:/im);
-    expect(region).toMatch(/^If to Party 2:/im);
-    expect(region).toMatch(/\nParty 1\n/);
-    expect(region).toMatch(/\nParty 2\n/);
+    // Approved tip behavior: entity-line notice authority (not generic Party N heads).
+    expect(region).toMatch(new RegExp(`^If to ${SHARED_RED_MESA}:`, "im"));
+    expect(region).toMatch(new RegExp(`^If to ${SHARED_HARBOR_PEAK}:`, "im"));
+    expect(region).toMatch(new RegExp(`\\n${SHARED_RED_MESA}\\n`));
+    expect(region).toMatch(new RegExp(`\\n${SHARED_HARBOR_PEAK}\\n`));
+    expect(region).not.toMatch(/^If to Party 1:/im);
+    expect(region).not.toMatch(/^If to Party 2:/im);
     const violations = validateNoticesClauseFamilyStructuralIntegrity(hydrated.text, {
       parties,
       acceptedCorpus: hydrated.text,

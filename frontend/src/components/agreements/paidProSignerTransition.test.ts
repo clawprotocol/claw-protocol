@@ -1,3 +1,4 @@
+import { SHARED_ACCEPTED_PAID_BODY } from "./paidProSharedFixtureSystem";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   logPaidProSignerTransition,
@@ -16,7 +17,7 @@ describe("paidProSignerTransition", () => {
   });
 
   it("routes paid Pro signer setup to review decision when SoT exists and signers complete", () => {
-    establishPaidProSourceOfTruth({ text: "x".repeat(2000), source: "server_full_draft" });
+    establishPaidProSourceOfTruth({ text: SHARED_ACCEPTED_PAID_BODY, source: "server_full_draft" });
     expect(
       shouldRoutePaidProSignerSetupToReviewDecision({
         acceptedPaidProAuthorityActive: false,
@@ -27,7 +28,7 @@ describe("paidProSignerTransition", () => {
   });
 
   it("does not route when signature preparation already requested", () => {
-    establishPaidProSourceOfTruth({ text: "x".repeat(2000), source: "server_full_draft" });
+    establishPaidProSourceOfTruth({ text: SHARED_ACCEPTED_PAID_BODY, source: "server_full_draft" });
     expect(
       shouldRoutePaidProSignerSetupToReviewDecision({
         acceptedPaidProAuthorityActive: true,

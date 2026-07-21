@@ -6,7 +6,7 @@ import { buildPaidProSignerMetadataParties } from "./paidProSignerMetadataAuthor
 import { analyzePaidProExecutionBlockInvariant } from "./paidProExecutionBlockAuthority";
 import { buildPremiumAgreementReadonlyHtml } from "./premiumAgreementDocumentHtml";
 import { resolveGeneratedAgreementPartyCount, resolveSignerSetupUiPartyCount } from "./paidProNPartySignerSetup";
-import { TEST371_QUADRIPARTITE_LABELED_PARTIES_INTAKE } from "./paidProTest371QuadrpartiteRegression.test";
+import { TEST371_QUADRIPARTITE_LABELED_PARTIES_INTAKE } from "./paidProTest371QuadrpartiteFixtures";
 import { TEST372_FREE_STACKED_PARTY_INTAKE } from "./paidProTest372FreeStarterIdentityRegression.test";
 import { labeledPartyLegalEntities } from "./labeledPartyBlockParse";
 import {

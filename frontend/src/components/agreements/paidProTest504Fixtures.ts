@@ -1,5 +1,7 @@
-import type { ParsedDraftShape } from "./intakeSmartDefaults";
+import { SUBSTANTIVE_SERVER_DRAFT_MIN_LEN } from "./premiumAcceptancePolicy";
+import { buildTwoPartyProfessionalServicesCorpus } from "./paidProSharedFixtureSystem";
 import { paidProPipelineAcceptedCorpusHash } from "./paidProPipelineAcceptedCorpus";
+import type { ParsedDraftShape } from "./intakeSmartDefaults";
 
 export const TEST504_RED_MESA = "Red Mesa Logistics LLC";
 export const TEST504_HARBOR_PEAK = "Harbor Peak Automation LLC";
@@ -28,33 +30,10 @@ export const TEST504_INTAKE = [
 export const TEST504_STARTER_PREVIEW =
   "Starter five-section preview for Red Mesa and Harbor Peak. ".repeat(10);
 
-/** Concise accepted Pro corpus — substantive professional clause coverage for Red Mesa intake. */
-const TEST504_ACCEPTED_PREFIX =
-  `PROFESSIONAL SERVICES AGREEMENT between ${TEST504_RED_MESA} (Client) and ${TEST504_HARBOR_PEAK} (Service Provider). ` +
-  "Harbor Peak will evaluate warehouse operations, optimize workflows, automate reporting, and implement dashboard integrations. " +
-  "Total fee: $96,000 payable in four installments. Term: 12 months. ";
-
-const TEST504_ACCEPTED_OPERATIVE_SECTIONS = [
-  "1. CONFIDENTIALITY. Each party shall hold the other party's Confidential Information in strict confidence and use it only for performing under this Agreement.",
-  "2. INTELLECTUAL PROPERTY. Service Provider assigns to Client all right, title, and interest in work product, deliverables, and inventions arising from the services.",
-  "3. LIMITATION OF LIABILITY. Neither party shall be liable for indirect, incidental, special, or consequential damages. Aggregate liability is capped at fees paid under this Agreement.",
-  "4. TERMINATION. Either party may terminate for cause upon uncured material breach or for convenience upon thirty (30) days' written notice.",
-  "5. GOVERNING LAW. This Agreement is governed by the laws of the State of Delaware without regard to conflict of laws principles.",
-  "6. NOTICES. All notices must be in writing and delivered to the notice addresses designated below with confirmation of receipt.",
-  "IN WITNESS WHEREOF, the parties execute this Agreement by their authorized signers.",
-  `CLIENT:\n${TEST504_RED_MESA}\nBy: ____________________\nName:\nTitle:\nDate:\n\nSERVICE PROVIDER:\n${TEST504_HARBOR_PEAK}\nBy: ____________________\nName:\nTitle:\nDate:`,
-].join("\n\n");
+export const TEST504_ACCEPTED_PAID_BODY = buildTwoPartyProfessionalServicesCorpus(SUBSTANTIVE_SERVER_DRAFT_MIN_LEN);
 
 const TEST504_ACCEPTED_PAD =
   "Substantive operative clause with Delaware governing law, confidentiality, IP assignment, limitation of liability, termination for cause or convenience, and notice delivery requirements.";
-
-function buildTest504AcceptedBody(targetLen = 2600): string {
-  let body = `${TEST504_ACCEPTED_PREFIX.trim()}\n\n${TEST504_ACCEPTED_OPERATIVE_SECTIONS}`;
-  while (body.length < targetLen) body += `\n\n${TEST504_ACCEPTED_PAD}`;
-  return body.trim();
-}
-
-export const TEST504_ACCEPTED_PAID_BODY = buildTest504AcceptedBody(2600);
 
 /** Thin starter-style body (~1798 chars) missing substantive professional clauses — must not pass Pro gate. */
 export const TEST504_THIN_STARTER_STYLE_BODY = (() => {

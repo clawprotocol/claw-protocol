@@ -1,3 +1,4 @@
+import { SHARED_ACCEPTED_PAID_BODY } from "./paidProSharedFixtureSystem";
 /** @vitest-environment jsdom */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -175,7 +176,7 @@ describe("paidProPostFinalizeEditSignerDetails", () => {
 
   it("seed falls back to snapshot metadata when consumed authority is empty", () => {
     const authority = qaAuthority();
-    const corpus = "x".repeat(600);
+    const corpus = SHARED_ACCEPTED_PAID_BODY;
     createAuthoritativeSigningSnapshot({
       corpus,
       signerMetadata: authorityPartiesToRecipientMetadata(authority.parties),
@@ -192,7 +193,7 @@ describe("paidProPostFinalizeEditSignerDetails", () => {
 
   it("beginPaidProPostFinalizeSignerDetailsReopen clears snapshot and pinned hydrated corpus", () => {
     const authority = qaAuthority();
-    const corpus = "x".repeat(600);
+    const corpus = SHARED_ACCEPTED_PAID_BODY;
     createAuthoritativeSigningSnapshot({
       corpus,
       signerMetadata: authorityPartiesToRecipientMetadata(authority.parties),

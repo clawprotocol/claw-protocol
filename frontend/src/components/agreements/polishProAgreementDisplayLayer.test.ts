@@ -1,3 +1,4 @@
+import { SHARED_ACCEPTED_PAID_BODY } from "./paidProSharedFixtureSystem";
 import { describe, expect, it } from "vitest";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import {
@@ -140,7 +141,7 @@ describe("polishProAgreementDisplayLayer", () => {
   });
 
   it("polishedAuthoritativeProPlainForCopy uses long authoritative candidate", () => {
-    const long = "x".repeat(3_200);
+    const long = SHARED_ACCEPTED_PAID_BODY;
     const short = "y".repeat(800);
     const out = polishedAuthoritativeProPlainForCopy([short, long], {
       acceptedAuthoritativeBody: long,

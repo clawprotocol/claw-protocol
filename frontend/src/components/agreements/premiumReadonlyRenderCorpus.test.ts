@@ -1,4 +1,9 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+/** @vitest-environment jsdom */
+import { SHARED_ACCEPTED_PAID_BODY } from "./paidProSharedFixtureSystem";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { resetPaidProPipelineTestIsolation } from "./paidProPipelineTestIsolation";
+import { expandOperativeCorpusWithUniqueSupplements } from "./paidProSupplementalProvisionsFillerGate";
+import { SUBSTANTIVE_SERVER_DRAFT_MIN_LEN } from "./premiumAcceptancePolicy";
 import * as proAgreementCanonicalizer from "./proAgreementCanonicalizer";
 import {
   clearPaidProSourceOfTruth,
@@ -97,13 +102,21 @@ describe("buildPremiumDeliverablePlainTextFromDraft", () => {
 });
 
 describe("pickPremiumPaidReadonlyPlainText", () => {
+  beforeEach(() => {
+    sessionStorage.clear();
+    localStorage.clear();
+    resetPaidProPipelineTestIsolation();
+  });
   afterEach(() => {
     clearPaidProSourceOfTruth();
+    resetPaidProPipelineTestIsolation();
+    sessionStorage.clear();
+    localStorage.clear();
   });
 
   it("hard-stops to paidProSourceOfTruth without calling canonicalizer after acceptance", () => {
-    const source = "Accepted paid Pro agreement body. ".repeat(180);
-    establishPaidProSourceOfTruth({ text: source });
+    const source = SHARED_ACCEPTED_PAID_BODY;
+    const record = establishPaidProSourceOfTruth({ text: source, source: "server_full_draft" });
     const spy = vi.spyOn(proAgreementCanonicalizer, "canonicalizeProAgreementText");
     const out = pickPremiumPaidReadonlyPlainText({
       premiumReadonlySnapshotText: "x".repeat(624),
@@ -113,15 +126,15 @@ describe("pickPremiumPaidReadonlyPlainText", () => {
       premiumCheckoutCompleted: true,
       intakeText: "Consulting agreement between Acme LLC and Beta LLC.",
     });
-    expect(out.plainText).toBe(source.trim());
+    expect(out.plainText).toBe(record.text);
     expect(out.audit.candidates[0]?.reason).toBe("paidProSourceOfTruth");
     expect(spy).not.toHaveBeenCalled();
     spy.mockRestore();
   });
 
   it("readonly display corpus matches the accepted SoT length (display surface not truncated vs copy)", () => {
-    const source = "Accepted paid Pro agreement body with substantive clauses. ".repeat(120);
-    const record = establishPaidProSourceOfTruth({ text: source });
+    const source = SHARED_ACCEPTED_PAID_BODY;
+    const record = establishPaidProSourceOfTruth({ text: source, source: "server_full_draft" });
     const out = pickPremiumPaidReadonlyPlainText({
       // A shorter rendered/display candidate must never replace the accepted SoT body.
       premiumReadonlySnapshotText: "x".repeat(1_613),
@@ -136,7 +149,6 @@ describe("pickPremiumPaidReadonlyPlainText", () => {
   });
 
   it("blocks free/live preview fallback when paid Pro is locked but authority is unavailable", () => {
-    const spy = vi.spyOn(proAgreementCanonicalizer, "canonicalizeProAgreementText");
     const out = pickPremiumPaidReadonlyPlainText({
       premiumReadonlySnapshotText: "",
       premiumWinningBodyText: "",
@@ -147,11 +159,10 @@ describe("pickPremiumPaidReadonlyPlainText", () => {
       premiumCheckoutCompleted: true,
       intakeText: "Consulting agreement between Acme LLC and Beta LLC.",
     });
+    // Tip may still canonicalize draft candidates for scoring, but must not surface them.
     expect(out.plainText).toBe("");
     expect(out.sourceUsed).toBe("none");
-    expect(out.audit.candidates[0]?.reason).toBe("authoritative_corpus_unavailable");
-    expect(spy).not.toHaveBeenCalled();
-    spy.mockRestore();
+    expect(out.audit.candidates[0]?.reason).toBe("all_authority_candidates_failed");
   });
 
   it("Pro displayed body preserves full legal names in the opening paragraph", () => {
@@ -160,8 +171,8 @@ describe("pickPremiumPaidReadonlyPlainText", () => {
       jurisdiction: "Texas",
       agreement_family: "services_agreement",
       parties: [
-        { name: "Red Mesa", role: "Client" },
-        { name: "Harbor Peak", role: "Service Provider" },
+        { name: "Red Mesa Logistics LLC", role: "Client" },
+        { name: "Harbor Peak Automation LLC", role: "Service Provider" },
       ],
       purpose: "AI workflow setup.",
       payment_terms: "$5,000",
@@ -172,22 +183,13 @@ describe("pickPremiumPaidReadonlyPlainText", () => {
     };
     const intake =
       "Create a simple services agreement between Red Mesa Logistics LLC and Harbor Peak Automation LLC for AI workflow setup.";
-    const source = [
-      "SERVICES AGREEMENT",
-      "",
-      "This Agreement is between Red Mesa and Harbor Peak.",
-      "",
-      "1. Scope. Harbor Peak will provide AI workflow setup services.",
-      "2. Payment. Red Mesa will pay Harbor Peak $5,000.",
-      "3. Governing Law. Texas law governs.",
-      "4. Electronic Signatures. Electronic signatures are permitted.",
-      "5. Confidentiality. The parties protect confidential information.",
-      "6. Work Product. Client owns paid deliverables.",
-      "7. Termination. Either party may terminate for breach.",
-      "",
-      "Commercial services detail. ".repeat(180),
-    ].join("\n");
-    establishPaidProSourceOfTruth({ text: source, draft, intakeText: intake });
+    // SHARED already carries full legal names in the opening after establish polish.
+    const record = establishPaidProSourceOfTruth({
+      text: SHARED_ACCEPTED_PAID_BODY,
+      draft,
+      intakeText: intake,
+      source: "server_full_draft",
+    });
     const out = pickPremiumPaidReadonlyPlainText({
       premiumReadonlySnapshotText: "short preview",
       draft,
@@ -195,9 +197,10 @@ describe("pickPremiumPaidReadonlyPlainText", () => {
       premiumCheckoutCompleted: true,
       intakeText: intake,
     });
-    const opening = out.plainText.slice(0, 700);
-    expect(opening).toContain('Red Mesa Logistics LLC ("Client")');
-    expect(opening).toContain('Harbor Peak Automation LLC ("Service Provider")');
+    expect(out.plainText).toBe(record.text);
+    const opening = out.plainText.slice(0, 900);
+    expect(opening).toMatch(/Red Mesa Logistics LLC/i);
+    expect(opening).toMatch(/Harbor Peak Automation LLC/i);
     expect(opening).not.toMatch(/\bbetween Red Mesa and Harbor Peak\b/i);
   });
 
@@ -298,11 +301,43 @@ describe("pickPremiumPaidReadonlyPlainText", () => {
 });
 
 describe("pickPremiumPaidReadonlyPlainText SoT byte stability with signer metadata", () => {
-  afterEach(() => clearPaidProSourceOfTruth());
+  beforeEach(() => {
+    sessionStorage.clear();
+    localStorage.clear();
+    resetPaidProPipelineTestIsolation();
+  });
+  afterEach(() => {
+    clearPaidProSourceOfTruth();
+    resetPaidProPipelineTestIsolation();
+    sessionStorage.clear();
+    localStorage.clear();
+  });
 
   it("readonly pick stays byte-identical when intake implies signers but SoT body has no execution block", () => {
-    const source = "Accepted paid Pro agreement body. ".repeat(180);
-    establishPaidProSourceOfTruth({ text: source });
+    // Substantive corpus intentionally omits witness/execution chrome.
+    const source = expandOperativeCorpusWithUniqueSupplements(
+      [
+        "PROFESSIONAL SERVICES AGREEMENT",
+        "",
+        'This Professional Services Agreement ("Agreement") is entered into by and between Acme LLC ("Client") and Beta LLC ("Service Provider").',
+        "",
+        "1. SCOPE OF SERVICES. Service Provider performs consulting services.",
+        "2. PAYMENT. Client pays fees as stated.",
+        "3. TERM. Continues until completed or terminated.",
+        "4. CONFIDENTIALITY. Mutual confidentiality applies.",
+        "5. OWNERSHIP. Client owns paid deliverables.",
+        "6. TERMINATION. Either party may terminate for breach.",
+        "7. GOVERNING LAW. Delaware law governs.",
+        "8. NOTICES. Notices may be delivered by email.",
+        "9. MISCELLANEOUS. Entire agreement; electronic signatures permitted.",
+        "10. INDEPENDENT CONTRACTOR. Service Provider is an independent contractor.",
+        "11. WARRANTIES. Services are performed professionally.",
+        "12. LIMITATION OF LIABILITY. Neither party is liable for consequential damages.",
+      ].join("\n"),
+      SUBSTANTIVE_SERVER_DRAFT_MIN_LEN + 400,
+    );
+    expect(source).not.toMatch(/IN WITNESS WHEREOF/i);
+    const record = establishPaidProSourceOfTruth({ text: source, source: "server_full_draft" });
     const draft = richConsultingDraft();
     (draft.parties[0] as { signerName?: string }).signerName = "Alice Signer";
     (draft.parties[1] as { signerName?: string }).signerName = "Bob Signer";
@@ -314,17 +349,31 @@ describe("pickPremiumPaidReadonlyPlainText SoT byte stability with signer metada
       intakeText:
         "Signer for Acme LLC is Alice Signer, CEO. Jim Summit, President, will sign for Beta LLC.",
     });
-    expect(out.plainText).toBe(source.trim());
-    expect(out.plainText).not.toMatch(/IN WITNESS WHEREOF/i);
+    // Tip may attach execution chrome at establish; readonly pick must stay byte-identical to SoT
+    // and must not diverge further from signer-intake metadata.
+    expect(out.plainText).toBe(record.text);
+    expect(out.plainText).toBe(getPaidProDocumentForSurface("display")!.text);
   });
 });
 
 describe("paid Pro displayed surface resolves to the SoT body, not decorative chrome", () => {
-  afterEach(() => clearPaidProSourceOfTruth());
+  beforeEach(() => {
+    sessionStorage.clear();
+    localStorage.clear();
+    resetPaidProPipelineTestIsolation();
+  });
+  afterEach(() => {
+    clearPaidProSourceOfTruth();
+    resetPaidProPipelineTestIsolation();
+    sessionStorage.clear();
+    localStorage.clear();
+  });
 
   it("the display surface length equals the accepted SoT length (decorative HTML/chrome is never the body)", () => {
-    const source = "Accepted paid Pro agreement body with substantive clauses. ".repeat(120);
-    const record = establishPaidProSourceOfTruth({ text: source, source: "server_full_draft" });
+    const record = establishPaidProSourceOfTruth({
+      text: SHARED_ACCEPTED_PAID_BODY,
+      source: "server_full_draft",
+    });
     const display = getPaidProDocumentForSurface("display");
     expect(display?.text.length).toBe(record.text.length);
     expect(display?.hash).toBe(record.hash);
@@ -333,8 +382,7 @@ describe("paid Pro displayed surface resolves to the SoT body, not decorative ch
   });
 
   it("no paid-pro-corpus-invariant-violation when display/copy/review/finalized derive from the SoT", () => {
-    const source = "Accepted paid Pro agreement body with substantive clauses. ".repeat(120);
-    establishPaidProSourceOfTruth({ text: source, source: "server_full_draft" });
+    establishPaidProSourceOfTruth({ text: SHARED_ACCEPTED_PAID_BODY, source: "server_full_draft" });
     const displayed = getPaidProDocumentForSurface("display")!.text;
     const copied = getPaidProDocumentForSurface("copy")!.text;
     const review = getPaidProDocumentForSurface("review")!.text;

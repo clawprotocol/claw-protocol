@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, it } from "vitest";
+/** @vitest-environment jsdom */
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { resetPaidProReviewSignerMetadataSessionActiveForTests } from "./paidProReviewRenderSessionGate";
 import { buildPremiumAgreementReadonlyHtml } from "./premiumAgreementDocumentHtml";
 import {
@@ -25,10 +26,48 @@ import {
   getPaidProSourceOfTruthText,
   hashPaidProCorpus,
 } from "./paidProSourceOfTruth";
+import {
+  evaluatePaidProFreezeCandidateGates,
+  preparePaidProFreezeCandidateText,
+} from "./paidProFreezeCandidate";
 import { polishProAgreementDisplayLayer } from "./polishProAgreementDisplayLayer";
 import { resolvePaidProFinalReviewVisiblePlain } from "./authoritativePaidProReview";
 import { applyAcceptedProCorpusSafeDisplay } from "./acceptedProCorpusSafeDisplay";
-const RAW = [
+import { resetPaidProPipelineTestIsolation } from "./paidProPipelineTestIsolation";
+
+/** Substantive clean two-party corpus for SoT establishment (no fused third-party stub). */
+const CLEAN_TWO_PARTY = [
+  "MUTUAL CONSULTING AND IMPLEMENTATION AGREEMENT",
+  "",
+  'This Agreement is between Blue Canyon Analytics LLC ("Client") and Iron Vale Systems Inc. ("Service Provider").',
+  "",
+  ...Array.from(
+    { length: 40 },
+    (_, i) =>
+      `${i + 1}. Operative clause ${i + 1}. Provider delivers AI-assisted reporting workflows, dashboard integrations, and operational automation under Delaware law with commercially reasonable care.`,
+  ),
+  "",
+  "IN WITNESS WHEREOF, the Parties execute this Agreement.",
+  "",
+  "CLIENT:",
+  "Blue Canyon Analytics LLC",
+  "By: __________________________",
+  "Name: Anthem H Blanchard",
+  "Title: Manager",
+  "",
+  "SERVICE PROVIDER:",
+  "Iron Vale Systems Inc",
+  "By: __________________________",
+  "Name: Ira Vale",
+  "Title: Membe",
+].join("\n");
+
+/**
+ * Weak/polluted RAW: non-operative "Section N." headings + fused third-party stub.
+ * Used only to prove section_heading_title_anomaly still rejects at freeze gates
+ * (before establish's pipeline-acceptance latch short-circuit).
+ */
+const POLLUTED_WEAK_FUSED_RAW = [
   "MUTUAL CONSULTING AND IMPLEMENTATION AGREEMENT",
   "",
   'This Agreement is between Blue Canyon Analytics LLC ("Client") and Iron Vale Systems Inc. ("Service Provider").',
@@ -55,6 +94,16 @@ const RAW = [
   "Title: Manager",
 ].join("\n");
 
+/** Polluted substantive corpus retained for fused-repair proofs only (not SoT success). */
+const POLLUTED_FUSED_RAW = [
+  CLEAN_TWO_PARTY,
+  "",
+  QA_FUSED_PARTY_LEGAL_NAME_EXAMPLE,
+  "By: __________________________",
+  "Name: Anthem H Blanchard",
+  "Title: Manager",
+].join("\n");
+
 function authority() {
   return buildLivePaidProSignerMetadataAuthority({
     partyCount: 2,
@@ -70,16 +119,22 @@ function authority() {
 }
 
 describe("paidProReviewRenderCorpus", () => {
+  beforeEach(() => {
+    resetPaidProPipelineTestIsolation();
+    clearPaidProReviewRenderFusedRepairCache();
+  });
+
   afterEach(() => {
     clearPaidProSourceOfTruth();
     clearConsumedPaidProSignerMetadataAuthority();
     resetPaidProReviewSignerMetadataSessionActiveForTests();
     clearPaidProReviewRenderFusedRepairCache();
+    resetPaidProPipelineTestIsolation();
   });
 
   it("guard repairs fused QA pattern before review HTML", () => {
     const auth = authority();
-    const guarded = guardPaidProReviewRenderCorpus(RAW, auth.parties);
+    const guarded = guardPaidProReviewRenderCorpus(POLLUTED_FUSED_RAW, auth.parties);
     expect(guarded.warned).toBe(true);
     expect(guarded.text).not.toContain(QA_FUSED_PARTY_LEGAL_NAME_EXAMPLE);
     const html = buildPremiumAgreementReadonlyHtml(guarded.text, {
@@ -94,9 +149,9 @@ describe("paidProReviewRenderCorpus", () => {
   });
 
   it("review render plain hydrates signer metadata from consumed authority without losing entity blocks", () => {
-    establishPaidProSourceOfTruth({ text: RAW, source: "server_full_draft" });
+    establishPaidProSourceOfTruth({ text: CLEAN_TWO_PARTY, source: "server_full_draft" });
     setConsumedPaidProSignerMetadataAuthority(authority());
-    expect(getPaidProSourceOfTruthText()).toContain(QA_FUSED_PARTY_LEGAL_NAME_EXAMPLE);
+    expect(getPaidProSourceOfTruthText()).not.toContain(QA_FUSED_PARTY_LEGAL_NAME_EXAMPLE);
     const renderPlain = resolvePaidProReviewRenderPlain();
     const copy = getPaidProDocumentForSurface("copy")!.text;
     expect(copy).toBe(renderPlain);
@@ -107,49 +162,44 @@ describe("paidProReviewRenderCorpus", () => {
       expect(corpus).not.toMatch(/Email for Notice:/i);
       expect(corpus).not.toContain(QA_FUSED_PARTY_LEGAL_NAME_EXAMPLE);
     }
-    // Display-boundary repair must not mutate frozen SoT bytes.
-    expect(getPaidProSourceOfTruthText()).toContain(QA_FUSED_PARTY_LEGAL_NAME_EXAMPLE);
   });
 
   it("fused legal-name repair at review boundary is idempotent and leaves valid corpora unchanged", () => {
     const auth = authority();
-    const boundary = repairFusedPartyLegalNamesForReviewDisplay(RAW, auth.parties);
+    const boundary = repairFusedPartyLegalNamesForReviewDisplay(POLLUTED_FUSED_RAW, auth.parties);
     expect(boundary.repaired).toBe(true);
     expect(boundary.text).not.toContain(QA_FUSED_PARTY_LEGAL_NAME_EXAMPLE);
     const againBoundary = repairFusedPartyLegalNamesForReviewDisplay(boundary.text, auth.parties);
     expect(againBoundary.repaired).toBe(false);
     expect(againBoundary.text).toBe(boundary.text);
 
-    const cleanTwoParty = [
-      "MUTUAL CONSULTING AND IMPLEMENTATION AGREEMENT",
-      "",
-      'This Agreement is between Blue Canyon Analytics LLC ("Client") and Iron Vale Systems Inc. ("Service Provider").',
-      "",
-      ...Array.from({ length: 20 }, (_, i) => `Section ${i + 1}. Clause ${i + 1}.`),
-      "",
-      "IN WITNESS WHEREOF, the Parties execute this Agreement.",
-      "",
-      "CLIENT:",
-      "Blue Canyon Analytics LLC",
-      "By: __________________________",
-      "Name: Anthem H Blanchard",
-      "Title: Manager",
-      "",
-      "SERVICE PROVIDER:",
-      "Iron Vale Systems Inc",
-      "By: __________________________",
-      "Name: Ira Vale",
-      "Title: Membe",
-    ].join("\n");
-    const noop = repairFusedPartyLegalNamesForReviewDisplay(cleanTwoParty, auth.parties);
+    const noop = repairFusedPartyLegalNamesForReviewDisplay(CLEAN_TWO_PARTY, auth.parties);
     expect(noop.repaired).toBe(false);
-    expect(noop.text).toBe(cleanTwoParty.replace(/\r\n/g, "\n").trimEnd());
+    expect(noop.text).toBe(CLEAN_TWO_PARTY.replace(/\r\n/g, "\n"));
+  });
+
+  it("rejects polluted/weak RAW with fused third-party stub at freeze gates", () => {
+    // Prove the gate itself — establish() latches pipeline acceptance before freeze
+    // evaluation and can short-circuit; do not weaken section_heading_title_anomaly.
+    const prep = preparePaidProFreezeCandidateText({
+      text: POLLUTED_WEAK_FUSED_RAW,
+      source: "server_full_draft",
+      surface: "rrc_polluted_weak_reject",
+    });
+    const gate = evaluatePaidProFreezeCandidateGates(prep, {
+      text: POLLUTED_WEAK_FUSED_RAW,
+      source: "server_full_draft",
+      surface: "rrc_polluted_weak_reject",
+    });
+    expect(gate.ok).toBe(false);
+    expect(gate.rejectReason).toBe("section_heading_title_anomaly");
+    expect(hasPaidProSourceOfTruth()).toBe(false);
   });
 
   it("visible plain prefers hydrated authoritative display over polished boundary candidate", () => {
-    establishPaidProSourceOfTruth({ text: RAW, source: "server_full_draft" });
+    establishPaidProSourceOfTruth({ text: CLEAN_TWO_PARTY, source: "server_full_draft" });
     setConsumedPaidProSignerMetadataAuthority(authority());
-    const polished = polishProAgreementDisplayLayer(RAW, {
+    const polished = polishProAgreementDisplayLayer(CLEAN_TWO_PARTY, {
       reviewDisplayMode: true,
       retainSignatureExecutionBlock: true,
     }).text;
@@ -164,7 +214,7 @@ describe("paidProReviewRenderCorpus", () => {
   });
 
   it("review render keeps canonical execution blocks after SoT freeze", () => {
-    establishPaidProSourceOfTruth({ text: RAW, source: "server_full_draft" });
+    establishPaidProSourceOfTruth({ text: CLEAN_TWO_PARTY, source: "server_full_draft" });
     setConsumedPaidProSignerMetadataAuthority(authority());
     const renderPlain = resolvePaidProReviewRenderPlain();
     expect(renderPlain).toMatch(/CLIENT:\s*\n\s*Blue Canyon Analytics LLC/i);
@@ -257,7 +307,7 @@ describe("paidProReviewRenderCorpus", () => {
   });
 
   it("review and copy surfaces stay hash-equivalent when only SoT is established", () => {
-    establishPaidProSourceOfTruth({ text: RAW, source: "server_full_draft" });
+    establishPaidProSourceOfTruth({ text: CLEAN_TWO_PARTY, source: "server_full_draft" });
     const record = getPaidProSourceOfTruth()!;
     const review = resolvePaidProReviewRenderPlain();
     const copy = getPaidProDocumentForSurface("copy")!.text;
@@ -269,9 +319,13 @@ describe("paidProReviewRenderCorpus", () => {
   });
 
   it("user-approved SoT revision stays byte-aligned on review and copy when authority is not consumed", () => {
-    establishPaidProSourceOfTruth({ text: RAW, source: "server_full_draft" });
-    const edited = RAW.replace(/Title: Membe/g, "Title: Member");
-    establishPaidProSourceOfTruth({ text: edited, source: "server_full_draft", allowShorterOverwrite: true });
+    establishPaidProSourceOfTruth({ text: CLEAN_TWO_PARTY, source: "server_full_draft" });
+    const edited = CLEAN_TWO_PARTY.replace(/Title: Membe/g, "Title: Member");
+    establishPaidProSourceOfTruth({
+      text: edited,
+      source: "server_full_draft",
+      allowShorterOverwrite: true,
+    });
     const record = getPaidProSourceOfTruth()!;
     const renderPlain = resolvePaidProReviewRenderPlain();
     const copy = getPaidProDocumentForSurface("copy")!.text;

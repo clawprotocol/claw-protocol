@@ -1,3 +1,4 @@
+import { SHARED_ACCEPTED_PAID_BODY } from "./paidProSharedFixtureSystem";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import { buildAgreementPreviewTextCore } from "./agreementPreviewFromDraft";
@@ -64,7 +65,7 @@ describe("premiumApiHandoff", () => {
   });
 
   it("extractPremiumApiServerCorpusText prefers server_full_document_text then document_text", () => {
-    const long = "x".repeat(600);
+    const long = SHARED_ACCEPTED_PAID_BODY;
     expect(
       extractPremiumApiServerCorpusText({
         server_full_document_text: long,
@@ -93,7 +94,7 @@ describe("premiumApiHandoff", () => {
     logPremiumApiResultFromWire({
       ok: true,
       status: 200,
-      wire: { server_full_document_text: "x".repeat(600) },
+      wire: { server_full_document_text: SHARED_ACCEPTED_PAID_BODY },
     });
     expect(info).not.toHaveBeenCalled();
   });
@@ -103,7 +104,7 @@ describe("premiumApiHandoff", () => {
   });
 
   it("hasPaidProChromeAuthority is true after establishPaidProSourceOfTruth", () => {
-    establishPaidProSourceOfTruth({ text: "Paid Pro server agreement. ".repeat(200), source: "server_full_draft" });
+    establishPaidProSourceOfTruth({ text: SHARED_ACCEPTED_PAID_BODY, source: "server_full_draft" });
     expect(hasPaidProChromeAuthority({ draft: servicesDraft() })).toBe(true);
   });
 

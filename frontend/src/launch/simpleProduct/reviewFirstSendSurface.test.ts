@@ -1,3 +1,4 @@
+import { SHARED_ACCEPTED_PAID_BODY } from "../../components/agreements/paidProSharedFixtureSystem";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -62,7 +63,7 @@ describe("reviewFirstSendSurface", () => {
   it("shouldRenderPaidProReviewFirstSendSurface is false for signature intent", () => {
     const draft = {
       premium_render_source: "server_full_document_text",
-      server_full_document_text: "x".repeat(700),
+      server_full_document_text: SHARED_ACCEPTED_PAID_BODY,
     } as AgreementDraft;
     expect(
       shouldRenderPaidProReviewFirstSendSurface({

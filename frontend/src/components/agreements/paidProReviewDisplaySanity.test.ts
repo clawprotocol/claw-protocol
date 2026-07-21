@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, it } from "vitest";
+/** @vitest-environment jsdom */
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   detectProReviewDisplaySanityViolations,
   sanitizeProReviewDisplayText,
@@ -10,6 +11,7 @@ import {
 } from "./paidProSourceOfTruth";
 import { resolvePaidProReviewRenderPlain } from "./paidProReviewRenderCorpus";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
+import { resetPaidProPipelineTestIsolation } from "./paidProPipelineTestIsolation";
 
 const structured: ParsedDraftShape = {
   title: "Mutual Consulting and Implementation Agreement",
@@ -54,8 +56,12 @@ function validPostSotExecutionCorpus(): string {
 }
 
 describe("paidProReviewDisplaySanity", () => {
+  beforeEach(() => {
+    resetPaidProPipelineTestIsolation();
+  });
   afterEach(() => {
     clearPaidProSourceOfTruth();
+    resetPaidProPipelineTestIsolation();
   });
 
   it("valid post-SoT execution block does not trigger display sanity violations", () => {
@@ -123,21 +129,35 @@ describe("paidProReviewDisplaySanity", () => {
   it("server_full_draft SoT display remains hash-stable after review render resolve", () => {
     const intake =
       "Services between Blue Canyon Analytics LLC and Iron Vale Systems Inc for AI workflow implementation $8500 Delaware";
-    let body = [
+    // Substantive clean two-party corpus — thin fixtures trip SoT gates / session isolation.
+    const body = [
       "MUTUAL CONSULTING AND IMPLEMENTATION AGREEMENT",
       "",
-      "Blue Canyon Analytics LLC (Client) and Iron Vale Systems Inc. (Service Provider).",
+      'This Agreement is between Blue Canyon Analytics LLC ("Client") and Iron Vale Systems Inc. ("Service Provider").',
       "Delaware law. Fixed fee $8,500.",
       "",
-      ...Array.from({ length: 8 }, (_, i) => `${i + 1}. Operative clause ${i + 1}.`),
+      ...Array.from(
+        { length: 40 },
+        (_, i) =>
+          `${i + 1}. Operative clause ${i + 1}. Provider delivers AI-assisted reporting workflows, dashboard integrations, and operational automation under Delaware law.`,
+      ),
       "",
-      "IN WITNESS WHEREOF",
-      "CLIENT: Blue Canyon Analytics LLC",
-      "SERVICE PROVIDER: Iron Vale Systems Inc.",
+      "IN WITNESS WHEREOF, the Parties execute this Agreement.",
+      "",
+      "CLIENT:",
+      "Blue Canyon Analytics LLC",
+      "By: __________________________",
+      "Name: __________________________",
+      "Title: _________________________",
+      "Date: _____________________________",
+      "",
+      "SERVICE PROVIDER:",
+      "Iron Vale Systems Inc.",
+      "By: __________________________",
+      "Name: __________________________",
+      "Title: _________________________",
+      "Date: _____________________________",
     ].join("\n");
-    while (body.length < 6_500) {
-      body += "\n9. Additional operative clause for acceptance gates.";
-    }
     const record = establishPaidProSourceOfTruth({
       text: body,
       source: "server_full_draft",

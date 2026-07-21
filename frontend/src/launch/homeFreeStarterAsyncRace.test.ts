@@ -32,21 +32,25 @@ import {
 import type { ParsedDraftShape } from "../components/agreements/intakeSmartDefaults";
 import { resolvePremiumRenderSource } from "../components/agreements/premiumRenderSourceResolver";
 import { initializeNewAgreementSession } from "./newAgreementSessionReset";
+import { resetPaidProPremiumRecipientHandoffReadGateForTests } from "../components/agreements/paidProPremiumRecipientHandoffReadGate";
+import { resetSignerMetadataEffectiveMaxForTests } from "../components/agreements/signerMetadataEffective";
 
-const TEST332_INTAKE = [
-  "Create a consulting agreement",
-  'between Red Mesa Logistics, LLC ("party_a") and Harbor Peak Automation, LLC ("party_b")',
-  "for AI workflow setup.",
-  "Oklahoma law governs.",
-].join(" ");
+import {
+  buildStarterIsolationProDraft,
+  buildStarterIsolationSubstantiveProCorpus,
+  STARTER_ISOLATION_HARBOR_PEAK,
+  STARTER_ISOLATION_RED_MESA,
+  STARTER_ISOLATION_TWO_PARTY_INTAKE,
+} from "./starterIsolationFixtures";
 
-const PRO_BODY = `CONSULTING AGREEMENT between Red Mesa Logistics LLC and Harbor Peak Automation LLC. ${"x".repeat(900)}`;
-const SERVER_FULL_DRAFT = PRO_BODY;
+const SERVER_FULL_DRAFT = buildStarterIsolationSubstantiveProCorpus();
 
 describe("homeFreeStarterAsyncRace (test332)", () => {
   beforeEach(() => {
     sessionStorage.clear();
     vi.spyOn(console, "info").mockImplementation(() => {});
+    resetPaidProPremiumRecipientHandoffReadGateForTests();
+    resetSignerMetadataEffectiveMaxForTests();
     clearPaidProSourceOfTruth();
     clearCurrentSessionProEntitlementMarkers();
     clearPremiumPartyNamesHandoff();
@@ -76,7 +80,7 @@ describe("homeFreeStarterAsyncRace (test332)", () => {
         ],
         premium_server_full_document_text: SERVER_FULL_DRAFT,
       } as ParsedDraftShape,
-      intakeText: TEST332_INTAKE,
+      intakeText: STARTER_ISOLATION_TWO_PARTY_INTAKE,
       serverFullDocumentText: SERVER_FULL_DRAFT,
       premiumWinningCorpusFallback: SERVER_FULL_DRAFT,
       paidAuthoritativeProBody: SERVER_FULL_DRAFT,
@@ -139,7 +143,11 @@ describe("homeFreeStarterAsyncRace (test332)", () => {
     markCurrentSessionFreeStarterIntent();
     markCurrentSessionProIntent();
     markCurrentSessionProEntitlementComplete({ source: "qa_bypass" });
-    establishPaidProSourceOfTruth({ text: SERVER_FULL_DRAFT, source: "server_full_draft" });
+    establishPaidProSourceOfTruth({
+      text: SERVER_FULL_DRAFT,
+      source: "server_full_draft",
+      draft: buildStarterIsolationProDraft(),
+    });
     expect(hasPaidProSourceOfTruth()).toBe(true);
     const chrome = resolveReviewShellChrome({
       isFreeStreamlineDraftReview: false,
@@ -155,9 +163,9 @@ describe("homeFreeStarterAsyncRace (test332)", () => {
 
   it("test330 party normalization stays at exactly two parties", () => {
     markCurrentSessionFreeStarterIntent();
-    expect(extractBetweenPartyNameList(TEST332_INTAKE)).toEqual([
-      "Red Mesa Logistics LLC",
-      "Harbor Peak Automation LLC",
+    expect(extractBetweenPartyNameList(STARTER_ISOLATION_TWO_PARTY_INTAKE)).toEqual([
+      STARTER_ISOLATION_RED_MESA,
+      STARTER_ISOLATION_HARBOR_PEAK,
     ]);
     const manifest = resolveCanonicalFinalPartyManifest({
       sendMode: "review",
@@ -170,7 +178,7 @@ describe("homeFreeStarterAsyncRace (test332)", () => {
       draftPartyNames: ["Red Mesa Logistics", "LLC", "Harbor Peak Automation"],
       partySignerNames: ["", ""],
       extraPartyReviewEmails: [],
-      intakeText: TEST332_INTAKE,
+      intakeText: STARTER_ISOLATION_TWO_PARTY_INTAKE,
     });
     expect(manifest.parties).toHaveLength(2);
   });

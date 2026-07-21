@@ -1,3 +1,4 @@
+import { SHARED_ACCEPTED_PAID_BODY } from "./paidProSharedFixtureSystem";
 import { describe, expect, it } from "vitest";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import { repairDuplicateAgreementOpening } from "./canonicalPartyIdentityResolver";
@@ -59,7 +60,7 @@ function longProBody(minLen = 2_700): string {
 
 describe("premiumAuthoritativeBodyPreservation", () => {
   it("blocks material shrink of accepted winning body", () => {
-    const winning = "x".repeat(2_700);
+    const winning = SHARED_ACCEPTED_PAID_BODY;
     const short = "y".repeat(880);
     const r = coalesceAuthoritativePremiumBody({
       preservedBody: winning,
@@ -72,7 +73,7 @@ describe("premiumAuthoritativeBodyPreservation", () => {
   });
 
   it("allows validated repair success even when shorter", () => {
-    const winning = "x".repeat(2_700);
+    const winning = SHARED_ACCEPTED_PAID_BODY;
     const repaired = "z".repeat(2_000);
     const r = coalesceAuthoritativePremiumBody({
       preservedBody: winning,

@@ -44,8 +44,9 @@ export function buildTest494ThreePartySection10Corpus(): string {
     "",
     `This Agreement is entered into among ${TEST490_STONEBRIDGE}, ${TEST490_NOVAPATH}, and ${TEST490_CLEARSPRING} (each a "Party").`,
     "",
-    "1. LICENSE GRANT",
-    "Stonebridge grants NovaPath a license to adapt and host the original wellness materials.",
+    "1. INTELLECTUAL PROPERTY AND LICENSE GRANT",
+    "Stonebridge retains ownership of all intellectual property embodied in the original wellness materials.",
+    "Stonebridge grants NovaPath a non-exclusive license to adapt, reproduce, and host such intellectual property for the Platform.",
     "",
     "2. REVENUE SHARING",
     "Subscription revenue is allocated 45% to Stonebridge, 35% to NovaPath, and 20% to ClearSpring.",
@@ -108,6 +109,16 @@ export function buildTest494ThreePartySection10Corpus(): string {
   const witnessIdx = body.search(/\bIN WITNESS WHEREOF\b/i);
   const insertAt = witnessIdx >= 0 ? witnessIdx : body.length;
   return `${body.slice(0, insertAt)}${pad}${body.slice(insertAt)}`;
+}
+
+export function buildTest494ThreePartySection10CorpusWithoutOperativeIp(): string {
+  const complete = buildTest494ThreePartySection10Corpus();
+  return complete
+    .replace(
+      /1\. INTELLECTUAL PROPERTY AND LICENSE GRANT[\s\S]*?(?=\n\n2\. REVENUE SHARING)/i,
+      "1. LICENSE GRANT\nStonebridge grants NovaPath a license to adapt and host the original wellness materials.",
+    )
+    .replace(/\bINTELLECTUAL PROPERTY\b/gi, "LICENSE");
 }
 
 export function test494Draft() {

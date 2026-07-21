@@ -9,6 +9,7 @@ import {
 } from "./agreementIntakeStorage";
 import { persistStarterReviewBeforeCheckout } from "./checkoutBackRestore";
 import { establishPaidProSourceOfTruth, clearPaidProSourceOfTruth } from "./paidProSourceOfTruth";
+import { SHARED_ACCEPTED_PAID_BODY } from "./paidProSharedFixtureSystem";
 import {
   logReviewRefreshRegenerationSkipped,
   shouldHydrateStoredAgreementResumeId,
@@ -83,7 +84,7 @@ describe("createReviewRefreshRestore", () => {
   it("shouldRestoreStoredCreateReviewDraftSnapshot is false when paid SoT exists", () => {
     writeCreateReviewDraftReadyMarker();
     establishPaidProSourceOfTruth({
-      text: `Paid agreement. ${"x".repeat(600)}`,
+      text: SHARED_ACCEPTED_PAID_BODY,
       source: "server_full_draft",
     });
     expect(shouldRestoreStoredCreateReviewDraftSnapshot()).toBe(false);
@@ -95,7 +96,7 @@ describe("createReviewRefreshRestore", () => {
   it("shouldSkipHomeAutoGenerateForStoredReview is true when paid SoT blocks starter downgrade", () => {
     writeCreateReviewDraftReadyMarker();
     establishPaidProSourceOfTruth({
-      text: `Paid agreement. ${"x".repeat(600)}`,
+      text: SHARED_ACCEPTED_PAID_BODY,
       source: "server_full_draft",
     });
     expect(shouldSkipHomeAutoGenerateForStoredReview()).toBe(true);
@@ -106,7 +107,7 @@ describe("createReviewRefreshRestore", () => {
 
   it("fresh homepage hero handoff bypasses stale paid SoT auto-generate skip", () => {
     establishPaidProSourceOfTruth({
-      text: `Paid agreement. ${"x".repeat(600)}`,
+      text: SHARED_ACCEPTED_PAID_BODY,
       source: "server_full_draft",
     });
     expect(shouldSkipHomeAutoGenerateForStoredReview({ freshHomeHeroHandoff: true })).toBe(false);

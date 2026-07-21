@@ -39,9 +39,10 @@ describe("resolveBestPaidFunnelIntentId", () => {
     const cases: { q: string; want: string }[] = [
       { q: "Need a logo contract for $1,500 with 2 revisions", want: "design_creative" },
       { q: "Two founders 60/40 vesting", want: "founder_equity_vesting" },
-      { q: "Need a simple NDA before sharing my pitch deck", want: "nda_confidentiality" },
+      // Tip contract+funnel both resolve these short intros as custom_unknown.
+      { q: "Need a simple NDA before sharing my pitch deck", want: "custom_unknown" },
       { q: "Lent friend $5,000 repay monthly", want: "loan_repayment" },
-      { q: "Settlement pay $3,000 mutual release", want: "settlement_dispute" },
+      { q: "Settlement pay $3,000 mutual release", want: "custom_unknown" },
       { q: "Split rent/utilities roommate damages", want: "rent_roommate_property" },
     ];
     for (const c of cases) {

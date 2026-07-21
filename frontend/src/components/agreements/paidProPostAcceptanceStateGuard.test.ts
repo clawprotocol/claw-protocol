@@ -22,7 +22,15 @@ import {
 } from "./authoritativeAgreementDocument";
 import { resolvePaidProSignerDetailsGate } from "./signerSetupPartyIdentity";
 
-const PAID_BODY = `PRO AGREEMENT. ${"Substantive clause. ".repeat(900)}`;
+import { SHARED_ACCEPTED_PAID_BODY } from "./paidProSharedFixtureSystem";
+import { expandOperativeCorpusWithUniqueSupplements } from "./paidProSupplementalProvisionsFillerGate";
+import { SUBSTANTIVE_SERVER_DRAFT_MIN_LEN } from "./premiumAcceptancePolicy";
+
+/** Substantive post-normalization fixture; hash assertions use established SoT bytes. */
+const PAID_BODY = expandOperativeCorpusWithUniqueSupplements(
+  SHARED_ACCEPTED_PAID_BODY,
+  SUBSTANTIVE_SERVER_DRAFT_MIN_LEN + 1600,
+);
 
 describe("paidProPostAcceptanceStateGuard", () => {
   afterEach(() => {
@@ -56,10 +64,11 @@ describe("paidProPostAcceptanceStateGuard", () => {
 
   it("review/signer/reviewer hashes stay stable from SoT across recipient_setup_required phase", () => {
     const record = establishPaidProSourceOfTruth({ text: PAID_BODY, source: "server_full_draft" });
-    const reviewHash = fingerprintAgreementBody(PAID_BODY);
+    const reviewHash = fingerprintAgreementBody(record.text);
     const delivery = resolveProDeliveryTrackCanonicalCorpus();
     expect(delivery.hash).toBe(record.hash);
     expect(reviewHash).toBe(fingerprintAgreementBody(getPaidProSourceOfTruth()?.text ?? ""));
+    expect(reviewHash).toBe(record.hash);
     expect(
       canChooseProDeliveryTrack({
         isPaidPro: true,

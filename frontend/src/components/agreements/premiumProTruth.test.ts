@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+/** @vitest-environment jsdom */
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { resolveAgreementIntentContract } from "./agreementIntentContract";
 import {
   computeProTruthSurface,
@@ -7,13 +8,41 @@ import {
   validateProTruthReadonlyText,
 } from "./premiumProTruth";
 import { validatePaidProOutput } from "./paidProCorpusAcceptance";
+import { resetPaidProPipelineTestIsolation } from "./paidProPipelineTestIsolation";
+import { expandOperativeCorpusWithUniqueSupplements } from "./paidProSupplementalProvisionsFillerGate";
+import { SUBSTANTIVE_SERVER_DRAFT_MIN_LEN } from "./premiumAcceptancePolicy";
 
 const intake = "SaaS website for Client A and Developer B in Oklahoma, $5000, May 2026.";
 
+const saasSubstantiveBody = () =>
+  expandOperativeCorpusWithUniqueSupplements(
+    [
+      "WHEREAS parties agree.",
+      "",
+      "1. Services for SaaS website in Oklahoma with milestones.",
+      "2. Fees $5000 May 2026.",
+      "3. IP and confidentiality.",
+      "4. Termination.",
+      "5. Law Oklahoma.",
+    ].join("\n"),
+    SUBSTANTIVE_SERVER_DRAFT_MIN_LEN + 400,
+  );
+
 describe("premiumProTruth (canonical surface)", () => {
+  beforeEach(() => {
+    sessionStorage.clear();
+    localStorage.clear();
+    resetPaidProPipelineTestIsolation();
+  });
+  afterEach(() => {
+    resetPaidProPipelineTestIsolation();
+    sessionStorage.clear();
+    localStorage.clear();
+  });
+
   it("validateProTruthReadonlyText matches validatePaidProOutput", () => {
     const c = resolveAgreementIntentContract(intake);
-    const text = "x".repeat(3000);
+    const text = saasSubstantiveBody();
     const a = validateProTruthReadonlyText({
       text,
       rawIntake: intake,
@@ -33,9 +62,7 @@ describe("premiumProTruth (canonical surface)", () => {
 
   it("computeProTruthSurface: server_full_document_text + validated body yields premium_success gate", () => {
     const c = resolveAgreementIntentContract(intake);
-    const body =
-      "WHEREAS parties agree.\n\n1. Services for SaaS website in Oklahoma with milestones.\n2. Fees $5000 May 2026.\n3. IP and confidentiality.\n4. Termination.\n5. Law Oklahoma.\n\n" +
-      "x".repeat(4500);
+    const body = saasSubstantiveBody();
     const v = validatePaidProOutput({
       text: body,
       rawIntake: intake,

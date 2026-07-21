@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+/** @vitest-environment jsdom */
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { buildAgreementPreviewTextCore } from "./agreementPreviewFromDraft";
 import { resolveCanonicalFinalPartyManifest } from "./guidedDealCompletion/canonicalFinalPartyManifest";
 import {
@@ -30,6 +31,8 @@ import {
 import { legalPartyIdentitiesExcludingCoordinator, normalizePartyIdentities, createCoordinatorProfile } from "./canonicalPartyIdentityModel";
 import { PAID_PRO_HARDENING_CLIENT, PAID_PRO_HARDENING_PROVIDER } from "./qa/paidProHardening/paidProHardeningFixtures";
 import { shouldUseAuthorityEntityExecutionHeadings } from "./paidProSignerMetadataAuthority";
+import { resetFreeStarterIdentityTestIsolation } from "./freeStarterIdentityTestIsolation";
+import { resetPaidProPipelineTestIsolation } from "./paidProPipelineTestIsolation";
 
 const TEST367_TRIPARTITE_LABELED_PARTIES_INTAKE = `Create a TRIPARTITE SOFTWARE DEVELOPMENT AND REVENUE SHARING AGREEMENT.
 
@@ -162,6 +165,15 @@ function buildQuadWitnessCorpus(): string {
 }
 
 describe("Test371 quadrpartite labeled parties regression", () => {
+  beforeEach(() => {
+    resetFreeStarterIdentityTestIsolation();
+    resetPaidProPipelineTestIsolation();
+  });
+  afterEach(() => {
+    resetFreeStarterIdentityTestIsolation();
+    resetPaidProPipelineTestIsolation();
+  });
+
   it("parses four labeled party blocks and excludes coordinator contamination", () => {
     expect(isQuadripartiteLabeledPartiesIntake(TEST371_QUADRIPARTITE_LABELED_PARTIES_INTAKE)).toBe(true);
     expect(labeledPartyLegalEntities(TEST371_QUADRIPARTITE_LABELED_PARTIES_INTAKE)).toEqual([

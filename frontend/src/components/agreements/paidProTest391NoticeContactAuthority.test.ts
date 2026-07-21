@@ -1,3 +1,4 @@
+/** @vitest-environment jsdom */
 import { afterEach, describe, expect, it } from "vitest";
 import { applyAcceptedProCorpusSafeDisplay } from "./acceptedProCorpusSafeDisplay";
 import { applyPaidProReviewRenderSanitizer } from "./paidProReviewRenderCorpus";

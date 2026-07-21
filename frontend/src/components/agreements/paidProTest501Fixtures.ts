@@ -14,7 +14,9 @@ export const TEST501_INTAKE = [
 export const TEST501_STARTER_PREVIEW =
   "Starter preview between Red Mesa and Harbor Peak. ".repeat(12);
 
-export const TEST501_ACCEPTED_PAID_BODY = `PROFESSIONAL SERVICES AGREEMENT between ${TEST501_RED_MESA} and ${TEST501_HARBOR_PEAK}. ${"Substantive paid clause with Delaware governing law and $96,000 fee. ".repeat(95)}`;
+import { buildTwoPartyProfessionalServicesCorpus } from "./paidProSharedFixtureSystem";
+
+export const TEST501_ACCEPTED_PAID_BODY = buildTwoPartyProfessionalServicesCorpus();
 
 export function test501Draft(starterBody: string, paidBody: string): ParsedDraftShape {
   return {

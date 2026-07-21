@@ -16,6 +16,10 @@ import {
   clearPremiumPartyNamesHandoff,
   writePremiumRecipientHandoffExact,
 } from "../components/agreements/premiumPartyNamesHandoff";
+import {
+  markCurrentSessionProEntitlementComplete,
+  markCurrentSessionProIntent,
+} from "../components/agreements/paidProSessionEligibility";
 import { markPaidPremiumCompletionSession, hasPaidPremiumCompletionSession } from "../components/agreements/premiumCompletionStorage";
 import {
   clearStalePaidProAuthorityForFreshFreeStarter,
@@ -23,15 +27,12 @@ import {
 } from "./newAgreementSessionReset";
 import { writeCreateReviewDraftReadyMarker } from "../components/agreements/agreementIntakeStorage";
 
-const TEST331_INTAKE = [
-  "Create a consulting agreement",
-  'between Red Mesa Logistics, LLC ("party_a") and Harbor Peak Automation, LLC ("party_b")',
-  "for AI workflow setup.",
-  "Oklahoma law governs.",
-].join(" ");
-
-const RED_MESA = "Red Mesa Logistics LLC";
-const HARBOR_PEAK = "Harbor Peak Automation LLC";
+import {
+  buildStarterIsolationSubstantiveProCorpus,
+  STARTER_ISOLATION_HARBOR_PEAK,
+  STARTER_ISOLATION_RED_MESA,
+  STARTER_ISOLATION_TWO_PARTY_INTAKE,
+} from "./starterIsolationFixtures";
 
 describe("homeFreeStarterFlowIsolation (test331)", () => {
   beforeEach(() => {
@@ -47,8 +48,10 @@ describe("homeFreeStarterFlowIsolation (test331)", () => {
   });
 
   it("initializeNewAgreementSession clears stale paid Pro SoT from prior QA tab session", () => {
+    markCurrentSessionProIntent();
+    markCurrentSessionProEntitlementComplete({ source: "qa_bypass" });
     establishPaidProSourceOfTruth({
-      text: `Prior Pro rewrite corpus. ${"x".repeat(700)}`,
+      text: buildStarterIsolationSubstantiveProCorpus(),
       source: "server_full_draft",
     });
     markPaidPremiumCompletionSession({ source: "qa_bypass" });
@@ -70,20 +73,23 @@ describe("homeFreeStarterFlowIsolation (test331)", () => {
     expect(sessionStorage.getItem("claw_premium_recipient_handoff_v2")).toBeNull();
   });
 
-  it("fresh homepage hero handoff does not skip auto-generate solely because stale paid SoT exists", () => {
+  function establishStalePaidProSoTForIsolation(): void {
+    markCurrentSessionProIntent();
+    markCurrentSessionProEntitlementComplete({ source: "qa_bypass" });
     establishPaidProSourceOfTruth({
-      text: `Stale paid corpus. ${"x".repeat(700)}`,
+      text: buildStarterIsolationSubstantiveProCorpus(),
       source: "server_full_draft",
     });
+  }
+
+  it("fresh homepage hero handoff does not skip auto-generate solely because stale paid SoT exists", () => {
+    establishStalePaidProSoTForIsolation();
     expect(shouldSkipHomeAutoGenerateForStoredReview()).toBe(true);
     expect(shouldSkipHomeAutoGenerateForStoredReview({ freshHomeHeroHandoff: true })).toBe(false);
   });
 
   it("resetStalePaidReviewShellForFreeStarter clears paid authority for home_create_submit", () => {
-    establishPaidProSourceOfTruth({
-      text: `Stale paid corpus. ${"x".repeat(700)}`,
-      source: "server_full_draft",
-    });
+    establishStalePaidProSoTForIsolation();
     resetStalePaidReviewShellForFreeStarter("home_create_submit");
     expect(hasPaidProSourceOfTruth()).toBe(false);
     expect(
@@ -100,16 +106,16 @@ describe("homeFreeStarterFlowIsolation (test331)", () => {
 
   it("shouldRestoreStoredCreateReviewDraftSnapshot stays false when paid SoT blocks restore", () => {
     writeCreateReviewDraftReadyMarker();
-    establishPaidProSourceOfTruth({
-      text: `Paid corpus. ${"x".repeat(700)}`,
-      source: "server_full_draft",
-    });
+    establishStalePaidProSoTForIsolation();
     expect(shouldRestoreStoredCreateReviewDraftSnapshot()).toBe(false);
   });
 
   it("test331 prompt resolves exactly two parties and manifest stays at two slots", () => {
     clearStalePaidProAuthorityForFreshFreeStarter();
-    expect(extractBetweenPartyNameList(TEST331_INTAKE)).toEqual([RED_MESA, HARBOR_PEAK]);
+    expect(extractBetweenPartyNameList(STARTER_ISOLATION_TWO_PARTY_INTAKE)).toEqual([
+      STARTER_ISOLATION_RED_MESA,
+      STARTER_ISOLATION_HARBOR_PEAK,
+    ]);
     const manifest = resolveCanonicalFinalPartyManifest({
       sendMode: "review",
       recipientsDeferred: false,
@@ -121,10 +127,10 @@ describe("homeFreeStarterFlowIsolation (test331)", () => {
       draftPartyNames: ["Red Mesa Logistics", "LLC", "Harbor Peak Automation"],
       partySignerNames: ["", ""],
       extraPartyReviewEmails: [],
-      intakeText: TEST331_INTAKE,
+      intakeText: STARTER_ISOLATION_TWO_PARTY_INTAKE,
     });
     expect(manifest.parties).toHaveLength(2);
-    expect(manifest.parties[0]?.partyName).toBe(RED_MESA);
-    expect(manifest.parties[1]?.partyName).toBe(HARBOR_PEAK);
+    expect(manifest.parties[0]?.partyName).toBe(STARTER_ISOLATION_RED_MESA);
+    expect(manifest.parties[1]?.partyName).toBe(STARTER_ISOLATION_HARBOR_PEAK);
   });
 });

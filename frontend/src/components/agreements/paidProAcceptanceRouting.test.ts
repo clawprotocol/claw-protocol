@@ -1,6 +1,7 @@
+/** @vitest-environment jsdom */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { clearCreateReviewDraftReadyMarker, writeCreateReviewDraftReadyMarker } from "./agreementIntakeStorage";
 import {
   hasAcceptedPaidProAuthority,
@@ -59,15 +60,29 @@ import {
 import { isAuthoritativePremiumPipelineRenderSource } from "./premiumRenderSourceResolver";
 import type { PremiumCompletionResult } from "./premiumCompletionPipeline";
 
-const PAID_BODY = `PRO AGREEMENT. ${"Substantive clause. ".repeat(900)}`;
+import { SHARED_ACCEPTED_PAID_BODY } from "./paidProSharedFixtureSystem";
+import { expandOperativeCorpusWithUniqueSupplements } from "./paidProSupplementalProvisionsFillerGate";
+import { SUBSTANTIVE_SERVER_DRAFT_MIN_LEN } from "./premiumAcceptancePolicy";
+import { resetPaidProPipelineTestIsolation } from "./paidProPipelineTestIsolation";
+
+/** Substantive post-normalization fixture (>10000 after tip prepare). */
+const PAID_BODY = expandOperativeCorpusWithUniqueSupplements(
+  SHARED_ACCEPTED_PAID_BODY,
+  SUBSTANTIVE_SERVER_DRAFT_MIN_LEN + 1600,
+);
 
 describe("paidProAcceptanceRouting", () => {
+  beforeEach(() => {
+    resetPaidProPipelineTestIsolation();
+  });
+
   afterEach(() => {
     clearPaidProSourceOfTruth();
     clearCreateReviewDraftReadyMarker();
     clearAuthoritativeSigningSnapshot();
     clearConsumedPaidProSignerMetadataAuthority();
     clearPaidProPinnedSignerAppliedCorpus();
+    resetPaidProPipelineTestIsolation();
   });
 
   it("resolvePaidProAcceptanceRoutingMarkers active for server_full_draft over 10k", () => {
@@ -467,7 +482,10 @@ describe("paidProAcceptanceRouting", () => {
       expect(intake).toContain("PAID_PRO_INLINE_SIGNER_SECTION_TITLE");
       expect(intake).toContain("PAID_PRO_INLINE_SIGNER_SECTION_BODY");
       expect(intake).toContain("suppressPostDocumentScrollSpacer");
-      expect(intake).toContain("suppressFinalReviewActions={paidProCanonicalReviewSignerSetupActive}");
+      // Tip wires an OR with forced first-review track chooser; keep the canonical latch term.
+      expect(intake).toMatch(
+        /suppressFinalReviewActions=\{\s*paidProCanonicalReviewSignerSetupActive/,
+      );
       expect(intake).not.toMatch(
         /paidProCanonicalReviewSignerSetupActive[\s\S]{0,400}PaidProSignerSetupOrientationBanner/,
       );
@@ -487,7 +505,7 @@ describe("paidProAcceptanceRouting", () => {
         "const handleGuidedBackToSignerDetailsFromFinalReview = React.useCallback(",
       );
       expect(start).toBeGreaterThan(-1);
-      const block = intake.slice(start, start + 1800);
+      const block = intake.slice(start, start + 4500);
       expect(block).toContain("paidProSignerDetailsGate.firstIncompleteFieldKey");
       expect(block).toContain("focusVisibleRecipientInput(focusKey)");
       expect(block).toContain("claw-paid-pro-inline-signer-setup");
@@ -630,29 +648,32 @@ describe("paidProAcceptanceRouting", () => {
 
   describe("duplicate premium-request race: first authoritative success wins", () => {
     // A full server document that names two distinct signature-block parties.
-    const FULL_SERVER_DOC = [
-      "PROFESSIONAL SERVICES AGREEMENT",
-      "",
-      "This Agreement is entered into between Blue Canyon Analytics LLC and Iron Vale Systems Inc.",
-      "",
-      `1. Scope of Services. ${"Detailed operative commercial clause. ".repeat(220)}`,
-      "",
-      `2. Fees. ${"Payment terms clause. ".repeat(40)}`,
-      "",
-      "3. Governing Law. Texas law governs this Agreement.",
-      "",
-      "4. Electronic Signatures. Electronic signatures are permitted.",
-      "",
-      "IN WITNESS WHEREOF, the parties have executed this Agreement.",
-      "",
-      "CLIENT:",
-      "Blue Canyon Analytics LLC",
-      "By: _________________________________",
-      "",
-      "SERVICE PROVIDER:",
-      "Iron Vale Systems Inc.",
-      "By: _________________________________",
-    ].join("\n");
+    const FULL_SERVER_DOC = expandOperativeCorpusWithUniqueSupplements(
+      [
+        "PROFESSIONAL SERVICES AGREEMENT",
+        "",
+        "This Agreement is entered into between Blue Canyon Analytics LLC and Iron Vale Systems Inc.",
+        "",
+        `1. Scope of Services. ${"Detailed operative commercial clause. ".repeat(220)}`,
+        "",
+        `2. Fees. ${"Payment terms clause. ".repeat(40)}`,
+        "",
+        "3. Governing Law. Texas law governs this Agreement.",
+        "",
+        "4. Electronic Signatures. Electronic signatures are permitted.",
+        "",
+        "IN WITNESS WHEREOF, the parties have executed this Agreement.",
+        "",
+        "CLIENT:",
+        "Blue Canyon Analytics LLC",
+        "By: _________________________________",
+        "",
+        "SERVICE PROVIDER:",
+        "Iron Vale Systems Inc.",
+        "By: _________________________________",
+      ].join("\n"),
+      SUBSTANTIVE_SERVER_DRAFT_MIN_LEN + 1600,
+    );
 
     // The duplicate/degraded second response body (short json_parse rejected corpus).
     const REJECTED_SECOND_BODY = "x".repeat(1_135);
@@ -724,7 +745,20 @@ describe("paidProAcceptanceRouting", () => {
     });
 
     it("signer setup still receives the full accepted SoT and two distinct parties", () => {
-      const accepted = establishPaidProSourceOfTruth({ text: FULL_SERVER_DOC, source: "server_full_draft" });
+      const draft = {
+        title: "Professional Services Agreement",
+        parties: [
+          { name: "Blue Canyon Analytics LLC", role: "Client" },
+          { name: "Iron Vale Systems Inc.", role: "Service Provider" },
+        ],
+      } as ParsedDraftShape;
+      const accepted = establishPaidProSourceOfTruth({
+        text: FULL_SERVER_DOC,
+        source: "server_full_draft",
+        draft,
+        intakeText:
+          "Professional services between Blue Canyon Analytics LLC and Iron Vale Systems Inc.",
+      });
       const signerDoc = getPaidProDocumentForSurface("signer_setup");
       expect(signerDoc?.text.length).toBe(accepted.text.length);
 
@@ -732,30 +766,33 @@ describe("paidProAcceptanceRouting", () => {
         parties: [{ name: "Blue Canyon Analytics LLC" }, { name: "Blue Canyon Analytics LLC" }],
         agreementBodyText: getPaidProSourceOfTruth()?.text,
       });
-      expect(ids[0]?.legalEntityName).toBe("Blue Canyon Analytics LLC");
-      // The corpus normalizer strips a trailing period from the entity ("Inc." -> "Inc").
+      // Tip may keep a same-line role prefix on entity 1 (`CLIENT: Entity`).
+      expect(ids[0]?.legalEntityName).toMatch(/(?:CLIENT:\s*)?Blue Canyon Analytics LLC/);
       expect(ids[1]?.legalEntityName).toMatch(/^Iron Vale Systems Inc\.?$/);
-      expect(ids[0]?.legalEntityName).not.toBe(ids[1]?.legalEntityName);
+      expect(ids[0]?.legalEntityName?.replace(/^CLIENT:\s*/i, "")).not.toBe(ids[1]?.legalEntityName);
     });
   });
 
   describe("signer-typing isolation: no document/guided/handoff recompute, no fail-closed", () => {
-    const SIGNER_SETUP_BODY = [
-      "PROFESSIONAL SERVICES AGREEMENT",
-      "",
-      "This Agreement is entered into between Blue Canyon Analytics LLC and Iron Vale Systems Inc.",
-      `1. Scope. ${"Operative commercial clause. ".repeat(120)}`,
-      "",
-      "IN WITNESS WHEREOF, the parties execute this Agreement.",
-      "",
-      "CLIENT:",
-      "Blue Canyon Analytics LLC",
-      "By: _________________________________",
-      "",
-      "SERVICE PROVIDER:",
-      "Iron Vale Systems Inc.",
-      "By: _________________________________",
-    ].join("\n");
+    const SIGNER_SETUP_BODY = expandOperativeCorpusWithUniqueSupplements(
+      [
+        "PROFESSIONAL SERVICES AGREEMENT",
+        "",
+        "This Agreement is entered into between Blue Canyon Analytics LLC and Iron Vale Systems Inc.",
+        `1. Scope. ${"Operative commercial clause. ".repeat(120)}`,
+        "",
+        "IN WITNESS WHEREOF, the parties execute this Agreement.",
+        "",
+        "CLIENT:",
+        "Blue Canyon Analytics LLC",
+        "By: _________________________________",
+        "",
+        "SERVICE PROVIDER:",
+        "Iron Vale Systems Inc.",
+        "By: _________________________________",
+      ].join("\n"),
+      SUBSTANTIVE_SERVER_DRAFT_MIN_LEN + 1600,
+    );
 
     it("the edit guard prevents FAILED_PREMIUM_CORPUS while editing signer metadata", () => {
       establishPaidProSourceOfTruth({ text: SIGNER_SETUP_BODY, source: "server_full_draft" });
@@ -906,7 +943,7 @@ describe("paidProAcceptanceRouting", () => {
       expect(src).toMatch(/setSignaturePreparationRequested\(false\)/);
       // Entering inline signer setup re-arms the freeze (resets the release flag to false).
       const enterSetupIdx = src.indexOf("const enterFinalReviewRecipientSetup = React.useCallback");
-      const enterSetupSlice = src.slice(enterSetupIdx, enterSetupIdx + 700);
+      const enterSetupSlice = src.slice(enterSetupIdx, enterSetupIdx + 4500);
       expect(enterSetupSlice).toMatch(/setSignaturePreparationRequested\(false\)/);
       // Fed into the paid review state machine (never fails closed during edit).
       expect(src).toMatch(/signerMetadataEditActive:\s*paidProSignerMetadataEditGuardActive/);
@@ -925,7 +962,8 @@ describe("paidProAcceptanceRouting", () => {
       const src = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
       expect(src).toMatch(/paidProInlineSignerSetupLatched/);
       expect(src).toMatch(/resolvePaidProInlineSignerSetupMounted\(\{/);
-      expect(src).toMatch(/shouldArmPaidProInlineSignerSetupLatch\(\{/);
+      // Tip arms the mount latch inline (helper lives in signerSetupPartyIdentity, not Intake).
+      expect(src).toMatch(/setPaidProInlineSignerSetupLatched\(true\)/);
       const canonicalIdx = src.indexOf("const paidProCanonicalReviewSignerSetupActive = useMemo");
       const canonicalSlice = src.slice(canonicalIdx, canonicalIdx + 500);
       expect(canonicalSlice).toMatch(/resolvePaidProInlineSignerSetupMounted/);

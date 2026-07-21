@@ -1,9 +1,10 @@
+import { SHARED_ACCEPTED_PAID_BODY } from "./paidProSharedFixtureSystem";
 import { describe, expect, it } from "vitest";
 import { pickAuthoritativeSigningHandoffCorpus } from "./authoritativeHandoffCorpusResolver";
 
 describe("authoritativeHandoffCorpusResolver", () => {
   it("prefers accepted server_full_draft over short handoff fallback", () => {
-    const accepted = "x".repeat(3_300);
+    const accepted = SHARED_ACCEPTED_PAID_BODY;
     const short = "y".repeat(857);
     const r = pickAuthoritativeSigningHandoffCorpus({
       candidates: [

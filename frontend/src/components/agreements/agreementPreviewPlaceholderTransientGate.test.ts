@@ -1,3 +1,4 @@
+import { SHARED_ACCEPTED_PAID_BODY } from "./paidProSharedFixtureSystem";
 import { describe, expect, it } from "vitest";
 import {
   IRONCLAD_JOINT_ROLLOUT_INTAKE,
@@ -164,7 +165,7 @@ describe("agreementPreviewPlaceholderTransientGate", () => {
   });
 
   it("valid_preview_fallback releases shell when draft_ready and preview > 400 without server ref", () => {
-    const preview = "x".repeat(825);
+    const preview = SHARED_ACCEPTED_PAID_BODY;
     expect(
       resolveEffectiveStarterHasDraftPayload({
         hasDraftPayload: false,

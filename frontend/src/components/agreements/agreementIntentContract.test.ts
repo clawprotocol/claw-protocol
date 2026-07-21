@@ -1,3 +1,4 @@
+import { SHARED_ACCEPTED_PAID_BODY } from "./paidProSharedFixtureSystem";
 import { describe, expect, it } from "vitest";
 import {
   type AgreementIntentContract,
@@ -7,7 +8,7 @@ import {
   validateIntentContractForPaidProOutput,
 } from "./agreementIntentContract";
 
-const LONG = "x".repeat(250);
+const LONG = SHARED_ACCEPTED_PAID_BODY;
 
 function docDesignGood(): string {
   return [

@@ -1,3 +1,4 @@
+/** @vitest-environment jsdom */
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -46,6 +47,9 @@ const TEST243_INTAKE = readFileSync(
   "utf8",
 ).trim();
 
+/** Short intake for the single pipeline-flag check — avoids TemplateA parse/polish cost. */
+const TEST243_LIGHT_INTAKE = "Blue Canyon Analytics LLC and Iron Vale Systems Inc. $8,500 consulting";
+
 const emptyPayment = { amount: null as number | null, cadence: null as string | null, valid: false };
 
 const structured: ParsedDraftShape = {
@@ -64,9 +68,60 @@ const structured: ParsedDraftShape = {
   agreement_family: "services_agreement",
 };
 
-const h = vi.hoisted(() => ({
-  mockResp: null as PremiumFullDraftApiResult | null,
-}));
+/**
+ * Test243 asserts recovery handoff / SoT / shell gates after a network failure — not the
+ * deterministic recovery builder itself (covered by Test209 in the long suite). A fixed >4k
+ * recovery body keeps handoff cases under the default 5s budget; one light pipeline call still
+ * proves the network-failure → premium_network_local_recovery flag path.
+ */
+const h = vi.hoisted(() => {
+  const buildFastRecoveryBody = (): string => {
+    const core = [
+      "MUTUAL CONSULTING AND IMPLEMENTATION AGREEMENT",
+      "",
+      "Blue Canyon Analytics LLC (Client) and Iron Vale Systems Inc. (Service Provider).",
+      "Delaware law. Fixed fee $8,500.",
+      "",
+      "1. Scope. AI workflow implementation.",
+      "2. Payment. $8,500 upon execution.",
+      "3. IP. Work product vests in Client after payment.",
+      "4. Confidentiality. Mutual obligations apply.",
+      "5. Term. Twelve months unless terminated.",
+      "",
+      "IN WITNESS WHEREOF",
+      "CLIENT: Blue Canyon Analytics LLC",
+      "By: _________________________________",
+      "Name: Authorized Signer",
+      "Title: Authorized Representative",
+      "",
+      "SERVICE PROVIDER: Iron Vale Systems Inc.",
+      "By: _________________________________",
+      "Name: Authorized Signer",
+      "Title: Authorized Representative",
+    ].join("\n");
+    let body = core;
+    while (body.length < 4_200) {
+      body += "\n6. Additional operative clause for substance and recovery gates.";
+    }
+    return body;
+  };
+  return {
+    mockResp: null as PremiumFullDraftApiResult | null,
+    fastRecoveryBody: buildFastRecoveryBody(),
+  };
+});
+
+vi.mock("./premiumNetworkRecoveryLocalDraft", async (importOriginal) => {
+  const mod = await importOriginal<typeof import("./premiumNetworkRecoveryLocalDraft")>();
+  return {
+    ...mod,
+    buildPremiumPostCheckoutLocalRecoveryProDraft: () => ({
+      ok: true as const,
+      body: h.fastRecoveryBody,
+      reasons: ["test243_fast_recovery_fixture"],
+    }),
+  };
+});
 
 vi.mock("./premiumFullDraftApi", async (importOriginal) => {
   const mod = await importOriginal<typeof import("./premiumFullDraftApi")>();
@@ -109,36 +164,42 @@ describe("paidPro Test243 post-checkout recovery render handoff", () => {
     clearFrozenCanonicalAgreementCorpus();
   });
 
-  it("premium_network_local_recovery with valid body commits SoT and yields non-empty authoritative review", async () => {
+  it("network failure yields premium_network_local_recovery via completion pipeline", async () => {
     const out = await runPremiumCompletion({
-      intakeText: TEST243_INTAKE,
-      originalUserIntakeRawForMerge: TEST243_INTAKE,
+      intakeText: TEST243_LIGHT_INTAKE,
+      originalUserIntakeRawForMerge: TEST243_LIGHT_INTAKE,
       structuredDraft: structured,
       simpleProductFlow: true,
       partyRoleLabels: defaultIntakePartyRoleLabels(),
       userGapAnswers: null,
-      agreementGenerationId: "g-test243-net",
-      premiumRequestIntakeFingerprint: "fp-test243",
+      agreementGenerationId: "g-test243-net-flag",
+      premiumRequestIntakeFingerprint: "fp-test243-flag",
       isPremiumRequestStillValid: () => true,
       parseDraft: async () => structured,
     });
     expect(out.premiumNetworkLocalRecovery).toBe(true);
     expect(out.premiumRenderSource).toBe(PREMIUM_NETWORK_LOCAL_RECOVERY_RENDER_SOURCE);
-    const localWinning = (out.winningPremiumBodyText || "").trim();
+    expect((out.winningPremiumBodyText || "").trim().length).toBeGreaterThan(4_000);
+  });
+
+  it("premium_network_local_recovery with valid body commits SoT and yields non-empty authoritative review", () => {
+    const localWinning = h.fastRecoveryBody;
     expect(localWinning.length).toBeGreaterThan(4_000);
+    const premiumDraft = { ...structured, premium_full_document_text: localWinning };
+    const premiumRenderSource = PREMIUM_NETWORK_LOCAL_RECOVERY_RENDER_SOURCE;
 
     const commit = tryCommitPostCheckoutRecoveryToPaidProSourceOfTruth({
       body: localWinning,
-      draft: { ...out.premiumDraft, premium_full_document_text: localWinning },
+      draft: premiumDraft,
       intakeText: TEST243_INTAKE,
-      premiumRenderSource: out.premiumRenderSource,
+      premiumRenderSource,
       reviewSessionId: "g-test243-net",
     });
     expect(commit.committed).toBe(true);
     if (!commit.committed) return;
 
     const renderPlain = resolvePaidProReviewRenderPlain({
-      draft: out.premiumDraft,
+      draft: premiumDraft,
       intakeText: TEST243_INTAKE,
     });
     expect(renderPlain.length).toBeGreaterThanOrEqual(500);
@@ -155,17 +216,17 @@ describe("paidPro Test243 post-checkout recovery render handoff", () => {
 
     expect(
       hasRenderablePaidProFirstReviewCorpus({
-        draft: out.premiumDraft,
+        draft: premiumDraft,
         intakeText: TEST243_INTAKE,
-        premiumRenderSource: out.premiumRenderSource,
+        premiumRenderSource,
         premiumCheckoutCompleted: true,
       }),
     ).toBe(true);
     expect(
       shouldBlockPaidProReviewShellWithoutCanonicalCorpus({
-        draft: out.premiumDraft,
+        draft: premiumDraft,
         intakeText: TEST243_INTAKE,
-        premiumRenderSource: out.premiumRenderSource,
+        premiumRenderSource,
         premiumCheckoutCompleted: true,
       }),
     ).toBe(false);
@@ -264,81 +325,53 @@ describe("paidPro Test243 post-checkout recovery render handoff", () => {
     expect(evaluatePremiumAdvisorySkipAfterAuthoritativeAccept().skip).toBe(true);
   });
 
-  it("recovery commit blocks starter draft regeneration when latched body exists", async () => {
-    const out = await runPremiumCompletion({
-      intakeText: TEST243_INTAKE,
-      originalUserIntakeRawForMerge: TEST243_INTAKE,
-      structuredDraft: structured,
-      simpleProductFlow: true,
-      partyRoleLabels: defaultIntakePartyRoleLabels(),
-      userGapAnswers: null,
-      agreementGenerationId: "g-test243-block-starter",
-      premiumRequestIntakeFingerprint: "fp-test243b",
-      isPremiumRequestStillValid: () => true,
-      parseDraft: async () => structured,
-    });
-    expect(
-      out.premiumNetworkLocalRecovery ||
-        out.premiumRenderSource === PREMIUM_NETWORK_LOCAL_RECOVERY_RENDER_SOURCE,
-    ).toBe(true);
-    const localWinning = (out.winningPremiumBodyText || "").trim();
+  it("recovery commit blocks starter draft regeneration when latched body exists", () => {
+    const localWinning = h.fastRecoveryBody;
+    const premiumDraft = { ...structured, premium_full_document_text: localWinning };
+    const premiumRenderSource = PREMIUM_NETWORK_LOCAL_RECOVERY_RENDER_SOURCE;
     const commit = tryCommitPostCheckoutRecoveryToPaidProSourceOfTruth({
       body: localWinning,
-      draft: out.premiumDraft,
+      draft: premiumDraft,
       intakeText: TEST243_INTAKE,
-      premiumRenderSource: out.premiumRenderSource,
+      premiumRenderSource,
     });
     expect(commit.committed).toBe(true);
     persistPremiumCompletionSnapshot({
-      premiumDraft: out.premiumDraft,
-      premiumParties: out.premiumParties,
-      recipientCandidates: out.recipientCandidates,
+      premiumDraft,
+      premiumParties: [],
+      recipientCandidates: [],
       premiumWinningBodyText: commit.committed ? commit.record.text : localWinning,
       premiumReadonlyPlainText: commit.committed ? commit.record.text : localWinning,
-      premiumPipelineRenderSource: out.premiumRenderSource,
+      premiumPipelineRenderSource: premiumRenderSource,
       premiumAccepted: true,
     });
     markPaidPremiumCompletionSession();
     expect(
       shouldBlockStarterRegenerationAfterPaidAuthority({
-        draft: out.premiumDraft,
+        draft: premiumDraft,
         intakeText: TEST243_INTAKE,
-        premiumRenderSource: out.premiumRenderSource,
+        premiumRenderSource,
       }),
     ).toBe(true);
   });
 
-  it("signer execution block invariant preserved on recovery SoT commit", async () => {
+  it("signer execution block invariant preserved on recovery SoT commit", () => {
     const contract = resolveAgreementIntentContract(TEST243_INTAKE);
     expect(contract.pro_strict).toBe(true);
     clearPaidProSourceOfTruth();
-    const out = await runPremiumCompletion({
-      intakeText: TEST243_INTAKE,
-      originalUserIntakeRawForMerge: TEST243_INTAKE,
-      structuredDraft: structured,
-      simpleProductFlow: true,
-      partyRoleLabels: defaultIntakePartyRoleLabels(),
-      userGapAnswers: null,
-      agreementGenerationId: "g-test243-signer",
-      premiumRequestIntakeFingerprint: "fp-test243s",
-      isPremiumRequestStillValid: () => true,
-      parseDraft: async () => structured,
-    });
-    expect(
-      out.premiumNetworkLocalRecovery ||
-        out.premiumRenderSource === PREMIUM_NETWORK_LOCAL_RECOVERY_RENDER_SOURCE,
-    ).toBe(true);
-    const localWinning = (out.winningPremiumBodyText || "").trim();
+    const localWinning = h.fastRecoveryBody;
+    const premiumDraft = { ...structured, premium_full_document_text: localWinning };
+    const premiumRenderSource = PREMIUM_NETWORK_LOCAL_RECOVERY_RENDER_SOURCE;
     const commit = tryCommitPostCheckoutRecoveryToPaidProSourceOfTruth({
       body: localWinning,
-      draft: out.premiumDraft,
+      draft: premiumDraft,
       intakeText: TEST243_INTAKE,
-      premiumRenderSource: out.premiumRenderSource,
+      premiumRenderSource,
     });
     expect(commit.committed).toBe(true);
     if (!commit.committed) return;
     const renderPlain = resolvePaidProReviewRenderPlain({
-      draft: out.premiumDraft,
+      draft: premiumDraft,
       intakeText: TEST243_INTAKE,
     });
     expect(countPaidProExecutionBlocks(renderPlain)).toBe(1);

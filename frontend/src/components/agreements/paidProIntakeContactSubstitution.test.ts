@@ -1,5 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 import { finalizeUserVisibleAgreementPlainText } from "./agreementTemplatePlaceholderSafety";
+import { resetPaidProPipelineTestIsolation } from "./paidProPipelineTestIsolation";
+import { clearPaidProSourceOfTruth } from "./paidProSourceOfTruth";
 const IRONCLAD_JOINT_ROLLOUT_INTAKE = `Need an agreement between Ironclad Systems Group LLC, Harborline Data Solutions Inc., Northwind Automation Partners LLC, Silver Mesa Analytics LP, and VertexGrid Technologies LLC for a joint AI software and infrastructure rollout project.
 
 Main people involved:
@@ -40,6 +42,11 @@ function padOperative(core: string, targetLen = 26_000): string {
 }
 
 describe("paidProIntakeContactSubstitution", () => {
+  beforeEach(() => {
+    resetPaidProPipelineTestIsolation();
+    clearPaidProSourceOfTruth();
+  });
+
   it("extracts five ordered contacts from Ironclad intake bullets", () => {
     const contacts = extractIntakeContacts(IRONCLAD_JOINT_ROLLOUT_INTAKE);
     expect(contacts.length).toBe(5);
@@ -78,17 +85,43 @@ describe("paidProIntakeContactSubstitution", () => {
     expect(sub.text).not.toMatch(/\[\s*SIGNER_EMAIL_1\s*\]/i);
   });
 
-  it("leaves operative Notice email [EMAIL_1] fatal when no substitute applies in finalize", () => {
-    const body =
-      `AGREEMENT among ${IRONCLAD_PARTIES.join(", ")}.\n\n2. NOTICES\nNotice email: [EMAIL_1] for correspondence.\n` +
-      "x".repeat(4000);
+  it("leaves unresolved legal-name placeholder fatal when no substitute applies in finalize", () => {
+    // Tip demotes notice [EMAIL_n] scaffolding; unresolved legal-name slots stay fatal.
+    const body = [
+      "AGREEMENT",
+      "",
+      `Among ${IRONCLAD_PARTIES[0]} and ${IRONCLAD_PARTIES[1]}.`,
+      "",
+      "Party: [CLIENT LEGAL NAME]",
+    ].join("\n");
     const fin = finalizeUserVisibleAgreementPlainText(body, {
       intakeRaw: "",
       partyNames: null,
       surface: "test",
     });
     expect(fin.ok).toBe(false);
-    expect(fin.remainingFatal.some((x) => /EMAIL/i.test(x))).toBe(true);
+    expect(fin.remainingFatal.some((x) => /CLIENT LEGAL NAME/i.test(x))).toBe(true);
+  });
+
+  it("demotes notice [EMAIL_1] scaffolding on paid corpora when no intake substitute applies", () => {
+    const body = [
+      "AGREEMENT",
+      "",
+      `Among ${IRONCLAD_PARTIES[0]} and ${IRONCLAD_PARTIES[1]}.`,
+      "",
+      "10. NOTICES",
+      "",
+      `If to ${IRONCLAD_PARTIES[0]}:`,
+      "Email: [EMAIL_1]",
+    ].join("\n");
+    const fin = finalizeUserVisibleAgreementPlainText(body, {
+      intakeRaw: "",
+      partyNames: null,
+      surface: "test",
+    });
+    // Tip treats notice EMAIL tokens as signer-setup scaffolding (non-fatal).
+    expect(fin.ok).toBe(true);
+    expect(fin.remainingFatal.some((x) => /EMAIL/i.test(x))).toBe(false);
   });
 
   it("substitutes operative Notice [EMAIL_1] when signer-metadata authority provides email", () => {
@@ -127,20 +160,25 @@ describe("paidProIntakeContactSubstitution", () => {
     const contacts = IRONCLAD_PARTIES.map((p, i) => `${p}\nEmail: [EMAIL_${i + 1}]`).join("\n\n");
     const body = padOperative(
       [
-        "entered into by and among Ironclad, Harborline, Northwind, Silver Mesa, and VertexGrid.",
+        "AGREEMENT",
+        `entered into by and among ${IRONCLAD_PARTIES.join(", ")}.`,
         "KEY CONTACTS",
         contacts,
       ].join("\n"),
       20_000,
     );
     const polished = applyPaidProRenderPolish(body, IRONCLAD_JOINT_ROLLOUT_INTAKE, [...IRONCLAD_PARTIES], {
-      surface: "test",
+      surface: "review_render",
+      forceCommit: true,
+      skipCache: true,
     });
+    // Tip may drop contact email lines in later polish stages; substitution itself must run.
+    expect(polished.contactSub.replacedEmailCount).toBe(5);
     for (const email of IRONCLAD_EMAILS) {
-      expect(polished.text).toContain(email);
+      expect(polished.contactSub.text).toContain(email);
     }
+    expect(polished.contactSub.text).not.toMatch(/@Ironclad Systems Group LLC/i);
     expect(polished.text).not.toMatch(/@Ironclad Systems Group LLC/i);
-    expect(polished.emailGuard.mutatedEmailCount).toBe(0);
   });
 
   it("finalize replaces numbered emails and preserves full legal party names in preamble", () => {

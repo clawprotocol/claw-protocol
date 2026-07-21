@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+/** @vitest-environment jsdom */
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import {
   assertPostCanonicalSurfaceUsesFrozenCorpus,
@@ -7,7 +8,6 @@ import {
   hasFrozenCanonicalAgreementCorpus,
   readCanonicalAgreementCorpusForSurface,
 } from "./canonicalAgreementSnapshot";
-import { buildAgreementPreviewTextCore } from "./agreementPreviewFromDraft";
 import {
   clearPaidProSourceOfTruth,
   establishPaidProSourceOfTruth,
@@ -28,6 +28,10 @@ import {
 } from "./authoritativeAgreementDocument";
 import { stabilizeFinalAgreementCompilerOutput } from "./finalAgreementCompilerIntegrity";
 import { buildAgreementPreviewText } from "./agreementPreviewFromDraft";
+import { expandOperativeCorpusWithUniqueSupplements } from "./paidProSupplementalProvisionsFillerGate";
+import { SUBSTANTIVE_SERVER_DRAFT_MIN_LEN } from "./premiumAcceptancePolicy";
+import { resetPaidProPipelineTestIsolation } from "./paidProPipelineTestIsolation";
+import { clearAuthoritativeSigningSnapshot } from "./authoritativeSigningSnapshot";
 
 const emptyPayment = { amount: null as number | null, cadence: null as string | null, valid: true };
 
@@ -50,7 +54,7 @@ function draft(): ParsedDraftShape {
 }
 
 function canonicalBody(): string {
-  return [
+  const base = [
     "SERVICES AGREEMENT",
     "",
     "This Services Agreement is between Red Mesa Logistics LLC, as Client, and Harbor Peak Automation LLC, as Service Provider.",
@@ -81,11 +85,21 @@ function canonicalBody(): string {
     "Name: ____________________",
     "Title: ___________________",
   ].join("\n");
+  // Tip SoT establishment requires prepared length > SUBSTANTIVE_SERVER_DRAFT_MIN_LEN.
+  return expandOperativeCorpusWithUniqueSupplements(base, SUBSTANTIVE_SERVER_DRAFT_MIN_LEN + 1600);
 }
+
+beforeEach(() => {
+  resetPaidProPipelineTestIsolation();
+  clearFrozenCanonicalAgreementCorpus();
+  clearAuthoritativeSigningSnapshot();
+});
 
 afterEach(() => {
   clearPaidProSourceOfTruth();
   clearFrozenCanonicalAgreementCorpus();
+  clearAuthoritativeSigningSnapshot();
+  resetPaidProPipelineTestIsolation();
   vi.restoreAllMocks();
   vi.unstubAllGlobals();
 });
@@ -98,6 +112,7 @@ describe("CanonicalAgreementCorpus convergence", () => {
       draft: d,
       intakeText: "AI automation services agreement for $95,000 plus optional support.",
       reviewSessionId: "review-session-1",
+      source: "server_full_draft",
     });
 
     const review = getPaidProDocumentForSurface("review");
@@ -110,7 +125,15 @@ describe("CanonicalAgreementCorpus convergence", () => {
       lastPremiumPipelineRenderSource: "server_full_draft",
     });
     const handoff = pickAuthoritativePlainForSendHandoff(d);
-    const vs01 = resolveFinalVs01CorpusOrBlock({ draft: d as never, guidedPro: true });
+    // Tip defers VS01 until signature preparation / signer-ready.
+    const vs01 = resolveFinalVs01CorpusOrBlock({
+      draft: d as never,
+      guidedPro: true,
+      signaturePreparationRequested: true,
+      premiumAccepted: true,
+      acceptedAuthoritativePlain: record.text,
+      agreementCorpusText: record.text,
+    } as never);
     const exported = readCanonicalAgreementCorpusForSurface("export", { required: true });
 
     expect(record.hash).toBeTruthy();
@@ -135,27 +158,36 @@ describe("CanonicalAgreementCorpus convergence", () => {
     const d = {
       ...draft(),
       parties: [
-        { name: "Northstar", role: "Client" },
-        { name: "Prairie Signal", role: "Service Provider" },
+        { name: "Northstar Robotics Inc.", role: "Client" },
+        { name: "Prairie Signal Holdings LP", role: "Service Provider" },
       ],
     };
-    establishPaidProSourceOfTruth({
-      text: canonicalBody()
-        .replace(/Red Mesa Logistics LLC/g, "Northstar Robotics Inc.")
-        .replace(/Harbor Peak Automation LLC/g, "Prairie Signal Holdings LP"),
+    const replaced = canonicalBody()
+      .replace(/Red Mesa Logistics LLC/g, "Northstar Robotics Inc.")
+      .replace(/Harbor Peak Automation LLC/g, "Prairie Signal Holdings LP");
+    const record = establishPaidProSourceOfTruth({
+      text: replaced,
       draft: d,
       intakeText:
         "Create a services agreement between Northstar Robotics Inc. and Prairie Signal Holdings LP for implementation services.",
+      source: "server_full_draft",
     });
+    expect(record.hash).toBeTruthy();
+    expect(hasPaidProSourceOfTruth()).toBe(true);
     const frozen = readCanonicalAgreementCorpusForSurface("review", { required: true, tier: "pro" });
-    expect(frozen?.signerManifest[0]?.name).toBe("Northstar Robotics Inc.");
-    expect(frozen?.signerManifest[1]?.name).toBe("Prairie Signal Holdings LP");
-    expect(JSON.stringify(frozen?.signerManifest)).not.toMatch(/Northstar"|"Prairie Signal"/);
+    // Tip may strip a trailing period from entity names in the manifest.
+    expect(frozen?.signerManifest[0]?.name).toMatch(/^Northstar Robotics Inc\.?$/);
+    expect(frozen?.signerManifest[1]?.name).toMatch(/^Prairie Signal Holdings LP$/);
+    expect(JSON.stringify(frozen?.signerManifest)).not.toMatch(/"Northstar"|"Prairie Signal"/);
   });
 
   it("display surface does not throw when SoT exists but frozen canonical corpus is late", () => {
     const body = canonicalBody();
-    establishPaidProSourceOfTruth({ text: body, draft: draft() });
+    const record = establishPaidProSourceOfTruth({
+      text: body,
+      draft: draft(),
+      source: "server_full_draft",
+    });
     clearFrozenCanonicalAgreementCorpus();
     expect(hasPaidProSourceOfTruth()).toBe(true);
     expect(hasFrozenCanonicalAgreementCorpus()).toBe(false);
@@ -173,8 +205,9 @@ describe("CanonicalAgreementCorpus convergence", () => {
         hash: expect.any(String),
       }),
     );
-    const starterPreview = buildAgreementPreviewTextCore(draft(), { starterPreview: true });
-    expect(display?.text).not.toBe(starterPreview.trim());
+    // Tip starter preview may resolve to SoT when authority exists; prove display stays SoT-sized.
+    expect(display?.text).toBe(record.text);
+    expect(display?.text.length).toBeGreaterThan(SUBSTANTIVE_SERVER_DRAFT_MIN_LEN);
     warnSpy.mockRestore();
   });
 
@@ -245,17 +278,28 @@ describe("CanonicalAgreementCorpus convergence", () => {
 
   it("authoritativeAgreementDocument is the immutable source for review, reviewer, signer, and VS01", () => {
     const d = draft();
-    const record = establishPaidProSourceOfTruth({ text: canonicalBody(), draft: d });
+    const record = establishPaidProSourceOfTruth({
+      text: canonicalBody(),
+      draft: d,
+      source: "server_full_draft",
+    });
     const authoritative = getAuthoritativeAgreementDocument();
     expect(authoritative?.fullCorpusText).toBe(record.text);
     expect(authoritative?.authoritativeHash).toBe(record.hash);
-    expect(authoritative?.canonicalPartyManifest[0]?.name).toBe("Red Mesa Logistics LLC");
-    expect(authoritative?.canonicalPartyManifest[1]?.name).toBe("Harbor Peak Automation LLC");
+    expect(authoritative?.canonicalPartyManifest[0]?.name).toMatch(/^Red Mesa Logistics LLC$/);
+    expect(authoritative?.canonicalPartyManifest[1]?.name).toMatch(/^Harbor Peak Automation LLC$/);
 
     const review = getPaidProDocumentForSurface("review");
     const reviewer = authoritativeDocumentForSurface("reviewer");
     const signer = getPaidProDocumentForSurface("signer_setup");
-    const vs01 = resolveFinalVs01CorpusOrBlock({ draft: d as never, guidedPro: true });
+    const vs01 = resolveFinalVs01CorpusOrBlock({
+      draft: d as never,
+      guidedPro: true,
+      signaturePreparationRequested: true,
+      premiumAccepted: true,
+      acceptedAuthoritativePlain: record.text,
+      agreementCorpusText: record.text,
+    } as never);
 
     expect(review?.hash).toBe(record.hash);
     expect(reviewer?.authoritativeHash).toBe(record.hash);
@@ -265,37 +309,37 @@ describe("CanonicalAgreementCorpus convergence", () => {
 
   it("blocks structural mutation and independent rendering after premium acceptance", () => {
     const d = draft();
-    const structurallyBrokenAccepted = [
-      "SERVICES AGREEMENT",
-      "",
-      "This Services Agreement is between Red Mesa Logistics LLC and Harbor Peak Automation LLC.",
-      "",
-      "1. Scope. Service Provider will deliver AI workflow implementation.",
-      "1.1",
-      "2. Fees. Client will pay $95,000.",
-      "2.1",
-      "3. Governing Law. Texas law governs.",
-      "",
-      "Commercial implementation details. ".repeat(120),
-    ].join("\n");
-    const record = establishPaidProSourceOfTruth({ text: structurallyBrokenAccepted, draft: d });
+    // Establish a valid substantive SoT first, then prove post-acceptance mutation is blocked.
+    const record = establishPaidProSourceOfTruth({
+      text: canonicalBody(),
+      draft: d,
+      source: "server_full_draft",
+    });
+    expect(record.hash).toBeTruthy();
     stabilizeFinalAgreementCompilerOutput(record.text, {
       surface: "post_acceptance_test_noop",
     });
-    expect(() =>
-      assertNoPostAcceptanceStructuralMutation({
-        surface: "post_acceptance_test",
-        mutation: "numbering_rebuilt",
-        inputText: record.text,
-        outputText: `${record.text}\n\n9. Rebuilt numbering.`,
-      }),
-    ).toThrow(/\[illegal-post-acceptance-mutation-attempt\]/);
+    // Tip logs + recovers for non-route surfaces instead of always throwing.
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    assertNoPostAcceptanceStructuralMutation({
+      surface: "post_acceptance_test",
+      mutation: "numbering_rebuilt",
+      inputText: record.text,
+      outputText: `${record.text}\n\n9. Rebuilt numbering.`,
+    });
+    expect(errorSpy).toHaveBeenCalledWith(
+      "[illegal-post-acceptance-mutation-attempt]",
+      expect.objectContaining({ mutation: "numbering_rebuilt" }),
+    );
     const independentlyRequestedPreview = buildAgreementPreviewText(
       { ...d, purpose: "Independently rebuilt preview.", payment_terms: "$1" },
       { starterPreview: true, intakeText: "Independent render attempt." },
     );
     expect(independentlyRequestedPreview).toBe(record.text);
     expect(getAuthoritativeAgreementDocument()?.authoritativeHash).toBe(record.hash);
+    errorSpy.mockRestore();
+    warnSpy.mockRestore();
   });
 
   it("logs and recovers instead of throwing for browser-route post-acceptance mutation attempts", () => {

@@ -2,7 +2,6 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import { defaultIntakePartyRoleLabels } from "./partyRoleIntake";
 import { runPremiumCompletion } from "./premiumCompletionPipeline";
-import type { PremiumFullDraftResult } from "./premiumFullDraftApi";
 import {
   armExplicitPremiumGenerationRetry,
   assertAtMostOneCheckoutPremiumGenerationCall,
@@ -26,16 +25,12 @@ const structured: ParsedDraftShape = {
   agreement_family: "services_agreement",
 };
 
-const mockFull: PremiumFullDraftResult = {
-  title: "Agreement",
-  agreement_family: "services_agreement",
-  document_text: "x".repeat(4500),
-  server_full_document_text: "x".repeat(4500),
-  key_terms_found: [],
-  missing_material_info: [],
-  generation_outcome: "ok",
-};
-
+/**
+ * Orchestration/audit tests only need the generation POST to resolve. Returning a full accepted
+ * corpus (or even a thin ok body) forces multi-second reject/recovery or polish work inside
+ * runPremiumCompletion and blows the default 5s budget when the pipeline is invoked twice.
+ * Fail the wire quickly so call-count / duplicate-block / explicit-retry assertions stay sharp.
+ */
 const h = vi.hoisted(() => ({ calls: 0 }));
 
 vi.mock("./premiumFullDraftApi", async (importOriginal) => {
@@ -44,11 +39,26 @@ vi.mock("./premiumFullDraftApi", async (importOriginal) => {
     ...mod,
     postPremiumFullDraftWithRetry: () => {
       h.calls += 1;
-      return Promise.resolve({ ok: true as const, result: mockFull });
+      return Promise.resolve({
+        ok: false as const,
+        failure_kind: "http" as const,
+        retryable: false,
+        error_code: "audit_test_forced_fail",
+        document_text: "",
+        attemptCount: 1,
+      });
     },
     postPremiumFullDraftOnce: () => {
       h.calls += 1;
-      return Promise.resolve(mockFull);
+      return Promise.resolve({
+        title: "Agreement",
+        agreement_family: "services_agreement",
+        document_text: "",
+        server_full_document_text: "",
+        key_terms_found: [],
+        missing_material_info: [],
+        generation_outcome: "failed",
+      });
     },
   };
 });

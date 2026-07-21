@@ -1,7 +1,11 @@
-import { describe, expect, it } from "vitest";
+/** @vitest-environment jsdom */
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { resolveAgreementIntentContract } from "./agreementIntentContract";
 import { validatePaidProOutput } from "./paidProCorpusAcceptance";
 import { canShowPremiumSuccess } from "./premiumSuccessGate";
+import { resetPaidProPipelineTestIsolation } from "./paidProPipelineTestIsolation";
+import { expandOperativeCorpusWithUniqueSupplements } from "./paidProSupplementalProvisionsFillerGate";
+import { SUBSTANTIVE_SERVER_DRAFT_MIN_LEN } from "./premiumAcceptancePolicy";
 
 const LONG = "x".repeat(500);
 
@@ -16,25 +20,48 @@ const logoServerDoc = (title = "LOGO DESIGN AGREEMENT") =>
   ].join("\n");
 
 const founderServerDoc = () =>
-  [
-    "FOUNDER VESTING AGREEMENT",
-    "The parties are founders; this agreement sets forth vesting, repurchase, and equity between the founders.",
-    "Vesting schedule: four-year with one-year cliff. Economic split 60/40 as between the founders.",
-    "Confidentiality, IP assignment, and leaver provisions. Cap table mechanics in Schedule A. ",
-    LONG,
-  ].join("\n");
+  expandOperativeCorpusWithUniqueSupplements(
+    [
+      "Founder Vesting Agreement",
+      "The parties are founders; this agreement sets forth vesting, repurchase, and equity between the founders.",
+      "Vesting schedule: four-year with one-year cliff. Economic split 60/40 as between the founders.",
+      "Confidentiality, IP assignment, and leaver provisions. Cap table mechanics in Schedule A.",
+      "1. Vesting. 2. Repurchase. 3. Cliff. 4. IP. 5. Confidentiality. 6. Termination. 7. Governing Law.",
+      "8. Notices. 9. Entire Agreement. 10. Counterparts. 11. Severability. 12. Electronic signatures.",
+    ].join("\n"),
+    SUBSTANTIVE_SERVER_DRAFT_MIN_LEN + 400,
+  );
 
 describe("premium success gate (universal Pro truth)", () => {
+  beforeEach(() => {
+    sessionStorage.clear();
+    localStorage.clear();
+    resetPaidProPipelineTestIsolation();
+  });
+  afterEach(() => {
+    resetPaidProPipelineTestIsolation();
+    sessionStorage.clear();
+    localStorage.clear();
+  });
+
   it("1) logo: blocks success when body/title are not design services", () => {
-    const c = resolveAgreementIntentContract("Need a logo, $1,500, two revisions, IP to client");
+    const logoIntake = "Need a logo, $1,500, two revisions, IP to client";
+    const c = resolveAgreementIntentContract(logoIntake);
     const bad = "AGREEMENT\n" + "commercial work.\n" + LONG;
-    const v = validatePaidProOutput({ text: bad, rawIntake: "foo", intentContract: c, draft: null });
+    // rawIntake must stay logo-scoped: "foo" resolves custom_unknown and leniently passes validation.
+    const v = validatePaidProOutput({
+      text: bad,
+      rawIntake: logoIntake,
+      intentContract: c,
+      draft: null,
+      premiumPipelineSource: "server_full_draft",
+    });
     const g = canShowPremiumSuccess({
       intentContract: c,
       renderSource: "server_full_document_text",
       validation: v,
       documentText: bad,
-      intakeText: "x",
+      intakeText: logoIntake,
       premiumPipelineSource: "server_full_draft",
       stale: false,
     });
@@ -74,17 +101,25 @@ describe("premium success gate (universal Pro truth)", () => {
   });
 
   it("2b) founder: success with proper founder-style body", () => {
-    const c = resolveAgreementIntentContract("60/40 vesting for two founders, four-year, cliff");
+    const founderIntake = "60/40 vesting for two founders, four-year, cliff";
+    const c = resolveAgreementIntentContract(founderIntake);
     const d = founderServerDoc();
-    const v = validatePaidProOutput({ text: d, rawIntake: "60/40 founders", intentContract: c, draft: null });
+    const v = validatePaidProOutput({
+      text: d,
+      rawIntake: founderIntake,
+      intentContract: c,
+      draft: null,
+      premiumPipelineSource: "server_full_draft",
+    });
     const g = canShowPremiumSuccess({
       intentContract: c,
       renderSource: "server_full_document_text",
       validation: v,
       documentText: d,
-      intakeText: "x",
+      intakeText: founderIntake,
       premiumPipelineSource: "server_full_draft",
       stale: false,
+      allowPaidSubstantiveStitch: true,
     });
     expect(g.state).toBe("premium_success");
   });

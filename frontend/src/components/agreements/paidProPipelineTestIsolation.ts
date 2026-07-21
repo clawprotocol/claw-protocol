@@ -24,6 +24,9 @@ import { clearPaidProAuthorityHashContinuityForTests } from "./paidProAuthorityH
 import { clearAcceptedProCorpusSafeDisplayCacheForTests } from "./paidProAcceptedCorpusSafeDisplayCache";
 import { clearPaidProPipelineAcceptedCorpusHashForTests } from "./paidProPipelineAcceptedCorpus";
 import { resetPaidReviewSessionCorpusInvariantForTests } from "./paidProReviewSessionCorpusInvariantState";
+import { clearIntakeSignerMetadataExtractMemoForTests } from "./universalSignerMetadataAuthority";
+import { clearPaidProVisibleRenderMemoForTests } from "./paidProVisibleRenderMemo";
+import { clearPaidProReviewRenderFusedRepairCache } from "./paidProReviewRenderCorpus";
 
 /** Clear cross-test Paid Pro pipeline caches and in-memory authority without touching sessionStorage. */
 export function resetPaidProPipelineTestIsolation(): void {
@@ -46,4 +49,8 @@ export function resetPaidProPipelineTestIsolation(): void {
   clearCurrentSessionProEntitlementMarkers();
   resetPremiumRecipientHandoffDedupForTests();
   resetPaidReviewSessionCorpusInvariantForTests();
+  clearIntakeSignerMetadataExtractMemoForTests();
+  // Preserve sanitizer/render memo-clear discipline from 021c3a8a-era isolation.
+  clearPaidProVisibleRenderMemoForTests();
+  clearPaidProReviewRenderFusedRepairCache();
 }

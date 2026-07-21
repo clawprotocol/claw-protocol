@@ -1,3 +1,4 @@
+import { SHARED_ACCEPTED_PAID_BODY } from "../paidProSharedFixtureSystem";
 import { describe, expect, it, vi } from "vitest";
 import {
   assessGuidedAuthoritativeReviewSync,
@@ -47,7 +48,7 @@ describe("guidedAuthoritativeReviewSync", () => {
 
   it("warns when review render drifts from authoritative body", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
-    const auth = "x".repeat(1000);
+    const auth = SHARED_ACCEPTED_PAID_BODY;
     const stale = "y".repeat(500);
     const r = logGuidedAuthoritativeReviewSync({
       authoritativePlain: auth,

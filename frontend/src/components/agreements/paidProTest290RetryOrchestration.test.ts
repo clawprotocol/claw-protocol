@@ -24,24 +24,27 @@ const structured: ParsedDraftShape = {
   agreement_family: "services_agreement",
 };
 
+/**
+ * Retry-orchestration assertions are about POST/reason counts, not corpus acceptance.
+ * A successful full-draft mock forces heavy polish/recovery work that exceeds the default
+ * 5s timeout when runPremiumCompletion is invoked twice; fail the wire immediately instead.
+ */
 const retryHttpCalls = vi.hoisted(() => ({ count: 0 }));
 
 vi.mock("./premiumFullDraftApi", async (importOriginal) => {
   const mod = await importOriginal<typeof import("./premiumFullDraftApi")>();
-  const mockFull = {
-    title: "Agreement",
-    agreement_family: "services_agreement",
-    document_text: "x".repeat(4500),
-    server_full_document_text: "x".repeat(4500),
-    key_terms_found: [],
-    missing_material_info: [],
-    generation_outcome: "ok",
-  };
   return {
     ...mod,
     postPremiumFullDraftWithRetry: () => {
       retryHttpCalls.count += 1;
-      return Promise.resolve({ ok: true as const, result: mockFull });
+      return Promise.resolve({
+        ok: false as const,
+        failure_kind: "http" as const,
+        retryable: false,
+        error_code: "test290_forced_fail",
+        document_text: "",
+        attemptCount: 1,
+      });
     },
   };
 });

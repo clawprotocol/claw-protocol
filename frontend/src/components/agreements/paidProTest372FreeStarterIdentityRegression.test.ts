@@ -1,4 +1,5 @@
-import { describe, expect, it, vi } from "vitest";
+/** @vitest-environment jsdom */
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { buildAgreementPreviewText, buildStarterAgreementPreviewForReview } from "./agreementPreviewFromDraft";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import { labeledPartyLegalEntities, parseLabeledPartyBlocks } from "./labeledPartyBlockParse";
@@ -21,7 +22,8 @@ import {
   isStackedPartyIdentityContamination,
 } from "./starterPartyIdentityIsolation";
 import { sanitizeStarterPartyNameForDisplay } from "./starterPreviewProseSanitize";
-import { TEST371_QUADRIPARTITE_LABELED_PARTIES_INTAKE } from "./paidProTest371QuadrpartiteRegression.test";
+import { TEST371_QUADRIPARTITE_LABELED_PARTIES_INTAKE } from "./paidProTest371QuadrpartiteFixtures";
+import { resetFreeStarterIdentityTestIsolation } from "./freeStarterIdentityTestIsolation";
 
 const BLUE = "Blue Canyon Analytics LLC";
 const HARBOR = "Harbor Peak Automation LLC";
@@ -68,6 +70,14 @@ function test372ContaminatedDraft(): ParsedDraftShape {
 }
 
 describe("Test372 Free 2-party identity isolation", () => {
+  beforeEach(() => {
+    resetFreeStarterIdentityTestIsolation();
+  });
+  afterEach(() => {
+    resetFreeStarterIdentityTestIsolation();
+    vi.unstubAllGlobals();
+  });
+
   it("parses stacked Party N blocks without Legal Entity labels", () => {
     const blocks = parseLabeledPartyBlocks(TEST372_FREE_STACKED_PARTY_INTAKE);
     expect(blocks).toHaveLength(2);
@@ -311,6 +321,13 @@ describe("Test372 Free 2-party identity isolation", () => {
 });
 
 describe("Test371 multi-party gate unaffected", () => {
+  beforeEach(() => {
+    resetFreeStarterIdentityTestIsolation();
+  });
+  afterEach(() => {
+    resetFreeStarterIdentityTestIsolation();
+  });
+
   it("still gates Test371 quadrpartite labeled intake on free starter", () => {
     const gate = assessStarterComplexityGate(TEST371_QUADRIPARTITE_LABELED_PARTIES_INTAKE);
     expect(gate.required).toBe(true);

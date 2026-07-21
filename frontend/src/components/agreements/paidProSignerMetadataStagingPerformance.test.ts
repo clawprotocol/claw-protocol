@@ -1,3 +1,4 @@
+/** @vitest-environment jsdom */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as paidProAgreementRecitalRepair from "./paidProAgreementRecitalRepair";
 import * as paidProOpeningRecitalGuard from "./paidProOpeningRecitalGuard";
@@ -10,6 +11,8 @@ import {
   PAID_PRO_HARDENING_CLIENT,
   PAID_PRO_HARDENING_PROVIDER,
 } from "./qa/paidProHardening/paidProHardeningFixtures";
+import { expandOperativeCorpusWithUniqueSupplements } from "./paidProSupplementalProvisionsFillerGate";
+import { SUBSTANTIVE_SERVER_DRAFT_MIN_LEN } from "./premiumAcceptancePolicy";
 
 const FIXTURE = "freeProQaTemplateATest204";
 
@@ -23,9 +26,10 @@ describe("paidProSignerMetadataStagingPerformance", () => {
     expect(
       shouldDeferPaidProReviewRenderSignerRepair({ signerMetadataSessionActive: true }),
     ).toBe(true);
+    // Tip only defers while the signer-metadata session is active.
     expect(
       shouldDeferPaidProReviewRenderSignerRepair({ signerMetadataSessionActive: false }),
-    ).toBe(true);
+    ).toBe(false);
   });
 
   it("repeated resolve with deferSignerMetadataRepair does not run repair or opening guards", () => {
@@ -66,13 +70,33 @@ describe("paidProSignerMetadataStagingPerformance", () => {
 
   it("parenthetical inversion reconcile on defer path does not invoke opening guard or sanitizer", () => {
     const fixture = loadPaidProHardeningFixture(FIXTURE);
+    // Start from a substantive clean corpus, then invert only the signature parentheticals.
+    const base = expandOperativeCorpusWithUniqueSupplements(
+      [
+        "MUTUAL CONSULTING AND IMPLEMENTATION AGREEMENT",
+        "",
+        `This Agreement is entered into between ${PAID_PRO_HARDENING_CLIENT} ("Client") and ${PAID_PRO_HARDENING_PROVIDER} ("Service Provider").`,
+        "",
+        "1. SCOPE. Provider will deliver AI workflow implementation services.",
+        "2. FEES. Client will pay a fixed fee of $8,500.",
+        "3. GOVERNING LAW. Delaware law governs.",
+        "4. ELECTRONIC SIGNATURES. Counterparts and e-signatures are permitted.",
+        "",
+        "IN WITNESS WHEREOF, the Parties execute this Agreement.",
+        "",
+        "CLIENT:",
+        PAID_PRO_HARDENING_CLIENT,
+        "By: __________________________",
+        "",
+        "SERVICE PROVIDER:",
+        PAID_PRO_HARDENING_PROVIDER,
+        "By: __________________________",
+      ].join("\n"),
+      SUBSTANTIVE_SERVER_DRAFT_MIN_LEN + 1600,
+    );
+    const witnessIdx = base.search(/\bIN WITNESS WHEREOF\b/i);
     const inverted = [
-      "MUTUAL CONSULTING AND IMPLEMENTATION AGREEMENT",
-      "",
-      `This Agreement is between ${PAID_PRO_HARDENING_CLIENT} ("Client") and ${PAID_PRO_HARDENING_PROVIDER} ("Service Provider").`,
-      "",
-      "1. SCOPE. Services.",
-      "2. FEES. Fixed fee.",
+      base.slice(0, witnessIdx).trimEnd(),
       "",
       "IN WITNESS WHEREOF, the Parties execute this Agreement.",
       "",
@@ -97,7 +121,7 @@ describe("paidProSignerMetadataStagingPerformance", () => {
       intakeText: fixture.intakeText,
       deferSignerMetadataRepair: true,
     });
-    expect(renderPlain).toMatch(/CLIENT\s*:\s*\nBlue Canyon Analytics LLC/i);
+    expect(renderPlain).toMatch(/CLIENT\s*:\s*(?:\n\s*)?Blue Canyon Analytics LLC/i);
     expect(sanitizeSpy).not.toHaveBeenCalled();
     expect(openingSpy).not.toHaveBeenCalled();
 

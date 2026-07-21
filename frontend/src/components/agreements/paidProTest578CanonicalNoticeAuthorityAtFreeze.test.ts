@@ -18,7 +18,19 @@ import {
 } from "./paidProNoticeContactAuthority";
 import { repairFusedNoticesHeadingToPriorClause } from "./paidProPartyNoticeDetails";
 
-const PAID_BODY = `PRO AGREEMENT. ${"Substantive clause. ".repeat(900)}`;
+import { SHARED_ACCEPTED_PAID_BODY } from "./paidProSharedFixtureSystem";
+import { expandOperativeCorpusWithUniqueSupplements } from "./paidProSupplementalProvisionsFillerGate";
+import { SUBSTANTIVE_SERVER_DRAFT_MIN_LEN } from "./premiumAcceptancePolicy";
+
+/**
+ * Shared fixture raw length is ~10k; post-normalize prepare can shrink ~1.2k chars
+ * (post-signature pads are dropped). Expand operative supplements before IN WITNESS
+ * so prepared/established text stays > SUBSTANTIVE_SERVER_DRAFT_MIN_LEN.
+ */
+const PAID_BODY = expandOperativeCorpusWithUniqueSupplements(
+  SHARED_ACCEPTED_PAID_BODY,
+  SUBSTANTIVE_SERVER_DRAFT_MIN_LEN + 1600,
+);
 
 describe("TEST578 canonical notice authority at freeze", () => {
   it("defuses a Notices heading fused onto prior clause prose", () => {
@@ -47,11 +59,22 @@ describe("TEST578 canonical notice authority at freeze", () => {
   });
 
   it("SoT establishment succeeds for PAID_BODY routing fixture", () => {
+    expect(SUBSTANTIVE_SERVER_DRAFT_MIN_LEN).toBe(10_000);
+    const prep = preparePaidProFreezeCandidateText({
+      text: PAID_BODY,
+      source: "server_full_draft",
+      surface: "test578_sot",
+    });
+    // Assert prepared-text length (not obsolete raw length); establish may still
+    // apply notice authority that slightly expands the committed corpus.
+    expect(prep.text.length).toBeGreaterThan(SUBSTANTIVE_SERVER_DRAFT_MIN_LEN);
     const record = establishPaidProSourceOfTruth({
       text: PAID_BODY,
       source: "server_full_draft",
     });
-    expect(record.text.length).toBeGreaterThan(10_000);
+    expect(record.source).toBe("server_full_draft");
+    expect(record.text.length).toBeGreaterThan(SUBSTANTIVE_SERVER_DRAFT_MIN_LEN);
+    expect(record.text.length).toBeGreaterThanOrEqual(prep.text.length);
   });
 
   it("four-party intake notices pass structural validation with authority-aligned parties", () => {

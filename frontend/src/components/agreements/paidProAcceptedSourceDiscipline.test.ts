@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, it } from "vitest";
+/** @vitest-environment jsdom */
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { applyAcceptedProCorpusSafeDisplay } from "./acceptedProCorpusSafeDisplay";
 import { polishProAgreementDisplayLayer } from "./polishProAgreementDisplayLayer";
 import { resolvePaidProReviewRenderPlain } from "./paidProReviewRenderCorpus";
@@ -15,6 +16,7 @@ import {
   PAID_PRO_HARDENING_PROVIDER,
 } from "./qa/paidProHardening/paidProHardeningFixtures";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
+import { resetPaidProPipelineTestIsolation } from "./paidProPipelineTestIsolation";
 
 const INTAKE =
   "Create a mutual consulting and implementation agreement between Blue Canyon Analytics LLC (Client) and Iron Vale Systems Inc. (Service Provider).";
@@ -30,22 +32,36 @@ const ACCEPTED = [
   "4. GOVERNING LAW. Delaware law governs.",
   "5. ELECTRONIC SIGNATURES. Counterparts and e-signatures are permitted.",
   "",
+  ...Array.from(
+    { length: 35 },
+    (_, i) =>
+      `${i + 6}. Operative commercial clause ${i + 6}. Provider delivers AI-assisted reporting workflows and operational automation under Delaware law.`,
+  ),
+  "",
   "IN WITNESS WHEREOF, the Parties execute this Agreement.",
   "",
   "CLIENT:",
   PAID_PRO_HARDENING_CLIENT,
   "By: __________________________",
+  "Name: __________________________",
+  "Title: _________________________",
+  "Date: _____________________________",
   "",
   "SERVICE PROVIDER:",
   PAID_PRO_HARDENING_PROVIDER,
   "By: __________________________",
-  "",
-  "Operative commercial clause. ".repeat(80),
+  "Name: __________________________",
+  "Title: _________________________",
+  "Date: _____________________________",
 ].join("\n");
 
 describe("paidPro accepted source discipline", () => {
+  beforeEach(() => {
+    resetPaidProPipelineTestIsolation();
+  });
   afterEach(() => {
     clearPaidProSourceOfTruth();
+    resetPaidProPipelineTestIsolation();
   });
 
   it("keeps one accepted hash across display, copy, review render, and polish handoff", () => {
@@ -90,8 +106,9 @@ describe("paidPro accepted source discipline", () => {
       retainSignatureExecutionBlock: true,
     });
     const polishedTail = polished.text.slice(polished.text.search(/\bIN WITNESS WHEREOF\b/i));
-    expect(polishedTail).toMatch(/CLIENT\s*:\s*\nBlue Canyon Analytics LLC/i);
-    expect(polishedTail).toMatch(/SERVICE\s+PROVIDER\s*:\s*\nIron Vale Systems Inc/i);
+    // Display polish may keep entity on the role line (`CLIENT: Entity`) or the next line.
+    expect(polishedTail).toMatch(/CLIENT\s*:\s*(?:\n\s*)?Blue Canyon Analytics LLC/i);
+    expect(polishedTail).toMatch(/SERVICE\s+PROVIDER\s*:\s*(?:\n\s*)?Iron Vale Systems Inc/i);
   });
 
   it("treats signer-applied signature tail as allowed overlay when operative body matches SoT", () => {

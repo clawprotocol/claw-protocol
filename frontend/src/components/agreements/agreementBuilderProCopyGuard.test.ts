@@ -1,8 +1,11 @@
+import { SHARED_ACCEPTED_PAID_BODY } from "./paidProSharedFixtureSystem";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { canShowPremiumSuccess } from "./premiumSuccessGate";
 import { resolveAgreementIntentContract } from "./agreementIntentContract";
+import { expandOperativeCorpusWithUniqueSupplements } from "./paidProSupplementalProvisionsFillerGate";
+import { SUBSTANTIVE_SERVER_DRAFT_MIN_LEN } from "./premiumAcceptancePolicy";
 
 /** Guardrails: post-checkout Pro must not surface these as default user-visible strings. */
 const BANNED = [
@@ -11,6 +14,12 @@ const BANNED = [
   "not a finished pro agreement",
   "thin starter outline",
 ];
+
+/** Canonical substantive corpus that remains review-ready after tip normalize. */
+const SUBSTANTIVE_BODY = expandOperativeCorpusWithUniqueSupplements(
+  SHARED_ACCEPTED_PAID_BODY,
+  SUBSTANTIVE_SERVER_DRAFT_MIN_LEN + 1600,
+);
 
 describe("AgreementBuilderIntake Pro copy guard", () => {
   it("source does not include banned post-checkout Pro phrases", () => {
@@ -30,16 +39,17 @@ describe("AgreementBuilderIntake Pro copy guard", () => {
 });
 
 describe("canShowPremiumSuccess paid fallback", () => {
-  it("allows success + signers for substantive stitched / fallback when flag set", () => {
+  it("allows success + signers for substantive stitched body when flag set", () => {
     const intent = resolveAgreementIntentContract("We need a software build for the tenant portal.");
-    const body = "x".repeat(600);
+    expect(SUBSTANTIVE_BODY.length).toBeGreaterThan(SUBSTANTIVE_SERVER_DRAFT_MIN_LEN);
     const r = canShowPremiumSuccess({
       intentContract: intent,
       renderSource: "live_generated_preview",
       validation: { ok: true, reasons: [] },
-      documentText: body,
+      documentText: SUBSTANTIVE_BODY,
       intakeText: "x",
-      premiumPipelineSource: "fallback_preview_error",
+      // Tip blocks ineligible fallback_* pipelines even with stitch; use an eligible source.
+      premiumPipelineSource: "server_full_draft",
       stale: false,
       allowPaidSubstantiveStitch: true,
     });
@@ -49,19 +59,34 @@ describe("canShowPremiumSuccess paid fallback", () => {
 
   it("treats substantive body as success even for live preview render source when allowPaidSubstantiveStitch", () => {
     const intent = resolveAgreementIntentContract("Software and API build.");
-    const body = "x".repeat(500);
     const r = canShowPremiumSuccess({
       intentContract: intent,
       renderSource: "live_generated_preview",
       validation: { ok: true, reasons: [] },
-      documentText: body,
+      documentText: SUBSTANTIVE_BODY,
       intakeText: "x",
-      premiumPipelineSource: "fallback_preview",
+      premiumPipelineSource: "server_full_draft",
       stale: false,
       allowPaidSubstantiveStitch: true,
     });
     expect(r.state).toBe("premium_success");
     expect(r.signerCtaAllowed).toBe(true);
+  });
+
+  it("rejects ineligible fallback_preview pipeline even with substantive stitch body", () => {
+    const intent = resolveAgreementIntentContract("Software and API build.");
+    const r = canShowPremiumSuccess({
+      intentContract: intent,
+      renderSource: "live_generated_preview",
+      validation: { ok: true, reasons: [] },
+      documentText: SUBSTANTIVE_BODY,
+      intakeText: "x",
+      premiumPipelineSource: "fallback_preview",
+      stale: false,
+      allowPaidSubstantiveStitch: true,
+    });
+    expect(r.state).toBe("premium_retry_available");
+    expect(r.signerCtaAllowed).toBe(false);
   });
 
   it("still blocks when quality retry is active, even with substantive stitch allowed", () => {
@@ -70,9 +95,9 @@ describe("canShowPremiumSuccess paid fallback", () => {
       intentContract: intent,
       renderSource: "live_generated_preview",
       validation: { ok: true, reasons: [] },
-      documentText: "x".repeat(600),
+      documentText: SUBSTANTIVE_BODY,
       intakeText: "x",
-      premiumPipelineSource: "fallback_preview",
+      premiumPipelineSource: "server_full_draft",
       stale: false,
       qualityRetryActive: true,
       allowPaidSubstantiveStitch: true,

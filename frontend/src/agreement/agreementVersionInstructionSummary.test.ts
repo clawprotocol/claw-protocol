@@ -1,3 +1,4 @@
+import { SHARED_ACCEPTED_PAID_BODY } from "../components/agreements/paidProSharedFixtureSystem";
 import { describe, expect, it } from "vitest";
 import { safeVersionInstructionSummary } from "./agreementVersionStore";
 
@@ -8,7 +9,7 @@ describe("safeVersionInstructionSummary", () => {
   });
 
   it("truncates long instructions", () => {
-    const s = "x".repeat(90);
+    const s = SHARED_ACCEPTED_PAID_BODY;
     expect(safeVersionInstructionSummary(s).length).toBeLessThanOrEqual(73);
     expect(safeVersionInstructionSummary(s).endsWith("…")).toBe(true);
   });

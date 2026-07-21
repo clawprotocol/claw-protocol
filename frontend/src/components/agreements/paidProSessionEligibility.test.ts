@@ -16,7 +16,9 @@ import {
   hasPaidProSourceOfTruth,
 } from "./paidProSourceOfTruth";
 
-const PRO_BODY = `Consulting agreement between Red Mesa Logistics LLC and Harbor Peak Automation LLC. ${"x".repeat(700)}`;
+import { SHARED_ACCEPTED_PAID_BODY } from "./paidProSharedFixtureSystem";
+
+const PRO_BODY = SHARED_ACCEPTED_PAID_BODY;
 
 describe("paidProSessionEligibility", () => {
   beforeEach(() => {
@@ -41,10 +43,12 @@ describe("paidProSessionEligibility", () => {
     expect(hasPaidProSourceOfTruth()).toBe(false);
   });
 
-  it("pipelineSessionAccepted clears free starter latch and allows establishment", () => {
+  it("pipelineSessionAccepted arms pro entitlement over an active free starter latch", () => {
+    // Tip: pipeline acceptance marks pro entitlement, which clears the free-starter block.
     markCurrentSessionFreeStarterIntent();
     const decision = evaluatePaidProSourceOfTruthEstablishment({ pipelineSessionAccepted: true });
     expect(decision.allowed).toBe(true);
+    expect(hasCurrentSessionProEntitlement()).toBe(true);
     expect(decision.hasFreeStarterSession).toBe(false);
   });
 

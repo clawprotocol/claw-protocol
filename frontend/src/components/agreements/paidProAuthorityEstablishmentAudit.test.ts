@@ -34,7 +34,9 @@ import { resetStalePaidReviewShellForFreeStarter } from "./freeStarterReviewShel
 import { resolvePremiumRenderSource } from "./premiumRenderSourceResolver";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 
-const PRO_BODY = `CONSULTING AGREEMENT between Red Mesa Logistics LLC and Harbor Peak Automation LLC. ${"x".repeat(900)}`;
+import { SHARED_ACCEPTED_PAID_BODY } from "./paidProSharedFixtureSystem";
+
+const PRO_BODY = SHARED_ACCEPTED_PAID_BODY;
 
 const PRO_DRAFT: PaidProAgreementAuthorityDraft = {
   title: "Consulting Agreement",

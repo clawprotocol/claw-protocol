@@ -1,4 +1,6 @@
-import { afterEach, describe, expect, it } from "vitest";
+/** @vitest-environment jsdom */
+import { SHARED_ACCEPTED_PAID_BODY } from "./paidProSharedFixtureSystem";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   hasAcceptedPaidProAuthority,
   isAuthoritativePaidProReview,
@@ -18,6 +20,7 @@ import {
   clearPaidProSourceOfTruth,
   establishPaidProSourceOfTruth,
   getPaidProDocumentForSurface,
+  getPaidProSourceOfTruthText,
 } from "./paidProSourceOfTruth";
 import {
   buildLivePaidProSignerMetadataAuthority,
@@ -35,15 +38,27 @@ import { resolveIsFreeStreamlineDraftReview } from "./freeStreamlineDraftReview"
 import { CreateUiStage } from "./createUiStage";
 import { resolveSimpleProFinalReviewCorpus } from "./simpleProFinalReviewCorpus";
 import { CHIP_STATE_INITIAL_READY, CHIP_VERSION_STARTER } from "./draftPreviewLabels";
+import { expandOperativeCorpusWithUniqueSupplements } from "./paidProSupplementalProvisionsFillerGate";
+import { SUBSTANTIVE_SERVER_DRAFT_MIN_LEN } from "./premiumAcceptancePolicy";
+import { resetPaidProPipelineTestIsolation } from "./paidProPipelineTestIsolation";
 
-const PAID_BODY = `PRO AGREEMENT BODY. ${"Section with substantive terms. ".repeat(120)}`;
+/** Substantive wire that remains >10k after tip prepare/establish normalize. */
+const PAID_BODY = expandOperativeCorpusWithUniqueSupplements(
+  SHARED_ACCEPTED_PAID_BODY,
+  SUBSTANTIVE_SERVER_DRAFT_MIN_LEN + 1600,
+);
 
 describe("authoritativePaidProReview", () => {
+  beforeEach(() => {
+    resetPaidProPipelineTestIsolation();
+  });
+
   afterEach(() => {
     clearPaidProSourceOfTruth();
     clearConsumedPaidProSignerMetadataAuthority();
     clearPaidProPinnedSignerAppliedCorpus();
     resetPaidProReviewSignerMetadataSessionActiveForTests();
+    resetPaidProPipelineTestIsolation();
   });
 
   it("isAuthoritativePaidProReview is true after establishPaidProSourceOfTruth", () => {
@@ -53,11 +68,12 @@ describe("authoritativePaidProReview", () => {
   });
 
   it("review and display surfaces read the same paid corpus", () => {
-    establishPaidProSourceOfTruth({ text: PAID_BODY, source: "server_full_draft" });
+    const record = establishPaidProSourceOfTruth({ text: PAID_BODY, source: "server_full_draft" });
     const review = getPaidProDocumentForSurface("review");
     const display = getPaidProDocumentForSurface("display");
-    expect(review?.text).toBe(PAID_BODY.trim());
-    expect(display?.text).toBe(PAID_BODY.trim());
+    // Compare against prepared/established SoT bytes (not obsolete raw fixture whitespace).
+    expect(review?.text).toBe(record.text);
+    expect(display?.text).toBe(record.text);
   });
 
   it("starterPlainLooksStaleVersusPaidAuthority detects short starter vs paid", () => {
@@ -80,13 +96,19 @@ describe("authoritativePaidProReview", () => {
       isFreeStreamlineDraftReview: true,
       isFreeStarterReviewSurface: true,
       premiumPaidDocumentSurface: false,
-      paidProAuthoritative: false,
+      paidProAuthoritative: true,
       paidProReviewReadyBase: true,
       guidedCompletionActive: false,
+      simpleProductFlow: true,
+      liveWorkspaceTwoPane: true,
+      createUiStage: CreateUiStage.DRAFT,
+      displayPhase: "review",
+      createFlowPhase: "draft_ready_for_review",
     });
     expect(chrome.title).toBe(PAID_PRO_REVIEW_SHELL_TITLE);
     expect(chrome.badge).toBe(PAID_PRO_REVIEW_BADGE);
     expect(chrome.paidProReviewReady).toBe(true);
+    expect(chrome.paidProReviewContentReady).toBe(true);
     expect(chrome.title).not.toContain("Starter");
   });
 
@@ -111,7 +133,7 @@ describe("authoritativePaidProReview", () => {
   });
 
   it("resolveSimpleProFinalReviewCorpus prefers SoT over rendered starter preview", () => {
-    establishPaidProSourceOfTruth({ text: PAID_BODY, source: "server_full_draft" });
+    const record = establishPaidProSourceOfTruth({ text: PAID_BODY, source: "server_full_draft" });
     const starterPreview = "Starter only.".repeat(40);
     const resolved = resolveSimpleProFinalReviewCorpus({
       authoritativePlain: "",
@@ -120,7 +142,7 @@ describe("authoritativePaidProReview", () => {
       agreementDocumentPlain: starterPreview,
       finalReviewAuthorityOnly: true,
     });
-    expect(resolved.plainText).toBe(PAID_BODY.trim());
+    expect(resolved.plainText).toBe(record.text);
     expect(resolved.plainText).not.toContain("Starter only");
   });
 
@@ -131,41 +153,40 @@ describe("authoritativePaidProReview", () => {
   });
 
   it("hasAcceptedPaidProAuthority for long server acceptance", () => {
-    const body = "x".repeat(16_000);
-    establishPaidProSourceOfTruth({ text: body, source: "server_full_draft" });
+    const record = establishPaidProSourceOfTruth({ text: PAID_BODY, source: "server_full_draft" });
+    expect(record.text.length).toBeGreaterThan(SUBSTANTIVE_SERVER_DRAFT_MIN_LEN);
     expect(hasAcceptedPaidProAuthority()).toBe(true);
     expect(
       resolvePaidProAcceptanceRoutingMarkers({
         premiumRenderSource: "server_full_draft",
-        acceptedBodyLen: body.length,
+        acceptedBodyLen: record.text.length,
       }).suppressGuidedQuestionPanel,
     ).toBe(true);
   });
 
   it("resolvePaidProFinalReviewVisiblePlain uses SoT when boundary is empty", () => {
-    const body = "x".repeat(12_384);
-    establishPaidProSourceOfTruth({ text: body, source: "server_full_draft" });
+    const record = establishPaidProSourceOfTruth({ text: PAID_BODY, source: "server_full_draft" });
     const visible = resolvePaidProFinalReviewVisiblePlain({
       boundaryPlain: "",
       displayCandidatePlain: "",
     });
     expect(visible.length).toBeGreaterThan(10_000);
-    expect(visible.length).toBeGreaterThanOrEqual(500);
+    expect(visible).toBe(record.text);
   });
 
   it("resolvePaidProFinalReviewVisiblePlain uses SoT when stale preview is empty", () => {
-    const body = "x".repeat(12_384);
-    establishPaidProSourceOfTruth({ text: body, source: "server_full_draft" });
+    const record = establishPaidProSourceOfTruth({ text: PAID_BODY, source: "server_full_draft" });
     expect(
       resolvePaidProFinalReviewVisiblePlain({
         boundaryPlain: "",
         displayCandidatePlain: "",
-      }).length,
-    ).toBe(12_384);
+      }),
+    ).toBe(getPaidProSourceOfTruthText());
+    expect(record.text.length).toBeGreaterThan(SUBSTANTIVE_SERVER_DRAFT_MIN_LEN);
   });
 
   it("suppressPaidProFinalReviewFinalizingState when paid authority exists", () => {
-    establishPaidProSourceOfTruth({ text: "x".repeat(12_384), source: "server_full_draft" });
+    establishPaidProSourceOfTruth({ text: PAID_BODY, source: "server_full_draft" });
     expect(suppressPaidProFinalReviewFinalizingState()).toBe(true);
   });
 
