@@ -1,0 +1,478 @@
+/**
+ * RC Paid Pro E2E mocks — substantive professional corpus from shared fixture system.
+ */
+import { expect, type Page } from "@playwright/test";
+import {
+  SHARED_ACCEPTED_PAID_BODY,
+  SHARED_TWO_PARTY_INTAKE,
+} from "../../src/components/agreements/paidProSharedFixtureSystem";
+import {
+  buildRcQuadPartyPaidBody,
+  RC_QUAD_PARTY_INTAKE,
+  RC_QUAD_PENDING_DRAFT,
+} from "../fixtures/rcQuadPartyProfessional";
+
+export const RC_PAID_ECONOMICS = {
+  tier: "paid",
+  watermark_required: false,
+  free_draft_expired: false,
+  free_draft_expires_at: null as string | null,
+};
+
+export const RC_ENTITLED_USAGE = {
+  tier: "paid",
+  agreements_used: 0,
+  agreements_limit: 100,
+  agreements_created: 0,
+  agreements_completed: 0,
+  drafts_active: 0,
+  agreements_remaining: 100,
+  drafts_remaining: 100,
+  watermark_required: false,
+  storage_persistent: true,
+  paywall_required: false,
+  soft_throttle: false,
+};
+
+export type RcDraftRecord = {
+  id: string;
+  title: string;
+  jurisdiction: string;
+  parties: Array<{ name: string; role: string; email?: string }>;
+  purpose: string;
+  payment_terms: string;
+  duration: string | null;
+  due_date: string | null;
+  effective_date: string | null;
+  versions: Array<{ version: number; created_at: string; note?: string | null }>;
+  audit_log: Array<{ event_type: string; at: string; field?: string | null; value?: unknown }>;
+  created_at: string;
+  updated_at: string;
+};
+
+const ANON_ORG = "anon-rc-paid-pro-org";
+
+export async function seedEntitledPaidProBrowserState(page: Page): Promise<void> {
+  await page.addInitScript((orgId: string) => {
+    try {
+      localStorage.setItem("claw_org_id", orgId);
+      localStorage.setItem("claw_subscription_entitlement_v1", "paid");
+      localStorage.setItem(
+        "claw_workspace_usage_tier_v1",
+        JSON.stringify({ orgId, tier: "paid", fetchedAt: Date.now() }),
+      );
+      sessionStorage.setItem("claw_authenticated_workspace_session", "1");
+      sessionStorage.setItem("claw_pro_entitlement_session_v1", "rc-e2e-entitled");
+      sessionStorage.setItem("claw_pro_intent_session_v1", "rc-e2e-entitled");
+      sessionStorage.setItem("claw_paid_dashboard_create_context_v1", "dashboard_paid_create");
+    } catch {
+      /* ignore */
+    }
+  }, ANON_ORG);
+}
+
+const RC_TWO_PARTY_PENDING_DRAFT = {
+  title: "Professional Services Agreement",
+  jurisdiction: "Delaware",
+  parties: [
+    { name: "Red Mesa Logistics LLC", role: "Client" },
+    { name: "Harbor Peak Automation LLC", role: "Service Provider" },
+  ],
+  purpose: "Professional technology and consulting services.",
+  payment_terms: "$96,000 milestone installments",
+  duration: "12 months",
+  due_date: null,
+  effective_date: "2026-01-01",
+  agreement_family: "services_agreement",
+};
+
+/** Clear RC journey session keys without touching unrelated browser state. */
+export async function resetRcPaidBrowserState(page: Page): Promise<void> {
+  await clearRcApiMocks(page);
+  await page.goto("/", { waitUntil: "domcontentloaded" });
+  await page.evaluate(() => {
+    try {
+      delete (window as Window & { __clawRcCheckoutReturnSeeded?: boolean }).__clawRcCheckoutReturnSeeded;
+      const sessionKeys: string[] = [];
+      for (let i = 0; i < sessionStorage.length; i += 1) {
+        const key = sessionStorage.key(i);
+        if (key && (key.startsWith("claw_") || key.startsWith("lawdog_"))) sessionKeys.push(key);
+      }
+      for (const key of sessionKeys) sessionStorage.removeItem(key);
+      sessionStorage.removeItem("claw_rc_e2e_mock_parties_v1");
+      sessionStorage.removeItem("claw_rc_e2e_parse_parties_v1");
+      localStorage.removeItem("claw_premium_completed");
+      localStorage.removeItem("claw_paid_dashboard_create_context_v1");
+    } catch {
+      /* ignore */
+    }
+  });
+}
+
+/** Seed browser as if checkout completed — init script overwrites on each navigation. */
+export async function seedRcPaidCheckoutReturn(
+  page: Page,
+  intake = SHARED_TWO_PARTY_INTAKE,
+  draftId = "ag_rc_paid_two_party",
+  pendingDraft = RC_TWO_PARTY_PENDING_DRAFT,
+): Promise<void> {
+  await page.addInitScript(
+    ({ orgId, intakeText, pending, agreementId }) => {
+      try {
+        localStorage.setItem("claw_org_id", orgId);
+        localStorage.removeItem("claw_premium_completed");
+        sessionStorage.removeItem("claw_premium_completion_snapshot_v1");
+        sessionStorage.removeItem("claw_paid_premium_completion_session_v1");
+        sessionStorage.removeItem("claw_paid_dashboard_create_context_v1");
+        sessionStorage.setItem("claw_advanced_full_draft_checkout_ok_v1", String(Date.now()));
+        sessionStorage.setItem(
+          "claw_create_complexity_resume_v1",
+          JSON.stringify({
+            version: 1,
+            savedAt: Date.now(),
+            rawIntake: intakeText,
+            pending,
+            awaitingProCheckout: true,
+            resume_kind: "optional_full_upgrade",
+            originalUserIntakeRaw: intakeText,
+            agreementId,
+          }),
+        );
+      } catch {
+        /* ignore */
+      }
+    },
+    { orgId: ANON_ORG, intakeText: intake, pending: pendingDraft, agreementId: draftId },
+  );
+}
+
+export async function clearRcApiMocks(page: Page): Promise<void> {
+  const ctx = page.context();
+  const patterns: Array<string | RegExp> = [
+    /\/(api\/|v1\/workspace\/)/,
+    "**/v1/workspace/finalize-auth**",
+    "**/v1/workspace/bind-user-org**",
+    "**/v1/workspace/auth-continuation**",
+    "**/v1/billing/verify-checkout-session**",
+    "**/v1/subscriptions/**",
+    "**/api/agreements/premium-full-draft**",
+    /\/api\/agreements\/[^/?]+/,
+    "**/api/agreements/**/frozen-signing-authority**",
+    "**/api/agreements/**/signing-packet/**",
+    "**/api/agreements/**/signing-links-sent**",
+    "**/api/agreements/**/vs01-signer-complete**",
+    "**/api/agreements/**/vs01-ensure-signed-snapshot**",
+    "**/api/agreements/public/**",
+    "**/v1/documents/*/content**",
+  ];
+  for (const pattern of patterns) {
+    await page.unroute(pattern).catch(() => undefined);
+    await ctx.unroute(pattern).catch(() => undefined);
+  }
+}
+
+export async function installRcPaidProApiRoutes(
+  page: Page,
+  drafts: Map<string, RcDraftRecord>,
+  opts?: {
+    draftId?: string;
+    partyCount?: 2 | 3 | 4;
+    /** Override premium-full-draft body (e.g. quad corpus on stable two-party checkout handoff). */
+    premiumBody?: string;
+    /** When false, parse mock stays two-party while premium body may still be quad. */
+    parsePartyCount?: 2 | 3 | 4;
+  },
+) {
+  const draftId = opts?.draftId ?? "ag_rc_paid_pro";
+  const partyCount = opts?.partyCount ?? 2;
+  const parsePartyCount = opts?.parsePartyCount ?? partyCount;
+  const paidBody = opts?.premiumBody ?? (partyCount >= 4 ? buildRcQuadPartyPaidBody() : SHARED_ACCEPTED_PAID_BODY);
+  const mockPartyNames =
+    parsePartyCount >= 4
+      ? [
+          "Redwood Biologics, Inc.",
+          "Summit AI Consulting LLC",
+          "Blue Harbor Systems LLC",
+          "Iron Gate Security LLC",
+        ]
+      : parsePartyCount === 3
+        ? ["Red Mesa Logistics LLC", "Harbor Peak Automation LLC", "Blue Canyon Analytics LLC"]
+        : ["Red Mesa Logistics LLC", "Harbor Peak Automation LLC"];
+
+  await clearRcApiMocks(page);
+  return page.route(/\/(api\/|v1\/workspace\/)/, async (route) => {
+    const url = route.request().url();
+    const method = route.request().method();
+
+    if (url.includes("/health") && method === "GET") {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ ok: true }),
+      });
+      return;
+    }
+
+    if (url.includes("/api/agreements/access/policy") && method === "GET") {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          recipient_link_token_required: false,
+          mint_key_configured: true,
+          signing_token_configured: true,
+          review_link_mint_enabled: true,
+          signing_token_env_var_detected: "CLAW_AGREEMENT_SIGNING_TOKEN_SECRET",
+        }),
+      });
+      return;
+    }
+
+    if (url.includes("/recipient-access-token") && method === "POST") {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          token: "rc-e2e-recipient-token",
+          expires_in_seconds: 86400,
+          locked_version_id: "v1",
+          review_url: "https://example.test/agreements/rc-e2e/review",
+        }),
+      });
+      return;
+    }
+
+    if (url.includes("/recipient-links/mint") && method === "POST") {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          rows: [
+            {
+              partyId: "p-1",
+              displayName: "Harbor Peak Automation LLC",
+              email: "michael.torres@example.com",
+              reviewHref: "https://example.test/review/rc-e2e/1",
+            },
+          ],
+        }),
+      });
+      return;
+    }
+
+    if (url.includes("/v1/workspace/anonymous-session") && method === "POST") {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          ok: true,
+          org_id: ANON_ORG,
+          session_id: "rc-e2e-session",
+          token: "rc-e2e-token",
+          expires_in_seconds: 86400,
+        }),
+      });
+      return;
+    }
+
+    if (url.includes("/api/agreements/usage") && method === "GET") {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify(RC_ENTITLED_USAGE),
+      });
+      return;
+    }
+
+    if (!url.includes("/api/agreements/") && !url.includes("premium-full-draft")) {
+      await route.continue();
+      return;
+    }
+
+    if (url.includes("/api/agreements/premium-missing-facts") && method === "POST") {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ questions: [] }),
+      });
+      return;
+    }
+
+    if (url.includes("/api/agreements/premium-full-draft") && method === "POST") {
+      await page.evaluate((partyNames) => {
+        try {
+          sessionStorage.setItem("claw_rc_e2e_mock_parties_v1", JSON.stringify(partyNames));
+        } catch {
+          /* ignore */
+        }
+      }, mockPartyNames);
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          title: "Professional Services Agreement",
+          agreement_family: "services_agreement",
+          generation_outcome: "ok",
+          document_text: paidBody,
+          server_full_document_text: paidBody,
+          premium_full_document_text: paidBody,
+          authoritative_draft: paidBody,
+          key_terms_found: ["Parties", "Fees", "Delaware", "Confidentiality"],
+          missing_material_info: [],
+          validation: { ok: true, professional_coverage_ok: true },
+          model: "rc-e2e-mock",
+        }),
+      });
+      return;
+    }
+
+    if (url.includes("/api/agreements/parse")) {
+      const parties =
+        parsePartyCount >= 4
+          ? [
+              { name: "Redwood Biologics, Inc.", role: "Client" },
+              { name: "Summit AI Consulting LLC", role: "Lead Provider" },
+              { name: "Blue Harbor Systems LLC", role: "Implementation Partner" },
+              { name: "Iron Gate Security LLC", role: "Cybersecurity Auditor" },
+            ]
+          : parsePartyCount === 3
+            ? [
+                { name: "Red Mesa Logistics LLC", role: "Client" },
+                { name: "Harbor Peak Automation LLC", role: "Service Provider" },
+                { name: "Blue Canyon Analytics LLC", role: "Technology Partner" },
+              ]
+            : [
+                { name: "Red Mesa Logistics LLC", role: "Client" },
+                { name: "Harbor Peak Automation LLC", role: "Service Provider" },
+              ];
+      await page.evaluate((partyNames) => {
+        try {
+          sessionStorage.setItem("claw_rc_e2e_parse_parties_v1", JSON.stringify(partyNames));
+        } catch {
+          /* ignore */
+        }
+      }, parties.map((p) => p.name));
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          draft: {
+            title: "Professional Services Agreement",
+            jurisdiction: "Delaware",
+            parties,
+            purpose: "Professional technology and consulting services.",
+            payment_terms: "$96,000 milestone installments",
+            duration: "12 months",
+            due_date: null,
+            effective_date: "2026-01-01",
+            agreement_family: "services_agreement",
+          },
+        }),
+      });
+      return;
+    }
+
+    if (url.includes("/api/agreements/draft") && method === "POST") {
+      const body = route.request().postDataJSON() as Record<string, unknown>;
+      const now = new Date().toISOString();
+      const rec: RcDraftRecord = {
+        id: draftId,
+        title: String(body.title || "Professional Services Agreement"),
+        jurisdiction: String(body.jurisdiction || "Delaware"),
+        parties: (Array.isArray(body.parties) ? body.parties : []) as RcDraftRecord["parties"],
+        purpose: String(body.purpose || ""),
+        payment_terms: String(body.payment_terms || ""),
+        duration: body.duration == null ? null : String(body.duration),
+        due_date: body.due_date == null ? null : String(body.due_date),
+        effective_date: body.effective_date == null ? null : String(body.effective_date),
+        versions: [{ version: 1, created_at: now, note: "created" }],
+        audit_log: [],
+        created_at: now,
+        updated_at: now,
+      };
+      drafts.set(draftId, rec);
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ id: draftId, draft: rec, economics: RC_PAID_ECONOMICS }),
+      });
+      return;
+    }
+
+    if (url.includes("/render")) {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ rendered_html: `<p>${paidBody.slice(0, 500)}</p>` }),
+      });
+      return;
+    }
+
+    if (url.includes("/vs01-signing-seed") && method === "POST") {
+      const seedMatch = url.match(/\/api\/agreements\/([^/?]+)/);
+      const seedAgreementId = seedMatch?.[1] ? decodeURIComponent(seedMatch[1]) : draftId;
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          document_id: `doc_${seedAgreementId}`,
+          content_sha256: "rc_e2e_seed_hash_v1",
+        }),
+      });
+      return;
+    }
+
+    if (url.includes("/v1/documents/") && url.includes("/content") && method === "GET") {
+      const pdf = Buffer.from("%PDF-1.4\n1 0 obj<<>>endobj\ntrailer<<>>\n%%EOF\n", "utf8");
+      await route.fulfill({ status: 200, contentType: "application/pdf", body: pdf });
+      return;
+    }
+
+    if (method !== "GET") {
+      const allowServiceBoundaryFallback =
+        url.includes("/signing-links-sent") ||
+        url.includes("/signing-packet/") ||
+        url.includes("/frozen-signing-authority") ||
+        url.includes("/vs01-signer-complete") ||
+        url.includes("/vs01-ensure-signed-snapshot") ||
+        url.includes("/agreements/public/");
+      if (allowServiceBoundaryFallback) {
+        await route.fallback();
+        return;
+      }
+      await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify({ ok: true }) });
+      return;
+    }
+
+    const m = url.match(/\/api\/agreements\/([^/?]+)/);
+    const segment = m?.[1] ? decodeURIComponent(m[1]) : "";
+    const rec = drafts.get(segment);
+    await route.fulfill({
+      status: rec ? 200 : 404,
+      contentType: "application/json",
+      body: JSON.stringify(rec ? { draft: rec, economics: RC_PAID_ECONOMICS } : { detail: "not_found" }),
+    });
+  });
+}
+
+export async function waitForAuthoritativeProReview(page: Page): Promise<void> {
+  await expect(page).not.toHaveURL(/\/app\/ops\//, { timeout: 5_000 });
+  await expect(page.getByText("We couldn't safely finalize the Pro version.")).toHaveCount(0);
+  await expect(page.getByText(/Retry Pro draft/i)).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "Review your Pro agreement" })).toBeVisible({
+    timeout: 180_000,
+  });
+  const waitTitle = page.getByRole("heading", {
+    name: /Preparing final agreement|Preparing signature-ready version|Generating your final Pro agreement/i,
+  });
+  await expect(waitTitle.first()).toBeHidden({ timeout: 120_000 }).catch(() => undefined);
+  await expect
+    .poll(async () => {
+      const text = await page.evaluate(() => document.body?.textContent ?? "");
+      const auth = text.match(/authoritativeLen:\s*(\d+)/i);
+      return Number.parseInt(auth?.[1] ?? "0", 10) || 0;
+    }, { timeout: 180_000 })
+    .toBeGreaterThan(8_000);
+}
+
+export { SHARED_ACCEPTED_PAID_BODY as RC_SUBSTANTIVE_PAID_BODY };

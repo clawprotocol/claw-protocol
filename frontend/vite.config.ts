@@ -123,7 +123,22 @@ export default defineConfig({
         target: "http://127.0.0.1:8000",
         changeOrigin: true,
       },
-      "/verify": { target: "http://127.0.0.1:8000", changeOrigin: true },
+      /**
+       * Backend receipt verify is POST /verify and POST /verify/tree only.
+       * GET /verify/:agreementId is the SPA public agreement verification route
+       * (see agreementPublicVerifyPath) — must not proxy to FastAPI.
+       */
+      "/verify": {
+        target: "http://127.0.0.1:8000",
+        changeOrigin: true,
+        bypass(req) {
+          const url = req.url ?? "";
+          if (req.method === "GET" && /^\/verify\/[^/?]+/.test(url)) {
+            return url;
+          }
+          return undefined;
+        },
+      },
       "/verify/tree": { target: "http://127.0.0.1:8000", changeOrigin: true },
       "/receipt": { target: "http://127.0.0.1:8000", changeOrigin: true },
       "/health": { target: "http://127.0.0.1:8000", changeOrigin: true },
