@@ -570,6 +570,8 @@ class AgreementDraft(AgreementDraftCreate):
     review_invite_emails_sent_at: Optional[str] = None
     """VS01 prepared signing packet for cross-browser recipient hydration (test346)."""
     vs01_signing_packet_v1: Optional[Dict[str, Any]] = None
+    """Phase 3B — durable frozen signing authority bound to accepted corpus hash."""
+    frozen_signing_authority_v1: Optional[Dict[str, Any]] = None
     """Per-recipient invite delivery registry (JTIs, timestamps, resend counts)."""
     recipient_delivery_v1: Optional[Dict[str, Any]] = None
     workspace_archived_at: Optional[str] = None
@@ -2925,7 +2927,24 @@ class SigningLinksSentBody(BaseModel):
     packet_revision: Optional[str] = None
     document_id: Optional[str] = None
     portable_packet: Optional[Dict[str, Any]] = None
+    frozen_signing_authority: Optional[Dict[str, Any]] = None
     targets: List[SigningInviteTargetBody] = Field(default_factory=list)
+
+
+class FrozenSigningAuthorityPersistBody(BaseModel):
+    snapshot: Dict[str, Any]
+    packet_state: str = "draft"
+
+
+class SigningPacketCancelBody(BaseModel):
+    reason: str = ""
+
+
+class SigningPacketReissueBody(BaseModel):
+    packet_revision: str = ""
+    document_id: str = ""
+    portable_packet: Optional[Dict[str, Any]] = None
+    frozen_signing_authority: Optional[Dict[str, Any]] = None
 
 
 class Vs01SignerCompleteBody(BaseModel):
@@ -6245,7 +6264,69 @@ def post_agreement_signing_links_sent(
     portable = body.portable_packet if isinstance(body.portable_packet, dict) else None
     document_id = (body.document_id or "").strip() or None
     packet_revision = (body.packet_revision or "").strip() or None
+    frozen_raw = body.frozen_signing_authority if isinstance(body.frozen_signing_authority, dict) else None
+
     if portable and document_id:
+        from backend.services.frozen_signing_authority import (
+            PACKET_STATE_ACTIVE,
+            corpus_hash_from_portable,
+            extract_required_signing_actions,
+            validate_frozen_signing_authority_snapshot,
+        )
+
+        corpus_hash = corpus_hash_from_portable(portable)
+        if frozen_raw:
+            ok, err_code, err_detail = validate_frozen_signing_authority_snapshot(
+                frozen_raw,
+                expected_agreement_id=agreement_id,
+                expected_corpus_hash=corpus_hash or None,
+            )
+            if not ok:
+                raise HTTPException(
+                    status_code=400,
+                    detail={
+                        "code": err_code or "frozen_authority_invalid",
+                        "message": "Frozen signing authority validation failed.",
+                        "detail": err_detail,
+                    },
+                )
+            actions = extract_required_signing_actions(frozen_raw)
+            frozen_to_store = {
+                **frozen_raw,
+                "packetState": PACKET_STATE_ACTIVE,
+                "requiredActions": actions,
+                "activePacketRevision": packet_revision,
+            }
+            draft = _merge_agreement_draft(
+                draft,
+                frozen_signing_authority_v1=frozen_to_store,
+                updated_at=_utc_now_iso(),
+            )
+            _save_draft_sync(draft.model_dump(), request)
+        elif not isinstance(draft.frozen_signing_authority_v1, dict):
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "code": "frozen_signing_authority_required",
+                    "message": "Durable frozen signing authority is required before packet activation.",
+                },
+            )
+        else:
+            ok, err_code, err_detail = validate_frozen_signing_authority_snapshot(
+                draft.frozen_signing_authority_v1,
+                expected_agreement_id=agreement_id,
+                expected_corpus_hash=corpus_hash or None,
+            )
+            if not ok:
+                raise HTTPException(
+                    status_code=400,
+                    detail={
+                        "code": err_code or "frozen_authority_invalid",
+                        "message": "Stored frozen signing authority failed validation.",
+                        "detail": err_detail,
+                    },
+                )
+
         try:
             stored = {
                 "v": 1,
@@ -6253,6 +6334,8 @@ def post_agreement_signing_links_sent(
                 "packet_revision": packet_revision,
                 "portable": portable,
                 "stored_at": _utc_now_iso(),
+                "packet_state": "active",
+                "frozen_corpus_hash": corpus_hash,
             }
             draft = _merge_agreement_draft(draft, vs01_signing_packet_v1=stored, updated_at=_utc_now_iso())
             _save_draft_sync(draft.model_dump(), request)
@@ -6260,6 +6343,13 @@ def post_agreement_signing_links_sent(
             logging.getLogger(__name__).exception(
                 "vs01_signing_packet_persist_failed agreement_id=%s",
                 agreement_id,
+            )
+            raise HTTPException(
+                status_code=500,
+                detail={
+                    "code": "packet_persist_failed",
+                    "message": "Signing packet could not be persisted; invitations were not sent.",
+                },
             )
     try:
         from backend.services.email.signing_delivery import maybe_send_signing_invites_after_packet_prepared
@@ -6318,6 +6408,250 @@ def post_agreement_signing_links_sent(
         "sent_count": sent_count,
         "skip_reason": skip_reason,
         "draft": draft.model_dump(),
+    }
+
+
+@router.get("/{agreement_id}/frozen-signing-authority")
+def get_frozen_signing_authority(agreement_id: str, request: Request) -> Dict[str, Any]:
+    """Owner read of durable frozen signing authority snapshot."""
+    assert_agreement_full_draft_read_allowed(request, agreement_id)
+    draft = _load_or_404(agreement_id)
+    frozen = draft.frozen_signing_authority_v1 if isinstance(draft.frozen_signing_authority_v1, dict) else None
+    if not frozen:
+        raise HTTPException(status_code=404, detail="frozen_signing_authority_not_found")
+    from backend.services.frozen_signing_authority import (
+        resolve_signing_status_counts,
+        validate_frozen_signing_authority_snapshot,
+    )
+
+    ok, err_code, err_detail = validate_frozen_signing_authority_snapshot(
+        frozen,
+        expected_agreement_id=agreement_id,
+    )
+    if not ok:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": err_code or "frozen_authority_invalid",
+                "message": "Stored frozen signing authority is invalid.",
+                "detail": err_detail,
+            },
+        )
+    return {
+        "ok": True,
+        "snapshot": frozen,
+        "status_counts": resolve_signing_status_counts(frozen),
+    }
+
+
+@router.post("/{agreement_id}/frozen-signing-authority")
+def post_frozen_signing_authority(
+    agreement_id: str,
+    request: Request,
+    body: FrozenSigningAuthorityPersistBody,
+) -> Dict[str, Any]:
+    """Persist draft frozen signing authority at finalize boundary (before packet activation)."""
+    if not _agreements_write_allowed():
+        raise HTTPException(status_code=403, detail="verifier_only")
+    _owner_mutation_guards(request, agreement_id, surface="frozen_signing_authority")
+    draft = _load_or_404(agreement_id)
+    existing = draft.frozen_signing_authority_v1 if isinstance(draft.frozen_signing_authority_v1, dict) else None
+    existing_state = (
+        (existing.get("packetState") or existing.get("packet_state") or "draft").strip().lower()
+        if existing
+        else "draft"
+    )
+    if existing_state == "active":
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "frozen_authority_immutable",
+                "message": "Active frozen signing authority cannot be replaced.",
+            },
+        )
+    from backend.services.frozen_signing_authority import (
+        PACKET_STATE_DRAFT,
+        extract_required_signing_actions,
+        validate_frozen_signing_authority_snapshot,
+    )
+
+    snapshot = body.snapshot if isinstance(body.snapshot, dict) else {}
+    ok, err_code, err_detail = validate_frozen_signing_authority_snapshot(
+        snapshot,
+        expected_agreement_id=agreement_id,
+    )
+    if not ok:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": err_code or "frozen_authority_invalid",
+                "message": "Frozen signing authority validation failed.",
+                "detail": err_detail,
+            },
+        )
+    packet_state = (body.packet_state or PACKET_STATE_DRAFT).strip().lower()
+    if packet_state not in ("draft",):
+        raise HTTPException(status_code=400, detail="invalid_packet_state_for_persist")
+    actions = extract_required_signing_actions(snapshot)
+    frozen_to_store = {
+        **snapshot,
+        "packetState": PACKET_STATE_DRAFT,
+        "requiredActions": actions,
+    }
+    now = _utc_now_iso()
+    audit = list(draft.audit_log or [])
+    audit.append(
+        AuditEvent(
+            event_type="frozen_signing_authority_persisted",
+            at=now,
+            field="frozen_signing_authority_v1",
+            value={"version": snapshot.get("version"), "corpus_hash": snapshot.get("frozenCorpusHash")},
+        )
+    )
+    next_draft = _merge_agreement_draft(
+        draft,
+        frozen_signing_authority_v1=frozen_to_store,
+        audit_log=audit,
+        updated_at=now,
+    )
+    _save_draft_sync(next_draft.model_dump(), request)
+    return {"ok": True, "snapshot": frozen_to_store, "draft": next_draft.model_dump()}
+
+
+@router.post("/{agreement_id}/signing-packet/cancel")
+def post_signing_packet_cancel(
+    agreement_id: str,
+    request: Request,
+    body: SigningPacketCancelBody = SigningPacketCancelBody(),
+) -> Dict[str, Any]:
+    """Cancel active signing packet; prior links fail closed."""
+    if not _agreements_write_allowed():
+        raise HTTPException(status_code=403, detail="verifier_only")
+    _owner_mutation_guards(request, agreement_id, surface="signing_packet_cancel")
+    draft = _load_or_404(agreement_id)
+    stored = draft.vs01_signing_packet_v1 if isinstance(draft.vs01_signing_packet_v1, dict) else None
+    if not stored:
+        raise HTTPException(status_code=404, detail="packet_not_found")
+    from backend.services.frozen_signing_authority import PACKET_STATE_CANCELLED
+
+    now = _utc_now_iso()
+    stored = {**stored, "packet_state": PACKET_STATE_CANCELLED, "cancelled_at": now}
+    frozen = draft.frozen_signing_authority_v1 if isinstance(draft.frozen_signing_authority_v1, dict) else None
+    frozen_next = (
+        {**frozen, "packetState": PACKET_STATE_CANCELLED, "cancelledAt": now} if frozen else None
+    )
+    audit = list(draft.audit_log or [])
+    audit.append(
+        AuditEvent(
+            event_type="signing_packet_cancelled",
+            at=now,
+            field="vs01_signing_packet_v1",
+            value={"reason": (body.reason or "").strip() or None},
+        )
+    )
+    merge_fields: Dict[str, Any] = {
+        "vs01_signing_packet_v1": stored,
+        "audit_log": audit,
+        "updated_at": now,
+    }
+    if frozen_next:
+        merge_fields["frozen_signing_authority_v1"] = frozen_next
+    next_draft = _merge_agreement_draft(draft, **merge_fields)
+    _save_draft_sync(next_draft.model_dump(), request)
+    return {"ok": True, "packet_state": PACKET_STATE_CANCELLED, "draft": next_draft.model_dump()}
+
+
+@router.post("/{agreement_id}/signing-packet/reissue")
+def post_signing_packet_reissue(
+    agreement_id: str,
+    request: Request,
+    body: SigningPacketReissueBody,
+) -> Dict[str, Any]:
+    """Reissue signing packet with new revision; prior links superseded."""
+    if not _agreements_write_allowed():
+        raise HTTPException(status_code=403, detail="verifier_only")
+    _owner_mutation_guards(request, agreement_id, surface="signing_packet_reissue")
+    draft = _load_or_404(agreement_id)
+    prior = draft.vs01_signing_packet_v1 if isinstance(draft.vs01_signing_packet_v1, dict) else None
+    if not prior:
+        raise HTTPException(status_code=404, detail="packet_not_found")
+    document_id = (body.document_id or "").strip() or (prior.get("document_id") or "").strip()
+    packet_revision = (body.packet_revision or "").strip()
+    portable = body.portable_packet if isinstance(body.portable_packet, dict) else prior.get("portable")
+    if not document_id or not isinstance(portable, dict) or not packet_revision:
+        raise HTTPException(status_code=400, detail="reissue_fields_required")
+    from backend.services.frozen_signing_authority import (
+        PACKET_STATE_ACTIVE,
+        PACKET_STATE_SUPERSEDED,
+        corpus_hash_from_portable,
+        extract_required_signing_actions,
+        validate_frozen_signing_authority_snapshot,
+    )
+
+    corpus_hash = corpus_hash_from_portable(portable)
+    frozen_raw = body.frozen_signing_authority if isinstance(body.frozen_signing_authority, dict) else None
+    if not frozen_raw and isinstance(draft.frozen_signing_authority_v1, dict):
+        frozen_raw = draft.frozen_signing_authority_v1
+    if not frozen_raw:
+        raise HTTPException(status_code=400, detail="frozen_signing_authority_required")
+    ok, err_code, err_detail = validate_frozen_signing_authority_snapshot(
+        frozen_raw,
+        expected_agreement_id=agreement_id,
+        expected_corpus_hash=corpus_hash or None,
+    )
+    if not ok:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": err_code or "frozen_authority_invalid",
+                "message": "Frozen signing authority validation failed for reissue.",
+                "detail": err_detail,
+            },
+        )
+    now = _utc_now_iso()
+    prior_rev = (prior.get("packet_revision") or "").strip()
+    superseded = {**prior, "packet_state": PACKET_STATE_SUPERSEDED, "superseded_at": now, "superseded_by_revision": packet_revision}
+    actions = extract_required_signing_actions(frozen_raw)
+    frozen_to_store = {
+        **frozen_raw,
+        "packetState": PACKET_STATE_ACTIVE,
+        "requiredActions": actions,
+        "activePacketRevision": packet_revision,
+        "supersedesRevision": prior_rev or None,
+        "reissuedAt": now,
+    }
+    stored = {
+        "v": 1,
+        "document_id": document_id,
+        "packet_revision": packet_revision,
+        "portable": portable,
+        "stored_at": now,
+        "packet_state": PACKET_STATE_ACTIVE,
+        "frozen_corpus_hash": corpus_hash,
+        "supersedes_revision": prior_rev or None,
+    }
+    audit = list(draft.audit_log or [])
+    audit.append(
+        AuditEvent(
+            event_type="signing_packet_reissued",
+            at=now,
+            field="vs01_signing_packet_v1",
+            value={"prior_revision": prior_rev or None, "new_revision": packet_revision},
+        )
+    )
+    next_draft = _merge_agreement_draft(
+        draft,
+        vs01_signing_packet_v1=stored,
+        frozen_signing_authority_v1=frozen_to_store,
+        audit_log=audit,
+        updated_at=now,
+    )
+    _save_draft_sync(next_draft.model_dump(), request)
+    return {
+        "ok": True,
+        "packet_state": PACKET_STATE_ACTIVE,
+        "superseded_revision": prior_rev or None,
+        "draft": next_draft.model_dump(),
     }
 
 
@@ -7071,6 +7405,15 @@ def get_public_vs01_signing_packet(
     stored = draft.vs01_signing_packet_v1 if isinstance(draft.vs01_signing_packet_v1, dict) else None
     if not stored:
         raise HTTPException(status_code=404, detail="packet_not_found")
+    packet_state = (stored.get("packet_state") or "active").strip().lower()
+    if packet_state in ("cancelled", "superseded"):
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": f"packet_{packet_state}",
+                "message": "This signing packet is no longer active.",
+            },
+        )
     if (stored.get("document_id") or "").strip() != did:
         raise HTTPException(status_code=404, detail="packet_document_mismatch")
     rev = (packet_revision or "").strip()
@@ -7080,7 +7423,32 @@ def get_public_vs01_signing_packet(
     portable = stored.get("portable")
     if not isinstance(portable, dict):
         raise HTTPException(status_code=404, detail="packet_invalid")
-    return {"ok": True, "portable": portable}
+
+    recipient_projection: Optional[Dict[str, Any]] = None
+    frozen = draft.frozen_signing_authority_v1 if isinstance(draft.frozen_signing_authority_v1, dict) else None
+    if frozen:
+        from backend.services.frozen_signing_authority import build_recipient_signing_projection
+
+        frozen_state = (frozen.get("packetState") or frozen.get("packet_state") or "active").strip().lower()
+        if frozen_state in ("cancelled", "superseded"):
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "code": f"packet_{frozen_state}",
+                    "message": "This signing packet is no longer active.",
+                },
+            )
+        recipient_projection = build_recipient_signing_projection(
+            frozen,
+            signer_record_id=pid or None,
+            agreement_party_id=pid or None,
+            participant_id=pid or None,
+        )
+
+    out: Dict[str, Any] = {"ok": True, "portable": portable}
+    if recipient_projection:
+        out["recipient_projection"] = recipient_projection
+    return out
 
 
 @router.get("/{agreement_id}")

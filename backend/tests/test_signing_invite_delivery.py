@@ -78,6 +78,44 @@ def _create_agreement(client: TestClient) -> str:
     return create_res.json()["id"]
 
 
+def _minimal_frozen_authority(aid: str, corpus_hash: str = "abc123") -> dict:
+    return {
+        "version": 1,
+        "agreementId": aid,
+        "agreementSessionId": "sess_invite",
+        "frozenCorpusHash": corpus_hash,
+        "frozenAt": "2026-07-08T00:00:00.000Z",
+        "parties": [
+            {"agreementPartyId": "p_owner", "legalEntityName": "Red Mesa Logistics LLC", "canonicalOrder": 0},
+            {"agreementPartyId": "p_cp", "legalEntityName": "Harbor Peak Automation LLC", "canonicalOrder": 1},
+        ],
+        "signers": [
+            {
+                "signerRecordId": "signer:p_owner:0",
+                "agreementPartyId": "p_owner",
+                "signerEmail": "owner@example.com",
+                "signingOrder": 0,
+                "requiresSignature": True,
+                "requiresInitials": False,
+            },
+            {
+                "signerRecordId": "signer:p_cp:0",
+                "agreementPartyId": "p_cp",
+                "signerEmail": "cp@example.com",
+                "signingOrder": 1,
+                "requiresSignature": True,
+                "requiresInitials": False,
+            },
+        ],
+        "recipients": [],
+        "execution": {
+            "partyOrder": ["p_owner", "p_cp"],
+            "signerOrder": ["signer:p_owner:0", "signer:p_cp:0"],
+            "executionBlockHash": "exec",
+        },
+    }
+
+
 def test_signing_links_sent_emails_all_parties(
     monkeypatch: pytest.MonkeyPatch, tmp_path
 ) -> None:
@@ -170,6 +208,7 @@ def test_signing_links_sent_persists_vs01_portable_packet_for_public_hydration(
         "packet_revision": "rev_test346",
         "document_id": "doc_test346",
         "portable_packet": portable,
+        "frozen_signing_authority": _minimal_frozen_authority(aid, corpus_hash="abc123"),
         "targets": [
             {
                 "email": "owner@example.com",

@@ -576,7 +576,26 @@ def ensure_fully_executed_snapshot_on_draft(
     corpus = str(seed.get("corpusPlain") or "")
     built = build_snapshot_record(corpus, portable) if corpus else None
     if built:
-        built_violations = completed_execution_by_name_violations(str(built.get("corpus_plain") or ""))
+        built_corpus = str(built.get("corpus_plain") or "")
+        built_violations = completed_execution_by_name_violations(built_corpus)
+        frozen_authority = draft.get("frozen_signing_authority_v1")
+        if isinstance(frozen_authority, dict):
+            from backend.services.completed_agreement_parity import validate_completed_agreement_authorized_delta
+
+            seed_corpus = corpus
+            parity_ok, parity_code, parity_detail = validate_completed_agreement_authorized_delta(
+                frozen_corpus=seed_corpus,
+                completed_corpus=built_corpus,
+                snapshot=frozen_authority,
+            )
+            if not parity_ok:
+                _log.warning(
+                    "[vs01-final-signed-snapshot] agreement_id=%s authorized_delta_failed code=%s detail=%s",
+                    aid,
+                    parity_code,
+                    parity_detail,
+                )
+                return EnsureFullyExecutedSnapshotResult(draft, False, f"parity_{parity_code}", False)
         if not built_violations:
             next_stored = {**stored, "fully_executed_snapshot": built}
             _log.info(
