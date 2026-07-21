@@ -125,6 +125,39 @@ function mergeUniqueAuthoritativePartyNames(...groups: readonly string[][]): str
 }
 
 /**
+ * Prefer appearance-ordered between/among parties over a length-sorted entity pool when the
+ * ordered list is usable (3+), unique, and set-consistent with candidate parties. Length must
+ * never decide signer-slot order (e.g. longer "Beta Operations LLC" displacing "Alpha Services LLC").
+ */
+function preferOrderedBetweenPartyList(
+  fromBetween: readonly string[],
+  candidateParties: readonly string[],
+): boolean {
+  if (fromBetween.length < 3) return false;
+  const uniqueKeys = new Set(fromBetween.map((n) => normalizeAgreementPartyName(n).toLowerCase()));
+  if (uniqueKeys.size !== fromBetween.length) return false;
+  if (
+    !fromBetween.every(
+      (n) =>
+        n.length >= 2 &&
+        !isInvalidPartySlotLegalEntity(n) &&
+        isAuthoritativeLegalEntityName(n),
+    )
+  ) {
+    return false;
+  }
+  if (candidateParties.length < 3) return true;
+  if (candidateParties.length !== fromBetween.length) return false;
+  const betweenCovered = fromBetween.every((b) =>
+    candidateParties.some((c) => partyLegalNamesMatch(b, c)),
+  );
+  const candidatesCovered = candidateParties.every((c) =>
+    fromBetween.some((b) => partyLegalNamesMatch(b, c)),
+  );
+  return betweenCovered && candidatesCovered;
+}
+
+/**
  * TEST536 — restore intake document order for a merged multi-party manifest. The entity pool is
  * length-sorted for canonicalization, which can reorder parties (e.g. drop Party 1 "Redwood
  * Biologics, Inc." to the tail). Reorder by first appearance in the intake so recital/notice/
@@ -240,6 +273,8 @@ export function resolveAuthoritativeIntakePartyNames(intakeContext?: string | nu
   }
   if (labeled.length >= 3) return labeled;
   if (numbered.length >= 3) return numbered;
+  // Ordered between/among clause wins over length-sorted entityPool for 3+ party slot order.
+  if (preferOrderedBetweenPartyList(fromBetween, entityPool)) return fromBetween;
   if (entityPool.length >= 3) return entityPool;
   if (numbered.length >= 2 && numbered.length >= entityPool.length) return numbered;
   if (fromBetween.length >= 2 && fromBetween.length >= lineSeparated.length) return fromBetween;

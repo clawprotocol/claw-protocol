@@ -421,6 +421,40 @@ describe("signerSetupPartyIdentity", () => {
     expect(new Set(identities.map((id) => id.legalEntityName)).size).toBe(3);
   });
 
+  it("keeps Alpha→Beta→Gamma appearance order when Party 2's legal name is longer", () => {
+    // Regression: length-sorted entity pools used to yield Beta→Beta→Gamma because
+    // "Beta Operations LLC" is longer than "Alpha Services LLC".
+    const party1 = "Alpha Services LLC";
+    const party2 = "Beta Operations LLC";
+    const party3 = "Gamma Holdings LLC";
+    expect(party2.length).toBeGreaterThan(party1.length);
+    const identities = resolveSignerSetupPartyIdentities({
+      parties: [{ name: party1 }, { name: party2 }, { name: party3 }],
+      intakeText: `Services agreement among ${party1}, ${party2}, and ${party3}.`,
+      agreementBodyText: [
+        `${party1} appoints ${party2} as implementation provider.`,
+        `${party1} will coordinate approvals with ${party3}.`,
+      ].join(" "),
+    });
+    expect(identities).toHaveLength(3);
+    expect(identities.map((id) => id.legalEntityName)).toEqual([party1, party2, party3]);
+    expect(new Set(identities.map((id) => id.legalEntityName)).size).toBe(3);
+    expect(identities[0]?.legalEntityName).toBe(party1);
+    expect(identities[0]?.legalEntityName).not.toBe(party2);
+  });
+
+  it("two-party between-clause order stays Client then Provider (length must not reorder)", () => {
+    const shorter = "Acme LLC";
+    const longer = "Harbor Peak Automation LLC";
+    expect(longer.length).toBeGreaterThan(shorter.length);
+    const identities = resolveSignerSetupPartyIdentities({
+      parties: [{ name: shorter }, { name: longer }],
+      intakeText: `Agreement between ${shorter} and ${longer}.`,
+      agreementBodyText: `${shorter} retains ${longer} for services.`,
+    });
+    expect(identities.map((id) => id.legalEntityName)).toEqual([shorter, longer]);
+  });
+
   it("keeps signer metadata attached to canonical slots after refresh-style hydration", () => {
     const identities = resolveSignerSetupPartyIdentities({
       parties: [{ name: "Alpha Services LLC" }, { name: "Beta Operations LLC" }],
@@ -1334,9 +1368,18 @@ describe("signer party legal entity display sanitizer (Paid Pro signer details)"
   });
 
   it("persists user-edited legal entity through metadata authority without mutating agreement body", () => {
+    // Intentionally short corpus — authorize via the established allowShorterOverwrite test
+    // override so we exercise metadata-vs-body authority without lowering
+    // SUBSTANTIVE_SERVER_DRAFT_MIN_LEN or weakening the production fail-closed SoT gate.
     const corpusBefore = BODY;
-    const sotRecord = establishPaidProSourceOfTruth({ text: corpusBefore, source: "server_full_draft" });
-    const operativeBefore = sotRecord.text.split(/\bIN WITNESS WHEREOF\b/i)[0]?.trim() ?? sotRecord.text;
+    establishPaidProSourceOfTruth({
+      text: corpusBefore,
+      source: "server_full_draft",
+      allowShorterOverwrite: true,
+    });
+    const bodyAfterEstablish = getPaidProSourceOfTruthText();
+    const operativeBefore =
+      bodyAfterEstablish.split(/\bIN WITNESS WHEREOF\b/i)[0]?.trim() ?? bodyAfterEstablish;
     const identities = resolveSignerSetupPartyIdentities({
       parties: [{ name: PARTY_1 }, { name: PARTY_2 }],
       intakeText: INTAKE,
@@ -1355,11 +1398,13 @@ describe("signer party legal entity display sanitizer (Paid Pro signer details)"
       extraPartyReviewEmails: [],
     });
     expect(authority.parties[1]?.partyLegalName).toBe(corrected);
+    const bodyAfterMetadata = getPaidProSourceOfTruthText();
     const operativeAfter =
-      getPaidProSourceOfTruthText().split(/\bIN WITNESS WHEREOF\b/i)[0]?.trim() ??
-      getPaidProSourceOfTruthText();
+      bodyAfterMetadata.split(/\bIN WITNESS WHEREOF\b/i)[0]?.trim() ?? bodyAfterMetadata;
+    expect(bodyAfterMetadata).toBe(bodyAfterEstablish);
     expect(operativeAfter).toBe(operativeBefore);
-    expect(getPaidProSourceOfTruthText()).toContain(`${PARTY_1} engages ${PARTY_2}`);
+    expect(bodyAfterMetadata).toContain(PARTY_1);
+    expect(bodyAfterMetadata).toMatch(/Iron Vale Systems Inc\.?/);
     expect(identities[1]?.legalEntityName).toMatch(/^Iron Vale Systems Inc\.?$/);
     const handoff = resolveLegalEntityNameForHandoffSlot({
       partyIndex: 1,
@@ -1370,6 +1415,14 @@ describe("signer party legal entity display sanitizer (Paid Pro signer details)"
       slotIdentities: identities,
     });
     expect(handoff).toBe(corrected);
+  });
+
+  it("short server_full_draft without authorized test override remains blocked", () => {
+    expect(BODY.length).toBeLessThan(10_000);
+    expect(() =>
+      establishPaidProSourceOfTruth({ text: BODY, source: "server_full_draft" }),
+    ).toThrow(/mislabeled_server_full_draft_below_substantive_min/);
+    expect(getPaidProSourceOfTruthText()).toBe("");
   });
 
   it("resolveSignerPartyLegalEntityDisplayValue honors deliberate user correction over polluted canonical", () => {

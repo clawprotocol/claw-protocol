@@ -6,6 +6,7 @@ import {
   isInvalidPartySlotLegalEntity,
   isStandaloneLegalEntitySuffix,
   normalizeAgreementPartyName,
+  resolveAuthoritativeIntakePartyNames,
   splitCommaSeparatedPartyNames,
 } from "./partySlotIdentityNormalize";
 
@@ -72,5 +73,27 @@ describe("partySlotIdentityNormalize", () => {
     expect(collapsed).toHaveLength(2);
     expect(collapsed[0]?.name).toBe(RED_MESA);
     expect(collapsed[1]?.name).toBe(HARBOR_PEAK);
+  });
+
+  it("among Alpha/Beta/Gamma keeps appearance order even when Beta's name is longer", () => {
+    const alpha = "Alpha Services LLC";
+    const beta = "Beta Operations LLC";
+    const gamma = "Gamma Holdings LLC";
+    expect(beta.length).toBeGreaterThan(alpha.length);
+    const names = resolveAuthoritativeIntakePartyNames(
+      `Services agreement among ${alpha}, ${beta}, and ${gamma}.`,
+    );
+    expect(names).toEqual([alpha, beta, gamma]);
+    expect(new Set(names).size).toBe(3);
+  });
+
+  it("two-party between-clause order is unchanged when Party 2 is longer", () => {
+    const shorter = "Acme LLC";
+    const longer = "Harbor Peak Automation LLC";
+    expect(longer.length).toBeGreaterThan(shorter.length);
+    expect(resolveAuthoritativeIntakePartyNames(`Agreement between ${shorter} and ${longer}.`)).toEqual([
+      shorter,
+      longer,
+    ]);
   });
 });
