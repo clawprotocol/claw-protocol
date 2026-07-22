@@ -108,7 +108,11 @@ def test_recipient_access_token_does_not_503_without_signing_lock(monkeypatch, t
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
     monkeypatch.setenv("CLAW_ENVIRONMENT", "staging")
-    monkeypatch.delenv("CLAW_AGREEMENT_SIGNING_TOKEN_SECRET", raising=False)
+    # Staging requires an explicit signing-token secret (no shared fallback).
+    monkeypatch.setenv(
+        "CLAW_AGREEMENT_SIGNING_TOKEN_SECRET",
+        "staging-reliability-explicit-signing-token",
+    )
     client = TestClient(app)
     aid = _create_draft_with_parties(client)
     mint = client.post(
@@ -119,6 +123,25 @@ def test_recipient_access_token_does_not_503_without_signing_lock(monkeypatch, t
     assert mint.status_code == 200
     assert mint.status_code != 503
     assert mint.json().get("token")
+
+
+def test_recipient_access_token_mint_422_when_staging_and_secret_unset(monkeypatch, tmp_path):
+    monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ENVIRONMENT", "staging")
+    monkeypatch.delenv("CLAW_AGREEMENT_SIGNING_TOKEN_SECRET", raising=False)
+    monkeypatch.delenv("CLAW_SIGNING_TOKEN_SECRET", raising=False)
+    client = TestClient(app)
+    aid = _create_draft_with_parties(client)
+    mint = client.post(
+        f"/api/agreements/{aid}/recipient-access-token",
+        headers=_ORG,
+        json={"mode": "review", "role": "signer"},
+    )
+    assert mint.status_code == 422
+    d = mint.json().get("detail")
+    assert isinstance(d, dict)
+    assert d.get("code") == "signing_token_secret_not_configured"
 
 
 def test_public_verify_does_not_500_when_overview_hash_raises(monkeypatch, tmp_path):

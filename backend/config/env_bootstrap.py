@@ -14,6 +14,7 @@ from backend.config.agreement_signing_token import (
     detected_signing_token_env_var,
     operator_signing_token_secret_configured,
     review_link_mint_enabled,
+    signing_token_secret_source,
 )
 from backend.config.deployment_runtime import is_production_like_claw_environment
 from backend.cors_policy import cors_env_raw_meta, cors_startup_diagnostics
@@ -37,8 +38,10 @@ def collect_env_warnings() -> List[str]:
             )
         if not operator_signing_token_secret_configured():
             warnings.append(
-                "CLAW_AGREEMENT_SIGNING_TOKEN_SECRET (or CLAW_SIGNING_TOKEN_SECRET) unset — "
-                "review/signing link mint returns 422 signing_token_secret_not_configured in production."
+                "CLAW_AGREEMENT_SIGNING_TOKEN_SECRET (or CLAW_SIGNING_TOKEN_SECRET) unset or not explicit — "
+                "review/signing link mint and envelope attestation return 422 "
+                "signing_token_secret_not_configured in staging/production "
+                f"(source={signing_token_secret_source()})."
             )
         if not _is_set("STRIPE_WEBHOOK_SECRET"):
             warnings.append(
@@ -97,6 +100,8 @@ def public_env_snapshot() -> dict:
         ).is_stripe_checkout_configured(),
         "openai_configured": _is_set("OPENAI_API_KEY"),
         "signing_token_secret_configured": operator_signing_token_secret_configured(),
+        "signing_token_configured": operator_signing_token_secret_configured(),
+        "signing_token_secret_source": signing_token_secret_source(),
         "signing_token_env_var_detected": detected_signing_token_env_var(),
         "review_link_mint_enabled": review_link_mint_enabled(),
     }

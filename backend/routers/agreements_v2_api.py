@@ -5682,10 +5682,13 @@ def _persist_review_first_final_corpus_if_supplied(
 @router.get("/access/policy")
 def recipient_access_policy() -> Dict[str, Any]:
     """Public: lets the SPA decide whether ``t=`` links are mandatory."""
+    from backend.config.agreement_signing_token import signing_token_secret_source
+
     return {
         "recipient_link_token_required": recipient_access_token_required(),
         "mint_key_configured": bool(os.getenv("CLAW_RECIPIENT_LINK_MINT_KEY", "").strip()),
         "signing_token_configured": operator_signing_token_secret_configured(),
+        "signing_token_secret_source": signing_token_secret_source(),
         "review_link_mint_enabled": review_link_mint_enabled(),
         "signing_token_env_var_detected": detected_signing_token_env_var(),
         "recipient_token_ttl_seconds": {
@@ -7315,23 +7318,36 @@ def _public_agreement_verify_payload(aid: str, draft: AgreementDraft) -> Dict[st
         "schema": "claw.agreement.public_verify/v1",
     }
     try:
-        from backend.config.agreement_signing_token import resolve_signing_token_secret_raw
+        from backend.config.agreement_signing_token import (
+            SigningTokenSecretMissingInProductionError,
+            resolve_signing_token_secret_raw,
+        )
         from backend.services.vs01_signing_envelope_provenance import (
             public_verify_envelope_provenance_from_draft,
         )
 
-        env_frag = public_verify_envelope_provenance_from_draft(
-            agreement_id=aid,
-            draft=draft,
-            secret_raw=resolve_signing_token_secret_raw(),
-        )
-        if isinstance(env_frag, dict):
-            verification["envelope_provenance"] = env_frag.get("envelope_provenance")
-            verification["envelope_attestation_valid"] = env_frag.get("envelope_attestation_valid")
-            if env_frag.get("envelope_attestation_reason"):
-                verification["envelope_attestation_reason"] = env_frag.get(
-                    "envelope_attestation_reason"
+        try:
+            secret_raw = resolve_signing_token_secret_raw()
+        except SigningTokenSecretMissingInProductionError:
+            # Fail closed: never advertise envelope provenance without a trusted secret.
+            verification["envelope_provenance"] = None
+            verification["envelope_attestation_valid"] = False
+            verification["envelope_attestation_reason"] = "signing_token_secret_not_configured"
+        else:
+            env_frag = public_verify_envelope_provenance_from_draft(
+                agreement_id=aid,
+                draft=draft,
+                secret_raw=secret_raw,
+            )
+            if isinstance(env_frag, dict):
+                verification["envelope_provenance"] = env_frag.get("envelope_provenance")
+                verification["envelope_attestation_valid"] = env_frag.get(
+                    "envelope_attestation_valid"
                 )
+                if env_frag.get("envelope_attestation_reason"):
+                    verification["envelope_attestation_reason"] = env_frag.get(
+                        "envelope_attestation_reason"
+                    )
     except Exception:
         logging.getLogger(__name__).exception(
             "public_verify_envelope_provenance_failed agreement_id=%s", aid
