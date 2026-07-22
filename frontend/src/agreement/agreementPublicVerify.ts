@@ -45,6 +45,18 @@ export type PublicVerifyPayload = {
     signing_commitment_hash?: string | null;
     schema?: string;
     record_note?: string;
+    /**
+     * Optional VS01 signing-envelope provenance (packet → accepted SoT).
+     * Digests are SHA-256; agreement_hash may remain a short display fingerprint.
+     */
+    envelope_provenance?: {
+      acceptedSoTDigest?: string;
+      acceptedSoTLength?: number;
+      packetDigest?: string;
+      packetSchemaVersion?: string;
+      signerManifestDigest?: string;
+      derivedAt?: string;
+    } | null;
   };
   claw_feed?: {
     event_type?: string;

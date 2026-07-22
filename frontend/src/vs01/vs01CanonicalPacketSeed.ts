@@ -8,6 +8,7 @@ import type { Vs01FullyExecutedSignedSnapshotV1 } from "./vs01FullyExecutedSigne
 import type { Vs01RecipientPlacedField } from "./types";
 import type { Vs01PrepareSigningRole } from "./vs01SignerFieldAssignment";
 import { VS01_SIGNING_CORPUS_MIN_LEN } from "./vs01SigningCorpus";
+import type { Vs01SigningEnvelopeProvenanceV1 } from "./vs01SigningEnvelopeProvenance";
 
 export const VS01_CANONICAL_PACKET_SEED_SCOPE = "__canonical_packet__";
 export const VS01_CANONICAL_PACKET_QUERY = "vs01_cpacket";
@@ -60,6 +61,11 @@ export type Vs01CanonicalPacketPortableV1 = {
   fieldCount: number;
   /** Present after all required signers finish — burned signatures + dates in corpus. */
   fullyExecutedSnapshot?: Vs01FullyExecutedSignedSnapshotV1;
+  /**
+   * Packet-layer envelope provenance: links packetDigest → acceptedSoTDigest.
+   * seed.corpusPlain remains the accepted SoT; layout witness is not re-frozen as SoT.
+   */
+  envelopeProvenance?: Vs01SigningEnvelopeProvenanceV1;
 };
 
 const SS_PREFIX = "claw_vs01_canonical_seed_ss_";
@@ -156,6 +162,7 @@ export function buildVs01CanonicalPacketPortable(args: {
   pageCount: number;
   witnessPageIndex: number;
   initialsEnabled?: boolean;
+  envelopeProvenance?: Vs01SigningEnvelopeProvenanceV1 | null;
 }): Vs01CanonicalPacketPortableV1 {
   const roles = args.roles.map((r) => ({
     roleId: r.roleId,
@@ -189,6 +196,7 @@ export function buildVs01CanonicalPacketPortable(args: {
       bodyPagesOnly: fields.every((f) => f.type !== "initials" || f.page !== args.witnessPageIndex),
     },
     fieldCount: fields.length,
+    ...(args.envelopeProvenance ? { envelopeProvenance: args.envelopeProvenance } : {}),
   };
 }
 

@@ -102,7 +102,10 @@ export type Vs01SigningPacketModel = {
   allowed: boolean;
   pages: Vs01SigningPacketPage[];
   fields: PlacedSigningField[];
+  /** Accepted / gate corpus — never the packet-layout witness overlay. */
   corpus: string;
+  /** Packet-layer layout corpus (may rebuild witness/signature tail). Distinct from {@link corpus}. */
+  packetLayoutCorpus: string;
   diagnostics: Vs01SigningPacketDiagnostics;
 };
 
@@ -343,7 +346,14 @@ function standardizeWitnessSignatureLines(corpus: string): string {
   return corpus.replace(/^(\s*)Signature(\s*:\s*)_{2,}\s*$/gim, "$1By$2______________________");
 }
 
-function ensureWitnessBlockFromRoles(corpus: string, roles: readonly Vs01PrepareSigningRole[]): string {
+/**
+ * Packet-layer witness/signature alignment for the current role set.
+ * Never writes accepted SoT — callers must keep gate.corpus / seed.corpusPlain as the accepted body.
+ */
+export function deriveVs01PacketLayoutCorpus(
+  corpus: string,
+  roles: readonly Vs01PrepareSigningRole[],
+): string {
   const cleaned = standardizeWitnessSignatureLines(stripStaleExecutionPlacementCorpusCopy(corpus).text.trim());
   const signerCount = Math.max(1, roles.filter((r) => r.requiresSignature !== false).length);
   const executionLines = countSignatureExecutionLinesInTail(cleaned);
@@ -794,7 +804,7 @@ export function buildVs01SigningPacketModel(args: {
   // Packet-layer only: align signature/witness anchors to the current role set. Never writes SoT.
   const packetLayoutCorpus =
     guidedPro && corpusGate.allowed
-      ? ensureWitnessBlockFromRoles(corpusGate.corpus, args.roles)
+      ? deriveVs01PacketLayoutCorpus(corpusGate.corpus, args.roles)
       : corpusGate.allowed
         ? corpusGate.corpus
         : "";
@@ -961,6 +971,7 @@ export function buildVs01SigningPacketModel(args: {
     pages,
     fields,
     corpus: corpusGate.corpus,
+    packetLayoutCorpus,
     diagnostics,
   };
 }

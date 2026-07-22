@@ -69,6 +69,7 @@ import {
   logVs01PrepareFinishBlocked,
 } from "./vs01PreparePacketCompletion";
 import { handlePreparePacketContinue } from "./vs01PreparePacketContinue";
+import { sealPortablePacketEnvelopeProvenance } from "./vs01SigningEnvelopeProvenance";
 import { dispatchSigningInvitesFromHandoff } from "./vs01SigningInviteDelivery";
 import { paidProPacketReadyDashboardPath } from "./vs01PaidProPacketReadyNavigation";
 import { bootstrapVs01RecipientSigningAuthority } from "./vs01RecipientAuthorityBootstrap";
@@ -635,10 +636,28 @@ export function Vs01Wizard({
       fieldsPlacedCount: placedCount,
     });
     const roles = result.roles;
-    void dispatchSigningInvitesFromHandoff(result.handoff, roles, {
-      portablePacket: result.portablePacket,
-      documentId: did,
-    }).then((delivery) => {
+    void (async () => {
+      let portablePacket = result.portablePacket;
+      if (portablePacket) {
+        try {
+          portablePacket = await sealPortablePacketEnvelopeProvenance({
+            documentId: did,
+            portable: portablePacket,
+            roles,
+          });
+        } catch (err) {
+          setError(
+            err instanceof Error
+              ? err.message
+              : "Signing packet provenance could not be sealed against the accepted agreement.",
+          );
+          return;
+        }
+      }
+      const delivery = await dispatchSigningInvitesFromHandoff(result.handoff, roles, {
+        portablePacket,
+        documentId: did,
+      });
       // eslint-disable-next-line no-console
       console.info("[vs01-signing-invites-dispatched]", {
         agreementIdShort: linkedAgreementId.slice(0, 16),
@@ -646,6 +665,9 @@ export function Vs01Wizard({
         ok: delivery.ok,
         sentCount: delivery.sentCount,
         skipReason: delivery.skipReason,
+        packetDigestShort: portablePacket?.envelopeProvenance?.packetDigest?.slice(0, 16) ?? null,
+        acceptedSoTDigestShort:
+          portablePacket?.envelopeProvenance?.acceptedSoTDigest?.slice(0, 16) ?? null,
       });
       markAgreementPacketPrepared(linkedAgreementId);
       clearAgreementVs01BridgeSession();
@@ -659,7 +681,7 @@ export function Vs01Wizard({
         destination: paidProPacketReadyDashboardPath(),
       });
       navigate(paidProPacketReadyDashboardPath());
-    });
+    })();
   }, [
     vs01LinkedAgreementId,
     documentId,

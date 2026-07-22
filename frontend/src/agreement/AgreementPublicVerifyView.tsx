@@ -5,6 +5,11 @@ import {
   type PublicVerifyPayload,
 } from "./agreementPublicVerify";
 import {
+  evaluatePublicVerifyEnvelopeLinkage,
+  VS01_SIGNING_ENVELOPE_SCHEMA_VERSION,
+  type Vs01SigningEnvelopeProvenanceV1,
+} from "../vs01/vs01SigningEnvelopeProvenance";
+import {
   downloadPublicCompletedSignedAgreementPdf,
 } from "./completedSignedAgreementPdfDownload";
 import { CREATOR_DOWNLOAD_PDF_LABEL } from "../launch/creatorDashboardCopy";
@@ -53,16 +58,42 @@ export function AgreementPublicVerify({ agreementId, onClose }: Props) {
   const [loading, setLoading] = useState(true);
   const [pdfBusy, setPdfBusy] = useState(false);
   const [pdfError, setPdfError] = useState<string | null>(null);
+  const [envelopeLinkOk, setEnvelopeLinkOk] = useState<boolean | null>(null);
+  const [envelopeLinkReason, setEnvelopeLinkReason] = useState<string | null>(null);
 
   useEffect(() => {
     let cancel = false;
     void (async () => {
       setLoading(true);
       const p = await fetchPublicAgreementVerify(agreementId);
-      if (!cancel) {
-        setData(p);
-        setLoading(false);
+      if (cancel) return;
+      setData(p);
+      const raw = p?.verification?.envelope_provenance;
+      if (raw?.acceptedSoTDigest && raw?.packetDigest) {
+        const provenance = {
+          acceptedSoTDigest: String(raw.acceptedSoTDigest),
+          acceptedSoTLength: Number(raw.acceptedSoTLength ?? 0),
+          acceptedSoTDisplayFingerprint: "",
+          packetDigest: String(raw.packetDigest),
+          packetSchemaVersion: String(raw.packetSchemaVersion ?? VS01_SIGNING_ENVELOPE_SCHEMA_VERSION),
+          signerManifestDigest: String(raw.signerManifestDigest ?? ""),
+          derivedAt: String(raw.derivedAt ?? ""),
+          packetLayoutCorpusDigest: "",
+          packetLayoutCorpusLength: 0,
+        } satisfies Vs01SigningEnvelopeProvenanceV1;
+        const link = await evaluatePublicVerifyEnvelopeLinkage({
+          provenance,
+          claimedAcceptedSoTDigest: raw.acceptedSoTDigest,
+        });
+        if (!cancel) {
+          setEnvelopeLinkOk(link.ok);
+          setEnvelopeLinkReason(link.reason);
+        }
+      } else if (!cancel) {
+        setEnvelopeLinkOk(null);
+        setEnvelopeLinkReason(null);
       }
+      if (!cancel) setLoading(false);
     })();
     return () => {
       cancel = true;
@@ -316,6 +347,34 @@ export function AgreementPublicVerify({ agreementId, onClose }: Props) {
             ) : (
               <p className="text-slate-500">No signing lock — commitment hash is not yet fixed.</p>
             )}
+            {vfy.envelope_provenance?.packetDigest ? (
+              <div data-testid="public-verify-envelope-provenance">
+                <p className="font-semibold text-slate-400">Signing packet provenance (SHA-256)</p>
+                <p className="mt-1 break-all font-mono text-[11px] text-violet-100/90">
+                  packet: {vfy.envelope_provenance.packetDigest}
+                </p>
+                <p className="mt-1 break-all font-mono text-[11px] text-violet-100/90">
+                  accepted SoT: {vfy.envelope_provenance.acceptedSoTDigest}
+                </p>
+                {vfy.envelope_provenance.signerManifestDigest ? (
+                  <p className="mt-1 break-all font-mono text-[11px] text-violet-100/90">
+                    signer manifest: {vfy.envelope_provenance.signerManifestDigest}
+                  </p>
+                ) : null}
+                <p className="mt-1 text-[10px] text-slate-500">
+                  Packet-layer envelope linked to the customer-accepted source of truth. Witness/signature placement is
+                  not re-frozen as the agreement body.
+                </p>
+                {envelopeLinkOk === false ? (
+                  <p className="mt-2 text-[11px] text-rose-300" role="alert">
+                    Provenance linkage check failed
+                    {envelopeLinkReason ? `: ${envelopeLinkReason}` : ""}.
+                  </p>
+                ) : envelopeLinkOk === true ? (
+                  <p className="mt-2 text-[11px] text-emerald-300/90">Provenance linkage verified.</p>
+                ) : null}
+              </div>
+            ) : null}
             {data.claw_feed ? (
               <div>
                 <p className="font-semibold text-slate-400">Public feed anchor</p>
