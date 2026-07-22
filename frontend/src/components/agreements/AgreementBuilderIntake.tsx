@@ -679,6 +679,7 @@ import {
   hasPaidProSourceOfTruth,
   hydratePaidProSourceOfTruth,
 } from "./paidProSourceOfTruth";
+import { establishServerAcceptedReviewSnapshot } from "../../agreement/canonicalReviewSnapshotApi";
 import {
   hasFrozenPaidProAuthoritativeSnapshot,
   isPaidProSoTEstablishmentFailure,
@@ -8568,7 +8569,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             });
           };
           try {
-            establishPaidProSourceOfTruth({
+            const establishedSoT = establishPaidProSourceOfTruth({
               text: snapshotPlain,
               source: paidProSotSource,
               draft: mergedDraftPersist,
@@ -8577,6 +8578,23 @@ const AgreementBuilderIntake: React.FC<Props> = ({
               reviewSessionId: sessionGenId,
               generationOutcome: generationOutcomeLabel,
             });
+            const agreementIdForSnapshot = (
+              reviewAgreementIdRef.current ||
+              readCreateReviewAgreementResumeId() ||
+              ""
+            ).trim();
+            if (agreementIdForSnapshot && establishedSoT?.text) {
+              void establishServerAcceptedReviewSnapshot({
+                agreementId: agreementIdForSnapshot,
+                corpusPlain: establishedSoT.text,
+                generationSessionId: sessionGenId,
+              }).then((serverAccept) => {
+                if (!serverAccept.ok && import.meta.env.DEV) {
+                  // eslint-disable-next-line no-console
+                  console.warn("[canonical-review-snapshot] server accept failed", serverAccept.code);
+                }
+              });
+            }
             commitPostCheckoutCanonicalReviewEntry();
           } catch (establishErr) {
             const establishMsg =
@@ -14934,6 +14952,20 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         // Explicit user-approved revision may legitimately shorten the body (edits/deletions).
         allowShorterOverwrite: true,
       });
+      const agreementIdForRevision = (
+        reviewAgreementIdRef.current ||
+        readCreateReviewAgreementResumeId() ||
+        ""
+      ).trim();
+      if (agreementIdForRevision && record.text) {
+        // Client allowShorterOverwrite cannot mutate server authority; explicit revision accept required.
+        void establishServerAcceptedReviewSnapshot({
+          agreementId: agreementIdForRevision,
+          corpusPlain: record.text,
+          generationSessionId: getOrInitSessionAgreementGenerationId(),
+          allowRevision: true,
+        });
+      }
       const stable = record.text;
       hydratedPremiumBodyRef.current = stable;
       lastPremiumWinningCorpusRef.current = stable;

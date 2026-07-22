@@ -572,6 +572,13 @@ class AgreementDraft(AgreementDraftCreate):
     vs01_signing_packet_v1: Optional[Dict[str, Any]] = None
     """Phase 3B — durable frozen signing authority bound to accepted corpus hash."""
     frozen_signing_authority_v1: Optional[Dict[str, Any]] = None
+    """
+    Server-authoritative canonical review snapshot registry (pending + accepted).
+    Trusted commercial authority for paid-Pro first-seal / dispatch / verify.
+    """
+    canonical_review_snapshots_v1: Optional[Dict[str, Any]] = None
+    """Denormalized currently-accepted review snapshot (corpus + SHA-256 + metadata)."""
+    accepted_review_snapshot_v1: Optional[Dict[str, Any]] = None
     """Per-recipient invite delivery registry (JTIs, timestamps, resend counts)."""
     recipient_delivery_v1: Optional[Dict[str, Any]] = None
     workspace_archived_at: Optional[str] = None
@@ -2929,6 +2936,30 @@ class SigningLinksSentBody(BaseModel):
     portable_packet: Optional[Dict[str, Any]] = None
     frozen_signing_authority: Optional[Dict[str, Any]] = None
     targets: List[SigningInviteTargetBody] = Field(default_factory=list)
+    """Correlation only — server loads authority from accepted snapshot, not client corpus."""
+    accepted_review_snapshot_id: Optional[str] = None
+    accepted_review_snapshot_digest: Optional[str] = None
+
+
+class CanonicalReviewSnapshotCreateBody(BaseModel):
+    """Persist immutable pending review snapshot before customer acceptance."""
+
+    corpus_plain: str = ""
+    generation_session_id: Optional[str] = None
+    claimed_digest: Optional[str] = None
+    created_by_session: Optional[str] = None
+
+
+class CanonicalReviewSnapshotAcceptBody(BaseModel):
+    """Accept an existing pending snapshot by id + digest (no replacement corpus)."""
+
+    snapshot_id: str = ""
+    expected_digest: str = ""
+    accepting_session: Optional[str] = None
+    """Concurrency token: empty string means 'no snapshot accepted yet'."""
+    expected_accepted_snapshot_id: Optional[str] = None
+    """Owner-approved revision: supersede prior accepted and accept a different pending snapshot."""
+    allow_revision: bool = False
 
 
 class FrozenSigningAuthorityPersistBody(BaseModel):
@@ -6255,14 +6286,21 @@ def _attest_portable_envelope_or_400(
     *,
     agreement_id: str,
     portable: Dict[str, Any],
+    draft: Optional[AgreementDraft] = None,
     stored_portable: Optional[Dict[str, Any]] = None,
     surface: str = "signing_links_sent",
+    require_accepted_snapshot: bool = True,
 ) -> Dict[str, Any]:
-    """Trusted boundary: recompute envelope digests; reject client forgery before persist/dispatch."""
+    """
+    Trusted boundary:
+      1) Bind portable seed corpus to server accepted review snapshot (commercial authority).
+      2) Recompute envelope digests; reject client forgery before persist/dispatch.
+    """
     from backend.config.agreement_signing_token import (
         SigningTokenSecretMissingInProductionError,
         resolve_signing_token_secret_raw,
     )
+    from backend.services.accepted_review_snapshot import bind_portable_to_accepted_snapshot
     from backend.services.vs01_signing_envelope_provenance import (
         attest_portable_envelope_provenance,
         validate_portable_against_stored_attested_sot,
@@ -6276,17 +6314,36 @@ def _attest_portable_envelope_or_400(
             detail={"code": "signing_token_secret_not_configured", "message": str(e)},
         ) from e
 
+    draft_obj = draft if draft is not None else _load_or_404(agreement_id)
+    bound_ok, bound_err, bound_portable, _authority_mode = bind_portable_to_accepted_snapshot(
+        agreement_id=agreement_id,
+        draft=draft_obj,
+        portable=portable,
+        require_accepted=require_accepted_snapshot,
+    )
+    if not bound_ok or not isinstance(bound_portable, dict):
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": bound_err or "accepted_review_snapshot_required",
+                "message": (
+                    "Signing packet rejected: commercial authority requires a server-accepted "
+                    f"review snapshot ({surface})."
+                ),
+            },
+        )
+
     if stored_portable is not None:
         ok, err, attested = validate_portable_against_stored_attested_sot(
             agreement_id=agreement_id,
             stored_portable=stored_portable,
-            incoming_portable=portable,
+            incoming_portable=bound_portable,
             secret_raw=secret_raw,
         )
     else:
         ok, err, attested = attest_portable_envelope_provenance(
             agreement_id=agreement_id,
-            portable=portable,
+            portable=bound_portable,
             secret_raw=secret_raw,
             require_client_match=True,
         )
@@ -6302,6 +6359,255 @@ def _attest_portable_envelope_or_400(
             },
         )
     return attested
+
+
+def _apply_snapshot_registry_to_draft(
+    draft: AgreementDraft,
+    *,
+    registry: Dict[str, Any],
+    accepted: Optional[Dict[str, Any]] = None,
+    audit_event: Optional[AuditEvent] = None,
+) -> AgreementDraft:
+    audit = list(draft.audit_log or [])
+    if audit_event is not None:
+        audit.append(audit_event)
+    return _merge_agreement_draft(
+        draft,
+        canonical_review_snapshots_v1=registry,
+        accepted_review_snapshot_v1=accepted,
+        updated_at=_utc_now_iso(),
+        audit_log=audit,
+    )
+
+
+@router.post("/{agreement_id}/canonical-review-snapshot")
+def post_canonical_review_snapshot(
+    agreement_id: str,
+    request: Request,
+    body: CanonicalReviewSnapshotCreateBody,
+) -> Dict[str, Any]:
+    """Persist an immutable pending canonical review snapshot (pre-acceptance)."""
+    if not _agreements_write_allowed():
+        raise HTTPException(status_code=403, detail="verifier_only")
+    _owner_mutation_guards(request, agreement_id, surface="canonical_review_snapshot_create")
+    from backend.services.accepted_review_snapshot import (
+        create_pending_snapshot,
+        get_registry,
+        public_accepted_snapshot_fragment,
+    )
+
+    draft = _load_or_404(agreement_id)
+    principal = resolve_subject_from_request(request)
+    ok, err, snap, reg = create_pending_snapshot(
+        agreement_id=agreement_id,
+        corpus_plain=body.corpus_plain or "",
+        generation_session_id=body.generation_session_id,
+        created_by_principal=principal,
+        created_by_session=body.created_by_session,
+        claimed_digest=body.claimed_digest,
+        registry=get_registry(draft),
+    )
+    if not ok or not isinstance(snap, dict) or not isinstance(reg, dict):
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": err or "snapshot_create_failed",
+                "message": "Canonical review snapshot could not be persisted.",
+            },
+        )
+    accepted = draft.accepted_review_snapshot_v1 if isinstance(draft.accepted_review_snapshot_v1, dict) else None
+    # Creating a pending snapshot must never mutate an already-accepted record's corpus.
+    next_draft = _apply_snapshot_registry_to_draft(
+        draft,
+        registry=reg,
+        accepted=accepted,
+        audit_event=AuditEvent(
+            event_type="canonical_review_snapshot_persisted",
+            at=_utc_now_iso(),
+            field="canonical_review_snapshots_v1",
+            value={
+                "snapshot_id": snap.get("snapshotId"),
+                "corpus_sha256": snap.get("corpusSha256"),
+                "corpus_length": snap.get("corpusLength"),
+                "status": snap.get("status"),
+            },
+        ),
+    )
+    _save_draft_sync(next_draft.model_dump(), request)
+    return {
+        "ok": True,
+        "snapshot": {
+            "snapshot_id": snap.get("snapshotId"),
+            "agreement_id": snap.get("agreementId"),
+            "corpus_plain": snap.get("corpusPlain"),
+            "corpus_sha256": snap.get("corpusSha256"),
+            "corpus_length": snap.get("corpusLength"),
+            "generation_session_id": snap.get("generationSessionId"),
+            "created_at": snap.get("createdAt"),
+            "schema_version": snap.get("schemaVersion"),
+            "status": snap.get("status"),
+        },
+        "accepted": public_accepted_snapshot_fragment(accepted),
+        "draft": next_draft.model_dump(),
+    }
+
+
+@router.post("/{agreement_id}/canonical-review-snapshot/accept")
+def post_canonical_review_snapshot_accept(
+    agreement_id: str,
+    request: Request,
+    body: CanonicalReviewSnapshotAcceptBody,
+) -> Dict[str, Any]:
+    """Atomically accept a pending snapshot by id + digest (no corpus replacement)."""
+    if not _agreements_write_allowed():
+        raise HTTPException(status_code=403, detail="verifier_only")
+    _owner_mutation_guards(request, agreement_id, surface="canonical_review_snapshot_accept")
+    from backend.services.accepted_review_snapshot import (
+        accept_snapshot,
+        get_registry,
+        public_accepted_snapshot_fragment,
+    )
+
+    draft = _load_or_404(agreement_id)
+    principal = resolve_subject_from_request(request)
+    ok, err, accepted, reg = accept_snapshot(
+        agreement_id=agreement_id,
+        snapshot_id=body.snapshot_id,
+        expected_digest=body.expected_digest,
+        accepting_principal=principal,
+        accepting_session=body.accepting_session,
+        registry=get_registry(draft),
+        expected_accepted_snapshot_id=body.expected_accepted_snapshot_id,
+        allow_revision=bool(body.allow_revision),
+    )
+    if not ok or not isinstance(accepted, dict) or not isinstance(reg, dict):
+        status = 409 if err in {
+            "different_snapshot_already_accepted",
+            "accept_concurrency_conflict",
+        } else 400
+        raise HTTPException(
+            status_code=status,
+            detail={
+                "code": err or "snapshot_accept_failed",
+                "message": "Canonical review snapshot could not be accepted.",
+            },
+        )
+    next_draft = _apply_snapshot_registry_to_draft(
+        draft,
+        registry=reg,
+        accepted=accepted,
+        audit_event=AuditEvent(
+            event_type="canonical_review_snapshot_accepted",
+            at=_utc_now_iso(),
+            field="accepted_review_snapshot_v1",
+            value={
+                "snapshot_id": accepted.get("snapshotId"),
+                "corpus_sha256": accepted.get("corpusSha256"),
+                "corpus_length": accepted.get("corpusLength"),
+                "accepted_by_principal": accepted.get("acceptedByPrincipal"),
+            },
+        ),
+    )
+    # Mirror accepted corpus into server document fields for review hydration (authoritative bytes).
+    next_draft = _merge_agreement_draft(
+        next_draft,
+        server_full_document_text=accepted.get("corpusPlain"),
+        premium_server_full_document_text=accepted.get("corpusPlain"),
+        document_text=accepted.get("corpusPlain"),
+        premium_render_source="accepted_review_snapshot",
+        updated_at=_utc_now_iso(),
+    )
+    _save_draft_sync(next_draft.model_dump(), request)
+    return {
+        "ok": True,
+        "accepted": {
+            "snapshot_id": accepted.get("snapshotId"),
+            "agreement_id": accepted.get("agreementId"),
+            "corpus_plain": accepted.get("corpusPlain"),
+            "corpus_sha256": accepted.get("corpusSha256"),
+            "corpus_length": accepted.get("corpusLength"),
+            "generation_session_id": accepted.get("generationSessionId"),
+            "created_at": accepted.get("createdAt"),
+            "accepted_at": accepted.get("acceptedAt"),
+            "accepted_by_principal": accepted.get("acceptedByPrincipal"),
+            "schema_version": accepted.get("schemaVersion"),
+            "status": accepted.get("status"),
+        },
+        "public": public_accepted_snapshot_fragment(accepted),
+        "draft": next_draft.model_dump(),
+    }
+
+
+@router.get("/{agreement_id}/canonical-review-snapshot")
+def get_canonical_review_snapshot(agreement_id: str, request: Request) -> Dict[str, Any]:
+    """Owner read of pending/accepted canonical review snapshot for review hydration."""
+    assert_agreement_full_draft_read_allowed(request, agreement_id)
+    from backend.services.accepted_review_snapshot import (
+        get_accepted_snapshot_record,
+        get_registry,
+        public_accepted_snapshot_fragment,
+        verify_snapshot_integrity,
+    )
+
+    draft = _load_or_404(agreement_id)
+    accepted = get_accepted_snapshot_record(draft)
+    if isinstance(accepted, dict):
+        ok, err = verify_snapshot_integrity(accepted)
+        if not ok:
+            raise HTTPException(
+                status_code=409,
+                detail={"code": err or "accepted_snapshot_corrupt", "message": "Accepted snapshot failed integrity."},
+            )
+        return {
+            "ok": True,
+            "status": "accepted",
+            "snapshot": {
+                "snapshot_id": accepted.get("snapshotId"),
+                "agreement_id": accepted.get("agreementId"),
+                "corpus_plain": accepted.get("corpusPlain"),
+                "corpus_sha256": accepted.get("corpusSha256"),
+                "corpus_length": accepted.get("corpusLength"),
+                "generation_session_id": accepted.get("generationSessionId"),
+                "created_at": accepted.get("createdAt"),
+                "accepted_at": accepted.get("acceptedAt"),
+                "schema_version": accepted.get("schemaVersion"),
+                "status": accepted.get("status"),
+            },
+            "public": public_accepted_snapshot_fragment(accepted),
+        }
+    reg = get_registry(draft)
+    snaps = reg.get("snapshots") if isinstance(reg.get("snapshots"), dict) else {}
+    pending = [
+        s
+        for s in snaps.values()
+        if isinstance(s, dict) and str(s.get("status") or "").strip() == "pending"
+    ]
+    pending.sort(key=lambda s: str(s.get("createdAt") or ""), reverse=True)
+    latest = pending[0] if pending else None
+    if not latest:
+        raise HTTPException(status_code=404, detail="canonical_review_snapshot_not_found")
+    ok, err = verify_snapshot_integrity(latest)
+    if not ok:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": err or "snapshot_corrupt", "message": "Pending snapshot failed integrity."},
+        )
+    return {
+        "ok": True,
+        "status": "pending",
+        "snapshot": {
+            "snapshot_id": latest.get("snapshotId"),
+            "agreement_id": latest.get("agreementId"),
+            "corpus_plain": latest.get("corpusPlain"),
+            "corpus_sha256": latest.get("corpusSha256"),
+            "corpus_length": latest.get("corpusLength"),
+            "generation_session_id": latest.get("generationSessionId"),
+            "created_at": latest.get("createdAt"),
+            "schema_version": latest.get("schemaVersion"),
+            "status": latest.get("status"),
+        },
+        "public": None,
+    }
 
 
 @router.post("/{agreement_id}/signing-links-sent")
@@ -6323,10 +6629,42 @@ def post_agreement_signing_links_sent(
     frozen_raw = body.frozen_signing_authority if isinstance(body.frozen_signing_authority, dict) else None
 
     if portable and document_id:
+        # Correlation fields from client — never authority; reject mismatch vs accepted snapshot.
+        from backend.services.accepted_review_snapshot import get_accepted_snapshot_record
+
+        accepted_snap = get_accepted_snapshot_record(draft)
+        if isinstance(accepted_snap, dict):
+            corr_id = (body.accepted_review_snapshot_id or "").strip()
+            corr_digest = (body.accepted_review_snapshot_digest or "").strip().lower()
+            if corr_id and corr_id != str(accepted_snap.get("snapshotId") or "").strip():
+                raise HTTPException(
+                    status_code=400,
+                    detail={
+                        "code": "submitted_snapshot_id_mismatch",
+                        "message": "Client snapshot id does not match server-accepted review snapshot.",
+                    },
+                )
+            if corr_digest and corr_digest != str(accepted_snap.get("corpusSha256") or "").strip().lower():
+                raise HTTPException(
+                    status_code=400,
+                    detail={
+                        "code": "submitted_digest_differs_from_accepted_snapshot",
+                        "message": "Client snapshot digest does not match server-accepted review snapshot.",
+                    },
+                )
+            if isinstance(portable, dict):
+                portable = {
+                    **portable,
+                    "acceptedReviewSnapshotId": accepted_snap.get("snapshotId"),
+                    "acceptedReviewSnapshotDigest": accepted_snap.get("corpusSha256"),
+                }
+
         portable = _attest_portable_envelope_or_400(
             agreement_id=agreement_id,
             portable=portable,
+            draft=draft,
             surface="signing_links_sent",
+            require_accepted_snapshot=True,
         )
         from backend.services.frozen_signing_authority import (
             PACKET_STATE_ACTIVE,
@@ -6389,6 +6727,9 @@ def post_agreement_signing_links_sent(
                 )
 
         try:
+            from backend.services.accepted_review_snapshot import get_accepted_snapshot_record
+
+            accepted_for_pkt = get_accepted_snapshot_record(draft)
             stored = {
                 "v": 1,
                 "document_id": document_id,
@@ -6397,6 +6738,13 @@ def post_agreement_signing_links_sent(
                 "stored_at": _utc_now_iso(),
                 "packet_state": "active",
                 "frozen_corpus_hash": corpus_hash,
+                "accepted_review_snapshot_id": (
+                    (accepted_for_pkt or {}).get("snapshotId") if isinstance(accepted_for_pkt, dict) else None
+                ),
+                "accepted_review_snapshot_digest": (
+                    (accepted_for_pkt or {}).get("corpusSha256") if isinstance(accepted_for_pkt, dict) else None
+                ),
+                "authority_mode": "accepted_review_snapshot",
             }
             draft = _merge_agreement_draft(draft, vs01_signing_packet_v1=stored, updated_at=_utc_now_iso())
             _save_draft_sync(draft.model_dump(), request)
@@ -6642,11 +6990,23 @@ def post_signing_packet_reissue(
     if not document_id or not isinstance(portable, dict) or not packet_revision:
         raise HTTPException(status_code=400, detail="reissue_fields_required")
     prior_portable = prior.get("portable") if isinstance(prior.get("portable"), dict) else None
+    # Reissue always binds to accepted snapshot when present; legacy pre-snapshot packets
+    # may continue only when they already sealed without a snapshot (explicit legacy mode).
+    from backend.services.accepted_review_snapshot import (
+        AUTHORITY_MODE_LEGACY_PACKET,
+        classify_authority_mode,
+        get_accepted_snapshot_record,
+    )
+
+    authority_mode = classify_authority_mode(draft)
+    require_snap = authority_mode != AUTHORITY_MODE_LEGACY_PACKET or bool(get_accepted_snapshot_record(draft))
     portable = _attest_portable_envelope_or_400(
         agreement_id=agreement_id,
         portable=portable,
+        draft=draft,
         stored_portable=prior_portable,
         surface="signing_packet_reissue",
+        require_accepted_snapshot=require_snap,
     )
     from backend.services.frozen_signing_authority import (
         PACKET_STATE_ACTIVE,
@@ -6688,6 +7048,7 @@ def post_signing_packet_reissue(
         "supersedesRevision": prior_rev or None,
         "reissuedAt": now,
     }
+    accepted_for_pkt = get_accepted_snapshot_record(draft)
     stored = {
         "v": 1,
         "document_id": document_id,
@@ -6697,6 +7058,13 @@ def post_signing_packet_reissue(
         "packet_state": PACKET_STATE_ACTIVE,
         "frozen_corpus_hash": corpus_hash,
         "supersedes_revision": prior_rev or None,
+        "accepted_review_snapshot_id": (
+            (accepted_for_pkt or {}).get("snapshotId") if isinstance(accepted_for_pkt, dict) else prior.get("accepted_review_snapshot_id")
+        ),
+        "accepted_review_snapshot_digest": (
+            (accepted_for_pkt or {}).get("corpusSha256") if isinstance(accepted_for_pkt, dict) else prior.get("accepted_review_snapshot_digest")
+        ),
+        "authority_mode": authority_mode,
     }
     audit = list(draft.audit_log or [])
     audit.append(
@@ -6704,7 +7072,11 @@ def post_signing_packet_reissue(
             event_type="signing_packet_reissued",
             at=now,
             field="vs01_signing_packet_v1",
-            value={"prior_revision": prior_rev or None, "new_revision": packet_revision},
+            value={
+                "prior_revision": prior_rev or None,
+                "new_revision": packet_revision,
+                "authority_mode": authority_mode,
+            },
         )
     )
     next_draft = _merge_agreement_draft(
@@ -6840,13 +7212,25 @@ def post_vs01_signer_complete(
 
     portable_packet = body.portable_packet if isinstance(body.portable_packet, dict) else None
     if isinstance(portable_packet, dict):
+        from backend.services.accepted_review_snapshot import (
+            AUTHORITY_MODE_LEGACY_PACKET,
+            classify_authority_mode,
+            get_accepted_snapshot_record,
+        )
+
         stored_pkt = draft.vs01_signing_packet_v1 if isinstance(draft.vs01_signing_packet_v1, dict) else {}
         stored_portable = stored_pkt.get("portable") if isinstance(stored_pkt.get("portable"), dict) else None
+        authority_mode = classify_authority_mode(draft)
+        require_snap = authority_mode != AUTHORITY_MODE_LEGACY_PACKET or bool(
+            get_accepted_snapshot_record(draft)
+        )
         portable_packet = _attest_portable_envelope_or_400(
             agreement_id=aid,
             portable=portable_packet,
+            draft=draft,
             stored_portable=stored_portable,
             surface="vs01_signer_complete",
+            require_accepted_snapshot=require_snap,
         )
 
     pending = orchestrate_vs01_signer_complete(
@@ -7351,6 +7735,37 @@ def _public_agreement_verify_payload(aid: str, draft: AgreementDraft) -> Dict[st
     except Exception:
         logging.getLogger(__name__).exception(
             "public_verify_envelope_provenance_failed agreement_id=%s", aid
+        )
+    # Link public verify to server-accepted review snapshot (digests/ids only — never corpus).
+    try:
+        from backend.services.accepted_review_snapshot import (
+            get_accepted_snapshot_record,
+            public_accepted_snapshot_fragment,
+            verify_snapshot_integrity,
+        )
+
+        accepted_snap = get_accepted_snapshot_record(draft)
+        if isinstance(accepted_snap, dict):
+            ok_snap, snap_err = verify_snapshot_integrity(accepted_snap)
+            pub_snap = public_accepted_snapshot_fragment(accepted_snap) if ok_snap else None
+            verification["accepted_review_snapshot"] = pub_snap
+            env_prov = verification.get("envelope_provenance")
+            if ok_snap and isinstance(env_prov, dict):
+                snap_digest = str(accepted_snap.get("corpusSha256") or "").strip().lower()
+                env_digest = str(env_prov.get("acceptedSoTDigest") or "").strip().lower()
+                if snap_digest and env_digest and snap_digest != env_digest:
+                    verification["envelope_provenance"] = None
+                    verification["envelope_attestation_valid"] = False
+                    verification["envelope_attestation_reason"] = "accepted_snapshot_digest_mismatch"
+                    verification["accepted_review_snapshot"] = None
+            elif not ok_snap:
+                verification["accepted_review_snapshot"] = None
+                verification["accepted_review_snapshot_reason"] = snap_err
+        else:
+            verification["accepted_review_snapshot"] = None
+    except Exception:
+        logging.getLogger(__name__).exception(
+            "public_verify_accepted_snapshot_failed agreement_id=%s", aid
         )
     return {
         "agreement_id": aid,

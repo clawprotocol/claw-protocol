@@ -1,4 +1,5 @@
 import { postSigningLinksSent } from "../agreement/agreementWorkspaceApi";
+import { readAcceptedReviewSnapshotRef } from "../agreement/canonicalReviewSnapshotApi";
 import { readFrozenSigningAuthoritySnapshot, loadFrozenSigningAuthority } from "../components/agreements/frozenSigningAuthoritySnapshot";
 import {
   fetchRecipientAccessPolicy,
@@ -152,12 +153,15 @@ export async function dispatchSigningInvitesFromHandoff(
         agreementId: handoff.agreementId,
         expectedVersion: 1,
       }));
+    const acceptedRef = readAcceptedReviewSnapshotRef(handoff.agreementId);
     const res = await postSigningLinksSent(handoff.agreementId, {
       packet_revision: handoff.packetRevision ?? null,
       document_id: (opts?.documentId ?? handoff.vs01DocumentId ?? "").trim() || null,
       portable_packet: opts?.portablePacket ? (opts.portablePacket as unknown as Record<string, unknown>) : null,
       frozen_signing_authority: frozen ? (frozen as unknown as Record<string, unknown>) : null,
       targets,
+      accepted_review_snapshot_id: acceptedRef?.snapshotId ?? null,
+      accepted_review_snapshot_digest: acceptedRef?.corpusSha256 ?? null,
     });
     return {
       attempted: true,

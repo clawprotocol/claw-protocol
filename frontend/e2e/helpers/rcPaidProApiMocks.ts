@@ -243,6 +243,83 @@ export async function installRcPaidProApiRoutes(
       return;
     }
 
+    // Server-authoritative canonical review snapshot (commercial first-seal authority).
+    if (url.includes("/canonical-review-snapshot/accept") && method === "POST") {
+      let body: {
+        snapshot_id?: string;
+        expected_digest?: string;
+      } = {};
+      try {
+        body = route.request().postDataJSON() as typeof body;
+      } catch {
+        /* ignore */
+      }
+      const snapshotId = String(body.snapshot_id || "crs_rc_e2e").trim();
+      const digest = String(body.expected_digest || "").trim().toLowerCase();
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          ok: true,
+          accepted: {
+            snapshot_id: snapshotId,
+            agreement_id: draftId,
+            corpus_plain: "",
+            corpus_sha256: digest || "e".repeat(64),
+            corpus_length: 0,
+            status: "accepted",
+            schema_version: "claw.canonical_review_snapshot/v1",
+            accepted_at: new Date().toISOString(),
+          },
+        }),
+      });
+      return;
+    }
+
+    if (url.includes("/canonical-review-snapshot") && method === "POST") {
+      let body: {
+        corpus_plain?: string;
+        claimed_digest?: string;
+        generation_session_id?: string;
+      } = {};
+      try {
+        body = route.request().postDataJSON() as typeof body;
+      } catch {
+        /* ignore */
+      }
+      const corpus = String(body.corpus_plain || "").trim();
+      const digest = String(body.claimed_digest || "").trim().toLowerCase() || "e".repeat(64);
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          ok: true,
+          snapshot: {
+            snapshot_id: `crs_rc_${draftId}`,
+            agreement_id: draftId,
+            corpus_plain: corpus,
+            corpus_sha256: digest,
+            corpus_length: corpus.length,
+            generation_session_id: body.generation_session_id ?? null,
+            created_at: new Date().toISOString(),
+            schema_version: "claw.canonical_review_snapshot/v1",
+            status: "pending",
+          },
+          accepted: null,
+        }),
+      });
+      return;
+    }
+
+    if (url.includes("/canonical-review-snapshot") && method === "GET") {
+      await route.fulfill({
+        status: 404,
+        contentType: "application/json",
+        body: JSON.stringify({ detail: "canonical_review_snapshot_not_found" }),
+      });
+      return;
+    }
+
     if (url.includes("/recipient-access-token") && method === "POST") {
       let partyKey = "party";
       try {

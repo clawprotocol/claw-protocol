@@ -110,6 +110,8 @@ export async function postSigningLinksSent(
     portable_packet?: Record<string, unknown> | null;
     frozen_signing_authority?: Record<string, unknown> | null;
     targets: SigningInviteTargetPayload[];
+    accepted_review_snapshot_id?: string | null;
+    accepted_review_snapshot_digest?: string | null;
   },
 ): Promise<PostSigningLinksSentResult> {
   const id = agreementId.trim();
@@ -124,6 +126,8 @@ export async function postSigningLinksSent(
         portable_packet: body.portable_packet ?? null,
         frozen_signing_authority: body.frozen_signing_authority ?? null,
         targets: body.targets,
+        accepted_review_snapshot_id: body.accepted_review_snapshot_id ?? null,
+        accepted_review_snapshot_digest: body.accepted_review_snapshot_digest ?? null,
       }),
     });
     if (!res.ok) {

@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 
 from backend.config.agreement_signing_token import _DEV_FALLBACK_SIGNING_TOKEN_RAW
 from backend.main import app
+from backend.services.accepted_review_snapshot import sha256_hex_text
 from backend.services.vs01_signing_envelope_provenance import fingerprint_agreement_body
 
 pytestmark = pytest.mark.unit
@@ -174,6 +175,30 @@ def _assert_422_secret(res) -> None:
     assert _DEV_FALLBACK_SIGNING_TOKEN_RAW not in blob
 
 
+def _persist_and_accept(client: TestClient, aid: str, corpus: str) -> None:
+    create = client.post(
+        f"/api/agreements/{aid}/canonical-review-snapshot",
+        headers=_ORG_H,
+        json={
+            "corpus_plain": corpus,
+            "generation_session_id": "gen_staging_secret",
+            "claimed_digest": sha256_hex_text(corpus),
+        },
+    )
+    assert create.status_code == 200, create.text
+    snap = create.json()["snapshot"]
+    accept = client.post(
+        f"/api/agreements/{aid}/canonical-review-snapshot/accept",
+        headers=_ORG_H,
+        json={
+            "snapshot_id": snap["snapshot_id"],
+            "expected_digest": snap["corpus_sha256"],
+            "expected_accepted_snapshot_id": "",
+        },
+    )
+    assert accept.status_code == 200, accept.text
+
+
 @pytest.mark.parametrize("mode", ["missing", "blank", "fallback"])
 def test_staging_dispatch_fails_closed_without_explicit_secret(
     monkeypatch: pytest.MonkeyPatch, tmp_path, mode: str
@@ -201,6 +226,7 @@ def test_staging_reissue_fails_closed_without_explicit_secret(
     client = TestClient(app)
     aid = _create_agreement(client)
     corpus = ("OPERATIVE TERMS.\n\n" + ("y" * 1600)).strip()
+    _persist_and_accept(client, aid, corpus)
     portable = _portable(aid, corpus)
     body = {
         "packet_revision": "rev_v1",
@@ -243,6 +269,7 @@ def test_staging_signer_complete_fails_closed_without_explicit_secret(
     client = TestClient(app)
     aid = _create_agreement(client)
     corpus = ("OPERATIVE TERMS.\n\n" + ("z" * 1600)).strip()
+    _persist_and_accept(client, aid, corpus)
     portable = _portable(aid, corpus)
     body = {
         "packet_revision": "rev_sign",
@@ -285,6 +312,7 @@ def test_staging_public_verify_fails_closed_without_explicit_secret(
     client = TestClient(app)
     aid = _create_agreement(client)
     corpus = ("OPERATIVE TERMS.\n\n" + ("w" * 1600)).strip()
+    _persist_and_accept(client, aid, corpus)
     body = {
         "packet_revision": "rev_verify",
         "document_id": "doc_staging_secret",

@@ -8,6 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from backend.main import app
+from backend.services.accepted_review_snapshot import sha256_hex_text
 from backend.services.vs01_signing_envelope_provenance import (
     attest_portable_envelope_provenance,
     build_vs01_signing_envelope_provenance,
@@ -175,6 +176,31 @@ def _frozen(aid: str, corpus: str) -> dict:
     }
 
 
+def _persist_and_accept(client: TestClient, aid: str, corpus: str) -> dict:
+    create = client.post(
+        f"/api/agreements/{aid}/canonical-review-snapshot",
+        headers=_ORG_H,
+        json={
+            "corpus_plain": corpus,
+            "generation_session_id": "gen_env_tamper",
+            "claimed_digest": sha256_hex_text(corpus),
+        },
+    )
+    assert create.status_code == 200, create.text
+    snap = create.json()["snapshot"]
+    accept = client.post(
+        f"/api/agreements/{aid}/canonical-review-snapshot/accept",
+        headers=_ORG_H,
+        json={
+            "snapshot_id": snap["snapshot_id"],
+            "expected_digest": snap["corpus_sha256"],
+            "expected_accepted_snapshot_id": "",
+        },
+    )
+    assert accept.status_code == 200, accept.text
+    return accept.json()["accepted"]
+
+
 def _dispatch(client: TestClient, aid: str, portable: dict, corpus: str):
     body = {
         "packet_revision": "rev_env_tamper",
@@ -195,6 +221,7 @@ def test_server_attests_when_client_omits_provenance(monkeypatch: pytest.MonkeyP
     client = TestClient(app)
     aid = _create_agreement(client)
     corpus = ("OPERATIVE TERMS.\n\n" + ("x" * 1600)).strip()
+    _persist_and_accept(client, aid, corpus)
     res = _dispatch(client, aid, _portable(aid, corpus), corpus)
     assert res.status_code == 200, res.text
     stored = res.json()["draft"]["vs01_signing_packet_v1"]["portable"]
@@ -210,11 +237,16 @@ def test_reject_forged_accepted_sot_digest_before_dispatch(
     client = TestClient(app)
     aid = _create_agreement(client)
     corpus = ("OPERATIVE TERMS.\n\n" + ("a" * 1600)).strip()
+    _persist_and_accept(client, aid, corpus)
     honest = build_vs01_signing_envelope_provenance(accepted_sot_plain=corpus, roles=_roles())
     forged = {**honest, "acceptedSoTDigest": "0" * 64}
     res = _dispatch(client, aid, _portable(aid, corpus, provenance=forged), corpus)
     assert res.status_code == 400
-    assert res.json()["detail"]["code"] == "forged_accepted_sot_digest"
+    # Snapshot bind rejects forged accepted digest before HMAC attest.
+    assert res.json()["detail"]["code"] in {
+        "forged_accepted_sot_digest",
+        "submitted_digest_differs_from_accepted_snapshot",
+    }
 
 
 def test_reject_forged_packet_digest_before_dispatch(
@@ -224,6 +256,7 @@ def test_reject_forged_packet_digest_before_dispatch(
     client = TestClient(app)
     aid = _create_agreement(client)
     corpus = ("OPERATIVE TERMS.\n\n" + ("b" * 1600)).strip()
+    _persist_and_accept(client, aid, corpus)
     honest = build_vs01_signing_envelope_provenance(accepted_sot_plain=corpus, roles=_roles())
     forged = {**honest, "packetDigest": "f" * 64}
     res = _dispatch(client, aid, _portable(aid, corpus, provenance=forged), corpus)
@@ -239,11 +272,15 @@ def test_reject_provenance_copied_from_other_accepted_sot(
     aid = _create_agreement(client)
     corpus_a = ("AGREEMENT A BODY.\n\n" + ("a" * 1600)).strip()
     corpus_b = ("AGREEMENT B BODY.\n\n" + ("b" * 1600)).strip()
+    _persist_and_accept(client, aid, corpus_a)
     prov_a = build_vs01_signing_envelope_provenance(accepted_sot_plain=corpus_a, roles=_roles())
     # Client posts SoT B bytes with provenance sealed against SoT A.
     res = _dispatch(client, aid, _portable(aid, corpus_b, provenance=prov_a), corpus_b)
     assert res.status_code == 400
-    assert res.json()["detail"]["code"] == "forged_accepted_sot_digest"
+    assert res.json()["detail"]["code"] in {
+        "forged_accepted_sot_digest",
+        "submitted_corpus_differs_from_accepted_snapshot",
+    }
 
 
 def test_reject_reordered_or_altered_signer_manifest(
@@ -253,6 +290,7 @@ def test_reject_reordered_or_altered_signer_manifest(
     client = TestClient(app)
     aid = _create_agreement(client)
     corpus = ("OPERATIVE TERMS.\n\n" + ("c" * 1600)).strip()
+    _persist_and_accept(client, aid, corpus)
     roles = _roles()
     honest = build_vs01_signing_envelope_provenance(accepted_sot_plain=corpus, roles=roles)
     # Tamper: claim honest digests while sending reordered/altered roles.
@@ -282,6 +320,7 @@ def test_reject_client_provenance_differing_from_persisted_on_signer_complete(
     client = TestClient(app)
     aid = _create_agreement(client)
     corpus = ("OPERATIVE TERMS.\n\n" + ("d" * 1600)).strip()
+    _persist_and_accept(client, aid, corpus)
     dispatch = _dispatch(client, aid, _portable(aid, corpus), corpus)
     assert dispatch.status_code == 200, dispatch.text
     stored = dispatch.json()["draft"]["vs01_signing_packet_v1"]["portable"]
@@ -310,6 +349,7 @@ def test_public_verify_serves_server_attested_provenance_not_client_forgery(
     client = TestClient(app)
     aid = _create_agreement(client)
     corpus = ("OPERATIVE TERMS.\n\n" + ("e" * 1600)).strip()
+    _persist_and_accept(client, aid, corpus)
     dispatch = _dispatch(client, aid, _portable(aid, corpus), corpus)
     assert dispatch.status_code == 200, dispatch.text
     expected = dispatch.json()["draft"]["vs01_signing_packet_v1"]["portable"]["envelopeProvenance"]
@@ -345,6 +385,7 @@ def test_public_verify_fails_closed_when_stored_provenance_tampered(
     client = TestClient(app)
     aid = _create_agreement(client)
     corpus = ("OPERATIVE TERMS.\n\n" + ("f" * 1600)).strip()
+    _persist_and_accept(client, aid, corpus)
     dispatch = _dispatch(client, aid, _portable(aid, corpus), corpus)
     assert dispatch.status_code == 200, dispatch.text
 
