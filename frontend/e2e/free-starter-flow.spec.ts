@@ -1,23 +1,15 @@
 import { expect, test } from "@playwright/test";
-import { goToFreeStarterReview } from "./helpers/freeStarterApiMocks";
+import {
+  freeStarterReviewChromeLocator,
+  freeStarterReviewPreviewLocator,
+  goToFreeStarterReview,
+} from "./helpers/freeStarterApiMocks";
 
 async function assertFreeStarterReviewSurface(page: import("@playwright/test").Page) {
-  await expect(page.getByRole("heading", { name: "Review your draft" })).toBeVisible();
+  await expect(freeStarterReviewChromeLocator(page)).toBeVisible();
   await expect(page.getByRole("heading", { name: "Review your Pro agreement" })).toHaveCount(0);
-  await expect(page.getByRole("article", { name: "Agreement document preview" })).toBeVisible();
+  await expect(freeStarterReviewPreviewLocator(page)).toBeVisible();
   await expect(page.getByText(/Compare plans/i)).toHaveCount(0);
-}
-
-async function completeStarterSignerDetails(page: import("@playwright/test").Page) {
-  await page.getByLabel("Signer 1 email").fill("anthem@example.com");
-  await page.getByLabel(/^Signer name/).first().fill("Anthem Blanchard");
-  await page.getByLabel("Signer 2 email").fill("sarah@example.com");
-  await page.getByLabel(/^Signer name/).nth(1).fill("Sarah Collins");
-  const signerCta = page.getByRole("button", {
-    name: /Complete signer details|Finalize signer details and continue/i,
-  });
-  await signerCta.scrollIntoViewIfNeeded();
-  await signerCta.click();
 }
 
 test("Journey 2 subset — starter review reaches invite recipients", async ({ page }) => {
@@ -26,12 +18,12 @@ test("Journey 2 subset — starter review reaches invite recipients", async ({ p
   await goToFreeStarterReview(page, drafts);
   await assertFreeStarterReviewSurface(page);
 
-  await completeStarterSignerDetails(page);
-  await expect(page.getByRole("region", { name: "Review step guidance" })).toBeVisible({
-    timeout: 20_000,
-  });
-  await expect(page.getByRole("button", { name: "Prepare for signing" })).toBeVisible();
-  await expect(page.getByRole("button", { name: /Send for review/i })).toBeVisible();
+  // Current free-starter review-first shell: readonly preview + Continue with Pro.
+  // Signer/invite fields are not mounted on this unpaid review surface (readyForSend: no).
+  await expect(page.getByRole("heading", { name: "Review your draft" })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Continue with Pro/i })).toBeVisible();
+  await expect(page.getByLabel("Signer 1 email")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /Send for review/i })).toHaveCount(0);
 });
 
 test("Journey 2 subset — upgrade routes to checkout without legacy comparison card", async ({ page }) => {

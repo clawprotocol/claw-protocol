@@ -5,6 +5,10 @@
 import type { AgreementDraft } from "../agreement/agreementTypes";
 import { getAuthoritativeSigningSnapshot } from "../components/agreements/authoritativeSigningSnapshot";
 import { resolveGuidedVs01SigningHandoffForBridge } from "../components/agreements/guidedDealCompletion/guidedVs01SigningHandoffSession";
+import {
+  getPaidProSourceOfTruthText,
+  hasPaidProSourceOfTruth,
+} from "../components/agreements/paidProSourceOfTruth";
 import type { AgreementVs01BridgeSession } from "../launch/simpleProduct/agreementToVs01SigningBridge";
 import { resolveBridgeAgreementCorpusFromDraft } from "../launch/simpleProduct/agreementToVs01SigningBridge";
 import { peekReviewFirstPinnedCorpus } from "../launch/simpleProduct/reviewFirstSendSurface";
@@ -20,6 +24,12 @@ export function resolveAgreementCorpusForPrepareHandoff(args: {
   draft: AgreementDraft | null;
   bridgeCorpusText?: string | null;
 }): string {
+  // Accepted SoT wins when present — VS01 must not invent a second freeze or prefer a divergent bridge body.
+  if (hasPaidProSourceOfTruth()) {
+    const sot = getPaidProSourceOfTruthText().trim();
+    if (sot.length >= VS01_SIGNING_CORPUS_MIN_LEN) return sot;
+  }
+
   const fromBridge = (args.bridgeCorpusText ?? "").trim();
   if (fromBridge.length >= VS01_SIGNING_CORPUS_MIN_LEN) return fromBridge;
 

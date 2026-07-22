@@ -7,6 +7,7 @@
 import { expect, test, type Page } from "@playwright/test";
 import path from "node:path";
 import {
+  freeStarterReviewPreviewLocator,
   goToFreeStarterReview,
   installFreeStarterApiRoutes,
   PROD_QA_FREELANCE_PROMPT,
@@ -22,18 +23,28 @@ import {
   waitForAuthoritativeProReview,
   type RcDraftRecord,
 } from "./helpers/rcPaidProApiMocks";
-import { buildRcQuadPartyPaidBody } from "./fixtures/rcQuadPartyProfessional";
 import {
+  buildRcQuadPartyPaidBody,
+  RC_QUAD_PARTY_INTAKE,
+  RC_QUAD_PENDING_DRAFT,
+} from "./fixtures/rcQuadPartyProfessional";
+import {
+  agreementDocumentLocator,
   assertAuthoritativePaidHash,
   assertAuthoritativePaidHashParity,
   assertAuthoritativePaidReviewDocument,
   advancePaidProSignerSetupToReviewDecision,
   assertPaidProSignerDetailsPopulated,
   clickPaidProReviewSignatureTrack,
+  readAuthoritativeCorpusText,
   readDevAuthoritativeCorpusLen,
   readPremiumCompletionSnapshot,
   waitForPaidProReviewDecisionSurface,
 } from "./helpers/rcJourneyHelpers";
+import {
+  collectPaidProSoTReadinessDiag,
+  waitForAcceptedPaidProSoTReady,
+} from "./helpers/rcPaidProSoTReadiness";
 import {
   captureJ5ReviewDecisionDiagnostics,
   enableJ5ReviewDecisionDiagnostics,
@@ -65,12 +76,18 @@ async function submitPaidProCheckoutReturn(
   drafts: Map<string, RcDraftRecord>,
   draftId: string,
   partyCount: 2 | 3 | 4 = 2,
-  routeOpts?: { premiumBody?: string; parsePartyCount?: 2 | 3 | 4 },
+  routeOpts?: {
+    premiumBody?: string;
+    parsePartyCount?: 2 | 3 | 4;
+    intake?: string;
+    pendingDraft?: typeof RC_QUAD_PENDING_DRAFT;
+  },
 ): Promise<void> {
-  const intake = SHARED_TWO_PARTY_INTAKE;
+  const intake = routeOpts?.intake ?? SHARED_TWO_PARTY_INTAKE;
+  const { intake: _intake, pendingDraft, ...installOpts } = routeOpts ?? {};
   await clearRcApiMocks(page);
-  await seedRcPaidCheckoutReturn(page, intake, draftId);
-  await installRcPaidProApiRoutes(page, drafts, { draftId, partyCount, ...routeOpts });
+  await seedRcPaidCheckoutReturn(page, intake, draftId, pendingDraft);
+  await installRcPaidProApiRoutes(page, drafts, { draftId, partyCount, ...installOpts });
   await page.goto("/app/create?premiumCompletion=1", { waitUntil: "domcontentloaded" });
   const gap = page.getByRole("dialog", { name: /finish your agreement/i });
   if (await gap.isVisible().catch(() => false)) {
@@ -83,9 +100,7 @@ const PROMPT_B =
   "Create a vendor maintenance agreement between Cedar Ridge Holdings LLC and Northwind Analytics Inc for quarterly reporting support. Texas law governs. Fee $4,200 per quarter.";
 
 function freeStarterDocumentPreview(page: Page) {
-  return page
-    .getByRole("region", { name: "Agreement text preview" })
-    .or(page.getByRole("article", { name: "Agreement document preview" }));
+  return freeStarterReviewPreviewLocator(page);
 }
 
 test.describe("RC Journey 1 — Anonymous Starter isolation", () => {
@@ -166,49 +181,105 @@ test.describe("RC Journey 3 — Paid Pro two-party", () => {
 
 test.describe("RC Journey 4 — Multi-party authority", () => {
   test("four-party intake preserves all legal parties on review surface", async ({ browser }) => {
-    test.setTimeout(600_000);
+    // Hard 60s gate — readiness is SoT-authoritative, not overlay polling.
+    test.setTimeout(60_000);
     const context = await browser.newContext({ viewport: { width: 1440, height: 1100 } });
     const page = await context.newPage();
     const drafts = new Map<string, RcDraftRecord>();
+    const startedAt = Date.now();
 
     try {
       const quadBody = buildRcQuadPartyPaidBody();
-      await submitPaidProCheckoutReturn(page, drafts, "ag_rc_quad_party", 2, {
+      // Raw wire fixture remains deterministic; accepted SoT may be pre-freeze normalized.
+      expect(hashPaidProCorpus(quadBody)).toBe("10149:e85e06a");
+
+      const intake = RC_QUAD_PARTY_INTAKE;
+      await clearRcApiMocks(page);
+      await seedRcPaidCheckoutReturn(page, intake, "ag_rc_quad_party", RC_QUAD_PENDING_DRAFT);
+      await installRcPaidProApiRoutes(page, drafts, {
+        draftId: "ag_rc_quad_party",
+        partyCount: 4,
         premiumBody: quadBody,
         parsePartyCount: 4,
       });
-      const { authoritativeLen } = await assertAuthoritativePaidReviewDocument(page);
-      expect(authoritativeLen).toBeGreaterThan(8_000);
-
-      const parseParties = await page.evaluate(() => {
-        try {
-          return JSON.parse(sessionStorage.getItem("claw_rc_e2e_mock_parties_v1") || "[]") as string[];
-        } catch {
-          return [] as string[];
-        }
-      });
-      expect(parseParties.length).toBe(4);
-      for (const name of [/Redwood Biologics/i, /Summit AI Consulting/i, /Blue Harbor Systems/i, /Iron Gate Security/i]) {
-        expect(parseParties.join(" | ")).toMatch(name);
+      await page.goto("/app/create?premiumCompletion=1", { waitUntil: "domcontentloaded" });
+      const gap = page.getByRole("dialog", { name: /finish your agreement/i });
+      if (await gap.isVisible().catch(() => false)) {
+        await page.getByRole("button", { name: /^use defaults$/i }).click();
       }
-      await assertAuthoritativePaidHash(page, hashPaidProCorpus(quadBody));
+
+      // Authoritative readiness: persisted SoT + verified hash + rendered parity (not heading/overlay).
+      const ready = await waitForAcceptedPaidProSoTReady(page, { timeoutMs: 45_000 });
+      const acceptedHash = ready.hash;
+      const acceptedCorpus = (await readAuthoritativeCorpusText(page)).trim();
+      expect(hashPaidProCorpus(acceptedCorpus)).toBe(acceptedHash);
+      expect(acceptedCorpus.length).toBe(ready.len);
+
+      // UI assertion separate from SoT readiness (bounded; must leave budget for reload).
+      await expect(proReviewHeading(page)).toBeVisible({ timeout: 5_000 });
+
+      const partyMatchers = [
+        /Redwood Biologics/i,
+        /Summit AI Consulting/i,
+        /Blue Harbor Systems/i,
+        /Iron Gate Security/i,
+      ] as const;
+      expect(acceptedCorpus).not.toMatch(/Red Mesa Logistics/i);
+      for (const re of partyMatchers) {
+        expect(acceptedCorpus, `accepted corpus includes ${re}`).toMatch(re);
+      }
+      await Promise.all(
+        partyMatchers.map((re) =>
+          expect(page.getByText(re).first()).toBeVisible({ timeout: 4_000 }),
+        ),
+      );
+      const orderIdx = partyMatchers.map((re) => acceptedCorpus.search(re));
+      expect(orderIdx.every((i) => i >= 0), "all four parties located").toBe(true);
+      expect(orderIdx, "party order").toEqual([...orderIdx].sort((a, b) => a - b));
+
+      await assertAuthoritativePaidHash(page, acceptedHash);
       await expect(page.getByText(/Party A|Party B/i)).toHaveCount(0);
+      // eslint-disable-next-line no-console
+      console.log("[j4] accepted_before_reload", {
+        ms: Date.now() - startedAt,
+        hash: acceptedHash,
+        len: ready.len,
+        auth: ready.diag.renderedHash,
+        hydrate: ready.diag.hydrateStatus,
+      });
       await captureMilestone(page, "j4", "quad-party-review");
 
-      await page.reload({ waitUntil: "domcontentloaded" });
-      await expect(proReviewHeading(page)).toBeVisible({ timeout: 60_000 });
-      await expect
-        .poll(async () => readDevAuthoritativeCorpusLen(page), { timeout: 90_000 })
-        .toBeGreaterThan(8_000);
-      const reloadedParties = await page.evaluate(() => {
-        try {
-          return JSON.parse(sessionStorage.getItem("claw_rc_e2e_mock_parties_v1") || "[]") as string[];
-        } catch {
-          return [] as string[];
-        }
+      await page.reload({ waitUntil: "commit" });
+      // Wait for live SoT rematerialization markers before authority polls (avoid evaluate during mount).
+      await page.waitForFunction(
+        () => Boolean(document.documentElement.getAttribute("data-claw-live-sot-hash")),
+        { timeout: 15_000 },
+      );
+      const reloaded = await waitForAcceptedPaidProSoTReady(page, { timeoutMs: 12_000 });
+      expect(reloaded.hash, "reload SoT hash").toBe(acceptedHash);
+      expect(reloaded.len, "reload SoT length").toBe(ready.len);
+      await expect(proReviewHeading(page)).toBeVisible({ timeout: 5_000 });
+      const reloadedCorpus = (await readAuthoritativeCorpusText(page)).trim();
+      expect(reloadedCorpus).toBe(acceptedCorpus);
+      expect(hashPaidProCorpus(reloadedCorpus)).toBe(acceptedHash);
+      for (const re of partyMatchers) {
+        expect(reloadedCorpus).toMatch(re);
+      }
+      await assertAuthoritativePaidHash(page, acceptedHash);
+      // eslint-disable-next-line no-console
+      console.log("[j4] accepted_after_reload", {
+        ms: Date.now() - startedAt,
+        hash: reloaded.hash,
+        len: reloaded.len,
+        auth: reloaded.diag.renderedHash,
+        hydrate: reloaded.diag.hydrateStatus,
       });
-      expect(reloadedParties.length).toBe(4);
       await captureMilestone(page, "j4", "quad-party-reload");
+    } catch (err) {
+      const diag = await collectPaidProSoTReadinessDiag(page, startedAt).catch(() => null);
+      // eslint-disable-next-line no-console
+      console.error("[j4] FAILURE_DIAG", JSON.stringify(diag));
+      throw err;
     } finally {
       await context.close();
     }

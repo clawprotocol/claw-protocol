@@ -33,6 +33,9 @@ export type EstablishAcceptedPremiumCanonicalCorpusArgs = {
   intakeText?: string | null;
   draft?: ParsedDraftShape | null;
   pipelineSource: string;
+  /** Must match ensurePremiumCompletion mark key when freezing after checkout. */
+  agreementGenerationId?: string | null;
+  reviewSessionId?: string | null;
 };
 
 export type AcceptedPremiumCorpusInstrumentation = {
@@ -96,6 +99,8 @@ export function establishAcceptedPremiumCanonicalCorpus(
     source: pipelineSource,
     draft: args.draft ?? null,
     intakeText: args.intakeText ?? null,
+    agreementGenerationId: args.agreementGenerationId ?? null,
+    reviewSessionId: args.reviewSessionId ?? null,
   });
   return { ...toAcceptedRecord(record), rawAcceptedLen: raw.length };
 }
@@ -122,6 +127,8 @@ export function hydrateAcceptedPremiumCanonicalCorpusFromSnapshot(
     accepted_at: snap.paidProSourceOfTruthAcceptedAt ?? snap.savedAt,
     source: "server_full_draft",
     draft: snap.premiumDraft ?? null,
+    agreementGenerationId: snap.agreementGenerationId ?? null,
+    reviewSessionId: snap.agreementGenerationId ?? null,
   });
   return record ? toAcceptedRecord(record) : null;
 }

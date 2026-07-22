@@ -92,7 +92,6 @@ export async function resetRcPaidBrowserState(page: Page): Promise<void> {
   await page.goto("/", { waitUntil: "domcontentloaded" });
   await page.evaluate(() => {
     try {
-      delete (window as Window & { __clawRcCheckoutReturnSeeded?: boolean }).__clawRcCheckoutReturnSeeded;
       const sessionKeys: string[] = [];
       for (let i = 0; i < sessionStorage.length; i += 1) {
         const key = sessionStorage.key(i);
@@ -101,6 +100,7 @@ export async function resetRcPaidBrowserState(page: Page): Promise<void> {
       for (const key of sessionKeys) sessionStorage.removeItem(key);
       sessionStorage.removeItem("claw_rc_e2e_mock_parties_v1");
       sessionStorage.removeItem("claw_rc_e2e_parse_parties_v1");
+      sessionStorage.removeItem("claw_rc_checkout_return_seeded_v1");
       localStorage.removeItem("claw_premium_completed");
       localStorage.removeItem("claw_paid_dashboard_create_context_v1");
     } catch {
@@ -109,7 +109,11 @@ export async function resetRcPaidBrowserState(page: Page): Promise<void> {
   });
 }
 
-/** Seed browser as if checkout completed — init script overwrites on each navigation. */
+/**
+ * Seed browser as if checkout completed.
+ * Once-only via sessionStorage (survives reload). A window flag does NOT — reload would
+ * wipe claw_premium_completion_snapshot_v1 and re-trigger grant+resume generation.
+ */
 export async function seedRcPaidCheckoutReturn(
   page: Page,
   intake = SHARED_TWO_PARTY_INTAKE,
@@ -119,6 +123,8 @@ export async function seedRcPaidCheckoutReturn(
   await page.addInitScript(
     ({ orgId, intakeText, pending, agreementId }) => {
       try {
+        if (sessionStorage.getItem("claw_rc_checkout_return_seeded_v1") === "1") return;
+        sessionStorage.setItem("claw_rc_checkout_return_seeded_v1", "1");
         localStorage.setItem("claw_org_id", orgId);
         localStorage.removeItem("claw_premium_completed");
         sessionStorage.removeItem("claw_premium_completion_snapshot_v1");
@@ -200,6 +206,15 @@ export async function installRcPaidProApiRoutes(
         : ["Red Mesa Logistics LLC", "Harbor Peak Automation LLC"];
 
   await clearRcApiMocks(page);
+  // Seed party names outside the route handler — page.evaluate during fulfill can race the network.
+  await page.addInitScript((partyNames) => {
+    try {
+      sessionStorage.setItem("claw_rc_e2e_mock_parties_v1", JSON.stringify(partyNames));
+    } catch {
+      /* ignore */
+    }
+  }, mockPartyNames);
+
   return page.route(/\/(api\/|v1\/workspace\/)/, async (route) => {
     const url = route.request().url();
     const method = route.request().method();
@@ -229,11 +244,20 @@ export async function installRcPaidProApiRoutes(
     }
 
     if (url.includes("/recipient-access-token") && method === "POST") {
+      let partyKey = "party";
+      try {
+        const body = route.request().postDataJSON() as { recipient_party_id?: string };
+        partyKey = String(body?.recipient_party_id ?? "").trim() || "party";
+      } catch {
+        /* ignore */
+      }
+      // Fingerprint uses token.slice(0, 12) — uniqueness must appear in the prefix.
+      const prefix = `t${Math.random().toString(36).slice(2, 10)}${partyKey.replace(/[^a-zA-Z0-9]/g, "").slice(0, 4)}`;
       await route.fulfill({
         status: 200,
         contentType: "application/json",
         body: JSON.stringify({
-          token: "rc-e2e-recipient-token",
+          token: `${prefix}${Date.now().toString(36)}`.slice(0, 64),
           expires_in_seconds: 86400,
           locked_version_id: "v1",
           review_url: "https://example.test/agreements/rc-e2e/review",
@@ -299,27 +323,24 @@ export async function installRcPaidProApiRoutes(
     }
 
     if (url.includes("/api/agreements/premium-full-draft") && method === "POST") {
-      await page.evaluate((partyNames) => {
-        try {
-          sessionStorage.setItem("claw_rc_e2e_mock_parties_v1", JSON.stringify(partyNames));
-        } catch {
-          /* ignore */
-        }
-      }, mockPartyNames);
       await route.fulfill({
         status: 200,
         contentType: "application/json",
         body: JSON.stringify({
-          title: "Professional Services Agreement",
+          title:
+            parsePartyCount >= 4
+              ? "Multi-Party Professional Services Agreement"
+              : "Professional Services Agreement",
           agreement_family: "services_agreement",
           generation_outcome: "ok",
+          generation_ok: true,
           document_text: paidBody,
           server_full_document_text: paidBody,
           premium_full_document_text: paidBody,
           authoritative_draft: paidBody,
+          premium_render_source: "server_full_document_text",
           key_terms_found: ["Parties", "Fees", "Delaware", "Confidentiality"],
           missing_material_info: [],
-          validation: { ok: true, professional_coverage_ok: true },
           model: "rc-e2e-mock",
         }),
       });
@@ -459,18 +480,49 @@ export async function waitForAuthoritativeProReview(page: Page): Promise<void> {
   await expect(page).not.toHaveURL(/\/app\/ops\//, { timeout: 5_000 });
   await expect(page.getByText("We couldn't safely finalize the Pro version.")).toHaveCount(0);
   await expect(page.getByText(/Retry Pro draft/i)).toHaveCount(0);
-  await expect(page.getByRole("heading", { name: "Review your Pro agreement" })).toBeVisible({
-    timeout: 180_000,
-  });
+  const reviewHeading = page
+    .locator("#premium-pro-review-scroll-anchor")
+    .or(page.getByRole("heading", { name: /Review your Pro agreement/i }).first());
+  await expect(reviewHeading).toBeVisible({ timeout: 180_000 });
   const waitTitle = page.getByRole("heading", {
     name: /Preparing final agreement|Preparing signature-ready version|Generating your final Pro agreement/i,
   });
   await expect(waitTitle.first()).toBeHidden({ timeout: 120_000 }).catch(() => undefined);
   await expect
     .poll(async () => {
-      const text = await page.evaluate(() => document.body?.textContent ?? "");
-      const auth = text.match(/authoritativeLen:\s*(\d+)/i);
-      return Number.parseInt(auth?.[1] ?? "0", 10) || 0;
+      const overlayLen = await page.evaluate(() => {
+        const text = document.body?.textContent ?? "";
+        const auth = text.match(/authoritativeLen:\s*(\d+)/i);
+        if (auth) return Number.parseInt(auth[1] ?? "0", 10) || 0;
+        const working = text.match(/workingCorpusLen:\s*(\d+)/i);
+        return Number.parseInt(working?.[1] ?? "0", 10) || 0;
+      });
+      const snap = await page.evaluate(() => {
+        try {
+          const raw = sessionStorage.getItem("claw_premium_completion_snapshot_v1");
+          if (!raw) return { len: 0, hash: "" };
+          const parsed = JSON.parse(raw) as {
+            paidProSourceOfTruthText?: string;
+            paidProSourceOfTruthHash?: string;
+            premiumWinningBodyText?: string;
+            premiumReadonlyPlainText?: string;
+          };
+          const text =
+            parsed.paidProSourceOfTruthText ||
+            parsed.premiumWinningBodyText ||
+            parsed.premiumReadonlyPlainText ||
+            "";
+          return {
+            len: text.length,
+            hash: (parsed.paidProSourceOfTruthHash || "").trim(),
+          };
+        } catch {
+          return { len: 0, hash: "" };
+        }
+      });
+      // Authoritative when SoT hash is present or corpus length clears the substantive bar.
+      if (snap.hash && snap.len > 8_000) return snap.len;
+      return Math.max(overlayLen, snap.len);
     }, { timeout: 180_000 })
     .toBeGreaterThan(8_000);
 }

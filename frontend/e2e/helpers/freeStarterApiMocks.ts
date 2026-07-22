@@ -1,4 +1,4 @@
-import { expect, type Page } from "@playwright/test";
+import { expect, type Locator, type Page } from "@playwright/test";
 
 /**
  * Shared E2E mocks for anonymous free-starter create → review journeys.
@@ -236,18 +236,45 @@ export async function submitHomepageHeroToCreate(page: Page, prompt = PROD_QA_FR
   await expect(page).toHaveURL(/\/app\/create/, { timeout: 30_000 });
 }
 
+/**
+ * Stable free-starter review preview locator.
+ * Production may render either the starter document article ("Agreement document preview")
+ * or the text preview region ("Agreement text preview"). Prefer the article when both are
+ * visible so the create-flow intake region does not win via DOM order.
+ */
+export function freeStarterReviewPreviewLocator(page: Page): Locator {
+  return page
+    .getByRole("article", { name: "Agreement document preview" })
+    .or(page.getByRole("region", { name: "Agreement text preview" }))
+    .first();
+}
+
+/** Free-starter post-generation chrome: summary card and/or "Review your draft" heading. */
+export function freeStarterReviewChromeLocator(page: Page): Locator {
+  return page
+    .getByTestId("agreement-ready-summary-card")
+    .or(page.getByRole("heading", { name: "Review your draft" }))
+    .first();
+}
+
+/**
+ * AgreementReadySummaryCard gates the readonly review surface — advance when present.
+ * No-op when already on the draft review / invite path.
+ */
+export async function advancePastFreeStarterReadySummaryIfPresent(page: Page): Promise<void> {
+  const summary = page.getByTestId("agreement-ready-summary-card");
+  if (!(await summary.isVisible().catch(() => false))) return;
+  const reviewBtn = page.getByRole("button", { name: "Review agreement" });
+  await expect(reviewBtn).toBeVisible({ timeout: 15_000 });
+  await reviewBtn.click();
+  await expect(summary).toBeHidden({ timeout: 30_000 });
+}
+
 /** Wait until anonymous free-starter post-generation review surface is ready (summary + document preview). */
 export async function waitForFreeStarterReviewReady(page: Page): Promise<void> {
-  await expect(
-    page
-      .getByTestId("agreement-ready-summary-card")
-      .or(page.getByRole("heading", { name: "Review your draft" })),
-  ).toBeVisible({ timeout: 60_000 });
-  await expect(
-    page
-      .getByRole("region", { name: "Agreement text preview" })
-      .or(page.getByRole("article", { name: "Agreement document preview" })),
-  ).toBeVisible({ timeout: 60_000 });
+  await expect(freeStarterReviewChromeLocator(page)).toBeVisible({ timeout: 60_000 });
+  await advancePastFreeStarterReadySummaryIfPresent(page);
+  await expect(freeStarterReviewPreviewLocator(page)).toBeVisible({ timeout: 60_000 });
 }
 
 /** @deprecated Prefer waitForFreeStarterReviewReady — legacy alias for rc-journeys imports. */
@@ -260,8 +287,7 @@ export async function goToFreeStarterReview(page: Page, drafts: Map<string, Draf
   await installFreeStarterApiRoutes(page, drafts, draftId);
   await submitHomepageHeroToCreate(page);
   await waitForFreeStarterReviewReady(page);
-  await expect(page.getByRole("article", { name: "Agreement document preview" })).toBeVisible({
-    timeout: 60_000,
-  });
-  return page.getByRole("article", { name: "Agreement document preview" });
+  const preview = freeStarterReviewPreviewLocator(page);
+  await expect(preview).toBeVisible({ timeout: 60_000 });
+  return preview;
 }

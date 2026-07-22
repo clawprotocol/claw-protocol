@@ -4,6 +4,7 @@ import type { PremiumCompletionSnapshot } from "./premiumCompletionStorage";
 import {
   endPremiumEnsureForIntake,
   resetPremiumEnsureMutexForTests,
+  shouldBlockEntitledRewriteForAcceptedPaidProSnapshot,
   shouldSkipPremiumEnsureBecauseSnapshotAlreadyAuthoritative,
   tryBeginPremiumEnsureForIntake,
 } from "./premiumAuthoritativeVisibleSurface";
@@ -54,6 +55,27 @@ describe("premiumAuthoritativeVisibleSurface", () => {
         snapshot: snap,
       }),
     ).toBe(true);
+  });
+
+  it("shouldBlockEntitledRewriteForAcceptedPaidProSnapshot when frozen SoT hash is present", () => {
+    const snap: PremiumCompletionSnapshot = {
+      savedAt: Date.now(),
+      premiumDraft: minimalDraft(),
+      premiumParties: [],
+      recipientCandidates: [],
+      premiumAccepted: true,
+      paidProSourceOfTruthText: "y".repeat(11052),
+      paidProSourceOfTruthHash: "11052:5d0ca5a7",
+      premiumPipelineRenderSource: "server_full_draft",
+    };
+    expect(shouldBlockEntitledRewriteForAcceptedPaidProSnapshot(snap)).toBe(true);
+    expect(shouldBlockEntitledRewriteForAcceptedPaidProSnapshot(null)).toBe(false);
+    expect(
+      shouldBlockEntitledRewriteForAcceptedPaidProSnapshot({
+        ...snap,
+        premiumAccepted: false,
+      }),
+    ).toBe(false);
   });
 
   it("tryBeginPremiumEnsureForIntake blocks parallel duplicate fingerprint until released", () => {

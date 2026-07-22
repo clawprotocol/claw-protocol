@@ -12,6 +12,8 @@ import {
 import {
   corpusHasVisibleSignatureExecutionLines,
   corpusSignatureBlocksHaveRequiredByLines,
+  countSignatureExecutionLinesInTail,
+  signaturePatchStartIndex,
 } from "../components/agreements/guidedDealCompletion/signatureRegion";
 import {
   resolveFinalVs01CorpusOrBlock,
@@ -344,13 +346,21 @@ function standardizeWitnessSignatureLines(corpus: string): string {
 function ensureWitnessBlockFromRoles(corpus: string, roles: readonly Vs01PrepareSigningRole[]): string {
   const cleaned = standardizeWitnessSignatureLines(stripStaleExecutionPlacementCorpusCopy(corpus).text.trim());
   const signerCount = Math.max(1, roles.filter((r) => r.requiresSignature !== false).length);
+  const executionLines = countSignatureExecutionLinesInTail(cleaned);
+  // corpusSignatureBlocksHaveRequiredByLines can pass when execution lines match headings even if
+  // headings < role count (e.g. 2-party SoT + 3 prepare roles). Packet model must cover every role.
   if (
     corpusHasVisibleSignatureExecutionLines(cleaned) &&
-    corpusSignatureBlocksHaveRequiredByLines(cleaned, signerCount)
+    corpusSignatureBlocksHaveRequiredByLines(cleaned, signerCount) &&
+    executionLines >= signerCount
   ) {
     return cleaned;
   }
-  return `${cleaned.replace(/\n+$/g, "")}\n\n${canonicalWitnessBlockFromRoles(roles)}`.trim();
+  // Rebuild signature/witness tail for the current role set (packet-layer only — never writes SoT).
+  const patchAt = signaturePatchStartIndex(cleaned);
+  const operative =
+    patchAt >= 0 ? cleaned.slice(0, patchAt).replace(/\n+$/g, "") : cleaned.replace(/\n+$/g, "");
+  return `${operative}\n\n${canonicalWitnessBlockFromRoles(roles)}`.trim();
 }
 
 function classifyText(line: string, options?: { allowDocumentTitle?: boolean }): Vs01NormTextRect["kind"] {
@@ -770,19 +780,25 @@ export function buildVs01SigningPacketModel(args: {
   draft?: AgreementDraft | null;
 }): Vs01SigningPacketModel {
   const guidedPro = args.mode === "guided_pro";
-  const authoritativeCorpusPlain = guidedPro
-    ? ensureWitnessBlockFromRoles(args.authoritativeCorpusPlain ?? "", args.roles)
-    : (args.authoritativeCorpusPlain ?? "");
+  // Gate against the accepted/handoff corpus first. resolveFinalVs01CorpusOrBlock prefers frozen
+  // canonical/SoT and would discard a pre-gate witness rebuild — so role alignment must run after.
   const corpusGate = resolveFinalVs01CorpusOrBlock({
     ...(args.corpusGateArgs ?? {}),
-    agreementCorpusText: authoritativeCorpusPlain,
+    agreementCorpusText: args.authoritativeCorpusPlain ?? "",
     bridge: args.bridge ?? args.corpusGateArgs?.bridge ?? null,
     draft: args.draft ?? args.corpusGateArgs?.draft ?? null,
     guidedPro,
   });
   const validationErrors: string[] = [];
   if (!corpusGate.allowed) validationErrors.push(corpusGate.blockReason ?? "corpus_gate_blocked");
-  const layouts = corpusGate.allowed ? paginateCorpus(corpusGate.corpus) : [];
+  // Packet-layer only: align signature/witness anchors to the current role set. Never writes SoT.
+  const packetLayoutCorpus =
+    guidedPro && corpusGate.allowed
+      ? ensureWitnessBlockFromRoles(corpusGate.corpus, args.roles)
+      : corpusGate.allowed
+        ? corpusGate.corpus
+        : "";
+  const layouts = corpusGate.allowed ? paginateCorpus(packetLayoutCorpus) : [];
   const roles = [...args.roles];
   const roleEntityNames = roles.map((r) => r.entityName?.trim() || r.partyName?.trim()).filter(Boolean);
   const fields: PlacedSigningField[] = [];

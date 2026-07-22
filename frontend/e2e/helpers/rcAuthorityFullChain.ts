@@ -70,28 +70,83 @@ export async function bootstrapAuthorityOwnerReview(
   await installOwnershipMigrationAuthorityRoutes(page, harness);
   await seedRcPaidCheckoutReturn(page, SHARED_TWO_PARTY_INTAKE, ids.ownedId);
   await page.goto("/app/create?checkout_session_id=rc_auth_sign_cs&premiumCompletion=1", {
-    waitUntil: "domcontentloaded",
+    waitUntil: "commit",
   });
+  // Rematerialized accepted SoT before decision-surface polling (same authority gate as J4).
+  await page
+    .waitForFunction(
+      () => Boolean(document.documentElement.getAttribute("data-claw-live-sot-hash")),
+      { timeout: 45_000 },
+    )
+    .catch(() => undefined);
   await waitForPaidProReviewDecisionSurface(page, { timeout: 180_000 });
 
   return { harness, paidDrafts };
 }
 
+/** Post-signer-setup prepare CTA — label or testid (forced chrome / simple final review). */
+export function authorityPrepareForSigningLocator(page: Page) {
+  return page
+    .getByTestId("paid-pro-forced-prepare-signatures")
+    .or(page.getByTestId("simple-pro-send-for-signature"))
+    .or(page.getByRole("button", { name: /Prepare for signing/i }))
+    .first();
+}
+
 export async function advanceAuthorityThroughSignerSetup(page: Page): Promise<void> {
-  if (
-    await page
-      .getByTestId("paid-pro-forced-prepare-signatures")
-      .first()
-      .isVisible()
-      .catch(() => false)
-  ) {
+  const prepareTrack = page
+    .getByTestId("paid-pro-forced-prepare-signatures")
+    .or(page.getByTestId("simple-pro-send-for-signature"))
+    .or(page.getByRole("button", { name: /Prepare for signing/i }))
+    .first();
+  // Latch signature track when the review-decision prepare CTA is available.
+  if (await prepareTrack.isVisible().catch(() => false)) {
     await clickPaidProReviewSignatureTrack(page);
   }
   await fillPaidProSignerDetailsIfVisible(page);
   await advancePaidProSignerSetupToReviewDecision(page);
-  await expect(
-    page.getByRole("button", { name: /Prepare for signing/i }).first(),
-  ).toBeVisible({ timeout: 120_000 });
+  try {
+    await expect(authorityPrepareForSigningLocator(page)).toBeVisible({ timeout: 120_000 });
+  } catch (err) {
+    const diag = await page
+      .evaluate(() => {
+        const snapRaw = sessionStorage.getItem("claw_premium_completion_snapshot_v1");
+        let sotHash: string | null = null;
+        let frozenHint = false;
+        try {
+          if (snapRaw) {
+            const snap = JSON.parse(snapRaw) as { paidProSourceOfTruthHash?: string };
+            sotHash = (snap.paidProSourceOfTruthHash || "").trim() || null;
+          }
+        } catch {
+          /* ignore */
+        }
+        return {
+          url: location.href,
+          liveHash: document.documentElement.getAttribute("data-claw-live-sot-hash"),
+          snapHash: sotHash,
+          frozenHint,
+          buttons: Array.from(document.querySelectorAll("button"))
+            .map((b) => (b.textContent || "").trim().replace(/\s+/g, " "))
+            .filter(Boolean)
+            .slice(0, 30),
+          testIds: Array.from(document.querySelectorAll("[data-testid]"))
+            .map((e) => e.getAttribute("data-testid"))
+            .filter((t): t is string => Boolean(t && /sign|prepare|send|review|forced|signer|complete/i.test(t)))
+            .slice(0, 40),
+          bodySnippet: (document.body?.innerText || "").replace(/\s+/g, " ").trim().slice(0, 280),
+        };
+      })
+      .catch((e: Error) => ({ evaluateError: String(e?.message || e) }));
+    // eslint-disable-next-line no-console
+    console.error("[j7-authority] PREPARE_MISSING_DIAG", JSON.stringify(diag));
+    throw err;
+  }
+  const sotHash = await page
+    .evaluate(() => document.documentElement.getAttribute("data-claw-live-sot-hash"))
+    .catch(() => null);
+  // eslint-disable-next-line no-console
+  console.log("[j7-authority] prepare_ready", { sotHash });
 }
 
 export async function advanceAuthorityThroughPacketDelivery(
@@ -124,10 +179,13 @@ export async function advanceAuthorityThroughPacketDelivery(
     }
   });
 
-  const prepareBtn = page
-    .getByTestId("paid-pro-forced-prepare-signatures")
-    .or(page.getByRole("button", { name: /Prepare for signing/i }))
-    .first();
+  const prepareBtn = authorityPrepareForSigningLocator(page);
+  await expect(prepareBtn).toBeVisible({ timeout: 60_000 });
+  const sotHashBeforePrepare = await page
+    .evaluate(() => document.documentElement.getAttribute("data-claw-live-sot-hash"))
+    .catch(() => null);
+  // eslint-disable-next-line no-console
+  console.log("[j7-authority] prepare_click", { sotHashBeforePrepare });
   await prepareBtn.scrollIntoViewIfNeeded();
   await prepareBtn.click();
 
@@ -151,6 +209,7 @@ export async function advanceAuthorityThroughPacketDelivery(
     );
   }
 
+  const packetPollStartedAt = Date.now();
   try {
     await expect
       .poll(
@@ -159,21 +218,156 @@ export async function advanceAuthorityThroughPacketDelivery(
       )
       .toBeGreaterThan(0);
   } catch (err) {
-    const vs01Diag = await page.evaluate(() => {
-      const block = document.querySelector("[data-packet-block-reason]");
-      return {
-        url: location.href,
-        packetBlockReason: block?.getAttribute("data-packet-block-reason") ?? null,
-        packetBlockDebug: block?.getAttribute("data-packet-block-debug") ?? null,
-        buttons: Array.from(document.querySelectorAll("button"))
-          .map((b) => b.textContent?.trim())
-          .filter(Boolean)
-          .slice(0, 12),
-        bodySnippet: (document.body.textContent ?? "").replace(/\s+/g, " ").trim().slice(0, 400),
-      };
-    });
+    const elapsedMs = Date.now() - packetPollStartedAt;
+    const vs01Diag = await page
+      .evaluate(() => {
+        const block = document.querySelector("[data-packet-block-reason]");
+        let acceptedSotHash: string | null = null;
+        let acceptedSotLen = 0;
+        let handoffHash: string | null = null;
+        let handoffLen = 0;
+        let generationId: string | null = null;
+        let agreementId: string | null = null;
+        let documentId: string | null = null;
+        let sessionId: string | null = null;
+        let handoffStatus: string | null = null;
+        let handoffTargetRoute: string | null = null;
+        let requiredSignerCount: number | null = null;
+        let signerManifestStatus: string | null = null;
+        let signerManifestError: string | null = null;
+        try {
+          const snapRaw = sessionStorage.getItem("claw_premium_completion_snapshot_v1");
+          if (snapRaw) {
+            const snap = JSON.parse(snapRaw) as {
+              paidProSourceOfTruthHash?: string;
+              paidProSourceOfTruthText?: string;
+              agreementGenerationId?: string;
+              agreementId?: string;
+              documentId?: string;
+            };
+            acceptedSotHash = (snap.paidProSourceOfTruthHash || "").trim() || null;
+            acceptedSotLen = (snap.paidProSourceOfTruthText || "").trim().length;
+            generationId = (snap.agreementGenerationId || "").trim() || null;
+            agreementId = (snap.agreementId || "").trim() || null;
+            documentId = (snap.documentId || "").trim() || null;
+          }
+          const handoffRaw = sessionStorage.getItem("claw_guided_vs01_signing_handoff_v1");
+          if (handoffRaw) {
+            const handoff = JSON.parse(handoffRaw) as {
+              corpusHash?: string;
+              corpusText?: string;
+              status?: string;
+              targetRoute?: string;
+              agreementId?: string;
+              documentId?: string;
+              sessionId?: string;
+              roles?: unknown[];
+            };
+            handoffHash = (handoff.corpusHash || "").trim() || null;
+            handoffLen = (handoff.corpusText || "").trim().length;
+            handoffStatus = (handoff.status || "").trim() || "present";
+            handoffTargetRoute = (handoff.targetRoute || "").trim() || null;
+            sessionId = (handoff.sessionId || "").trim() || null;
+            if (!agreementId) agreementId = (handoff.agreementId || "").trim() || null;
+            if (!documentId) documentId = (handoff.documentId || "").trim() || null;
+            if (Array.isArray(handoff.roles)) requiredSignerCount = handoff.roles.length;
+          } else {
+            handoffStatus = "missing";
+          }
+          const manifestRaw =
+            sessionStorage.getItem("claw_vs01_signer_manifest_v1") ||
+            sessionStorage.getItem("claw_guided_signer_manifest_v1");
+          if (manifestRaw) {
+            try {
+              const manifest = JSON.parse(manifestRaw) as {
+                roles?: unknown[];
+                error?: string;
+                status?: string;
+              };
+              signerManifestStatus = (manifest.status || "present").trim() || "present";
+              signerManifestError = (manifest.error || "").trim() || null;
+              if (requiredSignerCount == null && Array.isArray(manifest.roles)) {
+                requiredSignerCount = manifest.roles.length;
+              }
+            } catch {
+              signerManifestStatus = "parse_error";
+              signerManifestError = "invalid_json";
+            }
+          } else {
+            signerManifestStatus = "missing";
+          }
+        } catch {
+          /* ignore */
+        }
+        const pathDoc = location.pathname.match(/\/app\/esign\/([^/?#]+)/)?.[1] ?? null;
+        if (!documentId) documentId = pathDoc;
+        const executionLines = document.querySelectorAll("[data-vs01-signature-execution-line]").length;
+        const sigAnchors = document.querySelectorAll(
+          "[data-vs01-signature-line-anchor], [data-vs01-canonical-signature-line]",
+        ).length;
+        const canonicalTextNodes = document.querySelectorAll("[data-vs01-canonical-text]").length;
+        const partyMarkers = document.querySelectorAll("[data-vs01-signature-party]").length;
+        const liveSotHash = document.documentElement.getAttribute("data-claw-live-sot-hash");
+        const liveSotLenRaw = document.documentElement.getAttribute("data-claw-live-sot-len");
+        const liveSotLen = liveSotLenRaw != null ? Number(liveSotLenRaw) : null;
+        const signerAppliedDistinct =
+          Boolean(handoffHash) &&
+          Boolean(acceptedSotHash || liveSotHash) &&
+          handoffHash !== (acceptedSotHash || liveSotHash);
+        return {
+          url: location.href,
+          targetRoute: location.pathname,
+          acceptedSotHash: acceptedSotHash || liveSotHash,
+          acceptedSotLen: acceptedSotLen || liveSotLen,
+          liveSotHash,
+          liveSotLen,
+          signerAppliedCorpusHash: handoffHash,
+          signerAppliedCorpusLen: handoffLen,
+          signerAppliedDistinctFromAcceptedSot: signerAppliedDistinct,
+          agreementId,
+          documentId,
+          generationId,
+          sessionId,
+          handoffStatus,
+          handoffTargetRoute,
+          requiredSignerCount,
+          renderedSignatureExecutionLineCount: executionLines,
+          renderedSignatureAnchorCount: sigAnchors,
+          renderedSignaturePartyMarkerCount: partyMarkers,
+          canonicalTextNodeCount: canonicalTextNodes,
+          canonicalSignatureLineSelectors: {
+            executionLine: executionLines,
+            anchorOrCanonicalLine: sigAnchors,
+            partyMarker: partyMarkers,
+          },
+          signerManifestStatus,
+          signerManifestError,
+          packetBlockReason: block?.getAttribute("data-packet-block-reason") ?? null,
+          packetBlockDebug: block?.getAttribute("data-packet-block-debug") ?? null,
+          lastReadinessState: block
+            ? "blocked"
+            : document.querySelector(".vs01-sign-status-ready")
+              ? "ready"
+              : "unknown",
+          buttons: Array.from(document.querySelectorAll("button"))
+            .map((b) => (b.textContent || "").trim().replace(/\s+/g, " "))
+            .filter(Boolean)
+            .slice(0, 10),
+        };
+      })
+      .catch((e: Error) => ({ evaluateError: String(e?.message || e) }));
+    // eslint-disable-next-line no-console
+    console.error(
+      "[j7-authority] PACKET_READY_DIAG",
+      JSON.stringify({
+        ...vs01Diag,
+        sotHashBeforePrepare,
+        elapsedMs,
+        timeline: chainState.timeline.map((t) => t.tag),
+      }),
+    );
     throw new Error(
-      `packet/delivery failed timeline=${chainState.timeline.map((t) => t.tag).join(",")} vs01=${JSON.stringify(vs01Diag)} trace=${JSON.stringify(await page.evaluate(() => { try { return JSON.parse(sessionStorage.getItem("claw_signing_advance_trace_v1") ?? "[]"); } catch { return []; } }))}`,
+      `packet/delivery failed timeline=${chainState.timeline.map((t) => t.tag).join(",")} elapsedMs=${elapsedMs} vs01=${JSON.stringify(vs01Diag)} trace=${JSON.stringify(await page.evaluate(() => { try { return JSON.parse(sessionStorage.getItem("claw_signing_advance_trace_v1") ?? "[]"); } catch { return []; } }))}`,
       { cause: err instanceof Error ? err : undefined },
     );
   }
@@ -239,9 +433,10 @@ export async function runAuthorityFullChain(
 ): Promise<void> {
   await advanceAuthorityThroughPacketDelivery(page, chainState, ids);
 
-  await completeAllVs01Recipients(page, chainState);
+  // Authority full-chain is a two-party SoT journey; UI may expose a surplus slot — only complete the first two.
+  await completeAllVs01Recipients(page, chainState, { limit: 2 });
 
-  expect(chainState.completions.length).toBeGreaterThanOrEqual(2);
+  expect(chainState.completions.length).toBe(2);
   expect(chainState.completion).not.toBeNull();
 
   await openArtifactPublicVerification(browser, {

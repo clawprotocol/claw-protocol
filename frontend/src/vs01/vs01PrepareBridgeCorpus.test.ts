@@ -143,4 +143,42 @@ describe("VS01 prepare bridge corpus (Test369)", () => {
     expect(src).not.toMatch(/setAutoInitialsEveryPage\(true\)/);
     expect(src).toContain("buildPrepareBridgeCorpusGateArgs");
   });
+
+  it("rebuilds witness anchors when prepare roles exceed existing By-line count", () => {
+    const corpus = premiumCorpus();
+    const threeRoles = buildVs01PrepareSigningRoles({
+      agreementId: AGREEMENT_ID,
+      creatorName: "Acme LLC",
+      creatorEmail: "owner@example.test",
+      ownerSignerName: "Anthem H Blanchard",
+      ownerSignerTitle: "Manager",
+      counterparties: [
+        { id: "cp1", name: "Joe Smith", email: "joe@example.test", signerName: "Joe Smith" },
+        { id: "cp2", name: "Third Party LLC", email: "third@example.test", signerName: "Third Signer" },
+      ],
+    });
+    expect(threeRoles.length).toBe(3);
+    const model = buildVs01SigningPacketModel({
+      mode: "guided_pro",
+      authoritativeCorpusPlain: corpus,
+      roles: threeRoles,
+      initialsEnabled: false,
+      bridge: minimalBridge(),
+      corpusGateArgs: buildPrepareBridgeCorpusGateArgs({
+        agreementCorpusText: corpus,
+        bridge: minimalBridge(),
+      }),
+    });
+    expect(model.diagnostics.signatureAnchorCount).toBeGreaterThanOrEqual(3);
+    const signatureFields = model.fields.filter((f) => f.type === "signature" && !f.autoInitials);
+    expect(signatureFields.length).toBeGreaterThanOrEqual(3);
+    const readiness = resolveVs01PreparePacketReadiness({
+      corpusGate: { allowed: true, blockReason: undefined },
+      placementCanFinish: signatureFields.length >= threeRoles.length,
+      initialsSummary: null,
+      canonicalTextRendered: true,
+      canonicalSignatureLinesRendered: model.diagnostics.signatureAnchorCount >= threeRoles.length,
+    });
+    expect(readiness.packetReady).toBe(true);
+  });
 });

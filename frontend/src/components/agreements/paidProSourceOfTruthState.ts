@@ -39,12 +39,31 @@ export function hasPaidProSourceOfTruth(): boolean {
   return Boolean(paidProSourceOfTruth?.text && paidProSourceOfTruth.text.length >= 500);
 }
 
+/** CI-safe live SoT markers on <html> — hashes/lens only, never corpus bytes. */
+function publishLivePaidProSoTAuthorityMarkers(next: PaidProSourceOfTruth | null): void {
+  if (typeof document === "undefined") return;
+  try {
+    const root = document.documentElement;
+    if (!next?.hash || !next.text || next.text.length < 500) {
+      root.removeAttribute("data-claw-live-sot-hash");
+      root.removeAttribute("data-claw-live-sot-len");
+      return;
+    }
+    root.setAttribute("data-claw-live-sot-hash", next.hash.trim());
+    root.setAttribute("data-claw-live-sot-len", String(next.text.trim().length));
+  } catch {
+    /* ignore */
+  }
+}
+
 export function replacePaidProSourceOfTruth(next: PaidProSourceOfTruth | null): void {
   paidProSourceOfTruth = next;
+  publishLivePaidProSoTAuthorityMarkers(next);
 }
 
 export function clearPaidProSourceOfTruthState(): PaidProSourceOfTruth | null {
   const prev = paidProSourceOfTruth;
   paidProSourceOfTruth = null;
+  publishLivePaidProSoTAuthorityMarkers(null);
   return prev;
 }

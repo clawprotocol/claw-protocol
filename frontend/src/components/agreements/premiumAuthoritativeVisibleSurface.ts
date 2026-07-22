@@ -80,9 +80,38 @@ export function shouldSkipPremiumEnsureBecauseSnapshotAlreadyAuthoritative(args:
 }): boolean {
   const s = args.snapshot;
   if (!s?.premiumAccepted) return false;
-  const body = (s.premiumWinningBodyText || s.premiumReadonlyPlainText || "").trim();
+  // Prefer frozen SoT bytes over winning/readonly aliases (reload authority).
+  const body = (
+    s.paidProSourceOfTruthText ||
+    s.acceptedPremiumCanonicalText ||
+    s.premiumWinningBodyText ||
+    s.premiumReadonlyPlainText ||
+    ""
+  ).trim();
   if (body.length < 500) return false;
   if (s.intakeTextFingerprint && s.intakeTextFingerprint !== args.intakeFingerprint) return false;
   if (!isAuthoritativePremiumPipelineRenderSource(s.premiumPipelineRenderSource)) return false;
   return true;
+}
+
+/**
+ * After customer acceptance, entitled auto-rewrite must not re-run generation.
+ * In-memory SoT is empty on full page reload until hydrate — check the session snapshot.
+ */
+export function shouldBlockEntitledRewriteForAcceptedPaidProSnapshot(
+  snapshot: PremiumCompletionSnapshot | null,
+): boolean {
+  if (!snapshot?.premiumAccepted) return false;
+  // Only block when a true frozen SoT exists — do not treat winning-body-only snaps as final.
+  const sotText = (
+    snapshot.paidProSourceOfTruthText ||
+    snapshot.acceptedPremiumCanonicalText ||
+    ""
+  ).trim();
+  const sotHash = (
+    snapshot.paidProSourceOfTruthHash ||
+    snapshot.acceptedPremiumCanonicalHash ||
+    ""
+  ).trim();
+  return sotText.length >= 500 && Boolean(sotHash);
 }

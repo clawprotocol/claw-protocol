@@ -26,8 +26,10 @@ import { resolvePaidProPostFinalizeUserVisiblePlain } from "./paidProDisplayPlai
 import { isPaidProPostFinalizeHydratedCorpusLocked } from "./paidProSignerMetadataCommitPolicy";
 import type { VisibleProPaperDiagnosticsTrace } from "./visibleProPaperRenderBoundary";
 import {
+  getPaidProSourceOfTruth,
   getPaidProSourceOfTruthText,
   hasPaidProSourceOfTruth,
+  hashPaidProCorpus,
 } from "./paidProSourceOfTruth";
 
 export const PAID_PRO_VISIBLE_SHELL_COMPONENT_NAME = "PaidProVisibleDocumentShell";
@@ -215,6 +217,16 @@ export function PaidProVisibleDocumentShell({
     }
   }, [branch, renderPlain, html]);
 
+  // Review-authority corpus = live SoT (not DOM textContent / display projection).
+  // CI readiness reads these attrs; never log corpus contents.
+  const liveSot = hasSoT ? getPaidProSourceOfTruth() : null;
+  const authorityLen = liveSot?.text?.trim().length ?? 0;
+  const authorityHash =
+    liveSot?.hash?.trim() ||
+    (authorityLen > 0 ? hashPaidProCorpus(liveSot!.text) : "");
+  const paintPlainHash =
+    renderPlain.trim().length > 0 ? hashPaidProCorpus(renderPlain.trim()) : "";
+
   return (
     <div
       ref={shellRef}
@@ -222,6 +234,10 @@ export function PaidProVisibleDocumentShell({
       data-testid="paid-pro-visible-document-shell"
       data-paid-pro-visible-shell-owner={PAID_PRO_VISIBLE_SHELL_COMPONENT_NAME}
       data-paid-pro-render-branch={branch}
+      data-claw-review-authority-len={authorityLen > 0 ? String(authorityLen) : undefined}
+      data-claw-review-authority-hash={authorityHash || undefined}
+      data-claw-paint-plain-len={renderPlain.trim().length > 0 ? String(renderPlain.trim().length) : undefined}
+      data-claw-paint-plain-hash={paintPlainHash || undefined}
     >
       {branch === "canonical_plain_forced" ? (
         <PaidProCanonicalPlainReviewDocument

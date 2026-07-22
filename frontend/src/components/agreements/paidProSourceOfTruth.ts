@@ -8,6 +8,7 @@
 
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import type { AgreementDraft } from "../../agreement/agreementTypes";
+import { getOrInitSessionAgreementGenerationId } from "../../lib/agreementGenerationId";
 import { clearAcceptedProCorpusSafeDisplayCacheForTests } from "./paidProAcceptedCorpusSafeDisplayCache";
 import { clearPaidProPipelineAcceptedCorpusHashForTests } from "./paidProPipelineAcceptedCorpus";
 import { clearPaidProVisibleRenderMemo } from "./paidProVisibleRenderMemo";
@@ -80,7 +81,10 @@ import {
   logPostFreezeCorpusDrift,
 } from "./paidProExecutionBlockInstrumentation";
 import { logPaidProFreezeEstablished } from "./paidProFreezeDiagnostics";
-import { latchPaidReviewSessionCanonicalSoTHash } from "./paidProReviewSessionCorpusInvariantState";
+import {
+  latchPaidReviewSessionCanonicalSoTHash,
+  markPaidReviewSessionPremiumGeneration,
+} from "./paidProReviewSessionCorpusInvariantState";
 import {
   enforceAuthoritativeProCorpusDisplay,
   logProCorpusSourceMap,
@@ -344,6 +348,16 @@ export function establishPaidProSourceOfTruth(args: {
   const sotBefore = getPaidProSourceOfTruth()?.text ?? "";
   const sourceBefore = getPaidProSourceOfTruth()?.source ?? null;
   const requestedSource = (args.source ?? "server_full_draft").trim();
+  /**
+   * Premium generation is marked under `agreementGenerationId` in ensurePremiumCompletion.
+   * Canonical freeze must use that same session key. Falling through to `review-${hash}`
+   * (when reviewSessionId is omitted) makes applySuccess throw and leaves SoT hash null.
+   */
+  const reviewSessionId =
+    (args.reviewSessionId ?? args.agreementGenerationId ?? getOrInitSessionAgreementGenerationId()).trim() ||
+    getOrInitSessionAgreementGenerationId();
+  // Rematerialize mark under the exact key freeze will use (covers ensure/establish id skew).
+  markPaidReviewSessionPremiumGeneration(reviewSessionId, "establish_paid_pro_source_of_truth");
   // Minimum commit gate: a rejected/recoverable/fallback corpus must never become the SoT, no matter
   // how long its body is — this is the last line of defense against a short rejected corpus leaking in.
   if (FORBIDDEN_PAID_PRO_SOT_SOURCES.has(requestedSource)) {
@@ -351,7 +365,7 @@ export function establishPaidProSourceOfTruth(args: {
   }
   const establishmentGate = evaluatePaidProSourceOfTruthEstablishment({
     source: requestedSource,
-    agreementGenerationId: args.agreementGenerationId ?? args.reviewSessionId ?? null,
+    agreementGenerationId: args.agreementGenerationId ?? reviewSessionId,
     allowUserApprovedRevision: Boolean(args.allowShorterOverwrite),
     hasExistingSourceOfTruth: Boolean(getPaidProSourceOfTruth()?.text),
     pipelineSessionAccepted: hasPaidProPipelineSessionAcceptance({
@@ -366,7 +380,7 @@ export function establishPaidProSourceOfTruth(args: {
     hasProEntitlement: establishmentGate.hasProEntitlement,
     hasFreeStarterSession: establishmentGate.hasFreeStarterSession,
     generationId: establishmentGate.generationId,
-    agreementGenerationId: args.agreementGenerationId ?? args.reviewSessionId ?? null,
+    agreementGenerationId: args.agreementGenerationId ?? reviewSessionId,
     textLen: trim(args.text).length,
   });
   if (!establishmentGate.allowed) {
@@ -374,20 +388,22 @@ export function establishPaidProSourceOfTruth(args: {
   }
   const wireLen = trim(args.text).length;
   const generationOutcome = trim(args.generationOutcome).toLowerCase();
-  // First-authoritative-success-wins latch: a later automated duplicate/degraded response must not
-  // overwrite a substantive SoT. Run before substantive-min qualification so downgrade attempts do
-  // not throw mislabeled errors when the existing authoritative corpus already wins.
+  // First-authoritative-success-wins latch: a later automated duplicate/degraded/re-prep response
+  // must not overwrite a substantive SoT — including longer multiparty rewrite on reload.
+  // User-approved revisions pass allowShorterOverwrite. Execution-only append remains allowed.
   const existingSot = getPaidProSourceOfTruth();
   if (existingSot && !args.allowShorterOverwrite) {
-    const incomingLen = trim(args.text).length;
-    const sameOrLonger =
-      incomingLen >= existingSot.text.length ||
-      differsOnlyByExecutionAppend(existingSot.text, trim(args.text));
-    if (!sameOrLonger) {
+    const incoming = trim(args.text);
+    const incomingHash = hashPaidProCorpus(incoming);
+    if (incoming === existingSot.text || incomingHash === existingSot.hash) {
+      return existingSot;
+    }
+    const executionOnlyAppend = differsOnlyByExecutionAppend(existingSot.text, incoming);
+    if (!executionOnlyAppend) {
       logProCorpusSourceMap({
-        stage: "sot_overwrite_blocked_downgrade",
+        stage: "sot_overwrite_blocked_post_acceptance",
         source: requestedSource,
-        len: incomingLen,
+        len: incoming.length,
         text: args.text,
         allowedToOverride: false,
         reason: "first_authoritative_success_wins",
@@ -395,7 +411,7 @@ export function establishPaidProSourceOfTruth(args: {
       tracePaidProCorpusMutation({
         store: "paidProSourceOfTruth",
         caller: "establishPaidProSourceOfTruth",
-        stage: "sot_overwrite_blocked_downgrade",
+        stage: "sot_overwrite_blocked_post_acceptance",
         surface: requestedSource,
         oldText: sotBefore,
         newText: existingSot.text,
@@ -456,7 +472,7 @@ export function establishPaidProSourceOfTruth(args: {
     intakeText: args.intakeText ?? null,
     agreementGenerationId: args.agreementGenerationId,
     generationOutcome: args.generationOutcome,
-    reviewSessionId: args.reviewSessionId,
+    reviewSessionId,
     surface: "establish_paid_pro_source_of_truth",
   });
   logProCorpusSourceMap({
@@ -553,7 +569,7 @@ export function establishPaidProSourceOfTruth(args: {
     intakeText: args.intakeText ?? null,
     agreementGenerationId: args.agreementGenerationId,
     generationOutcome: args.generationOutcome,
-    reviewSessionId: args.reviewSessionId,
+    reviewSessionId,
     surface: "establish_paid_pro_source_of_truth",
   };
   const primaryFreezeGate = evaluatePaidProFreezeCandidateGates(prep, freezeGateArgs);
@@ -586,7 +602,7 @@ export function establishPaidProSourceOfTruth(args: {
       parties,
       reviewParties,
       authoritativeSignerCount,
-      reviewSessionId: args.reviewSessionId,
+      reviewSessionId,
       draft: args.draft ?? null,
       freezeGatesPassed,
     }),
@@ -634,7 +650,7 @@ export function establishPaidProSourceOfTruth(args: {
           parties,
           reviewParties,
           authoritativeSignerCount,
-          reviewSessionId: args.reviewSessionId,
+          reviewSessionId,
           draft: args.draft ?? null,
           freezeGatesPassed,
         }),
@@ -704,7 +720,7 @@ export function establishPaidProSourceOfTruth(args: {
         parties,
         reviewParties,
         authoritativeSignerCount,
-        reviewSessionId: args.reviewSessionId,
+        reviewSessionId,
         draft: args.draft ?? null,
         freezeGatesPassed: true,
       }),
@@ -856,6 +872,25 @@ export function hydratePaidProSourceOfTruth(args: {
   if (text.length < 500) return null;
   const source = trim(args.source) || "server_full_draft";
   if (source !== "server_full_draft" && source !== "server_full_draft_degraded") return null;
+  const existingSoT = getPaidProSourceOfTruth();
+  const incomingHash = trim(args.hash) || hashPaidProCorpus(text);
+  // Same-tab reload/hydrate after establish: do not re-freeze under a divergent review-${hash} key.
+  if (existingSoT && existingSoT.hash === incomingHash && trim(existingSoT.text) === text) {
+    return existingSoT;
+  }
+  /**
+   * Hydrate must use the same session key ensurePremiumCompletion marked.
+   * Prefer explicit ids, then the established SoT session, then the active generation id —
+   * never invent `review-${hash}` when a generation session already owns the mark.
+   */
+  const reviewSessionId =
+    (
+      args.reviewSessionId ||
+      args.agreementGenerationId ||
+      existingSoT?.reviewSessionId ||
+      getOrInitSessionAgreementGenerationId() ||
+      ""
+    ).trim() || getOrInitSessionAgreementGenerationId();
   if (
     text.length < SUBSTANTIVE_SERVER_DRAFT_MIN_LEN &&
     !hasPaidProPipelineSessionAcceptance({ text, source }) &&
@@ -865,7 +900,7 @@ export function hydratePaidProSourceOfTruth(args: {
   }
   const establishmentGate = evaluatePaidProSourceOfTruthEstablishment({
     source: args.source ?? "server_full_draft",
-    agreementGenerationId: args.agreementGenerationId ?? args.reviewSessionId ?? null,
+    agreementGenerationId: args.agreementGenerationId ?? reviewSessionId,
     pipelineSessionAccepted: hasPaidProPipelineSessionAcceptance({ text, source }),
   });
   logPaidProSourceOfTruthEstablishmentAttempt({
@@ -875,10 +910,76 @@ export function hydratePaidProSourceOfTruth(args: {
     hasProEntitlement: establishmentGate.hasProEntitlement,
     hasFreeStarterSession: establishmentGate.hasFreeStarterSession,
     generationId: establishmentGate.generationId,
-    agreementGenerationId: args.agreementGenerationId ?? args.reviewSessionId ?? null,
+    agreementGenerationId: args.agreementGenerationId ?? reviewSessionId,
     textLen: text.length,
   });
   if (!establishmentGate.allowed) return null;
+
+  const providedHash = trim(args.hash);
+  const byteIdenticalReplay = Boolean(providedHash && providedHash === hashPaidProCorpus(text));
+  // Reload clears in-memory generation marks; rematerialize before any freezeCanonical work.
+  markPaidReviewSessionPremiumGeneration(reviewSessionId, "hydrate_accepted_paid_pro_snapshot");
+
+  // Hash-verified accepted replay: install SoT bytes only — skip structural rebuild + freeze.
+  // establishPaidProSourceOfTruth remains the sole freeze authority; hydrate rematerializes.
+  if (byteIdenticalReplay) {
+    const record: PaidProSourceOfTruth = {
+      text,
+      hash: providedHash,
+      accepted_at: args.accepted_at ?? Date.now(),
+      source: "server_full_draft",
+      reviewSessionId: reviewSessionId || undefined,
+    };
+    const hydrateBefore = getPaidProSourceOfTruth()?.text ?? "";
+    replacePaidProSourceOfTruth(record);
+    const draftParties = (args.draft?.parties ?? [])
+      .map((p) => ({
+        name: String((p as { name?: string }).name ?? "").trim(),
+        role: "party",
+        email: String((p as { email?: string }).email ?? "").trim() || undefined,
+        partyAddress: String((p as { partyAddress?: string }).partyAddress ?? "").trim() || undefined,
+      }))
+      .filter((p) => p.name.length > 0);
+    hydrateAuthoritativeAgreementDocument({
+      fullCorpusText: record.text,
+      authoritativeHash: record.hash,
+      canonicalPartyManifest: draftParties,
+      agreementMetadata: {
+        reviewSessionId: record.reviewSessionId ?? null,
+      },
+      acceptedAt: record.accepted_at,
+    });
+    // Rematerialize frozen canonical via preserve-only path so delivery-track CTAs
+    // (canChooseProDeliveryTrack) see hasFrozenCanonicalAgreementCorpus — no validation rebuild.
+    if (!hasFrozenCanonicalAgreementCorpus()) {
+      try {
+        const snapshot = buildCanonicalAgreementSnapshot({
+          surface: "paid_pro_source_of_truth_hydrate",
+          tier: "pro",
+          candidates: [{ source: "server_full_document_text", text }],
+          minLen: 500,
+          reviewSessionId,
+          forceAuthoritativePreservation: true,
+          skipClauseFamilyPlaceholderIssues: true,
+          parties: draftParties,
+        });
+        freezeCanonicalAgreementSnapshot(snapshot, "server_full_document_text");
+      } catch {
+        /* SoT already installed; frozen metadata is best-effort on replay */
+      }
+    }
+    tracePaidProCorpusMutation({
+      store: "paidProSourceOfTruth",
+      caller: "hydratePaidProSourceOfTruth",
+      stage: "hydrate_byte_identical_replay",
+      surface: args.source ?? "server_full_draft",
+      oldText: hydrateBefore,
+      newText: record.text,
+      sourceBefore: null,
+      sourceAfter: record.source,
+    });
+    return record;
+  }
 
   const hydrateCtx = resolvePaidProHydrateStructuralContext({
     text,
@@ -893,8 +994,9 @@ export function hydratePaidProSourceOfTruth(args: {
     tier: "pro",
     candidates: [{ source: "server_full_document_text", text }],
     minLen: 500,
-    reviewSessionId: args.reviewSessionId ?? null,
+    reviewSessionId,
     intakeText: args.intakeText ?? null,
+    forceAuthoritativePreservation: false,
     parties: hydrateCtx.structuralParties.map((party) => ({
       name: party.partyLegalName,
       role: "party",
@@ -914,10 +1016,10 @@ export function hydratePaidProSourceOfTruth(args: {
   const frozen = freezeCanonicalAgreementSnapshot(snapshot, "server_full_document_text");
   const record: PaidProSourceOfTruth = {
     text: frozen?.canonicalText ?? text,
-    hash: frozen?.hash ?? (trim(args.hash) || hashPaidProCorpus(text)),
+    hash: frozen?.hash ?? (providedHash || hashPaidProCorpus(text)),
     accepted_at: args.accepted_at ?? Date.now(),
     source: "server_full_draft",
-    reviewSessionId: frozen?.reviewSessionId,
+    reviewSessionId: frozen?.reviewSessionId ?? reviewSessionId ?? undefined,
     signerManifestHash: frozen?.signerManifestHash,
   };
   const hydrateBefore = getPaidProSourceOfTruth()?.text ?? "";

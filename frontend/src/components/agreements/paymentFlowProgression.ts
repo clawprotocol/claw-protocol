@@ -72,7 +72,13 @@ export function serializeProgressionError(err: unknown): { message: string; stac
 }
 
 export function readAuthoritativeSnapshotBody(snap: PremiumCompletionSnapshot | null): string {
-  return (snap?.premiumWinningBodyText || snap?.premiumReadonlyPlainText || "").trim();
+  return (
+    snap?.paidProSourceOfTruthText ||
+    snap?.acceptedPremiumCanonicalText ||
+    snap?.premiumWinningBodyText ||
+    snap?.premiumReadonlyPlainText ||
+    ""
+  ).trim();
 }
 
 export function snapshotReadyForPostCheckoutUnlock(args: {

@@ -563,7 +563,7 @@ export async function installAuthoritySigningChainRoutes(
         version_history: [],
         signature_status: {
           fully_executed: true,
-          signatures_recorded: state.completions.length,
+          signatures_recorded: Math.min(state.completions.length, partyCount),
           signer_party_count: partyCount,
         },
         signature_events: state.completions.map((c) => ({
@@ -644,7 +644,7 @@ export async function installAuthorityPublicVerifyRoutes(
         version_history: [],
         signature_status: {
           fully_executed: true,
-          signatures_recorded: state.completions.length,
+          signatures_recorded: Math.min(state.completions.length, partyCount),
           signer_party_count: partyCount,
         },
         signature_events: state.completions.map((c) => ({
@@ -692,7 +692,10 @@ export async function openArtifactPublicVerification(
     await expect(page.getByText(new RegExp(args.agreementId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i")).first()).toBeVisible({
       timeout: 30_000,
     });
-    await expect(page.getByText(/Signatures recorded:\s*2\s*\/\s*2/i).first()).toBeVisible({ timeout: 30_000 });
+    const partyCount = args.partyCount ?? 2;
+    await expect(
+      page.getByText(new RegExp(`Signatures recorded:\\s*${partyCount}\\s*/\\s*${partyCount}`, "i")).first(),
+    ).toBeVisible({ timeout: 30_000 });
     await page.reload({ waitUntil: "domcontentloaded" });
     await expect(page.getByText(/Fully executed|fully signed|Record complete/i).first()).toBeVisible({ timeout: 30_000 });
   } finally {

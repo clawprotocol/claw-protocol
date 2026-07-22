@@ -94,11 +94,13 @@ export function resolveVs01CanonicalBridgeSignatureLinesRendered(args: {
   roleCount: number;
 }): boolean | undefined {
   if (!args.bridgeMode) return undefined;
+  // Roles not hydrated yet — do not treat as a definitive missing-lines failure.
+  if (args.roleCount <= 0) return undefined;
   const anchorCount = args.signingPacketModel?.diagnostics.signatureAnchorCount ?? 0;
-  if (anchorCount >= args.roleCount && args.roleCount > 0) return true;
+  if (anchorCount >= args.roleCount) return true;
   const signatureFields =
     args.signingPacketModel?.fields.filter((f) => f.type === "signature" && !f.autoInitials).length ?? 0;
-  return signatureFields >= args.roleCount && args.roleCount > 0;
+  return signatureFields >= args.roleCount;
 }
 
 export function signingPacketTotalCharCount(pages: readonly Vs01SigningPacketPage[]): number {

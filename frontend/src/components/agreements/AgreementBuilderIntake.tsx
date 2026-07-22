@@ -1111,6 +1111,7 @@ import {
   logPremiumAuthoritativeVisibleSurface,
   logPremiumDuplicateRunBlocked,
   logPremiumFailopenOverriddenBySuccess,
+  shouldBlockEntitledRewriteForAcceptedPaidProSnapshot,
   shouldSkipPremiumEnsureBecauseSnapshotAlreadyAuthoritative,
   tryBeginPremiumEnsureForIntake,
 } from "./premiumAuthoritativeVisibleSurface";
@@ -5714,33 +5715,49 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         const draftParties = ((nextDraft as { parties?: Array<{ name?: string; role?: string; email?: string }> }).parties ?? [])
           .map((p) => ({ name: p.name || "", role: p.role ?? null, email: p.email ?? null }))
           .filter((p) => p.name.trim());
+        // After accepted SoT exists, re-freeze may still refresh signer manifest metadata, but must
+        // preserve accepted corpus bytes (no validation rebuild / entitled rewrite).
+        const acceptedSoTText = getPaidProSourceOfTruthText().trim();
+        const preserveAcceptedSoT = Boolean(
+          effectiveProCanonicalTier &&
+            hasPaidProSourceOfTruth() &&
+            acceptedSoTText.length > 8_000 &&
+            canonicalReviewPlain.trim() === acceptedSoTText,
+        );
         const snapshot = buildCanonicalAgreementSnapshot({
           surface: "draft_ready_for_review",
           tier: effectiveProCanonicalTier ? "pro" : "starter",
           candidates: [
             {
-              source: effectiveProCanonicalTier ? "canonical_working_draft" : "free_starter",
-              text: canonicalReviewPlain,
+              source: preserveAcceptedSoT
+                ? "server_full_document_text"
+                : effectiveProCanonicalTier
+                  ? "canonical_working_draft"
+                  : "free_starter",
+              text: preserveAcceptedSoT ? acceptedSoTText : canonicalReviewPlain,
             },
           ],
           intakeText: intakeCombined,
           parties: draftParties,
           signerState: {
-            complete: false,
+            complete: draftParties.some((p) => Boolean(String(p.email || "").trim())),
             signerCount: resolveAuthoritativeSignerCount({
               intakeText: intakeCombined,
               draftParties,
-              corpusPlain: canonicalReviewPlain,
+              corpusPlain: preserveAcceptedSoT ? acceptedSoTText : canonicalReviewPlain,
             }).count,
           },
           minLen: effectiveProCanonicalTier ? 500 : 120,
           reviewSessionId: reviewAgreementIdRef.current || getOrInitSessionAgreementGenerationId(),
+          forceAuthoritativePreservation: preserveAcceptedSoT,
+          skipClauseFamilyPlaceholderIssues: preserveAcceptedSoT,
         });
         freezeCanonicalAgreementSnapshot(snapshot, snapshot.source);
         if (
           effectiveProCanonicalTier &&
           canonicalReviewPlain.length >= PAID_PRO_RECOVERY_MIN_DISPLAY_LEN &&
-          isPaidProPostCheckoutRecoveryPipelineSource(pipelineForCanonical)
+          isPaidProPostCheckoutRecoveryPipelineSource(pipelineForCanonical) &&
+          !preserveAcceptedSoT
         ) {
           freezePaidProPostCheckoutRecoveryCanonicalSnapshot({
             text: canonicalReviewPlain,
@@ -6144,8 +6161,17 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
   /** Rehydrate paid premium state from session snapshot (refresh / return navigation). */
   function applyHydrationFromPremiumSnapshot(snap: PremiumCompletionSnapshot): void {
+    const hydrateStartedAt = typeof performance !== "undefined" ? performance.now() : Date.now();
     if (hasCurrentSessionFreeStarterIntent() && !hasCurrentSessionProEntitlement()) return;
     hydrateAcceptedPremiumCanonicalCorpusFromSnapshot(snap);
+    if (import.meta.env.DEV) {
+      // eslint-disable-next-line no-console
+      console.info("[paid-pro-hydrate-timing] after_sot", {
+        ms: Math.round((typeof performance !== "undefined" ? performance.now() : Date.now()) - hydrateStartedAt),
+        sotHash: getPaidProSourceOfTruth()?.hash ?? null,
+        sotLen: getPaidProSourceOfTruthText().trim().length,
+      });
+    }
     setPremiumRefineReview(snap.premiumReview ?? null);
     setPremiumFinalizeAudit(snap.premiumFinalizeAudit ?? null);
     setPremiumReviewRoute(snap.premiumReviewRoute ?? null);
@@ -6219,6 +6245,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     writeAgreementCreatorIntakeStorage(raw);
 
     commitParsedDraftToReviewFlow(merged.draft, { forceReviewDisplay: true });
+    if (import.meta.env.DEV) {
+      // eslint-disable-next-line no-console
+      console.info("[paid-pro-hydrate-timing] after_commit", {
+        ms: Math.round((typeof performance !== "undefined" ? performance.now() : Date.now()) - hydrateStartedAt),
+        sotPresent: hasPaidProSourceOfTruth(),
+      });
+    }
     setGuidedCompletionPhase("applied");
     setGuidedFinalReviewExplicitlyOpened(true);
     setCreateFlowPhase("draft_ready_for_review");
@@ -6356,13 +6389,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       }
       if (plan.establishSourceOfTruth) {
         try {
+          const enterReviewGenId =
+            args.agreementGenerationId ?? getOrInitSessionAgreementGenerationId();
           establishPaidProSourceOfTruth({
             text: finalPlain,
             source: plan.pipelineSource,
             draft: args.draft,
             intakeText: args.intakeText,
-            agreementGenerationId:
-              args.agreementGenerationId ?? getOrInitSessionAgreementGenerationId(),
+            agreementGenerationId: enterReviewGenId,
+            reviewSessionId: enterReviewGenId,
             generationOutcome: args.generationOutcome ?? "ok",
           });
         } catch {
@@ -6476,6 +6511,25 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     rawIntake?: string;
   }) => {
     if (entitledPremiumRewriteInFlightRef.current) return;
+    // Reload race: in-memory SoT is empty until hydrate; never re-generate over an accepted snap.
+    const acceptedSnap = readPremiumCompletionSnapshot();
+    if (
+      hasPaidProSourceOfTruth() ||
+      shouldBlockEntitledRewriteForAcceptedPaidProSnapshot(acceptedSnap)
+    ) {
+      if (acceptedSnap && !hasPaidProSourceOfTruth()) {
+        applyHydrationFromPremiumSnapshot(acceptedSnap);
+      }
+      logPremiumDuplicateRunBlocked({
+        reason: "entitled_rewrite_blocked_accepted_sot_snapshot",
+        hasInMemorySoT: hasPaidProSourceOfTruth(),
+        sotHash:
+          acceptedSnap?.paidProSourceOfTruthHash ||
+          acceptedSnap?.acceptedPremiumCanonicalHash ||
+          null,
+      });
+      return;
+    }
     markCurrentSessionProIntent();
     markCurrentSessionProEntitlementComplete({ source: "entitled_rewrite" });
     entitledPremiumRewriteInFlightRef.current = true;
@@ -6771,12 +6825,16 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         { ...rc0, name: merged.displayName1 },
         { ...rc1, name: merged.displayName2 },
       ];
+      const acceptedEntitled = isAcceptedPremiumCanonicalEstablished()
+        ? getAcceptedPremiumCanonicalCorpus()
+        : null;
+      const entitledPersistPlain = (acceptedEntitled?.text || finalPlain).trim();
       persistPremiumCompletionSnapshot({
         premiumDraft: mergedDraftPersist,
         premiumParties: result.premiumParties,
         recipientCandidates,
-        premiumWinningBodyText: finalPlain,
-        premiumReadonlyPlainText: finalPlain,
+        premiumWinningBodyText: entitledPersistPlain,
+        premiumReadonlyPlainText: entitledPersistPlain,
         premiumReview: result.premiumReview ?? null,
         premiumFinalizeAudit: result.premiumFinalizeAudit ?? null,
         premiumReviewRoute: result.premiumReviewRoute ?? null,
@@ -6786,26 +6844,22 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         premiumRenderResolveSource: resolvedPersist.premium_render_source,
         premiumAccepted: true,
         serverGenerationDegraded: result.serverGenerationDegraded ?? null,
-        ...(isAcceptedPremiumCanonicalEstablished()
-          ? snapshotFieldsFromAcceptedPremiumCanonical(
-              getAcceptedPremiumCanonicalCorpus()!,
-            )
-          : {}),
+        ...(acceptedEntitled ? snapshotFieldsFromAcceptedPremiumCanonical(acceptedEntitled) : {}),
       });
-      if (finalPlain.length >= GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN) {
-        lastPremiumWinningCorpusRef.current = finalPlain;
-        premiumPipelineOutputBodyRef.current = finalPlain;
-        hydratedPremiumBodyRef.current = finalPlain;
-        lastKnownGoodAuthoritativeDraftRef.current = finalPlain;
-        acceptedReviewCorpusRef.current = finalPlain;
-        authoritativeAgreementSnapshotRef.current = finalPlain;
+      if (entitledPersistPlain.length >= GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN) {
+        lastPremiumWinningCorpusRef.current = entitledPersistPlain;
+        premiumPipelineOutputBodyRef.current = entitledPersistPlain;
+        hydratedPremiumBodyRef.current = entitledPersistPlain;
+        lastKnownGoodAuthoritativeDraftRef.current = entitledPersistPlain;
+        acceptedReviewCorpusRef.current = entitledPersistPlain;
+        authoritativeAgreementSnapshotRef.current = entitledPersistPlain;
         guidedFinalReviewExplicitlyUnlockedRef.current = true;
       }
       commitParsedDraftToReviewFlow(mergedDraftPersist, { forceReviewDisplay: true });
       const dashboardCanonicalSource = resolveDashboardPaidCreateCanonicalReviewSource();
       const finalizePlan = planFinalizeCanonicalPaidProPipelineSuccess({
         source: dashboardCanonicalSource,
-        corpusPlain: finalPlain,
+        corpusPlain: entitledPersistPlain || finalPlain,
         winningBody: winning,
         snapshotPlain: acceptedCorpusPlain || snapshotPlain,
         premiumDeliverablePlain,
@@ -6898,6 +6952,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         rawProbe.length >= 24 ? shortIntakeFingerprint(rawProbe) : (snap.intakeTextFingerprint || "");
       if (isAuthoritativePremiumSnapshotHydratable(snap, intakeFpProbe)) {
         applyHydrationFromPremiumSnapshot(snap);
+        // Prevent checkout useEffect from re-entering the same hydrate+commit freeze path.
+        paidCheckoutCompletedRef.current = true;
         try {
           if (u.searchParams.get("premiumCompletion") === "1") {
             u.searchParams.delete("premiumCompletion");
@@ -7038,9 +7094,36 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     const urlPc = url.searchParams.get("premiumCompletion") === "1";
     const grantPending = peekAdvancedFullDraftCheckoutGrant() && Boolean(readCreateComplexityResume()?.awaitingProCheckout);
     if (!urlPc && !grantPending) return;
+    // Already completed this tab's checkout→review handoff — do not re-enter generation/hydrate loops.
+    if (paidCheckoutCompletedRef.current) return;
 
     const postCheckoutReturnSnap = readPremiumCompletionSnapshot();
     if (postCheckoutReturnSnap) {
+      // Frozen customer-accepted SoT must never be cleared for a second generation pass.
+      if (shouldBlockEntitledRewriteForAcceptedPaidProSnapshot(postCheckoutReturnSnap)) {
+        try {
+          if (url.searchParams.get("premiumCompletion") === "1") {
+            url.searchParams.delete("premiumCompletion");
+            const qs = url.searchParams.toString();
+            window.history.replaceState(window.history.state, "", qs ? `${url.pathname}?${qs}` : url.pathname);
+          }
+        } catch {
+          /* ignore */
+        }
+        paidCheckoutCompletedRef.current = true;
+        applyHydrationFromPremiumSnapshot(postCheckoutReturnSnap);
+        logPaymentFlowStage("premium_unlock_received", {
+          agreementId: (reviewAgreementIdRef.current || readCreateReviewAgreementResumeId() || "").trim() || null,
+          premiumUnlocked: true,
+          paymentState: "snapshot_return_hydrate_frozen_sot",
+        });
+        logPaymentFlowStage("checkout_complete", {
+          agreementId: (reviewAgreementIdRef.current || readCreateReviewAgreementResumeId() || "").trim() || null,
+          premiumUnlocked: true,
+          corpusIntegrity: "ok",
+        });
+        return;
+      }
       const resProbe = readCreateComplexityResume();
       const o = readOriginalUserIntakeRaw().trim();
       const oRes = (resProbe?.originalUserIntakeRaw || "").trim();
@@ -8491,6 +8574,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
               draft: mergedDraftPersist,
               intakeText: mergedIntake,
               agreementGenerationId: sessionGenId,
+              reviewSessionId: sessionGenId,
               generationOutcome: generationOutcomeLabel,
             });
             commitPostCheckoutCanonicalReviewEntry();
@@ -8541,6 +8625,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                 text: snapshotPlain,
                 source: paidProSotSource,
                 agreementGenerationId: sessionGenId,
+                reviewSessionId: sessionGenId,
               });
               if (hydrated) {
                 commitPaidProAcceptanceStorageHygiene();
@@ -8702,12 +8787,17 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           party_roles: (mergedDraftPersist.parties || []).map((p) => (p.role || "").trim()).filter(Boolean),
           text: snapshotPlain,
         });
+        const acceptedApply = isAcceptedPremiumCanonicalEstablished()
+          ? getAcceptedPremiumCanonicalCorpus()
+          : null;
+        // Persist frozen customer-accepted bytes as winning/readonly — never a divergent pre-prep alias.
+        const persistPlain = (acceptedApply?.text || snapshotPlain).trim();
         persistPremiumCompletionSnapshot({
           premiumDraft: mergedDraftPersist,
           premiumParties: result.premiumParties,
           recipientCandidates,
-          premiumWinningBodyText: snapshotPlain,
-          premiumReadonlyPlainText: snapshotPlain,
+          premiumWinningBodyText: persistPlain,
+          premiumReadonlyPlainText: persistPlain,
           premiumReview: result.premiumReview ?? null,
           premiumFinalizeAudit: result.premiumFinalizeAudit ?? null,
           premiumReviewRoute: result.premiumReviewRoute ?? null,
@@ -8721,9 +8811,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           structuralCatastrophic: result.structuralCatastrophic,
           agreementIntelligence: result.agreementIntelligence ?? null,
           agreementValidation: result.agreementValidation ?? null,
-          ...(isAcceptedPremiumCanonicalEstablished()
-            ? snapshotFieldsFromAcceptedPremiumCanonical(getAcceptedPremiumCanonicalCorpus()!)
-            : {}),
+          ...(acceptedApply ? snapshotFieldsFromAcceptedPremiumCanonical(acceptedApply) : {}),
         });
         if (usePaidAuthoritativeBody) {
           bumpPremiumSurfaceGateTick();
@@ -8732,26 +8820,26 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           // eslint-disable-next-line no-console
           console.info("[premium-authoritative-apply] after_snapshot", {
             snapshotWritten: true,
-            bodyLen: snapshotPlain.length,
+            bodyLen: persistPlain.length,
             source: result.premiumRenderSource,
           });
           // eslint-disable-next-line no-console
           console.info("[premium-post-accept-body-preserved]", {
             source: result.premiumRenderSource,
-            docLen: snapshotPlain.length,
+            docLen: persistPlain.length,
           });
           // eslint-disable-next-line no-console
           console.info("[premium-success-hydrate]", {
             post_accept_snapshot_persisted: true,
             source: result.premiumRenderSource,
-            bodyLen: snapshotPlain.length,
+            bodyLen: persistPlain.length,
           });
         }
         logPremiumCompletionDebug({
           stage: "ui_session_snapshot_persisted",
           snapshotWritten: true,
           intakeLen: mergedIntake.length,
-          currentDocLen: snapshotPlain.length,
+          currentDocLen: persistPlain.length,
           premiumRenderSource: result.premiumRenderSource,
           generationOutcome: result.premiumRenderSource,
           degraded: Boolean(result.serverGenerationDegraded),
@@ -8763,12 +8851,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             modalExtendedWaitActive: extendedWaitAtApplyStart,
             modalHardFailopenWasActive: hardFailopenAtApplyStart,
             snapshotWritten: true,
-            acceptedDocLen: snapshotPlain.length,
+            acceptedDocLen: persistPlain.length,
           });
           logPremiumLateApply("recovery_cleared", { reason: "session_snapshot_persisted_full_pro" });
         }
         if (import.meta.env.DEV) {
-          const snapDoc = snapshotPlain;
+          const snapDoc = persistPlain;
           const hit = gapTraceNeedlesHit(snapDoc);
           console.info("[gap-trace] stage=snapshot_persistence", {
             rendered_source: resolvedPersist.premium_render_source,
@@ -9079,13 +9167,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             !hasPaidProSourceOfTruth();
           if (canRecoverFromLatchedAuthority && latchedRecovery) {
             try {
+              const recoveryGenId =
+                result.agreementGenerationId ?? getOrInitSessionAgreementGenerationId();
               establishPaidProSourceOfTruth({
                 text: latchedRecovery.body,
                 source: latchedRecovery.source,
                 draft: result.premiumDraft,
                 intakeText: mergedIntake,
-                agreementGenerationId:
-                  result.agreementGenerationId ?? getOrInitSessionAgreementGenerationId(),
+                agreementGenerationId: recoveryGenId,
+                reviewSessionId: recoveryGenId,
                 generationOutcome: result.serverGenerationDegraded ? "degraded" : "ok",
               });
               hydratedPremiumBodyRef.current = latchedRecovery.body;
@@ -14365,6 +14455,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     if (!shouldUsePaidProCreateFlowReviewShell(authoritativeCreateFlowReviewShellInput)) return;
     if (entitledPremiumRewriteInFlightRef.current) return;
     if (hasPaidProSourceOfTruth()) return;
+    const acceptedSnapForRewrite = readPremiumCompletionSnapshot();
+    if (shouldBlockEntitledRewriteForAcceptedPaidProSnapshot(acceptedSnapForRewrite)) {
+      if (acceptedSnapForRewrite && !hasPaidProSourceOfTruth()) {
+        applyHydrationFromPremiumSnapshot(acceptedSnapForRewrite);
+      }
+      return;
+    }
     if (premiumPostCheckoutPhase === "processing") return;
     if (!draft || createFlowPhase !== "draft_ready_for_review") return;
     if (!isFreeStreamlineDraftReview && !isFreeStarterReviewSurface && !showUpgradeToFullDraftOnReview) {
@@ -26030,14 +26127,23 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         (proReviewFooter.mode === "freeform_edit" && !guidedUxFlags.guidedQueued)),
   );
 
+  const paidProSoTHashForDeliveryTrack = getPaidProSourceOfTruth()?.hash ?? "";
+  const hasFrozenCanonicalForDeliveryTrack = hasFrozenCanonicalAgreementCorpus();
   const canChooseProDeliveryTrackFlag = useMemo(
     () =>
       canChooseProDeliveryTrack({
         isPaidPro: Boolean(paidProAuthoritative && hasPaidProSourceOfTruth()),
         createFlowPhase,
-        hasCanonicalCorpus: hasFrozenCanonicalAgreementCorpus(),
+        hasCanonicalCorpus: hasFrozenCanonicalForDeliveryTrack || Boolean(paidProSoTHashForDeliveryTrack),
       }),
-    [paidProAuthoritative, createFlowPhase],
+    [
+      paidProAuthoritative,
+      createFlowPhase,
+      hasFrozenCanonicalForDeliveryTrack,
+      paidProSoTHashForDeliveryTrack,
+      premiumSurfaceGateTick,
+      reviewDocRefreshTick,
+    ],
   );
 
   const proDeliveryTrackSelected = useMemo(
@@ -27365,6 +27471,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         phase: createFlowPhase,
       });
 
+      // Sticky Prepare can appear before the slots-complete effect copies the live manifest into the ref.
+      if (
+        (!canonicalSignerManifestRef.current ||
+          (canonicalSignerManifestRef.current.entries?.length ?? 0) === 0) &&
+        (canonicalSignerManifest.entries?.length ?? 0) > 0
+      ) {
+        canonicalSignerManifestRef.current = canonicalSignerManifest;
+      }
+
       const transition = assertGuidedTransitionReady("signing_confirm");
       if (!transition.ok) {
         traceSigningAdvance(`enterGuidedSignatureTrackRoute:blocked:${transition.reason ?? "transition_not_ready"}`);
@@ -27726,6 +27841,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     assertGuidedTransitionReady,
     ensureGuidedSigningCorpusReady,
     draft,
+    canonicalSignerManifest,
     guidedSignerCanonicalIdentities,
     guidedFinalPartyManifest,
     handlePremiumSendModePick,

@@ -10,6 +10,7 @@ import {
   isMainSectionHeadingLine,
 } from "./paidProDocumentBlockClassifier";
 import { logTest314HeadingInvariant } from "./paidProFirstReviewDisplayAuthority";
+import { hashPaidProCorpus } from "./paidProSourceOfTruth";
 
 type Props = {
   plain: string;
@@ -62,6 +63,10 @@ export function PaidProCanonicalPlainReviewDocument({
       data-testid="premium-agreement-readonly-article"
       data-paid-pro-review-paper={compactTopPadding ? "true" : undefined}
       data-paid-pro-authoritative-source={authoritativeSource}
+      data-claw-review-corpus-len={plain.trim().length > 0 ? String(plain.trim().length) : undefined}
+      data-claw-review-corpus-hash={
+        plain.trim().length > 0 ? hashPaidProCorpus(plain.trim()) : undefined
+      }
     >
       <div className="premium-doc-body" data-testid="simple-pro-final-review-paid-sot-body">
         {blocks.map(({ block, blockIndex, kind, firstLine }) => {
