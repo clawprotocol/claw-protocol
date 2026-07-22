@@ -6248,6 +6248,59 @@ def post_agreement_review_sent(agreement_id: str, request: Request) -> Dict[str,
     return {"ok": True, "draft": next_draft.model_dump()}
 
 
+def _attest_portable_envelope_or_400(
+    *,
+    agreement_id: str,
+    portable: Dict[str, Any],
+    stored_portable: Optional[Dict[str, Any]] = None,
+    surface: str = "signing_links_sent",
+) -> Dict[str, Any]:
+    """Trusted boundary: recompute envelope digests; reject client forgery before persist/dispatch."""
+    from backend.config.agreement_signing_token import (
+        SigningTokenSecretMissingInProductionError,
+        resolve_signing_token_secret_raw,
+    )
+    from backend.services.vs01_signing_envelope_provenance import (
+        attest_portable_envelope_provenance,
+        validate_portable_against_stored_attested_sot,
+    )
+
+    try:
+        secret_raw = resolve_signing_token_secret_raw()
+    except SigningTokenSecretMissingInProductionError as e:
+        raise HTTPException(
+            status_code=422,
+            detail={"code": "signing_token_secret_not_configured", "message": str(e)},
+        ) from e
+
+    if stored_portable is not None:
+        ok, err, attested = validate_portable_against_stored_attested_sot(
+            agreement_id=agreement_id,
+            stored_portable=stored_portable,
+            incoming_portable=portable,
+            secret_raw=secret_raw,
+        )
+    else:
+        ok, err, attested = attest_portable_envelope_provenance(
+            agreement_id=agreement_id,
+            portable=portable,
+            secret_raw=secret_raw,
+            require_client_match=True,
+        )
+    if not ok or not isinstance(attested, dict):
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": err or "envelope_provenance_rejected",
+                "message": (
+                    "Signing-envelope provenance failed trusted-boundary validation "
+                    f"({surface})."
+                ),
+            },
+        )
+    return attested
+
+
 @router.post("/{agreement_id}/signing-links-sent")
 def post_agreement_signing_links_sent(
     agreement_id: str,
@@ -6267,6 +6320,11 @@ def post_agreement_signing_links_sent(
     frozen_raw = body.frozen_signing_authority if isinstance(body.frozen_signing_authority, dict) else None
 
     if portable and document_id:
+        portable = _attest_portable_envelope_or_400(
+            agreement_id=agreement_id,
+            portable=portable,
+            surface="signing_links_sent",
+        )
         from backend.services.frozen_signing_authority import (
             PACKET_STATE_ACTIVE,
             corpus_hash_from_portable,
@@ -6580,6 +6638,13 @@ def post_signing_packet_reissue(
     portable = body.portable_packet if isinstance(body.portable_packet, dict) else prior.get("portable")
     if not document_id or not isinstance(portable, dict) or not packet_revision:
         raise HTTPException(status_code=400, detail="reissue_fields_required")
+    prior_portable = prior.get("portable") if isinstance(prior.get("portable"), dict) else None
+    portable = _attest_portable_envelope_or_400(
+        agreement_id=agreement_id,
+        portable=portable,
+        stored_portable=prior_portable,
+        surface="signing_packet_reissue",
+    )
     from backend.services.frozen_signing_authority import (
         PACKET_STATE_ACTIVE,
         PACKET_STATE_SUPERSEDED,
@@ -6771,6 +6836,15 @@ def post_vs01_signer_complete(
             display_name = (sp.name or "").strip()
 
     portable_packet = body.portable_packet if isinstance(body.portable_packet, dict) else None
+    if isinstance(portable_packet, dict):
+        stored_pkt = draft.vs01_signing_packet_v1 if isinstance(draft.vs01_signing_packet_v1, dict) else {}
+        stored_portable = stored_pkt.get("portable") if isinstance(stored_pkt.get("portable"), dict) else None
+        portable_packet = _attest_portable_envelope_or_400(
+            agreement_id=aid,
+            portable=portable_packet,
+            stored_portable=stored_portable,
+            surface="vs01_signer_complete",
+        )
 
     pending = orchestrate_vs01_signer_complete(
         draft.model_dump(),
@@ -7235,6 +7309,33 @@ def _public_agreement_verify_payload(aid: str, draft: AgreementDraft) -> Dict[st
                 "batch_id": row.get("batch_id"),
             }
     settlement_net = settlement_anchor_network_hint()
+    verification: Dict[str, Any] = {
+        "agreement_hash": overview_hash,
+        "signing_commitment_hash": sig_status.get("signing_commitment_hash"),
+        "schema": "claw.agreement.public_verify/v1",
+    }
+    try:
+        from backend.config.agreement_signing_token import resolve_signing_token_secret_raw
+        from backend.services.vs01_signing_envelope_provenance import (
+            public_verify_envelope_provenance_from_draft,
+        )
+
+        env_frag = public_verify_envelope_provenance_from_draft(
+            agreement_id=aid,
+            draft=draft,
+            secret_raw=resolve_signing_token_secret_raw(),
+        )
+        if isinstance(env_frag, dict):
+            verification["envelope_provenance"] = env_frag.get("envelope_provenance")
+            verification["envelope_attestation_valid"] = env_frag.get("envelope_attestation_valid")
+            if env_frag.get("envelope_attestation_reason"):
+                verification["envelope_attestation_reason"] = env_frag.get(
+                    "envelope_attestation_reason"
+                )
+    except Exception:
+        logging.getLogger(__name__).exception(
+            "public_verify_envelope_provenance_failed agreement_id=%s", aid
+        )
     return {
         "agreement_id": aid,
         "summary": {
@@ -7249,11 +7350,7 @@ def _public_agreement_verify_payload(aid: str, draft: AgreementDraft) -> Dict[st
         "version_history": _public_version_history(draft),
         "signature_status": sig_status,
         "signature_events": _public_signature_events(draft.audit_log),
-        "verification": {
-            "agreement_hash": overview_hash,
-            "signing_commitment_hash": sig_status.get("signing_commitment_hash"),
-            "schema": "claw.agreement.public_verify/v1",
-        },
+        "verification": verification,
         "claw_feed": claw_feed,
         "settlement_anchor": {
             "network_hint": settlement_net,
