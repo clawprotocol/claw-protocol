@@ -12,6 +12,7 @@ export type PaidProGenerationTerminalReason =
   | "paid_pro_gate_failed"
   | "entitled_rewrite_validation_failed"
   | "entitled_rewrite_canonical_blocked"
+  | "entitled_rewrite_snapshot_prepare_failed"
   | "entitled_rewrite_aborted"
   | "draft_limit_reached"
   | "draft_persist_failed";

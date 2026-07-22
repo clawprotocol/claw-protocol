@@ -2,11 +2,16 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
   acceptCanonicalReviewSnapshot,
+  acceptDisplayedCommercialReviewSnapshot,
+  canEnableCommercialPrepareFromServerSnapshot,
   establishServerAcceptedReviewSnapshot,
   persistCanonicalReviewSnapshot,
+  prepareCommercialReviewSnapshotAuthority,
   readAcceptedReviewSnapshotRef,
+  readDisplayReviewSnapshotAuthority,
   sha256CorpusDigest,
   storeAcceptedReviewSnapshotRef,
+  storeDisplayReviewSnapshotAuthority,
 } from "./canonicalReviewSnapshotApi";
 
 describe("canonicalReviewSnapshotApi", () => {
@@ -33,79 +38,108 @@ describe("canonicalReviewSnapshotApi", () => {
     expect(a).toMatch(/^[a-f0-9]{64}$/);
   });
 
-  it("establishServerAcceptedReviewSnapshot persists then accepts", async () => {
+  it("fire-and-forget establishServerAcceptedReviewSnapshot is removed (fail closed)", async () => {
+    const result = await establishServerAcceptedReviewSnapshot({
+      agreementId: "ag_test",
+      corpusPlain: ("OPERATIVE\n\n" + "x".repeat(600)).trim(),
+    });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.code).toBe("fire_and_forget_commercial_accept_removed");
+  });
+
+  it("prepareCommercialReviewSnapshotAuthority persists then GETs and does not accept", async () => {
     const corpus = ("OPERATIVE\n\n" + "x".repeat(600)).trim();
     const digest = await sha256CorpusDigest(corpus);
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
-      if (url.includes("/canonical-review-snapshot/accept")) {
+      const method = String(init?.method || "GET").toUpperCase();
+      if (url.includes("/canonical-review-snapshot") && method === "POST") {
         return {
           ok: true,
           status: 200,
           json: async () => ({
-            accepted: {
+            snapshot: {
               snapshot_id: "crs_test",
               agreement_id: "ag_test",
               corpus_plain: corpus,
               corpus_sha256: digest,
               corpus_length: corpus.length,
-              status: "accepted",
+              status: "pending",
               schema_version: "claw.canonical_review_snapshot/v1",
             },
+            registry_version: 1,
           }),
         } as Response;
       }
-      return {
+      if (url.includes("/canonical-review-snapshot") && method === "GET") {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            status: "pending",
+            snapshot: {
+              snapshot_id: "crs_test",
+              agreement_id: "ag_test",
+              corpus_plain: corpus,
+              corpus_sha256: digest,
+              corpus_length: corpus.length,
+              status: "pending",
+              schema_version: "claw.canonical_review_snapshot/v1",
+            },
+            registry_version: 1,
+          }),
+        } as Response;
+      }
+      throw new Error(`unexpected fetch ${method} ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await prepareCommercialReviewSnapshotAuthority({
+      agreementId: "ag_test",
+      corpusPlain: corpus,
+      generationSessionId: "gen_1",
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error(result.code);
+    expect(result.snapshot.snapshot_id).toBe("crs_test");
+    expect(result.status).toBe("pending");
+    expect(readDisplayReviewSnapshotAuthority("ag_test")?.snapshotId).toBe("crs_test");
+    expect(readAcceptedReviewSnapshotRef("ag_test")).toBeNull();
+    expect(canEnableCommercialPrepareFromServerSnapshot("ag_test")).toBe(false);
+    expect(fetchMock.mock.calls.some((c) => String(c[0]).includes("/accept"))).toBe(false);
+  });
+
+  it("acceptDisplayedCommercialReviewSnapshot fails when display differs from GET", async () => {
+    const corpus = ("OPERATIVE\n\n" + "x".repeat(600)).trim();
+    const digest = await sha256CorpusDigest(corpus);
+    storeDisplayReviewSnapshotAuthority({
+      agreementId: "ag_test",
+      snapshotId: "crs_display_a",
+      corpusSha256: digest,
+      corpusLength: corpus.length,
+      status: "pending",
+    });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
         ok: true,
         status: 200,
         json: async () => ({
+          status: "pending",
           snapshot: {
-            snapshot_id: "crs_test",
+            snapshot_id: "crs_other_b",
             agreement_id: "ag_test",
             corpus_plain: corpus,
             corpus_sha256: digest,
             corpus_length: corpus.length,
             status: "pending",
-            schema_version: "claw.canonical_review_snapshot/v1",
           },
         }),
-      } as Response;
-    });
-    vi.stubGlobal("fetch", fetchMock);
-
-    const result = await establishServerAcceptedReviewSnapshot({
-      agreementId: "ag_test",
-      corpusPlain: corpus,
-      generationSessionId: "gen_1",
-    });
-    expect(result).toEqual(
-      expect.objectContaining({
-        ok: true,
-      }),
+      })),
     );
-    if (!result.ok) {
-      throw new Error(`establish failed: ${result.code}`);
-    }
-    expect(result.accepted.snapshot_id).toBe("crs_test");
-    expect(result.accepted.corpus_sha256).toBe(digest);
-    expect(readAcceptedReviewSnapshotRef("ag_test")?.snapshotId).toBe("crs_test");
-    expect(fetchMock).toHaveBeenCalled();
-    const acceptCall = fetchMock.mock.calls.find((c) => String(c[0]).includes("/accept")) as
-      | [string, RequestInit?]
-      | undefined;
-    expect(acceptCall).toBeTruthy();
-    const acceptBody = JSON.parse(String(acceptCall?.[1]?.body ?? "{}"));
-    expect(acceptBody.corpus_plain).toBeUndefined();
-    expect(acceptBody.snapshot_id).toBe("crs_test");
-  });
-
-  it("persistCanonicalReviewSnapshot returns error code on http failure", async () => {
-    const res = await persistCanonicalReviewSnapshot({
-      agreementId: "ag_x",
-      corpusPlain: "short",
-    });
-    expect(res.ok).toBe(false);
-    if (!res.ok) expect(res.code).toBe("invalid_snapshot_args");
+    const result = await acceptDisplayedCommercialReviewSnapshot({ agreementId: "ag_test" });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.code).toBe("display_authority_mismatch");
   });
 
   it("acceptCanonicalReviewSnapshot does not send replacement corpus bytes", async () => {
@@ -129,6 +163,9 @@ describe("canonicalReviewSnapshotApi", () => {
       snapshotId: "crs_a",
       expectedDigest: "d".repeat(64),
       expectedAcceptedSnapshotId: "",
+      displaySnapshotId: "crs_a",
+      displayDigest: "d".repeat(64),
+      displayLength: 4,
     });
     expect(result.ok).toBe(true);
     expect(fetchMock).toHaveBeenCalled();
@@ -137,5 +174,33 @@ describe("canonicalReviewSnapshotApi", () => {
     expect(body.snapshot_id).toBe("crs_a");
     expect(body.expected_digest).toBe("d".repeat(64));
     expect(body.corpus_plain).toBeUndefined();
+    expect(body.display_snapshot_id).toBe("crs_a");
+  });
+
+  it("persistCanonicalReviewSnapshot returns error code on http failure", async () => {
+    const res = await persistCanonicalReviewSnapshot({
+      agreementId: "ag_x",
+      corpusPlain: "short",
+    });
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.code).toBe("invalid_snapshot_args");
+  });
+
+  it("canEnableCommercialPrepareFromServerSnapshot requires display==accepted", () => {
+    storeDisplayReviewSnapshotAuthority({
+      agreementId: "ag_1",
+      snapshotId: "crs_1",
+      corpusSha256: "abc",
+      corpusLength: 1000,
+      status: "pending",
+    });
+    expect(canEnableCommercialPrepareFromServerSnapshot("ag_1")).toBe(false);
+    storeAcceptedReviewSnapshotRef({
+      agreementId: "ag_1",
+      snapshotId: "crs_1",
+      corpusSha256: "abc",
+      corpusLength: 1000,
+    });
+    expect(canEnableCommercialPrepareFromServerSnapshot("ag_1")).toBe(true);
   });
 });

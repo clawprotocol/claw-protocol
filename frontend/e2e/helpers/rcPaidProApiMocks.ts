@@ -52,6 +52,23 @@ export type RcDraftRecord = {
 
 const ANON_ORG = "anon-rc-paid-pro-org";
 
+/** In-process mock store for canonical review snapshots (POST→GET→accept). */
+const rcCanonicalSnapshotStore = new Map<
+  string,
+  {
+    snapshot_id: string;
+    agreement_id: string;
+    corpus_plain: string;
+    corpus_sha256: string;
+    corpus_length: number;
+    status: string;
+    schema_version?: string;
+    created_at?: string;
+    accepted_at?: string;
+    generation_session_id?: string | null;
+  }
+>();
+
 export async function seedEntitledPaidProBrowserState(page: Page): Promise<void> {
   await page.addInitScript((orgId: string) => {
     try {
@@ -153,6 +170,7 @@ export async function seedRcPaidCheckoutReturn(
 }
 
 export async function clearRcApiMocks(page: Page): Promise<void> {
+  rcCanonicalSnapshotStore.clear();
   const ctx = page.context();
   const patterns: Array<string | RegExp> = [
     /\/(api\/|v1\/workspace\/)/,
@@ -244,33 +262,85 @@ export async function installRcPaidProApiRoutes(
     }
 
     // Server-authoritative canonical review snapshot (commercial first-seal authority).
+    // Module store so POST → GET → accept mirrors production lifecycle (mocked).
+    if (url.includes("/canonical-review-snapshot/migrate-legacy") && method === "POST") {
+      await route.fulfill({
+        status: 400,
+        contentType: "application/json",
+        body: JSON.stringify({
+          detail: { code: "legacy_migration_not_applicable_already_accepted" },
+        }),
+      });
+      return;
+    }
+
     if (url.includes("/canonical-review-snapshot/accept") && method === "POST") {
       let body: {
         snapshot_id?: string;
         expected_digest?: string;
+        display_snapshot_id?: string;
+        display_digest?: string;
+        display_length?: number;
+        corpus_plain?: string;
       } = {};
       try {
         body = route.request().postDataJSON() as typeof body;
       } catch {
         /* ignore */
       }
-      const snapshotId = String(body.snapshot_id || "crs_rc_e2e").trim();
-      const digest = String(body.expected_digest || "").trim().toLowerCase();
+      if (body.corpus_plain !== undefined) {
+        await route.fulfill({
+          status: 400,
+          contentType: "application/json",
+          body: JSON.stringify({ detail: { code: "accept_must_not_include_corpus" } }),
+        });
+        return;
+      }
+      const stored = rcCanonicalSnapshotStore.get(draftId);
+      const snapshotId = String(body.snapshot_id || stored?.snapshot_id || "crs_rc_e2e").trim();
+      const digest = String(body.expected_digest || stored?.corpus_sha256 || "").trim().toLowerCase();
+      if (
+        body.display_snapshot_id &&
+        String(body.display_snapshot_id).trim() !== snapshotId
+      ) {
+        await route.fulfill({
+          status: 409,
+          contentType: "application/json",
+          body: JSON.stringify({ detail: { code: "display_authority_mismatch" } }),
+        });
+        return;
+      }
+      if (
+        body.display_digest &&
+        String(body.display_digest).trim().toLowerCase() !== digest
+      ) {
+        await route.fulfill({
+          status: 409,
+          contentType: "application/json",
+          body: JSON.stringify({ detail: { code: "display_authority_mismatch" } }),
+        });
+        return;
+      }
+      const accepted = {
+        snapshot_id: snapshotId,
+        agreement_id: draftId,
+        corpus_plain: stored?.corpus_plain || "",
+        corpus_sha256: digest || "e".repeat(64),
+        corpus_length: stored?.corpus_length ?? (stored?.corpus_plain || "").length,
+        status: "accepted",
+        schema_version: "claw.canonical_review_snapshot/v1",
+        accepted_at: new Date().toISOString(),
+        created_at: stored?.created_at,
+        generation_session_id: stored?.generation_session_id ?? null,
+      };
+      rcCanonicalSnapshotStore.set(draftId, { ...accepted, status: "accepted" });
       await route.fulfill({
         status: 200,
         contentType: "application/json",
         body: JSON.stringify({
           ok: true,
-          accepted: {
-            snapshot_id: snapshotId,
-            agreement_id: draftId,
-            corpus_plain: "",
-            corpus_sha256: digest || "e".repeat(64),
-            corpus_length: 0,
-            status: "accepted",
-            schema_version: "claw.canonical_review_snapshot/v1",
-            accepted_at: new Date().toISOString(),
-          },
+          accepted,
+          registry_version: 2,
         }),
       });
       return;
@@ -289,22 +359,25 @@ export async function installRcPaidProApiRoutes(
       }
       const corpus = String(body.corpus_plain || "").trim();
       const digest = String(body.claimed_digest || "").trim().toLowerCase() || "e".repeat(64);
+      const snapshot = {
+        snapshot_id: `crs_rc_${draftId}`,
+        agreement_id: draftId,
+        corpus_plain: corpus,
+        corpus_sha256: digest,
+        corpus_length: corpus.length,
+        generation_session_id: body.generation_session_id ?? null,
+        created_at: new Date().toISOString(),
+        schema_version: "claw.canonical_review_snapshot/v1",
+        status: "pending",
+      };
+      rcCanonicalSnapshotStore.set(draftId, snapshot);
       await route.fulfill({
         status: 200,
         contentType: "application/json",
         body: JSON.stringify({
           ok: true,
-          snapshot: {
-            snapshot_id: `crs_rc_${draftId}`,
-            agreement_id: draftId,
-            corpus_plain: corpus,
-            corpus_sha256: digest,
-            corpus_length: corpus.length,
-            generation_session_id: body.generation_session_id ?? null,
-            created_at: new Date().toISOString(),
-            schema_version: "claw.canonical_review_snapshot/v1",
-            status: "pending",
-          },
+          snapshot,
+          registry_version: 1,
           accepted: null,
         }),
       });
@@ -312,10 +385,44 @@ export async function installRcPaidProApiRoutes(
     }
 
     if (url.includes("/canonical-review-snapshot") && method === "GET") {
+      const stored = rcCanonicalSnapshotStore.get(draftId);
+      if (!stored) {
+        await route.fulfill({
+          status: 404,
+          contentType: "application/json",
+          body: JSON.stringify({ detail: "canonical_review_snapshot_not_found" }),
+        });
+        return;
+      }
       await route.fulfill({
-        status: 404,
+        status: 200,
         contentType: "application/json",
-        body: JSON.stringify({ detail: "canonical_review_snapshot_not_found" }),
+        body: JSON.stringify({
+          ok: true,
+          status: stored.status === "accepted" ? "accepted" : "pending",
+          snapshot: {
+            snapshot_id: stored.snapshot_id,
+            agreement_id: stored.agreement_id || draftId,
+            corpus_plain: stored.corpus_plain,
+            corpus_sha256: stored.corpus_sha256,
+            corpus_length: stored.corpus_length,
+            generation_session_id: stored.generation_session_id ?? null,
+            created_at: stored.created_at ?? new Date().toISOString(),
+            accepted_at: stored.accepted_at ?? null,
+            schema_version: stored.schema_version || "claw.canonical_review_snapshot/v1",
+            status: stored.status,
+          },
+          registry_version: stored.status === "accepted" ? 2 : 1,
+          public:
+            stored.status === "accepted"
+              ? {
+                  snapshot_id: stored.snapshot_id,
+                  corpus_sha256: stored.corpus_sha256,
+                  corpus_length: stored.corpus_length,
+                  status: "accepted",
+                }
+              : null,
+        }),
       });
       return;
     }

@@ -2948,6 +2948,8 @@ class CanonicalReviewSnapshotCreateBody(BaseModel):
     generation_session_id: Optional[str] = None
     claimed_digest: Optional[str] = None
     created_by_session: Optional[str] = None
+    """Optimistic concurrency: must match current registryVersion when provided."""
+    expected_registry_version: Optional[int] = None
 
 
 class CanonicalReviewSnapshotAcceptBody(BaseModel):
@@ -2960,6 +2962,20 @@ class CanonicalReviewSnapshotAcceptBody(BaseModel):
     expected_accepted_snapshot_id: Optional[str] = None
     """Owner-approved revision: supersede prior accepted and accept a different pending snapshot."""
     allow_revision: bool = False
+    """Optimistic concurrency: must match current registryVersion when provided."""
+    expected_registry_version: Optional[int] = None
+    """Displayed server snapshot id from GET — must match accept target."""
+    display_snapshot_id: Optional[str] = None
+    display_digest: Optional[str] = None
+    display_length: Optional[int] = None
+
+
+class CanonicalReviewSnapshotLegacyMigrateBody(BaseModel):
+    """Re-attest exact sealed portable corpus for pure pre-cutover legacy packets."""
+
+    sealed_corpus_plain: str = ""
+    claimed_digest: Optional[str] = None
+    accepting_session: Optional[str] = None
 
 
 class FrozenSigningAuthorityPersistBody(BaseModel):
@@ -6368,6 +6384,20 @@ def _apply_snapshot_registry_to_draft(
     accepted: Optional[Dict[str, Any]] = None,
     audit_event: Optional[AuditEvent] = None,
 ) -> AgreementDraft:
+    from backend.services.accepted_review_snapshot import assert_snapshot_immutable_post_accept
+
+    imm_ok, imm_err = assert_snapshot_immutable_post_accept(
+        draft=draft,
+        incoming_registry=registry,
+    )
+    if not imm_ok:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": imm_err or "accepted_snapshot_mutation_rejected",
+                "message": "Accepted review snapshot corpus is immutable.",
+            },
+        )
     audit = list(draft.audit_log or [])
     if audit_event is not None:
         audit.append(audit_event)
@@ -6406,10 +6436,13 @@ def post_canonical_review_snapshot(
         created_by_session=body.created_by_session,
         claimed_digest=body.claimed_digest,
         registry=get_registry(draft),
+        expected_registry_version=body.expected_registry_version,
+        draft_for_immutability=draft,
     )
     if not ok or not isinstance(snap, dict) or not isinstance(reg, dict):
+        status = 409 if err in {"registry_version_conflict", "accepted_snapshot_mutation_rejected"} else 400
         raise HTTPException(
-            status_code=400,
+            status_code=status,
             detail={
                 "code": err or "snapshot_create_failed",
                 "message": "Canonical review snapshot could not be persisted.",
@@ -6447,6 +6480,7 @@ def post_canonical_review_snapshot(
             "schema_version": snap.get("schemaVersion"),
             "status": snap.get("status"),
         },
+        "registry_version": reg.get("registryVersion"),
         "accepted": public_accepted_snapshot_fragment(accepted),
         "draft": next_draft.model_dump(),
     }
@@ -6479,11 +6513,19 @@ def post_canonical_review_snapshot_accept(
         registry=get_registry(draft),
         expected_accepted_snapshot_id=body.expected_accepted_snapshot_id,
         allow_revision=bool(body.allow_revision),
+        expected_registry_version=body.expected_registry_version,
+        display_snapshot_id=body.display_snapshot_id,
+        display_digest=body.display_digest,
+        display_length=body.display_length,
+        draft_for_immutability=draft,
     )
     if not ok or not isinstance(accepted, dict) or not isinstance(reg, dict):
         status = 409 if err in {
             "different_snapshot_already_accepted",
             "accept_concurrency_conflict",
+            "registry_version_conflict",
+            "display_authority_mismatch",
+            "accepted_snapshot_mutation_rejected",
         } else 400
         raise HTTPException(
             status_code=status,
@@ -6533,6 +6575,91 @@ def post_canonical_review_snapshot_accept(
             "schema_version": accepted.get("schemaVersion"),
             "status": accepted.get("status"),
         },
+        "registry_version": reg.get("registryVersion"),
+        "public": public_accepted_snapshot_fragment(accepted),
+        "draft": next_draft.model_dump(),
+    }
+
+
+@router.post("/{agreement_id}/canonical-review-snapshot/migrate-legacy")
+def post_canonical_review_snapshot_migrate_legacy(
+    agreement_id: str,
+    request: Request,
+    body: CanonicalReviewSnapshotLegacyMigrateBody,
+) -> Dict[str, Any]:
+    """
+    Deliberate migration for pure pre-cutover sealed packets.
+
+    Requires exact sealed-corpus re-attestation (portable seed bytes). No silent backfill.
+    """
+    if not _agreements_write_allowed():
+        raise HTTPException(status_code=403, detail="verifier_only")
+    _owner_mutation_guards(request, agreement_id, surface="canonical_review_snapshot_migrate_legacy")
+    from backend.services.accepted_review_snapshot import (
+        public_accepted_snapshot_fragment,
+        reattest_legacy_sealed_corpus,
+    )
+
+    draft = _load_or_404(agreement_id)
+    principal = resolve_subject_from_request(request)
+    ok, err, accepted, reg = reattest_legacy_sealed_corpus(
+        agreement_id=agreement_id,
+        draft=draft,
+        sealed_corpus_plain=body.sealed_corpus_plain or "",
+        accepting_principal=principal,
+        accepting_session=body.accepting_session,
+        claimed_digest=body.claimed_digest,
+    )
+    if not ok or not isinstance(accepted, dict) or not isinstance(reg, dict):
+        status = 409 if err in {
+            "legacy_sealed_corpus_mismatch",
+            "legacy_migration_not_pure_pre_cutover",
+            "legacy_migration_not_applicable_already_accepted",
+        } else 400
+        raise HTTPException(
+            status_code=status,
+            detail={
+                "code": err or "legacy_migration_failed",
+                "message": "Legacy sealed-corpus re-attestation failed.",
+            },
+        )
+    next_draft = _apply_snapshot_registry_to_draft(
+        draft,
+        registry=reg,
+        accepted=accepted,
+        audit_event=AuditEvent(
+            event_type="canonical_review_snapshot_legacy_migrated",
+            at=_utc_now_iso(),
+            field="accepted_review_snapshot_v1",
+            value={
+                "snapshot_id": accepted.get("snapshotId"),
+                "corpus_sha256": accepted.get("corpusSha256"),
+                "corpus_length": accepted.get("corpusLength"),
+            },
+        ),
+    )
+    next_draft = _merge_agreement_draft(
+        next_draft,
+        server_full_document_text=accepted.get("corpusPlain"),
+        premium_server_full_document_text=accepted.get("corpusPlain"),
+        document_text=accepted.get("corpusPlain"),
+        premium_render_source="accepted_review_snapshot",
+        updated_at=_utc_now_iso(),
+    )
+    _save_draft_sync(next_draft.model_dump(), request)
+    return {
+        "ok": True,
+        "accepted": {
+            "snapshot_id": accepted.get("snapshotId"),
+            "agreement_id": accepted.get("agreementId"),
+            "corpus_plain": accepted.get("corpusPlain"),
+            "corpus_sha256": accepted.get("corpusSha256"),
+            "corpus_length": accepted.get("corpusLength"),
+            "status": accepted.get("status"),
+            "schema_version": accepted.get("schemaVersion"),
+            "accepted_at": accepted.get("acceptedAt"),
+        },
+        "registry_version": reg.get("registryVersion"),
         "public": public_accepted_snapshot_fragment(accepted),
         "draft": next_draft.model_dump(),
     }
@@ -6550,6 +6677,7 @@ def get_canonical_review_snapshot(agreement_id: str, request: Request) -> Dict[s
     )
 
     draft = _load_or_404(agreement_id)
+    reg = get_registry(draft)
     accepted = get_accepted_snapshot_record(draft)
     if isinstance(accepted, dict):
         ok, err = verify_snapshot_integrity(accepted)
@@ -6573,9 +6701,9 @@ def get_canonical_review_snapshot(agreement_id: str, request: Request) -> Dict[s
                 "schema_version": accepted.get("schemaVersion"),
                 "status": accepted.get("status"),
             },
+            "registry_version": reg.get("registryVersion"),
             "public": public_accepted_snapshot_fragment(accepted),
         }
-    reg = get_registry(draft)
     snaps = reg.get("snapshots") if isinstance(reg.get("snapshots"), dict) else {}
     pending = [
         s
@@ -6606,6 +6734,7 @@ def get_canonical_review_snapshot(agreement_id: str, request: Request) -> Dict[s
             "schema_version": latest.get("schemaVersion"),
             "status": latest.get("status"),
         },
+        "registry_version": reg.get("registryVersion"),
         "public": None,
     }
 
@@ -6990,16 +7119,11 @@ def post_signing_packet_reissue(
     if not document_id or not isinstance(portable, dict) or not packet_revision:
         raise HTTPException(status_code=400, detail="reissue_fields_required")
     prior_portable = prior.get("portable") if isinstance(prior.get("portable"), dict) else None
-    # Reissue always binds to accepted snapshot when present; legacy pre-snapshot packets
-    # may continue only when they already sealed without a snapshot (explicit legacy mode).
-    from backend.services.accepted_review_snapshot import (
-        AUTHORITY_MODE_LEGACY_PACKET,
-        classify_authority_mode,
-        get_accepted_snapshot_record,
-    )
+    # Post-cutover commercial: always require accepted snapshot. Pure pre-cutover sealed
+    # packets may continue until deliberate sealed-corpus re-attestation.
+    from backend.services.accepted_review_snapshot import requires_accepted_snapshot_for_continuation
 
-    authority_mode = classify_authority_mode(draft)
-    require_snap = authority_mode != AUTHORITY_MODE_LEGACY_PACKET or bool(get_accepted_snapshot_record(draft))
+    require_snap = requires_accepted_snapshot_for_continuation(draft)
     portable = _attest_portable_envelope_or_400(
         agreement_id=agreement_id,
         portable=portable,
@@ -7212,18 +7336,11 @@ def post_vs01_signer_complete(
 
     portable_packet = body.portable_packet if isinstance(body.portable_packet, dict) else None
     if isinstance(portable_packet, dict):
-        from backend.services.accepted_review_snapshot import (
-            AUTHORITY_MODE_LEGACY_PACKET,
-            classify_authority_mode,
-            get_accepted_snapshot_record,
-        )
+        from backend.services.accepted_review_snapshot import requires_accepted_snapshot_for_continuation
 
         stored_pkt = draft.vs01_signing_packet_v1 if isinstance(draft.vs01_signing_packet_v1, dict) else {}
         stored_portable = stored_pkt.get("portable") if isinstance(stored_pkt.get("portable"), dict) else None
-        authority_mode = classify_authority_mode(draft)
-        require_snap = authority_mode != AUTHORITY_MODE_LEGACY_PACKET or bool(
-            get_accepted_snapshot_record(draft)
-        )
+        require_snap = requires_accepted_snapshot_for_continuation(draft)
         portable_packet = _attest_portable_envelope_or_400(
             agreement_id=aid,
             portable=portable_packet,

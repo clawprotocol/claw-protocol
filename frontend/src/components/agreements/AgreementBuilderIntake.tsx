@@ -679,7 +679,15 @@ import {
   hasPaidProSourceOfTruth,
   hydratePaidProSourceOfTruth,
 } from "./paidProSourceOfTruth";
-import { establishServerAcceptedReviewSnapshot } from "../../agreement/canonicalReviewSnapshotApi";
+import {
+  acceptDisplayedCommercialReviewSnapshot,
+  canEnableCommercialPrepareFromServerSnapshot,
+  clearAcceptedReviewSnapshotRef,
+  hydrateCommercialReviewFromServerSnapshot,
+  prepareCommercialReviewSnapshotAuthority,
+  readAcceptedReviewSnapshotRef,
+  readDisplayReviewSnapshotAuthority,
+} from "../../agreement/canonicalReviewSnapshotApi";
 import {
   hasFrozenPaidProAuthoritativeSnapshot,
   isPaidProSoTEstablishmentFailure,
@@ -6858,11 +6866,33 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       }
       commitParsedDraftToReviewFlow(mergedDraftPersist, { forceReviewDisplay: true });
       const dashboardCanonicalSource = resolveDashboardPaidCreateCanonicalReviewSource();
+      let entitledReviewCorpus = (entitledPersistPlain || finalPlain).trim();
+      if (agreementIdForPass && entitledReviewCorpus.length >= 500) {
+        const prepared = await prepareCommercialReviewSnapshotAuthority({
+          agreementId: agreementIdForPass,
+          corpusPlain: entitledReviewCorpus,
+          generationSessionId: result.agreementGenerationId ?? sessionGenForPass,
+        });
+        if (!prepared.ok) {
+          logPaidProGenerationTerminalTransition({
+            reason: "entitled_rewrite_snapshot_prepare_failed",
+            outcome: "retry_recoverable",
+          });
+          setProFullDraftQualityRetry(true);
+          setProFullDraftCustomGateMessage(
+            "Your Pro agreement could not be locked for review on the server. Tap **Retry Pro draft**.",
+          );
+          setLoading(false);
+          entitledPremiumRewriteInFlightRef.current = false;
+          return;
+        }
+        entitledReviewCorpus = prepared.snapshot.corpus_plain;
+      }
       const finalizePlan = planFinalizeCanonicalPaidProPipelineSuccess({
         source: dashboardCanonicalSource,
-        corpusPlain: entitledPersistPlain || finalPlain,
+        corpusPlain: entitledReviewCorpus,
         winningBody: winning,
-        snapshotPlain: acceptedCorpusPlain || snapshotPlain,
+        snapshotPlain: entitledReviewCorpus,
         premiumDeliverablePlain,
         agreementDocumentText: agreementDocumentTextRef.current,
         pipelineWinningBody: winning || premiumPipelineOutputBodyRef.current,
@@ -8540,13 +8570,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                 : result.premiumRenderSource,
           });
           const paidProSotSource = result.premiumRenderSource || "server_full_draft";
-          const commitPostCheckoutCanonicalReviewEntry = () => {
+          const commitPostCheckoutCanonicalReviewEntry = (serverCorpusPlain: string) => {
             const finalizePlan = planFinalizeCanonicalPaidProPipelineSuccess({
               source: "post_checkout_apply_success",
-              corpusPlain: snapshotPlain,
-              snapshotPlain,
-              winningBody: snapshotPlain,
-              pipelineWinningBody: snapshotPlain,
+              corpusPlain: serverCorpusPlain,
+              snapshotPlain: serverCorpusPlain,
+              winningBody: serverCorpusPlain,
+              pipelineWinningBody: serverCorpusPlain,
               agreementDocumentText: agreementDocumentTextRef.current,
               hydratedPremiumBody: hydratedPremiumBodyRef.current,
               pipelineSource: paidProSotSource,
@@ -8568,35 +8598,55 @@ const AgreementBuilderIntake: React.FC<Props> = ({
               recipientCandidates,
             });
           };
-          try {
-            const establishedSoT = establishPaidProSourceOfTruth({
-              text: snapshotPlain,
-              source: paidProSotSource,
-              draft: mergedDraftPersist,
-              intakeText: mergedIntake,
-              agreementGenerationId: sessionGenId,
-              reviewSessionId: sessionGenId,
-              generationOutcome: generationOutcomeLabel,
-            });
+          // Persist pending BEFORE review UI; hydrate SoT + review from GET bytes only.
+          // Acceptance is awaited later on Prepare — never fire-and-forget.
+          void (async () => {
             const agreementIdForSnapshot = (
               reviewAgreementIdRef.current ||
               readCreateReviewAgreementResumeId() ||
               ""
             ).trim();
-            if (agreementIdForSnapshot && establishedSoT?.text) {
-              void establishServerAcceptedReviewSnapshot({
+            let reviewCorpus = snapshotPlain;
+            if (agreementIdForSnapshot) {
+              const prepared = await prepareCommercialReviewSnapshotAuthority({
                 agreementId: agreementIdForSnapshot,
-                corpusPlain: establishedSoT.text,
+                corpusPlain: snapshotPlain,
                 generationSessionId: sessionGenId,
-              }).then((serverAccept) => {
-                if (!serverAccept.ok && import.meta.env.DEV) {
+              });
+              if (!prepared.ok) {
+                setProFullDraftCustomGateMessage(
+                  "Your Pro agreement could not be locked for review on the server. Tap retry before continuing.",
+                );
+                if (import.meta.env.DEV) {
                   // eslint-disable-next-line no-console
-                  console.warn("[canonical-review-snapshot] server accept failed", serverAccept.code);
+                  console.warn("[canonical-review-snapshot] prepare failed", prepared.code);
                 }
+                return;
+              }
+              reviewCorpus = prepared.snapshot.corpus_plain;
+              snapshotPlain = reviewCorpus;
+              mergedDraftPersist = mergePremiumDraftWithServerCorpusFields(merged.draft, {
+                authoritativePlain: reviewCorpus,
+                serverFullFromApi: reviewCorpus,
+                premiumRenderSource:
+                  resolvedPersist.premium_render_source === "server_full_document_text"
+                    ? "server_full_document_text"
+                    : result.premiumRenderSource,
               });
             }
-            commitPostCheckoutCanonicalReviewEntry();
-          } catch (establishErr) {
+            try {
+              establishPaidProSourceOfTruth({
+                text: reviewCorpus,
+                source: paidProSotSource,
+                draft: mergedDraftPersist,
+                intakeText: mergedIntake,
+                agreementGenerationId: sessionGenId,
+                reviewSessionId: sessionGenId,
+                generationOutcome: generationOutcomeLabel,
+              });
+              commitPostCheckoutCanonicalReviewEntry(reviewCorpus);
+              bumpPremiumSurfaceGateTick();
+            } catch (establishErr) {
             const establishMsg =
               establishErr instanceof Error ? establishErr.message : String(establishErr);
             const pipelineValidatedForRecovery =
@@ -8625,9 +8675,19 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                       ? "server_full_document_text"
                       : result.premiumRenderSource,
                 });
+                if (agreementIdForSnapshot) {
+                  const recoveredPrepared = await prepareCommercialReviewSnapshotAuthority({
+                    agreementId: agreementIdForSnapshot,
+                    corpusPlain: snapshotPlain,
+                    generationSessionId: sessionGenId,
+                  });
+                  if (recoveredPrepared.ok) {
+                    snapshotPlain = recoveredPrepared.snapshot.corpus_plain;
+                  }
+                }
                 commitPaidProAcceptanceStorageHygiene();
                 bumpPremiumSurfaceGateTick();
-                commitPostCheckoutCanonicalReviewEntry();
+                commitPostCheckoutCanonicalReviewEntry(snapshotPlain);
                 setProFullDraftCustomGateMessage(
                   "Your Pro agreement was recovered using a deterministic structure-safe draft. Review before finalize.",
                 );
@@ -8646,9 +8706,16 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                 reviewSessionId: sessionGenId,
               });
               if (hydrated) {
+                if (agreementIdForSnapshot) {
+                  await prepareCommercialReviewSnapshotAuthority({
+                    agreementId: agreementIdForSnapshot,
+                    corpusPlain: snapshotPlain,
+                    generationSessionId: sessionGenId,
+                  });
+                }
                 commitPaidProAcceptanceStorageHygiene();
                 bumpPremiumSurfaceGateTick();
-                commitPostCheckoutCanonicalReviewEntry();
+                commitPostCheckoutCanonicalReviewEntry(snapshotPlain);
                 setProFullDraftCustomGateMessage(
                   "Your Pro agreement is ready to review. Some signing checks may need attention before finalize.",
                 );
@@ -8711,7 +8778,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
               });
               return;
             }
-          }
+            }
+          })();
         }
         const finalDoc = guardPaidProAcceptedServerFullDraftCommit({
           candidateText: collapseDuplicateEsignNoticesInFullPreview(snapshotPlain),
@@ -14958,12 +15026,17 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         ""
       ).trim();
       if (agreementIdForRevision && record.text) {
-        // Client allowShorterOverwrite cannot mutate server authority; explicit revision accept required.
-        void establishServerAcceptedReviewSnapshot({
+        // Persist a new pending snapshot for review; do not auto-accept (no fire-and-forget).
+        clearAcceptedReviewSnapshotRef();
+        void prepareCommercialReviewSnapshotAuthority({
           agreementId: agreementIdForRevision,
           corpusPlain: record.text,
           generationSessionId: getOrInitSessionAgreementGenerationId(),
-          allowRevision: true,
+        }).then((prepared) => {
+          if (!prepared.ok && import.meta.env.DEV) {
+            // eslint-disable-next-line no-console
+            console.warn("[canonical-review-snapshot] revision prepare failed", prepared.code);
+          }
         });
       }
       const stable = record.text;
@@ -28666,42 +28739,89 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   ]);
 
   const handlePaidProPrepareSignaturesFromFirstReview = React.useCallback(() => {
-    logPaidProSignaturePrepSelected({
-      source: paidProForcedFirstReviewActive ? "forced_first_review" : "paid_pro_first_review",
-      selectedTrack: "signature",
-    });
-    handlePremiumSendModePick("signature");
-    setPremiumSendModeTouched(true);
-    // TEST570: "Prepare signature links" is the point where signer setup mounts. From the review
-    // decision surface we always mount the inline signer form for confirmation/edit before signing —
-    // even when intake prefilled every signer name — and never auto-finalize or jump straight to
-    // signing. Incomplete details reuse the shared recipient-setup entry; prefilled-but-unconfirmed
-    // details arm the inline mount latch directly.
-    const canMountPaidProInlineSignerSetupFromFirstReview = Boolean(
-      !paidProSignerMetadataFinalized &&
-        (acceptedPaidProAuthorityActive ||
-          paidProReviewDecisionLifecycleReady ||
-          paidProPostCheckoutFirstReviewActive),
-    );
-    if (canMountPaidProInlineSignerSetupFromFirstReview) {
-      if (!paidProSignatureDetailsReady) {
-        enterFinalReviewRecipientSetup("signature");
+    void (async () => {
+      const agreementIdForAccept = (
+        reviewAgreementIdRef.current ||
+        readCreateReviewAgreementResumeId() ||
+        ""
+      ).trim();
+      // Await server acceptance of the displayed GET snapshot before Prepare/signing handoff.
+      if (agreementIdForAccept) {
+        const display = readDisplayReviewSnapshotAuthority(agreementIdForAccept);
+        if (!display) {
+          const hydrated = await hydrateCommercialReviewFromServerSnapshot({
+            agreementId: agreementIdForAccept,
+          });
+          if (!hydrated.ok) {
+            setProFullDraftCustomGateMessage(
+              "Server review snapshot is required before Prepare for signing. Reload and try again.",
+            );
+            return;
+          }
+        }
+        if (!canEnableCommercialPrepareFromServerSnapshot(agreementIdForAccept)) {
+          const prior = readAcceptedReviewSnapshotRef(agreementIdForAccept);
+          const acceptResult = await acceptDisplayedCommercialReviewSnapshot({
+            agreementId: agreementIdForAccept,
+            acceptingSession: getOrInitSessionAgreementGenerationId(),
+            allowRevision: Boolean(prior?.snapshotId),
+          });
+          if (!acceptResult.ok) {
+            setProFullDraftCustomGateMessage(
+              "Server acceptance of the reviewed agreement is required before Prepare for signing.",
+            );
+            if (import.meta.env.DEV) {
+              // eslint-disable-next-line no-console
+              console.warn("[canonical-review-snapshot] prepare blocked; accept failed", acceptResult.code);
+            }
+            return;
+          }
+        }
+        if (!canEnableCommercialPrepareFromServerSnapshot(agreementIdForAccept)) {
+          setProFullDraftCustomGateMessage(
+            "Displayed review snapshot does not match the accepted server snapshot.",
+          );
+          return;
+        }
+      }
+
+      logPaidProSignaturePrepSelected({
+        source: paidProForcedFirstReviewActive ? "forced_first_review" : "paid_pro_first_review",
+        selectedTrack: "signature",
+      });
+      handlePremiumSendModePick("signature");
+      setPremiumSendModeTouched(true);
+      // TEST570: "Prepare signature links" is the point where signer setup mounts. From the review
+      // decision surface we always mount the inline signer form for confirmation/edit before signing —
+      // even when intake prefilled every signer name — and never auto-finalize or jump straight to
+      // signing. Incomplete details reuse the shared recipient-setup entry; prefilled-but-unconfirmed
+      // details arm the inline mount latch directly.
+      const canMountPaidProInlineSignerSetupFromFirstReview = Boolean(
+        !paidProSignerMetadataFinalized &&
+          (acceptedPaidProAuthorityActive ||
+            paidProReviewDecisionLifecycleReady ||
+            paidProPostCheckoutFirstReviewActive),
+      );
+      if (canMountPaidProInlineSignerSetupFromFirstReview) {
+        if (!paidProSignatureDetailsReady) {
+          enterFinalReviewRecipientSetup("signature");
+          return;
+        }
+        setSignaturePreparationRequested(false);
+        setPaidProInlineSignerSetupLatched(true);
+        setDisplayPhase("review");
+        setCreateUiStage(CreateUiStage.DRAFT);
+        setCreateFlowSendRecipientEditorOpen(true);
+        bumpPremiumSurfaceGateTick();
+        window.requestAnimationFrame(() => {
+          document
+            .getElementById("claw-paid-pro-inline-signer-setup")
+            ?.scrollIntoView({ behavior: "smooth", block: "start" });
+        });
         return;
       }
-      setSignaturePreparationRequested(false);
-      setPaidProInlineSignerSetupLatched(true);
-      setDisplayPhase("review");
-      setCreateUiStage(CreateUiStage.DRAFT);
-      setCreateFlowSendRecipientEditorOpen(true);
-      bumpPremiumSurfaceGateTick();
-      window.requestAnimationFrame(() => {
-        document
-          .getElementById("claw-paid-pro-inline-signer-setup")
-          ?.scrollIntoView({ behavior: "smooth", block: "start" });
-      });
-      return;
-    }
-    void handleProSendForSignature();
+      void handleProSendForSignature();
+    })();
   }, [
     paidProForcedFirstReviewActive,
     handlePremiumSendModePick,

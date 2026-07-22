@@ -2,15 +2,18 @@
 Server-authoritative canonical review snapshots for paid-Pro commercial authority.
 
 Lifecycle:
-  1. Persist immutable pending snapshot (corpus bytes + SHA-256) before acceptance.
-  2. Accept by snapshot ID + digest only (no replacement corpus bytes).
-  3. First signing dispatch / reissue / signer-complete / public verify bind to the
+  1. Persist immutable pending snapshot (corpus bytes + SHA-256) before review UI.
+  2. Review hydrates from GET snapshot (id + digest + length + bytes).
+  3. Accept by snapshot ID + digest only (no replacement corpus bytes).
+  4. First signing dispatch / reissue / signer-complete / public verify bind to the
      accepted snapshot — never to owner-submitted corpusPlain as authority.
 
-Legacy drafts that already carry a sealed ``vs01_signing_packet_v1`` without a linked
-accepted snapshot are classified as ``legacy_packet_pre_snapshot`` and must not mint
-new first-seal authority from client bytes. New commercial first-dispatch fails closed
-without an accepted snapshot.
+Post-cutover commercial agreements (any draft that entered the snapshot registry)
+always require an accepted snapshot for reissue and signer-complete.
+
+Pure pre-cutover sealed packets (packet present, never touched snapshot registry)
+may continue under ``legacy_packet_pre_snapshot`` until explicit sealed-corpus
+re-attestation migrates them onto an accepted snapshot.
 """
 
 from __future__ import annotations
@@ -56,6 +59,8 @@ def empty_registry() -> Dict[str, Any]:
         "acceptedSnapshotId": None,
         "acceptedAt": None,
         "authorityMode": None,
+        "registryVersion": 0,
+        "commercialSnapshotAuthorityRequired": False,
     }
 
 
@@ -70,6 +75,11 @@ def get_registry(draft: Any) -> Dict[str, Any]:
     snaps = reg.get("snapshots")
     if not isinstance(snaps, dict):
         reg["snapshots"] = {}
+    if "registryVersion" not in reg:
+        reg["registryVersion"] = 0
+    if "commercialSnapshotAuthorityRequired" not in reg:
+        # Any non-empty snapshot map implies post-cutover commercial authority.
+        reg["commercialSnapshotAuthorityRequired"] = bool(reg["snapshots"])
     return reg
 
 
@@ -89,6 +99,29 @@ def get_accepted_snapshot_record(draft: Any) -> Optional[Dict[str, Any]]:
     if isinstance(snap, dict) and _clean(snap.get("status")) == STATUS_ACCEPTED:
         return snap
     return None
+
+
+def _packet_portable(draft: Any) -> Optional[Dict[str, Any]]:
+    if isinstance(draft, dict):
+        packet = draft.get("vs01_signing_packet_v1")
+    else:
+        packet = getattr(draft, "vs01_signing_packet_v1", None)
+    if not isinstance(packet, dict):
+        return None
+    portable = packet.get("portable")
+    return portable if isinstance(portable, dict) else None
+
+
+def sealed_corpus_from_draft_packet(draft: Any) -> Optional[str]:
+    """Exact sealed legal corpus from stored portable seed (never layout artifacts)."""
+    portable = _packet_portable(draft)
+    if not portable:
+        return None
+    seed = portable.get("seed") if isinstance(portable.get("seed"), dict) else {}
+    corpus = seed.get("corpusPlain") or seed.get("corpus_plain")
+    if not isinstance(corpus, str) or not corpus.strip():
+        return None
+    return corpus.strip()
 
 
 def verify_snapshot_integrity(snap: Dict[str, Any]) -> Tuple[bool, Optional[str]]:
@@ -118,13 +151,44 @@ def classify_authority_mode(draft: Any) -> str:
     accepted = get_accepted_snapshot_record(draft)
     if accepted:
         return AUTHORITY_MODE_ACCEPTED_SNAPSHOT
-    if isinstance(draft, dict):
-        packet = draft.get("vs01_signing_packet_v1")
-    else:
-        packet = getattr(draft, "vs01_signing_packet_v1", None)
-    if isinstance(packet, dict) and isinstance(packet.get("portable"), dict):
+    if _packet_portable(draft) is not None:
         return AUTHORITY_MODE_LEGACY_PACKET
     return AUTHORITY_MODE_ACCEPTED_SNAPSHOT  # new commercial — require snapshot
+
+
+def is_pure_legacy_pre_cutover(draft: Any) -> bool:
+    """
+    True only for sealed packets that never entered the snapshot authority system.
+
+    Post-cutover commercial drafts (flag set or any registry snapshots) are never legacy.
+    """
+    if get_accepted_snapshot_record(draft):
+        return False
+    if _packet_portable(draft) is None:
+        return False
+    reg = get_registry(draft)
+    if bool(reg.get("commercialSnapshotAuthorityRequired")):
+        return False
+    snaps = reg.get("snapshots") or {}
+    if snaps:
+        return False
+    return True
+
+
+def requires_accepted_snapshot_for_continuation(draft: Any) -> bool:
+    """
+    Post-cutover commercial: always require accepted snapshot for reissue/signer-complete.
+    Pure pre-cutover sealed packets may continue until deliberate re-attestation.
+    """
+    return not is_pure_legacy_pre_cutover(draft)
+
+
+def _bump_registry_version(reg: Dict[str, Any], expected_registry_version: Optional[int]) -> Tuple[bool, Optional[str]]:
+    current = int(reg.get("registryVersion") or 0)
+    if expected_registry_version is not None and int(expected_registry_version) != current:
+        return False, "registry_version_conflict"
+    reg["registryVersion"] = current + 1
+    return True, None
 
 
 def create_pending_snapshot(
@@ -136,12 +200,15 @@ def create_pending_snapshot(
     created_by_session: Optional[str] = None,
     claimed_digest: Optional[str] = None,
     registry: Optional[Dict[str, Any]] = None,
+    expected_registry_version: Optional[int] = None,
+    draft_for_immutability: Any = None,
 ) -> Tuple[bool, Optional[str], Optional[Dict[str, Any]], Optional[Dict[str, Any]]]:
     """
     Persist an immutable pending snapshot.
 
     Returns (ok, error_code, snapshot, updated_registry).
     Idempotent when an identical pending/accepted corpus already exists for this agreement.
+    Sets commercialSnapshotAuthorityRequired (post-cutover) on first registry write.
     """
     aid = _clean(agreement_id)
     corpus = (corpus_plain or "").strip()
@@ -158,6 +225,14 @@ def create_pending_snapshot(
     reg = dict(registry or empty_registry())
     snaps: Dict[str, Any] = dict(reg.get("snapshots") or {})
 
+    if draft_for_immutability is not None:
+        imm_ok, imm_err = assert_snapshot_immutable_post_accept(
+            draft=draft_for_immutability,
+            incoming_registry=reg,
+        )
+        if not imm_ok:
+            return False, imm_err, None, None
+
     # Idempotent: identical bytes already registered for this agreement.
     for existing in snaps.values():
         if not isinstance(existing, dict):
@@ -168,6 +243,8 @@ def create_pending_snapshot(
             ok, err = verify_snapshot_integrity(existing)
             if not ok:
                 return False, err, None, None
+            # No version bump on pure idempotent read-back.
+            reg["commercialSnapshotAuthorityRequired"] = True
             return True, None, existing, reg
 
     # Reject post-accept replacement attempts that try to insert a different corpus
@@ -180,7 +257,12 @@ def create_pending_snapshot(
             ok, err = verify_snapshot_integrity(accepted)
             if not ok:
                 return False, err, None, None
+            reg["commercialSnapshotAuthorityRequired"] = True
             return True, None, accepted, reg
+
+    ver_ok, ver_err = _bump_registry_version(reg, expected_registry_version)
+    if not ver_ok:
+        return False, ver_err, None, None
 
     snap_id = f"crs_{uuid.uuid4().hex}"
     snap = {
@@ -202,6 +284,16 @@ def create_pending_snapshot(
     snaps[snap_id] = snap
     reg["schema"] = REGISTRY_SCHEMA_VERSION
     reg["snapshots"] = snaps
+    reg["commercialSnapshotAuthorityRequired"] = True
+
+    if draft_for_immutability is not None:
+        imm_ok, imm_err = assert_snapshot_immutable_post_accept(
+            draft=draft_for_immutability,
+            incoming_registry=reg,
+        )
+        if not imm_ok:
+            return False, imm_err, None, None
+
     return True, None, snap, reg
 
 
@@ -217,6 +309,12 @@ def accept_snapshot(
     expected_accepted_snapshot_id: Optional[str] = None,
     # Explicit owner revision: supersede prior accepted and accept a different pending snapshot.
     allow_revision: bool = False,
+    expected_registry_version: Optional[int] = None,
+    # Fail closed when UI display authority does not match the snapshot being accepted.
+    display_snapshot_id: Optional[str] = None,
+    display_digest: Optional[str] = None,
+    display_length: Optional[int] = None,
+    draft_for_immutability: Any = None,
 ) -> Tuple[bool, Optional[str], Optional[Dict[str, Any]], Optional[Dict[str, Any]]]:
     """
     Atomically mark a pending snapshot accepted.
@@ -250,14 +348,23 @@ def accept_snapshot(
     if _clean(snap.get("corpusSha256")).lower() != digest:
         return False, "accept_digest_mismatch", None, None
 
+    # Display authority must match the snapshot under accept (A≠B fail closed).
+    if display_snapshot_id is not None and _clean(display_snapshot_id) != sid:
+        return False, "display_authority_mismatch", None, None
+    if display_digest is not None and _clean(display_digest).lower() != digest:
+        return False, "display_authority_mismatch", None, None
+    if display_length is not None and int(display_length) != int(snap.get("corpusLength") or 0):
+        return False, "display_authority_mismatch", None, None
+
     current_accepted = _clean(reg.get("acceptedSnapshotId"))
     if expected_accepted_snapshot_id is not None:
         expected_token = _clean(expected_accepted_snapshot_id)
         if current_accepted != expected_token:
             return False, "accept_concurrency_conflict", None, None
 
-    # Idempotent identical accept.
+    # Idempotent identical accept (no version bump).
     if current_accepted == sid and _clean(snap.get("status")) == STATUS_ACCEPTED:
+        reg["commercialSnapshotAuthorityRequired"] = True
         return True, None, snap, reg
 
     # Concurrent / second accept of a different snapshot.
@@ -270,6 +377,10 @@ def accept_snapshot(
         if not (allow_revision and _clean(snap.get("status")) == STATUS_PENDING):
             if _clean(snap.get("status")) == STATUS_SUPERSEDED:
                 return False, "snapshot_superseded", None, None
+
+    ver_ok, ver_err = _bump_registry_version(reg, expected_registry_version)
+    if not ver_ok:
+        return False, ver_err, None, None
 
     now = _utc_now_iso()
     # Explicit revision: mark prior accepted snapshot superseded (corpus remains immutable).
@@ -305,7 +416,89 @@ def accept_snapshot(
     reg["acceptedAt"] = now
     reg["authorityMode"] = AUTHORITY_MODE_ACCEPTED_SNAPSHOT
     reg["schema"] = REGISTRY_SCHEMA_VERSION
+    reg["commercialSnapshotAuthorityRequired"] = True
+
+    if draft_for_immutability is not None:
+        # Prior accepted corpus bytes must remain byte-identical in the write set.
+        prior_accepted = get_accepted_snapshot_record(draft_for_immutability)
+        if prior_accepted and _clean(prior_accepted.get("snapshotId")) == sid:
+            imm_ok, imm_err = assert_snapshot_immutable_post_accept(
+                draft=draft_for_immutability,
+                incoming_registry=reg,
+            )
+            if not imm_ok:
+                return False, imm_err, None, None
+        elif prior_accepted and not allow_revision:
+            imm_ok, imm_err = assert_snapshot_immutable_post_accept(
+                draft=draft_for_immutability,
+                incoming_registry=reg,
+            )
+            if not imm_ok and imm_err == "accepted_snapshot_mutation_rejected":
+                return False, imm_err, None, None
+
     return True, None, accepted, reg
+
+
+def reattest_legacy_sealed_corpus(
+    *,
+    agreement_id: str,
+    draft: Any,
+    sealed_corpus_plain: str,
+    accepting_principal: str,
+    accepting_session: Optional[str] = None,
+    claimed_digest: Optional[str] = None,
+) -> Tuple[bool, Optional[str], Optional[Dict[str, Any]], Optional[Dict[str, Any]]]:
+    """
+    Deliberate migration for pure pre-cutover sealed packets.
+
+    Requires the caller to re-attest the *exact* sealed portable seed corpus.
+    Mismatched bytes fail closed — no silent backfill from arbitrary client corpus.
+    """
+    aid = _clean(agreement_id)
+    if not aid:
+        return False, "agreement_id_required", None, None
+    if not is_pure_legacy_pre_cutover(draft):
+        if get_accepted_snapshot_record(draft):
+            return False, "legacy_migration_not_applicable_already_accepted", None, None
+        if not _packet_portable(draft):
+            return False, "legacy_migration_requires_sealed_packet", None, None
+        return False, "legacy_migration_not_pure_pre_cutover", None, None
+
+    stored = sealed_corpus_from_draft_packet(draft)
+    if not stored:
+        return False, "legacy_sealed_corpus_missing", None, None
+    offered = (sealed_corpus_plain or "").strip()
+    if offered != stored:
+        return False, "legacy_sealed_corpus_mismatch", None, None
+
+    ok, err, snap, reg = create_pending_snapshot(
+        agreement_id=aid,
+        corpus_plain=stored,
+        generation_session_id="legacy_reattestation",
+        created_by_principal=accepting_principal,
+        created_by_session=accepting_session,
+        claimed_digest=claimed_digest or sha256_hex_text(stored),
+        registry=get_registry(draft),
+        draft_for_immutability=draft,
+    )
+    if not ok or not isinstance(snap, dict) or not isinstance(reg, dict):
+        return False, err or "legacy_migration_persist_failed", None, None
+    if _clean(snap.get("status")) == STATUS_ACCEPTED:
+        return True, None, snap, reg
+    return accept_snapshot(
+        agreement_id=aid,
+        snapshot_id=_clean(snap.get("snapshotId")),
+        expected_digest=_clean(snap.get("corpusSha256")).lower(),
+        accepting_principal=accepting_principal,
+        accepting_session=accepting_session,
+        registry=reg,
+        expected_accepted_snapshot_id="",
+        allow_revision=False,
+        display_snapshot_id=_clean(snap.get("snapshotId")),
+        display_digest=_clean(snap.get("corpusSha256")).lower(),
+        display_length=int(snap.get("corpusLength") or 0),
+        draft_for_immutability=draft,
+    )
 
 
 def public_accepted_snapshot_fragment(snap: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
@@ -406,7 +599,9 @@ def bind_portable_to_accepted_snapshot(
             return False, "legacy_packet_requires_reattestation", None, AUTHORITY_MODE_LEGACY_PACKET
         return False, "accepted_review_snapshot_required", None, AUTHORITY_MODE_ACCEPTED_SNAPSHOT
 
-    # Continuation-only legacy path (explicit caller opt-in).
+    # Continuation-only legacy path (explicit caller opt-in + pure pre-cutover only).
+    if not is_pure_legacy_pre_cutover(draft):
+        return False, "accepted_review_snapshot_required", None, AUTHORITY_MODE_ACCEPTED_SNAPSHOT
     return True, None, portable, AUTHORITY_MODE_LEGACY_PACKET
 
 
@@ -425,10 +620,13 @@ def assert_snapshot_immutable_post_accept(
     incoming_snaps = _as_dict(incoming_registry.get("snapshots"))
     incoming = incoming_snaps.get(sid)
     if not isinstance(incoming, dict):
+        # Supersede path may omit prior id only when status flipped; still require presence.
         return False, "accepted_snapshot_missing_on_write"
     if _clean(incoming.get("corpusPlain")) != _clean(current.get("corpusPlain")):
         return False, "accepted_snapshot_mutation_rejected"
     if _clean(incoming.get("corpusSha256")).lower() != _clean(current.get("corpusSha256")).lower():
+        return False, "accepted_snapshot_mutation_rejected"
+    if int(incoming.get("corpusLength") or 0) != int(current.get("corpusLength") or 0):
         return False, "accepted_snapshot_mutation_rejected"
     return True, None
 

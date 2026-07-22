@@ -653,3 +653,274 @@ def test_client_sot_overwrite_exceptions_cannot_change_server_accepted_snapshot(
     assert ok.status_code == 200, ok.text
     stored = ok.json()["draft"]["vs01_signing_packet_v1"]["portable"]["seed"]["corpusPlain"]
     assert stored == corpus.strip()
+
+
+def test_accept_fails_when_display_authority_mismatches_snapshot(monkeypatch, tmp_path):
+    """Server snapshot A rendered; client attempts to accept corpus/snapshot B."""
+    _env(monkeypatch, tmp_path)
+    client = TestClient(app)
+    aid = _create_agreement(client)
+    corpus_a = _corpus("A")
+    corpus_b = _corpus("B")
+    s_a = client.post(
+        f"/api/agreements/{aid}/canonical-review-snapshot",
+        headers=_ORG_H,
+        json={"corpus_plain": corpus_a},
+    ).json()["snapshot"]
+    s_b = client.post(
+        f"/api/agreements/{aid}/canonical-review-snapshot",
+        headers=_ORG_H,
+        json={"corpus_plain": corpus_b},
+    ).json()["snapshot"]
+    # Display claims A, accept targets B.
+    bad = client.post(
+        f"/api/agreements/{aid}/canonical-review-snapshot/accept",
+        headers=_ORG_H,
+        json={
+            "snapshot_id": s_b["snapshot_id"],
+            "expected_digest": s_b["corpus_sha256"],
+            "expected_accepted_snapshot_id": "",
+            "display_snapshot_id": s_a["snapshot_id"],
+            "display_digest": s_a["corpus_sha256"],
+            "display_length": s_a["corpus_length"],
+        },
+    )
+    assert bad.status_code == 409
+    assert bad.json()["detail"]["code"] == "display_authority_mismatch"
+
+
+def test_reload_get_returns_exact_persisted_bytes_digest_length(monkeypatch, tmp_path):
+    _env(monkeypatch, tmp_path)
+    client = TestClient(app)
+    aid = _create_agreement(client)
+    corpus = _corpus("RELOAD")
+    pending = client.post(
+        f"/api/agreements/{aid}/canonical-review-snapshot",
+        headers=_ORG_H,
+        json={"corpus_plain": corpus},
+    ).json()["snapshot"]
+    got = client.get(f"/api/agreements/{aid}/canonical-review-snapshot", headers=_ORG_H)
+    assert got.status_code == 200
+    body = got.json()["snapshot"]
+    assert body["snapshot_id"] == pending["snapshot_id"]
+    assert body["corpus_plain"] == corpus.strip()
+    assert body["corpus_sha256"] == sha256_hex_text(corpus.strip())
+    assert body["corpus_length"] == len(corpus.strip())
+    assert body["corpus_length"] == len(body["corpus_plain"])
+
+
+def test_registry_version_conflict_on_parallel_accept(monkeypatch, tmp_path):
+    _env(monkeypatch, tmp_path)
+    client = TestClient(app)
+    aid = _create_agreement(client)
+    corpus = _corpus("A")
+    created = client.post(
+        f"/api/agreements/{aid}/canonical-review-snapshot",
+        headers=_ORG_H,
+        json={"corpus_plain": corpus, "expected_registry_version": 0},
+    )
+    assert created.status_code == 200, created.text
+    snap = created.json()["snapshot"]
+    reg_ver = created.json().get("registry_version")
+    assert reg_ver == 1
+    # Stale version loses.
+    stale = client.post(
+        f"/api/agreements/{aid}/canonical-review-snapshot/accept",
+        headers=_ORG_H,
+        json={
+            "snapshot_id": snap["snapshot_id"],
+            "expected_digest": snap["corpus_sha256"],
+            "expected_accepted_snapshot_id": "",
+            "expected_registry_version": 0,
+            "display_snapshot_id": snap["snapshot_id"],
+            "display_digest": snap["corpus_sha256"],
+            "display_length": snap["corpus_length"],
+        },
+    )
+    assert stale.status_code == 409
+    assert stale.json()["detail"]["code"] == "registry_version_conflict"
+    ok = client.post(
+        f"/api/agreements/{aid}/canonical-review-snapshot/accept",
+        headers=_ORG_H,
+        json={
+            "snapshot_id": snap["snapshot_id"],
+            "expected_digest": snap["corpus_sha256"],
+            "expected_accepted_snapshot_id": "",
+            "expected_registry_version": 1,
+            "display_snapshot_id": snap["snapshot_id"],
+            "display_digest": snap["corpus_sha256"],
+            "display_length": snap["corpus_length"],
+        },
+    )
+    assert ok.status_code == 200, ok.text
+
+
+def test_post_cutover_reissue_requires_accepted_snapshot(monkeypatch, tmp_path):
+    """Post-cutover (registry touched) cannot reissue under legacy continuation."""
+    _env(monkeypatch, tmp_path)
+    client = TestClient(app)
+    aid = _create_agreement(client)
+    corpus = _corpus("A")
+    # Touch snapshot registry (cutover) but do not accept.
+    client.post(
+        f"/api/agreements/{aid}/canonical-review-snapshot",
+        headers=_ORG_H,
+        json={"corpus_plain": corpus},
+    )
+    from backend.services.agreement_draft_store import load_draft, save_draft
+
+    draft = load_draft(aid)
+    # Inject a sealed packet without accepted snapshot (adversarial / partial state).
+    draft["vs01_signing_packet_v1"] = {
+        "document_id": "doc_snap_auth",
+        "packet_revision": "rev_1",
+        "packet_state": "active",
+        "portable": _portable(aid, corpus),
+    }
+    save_draft({**draft, "id": aid})
+    reissue = client.post(
+        f"/api/agreements/{aid}/signing-packet/reissue",
+        headers=_ORG_H,
+        json={
+            "packet_revision": "rev_2",
+            "document_id": "doc_snap_auth",
+            "portable_packet": _portable(aid, corpus),
+            "frozen_signing_authority": _frozen(aid, corpus),
+        },
+    )
+    assert reissue.status_code == 400
+    assert reissue.json()["detail"]["code"] in {
+        "accepted_review_snapshot_required",
+        "legacy_packet_requires_reattestation",
+    }
+
+
+def test_post_cutover_signer_complete_requires_accepted_snapshot(monkeypatch, tmp_path):
+    _env(monkeypatch, tmp_path)
+    client = TestClient(app)
+    aid = _create_agreement(client)
+    corpus = _corpus("A")
+    client.post(
+        f"/api/agreements/{aid}/canonical-review-snapshot",
+        headers=_ORG_H,
+        json={"corpus_plain": corpus},
+    )
+    from backend.services.agreement_draft_store import load_draft, save_draft
+
+    draft = load_draft(aid)
+    portable = _portable(aid, corpus)
+    draft["vs01_signing_packet_v1"] = {
+        "document_id": "doc_snap_auth",
+        "packet_revision": "rev_1",
+        "packet_state": "active",
+        "portable": portable,
+    }
+    save_draft({**draft, "id": aid})
+    complete = client.post(
+        f"/api/agreements/{aid}/vs01-signer-complete",
+        headers=_ORG_H,
+        json={
+            "signer_role_id": "role_owner",
+            "document_id": "doc_snap_auth",
+            "portable_packet": portable,
+        },
+    )
+    assert complete.status_code == 400
+    assert complete.json()["detail"]["code"] in {
+        "accepted_review_snapshot_required",
+        "legacy_packet_requires_reattestation",
+    }
+
+
+def test_legacy_migration_requires_exact_sealed_corpus_reattestation(monkeypatch, tmp_path):
+    _env(monkeypatch, tmp_path)
+    client = TestClient(app)
+    aid = _create_agreement(client)
+    sealed = _corpus("LEGACY")
+    from backend.services.agreement_draft_store import load_draft, save_draft
+
+    draft = load_draft(aid)
+    # Pure pre-cutover: sealed packet, empty snapshot registry.
+    draft["vs01_signing_packet_v1"] = {
+        "document_id": "doc_snap_auth",
+        "packet_revision": "rev_1",
+        "packet_state": "active",
+        "portable": _portable(aid, sealed),
+    }
+    draft["canonical_review_snapshots_v1"] = None
+    draft["accepted_review_snapshot_v1"] = None
+    save_draft({**draft, "id": aid})
+
+    wrong = client.post(
+        f"/api/agreements/{aid}/canonical-review-snapshot/migrate-legacy",
+        headers=_ORG_H,
+        json={"sealed_corpus_plain": _corpus("WRONG")},
+    )
+    assert wrong.status_code == 409
+    assert wrong.json()["detail"]["code"] == "legacy_sealed_corpus_mismatch"
+
+    ok = client.post(
+        f"/api/agreements/{aid}/canonical-review-snapshot/migrate-legacy",
+        headers=_ORG_H,
+        json={
+            "sealed_corpus_plain": sealed,
+            "claimed_digest": sha256_hex_text(sealed.strip()),
+        },
+    )
+    assert ok.status_code == 200, ok.text
+    accepted = ok.json()["accepted"]
+    assert accepted["corpus_sha256"] == sha256_hex_text(sealed.strip())
+    assert accepted["status"] == "accepted"
+    got = client.get(f"/api/agreements/{aid}/canonical-review-snapshot", headers=_ORG_H)
+    assert got.status_code == 200
+    assert got.json()["snapshot"]["corpus_plain"] == sealed.strip()
+
+
+def test_dispatch_before_accept_fails_closed_even_with_pending(monkeypatch, tmp_path):
+    """Prepare/dispatch cannot proceed before awaited server acceptance."""
+    _env(monkeypatch, tmp_path)
+    client = TestClient(app)
+    aid = _create_agreement(client)
+    corpus = _corpus("A")
+    pending = client.post(
+        f"/api/agreements/{aid}/canonical-review-snapshot",
+        headers=_ORG_H,
+        json={"corpus_plain": corpus},
+    )
+    assert pending.status_code == 200
+    res = _dispatch(client, aid, _portable(aid, corpus), corpus)
+    assert res.status_code == 400
+    assert res.json()["detail"]["code"] == "accepted_review_snapshot_required"
+
+
+def test_immutability_assertion_wired_on_registry_write(monkeypatch, tmp_path):
+    """Mutating accepted corpus in registry via create path fails closed."""
+    _env(monkeypatch, tmp_path)
+    client = TestClient(app)
+    aid = _create_agreement(client)
+    corpus = _corpus("A")
+    accepted = _persist_and_accept(client, aid, corpus)
+    from backend.services.agreement_draft_store import load_draft, save_draft
+    from backend.services.accepted_review_snapshot import assert_snapshot_immutable_post_accept
+
+    draft = load_draft(aid)
+    reg = dict(draft["canonical_review_snapshots_v1"])
+    mutated = dict(reg["snapshots"][accepted["snapshot_id"]])
+    mutated["corpusPlain"] = (corpus + "\nMUTATED").strip()
+    reg["snapshots"] = {**reg["snapshots"], accepted["snapshot_id"]: mutated}
+    ok, err = assert_snapshot_immutable_post_accept(draft=draft, incoming_registry=reg)
+    assert ok is False
+    assert err == "accepted_snapshot_mutation_rejected"
+    # Creating a new pending must not be able to smuggle mutated accepted bytes through apply.
+    # (Service create keeps prior accepted intact; apply asserts immutability.)
+    other = _corpus("B")
+    create = client.post(
+        f"/api/agreements/{aid}/canonical-review-snapshot",
+        headers=_ORG_H,
+        json={"corpus_plain": other},
+    )
+    assert create.status_code == 200
+    reloaded = load_draft(aid)
+    prior = reloaded["accepted_review_snapshot_v1"]
+    assert prior["corpusPlain"] == corpus.strip()
+    assert prior["corpusSha256"] == accepted["corpus_sha256"]
