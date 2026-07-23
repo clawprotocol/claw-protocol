@@ -11,7 +11,6 @@ import pytest
 from fastapi.testclient import TestClient
 
 from backend.main import app
-from backend.security.recipient_access_token import mint_recipient_access_token
 
 
 _SECRET = "unit-test-commercial-read-scope-secret"
@@ -152,16 +151,19 @@ def test_valid_recipient_token_scoped_to_agreement(monkeypatch, client: TestClie
     aid = _create_owned_draft(client, user="owner-a")
     aid_other = _create_owned_draft(client, user="owner-b", title="Other")
 
-    tok = mint_recipient_access_token(
-        secret=_SECRET.encode("utf-8"),
-        agreement_id=aid,
-        mode="review",
-        role="signer",
-        locked_version_id="v1",
-        recipient_party_id="p2",
-        inviter_display_name="Owner",
-        ttl_seconds=3600,
+    # Mint via authorized API so recipient_delivery_v1 records the JTI (commercial fail-closed).
+    minted = client.post(
+        f"/api/agreements/{aid}/recipient-access-token",
+        headers=_owner("owner-a"),
+        json={
+            "mode": "review",
+            "role": "signer",
+            "recipient_party_id": "p2",
+            "inviter_display_name": "Owner",
+        },
     )
+    assert minted.status_code == 200, minted.text
+    tok = minted.json()["token"]
     _enable_commercial_economics_off(monkeypatch)
 
     ok = client.get(

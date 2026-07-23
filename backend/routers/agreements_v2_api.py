@@ -173,6 +173,44 @@ def _save_draft_sync(
     save_draft_and_sync_dashboard_metadata(draft, subject_ref=subj)
 
 
+def _save_draft_registry_cas_sync(
+    draft: Dict[str, Any],
+    request: Optional[Request],
+    *,
+    expected_revision: int,
+    subject_ref: Optional[str] = None,
+) -> None:
+    """
+    CAS-persist a draft after an authorized recipient_delivery_v1 mutation.
+
+    On revision conflict, raises HTTP 409 (reload/retry). Dashboard sync does not
+    perform a second last-write-wins draft write.
+    """
+    from backend.services.agreement_draft_store import DraftCasConflictError, save_draft_cas
+    from backend.lawdog_dashboard.draft_persistence import (
+        resolve_organization_id_for_draft_sync,
+        sync_agreement_draft_to_supabase,
+    )
+
+    try:
+        save_draft_cas(draft, expected_revision=int(expected_revision))
+    except DraftCasConflictError:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "invite_replacement_conflict",
+                "message": "Invite registry changed concurrently; reload and retry.",
+                "retryable": True,
+            },
+        )
+    subj = (subject_ref or "").strip() or None
+    if not subj and request is not None:
+        subj = resolve_subject_from_request(request)
+    org_id = resolve_organization_id_for_draft_sync(draft, subject_ref=subj)
+    if org_id:
+        sync_agreement_draft_to_supabase(organization_id=org_id, draft=draft)
+
+
 def _openai_key_diagnostics() -> Dict[str, Any]:
     """
     For logs only: key presence, length, last 4 chars of key — never log the full secret.
@@ -5808,25 +5846,44 @@ def recipient_access_validate(token: str = "", agreement_id: str = "") -> Dict[s
         log_validation=log_ok,
     )
     try:
-        from backend.services.agreement_draft_store import load_draft, save_draft
-        from backend.services.recipient_delivery_registry import extract_jti_from_token, record_invite_opened
+        from backend.services.agreement_draft_store import (
+            DraftCasConflictError,
+            load_draft,
+            save_draft_cas,
+        )
+        from backend.services.recipient_delivery_registry import (
+            extract_jti_from_token,
+            get_registry_revision,
+            record_invite_opened,
+        )
 
         aid = str(out.get("agreement_id") or "").strip()
         pid = str(out.get("recipient_party_id") or "").strip()
         mode = str(out.get("mode") or "").strip()
         if aid and pid and mode in ("review", "sign"):
             phase = "review" if mode == "review" else "signing"
-            raw = load_draft(aid)
-            audit = list(raw.get("audit_log") or [])
-            record_invite_opened(
-                raw,
-                phase=phase,
-                participant_id=pid,
-                jti=extract_jti_from_token(token),
-                audit_log=audit,
-            )
-            raw["audit_log"] = audit
-            save_draft({**raw, "id": aid})
+            jti = extract_jti_from_token(token)
+            # Authorized CAS path: open telemetry bumps registry revision and must
+            # not LWW-overwrite lifecycle/JTI state (and cannot be dropped by
+            # generic whole-blob preservation).
+            for _attempt in range(2):
+                raw = load_draft(aid)
+                base_rev = get_registry_revision(raw)
+                audit = list(raw.get("audit_log") or [])
+                record_invite_opened(
+                    raw,
+                    phase=phase,
+                    participant_id=pid,
+                    jti=jti,
+                    audit_log=audit,
+                )
+                raw["audit_log"] = audit
+                try:
+                    save_draft_cas({**raw, "id": aid}, expected_revision=base_rev)
+                    break
+                except DraftCasConflictError:
+                    if _attempt >= 1:
+                        raise
     except Exception:
         pass
     return {
@@ -6244,8 +6301,11 @@ def post_recipient_access_token(
         )
 
         try:
+            from backend.services.recipient_delivery_registry import get_registry_revision
+
             draft_for_reg = _load_or_404(agreement_id)
             draft_dict = draft_for_reg.model_dump(mode="json")
+            base_rev = get_registry_revision(draft_dict)
             phase = normalize_delivery_phase("signing" if body.mode == "sign" else "review")
             jti = extract_jti_from_token(token)
             audit_log = list(draft_dict.get("audit_log") or [])
@@ -6258,7 +6318,7 @@ def post_recipient_access_token(
                 audit_log=audit_log,
             )
             draft_dict["audit_log"] = audit_log
-            _save_draft_sync(draft_dict, request)
+            _save_draft_registry_cas_sync(draft_dict, request, expected_revision=base_rev)
         except RecipientInviteRegistryPersistError as exc:
             logging.getLogger(__name__).exception(
                 "recipient_token_jti_registry_failed agreement_id=%s code=%s",
@@ -6388,7 +6448,10 @@ def post_agreement_review_sent(agreement_id: str, request: Request) -> Dict[str,
                 resolve_subject_from_request(request),
             )
         else:
+            from backend.services.recipient_delivery_registry import get_registry_revision
+
             email_draft = _load_or_404(agreement_id).model_dump(mode="json")
+            base_rev = get_registry_revision(email_draft)
             delivery_marker = maybe_send_review_invites_after_review_sent(
                 agreement_id=agreement_id,
                 draft=email_draft,
@@ -6403,7 +6466,13 @@ def post_agreement_review_sent(agreement_id: str, request: Request) -> Dict[str,
                 if email_draft.get("audit_log"):
                     marked["audit_log"] = email_draft["audit_log"]
                 next_draft = AgreementDraft.model_validate(marked)
-                _save_draft_sync(next_draft.model_dump(), request)
+                dump = next_draft.model_dump()
+                if get_registry_revision(dump) > base_rev:
+                    _save_draft_registry_cas_sync(
+                        dump, request, expected_revision=base_rev
+                    )
+                else:
+                    _save_draft_sync(dump, request)
     except Exception:
         pass
     return {"ok": True, "draft": next_draft.model_dump()}
@@ -7006,7 +7075,10 @@ def post_agreement_signing_links_sent(
             maybe_send_signing_invites_after_packet_prepared,
         )
 
+        from backend.services.recipient_delivery_registry import get_registry_revision
+
         email_draft = draft.model_dump(mode="json")
+        base_rev = get_registry_revision(email_draft)
         try:
             notify_audit = maybe_send_signing_invites_after_packet_prepared(
                 agreement_id=agreement_id,
@@ -7057,8 +7129,12 @@ def post_agreement_signing_links_sent(
             if email_draft.get("recipient_delivery_v1"):
                 merge_fields["recipient_delivery_v1"] = email_draft["recipient_delivery_v1"]
             next_draft = _merge_agreement_draft(draft, **merge_fields)
-            _save_draft_sync(next_draft.model_dump(), request)
-            return {"ok": True, "sent_count": sent_count, "skip_reason": None, "draft": next_draft.model_dump()}
+            dump = next_draft.model_dump()
+            if get_registry_revision(dump) > base_rev:
+                _save_draft_registry_cas_sync(dump, request, expected_revision=base_rev)
+            else:
+                _save_draft_sync(dump, request)
+            return {"ok": True, "sent_count": sent_count, "skip_reason": None, "draft": dump}
         skip_reason = "not_sent"
     except HTTPException:
         raise
@@ -7216,7 +7292,10 @@ def post_signing_packet_cancel(
         )
     )
     # Invalidate every live signing JTI for this agreement (idempotent).
+    from backend.services.recipient_delivery_registry import get_registry_revision
+
     draft_dict = draft.model_dump(mode="json")
+    base_rev = get_registry_revision(draft_dict)
     draft_dict["vs01_signing_packet_v1"] = stored
     if frozen_next:
         draft_dict["frozen_signing_authority_v1"] = frozen_next
@@ -7226,8 +7305,13 @@ def post_signing_packet_cancel(
     )
     draft_dict["updated_at"] = now
     next_draft = AgreementDraft.model_validate(draft_dict)
-    _save_draft_sync(next_draft.model_dump(), request)
-    return {"ok": True, "packet_state": PACKET_STATE_CANCELLED, "draft": next_draft.model_dump()}
+    dump = next_draft.model_dump()
+    if get_registry_revision(dump) > base_rev:
+        _save_draft_registry_cas_sync(dump, request, expected_revision=base_rev)
+    else:
+        # No recipient rows mutated; preserve-on-write still protects newer registry.
+        _save_draft_sync(dump, request)
+    return {"ok": True, "packet_state": PACKET_STATE_CANCELLED, "draft": dump}
 
 
 @router.post("/{agreement_id}/signing-packet/reissue")
@@ -7341,10 +7425,14 @@ def post_signing_packet_reissue(
             },
         )
     )
-    from backend.services.recipient_delivery_registry import supersede_all_phase_invites
+    from backend.services.recipient_delivery_registry import (
+        get_registry_revision,
+        supersede_all_phase_invites,
+    )
 
     # Prior-revision signing JTIs must die before the new packet is active.
     draft_dict = draft.model_dump(mode="json")
+    base_rev = get_registry_revision(draft_dict)
     draft_dict["vs01_signing_packet_v1"] = stored
     draft_dict["frozen_signing_authority_v1"] = frozen_to_store
     draft_dict["audit_log"] = audit
@@ -7353,12 +7441,16 @@ def post_signing_packet_reissue(
     )
     draft_dict["updated_at"] = now
     next_draft = AgreementDraft.model_validate(draft_dict)
-    _save_draft_sync(next_draft.model_dump(), request)
+    dump = next_draft.model_dump()
+    if get_registry_revision(dump) > base_rev:
+        _save_draft_registry_cas_sync(dump, request, expected_revision=base_rev)
+    else:
+        _save_draft_sync(dump, request)
     return {
         "ok": True,
         "packet_state": PACKET_STATE_ACTIVE,
         "superseded_revision": prior_rev or None,
-        "draft": next_draft.model_dump(),
+        "draft": dump,
     }
 
 
@@ -7581,7 +7673,11 @@ def post_vs01_signer_complete(
     completion_emails_sent = completion_emails_already_sent(outcome.audit)
 
     if outcome.audit_mutated:
+        from backend.services.recipient_delivery_registry import get_registry_revision
+
         draft_dict_to_save = outcome.draft_dict
+        base_rev = get_registry_revision(draft_dict_to_save)
+        registry_mutated = False
         # Replay protection: consume/supersede active signing invite JTI after recipient complete.
         # Phase must be "signing" to match validate_recipient_access_token_for_agreement.
         if auth_mode == "recipient" and participant_id:
@@ -7597,6 +7693,7 @@ def post_vs01_signer_complete(
                 jti=extract_jti_from_token(recipient_token_raw or ""),
                 audit_log=list(outcome.audit),
             )
+            registry_mutated = True
         next_draft = _merge_agreement_draft(
             fresh,
             updated_at=now,
@@ -7604,7 +7701,12 @@ def post_vs01_signer_complete(
             vs01_signing_packet_v1=draft_dict_to_save.get("vs01_signing_packet_v1"),
             recipient_delivery_v1=draft_dict_to_save.get("recipient_delivery_v1"),
         )
-        _save_draft_sync(next_draft.model_dump(), request)
+        if registry_mutated:
+            _save_draft_registry_cas_sync(
+                next_draft.model_dump(), request, expected_revision=base_rev
+            )
+        else:
+            _save_draft_sync(next_draft.model_dump(), request)
 
         if outcome.newly_finalized:
             assert_can_complete_agreement(agreement_id=aid)
@@ -7887,19 +7989,73 @@ def post_recipient_invite_resend(
     _owner_mutation_guards(request, agreement_id, surface="recipient_invite_resend")
     draft = _load_or_404(agreement_id)
     _assert_negotiation_not_locked(agreement_id)
+    from backend.services.agreement_draft_store import DraftCasConflictError, save_draft_cas
     from backend.services.recipient_invite_resend import resend_recipient_invite
-
-    next_data, meta = resend_recipient_invite(
-        agreement_id=agreement_id,
-        draft=draft.model_dump(mode="json"),
-        phase=body.phase,
-        participant_id=body.participant_id,
-        signing_url=body.signing_url,
-        signer_role_id=body.signer_role_id,
-        org_id=resolve_subject_from_request(request),
+    from backend.lawdog_dashboard.draft_persistence import (
+        resolve_organization_id_for_draft_sync,
+        sync_agreement_draft_to_supabase,
     )
+
+    subject = resolve_subject_from_request(request)
+
+    def _persist(d: Dict[str, Any], expected_revision: int = 0) -> None:
+        # CAS write already performed by service; sync dashboard metadata only.
+        org_id = resolve_organization_id_for_draft_sync(d, subject_ref=subject)
+        if org_id:
+            sync_agreement_draft_to_supabase(organization_id=org_id, draft=d)
+
+    try:
+        next_data, meta = resend_recipient_invite(
+            agreement_id=agreement_id,
+            draft=draft.model_dump(mode="json"),
+            phase=body.phase,
+            participant_id=body.participant_id,
+            signing_url=body.signing_url,
+            signer_role_id=body.signer_role_id,
+            org_id=subject,
+            persist=_persist,
+        )
+    except HTTPException:
+        raise
     next_draft = AgreementDraft.model_validate(next_data)
-    _save_draft_sync(next_draft.model_dump(), request)
+    if meta.get("needs_final_cas") and not meta.get("persisted"):
+        try:
+            save_draft_cas(
+                next_draft.model_dump(),
+                expected_revision=int(meta.get("cas_expected_revision") or 0),
+            )
+            _persist(next_draft.model_dump(), expected_revision=int(meta.get("cas_expected_revision") or 0))
+        except DraftCasConflictError:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": "invite_replacement_conflict",
+                    "message": "Invite registry changed concurrently; reload and retry.",
+                    "retryable": True,
+                },
+            )
+    if meta.get("code") == "invite_replacement_conflict":
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "invite_replacement_conflict",
+                "message": "Invite registry changed concurrently; reload and retry.",
+                "retryable": True,
+                "preserved_active": True,
+            },
+        )
+    if meta.get("retryable") and not meta.get("replacement_activated") and meta.get("code"):
+        # Preserve prior invite on failure; surface retryable state to the client.
+        if not meta.get("sent_invite"):
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "code": meta.get("code") or "invite_replacement_failed",
+                    "message": "Invite resend could not complete; the prior invite remains active. Retry shortly.",
+                    "retryable": True,
+                    "preserved_active": True,
+                },
+            )
     return {"ok": True, "draft": next_draft.model_dump(), **meta}
 
 
@@ -7921,6 +8077,7 @@ def post_recipient_invite_revoke(
         raise HTTPException(status_code=403, detail="verifier_only")
     _owner_mutation_guards(request, agreement_id, surface="recipient_invite_revoke")
     from backend.services.recipient_delivery_registry import (
+        get_registry_revision,
         normalize_delivery_phase,
         supersede_active_invite,
     )
@@ -7932,8 +8089,10 @@ def post_recipient_invite_revoke(
     draft = _load_or_404(agreement_id)
 
     audit = list(draft.audit_log or [])
+    raw = draft.model_dump(mode="json")
+    base_rev = get_registry_revision(raw)
     next_data = supersede_active_invite(
-        draft.model_dump(mode="json"),
+        raw,
         phase=phase,
         participant_id=participant_id,
         audit_log=audit,
@@ -7954,7 +8113,9 @@ def post_recipient_invite_revoke(
         )
         next_data["audit_log"] = audit
     next_draft = AgreementDraft.model_validate(next_data)
-    _save_draft_sync(next_draft.model_dump(), request)
+    _save_draft_registry_cas_sync(
+        next_draft.model_dump(), request, expected_revision=base_rev
+    )
     return {
         "ok": True,
         "revoked": True,
@@ -7978,6 +8139,17 @@ def post_review_recipient_email_correction(
     _assert_negotiation_not_locked(agreement_id)
     _assert_draft_mutable_after_signatures(draft)
     from backend.services.recipient_email_correction import correct_review_recipient_email
+    from backend.lawdog_dashboard.draft_persistence import (
+        resolve_organization_id_for_draft_sync,
+        sync_agreement_draft_to_supabase,
+    )
+
+    subject = resolve_subject_from_request(request)
+
+    def _persist(d: Dict[str, Any], expected_revision: int = 0) -> None:
+        org_id = resolve_organization_id_for_draft_sync(d, subject_ref=subject)
+        if org_id:
+            sync_agreement_draft_to_supabase(organization_id=org_id, draft=d)
 
     next_data, meta = correct_review_recipient_email(
         agreement_id=agreement_id,
@@ -7985,10 +8157,35 @@ def post_review_recipient_email_correction(
         participant_id=body.participant_id,
         new_email=body.new_email,
         resend_invite=body.resend_invite,
-        org_id=resolve_subject_from_request(request),
+        org_id=subject,
+        persist=_persist,
     )
     next_draft = AgreementDraft.model_validate(next_data)
-    _save_draft_sync(next_draft.model_dump(), request)
+    if meta.get("code") == "invite_replacement_conflict":
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "invite_replacement_conflict",
+                "message": "Invite registry changed concurrently; reload and retry.",
+                "retryable": True,
+                "old_address_authorized": False,
+                "correction_pending": True,
+            },
+        )
+    if meta.get("correction_pending") and meta.get("retryable") and meta.get("code"):
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": meta.get("code") or "correction_pending",
+                "message": (
+                    "Email correction revoked the old invite but could not finish "
+                    "replacement delivery. The old address is not authorized; retry or contact support."
+                ),
+                "retryable": True,
+                "old_address_authorized": False,
+                "correction_pending": True,
+            },
+        )
     return {"ok": True, "draft": next_draft.model_dump(), **meta}
 
 
@@ -8005,6 +8202,17 @@ def post_signing_recipient_email_correction(
     draft = _load_or_404(agreement_id)
     _assert_negotiation_not_locked(agreement_id)
     from backend.services.recipient_email_correction import correct_signing_recipient_email
+    from backend.lawdog_dashboard.draft_persistence import (
+        resolve_organization_id_for_draft_sync,
+        sync_agreement_draft_to_supabase,
+    )
+
+    subject = resolve_subject_from_request(request)
+
+    def _persist(d: Dict[str, Any], expected_revision: int = 0) -> None:
+        org_id = resolve_organization_id_for_draft_sync(d, subject_ref=subject)
+        if org_id:
+            sync_agreement_draft_to_supabase(organization_id=org_id, draft=d)
 
     next_data, meta = correct_signing_recipient_email(
         agreement_id=agreement_id,
@@ -8014,10 +8222,35 @@ def post_signing_recipient_email_correction(
         signer_role_id=body.signer_role_id,
         signing_url=body.signing_url,
         resend_invite=body.resend_invite,
-        org_id=resolve_subject_from_request(request),
+        org_id=subject,
+        persist=_persist,
     )
     next_draft = AgreementDraft.model_validate(next_data)
-    _save_draft_sync(next_draft.model_dump(), request)
+    if meta.get("code") == "invite_replacement_conflict":
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "invite_replacement_conflict",
+                "message": "Invite registry changed concurrently; reload and retry.",
+                "retryable": True,
+                "old_address_authorized": False,
+                "correction_pending": True,
+            },
+        )
+    if meta.get("correction_pending") and meta.get("retryable") and meta.get("code"):
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": meta.get("code") or "correction_pending",
+                "message": (
+                    "Email correction revoked the old invite but could not finish "
+                    "replacement delivery. The old address is not authorized; retry or contact support."
+                ),
+                "retryable": True,
+                "old_address_authorized": False,
+                "correction_pending": True,
+            },
+        )
     return {"ok": True, "draft": next_draft.model_dump(), **meta}
 
 

@@ -277,9 +277,13 @@ def send_signing_invite_to_target(
     target: Dict[str, Any],
     packet_revision: str | None = None,
     org_id: str | None = None,
+    bind_registry: bool = True,
 ) -> bool:
     """
     Send one signing invite (resend / corrected email). Bypasses bulk idempotency guard.
+
+    When ``bind_registry`` is False, skips active-JTI registration (replacement lifecycle
+    stages pending separately, then activates after successful delivery).
 
     Never raises. Returns True when Resend accepted the send.
     """
@@ -310,7 +314,7 @@ def send_signing_invite_to_target(
     commercial = commercial_mode_enforced()
     if commercial and not jti:
         return False
-    if jti:
+    if jti and bind_registry:
         if not participant_id:
             return False
         try:

@@ -12,9 +12,13 @@ import pytest
 from fastapi.testclient import TestClient
 
 from backend.main import app
-from backend.services.agreement_draft_store import load_draft, save_draft
+from backend.services.agreement_draft_store import load_draft, save_draft, save_draft_cas
 from backend.security.recipient_access_token import mint_recipient_access_token
-from backend.services.recipient_delivery_registry import extract_jti_from_token, record_invite_sent
+from backend.services.recipient_delivery_registry import (
+    extract_jti_from_token,
+    get_registry_revision,
+    record_invite_sent,
+)
 
 
 _SECRET = "unit-test-commercial-hardening-secret"
@@ -231,6 +235,7 @@ def test_signer_complete_without_portable_requires_accepted_snapshot(client: Tes
         recipient_party_id="p2",
     )
     draft = load_draft(aid)
+    base_rev = get_registry_revision(draft)
     record_invite_sent(
         draft,
         phase="signing",
@@ -239,7 +244,7 @@ def test_signer_complete_without_portable_requires_accepted_snapshot(client: Tes
         email="b@x.com",
         audit_log=draft.setdefault("audit_log", []),
     )
-    save_draft(draft)
+    save_draft_cas(draft, expected_revision=base_rev)
     res = client.post(
         f"/api/agreements/{aid}/vs01-signer-complete",
         headers={"X-Claw-Recipient-Access-Token": tok},

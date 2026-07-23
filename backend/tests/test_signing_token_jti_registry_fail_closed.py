@@ -140,7 +140,7 @@ def test_commercial_review_mint_registry_failure_returns_no_token(client: TestCl
     def _boom(*_a, **_k):
         raise OSError("disk full")
 
-    monkeypatch.setattr("backend.routers.agreements_v2_api._save_draft_sync", _boom)
+    monkeypatch.setattr("backend.routers.agreements_v2_api._save_draft_registry_cas_sync", _boom)
     mint = client.post(
         f"/api/agreements/{aid}/recipient-access-token",
         headers=_ORG,
@@ -159,7 +159,7 @@ def test_sign_mint_registry_save_failure_returns_no_token(client: TestClient, mo
     def _boom(*_a, **_k):
         raise OSError("disk full simulating registry persist failure")
 
-    monkeypatch.setattr("backend.routers.agreements_v2_api._save_draft_sync", _boom)
+    monkeypatch.setattr("backend.routers.agreements_v2_api._save_draft_registry_cas_sync", _boom)
 
     mint = client.post(
         f"/api/agreements/{aid}/recipient-access-token",
@@ -204,7 +204,7 @@ def test_sign_mint_retry_after_storage_recovery_succeeds(client: TestClient, mon
 
     import backend.routers.agreements_v2_api as api
 
-    real_save = api._save_draft_sync
+    real_save = api._save_draft_registry_cas_sync
 
     def _flaky(*args, **kwargs):
         calls["n"] += 1
@@ -212,7 +212,7 @@ def test_sign_mint_retry_after_storage_recovery_succeeds(client: TestClient, mon
             raise OSError("transient persist failure")
         return real_save(*args, **kwargs)
 
-    monkeypatch.setattr(api, "_save_draft_sync", _flaky)
+    monkeypatch.setattr(api, "_save_draft_registry_cas_sync", _flaky)
 
     first = client.post(
         f"/api/agreements/{aid}/recipient-access-token",
@@ -464,20 +464,16 @@ def test_reissue_supersedes_without_leaving_dual_active_jtis(client: TestClient)
     j1 = extract_jti_from_token(t1.json()["token"])
 
     draft = load_draft(aid)
-    record_invite_sent(
-        draft,
-        phase="signing",
-        participant_id="p2",
-        jti=j1,
-        email="cp@example.com",
-        audit_log=draft.setdefault("audit_log", []),
-    )
     # Simulate owner cancel/reissue path: supersede then mint fresh.
-    from backend.services.recipient_delivery_registry import supersede_active_invite
-    from backend.services.agreement_draft_store import save_draft
+    from backend.services.recipient_delivery_registry import (
+        get_registry_revision,
+        supersede_active_invite,
+    )
+    from backend.services.agreement_draft_store import save_draft_cas
 
+    base_rev = get_registry_revision(draft)
     supersede_active_invite(draft, phase="signing", participant_id="p2", audit_log=draft["audit_log"])
-    save_draft(draft)
+    save_draft_cas(draft, expected_revision=base_rev)
 
     t2 = client.post(
         f"/api/agreements/{aid}/recipient-access-token",

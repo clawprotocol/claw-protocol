@@ -366,7 +366,7 @@ def test_recipient_revise_rejects_sign_mode_token(monkeypatch, tmp_path):
     mint = client.post(
         f"/api/agreements/{aid}/recipient-access-token",
         headers=_ORG_A,
-        json={"mode": "sign", "role": "signer", "recipient_party_id": "p-acme"},
+        json={"mode": "sign", "role": "signer", "recipient_party_id": "p-r1"},
     )
     assert mint.status_code == 200
     sign_tok = mint.json()["token"]

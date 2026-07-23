@@ -12,11 +12,51 @@ draft (JSONB payload) in schema ``lawdog_agreements`` (override with ``CLAW_PG_S
 import json
 import os
 import tempfile
+import threading
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from backend.utils.canon_json import canon_json_bytes
+
+try:
+    import fcntl
+except ImportError:  # pragma: no cover — non-POSIX
+    fcntl = None  # type: ignore[assignment]
+
+
+class DraftCasConflictError(RuntimeError):
+    """Compare-and-swap draft save rejected due to registry revision mismatch."""
+
+    def __init__(self, code: str = "invite_replacement_conflict", message: str | None = None) -> None:
+        self.code = (code or "invite_replacement_conflict").strip()
+        super().__init__(message or self.code)
+
+
+_FILE_LOCKS: dict[str, threading.RLock] = {}
+_FILE_LOCKS_GUARD = threading.Lock()
+
+
+def _thread_lock_for(agreement_id: str) -> threading.RLock:
+    aid = (agreement_id or "").strip()
+    with _FILE_LOCKS_GUARD:
+        lock = _FILE_LOCKS.get(aid)
+        if lock is None:
+            lock = threading.RLock()
+            _FILE_LOCKS[aid] = lock
+        return lock
+
+
+def _registry_revision_from_draft(draft: Optional[Dict[str, Any]]) -> int:
+    if not isinstance(draft, dict):
+        return 0
+    reg = draft.get("recipient_delivery_v1")
+    if not isinstance(reg, dict):
+        return 0
+    try:
+        return int(reg.get("revision") or 0)
+    except (TypeError, ValueError):
+        return 0
 
 
 def _repo_root() -> Path:
@@ -62,13 +102,40 @@ def draft_exists(agreement_id: str) -> bool:
     return _agreement_path(aid).exists()
 
 
-def save_draft(draft: Dict[str, Any]) -> None:
-    agreement_id = str(draft.get("id") or "").strip()
-    if not agreement_id:
-        raise ValueError("missing_id")
-    if _use_postgres():
-        _save_draft_postgres(draft, agreement_id)
-        return
+def _preserve_security_owned_recipient_delivery(
+    incoming: Dict[str, Any],
+    durable: Optional[Dict[str, Any]],
+) -> bool:
+    """
+    Treat ``recipient_delivery_v1`` as a security-owned subdocument on generic saves.
+
+    - If durable registry exists and incoming differs (any revision), keep durable exactly.
+    - If durable has no registry, strip any incoming registry (CAS-only creation).
+    - Never trust equal/higher incoming revision as authority for registry content.
+
+    Returns True when incoming was modified.
+    """
+    import copy
+
+    incoming_reg = incoming.get("recipient_delivery_v1")
+    durable_reg = durable.get("recipient_delivery_v1") if isinstance(durable, dict) else None
+    if isinstance(durable_reg, dict):
+        if incoming_reg != durable_reg:
+            incoming["recipient_delivery_v1"] = copy.deepcopy(durable_reg)
+            return True
+        return False
+    # No durable registry: generic writers may not create one.
+    if isinstance(incoming_reg, dict):
+        incoming.pop("recipient_delivery_v1", None)
+        return True
+    return False
+
+
+# Backward-compatible alias for callers/tests that still reference the prior name.
+_preserve_newer_recipient_delivery = _preserve_security_owned_recipient_delivery
+
+
+def _write_draft_file_unlocked(draft: Dict[str, Any], agreement_id: str) -> None:
     path = _agreement_path(agreement_id)
     data = canon_json_bytes(draft)
     fd, tmp_name = tempfile.mkstemp(prefix=f"{agreement_id}_", suffix=".tmp", dir=str(path.parent))
@@ -83,7 +150,210 @@ def save_draft(draft: Dict[str, Any]) -> None:
             os.unlink(tmp_name)
 
 
-def _save_draft_postgres(draft: Dict[str, Any], agreement_id: str) -> None:
+def _load_draft_file_unlocked(agreement_id: str) -> Optional[Dict[str, Any]]:
+    path = _agreement_path(agreement_id)
+    if not path.exists():
+        return None
+    raw = path.read_text(encoding="utf-8")
+    parsed = json.loads(raw)
+    if not isinstance(parsed, dict):
+        raise ValueError("invalid_agreement_payload")
+    return parsed
+
+
+def save_draft(
+    draft: Dict[str, Any],
+    *,
+    preserve_newer_recipient_delivery: bool = True,
+) -> None:
+    """
+    Persist an agreement draft.
+
+    When ``preserve_newer_recipient_delivery`` is True (default), generic writers cannot
+    replace, clear, weaken, or create ``recipient_delivery_v1`` — the durable security-owned
+    registry blob is preserved under lock regardless of incoming revision. Authorized CAS
+    registry mutations use ``save_draft_cas`` (or call with preservation disabled only for
+    controlled test seeding).
+    """
+    agreement_id = str(draft.get("id") or "").strip()
+    if not agreement_id:
+        raise ValueError("missing_id")
+
+    if not preserve_newer_recipient_delivery:
+        if _use_postgres():
+            _save_draft_postgres_raw(draft, agreement_id)
+        else:
+            _write_draft_file_unlocked(draft, agreement_id)
+        return
+
+    lock = _thread_lock_for(agreement_id)
+    with lock:
+        if _use_postgres():
+            _save_draft_postgres_preserving(draft, agreement_id)
+            return
+        path = _agreement_path(agreement_id)
+        lock_path = path.with_suffix(path.suffix + ".lock")
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(lock_path, "a+", encoding="utf-8") as lf:
+            if fcntl is not None:
+                fcntl.flock(lf.fileno(), fcntl.LOCK_EX)
+            try:
+                durable = _load_draft_file_unlocked(agreement_id)
+                _preserve_security_owned_recipient_delivery(draft, durable)
+                _write_draft_file_unlocked(draft, agreement_id)
+            finally:
+                if fcntl is not None:
+                    fcntl.flock(lf.fileno(), fcntl.LOCK_UN)
+
+
+def save_draft_cas(draft: Dict[str, Any], *, expected_revision: int) -> None:
+    """
+    Persist ``draft`` only when on-disk ``recipient_delivery_v1.revision`` equals
+    ``expected_revision`` (the revision observed before the in-memory transition).
+
+    The draft being saved must already contain a bumped registry revision
+    strictly greater than ``expected_revision``. On conflict, raises
+    ``DraftCasConflictError`` and leaves storage unchanged.
+    """
+    agreement_id = str(draft.get("id") or "").strip()
+    if not agreement_id:
+        raise ValueError("missing_id")
+    new_rev = _registry_revision_from_draft(draft)
+    try:
+        base = int(expected_revision)
+    except (TypeError, ValueError):
+        base = 0
+    if new_rev <= base:
+        raise DraftCasConflictError(
+            "invite_replacement_conflict",
+            "Draft registry revision was not advanced for CAS persist.",
+        )
+
+    lock = _thread_lock_for(agreement_id)
+    with lock:
+        if _use_postgres():
+            _save_draft_postgres_cas(draft, agreement_id, expected_revision=base)
+            return
+        path = _agreement_path(agreement_id)
+        lock_path = path.with_suffix(path.suffix + ".lock")
+        lock_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(lock_path, "a+", encoding="utf-8") as lf:
+            if fcntl is not None:
+                fcntl.flock(lf.fileno(), fcntl.LOCK_EX)
+            try:
+                current_rev = 0
+                durable = _load_draft_file_unlocked(agreement_id)
+                if durable is not None:
+                    current_rev = _registry_revision_from_draft(durable)
+                if current_rev != base:
+                    raise DraftCasConflictError(
+                        "invite_replacement_conflict",
+                        "Invite registry revision conflict; reload and retry.",
+                    )
+                # CAS already validated revision; write incoming registry authoritatively.
+                _write_draft_file_unlocked(draft, agreement_id)
+            finally:
+                if fcntl is not None:
+                    fcntl.flock(lf.fileno(), fcntl.LOCK_UN)
+
+
+def _save_draft_postgres_cas(
+    draft: Dict[str, Any],
+    agreement_id: str,
+    *,
+    expected_revision: int,
+) -> None:
+    from backend.db.agreement_sql import agreement_postgres_connection, pg_execute
+
+    payload_text = canon_json_bytes(draft).decode("utf-8")
+    now = datetime.now(timezone.utc)
+    with agreement_postgres_connection() as cx:
+        cur = pg_execute(
+            cx,
+            "SELECT payload FROM agreement_drafts WHERE id = ? FOR UPDATE",
+            (agreement_id,),
+        )
+        row = cur.fetchone()
+        current_rev = 0
+        if row:
+            payload = row[0]
+            if isinstance(payload, dict):
+                current = payload
+            else:
+                current = json.loads(str(payload))
+            if not isinstance(current, dict):
+                raise ValueError("invalid_agreement_payload")
+            current_rev = _registry_revision_from_draft(current)
+        if current_rev != int(expected_revision):
+            raise DraftCasConflictError(
+                "invite_replacement_conflict",
+                "Invite registry revision conflict; reload and retry.",
+            )
+        if row:
+            pg_execute(
+                cx,
+                """
+                UPDATE agreement_drafts
+                SET payload = ?::jsonb, updated_at = ?
+                WHERE id = ?
+                """,
+                (payload_text, now, agreement_id),
+            )
+        else:
+            pg_execute(
+                cx,
+                """
+                INSERT INTO agreement_drafts (id, payload, created_at, updated_at)
+                VALUES (?, ?::jsonb, ?, ?)
+                """,
+                (agreement_id, payload_text, now, now),
+            )
+
+
+def _save_draft_postgres_preserving(draft: Dict[str, Any], agreement_id: str) -> None:
+    from backend.db.agreement_sql import agreement_postgres_connection, pg_execute
+
+    now = datetime.now(timezone.utc)
+    with agreement_postgres_connection() as cx:
+        cur = pg_execute(
+            cx,
+            "SELECT payload FROM agreement_drafts WHERE id = ? FOR UPDATE",
+            (agreement_id,),
+        )
+        row = cur.fetchone()
+        durable: Optional[Dict[str, Any]] = None
+        if row:
+            payload = row[0]
+            if isinstance(payload, dict):
+                durable = payload
+            else:
+                durable = json.loads(str(payload))
+            if not isinstance(durable, dict):
+                raise ValueError("invalid_agreement_payload")
+        _preserve_security_owned_recipient_delivery(draft, durable)
+        payload_text = canon_json_bytes(draft).decode("utf-8")
+        if row:
+            pg_execute(
+                cx,
+                """
+                UPDATE agreement_drafts
+                SET payload = ?::jsonb, updated_at = ?
+                WHERE id = ?
+                """,
+                (payload_text, now, agreement_id),
+            )
+        else:
+            pg_execute(
+                cx,
+                """
+                INSERT INTO agreement_drafts (id, payload, created_at, updated_at)
+                VALUES (?, ?::jsonb, ?, ?)
+                """,
+                (agreement_id, payload_text, now, now),
+            )
+
+
+def _save_draft_postgres_raw(draft: Dict[str, Any], agreement_id: str) -> None:
     from backend.db.agreement_sql import agreement_postgres_connection, pg_execute
 
     payload_text = canon_json_bytes(draft).decode("utf-8")
@@ -100,6 +370,10 @@ def _save_draft_postgres(draft: Dict[str, Any], agreement_id: str) -> None:
             """,
             (agreement_id, payload_text, now, now),
         )
+
+
+def _save_draft_postgres(draft: Dict[str, Any], agreement_id: str) -> None:
+    _save_draft_postgres_preserving(draft, agreement_id)
 
 
 def load_draft(agreement_id: str) -> Dict[str, Any]:

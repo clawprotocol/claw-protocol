@@ -122,6 +122,8 @@ def test_signing_recipient_email_corrected_after_invite_sent(
     monkeypatch: pytest.MonkeyPatch, tmp_path
 ) -> None:
     _env_common(monkeypatch, tmp_path)
+    monkeypatch.setenv("CLAW_ENVIRONMENT", "test")
+    monkeypatch.delenv("CLAW_COMMERCIAL_MODE", raising=False)
     client = TestClient(app)
     aid, cp_id, _owner = _create_agreement(client)
     draft = client.get(f"/api/agreements/{aid}", headers=_ORG_H).json()["draft"]
@@ -135,8 +137,21 @@ def test_signing_recipient_email_corrected_after_invite_sent(
         },
     ]
     from backend.services.agreement_draft_store import save_draft
+    from backend.security.recipient_access_token import mint_recipient_access_token
 
     save_draft({**draft, "id": aid})
+    token = mint_recipient_access_token(
+        secret=b"unit-test-signing-invite-secret",
+        agreement_id=aid,
+        locked_version_id="v1",
+        mode="sign",
+        role="signer",
+        ttl_seconds=3600,
+        recipient_party_id=cp_id,
+    )
+    signing_url = (
+        f"https://app.example.com/app/sign/doc_test?vs01_recipient_sign=1&t={token}"
+    )
     with patch("backend.services.email.resend_client.httpx.Client", return_value=_mock_resend_success()):
         res = client.post(
             f"/api/agreements/{aid}/signing-recipient-email",
@@ -145,11 +160,11 @@ def test_signing_recipient_email_corrected_after_invite_sent(
                 "participant_id": cp_id,
                 "new_email": "signer-fixed@example.com",
                 "signer_role_id": "role_cp",
-                "signing_url": "https://app.example.com/app/sign/doc_test?vs01_recipient_sign=1",
+                "signing_url": signing_url,
                 "resend_invite": True,
             },
         )
-    assert res.status_code == 200
+    assert res.status_code == 200, res.text
     payload = res.json()
     assert payload.get("sent_invite") is True
     types = _audit_types(payload["draft"])

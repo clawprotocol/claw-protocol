@@ -827,15 +827,69 @@ def _redact_recipient_emails(targets: List[ReviewInviteTarget]) -> str:
     return ",".join(_redact_to(t.to) for t in targets)
 
 
+def mint_review_invite_token_for_participant(
+    *,
+    agreement_id: str,
+    draft: Dict[str, Any],
+    participant_id: str,
+) -> tuple[str | None, str | None]:
+    """
+    Mint a review invite token for one participant without registry bind or email.
+
+    Returns ``(token, jti)`` or ``(None, None)`` on failure.
+    """
+    aid = (agreement_id or "").strip()
+    pid = (participant_id or "").strip()
+    if not aid or not pid:
+        return None, None
+    if not _draft_has_explicit_owner_party(draft):
+        return None, None
+    targets = _live_resend_review_invite_targets_from_draft(draft)
+    target = next((t for t in targets if (t.recipient_party_id or "") == pid), None)
+    if not target:
+        return None, None
+    try:
+        secret = resolve_signing_token_secret_raw().encode("utf-8")
+    except SigningTokenSecretMissingInProductionError:
+        return None, None
+    lock = read_signing_lock(agreement_id)
+    locked_version_id = str((lock or {}).get("locked_version_id") or "")
+    ttl = _default_recipient_token_ttl_seconds()
+    try:
+        token = mint_recipient_access_token(
+            secret=secret,
+            agreement_id=agreement_id,
+            locked_version_id=locked_version_id,
+            mode="review",
+            role=target.mint_role,
+            ttl_seconds=ttl,
+            recipient_party_id=target.recipient_party_id,
+        )
+    except Exception:  # noqa: BLE001
+        return None, None
+    from backend.services.recipient_delivery_registry import extract_jti_from_token
+
+    jti = extract_jti_from_token(token)
+    if not jti:
+        return None, None
+    return token, jti
+
+
 def send_review_invite_to_participant(
     *,
     agreement_id: str,
     draft: Dict[str, Any],
     participant_id: str,
     org_id: str | None = None,
+    bind_registry: bool = True,
+    token: str | None = None,
 ) -> tuple[bool, str | None]:
     """
     Send a single review invite to one party (used after email correction / resend).
+
+    When ``bind_registry`` is True (default), persists the JTI as active before send.
+    When False, sends an already-minted ``token`` (or mints one) without activating it —
+    used by the same-email replacement lifecycle (pending → deliver → activate).
 
     Never raises. Returns (sent_ok, jti) when Resend accepted the send.
     """
@@ -857,53 +911,46 @@ def send_review_invite_to_participant(
     if not target:
         return False, None
 
-    try:
-        secret = resolve_signing_token_secret_raw().encode("utf-8")
-    except SigningTokenSecretMissingInProductionError:
-        return False, None
-
-    lock = read_signing_lock(agreement_id)
-    locked_version_id = str((lock or {}).get("locked_version_id") or "")
-    ttl = _default_recipient_token_ttl_seconds()
-
-    try:
-        token = mint_recipient_access_token(
-            secret=secret,
-            agreement_id=agreement_id,
-            locked_version_id=locked_version_id,
-            mode="review",
-            role=target.mint_role,
-            ttl_seconds=ttl,
-            recipient_party_id=target.recipient_party_id,
-        )
-    except Exception:  # noqa: BLE001
-        return False, None
-
     from backend.services.recipient_delivery_registry import (
         RecipientInviteRegistryPersistError,
         extract_jti_from_token,
         require_invite_jti_recorded,
     )
 
-    jti = extract_jti_from_token(token)
+    jti: str | None = None
+    if token:
+        jti = extract_jti_from_token(token)
+        if not jti:
+            return False, None
+    else:
+        minted, jti = mint_review_invite_token_for_participant(
+            agreement_id=agreement_id,
+            draft=draft,
+            participant_id=pid,
+        )
+        if not minted or not jti:
+            return False, None
+        token = minted
+
     pid = (target.recipient_party_id or "").strip()
     if not pid or not jti:
         return False, None
-    try:
-        require_invite_jti_recorded(
-            draft,
-            phase="review",
-            participant_id=pid,
-            jti=jti,
-            email=target.to,
-            audit_log=draft.setdefault("audit_log", []),
-        )
-    except RecipientInviteRegistryPersistError:
-        _log.exception(
-            "[review-email-delivery] registry_failed_before_resend agreement_id=%s",
-            aid,
-        )
-        return False, None
+    if bind_registry:
+        try:
+            require_invite_jti_recorded(
+                draft,
+                phase="review",
+                participant_id=pid,
+                jti=jti,
+                email=target.to,
+                audit_log=draft.setdefault("audit_log", []),
+            )
+        except RecipientInviteRegistryPersistError:
+            _log.exception(
+                "[review-email-delivery] registry_failed_before_resend agreement_id=%s",
+                aid,
+            )
+            return False, None
 
     review_url = _build_absolute_review_url(origin, agreement_id, token)
     email = build_review_invite_email(

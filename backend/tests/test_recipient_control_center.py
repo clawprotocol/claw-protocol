@@ -12,9 +12,13 @@ from backend.security.recipient_access_token import (
     RECIPIENT_INVITE_SUPERSEDED,
     mint_recipient_access_token,
 )
-from backend.services.agreement_draft_store import load_draft, save_draft
+from backend.services.agreement_draft_store import load_draft, save_draft, save_draft_cas
 from backend.services.email.signing_delivery import SIGNING_INVITE_EMAILS_SENT_EVENT
-from backend.services.recipient_delivery_registry import extract_jti_from_token, record_invite_sent
+from backend.services.recipient_delivery_registry import (
+    extract_jti_from_token,
+    get_registry_revision,
+    record_invite_sent,
+)
 from backend.config.agreement_signing_token import resolve_signing_token_secret_raw
 
 pytestmark = pytest.mark.unit
@@ -122,6 +126,7 @@ def test_superseded_review_link_blocked(
         recipient_party_id=cp_id,
     )
     draft = load_draft(aid)
+    base_rev = get_registry_revision(draft)
     record_invite_sent(
         draft,
         phase="review",
@@ -130,7 +135,7 @@ def test_superseded_review_link_blocked(
         email="wrong@example.com",
         audit_log=draft.setdefault("audit_log", []),
     )
-    save_draft({**draft, "id": aid})
+    save_draft_cas({**draft, "id": aid}, expected_revision=base_rev)
 
     with patch("backend.services.email.resend_client.httpx.Client", return_value=_mock_resend_success()):
         client.post(
@@ -180,7 +185,8 @@ def test_superseded_signing_link_blocked_on_packet_fetch(
     for p in draft.get("parties") or []:
         if p.get("id") == cp_id:
             p["email"] = "fixed@example.com"
-    save_draft({**draft, "id": aid})
+    # Email-only registry seed (no JTI bump): authorized test escape hatch.
+    save_draft({**draft, "id": aid}, preserve_newer_recipient_delivery=False)
 
     res = client.get(
         f"/api/agreements/public/{aid}/vs01-signing-packet"
