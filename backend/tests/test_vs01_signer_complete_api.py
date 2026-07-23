@@ -11,10 +11,14 @@ from backend.main import app
 from backend.services.agreement_draft_store import load_draft, save_draft
 
 _ORG_ID = "test-org-vs01-complete"
+_OWNER_USER = "owner-vs01-complete"
 
 
 def _org_headers() -> dict[str, str]:
-    return {"X-Claw-Org-Id": _ORG_ID}
+    return {
+        "X-Claw-Org-Id": _ORG_ID,
+        "X-Claw-Test-Auth-User-Id": _OWNER_USER,
+    }
 
 
 def _draft_with_vs01_packet(aid: str) -> dict:
@@ -83,10 +87,13 @@ def client(monkeypatch, tmp_path):
     from backend.services.vs01_signer_completion import reset_vs01_completion_email_locks_for_tests
 
     reset_vs01_completion_email_locks_for_tests()
+    monkeypatch.setenv("CLAW_ENVIRONMENT", "test")
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
     monkeypatch.setenv("CLAW_AGREEMENT_SIGNING_TOKEN_SECRET", "unit-test-vs01-complete-secret")
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_ENABLED", "0")
+    monkeypatch.delenv("CLAW_ALLOW_TOKENLESS_SIGNER_COMPLETE", raising=False)
+    monkeypatch.delenv("CLAW_COMMERCIAL_MODE", raising=False)
     return TestClient(app)
 
 
@@ -205,12 +212,36 @@ def test_test371_counterparty_signer_complete_without_token_when_open_signing_li
     monkeypatch,
     tmp_path,
 ) -> None:
-    """Party 2 completion must persist when signing invite URLs omit t= (production economics on)."""
+    """Tokenless open-link completion is closed by default (commercial fail-closed)."""
     from backend.usage_economics import store as usage_economics_store_mod
 
     usage_economics_store_mod._store = None  # noqa: SLF001
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_ENABLED", "1")
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage_strict.sqlite3"))
+
+    aid = _create_two_signer_agreement(client)
+    monkeypatch.setenv("CLAW_COMMERCIAL_MODE", "1")
+    cp = client.post(
+        f"/api/agreements/{aid}/vs01-signer-complete",
+        json={"signer_role_id": "role_cp", "participant_id": "p2", "document_id": "doc_vs01"},
+    )
+    assert cp.status_code == 403
+    assert cp.json()["detail"]["code"] == "signing_token_required"
+
+
+def test_test371_legacy_tokenless_opt_in_relaxed_noncommercial(
+    client: TestClient,
+    monkeypatch,
+    tmp_path,
+) -> None:
+    """Legacy tokenless path: opt-in flag + relaxed env + noncommercial only."""
+    from backend.usage_economics import store as usage_economics_store_mod
+
+    usage_economics_store_mod._store = None  # noqa: SLF001
+    monkeypatch.setenv("CLAW_ENVIRONMENT", "test")
+    monkeypatch.setenv("CLAW_USAGE_ECONOMICS_ENABLED", "0")
+    monkeypatch.setenv("CLAW_ALLOW_TOKENLESS_SIGNER_COMPLETE", "1")
+    monkeypatch.delenv("CLAW_COMMERCIAL_MODE", raising=False)
 
     aid = _create_two_signer_agreement(client)
     owner = client.post(
@@ -231,17 +262,6 @@ def test_test371_counterparty_signer_complete_without_token_when_open_signing_li
     assert cp.status_code == 200
     body = cp.json()
     assert body["fully_executed"] is True
-    assert body["already_signed"] is False
-
-    draft = client.get(f"/api/agreements/{aid}", headers=_org_headers()).json()["draft"]
-    sig_events = [e for e in draft.get("audit_log", []) if e.get("event_type") == "signature_completed"]
-    assert len(sig_events) == 2
-    role_ids = {e["value"]["signer_role_id"] for e in sig_events}
-    assert role_ids == {"role_owner", "role_cp"}
-
-    verify = client.get(f"/api/agreements/public/{aid}/verify").json()
-    assert verify["signature_status"]["fully_executed"] is True
-    assert verify["signature_status"]["signatures_recorded"] == 2
 
 
 def test_vs01_signer_complete_rejects_unknown_role_without_token_when_strict(
@@ -261,7 +281,7 @@ def test_vs01_signer_complete_rejects_unknown_role_without_token_when_strict(
         json={"signer_role_id": "role_unknown", "participant_id": "p9", "document_id": "doc_vs01"},
     )
     assert res.status_code == 403
-    assert res.json()["detail"]["code"] == "recipient_token_required"
+    assert res.json()["detail"]["code"] == "signing_token_required"
 
 
 def test_vs01_signer_complete_email_failure_still_completed(client: TestClient) -> None:

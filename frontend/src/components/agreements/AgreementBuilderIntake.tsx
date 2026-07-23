@@ -6526,9 +6526,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       hasPaidProSourceOfTruth() ||
       shouldBlockEntitledRewriteForAcceptedPaidProSnapshot(acceptedSnap)
     ) {
-      if (acceptedSnap && !hasPaidProSourceOfTruth()) {
-        applyHydrationFromPremiumSnapshot(acceptedSnap);
-      }
+      // Never hydrate review-ready state from local storage alone — layout reload
+      // path must GET /canonical-review-snapshot first.
       logPremiumDuplicateRunBlocked({
         reason: "entitled_rewrite_blocked_accepted_sot_snapshot",
         hasInMemorySoT: hasPaidProSourceOfTruth(),
@@ -6982,18 +6981,67 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       const intakeFpProbe =
         rawProbe.length >= 24 ? shortIntakeFingerprint(rawProbe) : (snap.intakeTextFingerprint || "");
       if (isAuthoritativePremiumSnapshotHydratable(snap, intakeFpProbe)) {
-        applyHydrationFromPremiumSnapshot(snap);
-        // Prevent checkout useEffect from re-entering the same hydrate+commit freeze path.
-        paidCheckoutCompletedRef.current = true;
-        try {
-          if (u.searchParams.get("premiumCompletion") === "1") {
-            u.searchParams.delete("premiumCompletion");
-            const qs = u.searchParams.toString();
-            window.history.replaceState(window.history.state, "", qs ? `${u.pathname}?${qs}` : u.pathname);
-          }
-        } catch {
-          /* ignore */
+        // Fail closed: never show review-ready/accepted from local storage alone.
+        // GET canonical-review-snapshot first; only then hydrate/render.
+        const agreementIdForReload = (
+          reviewAgreementIdRef.current ||
+          readCreateReviewAgreementResumeId() ||
+          ""
+        ).trim();
+        if (!agreementIdForReload) {
+          setProFullDraftCustomGateMessage(
+            "Server review snapshot is required after reload. Open the agreement again or contact support.",
+          );
+          return;
         }
+        setPremiumPostCheckoutPhase("processing");
+        setPremiumPipelineUserMessage("Confirming your server-locked agreement…");
+        void (async () => {
+          const hydrated = await hydrateCommercialReviewFromServerSnapshot({
+            agreementId: agreementIdForReload,
+          });
+          if (!hydrated.ok) {
+            setProFullDraftCustomGateMessage(
+              "Could not reload the server review snapshot. Retry or contact support@lawdog.me.",
+            );
+            setPremiumPostCheckoutPhase(null);
+            setPremiumPipelineUserMessage(null);
+            setPremiumSendPathUnlocked(false);
+            return;
+          }
+          const serverCorpus = hydrated.snapshot.corpus_plain;
+          if (
+            hydrated.display.snapshotId !== hydrated.snapshot.snapshot_id ||
+            hydrated.display.corpusSha256 !== hydrated.snapshot.corpus_sha256.toLowerCase() ||
+            hydrated.display.corpusLength !== hydrated.snapshot.corpus_length
+          ) {
+            setProFullDraftCustomGateMessage(
+              "Server review snapshot authority mismatch after reload. Prepare is blocked. Contact support@lawdog.me.",
+            );
+            setPremiumPostCheckoutPhase(null);
+            setPremiumPipelineUserMessage(null);
+            setPremiumSendPathUnlocked(false);
+            return;
+          }
+          // Prefer server GET bytes over stale local premium snapshot body.
+          applyHydrationFromPremiumSnapshot({
+            ...snap,
+            premiumWinningBodyText: serverCorpus,
+            premiumReadonlyPlainText: serverCorpus,
+          });
+          paidCheckoutCompletedRef.current = true;
+          setPremiumPostCheckoutPhase(null);
+          setPremiumPipelineUserMessage(null);
+          try {
+            if (u.searchParams.get("premiumCompletion") === "1") {
+              u.searchParams.delete("premiumCompletion");
+              const qs = u.searchParams.toString();
+              window.history.replaceState(window.history.state, "", qs ? `${u.pathname}?${qs}` : u.pathname);
+            }
+          } catch {
+            /* ignore */
+          }
+        })();
         return;
       }
     }
@@ -7132,26 +7180,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     if (postCheckoutReturnSnap) {
       // Frozen customer-accepted SoT must never be cleared for a second generation pass.
       if (shouldBlockEntitledRewriteForAcceptedPaidProSnapshot(postCheckoutReturnSnap)) {
-        try {
-          if (url.searchParams.get("premiumCompletion") === "1") {
-            url.searchParams.delete("premiumCompletion");
-            const qs = url.searchParams.toString();
-            window.history.replaceState(window.history.state, "", qs ? `${url.pathname}?${qs}` : url.pathname);
-          }
-        } catch {
-          /* ignore */
-        }
-        paidCheckoutCompletedRef.current = true;
-        applyHydrationFromPremiumSnapshot(postCheckoutReturnSnap);
+        // Fail closed: layout effect GETs server snapshot before any local hydrate.
+        // Do not mark complete or render accepted state from local storage alone.
         logPaymentFlowStage("premium_unlock_received", {
           agreementId: (reviewAgreementIdRef.current || readCreateReviewAgreementResumeId() || "").trim() || null,
-          premiumUnlocked: true,
-          paymentState: "snapshot_return_hydrate_frozen_sot",
-        });
-        logPaymentFlowStage("checkout_complete", {
-          agreementId: (reviewAgreementIdRef.current || readCreateReviewAgreementResumeId() || "").trim() || null,
-          premiumUnlocked: true,
-          corpusIntegrity: "ok",
+          premiumUnlocked: false,
+          paymentState: "snapshot_return_await_server_hydrate",
         });
         return;
       }

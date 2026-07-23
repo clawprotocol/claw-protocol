@@ -61,7 +61,9 @@ class AdminConsoleStore:
                   reason TEXT,
                   before_snapshot_json TEXT,
                   after_snapshot_json TEXT,
-                  created_at TEXT NOT NULL
+                  created_at TEXT NOT NULL,
+                  actor_role TEXT,
+                  correlation_id TEXT
                 );
                 CREATE INDEX IF NOT EXISTS idx_admin_action_audit_created
                   ON admin_action_audit (created_at DESC);
@@ -69,6 +71,23 @@ class AdminConsoleStore:
                   ON admin_action_audit (target_type, target_id, created_at DESC);
                 """
             )
+            # Additive migrations for older DBs.
+            cols = {
+                str(r[1])
+                for r in con.execute("PRAGMA table_info(admin_action_audit)").fetchall()
+            }
+            if "actor_role" not in cols:
+                con.execute("ALTER TABLE admin_action_audit ADD COLUMN actor_role TEXT")
+            if "correlation_id" not in cols:
+                con.execute("ALTER TABLE admin_action_audit ADD COLUMN correlation_id TEXT")
+
+    def get_admin_user(self, admin_user_id: str) -> Optional[Dict[str, Any]]:
+        uid = (admin_user_id or "").strip()
+        if not uid:
+            return None
+        with self._conn() as con:
+            row = con.execute("SELECT * FROM admin_users WHERE id = ?", (uid,)).fetchone()
+        return dict(row) if row else None
 
     def touch_admin_user(self, *, admin_user_id: str, email: str | None, role: str = "operator") -> None:
         uid = (admin_user_id or "").strip()
@@ -140,15 +159,21 @@ class AdminConsoleStore:
         reason: str | None,
         before_snapshot_json: str | None,
         after_snapshot_json: str | None,
+        actor_role: str | None = None,
+        correlation_id: str | None = None,
     ) -> str:
         aid = str(uuid.uuid4())
+        reason_clean = (reason or "").strip()
+        if not reason_clean:
+            raise ValueError("reason_required")
         with self._conn() as con:
             con.execute(
                 """
                 INSERT INTO admin_action_audit (
                   id, admin_user_id, action_type, target_type, target_id, reason,
-                  before_snapshot_json, after_snapshot_json, created_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                  before_snapshot_json, after_snapshot_json, created_at,
+                  actor_role, correlation_id
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     aid,
@@ -156,10 +181,12 @@ class AdminConsoleStore:
                     (action_type or "").strip() or "unknown",
                     (target_type or "").strip() or "unknown",
                     (target_id or "").strip() or "unknown",
-                    (reason or "").strip() or None,
+                    reason_clean,
                     before_snapshot_json,
                     after_snapshot_json,
                     _utc_now(),
+                    (actor_role or "").strip() or None,
+                    (correlation_id or "").strip() or None,
                 ),
             )
         return aid
@@ -170,7 +197,8 @@ class AdminConsoleStore:
             rows = con.execute(
                 """
                 SELECT id, admin_user_id, action_type, target_type, target_id, reason,
-                       before_snapshot_json, after_snapshot_json, created_at
+                       before_snapshot_json, after_snapshot_json, created_at,
+                       actor_role, correlation_id
                 FROM admin_action_audit
                 ORDER BY datetime(created_at) DESC
                 LIMIT ?

@@ -7,6 +7,7 @@ from backend.services.agreement_draft_store import save_draft
 
 
 def _seed_env(monkeypatch, tmp_path):
+    monkeypatch.setenv("CLAW_ENVIRONMENT", "test")
     monkeypatch.setenv("CLAW_ADMIN_SECRET", "admin-test-secret")
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
@@ -22,11 +23,38 @@ def _seed_env(monkeypatch, tmp_path):
     admin_store._store = None  # type: ignore[attr-defined]
 
 
+def _ops_headers(
+    *,
+    role: str = "admin",
+    user_id: str = "ops_admin",
+    include_secret: bool = True,
+    spoof_actor: str | None = None,
+) -> dict[str, str]:
+    h = {
+        "X-Claw-Test-Auth-User-Id": user_id,
+        "X-Claw-Test-Operator-Role": role,
+        "x-request-id": "corr-admin-test-1",
+    }
+    if include_secret:
+        h["x-claw-admin-secret"] = "admin-test-secret"
+    if spoof_actor:
+        # Must never be trusted as actor identity.
+        h["x-claw-admin-user-id"] = spoof_actor
+    return h
+
+
 def test_admin_console_requires_secret(monkeypatch, tmp_path):
     _seed_env(monkeypatch, tmp_path)
     client = TestClient(app)
     r = client.get("/v1/admin/overview")
-    assert r.status_code == 403
+    assert r.status_code in (401, 403)
+
+
+def test_admin_console_rejects_secret_only_without_principal(monkeypatch, tmp_path):
+    _seed_env(monkeypatch, tmp_path)
+    client = TestClient(app)
+    r = client.get("/v1/admin/overview", headers={"x-claw-admin-secret": "admin-test-secret"})
+    assert r.status_code == 401
 
 
 def test_admin_agreements_is_metadata_only(monkeypatch, tmp_path):
@@ -50,7 +78,7 @@ def test_admin_agreements_is_metadata_only(monkeypatch, tmp_path):
         }
     )
     client = TestClient(app)
-    r = client.get("/v1/admin/agreements", headers={"x-claw-admin-secret": "admin-test-secret"})
+    r = client.get("/v1/admin/agreements", headers=_ops_headers())
     assert r.status_code == 200
     rows = r.json().get("agreements") or []
     assert len(rows) == 1
@@ -64,10 +92,7 @@ def test_admin_agreements_is_metadata_only(monkeypatch, tmp_path):
 def test_admin_affiliates_empty_fresh_economics_db(monkeypatch, tmp_path):
     _seed_env(monkeypatch, tmp_path)
     client = TestClient(app)
-    r = client.get(
-        "/v1/admin/affiliates",
-        headers={"x-claw-admin-secret": "admin-test-secret"},
-    )
+    r = client.get("/v1/admin/affiliates", headers=_ops_headers())
     assert r.status_code == 200
     assert r.json() == {"affiliates": []}
 
@@ -84,10 +109,7 @@ def test_admin_affiliates_pg_ledger_without_sqlite_earnings_table(monkeypatch, t
     )
     eco_store.reset_economics_store_for_tests()
     client = TestClient(app)
-    r = client.get(
-        "/v1/admin/affiliates",
-        headers={"x-claw-admin-secret": "admin-test-secret"},
-    )
+    r = client.get("/v1/admin/affiliates", headers=_ops_headers())
     assert r.status_code == 200
     assert r.json() == {"affiliates": []}
 
@@ -113,14 +135,62 @@ def test_admin_flag_action_is_audited(monkeypatch, tmp_path):
     client = TestClient(app)
     r = client.post(
         "/v1/admin/agreements/ag_admin_2/flag",
-        headers={"x-claw-admin-secret": "admin-test-secret", "x-claw-admin-user-id": "ops_admin"},
-        json={"flagged": True, "reason": "triage"},
+        headers=_ops_headers(spoof_actor="spoofed_attacker"),
+        json={"flagged": True, "reason": "triage abuse report"},
     )
     assert r.status_code == 200
-    a = client.get("/v1/admin/audit", headers={"x-claw-admin-secret": "admin-test-secret"})
+    a = client.get("/v1/admin/audit", headers=_ops_headers())
     assert a.status_code == 200
     actions = a.json().get("actions") or []
-    assert any(x.get("action_type") == "flag_agreement" and x.get("target_id") == "ag_admin_2" for x in actions)
+    match = [
+        x
+        for x in actions
+        if x.get("action_type") == "flag_agreement" and x.get("target_id") == "ag_admin_2"
+    ]
+    assert match
+    assert match[0].get("admin_user_id") == "ops_admin"
+    assert match[0].get("admin_user_id") != "spoofed_attacker"
+    assert match[0].get("actor_role") in ("admin", "support_operator")
+    assert (match[0].get("reason") or "").strip()
+    assert match[0].get("correlation_id") == "corr-admin-test-1"
+
+
+def test_admin_flag_rejects_missing_reason_and_spoofed_only_actor(monkeypatch, tmp_path):
+    _seed_env(monkeypatch, tmp_path)
+    from backend.usage_economics.store import get_usage_economics_store
+
+    ustore = get_usage_economics_store()
+    ustore.init_schema()
+    ustore.insert_agreement_owner(agreement_id="ag_admin_3", subject_ref="subject_ops", internal_keys_draft=1)
+    save_draft(
+        {
+            "id": "ag_admin_3",
+            "title": "NDA",
+            "parties": [],
+            "versions": [],
+            "audit_log": [],
+            "created_at": "2026-01-01T00:00:00Z",
+            "updated_at": "2026-01-02T00:00:00Z",
+        }
+    )
+    client = TestClient(app)
+    spoof_only = client.post(
+        "/v1/admin/agreements/ag_admin_3/flag",
+        headers={
+            "x-claw-admin-secret": "admin-test-secret",
+            "x-claw-admin-user-id": "spoofed_attacker",
+        },
+        json={"flagged": True, "reason": "should not work"},
+    )
+    assert spoof_only.status_code == 401
+
+    missing_reason = client.post(
+        "/v1/admin/agreements/ag_admin_3/flag",
+        headers=_ops_headers(),
+        json={"flagged": True, "reason": ""},
+    )
+    # Pydantic min_length rejects empty reason before handler (422).
+    assert missing_reason.status_code in (400, 422)
 
 
 def _admin_draft_slice(agreement_id: str, *, title: str = "Agreement") -> dict:
@@ -154,7 +224,7 @@ def test_admin_agreements_pg_path_does_not_call_load_draft(monkeypatch, tmp_path
     client = TestClient(app)
     r = client.get(
         "/v1/admin/agreements?limit=50",
-        headers={"x-claw-admin-secret": "admin-test-secret"},
+        headers=_ops_headers(),
     )
     assert r.status_code == 200
     assert len(r.json().get("agreements") or []) == 50
@@ -178,7 +248,7 @@ def test_admin_overview_pg_path_does_not_call_load_draft(monkeypatch, tmp_path):
     monkeypatch.setattr(ads, "load_draft", lambda aid: load_draft_calls.append(aid) or {})
 
     client = TestClient(app)
-    r = client.get("/v1/admin/overview", headers={"x-claw-admin-secret": "admin-test-secret"})
+    r = client.get("/v1/admin/overview", headers=_ops_headers())
     assert r.status_code == 200
     assert batch_limits == [250]
     assert load_draft_calls == []
@@ -214,10 +284,9 @@ def test_admin_agreements_local_respects_limit_bounded_load_draft(monkeypatch, t
     client = TestClient(app)
     r = client.get(
         "/v1/admin/agreements?limit=3",
-        headers={"x-claw-admin-secret": "admin-test-secret"},
+        headers=_ops_headers(),
     )
     assert r.status_code == 200
     assert len(r.json().get("agreements") or []) == 3
     assert len(load_draft_calls) == 3
     assert "purpose" not in (r.json().get("agreements") or [{}])[0]
-

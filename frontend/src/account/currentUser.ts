@@ -1,11 +1,15 @@
 /**
- * Lightweight current-user adapter for dashboard / workspace surfaces.
- * Dev/local mode uses org id + optional display name — no login wall for localhost QA.
+ * Current-user adapter for dashboard / workspace surfaces.
+ *
+ * Org headers, localStorage, and workspace slugs are NEVER proof of authentication.
+ * Authenticated state requires a validated Supabase session (or explicit e2e/dev test bridge).
  */
 
 import { getOrgId } from "../launch/orgContext";
+import { readE2eAuthSessionForDev } from "../auth/e2eAuthSessionBridge";
+import { isPublicProductionHostname } from "../launch/devPaymentBypass";
 
-export type CurrentUserSource = "local_dev" | "org_context" | "anonymous";
+export type CurrentUserSource = "supabase_session" | "e2e_test_bridge" | "anonymous";
 
 export type CurrentUser = {
   id: string;
@@ -41,51 +45,107 @@ export function writeCurrentUserDisplayName(name: string): void {
   }
 }
 
-/** Resolve the active workspace user — never blocks reviewer/signing token routes. */
-export function resolveCurrentUser(): CurrentUser {
-  const orgId = getOrgId().trim() || "local-org";
-  const displayName = readStoredDisplayName();
-  const isDev =
+/**
+ * Explicit local/e2e test bridge — impossible on public production hostnames.
+ * Requires DEV or MODE=test, plus e2e session seed (Playwright) or VITE_CLAW_E2E_AUTH_BRIDGE=1.
+ */
+export function isExplicitLocalAuthTestBridgeEnabled(): boolean {
+  if (typeof window !== "undefined") {
+    try {
+      if (isPublicProductionHostname(window.location.hostname)) return false;
+    } catch {
+      /* ignore */
+    }
+  }
+  const isDevOrTest =
     typeof import.meta !== "undefined" &&
     Boolean(import.meta.env?.DEV || import.meta.env?.MODE === "test");
-  if (isDev || orgId) {
+  if (!isDevOrTest) return false;
+  if (readE2eAuthSessionForDev()) return true;
+  return String(import.meta.env?.VITE_CLAW_E2E_AUTH_BRIDGE || "") === "1";
+}
+
+/** Resolve the active workspace user — never blocks reviewer/signing token routes. */
+export function resolveCurrentUser(args?: {
+  supabaseUserId?: string | null;
+  supabaseEmail?: string | null;
+  supabaseDisplayName?: string | null;
+}): CurrentUser {
+  const displayName = readStoredDisplayName();
+  const supabaseUserId = (args?.supabaseUserId || "").trim();
+  if (supabaseUserId) {
     return {
-      id: orgId,
-      displayName: displayName || "Local User",
-      email: null,
+      id: supabaseUserId,
+      displayName:
+        (args?.supabaseDisplayName || "").trim() ||
+        displayName ||
+        (args?.supabaseEmail || "").trim() ||
+        "Signed-in user",
+      email: (args?.supabaseEmail || "").trim() || null,
       isAuthenticated: true,
-      source: isDev ? "local_dev" : "org_context",
+      source: "supabase_session",
     };
   }
+
+  if (isExplicitLocalAuthTestBridgeEnabled()) {
+    const e2e = readE2eAuthSessionForDev();
+    if (e2e?.user?.id) {
+      return {
+        id: String(e2e.user.id),
+        displayName:
+          displayName ||
+          String((e2e.user as { user_metadata?: { full_name?: string } }).user_metadata?.full_name || "") ||
+          String(e2e.user.email || "E2E User"),
+        email: e2e.user.email ?? null,
+        isAuthenticated: true,
+        source: "e2e_test_bridge",
+      };
+    }
+  }
+
+  // Org header / local-org is workspace context only — never authentication.
+  void getOrgId();
   return {
     id: "anonymous",
-    displayName: "Guest",
+    displayName: displayName || "Guest",
     email: null,
     isAuthenticated: false,
     source: "anonymous",
   };
 }
 
-/** Dashboard/account routes may assume a user context; public token routes must not call this. */
-export function isDashboardAccountSurface(pathname: string): boolean {
+/** Dashboard/account routes that require a validated session. */
+export function isAuthenticatedDashboardSurface(pathname: string): boolean {
   const p = (pathname || "").replace(/\/$/, "") || "/";
   if (p === "/app" || p === "/dashboard") return true;
-  if (p === "/app/create" || p === "/app/quick") return true;
-  if (p === "/app/affiliate" || p === "/app/settings" || p === "/app/signatures") return true;
-  if (p.startsWith("/app/agreements")) return true;
-  if (p.startsWith("/app/send/") || p.startsWith("/app/done/") || p.startsWith("/app/ready/")) {
-    return true;
-  }
+  if (p === "/app/billing" || p === "/app/settings" || p === "/app/signatures") return true;
+  if (p === "/app/affiliate" || p === "/app/opportunity" || p === "/app/agreement-memory") return true;
+  if (p === "/app/integrations" || p === "/app/work-product") return true;
+  if (p === "/app/genesis-referral") return true;
+  if (p.startsWith("/app/ops/")) return true;
+  if (p === "/app/admin" || p === "/app/founder" || p === "/founder" || p === "/admin") return true;
+  if (p === "/app/agreements" || p.startsWith("/app/agreements/")) return true;
+  if (p.startsWith("/app/done/") || p.startsWith("/app/ready/") || p.startsWith("/app/send/")) return true;
+  if (p.startsWith("/app/checkout/") || p.startsWith("/app/review-changes/")) return true;
+  if (p.startsWith("/app/agreements/") && p.includes("/signing-status")) return true;
   return false;
+}
+
+/** @deprecated Use isAuthenticatedDashboardSurface — kept for older call sites. */
+export function isDashboardAccountSurface(pathname: string): boolean {
+  return isAuthenticatedDashboardSurface(pathname) || pathname.replace(/\/$/, "") === "/app/create";
 }
 
 /** Reviewer and signer links stay public — no login redirect. */
 export function isPublicTokenAgreementSurface(pathname: string): boolean {
   const p = (pathname || "").replace(/\/$/, "") || "/";
   if (/^\/agreements\/[^/]+\/review$/i.test(p)) return true;
+  if (/^\/verify\//i.test(p)) return true;
   if (/^\/app\/esign\/[^/]+$/i.test(p) && p !== "/app/esign/new") return true;
-  if (/^\/app\/agreements\/[^/]+$/i.test(p) && /\?.*(?:^|&)(?:t|token)=/i.test(window.location.search)) {
-    return true;
+  if (typeof window !== "undefined") {
+    if (/^\/app\/agreements\/[^/]+$/i.test(p) && /\?.*(?:^|&)(?:t|token)=/i.test(window.location.search)) {
+      return true;
+    }
   }
   return false;
 }

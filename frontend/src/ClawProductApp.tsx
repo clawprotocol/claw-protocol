@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
+import { RequireAuthenticatedDashboard } from "./auth/RequireAuthenticatedDashboard";
 import { featureFlags } from "./config/featureFlags";
 import { AppShell } from "./launch/AppShell";
 import { AppDashboard } from "./launch/AppDashboard";
@@ -624,73 +625,100 @@ export function ClawProductApp() {
   }
 
   if (appMatch) {
+    let surface: ReactNode = null;
     switch (appMatch.kind) {
       case "simpleCreate":
+        // Anonymous starter create remains reachable without a login wall.
         return <SimpleCreatePage />;
-      case "simpleReady":
-        return <SimpleReadyToSendPage agreementId={appMatch.agreementId} />;
-      case "simpleCheckout":
-        return <SimpleCheckoutPage agreementId={appMatch.agreementId} />;
-      case "simpleSend":
-        return <SimpleSendPage agreementId={appMatch.agreementId} />;
-      case "simpleDone":
-        return <SimpleDonePage agreementId={appMatch.agreementId} />;
-      case "ownerProposalReview":
-        return <OwnerProposalReviewPage agreementId={appMatch.agreementId} />;
-      case "ownerAgreementView":
-        return <OwnerAgreementReadOnlyPage agreementId={appMatch.agreementId} />;
-      case "ownerSignedAgreementView":
-        return <OwnerSignedAgreementPage agreementId={appMatch.agreementId} />;
-      case "ownerSigningStatus":
-        return <OwnerSigningStatusPage agreementId={appMatch.agreementId} />;
-      case "simpleVerification":
-        return <SimpleVerificationPage agreementId={appMatch.agreementId} />;
-      case "quickSend":
-        return <QuickSendPage />;
-      case "dashboard":
-        return <AppDashboard />;
-      case "billing":
-        return <BillingPage />;
-      case "affiliate":
-        return <ClawOpportunityPage />;
-      case "settings":
-        return <LawdogSettingsPage />;
       case "signIn":
         return <SignInPage />;
       case "authCallback":
         return <AuthCallbackPage />;
+      case "simpleReady":
+        surface = <SimpleReadyToSendPage agreementId={appMatch.agreementId} />;
+        break;
+      case "simpleCheckout":
+        surface = <SimpleCheckoutPage agreementId={appMatch.agreementId} />;
+        break;
+      case "simpleSend":
+        surface = <SimpleSendPage agreementId={appMatch.agreementId} />;
+        break;
+      case "simpleDone":
+        surface = <SimpleDonePage agreementId={appMatch.agreementId} />;
+        break;
+      case "ownerProposalReview":
+        surface = <OwnerProposalReviewPage agreementId={appMatch.agreementId} />;
+        break;
+      case "ownerAgreementView":
+        surface = <OwnerAgreementReadOnlyPage agreementId={appMatch.agreementId} />;
+        break;
+      case "ownerSignedAgreementView":
+        surface = <OwnerSignedAgreementPage agreementId={appMatch.agreementId} />;
+        break;
+      case "ownerSigningStatus":
+        surface = <OwnerSigningStatusPage agreementId={appMatch.agreementId} />;
+        break;
+      case "simpleVerification":
+        surface = <SimpleVerificationPage agreementId={appMatch.agreementId} />;
+        break;
+      case "quickSend":
+        surface = <QuickSendPage />;
+        break;
+      case "dashboard":
+        surface = <AppDashboard />;
+        break;
+      case "billing":
+        surface = <BillingPage />;
+        break;
+      case "affiliate":
+        surface = <ClawOpportunityPage />;
+        break;
+      case "settings":
+        surface = <LawdogSettingsPage />;
+        break;
       case "signatures":
-        return <LawdogSignaturesPage />;
+        surface = <LawdogSignaturesPage />;
+        break;
       case "agreementMemory":
-        return <AgreementMemoryPage />;
+        surface = <AgreementMemoryPage />;
+        break;
       case "integrations":
-        return <IntegrationsPage />;
+        surface = <IntegrationsPage />;
+        break;
       case "fieldReview":
-        return <FieldReviewPage analysisId={appMatch.analysisId} />;
+        surface = <FieldReviewPage analysisId={appMatch.analysisId} />;
+        break;
       case "advancedWorkProduct":
-        return <AdvancedWorkProductPage />;
+        surface = <AdvancedWorkProductPage />;
+        break;
       case "opportunity":
-        return <ClawOpportunityPage />;
+        surface = <ClawOpportunityPage />;
+        break;
       case "affiliatePayoutOps":
-        return <AffiliatePayoutOpsPage />;
+        surface = <AffiliatePayoutOpsPage />;
+        break;
       case "genesisReferral":
-        return <GenesisAffiliateDashboardPage />;
+        surface = <GenesisAffiliateDashboardPage />;
+        break;
       case "opsGenesisReferral":
-        return <GenesisReferralOpsPage />;
+        surface = <GenesisReferralOpsPage />;
+        break;
       case "opsGrowth":
-        return (
+        surface = (
           <AppShell title="Operator — Growth" subtitle="Funnel, experiments, and share metrics (local browser data).">
             <OperatorGrowthDashboard />
           </AppShell>
         );
+        break;
       case "opsPaidFunnel":
-        return (
+        surface = (
           <AppShell title="Operator — Paid funnel (Pro)" subtitle="Local rows for the LawDog Pro conversion path.">
             <OperatorPaidFunnelDashboard />
           </AppShell>
         );
+        break;
       case "opsStarterProRefine":
-        return (
+        surface = (
           <AppShell
             title="Operator — Starter Pro Refine"
             subtitle="Local experiment stats (this browser; same storage as growth ops)."
@@ -698,16 +726,19 @@ export function ClawProductApp() {
             <OperatorStarterProRefineDashboard />
           </AppShell>
         );
+        break;
       case "adminConsole":
         if (requiresAdminConsoleServerAuth()) {
-          return <AdminConsoleAccessGate />;
+          surface = <AdminConsoleAccessGate />;
+        } else if (canAccessAdminConsoleWithoutServerAuth()) {
+          surface = <AdminConsolePage />;
+        } else {
+          surface = <AdminConsoleUnavailable />;
         }
-        if (canAccessAdminConsoleWithoutServerAuth()) {
-          return <AdminConsolePage />;
-        }
-        return <AdminConsoleUnavailable />;
+        break;
       case "receipt":
-        return <UsageReceiptPage usageId={appMatch.id} />;
+        surface = <UsageReceiptPage usageId={appMatch.id} />;
+        break;
       case "agreements": {
         const sub = appMatch.sub;
         const shellKey =
@@ -720,7 +751,7 @@ export function ClawProductApp() {
             : sub === "new"
               ? "Describe the deal in plain language — we’ll help structure the draft."
               : "Resume drafting, recipients, and finalize when you’re ready.";
-        return (
+        surface = (
           <AppShell title={title} subtitle={subtitle}>
             <AgreementWizardShell
               key={shellKey}
@@ -729,6 +760,7 @@ export function ClawProductApp() {
             />
           </AppShell>
         );
+        break;
       }
       case "esign": {
         const sub = appMatch.sub;
@@ -736,10 +768,14 @@ export function ClawProductApp() {
           return <RedirectEsignNewToQuick search={search} />;
         }
         const seed = sub.id;
-        return <AppEsignDocumentShell seed={seed} search={search || ""} pathname={pathname} />;
+        surface = <AppEsignDocumentShell seed={seed} search={search || ""} pathname={pathname} />;
+        break;
       }
       default:
         break;
+    }
+    if (surface) {
+      return <RequireAuthenticatedDashboard>{surface}</RequireAuthenticatedDashboard>;
     }
   }
 

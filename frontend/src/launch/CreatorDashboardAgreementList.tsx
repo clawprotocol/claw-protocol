@@ -251,6 +251,27 @@ export function CreatorDashboardAgreementList(props: Props) {
                     Agreement content unavailable — metadata only.
                   </p>
                 ) : null}
+                {row.accepted_review_snapshot?.snapshot_id &&
+                row.accepted_review_snapshot?.corpus_sha256 ? (
+                  <p
+                    className="mt-2 font-mono text-[11px] leading-relaxed text-slate-500"
+                    data-testid={`creator-dashboard-accepted-snapshot-${row.id}`}
+                    data-accepted-snapshot-id={row.accepted_review_snapshot.snapshot_id}
+                    data-accepted-snapshot-digest={row.accepted_review_snapshot.corpus_sha256}
+                  >
+                    Accepted snapshot{" "}
+                    <span className="text-slate-400">
+                      {row.accepted_review_snapshot.snapshot_id.slice(0, 12)}
+                    </span>
+                    {" · "}
+                    <span className="text-slate-400">
+                      sha256:{row.accepted_review_snapshot.corpus_sha256.slice(0, 12)}…
+                    </span>
+                    {typeof row.accepted_review_snapshot.corpus_length === "number"
+                      ? ` · ${row.accepted_review_snapshot.corpus_length} chars`
+                      : null}
+                  </p>
+                ) : null}
                 {readyForSigning ? (
                   <>
                     <p className="mt-3 text-sm text-slate-300" data-testid={`creator-dashboard-next-action-${row.id}`}>

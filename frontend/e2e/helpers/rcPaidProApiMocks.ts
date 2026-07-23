@@ -11,6 +11,7 @@ import {
   RC_QUAD_PARTY_INTAKE,
   RC_QUAD_PENDING_DRAFT,
 } from "../fixtures/rcQuadPartyProfessional";
+import { seedE2eAuthSession } from "./rcE2eAuthBridge";
 
 export const RC_PAID_ECONOMICS = {
   tier: "paid",
@@ -70,6 +71,7 @@ const rcCanonicalSnapshotStore = new Map<
 >();
 
 export async function seedEntitledPaidProBrowserState(page: Page): Promise<void> {
+  await seedE2eAuthSession(page);
   await page.addInitScript((orgId: string) => {
     try {
       localStorage.setItem("claw_org_id", orgId);
@@ -137,6 +139,7 @@ export async function seedRcPaidCheckoutReturn(
   draftId = "ag_rc_paid_two_party",
   pendingDraft = RC_TWO_PARTY_PENDING_DRAFT,
 ): Promise<void> {
+  await seedE2eAuthSession(page);
   await page.addInitScript(
     ({ orgId, intakeText, pending, agreementId }) => {
       try {

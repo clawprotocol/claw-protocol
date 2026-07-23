@@ -32,6 +32,14 @@ export type WorkspaceIndexAgreement = {
   content_unavailable_reason?: string;
   /** `draft` = built from load_draft(); `supabase_fallback` = draft load failed. */
   dashboard_source?: "draft" | "supabase_fallback";
+  /** Server-authoritative accepted review snapshot (ids/digests only — never corpus). */
+  accepted_review_snapshot?: {
+    snapshot_id?: string | null;
+    corpus_sha256?: string | null;
+    corpus_length?: number | null;
+    accepted_at?: string | null;
+    status?: string | null;
+  } | null;
 };
 
 const base = () => resolveApiBase().replace(/\/$/, "");

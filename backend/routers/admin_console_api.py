@@ -15,6 +15,15 @@ from backend.economics.store import get_economics_store
 from backend.integrations.webhook_dispatch import retry_delivery
 from backend.integrations import webhook_store
 from backend.ops.break_glass_audit import BreakGlassAction, log_break_glass_event
+from backend.security.operator_principal import (
+    PERM_MUTATE_ADMIN,
+    PERM_MUTATE_FINANCIAL,
+    PERM_MUTATE_SUPPORT,
+    PERM_READ_OPS,
+    OperatorPrincipal,
+    require_nonempty_reason,
+    resolve_operator_principal,
+)
 from backend.services.agreement_draft_store import list_draft_admin_metadata_newest_first
 from backend.usage_economics.store import get_usage_economics_store
 
@@ -23,52 +32,72 @@ router = APIRouter(prefix="/v1/admin", tags=["admin-v1"])
 
 class UserStatusBody(BaseModel):
     disabled: bool
-    reason: Optional[str] = Field(default=None, max_length=500)
+    reason: str = Field(..., min_length=3, max_length=500)
 
 
 class RefreshEntitlementBody(BaseModel):
-    reason: Optional[str] = Field(default=None, max_length=500)
+    reason: str = Field(..., min_length=3, max_length=500)
 
 
 class AgreementFlagBody(BaseModel):
     flagged: bool = True
-    reason: Optional[str] = Field(default=None, max_length=500)
+    reason: str = Field(..., min_length=3, max_length=500)
 
 
 class ResendDeliveryBody(BaseModel):
-    reason: Optional[str] = Field(default=None, max_length=500)
+    reason: str = Field(..., min_length=3, max_length=500)
 
 
 class AffiliateStatusBody(BaseModel):
     status: str = Field(..., pattern="^(active|disabled|hold)$")
-    reason: Optional[str] = Field(default=None, max_length=500)
+    reason: str = Field(..., min_length=3, max_length=500)
 
 
 class AffiliatePayoutActionBody(BaseModel):
-    reason: Optional[str] = Field(default=None, max_length=500)
+    reason: str = Field(..., min_length=3, max_length=500)
     tx_hash: Optional[str] = Field(default=None, max_length=256)
     network: str = Field(default="base", max_length=64)
 
 
-def _admin_identity(request: Request) -> Dict[str, str]:
-    secret = os.getenv("CLAW_ADMIN_SECRET", "").strip()
-    presented = (request.headers.get("x-claw-admin-secret") or "").strip()
-    if not secret or not presented or not secrets.compare_digest(secret, presented):
-        raise HTTPException(status_code=403, detail="forbidden")
-    admin_user_id = (request.headers.get("x-claw-admin-user-id") or "admin_operator").strip()
-    admin_email = (request.headers.get("x-claw-admin-email") or "").strip()
-    store = get_admin_console_store()
-    store.init_schema()
-    store.touch_admin_user(admin_user_id=admin_user_id, email=admin_email or None)
+def _operator(
+    request: Request,
+    *,
+    permission: str = PERM_READ_OPS,
+) -> OperatorPrincipal:
+    principal = resolve_operator_principal(request, require_permission=permission)
     try:
         log_break_glass_event(
             request,
             BreakGlassAction.ADMIN_RUNTIME_SUMMARY,
-            auth_channel="x-claw-admin-secret",
+            auth_channel="operator_principal",
+            extra={"actor": principal.user_id, "role": principal.role},
         )
     except Exception:
         pass
-    return {"admin_user_id": admin_user_id, "admin_email": admin_email}
+    return principal
+
+
+def _audit(
+    principal: OperatorPrincipal,
+    *,
+    action_type: str,
+    target_type: str,
+    target_id: str,
+    reason: str,
+    before: Any = None,
+    after: Any = None,
+) -> str:
+    return get_admin_console_store().append_admin_action_audit(
+        admin_user_id=principal.user_id,
+        action_type=action_type,
+        target_type=target_type,
+        target_id=target_id,
+        reason=reason,
+        before_snapshot_json=json.dumps(before, default=str) if before is not None else None,
+        after_snapshot_json=json.dumps(after, default=str) if after is not None else None,
+        actor_role=principal.role,
+        correlation_id=principal.correlation_id or None,
+    )
 
 
 def _parse_subject_email(subject_ref: str) -> Optional[str]:
@@ -150,7 +179,7 @@ def _load_agreements_metadata(limit: int = 200) -> List[Dict[str, Any]]:
 
 @router.get("/overview")
 def admin_overview(request: Request) -> Dict[str, Any]:
-    _admin_identity(request)
+    _operator(request, permission=PERM_READ_OPS)
     ustore = get_usage_economics_store()
     ustore.init_schema()
     eco = get_economics_store()
@@ -181,7 +210,7 @@ def admin_overview(request: Request) -> Dict[str, Any]:
 
 @router.get("/users")
 def admin_users(request: Request, limit: int = Query(default=200, ge=1, le=500)) -> Dict[str, Any]:
-    _admin_identity(request)
+    _operator(request, permission=PERM_READ_OPS)
     ustore = get_usage_economics_store()
     ustore.init_schema()
     eco = get_economics_store()
@@ -224,28 +253,37 @@ def admin_users(request: Request, limit: int = Query(default=200, ge=1, le=500))
 
 @router.post("/users/{subject_ref}/status")
 def admin_set_user_status(subject_ref: str, body: UserStatusBody, request: Request) -> Dict[str, Any]:
-    admin = _admin_identity(request)
+    principal = _operator(request, permission=PERM_MUTATE_ADMIN)
+    reason = require_nonempty_reason(body.reason)
     ustore = get_usage_economics_store()
     ustore.init_schema()
     before = ustore.get_subject_row(subject_ref) or {}
     ustore.set_abuse_flag(subject_ref, 1 if body.disabled else 0)
     ustore.set_soft_throttle(subject_ref, 1 if body.disabled else 0)
     after = ustore.get_subject_row(subject_ref) or {}
-    get_admin_console_store().append_admin_action_audit(
-        admin_user_id=admin["admin_user_id"],
+    audit_id = _audit(
+        principal,
         action_type="set_user_status",
         target_type="user",
         target_id=subject_ref,
-        reason=body.reason,
-        before_snapshot_json=json.dumps(before, default=str),
-        after_snapshot_json=json.dumps(after, default=str),
+        reason=reason,
+        before=before,
+        after=after,
     )
-    return {"ok": True, "subject_ref": subject_ref, "disabled": body.disabled}
+    return {
+        "ok": True,
+        "subject_ref": subject_ref,
+        "disabled": body.disabled,
+        "audit_id": audit_id,
+        "actor": principal.user_id,
+        "actor_role": principal.role,
+    }
 
 
 @router.post("/users/{subject_ref}/refresh-entitlement")
 def admin_refresh_entitlement(subject_ref: str, body: RefreshEntitlementBody, request: Request) -> Dict[str, Any]:
-    admin = _admin_identity(request)
+    principal = _operator(request, permission=PERM_MUTATE_SUPPORT)
+    reason = require_nonempty_reason(body.reason)
     eco = get_economics_store()
     eco.init_schema()
     with eco._conn() as con:
@@ -254,50 +292,64 @@ def admin_refresh_entitlement(subject_ref: str, body: RefreshEntitlementBody, re
             (subject_ref,),
         ).fetchone()
     out = dict(row) if row else None
-    get_admin_console_store().append_admin_action_audit(
-        admin_user_id=admin["admin_user_id"],
+    audit_id = _audit(
+        principal,
         action_type="refresh_entitlement",
         target_type="user",
         target_id=subject_ref,
-        reason=body.reason,
-        before_snapshot_json=None,
-        after_snapshot_json=json.dumps(out or {"entitlement": "none"}, default=str),
+        reason=reason,
+        after=out or {"entitlement": "none"},
     )
-    return {"ok": True, "subject_ref": subject_ref, "entitlement": out}
+    return {
+        "ok": True,
+        "subject_ref": subject_ref,
+        "entitlement": out,
+        "audit_id": audit_id,
+        "actor": principal.user_id,
+        "actor_role": principal.role,
+    }
 
 
 @router.get("/agreements")
 def admin_agreements(request: Request, limit: int = Query(default=200, ge=1, le=500)) -> Dict[str, Any]:
-    _admin_identity(request)
+    _operator(request, permission=PERM_READ_OPS)
     return {"agreements": _load_agreements_metadata(limit=limit)}
 
 
 @router.post("/agreements/{agreement_id}/flag")
 def admin_flag_agreement(agreement_id: str, body: AgreementFlagBody, request: Request) -> Dict[str, Any]:
-    admin = _admin_identity(request)
+    principal = _operator(request, permission=PERM_MUTATE_SUPPORT)
+    reason = require_nonempty_reason(body.reason)
     store = get_admin_console_store()
     before = store.get_agreement_flags_map([agreement_id]).get(agreement_id) or {}
     after = store.set_agreement_flag(
         agreement_id=agreement_id,
         flagged=body.flagged,
-        reason=body.reason,
-        admin_user_id=admin["admin_user_id"],
+        reason=reason,
+        admin_user_id=principal.user_id,
     )
-    store.append_admin_action_audit(
-        admin_user_id=admin["admin_user_id"],
+    audit_id = _audit(
+        principal,
         action_type="flag_agreement",
         target_type="agreement",
         target_id=agreement_id,
-        reason=body.reason,
-        before_snapshot_json=json.dumps(before, default=str),
-        after_snapshot_json=json.dumps(after, default=str),
+        reason=reason,
+        before=before,
+        after=after,
     )
-    return {"ok": True, "agreement_id": agreement_id, "is_flagged_abuse": bool(after.get("is_flagged_abuse"))}
+    return {
+        "ok": True,
+        "agreement_id": agreement_id,
+        "is_flagged_abuse": bool(after.get("is_flagged_abuse")),
+        "audit_id": audit_id,
+        "actor": principal.user_id,
+        "actor_role": principal.role,
+    }
 
 
 @router.get("/deliveries")
 def admin_deliveries(request: Request, limit: int = Query(default=200, ge=1, le=500)) -> Dict[str, Any]:
-    _admin_identity(request)
+    _operator(request, permission=PERM_READ_OPS)
     out: List[Dict[str, Any]] = []
     for row in webhook_store.list_all_org_deliveries(limit=limit):
         out.append(
@@ -322,25 +374,25 @@ def admin_deliveries(request: Request, limit: int = Query(default=200, ge=1, le=
 
 @router.post("/deliveries/{org_id}/{delivery_id}/resend")
 def admin_resend_delivery(org_id: str, delivery_id: str, body: ResendDeliveryBody, request: Request) -> Dict[str, Any]:
-    admin = _admin_identity(request)
+    principal = _operator(request, permission=PERM_MUTATE_SUPPORT)
+    reason = require_nonempty_reason(body.reason)
     ok = retry_delivery(org_id, delivery_id)
     if not ok:
         raise HTTPException(status_code=404, detail="delivery_not_found")
-    get_admin_console_store().append_admin_action_audit(
-        admin_user_id=admin["admin_user_id"],
+    audit_id = _audit(
+        principal,
         action_type="resend_delivery",
         target_type="delivery",
         target_id=f"{org_id}:{delivery_id}",
-        reason=body.reason,
-        before_snapshot_json=None,
-        after_snapshot_json=json.dumps({"queued": True}),
+        reason=reason,
+        after={"queued": True},
     )
-    return {"ok": True, "queued": True}
+    return {"ok": True, "queued": True, "audit_id": audit_id, "actor": principal.user_id}
 
 
 @router.get("/affiliates")
 def admin_affiliates(request: Request, limit: int = Query(default=200, ge=1, le=500)) -> Dict[str, Any]:
-    _admin_identity(request)
+    _operator(request, permission=PERM_READ_OPS)
     eco = get_economics_store()
     eco.init_schema()
     return {"affiliates": eco.list_admin_affiliate_summaries(limit=limit)}
@@ -350,7 +402,7 @@ def admin_affiliates(request: Request, limit: int = Query(default=200, ge=1, le=
 def admin_affiliate_payout_batches(
     request: Request, limit: int = Query(default=100, ge=1, le=500)
 ) -> Dict[str, Any]:
-    _admin_identity(request)
+    _operator(request, permission=PERM_READ_OPS)
     return {"batches": list_payout_batch_summaries(limit=limit)}
 
 
@@ -358,7 +410,8 @@ def admin_affiliate_payout_batches(
 def admin_set_affiliate_status(
     affiliate_id: str, body: AffiliateStatusBody, request: Request
 ) -> Dict[str, Any]:
-    admin = _admin_identity(request)
+    principal = _operator(request, permission=PERM_MUTATE_FINANCIAL)
+    reason = require_nonempty_reason(body.reason)
     eco = get_economics_store()
     eco.init_schema()
     with eco._conn() as con:
@@ -367,23 +420,31 @@ def admin_set_affiliate_status(
             raise HTTPException(status_code=404, detail="not_found")
         con.execute("UPDATE affiliates SET status = ? WHERE id = ?", (body.status, affiliate_id))
         after = con.execute("SELECT * FROM affiliates WHERE id = ?", (affiliate_id,)).fetchone()
-    get_admin_console_store().append_admin_action_audit(
-        admin_user_id=admin["admin_user_id"],
+    audit_id = _audit(
+        principal,
         action_type="set_affiliate_status",
         target_type="affiliate",
         target_id=affiliate_id,
-        reason=body.reason,
-        before_snapshot_json=json.dumps(dict(before), default=str) if before else None,
-        after_snapshot_json=json.dumps(dict(after), default=str) if after else None,
+        reason=reason,
+        before=dict(before) if before else None,
+        after=dict(after) if after else None,
     )
-    return {"ok": True, "affiliate_id": affiliate_id, "status": body.status}
+    return {
+        "ok": True,
+        "affiliate_id": affiliate_id,
+        "status": body.status,
+        "audit_id": audit_id,
+        "actor": principal.user_id,
+        "actor_role": principal.role,
+    }
 
 
 @router.post("/affiliates/payout-batches/{batch_id}/action")
 def admin_affiliate_payout_batch_action(
     batch_id: str, body: AffiliatePayoutActionBody, request: Request, action: str = Query(...),
 ) -> Dict[str, Any]:
-    admin = _admin_identity(request)
+    principal = _operator(request, permission=PERM_MUTATE_FINANCIAL)
+    reason = require_nonempty_reason(body.reason)
     action_norm = (action or "").strip().lower()
     if action_norm not in ("approve", "hold", "mark_paid"):
         raise HTTPException(status_code=400, detail="invalid_action")
@@ -395,20 +456,20 @@ def admin_affiliate_payout_batch_action(
         out = affiliate_payout_batches.cancel_draft_batch(batch_id=batch_id)
     if not out.get("ok"):
         raise HTTPException(status_code=400, detail=out.get("error", "failed"))
-    get_admin_console_store().append_admin_action_audit(
-        admin_user_id=admin["admin_user_id"],
+    audit_id = _audit(
+        principal,
         action_type=f"affiliate_payout_{action_norm}",
         target_type="affiliate_payout_batch",
         target_id=batch_id,
-        reason=body.reason,
-        before_snapshot_json=None,
-        after_snapshot_json=json.dumps(out, default=str),
+        reason=reason,
+        after=out,
     )
+    out = {**out, "audit_id": audit_id, "actor": principal.user_id, "actor_role": principal.role}
     return out
 
 
 @router.get("/audit")
 def admin_audit(request: Request, limit: int = Query(default=200, ge=1, le=1000)) -> Dict[str, Any]:
-    _admin_identity(request)
+    _operator(request, permission=PERM_READ_OPS)
     rows = get_admin_console_store().list_admin_action_audit(limit=limit)
     return {"actions": rows}

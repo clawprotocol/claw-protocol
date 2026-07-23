@@ -238,6 +238,10 @@ def _agreements_write_allowed() -> bool:
 
 def _owner_mutation_guards(request: Request, agreement_id: str, *, surface: str) -> None:
     require_claw_org_id_header(request)
+    from backend.security.commercial_auth import require_authenticated_dashboard_principal
+
+    # Org headers alone are never authentication — require a validated principal.
+    require_authenticated_dashboard_principal(request)
     assert_registered_owner_matches(request, agreement_id)
     assert_free_incomplete_draft_not_expired(agreement_id, surface=surface)
 
@@ -3024,6 +3028,14 @@ class RecipientInviteResendBody(BaseModel):
     participant_id: str = ""
     signing_url: Optional[str] = None
     signer_role_id: Optional[str] = None
+
+
+class RecipientInviteRevokeBody(BaseModel):
+    """Explicitly revoke/supersede the active invite for a phase+participant (no resend)."""
+
+    phase: str = ""
+    participant_id: str = ""
+    reason: str = ""
 
 
 NegotiationPosture = Literal[
@@ -5821,6 +5833,9 @@ def recipient_access_validate(token: str = "", agreement_id: str = "") -> Dict[s
 def get_agreements_workspace_index(request: Request) -> Dict[str, Any]:
     """Lightweight list for Agreement Workspace landing (local / single-tenant style)."""
     require_claw_org_id_header(request)
+    from backend.security.commercial_auth import require_authenticated_dashboard_principal
+
+    require_authenticated_dashboard_principal(request)
     subject = resolve_subject_from_request(request)
     folder_names = _folder_name_map_for_subject(subject)
     summaries: List[Dict[str, Any]] = []
@@ -5890,6 +5905,17 @@ def get_agreements_workspace_index(request: Request) -> Dict[str, Any]:
                 review_status,
                 signing_status,
             )
+            accepted_snap = d.get("accepted_review_snapshot_v1")
+            accepted_public: Optional[Dict[str, Any]] = None
+            if isinstance(accepted_snap, dict) and str(accepted_snap.get("status") or "").strip() == "accepted":
+                # Non-sensitive digest/id status only — never corpus bytes.
+                accepted_public = {
+                    "snapshot_id": str(accepted_snap.get("snapshotId") or "").strip() or None,
+                    "corpus_sha256": str(accepted_snap.get("corpusSha256") or "").strip().lower() or None,
+                    "corpus_length": int(accepted_snap.get("corpusLength") or 0) or None,
+                    "accepted_at": str(accepted_snap.get("acceptedAt") or "").strip() or None,
+                    "status": "accepted",
+                }
             summaries.append(
                 {
                     "id": aid,
@@ -5913,6 +5939,7 @@ def get_agreements_workspace_index(request: Request) -> Dict[str, Any]:
                     "workspace_tags": tags_out,
                     "dashboard_source": "draft",
                     "content_unavailable": False,
+                    "accepted_review_snapshot": accepted_public,
                 }
             )
         except Exception as exc:
@@ -7291,16 +7318,28 @@ def post_vs01_signer_complete(
             )
             auth_mode = "recipient"
         else:
+            from backend.security.commercial_auth import tokenless_signer_complete_allowed
+
             draft_for_auth = _load_or_404(aid)
-            if vs01_open_signing_link_completion_allowed(
+            # Commercial / staging / production: never allow tokenless completion.
+            # Legacy opt-in only when CLAW_ALLOW_TOKENLESS_SIGNER_COMPLETE=1 in local/dev/test.
+            if tokenless_signer_complete_allowed() and vs01_open_signing_link_completion_allowed(
                 draft_for_auth.model_dump(),
                 signer_role_id=signer_role_id,
                 document_id=(body.document_id or "").strip(),
             ):
                 auth_mode = "signing_link"
             else:
-                assert_agreement_recipient_write_allowed(request, aid, allowed_modes=("sign",))
-                auth_mode = "recipient"
+                raise HTTPException(
+                    status_code=403,
+                    detail={
+                        "code": "signing_token_required",
+                        "message": (
+                            "Recipient completion requires a valid, unexpired, "
+                            "recipient-bound signing token."
+                        ),
+                    },
+                )
 
     from backend.services.vs01_signer_completion import (
         completion_emails_already_sent,
@@ -7375,11 +7414,23 @@ def post_vs01_signer_complete(
     completion_emails_sent = completion_emails_already_sent(outcome.audit)
 
     if outcome.audit_mutated:
+        draft_dict_to_save = outcome.draft_dict
+        # Replay protection: consume/supersede active signing invite JTI after recipient complete.
+        if auth_mode == "recipient" and participant_id:
+            from backend.services.recipient_delivery_registry import supersede_active_invite
+
+            draft_dict_to_save = supersede_active_invite(
+                dict(draft_dict_to_save),
+                phase="sign",
+                participant_id=participant_id,
+                audit_log=list(outcome.audit),
+            )
         next_draft = _merge_agreement_draft(
             fresh,
             updated_at=now,
-            audit_log=outcome.audit,
-            vs01_signing_packet_v1=outcome.draft_dict.get("vs01_signing_packet_v1"),
+            audit_log=draft_dict_to_save.get("audit_log") or outcome.audit,
+            vs01_signing_packet_v1=draft_dict_to_save.get("vs01_signing_packet_v1"),
+            recipient_delivery_v1=draft_dict_to_save.get("recipient_delivery_v1"),
         )
         _save_draft_sync(next_draft.model_dump(), request)
 
@@ -7678,6 +7729,63 @@ def post_recipient_invite_resend(
     next_draft = AgreementDraft.model_validate(next_data)
     _save_draft_sync(next_draft.model_dump(), request)
     return {"ok": True, "draft": next_draft.model_dump(), **meta}
+
+
+@router.post("/{agreement_id}/recipient-invite-revoke")
+def post_recipient_invite_revoke(
+    agreement_id: str,
+    request: Request,
+    body: RecipientInviteRevokeBody = RecipientInviteRevokeBody(),
+) -> Dict[str, Any]:
+    """
+    Explicitly revoke the active recipient invite (supersede JTI; no new token minted).
+
+    Behavior:
+    - Supersedes active JTI for phase+participant → validate returns invite_superseded
+    - Replay of revoked/superseded tokens fails closed
+    - Owner-only
+    """
+    if not _agreements_write_allowed():
+        raise HTTPException(status_code=403, detail="verifier_only")
+    _owner_mutation_guards(request, agreement_id, surface="recipient_invite_revoke")
+    phase = (body.phase or "").strip().lower()
+    participant_id = (body.participant_id or "").strip()
+    if phase not in {"review", "sign"} or not participant_id:
+        raise HTTPException(status_code=400, detail="phase_and_participant_required")
+    draft = _load_or_404(agreement_id)
+    from backend.services.recipient_delivery_registry import supersede_active_invite
+
+    audit = list(draft.audit_log or [])
+    next_data = supersede_active_invite(
+        draft.model_dump(mode="json"),
+        phase=phase,
+        participant_id=participant_id,
+        audit_log=audit,
+    )
+    reason = (body.reason or "").strip()
+    if reason:
+        audit.append(
+            {
+                "event_type": "recipient_invite_revoked",
+                "at": _utc_now_iso(),
+                "field": "recipient_delivery",
+                "value": {
+                    "phase": phase,
+                    "participant_id": participant_id,
+                    "reason": reason[:500],
+                },
+            }
+        )
+        next_data["audit_log"] = audit
+    next_draft = AgreementDraft.model_validate(next_data)
+    _save_draft_sync(next_draft.model_dump(), request)
+    return {
+        "ok": True,
+        "revoked": True,
+        "phase": phase,
+        "participant_id": participant_id,
+        "draft": next_draft.model_dump(),
+    }
 
 
 @router.post("/{agreement_id}/review-recipient-email")
@@ -8110,9 +8218,43 @@ def get_agreement_draft(agreement_id: str, request: Request) -> Dict[str, Any]:
             "locked_by": lock.get("locked_by"),
             "content_sha256": lock.get("content_sha256"),
         }
+    draft_out = _draft_with_sanitized_parties(draft).model_dump()
+    # Recipient tokens receive a minimum projection (no unrelated-party PII / delivery JTIs).
+    from backend.security.agreement_read_scope import recipient_access_token_from_request
+    from backend.services.recipient_draft_projection import project_recipient_agreement_draft
+
+    tok = recipient_access_token_from_request(request)
+    recipient_party_id: Optional[str] = None
+    if tok:
+        try:
+            from backend.config.agreement_signing_token import resolve_signing_token_secret_raw
+            from backend.security.agreement_read_scope import validate_recipient_access_token_for_agreement
+
+            token_out = validate_recipient_access_token_for_agreement(
+                token=tok,
+                path_agreement_id=agreement_id,
+                query_agreement_id=None,
+                secret_raw=resolve_signing_token_secret_raw(),
+                consume_single_use=False,
+                log_validation=False,
+            )
+            recipient_party_id = str(token_out.get("recipient_party_id") or "").strip() or None
+        except Exception:
+            recipient_party_id = None
+        draft_out = project_recipient_agreement_draft(
+            draft_out,
+            recipient_party_id=recipient_party_id,
+        )
+        return {
+            "id": agreement_id,
+            "draft": draft_out,
+            "economics": None,
+            "signing_lock": signing_lock_out,
+            "recipient_projection": True,
+        }
     return {
         "id": agreement_id,
-        "draft": _draft_with_sanitized_parties(draft).model_dump(),
+        "draft": draft_out,
         "economics": economics_overlay_for_agreement(agreement_id),
         "signing_lock": signing_lock_out,
     }

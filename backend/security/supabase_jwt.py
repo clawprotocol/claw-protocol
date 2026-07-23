@@ -64,12 +64,14 @@ def extract_bearer_token(request: Request) -> Optional[str]:
 
 
 def _test_auth_user_id(request: Request) -> Optional[str]:
-    env = os.getenv("CLAW_ENVIRONMENT", "local").strip().lower()
-    if env not in ("local", "dev", "test", "staging", "qa", "preview", "review"):
-        return None
-    if env.startswith("preview") or env.startswith("review"):
-        pass
-    elif env in ("production", "prod"):
+    """
+    Test auth header — local/dev/test only.
+
+    Impossible in staging, qa, preview, review, production (commercial fail-closed).
+    """
+    from backend.security.commercial_auth import test_auth_headers_allowed
+
+    if not test_auth_headers_allowed():
         return None
     uid = (request.headers.get("X-Claw-Test-Auth-User-Id") or "").strip()
     return uid or None

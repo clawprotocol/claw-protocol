@@ -16,8 +16,14 @@ from backend.services.vs01_signing_envelope_provenance import (
 
 pytestmark = pytest.mark.unit
 
-_ORG_H = {"X-Claw-Org-Id": "test-org-accepted-snapshot"}
-_ORG_B = {"X-Claw-Org-Id": "test-org-other-customer"}
+_ORG_H = {
+    "X-Claw-Org-Id": "test-org-accepted-snapshot",
+    "X-Claw-Test-Auth-User-Id": "owner-accepted-snapshot",
+}
+_ORG_B = {
+    "X-Claw-Org-Id": "test-org-other-customer",
+    "X-Claw-Test-Auth-User-Id": "other-customer",
+}
 _SECRET = "unit-test-accepted-review-snapshot-secret"
 
 
@@ -31,6 +37,7 @@ def _reset_usage_economics_singleton():
 
 
 def _env(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    monkeypatch.setenv("CLAW_ENVIRONMENT", "test")
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
     monkeypatch.setenv("RESEND_API_KEY", "re_test")
@@ -38,6 +45,7 @@ def _env(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
     monkeypatch.setenv("CLAW_APP_PUBLIC_ORIGIN", "https://app.example.com")
     monkeypatch.setenv("CLAW_AGREEMENT_SIGNING_TOKEN_SECRET", _SECRET)
     monkeypatch.setenv("CLAW_PUBLIC_AGREEMENT_VERIFY", "1")
+    monkeypatch.delenv("CLAW_COMMERCIAL_MODE", raising=False)
 
 
 def _mock_resend_success() -> MagicMock:
