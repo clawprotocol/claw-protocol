@@ -270,3 +270,96 @@ def test_superseded_invite_token_fails_signer_complete(client: TestClient):
     assert revoked.status_code == 403
     detail = revoked.json().get("detail") or {}
     assert detail.get("code") == "invite_superseded"
+
+
+def test_expired_supabase_session_rejected_on_workspace_index(client: TestClient, monkeypatch):
+    import base64
+    import hashlib
+    import hmac
+    import json
+    import time as _time
+
+    secret = "unit-test-supabase-jwt-secret"
+    monkeypatch.setenv("SUPABASE_JWT_SECRET", secret)
+    monkeypatch.delenv("CLAW_COMMERCIAL_MODE", raising=False)
+
+    def _b64(raw: bytes) -> str:
+        return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
+
+    header = _b64(json.dumps({"alg": "HS256", "typ": "JWT"}, separators=(",", ":")).encode())
+    payload = _b64(
+        json.dumps(
+            {"sub": "owner-a", "exp": int(_time.time()) - 120, "iat": int(_time.time()) - 3600},
+            separators=(",", ":"),
+        ).encode()
+    )
+    sig = hmac.new(secret.encode("utf-8"), f"{header}.{payload}".encode(), hashlib.sha256).digest()
+    expired_jwt = f"{header}.{payload}.{_b64(sig)}"
+
+    r = client.get(
+        "/api/agreements/workspace-index",
+        headers={
+            "X-Claw-Org-Id": "user-owner-a",
+            "Authorization": f"Bearer {expired_jwt}",
+        },
+    )
+    assert r.status_code == 401
+    assert r.json()["detail"]["code"] == "invalid_auth_token"
+    assert "jwt_expired" in str(r.json()["detail"].get("message") or "")
+
+
+def test_genesis_affiliate_and_customer_denied_admin_mutations(client: TestClient, monkeypatch):
+    monkeypatch.setenv("CLAW_ADMIN_SECRET", "admin-test-secret")
+    for role, uid in (("genesis_affiliate", "aff-1"), ("customer", "cust-1")):
+        r = client.post(
+            "/v1/admin/agreements/ag_x/flag",
+            headers={
+                "x-claw-admin-secret": "admin-test-secret",
+                "X-Claw-Test-Auth-User-Id": uid,
+                "X-Claw-Test-Operator-Role": role,
+            },
+            json={"flagged": True, "reason": "should be denied"},
+        )
+        assert r.status_code == 403, role
+        assert r.json()["detail"]["code"] == "operator_role_required"
+
+
+def test_replayed_signing_token_fails_after_recipient_complete(client: TestClient):
+    """After successful recipient complete, the same JTI must be superseded (replay fail-closed)."""
+    from backend.services.agreement_signing_lock_store import write_signing_lock
+    from unittest.mock import patch
+
+    aid = "ag_replay_token"
+    _seed_signing_draft(aid)
+    write_signing_lock(aid, {"locked_version_id": "v1"})
+    token = _mint(agreement_id=aid, recipient_party_id="p2")
+    jti = extract_jti_from_token(token)
+    draft = load_draft(aid)
+    record_invite_sent(
+        draft,
+        phase="signing",
+        participant_id="p2",
+        jti=jti,
+        email="c@example.com",
+        audit_log=draft.setdefault("audit_log", []),
+    )
+    save_draft(draft)
+
+    with patch(
+        "backend.services.email.signing_completion_delivery.maybe_send_signing_completion_emails",
+        return_value=None,
+    ):
+        first = client.post(
+            f"/api/agreements/{aid}/vs01-signer-complete",
+            headers={"X-Claw-Recipient-Access-Token": token},
+            json={"signer_role_id": "role_cp", "participant_id": "p2", "document_id": "doc_vs01"},
+        )
+    assert first.status_code == 200, first.text
+
+    replay = client.post(
+        f"/api/agreements/{aid}/vs01-signer-complete",
+        headers={"X-Claw-Recipient-Access-Token": token},
+        json={"signer_role_id": "role_cp", "participant_id": "p2", "document_id": "doc_vs01"},
+    )
+    assert replay.status_code == 403
+    assert replay.json()["detail"]["code"] == "invite_superseded"

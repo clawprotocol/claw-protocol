@@ -7416,12 +7416,13 @@ def post_vs01_signer_complete(
     if outcome.audit_mutated:
         draft_dict_to_save = outcome.draft_dict
         # Replay protection: consume/supersede active signing invite JTI after recipient complete.
+        # Phase must be "signing" to match validate_recipient_access_token_for_agreement.
         if auth_mode == "recipient" and participant_id:
             from backend.services.recipient_delivery_registry import supersede_active_invite
 
             draft_dict_to_save = supersede_active_invite(
                 dict(draft_dict_to_save),
-                phase="sign",
+                phase="signing",
                 participant_id=participant_id,
                 audit_log=list(outcome.audit),
             )
