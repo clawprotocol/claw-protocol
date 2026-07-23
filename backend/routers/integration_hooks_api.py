@@ -9,8 +9,6 @@ from typing import Any, Dict
 
 from fastapi import APIRouter, Request
 
-from backend.document_layout.review_manifest import enrich_analysis_for_api
-from backend.document_layout.store import load_layout_analysis
 from backend.routers.agreements_v2_api import (
     AgreementDraftCreate,
     _load_or_404,
@@ -23,6 +21,7 @@ from backend.routers.agreement_memory_api import MemorySearchBody, agreement_mem
 from backend.routers.document_layout_api import (
     LayoutAnalyzeRequest,
     LayoutLocalizeRequest,
+    api_get_layout_analysis,
     api_layout_analyze,
     api_layout_localize,
 )
@@ -42,18 +41,17 @@ def integration_document_analyze(body: LayoutAnalyzeRequest, request: Request) -
 
 @router.post("/layout/{analysis_id}/localize")
 def integration_layout_localize(analysis_id: str, body: LayoutLocalizeRequest, request: Request) -> Dict[str, Any]:
-    return api_layout_localize(analysis_id, body)
+    """Same auth + ownership bind as ``POST /v1/document-layout/analysis/{id}/localize``."""
+    return api_layout_localize(analysis_id, body, request)
 
 
 @router.get("/layout/{analysis_id}/fields")
 def integration_layout_fields(analysis_id: str, request: Request) -> Dict[str, Any]:
-    """Review-ready field map (candidates + manifest + downstream list)."""
-    data = load_layout_analysis(analysis_id.strip())
-    if not data:
-        from fastapi import HTTPException
-
-        raise HTTPException(status_code=404, detail="analysis_not_found")
-    return {"ok": True, **enrich_analysis_for_api(data)}
+    """
+    Review-ready field map — same auth + ownership bind as
+    ``GET /v1/document-layout/analysis/{id}``.
+    """
+    return api_get_layout_analysis(analysis_id, request)
 
 
 @router.post("/agreements/{agreement_id}/send")

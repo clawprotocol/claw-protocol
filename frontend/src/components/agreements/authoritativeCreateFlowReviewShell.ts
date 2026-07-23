@@ -9,6 +9,7 @@ import type { CreateFlowProductionPhase } from "./createFlowTypes";
 import { tierAllowsAdvancedFullDraftReveal } from "./agreementAdvancedDraftAccess";
 import { getPaidProSourceOfTruthText, hasPaidProSourceOfTruth } from "./paidProSourceOfTruthState";
 import { readAcceptedPipelineReviewCorpusPlain } from "./paidProAcceptedPipelineReviewCorpus";
+import { readDisplayReviewSnapshotAuthority } from "../../agreement/canonicalReviewSnapshotApi";
 import { readPremiumCompletionSnapshot, hasPaidPremiumCompletionSession } from "./premiumCompletionStorage";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import { getLatchedAcceptedServerFullDraftAuthority } from "./premiumAcceptancePolicy";
@@ -88,9 +89,8 @@ export function isCreateFlowPaidAcceptedOrAuthoritativeActive(
       return true;
     }
   }
-  const snap = readPremiumCompletionSnapshot();
-  if (snap?.premiumAccepted === true) return true;
-  return false;
+  // Local premium completion snap is not commercial legal authority.
+  return Boolean(readDisplayReviewSnapshotAuthority()?.snapshotId);
 }
 
 export function resolveAuthoritativeCreateFlowReviewShell(
@@ -107,8 +107,7 @@ export function resolveAuthoritativeCreateFlowReviewShell(
     if (hasPaidProSourceOfTruth()) return "paid_pro";
     if (hasAcceptedPaidCreateFlowFreezeLatch()) return "paid_pro";
     if (hasPaidCreateFlowPipelineAcceptance()) return "paid_pro";
-    const starterSnap = readPremiumCompletionSnapshot();
-    if (starterSnap?.premiumAccepted === true) return "paid_pro";
+    if (readDisplayReviewSnapshotAuthority()?.snapshotId) return "paid_pro";
     return "free_starter";
   }
   if (input.premiumCheckoutCompleted) return "paid_pro";
@@ -121,8 +120,7 @@ export function resolveAuthoritativeCreateFlowReviewShell(
     if (hasCurrentSessionProEntitlement()) return "paid_pro";
     if (hasAcceptedPaidCreateFlowFreezeLatch()) return "paid_pro";
     if (hasPaidCreateFlowPipelineAcceptance()) return "paid_pro";
-    const snap = readPremiumCompletionSnapshot();
-    if (snap?.premiumAccepted === true) return "paid_pro";
+    if (readDisplayReviewSnapshotAuthority()?.snapshotId) return "paid_pro";
     return "free_starter";
   }
 
@@ -137,8 +135,7 @@ export function resolveAuthoritativeCreateFlowReviewShell(
   if (hasCurrentSessionProEntitlement()) return "paid_pro";
   if (hasAcceptedPaidCreateFlowFreezeLatch()) return "paid_pro";
   if (hasPaidCreateFlowPipelineAcceptance()) return "paid_pro";
-  const snap = readPremiumCompletionSnapshot();
-  if (snap?.premiumAccepted === true) return "paid_pro";
+  if (readDisplayReviewSnapshotAuthority()?.snapshotId) return "paid_pro";
   return "free_starter";
 }
 

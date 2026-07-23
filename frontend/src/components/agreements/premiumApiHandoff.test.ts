@@ -1,3 +1,4 @@
+/** @vitest-environment jsdom */
 import { SHARED_ACCEPTED_PAID_BODY } from "./paidProSharedFixtureSystem";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
@@ -10,6 +11,10 @@ import {
 } from "./premiumApiHandoff";
 import { assertPremiumPurposeHandoffBlocked } from "./paidProRuntimeAuthorityEstablishment";
 import { clearPaidProSourceOfTruth, establishPaidProSourceOfTruth } from "./paidProSourceOfTruth";
+import {
+  clearDisplayReviewSnapshotAuthority,
+  storeDisplayReviewSnapshotAuthority,
+} from "../../agreement/canonicalReviewSnapshotApi";
 import { resolvePremiumRenderSource } from "./premiumRenderSourceResolver";
 import { pickPremiumPaidReadonlyPlainText } from "./premiumReadonlyRenderCorpus";
 import type { PremiumFullDraftApiResult } from "./premiumFullDraftApi";
@@ -61,6 +66,7 @@ function servicesDraft(): ParsedDraftShape {
 describe("premiumApiHandoff", () => {
   afterEach(() => {
     clearPaidProSourceOfTruth();
+    clearDisplayReviewSnapshotAuthority();
     vi.restoreAllMocks();
   });
 
@@ -99,13 +105,41 @@ describe("premiumApiHandoff", () => {
     expect(info).not.toHaveBeenCalled();
   });
 
-  it("hasPaidProChromeAuthority is false without server corpus or SoT", () => {
-    expect(hasPaidProChromeAuthority({ draft: servicesDraft() })).toBe(false);
+  it("hasPaidProChromeAuthority is false without display snapshot authority", () => {
+    expect(hasPaidProChromeAuthority({ draft: servicesDraft(), agreementId: "ag_chrome" })).toBe(false);
   });
 
-  it("hasPaidProChromeAuthority is true after establishPaidProSourceOfTruth", () => {
+  it("hasPaidProChromeAuthority stays false after local SoT alone", () => {
     establishPaidProSourceOfTruth({ text: SHARED_ACCEPTED_PAID_BODY, source: "server_full_draft" });
-    expect(hasPaidProChromeAuthority({ draft: servicesDraft() })).toBe(true);
+    expect(hasPaidProChromeAuthority({ draft: servicesDraft(), agreementId: "ag_chrome" })).toBe(false);
+  });
+
+  it("hasPaidProChromeAuthority is true only with verified GET corpus", async () => {
+    establishPaidProSourceOfTruth({ text: SHARED_ACCEPTED_PAID_BODY, source: "server_full_draft" });
+    storeDisplayReviewSnapshotAuthority({
+      agreementId: "ag_chrome",
+      snapshotId: "crs_chrome",
+      corpusSha256: "a".repeat(64),
+      corpusLength: SHARED_ACCEPTED_PAID_BODY.length,
+      status: "pending",
+    });
+    // Display metadata alone must not unlock chrome.
+    expect(hasPaidProChromeAuthority({ draft: servicesDraft(), agreementId: "ag_chrome" })).toBe(false);
+
+    const { sha256CorpusDigest, storeVerifiedCommercialDisplayCorpus } = await import(
+      "../../agreement/canonicalReviewSnapshotApi"
+    );
+    const sha = await sha256CorpusDigest(SHARED_ACCEPTED_PAID_BODY);
+    storeVerifiedCommercialDisplayCorpus({
+      agreementId: "ag_chrome",
+      snapshotId: "crs_chrome",
+      corpusSha256: sha,
+      corpusLength: SHARED_ACCEPTED_PAID_BODY.length,
+      status: "pending",
+      corpusPlain: SHARED_ACCEPTED_PAID_BODY,
+    });
+    expect(hasPaidProChromeAuthority({ draft: servicesDraft(), agreementId: "ag_chrome" })).toBe(true);
+    expect(hasPaidProChromeAuthority({ draft: servicesDraft(), agreementId: "ag_other" })).toBe(false);
   });
 
   it("resolvePremiumRenderSource blocks live_generated_preview after checkout lock", () => {

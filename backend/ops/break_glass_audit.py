@@ -21,6 +21,7 @@ from typing import Any, Dict, Optional
 
 from fastapi import Request
 
+from backend.config.deployment_runtime import claw_environment
 from backend.config.runtime_environment import data_dir
 
 log = logging.getLogger(__name__)
@@ -98,7 +99,7 @@ def log_break_glass_event(
         "request_id": _request_id(request),
         "client_ip": _client_ip(request),
         "auth_channel": auth_channel,
-        "environment": os.getenv("CLAW_ENVIRONMENT", "local").strip() or "local",
+        "environment": claw_environment() or "(unset)",
     }
     if extra:
         for k, v in extra.items():

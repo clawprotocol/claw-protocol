@@ -1117,6 +1117,23 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
 describe("paid Pro runtime authority establishment (intake wiring)", () => {
   const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
 
+  it("Prepare handoff fails closed without agreement id (cannot bypass Prepare authority)", () => {
+    const frag = extractBalancedDecl(
+      intake,
+      "const handlePaidProPrepareSignaturesFromFirstReview = React.useCallback",
+    );
+    expect(frag).toContain("if (!agreementIdForAccept)");
+    expect(frag).toContain(
+      "Server review snapshot requires an agreement id before Prepare",
+    );
+    expect(frag).toContain("canEnableCommercialPrepareFromServerSnapshot(agreementIdForAccept)");
+    // Empty id must return before accept/prepare progress — no silent bypass.
+    const emptyIdx = frag.indexOf("if (!agreementIdForAccept)");
+    const acceptIdx = frag.indexOf("acceptDisplayedCommercialReviewSnapshot");
+    expect(emptyIdx).toBeGreaterThanOrEqual(0);
+    expect(acceptIdx).toBeGreaterThan(emptyIdx);
+  });
+
   it("blocks Pro review shell until runtime authority is established", () => {
     expect(intake).toContain("assessPaidProRuntimeAuthority");
     expect(intake).toContain("paidProAwaitingRuntimeAuthority");

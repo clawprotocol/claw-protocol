@@ -4,12 +4,13 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Body, File, UploadFile
+from fastapi import APIRouter, Body, Depends, File, UploadFile
 from fastapi.responses import StreamingResponse, JSONResponse
 import io
 import base64
 from pydantic import BaseModel
 
+from backend.security.legacy_router_gate import deny_legacy_router_in_commercial
 from backend.services import workflow_service
 from backend.services import bundle_service
 from backend.services import agreement_service
@@ -19,7 +20,11 @@ from backend.utils import metrics
 from backend.utils.canon_json import canon_sha256_hex
 
 
-router = APIRouter(prefix="/v1/workflow", tags=["workflow"])
+router = APIRouter(
+    prefix="/v1/workflow",
+    tags=["workflow"],
+    dependencies=[Depends(deny_legacy_router_in_commercial)],
+)
 
 
 class TimelineCreateRequest(BaseModel):

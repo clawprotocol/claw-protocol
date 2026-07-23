@@ -65,9 +65,11 @@ def test_capture_returns_200_on_unknown_code(tmp_path: Path, monkeypatch: pytest
 
 
 def test_checkout_metadata_endpoint(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("CLAW_ENVIRONMENT", "test")
     client = _client(tmp_path, monkeypatch)
     res = client.post(
         "/v1/genesis-referral/checkout-metadata",
+        headers={"X-Claw-Test-Auth-User-Id": "user_qa_checkout"},
         json={
             "org_id": "org_qa",
             "referral_code": "DOG1",
@@ -82,3 +84,4 @@ def test_checkout_metadata_endpoint(tmp_path: Path, monkeypatch: pytest.MonkeyPa
     assert md["plan_code"] == "pro"
     assert md["referral_code"] == "DOG1"
     assert md["visitor_id"] == "vis_qa_12345678"
+    assert md["user_id"] == "user_qa_checkout"

@@ -11,6 +11,8 @@ import logging
 import os
 from typing import Any, Dict, Literal, Optional
 
+from backend.config.deployment_runtime import claw_environment
+
 log = logging.getLogger(__name__)
 
 LIVENESS_SUMMARY = (
@@ -93,7 +95,7 @@ def _probe_runtime_environment() -> Dict[str, Any]:
         return _subsystem(
             status="ok" if writable else "degraded",
             extra={
-                "environment": os.getenv("CLAW_ENVIRONMENT", "local").strip() or "local",
+                "environment": claw_environment() or "(unset)",
                 "data_dir_configured": bool(str(os.getenv("CLAW_DATA_DIR", "")).strip()),
                 "data_dir_writable": writable,
             },

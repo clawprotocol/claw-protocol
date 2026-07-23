@@ -11,6 +11,7 @@ from starlette.requests import Request
 from starlette.responses import Response
 
 from backend.agreements.paid_pro_server_timing import CORS_EXPOSE_PAID_PRO_HEADERS
+from backend.config.deployment_runtime import claw_environment
 
 _log = logging.getLogger("claw.cors")
 
@@ -100,7 +101,9 @@ def cors_allowed_origins() -> List[str]:
     parsed = _parse_cors_origins_env()
     if parsed:
         return parsed
-    if os.getenv("CLAW_ENVIRONMENT", "local") in ("local", "dev", "test"):
+    env = claw_environment()
+    # Only explicit relaxed environments may default to wildcard CORS.
+    if env in ("local", "dev", "test"):
         return ["*"]
     return []
 
@@ -118,7 +121,7 @@ def _origin_suffix_allowlist() -> List[str]:
     raw = os.getenv("CLAW_CORS_ALLOW_ORIGIN_SUFFIXES", "").strip()
     if raw:
         return [s.strip() for s in raw.split(",") if s.strip()]
-    env = os.getenv("CLAW_ENVIRONMENT", "local").strip().lower()
+    env = claw_environment()
     if env in ("staging", "qa", "preview", "test"):
         return [".up.railway.app", ".railway.app"]
     # Production Railway API + separate Railway SPA (e.g. believable-gentleness → claw-protocol).
@@ -185,7 +188,7 @@ def cors_env_raw_meta() -> Dict[str, Any]:
 def cors_startup_diagnostics() -> Dict[str, Any]:
     allowed = cors_allowed_origins()
     return {
-        "claw_environment": os.getenv("CLAW_ENVIRONMENT", "local").strip().lower(),
+        "claw_environment": claw_environment(),
         "env_raw": cors_env_raw_meta(),
         "resolved_origin_count": len(allowed),
         "resolved_origins": allowed if allowed != ["*"] else ["*"],

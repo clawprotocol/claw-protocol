@@ -1,4 +1,9 @@
-"""Proof status, details, upgrade (batched anchoring), and humane export jobs."""
+"""Proof status, details, upgrade (batched anchoring), and humane export jobs.
+
+Commercial mode: all private proof surfaces require validated owner principal
+(or recipient token for agreement/receipt-bound subjects) and server-side
+ownership binding. Path subject ids alone are never sufficient.
+"""
 
 from __future__ import annotations
 
@@ -17,7 +22,10 @@ from backend.proof_status.capabilities import (
 from backend.proof_status.schemas import ExportJobCreateBody
 from backend.proof_status.service import get_proof_status_service
 from backend.proof_status.store import ProofLayerStore
-from backend.utils.enforce import resolve_subject_from_request
+from backend.security.proof_subject_access import (
+    require_proof_subject_access,
+    resolve_proof_owner_subject,
+)
 
 router = APIRouter(prefix="/v1/proof", tags=["proof"])
 
@@ -28,6 +36,7 @@ class ProofUpgradeBody(BaseModel):
 
 @router.get("/{subject_type}/{subject_id}/status")
 def api_proof_status(subject_type: str, subject_id: str, request: Request) -> Dict[str, Any]:
+    require_proof_subject_access(request, subject_type, subject_id)
     caps = resolve_humane_capabilities(request).as_dict()
     svc = get_proof_status_service()
     payload = svc.build_status_payload(subject_type, subject_id, capabilities=caps)
@@ -36,6 +45,7 @@ def api_proof_status(subject_type: str, subject_id: str, request: Request) -> Di
 
 @router.get("/{subject_type}/{subject_id}/details")
 def api_proof_details(subject_type: str, subject_id: str, request: Request) -> Dict[str, Any]:
+    require_proof_subject_access(request, subject_type, subject_id)
     caps = resolve_humane_capabilities(request).as_dict()
     svc = get_proof_status_service()
     payload = svc.build_details_payload(subject_type, subject_id, capabilities=caps)
@@ -48,6 +58,7 @@ def api_proof_subject_export(subject_type: str, subject_id: str, request: Reques
     Stream the VS01 verification bundle for a receipt id (same bytes as GET /v1/receipts/{id}/bundle).
     Agreement/workspace records use POST /v1/proof/exports with scope=record.
     """
+    require_proof_subject_access(request, subject_type, subject_id)
     assert_export_allowed_or_raise(request)
     st = (subject_type or "").strip().lower()
     if st != "receipt":
@@ -60,7 +71,7 @@ def api_proof_subject_export(subject_type: str, subject_id: str, request: Reques
         )
     from backend.routers.vs01_receipts_api import api_get_receipt_bundle
 
-    return api_get_receipt_bundle(subject_id)
+    return api_get_receipt_bundle(subject_id, request)
 
 
 @router.post("/{subject_type}/{subject_id}/upgrade")
@@ -70,6 +81,7 @@ def api_proof_upgrade(
     request: Request,
     body: ProofUpgradeBody,
 ) -> Dict[str, Any]:
+    require_proof_subject_access(request, subject_type, subject_id)
     caps = resolve_humane_capabilities(request).as_dict()
     svc = get_proof_status_service()
     uid = (request.headers.get("x-claw-user-id") or "").strip() or None
@@ -86,7 +98,10 @@ def api_proof_upgrade(
 @router.post("/exports")
 def api_proof_exports_create(request: Request, body: ExportJobCreateBody) -> Dict[str, Any]:
     assert_export_allowed_or_raise(request)
-    subject = resolve_subject_from_request(request)
+    subject = resolve_proof_owner_subject(request)
+    # Record-scoped exports must bind to an agreement the caller can read.
+    if (body.scope or "").strip() == "record" and (body.scope_ref or "").strip():
+        require_proof_subject_access(request, "agreement", str(body.scope_ref).strip())
     store = ProofLayerStore()
     store.init_schema()
     job = store.create_export_job(
@@ -135,7 +150,7 @@ def _export_row_api(row: Optional[Dict[str, Any]], request: Request) -> Dict[str
 @router.get("/exports/{export_id}")
 def api_proof_exports_get(export_id: str, request: Request) -> Dict[str, Any]:
     assert_export_allowed_or_raise(request)
-    subject = resolve_subject_from_request(request)
+    subject = resolve_proof_owner_subject(request)
     store = ProofLayerStore()
     store.init_schema()
     row = store.get_export_job(export_id, subject)
@@ -155,7 +170,7 @@ def api_proof_exports_get(export_id: str, request: Request) -> Dict[str, Any]:
 @router.get("/exports/{export_id}/download")
 def api_proof_exports_download(export_id: str, request: Request) -> Response:
     assert_export_allowed_or_raise(request)
-    subject = resolve_subject_from_request(request)
+    subject = resolve_proof_owner_subject(request)
     store = ProofLayerStore()
     store.init_schema()
     row = store.get_export_job(export_id, subject)
@@ -198,7 +213,7 @@ class ProofFolderCreateBody(BaseModel):
 def api_proof_folders_list(request: Request) -> Dict[str, Any]:
     """Folder metadata for exports and browsing (base organization without AI)."""
     assert_export_allowed_or_raise(request)
-    subject = resolve_subject_from_request(request)
+    subject = resolve_proof_owner_subject(request)
     store = ProofLayerStore()
     store.init_schema()
     rows = store.list_folders(subject)
@@ -208,7 +223,7 @@ def api_proof_folders_list(request: Request) -> Dict[str, Any]:
 @router.post("/folders")
 def api_proof_folders_create(request: Request, body: ProofFolderCreateBody) -> Dict[str, Any]:
     assert_export_allowed_or_raise(request)
-    subject = resolve_subject_from_request(request)
+    subject = resolve_proof_owner_subject(request)
     store = ProofLayerStore()
     store.init_schema()
     row = store.insert_folder(owner_subject=subject, folder_name=body.folder_name.strip())

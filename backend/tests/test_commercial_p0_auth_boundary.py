@@ -363,3 +363,110 @@ def test_replayed_signing_token_fails_after_recipient_complete(client: TestClien
     )
     assert replay.status_code == 403
     assert replay.json()["detail"]["code"] == "invite_superseded"
+
+
+def test_sign_vs_signing_revoke_normalization_invalidates_live_token(client: TestClient):
+    """Legacy phase=sign revoke must hit the signing registry key and kill the live JTI."""
+    from backend.services.agreement_signing_lock_store import write_signing_lock
+    from backend.services.recipient_delivery_registry import (
+        is_jti_superseded,
+        normalize_delivery_phase,
+    )
+
+    assert normalize_delivery_phase("sign") == "signing"
+    assert normalize_delivery_phase("signature") == "signing"
+
+    aid = "ag_sign_phase_revoke"
+    _seed_signing_draft(aid)
+    write_signing_lock(aid, {"locked_version_id": "v1"})
+    token = _mint(agreement_id=aid, recipient_party_id="p2")
+    jti = extract_jti_from_token(token)
+    assert jti
+    draft = load_draft(aid)
+    record_invite_sent(
+        draft,
+        phase="signing",
+        participant_id="p2",
+        jti=jti,
+        email="c@example.com",
+        audit_log=draft.setdefault("audit_log", []),
+    )
+    save_draft(draft)
+
+    revoked = client.post(
+        f"/api/agreements/{aid}/recipient-invite-revoke",
+        headers=_owner_headers(),
+        json={"phase": "sign", "participant_id": "p2", "reason": "adversarial sign alias revoke"},
+    )
+    assert revoked.status_code == 200, revoked.text
+    assert revoked.json().get("phase") == "signing"
+
+    draft_after = load_draft(aid)
+    assert is_jti_superseded(draft_after, jti, phase="signing", participant_id="p2")
+    assert is_jti_superseded(draft_after, jti, phase="sign", participant_id="p2")
+
+    complete = client.post(
+        f"/api/agreements/{aid}/vs01-signer-complete",
+        headers={"X-Claw-Recipient-Access-Token": token},
+        json={"signer_role_id": "role_cp", "participant_id": "p2", "document_id": "doc_vs01"},
+    )
+    assert complete.status_code == 403
+    assert complete.json()["detail"]["code"] == "invite_superseded"
+
+
+def test_minted_signing_token_jti_recorded_and_revoked_replay_fails(client: TestClient):
+    """Mint must persist JTI under signing phase; revoke then replay fails closed."""
+    from backend.services.agreement_signing_lock_store import write_signing_lock
+    from backend.services.recipient_delivery_registry import get_registry
+
+    create = client.post(
+        "/api/agreements/draft",
+        headers=_owner_headers(),
+        json={
+            "title": "Mint JTI record",
+            "jurisdiction": "DE",
+            "parties": [
+                {"name": "Owner LLC", "role": "Client", "email": "o@example.com", "id": "p1"},
+                {"name": "CP LLC", "role": "Service Provider", "email": "c@example.com", "id": "p2"},
+            ],
+        },
+    )
+    assert create.status_code == 200, create.text
+    aid = create.json()["draft"]["id"]
+    _seed_signing_draft(aid)
+    write_signing_lock(aid, {"locked_version_id": "v1"})
+
+    mint = client.post(
+        f"/api/agreements/{aid}/recipient-access-token",
+        headers=_owner_headers(),
+        json={
+            "mode": "sign",
+            "role": "signer",
+            "recipient_party_id": "p2",
+            "locked_version_id": "v1",
+        },
+    )
+    assert mint.status_code == 200, mint.text
+    token = mint.json()["token"]
+    jti = extract_jti_from_token(token)
+    assert jti
+
+    draft = load_draft(aid)
+    reg = get_registry(draft)
+    row = (reg.get("recipients") or {}).get("signing:p2") or {}
+    assert row.get("active_jti") == jti
+
+    revoke = client.post(
+        f"/api/agreements/{aid}/recipient-invite-revoke",
+        headers=_owner_headers(),
+        json={"phase": "sign", "participant_id": "p2", "reason": "revoke after mint"},
+    )
+    assert revoke.status_code == 200, revoke.text
+
+    replay = client.post(
+        f"/api/agreements/{aid}/vs01-signer-complete",
+        headers={"X-Claw-Recipient-Access-Token": token},
+        json={"signer_role_id": "role_cp", "participant_id": "p2", "document_id": "doc_vs01"},
+    )
+    assert replay.status_code == 403
+    assert replay.json()["detail"]["code"] == "invite_superseded"

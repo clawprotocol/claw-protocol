@@ -33,6 +33,23 @@ def test_cors_allow_request_headers_includes_paid_pro_perf_trace_case_insensitiv
     assert not cors_allow_request_header_allowed("x-claw-unknown-header")
 
 
+@pytest.mark.parametrize("env", ["staging", "production", "prod", None, "   ", "unknown"])
+def test_non_relaxed_cors_does_not_default_to_wildcard_when_origins_unset(
+    monkeypatch: pytest.MonkeyPatch, env: str | None
+) -> None:
+    """Regression: cors_policy must not treat unset/staging as relaxed ["*"] default."""
+    monkeypatch.delenv("CLAW_CORS_ALLOW_ORIGINS", raising=False)
+    monkeypatch.delenv("CLAW_CORS_ALLOW_ORIGIN_SUFFIXES", raising=False)
+    monkeypatch.delenv("RAILWAY_ENVIRONMENT", raising=False)
+    if env is None:
+        monkeypatch.delenv("CLAW_ENVIRONMENT", raising=False)
+    else:
+        monkeypatch.setenv("CLAW_ENVIRONMENT", env)
+    origins = cors_allowed_origins()
+    assert origins != ["*"]
+    assert "*" not in origins
+
+
 def test_normalize_cors_origin_strips_quotes_trailing_slash_and_crlf() -> None:
     assert (
         normalize_cors_origin(

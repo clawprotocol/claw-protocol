@@ -108,10 +108,17 @@ def test_exports_flow(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     def fake_resolve(_req):
         return "org:test-org"
 
-    monkeypatch.setattr("backend.routers.proof_status_api.resolve_subject_from_request", fake_resolve)
+    monkeypatch.setattr(
+        "backend.routers.proof_status_api.resolve_proof_owner_subject",
+        fake_resolve,
+    )
     monkeypatch.setattr(
         "backend.proof_status.capabilities.assert_export_allowed_or_raise",
         lambda _req: None,
+    )
+    monkeypatch.setattr(
+        "backend.routers.proof_status_api.require_proof_subject_access",
+        lambda *_a, **_k: None,
     )
 
     r = client.post("/v1/proof/exports", json={"scope": "record", "scope_ref": "rcpt_z"})

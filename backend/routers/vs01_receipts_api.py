@@ -2,16 +2,20 @@
 VS01-B11: GET persisted receipt.
 
 VS01-B12: verification bundle zip download.
+
+Commercial mode: owner principal + document ownership bind, or recipient token
+bound to the document's agreement/party. Path receipt ids alone are insufficient.
 """
 from __future__ import annotations
 
 import logging
 from typing import Any, Dict
 
-from fastapi import APIRouter, HTTPException, Response
+from fastapi import APIRouter, HTTPException, Request, Response
 
 from backend.config.storage_runtime import cache_verification_bundles_enabled, unified_artifact_store_enabled
-from backend.services import document_service, receipt_service
+from backend.security.receipt_access import require_vs01_receipt_access
+from backend.services import document_service
 from backend.storage.artifact_repository import get_artifact_repository
 from backend.utils.vs01_verification_bundle import build_verification_bundle_zip_bytes
 
@@ -62,18 +66,24 @@ def _bundle_cache_put(receipt_id: str, zip_bytes: bytes) -> None:
 
 
 @router.get("/{receipt_id}")
-def api_get_receipt(receipt_id: str) -> Dict[str, Any]:
-    rec = receipt_service.get_receipt(receipt_id)
-    if not rec:
-        raise HTTPException(status_code=404, detail=_MSG_RECEIPT_NOT_FOUND)
+def api_get_receipt(receipt_id: str, request: Request) -> Dict[str, Any]:
+    try:
+        rec = require_vs01_receipt_access(request, receipt_id)
+    except HTTPException as exc:
+        if exc.status_code == 404:
+            raise HTTPException(status_code=404, detail=_MSG_RECEIPT_NOT_FOUND) from exc
+        raise
     return {"ok": True, "receipt": rec}
 
 
 @router.get("/{receipt_id}/bundle")
-def api_get_receipt_bundle(receipt_id: str) -> Response:
-    rec = receipt_service.get_receipt(receipt_id)
-    if not rec:
-        raise HTTPException(status_code=404, detail=_MSG_RECEIPT_NOT_FOUND)
+def api_get_receipt_bundle(receipt_id: str, request: Request) -> Response:
+    try:
+        rec = require_vs01_receipt_access(request, receipt_id)
+    except HTTPException as exc:
+        if exc.status_code == 404:
+            raise HTTPException(status_code=404, detail=_MSG_RECEIPT_NOT_FOUND) from exc
+        raise
 
     doc_id = rec.get("document_id")
     if not isinstance(doc_id, str) or not doc_id:

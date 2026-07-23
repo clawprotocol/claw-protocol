@@ -2,14 +2,19 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
+from backend.security.legacy_router_gate import deny_legacy_router_in_commercial
 from backend.services import esign_service
 
 
-router = APIRouter(prefix="/v1/esign", tags=["esign"])
+router = APIRouter(
+    prefix="/v1/esign",
+    tags=["esign"],
+    dependencies=[Depends(deny_legacy_router_in_commercial)],
+)
 
 
 class SignerInput(BaseModel):

@@ -96,7 +96,8 @@ def _post_agreement(
 
 
 def _is_prod() -> bool:
-    return os.getenv("CLAW_ENVIRONMENT", "local").strip().lower() in ("production", "prod")
+    # Script-only: empty default (never imply local for copy-paste into runtime).
+    return os.getenv("CLAW_ENVIRONMENT", "").strip().lower() in ("production", "prod")
 
 
 def _truthy(name: str) -> bool:

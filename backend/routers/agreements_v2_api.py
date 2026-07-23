@@ -119,6 +119,7 @@ from backend.config.agreement_signing_token import (
     resolve_signing_token_secret_raw,
     review_link_mint_enabled,
 )
+from backend.config.deployment_runtime import claw_environment
 from backend.config.feed_anchor_policy import settlement_anchor_network_hint
 from backend.proof_status.store import ProofLayerStore
 from backend.services import document_service
@@ -280,7 +281,7 @@ def _signing_token_secret_bytes(*, agreement_id: str | None = None) -> bytes:
         _agreements_log.warning(
             "[review-first-env-token-secret-missing] agreementIdShort=%s claw_environment=%s",
             _agreement_id_short(agreement_id or ""),
-            os.getenv("CLAW_ENVIRONMENT", "local").strip().lower(),
+            claw_environment(),
         )
         raise HTTPException(
             status_code=422,
@@ -6216,6 +6217,32 @@ def post_recipient_access_token(
                 "message": "Unable to mint recipient access token after retries. Try again shortly.",
             },
         ) from last_mint_error
+    # Record JTI in delivery registry for sign/review so revoke/complete can consume it.
+    pid_for_reg = (body.recipient_party_id or "").strip()
+    if pid_for_reg:
+        try:
+            from backend.services.recipient_delivery_registry import (
+                extract_jti_from_token,
+                normalize_delivery_phase,
+                record_invite_sent,
+            )
+
+            draft_for_reg = _load_or_404(agreement_id)
+            draft_dict = draft_for_reg.model_dump(mode="json")
+            phase = normalize_delivery_phase("signing" if body.mode == "sign" else "review")
+            record_invite_sent(
+                draft_dict,
+                phase=phase,
+                participant_id=pid_for_reg,
+                jti=extract_jti_from_token(token),
+                email=None,
+                audit_log=list(draft_dict.get("audit_log") or []),
+            )
+            _save_draft_sync(draft_dict, request)
+        except Exception:  # noqa: BLE001 — mint must still return token
+            logging.getLogger(__name__).exception(
+                "recipient_token_jti_registry_failed agreement_id=%s", agreement_id
+            )
     u_ev = "signature_request_sent" if body.mode == "sign" else "recipient_invite_sent"
     record_usage_ledger_event(
         subject_ref=resolve_subject_from_request(request),
@@ -7107,6 +7134,7 @@ def post_signing_packet_cancel(
     if not stored:
         raise HTTPException(status_code=404, detail="packet_not_found")
     from backend.services.frozen_signing_authority import PACKET_STATE_CANCELLED
+    from backend.services.recipient_delivery_registry import supersede_all_phase_invites
 
     now = _utc_now_iso()
     stored = {**stored, "packet_state": PACKET_STATE_CANCELLED, "cancelled_at": now}
@@ -7123,14 +7151,17 @@ def post_signing_packet_cancel(
             value={"reason": (body.reason or "").strip() or None},
         )
     )
-    merge_fields: Dict[str, Any] = {
-        "vs01_signing_packet_v1": stored,
-        "audit_log": audit,
-        "updated_at": now,
-    }
+    # Invalidate every live signing JTI for this agreement (idempotent).
+    draft_dict = draft.model_dump(mode="json")
+    draft_dict["vs01_signing_packet_v1"] = stored
     if frozen_next:
-        merge_fields["frozen_signing_authority_v1"] = frozen_next
-    next_draft = _merge_agreement_draft(draft, **merge_fields)
+        draft_dict["frozen_signing_authority_v1"] = frozen_next
+    draft_dict["audit_log"] = audit
+    draft_dict = supersede_all_phase_invites(
+        draft_dict, phase="signing", audit_log=audit
+    )
+    draft_dict["updated_at"] = now
+    next_draft = AgreementDraft.model_validate(draft_dict)
     _save_draft_sync(next_draft.model_dump(), request)
     return {"ok": True, "packet_state": PACKET_STATE_CANCELLED, "draft": next_draft.model_dump()}
 
@@ -7246,13 +7277,18 @@ def post_signing_packet_reissue(
             },
         )
     )
-    next_draft = _merge_agreement_draft(
-        draft,
-        vs01_signing_packet_v1=stored,
-        frozen_signing_authority_v1=frozen_to_store,
-        audit_log=audit,
-        updated_at=now,
+    from backend.services.recipient_delivery_registry import supersede_all_phase_invites
+
+    # Prior-revision signing JTIs must die before the new packet is active.
+    draft_dict = draft.model_dump(mode="json")
+    draft_dict["vs01_signing_packet_v1"] = stored
+    draft_dict["frozen_signing_authority_v1"] = frozen_to_store
+    draft_dict["audit_log"] = audit
+    draft_dict = supersede_all_phase_invites(
+        draft_dict, phase="signing", audit_log=audit
     )
+    draft_dict["updated_at"] = now
+    next_draft = AgreementDraft.model_validate(draft_dict)
     _save_draft_sync(next_draft.model_dump(), request)
     return {
         "ok": True,
@@ -7275,6 +7311,7 @@ def post_vs01_signer_complete(
         raise HTTPException(status_code=400, detail="signer_role_id_required")
 
     auth_mode: Optional[str] = None
+    recipient_token_raw: Optional[str] = None
     if _agreements_write_allowed():
         try:
             _owner_mutation_guards(request, aid, surface="vs01_signer_complete")
@@ -7298,6 +7335,7 @@ def post_vs01_signer_complete(
 
         tok = recipient_access_token_from_request(request)
         if tok:
+            recipient_token_raw = tok
             try:
                 secret_raw = resolve_signing_token_secret_raw()
             except SigningTokenSecretMissingInProductionError as e:
@@ -7365,6 +7403,35 @@ def post_vs01_signer_complete(
     )
 
     draft = _load_or_404(aid)
+    stored_pkt = draft.vs01_signing_packet_v1 if isinstance(draft.vs01_signing_packet_v1, dict) else {}
+    packet_state = str(stored_pkt.get("packet_state") or "active").strip().lower()
+    if packet_state in ("cancelled", "superseded"):
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": f"packet_{packet_state}",
+                "message": (
+                    "This signing packet was cancelled or replaced. "
+                    "Ask the sender for a new signing link."
+                ),
+            },
+        )
+    frozen_chk = draft.frozen_signing_authority_v1 if isinstance(draft.frozen_signing_authority_v1, dict) else {}
+    frozen_state = str(
+        frozen_chk.get("packetState") or frozen_chk.get("packet_state") or "active"
+    ).strip().lower()
+    if frozen_state in ("cancelled", "superseded"):
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": f"packet_{frozen_state}",
+                "message": (
+                    "This signing packet was cancelled or replaced. "
+                    "Ask the sender for a new signing link."
+                ),
+            },
+        )
+
     now = (body.signed_at or "").strip() or _utc_now_iso()
     signed_date_iso = (body.signed_date_iso or "").strip() or now[:10]
     signed_date_display = (body.signed_date_display or "").strip()
@@ -7394,7 +7461,6 @@ def post_vs01_signer_complete(
     # Commercial post-cutover: every completion path must bind accepted snapshot,
     # including requests that omit portable_packet (hydrate from stored packet).
     require_snap = requires_accepted_snapshot_for_continuation(draft)
-    stored_pkt = draft.vs01_signing_packet_v1 if isinstance(draft.vs01_signing_packet_v1, dict) else {}
     stored_portable = stored_pkt.get("portable") if isinstance(stored_pkt.get("portable"), dict) else None
     portable_packet = body.portable_packet if isinstance(body.portable_packet, dict) else None
     if require_snap:
@@ -7455,12 +7521,16 @@ def post_vs01_signer_complete(
         # Replay protection: consume/supersede active signing invite JTI after recipient complete.
         # Phase must be "signing" to match validate_recipient_access_token_for_agreement.
         if auth_mode == "recipient" and participant_id:
-            from backend.services.recipient_delivery_registry import supersede_active_invite
+            from backend.services.recipient_delivery_registry import (
+                extract_jti_from_token,
+                supersede_active_invite,
+            )
 
             draft_dict_to_save = supersede_active_invite(
                 dict(draft_dict_to_save),
                 phase="signing",
                 participant_id=participant_id,
+                jti=extract_jti_from_token(recipient_token_raw or ""),
                 audit_log=list(outcome.audit),
             )
         next_draft = _merge_agreement_draft(
@@ -7786,12 +7856,16 @@ def post_recipient_invite_revoke(
     if not _agreements_write_allowed():
         raise HTTPException(status_code=403, detail="verifier_only")
     _owner_mutation_guards(request, agreement_id, surface="recipient_invite_revoke")
-    phase = (body.phase or "").strip().lower()
+    from backend.services.recipient_delivery_registry import (
+        normalize_delivery_phase,
+        supersede_active_invite,
+    )
+
+    phase = normalize_delivery_phase(body.phase or "")
     participant_id = (body.participant_id or "").strip()
-    if phase not in {"review", "sign"} or not participant_id:
+    if phase not in {"review", "signing"} or not participant_id:
         raise HTTPException(status_code=400, detail="phase_and_participant_required")
     draft = _load_or_404(agreement_id)
-    from backend.services.recipient_delivery_registry import supersede_active_invite
 
     audit = list(draft.audit_log or [])
     next_data = supersede_active_invite(
@@ -11246,9 +11320,14 @@ def _agreement_anchor_proof_view(
 
 
 @router.post("/{agreement_id}/finalized-receipt")
-def post_agreement_finalized_receipt(agreement_id: str, body: AgreementFinalizeReceiptRequest):
+def post_agreement_finalized_receipt(
+    agreement_id: str,
+    request: Request,
+    body: AgreementFinalizeReceiptRequest,
+):
     if not _agreements_write_allowed():
         raise HTTPException(status_code=403, detail="verifier_only")
+    _owner_mutation_guards(request, agreement_id, surface="finalized_receipt")
 
     anchor_network = (body.anchor_network or "").strip()
     if anchor_network not in ALLOWED_AGREEMENT_ANCHOR_NETWORKS:
@@ -11322,7 +11401,9 @@ def post_agreement_finalized_receipt(agreement_id: str, body: AgreementFinalizeR
 
 
 @router.get("/{agreement_id}/proof-status")
-def get_agreement_proof_status(agreement_id: str):
+def get_agreement_proof_status(agreement_id: str, request: Request):
+    # Same commercial read-scope gate as full-draft / export / render (not public verify).
+    assert_agreement_full_draft_read_allowed(request, agreement_id)
     store = _agreements_timeline_store()
     timeline_id = f"agreement:{agreement_id}"
     rec = store.get_latest_receipt_for_timeline(timeline_id)

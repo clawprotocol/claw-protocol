@@ -104,7 +104,10 @@ def maybe_send_signing_invites_after_packet_prepared(
             rid = str(target.get("signer_role_id") or "").strip()
             if rid:
                 sent_role_ids.append(rid)
-            from backend.services.recipient_delivery_registry import record_invite_sent
+            from backend.services.recipient_delivery_registry import (
+                extract_jti_from_signing_url,
+                record_invite_sent,
+            )
 
             participant_id = str(target.get("participant_id") or "").strip()
             if not participant_id:
@@ -114,6 +117,7 @@ def maybe_send_signing_invites_after_packet_prepared(
                     draft,
                     phase="signing",
                     participant_id=participant_id,
+                    jti=extract_jti_from_signing_url(target["signing_url"]),
                     email=target["email"],
                     audit_log=draft.setdefault("audit_log", []),
                 )
@@ -269,12 +273,16 @@ def send_signing_invite_to_target(
         if not participant_id:
             participant_id = _participant_id_for_email(draft, row["email"])
         if participant_id:
-            from backend.services.recipient_delivery_registry import record_invite_sent
+            from backend.services.recipient_delivery_registry import (
+                extract_jti_from_signing_url,
+                record_invite_sent,
+            )
 
             record_invite_sent(
                 draft,
                 phase="signing",
                 participant_id=participant_id,
+                jti=extract_jti_from_signing_url(row["signing_url"]),
                 email=row["email"],
                 audit_log=draft.setdefault("audit_log", []),
             )

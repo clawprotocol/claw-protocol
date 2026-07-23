@@ -25,10 +25,12 @@ def client(monkeypatch, tmp_path):
     from backend.usage_economics import store as usage_economics_store_mod
     from backend.admin_console import store as admin_store
     from backend.economics import store as eco_store
+    from backend import main as main_mod
 
     usage_economics_store_mod._store = None  # noqa: SLF001
     admin_store._store = None  # noqa: SLF001
     eco_store.reset_economics_store_for_tests()
+    main_mod._rate_state.clear()  # noqa: SLF001
     monkeypatch.setenv("CLAW_ENVIRONMENT", "test")
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
@@ -37,6 +39,9 @@ def client(monkeypatch, tmp_path):
     monkeypatch.setenv("CLAW_AGREEMENT_SIGNING_TOKEN_SECRET", _SECRET)
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_ENABLED", "0")
     monkeypatch.setenv("CLAW_ADMIN_SECRET", "admin-test-secret")
+    # Parametrized production-like envs enable default /v1 rate limits; keep tests auth-focused.
+    monkeypatch.setenv("CLAW_RATE_LIMIT_RPS", "1000")
+    monkeypatch.setenv("CLAW_RATE_LIMIT_BURST", "1000")
     monkeypatch.delenv("CLAW_ALLOW_TOKENLESS_SIGNER_COMPLETE", raising=False)
     monkeypatch.delenv("CLAW_COMMERCIAL_MODE", raising=False)
     return TestClient(app)
@@ -173,10 +178,10 @@ def test_main_admin_uses_constant_time_secret_compare(monkeypatch, client: TestC
     monkeypatch.setenv("CLAW_ENVIRONMENT", "staging")
     monkeypatch.setenv("CLAW_ADMIN_SECRET", "admin-test-secret")
     bad = client.get("/admin/runtime-summary", headers={"x-claw-admin-secret": "wrong"})
-    assert bad.status_code == 403
+    assert bad.status_code in (401, 403)
     good = client.get("/admin/runtime-summary", headers={"x-claw-admin-secret": "admin-test-secret"})
-    # May still 403 if route requires more — accept 200 or structured deny without crash
-    assert good.status_code in (200, 403, 404)
+    # Secret alone is insufficient (principal+reason required); deny without crash.
+    assert good.status_code in (401, 403, 404)
 
 
 def test_signer_complete_without_portable_requires_accepted_snapshot(client: TestClient, monkeypatch):
@@ -248,3 +253,122 @@ def test_signer_complete_without_portable_requires_accepted_snapshot(client: Tes
         "legacy_packet_requires_reattestation",
         "portable_snapshot_mismatch",
     ) or "accepted_review_snapshot" in str(detail)
+
+
+def _ops_headers(*, reason: str = "privileged ops unit test") -> dict[str, str]:
+    return {
+        "x-claw-admin-secret": "admin-test-secret",
+        "X-Claw-Test-Auth-User-Id": "ops_admin",
+        "X-Claw-Test-Operator-Role": "admin",
+        "x-claw-admin-reason": reason,
+        "x-request-id": "corr-hardening-ops-1",
+    }
+
+
+@pytest.mark.parametrize(
+    "path,json_body",
+    [
+        ("/v1/affiliates/payouts/run", None),
+        ("/v1/affiliates", {"affiliate_code": "ADV1", "wallet_address": "w1", "display_name": "n", "owner_org_id": "user-victim"}),
+        ("/v1/workspace/demo-activate-subscription", {"user_id": "u", "previous_org_id": "org"}),
+        ("/api/agreements/ag_missing/finalized-receipt", {
+            "finalized_version_id": "v1",
+            "finalized_at": "2026-01-01T00:00:00Z",
+            "content_sha256": "a" * 64,
+            "execution_packet_sha256": "b" * 64,
+            "parties_sha256": "c" * 64,
+            "signer_count": 1,
+            "anchor_network": "bitcoin-testnet",
+            "execution_packet": {"v": 1},
+        }),
+    ],
+)
+@pytest.mark.parametrize("env", ["staging", "production", None, "   "])
+def test_unauthenticated_commercial_mutations_fail_closed(
+    client: TestClient, monkeypatch, path: str, json_body, env
+):
+    if env is None:
+        monkeypatch.delenv("CLAW_ENVIRONMENT", raising=False)
+    else:
+        monkeypatch.setenv("CLAW_ENVIRONMENT", env)
+    monkeypatch.setenv("CLAW_COMMERCIAL_MODE", "1")
+    kwargs = {"method": "POST", "url": path}
+    if json_body is not None:
+        kwargs["json"] = json_body
+    r = client.request(**kwargs)
+    assert r.status_code in (401, 403, 404), (path, env, r.status_code, r.text)
+
+
+@pytest.mark.parametrize("env", ["staging", "production", None, "   "])
+def test_non_relaxed_env_cannot_enable_demo_or_payment_bypass(
+    client: TestClient, monkeypatch, env
+):
+    if env is None:
+        monkeypatch.delenv("CLAW_ENVIRONMENT", raising=False)
+    else:
+        monkeypatch.setenv("CLAW_ENVIRONMENT", env)
+
+    demo = client.post(
+        "/v1/workspace/demo-activate-subscription",
+        headers=_owner("attacker"),
+        json={"user_id": "attacker", "previous_org_id": "user-attacker"},
+    )
+    assert demo.status_code in (401, 403, 404)
+
+    bypass_session = client.post(
+        "/v1/workspace/qa-payment-bypass/session",
+        headers=_ops_headers(),
+        json={"admin_secret": "admin-test-secret"},
+    )
+    assert bypass_session.status_code in (401, 403, 404)
+
+    bypass_auth = client.get("/v1/workspace/qa-payment-bypass/authorization")
+    assert bypass_auth.status_code == 200
+    assert bypass_auth.json().get("authorized") is False
+
+
+def test_migrated_privileged_routes_reject_secret_only_require_rbac_reason_and_audit(
+    client: TestClient, monkeypatch, tmp_path
+):
+    monkeypatch.setenv("CLAW_ADMIN_CONSOLE_DB_PATH", str(tmp_path / "admin_priv.sqlite3"))
+    from backend.admin_console import store as admin_store
+
+    admin_store._store = None  # noqa: SLF001
+
+    secret_only_paths = [
+        ("GET", "/admin/runtime-summary"),
+        ("GET", "/v1/ops/anchor/summary"),
+        ("POST", "/v1/affiliates/payouts/run"),
+        ("GET", "/v1/genesis-referral/ops/summary"),
+    ]
+    for method, path in secret_only_paths:
+        r = client.request(
+            method,
+            path,
+            headers={"x-claw-admin-secret": "admin-test-secret"},
+        )
+        assert r.status_code in (401, 403), (method, path, r.status_code, r.text)
+
+    no_reason = client.get(
+        "/admin/runtime-summary",
+        headers={
+            "x-claw-admin-secret": "admin-test-secret",
+            "X-Claw-Test-Auth-User-Id": "ops_admin",
+            "X-Claw-Test-Operator-Role": "admin",
+        },
+    )
+    assert no_reason.status_code == 400
+    assert no_reason.json()["detail"]["code"] == "reason_required"
+
+    ok = client.get("/admin/runtime-summary", headers=_ops_headers(reason="runtime summary audit"))
+    assert ok.status_code == 200
+
+    from backend.admin_console.store import get_admin_console_store
+
+    actions = get_admin_console_store().list_admin_action_audit(limit=50)
+    match = [a for a in actions if a.get("action_type") == "admin_runtime_summary"]
+    assert match, actions
+    assert match[-1].get("admin_user_id") == "ops_admin"
+    assert match[-1].get("actor_role") == "admin"
+    assert "runtime summary" in (match[-1].get("reason") or "")
+    assert match[-1].get("correlation_id") == "corr-hardening-ops-1"

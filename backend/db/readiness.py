@@ -347,8 +347,9 @@ def production_launch_config_readiness() -> Dict[str, Any]:
 
     from backend.billing.stripe_config import is_stripe_checkout_configured
     from backend.config.agreement_signing_token import operator_signing_token_secret_configured
+    from backend.config.deployment_runtime import claw_environment
 
-    env = os.getenv("CLAW_ENVIRONMENT", "").strip().lower() or "local"
+    env = claw_environment()
     pg_configured = bool(
         os.getenv("CLAW_DATABASE_URL", "").strip() or os.getenv("DATABASE_URL", "").strip()
     )

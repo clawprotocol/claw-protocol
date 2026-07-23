@@ -2,6 +2,11 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { cleanup, render } from "@testing-library/react";
 import {
+  clearDisplayReviewSnapshotAuthority,
+  sha256CorpusDigest,
+  storeVerifiedCommercialDisplayCorpus,
+} from "../../agreement/canonicalReviewSnapshotApi";
+import {
   classifyPaidProDocumentBlocks,
   isMainSectionHeadingLine,
 } from "./paidProDocumentBlockClassifier";
@@ -60,9 +65,22 @@ const LIVE_PREVIEW_CORPUS = [
   "11. WARRANTIES AND COMPLIANCE. Each party represents compliance.",
 ].join("\n\n");
 
+async function seedVerified(corpus: string, agreementId = "ag_test310"): Promise<void> {
+  const sha = await sha256CorpusDigest(corpus);
+  storeVerifiedCommercialDisplayCorpus({
+    agreementId,
+    snapshotId: "crs_test310",
+    corpusSha256: sha,
+    corpusLength: corpus.length,
+    status: "pending",
+    corpusPlain: corpus,
+  });
+}
+
 describe("paidProFirstReviewDisplayAuthority", () => {
   afterEach(() => {
     clearPaidProSourceOfTruth();
+    clearDisplayReviewSnapshotAuthority();
     resetPaidProTest310DisplaySourceLogsForTests();
     resetPaidProTest310BlockClassificationLogsForTests();
     cleanup();
@@ -70,6 +88,7 @@ describe("paidProFirstReviewDisplayAuthority", () => {
 
   it("blocks live_generated_preview picker source after paid Pro checkout is active", () => {
     const resolution = resolvePaidProFirstReviewVisibleDisplayPlain({
+      agreementId: "ag_test310",
       premiumCheckoutCompleted: true,
       premiumPaidDocumentSurface: true,
       pickerPlain: LIVE_PREVIEW_CORPUS,
@@ -77,17 +96,37 @@ describe("paidProFirstReviewDisplayAuthority", () => {
       paidProActive: true,
     });
     expect(resolution.plain).toBe("");
-    expect(isForbiddenPaidProDisplayRenderSource(resolution.source)).toBe(true);
-    expect(resolution.fallbackReason).toMatch(/forbidden_picker_source/);
+    expect(resolution.fallbackReason).toBe("awaiting_server_display_authority");
+    expect(isForbiddenPaidProDisplayRenderSource("live_generated_preview")).toBe(true);
   });
 
-  it("prefers paid Pro SoT over live preview picker when authority exists", () => {
+  it("does not paint local SoT before verified server GET authority", () => {
     const authority = buildProAuthorityCorpus();
     establishPaidProSourceOfTruth({
       text: authority,
       source: "server_full_draft",
     });
     const resolution = resolvePaidProFirstReviewVisibleDisplayPlain({
+      agreementId: "ag_test310",
+      premiumCheckoutCompleted: true,
+      premiumPaidDocumentSurface: true,
+      pickerPlain: LIVE_PREVIEW_CORPUS,
+      pickerSource: "live_generated_preview",
+      paidProActive: true,
+    });
+    expect(resolution.plain).toBe("");
+    expect(resolution.fallbackReason).toBe("awaiting_server_display_authority");
+  });
+
+  it("paints verified server GET corpus (not local SoT / live preview) when authority matches", async () => {
+    const authority = buildProAuthorityCorpus();
+    establishPaidProSourceOfTruth({
+      text: authority,
+      source: "server_full_draft",
+    });
+    await seedVerified(authority);
+    const resolution = resolvePaidProFirstReviewVisibleDisplayPlain({
+      agreementId: "ag_test310",
       premiumCheckoutCompleted: true,
       premiumPaidDocumentSurface: true,
       pickerPlain: LIVE_PREVIEW_CORPUS,
@@ -95,7 +134,7 @@ describe("paidProFirstReviewDisplayAuthority", () => {
       paidProActive: true,
     });
     expect(resolution.plain.length).toBeGreaterThanOrEqual(PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN);
-    expect(resolution.source).toBe("paidProReviewRenderPlain");
+    expect(resolution.source).toBe("verified_server_canonical_review_snapshot");
     expect(resolution.plain).toContain("Sarah Mitchell");
     expect(resolution.plain).toContain("Michael Torres");
   });
@@ -121,15 +160,16 @@ describe("paidProFirstReviewDisplayAuthority", () => {
     expect(blocks.find((b) => b.firstLine.startsWith("1.1"))?.kind).toBe("body_paragraph");
   });
 
-  it("renders sections 9/10/11 consistently as h2 section headings on first review", () => {
+  it("renders sections 9/10/11 consistently as h2 section headings on first review", async () => {
     const authority = buildProAuthorityCorpus();
-    establishPaidProSourceOfTruth({
-      text: authority,
-      source: "server_full_draft",
-    });
+    await seedVerified(authority);
     const { container, unmount } = render(
       <PaidProCanonicalPlainReviewDocument
-        plain={resolveCanonicalPlainForVisibleShell({ paidProActive: true }).plain}
+        plain={resolveCanonicalPlainForVisibleShell({
+          paidProActive: true,
+          agreementId: "ag_test310",
+          premiumCheckoutCompleted: true,
+        }).plain}
         tailPaddingClass="pb-12"
         compactTopPadding
         authoritativeSource="test310"

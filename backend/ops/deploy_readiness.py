@@ -14,6 +14,7 @@ from typing import Any, Dict, List, Literal, Optional
 
 from backend.config.deployment_runtime import (
     admin_anchor_http_trigger_enabled,
+    claw_environment,
     is_production_named_claw_environment,
     public_runtime_summary,
 )
@@ -441,7 +442,7 @@ def gather_readiness_summary_lines() -> List[str]:
     opt_err = summ.get("optional_component_errors") or []
     lines = [
         f"deploy_readiness ok={r['ok']} profile={r['smoke_profile']} "
-        f"CLAW_ENVIRONMENT={os.getenv('CLAW_ENVIRONMENT', 'local')}",
+        f"CLAW_ENVIRONMENT={claw_environment() or '(unset)'}",
         f"  {summ.get('headline', '')}",
     ]
     if opt_err:

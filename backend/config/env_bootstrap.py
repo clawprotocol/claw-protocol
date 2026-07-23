@@ -16,7 +16,7 @@ from backend.config.agreement_signing_token import (
     review_link_mint_enabled,
     signing_token_secret_source,
 )
-from backend.config.deployment_runtime import is_production_like_claw_environment
+from backend.config.deployment_runtime import claw_environment, is_production_like_claw_environment
 from backend.cors_policy import cors_env_raw_meta, cors_startup_diagnostics
 
 _log = logging.getLogger("claw.env")
@@ -29,7 +29,7 @@ def _is_set(name: str) -> bool:
 def collect_env_warnings() -> List[str]:
     """Non-fatal issues operators should fix before/at production launch."""
     warnings: List[str] = []
-    env = os.getenv("CLAW_ENVIRONMENT", "local").strip().lower()
+    env = claw_environment()
 
     if is_production_like_claw_environment():
         if not _is_set("CLAW_CORS_ALLOW_ORIGINS"):
@@ -86,7 +86,7 @@ def public_env_snapshot() -> dict:
     """Safe for /version and operator summaries — no secret values."""
     cors = cors_startup_diagnostics()
     return {
-        "claw_environment": os.getenv("CLAW_ENVIRONMENT", "local").strip().lower(),
+        "claw_environment": claw_environment(),
         "cors_configured": _is_set("CLAW_CORS_ALLOW_ORIGINS"),
         "cors_origin_count": cors.get("resolved_origin_count"),
         "cors_allow_wildcard": cors.get("allow_wildcard"),

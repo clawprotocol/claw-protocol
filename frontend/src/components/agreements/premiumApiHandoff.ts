@@ -11,11 +11,8 @@ import {
   promoteSubstantiveDegradedJsonParseWireToServerFull,
   resolvePremiumFullDraftAuthoritativeBody,
 } from "./premiumFullDraftResponseNormalization";
-import { draftServerFullDocumentExists } from "./paidProRuntimeAuthorityEstablishment";
-import { hasPaidProSourceOfTruth } from "./paidProSourceOfTruth";
-import { hasUsablePremiumBodyText } from "./premiumPostCheckoutApplyEligible";
+import { hasVerifiedCommercialDisplayCorpus } from "../../agreement/canonicalReviewSnapshotApi";
 import { isAuthoritativePremiumPipelineRenderSource } from "./premiumRenderSourceResolver";
-import { readPremiumCompletionSnapshot } from "./premiumCompletionStorage";
 
 export type PremiumApiResultLog = {
   ok: boolean;
@@ -104,16 +101,15 @@ export function logPremiumApiResultFromWire(args: {
   });
 }
 
-/** Paid Pro chrome / review shell may only show when server or frozen authority exists. */
+/** Paid Pro chrome / review shell may only show when verified GET corpus exists. */
 export function hasPaidProChromeAuthority(args?: {
   draft?: ParsedDraftShape | null;
+  agreementId?: string | null;
 }): boolean {
-  if (hasPaidProSourceOfTruth()) return true;
-  if (draftServerFullDocumentExists(args?.draft ?? null)) return true;
-  const snap = readPremiumCompletionSnapshot();
-  if (!snap?.premiumAccepted) return false;
-  if (!hasUsablePremiumBodyText(snap.premiumWinningBodyText)) return false;
-  return isAuthoritativePremiumPipelineRenderSource(snap.premiumPipelineRenderSource);
+  // Local premium completion / SoT / display metadata alone must not unlock commercial chrome.
+  const aid = (args?.agreementId || "").trim();
+  if (!aid) return false;
+  return hasVerifiedCommercialDisplayCorpus(aid);
 }
 
 export function mergePremiumDraftWithServerCorpusFields(

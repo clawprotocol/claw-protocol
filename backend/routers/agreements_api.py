@@ -3,15 +3,20 @@ from __future__ import annotations
 import json
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from backend.llm_router import call_legal_llm
+from backend.security.legacy_router_gate import deny_legacy_router_in_commercial
 from backend.services import agreement_service
 
 
-router = APIRouter(prefix="/v1/agreements", tags=["agreements"])
+router = APIRouter(
+    prefix="/v1/agreements",
+    tags=["agreements"],
+    dependencies=[Depends(deny_legacy_router_in_commercial)],
+)
 
 
 class PartyInput(BaseModel):

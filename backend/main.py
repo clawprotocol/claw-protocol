@@ -92,6 +92,7 @@ from backend.utils.tiers import Capability
 from backend.utils.anchor_queue import AnchorQueue
 from backend.config.deployment_runtime import (
     admin_anchor_http_trigger_enabled,
+    claw_environment,
     public_runtime_summary,
 )
 from backend.ops.break_glass_audit import BreakGlassAction, log_break_glass_event
@@ -250,7 +251,7 @@ def _rate_limit_rps_burst() -> tuple[float, float]:
     burst = float(os.getenv("CLAW_RATE_LIMIT_BURST", "0") or 0)
     if rps > 0 and burst > 0:
         return rps, burst
-    env = os.getenv("CLAW_ENVIRONMENT", "local").strip().lower()
+    env = claw_environment()
     if env in ("local", "dev", "test"):
         return 0.0, 0.0
     return 8.0, 16.0
@@ -422,12 +423,12 @@ def _payment_header_value(req: Request) -> Optional[str]:
 
 
 def _environment() -> str:
-    return os.getenv("CLAW_ENVIRONMENT", "local")
+    return claw_environment()
 
 
 def _relaxed_claw_environment() -> bool:
     """local / dev / test — keep admin-secret-off and debug-default-on ergonomic."""
-    return _environment().strip().lower() in ("local", "dev", "test")
+    return _environment() in ("local", "dev", "test")
 
 
 def _is_production_like() -> bool:
@@ -477,14 +478,32 @@ def _log_break_glass_admin(req: Request, action: str) -> None:
 
 def _admin_ok(req: Request) -> bool:
     """
-    Legacy shared-secret gate for ops diagnostics.
+    Legacy shared-secret second-factor check (not sole authority).
 
-    Privileged mutations should use resolve_operator_principal. This helper is
-    constant-time and fail-closed in production-like environments.
+    Prefer ``_require_privileged_admin`` for privileged routes.
     """
     from backend.config.deployment_runtime import admin_http_request_authorized
 
     return bool(admin_http_request_authorized(req))
+
+
+def _require_privileged_admin(
+    req: Request,
+    *,
+    permission: str,
+    action_type: str,
+    target_id: str = "global",
+) -> None:
+    from backend.security.privileged_ops import require_privileged_operator
+
+    require_privileged_operator(
+        req,
+        permission=permission,
+        action_type=action_type,
+        target_type="admin",
+        target_id=target_id,
+        reason=(req.headers.get("x-claw-admin-reason") or "").strip() or None,
+    )
 
 
 def _multipart_enabled() -> bool:
@@ -517,9 +536,10 @@ def _deny_write_if_verifier() -> Optional[JSONResponse]:
     In verifier-only mode, we block ALL mutation endpoints.
 
     Read-only endpoints remain available:
-      /health, /version, /verify, /verify/tree,
-      GET /v1/timelines/*, GET /v1/receipts/* (VS01 filesystem receipts),
-      GET /v1/timeline/receipts/* (legacy timeline-store receipts)
+      /health, /version, /verify,
+      POST /verify/tree (client-supplied receipt body only; server fetch is auth-gated),
+      GET /v1/receipts/* (VS01 filesystem receipts; ownership-gated in commercial mode),
+      GET /v1/timeline/receipts/* (legacy timeline-store receipts; ownership-gated)
     """
     if _verifier_only():
         return JSONResponse(
@@ -532,15 +552,32 @@ def _deny_write_if_verifier() -> Optional[JSONResponse]:
     return None
 
 
+def _deny_legacy_main_surface(request: Request) -> None:
+    """Fail closed for legacy timeline/agent surfaces under commercial mode."""
+    from backend.security.legacy_router_gate import deny_legacy_main_surface_in_commercial
+
+    deny_legacy_main_surface_in_commercial(request)
+
+
 @app.get("/v1/batches/{batch_id}")
-def api_get_batch(batch_id: str):
+def api_get_batch(batch_id: str, request: Request):
+    _deny_legacy_main_surface(request)
     store = TimelineStore()
     return get_batch(store=store, batch_id=batch_id)
 
 
 @app.get("/v1/timeline/receipts/{receipt_id}/verify")
-def api_get_receipt_for_verify(receipt_id: str):
+def api_get_receipt_for_verify(receipt_id: str, request: Request):
+    """
+    Legacy timeline receipt fetch used by verifier tooling.
+
+    Not a redacted public-verify surface — commercial mode requires agreement
+    ownership / recipient bind via ``require_timeline_receipt_access``.
+    """
+    from backend.security.receipt_access import require_timeline_receipt_access
+
     store = TimelineStore()
+    require_timeline_receipt_access(request, receipt_id, store=store)
     return get_receipt_for_verify(store=store, receipt_id=receipt_id)
 
 
@@ -783,7 +820,8 @@ async def _unhandled_exception_handler(request: Request, exc: Exception):
 # NOTE: allowed in verifier mode (pure function / no state mutation)
 # -------------------------------------------------
 @app.post("/receipt")
-async def receipt_legacy(body: Dict[str, Any]):
+async def receipt_legacy(request: Request, body: Dict[str, Any]):
+    _deny_legacy_main_surface(request)
     proof_packet = body.get("proof_packet")
     signatures = body.get("signatures") or []
 
@@ -846,7 +884,8 @@ async def verify(body: Dict[str, Any]):
 # Timeline Tool API (docs/CLAW-TIMELINE-API.md)
 # -------------------------------------------------
 @app.post("/v1/timelines")
-async def create_timeline(body: CreateTimelineRequest):
+async def create_timeline(request: Request, body: CreateTimelineRequest):
+    _deny_legacy_main_surface(request)
     deny = _deny_write_if_verifier()
     if deny:
         return deny
@@ -866,7 +905,8 @@ async def create_timeline(body: CreateTimelineRequest):
 
 
 @app.get("/v1/timelines/{timeline_id}")
-async def get_timeline(timeline_id: str):
+async def get_timeline(timeline_id: str, request: Request):
+    _deny_legacy_main_surface(request)
     try:
         return JSONResponse(timeline_response(timeline_store, timeline_id))
     except KeyError:
@@ -875,7 +915,8 @@ async def get_timeline(timeline_id: str):
 
 # ✅ NEW: list events (Screen 3 timeline view)
 @app.get("/v1/timelines/{timeline_id}/events")
-async def list_events(timeline_id: str):
+async def list_events(timeline_id: str, request: Request):
+    _deny_legacy_main_surface(request)
     try:
         return JSONResponse(timeline_store.list_events(timeline_id))
     except KeyError:
@@ -883,7 +924,8 @@ async def list_events(timeline_id: str):
 
 
 @app.post("/v1/timelines/{timeline_id}/events")
-async def append_event(timeline_id: str, body: AppendEventRequest):
+async def append_event(timeline_id: str, request: Request, body: AppendEventRequest):
+    _deny_legacy_main_surface(request)
     deny = _deny_write_if_verifier()
     if deny:
         return deny
@@ -918,7 +960,8 @@ async def append_event(timeline_id: str, body: AppendEventRequest):
 
 
 @app.get("/v1/timelines/{timeline_id}/events/{event_id}")
-async def get_event(timeline_id: str, event_id: str):
+async def get_event(timeline_id: str, event_id: str, request: Request):
+    _deny_legacy_main_surface(request)
     try:
         return JSONResponse(event_response(timeline_store, timeline_id, event_id))
     except KeyError:
@@ -927,7 +970,8 @@ async def get_event(timeline_id: str, event_id: str):
 
 # ✅ NEW: patch/update event (Screen 3 "Edit")
 @app.patch("/v1/timelines/{timeline_id}/events/{event_id}")
-async def patch_event(timeline_id: str, event_id: str, body: EventPatchRequest):
+async def patch_event(timeline_id: str, event_id: str, request: Request, body: EventPatchRequest):
+    _deny_legacy_main_surface(request)
     deny = _deny_write_if_verifier()
     if deny:
         return deny
@@ -940,7 +984,8 @@ async def patch_event(timeline_id: str, event_id: str, body: EventPatchRequest):
 
 # ✅ NEW: delete event (Screen 3 "Remove")
 @app.delete("/v1/timelines/{timeline_id}/events/{event_id}")
-async def delete_event(timeline_id: str, event_id: str):
+async def delete_event(timeline_id: str, event_id: str, request: Request):
+    _deny_legacy_main_surface(request)
     deny = _deny_write_if_verifier()
     if deny:
         return deny
@@ -952,7 +997,8 @@ async def delete_event(timeline_id: str, event_id: str):
 
 # ✅ NEW: duplicate event (Screen 3 "Duplicate")
 @app.post("/v1/timelines/{timeline_id}/events/{event_id}/duplicate")
-async def duplicate_event(timeline_id: str, event_id: str):
+async def duplicate_event(timeline_id: str, event_id: str, request: Request):
+    _deny_legacy_main_surface(request)
     deny = _deny_write_if_verifier()
     if deny:
         return deny
@@ -963,7 +1009,8 @@ async def duplicate_event(timeline_id: str, event_id: str):
 
 
 @app.post("/v1/timelines/{timeline_id}/freeze")
-async def freeze_timeline(timeline_id: str, body: FreezeTimelineRequest):
+async def freeze_timeline(timeline_id: str, request: Request, body: FreezeTimelineRequest):
+    _deny_legacy_main_surface(request)
     deny = _deny_write_if_verifier()
     if deny:
         return deny
@@ -989,7 +1036,8 @@ async def freeze_timeline(timeline_id: str, body: FreezeTimelineRequest):
 
 
 @app.post("/v1/timelines/{timeline_id}/anchor")
-async def anchor_timeline(timeline_id: str, body: AnchorTimelineRequest):
+async def anchor_timeline(timeline_id: str, request: Request, body: AnchorTimelineRequest):
+    _deny_legacy_main_surface(request)
     deny = _deny_write_if_verifier()
     if deny:
         return deny
@@ -1057,21 +1105,28 @@ async def anchor_timeline(timeline_id: str, body: AnchorTimelineRequest):
 
 
 @app.get("/v1/timeline/receipts/{receipt_id}")
-async def get_receipt(receipt_id: str):
+async def get_receipt(receipt_id: str, request: Request):
+    from backend.security.receipt_access import require_timeline_receipt_access
+
     try:
-        return JSONResponse(timeline_store.get_receipt(receipt_id))
-    except KeyError:
-        return JSONResponse(status_code=404, content={"error": "receipt_not_found"})
+        rec = require_timeline_receipt_access(request, receipt_id, store=timeline_store)
+        return JSONResponse(rec)
+    except HTTPException as exc:
+        if exc.status_code == 404:
+            return JSONResponse(status_code=404, content={"error": "receipt_not_found"})
+        raise
 
 
 @app.get("/v1/liability/assessment/{event_id}")
-def api_get_liability_assessment(event_id: str):
+def api_get_liability_assessment(event_id: str, request: Request):
+    _deny_legacy_main_surface(request)
     store = TimelineStore()
     return get_liability_assessment(event_id, store)
 
 
 @app.get("/v1/timelines/{timeline_id}/liability/latest")
-def liability_latest(timeline_id: str):
+def liability_latest(timeline_id: str, request: Request):
+    _deny_legacy_main_surface(request)
     store = TimelineStore()
     return get_latest_liability_for_timeline(store, timeline_id)
 
@@ -1080,16 +1135,34 @@ def liability_latest(timeline_id: str):
 # /verify/tree — verify a parent receipt + its child receipts
 # -------------------------------------------------
 @app.post("/verify/tree")
-async def verify_tree(body: Dict[str, Any]):
+async def verify_tree(request: Request, body: Dict[str, Any]):
+    """
+    Cryptographic tree verify.
+
+    Client-supplied ``receipt`` / ``children`` bodies remain public (redacted verify
+    of presented material). Server fetch by ``receipt_id`` requires validated
+    owner/recipient timeline-receipt access — never ID-only.
+    """
     if isinstance(body, dict) and not body.get("receipt") and body.get("receipt_id"):
-        rid = body.get("receipt_id")
+        from backend.security.receipt_access import require_timeline_receipt_access
+
+        rid = str(body.get("receipt_id") or "").strip()
         try:
             body = dict(body)
-            body["receipt"] = timeline_store.get_receipt(rid)
-        except KeyError:
-            return JSONResponse(status_code=404, content={"error": "receipt_not_found", "receipt_id": rid})
+            body["receipt"] = require_timeline_receipt_access(
+                request, rid, store=timeline_store
+            )
+        except HTTPException as exc:
+            if exc.status_code == 404:
+                return JSONResponse(
+                    status_code=404,
+                    content={"error": "receipt_not_found", "receipt_id": rid},
+                )
+            raise
         except Exception as e:
-            return JSONResponse(status_code=500, content={"error": f"receipt_fetch_failed: {str(e)}"})
+            return JSONResponse(
+                status_code=500, content={"error": f"receipt_fetch_failed: {str(e)}"}
+            )
 
     req = VerifyTreeRequest(**body)
     resp = verify_receipt_tree(req)
@@ -1107,9 +1180,11 @@ async def admin_anchor_run(req: Request):
     if deny:
         return deny
 
-    if not _admin_ok(req):
-        return JSONResponse(status_code=403, content={"error": "Forbidden"})
+    from backend.security.privileged_ops import PERM_MUTATE_ADMIN
 
+    _require_privileged_admin(
+        req, permission=PERM_MUTATE_ADMIN, action_type="admin_anchor_run", target_id="anchor_run"
+    )
     _log_break_glass_admin(req, BreakGlassAction.ADMIN_ANCHOR_RUN)
 
     if not admin_anchor_http_trigger_enabled():
@@ -1149,9 +1224,14 @@ async def admin_anchor_receipt_batch_requeue(
     if deny:
         return deny
 
-    if not _admin_ok(req):
-        return JSONResponse(status_code=403, content={"error": "Forbidden"})
+    from backend.security.privileged_ops import PERM_MUTATE_ADMIN
 
+    _require_privileged_admin(
+        req,
+        permission=PERM_MUTATE_ADMIN,
+        action_type="admin_anchor_receipt_batch_requeue",
+        target_id=(body.job_id or "requeue").strip()[:64],
+    )
     _log_break_glass_admin(req, BreakGlassAction.ADMIN_ANCHOR_JOB_REQUEUE)
 
     if not admin_anchor_http_trigger_enabled():
@@ -1185,9 +1265,12 @@ async def admin_anchor_receipt_batch_requeue(
 
 @app.get("/admin/runtime-summary")
 async def admin_runtime_summary(req: Request):
-    """Non-secret deployment snapshot for operators (requires CLAW_ADMIN_SECRET when not local/dev/test)."""
-    if not _admin_ok(req):
-        return JSONResponse(status_code=403, content={"error": "Forbidden"})
+    """Operator principal + reason required; admin secret is second factor only."""
+    from backend.security.privileged_ops import PERM_READ_OPS
+
+    _require_privileged_admin(
+        req, permission=PERM_READ_OPS, action_type="admin_runtime_summary", target_id="runtime"
+    )
     _log_break_glass_admin(req, BreakGlassAction.ADMIN_RUNTIME_SUMMARY)
     return JSONResponse(public_runtime_summary())
 
@@ -1200,8 +1283,11 @@ async def admin_deploy_readiness(req: Request):
     See docs/ops/DEPLOY_SMOKE_TEST.md. Profile: CLAW_DEPLOY_SMOKE_PROFILE and
     CLAW_DEPLOY_SMOKE_STORAGE_ROUND_TRIP.
     """
-    if not _admin_ok(req):
-        return JSONResponse(status_code=403, content={"error": "Forbidden"})
+    from backend.security.privileged_ops import PERM_READ_OPS
+
+    _require_privileged_admin(
+        req, permission=PERM_READ_OPS, action_type="admin_deploy_readiness", target_id="deploy"
+    )
     _log_break_glass_admin(req, BreakGlassAction.ADMIN_DEPLOY_READINESS)
     return JSONResponse(gather_deploy_readiness())
 
@@ -1211,6 +1297,7 @@ async def admin_deploy_readiness(req: Request):
 # -------------------------------------------------
 @app.post("/agent/propose")
 async def agent_propose(req: Request, body: ProposeClauseRequest):
+    _deny_legacy_main_surface(req)
     deny = _deny_write_if_verifier()
     if deny:
         return deny
@@ -1231,6 +1318,7 @@ async def agent_propose(req: Request, body: ProposeClauseRequest):
 
 @app.post("/agent/sign")
 async def agent_sign(req: Request, body: SignClauseRequest):
+    _deny_legacy_main_surface(req)
     deny = _deny_write_if_verifier()
     if deny:
         return deny
@@ -1251,6 +1339,7 @@ async def agent_sign(req: Request, body: SignClauseRequest):
 
 @app.post("/agent/proof")
 async def agent_proof(req: Request, body: GenerateProofRequest):
+    _deny_legacy_main_surface(req)
     deny = _deny_write_if_verifier()
     if deny:
         return deny
@@ -1271,6 +1360,7 @@ async def agent_proof(req: Request, body: GenerateProofRequest):
 
 @app.post("/agent/anchor")
 async def agent_anchor(req: Request, body: AnchorProofRequest):
+    _deny_legacy_main_surface(req)
     deny = _deny_write_if_verifier()
     if deny:
         return deny
@@ -1317,6 +1407,7 @@ async def agent_anchor(req: Request, body: AnchorProofRequest):
 # -------------------------------------------------
 @app.post("/propose")
 async def propose_legacy(req: Request, body: ProposeClauseRequest):
+    _deny_legacy_main_surface(req)
     deny = _deny_write_if_verifier()
     if deny:
         return deny
@@ -1325,6 +1416,7 @@ async def propose_legacy(req: Request, body: ProposeClauseRequest):
 
 @app.post("/sign")
 async def sign_legacy(req: Request, body: SignClauseRequest):
+    _deny_legacy_main_surface(req)
     deny = _deny_write_if_verifier()
     if deny:
         return deny
@@ -1369,6 +1461,7 @@ async def sign_legacy(req: Request, body: SignClauseRequest):
 
 @app.post("/proof")
 async def proof_legacy(req: Request, body: GenerateProofRequest):
+    _deny_legacy_main_surface(req)
     deny = _deny_write_if_verifier()
     if deny:
         return deny
@@ -1433,6 +1526,7 @@ async def proof_legacy(req: Request, body: GenerateProofRequest):
 
 @app.post("/anchor")
 async def anchor_legacy(req: Request, body: AnchorProofRequest):
+    _deny_legacy_main_surface(req)
     deny = _deny_write_if_verifier()
     if deny:
         return deny

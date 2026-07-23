@@ -17,7 +17,6 @@ import { hasPaidProPipelineSessionAcceptance } from "./paidProPostAcceptanceVali
 import { isAuthoritativePremiumPipelineRenderSource } from "./premiumRenderSourceResolver";
 import { PAID_PRO_AUTHORITY_MIN_LEN } from "./paidProAuthorityConstants";
 import { GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN } from "./simpleProFinalReviewCorpus";
-import { readPremiumCompletionSnapshot } from "./premiumCompletionStorage";
 import { resolveCreateFlowAcceptedPipelineCorpusPlain } from "./paidProAcceptanceRouting";
 import { hasPaidCreateFlowPipelineAcceptance } from "./paidCreateFlowPipelineAcceptanceProbe";
 
@@ -165,7 +164,7 @@ export function shouldUsePaidCreateFlowReviewFirstPersist(args?: {
   if (hasPaidProPipelineSessionAcceptance({ text: corpusPlain, source: "server_full_draft" })) {
     return true;
   }
-  if (readPremiumCompletionSnapshot()?.premiumAccepted === true) return true;
+  // Local premiumAccepted snap is not commercial legal authority.
   return false;
 }
 

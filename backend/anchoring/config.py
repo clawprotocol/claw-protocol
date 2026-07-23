@@ -28,7 +28,9 @@ def _int_env(name: str, default: int) -> int:
 
 
 def _anchor_profile() -> str:
-    return (os.getenv("CLAW_ANCHOR_ENV") or os.getenv("CLAW_ENVIRONMENT", "local")).strip().lower()
+    from backend.config.deployment_runtime import claw_environment
+
+    return (os.getenv("CLAW_ANCHOR_ENV") or claw_environment() or "").strip().lower()
 
 
 def anchoring_enabled() -> bool:

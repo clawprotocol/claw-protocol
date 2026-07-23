@@ -2,6 +2,9 @@
 VS01-B08: sign-session create (bind document + hash).
 
 VS01-B10: complete-sign orchestration → receipt.v1 persist.
+
+Commercial mode: create/complete require document owner principal or a
+recipient sign token bound to the document's agreement/party.
 """
 from __future__ import annotations
 
@@ -9,9 +12,13 @@ import os
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
+from backend.security.vs01_document_ownership import (
+    require_vs01_document_access,
+    require_vs01_sign_session_access,
+)
 from backend.services import receipt_service, signature_service
 
 router = APIRouter(prefix="/v1/sign-sessions", tags=["sign-sessions"])
@@ -55,7 +62,12 @@ class CompleteSignRequest(BaseModel):
 
 
 @router.post("")
-def api_create_sign_session(body: CreateSignSessionRequest) -> Dict[str, Any]:
+def api_create_sign_session(body: CreateSignSessionRequest, request: Request) -> Dict[str, Any]:
+    require_vs01_document_access(
+        request,
+        body.document_id,
+        allow_recipient_modes=("sign",),
+    )
     try:
         row = signature_service.create_sign_session(
             document_id=body.document_id,
@@ -72,12 +84,20 @@ def api_create_sign_session(body: CreateSignSessionRequest) -> Dict[str, Any]:
 
 
 @router.post("/{session_id}/complete")
-def api_complete_sign(session_id: str, body: CompleteSignRequest) -> Dict[str, Any]:
+def api_complete_sign(
+    session_id: str, body: CompleteSignRequest, request: Request
+) -> Dict[str, Any]:
     session = signature_service.get_sign_session(session_id)
     if not session:
         raise HTTPException(status_code=404, detail="session_not_found")
     if session.get("status") != "pending":
         raise HTTPException(status_code=409, detail="session_not_pending")
+
+    require_vs01_sign_session_access(
+        request,
+        session,
+        allow_recipient_modes=("sign",),
+    )
 
     document_id = session["document_id"]
     content_sha256 = session["content_sha256"]

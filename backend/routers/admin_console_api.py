@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import json
-import os
-import secrets
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -15,14 +13,13 @@ from backend.economics.store import get_economics_store
 from backend.integrations.webhook_dispatch import retry_delivery
 from backend.integrations import webhook_store
 from backend.ops.break_glass_audit import BreakGlassAction, log_break_glass_event
-from backend.security.operator_principal import (
+from backend.security.operator_principal import OperatorPrincipal
+from backend.security.privileged_ops import (
     PERM_MUTATE_ADMIN,
     PERM_MUTATE_FINANCIAL,
     PERM_MUTATE_SUPPORT,
     PERM_READ_OPS,
-    OperatorPrincipal,
-    require_nonempty_reason,
-    resolve_operator_principal,
+    require_privileged_operator,
 )
 from backend.services.agreement_draft_store import list_draft_admin_metadata_newest_first
 from backend.usage_economics.store import get_usage_economics_store
@@ -59,12 +56,24 @@ class AffiliatePayoutActionBody(BaseModel):
     network: str = Field(default="base", max_length=64)
 
 
-def _operator(
+def _privileged(
     request: Request,
     *,
-    permission: str = PERM_READ_OPS,
+    permission: str,
+    action_type: str,
+    target_type: str = "admin_console",
+    target_id: str = "global",
+    reason: Optional[str] = None,
 ) -> OperatorPrincipal:
-    principal = resolve_operator_principal(request, require_permission=permission)
+    """Unified gate: principal + permission + nonempty reason + audit (+ secret 2FA)."""
+    principal = require_privileged_operator(
+        request,
+        permission=permission,
+        action_type=action_type,
+        target_type=target_type,
+        target_id=target_id,
+        reason=reason,
+    )
     try:
         log_break_glass_event(
             request,
@@ -87,6 +96,7 @@ def _audit(
     before: Any = None,
     after: Any = None,
 ) -> str:
+    """Mutation detail audit with before/after snapshots (gate audit already recorded)."""
     return get_admin_console_store().append_admin_action_audit(
         admin_user_id=principal.user_id,
         action_type=action_type,
@@ -179,7 +189,12 @@ def _load_agreements_metadata(limit: int = 200) -> List[Dict[str, Any]]:
 
 @router.get("/overview")
 def admin_overview(request: Request) -> Dict[str, Any]:
-    _operator(request, permission=PERM_READ_OPS)
+    _privileged(
+        request,
+        permission=PERM_READ_OPS,
+        action_type="admin_overview",
+        target_id="overview",
+    )
     ustore = get_usage_economics_store()
     ustore.init_schema()
     eco = get_economics_store()
@@ -210,7 +225,12 @@ def admin_overview(request: Request) -> Dict[str, Any]:
 
 @router.get("/users")
 def admin_users(request: Request, limit: int = Query(default=200, ge=1, le=500)) -> Dict[str, Any]:
-    _operator(request, permission=PERM_READ_OPS)
+    _privileged(
+        request,
+        permission=PERM_READ_OPS,
+        action_type="admin_users",
+        target_id="users",
+    )
     ustore = get_usage_economics_store()
     ustore.init_schema()
     eco = get_economics_store()
@@ -253,8 +273,14 @@ def admin_users(request: Request, limit: int = Query(default=200, ge=1, le=500))
 
 @router.post("/users/{subject_ref}/status")
 def admin_set_user_status(subject_ref: str, body: UserStatusBody, request: Request) -> Dict[str, Any]:
-    principal = _operator(request, permission=PERM_MUTATE_ADMIN)
-    reason = require_nonempty_reason(body.reason)
+    principal = _privileged(
+        request,
+        permission=PERM_MUTATE_ADMIN,
+        action_type="set_user_status",
+        target_type="user",
+        target_id=subject_ref,
+        reason=body.reason,
+    )
     ustore = get_usage_economics_store()
     ustore.init_schema()
     before = ustore.get_subject_row(subject_ref) or {}
@@ -266,7 +292,7 @@ def admin_set_user_status(subject_ref: str, body: UserStatusBody, request: Reque
         action_type="set_user_status",
         target_type="user",
         target_id=subject_ref,
-        reason=reason,
+        reason=(body.reason or "").strip(),
         before=before,
         after=after,
     )
@@ -282,8 +308,14 @@ def admin_set_user_status(subject_ref: str, body: UserStatusBody, request: Reque
 
 @router.post("/users/{subject_ref}/refresh-entitlement")
 def admin_refresh_entitlement(subject_ref: str, body: RefreshEntitlementBody, request: Request) -> Dict[str, Any]:
-    principal = _operator(request, permission=PERM_MUTATE_SUPPORT)
-    reason = require_nonempty_reason(body.reason)
+    principal = _privileged(
+        request,
+        permission=PERM_MUTATE_SUPPORT,
+        action_type="refresh_entitlement",
+        target_type="user",
+        target_id=subject_ref,
+        reason=body.reason,
+    )
     eco = get_economics_store()
     eco.init_schema()
     with eco._conn() as con:
@@ -297,7 +329,7 @@ def admin_refresh_entitlement(subject_ref: str, body: RefreshEntitlementBody, re
         action_type="refresh_entitlement",
         target_type="user",
         target_id=subject_ref,
-        reason=reason,
+        reason=(body.reason or "").strip(),
         after=out or {"entitlement": "none"},
     )
     return {
@@ -312,20 +344,31 @@ def admin_refresh_entitlement(subject_ref: str, body: RefreshEntitlementBody, re
 
 @router.get("/agreements")
 def admin_agreements(request: Request, limit: int = Query(default=200, ge=1, le=500)) -> Dict[str, Any]:
-    _operator(request, permission=PERM_READ_OPS)
+    _privileged(
+        request,
+        permission=PERM_READ_OPS,
+        action_type="admin_agreements",
+        target_id="agreements",
+    )
     return {"agreements": _load_agreements_metadata(limit=limit)}
 
 
 @router.post("/agreements/{agreement_id}/flag")
 def admin_flag_agreement(agreement_id: str, body: AgreementFlagBody, request: Request) -> Dict[str, Any]:
-    principal = _operator(request, permission=PERM_MUTATE_SUPPORT)
-    reason = require_nonempty_reason(body.reason)
+    principal = _privileged(
+        request,
+        permission=PERM_MUTATE_SUPPORT,
+        action_type="flag_agreement",
+        target_type="agreement",
+        target_id=agreement_id,
+        reason=body.reason,
+    )
     store = get_admin_console_store()
     before = store.get_agreement_flags_map([agreement_id]).get(agreement_id) or {}
     after = store.set_agreement_flag(
         agreement_id=agreement_id,
         flagged=body.flagged,
-        reason=reason,
+        reason=(body.reason or "").strip(),
         admin_user_id=principal.user_id,
     )
     audit_id = _audit(
@@ -333,7 +376,7 @@ def admin_flag_agreement(agreement_id: str, body: AgreementFlagBody, request: Re
         action_type="flag_agreement",
         target_type="agreement",
         target_id=agreement_id,
-        reason=reason,
+        reason=(body.reason or "").strip(),
         before=before,
         after=after,
     )
@@ -349,7 +392,12 @@ def admin_flag_agreement(agreement_id: str, body: AgreementFlagBody, request: Re
 
 @router.get("/deliveries")
 def admin_deliveries(request: Request, limit: int = Query(default=200, ge=1, le=500)) -> Dict[str, Any]:
-    _operator(request, permission=PERM_READ_OPS)
+    _privileged(
+        request,
+        permission=PERM_READ_OPS,
+        action_type="admin_deliveries",
+        target_id="deliveries",
+    )
     out: List[Dict[str, Any]] = []
     for row in webhook_store.list_all_org_deliveries(limit=limit):
         out.append(
@@ -374,8 +422,14 @@ def admin_deliveries(request: Request, limit: int = Query(default=200, ge=1, le=
 
 @router.post("/deliveries/{org_id}/{delivery_id}/resend")
 def admin_resend_delivery(org_id: str, delivery_id: str, body: ResendDeliveryBody, request: Request) -> Dict[str, Any]:
-    principal = _operator(request, permission=PERM_MUTATE_SUPPORT)
-    reason = require_nonempty_reason(body.reason)
+    principal = _privileged(
+        request,
+        permission=PERM_MUTATE_SUPPORT,
+        action_type="resend_delivery",
+        target_type="delivery",
+        target_id=f"{org_id}:{delivery_id}",
+        reason=body.reason,
+    )
     ok = retry_delivery(org_id, delivery_id)
     if not ok:
         raise HTTPException(status_code=404, detail="delivery_not_found")
@@ -384,7 +438,7 @@ def admin_resend_delivery(org_id: str, delivery_id: str, body: ResendDeliveryBod
         action_type="resend_delivery",
         target_type="delivery",
         target_id=f"{org_id}:{delivery_id}",
-        reason=reason,
+        reason=(body.reason or "").strip(),
         after={"queued": True},
     )
     return {"ok": True, "queued": True, "audit_id": audit_id, "actor": principal.user_id}
@@ -392,7 +446,12 @@ def admin_resend_delivery(org_id: str, delivery_id: str, body: ResendDeliveryBod
 
 @router.get("/affiliates")
 def admin_affiliates(request: Request, limit: int = Query(default=200, ge=1, le=500)) -> Dict[str, Any]:
-    _operator(request, permission=PERM_READ_OPS)
+    _privileged(
+        request,
+        permission=PERM_READ_OPS,
+        action_type="admin_affiliates",
+        target_id="affiliates",
+    )
     eco = get_economics_store()
     eco.init_schema()
     return {"affiliates": eco.list_admin_affiliate_summaries(limit=limit)}
@@ -402,7 +461,12 @@ def admin_affiliates(request: Request, limit: int = Query(default=200, ge=1, le=
 def admin_affiliate_payout_batches(
     request: Request, limit: int = Query(default=100, ge=1, le=500)
 ) -> Dict[str, Any]:
-    _operator(request, permission=PERM_READ_OPS)
+    _privileged(
+        request,
+        permission=PERM_READ_OPS,
+        action_type="admin_affiliate_payout_batches",
+        target_id="affiliate_payout_batches",
+    )
     return {"batches": list_payout_batch_summaries(limit=limit)}
 
 
@@ -410,8 +474,14 @@ def admin_affiliate_payout_batches(
 def admin_set_affiliate_status(
     affiliate_id: str, body: AffiliateStatusBody, request: Request
 ) -> Dict[str, Any]:
-    principal = _operator(request, permission=PERM_MUTATE_FINANCIAL)
-    reason = require_nonempty_reason(body.reason)
+    principal = _privileged(
+        request,
+        permission=PERM_MUTATE_FINANCIAL,
+        action_type="set_affiliate_status",
+        target_type="affiliate",
+        target_id=affiliate_id,
+        reason=body.reason,
+    )
     eco = get_economics_store()
     eco.init_schema()
     with eco._conn() as con:
@@ -425,7 +495,7 @@ def admin_set_affiliate_status(
         action_type="set_affiliate_status",
         target_type="affiliate",
         target_id=affiliate_id,
-        reason=reason,
+        reason=(body.reason or "").strip(),
         before=dict(before) if before else None,
         after=dict(after) if after else None,
     )
@@ -443,8 +513,14 @@ def admin_set_affiliate_status(
 def admin_affiliate_payout_batch_action(
     batch_id: str, body: AffiliatePayoutActionBody, request: Request, action: str = Query(...),
 ) -> Dict[str, Any]:
-    principal = _operator(request, permission=PERM_MUTATE_FINANCIAL)
-    reason = require_nonempty_reason(body.reason)
+    principal = _privileged(
+        request,
+        permission=PERM_MUTATE_FINANCIAL,
+        action_type="affiliate_payout_batch_action",
+        target_type="affiliate_payout_batch",
+        target_id=batch_id,
+        reason=body.reason,
+    )
     action_norm = (action or "").strip().lower()
     if action_norm not in ("approve", "hold", "mark_paid"):
         raise HTTPException(status_code=400, detail="invalid_action")
@@ -461,7 +537,7 @@ def admin_affiliate_payout_batch_action(
         action_type=f"affiliate_payout_{action_norm}",
         target_type="affiliate_payout_batch",
         target_id=batch_id,
-        reason=reason,
+        reason=(body.reason or "").strip(),
         after=out,
     )
     out = {**out, "audit_id": audit_id, "actor": principal.user_id, "actor_role": principal.role}
@@ -470,6 +546,11 @@ def admin_affiliate_payout_batch_action(
 
 @router.get("/audit")
 def admin_audit(request: Request, limit: int = Query(default=200, ge=1, le=1000)) -> Dict[str, Any]:
-    _operator(request, permission=PERM_READ_OPS)
+    _privileged(
+        request,
+        permission=PERM_READ_OPS,
+        action_type="admin_audit",
+        target_id="audit",
+    )
     rows = get_admin_console_store().list_admin_action_audit(limit=limit)
     return {"actions": rows}

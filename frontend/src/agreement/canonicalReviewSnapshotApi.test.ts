@@ -186,21 +186,98 @@ describe("canonicalReviewSnapshotApi", () => {
     if (!res.ok) expect(res.code).toBe("invalid_snapshot_args");
   });
 
-  it("canEnableCommercialPrepareFromServerSnapshot requires display==accepted", () => {
-    storeDisplayReviewSnapshotAuthority({
+  it("canEnableCommercialPrepareFromServerSnapshot requires verified GET corpus + display==accepted", async () => {
+    const corpus = ("OPERATIVE\n\n" + "x".repeat(600)).trim();
+    const sha = await sha256CorpusDigest(corpus);
+    const { storeVerifiedCommercialDisplayCorpus } = await import("./canonicalReviewSnapshotApi");
+    storeVerifiedCommercialDisplayCorpus({
       agreementId: "ag_1",
       snapshotId: "crs_1",
-      corpusSha256: "abc",
-      corpusLength: 1000,
+      corpusSha256: sha,
+      corpusLength: corpus.length,
       status: "pending",
+      corpusPlain: corpus,
     });
     expect(canEnableCommercialPrepareFromServerSnapshot("ag_1")).toBe(false);
     storeAcceptedReviewSnapshotRef({
       agreementId: "ag_1",
       snapshotId: "crs_1",
-      corpusSha256: "abc",
-      corpusLength: 1000,
+      corpusSha256: sha,
+      corpusLength: corpus.length,
+    });
+    storeVerifiedCommercialDisplayCorpus({
+      agreementId: "ag_1",
+      snapshotId: "crs_1",
+      corpusSha256: sha,
+      corpusLength: corpus.length,
+      status: "accepted",
+      corpusPlain: corpus,
     });
     expect(canEnableCommercialPrepareFromServerSnapshot("ag_1")).toBe(true);
+  });
+
+  it("prepare/empty agreementId cannot bypass Prepare authority", async () => {
+    const corpus = ("OPERATIVE\n\n" + "x".repeat(600)).trim();
+    for (const agreementId of ["", "   "]) {
+      const prepared = await prepareCommercialReviewSnapshotAuthority({
+        agreementId,
+        corpusPlain: corpus,
+      });
+      expect(prepared.ok).toBe(false);
+      if (!prepared.ok) expect(prepared.code).toBe("invalid_snapshot_args");
+      expect(canEnableCommercialPrepareFromServerSnapshot(agreementId)).toBe(false);
+    }
+  });
+
+  it("local accepted/display refs alone do not unlock Prepare without verified GET corpus", async () => {
+    // Local-only session refs (simulating a premium completion snap leftover) are insufficient
+    // until verified GET corpus + matching accepted authority exist.
+    storeAcceptedReviewSnapshotRef({
+      agreementId: "ag_local_only",
+      snapshotId: "crs_local",
+      corpusSha256: "f".repeat(64),
+      corpusLength: 1200,
+    });
+    expect(canEnableCommercialPrepareFromServerSnapshot("ag_local_only")).toBe(false);
+    expect(canEnableCommercialPrepareFromServerSnapshot("")).toBe(false);
+    expect(canEnableCommercialPrepareFromServerSnapshot(null)).toBe(false);
+
+    storeDisplayReviewSnapshotAuthority({
+      agreementId: "ag_local_only",
+      snapshotId: "crs_other",
+      corpusSha256: "e".repeat(64),
+      corpusLength: 1200,
+      status: "accepted",
+    });
+    expect(canEnableCommercialPrepareFromServerSnapshot("ag_local_only")).toBe(false);
+
+    storeDisplayReviewSnapshotAuthority({
+      agreementId: "ag_local_only",
+      snapshotId: "crs_local",
+      corpusSha256: "f".repeat(64),
+      corpusLength: 1200,
+      status: "accepted",
+    });
+    // Matching metadata without GET corpus bytes still blocks Prepare.
+    expect(canEnableCommercialPrepareFromServerSnapshot("ag_local_only")).toBe(false);
+
+    const corpus = ("OPERATIVE\n\n" + "y".repeat(600)).trim();
+    const sha = await sha256CorpusDigest(corpus);
+    const { storeVerifiedCommercialDisplayCorpus } = await import("./canonicalReviewSnapshotApi");
+    storeVerifiedCommercialDisplayCorpus({
+      agreementId: "ag_local_only",
+      snapshotId: "crs_local",
+      corpusSha256: sha,
+      corpusLength: corpus.length,
+      status: "accepted",
+      corpusPlain: corpus,
+    });
+    storeAcceptedReviewSnapshotRef({
+      agreementId: "ag_local_only",
+      snapshotId: "crs_local",
+      corpusSha256: sha,
+      corpusLength: corpus.length,
+    });
+    expect(canEnableCommercialPrepareFromServerSnapshot("ag_local_only")).toBe(true);
   });
 });

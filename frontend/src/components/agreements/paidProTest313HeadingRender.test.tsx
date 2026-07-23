@@ -9,6 +9,11 @@ import {
   summarizePaidProDocumentBlockClassifications,
 } from "./paidProDocumentBlockClassifier";
 import {
+  clearDisplayReviewSnapshotAuthority,
+  sha256CorpusDigest,
+  storeVerifiedCommercialDisplayCorpus,
+} from "../../agreement/canonicalReviewSnapshotApi";
+import {
   resetPaidProTest313HeadingRenderSourceLogsForTests,
   resolvePaidProFirstReviewVisibleDisplayPlain,
 } from "./paidProFirstReviewDisplayAuthority";
@@ -66,6 +71,7 @@ function countHtmlHeadings(html: string): number {
 describe("TEST313 paid Pro heading render hardening", () => {
   afterEach(() => {
     clearPaidProSourceOfTruth();
+    clearDisplayReviewSnapshotAuthority();
     resetPaidProTest313HeadingRenderSourceLogsForTests();
     cleanup();
   });
@@ -126,6 +132,7 @@ describe("TEST313 paid Pro heading render hardening", () => {
   it("blocks live_generated_preview and starter_preview for paid Pro first review display", () => {
     for (const forbidden of ["live_generated_preview", "starter_preview", "renderedAgreementPreview"]) {
       const resolution = resolvePaidProFirstReviewVisibleDisplayPlain({
+        agreementId: "ag_test313",
         premiumCheckoutCompleted: true,
         premiumPaidDocumentSurface: true,
         paidProActive: true,
@@ -133,15 +140,37 @@ describe("TEST313 paid Pro heading render hardening", () => {
         pickerSource: forbidden,
       });
       expect(resolution.plain).toBe("");
+      expect(resolution.fallbackReason).toBe("awaiting_server_display_authority");
       expect(resolution.forbiddenSourceBlocked).toBe(true);
-      expect(isForbiddenPaidProDisplayRenderSource(resolution.source)).toBe(true);
+      expect(isForbiddenPaidProDisplayRenderSource(forbidden)).toBe(true);
     }
   });
 
-  it("uses authoritative SoT for visible shell instead of live preview picker", () => {
+  it("uses verified server GET corpus for visible shell instead of live preview picker / SoT", async () => {
     const authority = buildTest313Corpus();
     establishPaidProSourceOfTruth({ text: authority, source: "server_full_draft" });
+    // SoT alone must not paint.
+    expect(
+      resolveCanonicalPlainForVisibleShell({
+        agreementId: "ag_test313",
+        paidProActive: true,
+        premiumCheckoutCompleted: true,
+        premiumPaidDocumentSurface: true,
+        pickerPlain: LIVE_PREVIEW_CORPUS,
+        pickerSource: "live_generated_preview",
+      }).plain,
+    ).toBe("");
+    const sha = await sha256CorpusDigest(authority);
+    storeVerifiedCommercialDisplayCorpus({
+      agreementId: "ag_test313",
+      snapshotId: "crs_test313",
+      corpusSha256: sha,
+      corpusLength: authority.length,
+      status: "pending",
+      corpusPlain: authority,
+    });
     const { plain, source } = resolveCanonicalPlainForVisibleShell({
+      agreementId: "ag_test313",
       paidProActive: true,
       premiumCheckoutCompleted: true,
       premiumPaidDocumentSurface: true,
@@ -149,7 +178,7 @@ describe("TEST313 paid Pro heading render hardening", () => {
       pickerSource: "live_generated_preview",
     });
     expect(plain.length).toBeGreaterThanOrEqual(PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN);
-    expect(source).toBe("paidProReviewRenderPlain");
+    expect(source).toBe("verified_server_canonical_review_snapshot");
     expect(plain).toContain("Sarah Mitchell");
     expect(detectPaidProPlainParagraphHeadingLeaks(plain).plainParagraphHeadingLeakCount).toBe(0);
   });

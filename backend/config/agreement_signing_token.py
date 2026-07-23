@@ -37,11 +37,17 @@ _MIN_EXPLICIT_SECRET_LEN = 16
 
 
 def claw_environment_name() -> str:
-    return os.getenv("CLAW_ENVIRONMENT", "local").strip().lower() or "local"
+    """Fail-closed: empty when unset/blank (never defaults to local)."""
+    from backend.config.deployment_runtime import claw_environment
+
+    return claw_environment()
 
 
 def fallback_signing_token_allowed() -> bool:
-    return claw_environment_name() in _FALLBACK_ALLOWED_ENVIRONMENTS
+    from backend.config.deployment_runtime import is_relaxed_claw_environment
+
+    # Only explicit local/dev/test — never unset/blank/staging/unknown.
+    return is_relaxed_claw_environment() and claw_environment_name() in _FALLBACK_ALLOWED_ENVIRONMENTS
 
 
 def _raw_env_signing_token_secret() -> str:

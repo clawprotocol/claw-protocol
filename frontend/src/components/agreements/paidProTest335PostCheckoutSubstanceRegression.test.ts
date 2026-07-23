@@ -11,6 +11,11 @@ import {
   hasCanonicalReviewCorpusForRender,
   resolveCanonicalReviewCorpusLenForRender,
 } from "./paidProDocumentBodyRouter";
+import {
+  clearDisplayReviewSnapshotAuthority,
+  sha256CorpusDigest,
+  storeVerifiedCommercialDisplayCorpus,
+} from "../../agreement/canonicalReviewSnapshotApi";
 import { resolvePaidProFirstReviewVisibleDisplayPlain } from "./paidProFirstReviewDisplayAuthority";
 import {
   assessConciseCommercialServicesProQuality,
@@ -101,6 +106,7 @@ afterEach(() => {
   clearPaidProSourceOfTruth();
   clearPaidProPostAcceptanceValidatorCache();
   clearFrozenPremiumSessionBodiesForTests();
+  clearDisplayReviewSnapshotAuthority();
 });
 
 describe("paidProTest335PostCheckoutSubstanceRegression", () => {
@@ -155,10 +161,31 @@ describe("paidProTest335PostCheckoutSubstanceRegression", () => {
     expect(pick.audit.candidates[0]?.reason).toBe("latched_pipeline_accepted_server_full_draft");
   });
 
-  it("first-review display authority resolves latched pipeline acceptance instead of blank", () => {
+  it("first-review display authority paints verified GET corpus (not latched local fallback)", async () => {
     const body = buildTest335ServerBody();
     latchAcceptedServerFullDraftAuthority(body, "server_full_draft");
+    // Latched local alone must not paint commercial review.
+    expect(
+      resolvePaidProFirstReviewVisibleDisplayPlain({
+        agreementId: "ag_test335",
+        draft: test335Draft(),
+        intakeText: TEST335_INTAKE,
+        premiumPaidDocumentSurface: true,
+        premiumCheckoutCompleted: true,
+        premiumRenderSource: "server_full_draft",
+      }).plain,
+    ).toBe("");
+    const sha = await sha256CorpusDigest(body);
+    storeVerifiedCommercialDisplayCorpus({
+      agreementId: "ag_test335",
+      snapshotId: "crs_test335",
+      corpusSha256: sha,
+      corpusLength: body.length,
+      status: "pending",
+      corpusPlain: body,
+    });
     const visible = resolvePaidProFirstReviewVisibleDisplayPlain({
+      agreementId: "ag_test335",
       draft: test335Draft(),
       intakeText: TEST335_INTAKE,
       premiumPaidDocumentSurface: true,
@@ -166,15 +193,17 @@ describe("paidProTest335PostCheckoutSubstanceRegression", () => {
       premiumRenderSource: "server_full_draft",
     });
     expect(visible.plain.length).toBeGreaterThanOrEqual(LONG_PREMIUM_AUTHORITATIVE_MIN_LEN);
-    expect(visible.fallbackReason).toBe("latched_pipeline_accepted_server_full_draft");
+    expect(visible.source).toBe("verified_server_canonical_review_snapshot");
+    expect(visible.fallbackReason).toBeNull();
   });
 
-  it("canonical review corpus routing sees latched accepted authority before SoT commit", () => {
+  it("latched accepted authority is retained before SoT commit (render gate is pipeline/SoT)", () => {
     const body = buildTest335ServerBody();
     latchAcceptedServerFullDraftAuthority(body, "server_full_draft");
-    expect(hasCanonicalReviewCorpusForRender()).toBe(true);
-    expect(resolveCanonicalReviewCorpusLenForRender()).toBeGreaterThanOrEqual(LONG_PREMIUM_AUTHORITATIVE_MIN_LEN);
+    // Latch alone is recovery/handoff state; canonical render still requires SoT or validated pipeline.
+    expect(hasCanonicalReviewCorpusForRender()).toBe(false);
     expect(getLatchedAcceptedServerFullDraftAuthority()?.body.length).toBe(body.length);
+    expect(resolveCanonicalReviewCorpusLenForRender()).toBe(0);
   });
 
   it("still blocks thin 3-section corpus without pipeline acceptance", () => {
@@ -198,6 +227,6 @@ describe("paidProTest335PostCheckoutSubstanceRegression", () => {
         draft: test335Draft(),
         intakeText: TEST335_INTAKE,
       }),
-    ).toThrow(/\[pro-minimum-substance-blocked\]/);
+    ).toThrow(/\[(pro-minimum-substance-blocked|paid-pro-sot-establishment-blocked)\]/);
   });
 });

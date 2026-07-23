@@ -1,12 +1,13 @@
 /**
- * TEST310 — first paid Pro review visible display authority.
- * Single source-selection path for forced shell / display plain; never live preview after checkout.
+ * TEST310 / Patch 5B — first paid Pro review visible display authority.
+ * Commercial paint is server-GET-only: no SoT / completion-snap / latched / picker fallbacks.
  */
 
+import {
+  hasVerifiedCommercialDisplayCorpus,
+  readVerifiedCommercialDisplayCorpus,
+} from "../../agreement/canonicalReviewSnapshotApi";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
-import { getAuthoritativeAgreementText } from "./authoritativeAgreementDocument";
-import { readCanonicalAgreementCorpusForSurface } from "./canonicalAgreementSnapshot";
-import { resolveAuthoritativePaidProReviewPlain } from "./authoritativePaidProReview";
 import { PAID_PRO_AUTHORITY_MIN_LEN } from "./paidProAgreementAuthority";
 import {
   classifyPaidProDocumentBlocks,
@@ -18,7 +19,6 @@ import { draftServerFullDocumentExists } from "./paidProRuntimeAuthorityEstablis
 import {
   isPaidProPostCheckoutFlowActive,
   isPaidProFirstReviewDisplayActive as isPaidProFirstReviewDisplayFlowActive,
-  resolvePaidProPostCheckoutFirstReviewPlain,
 } from "./paidProPostCheckoutRenderGate";
 import { resolvePaidProPostFinalizeReviewPlain } from "./paidProPostFinalizeReviewSurface";
 import {
@@ -29,13 +29,10 @@ import {
   hashPaidProCorpus,
   hasPaidProSourceOfTruth,
 } from "./paidProSourceOfTruth";
-import { getLatchedAcceptedServerFullDraftAuthority } from "./premiumAcceptancePolicy";
 import {
   hasPaidPremiumCompletionSession,
-  readPremiumCompletionSnapshot,
 } from "./premiumCompletionStorage";
 import { isForbiddenPaidProDisplayRenderSource } from "./premiumGenerationApiAvailability";
-import { isAuthoritativePremiumPipelineRenderSource } from "./premiumRenderSourceResolver";
 
 export type PaidProFirstReviewVisibleDisplayResolution = {
   plain: string;
@@ -55,43 +52,15 @@ export type PaidProFirstReviewVisibleDisplayArgs = {
   premiumPaidDocumentSurface?: boolean;
   /** When true, block live preview HTML fallback on the forced visible shell. */
   paidProActive?: boolean;
-  /** Picker output — used only when not a forbidden post-checkout source. */
+  /** Picker output — never paint-eligible in commercial mode (hint only). */
   pickerPlain?: string | null;
   pickerSource?: string | null;
+  /** Required for commercial paint: nonempty agreement id + verified GET corpus. */
+  agreementId?: string | null;
 };
 
 function trim(s: string | null | undefined): string {
   return (s || "").trim();
-}
-
-function serverFullFromDraft(draft: ParsedDraftShape | null | undefined): string {
-  if (!draft) return "";
-  const extended = draft as ParsedDraftShape & {
-    server_full_document_text?: string | null;
-    premium_server_repair_document_text?: string | null;
-  };
-  const candidates = [
-    extended.premium_server_full_document_text,
-    extended.server_full_document_text,
-    extended.premium_full_document_text,
-    extended.premium_server_repair_document_text,
-  ];
-  return candidates.map((c) => trim(c)).find((t) => t.length >= PAID_PRO_AUTHORITY_MIN_LEN) ?? "";
-}
-
-function snapshotServerFullBody(): string {
-  const snap = readPremiumCompletionSnapshot();
-  const snapDraft = snap?.premiumDraft as
-    | (ParsedDraftShape & { server_full_document_text?: string | null })
-    | undefined;
-  const candidates = [
-    snap?.premiumWinningBodyText,
-    snap?.premiumReadonlyPlainText,
-    snapDraft?.premium_server_full_document_text,
-    snapDraft?.server_full_document_text,
-    snapDraft?.premium_full_document_text,
-  ];
-  return candidates.map((c) => trim(c)).find((t) => t.length >= PAID_PRO_AUTHORITY_MIN_LEN) ?? "";
 }
 
 export function isPaidProFirstReviewVisibleDisplayActive(
@@ -114,24 +83,86 @@ export function isPaidProFirstReviewVisibleDisplayActive(
   );
 }
 
+function commercialDisplayGateActive(args: PaidProFirstReviewVisibleDisplayArgs): boolean {
+  return (
+    Boolean(args.paidProActive) ||
+    Boolean(args.premiumCheckoutCompleted) ||
+    Boolean(args.premiumPaidDocumentSurface) ||
+    isPaidProFirstReviewVisibleDisplayActive(args)
+  );
+}
+
 /**
- * Resolve visible first-review plain from paid Pro authority only — never live_generated_preview
- * once post-checkout / paid Pro display is active.
+ * Resolve visible first-review plain from verified server GET authority only.
+ * Local SoT / completion snap / latched draft / picker must never paint commercial review corpus.
  */
 export function resolvePaidProFirstReviewVisibleDisplayPlain(
   args: PaidProFirstReviewVisibleDisplayArgs = {},
 ): PaidProFirstReviewVisibleDisplayResolution {
   const draft = args.draft ?? null;
-  const intakeText = trim(args.intakeText);
-  const premiumRenderSource = trim(args.premiumRenderSource);
-  const paidProActive = isPaidProFirstReviewVisibleDisplayActive(args);
+  const agreementId = trim(args.agreementId);
+  const paidProActive = commercialDisplayGateActive(args);
   const hasSoT = hasPaidProSourceOfTruth();
-  const hasServerFullDoc = draftServerFullDocumentExists(draft) || snapshotServerFullBody().length >= PAID_PRO_AUTHORITY_MIN_LEN;
+  const hasServerFullDoc = draftServerFullDocumentExists(draft);
 
+  if (!paidProActive) {
+    return {
+      plain: "",
+      source: "none",
+      fallbackReason: "no_authoritative_corpus",
+      hasSoT,
+      hasServerFullDoc,
+      paidProActive: false,
+    };
+  }
+
+  if (!agreementId) {
+    return {
+      plain: "",
+      source: "none",
+      fallbackReason: "missing_agreement_id",
+      hasSoT,
+      hasServerFullDoc,
+      paidProActive,
+    };
+  }
+
+  if (!hasVerifiedCommercialDisplayCorpus(agreementId)) {
+    const pickerSource = trim(args.pickerSource);
+    const pickerForbidden =
+      paidProActive && isForbiddenPaidProDisplayRenderSource(pickerSource);
+    return {
+      plain: "",
+      source: pickerForbidden ? "none" : "none",
+      fallbackReason: "awaiting_server_display_authority",
+      hasSoT,
+      hasServerFullDoc,
+      paidProActive,
+      forbiddenSourceBlocked: pickerForbidden || undefined,
+    };
+  }
+
+  const verified = readVerifiedCommercialDisplayCorpus(agreementId);
+  const verifiedPlain = trim(verified?.corpusPlain);
+  if (verifiedPlain.length < PAID_PRO_AUTHORITY_MIN_LEN) {
+    return {
+      plain: "",
+      source: "none",
+      fallbackReason: "awaiting_server_display_authority",
+      hasSoT,
+      hasServerFullDoc,
+      paidProActive,
+    };
+  }
+
+  // Post-finalize may project signer-hydrated text only after verified GET authority exists.
   if (isPaidProPostFinalizeHydratedCorpusLocked()) {
     const locked = resolvePaidProPostFinalizeReviewPlain().trim();
     if (locked.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
-      const plain = resolvePaidProPostFinalizeUserVisiblePlain(locked, draft as import("../../agreement/agreementTypes").AgreementDraft | null);
+      const plain = resolvePaidProPostFinalizeUserVisiblePlain(
+        locked,
+        draft as import("../../agreement/agreementTypes").AgreementDraft | null,
+      );
       return {
         plain,
         source: "authoritative_signing_snapshot",
@@ -143,132 +174,13 @@ export function resolvePaidProFirstReviewVisibleDisplayPlain(
     }
   }
 
-  const authoritative = resolveAuthoritativePaidProReviewPlain({
-    draft,
-    intakeText,
-    premiumRenderSource,
-  }).trim();
-  if (authoritative.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
-    return {
-      plain: authoritative,
-      source: hasSoT ? "paidProReviewRenderPlain" : "authoritative_paid_pro_review",
-      fallbackReason: null,
-      hasSoT,
-      hasServerFullDoc,
-      paidProActive,
-    };
-  }
-
-  const recovery = resolvePaidProPostCheckoutFirstReviewPlain({
-    draft,
-    intakeText,
-    premiumRenderSource,
-    winningPremiumBodyText: serverFullFromDraft(draft) || snapshotServerFullBody(),
-  }).trim();
-  if (recovery.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
-    return {
-      plain: recovery,
-      source: "post_checkout_recovery_display",
-      fallbackReason: null,
-      hasSoT,
-      hasServerFullDoc,
-      paidProActive,
-    };
-  }
-
-  const draftServerFull = serverFullFromDraft(draft);
-  if (draftServerFull.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
-    return {
-      plain: draftServerFull,
-      source: "server_full_document_text",
-      fallbackReason: "draft_server_full_document",
-      hasSoT,
-      hasServerFullDoc,
-      paidProActive,
-    };
-  }
-
-  const latched = getLatchedAcceptedServerFullDraftAuthority();
-  if (latched && latched.body.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
-    return {
-      plain: latched.body,
-      source: "server_full_document_text",
-      fallbackReason: "latched_pipeline_accepted_server_full_draft",
-      hasSoT,
-      hasServerFullDoc,
-      paidProActive,
-    };
-  }
-
-  const snapBody = snapshotServerFullBody();
-  if (snapBody.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
-    const snap = readPremiumCompletionSnapshot();
-    const pipeline = trim(snap?.premiumPipelineRenderSource ?? snap?.premiumRenderResolveSource);
-    return {
-      plain: snapBody,
-      source: isAuthoritativePremiumPipelineRenderSource(pipeline)
-        ? "server_full_document_text"
-        : "premium_completion_snapshot",
-      fallbackReason: "premium_completion_snapshot",
-      hasSoT,
-      hasServerFullDoc,
-      paidProActive,
-    };
-  }
-
-  const authoritativeDoc = getAuthoritativeAgreementText().trim();
-  if (authoritativeDoc.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
-    return {
-      plain: authoritativeDoc,
-      source: "authoritativeAgreementDocument",
-      fallbackReason: "authoritative_agreement_document",
-      hasSoT,
-      hasServerFullDoc,
-      paidProActive,
-    };
-  }
-
-  const frozen = readCanonicalAgreementCorpusForSurface("review", { tier: "pro" });
-  const frozenPlain = frozen?.canonicalText?.trim() ?? "";
-  if (frozenPlain.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
-    return {
-      plain: frozenPlain,
-      source: "frozenCanonicalCorpus",
-      fallbackReason: "frozen_canonical_corpus",
-      hasSoT,
-      hasServerFullDoc,
-      paidProActive,
-    };
-  }
-
-  const pickerPlain = trim(args.pickerPlain);
-  const pickerSource = trim(args.pickerSource);
-  const pickerForbidden =
-    paidProActive && isForbiddenPaidProDisplayRenderSource(pickerSource);
-  if (pickerPlain.length >= PAID_PRO_AUTHORITY_MIN_LEN && !pickerForbidden) {
-    return {
-      plain: pickerPlain,
-      source: pickerSource || "premium_readonly_picker",
-      fallbackReason: null,
-      hasSoT,
-      hasServerFullDoc,
-      paidProActive,
-      forbiddenSourceBlocked: false,
-    };
-  }
-
   return {
-    plain: "",
-    source: pickerForbidden ? "none" : pickerSource || "none",
-    fallbackReason: pickerForbidden
-      ? `forbidden_picker_source:${pickerSource}`
-      : paidProActive
-        ? "awaiting_paid_pro_authority"
-        : "no_authoritative_corpus",
+    plain: verifiedPlain,
+    source: "verified_server_canonical_review_snapshot",
+    fallbackReason: null,
     hasSoT,
     hasServerFullDoc,
     paidProActive,
-    forbiddenSourceBlocked: pickerForbidden,
   };
 }
 

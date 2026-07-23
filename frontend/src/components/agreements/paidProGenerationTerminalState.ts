@@ -13,6 +13,7 @@ export type PaidProGenerationTerminalReason =
   | "entitled_rewrite_validation_failed"
   | "entitled_rewrite_canonical_blocked"
   | "entitled_rewrite_snapshot_prepare_failed"
+  | "entitled_rewrite_missing_agreement_or_corpus"
   | "entitled_rewrite_aborted"
   | "draft_limit_reached"
   | "draft_persist_failed";

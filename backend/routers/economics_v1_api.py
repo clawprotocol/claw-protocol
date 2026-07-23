@@ -144,7 +144,10 @@ def _affiliate_access_status_payload(
 
 
 @router.post("/affiliates")
-async def create_affiliate(body: CreateAffiliateBody) -> Dict[str, Any]:
+async def create_affiliate(request: Request, body: CreateAffiliateBody) -> Dict[str, Any]:
+    from backend.security.commercial_auth import require_org_matches_principal
+
+    require_org_matches_principal(request, body.owner_org_id)
     out = affiliate_service.create_affiliate(
         affiliate_code=body.affiliate_code,
         wallet_address=body.wallet_address,
@@ -247,6 +250,9 @@ async def create_affiliate_access_request(
 async def attribute_affiliate(request: Request, body: AttributeAffiliateBody) -> Dict[str, Any]:
     from backend.payments.store import get_onramp_store
     from backend.treasury.treasury_store import get_treasury_store
+    from backend.security.commercial_auth import require_org_matches_principal
+
+    require_org_matches_principal(request, body.org_id)
 
     client_ip = None
     try:
@@ -275,15 +281,32 @@ async def attribute_affiliate(request: Request, body: AttributeAffiliateBody) ->
 
 
 @router.get("/affiliates/{affiliate_id}")
-async def get_affiliate(affiliate_id: str) -> Dict[str, Any]:
+async def get_affiliate(affiliate_id: str, request: Request) -> Dict[str, Any]:
+    from backend.security.commercial_auth import require_commercial_owner_principal
+
+    require_commercial_owner_principal(request)
     row = affiliate_service.get_affiliate(affiliate_id)
     if not row:
         raise HTTPException(status_code=404, detail="not_found")
+    owner_org = str((row or {}).get("owner_org_id") or "").strip()
+    if owner_org:
+        from backend.security.commercial_auth import require_org_matches_principal
+
+        require_org_matches_principal(request, owner_org)
     return dict(row)
 
 
 @router.get("/affiliates/{affiliate_id}/accruals")
-async def list_accruals(affiliate_id: str) -> Dict[str, Any]:
+async def list_accruals(affiliate_id: str, request: Request) -> Dict[str, Any]:
+    from backend.security.commercial_auth import require_commercial_owner_principal, require_org_matches_principal
+
+    require_commercial_owner_principal(request)
+    row = affiliate_service.get_affiliate(affiliate_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="not_found")
+    owner_org = str((row or {}).get("owner_org_id") or "").strip()
+    if owner_org:
+        require_org_matches_principal(request, owner_org)
     eco = get_economics_store()
     eco.init_schema()
     rows = eco.list_accruals_for_affiliate(affiliate_id)
@@ -291,18 +314,38 @@ async def list_accruals(affiliate_id: str) -> Dict[str, Any]:
 
 
 @router.post("/affiliates/payouts/run")
-async def run_payouts() -> Dict[str, Any]:
+async def run_payouts(request: Request) -> Dict[str, Any]:
+    from backend.security.privileged_ops import PERM_MUTATE_FINANCIAL, require_privileged_operator
+
+    require_privileged_operator(
+        request,
+        permission=PERM_MUTATE_FINANCIAL,
+        action_type="affiliate_payouts_run",
+        target_type="affiliate_payouts",
+        target_id="run",
+        reason=(request.headers.get("x-claw-admin-reason") or "").strip() or None,
+    )
     as_of = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
     return affiliate_payouts.run_payout_cycle(as_of_iso=as_of)
 
 
-def _require_affiliate_ops(request: Request) -> None:
+def _require_affiliate_ops(request: Request, *, action_type: str = "affiliate_ops") -> None:
+    """Operator principal + reason; optional affiliate-ops secret as second factor when set."""
+    from backend.security.privileged_ops import PERM_MUTATE_FINANCIAL, require_privileged_operator
+
+    require_privileged_operator(
+        request,
+        permission=PERM_MUTATE_FINANCIAL,
+        action_type=action_type,
+        target_type="affiliate_ops",
+        target_id=action_type,
+        reason=(request.headers.get("x-claw-admin-reason") or "").strip() or None,
+    )
     secret = os.getenv("CLAW_AFFILIATE_OPS_SECRET", "").strip()
-    if not secret:
-        raise HTTPException(status_code=503, detail="affiliate_ops_unconfigured")
-    presented = (request.headers.get("X-Claw-Affiliate-Ops") or "").strip()
-    if not secrets.compare_digest(presented, secret):
-        raise HTTPException(status_code=403, detail="forbidden")
+    if secret:
+        presented = (request.headers.get("X-Claw-Affiliate-Ops") or "").strip()
+        if not presented or not secrets.compare_digest(presented, secret):
+            raise HTTPException(status_code=403, detail="forbidden")
 
 
 class PrepareAffiliatePayoutBatchesBody(BaseModel):
@@ -584,7 +627,10 @@ async def post_meter(request: Request, body: MeterUsageBody) -> Dict[str, Any]:
 
 
 @router.get("/usage/{usage_id}/receipt")
-async def get_usage_receipt(usage_id: str) -> Dict[str, Any]:
+async def get_usage_receipt(usage_id: str, request: Request) -> Dict[str, Any]:
+    from backend.security.receipt_access import require_usage_receipt_access
+
+    require_usage_receipt_access(request, usage_id)
     try:
         return generate_usage_receipt(usage_id)
     except ValueError as exc:
@@ -592,7 +638,10 @@ async def get_usage_receipt(usage_id: str) -> Dict[str, Any]:
 
 
 @router.get("/usage/{usage_id}/bundle")
-async def get_usage_bundle(usage_id: str) -> Dict[str, Any]:
+async def get_usage_bundle(usage_id: str, request: Request) -> Dict[str, Any]:
+    from backend.security.receipt_access import require_usage_receipt_access
+
+    require_usage_receipt_access(request, usage_id)
     try:
         return build_usage_bundle(usage_id)
     except ValueError as exc:
@@ -618,10 +667,22 @@ async def get_subscription(org_id: str, request: Request) -> Dict[str, Any]:
 @router.get("/internal/usage-economics/overview")
 async def internal_usage_economics_overview(request: Request) -> Dict[str, Any]:
     """Operator-only: internal Key counters & subjects (never shown in product UI)."""
+    from backend.security.privileged_ops import PERM_READ_OPS, require_privileged_operator
+
+    require_privileged_operator(
+        request,
+        permission=PERM_READ_OPS,
+        action_type="internal_usage_economics_overview",
+        target_type="usage_economics",
+        target_id="overview",
+        reason=(request.headers.get("x-claw-admin-reason") or "").strip() or None,
+    )
+    # Optional second factor when CLAW_ADMIN_TOKEN is configured.
     expected = os.getenv("CLAW_ADMIN_TOKEN", "").strip()
-    presented = (request.headers.get("X-Claw-Admin-Token") or "").strip()
-    if not expected or not presented or not secrets.compare_digest(presented, expected):
-        raise HTTPException(status_code=404, detail="not_found")
+    if expected:
+        presented = (request.headers.get("X-Claw-Admin-Token") or "").strip()
+        if not presented or not secrets.compare_digest(presented, expected):
+            raise HTTPException(status_code=403, detail="forbidden")
     try:
         from backend.ops.break_glass_audit import BreakGlassAction, log_break_glass_event
 

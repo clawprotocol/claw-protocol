@@ -56,7 +56,9 @@ def resend_recipient_invite(
 ) -> Tuple[Dict[str, Any], Dict[str, Any]]:
     """Resend waiting/opened invite; supersedes prior token/link metadata only."""
     pid = (participant_id or "").strip()
-    ph = (phase or "").strip().lower()
+    from backend.services.recipient_delivery_registry import normalize_delivery_phase
+
+    ph = normalize_delivery_phase(phase)
     if ph not in ("review", "signing"):
         raise HTTPException(status_code=400, detail="invalid_phase")
 
@@ -95,6 +97,7 @@ def resend_recipient_invite(
         url = (signing_url or "").strip()
         if not url:
             raise HTTPException(status_code=400, detail="signing_url_required")
+        # send_signing_invite_to_target records JTI from the URL when send succeeds.
         sent_invite = send_signing_invite_to_target(
             agreement_id=agreement_id,
             draft=next_draft,
@@ -108,14 +111,6 @@ def resend_recipient_invite(
             packet_revision=_latest_signing_packet_revision(draft.get("audit_log")),
             org_id=org_id,
         )
-        if sent_invite:
-            record_invite_sent(
-                next_draft,
-                phase="signing",
-                participant_id=pid,
-                email=email,
-                audit_log=audit_log,
-            )
 
     next_draft["audit_log"] = audit_log
     next_draft["updated_at"] = now

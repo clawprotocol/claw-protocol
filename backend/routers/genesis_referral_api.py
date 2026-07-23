@@ -53,32 +53,25 @@ class CheckoutMetadataBody(BaseModel):
     plan_code: str = Field(default="pro", max_length=32)
 
 
-def _require_admin(request: Request, *, reason: str = "genesis_ops") -> Any:
-    """Privileged Genesis ops: authenticated operator principal + reason + audit."""
-    from backend.security.operator_principal import (
-        PERM_MUTATE_SUPPORT,
-        require_nonempty_reason,
-        resolve_operator_principal,
-    )
-    from backend.admin_console.store import get_admin_console_store
+def _require_admin(
+    request: Request,
+    *,
+    permission: str,
+    action_type: str,
+    reason: Optional[str] = None,
+    target_id: str = "global",
+) -> Any:
+    """Privileged Genesis ops via unified gate (principal + permission + reason + audit)."""
+    from backend.security.privileged_ops import require_privileged_operator
 
-    principal = resolve_operator_principal(request, require_permission=PERM_MUTATE_SUPPORT)
-    # Prefer explicit reason header/query for GET; body mutations pass reason separately.
-    reason_text = require_nonempty_reason(
-        (request.headers.get("x-claw-admin-reason") or reason or "").strip() or None
-    )
-    get_admin_console_store().append_admin_action_audit(
-        admin_user_id=principal.user_id,
-        action_type="genesis_ops_access",
+    return require_privileged_operator(
+        request,
+        permission=permission,
+        action_type=action_type,
         target_type="genesis",
-        target_id=reason_text[:64],
-        reason=reason_text,
-        before_snapshot_json=None,
-        after_snapshot_json=None,
-        actor_role=principal.role,
-        correlation_id=principal.correlation_id or None,
+        target_id=target_id,
+        reason=reason,
     )
-    return principal
 
 
 def _user_id_from_request(request: Request) -> str:
@@ -103,14 +96,26 @@ async def capture_referral(body: CaptureReferralBody) -> Dict[str, Any]:
 
 
 @router.post("/convert")
-async def convert_referral(body: ConvertReferralBody) -> Dict[str, Any]:
+async def convert_referral(request: Request, body: ConvertReferralBody) -> Dict[str, Any]:
+    """Authenticated convert — org/user must match validated principal."""
+    from backend.security.commercial_auth import require_org_matches_principal
+    from backend.security.supabase_jwt import require_supabase_user_id
+
+    uid = require_supabase_user_id(request)
+    require_org_matches_principal(request, body.referred_org_id)
+    body_uid = (body.referred_user_id or "").strip()
+    if body_uid and body_uid != uid:
+        raise HTTPException(
+            status_code=403,
+            detail={"code": "cross_user_denied", "message": "referred_user_id must match principal."},
+        )
     eco = get_economics_store()
     out = genesis_svc.convert_referral(
         eco,
         referral_code=body.referral_code,
         visitor_id=body.visitor_id,
         referred_org_id=body.referred_org_id,
-        referred_user_id=body.referred_user_id,
+        referred_user_id=uid,
     )
     if not out.get("ok"):
         code = 400
@@ -121,13 +126,24 @@ async def convert_referral(body: ConvertReferralBody) -> Dict[str, Any]:
 
 
 @router.post("/checkout-metadata")
-async def checkout_metadata(body: CheckoutMetadataBody) -> Dict[str, Any]:
-    """Return Stripe-ready metadata for Checkout Session / Customer / Subscription."""
+async def checkout_metadata(request: Request, body: CheckoutMetadataBody) -> Dict[str, Any]:
+    """Stripe-ready metadata — authenticated; org/user bound to principal."""
+    from backend.security.commercial_auth import require_org_matches_principal
+    from backend.security.supabase_jwt import require_supabase_user_id
+
+    uid = require_supabase_user_id(request)
+    require_org_matches_principal(request, body.org_id)
+    body_uid = (body.user_id or "").strip()
+    if body_uid and body_uid != uid:
+        raise HTTPException(
+            status_code=403,
+            detail={"code": "cross_user_denied", "message": "user_id must match principal."},
+        )
     md = genesis_svc.build_stripe_checkout_metadata(
         org_id=body.org_id,
         referral_code=body.referral_code,
         visitor_id=body.visitor_id,
-        user_id=body.user_id,
+        user_id=uid,
         plan_code=body.plan_code,
     )
     return {"ok": True, "metadata": md}
@@ -147,7 +163,15 @@ async def affiliate_me(request: Request) -> Dict[str, Any]:
 
 @router.post("/ops/affiliates")
 async def ops_create_affiliate(request: Request, body: CreateGenesisAffiliateBody) -> Dict[str, Any]:
-    _require_admin(request, reason=body.reason)
+    from backend.security.privileged_ops import PERM_MUTATE_SUPPORT
+
+    _require_admin(
+        request,
+        permission=PERM_MUTATE_SUPPORT,
+        action_type="genesis_ops_create_affiliate",
+        reason=body.reason,
+        target_id=(body.referral_code or "affiliate")[:128],
+    )
     eco = get_economics_store()
     return genesis_svc.create_genesis_affiliate(
         eco,
@@ -162,7 +186,14 @@ async def ops_create_affiliate(request: Request, body: CreateGenesisAffiliateBod
 
 @router.get("/ops/summary")
 async def ops_summary(request: Request) -> Dict[str, Any]:
-    _require_admin(request)
+    from backend.security.privileged_ops import PERM_READ_OPS
+
+    _require_admin(
+        request,
+        permission=PERM_READ_OPS,
+        action_type="genesis_ops_summary",
+        target_id="summary",
+    )
     eco = get_economics_store()
     eco.init_schema()
     with eco._conn() as con:
@@ -171,7 +202,14 @@ async def ops_summary(request: Request) -> Dict[str, Any]:
 
 @router.get("/ops/commissions/export.csv")
 async def ops_commissions_csv(request: Request) -> Response:
-    _require_admin(request)
+    from backend.security.privileged_ops import PERM_READ_OPS
+
+    _require_admin(
+        request,
+        permission=PERM_READ_OPS,
+        action_type="genesis_ops_commissions_export",
+        target_id="commissions_export",
+    )
     eco = get_economics_store()
     eco.init_schema()
     with eco._conn() as con:

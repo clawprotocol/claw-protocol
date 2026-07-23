@@ -29,11 +29,13 @@ def _ops_headers(
     user_id: str = "ops_admin",
     include_secret: bool = True,
     spoof_actor: str | None = None,
+    reason: str = "admin console ops test",
 ) -> dict[str, str]:
     h = {
         "X-Claw-Test-Auth-User-Id": user_id,
         "X-Claw-Test-Operator-Role": role,
         "x-request-id": "corr-admin-test-1",
+        "x-claw-admin-reason": reason,
     }
     if include_secret:
         h["x-claw-admin-secret"] = "admin-test-secret"

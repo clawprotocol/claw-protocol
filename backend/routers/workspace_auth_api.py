@@ -29,6 +29,7 @@ from backend.security.anonymous_session_token import (
 from backend.security.supabase_jwt import require_supabase_user_id
 from backend.security.workspace_identity import verify_anonymous_session_from_request, extract_anonymous_session_token
 from backend.security.safe_redirect import build_destination_with_agreement, resolve_safe_redirect_path
+from backend.config.deployment_runtime import claw_environment
 from backend.cors_policy import apply_cors_headers_to_response
 
 router = APIRouter(prefix="/v1/workspace", tags=["workspace-auth"])
@@ -435,20 +436,41 @@ async def bind_user_org(request: Request, body: BindUserOrgIn) -> Dict[str, Any]
 
 
 @router.post("/demo-activate-subscription")
-async def demo_activate_subscription(body: BindUserOrgIn) -> Dict[str, Any]:
-    """Dev/QA/staging only: activate Pro subscription without Stripe."""
-    import os
+async def demo_activate_subscription(request: Request, body: BindUserOrgIn) -> Dict[str, Any]:
+    """
+    Explicit local/dev/test only: activate Pro without Stripe.
 
-    env = os.getenv("CLAW_ENVIRONMENT", "local").strip().lower()
-    prod_denied = env in ("production", "prod")
-    non_prod_allowed = env in ("local", "dev", "test", "staging", "qa", "preview", "review")
-    preview_like = env.startswith("preview") or env.startswith("review") or env.startswith("pr-")
-    if prod_denied or not (non_prod_allowed or preview_like):
+    Requires authenticated principal bound to the target user/org.
+    Impossible on staging, production, unset, blank, or unknown environments.
+    """
+    from backend.config.deployment_runtime import is_relaxed_claw_environment
+    from backend.security.supabase_jwt import require_supabase_user_id
+
+    if not is_relaxed_claw_environment():
         raise HTTPException(status_code=404, detail="not_found")
 
-    org_id = (body.previous_org_id or "").strip() or _stable_org_id_for_user(body.user_id)
-    if not org_id:
-        raise HTTPException(status_code=400, detail="missing_org_id")
+    uid = require_supabase_user_id(request)
+    body_uid = (body.user_id or "").strip()
+    if not body_uid or body_uid != uid:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "cross_user_denied",
+                "message": "Demo activation user_id must match authenticated principal.",
+            },
+        )
+
+    expected_org = f"user-{uid}"
+    org_id = (body.previous_org_id or "").strip() or expected_org
+    # Allow user workspace or a prior anonymous org during local bind/migration only.
+    if org_id != expected_org and not org_id.startswith("anon-"):
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "cross_org_denied",
+                "message": "Demo activation organization must match authenticated principal.",
+            },
+        )
 
     from backend.billing import subscriptions as subs
     from backend.economics.store import get_economics_store
@@ -463,7 +485,7 @@ async def demo_activate_subscription(body: BindUserOrgIn) -> Dict[str, Any]:
         treasury=get_treasury_store(),
         payment_id=payment_id,
         org_id=org_id,
-        user_id=body.user_id.strip(),
+        user_id=uid,
         plan_code="pro",
         use_demo_expiry=True,
     )
@@ -493,7 +515,7 @@ def _qa_payment_bypass_role_users() -> Set[str]:
 
 
 def _cookie_secure_for_request(request: Request) -> bool:
-    env = os.getenv("CLAW_ENVIRONMENT", "local").strip().lower()
+    env = claw_environment()
     if env in ("production", "prod"):
         return True
     forwarded = (request.headers.get("x-forwarded-proto") or "").split(",")[0].strip().lower()
@@ -561,13 +583,23 @@ async def qa_payment_bypass_bootstrap_session(
     response: Response,
 ) -> Dict[str, Any]:
     """
-    Bootstrap-only: validate admin secret once and issue a short-lived httpOnly session cookie.
-    The secret is never stored client-side as a long-lived bypass credential.
+    Explicit local/dev/test only. Operator principal + admin secret second factor.
+    Never available on staging/production/unset/unknown environments.
     """
-    configured = os.getenv("CLAW_ADMIN_SECRET", "").strip()
-    presented = body.admin_secret.strip()
-    if not configured or not presented or not secrets.compare_digest(configured, presented):
-        raise HTTPException(status_code=401, detail="invalid_admin_secret")
+    from backend.config.deployment_runtime import claw_environment, is_relaxed_claw_environment
+    from backend.security.privileged_ops import PERM_MUTATE_SUPPORT, require_privileged_operator
+
+    if not is_relaxed_claw_environment():
+        raise HTTPException(status_code=404, detail="not_found")
+
+    require_privileged_operator(
+        request,
+        permission=PERM_MUTATE_SUPPORT,
+        action_type="qa_payment_bypass_session",
+        target_type="workspace",
+        target_id="qa_bypass",
+        reason=(request.headers.get("x-claw-admin-reason") or "qa payment bypass session").strip(),
+    )
 
     session_secret = session_secret_bytes()
     if not session_secret:
@@ -578,7 +610,7 @@ async def qa_payment_bypass_bootstrap_session(
     _log.info(
         "qa_payment_bypass_session_minted host=%s deployment=%s",
         request.url.hostname or "",
-        os.getenv("CLAW_ENVIRONMENT", "local").strip().lower(),
+        claw_environment() or "(unset)",
     )
     return {"ok": True}
 
@@ -586,15 +618,30 @@ async def qa_payment_bypass_bootstrap_session(
 @router.get("/qa-payment-bypass/authorization")
 async def qa_payment_bypass_authorization(request: Request) -> Dict[str, Any]:
     """
-    Server-authoritative QA payment bypass authorization for public production hosts.
-    Does not activate billing — only reports whether the caller may use QA bypass UI.
+    QA payment bypass authorization — local/dev/test only.
+    Never authorize via spoofable X-Claw-User-Id outside relaxed env.
     """
+    from backend.config.deployment_runtime import claw_environment, is_relaxed_claw_environment
+
+    if not is_relaxed_claw_environment():
+        return {"authorized": False, "reason": "not_available_outside_local_dev_test"}
     result = _resolve_qa_payment_bypass_authorization(request)
+    # Never trust client X-Claw-User-Id allowlist alone — require verified principal.
+    if result.get("reason") in ("qa_allowlist", "qa_role"):
+        try:
+            from backend.security.supabase_jwt import require_supabase_user_id
+
+            uid = require_supabase_user_id(request)
+            header_uid = (request.headers.get("X-Claw-User-Id") or "").strip()
+            if not header_uid or header_uid != uid:
+                result = {"authorized": False, "reason": "principal_required"}
+        except Exception:
+            result = {"authorized": False, "reason": "principal_required"}
     _log.info(
         "qa_payment_bypass_authorization authorized=%s reason=%s host=%s deployment=%s",
         result["authorized"],
         result["reason"],
         request.url.hostname or "",
-        os.getenv("CLAW_ENVIRONMENT", "local").strip().lower(),
+        claw_environment() or "(unset)",
     )
     return result

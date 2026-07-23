@@ -1,7 +1,7 @@
 """
 Operator HTTP surface for receipt-batch anchor retries (adaptive ``anchoring.sqlite3``).
 
-Auth: same ``x-claw-admin-secret`` rules as other admin routes (see ``admin_http_request_authorized``).
+Auth: validated operator principal + role + reason; admin secret as second factor only.
 """
 
 from __future__ import annotations
@@ -13,10 +13,14 @@ from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
-from backend.config.deployment_runtime import admin_http_request_authorized
 from backend.ops.break_glass_audit import BreakGlassAction, log_break_glass_event
 from backend.anchoring.observability_cycle import gather_anchoring_operator_http_summary
 from backend.anchoring.store import AnchoringStore
+from backend.security.privileged_ops import (
+    PERM_MUTATE_ADMIN,
+    PERM_READ_OPS,
+    require_privileged_operator,
+)
 
 router = APIRouter(prefix="/v1/ops/anchor", tags=["ops-anchor"])
 
@@ -57,9 +61,14 @@ async def ops_anchor_summary(req: Request) -> JSONResponse:
     if deny:
         return deny
 
-    if not admin_http_request_authorized(req):
-        raise HTTPException(status_code=403, detail="Forbidden")
-
+    require_privileged_operator(
+        req,
+        permission=PERM_READ_OPS,
+        action_type="ops_anchor_summary",
+        target_type="ops_anchor",
+        target_id="summary",
+        reason=(req.headers.get("x-claw-admin-reason") or "").strip() or None,
+    )
     _log_ops(req, BreakGlassAction.OPS_V1_ANCHOR_SUMMARY)
     return JSONResponse(gather_anchoring_operator_http_summary())
 
@@ -70,9 +79,14 @@ async def ops_anchor_retry_job(req: Request, body: OpsAnchorRetryJobBody) -> JSO
     if deny:
         return deny
 
-    if not admin_http_request_authorized(req):
-        raise HTTPException(status_code=403, detail="Forbidden")
-
+    require_privileged_operator(
+        req,
+        permission=PERM_MUTATE_ADMIN,
+        action_type="ops_anchor_retry_job",
+        target_type="ops_anchor",
+        target_id=(body.job_id or body.receipt_batch_id or "retry").strip()[:64],
+        reason=(req.headers.get("x-claw-admin-reason") or "").strip() or None,
+    )
     _log_ops(req, BreakGlassAction.OPS_V1_ANCHOR_RETRY_JOB)
 
     jid_in = (body.job_id or "").strip()

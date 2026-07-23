@@ -10,6 +10,7 @@ from typing import Any, Dict, Optional
 from fastapi import Request
 
 from backend.billing import subscriptions as subs
+from backend.config.deployment_runtime import claw_environment
 from backend.economics.store import EconomicsStore, get_economics_store
 from backend.usage_economics import constants as uc
 from backend.usage_economics.store import UsageEconomicsStore, get_usage_economics_store
@@ -44,7 +45,7 @@ def _relaxed_draft_limits_in_dev() -> bool:
     Production-like CLAW_ENVIRONMENT still enforces limits. Abuse-flag checks always apply.
     Opt-in strictness: CLAW_USAGE_ECONOMICS_STRICT_IN_DEV=1.
     """
-    env = os.getenv("CLAW_ENVIRONMENT", "local").strip().lower()
+    env = claw_environment()
     if env not in ("local", "dev", "test"):
         return False
     strict = os.getenv("CLAW_USAGE_ECONOMICS_STRICT_IN_DEV", "0").strip().lower()
@@ -263,15 +264,30 @@ def assert_can_complete_agreement(*, agreement_id: str) -> Optional[str]:
 
 
 def record_draft_created(*, agreement_id: str, subject_ref: str, request_ip: str) -> None:
-    if not usage_economics_enabled():
+    """
+    Register agreement ownership (and optionally meter draft keys).
+
+    Ownership is stamped whenever commercial mode is enforced *or* usage economics
+    metering is enabled — never skip the ownership row because metering is off.
+    Key/IP metering events remain economics-gated.
+    """
+    from backend.security.commercial_auth import commercial_mode_enforced
+
+    economics = usage_economics_enabled()
+    commercial = commercial_mode_enforced()
+    if not economics and not commercial:
         return
     store = get_usage_economics_store()
     store.init_schema()
-    store.insert_agreement_owner(
-        agreement_id=agreement_id,
-        subject_ref=subject_ref,
-        internal_keys_draft=uc.KEY_COST_AGREEMENT_DRAFT,
-    )
+    # Idempotent enough for tests: skip insert when already owned.
+    if store.get_agreement_owner_row(agreement_id) is None:
+        store.insert_agreement_owner(
+            agreement_id=agreement_id,
+            subject_ref=subject_ref,
+            internal_keys_draft=uc.KEY_COST_AGREEMENT_DRAFT if economics else 0,
+        )
+    if not economics:
+        return
     store.emit_event(
         subject_ref=subject_ref,
         event_type="agreement_created",
@@ -460,12 +476,22 @@ def require_claw_org_id_header(request: Request) -> str:
 
 
 def assert_registered_owner_matches(request: Request, agreement_id: str) -> str:
+    """
+    Bind owner mutations to the server-side agreement ownership registry.
+
+    Commercial mode always consults the registry (ignores
+    ``CLAW_USAGE_ECONOMICS_ENABLED``). Non-commercial + economics-off keeps the
+    legacy subject-only path for local/dev installs.
+    """
     from fastapi import HTTPException
 
+    from backend.security.commercial_auth import commercial_mode_enforced
     from backend.security.request_identity import resolve_verified_subject_from_request
 
-    if not usage_economics_enabled():
+    commercial = commercial_mode_enforced()
+    if not usage_economics_enabled() and not commercial:
         return resolve_subject_from_request(request)
+
     subj = resolve_verified_subject_from_request(request)
     store = get_usage_economics_store()
     store.init_schema()

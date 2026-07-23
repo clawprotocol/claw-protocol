@@ -176,11 +176,11 @@ export function PaidProVisibleDocumentShell({
     canonicalPlainSource: canonicalPlain.source,
     paidProFirstReviewActive,
   });
+  // Never fall back to local SoT for paint — commercial corpus must come from verified GET.
   const renderPlain =
-    branch === "canonical_plain_forced"
-      ? canonicalPlain.plain.length >= PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN
-        ? canonicalPlain.plain
-        : sotPlain
+    branch === "canonical_plain_forced" &&
+    canonicalPlain.plain.length >= PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN
+      ? canonicalPlain.plain
       : "";
   const renderSource =
     branch === "canonical_plain_forced" && canonicalPlain.plain.length >= PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN
@@ -255,12 +255,26 @@ export function PaidProVisibleDocumentShell({
           visibleProPaperTrace={visibleProPaperTrace}
         />
       ) : (
-        <p
+        <div
           className="px-6 py-10 text-center text-sm text-stone-500"
           data-testid="paid-pro-visible-document-shell-empty"
+          data-claw-review-display-gate={
+            reason === "paid_pro_awaiting_display_authority"
+              ? "awaiting_server_display_authority"
+              : reason
+          }
         >
-          Agreement preview is not available yet.
-        </p>
+          <p className="font-medium text-stone-600">
+            {reason === "paid_pro_awaiting_display_authority"
+              ? "Confirming your server-locked agreement…"
+              : "Agreement preview is not available yet."}
+          </p>
+          {reason === "paid_pro_awaiting_display_authority" ? (
+            <p className="mt-2 text-xs text-stone-400">
+              Review text and Prepare stay locked until the server snapshot is verified.
+            </p>
+          ) : null}
+        </div>
       )}
     </div>
   );

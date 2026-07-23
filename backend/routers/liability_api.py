@@ -2,14 +2,19 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
+from backend.security.legacy_router_gate import deny_legacy_router_in_commercial
 from backend.services import liability_service
 
 
-router = APIRouter(prefix="/v1/liability", tags=["liability"])
+router = APIRouter(
+    prefix="/v1/liability",
+    tags=["liability"],
+    dependencies=[Depends(deny_legacy_router_in_commercial)],
+)
 
 
 class AttestableFacts(BaseModel):

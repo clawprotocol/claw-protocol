@@ -46,6 +46,8 @@ export type FetchCanonicalReviewSnapshotResult =
 
 const ACCEPTED_SESSION_KEY = "claw_accepted_review_snapshot_v1";
 const DISPLAY_SESSION_KEY = "claw_display_review_snapshot_v1";
+/** GET corpus bytes paired with display authority — only set after successful server GET. */
+const DISPLAY_CORPUS_SESSION_KEY = "claw_display_review_corpus_v1";
 
 export type StoredAcceptedReviewSnapshotRef = {
   agreementId: string;
@@ -60,6 +62,10 @@ export type StoredDisplayReviewSnapshotAuthority = {
   corpusSha256: string;
   corpusLength: number;
   status: string;
+};
+
+export type StoredVerifiedDisplayReviewCorpus = StoredDisplayReviewSnapshotAuthority & {
+  corpusPlain: string;
 };
 
 export function storeAcceptedReviewSnapshotRef(ref: StoredAcceptedReviewSnapshotRef): void {
@@ -121,9 +127,95 @@ export function readDisplayReviewSnapshotAuthority(
 export function clearDisplayReviewSnapshotAuthority(): void {
   try {
     sessionStorage.removeItem(DISPLAY_SESSION_KEY);
+    sessionStorage.removeItem(DISPLAY_CORPUS_SESSION_KEY);
   } catch {
     /* ignore */
   }
+}
+
+/**
+ * Persist server GET corpus as the only paint-eligible commercial review text.
+ * Call only after a successful GET with matching id / sha256 / length.
+ */
+export function storeVerifiedCommercialDisplayCorpus(
+  ref: StoredVerifiedDisplayReviewCorpus,
+): void {
+  const corpus = (ref.corpusPlain || "").trim();
+  if (
+    !ref.agreementId?.trim() ||
+    !ref.snapshotId?.trim() ||
+    !ref.corpusSha256?.trim() ||
+    !Number.isFinite(ref.corpusLength) ||
+    corpus.length !== Number(ref.corpusLength)
+  ) {
+    return;
+  }
+  storeDisplayReviewSnapshotAuthority({
+    agreementId: ref.agreementId.trim(),
+    snapshotId: ref.snapshotId.trim(),
+    corpusSha256: ref.corpusSha256.toLowerCase(),
+    corpusLength: Number(ref.corpusLength),
+    status: ref.status,
+  });
+  try {
+    sessionStorage.setItem(
+      DISPLAY_CORPUS_SESSION_KEY,
+      JSON.stringify({
+        agreementId: ref.agreementId.trim(),
+        snapshotId: ref.snapshotId.trim(),
+        corpusSha256: ref.corpusSha256.toLowerCase(),
+        corpusLength: Number(ref.corpusLength),
+        status: ref.status,
+        corpusPlain: corpus,
+      } satisfies StoredVerifiedDisplayReviewCorpus),
+    );
+  } catch {
+    /* ignore */
+  }
+}
+
+/**
+ * Read paint-eligible commercial review corpus. Returns null unless metadata + length
+ * match the display authority (never paints from local SoT / completion snap alone).
+ */
+export function readVerifiedCommercialDisplayCorpus(
+  agreementId?: string | null,
+): StoredVerifiedDisplayReviewCorpus | null {
+  try {
+    const display = readDisplayReviewSnapshotAuthority(agreementId);
+    if (!display?.snapshotId) return null;
+    const raw = sessionStorage.getItem(DISPLAY_CORPUS_SESSION_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as StoredVerifiedDisplayReviewCorpus;
+    const corpus = (parsed?.corpusPlain || "").trim();
+    if (!corpus || !parsed?.snapshotId) return null;
+    if (agreementId && parsed.agreementId && parsed.agreementId !== agreementId.trim()) {
+      return null;
+    }
+    if (
+      parsed.snapshotId !== display.snapshotId ||
+      parsed.corpusSha256.toLowerCase() !== display.corpusSha256.toLowerCase() ||
+      Number(parsed.corpusLength) !== Number(display.corpusLength) ||
+      corpus.length !== Number(display.corpusLength)
+    ) {
+      return null;
+    }
+    return {
+      ...parsed,
+      corpusSha256: parsed.corpusSha256.toLowerCase(),
+      corpusPlain: corpus,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** True when commercial review may paint legal corpus for this agreement. */
+export function hasVerifiedCommercialDisplayCorpus(agreementId?: string | null): boolean {
+  const aid = (agreementId || "").trim();
+  if (!aid) return false;
+  const verified = readVerifiedCommercialDisplayCorpus(aid);
+  return Boolean(verified && verified.corpusPlain.length >= 500);
 }
 
 export function displayAuthorityMatchesSnapshot(
@@ -153,10 +245,13 @@ export function acceptedMatchesDisplayAuthority(
   );
 }
 
-/** Prepare/dispatch gate: server accept must match the displayed GET authority. */
+/** Prepare/dispatch gate: verified GET corpus + accept must match display authority. */
 export function canEnableCommercialPrepareFromServerSnapshot(agreementId?: string | null): boolean {
-  const display = readDisplayReviewSnapshotAuthority(agreementId);
-  const accepted = readAcceptedReviewSnapshotRef(agreementId);
+  const aid = (agreementId || "").trim();
+  if (!aid) return false;
+  if (!hasVerifiedCommercialDisplayCorpus(aid)) return false;
+  const display = readDisplayReviewSnapshotAuthority(aid);
+  const accepted = readAcceptedReviewSnapshotRef(aid);
   return acceptedMatchesDisplayAuthority(accepted, display);
 }
 
@@ -359,7 +454,10 @@ export async function prepareCommercialReviewSnapshotAuthority(args: {
     corpusLength: snap.corpus_length,
     status: String(fetched.status || snap.status || "pending"),
   };
-  storeDisplayReviewSnapshotAuthority(display);
+  storeVerifiedCommercialDisplayCorpus({
+    ...display,
+    corpusPlain: (snap.corpus_plain || "").trim(),
+  });
   // New pending review invalidates prior accept until explicit accept of display authority.
   if (display.status !== "accepted") {
     clearAcceptedReviewSnapshotRef();
@@ -406,7 +504,10 @@ export async function hydrateCommercialReviewFromServerSnapshot(args: {
     corpusLength: snap.corpus_length,
     status: String(fetched.status || snap.status || "pending"),
   };
-  storeDisplayReviewSnapshotAuthority(display);
+  storeVerifiedCommercialDisplayCorpus({
+    ...display,
+    corpusPlain: (snap.corpus_plain || "").trim(),
+  });
   const accepted = display.status === "accepted";
   if (accepted) {
     storeAcceptedReviewSnapshotRef({

@@ -1,18 +1,19 @@
 """
 Scoped read access for full LawDog agreement drafts.
 
-- Owner workspace: ``X-Claw-Org-Id`` resolving to the registered agreement owner (usage economics).
-- Recipient: valid ``X-Claw-Recipient-Access-Token`` (or ``recipient_access_token`` query) for the same agreement id.
+- Owner workspace: validated commercial principal (or org header in non-commercial) matching
+  the registered agreement owner.
+- Recipient: valid ``X-Claw-Recipient-Access-Token`` (or ``recipient_access_token`` query)
+  for the same agreement id.
 - Public proof: ``GET /api/agreements/public/{id}/verify`` only (handled separately; no full draft).
 
-Legacy: when usage economics is off *and* recipient tokens are not required, full draft reads stay
-permissive (anonymous + id) for dev/small installs — enable economics and/or
-``CLAW_RECIPIENT_ACCESS_TOKEN_REQUIRED=1`` for production-style enforcement.
+Legacy: when usage economics is off *and* recipient tokens are not required *and* commercial
+mode is not enforced, full draft reads stay permissive (anonymous + id) for local/dev installs.
+Commercial mode never takes that unauthenticated early-return path.
 """
 
 from __future__ import annotations
 
-import os
 from typing import Any, Dict, Optional
 
 from fastapi import HTTPException, Request
@@ -74,6 +75,46 @@ def _recipient_party_id_on_draft(draft: Dict[str, Any], party_id: str) -> bool:
         if str(p.get("id") or "").strip() == pid:
             return True
     return False
+
+
+def _commercial_mode_enforced() -> bool:
+    from backend.security.commercial_auth import commercial_mode_enforced
+
+    return commercial_mode_enforced()
+
+
+def _agreement_owned_by_subject(agreement_id: str, subject_ref: str) -> bool:
+    """
+    Ownership bind against the usage-economics registry.
+
+    Always consults the store (ignores CLAW_USAGE_ECONOMICS_ENABLED) so commercial
+    mode cannot skip resource binding when metering is disabled.
+    """
+    from backend.usage_economics.store import get_usage_economics_store
+
+    aid = (agreement_id or "").strip()
+    sub = (subject_ref or "").strip()
+    if not aid or not sub:
+        return False
+    store = get_usage_economics_store()
+    store.init_schema()
+    owner = store.owner_subject_for_agreement(aid)
+    if owner is None:
+        return False
+    return owner == sub
+
+
+def _deny_agreement_read() -> None:
+    raise HTTPException(
+        status_code=403,
+        detail={
+            "code": "agreement_read_denied",
+            "message": (
+                "Not allowed to read this agreement. Sign in with the owner workspace "
+                "or use a recipient link token."
+            ),
+        },
+    )
 
 
 def validate_recipient_access_token_for_agreement(
@@ -205,9 +246,11 @@ def assert_agreement_recipient_write_allowed(
     bind_participant_id: Optional[str] = None,
 ) -> None:
     """
-    Require a valid recipient access token for mutating recipient flows when strict (economics on
-    or ``CLAW_RECIPIENT_ACCESS_TOKEN_REQUIRED``). Same legacy bypass as full-draft reads when both
-    are off.
+    Require a valid recipient access token for mutating recipient flows.
+
+    Commercial mode always requires a token (no anonymous early-return).
+    Legacy: when economics is off, recipient tokens are not required, and commercial
+    mode is not enforced, writes stay permissive for local/dev installs.
 
     When ``bind_participant_id`` is not None, a token that encodes ``pid`` must match that id
     (after strip). Pass resolved ceremony participant id for signing (including legacy inferred id).
@@ -217,7 +260,8 @@ def assert_agreement_recipient_write_allowed(
         raise HTTPException(status_code=404, detail="agreement_not_found")
 
     tok = recipient_access_token_from_request(request)
-    strict = usage_economics_enabled() or recipient_access_token_required()
+    commercial = _commercial_mode_enforced()
+    strict = usage_economics_enabled() or recipient_access_token_required() or commercial
     if not tok:
         if not strict:
             return
@@ -281,7 +325,11 @@ def assert_agreement_recipient_write_allowed(
 
 
 def assert_agreement_full_draft_read_allowed(request: Request, agreement_id: str) -> None:
-    """Require recipient token or owner workspace before returning a full draft / render."""
+    """
+    Require recipient token or owner principal before returning a full draft / render.
+
+    Commercial mode never returns early without auth when economics/token-required are off.
+    """
     aid = (agreement_id or "").strip()
     if not aid:
         raise HTTPException(status_code=404, detail="agreement_not_found")
@@ -308,19 +356,22 @@ def assert_agreement_full_draft_read_allowed(request: Request, agreement_id: str
         )
         return
 
-    strict = usage_economics_enabled() or recipient_access_token_required()
+    commercial = _commercial_mode_enforced()
+    strict = usage_economics_enabled() or recipient_access_token_required() or commercial
     if not strict:
         return
 
-    require_claw_org_id_header(request)
+    from backend.security.commercial_auth import require_commercial_owner_principal
     from backend.security.request_identity import resolve_verified_subject_from_request
 
+    if commercial:
+        require_commercial_owner_principal(request)
+        subject = resolve_verified_subject_from_request(request)
+        if not _agreement_owned_by_subject(aid, subject):
+            _deny_agreement_read()
+        return
+
+    require_claw_org_id_header(request)
     subject = resolve_verified_subject_from_request(request)
     if not workspace_lists_agreement_for_subject(aid, subject):
-        raise HTTPException(
-            status_code=403,
-            detail={
-                "code": "agreement_read_denied",
-                "message": "Not allowed to read this agreement. Sign in with the owner workspace or use a recipient link token.",
-            },
-        )
+        _deny_agreement_read()

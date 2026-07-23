@@ -8,6 +8,10 @@ import {
   PAID_PRO_DOCUMENT_BODY_SOT_MIN_LEN,
   resolveCanonicalReviewCorpusLenForRender,
 } from "./paidProDocumentBodyRouter";
+import {
+  sha256CorpusDigest,
+  storeVerifiedCommercialDisplayCorpus,
+} from "../../agreement/canonicalReviewSnapshotApi";
 import { resolvePaidProFirstReviewVisibleDisplayPlain } from "./paidProFirstReviewDisplayAuthority";
 import {
   assessConciseCommercialServicesProQuality,
@@ -135,7 +139,7 @@ afterEach(() => {
 });
 
 describe("paidProTest338PostCheckoutAcceptedCorpusStillMounts", () => {
-  it("pipeline-accepted server_full_draft variant still establishes SoT and mounts review", () => {
+  it("pipeline-accepted server_full_draft variant still establishes SoT and mounts review", async () => {
     const draft = test338Draft();
     const pipelineAcceptedBody = buildTest338PipelineAcceptedBody();
     const establishVariant = applyAcceptedProCorpusSafeDisplay(pipelineAcceptedBody, {
@@ -207,7 +211,28 @@ describe("paidProTest338PostCheckoutAcceptedCorpusStillMounts", () => {
     });
     expect(pick.plainText.length).toBeGreaterThanOrEqual(LONG_PREMIUM_AUTHORITATIVE_MIN_LEN);
 
+    // Commercial paint requires verified GET corpus (Patch 5B).
+    expect(
+      resolvePaidProFirstReviewVisibleDisplayPlain({
+        agreementId: "ag_test338",
+        draft,
+        intakeText: TEST338_INTAKE,
+        premiumPaidDocumentSurface: true,
+        premiumCheckoutCompleted: true,
+        premiumRenderSource: "server_full_draft",
+      }).plain,
+    ).toBe("");
+    const sha = await sha256CorpusDigest(pipelineAcceptedBody);
+    storeVerifiedCommercialDisplayCorpus({
+      agreementId: "ag_test338",
+      snapshotId: "crs_test338",
+      corpusSha256: sha,
+      corpusLength: pipelineAcceptedBody.length,
+      status: "pending",
+      corpusPlain: pipelineAcceptedBody,
+    });
     const visible = resolvePaidProFirstReviewVisibleDisplayPlain({
+      agreementId: "ag_test338",
       draft,
       intakeText: TEST338_INTAKE,
       premiumPaidDocumentSurface: true,

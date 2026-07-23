@@ -69,4 +69,68 @@ describe("commercial review reload authority", () => {
     // Authority ids come from server response, not client-invented local values.
     expect(display?.snapshotId).not.toBe("local-only-snap");
   });
+
+  it("local accepted session refs do not unlock Prepare without matching display authority", async () => {
+    const {
+      canEnableCommercialPrepareFromServerSnapshot,
+      storeAcceptedReviewSnapshotRef,
+      storeDisplayReviewSnapshotAuthority,
+      clearAcceptedReviewSnapshotRef,
+      clearDisplayReviewSnapshotAuthority,
+    } = await import("./canonicalReviewSnapshotApi");
+
+    clearAcceptedReviewSnapshotRef();
+    clearDisplayReviewSnapshotAuthority();
+
+    // Local premium-completion leftovers may write an accepted ref; Prepare stays closed
+    // until display authority (from server GET) matches.
+    storeAcceptedReviewSnapshotRef({
+      agreementId: "ag_local_snap",
+      snapshotId: "crs_local_snap",
+      corpusSha256: "c".repeat(64),
+      corpusLength: 1200,
+    });
+    expect(canEnableCommercialPrepareFromServerSnapshot("ag_local_snap")).toBe(false);
+    expect(canEnableCommercialPrepareFromServerSnapshot("")).toBe(false);
+
+    storeDisplayReviewSnapshotAuthority({
+      agreementId: "ag_local_snap",
+      snapshotId: "crs_mismatch",
+      corpusSha256: "d".repeat(64),
+      corpusLength: 1200,
+      status: "accepted",
+    });
+    expect(canEnableCommercialPrepareFromServerSnapshot("ag_local_snap")).toBe(false);
+
+    storeDisplayReviewSnapshotAuthority({
+      agreementId: "ag_local_snap",
+      snapshotId: "crs_local_snap",
+      corpusSha256: "c".repeat(64),
+      corpusLength: 1200,
+      status: "accepted",
+    });
+    // Metadata match without verified GET corpus bytes still blocks Prepare.
+    expect(canEnableCommercialPrepareFromServerSnapshot("ag_local_snap")).toBe(false);
+
+    const corpus = ("OPERATIVE\n\n" + "z".repeat(600)).trim();
+    const { sha256CorpusDigest, storeVerifiedCommercialDisplayCorpus } = await import(
+      "./canonicalReviewSnapshotApi"
+    );
+    const sha = await sha256CorpusDigest(corpus);
+    storeVerifiedCommercialDisplayCorpus({
+      agreementId: "ag_local_snap",
+      snapshotId: "crs_local_snap",
+      corpusSha256: sha,
+      corpusLength: corpus.length,
+      status: "accepted",
+      corpusPlain: corpus,
+    });
+    storeAcceptedReviewSnapshotRef({
+      agreementId: "ag_local_snap",
+      snapshotId: "crs_local_snap",
+      corpusSha256: sha,
+      corpusLength: corpus.length,
+    });
+    expect(canEnableCommercialPrepareFromServerSnapshot("ag_local_snap")).toBe(true);
+  });
 });

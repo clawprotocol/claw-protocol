@@ -1,5 +1,8 @@
 """
 VS01-B06: minimal HTTP surface for document finalize and sign preparation.
+
+All commercial-mode access requires owner principal + server-stamped ownership
+or a recipient token bound to the document's agreement (and party when set).
 """
 from __future__ import annotations
 
@@ -11,6 +14,10 @@ from fastapi import APIRouter, HTTPException, Request, Response
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 
+from backend.security.vs01_document_ownership import (
+    require_vs01_document_access,
+    require_vs01_document_finalize_principal,
+)
 from backend.services import document_service, signature_service
 from backend.services.vs01_document_content import (
     content_type_for_meta,
@@ -28,6 +35,14 @@ class FinalizeDocumentRequest(BaseModel):
     content_type: Optional[str] = Field(
         default=None,
         description="Optional MIME hint; stored for metadata only.",
+    )
+    agreement_id: Optional[str] = Field(
+        default=None,
+        description="Optional server-bound agreement id for recipient document access.",
+    )
+    bound_party_id: Optional[str] = Field(
+        default=None,
+        description="Optional party id; recipient tokens must match when set.",
     )
 
 
@@ -52,9 +67,38 @@ class SignPrepareRequest(BaseModel):
     )
 
 
+def _assert_finalize_agreement_bind(request: Request, agreement_id: Optional[str]) -> Optional[str]:
+    """When agreement_id is supplied in commercial mode, require registry ownership."""
+    aid = (agreement_id or "").strip()
+    if not aid:
+        return None
+    from backend.security.commercial_auth import commercial_mode_enforced
+    from backend.security.request_identity import resolve_verified_subject_from_request
+    from backend.usage_economics.store import get_usage_economics_store
+
+    if not commercial_mode_enforced():
+        return aid
+    subject = resolve_verified_subject_from_request(request)
+    store = get_usage_economics_store()
+    store.init_schema()
+    owner = store.owner_subject_for_agreement(aid)
+    if owner is None or owner != subject:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "agreement_ownership_required",
+                "message": "Cannot bind this document to an agreement you do not own.",
+            },
+        )
+    return aid
+
+
 @router.post("")
-def api_finalize_document(body: FinalizeDocumentRequest) -> Dict[str, Any]:
+def api_finalize_document(body: FinalizeDocumentRequest, request: Request) -> Dict[str, Any]:
     import base64
+
+    owner_org = require_vs01_document_finalize_principal(request)
+    aid = _assert_finalize_agreement_bind(request, body.agreement_id)
 
     try:
         raw = base64.b64decode(body.content_base64, validate=True)
@@ -63,7 +107,11 @@ def api_finalize_document(body: FinalizeDocumentRequest) -> Dict[str, Any]:
 
     try:
         meta = document_service.finalize_document(
-            raw, content_type=body.content_type
+            raw,
+            content_type=body.content_type,
+            agreement_id=aid,
+            owner_org_id=owner_org or None,
+            bound_party_id=(body.bound_party_id or "").strip() or None,
         )
     except ValueError as exc:
         code = str(exc)
@@ -75,10 +123,8 @@ def api_finalize_document(body: FinalizeDocumentRequest) -> Dict[str, Any]:
 
 
 @router.get("/{document_id}")
-def api_get_document(document_id: str) -> Dict[str, Any]:
-    meta = document_service.get_document_meta(document_id)
-    if not meta:
-        raise HTTPException(status_code=404, detail="document_not_found")
+def api_get_document(document_id: str, request: Request) -> Dict[str, Any]:
+    _kind, meta, _claims = require_vs01_document_access(request, document_id)
     return {"ok": True, "document": meta}
 
 
@@ -86,6 +132,7 @@ def api_get_document(document_id: str) -> Dict[str, Any]:
 def api_get_document_content(document_id: str, request: Request) -> Response:
     did = (document_id or "").strip()
     try:
+        require_vs01_document_access(request, did)
         raw, meta = load_document_content(did)
         if raw is None:
             raise HTTPException(status_code=404, detail="document_not_found")
@@ -114,7 +161,14 @@ def api_get_document_content(document_id: str, request: Request) -> Response:
 
 
 @router.post("/{document_id}/sign-prep")
-def api_sign_prepare(document_id: str, body: SignPrepareRequest) -> Dict[str, Any]:
+def api_sign_prepare(
+    document_id: str, body: SignPrepareRequest, request: Request
+) -> Dict[str, Any]:
+    require_vs01_document_access(
+        request,
+        document_id,
+        allow_recipient_modes=("sign",),
+    )
     try:
         result = signature_service.prepare_sign_packet(
             document_id=document_id,

@@ -144,9 +144,14 @@ def finalize_document(
     *,
     content_type: Optional[str] = None,
     agreement_id: Optional[str] = None,
+    owner_org_id: Optional[str] = None,
+    bound_party_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Write finalized bytes and return stable identifiers (``document_id``, ``content_sha256``, ...).
+
+    ``owner_org_id`` / ``bound_party_id`` must be supplied by the authenticated API layer
+    (never trusted from an unauthenticated client alone).
     """
     if not content:
         raise ValueError("empty_document")
@@ -164,6 +169,12 @@ def finalize_document(
     aid = (agreement_id or "").strip()
     if aid:
         meta["agreement_id"] = aid
+    oid = (owner_org_id or "").strip()
+    if oid:
+        meta["owner_org_id"] = oid
+    bpid = (bound_party_id or "").strip()
+    if bpid:
+        meta["bound_party_id"] = bpid
 
     for base in _legacy_storage_bases():
         try:

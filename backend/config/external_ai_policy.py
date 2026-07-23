@@ -17,6 +17,8 @@ import logging
 import os
 from typing import Final
 
+from backend.config.deployment_runtime import claw_environment
+
 log = logging.getLogger("claw.backend.external_ai")
 
 # Env var: explicit opt-in; must be combined with a non-production CLAW_ENVIRONMENT.
@@ -42,7 +44,8 @@ _PROD_DENY: Final[frozenset[str]] = frozenset(
 
 
 def claw_environment_normalized() -> str:
-    return os.getenv("CLAW_ENVIRONMENT", "local").strip().lower() or "local"
+    """Fail-closed: empty when CLAW_ENVIRONMENT is unset/blank (never defaults to local)."""
+    return claw_environment()
 
 
 def is_non_production_external_ai_bypass_active() -> bool:
@@ -63,7 +66,7 @@ def is_non_production_external_ai_bypass_active() -> bool:
 
 def log_external_ai_policy_at_startup() -> None:
     """Idempotent friendly log for operators (no secrets). Call once from app startup."""
-    env = os.getenv("CLAW_ENVIRONMENT", "local")
+    env = claw_environment_normalized()
     flag = os.getenv(ENV_CLAW_ALLOW_EXTERNAL_AI_LOCAL, "")
     active = is_non_production_external_ai_bypass_active()
     if active:

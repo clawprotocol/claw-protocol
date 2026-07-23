@@ -14,7 +14,6 @@ import {
   getPaidProSourceOfTruthText,
   getPaidProVs01Text,
   hasPaidProSourceOfTruth,
-  hydratePaidProSourceOfTruth,
   logPaidProCorpusInvariant,
   type PaidProSourceOfTruth,
 } from "./paidProSourceOfTruth";
@@ -108,29 +107,13 @@ export function establishAcceptedPremiumCanonicalCorpus(
 export function hydrateAcceptedPremiumCanonicalCorpusFromSnapshot(
   snap: PremiumCompletionSnapshot | null | undefined,
 ): AcceptedPremiumCanonicalRecord | null {
-  if (!snap?.premiumAccepted) return null;
-  const canonical = trim(snap.paidProSourceOfTruthText || snap.acceptedPremiumCanonicalText);
-  const pipelineSource = trim(
-    snap.paidProSourceOfTruthSource ||
-      snap.acceptedPremiumCanonicalPipelineSource ||
-      snap.premiumPipelineRenderSource,
-  );
-  if (
-    canonical.length < 500 ||
-    !isAuthoritativePremiumPipelineRenderSource(pipelineSource)
-  ) {
-    return null;
-  }
-  const record = hydratePaidProSourceOfTruth({
-    text: canonical,
-    hash: trim(snap.paidProSourceOfTruthHash || snap.acceptedPremiumCanonicalHash),
-    accepted_at: snap.paidProSourceOfTruthAcceptedAt ?? snap.savedAt,
-    source: "server_full_draft",
-    draft: snap.premiumDraft ?? null,
-    agreementGenerationId: snap.agreementGenerationId ?? null,
-    reviewSessionId: snap.agreementGenerationId ?? null,
-  });
-  return record ? toAcceptedRecord(record) : null;
+  /**
+   * Local completion snapshots are loading hints only.
+   * They must not establish Paid Pro SoT / authoritative legal corpus.
+   * Commercial authority comes from GET /canonical-review-snapshot.
+   */
+  void snap;
+  return null;
 }
 
 /** Display / copy / final review — identical to established accepted corpus. */
