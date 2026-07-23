@@ -102,7 +102,14 @@ def _seed_agreement(*, aid: str, parties: list[dict] | None = None) -> None:
 
 
 def _mint(*, agreement_id: str, party_id: str, mode: str = "sign") -> str:
-    return mint_recipient_access_token(
+    from backend.services.agreement_draft_store import load_draft
+    from backend.services.recipient_delivery_registry import (
+        extract_jti_from_token,
+        normalize_delivery_phase,
+        record_invite_sent_cas,
+    )
+
+    tok = mint_recipient_access_token(
         secret=_SECRET.encode("utf-8"),
         agreement_id=agreement_id,
         locked_version_id="v1",
@@ -111,6 +118,16 @@ def _mint(*, agreement_id: str, party_id: str, mode: str = "sign") -> str:
         ttl_seconds=3600,
         recipient_party_id=party_id,
     )
+    draft = load_draft(agreement_id)
+    assert draft is not None
+    record_invite_sent_cas(
+        draft,
+        phase=normalize_delivery_phase("signing" if mode == "sign" else mode),
+        participant_id=party_id,
+        jti=extract_jti_from_token(tok),
+        audit_log=draft.setdefault("audit_log", []),
+    )
+    return tok
 
 
 def _register_owner(aid: str, user: str = "owner-a") -> None:

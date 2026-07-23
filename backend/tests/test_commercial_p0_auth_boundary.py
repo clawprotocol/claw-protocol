@@ -275,28 +275,20 @@ def test_superseded_invite_token_fails_signer_complete(client: TestClient):
 
 
 def test_expired_supabase_session_rejected_on_workspace_index(client: TestClient, monkeypatch):
-    import base64
-    import hashlib
-    import hmac
-    import json
     import time as _time
 
-    secret = "unit-test-supabase-jwt-secret"
-    monkeypatch.setenv("SUPABASE_JWT_SECRET", secret)
-    monkeypatch.delenv("CLAW_COMMERCIAL_MODE", raising=False)
-
-    def _b64(raw: bytes) -> str:
-        return base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=")
-
-    header = _b64(json.dumps({"alg": "HS256", "typ": "JWT"}, separators=(",", ":")).encode())
-    payload = _b64(
-        json.dumps(
-            {"sub": "owner-a", "exp": int(_time.time()) - 120, "iat": int(_time.time()) - 3600},
-            separators=(",", ":"),
-        ).encode()
+    from backend.tests.auth_fixtures import (
+        configure_production_like_jwt,
+        mint_es256_supabase_jwt,
     )
-    sig = hmac.new(secret.encode("utf-8"), f"{header}.{payload}".encode(), hashlib.sha256).digest()
-    expired_jwt = f"{header}.{payload}.{_b64(sig)}"
+
+    monkeypatch.delenv("CLAW_COMMERCIAL_MODE", raising=False)
+    monkeypatch.setenv("CLAW_ENVIRONMENT", "staging")
+    configure_production_like_jwt(monkeypatch)
+    expired_jwt = mint_es256_supabase_jwt(
+        "owner-a",
+        exp=int(_time.time()) - 120,
+    )
 
     r = client.get(
         "/api/agreements/workspace-index",

@@ -252,23 +252,30 @@ def test_signing_ceremony_multi_signer_and_immutability(monkeypatch, tmp_path):
         },
     )
     assert lock.status_code == 200
-    mint_sign = client.post(
+    mint_acme = client.post(
         f"/api/agreements/{aid}/recipient-access-token",
         headers=_ORG_H,
         json={"mode": "sign", "role": "signer", "recipient_party_id": "p-acme"},
     )
-    assert mint_sign.status_code == 200
-    sign_tok = mint_sign.json()["token"]
-    sign_hdr = {"X-Claw-Recipient-Access-Token": sign_tok}
+    assert mint_acme.status_code == 200
+    acme_hdr = {"X-Claw-Recipient-Access-Token": mint_acme.json()["token"]}
+    mint_beta = client.post(
+        f"/api/agreements/{aid}/recipient-access-token",
+        headers=_ORG_H,
+        json={"mode": "sign", "role": "signer", "recipient_party_id": "p-beta"},
+    )
+    assert mint_beta.status_code == 200
+    beta_tok = mint_beta.json()["token"]
+    beta_hdr = {"X-Claw-Recipient-Access-Token": beta_tok}
     s1 = client.post(
         f"/api/agreements/{aid}/signing-ceremony/start",
-        headers=sign_hdr,
+        headers=acme_hdr,
         json={"participant_id": "p-acme"},
     )
     assert s1.status_code == 200
     c1 = client.post(
         f"/api/agreements/{aid}/signing-ceremony/complete",
-        headers=sign_hdr,
+        headers=acme_hdr,
         json={
             "participant_id": "p-acme",
             "typed_name": "Acme Growth LLC",
@@ -277,13 +284,35 @@ def test_signing_ceremony_multi_signer_and_immutability(monkeypatch, tmp_path):
     )
     assert c1.status_code == 200
     assert c1.json().get("fully_executed") is False
+    # Completing party invite is consumed — replay must fail closed.
+    replay = client.post(
+        f"/api/agreements/{aid}/signing-ceremony/complete",
+        headers=acme_hdr,
+        json={
+            "participant_id": "p-acme",
+            "typed_name": "Acme Growth LLC",
+            "locked_version_id": "lv-ceremony-1",
+        },
+    )
+    assert replay.status_code in (403, 409), replay.text
     d1 = client.get(f"/api/agreements/{aid}", headers=_ORG_H).json()["draft"]
     types1 = [e.get("event_type") for e in d1.get("audit_log", [])]
     assert "signature_initiated" in types1
     assert "signature_completed" in types1
+    # Cross-party misuse of Acme's (now superseded) token must not complete for Beta.
+    cross = client.post(
+        f"/api/agreements/{aid}/signing-ceremony/complete",
+        headers=acme_hdr,
+        json={
+            "participant_id": "p-beta",
+            "typed_name": "Beta LLC",
+            "locked_version_id": "lv-ceremony-1",
+        },
+    )
+    assert cross.status_code == 403, cross.text
     c2 = client.post(
         f"/api/agreements/{aid}/signing-ceremony/complete",
-        headers=sign_hdr,
+        headers=beta_hdr,
         json={
             "participant_id": "p-beta",
             "typed_name": "Beta LLC",

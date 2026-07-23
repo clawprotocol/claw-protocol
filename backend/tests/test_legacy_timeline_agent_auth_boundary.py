@@ -149,6 +149,12 @@ def test_verify_tree_owner_receipt_id_allowed(client: TestClient):
 
 
 def test_verify_tree_recipient_token_allowed_for_bound_agreement(client: TestClient):
+    from backend.services.agreement_draft_store import load_draft
+    from backend.services.recipient_delivery_registry import (
+        extract_jti_from_token,
+        record_invite_sent_cas,
+    )
+
     aid = _create_owned_draft(client, user="owner-a")
     write_signing_lock(aid, {"locked_version_id": "v1"})
     rid = f"rcpt_rcp_{aid[-8:]}"
@@ -161,6 +167,15 @@ def test_verify_tree_recipient_token_allowed_for_bound_agreement(client: TestCli
         role="signer",
         ttl_seconds=3600,
         recipient_party_id="p2",
+    )
+    draft = load_draft(aid)
+    assert draft is not None
+    record_invite_sent_cas(
+        draft,
+        phase="signing",
+        participant_id="p2",
+        jti=extract_jti_from_token(tok),
+        audit_log=draft.setdefault("audit_log", []),
     )
     r = client.post(
         "/verify/tree",

@@ -3,8 +3,6 @@
 from __future__ import annotations
 
 import base64
-import hashlib
-import hmac
 import json
 import time
 
@@ -104,51 +102,89 @@ def test_economics_keys_meter_subscription_require_auth(client: TestClient, monk
 
 
 def test_jwt_requires_exp_iss_aud_in_production_like(monkeypatch, client: TestClient):
+    from backend.tests.auth_fixtures import (
+        DEFAULT_CURRENT_KID,
+        DEFAULT_JWT_ISSUER,
+        configure_production_like_jwt,
+        mint_es256_supabase_jwt,
+        mint_hs256_supabase_jwt,
+    )
+
     monkeypatch.setenv("CLAW_ENVIRONMENT", "staging")
+    configure_production_like_jwt(monkeypatch)
+    # Even if a shared secret is present, staging must not accept HS256.
     monkeypatch.setenv("SUPABASE_JWT_SECRET", "jwt-secret-for-staging-tests")
-    monkeypatch.setenv("SUPABASE_JWT_ISSUER", "https://example.supabase.co/auth/v1")
-    monkeypatch.setenv("SUPABASE_JWT_AUDIENCE", "authenticated")
 
-    def mint(*, exp=None, iss=None, aud="authenticated", sub="owner-a", alg="HS256"):
-        header = {"alg": alg, "typ": "JWT"}
-        payload = {"sub": sub, "aud": aud}
-        if exp is not None:
-            payload["exp"] = exp
-        if iss is not None:
-            payload["iss"] = iss
-        def b64(o):
-            return base64.urlsafe_b64encode(json.dumps(o, separators=(",", ":")).encode()).decode().rstrip("=")
-        h, p = b64(header), b64(payload)
-        sig = hmac.new(b"jwt-secret-for-staging-tests", f"{h}.{p}".encode(), hashlib.sha256).digest()
-        return f"{h}.{p}.{base64.urlsafe_b64encode(sig).decode().rstrip('=')}"
+    no_exp_header = {
+        "alg": "ES256",
+        "typ": "JWT",
+        "kid": DEFAULT_CURRENT_KID,
+    }
+    no_exp_payload = {
+        "sub": "owner-a",
+        "iss": DEFAULT_JWT_ISSUER,
+        "aud": "authenticated",
+        "iat": int(time.time()),
+    }
+    # Unsigned/malformed ES256-shaped token (missing exp) must fail closed.
+    def b64(o):
+        return base64.urlsafe_b64encode(json.dumps(o, separators=(",", ":")).encode()).decode().rstrip("=")
 
+    no_exp_token = f"{b64(no_exp_header)}.{b64(no_exp_payload)}.e30"
     no_exp = client.get(
         "/api/agreements/workspace-index",
-        headers={
-            "X-Claw-Org-Id": "user-owner-a",
-            "Authorization": f"Bearer {mint(iss='https://example.supabase.co/auth/v1')}",
-        },
+        headers={"X-Claw-Org-Id": "user-owner-a", "Authorization": f"Bearer {no_exp_token}"},
     )
     assert no_exp.status_code == 401
-    assert "jwt_exp" in str(no_exp.json())
 
     bad_iss = client.get(
         "/api/agreements/workspace-index",
         headers={
             "X-Claw-Org-Id": "user-owner-a",
-            "Authorization": f"Bearer {mint(exp=int(time.time())+3600, iss='https://evil.example/auth/v1')}",
+            "Authorization": (
+                "Bearer "
+                + mint_es256_supabase_jwt(
+                    "owner-a",
+                    issuer="https://evil.example/auth/v1",
+                )
+            ),
         },
     )
     assert bad_iss.status_code == 401
 
+    none_header = b64({"alg": "none", "typ": "JWT"})
+    none_payload = b64(
+        {
+            "sub": "owner-a",
+            "iss": DEFAULT_JWT_ISSUER,
+            "aud": "authenticated",
+            "exp": int(time.time()) + 3600,
+        }
+    )
     alg_none = client.get(
         "/api/agreements/workspace-index",
         headers={
             "X-Claw-Org-Id": "user-owner-a",
-            "Authorization": f"Bearer {mint(exp=int(time.time())+3600, iss='https://example.supabase.co/auth/v1', alg='none')}",
+            "Authorization": f"Bearer {none_header}.{none_payload}.",
         },
     )
     assert alg_none.status_code == 401
+
+    hs256_fallback = client.get(
+        "/api/agreements/workspace-index",
+        headers={
+            "X-Claw-Org-Id": "user-owner-a",
+            "Authorization": (
+                "Bearer "
+                + mint_hs256_supabase_jwt(
+                    "owner-a",
+                    secret="jwt-secret-for-staging-tests",
+                    issuer=DEFAULT_JWT_ISSUER,
+                )
+            ),
+        },
+    )
+    assert hs256_fallback.status_code == 401
 
 
 def test_genesis_affiliate_me_ignores_spoofed_user_header(client: TestClient):

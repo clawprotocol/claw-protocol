@@ -5791,6 +5791,7 @@ def _persist_review_first_final_corpus_if_supplied(
 def recipient_access_policy() -> Dict[str, Any]:
     """Public: lets the SPA decide whether ``t=`` links are mandatory."""
     from backend.config.agreement_signing_token import signing_token_secret_source
+    from backend.security.supabase_jwt import public_supabase_jwt_readiness
 
     return {
         "recipient_link_token_required": recipient_access_token_required(),
@@ -5803,6 +5804,7 @@ def recipient_access_policy() -> Dict[str, Any]:
             "min": recipient_token_ttl_min_seconds(),
             "max": recipient_token_ttl_max_seconds(),
         },
+        **public_supabase_jwt_readiness(),
     }
 
 
@@ -6170,7 +6172,31 @@ def post_signing_ceremony_complete(
         )
     next_draft = _merge_agreement_draft(draft, updated_at=now, audit_log=audit)
     dump = next_draft.model_dump()
-    _save_draft_sync(dump, request)
+    # Replay protection: consume the completing party's active signing invite JTI.
+    # Generic save_draft cannot mutate recipient_delivery_v1 — CAS when registry changes.
+    from backend.security.agreement_read_scope import recipient_access_token_from_request
+    from backend.services.recipient_delivery_registry import (
+        extract_jti_from_token,
+        get_registry_revision,
+        supersede_active_invite,
+    )
+
+    base_rev = get_registry_revision(dump)
+    recipient_tok = recipient_access_token_from_request(request)
+    registry_mutated = False
+    if part_id and recipient_tok:
+        dump = supersede_active_invite(
+            dump,
+            phase="signing",
+            participant_id=part_id,
+            jti=extract_jti_from_token(recipient_tok),
+            audit_log=list(dump.get("audit_log") or []),
+        )
+        registry_mutated = True
+    if registry_mutated and get_registry_revision(dump) > base_rev:
+        _save_draft_registry_cas_sync(dump, request, expected_revision=base_rev)
+    else:
+        _save_draft_sync(dump, request)
     if fully:
         record_agreement_finalized(agreement_id=agreement_id)
         record_public_feed_event_if_applicable(draft_dict=dump, event_type="signed", at=now)

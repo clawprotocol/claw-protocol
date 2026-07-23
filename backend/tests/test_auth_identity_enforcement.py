@@ -77,7 +77,9 @@ def test_user_org_header_without_jwt_returns_401(isolated_usage):
 
 
 def test_invalid_jwt_returns_401(isolated_usage, monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setenv("SUPABASE_JWT_SECRET", "test-jwt-secret")
+    from backend.tests.auth_fixtures import configure_local_hs256_jwt
+
+    configure_local_hs256_jwt(monkeypatch, secret="test-jwt-secret")
     client = TestClient(app)
     res = client.post(
         "/api/agreements/draft",
@@ -92,7 +94,9 @@ def test_invalid_jwt_returns_401(isolated_usage, monkeypatch: pytest.MonkeyPatch
 
 
 def test_expired_jwt_returns_401(isolated_usage, monkeypatch: pytest.MonkeyPatch):
-    monkeypatch.setenv("SUPABASE_JWT_SECRET", "test-jwt-secret")
+    from backend.tests.auth_fixtures import configure_local_hs256_jwt
+
+    configure_local_hs256_jwt(monkeypatch, secret="test-jwt-secret")
     token = _mint_jwt("user-a", expired=True)
     client = TestClient(app)
     res = client.post(

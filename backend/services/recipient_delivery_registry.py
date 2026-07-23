@@ -99,6 +99,73 @@ def require_invite_jti_recorded(
         ) from exc
 
 
+def record_invite_sent_cas(
+    draft: Dict[str, Any],
+    *,
+    phase: str,
+    participant_id: str,
+    jti: Optional[str] = None,
+    email: Optional[str] = None,
+    audit_log: Optional[List[Dict[str, Any]]] = None,
+) -> Dict[str, Any]:
+    """
+    Record an invite JTI and CAS-persist ``recipient_delivery_v1``.
+
+    Generic ``save_draft`` cannot create or mutate the security-owned registry; all
+    durable invite bindings must go through CAS (this helper or ``save_draft_cas``).
+    """
+    from backend.services.agreement_draft_store import DraftCasConflictError, save_draft_cas
+
+    base_rev = get_registry_revision(draft)
+    record_invite_sent(
+        draft,
+        phase=phase,
+        participant_id=participant_id,
+        jti=jti,
+        email=email,
+        audit_log=audit_log,
+    )
+    try:
+        save_draft_cas(draft, expected_revision=base_rev)
+    except DraftCasConflictError as exc:
+        raise RecipientInviteRegistryPersistError(
+            "invite_replacement_conflict",
+            "Invite delivery registry changed concurrently; reload and retry.",
+        ) from exc
+    return draft
+
+
+def supersede_active_invite_cas(
+    draft: Dict[str, Any],
+    *,
+    phase: str,
+    participant_id: str,
+    audit_log: Optional[List[Dict[str, Any]]] = None,
+    jti: Optional[str] = None,
+    force_revoke_gate: bool = False,
+) -> Dict[str, Any]:
+    """Supersede the active invite and CAS-persist the registry mutation."""
+    from backend.services.agreement_draft_store import DraftCasConflictError, save_draft_cas
+
+    base_rev = get_registry_revision(draft)
+    supersede_active_invite(
+        draft,
+        phase=phase,
+        participant_id=participant_id,
+        audit_log=audit_log,
+        jti=jti,
+        force_revoke_gate=force_revoke_gate,
+    )
+    try:
+        save_draft_cas(draft, expected_revision=base_rev)
+    except DraftCasConflictError as exc:
+        raise RecipientInviteRegistryPersistError(
+            "invite_replacement_conflict",
+            "Invite delivery registry changed concurrently; reload and retry.",
+        ) from exc
+    return draft
+
+
 def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 

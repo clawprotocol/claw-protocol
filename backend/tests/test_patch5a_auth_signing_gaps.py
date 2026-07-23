@@ -12,12 +12,11 @@ from fastapi.testclient import TestClient
 
 from backend.main import app
 from backend.security.recipient_access_token import mint_recipient_access_token
-from backend.services.agreement_draft_store import load_draft, save_draft
+from backend.services.agreement_draft_store import load_draft
 from backend.services.agreement_signing_lock_store import write_signing_lock
 from backend.services.recipient_delivery_registry import (
     extract_jti_from_token,
     is_jti_superseded,
-    record_invite_sent,
 )
 
 fitz = pytest.importorskip("fitz")
@@ -196,7 +195,10 @@ def _seed_packet_and_invite(aid: str, *, party_id: str = "p2") -> str:
     )
     jti = extract_jti_from_token(tok)
     audit = draft.setdefault("audit_log", [])
-    record_invite_sent(
+    from backend.services.recipient_delivery_registry import record_invite_sent_cas
+
+    # Security-owned registry requires CAS — generic save_draft cannot bind JTIs.
+    record_invite_sent_cas(
         draft,
         phase="signing",
         participant_id=party_id,
@@ -204,7 +206,6 @@ def _seed_packet_and_invite(aid: str, *, party_id: str = "p2") -> str:
         email="s@x.com",
         audit_log=audit,
     )
-    save_draft(draft)
     return tok
 
 
@@ -341,7 +342,9 @@ def test_reissue_supersedes_old_jti_new_invite_ok(client: TestClient, monkeypatc
         recipient_party_id="p2",
     )
     draft = load_draft(aid)
-    record_invite_sent(
+    from backend.services.recipient_delivery_registry import record_invite_sent_cas
+
+    record_invite_sent_cas(
         draft,
         phase="signing",
         participant_id="p2",
@@ -349,7 +352,6 @@ def test_reissue_supersedes_old_jti_new_invite_ok(client: TestClient, monkeypatc
         email="s@x.com",
         audit_log=draft.setdefault("audit_log", []),
     )
-    save_draft(draft)
 
     reissue = client.post(
         f"/api/agreements/{aid}/signing-packet/reissue",
@@ -387,7 +389,7 @@ def test_reissue_supersedes_old_jti_new_invite_ok(client: TestClient, monkeypatc
         recipient_party_id="p2",
     )
     draft2 = load_draft(aid)
-    record_invite_sent(
+    record_invite_sent_cas(
         draft2,
         phase="signing",
         participant_id="p2",
@@ -395,7 +397,7 @@ def test_reissue_supersedes_old_jti_new_invite_ok(client: TestClient, monkeypatc
         email="s@x.com",
         audit_log=draft2.setdefault("audit_log", []),
     )
-    save_draft(draft2)
+    draft2 = load_draft(aid)
     assert not is_jti_superseded(draft2, extract_jti_from_token(new_tok), "signing", "p2")
     assert is_jti_superseded(draft2, extract_jti_from_token(old_tok), "signing", "p2")
 

@@ -15,8 +15,11 @@ Auth continuation uses **server-side transactions** (`POST /v1/workspace/auth-co
 | `VITE_SUPABASE_URL` | Supabase project URL |
 | `VITE_SUPABASE_ANON_KEY` | Supabase anon key |
 | `CLAW_ANON_SESSION_SECRET` | HMAC secret for anonymous session tokens (required in production) |
-| `SUPABASE_JWT_SECRET` or `CLAW_SUPABASE_JWT_SECRET` | Verify Supabase access tokens on bind/finalize |
+| `SUPABASE_JWT_ISSUER` | Supabase Auth issuer (`https://<project-ref>.supabase.co/auth/v1`); JWKS at `<issuer>/.well-known/jwks.json` for ES256 verification |
+| `SUPABASE_JWT_AUDIENCE` | Expected JWT audience (default `authenticated`) |
 | `CLAW_ANON_SESSION_ENFORCE=1` | Require session token for `anon-*` org APIs (default on) |
+
+Do **not** set `SUPABASE_JWT_SECRET` for staging/production when the project signs with ECC/ES256. HS256 shared-secret verification is local/dev/test opt-in only (`CLAW_SUPABASE_JWT_HS256_LOCAL=1`).
 
 ## Supabase Dashboard
 

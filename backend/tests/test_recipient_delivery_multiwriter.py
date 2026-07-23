@@ -471,3 +471,55 @@ def test_postgres_cas_path_shares_revision_guard_helpers(data_dir):
     body_p = inspect.getsource(store._save_draft_postgres_preserving)
     assert "FOR UPDATE" in body_p
     assert "_preserve_security_owned_recipient_delivery" in body_p
+
+
+def test_generic_save_draft_cannot_bind_invite_jti_cas_required(data_dir):
+    """Adversarial: prior broken path (record_invite_sent + save_draft) must not bind JTIs."""
+    from backend.services.recipient_delivery_registry import record_invite_sent_cas
+
+    aid = "ag_mw_cas_required"
+    draft = {
+        "id": aid,
+        "title": "CAS required",
+        "parties": [{"id": "p2", "role": "party", "email": "cp@example.com"}],
+        "audit_log": [],
+    }
+    save_draft(draft, preserve_newer_recipient_delivery=False)
+    cur = load_draft(aid)
+    record_invite_sent(
+        cur,
+        phase="signing",
+        participant_id="p2",
+        jti="jti-ghost",
+        email="cp@example.com",
+        audit_log=cur.setdefault("audit_log", []),
+    )
+    save_draft(cur)  # generic writer — must not create security-owned registry
+    assert get_registry(load_draft(aid)).get("recipients") in (None, {})
+    assert not (get_registry(load_draft(aid)).get("recipients") or {})
+
+    cur = load_draft(aid)
+    record_invite_sent_cas(
+        cur,
+        phase="signing",
+        participant_id="p2",
+        jti="jti-live",
+        email="cp@example.com",
+        audit_log=cur.setdefault("audit_log", []),
+    )
+    final = load_draft(aid)
+    assert (get_registry(final).get("recipients") or {}).get("signing:p2", {}).get("active_jti") == "jti-live"
+    # Unbound / non-active JTIs are treated as superseded once a live invite exists.
+    assert is_jti_superseded(final, "jti-ghost", "signing", "p2")
+    assert not is_jti_superseded(final, "jti-live", "signing", "p2")
+    assert jti_invite_access_denied(final, "jti-ghost", "signing", "p2", commercial=True)
+
+    # Cancel-equivalent supersede must durably kill the live JTI.
+    base = get_registry_revision(final)
+    revoked = supersede_active_invite(
+        final, phase="signing", participant_id="p2", audit_log=final.setdefault("audit_log", [])
+    )
+    save_draft_cas(revoked, expected_revision=base)
+    after = load_draft(aid)
+    assert is_jti_superseded(after, "jti-live", "signing", "p2")
+    assert jti_invite_access_denied(after, "jti-live", "signing", "p2", commercial=True)
