@@ -11,7 +11,6 @@ from fastapi import HTTPException
 from backend.services.recipient_party_identity import find_party_dict_by_participant_id
 from backend.services.recipient_delivery_registry import (
     RECIPIENT_EMAIL_CORRECTED,
-    record_invite_sent,
     supersede_active_invite,
 )
 from backend.services.email.review_delivery import send_review_invite_to_participant
@@ -207,21 +206,14 @@ def correct_review_recipient_email(
             participant_id=resolved_pid,
             audit_log=audit_log,
         )
-        sent_invite, jti = send_review_invite_to_participant(
+        # Mint → registry → email is handled inside send_review_invite_to_participant.
+        sent_invite, _jti = send_review_invite_to_participant(
             agreement_id=agreement_id,
             draft=next_draft,
             participant_id=resolved_pid,
             org_id=org_id,
         )
         if sent_invite:
-            record_invite_sent(
-                next_draft,
-                phase="review",
-                participant_id=resolved_pid,
-                jti=jti,
-                email=email,
-                audit_log=audit_log,
-            )
             audit_log.append(
                 {
                     "event_type": REVIEW_EMAIL_RESENT,
@@ -327,6 +319,7 @@ def correct_signing_recipient_email(
                     },
                 }
             )
+        # Registry-before-email is handled inside send_signing_invite_to_target.
         sent_invite = send_signing_invite_to_target(
             agreement_id=agreement_id,
             draft=next_draft,
@@ -341,13 +334,6 @@ def correct_signing_recipient_email(
             org_id=org_id,
         )
         if sent_invite:
-            record_invite_sent(
-                next_draft,
-                phase="signing",
-                participant_id=resolved_pid,
-                email=email,
-                audit_log=audit_log,
-            )
             audit_log.append(
                 {
                     "event_type": SIGNING_INVITE_RESENT,

@@ -203,6 +203,36 @@ def maybe_send_review_invites_after_review_sent(
             failed += 1
             continue
 
+        from backend.services.recipient_delivery_registry import (
+            RecipientInviteRegistryPersistError,
+            extract_jti_from_token,
+            require_invite_jti_recorded,
+        )
+
+        jti = extract_jti_from_token(token)
+        pid = (target.recipient_party_id or "").strip()
+        if pid and jti:
+            try:
+                require_invite_jti_recorded(
+                    draft,
+                    phase="review",
+                    participant_id=pid,
+                    jti=jti,
+                    email=target.to,
+                    audit_log=draft.setdefault("audit_log", []),
+                )
+            except RecipientInviteRegistryPersistError:
+                _log.exception(
+                    "[review-email-delivery] registry_failed_before_send agreement_id=%s to=%s",
+                    aid,
+                    _redact_to(target.to),
+                )
+                failed += 1
+                continue
+        elif pid and not jti:
+            failed += 1
+            continue
+
         review_url = _build_absolute_review_url(origin, agreement_id, token)
         email = build_review_invite_email(
             party_name=target.party_name,
@@ -221,16 +251,6 @@ def maybe_send_review_invites_after_review_sent(
         )
         if result.ok:
             sent += 1
-            from backend.services.recipient_delivery_registry import extract_jti_from_token, record_invite_sent
-
-            record_invite_sent(
-                draft,
-                phase="review",
-                participant_id=target.recipient_party_id or "",
-                jti=extract_jti_from_token(token),
-                email=target.to,
-                audit_log=draft.setdefault("audit_log", []),
-            )
         else:
             failed += 1
 
@@ -859,9 +879,31 @@ def send_review_invite_to_participant(
     except Exception:  # noqa: BLE001
         return False, None
 
-    from backend.services.recipient_delivery_registry import extract_jti_from_token
+    from backend.services.recipient_delivery_registry import (
+        RecipientInviteRegistryPersistError,
+        extract_jti_from_token,
+        require_invite_jti_recorded,
+    )
 
     jti = extract_jti_from_token(token)
+    pid = (target.recipient_party_id or "").strip()
+    if not pid or not jti:
+        return False, None
+    try:
+        require_invite_jti_recorded(
+            draft,
+            phase="review",
+            participant_id=pid,
+            jti=jti,
+            email=target.to,
+            audit_log=draft.setdefault("audit_log", []),
+        )
+    except RecipientInviteRegistryPersistError:
+        _log.exception(
+            "[review-email-delivery] registry_failed_before_resend agreement_id=%s",
+            aid,
+        )
+        return False, None
 
     review_url = _build_absolute_review_url(origin, agreement_id, token)
     email = build_review_invite_email(

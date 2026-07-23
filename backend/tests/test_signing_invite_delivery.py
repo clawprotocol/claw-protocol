@@ -40,6 +40,10 @@ def _mock_resend_success() -> MagicMock:
 
 
 def _env_common(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    # Explicit non-commercial unit fixtures may use tokenless URLs; commercial
+    # fail-closed delivery is covered in test_signing_token_jti_registry_fail_closed.
+    monkeypatch.setenv("CLAW_ENVIRONMENT", "test")
+    monkeypatch.delenv("CLAW_COMMERCIAL_MODE", raising=False)
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
     monkeypatch.setenv("RESEND_API_KEY", "re_test")

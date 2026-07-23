@@ -125,7 +125,7 @@ def test_recipient_access_token_does_not_503_without_signing_lock(monkeypatch, t
     mint = client.post(
         f"/api/agreements/{aid}/recipient-access-token",
         headers=_STAGING_ORG,
-        json={"mode": "review", "role": "signer"},
+        json={"mode": "review", "role": "signer", "recipient_party_id": "p-signer"},
     )
     assert mint.status_code == 200
     assert mint.status_code != 503
@@ -144,7 +144,7 @@ def test_recipient_access_token_mint_422_when_staging_and_secret_unset(monkeypat
     mint = client.post(
         f"/api/agreements/{aid}/recipient-access-token",
         headers=_STAGING_ORG,
-        json={"mode": "review", "role": "signer"},
+        json={"mode": "review", "role": "signer", "recipient_party_id": "p-signer"},
     )
     assert mint.status_code == 422
     d = mint.json().get("detail")
@@ -200,7 +200,7 @@ def test_recipient_access_token_mint_422_when_prod_and_secret_unset(monkeypatch,
     mint = client.post(
         f"/api/agreements/{aid}/recipient-access-token",
         headers=_STAGING_ORG,
-        json={"mode": "review", "role": "signer"},
+        json={"mode": "review", "role": "signer", "recipient_party_id": "p-signer"},
     )
     assert mint.status_code == 422
     d = mint.json().get("detail")

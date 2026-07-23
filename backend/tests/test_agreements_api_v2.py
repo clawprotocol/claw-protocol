@@ -255,7 +255,7 @@ def test_signing_ceremony_multi_signer_and_immutability(monkeypatch, tmp_path):
     mint_sign = client.post(
         f"/api/agreements/{aid}/recipient-access-token",
         headers=_ORG_H,
-        json={"mode": "sign", "role": "signer"},
+        json={"mode": "sign", "role": "signer", "recipient_party_id": "p-acme"},
     )
     assert mint_sign.status_code == 200
     sign_tok = mint_sign.json()["token"]
@@ -458,7 +458,7 @@ def test_signing_complete_rejects_stale_draft_vs_lock_hash(monkeypatch, tmp_path
     mint_sign = client.post(
         f"/api/agreements/{aid}/recipient-access-token",
         headers=_ORG_H,
-        json={"mode": "sign", "role": "signer"},
+        json={"mode": "sign", "role": "signer", "recipient_party_id": "p-acme"},
     )
     assert mint_sign.status_code == 200
     sign_tok = mint_sign.json()["token"]

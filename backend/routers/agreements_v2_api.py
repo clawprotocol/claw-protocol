@@ -6171,6 +6171,23 @@ def post_recipient_access_token(
             detail="reviewer_role_incompatible_with_sign_mode",
         )
 
+    from backend.security.commercial_auth import commercial_mode_enforced
+
+    pid_for_reg = (body.recipient_party_id or "").strip()
+    # Sign always requires party binding. Commercial mode requires the same for review.
+    requires_party_bound_registry = body.mode == "sign" or commercial_mode_enforced()
+    if requires_party_bound_registry and not pid_for_reg:
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "recipient_party_id_required",
+                "message": (
+                    "Commercial review/sign tokens require recipient_party_id "
+                    "so the invite JTI can be registered before return."
+                ),
+            },
+        )
+
     lock = read_signing_lock(agreement_id)
     env_ttl = os.getenv("CLAW_RECIPIENT_TOKEN_TTL_SECONDS", "").strip()
     raw_ttl = int(env_ttl) if env_ttl else int(body.ttl_seconds)
@@ -6217,32 +6234,63 @@ def post_recipient_access_token(
                 "message": "Unable to mint recipient access token after retries. Try again shortly.",
             },
         ) from last_mint_error
-    # Record JTI in delivery registry for sign/review so revoke/complete can consume it.
-    pid_for_reg = (body.recipient_party_id or "").strip()
+    # Fail-closed: persist JTI in delivery registry before returning any usable token.
     if pid_for_reg:
-        try:
-            from backend.services.recipient_delivery_registry import (
-                extract_jti_from_token,
-                normalize_delivery_phase,
-                record_invite_sent,
-            )
+        from backend.services.recipient_delivery_registry import (
+            RecipientInviteRegistryPersistError,
+            extract_jti_from_token,
+            normalize_delivery_phase,
+            require_invite_jti_recorded,
+        )
 
+        try:
             draft_for_reg = _load_or_404(agreement_id)
             draft_dict = draft_for_reg.model_dump(mode="json")
             phase = normalize_delivery_phase("signing" if body.mode == "sign" else "review")
-            record_invite_sent(
+            jti = extract_jti_from_token(token)
+            audit_log = list(draft_dict.get("audit_log") or [])
+            require_invite_jti_recorded(
                 draft_dict,
                 phase=phase,
                 participant_id=pid_for_reg,
-                jti=extract_jti_from_token(token),
+                jti=jti,
                 email=None,
-                audit_log=list(draft_dict.get("audit_log") or []),
+                audit_log=audit_log,
             )
+            draft_dict["audit_log"] = audit_log
             _save_draft_sync(draft_dict, request)
-        except Exception:  # noqa: BLE001 — mint must still return token
+        except RecipientInviteRegistryPersistError as exc:
+            logging.getLogger(__name__).exception(
+                "recipient_token_jti_registry_failed agreement_id=%s code=%s",
+                agreement_id,
+                exc.code,
+            )
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "code": exc.code or "recipient_invite_registry_unavailable",
+                    "message": (
+                        "Invite delivery registry could not be persisted. "
+                        "Retry shortly; no usable token was returned."
+                    ),
+                    "retryable": True,
+                },
+            ) from exc
+        except Exception as exc:  # noqa: BLE001 — never return an unbound commercial token
             logging.getLogger(__name__).exception(
                 "recipient_token_jti_registry_failed agreement_id=%s", agreement_id
             )
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "code": "recipient_invite_registry_unavailable",
+                    "message": (
+                        "Invite delivery registry could not be persisted. "
+                        "Retry shortly; no usable token was returned."
+                    ),
+                    "retryable": True,
+                },
+            ) from exc
     u_ev = "signature_request_sent" if body.mode == "sign" else "recipient_invite_sent"
     record_usage_ledger_event(
         subject_ref=resolve_subject_from_request(request),
@@ -6953,16 +7001,30 @@ def post_agreement_signing_links_sent(
                 },
             )
     try:
-        from backend.services.email.signing_delivery import maybe_send_signing_invites_after_packet_prepared
+        from backend.services.email.signing_delivery import (
+            SigningInviteDeliveryBlocked,
+            maybe_send_signing_invites_after_packet_prepared,
+        )
 
         email_draft = draft.model_dump(mode="json")
-        notify_audit = maybe_send_signing_invites_after_packet_prepared(
-            agreement_id=agreement_id,
-            draft=email_draft,
-            targets=[t.model_dump() for t in (body.targets or [])],
-            packet_revision=(body.packet_revision or "").strip() or None,
-            org_id=resolve_subject_from_request(request),
-        )
+        try:
+            notify_audit = maybe_send_signing_invites_after_packet_prepared(
+                agreement_id=agreement_id,
+                draft=email_draft,
+                targets=[t.model_dump() for t in (body.targets or [])],
+                packet_revision=(body.packet_revision or "").strip() or None,
+                org_id=resolve_subject_from_request(request),
+            )
+        except SigningInviteDeliveryBlocked as blocked:
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "code": blocked.code or "signing_invite_delivery_unavailable",
+                    "message": str(blocked)
+                    or "Commercial signing invites could not be delivered. Retry shortly.",
+                    "retryable": True,
+                },
+            ) from blocked
         if notify_audit:
             value = notify_audit.get("value") if isinstance(notify_audit.get("value"), dict) else {}
             sent_count = int(value.get("sent_count") or 0)
@@ -6998,6 +7060,8 @@ def post_agreement_signing_links_sent(
             _save_draft_sync(next_draft.model_dump(), request)
             return {"ok": True, "sent_count": sent_count, "skip_reason": None, "draft": next_draft.model_dump()}
         skip_reason = "not_sent"
+    except HTTPException:
+        raise
     except Exception:
         logging.getLogger(__name__).exception(
             "signing_invite_delivery_hook_failed agreement_id=%s",

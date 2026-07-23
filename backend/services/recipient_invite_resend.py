@@ -13,7 +13,7 @@ from backend.services.email.signing_delivery import (
     send_signing_invite_to_target,
 )
 from backend.services.recipient_party_identity import find_party_dict_by_participant_id
-from backend.services.recipient_delivery_registry import record_invite_sent, supersede_active_invite
+from backend.services.recipient_delivery_registry import supersede_active_invite
 
 
 def _utc_now_iso() -> str:
@@ -70,34 +70,27 @@ def resend_recipient_invite(
     now = _utc_now_iso()
     audit_log = list(draft.get("audit_log") or [])
     next_draft = dict(draft)
+    next_draft["audit_log"] = audit_log
     supersede_active_invite(next_draft, phase=ph, participant_id=pid, audit_log=audit_log)
 
     sent_invite = False
     if ph == "review":
         if not str(draft.get("review_sent_at") or "").strip():
             raise HTTPException(status_code=400, detail="review_not_sent_yet")
-        sent_invite, jti = send_review_invite_to_participant(
+        # send_review_invite_to_participant persists JTI before email dispatch.
+        sent_invite, _jti = send_review_invite_to_participant(
             agreement_id=agreement_id,
             draft=next_draft,
             participant_id=pid,
             org_id=org_id,
         )
-        if sent_invite:
-            record_invite_sent(
-                next_draft,
-                phase="review",
-                participant_id=pid,
-                jti=jti,
-                email=email,
-                audit_log=audit_log,
-            )
     else:
         if _latest_signing_packet_revision(draft.get("audit_log")) is None:
             raise HTTPException(status_code=400, detail="signing_not_sent_yet")
         url = (signing_url or "").strip()
         if not url:
             raise HTTPException(status_code=400, detail="signing_url_required")
-        # send_signing_invite_to_target records JTI from the URL when send succeeds.
+        # send_signing_invite_to_target persists JTI from the URL before email dispatch.
         sent_invite = send_signing_invite_to_target(
             agreement_id=agreement_id,
             draft=next_draft,

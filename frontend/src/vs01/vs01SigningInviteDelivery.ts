@@ -83,43 +83,53 @@ function appendSignTokenToSigningUrl(url: string, token: string): string {
   }
 }
 
+function partyIdForSigningTarget(
+  target: { signer_role_id: string; is_owner: boolean },
+  roles: readonly Vs01PrepareSigningRole[],
+): string {
+  const role = roles.find((r) => r.roleId === target.signer_role_id);
+  return (
+    role?.vs01CounterpartyId ??
+    role?.partyId ??
+    ""
+  ).trim();
+}
+
+type EnrichResult =
+  | { ok: true; targets: ReturnType<typeof buildSigningInviteTargetsFromHandoff> }
+  | { ok: false; skipReason: string };
+
 async function enrichSigningTargetsWithRecipientTokens(
   agreementId: string,
   targets: ReturnType<typeof buildSigningInviteTargetsFromHandoff>,
   roles: readonly Vs01PrepareSigningRole[],
-): Promise<ReturnType<typeof buildSigningInviteTargetsFromHandoff>> {
+): Promise<EnrichResult> {
   const policy = await fetchRecipientAccessPolicy();
   const shouldMint =
     Boolean(policy?.recipient_link_token_required) || Boolean(policy?.signing_token_configured);
-  if (!shouldMint) return targets;
+  if (!shouldMint) return { ok: true, targets };
 
   const out: ReturnType<typeof buildSigningInviteTargetsFromHandoff> = [];
   for (const target of targets) {
-    if (target.is_owner) {
-      out.push(target);
-      continue;
+    const partyIdForToken = partyIdForSigningTarget(target, roles);
+    if (!partyIdForToken) {
+      return { ok: false, skipReason: "recipient_party_id_required" };
     }
-    const role = roles.find((r) => r.roleId === target.signer_role_id);
-    const partyIdForToken = (
-      role?.vs01CounterpartyId ??
-      role?.partyId ??
-      ""
-    ).trim();
     const mint = await mintRecipientAccessTokenResult(agreementId, {
       mode: "sign",
       role: "signer",
-      recipient_party_id: partyIdForToken || undefined,
+      recipient_party_id: partyIdForToken,
     });
-    if (mint.ok && mint.data.token) {
-      out.push({
-        ...target,
-        signing_url: appendSignTokenToSigningUrl(target.signing_url, mint.data.token),
-      });
-    } else {
-      out.push(target);
+    if (!mint.ok || !mint.data?.token) {
+      // Fail closed: never preserve/dispatch a tokenless signing target after mint failure.
+      return { ok: false, skipReason: "recipient_token_mint_failed" };
     }
+    out.push({
+      ...target,
+      signing_url: appendSignTokenToSigningUrl(target.signing_url, mint.data.token),
+    });
   }
-  return out;
+  return { ok: true, targets: out };
 }
 
 /** Fire-and-forget signing invite delivery after packet prepare (parallel flow only). */
@@ -136,11 +146,20 @@ export async function dispatchSigningInvitesFromHandoff(
     return { attempted: false, ok: false, sentCount: 0, skipReason: "sender_first_explicit" };
   }
 
-  const targets = await enrichSigningTargetsWithRecipientTokens(
+  const enriched = await enrichSigningTargetsWithRecipientTokens(
     handoff.agreementId,
     buildSigningInviteTargetsFromHandoff(handoff, roles),
     roles,
   );
+  if (!enriched.ok) {
+    return {
+      attempted: true,
+      ok: false,
+      sentCount: 0,
+      skipReason: enriched.skipReason,
+    };
+  }
+  const targets = enriched.targets;
   if (!targets.length) {
     return { attempted: false, ok: false, sentCount: 0, skipReason: "no_targets" };
   }

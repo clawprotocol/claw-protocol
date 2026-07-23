@@ -21,6 +21,14 @@ _log = logging.getLogger(__name__)
 SIGNING_INVITE_EMAILS_SENT_EVENT = "signing_invite_emails_sent"
 
 
+class SigningInviteDeliveryBlocked(RuntimeError):
+    """Commercial signing invite delivery refused (missing JTI / registry bind)."""
+
+    def __init__(self, code: str, message: str | None = None) -> None:
+        self.code = (code or "signing_invite_delivery_unavailable").strip()
+        super().__init__(message or self.code)
+
+
 def maybe_send_signing_invites_after_packet_prepared(
     *,
     agreement_id: str,
@@ -32,11 +40,18 @@ def maybe_send_signing_invites_after_packet_prepared(
     """
     Email every prepared signer their VS01 signing URL.
 
-    Never raises. Returns an audit event dict when at least one send succeeded.
+    Returns an audit event dict when at least one send succeeded.
+
+    In commercial mode, raises ``SigningInviteDeliveryBlocked`` when every eligible
+    target fails closed (tokenless URL, unbound party, or registry persist failure)
+    so the owner API can return a retryable error instead of silently skipping.
     """
+    from backend.security.commercial_auth import commercial_mode_enforced
+
     aid = (agreement_id or "").strip()
     oid = (org_id or "").strip() or None
     revision = (packet_revision or "").strip() or None
+    commercial = commercial_mode_enforced()
 
     _log.info(
         "[signing-email-delivery] start agreement_id=%s org_id=%s packet_revision=%s target_count=%s",
@@ -84,7 +99,53 @@ def maybe_send_signing_invites_after_packet_prepared(
     sent_count = 0
     failed_count = 0
     sent_role_ids: List[str] = []
+    from backend.services.recipient_delivery_registry import (
+        RecipientInviteRegistryPersistError,
+        extract_jti_from_signing_url,
+        require_invite_jti_recorded,
+    )
+
     for target in eligible:
+        participant_id = str(target.get("participant_id") or "").strip()
+        if not participant_id:
+            participant_id = _participant_id_for_email(draft, target["email"])
+        jti = extract_jti_from_signing_url(target["signing_url"])
+        # Commercial: refuse tokenless URLs. Any extractable JTI must be registry-bound
+        # before email dispatch (mint → registry → delivery).
+        if commercial and not jti:
+            _log.warning(
+                "[signing-email-delivery] skip_tokenless_url agreement_id=%s to=%s",
+                aid,
+                _redact_to(target["email"]),
+            )
+            failed_count += 1
+            continue
+        if jti:
+            if not participant_id:
+                _log.warning(
+                    "[signing-email-delivery] skip_unbound_jti agreement_id=%s to=%s",
+                    aid,
+                    _redact_to(target["email"]),
+                )
+                failed_count += 1
+                continue
+            try:
+                require_invite_jti_recorded(
+                    draft,
+                    phase="signing",
+                    participant_id=participant_id,
+                    jti=jti,
+                    email=target["email"],
+                    audit_log=draft.setdefault("audit_log", []),
+                )
+            except RecipientInviteRegistryPersistError:
+                _log.exception(
+                    "[signing-email-delivery] registry_failed_before_send agreement_id=%s",
+                    aid,
+                )
+                failed_count += 1
+                continue
+
         email = build_signing_invite_email(
             party_name=target["display_name"],
             agreement_title=title,
@@ -104,23 +165,6 @@ def maybe_send_signing_invites_after_packet_prepared(
             rid = str(target.get("signer_role_id") or "").strip()
             if rid:
                 sent_role_ids.append(rid)
-            from backend.services.recipient_delivery_registry import (
-                extract_jti_from_signing_url,
-                record_invite_sent,
-            )
-
-            participant_id = str(target.get("participant_id") or "").strip()
-            if not participant_id:
-                participant_id = _participant_id_for_email(draft, target["email"])
-            if participant_id:
-                record_invite_sent(
-                    draft,
-                    phase="signing",
-                    participant_id=participant_id,
-                    jti=extract_jti_from_signing_url(target["signing_url"]),
-                    email=target["email"],
-                    audit_log=draft.setdefault("audit_log", []),
-                )
         else:
             failed_count += 1
 
@@ -136,6 +180,11 @@ def maybe_send_signing_invites_after_packet_prepared(
     )
 
     if sent_count < 1:
+        if commercial and failed_count > 0:
+            raise SigningInviteDeliveryBlocked(
+                "signing_invite_jti_registry_required",
+                "Commercial signing invites require a registry-bound token in each signing URL. Retry shortly.",
+            )
         return None
 
     now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
@@ -247,6 +296,39 @@ def send_signing_invite_to_target(
     requester = _owner_display_name_from_draft(draft)
     party_names = _party_display_names_from_draft(draft)
 
+    from backend.security.commercial_auth import commercial_mode_enforced
+    from backend.services.recipient_delivery_registry import (
+        RecipientInviteRegistryPersistError,
+        extract_jti_from_signing_url,
+        require_invite_jti_recorded,
+    )
+
+    participant_id = str(target.get("participant_id") or "").strip()
+    if not participant_id:
+        participant_id = _participant_id_for_email(draft, row["email"])
+    jti = extract_jti_from_signing_url(row["signing_url"])
+    commercial = commercial_mode_enforced()
+    if commercial and not jti:
+        return False
+    if jti:
+        if not participant_id:
+            return False
+        try:
+            require_invite_jti_recorded(
+                draft,
+                phase="signing",
+                participant_id=participant_id,
+                jti=jti,
+                email=row["email"],
+                audit_log=draft.setdefault("audit_log", []),
+            )
+        except RecipientInviteRegistryPersistError:
+            _log.exception(
+                "[signing-email-delivery] registry_failed_before_resend agreement_id=%s",
+                aid,
+            )
+            return False
+
     email = build_signing_invite_email(
         party_name=row["display_name"],
         agreement_title=title,
@@ -269,21 +351,4 @@ def send_signing_invite_to_target(
             (packet_revision or "").strip() or "none",
             row.get("signer_role_id") or "",
         )
-        participant_id = str(target.get("participant_id") or "").strip()
-        if not participant_id:
-            participant_id = _participant_id_for_email(draft, row["email"])
-        if participant_id:
-            from backend.services.recipient_delivery_registry import (
-                extract_jti_from_signing_url,
-                record_invite_sent,
-            )
-
-            record_invite_sent(
-                draft,
-                phase="signing",
-                participant_id=participant_id,
-                jti=extract_jti_from_signing_url(row["signing_url"]),
-                email=row["email"],
-                audit_log=draft.setdefault("audit_log", []),
-            )
     return bool(result.ok)

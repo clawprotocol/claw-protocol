@@ -19,6 +19,58 @@ RECIPIENT_INVITE_SUPERSEDED_MESSAGE = (
 )
 
 
+class RecipientInviteRegistryPersistError(RuntimeError):
+    """Invite JTI could not be bound into the delivery registry (fail closed)."""
+
+    def __init__(self, code: str, message: str | None = None) -> None:
+        self.code = (code or "recipient_invite_registry_unavailable").strip()
+        super().__init__(message or self.code)
+
+
+def require_invite_jti_recorded(
+    draft: Dict[str, Any],
+    *,
+    phase: str,
+    participant_id: str,
+    jti: str,
+    email: Optional[str] = None,
+    audit_log: Optional[List[Dict[str, Any]]] = None,
+) -> Dict[str, Any]:
+    """
+    Persist active invite JTI for phase+participant before token return / email send.
+
+    Raises ``RecipientInviteRegistryPersistError`` when binding cannot be established.
+    """
+    pid = (participant_id or "").strip()
+    j = (jti or "").strip()
+    if not pid:
+        raise RecipientInviteRegistryPersistError(
+            "recipient_party_id_required",
+            "Commercial signing invites require a recipient party id for delivery registry binding.",
+        )
+    if not j:
+        raise RecipientInviteRegistryPersistError(
+            "jti_missing",
+            "Invite token JTI is required before delivery registry persistence.",
+        )
+    try:
+        return record_invite_sent(
+            draft,
+            phase=phase,
+            participant_id=pid,
+            jti=j,
+            email=email,
+            audit_log=audit_log,
+        )
+    except RecipientInviteRegistryPersistError:
+        raise
+    except Exception as exc:  # noqa: BLE001 — surface as retryable registry failure
+        raise RecipientInviteRegistryPersistError(
+            "recipient_invite_registry_unavailable",
+            "Invite delivery registry could not be updated.",
+        ) from exc
+
+
 def _utc_now_iso() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
