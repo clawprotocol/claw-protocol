@@ -19,7 +19,7 @@ from backend.services.email.signing_delivery import SIGNING_INVITE_EMAILS_SENT_E
 
 pytestmark = pytest.mark.unit
 
-_ORG_H = {"X-Claw-Org-Id": "test-org-email-correction"}
+_ORG_H = {"X-Claw-Org-Id": "test-org-email-correction", "X-Claw-Test-Auth-User-Id": "test-owner"}
 
 
 @pytest.fixture(autouse=True)

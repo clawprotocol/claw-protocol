@@ -14,7 +14,7 @@ from backend.main import app
 
 pytestmark = pytest.mark.unit
 
-_ORG_H = {"X-Claw-Org-Id": "test-org-premium-finalization"}
+_ORG_H = {"X-Claw-Org-Id": "test-org-premium-finalization", "X-Claw-Test-Auth-User-Id": "test-owner"}
 
 
 def _intel() -> dict:

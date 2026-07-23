@@ -11,10 +11,14 @@ from backend.config.agreement_signing_token import _DEV_FALLBACK_SIGNING_TOKEN_R
 from backend.main import app
 from backend.services.accepted_review_snapshot import sha256_hex_text
 from backend.services.vs01_signing_envelope_provenance import fingerprint_agreement_body
+from backend.tests.auth_fixtures import (
+    configure_production_like_jwt,
+    owner_headers_production_like,
+)
 
 pytestmark = pytest.mark.unit
 
-_ORG_H = {"X-Claw-Org-Id": "test-org-staging-secret"}
+_ORG_H = owner_headers_production_like(user_id="staging-owner")
 _EXPLICIT = "staging-fail-closed-explicit-signing-token"
 
 
@@ -31,6 +35,7 @@ def _env_staging_invalid(monkeypatch: pytest.MonkeyPatch, tmp_path, mode: str) -
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
     monkeypatch.setenv("CLAW_ENVIRONMENT", "staging")
+    configure_production_like_jwt(monkeypatch)
     monkeypatch.setenv("RESEND_API_KEY", "re_test")
     monkeypatch.setenv("EMAIL_FROM", "LawDog <notifications@lawdog.me>")
     monkeypatch.setenv("CLAW_APP_PUBLIC_ORIGIN", "https://app.example.com")
@@ -50,6 +55,7 @@ def _env_staging_explicit(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
     monkeypatch.setenv("CLAW_ENVIRONMENT", "staging")
+    configure_production_like_jwt(monkeypatch)
     monkeypatch.setenv("CLAW_AGREEMENT_SIGNING_TOKEN_SECRET", _EXPLICIT)
     monkeypatch.setenv("RESEND_API_KEY", "re_test")
     monkeypatch.setenv("EMAIL_FROM", "LawDog <notifications@lawdog.me>")

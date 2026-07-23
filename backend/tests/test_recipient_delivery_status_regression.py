@@ -13,7 +13,7 @@ from backend.services.recipient_delivery_status import build_recipient_delivery_
 
 pytestmark = pytest.mark.unit
 
-_ORG_H = {"X-Claw-Org-Id": "test-org-recipient-delivery-regression"}
+_ORG_H = {"X-Claw-Org-Id": "test-org-recipient-delivery-regression", "X-Claw-Test-Auth-User-Id": "test-owner"}
 
 
 @pytest.fixture(autouse=True)

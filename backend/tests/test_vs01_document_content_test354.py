@@ -10,7 +10,7 @@ from backend.services import document_service
 
 pytestmark = pytest.mark.unit
 
-_ORG_H = {"X-Claw-Org-Id": "test-org-vs01-content-test354"}
+_ORG_H = {"X-Claw-Org-Id": "test-org-vs01-content-test354", "X-Claw-Test-Auth-User-Id": "test-owner"}
 _ORIGIN_H = {
     **_ORG_H,
     "Origin": "https://believable-gentleness-production-3ab6.up.railway.app",

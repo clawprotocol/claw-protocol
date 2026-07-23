@@ -19,7 +19,7 @@ from backend.usage_economics import store as usage_economics_store_mod
 
 pytestmark = pytest.mark.unit
 
-_ORG_H = {"X-Claw-Org-Id": "test-org-api-v2"}
+_ORG_H = {"X-Claw-Org-Id": "test-org-api-v2", "X-Claw-Test-Auth-User-Id": "test-owner"}
 _PERF_H = {PAID_PRO_PERF_TRACE_REQUEST_HEADER: "1"}
 
 LOGO_INTAKE = (
@@ -109,6 +109,7 @@ def test_premium_full_draft_server_timing_header_only_with_perf_trace(
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     import backend.routers.agreements_v2_api as av2
 
+    monkeypatch.setattr(av2, "OPENAI_API_KEY", "test-key")
     monkeypatch.setattr(av2, "call_legal_llm", lambda *a, **k: json.dumps(_wire_json()))
 
     client = TestClient(app)
@@ -147,6 +148,7 @@ def test_premium_full_draft_timing_does_not_mutate_response_body(
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     import backend.routers.agreements_v2_api as av2
 
+    monkeypatch.setattr(av2, "OPENAI_API_KEY", "test-key")
     monkeypatch.setattr(av2, "call_legal_llm", lambda *a, **k: json.dumps(_wire_json()))
 
     client = TestClient(app)
@@ -169,6 +171,7 @@ def test_cors_exposes_paid_pro_server_timing_header(
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     import backend.routers.agreements_v2_api as av2
 
+    monkeypatch.setattr(av2, "OPENAI_API_KEY", "test-key")
     monkeypatch.setattr(av2, "call_legal_llm", lambda *a, **k: json.dumps(_wire_json()))
 
     client = TestClient(app)
@@ -203,6 +206,8 @@ def test_repair_path_records_llm_repair_or_regen_span(
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     import backend.routers.agreements_v2_api as av2
+
+    monkeypatch.setattr(av2, "OPENAI_API_KEY", "test-key")
 
     bad_json: Dict[str, Any] = {
         "title": "AGREEMENT",

@@ -85,7 +85,7 @@ def _seed_pending_proposal(client: TestClient, org_hdr: dict) -> tuple[str, str,
 
 def test_owner_apply_updates_corpus_and_preserves_audit(monkeypatch, isolated_agreement_env):
     client = TestClient(app)
-    org = {"X-Claw-Org-Id": "org-owner-apply"}
+    org = {"X-Claw-Org-Id": "org-owner-apply", "X-Claw-Test-Auth-User-Id": "test-owner"}
     aid, proposal_id, original_purpose = _seed_pending_proposal(client, org)
 
     applied = client.post(
@@ -105,7 +105,7 @@ def test_owner_apply_updates_corpus_and_preserves_audit(monkeypatch, isolated_ag
 
 def test_owner_reject_preserves_corpus_and_marks_rejected(monkeypatch, isolated_agreement_env):
     client = TestClient(app)
-    org = {"X-Claw-Org-Id": "org-owner-reject"}
+    org = {"X-Claw-Org-Id": "org-owner-reject", "X-Claw-Test-Auth-User-Id": "test-owner"}
     aid, proposal_id, original_purpose = _seed_pending_proposal(client, org)
 
     rejected = client.post(

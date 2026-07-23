@@ -16,8 +16,8 @@ def _reset_usage_economics_singleton():
     yield
     usage_economics_store_mod._store = None  # noqa: SLF001
 
-_ORG_A = {"X-Claw-Org-Id": "read-scope-org-a"}
-_ORG_B = {"X-Claw-Org-Id": "read-scope-org-b"}
+_ORG_A = {"X-Claw-Org-Id": "read-scope-org-a", "X-Claw-Test-Auth-User-Id": "owner-a"}
+_ORG_B = {"X-Claw-Org-Id": "read-scope-org-b", "X-Claw-Test-Auth-User-Id": "owner-b"}
 
 
 def test_no_credentials_returns_401_not_403(monkeypatch, tmp_path):

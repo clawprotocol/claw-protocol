@@ -40,11 +40,19 @@ from backend.config.storage_runtime import public_runtime_storage_summary
 
 
 def claw_environment() -> str:
-    return os.getenv("CLAW_ENVIRONMENT", "local").strip().lower()
+    """Normalized CLAW_ENVIRONMENT. Empty when unset/blank (fail-closed default)."""
+    return os.getenv("CLAW_ENVIRONMENT", "").strip().lower()
 
 
 def is_relaxed_claw_environment() -> bool:
-    return claw_environment() in ("local", "dev", "test")
+    """
+    Explicit local/dev/test only.
+
+    Unset, blank, or any other value is NOT relaxed — production-like fail-closed.
+    Local/test must set ``CLAW_ENVIRONMENT=local|dev|test`` explicitly.
+    """
+    env = claw_environment()
+    return env in ("local", "dev", "test")
 
 
 def is_production_like_claw_environment() -> bool:
@@ -58,18 +66,24 @@ def is_production_named_claw_environment() -> bool:
 
 def admin_http_request_authorized(request: Any) -> bool:
     """
-    Same rules as ``main._admin_ok`` for shared-secret operator HTTP surfaces.
+    Shared-secret second factor for legacy ops surfaces.
 
-    ``request`` must implement ``.headers.get(name)`` (e.g. Starlette ``Request``).
+    Production-like: secret required + constant-time compare.
+    Prefer ``resolve_operator_principal`` for privileged mutations.
     """
+    import secrets as _secrets
+
     secret = os.getenv("CLAW_ADMIN_SECRET", "").strip()
+    presented = (request.headers.get("x-claw-admin-secret") or "").strip()
     if is_production_like_claw_environment():
-        if not secret:
+        if not secret or not presented:
             return False
-        return (request.headers.get("x-claw-admin-secret") or "").strip() == secret
+        return _secrets.compare_digest(secret, presented)
     if not secret:
         return True
-    return (request.headers.get("x-claw-admin-secret") or "").strip() == secret
+    if not presented:
+        return False
+    return _secrets.compare_digest(secret, presented)
 
 
 def admin_endpoints_unauthenticated() -> bool:

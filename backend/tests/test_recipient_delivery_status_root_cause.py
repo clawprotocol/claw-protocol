@@ -21,7 +21,7 @@ from backend.services.recipient_delivery_status import (
 
 pytestmark = pytest.mark.unit
 
-_ORG_H = {"X-Claw-Org-Id": "test-org-recipient-status-root-cause"}
+_ORG_H = {"X-Claw-Org-Id": "test-org-recipient-status-root-cause", "X-Claw-Test-Auth-User-Id": "test-owner"}
 
 
 @pytest.fixture(autouse=True)

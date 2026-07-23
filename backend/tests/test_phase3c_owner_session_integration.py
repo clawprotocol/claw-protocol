@@ -6,10 +6,11 @@ import pytest
 from fastapi.testclient import TestClient
 
 from backend.main import app
+from backend.tests.auth_fixtures import persist_and_accept_review_snapshot
 
 pytestmark = pytest.mark.unit
 
-_ORG_H = {"X-Claw-Org-Id": "test-org-phase3c-integration"}
+_ORG_H = {"X-Claw-Org-Id": "test-org-phase3c-integration", "X-Claw-Test-Auth-User-Id": "test-owner"}
 
 
 @pytest.fixture(autouse=True)
@@ -129,6 +130,8 @@ def test_phase3c_owner_session_independence_full_api_lifecycle(
     aid = create.json()["id"]
     snap = _frozen_snapshot(aid)
     portable = _portable(aid)
+    corpus = str(portable["seed"]["corpusPlain"])
+    accepted = persist_and_accept_review_snapshot(client, aid, corpus, headers=_ORG_H)
 
     activate = client.post(
         f"/api/agreements/{aid}/signing-links-sent",
@@ -138,6 +141,8 @@ def test_phase3c_owner_session_independence_full_api_lifecycle(
             "document_id": "doc_phase3c",
             "portable_packet": portable,
             "frozen_signing_authority": snap,
+            "accepted_review_snapshot_id": accepted["snapshot_id"],
+            "accepted_review_snapshot_digest": accepted["corpus_sha256"],
             "targets": [],
         },
     )

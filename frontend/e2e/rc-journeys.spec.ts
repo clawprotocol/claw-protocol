@@ -34,7 +34,6 @@ import {
   assertAuthoritativePaidHashParity,
   assertAuthoritativePaidReviewDocument,
   advancePaidProSignerSetupToReviewDecision,
-  assertPaidProSignerDetailsPopulated,
   clickPaidProReviewSignatureTrack,
   readAuthoritativeCorpusText,
   readDevAuthoritativeCorpusLen,
@@ -311,12 +310,18 @@ test.describe("RC Journey 5 — Signing lifecycle (mocked packet)", () => {
         await clickPaidProReviewSignatureTrack(page);
       }
 
+      // advance* fills/asserts signer fields, then may leave the setup surface once prepare is ready.
       await advancePaidProSignerSetupToReviewDecision(page);
-      await assertPaidProSignerDetailsPopulated(page);
       await expect(
-        page.getByRole("button", {
-          name: /Prepare for signing|Complete signer details|Finalize signer details/i,
-        }).first(),
+        page
+          .getByTestId("paid-pro-forced-prepare-signatures")
+          .or(page.getByTestId("simple-pro-send-for-signature"))
+          .or(
+            page.getByRole("button", {
+              name: /Prepare for signing|Complete signer details|Finalize signer details/i,
+            }),
+          )
+          .first(),
       ).toBeVisible({ timeout: 60_000 });
       await captureMilestone(page, "j5", "prepare-for-signing");
     } finally {

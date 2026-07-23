@@ -17,7 +17,7 @@ from backend.services.vs01_signing_envelope_provenance import (
 
 pytestmark = pytest.mark.unit
 
-_ORG_H = {"X-Claw-Org-Id": "test-org-envelope-tamper"}
+_ORG_H = {"X-Claw-Org-Id": "test-org-envelope-tamper", "X-Claw-Test-Auth-User-Id": "test-owner"}
 _SECRET = "unit-test-envelope-provenance-secret"
 
 

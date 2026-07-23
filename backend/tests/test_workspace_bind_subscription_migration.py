@@ -126,7 +126,7 @@ def test_paid_user_workspace_org_can_create_draft_after_bind(isolated_stores):
 def test_free_user_still_blocked_at_third_draft(isolated_stores):
     _eco, _usage = isolated_stores
     client = TestClient(app)
-    h = {"X-Claw-Org-Id": "test-org-free-488"}
+    h = {"X-Claw-Org-Id": "test-org-free-488", "X-Claw-Test-Auth-User-Id": "test-owner"}
 
     draft_body = {
         "title": "T",
@@ -274,7 +274,7 @@ def test_draft_post_auto_repair_without_client_header_when_bound_has_agreements(
 
     _eco, _usage = isolated_stores
     client = TestClient(app)
-    h = {"X-Claw-Org-Id": "test-org-free-489"}
+    h = {"X-Claw-Org-Id": "test-org-free-489", "X-Claw-Test-Auth-User-Id": "test-owner"}
 
     draft_body = {
         "title": "T",

@@ -50,6 +50,8 @@ class LayoutLocalizeRequest(BaseModel):
 @router.post("/analyze")
 def api_layout_analyze(body: LayoutAnalyzeRequest, request: Request) -> Dict[str, Any]:
     org_for_hooks = require_claw_org_id_header(request)
+    from backend.security.commercial_auth import require_commercial_owner_principal
+    require_commercial_owner_principal(request)
     if body.document_id and body.content_base64:
         raise HTTPException(status_code=400, detail="use_either_document_id_or_content_not_both")
 
@@ -140,6 +142,8 @@ def api_get_layout_analysis(analysis_id: str) -> Dict[str, Any]:
 def api_signing_prep(analysis_id: str, request: Request) -> Dict[str, Any]:
     """Placement overlay for a future signing workflow — does not alter source document or proof stores."""
     require_claw_org_id_header(request)
+    from backend.security.commercial_auth import require_commercial_owner_principal
+    require_commercial_owner_principal(request)
     aid = analysis_id.strip()
     data = load_layout_analysis(aid)
     if not data:
@@ -186,6 +190,8 @@ def api_put_review_manifest(analysis_id: str, body: ReviewManifestPutBody, reque
     if not data:
         raise HTTPException(status_code=404, detail="analysis_not_found")
     org_for_hooks = require_claw_org_id_header(request)
+    from backend.security.commercial_auth import require_commercial_owner_principal
+    require_commercial_owner_principal(request)
 
     def _emit(event: str, **kwargs: Any) -> None:
         emit_document_layout_event(event, analysis_id=aid, **kwargs)

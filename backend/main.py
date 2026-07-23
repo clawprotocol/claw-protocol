@@ -477,20 +477,14 @@ def _log_break_glass_admin(req: Request, action: str) -> None:
 
 def _admin_ok(req: Request) -> bool:
     """
-    Admin-only endpoints (anchor batch, deploy readiness, runtime summary).
+    Legacy shared-secret gate for ops diagnostics.
 
-    - Production-like (CLAW_ENVIRONMENT not local/dev/test): CLAW_ADMIN_SECRET is **required**;
-      missing secret => deny (fail closed).
-    - Relaxed envs: unset secret => allow (local ergonomics); set secret => header must match.
+    Privileged mutations should use resolve_operator_principal. This helper is
+    constant-time and fail-closed in production-like environments.
     """
-    secret = os.getenv("CLAW_ADMIN_SECRET", "").strip()
-    if _is_production_like():
-        if not secret:
-            return False
-        return req.headers.get("x-claw-admin-secret") == secret
-    if not secret:
-        return True
-    return req.headers.get("x-claw-admin-secret") == secret
+    from backend.config.deployment_runtime import admin_http_request_authorized
+
+    return bool(admin_http_request_authorized(req))
 
 
 def _multipart_enabled() -> bool:

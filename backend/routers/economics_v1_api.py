@@ -158,8 +158,11 @@ async def create_affiliate(body: CreateAffiliateBody) -> Dict[str, Any]:
 
 @router.post("/affiliates/create-link")
 async def create_affiliate_link(request: Request, body: CreateAffiliateLinkBody) -> Dict[str, Any]:
+    from backend.security.commercial_auth import require_commercial_owner_principal
+
     eco = get_economics_store()
     eco.init_schema()
+    require_commercial_owner_principal(request)
     org_id = require_claw_org_id_header(request).strip()
     st = _affiliate_access_status_payload(eco, org_id=org_id, email=None)
     eligibility = st.get("eligibility") or {}
@@ -549,15 +552,28 @@ async def affiliate_ops_review_access_request(
 
 
 @router.get("/orgs/{org_id}/keys")
-async def get_org_keys(org_id: str) -> Dict[str, Any]:
+async def get_org_keys(org_id: str, request: Request) -> Dict[str, Any]:
+    from backend.security.commercial_auth import require_org_matches_principal
+
+    require_org_matches_principal(request, org_id)
     return usage_metering.get_key_balance(org_id)
 
 
 @router.post("/usage/meter")
-async def post_meter(body: MeterUsageBody) -> Dict[str, Any]:
+async def post_meter(request: Request, body: MeterUsageBody) -> Dict[str, Any]:
+    from backend.security.commercial_auth import require_org_matches_principal
+
+    uid = require_org_matches_principal(request, body.org_id)
+    # Actor user_id must match authenticated principal when provided.
+    body_uid = (body.user_id or "").strip()
+    if body_uid and body_uid != uid:
+        raise HTTPException(
+            status_code=403,
+            detail={"code": "cross_user_denied", "message": "Meter user_id does not match principal."},
+        )
     out = usage_metering.meter_usage(
         org_id=body.org_id,
-        user_id=body.user_id,
+        user_id=uid,
         service_type=body.service_type,
         unit_count=body.unit_count,
         reference_id=body.reference_id,
@@ -585,7 +601,10 @@ async def get_usage_bundle(usage_id: str) -> Dict[str, Any]:
 
 
 @router.get("/subscriptions/{org_id}")
-async def get_subscription(org_id: str) -> Dict[str, Any]:
+async def get_subscription(org_id: str, request: Request) -> Dict[str, Any]:
+    from backend.security.commercial_auth import require_org_matches_principal
+
+    require_org_matches_principal(request, org_id)
     eco = get_economics_store()
     eco.init_schema()
     row = subs.get_subscription_for_org(eco, org_id)

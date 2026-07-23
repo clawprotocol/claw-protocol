@@ -42,7 +42,7 @@ def _draft_with_reviewer(client: TestClient, org_hdr: dict) -> tuple[str, dict]:
 
 def test_recipient_proposal_stage_then_finalize(monkeypatch, isolated_agreement_env):
     client = TestClient(app)
-    org = {"X-Claw-Org-Id": "org-stage-finalize"}
+    org = {"X-Claw-Org-Id": "org-stage-finalize", "X-Claw-Test-Auth-User-Id": "test-owner"}
     aid, ctx = _draft_with_reviewer(client, org)
     reviewer_id = ctx["reviewer_id"]
     draft = ctx["draft"]
@@ -111,7 +111,7 @@ def test_recipient_proposal_stage_then_finalize(monkeypatch, isolated_agreement_
 
 def test_stage_derives_proposer_from_token_when_body_empty(monkeypatch, isolated_agreement_env):
     client = TestClient(app)
-    org = {"X-Claw-Org-Id": "org-token-proposer"}
+    org = {"X-Claw-Org-Id": "org-token-proposer", "X-Claw-Test-Auth-User-Id": "test-owner"}
     aid, ctx = _draft_with_reviewer(client, org)
     reviewer_id = ctx["reviewer_id"]
     draft = ctx["draft"]
@@ -157,7 +157,7 @@ def test_stage_derives_proposer_from_token_when_body_empty(monkeypatch, isolated
 
 def test_stage_infers_single_reviewer_without_token_pid(monkeypatch, isolated_agreement_env):
     client = TestClient(app)
-    org = {"X-Claw-Org-Id": "org-infer-proposer"}
+    org = {"X-Claw-Org-Id": "org-infer-proposer", "X-Claw-Test-Auth-User-Id": "test-owner"}
     aid, ctx = _draft_with_reviewer(client, org)
     reviewer_id = ctx["reviewer_id"]
     draft = ctx["draft"]
@@ -223,7 +223,7 @@ def test_stage_infers_assumed_owner_counterparty_without_explicit_owner(
 ):
     """Paid-pro style: both parties role=party; index 0 treated as owner."""
     client = TestClient(app)
-    org = {"X-Claw-Org-Id": "org-assumed-owner"}
+    org = {"X-Claw-Org-Id": "org-assumed-owner", "X-Claw-Test-Auth-User-Id": "test-owner"}
     r = client.post(
         "/api/agreements/draft",
         headers=org,
@@ -272,7 +272,7 @@ def test_stage_infers_assumed_owner_counterparty_without_explicit_owner(
 
 def test_stage_fails_ambiguous_multiple_counterparties(monkeypatch, isolated_agreement_env):
     client = TestClient(app)
-    org = {"X-Claw-Org-Id": "org-ambiguous"}
+    org = {"X-Claw-Org-Id": "org-ambiguous", "X-Claw-Test-Auth-User-Id": "test-owner"}
     r = client.post(
         "/api/agreements/draft",
         headers=org,
@@ -320,7 +320,7 @@ def test_stage_fails_ambiguous_multiple_counterparties(monkeypatch, isolated_agr
 def test_stage_preserves_canonical_draft_in_pro_redline_only(monkeypatch, isolated_agreement_env):
     """Staged proposal corpus is separate; canonical purpose unchanged until owner applies."""
     client = TestClient(app)
-    org = {"X-Claw-Org-Id": "org-corpus-separate"}
+    org = {"X-Claw-Org-Id": "org-corpus-separate", "X-Claw-Test-Auth-User-Id": "test-owner"}
     aid, ctx = _draft_with_reviewer(client, org)
     reviewer_id = ctx["reviewer_id"]
     draft = ctx["draft"]
@@ -379,7 +379,7 @@ def test_finalize_staged_proposal_queues_audit_without_mutating_canonical_purpos
     monkeypatch, isolated_agreement_env
 ):
     client = TestClient(app)
-    org = {"X-Claw-Org-Id": "org-finalize-corpus"}
+    org = {"X-Claw-Org-Id": "org-finalize-corpus", "X-Claw-Test-Auth-User-Id": "test-owner"}
     aid, ctx = _draft_with_reviewer(client, org)
     reviewer_id = ctx["reviewer_id"]
     draft = ctx["draft"]
@@ -438,7 +438,7 @@ def test_finalize_staged_proposal_queues_audit_without_mutating_canonical_purpos
 def test_stage_invalid_token_returns_403_not_500(monkeypatch, isolated_agreement_env):
     monkeypatch.setenv("CLAW_RECIPIENT_ACCESS_TOKEN_REQUIRED", "1")
     client = TestClient(app)
-    org = {"X-Claw-Org-Id": "org-bad-token"}
+    org = {"X-Claw-Org-Id": "org-bad-token", "X-Claw-Test-Auth-User-Id": "test-owner"}
     aid, ctx = _draft_with_reviewer(client, org)
     reviewer_id = ctx["reviewer_id"]
     draft = ctx["draft"]
@@ -468,7 +468,7 @@ def test_stage_invalid_token_returns_403_not_500(monkeypatch, isolated_agreement
 
 def test_stage_missing_instruction_returns_400(monkeypatch, isolated_agreement_env):
     client = TestClient(app)
-    org = {"X-Claw-Org-Id": "org-no-instruction"}
+    org = {"X-Claw-Org-Id": "org-no-instruction", "X-Claw-Test-Auth-User-Id": "test-owner"}
     aid, ctx = _draft_with_reviewer(client, org)
     reviewer_id = ctx["reviewer_id"]
     draft = ctx["draft"]
@@ -511,7 +511,7 @@ def test_stage_missing_instruction_returns_400(monkeypatch, isolated_agreement_e
 
 def test_stage_requires_proposer_without_token(monkeypatch, isolated_agreement_env):
     client = TestClient(app)
-    org = {"X-Claw-Org-Id": "org-no-token-proposer"}
+    org = {"X-Claw-Org-Id": "org-no-token-proposer", "X-Claw-Test-Auth-User-Id": "test-owner"}
     aid, ctx = _draft_with_reviewer(client, org)
     draft = ctx["draft"]
 

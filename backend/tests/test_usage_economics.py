@@ -27,7 +27,7 @@ def test_free_tier_blocks_third_draft(isolated_usage_db, monkeypatch: pytest.Mon
     # Default CLAW_ENVIRONMENT=local relaxes the free draft cap; enforce prod-like limits for this assertion.
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_STRICT_IN_DEV", "1")
     client = TestClient(app)
-    h = {"X-Claw-Org-Id": "test-org-free"}
+    h = {"X-Claw-Org-Id": "test-org-free", "X-Claw-Test-Auth-User-Id": "test-owner"}
 
     for _ in range(2):
         r = client.post(
@@ -69,7 +69,7 @@ def test_review_first_paid_pro_persist_bypasses_free_draft_cap(isolated_usage_db
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_ENABLED", "1")
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_STRICT_IN_DEV", "1")
     client = TestClient(app)
-    h = {"X-Claw-Org-Id": "test-org-review-first"}
+    h = {"X-Claw-Org-Id": "test-org-review-first", "X-Claw-Test-Auth-User-Id": "test-owner"}
     body = {
         "title": "Paid Pro Review",
         "jurisdiction": "CA",
@@ -136,10 +136,17 @@ def test_ip_burst_sets_soft_throttle_for_free_tier(isolated_usage_db, monkeypatc
     last_org = ""
     for _ in range(4):
         last_org = f"burst-org-{uuid.uuid4().hex[:10]}"
-        r = client.post("/api/agreements/draft", headers={"X-Claw-Org-Id": last_org}, json=body)
+        r = client.post(
+            "/api/agreements/draft",
+            headers={"X-Claw-Org-Id": last_org, "X-Claw-Test-Auth-User-Id": "burst-owner"},
+            json=body,
+        )
         assert r.status_code == 200, r.text
 
-    rsum = client.get("/api/agreements/usage/summary", headers={"X-Claw-Org-Id": last_org})
+    rsum = client.get(
+        "/api/agreements/usage/summary",
+        headers={"X-Claw-Org-Id": last_org, "X-Claw-Test-Auth-User-Id": "burst-owner"},
+    )
     assert rsum.status_code == 200
     assert rsum.json().get("soft_throttle") is True
 
@@ -147,7 +154,7 @@ def test_ip_burst_sets_soft_throttle_for_free_tier(isolated_usage_db, monkeypatc
 def test_usage_summary_no_keys_in_payload(isolated_usage_db, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_ENABLED", "1")
     client = TestClient(app)
-    r = client.get("/api/agreements/usage/summary", headers={"X-Claw-Org-Id": "sum-org"})
+    r = client.get("/api/agreements/usage/summary", headers={"X-Claw-Org-Id": "sum-org", "X-Claw-Test-Auth-User-Id": "test-owner"})
     assert r.status_code == 200
     payload = r.json()
     assert "keys" not in str(payload).lower()

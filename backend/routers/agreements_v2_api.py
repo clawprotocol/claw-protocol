@@ -237,11 +237,10 @@ def _agreements_write_allowed() -> bool:
 
 
 def _owner_mutation_guards(request: Request, agreement_id: str, *, surface: str) -> None:
-    require_claw_org_id_header(request)
-    from backend.security.commercial_auth import require_authenticated_dashboard_principal
+    from backend.security.commercial_auth import require_commercial_owner_principal
 
     # Org headers alone are never authentication — require a validated principal.
-    require_authenticated_dashboard_principal(request)
+    require_commercial_owner_principal(request)
     assert_registered_owner_matches(request, agreement_id)
     assert_free_incomplete_draft_not_expired(agreement_id, surface=surface)
 
@@ -1940,7 +1939,8 @@ def _user_payload_premium_refine(
 
 @router.post("/premium-refine", response_model=PremiumRefineResponse)
 def premium_refine(request: Request, body: PremiumRefineRequest) -> PremiumRefineResponse:
-    require_claw_org_id_header(request)
+    from backend.security.commercial_auth import require_commercial_owner_principal
+    require_commercial_owner_principal(request)
     ok_txt, msg_txt = validate_negotiate_text(body.intake_text, "owner")
     if not ok_txt:
         raise HTTPException(status_code=400, detail=msg_txt)
@@ -2696,7 +2696,8 @@ def _fallback_premium_review_route(payload: Dict[str, Any]) -> PremiumReviewRout
 
 @router.post("/premium-finalize-audit", response_model=PremiumFinalizeAuditResponse)
 def premium_finalize_audit(request: Request, body: PremiumFinalizeAuditRequest) -> PremiumFinalizeAuditResponse:
-    require_claw_org_id_header(request)
+    from backend.security.commercial_auth import require_commercial_owner_principal
+    require_commercial_owner_principal(request)
     ok_txt, msg_txt = validate_negotiate_text(body.intake_text, "owner")
     if not ok_txt:
         raise HTTPException(status_code=400, detail=msg_txt)
@@ -2788,7 +2789,8 @@ def premium_finalize_audit(request: Request, body: PremiumFinalizeAuditRequest) 
 
 @router.post("/premium-review-route", response_model=PremiumReviewRouteResponse)
 def premium_review_route(request: Request, body: PremiumReviewRouteRequest) -> PremiumReviewRouteResponse:
-    require_claw_org_id_header(request)
+    from backend.security.commercial_auth import require_commercial_owner_principal
+    require_commercial_owner_principal(request)
     ok_txt, msg_txt = validate_negotiate_text(body.intake_text, "owner")
     if not ok_txt:
         raise HTTPException(status_code=400, detail=msg_txt)
@@ -4353,7 +4355,8 @@ def _parse_intake_system_prompt_premium() -> str:
 
 @router.post("/parse", response_model=AgreementParseResponse)
 def parse_agreement_intake(request: Request, body: AgreementParseRequest) -> AgreementParseResponse:
-    require_claw_org_id_header(request)
+    from backend.security.commercial_auth import require_commercial_owner_principal
+    require_commercial_owner_principal(request)
     parse_debug_client = os.getenv("CLAW_AGREEMENT_PARSE_CLIENT_DEBUG", "").strip() == "1"
     if body.ai_model_class == "premium":
         system_prompt = _parse_intake_system_prompt_premium()
@@ -4451,7 +4454,8 @@ def premium_missing_facts(request: Request, body: PremiumMissingFactsRequest) ->
     """
     Pre–full-draft: up to 5 high-value open questions. Fail-open returns empty questions on model errors.
     """
-    require_claw_org_id_header(request)
+    from backend.security.commercial_auth import require_commercial_owner_principal
+    require_commercial_owner_principal(request)
     ok_txt, msg_txt = validate_negotiate_text(body.intake_text, "owner")
     if not ok_txt:
         raise HTTPException(status_code=400, detail=msg_txt)
@@ -4556,7 +4560,8 @@ def premium_finalize(request: Request, body: PremiumFinalizationRequest) -> Prem
     This route never runs from first-pass generation automatically. The client must
     call it deliberately after material clarification answers or a repair-needed state.
     """
-    require_claw_org_id_header(request)
+    from backend.security.commercial_auth import require_commercial_owner_principal
+    require_commercial_owner_principal(request)
     ok_txt, msg_txt = validate_negotiate_text(body.original_intake, "owner")
     if not ok_txt:
         raise HTTPException(status_code=400, detail=msg_txt)
@@ -4594,7 +4599,8 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Respo
     One-shot premium model: full agreement document (not stitched field transforms).
     Returns JSON with `document_text` as the primary body for LawDog Pro read-only preview.
     """
-    require_claw_org_id_header(request)
+    from backend.security.commercial_auth import require_commercial_owner_principal
+    require_commercial_owner_principal(request)
     ok_txt, msg_txt = validate_negotiate_text(body.intake_text, "owner")
     if not ok_txt:
         raise HTTPException(status_code=400, detail=msg_txt)
@@ -5317,7 +5323,8 @@ def premium_agreement_review(request: Request, body: PremiumAgreementReviewReque
     After premium full draft (or final premium body): light AI pass for clarity / completeness nudges.
     Does not replace the agreement; returns structured bullets for the UI.
     """
-    require_claw_org_id_header(request)
+    from backend.security.commercial_auth import require_commercial_owner_principal
+    require_commercial_owner_principal(request)
     ok_txt, msg_txt = validate_negotiate_text(body.intake_text, "owner")
     if not ok_txt:
         raise HTTPException(status_code=400, detail=msg_txt)
@@ -5382,7 +5389,8 @@ def premium_agreement_review(request: Request, body: PremiumAgreementReviewReque
 @router.get("/usage/summary")
 def get_agreement_usage_summary(request: Request) -> Dict[str, Any]:
     """User-facing usage (no internal Key units)."""
-    require_claw_org_id_header(request)
+    from backend.security.commercial_auth import require_commercial_owner_principal
+    require_commercial_owner_principal(request)
     return usage_summary_for_subject(resolve_subject_from_request(request))
 
 
@@ -5399,7 +5407,8 @@ def _ensure_agreement_parties_have_ids(parties: List[AgreementParty]) -> List[Ag
 
 @router.post("/draft")
 def create_agreement_draft(body: AgreementDraftCreate, request: Request) -> Dict[str, Any]:
-    require_claw_org_id_header(request)
+    from backend.security.commercial_auth import require_commercial_owner_principal
+    require_commercial_owner_principal(request)
     from backend.security.request_identity import resolve_verified_subject_from_request
 
     subject = resolve_verified_subject_from_request(request)
@@ -5475,7 +5484,8 @@ class AgreementDraftForkRequest(BaseModel):
 
 @router.post("/draft-from-agreement")
 def create_draft_from_prior_agreement(body: AgreementDraftForkRequest, request: Request) -> Dict[str, Any]:
-    require_claw_org_id_header(request)
+    from backend.security.commercial_auth import require_commercial_owner_principal
+    require_commercial_owner_principal(request)
     subject = resolve_subject_from_request(request)
     request_ip = request.client.host if request.client else "unknown"
     assert_can_create_draft(subject_ref=subject, request_ip=request_ip or "unknown")
@@ -5832,10 +5842,8 @@ def recipient_access_validate(token: str = "", agreement_id: str = "") -> Dict[s
 @router.get("/workspace-index")
 def get_agreements_workspace_index(request: Request) -> Dict[str, Any]:
     """Lightweight list for Agreement Workspace landing (local / single-tenant style)."""
-    require_claw_org_id_header(request)
-    from backend.security.commercial_auth import require_authenticated_dashboard_principal
-
-    require_authenticated_dashboard_principal(request)
+    from backend.security.commercial_auth import require_commercial_owner_principal
+    require_commercial_owner_principal(request)
     subject = resolve_subject_from_request(request)
     folder_names = _folder_name_map_for_subject(subject)
     summaries: List[Dict[str, Any]] = []
@@ -6232,7 +6240,8 @@ def post_recipient_access_token(
 @router.post("/{agreement_id}/review-delivery-dry-run")
 def post_agreement_review_delivery_dry_run(agreement_id: str, request: Request) -> Dict[str, Any]:
     """Owner-only: count + structured email payloads without minting tokens (``review_url`` always null)."""
-    require_claw_org_id_header(request)
+    from backend.security.commercial_auth import require_commercial_owner_principal
+    require_commercial_owner_principal(request)
     subject = resolve_subject_from_request(request)
     aid = (agreement_id or "").strip()
     if not aid or not workspace_lists_agreement_for_subject(aid, subject):
@@ -7148,7 +7157,10 @@ def post_signing_packet_reissue(
     prior_portable = prior.get("portable") if isinstance(prior.get("portable"), dict) else None
     # Post-cutover commercial: always require accepted snapshot. Pure pre-cutover sealed
     # packets may continue until deliberate sealed-corpus re-attestation.
-    from backend.services.accepted_review_snapshot import requires_accepted_snapshot_for_continuation
+    from backend.services.accepted_review_snapshot import (
+        get_accepted_snapshot_record,
+        requires_accepted_snapshot_for_continuation,
+    )
 
     require_snap = requires_accepted_snapshot_for_continuation(draft)
     portable = _attest_portable_envelope_or_400(
@@ -7158,6 +7170,10 @@ def post_signing_packet_reissue(
         stored_portable=prior_portable,
         surface="signing_packet_reissue",
         require_accepted_snapshot=require_snap,
+    )
+    authority_mode = (
+        str(portable.get("authorityMode") or "").strip()
+        or ("accepted_review_snapshot" if require_snap else "legacy_packet")
     )
     from backend.services.frozen_signing_authority import (
         PACKET_STATE_ACTIVE,
@@ -7373,20 +7389,41 @@ def post_vs01_signer_complete(
         if sp:
             display_name = (sp.name or "").strip()
 
-    portable_packet = body.portable_packet if isinstance(body.portable_packet, dict) else None
-    if isinstance(portable_packet, dict):
-        from backend.services.accepted_review_snapshot import requires_accepted_snapshot_for_continuation
+    from backend.services.accepted_review_snapshot import requires_accepted_snapshot_for_continuation
 
-        stored_pkt = draft.vs01_signing_packet_v1 if isinstance(draft.vs01_signing_packet_v1, dict) else {}
-        stored_portable = stored_pkt.get("portable") if isinstance(stored_pkt.get("portable"), dict) else None
-        require_snap = requires_accepted_snapshot_for_continuation(draft)
+    # Commercial post-cutover: every completion path must bind accepted snapshot,
+    # including requests that omit portable_packet (hydrate from stored packet).
+    require_snap = requires_accepted_snapshot_for_continuation(draft)
+    stored_pkt = draft.vs01_signing_packet_v1 if isinstance(draft.vs01_signing_packet_v1, dict) else {}
+    stored_portable = stored_pkt.get("portable") if isinstance(stored_pkt.get("portable"), dict) else None
+    portable_packet = body.portable_packet if isinstance(body.portable_packet, dict) else None
+    if require_snap:
+        if portable_packet is None and isinstance(stored_portable, dict):
+            portable_packet = dict(stored_portable)
+        if not isinstance(portable_packet, dict):
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "code": "accepted_review_snapshot_required",
+                    "message": "Signer completion requires an accepted review snapshot binding.",
+                },
+            )
         portable_packet = _attest_portable_envelope_or_400(
             agreement_id=aid,
             portable=portable_packet,
             draft=draft,
             stored_portable=stored_portable,
             surface="vs01_signer_complete",
-            require_accepted_snapshot=require_snap,
+            require_accepted_snapshot=True,
+        )
+    elif isinstance(portable_packet, dict):
+        portable_packet = _attest_portable_envelope_or_400(
+            agreement_id=aid,
+            portable=portable_packet,
+            draft=draft,
+            stored_portable=stored_portable,
+            surface="vs01_signer_complete",
+            require_accepted_snapshot=False,
         )
 
     pending = orchestrate_vs01_signer_complete(
@@ -9666,7 +9703,8 @@ def negotiate_assist(
     """
     session_type = body.session_type
     if session_type == "owner":
-        require_claw_org_id_header(request)
+        from backend.security.commercial_auth import require_commercial_owner_principal
+        require_commercial_owner_principal(request)
         assert_registered_owner_matches(request, agreement_id)
     elif session_type == "recipient":
         assert_agreement_recipient_write_allowed(request, agreement_id, allowed_modes=("review",))
@@ -9760,7 +9798,8 @@ def revise_agreement(
     response: Response,
 ):
     if body.session_type == "owner":
-        require_claw_org_id_header(request)
+        from backend.security.commercial_auth import require_commercial_owner_principal
+        require_commercial_owner_principal(request)
         assert_registered_owner_matches(request, agreement_id)
     elif body.session_type == "recipient":
         assert_agreement_recipient_write_allowed(request, agreement_id, allowed_modes=("review",))

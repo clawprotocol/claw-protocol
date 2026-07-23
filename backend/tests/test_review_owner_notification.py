@@ -18,7 +18,7 @@ from backend.usage_economics import store as usage_economics_store_mod
 
 pytestmark = pytest.mark.unit
 
-_ORG_H = {"X-Claw-Org-Id": "test-org-owner-notify"}
+_ORG_H = {"X-Claw-Org-Id": "test-org-owner-notify", "X-Claw-Test-Auth-User-Id": "test-owner"}
 
 
 @pytest.fixture(autouse=True)

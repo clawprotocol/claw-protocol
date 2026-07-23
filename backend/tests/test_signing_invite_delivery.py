@@ -10,10 +10,12 @@ from fastapi.testclient import TestClient
 from backend.main import app
 from backend.services.email.review_delivery import COUNTERPARTY_REVIEWS_COMPLETE_NOTIFIED_EVENT
 from backend.services.email.signing_delivery import SIGNING_INVITE_EMAILS_SENT_EVENT
+from backend.tests.auth_fixtures import persist_and_accept_review_snapshot
 
 pytestmark = pytest.mark.unit
 
-_ORG_H = {"X-Claw-Org-Id": "test-org-signing-invite"}
+_ORG_H = {"X-Claw-Org-Id": "test-org-signing-invite", "X-Claw-Test-Auth-User-Id": "test-owner"}
+_CORPUS = "x" * 1600
 
 
 @pytest.fixture(autouse=True)
@@ -190,6 +192,7 @@ def test_signing_links_sent_persists_vs01_portable_packet_for_public_hydration(
     mock_client = _mock_resend_success()
     client = TestClient(app)
     aid = _create_agreement(client)
+    accepted = persist_and_accept_review_snapshot(client, aid, _CORPUS, headers=_ORG_H)
     portable = {
         "v": 1,
         "seed": {
@@ -197,7 +200,7 @@ def test_signing_links_sent_persists_vs01_portable_packet_for_public_hydration(
             "documentId": "doc_test346",
             "agreementId": aid,
             "corpusHash": "abc123",
-            "corpusPlain": "x" * 1600,
+            "corpusPlain": _CORPUS,
         },
         "fields": [{"id": "f1", "type": "signature", "page": 0, "x": 0.1, "y": 0.1, "width": 0.2, "height": 0.05, "counterpartyId": "owner"}],
         "roles": [{"roleId": "role_owner", "vs01CounterpartyId": "owner", "partyIndex": 0}],
@@ -209,6 +212,8 @@ def test_signing_links_sent_persists_vs01_portable_packet_for_public_hydration(
         "document_id": "doc_test346",
         "portable_packet": portable,
         "frozen_signing_authority": _minimal_frozen_authority(aid, corpus_hash="abc123"),
+        "accepted_review_snapshot_id": accepted["snapshot_id"],
+        "accepted_review_snapshot_digest": accepted["corpus_sha256"],
         "targets": [
             {
                 "email": "owner@example.com",

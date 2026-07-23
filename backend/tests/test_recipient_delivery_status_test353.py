@@ -14,7 +14,7 @@ from backend.tests.conftest_usage_economics_helpers import register_test_agreeme
 
 pytestmark = pytest.mark.unit
 
-_ORG_H = {"X-Claw-Org-Id": "test-org-recipient-status-test353"}
+_ORG_H = {"X-Claw-Org-Id": "test-org-recipient-status-test353", "X-Claw-Test-Auth-User-Id": "test-owner"}
 _EXACT_FAILING_AID = "10737cbf-7b9a-491a-ad50-065486e70a25"
 
 

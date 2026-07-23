@@ -38,6 +38,8 @@ def _subject(request: Request) -> str:
 
 def _require_memory_tier(request: Request, minimum: str) -> tuple[str, str]:
     oid = require_claw_org_id_header(request)
+    from backend.security.commercial_auth import require_commercial_owner_principal
+    require_commercial_owner_principal(request)
     subj = _subject(request)
     tier = agreement_memory_tier_for_subject(subj)
     order = ("none", "standard", "full")
@@ -66,6 +68,8 @@ class MemoryIndexBody(BaseModel):
 def agreement_memory_status(request: Request) -> Dict[str, Any]:
     """Public to org: tier + capabilities (no indexing)."""
     oid = require_claw_org_id_header(request)
+    from backend.security.commercial_auth import require_commercial_owner_principal
+    require_commercial_owner_principal(request)
     subj = _subject(request)
     tier = agreement_memory_tier_for_subject(subj)
     store = get_agreement_memory_store()

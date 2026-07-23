@@ -6169,6 +6169,58 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   }, [createProductionTwoPane, simpleProductFlow, intakeCombined]);
 
   /** Rehydrate paid premium state from session snapshot (refresh / return navigation). */
+  async function hydrateCommercialReviewOnlyAfterServerGet(
+    snap: PremiumCompletionSnapshot,
+  ): Promise<boolean> {
+    const agreementId = (
+      reviewAgreementIdRef.current ||
+      readCreateReviewAgreementResumeId() ||
+      ""
+    ).trim();
+    if (!agreementId) {
+      setProFullDraftCustomGateMessage(
+        "Server review snapshot is required. Open the agreement again or contact support@lawdog.me.",
+      );
+      setPremiumSendPathUnlocked(false);
+      setPremiumPostCheckoutPhase(null);
+      setPremiumPipelineUserMessage(null);
+      return false;
+    }
+    setPremiumPostCheckoutPhase("processing");
+    setPremiumPipelineUserMessage("Confirming your server-locked agreement…");
+    const hydrated = await hydrateCommercialReviewFromServerSnapshot({ agreementId });
+    if (!hydrated.ok) {
+      setProFullDraftCustomGateMessage(
+        "Could not confirm the server review snapshot. Retry or contact support@lawdog.me.",
+      );
+      setPremiumSendPathUnlocked(false);
+      setPremiumPostCheckoutPhase(null);
+      setPremiumPipelineUserMessage(null);
+      return false;
+    }
+    if (
+      hydrated.display.snapshotId !== hydrated.snapshot.snapshot_id ||
+      hydrated.display.corpusSha256 !== hydrated.snapshot.corpus_sha256.toLowerCase() ||
+      hydrated.display.corpusLength !== hydrated.snapshot.corpus_length
+    ) {
+      setProFullDraftCustomGateMessage(
+        "Server review snapshot authority mismatch. Prepare is blocked. Contact support@lawdog.me.",
+      );
+      setPremiumSendPathUnlocked(false);
+      setPremiumPostCheckoutPhase(null);
+      setPremiumPipelineUserMessage(null);
+      return false;
+    }
+    applyHydrationFromPremiumSnapshot({
+      ...snap,
+      premiumWinningBodyText: hydrated.snapshot.corpus_plain,
+      premiumReadonlyPlainText: hydrated.snapshot.corpus_plain,
+    });
+    setPremiumPostCheckoutPhase(null);
+    setPremiumPipelineUserMessage(null);
+    return true;
+  }
+
   function applyHydrationFromPremiumSnapshot(snap: PremiumCompletionSnapshot): void {
     const hydrateStartedAt = typeof performance !== "undefined" ? performance.now() : Date.now();
     if (hasCurrentSessionFreeStarterIntent() && !hasCurrentSessionProEntitlement()) return;
@@ -7237,17 +7289,19 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           } catch {
             /* ignore */
           }
-          applyHydrationFromPremiumSnapshot(postCheckoutReturnSnap);
-          paidCheckoutCompletedRef.current = true;
-          logPaymentFlowStage("premium_unlock_received", {
-            agreementId: (reviewAgreementIdRef.current || readCreateReviewAgreementResumeId() || "").trim() || null,
-            premiumUnlocked: true,
-            paymentState: "snapshot_return_hydrate",
-          });
-          logPaymentFlowStage("checkout_complete", {
-            agreementId: (reviewAgreementIdRef.current || readCreateReviewAgreementResumeId() || "").trim() || null,
-            premiumUnlocked: true,
-            corpusIntegrity: "ok",
+          void hydrateCommercialReviewOnlyAfterServerGet(postCheckoutReturnSnap).then((ok) => {
+            if (!ok) return;
+            paidCheckoutCompletedRef.current = true;
+            logPaymentFlowStage("premium_unlock_received", {
+              agreementId: (reviewAgreementIdRef.current || readCreateReviewAgreementResumeId() || "").trim() || null,
+              premiumUnlocked: true,
+              paymentState: "snapshot_return_server_hydrate",
+            });
+            logPaymentFlowStage("checkout_complete", {
+              agreementId: (reviewAgreementIdRef.current || readCreateReviewAgreementResumeId() || "").trim() || null,
+              premiumUnlocked: true,
+              corpusIntegrity: "ok",
+            });
           });
           return;
         }
@@ -9776,17 +9830,19 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             });
             const authoritativeSnap = readPremiumCompletionSnapshot();
             if (authoritativeSnap) {
-              applyHydrationFromPremiumSnapshot(authoritativeSnap);
-              paidCheckoutCompletedRef.current = true;
-              logPaymentFlowStage("premium_unlock_received", {
-                agreementId: (reviewAgreementIdRef.current || readCreateReviewAgreementResumeId() || "").trim() || null,
-                premiumUnlocked: true,
-                paymentState: "ensure_skipped_authoritative_snapshot",
-              });
-              logPaymentFlowStage("checkout_complete", {
-                agreementId: (reviewAgreementIdRef.current || readCreateReviewAgreementResumeId() || "").trim() || null,
-                premiumUnlocked: true,
-                corpusIntegrity: "ok",
+              void hydrateCommercialReviewOnlyAfterServerGet(authoritativeSnap).then((ok) => {
+                if (!ok) return;
+                paidCheckoutCompletedRef.current = true;
+                logPaymentFlowStage("premium_unlock_received", {
+                  agreementId: (reviewAgreementIdRef.current || readCreateReviewAgreementResumeId() || "").trim() || null,
+                  premiumUnlocked: true,
+                  paymentState: "ensure_skipped_server_hydrate",
+                });
+                logPaymentFlowStage("checkout_complete", {
+                  agreementId: (reviewAgreementIdRef.current || readCreateReviewAgreementResumeId() || "").trim() || null,
+                  premiumUnlocked: true,
+                  corpusIntegrity: "ok",
+                });
               });
             } else {
               setPremiumPostCheckoutPhase(null);
@@ -9886,13 +9942,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                     intakeFingerprint: intakeFpGuard,
                   })
                 ) {
-                  applyHydrationFromPremiumSnapshot(mutexSnap);
-                  paidCheckoutCompletedRef.current = true;
-                  logPaymentFlowStage("checkout_complete", {
-                    agreementId: (reviewAgreementIdRef.current || readCreateReviewAgreementResumeId() || "").trim() || null,
-                    premiumUnlocked: true,
-                    paymentState: "mutex_busy_authoritative_snapshot",
-                  });
+                  const ok = await hydrateCommercialReviewOnlyAfterServerGet(mutexSnap);
+                  if (ok) {
+                    paidCheckoutCompletedRef.current = true;
+                    logPaymentFlowStage("checkout_complete", {
+                      agreementId: (reviewAgreementIdRef.current || readCreateReviewAgreementResumeId() || "").trim() || null,
+                      premiumUnlocked: true,
+                      paymentState: "mutex_busy_server_hydrate",
+                    });
+                  }
                 } else {
                   setPremiumPostCheckoutPhase(null);
                   setPremiumPipelineUserMessage(null);
@@ -10287,13 +10345,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                   intakeFingerprint: recoveryFp,
                 })
               ) {
-                applyHydrationFromPremiumSnapshot(recoverySnap);
-                paidCheckoutCompletedRef.current = true;
-                logPaymentFlowStage("checkout_complete", {
-                  agreementId: (reviewAgreementIdRef.current || readCreateReviewAgreementResumeId() || "").trim() || null,
-                  premiumUnlocked: true,
-                  paymentState: "processing_stuck_snapshot_recovery",
-                  corpusIntegrity: "ok",
+                void hydrateCommercialReviewOnlyAfterServerGet(recoverySnap).then((ok) => {
+                  if (!ok) return;
+                  paidCheckoutCompletedRef.current = true;
+                  logPaymentFlowStage("checkout_complete", {
+                    agreementId: (reviewAgreementIdRef.current || readCreateReviewAgreementResumeId() || "").trim() || null,
+                    premiumUnlocked: true,
+                    paymentState: "processing_stuck_server_hydrate",
+                    corpusIntegrity: "ok",
+                  });
                 });
               } else if (!recoverySnap || readAuthoritativeSnapshotBody(recoverySnap).length < 500) {
                 logGuidedProgressionBlocked({
@@ -14577,8 +14637,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     if (hasPaidProSourceOfTruth()) return;
     const acceptedSnapForRewrite = readPremiumCompletionSnapshot();
     if (shouldBlockEntitledRewriteForAcceptedPaidProSnapshot(acceptedSnapForRewrite)) {
+      // Never paint review-ready from local storage — await server GET authority.
       if (acceptedSnapForRewrite && !hasPaidProSourceOfTruth()) {
-        applyHydrationFromPremiumSnapshot(acceptedSnapForRewrite);
+        void hydrateCommercialReviewOnlyAfterServerGet(acceptedSnapForRewrite);
       }
       return;
     }

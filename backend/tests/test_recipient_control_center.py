@@ -19,7 +19,7 @@ from backend.config.agreement_signing_token import resolve_signing_token_secret_
 
 pytestmark = pytest.mark.unit
 
-_ORG_H = {"X-Claw-Org-Id": "test-org-recipient-control"}
+_ORG_H = {"X-Claw-Org-Id": "test-org-recipient-control", "X-Claw-Test-Auth-User-Id": "test-owner"}
 
 
 @pytest.fixture(autouse=True)

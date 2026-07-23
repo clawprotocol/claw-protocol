@@ -6,11 +6,17 @@ import pytest
 from fastapi.testclient import TestClient
 
 from backend.main import app
+from backend.tests.auth_fixtures import (
+    configure_production_like_jwt,
+    owner_headers_production_like,
+    owner_headers_relaxed,
+)
 from backend.usage_economics import store as usage_economics_store_mod
 
 pytestmark = pytest.mark.unit
 
-_ORG = {"X-Claw-Org-Id": "test-org-recipient-verify-reliability"}
+_ORG = owner_headers_relaxed("test-org-recipient-verify-reliability")
+_STAGING_ORG = owner_headers_production_like(user_id="recipient-verify-owner")
 
 
 @pytest.fixture(autouse=True)
@@ -20,10 +26,10 @@ def _reset_usage_economics_singleton():
     usage_economics_store_mod._store = None  # noqa: SLF001
 
 
-def _create_draft_with_parties(client: TestClient) -> str:
+def _create_draft_with_parties(client: TestClient, headers=None) -> str:
     c = client.post(
         "/api/agreements/draft",
-        headers=_ORG,
+        headers=headers or _ORG,
         json={
             "title": "Reliability mint",
             "jurisdiction": "TX",
@@ -108,16 +114,17 @@ def test_recipient_access_token_does_not_503_without_signing_lock(monkeypatch, t
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
     monkeypatch.setenv("CLAW_ENVIRONMENT", "staging")
+    configure_production_like_jwt(monkeypatch)
     # Staging requires an explicit signing-token secret (no shared fallback).
     monkeypatch.setenv(
         "CLAW_AGREEMENT_SIGNING_TOKEN_SECRET",
         "staging-reliability-explicit-signing-token",
     )
     client = TestClient(app)
-    aid = _create_draft_with_parties(client)
+    aid = _create_draft_with_parties(client, headers=_STAGING_ORG)
     mint = client.post(
         f"/api/agreements/{aid}/recipient-access-token",
-        headers=_ORG,
+        headers=_STAGING_ORG,
         json={"mode": "review", "role": "signer"},
     )
     assert mint.status_code == 200
@@ -129,13 +136,14 @@ def test_recipient_access_token_mint_422_when_staging_and_secret_unset(monkeypat
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
     monkeypatch.setenv("CLAW_ENVIRONMENT", "staging")
+    configure_production_like_jwt(monkeypatch)
     monkeypatch.delenv("CLAW_AGREEMENT_SIGNING_TOKEN_SECRET", raising=False)
     monkeypatch.delenv("CLAW_SIGNING_TOKEN_SECRET", raising=False)
     client = TestClient(app)
-    aid = _create_draft_with_parties(client)
+    aid = _create_draft_with_parties(client, headers=_STAGING_ORG)
     mint = client.post(
         f"/api/agreements/{aid}/recipient-access-token",
-        headers=_ORG,
+        headers=_STAGING_ORG,
         json={"mode": "review", "role": "signer"},
     )
     assert mint.status_code == 422
@@ -185,12 +193,13 @@ def test_recipient_access_token_mint_422_when_prod_and_secret_unset(monkeypatch,
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
     monkeypatch.setenv("CLAW_ENVIRONMENT", "production")
+    configure_production_like_jwt(monkeypatch)
     monkeypatch.delenv("CLAW_AGREEMENT_SIGNING_TOKEN_SECRET", raising=False)
     client = TestClient(app)
-    aid = _create_draft_with_parties(client)
+    aid = _create_draft_with_parties(client, headers=_STAGING_ORG)
     mint = client.post(
         f"/api/agreements/{aid}/recipient-access-token",
-        headers=_ORG,
+        headers=_STAGING_ORG,
         json={"mode": "review", "role": "signer"},
     )
     assert mint.status_code == 422

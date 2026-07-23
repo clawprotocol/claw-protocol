@@ -73,6 +73,8 @@ def integration_agreement_status(agreement_id: str, request: Request) -> Dict[st
     from backend.usage_economics.policy import assert_registered_owner_matches, require_claw_org_id_header
 
     require_claw_org_id_header(request)
+    from backend.security.commercial_auth import require_commercial_owner_principal
+    require_commercial_owner_principal(request)
     assert_registered_owner_matches(request, agreement_id)
     draft = _load_or_404(agreement_id)
     eco = economics_overlay_for_agreement(agreement_id)

@@ -20,7 +20,7 @@ from backend.usage_economics import store as usage_economics_store_mod
 
 pytestmark = pytest.mark.unit
 
-_ORG_H = {"X-Claw-Org-Id": "test-org-api-v2"}
+_ORG_H = {"X-Claw-Org-Id": "test-org-api-v2", "X-Claw-Test-Auth-User-Id": "test-owner"}
 
 
 @pytest.fixture(autouse=True)
@@ -352,7 +352,10 @@ class TestMultiPartyPresenceGate:
 def test_premium_full_draft_invokes_repair_on_quality_fail(monkeypatch, tmp_path):
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test-unit")
     import backend.routers.agreements_v2_api as av2
+
+    monkeypatch.setattr(av2, "OPENAI_API_KEY", "sk-test-unit")
 
     good_body = _long_commercial_body(
         "\nFlat fee **$1,500** for logo work including **two revision rounds**.\n"

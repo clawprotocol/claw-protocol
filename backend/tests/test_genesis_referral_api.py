@@ -20,16 +20,30 @@ def _client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
 
 
 def test_ops_endpoints_require_admin_secret(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("CLAW_ENVIRONMENT", "test")
     monkeypatch.setenv("CLAW_ADMIN_SECRET", "test-admin-secret-qa")
+    monkeypatch.setenv("CLAW_ADMIN_CONSOLE_DB_PATH", str(tmp_path / "admin.sqlite3"))
+    from backend.admin_console import store as admin_store
+
+    admin_store._store = None  # noqa: SLF001
     client = _client(tmp_path, monkeypatch)
 
-    assert client.get("/v1/genesis-referral/ops/summary").status_code == 403
-    assert client.get("/v1/genesis-referral/ops/commissions/export.csv").status_code == 403
+    assert client.get("/v1/genesis-referral/ops/summary").status_code in (401, 403)
+    assert client.get("/v1/genesis-referral/ops/commissions/export.csv").status_code in (401, 403)
 
     headers = {"x-claw-admin-secret": "wrong"}
-    assert client.get("/v1/genesis-referral/ops/summary", headers=headers).status_code == 403
+    assert client.get("/v1/genesis-referral/ops/summary", headers=headers).status_code in (401, 403)
 
-    ok_headers = {"x-claw-admin-secret": "test-admin-secret-qa"}
+    # Secret alone is insufficient — operator principal + reason required.
+    secret_only = {"x-claw-admin-secret": "test-admin-secret-qa"}
+    assert client.get("/v1/genesis-referral/ops/summary", headers=secret_only).status_code in (401, 403)
+
+    ok_headers = {
+        "x-claw-admin-secret": "test-admin-secret-qa",
+        "X-Claw-Test-Auth-User-Id": "ops_admin",
+        "X-Claw-Test-Operator-Role": "admin",
+        "x-claw-admin-reason": "genesis ops summary",
+    }
     assert client.get("/v1/genesis-referral/ops/summary", headers=ok_headers).status_code == 200
 
 

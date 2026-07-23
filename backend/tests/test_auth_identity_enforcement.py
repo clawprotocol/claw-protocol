@@ -208,7 +208,8 @@ def test_org_header_cannot_repair_missing_ownership(isolated_usage):
 
 def test_new_draft_registers_ownership(isolated_usage):
     client = TestClient(app)
-    org_id, _t, headers = mint_anonymous_session(client)
+    headers = make_authenticated_user_headers("draft-owner")
+    org_id = headers["X-Claw-Org-Id"]
     res = client.post(
         "/api/agreements/draft",
         headers={**headers, "Content-Type": "application/json"},
@@ -219,6 +220,19 @@ def test_new_draft_registers_ownership(isolated_usage):
     row = isolated_usage.get_agreement_owner_row(aid)
     assert row is not None
     assert row["subject_ref"] == f"org:{org_id}"
+
+
+def test_anonymous_session_cannot_create_draft_without_principal(isolated_usage):
+    """Commercial principal enforcement: anon org cookie alone is insufficient."""
+    client = TestClient(app)
+    _org_id, _t, headers = mint_anonymous_session(client)
+    res = client.post(
+        "/api/agreements/draft",
+        headers={**headers, "Content-Type": "application/json"},
+        json=_draft_payload(),
+    )
+    assert res.status_code == 401
+    assert res.json()["detail"]["code"] == "auth_required"
 
 
 # --- Stripe tampering ---

@@ -4,8 +4,6 @@ from __future__ import annotations
 
 import csv
 import io
-import os
-import secrets
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, HTTPException, Request, Response
@@ -44,6 +42,7 @@ class CreateGenesisAffiliateBody(BaseModel):
     community_slug: Optional[str] = Field(default=None, max_length=80)
     affiliate_status: str = Field(default="active", pattern="^(active|paused|revoked)$")
     payout_rate: float = Field(default=0.30, ge=0, le=1)
+    reason: str = Field(..., min_length=3, max_length=500)
 
 
 class CheckoutMetadataBody(BaseModel):
@@ -54,22 +53,39 @@ class CheckoutMetadataBody(BaseModel):
     plan_code: str = Field(default="pro", max_length=32)
 
 
-def _require_admin(request: Request) -> None:
-    secret = os.getenv("CLAW_ADMIN_SECRET", "").strip()
-    presented = (request.headers.get("x-claw-admin-secret") or "").strip()
-    if not secret or not presented or not secrets.compare_digest(secret, presented):
-        raise HTTPException(status_code=403, detail="forbidden")
+def _require_admin(request: Request, *, reason: str = "genesis_ops") -> Any:
+    """Privileged Genesis ops: authenticated operator principal + reason + audit."""
+    from backend.security.operator_principal import (
+        PERM_MUTATE_SUPPORT,
+        require_nonempty_reason,
+        resolve_operator_principal,
+    )
+    from backend.admin_console.store import get_admin_console_store
+
+    principal = resolve_operator_principal(request, require_permission=PERM_MUTATE_SUPPORT)
+    # Prefer explicit reason header/query for GET; body mutations pass reason separately.
+    reason_text = require_nonempty_reason(
+        (request.headers.get("x-claw-admin-reason") or reason or "").strip() or None
+    )
+    get_admin_console_store().append_admin_action_audit(
+        admin_user_id=principal.user_id,
+        action_type="genesis_ops_access",
+        target_type="genesis",
+        target_id=reason_text[:64],
+        reason=reason_text,
+        before_snapshot_json=None,
+        after_snapshot_json=None,
+        actor_role=principal.role,
+        correlation_id=principal.correlation_id or None,
+    )
+    return principal
 
 
 def _user_id_from_request(request: Request) -> str:
-    uid = (
-        (request.headers.get("X-Claw-User-Id") or "")
-        or (request.headers.get("X-Claw-Subject-Ref") or "")
-        or ""
-    ).strip()
-    if not uid:
-        raise HTTPException(status_code=400, detail="missing_user_id")
-    return uid
+    """Affiliate identity from validated JWT/test principal — never client spoof headers."""
+    from backend.security.supabase_jwt import require_supabase_user_id
+
+    return require_supabase_user_id(request)
 
 
 @router.post("/capture")
@@ -131,7 +147,7 @@ async def affiliate_me(request: Request) -> Dict[str, Any]:
 
 @router.post("/ops/affiliates")
 async def ops_create_affiliate(request: Request, body: CreateGenesisAffiliateBody) -> Dict[str, Any]:
-    _require_admin(request)
+    _require_admin(request, reason=body.reason)
     eco = get_economics_store()
     return genesis_svc.create_genesis_affiliate(
         eco,

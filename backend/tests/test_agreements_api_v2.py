@@ -10,7 +10,7 @@ from backend.usage_economics import store as usage_economics_store_mod
 
 pytestmark = pytest.mark.unit
 
-_ORG_H = {"X-Claw-Org-Id": "test-org-api-v2"}
+_ORG_H = {"X-Claw-Org-Id": "test-org-api-v2", "X-Claw-Test-Auth-User-Id": "test-owner"}
 
 
 @pytest.fixture(autouse=True)
@@ -942,7 +942,10 @@ def test_parse_premium_invalid_extract_fields_coerced_to_safe_extract(monkeypatc
 def test_premium_full_draft_ok(monkeypatch, tmp_path):
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test-unit")
     import backend.routers.agreements_v2_api as av2
+
+    monkeypatch.setattr(av2, "OPENAI_API_KEY", "sk-test-unit")
 
     body_block = "\n\n".join(
         [
@@ -1013,6 +1016,8 @@ def test_premium_full_draft_repair_pass_uses_agreement_outbound_airlock_profile(
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test-unit")
     import backend.routers.agreements_v2_api as av2
+
+    monkeypatch.setattr(av2, "OPENAI_API_KEY", "sk-test-unit")
 
     body_block = "\n\n".join(
         [
@@ -1093,6 +1098,8 @@ def test_premium_full_draft_saas_reseller_qa_prompt_not_airlock_blocked(monkeypa
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test-unit")
     import backend.routers.agreements_v2_api as av2
     from backend.tests.test_privilege_policy import LAWDOG_QA_SAAS_RESELLER_PROMPT
+
+    monkeypatch.setattr(av2, "OPENAI_API_KEY", "sk-test-unit")
 
     body_block = "\n\n".join(
         [
@@ -1187,8 +1194,11 @@ def test_premium_full_draft_degraded_airlock_returns_empty_document(monkeypatch,
     """Airlock failures must not inject fake Pro agreement text into document_text."""
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test-unit")
     import backend.routers.agreements_v2_api as av2
     from backend.llm_router import ExternalAIBlockedError
+
+    monkeypatch.setattr(av2, "OPENAI_API_KEY", "sk-test-unit")
 
     def boom(*args, **kwargs):
         raise ExternalAIBlockedError(
@@ -2549,7 +2559,7 @@ def test_vs01_signing_seed_endpoint_ok_with_s3_backend_uses_legacy_finalize(monk
     monkeypatch.setenv("CLAW_DOCUMENTS_DIR", str(tmp_path / "documents"))
     reset_artifact_repository_singleton()
     client = TestClient(app)
-    h = {"X-Claw-Org-Id": "test-vs01-seed-s3-fallback"}
+    h = {"X-Claw-Org-Id": "test-vs01-seed-s3-fallback", "X-Claw-Test-Auth-User-Id": "test-owner"}
     create_res = client.post(
         "/api/agreements/draft",
         headers=h,
@@ -2586,7 +2596,7 @@ def test_vs01_signing_seed_endpoint_ok(monkeypatch, tmp_path):
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
     client = TestClient(app)
-    h = {"X-Claw-Org-Id": "test-vs01-seed-org"}
+    h = {"X-Claw-Org-Id": "test-vs01-seed-org", "X-Claw-Test-Auth-User-Id": "test-owner"}
     create_res = client.post(
         "/api/agreements/draft",
         headers=h,
@@ -2628,7 +2638,7 @@ def test_vs01_signing_seed_ok_when_economics_watermark_raises(monkeypatch, tmp_p
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
     client = TestClient(app)
-    h = {"X-Claw-Org-Id": "test-vs01-seed-econ-fail"}
+    h = {"X-Claw-Org-Id": "test-vs01-seed-econ-fail", "X-Claw-Test-Auth-User-Id": "test-owner"}
     create_res = client.post(
         "/api/agreements/draft",
         headers=h,
@@ -2672,7 +2682,7 @@ def test_vs01_signing_seed_structured_detail_when_render_html_raises(monkeypatch
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
     client = TestClient(app)
-    h = {"X-Claw-Org-Id": "test-vs01-seed-render-err"}
+    h = {"X-Claw-Org-Id": "test-vs01-seed-render-err", "X-Claw-Test-Auth-User-Id": "test-owner"}
     create_res = client.post(
         "/api/agreements/draft",
         headers=h,
@@ -2725,7 +2735,7 @@ def test_vs01_signing_seed_structured_detail_when_finalize_storage_exhausted(mon
 
     monkeypatch.setattr(ds, "_write_legacy_layout", _always_fail)
     client = TestClient(app)
-    h = {"X-Claw-Org-Id": "test-vs01-seed-storage-exhausted"}
+    h = {"X-Claw-Org-Id": "test-vs01-seed-storage-exhausted", "X-Claw-Test-Auth-User-Id": "test-owner"}
     create_res = client.post(
         "/api/agreements/draft",
         headers=h,
@@ -2769,7 +2779,7 @@ def test_vs01_signing_seed_structured_detail_when_finalize_meta_missing_document
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
     client = TestClient(app)
-    h = {"X-Claw-Org-Id": "test-vs01-seed-bad-meta"}
+    h = {"X-Claw-Org-Id": "test-vs01-seed-bad-meta", "X-Claw-Test-Auth-User-Id": "test-owner"}
     create_res = client.post(
         "/api/agreements/draft",
         headers=h,

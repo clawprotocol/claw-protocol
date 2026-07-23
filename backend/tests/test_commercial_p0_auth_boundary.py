@@ -100,7 +100,7 @@ def _seed_signing_draft(aid: str) -> None:
 
 def test_workspace_index_rejects_anonymous_and_forged_org(client: TestClient, monkeypatch):
     monkeypatch.setenv("CLAW_COMMERCIAL_MODE", "1")
-    anon = client.get("/api/agreements/workspace-index", headers={"X-Claw-Org-Id": "forged-org"})
+    anon = client.get("/api/agreements/workspace-index", headers={"X-Claw-Org-Id": "forged-org", "X-Claw-Test-Auth-User-Id": "test-owner"})
     assert anon.status_code == 401
 
     forged = client.get(

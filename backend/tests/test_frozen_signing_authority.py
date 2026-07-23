@@ -6,10 +6,12 @@ import pytest
 from fastapi.testclient import TestClient
 
 from backend.main import app
+from backend.tests.auth_fixtures import persist_and_accept_review_snapshot
 
 pytestmark = pytest.mark.unit
 
-_ORG_H = {"X-Claw-Org-Id": "test-org-frozen-authority"}
+_ORG_H = {"X-Claw-Org-Id": "test-org-frozen-authority", "X-Claw-Test-Auth-User-Id": "test-owner"}
+_CORPUS = "x" * 1600
 
 
 @pytest.fixture(autouse=True)
@@ -106,7 +108,7 @@ def _frozen_snapshot(aid: str, corpus_hash: str = "abc123") -> dict:
     }
 
 
-def _portable_packet(aid: str, corpus_hash: str = "abc123") -> dict:
+def _portable_packet(aid: str, corpus_hash: str = "abc123", corpus: str = _CORPUS) -> dict:
     return {
         "v": 1,
         "seed": {
@@ -114,7 +116,7 @@ def _portable_packet(aid: str, corpus_hash: str = "abc123") -> dict:
             "documentId": "doc_frozen",
             "agreementId": aid,
             "corpusHash": corpus_hash,
-            "corpusPlain": "x" * 1600,
+            "corpusPlain": corpus,
         },
         "fields": [],
         "roles": [
@@ -124,6 +126,10 @@ def _portable_packet(aid: str, corpus_hash: str = "abc123") -> dict:
         "fieldCount": 0,
         "initialsPolicy": {"enabled": True},
     }
+
+
+def _accept_default(client: TestClient, aid: str) -> dict:
+    return persist_and_accept_review_snapshot(client, aid, _CORPUS, headers=_ORG_H)
 
 
 def test_frozen_signing_authority_persist_and_read(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
@@ -151,10 +157,13 @@ def test_signing_links_sent_requires_frozen_authority_for_portable_packet(
     _env_common(monkeypatch, tmp_path)
     client = TestClient(app)
     aid = _create_agreement(client)
+    accepted = _accept_default(client, aid)
     body = {
         "packet_revision": "rev_1",
         "document_id": "doc_frozen",
         "portable_packet": _portable_packet(aid),
+        "accepted_review_snapshot_id": accepted["snapshot_id"],
+        "accepted_review_snapshot_digest": accepted["corpus_sha256"],
         "targets": [],
     }
     res = client.post(f"/api/agreements/{aid}/signing-links-sent", headers=_ORG_H, json=body)
@@ -170,12 +179,15 @@ def test_signing_links_sent_rejects_corpus_hash_mismatch(
     _env_common(monkeypatch, tmp_path)
     client = TestClient(app)
     aid = _create_agreement(client)
+    accepted = _accept_default(client, aid)
     snap = _frozen_snapshot(aid, corpus_hash="wrong_hash")
     body = {
         "packet_revision": "rev_1",
         "document_id": "doc_frozen",
         "portable_packet": _portable_packet(aid, corpus_hash="abc123"),
         "frozen_signing_authority": snap,
+        "accepted_review_snapshot_id": accepted["snapshot_id"],
+        "accepted_review_snapshot_digest": accepted["corpus_sha256"],
         "targets": [],
     }
     res = client.post(f"/api/agreements/{aid}/signing-links-sent", headers=_ORG_H, json=body)
@@ -191,12 +203,15 @@ def test_signing_links_sent_persists_frozen_authority_atomically(
     _env_common(monkeypatch, tmp_path)
     client = TestClient(app)
     aid = _create_agreement(client)
+    accepted = _accept_default(client, aid)
     snap = _frozen_snapshot(aid)
     body = {
         "packet_revision": "rev_active",
         "document_id": "doc_frozen",
         "portable_packet": _portable_packet(aid),
         "frozen_signing_authority": snap,
+        "accepted_review_snapshot_id": accepted["snapshot_id"],
+        "accepted_review_snapshot_digest": accepted["corpus_sha256"],
         "targets": [],
     }
     res = client.post(f"/api/agreements/{aid}/signing-links-sent", headers=_ORG_H, json=body)
@@ -214,12 +229,15 @@ def test_cancelled_packet_public_endpoint_fails_closed(
     _env_common(monkeypatch, tmp_path)
     client = TestClient(app)
     aid = _create_agreement(client)
+    accepted = _accept_default(client, aid)
     snap = _frozen_snapshot(aid)
     body = {
         "packet_revision": "rev_cancel",
         "document_id": "doc_frozen",
         "portable_packet": _portable_packet(aid),
         "frozen_signing_authority": snap,
+        "accepted_review_snapshot_id": accepted["snapshot_id"],
+        "accepted_review_snapshot_digest": accepted["corpus_sha256"],
         "targets": [],
     }
     client.post(f"/api/agreements/{aid}/signing-links-sent", headers=_ORG_H, json=body)
@@ -239,12 +257,15 @@ def test_reissue_supersedes_prior_revision(monkeypatch: pytest.MonkeyPatch, tmp_
     _env_common(monkeypatch, tmp_path)
     client = TestClient(app)
     aid = _create_agreement(client)
+    accepted = _accept_default(client, aid)
     snap = _frozen_snapshot(aid)
     body = {
         "packet_revision": "rev_v1",
         "document_id": "doc_frozen",
         "portable_packet": _portable_packet(aid),
         "frozen_signing_authority": snap,
+        "accepted_review_snapshot_id": accepted["snapshot_id"],
+        "accepted_review_snapshot_digest": accepted["corpus_sha256"],
         "targets": [],
     }
     client.post(f"/api/agreements/{aid}/signing-links-sent", headers=_ORG_H, json=body)
@@ -256,6 +277,8 @@ def test_reissue_supersedes_prior_revision(monkeypatch: pytest.MonkeyPatch, tmp_
             "document_id": "doc_frozen",
             "portable_packet": _portable_packet(aid),
             "frozen_signing_authority": snap,
+            "accepted_review_snapshot_id": accepted["snapshot_id"],
+            "accepted_review_snapshot_digest": accepted["corpus_sha256"],
         },
     )
     assert reissue.status_code == 200

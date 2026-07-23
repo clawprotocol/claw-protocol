@@ -36,6 +36,8 @@ SCHEMA_VERSION = "claw.affiliate.gamification/v2"
 
 def _require_org_match(request: Request, org_id_path: str) -> str:
     oid = require_claw_org_id_header(request).strip()
+    from backend.security.commercial_auth import require_commercial_owner_principal
+    require_commercial_owner_principal(request)
     if oid != (org_id_path or "").strip():
         raise HTTPException(
             status_code=403,
