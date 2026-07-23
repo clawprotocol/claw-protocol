@@ -36,6 +36,9 @@ describe("commercial review reload authority", () => {
   });
 
   it("hydrate stores server snapshot authority only after successful GET", async () => {
+    const { sha256CorpusDigest } = await import("./canonicalReviewSnapshotApi");
+    const corpus = ("SERVER_CORPUS_" + "x".repeat(80)).trim();
+    const digest = await sha256CorpusDigest(corpus);
     fetchMock.mockResolvedValue({
       ok: true,
       status: 200,
@@ -44,9 +47,9 @@ describe("commercial review reload authority", () => {
         snapshot: {
           snapshot_id: "snap_server_1",
           agreement_id: "ag_reload_2",
-          corpus_plain: "SERVER_CORPUS_" + "x".repeat(80),
-          corpus_sha256: "b".repeat(64),
-          corpus_length: 94,
+          corpus_plain: corpus,
+          corpus_sha256: digest,
+          corpus_length: corpus.length,
           status: "accepted",
         },
       }),
@@ -60,10 +63,10 @@ describe("commercial review reload authority", () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.display.snapshotId).toBe("snap_server_1");
-    expect(result.display.corpusSha256).toBe("b".repeat(64));
+    expect(result.display.corpusSha256).toBe(digest);
     const accepted = readAcceptedReviewSnapshotRef("ag_reload_2");
     expect(accepted?.snapshotId).toBe("snap_server_1");
-    expect(accepted?.corpusSha256).toBe("b".repeat(64));
+    expect(accepted?.corpusSha256).toBe(digest);
     const display = readDisplayReviewSnapshotAuthority("ag_reload_2");
     expect(display?.snapshotId).toBe("snap_server_1");
     // Authority ids come from server response, not client-invented local values.

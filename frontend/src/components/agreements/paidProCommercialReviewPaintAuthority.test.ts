@@ -22,6 +22,7 @@ import {
 import {
   clearPaidProSourceOfTruth,
   establishPaidProSourceOfTruth,
+  hashPaidProCorpus,
 } from "./paidProSourceOfTruth";
 import {
   clearPremiumCompletionSnapshot,
@@ -263,5 +264,56 @@ describe("Patch 5B commercial review paint authority", () => {
       corpusPlain: SERVER_CORPUS,
     });
     expect(canEnableCommercialPrepareFromServerSnapshot(AGREEMENT_ID)).toBe(true);
+  });
+
+  it("adversarial: completed hydrate + matching verified GET corpus must paint (blank surface fails)", async () => {
+    // SoT rematerialized (hydrate-complete style) while paint still requires verified GET + agreementId.
+    establishPaidProSourceOfTruth({
+      text: SERVER_CORPUS,
+      source: "server_full_draft",
+    });
+    await seedVerifiedServerCorpus({ status: "pending", corpus: SERVER_CORPUS });
+    expect(hasVerifiedCommercialDisplayCorpus(AGREEMENT_ID)).toBe(true);
+    expect(hashPaidProCorpus(SERVER_CORPUS).length).toBeGreaterThan(8);
+
+    const stuckWithoutAgreementId = resolvePaidProFirstReviewVisibleDisplayPlain({
+      agreementId: "",
+      premiumCheckoutCompleted: true,
+      premiumPaidDocumentSurface: true,
+      paidProActive: true,
+    });
+    expect(stuckWithoutAgreementId.plain).toBe("");
+    expect(stuckWithoutAgreementId.fallbackReason).toBe("missing_agreement_id");
+    expect(
+      resolvePaidProVisibleShellRenderBranch({
+        hasSoT: true,
+        sotLen: SERVER_CORPUS.length,
+        htmlLen: 0,
+        canonicalPlainLen: stuckWithoutAgreementId.plain.length,
+        paidProFirstReviewActive: true,
+      }).branch,
+    ).toBe("empty");
+
+    const painted = resolvePaidProFirstReviewVisibleDisplayPlain({
+      agreementId: AGREEMENT_ID,
+      premiumCheckoutCompleted: true,
+      premiumPaidDocumentSurface: true,
+      paidProActive: true,
+    });
+    expect(painted.plain.length).toBeGreaterThanOrEqual(PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN);
+    expect(painted.plain).toBe(SERVER_CORPUS.trim());
+    expect(painted.source).toBe("verified_server_canonical_review_snapshot");
+    const branch = resolvePaidProVisibleShellRenderBranch({
+      hasSoT: true,
+      sotLen: SERVER_CORPUS.length,
+      htmlLen: 0,
+      canonicalPlainLen: painted.plain.length,
+      canonicalPlainSource: painted.source,
+      paidProFirstReviewActive: true,
+    });
+    expect(branch.branch).toBe("canonical_plain_forced");
+    // Blank surface with healthy SoT+verified GET is the J4 failure mode — this must not regress.
+    expect(painted.plain.length).toBeGreaterThan(0);
+    expect(painted.plain).toContain("SERVER_GET_AUTHORITY_MARKER");
   });
 });

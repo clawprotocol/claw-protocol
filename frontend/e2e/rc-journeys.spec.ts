@@ -276,8 +276,67 @@ test.describe("RC Journey 4 — Multi-party authority", () => {
       await captureMilestone(page, "j4", "quad-party-reload");
     } catch (err) {
       const diag = await collectPaidProSoTReadinessDiag(page, startedAt).catch(() => null);
+      const extra = await page
+        .evaluate(() => {
+          const shell = document.querySelector('[data-testid="paid-pro-visible-document-shell"]');
+          const empty = document.querySelector('[data-testid="paid-pro-visible-document-shell-empty"]');
+          const heading = document.querySelector("#premium-pro-review-scroll-anchor");
+          let displayCorpus = null as null | {
+            agreementId?: string;
+            len?: number;
+            snapshotId?: string;
+            hasVerifiedKey: boolean;
+          };
+          let resumeId: string | null = null;
+          let displayAuthority = null as null | { snapshotId?: string; len?: number };
+          try {
+            const raw = sessionStorage.getItem("claw_display_review_corpus_v1");
+            if (raw) {
+              const parsed = JSON.parse(raw) as {
+                agreementId?: string;
+                snapshotId?: string;
+                corpusPlain?: string;
+              };
+              displayCorpus = {
+                agreementId: parsed.agreementId,
+                snapshotId: parsed.snapshotId,
+                len: (parsed.corpusPlain || "").trim().length,
+                hasVerifiedKey: true,
+              };
+            } else {
+              displayCorpus = { hasVerifiedKey: false };
+            }
+            const authRaw = sessionStorage.getItem("claw_display_review_snapshot_v1");
+            if (authRaw) {
+              const parsed = JSON.parse(authRaw) as { snapshotId?: string; corpusLength?: number };
+              displayAuthority = {
+                snapshotId: parsed.snapshotId,
+                len: Number(parsed.corpusLength || 0),
+              };
+            }
+            resumeId = sessionStorage.getItem("claw_agreement_create_review_resume_v1");
+          } catch {
+            /* ignore */
+          }
+          return {
+            shellPresent: Boolean(shell),
+            emptyGate: empty?.getAttribute("data-claw-review-display-gate") || null,
+            headingText: (heading?.textContent || "").slice(0, 120),
+            bodyHasConfirming: /Confirming your server-locked agreement/i.test(
+              document.body?.textContent || "",
+            ),
+            bodyHasRedwood: /Redwood Biologics/i.test(document.body?.textContent || ""),
+            displayCorpus,
+            displayAuthority,
+            resumeId,
+            liveSotLen: document.documentElement.getAttribute("data-claw-live-sot-len"),
+          };
+        })
+        .catch(() => null);
       // eslint-disable-next-line no-console
       console.error("[j4] FAILURE_DIAG", JSON.stringify(diag));
+      // eslint-disable-next-line no-console
+      console.error("[j4] FAILURE_EXTRA", JSON.stringify(extra));
       throw err;
     } finally {
       await context.close();

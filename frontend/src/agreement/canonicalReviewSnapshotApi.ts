@@ -437,12 +437,21 @@ export async function prepareCommercialReviewSnapshotAuthority(args: {
   if (!fetched.ok) return { ok: false, code: fetched.code };
 
   const snap = fetched.snapshot;
+  const getCorpus = (snap.corpus_plain || "").trim();
   // Fail closed if GET authority diverges from what we just persisted.
   if (
     snap.snapshot_id !== persisted.snapshot.snapshot_id ||
     snap.corpus_sha256.toLowerCase() !== persisted.snapshot.corpus_sha256.toLowerCase() ||
     snap.corpus_length !== persisted.snapshot.corpus_length ||
-    (snap.corpus_plain || "").trim() !== (persisted.snapshot.corpus_plain || "").trim()
+    getCorpus !== (persisted.snapshot.corpus_plain || "").trim()
+  ) {
+    return { ok: false, code: "persist_get_authority_mismatch" };
+  }
+  // Exact GET contract: digest + length must match the returned corpus bytes.
+  const getDigest = await sha256CorpusDigest(getCorpus);
+  if (
+    getDigest !== snap.corpus_sha256.toLowerCase() ||
+    Number(snap.corpus_length) !== getCorpus.length
   ) {
     return { ok: false, code: "persist_get_authority_mismatch" };
   }
@@ -456,7 +465,7 @@ export async function prepareCommercialReviewSnapshotAuthority(args: {
   };
   storeVerifiedCommercialDisplayCorpus({
     ...display,
-    corpusPlain: (snap.corpus_plain || "").trim(),
+    corpusPlain: getCorpus,
   });
   // New pending review invalidates prior accept until explicit accept of display authority.
   if (display.status !== "accepted") {
@@ -497,6 +506,15 @@ export async function hydrateCommercialReviewFromServerSnapshot(args: {
   if (!fetched.ok) return { ok: false, code: fetched.code };
   const snap = fetched.snapshot;
   const id = args.agreementId.trim();
+  const getCorpus = (snap.corpus_plain || "").trim();
+  const getDigest = await sha256CorpusDigest(getCorpus);
+  if (
+    !getCorpus ||
+    getDigest !== String(snap.corpus_sha256 || "").toLowerCase() ||
+    Number(snap.corpus_length) !== getCorpus.length
+  ) {
+    return { ok: false, code: "persist_get_authority_mismatch" };
+  }
   const display: StoredDisplayReviewSnapshotAuthority = {
     agreementId: id,
     snapshotId: snap.snapshot_id,
@@ -506,7 +524,7 @@ export async function hydrateCommercialReviewFromServerSnapshot(args: {
   };
   storeVerifiedCommercialDisplayCorpus({
     ...display,
-    corpusPlain: (snap.corpus_plain || "").trim(),
+    corpusPlain: getCorpus,
   });
   const accepted = display.status === "accepted";
   if (accepted) {

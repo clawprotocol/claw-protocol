@@ -260,6 +260,33 @@ export function SimpleCreatePage() {
       prevIntakeKeyRef.current = intakeKey;
       return;
     }
+    // Preserve create-review resume during paid checkout return (prepare/GET paint authority).
+    try {
+      if (
+        typeof window !== "undefined" &&
+        new URL(window.location.href).searchParams.get("premiumCompletion") === "1"
+      ) {
+        prevIntakeKeyRef.current = intakeKey;
+        return;
+      }
+    } catch {
+      /* ignore */
+    }
+    try {
+      const grant = sessionStorage.getItem("claw_advanced_full_draft_checkout_ok_v1");
+      const resume = sessionStorage.getItem("claw_create_complexity_resume_v1");
+      if (grant && resume && /"awaitingProCheckout"\s*:\s*true/.test(resume)) {
+        prevIntakeKeyRef.current = intakeKey;
+        return;
+      }
+      const snapRaw = sessionStorage.getItem("claw_premium_completion_snapshot_v1");
+      if (snapRaw && /"premiumAccepted"\s*:\s*true/.test(snapRaw)) {
+        prevIntakeKeyRef.current = intakeKey;
+        return;
+      }
+    } catch {
+      /* ignore */
+    }
     if (prevIntakeKeyRef.current != null && prevIntakeKeyRef.current !== intakeKey) {
       clearCreateReviewAgreementResumeId();
     }

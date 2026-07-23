@@ -1,6 +1,7 @@
 /**
  * RC Paid Pro E2E mocks — substantive professional corpus from shared fixture system.
  */
+import { createHash } from "node:crypto";
 import { expect, type Page } from "@playwright/test";
 import {
   SHARED_ACCEPTED_PAID_BODY,
@@ -12,6 +13,11 @@ import {
   RC_QUAD_PENDING_DRAFT,
 } from "../fixtures/rcQuadPartyProfessional";
 import { seedE2eAuthSession } from "./rcE2eAuthBridge";
+
+/** Production-faithful corpus digest for canonical-review-snapshot mock contract. */
+function rcSha256Hex(corpusPlain: string): string {
+  return createHash("sha256").update((corpusPlain || "").trim(), "utf8").digest("hex");
+}
 
 export const RC_PAID_ECONOMICS = {
   tier: "paid",
@@ -151,6 +157,8 @@ export async function seedRcPaidCheckoutReturn(
         sessionStorage.removeItem("claw_paid_premium_completion_session_v1");
         sessionStorage.removeItem("claw_paid_dashboard_create_context_v1");
         sessionStorage.setItem("claw_advanced_full_draft_checkout_ok_v1", String(Date.now()));
+        // Production create-review resume key — required for prepare/GET display authority.
+        sessionStorage.setItem("claw_agreement_create_review_resume_v1", agreementId);
         sessionStorage.setItem(
           "claw_create_complexity_resume_v1",
           JSON.stringify({
@@ -161,7 +169,6 @@ export async function seedRcPaidCheckoutReturn(
             awaitingProCheckout: true,
             resume_kind: "optional_full_upgrade",
             originalUserIntakeRaw: intakeText,
-            agreementId,
           }),
         );
       } catch {
@@ -361,7 +368,17 @@ export async function installRcPaidProApiRoutes(
         /* ignore */
       }
       const corpus = String(body.corpus_plain || "").trim();
-      const digest = String(body.claimed_digest || "").trim().toLowerCase() || "e".repeat(64);
+      // Server authority: digest is computed from corpus bytes (not client-claimed alone).
+      const digest = rcSha256Hex(corpus);
+      const claimed = String(body.claimed_digest || "").trim().toLowerCase();
+      if (claimed && claimed !== digest) {
+        await route.fulfill({
+          status: 400,
+          contentType: "application/json",
+          body: JSON.stringify({ detail: { code: "claimed_digest_mismatch" } }),
+        });
+        return;
+      }
       const snapshot = {
         snapshot_id: `crs_rc_${draftId}`,
         agreement_id: draftId,
@@ -397,6 +414,18 @@ export async function installRcPaidProApiRoutes(
         });
         return;
       }
+      // Production contract: GET returns the exact persisted corpus bytes + digest + length.
+      const corpusPlain = String(stored.corpus_plain || "").trim();
+      const corpusLength = corpusPlain.length;
+      const corpusSha = rcSha256Hex(corpusPlain);
+      if (!corpusPlain || Number(stored.corpus_length) !== corpusLength) {
+        await route.fulfill({
+          status: 500,
+          contentType: "application/json",
+          body: JSON.stringify({ detail: { code: "canonical_review_snapshot_corrupt" } }),
+        });
+        return;
+      }
       await route.fulfill({
         status: 200,
         contentType: "application/json",
@@ -406,9 +435,9 @@ export async function installRcPaidProApiRoutes(
           snapshot: {
             snapshot_id: stored.snapshot_id,
             agreement_id: stored.agreement_id || draftId,
-            corpus_plain: stored.corpus_plain,
-            corpus_sha256: stored.corpus_sha256,
-            corpus_length: stored.corpus_length,
+            corpus_plain: corpusPlain,
+            corpus_sha256: corpusSha,
+            corpus_length: corpusLength,
             generation_session_id: stored.generation_session_id ?? null,
             created_at: stored.created_at ?? new Date().toISOString(),
             accepted_at: stored.accepted_at ?? null,
@@ -420,8 +449,8 @@ export async function installRcPaidProApiRoutes(
             stored.status === "accepted"
               ? {
                   snapshot_id: stored.snapshot_id,
-                  corpus_sha256: stored.corpus_sha256,
-                  corpus_length: stored.corpus_length,
+                  corpus_sha256: corpusSha,
+                  corpus_length: corpusLength,
                   status: "accepted",
                 }
               : null,
