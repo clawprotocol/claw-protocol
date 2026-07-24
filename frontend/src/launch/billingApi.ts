@@ -1,5 +1,6 @@
 import { apiUrl, errorMessageFromResponse, logClawClientWarning, readJson } from "../lib/clawApi";
 import { featureFlags } from "../config/featureFlags";
+import { getAuthSession } from "../auth/supabaseAuthService";
 
 export type KeyBalanceResponse = {
   org_id?: string;
@@ -27,7 +28,19 @@ export type SubscriptionFetch = {
   error: string | null;
   /** True when the server explicitly reported no subscription (HTTP 404 or null body). */
   noSubscription: boolean;
+  /** True when the probe failed due to missing/invalid auth (HTTP 401/403). */
+  authFailure?: boolean;
 };
+
+async function billingAuthHeaders(): Promise<Record<string, string>> {
+  const headers: Record<string, string> = { Accept: "application/json" };
+  const session = await getAuthSession();
+  const token = session?.access_token?.trim();
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+  return headers;
+}
 
 export async function fetchKeyBalance(orgId: string): Promise<KeyBalanceFetch> {
   if (!featureFlags.serverBilling) return { data: null, error: null };
@@ -35,7 +48,8 @@ export async function fetchKeyBalance(orgId: string): Promise<KeyBalanceFetch> {
   if (!oid) return { data: null, error: "Set a workspace org id on the billing page." };
   try {
     const res = await fetch(apiUrl(`/v1/orgs/${encodeURIComponent(oid)}/keys`), {
-      headers: { Accept: "application/json" },
+      headers: await billingAuthHeaders(),
+      credentials: "include",
     });
     if (!res.ok) {
       const msg = await errorMessageFromResponse(res, `Could not load keys (HTTP ${res.status}).`);
@@ -56,9 +70,15 @@ export async function fetchSubscription(orgId: string): Promise<SubscriptionFetc
   if (!oid) return { data: null, error: null, noSubscription: false };
   try {
     const res = await fetch(apiUrl(`/v1/subscriptions/${encodeURIComponent(oid)}`), {
-      headers: { Accept: "application/json" },
+      headers: await billingAuthHeaders(),
+      credentials: "include",
     });
     if (res.status === 404) return { data: null, error: null, noSubscription: true };
+    if (res.status === 401 || res.status === 403) {
+      const msg = await errorMessageFromResponse(res, `Could not load subscription (HTTP ${res.status}).`);
+      logClawClientWarning("billing.subscription", { status: res.status, orgId: oid });
+      return { data: null, error: msg, noSubscription: false, authFailure: true };
+    }
     if (!res.ok) {
       const msg = await errorMessageFromResponse(res, `Could not load subscription (HTTP ${res.status}).`);
       logClawClientWarning("billing.subscription", { status: res.status, orgId: oid });

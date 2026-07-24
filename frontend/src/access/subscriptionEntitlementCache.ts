@@ -83,12 +83,14 @@ export function clearCachedSubscriptionEntitlement(): void {
 export async function refreshSubscriptionEntitlement(orgId?: string): Promise<SubscriptionEntitlementSnapshot | null> {
   const oid = (orgId ?? getOrgId()).trim();
   if (!oid) return null;
-  const { data, error, noSubscription } = await fetchSubscription(oid);
+  const { data, error, noSubscription, authFailure } = await fetchSubscription(oid);
   if (error) {
     const existing = readCachedSubscriptionEntitlement();
     if (existing?.orgId === oid && existing.tier) {
       return existing;
     }
+    // Auth/API failure must not invent a free entitlement (401/403 ≠ no plan).
+    if (authFailure) return null;
     return writeCachedSubscriptionEntitlement(null, oid);
   }
   if (noSubscription || !data) {
