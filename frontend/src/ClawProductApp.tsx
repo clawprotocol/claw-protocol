@@ -671,6 +671,7 @@ export function ClawProductApp() {
         surface = <BillingPage />;
         break;
       case "affiliate":
+        // Legacy URL — same Genesis-only gate + dashboard (no economics affiliate UI).
         surface = <ClawOpportunityPage />;
         break;
       case "settings":

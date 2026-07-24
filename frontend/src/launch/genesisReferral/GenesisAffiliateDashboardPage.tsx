@@ -1,16 +1,23 @@
 import { useEffect, useMemo, useState } from "react";
 import { AppShell } from "../AppShell";
 import { useLaunchNav } from "../LaunchNavContext";
-import { getOrgId } from "../orgContext";
 import { buildGenesisReferralLink } from "./genesisReferralCapture";
 import { fetchGenesisAffiliateDashboard, type GenesisAffiliateDashboard } from "./genesisReferralApi";
+import { RequireActiveGenesisAffiliate } from "./RequireActiveGenesisAffiliate";
 
 const GOOD_STANDING_NOTE =
   "Genesis Referral Access pays a 30% recurring referral share while referred Pro subscriptions remain active, subject to good standing and fair-use participation. Payouts are processed manually during early launch.";
 
 export function GenesisAffiliateDashboardPage() {
+  return (
+    <RequireActiveGenesisAffiliate>
+      <GenesisAffiliateDashboardBody />
+    </RequireActiveGenesisAffiliate>
+  );
+}
+
+function GenesisAffiliateDashboardBody() {
   const { navigate } = useLaunchNav();
-  const userId = getOrgId();
   const [data, setData] = useState<GenesisAffiliateDashboard | null>(null);
   const [loading, setLoading] = useState(true);
   const [copied, setCopied] = useState(false);
@@ -19,7 +26,7 @@ export function GenesisAffiliateDashboardPage() {
     let cancelled = false;
     (async () => {
       setLoading(true);
-      const res = await fetchGenesisAffiliateDashboard(userId);
+      const res = await fetchGenesisAffiliateDashboard();
       if (!cancelled) {
         setData(res);
         setLoading(false);
@@ -28,7 +35,7 @@ export function GenesisAffiliateDashboardPage() {
     return () => {
       cancelled = true;
     };
-  }, [userId]);
+  }, []);
 
   const referralLink = useMemo(() => {
     const code = data?.affiliate?.referral_code;
@@ -57,12 +64,8 @@ export function GenesisAffiliateDashboardPage() {
       {loading ? (
         <p className="text-sm text-slate-400">Loading your referral dashboard…</p>
       ) : !data?.ok ? (
-        <div className="max-w-lg space-y-4">
-          <p className="text-sm text-slate-300">
-            This dashboard is for approved Genesis Dogs partners. If you believe you should have access, contact the
-            LawDog team.
-          </p>
-          <p className="text-xs text-slate-500">{data?.error ?? "Not enrolled"}</p>
+        <div className="max-w-lg space-y-4" data-testid="genesis-affiliate-access-denied">
+          <p className="text-sm text-slate-300">This area is not available for your account.</p>
           <button type="button" className="vs01-btn vs01-btn--secondary" onClick={() => navigate("/app")}>
             Back to dashboard
           </button>

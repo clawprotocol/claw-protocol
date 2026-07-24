@@ -3,6 +3,7 @@ import { useDynamicConfig } from "../../config/dynamicConfig/useDynamicConfig";
 import { useExperimentVariant } from "../../config/experiments/useExperimentVariant";
 import { useFeatureGate } from "../../config/featureFlags/useFeatureGate";
 import { recordProofShareSignal } from "./opportunityGamification";
+import { useActiveGenesisAffiliateAccess } from "../genesisReferral/genesisAffiliateAccess";
 import { useLaunchNav } from "../LaunchNavContext";
 
 type BridgeMode = "proof_ready" | "sent_pending";
@@ -11,6 +12,9 @@ export function ProofOpportunityBridgeCard(props: { agreementId: string; mode: B
   const { agreementId, mode } = props;
   const { navigate } = useLaunchNav();
   const bridgeOn = useFeatureGate("proof_share_bridge_enabled");
+  const affiliateFeatureOn = useFeatureGate("affiliate_opportunity_enabled");
+  const { allowed: activeGenesisAffiliate } = useActiveGenesisAffiliateAccess();
+  const showEarnCta = affiliateFeatureOn && activeGenesisAffiliate;
   const dc = useDynamicConfig();
   const copy = dc.proofBridge;
   const { variant: bridgeCopyVariant } = useExperimentVariant("proof_share_bridge_copy");
@@ -56,9 +60,16 @@ export function ProofOpportunityBridgeCard(props: { agreementId: string; mode: B
         <button type="button" className="vs01-btn vs01-btn--secondary" onClick={() => void copyProof()}>
           {copy.ctaShareProof}
         </button>
-        <button type="button" className="vs01-btn vs01-btn--primary" onClick={() => navigate("/app/opportunity")}>
-          {copy.ctaEarnLink}
-        </button>
+        {showEarnCta ? (
+          <button
+            type="button"
+            className="vs01-btn vs01-btn--primary"
+            data-testid="proof-bridge-earn-cta"
+            onClick={() => navigate("/app/genesis-referral")}
+          >
+            {copy.ctaEarnLink}
+          </button>
+        ) : null}
       </div>
     </div>
   );

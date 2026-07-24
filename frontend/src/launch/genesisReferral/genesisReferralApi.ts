@@ -1,5 +1,19 @@
 import { apiUrl, errorMessageFromResponse } from "../../lib/clawApi";
+import { getAuthSession } from "../../auth/supabaseAuthService";
 import type { GenesisReferralCheckoutPayload } from "./genesisReferralCapture";
+
+async function genesisAuthHeaders(extra?: Record<string, string>): Promise<Record<string, string>> {
+  const headers: Record<string, string> = {
+    Accept: "application/json",
+    ...(extra ?? {}),
+  };
+  const session = await getAuthSession();
+  const token = session?.access_token?.trim();
+  if (token) {
+    headers.Authorization = `Bearer ${token}`;
+  }
+  return headers;
+}
 
 export async function postGenesisReferralCapture(args: {
   referral_code: string;
@@ -28,7 +42,8 @@ export async function postGenesisReferralConvert(args: {
   try {
     const res = await fetch(apiUrl("/v1/genesis-referral/convert"), {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: await genesisAuthHeaders({ "Content-Type": "application/json" }),
+      credentials: "include",
       body: JSON.stringify(args),
     });
     if (res.ok) return { ok: true };
@@ -68,7 +83,8 @@ export async function fetchGenesisCheckoutMetadata(
   try {
     const res = await fetch(apiUrl("/v1/genesis-referral/checkout-metadata"), {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: await genesisAuthHeaders({ "Content-Type": "application/json" }),
+      credentials: "include",
       body: JSON.stringify({
         org_id: orgId,
         referral_code: payload.referral_code ?? undefined,
@@ -104,13 +120,49 @@ export type GenesisAffiliateDashboard = {
   error?: string;
 };
 
-export async function fetchGenesisAffiliateDashboard(userId: string): Promise<GenesisAffiliateDashboard> {
+export type GenesisAffiliateAccess = {
+  ok: boolean;
+  allowed: boolean;
+  reason?: string;
+};
+
+/** Authenticated probe — active Genesis Dog only; no commission payload. */
+export async function fetchGenesisAffiliateAccess(): Promise<GenesisAffiliateAccess> {
   try {
-    const res = await fetch(apiUrl("/v1/genesis-referral/affiliate/me"), {
-      headers: { "X-Claw-User-Id": userId },
+    const headers = await genesisAuthHeaders();
+    if (!headers.Authorization) {
+      return { ok: true, allowed: false, reason: "genesis_affiliate_access_denied" };
+    }
+    const res = await fetch(apiUrl("/v1/genesis-referral/affiliate/access"), {
+      headers,
+      credentials: "include",
     });
     if (!res.ok) {
-      return { ok: false, error: await errorMessageFromResponse(res, "Not found") };
+      return { ok: true, allowed: false, reason: "genesis_affiliate_access_denied" };
+    }
+    const data = (await res.json()) as GenesisAffiliateAccess;
+    return {
+      ok: true,
+      allowed: Boolean(data.allowed),
+      reason: data.allowed ? undefined : data.reason || "genesis_affiliate_access_denied",
+    };
+  } catch {
+    return { ok: true, allowed: false, reason: "genesis_affiliate_access_denied" };
+  }
+}
+
+export async function fetchGenesisAffiliateDashboard(): Promise<GenesisAffiliateDashboard> {
+  try {
+    const headers = await genesisAuthHeaders();
+    if (!headers.Authorization) {
+      return { ok: false, error: "genesis_affiliate_access_denied" };
+    }
+    const res = await fetch(apiUrl("/v1/genesis-referral/affiliate/me"), {
+      headers,
+      credentials: "include",
+    });
+    if (!res.ok) {
+      return { ok: false, error: await errorMessageFromResponse(res, "genesis_affiliate_access_denied") };
     }
     return (await res.json()) as GenesisAffiliateDashboard;
   } catch {

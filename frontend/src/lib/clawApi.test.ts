@@ -87,6 +87,9 @@ describe("genesisReferralApi", () => {
 
   it("posts checkout-metadata to normalized loopback base", async () => {
     vi.resetModules();
+    vi.doMock("../auth/supabaseAuthService", () => ({
+      getAuthSession: vi.fn().mockResolvedValue({ access_token: "tok", user: { id: "u1" } }),
+    }));
     const { fetchGenesisCheckoutMetadata } = await import("../launch/genesisReferral/genesisReferralApi");
     await fetchGenesisCheckoutMetadata("org1", { visitor_id: "v1", referral_code: null });
     const fetchMock = vi.mocked(fetch);
@@ -94,5 +97,7 @@ describe("genesisReferralApi", () => {
     const url = String(fetchMock.mock.calls[0]?.[0]);
     expect(url).toContain("http://127.0.0.1:8000/v1/genesis-referral/checkout-metadata");
     expect(url).not.toContain("192.168");
+    const headers = (fetchMock.mock.calls[0]?.[1]?.headers ?? {}) as Record<string, string>;
+    expect(headers.Authorization).toBe("Bearer tok");
   });
 });

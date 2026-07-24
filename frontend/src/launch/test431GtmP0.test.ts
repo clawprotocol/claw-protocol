@@ -43,7 +43,7 @@ describe("TEST431 — P0 GTM auth, Stripe entitlement, affiliate nav", () => {
 
   it("sidebar affiliate nav routes to opportunity dashboard", () => {
     const affiliate = LAWDOG_NAV_ITEMS.find((i) => i.id === "affiliate");
-    expect(affiliate?.path).toBe("/app/opportunity");
+    expect(affiliate?.path).toBe("/app/genesis-referral");
   });
 
   it("server subscription cache drives access tier", () => {

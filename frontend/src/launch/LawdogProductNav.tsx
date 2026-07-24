@@ -1,4 +1,6 @@
 import type { ReactNode } from "react";
+import { useFeatureGate } from "../config/featureFlags/useFeatureGate";
+import { useActiveGenesisAffiliateAccess } from "./genesisReferral/genesisAffiliateAccess";
 import { useLaunchNav } from "./LaunchNavContext";
 
 export type LawdogNavItemId =
@@ -22,7 +24,7 @@ export const LAWDOG_NAV_ITEMS: NavItem[] = [
   { id: "create", label: "Create", path: "/app/create", testId: "lawdog-nav-create" },
   { id: "agreements", label: "Agreements", path: "/app/agreements", testId: "lawdog-nav-agreements" },
   { id: "signatures", label: "Signatures", path: "/app/signatures", testId: "lawdog-nav-signatures" },
-  { id: "affiliate", label: "Affiliate", path: "/app/opportunity", testId: "lawdog-nav-affiliate" },
+  { id: "affiliate", label: "Affiliate", path: "/app/genesis-referral", testId: "lawdog-nav-affiliate" },
 ];
 
 export function resolveLawdogNavActiveId(pathname: string): LawdogNavItemId {
@@ -31,7 +33,7 @@ export function resolveLawdogNavActiveId(pathname: string): LawdogNavItemId {
   if (p.startsWith("/app/create")) return "create";
   if (p.startsWith("/app/agreements")) return "agreements";
   if (p.startsWith("/app/signatures")) return "signatures";
-  if (p === "/app/affiliate" || p === "/app/opportunity") return "affiliate";
+  if (p === "/app/affiliate" || p === "/app/opportunity" || p === "/app/genesis-referral") return "affiliate";
   if (p.startsWith("/app/billing")) return "billing";
   if (p.startsWith("/app/settings")) return "settings";
   return "dashboard";
@@ -40,6 +42,10 @@ export function resolveLawdogNavActiveId(pathname: string): LawdogNavItemId {
 export function LawdogProductNav(props: { activeId?: LawdogNavItemId }) {
   const { navigate, pathname } = useLaunchNav();
   const activeId = props.activeId ?? resolveLawdogNavActiveId(pathname);
+  const affiliateFeatureOn = useFeatureGate("affiliate_opportunity_enabled");
+  const { allowed: activeGenesisAffiliate } = useActiveGenesisAffiliateAccess();
+  const showAffiliateNav = affiliateFeatureOn && activeGenesisAffiliate;
+  const navItems = LAWDOG_NAV_ITEMS.filter((item) => item.id !== "affiliate" || showAffiliateNav);
 
   return (
     <nav
@@ -47,7 +53,7 @@ export function LawdogProductNav(props: { activeId?: LawdogNavItemId }) {
       aria-label="LawDog workspace"
       data-testid="lawdog-product-nav"
     >
-      {LAWDOG_NAV_ITEMS.map((item) => {
+      {navItems.map((item) => {
         const active = item.id === activeId;
         return (
           <button

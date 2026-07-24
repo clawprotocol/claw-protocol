@@ -5,6 +5,7 @@ import "../../joy/joy.css";
 import { JOY_COPY } from "../../joy/clawJoyCopy";
 import { useFeatureGate } from "../../config/featureFlags/useFeatureGate";
 import { useLaunchNav } from "../LaunchNavContext";
+import { useActiveGenesisAffiliateAccess } from "../genesisReferral/genesisAffiliateAccess";
 import { LawdogLogoLink } from "../../components/ui/LawdogLogoLink";
 import { DisclosureFooter } from "../../compliance/DisclosureFooter";
 
@@ -42,7 +43,10 @@ export function SimpleFlowShell(props: {
   hideAffiliateNav?: boolean;
 }) {
   const { navigate } = useLaunchNav();
-  const affiliateNav = useFeatureGate("affiliate_opportunity_enabled");
+  const affiliateFeatureOn = useFeatureGate("affiliate_opportunity_enabled");
+  // Earn nav is Genesis-active only (same product boundary as Affiliate dashboard).
+  const { allowed: activeGenesisAffiliate } = useActiveGenesisAffiliateAccess();
+  const affiliateNav = affiliateFeatureOn && activeGenesisAffiliate;
   const {
     children,
     kicker,
@@ -77,7 +81,7 @@ export function SimpleFlowShell(props: {
               <button
                 type="button"
                 className="min-h-11 rounded-md border border-transparent px-3 py-2 text-sm font-medium text-slate-500 transition-colors hover:border-slate-800 hover:text-slate-300"
-                onClick={() => navigate("/app/opportunity")}
+                onClick={() => navigate("/app/genesis-referral")}
               >
                 Earn
               </button>

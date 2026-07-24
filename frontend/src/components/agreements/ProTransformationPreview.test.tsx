@@ -49,15 +49,13 @@ describe("ProTransformationPreview", () => {
 });
 
 describe("Genesis Dogs partner page (static)", () => {
-  it("uses Genesis Dogs partner framing with minimal app shell nav", () => {
-    expect(opportunity).toContain("EARN_HERO_TITLE");
+  it("routes partner access through Genesis Referral only", () => {
     expect(EARN_HERO_TITLE).toBe("Genesis Dogs Partner Access");
-    expect(opportunity).toContain('navMode="minimal"');
-    expect(opportunity).toContain("compactFooter");
+    expect(EARN_CTA_START).toBe("Request partner access");
+    expect(opportunity).toContain("RequireActiveGenesisAffiliate");
+    expect(opportunity).toContain("/app/genesis-referral");
     expect(opportunity).not.toContain("Doginal Dog holders");
     expect(opportunity).not.toContain("Start earning");
-    expect(opportunity).toContain("EARN_CTA_START");
-    expect(EARN_CTA_START).toBe("Request partner access");
-    expect(opportunity).toContain("overflow-x-hidden");
+    expect(opportunity).not.toContain("AffiliateDashboardPanel");
   });
 });

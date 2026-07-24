@@ -61,7 +61,7 @@ def capture_referral_visit(
             return {"ok": False, "error": "unknown_referral_code"}
         if str(aff.get("affiliate_status") or "") != "active":
             return {"ok": False, "error": "affiliate_not_active"}
-        row = record_referral_capture(
+        record_referral_capture(
             con,
             referral_code=code,
             referrer_user_id=str(aff["user_id"]),
@@ -70,7 +70,8 @@ def capture_referral_visit(
             metadata=metadata,
         )
         con.commit()
-    return {"ok": True, "attribution": row, "referrer_user_id": aff["user_id"]}
+    # Public capture: acknowledge only — never leak referrer identity or attribution rows.
+    return {"ok": True}
 
 
 def convert_referral(
@@ -105,7 +106,9 @@ def convert_referral(
         return {"ok": False, "error": "conversion_failed"}
     if row.get("self_referral"):
         return {"ok": False, "error": "self_referral", "blocked": True}
-    return {"ok": True, "attribution": row}
+    # Authenticated referred client: acknowledge only — never leak referrer identity
+    # or attribution rows (side effects already committed above).
+    return {"ok": True}
 
 
 def resolve_genesis_commission_context(

@@ -95,18 +95,13 @@ describe("proConversionCopy", () => {
 });
 
 describe("ClawOpportunityPage earn landing (static)", () => {
-  it("renders simplified hero before partner access expands details", () => {
+  it("legacy opportunity URL redirects into Genesis Referral only", () => {
     const page = readFileSync(join(__dirname, "../affiliate/ClawOpportunityPage.tsx"), "utf8");
-    expect(page).toContain("EARN_HERO_TITLE");
-    expect(page).toContain("EARN_CTA_START");
-    expect(page).toContain("earnDetailsOpen");
-    expect(page).toContain("compactFooter");
+    expect(page).toContain("RequireActiveGenesisAffiliate");
+    expect(page).toContain("/app/genesis-referral");
+    expect(page).not.toContain("AffiliateDashboardPanel");
     expect(page).not.toContain("OpportunityIntroCards");
     expect(page).not.toContain("Doginal Dog holders");
-    const affiliatePanelIdx = page.indexOf("<AffiliateDashboardPanel");
-    const startIdx = page.indexOf("earnDetailsOpen");
-    expect(startIdx).toBeGreaterThanOrEqual(0);
-    expect(affiliatePanelIdx).toBeGreaterThan(startIdx);
   });
 });
 

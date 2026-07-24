@@ -392,10 +392,16 @@ def void_commissions_for_charge_invoice_ids(
 
 
 def affiliate_dashboard_summary(con: sqlite3.Connection, referrer_user_id: str) -> Dict[str, Any]:
+    """Dashboard summary for an *active* Genesis affiliate only — no data when inactive/absent."""
+    from backend.security.genesis_affiliate_access import (
+        GENESIS_AFFILIATE_ACCESS_DENIED,
+        resolve_active_genesis_affiliate,
+    )
+
     uid = referrer_user_id.strip()
-    aff = get_genesis_affiliate_by_user_id(con, uid)
+    aff = resolve_active_genesis_affiliate(con, uid)
     if not aff:
-        return {"ok": False, "error": "not_genesis_affiliate"}
+        return {"ok": False, "error": GENESIS_AFFILIATE_ACCESS_DENIED}
     code = str(aff["referral_code"])
     referrals = con.execute(
         """

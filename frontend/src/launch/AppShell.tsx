@@ -9,6 +9,7 @@ import { DisclosureFooter } from "../compliance/DisclosureFooter";
 import { JoySocialFooter } from "../joy/JoySocialFooter";
 import { LawdogLogoLink } from "../components/ui/LawdogLogoLink";
 import { LawdogBrand } from "../components/ui/LawdogBrand";
+import { useActiveGenesisAffiliateAccess } from "./genesisReferral/genesisAffiliateAccess";
 import "../joy/joy.css";
 
 export type AppShellNavMode = "default" | "esign_bridge_focused" | "minimal" | "public_completed";
@@ -31,7 +32,9 @@ export function AppShell(props: {
 }) {
   const { navigate } = useLaunchNav();
   const access = useAccess();
-  const affiliateNav = useFeatureGate("affiliate_opportunity_enabled");
+  const affiliateFeatureOn = useFeatureGate("affiliate_opportunity_enabled");
+  const { allowed: activeGenesisAffiliate } = useActiveGenesisAffiliateAccess();
+  const showAffiliateNav = affiliateFeatureOn && activeGenesisAffiliate;
   const { children, title, subtitle, navMode = "default", compactFooter = false } = props;
   const showLegacyQuickPath = access.tier === "free";
   const esignBridgeNav = navMode === "esign_bridge_focused";
@@ -154,13 +157,16 @@ export function AppShell(props: {
                 >
                   Signatures
                 </button>
-                <button
-                  type="button"
-                  className="vs01-btn vs01-btn--secondary vs01-btn--compact"
-                  onClick={() => navigate(affiliateNav ? "/app/opportunity" : "/app/affiliate")}
-                >
-                  Affiliate
-                </button>
+                {showAffiliateNav ? (
+                  <button
+                    type="button"
+                    className="vs01-btn vs01-btn--secondary vs01-btn--compact"
+                    data-testid="app-shell-nav-affiliate"
+                    onClick={() => navigate("/app/genesis-referral")}
+                  >
+                    Affiliate
+                  </button>
+                ) : null}
                 <div className="relative">
                   <button
                     type="button"

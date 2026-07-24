@@ -122,7 +122,8 @@ async def convert_referral(request: Request, body: ConvertReferralBody) -> Dict[
         if out.get("error") == "self_referral":
             code = 409
         raise HTTPException(status_code=code, detail=out.get("error", "convert_failed"))
-    return out
+    # Privacy: never echo attribution / referrer fields to the referred client.
+    return {"ok": True}
 
 
 @router.post("/checkout-metadata")
@@ -149,15 +150,37 @@ async def checkout_metadata(request: Request, body: CheckoutMetadataBody) -> Dic
     return {"ok": True, "metadata": md}
 
 
-@router.get("/affiliate/me")
-async def affiliate_me(request: Request) -> Dict[str, Any]:
+@router.get("/affiliate/access")
+async def affiliate_access(request: Request) -> Dict[str, Any]:
+    """Authenticated probe: active Genesis Dog only. No commission/referral payload."""
+    from backend.security.genesis_affiliate_access import active_genesis_access_payload
+
     uid = _user_id_from_request(request)
     eco = get_economics_store()
     eco.init_schema()
     with eco._conn() as con:
+        return active_genesis_access_payload(con, uid)
+
+
+@router.get("/affiliate/me")
+async def affiliate_me(request: Request) -> Dict[str, Any]:
+    """Active Genesis Dog dashboard — deny absent/paused/revoked without leaking summary data."""
+    from backend.security.genesis_affiliate_access import (
+        GENESIS_AFFILIATE_ACCESS_DENIED,
+        require_active_genesis_affiliate,
+    )
+
+    uid = _user_id_from_request(request)
+    eco = get_economics_store()
+    eco.init_schema()
+    with eco._conn() as con:
+        require_active_genesis_affiliate(con, uid)
         summary = affiliate_dashboard_summary(con, uid)
     if not summary.get("ok"):
-        raise HTTPException(status_code=404, detail=summary.get("error", "not_found"))
+        raise HTTPException(
+            status_code=403,
+            detail={"code": summary.get("error") or GENESIS_AFFILIATE_ACCESS_DENIED},
+        )
     return summary
 
 

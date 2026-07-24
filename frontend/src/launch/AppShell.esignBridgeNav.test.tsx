@@ -32,7 +32,7 @@ describe("AppShell esign bridge nav", () => {
     cleanup();
   });
 
-  it("esign_bridge_focused has no Home buttons and shows My agreements + Dashboard", () => {
+  it("esign_bridge_focused has no Home/Affiliate and shows My agreements + Dashboard", () => {
     render(
       <AppShell title="Prepare for e-signing" subtitle="Test" navMode="esign_bridge_focused">
         <div>child</div>
@@ -42,20 +42,21 @@ describe("AppShell esign bridge nav", () => {
     expect(within(nav).queryAllByRole("button", { name: /^Home$/ })).toHaveLength(0);
     expect(within(nav).getByRole("button", { name: "My agreements" })).toBeTruthy();
     expect(within(nav).getByRole("button", { name: "Dashboard" })).toBeTruthy();
-    expect(within(nav).getByRole("button", { name: "Create" })).toBeTruthy();
-    expect(within(nav).getByRole("button", { name: "Billing" })).toBeTruthy();
+    expect(within(nav).queryByRole("button", { name: "Create" })).toBeNull();
+    expect(within(nav).queryByTestId("app-shell-nav-affiliate")).toBeNull();
     expect(within(nav).queryByRole("button", { name: "Integrations" })).toBeNull();
     expect(within(nav).queryByRole("button", { name: "Work product" })).toBeNull();
   });
 
-  it("default nav exposes a single Home button for the owner dashboard", () => {
+  it("default nav exposes Dashboard and hides Affiliate without active Genesis", async () => {
     render(
       <AppShell title="Continue your document" subtitle="Test">
         <div>child</div>
       </AppShell>,
     );
     const nav = screen.getByTestId("app-shell-primary-nav");
-    expect(within(nav).getAllByRole("button", { name: /^Home$/ })).toHaveLength(1);
+    expect(within(nav).getByRole("button", { name: /^Dashboard$/ })).toBeTruthy();
+    expect(within(nav).queryByTestId("app-shell-nav-affiliate")).toBeNull();
   });
 
   it("minimal nav shows only logo, back to dashboard, and new agreement", () => {

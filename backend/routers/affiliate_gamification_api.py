@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from backend.affiliates.badges_catalog import BADGE_BY_ID, all_badge_definitions
@@ -24,11 +24,15 @@ from backend.affiliates.evm_wallet import validate_evm_wallet_address
 from backend.affiliates.progression import next_progression_target
 from backend.economics import config as econ_config
 from backend.economics.store import get_economics_store
+from backend.security.legacy_affiliate_commercial_gate import (
+    deny_legacy_private_affiliate_in_commercial,
+)
 from backend.usage_economics.policy import require_claw_org_id_header
 
 router = APIRouter(
     prefix="/v1/orgs/{org_id}/affiliate/gamification",
     tags=["affiliate-gamification"],
+    dependencies=[Depends(deny_legacy_private_affiliate_in_commercial)],
 )
 
 SCHEMA_VERSION = "claw.affiliate.gamification/v2"

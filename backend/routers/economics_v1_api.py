@@ -146,7 +146,11 @@ def _affiliate_access_status_payload(
 @router.post("/affiliates")
 async def create_affiliate(request: Request, body: CreateAffiliateBody) -> Dict[str, Any]:
     from backend.security.commercial_auth import require_org_matches_principal
+    from backend.security.legacy_affiliate_commercial_gate import (
+        deny_legacy_private_affiliate_in_commercial,
+    )
 
+    deny_legacy_private_affiliate_in_commercial(request)
     require_org_matches_principal(request, body.owner_org_id)
     out = affiliate_service.create_affiliate(
         affiliate_code=body.affiliate_code,
@@ -162,7 +166,11 @@ async def create_affiliate(request: Request, body: CreateAffiliateBody) -> Dict[
 @router.post("/affiliates/create-link")
 async def create_affiliate_link(request: Request, body: CreateAffiliateLinkBody) -> Dict[str, Any]:
     from backend.security.commercial_auth import require_commercial_owner_principal
+    from backend.security.legacy_affiliate_commercial_gate import (
+        deny_legacy_private_affiliate_in_commercial,
+    )
 
+    deny_legacy_private_affiliate_in_commercial(request)
     eco = get_economics_store()
     eco.init_schema()
     require_commercial_owner_principal(request)
@@ -197,6 +205,11 @@ async def create_affiliate_link(request: Request, body: CreateAffiliateLinkBody)
 
 @router.get("/affiliates/access-request/status")
 async def affiliate_access_request_status(request: Request) -> Dict[str, Any]:
+    from backend.security.legacy_affiliate_commercial_gate import (
+        deny_legacy_private_affiliate_in_commercial,
+    )
+
+    deny_legacy_private_affiliate_in_commercial(request)
     eco = get_economics_store()
     eco.init_schema()
     org_id = (request.headers.get("X-Claw-Org-Id") or "").strip() or None
@@ -208,6 +221,11 @@ async def affiliate_access_request_status(request: Request) -> Dict[str, Any]:
 async def create_affiliate_access_request(
     request: Request, body: AffiliateAccessRequestBody
 ) -> Dict[str, Any]:
+    from backend.security.legacy_affiliate_commercial_gate import (
+        deny_legacy_private_affiliate_in_commercial,
+    )
+
+    deny_legacy_private_affiliate_in_commercial(request)
     eco = get_economics_store()
     eco.init_schema()
     org_id = (request.headers.get("X-Claw-Org-Id") or "").strip() or None
@@ -283,30 +301,41 @@ async def attribute_affiliate(request: Request, body: AttributeAffiliateBody) ->
 @router.get("/affiliates/{affiliate_id}")
 async def get_affiliate(affiliate_id: str, request: Request) -> Dict[str, Any]:
     from backend.security.commercial_auth import require_commercial_owner_principal
+    from backend.security.legacy_affiliate_commercial_gate import (
+        deny_legacy_private_affiliate_in_commercial,
+    )
 
+    deny_legacy_private_affiliate_in_commercial(request)
     require_commercial_owner_principal(request)
     row = affiliate_service.get_affiliate(affiliate_id)
     if not row:
         raise HTTPException(status_code=404, detail="not_found")
     owner_org = str((row or {}).get("owner_org_id") or "").strip()
-    if owner_org:
-        from backend.security.commercial_auth import require_org_matches_principal
+    if not owner_org:
+        # Ownerless rows are never readable via this commercial-denied surface.
+        raise HTTPException(status_code=404, detail="not_found")
+    from backend.security.commercial_auth import require_org_matches_principal
 
-        require_org_matches_principal(request, owner_org)
+    require_org_matches_principal(request, owner_org)
     return dict(row)
 
 
 @router.get("/affiliates/{affiliate_id}/accruals")
 async def list_accruals(affiliate_id: str, request: Request) -> Dict[str, Any]:
     from backend.security.commercial_auth import require_commercial_owner_principal, require_org_matches_principal
+    from backend.security.legacy_affiliate_commercial_gate import (
+        deny_legacy_private_affiliate_in_commercial,
+    )
 
+    deny_legacy_private_affiliate_in_commercial(request)
     require_commercial_owner_principal(request)
     row = affiliate_service.get_affiliate(affiliate_id)
     if not row:
         raise HTTPException(status_code=404, detail="not_found")
     owner_org = str((row or {}).get("owner_org_id") or "").strip()
-    if owner_org:
-        require_org_matches_principal(request, owner_org)
+    if not owner_org:
+        raise HTTPException(status_code=404, detail="not_found")
+    require_org_matches_principal(request, owner_org)
     eco = get_economics_store()
     eco.init_schema()
     rows = eco.list_accruals_for_affiliate(affiliate_id)

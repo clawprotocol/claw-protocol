@@ -181,11 +181,9 @@ describe("AgreementBuilderIntake home auto-generate (static)", () => {
 describe("ClawOpportunityPage earn landing (static)", () => {
   const page = readFileSync(join(__dirname, "affiliate/ClawOpportunityPage.tsx"), "utf8");
 
-  it("hides dashboard until Start earning", () => {
-    expect(page).toContain("earnDetailsOpen");
-    expect(page).toContain("EARN_CTA_START");
-    const panelIdx = page.indexOf("<AffiliateDashboardPanel");
-    const startIdx = page.indexOf("earnDetailsOpen");
-    expect(panelIdx).toBeGreaterThan(startIdx);
+  it("does not render a legacy affiliate dashboard panel", () => {
+    expect(page).toContain("RequireActiveGenesisAffiliate");
+    expect(page).toContain("/app/genesis-referral");
+    expect(page).not.toContain("AffiliateDashboardPanel");
   });
 });
