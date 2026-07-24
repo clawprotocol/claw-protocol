@@ -119,27 +119,82 @@ class UsageEconomicsStore:
         subject_ref: str,
         internal_keys_draft: int,
     ) -> None:
+        result = self.try_insert_agreement_owner_with_monthly_cap(
+            agreement_id=agreement_id,
+            subject_ref=subject_ref,
+            internal_keys_draft=internal_keys_draft,
+            monthly_cap=None,
+            period_start_iso="",
+        )
+        if result == "cap_exceeded":
+            raise RuntimeError("unexpected monthly cap denial without cap")
+
+    def try_insert_agreement_owner_with_monthly_cap(
+        self,
+        *,
+        agreement_id: str,
+        subject_ref: str,
+        internal_keys_draft: int,
+        monthly_cap: Optional[int],
+        period_start_iso: str,
+    ) -> str:
+        """
+        Idempotent ownership insert with optional transactional monthly create cap.
+
+        Returns ``inserted`` | ``duplicate`` | ``cap_exceeded``.
+        Concurrent callers cannot exceed ``monthly_cap`` when set.
+        """
         now = _utc_now()
+        aid = (agreement_id or "").strip()
+        subj = (subject_ref or "").strip()
+        if not aid or not subj:
+            raise ValueError("agreement_id and subject_ref are required")
         if self._pg:
             from backend.usage_economics import usage_economics_postgres as uep
 
-            uep.insert_agreement_owner(
-                agreement_id=agreement_id,
-                subject_ref=subject_ref,
+            return uep.try_insert_agreement_owner_with_monthly_cap(
+                agreement_id=aid,
+                subject_ref=subj,
                 internal_keys_draft=internal_keys_draft,
                 now_iso=now,
+                monthly_cap=monthly_cap,
+                period_start_iso=period_start_iso,
             )
-            return
-        with self._conn() as con:
+
+        con = self._conn()
+        try:
+            con.execute("BEGIN IMMEDIATE")
+            existing = con.execute(
+                "SELECT 1 FROM agreement_owner WHERE agreement_id = ?",
+                (aid,),
+            ).fetchone()
+            if existing:
+                con.execute("COMMIT")
+                return "duplicate"
+            if monthly_cap is not None:
+                start = (period_start_iso or "").strip()
+                if not start:
+                    raise ValueError("period_start_iso required when monthly_cap is set")
+                row = con.execute(
+                    """
+                    SELECT COUNT(*) AS c FROM agreement_owner
+                    WHERE subject_ref = ? AND created_at >= ?
+                    """,
+                    (subj, start),
+                ).fetchone()
+                used = int(row[0]) if row else 0
+                if used >= int(monthly_cap):
+                    con.execute("ROLLBACK")
+                    return "cap_exceeded"
+            kd = int(internal_keys_draft)
             con.execute(
                 """
                 INSERT INTO agreement_owner (
                   agreement_id, subject_ref, created_at, internal_keys_draft
                 ) VALUES (?, ?, ?, ?)
                 """,
-                (agreement_id, subject_ref, now, int(internal_keys_draft)),
+                (aid, subj, now, kd),
             )
-            kd = int(internal_keys_draft)
             con.execute(
                 """
                 INSERT INTO subject_counters (subject_ref, keys_consumed_total, agreements_created, agreements_finalized, ai_calls_count, abuse_flag, soft_throttle_flag, updated_at)
@@ -149,8 +204,18 @@ class UsageEconomicsStore:
                   keys_consumed_total = keys_consumed_total + ?,
                   updated_at = excluded.updated_at
                 """,
-                (subject_ref, kd, now, kd),
+                (subj, kd, now, kd),
             )
+            con.execute("COMMIT")
+            return "inserted"
+        except Exception:
+            try:
+                con.execute("ROLLBACK")
+            except Exception:
+                pass
+            raise
+        finally:
+            con.close()
 
     def owner_subject_for_agreement(self, agreement_id: str) -> Optional[str]:
         if self._pg:

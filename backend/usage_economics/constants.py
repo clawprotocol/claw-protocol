@@ -19,6 +19,16 @@ WATERMARK_LABEL = "Created with LawDog — Draft for Review"
 
 PAID_SOFT_MONTHLY_AGREEMENTS_CAP = 500
 
+# Complimentary UTC-calendar-month agreement *creations* for active Genesis Dogs.
+# Not a Stripe Pro plan and not affiliate commission economics ($11.70/mo is separate).
+# Override with CLAW_GENESIS_MONTHLY_AGREEMENT_ALLOWANCE — accepted range [1, 100] only.
+# Blank / malformed / 0 / negative / >100 → DEFAULT (never a hidden kill-switch).
+DEFAULT_GENESIS_MONTHLY_AGREEMENT_ALLOWANCE = 5
+GENESIS_MONTHLY_AGREEMENT_ALLOWANCE_MIN = 1
+GENESIS_MONTHLY_AGREEMENT_ALLOWANCE_MAX = 100
+
+GENESIS_MONTHLY_ALLOWANCE_EXHAUSTED = "genesis_monthly_allowance_exhausted"
+
 # Abuse heuristics (stub-friendly; tune in production).
 MAX_DISTINCT_SUBJECTS_PER_IP_PER_DAY = 5
 # Draft creations from the same client IP in a short window (any org / subject).

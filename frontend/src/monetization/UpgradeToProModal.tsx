@@ -2,34 +2,46 @@ import { useEffect } from "react";
 import { logProductEvent } from "../lib/experimentation/productEvents";
 import { useLaunchNav } from "../launch/LaunchNavContext";
 
+export type UpgradeToProModalVariant = "upgrade_to_pro" | "genesis_allowance_exhausted";
+
 export type UpgradeToProModalProps = {
   open: boolean;
   onClose: () => void;
   /** Analytics surface, e.g. `simple_create` | `agreement_wizard_new`. */
   surface: string;
+  /** Default free-path upgrade copy vs Genesis monthly allowance exhausted. */
+  variant?: UpgradeToProModalVariant;
 };
 
-export function UpgradeToProModal({ open, onClose, surface }: UpgradeToProModalProps) {
+export function UpgradeToProModal({
+  open,
+  onClose,
+  surface,
+  variant = "upgrade_to_pro",
+}: UpgradeToProModalProps) {
   const { navigate } = useLaunchNav();
+  const analyticsVariant = variant;
 
   useEffect(() => {
     if (!open) return;
-    logProductEvent("paywall_viewed", { surface, variant: "upgrade_to_pro" });
-  }, [open, surface]);
+    logProductEvent("paywall_viewed", { surface, variant: analyticsVariant });
+  }, [open, surface, analyticsVariant]);
 
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
-        logProductEvent("paywall_dismissed", { surface, variant: "upgrade_to_pro", via: "escape" });
+        logProductEvent("paywall_dismissed", { surface, variant: analyticsVariant, via: "escape" });
         onClose();
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [open, onClose, surface]);
+  }, [open, onClose, surface, analyticsVariant]);
 
   if (!open) return null;
+
+  const isGenesisExhausted = variant === "genesis_allowance_exhausted";
 
   return (
     <div
@@ -37,7 +49,7 @@ export function UpgradeToProModal({ open, onClose, surface }: UpgradeToProModalP
       role="presentation"
       onMouseDown={(e) => {
         if (e.target === e.currentTarget) {
-          logProductEvent("paywall_dismissed", { surface, variant: "upgrade_to_pro", via: "backdrop" });
+          logProductEvent("paywall_dismissed", { surface, variant: analyticsVariant, via: "backdrop" });
           onClose();
         }
       }}
@@ -50,37 +62,41 @@ export function UpgradeToProModal({ open, onClose, surface }: UpgradeToProModalP
         className="relative z-[1] w-full max-w-md rounded-2xl border border-slate-700/90 bg-slate-950 px-6 py-6 shadow-[0_24px_64px_rgba(0,0,0,0.45)]"
       >
         <h2 id="upgrade-pro-title" className="text-lg font-semibold text-slate-50">
-          Keep creating with LawDog
+          {isGenesisExhausted ? "Genesis monthly allowance used" : "Keep creating with LawDog"}
         </h2>
         <p className="mt-3 text-sm leading-relaxed text-slate-400">
-          You&apos;ve already created a verified record. Upgrade to Pro to create and manage more agreements.
+          {isGenesisExhausted
+            ? "You're still an active Genesis Dog. You've used this month's complimentary agreement allowance. Upgrade to Pro for unlimited creations, or wait until next month when the allowance resets."
+            : "You've already created a verified record. Upgrade to Pro to create and manage more agreements."}
         </p>
-        <ul className="mt-4 space-y-2 text-sm text-slate-300">
-          <li className="flex gap-2">
-            <span className="text-emerald-400/90" aria-hidden>
-              ✓
-            </span>
-            <span>Unlimited agreements</span>
-          </li>
-          <li className="flex gap-2">
-            <span className="text-emerald-400/90" aria-hidden>
-              ✓
-            </span>
-            <span>Full history</span>
-          </li>
-          <li className="flex gap-2">
-            <span className="text-emerald-400/90" aria-hidden>
-              ✓
-            </span>
-            <span>Reuse and edit anytime</span>
-          </li>
-        </ul>
+        {!isGenesisExhausted ? (
+          <ul className="mt-4 space-y-2 text-sm text-slate-300">
+            <li className="flex gap-2">
+              <span className="text-emerald-400/90" aria-hidden>
+                ✓
+              </span>
+              <span>Unlimited agreements</span>
+            </li>
+            <li className="flex gap-2">
+              <span className="text-emerald-400/90" aria-hidden>
+                ✓
+              </span>
+              <span>Full history</span>
+            </li>
+            <li className="flex gap-2">
+              <span className="text-emerald-400/90" aria-hidden>
+                ✓
+              </span>
+              <span>Reuse and edit anytime</span>
+            </li>
+          </ul>
+        ) : null}
         <div className="mt-6 flex flex-col gap-3">
           <button
             type="button"
             className="vs01-btn vs01-btn--primary min-h-[2.75rem] w-full"
             onClick={() => {
-              logProductEvent("paywall_clicked_upgrade", { surface, variant: "upgrade_to_pro" });
+              logProductEvent("paywall_clicked_upgrade", { surface, variant: analyticsVariant });
               onClose();
               navigate("/app/billing");
             }}
@@ -91,7 +107,11 @@ export function UpgradeToProModal({ open, onClose, surface }: UpgradeToProModalP
             type="button"
             className="text-center text-sm font-medium text-slate-500 underline-offset-2 hover:text-slate-300 hover:underline"
             onClick={() => {
-              logProductEvent("paywall_dismissed", { surface, variant: "upgrade_to_pro", via: "maybe_later" });
+              logProductEvent("paywall_dismissed", {
+                surface,
+                variant: analyticsVariant,
+                via: "maybe_later",
+              });
               onClose();
             }}
           >

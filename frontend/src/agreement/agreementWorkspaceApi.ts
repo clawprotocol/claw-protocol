@@ -708,6 +708,22 @@ export type AgreementMemoryUsageBlock = {
   relationship_view: boolean;
 };
 
+export type CommercialEntitlementBlock = {
+  entitlement: "paid_pro" | "genesis_allowance" | "free" | string;
+  create_allowed: boolean;
+  upgrade_required: boolean;
+  reason?: string | null;
+  genesis_allowance?: {
+    active: boolean;
+    limit: number;
+    used: number;
+    remaining: number;
+    period_start: string;
+    period_end: string;
+    allowed: boolean;
+  } | null;
+};
+
 export type AgreementUsageSummary = {
   tier: string;
   agreements_created: number;
@@ -720,23 +736,30 @@ export type AgreementUsageSummary = {
   paywall_required: boolean;
   soft_throttle: boolean;
   agreement_memory?: AgreementMemoryUsageBlock;
+  commercial?: CommercialEntitlementBlock;
 };
 
 export async function fetchAgreementUsageSummary(): Promise<{
   ok: boolean;
   data: AgreementUsageSummary | null;
   error: string | null;
+  /** Missing/expired/invalid auth — must not be treated as free or Genesis. */
+  authFailure?: boolean;
 }> {
   try {
     const res = await fetch(`${base()}/api/agreements/usage/summary`, {
       headers: clawAgreementHeaders(),
+      credentials: "include",
     });
+    if (res.status === 401 || res.status === 403) {
+      return { ok: false, data: null, error: `HTTP ${res.status}`, authFailure: true };
+    }
     if (!res.ok) {
-      return { ok: false, data: null, error: `HTTP ${res.status}` };
+      return { ok: false, data: null, error: `HTTP ${res.status}`, authFailure: false };
     }
     const data = (await res.json()) as AgreementUsageSummary;
-    return { ok: true, data, error: null };
+    return { ok: true, data, error: null, authFailure: false };
   } catch (e) {
-    return { ok: false, data: null, error: String(e) };
+    return { ok: false, data: null, error: String(e), authFailure: false };
   }
 }

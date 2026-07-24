@@ -142,16 +142,63 @@ def insert_agreement_owner(
     internal_keys_draft: int,
     now_iso: str,
 ) -> None:
+    result = try_insert_agreement_owner_with_monthly_cap(
+        agreement_id=agreement_id,
+        subject_ref=subject_ref,
+        internal_keys_draft=internal_keys_draft,
+        now_iso=now_iso,
+        monthly_cap=None,
+        period_start_iso="",
+    )
+    if result == "cap_exceeded":
+        raise RuntimeError("unexpected monthly cap denial without cap")
+
+
+def try_insert_agreement_owner_with_monthly_cap(
+    *,
+    agreement_id: str,
+    subject_ref: str,
+    internal_keys_draft: int,
+    now_iso: str,
+    monthly_cap: Optional[int],
+    period_start_iso: str,
+) -> str:
+    """Returns ``inserted`` | ``duplicate`` | ``cap_exceeded`` under a subject advisory lock."""
     kd = int(internal_keys_draft)
     ts = _ts(now_iso)
+    aid = (agreement_id or "").strip()
+    subj = (subject_ref or "").strip()
     with _tx() as conn:
+        # Serialize concurrent creates for the same subject within this transaction.
+        conn.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", (subj,))
+        cur = conn.execute(
+            "SELECT 1 AS one FROM agreement_owner WHERE agreement_id = %s",
+            (aid,),
+        )
+        if cur.fetchone():
+            return "duplicate"
+        if monthly_cap is not None:
+            start = (period_start_iso or "").strip()
+            if not start:
+                raise ValueError("period_start_iso required when monthly_cap is set")
+            cur = conn.execute(
+                """
+                SELECT COUNT(*) AS c FROM agreement_owner
+                WHERE subject_ref = %s AND created_at >= %s::timestamptz
+                """,
+                (subj, _ts(start)),
+            )
+            row = cur.fetchone()
+            used = int(row["c"] or 0) if row else 0
+            if used >= int(monthly_cap):
+                return "cap_exceeded"
         conn.execute(
             """
             INSERT INTO agreement_owner (
               agreement_id, subject_ref, created_at, internal_keys_draft
             ) VALUES (%s, %s, %s::timestamptz, %s)
             """,
-            (agreement_id, subject_ref, ts, kd),
+            (aid, subj, ts, kd),
         )
         conn.execute(
             """
@@ -165,8 +212,9 @@ def insert_agreement_owner(
               keys_consumed_total = subject_counters.keys_consumed_total + EXCLUDED.keys_consumed_total,
               updated_at = EXCLUDED.updated_at
             """,
-            (subject_ref, kd, ts),
+            (subj, kd, ts),
         )
+        return "inserted"
 
 
 def owner_subject_for_agreement(agreement_id: str) -> Optional[str]:

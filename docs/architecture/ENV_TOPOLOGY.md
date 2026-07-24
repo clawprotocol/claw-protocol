@@ -52,6 +52,7 @@ Companion: **[Operator runbook](../ops/OPERATOR_RUNBOOK.md)**.
 | `CLAW_TIMELINE_DB_PATH` | Timeline + receipts + Merkle batches SQLite path (ignored for persistence when a **Postgres timeline DSN** is active) | `runtime_environment.timeline_db_path`, `TimelineStore` |
 | `CLAW_USAGE_DB_PATH` | Usage metering + **anchor queue** SQLite default | `backend/utils/usage_store.py`, `anchor_queue.py` |
 | `CLAW_USAGE_ECONOMICS_DB_PATH` | Override path for **LawDog usage economics** SQLite (`usage_economics.sqlite3` default under `CLAW_DATA_DIR`; ignored when a Postgres usage-economics DSN is set) | `backend/usage_economics/store.py` |
+| `CLAW_GENESIS_MONTHLY_AGREEMENT_ALLOWANCE` | Complimentary UTC-month **draft creates** for active Genesis Dogs (integer **1–100**; default **5** when unset/blank/0/negative/>100/malformed). Not affiliate commission. | `backend/usage_economics/commercial_entitlement.py` |
 | `CLAW_ONRAMP_DB_PATH` | Override path for **crypto onramp payments** SQLite (`onramp_payments.sqlite3` default under `CLAW_DATA_DIR`; ignored when a Postgres onramp-payments DSN is set) | `backend/payments/store.py` |
 | `CLAW_ANCHOR_MODE` | `batch` vs `immediate` — worker batch cycle requires `batch` | `runtime_environment.anchor_mode`, `anchor_runner.py` |
 | `CLAW_ANCHOR_ENABLE_MAINNET` | `1` to allow mainnet broadcasts | `runtime_environment.mainnet_disabled`, `anchor_runner.py` |

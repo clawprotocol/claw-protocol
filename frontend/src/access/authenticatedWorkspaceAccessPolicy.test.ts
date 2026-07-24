@@ -15,6 +15,8 @@ describe("authenticatedWorkspaceAccessPolicy", () => {
     });
     expect(verdict.allowed).toBe(true);
     expect(verdict.reason).toBe("anonymous_starter");
+    expect(verdict.showGenesisAllowanceExhausted).toBe(false);
+    expect(verdict.showEntitlementProbeError).toBe(false);
   });
 
   it("blocks authenticated create without entitlement", () => {
@@ -28,6 +30,8 @@ describe("authenticatedWorkspaceAccessPolicy", () => {
     });
     expect(verdict.allowed).toBe(false);
     expect(verdict.showUpgradeModal).toBe(true);
+    expect(verdict.showGenesisAllowanceExhausted).toBe(false);
+    expect(verdict.showEntitlementProbeError).toBe(false);
     expect(shouldBlockAuthenticatedCreateWithoutEntitlement({
       isAuthenticated: true,
       tier: "free",
@@ -46,6 +50,8 @@ describe("authenticatedWorkspaceAccessPolicy", () => {
     });
     expect(verdict.allowed).toBe(true);
     expect(verdict.reason).toBe("checkout_pending");
+    expect(verdict.showGenesisAllowanceExhausted).toBe(false);
+    expect(verdict.showEntitlementProbeError).toBe(false);
   });
 
   it("allows entitled owner create", () => {
@@ -58,5 +64,7 @@ describe("authenticatedWorkspaceAccessPolicy", () => {
     });
     expect(verdict.allowed).toBe(true);
     expect(verdict.reason).toBe("entitled_owner");
+    expect(verdict.showGenesisAllowanceExhausted).toBe(false);
+    expect(verdict.showEntitlementProbeError).toBe(false);
   });
 });

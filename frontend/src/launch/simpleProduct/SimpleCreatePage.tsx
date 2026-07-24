@@ -34,6 +34,10 @@ import {
   resolveAuthenticationState,
   resolveEntitlementStateFromTier,
 } from "../../access/authenticatedWorkspaceAccessPolicy";
+import {
+  fetchCommercialEntitlement,
+  type CommercialEntitlementDecision,
+} from "../../access/commercialEntitlement";
 import { hasCurrentSessionFreeStarterIntent } from "../../components/agreements/paidProSessionEligibility";
 import { getLawdogTrustNudges } from "../../tracking/lawdogSession";
 import { UpgradeToProModal } from "../../monetization/UpgradeToProModal";
@@ -153,6 +157,9 @@ export function SimpleCreatePage() {
     [access.tier, access.usage],
   );
   const [workspaceProEntitled, setWorkspaceProEntitled] = useState(false);
+  const [commercialEntitlement, setCommercialEntitlement] =
+    useState<CommercialEntitlementDecision | null>(null);
+  const [commercialEntitlementReady, setCommercialEntitlementReady] = useState(false);
   const createAccessVerdict = useMemo(
     () =>
       resolveWorkspaceCreateAccess({
@@ -164,11 +171,30 @@ export function SimpleCreatePage() {
         isResumingOwnedAgreement: Boolean(readCreateReviewAgreementResumeId()),
         hasCheckoutPendingMarker: Boolean(readCreateComplexityResume()?.awaitingProCheckout),
         workspaceProEntitledProbe: workspaceProEntitled,
+        commercialEntitlement: commercialEntitlement
+          ? {
+              entitlement: commercialEntitlement.entitlement,
+              createAllowed: commercialEntitlement.createAllowed,
+              authFailure: commercialEntitlement.authFailure,
+              probeFailure: commercialEntitlement.probeFailure,
+              reason: commercialEntitlement.reason,
+            }
+          : null,
       }),
-    [access.tier, monetizationUser.isAuthenticated, workspaceProEntitled],
+    [access.tier, monetizationUser.isAuthenticated, workspaceProEntitled, commercialEntitlement],
   );
+  // Wait for server commercial decision before showing upgrade UI (avoids Genesis flash).
   const creationBlockedForUi =
-    !createAccessVerdict.allowed && createAccessVerdict.showUpgradeModal;
+    commercialEntitlementReady &&
+    ((!createAccessVerdict.allowed && createAccessVerdict.showUpgradeModal) ||
+      createAccessVerdict.showGenesisAllowanceExhausted);
+  const entitlementProbeBlocked =
+    commercialEntitlementReady && createAccessVerdict.showEntitlementProbeError;
+  const intakeInteractionBlocked = creationBlockedForUi || entitlementProbeBlocked;
+  const genesisWithinAllowance =
+    commercialEntitlementReady &&
+    createAccessVerdict.allowed &&
+    createAccessVerdict.reason === "genesis_allowance";
   const [upgradeModalOpen, setUpgradeModalOpen] = useState(false);
   const [postRecipientHandoffFailure, setPostRecipientHandoffFailure] =
     useState<PaidProPostRecipientSetupFailure | null>(null);
@@ -192,6 +218,11 @@ export function SimpleCreatePage() {
     let cancelled = false;
     void fetchWorkspaceProEntitlement().then((ok) => {
       if (!cancelled) setWorkspaceProEntitled(ok);
+    });
+    void fetchCommercialEntitlement().then((decision) => {
+      if (cancelled) return;
+      setCommercialEntitlement(decision);
+      setCommercialEntitlementReady(true);
     });
     return () => {
       cancelled = true;
@@ -223,7 +254,16 @@ export function SimpleCreatePage() {
       reason: createAccessVerdict.reason,
     });
     setUpgradeModalOpen(true);
-  }, [creationBlockedForUi]);
+  }, [creationBlockedForUi, createAccessVerdict.reason]);
+
+  useEffect(() => {
+    if (!entitlementProbeBlocked) return;
+    logProductEvent("paywall_triggered", {
+      surface: "simple_create",
+      reason: createAccessVerdict.reason,
+      variant: "entitlement_probe_failed",
+    });
+  }, [entitlementProbeBlocked, createAccessVerdict.reason]);
 
   const intakeKey = usingTemplate
     ? "tmpl"
@@ -579,20 +619,79 @@ export function SimpleCreatePage() {
           </div>
         ) : null}
 
+        {genesisWithinAllowance && commercialEntitlement?.genesisAllowance ? (
+          <div
+            className="mb-4 rounded-lg border border-slate-700/70 bg-slate-950/40 px-4 py-2.5 text-xs text-slate-300"
+            role="status"
+            data-testid="genesis-allowance-indicator"
+          >
+            Genesis complimentary allowance:{" "}
+            <span className="font-medium text-slate-100">
+              {commercialEntitlement.genesisAllowance.remaining} of{" "}
+              {commercialEntitlement.genesisAllowance.limit}
+            </span>{" "}
+            agreements remaining this month.
+          </div>
+        ) : null}
+
+        {entitlementProbeBlocked ? (
+          <div
+            className="mb-4 rounded-lg border border-slate-600/50 bg-slate-900/50 px-4 py-3 text-sm text-slate-200"
+            role="alert"
+            data-testid="entitlement-probe-error"
+          >
+            <p className="font-medium text-slate-50">Couldn&apos;t verify your workspace access</p>
+            <p className="mt-1 text-xs text-slate-400">
+              This is a temporary connection or authorization issue — not a free-plan limit. Retry in a
+              moment, or contact support if it continues.
+            </p>
+            <button
+              type="button"
+              className="vs01-btn vs01-btn--secondary vs01-btn--compact mt-3"
+              onClick={() => {
+                setCommercialEntitlementReady(false);
+                void fetchCommercialEntitlement().then((decision) => {
+                  setCommercialEntitlement(decision);
+                  setCommercialEntitlementReady(true);
+                });
+              }}
+            >
+              Retry access check
+            </button>
+          </div>
+        ) : null}
+
         {creationBlockedForUi ? (
           <div
             className="mb-4 rounded-lg border border-amber-800/40 bg-amber-950/20 px-4 py-3 text-sm text-amber-100/95"
             role="status"
           >
-            <p className="font-medium text-amber-50">You&apos;ve used your free agreement.</p>
-            <p className="mt-1 text-xs text-amber-100/85">
-              Upgrade to Pro to continue shaping agreements in this workspace.
-            </p>
+            {createAccessVerdict.showGenesisAllowanceExhausted ? (
+              <>
+                <p className="font-medium text-amber-50">Genesis monthly allowance used</p>
+                <p className="mt-1 text-xs text-amber-100/85">
+                  You&apos;re still an active Genesis Dog. You&apos;ve used this month&apos;s complimentary
+                  agreement allowance. Upgrade to Pro for unlimited creations, or wait until next month.
+                </p>
+              </>
+            ) : (
+              <>
+                <p className="font-medium text-amber-50">You&apos;ve used your free agreement.</p>
+                <p className="mt-1 text-xs text-amber-100/85">
+                  Upgrade to Pro to continue shaping agreements in this workspace.
+                </p>
+              </>
+            )}
             <button
               type="button"
               className="vs01-btn vs01-btn--primary vs01-btn--compact mt-3"
               onClick={() => {
-                logProductEvent("paywall_clicked_upgrade", { surface: "simple_create", variant: "inline_strip" });
+                logProductEvent("paywall_clicked_upgrade", {
+                  surface: "simple_create",
+                  variant: createAccessVerdict.showGenesisAllowanceExhausted
+                    ? "genesis_allowance_exhausted_inline"
+                    : "inline_strip",
+                });
                 navigate("/app/billing");
               }}
             >
@@ -612,7 +711,7 @@ export function SimpleCreatePage() {
           </div>
         ) : null}
 
-        <div className={creationBlockedForUi ? "pointer-events-none select-none opacity-60" : undefined}>
+        <div className={intakeInteractionBlocked ? "pointer-events-none select-none opacity-60" : undefined}>
           <AgreementBuilderIntake
             key={intakeKey}
             className="vs01-agreement-intake rounded-xl border border-slate-800/90 bg-slate-950/35 p-4 sm:p-5"
@@ -739,6 +838,11 @@ export function SimpleCreatePage() {
           open={upgradeModalOpen}
           onClose={() => setUpgradeModalOpen(false)}
           surface="simple_create"
+          variant={
+            createAccessVerdict.showGenesisAllowanceExhausted
+              ? "genesis_allowance_exhausted"
+              : "upgrade_to_pro"
+          }
         />
 
         {!(firstSessionLive && isFreshSimpleCreateStart) ? (
