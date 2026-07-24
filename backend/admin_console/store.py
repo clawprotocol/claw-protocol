@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import sqlite3
 import uuid
@@ -106,6 +107,121 @@ class AdminConsoleStore:
                 """,
                 (uid, (email or "").strip() or None, role, now, now),
             )
+
+    def count_active_operators(self) -> int:
+        self.init_schema()
+        with self._conn() as con:
+            row = con.execute(
+                "SELECT COUNT(*) AS c FROM admin_users WHERE is_active = 1"
+            ).fetchone()
+            return int(row[0]) if row else 0
+
+    def bootstrap_first_support_operator(
+        self,
+        *,
+        admin_user_id: str,
+        reason: str,
+        correlation_id: str | None = None,
+        email: str | None = None,
+    ) -> Dict[str, Any]:
+        """
+        Atomically create the first active ``support_operator`` + audit row.
+
+        Returns ``{"ok": True, "audit_id": ..., "created": bool}`` or
+        ``{"ok": False, "code": "operator_bootstrap_already_done"}``.
+        SQLite ``BEGIN IMMEDIATE`` makes the active-count check + writes atomic.
+        """
+        from backend.security.operator_principal import ROLE_SUPPORT_OPERATOR
+
+        uid = (admin_user_id or "").strip()
+        reason_clean = (reason or "").strip()
+        if not uid:
+            raise ValueError("admin_user_id_required")
+        if len(reason_clean) < 3:
+            raise ValueError("reason_required")
+        self.init_schema()
+        now = _utc_now()
+        audit_id = str(uuid.uuid4())
+        email_clean = (email or "").strip() or None
+        con = self._conn()
+        try:
+            con.execute("BEGIN IMMEDIATE")
+            row = con.execute(
+                "SELECT COUNT(*) AS c FROM admin_users WHERE is_active = 1"
+            ).fetchone()
+            if int(row[0] if row else 0) > 0:
+                con.execute("ROLLBACK")
+                return {"ok": False, "code": "operator_bootstrap_already_done"}
+
+            existing = con.execute(
+                "SELECT id, is_active FROM admin_users WHERE id = ?",
+                (uid,),
+            ).fetchone()
+            created = existing is None
+            if existing is None:
+                con.execute(
+                    """
+                    INSERT INTO admin_users (id, email, role, is_active, created_at, last_login_at)
+                    VALUES (?, ?, ?, 1, ?, ?)
+                    """,
+                    (uid, email_clean, ROLE_SUPPORT_OPERATOR, now, now),
+                )
+            else:
+                con.execute(
+                    """
+                    UPDATE admin_users
+                    SET email = COALESCE(?, email),
+                        role = ?,
+                        is_active = 1,
+                        last_login_at = ?
+                    WHERE id = ?
+                    """,
+                    (email_clean, ROLE_SUPPORT_OPERATOR, now, uid),
+                )
+
+            after = {
+                "user_id": uid,
+                "role": ROLE_SUPPORT_OPERATOR,
+                "is_active": 1,
+                "created": created,
+            }
+            con.execute(
+                """
+                INSERT INTO admin_action_audit (
+                  id, admin_user_id, action_type, target_type, target_id, reason,
+                  before_snapshot_json, after_snapshot_json, created_at,
+                  actor_role, correlation_id
+                ) VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?)
+                """,
+                (
+                    audit_id,
+                    uid,
+                    "operator_bootstrap",
+                    "admin_user",
+                    uid,
+                    reason_clean[:500],
+                    json.dumps(after, separators=(",", ":"), sort_keys=True),
+                    now,
+                    ROLE_SUPPORT_OPERATOR,
+                    (correlation_id or "").strip() or None,
+                ),
+            )
+            con.execute("COMMIT")
+            return {
+                "ok": True,
+                "audit_id": audit_id,
+                "created": created,
+                "role": ROLE_SUPPORT_OPERATOR,
+                "user_id": uid,
+            }
+        except Exception:
+            try:
+                con.execute("ROLLBACK")
+            except Exception:
+                pass
+            raise
+        finally:
+            con.close()
 
     def set_agreement_flag(
         self,
@@ -217,3 +333,8 @@ def get_admin_console_store() -> AdminConsoleStore:
         _store = AdminConsoleStore()
         _store.init_schema()
     return _store
+
+
+def reset_admin_console_store_for_tests() -> None:
+    global _store
+    _store = None

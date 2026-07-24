@@ -123,6 +123,8 @@ Companion: **[Operator runbook](../ops/OPERATOR_RUNBOOK.md)**.
 | `CLAW_RECIPIENT_TOKEN_TTL_SECONDS` | Optional API override (see agreements router) |
 | `CLAW_RECIPIENT_TOKEN_LOG_VALIDATIONS` | Logging toggle |
 | `CLAW_ADMIN_SECRET` | If set, `x-claw-admin-secret` required for admin routes |
+| `CLAW_ALLOW_OPERATOR_BOOTSTRAP` | Staging-only: set `1` temporarily for one-shot `POST /v1/admin/operators/bootstrap`; never production (see `docs/ops/STAGING_OPERATOR_BOOTSTRAP.md`) |
+| `CLAW_ADMIN_CONSOLE_DB_PATH` | Optional SQLite path for `admin_users` / `admin_action_audit` (default `{CLAW_DATA_DIR}/admin_console.sqlite3`) |
 | `CLAW_ADMIN_ANCHOR_RUN_ENABLED` | `0` disables `POST /admin/anchor/run` and `POST /admin/anchor/receipt-batch/requeue` |
 | `CLAW_PUBLIC_AGREEMENT_VERIFY` | Public verify behavior for agreements |
 | `CLAW_BUNDLE_MAX_ZIP_BYTES` / related | Workflow bundle limits (`bundle_service.py`) |

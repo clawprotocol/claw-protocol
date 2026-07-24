@@ -1,19 +1,26 @@
 from __future__ import annotations
 
 import json
+import os
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, HTTPException, Query, Request
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from backend.admin_console.store import get_admin_console_store
 from backend.affiliates import payout_batches as affiliate_payout_batches
 from backend.affiliates.payout_ops_summary import list_payout_batch_summaries
+from backend.config.deployment_runtime import claw_environment
 from backend.economics.store import get_economics_store
 from backend.integrations.webhook_dispatch import retry_delivery
 from backend.integrations import webhook_store
 from backend.ops.break_glass_audit import BreakGlassAction, log_break_glass_event
-from backend.security.operator_principal import OperatorPrincipal
+from backend.security.commercial_auth import correlation_id_from_request
+from backend.security.operator_principal import (
+    ROLE_SUPPORT_OPERATOR,
+    OperatorPrincipal,
+    require_nonempty_reason,
+)
 from backend.security.privileged_ops import (
     PERM_MUTATE_ADMIN,
     PERM_MUTATE_FINANCIAL,
@@ -21,6 +28,7 @@ from backend.security.privileged_ops import (
     PERM_READ_OPS,
     require_privileged_operator,
 )
+from backend.security.supabase_jwt import require_supabase_user_id
 from backend.services.agreement_draft_store import list_draft_admin_metadata_newest_first
 from backend.usage_economics.store import get_usage_economics_store
 
@@ -54,6 +62,83 @@ class AffiliatePayoutActionBody(BaseModel):
     reason: str = Field(..., min_length=3, max_length=500)
     tx_hash: Optional[str] = Field(default=None, max_length=256)
     network: str = Field(default="base", max_length=64)
+
+
+class OperatorBootstrapBody(BaseModel):
+    """One-shot staging bootstrap — reason only; operator id is JWT ``sub`` exclusively."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    reason: str = Field(..., min_length=3, max_length=500)
+
+
+def _operator_bootstrap_allowed() -> bool:
+    """Staging + explicit flag only. Production and unset env never allow."""
+    if claw_environment() != "staging":
+        return False
+    return os.getenv("CLAW_ALLOW_OPERATOR_BOOTSTRAP", "").strip() == "1"
+
+
+def _require_admin_secret_for_bootstrap(request: Request) -> None:
+    """Second factor — always required for bootstrap (no relaxed-env bypass)."""
+    import secrets as _secrets
+
+    secret = os.getenv("CLAW_ADMIN_SECRET", "").strip()
+    presented = (request.headers.get("x-claw-admin-secret") or "").strip()
+    if not secret:
+        raise HTTPException(
+            status_code=403,
+            detail={"code": "admin_secret_required", "message": "Operator secret not configured."},
+        )
+    if not presented or not _secrets.compare_digest(secret, presented):
+        raise HTTPException(
+            status_code=403,
+            detail={"code": "forbidden", "message": "Invalid operator secret."},
+        )
+
+
+@router.post("/operators/bootstrap")
+def bootstrap_first_operator(request: Request, body: OperatorBootstrapBody) -> Dict[str, Any]:
+    """
+    One-shot first ``support_operator`` for empty staging registries.
+
+    Requires: CLAW_ENVIRONMENT=staging, CLAW_ALLOW_OPERATOR_BOOTSTRAP=1,
+    valid Supabase Bearer JWT (sub → operator id), x-claw-admin-secret, reason.
+    Test-auth cannot satisfy staging. Never accepts a client-supplied target user id.
+    """
+    if not _operator_bootstrap_allowed():
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "operator_bootstrap_disabled",
+                "message": "Operator bootstrap is disabled for this environment.",
+            },
+        )
+    _require_admin_secret_for_bootstrap(request)
+    # Staging: JWT only — test-auth headers are unavailable when CLAW_ENVIRONMENT=staging.
+    user_id = require_supabase_user_id(request)
+    reason = require_nonempty_reason(body.reason)
+    store = get_admin_console_store()
+    result = store.bootstrap_first_support_operator(
+        admin_user_id=user_id,
+        reason=reason,
+        correlation_id=correlation_id_from_request(request),
+    )
+    if not result.get("ok"):
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": result.get("code") or "operator_bootstrap_already_done",
+                "message": "An active operator already exists; bootstrap is one-shot.",
+            },
+        )
+    return {
+        "ok": True,
+        "user_id": result["user_id"],
+        "role": ROLE_SUPPORT_OPERATOR,
+        "audit_id": result["audit_id"],
+        "created": bool(result.get("created")),
+    }
 
 
 def _privileged(

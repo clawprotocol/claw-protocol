@@ -63,6 +63,7 @@ Checkout Session metadata (set by app when Stripe Checkout is wired): `org_id`, 
 | Variable | Purpose |
 |----------|---------|
 | `CLAW_ADMIN_SECRET` | Header `x-claw-admin-secret` for `/v1/genesis-referral/ops/*` and admin console |
+| `CLAW_ALLOW_OPERATOR_BOOTSTRAP` | Staging-only one-shot first `support_operator` via `POST /v1/admin/operators/bootstrap`; must stay unset/`0` in production — see `docs/ops/STAGING_OPERATOR_BOOTSTRAP.md` |
 
 ## Local / dev defaults
 
