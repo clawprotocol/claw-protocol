@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import logging
 import os
+from pathlib import Path
 from typing import Any, Dict, Literal, Optional
 
 from backend.config.deployment_runtime import claw_environment
@@ -82,7 +83,8 @@ def _probe_runtime_environment() -> Dict[str, Any]:
     try:
         from backend.config.runtime_environment import data_dir
 
-        dd = data_dir()
+        # ``data_dir()`` returns a filesystem path string — coerce before Path ops.
+        dd = Path(data_dir())
         writable = False
         try:
             dd.mkdir(parents=True, exist_ok=True)
