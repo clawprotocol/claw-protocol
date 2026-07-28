@@ -176,6 +176,25 @@ def test_3_genesis_request_does_not_grant(isolated_entitlement_env):
     assert get_entitlement(uid) is None
 
 
+def test_public_and_customer_cannot_grant_genesis(isolated_entitlement_env):
+    client, _eco, _usage = isolated_entitlement_env
+    uid = "no-public-grant"
+    # Unauthenticated
+    r0 = client.post(
+        f"/v1/admin/users/{uid}/genesis-entitlement/grant",
+        json={"reason": "should_fail"},
+    )
+    assert r0.status_code in (401, 403)
+    # Authenticated customer without operator role/secret
+    r1 = client.post(
+        f"/v1/admin/users/{uid}/genesis-entitlement/grant",
+        headers=_auth("customer-only"),
+        json={"reason": "should_fail"},
+    )
+    assert r1.status_code in (401, 403)
+    assert get_entitlement(uid) is None
+
+
 def test_4_admin_grant_five_agreements(isolated_entitlement_env):
     client, _eco, _usage = isolated_entitlement_env
     uid = "genesis-five"
@@ -186,6 +205,7 @@ def test_4_admin_grant_five_agreements(isolated_entitlement_env):
         json={"reason": "invite_selected_user"},
     )
     assert grant.status_code == 200, grant.text
+    assert grant.json().get("audit_id")
     h = _auth(uid)
     for i in range(5):
         r = client.post("/api/agreements/draft", headers=h, json=_draft_body(f"G{i}"))

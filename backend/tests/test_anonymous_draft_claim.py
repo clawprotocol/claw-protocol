@@ -31,12 +31,48 @@ def isolated_usage(tmp_path, monkeypatch: pytest.MonkeyPatch, auth_secrets):
     reset_anonymous_session_store_for_tests()
 
 
+def test_bind_user_org_defers_guest_import_without_entitlement(isolated_usage):
+    """Guest drafts stay on the anon org until Genesis Dog or Pro is granted."""
+    client = TestClient(app)
+    anon_org, token, headers = mint_anonymous_session(client)
+    user_id = "supabase-user-anon-deferred"
+    aid = f"ag-anon-defer-{uuid.uuid4().hex[:8]}"
+
+    isolated_usage.insert_agreement_owner(
+        agreement_id=aid,
+        subject_ref=f"org:{anon_org}",
+        internal_keys_draft=1,
+    )
+
+    res = client.post(
+        "/v1/workspace/bind-user-org",
+        headers={**headers, **make_test_auth_headers(user_id)},
+        json={
+            "user_id": user_id,
+            "previous_org_id": anon_org,
+            "claim_method": "google",
+        },
+    )
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["migrated_agreement_count"] == 0
+    row = isolated_usage.get_agreement_owner_row(aid)
+    assert row is not None
+    assert row["subject_ref"] == f"org:{anon_org}"
+
+
 def test_bind_user_org_migrates_drafts_from_anon_org(isolated_usage):
+    from backend.usage_economics.genesis_dog_entitlement import (
+        GRANT_SOURCE_ADMIN,
+        grant_entitlement,
+    )
+
     client = TestClient(app)
     anon_org, token, headers = mint_anonymous_session(client)
     user_id = "supabase-user-anon-claim"
     stable_org = f"user-{user_id}"
     aid = f"ag-anon-{uuid.uuid4().hex[:8]}"
+    grant_entitlement(user_id=user_id, granted_by="test", grant_source=GRANT_SOURCE_ADMIN)
 
     isolated_usage.insert_agreement_owner(
         agreement_id=aid,
@@ -93,10 +129,16 @@ def test_bind_user_org_rejects_authenticated_source_org(isolated_usage):
 
 
 def test_bind_user_org_idempotent_second_call(isolated_usage):
+    from backend.usage_economics.genesis_dog_entitlement import (
+        GRANT_SOURCE_ADMIN,
+        grant_entitlement,
+    )
+
     client = TestClient(app)
     anon_org, token, headers = mint_anonymous_session(client)
     user_id = "supabase-user-idempotent"
     aid = f"ag-idem-{uuid.uuid4().hex[:8]}"
+    grant_entitlement(user_id=user_id, granted_by="test", grant_source=GRANT_SOURCE_ADMIN)
 
     isolated_usage.insert_agreement_owner(
         agreement_id=aid,

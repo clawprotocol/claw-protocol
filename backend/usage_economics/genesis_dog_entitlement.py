@@ -314,17 +314,12 @@ def has_open_genesis_access_request(user_id: str) -> bool:
         return bool(row and str(row[0] or "") == "open")
 
 
-def list_active_affiliates_without_entitlement() -> List[str]:
-    """Active genesis_affiliates user_ids that have no entitlement row (migration candidates)."""
+def _list_active_affiliate_user_ids() -> List[str]:
     from backend.economics.genesis_referral_store import ensure_genesis_referral_schema
     from backend.economics.store import get_economics_store
-    from backend.usage_economics.store import get_usage_economics_store
 
     eco = get_economics_store()
     eco.init_schema()
-    ustore = get_usage_economics_store()
-    ustore.init_schema()
-    candidates: List[str] = []
     with eco._conn() as con:  # noqa: SLF001
         ensure_genesis_referral_schema(con)
         rows = con.execute(
@@ -333,37 +328,71 @@ def list_active_affiliates_without_entitlement() -> List[str]:
             WHERE lower(affiliate_status) = 'active'
             """
         ).fetchall()
-        for r in rows:
-            uid = str(r[0] if not isinstance(r, dict) else r.get("user_id") or "").strip()
-            if uid and get_entitlement(uid) is None:
-                candidates.append(uid)
-    return candidates
+    out: List[str] = []
+    for r in rows:
+        uid = str(r[0] if not isinstance(r, dict) else r.get("user_id") or "").strip()
+        if uid:
+            out.append(uid)
+    return out
 
 
-def backfill_legacy_affiliate_grants(*, granted_by: str = "legacy_migration") -> Dict[str, int]:
-    """Insert legacy_migration grants for active affiliates lacking an entitlement row."""
-    inserted = 0
-    skipped = 0
-    candidates = list_active_affiliates_without_entitlement()
-    # Re-query all active affiliates for skip accounting
-    from backend.economics.genesis_referral_store import ensure_genesis_referral_schema
-    from backend.economics.store import get_economics_store
+def list_active_affiliates_without_entitlement() -> List[str]:
+    """Active genesis_affiliates user_ids that have no entitlement row (migration candidates)."""
+    from backend.usage_economics.store import get_usage_economics_store
 
-    eco = get_economics_store()
-    eco.init_schema()
-    with eco._conn() as con:  # noqa: SLF001
-        ensure_genesis_referral_schema(con)
-        all_active = con.execute(
-            "SELECT user_id FROM genesis_affiliates WHERE lower(affiliate_status) = 'active'"
-        ).fetchall()
-        active_ids = [
-            str(r[0] if not isinstance(r, dict) else r.get("user_id") or "").strip()
-            for r in all_active
-        ]
-    active_ids = [u for u in active_ids if u]
+    get_usage_economics_store().init_schema()
+    return [uid for uid in _list_active_affiliate_user_ids() if get_entitlement(uid) is None]
+
+
+def preview_legacy_affiliate_backfill() -> Dict[str, Any]:
+    """
+    Dry-run counts for legacy affiliate → genesis_dog_entitlements backfill.
+
+    Does not write. ``would_insert`` users currently rely on dual-read fallback.
+    Users with any entitlement row (including revoked/expired) are skipped so
+    explicit denials are never overwritten.
+    """
+    from backend.usage_economics.store import get_usage_economics_store
+
+    get_usage_economics_store().init_schema()
+    active_ids = _list_active_affiliate_user_ids()
+    would_insert: List[str] = []
+    skipped_existing = 0
+    skipped_revoked_or_expired = 0
     for uid in active_ids:
+        row = get_entitlement(uid)
+        if row is None:
+            would_insert.append(uid)
+            continue
+        skipped_existing += 1
+        if not is_commercially_active(row):
+            skipped_revoked_or_expired += 1
+    return {
+        "dry_run": True,
+        "active_affiliates": len(active_ids),
+        "candidates": len(would_insert),
+        "would_insert": len(would_insert),
+        "would_insert_user_ids": would_insert,
+        "skipped": skipped_existing,
+        "skipped_revoked_or_expired": skipped_revoked_or_expired,
+        "inserted": 0,
+    }
+
+
+def backfill_legacy_affiliate_grants(
+    *,
+    granted_by: str = "legacy_migration",
+    dry_run: bool = False,
+) -> Dict[str, Any]:
+    """Insert legacy_migration grants for active affiliates lacking an entitlement row."""
+    preview = preview_legacy_affiliate_backfill()
+    if dry_run:
+        return preview
+
+    inserted = 0
+    for uid in preview["would_insert_user_ids"]:
+        # Re-check to stay idempotent under concurrency.
         if get_entitlement(uid) is not None:
-            skipped += 1
             continue
         grant_entitlement(
             user_id=uid,
@@ -374,10 +403,13 @@ def backfill_legacy_affiliate_grants(*, granted_by: str = "legacy_migration") ->
         )
         inserted += 1
     return {
-        "candidates": len(candidates),
-        "active_affiliates": len(active_ids),
+        "dry_run": False,
+        "active_affiliates": preview["active_affiliates"],
+        "candidates": preview["candidates"],
+        "would_insert": preview["would_insert"],
         "inserted": inserted,
-        "skipped": skipped,
+        "skipped": preview["skipped"],
+        "skipped_revoked_or_expired": preview["skipped_revoked_or_expired"],
     }
 
 

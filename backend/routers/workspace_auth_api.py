@@ -97,6 +97,18 @@ def _attach_anon_session_cookie(*, response: Response, request: Request, token: 
     )
 
 
+def _target_can_import_guest_drafts(target_org_id: str) -> bool:
+    """Import guest drafts into a workspace only after Genesis Dog or Pro entitlement."""
+    from backend.usage_economics.commercial_entitlement import (
+        STATE_GENESIS,
+        STATE_PRO,
+        resolve_commercial_entitlement,
+    )
+
+    decision = resolve_commercial_entitlement(f"org:{(target_org_id or '').strip()}")
+    return str(decision.get("state") or "") in (STATE_GENESIS, STATE_PRO)
+
+
 def _migrate_drafts_for_claim(
     *,
     prev_org_id: str,
@@ -109,6 +121,23 @@ def _migrate_drafts_for_claim(
     to_subject = f"org:{target_org_id}"
     migrated_agreements = ustore.list_agreement_ids_for_subject(from_subject)
     if not migrated_agreements:
+        return []
+    if not _target_can_import_guest_drafts(target_org_id):
+        _log.info(
+            "guest_draft_import_deferred prev=%s target=%s count=%s reason=entitlement_required",
+            prev_org_id,
+            target_org_id,
+            len(migrated_agreements),
+        )
+        ustore.emit_event(
+            subject_ref=to_subject,
+            event_type="guest_draft_import_deferred",
+            payload={
+                "claim_method": claim_method,
+                "previous_org_id": prev_org_id,
+                "pending_count": len(migrated_agreements),
+            },
+        )
         return []
     claimed = ustore.record_agreements_claimed(
         agreement_ids=migrated_agreements,
@@ -318,12 +347,15 @@ async def finalize_auth(request: Request, body: FinalizeAuthIn) -> Dict[str, Any
         if str(anon_row.get("session_id") or "") != str(cont_row.get("session_id") or ""):
             raise HTTPException(status_code=403, detail={"code": "continuation_session_mismatch"})
         _assert_claimable_previous_org(prev_org, org_id)
+        pending_before = get_usage_economics_store().list_agreement_ids_for_subject(f"org:{prev_org}")
         migrated = _migrate_drafts_for_claim(
             prev_org_id=prev_org,
             target_org_id=org_id,
             claim_method=claim_method,
         )
-        store.mark_session_claimed(session_id=str(anon_row.get("session_id") or ""), user_id=user_id)
+        # Keep the anon session claimable when import is deferred until Genesis/Pro.
+        if migrated or not pending_before:
+            store.mark_session_claimed(session_id=str(anon_row.get("session_id") or ""), user_id=user_id)
     elif is_returning:
         prev_org = ""
 
@@ -441,10 +473,12 @@ async def bind_user_org(request: Request, body: BindUserOrgIn) -> Dict[str, Any]
                     target_org_id=org_id,
                     claim_method=claim_method,
                 )
-                get_anonymous_session_store().mark_session_claimed(
-                    session_id=str(anon_row.get("session_id") or ""),
-                    user_id=user_id,
-                )
+                # Keep the anon session claimable when import is deferred until Genesis/Pro.
+                if migrated_agreements or not pending:
+                    get_anonymous_session_store().mark_session_claimed(
+                        session_id=str(anon_row.get("session_id") or ""),
+                        user_id=user_id,
+                    )
         elif prev != "local-org":
             raise HTTPException(
                 status_code=403,

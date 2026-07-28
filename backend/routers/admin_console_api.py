@@ -56,6 +56,7 @@ class GenesisEntitlementRevokeBody(BaseModel):
 
 class GenesisLegacyMigrationBody(BaseModel):
     reason: str = Field(..., min_length=3, max_length=500)
+    dry_run: bool = False
 
 
 class AgreementFlagBody(BaseModel):
@@ -602,17 +603,23 @@ def admin_migrate_legacy_genesis_affiliates(
         target_id="legacy_migration",
         reason=body.reason,
     )
-    counts = backfill_legacy_affiliate_grants(granted_by=principal.user_id)
-    audit_id = _audit(
-        principal,
-        action_type="genesis_entitlement_legacy_migration",
-        target_type="genesis_dog_entitlement",
-        target_id="legacy_migration",
-        reason=(body.reason or "").strip(),
-        after=counts,
+    counts = backfill_legacy_affiliate_grants(
+        granted_by=principal.user_id,
+        dry_run=bool(body.dry_run),
     )
+    audit_id = None
+    if not body.dry_run:
+        audit_id = _audit(
+            principal,
+            action_type="genesis_entitlement_legacy_migration",
+            target_type="genesis_dog_entitlement",
+            target_id="legacy_migration",
+            reason=(body.reason or "").strip(),
+            after=counts,
+        )
     return {
         "ok": True,
+        "dry_run": bool(body.dry_run),
         "counts": counts,
         "audit_id": audit_id,
         "actor": principal.user_id,
