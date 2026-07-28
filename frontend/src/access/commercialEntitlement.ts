@@ -17,12 +17,20 @@ export type GenesisAllowanceSnapshot = {
   allowed: boolean;
 };
 
+export type FreeAllowanceSnapshot = {
+  limit: number;
+  used: number;
+  remaining: number;
+  allowed: boolean;
+};
+
 export type CommercialEntitlementDecision = {
   entitlement: CommercialEntitlementClass;
   createAllowed: boolean;
   upgradeRequired: boolean;
   reason: string | null;
   genesisAllowance: GenesisAllowanceSnapshot | null;
+  freeAllowance: FreeAllowanceSnapshot | null;
   /** True when the probe failed auth/authorization — not free, not Genesis. */
   authFailure: boolean;
   /** True when the probe failed for non-auth reasons — fail closed; not a free plan. */
@@ -46,6 +54,17 @@ function parseGenesisAllowance(raw: unknown): GenesisAllowanceSnapshot | null {
   };
 }
 
+function parseFreeAllowance(raw: unknown): FreeAllowanceSnapshot | null {
+  if (!raw || typeof raw !== "object") return null;
+  const o = raw as Record<string, unknown>;
+  return {
+    limit: Number(o.limit ?? 0),
+    used: Number(o.used ?? 0),
+    remaining: Number(o.remaining ?? 0),
+    allowed: Boolean(o.allowed),
+  };
+}
+
 export function commercialDecisionFromUsageSummary(
   data: AgreementUsageSummary,
 ): Omit<CommercialEntitlementDecision, "authFailure" | "probeFailure" | "raw"> {
@@ -65,6 +84,7 @@ export function commercialDecisionFromUsageSummary(
       upgradeRequired: Boolean(c.upgrade_required),
       reason: c.reason ?? null,
       genesisAllowance: parseGenesisAllowance(c.genesis_allowance),
+      freeAllowance: parseFreeAllowance(c.free_allowance),
       tier: data.tier ?? null,
     };
   }
@@ -76,15 +96,26 @@ export function commercialDecisionFromUsageSummary(
       upgradeRequired: false,
       reason: null,
       genesisAllowance: null,
+      freeAllowance: null,
       tier: "paid",
     };
   }
+  // Honor agreements_remaining when present so first-free users are not blocked by legacy payloads.
+  const remaining =
+    typeof data.agreements_remaining === "number" ? data.agreements_remaining : 0;
+  const allowed = remaining > 0;
   return {
     entitlement: "free",
-    createAllowed: false,
-    upgradeRequired: true,
-    reason: "entitlement_required",
+    createAllowed: allowed,
+    upgradeRequired: !allowed,
+    reason: allowed ? null : "completed_agreement_limit",
     genesisAllowance: null,
+    freeAllowance: {
+      limit: Math.max(remaining, Number(data.agreements_completed ?? 0) + remaining),
+      used: Number(data.agreements_completed ?? 0),
+      remaining,
+      allowed,
+    },
     tier: data.tier ?? "free",
   };
 }
@@ -102,6 +133,7 @@ export async function fetchCommercialEntitlement(): Promise<CommercialEntitlemen
       upgradeRequired: false,
       reason: "auth_failure",
       genesisAllowance: null,
+      freeAllowance: null,
       authFailure: true,
       probeFailure: false,
       tier: null,
@@ -116,6 +148,7 @@ export async function fetchCommercialEntitlement(): Promise<CommercialEntitlemen
       upgradeRequired: false,
       reason: "probe_failed",
       genesisAllowance: null,
+      freeAllowance: null,
       authFailure: false,
       probeFailure: true,
       tier: null,

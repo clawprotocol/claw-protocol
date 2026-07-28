@@ -239,14 +239,69 @@ def test_inactive_genesis_denied_complimentary_allowance(isolated_entitlement_en
     assert decision["genesis_allowance"] is None
 
 
-def test_ordinary_free_user_upgrade_path(isolated_entitlement_env):
+def test_ordinary_free_user_first_agreement_allowed(isolated_entitlement_env):
+    """Zero completed agreements → complimentary create path (first agreement free)."""
     client, eco, _usage = isolated_entitlement_env
     uid = "ordinary-free"
     h = _auth(uid)
     summary = client.get("/api/agreements/usage/summary", headers=h).json()
     assert summary["commercial"]["entitlement"] == ENTITLEMENT_FREE
-    assert summary["commercial"]["upgrade_required"] is True
+    assert summary["commercial"]["upgrade_required"] is False
+    assert summary["commercial"]["create_allowed"] is True
+    assert summary["agreements_remaining"] == 1
+    fa = summary["commercial"]["free_allowance"]
+    assert fa["limit"] == 1
+    assert fa["used"] == 0
+    assert fa["remaining"] == 1
+    assert fa["allowed"] is True
+    created = client.post("/api/agreements/draft", headers=h, json=_draft_body("First free"))
+    assert created.status_code == 200, created.text
+
+
+def test_ordinary_free_user_after_completed_requires_upgrade(isolated_entitlement_env):
+    """Completed free allowance → create blocked with upgrade path."""
+    client, eco, usage = isolated_entitlement_env
+    uid = "ordinary-free-done"
+    subject = f"org:user-{uid}"
+    h = _auth(uid)
+    aid = str(uuid.uuid4())
+    usage.try_insert_agreement_owner_with_monthly_cap(
+        agreement_id=aid,
+        subject_ref=subject,
+        internal_keys_draft=0,
+        monthly_cap=None,
+        period_start_iso="",
+    )
+    assert usage.mark_agreement_completed(
+        agreement_id=aid, subject_ref=subject, internal_keys_finalize=0
+    )
+    summary = client.get("/api/agreements/usage/summary", headers=h).json()
+    assert summary["commercial"]["entitlement"] == ENTITLEMENT_FREE
     assert summary["commercial"]["create_allowed"] is False
+    assert summary["commercial"]["upgrade_required"] is True
+    assert summary["commercial"]["reason"] == uc.COMPLETED_AGREEMENT_LIMIT
+    assert summary["agreements_remaining"] == 0
+    blocked = client.post("/api/agreements/draft", headers=h, json=_draft_body("Second"))
+    assert blocked.status_code == 403
+    detail = blocked.json().get("detail") or {}
+    assert detail.get("code") == uc.COMPLETED_AGREEMENT_LIMIT
+    assert "verified record" not in (detail.get("message") or "").lower()
+    assert "free agreement" in (detail.get("message") or "").lower()
+
+
+def test_draft_create_does_not_consume_free_allowance(isolated_entitlement_env):
+    """Draft initialization must not exhaust the complimentary completed-agreement allowance."""
+    client, eco, _usage = isolated_entitlement_env
+    uid = "free-draft-only"
+    h = _auth(uid)
+    for i in range(2):
+        r = client.post("/api/agreements/draft", headers=h, json=_draft_body(f"D{i}"))
+        assert r.status_code == 200, r.text
+    summary = client.get("/api/agreements/usage/summary", headers=h).json()
+    assert summary["commercial"]["create_allowed"] is True
+    assert summary["commercial"]["free_allowance"]["used"] == 0
+    assert summary["agreements_completed"] == 0
+    assert summary["agreements_remaining"] == 1
 
 
 def test_paid_plus_genesis_prefers_paid_unlimited(isolated_entitlement_env):

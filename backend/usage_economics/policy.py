@@ -228,7 +228,30 @@ def assert_can_create_draft(*, subject_ref: str, request_ip: str) -> None:
         _maybe_flag_abuse(subject_ref=subject_ref, ip=request_ip, store=store)
         return
 
-    # Free / evaluation path — active-draft cap (unless relaxed local/dev).
+    # Free / evaluation path — first completed agreement is complimentary.
+    if not decision.get("create_allowed"):
+        store.emit_event(
+            subject_ref=subject_ref,
+            event_type="paywall_triggered",
+            payload={"surface": "draft_create", "reason": uc.COMPLETED_AGREEMENT_LIMIT},
+        )
+        _notify_paywall_integration_webhook(
+            subject_ref, {"surface": "draft_create", "reason": uc.COMPLETED_AGREEMENT_LIMIT}
+        )
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": uc.COMPLETED_AGREEMENT_LIMIT,
+                "message": (
+                    "You've completed your free agreement. "
+                    "Upgrade to Pro to create another agreement, keep reusable drafts, and unlock full history."
+                ),
+                "paywall": True,
+                "agreements_remaining": 0,
+            },
+        )
+
+    # Active-draft cap (unless relaxed local/dev).
     incomplete = store.count_incomplete_agreements(subject_ref)
     if incomplete >= uc.FREE_MAX_ACTIVE_DRAFTS and not _relaxed_draft_limits_in_dev():
         store.emit_event(
@@ -310,8 +333,11 @@ def assert_can_complete_agreement(*, agreement_id: str) -> Optional[str]:
         raise HTTPException(
             status_code=403,
             detail={
-                "code": "completed_agreement_limit",
-                "message": "Free workspaces can complete one agreement. Upgrade to finalize more.",
+                "code": uc.COMPLETED_AGREEMENT_LIMIT,
+                "message": (
+                    "You've completed your free agreement. "
+                    "Upgrade to Pro to finalize more agreements."
+                ),
                 "paywall": True,
                 "agreements_remaining": 0,
             },
@@ -507,6 +533,7 @@ def usage_summary_for_subject(subject_ref: str) -> Dict[str, Any]:
         "upgrade_required": bool(decision.get("upgrade_required")),
         "reason": decision.get("reason"),
         "genesis_allowance": decision.get("genesis_allowance"),
+        "free_allowance": decision.get("free_allowance"),
     }
 
     if entitlement == ENTITLEMENT_PAID_PRO:

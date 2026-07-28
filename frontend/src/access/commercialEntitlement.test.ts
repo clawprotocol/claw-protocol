@@ -96,7 +96,69 @@ describe("commercialEntitlement", () => {
     expect(verdict.reason).toBe("genesis_allowance_exhausted");
   });
 
-  it("keeps ordinary free users on upgrade path", () => {
+  it("allows first-time free users within complimentary allowance", () => {
+    const decision = commercialDecisionFromUsageSummary({
+      tier: "free",
+      agreements_created: 0,
+      agreements_completed: 0,
+      drafts_active: 0,
+      agreements_remaining: 1,
+      drafts_remaining: 2,
+      watermark_required: true,
+      storage_persistent: false,
+      paywall_required: false,
+      soft_throttle: false,
+      commercial: {
+        entitlement: "free",
+        create_allowed: true,
+        upgrade_required: false,
+        reason: null,
+        genesis_allowance: null,
+        free_allowance: { limit: 1, used: 0, remaining: 1, allowed: true },
+      },
+    });
+    expect(decision.createAllowed).toBe(true);
+    expect(decision.freeAllowance?.remaining).toBe(1);
+
+    const verdict = resolveWorkspaceCreateAccess({
+      authentication: "authenticated",
+      entitlement: "none",
+      isStarterAnonymousSession: false,
+      isResumingOwnedAgreement: false,
+      hasCheckoutPendingMarker: false,
+      commercialEntitlement: {
+        entitlement: decision.entitlement,
+        createAllowed: decision.createAllowed,
+      },
+    });
+    expect(verdict.allowed).toBe(true);
+    expect(verdict.reason).toBe("free_allowance");
+    expect(verdict.showUpgradeModal).toBe(false);
+  });
+
+  it("gates free users after complimentary allowance is consumed", () => {
+    const decision = commercialDecisionFromUsageSummary({
+      tier: "free",
+      agreements_created: 1,
+      agreements_completed: 1,
+      drafts_active: 0,
+      agreements_remaining: 0,
+      drafts_remaining: 2,
+      watermark_required: true,
+      storage_persistent: false,
+      paywall_required: true,
+      soft_throttle: false,
+      commercial: {
+        entitlement: "free",
+        create_allowed: false,
+        upgrade_required: true,
+        reason: "completed_agreement_limit",
+        genesis_allowance: null,
+        free_allowance: { limit: 1, used: 1, remaining: 0, allowed: false },
+      },
+    });
+    expect(decision.createAllowed).toBe(false);
+
     const verdict = resolveWorkspaceCreateAccess({
       authentication: "authenticated",
       entitlement: "none",
@@ -106,16 +168,34 @@ describe("commercialEntitlement", () => {
       commercialEntitlement: {
         entitlement: "free",
         createAllowed: false,
-        reason: "entitlement_required",
+        reason: "completed_agreement_limit",
       },
     });
     expect(verdict.allowed).toBe(false);
+    expect(verdict.reason).toBe("free_allowance_exhausted");
     expect(verdict.showUpgradeModal).toBe(true);
     expect(verdict.showGenesisAllowanceExhausted).toBe(false);
     expect(verdict.showEntitlementProbeError).toBe(false);
   });
 
-  it("cached paid entitlement cannot override a server free decision", () => {
+  it("legacy free summary without commercial block honors agreements_remaining", () => {
+    const decision = commercialDecisionFromUsageSummary({
+      tier: "free",
+      agreements_created: 0,
+      agreements_completed: 0,
+      drafts_active: 0,
+      agreements_remaining: 1,
+      drafts_remaining: 2,
+      watermark_required: true,
+      storage_persistent: false,
+      paywall_required: false,
+      soft_throttle: false,
+    });
+    expect(decision.createAllowed).toBe(true);
+    expect(decision.upgradeRequired).toBe(false);
+  });
+
+  it("cached paid entitlement cannot override a server free exhausted decision", () => {
     const verdict = resolveWorkspaceCreateAccess({
       authentication: "authenticated",
       entitlement: "active",
@@ -126,11 +206,11 @@ describe("commercialEntitlement", () => {
       commercialEntitlement: {
         entitlement: "free",
         createAllowed: false,
-        reason: "entitlement_required",
+        reason: "completed_agreement_limit",
       },
     });
     expect(verdict.allowed).toBe(false);
-    expect(verdict.reason).toBe("entitlement_required");
+    expect(verdict.reason).toBe("free_allowance_exhausted");
     expect(verdict.showUpgradeModal).toBe(true);
     expect(verdict.showEntitlementProbeError).toBe(false);
   });

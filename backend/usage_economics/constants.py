@@ -11,6 +11,8 @@ KEY_COST_FULL_AGREEMENT_APPROX = KEY_COST_AGREEMENT_DRAFT + KEY_COST_AGREEMENT_F
 
 FREE_MAX_ACTIVE_DRAFTS = 2
 FREE_MAX_COMPLETED_AGREEMENTS = 1
+# Server reason when the one complimentary completed agreement has been used.
+COMPLETED_AGREEMENT_LIMIT = "completed_agreement_limit"
 
 # Free-tier draft storage window (incomplete agreements only).
 FREE_DRAFT_TTL_SECONDS = 24 * 60 * 60

@@ -3,7 +3,8 @@
 Decision classes (single authority for dashboard / Create / enforcement):
 - ``paid_pro`` — active Stripe-paid subscription; unlimited agreement creation
 - ``genesis_allowance`` — active Genesis Dog with complimentary monthly create meter
-- ``free`` — evaluation path; upgrade prompts allowed
+- ``free`` — first completed agreement complimentary; create allowed until that
+  allowance is consumed (draft init / bootstrap / dashboard visits do not consume it)
 
 Genesis status is loaded from the economics ``genesis_affiliates`` table (status=active).
 Client headers, cached tiers, and org spoofing must never grant complimentary access.
@@ -111,6 +112,7 @@ def resolve_commercial_entitlement(subject_ref: str) -> Dict[str, Any]:
             "upgrade_required": False,
             "reason": None,
             "genesis_allowance": None,
+            "free_allowance": None,
         }
 
     genesis_active = subject_is_active_genesis(subject_ref)
@@ -136,13 +138,26 @@ def resolve_commercial_entitlement(subject_ref: str) -> Dict[str, Any]:
                 "period_end": period_end,
                 "allowed": allowed,
             },
+            "free_allowance": None,
         }
 
+    store = get_usage_economics_store()
+    store.init_schema()
+    completed = int(store.count_completed_agreements(subject_ref))
+    limit = int(uc.FREE_MAX_COMPLETED_AGREEMENTS)
+    remaining = max(0, limit - completed)
+    allowed = remaining > 0
     return {
         "entitlement": ENTITLEMENT_FREE,
         "tier": "free",
-        "create_allowed": False,
-        "upgrade_required": True,
-        "reason": "entitlement_required",
+        "create_allowed": allowed,
+        "upgrade_required": not allowed,
+        "reason": None if allowed else uc.COMPLETED_AGREEMENT_LIMIT,
         "genesis_allowance": None,
+        "free_allowance": {
+            "limit": limit,
+            "used": completed,
+            "remaining": remaining,
+            "allowed": allowed,
+        },
     }

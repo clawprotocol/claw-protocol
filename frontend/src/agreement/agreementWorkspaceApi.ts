@@ -722,6 +722,12 @@ export type CommercialEntitlementBlock = {
     period_end: string;
     allowed: boolean;
   } | null;
+  free_allowance?: {
+    limit: number;
+    used: number;
+    remaining: number;
+    allowed: boolean;
+  } | null;
 };
 
 export type AgreementUsageSummary = {

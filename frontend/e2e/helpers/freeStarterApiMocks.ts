@@ -43,6 +43,19 @@ const FREE_USAGE_SUMMARY = {
   storage_persistent: false,
   paywall_required: false,
   soft_throttle: false,
+  commercial: {
+    entitlement: "free",
+    create_allowed: true,
+    upgrade_required: false,
+    reason: null,
+    genesis_allowance: null,
+    free_allowance: {
+      limit: 1,
+      used: 0,
+      remaining: 1,
+      allowed: true,
+    },
+  },
 };
 
 const ANON_ORG_ID = "anon-e2e-starter-org";

@@ -19,7 +19,7 @@ describe("authenticatedWorkspaceAccessPolicy", () => {
     expect(verdict.showEntitlementProbeError).toBe(false);
   });
 
-  it("blocks authenticated create without entitlement", () => {
+  it("blocks authenticated create without entitlement when commercial probe is absent", () => {
     const verdict = resolveWorkspaceCreateAccess({
       authentication: "authenticated",
       entitlement: "none",
@@ -38,6 +38,43 @@ describe("authenticatedWorkspaceAccessPolicy", () => {
       workspaceProEntitled: false,
       isStarterAnonymousSession: false,
     })).toBe(true);
+  });
+
+  it("allows authenticated free create while complimentary allowance remains", () => {
+    const verdict = resolveWorkspaceCreateAccess({
+      authentication: "authenticated",
+      entitlement: "none",
+      isStarterAnonymousSession: false,
+      isResumingOwnedAgreement: false,
+      hasCheckoutPendingMarker: false,
+      workspaceProEntitledProbe: false,
+      commercialEntitlement: {
+        entitlement: "free",
+        createAllowed: true,
+      },
+    });
+    expect(verdict.allowed).toBe(true);
+    expect(verdict.reason).toBe("free_allowance");
+    expect(verdict.showUpgradeModal).toBe(false);
+  });
+
+  it("blocks authenticated free create after complimentary allowance is consumed", () => {
+    const verdict = resolveWorkspaceCreateAccess({
+      authentication: "authenticated",
+      entitlement: "none",
+      isStarterAnonymousSession: false,
+      isResumingOwnedAgreement: false,
+      hasCheckoutPendingMarker: false,
+      workspaceProEntitledProbe: false,
+      commercialEntitlement: {
+        entitlement: "free",
+        createAllowed: false,
+        reason: "completed_agreement_limit",
+      },
+    });
+    expect(verdict.allowed).toBe(false);
+    expect(verdict.reason).toBe("free_allowance_exhausted");
+    expect(verdict.showUpgradeModal).toBe(true);
   });
 
   it("allows checkout-pending authenticated continuity", () => {

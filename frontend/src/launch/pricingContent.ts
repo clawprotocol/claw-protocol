@@ -32,6 +32,10 @@ export const PRICING_FIRST_WORKFLOW_GUARANTEE_TITLE = "Try your first agreement 
 export const PRICING_FIRST_WORKFLOW_GUARANTEE_BODY =
   "If the workflow does not work as intended, we'll refund your subscription. No friction.";
 
+/** Create screen — shown while the complimentary first agreement remains available. */
+export const CREATE_FIRST_AGREEMENT_FREE_INLINE =
+  "Your first agreement is free. Upgrade when you need another agreement, reusable drafts, or full history.";
+
 /** Product workflow completion only — not legal results. */
 export const PRICING_FIRST_WORKFLOW_GUARANTEE_FOOTNOTE =
   "Applies to product workflow completion only—not legal outcomes, enforceability, or third-party decisions.";

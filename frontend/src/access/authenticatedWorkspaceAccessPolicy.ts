@@ -1,12 +1,13 @@
 /**
- * Authenticated workspace access — entitlement/account states, not a permanent free product tier.
+ * Authenticated workspace access — entitlement/account states for Create gating.
  *
  * Actors (product):
  * - Anonymous prospective customer (Starter conversion experience)
+ * - Authenticated free user within the one complimentary completed-agreement allowance
  * - Authenticated paid owner (active entitlement)
  * - Recipient signer (token holder)
  *
- * Authentication establishes identity/ownership; entitlement establishes paid capabilities.
+ * Authentication establishes identity/ownership; entitlement establishes create capabilities.
  * When a server commercial entitlement decision is present, it is the sole Create-UI authority
  * (cached paid probes / access.tier must not override it).
  */
@@ -45,6 +46,8 @@ export type WorkspaceCreateAccessVerdict = {
     | "resume_owned_agreement"
     | "checkout_pending"
     | "entitlement_required"
+    | "free_allowance"
+    | "free_allowance_exhausted"
     | "genesis_allowance"
     | "genesis_allowance_exhausted"
     | "auth_probe_failed"
@@ -70,9 +73,10 @@ function baseVerdict(
 }
 
 /**
- * Replaces obsolete `shouldBlockSecondAgreementCreation` ("authenticated free user, one agreement").
- * Authenticated users without entitlement may resume owned work but cannot open paid-owner create
- * without checkout / resubscribe — they are NOT granted a permanent free dashboard tier.
+ * Create access for authenticated workspaces.
+ * Free users may create while the server reports ``createAllowed`` (one complimentary
+ * completed agreement). After that allowance is consumed, Create shows an upgrade gate.
+ * Authenticated users may always resume owned work.
  */
 export function resolveWorkspaceCreateAccess(args: {
   authentication: AuthenticationState;
@@ -167,9 +171,17 @@ export function resolveWorkspaceCreateAccess(args: {
     }
 
     if (commercial.entitlement === "free") {
+      if (commercial.createAllowed) {
+        return baseVerdict({
+          allowed: true,
+          reason: "free_allowance",
+          showUpgradeModal: false,
+          showResubscribeCta: false,
+        });
+      }
       return baseVerdict({
         allowed: false,
-        reason: "entitlement_required",
+        reason: "free_allowance_exhausted",
         showUpgradeModal: true,
         showResubscribeCta: false,
       });

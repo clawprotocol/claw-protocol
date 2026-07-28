@@ -48,6 +48,7 @@ import {
   STRUCTURED_DRAFT_ASSIST_SHORT,
 } from "../../compliance/disclosureCopy";
 import {
+  CREATE_FIRST_AGREEMENT_FREE_INLINE,
   FIRST_RUN_INTAKE_REASSURANCE,
   FIRST_SESSION_CREATE_INTAKE_PLACEHOLDER,
   SIMPLE_CREATE_INTAKE_PLACEHOLDER,
@@ -195,12 +196,18 @@ export function SimpleCreatePage() {
     commercialEntitlementReady &&
     createAccessVerdict.allowed &&
     createAccessVerdict.reason === "genesis_allowance";
+  const freeAllowanceAvailable =
+    commercialEntitlementReady &&
+    createAccessVerdict.allowed &&
+    createAccessVerdict.reason === "free_allowance";
   const [upgradeModalOpen, setUpgradeModalOpen] = useState(false);
   const [postRecipientHandoffFailure, setPostRecipientHandoffFailure] =
     useState<PaidProPostRecipientSetupFailure | null>(null);
   const [postRecipientHandoffRetrying, setPostRecipientHandoffRetrying] = useState(false);
   const [reEngageBanner, setReEngageBanner] = useState<CreateOrHomeBanner | null>(null);
   const [intakeActive, setIntakeActive] = useState(false);
+  const draftPreservedForUpgrade =
+    readAgreementCreatorIntakeStorage().trim().length > 0 || intakeActive;
   const trustNudge = getLawdogTrustNudges();
   const intakeChangeBootRef = useRef(true);
   const primedDraftForHandoffRetryRef = useRef<AgreementDraft | null>(null);
@@ -634,6 +641,16 @@ export function SimpleCreatePage() {
           </div>
         ) : null}
 
+        {freeAllowanceAvailable ? (
+          <div
+            className="mb-4 rounded-lg border border-slate-700/70 bg-slate-950/40 px-4 py-2.5 text-xs text-slate-300"
+            role="status"
+            data-testid="free-allowance-indicator"
+          >
+            {CREATE_FIRST_AGREEMENT_FREE_INLINE}
+          </div>
+        ) : null}
+
         {entitlementProbeBlocked ? (
           <div
             className="mb-4 rounded-lg border border-slate-600/50 bg-slate-900/50 px-4 py-3 text-sm text-slate-200"
@@ -678,36 +695,61 @@ export function SimpleCreatePage() {
               <>
                 <p className="font-medium text-amber-50">You&apos;ve used your free agreement.</p>
                 <p className="mt-1 text-xs text-amber-100/85">
-                  Upgrade to Pro to continue shaping agreements in this workspace.
+                  Your free agreement is complete. Upgrade to Pro to create another, keep reusable
+                  drafts, and unlock full history.
                 </p>
               </>
             )}
-            <button
-              type="button"
-              className="vs01-btn vs01-btn--primary vs01-btn--compact mt-3"
-              onClick={() => {
-                logProductEvent("paywall_clicked_upgrade", {
-                  surface: "simple_create",
-                  variant: createAccessVerdict.showGenesisAllowanceExhausted
-                    ? "genesis_allowance_exhausted_inline"
-                    : "inline_strip",
-                });
-                navigate("/app/billing");
-              }}
-            >
-              Upgrade to Pro
-            </button>
-            <p className="mt-3 text-[11px] text-amber-200/75">
-              Quick send stays open —{" "}
+            <div className="mt-3 flex flex-wrap gap-2">
               <button
                 type="button"
-                className="font-medium text-amber-100 underline-offset-2 hover:underline"
-                onClick={() => navigate("/app/quick")}
+                className="vs01-btn vs01-btn--primary vs01-btn--compact"
+                onClick={() => {
+                  logProductEvent("paywall_clicked_upgrade", {
+                    surface: "simple_create",
+                    variant: createAccessVerdict.showGenesisAllowanceExhausted
+                      ? "genesis_allowance_exhausted_inline"
+                      : "inline_strip",
+                  });
+                  navigate("/app/billing");
+                }}
               >
-                send a document instead
+                Upgrade to Pro
               </button>
-              .
-            </p>
+              {!createAccessVerdict.showGenesisAllowanceExhausted ? (
+                <button
+                  type="button"
+                  className="vs01-btn vs01-btn--secondary vs01-btn--compact"
+                  onClick={() => {
+                    logProductEvent("paywall_clicked_view_existing", {
+                      surface: "simple_create",
+                      variant: "inline_strip",
+                    });
+                    navigate("/app/agreements");
+                  }}
+                >
+                  View your agreement
+                </button>
+              ) : null}
+            </div>
+            {draftPreservedForUpgrade && !createAccessVerdict.showGenesisAllowanceExhausted ? (
+              <p className="mt-3 text-[11px] text-amber-200/75" data-testid="create-draft-preserved-note">
+                Your draft text stays saved in this browser while you upgrade or review your existing
+                agreement.
+              </p>
+            ) : (
+              <p className="mt-3 text-[11px] text-amber-200/75">
+                Quick send stays open —{" "}
+                <button
+                  type="button"
+                  className="font-medium text-amber-100 underline-offset-2 hover:underline"
+                  onClick={() => navigate("/app/quick")}
+                >
+                  send a document instead
+                </button>
+                .
+              </p>
+            )}
           </div>
         ) : null}
 
@@ -843,6 +885,8 @@ export function SimpleCreatePage() {
               ? "genesis_allowance_exhausted"
               : "upgrade_to_pro"
           }
+          viewExistingPath="/app/agreements"
+          draftPreserved={draftPreservedForUpgrade}
         />
 
         {!(firstSessionLive && isFreshSimpleCreateStart) ? (
