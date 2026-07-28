@@ -63,17 +63,28 @@ export type WorkspaceCreateAccessVerdict = {
   showEntitlementProbeError: boolean;
   /** Authenticated without Genesis/Pro — request Genesis + Choose Pro. */
   showRequestGenesisCta: boolean;
+  /**
+   * Authenticated without Genesis/Pro — stable full-page access choice (not a delayed modal).
+   * When true, Create must not render the agreement editor.
+   */
+  showAccessChoiceScreen: boolean;
 };
 
 function baseVerdict(
   partial: Omit<
     WorkspaceCreateAccessVerdict,
-    "showGenesisAllowanceExhausted" | "showEntitlementProbeError" | "showRequestGenesisCta"
+    | "showGenesisAllowanceExhausted"
+    | "showEntitlementProbeError"
+    | "showRequestGenesisCta"
+    | "showAccessChoiceScreen"
   > &
     Partial<
       Pick<
         WorkspaceCreateAccessVerdict,
-        "showGenesisAllowanceExhausted" | "showEntitlementProbeError" | "showRequestGenesisCta"
+        | "showGenesisAllowanceExhausted"
+        | "showEntitlementProbeError"
+        | "showRequestGenesisCta"
+        | "showAccessChoiceScreen"
       >
     >,
 ): WorkspaceCreateAccessVerdict {
@@ -81,6 +92,7 @@ function baseVerdict(
     showGenesisAllowanceExhausted: false,
     showEntitlementProbeError: false,
     showRequestGenesisCta: false,
+    showAccessChoiceScreen: false,
     ...partial,
   };
 }
@@ -215,9 +227,10 @@ export function resolveWorkspaceCreateAccess(args: {
       return baseVerdict({
         allowed: false,
         reason: "pending_genesis",
-        showUpgradeModal: true,
+        showUpgradeModal: false,
         showResubscribeCta: false,
         showRequestGenesisCta: true,
+        showAccessChoiceScreen: true,
       });
     }
 
@@ -245,18 +258,20 @@ export function resolveWorkspaceCreateAccess(args: {
       return baseVerdict({
         allowed: false,
         reason: "entitlement_required",
-        showUpgradeModal: true,
+        showUpgradeModal: false,
         showResubscribeCta: false,
         showRequestGenesisCta: true,
+        showAccessChoiceScreen: true,
       });
     }
 
     return baseVerdict({
       allowed: false,
       reason: "entitlement_required",
-      showUpgradeModal: true,
+      showUpgradeModal: false,
       showResubscribeCta: false,
       showRequestGenesisCta: true,
+      showAccessChoiceScreen: true,
     });
   }
 
@@ -281,15 +296,18 @@ export function resolveWorkspaceCreateAccess(args: {
       reason: "entitlement_required",
       showUpgradeModal: false,
       showResubscribeCta: true,
+      showAccessChoiceScreen: true,
+      showRequestGenesisCta: true,
     });
   }
 
   return baseVerdict({
     allowed: false,
     reason: "entitlement_required",
-    showUpgradeModal: true,
+    showUpgradeModal: false,
     showResubscribeCta: false,
     showRequestGenesisCta: true,
+    showAccessChoiceScreen: true,
   });
 }
 

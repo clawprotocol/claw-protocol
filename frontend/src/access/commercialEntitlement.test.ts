@@ -178,7 +178,8 @@ describe("commercialEntitlement", () => {
     expect(verdict.allowed).toBe(false);
     expect(verdict.reason).toBe("entitlement_required");
     expect(verdict.showRequestGenesisCta).toBe(true);
-    expect(verdict.showUpgradeModal).toBe(true);
+    expect(verdict.showUpgradeModal).toBe(false);
+    expect(verdict.showAccessChoiceScreen).toBe(true);
   });
 
   it("surfaces auth probe failures without mapping to guest", async () => {

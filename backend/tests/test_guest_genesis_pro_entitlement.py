@@ -176,6 +176,43 @@ def test_3_genesis_request_does_not_grant(isolated_entitlement_env):
     assert get_entitlement(uid) is None
 
 
+def test_authenticated_none_usage_summary_blocks_persisted_create(isolated_entitlement_env):
+    """Backend authority for unentitled signed-in Create access-choice (no editor grant)."""
+    client, _eco, _usage = isolated_entitlement_env
+    uid = "unentitled-create"
+    h = _auth(uid)
+    summary = client.get("/api/agreements/usage/summary", headers=h)
+    assert summary.status_code == 200, summary.text
+    body = summary.json()
+    assert body["state"] == STATE_NONE
+    assert body["can_create_persisted_agreement"] is False
+    assert body["can_save_guest_draft"] is False
+    commercial = body.get("commercial") or {}
+    assert commercial.get("state") == STATE_NONE
+    assert commercial.get("can_create_persisted_agreement") is False
+    blocked = client.post("/api/agreements/draft", headers=h, json=_draft_body("NoAccess"))
+    assert blocked.status_code == 403
+
+
+def test_guest_may_create_one_temp_draft_before_conversion(isolated_entitlement_env):
+    """Guest value-before-conversion: first temp draft allowed; persistence denied."""
+    client, _eco, _usage = isolated_entitlement_env
+    h = _mint_anon(client)
+    before = resolve_commercial_entitlement(f"org:{h['X-Claw-Org-Id']}")
+    assert before["state"] == STATE_GUEST
+    assert before["can_save_guest_draft"] is True
+    assert before["can_create_persisted_agreement"] is False
+    created = client.post("/api/agreements/draft", headers=h, json=_draft_body("GuestValue"))
+    assert created.status_code == 200, created.text
+    after = resolve_commercial_entitlement(f"org:{h['X-Claw-Org-Id']}")
+    assert after["state"] == STATE_GUEST
+    assert after["can_save_guest_draft"] is False
+    assert after["can_create_persisted_agreement"] is False
+    # Second draft requires Genesis/Pro — value moment already delivered.
+    blocked = client.post("/api/agreements/draft", headers=h, json=_draft_body("GuestAgain"))
+    assert blocked.status_code == 403
+
+
 def test_public_and_customer_cannot_grant_genesis(isolated_entitlement_env):
     client, _eco, _usage = isolated_entitlement_env
     uid = "no-public-grant"

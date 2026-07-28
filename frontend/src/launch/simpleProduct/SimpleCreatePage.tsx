@@ -40,6 +40,7 @@ import {
   fetchCommercialEntitlement,
   type CommercialEntitlementDecision,
 } from "../../access/commercialEntitlement";
+import { fetchWorkspaceIndex } from "../../agreement/agreementWorkspaceApi";
 import { hasCurrentSessionFreeStarterIntent } from "../../components/agreements/paidProSessionEligibility";
 import { getLawdogTrustNudges } from "../../tracking/lawdogSession";
 import { UpgradeToProModal } from "../../monetization/UpgradeToProModal";
@@ -55,6 +56,14 @@ import {
   FIRST_SESSION_CREATE_INTAKE_PLACEHOLDER,
   SIMPLE_CREATE_INTAKE_PLACEHOLDER,
 } from "../pricingContent";
+import { CreateAccessChoicePanel } from "./CreateAccessChoicePanel";
+import {
+  CREATE_ACCESS_CHOICE_HEADING,
+  formatGenesisAllowanceStatusCopy,
+  formatProAllowanceStatusCopy,
+  shouldGateCreateEditorUntilEntitlementReady,
+  shouldShowCreateAccessChoiceScreen,
+} from "./createEntitlementUi";
 import { useFirstSessionHint } from "../../conversion/firstExposureHints";
 import { clearLawdogEntryContext, consumeLawdogFocusCreateIntake } from "../lawdogEntryContext";
 import { isFirstLawdogSession, markLawdogDraftCreated } from "../lawdogFirstDraftSession";
@@ -192,25 +201,61 @@ export function SimpleCreatePage() {
       }),
     [access.tier, monetizationUser.isAuthenticated, workspaceProEntitled, commercialEntitlement],
   );
-  // Wait for server commercial decision before showing upgrade UI (avoids Genesis flash).
+  const isResumingOwnedAgreement = Boolean(readCreateReviewAgreementResumeId());
+  const hasCheckoutPendingMarker = Boolean(readCreateComplexityResume()?.awaitingProCheckout);
+  const editorGatedUntilEntitlement = shouldGateCreateEditorUntilEntitlementReady({
+    isAuthenticated: monetizationUser.isAuthenticated,
+    commercialEntitlementReady,
+    isResumingOwnedAgreement,
+    hasCheckoutPendingMarker,
+  });
+  const showAccessChoiceScreen =
+    commercialEntitlementReady && shouldShowCreateAccessChoiceScreen(createAccessVerdict);
+  // Modal only for post-value conversion (guest ready) or allowance exhaustion — not for unentitled signed-in.
   const creationBlockedForUi =
     commercialEntitlementReady &&
+    !showAccessChoiceScreen &&
     ((!createAccessVerdict.allowed && createAccessVerdict.showUpgradeModal) ||
       createAccessVerdict.showGenesisAllowanceExhausted);
   const entitlementProbeBlocked =
     commercialEntitlementReady && createAccessVerdict.showEntitlementProbeError;
+  const hideAgreementEditor =
+    editorGatedUntilEntitlement || showAccessChoiceScreen || entitlementProbeBlocked;
   const intakeInteractionBlocked = creationBlockedForUi || entitlementProbeBlocked;
   const genesisWithinAllowance =
     commercialEntitlementReady &&
     createAccessVerdict.allowed &&
     createAccessVerdict.reason === "genesis_allowance";
+  const proWithinAllowance =
+    commercialEntitlementReady &&
+    createAccessVerdict.allowed &&
+    createAccessVerdict.reason === "entitled_owner" &&
+    commercialEntitlement?.state === "pro";
   const guestDraftAvailable =
     commercialEntitlementReady &&
     createAccessVerdict.allowed &&
     (createAccessVerdict.reason === "guest_draft" ||
       createAccessVerdict.reason === "anonymous_starter");
   const freeAllowanceAvailable = guestDraftAvailable;
+  const genesisAllowanceCopy =
+    genesisWithinAllowance && commercialEntitlement
+      ? formatGenesisAllowanceStatusCopy({
+          agreementsRemaining: commercialEntitlement.agreementsRemaining,
+          agreementAllowance: commercialEntitlement.agreementAllowance,
+          periodEndsAt: commercialEntitlement.periodEndsAt,
+        })
+      : null;
+  const proAllowanceCopy =
+    proWithinAllowance && commercialEntitlement
+      ? formatProAllowanceStatusCopy({
+          agreementsRemaining: commercialEntitlement.agreementsRemaining,
+          agreementAllowance: commercialEntitlement.agreementAllowance,
+          periodEndsAt: commercialEntitlement.periodEndsAt,
+        })
+      : null;
   const [upgradeModalOpen, setUpgradeModalOpen] = useState(false);
+  const [hasAccessibleAgreement, setHasAccessibleAgreement] = useState(false);
+  const [genesisRequestBusy, setGenesisRequestBusy] = useState(false);
   const [postRecipientHandoffFailure, setPostRecipientHandoffFailure] =
     useState<PaidProPostRecipientSetupFailure | null>(null);
   const [postRecipientHandoffRetrying, setPostRecipientHandoffRetrying] = useState(false);
@@ -274,6 +319,30 @@ export function SimpleCreatePage() {
   }, [creationBlockedForUi, createAccessVerdict.reason]);
 
   useEffect(() => {
+    if (!showAccessChoiceScreen) return;
+    logProductEvent("paywall_triggered", {
+      surface: "simple_create",
+      reason: createAccessVerdict.reason,
+      variant: "access_choice_screen",
+    });
+  }, [showAccessChoiceScreen, createAccessVerdict.reason]);
+
+  useEffect(() => {
+    if (!showAccessChoiceScreen) {
+      setHasAccessibleAgreement(false);
+      return;
+    }
+    let cancelled = false;
+    void fetchWorkspaceIndex().then((result) => {
+      if (cancelled) return;
+      setHasAccessibleAgreement(!result.error && result.agreements.length > 0);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [showAccessChoiceScreen]);
+
+  useEffect(() => {
     if (!entitlementProbeBlocked) return;
     logProductEvent("paywall_triggered", {
       surface: "simple_create",
@@ -281,6 +350,23 @@ export function SimpleCreatePage() {
       variant: "entitlement_probe_failed",
     });
   }, [entitlementProbeBlocked, createAccessVerdict.reason]);
+
+  const requestGenesisAccess = useCallback(() => {
+    setGenesisRequestBusy(true);
+    void fetch(`${resolveApiBase().replace(/\/$/, "")}/v1/workspace/genesis-access-request`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", ...clawAgreementHeaders() },
+      credentials: "include",
+      body: JSON.stringify({ reason: "create_access_choice_request" }),
+    })
+      .then(() =>
+        fetchCommercialEntitlement().then((decision) => {
+          setCommercialEntitlement(decision);
+          setCommercialEntitlementReady(true);
+        }),
+      )
+      .finally(() => setGenesisRequestBusy(false));
+  }, []);
 
   const intakeKey = usingTemplate
     ? "tmpl"
@@ -401,24 +487,36 @@ export function SimpleCreatePage() {
         ? SIMPLE_CREATE_STARTER_HERO_SUBHEAD
         : "Start typing or speaking — LawDog auto-structures parties, term, scope, and obligations as you go (edit inline in preview). Review, share, or prepare for signing when you're ready.";
   const hideIntakeMarketingChrome =
-    paidProReviewReadyShell || homeTransitionVisible || anonymousStarterReviewChrome;
+    paidProReviewReadyShell ||
+    homeTransitionVisible ||
+    anonymousStarterReviewChrome ||
+    hideAgreementEditor;
+  const accessChoiceShell = showAccessChoiceScreen || editorGatedUntilEntitlement;
 
   return (
     <SimpleFlowShell
-      step={shellStep}
+      step={accessChoiceShell ? undefined : shellStep}
       progressLabels={shellProgressLabels}
       hideHeader={anonymousStarterReviewChrome}
       logoHomeHref={anonymousStarterReviewChrome ? "/" : "/app"}
       hideAffiliateNav={anonymousStarterReviewChrome}
       kicker={
-        paidProReviewReadyShell
+        paidProReviewReadyShell || accessChoiceShell
           ? undefined
           : quickSendTypedArrival
             ? "Starting from your typed agreement"
             : undefined
       }
-      title={shellTitle}
-      subtitle={shellSubtitle}
+      title={
+        showAccessChoiceScreen
+          ? CREATE_ACCESS_CHOICE_HEADING
+          : editorGatedUntilEntitlement
+            ? "Checking access"
+            : shellTitle
+      }
+      subtitle={
+        showAccessChoiceScreen || editorGatedUntilEntitlement ? undefined : shellSubtitle
+      }
       titleHeadingId={paidProReviewReadyShell ? PREMIUM_PRO_REVIEW_SCROLL_ANCHOR_ID : undefined}
       compactReviewHeader={paidProReviewReadyShell}
     >
@@ -430,6 +528,55 @@ export function SimpleCreatePage() {
             : undefined
         }
       >
+        {editorGatedUntilEntitlement ? (
+          <div
+            className="mx-auto max-w-lg py-10 text-center text-sm text-slate-400"
+            data-testid="create-entitlement-loading"
+            role="status"
+          >
+            Confirming your workspace access…
+          </div>
+        ) : null}
+
+        {showAccessChoiceScreen ? (
+          <CreateAccessChoicePanel
+            showHeading={false}
+            pendingGenesis={createAccessVerdict.reason === "pending_genesis"}
+            requestBusy={genesisRequestBusy}
+            hasAccessibleAgreement={hasAccessibleAgreement}
+            onRequestGenesis={() => {
+              logProductEvent("paywall_clicked_upgrade", {
+                surface: "simple_create",
+                variant: "access_choice_screen",
+                cta: "request_genesis",
+              });
+              requestGenesisAccess();
+            }}
+            onChoosePro={() => {
+              logProductEvent("paywall_clicked_upgrade", {
+                surface: "simple_create",
+                variant: "access_choice_screen",
+                cta: "choose_pro",
+              });
+              navigate("/app/billing");
+            }}
+            onViewAgreement={() => {
+              logProductEvent("paywall_clicked_view_existing", {
+                surface: "simple_create",
+                variant: "access_choice_screen",
+              });
+              navigate("/app/agreements");
+            }}
+            onBackToDashboard={() => {
+              logProductEvent("paywall_dismissed", {
+                surface: "simple_create",
+                variant: "access_choice_screen",
+                via: "return_dashboard",
+              });
+              navigate("/app");
+            }}
+          />
+        ) : null}
         {isFreshSimpleCreateStart && simplifyFirstSession && !quickSendTypedArrival && !hideIntakeMarketingChrome ? (
           <p className="mb-2 text-center text-[11px] font-medium leading-snug text-slate-500 sm:text-left sm:text-xs">
             {SIMPLE_CREATE_STARTER_CONTROL_LINE}
@@ -636,32 +783,27 @@ export function SimpleCreatePage() {
           </div>
         ) : null}
 
-        {genesisWithinAllowance && commercialEntitlement ? (
+        {!hideAgreementEditor && genesisAllowanceCopy ? (
           <div
             className="mb-4 rounded-lg border border-slate-700/70 bg-slate-950/40 px-4 py-2.5 text-xs text-slate-300"
             role="status"
             data-testid="genesis-allowance-indicator"
           >
-            Genesis Dog access includes {commercialEntitlement.agreementAllowance ?? "—"} new agreements
-            each month.{" "}
-            <span className="font-medium text-slate-100">
-              {commercialEntitlement.agreementsRemaining ?? "—"} of{" "}
-              {commercialEntitlement.agreementAllowance ?? "—"}
-            </span>{" "}
-            remaining. Resets{" "}
-            {commercialEntitlement.periodEndsAt
-              ? new Date(commercialEntitlement.periodEndsAt).toLocaleDateString(undefined, {
-                  year: "numeric",
-                  month: "short",
-                  day: "numeric",
-                  timeZone: "UTC",
-                })
-              : "next period"}
-            .
+            {genesisAllowanceCopy}
           </div>
         ) : null}
 
-        {freeAllowanceAvailable ? (
+        {!hideAgreementEditor && proAllowanceCopy ? (
+          <div
+            className="mb-4 rounded-lg border border-slate-700/70 bg-slate-950/40 px-4 py-2.5 text-xs text-slate-300"
+            role="status"
+            data-testid="pro-allowance-indicator"
+          >
+            {proAllowanceCopy}
+          </div>
+        ) : null}
+
+        {!hideAgreementEditor && freeAllowanceAvailable ? (
           <div
             className="mb-4 rounded-lg border border-slate-700/70 bg-slate-950/40 px-4 py-2.5 text-xs text-slate-300"
             role="status"
@@ -698,36 +840,24 @@ export function SimpleCreatePage() {
           </div>
         ) : null}
 
-        {creationBlockedForUi ? (
+        {creationBlockedForUi && createAccessVerdict.showGenesisAllowanceExhausted ? (
           <div
             className="mb-4 rounded-lg border border-amber-800/40 bg-amber-950/20 px-4 py-3 text-sm text-amber-100/95"
             role="status"
           >
-            {createAccessVerdict.showGenesisAllowanceExhausted ? (
-              <>
-                <p className="font-medium text-amber-50">Genesis monthly allowance used</p>
-                <p className="mt-1 text-xs text-amber-100/85">
-                  You&apos;ve used this month&apos;s Genesis Dog agreements. Your allowance renews on{" "}
-                  {commercialEntitlement?.periodEndsAt
-                    ? new Date(commercialEntitlement.periodEndsAt).toLocaleDateString(undefined, {
-                        year: "numeric",
-                        month: "short",
-                        day: "numeric",
-                        timeZone: "UTC",
-                      })
-                    : "the next period"}
-                  . Upgrade to Pro for more capacity.
-                </p>
-              </>
-            ) : (
-              <>
-                <p className="font-medium text-amber-50">Save and continue with LawDog</p>
-                <p className="mt-1 text-xs text-amber-100/85">
-                  Request Genesis access or choose Pro to save agreements, invite review, prepare
-                  signatures, and keep a proof record.
-                </p>
-              </>
-            )}
+            <p className="font-medium text-amber-50">Genesis monthly allowance used</p>
+            <p className="mt-1 text-xs text-amber-100/85">
+              You&apos;ve used this month&apos;s Genesis Dog agreements. Your allowance renews on{" "}
+              {commercialEntitlement?.periodEndsAt
+                ? new Date(commercialEntitlement.periodEndsAt).toLocaleDateString(undefined, {
+                    year: "numeric",
+                    month: "short",
+                    day: "numeric",
+                    timeZone: "UTC",
+                  })
+                : "the next period"}
+              . Upgrade to Pro for more capacity.
+            </p>
             <div className="mt-3 flex flex-wrap gap-2">
               <button
                 type="button"
@@ -735,177 +865,144 @@ export function SimpleCreatePage() {
                 onClick={() => {
                   logProductEvent("paywall_clicked_upgrade", {
                     surface: "simple_create",
-                    variant: createAccessVerdict.showGenesisAllowanceExhausted
-                      ? "genesis_allowance_exhausted_inline"
-                      : "inline_strip",
+                    variant: "genesis_allowance_exhausted_inline",
                   });
                   navigate("/app/billing");
                 }}
               >
                 Choose Pro
               </button>
-              {!createAccessVerdict.showGenesisAllowanceExhausted ? (
-                <button
-                  type="button"
-                  className="vs01-btn vs01-btn--secondary vs01-btn--compact"
-                  onClick={() => {
-                    logProductEvent("paywall_clicked_view_existing", {
-                      surface: "simple_create",
-                      variant: "inline_strip",
-                    });
-                    navigate("/app/agreements");
-                  }}
-                >
-                  View your agreement
-                </button>
-              ) : null}
             </div>
-            {draftPreservedForUpgrade && !createAccessVerdict.showGenesisAllowanceExhausted ? (
-              <p className="mt-3 text-[11px] text-amber-200/75" data-testid="create-draft-preserved-note">
-                Your draft text stays saved in this browser while you upgrade or review your existing
-                agreement.
-              </p>
-            ) : (
-              <p className="mt-3 text-[11px] text-amber-200/75">
-                Quick send stays open —{" "}
-                <button
-                  type="button"
-                  className="font-medium text-amber-100 underline-offset-2 hover:underline"
-                  onClick={() => navigate("/app/quick")}
-                >
-                  send a document instead
-                </button>
-                .
-              </p>
-            )}
           </div>
         ) : null}
 
-        <div className={intakeInteractionBlocked ? "pointer-events-none select-none opacity-60" : undefined}>
-          <AgreementBuilderIntake
-            key={intakeKey}
-            className="vs01-agreement-intake rounded-xl border border-slate-800/90 bg-slate-950/35 p-4 sm:p-5"
-            workspaceUi
-            simpleProductFlow
-            simpleProductTextareaPlaceholder={
-              isFreshSimpleCreateStart ? FIRST_SESSION_CREATE_INTAKE_PLACEHOLDER : SIMPLE_CREATE_INTAKE_PLACEHOLDER
-            }
-            simpleProductFlowSubmitLabel={
-              isFreshSimpleCreateStart ? "Create draft" : quickSendTypedArrival ? "Review" : "Review"
-            }
-            simpleProductFollowUpSubmitLabel="Next"
-            simpleProductFlowGeneratingLabel={
-              quickSendTypedArrival || homeHeroAutoGenerate ? DRAFT_LOADING_PREPARING : undefined
-            }
-            homeHeroAutoGenerate={homeHeroAutoGenerate}
-            checkoutBackRestoreActive={checkoutBackRestoreActive}
-            onHomeGuidedTransitionPhase={homeHeroAutoGenerate ? onHomeGuidedTransitionPhase : undefined}
-            continuitySourcePanel={
-              quickSendTypedArrival && heroHandoff?.text
-                ? { label: "Your starting text", text: heroHandoff.text }
-                : undefined
-            }
-            hideWorkspaceComplianceFootnote
-            liveWorkspaceTwoPane
-            initialIntakeText={initialFromHeroOrStorage}
-            freshSimpleCreateStart={isFreshSimpleCreateStart}
-            firstLawdogSession={firstSessionLive}
-            onSimpleCreateShellChrome={onSimpleCreateShellChrome}
-            onIntakeTextChange={(t) => {
-              setIntakeActive(t.trim().length > 0);
-              if (intakeChangeBootRef.current) {
-                intakeChangeBootRef.current = false;
-                return;
+        {!hideAgreementEditor ? (
+          <div className={intakeInteractionBlocked ? "pointer-events-none select-none opacity-60" : undefined}>
+            <AgreementBuilderIntake
+              key={intakeKey}
+              className="vs01-agreement-intake rounded-xl border border-slate-800/90 bg-slate-950/35 p-4 sm:p-5"
+              workspaceUi
+              simpleProductFlow
+              simpleProductTextareaPlaceholder={
+                isFreshSimpleCreateStart ? FIRST_SESSION_CREATE_INTAKE_PLACEHOLDER : SIMPLE_CREATE_INTAKE_PLACEHOLDER
               }
-              clearLawdogEntryContext();
-            }}
-            onCreated={(
-              agreementId: string,
-              primed: AgreementDraft,
-              handoff?: { premiumSendIntent?: PremiumSendIntent | null; openFlowPhase?: "review" | "send" },
-            ) => {
-              clearCreateReviewAgreementResumeId();
-              clearLawdogEntryContext();
-              markLawdogDraftCreated();
-              access.recordUsage("agreements_created");
-              logProductEvent("agreement_started", { agreementId });
-              logProductEvent("agreement_created", { agreementId });
-              logProductEvent("draft_created", { agreementId });
-              recordAgreementCreatedForInboundRef(agreementId);
-              clearHeroIntakeHandoffAfterApply();
-              setJoyFlash("draft_ready");
-              emitActionCompleted("draft", { agreementId });
-              if (
-                (import.meta as unknown as { env?: { DEV?: boolean } }).env?.DEV &&
-                !shouldSuppressReviewPipelineTelemetry()
-              ) {
-                console.debug("[SimpleCreate] navigate to review with agreement id", agreementId);
+              simpleProductFlowSubmitLabel={
+                isFreshSimpleCreateStart ? "Create draft" : quickSendTypedArrival ? "Review" : "Review"
               }
-              void (async () => {
-                if (peekReviewFirstHandoffSource(agreementId)) {
-                  logReviewFirstLegacySendBlocked({
-                    agreementId,
-                    path: "simple_create_onCreated",
-                    premiumSendIntent: handoff?.premiumSendIntent ?? null,
-                  });
+              simpleProductFollowUpSubmitLabel="Next"
+              simpleProductFlowGeneratingLabel={
+                quickSendTypedArrival || homeHeroAutoGenerate ? DRAFT_LOADING_PREPARING : undefined
+              }
+              homeHeroAutoGenerate={homeHeroAutoGenerate}
+              checkoutBackRestoreActive={checkoutBackRestoreActive}
+              onHomeGuidedTransitionPhase={homeHeroAutoGenerate ? onHomeGuidedTransitionPhase : undefined}
+              continuitySourcePanel={
+                quickSendTypedArrival && heroHandoff?.text
+                  ? { label: "Your starting text", text: heroHandoff.text }
+                  : undefined
+              }
+              hideWorkspaceComplianceFootnote
+              liveWorkspaceTwoPane
+              initialIntakeText={initialFromHeroOrStorage}
+              freshSimpleCreateStart={isFreshSimpleCreateStart}
+              firstLawdogSession={firstSessionLive}
+              onSimpleCreateShellChrome={onSimpleCreateShellChrome}
+              onIntakeTextChange={(t) => {
+                setIntakeActive(t.trim().length > 0);
+                if (intakeChangeBootRef.current) {
+                  intakeChangeBootRef.current = false;
                   return;
                 }
-                const resolvedIntent: PremiumSendIntent | null =
-                  handoff?.premiumSendIntent === "signature" || handoff?.premiumSendIntent === "review"
-                    ? handoff.premiumSendIntent
-                    : null;
-                primedDraftForHandoffRetryRef.current = primed;
+                clearLawdogEntryContext();
+              }}
+              onCreated={(
+                agreementId: string,
+                primed: AgreementDraft,
+                handoff?: { premiumSendIntent?: PremiumSendIntent | null; openFlowPhase?: "review" | "send" },
+              ) => {
+                clearCreateReviewAgreementResumeId();
+                clearLawdogEntryContext();
+                markLawdogDraftCreated();
+                access.recordUsage("agreements_created");
+                logProductEvent("agreement_started", { agreementId });
+                logProductEvent("agreement_created", { agreementId });
+                logProductEvent("draft_created", { agreementId });
+                recordAgreementCreatedForInboundRef(agreementId);
+                clearHeroIntakeHandoffAfterApply();
+                setJoyFlash("draft_ready");
+                emitActionCompleted("draft", { agreementId });
                 if (
-                  resolvedIntent &&
-                  shouldSkipPaidProPrepareReviewLinkInterstitial({
-                    draft: primed,
-                    agreementId,
-                    premiumSendIntent: resolvedIntent,
-                  })
+                  (import.meta as unknown as { env?: { DEV?: boolean } }).env?.DEV &&
+                  !shouldSuppressReviewPipelineTelemetry()
                 ) {
-                  const result = await executePaidProPostRecipientSetupHandoff({
-                    navigate: (to) => void navigate(to),
-                    agreementId,
-                    draft: primed,
-                    premiumSendIntent: resolvedIntent,
-                    recipientSetup: {
-                      recipientPartyEmails: (primed.parties ?? []).map((p) =>
-                        String((p as { email?: string }).email ?? "").trim(),
-                      ),
-                      recipientPartySignerNames: (primed.parties ?? []).map((p) =>
-                        String((p as { signerName?: string }).signerName ?? "").trim(),
-                      ),
-                      recipientPartySignerTitles: (primed.parties ?? []).map((p) =>
-                        String((p as { signerTitle?: string }).signerTitle ?? "").trim(),
-                      ),
-                    },
-                    logSource: "create_flow_post_recipient_setup",
-                  });
-                  if (result.ok) {
-                    clearPaidProStarterSignatureSendFromCreateFlow();
+                  console.debug("[SimpleCreate] navigate to review with agreement id", agreementId);
+                }
+                void (async () => {
+                  if (peekReviewFirstHandoffSource(agreementId)) {
+                    logReviewFirstLegacySendBlocked({
+                      agreementId,
+                      path: "simple_create_onCreated",
+                      premiumSendIntent: handoff?.premiumSendIntent ?? null,
+                    });
                     return;
                   }
-                  setPostRecipientHandoffFailure(result.failure);
-                  return;
-                }
-                navigate(`/app/send/${encodeURIComponent(agreementId)}`, {
-                  simpleSendHandoff: buildSimpleSendHandoff({
-                    agreementId,
-                    primedDraft: primed,
-                    streamlinedSimpleFlow: isFreshSimpleCreateStart,
-                    premiumSendIntent: handoff?.premiumSendIntent ?? null,
-                    ...(handoff?.openFlowPhase === "send" || handoff?.openFlowPhase === "review"
-                      ? { openFlowPhase: handoff.openFlowPhase }
-                      : {}),
-                  }),
-                });
-              })();
-            }}
-          />
-        </div>
+                  const resolvedIntent: PremiumSendIntent | null =
+                    handoff?.premiumSendIntent === "signature" || handoff?.premiumSendIntent === "review"
+                      ? handoff.premiumSendIntent
+                      : null;
+                  primedDraftForHandoffRetryRef.current = primed;
+                  if (
+                    resolvedIntent &&
+                    shouldSkipPaidProPrepareReviewLinkInterstitial({
+                      draft: primed,
+                      agreementId,
+                      premiumSendIntent: resolvedIntent,
+                    })
+                  ) {
+                    const result = await executePaidProPostRecipientSetupHandoff({
+                      navigate: (to) => void navigate(to),
+                      agreementId,
+                      draft: primed,
+                      premiumSendIntent: resolvedIntent,
+                      recipientSetup: {
+                        recipientPartyEmails: (primed.parties ?? []).map((p) =>
+                          String((p as { email?: string }).email ?? "").trim(),
+                        ),
+                        recipientPartySignerNames: (primed.parties ?? []).map((p) =>
+                          String((p as { signerName?: string }).signerName ?? "").trim(),
+                        ),
+                        recipientPartySignerTitles: (primed.parties ?? []).map((p) =>
+                          String((p as { signerTitle?: string }).signerTitle ?? "").trim(),
+                        ),
+                      },
+                      logSource: "create_flow_post_recipient_setup",
+                    });
+                    if (result.ok) {
+                      clearPaidProStarterSignatureSendFromCreateFlow();
+                      return;
+                    }
+                    setPostRecipientHandoffFailure(result.failure);
+                    return;
+                  }
+                  navigate(`/app/send/${encodeURIComponent(agreementId)}`, {
+                    simpleSendHandoff: buildSimpleSendHandoff({
+                      agreementId,
+                      primedDraft: primed,
+                      streamlinedSimpleFlow: isFreshSimpleCreateStart,
+                      premiumSendIntent: handoff?.premiumSendIntent ?? null,
+                      ...(handoff?.openFlowPhase === "send" || handoff?.openFlowPhase === "review"
+                        ? { openFlowPhase: handoff.openFlowPhase }
+                        : {}),
+                    }),
+                  });
+                })();
+              }}
+            />
+          </div>
+        ) : null}
 
         <UpgradeToProModal
-          open={upgradeModalOpen}
+          open={upgradeModalOpen && !showAccessChoiceScreen}
           onClose={() => setUpgradeModalOpen(false)}
           surface="simple_create"
           variant={
@@ -913,31 +1010,25 @@ export function SimpleCreatePage() {
               ? "genesis_allowance_exhausted"
               : createAccessVerdict.reason === "guest_draft"
                 ? "guest_ready"
-                : createAccessVerdict.showRequestGenesisCta
-                  ? "entitlement_required"
-                  : "upgrade_to_pro"
+                : "upgrade_to_pro"
           }
           viewExistingPath="/app/agreements"
+          showViewExistingAgreement={hasAccessibleAgreement}
           draftPreserved={draftPreservedForUpgrade}
           agreementAllowance={commercialEntitlement?.agreementAllowance ?? null}
           agreementsRemaining={commercialEntitlement?.agreementsRemaining ?? null}
           periodEndsAt={commercialEntitlement?.periodEndsAt ?? null}
           onRequestGenesis={() => {
-            void fetch(`${resolveApiBase().replace(/\/$/, "")}/v1/workspace/genesis-access-request`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json", ...clawAgreementHeaders() },
-              credentials: "include",
-              body: JSON.stringify({ reason: "create_paywall_request" }),
-            }).then(() => {
-              void fetchCommercialEntitlement().then((decision) => {
-                setCommercialEntitlement(decision);
-                setCommercialEntitlementReady(true);
-              });
+            logProductEvent("paywall_clicked_upgrade", {
+              surface: "simple_create",
+              variant: "guest_ready",
+              cta: "request_genesis",
             });
+            requestGenesisAccess();
           }}
         />
 
-        {!(firstSessionLive && isFreshSimpleCreateStart) ? (
+        {!hideAgreementEditor && !(firstSessionLive && isFreshSimpleCreateStart) ? (
           <p className="mx-auto mt-4 max-w-xl text-center text-xs leading-relaxed text-slate-500 sm:text-[0.8125rem] md:text-sm lg:text-[0.9375rem] lg:leading-[1.55] lg:text-slate-400">
             Editable at every step. {STRUCTURED_DRAFT_ASSIST_SHORT} {PRODUCT_NOT_LAW_FIRM} {NO_ATTORNEY_CLIENT}
           </p>

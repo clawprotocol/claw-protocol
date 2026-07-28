@@ -29,7 +29,8 @@ describe("authenticatedWorkspaceAccessPolicy", () => {
       workspaceProEntitledProbe: false,
     });
     expect(verdict.allowed).toBe(false);
-    expect(verdict.showUpgradeModal).toBe(true);
+    expect(verdict.showUpgradeModal).toBe(false);
+    expect(verdict.showAccessChoiceScreen).toBe(true);
     expect(verdict.showGenesisAllowanceExhausted).toBe(false);
     expect(verdict.showEntitlementProbeError).toBe(false);
     expect(shouldBlockAuthenticatedCreateWithoutEntitlement({
@@ -79,8 +80,52 @@ describe("authenticatedWorkspaceAccessPolicy", () => {
     });
     expect(verdict.allowed).toBe(false);
     expect(verdict.reason).toBe("entitlement_required");
-    expect(verdict.showUpgradeModal).toBe(true);
+    expect(verdict.showUpgradeModal).toBe(false);
+    expect(verdict.showAccessChoiceScreen).toBe(true);
     expect(verdict.showRequestGenesisCta).toBe(true);
+  });
+
+  it("keeps guest draft allowed without access-choice paywall before value", () => {
+    const verdict = resolveWorkspaceCreateAccess({
+      authentication: "unauthenticated",
+      entitlement: "none",
+      isStarterAnonymousSession: false,
+      isResumingOwnedAgreement: false,
+      hasCheckoutPendingMarker: false,
+      commercialEntitlement: {
+        state: "guest",
+        entitlement: "guest",
+        createAllowed: true,
+        canSaveGuestDraft: true,
+        canCreatePersistedAgreement: false,
+      },
+    });
+    expect(verdict.allowed).toBe(true);
+    expect(verdict.reason).toBe("guest_draft");
+    expect(verdict.showAccessChoiceScreen).toBe(false);
+    expect(verdict.showUpgradeModal).toBe(false);
+  });
+
+  it("allows Genesis access without access-choice screen", () => {
+    const verdict = resolveWorkspaceCreateAccess({
+      authentication: "authenticated",
+      entitlement: "none",
+      isStarterAnonymousSession: false,
+      isResumingOwnedAgreement: false,
+      hasCheckoutPendingMarker: false,
+      commercialEntitlement: {
+        state: "genesis",
+        entitlement: "genesis_allowance",
+        createAllowed: true,
+        canCreatePersistedAgreement: true,
+        agreementAllowance: 5,
+        agreementsRemaining: 4,
+      },
+    });
+    expect(verdict.allowed).toBe(true);
+    expect(verdict.reason).toBe("genesis_allowance");
+    expect(verdict.showAccessChoiceScreen).toBe(false);
+    expect(verdict.showUpgradeModal).toBe(false);
   });
 
   it("allows checkout-pending authenticated continuity", () => {

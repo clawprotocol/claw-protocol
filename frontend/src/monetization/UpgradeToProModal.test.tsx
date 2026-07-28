@@ -27,7 +27,7 @@ describe("UpgradeToProModal", () => {
     expect(screen.getByText(/request genesis access or choose pro/i)).toBeTruthy();
     expect(screen.queryByText(/verified record/i)).toBeNull();
     expect(screen.getByRole("button", { name: /choose pro/i })).toBeTruthy();
-    expect(screen.getByRole("button", { name: /view your agreement/i })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /view your agreement/i })).toBeNull();
     expect(screen.getByRole("button", { name: /keep this draft/i })).toBeTruthy();
     expect(screen.getByTestId("upgrade-draft-preserved")).toBeTruthy();
   });
@@ -48,7 +48,7 @@ describe("UpgradeToProModal", () => {
     expect(screen.getByRole("button", { name: /back to dashboard/i })).toBeTruthy();
   });
 
-  it("routes view-your-agreement to the existing agreement path", () => {
+  it("routes view-your-agreement only when backend confirms an accessible agreement", () => {
     const onClose = vi.fn();
     render(
       <UpgradeToProModal
@@ -56,6 +56,7 @@ describe("UpgradeToProModal", () => {
         surface="simple_create"
         onClose={onClose}
         viewExistingPath="/app/agreements/ag_done"
+        showViewExistingAgreement
       />,
     );
     fireEvent.click(screen.getByRole("button", { name: /view your agreement/i }));

@@ -18,9 +18,13 @@ export type UpgradeToProModalProps = {
   variant?: UpgradeToProModalVariant;
   /**
    * Optional path to the user's existing agreement(s).
-   * Defaults to the agreements list when omitted.
+   * Only used when {@link showViewExistingAgreement} is true.
    */
   viewExistingPath?: string | null;
+  /**
+   * Show “View your agreement” only when the backend confirms an accessible persisted agreement.
+   */
+  showViewExistingAgreement?: boolean;
   /** True when intake/draft text is preserved locally and can be resumed later. */
   draftPreserved?: boolean;
   /** Server-authoritative allowance fields — do not hard-code client defaults. */
@@ -37,6 +41,7 @@ export function UpgradeToProModal({
   surface,
   variant = "upgrade_to_pro",
   viewExistingPath = "/app/agreements",
+  showViewExistingAgreement = false,
   draftPreserved = false,
   agreementAllowance = null,
   agreementsRemaining = null,
@@ -165,7 +170,7 @@ export function UpgradeToProModal({
               Start a new guest draft
             </button>
           ) : null}
-          {!isGenesisExhausted && !isGuestReady ? (
+          {showViewExistingAgreement && !isGenesisExhausted && !isGuestReady ? (
             <button
               type="button"
               className="vs01-btn vs01-btn--secondary min-h-[2.75rem] w-full"
