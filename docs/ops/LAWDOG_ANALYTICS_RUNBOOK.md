@@ -23,6 +23,7 @@ Typical **agreement** path (happy path):
 - `paywall_triggered` — upgrade required (see `surface`, `reason`, `code`)
 - `paywall_shown` / `paywall_viewed` — modal or strip shown
 - `paywall_clicked_upgrade` / `upgrade_clicked` — user moved toward billing
+- `paywall_clicked_view_existing` — user chose “View your agreement” from free-allowance paywall
 - `power_paywall_*` — Power tier modal (see `feature`, `surface`)
 
 **Claim note:** payload uses `claim_flow` (`esign_receipt` | `agreement_complete`), not the top-level `flow` dimension (`esign` | `agreement` from routing).

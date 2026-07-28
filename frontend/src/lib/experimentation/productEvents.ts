@@ -31,6 +31,7 @@ export type ProductEventName =
   | "paywall_triggered"
   | "paywall_viewed"
   | "paywall_clicked_upgrade"
+  | "paywall_clicked_view_existing"
   | "paywall_dismissed"
   | "upgrade_clicked"
   | "unlock_clicked"
