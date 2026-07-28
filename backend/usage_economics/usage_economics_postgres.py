@@ -162,12 +162,14 @@ def try_insert_agreement_owner_with_monthly_cap(
     now_iso: str,
     monthly_cap: Optional[int],
     period_start_iso: str,
+    guest_temp: bool = False,
 ) -> str:
     """Returns ``inserted`` | ``duplicate`` | ``cap_exceeded`` under a subject advisory lock."""
     kd = int(internal_keys_draft)
     ts = _ts(now_iso)
     aid = (agreement_id or "").strip()
     subj = (subject_ref or "").strip()
+    gt = 1 if guest_temp else 0
     with _tx() as conn:
         # Serialize concurrent creates for the same subject within this transaction.
         conn.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", (subj,))
@@ -177,7 +179,7 @@ def try_insert_agreement_owner_with_monthly_cap(
         )
         if cur.fetchone():
             return "duplicate"
-        if monthly_cap is not None:
+        if monthly_cap is not None and not guest_temp:
             start = (period_start_iso or "").strip()
             if not start:
                 raise ValueError("period_start_iso required when monthly_cap is set")
@@ -185,6 +187,7 @@ def try_insert_agreement_owner_with_monthly_cap(
                 """
                 SELECT COUNT(*) AS c FROM agreement_owner
                 WHERE subject_ref = %s AND created_at >= %s::timestamptz
+                  AND COALESCE(guest_temp, 0) = 0
                 """,
                 (subj, _ts(start)),
             )
@@ -195,25 +198,26 @@ def try_insert_agreement_owner_with_monthly_cap(
         conn.execute(
             """
             INSERT INTO agreement_owner (
-              agreement_id, subject_ref, created_at, internal_keys_draft
-            ) VALUES (%s, %s, %s::timestamptz, %s)
+              agreement_id, subject_ref, created_at, internal_keys_draft, guest_temp
+            ) VALUES (%s, %s, %s::timestamptz, %s, %s)
             """,
-            (aid, subj, ts, kd),
+            (aid, subj, ts, kd, gt),
         )
-        conn.execute(
-            """
-            INSERT INTO subject_counters (
-              subject_ref, keys_consumed_total, agreements_created, agreements_finalized,
-              ai_calls_count, abuse_flag, soft_throttle_flag, updated_at
+        if not guest_temp:
+            conn.execute(
+                """
+                INSERT INTO subject_counters (
+                  subject_ref, keys_consumed_total, agreements_created, agreements_finalized,
+                  ai_calls_count, abuse_flag, soft_throttle_flag, updated_at
+                )
+                VALUES (%s, %s, 1, 0, 0, 0, 0, %s::timestamptz)
+                ON CONFLICT (subject_ref) DO UPDATE SET
+                  agreements_created = subject_counters.agreements_created + 1,
+                  keys_consumed_total = subject_counters.keys_consumed_total + EXCLUDED.keys_consumed_total,
+                  updated_at = EXCLUDED.updated_at
+                """,
+                (subj, kd, ts),
             )
-            VALUES (%s, %s, 1, 0, 0, 0, 0, %s::timestamptz)
-            ON CONFLICT (subject_ref) DO UPDATE SET
-              agreements_created = subject_counters.agreements_created + 1,
-              keys_consumed_total = subject_counters.keys_consumed_total + EXCLUDED.keys_consumed_total,
-              updated_at = EXCLUDED.updated_at
-            """,
-            (subj, kd, ts),
-        )
         return "inserted"
 
 
@@ -390,11 +394,110 @@ def agreements_created_this_utc_month(subject_ref: str, month_start_iso: str) ->
             """
             SELECT COUNT(*) AS c FROM agreement_owner
             WHERE subject_ref = %s AND created_at >= %s::timestamptz
+              AND COALESCE(guest_temp, 0) = 0
             """,
             (subject_ref, _ts(month_start_iso)),
         )
         row = cur.fetchone()
     return int(row["c"] or 0) if row else 0
+
+
+def get_genesis_dog_entitlement(user_id: str) -> Optional[Dict[str, Any]]:
+    with _tx() as conn:
+        cur = conn.execute(
+            "SELECT * FROM genesis_dog_entitlements WHERE user_id = %s",
+            (user_id,),
+        )
+        row = cur.fetchone()
+    return _row_out(dict(row)) if row else None
+
+
+def upsert_genesis_dog_entitlement(
+    *,
+    user_id: str,
+    status: str,
+    expires_at: Optional[str],
+    allowance_override: Optional[int],
+    grant_source: str,
+    granted_by: Optional[str],
+    granted_at: str,
+    revoked_by: Optional[str],
+    revoked_at: Optional[str],
+    revoke_reason: Optional[str],
+    updated_at: str,
+) -> Dict[str, Any]:
+    with _tx() as conn:
+        conn.execute(
+            """
+            INSERT INTO genesis_dog_entitlements (
+              user_id, status, expires_at, allowance_override, grant_source,
+              granted_by, granted_at, revoked_by, revoked_at, revoke_reason, updated_at
+            ) VALUES (
+              %s, %s, %s::timestamptz, %s, %s,
+              %s, %s::timestamptz, %s, %s::timestamptz, %s, %s::timestamptz
+            )
+            ON CONFLICT (user_id) DO UPDATE SET
+              status = EXCLUDED.status,
+              expires_at = EXCLUDED.expires_at,
+              allowance_override = EXCLUDED.allowance_override,
+              grant_source = EXCLUDED.grant_source,
+              granted_by = EXCLUDED.granted_by,
+              granted_at = EXCLUDED.granted_at,
+              revoked_by = EXCLUDED.revoked_by,
+              revoked_at = EXCLUDED.revoked_at,
+              revoke_reason = EXCLUDED.revoke_reason,
+              updated_at = EXCLUDED.updated_at
+            """,
+            (
+                user_id,
+                status,
+                _ts(expires_at) if expires_at else None,
+                allowance_override,
+                grant_source,
+                granted_by,
+                _ts(granted_at),
+                revoked_by,
+                _ts(revoked_at) if revoked_at else None,
+                revoke_reason,
+                _ts(updated_at),
+            ),
+        )
+        cur = conn.execute(
+            "SELECT * FROM genesis_dog_entitlements WHERE user_id = %s",
+            (user_id,),
+        )
+        row = cur.fetchone()
+    return _row_out(dict(row)) if row else {}
+
+
+def get_genesis_access_request(user_id: str) -> Optional[Dict[str, Any]]:
+    with _tx() as conn:
+        cur = conn.execute(
+            "SELECT * FROM genesis_access_requests WHERE user_id = %s",
+            (user_id,),
+        )
+        row = cur.fetchone()
+    return _row_out(dict(row)) if row else None
+
+
+def upsert_genesis_access_request(user_id: str, now_iso: str) -> Dict[str, Any]:
+    with _tx() as conn:
+        conn.execute(
+            """
+            INSERT INTO genesis_access_requests (user_id, requested_at, status, updated_at)
+            VALUES (%s, %s::timestamptz, 'open', %s::timestamptz)
+            ON CONFLICT (user_id) DO UPDATE SET
+              status = 'open',
+              updated_at = EXCLUDED.updated_at
+            """,
+            (user_id, _ts(now_iso), _ts(now_iso)),
+        )
+        cur = conn.execute(
+            "SELECT * FROM genesis_access_requests WHERE user_id = %s",
+            (user_id,),
+        )
+        row = cur.fetchone()
+    return _row_out(dict(row)) if row else {}
 
 
 def append_ip_draft_create_event(ip: str, now_iso: str, cutoff_iso: str) -> None:

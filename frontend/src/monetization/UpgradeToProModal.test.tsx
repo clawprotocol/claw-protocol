@@ -19,34 +19,33 @@ describe("UpgradeToProModal", () => {
     navigate.mockReset();
   });
 
-  it("uses customer-facing free-allowance copy (no verified-record jargon)", () => {
+  it("uses entitlement-required copy without free-account jargon", () => {
     render(
       <UpgradeToProModal open surface="simple_create" onClose={() => undefined} draftPreserved />,
     );
-    expect(screen.getByRole("heading", { name: /used your free agreement/i })).toBeTruthy();
-    expect(screen.getByText(/free agreement is complete/i)).toBeTruthy();
+    expect(screen.getByRole("heading", { name: /save and continue with lawdog/i })).toBeTruthy();
+    expect(screen.getByText(/request genesis access or choose pro/i)).toBeTruthy();
     expect(screen.queryByText(/verified record/i)).toBeNull();
-    expect(screen.queryByText(/maybe later/i)).toBeNull();
-    expect(screen.getByRole("button", { name: /upgrade to pro/i })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /choose pro/i })).toBeTruthy();
     expect(screen.getByRole("button", { name: /view your agreement/i })).toBeTruthy();
     expect(screen.getByRole("button", { name: /keep this draft/i })).toBeTruthy();
     expect(screen.getByTestId("upgrade-draft-preserved")).toBeTruthy();
   });
 
-  it("preserves draft on keep-this-draft without clearing escape paths", () => {
-    const onClose = vi.fn();
+  it("renders Genesis exhausted copy from server period_ends_at", () => {
     render(
       <UpgradeToProModal
         open
         surface="simple_create"
-        onClose={onClose}
-        draftPreserved
-        viewExistingPath="/app/agreements"
+        onClose={() => undefined}
+        variant="genesis_allowance_exhausted"
+        periodEndsAt="2026-07-31T23:59:59Z"
       />,
     );
-    fireEvent.click(screen.getByRole("button", { name: /keep this draft/i }));
-    expect(onClose).toHaveBeenCalled();
-    expect(navigate).not.toHaveBeenCalled();
+    expect(screen.getByRole("heading", { name: /genesis monthly allowance used/i })).toBeTruthy();
+    expect(screen.getByText(/renews on/i)).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /view your agreement/i })).toBeNull();
+    expect(screen.getByRole("button", { name: /back to dashboard/i })).toBeTruthy();
   });
 
   it("routes view-your-agreement to the existing agreement path", () => {
@@ -64,17 +63,20 @@ describe("UpgradeToProModal", () => {
     expect(navigate).toHaveBeenCalledWith("/app/agreements/ag_done");
   });
 
-  it("keeps Genesis exhausted copy distinct from free exhaustion", () => {
+  it("shows guest-ready CTAs including request genesis", () => {
+    const onRequestGenesis = vi.fn();
     render(
       <UpgradeToProModal
         open
         surface="simple_create"
         onClose={() => undefined}
-        variant="genesis_allowance_exhausted"
+        variant="guest_ready"
+        onRequestGenesis={onRequestGenesis}
+        onStartNewGuestDraft={() => undefined}
       />,
     );
-    expect(screen.getByRole("heading", { name: /genesis monthly allowance used/i })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: /view your agreement/i })).toBeNull();
-    expect(screen.getByRole("button", { name: /back to dashboard/i })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: /your draft is ready/i })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /request genesis access/i }));
+    expect(onRequestGenesis).toHaveBeenCalled();
   });
 });

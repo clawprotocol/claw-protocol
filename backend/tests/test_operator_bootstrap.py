@@ -202,9 +202,10 @@ def test_bootstrap_success_then_genesis_ops_read(staging_bootstrap_env):
     audits = store.list_admin_action_audit(limit=10)
     assert any(a.get("action_type") == "operator_bootstrap" and a.get("id") == body["audit_id"] for a in audits)
 
-    # Bootstrap must not invent agreement ownership or consume the free-agreement entitlement.
+    # Bootstrap must not invent agreement ownership or grant customer Genesis Dog access.
     from backend.usage_economics import store as ue_store
     from backend.usage_economics.commercial_entitlement import resolve_commercial_entitlement
+    from backend.usage_economics.genesis_dog_entitlement import get_entitlement
     from backend.usage_economics.store import get_usage_economics_store
 
     ue_store._store = None
@@ -213,10 +214,11 @@ def test_bootstrap_success_then_genesis_ops_read(staging_bootstrap_env):
     usage.init_schema()
     assert usage.count_completed_agreements(subject) == 0
     assert usage.count_incomplete_agreements(subject) == 0
+    assert get_entitlement(uid) is None
     decision = resolve_commercial_entitlement(subject)
-    assert decision["entitlement"] == "free"
-    assert decision["create_allowed"] is True
-    assert decision["upgrade_required"] is False
+    assert decision["state"] == "none"
+    assert decision["can_create_persisted_agreement"] is False
+    assert decision["grant_source"] == "none"
 
     # Second bootstrap must fail closed.
     r2 = client.post(

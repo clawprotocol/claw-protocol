@@ -178,6 +178,45 @@ async def create_anonymous_session(request: Request, response: Response) -> Dict
     }
 
 
+class GenesisAccessRequestIn(BaseModel):
+    """Request Genesis Dog access — never auto-grants entitlement."""
+
+    reason: Optional[str] = Field(default=None, max_length=500)
+
+
+@router.post("/genesis-access-request")
+async def request_genesis_access(request: Request, body: GenesisAccessRequestIn) -> Dict[str, Any]:
+    """
+    Authenticated users may request Genesis Dog access.
+
+    Does not grant ``genesis_dog_entitlements`` or activate affiliate status.
+    """
+    from backend.usage_economics.genesis_dog_entitlement import record_genesis_access_request
+    from backend.usage_economics.commercial_entitlement import resolve_commercial_entitlement
+
+    user_id = require_supabase_user_id(request)
+    row = record_genesis_access_request(user_id)
+    decision = resolve_commercial_entitlement(f"org:user-{user_id}")
+    _log.info(
+        "genesis_access_requested user_id=%s state=%s grant_source=%s",
+        user_id,
+        decision.get("state"),
+        decision.get("grant_source"),
+    )
+    return {
+        "ok": True,
+        "requested": True,
+        "granted": False,
+        "request": row,
+        "commercial": {
+            "state": decision.get("state"),
+            "grant_source": decision.get("grant_source"),
+            "can_create_persisted_agreement": decision.get("can_create_persisted_agreement"),
+        },
+        "reason": (body.reason or "").strip() or None,
+    }
+
+
 @router.post("/auth-continuation")
 async def create_auth_continuation(request: Request, body: AuthContinuationIn) -> Dict[str, Any]:
     """Create durable server-side continuation for OAuth / magic-link round trips."""

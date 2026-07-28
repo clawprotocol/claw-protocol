@@ -153,13 +153,15 @@ def assert_can_create_draft(*, subject_ref: str, request_ip: str) -> None:
     """
     Raises HTTPException 403 with detail dict when blocked.
 
-    Authority: ``resolve_commercial_entitlement`` (paid_pro / genesis_allowance / free).
+    Authority: ``resolve_commercial_entitlement`` (guest / genesis / pro / none).
+    Guest may create one temporary draft; persisted creates require Genesis or Pro.
     """
     from fastapi import HTTPException
 
     from backend.usage_economics.commercial_entitlement import (
-        ENTITLEMENT_GENESIS_ALLOWANCE,
-        ENTITLEMENT_PAID_PRO,
+        STATE_GENESIS,
+        STATE_GUEST,
+        STATE_PRO,
         resolve_commercial_entitlement,
     )
 
@@ -187,15 +189,62 @@ def assert_can_create_draft(*, subject_ref: str, request_ip: str) -> None:
         )
 
     decision = resolve_commercial_entitlement(subject_ref)
-    entitlement = str(decision.get("entitlement") or "")
+    state = str(decision.get("state") or "")
 
-    if entitlement == ENTITLEMENT_PAID_PRO:
+    if state == STATE_GUEST:
+        if not decision.get("can_save_guest_draft"):
+            store.emit_event(
+                subject_ref=subject_ref,
+                event_type="paywall_triggered",
+                payload={"surface": "draft_create", "reason": uc.GUEST_DRAFT_LIMIT},
+            )
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "code": uc.GUEST_DRAFT_LIMIT,
+                    "message": (
+                        "You've used your guest draft. Request Genesis access or choose Pro "
+                        "to save agreements, or start a new guest draft after clearing the current one."
+                    ),
+                    "paywall": True,
+                    "commercial": decision,
+                },
+            )
         _maybe_flag_abuse(subject_ref=subject_ref, ip=request_ip, store=store)
         return
 
-    if entitlement == ENTITLEMENT_GENESIS_ALLOWANCE:
-        if not decision.get("create_allowed"):
+    if state == STATE_PRO:
+        if not decision.get("can_create_persisted_agreement"):
+            pa = decision.get("pro_allowance") or {}
+            store.emit_event(
+                subject_ref=subject_ref,
+                event_type="paywall_triggered",
+                payload={
+                    "surface": "draft_create",
+                    "reason": uc.PRO_BILLING_PERIOD_ALLOWANCE_EXHAUSTED,
+                    "limit": pa.get("limit"),
+                    "used": pa.get("used"),
+                },
+            )
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "code": uc.PRO_BILLING_PERIOD_ALLOWANCE_EXHAUSTED,
+                    "message": (
+                        "You've used this billing period's Pro agreement allowance. "
+                        "Your allowance renews at the end of the current Stripe period."
+                    ),
+                    "paywall": True,
+                    "commercial": decision,
+                },
+            )
+        _maybe_flag_abuse(subject_ref=subject_ref, ip=request_ip, store=store)
+        return
+
+    if state == STATE_GENESIS:
+        if not decision.get("can_create_persisted_agreement"):
             ga = decision.get("genesis_allowance") or {}
+            renew = decision.get("period_ends_at") or "next month"
             store.emit_event(
                 subject_ref=subject_ref,
                 event_type="paywall_triggered",
@@ -218,59 +267,38 @@ def assert_can_create_draft(*, subject_ref: str, request_ip: str) -> None:
                 detail={
                     "code": uc.GENESIS_MONTHLY_ALLOWANCE_EXHAUSTED,
                     "message": (
-                        "You've used this month's complimentary Genesis agreement allowance. "
-                        "Upgrade to Pro for unlimited agreement creation, or wait until next month."
+                        f"You've used this month's Genesis Dog agreements. "
+                        f"Your allowance renews on {renew}. Upgrade to Pro for more capacity."
                     ),
                     "paywall": True,
                     "genesis_allowance": ga,
+                    "commercial": decision,
                 },
             )
         _maybe_flag_abuse(subject_ref=subject_ref, ip=request_ip, store=store)
         return
 
-    # Free / evaluation path — first completed agreement is complimentary.
-    if not decision.get("create_allowed"):
-        store.emit_event(
-            subject_ref=subject_ref,
-            event_type="paywall_triggered",
-            payload={"surface": "draft_create", "reason": uc.COMPLETED_AGREEMENT_LIMIT},
-        )
-        _notify_paywall_integration_webhook(
-            subject_ref, {"surface": "draft_create", "reason": uc.COMPLETED_AGREEMENT_LIMIT}
-        )
-        raise HTTPException(
-            status_code=403,
-            detail={
-                "code": uc.COMPLETED_AGREEMENT_LIMIT,
-                "message": (
-                    "You've completed your free agreement. "
-                    "Upgrade to Pro to create another agreement, keep reusable drafts, and unlock full history."
-                ),
-                "paywall": True,
-                "agreements_remaining": 0,
-            },
-        )
-
-    # Active-draft cap (unless relaxed local/dev).
-    incomplete = store.count_incomplete_agreements(subject_ref)
-    if incomplete >= uc.FREE_MAX_ACTIVE_DRAFTS and not _relaxed_draft_limits_in_dev():
-        store.emit_event(
-            subject_ref=subject_ref,
-            event_type="paywall_triggered",
-            payload={"surface": "draft_create", "reason": "draft_limit"},
-        )
-        _notify_paywall_integration_webhook(subject_ref, {"surface": "draft_create", "reason": "draft_limit"})
-        raise HTTPException(
-            status_code=403,
-            detail={
-                "code": "draft_limit_reached",
-                "message": "Free workspaces can have up to 2 active drafts. Finish or upgrade to add another.",
-                "paywall": True,
-                "drafts_remaining": 0,
-            },
-        )
-
-    _maybe_flag_abuse(subject_ref=subject_ref, ip=request_ip, store=store)
+    # Authenticated without Genesis or Pro — no Free account tier.
+    store.emit_event(
+        subject_ref=subject_ref,
+        event_type="paywall_triggered",
+        payload={"surface": "draft_create", "reason": uc.ENTITLEMENT_REQUIRED},
+    )
+    _notify_paywall_integration_webhook(
+        subject_ref, {"surface": "draft_create", "reason": uc.ENTITLEMENT_REQUIRED}
+    )
+    raise HTTPException(
+        status_code=403,
+        detail={
+            "code": uc.ENTITLEMENT_REQUIRED,
+            "message": (
+                "Request Genesis access or choose Pro to save agreements, invite review, "
+                "prepare signatures, and keep a proof record."
+            ),
+            "paywall": True,
+            "commercial": decision,
+        },
+    )
 
 
 def assert_can_complete_agreement(*, agreement_id: str) -> Optional[str]:
@@ -308,41 +336,59 @@ def assert_can_complete_agreement(*, agreement_id: str) -> Optional[str]:
             },
         )
 
-    paid = subject_has_paid_plan(subject_ref)
-    if paid:
-        return subject_ref
+    from backend.usage_economics.commercial_entitlement import (
+        STATE_GENESIS,
+        STATE_GUEST,
+        STATE_PRO,
+        resolve_commercial_entitlement,
+        subject_is_guest,
+    )
 
-    from backend.usage_economics.commercial_entitlement import subject_is_active_genesis
-
-    # Active Genesis Dogs keep finalize rights for agreements they already created;
-    # complimentary metering applies to creation, not completion of existing drafts.
-    if subject_is_active_genesis(subject_ref):
-        return subject_ref
-
-    completed = store.count_completed_agreements(subject_ref)
-    if completed >= uc.FREE_MAX_COMPLETED_AGREEMENTS:
+    if subject_is_guest(subject_ref):
         store.emit_event(
             subject_ref=subject_ref,
             event_type="paywall_triggered",
-            payload={"surface": "finalize", "reason": "completed_limit", "agreement_id": agreement_id},
-        )
-        _notify_paywall_integration_webhook(
-            subject_ref,
-            {"surface": "finalize", "reason": "completed_limit", "agreement_id": agreement_id},
+            payload={"surface": "finalize", "reason": uc.GUEST_WORKFLOW_DENIED, "agreement_id": agreement_id},
         )
         raise HTTPException(
             status_code=403,
             detail={
-                "code": uc.COMPLETED_AGREEMENT_LIMIT,
+                "code": uc.GUEST_WORKFLOW_DENIED,
                 "message": (
-                    "You've completed your free agreement. "
-                    "Upgrade to Pro to finalize more agreements."
+                    "Guest drafts cannot be signed. Request Genesis access or choose Pro "
+                    "to prepare signatures and keep a proof record."
                 ),
                 "paywall": True,
-                "agreements_remaining": 0,
             },
         )
-    return subject_ref
+
+    decision = resolve_commercial_entitlement(subject_ref)
+    state = str(decision.get("state") or "")
+    # Genesis/Pro keep finalize rights for agreements they already created;
+    # allowance metering applies to creation, not completion/revisions.
+    if state in (STATE_PRO, STATE_GENESIS):
+        return subject_ref
+
+    store.emit_event(
+        subject_ref=subject_ref,
+        event_type="paywall_triggered",
+        payload={"surface": "finalize", "reason": uc.ENTITLEMENT_REQUIRED, "agreement_id": agreement_id},
+    )
+    _notify_paywall_integration_webhook(
+        subject_ref,
+        {"surface": "finalize", "reason": uc.ENTITLEMENT_REQUIRED, "agreement_id": agreement_id},
+    )
+    raise HTTPException(
+        status_code=403,
+        detail={
+            "code": uc.ENTITLEMENT_REQUIRED,
+            "message": (
+                "Request Genesis access or choose Pro to finalize agreements."
+            ),
+            "paywall": True,
+            "commercial": decision,
+        },
+    )
 
 
 def record_draft_created(*, agreement_id: str, subject_ref: str, request_ip: str) -> None:
@@ -360,11 +406,10 @@ def record_draft_created(*, agreement_id: str, subject_ref: str, request_ip: str
 
     from backend.security.commercial_auth import commercial_mode_enforced
     from backend.usage_economics.commercial_entitlement import (
-        ENTITLEMENT_GENESIS_ALLOWANCE,
-        ENTITLEMENT_PAID_PRO,
-        genesis_monthly_agreement_allowance,
+        STATE_GENESIS,
+        STATE_GUEST,
+        STATE_PRO,
         resolve_commercial_entitlement,
-        utc_month_period_bounds,
     )
 
     economics = usage_economics_enabled()
@@ -376,31 +421,52 @@ def record_draft_created(*, agreement_id: str, subject_ref: str, request_ip: str
 
     monthly_cap: Optional[int] = None
     period_start = ""
+    guest_temp = False
+    cap_code = uc.GENESIS_MONTHLY_ALLOWANCE_EXHAUSTED
+    cap_message = (
+        "You've used this month's Genesis Dog agreements. "
+        "Upgrade to Pro for more capacity."
+    )
     if economics:
         decision = resolve_commercial_entitlement(subject_ref)
-        entitlement = str(decision.get("entitlement") or "")
-        if entitlement == ENTITLEMENT_GENESIS_ALLOWANCE:
-            monthly_cap = genesis_monthly_agreement_allowance()
-            period_start, _ = utc_month_period_bounds()
-        elif entitlement == ENTITLEMENT_PAID_PRO:
+        state = str(decision.get("state") or "")
+        if state == STATE_GUEST:
+            guest_temp = True
             monthly_cap = None
+        elif state == STATE_GENESIS:
+            ga = decision.get("genesis_allowance") or {}
+            monthly_cap = int(ga.get("limit") or 0) or None
+            period_start = str(ga.get("period_start") or "")
+            renew = decision.get("period_ends_at") or "next month"
+            cap_code = uc.GENESIS_MONTHLY_ALLOWANCE_EXHAUSTED
+            cap_message = (
+                f"You've used this month's Genesis Dog agreements. "
+                f"Your allowance renews on {renew}. Upgrade to Pro for more capacity."
+            )
+        elif state == STATE_PRO:
+            pa = decision.get("pro_allowance") or {}
+            monthly_cap = int(pa.get("limit") or 0) or None
+            period_start = str(pa.get("period_start") or "")
+            cap_code = uc.PRO_BILLING_PERIOD_ALLOWANCE_EXHAUSTED
+            cap_message = (
+                "You've used this billing period's Pro agreement allowance. "
+                "Your allowance renews at the end of the current Stripe period."
+            )
 
     insert_result = store.try_insert_agreement_owner_with_monthly_cap(
         agreement_id=agreement_id,
         subject_ref=subject_ref,
-        internal_keys_draft=uc.KEY_COST_AGREEMENT_DRAFT if economics else 0,
+        internal_keys_draft=uc.KEY_COST_AGREEMENT_DRAFT if economics and not guest_temp else 0,
         monthly_cap=monthly_cap,
         period_start_iso=period_start,
+        guest_temp=guest_temp,
     )
     if insert_result == "cap_exceeded":
         raise HTTPException(
             status_code=403,
             detail={
-                "code": uc.GENESIS_MONTHLY_ALLOWANCE_EXHAUSTED,
-                "message": (
-                    "You've used this month's complimentary Genesis agreement allowance. "
-                    "Upgrade to Pro for unlimited agreement creation, or wait until next month."
-                ),
+                "code": cap_code,
+                "message": cap_message,
                 "paywall": True,
             },
         )
@@ -502,15 +568,16 @@ def record_ai_call(*, subject_ref: str, request_ip: str) -> None:
 def usage_summary_for_subject(subject_ref: str) -> Dict[str, Any]:
     """User-safe fields only — no internal Keys. Includes commercial entitlement authority."""
     from backend.usage_economics.commercial_entitlement import (
-        ENTITLEMENT_GENESIS_ALLOWANCE,
-        ENTITLEMENT_PAID_PRO,
+        STATE_GENESIS,
+        STATE_GUEST,
+        STATE_PRO,
         resolve_commercial_entitlement,
     )
 
     store = get_usage_economics_store()
     store.init_schema()
     decision = resolve_commercial_entitlement(subject_ref)
-    entitlement = str(decision.get("entitlement") or "")
+    state = str(decision.get("state") or "")
     incomplete = store.count_incomplete_agreements(subject_ref)
     completed = store.count_completed_agreements(subject_ref)
     row = store.get_subject_row(subject_ref) or {}
@@ -528,45 +595,44 @@ def usage_summary_for_subject(subject_ref: str) -> Dict[str, Any]:
     }
 
     commercial = {
-        "entitlement": entitlement,
+        "state": decision.get("state"),
+        "grant_source": decision.get("grant_source"),
+        "agreement_allowance": decision.get("agreement_allowance"),
+        "agreements_used": decision.get("agreements_used"),
+        "agreements_remaining": decision.get("agreements_remaining"),
+        "period_ends_at": decision.get("period_ends_at"),
+        "can_create_persisted_agreement": decision.get("can_create_persisted_agreement"),
+        "can_save_guest_draft": decision.get("can_save_guest_draft"),
+        "entitlement": decision.get("entitlement"),
         "create_allowed": bool(decision.get("create_allowed")),
         "upgrade_required": bool(decision.get("upgrade_required")),
         "reason": decision.get("reason"),
         "genesis_allowance": decision.get("genesis_allowance"),
-        "free_allowance": decision.get("free_allowance"),
+        "pro_allowance": decision.get("pro_allowance"),
+        "free_allowance": None,
     }
 
-    if entitlement == ENTITLEMENT_PAID_PRO:
+    remaining = decision.get("agreements_remaining")
+    ttl_h = max(1, int(uc.GUEST_DRAFT_TTL_SECONDS // 3600))
+
+    if state == STATE_PRO:
         return {
             "tier": "paid",
-            "agreements_created": created_total,
-            "agreements_completed": completed,
-            "drafts_active": incomplete,
-            "agreements_remaining": None,
-            "drafts_remaining": None,
-            "watermark_required": False,
-            "storage_persistent": True,
-            "paywall_required": abuse,
-            "soft_throttle": throttle,
-            "draft_ttl_hours": None,
-            "temporary_storage_note": None,
-            "agreement_memory": agreement_memory_block,
-            "commercial": commercial,
-        }
-
-    if entitlement == ENTITLEMENT_GENESIS_ALLOWANCE:
-        ga = decision.get("genesis_allowance") or {}
-        remaining = int(ga.get("remaining") or 0)
-        return {
-            "tier": "genesis",
-            "agreements_created": created_total,
-            "agreements_completed": completed,
-            "drafts_active": incomplete,
+            "state": STATE_PRO,
+            "grant_source": decision.get("grant_source"),
+            "agreement_allowance": decision.get("agreement_allowance"),
+            "agreements_used": decision.get("agreements_used"),
             "agreements_remaining": remaining,
+            "period_ends_at": decision.get("period_ends_at"),
+            "can_create_persisted_agreement": decision.get("can_create_persisted_agreement"),
+            "can_save_guest_draft": False,
+            "agreements_created": created_total,
+            "agreements_completed": completed,
+            "drafts_active": incomplete,
             "drafts_remaining": remaining,
             "watermark_required": False,
             "storage_persistent": True,
-            "paywall_required": abuse or not bool(decision.get("create_allowed")),
+            "paywall_required": abuse or not bool(decision.get("can_create_persisted_agreement")),
             "soft_throttle": throttle,
             "draft_ttl_hours": None,
             "temporary_storage_note": None,
@@ -574,26 +640,104 @@ def usage_summary_for_subject(subject_ref: str) -> Dict[str, Any]:
             "commercial": commercial,
         }
 
-    drafts_remaining = max(0, uc.FREE_MAX_ACTIVE_DRAFTS - incomplete)
-    agreements_remaining = max(0, uc.FREE_MAX_COMPLETED_AGREEMENTS - completed)
+    if state == STATE_GENESIS:
+        return {
+            "tier": "genesis",
+            "state": STATE_GENESIS,
+            "grant_source": decision.get("grant_source"),
+            "agreement_allowance": decision.get("agreement_allowance"),
+            "agreements_used": decision.get("agreements_used"),
+            "agreements_remaining": remaining,
+            "period_ends_at": decision.get("period_ends_at"),
+            "can_create_persisted_agreement": decision.get("can_create_persisted_agreement"),
+            "can_save_guest_draft": False,
+            "agreements_created": created_total,
+            "agreements_completed": completed,
+            "drafts_active": incomplete,
+            "drafts_remaining": remaining,
+            "watermark_required": False,
+            "storage_persistent": True,
+            "paywall_required": abuse or not bool(decision.get("can_create_persisted_agreement")),
+            "soft_throttle": throttle,
+            "draft_ttl_hours": None,
+            "temporary_storage_note": None,
+            "agreement_memory": agreement_memory_block,
+            "commercial": commercial,
+        }
 
-    ttl_h = max(1, int(uc.FREE_DRAFT_TTL_SECONDS // 3600))
+    if state == STATE_GUEST:
+        return {
+            "tier": "guest",
+            "state": STATE_GUEST,
+            "grant_source": decision.get("grant_source"),
+            "agreement_allowance": decision.get("agreement_allowance"),
+            "agreements_used": decision.get("agreements_used"),
+            "agreements_remaining": remaining,
+            "period_ends_at": None,
+            "can_create_persisted_agreement": False,
+            "can_save_guest_draft": decision.get("can_save_guest_draft"),
+            "agreements_created": created_total,
+            "agreements_completed": completed,
+            "drafts_active": incomplete,
+            "drafts_remaining": remaining,
+            "watermark_required": True,
+            "storage_persistent": False,
+            "paywall_required": abuse or not bool(decision.get("can_save_guest_draft")),
+            "soft_throttle": throttle,
+            "draft_ttl_hours": ttl_h,
+            "temporary_storage_note": (
+                f"Guest drafts may be retained for up to {ttl_h} hours. "
+                "Request Genesis access or choose Pro to save your draft."
+            ),
+            "agreement_memory": {**agreement_memory_block, "tier": "none", "semantic_search": False, "relationship_view": False},
+            "commercial": commercial,
+        }
+
     return {
-        "tier": "free",
+        "tier": "none",
+        "state": state or "none",
+        "grant_source": decision.get("grant_source"),
+        "agreement_allowance": decision.get("agreement_allowance"),
+        "agreements_used": decision.get("agreements_used"),
+        "agreements_remaining": remaining,
+        "period_ends_at": decision.get("period_ends_at"),
+        "can_create_persisted_agreement": False,
+        "can_save_guest_draft": False,
         "agreements_created": created_total,
         "agreements_completed": completed,
         "drafts_active": incomplete,
-        "agreements_remaining": agreements_remaining,
-        "drafts_remaining": drafts_remaining,
+        "drafts_remaining": 0,
         "watermark_required": True,
         "storage_persistent": False,
-        "paywall_required": abuse or agreements_remaining == 0,
+        "paywall_required": True,
         "soft_throttle": throttle,
-        "draft_ttl_hours": ttl_h,
-        "temporary_storage_note": f"Drafts expire after {ttl_h} hours unless you upgrade.",
+        "draft_ttl_hours": None,
+        "temporary_storage_note": None,
         "agreement_memory": agreement_memory_block,
         "commercial": commercial,
     }
+
+
+def assert_guest_workflow_denied(*, subject_ref: str, surface: str) -> None:
+    """Block guest subjects from save/share/sign/proof/history workflows."""
+    from fastapi import HTTPException
+
+    from backend.usage_economics.commercial_entitlement import subject_is_guest
+
+    if not subject_is_guest(subject_ref):
+        return
+    raise HTTPException(
+        status_code=403,
+        detail={
+            "code": uc.GUEST_WORKFLOW_DENIED,
+            "message": (
+                "Guest drafts cannot save to a workspace, share, sign, prove, or open history. "
+                "Request Genesis access or choose Pro to continue."
+            ),
+            "paywall": True,
+            "surface": surface,
+        },
+    )
 
 
 def org_header_required() -> bool:

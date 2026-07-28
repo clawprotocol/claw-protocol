@@ -40,25 +40,28 @@ describe("authenticatedWorkspaceAccessPolicy", () => {
     })).toBe(true);
   });
 
-  it("allows authenticated free create while complimentary allowance remains", () => {
+  it("allows guest temporary draft when server permits can_save_guest_draft", () => {
     const verdict = resolveWorkspaceCreateAccess({
-      authentication: "authenticated",
+      authentication: "unauthenticated",
       entitlement: "none",
-      isStarterAnonymousSession: false,
+      isStarterAnonymousSession: true,
       isResumingOwnedAgreement: false,
       hasCheckoutPendingMarker: false,
       workspaceProEntitledProbe: false,
       commercialEntitlement: {
-        entitlement: "free",
+        state: "guest",
+        entitlement: "guest",
         createAllowed: true,
+        canSaveGuestDraft: true,
+        canCreatePersistedAgreement: false,
       },
     });
     expect(verdict.allowed).toBe(true);
-    expect(verdict.reason).toBe("free_allowance");
+    expect(verdict.reason).toBe("guest_draft");
     expect(verdict.showUpgradeModal).toBe(false);
   });
 
-  it("blocks authenticated free create after complimentary allowance is consumed", () => {
+  it("blocks authenticated none without inventing a free allowance", () => {
     const verdict = resolveWorkspaceCreateAccess({
       authentication: "authenticated",
       entitlement: "none",
@@ -67,14 +70,17 @@ describe("authenticatedWorkspaceAccessPolicy", () => {
       hasCheckoutPendingMarker: false,
       workspaceProEntitledProbe: false,
       commercialEntitlement: {
-        entitlement: "free",
+        state: "none",
+        entitlement: "none",
         createAllowed: false,
-        reason: "completed_agreement_limit",
+        canCreatePersistedAgreement: false,
+        reason: "entitlement_required",
       },
     });
     expect(verdict.allowed).toBe(false);
-    expect(verdict.reason).toBe("free_allowance_exhausted");
+    expect(verdict.reason).toBe("entitlement_required");
     expect(verdict.showUpgradeModal).toBe(true);
+    expect(verdict.showRequestGenesisCta).toBe(true);
   });
 
   it("allows checkout-pending authenticated continuity", () => {

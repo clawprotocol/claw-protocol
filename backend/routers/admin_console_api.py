@@ -44,6 +44,20 @@ class RefreshEntitlementBody(BaseModel):
     reason: str = Field(..., min_length=3, max_length=500)
 
 
+class GenesisEntitlementGrantBody(BaseModel):
+    reason: str = Field(..., min_length=3, max_length=500)
+    expires_at: Optional[str] = Field(default=None, max_length=64)
+    allowance_override: Optional[int] = Field(default=None, ge=1, le=100)
+
+
+class GenesisEntitlementRevokeBody(BaseModel):
+    reason: str = Field(..., min_length=3, max_length=500)
+
+
+class GenesisLegacyMigrationBody(BaseModel):
+    reason: str = Field(..., min_length=3, max_length=500)
+
+
 class AgreementFlagBody(BaseModel):
     flagged: bool = True
     reason: str = Field(..., min_length=3, max_length=500)
@@ -421,6 +435,185 @@ def admin_refresh_entitlement(subject_ref: str, body: RefreshEntitlementBody, re
         "ok": True,
         "subject_ref": subject_ref,
         "entitlement": out,
+        "audit_id": audit_id,
+        "actor": principal.user_id,
+        "actor_role": principal.role,
+    }
+
+
+def _user_id_from_admin_path(user_id: str) -> str:
+    uid = (user_id or "").strip()
+    if uid.startswith("user-"):
+        uid = uid[5:].strip()
+    if uid.startswith("org:user-"):
+        uid = uid[len("org:user-") :].strip()
+    if not uid:
+        raise HTTPException(status_code=400, detail={"code": "user_id_required"})
+    return uid
+
+
+@router.post("/users/{user_id}/genesis-entitlement/grant")
+def admin_grant_genesis_entitlement(
+    user_id: str, body: GenesisEntitlementGrantBody, request: Request
+) -> Dict[str, Any]:
+    """Grant Genesis Dog commercial access. Writes only genesis_dog_entitlements (+ audit)."""
+    from backend.usage_economics.commercial_entitlement import resolve_commercial_entitlement
+    from backend.usage_economics.genesis_dog_entitlement import (
+        GRANT_SOURCE_ADMIN,
+        get_entitlement,
+        grant_entitlement,
+    )
+
+    uid = _user_id_from_admin_path(user_id)
+    principal = _privileged(
+        request,
+        permission=PERM_MUTATE_SUPPORT,
+        action_type="genesis_entitlement_grant",
+        target_type="genesis_dog_entitlement",
+        target_id=uid,
+        reason=body.reason,
+    )
+    before = get_entitlement(uid)
+    after = grant_entitlement(
+        user_id=uid,
+        granted_by=principal.user_id,
+        grant_source=GRANT_SOURCE_ADMIN,
+        expires_at=(body.expires_at or "").strip() or None,
+        allowance_override=body.allowance_override,
+    )
+    audit_id = _audit(
+        principal,
+        action_type="genesis_entitlement_grant",
+        target_type="genesis_dog_entitlement",
+        target_id=uid,
+        reason=(body.reason or "").strip(),
+        before=before,
+        after=after,
+    )
+    decision = resolve_commercial_entitlement(f"org:user-{uid}")
+    return {
+        "ok": True,
+        "user_id": uid,
+        "entitlement": after,
+        "commercial": decision,
+        "audit_id": audit_id,
+        "actor": principal.user_id,
+        "actor_role": principal.role,
+    }
+
+
+@router.post("/users/{user_id}/genesis-entitlement/revoke")
+def admin_revoke_genesis_entitlement(
+    user_id: str, body: GenesisEntitlementRevokeBody, request: Request
+) -> Dict[str, Any]:
+    """Revoke Genesis Dog commercial access. Writes only genesis_dog_entitlements (+ audit)."""
+    from backend.usage_economics.commercial_entitlement import resolve_commercial_entitlement
+    from backend.usage_economics.genesis_dog_entitlement import get_entitlement, revoke_entitlement
+
+    uid = _user_id_from_admin_path(user_id)
+    principal = _privileged(
+        request,
+        permission=PERM_MUTATE_SUPPORT,
+        action_type="genesis_entitlement_revoke",
+        target_type="genesis_dog_entitlement",
+        target_id=uid,
+        reason=body.reason,
+    )
+    before = get_entitlement(uid)
+    after = revoke_entitlement(
+        user_id=uid,
+        revoked_by=principal.user_id,
+        reason=body.reason,
+    )
+    audit_id = _audit(
+        principal,
+        action_type="genesis_entitlement_revoke",
+        target_type="genesis_dog_entitlement",
+        target_id=uid,
+        reason=(body.reason or "").strip(),
+        before=before,
+        after=after,
+    )
+    decision = resolve_commercial_entitlement(f"org:user-{uid}")
+    return {
+        "ok": True,
+        "user_id": uid,
+        "entitlement": after,
+        "commercial": decision,
+        "audit_id": audit_id,
+        "actor": principal.user_id,
+        "actor_role": principal.role,
+    }
+
+
+@router.get("/users/{user_id}/genesis-entitlement")
+def admin_get_genesis_entitlement(user_id: str, request: Request) -> Dict[str, Any]:
+    from backend.usage_economics.commercial_entitlement import resolve_commercial_entitlement
+    from backend.usage_economics.genesis_dog_entitlement import get_entitlement
+
+    uid = _user_id_from_admin_path(user_id)
+    _privileged(
+        request,
+        permission=PERM_READ_OPS,
+        action_type="genesis_entitlement_get",
+        target_type="genesis_dog_entitlement",
+        target_id=uid,
+        reason="admin_console_read",
+    )
+    row = get_entitlement(uid)
+    decision = resolve_commercial_entitlement(f"org:user-{uid}")
+    store = get_admin_console_store()
+    audit = store.list_admin_action_audit(limit=50)
+    related = [
+        a
+        for a in audit
+        if str(a.get("target_id") or "") == uid
+        and str(a.get("action_type") or "").startswith("genesis_entitlement_")
+    ]
+    return {
+        "ok": True,
+        "user_id": uid,
+        "entitlement": row,
+        "commercial": {
+            "state": decision.get("state"),
+            "grant_source": decision.get("grant_source"),
+            "agreement_allowance": decision.get("agreement_allowance"),
+            "agreements_used": decision.get("agreements_used"),
+            "agreements_remaining": decision.get("agreements_remaining"),
+            "period_ends_at": decision.get("period_ends_at"),
+            "can_create_persisted_agreement": decision.get("can_create_persisted_agreement"),
+        },
+        "audit": related[:20],
+    }
+
+
+@router.post("/genesis-entitlement/migrate-legacy-affiliates")
+def admin_migrate_legacy_genesis_affiliates(
+    body: GenesisLegacyMigrationBody, request: Request
+) -> Dict[str, Any]:
+    """Backfill active genesis_affiliates into genesis_dog_entitlements (legacy_migration)."""
+    from backend.usage_economics.genesis_dog_entitlement import backfill_legacy_affiliate_grants
+
+    principal = _privileged(
+        request,
+        permission=PERM_MUTATE_ADMIN,
+        action_type="genesis_entitlement_legacy_migration",
+        target_type="genesis_dog_entitlement",
+        target_id="legacy_migration",
+        reason=body.reason,
+    )
+    counts = backfill_legacy_affiliate_grants(granted_by=principal.user_id)
+    audit_id = _audit(
+        principal,
+        action_type="genesis_entitlement_legacy_migration",
+        target_type="genesis_dog_entitlement",
+        target_id="legacy_migration",
+        reason=(body.reason or "").strip(),
+        after=counts,
+    )
+    return {
+        "ok": True,
+        "counts": counts,
         "audit_id": audit_id,
         "actor": principal.user_id,
         "actor_role": principal.role,

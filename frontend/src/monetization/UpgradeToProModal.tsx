@@ -1,23 +1,34 @@
 import { useEffect } from "react";
+import { formatPeriodEndsLabel } from "../access/commercialEntitlement";
 import { logProductEvent } from "../lib/experimentation/productEvents";
 import { useLaunchNav } from "../launch/LaunchNavContext";
 
-export type UpgradeToProModalVariant = "upgrade_to_pro" | "genesis_allowance_exhausted";
+export type UpgradeToProModalVariant =
+  | "upgrade_to_pro"
+  | "genesis_allowance_exhausted"
+  | "guest_ready"
+  | "entitlement_required";
 
 export type UpgradeToProModalProps = {
   open: boolean;
   onClose: () => void;
   /** Analytics surface, e.g. `simple_create` | `agreement_wizard_new`. */
   surface: string;
-  /** Default free-path upgrade copy vs Genesis monthly allowance exhausted. */
+  /** Default upgrade copy vs Genesis monthly allowance exhausted vs guest ready. */
   variant?: UpgradeToProModalVariant;
   /**
-   * When the free allowance is exhausted, optional path to the user's existing agreement(s).
+   * Optional path to the user's existing agreement(s).
    * Defaults to the agreements list when omitted.
    */
   viewExistingPath?: string | null;
   /** True when intake/draft text is preserved locally and can be resumed later. */
   draftPreserved?: boolean;
+  /** Server-authoritative allowance fields — do not hard-code client defaults. */
+  agreementAllowance?: number | null;
+  agreementsRemaining?: number | null;
+  periodEndsAt?: string | null;
+  onRequestGenesis?: () => void;
+  onStartNewGuestDraft?: () => void;
 };
 
 export function UpgradeToProModal({
@@ -27,9 +38,21 @@ export function UpgradeToProModal({
   variant = "upgrade_to_pro",
   viewExistingPath = "/app/agreements",
   draftPreserved = false,
+  agreementAllowance = null,
+  agreementsRemaining = null,
+  periodEndsAt = null,
+  onRequestGenesis,
+  onStartNewGuestDraft,
 }: UpgradeToProModalProps) {
   const { navigate } = useLaunchNav();
   const analyticsVariant = variant;
+  const renewLabel = formatPeriodEndsLabel(periodEndsAt);
+  const allowanceLabel =
+    typeof agreementAllowance === "number" && agreementAllowance > 0
+      ? String(agreementAllowance)
+      : null;
+  const remainingLabel =
+    typeof agreementsRemaining === "number" ? String(agreementsRemaining) : null;
 
   useEffect(() => {
     if (!open) return;
@@ -51,7 +74,20 @@ export function UpgradeToProModal({
   if (!open) return null;
 
   const isGenesisExhausted = variant === "genesis_allowance_exhausted";
+  const isGuestReady = variant === "guest_ready";
   const existingPath = (viewExistingPath || "/app/agreements").trim() || "/app/agreements";
+
+  const title = isGenesisExhausted
+    ? "Genesis monthly allowance used"
+    : isGuestReady
+      ? "Your draft is ready"
+      : "Save and continue with LawDog";
+
+  const body = isGenesisExhausted
+    ? `You've used this month's Genesis Dog agreements. Your allowance renews on ${renewLabel}. Upgrade to Pro for more capacity.`
+    : isGuestReady
+      ? "Your draft is ready. Request Genesis access or choose Pro to save it, invite review, prepare signatures, and keep a proof record."
+      : "Request Genesis access or choose Pro to save agreements, invite review, prepare signatures, and keep a proof record.";
 
   return (
     <div
@@ -73,34 +109,14 @@ export function UpgradeToProModal({
         data-testid="upgrade-to-pro-modal"
       >
         <h2 id="upgrade-pro-title" className="text-lg font-semibold text-slate-50">
-          {isGenesisExhausted ? "Genesis monthly allowance used" : "You've used your free agreement"}
+          {title}
         </h2>
-        <p className="mt-3 text-sm leading-relaxed text-slate-400">
-          {isGenesisExhausted
-            ? "You're still an active Genesis Dog. You've used this month's complimentary agreement allowance. Upgrade to Pro for unlimited creations, or wait until next month when the allowance resets."
-            : "Your free agreement is complete. Upgrade to Pro to create another agreement, keep reusable drafts, and unlock full history."}
-        </p>
-        {!isGenesisExhausted ? (
-          <ul className="mt-4 space-y-2 text-sm text-slate-300">
-            <li className="flex gap-2">
-              <span className="text-emerald-400/90" aria-hidden>
-                ✓
-              </span>
-              <span>Unlimited agreements</span>
-            </li>
-            <li className="flex gap-2">
-              <span className="text-emerald-400/90" aria-hidden>
-                ✓
-              </span>
-              <span>Full history</span>
-            </li>
-            <li className="flex gap-2">
-              <span className="text-emerald-400/90" aria-hidden>
-                ✓
-              </span>
-              <span>Reuse and edit anytime</span>
-            </li>
-          </ul>
+        <p className="mt-3 text-sm leading-relaxed text-slate-400">{body}</p>
+        {!isGenesisExhausted && allowanceLabel && remainingLabel && !isGuestReady ? (
+          <p className="mt-2 text-xs text-slate-500">
+            Genesis Dog access includes {allowanceLabel} new agreements each month. {remainingLabel} of{" "}
+            {allowanceLabel} remaining. Resets {renewLabel}.
+          </p>
         ) : null}
         {draftPreserved && !isGenesisExhausted ? (
           <p className="mt-4 text-xs leading-relaxed text-slate-500" data-testid="upgrade-draft-preserved">
@@ -118,9 +134,38 @@ export function UpgradeToProModal({
               navigate("/app/billing");
             }}
           >
-            Upgrade to Pro
+            Choose Pro
           </button>
-          {!isGenesisExhausted ? (
+          {(isGuestReady || variant === "entitlement_required" || variant === "upgrade_to_pro") &&
+          onRequestGenesis ? (
+            <button
+              type="button"
+              className="vs01-btn vs01-btn--secondary min-h-[2.75rem] w-full"
+              onClick={() => {
+                logProductEvent("paywall_clicked_upgrade", {
+                  surface,
+                  variant: analyticsVariant,
+                  cta: "request_genesis",
+                });
+                onRequestGenesis();
+              }}
+            >
+              Request Genesis access
+            </button>
+          ) : null}
+          {isGuestReady && onStartNewGuestDraft ? (
+            <button
+              type="button"
+              className="vs01-btn vs01-btn--secondary min-h-[2.75rem] w-full"
+              onClick={() => {
+                onStartNewGuestDraft();
+                onClose();
+              }}
+            >
+              Start a new guest draft
+            </button>
+          ) : null}
+          {!isGenesisExhausted && !isGuestReady ? (
             <button
               type="button"
               className="vs01-btn vs01-btn--secondary min-h-[2.75rem] w-full"
@@ -147,10 +192,7 @@ export function UpgradeToProModal({
                 via: keepDraft ? "keep_draft" : "return_dashboard",
               });
               onClose();
-              // Keep draft: dismiss only — intake storage already holds the text.
-              if (!keepDraft) {
-                navigate("/app");
-              }
+              if (!keepDraft) navigate("/app");
             }}
           >
             {draftPreserved && !isGenesisExhausted ? "Keep this draft" : "Back to dashboard"}

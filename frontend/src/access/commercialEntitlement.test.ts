@@ -20,19 +20,34 @@ describe("commercialEntitlement", () => {
     vi.restoreAllMocks();
   });
 
-  it("maps paid_pro summary to unlimited create access", () => {
+  it("maps pro summary to persisted create access from server fields", () => {
     const decision = commercialDecisionFromUsageSummary({
       tier: "paid",
+      state: "pro",
+      grant_source: "stripe",
+      agreement_allowance: 25,
+      agreements_used: 10,
+      agreements_remaining: 15,
+      period_ends_at: "2026-08-01T00:00:00Z",
+      can_create_persisted_agreement: true,
+      can_save_guest_draft: false,
       agreements_created: 10,
       agreements_completed: 2,
       drafts_active: 1,
-      agreements_remaining: null,
-      drafts_remaining: null,
+      drafts_remaining: 15,
       watermark_required: false,
       storage_persistent: true,
       paywall_required: false,
       soft_throttle: false,
       commercial: {
+        state: "pro",
+        grant_source: "stripe",
+        agreement_allowance: 25,
+        agreements_used: 10,
+        agreements_remaining: 15,
+        period_ends_at: "2026-08-01T00:00:00Z",
+        can_create_persisted_agreement: true,
+        can_save_guest_draft: false,
         entitlement: "paid_pro",
         create_allowed: true,
         upgrade_required: false,
@@ -40,8 +55,10 @@ describe("commercialEntitlement", () => {
         genesis_allowance: null,
       },
     });
-    expect(decision.entitlement).toBe("paid_pro");
-    expect(decision.createAllowed).toBe(true);
+    expect(decision.state).toBe("pro");
+    expect(decision.grantSource).toBe("stripe");
+    expect(decision.agreementAllowance).toBe(25);
+    expect(decision.canCreatePersistedAgreement).toBe(true);
     const verdict = resolveWorkspaceCreateAccess({
       authentication: "authenticated",
       entitlement: "none",
@@ -50,8 +67,10 @@ describe("commercialEntitlement", () => {
       hasCheckoutPendingMarker: false,
       workspaceProEntitledProbe: false,
       commercialEntitlement: {
+        state: decision.state,
         entitlement: decision.entitlement,
         createAllowed: decision.createAllowed,
+        canCreatePersistedAgreement: decision.canCreatePersistedAgreement,
       },
     });
     expect(verdict.allowed).toBe(true);
@@ -67,8 +86,13 @@ describe("commercialEntitlement", () => {
       hasCheckoutPendingMarker: false,
       workspaceProEntitledProbe: false,
       commercialEntitlement: {
+        state: "genesis",
         entitlement: "genesis_allowance",
         createAllowed: true,
+        canCreatePersistedAgreement: true,
+        agreementAllowance: 5,
+        agreementsRemaining: 3,
+        periodEndsAt: "2026-07-31T23:59:59Z",
       },
     });
     expect(verdict.allowed).toBe(true);
@@ -85,9 +109,12 @@ describe("commercialEntitlement", () => {
       isResumingOwnedAgreement: false,
       hasCheckoutPendingMarker: false,
       commercialEntitlement: {
+        state: "genesis",
         entitlement: "genesis_allowance",
         createAllowed: false,
+        canCreatePersistedAgreement: false,
         reason: "genesis_monthly_allowance_exhausted",
+        periodEndsAt: "2026-07-31T23:59:59Z",
       },
     });
     expect(verdict.allowed).toBe(false);
@@ -96,30 +123,44 @@ describe("commercialEntitlement", () => {
     expect(verdict.reason).toBe("genesis_allowance_exhausted");
   });
 
-  it("allows first-time free users within complimentary allowance", () => {
+  it("allows guest temporary draft from server can_save_guest_draft", () => {
     const decision = commercialDecisionFromUsageSummary({
-      tier: "free",
+      tier: "guest",
+      state: "guest",
+      grant_source: "none",
+      agreement_allowance: 1,
+      agreements_used: 0,
+      agreements_remaining: 1,
+      can_create_persisted_agreement: false,
+      can_save_guest_draft: true,
       agreements_created: 0,
       agreements_completed: 0,
       drafts_active: 0,
-      agreements_remaining: 1,
-      drafts_remaining: 2,
+      drafts_remaining: 1,
       watermark_required: true,
       storage_persistent: false,
       paywall_required: false,
       soft_throttle: false,
       commercial: {
-        entitlement: "free",
+        state: "guest",
+        grant_source: "none",
+        agreement_allowance: 1,
+        agreements_used: 0,
+        agreements_remaining: 1,
+        can_create_persisted_agreement: false,
+        can_save_guest_draft: true,
+        entitlement: "guest",
         create_allowed: true,
         upgrade_required: false,
         reason: null,
-        genesis_allowance: null,
-        free_allowance: { limit: 1, used: 0, remaining: 1, allowed: true },
       },
     });
-    expect(decision.createAllowed).toBe(true);
-    expect(decision.freeAllowance?.remaining).toBe(1);
+    expect(decision.state).toBe("guest");
+    expect(decision.canSaveGuestDraft).toBe(true);
+    expect(decision.canCreatePersistedAgreement).toBe(false);
+  });
 
+  it("blocks authenticated none without inventing a free allowance", () => {
     const verdict = resolveWorkspaceCreateAccess({
       authentication: "authenticated",
       entitlement: "none",
@@ -127,147 +168,20 @@ describe("commercialEntitlement", () => {
       isResumingOwnedAgreement: false,
       hasCheckoutPendingMarker: false,
       commercialEntitlement: {
-        entitlement: decision.entitlement,
-        createAllowed: decision.createAllowed,
-      },
-    });
-    expect(verdict.allowed).toBe(true);
-    expect(verdict.reason).toBe("free_allowance");
-    expect(verdict.showUpgradeModal).toBe(false);
-  });
-
-  it("gates free users after complimentary allowance is consumed", () => {
-    const decision = commercialDecisionFromUsageSummary({
-      tier: "free",
-      agreements_created: 1,
-      agreements_completed: 1,
-      drafts_active: 0,
-      agreements_remaining: 0,
-      drafts_remaining: 2,
-      watermark_required: true,
-      storage_persistent: false,
-      paywall_required: true,
-      soft_throttle: false,
-      commercial: {
-        entitlement: "free",
-        create_allowed: false,
-        upgrade_required: true,
-        reason: "completed_agreement_limit",
-        genesis_allowance: null,
-        free_allowance: { limit: 1, used: 1, remaining: 0, allowed: false },
-      },
-    });
-    expect(decision.createAllowed).toBe(false);
-
-    const verdict = resolveWorkspaceCreateAccess({
-      authentication: "authenticated",
-      entitlement: "none",
-      isStarterAnonymousSession: false,
-      isResumingOwnedAgreement: false,
-      hasCheckoutPendingMarker: false,
-      commercialEntitlement: {
-        entitlement: "free",
+        state: "none",
+        entitlement: "none",
         createAllowed: false,
-        reason: "completed_agreement_limit",
+        canCreatePersistedAgreement: false,
+        reason: "entitlement_required",
       },
     });
     expect(verdict.allowed).toBe(false);
-    expect(verdict.reason).toBe("free_allowance_exhausted");
+    expect(verdict.reason).toBe("entitlement_required");
+    expect(verdict.showRequestGenesisCta).toBe(true);
     expect(verdict.showUpgradeModal).toBe(true);
-    expect(verdict.showGenesisAllowanceExhausted).toBe(false);
-    expect(verdict.showEntitlementProbeError).toBe(false);
   });
 
-  it("legacy free summary without commercial block honors agreements_remaining", () => {
-    const decision = commercialDecisionFromUsageSummary({
-      tier: "free",
-      agreements_created: 0,
-      agreements_completed: 0,
-      drafts_active: 0,
-      agreements_remaining: 1,
-      drafts_remaining: 2,
-      watermark_required: true,
-      storage_persistent: false,
-      paywall_required: false,
-      soft_throttle: false,
-    });
-    expect(decision.createAllowed).toBe(true);
-    expect(decision.upgradeRequired).toBe(false);
-  });
-
-  it("cached paid entitlement cannot override a server free exhausted decision", () => {
-    const verdict = resolveWorkspaceCreateAccess({
-      authentication: "authenticated",
-      entitlement: "active",
-      isStarterAnonymousSession: false,
-      isResumingOwnedAgreement: false,
-      hasCheckoutPendingMarker: false,
-      workspaceProEntitledProbe: true,
-      commercialEntitlement: {
-        entitlement: "free",
-        createAllowed: false,
-        reason: "completed_agreement_limit",
-      },
-    });
-    expect(verdict.allowed).toBe(false);
-    expect(verdict.reason).toBe("free_allowance_exhausted");
-    expect(verdict.showUpgradeModal).toBe(true);
-    expect(verdict.showEntitlementProbeError).toBe(false);
-  });
-
-  it("server Genesis-exhausted cannot be overridden by cached paid entitlement", () => {
-    const verdict = resolveWorkspaceCreateAccess({
-      authentication: "authenticated",
-      entitlement: "active",
-      isStarterAnonymousSession: false,
-      isResumingOwnedAgreement: false,
-      hasCheckoutPendingMarker: false,
-      workspaceProEntitledProbe: true,
-      commercialEntitlement: {
-        entitlement: "genesis_allowance",
-        createAllowed: false,
-        reason: "genesis_monthly_allowance_exhausted",
-      },
-    });
-    expect(verdict.allowed).toBe(false);
-    expect(verdict.reason).toBe("genesis_allowance_exhausted");
-    expect(verdict.showUpgradeModal).toBe(false);
-    expect(verdict.showGenesisAllowanceExhausted).toBe(true);
-  });
-
-  it("probe error does not unlock Create and is not free-plan upgrade", async () => {
-    vi.mocked(fetchAgreementUsageSummary).mockResolvedValue({
-      ok: false,
-      data: null,
-      error: "HTTP 503",
-      authFailure: false,
-    });
-    const decision = await fetchCommercialEntitlement();
-    expect(decision.probeFailure).toBe(true);
-    expect(decision.createAllowed).toBe(false);
-    expect(decision.reason).toBe("probe_failed");
-
-    const verdict = resolveWorkspaceCreateAccess({
-      authentication: "authenticated",
-      entitlement: "active",
-      isStarterAnonymousSession: false,
-      isResumingOwnedAgreement: false,
-      hasCheckoutPendingMarker: false,
-      workspaceProEntitledProbe: true,
-      commercialEntitlement: {
-        entitlement: decision.entitlement,
-        createAllowed: decision.createAllowed,
-        probeFailure: true,
-        reason: decision.reason,
-      },
-    });
-    expect(verdict.allowed).toBe(false);
-    expect(verdict.showUpgradeModal).toBe(false);
-    expect(verdict.showEntitlementProbeError).toBe(true);
-    expect(verdict.reason).toBe("entitlement_probe_failed");
-  });
-
-  it("auth probe failure is not free or Genesis entitlement", async () => {
+  it("surfaces auth probe failures without mapping to guest", async () => {
     vi.mocked(fetchAgreementUsageSummary).mockResolvedValue({
       ok: false,
       data: null,
@@ -276,59 +190,7 @@ describe("commercialEntitlement", () => {
     });
     const decision = await fetchCommercialEntitlement();
     expect(decision.authFailure).toBe(true);
+    expect(decision.state).toBe("none");
     expect(decision.createAllowed).toBe(false);
-    expect(decision.reason).toBe("auth_failure");
-
-    const verdict = resolveWorkspaceCreateAccess({
-      authentication: "authenticated",
-      entitlement: "active",
-      isStarterAnonymousSession: false,
-      isResumingOwnedAgreement: false,
-      hasCheckoutPendingMarker: false,
-      workspaceProEntitledProbe: true,
-      commercialEntitlement: {
-        entitlement: decision.entitlement,
-        createAllowed: decision.createAllowed,
-        authFailure: true,
-        reason: decision.reason,
-      },
-    });
-    expect(verdict.allowed).toBe(false);
-    expect(verdict.showUpgradeModal).toBe(false);
-    expect(verdict.showEntitlementProbeError).toBe(true);
-    expect(verdict.reason).toBe("auth_probe_failed");
-  });
-
-  it("paid and active-Genesis-under-limit still unlock with stale free tier cache", () => {
-    const paid = resolveWorkspaceCreateAccess({
-      authentication: "authenticated",
-      entitlement: "none",
-      isStarterAnonymousSession: false,
-      isResumingOwnedAgreement: false,
-      hasCheckoutPendingMarker: false,
-      workspaceProEntitledProbe: false,
-      commercialEntitlement: {
-        entitlement: "paid_pro",
-        createAllowed: true,
-      },
-    });
-    expect(paid.allowed).toBe(true);
-    expect(paid.reason).toBe("entitled_owner");
-
-    const genesis = resolveWorkspaceCreateAccess({
-      authentication: "authenticated",
-      entitlement: "none",
-      isStarterAnonymousSession: false,
-      isResumingOwnedAgreement: false,
-      hasCheckoutPendingMarker: false,
-      workspaceProEntitledProbe: false,
-      commercialEntitlement: {
-        entitlement: "genesis_allowance",
-        createAllowed: true,
-      },
-    });
-    expect(genesis.allowed).toBe(true);
-    expect(genesis.reason).toBe("genesis_allowance");
-    expect(genesis.showUpgradeModal).toBe(false);
   });
 });

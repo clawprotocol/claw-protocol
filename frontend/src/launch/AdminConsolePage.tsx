@@ -2,7 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AppShell } from "./AppShell";
 import {
   adminPayoutBatchAction,
+  adminGrantGenesisEntitlement,
   adminRefreshEntitlement,
+  adminRevokeGenesisEntitlement,
   adminSetAffiliateStatus,
   adminSetUserDisabled,
   fetchAdminAffiliatePayoutBatches,
@@ -285,6 +287,30 @@ export function AdminConsolePage(props: { initialAdminSecret?: string } = {}) {
                       onClick={() => void doAction(`ent:${id}`, () => adminRefreshEntitlement(id, "ops_refresh"))}
                     >
                       Refresh entitlement
+                    </button>
+                    <button
+                      type="button"
+                      className="vs01-btn vs01-btn--secondary vs01-btn--compact"
+                      disabled={busyId === `genesis-grant:${id}`}
+                      onClick={() =>
+                        void doAction(`genesis-grant:${id}`, () =>
+                          adminGrantGenesisEntitlement(id, "ops_grant_genesis_dog"),
+                        )
+                      }
+                    >
+                      Grant Genesis Dog
+                    </button>
+                    <button
+                      type="button"
+                      className="vs01-btn vs01-btn--secondary vs01-btn--compact"
+                      disabled={busyId === `genesis-revoke:${id}`}
+                      onClick={() =>
+                        void doAction(`genesis-revoke:${id}`, () =>
+                          adminRevokeGenesisEntitlement(id, "ops_revoke_genesis_dog"),
+                        )
+                      }
+                    >
+                      Revoke Genesis Dog
                     </button>
                     <button
                       type="button"

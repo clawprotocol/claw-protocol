@@ -26,6 +26,8 @@ import {
 import { SimpleFlowShell } from "./SimpleFlowShell";
 import { recordAgreementCreatedForInboundRef } from "../affiliate/clawOpportunityStore";
 import { logProductEvent } from "../../lib/experimentation/productEvents";
+import { resolveApiBase } from "../../lib/clawApi";
+import { clawAgreementHeaders } from "../../agreement/agreementOrgHeaders";
 import { useLaunchNav } from "../LaunchNavContext";
 import { EXAMPLE_INTAKE_PROMPTS } from "../useInputConfidenceHint";
 import { AGREEMENT_LIFECYCLE_PROGRESS_LABELS, lifecycleStepForStage } from "../../agreement/agreementLifecycleRail";
@@ -175,7 +177,13 @@ export function SimpleCreatePage() {
         commercialEntitlement: commercialEntitlement
           ? {
               entitlement: commercialEntitlement.entitlement,
+              state: commercialEntitlement.state,
               createAllowed: commercialEntitlement.createAllowed,
+              canCreatePersistedAgreement: commercialEntitlement.canCreatePersistedAgreement,
+              canSaveGuestDraft: commercialEntitlement.canSaveGuestDraft,
+              agreementAllowance: commercialEntitlement.agreementAllowance,
+              agreementsRemaining: commercialEntitlement.agreementsRemaining,
+              periodEndsAt: commercialEntitlement.periodEndsAt,
               authFailure: commercialEntitlement.authFailure,
               probeFailure: commercialEntitlement.probeFailure,
               reason: commercialEntitlement.reason,
@@ -196,10 +204,12 @@ export function SimpleCreatePage() {
     commercialEntitlementReady &&
     createAccessVerdict.allowed &&
     createAccessVerdict.reason === "genesis_allowance";
-  const freeAllowanceAvailable =
+  const guestDraftAvailable =
     commercialEntitlementReady &&
     createAccessVerdict.allowed &&
-    createAccessVerdict.reason === "free_allowance";
+    (createAccessVerdict.reason === "guest_draft" ||
+      createAccessVerdict.reason === "anonymous_starter");
+  const freeAllowanceAvailable = guestDraftAvailable;
   const [upgradeModalOpen, setUpgradeModalOpen] = useState(false);
   const [postRecipientHandoffFailure, setPostRecipientHandoffFailure] =
     useState<PaidProPostRecipientSetupFailure | null>(null);
@@ -626,18 +636,28 @@ export function SimpleCreatePage() {
           </div>
         ) : null}
 
-        {genesisWithinAllowance && commercialEntitlement?.genesisAllowance ? (
+        {genesisWithinAllowance && commercialEntitlement ? (
           <div
             className="mb-4 rounded-lg border border-slate-700/70 bg-slate-950/40 px-4 py-2.5 text-xs text-slate-300"
             role="status"
             data-testid="genesis-allowance-indicator"
           >
-            Genesis complimentary allowance:{" "}
+            Genesis Dog access includes {commercialEntitlement.agreementAllowance ?? "—"} new agreements
+            each month.{" "}
             <span className="font-medium text-slate-100">
-              {commercialEntitlement.genesisAllowance.remaining} of{" "}
-              {commercialEntitlement.genesisAllowance.limit}
+              {commercialEntitlement.agreementsRemaining ?? "—"} of{" "}
+              {commercialEntitlement.agreementAllowance ?? "—"}
             </span>{" "}
-            agreements remaining this month.
+            remaining. Resets{" "}
+            {commercialEntitlement.periodEndsAt
+              ? new Date(commercialEntitlement.periodEndsAt).toLocaleDateString(undefined, {
+                  year: "numeric",
+                  month: "short",
+                  day: "numeric",
+                  timeZone: "UTC",
+                })
+              : "next period"}
+            .
           </div>
         ) : null}
 
@@ -687,16 +707,24 @@ export function SimpleCreatePage() {
               <>
                 <p className="font-medium text-amber-50">Genesis monthly allowance used</p>
                 <p className="mt-1 text-xs text-amber-100/85">
-                  You&apos;re still an active Genesis Dog. You&apos;ve used this month&apos;s complimentary
-                  agreement allowance. Upgrade to Pro for unlimited creations, or wait until next month.
+                  You&apos;ve used this month&apos;s Genesis Dog agreements. Your allowance renews on{" "}
+                  {commercialEntitlement?.periodEndsAt
+                    ? new Date(commercialEntitlement.periodEndsAt).toLocaleDateString(undefined, {
+                        year: "numeric",
+                        month: "short",
+                        day: "numeric",
+                        timeZone: "UTC",
+                      })
+                    : "the next period"}
+                  . Upgrade to Pro for more capacity.
                 </p>
               </>
             ) : (
               <>
-                <p className="font-medium text-amber-50">You&apos;ve used your free agreement.</p>
+                <p className="font-medium text-amber-50">Save and continue with LawDog</p>
                 <p className="mt-1 text-xs text-amber-100/85">
-                  Your free agreement is complete. Upgrade to Pro to create another, keep reusable
-                  drafts, and unlock full history.
+                  Request Genesis access or choose Pro to save agreements, invite review, prepare
+                  signatures, and keep a proof record.
                 </p>
               </>
             )}
@@ -714,7 +742,7 @@ export function SimpleCreatePage() {
                   navigate("/app/billing");
                 }}
               >
-                Upgrade to Pro
+                Choose Pro
               </button>
               {!createAccessVerdict.showGenesisAllowanceExhausted ? (
                 <button
@@ -883,10 +911,30 @@ export function SimpleCreatePage() {
           variant={
             createAccessVerdict.showGenesisAllowanceExhausted
               ? "genesis_allowance_exhausted"
-              : "upgrade_to_pro"
+              : createAccessVerdict.reason === "guest_draft"
+                ? "guest_ready"
+                : createAccessVerdict.showRequestGenesisCta
+                  ? "entitlement_required"
+                  : "upgrade_to_pro"
           }
           viewExistingPath="/app/agreements"
           draftPreserved={draftPreservedForUpgrade}
+          agreementAllowance={commercialEntitlement?.agreementAllowance ?? null}
+          agreementsRemaining={commercialEntitlement?.agreementsRemaining ?? null}
+          periodEndsAt={commercialEntitlement?.periodEndsAt ?? null}
+          onRequestGenesis={() => {
+            void fetch(`${resolveApiBase().replace(/\/$/, "")}/v1/workspace/genesis-access-request`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json", ...clawAgreementHeaders() },
+              credentials: "include",
+              body: JSON.stringify({ reason: "create_paywall_request" }),
+            }).then(() => {
+              void fetchCommercialEntitlement().then((decision) => {
+                setCommercialEntitlement(decision);
+                setCommercialEntitlementReady(true);
+              });
+            });
+          }}
         />
 
         {!(firstSessionLive && isFreshSimpleCreateStart) ? (

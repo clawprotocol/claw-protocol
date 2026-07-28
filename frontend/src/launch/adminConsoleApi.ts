@@ -55,6 +55,37 @@ export const adminRefreshEntitlement = (subjectRef: string, reason: string) =>
     method: "POST",
     body: JSON.stringify({ reason }),
   });
+
+export const adminGrantGenesisEntitlement = (
+  userId: string,
+  reason: string,
+  opts?: { expiresAt?: string | null; allowanceOverride?: number | null },
+) =>
+  adminFetch(`/v1/admin/users/${encodeURIComponent(userId)}/genesis-entitlement/grant`, {
+    method: "POST",
+    body: JSON.stringify({
+      reason,
+      expires_at: opts?.expiresAt || null,
+      allowance_override: opts?.allowanceOverride ?? null,
+    }),
+  });
+
+export const adminRevokeGenesisEntitlement = (userId: string, reason: string) =>
+  adminFetch(`/v1/admin/users/${encodeURIComponent(userId)}/genesis-entitlement/revoke`, {
+    method: "POST",
+    body: JSON.stringify({ reason }),
+  });
+
+export const adminGetGenesisEntitlement = (userId: string) =>
+  adminFetch(`/v1/admin/users/${encodeURIComponent(userId)}/genesis-entitlement`) as Promise<
+    Record<string, unknown>
+  >;
+
+export const adminMigrateLegacyGenesisAffiliates = (reason: string) =>
+  adminFetch(`/v1/admin/genesis-entitlement/migrate-legacy-affiliates`, {
+    method: "POST",
+    body: JSON.stringify({ reason }),
+  });
 export const adminSetUserDisabled = (subjectRef: string, disabled: boolean, reason: string) =>
   adminFetch(`/v1/admin/users/${encodeURIComponent(subjectRef)}/status`, {
     method: "POST",

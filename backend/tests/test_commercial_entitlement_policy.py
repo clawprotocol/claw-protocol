@@ -1,4 +1,4 @@
-"""Server-authoritative commercial entitlement — paid / Genesis allowance / free."""
+"""Server-authoritative commercial entitlement — Pro / Genesis / guest / none."""
 
 from __future__ import annotations
 
@@ -15,10 +15,16 @@ from backend.economics.store import get_economics_store, reset_economics_store_f
 from backend.main import app
 from backend.usage_economics import constants as uc
 from backend.usage_economics.commercial_entitlement import (
-    ENTITLEMENT_FREE,
     ENTITLEMENT_GENESIS_ALLOWANCE,
     ENTITLEMENT_PAID_PRO,
+    STATE_GENESIS,
+    STATE_NONE,
+    STATE_PRO,
     resolve_commercial_entitlement,
+)
+from backend.usage_economics.genesis_dog_entitlement import (
+    GRANT_SOURCE_ADMIN,
+    grant_entitlement,
 )
 from backend.usage_economics.store import UsageEconomicsStore
 
@@ -40,6 +46,7 @@ def isolated_entitlement_env(tmp_path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_ENABLED", "1")
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_STRICT_IN_DEV", "1")
     monkeypatch.setenv("CLAW_GENESIS_MONTHLY_AGREEMENT_ALLOWANCE", "3")
+    monkeypatch.setenv("CLAW_PRO_BILLING_PERIOD_AGREEMENT_ALLOWANCE", "25")
     monkeypatch.setenv("CLAW_RATE_LIMIT_RPS", "1000")
     monkeypatch.setenv("CLAW_RATE_LIMIT_BURST", "1000")
 
@@ -98,9 +105,9 @@ def _make_genesis(eco, user_id: str, *, status: str = "active", code: str | None
     )
 
 
-def test_paid_user_unlimited_creates(isolated_entitlement_env):
+def test_paid_user_creates_within_billing_period_allowance(isolated_entitlement_env):
     client, eco, _usage = isolated_entitlement_env
-    uid = "paid-unlimited"
+    uid = "paid-cap"
     _activate_paid(eco, uid)
     h = _auth(uid)
     for i in range(5):
@@ -110,7 +117,10 @@ def test_paid_user_unlimited_creates(isolated_entitlement_env):
     assert summary.status_code == 200
     body = summary.json()
     assert body["tier"] == "paid"
+    assert body["state"] == STATE_PRO
     assert body["commercial"]["entitlement"] == ENTITLEMENT_PAID_PRO
+    assert body["agreement_allowance"] == 25
+    assert body["agreements_used"] == 5
     assert body["commercial"]["create_allowed"] is True
 
 
@@ -123,6 +133,7 @@ def test_active_genesis_under_allowance_allowed(isolated_entitlement_env):
     assert r.status_code == 200, r.text
     summary = client.get("/api/agreements/usage/summary", headers=h).json()
     assert summary["commercial"]["entitlement"] == ENTITLEMENT_GENESIS_ALLOWANCE
+    assert summary["state"] == STATE_GENESIS
     assert summary["commercial"]["create_allowed"] is True
     ga = summary["commercial"]["genesis_allowance"]
     assert ga["limit"] == 3
@@ -144,7 +155,6 @@ def test_active_genesis_at_limit_denied_server_side(isolated_entitlement_env):
     detail = blocked.json().get("detail") or {}
     assert detail.get("code") == uc.GENESIS_MONTHLY_ALLOWANCE_EXHAUSTED
     assert "Genesis" in (detail.get("message") or "")
-    assert "not an active" not in (detail.get("message") or "").lower()
 
     summary = client.get("/api/agreements/usage/summary", headers=h).json()
     assert summary["commercial"]["entitlement"] == ENTITLEMENT_GENESIS_ALLOWANCE
@@ -158,14 +168,13 @@ def test_month_rollover_resets_genesis_allowance(isolated_entitlement_env, tmp_p
     uid = "genesis-rollover"
     subject = f"org:user-{uid}"
     _make_genesis(eco, uid)
-    # Seed prior-month ownership rows that must not count against this UTC month.
     prior = datetime(2020, 1, 15, tzinfo=timezone.utc).isoformat().replace("+00:00", "Z")
     with usage._conn() as con:
         for i in range(5):
             con.execute(
                 """
-                INSERT INTO agreement_owner (agreement_id, subject_ref, created_at, internal_keys_draft)
-                VALUES (?, ?, ?, 0)
+                INSERT INTO agreement_owner (agreement_id, subject_ref, created_at, internal_keys_draft, guest_temp)
+                VALUES (?, ?, ?, 0, 0)
                 """,
                 (f"old-{i}", subject, prior),
             )
@@ -186,7 +195,6 @@ def test_concurrency_cannot_exceed_genesis_allowance(isolated_entitlement_env):
     uid = "genesis-race"
     _make_genesis(eco, uid)
     h = _auth(uid)
-    # Fill to limit-1 so only one concurrent create should succeed.
     for i in range(2):
         assert client.post("/api/agreements/draft", headers=h, json=_draft_body(f"pre{i}")).status_code == 200
 
@@ -230,81 +238,40 @@ def test_inactive_genesis_denied_complimentary_allowance(isolated_entitlement_en
     _make_genesis(eco, uid, status=status, code=f"X{status[:4].upper()}")
     h = _auth(uid)
     summary = client.get("/api/agreements/usage/summary", headers=h).json()
-    assert summary["commercial"]["entitlement"] == ENTITLEMENT_FREE
-    assert summary["tier"] == "free"
-    # Free evaluation still subject to free draft caps when strict; first creates may succeed.
-    # Complimentary Genesis path must not apply.
+    assert summary["commercial"]["entitlement"] in ("none", STATE_NONE)
+    assert summary["state"] == STATE_NONE
     decision = resolve_commercial_entitlement(f"org:user-{uid}")
-    assert decision["entitlement"] == ENTITLEMENT_FREE
+    assert decision["state"] == STATE_NONE
     assert decision["genesis_allowance"] is None
 
 
-def test_ordinary_free_user_first_agreement_allowed(isolated_entitlement_env):
-    """Zero completed agreements → complimentary create path (first agreement free)."""
+def test_ordinary_authenticated_user_has_no_free_tier(isolated_entitlement_env):
+    """No recurring Free account — authenticated users need Genesis or Pro."""
     client, eco, _usage = isolated_entitlement_env
-    uid = "ordinary-free"
+    uid = "ordinary-none"
     h = _auth(uid)
     summary = client.get("/api/agreements/usage/summary", headers=h).json()
-    assert summary["commercial"]["entitlement"] == ENTITLEMENT_FREE
-    assert summary["commercial"]["upgrade_required"] is False
-    assert summary["commercial"]["create_allowed"] is True
-    assert summary["agreements_remaining"] == 1
-    fa = summary["commercial"]["free_allowance"]
-    assert fa["limit"] == 1
-    assert fa["used"] == 0
-    assert fa["remaining"] == 1
-    assert fa["allowed"] is True
-    created = client.post("/api/agreements/draft", headers=h, json=_draft_body("First free"))
-    assert created.status_code == 200, created.text
-
-
-def test_ordinary_free_user_after_completed_requires_upgrade(isolated_entitlement_env):
-    """Completed free allowance → create blocked with upgrade path."""
-    client, eco, usage = isolated_entitlement_env
-    uid = "ordinary-free-done"
-    subject = f"org:user-{uid}"
-    h = _auth(uid)
-    aid = str(uuid.uuid4())
-    usage.try_insert_agreement_owner_with_monthly_cap(
-        agreement_id=aid,
-        subject_ref=subject,
-        internal_keys_draft=0,
-        monthly_cap=None,
-        period_start_iso="",
-    )
-    assert usage.mark_agreement_completed(
-        agreement_id=aid, subject_ref=subject, internal_keys_finalize=0
-    )
-    summary = client.get("/api/agreements/usage/summary", headers=h).json()
-    assert summary["commercial"]["entitlement"] == ENTITLEMENT_FREE
-    assert summary["commercial"]["create_allowed"] is False
-    assert summary["commercial"]["upgrade_required"] is True
-    assert summary["commercial"]["reason"] == uc.COMPLETED_AGREEMENT_LIMIT
-    assert summary["agreements_remaining"] == 0
-    blocked = client.post("/api/agreements/draft", headers=h, json=_draft_body("Second"))
+    assert summary["state"] == STATE_NONE
+    assert summary["commercial"]["can_create_persisted_agreement"] is False
+    blocked = client.post("/api/agreements/draft", headers=h, json=_draft_body("First"))
     assert blocked.status_code == 403
     detail = blocked.json().get("detail") or {}
-    assert detail.get("code") == uc.COMPLETED_AGREEMENT_LIMIT
-    assert "verified record" not in (detail.get("message") or "").lower()
-    assert "free agreement" in (detail.get("message") or "").lower()
+    assert detail.get("code") == uc.ENTITLEMENT_REQUIRED
 
 
-def test_draft_create_does_not_consume_free_allowance(isolated_entitlement_env):
-    """Draft initialization must not exhaust the complimentary completed-agreement allowance."""
+def test_admin_grant_beats_inactive_affiliate_path(isolated_entitlement_env):
     client, eco, _usage = isolated_entitlement_env
-    uid = "free-draft-only"
+    uid = "admin-grant-user"
+    grant_entitlement(user_id=uid, granted_by="ops", grant_source=GRANT_SOURCE_ADMIN)
     h = _auth(uid)
-    for i in range(2):
-        r = client.post("/api/agreements/draft", headers=h, json=_draft_body(f"D{i}"))
-        assert r.status_code == 200, r.text
+    r = client.post("/api/agreements/draft", headers=h, json=_draft_body("Granted"))
+    assert r.status_code == 200, r.text
     summary = client.get("/api/agreements/usage/summary", headers=h).json()
-    assert summary["commercial"]["create_allowed"] is True
-    assert summary["commercial"]["free_allowance"]["used"] == 0
-    assert summary["agreements_completed"] == 0
-    assert summary["agreements_remaining"] == 1
+    assert summary["state"] == STATE_GENESIS
+    assert summary["grant_source"] == GRANT_SOURCE_ADMIN
 
 
-def test_paid_plus_genesis_prefers_paid_unlimited(isolated_entitlement_env):
+def test_paid_plus_genesis_prefers_paid(isolated_entitlement_env):
     client, eco, _usage = isolated_entitlement_env
     uid = "paid-and-genesis"
     _make_genesis(eco, uid)
@@ -314,13 +281,13 @@ def test_paid_plus_genesis_prefers_paid_unlimited(isolated_entitlement_env):
         assert client.post("/api/agreements/draft", headers=h, json=_draft_body(f"PG{i}")).status_code == 200
     summary = client.get("/api/agreements/usage/summary", headers=h).json()
     assert summary["commercial"]["entitlement"] == ENTITLEMENT_PAID_PRO
+    assert summary["state"] == STATE_PRO
     assert summary["commercial"]["genesis_allowance"] is None
 
 
 def test_forged_org_header_cannot_steal_genesis_allowance(isolated_entitlement_env):
     client, eco, _usage = isolated_entitlement_env
     _make_genesis(eco, "real-genesis-dog")
-    # Authenticated as ordinary user while claiming Genesis dog org.
     forged = {
         "X-Claw-Test-Auth-User-Id": "ordinary-spoof",
         "X-Claw-Org-Id": "user-real-genesis-dog",

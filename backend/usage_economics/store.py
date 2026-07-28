@@ -102,10 +102,16 @@ class UsageEconomicsStore:
                 CREATE INDEX IF NOT EXISTS idx_ip_draft_burst_ip_ts ON ip_draft_burst (ip, created_at);
                 """
             )
+            from backend.usage_economics.genesis_dog_entitlement import (
+                ensure_genesis_dog_entitlement_schema,
+            )
+
+            ensure_genesis_dog_entitlement_schema(con)
             for col_sql in (
                 "ALTER TABLE agreement_owner ADD COLUMN claimed_at TEXT",
                 "ALTER TABLE agreement_owner ADD COLUMN claim_method TEXT",
                 "ALTER TABLE agreement_owner ADD COLUMN anonymous_source_org TEXT",
+                "ALTER TABLE agreement_owner ADD COLUMN guest_temp INTEGER NOT NULL DEFAULT 0",
             ):
                 try:
                     con.execute(col_sql)
@@ -137,12 +143,14 @@ class UsageEconomicsStore:
         internal_keys_draft: int,
         monthly_cap: Optional[int],
         period_start_iso: str,
+        guest_temp: bool = False,
     ) -> str:
         """
         Idempotent ownership insert with optional transactional monthly create cap.
 
         Returns ``inserted`` | ``duplicate`` | ``cap_exceeded``.
         Concurrent callers cannot exceed ``monthly_cap`` when set.
+        Guest temporary drafts (``guest_temp``) do not consume commercial allowance.
         """
         now = _utc_now()
         aid = (agreement_id or "").strip()
@@ -159,6 +167,7 @@ class UsageEconomicsStore:
                 now_iso=now,
                 monthly_cap=monthly_cap,
                 period_start_iso=period_start_iso,
+                guest_temp=guest_temp,
             )
 
         con = self._conn()
@@ -171,7 +180,7 @@ class UsageEconomicsStore:
             if existing:
                 con.execute("COMMIT")
                 return "duplicate"
-            if monthly_cap is not None:
+            if monthly_cap is not None and not guest_temp:
                 start = (period_start_iso or "").strip()
                 if not start:
                     raise ValueError("period_start_iso required when monthly_cap is set")
@@ -179,6 +188,7 @@ class UsageEconomicsStore:
                     """
                     SELECT COUNT(*) AS c FROM agreement_owner
                     WHERE subject_ref = ? AND created_at >= ?
+                      AND COALESCE(guest_temp, 0) = 0
                     """,
                     (subj, start),
                 ).fetchone()
@@ -187,25 +197,27 @@ class UsageEconomicsStore:
                     con.execute("ROLLBACK")
                     return "cap_exceeded"
             kd = int(internal_keys_draft)
+            gt = 1 if guest_temp else 0
             con.execute(
                 """
                 INSERT INTO agreement_owner (
-                  agreement_id, subject_ref, created_at, internal_keys_draft
-                ) VALUES (?, ?, ?, ?)
+                  agreement_id, subject_ref, created_at, internal_keys_draft, guest_temp
+                ) VALUES (?, ?, ?, ?, ?)
                 """,
-                (aid, subj, now, kd),
+                (aid, subj, now, kd, gt),
             )
-            con.execute(
-                """
-                INSERT INTO subject_counters (subject_ref, keys_consumed_total, agreements_created, agreements_finalized, ai_calls_count, abuse_flag, soft_throttle_flag, updated_at)
-                VALUES (?, ?, 1, 0, 0, 0, 0, ?)
-                ON CONFLICT(subject_ref) DO UPDATE SET
-                  agreements_created = agreements_created + 1,
-                  keys_consumed_total = keys_consumed_total + ?,
-                  updated_at = excluded.updated_at
-                """,
-                (subj, kd, now, kd),
-            )
+            if not guest_temp:
+                con.execute(
+                    """
+                    INSERT INTO subject_counters (subject_ref, keys_consumed_total, agreements_created, agreements_finalized, ai_calls_count, abuse_flag, soft_throttle_flag, updated_at)
+                    VALUES (?, ?, 1, 0, 0, 0, 0, ?)
+                    ON CONFLICT(subject_ref) DO UPDATE SET
+                      agreements_created = agreements_created + 1,
+                      keys_consumed_total = keys_consumed_total + ?,
+                      updated_at = excluded.updated_at
+                    """,
+                    (subj, kd, now, kd),
+                )
             con.execute("COMMIT")
             return "inserted"
         except Exception:
@@ -417,6 +429,13 @@ class UsageEconomicsStore:
         """Count agreements created in current UTC calendar month (paid soft limit)."""
         now = datetime.now(timezone.utc)
         start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0).isoformat().replace("+00:00", "Z")
+        return self.agreements_created_since(subject_ref, start)
+
+    def agreements_created_since(self, subject_ref: str, period_start_iso: str) -> int:
+        """Count persisted agreement creates for subject since period_start (inclusive)."""
+        start = (period_start_iso or "").strip()
+        if not start:
+            return 0
         if self._pg:
             from backend.usage_economics import usage_economics_postgres as uep
 
@@ -426,6 +445,7 @@ class UsageEconomicsStore:
                 """
                 SELECT COUNT(*) AS c FROM agreement_owner
                 WHERE subject_ref = ? AND created_at >= ?
+                  AND COALESCE(guest_temp, 0) = 0
                 """,
                 (subject_ref, start),
             ).fetchone()

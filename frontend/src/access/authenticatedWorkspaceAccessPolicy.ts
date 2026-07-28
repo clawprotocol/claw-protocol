@@ -1,15 +1,8 @@
 /**
  * Authenticated workspace access — entitlement/account states for Create gating.
  *
- * Actors (product):
- * - Anonymous prospective customer (Starter conversion experience)
- * - Authenticated free user within the one complimentary completed-agreement allowance
- * - Authenticated paid owner (active entitlement)
- * - Recipient signer (token holder)
- *
- * Authentication establishes identity/ownership; entitlement establishes create capabilities.
- * When a server commercial entitlement decision is present, it is the sole Create-UI authority
- * (cached paid probes / access.tier must not override it).
+ * Product ladder: Guest → Genesis Dog → Pro (no recurring Free account tier).
+ * When a server commercial entitlement decision is present, it is the sole Create-UI authority.
  */
 
 import type { AccessTier } from "./types";
@@ -29,11 +22,17 @@ export type EntitlementState =
   | "expired";
 
 export type CommercialCreateEntitlementProbe = {
-  entitlement: "paid_pro" | "genesis_allowance" | "free" | string;
+  entitlement?: "paid_pro" | "genesis_allowance" | "guest" | "none" | "free" | string;
+  state?: "guest" | "pending_genesis" | "genesis" | "pro" | "none" | string;
   createAllowed: boolean;
+  canCreatePersistedAgreement?: boolean;
+  canSaveGuestDraft?: boolean;
+  agreementAllowance?: number | null;
+  agreementsRemaining?: number | null;
+  periodEndsAt?: string | null;
   /** Auth/authorization failure on the entitlement probe. */
   authFailure?: boolean;
-  /** Non-auth transport/API failure — fail closed; not a free plan. */
+  /** Non-auth transport/API failure — fail closed. */
   probeFailure?: boolean;
   reason?: string | null;
 };
@@ -42,41 +41,53 @@ export type WorkspaceCreateAccessVerdict = {
   allowed: boolean;
   reason:
     | "anonymous_starter"
+    | "guest_draft"
     | "entitled_owner"
     | "resume_owned_agreement"
     | "checkout_pending"
     | "entitlement_required"
+    | "pending_genesis"
     | "free_allowance"
     | "free_allowance_exhausted"
     | "genesis_allowance"
     | "genesis_allowance_exhausted"
+    | "pro_allowance_exhausted"
     | "auth_probe_failed"
     | "entitlement_probe_failed"
     | "recipient_isolated";
   showUpgradeModal: boolean;
   showResubscribeCta: boolean;
-  /** Genesis monthly complimentary allowance exhausted — specific UI, not “not Genesis”. */
+  /** Genesis monthly complimentary allowance exhausted — specific UI. */
   showGenesisAllowanceExhausted: boolean;
-  /** Entitlement probe failed — retry/support UI, not free-plan upgrade copy. */
+  /** Entitlement probe failed — retry/support UI. */
   showEntitlementProbeError: boolean;
+  /** Authenticated without Genesis/Pro — request Genesis + Choose Pro. */
+  showRequestGenesisCta: boolean;
 };
 
 function baseVerdict(
-  partial: Omit<WorkspaceCreateAccessVerdict, "showGenesisAllowanceExhausted" | "showEntitlementProbeError"> &
-    Partial<Pick<WorkspaceCreateAccessVerdict, "showGenesisAllowanceExhausted" | "showEntitlementProbeError">>,
+  partial: Omit<
+    WorkspaceCreateAccessVerdict,
+    "showGenesisAllowanceExhausted" | "showEntitlementProbeError" | "showRequestGenesisCta"
+  > &
+    Partial<
+      Pick<
+        WorkspaceCreateAccessVerdict,
+        "showGenesisAllowanceExhausted" | "showEntitlementProbeError" | "showRequestGenesisCta"
+      >
+    >,
 ): WorkspaceCreateAccessVerdict {
   return {
     showGenesisAllowanceExhausted: false,
     showEntitlementProbeError: false,
+    showRequestGenesisCta: false,
     ...partial,
   };
 }
 
 /**
- * Create access for authenticated workspaces.
- * Free users may create while the server reports ``createAllowed`` (one complimentary
- * completed agreement). After that allowance is consumed, Create shows an upgrade gate.
- * Authenticated users may always resume owned work.
+ * Create access for workspaces. Guests may create a temporary draft.
+ * Persisted creates require Genesis or Pro from the server decision.
  */
 export function resolveWorkspaceCreateAccess(args: {
   authentication: AuthenticationState;
@@ -98,6 +109,16 @@ export function resolveWorkspaceCreateAccess(args: {
   }
 
   if (args.isStarterAnonymousSession || args.authentication === "unauthenticated") {
+    const commercial = args.commercialEntitlement;
+    if (commercial && (commercial.state === "guest" || commercial.entitlement === "guest")) {
+      const guestOk = commercial.canSaveGuestDraft ?? commercial.createAllowed;
+      return baseVerdict({
+        allowed: guestOk,
+        reason: "guest_draft",
+        showUpgradeModal: !guestOk,
+        showResubscribeCta: false,
+      });
+    }
     return baseVerdict({
       allowed: true,
       reason: "anonymous_starter",
@@ -143,17 +164,37 @@ export function resolveWorkspaceCreateAccess(args: {
       });
     }
 
-    if (commercial.entitlement === "paid_pro" && commercial.createAllowed) {
+    const state = commercial.state || (
+      commercial.entitlement === "paid_pro"
+        ? "pro"
+        : commercial.entitlement === "genesis_allowance"
+          ? "genesis"
+          : commercial.entitlement === "guest"
+            ? "guest"
+            : "none"
+    );
+
+    if (state === "pro") {
+      const ok = commercial.canCreatePersistedAgreement ?? commercial.createAllowed;
+      if (ok) {
+        return baseVerdict({
+          allowed: true,
+          reason: "entitled_owner",
+          showUpgradeModal: false,
+          showResubscribeCta: false,
+        });
+      }
       return baseVerdict({
-        allowed: true,
-        reason: "entitled_owner",
-        showUpgradeModal: false,
+        allowed: false,
+        reason: "pro_allowance_exhausted",
+        showUpgradeModal: true,
         showResubscribeCta: false,
       });
     }
 
-    if (commercial.entitlement === "genesis_allowance") {
-      if (commercial.createAllowed) {
+    if (state === "genesis") {
+      const ok = commercial.canCreatePersistedAgreement ?? commercial.createAllowed;
+      if (ok) {
         return baseVerdict({
           allowed: true,
           reason: "genesis_allowance",
@@ -170,7 +211,29 @@ export function resolveWorkspaceCreateAccess(args: {
       });
     }
 
+    if (state === "pending_genesis") {
+      return baseVerdict({
+        allowed: false,
+        reason: "pending_genesis",
+        showUpgradeModal: true,
+        showResubscribeCta: false,
+        showRequestGenesisCta: true,
+      });
+    }
+
+    if (state === "guest") {
+      const guestOk = commercial.canSaveGuestDraft ?? commercial.createAllowed;
+      return baseVerdict({
+        allowed: guestOk,
+        reason: "guest_draft",
+        showUpgradeModal: !guestOk,
+        showResubscribeCta: false,
+      });
+    }
+
+    // Authenticated none — request Genesis or Choose Pro (no Free allowance).
     if (commercial.entitlement === "free") {
+      // Legacy payloads during mid-deploy: treat exhausted free as entitlement_required.
       if (commercial.createAllowed) {
         return baseVerdict({
           allowed: true,
@@ -181,19 +244,19 @@ export function resolveWorkspaceCreateAccess(args: {
       }
       return baseVerdict({
         allowed: false,
-        reason: "free_allowance_exhausted",
+        reason: "entitlement_required",
         showUpgradeModal: true,
         showResubscribeCta: false,
+        showRequestGenesisCta: true,
       });
     }
 
-    // Unknown commercial class — fail closed (no cached paid unlock).
     return baseVerdict({
       allowed: false,
-      reason: "entitlement_probe_failed",
-      showUpgradeModal: false,
+      reason: "entitlement_required",
+      showUpgradeModal: true,
       showResubscribeCta: false,
-      showEntitlementProbeError: true,
+      showRequestGenesisCta: true,
     });
   }
 
@@ -226,6 +289,7 @@ export function resolveWorkspaceCreateAccess(args: {
     reason: "entitlement_required",
     showUpgradeModal: true,
     showResubscribeCta: false,
+    showRequestGenesisCta: true,
   });
 }
 

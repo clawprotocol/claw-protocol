@@ -12,7 +12,12 @@ export const HOMEPAGE_HERO_SUBHEAD =
   "Draft agreements in plain language, review every step, then share or sign only when you choose.";
 export const HOMEPAGE_HERO_MICRO_TRUST =
   "Nothing is sent, signed, or shared until you confirm.";
-export const HOMEPAGE_CTA_CREATE_FREE_DRAFT = "Create free draft";
+export const HOMEPAGE_CTA_CREATE_FREE_DRAFT = "Draft free—no account";
+/** Guest create microcopy — no Free account tier. */
+export const GUEST_DRAFT_NO_ACCOUNT_COPY = "Draft your agreement free—no account required.";
+export const GUEST_DRAFT_READY_COPY =
+  "Your draft is ready. Request Genesis access or choose Pro to save it, invite review, prepare signatures, and keep a proof record.";
+
 export const HOMEPAGE_CTA_VIEW_EXAMPLE = "View example";
 /** @deprecated Use {@link HOMEPAGE_CTA_VIEW_EXAMPLE} */
 export const HOMEPAGE_CTA_SEE_HOW = HOMEPAGE_CTA_VIEW_EXAMPLE;
@@ -32,9 +37,8 @@ export const PRICING_FIRST_WORKFLOW_GUARANTEE_TITLE = "Try your first agreement 
 export const PRICING_FIRST_WORKFLOW_GUARANTEE_BODY =
   "If the workflow does not work as intended, we'll refund your subscription. No friction.";
 
-/** Create screen — shown while the complimentary first agreement remains available. */
-export const CREATE_FIRST_AGREEMENT_FREE_INLINE =
-  "Your first agreement is free. Upgrade when you need another agreement, reusable drafts, or full history.";
+/** Create screen — guest/unauthenticated helper; allowances come from the entitlement API. */
+export const CREATE_FIRST_AGREEMENT_FREE_INLINE = GUEST_DRAFT_NO_ACCOUNT_COPY;
 
 /** Product workflow completion only — not legal results. */
 export const PRICING_FIRST_WORKFLOW_GUARANTEE_FOOTNOTE =

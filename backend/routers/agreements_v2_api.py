@@ -277,9 +277,14 @@ def _agreements_write_allowed() -> bool:
 
 def _owner_mutation_guards(request: Request, agreement_id: str, *, surface: str) -> None:
     from backend.security.commercial_auth import require_commercial_owner_principal
+    from backend.usage_economics.policy import assert_guest_workflow_denied
 
     # Org headers alone are never authentication — require a validated principal.
     require_commercial_owner_principal(request)
+    assert_guest_workflow_denied(
+        subject_ref=resolve_subject_from_request(request),
+        surface=surface,
+    )
     assert_registered_owner_matches(request, agreement_id)
     assert_free_incomplete_draft_not_expired(agreement_id, surface=surface)
 
@@ -5447,10 +5452,13 @@ def _ensure_agreement_parties_have_ids(parties: List[AgreementParty]) -> List[Ag
 @router.post("/draft")
 def create_agreement_draft(body: AgreementDraftCreate, request: Request) -> Dict[str, Any]:
     from backend.security.commercial_auth import require_commercial_owner_principal
-    require_commercial_owner_principal(request)
-    from backend.security.request_identity import resolve_verified_subject_from_request
+    from backend.security.request_identity import resolve_workspace_identity
 
-    subject = resolve_verified_subject_from_request(request)
+    identity = resolve_workspace_identity(request)
+    # Guest (anonymous) may create one temporary draft; persisted workspace requires auth.
+    if identity.kind != "anonymous":
+        require_commercial_owner_principal(request)
+    subject = identity.subject_ref
     request_ip = request.client.host if request.client else "unknown"
     if not review_first_paid_pro_persist_bypass(request=request, purpose=body.purpose or ""):
         maybe_repair_workspace_entitlement_from_request(request)
@@ -5903,8 +5911,11 @@ def recipient_access_validate(token: str = "", agreement_id: str = "") -> Dict[s
 def get_agreements_workspace_index(request: Request) -> Dict[str, Any]:
     """Lightweight list for Agreement Workspace landing (local / single-tenant style)."""
     from backend.security.commercial_auth import require_commercial_owner_principal
+    from backend.usage_economics.policy import assert_guest_workflow_denied
+
     require_commercial_owner_principal(request)
     subject = resolve_subject_from_request(request)
+    assert_guest_workflow_denied(subject_ref=subject, surface="workspace_history")
     folder_names = _folder_name_map_for_subject(subject)
     summaries: List[Dict[str, Any]] = []
     skipped: List[Dict[str, str]] = []
@@ -11726,6 +11737,12 @@ def post_agreement_finalized_receipt(
 @router.get("/{agreement_id}/proof-status")
 def get_agreement_proof_status(agreement_id: str, request: Request):
     # Same commercial read-scope gate as full-draft / export / render (not public verify).
+    from backend.usage_economics.commercial_entitlement import subject_is_guest
+    from backend.usage_economics.policy import assert_guest_workflow_denied
+
+    subject = resolve_subject_from_request(request)
+    if subject_is_guest(subject):
+        assert_guest_workflow_denied(subject_ref=subject, surface="proof")
     assert_agreement_full_draft_read_allowed(request, agreement_id)
     store = _agreements_timeline_store()
     timeline_id = f"agreement:{agreement_id}"

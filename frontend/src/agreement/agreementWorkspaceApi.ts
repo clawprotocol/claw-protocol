@@ -709,11 +709,28 @@ export type AgreementMemoryUsageBlock = {
 };
 
 export type CommercialEntitlementBlock = {
-  entitlement: "paid_pro" | "genesis_allowance" | "free" | string;
+  state?: "guest" | "pending_genesis" | "genesis" | "pro" | "none" | string;
+  grant_source?: "admin" | "stripe" | "legacy_affiliate" | "legacy_migration" | "none" | string;
+  agreement_allowance?: number | null;
+  agreements_used?: number;
+  agreements_remaining?: number | null;
+  period_ends_at?: string | null;
+  can_create_persisted_agreement?: boolean;
+  can_save_guest_draft?: boolean;
+  entitlement: "paid_pro" | "genesis_allowance" | "guest" | "none" | "free" | string;
   create_allowed: boolean;
   upgrade_required: boolean;
   reason?: string | null;
   genesis_allowance?: {
+    active: boolean;
+    limit: number;
+    used: number;
+    remaining: number;
+    period_start: string;
+    period_end: string;
+    allowed: boolean;
+  } | null;
+  pro_allowance?: {
     active: boolean;
     limit: number;
     used: number;
@@ -732,10 +749,17 @@ export type CommercialEntitlementBlock = {
 
 export type AgreementUsageSummary = {
   tier: string;
+  state?: string;
+  grant_source?: string;
+  agreement_allowance?: number | null;
+  agreements_used?: number;
+  agreements_remaining: number | null;
+  period_ends_at?: string | null;
+  can_create_persisted_agreement?: boolean;
+  can_save_guest_draft?: boolean;
   agreements_created: number;
   agreements_completed: number;
   drafts_active: number;
-  agreements_remaining: number | null;
   drafts_remaining: number | null;
   watermark_required: boolean;
   storage_persistent: boolean;
