@@ -112,6 +112,36 @@ def _require_admin_secret_for_bootstrap(request: Request) -> None:
         )
 
 
+@router.get("/operators/me")
+def operator_session_capability(request: Request) -> Dict[str, Any]:
+    """
+    Read-only capability probe for Admin Console nav.
+
+    Authenticated principal only (JWT / relaxed test auth). Does **not** require
+    the admin secret and does **not** grant mutate permissions — grant/revoke still
+    go through ``_privileged`` / ``ops:mutate_support``.
+    """
+    from backend.security.operator_principal import OPERATOR_ROLES, ROLE_SUPPORT_OPERATOR
+
+    user_id = require_supabase_user_id(request)
+    store = get_admin_console_store()
+    store.init_schema()
+    row = store.get_admin_user(user_id)
+    if not row or not int(row.get("is_active") or 0):
+        return {"ok": True, "authorized": False, "role": None, "user_id": user_id}
+    role = str(row.get("role") or "").strip().lower()
+    if role == "operator":
+        role = ROLE_SUPPORT_OPERATOR
+    if role not in OPERATOR_ROLES:
+        return {"ok": True, "authorized": False, "role": None, "user_id": user_id}
+    return {
+        "ok": True,
+        "authorized": True,
+        "role": role,
+        "user_id": user_id,
+    }
+
+
 @router.post("/operators/bootstrap")
 def bootstrap_first_operator(request: Request, body: OperatorBootstrapBody) -> Dict[str, Any]:
     """

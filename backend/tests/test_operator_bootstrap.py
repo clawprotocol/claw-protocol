@@ -176,6 +176,41 @@ def test_bootstrap_rejects_role_escalation_parameter(staging_bootstrap_env):
     assert get_admin_console_store().count_active_operators() == 0
 
 
+def test_operators_me_capability_without_admin_secret(staging_bootstrap_env):
+    """Nav capability probe: JWT + registry only — no secret, no mutate grant."""
+    client = staging_bootstrap_env
+    uid = "staging-first-op"
+    token = mint_es256_supabase_jwt(uid)
+    denied = client.get(
+        "/v1/admin/operators/me",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert denied.status_code == 200, denied.text
+    assert denied.json()["authorized"] is False
+
+    boot = client.post(
+        BOOTSTRAP_PATH,
+        headers=_auth_headers(uid),
+        json={"reason": "staging first support operator bootstrap"},
+    )
+    assert boot.status_code == 200, boot.text
+
+    allowed = client.get(
+        "/v1/admin/operators/me",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert allowed.status_code == 200, allowed.text
+    body = allowed.json()
+    assert body["authorized"] is True
+    assert body["role"] == "support_operator"
+    assert body["user_id"] == uid
+
+    # Capability probe must not grant Genesis Dog customer access.
+    from backend.usage_economics.genesis_dog_entitlement import get_entitlement
+
+    assert get_entitlement(uid) is None
+
+
 def test_bootstrap_success_then_genesis_ops_read(staging_bootstrap_env):
     client = staging_bootstrap_env
     uid = "staging-first-op"

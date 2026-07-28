@@ -1,3 +1,4 @@
+import { clawAgreementHeaders } from "../agreement/agreementOrgHeaders";
 import { resolveApiBase } from "../lib/clawApi";
 
 const API_BASE = resolveApiBase();
@@ -26,11 +27,12 @@ async function adminFetch(path: string, init?: RequestInit): Promise<unknown> {
   if (!sec) throw new Error("missing_admin_secret");
   const res = await fetch(`${API_BASE}${path}`, {
     ...init,
-    headers: {
+    credentials: "include",
+    headers: clawAgreementHeaders({
       "Content-Type": "application/json",
       "x-claw-admin-secret": sec,
-      ...(init?.headers || {}),
-    },
+      ...(init?.headers as Record<string, string> | undefined),
+    }),
   });
   const txt = await res.text();
   const data = txt ? JSON.parse(txt) : {};

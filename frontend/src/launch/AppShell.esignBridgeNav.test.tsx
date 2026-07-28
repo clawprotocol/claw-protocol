@@ -27,6 +27,17 @@ vi.mock("../access/AccessContext", () => ({
   useAccess: () => ({ tier: "paid" }),
 }));
 
+vi.mock("./genesisReferral/genesisAffiliateAccess", () => ({
+  useActiveGenesisAffiliateAccess: () => ({ allowed: false }),
+}));
+
+vi.mock("./useOperatorConsoleCapability", () => ({
+  useOperatorConsoleCapability: () => ({
+    ready: true,
+    capability: { authorized: false, role: null, userId: null },
+  }),
+}));
+
 describe("AppShell esign bridge nav", () => {
   afterEach(() => {
     cleanup();

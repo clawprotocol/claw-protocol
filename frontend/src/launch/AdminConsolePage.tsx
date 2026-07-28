@@ -48,6 +48,8 @@ export function AdminConsolePage(props: { initialAdminSecret?: string } = {}) {
   const [users, setUsers] = useState<Record<string, unknown>[]>([]);
   const [agreements, setAgreements] = useState<Record<string, unknown>[]>([]);
   const [deliveries, setDeliveries] = useState<Record<string, unknown>[]>([]);
+  const [genesisAuditReason, setGenesisAuditReason] = useState("");
+  const genesisReasonReady = genesisAuditReason.trim().length >= 3;
   const [affiliates, setAffiliates] = useState<Record<string, unknown>[]>([]);
   const [audit, setAudit] = useState<Record<string, unknown>[]>([]);
   const [payoutBatches, setPayoutBatches] = useState<Record<string, unknown>[]>([]);
@@ -269,7 +271,28 @@ export function AdminConsolePage(props: { initialAdminSecret?: string } = {}) {
         ) : null}
 
         {tab === "users" ? (
-          <div className="space-y-2">
+          <div className="space-y-3">
+            <div
+              className="rounded-xl border border-slate-800/80 bg-slate-950/40 p-3"
+              data-testid="admin-genesis-audit-reason"
+            >
+              <label className="text-xs text-slate-400" htmlFor="admin-genesis-audit-reason">
+                Audit reason (required for Grant / Revoke Genesis Dog)
+              </label>
+              <input
+                id="admin-genesis-audit-reason"
+                className="mt-1 w-full rounded border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100"
+                type="text"
+                value={genesisAuditReason}
+                onChange={(e) => setGenesisAuditReason(e.target.value)}
+                placeholder="e.g. staging acceptance grant for cryptocurated21"
+                maxLength={500}
+                autoComplete="off"
+              />
+              {!genesisReasonReady ? (
+                <p className="mt-1 text-[11px] text-amber-200/80">Enter at least 3 characters before granting or revoking.</p>
+              ) : null}
+            </div>
             {users.slice(0, 80).map((u) => {
               const id = String(u.id || "");
               const disabled = String(u.account_status || "") === "disabled";
@@ -291,10 +314,10 @@ export function AdminConsolePage(props: { initialAdminSecret?: string } = {}) {
                     <button
                       type="button"
                       className="vs01-btn vs01-btn--secondary vs01-btn--compact"
-                      disabled={busyId === `genesis-grant:${id}`}
+                      disabled={!genesisReasonReady || busyId === `genesis-grant:${id}`}
                       onClick={() =>
                         void doAction(`genesis-grant:${id}`, () =>
-                          adminGrantGenesisEntitlement(id, "ops_grant_genesis_dog"),
+                          adminGrantGenesisEntitlement(id, genesisAuditReason.trim()),
                         )
                       }
                     >
@@ -303,10 +326,10 @@ export function AdminConsolePage(props: { initialAdminSecret?: string } = {}) {
                     <button
                       type="button"
                       className="vs01-btn vs01-btn--secondary vs01-btn--compact"
-                      disabled={busyId === `genesis-revoke:${id}`}
+                      disabled={!genesisReasonReady || busyId === `genesis-revoke:${id}`}
                       onClick={() =>
                         void doAction(`genesis-revoke:${id}`, () =>
-                          adminRevokeGenesisEntitlement(id, "ops_revoke_genesis_dog"),
+                          adminRevokeGenesisEntitlement(id, genesisAuditReason.trim()),
                         )
                       }
                     >

@@ -32,13 +32,7 @@ import { LawdogReferralRedirect, parseLawdogReferralPath } from "./launch/Lawdog
 import { AffiliatePayoutOpsPage } from "./launch/affiliate/AffiliatePayoutOpsPage";
 import { GenesisAffiliateDashboardPage } from "./launch/genesisReferral/GenesisAffiliateDashboardPage";
 import { GenesisReferralOpsPage } from "./launch/genesisReferral/GenesisReferralOpsPage";
-import { AdminConsoleAccessGate, AdminConsoleUnavailable } from "./launch/AdminConsoleAccessGate";
-import { AdminConsolePage } from "./launch/AdminConsolePage";
-import {
-  canAccessAdminConsoleWithoutServerAuth,
-  isAdminConsoleDeploymentEnabled,
-  requiresAdminConsoleServerAuth,
-} from "./launch/adminConsoleAccess";
+import { AdminConsoleRouteShell } from "./launch/AdminConsoleRouteShell";
 import { canAccessOperatorGrowthDashboard, OperatorGrowthDashboard } from "./launch/ops/OperatorGrowthDashboard";
 import { OperatorPaidFunnelDashboard } from "./launch/ops/OperatorPaidFunnelDashboard";
 import { OperatorStarterProRefineDashboard } from "./launch/ops/OperatorStarterProRefineDashboard";
@@ -581,10 +575,6 @@ export function ClawProductApp() {
     return <LawdogReferralRedirect userSlug={lawdogReferralSlug} />;
   }
 
-  if (appMatch?.kind === "adminConsole" && !isAdminConsoleDeploymentEnabled()) {
-    return <AdminConsoleUnavailable />;
-  }
-
   if (appMatch?.kind === "affiliatePayoutOps" && !featureFlags.affiliateAdminUi) {
     return (
       <AppShell
@@ -729,13 +719,7 @@ export function ClawProductApp() {
         );
         break;
       case "adminConsole":
-        if (requiresAdminConsoleServerAuth()) {
-          surface = <AdminConsoleAccessGate />;
-        } else if (canAccessAdminConsoleWithoutServerAuth()) {
-          surface = <AdminConsolePage />;
-        } else {
-          surface = <AdminConsoleUnavailable />;
-        }
+        surface = <AdminConsoleRouteShell />;
         break;
       case "receipt":
         surface = <UsageReceiptPage usageId={appMatch.id} />;

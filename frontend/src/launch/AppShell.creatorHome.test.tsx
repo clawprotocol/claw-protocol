@@ -30,6 +30,17 @@ vi.mock("../access/AccessContext", () => ({
   useAccess: () => ({ tier: "paid" }),
 }));
 
+vi.mock("./genesisReferral/genesisAffiliateAccess", () => ({
+  useActiveGenesisAffiliateAccess: () => ({ allowed: false }),
+}));
+
+vi.mock("./useOperatorConsoleCapability", () => ({
+  useOperatorConsoleCapability: () => ({
+    ready: true,
+    capability: { authorized: false, role: null, userId: null },
+  }),
+}));
+
 describe("AppShell creator owner home routing", () => {
   afterEach(() => {
     cleanup();

@@ -10,6 +10,7 @@ import { JoySocialFooter } from "../joy/JoySocialFooter";
 import { LawdogLogoLink } from "../components/ui/LawdogLogoLink";
 import { LawdogBrand } from "../components/ui/LawdogBrand";
 import { useActiveGenesisAffiliateAccess } from "./genesisReferral/genesisAffiliateAccess";
+import { useOperatorConsoleCapability } from "./useOperatorConsoleCapability";
 import "../joy/joy.css";
 
 export type AppShellNavMode = "default" | "esign_bridge_focused" | "minimal" | "public_completed";
@@ -35,6 +36,10 @@ export function AppShell(props: {
   const affiliateFeatureOn = useFeatureGate("affiliate_opportunity_enabled");
   const { allowed: activeGenesisAffiliate } = useActiveGenesisAffiliateAccess();
   const showAffiliateNav = affiliateFeatureOn && activeGenesisAffiliate;
+  const { ready: operatorCapabilityReady, capability: operatorCapability } =
+    useOperatorConsoleCapability();
+  const showAdminConsoleNav =
+    operatorCapabilityReady && operatorCapability.authorized;
   const { children, title, subtitle, navMode = "default", compactFooter = false } = props;
   const showLegacyQuickPath = access.tier === "free";
   const esignBridgeNav = navMode === "esign_bridge_focused";
@@ -60,6 +65,13 @@ export function AppShell(props: {
     { label: "Reuse agreements", path: "/app/agreement-memory", title: "Find and reuse prior agreements" },
     { label: "Work product", path: "/app/work-product", title: "Briefs and memos from your materials" },
   );
+  if (showAdminConsoleNav) {
+    overflowItems.push({
+      label: "Admin Console",
+      path: "/app/admin",
+      title: "Operator Admin Console (support operators only)",
+    });
+  }
 
   return (
     <div className="vs01-root">
