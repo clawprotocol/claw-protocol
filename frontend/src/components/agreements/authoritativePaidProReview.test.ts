@@ -249,6 +249,7 @@ describe("authoritativePaidProReview", () => {
   it("exports paid review chip labels distinct from starter", () => {
     expect(PAID_PRO_REVIEW_CHIP_VERSION).not.toBe(CHIP_VERSION_STARTER);
     expect(PAID_PRO_REVIEW_CHIP_STATE).not.toBe(CHIP_STATE_INITIAL_READY);
-    expect(PAID_PRO_REVIEW_CHIP_VERSION.toLowerCase()).toContain("pro");
+    expect(PAID_PRO_REVIEW_CHIP_VERSION.toLowerCase()).toContain("draft");
+    expect(PAID_PRO_REVIEW_CHIP_VERSION.toLowerCase()).not.toContain("pro");
   });
 });

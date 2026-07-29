@@ -40,13 +40,14 @@ import { resolvePaidProPostFinalizeReviewPlain } from "./paidProPostFinalizeRevi
 
 export { PAID_PRO_REVIEW_SIGNER_DETAILS_NEEDED_STATUS };
 
-export const PAID_PRO_REVIEW_SHELL_TITLE = "Agreement ready";
+export const PAID_PRO_REVIEW_SHELL_TITLE = "Agreement draft ready";
 export const PAID_PRO_REVIEW_SHELL_SUBTITLE =
-  "Review the agreement below. Next, add signer details to create signature links.";
+  "Review the agreement draft below. Next, add signer details to create signature links.";
 export const PAID_PRO_REVIEW_SHELL_SAFETY_LINE =
   "Nothing is sent or signed until you choose to share the links.";
-export const PAID_PRO_REVIEW_BADGE = "Pro agreement";
-export const PAID_PRO_REVIEW_CHIP_VERSION = "Pro agreement";
+/** Neutral product label — avoid plan-confusing “Pro agreement” before signer setup. */
+export const PAID_PRO_REVIEW_BADGE = "Agreement draft";
+export const PAID_PRO_REVIEW_CHIP_VERSION = "Agreement draft";
 /** @deprecated Prefer {@link resolvePaidProReviewChipState} for stage-accurate copy. */
 export const PAID_PRO_REVIEW_CHIP_STATE = "Ready for signature";
 
@@ -67,8 +68,16 @@ export function resolvePaidProReviewChipState(args: {
   if (args.reviewFirstNeutral) return PAID_PRO_REVIEW_CHIP_VERSION;
   return PAID_PRO_REVIEW_CHIP_READY_FOR_SIGNER_SETUP;
 }
-/** Subtle secondary action on the paid Pro review shell. */
+/** Subtle secondary action when signer metadata already exists. */
 export const PAID_PRO_REVIEW_EDIT_SIGNER_DETAILS_LABEL = "Edit signer details";
+/** Primary action while signer metadata is incomplete. */
+export const PAID_PRO_REVIEW_ADD_SIGNER_DETAILS_LABEL = "Add signer details";
+
+export function resolvePaidProReviewSignerDetailsActionLabel(signersReady: boolean): string {
+  return signersReady
+    ? PAID_PRO_REVIEW_EDIT_SIGNER_DETAILS_LABEL
+    : PAID_PRO_REVIEW_ADD_SIGNER_DETAILS_LABEL;
+}
 
 export type AuthoritativePaidProReviewInput = {
   /** When explicitly false, do not treat as paid review (rare). */

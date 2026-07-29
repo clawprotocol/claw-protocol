@@ -13,6 +13,7 @@ import { applyContactAuthorityExecutionBlockIntegrity } from "./contactAuthority
 import { repairPaidProOrphanSectionNumbers } from "./paidProOrphanSectionNumberRepair";
 import { normalizePaidProSectionRender } from "./paidProSectionRenderNormalize";
 import { repairSplitPaidProHeadingFragments } from "./repairSplitPaidProHeadingFragments";
+import { repairPaidProEmptyParentSectionHierarchy } from "./repairPaidProEmptyParentSectionHierarchy";
 import { normalizePaidProCopyQuality } from "./paidProCopyQualityNormalize";
 import { repairMalformedSectionAnyReference } from "./paidProFrozenManifestDisplayAuthority";
 import { repairBareEntityOnlyNoticeStanzas, repairCollapsedInlineNoticeStanzas } from "./paidProPartyNoticeDetails";
@@ -21,6 +22,11 @@ import { PAID_PRO_AUTHORITY_MIN_LEN } from "./paidProAgreementAuthority";
 import { getPaidProSourceOfTruthText, hasPaidProSourceOfTruth } from "./paidProSourceOfTruth";
 import { hasAuthoritativeSigningSnapshot } from "./authoritativeSigningSnapshot";
 import { projectPaidProFrozenSoTDisplayPlain } from "./paidProDisplayPlainAuthority";
+import {
+  buildCorpusRoleIdentitiesForExecutionReconcile,
+  detectExecutionBlockRoleInversion,
+} from "./paidProAcceptedCorpusPartyRoles";
+import { reconcileExecutionBlockToRoleIdentities } from "./paidProSignerMetadataMergeGate";
 
 function expandInlineSignatureMarkersToLines(prefix: string): string {
   return prefix
@@ -215,6 +221,24 @@ export function preparePaidProReviewDisplayPlain(
   if (splitTail.repairs.length > 0) {
     out = splitTail.text;
     repairs.push(...splitTail.repairs);
+  }
+  const emptyParents = repairPaidProEmptyParentSectionHierarchy(out);
+  if (emptyParents.repairs.length > 0) {
+    out = emptyParents.text;
+    repairs.push(...emptyParents.repairs);
+    const splitAfterDemote = repairSplitPaidProHeadingFragments(out);
+    if (splitAfterDemote.repairs.length > 0) {
+      out = splitAfterDemote.text;
+      repairs.push(...splitAfterDemote.repairs);
+    }
+  }
+  if (detectExecutionBlockRoleInversion(out)) {
+    const identities = buildCorpusRoleIdentitiesForExecutionReconcile(out);
+    const reconciled = reconcileExecutionBlockToRoleIdentities(out, identities);
+    if (reconciled.repairs > 0) {
+      out = reconciled.text;
+      repairs.push("display:reconcile_execution_block_roles");
+    }
   }
   const headingTitle = applyPaidProSectionHeadingTitleAuthority(out);
   if (headingTitle.repairs.length > 0) {

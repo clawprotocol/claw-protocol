@@ -64,7 +64,7 @@ describe("paidProReviewStatusCopy", () => {
     expect(steps.find((s) => s.id === "signer_details")?.state).toBe("done");
   });
 
-  it("review-first neutral chip stays Pro agreement before Prepare signatures", () => {
+  it("review-first neutral chip stays Agreement draft before Prepare signatures", () => {
     expect(
       resolvePaidProReviewChipState({ signersReady: false, reviewFirstNeutral: true }),
     ).toBe(PAID_PRO_REVIEW_CHIP_VERSION);

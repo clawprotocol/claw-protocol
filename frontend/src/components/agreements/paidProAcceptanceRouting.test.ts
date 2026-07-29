@@ -188,7 +188,8 @@ describe("paidProAcceptanceRouting", () => {
   });
 
   it("paid shell chip copy constants", () => {
-    expect(PAID_PRO_REVIEW_CHIP_VERSION.toLowerCase()).toContain("pro");
+    expect(PAID_PRO_REVIEW_CHIP_VERSION.toLowerCase()).toContain("draft");
+    expect(PAID_PRO_REVIEW_CHIP_VERSION.toLowerCase()).not.toContain("pro");
     expect(PAID_PRO_REVIEW_CHIP_STATE.toLowerCase()).toContain("ready");
     expect(resolvePaidProReviewChipState({ signersReady: false })).toBe("Signer details needed");
   });

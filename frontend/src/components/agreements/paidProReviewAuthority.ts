@@ -31,7 +31,7 @@ import {
   type PaidProReviewState,
 } from "./paidProReviewStateMachine";
 
-export const PAID_PRO_REVIEW_RECOVERING_TITLE = "Review your Pro agreement";
+export const PAID_PRO_REVIEW_RECOVERING_TITLE = "Review your agreement draft";
 export const PAID_PRO_REVIEW_RECOVERING_SUBTITLE =
   "Your Pro agreement needs another pass before review. Use the recovery options below — your intake is still here.";
 

@@ -33,7 +33,7 @@ export const FREE_STARTER_REVIEW_SUBTITLE =
   "Your starter draft is ready. Review it, then continue when you're ready.";
 export const FREE_STARTER_REVIEW_BADGE = "Starter draft";
 
-export const PAID_PRO_REVIEW_RECOVERING_TITLE = "Review your Pro agreement";
+export const PAID_PRO_REVIEW_RECOVERING_TITLE = "Review your agreement draft";
 export const PAID_PRO_REVIEW_RECOVERING_SUBTITLE =
   "Your Pro agreement needs another pass before review. Use the recovery options below — your intake is still here.";
 

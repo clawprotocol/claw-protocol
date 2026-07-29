@@ -40,7 +40,7 @@ describe("SimpleProFinalReviewScreen", () => {
     cleanup();
   });
 
-  it("'Edit signer details' is actionable and invokes the signer-setup handler", () => {
+  it("'Add signer details' is actionable and invokes the signer-setup handler when signers incomplete", () => {
     const onBackToSignerDetails = vi.fn();
     render(
       <SimpleProFinalReviewScreen
@@ -55,7 +55,7 @@ describe("SimpleProFinalReviewScreen", () => {
       />,
     );
     const editBtn = screen.getByTestId("simple-pro-back-to-signer-details");
-    expect(editBtn.textContent).toContain("Edit signer details");
+    expect(editBtn.textContent).toContain("Add signer details");
     fireEvent.click(editBtn);
     expect(onBackToSignerDetails).toHaveBeenCalledTimes(1);
     cleanup();

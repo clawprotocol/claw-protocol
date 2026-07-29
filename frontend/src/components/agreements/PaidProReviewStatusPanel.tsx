@@ -49,7 +49,11 @@ export function PaidProReviewStatusPanel({
   compactShell = false,
 }: Props) {
   const steps = resolvePaidProReviewTrustSteps({ signersReady, signerMetadataFinalized });
-  const supporting = compactShell ? null : resolvePaidProReviewSupportingCopy({ signersReady });
+  // Always surface signer-field guidance while details are incomplete, even on compact shells.
+  const supporting =
+    !signersReady || !compactShell
+      ? resolvePaidProReviewSupportingCopy({ signersReady })
+      : null;
 
   return (
     <section

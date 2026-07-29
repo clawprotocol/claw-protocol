@@ -23,7 +23,7 @@ describe("Pro delivery track UI wiring", () => {
     expect(intake).toContain("PaidProForcedFirstReviewChrome");
     expect(intake).toContain("paid-pro-forced-prepare-signatures");
     expect(intake).toContain("shouldShowPaidProReviewDecisionChrome");
-    expect(shell).toContain("Review your Pro agreement");
+    expect(shell).toContain("Review your agreement draft");
     expect(shell).toContain("Nothing is sent or signed until you choose the next step.");
     expect(intake).toContain("logAgreementFlowStep");
     expect(intake).toContain("logProDeliveryTrackState");

@@ -45,6 +45,10 @@ const EXECUTION_ENTITY_PAREN_ROLE_RE =
 const BETWEEN_CLIENT_PROVIDER_RE =
   /(?:\bbetween|\bby\s+and\s+between)\s+(.+?)\s*\(\s*["']?Client["']?\s*\)\s+and\s+(.+?)\s*\(\s*["']?Service\s+Provider["']?\s*\)/i;
 
+/** Provider-first openings: LawDog ("Service Provider") and Acme ("Client"). */
+const BETWEEN_PROVIDER_CLIENT_RE =
+  /(?:\bbetween|\bby\s+and\s+between)\s+(.+?)\s*\(\s*["']?Service\s+Provider["']?\s*\)\s+and\s+(.+?)\s*\(\s*["']?Client["']?\s*\)/i;
+
 function normalizedKey(name: string): string {
   return name
     .replace(/\s+/g, " ")
@@ -72,10 +76,31 @@ export function resolvePaidProPartyRolesFromAcceptedCorpus(
   const seen = new Set<string>();
   const out: AcceptedCorpusRoleAssignment[] = [];
 
-  const betweenMatch = head.match(BETWEEN_CLIENT_PROVIDER_RE);
-  if (betweenMatch?.[1] && betweenMatch?.[2]) {
-    const clientLegal = acceptCorpusRoleLegalName(betweenMatch[1]);
-    const providerLegal = acceptCorpusRoleLegalName(betweenMatch[2]);
+  const betweenClientFirst = head.match(BETWEEN_CLIENT_PROVIDER_RE);
+  const betweenProviderFirst =
+    !betweenClientFirst ? head.match(BETWEEN_PROVIDER_CLIENT_RE) : null;
+  if (betweenClientFirst?.[1] && betweenClientFirst?.[2]) {
+    const clientLegal = acceptCorpusRoleLegalName(betweenClientFirst[1]);
+    const providerLegal = acceptCorpusRoleLegalName(betweenClientFirst[2]);
+    if (clientLegal) {
+      seen.add(normalizedKey(clientLegal));
+      out.push({
+        legalName: clientLegal,
+        role: "client",
+        roleLabel: "Client",
+      });
+    }
+    if (providerLegal) {
+      seen.add(normalizedKey(providerLegal));
+      out.push({
+        legalName: providerLegal,
+        role: "service_provider",
+        roleLabel: "Service Provider",
+      });
+    }
+  } else if (betweenProviderFirst?.[1] && betweenProviderFirst?.[2]) {
+    const providerLegal = acceptCorpusRoleLegalName(betweenProviderFirst[1]);
+    const clientLegal = acceptCorpusRoleLegalName(betweenProviderFirst[2]);
     if (clientLegal) {
       seen.add(normalizedKey(clientLegal));
       out.push({

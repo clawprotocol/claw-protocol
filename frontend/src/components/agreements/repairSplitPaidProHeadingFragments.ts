@@ -126,12 +126,28 @@ function parseMainSectionPrefixLine(
   return { sectionNum: m[1], title: m[2].trim(), full: trimmed };
 }
 
+/** Complete single-token main headings that should not merge with the next line. */
+const COMPLETE_SINGLE_TOKEN_MAIN_HEADING_RE =
+  /^(?:Term|Notices?|Fees|Confidentiality|Termination|Assignment|Miscellaneous|Definitions|Recitals|Indemnity|Warranty|Services)$/i;
+
+/** Incomplete prefixes that commonly wrap onto the next line (e.g. Independent / Contractor). */
+const INCOMPLETE_SINGLE_TOKEN_MAIN_HEADING_RE =
+  /^(?:Independent|General|Limitation|Mutual|Intellectual|Governing|Representations?|Ownership)$/i;
+
 export function isDanglingPaidProMainHeadingPrefix(title: string): boolean {
   if (!title || title.length < 3) return false;
   if (/\.\s+[A-Za-z]/.test(title)) return false;
   if (BODY_VERB_RE.test(title)) return false;
   if (DANGLING_HEADING_TAIL_RE.test(title)) return true;
   if (/,\s*$/.test(title)) return true;
+  const words = title.split(/\s+/).filter(Boolean);
+  if (
+    words.length === 1 &&
+    INCOMPLETE_SINGLE_TOKEN_MAIN_HEADING_RE.test(words[0]!) &&
+    !COMPLETE_SINGLE_TOKEN_MAIN_HEADING_RE.test(words[0]!)
+  ) {
+    return true;
+  }
   return false;
 }
 

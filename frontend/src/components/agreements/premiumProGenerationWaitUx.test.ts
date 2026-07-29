@@ -65,7 +65,7 @@ describe("premium Pro generation wait (static)", () => {
       })
       .join(" ");
     expect(copy).not.toMatch(/Still finishing/i);
-    expect(copy).toMatch(/Generating your final Pro agreement/i);
+    expect(copy).toMatch(/Generating your agreement draft/i);
     expect(copy).not.toMatch(/Still building/i);
     expect(copy).not.toMatch(/15[–-]30\s*seconds/i);
   });

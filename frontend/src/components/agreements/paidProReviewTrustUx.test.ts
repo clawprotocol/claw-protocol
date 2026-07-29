@@ -15,8 +15,8 @@ describe("paidProReviewTrustUx", () => {
   it("before signer setup shows agreement generated and signer-required steps", () => {
     const steps = resolvePaidProReviewTrustSteps({ signersReady: false });
     expect(steps.map((s) => s.label)).toEqual([
-      "Agreement generated",
-      "Legal review complete",
+      "Agreement draft generated",
+      "Automated draft checks completed",
       "Signer details needed",
       "Signature links ready",
     ]);
@@ -37,7 +37,7 @@ describe("paidProReviewTrustUx", () => {
     const steps = resolvePaidProReviewTrustSteps({ signersReady: true });
     expect(steps.map((s) => s.label)).toEqual([
       "Agreement generated",
-      "Legal review complete",
+      "Automated draft checks completed",
       "Signer details added",
       "Ready for signing",
     ]);

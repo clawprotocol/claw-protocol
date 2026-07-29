@@ -17,11 +17,11 @@ describe("Pro review shell UX", () => {
   const createPage = readFileSync(join(__dirname, "SimpleCreatePage.tsx"), "utf8");
   const joy = readFileSync(join(__dirname, "../../joy/clawJoyCopy.ts"), "utf8");
 
-  it("targets concise Pro review copy", () => {
-    expect(SIMPLE_CREATE_PAID_PRO_REVIEW_TITLE).toBe("Review your Pro agreement");
+  it("targets concise agreement-draft review copy", () => {
+    expect(SIMPLE_CREATE_PAID_PRO_REVIEW_TITLE).toBe("Review your agreement draft");
     expect(SIMPLE_CREATE_PAID_PRO_REVIEW_SUBTITLE).toMatch(/Nothing is sent or signed/i);
     expect(SIMPLE_CREATE_PAID_PRO_REVIEW_CONTROL_LINE).toMatch(/Nothing is sent or signed/i);
-    expect(PRO_REVIEW_DOCUMENT_PANEL_HEADING).toBe("Review your Pro agreement");
+    expect(PRO_REVIEW_DOCUMENT_PANEL_HEADING).toBe("Review your agreement draft");
     expect(PRO_REVIEW_DOCUMENT_PANEL_SUBCOPY).toMatch(/Nothing is sent or signed/i);
   });
 

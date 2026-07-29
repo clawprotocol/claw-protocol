@@ -64,7 +64,8 @@ describe("resolveSimpleCreateShellLifecycleStage", () => {
 describe("Simple create shell copy contract", () => {
   it("uses distinct Pro review title vs starter marketing title", () => {
     expect(SIMPLE_CREATE_PAID_PRO_REVIEW_TITLE).not.toContain("in minutes");
-    expect(SIMPLE_CREATE_PAID_PRO_REVIEW_TITLE).toContain("Pro");
+    expect(SIMPLE_CREATE_PAID_PRO_REVIEW_TITLE).toContain("draft");
+    expect(SIMPLE_CREATE_PAID_PRO_REVIEW_TITLE.toLowerCase()).not.toContain("pro");
     expect(SIMPLE_CREATE_STARTER_HERO_TITLE).toMatch(/Draft it fast/i);
   });
 

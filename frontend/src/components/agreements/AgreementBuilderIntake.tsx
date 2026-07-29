@@ -26077,7 +26077,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         surface: premiumPaidDocumentSurface ? "premium_paid_document_surface" : "paid_pro_authoritative",
         isPaidPro: true,
         isGuidedCompletion: Boolean(showPrimaryGuidedCompletion),
-        title: "Review your Pro agreement",
+        title: "Review your agreement draft",
       });
     }
   }, [
@@ -31941,10 +31941,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                           <div
                             className="mb-4 rounded-lg border border-emerald-800/35 bg-emerald-950/15 px-3 py-2.5 sm:px-4"
                             role="status"
-                            aria-label="Agreement ready"
+                            aria-label="Agreement draft ready"
                           >
                             <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-emerald-200/90 sm:text-[11px]">
-                              Agreement ready
+                              Agreement draft ready
                             </p>
                             <p className="mt-1 text-[11px] leading-snug text-slate-400 sm:text-xs">
                               Full text is in the preview — finish recipient details below. Nothing sends until you confirm

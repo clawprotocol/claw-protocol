@@ -6,7 +6,7 @@ import {
 import type { CreateFlowProductionPhase } from "../../components/agreements/createFlowTypes";
 import type { PremiumSendIntent } from "./premiumSendIntent";
 
-export const SIMPLE_CREATE_PAID_PRO_REVIEW_TITLE = "Review your Pro agreement";
+export const SIMPLE_CREATE_PAID_PRO_REVIEW_TITLE = "Review your agreement draft";
 
 /** Focus/scroll anchor id on paid-Pro review shell title (post-checkout). */
 export { PREMIUM_PRO_REVIEW_SCROLL_ANCHOR_ID } from "../../lib/premiumPostCheckoutReturnUx";
@@ -29,7 +29,7 @@ export const SIMPLE_CREATE_STARTER_HERO_SUBHEAD =
 export const SIMPLE_CREATE_STARTER_CONTROL_LINE =
   "You control the next step — review, improve, share, sign, or stop.";
 
-export const PRO_REVIEW_DOCUMENT_PANEL_HEADING = "Review your Pro agreement";
+export const PRO_REVIEW_DOCUMENT_PANEL_HEADING = "Review your agreement draft";
 
 export const PRO_REVIEW_DOCUMENT_PANEL_SUBCOPY =
   "Nothing is sent or signed until you choose the next step.";

@@ -13,7 +13,7 @@ describe("PremiumProGenerationWaitPanel", () => {
     render(
       <PremiumProGenerationWaitPanel view={view} titleId="test-wait-title" />,
     );
-    expect(screen.getByRole("heading", { name: /Generating your final Pro agreement/i })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: /Generating your agreement draft/i })).toBeTruthy();
     expect(screen.getAllByText(PREMIUM_PRO_WAIT_REASSURANCE)).toHaveLength(1);
     expect(screen.getByText("Terms loaded")).toBeTruthy();
     expect(screen.queryByText("Payment")).toBeNull();
@@ -39,7 +39,7 @@ describe("PremiumProGenerationWaitPanel", () => {
     const { container } = render(
       <PremiumProGenerationWaitPanel view={view} titleId="test-wait-title" />,
     );
-    expect(screen.getByText(/Pro agreement ready/i)).toBeTruthy();
+    expect(screen.getByText(/Agreement draft ready/i)).toBeTruthy();
     expect(screen.getByText(/Opening your review screen/i)).toBeTruthy();
     expect(container.querySelector(".animate-spin")).toBeNull();
   });

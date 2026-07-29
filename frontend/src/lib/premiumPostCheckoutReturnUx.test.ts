@@ -79,7 +79,7 @@ describe("premium post-checkout return UX policy", () => {
     });
     expect(phase).toBe("patience_extended");
     const view = resolvePremiumProWaitModalView(phase);
-    expect(view.title).toMatch(/Finalizing your Pro agreement/i);
+    expect(view.title).toMatch(/Finalizing your agreement draft/i);
     expect(view.statusLine).toBe(PREMIUM_PRO_WAIT_BODY_PATIENCE_EXTENDED);
     expect(view.statusLine).toMatch(/still active/i);
     expect(view.statusLine).not.toMatch(/failed|failure|error/i);
@@ -102,7 +102,7 @@ describe("premium post-checkout return UX policy", () => {
     });
     expect(phase).toBe("extended_wait");
     const view = resolvePremiumProWaitModalView(phase);
-    expect(view.title).toMatch(/Still preparing your Pro agreement/i);
+    expect(view.title).toMatch(/Still preparing your agreement draft/i);
     expect(view.statusLine).toBe(PREMIUM_PRO_WAIT_BODY_EXTENDED_WAIT);
     expect(view.statusLine).toMatch(/few minutes/i);
     expect(view.showRecoveryActions).toBe(false);
@@ -161,7 +161,7 @@ describe("premium post-checkout return UX policy", () => {
 
   it("soft wait keeps processing title and calm non-failure body", () => {
     const soft = resolvePremiumProWaitModalView("soft_wait");
-    expect(soft.title).toMatch(/Generating your final Pro agreement/i);
+    expect(soft.title).toMatch(/Generating your agreement draft/i);
     expect(soft.statusLine).toBe(PREMIUM_PRO_WAIT_BODY_SOFT_WAIT);
     expect(soft.statusLine).toMatch(/Still working normally/i);
     expect(soft.statusLine).toMatch(/payment is complete/i);
@@ -171,7 +171,7 @@ describe("premium post-checkout return UX policy", () => {
 
   it("success state copy for late apply transition", () => {
     const success = resolvePremiumProWaitModalView("success");
-    expect(success.title).toMatch(/Pro agreement ready/i);
+    expect(success.title).toMatch(/Agreement draft ready/i);
     expect(success.statusLine).toMatch(/Opening your review screen/i);
     expect(success.showSpinner).toBe(false);
     expect(success.progressSteps.every((s) => s.state === "done")).toBe(true);
@@ -183,7 +183,7 @@ describe("premium post-checkout return UX policy", () => {
     expect(view.showRotatingLines).toBe(false);
     expect(view.statusLine).toBe(PREMIUM_PRO_WAIT_BODY_PROCESSING);
     expect(view.statusLine).toMatch(/1–3 minutes/i);
-    expect(view.title).toMatch(/Generating your final Pro agreement/i);
+    expect(view.title).toMatch(/Generating your agreement draft/i);
   });
 
   it("121s in-flight uses soft_wait not terminal failure copy", () => {

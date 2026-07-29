@@ -43,7 +43,7 @@ export const PREMIUM_PRO_WAIT_STALE_COPY_BANS = [
   "15-30 seconds",
   "Agreement generated",
   "Review complete",
-  "Generating final Pro agreement",
+  "Generating agreement draft",
 ] as const;
 
 export const PREMIUM_PRO_WAIT_ROTATE_INTERVAL_MS = 5000;
@@ -51,18 +51,18 @@ export const PREMIUM_PRO_WAIT_ROTATE_INTERVAL_MS = 5000;
 /** @deprecated Rotating lines removed from UI; kept empty for legacy imports. */
 export const PREMIUM_PRO_WAIT_ROTATING_LINES: readonly string[] = [] as const;
 
-export const PREMIUM_PRO_WAIT_TITLE_PROCESSING = "Generating your final Pro agreement…";
-export const PREMIUM_PRO_WAIT_TITLE_EXTENDED = "Still preparing your Pro agreement…";
-export const PREMIUM_PRO_WAIT_TITLE_PATIENCE = "Finalizing your Pro agreement…";
+export const PREMIUM_PRO_WAIT_TITLE_PROCESSING = "Generating your agreement draft…";
+export const PREMIUM_PRO_WAIT_TITLE_EXTENDED = "Still preparing your agreement draft…";
+export const PREMIUM_PRO_WAIT_TITLE_PATIENCE = "Finalizing your agreement draft…";
 
 export const PREMIUM_PRO_WAIT_BODY_PROCESSING =
-  "LawDog is drafting, reviewing, and preparing your Pro agreement for signing. Most agreements are ready in 1–3 minutes. Larger or more detailed agreements may take a few minutes longer.";
+  "LawDog is drafting and preparing your agreement draft for review. Most agreements are ready in 1–3 minutes. Larger or more detailed agreements may take a few minutes longer. Nothing is sent, signed, or shared until you confirm.";
 
 export const PREMIUM_PRO_WAIT_BODY_SOFT_WAIT =
-  "Still working normally. Your payment is complete, and LawDog is preparing the full Pro draft. Please keep this tab open.";
+  "Still working normally. Your payment is complete, and LawDog is preparing the full agreement draft. Please keep this tab open.";
 
 export const PREMIUM_PRO_WAIT_BODY_EXTENDED_WAIT =
-  "Larger agreements can take a few minutes. LawDog is still working and your agreement will open here when ready.";
+  "Larger agreements can take a few minutes. LawDog is still working and your agreement draft will open here when ready.";
 
 export const PREMIUM_PRO_WAIT_BODY_PATIENCE_EXTENDED =
   "This is taking longer than usual, but processing is still active. Please keep this tab open.";
@@ -240,7 +240,7 @@ export function resolvePremiumProWaitModalView(phase: PremiumProWaitVisualPhase)
   if (phase === "success") {
     return {
       phase,
-      title: "Pro agreement ready",
+      title: "Agreement draft ready",
       statusLine: "Opening your review screen now.",
       showRotatingLines: false,
       showSpinner: false,

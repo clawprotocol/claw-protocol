@@ -28,7 +28,7 @@ export function PaidProReviewVerticalLayoutFixture({
             : "vs01-header pb-2 pt-4"
         }
       >
-        <h1 className="vs01-header-title text-xl sm:text-3xl">Review your Pro agreement</h1>
+        <h1 className="vs01-header-title text-xl sm:text-3xl">Review your agreement draft</h1>
         <p
           data-testid="paid-pro-review-shell-subtitle"
           className={

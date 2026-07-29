@@ -350,7 +350,7 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     expect(intake).toContain("freeStarterReviewShellActive");
     expect(intake).toContain("logFreeReviewPaidShellBlocked");
     expect(intake).not.toMatch(
-      /isFreeStreamlineDraftReview\s*\?[\s\S]{0,240}Review your Pro agreement/,
+      /isFreeStreamlineDraftReview\s*\?[\s\S]{0,240}Review your agreement draft/,
     );
     expect(intake).toContain("lastKnownGoodAuthoritativeDraftRef");
     expect(intake).toContain("resolveGuidedCompletionRenderDocument");

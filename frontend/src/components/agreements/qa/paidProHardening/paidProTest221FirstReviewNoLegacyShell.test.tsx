@@ -242,7 +242,7 @@ describe("paidPro Test221 first review after degraded recovery — no legacy sta
     expect(chrome.blockPaidProShell).toBe(false);
     expect(chrome.paidProReviewReady).toBe(true);
     expect(chrome.kind).toBe("paid_pro");
-    expect(SIMPLE_CREATE_PAID_PRO_REVIEW_TITLE).toBe("Review your Pro agreement");
+    expect(SIMPLE_CREATE_PAID_PRO_REVIEW_TITLE).toBe("Review your agreement draft");
 
     expect(
       shouldHideLegacyPaidProDraftPanels({

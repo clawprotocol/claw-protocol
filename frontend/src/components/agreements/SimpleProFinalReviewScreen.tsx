@@ -5,7 +5,7 @@ import type { VisibleProPaperDiagnosticsTrace } from "./visibleProPaperRenderBou
 import { PRO_REVIEW_EDITED_FILE_INPUT_ACCEPT } from "./reviewEditedVersionUpload";
 import { highlightAllGuidedChangedSections, scrollToGuidedAppliedChecklistSection } from "./guidedDealCompletion/guidedSectionScroll";
 import {
-  PAID_PRO_REVIEW_EDIT_SIGNER_DETAILS_LABEL,
+  resolvePaidProReviewSignerDetailsActionLabel,
   PAID_PRO_REVIEW_SHELL_SUBTITLE,
   PAID_PRO_REVIEW_SHELL_TITLE,
   suppressPaidProFinalReviewFinalizingState,
@@ -534,7 +534,7 @@ export function SimpleProFinalReviewScreen({
           className="px-6 py-10 text-center text-sm text-stone-500"
           data-testid="simple-pro-final-review-document-empty"
         >
-          Agreement preview is not available. Use Edit signer details, then continue to final review again.
+          Agreement preview is not available. Use Add signer details, then continue to final review again.
         </p>
       ) : null}
     </div>
@@ -675,7 +675,7 @@ export function SimpleProFinalReviewScreen({
             onClick={onBackToSignerDetails}
             data-testid="simple-pro-back-to-signer-details"
           >
-            {PAID_PRO_REVIEW_EDIT_SIGNER_DETAILS_LABEL}
+            {resolvePaidProReviewSignerDetailsActionLabel(signersReady)}
           </button>
         ) : null}
         {bulkApplyBusy ? (

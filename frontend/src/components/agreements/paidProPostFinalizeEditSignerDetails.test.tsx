@@ -120,7 +120,30 @@ describe("paidProPostFinalizeEditSignerDetails", () => {
     expect(meta.partySignerNames[0]).toBe("Rand Mann");
   });
 
-  it("forced review chrome shows Edit signer details and invokes handler", () => {
+  it("forced review chrome shows Add signer details as primary when signers incomplete", () => {
+    const onEditSignerDetails = vi.fn();
+    render(
+      <PaidProForcedFirstReviewChrome
+        signersReady={false}
+        signerMetadataFinalized={false}
+        postFinalizeCorpusHash="hash1"
+        postFinalizeActionsReady
+        getCopyPlainText={() => "body"}
+        onEditAgreement={vi.fn()}
+        onEditSignerDetails={onEditSignerDetails}
+        onExportAgreement={vi.fn()}
+        onShareForReview={vi.fn()}
+        onPrepareSignatures={vi.fn()}
+      />,
+    );
+    const addSignerBtn = screen.getByTestId("paid-pro-forced-add-signer-details");
+    expect(addSignerBtn.textContent).toContain("Add signer details");
+    fireEvent.click(addSignerBtn);
+    expect(onEditSignerDetails).toHaveBeenCalledTimes(1);
+    expect(screen.queryByTestId("paid-pro-forced-prepare-signatures")).toBeNull();
+  });
+
+  it("forced review chrome shows Edit signer details and invokes handler when signers ready", () => {
     const onEditSignerDetails = vi.fn();
     render(
       <PaidProForcedFirstReviewChrome

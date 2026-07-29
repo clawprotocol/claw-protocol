@@ -10,7 +10,9 @@ import { logPaidProPostFinalizeActionClick } from "./paidProPostFinalizeReviewSu
 import { PaidProReviewNextStepCallout } from "./PaidProReviewNextStepCallout";
 import { PaidProReviewStatusPanel } from "./PaidProReviewStatusPanel";
 import { logPaidProSignaturePrepCtaVisible } from "./paidProSignaturePrepUi";
-import { PAID_PRO_POST_FINALIZE_EDIT_SIGNER_DETAILS_LABEL } from "./paidProPostFinalizeEditSignerDetails";
+import {
+  resolvePaidProPostFinalizeSignerDetailsActionLabel,
+} from "./paidProPostFinalizeEditSignerDetails";
 import { PAID_PRO_PREPARE_ESIGN_DECISION_CTA } from "./signerSetupPartyIdentity";
 
 export type PaidProSignerSavedMapping = {
@@ -79,6 +81,7 @@ export function PaidProForcedFirstReviewChrome({
   const showSignerSavedBanner =
     signerMetadataFinalized && signersReady && signerSavedMappings.length > 0;
   const primaryActionsDisabled = sendDisabled || hydrationBlocked;
+  const signerDetailsActionLabel = resolvePaidProPostFinalizeSignerDetailsActionLabel(signersReady);
 
   const logPostFinalizeAction = (action: string) => {
     if (!signerMetadataFinalized || !postFinalizeCorpusHash) return;
@@ -122,18 +125,33 @@ export function PaidProForcedFirstReviewChrome({
         <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-stone-500">
           Choose your next step
         </p>
-        <button
-          type="button"
-          className="w-full rounded-lg bg-emerald-800 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700 disabled:opacity-45"
-          disabled={primaryActionsDisabled}
-          onClick={() => {
-            logPostFinalizeAction("prepare_for_signing");
-            onPrepareSignatures();
-          }}
-          data-testid="paid-pro-forced-prepare-signatures"
-        >
-          {PAID_PRO_PREPARE_ESIGN_DECISION_CTA}
-        </button>
+        {!signersReady && onEditSignerDetails ? (
+          <button
+            type="button"
+            className="w-full rounded-lg bg-emerald-800 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700 disabled:opacity-45"
+            disabled={primaryActionsDisabled}
+            onClick={() => {
+              logPostFinalizeAction("add_signer_details");
+              onEditSignerDetails();
+            }}
+            data-testid="paid-pro-forced-add-signer-details"
+          >
+            {signerDetailsActionLabel}
+          </button>
+        ) : (
+          <button
+            type="button"
+            className="w-full rounded-lg bg-emerald-800 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700 disabled:opacity-45"
+            disabled={primaryActionsDisabled || !signersReady}
+            onClick={() => {
+              logPostFinalizeAction("prepare_for_signing");
+              onPrepareSignatures();
+            }}
+            data-testid="paid-pro-forced-prepare-signatures"
+          >
+            {PAID_PRO_PREPARE_ESIGN_DECISION_CTA}
+          </button>
+        )}
         <div
           className="flex flex-col gap-2 sm:flex-row sm:flex-wrap"
           data-testid="paid-pro-forced-first-review-secondary-actions"
@@ -141,7 +159,7 @@ export function PaidProForcedFirstReviewChrome({
           <button
             type="button"
             className="w-full rounded-lg border border-stone-300/90 bg-white px-3 py-2 text-xs font-semibold text-stone-800 sm:w-auto"
-            disabled={primaryActionsDisabled || reviewBusy}
+            disabled={primaryActionsDisabled || reviewBusy || !signersReady}
             onClick={() => {
               logPostFinalizeAction("send_for_review");
               onShareForReview();
@@ -169,7 +187,7 @@ export function PaidProForcedFirstReviewChrome({
           >
             {exportBusy ? "Preparing export…" : "Download / export"}
           </button>
-          {onEditSignerDetails ? (
+          {onEditSignerDetails && signersReady ? (
             <button
               type="button"
               className="w-full rounded-lg border border-stone-300/90 bg-white px-3 py-2 text-xs font-semibold text-stone-800 sm:w-auto"
@@ -179,7 +197,7 @@ export function PaidProForcedFirstReviewChrome({
               }}
               data-testid="paid-pro-forced-edit-signer-details"
             >
-              {PAID_PRO_POST_FINALIZE_EDIT_SIGNER_DETAILS_LABEL}
+              {signerDetailsActionLabel}
             </button>
           ) : null}
           <button

@@ -31,7 +31,11 @@ import {
   type PremiumRecipientHandoffV2,
 } from "../premiumPartyNamesHandoff";
 import type { ResolveGuidedPreReviewSignerSlotsArgs } from "./resolveGuidedPreReviewSignerSlots";
-import { resolveCanonicalPartyRoleLabel } from "../canonicalPartyRoleAuthority";
+import {
+  resolveCanonicalPartyRoleLabel,
+  resolveStarterTwoPartyCommercialAuthority,
+} from "../canonicalPartyRoleAuthority";
+import { partyLegalNamesMatch } from "../paidProAcceptedCorpusPartyRoles";
 import { resolveSignerSetupPartyIdentity } from "../signerSetupPartyIdentity";
 import type { CanonicalPartyIdentity } from "./signerPartyIdentity";
 import { isIndividualPartyName } from "./signerPartyIdentity";
@@ -117,15 +121,26 @@ function roleForIndex(
   index: number,
   roleLabel?: string,
   intakeText?: string | null,
+  partyName?: string | null,
 ): CanonicalFinalPartyRole {
   if (intakeText && isQuadripartiteLabeledPartiesIntake(intakeText)) {
     return `party_${index + 1}`;
   }
-  if (index === 0) return "client";
-  if (index === 1) return "service_provider";
   const role = (roleLabel || "").trim().toLowerCase();
   if (/client|company|customer|buyer/.test(role)) return "client";
   if (/provider|vendor|contractor|consultant|service|developer/.test(role)) return "service_provider";
+
+  // Prefer semantic commercial authority over mention-order index defaults.
+  if (intakeText && partyName) {
+    const authority = resolveStarterTwoPartyCommercialAuthority(intakeText);
+    if (authority) {
+      if (partyLegalNamesMatch(partyName, authority.clientName)) return "client";
+      if (partyLegalNamesMatch(partyName, authority.providerName)) return "service_provider";
+    }
+  }
+
+  if (index === 0) return "client";
+  if (index === 1) return "service_provider";
   return `party_${index + 1}`;
 }
 
@@ -308,7 +323,7 @@ function resolveCanonicalFinalPartyManifestUncached(
       ? stripRecipientEmailNoise(emailRaw)
       : "";
     const role = args.draftPartyRoles?.[i] ?? slot?.role ?? "";
-    const canonicalRole = roleForIndex(i, role, args.intakeText);
+    const canonicalRole = roleForIndex(i, role, args.intakeText, partyName);
     const isIndividual = partyName ? isIndividualPartyName(partyName) : false;
     parties.push({
       index: i,
