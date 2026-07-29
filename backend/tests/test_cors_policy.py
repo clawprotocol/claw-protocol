@@ -23,10 +23,12 @@ def test_cors_allow_request_headers_includes_paid_pro_perf_trace_case_insensitiv
     assert "X-Claw-Paid-Pro-Perf-Trace" in CORS_ALLOW_REQUEST_HEADERS
     assert "X-Claw-Review-First-Persist" in CORS_ALLOW_REQUEST_HEADERS
     assert "X-Claw-Admin-Secret" in CORS_ALLOW_REQUEST_HEADERS
+    assert "X-Claw-Admin-Reason" in CORS_ALLOW_REQUEST_HEADERS
     assert "X-Claw-User-Id" in CORS_ALLOW_REQUEST_HEADERS
     assert cors_allow_request_header_allowed("x-claw-review-first-persist")
     assert cors_allow_request_header_allowed("x-claw-paid-pro-perf-trace")
     assert cors_allow_request_header_allowed("x-claw-admin-secret")
+    assert cors_allow_request_header_allowed("x-claw-admin-reason")
     assert cors_allow_request_header_allowed("x-claw-user-id")
     assert cors_allow_request_header_allowed("X-CLAW-ORG-ID")
     assert cors_allow_request_header_allowed("content-type")

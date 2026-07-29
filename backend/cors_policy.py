@@ -32,6 +32,7 @@ CORS_ALLOW_REQUEST_HEADERS: List[str] = [
     "X-Claw-Recipient-Link-Mint-Key",
     # Operator admin console + QA authorization (split-origin SPA).
     "X-Claw-Admin-Secret",
+    "X-Claw-Admin-Reason",
     "X-Claw-Admin-User-Id",
     "X-Claw-Admin-Email",
     "X-Claw-User-Id",
