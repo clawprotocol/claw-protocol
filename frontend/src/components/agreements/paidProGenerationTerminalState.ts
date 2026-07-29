@@ -16,7 +16,8 @@ export type PaidProGenerationTerminalReason =
   | "entitled_rewrite_missing_agreement_or_corpus"
   | "entitled_rewrite_aborted"
   | "draft_limit_reached"
-  | "draft_persist_failed";
+  | "draft_persist_failed"
+  | "review_ready_workspace_persist_failed";
 
 export type PaidProGenerationTerminalOutcome = "review_ready" | "retry_recoverable" | "failed_recoverable";
 

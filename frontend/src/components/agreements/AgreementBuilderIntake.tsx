@@ -1564,6 +1564,11 @@ import {
   shouldAutoPersistReviewAgreementRow,
 } from "./paidProCreateFlowRouting";
 import {
+  persistWorkspaceAgreementAfterReviewReady,
+  planReviewReadyPersistFailureUi,
+  shouldRunAutoPersistAfterAuthoritativeCommit,
+} from "./paidProReviewReadyWorkspacePersist";
+import {
   formatPaidCreateFlowDraftPersistFailureMessage,
   isDraftLimitReachedPersistError,
   PAID_CREATE_FLOW_DRAFT_LIMIT_HEADLINE,
@@ -7067,6 +7072,29 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             corpusLen: finalizePlan.corpusPlain.length,
           });
         }
+      } else {
+        // Authenticated Genesis/Pro: persist workspace row immediately so refresh shows the agreement.
+        const persistOutcome = await persistWorkspaceAgreementAfterReviewReady({
+          canonicalReviewEntered: true,
+          existingAgreementId: reviewAgreementIdRef.current,
+          // Entitled rewrite only runs for authenticated Genesis/Pro create — always persist.
+          skipFreeStarterCreateSubmit: true,
+          ensurePersist: () => ensureReviewAgreementWorkspaceId(),
+        });
+        if (!persistOutcome.ok) {
+          const failureUi = planReviewReadyPersistFailureUi();
+          setPremiumPersistedFlowActive(failureUi.premiumPersistedFlowActive);
+          setPremiumSendPathUnlocked(failureUi.premiumSendPathUnlocked);
+          setProFullDraftQualityRetry(failureUi.proFullDraftQualityRetry);
+          const persistMsg =
+            "LawDog could not save this agreement to your workspace. Tap Retry to try again — nothing was saved.";
+          setCreateFlowDraftPersistError(persistMsg);
+          setProFullDraftCustomGateMessage(persistMsg);
+          logPaidProGenerationTerminalTransition({
+            reason: "review_ready_workspace_persist_failed",
+            outcome: "failed_recoverable",
+          });
+        }
       }
       setPremiumPostCheckoutPhase(null);
       setPremiumPipelineUserMessage(null);
@@ -7075,6 +7103,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         pipelineSource: result.premiumRenderSource,
         bodyLen: finalPlain.length,
         paidReviewAuthorityEstablished: handoff.established,
+        workspaceAgreementId: reviewAgreementIdRef.current || null,
       });
     } catch (e: unknown) {
       if (import.meta.env.DEV) {
@@ -7087,7 +7116,16 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     } finally {
       entitledPremiumRewriteInFlightRef.current = false;
     }
-  }, [draft, finalizeIntakeCapture, intakePartyRoleLabels, simpleProductFlow, resolveRawIntakeForPremiumCheckout, bumpPremiumSurfaceGateTick, enterCanonicalPaidProReviewFlow]);
+  }, [
+    draft,
+    finalizeIntakeCapture,
+    intakePartyRoleLabels,
+    simpleProductFlow,
+    resolveRawIntakeForPremiumCheckout,
+    bumpPremiumSurfaceGateTick,
+    enterCanonicalPaidProReviewFlow,
+    ensureReviewAgreementWorkspaceId,
+  ]);
 
   useLayoutEffect(() => {
     if (!createProductionTwoPane || !simpleProductFlow) return;
@@ -16169,20 +16207,29 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     intakePartyRoleLabels,
   ]);
 
-  /** Best-effort: create persisted row early so Send can reuse the same id (deduped inside ensure). Does not gate the refine UI. */
+  /** Best-effort: create persisted row early so Send can reuse the same id (deduped inside ensure). */
   useEffect(() => {
     if (!createProductionTwoPane || !productionDraftPrimaryReviewSurface || !draft || reviewAgreementId) return;
-    if (authoritativePremiumUiCommitted) return;
+    const skipFreeStarter = resolveSkipFreeStarterCreateSubmit({
+      tier,
+      proAgreementEntitled,
+    });
+    // Paid/Genesis corpus is only persistable after authoritative commit — do not bail then.
+    if (
+      !shouldRunAutoPersistAfterAuthoritativeCommit({
+        authoritativePremiumUiCommitted,
+        skipFreeStarterCreateSubmit: skipFreeStarter,
+      })
+    ) {
+      return;
+    }
     if (premiumPostCheckoutPhase === "processing" || premiumAuthoritativeRequestInFlightUi) return;
     if (proFullDraftQualityRetry) return;
     if (createFlowDraftPersistError) return;
     if (
       !shouldAutoPersistReviewAgreementRow({
         hasReviewAgreementId: Boolean(reviewAgreementId?.trim()),
-        skipFreeStarterCreateSubmit: resolveSkipFreeStarterCreateSubmit({
-          tier,
-          proAgreementEntitled,
-        }),
+        skipFreeStarterCreateSubmit: skipFreeStarter,
         qualityRetryActive: proFullDraftQualityRetry,
         draft,
         agreementDocumentText,

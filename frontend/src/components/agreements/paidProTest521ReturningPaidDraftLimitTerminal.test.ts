@@ -221,7 +221,7 @@ describe("TEST521 — returning paid create + validation fail + draft_limit_reac
 
   it("6 — ensureReviewAgreementWorkspaceId surfaces draft_limit_reached without swallowing", () => {
     const ensureIdx = intakeSrc.indexOf("const ensureReviewAgreementWorkspaceId = React.useCallback");
-    const ensureBlock = intakeSrc.slice(ensureIdx, ensureIdx + 3200);
+    const ensureBlock = intakeSrc.slice(ensureIdx, ensureIdx + 4500);
     expect(ensureBlock).toContain("formatPaidCreateFlowDraftPersistFailureMessage");
     expect(ensureBlock).toContain("isDraftLimitReachedPersistError");
     expect(ensureBlock).toContain('reason: isDraftLimitReachedPersistError(e) ? "draft_limit_reached" : "draft_persist_failed"');

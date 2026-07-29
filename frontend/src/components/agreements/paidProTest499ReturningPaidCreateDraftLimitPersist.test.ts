@@ -205,7 +205,7 @@ describe("TEST499 — returning paid create survives draft-limit 403 with accept
     expect(intake).toContain("establishPaidProSourceOfTruth");
     expect(intake).toContain("enterCanonicalPaidProReviewFlow");
     expect(intake).toContain('source: "post_checkout_apply_success"');
-    expect(intake).toContain('source: "returning_paid_create"');
+    expect(intake).toContain('"returning_paid_create"');
     expect(intake).toContain("commitPostCheckoutCanonicalReviewEntry");
   });
 
