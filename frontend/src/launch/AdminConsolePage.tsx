@@ -18,6 +18,11 @@ import {
   writeAdminConsoleSecret,
 } from "./adminConsoleApi";
 import { bootstrapQaPaymentBypassAdminSession } from "./genesisBetaPaymentBypassAuth";
+import {
+  adminConsoleGenesisTargetId,
+  filterAdminConsoleUsers,
+  normalizeAdminConsoleUser,
+} from "./adminConsoleUsers";
 
 type FounderTab = "hq" | "money" | "users" | "queue" | "partners" | "systems" | "links";
 
@@ -50,12 +55,21 @@ export function AdminConsolePage(props: { initialAdminSecret?: string } = {}) {
   const [deliveries, setDeliveries] = useState<Record<string, unknown>[]>([]);
   const [genesisAuditReason, setGenesisAuditReason] = useState("");
   const genesisReasonReady = genesisAuditReason.trim().length >= 3;
+  const [userSearchQuery, setUserSearchQuery] = useState("");
   const [affiliates, setAffiliates] = useState<Record<string, unknown>[]>([]);
   const [audit, setAudit] = useState<Record<string, unknown>[]>([]);
   const [payoutBatches, setPayoutBatches] = useState<Record<string, unknown>[]>([]);
   const [busyId, setBusyId] = useState<string | null>(null);
 
   const blockedDeliveries = useMemo(() => deliveries.filter(isDeliveryBlocked), [deliveries]);
+  const normalizedUsers = useMemo(
+    () => users.map((u) => normalizeAdminConsoleUser(u)),
+    [users],
+  );
+  const filteredUsers = useMemo(
+    () => filterAdminConsoleUsers(normalizedUsers, userSearchQuery),
+    [normalizedUsers, userSearchQuery],
+  );
   const disabledUsers = useMemo(
     () => users.filter((u) => String(u.account_status || "").toLowerCase() === "disabled"),
     [users],
@@ -274,6 +288,27 @@ export function AdminConsolePage(props: { initialAdminSecret?: string } = {}) {
           <div className="space-y-3">
             <div
               className="rounded-xl border border-slate-800/80 bg-slate-950/40 p-3"
+              data-testid="admin-users-search"
+            >
+              <label className="text-xs text-slate-400" htmlFor="admin-users-search">
+                Find user (email, display name, user ID, or org ID)
+              </label>
+              <input
+                id="admin-users-search"
+                className="mt-1 w-full rounded border border-slate-700 bg-slate-900 px-3 py-2 text-sm text-slate-100"
+                type="search"
+                value={userSearchQuery}
+                onChange={(e) => setUserSearchQuery(e.target.value)}
+                placeholder="e.g. cryptocurated21@… or user id"
+                autoComplete="off"
+              />
+              <p className="mt-1 text-[11px] text-slate-500">
+                Showing {Math.min(filteredUsers.length, 80)} of {filteredUsers.length} match
+                {filteredUsers.length === 1 ? "" : "es"} ({normalizedUsers.length} loaded).
+              </p>
+            </div>
+            <div
+              className="rounded-xl border border-slate-800/80 bg-slate-950/40 p-3"
               data-testid="admin-genesis-audit-reason"
             >
               <label className="text-xs text-slate-400" htmlFor="admin-genesis-audit-reason">
@@ -293,31 +328,62 @@ export function AdminConsolePage(props: { initialAdminSecret?: string } = {}) {
                 <p className="mt-1 text-[11px] text-amber-200/80">Enter at least 3 characters before granting or revoking.</p>
               ) : null}
             </div>
-            {users.slice(0, 80).map((u) => {
-              const id = String(u.id || "");
-              const disabled = String(u.account_status || "") === "disabled";
+            {filteredUsers.slice(0, 80).map((u) => {
+              const subjectRef = u.id;
+              const genesisTarget = adminConsoleGenesisTargetId(u);
+              const disabled = u.accountStatus === "disabled";
+              const title =
+                u.email || u.displayName || u.userId || subjectRef || "Unknown user";
               return (
-                <div key={id} className="rounded border border-slate-800 bg-slate-950/25 p-3 text-xs">
-                  <p className="text-slate-200">
-                    {id} {u.email ? `(${String(u.email)})` : ""}
+                <div
+                  key={subjectRef || genesisTarget}
+                  className="rounded border border-slate-800 bg-slate-950/25 p-3 text-xs"
+                  data-testid="admin-user-card"
+                >
+                  <p className="text-sm font-medium text-slate-100" data-testid="admin-user-primary-label">
+                    {title}
                   </p>
-                  <p className="text-slate-500">plan={String(u.plan_type || "free")} premium={String(u.premium_active || false)}</p>
+                  <dl className="mt-2 grid gap-1 text-[11px] text-slate-400 sm:grid-cols-2">
+                    <div>
+                      <dt className="inline text-slate-500">Email: </dt>
+                      <dd className="inline text-slate-200">{u.email || "—"}</dd>
+                    </div>
+                    <div>
+                      <dt className="inline text-slate-500">Display name: </dt>
+                      <dd className="inline text-slate-200">{u.displayName || "—"}</dd>
+                    </div>
+                    <div className="sm:col-span-2 break-all">
+                      <dt className="inline text-slate-500">User ID: </dt>
+                      <dd className="inline text-slate-200">{u.userId || "—"}</dd>
+                    </div>
+                    <div className="sm:col-span-2 break-all">
+                      <dt className="inline text-slate-500">Org ID: </dt>
+                      <dd className="inline text-slate-300">{u.orgId || subjectRef || "—"}</dd>
+                    </div>
+                  </dl>
+                  <p className="mt-2 text-slate-500">
+                    plan={u.planType} premium={String(u.premiumActive)} agreements={u.agreementCount}
+                  </p>
                   <div className="mt-2 flex flex-wrap gap-2">
                     <button
                       type="button"
                       className="vs01-btn vs01-btn--secondary vs01-btn--compact"
-                      disabled={busyId === `ent:${id}`}
-                      onClick={() => void doAction(`ent:${id}`, () => adminRefreshEntitlement(id, "ops_refresh"))}
+                      disabled={busyId === `ent:${subjectRef}`}
+                      onClick={() =>
+                        void doAction(`ent:${subjectRef}`, () =>
+                          adminRefreshEntitlement(subjectRef, "ops_refresh"),
+                        )
+                      }
                     >
                       Refresh entitlement
                     </button>
                     <button
                       type="button"
                       className="vs01-btn vs01-btn--secondary vs01-btn--compact"
-                      disabled={!genesisReasonReady || busyId === `genesis-grant:${id}`}
+                      disabled={!genesisReasonReady || !genesisTarget || busyId === `genesis-grant:${genesisTarget}`}
                       onClick={() =>
-                        void doAction(`genesis-grant:${id}`, () =>
-                          adminGrantGenesisEntitlement(id, genesisAuditReason.trim()),
+                        void doAction(`genesis-grant:${genesisTarget}`, () =>
+                          adminGrantGenesisEntitlement(genesisTarget, genesisAuditReason.trim()),
                         )
                       }
                     >
@@ -326,10 +392,10 @@ export function AdminConsolePage(props: { initialAdminSecret?: string } = {}) {
                     <button
                       type="button"
                       className="vs01-btn vs01-btn--secondary vs01-btn--compact"
-                      disabled={!genesisReasonReady || busyId === `genesis-revoke:${id}`}
+                      disabled={!genesisReasonReady || !genesisTarget || busyId === `genesis-revoke:${genesisTarget}`}
                       onClick={() =>
-                        void doAction(`genesis-revoke:${id}`, () =>
-                          adminRevokeGenesisEntitlement(id, genesisAuditReason.trim()),
+                        void doAction(`genesis-revoke:${genesisTarget}`, () =>
+                          adminRevokeGenesisEntitlement(genesisTarget, genesisAuditReason.trim()),
                         )
                       }
                     >
@@ -338,8 +404,12 @@ export function AdminConsolePage(props: { initialAdminSecret?: string } = {}) {
                     <button
                       type="button"
                       className="vs01-btn vs01-btn--secondary vs01-btn--compact"
-                      disabled={busyId === `status:${id}`}
-                      onClick={() => void doAction(`status:${id}`, () => adminSetUserDisabled(id, !disabled, "ops_toggle_account"))}
+                      disabled={busyId === `status:${subjectRef}`}
+                      onClick={() =>
+                        void doAction(`status:${subjectRef}`, () =>
+                          adminSetUserDisabled(subjectRef, !disabled, "ops_toggle_account"),
+                        )
+                      }
                     >
                       {disabled ? "Enable account" : "Disable account"}
                     </button>
@@ -347,6 +417,11 @@ export function AdminConsolePage(props: { initialAdminSecret?: string } = {}) {
                 </div>
               );
             })}
+            {filteredUsers.length === 0 ? (
+              <p className="text-xs text-slate-500" data-testid="admin-users-empty">
+                No users match this search.
+              </p>
+            ) : null}
           </div>
         ) : null}
 

@@ -323,6 +323,21 @@ class AdminConsoleStore:
             ).fetchall()
         return [dict(r) for r in rows]
 
+    def list_admin_user_identity_rows(self, *, limit: int = 500) -> List[Dict[str, Any]]:
+        """Safe identity rows for Admin Console Users (id, email, role) — no secrets."""
+        lim = max(1, min(int(limit), 1000))
+        with self._conn() as con:
+            rows = con.execute(
+                """
+                SELECT id, email, role, is_active, created_at, last_login_at
+                FROM admin_users
+                ORDER BY datetime(COALESCE(last_login_at, created_at)) DESC
+                LIMIT ?
+                """,
+                (lim,),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
 
 _store: Optional[AdminConsoleStore] = None
 

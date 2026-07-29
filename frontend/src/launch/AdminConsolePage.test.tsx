@@ -31,7 +31,25 @@ vi.mock("./adminConsoleApi", () => ({
   writeAdminConsoleSecret: vi.fn(),
   fetchAdminOverview: vi.fn(async () => ({ premium_unlock_failures: 0, delivery_failures: 0 })),
   fetchAdminUsers: vi.fn(async () => ({
-    users: [{ id: "user-cryptocurated21", email: "cryptocurated21@example.com", plan_type: "free" }],
+    users: [
+      {
+        id: "org:user-cryptocurated21",
+        org_id: "org:user-cryptocurated21",
+        user_id: "cryptocurated21",
+        email: "cryptocurated21@example.com",
+        display_name: "Crypto Curated",
+        plan_type: "free",
+        agreement_count: 1,
+      },
+      {
+        id: "org:user-other-9",
+        org_id: "org:user-other-9",
+        user_id: "other-9",
+        email: "other@example.com",
+        display_name: "Other User",
+        plan_type: "free",
+      },
+    ],
   })),
   fetchAdminAgreements: vi.fn(async () => ({ agreements: [] })),
   fetchAdminDeliveries: vi.fn(async () => ({ events: [] })),
@@ -94,7 +112,13 @@ describe("AdminConsolePage connected state", () => {
       expect(fetchAdminOverview).toHaveBeenCalled();
     });
     fireEvent.click(screen.getByRole("button", { name: /^Users$/ }));
-    const grant = screen.getByRole("button", { name: /grant genesis dog/i });
+    expect(screen.getByTestId("admin-users-search")).toBeTruthy();
+    const firstCard = screen.getAllByTestId("admin-user-card")[0];
+    expect(firstCard.textContent).toContain("cryptocurated21@example.com");
+    expect(firstCard.textContent).toContain("cryptocurated21");
+    expect(firstCard.textContent).toContain("org:user-cryptocurated21");
+
+    const grant = screen.getAllByRole("button", { name: /grant genesis dog/i })[0];
     expect((grant as HTMLButtonElement).disabled).toBe(true);
     fireEvent.change(screen.getByLabelText(/audit reason/i), {
       target: { value: "staging acceptance grant for cryptocurated21" },
@@ -103,9 +127,26 @@ describe("AdminConsolePage connected state", () => {
     fireEvent.click(grant);
     await waitFor(() => {
       expect(adminGrantGenesisEntitlement).toHaveBeenCalledWith(
-        "user-cryptocurated21",
+        "cryptocurated21",
         "staging acceptance grant for cryptocurated21",
       );
     });
+  });
+
+  it("filters users by email without exposing agreement bodies", async () => {
+    render(<AdminConsolePage initialAdminSecret="ops-secret" />);
+    await waitFor(() => {
+      expect(fetchAdminOverview).toHaveBeenCalled();
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^Users$/ }));
+    expect(screen.getAllByTestId("admin-user-card")).toHaveLength(2);
+    fireEvent.change(screen.getByLabelText(/find user/i), {
+      target: { value: "cryptocurated21@" },
+    });
+    expect(screen.getAllByTestId("admin-user-card")).toHaveLength(1);
+    expect(screen.getByTestId("admin-user-primary-label").textContent).toContain(
+      "cryptocurated21@example.com",
+    );
+    expect(document.body.textContent).not.toMatch(/payment_terms|"purpose"|private text not for admin/i);
   });
 });

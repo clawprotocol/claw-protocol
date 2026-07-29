@@ -245,6 +245,19 @@ def _parse_subject_email(subject_ref: str) -> Optional[str]:
     return s if "@" in s else None
 
 
+def _user_id_from_subject_ref(subject_ref: str, subscription: Optional[Dict[str, Any]] = None) -> Optional[str]:
+    if subscription:
+        sid = str(subscription.get("user_id") or "").strip()
+        if sid:
+            return sid
+    s = (subject_ref or "").strip()
+    if s.startswith("org:user-"):
+        return s[len("org:user-") :].strip() or None
+    if s.startswith("user-"):
+        return s[5:].strip() or None
+    return None
+
+
 def _safe_bool(v: Any) -> bool:
     if isinstance(v, bool):
         return v
@@ -365,8 +378,11 @@ def admin_users(request: Request, limit: int = Query(default=200, ge=1, le=500))
     ustore.init_schema()
     eco = get_economics_store()
     eco.init_schema()
+    admin_store = get_admin_console_store()
+    admin_store.init_schema()
     subjects = ustore.admin_aggregate_subjects()[:limit]
     subs_by_org: Dict[str, Dict[str, Any]] = {}
+    affiliate_display_by_user: Dict[str, str] = {}
     with eco._conn() as con:
         rows = con.execute(
             "SELECT org_id, user_id, plan_code, status, started_at, expires_at FROM subscriptions ORDER BY datetime(created_at) DESC"
@@ -376,14 +392,45 @@ def admin_users(request: Request, limit: int = Query(default=200, ge=1, le=500))
             oid = str(d.get("org_id") or "")
             if oid and oid not in subs_by_org:
                 subs_by_org[oid] = d
+        try:
+            aff_rows = con.execute(
+                "SELECT user_id, display_name FROM genesis_affiliates ORDER BY datetime(created_at) DESC"
+            ).fetchall()
+            for ar in aff_rows:
+                ad = dict(ar)
+                uid = str(ad.get("user_id") or "").strip()
+                name = str(ad.get("display_name") or "").strip()
+                if uid and name and uid not in affiliate_display_by_user:
+                    affiliate_display_by_user[uid] = name[:160]
+        except Exception:
+            # Older DBs may not have genesis_affiliates in this connection.
+            pass
+
+    admin_email_by_user: Dict[str, str] = {}
+    admin_identity_rows = admin_store.list_admin_user_identity_rows(limit=500)
+    for row in admin_identity_rows:
+        uid = str(row.get("id") or "").strip()
+        email = str(row.get("email") or "").strip()
+        if uid and email and "@" in email:
+            admin_email_by_user[uid] = email
+
     users: List[Dict[str, Any]] = []
+    seen_user_ids: set[str] = set()
     for s in subjects:
         ref = str(s.get("subject_ref") or "").strip()
         sub = subs_by_org.get(ref)
+        uid = _user_id_from_subject_ref(ref, sub)
+        if uid:
+            seen_user_ids.add(uid)
+        email = _parse_subject_email(ref) or (admin_email_by_user.get(uid) if uid else None)
+        display_name = affiliate_display_by_user.get(uid) if uid else None
         users.append(
             {
                 "id": ref,
-                "email": _parse_subject_email(ref),
+                "org_id": ref,
+                "user_id": uid,
+                "email": email,
+                "display_name": display_name,
                 "created_at": str(s.get("updated_at") or ""),
                 "last_active_at": str(s.get("updated_at") or ""),
                 "account_status": "disabled" if _safe_bool(s.get("abuse_flag")) else "active",
@@ -398,6 +445,39 @@ def admin_users(request: Request, limit: int = Query(default=200, ge=1, le=500))
                 "last_error_code": None,
             }
         )
+
+    # Include operator registry identities not already present (safe email/user_id lookup).
+    for row in admin_identity_rows:
+        uid = str(row.get("id") or "").strip()
+        if not uid or uid in seen_user_ids:
+            continue
+        if len(users) >= limit:
+            break
+        email = str(row.get("email") or "").strip() or None
+        if email and "@" not in email:
+            email = None
+        users.append(
+            {
+                "id": f"org:user-{uid}",
+                "org_id": f"org:user-{uid}",
+                "user_id": uid,
+                "email": email,
+                "display_name": affiliate_display_by_user.get(uid),
+                "created_at": str(row.get("created_at") or ""),
+                "last_active_at": str(row.get("last_login_at") or row.get("created_at") or ""),
+                "account_status": "active" if int(row.get("is_active") or 0) else "disabled",
+                "plan_type": "free",
+                "premium_active": False,
+                "entitlement_source": "none",
+                "entitlement_started_at": None,
+                "entitlement_expires_at": None,
+                "affiliate_code_used": None,
+                "referred_by_affiliate_id": None,
+                "agreement_count": 0,
+                "last_error_code": None,
+            }
+        )
+        seen_user_ids.add(uid)
     return {"users": users}
 
 

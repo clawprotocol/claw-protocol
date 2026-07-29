@@ -256,6 +256,64 @@ def test_admin_overview_pg_path_does_not_call_load_draft(monkeypatch, tmp_path):
     assert load_draft_calls == []
 
 
+def test_admin_users_returns_safe_identity_fields(monkeypatch, tmp_path):
+    """Admin Users lists email / user_id / display_name for safe Genesis grants — no agreement bodies."""
+    _seed_env(monkeypatch, tmp_path)
+    from backend.admin_console.store import get_admin_console_store
+    from backend.economics.genesis_referral_store import (
+        ensure_genesis_referral_schema,
+        upsert_genesis_affiliate,
+    )
+    from backend.economics.store import get_economics_store
+    from backend.usage_economics.store import get_usage_economics_store
+
+    ustore = get_usage_economics_store()
+    ustore.init_schema()
+    uid = "uid-safe-grant-21"
+    org_ref = f"org:user-{uid}"
+    ustore.incr_ai_calls(org_ref, 1)
+    ustore.insert_agreement_owner(
+        agreement_id="ag_admin_users_1",
+        subject_ref=org_ref,
+        internal_keys_draft=1,
+    )
+
+    admin_store = get_admin_console_store()
+    admin_store.init_schema()
+    admin_store.touch_admin_user(
+        admin_user_id=uid,
+        email="cryptocurated21@example.com",
+        role="support_operator",
+    )
+
+    eco = get_economics_store()
+    eco.init_schema()
+    with eco._conn() as con:
+        ensure_genesis_referral_schema(con)
+        upsert_genesis_affiliate(
+            con,
+            user_id=uid,
+            display_name="Crypto Curated",
+            referral_code="SAFEGRANT21",
+        )
+
+    client = TestClient(app)
+    r = client.get("/v1/admin/users", headers=_ops_headers())
+    assert r.status_code == 200
+    users = r.json().get("users") or []
+    match = [u for u in users if u.get("user_id") == uid]
+    assert len(match) == 1
+    row = match[0]
+    assert row["org_id"] == org_ref
+    assert row["email"] == "cryptocurated21@example.com"
+    assert row["display_name"] == "Crypto Curated"
+    assert row["user_id"] == uid
+    assert "purpose" not in row
+    assert "payment_terms" not in row
+    assert "parties" not in row
+    assert "versions" not in row
+
+
 def test_admin_agreements_local_respects_limit_bounded_load_draft(monkeypatch, tmp_path):
     _seed_env(monkeypatch, tmp_path)
     from backend.services import agreement_draft_store as ads
