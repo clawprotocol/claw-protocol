@@ -14,6 +14,7 @@ import { repairPaidProOrphanSectionNumbers } from "./paidProOrphanSectionNumberR
 import { normalizePaidProSectionRender } from "./paidProSectionRenderNormalize";
 import { repairSplitPaidProHeadingFragments } from "./repairSplitPaidProHeadingFragments";
 import { repairPaidProEmptyParentSectionHierarchy } from "./repairPaidProEmptyParentSectionHierarchy";
+import { reconcileNamedSectionCrossReferences } from "./paidProReviewedDocumentIntegrity";
 import { normalizePaidProCopyQuality } from "./paidProCopyQualityNormalize";
 import { repairMalformedSectionAnyReference } from "./paidProFrozenManifestDisplayAuthority";
 import { repairBareEntityOnlyNoticeStanzas, repairCollapsedInlineNoticeStanzas } from "./paidProPartyNoticeDetails";
@@ -231,6 +232,11 @@ export function preparePaidProReviewDisplayPlain(
       out = splitAfterDemote.text;
       repairs.push(...splitAfterDemote.repairs);
     }
+  }
+  const namedXref = reconcileNamedSectionCrossReferences(out);
+  if (namedXref.repairs.length > 0) {
+    out = namedXref.text;
+    repairs.push(...namedXref.repairs);
   }
   if (detectExecutionBlockRoleInversion(out)) {
     const identities = buildCorpusRoleIdentitiesForExecutionReconcile(out);

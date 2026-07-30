@@ -336,7 +336,15 @@ export function normalizeAgreementOpeningStructure(
       if (!opening) {
         opening = normalized.text;
       } else {
-        repairs.push("opening:remove_duplicate_opening_phase");
+        // Prefer a resolved-identity opening over an earlier [ORG_n] / template survivor.
+        const priorHasOrg = /\[\s*ORG[_\s-]?\d+\s*\]|\bORG[1-9]\d*\b/i.test(opening);
+        const nextHasOrg = /\[\s*ORG[_\s-]?\d+\s*\]|\bORG[1-9]\d*\b/i.test(normalized.text);
+        if (priorHasOrg && !nextHasOrg) {
+          opening = normalized.text;
+          repairs.push("opening:prefer_resolved_identity_opening");
+        } else {
+          repairs.push("opening:remove_duplicate_opening_phase");
+        }
       }
       continue;
     }

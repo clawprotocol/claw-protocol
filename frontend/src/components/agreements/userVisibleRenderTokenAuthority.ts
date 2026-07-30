@@ -18,6 +18,7 @@ import {
   FORBIDDEN_INTERNAL_ALIAS_RENDER_RE,
   FORBIDDEN_TEMPLATE_VARIABLE_RENDER_RE,
 } from "./legalPartyIdentityAuthority";
+import { listUnresolvedIdentityPlaceholderTokens } from "./paidProPlaceholderAttributionLog";
 import {
   extractIntakeAddressesOrdered,
   extractIntakeContacts,
@@ -103,6 +104,12 @@ export function scanUnresolvedRenderTokens(text: string): RenderTokenMatch[] {
   NUMBERED_RENDER_TOKEN_RE.lastIndex = 0;
   for (const m of t.matchAll(NUMBERED_RENDER_TOKEN_RE)) {
     if (m.index != null) push(m[0], m.index);
+  }
+
+  // Identity slots ([ORG_1], ORG_2, PARTY_3, …) are hard failures — never display/persist.
+  for (const token of listUnresolvedIdentityPlaceholderTokens(t)) {
+    const idx = t.indexOf(token);
+    push(token, idx >= 0 ? idx : 0);
   }
 
   return matches;

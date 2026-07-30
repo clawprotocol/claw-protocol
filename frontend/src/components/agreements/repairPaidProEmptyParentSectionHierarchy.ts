@@ -30,21 +30,37 @@ type HeadingBlock =
 
 const PARENT_CHILD_AFFINITY: Array<{ parent: RegExp; child: RegExp }> = [
   {
+    parent: /\bservices?\b|\baccess\b/i,
+    child: /\bsubscription\b|\bservices?\b|\baccess\b|\bdeliver/i,
+  },
+  {
     parent: /\bfees?\b|\bpayment\b|\bcompensation\b|\bconsideration\b/i,
     child: /\bsubscription\b|\binvoic|\btax|\bdisputed\b|\bfee\b|\bpayment\b/i,
   },
   {
-    parent: /\bterminat/i,
-    child: /\bterminat|\beffect of|\bcure\b|\bconvenien|\bmaterial breach/i,
+    parent: /\bterm\b|\bcancell|\bterminat/i,
+    child: /\bterm\b|\bcancell|\bterminat|\beffect of|\bcure\b|\bconvenien|\bmaterial breach/i,
   },
   {
-    parent: /\bgeneral\s+provisions?\b|\bmiscellaneous\b/i,
+    parent: /\bintellectual\s+property\b|\bownership\b|\bdata\b/i,
+    child: /\bownership\b|\bprovider\s+ownership\b|\bintellectual\b|\blicen|\bdata\b/i,
+  },
+  {
+    parent: /\brepresentations?\b|\bwarrant/i,
+    child: /\bmutual\s+authority\b|\bauthority\b|\brepresent|\bwarrant|\bcompliance\b/i,
+  },
+  {
+    parent: /\bsuspension\b|\bterminat|\bbreach\b/i,
+    child: /\bmaterial\s+breach\b|\bsuspension\b|\bterminat|\bcure\b/i,
+  },
+  {
+    parent: /\bgeneral\s+(?:terms|provisions?)\b|\bmiscellaneous\b/i,
     child:
       /\bindependent\b|\bassignment\b|\bforce\s+majeure\b|\bnotices?\b|\bseverab|\bentire\b|\bcounterpart/i,
   },
   {
     parent: /\bliabilit|\bindemn/i,
-    child: /\bindemn|\bliabilit|\bcap\b|\bexclusion|\bthird-?party/i,
+    child: /\bindemn|\bliabilit|\bcap\b|\bexclusion|\bthird-?party|\bdamages\b/i,
   },
 ];
 
@@ -151,6 +167,25 @@ function topBlockHasBody(block: Extract<HeadingBlock, { kind: "top" }>): boolean
   return block.bodyLines.some((l) => clean(l).length > 0);
 }
 
+/** Short category shells ("Services", "Liability") that still splice a sibling child heading. */
+function isIncompleteCategoryParentTitle(title: string): boolean {
+  const words = clean(title).split(/\s+/).filter(Boolean);
+  if (words.length === 0 || words.length > 2) return false;
+  return /\b(services?|fees?|payment|term|liabilit|indemn|ownership|data|representations|suspension|breach|access)\b/i.test(
+    title,
+  );
+}
+
+function shouldAttemptParentChildFold(
+  parent: Extract<HeadingBlock, { kind: "top" }>,
+  child: Extract<HeadingBlock, { kind: "top" }>,
+): boolean {
+  if (!titlesAffinity(parent.title, child.title)) return false;
+  if (!topBlockHasBody(parent)) return true;
+  // Parent already has body but remains an incomplete category title with a spliced sibling.
+  return isIncompleteCategoryParentTitle(parent.title);
+}
+
 function demoteChildIntoParent(
   parent: Extract<HeadingBlock, { kind: "top" }>,
   child: Extract<HeadingBlock, { kind: "top" }>,
@@ -240,13 +275,7 @@ export function repairPaidProEmptyParentSectionHierarchy(
       i += 1;
       continue;
     }
-    if (topBlockHasBody(block)) {
-      next.push(block);
-      i += 1;
-      continue;
-    }
-
-    // Empty parent: fold affinity-matching following top-level siblings.
+    // Empty parents, or incomplete category shells with a spliced affinity sibling.
     const parent = {
       ...block,
       children: [...block.children],
@@ -257,7 +286,7 @@ export function repairPaidProEmptyParentSectionHierarchy(
     while (j < blocks.length) {
       const cand = blocks[j]!;
       if (cand.kind !== "top") break;
-      if (!titlesAffinity(parent.title, cand.title) && folded === 0) break;
+      if (!shouldAttemptParentChildFold(parent, cand) && folded === 0) break;
       if (!titlesAffinity(parent.title, cand.title) && folded > 0) break;
       demoteChildIntoParent(parent, cand);
       folded += 1;

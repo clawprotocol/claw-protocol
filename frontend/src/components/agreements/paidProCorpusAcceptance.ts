@@ -38,6 +38,9 @@ import {
 import { GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN } from "./simpleProFinalReviewCorpus";
 import { corpusHasPaidProSyntheticMalformedSectionHeadings } from "./paidProSyntheticMalformedSectionHeadings";
 import {
+  preparePaidProImmutableReviewedDocument,
+} from "./paidProReviewedDocumentIntegrity";
+import {
   buildPaidProFreezeCandidate,
   logPaidProFreezeCandidateDecision,
   logPaidProFreezeCandidatePrep,
@@ -409,6 +412,21 @@ export function validatePaidProOutput(args: {
   });
   const preparedCandidateText = freezeCandidate.text;
   const validationCorpus = freezeCandidate.ok ? freezeCandidate.text : preparedCandidateText;
+  // Hard-fail unresolved identity tokens — never accept/persist/consume allowance.
+  {
+    const integrityWire = preparePaidProImmutableReviewedDocument(t);
+    const integrityFreeze = preparePaidProImmutableReviewedDocument(validationCorpus);
+    if (
+      integrityWire.diagnostics.unresolvedIdentityTokens.length > 0 ||
+      integrityFreeze.diagnostics.unresolvedIdentityTokens.length > 0 ||
+      freezeCandidate.rejectReason === "unresolved_identity_token"
+    ) {
+      return rejectAt("reviewed_document_integrity", [
+        "unresolved_identity_token",
+        ...(integrityWire.diagnostics.unresolvedIdentityTokens.slice(0, 3) || []),
+      ]);
+    }
+  }
   const preparedStableHash = paidProPipelineAcceptedCorpusHash(preparedCandidateText);
   const validationCorpusHash = paidProPipelineAcceptedCorpusHash(validationCorpus);
   freezeCandidateHashForLog = freezeCandidate.hash ?? validationCorpusHash;

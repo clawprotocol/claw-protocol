@@ -44,6 +44,10 @@ import {
 } from "./paidProSectionStructureCompletenessAuthority";
 import { containsUnresolvedRenderTokens } from "./userVisibleRenderTokenAuthority";
 import {
+  assertPaidProReviewedDocumentIntegrity,
+  preparePaidProImmutableReviewedDocument,
+} from "./paidProReviewedDocumentIntegrity";
+import {
   detectPaidProOrphanSubsections,
   normalizePaidProOrphanSubsections,
 } from "./normalizePaidProOrphanSubsections";
@@ -279,25 +283,32 @@ export function preparePaidProFreezeCandidateText(
       source: requestedSource,
     })
   ) {
-    const reviewParties = resolvePartiesForReviewRender({
-      draft: args.draft ?? null,
-      intakeText: args.intakeText ?? null,
-    });
-    const parties: CanonicalAgreementSnapshotParty[] = reviewParties
-      .map((p) => ({
-        name: p.partyLegalName.trim(),
-        role: null,
-        email: p.signerEmail?.trim() || null,
-        partyAddress: p.partyAddress?.trim() || null,
-      }))
-      .filter((p) => p.name.length >= 2);
-    return {
-      text: inputTrimmed,
-      hash: hashPaidProCorpus(inputTrimmed),
-      reviewParties,
-      parties,
-      repairs: ["freeze_prep_skipped_pipeline_validated_corpus"],
-    };
+    const integrity = preparePaidProImmutableReviewedDocument(inputTrimmed);
+    if (integrity.ok) {
+      const reviewParties = resolvePartiesForReviewRender({
+        draft: args.draft ?? null,
+        intakeText: args.intakeText ?? null,
+      });
+      const parties: CanonicalAgreementSnapshotParty[] = reviewParties
+        .map((p) => ({
+          name: p.partyLegalName.trim(),
+          role: null,
+          email: p.signerEmail?.trim() || null,
+          partyAddress: p.partyAddress?.trim() || null,
+        }))
+        .filter((p) => p.name.length >= 2);
+      return {
+        text: integrity.text,
+        hash: hashPaidProCorpus(integrity.text),
+        reviewParties,
+        parties,
+        repairs: [
+          "freeze_prep_skipped_pipeline_validated_corpus",
+          ...integrity.repairs.map((r) => `reviewed_doc_integrity:${r}`),
+        ],
+      };
+    }
+    // Integrity failed — do not skip into a defective SoT; run full freeze prep.
   }
 
   const authorityGuard = guardPaidProAcceptedServerFullDraftCommit({
@@ -322,25 +333,31 @@ export function preparePaidProFreezeCandidateText(
       source: requestedSource,
     })
   ) {
-    const reviewParties = resolvePartiesForReviewRender({
-      draft: args.draft ?? null,
-      intakeText: args.intakeText ?? null,
-    });
-    const parties: CanonicalAgreementSnapshotParty[] = reviewParties
-      .map((p) => ({
-        name: p.partyLegalName.trim(),
-        role: null,
-        email: p.signerEmail?.trim() || null,
-        partyAddress: p.partyAddress?.trim() || null,
-      }))
-      .filter((p) => p.name.length >= 2);
-    return {
-      text: authorityTrimmed,
-      hash: hashPaidProCorpus(authorityTrimmed),
-      reviewParties,
-      parties,
-      repairs: ["freeze_prep_skipped_pipeline_stable_corpus"],
-    };
+    const integrity = preparePaidProImmutableReviewedDocument(authorityTrimmed);
+    if (integrity.ok) {
+      const reviewParties = resolvePartiesForReviewRender({
+        draft: args.draft ?? null,
+        intakeText: args.intakeText ?? null,
+      });
+      const parties: CanonicalAgreementSnapshotParty[] = reviewParties
+        .map((p) => ({
+          name: p.partyLegalName.trim(),
+          role: null,
+          email: p.signerEmail?.trim() || null,
+          partyAddress: p.partyAddress?.trim() || null,
+        }))
+        .filter((p) => p.name.length >= 2);
+      return {
+        text: integrity.text,
+        hash: hashPaidProCorpus(integrity.text),
+        reviewParties,
+        parties,
+        repairs: [
+          "freeze_prep_skipped_pipeline_stable_corpus",
+          ...integrity.repairs.map((r) => `reviewed_doc_integrity:${r}`),
+        ],
+      };
+    }
   }
 
   const incomingPreparedHash = paidProPipelineAcceptedCorpusHash(authorityText);
@@ -586,6 +603,12 @@ export function preparePaidProFreezeCandidateText(
     }
   }
 
+  const reviewedIntegrity = preparePaidProImmutableReviewedDocument(safeForCommit);
+  safeForCommit = reviewedIntegrity.text;
+  if (reviewedIntegrity.repairs.length > 0) {
+    repairs.push(...reviewedIntegrity.repairs.map((r) => `reviewed_doc_integrity:${r}`));
+  }
+
   return {
     text: finalizePreparedFreezeCandidateText(authorityTrimmed, safeForCommit, {
       intakeText: args.intakeText ?? null,
@@ -762,7 +785,9 @@ function applyCanonicalNoticeAuthorityBeforeFreezeValidation(
     draftPartyNames: noticeValidationCtx.draftPartyNames,
     acceptedCorpus: text,
   });
-  return text;
+  const integrity = preparePaidProImmutableReviewedDocument(text);
+  assertPaidProReviewedDocumentIntegrity(integrity.text);
+  return integrity.text;
 }
 
 export function assertPaidProFreezeCandidateGates(
@@ -968,6 +993,12 @@ export function assertPaidProFreezeCandidateGates(
     );
   }
 
+  {
+    const integrity = preparePaidProImmutableReviewedDocument(safeForCommit);
+    safeForCommit = integrity.text;
+    assertPaidProReviewedDocumentIntegrity(safeForCommit);
+  }
+
   const postNoticeStructure = applyPaidProSectionStructureCompletenessAuthority(safeForCommit, {
     source: `${surface}_post_notice_finalize`,
     phase: "pre_freeze",
@@ -995,6 +1026,13 @@ export function assertPaidProFreezeCandidateGates(
   const postDuplicationHeading = applyPaidProSectionHeadingTitleAuthority(safeForCommit);
   if (postDuplicationHeading.repairs.length > 0) {
     safeForCommit = postDuplicationHeading.text;
+  }
+
+  // Hierarchy / opening integrity must land before section-structure completeness —
+  // otherwise empty-parent splices are misclassified as heading-title anomalies.
+  {
+    const integrity = preparePaidProImmutableReviewedDocument(safeForCommit);
+    safeForCommit = integrity.text;
   }
 
   safeForCommit = assertPaidProSectionStructureCompletenessForFreeze(
@@ -1228,6 +1266,14 @@ export function assertPaidProFreezeCandidateGates(
     acceptedCorpus: safeForCommit,
   });
 
+  // Terminal integrity: notice / clause-family passes must not reintroduce empty parents,
+  // duplicate openings, or unresolved identity tokens into the immutable reviewed corpus.
+  {
+    const integrity = preparePaidProImmutableReviewedDocument(safeForCommit);
+    safeForCommit = integrity.text;
+    assertPaidProReviewedDocumentIntegrity(safeForCommit);
+  }
+
   return finalizePreparedFreezeCandidateText(trim(args.text), safeForCommit, {
     intakeText: args.intakeText ?? null,
     source: requestedSource,
@@ -1295,6 +1341,14 @@ function extractPaidProFreezeRejectReason(message: string): string {
     return "document_boundary_blocked";
   }
   if (message.includes("unresolved_render_tokens")) return "unresolved_render_tokens";
+  if (message.includes("[paid-pro-reviewed-document-integrity-blocked]")) {
+    return (
+      message
+        .replace(/^\[paid-pro-reviewed-document-integrity-blocked\]\s*/i, "")
+        .split(",")[0]
+        ?.trim() || "reviewed_document_integrity"
+    );
+  }
   if (message.includes("[paid-pro-professional-corpus-contamination-blocked]")) {
     const codes = message.match(/blocked\]\s*(.+)/)?.[1];
     return codes?.split(",")[0] ?? "professional_corpus_contamination";
