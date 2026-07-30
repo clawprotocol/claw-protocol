@@ -7,6 +7,7 @@ import { useLaunchNav } from "./LaunchNavContext";
 import { useAccess } from "../access/AccessContext";
 import { DisclosureFooter } from "../compliance/DisclosureFooter";
 import { JoySocialFooter } from "../joy/JoySocialFooter";
+import { LawdogBuildIdentityMark } from "./LawdogBuildIdentityMark";
 import { LawdogLogoLink } from "../components/ui/LawdogLogoLink";
 import { LawdogBrand } from "../components/ui/LawdogBrand";
 import { useActiveGenesisAffiliateAccess } from "./genesisReferral/genesisAffiliateAccess";
@@ -230,6 +231,7 @@ export function AppShell(props: {
 
         <footer className={compactFooter ? "vs01-footer vs01-footer--compact" : "vs01-footer"}>
           <DisclosureFooter slim={compactFooter} />
+          <LawdogBuildIdentityMark className="mt-2 px-1 opacity-80" />
           <JoySocialFooter />
         </footer>
       </div>

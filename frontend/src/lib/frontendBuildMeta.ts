@@ -3,6 +3,8 @@
 export type FrontendBuildIdentity = {
   git_commit: string;
   git_commit_short: string;
+  /** Inspectable staging label: shortSha|buildTimestamp (no secrets). */
+  build_id: string;
   build_timestamp: string;
   environment: string;
   api_base: string;
@@ -21,16 +23,29 @@ export type FrontendBuildMetaEnv = {
 };
 
 function firstNonEmpty(...values: Array<string | undefined | null>): string {
-  for (const value of values) {
-    const trimmed = String(value ?? "").trim();
-    if (trimmed) return trimmed;
-  }
-  return "";
+  return (
+    values
+      .map((value) => String(value ?? "").trim())
+      .find((trimmed) => trimmed.length > 0) ?? ""
+  );
 }
 
 function shortSha(fullSha: string): string {
   const sha = fullSha.trim();
   return sha.length >= 7 ? sha.slice(0, 7) : sha;
+}
+
+/** Compact non-secret label for `data-lawdog-build` / footer inspection. */
+export function formatLawdogBuildLabel(identity: Pick<FrontendBuildIdentity, "git_commit_short" | "build_timestamp" | "build_id">): string {
+  const fromId = (identity.build_id || "").trim();
+  if (fromId) return fromId;
+  const short = (identity.git_commit_short || "").trim() || "unknown";
+  const ts = (identity.build_timestamp || "")
+    .trim()
+    .replace(/\.\d+Z$/i, "")
+    .replace(/Z$/i, "")
+    .replace(/:/g, "");
+  return `${short}|${ts || "local"}`;
 }
 
 /** Pure resolver — unit-tested; Vite/Railpack invoke at build time. */
@@ -44,6 +59,7 @@ export function resolveFrontendBuildIdentity(
     env.RAILWAY_GIT_COMMIT,
   );
   const gitCommitShort = firstNonEmpty(opts?.gitCommitShort, shortSha(gitCommit));
+  const buildTimestamp = opts?.buildTimestamp ?? new Date().toISOString();
   const environment = firstNonEmpty(
     env.VITE_LAWDOG_ENV,
     env.VITE_APP_ENV,
@@ -51,10 +67,16 @@ export function resolveFrontendBuildIdentity(
     env.NODE_ENV,
   ).toLowerCase();
   const apiBase = firstNonEmpty(env.VITE_CLAW_API_BASE, env.VITE_API_BASE);
+  const build_id = formatLawdogBuildLabel({
+    git_commit_short: gitCommitShort,
+    build_timestamp: buildTimestamp,
+    build_id: "",
+  });
   return {
     git_commit: gitCommit,
     git_commit_short: gitCommitShort,
-    build_timestamp: opts?.buildTimestamp ?? new Date().toISOString(),
+    build_id,
+    build_timestamp: buildTimestamp,
     environment,
     api_base: apiBase,
   };

@@ -1,6 +1,6 @@
 /** @vitest-environment node */
 import { describe, expect, it } from "vitest";
-import { resolveFrontendBuildIdentity } from "./frontendBuildMeta";
+import { formatLawdogBuildLabel, resolveFrontendBuildIdentity } from "./frontendBuildMeta";
 
 describe("resolveFrontendBuildIdentity", () => {
   it("prefers Railway git SHA and staging env labels", () => {
@@ -16,6 +16,7 @@ describe("resolveFrontendBuildIdentity", () => {
     ).toEqual({
       git_commit: "212d4729ba25b750094315c54c117afc5c1afb97",
       git_commit_short: "212d472",
+      build_id: "212d472|2026-07-12T035000",
       build_timestamp: "2026-07-12T03:50:00.000Z",
       environment: "staging",
       api_base: "https://claw-protocol-staging.up.railway.app",
@@ -36,6 +37,16 @@ describe("resolveFrontendBuildIdentity", () => {
       api_base: "",
     });
   });
+
+  it("formats inspectable data-lawdog-build labels", () => {
+    expect(
+      formatLawdogBuildLabel({
+        git_commit_short: "cf16b73",
+        build_timestamp: "2026-07-30T14:16:29.097Z",
+        build_id: "",
+      }),
+    ).toBe("cf16b73|2026-07-30T141629");
+  });
 });
 
 describe("frontendBuildIdentity embed", () => {
@@ -45,5 +56,6 @@ describe("frontendBuildIdentity embed", () => {
     expect(typeof identity.build_timestamp).toBe("string");
     expect(typeof identity.environment).toBe("string");
     expect(typeof identity.api_base).toBe("string");
+    expect(typeof mod.readLawdogBuildLabel()).toBe("string");
   });
 });
