@@ -2,9 +2,12 @@
  * First paid Pro review visible display authority.
  *
  * Paint order for commercial first-review:
- *  1. Verified GET /canonical-review-snapshot corpus (preferred when present)
- *  2. Accepted frozen paid Pro Source of Truth (active-session canonical)
- *  3. Otherwise empty — never paint live preview / completion-snap / picker alone
+ *  1. Immutable review-session authority (accepted server snapshot) — always sufficient
+ *  2. Matching verified GET corpus (same hash only; never replaces diverging authority)
+ *  3. Accepted frozen SoT / parent acceptedCanonicalPlain
+ *  4. Otherwise empty — never paint live preview / completion-snap / picker alone
+ *
+ * Missing/stale agreementId or verified-GET cache must not blank an accepted server snapshot.
  */
 
 import {
@@ -39,6 +42,10 @@ import {
   hasPaidPremiumCompletionSession,
 } from "./premiumCompletionStorage";
 import { isForbiddenPaidProDisplayRenderSource } from "./premiumGenerationApiAvailability";
+import {
+  PAID_PRO_REVIEW_SESSION_AUTHORITY_SOURCE,
+  resolvePaidProReviewSessionAuthorityPaintPlain,
+} from "./paidProReviewSessionAuthority";
 
 export const PAID_PRO_ACCEPTED_CANONICAL_SOT_DISPLAY_SOURCE =
   "paid_pro_accepted_canonical_source_of_truth";
@@ -128,13 +135,22 @@ function resolveCommercialPaintAgreementId(preferred?: string | null): string {
 
 function resolveAcceptedCanonicalPaintPlain(
   args: PaidProFirstReviewVisibleDisplayArgs,
-): string {
+): { plain: string; source: string } {
+  // Immutable review-session authority wins over live SoT / parent props so paint
+  // cannot race on missing agreementId or a competing longer persist candidate.
+  const fromAuthority = resolvePaidProReviewSessionAuthorityPaintPlain();
+  if (fromAuthority && fromAuthority.plain.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
+    return { plain: fromAuthority.plain, source: fromAuthority.source };
+  }
   const fromParent = trim(args.acceptedCanonicalPlain);
   const fromSoT = hasPaidProSourceOfTruth() ? trim(getPaidProSourceOfTruthText()) : "";
-  // Prefer live SoT when both exist so parent prop cannot diverge from freeze.
-  if (fromSoT.length >= PAID_PRO_AUTHORITY_MIN_LEN) return fromSoT;
-  if (fromParent.length >= PAID_PRO_AUTHORITY_MIN_LEN) return fromParent;
-  return "";
+  if (fromSoT.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
+    return { plain: fromSoT, source: PAID_PRO_ACCEPTED_CANONICAL_SOT_DISPLAY_SOURCE };
+  }
+  if (fromParent.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
+    return { plain: fromParent, source: PAID_PRO_ACCEPTED_CANONICAL_SOT_DISPLAY_SOURCE };
+  }
+  return { plain: "", source: "none" };
 }
 
 /**
@@ -152,6 +168,22 @@ export function resolvePaidProFirstReviewVisibleDisplayPlain(
   const hasServerFullDoc = draftServerFullDocumentExists(draft);
 
   if (!paidProActive) {
+    // Still paint immutable review-session authority when present — missing
+    // displayContext flags must not blank an accepted server snapshot.
+    const authorityPaint = resolveAcceptedCanonicalPaintPlain(args);
+    if (authorityPaint.plain.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
+      return {
+        plain: authorityPaint.plain,
+        source:
+          authorityPaint.source === PAID_PRO_REVIEW_SESSION_AUTHORITY_SOURCE
+            ? PAID_PRO_REVIEW_SESSION_AUTHORITY_SOURCE
+            : PAID_PRO_ACCEPTED_CANONICAL_SOT_DISPLAY_SOURCE,
+        fallbackReason: null,
+        hasSoT,
+        hasServerFullDoc,
+        paidProActive: true,
+      };
+    }
     return {
       plain: "",
       source: "none",
@@ -159,6 +191,57 @@ export function resolvePaidProFirstReviewVisibleDisplayPlain(
       hasSoT,
       hasServerFullDoc,
       paidProActive: false,
+    };
+  }
+
+  // One-authority rule: accepted review-session corpus paints immediately and
+  // must not be replaced by a diverging verified-GET / pipeline candidate.
+  const acceptedCanonical = resolveAcceptedCanonicalPaintPlain(args);
+  if (acceptedCanonical.plain.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
+    if (agreementId && hasVerifiedCommercialDisplayCorpus(agreementId)) {
+      const verified = readVerifiedCommercialDisplayCorpus(agreementId);
+      const verifiedPlain = trim(verified?.corpusPlain);
+      if (
+        verifiedPlain.length >= PAID_PRO_AUTHORITY_MIN_LEN &&
+        hashPaidProCorpus(verifiedPlain) === hashPaidProCorpus(acceptedCanonical.plain)
+      ) {
+        if (isPaidProPostFinalizeHydratedCorpusLocked()) {
+          const locked = resolvePaidProPostFinalizeReviewPlain().trim();
+          if (locked.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
+            const plain = resolvePaidProPostFinalizeUserVisiblePlain(
+              locked,
+              draft as import("../../agreement/agreementTypes").AgreementDraft | null,
+            );
+            return {
+              plain,
+              source: "authoritative_signing_snapshot",
+              fallbackReason: null,
+              hasSoT,
+              hasServerFullDoc,
+              paidProActive,
+            };
+          }
+        }
+        return {
+          plain: verifiedPlain,
+          source: "verified_server_canonical_review_snapshot",
+          fallbackReason: null,
+          hasSoT,
+          hasServerFullDoc,
+          paidProActive,
+        };
+      }
+    }
+    return {
+      plain: acceptedCanonical.plain,
+      source:
+        acceptedCanonical.source === PAID_PRO_REVIEW_SESSION_AUTHORITY_SOURCE
+          ? PAID_PRO_REVIEW_SESSION_AUTHORITY_SOURCE
+          : PAID_PRO_ACCEPTED_CANONICAL_SOT_DISPLAY_SOURCE,
+      fallbackReason: null,
+      hasSoT,
+      hasServerFullDoc,
+      paidProActive,
     };
   }
 
@@ -192,18 +275,6 @@ export function resolvePaidProFirstReviewVisibleDisplayPlain(
         paidProActive,
       };
     }
-  }
-
-  const acceptedCanonical = resolveAcceptedCanonicalPaintPlain(args);
-  if (acceptedCanonical.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
-    return {
-      plain: acceptedCanonical,
-      source: PAID_PRO_ACCEPTED_CANONICAL_SOT_DISPLAY_SOURCE,
-      fallbackReason: null,
-      hasSoT,
-      hasServerFullDoc,
-      paidProActive,
-    };
   }
 
   const pickerSource = trim(args.pickerSource);

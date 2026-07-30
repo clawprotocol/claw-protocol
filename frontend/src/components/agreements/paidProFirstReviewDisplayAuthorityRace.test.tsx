@@ -20,6 +20,7 @@ import {
 import {
   clearPaidProSourceOfTruth,
   establishPaidProSourceOfTruth,
+  getPaidProSourceOfTruthText,
   hashPaidProCorpus,
 } from "./paidProSourceOfTruth";
 import {
@@ -85,13 +86,14 @@ describe("P0 first-review display-authority race", () => {
 
   it("1 — accepted canonical server document paints body; never server-locked blank state", async () => {
     const corpus = buildAcceptedCanonicalDocument().trim();
-    const sha = await seedAcceptedCanonical(corpus);
     establishPaidProSourceOfTruth({
       text: corpus,
       source: "server_full_document_text",
       agreementGenerationId: "gen_p0_race",
       reviewSessionId: "gen_p0_race",
     });
+    const frozen = getPaidProSourceOfTruthText().trim();
+    const sha = await seedAcceptedCanonical(frozen);
 
     // Staging race: SoT + verified snapshot exist; displayContext.agreementId still empty.
     const resolution = resolvePaidProFirstReviewVisibleDisplayPlain({
@@ -100,10 +102,10 @@ describe("P0 first-review display-authority race", () => {
       premiumCheckoutCompleted: true,
       premiumPaidDocumentSurface: true,
     });
-    expect(resolution.plain).toBe(corpus);
+    expect(resolution.plain).toBe(frozen);
     expect(resolution.source).toBe("verified_server_canonical_review_snapshot");
     expect(resolution.fallbackReason).toBeNull();
-    expect(hashPaidProCorpus(resolution.plain)).toBe(hashPaidProCorpus(corpus));
+    expect(hashPaidProCorpus(resolution.plain)).toBe(hashPaidProCorpus(frozen));
     expect(sha).toHaveLength(64);
 
     const { container, unmount } = render(
@@ -126,7 +128,7 @@ describe("P0 first-review display-authority race", () => {
     expect(
       resolvePaidProVisibleShellRenderBranch({
         hasSoT: true,
-        sotLen: corpus.length,
+        sotLen: frozen.length,
         htmlLen: 0,
         canonicalPlainLen: resolution.plain.length,
         canonicalPlainSource: resolution.source,
@@ -183,12 +185,13 @@ describe("P0 first-review display-authority race", () => {
 
   it("3 — same canonical hash through review→signer setup; authority read does not re-persist", async () => {
     const corpus = buildAcceptedCanonicalDocument("HASH_STABLE_MARKER").trim();
-    const sha = await seedAcceptedCanonical(corpus);
     establishPaidProSourceOfTruth({
       text: corpus,
       source: "server_full_document_text",
       agreementGenerationId: "gen_hash_stable",
     });
+    const frozen = getPaidProSourceOfTruthText().trim();
+    const sha = await seedAcceptedCanonical(frozen);
     const reviewPlain = resolvePaidProFirstReviewVisibleDisplayPlain({
       agreementId: AGREEMENT_ID,
       paidProActive: true,
@@ -200,25 +203,26 @@ describe("P0 first-review display-authority race", () => {
       premiumCheckoutCompleted: true,
       premiumPaidDocumentSurface: true,
     });
-    expect(hashPaidProCorpus(reviewPlain.plain)).toBe(hashPaidProCorpus(corpus));
+    expect(hashPaidProCorpus(reviewPlain.plain)).toBe(hashPaidProCorpus(frozen));
     expect(hashPaidProCorpus(signerSetupPlain.plain)).toBe(hashPaidProCorpus(reviewPlain.plain));
     expect(reviewPlain.plain).toContain("HASH_STABLE_MARKER");
     // Session authority stays the single stored snapshot (no second corpus write / overwrite).
     const stored = readVerifiedCommercialDisplayCorpus(AGREEMENT_ID);
     expect(stored?.corpusSha256).toBe(sha);
-    expect(stored?.corpusPlain).toBe(corpus);
+    expect(stored?.corpusPlain).toBe(frozen);
     expect(stored?.snapshotId).toBe(SNAPSHOT_ID);
   });
 
   it("4 — stale displayContext agreementId cannot overwrite valid active-session canonical", async () => {
     const corpus = buildAcceptedCanonicalDocument("ACTIVE_SESSION_CANONICAL").trim();
-    await seedAcceptedCanonical(corpus, AGREEMENT_ID);
     establishPaidProSourceOfTruth({
       text: corpus,
       source: "server_full_document_text",
       agreementGenerationId: "gen_active_session",
       reviewSessionId: "gen_active_session",
     });
+    const frozen = getPaidProSourceOfTruthText().trim();
+    await seedAcceptedCanonical(frozen, AGREEMENT_ID);
 
     const painted = resolvePaidProFirstReviewVisibleDisplayPlain({
       agreementId: STALE_AGREEMENT_ID,
@@ -228,7 +232,7 @@ describe("P0 first-review display-authority race", () => {
       pickerPlain: "STALE_FALLBACK_PREVIEW_MUST_NOT_PAINT",
       pickerSource: "live_generated_preview",
     });
-    expect(painted.plain).toBe(corpus);
+    expect(painted.plain).toBe(frozen);
     expect(painted.plain).toContain("ACTIVE_SESSION_CANONICAL");
     expect(painted.plain).not.toContain("STALE_FALLBACK_PREVIEW_MUST_NOT_PAINT");
     expect(painted.source).toBe("verified_server_canonical_review_snapshot");

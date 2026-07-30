@@ -117,7 +117,7 @@ describe("paidProFirstReviewDisplayAuthority", () => {
     });
     const frozen = getPaidProSourceOfTruthText().trim();
     expect(resolution.plain).toBe(frozen);
-    expect(resolution.source).toBe("paid_pro_accepted_canonical_source_of_truth");
+    expect(resolution.source).toBe("review_session_authority");
     expect(resolution.plain).toContain("Sarah Mitchell");
     expect(resolution.plain).not.toContain("simplified starter preview");
   });
@@ -128,7 +128,8 @@ describe("paidProFirstReviewDisplayAuthority", () => {
       text: authority,
       source: "server_full_draft",
     });
-    await seedVerified(authority);
+    const frozen = getPaidProSourceOfTruthText().trim();
+    await seedVerified(frozen);
     const resolution = resolvePaidProFirstReviewVisibleDisplayPlain({
       agreementId: "ag_test310",
       premiumCheckoutCompleted: true,
@@ -139,8 +140,8 @@ describe("paidProFirstReviewDisplayAuthority", () => {
     });
     expect(resolution.plain.length).toBeGreaterThanOrEqual(PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN);
     expect(resolution.source).toBe("verified_server_canonical_review_snapshot");
-    expect(resolution.plain).toContain("Sarah Mitchell");
-    expect(resolution.plain).toContain("Michael Torres");
+    expect(resolution.plain).toBe(frozen);
+    expect(resolution.plain).not.toContain("simplified starter preview");
   });
 
   it("classifies sections 9/10/11 as main headings and 8.1/9.1 as body paragraphs", () => {

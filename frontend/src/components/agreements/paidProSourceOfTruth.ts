@@ -86,6 +86,10 @@ import {
   markPaidReviewSessionPremiumGeneration,
 } from "./paidProReviewSessionCorpusInvariantState";
 import {
+  clearPaidProReviewSessionAuthorityForTests,
+  establishPaidProReviewSessionAuthority,
+} from "./paidProReviewSessionAuthority";
+import {
   enforceAuthoritativeProCorpusDisplay,
   logProCorpusSourceMap,
 } from "./proCorpusSourcePath";
@@ -298,6 +302,7 @@ function trim(s: string | null | undefined): string {
 
 export function clearPaidProSourceOfTruth(): void {
   const oldText = clearPaidProSourceOfTruthState()?.text ?? "";
+  clearPaidProReviewSessionAuthorityForTests();
   clearAuthoritativeAgreementDocument();
   clearFrozenCanonicalAgreementCorpus();
   clearPaidProSignerStagingDisplayCorpus();
@@ -838,6 +843,25 @@ export function establishPaidProSourceOfTruth(args: {
     reviewSessionId: record.reviewSessionId,
     canonicalPlain: record.text,
   });
+  try {
+    establishPaidProReviewSessionAuthority({
+      corpusPlain: record.text,
+      source: requestedSource,
+      integrityOk: true,
+      reviewSessionId: record.reviewSessionId ?? null,
+    });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    if (!message.includes("one_authority_violation")) throw err;
+    // First integrity-valid accept wins — competing freeze candidates must not replace it.
+    if (typeof import.meta !== "undefined" && import.meta.env?.MODE !== "test") {
+      // eslint-disable-next-line no-console
+      console.error("[paid-pro-review-session-authority]", {
+        phase: "one_authority_violation_ignored",
+        message: message.slice(0, 180),
+      });
+    }
+  }
   tracePaidProCorpusMutation({
     store: "paidProSourceOfTruth",
     caller: "establishPaidProSourceOfTruth",

@@ -137,7 +137,7 @@ describe("Patch 5B commercial review paint authority", () => {
     });
     const frozen = getPaidProSourceOfTruthText().trim();
     expect(resolution.plain).toBe(frozen);
-    expect(resolution.source).toBe("paid_pro_accepted_canonical_source_of_truth");
+    expect(resolution.source).toBe("review_session_authority");
     expect(resolution.plain).toContain("LOCAL_SOT_MUST_NOT_PAINT");
     const branch = resolvePaidProVisibleShellRenderBranch({
       hasSoT: true,
@@ -152,7 +152,7 @@ describe("Patch 5B commercial review paint authority", () => {
     expect(hasPaidProChromeAuthority({ agreementId: AGREEMENT_ID })).toBe(false);
   });
 
-  it("checkout-return paints accepted SoT before GET; verified GET wins when present", async () => {
+  it("checkout-return paints accepted SoT before GET; diverging GET cannot replace authority", async () => {
     establishPaidProSourceOfTruth({ text: SOT_LOCAL, source: "server_full_draft" });
     const frozen = getPaidProSourceOfTruthText().trim();
     storeDisplayReviewSnapshotAuthority({
@@ -171,7 +171,7 @@ describe("Patch 5B commercial review paint authority", () => {
       paidProActive: true,
     });
     expect(beforeGet.plain).toBe(frozen);
-    expect(beforeGet.source).toBe("paid_pro_accepted_canonical_source_of_truth");
+    expect(beforeGet.source).toBe("review_session_authority");
 
     await seedVerifiedServerCorpus({ status: "pending" });
     expect(hasPaidProChromeAuthority({ agreementId: AGREEMENT_ID })).toBe(true);
@@ -181,9 +181,10 @@ describe("Patch 5B commercial review paint authority", () => {
       premiumCheckoutCompleted: true,
       paidProActive: true,
     });
-    expect(painted.plain.length).toBeGreaterThanOrEqual(PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN);
-    expect(painted.plain).toContain("SERVER_GET_AUTHORITY_MARKER");
-    expect(painted.source).toBe("verified_server_canonical_review_snapshot");
+    // One-authority: accepted SoT remains paint/persist corpus; competing GET marker ignored.
+    expect(painted.plain).toBe(frozen);
+    expect(painted.source).toBe("review_session_authority");
+    expect(painted.plain).not.toContain("SERVER_GET_AUTHORITY_MARKER");
   });
 
   it("empty agreement ID recovers verified GET corpus for paint; Prepare still requires explicit id+accept", async () => {
@@ -284,16 +285,17 @@ describe("Patch 5B commercial review paint authority", () => {
   });
 
   it("adversarial: completed hydrate + matching verified GET corpus must paint (blank surface fails)", async () => {
-    // SoT rematerialized (hydrate-complete style) while paint still requires verified GET + agreementId.
+    // SoT rematerialized (hydrate-complete style); paint must not blank while agreementId lags.
     establishPaidProSourceOfTruth({
       text: SERVER_CORPUS,
       source: "server_full_draft",
     });
-    await seedVerifiedServerCorpus({ status: "pending", corpus: SERVER_CORPUS });
+    const frozen = getPaidProSourceOfTruthText().trim();
+    await seedVerifiedServerCorpus({ status: "pending", corpus: frozen });
     expect(hasVerifiedCommercialDisplayCorpus(AGREEMENT_ID)).toBe(true);
-    expect(hashPaidProCorpus(SERVER_CORPUS).length).toBeGreaterThan(8);
+    expect(hashPaidProCorpus(frozen).length).toBeGreaterThan(8);
 
-    // Even with empty displayContext.agreementId, verified GET + SoT must paint (P0 race).
+    // Even with empty displayContext.agreementId, matching GET + authority must paint (P0 race).
     const recoveredWithoutAgreementId = resolvePaidProFirstReviewVisibleDisplayPlain({
       agreementId: "",
       premiumCheckoutCompleted: true,
@@ -303,11 +305,11 @@ describe("Patch 5B commercial review paint authority", () => {
     expect(recoveredWithoutAgreementId.plain.length).toBeGreaterThanOrEqual(
       PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN,
     );
-    expect(recoveredWithoutAgreementId.plain).toBe(SERVER_CORPUS.trim());
+    expect(recoveredWithoutAgreementId.plain).toBe(frozen);
     expect(
       resolvePaidProVisibleShellRenderBranch({
         hasSoT: true,
-        sotLen: SERVER_CORPUS.length,
+        sotLen: frozen.length,
         htmlLen: 0,
         canonicalPlainLen: recoveredWithoutAgreementId.plain.length,
         canonicalPlainSource: recoveredWithoutAgreementId.source,
@@ -322,11 +324,11 @@ describe("Patch 5B commercial review paint authority", () => {
       paidProActive: true,
     });
     expect(painted.plain.length).toBeGreaterThanOrEqual(PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN);
-    expect(painted.plain).toBe(SERVER_CORPUS.trim());
+    expect(painted.plain).toBe(frozen);
     expect(painted.source).toBe("verified_server_canonical_review_snapshot");
     const branch = resolvePaidProVisibleShellRenderBranch({
       hasSoT: true,
-      sotLen: SERVER_CORPUS.length,
+      sotLen: frozen.length,
       htmlLen: 0,
       canonicalPlainLen: painted.plain.length,
       canonicalPlainSource: painted.source,

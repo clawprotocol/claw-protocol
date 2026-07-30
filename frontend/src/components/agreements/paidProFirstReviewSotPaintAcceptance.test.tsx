@@ -19,7 +19,6 @@ import {
   resetPaidProDocumentBodyRouterLogsForTests,
 } from "./paidProDocumentBodyRouter";
 import {
-  PAID_PRO_ACCEPTED_CANONICAL_SOT_DISPLAY_SOURCE,
   resolvePaidProFirstReviewVisibleDisplayPlain,
   resetPaidProTest310DisplaySourceLogsForTests,
 } from "./paidProFirstReviewDisplayAuthority";
@@ -103,7 +102,7 @@ describe("first-review ForcedRoute SoT paint acceptance (staging order)", () => 
       pickerSource: "live_generated_preview",
     };
     const resolution = resolvePaidProFirstReviewVisibleDisplayPlain(displayContextBeforePersist);
-    expect(resolution.source).toBe(PAID_PRO_ACCEPTED_CANONICAL_SOT_DISPLAY_SOURCE);
+    expect(resolution.source).toBe("review_session_authority");
     expect(resolution.plain).toBe(frozen);
     expect(resolution.plain).not.toContain("STALE_STARTER_PREVIEW_MUST_NOT_PAINT");
     expect(hashPaidProCorpus(resolution.plain)).toBe(expectedHash);
@@ -179,13 +178,14 @@ describe("first-review ForcedRoute SoT paint acceptance (staging order)", () => 
     unmount();
   });
 
-  it("verified GET corpus still wins over SoT when present for the agreement", async () => {
+  it("diverging verified GET must not replace immutable review-session authority", async () => {
     const sot = buildCanonicalServerDocument().trim();
-    const getCorpus = `${sot}\n\nVERIFIED_GET_WINS_MARKER`;
     establishPaidProSourceOfTruth({
       text: sot,
       source: "server_full_document_text",
     });
+    const frozen = getPaidProSourceOfTruthText().trim();
+    const getCorpus = `${frozen}\n\nVERIFIED_GET_WINS_MARKER`;
     const sha = await sha256CorpusDigest(getCorpus);
     storeVerifiedCommercialDisplayCorpus({
       agreementId: AGREEMENT_ID,
@@ -199,9 +199,38 @@ describe("first-review ForcedRoute SoT paint acceptance (staging order)", () => 
       agreementId: AGREEMENT_ID,
       paidProActive: true,
       premiumPaidDocumentSurface: true,
-      acceptedCanonicalPlain: sot,
+      acceptedCanonicalPlain: frozen,
+    });
+    // One-authority: accepted SoT hash paints; competing longer GET candidate is ignored.
+    expect(painted.source).toBe("review_session_authority");
+    expect(painted.plain).toBe(frozen);
+    expect(painted.plain).not.toContain("VERIFIED_GET_WINS_MARKER");
+    expect(hashPaidProCorpus(painted.plain)).toBe(hashPaidProCorpus(frozen));
+  });
+
+  it("matching verified GET may paint when hash equals review-session authority", async () => {
+    const sot = buildCanonicalServerDocument().trim();
+    establishPaidProSourceOfTruth({
+      text: sot,
+      source: "server_full_document_text",
+    });
+    const frozen = getPaidProSourceOfTruthText().trim();
+    const sha = await sha256CorpusDigest(frozen);
+    storeVerifiedCommercialDisplayCorpus({
+      agreementId: AGREEMENT_ID,
+      snapshotId: "crs_get_match",
+      corpusSha256: sha,
+      corpusLength: frozen.length,
+      status: "pending",
+      corpusPlain: frozen,
+    });
+    const painted = resolvePaidProFirstReviewVisibleDisplayPlain({
+      agreementId: AGREEMENT_ID,
+      paidProActive: true,
+      premiumPaidDocumentSurface: true,
+      acceptedCanonicalPlain: frozen,
     });
     expect(painted.source).toBe("verified_server_canonical_review_snapshot");
-    expect(painted.plain).toContain("VERIFIED_GET_WINS_MARKER");
+    expect(painted.plain).toBe(frozen);
   });
 });

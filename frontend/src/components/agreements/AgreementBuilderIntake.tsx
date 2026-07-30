@@ -1564,10 +1564,12 @@ import {
   shouldAutoPersistReviewAgreementRow,
 } from "./paidProCreateFlowRouting";
 import {
+  isPaidProReviewBodyVisiblyPaintReady,
   persistWorkspaceAgreementAfterReviewReady,
   planReviewReadyPersistFailureUi,
   shouldRunAutoPersistAfterAuthoritativeCommit,
 } from "./paidProReviewReadyWorkspacePersist";
+import { resolvePaidProReviewSessionAuthorityPersistPlain } from "./paidProReviewSessionAuthority";
 import {
   formatPaidCreateFlowDraftPersistFailureMessage,
   isDraftLimitReachedPersistError,
@@ -5465,17 +5467,38 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         lastPremiumWinningCorpusRef.current || premiumPipelineOutputBodyRef.current,
       hydratedPremiumBody: hydratedPremiumBodyRef.current,
     });
-    const corpusPlain = resolveCreateFlowAcceptedPipelineCorpusPlain({
-      draft: snapshot,
-      agreementDocumentText: agreementDocumentTextRef.current,
-      pipelineWinningBody:
-        lastPremiumWinningCorpusRef.current || premiumPipelineOutputBodyRef.current,
-      hydratedPremiumBody: hydratedPremiumBodyRef.current,
-    });
+    const sessionAuthorityPlain = resolvePaidProReviewSessionAuthorityPersistPlain();
+    const corpusPlain =
+      sessionAuthorityPlain.trim().length >= PAID_PRO_AUTHORITY_MIN_LEN
+        ? sessionAuthorityPlain
+        : resolveCreateFlowAcceptedPipelineCorpusPlain({
+            draft: snapshot,
+            agreementDocumentText: agreementDocumentTextRef.current,
+            pipelineWinningBody:
+              lastPremiumWinningCorpusRef.current || premiumPipelineOutputBodyRef.current,
+            hydratedPremiumBody: hydratedPremiumBodyRef.current,
+          });
     const draftForPersist =
       useReviewFirstPersist && corpusPlain.trim().length >= PAID_PRO_AUTHORITY_MIN_LEN
         ? mergeDraftForPaidCreateFlowPersist(snapshot, corpusPlain)
         : snapshot;
+    // Paid/Genesis: never POST /draft until review body paints from the same authority hash.
+    if (useReviewFirstPersist) {
+      const paintReady = isPaidProReviewBodyVisiblyPaintReady({
+        persistCorpusPlain: corpusPlain,
+      });
+      if (!paintReady.ready) {
+        if (import.meta.env.DEV) {
+          // eslint-disable-next-line no-console
+          console.warn("[paid-pro-workspace-persist-blocked]", {
+            reason: paintReady.reason,
+            paintHash: paintReady.paintHash,
+            authorityHash: paintReady.authorityHash,
+          });
+        }
+        return null;
+      }
+    }
     const p = (async (): Promise<string | null> => {
       reviewWorkspaceBootstrapDepthRef.current += 1;
       if (reviewWorkspaceBootstrapDepthRef.current === 1) setReviewWorkspaceBootstrapping(true);
@@ -7079,7 +7102,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           existingAgreementId: reviewAgreementIdRef.current,
           // Entitled rewrite only runs for authenticated Genesis/Pro create — always persist.
           skipFreeStarterCreateSubmit: true,
+          persistCorpusPlain: resolvePaidProReviewSessionAuthorityPersistPlain(),
           ensurePersist: () => ensureReviewAgreementWorkspaceId(),
+          agreementIdForPaintCheck: reviewAgreementIdRef.current,
         });
         if (!persistOutcome.ok) {
           const failureUi = planReviewReadyPersistFailureUi();
@@ -7087,11 +7112,18 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           setPremiumSendPathUnlocked(failureUi.premiumSendPathUnlocked);
           setProFullDraftQualityRetry(failureUi.proFullDraftQualityRetry);
           const persistMsg =
-            "LawDog could not save this agreement to your workspace. Tap Retry to try again — nothing was saved.";
+            persistOutcome.reason === "review_body_not_visibly_paint_ready" ||
+            persistOutcome.reason === "persist_hash_diverges_from_authority" ||
+            persistOutcome.reason === "missing_review_session_authority"
+              ? "LawDog could not confirm the review document before saving. Tap Retry — nothing was saved and no allowance was used."
+              : "LawDog could not save this agreement to your workspace. Tap Retry to try again — nothing was saved.";
           setCreateFlowDraftPersistError(persistMsg);
           setProFullDraftCustomGateMessage(persistMsg);
           logPaidProGenerationTerminalTransition({
-            reason: "review_ready_workspace_persist_failed",
+            reason:
+              persistOutcome.reason === "review_body_not_visibly_paint_ready"
+                ? "review_ready_paint_blocked_persist"
+                : "review_ready_workspace_persist_failed",
             outcome: "failed_recoverable",
           });
         }

@@ -94,8 +94,11 @@ export function resolvePaidProVisibleShellRenderBranch(args: {
         reason:
           args.canonicalPlainSource === "authoritative_signing_snapshot"
             ? "post_finalize_hydrated_snapshot_plain"
-            : args.canonicalPlainSource === "paid_pro_accepted_canonical_source_of_truth"
-              ? "paid_pro_accepted_canonical_source_of_truth"
+            : args.canonicalPlainSource === "paid_pro_accepted_canonical_source_of_truth" ||
+                args.canonicalPlainSource === "review_session_authority"
+              ? args.canonicalPlainSource === "review_session_authority"
+                ? "review_session_authority"
+                : "paid_pro_accepted_canonical_source_of_truth"
               : "paid_pro_first_review_display_authority",
       };
     }
@@ -285,18 +288,19 @@ export function PaidProVisibleDocumentShell({
           data-testid="paid-pro-visible-document-shell-empty"
           data-claw-review-display-gate={
             reason === "paid_pro_awaiting_display_authority"
-              ? "awaiting_server_display_authority"
+              ? "display_authority_gate_failed"
               : reason
           }
+          data-claw-review-actions-locked="true"
         >
-          <p className="font-medium text-stone-600">
+          <p className="font-medium text-stone-700">
             {reason === "paid_pro_awaiting_display_authority"
-              ? "Confirming your server-locked agreement…"
+              ? "LawDog could not confirm the server-locked agreement text for review."
               : "Agreement preview is not available yet."}
           </p>
           {reason === "paid_pro_awaiting_display_authority" ? (
-            <p className="mt-2 text-xs text-stone-400">
-              Review text and Prepare stay locked until the server snapshot is verified.
+            <p className="mt-2 text-xs text-stone-500">
+              Review actions stay locked. Tap Retry to reload the accepted server snapshot — nothing was saved.
             </p>
           ) : null}
         </div>

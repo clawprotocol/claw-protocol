@@ -1,15 +1,55 @@
 /** @vitest-environment jsdom */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import {
   persistWorkspaceAgreementAfterReviewReady,
   planReviewReadyPersistFailureUi,
   shouldRequireWorkspacePersistOnReviewReady,
   shouldRunAutoPersistAfterAuthoritativeCommit,
 } from "./paidProReviewReadyWorkspacePersist";
+import {
+  clearPaidProReviewSessionAuthorityForTests,
+  establishPaidProReviewSessionAuthority,
+} from "./paidProReviewSessionAuthority";
+import { clearPaidProSourceOfTruth, hashPaidProCorpus } from "./paidProSourceOfTruth";
+import { replacePaidProSourceOfTruth } from "./paidProSourceOfTruthState";
+
+function latchPersistReadyAuthority(): string {
+  const pad = "The parties agree to cooperate in good faith on the engagement terms. ".repeat(80);
+  const corpus = [
+    "MUTUAL CONSULTING AND IMPLEMENTATION AGREEMENT",
+    "This Agreement is between LawDog Demo LLC and Acme Test Co.",
+    "1. SCOPE OF SERVICES",
+    "1.1 Provider shall deliver consulting services.",
+    "8. GENERAL PROVISIONS",
+    "9. MISCELLANEOUS",
+    pad,
+    "IN WITNESS WHEREOF, the Parties execute this Agreement.",
+  ].join("\n\n");
+  const plain = corpus.trim();
+  replacePaidProSourceOfTruth({
+    text: plain,
+    hash: hashPaidProCorpus(plain),
+    accepted_at: Date.now(),
+    source: "server_full_draft",
+    reviewSessionId: "gen_persist_test",
+  });
+  establishPaidProReviewSessionAuthority({
+    corpusPlain: plain,
+    source: "server_full_document_text",
+    integrityOk: true,
+    reviewSessionId: "gen_persist_test",
+  });
+  return plain;
+}
 
 describe("paidProReviewReadyWorkspacePersist", () => {
+  afterEach(() => {
+    clearPaidProSourceOfTruth();
+    clearPaidProReviewSessionAuthorityForTests();
+  });
+
   it("requires persist for entitled Genesis/Pro review-ready without an existing id", () => {
     expect(
       shouldRequireWorkspacePersistOnReviewReady({
@@ -54,6 +94,7 @@ describe("paidProReviewReadyWorkspacePersist", () => {
   });
 
   it("integration: Genesis create → persist once → reload list/dashboard/allowance once", async () => {
+    const authorityPlain = latchPersistReadyAuthority();
     let draftPosts = 0;
     let agreementsUsed = 0;
     let workspaceRows: Array<{ id: string; title: string }> = [];
@@ -69,6 +110,7 @@ describe("paidProReviewReadyWorkspacePersist", () => {
     const first = await persistWorkspaceAgreementAfterReviewReady({
       canonicalReviewEntered: true,
       skipFreeStarterCreateSubmit: true,
+      persistCorpusPlain: authorityPlain,
       ensurePersist,
     });
     expect(first).toEqual({ ok: true, agreementId: "ag_genesis_lawdog_acme_1", created: true });
@@ -102,6 +144,7 @@ describe("paidProReviewReadyWorkspacePersist", () => {
   });
 
   it("integration: persist failure does not leave a workspace record or consume allowance", async () => {
+    const authorityPlain = latchPersistReadyAuthority();
     let draftPosts = 0;
     let agreementsUsed = 0;
     const ensurePersist = async () => {
@@ -112,6 +155,7 @@ describe("paidProReviewReadyWorkspacePersist", () => {
     const outcome = await persistWorkspaceAgreementAfterReviewReady({
       canonicalReviewEntered: true,
       skipFreeStarterCreateSubmit: true,
+      persistCorpusPlain: authorityPlain,
       ensurePersist,
     });
     expect(outcome).toEqual({ ok: false, reason: "persist_failed" });

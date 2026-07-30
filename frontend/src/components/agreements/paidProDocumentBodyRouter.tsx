@@ -23,12 +23,20 @@ import {
   getPaidProSourceOfTruthText,
   hasPaidProSourceOfTruth,
 } from "./paidProSourceOfTruth";
+import {
+  hasPaidProReviewSessionAuthority,
+  resolvePaidProReviewSessionAuthorityPaintPlain,
+} from "./paidProReviewSessionAuthority";
 
 /** Minimum frozen SoT length to force visible document shell (inclusive). */
 export const PAID_PRO_DOCUMENT_BODY_SOT_MIN_LEN = 1000;
 
 /** Read-only canonical review corpus length for render routing (no SoT mutation). */
 export function resolveCanonicalReviewCorpusLenForRender(): number {
+  const authority = resolvePaidProReviewSessionAuthorityPaintPlain();
+  if (authority && authority.plain.length >= PAID_PRO_DOCUMENT_BODY_SOT_MIN_LEN) {
+    return authority.plain.length;
+  }
   if (hasPaidProSourceOfTruth()) {
     return getPaidProSourceOfTruthText().trim().length;
   }
@@ -40,7 +48,9 @@ export function resolveCanonicalReviewCorpusLenForRender(): number {
 }
 
 export function hasCanonicalReviewCorpusForRender(): boolean {
-  if (hasPaidProSourceOfTruth() || hasFrozenCanonicalAgreementCorpus()) return true;
+  if (hasPaidProReviewSessionAuthority() || hasPaidProSourceOfTruth() || hasFrozenCanonicalAgreementCorpus()) {
+    return true;
+  }
   return hasAcceptedPipelineReviewCorpusForRender();
 }
 
@@ -68,8 +78,13 @@ export function resetPaidProDocumentBodyRouterLogsForTests(): void {
 }
 
 export function resolvePaidProDocumentBodyRouter(): PaidProDocumentBodyRouterState {
-  const hasSoT = hasPaidProSourceOfTruth();
-  const sotLen = hasSoT ? getPaidProSourceOfTruthText().trim().length : 0;
+  const hasSoT = hasPaidProSourceOfTruth() || hasPaidProReviewSessionAuthority();
+  const authority = resolvePaidProReviewSessionAuthorityPaintPlain();
+  const sotLen = authority?.plain.length
+    ? authority.plain.length
+    : hasPaidProSourceOfTruth()
+      ? getPaidProSourceOfTruthText().trim().length
+      : 0;
   const pipelinePlain = readAcceptedPipelineReviewCorpusPlain();
   const canonicalReviewLen = resolveCanonicalReviewCorpusLenForRender();
   const hasCanonicalCorpus = hasCanonicalReviewCorpusForRender();
@@ -78,11 +93,13 @@ export function resolvePaidProDocumentBodyRouter(): PaidProDocumentBodyRouterSta
       hasSoT,
       sotLen: canonicalReviewLen,
       branch: "paid_pro_visible_shell_forced",
-      reason: hasSoT
-        ? "frozen_sot_len_meets_threshold"
-        : pipelinePlain.length >= PAID_PRO_DOCUMENT_BODY_SOT_MIN_LEN
-          ? "pipeline_accepted_corpus_len_meets_threshold"
-          : "canonical_review_corpus_len_meets_threshold",
+      reason: hasPaidProReviewSessionAuthority()
+        ? "review_session_authority_len_meets_threshold"
+        : hasPaidProSourceOfTruth()
+          ? "frozen_sot_len_meets_threshold"
+          : pipelinePlain.length >= PAID_PRO_DOCUMENT_BODY_SOT_MIN_LEN
+            ? "pipeline_accepted_corpus_len_meets_threshold"
+            : "canonical_review_corpus_len_meets_threshold",
       forced: true,
     };
   }
@@ -144,16 +161,20 @@ export function PaidProDocumentBodyForcedRoute({
     });
   }, [router.hasSoT, router.sotLen, router.branch, router.reason]);
 
-  // Parent→shell boundary: when the router forced this shell because accepted
-  // canonical SoT exists, wire that exact corpus into displayContext so paint
-  // cannot race on missing agreementId / verified GET session keys.
-  const acceptedCanonicalPlain = hasPaidProSourceOfTruth()
-    ? getPaidProSourceOfTruthText().trim()
-    : (displayContext?.acceptedCanonicalPlain || "").trim();
+  // Parent→shell boundary: wire immutable review-session authority (else SoT) so
+  // paint cannot race on missing agreementId / verified GET or a competing hash.
+  const authorityPlain = resolvePaidProReviewSessionAuthorityPaintPlain()?.plain.trim() || "";
+  const acceptedCanonicalPlain =
+    authorityPlain.length >= PAID_PRO_DOCUMENT_BODY_SOT_MIN_LEN
+      ? authorityPlain
+      : hasPaidProSourceOfTruth()
+        ? getPaidProSourceOfTruthText().trim()
+        : (displayContext?.acceptedCanonicalPlain || "").trim();
   const shellDisplayContext: PaidProFirstReviewVisibleDisplayArgs = {
     ...(displayContext ?? {}),
     paidProActive: true,
     premiumPaidDocumentSurface: displayContext?.premiumPaidDocumentSurface ?? true,
+    premiumCheckoutCompleted: displayContext?.premiumCheckoutCompleted ?? true,
     acceptedCanonicalPlain:
       acceptedCanonicalPlain.length >= PAID_PRO_DOCUMENT_BODY_SOT_MIN_LEN
         ? acceptedCanonicalPlain
