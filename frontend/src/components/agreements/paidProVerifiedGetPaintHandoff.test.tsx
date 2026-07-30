@@ -132,7 +132,7 @@ describe("verified GET → visible shell paint handoff", () => {
     unmount();
   });
 
-  it("stays empty when SoT is live but no verified GET corpus exists yet", async () => {
+  it("paints accepted SoT immediately when verified GET corpus is not stored yet", async () => {
     const corpus = buildCorpus().trim();
     establishPaidProSourceOfTruth({
       text: corpus,
@@ -147,12 +147,14 @@ describe("verified GET → visible shell paint handoff", () => {
           paidProActive: true,
           premiumCheckoutCompleted: true,
           premiumPaidDocumentSurface: true,
+          acceptedCanonicalPlain: corpus,
         }}
       />,
     );
     const shell = container.querySelector('[data-testid="paid-pro-visible-document-shell"]');
-    expect(shell?.getAttribute("data-paid-pro-render-branch")).toBe("empty");
-    expect(shell?.textContent || "").not.toContain("VERIFIED_GET_PAINT_MARKER");
+    expect(shell?.getAttribute("data-paid-pro-render-branch")).toBe("canonical_plain_forced");
+    expect(shell?.textContent || "").toContain("VERIFIED_GET_PAINT_MARKER");
+    expect(shell?.textContent || "").not.toMatch(/Confirming your server-locked agreement/i);
     unmount();
   });
 });

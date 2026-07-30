@@ -10,7 +10,11 @@ import {
   resolvePaidProDocumentBodyRouter,
 } from "./paidProDocumentBodyRouter";
 import { resetPaidProVisibleDocumentShellLogsForTests } from "./paidProVisibleDocumentShell";
-import { clearPaidProSourceOfTruth, establishPaidProSourceOfTruth } from "./paidProSourceOfTruth";
+import {
+  clearPaidProSourceOfTruth,
+  establishPaidProSourceOfTruth,
+  getPaidProSourceOfTruthText,
+} from "./paidProSourceOfTruth";
 import { PAID_PRO_REVIEW_VISIBLE_TEXT_MIN } from "./paidProFirstReviewRenderGuard";
 
 const CANONICAL_PLAIN = [
@@ -52,6 +56,7 @@ describe("Test293 paid Pro document body router forced visible shell", () => {
       text: CANONICAL_PLAIN,
       source: "server_full_document_text",
     });
+    const frozen = getPaidProSourceOfTruthText().trim();
     const router = resolvePaidProDocumentBodyRouter();
     render(
       <PaidProDocumentBodyForcedRoute
@@ -67,9 +72,9 @@ describe("Test293 paid Pro document body router forced visible shell", () => {
     );
     const shell = within(forcedRoute).getByTestId("paid-pro-visible-document-shell");
     expect(shell.getAttribute("data-paid-pro-render-branch")).toBe("canonical_plain_forced");
-    expect(
-      within(shell).getByText(/CONSULTING AND IMPLEMENTATION AGREEMENT/i),
-    ).toBeTruthy();
+    expect(Number(shell.getAttribute("data-claw-paint-plain-len") || 0)).toBe(frozen.length);
+    expect(shell.textContent || "").toMatch(/IN WITNESS WHEREOF/i);
+    expect(shell.textContent || "").toMatch(/Operative\s*clause/i);
     expect((forcedRoute.textContent || "").length).toBeGreaterThan(PAID_PRO_REVIEW_VISIBLE_TEXT_MIN);
   });
 

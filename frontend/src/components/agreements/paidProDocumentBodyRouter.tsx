@@ -144,6 +144,22 @@ export function PaidProDocumentBodyForcedRoute({
     });
   }, [router.hasSoT, router.sotLen, router.branch, router.reason]);
 
+  // Parent→shell boundary: when the router forced this shell because accepted
+  // canonical SoT exists, wire that exact corpus into displayContext so paint
+  // cannot race on missing agreementId / verified GET session keys.
+  const acceptedCanonicalPlain = hasPaidProSourceOfTruth()
+    ? getPaidProSourceOfTruthText().trim()
+    : (displayContext?.acceptedCanonicalPlain || "").trim();
+  const shellDisplayContext: PaidProFirstReviewVisibleDisplayArgs = {
+    ...(displayContext ?? {}),
+    paidProActive: true,
+    premiumPaidDocumentSurface: displayContext?.premiumPaidDocumentSurface ?? true,
+    acceptedCanonicalPlain:
+      acceptedCanonicalPlain.length >= PAID_PRO_DOCUMENT_BODY_SOT_MIN_LEN
+        ? acceptedCanonicalPlain
+        : displayContext?.acceptedCanonicalPlain,
+  };
+
   const shell = (
     <PaidProVisibleDocumentShell
       html={html}
@@ -151,7 +167,7 @@ export function PaidProDocumentBodyForcedRoute({
       compactDocumentTopPadding={compactDocumentTopPadding}
       visibleProPaperTrace={visibleProPaperTrace}
       authoritativeSource={authoritativeSource}
-      displayContext={displayContext}
+      displayContext={shellDisplayContext}
     />
   );
 

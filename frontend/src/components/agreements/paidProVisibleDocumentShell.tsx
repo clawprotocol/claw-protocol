@@ -40,6 +40,10 @@ export type PaidProVisibleShellRenderBranch = "canonical_plain_forced" | "html" 
 
 const mountedLogKeys = new Set<string>();
 
+function trimOrEmpty(s: string | null | undefined): string {
+  return (s || "").trim();
+}
+
 export function resetPaidProVisibleDocumentShellLogsForTests(): void {
   mountedLogKeys.clear();
 }
@@ -83,15 +87,22 @@ export function resolvePaidProVisibleShellRenderBranch(args: {
 }): { branch: PaidProVisibleShellRenderBranch; reason: string } {
   const canonicalPlainLen = args.canonicalPlainLen ?? 0;
   if (args.paidProFirstReviewActive) {
-    // A valid verified/accepted canonical plain must always paint immediately.
-    // Never show the server-locked empty body while display authority already resolved.
+    // Never blank first-review while accepted canonical plain OR live SoT exists.
     if (canonicalPlainLen >= PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN) {
       return {
         branch: "canonical_plain_forced",
         reason:
           args.canonicalPlainSource === "authoritative_signing_snapshot"
             ? "post_finalize_hydrated_snapshot_plain"
-            : "paid_pro_first_review_display_authority",
+            : args.canonicalPlainSource === "paid_pro_accepted_canonical_source_of_truth"
+              ? "paid_pro_accepted_canonical_source_of_truth"
+              : "paid_pro_first_review_display_authority",
+      };
+    }
+    if (args.hasSoT && args.sotLen >= PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN) {
+      return {
+        branch: "canonical_plain_forced",
+        reason: "paid_pro_accepted_canonical_source_of_truth",
       };
     }
     return { branch: "empty", reason: "paid_pro_awaiting_display_authority" };
@@ -169,25 +180,37 @@ export function PaidProVisibleDocumentShell({
   const sotLen = sotPlain.length;
   const htmlLen = html.trim().length;
   const paidProFirstReviewActive = Boolean(displayContext?.paidProActive ?? displayContext?.premiumPaidDocumentSurface);
-  const canonicalPlain = resolveCanonicalPlainForVisibleShell(displayContext ?? {});
+  // Parent may wire acceptedCanonicalPlain before agreementId / verified GET land.
+  const displayContextWithCanonical: PaidProFirstReviewVisibleDisplayArgs = {
+    ...(displayContext ?? {}),
+    acceptedCanonicalPlain:
+      trimOrEmpty(displayContext?.acceptedCanonicalPlain) ||
+      (hasSoT ? sotPlain : ""),
+    paidProActive: paidProFirstReviewActive || Boolean(displayContext?.paidProActive),
+  };
+  const canonicalPlain = resolveCanonicalPlainForVisibleShell(displayContextWithCanonical);
+  const paintPlain =
+    canonicalPlain.plain.length >= PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN
+      ? canonicalPlain.plain
+      : hasSoT && sotLen >= PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN
+        ? sotPlain
+        : "";
+  const paintSource =
+    canonicalPlain.plain.length >= PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN
+      ? canonicalPlain.source
+      : paintPlain
+        ? "paid_pro_accepted_canonical_source_of_truth"
+        : authoritativeSource;
   const { branch, reason } = resolvePaidProVisibleShellRenderBranch({
     hasSoT,
     sotLen,
     htmlLen,
-    canonicalPlainLen: canonicalPlain.plain.length,
-    canonicalPlainSource: canonicalPlain.source,
+    canonicalPlainLen: paintPlain.length,
+    canonicalPlainSource: paintSource,
     paidProFirstReviewActive,
   });
-  // Never fall back to local SoT for paint — commercial corpus must come from verified GET.
-  const renderPlain =
-    branch === "canonical_plain_forced" &&
-    canonicalPlain.plain.length >= PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN
-      ? canonicalPlain.plain
-      : "";
-  const renderSource =
-    branch === "canonical_plain_forced" && canonicalPlain.plain.length >= PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN
-      ? canonicalPlain.source
-      : authoritativeSource;
+  const renderPlain = branch === "canonical_plain_forced" ? paintPlain : "";
+  const renderSource = branch === "canonical_plain_forced" ? paintSource : authoritativeSource;
 
   useEffect(() => {
     logPaidProVisibleShellOwnerMounted({

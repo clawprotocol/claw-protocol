@@ -1,6 +1,10 @@
 /**
- * TEST310 / Patch 5B — first paid Pro review visible display authority.
- * Commercial paint is server-GET-only: no SoT / completion-snap / latched / picker fallbacks.
+ * First paid Pro review visible display authority.
+ *
+ * Paint order for commercial first-review:
+ *  1. Verified GET /canonical-review-snapshot corpus (preferred when present)
+ *  2. Accepted frozen paid Pro Source of Truth (active-session canonical)
+ *  3. Otherwise empty — never paint live preview / completion-snap / picker alone
  */
 
 import {
@@ -27,6 +31,7 @@ import {
 } from "./paidProDisplayPlainAuthority";
 import { isPaidProPostFinalizeHydratedCorpusLocked } from "./paidProSignerMetadataCommitPolicy";
 import {
+  getPaidProSourceOfTruthText,
   hashPaidProCorpus,
   hasPaidProSourceOfTruth,
 } from "./paidProSourceOfTruth";
@@ -34,6 +39,9 @@ import {
   hasPaidPremiumCompletionSession,
 } from "./premiumCompletionStorage";
 import { isForbiddenPaidProDisplayRenderSource } from "./premiumGenerationApiAvailability";
+
+export const PAID_PRO_ACCEPTED_CANONICAL_SOT_DISPLAY_SOURCE =
+  "paid_pro_accepted_canonical_source_of_truth";
 
 export type PaidProFirstReviewVisibleDisplayResolution = {
   plain: string;
@@ -56,8 +64,13 @@ export type PaidProFirstReviewVisibleDisplayArgs = {
   /** Picker output — never paint-eligible in commercial mode (hint only). */
   pickerPlain?: string | null;
   pickerSource?: string | null;
-  /** Required for commercial paint: nonempty agreement id + verified GET corpus. */
+  /** Agreement id when known; paint must not require it once accepted SoT exists. */
   agreementId?: string | null;
+  /**
+   * Parent-wired accepted canonical plain for the active review session.
+   * Used when SoT is live but verified GET / agreementId have not landed yet.
+   */
+  acceptedCanonicalPlain?: string | null;
 };
 
 function trim(s: string | null | undefined): string {
@@ -96,8 +109,6 @@ function commercialDisplayGateActive(args: PaidProFirstReviewVisibleDisplayArgs)
 /**
  * Recover paint agreement id when React displayContext lags behind a successful
  * server snapshot prepare/GET (resume id / display authority already held in session).
- * Prefer an id that already has verified GET corpus so a stale/empty context cannot
- * blank a valid canonical document for the active review session.
  */
 function resolveCommercialPaintAgreementId(preferred?: string | null): string {
   const fromArg = trim(preferred);
@@ -109,21 +120,27 @@ function resolveCommercialPaintAgreementId(preferred?: string | null): string {
   if (fromDisplay && hasVerifiedCommercialDisplayCorpus(fromDisplay)) {
     return fromDisplay;
   }
-  // Verified corpus bytes may already be present while displayContext.agreementId
-  // is still empty (or briefly stale) on the same tick as SoT/review chrome unlock.
   const verifiedAny = readVerifiedCommercialDisplayCorpus();
   const fromVerified = trim(verifiedAny?.agreementId);
   if (fromVerified) return fromVerified;
   return fromArg;
 }
 
+function resolveAcceptedCanonicalPaintPlain(
+  args: PaidProFirstReviewVisibleDisplayArgs,
+): string {
+  const fromParent = trim(args.acceptedCanonicalPlain);
+  const fromSoT = hasPaidProSourceOfTruth() ? trim(getPaidProSourceOfTruthText()) : "";
+  // Prefer live SoT when both exist so parent prop cannot diverge from freeze.
+  if (fromSoT.length >= PAID_PRO_AUTHORITY_MIN_LEN) return fromSoT;
+  if (fromParent.length >= PAID_PRO_AUTHORITY_MIN_LEN) return fromParent;
+  return "";
+}
+
 /**
- * Resolve visible first-review plain from verified server GET authority only.
- * Local SoT / completion snap / latched draft / picker must never paint commercial review corpus.
- *
- * Once a verified canonical server snapshot exists for the active review session,
- * paint that exact corpus immediately — never blank the body on a transient
- * missing agreementId / displayContext race.
+ * Resolve visible first-review plain.
+ * Verified GET wins when present; otherwise paint the accepted frozen SoT / parent
+ * canonical immediately so first-review never blanks while draft persist races.
  */
 export function resolvePaidProFirstReviewVisibleDisplayPlain(
   args: PaidProFirstReviewVisibleDisplayArgs = {},
@@ -145,56 +162,30 @@ export function resolvePaidProFirstReviewVisibleDisplayPlain(
     };
   }
 
-  if (!agreementId) {
-    return {
-      plain: "",
-      source: "none",
-      fallbackReason: "missing_agreement_id",
-      hasSoT,
-      hasServerFullDoc,
-      paidProActive,
-    };
-  }
-
-  if (!hasVerifiedCommercialDisplayCorpus(agreementId)) {
-    const pickerSource = trim(args.pickerSource);
-    const pickerForbidden =
-      paidProActive && isForbiddenPaidProDisplayRenderSource(pickerSource);
-    return {
-      plain: "",
-      source: "none",
-      fallbackReason: "awaiting_server_display_authority",
-      hasSoT,
-      hasServerFullDoc,
-      paidProActive,
-      forbiddenSourceBlocked: pickerForbidden || undefined,
-    };
-  }
-
-  const verified = readVerifiedCommercialDisplayCorpus(agreementId);
-  const verifiedPlain = trim(verified?.corpusPlain);
-  if (verifiedPlain.length < PAID_PRO_AUTHORITY_MIN_LEN) {
-    return {
-      plain: "",
-      source: "none",
-      fallbackReason: "awaiting_server_display_authority",
-      hasSoT,
-      hasServerFullDoc,
-      paidProActive,
-    };
-  }
-
-  // Post-finalize may project signer-hydrated text only after verified GET authority exists.
-  if (isPaidProPostFinalizeHydratedCorpusLocked()) {
-    const locked = resolvePaidProPostFinalizeReviewPlain().trim();
-    if (locked.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
-      const plain = resolvePaidProPostFinalizeUserVisiblePlain(
-        locked,
-        draft as import("../../agreement/agreementTypes").AgreementDraft | null,
-      );
+  if (agreementId && hasVerifiedCommercialDisplayCorpus(agreementId)) {
+    const verified = readVerifiedCommercialDisplayCorpus(agreementId);
+    const verifiedPlain = trim(verified?.corpusPlain);
+    if (verifiedPlain.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
+      if (isPaidProPostFinalizeHydratedCorpusLocked()) {
+        const locked = resolvePaidProPostFinalizeReviewPlain().trim();
+        if (locked.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
+          const plain = resolvePaidProPostFinalizeUserVisiblePlain(
+            locked,
+            draft as import("../../agreement/agreementTypes").AgreementDraft | null,
+          );
+          return {
+            plain,
+            source: "authoritative_signing_snapshot",
+            fallbackReason: null,
+            hasSoT,
+            hasServerFullDoc,
+            paidProActive,
+          };
+        }
+      }
       return {
-        plain,
-        source: "authoritative_signing_snapshot",
+        plain: verifiedPlain,
+        source: "verified_server_canonical_review_snapshot",
         fallbackReason: null,
         hasSoT,
         hasServerFullDoc,
@@ -203,32 +194,80 @@ export function resolvePaidProFirstReviewVisibleDisplayPlain(
     }
   }
 
+  const acceptedCanonical = resolveAcceptedCanonicalPaintPlain(args);
+  if (acceptedCanonical.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
+    return {
+      plain: acceptedCanonical,
+      source: PAID_PRO_ACCEPTED_CANONICAL_SOT_DISPLAY_SOURCE,
+      fallbackReason: null,
+      hasSoT,
+      hasServerFullDoc,
+      paidProActive,
+    };
+  }
+
+  const pickerSource = trim(args.pickerSource);
+  const pickerForbidden =
+    paidProActive && isForbiddenPaidProDisplayRenderSource(pickerSource);
+
+  if (!agreementId) {
+    return {
+      plain: "",
+      source: "none",
+      fallbackReason: "missing_agreement_id",
+      hasSoT,
+      hasServerFullDoc,
+      paidProActive,
+      forbiddenSourceBlocked: pickerForbidden || undefined,
+    };
+  }
+
   return {
-    plain: verifiedPlain,
-    source: "verified_server_canonical_review_snapshot",
-    fallbackReason: null,
+    plain: "",
+    source: "none",
+    fallbackReason: "awaiting_server_display_authority",
     hasSoT,
     hasServerFullDoc,
     paidProActive,
+    forbiddenSourceBlocked: pickerForbidden || undefined,
   };
 }
 
-let lastTest310DisplaySourceKey = "";
+let lastDisplaySourceInvariantKey = "";
 
 export function resetPaidProTest310DisplaySourceLogsForTests(): void {
-  lastTest310DisplaySourceKey = "";
+  lastDisplaySourceInvariantKey = "";
 }
 
+/**
+ * Production-safe paint invariant: never keep an empty display source while an
+ * accepted canonical SoT already exists for the active review session.
+ */
 export function logTest310DisplaySource(resolution: PaidProFirstReviewVisibleDisplayResolution): void {
   if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
-  const key = `${resolution.source}|${resolution.plain.length}|${resolution.fallbackReason ?? ""}`;
-  if (key === lastTest310DisplaySourceKey) return;
-  lastTest310DisplaySourceKey = key;
+  const key = `${resolution.source}|${resolution.plain.length}|${resolution.fallbackReason ?? ""}|${resolution.hasSoT}`;
+  if (key === lastDisplaySourceInvariantKey) return;
+  lastDisplaySourceInvariantKey = key;
+  if (resolution.hasSoT && resolution.plain.length < PAID_PRO_AUTHORITY_MIN_LEN) {
+    // eslint-disable-next-line no-console
+    console.warn("[paid-pro-first-review-paint-invariant]", {
+      source: resolution.source,
+      len: resolution.plain.length,
+      hash: null,
+      hasSoT: resolution.hasSoT,
+      hasServerFullDoc: resolution.hasServerFullDoc,
+      paidProActive: resolution.paidProActive,
+      fallbackReason: resolution.fallbackReason,
+      invariant: "accepted_sot_must_paint",
+    });
+    return;
+  }
+  if (resolution.plain.length < 80) return;
   // eslint-disable-next-line no-console
-  console.info("[test310-display-source]", {
+  console.info("[paid-pro-first-review-paint-source]", {
     source: resolution.source,
     len: resolution.plain.length,
-    hash: resolution.plain.length >= 80 ? hashPaidProCorpus(resolution.plain) : null,
+    hash: hashPaidProCorpus(resolution.plain),
     hasSoT: resolution.hasSoT,
     hasServerFullDoc: resolution.hasServerFullDoc,
     paidProActive: resolution.paidProActive,

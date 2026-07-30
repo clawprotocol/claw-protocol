@@ -17930,6 +17930,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         readDisplayReviewSnapshotAuthority()?.agreementId ||
         ""
       ).trim(),
+      // Wire accepted frozen SoT into shell displayContext so first-review paint
+      // does not wait on draft persist / verified GET session keys.
+      acceptedCanonicalPlain: hasPaidProSourceOfTruth()
+        ? getPaidProSourceOfTruthText().trim()
+        : "",
     }),
     [
       reviewDraft,

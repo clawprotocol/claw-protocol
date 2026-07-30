@@ -22,6 +22,7 @@ import {
 import {
   clearPaidProSourceOfTruth,
   establishPaidProSourceOfTruth,
+  getPaidProSourceOfTruthText,
   hashPaidProCorpus,
 } from "./paidProSourceOfTruth";
 import {
@@ -123,7 +124,7 @@ describe("Patch 5B commercial review paint authority", () => {
     expect(hasVerifiedCommercialDisplayCorpus(AGREEMENT_ID)).toBe(false);
   });
 
-  it("local SoT / accepted-corpus data cannot paint review corpus before GET", () => {
+  it("accepted frozen SoT paints first-review immediately; Prepare still requires verified GET+accept", () => {
     establishPaidProSourceOfTruth({
       text: SOT_LOCAL,
       source: "server_full_draft",
@@ -134,39 +135,43 @@ describe("Patch 5B commercial review paint authority", () => {
       premiumPaidDocumentSurface: true,
       paidProActive: true,
     });
-    expect(resolution.plain).toBe("");
-    expect(resolution.fallbackReason).toBe("awaiting_server_display_authority");
-    expect(resolution.plain).not.toContain("LOCAL_SOT_MUST_NOT_PAINT");
+    const frozen = getPaidProSourceOfTruthText().trim();
+    expect(resolution.plain).toBe(frozen);
+    expect(resolution.source).toBe("paid_pro_accepted_canonical_source_of_truth");
+    expect(resolution.plain).toContain("LOCAL_SOT_MUST_NOT_PAINT");
     const branch = resolvePaidProVisibleShellRenderBranch({
       hasSoT: true,
-      sotLen: SOT_LOCAL.length,
+      sotLen: frozen.length,
       htmlLen: 0,
       canonicalPlainLen: resolution.plain.length,
+      canonicalPlainSource: resolution.source,
       paidProFirstReviewActive: true,
     });
-    expect(branch.branch).toBe("empty");
-    expect(branch.reason).toBe("paid_pro_awaiting_display_authority");
+    expect(branch.branch).toBe("canonical_plain_forced");
+    expect(canEnableCommercialPrepareFromServerSnapshot(AGREEMENT_ID)).toBe(false);
+    expect(hasPaidProChromeAuthority({ agreementId: AGREEMENT_ID })).toBe(false);
   });
 
-  it("checkout-return and entitlement-rewrite stay locked until verified GET", async () => {
+  it("checkout-return paints accepted SoT before GET; verified GET wins when present", async () => {
     establishPaidProSourceOfTruth({ text: SOT_LOCAL, source: "server_full_draft" });
+    const frozen = getPaidProSourceOfTruthText().trim();
     storeDisplayReviewSnapshotAuthority({
       agreementId: AGREEMENT_ID,
       snapshotId: SNAPSHOT_ID,
       corpusSha256: "a".repeat(64),
-      corpusLength: SOT_LOCAL.length,
+      corpusLength: frozen.length,
       status: "pending",
     });
-    // Metadata alone (no GET corpus bytes) must not unlock chrome / Prepare / paint.
+    // Metadata alone (no GET corpus bytes) must not unlock chrome / Prepare.
     expect(hasPaidProChromeAuthority({ agreementId: AGREEMENT_ID })).toBe(false);
     expect(canEnableCommercialPrepareFromServerSnapshot(AGREEMENT_ID)).toBe(false);
-    expect(
-      resolvePaidProFirstReviewVisibleDisplayPlain({
-        agreementId: AGREEMENT_ID,
-        premiumCheckoutCompleted: true,
-        paidProActive: true,
-      }).plain,
-    ).toBe("");
+    const beforeGet = resolvePaidProFirstReviewVisibleDisplayPlain({
+      agreementId: AGREEMENT_ID,
+      premiumCheckoutCompleted: true,
+      paidProActive: true,
+    });
+    expect(beforeGet.plain).toBe(frozen);
+    expect(beforeGet.source).toBe("paid_pro_accepted_canonical_source_of_truth");
 
     await seedVerifiedServerCorpus({ status: "pending" });
     expect(hasPaidProChromeAuthority({ agreementId: AGREEMENT_ID })).toBe(true);

@@ -10,7 +10,11 @@ import {
   resetPaidProVisibleDocumentShellLogsForTests,
   resolvePaidProVisibleShellRenderBranch,
 } from "./paidProVisibleDocumentShell";
-import { clearPaidProSourceOfTruth, establishPaidProSourceOfTruth } from "./paidProSourceOfTruth";
+import {
+  clearPaidProSourceOfTruth,
+  establishPaidProSourceOfTruth,
+  getPaidProSourceOfTruthText,
+} from "./paidProSourceOfTruth";
 import { PAID_PRO_REVIEW_VISIBLE_TEXT_MIN } from "./paidProFirstReviewRenderGuard";
 
 const CANONICAL_PLAIN = [
@@ -53,6 +57,7 @@ describe("Test292 paid Pro visible shell owner forced canonical plain", () => {
       text: CANONICAL_PLAIN,
       source: "server_full_document_text",
     });
+    const frozen = getPaidProSourceOfTruthText().trim();
     render(
       <PaidProVisibleDocumentShell
         html={HOLLOW_HTML}
@@ -65,9 +70,12 @@ describe("Test292 paid Pro visible shell owner forced canonical plain", () => {
       PAID_PRO_VISIBLE_SHELL_COMPONENT_NAME,
     );
     expect(shell.getAttribute("data-paid-pro-render-branch")).toBe("canonical_plain_forced");
-    expect(
-      within(shell).getByText(/CONSULTING AND IMPLEMENTATION AGREEMENT/i),
-    ).toBeTruthy();
+    expect(Number(shell.getAttribute("data-claw-paint-plain-len") || 0)).toBeGreaterThanOrEqual(
+      PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN,
+    );
+    expect(Number(shell.getAttribute("data-claw-paint-plain-len") || 0)).toBe(frozen.length);
+    expect(shell.textContent || "").toMatch(/IN WITNESS WHEREOF/i);
+    expect(shell.textContent || "").toMatch(/Operative\s*clause/i);
     expect((shell.textContent || "").length).toBeGreaterThan(PAID_PRO_REVIEW_VISIBLE_TEXT_MIN);
     expect(within(shell).getByTestId("simple-pro-final-review-paid-sot-body")).toBeTruthy();
   });
@@ -77,10 +85,12 @@ describe("Test292 paid Pro visible shell owner forced canonical plain", () => {
       text: CANONICAL_PLAIN,
       source: "server_full_document_text",
     });
+    const frozen = getPaidProSourceOfTruthText().trim();
     render(<PaidProVisibleDocumentShell html="" />);
     const shell = screen.getByTestId("paid-pro-visible-document-shell");
     expect(shell.getAttribute("data-paid-pro-render-branch")).toBe("canonical_plain_forced");
-    expect(within(shell).getByText(/Section 1\. Scope of services/i)).toBeTruthy();
+    expect(Number(shell.getAttribute("data-claw-paint-plain-len") || 0)).toBe(frozen.length);
+    expect(shell.textContent || "").toMatch(/IN WITNESS WHEREOF/i);
   });
 
   it("AgreementBuilderIntake wires PaidProVisibleDocumentShell on legacy paid review branch", () => {

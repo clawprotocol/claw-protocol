@@ -19,6 +19,7 @@ import {
 import {
   clearPaidProSourceOfTruth,
   establishPaidProSourceOfTruth,
+  getPaidProSourceOfTruthText,
 } from "./paidProSourceOfTruth";
 import {
   PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN,
@@ -100,7 +101,7 @@ describe("paidProFirstReviewDisplayAuthority", () => {
     expect(isForbiddenPaidProDisplayRenderSource("live_generated_preview")).toBe(true);
   });
 
-  it("does not paint local SoT before verified server GET authority", () => {
+  it("paints accepted frozen SoT when verified GET is not stored yet; never paints live preview", () => {
     const authority = buildProAuthorityCorpus();
     establishPaidProSourceOfTruth({
       text: authority,
@@ -114,8 +115,11 @@ describe("paidProFirstReviewDisplayAuthority", () => {
       pickerSource: "live_generated_preview",
       paidProActive: true,
     });
-    expect(resolution.plain).toBe("");
-    expect(resolution.fallbackReason).toBe("awaiting_server_display_authority");
+    const frozen = getPaidProSourceOfTruthText().trim();
+    expect(resolution.plain).toBe(frozen);
+    expect(resolution.source).toBe("paid_pro_accepted_canonical_source_of_truth");
+    expect(resolution.plain).toContain("Sarah Mitchell");
+    expect(resolution.plain).not.toContain("simplified starter preview");
   });
 
   it("paints verified server GET corpus (not local SoT / live preview) when authority matches", async () => {
