@@ -17922,10 +17922,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       paidProActive: paidProFirstReviewDisplayActive,
       // Prefer React state — refs/resume alone can leave paint blank after verified GET
       // while SoT markers are already live (stale useMemo / effect ordering).
+      // Also recover from verified display authority when state/resume lag one tick.
       agreementId: (
         reviewAgreementId ||
         reviewAgreementIdRef.current ||
         readCreateReviewAgreementResumeId() ||
+        readDisplayReviewSnapshotAuthority()?.agreementId ||
         ""
       ).trim(),
     }),

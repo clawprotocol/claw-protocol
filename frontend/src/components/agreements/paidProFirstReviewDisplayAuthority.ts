@@ -5,6 +5,7 @@
 
 import {
   hasVerifiedCommercialDisplayCorpus,
+  readDisplayReviewSnapshotAuthority,
   readVerifiedCommercialDisplayCorpus,
 } from "../../agreement/canonicalReviewSnapshotApi";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
@@ -93,14 +94,42 @@ function commercialDisplayGateActive(args: PaidProFirstReviewVisibleDisplayArgs)
 }
 
 /**
+ * Recover paint agreement id when React displayContext lags behind a successful
+ * server snapshot prepare/GET (resume id / display authority already held in session).
+ * Prefer an id that already has verified GET corpus so a stale/empty context cannot
+ * blank a valid canonical document for the active review session.
+ */
+function resolveCommercialPaintAgreementId(preferred?: string | null): string {
+  const fromArg = trim(preferred);
+  if (fromArg && hasVerifiedCommercialDisplayCorpus(fromArg)) {
+    return fromArg;
+  }
+  const display = readDisplayReviewSnapshotAuthority();
+  const fromDisplay = trim(display?.agreementId);
+  if (fromDisplay && hasVerifiedCommercialDisplayCorpus(fromDisplay)) {
+    return fromDisplay;
+  }
+  // Verified corpus bytes may already be present while displayContext.agreementId
+  // is still empty (or briefly stale) on the same tick as SoT/review chrome unlock.
+  const verifiedAny = readVerifiedCommercialDisplayCorpus();
+  const fromVerified = trim(verifiedAny?.agreementId);
+  if (fromVerified) return fromVerified;
+  return fromArg;
+}
+
+/**
  * Resolve visible first-review plain from verified server GET authority only.
  * Local SoT / completion snap / latched draft / picker must never paint commercial review corpus.
+ *
+ * Once a verified canonical server snapshot exists for the active review session,
+ * paint that exact corpus immediately — never blank the body on a transient
+ * missing agreementId / displayContext race.
  */
 export function resolvePaidProFirstReviewVisibleDisplayPlain(
   args: PaidProFirstReviewVisibleDisplayArgs = {},
 ): PaidProFirstReviewVisibleDisplayResolution {
   const draft = args.draft ?? null;
-  const agreementId = trim(args.agreementId);
+  const agreementId = resolveCommercialPaintAgreementId(args.agreementId);
   const paidProActive = commercialDisplayGateActive(args);
   const hasSoT = hasPaidProSourceOfTruth();
   const hasServerFullDoc = draftServerFullDocumentExists(draft);
@@ -133,7 +162,7 @@ export function resolvePaidProFirstReviewVisibleDisplayPlain(
       paidProActive && isForbiddenPaidProDisplayRenderSource(pickerSource);
     return {
       plain: "",
-      source: pickerForbidden ? "none" : "none",
+      source: "none",
       fallbackReason: "awaiting_server_display_authority",
       hasSoT,
       hasServerFullDoc,

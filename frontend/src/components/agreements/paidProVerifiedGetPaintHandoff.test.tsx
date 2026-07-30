@@ -97,7 +97,7 @@ describe("verified GET → visible shell paint handoff", () => {
     unmount();
   });
 
-  it("does not paint when SoT is live but displayContext agreementId is missing", async () => {
+  it("paints verified GET corpus even when displayContext agreementId lags (P0 race)", async () => {
     const corpus = buildCorpus().trim();
     const sha = await sha256CorpusDigest(corpus);
     establishPaidProSourceOfTruth({
@@ -125,8 +125,33 @@ describe("verified GET → visible shell paint handoff", () => {
       />,
     );
     const shell = container.querySelector('[data-testid="paid-pro-visible-document-shell"]');
+    expect(shell?.getAttribute("data-paid-pro-render-branch")).toBe("canonical_plain_forced");
+    expect(Number(shell?.getAttribute("data-claw-paint-plain-len") || 0)).toBeGreaterThanOrEqual(1001);
+    expect(shell?.textContent || "").toContain("VERIFIED_GET_PAINT_MARKER");
+    expect(shell?.textContent || "").not.toMatch(/Confirming your server-locked agreement/i);
+    unmount();
+  });
+
+  it("stays empty when SoT is live but no verified GET corpus exists yet", async () => {
+    const corpus = buildCorpus().trim();
+    establishPaidProSourceOfTruth({
+      text: corpus,
+      source: "server_full_draft",
+    });
+
+    const { container, unmount } = render(
+      <PaidProVisibleDocumentShell
+        html=""
+        displayContext={{
+          agreementId: "",
+          paidProActive: true,
+          premiumCheckoutCompleted: true,
+          premiumPaidDocumentSurface: true,
+        }}
+      />,
+    );
+    const shell = container.querySelector('[data-testid="paid-pro-visible-document-shell"]');
     expect(shell?.getAttribute("data-paid-pro-render-branch")).toBe("empty");
-    expect(shell?.getAttribute("data-claw-paint-plain-len")).toBeNull();
     expect(shell?.textContent || "").not.toContain("VERIFIED_GET_PAINT_MARKER");
     unmount();
   });

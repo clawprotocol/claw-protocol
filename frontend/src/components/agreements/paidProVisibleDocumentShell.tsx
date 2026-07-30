@@ -83,6 +83,8 @@ export function resolvePaidProVisibleShellRenderBranch(args: {
 }): { branch: PaidProVisibleShellRenderBranch; reason: string } {
   const canonicalPlainLen = args.canonicalPlainLen ?? 0;
   if (args.paidProFirstReviewActive) {
+    // A valid verified/accepted canonical plain must always paint immediately.
+    // Never show the server-locked empty body while display authority already resolved.
     if (canonicalPlainLen >= PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN) {
       return {
         branch: "canonical_plain_forced",

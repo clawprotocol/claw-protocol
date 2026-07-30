@@ -181,8 +181,23 @@ describe("Patch 5B commercial review paint authority", () => {
     expect(painted.source).toBe("verified_server_canonical_review_snapshot");
   });
 
-  it("empty agreement ID blocks review-ready / Prepare state", async () => {
+  it("empty agreement ID recovers verified GET corpus for paint; Prepare still requires explicit id+accept", async () => {
     await seedVerifiedServerCorpus();
+    // Transient missing displayContext.agreementId must not blank a verified canonical document.
+    const resolution = resolvePaidProFirstReviewVisibleDisplayPlain({
+      agreementId: "",
+      premiumCheckoutCompleted: true,
+      paidProActive: true,
+    });
+    expect(resolution.plain.length).toBeGreaterThanOrEqual(PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN);
+    expect(resolution.plain).toContain("SERVER_GET_AUTHORITY_MARKER");
+    expect(resolution.source).toBe("verified_server_canonical_review_snapshot");
+    expect(canEnableCommercialPrepareFromServerSnapshot("")).toBe(false);
+    expect(canEnableCommercialPrepareFromServerSnapshot(null)).toBe(false);
+    expect(hasPaidProChromeAuthority({ agreementId: "" })).toBe(false);
+  });
+
+  it("truly missing verified corpus with empty agreement ID stays blocked", () => {
     const resolution = resolvePaidProFirstReviewVisibleDisplayPlain({
       agreementId: "",
       premiumCheckoutCompleted: true,
@@ -190,9 +205,6 @@ describe("Patch 5B commercial review paint authority", () => {
     });
     expect(resolution.plain).toBe("");
     expect(resolution.fallbackReason).toBe("missing_agreement_id");
-    expect(canEnableCommercialPrepareFromServerSnapshot("")).toBe(false);
-    expect(canEnableCommercialPrepareFromServerSnapshot(null)).toBe(false);
-    expect(hasPaidProChromeAuthority({ agreementId: "" })).toBe(false);
   });
 
   it("GET mismatch / failure leaves no legal corpus visible and blocks Prepare/dispatch", async () => {
@@ -276,23 +288,27 @@ describe("Patch 5B commercial review paint authority", () => {
     expect(hasVerifiedCommercialDisplayCorpus(AGREEMENT_ID)).toBe(true);
     expect(hashPaidProCorpus(SERVER_CORPUS).length).toBeGreaterThan(8);
 
-    const stuckWithoutAgreementId = resolvePaidProFirstReviewVisibleDisplayPlain({
+    // Even with empty displayContext.agreementId, verified GET + SoT must paint (P0 race).
+    const recoveredWithoutAgreementId = resolvePaidProFirstReviewVisibleDisplayPlain({
       agreementId: "",
       premiumCheckoutCompleted: true,
       premiumPaidDocumentSurface: true,
       paidProActive: true,
     });
-    expect(stuckWithoutAgreementId.plain).toBe("");
-    expect(stuckWithoutAgreementId.fallbackReason).toBe("missing_agreement_id");
+    expect(recoveredWithoutAgreementId.plain.length).toBeGreaterThanOrEqual(
+      PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN,
+    );
+    expect(recoveredWithoutAgreementId.plain).toBe(SERVER_CORPUS.trim());
     expect(
       resolvePaidProVisibleShellRenderBranch({
         hasSoT: true,
         sotLen: SERVER_CORPUS.length,
         htmlLen: 0,
-        canonicalPlainLen: stuckWithoutAgreementId.plain.length,
+        canonicalPlainLen: recoveredWithoutAgreementId.plain.length,
+        canonicalPlainSource: recoveredWithoutAgreementId.source,
         paidProFirstReviewActive: true,
       }).branch,
-    ).toBe("empty");
+    ).toBe("canonical_plain_forced");
 
     const painted = resolvePaidProFirstReviewVisibleDisplayPlain({
       agreementId: AGREEMENT_ID,
