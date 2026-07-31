@@ -391,16 +391,25 @@ def assert_can_complete_agreement(*, agreement_id: str) -> Optional[str]:
     )
 
 
-def record_draft_created(*, agreement_id: str, subject_ref: str, request_ip: str) -> None:
+def record_draft_created(
+    *,
+    agreement_id: str,
+    subject_ref: str,
+    request_ip: str,
+    idempotency_key: Optional[str] = None,
+) -> str:
     """
-    Register agreement ownership (and optionally meter draft keys).
+    Register agreement ownership (and optionally meter draft keys) after a successful persist.
 
     Ownership is stamped whenever commercial mode is enforced *or* usage economics
     metering is enabled — never skip the ownership row because metering is off.
     Key/IP metering events remain economics-gated.
 
     Genesis monthly allowance is enforced transactionally here so concurrent creates
-    cannot exceed the configured complimentary cap (idempotent on agreement_id).
+    cannot exceed the configured complimentary cap (idempotent on agreement_id and
+    optional idempotency_key).
+
+    Returns ``inserted`` | ``duplicate`` | ``idempotent_hit`` | ``skipped``.
     """
     from fastapi import HTTPException
 
@@ -415,7 +424,7 @@ def record_draft_created(*, agreement_id: str, subject_ref: str, request_ip: str
     economics = usage_economics_enabled()
     commercial = commercial_mode_enforced()
     if not economics and not commercial:
-        return
+        return "skipped"
     store = get_usage_economics_store()
     store.init_schema()
 
@@ -460,6 +469,7 @@ def record_draft_created(*, agreement_id: str, subject_ref: str, request_ip: str
         monthly_cap=monthly_cap,
         period_start_iso=period_start,
         guest_temp=guest_temp,
+        idempotency_key=idempotency_key,
     )
     if insert_result == "cap_exceeded":
         raise HTTPException(
@@ -470,10 +480,10 @@ def record_draft_created(*, agreement_id: str, subject_ref: str, request_ip: str
                 "paywall": True,
             },
         )
-    if insert_result == "duplicate":
-        return
+    if insert_result in ("duplicate", "idempotent_hit"):
+        return insert_result
     if not economics:
-        return
+        return insert_result
     store.emit_event(
         subject_ref=subject_ref,
         event_type="agreement_created",
@@ -500,6 +510,7 @@ def record_draft_created(*, agreement_id: str, subject_ref: str, request_ip: str
                 },
             )
     _paid_soft_throttle_maybe(subject_ref)
+    return insert_result
 
 
 def record_agreement_finalized(*, agreement_id: str, subject_ref: Optional[str] = None) -> None:

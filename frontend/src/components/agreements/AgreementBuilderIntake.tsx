@@ -550,6 +550,7 @@ import {
   isReviewFirstPersistFailureReason,
 } from "./guidedDealCompletion/guidedFinalReviewToSigning";
 import {
+  DRAFT_IDEMPOTENCY_REQUEST_HEADER,
   REVIEW_FIRST_PERSIST_REQUEST_HEADER,
   REVIEW_LINK_PERSIST_BLOCKING_MESSAGE,
   buildReviewLinkPersistDiagnostics,
@@ -5354,7 +5355,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     const draftUrl = apiUrl("/api/agreements/draft");
     const draftHeaders = clawAgreementHeaders({
       "Content-Type": "application/json",
-      ...(reviewFirstHandoffPersist ? { [REVIEW_FIRST_PERSIST_REQUEST_HEADER]: "1" } : {}),
+      ...(reviewFirstHandoffPersist
+        ? {
+            [REVIEW_FIRST_PERSIST_REQUEST_HEADER]: "1",
+            [DRAFT_IDEMPOTENCY_REQUEST_HEADER]: `review-first:${getOrInitSessionAgreementGenerationId()}`,
+          }
+        : {}),
     });
     const draftBody = JSON.stringify(apiDraft);
     if (reviewFirstHandoffPersist) {

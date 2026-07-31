@@ -54,6 +54,12 @@ class GenesisEntitlementRevokeBody(BaseModel):
     reason: str = Field(..., min_length=3, max_length=500)
 
 
+class GenesisUsageReconcileBody(BaseModel):
+    reason: str = Field(..., min_length=3, max_length=500)
+    mode: str = Field(default="reset_month_to_zero", pattern="^reset_month_to_zero$")
+    dry_run: bool = False
+
+
 class GenesisLegacyMigrationBody(BaseModel):
     reason: str = Field(..., min_length=3, max_length=500)
     dry_run: bool = False
@@ -381,6 +387,9 @@ def admin_users(request: Request, limit: int = Query(default=200, ge=1, le=500))
     admin_store = get_admin_console_store()
     admin_store.init_schema()
     subjects = ustore.admin_aggregate_subjects()[:limit]
+    from backend.usage_economics.commercial_entitlement import utc_month_period_bounds
+
+    period_start, _period_end = utc_month_period_bounds()
     subs_by_org: Dict[str, Dict[str, Any]] = {}
     affiliate_display_by_user: Dict[str, str] = {}
     with eco._conn() as con:
@@ -441,6 +450,8 @@ def admin_users(request: Request, limit: int = Query(default=200, ge=1, le=500))
             or (admin_email_by_user.get(uid) if uid else None)
         )
         display_name = ident_display or (affiliate_display_by_user.get(uid) if uid else None)
+        # Align with customer Genesis meter (agreement_owner count this UTC month), not lifetime counters.
+        monthly_used = int(ustore.agreements_created_since(ref, period_start))
         users.append(
             {
                 "id": ref,
@@ -458,7 +469,7 @@ def admin_users(request: Request, limit: int = Query(default=200, ge=1, le=500))
                 "entitlement_expires_at": (sub or {}).get("expires_at"),
                 "affiliate_code_used": None,
                 "referred_by_affiliate_id": None,
-                "agreement_count": int(s.get("agreements_created") or 0),
+                "agreement_count": monthly_used,
                 "last_error_code": None,
             }
         )
@@ -753,6 +764,187 @@ def admin_get_genesis_entitlement(user_id: str, request: Request) -> Dict[str, A
             "can_create_persisted_agreement": decision.get("can_create_persisted_agreement"),
         },
         "audit": related[:20],
+    }
+
+
+@router.get("/users/{user_id}/genesis-usage")
+def admin_get_genesis_usage(user_id: str, request: Request) -> Dict[str, Any]:
+    """Trace Genesis monthly meter rows for a user (no agreement bodies / tokens)."""
+    from backend.services.agreement_draft_store import draft_exists
+    from backend.usage_economics.commercial_entitlement import (
+        resolve_commercial_entitlement,
+        utc_month_period_bounds,
+    )
+
+    uid = _user_id_from_admin_path(user_id)
+    _privileged(
+        request,
+        permission=PERM_READ_OPS,
+        action_type="genesis_usage_get",
+        target_type="genesis_dog_usage",
+        target_id=uid,
+        reason="admin_console_read",
+    )
+    subject = f"org:user-{uid}"
+    period_start, period_end = utc_month_period_bounds()
+    ustore = get_usage_economics_store()
+    ustore.init_schema()
+    decision = resolve_commercial_entitlement(subject)
+    rows = ustore.list_agreement_owner_rows_for_subject(subject, since_iso=period_start, limit=100)
+    events = [
+        e
+        for e in ustore.list_recent_events(limit=300)
+        if str(e.get("subject_ref") or "") == subject
+        and str(e.get("event_type") or "")
+        in ("agreement_created", "keys_consumed", "paywall_triggered")
+    ][:50]
+    records = []
+    for r in rows:
+        aid = str(r.get("agreement_id") or "").strip()
+        records.append(
+            {
+                "event_type": "agreement_owner_meter",
+                "agreement_id": aid,
+                "idempotency_key": r.get("idempotency_key"),
+                "created_at": r.get("created_at"),
+                "guest_temp": bool(int(r.get("guest_temp") or 0)),
+                "internal_keys_draft": int(r.get("internal_keys_draft") or 0),
+                "persisted_draft_exists": bool(aid and draft_exists(aid)),
+            }
+        )
+    return {
+        "ok": True,
+        "user_id": uid,
+        "subject_ref": subject,
+        "period_start": period_start,
+        "period_end": period_end,
+        "commercial": {
+            "state": decision.get("state"),
+            "agreements_used": decision.get("agreements_used"),
+            "agreements_remaining": decision.get("agreements_remaining"),
+            "agreement_allowance": decision.get("agreement_allowance"),
+            "period_ends_at": decision.get("period_ends_at"),
+        },
+        "meter_records": records,
+        "recent_events": [
+            {
+                "event_type": e.get("event_type"),
+                "created_at": e.get("created_at"),
+                "payload": (
+                    e.get("payload")
+                    if isinstance(e.get("payload"), dict)
+                    else (
+                        json.loads(e["payload_json"])
+                        if isinstance(e.get("payload_json"), str) and e.get("payload_json")
+                        else None
+                    )
+                ),
+            }
+            for e in events
+        ],
+    }
+
+
+@router.post("/users/{user_id}/genesis-usage/reconcile")
+def admin_reconcile_genesis_usage(
+    user_id: str, body: GenesisUsageReconcileBody, request: Request
+) -> Dict[str, Any]:
+    """
+    Staging/test only: reset this user's Genesis monthly meter to 0 (audited).
+
+    Does not alter production or other users. Refunds agreement_owner rows for the
+    current UTC month and reverses subject_counters charges.
+    """
+    from backend.usage_economics.commercial_entitlement import (
+        resolve_commercial_entitlement,
+        utc_month_period_bounds,
+    )
+
+    env = claw_environment()
+    if env not in ("staging", "test"):
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "staging_only",
+                "message": "Genesis usage reconcile is staging/test only.",
+            },
+        )
+    uid = _user_id_from_admin_path(user_id)
+    principal = _privileged(
+        request,
+        permission=PERM_MUTATE_SUPPORT,
+        action_type="genesis_usage_reconcile",
+        target_type="genesis_dog_usage",
+        target_id=uid,
+        reason=body.reason,
+    )
+    subject = f"org:user-{uid}"
+    period_start, period_end = utc_month_period_bounds()
+    ustore = get_usage_economics_store()
+    ustore.init_schema()
+    before = resolve_commercial_entitlement(subject)
+    rows = ustore.list_agreement_owner_rows_for_subject(subject, since_iso=period_start, limit=500)
+    candidate_ids = [
+        str(r.get("agreement_id") or "").strip()
+        for r in rows
+        if str(r.get("agreement_id") or "").strip() and not int(r.get("guest_temp") or 0)
+    ]
+    refunded: List[str] = []
+    if not body.dry_run:
+        refunded = ustore.refund_agreement_owners_since(
+            subject_ref=subject, period_start_iso=period_start
+        )
+        ustore.emit_event(
+            subject_ref=subject,
+            event_type="genesis_usage_reconciled",
+            payload={
+                "mode": body.mode,
+                "period_start": period_start,
+                "period_end": period_end,
+                "refunded_agreement_ids": refunded,
+                "actor": principal.user_id,
+                "reason": (body.reason or "").strip(),
+            },
+        )
+    after = resolve_commercial_entitlement(subject)
+    audit_id = _audit(
+        principal,
+        action_type="genesis_usage_reconcile",
+        target_type="genesis_dog_usage",
+        target_id=uid,
+        reason=(body.reason or "").strip(),
+        before={
+            "agreements_used": before.get("agreements_used"),
+            "candidate_ids": candidate_ids,
+            "dry_run": bool(body.dry_run),
+        },
+        after={
+            "agreements_used": after.get("agreements_used"),
+            "refunded_agreement_ids": refunded if not body.dry_run else candidate_ids,
+            "dry_run": bool(body.dry_run),
+        },
+    )
+    return {
+        "ok": True,
+        "user_id": uid,
+        "subject_ref": subject,
+        "mode": body.mode,
+        "dry_run": bool(body.dry_run),
+        "period_start": period_start,
+        "period_end": period_end,
+        "refunded_agreement_ids": refunded if not body.dry_run else [],
+        "candidate_agreement_ids": candidate_ids,
+        "commercial_before": {
+            "agreements_used": before.get("agreements_used"),
+            "agreements_remaining": before.get("agreements_remaining"),
+        },
+        "commercial_after": {
+            "agreements_used": after.get("agreements_used"),
+            "agreements_remaining": after.get("agreements_remaining"),
+        },
+        "audit_id": audit_id,
+        "actor": principal.user_id,
+        "actor_role": principal.role,
     }
 
 

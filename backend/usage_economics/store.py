@@ -112,11 +112,22 @@ class UsageEconomicsStore:
                 "ALTER TABLE agreement_owner ADD COLUMN claim_method TEXT",
                 "ALTER TABLE agreement_owner ADD COLUMN anonymous_source_org TEXT",
                 "ALTER TABLE agreement_owner ADD COLUMN guest_temp INTEGER NOT NULL DEFAULT 0",
+                "ALTER TABLE agreement_owner ADD COLUMN idempotency_key TEXT",
             ):
                 try:
                     con.execute(col_sql)
                 except Exception:
                     pass
+            try:
+                con.execute(
+                    """
+                    CREATE UNIQUE INDEX IF NOT EXISTS idx_agreement_owner_subject_idempotency
+                      ON agreement_owner (subject_ref, idempotency_key)
+                      WHERE idempotency_key IS NOT NULL AND length(trim(idempotency_key)) > 0
+                    """
+                )
+            except Exception:
+                pass
 
     def insert_agreement_owner(
         self,
@@ -144,17 +155,19 @@ class UsageEconomicsStore:
         monthly_cap: Optional[int],
         period_start_iso: str,
         guest_temp: bool = False,
+        idempotency_key: Optional[str] = None,
     ) -> str:
         """
         Idempotent ownership insert with optional transactional monthly create cap.
 
-        Returns ``inserted`` | ``duplicate`` | ``cap_exceeded``.
+        Returns ``inserted`` | ``duplicate`` | ``idempotent_hit`` | ``cap_exceeded``.
         Concurrent callers cannot exceed ``monthly_cap`` when set.
         Guest temporary drafts (``guest_temp``) do not consume commercial allowance.
         """
         now = _utc_now()
         aid = (agreement_id or "").strip()
         subj = (subject_ref or "").strip()
+        idem = (idempotency_key or "").strip()[:128] or None
         if not aid or not subj:
             raise ValueError("agreement_id and subject_ref are required")
         if self._pg:
@@ -168,6 +181,7 @@ class UsageEconomicsStore:
                 monthly_cap=monthly_cap,
                 period_start_iso=period_start_iso,
                 guest_temp=guest_temp,
+                idempotency_key=idem,
             )
 
         con = self._conn()
@@ -180,6 +194,17 @@ class UsageEconomicsStore:
             if existing:
                 con.execute("COMMIT")
                 return "duplicate"
+            if idem:
+                prior = con.execute(
+                    """
+                    SELECT agreement_id FROM agreement_owner
+                    WHERE subject_ref = ? AND idempotency_key = ?
+                    """,
+                    (subj, idem),
+                ).fetchone()
+                if prior:
+                    con.execute("COMMIT")
+                    return "idempotent_hit"
             if monthly_cap is not None and not guest_temp:
                 start = (period_start_iso or "").strip()
                 if not start:
@@ -201,10 +226,11 @@ class UsageEconomicsStore:
             con.execute(
                 """
                 INSERT INTO agreement_owner (
-                  agreement_id, subject_ref, created_at, internal_keys_draft, guest_temp
-                ) VALUES (?, ?, ?, ?, ?)
+                  agreement_id, subject_ref, created_at, internal_keys_draft, guest_temp,
+                  idempotency_key
+                ) VALUES (?, ?, ?, ?, ?, ?)
                 """,
-                (aid, subj, now, kd, gt),
+                (aid, subj, now, kd, gt, idem),
             )
             if not guest_temp:
                 con.execute(
@@ -220,11 +246,18 @@ class UsageEconomicsStore:
                 )
             con.execute("COMMIT")
             return "inserted"
-        except Exception:
+        except Exception as exc:
             try:
                 con.execute("ROLLBACK")
             except Exception:
                 pass
+            # Concurrent retry with the same idempotency key.
+            if idem and "UNIQUE" in str(exc).upper():
+                hit = self.get_agreement_id_for_idempotency_key(
+                    subject_ref=subj, idempotency_key=idem
+                )
+                if hit:
+                    return "idempotent_hit"
             raise
         finally:
             con.close()
@@ -241,7 +274,78 @@ class UsageEconomicsStore:
             ).fetchone()
             return str(row[0]) if row else None
 
+    def get_agreement_id_for_idempotency_key(
+        self, *, subject_ref: str, idempotency_key: str
+    ) -> Optional[str]:
+        subj = (subject_ref or "").strip()
+        idem = (idempotency_key or "").strip()
+        if not subj or not idem:
+            return None
+        if self._pg:
+            from backend.usage_economics import usage_economics_postgres as uep
+
+            return uep.get_agreement_id_for_idempotency_key(subject_ref=subj, idempotency_key=idem)
+        with self._conn() as con:
+            row = con.execute(
+                """
+                SELECT agreement_id FROM agreement_owner
+                WHERE subject_ref = ? AND idempotency_key = ?
+                """,
+                (subj, idem),
+            ).fetchone()
+            return str(row[0]).strip() if row and row[0] else None
+
+    def list_agreement_owner_rows_for_subject(
+        self,
+        subject_ref: str,
+        *,
+        since_iso: Optional[str] = None,
+        limit: int = 100,
+    ) -> List[Dict[str, Any]]:
+        subj = (subject_ref or "").strip()
+        if not subj:
+            return []
+        lim = max(1, min(int(limit), 500))
+        if self._pg:
+            from backend.usage_economics import usage_economics_postgres as uep
+
+            return uep.list_agreement_owner_rows_for_subject(
+                subject_ref=subj, since_iso=since_iso, limit=lim
+            )
+        with self._conn() as con:
+            if (since_iso or "").strip():
+                rows = con.execute(
+                    """
+                    SELECT agreement_id, subject_ref, created_at, completed_at,
+                           internal_keys_draft, guest_temp, idempotency_key,
+                           claimed_at, claim_method, anonymous_source_org
+                    FROM agreement_owner
+                    WHERE subject_ref = ? AND created_at >= ?
+                    ORDER BY datetime(created_at) DESC
+                    LIMIT ?
+                    """,
+                    (subj, (since_iso or "").strip(), lim),
+                ).fetchall()
+            else:
+                rows = con.execute(
+                    """
+                    SELECT agreement_id, subject_ref, created_at, completed_at,
+                           internal_keys_draft, guest_temp, idempotency_key,
+                           claimed_at, claim_method, anonymous_source_org
+                    FROM agreement_owner
+                    WHERE subject_ref = ?
+                    ORDER BY datetime(created_at) DESC
+                    LIMIT ?
+                    """,
+                    (subj, lim),
+                ).fetchall()
+            return [dict(r) for r in rows]
+
     def delete_agreement_owner(self, agreement_id: str) -> bool:
+        """
+        Remove ownership meter row and reverse subject_counters when the row was charged
+        (non-guest). Used for save/meter rollback and staging reconcile.
+        """
         aid = (agreement_id or "").strip()
         if not aid:
             return False
@@ -249,9 +353,58 @@ class UsageEconomicsStore:
             from backend.usage_economics import usage_economics_postgres as uep
 
             return uep.delete_agreement_owner(aid)
+        now = _utc_now()
         with self._conn() as con:
+            row = con.execute(
+                """
+                SELECT subject_ref, internal_keys_draft, COALESCE(guest_temp, 0) AS guest_temp
+                FROM agreement_owner WHERE agreement_id = ?
+                """,
+                (aid,),
+            ).fetchone()
+            if not row:
+                return False
+            subj = str(row["subject_ref"] or "").strip()
+            keys = int(row["internal_keys_draft"] or 0)
+            guest = int(row["guest_temp"] or 0) == 1
             cur = con.execute("DELETE FROM agreement_owner WHERE agreement_id = ?", (aid,))
-            return cur.rowcount > 0
+            if cur.rowcount <= 0:
+                return False
+            if subj and not guest:
+                con.execute(
+                    """
+                    UPDATE subject_counters SET
+                      agreements_created = MAX(0, agreements_created - 1),
+                      keys_consumed_total = MAX(0, keys_consumed_total - ?),
+                      updated_at = ?
+                    WHERE subject_ref = ?
+                    """,
+                    (keys, now, subj),
+                )
+            return True
+
+    def refund_agreement_owners_since(
+        self,
+        *,
+        subject_ref: str,
+        period_start_iso: str,
+    ) -> List[str]:
+        """Delete non-guest agreement_owner rows for subject since period_start; return ids."""
+        subj = (subject_ref or "").strip()
+        start = (period_start_iso or "").strip()
+        if not subj or not start:
+            return []
+        rows = self.list_agreement_owner_rows_for_subject(subj, since_iso=start, limit=500)
+        refunded: List[str] = []
+        for row in rows:
+            if int(row.get("guest_temp") or 0):
+                continue
+            aid = str(row.get("agreement_id") or "").strip()
+            if not aid:
+                continue
+            if self.delete_agreement_owner(aid):
+                refunded.append(aid)
+        return refunded
 
     def list_agreement_ids_for_subject(self, subject_ref: str) -> list[str]:
         subj = (subject_ref or "").strip()

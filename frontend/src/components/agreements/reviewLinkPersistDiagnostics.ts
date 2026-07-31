@@ -9,6 +9,9 @@ export const REVIEW_LINK_PERSIST_ENDPOINT = "/api/agreements/draft";
 /** Sent on review-first draft POST so backend can bypass free-tier draft caps for paid Pro persist. */
 export const REVIEW_FIRST_PERSIST_REQUEST_HEADER = "X-Claw-Review-First-Persist";
 
+/** Stable client key so blank-review retries do not burn another Genesis/Pro allowance. */
+export const DRAFT_IDEMPOTENCY_REQUEST_HEADER = "X-Claw-Draft-Idempotency-Key";
+
 export const REVIEW_LINK_PERSIST_BLOCKING_MESSAGE =
   "Review link could not be created because LawDog could not reach the agreement save service. Your Pro agreement is still saved in this browser. Retry creating the review link.";
 

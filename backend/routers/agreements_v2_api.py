@@ -5453,6 +5453,8 @@ def _ensure_agreement_parties_have_ids(parties: List[AgreementParty]) -> List[Ag
 def create_agreement_draft(body: AgreementDraftCreate, request: Request) -> Dict[str, Any]:
     from backend.security.commercial_auth import require_commercial_owner_principal
     from backend.security.request_identity import resolve_workspace_identity
+    from backend.services.agreement_draft_store import delete_draft_if_exists, draft_exists, load_draft
+    from backend.usage_economics.store import get_usage_economics_store
 
     identity = resolve_workspace_identity(request)
     # Guest (anonymous) may create one temporary draft; persisted workspace requires auth.
@@ -5460,9 +5462,31 @@ def create_agreement_draft(body: AgreementDraftCreate, request: Request) -> Dict
         require_commercial_owner_principal(request)
     subject = identity.subject_ref
     request_ip = request.client.host if request.client else "unknown"
+    idempotency_key = (request.headers.get("x-claw-draft-idempotency-key") or "").strip()[:128] or None
     if not review_first_paid_pro_persist_bypass(request=request, purpose=body.purpose or ""):
         maybe_repair_workspace_entitlement_from_request(request)
         assert_can_create_draft(subject_ref=subject, request_ip=request_ip or "unknown")
+
+    # Retries with the same client key must not mint a new id or burn another credit.
+    if idempotency_key:
+        ustore = get_usage_economics_store()
+        ustore.init_schema()
+        prior_id = ustore.get_agreement_id_for_idempotency_key(
+            subject_ref=subject, idempotency_key=idempotency_key
+        )
+        if prior_id and draft_exists(prior_id):
+            try:
+                prior_dump = load_draft(prior_id)
+            except KeyError:
+                prior_dump = None
+            if isinstance(prior_dump, dict):
+                return {
+                    "id": prior_id,
+                    "draft": prior_dump,
+                    "canonical_json": canonicalize_agreement(prior_dump),
+                    "idempotent": True,
+                }
+
     now = _utc_now_iso()
     agreement_id = str(uuid.uuid4())
     parties = _ensure_agreement_parties_have_ids(list(body.parties or []))
@@ -5486,21 +5510,51 @@ def create_agreement_draft(body: AgreementDraftCreate, request: Request) -> Dict
         audit_log=[AuditEvent(event_type="created", at=now)],
     )
     dump = draft.model_dump()
-    record_draft_created(
-        agreement_id=agreement_id,
-        subject_ref=subject,
-        request_ip=request_ip or "unknown",
-    )
+    # Persist first — Genesis/Pro allowance is charged only after a successful save.
     try:
         _save_draft_sync(dump, request, subject_ref=subject)
     except Exception:
+        raise
+    try:
+        meter_result = record_draft_created(
+            agreement_id=agreement_id,
+            subject_ref=subject,
+            request_ip=request_ip or "unknown",
+            idempotency_key=idempotency_key,
+        )
+    except Exception:
+        # Cap / meter rejection after persist must leave zero charge and no orphan draft.
         try:
-            from backend.usage_economics.store import get_usage_economics_store
-
+            delete_draft_if_exists(agreement_id)
+        except Exception:
+            log.exception("rollback draft after meter failure agreement_id=%s", agreement_id)
+        try:
             get_usage_economics_store().delete_agreement_owner(agreement_id)
         except Exception:
-            log.exception("rollback agreement_owner after draft save failure agreement_id=%s", agreement_id)
+            log.exception("rollback agreement_owner after meter failure agreement_id=%s", agreement_id)
         raise
+    if meter_result == "idempotent_hit" and idempotency_key:
+        prior_id = get_usage_economics_store().get_agreement_id_for_idempotency_key(
+            subject_ref=subject, idempotency_key=idempotency_key
+        )
+        if prior_id and prior_id != agreement_id:
+            delete_draft_if_exists(agreement_id)
+            try:
+                prior_dump = load_draft(prior_id)
+            except KeyError as exc:
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "code": "idempotent_draft_missing",
+                        "message": "Idempotent agreement meter exists but draft is missing.",
+                    },
+                ) from exc
+            return {
+                "id": prior_id,
+                "draft": prior_dump,
+                "canonical_json": canonicalize_agreement(prior_dump),
+                "idempotent": True,
+            }
     record_public_feed_event_if_applicable(draft_dict=dump, event_type="created", at=now)
     record_usage_ledger_event(
         subject_ref=subject,

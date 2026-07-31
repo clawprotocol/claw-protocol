@@ -91,6 +91,8 @@ describe("Test278 review-first persist regression", () => {
     expect(intake).toContain("logReviewFirstPersistResponse");
     expect(intake).toContain("REVIEW_FIRST_PERSIST_REQUEST_HEADER");
     expect(intake).toContain('[REVIEW_FIRST_PERSIST_REQUEST_HEADER]: "1"');
+    expect(intake).toContain("DRAFT_IDEMPOTENCY_REQUEST_HEADER");
+    expect(intake).toContain("review-first:");
     expect(intake).toContain("reviewFirstHandoffPersist");
   });
 

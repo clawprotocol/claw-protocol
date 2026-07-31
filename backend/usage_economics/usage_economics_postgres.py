@@ -163,12 +163,14 @@ def try_insert_agreement_owner_with_monthly_cap(
     monthly_cap: Optional[int],
     period_start_iso: str,
     guest_temp: bool = False,
+    idempotency_key: Optional[str] = None,
 ) -> str:
-    """Returns ``inserted`` | ``duplicate`` | ``cap_exceeded`` under a subject advisory lock."""
+    """Returns ``inserted`` | ``duplicate`` | ``idempotent_hit`` | ``cap_exceeded`` under a subject advisory lock."""
     kd = int(internal_keys_draft)
     ts = _ts(now_iso)
     aid = (agreement_id or "").strip()
     subj = (subject_ref or "").strip()
+    idem = (idempotency_key or "").strip()[:128] or None
     gt = 1 if guest_temp else 0
     with _tx() as conn:
         # Serialize concurrent creates for the same subject within this transaction.
@@ -179,6 +181,16 @@ def try_insert_agreement_owner_with_monthly_cap(
         )
         if cur.fetchone():
             return "duplicate"
+        if idem:
+            cur = conn.execute(
+                """
+                SELECT agreement_id FROM agreement_owner
+                WHERE subject_ref = %s AND idempotency_key = %s
+                """,
+                (subj, idem),
+            )
+            if cur.fetchone():
+                return "idempotent_hit"
         if monthly_cap is not None and not guest_temp:
             start = (period_start_iso or "").strip()
             if not start:
@@ -198,10 +210,11 @@ def try_insert_agreement_owner_with_monthly_cap(
         conn.execute(
             """
             INSERT INTO agreement_owner (
-              agreement_id, subject_ref, created_at, internal_keys_draft, guest_temp
-            ) VALUES (%s, %s, %s::timestamptz, %s, %s)
+              agreement_id, subject_ref, created_at, internal_keys_draft, guest_temp,
+              idempotency_key
+            ) VALUES (%s, %s, %s::timestamptz, %s, %s, %s)
             """,
-            (aid, subj, ts, kd, gt),
+            (aid, subj, ts, kd, gt, idem),
         )
         if not guest_temp:
             conn.execute(
@@ -234,13 +247,100 @@ def owner_subject_for_agreement(agreement_id: str) -> Optional[str]:
     return str(row["subject_ref"]) if row else None
 
 
+def get_agreement_id_for_idempotency_key(
+    *, subject_ref: str, idempotency_key: str
+) -> Optional[str]:
+    subj = (subject_ref or "").strip()
+    idem = (idempotency_key or "").strip()
+    if not subj or not idem:
+        return None
+    with _tx() as conn:
+        cur = conn.execute(
+            """
+            SELECT agreement_id FROM agreement_owner
+            WHERE subject_ref = %s AND idempotency_key = %s
+            """,
+            (subj, idem),
+        )
+        row = cur.fetchone()
+    return str(row["agreement_id"]).strip() if row and row.get("agreement_id") else None
+
+
+def list_agreement_owner_rows_for_subject(
+    subject_ref: str,
+    *,
+    since_iso: Optional[str] = None,
+    limit: int = 100,
+) -> List[Dict[str, Any]]:
+    subj = (subject_ref or "").strip()
+    if not subj:
+        return []
+    lim = max(1, min(int(limit), 500))
+    with _tx() as conn:
+        if (since_iso or "").strip():
+            cur = conn.execute(
+                """
+                SELECT agreement_id, subject_ref, created_at, completed_at,
+                       internal_keys_draft, guest_temp, idempotency_key,
+                       claimed_at, claim_method, anonymous_source_org
+                FROM agreement_owner
+                WHERE subject_ref = %s AND created_at >= %s::timestamptz
+                ORDER BY created_at DESC
+                LIMIT %s
+                """,
+                (subj, _ts((since_iso or "").strip()), lim),
+            )
+        else:
+            cur = conn.execute(
+                """
+                SELECT agreement_id, subject_ref, created_at, completed_at,
+                       internal_keys_draft, guest_temp, idempotency_key,
+                       claimed_at, claim_method, anonymous_source_org
+                FROM agreement_owner
+                WHERE subject_ref = %s
+                ORDER BY created_at DESC
+                LIMIT %s
+                """,
+                (subj, lim),
+            )
+        rows = cur.fetchall()
+    return [_row_out(dict(r)) for r in rows]
+
+
 def delete_agreement_owner(agreement_id: str) -> bool:
     aid = (agreement_id or "").strip()
     if not aid:
         return False
+    now = _utc_now_iso()
     with _tx() as conn:
+        cur = conn.execute(
+            """
+            SELECT subject_ref, internal_keys_draft, COALESCE(guest_temp, 0) AS guest_temp
+            FROM agreement_owner WHERE agreement_id = %s
+            """,
+            (aid,),
+        )
+        row = cur.fetchone()
+        if not row:
+            return False
+        subj = str(row.get("subject_ref") or "").strip()
+        keys = int(row.get("internal_keys_draft") or 0)
+        guest = int(row.get("guest_temp") or 0) == 1
         cur = conn.execute("DELETE FROM agreement_owner WHERE agreement_id = %s", (aid,))
-        return cur.rowcount > 0
+        if int(cur.rowcount or 0) <= 0:
+            return False
+        if subj and not guest:
+            conn.execute(
+                """
+                UPDATE subject_counters SET
+                  agreements_created = GREATEST(0, agreements_created - 1),
+                  keys_consumed_total = GREATEST(0, keys_consumed_total - %s),
+                  updated_at = %s::timestamptz
+                WHERE subject_ref = %s
+                """,
+                (keys, _ts(now), subj),
+            )
+        return True
 
 
 def list_agreement_ids_for_subject(subject_ref: str) -> list[str]:

@@ -102,6 +102,27 @@ def draft_exists(agreement_id: str) -> bool:
     return _agreement_path(aid).exists()
 
 
+def delete_draft_if_exists(agreement_id: str) -> bool:
+    """Best-effort delete of a persisted draft after a failed meter/rollback. Returns True if removed."""
+    aid = (agreement_id or "").strip()
+    if not aid:
+        return False
+    if _use_postgres():
+        from backend.db.agreement_sql import agreement_postgres_connection, pg_execute
+
+        with agreement_postgres_connection() as cx:
+            cur = pg_execute(cx, "DELETE FROM agreement_drafts WHERE id = ?", (aid,))
+            return int(getattr(cur, "rowcount", 0) or 0) > 0
+    path = _agreement_path(aid)
+    if not path.exists():
+        return False
+    try:
+        path.unlink()
+        return True
+    except OSError:
+        return False
+
+
 def _preserve_security_owned_recipient_delivery(
     incoming: Dict[str, Any],
     durable: Optional[Dict[str, Any]],
