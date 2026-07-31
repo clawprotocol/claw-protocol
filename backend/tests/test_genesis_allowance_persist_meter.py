@@ -197,16 +197,20 @@ def test_zero_persisted_drafts_but_five_credits_reconcile(isolated_env):
     assert after["agreements_remaining"] == 5
     assert after["state"] == STATE_GENESIS
 
-    # Production-like env must reject reconcile.
+    # Production-like env must reject both staging-only endpoints.
     import os
 
     os.environ["CLAW_ENVIRONMENT"] = "production"
+    blocked_get = client.get(f"/v1/admin/users/{uid}/genesis-usage", headers=_admin())
+    assert blocked_get.status_code == 403
+    assert (blocked_get.json().get("detail") or {}).get("code") == "staging_only"
     blocked = client.post(
         f"/v1/admin/users/{uid}/genesis-usage/reconcile",
         headers=_admin(),
         json={"reason": "must fail in production", "dry_run": False},
     )
     assert blocked.status_code == 403
+    assert (blocked.json().get("detail") or {}).get("code") == "staging_only"
     os.environ["CLAW_ENVIRONMENT"] = "test"
 
 
