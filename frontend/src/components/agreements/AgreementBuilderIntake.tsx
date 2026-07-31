@@ -945,6 +945,11 @@ import {
   shouldShowPaidProPostFinalizeEditSignerDetails,
 } from "./paidProPostFinalizeEditSignerDetails";
 import {
+  PAID_PRO_FIRST_REVIEW_INLINE_SIGNER_SETUP_DOM_ID,
+  resolvePaidProFirstReviewSignerSetupOpenIntent,
+  shouldOpenPaidProFirstReviewSignerSetupOnAddDetails,
+} from "./paidProFirstReviewSignerSetupTransition";
+import {
   auditPaidProPostFinalizeHydrationInvariant,
   canProceedPaidProReviewFirstHandoffAfterFinalize,
   logPaidProPostFinalizeHydrationBlocked,
@@ -25954,7 +25959,50 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     ],
   );
 
+  /**
+   * First-review "Add signer details": open inline signer form in place.
+   * Must not regenerate, clear SoT, flip guided completion back to apply, or leave review.
+   */
+  const openPaidProFirstReviewSignerSetup = React.useCallback(() => {
+    const intent = resolvePaidProFirstReviewSignerSetupOpenIntent();
+    setHardError(null);
+    setPremiumReviewDocEditorOpen(false);
+    setPaidProCardEditDraft(null);
+    setPaidProCardAiInstruction("");
+    setSignaturePreparationRequested(intent.signaturePreparationRequested);
+    setPaidProInlineSignerSetupLatched(intent.inlineSignerSetupLatched);
+    setDisplayPhase(intent.displayPhase);
+    setCreateUiStage(CreateUiStage.DRAFT);
+    setCreateFlowPhase(intent.createFlowPhase);
+    setCreateFlowSendRecipientEditorOpen(intent.recipientEditorOpen);
+    setPremiumRecipientUxActive(intent.premiumRecipientUxActive);
+    // Preserve guidedCompletionPhase + accepted document (intent.preserve*).
+    bumpPremiumSurfaceGateTick();
+    window.requestAnimationFrame(() => {
+      const focusKey = paidProSignerDetailsGate.firstIncompleteFieldKey;
+      const focused = focusKey ? focusVisibleRecipientInput(focusKey) : false;
+      if (!focused) {
+        document
+          .getElementById(PAID_PRO_FIRST_REVIEW_INLINE_SIGNER_SETUP_DOM_ID)
+          ?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+    });
+  }, [paidProSignerDetailsGate.firstIncompleteFieldKey, bumpPremiumSurfaceGateTick]);
+
   const handleGuidedBackToSignerDetailsFromFinalReview = React.useCallback(() => {
+    // Pre-finalize first review must use the light open path — never the post-finalize reopen
+    // (which can reset guidedCompletionPhase to ready_to_apply and re-trigger generation).
+    if (
+      shouldOpenPaidProFirstReviewSignerSetupOnAddDetails({
+        firstReviewSurfaceActive: paidProFirstReviewSurfaceActive,
+        signersReady: paidProInlineSignersReady,
+        signerMetadataFinalized: paidProSignerMetadataFinalized,
+        signaturePreparationRequested,
+      })
+    ) {
+      openPaidProFirstReviewSignerSetup();
+      return;
+    }
     const seedParties = resolvePaidProPostFinalizeSignerDetailsEditSeed();
     if (seedParties) {
       const seededUi = authorityPartiesToLiveSignerMetadataUi(seedParties);
@@ -25987,11 +26035,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     setPaidProInlineSignerSetupLatched(true);
     setPaidProSignerMetadataFinalizedLatch(false);
     frozenSignerMetadataPartyManifestRef.current = null;
-    setGuidedCompletionPhase(
-      paidProAcceptedCorpusReady && guidedCompletionPhase === "inactive"
-        ? "applied"
-        : "ready_to_apply",
-    );
+    // Stay on applied when already accepted — never regress to ready_to_apply (regeneration).
+    if (guidedCompletionPhase === "inactive" && paidProAcceptedCorpusReady) {
+      setGuidedCompletionPhase("applied");
+    }
     setCreateFlowPhase("signer_setup_required");
     setDisplayPhase("review");
     setPremiumRecipientUxActive(false);
@@ -26009,7 +26056,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       if (!focused) {
         scrollGuidedSignerSetupIntoView();
         document
-          .getElementById("claw-paid-pro-inline-signer-setup")
+          .getElementById(PAID_PRO_FIRST_REVIEW_INLINE_SIGNER_SETUP_DOM_ID)
           ?.scrollIntoView({ behavior: "smooth", block: "start" });
       }
     });
@@ -26018,6 +26065,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     paidProAcceptedCorpusReady,
     guidedCompletionPhase,
     paidProSignerDetailsGate,
+    paidProFirstReviewSurfaceActive,
+    paidProInlineSignersReady,
+    paidProSignerMetadataFinalized,
+    signaturePreparationRequested,
+    openPaidProFirstReviewSignerSetup,
   ]);
 
   React.useEffect(() => {
@@ -29631,20 +29683,23 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             return;
           }
           case "complete_recipient_details": {
+            // Genesis / paid first-review: open inline signer setup — never regenerate.
+            if (
+              shouldOpenPaidProFirstReviewSignerSetupOnAddDetails({
+                firstReviewSurfaceActive:
+                  paidProFirstReviewSurfaceActive ||
+                  acceptedPaidProAuthorityActive ||
+                  paidProReviewDecisionLifecycleReady,
+                signersReady: paidProSignatureDetailsReady,
+                signerMetadataFinalized: paidProSignerMetadataFinalized,
+                signaturePreparationRequested,
+              })
+            ) {
+              openPaidProFirstReviewSignerSetup();
+              return;
+            }
             if (acceptedPaidProAuthorityActive && !paidProSignatureDetailsReady) {
-              setHardError(null);
-              setDisplayPhase("review");
-              setCreateUiStage(CreateUiStage.DRAFT);
-              setCreateFlowSendRecipientEditorOpen(true);
-              const focusKey = paidProSignerDetailsGate.firstIncompleteFieldKey;
-              window.requestAnimationFrame(() => {
-                const focused = focusKey ? focusVisibleRecipientInput(focusKey) : false;
-                if (!focused) {
-                  document
-                    .getElementById("claw-paid-pro-inline-signer-setup")
-                    ?.scrollIntoView({ behavior: "smooth", block: "start" });
-                }
-              });
+              openPaidProFirstReviewSignerSetup();
               return;
             }
             setHardError(null);
@@ -32573,14 +32628,22 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                             }
                                             onEditAgreement={() => void openPaidProDraftCardEditor()}
                                             onEditSignerDetails={
-                                              shouldShowPaidProPostFinalizeEditSignerDetails({
-                                                trackChooserVisible: showPaidProForcedFirstReviewTrackChooser,
-                                                packetPrepared: Boolean(
-                                                  agreementIdForReview &&
-                                                    isAgreementPacketPrepared(agreementIdForReview),
-                                                ),
-                                                signaturePreparationRequested,
-                                              })
+                                              (
+                                                shouldOpenPaidProFirstReviewSignerSetupOnAddDetails({
+                                                  firstReviewSurfaceActive: paidProFirstReviewSurfaceActive,
+                                                  signersReady: paidProReviewSignerStatusReady,
+                                                  signerMetadataFinalized: paidProSignerMetadataFinalized,
+                                                  signaturePreparationRequested,
+                                                }) ||
+                                                shouldShowPaidProPostFinalizeEditSignerDetails({
+                                                  trackChooserVisible: showPaidProForcedFirstReviewTrackChooser,
+                                                  packetPrepared: Boolean(
+                                                    agreementIdForReview &&
+                                                      isAgreementPacketPrepared(agreementIdForReview),
+                                                  ),
+                                                  signaturePreparationRequested,
+                                                })
+                                              )
                                                 ? handleGuidedBackToSignerDetailsFromFinalReview
                                                 : undefined
                                             }
@@ -33152,14 +33215,22 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                             }
                                             onEditAgreement={() => void openPaidProDraftCardEditor()}
                                             onEditSignerDetails={
-                                              shouldShowPaidProPostFinalizeEditSignerDetails({
-                                                trackChooserVisible: showPaidProForcedFirstReviewTrackChooser,
-                                                packetPrepared: Boolean(
-                                                  agreementIdForReview &&
-                                                    isAgreementPacketPrepared(agreementIdForReview),
-                                                ),
-                                                signaturePreparationRequested,
-                                              })
+                                              (
+                                                shouldOpenPaidProFirstReviewSignerSetupOnAddDetails({
+                                                  firstReviewSurfaceActive: paidProFirstReviewSurfaceActive,
+                                                  signersReady: paidProReviewSignerStatusReady,
+                                                  signerMetadataFinalized: paidProSignerMetadataFinalized,
+                                                  signaturePreparationRequested,
+                                                }) ||
+                                                shouldShowPaidProPostFinalizeEditSignerDetails({
+                                                  trackChooserVisible: showPaidProForcedFirstReviewTrackChooser,
+                                                  packetPrepared: Boolean(
+                                                    agreementIdForReview &&
+                                                      isAgreementPacketPrepared(agreementIdForReview),
+                                                  ),
+                                                  signaturePreparationRequested,
+                                                })
+                                              )
                                                 ? handleGuidedBackToSignerDetailsFromFinalReview
                                                 : undefined
                                             }

@@ -125,10 +125,8 @@ describe("TEST570 dashboard paid-create review decision precedes signer setup", 
     expect(intakeSrc).toContain("firstReviewDeliveryTrackDecisionActive");
     expect(intakeSrc).toContain("deliveryTrackDecisionActive: firstReviewDeliveryTrackDecisionActive");
     // Prepare signature links mounts inline signer setup (arms the latch) rather than auto-finalizing.
-    const prepareBlock = intakeSrc.slice(
-      intakeSrc.indexOf("const handlePaidProPrepareSignaturesFromFirstReview"),
-      intakeSrc.indexOf("const handlePaidProPrepareSignaturesFromFirstReview") + 1400,
-    );
+    const prepareStart = intakeSrc.indexOf("const handlePaidProPrepareSignaturesFromFirstReview");
+    const prepareBlock = intakeSrc.slice(prepareStart, prepareStart + 4200);
     expect(prepareBlock).toContain("setPaidProInlineSignerSetupLatched(true)");
     expect(prepareBlock).toContain("!paidProSignerMetadataFinalized");
   });
