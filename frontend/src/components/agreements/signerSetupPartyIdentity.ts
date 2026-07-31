@@ -9,6 +9,7 @@ import {
   resolveCanonicalPartyIdentitiesFromSources,
 } from "./canonicalPartyIdentityResolver";
 import {
+  detectExecutionBlockRoleInversion,
   partyLegalNamesMatch,
   resolvePaidProPartyRolesFromAcceptedCorpus,
 } from "./paidProAcceptedCorpusPartyRoles";
@@ -1176,7 +1177,11 @@ export function resolveSignerSetupPartyIdentity(
       !isInvalidPartySlotLegalEntity(entity) &&
       !candidateContainsMultipleEntities(entity),
   );
+  // Never trust signature-block slot order when CLIENT/SERVICE PROVIDER entities disagree with
+  // opening recital roles — that reverses signer-form labels relative to the canonical manifest.
+  const signatureRolesInverted = detectExecutionBlockRoleInversion(bodyText);
   const signatureBlockAuthoritative =
+    !signatureRolesInverted &&
     signatureEntitiesClean.length >= 2 &&
     signatureEntities.length > index &&
     signatureSlotEntity.length >= 2 &&
@@ -1186,6 +1191,22 @@ export function resolveSignerSetupPartyIdentity(
     new Set(signatureEntitiesClean.map((e) => e.toLowerCase())).size >= 2;
   if (signatureBlockAuthoritative && !intakeManifestAuthoritative) {
     legalEntityName = signatureSlotEntity;
+  } else if (signatureRolesInverted) {
+    const roles = resolvePaidProPartyRolesFromAcceptedCorpus(bodyText);
+    const rolePick =
+      index === 0
+        ? roles.find((r) => r.role === "client")?.legalName
+        : index === 1
+          ? roles.find((r) => r.role === "service_provider")?.legalName
+          : roles[index]?.legalName;
+    const fromRole = norm(rolePick ?? "");
+    if (
+      fromRole &&
+      !isRecitalSentenceFragmentPartyName(fromRole) &&
+      !candidateContainsMultipleEntities(fromRole)
+    ) {
+      legalEntityName = fromRole;
+    }
   }
 
   if (isRecitalSentenceFragmentPartyName(legalEntityName)) {

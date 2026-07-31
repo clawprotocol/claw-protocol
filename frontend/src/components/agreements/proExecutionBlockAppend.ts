@@ -11,9 +11,40 @@ export type AppendProExecutionBlockResult = {
   repairs: string[];
 };
 
+function roleNorm(label: string | null | undefined): string {
+  return String(label || "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
+/** Prefer semantic Client / Service Provider roles over raw manifest array order. */
+function orderRecordsForExecutionBlock(
+  records: readonly CanonicalPartyIdentityRecord[],
+): {
+  client: CanonicalPartyIdentityRecord | undefined;
+  provider: CanonicalPartyIdentityRecord | undefined;
+} {
+  const client =
+    records.find((r) => {
+      const role = roleNorm(r.roleLabel);
+      return role === "client" || role === "customer" || role === "buyer";
+    }) ?? records[0];
+  const provider =
+    records.find((r) => {
+      const role = roleNorm(r.roleLabel);
+      return (
+        role === "service provider" ||
+        role === "provider" ||
+        role === "contractor" ||
+        role === "vendor"
+      );
+    }) ?? records.find((r) => r !== client) ?? records[1];
+  return { client, provider };
+}
+
 function buildExecutionBlock(records: readonly CanonicalPartyIdentityRecord[]): string {
-  const client = records[0];
-  const provider = records[1];
+  const { client, provider } = orderRecordsForExecutionBlock(records);
   if (!client || !provider) {
     return [
       "IN WITNESS WHEREOF, the Parties have executed this Agreement as of the date last signed below.",
@@ -32,6 +63,13 @@ function buildExecutionBlock(records: readonly CanonicalPartyIdentityRecord[]): 
     ].join("\n");
   }
 
+  const clientHeading = /client|customer|buyer/i.test(client.roleLabel)
+    ? "CLIENT"
+    : client.roleLabel.toUpperCase();
+  const providerHeading = /provider|contractor|vendor/i.test(provider.roleLabel)
+    ? "SERVICE PROVIDER"
+    : provider.roleLabel.toUpperCase();
+
   const clientLines = [
     client.fullLegalName,
     client.signerName ? `Name: ${client.signerName}` : "Name: _______________________________",
@@ -48,12 +86,12 @@ function buildExecutionBlock(records: readonly CanonicalPartyIdentityRecord[]): 
   return [
     "IN WITNESS WHEREOF, the Parties have executed this Agreement as of the date last signed below.",
     "",
-    `${client.roleLabel.toUpperCase()}:`,
+    `${clientHeading}:`,
     client.fullLegalName,
     "By: _________________________________",
     ...clientLines.slice(1),
     "",
-    `${provider.roleLabel.toUpperCase()}:`,
+    `${providerHeading}:`,
     provider.fullLegalName,
     "By: _________________________________",
     ...providerLines.slice(1),

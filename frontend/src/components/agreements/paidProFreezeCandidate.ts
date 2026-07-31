@@ -93,7 +93,10 @@ import { resolvePartiesForReviewRender } from "./paidProReviewRenderCorpus";
 import type { PaidProSignerMetadataParty } from "./paidProSignerMetadataAuthority";
 import type { CanonicalAgreementSnapshotParty } from "./canonicalAgreementSnapshot";
 import { reconcileExecutionBlockToRoleIdentities } from "./paidProSignerMetadataMergeGate";
-import { buildCorpusRoleIdentitiesForExecutionReconcile } from "./paidProAcceptedCorpusPartyRoles";
+import {
+  buildCorpusRoleIdentitiesForExecutionReconcile,
+  detectExecutionBlockRoleInversion,
+} from "./paidProAcceptedCorpusPartyRoles";
 import { hashPaidProCorpus } from "./paidProSourceOfTruth";
 import {
   assertBrandLicensingFrozenCorpusAuthorityForFreeze,
@@ -116,6 +119,33 @@ import { resolveAuthoritativeSignerCount } from "./signerCountAuthority";
 
 function trim(s: string | null | undefined): string {
   return (s || "").trim();
+}
+
+/**
+ * Align CLIENT / SERVICE PROVIDER entity assignment with opening recital roles before freeze.
+ * Must run for all corpora (including 2-party services and pipeline-stable short-circuits),
+ * not only multiparty brand-licensing paths.
+ */
+function reconcileExecutionRolesBeforeFreezeCommit(text: string): string {
+  const body = trim(text);
+  if (!body || !detectExecutionBlockRoleInversion(body)) return body;
+  const witnessIdx = body.search(/\bIN WITNESS WHEREOF\b/i);
+  if (witnessIdx < 0) return body;
+  const tail = body.slice(witnessIdx);
+  // Only repair classic CLIENT / SERVICE PROVIDER role-heading blocks — never collapse
+  // multiparty entity-heading or PARTY N execution tails.
+  if (!/^\s*CLIENT\s*:/im.test(tail) || !/^\s*SERVICE\s+PROVIDER\s*:/im.test(tail)) return body;
+  if (/^\s*PARTY\s+\d+\s*:/im.test(tail)) return body;
+
+  const identities = buildCorpusRoleIdentitiesForExecutionReconcile(body);
+  const client = identities.find((i) => i.blockHeading.trim().toUpperCase() === "CLIENT");
+  const provider = identities.find(
+    (i) => i.blockHeading.trim().toUpperCase() === "SERVICE PROVIDER",
+  );
+  if (!client?.partyDisplayName?.trim() || !provider?.partyDisplayName?.trim()) return body;
+
+  const reconciled = reconcileExecutionBlockToRoleIdentities(body, [client, provider]);
+  return reconciled.repairs > 0 ? reconciled.text : body;
 }
 
 function isSubstantiveBrandLicensingCorpus(
@@ -179,11 +209,13 @@ function finalizePreparedFreezeCandidateText(
     mutatedText,
     args.intakeText ?? null,
   );
-  return preserveSubstantiveServerFullDraftCorpusLength(
+  const lengthPreserved = preserveSubstantiveServerFullDraftCorpusLength(
     entryText,
     brandPreserved,
     args.source ?? null,
   );
+  // Length floor may restore the entry corpus; always re-align signature roles last.
+  return reconcileExecutionRolesBeforeFreezeCommit(lengthPreserved);
 }
 
 function finalizeSubstantiveBrandLicensingCorpusAfterWitness(
@@ -285,6 +317,7 @@ export function preparePaidProFreezeCandidateText(
   ) {
     const integrity = preparePaidProImmutableReviewedDocument(inputTrimmed);
     if (integrity.ok) {
+      const reconciled = reconcileExecutionRolesBeforeFreezeCommit(integrity.text);
       const reviewParties = resolvePartiesForReviewRender({
         draft: args.draft ?? null,
         intakeText: args.intakeText ?? null,
@@ -298,13 +331,16 @@ export function preparePaidProFreezeCandidateText(
         }))
         .filter((p) => p.name.length >= 2);
       return {
-        text: integrity.text,
-        hash: hashPaidProCorpus(integrity.text),
+        text: reconciled,
+        hash: hashPaidProCorpus(reconciled),
         reviewParties,
         parties,
         repairs: [
           "freeze_prep_skipped_pipeline_validated_corpus",
           ...integrity.repairs.map((r) => `reviewed_doc_integrity:${r}`),
+          ...(reconciled !== integrity.text
+            ? ["freeze_prep:reconcile_execution_block_roles"]
+            : []),
         ],
       };
     }
@@ -335,6 +371,7 @@ export function preparePaidProFreezeCandidateText(
   ) {
     const integrity = preparePaidProImmutableReviewedDocument(authorityTrimmed);
     if (integrity.ok) {
+      const reconciled = reconcileExecutionRolesBeforeFreezeCommit(integrity.text);
       const reviewParties = resolvePartiesForReviewRender({
         draft: args.draft ?? null,
         intakeText: args.intakeText ?? null,
@@ -348,13 +385,16 @@ export function preparePaidProFreezeCandidateText(
         }))
         .filter((p) => p.name.length >= 2);
       return {
-        text: integrity.text,
-        hash: hashPaidProCorpus(integrity.text),
+        text: reconciled,
+        hash: hashPaidProCorpus(reconciled),
         reviewParties,
         parties,
         repairs: [
           "freeze_prep_skipped_pipeline_stable_corpus",
           ...integrity.repairs.map((r) => `reviewed_doc_integrity:${r}`),
+          ...(reconciled !== integrity.text
+            ? ["freeze_prep:reconcile_execution_block_roles"]
+            : []),
         ],
       };
     }
@@ -604,22 +644,21 @@ export function preparePaidProFreezeCandidateText(
   }
 
   const reviewedIntegrity = preparePaidProImmutableReviewedDocument(safeForCommit);
-  safeForCommit = reviewedIntegrity.text;
+  safeForCommit = reconcileExecutionRolesBeforeFreezeCommit(reviewedIntegrity.text);
   if (reviewedIntegrity.repairs.length > 0) {
     repairs.push(...reviewedIntegrity.repairs.map((r) => `reviewed_doc_integrity:${r}`));
   }
+  if (safeForCommit !== reviewedIntegrity.text) {
+    repairs.push("freeze_prep:reconcile_execution_block_roles");
+  }
 
+  const finalizedText = finalizePreparedFreezeCandidateText(authorityTrimmed, safeForCommit, {
+    intakeText: args.intakeText ?? null,
+    source: requestedSource,
+  });
   return {
-    text: finalizePreparedFreezeCandidateText(authorityTrimmed, safeForCommit, {
-      intakeText: args.intakeText ?? null,
-      source: requestedSource,
-    }),
-    hash: hashPaidProCorpus(
-      finalizePreparedFreezeCandidateText(authorityTrimmed, safeForCommit, {
-        intakeText: args.intakeText ?? null,
-        source: requestedSource,
-      }),
-    ),
+    text: finalizedText,
+    hash: hashPaidProCorpus(finalizedText),
     reviewParties,
     parties,
     repairs,
@@ -774,6 +813,7 @@ function applyCanonicalNoticeAuthorityBeforeFreezeValidation(
 ): string {
   let text = repairPaidProCanonicalNoticeAuthorityAtFreeze(safeForCommit, prep, args, surface);
   text = ensureGenericManifestExecutionBlockBeforeNoticeFreeze(text, args);
+  text = reconcileExecutionRolesBeforeFreezeCommit(text);
   const noticeValidationCtx = resolveFreezeNoticeValidationContext(prep, args, text);
   assertClauseFamilyStructuralIntegrityForFreeze(text, {
     parties: noticeValidationCtx.parties,
@@ -787,7 +827,7 @@ function applyCanonicalNoticeAuthorityBeforeFreezeValidation(
   });
   const integrity = preparePaidProImmutableReviewedDocument(text);
   assertPaidProReviewedDocumentIntegrity(integrity.text);
-  return integrity.text;
+  return reconcileExecutionRolesBeforeFreezeCommit(integrity.text);
 }
 
 export function assertPaidProFreezeCandidateGates(
@@ -1194,21 +1234,13 @@ export function assertPaidProFreezeCandidateGates(
       draft: args.draft ?? null,
       intakeText: args.intakeText ?? null,
     });
-    if (
-      substantiveManifest.length >= 3 &&
-      !isGenericPaidProAcceptanceManifestFallback(substantiveManifest)
-    ) {
-      const roleReconcile = reconcileExecutionBlockToRoleIdentities(
-        safeForCommit,
-        buildCorpusRoleIdentitiesForExecutionReconcile(safeForCommit),
+    const roleReconciled = reconcileExecutionRolesBeforeFreezeCommit(safeForCommit);
+    if (roleReconciled !== safeForCommit) {
+      safeForCommit = preserveSubstantiveBrandLicensingCorpusLength(
+        freezeEntryText,
+        roleReconciled,
+        args.intakeText ?? null,
       );
-      if (roleReconcile.repairs > 0) {
-        safeForCommit = preserveSubstantiveBrandLicensingCorpusLength(
-          freezeEntryText,
-          roleReconcile.text,
-          args.intakeText ?? null,
-        );
-      }
     }
     const substantivePartyNames = substantiveManifest.map((r) => r.fullLegalName).filter(Boolean);
     if (substantivePartyNames.length >= 2) {
@@ -1230,6 +1262,9 @@ export function assertPaidProFreezeCandidateGates(
       args.draft ?? null,
     );
   }
+
+  // Universal pre-commit role reconcile (2-party services included).
+  safeForCommit = reconcileExecutionRolesBeforeFreezeCommit(safeForCommit);
 
   if (isSubstantiveBrandLicensingCorpus(freezeEntryText, args.intakeText)) {
     safeForCommit = finalizeSubstantiveBrandLicensingCorpusAfterWitness(
@@ -1270,7 +1305,7 @@ export function assertPaidProFreezeCandidateGates(
   // duplicate openings, or unresolved identity tokens into the immutable reviewed corpus.
   {
     const integrity = preparePaidProImmutableReviewedDocument(safeForCommit);
-    safeForCommit = integrity.text;
+    safeForCommit = reconcileExecutionRolesBeforeFreezeCommit(integrity.text);
     assertPaidProReviewedDocumentIntegrity(safeForCommit);
   }
 
