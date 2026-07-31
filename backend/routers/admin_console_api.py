@@ -414,6 +414,14 @@ def admin_users(request: Request, limit: int = Query(default=200, ge=1, le=500))
         if uid and email and "@" in email:
             admin_email_by_user[uid] = email
 
+    # Customer identities persisted at bind/finalize (preferred over operator registry).
+    workspace_identity_by_user: Dict[str, Dict[str, Any]] = {}
+    workspace_identity_rows = admin_store.list_workspace_user_identities(limit=2000)
+    for row in workspace_identity_rows:
+        uid = str(row.get("user_id") or "").strip()
+        if uid:
+            workspace_identity_by_user[uid] = row
+
     users: List[Dict[str, Any]] = []
     seen_user_ids: set[str] = set()
     for s in subjects:
@@ -422,8 +430,17 @@ def admin_users(request: Request, limit: int = Query(default=200, ge=1, le=500))
         uid = _user_id_from_subject_ref(ref, sub)
         if uid:
             seen_user_ids.add(uid)
-        email = _parse_subject_email(ref) or (admin_email_by_user.get(uid) if uid else None)
-        display_name = affiliate_display_by_user.get(uid) if uid else None
+        ident = workspace_identity_by_user.get(uid) if uid else None
+        ident_email = str((ident or {}).get("email") or "").strip() or None
+        if ident_email and "@" not in ident_email:
+            ident_email = None
+        ident_display = str((ident or {}).get("display_name") or "").strip() or None
+        email = (
+            ident_email
+            or _parse_subject_email(ref)
+            or (admin_email_by_user.get(uid) if uid else None)
+        )
+        display_name = ident_display or (affiliate_display_by_user.get(uid) if uid else None)
         users.append(
             {
                 "id": ref,
@@ -445,6 +462,47 @@ def admin_users(request: Request, limit: int = Query(default=200, ge=1, le=500))
                 "last_error_code": None,
             }
         )
+
+    # Authenticated customers with identity but no usage subject yet.
+    for row in workspace_identity_rows:
+        uid = str(row.get("user_id") or "").strip()
+        if not uid or uid in seen_user_ids:
+            continue
+        if len(users) >= limit:
+            break
+        email = str(row.get("email") or "").strip() or None
+        if email and "@" not in email:
+            email = None
+        oid_raw = str(row.get("org_id") or "").strip()
+        if oid_raw.startswith("org:"):
+            org_ref = oid_raw
+        elif oid_raw:
+            org_ref = f"org:{oid_raw}"
+        else:
+            org_ref = f"org:user-{uid}"
+        users.append(
+            {
+                "id": org_ref,
+                "org_id": org_ref,
+                "user_id": uid,
+                "email": email,
+                "display_name": str(row.get("display_name") or "").strip()
+                or affiliate_display_by_user.get(uid),
+                "created_at": str(row.get("created_at") or ""),
+                "last_active_at": str(row.get("updated_at") or row.get("created_at") or ""),
+                "account_status": "active",
+                "plan_type": "free",
+                "premium_active": False,
+                "entitlement_source": "none",
+                "entitlement_started_at": None,
+                "entitlement_expires_at": None,
+                "affiliate_code_used": None,
+                "referred_by_affiliate_id": None,
+                "agreement_count": 0,
+                "last_error_code": None,
+            }
+        )
+        seen_user_ids.add(uid)
 
     # Include operator registry identities not already present (safe email/user_id lookup).
     for row in admin_identity_rows:

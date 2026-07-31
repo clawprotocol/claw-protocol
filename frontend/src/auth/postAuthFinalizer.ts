@@ -49,7 +49,7 @@ function applyOwnershipMigrationFromServer(args: {
   });
 }
 
-function displayNameFromUser(user: User): string {
+export function displayNameFromUser(user: User): string {
   const meta = user.user_metadata as Record<string, unknown> | undefined;
   const fromMeta =
     typeof meta?.full_name === "string"

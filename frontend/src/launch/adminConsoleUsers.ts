@@ -56,6 +56,12 @@ export function adminConsoleUserSearchHaystack(user: AdminConsoleUserRow): strin
 export function adminConsoleUserMatchesQuery(user: AdminConsoleUserRow, query: string): boolean {
   const q = query.trim().toLowerCase();
   if (!q) return true;
+  // Exact email match when the query looks like an address — preserves Gmail plus-aliases
+  // (no normalization that strips +tag) and avoids accidental substring hits.
+  if (q.includes("@")) {
+    const email = (user.email || "").trim().toLowerCase();
+    return email === q;
+  }
   return adminConsoleUserSearchHaystack(user).includes(q);
 }
 

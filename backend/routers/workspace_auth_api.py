@@ -26,14 +26,77 @@ from backend.security.anonymous_session_token import (
     ANON_SESSION_COOKIE,
     anonymous_session_ttl_seconds,
 )
-from backend.security.supabase_jwt import require_supabase_user_id
+from backend.security.supabase_jwt import (
+    extract_bearer_token,
+    require_supabase_user_id,
+    verify_supabase_access_token,
+)
 from backend.security.workspace_identity import verify_anonymous_session_from_request, extract_anonymous_session_token
 from backend.security.safe_redirect import build_destination_with_agreement, resolve_safe_redirect_path
 from backend.config.deployment_runtime import claw_environment
 from backend.cors_policy import apply_cors_headers_to_response
+from backend.admin_console.store import get_admin_console_store
 
 router = APIRouter(prefix="/v1/workspace", tags=["workspace-auth"])
 _log = logging.getLogger("claw.workspace_auth")
+
+
+def _safe_identity_from_request(
+    request: Request,
+    *,
+    email: Optional[str] = None,
+    display_name: Optional[str] = None,
+) -> tuple[Optional[str], Optional[str]]:
+    """Resolve email / display_name from bind body, falling back to verified JWT claims."""
+    em = (email or "").strip() or None
+    dn = (display_name or "").strip() or None
+    if em and "@" not in em:
+        em = None
+    token = extract_bearer_token(request)
+    if token and (not em or not dn):
+        try:
+            claims = verify_supabase_access_token(token)
+            if not em:
+                claim_email = str(claims.get("email") or "").strip()
+                if claim_email and "@" in claim_email:
+                    em = claim_email
+            if not dn:
+                meta = claims.get("user_metadata") if isinstance(claims.get("user_metadata"), dict) else {}
+                dn = str(meta.get("full_name") or meta.get("name") or "").strip() or None
+        except ValueError:
+            pass
+    if em:
+        em = em[:256]
+    if dn:
+        dn = dn[:160]
+    return em, dn
+
+
+def _persist_workspace_user_identity(
+    request: Request,
+    *,
+    user_id: str,
+    org_id: str,
+    email: Optional[str] = None,
+    display_name: Optional[str] = None,
+) -> None:
+    """Upsert safe identity metadata for Admin Console Genesis grants (no tokens / bodies)."""
+    em, dn = _safe_identity_from_request(request, email=email, display_name=display_name)
+    try:
+        store = get_admin_console_store()
+        store.init_schema()
+        store.upsert_workspace_user_identity(
+            user_id=user_id,
+            org_id=org_id,
+            email=em,
+            display_name=dn,
+        )
+    except Exception:
+        _log.exception(
+            "workspace_user_identity_persist_failed user_id=%s org_id=%s",
+            user_id,
+            org_id,
+        )
 
 
 class BindUserOrgIn(BaseModel):
@@ -305,6 +368,7 @@ async def finalize_auth(request: Request, body: FinalizeAuthIn) -> Dict[str, Any
     if cont_row.get("consumed_at"):
         # Idempotent retry by same user
         if str(cont_row.get("claimed_user_id") or "") == user_id:
+            _persist_workspace_user_identity(request, user_id=user_id, org_id=org_id)
             dest = build_destination_with_agreement(
                 destination_path=str(cont_row.get("destination_path") or "/app"),
                 agreement_id=str(cont_row.get("agreement_id") or "") or None,
@@ -339,6 +403,7 @@ async def finalize_auth(request: Request, body: FinalizeAuthIn) -> Dict[str, Any
 
     prev_org = str(cont_row.get("org_id") or "").strip()
     ensure_organization(org_id, name=user_id)
+    _persist_workspace_user_identity(request, user_id=user_id, org_id=org_id)
 
     migrated: list[str] = []
     if not is_returning and prev_org and prev_org != org_id:
@@ -450,6 +515,13 @@ async def bind_user_org(request: Request, body: BindUserOrgIn) -> Dict[str, Any]
     claim_method = (body.claim_method or "unknown").strip()[:64]
 
     ensure_organization(org_id, name=display)
+    _persist_workspace_user_identity(
+        request,
+        user_id=user_id,
+        org_id=org_id,
+        email=body.email,
+        display_name=body.display_name,
+    )
 
     migrated_agreements: list[str] = []
     prev = (body.previous_org_id or "").strip()

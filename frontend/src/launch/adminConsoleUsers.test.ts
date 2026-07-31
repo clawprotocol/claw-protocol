@@ -42,10 +42,27 @@ describe("adminConsoleUsers", () => {
     expect(adminConsoleUserMatchesQuery(identified, "nobody")).toBe(false);
   });
 
+  it("matches exact email including Gmail plus-aliases", () => {
+    const plusAlias = normalizeAdminConsoleUser({
+      id: "org:user-uid-plus",
+      org_id: "org:user-uid-plus",
+      user_id: "uid-plus",
+      email: "founder+staging@gmail.com",
+      display_name: "Founder",
+      plan_type: "free",
+    });
+    expect(adminConsoleUserMatchesQuery(plusAlias, "founder+staging@gmail.com")).toBe(true);
+    expect(adminConsoleUserMatchesQuery(plusAlias, "Founder+Staging@gmail.com")).toBe(true);
+    expect(adminConsoleUserMatchesQuery(plusAlias, "founder@gmail.com")).toBe(false);
+    expect(adminConsoleUserMatchesQuery(plusAlias, "staging@gmail.com")).toBe(false);
+    expect(adminConsoleUserMatchesQuery(identified, "cryptocurated21@example.com")).toBe(true);
+  });
+
   it("filters the users list without dropping identity when query empty", () => {
     const rows = [opaque, identified];
     expect(filterAdminConsoleUsers(rows, "").length).toBe(2);
     expect(filterAdminConsoleUsers(rows, "cryptocurated21")).toEqual([identified]);
+    expect(filterAdminConsoleUsers(rows, "cryptocurated21@example.com")).toEqual([identified]);
   });
 
   it("prefers stable user_id for Genesis grant target", () => {

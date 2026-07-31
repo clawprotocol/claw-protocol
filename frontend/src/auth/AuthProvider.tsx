@@ -9,9 +9,10 @@ import {
   signOutAuth,
   buildAuthCallbackUrl,
 } from "./supabaseAuthService";
-import { finalizeAuthenticatedSession } from "./postAuthFinalizer";
+import { displayNameFromUser, finalizeAuthenticatedSession } from "./postAuthFinalizer";
 import { prepareAuthContinuation } from "./prepareAuthContinuation";
 import { setCachedAccessToken, clearCachedAccessToken } from "./authAccessTokenCache";
+import { bindAuthenticatedUserToWorkspace } from "./workspaceBindingApi";
 
 export type AuthContextValue = {
   enabled: boolean;
@@ -37,7 +38,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const finalizedUserRef = useRef<string | null>(null);
 
   const finalizeUser = useCallback(async (user: User, claimMethod: "magic_link" | "google" | "session_restore") => {
-    if (finalizedUserRef.current === user.id) return;
+    if (finalizedUserRef.current === user.id) {
+      // Idempotent identity upsert so Admin Console can find returning sessions by email.
+      try {
+        const s = await getAuthSession();
+        await bindAuthenticatedUserToWorkspace({
+          userId: user.id,
+          email: user.email,
+          displayName: displayNameFromUser(user) || undefined,
+          claimMethod: "session_restore",
+          accessToken: s?.access_token,
+        });
+      } catch {
+        // Non-blocking — full finalize already succeeded for this session.
+      }
+      return;
+    }
     finalizedUserRef.current = user.id;
     await finalizeAuthenticatedSession({ user, claimMethod });
   }, []);

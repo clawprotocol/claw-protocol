@@ -133,15 +133,20 @@ describe("AdminConsolePage connected state", () => {
     });
   });
 
-  it("filters users by email without exposing agreement bodies", async () => {
+  it("filters users by exact email without exposing agreement bodies", async () => {
     render(<AdminConsolePage initialAdminSecret="ops-secret" />);
     await waitFor(() => {
       expect(fetchAdminOverview).toHaveBeenCalled();
     });
     fireEvent.click(screen.getByRole("button", { name: /^Users$/ }));
     expect(screen.getAllByTestId("admin-user-card")).toHaveLength(2);
+    // Exact address match (includes Gmail plus-aliases); partial local-part still works without @.
     fireEvent.change(screen.getByLabelText(/find user/i), {
-      target: { value: "cryptocurated21@" },
+      target: { value: "cryptocurated21" },
+    });
+    expect(screen.getAllByTestId("admin-user-card")).toHaveLength(1);
+    fireEvent.change(screen.getByLabelText(/find user/i), {
+      target: { value: "cryptocurated21@example.com" },
     });
     expect(screen.getAllByTestId("admin-user-card")).toHaveLength(1);
     expect(screen.getByTestId("admin-user-primary-label").textContent).toContain(

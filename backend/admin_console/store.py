@@ -70,6 +70,20 @@ class AdminConsoleStore:
                   ON admin_action_audit (created_at DESC);
                 CREATE INDEX IF NOT EXISTS idx_admin_action_audit_target
                   ON admin_action_audit (target_type, target_id, created_at DESC);
+
+                -- Customer workspace identities for Admin Console lookup (no tokens / agreement bodies).
+                CREATE TABLE IF NOT EXISTS workspace_user_identities (
+                  user_id TEXT PRIMARY KEY,
+                  org_id TEXT NOT NULL,
+                  email TEXT,
+                  display_name TEXT,
+                  created_at TEXT NOT NULL,
+                  updated_at TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_workspace_user_identities_email
+                  ON workspace_user_identities (email);
+                CREATE INDEX IF NOT EXISTS idx_workspace_user_identities_updated
+                  ON workspace_user_identities (updated_at DESC);
                 """
             )
             # Additive migrations for older DBs.
@@ -332,6 +346,75 @@ class AdminConsoleStore:
                 SELECT id, email, role, is_active, created_at, last_login_at
                 FROM admin_users
                 ORDER BY datetime(COALESCE(last_login_at, created_at)) DESC
+                LIMIT ?
+                """,
+                (lim,),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def upsert_workspace_user_identity(
+        self,
+        *,
+        user_id: str,
+        org_id: str,
+        email: str | None = None,
+        display_name: str | None = None,
+    ) -> None:
+        """Persist safe customer identity for Admin Console email/display lookup."""
+        uid = (user_id or "").strip()
+        oid = (org_id or "").strip()
+        if not uid or not oid:
+            return
+        em = (email or "").strip() or None
+        if em and "@" not in em:
+            em = None
+        if em:
+            em = em[:256]
+        dn = (display_name or "").strip() or None
+        if dn:
+            dn = dn[:160]
+        now = _utc_now()
+        with self._conn() as con:
+            con.execute(
+                """
+                INSERT INTO workspace_user_identities (
+                  user_id, org_id, email, display_name, created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(user_id) DO UPDATE SET
+                  org_id = excluded.org_id,
+                  email = COALESCE(excluded.email, workspace_user_identities.email),
+                  display_name = COALESCE(
+                    excluded.display_name, workspace_user_identities.display_name
+                  ),
+                  updated_at = excluded.updated_at
+                """,
+                (uid, oid, em, dn, now, now),
+            )
+
+    def get_workspace_user_identity(self, user_id: str) -> Optional[Dict[str, Any]]:
+        uid = (user_id or "").strip()
+        if not uid:
+            return None
+        with self._conn() as con:
+            row = con.execute(
+                """
+                SELECT user_id, org_id, email, display_name, created_at, updated_at
+                FROM workspace_user_identities
+                WHERE user_id = ?
+                """,
+                (uid,),
+            ).fetchone()
+        return dict(row) if row else None
+
+    def list_workspace_user_identities(self, *, limit: int = 1000) -> List[Dict[str, Any]]:
+        lim = max(1, min(int(limit), 5000))
+        with self._conn() as con:
+            rows = con.execute(
+                """
+                SELECT user_id, org_id, email, display_name, created_at, updated_at
+                FROM workspace_user_identities
+                ORDER BY datetime(updated_at) DESC
                 LIMIT ?
                 """,
                 (lim,),
