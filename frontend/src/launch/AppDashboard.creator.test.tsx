@@ -766,4 +766,42 @@ describe("AppDashboard creator-centric surface", () => {
     expect(screen.getByText("Create your first agreement")).toBeTruthy();
     expect(screen.getByRole("button", { name: "Create first agreement" })).toBeTruthy();
   });
+
+  it("after one persisted draft reload, shows Continue Editing for that agreement (not empty state)", async () => {
+    const agreementId = "ag_genesis_persisted_1";
+    vi.spyOn(agreementWorkspaceApi, "fetchWorkspaceIndex").mockResolvedValue({
+      agreements: [
+        indexRow({
+          id: agreementId,
+          title: "Services Agreement — LawDog / Acme",
+          review_sent_at: null,
+          reviewer_approved: false,
+          all_reviewers_approved: false,
+          review_approvals_required: 0,
+          review_approvals_completed: 0,
+        }),
+      ],
+      skipped: [],
+      error: null,
+    });
+    vi.spyOn(agreementWorkspaceApi, "fetchAgreementDraft").mockResolvedValue({
+      ok: true,
+      draft: { ...draftWithParties(), id: agreementId },
+    });
+
+    const user = userEvent.setup();
+    render(<AppDashboard />);
+
+    await waitFor(() => {
+      expect(screen.getByRole("button", { name: "Continue Editing" })).toBeTruthy();
+    });
+
+    expect(screen.queryByText("Create your first agreement")).toBeNull();
+    expect(screen.getByTestId("dashboard-whats-next-panel").getAttribute("data-agreement-id")).toBe(
+      agreementId,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Continue Editing" }));
+    expect(mockNavigate).toHaveBeenCalledWith(`/app/send/${agreementId}`);
+  });
 });

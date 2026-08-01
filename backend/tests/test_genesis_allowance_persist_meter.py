@@ -127,6 +127,49 @@ def test_idempotent_retry_does_not_double_charge(isolated_env):
     assert decision["agreements_remaining"] == 4
 
 
+def test_review_ready_persist_reloads_on_workspace_index_without_duplicate(isolated_env):
+    """
+    Persist one review-ready draft → workspace-index lists exactly that id on reload;
+    idempotent retry must not duplicate the row or burn another Genesis allowance.
+    """
+    client, usage, _eco = isolated_env
+    uid = "genesis-reload-dashboard"
+    subject = f"org:user-{uid}"
+    grant_entitlement(user_id=uid, granted_by="ops", grant_source=GRANT_SOURCE_ADMIN)
+    h = {
+        **_auth(uid),
+        "X-Claw-Review-First-Persist": "1",
+        "X-Claw-Draft-Idempotency-Key": "review-first:reload-session-1",
+    }
+    created = client.post("/api/agreements/draft", headers=h, json=_draft_body("LawDog / Acme"))
+    assert created.status_code == 200, created.text
+    aid = created.json()["id"]
+    owner = usage.get_agreement_owner_row(aid)
+    assert owner is not None
+    assert owner["subject_ref"] == subject
+
+    idx1 = client.get("/api/agreements/workspace-index", headers=_auth(uid))
+    assert idx1.status_code == 200, idx1.text
+    ids1 = [row["id"] for row in (idx1.json().get("agreements") or [])]
+    assert ids1.count(aid) == 1
+    assert len(ids1) == 1
+
+    # Simulate /app reload + Continue Editing retry of the same review-first key.
+    retry = client.post("/api/agreements/draft", headers=h, json=_draft_body("LawDog / Acme"))
+    assert retry.status_code == 200, retry.text
+    assert retry.json()["id"] == aid
+    assert retry.json().get("idempotent") is True
+
+    idx2 = client.get("/api/agreements/workspace-index", headers=_auth(uid))
+    assert idx2.status_code == 200, idx2.text
+    ids2 = [row["id"] for row in (idx2.json().get("agreements") or [])]
+    assert ids2 == [aid]
+    assert usage.agreements_created_this_utc_month(subject) == 1
+    decision = resolve_commercial_entitlement(subject)
+    assert decision["agreements_used"] == 1
+    assert decision["agreements_remaining"] == 4
+
+
 def test_zero_persisted_drafts_but_five_credits_reconcile(isolated_env):
     """
     Reproduce staging mismatch: agreement_owner meters exist without drafts,

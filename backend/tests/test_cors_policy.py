@@ -22,10 +22,12 @@ from backend.cors_policy import (
 def test_cors_allow_request_headers_includes_paid_pro_perf_trace_case_insensitive() -> None:
     assert "X-Claw-Paid-Pro-Perf-Trace" in CORS_ALLOW_REQUEST_HEADERS
     assert "X-Claw-Review-First-Persist" in CORS_ALLOW_REQUEST_HEADERS
+    assert "X-Claw-Draft-Idempotency-Key" in CORS_ALLOW_REQUEST_HEADERS
     assert "X-Claw-Admin-Secret" in CORS_ALLOW_REQUEST_HEADERS
     assert "X-Claw-Admin-Reason" in CORS_ALLOW_REQUEST_HEADERS
     assert "X-Claw-User-Id" in CORS_ALLOW_REQUEST_HEADERS
     assert cors_allow_request_header_allowed("x-claw-review-first-persist")
+    assert cors_allow_request_header_allowed("x-claw-draft-idempotency-key")
     assert cors_allow_request_header_allowed("x-claw-paid-pro-perf-trace")
     assert cors_allow_request_header_allowed("x-claw-admin-secret")
     assert cors_allow_request_header_allowed("x-claw-admin-reason")
@@ -350,3 +352,41 @@ def test_qa_payment_bypass_authorization_includes_acao_for_allowed_origin(
     assert res.status_code == 200
     assert res.headers.get("access-control-allow-origin") == origin
     assert res.headers.get("access-control-allow-credentials") == "true"
+
+
+def test_options_agreements_draft_preflight_allows_draft_idempotency_header(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Any, caplog: pytest.LogCaptureFixture
+) -> None:
+    """
+    Staging repro: FE sends X-Claw-Draft-Idempotency-Key on review-ready persist.
+    Explicit CORS allow-list must include it or preflight blocks POST and /app stays empty.
+    """
+    monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ENVIRONMENT", "staging")
+    monkeypatch.setenv(
+        "CLAW_CORS_ALLOW_ORIGINS",
+        "https://believable-gentleness-staging.up.railway.app",
+    )
+    from backend.main import app
+
+    caplog.set_level(logging.INFO, logger="claw.cors")
+    client = TestClient(app)
+    origin = "https://believable-gentleness-staging.up.railway.app"
+    res = client.options(
+        "/api/agreements/draft",
+        headers={
+            "Origin": origin,
+            "Access-Control-Request-Method": "POST",
+            "Access-Control-Request-Headers": (
+                "authorization, content-type, x-claw-org-id, "
+                "x-claw-review-first-persist, x-claw-draft-idempotency-key"
+            ),
+        },
+    )
+    assert res.status_code in (200, 204)
+    assert res.headers.get("access-control-allow-origin") == origin
+    allow_headers = (res.headers.get("access-control-allow-headers") or "").lower()
+    assert "x-claw-draft-idempotency-key" in allow_headers
+    assert "x-claw-review-first-persist" in allow_headers
+    assert "content-type" in allow_headers

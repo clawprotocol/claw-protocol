@@ -28,6 +28,8 @@ CORS_ALLOW_REQUEST_HEADERS: List[str] = [
     "X-Claw-Affiliate-Code",
     "X-Claw-Paid-Pro-Perf-Trace",
     "X-Claw-Review-First-Persist",
+    # Review-ready draft idempotency (Genesis/Pro first-review persist; FE always sends).
+    "X-Claw-Draft-Idempotency-Key",
     "X-Claw-Recipient-Access-Token",
     "X-Claw-Recipient-Link-Mint-Key",
     # Operator admin console + QA authorization (split-origin SPA).

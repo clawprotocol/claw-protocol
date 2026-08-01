@@ -8,6 +8,7 @@ import {
   shouldRequireWorkspacePersistOnReviewReady,
   shouldRunAutoPersistAfterAuthoritativeCommit,
 } from "./paidProReviewReadyWorkspacePersist";
+import { DRAFT_IDEMPOTENCY_REQUEST_HEADER } from "./reviewLinkPersistDiagnostics";
 import {
   clearPaidProReviewSessionAuthorityForTests,
   establishPaidProReviewSessionAuthority,
@@ -98,13 +99,15 @@ describe("paidProReviewReadyWorkspacePersist", () => {
     let draftPosts = 0;
     let agreementsUsed = 0;
     let workspaceRows: Array<{ id: string; title: string }> = [];
+    const persistedId = "ag_genesis_lawdog_acme_1";
 
     const ensurePersist = async () => {
       draftPosts += 1;
       agreementsUsed += 1; // mirrors backend record_draft_created on successful POST
-      const id = "ag_genesis_lawdog_acme_1";
-      workspaceRows = [{ id, title: "Services Agreement — LawDog Demo LLC / Acme Test Co" }];
-      return id;
+      workspaceRows = [
+        { id: persistedId, title: "Services Agreement — LawDog Demo LLC / Acme Test Co" },
+      ];
+      return persistedId;
     };
 
     const first = await persistWorkspaceAgreementAfterReviewReady({
@@ -113,7 +116,7 @@ describe("paidProReviewReadyWorkspacePersist", () => {
       persistCorpusPlain: authorityPlain,
       ensurePersist,
     });
-    expect(first).toEqual({ ok: true, agreementId: "ag_genesis_lawdog_acme_1", created: true });
+    expect(first).toEqual({ ok: true, agreementId: persistedId, created: true });
     expect(draftPosts).toBe(1);
     expect(agreementsUsed).toBe(1);
 
@@ -124,23 +127,41 @@ describe("paidProReviewReadyWorkspacePersist", () => {
       skipFreeStarterCreateSubmit: true,
       ensurePersist,
     });
-    expect(retry).toEqual({ ok: true, agreementId: "ag_genesis_lawdog_acme_1", created: false });
+    expect(retry).toEqual({ ok: true, agreementId: persistedId, created: false });
     expect(draftPosts).toBe(1);
     expect(agreementsUsed).toBe(1);
 
-    // Reload: workspace-index still contains the row.
+    // Reload /app: workspace-index still contains exactly one row.
     const reloadedIndex = { agreements: [...workspaceRows] };
-    expect(reloadedIndex.agreements.some((r) => r.id === "ag_genesis_lawdog_acme_1")).toBe(true);
-    expect(reloadedIndex.agreements.length).toBeGreaterThan(0);
+    expect(reloadedIndex.agreements.map((r) => r.id)).toEqual([persistedId]);
+    expect(reloadedIndex.agreements.length).toBe(1);
 
     // Dashboard "Create your first agreement" only when agreementCount === 0.
     const agreementCount = reloadedIndex.agreements.length;
     const showFirstAgreementEmptyState = agreementCount === 0;
     expect(showFirstAgreementEmptyState).toBe(false);
+    // Continue Editing opens the same persisted agreement.
+    const continueEditingPath = `/app/send/${reloadedIndex.agreements[0]!.id}`;
+    expect(continueEditingPath).toBe(`/app/send/${persistedId}`);
 
-    // Agreements list empty copy only when no rows.
+    // /app/agreements shows the same single row (no empty state).
     const showNoRecordsYet = reloadedIndex.agreements.length === 0;
     expect(showNoRecordsYet).toBe(false);
+
+    // Second reload must not invent a duplicate or burn another allowance.
+    const secondReload = { agreements: [...workspaceRows] };
+    expect(secondReload.agreements).toEqual(reloadedIndex.agreements);
+    expect(draftPosts).toBe(1);
+    expect(agreementsUsed).toBe(1);
+  });
+
+  it("keeps draft-idempotency header synchronized with backend CORS allow-list", () => {
+    const corsPolicy = readFileSync(
+      join(__dirname, "../../../../backend/cors_policy.py"),
+      "utf8",
+    );
+    expect(DRAFT_IDEMPOTENCY_REQUEST_HEADER).toBe("X-Claw-Draft-Idempotency-Key");
+    expect(corsPolicy).toContain(`"${DRAFT_IDEMPOTENCY_REQUEST_HEADER}"`);
   });
 
   it("integration: persist failure does not leave a workspace record or consume allowance", async () => {
