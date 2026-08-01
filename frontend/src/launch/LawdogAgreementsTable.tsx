@@ -1,4 +1,5 @@
 import { useState } from "react";
+import type { AgreementDraft } from "../agreement/agreementTypes";
 import type { WorkspaceIndexAgreement } from "../agreement/agreementWorkspaceApi";
 import { patchWorkspaceArchive } from "../agreement/agreementWorkspaceApi";
 import { downloadCompletedSignedAgreementPdf } from "../agreement/completedSignedAgreementPdfDownload";
@@ -22,14 +23,22 @@ import { markPaidDashboardCreateContext } from "./paidDashboardCreateContext";
 
 type Props = {
   rows: readonly WorkspaceIndexAgreement[];
+  draftByAgreementId?: Readonly<Record<string, AgreementDraft | null>>;
   signingProgressByAgreementId?: Readonly<Record<string, import("./creatorDashboardSigningProgress").CreatorSigningProgressSnapshot>>;
-  onNavigate: (path: string) => void;
+  onNavigate: (path: string, meta?: { kind?: string; agreementId?: string }) => void;
   onFocusReviewStatus?: (agreementId: string) => void;
   onArchiveComplete?: () => void;
 };
 
 export function LawdogAgreementsTable(props: Props) {
-  const { rows, signingProgressByAgreementId = {}, onNavigate, onFocusReviewStatus, onArchiveComplete } = props;
+  const {
+    rows,
+    draftByAgreementId = {},
+    signingProgressByAgreementId = {},
+    onNavigate,
+    onFocusReviewStatus,
+    onArchiveComplete,
+  } = props;
   const [pdfDownloadBusyId, setPdfDownloadBusyId] = useState<string | null>(null);
 
   if (rows.length === 0) return null;
@@ -55,7 +64,8 @@ export function LawdogAgreementsTable(props: Props) {
             const rowProgress = signingProgressByAgreementId[row.id] ?? null;
             const internalStatus = deriveCreatorDashboardStatus(row);
             const productStatus = deriveLawdogProductStatus(row, rowProgress);
-            const openAction = creatorDashboardPrimaryAction(row);
+            const rowDraft = draftByAgreementId[row.id] ?? null;
+            const openAction = creatorDashboardPrimaryAction(row, { draft: rowDraft });
             const contentUnavailable = row.content_unavailable === true;
             const canDownload = internalStatus === "completed" && !contentUnavailable;
             const downloadBusy = pdfDownloadBusyId === row.id;
@@ -109,10 +119,15 @@ export function LawdogAgreementsTable(props: Props) {
                           return;
                         }
                         if (openAction.kind === "manage_recipients") {
-                          onNavigate(`${buildOwnerAgreementReadOnlyPath(row.id)}?recipients=1`);
+                          onNavigate(`${buildOwnerAgreementReadOnlyPath(row.id)}?recipients=1`, {
+                            agreementId: row.id,
+                          });
                           return;
                         }
-                        onNavigate(openAction.path);
+                        onNavigate(openAction.path, {
+                          kind: openAction.kind,
+                          agreementId: row.id,
+                        });
                       }}
                     >
                       Open

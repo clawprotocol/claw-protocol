@@ -188,6 +188,8 @@ import {
   rowReadyForReviewLinkInvite,
 } from "../../launch/simpleProduct/reviewLinkRecipientEmailMerge";
 import { isPaidProAgreementAuthoritative } from "./paidProAgreementAuthority";
+import { creatorDashboardSignerMetadataCompleteFromDraft } from "../../launch/creatorDashboardSignatureTrack";
+import { isAgreementPacketPrepared } from "../../vs01/vs01WorkspaceSigningStatus";
 import {
   isSourceComparisonReviewMode,
   logReviewMode,
@@ -1206,6 +1208,28 @@ const AgreementReview: React.FC<Props> = ({
     if (!isWorkspace) return null;
     return versionBundle ?? loadBundle(agreementId);
   }, [isWorkspace, versionBundle, agreementId]);
+
+  /** Paid Pro: Continue/send CTAs require signer-setup gate; unpaid uses requiredComplete alone. */
+  const paidProSignerMetadataReady = useMemo(() => {
+    if (!draft) return false;
+    if (!isPaidProAgreementAuthoritative({ draft, agreementId })) return true;
+    return creatorDashboardSignerMetadataCompleteFromDraft(draft);
+  }, [draft, agreementId]);
+
+  /**
+   * "Ready for signature" chrome: paid Pro also needs prepared signature links (packet or lock).
+   */
+  const paidProReadyForSignatureChrome = useMemo(() => {
+    if (!paidProSignerMetadataReady) return false;
+    if (!draft || !isPaidProAgreementAuthoritative({ draft, agreementId })) return true;
+    if (isAgreementPacketPrepared(agreementId)) return true;
+    return Boolean(isWorkspace && vb && isSigningLockActive(vb));
+  }, [paidProSignerMetadataReady, draft, agreementId, isWorkspace, vb]);
+
+  const simpleFlowContinueReady = Boolean(requiredComplete && paidProSignerMetadataReady);
+  const simpleFlowReadyForSignatureChrome = Boolean(
+    requiredComplete && paidProReadyForSignatureChrome,
+  );
 
   const headVersionTail = useMemo(() => {
     if (!vb || vb.versions.length === 0) return null;
@@ -7445,14 +7469,14 @@ const AgreementReview: React.FC<Props> = ({
                     </p>
                   ) : (
                     <>
-                      {requiredComplete &&
+                      {simpleFlowReadyForSignatureChrome &&
                       (simpleFlowPhase === "review" || simpleFlowPhase === "send") &&
                       !premiumLawdogSimpleHome ? (
                         <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-emerald-300/90">
                           Make this official
                         </p>
                       ) : null}
-                      {requiredComplete && !premiumLawdogSimpleHome ? (
+                      {simpleFlowReadyForSignatureChrome && !premiumLawdogSimpleHome ? (
                         <div className="flex flex-wrap gap-2 pb-1">
                           <span className="inline-flex items-center gap-1 rounded-full border border-emerald-800/40 bg-emerald-950/30 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-emerald-200/95">
                             <span aria-hidden>✓</span> Structured
@@ -7499,7 +7523,10 @@ const AgreementReview: React.FC<Props> = ({
                             : "Nothing has been sent yet. You’re in control — optional payment attaches only if you choose."}
                         </p>
                       ) : null}
-                      {simpleFlowPhase === "send" && requiredComplete && simpleSendActionsUnlocked && !premiumLawdogSimpleHome ? (
+                      {simpleFlowPhase === "send" &&
+                      simpleFlowContinueReady &&
+                      simpleSendActionsUnlocked &&
+                      !premiumLawdogSimpleHome ? (
                         <p className="text-[11px] leading-relaxed text-slate-500">
                           Takes about 10 seconds to send. No commitment until signed.
                         </p>
@@ -7526,7 +7553,10 @@ const AgreementReview: React.FC<Props> = ({
                   <div className="flex w-full flex-col items-stretch gap-3 sm:items-end">
                     {simpleFlowPhase === "review" || !requiredComplete ? (
                       <>
-                        {isSimpleHomeReview && simpleFlowPhase === "review" && requiredComplete && !premiumLawdogSimpleHome ? (
+                        {isSimpleHomeReview &&
+                        simpleFlowPhase === "review" &&
+                        simpleFlowContinueReady &&
+                        !premiumLawdogSimpleHome ? (
                           <p
                             className="w-full text-center text-xs font-medium leading-snug text-slate-300 sm:text-right"
                             role="status"
@@ -7546,7 +7576,7 @@ const AgreementReview: React.FC<Props> = ({
                             You&apos;re moving toward tracked e-sign — nothing sends without your confirmation.
                           </p>
                         ) : null}
-                        {premiumLawdogSimpleHome && simpleFlowPhase === "review" && requiredComplete ? (
+                        {premiumLawdogSimpleHome && simpleFlowPhase === "review" && simpleFlowContinueReady ? (
                           <div className="flex w-full flex-col-reverse gap-3 sm:flex-row sm:justify-end">
                             <button
                               type="button"
@@ -7559,7 +7589,7 @@ const AgreementReview: React.FC<Props> = ({
                             <button
                               type="button"
                               className="vs01-btn vs01-btn--primary w-full min-h-[2.75rem] px-6 py-3 shadow-md shadow-emerald-950/35 ring-1 ring-emerald-500/30 disabled:cursor-not-allowed disabled:opacity-45 sm:w-auto"
-                              disabled={!requiredComplete || premiumAwaitingStreamlinedFork}
+                              disabled={!simpleFlowContinueReady || premiumAwaitingStreamlinedFork}
                               onClick={() => {
                                 if (economicsOverlay?.free_draft_expired) {
                                   logProductEvent("draft_expired", { agreementId, surface: "simple_flow" });
@@ -7568,7 +7598,7 @@ const AgreementReview: React.FC<Props> = ({
                                 }
                                 if (
                                   simpleFlowPhase === "review" &&
-                                  requiredComplete &&
+                                  simpleFlowContinueReady &&
                                   economicsOverlay?.watermark_required &&
                                   !simpleFlowUpsellSuppressed &&
                                   draft &&
@@ -7596,7 +7626,7 @@ const AgreementReview: React.FC<Props> = ({
                             <button
                               type="button"
                               className="vs01-btn vs01-btn--primary order-1 w-full min-h-[2.75rem] px-6 py-3 shadow-md shadow-emerald-950/35 ring-1 ring-emerald-500/30 disabled:cursor-not-allowed disabled:opacity-45 sm:w-auto"
-                              disabled={!requiredComplete}
+                              disabled={!simpleFlowContinueReady}
                               onClick={() => {
                                 if (economicsOverlay?.free_draft_expired) {
                                   logProductEvent("draft_expired", { agreementId, surface: "simple_flow" });
@@ -7605,7 +7635,7 @@ const AgreementReview: React.FC<Props> = ({
                                 }
                                 if (
                                   simpleFlowPhase === "review" &&
-                                  requiredComplete &&
+                                  simpleFlowContinueReady &&
                                   economicsOverlay?.watermark_required &&
                                   !simpleFlowUpsellSuppressed &&
                                   draft &&
@@ -7625,11 +7655,11 @@ const AgreementReview: React.FC<Props> = ({
                                 void Promise.resolve(onSimpleFlowContinue?.());
                               }}
                             >
-                              {!requiredComplete
+                              {!simpleFlowContinueReady
                                 ? "Next"
                                 : simpleFlowReviewPrimaryCtaLabel ?? "Send"}
                             </button>
-                            {isSimpleHomeReview && simpleFlowPhase === "review" && requiredComplete ? (
+                            {isSimpleHomeReview && simpleFlowPhase === "review" && simpleFlowContinueReady ? (
                               <button
                                 type="button"
                                 className="vs01-btn vs01-btn--secondary order-2 w-full min-h-[2.75rem] px-6 sm:w-auto"

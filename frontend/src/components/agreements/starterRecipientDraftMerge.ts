@@ -159,7 +159,7 @@ export function applyStarterRecipientUiToDraftParties(
       out[idx] = {
         ...prev,
         ...(cleanName ? { name: cleanName } : {}),
-        ...(email ? { email } : {}),
+        ...(email ? { email, signerEmail: email } : {}),
         ...(nextSignerName ? { signerName: nextSignerName } : { signerName: undefined }),
         ...(nextSignerTitle ? { signerTitle: nextSignerTitle } : { signerTitle: undefined }),
         role: cleanRole(prev.role),
@@ -170,7 +170,7 @@ export function applyStarterRecipientUiToDraftParties(
     out[idx] = {
       name: cleanName || coercePartyNameForRecipientAutoFill("", idx === 0 ? 0 : 1, parsed.agreement_family ?? null),
       role: "party",
-      ...(email ? { email } : {}),
+      ...(email ? { email, signerEmail: email } : {}),
       ...(nextSignerName ? { signerName: nextSignerName } : {}),
       ...(nextSignerTitle ? { signerTitle: nextSignerTitle } : {}),
     };

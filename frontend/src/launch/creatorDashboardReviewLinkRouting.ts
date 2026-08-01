@@ -1,5 +1,6 @@
 import { resolveAllReviewPartiesApproved } from "../agreement/recipientApprovedWaitingPresentation";
 import type { AgreementDraft } from "../agreement/agreementTypes";
+import { writeCreateReviewAgreementResumeId } from "../components/agreements/agreementIntakeStorage";
 import {
   isReviewDeliveryModeExplicitlyManual,
   readReviewDeliveryMode,
@@ -42,6 +43,56 @@ export function creatorDashboardFocusAgreementPath(agreementId: string): string 
 /** Deep link for owner review-complete email and legacy /app/done bookmarks — same handoff as dashboard CTA. */
 export function creatorDashboardPrepareSignatureLinksPath(agreementId: string): string {
   return `/app?prepare_signature_links=${encodeURIComponent(agreementId.trim())}`;
+}
+
+/**
+ * Resume create + inline signer setup for incomplete signer metadata.
+ * Prefer {@link prepareCreatorDashboardSignerSetupNavigation} before navigate so resume id + latch arm.
+ */
+export function creatorDashboardSignerSetupPath(agreementId: string): string {
+  const id = encodeURIComponent(agreementId.trim());
+  return `/app/create?resume_signer_setup=${id}`;
+}
+
+const DASHBOARD_RESUME_SIGNER_SETUP_SS_KEY = "claw_dashboard_resume_signer_setup_v1";
+
+/** Write create-resume id and arm one-shot inline signer-setup latch for `/app/create`. */
+export function prepareCreatorDashboardSignerSetupNavigation(agreementId: string): string {
+  const id = agreementId.trim();
+  if (!id) return "/app/create";
+  writeCreateReviewAgreementResumeId(id);
+  armCreatorDashboardSignerSetupResume(id);
+  return creatorDashboardSignerSetupPath(id);
+}
+
+/** Consume one-shot dashboard → create signer-setup arm (null if not armed). */
+export function consumeCreatorDashboardSignerSetupResume(): string | null {
+  try {
+    const id = (sessionStorage.getItem(DASHBOARD_RESUME_SIGNER_SETUP_SS_KEY) || "").trim();
+    sessionStorage.removeItem(DASHBOARD_RESUME_SIGNER_SETUP_SS_KEY);
+    return id || null;
+  } catch {
+    return null;
+  }
+}
+
+/** Peek without consuming — used when URL `resume_signer_setup` also arms the latch. */
+export function peekCreatorDashboardSignerSetupResume(): string | null {
+  try {
+    return (sessionStorage.getItem(DASHBOARD_RESUME_SIGNER_SETUP_SS_KEY) || "").trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+export function armCreatorDashboardSignerSetupResume(agreementId: string): void {
+  const id = agreementId.trim();
+  if (!id) return;
+  try {
+    sessionStorage.setItem(DASHBOARD_RESUME_SIGNER_SETUP_SS_KEY, id);
+  } catch {
+    /* ignore */
+  }
 }
 
 export function normalizeAppDashboardPathname(pathname?: string | null): string {

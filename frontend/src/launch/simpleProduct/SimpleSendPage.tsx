@@ -18,6 +18,8 @@ import {
 } from "../simpleFlowSendUnlock";
 import { writeCreateReviewAgreementResumeId } from "../../components/agreements/agreementIntakeStorage";
 import { isPaidProAgreementAuthoritative } from "../../components/agreements/paidProAgreementAuthority";
+import { creatorDashboardSignerMetadataCompleteFromDraft } from "../creatorDashboardSignatureTrack";
+import { prepareCreatorDashboardSignerSetupNavigation } from "../creatorDashboardReviewLinkRouting";
 import {
   describePaidProSendModalBranch,
   type PaidProSendBranchMeta,
@@ -412,6 +414,32 @@ export function SimpleSendPage(props: { agreementId: string }) {
     },
     [agreementId, initialDraftSnapshot, navigate],
   );
+
+  /**
+   * Paid Pro with incomplete signer metadata must never render the send/review "ready" shell.
+   * Route back to create + inline signer setup (same authority as dashboard Complete signer details).
+   */
+  useEffect(() => {
+    if (completionGate !== "open") return;
+    const draft =
+      bridgeHandoffDraftRef.current ?? (initialDraftSnapshot as AgreementDraft | null) ?? null;
+    if (!draft) return;
+    const paidPro =
+      sendAuthoritative ||
+      paidProSendBranch.paidProSendAllowed ||
+      isPaidProAgreementAuthoritative({ draft, agreementId });
+    if (!paidPro) return;
+    if (creatorDashboardSignerMetadataCompleteFromDraft(draft)) return;
+    navigate(prepareCreatorDashboardSignerSetupNavigation(agreementId));
+  }, [
+    agreementId,
+    completionGate,
+    initialDraftSnapshot,
+    navigate,
+    paidProSendBranch.paidProSendAllowed,
+    redirectDraftTick,
+    sendAuthoritative,
+  ]);
 
   /** Paid Pro review-first must never sit on the generic `/app/send` review gate or upsell modal. */
   useEffect(() => {

@@ -62,6 +62,31 @@ describe("creatorDashboardPresentation", () => {
     });
   });
 
+  it("surfaces Complete signer details for draft when signer metadata is incomplete", () => {
+    const incompleteDraft = {
+      id: "ag_test",
+      title: "Services",
+      jurisdiction: "CA",
+      parties: [
+        { name: "Blue Canyon Analytics LLC", role: "party" },
+        { name: "Iron Vale Systems Inc", role: "party" },
+      ],
+      purpose: "Services",
+      payment_terms: "Net 30",
+      duration: "1y",
+      due_date: null,
+      effective_date: null,
+      created_at: "2026-01-01T00:00:00.000Z",
+      updated_at: "2026-01-01T00:00:00.000Z",
+      versions: [],
+      audit_log: [],
+    };
+    const action = creatorDashboardPrimaryAction(row({}), { draft: incompleteDraft as never });
+    expect(action.kind).toBe("complete_signer_details");
+    expect(action.path).toContain("/app/create?resume_signer_setup=");
+    expect(action.path).not.toContain("/app/send/");
+  });
+
   it("surfaces action-oriented CTAs per status", () => {
     expect(creatorDashboardPrimaryAction(row({})).label).toBe("Continue Editing");
     expect(

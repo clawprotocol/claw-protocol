@@ -71,6 +71,26 @@ const pendingReviewerDraft: AgreementDraft = {
 
 const reviewerApprovedDraft: AgreementDraft = {
   ...pendingReviewerDraft,
+  parties: [
+    {
+      id: "p-blue",
+      name: "Blue Canyon Analytics LLC",
+      role: "party",
+      signerName: "Sarah Mitchell",
+      signerTitle: "CEO",
+      signerEmail: "sarah@bluecanyon.test",
+      email: "sarah@bluecanyon.test",
+    },
+    {
+      id: "p-iron",
+      name: "Iron Vale Systems Inc",
+      role: "reviewer",
+      signerName: "Michael Torres",
+      signerTitle: "President",
+      signerEmail: "iron@example.test",
+      email: "iron@example.test",
+    },
+  ],
   audit_log: [
     {
       event_type: "participant_approved",

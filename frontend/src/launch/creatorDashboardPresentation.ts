@@ -38,8 +38,13 @@ import {
   creatorDashboardFocusAgreementPath,
   creatorDashboardSignedAgreementViewPath,
   creatorDashboardSigningStatusPath,
+  creatorDashboardSignerSetupPath,
   creatorDashboardUsesManualReviewLinkPage,
 } from "./creatorDashboardReviewLinkRouting";
+import {
+  CREATOR_COMPLETE_SIGNER_DETAILS_LABEL,
+  creatorDashboardSignerMetadataCompleteFromDraft,
+} from "./creatorDashboardSignatureTrack";
 
 export type CreatorDashboardStatus =
   | "draft"
@@ -51,7 +56,11 @@ export type CreatorDashboardStatus =
 
 export type CreatorDashboardMetricKey = "drafts" | "in_review" | "ready_for_signing" | "completed";
 
-export type CreatorDashboardActionKind = "navigate" | "focus_review_status" | "manage_recipients";
+export type CreatorDashboardActionKind =
+  | "navigate"
+  | "focus_review_status"
+  | "manage_recipients"
+  | "complete_signer_details";
 
 export type CreatorDashboardAction = {
   label: string;
@@ -137,11 +146,13 @@ export function countCreatorDashboardMetrics(rows: readonly WorkspaceIndexAgreem
 
 export function creatorDashboardPrimaryAction(
   row: WorkspaceIndexAgreement,
-  options?: { manualReviewLinkPage?: boolean },
+  options?: { manualReviewLinkPage?: boolean; draft?: AgreementDraft | null },
 ): CreatorDashboardAction {
   const id = encodeURIComponent(row.id);
   const manualReviewLinkPage = options?.manualReviewLinkPage ?? creatorDashboardUsesManualReviewLinkPage();
   const status = deriveCreatorDashboardStatus(row);
+  const signerMetadataComplete =
+    options?.draft == null ? true : creatorDashboardSignerMetadataCompleteFromDraft(options.draft);
   switch (status) {
     case "completed":
       return {
@@ -157,6 +168,14 @@ export function creatorDashboardPrimaryAction(
       };
     case "ready_for_signing":
     case "review_approved":
+      if (!signerMetadataComplete) {
+        return {
+          label: CREATOR_COMPLETE_SIGNER_DETAILS_LABEL,
+          path: creatorDashboardSignerSetupPath(row.id),
+          emphasis: "primary",
+          kind: "complete_signer_details",
+        };
+      }
       return { label: CREATOR_PREPARE_SIGNATURE_LINKS_LABEL, path: "/app", emphasis: "primary" };
     case "in_review":
       if (manualReviewLinkPage) {
@@ -183,6 +202,14 @@ export function creatorDashboardPrimaryAction(
       };
     case "draft":
     default:
+      if (!signerMetadataComplete) {
+        return {
+          label: CREATOR_COMPLETE_SIGNER_DETAILS_LABEL,
+          path: creatorDashboardSignerSetupPath(row.id),
+          emphasis: "primary",
+          kind: "complete_signer_details",
+        };
+      }
       return { label: "Continue Editing", path: `/app/send/${id}`, emphasis: "secondary" };
   }
 }

@@ -40,7 +40,7 @@ type Props = {
   rows: readonly WorkspaceIndexAgreement[];
   reviewRowsByAgreementId: Readonly<Record<string, OwnerReviewPartyStatusRow[]>>;
   draftByAgreementId?: Readonly<Record<string, AgreementDraft | null>>;
-  onNavigate: (path: string) => void;
+  onNavigate: (path: string, meta?: { kind?: string; agreementId?: string }) => void;
   onFocusReviewStatus?: (agreementId: string) => void;
   onPrepareSignatureLinks: (agreementId: string) => void | Promise<void>;
   prepareBusyAgreementId?: string | null;
@@ -156,7 +156,10 @@ export function CreatorDashboardAgreementList(props: Props) {
         }
 
         const status = deriveCreatorDashboardStatus(row);
-        const action = creatorDashboardPrimaryAction(row, { manualReviewLinkPage });
+        const action = creatorDashboardPrimaryAction(row, {
+          manualReviewLinkPage,
+          draft: rowDraft,
+        });
         const reviewGate = resolveCreatorDashboardReviewGate(row, reviewRows, { draft: rowDraft });
         const allApproved = reviewGate.allRequiredReviewPartiesApproved;
         const waitingOnReviewer = creatorDashboardWaitingOnReviewer(reviewGate);
@@ -193,7 +196,7 @@ export function CreatorDashboardAgreementList(props: Props) {
             onFocusReviewStatus?.(row.id);
             return;
           }
-          onNavigate(action.path);
+          onNavigate(action.path, { kind: action.kind, agreementId: row.id });
         };
 
         return (

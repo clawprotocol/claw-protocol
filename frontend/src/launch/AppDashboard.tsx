@@ -60,6 +60,7 @@ import {
 import { navigateCreatorPrepareSignatureLinks } from "./creatorDashboardPrepareSignatureLinks";
 import {
   isAppDashboardPathname,
+  prepareCreatorDashboardSignerSetupNavigation,
   stripPrepareSignatureLinksQueryFromDashboardUrl,
 } from "./creatorDashboardReviewLinkRouting";
 import type { AgreementDraft } from "../agreement/agreementTypes";
@@ -309,7 +310,13 @@ export function AppDashboard() {
 
   const refreshDashboardReviewHydration = useCallback(async () => {
     if (indexLoading || safeRecent.length === 0) return;
-    const targets = safeRecent.filter((row) => creatorDashboardNeedsAuthoritativeReviewHydration(row));
+    // Also hydrate draft/ready rows so signer-metadata completeness can divert Continue Editing
+    // away from /app/send when signature details are incomplete.
+    const targets = safeRecent.filter((row) => {
+      if (creatorDashboardNeedsAuthoritativeReviewHydration(row)) return true;
+      const status = deriveCreatorDashboardStatus(row);
+      return status === "draft" || status === "ready_for_signing" || status === "review_approved";
+    });
     if (targets.length === 0) return;
     const entries = await Promise.all(
       targets.map(async (row) => {
@@ -339,7 +346,11 @@ export function AppDashboard() {
 
   useEffect(() => {
     if (indexLoading || safeRecent.length === 0) return;
-    const targets = safeRecent.filter((row) => creatorDashboardNeedsAuthoritativeReviewHydration(row));
+    const targets = safeRecent.filter((row) => {
+      if (creatorDashboardNeedsAuthoritativeReviewHydration(row)) return true;
+      const status = deriveCreatorDashboardStatus(row);
+      return status === "draft" || status === "ready_for_signing" || status === "review_approved";
+    });
     if (targets.length === 0) return;
     const intervalId =
       typeof import.meta !== "undefined" && import.meta.env?.MODE === "test"
@@ -650,6 +661,26 @@ export function AppDashboard() {
     return () => window.clearTimeout(timer);
   }, [search, indexLoading, handlePrepareSignatureLinks]);
 
+  const navigateDashboardPath = useCallback(
+    (path: string, options?: { kind?: string; agreementId?: string }) => {
+      withClearEntry(() => {
+        if (
+          options?.kind === "complete_signer_details" ||
+          path.includes("resume_signer_setup=")
+        ) {
+          const fromQuery = path.match(/resume_signer_setup=([^&]+)/);
+          const id =
+            (options?.agreementId || "").trim() ||
+            (fromQuery ? decodeURIComponent(fromQuery[1] || "") : "");
+          navigate(id ? prepareCreatorDashboardSignerSetupNavigation(id) : path);
+          return;
+        }
+        navigate(path);
+      });
+    },
+    [navigate, withClearEntry],
+  );
+
   const handleWhatsNextPrimaryAction = useCallback(
     (row: WorkspaceIndexAgreement) => {
       const reviewRows = reviewRowsByAgreementId[row.id] ?? [];
@@ -667,16 +698,15 @@ export function AppDashboard() {
         handleFocusAgreementReviewStatus(row.id);
         return;
       }
-      withClearEntry(() => navigate(action.path));
+      navigateDashboardPath(action.path, { kind: action.kind, agreementId: row.id });
     },
     [
       draftByAgreementId,
       handleFocusAgreementReviewStatus,
       handlePrepareSignatureLinks,
-      navigate,
+      navigateDashboardPath,
       reviewRowsByAgreementId,
       signingProgressByAgreementId,
-      withClearEntry,
     ],
   );
 
@@ -769,7 +799,7 @@ export function AppDashboard() {
                 reviewRows={reviewRowsByAgreementId[featuredRow.id] ?? []}
                 draft={draftByAgreementId[featuredRow.id] ?? null}
                 onPrimaryAction={handleWhatsNextPrimaryAction}
-                onNavigate={(path) => withClearEntry(() => navigate(path))}
+                onNavigate={(path) => navigateDashboardPath(path, { agreementId: featuredRow.id })}
                 onFocusAgreement={handleFocusAgreementReviewStatus}
                 onPrepareSignatureLinks={handlePrepareSignatureLinks}
                 prepareBusy={prepareBusyAgreementId === featuredRow.id}
@@ -794,7 +824,12 @@ export function AppDashboard() {
                   rows={secondaryAttentionRows}
                   reviewRowsByAgreementId={reviewRowsByAgreementId}
                   draftByAgreementId={draftByAgreementId}
-                  onNavigate={(path) => withClearEntry(() => navigate(path))}
+                  onNavigate={(path, meta) =>
+                    navigateDashboardPath(path, {
+                      kind: meta?.kind,
+                      agreementId: meta?.agreementId,
+                    })
+                  }
                   onFocusReviewStatus={handleFocusAgreementReviewStatus}
                   onPrepareSignatureLinks={handlePrepareSignatureLinks}
                   prepareBusyAgreementId={prepareBusyAgreementId}
@@ -810,8 +845,14 @@ export function AppDashboard() {
               </h2>
               <LawdogAgreementsTable
                 rows={safeRecent}
+                draftByAgreementId={draftByAgreementId}
                 signingProgressByAgreementId={signingProgressByAgreementId}
-                onNavigate={(path) => withClearEntry(() => navigate(path))}
+                onNavigate={(path, meta) =>
+                  navigateDashboardPath(path, {
+                    kind: meta?.kind,
+                    agreementId: meta?.agreementId,
+                  })
+                }
                 onFocusReviewStatus={handleFocusAgreementReviewStatus}
                 onArchiveComplete={() => void reloadWorkspaceIndex()}
               />

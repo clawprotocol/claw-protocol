@@ -53,8 +53,24 @@ const partyTwoApprovedDraft: AgreementDraft = {
   title: "Consulting Agreement",
   jurisdiction: "CA",
   parties: [
-    { id: "p-blue", name: "Blue Canyon Analytics LLC", role: "party" },
-    { id: "p-iron", name: "Iron Vale Systems Inc", role: "reviewer", email: "jki93@me.com" },
+    {
+      id: "p-blue",
+      name: "Blue Canyon Analytics LLC",
+      role: "party",
+      signerName: "Sarah Mitchell",
+      signerTitle: "CEO",
+      signerEmail: "sarah@bluecanyon.test",
+      email: "sarah@bluecanyon.test",
+    },
+    {
+      id: "p-iron",
+      name: "Iron Vale Systems Inc",
+      role: "reviewer",
+      signerName: "Michael Torres",
+      signerTitle: "President",
+      signerEmail: "jki93@me.com",
+      email: "jki93@me.com",
+    },
   ],
   purpose: "Services",
   payment_terms: "Net 30",
@@ -127,6 +143,51 @@ describe("creatorDashboardSignatureTrack", () => {
     const action = resolveCreatorDashboardSignatureTrackAction(row, gate, { draft });
     expect(action.kind).toBe("complete_signer_details");
     expect(action.label).toBe(CREATOR_COMPLETE_SIGNER_DETAILS_LABEL);
+    expect(action.path).toContain("/app/create?resume_signer_setup=");
+    expect(action.path).not.toContain("/app/send/");
+  });
+
+  it("routes ready_for_signing with incomplete signer metadata to signer setup, not prepare/send", () => {
+    const draft: AgreementDraft = {
+      ...partyTwoApprovedDraft,
+      parties: [
+        { id: "p-blue", name: "Blue Canyon Analytics LLC", role: "party" },
+        { id: "p-iron", name: "Iron Vale Systems Inc", role: "reviewer", email: "jki93@me.com" },
+      ],
+    };
+    const row = indexRow({});
+    const gate = resolveCreatorDashboardReviewGate(row, [], { draft });
+    expect(deriveCreatorDashboardEffectiveStatus(row, gate)).toBe("ready_for_signing");
+    const action = resolveCreatorDashboardSignatureTrackAction(row, gate, { draft });
+    expect(action.kind).toBe("complete_signer_details");
+    expect(action.path).toContain("resume_signer_setup=");
+    expect(action.path).not.toContain("/app/send/");
+    expect(action.kind).not.toBe("prepare_signature_links");
+  });
+
+  it("routes paid Pro draft with incomplete signer metadata away from /app/send Continue Editing", () => {
+    const draft: AgreementDraft = {
+      ...partyTwoApprovedDraft,
+      audit_log: [],
+      parties: [
+        { id: "p-blue", name: "Blue Canyon Analytics LLC", role: "party" },
+        { id: "p-iron", name: "Iron Vale Systems Inc", role: "party" },
+      ],
+    };
+    const row = indexRow({
+      review_sent_at: null,
+      reviewer_approved: false,
+      all_reviewers_approved: false,
+      review_approvals_required: 0,
+      review_approvals_completed: 0,
+    });
+    const gate = resolveCreatorDashboardReviewGate(row, [], { draft });
+    expect(deriveCreatorDashboardEffectiveStatus(row, gate)).toBe("draft");
+    const action = resolveCreatorDashboardSignatureTrackAction(row, gate, { draft });
+    expect(action.kind).toBe("complete_signer_details");
+    expect(action.label).toBe(CREATOR_COMPLETE_SIGNER_DETAILS_LABEL);
+    expect(action.path).toBe(`/app/create?resume_signer_setup=${encodeURIComponent(row.id)}`);
+    expect(action.path).not.toContain("/app/send/");
   });
 
   it("uses dashboard focus for manual in-review tracking instead of done page", () => {

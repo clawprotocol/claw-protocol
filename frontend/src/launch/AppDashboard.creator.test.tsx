@@ -58,14 +58,28 @@ function indexRow(p: Partial<WorkspaceIndexAgreement>): WorkspaceIndexAgreement 
   };
 }
 
-function draftWithParties(): AgreementDraft {
+function draftWithParties(overrides?: Partial<AgreementDraft>): AgreementDraft {
   return {
     id: "ag_ready",
     title: "Services Agreement",
     jurisdiction: "CA",
     parties: [
-      { name: "Blue Canyon Analytics LLC", role: "owner" },
-      { name: "Iron Vale Systems Inc", role: "party" },
+      {
+        name: "Blue Canyon Analytics LLC",
+        role: "owner",
+        signerName: "Sarah Mitchell",
+        signerTitle: "CEO",
+        signerEmail: "sarah@bluecanyon.test",
+        email: "sarah@bluecanyon.test",
+      },
+      {
+        name: "Iron Vale Systems Inc",
+        role: "party",
+        signerName: "Michael Torres",
+        signerTitle: "President",
+        signerEmail: "iron@example.test",
+        email: "iron@example.test",
+      },
     ],
     purpose: "Services",
     payment_terms: "Net 30",
@@ -79,6 +93,7 @@ function draftWithParties(): AgreementDraft {
       { event_type: "recipient_approved", at: "2026-05-01T11:00:00.000Z" },
       { event_type: "recipient_approved", at: "2026-05-01T11:30:00.000Z" },
     ],
+    ...overrides,
   } as AgreementDraft;
 }
 
@@ -207,11 +222,12 @@ describe("AppDashboard creator-centric surface", () => {
   });
 
   it("shows Prepare and send signing links when reviewer approved on draft but index still in_review", async () => {
+    const base = draftWithParties();
     const reviewerApprovedDraft = {
-      ...draftWithParties(),
+      ...base,
       parties: [
-        { name: "Blue Canyon Analytics LLC", role: "party", id: "p1" },
-        { name: "Iron Vale Systems Inc", role: "reviewer", email: "iron@example.test", id: "p2" },
+        { ...base.parties![0], id: "p1", role: "party" },
+        { ...base.parties![1], id: "p2", role: "reviewer", email: "iron@example.test" },
       ],
       audit_log: [
         {
@@ -786,7 +802,7 @@ describe("AppDashboard creator-centric surface", () => {
     });
     vi.spyOn(agreementWorkspaceApi, "fetchAgreementDraft").mockResolvedValue({
       ok: true,
-      draft: { ...draftWithParties(), id: agreementId },
+      draft: draftWithParties({ id: agreementId, audit_log: [] }),
     });
 
     const user = userEvent.setup();
@@ -803,5 +819,58 @@ describe("AppDashboard creator-centric surface", () => {
 
     await user.click(screen.getByRole("button", { name: "Continue Editing" }));
     expect(mockNavigate).toHaveBeenCalledWith(`/app/send/${agreementId}`);
+  });
+
+  it("GTM: incomplete signer metadata on paid Pro draft CTA opens signer setup, not /app/send", async () => {
+    const agreementId = "9d6d1be0-55dd-415a-bf61-fee9db743674";
+    const incompleteDraft = draftWithParties({
+      id: agreementId,
+      audit_log: [],
+      parties: [
+        { name: "Blue Canyon Analytics LLC", role: "owner" },
+        { name: "Iron Vale Systems Inc", role: "party" },
+      ],
+    });
+    vi.spyOn(agreementWorkspaceApi, "fetchWorkspaceIndex").mockResolvedValue({
+      agreements: [
+        indexRow({
+          id: agreementId,
+          title: "Services Agreement — LawDog / Acme",
+          review_sent_at: null,
+          reviewer_approved: false,
+          all_reviewers_approved: false,
+          review_approvals_required: 0,
+          review_approvals_completed: 0,
+        }),
+      ],
+      skipped: [],
+      error: null,
+    });
+    vi.spyOn(agreementWorkspaceApi, "fetchAgreementDraft").mockResolvedValue({
+      ok: true,
+      draft: incompleteDraft,
+    });
+
+    const user = userEvent.setup();
+    render(<AppDashboard />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("dashboard-whats-next-panel").getAttribute("data-agreement-id")).toBe(
+        agreementId,
+      );
+    });
+
+    const cta = await waitFor(() => {
+      const button = screen.getByTestId(`creator-dashboard-action-${agreementId}`);
+      expect(button.textContent).toMatch(/Complete signer details/i);
+      return button;
+    });
+    expect(cta.getAttribute("data-dashboard-whats-next-cta")).toBe("complete_signer_details");
+    expect(screen.queryByRole("button", { name: "Continue Editing" })).toBeNull();
+    await user.click(cta);
+    expect(mockNavigate).toHaveBeenCalledWith(
+      `/app/create?resume_signer_setup=${encodeURIComponent(agreementId)}`,
+    );
+    expect(mockNavigate).not.toHaveBeenCalledWith(`/app/send/${agreementId}`);
   });
 });

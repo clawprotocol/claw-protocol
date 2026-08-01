@@ -34,6 +34,10 @@ import { defaultPostCheckoutRunModelPassInput, getPremiumGenerationIntakeFingerp
 import { canApplyLatePremiumCompletionFromModal } from "../../lib/premiumPostCheckoutModalRace";
 import { useAccess } from "../../access/AccessContext";
 import { useLaunchNav } from "../../launch/LaunchNavContext";
+import {
+  consumeCreatorDashboardSignerSetupResume,
+  peekCreatorDashboardSignerSetupResume,
+} from "../../launch/creatorDashboardReviewLinkRouting";
 import { triggerPaywall } from "../../launch/triggerPaywall";
 import { useInputConfidenceHint } from "../../launch/useInputConfidenceHint";
 import {
@@ -1739,6 +1743,11 @@ type Props = {
   }) => void;
   /** Homepage auto-generate handoff: parent shows concierge overlay until review is ready. */
   onHomeGuidedTransitionPhase?: (phase: "preparing" | "review_ready") => void;
+  /**
+   * Dashboard / send guard resumed create to finish incomplete signer metadata.
+   * When true (or session arm is set), open inline signer setup once review surface is ready.
+   */
+  openSignerSetupOnResume?: boolean;
 };
 
 type MissingKey = IntakeBlockingField;
@@ -3267,6 +3276,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   checkoutBackRestoreActive = false,
   onSimpleCreateShellChrome,
   onHomeGuidedTransitionPhase,
+  openSignerSetupOnResume = false,
 }) => {
   const [intakeBaselineCommitted, setIntakeBaselineCommitted] = useState("");
   const [intakeStepBuffer, setIntakeStepBuffer] = useState(() =>
@@ -25990,6 +26000,28 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       }
     });
   }, [paidProSignerDetailsGate.firstIncompleteFieldKey, bumpPremiumSurfaceGateTick]);
+
+  const dashboardSignerSetupResumeConsumedRef = React.useRef(false);
+  React.useEffect(() => {
+    if (dashboardSignerSetupResumeConsumedRef.current) return;
+    if (!openSignerSetupOnResume && !peekCreatorDashboardSignerSetupResume()) return;
+    if (!paidProFirstReviewSurfaceActive && !paidProAcceptedCorpusReady) return;
+    if (paidProSignerMetadataFinalized || paidProSignatureDetailsReady) {
+      consumeCreatorDashboardSignerSetupResume();
+      dashboardSignerSetupResumeConsumedRef.current = true;
+      return;
+    }
+    consumeCreatorDashboardSignerSetupResume();
+    dashboardSignerSetupResumeConsumedRef.current = true;
+    openPaidProFirstReviewSignerSetup();
+  }, [
+    openSignerSetupOnResume,
+    paidProFirstReviewSurfaceActive,
+    paidProAcceptedCorpusReady,
+    paidProSignerMetadataFinalized,
+    paidProSignatureDetailsReady,
+    openPaidProFirstReviewSignerSetup,
+  ]);
 
   const handleGuidedBackToSignerDetailsFromFinalReview = React.useCallback(() => {
     // Pre-finalize first review must use the light open path — never the post-finalize reopen

@@ -3,6 +3,7 @@ import type { WorkspaceIndexAgreement } from "../agreement/agreementWorkspaceApi
 import {
   type ResolvePaidProSignerDetailsGateArgs,
   PAID_PRO_SIGNER_DETAILS_INCOMPLETE_CTA,
+  resolvePaidProSignerDetailsGate,
 } from "../components/agreements/signerSetupPartyIdentity";
 import { isAgreementPacketPrepared } from "../vs01/vs01WorkspaceSigningStatus";
 import {
@@ -16,6 +17,7 @@ import {
   creatorDashboardSignedAgreementViewPath,
   creatorDashboardSigningStatusPath,
   creatorDashboardPrepareSignatureLinksPath,
+  creatorDashboardSignerSetupPath,
   creatorDashboardUsesManualReviewLinkPage,
 } from "./creatorDashboardReviewLinkRouting";
 import { buildOwnerAgreementReadOnlyPath } from "./ownerAgreementReadOnlyView";
@@ -51,6 +53,19 @@ export type CreatorDashboardSignatureTrackAction = {
   emphasis: "primary" | "secondary";
 };
 
+function draftPartySignerEmail(party: AgreementDraft["parties"][number] | undefined): string {
+  if (!party) return "";
+  return String(party.signerEmail ?? party.email ?? party.reviewEmail ?? "").trim();
+}
+
+function draftPartySignerName(party: AgreementDraft["parties"][number] | undefined): string {
+  if (!party) return "";
+  const camel = String(party.signerName ?? "").trim();
+  if (camel) return camel;
+  return String((party as { signer_name?: string }).signer_name ?? "").trim();
+}
+
+/** Build signer-setup gate args from persisted draft parties (same fields as live signer UI). */
 export function buildPaidProSignerDetailsGateArgsFromDraft(
   draft: AgreementDraft | null | undefined,
 ): ResolvePaidProSignerDetailsGateArgs {
@@ -59,22 +74,36 @@ export function buildPaidProSignerDetailsGateArgsFromDraft(
   return {
     partyCount: parties.length,
     draftPartyNames: names,
-    partySignerNames: parties.map((party) =>
-      String((party as { signer_name?: string }).signer_name ?? "").trim(),
-    ),
+    partySignerNames: parties.map((party) => draftPartySignerName(party)),
     recipient1Name: names[0] ?? "",
     recipient2Name: names[1] ?? "",
-    recipient1Email: String(parties[0]?.email ?? ""),
-    recipient2Email: String(parties[1]?.email ?? ""),
-    extraPartyReviewEmails: parties.slice(2).map((party) => String(party.email ?? "")),
+    recipient1Email: draftPartySignerEmail(parties[0]),
+    recipient2Email: draftPartySignerEmail(parties[1]),
+    extraPartyReviewEmails: parties.slice(2).map((party) => draftPartySignerEmail(party)),
   };
 }
 
+/**
+ * True when persisted draft parties satisfy the same signer-details gate as live signer setup
+ * (legal entity + signer name + email per required slot). Legal entity names alone do not count.
+ */
 export function creatorDashboardSignerMetadataCompleteFromDraft(
   draft: AgreementDraft | null | undefined,
 ): boolean {
   if (!draft?.parties?.length) return false;
-  return draft.parties.every((party) => (party.name || "").trim().length >= 2);
+  return resolvePaidProSignerDetailsGate(buildPaidProSignerDetailsGateArgsFromDraft(draft)).complete;
+}
+
+/** Incomplete paid-Pro drafts must resume create + signer setup — never bare /app/send/:id. */
+export function creatorDashboardIncompleteSignerSetupAction(
+  agreementId: string,
+): CreatorDashboardSignatureTrackAction {
+  return {
+    kind: "complete_signer_details",
+    label: CREATOR_COMPLETE_SIGNER_DETAILS_LABEL,
+    path: creatorDashboardSignerSetupPath(agreementId),
+    emphasis: "primary",
+  };
 }
 
 export function deriveCreatorDashboardEffectiveStatus(
@@ -130,14 +159,12 @@ export function resolveCreatorDashboardSignatureTrackAction(
   }
 
   if (effectiveStatus === "ready_for_signing") {
-    const signerMetadataComplete = creatorDashboardSignerMetadataCompleteFromDraft(options?.draft);
-    if (!signerMetadataComplete) {
-      return {
-        kind: "complete_signer_details",
-        label: CREATOR_COMPLETE_SIGNER_DETAILS_LABEL,
-        path: `/app/send/${id}#claw-paid-pro-inline-signer-setup`,
-        emphasis: "primary",
-      };
+    // Only divert when draft is loaded and incomplete — unknown draft stays prepare (hydration follows).
+    if (
+      options?.draft != null &&
+      !creatorDashboardSignerMetadataCompleteFromDraft(options.draft)
+    ) {
+      return creatorDashboardIncompleteSignerSetupAction(row.id);
     }
     return {
       kind: "prepare_signature_links",
@@ -170,6 +197,11 @@ export function resolveCreatorDashboardSignatureTrackAction(
       path: creatorDashboardFocusAgreementPath(row.id),
       emphasis: "primary",
     };
+  }
+
+  // Draft / default: incomplete signer metadata must open create signer setup, not /app/send.
+  if (options?.draft && !creatorDashboardSignerMetadataCompleteFromDraft(options.draft)) {
+    return creatorDashboardIncompleteSignerSetupAction(row.id);
   }
 
   return {
