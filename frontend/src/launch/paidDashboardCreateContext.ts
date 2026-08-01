@@ -67,7 +67,8 @@ export type PaidDashboardCreateContextSource =
   | "dashboard_duplicate"
   | "app_shell_new_agreement"
   | "reengagement_banner"
-  | "send_edit_return";
+  | "send_edit_return"
+  | "dashboard_signer_setup_resume";
 
 /** Workspace create entries that must normalize to {@link DASHBOARD_PAID_CREATE_ROUTE_SOURCE}. */
 const DASHBOARD_PAID_CREATE_LEGACY_SOURCES = new Set<string>([
@@ -84,7 +85,10 @@ const DASHBOARD_PAID_CREATE_LEGACY_SOURCES = new Set<string>([
 ]);
 
 /** Resume/edit flows — not a fresh dashboard create route. */
-const DASHBOARD_PAID_CREATE_RESUME_SOURCES = new Set<string>(["send_edit_return"]);
+const DASHBOARD_PAID_CREATE_RESUME_SOURCES = new Set<string>([
+  "send_edit_return",
+  "dashboard_signer_setup_resume",
+]);
 
 export function normalizeDashboardPaidCreateSource(
   source: PaidDashboardCreateContextSource | string,

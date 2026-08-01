@@ -11,7 +11,12 @@ import {
   readCreateReviewAgreementResumeId,
   writeCreateReviewAgreementResumeId,
 } from "../../components/agreements/agreementIntakeStorage";
-import { armCreatorDashboardSignerSetupResume } from "../creatorDashboardReviewLinkRouting";
+import {
+  armCreatorDashboardSignerSetupResume,
+  isCreatorDashboardSignerSetupResumeActive,
+  parseResumeSignerSetupAgreementIdFromSearch,
+  peekCreatorDashboardSignerSetupResume,
+} from "../creatorDashboardReviewLinkRouting";
 import { readCreateComplexityResume } from "../../components/agreements/agreementCreateComplexityResume";
 import {
   hasCheckoutBackRestoreSnapshot,
@@ -116,28 +121,20 @@ export function SimpleCreatePage() {
     }
   }, [search]);
   const resumeSignerSetupAgreementId = useMemo(() => {
-    try {
-      return (new URLSearchParams(search).get("resume_signer_setup") || "").trim();
-    } catch {
-      return "";
-    }
+    const fromSearch = parseResumeSignerSetupAgreementIdFromSearch(search);
+    if (fromSearch) return fromSearch;
+    return (peekCreatorDashboardSignerSetupResume() || "").trim();
   }, [search]);
-  const [openSignerSetupOnResume] = useState(() => Boolean(resumeSignerSetupAgreementId));
+  const openSignerSetupOnResume = Boolean(
+    resumeSignerSetupAgreementId || isCreatorDashboardSignerSetupResumeActive(search),
+  );
 
   useEffect(() => {
     const id = resumeSignerSetupAgreementId;
     if (!id) return;
+    // Keep resume_signer_setup in the URL until intake mounts signer setup (do not strip here).
     writeCreateReviewAgreementResumeId(id);
     armCreatorDashboardSignerSetupResume(id);
-    try {
-      const url = new URL(window.location.href);
-      if (!url.searchParams.has("resume_signer_setup")) return;
-      url.searchParams.delete("resume_signer_setup");
-      const qs = url.searchParams.toString();
-      window.history.replaceState(window.history.state, "", qs ? `${url.pathname}?${qs}` : url.pathname);
-    } catch {
-      /* ignore */
-    }
   }, [resumeSignerSetupAgreementId]);
   const checkoutBackRestoreActive = useMemo(
     () =>
@@ -921,6 +918,7 @@ export function SimpleCreatePage() {
               homeHeroAutoGenerate={homeHeroAutoGenerate}
               checkoutBackRestoreActive={checkoutBackRestoreActive}
               openSignerSetupOnResume={openSignerSetupOnResume}
+              resumeSignerSetupAgreementId={resumeSignerSetupAgreementId || null}
               onHomeGuidedTransitionPhase={homeHeroAutoGenerate ? onHomeGuidedTransitionPhase : undefined}
               continuitySourcePanel={
                 quickSendTypedArrival && heroHandoff?.text

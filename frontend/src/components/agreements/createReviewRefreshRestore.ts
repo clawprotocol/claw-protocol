@@ -6,6 +6,7 @@ import {
   readCreateReviewDraftReadyMarker,
 } from "./agreementIntakeStorage";
 import { hasCurrentSessionFreeStarterIntent } from "./paidProSessionEligibility";
+import { isCreatorDashboardSignerSetupResumeActive } from "../../launch/creatorDashboardReviewLinkRouting";
 
 export type ReviewRefreshRegenerationSkipReason =
   | "stored_agreement_resume_id"
@@ -34,6 +35,9 @@ export function logReviewRefreshRegenerationSkipped(reason: ReviewRefreshRegener
 
 /** Do not hydrate stored free starter snapshot when paid SoT already exists. */
 export function shouldRestoreStoredCreateReviewDraftSnapshot(): boolean {
+  if (isCreatorDashboardSignerSetupResumeActive()) {
+    return false;
+  }
   if (hasCurrentSessionFreeStarterIntent()) {
     return false;
   }
@@ -46,6 +50,10 @@ export function shouldRestoreStoredCreateReviewDraftSnapshot(): boolean {
 
 export function shouldHydrateStoredAgreementResumeId(opts?: SkipHomeAutoGenerateOptions): boolean {
   if (opts?.freshHomeHeroHandoff || hasCurrentSessionFreeStarterIntent()) return false;
+  // Signer-setup resume always hydrates the agreement id from workspace GET.
+  if (isCreatorDashboardSignerSetupResumeActive()) {
+    return Boolean(readCreateReviewAgreementResumeId());
+  }
   return Boolean(readCreateReviewAgreementResumeId());
 }
 

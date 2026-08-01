@@ -36,7 +36,9 @@ import { useAccess } from "../../access/AccessContext";
 import { useLaunchNav } from "../../launch/LaunchNavContext";
 import {
   consumeCreatorDashboardSignerSetupResume,
+  isCreatorDashboardSignerSetupResumeActive,
   peekCreatorDashboardSignerSetupResume,
+  stripResumeSignerSetupQueryFromCreateUrl,
 } from "../../launch/creatorDashboardReviewLinkRouting";
 import { triggerPaywall } from "../../launch/triggerPaywall";
 import { useInputConfidenceHint } from "../../launch/useInputConfidenceHint";
@@ -1748,6 +1750,8 @@ type Props = {
    * When true (or session arm is set), open inline signer setup once review surface is ready.
    */
   openSignerSetupOnResume?: boolean;
+  /** Agreement id from `/app/create?resume_signer_setup=` — authoritative over local snapshot restore. */
+  resumeSignerSetupAgreementId?: string | null;
 };
 
 type MissingKey = IntakeBlockingField;
@@ -3277,6 +3281,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   onSimpleCreateShellChrome,
   onHomeGuidedTransitionPhase,
   openSignerSetupOnResume = false,
+  resumeSignerSetupAgreementId = null,
 }) => {
   const [intakeBaselineCommitted, setIntakeBaselineCommitted] = useState("");
   const [intakeStepBuffer, setIntakeStepBuffer] = useState(() =>
@@ -4054,6 +4059,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   // Inline signer setup latch: once the user is on Add signer details, stay mounted across metadata
   // edits — including when the gate becomes complete — until Prepare signature links is clicked.
   const [paidProInlineSignerSetupLatched, setPaidProInlineSignerSetupLatched] = useState(false);
+  /** Dashboard Complete signer details → create: one-shot arm consumed after server hydrate. */
+  const dashboardSignerSetupResumeConsumedRef = React.useRef(false);
   // Sticky "signer metadata finalized" latch. The authoritative signing snapshot is module-level
   // state that a handful of render-phase hydration/freeze side effects can transiently clear. That
   // clear used to flip `signerMetadataFinalized` back to false, which re-armed the inline signer
@@ -16038,6 +16045,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     } catch {
       /* ignore */
     }
+    if (isCreatorDashboardSignerSetupResumeActive() || openSignerSetupOnResume) {
+      return;
+    }
     if (
       peekAdvancedFullDraftCheckoutGrant() &&
       Boolean(readCreateComplexityResume()?.awaitingProCheckout)
@@ -16051,7 +16061,18 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     if ((initialIntakeText ?? "").trim().length > 0) {
       clearCreateReviewAgreementResumeIdOnly();
     }
-  }, [initialIntakeText, checkoutBackRestoreActive]);
+  }, [initialIntakeText, checkoutBackRestoreActive, openSignerSetupOnResume]);
+
+  // Authoritative before layout restore: pin resume id for dashboard signer-setup resume.
+  useLayoutEffect(() => {
+    const id =
+      (resumeSignerSetupAgreementId || "").trim() ||
+      (peekCreatorDashboardSignerSetupResume() || "").trim();
+    if (!id) return;
+    writeCreateReviewAgreementResumeId(id);
+    reviewAgreementIdRef.current = id;
+    setReviewAgreementId(id);
+  }, [resumeSignerSetupAgreementId]);
 
   useLayoutEffect(() => {
     if (!createProductionTwoPane || !simpleProductFlow) return;
@@ -16059,6 +16080,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     if (checkoutBackRestoreHydratedRef.current) return;
     if (freeReviewSnapshotHydratedRef.current || productionResumeHydratedRef.current) return;
     if (checkoutBackRestoreActive) return;
+    if (isCreatorDashboardSignerSetupResumeActive() || openSignerSetupOnResume) return;
     if (readCreateReviewAgreementResumeId()) return;
     if (!shouldRestoreStoredCreateReviewDraftSnapshot()) return;
     const snap = readCreateReviewDraftSnapshot<ParsedDraftShape>();
@@ -16079,7 +16101,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     setPreviewPaneRevealed(true);
     setMobileWorkspacePane("preview");
     homeAutoGenerateConsumedRef.current = true;
-  }, [createProductionTwoPane, simpleProductFlow, draft, checkoutBackRestoreActive]);
+  }, [
+    createProductionTwoPane,
+    simpleProductFlow,
+    draft,
+    checkoutBackRestoreActive,
+    openSignerSetupOnResume,
+  ]);
 
   useEffect(() => {
     if (!createProductionTwoPane || !simpleProductFlow || !liveWorkspaceTwoPane) return;
@@ -16087,8 +16115,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     if (draft != null) return;
     if (productionResumeHydratedRef.current) return;
     if (!shouldHydrateStoredAgreementResumeId()) return;
-    const hid = readCreateReviewAgreementResumeId();
+    const hid =
+      (resumeSignerSetupAgreementId || "").trim() ||
+      readCreateReviewAgreementResumeId() ||
+      (peekCreatorDashboardSignerSetupResume() || "").trim();
     if (!hid) return;
+    const signerSetupResume =
+      openSignerSetupOnResume ||
+      isCreatorDashboardSignerSetupResumeActive() ||
+      Boolean((resumeSignerSetupAgreementId || "").trim());
     productionResumeHydratedRef.current = true;
     void (async () => {
       try {
@@ -16096,7 +16131,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           partyNameContext: "Party",
         });
         if (!ok || !ad) {
-          clearCreateReviewAgreementResumeId();
+          if (!signerSetupResume) clearCreateReviewAgreementResumeId();
           productionResumeHydratedRef.current = false;
           return;
         }
@@ -16172,9 +16207,34 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         const payment = extractIntakePayment(rawIntake);
         let next = coerceDraftFromApiPayload(adForHydrate as unknown, rawIntake, payment);
         next = mergePaidProAuthoritativeDraftFieldsFromApi(next, adForHydrate);
-        next = runIntakeDefaultsAndRoles(next, rawIntake, simpleProductFlow, intakePartyRoleLabels);
-        next = alignParsedWithCanonicalType(next, rawIntake);
-        next = normalizeParsedDraftLegalConcepts(next, rawIntake);
+        // Signer-setup resume: keep persisted party/signer metadata authority — never re-derive
+        // party names from document body sections (causes authority_party_count_mismatch).
+        if (!signerSetupResume) {
+          next = runIntakeDefaultsAndRoles(next, rawIntake, simpleProductFlow, intakePartyRoleLabels);
+          next = alignParsedWithCanonicalType(next, rawIntake);
+          next = normalizeParsedDraftLegalConcepts(next, rawIntake);
+        } else {
+          // Prefer API parties as-is; only fill empty legal names from draft.party slots.
+          const apiParties = Array.isArray(adForHydrate.parties) ? adForHydrate.parties : [];
+          if (apiParties.length > 0) {
+            next = {
+              ...next,
+              parties: apiParties.map((p, i) => ({
+                ...(next.parties?.[i] ?? {}),
+                ...p,
+                name: String(p.name ?? next.parties?.[i]?.name ?? "").trim(),
+                role: p.role ?? next.parties?.[i]?.role ?? "party",
+                email: String(
+                  (p as { signerEmail?: string }).signerEmail ?? p.email ?? next.parties?.[i]?.email ?? "",
+                ).trim(),
+                signerName: String((p as { signerName?: string }).signerName ?? "").trim() || undefined,
+                signerTitle: String((p as { signerTitle?: string }).signerTitle ?? "").trim() || undefined,
+                signerEmail:
+                  String((p as { signerEmail?: string }).signerEmail ?? p.email ?? "").trim() || undefined,
+              })),
+            };
+          }
+        }
         if (readFullDraftUpgradeMarkerAgreementId() === hid && !draftHasFullDraftExpansion(next)) {
           next = { ...next, additional_terms: FULL_DRAFT_EXPANSION_MARKER };
         }
@@ -16183,18 +16243,25 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         setMissing([]);
         setFollowUpDetailTotal(0);
         setCreateUiStage(CreateUiStage.DRAFT);
-        setCreateFlowPhaseGuarded("draft_ready_for_review");
+        const nextPhase = signerSetupResume ? "signer_setup_required" : "draft_ready_for_review";
+        setCreateFlowPhaseGuarded(nextPhase);
         setDraftNowCommitted(true);
-        writeCreateReviewDraftReadyMarker();
-        writeCreateReviewDraftSnapshot(next);
+        if (!signerSetupResume) {
+          writeCreateReviewDraftReadyMarker();
+          writeCreateReviewDraftSnapshot(next);
+        }
         restorePinnedFinalizedSignerCorpus("production_resume_hydrate");
         logReviewRefreshRestore({
           hasStoredDraft: true,
           agreementIdShort: agreementIdShort(hid),
           restored: true,
         });
-        const nextDisplay = shouldKeepReviewDisplayAfterProHydrate(adForHydrate) ? "review" : "intake";
-        if (import.meta.env.DEV) {
+        const nextDisplay = signerSetupResume
+          ? "review"
+          : shouldKeepReviewDisplayAfterProHydrate(adForHydrate)
+            ? "review"
+            : "intake";
+        if (import.meta.env.DEV || signerSetupResume) {
           const rs = String(adForHydrate.premium_render_source ?? "").trim();
           const corpusLen = materialPremiumPipelineCorpusMaxLen(adForHydrate);
           console.info("[paid-pro-hydrate-preserve]", {
@@ -16206,10 +16273,50 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             displayPhase_after: nextDisplay,
             createUiStage_before: String(createUiStageRef.current),
             createUiStage_after: CreateUiStage.DRAFT,
-            source: "production_resume_hydrate",
+            createFlowPhase_after: nextPhase,
+            source: signerSetupResume ? "dashboard_signer_setup_resume_hydrate" : "production_resume_hydrate",
           });
         }
         setDisplayPhase(nextDisplay);
+        if (signerSetupResume) {
+          setProFullDraftQualityRetry(false);
+          setProFullDraftCustomGateMessage(null);
+          setHardError(null);
+          setPremiumPersistedFlowActive(true);
+          setPremiumRecipientUxActive(false);
+          setCreateFlowSendRecipientEditorOpen(true);
+          setSignaturePreparationRequested(false);
+          setPaidProInlineSignerSetupLatched(true);
+          setPaidProSignerMetadataFinalizedLatch(false);
+          // Hydrate live signer UI from persisted draft parties (same authority as signer setup).
+          const parties = next.parties ?? [];
+          const names = parties.map((p) => String((p as { signerName?: string }).signerName ?? "").trim());
+          const titles = parties.map((p) => String((p as { signerTitle?: string }).signerTitle ?? "").trim());
+          const emails = parties.map((p) =>
+            String(
+              (p as { signerEmail?: string }).signerEmail ?? (p as { email?: string }).email ?? "",
+            ).trim(),
+          );
+          const legal = parties.map((p) => String(p.name ?? "").trim());
+          if (legal[0]) setRecipient1Name(legal[0]!);
+          if (legal[1]) setRecipient2Name(legal[1]!);
+          if (emails[0]) setRecipient1Email(emails[0]!);
+          if (emails[1]) setRecipient2Email(emails[1]!);
+          if (legal.length > 2) setExtraPartyLegalNames(legal.slice(2));
+          if (emails.length > 2) setExtraPartyReviewEmails(emails.slice(2));
+          setPartySignerNames(names.length ? names : ["", ""]);
+          setPartySignerTitles(titles.length ? titles : ["", ""]);
+          setSignerSetupUiPartyCount(Math.max(parties.length, 2));
+          consumeCreatorDashboardSignerSetupResume();
+          stripResumeSignerSetupQueryFromCreateUrl();
+          dashboardSignerSetupResumeConsumedRef.current = true;
+          bumpPremiumSurfaceGateTick();
+          window.requestAnimationFrame(() => {
+            document
+              .getElementById(PAID_PRO_FIRST_REVIEW_INLINE_SIGNER_SETUP_DOM_ID)
+              ?.scrollIntoView({ behavior: "smooth", block: "start" });
+          });
+        }
         if (editReturnMatch && !recipientApproved) {
           clearPaidProEditReturnHandoff();
           const docLenH = materialPremiumPipelineCorpusMaxLen(next);
@@ -16217,7 +16324,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           logPaidProEditReturnHydrated({
             agreementIdShort: hid.length <= 12 ? hid : `${hid.slice(0, 8)}…`,
             createUiStage: String(CreateUiStage.DRAFT),
-            createFlowPhase: "draft_ready_for_review",
+            createFlowPhase: nextPhase,
             displayPhase: nextDisplay,
             hasPremiumDoc: hasDocH,
             docLen: docLenH,
@@ -16229,14 +16336,18 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           recipientApprovedInAudit: recipientApproved,
           signingLockActive: Boolean(lockVid),
           createUiStage: String(CreateUiStage.DRAFT),
-          createFlowPhase: "draft_ready_for_review",
+          createFlowPhase: nextPhase,
           displayPhase: nextDisplay,
           recoveryFlags: {
             recipientApprovedHydrate: recipientApproved,
             usedEditReturnSnapshot: mergeEditReturnSnapshot,
-            premiumPersistedForced: recipientApproved,
+            premiumPersistedForced: recipientApproved || signerSetupResume,
           },
-          primaryCta: recipientApproved && !lockVid ? "finalize_in_workspace" : "resume_default",
+          primaryCta: signerSetupResume
+            ? "complete_signer_details"
+            : recipientApproved && !lockVid
+              ? "finalize_in_workspace"
+              : "resume_default",
           corpusLen: materialPremiumPipelineCorpusMaxLen(next),
         });
         setHardError(null);
@@ -16248,7 +16359,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         setMobileWorkspacePane("preview");
         setPreviewPaneRevealed(true);
       } catch {
-        clearCreateReviewAgreementResumeId();
+        if (!signerSetupResume) clearCreateReviewAgreementResumeId();
         productionResumeHydratedRef.current = false;
       }
     })();
@@ -16260,6 +16371,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     draft,
     alignParsedWithCanonicalType,
     intakePartyRoleLabels,
+    openSignerSetupOnResume,
+    resumeSignerSetupAgreementId,
+    bumpPremiumSurfaceGateTick,
   ]);
 
   /** Best-effort: create persisted row early so Send can reuse the same id (deduped inside ensure). */
@@ -19035,6 +19149,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       proFullDraftQualityRetry &&
       !hasUsablePaidBody &&
       !paidProEditReturnResumeActive &&
+      !openSignerSetupOnResume &&
+      createFlowPhase !== "signer_setup_required" &&
+      !paidProInlineSignerSetupLatched &&
       !(draft && draftAuditHasRecipientRecordedApproval(draft)),
   );
 
@@ -21073,7 +21190,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         proFullDraftQualityRetry,
         createFlowDraftPersistBlocked: Boolean(createFlowDraftPersistError?.trim()),
         signerMetadataEditActive:
-          paidProSignerMetadataEditGuardActive || paidProSigningCorpusFreezeActive,
+          paidProSignerMetadataEditGuardActive ||
+          paidProSigningCorpusFreezeActive ||
+          openSignerSetupOnResume ||
+          (createFlowPhase === "signer_setup_required" && paidProInlineSignerSetupLatched),
         premiumPostCheckoutPhase,
         suppressProcessingModal: shouldSuppressPremiumProcessingModalAfterPaidAuthority({
           draft: draft ?? null,
@@ -26001,23 +26121,44 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     });
   }, [paidProSignerDetailsGate.firstIncompleteFieldKey, bumpPremiumSurfaceGateTick]);
 
-  const dashboardSignerSetupResumeConsumedRef = React.useRef(false);
   React.useEffect(() => {
     if (dashboardSignerSetupResumeConsumedRef.current) return;
     if (!openSignerSetupOnResume && !peekCreatorDashboardSignerSetupResume()) return;
-    if (!paidProFirstReviewSurfaceActive && !paidProAcceptedCorpusReady) return;
-    if (paidProSignerMetadataFinalized || paidProSignatureDetailsReady) {
+    // Prefer production_resume hydrate path (sets signer_setup_required + latch). Fallback if draft
+    // already present without that path winning.
+    if (!draft) return;
+    if (createFlowPhase === "signer_setup_required" && paidProInlineSignerSetupLatched) {
       consumeCreatorDashboardSignerSetupResume();
+      stripResumeSignerSetupQueryFromCreateUrl();
       dashboardSignerSetupResumeConsumedRef.current = true;
       return;
     }
+    if (paidProSignerMetadataFinalized || paidProSignatureDetailsReady) {
+      consumeCreatorDashboardSignerSetupResume();
+      stripResumeSignerSetupQueryFromCreateUrl();
+      dashboardSignerSetupResumeConsumedRef.current = true;
+      return;
+    }
+    setProFullDraftQualityRetry(false);
+    setProFullDraftCustomGateMessage(null);
+    setHardError(null);
+    setCreateFlowPhaseGuarded("signer_setup_required");
+    setCreateUiStage(CreateUiStage.DRAFT);
+    setDisplayPhase("review");
+    setPremiumRecipientUxActive(false);
+    setCreateFlowSendRecipientEditorOpen(true);
+    setSignaturePreparationRequested(false);
+    setPaidProInlineSignerSetupLatched(true);
+    setPaidProSignerMetadataFinalizedLatch(false);
     consumeCreatorDashboardSignerSetupResume();
+    stripResumeSignerSetupQueryFromCreateUrl();
     dashboardSignerSetupResumeConsumedRef.current = true;
     openPaidProFirstReviewSignerSetup();
   }, [
     openSignerSetupOnResume,
-    paidProFirstReviewSurfaceActive,
-    paidProAcceptedCorpusReady,
+    draft,
+    createFlowPhase,
+    paidProInlineSignerSetupLatched,
     paidProSignerMetadataFinalized,
     paidProSignatureDetailsReady,
     openPaidProFirstReviewSignerSetup,

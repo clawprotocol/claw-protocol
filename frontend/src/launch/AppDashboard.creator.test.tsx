@@ -870,7 +870,16 @@ describe("AppDashboard creator-centric surface", () => {
     await user.click(cta);
     expect(mockNavigate).toHaveBeenCalledWith(
       `/app/create?resume_signer_setup=${encodeURIComponent(agreementId)}`,
+      expect.objectContaining({ resumeSignerSetupAgreementId: agreementId }),
     );
-    expect(mockNavigate).not.toHaveBeenCalledWith(`/app/send/${agreementId}`);
+    expect(mockNavigate).not.toHaveBeenCalledWith(
+      `/app/send/${agreementId}`,
+      expect.anything(),
+    );
+    expect(
+      mockNavigate.mock.calls.some(
+        (call) => typeof call[0] === "string" && call[0].startsWith(`/app/send/${agreementId}`),
+      ),
+    ).toBe(false);
   });
 });

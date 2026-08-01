@@ -37,6 +37,10 @@ import {
 } from "./paidDashboardCreateContext";
 import { markHomeAnonymousCreateOrigin } from "./homeAnonymousCreateOrigin";
 import { logDashboardPaidCreateScreenTransition } from "./paidDashboardCreateFunnel";
+import {
+  DASHBOARD_SIGNER_SETUP_RESUME_SOURCE,
+  parseResumeSignerSetupAgreementIdFromPath,
+} from "./creatorDashboardReviewLinkRouting";
 
 export type LaunchNavigateOptions = {
   heroIntake?: string;
@@ -56,6 +60,11 @@ export type LaunchNavigateOptions = {
   /** Authenticated workspace Dashboard → Create — latch paid-create context before billing fetch. */
   paidDashboardCreate?: boolean;
   paidDashboardCreateSource?: string;
+  /**
+   * Dashboard Complete signer details → create resume. Must not mark fresh dashboard_paid_create
+   * (that path races review-refresh-restore / Retry Pro draft recovery).
+   */
+  resumeSignerSetupAgreementId?: string;
 };
 
 type LaunchNav = {
@@ -126,11 +135,23 @@ export function LaunchNavProvider({ children }: { children: React.ReactNode }) {
       let markSource: string | null = null;
       let clearReason: string | null = null;
 
+      const resumeSignerSetupId =
+        (options?.resumeSignerSetupAgreementId || "").trim() ||
+        parseResumeSignerSetupAgreementIdFromPath(p);
+
       if (options?.heroFromHome) {
         clearPaidDashboardCreateContext("hero_from_home");
         markHomeAnonymousCreateOrigin();
         cleared = true;
         clearReason = "hero_from_home";
+      } else if (resumeSignerSetupId) {
+        // Must win over authenticated-workspace auto-mark of dashboard_paid_create.
+        markSource = DASHBOARD_SIGNER_SETUP_RESUME_SOURCE;
+        marked = markPaidDashboardCreateContext(markSource, {
+          originPath: originPathname,
+          destinationPath: pathOnly,
+          target: null,
+        });
       } else if (options?.paidDashboardCreate || isAuthenticatedWorkspacePath(originPathname)) {
         markSource =
           options?.paidDashboardCreateSource?.trim() ||

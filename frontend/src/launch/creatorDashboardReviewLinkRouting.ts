@@ -54,7 +54,36 @@ export function creatorDashboardSignerSetupPath(agreementId: string): string {
   return `/app/create?resume_signer_setup=${id}`;
 }
 
+/** LaunchNav / paid-create context source — not a fresh dashboard create. */
+export const DASHBOARD_SIGNER_SETUP_RESUME_SOURCE = "dashboard_signer_setup_resume" as const;
+
 const DASHBOARD_RESUME_SIGNER_SETUP_SS_KEY = "claw_dashboard_resume_signer_setup_v1";
+
+export function parseResumeSignerSetupAgreementIdFromSearch(
+  search?: string | null,
+): string {
+  try {
+    const raw = (search ?? (typeof window !== "undefined" ? window.location.search : "")).trim();
+    const qs = raw.startsWith("?") ? raw.slice(1) : raw;
+    return (new URLSearchParams(qs).get("resume_signer_setup") || "").trim();
+  } catch {
+    return "";
+  }
+}
+
+export function parseResumeSignerSetupAgreementIdFromPath(path: string): string {
+  try {
+    return (new URL(path, "http://localhost").searchParams.get("resume_signer_setup") || "").trim();
+  } catch {
+    return "";
+  }
+}
+
+/** True while dashboard Complete signer details resume is armed (URL and/or session). */
+export function isCreatorDashboardSignerSetupResumeActive(search?: string | null): boolean {
+  if (parseResumeSignerSetupAgreementIdFromSearch(search)) return true;
+  return Boolean(peekCreatorDashboardSignerSetupResume());
+}
 
 /** Write create-resume id and arm one-shot inline signer-setup latch for `/app/create`. */
 export function prepareCreatorDashboardSignerSetupNavigation(agreementId: string): string {
@@ -92,6 +121,23 @@ export function armCreatorDashboardSignerSetupResume(agreementId: string): void 
     sessionStorage.setItem(DASHBOARD_RESUME_SIGNER_SETUP_SS_KEY, id);
   } catch {
     /* ignore */
+  }
+}
+
+/** Strip resume_signer_setup only after signer setup has been armed on create. */
+export function stripResumeSignerSetupQueryFromCreateUrl(): string | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const url = new URL(window.location.href);
+    if (!url.pathname.replace(/\/$/, "").endsWith("/app/create")) return null;
+    if (!url.searchParams.has("resume_signer_setup")) return null;
+    url.searchParams.delete("resume_signer_setup");
+    const qs = url.searchParams.toString();
+    const next = qs ? `${url.pathname}?${qs}` : url.pathname;
+    window.history.replaceState(window.history.state, "", next);
+    return next;
+  } catch {
+    return null;
   }
 }
 

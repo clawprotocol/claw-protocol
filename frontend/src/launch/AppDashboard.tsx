@@ -672,7 +672,12 @@ export function AppDashboard() {
           const id =
             (options?.agreementId || "").trim() ||
             (fromQuery ? decodeURIComponent(fromQuery[1] || "") : "");
-          navigate(id ? prepareCreatorDashboardSignerSetupNavigation(id) : path);
+          if (!id) {
+            navigate(path);
+            return;
+          }
+          const target = prepareCreatorDashboardSignerSetupNavigation(id);
+          navigate(target, { resumeSignerSetupAgreementId: id });
           return;
         }
         navigate(path);
