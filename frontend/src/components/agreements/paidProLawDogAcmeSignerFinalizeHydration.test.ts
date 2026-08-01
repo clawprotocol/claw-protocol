@@ -129,6 +129,7 @@ function buildAcmeLawDogAuthority() {
       recipient2Name: ACME,
       recipient1Email: LAWDOG_EMAIL,
       recipient2Email: ACME_EMAIL,
+      extraPartyReviewEmails: [],
       partySignerNames: [LAWDOG_SIGNER, ACME_SIGNER],
       partySignerTitles: [SIGNER_TITLE, SIGNER_TITLE],
       partyAddresses: ["", ""],
