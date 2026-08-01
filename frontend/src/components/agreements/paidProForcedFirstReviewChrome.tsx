@@ -101,6 +101,7 @@ export function PaidProForcedFirstReviewChrome({
       <PaidProReviewStatusPanel
         signersReady={signersReady}
         signerMetadataFinalized={signerMetadataFinalized}
+        signingReadyHydrated={signerMetadataFinalized && !hydrationBlocked}
         compactShell={compactShell}
       />
       {showSignerSavedBanner ? (

@@ -8,6 +8,8 @@ import {
 type Props = {
   signersReady: boolean;
   signerMetadataFinalized?: boolean;
+  /** False when finalize did not produce a signing-ready hydrated corpus. */
+  signingReadyHydrated?: boolean;
   /** `/app/create` compact review — status steps only, no supporting paragraph. */
   compactShell?: boolean;
 };
@@ -46,9 +48,14 @@ function StepIcon({ state }: { state: PaidProReviewTrustStep["state"] }) {
 export function PaidProReviewStatusPanel({
   signersReady,
   signerMetadataFinalized,
+  signingReadyHydrated,
   compactShell = false,
 }: Props) {
-  const steps = resolvePaidProReviewTrustSteps({ signersReady, signerMetadataFinalized });
+  const steps = resolvePaidProReviewTrustSteps({
+    signersReady,
+    signerMetadataFinalized,
+    signingReadyHydrated,
+  });
   // Always surface signer-field guidance while details are incomplete, even on compact shells.
   const supporting =
     !signersReady || !compactShell

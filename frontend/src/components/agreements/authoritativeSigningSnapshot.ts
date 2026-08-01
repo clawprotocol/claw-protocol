@@ -208,21 +208,24 @@ export function createAuthoritativeSigningSnapshot(
   };
   let rawInput = (args.corpus || "").trim();
   const sot = hasPaidProSourceOfTruth() ? getPaidProSourceOfTruth() : null;
+  const inputMatchesFrozenSoT = Boolean(
+    sot &&
+      sot.text.trim().length >= PAID_PRO_AUTHORITY_MIN_LEN &&
+      hashPaidProCorpus(rawInput) === sot.hash,
+  );
+  const inputSigningReady =
+    rawInput.length >= PAID_PRO_AUTHORITY_MIN_LEN &&
+    countBlankSignerMetadataLinesInExecutionBlock(rawInput, parties) === 0 &&
+    !/provided during signer setup/i.test(rawInput);
+  // Preserve operative SoT bytes only when the caller already produced a signing-ready
+  // hydrated corpus. Never re-store unhydrated SoT placeholders after signer finalize.
   const preserveFrozenCanonicalCorpus =
-    Boolean(
-      sot &&
-        sot.text.trim().length >= PAID_PRO_AUTHORITY_MIN_LEN &&
-        hashPaidProCorpus(rawInput) === sot.hash,
-    ) || args.preserveFrozenServerFullHydratedCorpus === true;
+    args.preserveFrozenServerFullHydratedCorpus === true && inputSigningReady;
   const frozenServerFullMinimalHydration =
-    preserveFrozenCanonicalCorpus &&
-    countBlankSignerMetadataLinesInExecutionBlock(rawInput, parties) === 0;
+    (preserveFrozenCanonicalCorpus || inputMatchesFrozenSoT) && inputSigningReady;
 
   let corpus: string;
-  if (preserveFrozenCanonicalCorpus && sot) {
-    corpus = sot.text.trim();
-    corpus = threadPartyAddressesIntoNoticeStanzas(corpus, parties, args.intakeText ?? null);
-  } else if (frozenServerFullMinimalHydration) {
+  if (preserveFrozenCanonicalCorpus || frozenServerFullMinimalHydration) {
     const dedupe = stripDuplicateConsecutiveExecutionEntityLines(rawInput);
     corpus = dedupe.text.trim();
     corpus = threadPartyAddressesIntoNoticeStanzas(corpus, parties, args.intakeText ?? null);

@@ -546,6 +546,7 @@ export function SimpleProFinalReviewScreen({
         <PaidProReviewStatusPanel
           signersReady={signersReady}
           signerMetadataFinalized={signerMetadataFinalized}
+          signingReadyHydrated={signerMetadataFinalized}
           compactShell={hideInPanelTitleChrome}
         />
       ) : null}

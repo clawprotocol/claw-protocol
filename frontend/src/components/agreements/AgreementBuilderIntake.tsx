@@ -952,6 +952,7 @@ import {
 import {
   auditPaidProPostFinalizeHydrationInvariant,
   canProceedPaidProReviewFirstHandoffAfterFinalize,
+  isPaidProSigningReadyHydratedCorpus,
   logPaidProPostFinalizeHydrationBlocked,
   resolvePaidProPostFinalizeReviewHash,
   resolvePaidProPostFinalizeReviewPlain,
@@ -974,6 +975,7 @@ import {
 } from "./paidProReviewLinkCorpusParity";
 import { countBlankSignerMetadataLinesInExecutionBlock } from "./hydratePaidProExecutionBlockWithSignerMetadata";
 import {
+  clearPaidProPinnedSignerAppliedCorpus,
   resolvePaidProFinalHydratedCorpusForSurface,
   setPaidProPinnedSignerAppliedCorpus,
 } from "./paidProFinalHydratedCorpus";
@@ -28519,7 +28521,30 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       preserveFrozenServerFullHydratedCorpus:
         rawCorpusResolution.source === "paid_pro_source_of_truth",
     });
-    pinFinalizedSignerAppliedCorpus(hydrated.corpus, "paid_pro_signer_metadata_finalize");
+    const signingReadyPlain = (
+      resolvePaidProPostFinalizeReviewPlain() ||
+      getAuthoritativeSigningSnapshot()?.corpus ||
+      hydrated.corpus ||
+      ""
+    ).trim();
+    if (!isPaidProSigningReadyHydratedCorpus(signingReadyPlain) || hydrated.rejected) {
+      clearAuthoritativeSigningSnapshot();
+      clearPaidProPinnedSignerAppliedCorpus();
+      setPaidProSignerMetadataFinalizedLatch(false);
+      setPaidProInlineSignerSetupLatched(true);
+      setCreateFlowPhase("signer_setup_required");
+      setCreateFlowSendRecipientEditorOpen(true);
+      setHardError(
+        "Signer details could not be applied to the agreement. Update signer details and finalize again before preparing for signing.",
+      );
+      setGuidedSigningConfirmationBlockMessage(
+        "Signer details could not be applied to the agreement. Stay in signer setup, confirm each party's name, title, and email, then finalize again.",
+      );
+      bumpPremiumSurfaceGateTick();
+      scrollGuidedSignerSetupIntoView();
+      return;
+    }
+    pinFinalizedSignerAppliedCorpus(signingReadyPlain, "paid_pro_signer_metadata_finalize");
     if (import.meta.env.DEV) {
       logSignerMetadataLifecycleEvent("snapshot-write", {
         hash: getAuthoritativeSigningSnapshot()?.hash ?? null,
@@ -28528,7 +28553,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       });
       emitPaidProSignerMetadataAuthoritativeWrite({
         path: "finalizePaidProSignerMetadataAndOpenReviewDecision",
-        hydratedLen: hydrated.corpus.length,
+        hydratedLen: signingReadyPlain.length,
         authorityHash: authority.hash,
       });
     }

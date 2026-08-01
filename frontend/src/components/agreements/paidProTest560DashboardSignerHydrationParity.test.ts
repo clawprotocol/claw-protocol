@@ -12,8 +12,8 @@
  * Iron Gate → Emily Carter / Daniel Brooks / Sophia Martinez / Michael Reynolds) through the shared
  * canonical modules — establishPaidProSourceOfTruth → resolvePaidProSignerFinalizeRawCorpus →
  * buildHydratedAuthoritativeSigningCorpusFromAuthority → createAuthoritativeSigningSnapshot →
- * resolvePaidProPostFinalizeReviewPlain — and asserts the finalized display is fully hydrated while
- * the frozen signing snapshot stays byte-identical to the SoT (no parallel flow, no snapshot mutation).
+ * resolvePaidProPostFinalizeReviewPlain — and asserts the finalized signing snapshot + display
+ * are the same signing-ready hydrated corpus (no pre-signer placeholders remain).
  */
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
@@ -269,13 +269,17 @@ describe("TEST560 — dashboard paid-Pro signer hydration parity with first-time
     });
     setPaidProPinnedSignerAppliedCorpus(hydrated.corpus);
 
-    // Frozen signing snapshot stays byte-identical to the SoT (no snapshot mutation, first-time-user parity).
-    expect(getAuthoritativeSigningSnapshot()?.corpus).toBe(preSignerReview);
+    // Authoritative signing snapshot is the signing-ready hydrated corpus (not pre-signer SoT).
+    const snapshotCorpus = getAuthoritativeSigningSnapshot()?.corpus ?? "";
     expect(getPaidProSourceOfTruthText()).toBe(preSignerReview);
+    expect(snapshotCorpus).not.toBe(preSignerReview);
+    expect(snapshotCorpus).not.toMatch(/provided during signer setup/i);
+    expect(hydrated.corpus).not.toMatch(/provided during signer setup/i);
 
-    // Displayed review/signing corpus is fully hydrated for all four parties.
+    // Displayed review/signing corpus matches the authoritative snapshot hash/version.
     const postSignerReview = resolvePaidProPostFinalizeReviewPlain(draft);
     expect(postSignerReview).not.toMatch(/provided during signer setup/i);
+    expect(postSignerReview).toBe(snapshotCorpus);
     expect(countOperativeIfToNoticeStanzas(postSignerReview)).toBe(4);
     expect(countPaidProExecutionBlocks(postSignerReview)).toBe(1);
     for (let i = 0; i < 4; i += 1) {

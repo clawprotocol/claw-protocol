@@ -194,6 +194,28 @@ export function resolvePaidProFirstReviewVisibleDisplayPlain(
     };
   }
 
+  // After signer finalize, paint the authoritative signing-ready corpus (hydrated notices /
+  // execution lines) — never keep pre-signer review-session SoT placeholders on screen.
+  if (isPaidProPostFinalizeHydratedCorpusLocked()) {
+    const locked = resolvePaidProPostFinalizeReviewPlain(
+      draft as import("../../agreement/agreementTypes").AgreementDraft | null,
+    ).trim();
+    if (locked.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
+      const plain = resolvePaidProPostFinalizeUserVisiblePlain(
+        locked,
+        draft as import("../../agreement/agreementTypes").AgreementDraft | null,
+      );
+      return {
+        plain,
+        source: "authoritative_signing_snapshot",
+        fallbackReason: null,
+        hasSoT,
+        hasServerFullDoc,
+        paidProActive,
+      };
+    }
+  }
+
   // One-authority rule: accepted review-session corpus paints immediately and
   // must not be replaced by a diverging verified-GET / pipeline candidate.
   const acceptedCanonical = resolveAcceptedCanonicalPaintPlain(args);
@@ -205,23 +227,6 @@ export function resolvePaidProFirstReviewVisibleDisplayPlain(
         verifiedPlain.length >= PAID_PRO_AUTHORITY_MIN_LEN &&
         hashPaidProCorpus(verifiedPlain) === hashPaidProCorpus(acceptedCanonical.plain)
       ) {
-        if (isPaidProPostFinalizeHydratedCorpusLocked()) {
-          const locked = resolvePaidProPostFinalizeReviewPlain().trim();
-          if (locked.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
-            const plain = resolvePaidProPostFinalizeUserVisiblePlain(
-              locked,
-              draft as import("../../agreement/agreementTypes").AgreementDraft | null,
-            );
-            return {
-              plain,
-              source: "authoritative_signing_snapshot",
-              fallbackReason: null,
-              hasSoT,
-              hasServerFullDoc,
-              paidProActive,
-            };
-          }
-        }
         return {
           plain: verifiedPlain,
           source: "verified_server_canonical_review_snapshot",

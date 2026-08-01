@@ -31,7 +31,16 @@ import { repairJoinedTopLevelSectionHeadings } from "./sectionStructureAuthority
  * ("Email: provided during signer setup" / "Address: provided during signer setup")
  * must be hydrated on the post-finalize display surface even when execution blocks are filled.
  */
-const NOTICE_SIGNER_SETUP_PLACEHOLDER_RE = /provided during signer setup/i;
+export const NOTICE_SIGNER_SETUP_PLACEHOLDER_RE = /provided during signer setup/i;
+
+/** True when a corpus is signing-ready: no setup placeholders and no blank Name/Title lines. */
+export function isPaidProSigningReadyHydratedCorpus(plain: string): boolean {
+  const body = (plain || "").trim();
+  if (body.length < PAID_PRO_AUTHORITY_MIN_LEN) return false;
+  if (NOTICE_SIGNER_SETUP_PLACEHOLDER_RE.test(body)) return false;
+  if (countBlankSignerMetadataLinesInExecutionBlock(body) > 0) return false;
+  return true;
+}
 import { recipientMetadataToAuthorityParties } from "./paidProSignerMetadataAuthority";
 import { PAID_PRO_AUTHORITY_MIN_LEN } from "./paidProAgreementAuthority";
 import {
@@ -171,17 +180,24 @@ export function auditPaidProPostFinalizeHydrationInvariant(args: {
   blocked: boolean;
   blankSignerLinesRemaining: number;
   metadataComplete: boolean;
+  noticePlaceholdersRemaining: boolean;
 } {
   const reviewPlain = (args.reviewPlain || "").trim();
   const blankSignerLinesRemaining = countBlankSignerMetadataLinesInExecutionBlock(reviewPlain);
+  const noticePlaceholdersRemaining = NOTICE_SIGNER_SETUP_PLACEHOLDER_RE.test(reviewPlain);
   const metadataComplete = args.signerMetadata
     ? signerMetadataAuthorityHasHydratableFields(args.signerMetadata)
     : false;
   const blocked =
     isPaidProPostFinalizeHydratedCorpusLocked() &&
     metadataComplete &&
-    blankSignerLinesRemaining > 0;
-  return { blocked, blankSignerLinesRemaining, metadataComplete };
+    (blankSignerLinesRemaining > 0 || noticePlaceholdersRemaining);
+  return {
+    blocked,
+    blankSignerLinesRemaining,
+    metadataComplete,
+    noticePlaceholdersRemaining,
+  };
 }
 
 export function canProceedPaidProReviewFirstHandoffAfterFinalize(args: {
@@ -194,7 +210,7 @@ export function canProceedPaidProReviewFirstHandoffAfterFinalize(args: {
   const plain = (args.reviewPlain ?? resolvePaidProPostFinalizeReviewPlain()).trim();
   const minLen = args.minLen ?? PAID_PRO_AUTHORITY_MIN_LEN;
   if (plain.length < minLen) return false;
-  if (countBlankSignerMetadataLinesInExecutionBlock(plain) > 0) return false;
+  if (!isPaidProSigningReadyHydratedCorpus(plain)) return false;
   return true;
 }
 

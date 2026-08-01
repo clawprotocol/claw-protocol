@@ -228,6 +228,7 @@ describe("SimpleProFinalReviewScreen", () => {
         canonicalPaidProReview
         paidReviewPlain={sotPlain}
         signersReady
+        signerMetadataFinalized
         signerSavedMappings={[
           { partyLegalName: "Blue Canyon Analytics LLC", signerName: "Anthem H Blanchard" },
           { partyLegalName: "Iron Vale Systems Inc.", signerName: "Ira Vee" },

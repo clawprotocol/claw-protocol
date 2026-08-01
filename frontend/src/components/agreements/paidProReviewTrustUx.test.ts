@@ -33,8 +33,12 @@ describe("paidProReviewTrustUx", () => {
     );
   });
 
-  it("after signer setup shows signer-added and ready-for-signing step", () => {
-    const steps = resolvePaidProReviewTrustSteps({ signersReady: true });
+  it("after signer finalize + signing-ready corpus shows ready-for-signing step", () => {
+    const steps = resolvePaidProReviewTrustSteps({
+      signersReady: true,
+      signerMetadataFinalized: true,
+      signingReadyHydrated: true,
+    });
     expect(steps.map((s) => s.label)).toEqual([
       "Agreement generated",
       "Automated draft checks completed",
@@ -47,6 +51,22 @@ describe("paidProReviewTrustUx", () => {
     );
     expect(resolvePaidProFinalVersionCopy({ signersReady: true })).toBe(
       PAID_PRO_FINAL_VERSION_READY_FOR_SIGNATURE,
+    );
+  });
+
+  it("does not claim Ready for signing before finalize produces a signing-ready corpus", () => {
+    const beforeFinalize = resolvePaidProReviewTrustSteps({ signersReady: true });
+    expect(beforeFinalize.find((s) => s.id === "signature_links_ready")?.label).toBe(
+      "Ready to prepare signing links",
+    );
+    expect(beforeFinalize.find((s) => s.id === "signature_links_ready")?.state).toBe("pending");
+    const hydrateFailed = resolvePaidProReviewTrustSteps({
+      signersReady: true,
+      signerMetadataFinalized: true,
+      signingReadyHydrated: false,
+    });
+    expect(hydrateFailed.find((s) => s.id === "signature_links_ready")?.label).not.toMatch(
+      /Ready for signing\b/i,
     );
   });
 

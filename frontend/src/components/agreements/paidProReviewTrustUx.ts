@@ -60,9 +60,13 @@ export type PaidProSignerSavedMapping = {
 export function resolvePaidProReviewTrustSteps(args: {
   signersReady: boolean;
   signerMetadataFinalized?: boolean;
+  /** When false, do not claim Ready for signing (hydration/persist incomplete). */
+  signingReadyHydrated?: boolean;
 }): PaidProReviewTrustStep[] {
   const signersDone = Boolean(args.signersReady);
-  const linksDone = Boolean(args.signerMetadataFinalized) || signersDone;
+  // Ready for signing only after successful signer-detail finalize produced a signing-ready corpus.
+  const linksDone =
+    Boolean(args.signerMetadataFinalized) && args.signingReadyHydrated !== false;
   return [
     {
       id: "agreement_generated",
