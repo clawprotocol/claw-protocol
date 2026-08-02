@@ -23620,19 +23620,20 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       premiumCheckoutCompleted ||
       premiumPaidDocumentSurface;
     if (commercialDisplayLocked) {
-      // Post-finalize projection only after verified GET corpus is present.
-      const agreementIdForDisplay = (
-        reviewAgreementIdRef.current ||
-        readCreateReviewAgreementResumeId() ||
-        ""
-      ).trim();
-      if (!hasVerifiedCommercialDisplayCorpus(agreementIdForDisplay)) return "";
+      // Post-finalize hydrated signing snapshot is paint authority even when GET
+      // /canonical-review-snapshot is missing (dashboard signer-setup resume → Continue).
       if (isPaidProPostFinalizeHydratedCorpusLocked()) {
         const locked = resolvePaidProPostFinalizeReviewPlain();
         if (locked.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
           return resolvePaidProPostFinalizeUserVisiblePlain(locked, draft ?? null);
         }
       }
+      const agreementIdForDisplay = (
+        reviewAgreementIdRef.current ||
+        readCreateReviewAgreementResumeId() ||
+        ""
+      ).trim();
+      if (!hasVerifiedCommercialDisplayCorpus(agreementIdForDisplay)) return "";
       return (displayPolishedPaidProPlain || "").trim();
     }
     if (isPaidProPostFinalizeHydratedCorpusLocked()) {
@@ -23720,25 +23721,29 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   ]);
 
   useEffect(() => {
-    if (!hasPaidProSourceOfTruth()) return;
+    if (!hasPaidProSourceOfTruth() && !isPaidProPostFinalizeHydratedCorpusLocked()) return;
     const agreementIdForDisplay = (
       reviewAgreementIdRef.current ||
       readCreateReviewAgreementResumeId() ||
       ""
     ).trim();
-    // Patch 5B: never treat local SoT alone as review-rendered authority.
+    // Patch 5B: never treat local SoT alone as review-rendered authority — but post-finalize
+    // signing snapshot (Continue to signature links) is authoritative without GET.
     if (
       (premiumCheckoutCompleted || paidProFirstReviewDisplayActive || premiumPaidDocumentSurface) &&
-      !hasVerifiedCommercialDisplayCorpus(agreementIdForDisplay)
+      !hasVerifiedCommercialDisplayCorpus(agreementIdForDisplay) &&
+      !isPaidProPostFinalizeHydratedCorpusLocked()
     ) {
       return;
     }
     const plain = (
       simpleProFinalReviewDisplayPlain ||
       displayPolishedPaidProPlain ||
-      (hasVerifiedCommercialDisplayCorpus(agreementIdForDisplay)
-        ? getPaidProSourceOfTruthText()
-        : "")
+      (isPaidProPostFinalizeHydratedCorpusLocked()
+        ? resolvePaidProPostFinalizeReviewPlain()
+        : hasVerifiedCommercialDisplayCorpus(agreementIdForDisplay)
+          ? getPaidProSourceOfTruthText()
+          : "")
     ).trim();
     if (plain.length < PAID_PRO_AUTHORITY_MIN_LEN) return;
     notePaidProReviewHashFromPlain(plain);
@@ -24900,13 +24905,24 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
   React.useEffect(() => {
     if (!simpleProFinalReviewActive) return;
+    const postFinalizeDisplayLen = isPaidProPostFinalizeHydratedCorpusLocked()
+      ? Math.max(
+          simpleProFinalReviewDisplayPlain.length,
+          resolvePaidProPostFinalizeReviewPlain().length,
+        )
+      : 0;
     logSimpleProFinalReviewMounted({
-      bodyLen: Math.max(
-        simpleProFinalReviewDisplayPlain.length,
-        simpleProFinalReviewCorpus.plainText.length,
-        paidProAuthoritativeBodyLen,
-        hasPaidProSourceOfTruth() ? getPaidProSourceOfTruthText().trim().length : 0,
-      ),
+      // Prefer finalized signer display length — never let a longer pre-signer SoT
+      // inflate bodyLen after Continue to signature links.
+      bodyLen:
+        postFinalizeDisplayLen >= PAID_PRO_AUTHORITY_MIN_LEN
+          ? postFinalizeDisplayLen
+          : Math.max(
+              simpleProFinalReviewDisplayPlain.length,
+              simpleProFinalReviewCorpus.plainText.length,
+              paidProAuthoritativeBodyLen,
+              hasPaidProSourceOfTruth() ? getPaidProSourceOfTruthText().trim().length : 0,
+            ),
       phase: createFlowPhase,
       guidedApplied: guidedCompletionPhase === "applied",
       recipientUxActive: premiumRecipientUxActive,
@@ -28829,6 +28845,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     const signerMetadata = authorityPartiesToRecipientMetadata(authority.parties, [
       ...extraPartyReviewEmails,
     ]);
+    const durableAgreementId = (
+      reviewAgreementIdRef.current ||
+      readCreateReviewAgreementResumeId() ||
+      ""
+    ).trim();
     createAuthoritativeSigningSnapshot({
       corpus: hydrated.corpus,
       signerMetadata,
@@ -28839,6 +28860,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       replaceExisting: true,
       preserveFrozenServerFullHydratedCorpus:
         rawCorpusResolution.source === "paid_pro_source_of_truth",
+      agreementId: durableAgreementId,
     });
     const signingReadyPlain = (
       resolvePaidProPostFinalizeReviewPlain() ||
@@ -28864,6 +28886,24 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       return;
     }
     pinFinalizedSignerAppliedCorpus(signingReadyPlain, "paid_pro_signer_metadata_finalize");
+    // Seed/persist commercial review snapshot from the finalized signer corpus so Prepare
+    // and GET /canonical-review-snapshot use the durable agreement id (not a blank 404).
+    if (durableAgreementId && signingReadyPlain.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
+      void prepareCommercialReviewSnapshotAuthority({
+        agreementId: durableAgreementId,
+        corpusPlain: signingReadyPlain,
+        generationSessionId: getOrInitSessionAgreementGenerationId(),
+      }).then((prepared) => {
+        if (import.meta.env.DEV && !prepared.ok) {
+          // eslint-disable-next-line no-console
+          console.warn(
+            "[canonical-review-snapshot] post-finalize prepare failed",
+            prepared.code,
+            durableAgreementId,
+          );
+        }
+      });
+    }
     if (import.meta.env.DEV) {
       logSignerMetadataLifecycleEvent("snapshot-write", {
         hash: getAuthoritativeSigningSnapshot()?.hash ?? null,
@@ -29527,10 +29567,30 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             agreementId: agreementIdForAccept,
           });
           if (!hydrated.ok) {
-            setProFullDraftCustomGateMessage(
-              "Server review snapshot is required before Prepare for signing. Reload and try again.",
-            );
-            return;
+            // Dashboard signer-setup resume often has no prior GET snapshot. After finalize,
+            // persist the hydrated signing corpus under the durable agreement id and continue.
+            const finalizedPlain = resolvePaidProPostFinalizeReviewPlain().trim();
+            if (
+              isPaidProPostFinalizeHydratedCorpusLocked() &&
+              finalizedPlain.length >= PAID_PRO_AUTHORITY_MIN_LEN
+            ) {
+              const prepared = await prepareCommercialReviewSnapshotAuthority({
+                agreementId: agreementIdForAccept,
+                corpusPlain: finalizedPlain,
+                generationSessionId: getOrInitSessionAgreementGenerationId(),
+              });
+              if (!prepared.ok) {
+                setProFullDraftCustomGateMessage(
+                  "Server review snapshot is required before Prepare for signing. Reload and try again.",
+                );
+                return;
+              }
+            } else {
+              setProFullDraftCustomGateMessage(
+                "Server review snapshot is required before Prepare for signing. Reload and try again.",
+              );
+              return;
+            }
           }
         }
         if (!canEnableCommercialPrepareFromServerSnapshot(agreementIdForAccept)) {
@@ -29570,8 +29630,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       // even when intake prefilled every signer name — and never auto-finalize or jump straight to
       // signing. Incomplete details reuse the shared recipient-setup entry; prefilled-but-unconfirmed
       // details arm the inline mount latch directly.
+      // Use live snapshot/latch (not a stale closed-over state) — dashboard resume CTA calls
+      // finalize then Prepare in the same turn.
+      const signerMetadataAlreadyFinalized =
+        hasAuthoritativeSigningSnapshot() || paidProSignerMetadataFinalizedLatch;
       const canMountPaidProInlineSignerSetupFromFirstReview = Boolean(
-        !paidProSignerMetadataFinalized &&
+        !signerMetadataAlreadyFinalized &&
           (acceptedPaidProAuthorityActive ||
             paidProReviewDecisionLifecycleReady ||
             paidProPostCheckoutFirstReviewActive),
@@ -29603,7 +29667,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     paidProReviewDecisionLifecycleReady,
     paidProPostCheckoutFirstReviewActive,
     paidProSignatureDetailsReady,
-    paidProSignerMetadataFinalized,
+    paidProSignerMetadataFinalizedLatch,
     enterFinalReviewRecipientSetup,
     handleProSendForSignature,
   ]);
@@ -33440,13 +33504,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                           canonicalPaidProReview={
                                             (isAuthoritativePaidProReviewActive ||
                                               paidProAuthoritativeBodyLen >= PAID_PRO_AUTHORITY_MIN_LEN) &&
-                                            hasVerifiedCommercialDisplayCorpus(
-                                              (
-                                                reviewAgreementIdRef.current ||
-                                                readCreateReviewAgreementResumeId() ||
-                                                ""
-                                              ).trim(),
-                                            )
+                                            (isPaidProPostFinalizeHydratedCorpusLocked() ||
+                                              hasVerifiedCommercialDisplayCorpus(
+                                                (
+                                                  reviewAgreementIdRef.current ||
+                                                  readCreateReviewAgreementResumeId() ||
+                                                  ""
+                                                ).trim(),
+                                              ))
                                           }
                                           appliedChecklist={
                                             acceptedPaidProAuthorityActive ? [] : guidedAppliedSummaryChecklist

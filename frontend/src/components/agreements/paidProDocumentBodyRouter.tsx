@@ -27,6 +27,8 @@ import {
   hasPaidProReviewSessionAuthority,
   resolvePaidProReviewSessionAuthorityPaintPlain,
 } from "./paidProReviewSessionAuthority";
+import { isPaidProPostFinalizeHydratedCorpusLocked } from "./paidProSignerMetadataCommitPolicy";
+import { resolvePaidProPostFinalizeReviewPlain } from "./paidProPostFinalizeReviewSurface";
 
 /** Minimum frozen SoT length to force visible document shell (inclusive). */
 export const PAID_PRO_DOCUMENT_BODY_SOT_MIN_LEN = 1000;
@@ -165,16 +167,21 @@ export function PaidProDocumentBodyForcedRoute({
   // so paint cannot race on missing agreementId / verified GET or a competing hash.
   // Router may already force with pipeline/canonical sotLen while hasPaidProSourceOfTruth()
   // is still false — must still hand that plain to PaidProVisibleDocumentShell.
+  // Post-finalize hydrated signing corpus wins over a longer pre-signer SoT (blank Name/Title).
+  const postFinalizePlain = isPaidProPostFinalizeHydratedCorpusLocked()
+    ? resolvePaidProPostFinalizeReviewPlain().trim()
+    : "";
   const authorityPlain = resolvePaidProReviewSessionAuthorityPaintPlain()?.plain.trim() || "";
   const sotPlain = hasPaidProSourceOfTruth() ? getPaidProSourceOfTruthText().trim() : "";
   const pipelinePlain = readAcceptedPipelineReviewCorpusPlain().trim();
   const parentPlain = (displayContext?.acceptedCanonicalPlain || "").trim();
-  const acceptedCanonicalPlain = [
-    authorityPlain,
-    sotPlain,
-    pipelinePlain,
-    parentPlain,
-  ].reduce((best, t) => (t.length > best.length ? t : best), "");
+  const acceptedCanonicalPlain =
+    postFinalizePlain.length >= PAID_PRO_DOCUMENT_BODY_SOT_MIN_LEN
+      ? postFinalizePlain
+      : [authorityPlain, sotPlain, pipelinePlain, parentPlain].reduce(
+          (best, t) => (t.length > best.length ? t : best),
+          "",
+        );
   const shellDisplayContext: PaidProFirstReviewVisibleDisplayArgs = {
     ...(displayContext ?? {}),
     paidProActive: true,

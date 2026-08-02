@@ -176,6 +176,11 @@ export type CreateAuthoritativeSigningSnapshotArgs = {
   authorityParties?: readonly PaidProSignerMetadataParty[];
   /** When true, corpus was hydrated from frozen server_full SoT — store verbatim without re-synthesis. */
   preserveFrozenServerFullHydratedCorpus?: boolean;
+  /**
+   * Durable backend agreement id for frozen-signing-authority persist.
+   * Must not be the tab generation/session id (that stays agreementSessionId).
+   */
+  agreementId?: string | null;
 };
 
 /**
@@ -321,8 +326,11 @@ export function createAuthoritativeSigningSnapshot(
     newText: corpus,
     sourceAfter: authoritativeSigningSnapshot.source,
   });
+  const durableAgreementId = (args.agreementId || "").trim();
   createFrozenSigningAuthoritySnapshot({
-    agreementId: getOrInitSessionAgreementGenerationId(),
+    // Backend authority key = durable agreement id. Session generation id is stored
+    // separately as agreementSessionId inside the frozen snapshot builder.
+    agreementId: durableAgreementId || getOrInitSessionAgreementGenerationId(),
     authoritativeSnapshot: authoritativeSigningSnapshot,
     intakeText: args.intakeText ?? null,
   });
