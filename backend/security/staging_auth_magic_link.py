@@ -19,6 +19,7 @@ import httpx
 from backend.config.deployment_runtime import claw_environment, is_relaxed_claw_environment
 from backend.lawdog_dashboard.supabase_config import (
     is_supabase_dashboard_configured,
+    supabase_admin_missing_reason,
     supabase_service_role_key,
     supabase_url,
 )
@@ -144,7 +145,7 @@ def mint_staging_auth_magic_link(
     if not staging_auth_magic_link_environment_allowed():
         raise ValueError("environment_blocked")
     if not is_supabase_dashboard_configured():
-        raise ValueError("supabase_not_configured")
+        raise ValueError(supabase_admin_missing_reason() or "supabase_not_configured")
     normalized = (email or "").strip().lower()
     if not staging_auth_email_allowlisted(normalized):
         raise ValueError("email_not_allowlisted")

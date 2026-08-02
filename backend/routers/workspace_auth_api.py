@@ -833,7 +833,7 @@ async def staging_auth_magic_link(body: StagingAuthMagicLinkIn, request: Request
             raise HTTPException(status_code=403, detail=reason) from exc
         if reason == "redirect_invalid":
             raise HTTPException(status_code=400, detail=reason) from exc
-        if reason == "supabase_not_configured":
+        if reason.startswith("supabase_not_configured"):
             raise HTTPException(status_code=503, detail=reason) from exc
         if reason.startswith("supabase_"):
             raise HTTPException(status_code=502, detail=reason) from exc

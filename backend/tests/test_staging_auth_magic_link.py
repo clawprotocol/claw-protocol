@@ -117,3 +117,15 @@ def test_mint_blocked_in_production(monkeypatch: pytest.MonkeyPatch) -> None:
             email="cryptocurated21+lawdogtest2@gmail.com",
             redirect_to="https://believable-gentleness-staging.up.railway.app/app/auth/callback?next=/app",
         )
+
+
+def test_mint_reports_missing_service_role(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("CLAW_ENVIRONMENT", "staging")
+    monkeypatch.setenv("SUPABASE_URL", "https://example.supabase.co")
+    monkeypatch.delenv("SUPABASE_SERVICE_ROLE_KEY", raising=False)
+    monkeypatch.delenv("CLAW_SUPABASE_SERVICE_ROLE_KEY", raising=False)
+    with pytest.raises(ValueError, match="missing_service_role"):
+        mint_staging_auth_magic_link(
+            email="cryptocurated21+lawdogtest2@gmail.com",
+            redirect_to="https://believable-gentleness-staging.up.railway.app/app/auth/callback?next=/app",
+        )

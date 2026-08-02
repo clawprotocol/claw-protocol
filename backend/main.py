@@ -665,42 +665,47 @@ async def readyz():
 
 @app.get("/version")
 async def version():
-    return JSONResponse(
-        {
-            "name": "claw-backend",
-            "environment": _environment(),
-            "debug": _debug_enabled(),
-            "node_mode": _node_mode(),
-            "git_commit": git_commit_sha(),
-            "git_commit_short": git_commit_short(),
-            "recipient_delivery_status_handler_rev": RECIPIENT_DELIVERY_STATUS_HANDLER_REV,
-            "protocol_version": CLAW_PROTOCOL_VERSION,
-            "api_version": CLAW_API_VERSION,
-            "x402_payment_header": os.getenv("CLAW_X402_PAYMENT_HEADER", "X-PAYMENT"),
-            "tier_headers": ["x-claw-wallet", "x-claw-api-key", "x-claw-tier"],
-            "anchor": {
-                "default_network": _default_anchor_network(),
-                "mainnet_enabled": not _mainnet_disabled(),
-                "mode": _anchor_mode_env(),
-                "daily_equivalent_block_count_by_network": anchor_cadence_summary(),
-                "launch_policy": {
-                    "canonical_chain": anchor_canonical_chain_policy(),
-                    "mirror_dogecoin_enabled": anchor_mirror_dogecoin_enabled(),
-                    "mirror_dogecoin_required": anchor_mirror_dogecoin_required(),
-                    "target_cadence_days": launch_anchor_cadence_days(),
-                    "dogecoin_mirror_every_nth_batch_close": dogecoin_mirror_every_nth_batch_close(),
-                    "note": "Bitcoin is canonical. Dogecoin mirror jobs are enqueued every Nth batch close (default 2); mirror is secondary in verification.",
-                    "execution": {
-                        "bitcoin_provider": bitcoin_execution_provider_type(),
-                        "dogecoin_provider": dogecoin_execution_provider_type(),
-                        "third_party_base_url_configured": bool(third_party_anchor_base_url()),
-                        "third_party_api_key_configured": third_party_anchor_api_key_configured(),
-                    },
+    payload = {
+        "name": "claw-backend",
+        "environment": _environment(),
+        "debug": _debug_enabled(),
+        "node_mode": _node_mode(),
+        "git_commit": git_commit_sha(),
+        "git_commit_short": git_commit_short(),
+        "recipient_delivery_status_handler_rev": RECIPIENT_DELIVERY_STATUS_HANDLER_REV,
+        "protocol_version": CLAW_PROTOCOL_VERSION,
+        "api_version": CLAW_API_VERSION,
+        "x402_payment_header": os.getenv("CLAW_X402_PAYMENT_HEADER", "X-PAYMENT"),
+        "tier_headers": ["x-claw-wallet", "x-claw-api-key", "x-claw-tier"],
+        "anchor": {
+            "default_network": _default_anchor_network(),
+            "mainnet_enabled": not _mainnet_disabled(),
+            "mode": _anchor_mode_env(),
+            "daily_equivalent_block_count_by_network": anchor_cadence_summary(),
+            "launch_policy": {
+                "canonical_chain": anchor_canonical_chain_policy(),
+                "mirror_dogecoin_enabled": anchor_mirror_dogecoin_enabled(),
+                "mirror_dogecoin_required": anchor_mirror_dogecoin_required(),
+                "target_cadence_days": launch_anchor_cadence_days(),
+                "dogecoin_mirror_every_nth_batch_close": dogecoin_mirror_every_nth_batch_close(),
+                "note": "Bitcoin is canonical. Dogecoin mirror jobs are enqueued every Nth batch close (default 2); mirror is secondary in verification.",
+                "execution": {
+                    "bitcoin_provider": bitcoin_execution_provider_type(),
+                    "dogecoin_provider": dogecoin_execution_provider_type(),
+                    "third_party_base_url_configured": bool(third_party_anchor_base_url()),
+                    "third_party_api_key_configured": third_party_anchor_api_key_configured(),
                 },
             },
-            "multipart_enabled": _multipart_enabled(),
-        }
-    )
+        },
+        "multipart_enabled": _multipart_enabled(),
+    }
+    # Non-secret Supabase Admin readiness — staging/local GTM only (never production).
+    env_label = str(_environment() or "").strip().lower()
+    if env_label in ("staging", "local", "dev", "test", "qa", "preview"):
+        from backend.lawdog_dashboard.supabase_config import public_supabase_admin_readiness
+
+        payload.update(public_supabase_admin_readiness())
+    return JSONResponse(payload)
 
 
 @app.get("/v1/version")
