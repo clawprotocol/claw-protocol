@@ -8,6 +8,7 @@ import {
   creatorDashboardSignerSetupPath,
   DASHBOARD_SIGNER_SETUP_RESUME_SOURCE,
   isCreatorDashboardSignerSetupResumeActive,
+  isDashboardSignerSetupResumeUiActive,
   parseResumeSignerSetupAgreementIdFromPath,
   parseResumeSignerSetupAgreementIdFromSearch,
   prepareCreatorDashboardSignerSetupNavigation,
@@ -62,5 +63,15 @@ describe("dashboard Complete signer details → create resume", () => {
       ),
     ).toBe(AGREEMENT_ID);
     expect(parseResumeSignerSetupAgreementIdFromSearch("")).toBe("");
+  });
+
+  it("resume UI stays active via signer_setup_required latch after session arm", () => {
+    expect(
+      isDashboardSignerSetupResumeUiActive({
+        openSignerSetupOnResume: false,
+        createFlowPhase: "signer_setup_required",
+        paidProInlineSignerSetupLatched: true,
+      }),
+    ).toBe(true);
   });
 });

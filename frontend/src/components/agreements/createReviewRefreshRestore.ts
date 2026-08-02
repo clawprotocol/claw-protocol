@@ -25,6 +25,8 @@ export function logReviewRefreshRestore(args: {
   hasStoredDraft: boolean;
   agreementIdShort: string | null;
   restored: boolean;
+  /** When set, restore was intentionally skipped (e.g. dashboard signer-setup resume). */
+  skipped?: string;
 }): void {
   console.info("[review-refresh-restore]", args);
 }

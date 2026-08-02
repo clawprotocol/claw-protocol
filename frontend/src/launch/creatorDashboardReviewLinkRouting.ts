@@ -85,6 +85,24 @@ export function isCreatorDashboardSignerSetupResumeActive(search?: string | null
   return Boolean(peekCreatorDashboardSignerSetupResume());
 }
 
+/**
+ * Render/recovery authority for dashboard signer-setup resume.
+ * True while URL/session resume is armed, or while intake has latched signer_setup_required.
+ */
+export function isDashboardSignerSetupResumeUiActive(args: {
+  openSignerSetupOnResume?: boolean;
+  createFlowPhase?: string | null;
+  paidProInlineSignerSetupLatched?: boolean;
+  search?: string | null;
+}): boolean {
+  if (args.openSignerSetupOnResume) return true;
+  if (isCreatorDashboardSignerSetupResumeActive(args.search)) return true;
+  return (
+    args.createFlowPhase === "signer_setup_required" &&
+    Boolean(args.paidProInlineSignerSetupLatched)
+  );
+}
+
 /** Write create-resume id and arm one-shot inline signer-setup latch for `/app/create`. */
 export function prepareCreatorDashboardSignerSetupNavigation(agreementId: string): string {
   const id = agreementId.trim();

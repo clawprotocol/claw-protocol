@@ -3,6 +3,7 @@
  * before any user-visible render (Starter, Pro, review, readonly, completion).
  */
 
+import { isCreatorDashboardSignerSetupResumeActive } from "../../launch/creatorDashboardReviewLinkRouting";
 import type { AgreementFamily } from "./agreementFamilyRouter";
 import { extractBetweenPartyRawPair, sliceRawBetweenPartyClauseTailForRoleHints } from "./partyBetweenParse";
 import { stripPartyRoleAnnotations } from "./partyRoleAnnotations";
@@ -407,6 +408,8 @@ export function resolveStarterTwoPartyCommercialAuthority(
   intakeText: string | null | undefined,
   entityNames?: readonly string[],
 ): StarterTwoPartyCommercialAuthority | null {
+  // Dashboard signer-setup resume: use persisted workspace parties only — never body-derived names.
+  if (isCreatorDashboardSignerSetupResumeActive()) return null;
   const intake = String(intakeText ?? "").trim();
   if (!intake) return null;
 

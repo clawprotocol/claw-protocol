@@ -2,6 +2,7 @@
  * Canonical Pro freeze candidate — one normalized corpus path for acceptance and SoT freeze.
  */
 
+import { isCreatorDashboardSignerSetupResumeActive } from "../../launch/creatorDashboardReviewLinkRouting";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import { applyAcceptedProCorpusSafeDisplay } from "./acceptedProCorpusSafeDisplay";
 import { clearAcceptedProCorpusSafeDisplayCache } from "./paidProAcceptedCorpusSafeDisplayCache";
@@ -706,6 +707,9 @@ export function assertPaidProFreezeCandidateManifestCountAgreement(
   prep: PaidProFreezeCandidatePrepResult,
   args: PreparePaidProFreezeCandidateArgs,
 ): void {
+  // Signer-setup resume is metadata completion only — do not treat incomplete signer fields as
+  // document invalidity / freeze rejection (authority_party_count_mismatch from body-as-intake).
+  if (isCreatorDashboardSignerSetupResumeActive()) return;
   const intakeManifestCount = resolveAuthoritativeIntakeManifestCount(args.intakeText);
   if (intakeManifestCount < 3) return;
 

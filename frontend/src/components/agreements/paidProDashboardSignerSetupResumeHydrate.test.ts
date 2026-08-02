@@ -33,10 +33,11 @@ describe("dashboard signer-setup resume hydrate (source invariants)", () => {
     expect(intakeSrc).toContain("setPaidProInlineSignerSetupLatched(true)");
     expect(intakeSrc).toContain("PAID_PRO_FIRST_REVIEW_INLINE_SIGNER_SETUP_DOM_ID");
     expect(intakeSrc).toContain("stripResumeSignerSetupQueryFromCreateUrl");
+    expect(intakeSrc).toContain('skipped: "dashboard_signer_setup_resume"');
   });
 
   it("suppresses Retry Pro draft recovery while signer setup resume is active", () => {
-    expect(intakeSrc).toContain("!openSignerSetupOnResume");
-    expect(intakeSrc).toContain('createFlowPhase !== "signer_setup_required"');
+    expect(intakeSrc).toContain("!dashboardSignerSetupResumeUiActive");
+    expect(intakeSrc).toContain("forceDashboardSignerSetupResume");
   });
 });

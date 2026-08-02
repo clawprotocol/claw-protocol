@@ -1263,6 +1263,19 @@ describe("paid Pro inline signer setup mount latch", () => {
         signaturePreparationRequested: false,
       }),
     ).toBe(true);
+
+    expect(
+      resolvePaidProInlineSignerSetupMounted({
+        hasAcceptedPaidProAuthority: false,
+        hasProfessionallyValidatedReviewCorpus: false,
+        premiumPaidDocumentSurface: false,
+        premiumRecipientUxActive: false,
+        createUiStageIsDraft: true,
+        signerSetupLatched: true,
+        signaturePreparationRequested: false,
+        forceDashboardSignerSetupResume: true,
+      }),
+    ).toBe(true);
   });
 });
 

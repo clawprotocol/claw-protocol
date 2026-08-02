@@ -515,6 +515,11 @@ export type ResolvePaidProInlineSignerSetupMountedArgs = {
    * re-mounts it.
    */
   signerMetadataFinalized?: boolean;
+  /**
+   * Dashboard Complete signer details resume: mount signer fields even when paid review authority /
+   * subscription probes are transiently false. Latched setup is the task — not Pro draft recovery.
+   */
+  forceDashboardSignerSetupResume?: boolean;
 };
 
 /**
@@ -526,6 +531,15 @@ export function resolvePaidProInlineSignerSetupMounted(
   args: ResolvePaidProInlineSignerSetupMountedArgs,
 ): boolean {
   if (args.signerMetadataFinalized) return false;
+  if (
+    args.forceDashboardSignerSetupResume &&
+    args.signerSetupLatched &&
+    args.createUiStageIsDraft &&
+    !args.signaturePreparationRequested &&
+    !args.premiumRecipientUxActive
+  ) {
+    return true;
+  }
   const reviewAuthority =
     args.hasAcceptedPaidProAuthority || Boolean(args.hasProfessionallyValidatedReviewCorpus);
   return Boolean(

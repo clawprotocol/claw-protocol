@@ -37,6 +37,7 @@ import { useLaunchNav } from "../../launch/LaunchNavContext";
 import {
   consumeCreatorDashboardSignerSetupResume,
   isCreatorDashboardSignerSetupResumeActive,
+  isDashboardSignerSetupResumeUiActive,
   peekCreatorDashboardSignerSetupResume,
   stripResumeSignerSetupQueryFromCreateUrl,
 } from "../../launch/creatorDashboardReviewLinkRouting";
@@ -14252,6 +14253,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
    * alone (e.g. long fields after a parse glitch) never show LawDog Pro chips or amber recovery.
    */
   const premiumPaidDocumentSurface = useMemo(() => {
+    // Dashboard signer-setup resume must not depend on flaky /v1/subscriptions/local-org entitlement.
+    if (
+      openSignerSetupOnResume ||
+      isCreatorDashboardSignerSetupResumeActive() ||
+      createFlowPhase === "signer_setup_required"
+    ) {
+      return true;
+    }
     const canonicalForcedReviewCorpusReady = Boolean(
       hasCanonicalReviewCorpusForRender() &&
         resolveCanonicalReviewCorpusLenForRender() >= PAID_PRO_DOCUMENT_BODY_SOT_MIN_LEN,
@@ -14365,6 +14374,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     intakeCombined,
     premiumTruthPipelineSource,
     premiumPostCheckoutPhase,
+    openSignerSetupOnResume,
   ]);
   premiumPaidDocumentSurfaceRef.current = premiumPaidDocumentSurface;
 
@@ -16251,11 +16261,21 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           writeCreateReviewDraftSnapshot(next);
         }
         restorePinnedFinalizedSignerCorpus("production_resume_hydrate");
-        logReviewRefreshRestore({
-          hasStoredDraft: true,
-          agreementIdShort: agreementIdShort(hid),
-          restored: true,
-        });
+        if (signerSetupResume) {
+          // Workspace GET hydrate is not local review-refresh-restore — never log restored:true.
+          logReviewRefreshRestore({
+            hasStoredDraft: true,
+            agreementIdShort: agreementIdShort(hid),
+            restored: false,
+            skipped: "dashboard_signer_setup_resume",
+          });
+        } else {
+          logReviewRefreshRestore({
+            hasStoredDraft: true,
+            agreementIdShort: agreementIdShort(hid),
+            restored: true,
+          });
+        }
         const nextDisplay = signerSetupResume
           ? "review"
           : shouldKeepReviewDisplayAfterProHydrate(adForHydrate)
@@ -16307,7 +16327,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           setPartySignerNames(names.length ? names : ["", ""]);
           setPartySignerTitles(titles.length ? titles : ["", ""]);
           setSignerSetupUiPartyCount(Math.max(parties.length, 2));
-          consumeCreatorDashboardSignerSetupResume();
+          // Keep session arm until signer metadata is complete — only strip the query param.
           stripResumeSignerSetupQueryFromCreateUrl();
           dashboardSignerSetupResumeConsumedRef.current = true;
           bumpPremiumSurfaceGateTick();
@@ -17527,6 +17547,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     guidedInlineSignerSetupActive,
     premiumSurfaceGateTick,
   ]);
+  const dashboardSignerSetupResumeUiActive = isDashboardSignerSetupResumeUiActive({
+    openSignerSetupOnResume,
+    createFlowPhase,
+    paidProInlineSignerSetupLatched,
+  });
   const paidProCanonicalReviewSignerSetupActive = useMemo(
     () =>
       resolvePaidProInlineSignerSetupMounted({
@@ -17543,6 +17568,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         // TEST576: a stale inline-setup latch must not keep signer setup mounted after finalize.
         signerMetadataFinalized:
           hasAuthoritativeSigningSnapshot() || paidProSignerMetadataFinalizedLatch,
+        forceDashboardSignerSetupResume: dashboardSignerSetupResumeUiActive,
       }),
     [
       draft,
@@ -17556,6 +17582,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       paidProProfessionallyValidatedReviewCorpusActive,
       paidProSignerMetadataFinalizedLatch,
       premiumSurfaceGateTick,
+      dashboardSignerSetupResumeUiActive,
     ],
   );
   /** While missing/invalid emails, keep recipient inputs surfaced (no dead-end collapsed card). */
@@ -19145,13 +19172,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     ],
   );
   const shouldShowPaidRetry = Boolean(
-    !authoritativePremiumUiCommitted &&
+    !dashboardSignerSetupResumeUiActive &&
+      !authoritativePremiumUiCommitted &&
       proFullDraftQualityRetry &&
       !hasUsablePaidBody &&
       !paidProEditReturnResumeActive &&
-      !openSignerSetupOnResume &&
-      createFlowPhase !== "signer_setup_required" &&
-      !paidProInlineSignerSetupLatched &&
       !(draft && draftAuditHasRecipientRecordedApproval(draft)),
   );
 
@@ -21129,7 +21154,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       premiumReturnPatienceExtended,
   );
   const showPremiumCorsBlockedPanel = Boolean(
-    premiumPaidDocumentSurface &&
+    !dashboardSignerSetupResumeUiActive &&
+      premiumPaidDocumentSurface &&
       (hasPaidPremiumCompletionSession() || premiumPersistedFlowActive) &&
       (premiumPostCheckoutPhase === "premium_cors_blocked" ||
         premiumTruthPipelineSource === "premium_full_draft_cors_blocked") &&
@@ -21137,7 +21163,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       !canProceedWithPaidProDocument,
   );
   const showPremiumNetworkRecoverablePanel = Boolean(
-    !paidAcceptedDegradedRecoveryUiSuppressed &&
+    !dashboardSignerSetupResumeUiActive &&
+      !paidAcceptedDegradedRecoveryUiSuppressed &&
       premiumPaidDocumentSurface &&
       (hasPaidPremiumCompletionSession() || premiumPersistedFlowActive) &&
       (premiumPostCheckoutPhase === "premium_network_recoverable" ||
@@ -26128,7 +26155,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     // already present without that path winning.
     if (!draft) return;
     if (createFlowPhase === "signer_setup_required" && paidProInlineSignerSetupLatched) {
-      consumeCreatorDashboardSignerSetupResume();
+      // Keep session arm until metadata complete; only strip the query for a clean URL.
       stripResumeSignerSetupQueryFromCreateUrl();
       dashboardSignerSetupResumeConsumedRef.current = true;
       return;
@@ -26150,7 +26177,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     setSignaturePreparationRequested(false);
     setPaidProInlineSignerSetupLatched(true);
     setPaidProSignerMetadataFinalizedLatch(false);
-    consumeCreatorDashboardSignerSetupResume();
+    // Keep session arm until metadata complete; only strip the query for a clean URL.
     stripResumeSignerSetupQueryFromCreateUrl();
     dashboardSignerSetupResumeConsumedRef.current = true;
     openPaidProFirstReviewSignerSetup();
@@ -26162,6 +26189,17 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     paidProSignerMetadataFinalized,
     paidProSignatureDetailsReady,
     openPaidProFirstReviewSignerSetup,
+  ]);
+
+  // Clear dashboard resume session only after signer metadata is complete / finalized.
+  React.useEffect(() => {
+    if (!isCreatorDashboardSignerSetupResumeActive() && !openSignerSetupOnResume) return;
+    if (!paidProSignatureDetailsReady && !paidProSignerMetadataFinalized) return;
+    consumeCreatorDashboardSignerSetupResume();
+  }, [
+    openSignerSetupOnResume,
+    paidProSignatureDetailsReady,
+    paidProSignerMetadataFinalized,
   ]);
 
   const handleGuidedBackToSignerDetailsFromFinalReview = React.useCallback(() => {
@@ -26535,9 +26573,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   /** Test289: mount review document card when canonical corpus exists even if runtime authority gate is transiently false. */
   const showPaidProReviewDocumentCard = useMemo(
     () =>
+      dashboardSignerSetupResumeUiActive ||
       canDisplayPaidProAgreementDocument ||
       (paidProDocumentBodyRouter.forced && paidProCanonicalReviewCorpusReady),
     [
+      dashboardSignerSetupResumeUiActive,
       canDisplayPaidProAgreementDocument,
       paidProDocumentBodyRouter.forced,
       paidProCanonicalReviewCorpusReady,
@@ -27146,7 +27186,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   }, [showPrimaryGuidedCompletion, postCheckoutAdvisoryGaps.length]);
 
   const showProAmberRecoveryPanel = Boolean(
-    !paidAcceptedDegradedRecoveryUiSuppressed &&
+    !dashboardSignerSetupResumeUiActive &&
+      !paidAcceptedDegradedRecoveryUiSuppressed &&
       premiumPaidDocumentSurface &&
       !authoritativePremiumUiCommitted &&
       !proUpgradeUseStarterView &&
@@ -27179,7 +27220,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           guidedCompletionFriendlyCopy.body ||
           "Your intake is still available. Add or clarify details, retry a full Pro draft, or work from your starter version.";
   const showRetryAsPrimaryCta = Boolean(
-    simpleCreateUnifiedBottomCta &&
+    !dashboardSignerSetupResumeUiActive &&
+      simpleCreateUnifiedBottomCta &&
       createProductionTwoPane &&
       createUiStage === CreateUiStage.DRAFT &&
       premiumPaidDocumentSurface &&
@@ -32735,7 +32777,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                   key="paid-pro-agreement-document-stable"
                                   className="mx-auto w-full max-w-[850px] px-0 sm:px-1"
                                 >
-                                  {premiumServerGenerationDegraded ? (
+                                  {premiumServerGenerationDegraded && !dashboardSignerSetupResumeUiActive ? (
                                     <div
                                       className="mb-4 rounded-lg border border-sky-500/40 bg-slate-900/50 px-4 py-3 sm:px-5 sm:py-3.5"
                                       role="status"
@@ -32752,7 +32794,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                     </div>
                                   ) : null}
                                   <div className="w-full max-w-[850px] rounded-sm border border-stone-200/90 bg-[#faf7f0] text-left text-stone-900 shadow-[0_1px_2px_rgba(0,0,0,0.05),0_22px_48px_-8px_rgba(15,23,42,0.28)] ring-1 ring-black/[0.07]">
-                                    {paidProForcedFirstReviewActive ? (
+                                    {paidProForcedFirstReviewActive ||
+                                    paidProCanonicalReviewSignerSetupActive ? (
                                       <div className="px-[clamp(1.35rem,4.5vw,2.65rem)] py-3.5 sm:py-4">
                                         {premiumReviewDocEditorOpen ? (
                                           <PaidProPostFinalizeAgreementEditor
@@ -32763,7 +32806,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                             disabled={(isGenerating && !draft) || upgradeLockActive || loading}
                                             editorRef={agreementPreviewEditorRef}
                                           />
-                                        ) : (
+                                        ) : paidProForcedFirstReviewActive ? (
                                           <PaidProDocumentBodyForcedRoute
                                             embedded
                                             router={paidProDocumentBodyRouter}
@@ -32783,7 +32826,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                                   }).source
                                             }
                                           />
-                                        )}
+                                        ) : null}
                                         {showPaidProForcedFirstReviewTrackChooser && !premiumReviewDocEditorOpen ? (
                                           <PaidProForcedFirstReviewChrome
                                             signersReady={paidProReviewSignerStatusReady}

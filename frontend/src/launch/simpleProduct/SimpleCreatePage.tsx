@@ -120,11 +120,14 @@ export function SimpleCreatePage() {
       return false;
     }
   }, [search]);
-  const resumeSignerSetupAgreementId = useMemo(() => {
-    const fromSearch = parseResumeSignerSetupAgreementIdFromSearch(search);
+  // Sticky for this create-page mount: must survive URL strip after intake arms signer setup.
+  const [resumeSignerSetupAgreementId] = useState(() => {
+    const fromSearch = parseResumeSignerSetupAgreementIdFromSearch(
+      typeof window !== "undefined" ? window.location.search : search,
+    );
     if (fromSearch) return fromSearch;
     return (peekCreatorDashboardSignerSetupResume() || "").trim();
-  }, [search]);
+  });
   const openSignerSetupOnResume = Boolean(
     resumeSignerSetupAgreementId || isCreatorDashboardSignerSetupResumeActive(search),
   );
