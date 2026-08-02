@@ -2,13 +2,18 @@ import { useState } from "react";
 import { useLaunchNav } from "./LaunchNavContext";
 import { useAuth } from "../auth/AuthProvider";
 import { isGoogleAuthConfigured } from "../auth/supabaseAuthService";
+import {
+  isStagingAuthMagicLinkClientSurface,
+  stagingAuthDefaultTestEmail,
+} from "../auth/stagingAuthMagicLink";
 import { logProductEvent } from "../lib/experimentation/productEvents";
 
 /** Returning-user sign-in — no pending draft; lands on dashboard after auth. */
 export function SignInPage() {
   const { navigate } = useLaunchNav();
   const { enabled, loading, user, signInEmail, signInGoogle } = useAuth();
-  const [email, setEmail] = useState("");
+  const stagingAuthSurface = isStagingAuthMagicLinkClientSurface();
+  const [email, setEmail] = useState(() => (stagingAuthSurface ? stagingAuthDefaultTestEmail() : ""));
   const [status, setStatus] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -58,7 +63,13 @@ export function SignInPage() {
           setStatus(null);
           logProductEvent("magic_link_requested", { surface: "sign_in_page" });
           void signInEmail(email.trim(), { returningSignIn: true })
-            .then(() => setStatus("Check your email for a sign-in link."))
+            .then((result) => {
+              if (result.mode === "staging_redirect") {
+                setStatus("Signing you in via staging test login…");
+                return;
+              }
+              setStatus("Check your email for a sign-in link.");
+            })
             .catch((err) => setStatus(err instanceof Error ? err.message : "Could not send sign-in link."))
             .finally(() => setBusy(false));
         }}
@@ -79,6 +90,34 @@ export function SignInPage() {
           Email me a sign-in link
         </button>
       </form>
+      {stagingAuthSurface ? (
+        <button
+          type="button"
+          className="mt-3 w-full rounded-lg border border-amber-700/60 bg-amber-950/40 px-4 py-2.5 text-sm font-medium text-amber-100 hover:bg-amber-900/50 disabled:opacity-60"
+          disabled={busy}
+          onClick={() => {
+            const target = email.trim() || stagingAuthDefaultTestEmail();
+            setEmail(target);
+            setBusy(true);
+            setStatus(null);
+            logProductEvent("magic_link_requested", { surface: "sign_in_page_staging_bypass" });
+            void signInEmail(target, { returningSignIn: true })
+              .then((result) => {
+                if (result.mode === "staging_redirect") {
+                  setStatus("Signing you in via staging test login…");
+                  return;
+                }
+                setStatus("Check your email for a sign-in link.");
+              })
+              .catch((err) =>
+                setStatus(err instanceof Error ? err.message : "Staging test login failed."),
+              )
+              .finally(() => setBusy(false));
+          }}
+        >
+          Staging test login (skip email throttle)
+        </button>
+      ) : null}
       {status ? <p className="mt-3 text-sm text-slate-400">{status}</p> : null}
       <button
         type="button"

@@ -790,3 +790,59 @@ async def qa_payment_bypass_authorization(request: Request) -> Dict[str, Any]:
         claw_environment() or "(unset)",
     )
     return result
+
+
+class StagingAuthMagicLinkIn(BaseModel):
+    email: str = Field(..., min_length=3, max_length=320)
+    redirect_to: str = Field(..., min_length=8, max_length=2048)
+
+
+@router.post("/staging-auth/magic-link")
+async def staging_auth_magic_link(body: StagingAuthMagicLinkIn, request: Request) -> Dict[str, Any]:
+    """
+    Staging/local GTM: mint a Supabase magic-link action_link without sending email.
+
+    Bypasses Auth email OTP rate limits for allowlisted test accounts (e.g. lawdogtest2).
+    404 on production/prod. Soft IP throttle only — does not relax production auth.
+    """
+    from backend.security.staging_auth_magic_link import (
+        mint_staging_auth_magic_link,
+        staging_auth_client_ip,
+        staging_auth_ip_rate_limit_ok,
+        staging_auth_magic_link_environment_allowed,
+    )
+
+    if not staging_auth_magic_link_environment_allowed():
+        raise HTTPException(status_code=404, detail="not_found")
+
+    ip = staging_auth_client_ip(
+        request.client.host if request.client else None,
+        request.headers.get("x-forwarded-for"),
+    )
+    if not staging_auth_ip_rate_limit_ok(ip):
+        raise HTTPException(status_code=429, detail="staging_auth_rate_limited")
+
+    try:
+        action_link, _payload = mint_staging_auth_magic_link(
+            email=body.email,
+            redirect_to=body.redirect_to,
+        )
+    except ValueError as exc:
+        reason = str(exc)
+        if reason == "email_not_allowlisted":
+            raise HTTPException(status_code=403, detail=reason) from exc
+        if reason == "redirect_invalid":
+            raise HTTPException(status_code=400, detail=reason) from exc
+        if reason == "supabase_not_configured":
+            raise HTTPException(status_code=503, detail=reason) from exc
+        if reason.startswith("supabase_"):
+            raise HTTPException(status_code=502, detail=reason) from exc
+        raise HTTPException(status_code=400, detail=reason) from exc
+
+    _log.info(
+        "staging_auth_magic_link_ok email=%s host=%s deployment=%s",
+        (body.email or "").strip().lower(),
+        request.url.hostname or "",
+        claw_environment() or "(unset)",
+    )
+    return {"ok": True, "action_link": action_link, "mode": "staging_direct"}

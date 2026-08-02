@@ -19,7 +19,10 @@ export type AuthContextValue = {
   loading: boolean;
   session: Session | null;
   user: User | null;
-  signInEmail: (email: string, opts?: { returningSignIn?: boolean }) => Promise<void>;
+  signInEmail: (
+    email: string,
+    opts?: { returningSignIn?: boolean },
+  ) => Promise<{ mode: "email_sent" | "staging_redirect" }>;
   signInGoogle: (opts?: { returningSignIn?: boolean }) => Promise<void>;
   signOut: () => Promise<void>;
 };
@@ -93,7 +96,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       destinationPath: opts?.returningSignIn ? "/app" : undefined,
       provider: "email",
     });
-    await signInWithEmailMagicLink(email, buildAuthCallbackUrl(undefined, continuationId));
+    return signInWithEmailMagicLink(email, buildAuthCallbackUrl(undefined, continuationId));
   }, []);
 
   const signInGoogle = useCallback(async (opts?: { returningSignIn?: boolean }) => {

@@ -70,7 +70,13 @@ export function AccountLoginPanel(props: { className?: string }) {
           captureContinuationFromLocation({ workflowStage: "settings", destinationPath: "/app" });
           logProductEvent("magic_link_requested", { surface: "settings" });
           void signInEmail(email.trim())
-            .then(() => setStatus("Check your email for a sign-in link."))
+            .then((result) => {
+              if (result.mode === "staging_redirect") {
+                setStatus("Signing you in via staging test login…");
+                return;
+              }
+              setStatus("Check your email for a sign-in link.");
+            })
             .catch((err) => setStatus(err instanceof Error ? err.message : "Could not send sign-in link."))
             .finally(() => setBusy(false));
         }}

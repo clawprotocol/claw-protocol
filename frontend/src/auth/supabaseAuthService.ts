@@ -68,21 +68,55 @@ export function onAuthStateChange(
   return data.subscription;
 }
 
+export type EmailMagicLinkSignInResult =
+  | { mode: "email_sent" }
+  | { mode: "staging_redirect" };
+
 export async function signInWithEmailMagicLink(
   email: string,
   redirectTo?: string,
-): Promise<void> {
+): Promise<EmailMagicLinkSignInResult> {
   const client = getSupabaseBrowserClient();
   if (!client || !isSupabaseAuthEnabled()) {
     throw new Error("Sign-in is not configured yet.");
   }
+  const {
+    isAuthEmailRateLimitError,
+    isStagingAuthAllowlistedEmailClient,
+    isStagingAuthMagicLinkClientSurface,
+    redirectViaStagingAuthMagicLink,
+  } = await import("./stagingAuthMagicLink");
+  const redirect = redirectTo || buildAuthCallbackUrl();
+  const trimmed = email.trim();
+
+  // Prefer staging Admin mint for allowlisted GTM accounts — avoids OTP email throttle.
+  if (isStagingAuthMagicLinkClientSurface() && isStagingAuthAllowlistedEmailClient(trimmed)) {
+    try {
+      await redirectViaStagingAuthMagicLink(trimmed, redirect);
+      return { mode: "staging_redirect" };
+    } catch {
+      // Fall through to normal OTP (e.g. API not redeployed yet).
+    }
+  }
+
   const { error } = await client.auth.signInWithOtp({
-    email: email.trim(),
+    email: trimmed,
     options: {
-      emailRedirectTo: redirectTo || buildAuthCallbackUrl(),
+      emailRedirectTo: redirect,
     },
   });
-  if (error) throw error;
+  if (error) {
+    if (
+      isAuthEmailRateLimitError(error) &&
+      isStagingAuthMagicLinkClientSurface() &&
+      isStagingAuthAllowlistedEmailClient(trimmed)
+    ) {
+      await redirectViaStagingAuthMagicLink(trimmed, redirect);
+      return { mode: "staging_redirect" };
+    }
+    throw error;
+  }
+  return { mode: "email_sent" };
 }
 
 export async function signInWithOAuthProvider(args: {
