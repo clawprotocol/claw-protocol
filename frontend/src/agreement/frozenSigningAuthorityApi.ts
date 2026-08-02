@@ -25,12 +25,24 @@ export async function fetchFrozenSigningAuthorityFromBackend(
   }
 }
 
+export type PersistFrozenSigningAuthorityResult =
+  | { ok: true }
+  | { ok: false; code: string; status?: number };
+
 export async function persistFrozenSigningAuthorityToBackend(
   agreementId: string,
   snapshot: FrozenSigningAuthoritySnapshotV1,
 ): Promise<boolean> {
+  const result = await persistFrozenSigningAuthorityToBackendDetailed(agreementId, snapshot);
+  return result.ok;
+}
+
+export async function persistFrozenSigningAuthorityToBackendDetailed(
+  agreementId: string,
+  snapshot: FrozenSigningAuthoritySnapshotV1,
+): Promise<PersistFrozenSigningAuthorityResult> {
   const id = agreementId.trim();
-  if (!id) return false;
+  if (!id) return { ok: false, code: "missing_agreement_id" };
   try {
     const res = await fetch(
       `${base()}/api/agreements/${encodeURIComponent(id)}/frozen-signing-authority`,
@@ -40,9 +52,18 @@ export async function persistFrozenSigningAuthorityToBackend(
         body: JSON.stringify({ snapshot, packet_state: "draft" }),
       },
     );
-    return res.ok;
+    if (res.ok) return { ok: true };
+    let code = `http_${res.status}`;
+    try {
+      const j = (await res.json()) as { detail?: { code?: string } | string };
+      if (typeof j.detail === "object" && j.detail?.code) code = String(j.detail.code);
+      else if (typeof j.detail === "string" && j.detail.trim()) code = j.detail.trim();
+    } catch {
+      /* keep status code */
+    }
+    return { ok: false, code, status: res.status };
   } catch {
-    return false;
+    return { ok: false, code: "network_error" };
   }
 }
 

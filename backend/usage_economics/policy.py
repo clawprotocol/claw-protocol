@@ -788,6 +788,43 @@ def require_claw_org_id_header(request: Request) -> str:
     return require_verified_org_id(request)
 
 
+def try_repair_missing_agreement_ownership(agreement_id: str, verified_subject: str) -> bool:
+    """
+    One-shot ownership backfill when draft workspace metadata unambiguously matches
+    the verified commercial principal. Never trusts client org headers alone.
+    """
+    aid = (agreement_id or "").strip()
+    subj = (verified_subject or "").strip()
+    if not aid or not subj.startswith("org:user-"):
+        return False
+    try:
+        from backend.ops.ownership_inspector import _recoverable_subject_from_draft
+    except Exception:
+        return False
+    candidate = (_recoverable_subject_from_draft(aid) or "").strip()
+    if not candidate or candidate != subj:
+        return False
+    store = get_usage_economics_store()
+    store.init_schema()
+    if store.owner_subject_for_agreement(aid):
+        return store.owner_subject_for_agreement(aid) == subj
+    try:
+        store.insert_agreement_owner(
+            agreement_id=aid,
+            subject_ref=subj,
+            internal_keys_draft=0,
+        )
+        log.info(
+            "ownership_repaired_from_draft_metadata agreement_id=%s subject=%s",
+            aid,
+            subj,
+        )
+        return True
+    except Exception:
+        log.exception("ownership_repair_failed agreement_id=%s", aid)
+        return False
+
+
 def assert_registered_owner_matches(request: Request, agreement_id: str) -> str:
     """
     Bind owner mutations to the server-side agreement ownership registry.
@@ -809,6 +846,9 @@ def assert_registered_owner_matches(request: Request, agreement_id: str) -> str:
     store = get_usage_economics_store()
     store.init_schema()
     owner = store.owner_subject_for_agreement(agreement_id)
+    if not owner:
+        if try_repair_missing_agreement_ownership(agreement_id, subj):
+            owner = store.owner_subject_for_agreement(agreement_id)
     if not owner:
         raise HTTPException(
             status_code=403,
@@ -836,6 +876,28 @@ def _parse_utc_iso_z(value: str) -> datetime:
     return dt
 
 
+def subject_has_commercial_create_entitlement(subject_ref: str) -> bool:
+    """
+    True for Stripe Pro or Genesis create entitlement.
+
+    Guest draft TTL must not block these subjects — Genesis Dogs staging/GTM
+    agreements are often resumed days after create, and mutations (freeze /
+    canonical-review-snapshot) previously 403'd with ``draft_expired``.
+    """
+    try:
+        from backend.usage_economics.commercial_entitlement import (
+            STATE_GENESIS,
+            STATE_PRO,
+            resolve_commercial_entitlement,
+        )
+
+        state = str(resolve_commercial_entitlement(subject_ref).get("state") or "").strip().lower()
+        return state in (STATE_GENESIS, STATE_PRO)
+    except Exception:
+        log.exception("subject_has_commercial_create_entitlement failed")
+        return subject_has_paid_plan(subject_ref)
+
+
 def economics_overlay_for_agreement(agreement_id: str) -> Dict[str, Any]:
     if not usage_economics_enabled():
         return {
@@ -855,12 +917,14 @@ def economics_overlay_for_agreement(agreement_id: str) -> Dict[str, Any]:
             "tier": "unknown",
         }
     subj = str(row.get("subject_ref") or "")
+    # Pro OR Genesis — both are commercially entitled create paths (not guest TTL).
+    entitled = subject_has_commercial_create_entitlement(subj)
     paid = subject_has_paid_plan(subj)
-    tier: str = "paid" if paid else "free"
-    watermark = not paid
+    tier: str = "paid" if paid else ("genesis" if entitled else "free")
+    watermark = not entitled
     expires_at: Optional[str] = None
     expired = False
-    if not paid and not row.get("completed_at"):
+    if not entitled and not row.get("completed_at"):
         try:
             created = _parse_utc_iso_z(str(row.get("created_at") or ""))
             exp = created + timedelta(seconds=uc.FREE_DRAFT_TTL_SECONDS)

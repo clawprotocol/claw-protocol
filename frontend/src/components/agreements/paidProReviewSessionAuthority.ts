@@ -97,6 +97,46 @@ export function bindPaidProReviewSessionAuthorityAgreementId(agreementId: string
   activeAuthority = { ...activeAuthority, agreementId: id };
 }
 
+/**
+ * After signer-metadata finalize, advance review-session authority from the pre-signer
+ * SoT (blank Name/Title) to the hydrated signing corpus. One-authority rule still holds
+ * for unrelated competing candidates — this is the explicit finalize boundary.
+ */
+export function replacePaidProReviewSessionAuthorityAfterSignerFinalize(args: {
+  corpusPlain: string;
+  agreementId?: string | null;
+  reviewSessionId?: string | null;
+}): PaidProReviewSessionAuthorityRecord {
+  const corpusPlain = (args.corpusPlain || "").trim();
+  const hash = hashPaidProCorpus(corpusPlain);
+  if (corpusPlain.length < PAID_PRO_AUTHORITY_MIN_LEN) {
+    throw new Error(
+      `[paid-pro-review-session-authority-blocked] signer_finalize_length_failed len=${corpusPlain.length}`,
+    );
+  }
+  const prior = activeAuthority;
+  activeAuthority = {
+    corpusPlain,
+    hash,
+    source: "paid_pro_signer_metadata_finalize",
+    integrityOk: true,
+    agreementId: (args.agreementId || prior?.agreementId || "").trim() || null,
+    reviewSessionId: (args.reviewSessionId || prior?.reviewSessionId || "").trim() || null,
+    establishedAt: Date.now(),
+  };
+  if (typeof import.meta !== "undefined" && import.meta.env?.MODE !== "test") {
+    // eslint-disable-next-line no-console
+    console.info("[paid-pro-review-session-authority]", {
+      phase: "replaced_after_signer_finalize",
+      priorHash: prior?.hash ?? null,
+      hash: activeAuthority.hash,
+      len: activeAuthority.corpusPlain.length,
+      agreementId: activeAuthority.agreementId,
+    });
+  }
+  return activeAuthority;
+}
+
 export function resolvePaidProReviewSessionAuthorityPaintPlain(): {
   plain: string;
   hash: string;

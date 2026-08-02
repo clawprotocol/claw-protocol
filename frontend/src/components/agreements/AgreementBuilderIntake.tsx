@@ -1590,7 +1590,12 @@ import {
   planReviewReadyPersistFailureUi,
   shouldRunAutoPersistAfterAuthoritativeCommit,
 } from "./paidProReviewReadyWorkspacePersist";
-import { resolvePaidProReviewSessionAuthorityPersistPlain } from "./paidProReviewSessionAuthority";
+import {
+  replacePaidProReviewSessionAuthorityAfterSignerFinalize,
+  resolvePaidProReviewSessionAuthorityPersistPlain,
+} from "./paidProReviewSessionAuthority";
+import { persistFrozenSigningAuthorityToBackendDetailed } from "../../agreement/frozenSigningAuthorityApi";
+import { readFrozenSigningAuthoritySnapshot } from "./frozenSigningAuthoritySnapshot";
 import {
   formatPaidCreateFlowDraftPersistFailureMessage,
   isDraftLimitReachedPersistError,
@@ -4012,7 +4017,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const guidedFinalReviewNavigationInFlightRef = useRef(false);
   const guidedFinalReviewRetryPendingRef = useRef(false);
   const guidedFinalReviewTransitionPromiseRef = useRef<Promise<void> | null>(null);
-  const finalizePaidProSignerMetadataAndOpenReviewDecisionRef = useRef<() => void>(() => {});
+  const finalizePaidProSignerMetadataAndOpenReviewDecisionRef = useRef<() => Promise<boolean>>(
+    async () => false,
+  );
   const guidedSignatureTrackInFlightRef = useRef(false);
   const guidedSignaturePersistFailureRef = useRef<{ httpStatus?: number | null; rawMessage?: string } | null>(
     null,
@@ -25929,7 +25936,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
               navigationTarget: "review_decision",
               reason: "paid_pro_signer_setup_skip_guided_final_review",
             });
-            finalizePaidProSignerMetadataAndOpenReviewDecisionRef.current();
+            void finalizePaidProSignerMetadataAndOpenReviewDecisionRef.current();
             return;
           }
 
@@ -28799,10 +28806,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     ],
   );
 
-  const finalizePaidProSignerMetadataAndOpenReviewDecision = React.useCallback(() => {
+  const finalizePaidProSignerMetadataAndOpenReviewDecision = React.useCallback(async (): Promise<boolean> => {
     if (!paidProSignerDetailsGate.complete) {
       scrollGuidedSignerSetupIntoView();
-      return;
+      return false;
     }
     logPaidProSignerTransition({
       previousState: createFlowPhase,
@@ -28850,6 +28857,18 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       readCreateReviewAgreementResumeId() ||
       ""
     ).trim();
+    const rollbackFinalizeFailure = (message: string) => {
+      clearAuthoritativeSigningSnapshot();
+      clearPaidProPinnedSignerAppliedCorpus();
+      setPaidProSignerMetadataFinalizedLatch(false);
+      setPaidProInlineSignerSetupLatched(true);
+      setCreateFlowPhase("signer_setup_required");
+      setCreateFlowSendRecipientEditorOpen(true);
+      setHardError(message);
+      setGuidedSigningConfirmationBlockMessage(message);
+      bumpPremiumSurfaceGateTick();
+      scrollGuidedSignerSetupIntoView();
+    };
     createAuthoritativeSigningSnapshot({
       corpus: hydrated.corpus,
       signerMetadata,
@@ -28861,6 +28880,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       preserveFrozenServerFullHydratedCorpus:
         rawCorpusResolution.source === "paid_pro_source_of_truth",
       agreementId: durableAgreementId,
+      // Await durable persist below — never advance into broken final review on 403/404.
+      persistFrozenToBackend: false,
     });
     const signingReadyPlain = (
       resolvePaidProPostFinalizeReviewPlain() ||
@@ -28869,40 +28890,59 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       ""
     ).trim();
     if (!isPaidProSigningReadyHydratedCorpus(signingReadyPlain) || hydrated.rejected) {
-      clearAuthoritativeSigningSnapshot();
-      clearPaidProPinnedSignerAppliedCorpus();
-      setPaidProSignerMetadataFinalizedLatch(false);
-      setPaidProInlineSignerSetupLatched(true);
-      setCreateFlowPhase("signer_setup_required");
-      setCreateFlowSendRecipientEditorOpen(true);
-      setHardError(
+      rollbackFinalizeFailure(
         "Signer details could not be applied to the agreement. Update signer details and finalize again before preparing for signing.",
       );
-      setGuidedSigningConfirmationBlockMessage(
-        "Signer details could not be applied to the agreement. Stay in signer setup, confirm each party's name, title, and email, then finalize again.",
-      );
-      bumpPremiumSurfaceGateTick();
-      scrollGuidedSignerSetupIntoView();
-      return;
+      return false;
     }
     pinFinalizedSignerAppliedCorpus(signingReadyPlain, "paid_pro_signer_metadata_finalize");
-    // Seed/persist commercial review snapshot from the finalized signer corpus so Prepare
-    // and GET /canonical-review-snapshot use the durable agreement id (not a blank 404).
-    if (durableAgreementId && signingReadyPlain.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
-      void prepareCommercialReviewSnapshotAuthority({
-        agreementId: durableAgreementId,
+    if (!durableAgreementId) {
+      rollbackFinalizeFailure(
+        "Missing durable agreement id for signer finalize. Reload from the dashboard and try again.",
+      );
+      return false;
+    }
+    const prepared = await prepareCommercialReviewSnapshotAuthority({
+      agreementId: durableAgreementId,
+      corpusPlain: signingReadyPlain,
+      generationSessionId: getOrInitSessionAgreementGenerationId(),
+    });
+    if (!prepared.ok) {
+      rollbackFinalizeFailure(
+        `Could not persist the finalized agreement snapshot (${prepared.code}). Stay in signer setup and try again.`,
+      );
+      return false;
+    }
+    const frozenLocal = readFrozenSigningAuthoritySnapshot();
+    if (!frozenLocal || frozenLocal.agreementId !== durableAgreementId) {
+      rollbackFinalizeFailure(
+        "Frozen signing authority was not built for this agreement. Stay in signer setup and try again.",
+      );
+      return false;
+    }
+    const freezePersist = await persistFrozenSigningAuthorityToBackendDetailed(
+      durableAgreementId,
+      frozenLocal,
+    );
+    if (!freezePersist.ok) {
+      rollbackFinalizeFailure(
+        `Could not persist frozen signing authority (${freezePersist.code}). Stay in signer setup and try again.`,
+      );
+      return false;
+    }
+    try {
+      replacePaidProReviewSessionAuthorityAfterSignerFinalize({
         corpusPlain: signingReadyPlain,
-        generationSessionId: getOrInitSessionAgreementGenerationId(),
-      }).then((prepared) => {
-        if (import.meta.env.DEV && !prepared.ok) {
-          // eslint-disable-next-line no-console
-          console.warn(
-            "[canonical-review-snapshot] post-finalize prepare failed",
-            prepared.code,
-            durableAgreementId,
-          );
-        }
+        agreementId: durableAgreementId,
+        reviewSessionId: durableAgreementId,
       });
+    } catch (err) {
+      rollbackFinalizeFailure(
+        err instanceof Error
+          ? err.message
+          : "Could not advance review authority to the finalized signer corpus.",
+      );
+      return false;
     }
     if (import.meta.env.DEV) {
       logSignerMetadataLifecycleEvent("snapshot-write", {
@@ -28936,6 +28976,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     setGuidedSigningConfirmationBlockMessage(null);
     bumpPremiumSurfaceGateTick();
     scrollPaidProReviewDecisionIntoView();
+    return true;
   }, [
     paidProSignerDetailsGate.complete,
     scrollGuidedSignerSetupIntoView,
@@ -28986,7 +29027,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             path: "continueGuidedFinalReviewToSigning",
             reason: "signer_metadata_not_finalized",
           });
-          finalizePaidProSignerMetadataAndOpenReviewDecision();
+          void finalizePaidProSignerMetadataAndOpenReviewDecision();
           return;
         }
         // Explicit signing decision only: release freeze and enter e-sign preparation.
@@ -29495,7 +29536,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         return;
       }
       if (!postFinalizeSigningReady && paidProSignatureDetailsReady) {
-        finalizePaidProSignerMetadataAndOpenReviewDecision();
+        void finalizePaidProSignerMetadataAndOpenReviewDecision();
       }
       const signingReadyNow =
         postFinalizeSigningReady ||
@@ -29507,7 +29548,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       }
       traceSigningAdvance("handleProSendForSignature:post_finalize_advance");
       if (!hasAuthoritativeSigningSnapshot()) {
-        finalizePaidProSignerMetadataAndOpenReviewDecision();
+        void finalizePaidProSignerMetadataAndOpenReviewDecision();
       }
       markSigningPreparationRequested();
       setSignaturePreparationRequested(true);
@@ -30285,8 +30326,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           }
           case "guided_continue": {
             if (cta.reason === "dashboard_signer_setup_resume_complete") {
-              finalizePaidProSignerMetadataAndOpenReviewDecision();
-              handlePaidProPrepareSignaturesFromFirstReview();
+              void (async () => {
+                const ok = await finalizePaidProSignerMetadataAndOpenReviewDecision();
+                if (!ok) return;
+                handlePaidProPrepareSignaturesFromFirstReview();
+              })();
               return;
             }
             if (
@@ -30294,7 +30338,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
               paidProInlineSignerSetupLatched &&
               !signaturePreparationRequested
             ) {
-              finalizePaidProSignerMetadataAndOpenReviewDecision();
+              void finalizePaidProSignerMetadataAndOpenReviewDecision();
               return;
             }
             if (isPaidProReviewDecisionScrollReason(cta.reason) && !cta.disabled) {
@@ -30321,7 +30365,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                   navigationTarget: "review_decision",
                   reason: "paid_pro_signer_setup_skip_guided_final_review",
                 });
-                finalizePaidProSignerMetadataAndOpenReviewDecision();
+                void finalizePaidProSignerMetadataAndOpenReviewDecision();
                 return;
               }
               await continueGuidedSignerSetupToFinalReview("execute_primary_cta");
@@ -30480,7 +30524,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         paidProInlineSignerSetupLatched &&
         !signaturePreparationRequested
       ) {
-        finalizePaidProSignerMetadataAndOpenReviewDecision();
+        void finalizePaidProSignerMetadataAndOpenReviewDecision();
         return;
       }
       if (
@@ -30511,7 +30555,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             navigationTarget: "review_decision",
             reason: "paid_pro_signer_setup_skip_guided_final_review",
           });
-          finalizePaidProSignerMetadataAndOpenReviewDecision();
+          void finalizePaidProSignerMetadataAndOpenReviewDecision();
           return;
         }
         void continueGuidedSignerSetupToFinalReview(

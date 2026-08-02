@@ -44,6 +44,12 @@ import {
   clearFrozenSigningAuthoritySnapshotForSession,
   readFrozenSigningAuthoritySnapshot,
 } from "./frozenSigningAuthoritySnapshot";
+import {
+  clearPaidProReviewSessionAuthorityForTests,
+  establishPaidProReviewSessionAuthority,
+  readPaidProReviewSessionAuthority,
+  replacePaidProReviewSessionAuthorityAfterSignerFinalize,
+} from "./paidProReviewSessionAuthority";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const intakeSrc = readFileSync(join(here, "AgreementBuilderIntake.tsx"), "utf8");
@@ -134,12 +140,13 @@ describe("dashboard signer-setup resume → Continue paints finalized signer cor
     clearAcceptedReviewSnapshotRef();
     clearDisplayReviewSnapshotAuthority();
     clearFrozenSigningAuthoritySnapshotForSession();
+    clearPaidProReviewSessionAuthorityForTests();
     resetPaidProVisibleDocumentShellLogsForTests();
     resetPaidProDocumentBodyRouterLogsForTests();
     vi.restoreAllMocks();
   });
 
-  it("intake prefers post-finalize paint before verified GET gate", () => {
+  it("intake prefers post-finalize paint before verified GET gate and blocks on persist failure", () => {
     const commercialBlock = intakeSrc.indexOf("if (commercialDisplayLocked)");
     const postFinalizeIdx = intakeSrc.indexOf(
       "if (isPaidProPostFinalizeHydratedCorpusLocked())",
@@ -153,6 +160,11 @@ describe("dashboard signer-setup resume → Continue paints finalized signer cor
     expect(postFinalizeIdx).toBeGreaterThan(commercialBlock);
     expect(verifiedGateIdx).toBeGreaterThan(postFinalizeIdx);
     expect(intakeSrc).toContain("prepareCommercialReviewSnapshotAuthority({");
+    expect(intakeSrc).toContain("persistFrozenSigningAuthorityToBackendDetailed");
+    expect(intakeSrc).toContain("replacePaidProReviewSessionAuthorityAfterSignerFinalize");
+    expect(intakeSrc).toContain("Could not persist the finalized agreement snapshot");
+    expect(intakeSrc).toContain("Could not persist frozen signing authority");
+    expect(intakeSrc).toContain("persistFrozenToBackend: false");
     expect(intakeSrc).toContain("agreementId: durableAgreementId");
     expect(snapSrc).toContain("args.agreementId");
   });
@@ -214,5 +226,32 @@ describe("dashboard signer-setup resume → Continue paints finalized signer cor
     expect(text.includes("Alice Resume")).toBe(true);
     expect(snap.corpus).toContain("Alice Resume");
     unmount();
+  });
+
+  it("advances review-session authority from pre-signer SoT to finalized signer corpus", () => {
+    const sot = buildPreSignerSoT(9705);
+    establishPaidProSourceOfTruth({ text: sot, source: "server_full_draft" });
+    const establishedSoT = getPaidProSourceOfTruthText();
+    establishPaidProReviewSessionAuthority({
+      corpusPlain: establishedSoT,
+      source: "server_full_draft",
+      agreementId: AGREEMENT_ID,
+      reviewSessionId: AGREEMENT_ID,
+    });
+    const priorHash = readPaidProReviewSessionAuthority()?.hash ?? "";
+    expect(priorHash.length).toBeGreaterThan(0);
+
+    const snap = finalizeTwoSigners(establishedSoT);
+    replacePaidProReviewSessionAuthorityAfterSignerFinalize({
+      corpusPlain: snap.corpus,
+      agreementId: AGREEMENT_ID,
+      reviewSessionId: AGREEMENT_ID,
+    });
+    const next = readPaidProReviewSessionAuthority();
+    expect(next?.hash).toBe(snap.hash);
+    expect(next?.hash).not.toBe(priorHash);
+    expect(next?.source).toBe("paid_pro_signer_metadata_finalize");
+    expect(next?.corpusPlain).toMatch(/Alice Resume/);
+    expect(next?.corpusPlain).not.toMatch(/^Name:\s*$/m);
   });
 });

@@ -181,6 +181,8 @@ export type CreateAuthoritativeSigningSnapshotArgs = {
    * Must not be the tab generation/session id (that stays agreementSessionId).
    */
   agreementId?: string | null;
+  /** When false, skip backend POST (caller awaits persist and treats 403 as blocking). */
+  persistFrozenToBackend?: boolean;
 };
 
 /**
@@ -333,6 +335,7 @@ export function createAuthoritativeSigningSnapshot(
     agreementId: durableAgreementId || getOrInitSessionAgreementGenerationId(),
     authoritativeSnapshot: authoritativeSigningSnapshot,
     intakeText: args.intakeText ?? null,
+    persistToBackend: args.persistFrozenToBackend !== false,
   });
   return authoritativeSigningSnapshot;
 }
