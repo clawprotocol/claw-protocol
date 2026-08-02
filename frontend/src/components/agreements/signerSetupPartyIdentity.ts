@@ -115,6 +115,28 @@ export const PAID_PRO_SIGNER_DETAILS_COMPLETE_CTA =
 /** Explicit signing decision on the review/decision screen (sets signaturePreparationRequested). */
 export const PAID_PRO_PREPARE_ESIGN_DECISION_CTA = "Prepare for signing";
 
+/** Dashboard Complete signer details resume — sticky footer while metadata is incomplete. */
+export const DASHBOARD_SIGNER_SETUP_RESUME_INCOMPLETE_CTA = "Save signer details";
+/** Dashboard Complete signer details resume — sticky footer once name/title/email are complete. */
+export const DASHBOARD_SIGNER_SETUP_RESUME_COMPLETE_CTA = "Continue to signature links";
+
+export function resolveDashboardSignerSetupResumePrimaryCta(args: {
+  signerDetailsComplete: boolean;
+}): { label: string; action: "guided_continue" | "complete_recipient_details"; reason: string } {
+  if (args.signerDetailsComplete) {
+    return {
+      label: DASHBOARD_SIGNER_SETUP_RESUME_COMPLETE_CTA,
+      action: "guided_continue",
+      reason: "dashboard_signer_setup_resume_complete",
+    };
+  }
+  return {
+    label: DASHBOARD_SIGNER_SETUP_RESUME_INCOMPLETE_CTA,
+    action: "complete_recipient_details",
+    reason: "dashboard_signer_setup_resume_incomplete",
+  };
+}
+
 function norm(s: string): string {
   let t = s.replace(/\s+/g, " ").trim();
   if (/\.+$/.test(t) && PARTY_ENTITY_SUFFIX_RE.test(t.replace(/\.+$/, ""))) {

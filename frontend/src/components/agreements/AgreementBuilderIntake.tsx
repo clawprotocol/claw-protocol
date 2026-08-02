@@ -331,6 +331,9 @@ import {
   resolveLegalEntityNameForHandoffSlot,
   resolvePaidProInlineSignerSetupMounted,
   resolvePaidProSignerDetailsGate,
+  resolveDashboardSignerSetupResumePrimaryCta,
+  DASHBOARD_SIGNER_SETUP_RESUME_COMPLETE_CTA,
+  DASHBOARD_SIGNER_SETUP_RESUME_INCOMPLETE_CTA,
   PAID_PRO_SIGNER_DETAILS_COMPLETE_CTA,
   PAID_PRO_SIGNER_DETAILS_INCOMPLETE_CTA,
   PAID_PRO_PREPARE_ESIGN_DECISION_CTA,
@@ -1743,6 +1746,8 @@ type Props = {
     paidProReviewReady: boolean;
     freeStarterReviewShellActive: boolean;
     lifecycleStage: import("../../agreement/agreementLifecycleRail").AgreementLifecycleStageId;
+    /** Dashboard Complete signer details resume — dedicated shell title/CTA, not review/recovery. */
+    dashboardSignerSetupResumeActive?: boolean;
   }) => void;
   /** Homepage auto-generate handoff: parent shows concierge overlay until review is ready. */
   onHomeGuidedTransitionPhase?: (phase: "preparing" | "review_ready") => void;
@@ -16308,6 +16313,25 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           setSignaturePreparationRequested(false);
           setPaidProInlineSignerSetupLatched(true);
           setPaidProSignerMetadataFinalizedLatch(false);
+          // Seed locked agreement preview from persisted workspace corpus (no regen / no freeze).
+          const resumeCorpusCandidates = [
+            String((adForHydrate as { premium_full_document_text?: string }).premium_full_document_text ?? "").trim(),
+            String(
+              (adForHydrate as { premium_server_full_document_text?: string }).premium_server_full_document_text ?? "",
+            ).trim(),
+            String((adForHydrate as { server_full_document_text?: string }).server_full_document_text ?? "").trim(),
+            String((next as { purpose?: string }).purpose ?? "").trim(),
+          ];
+          const resumeCorpus = resumeCorpusCandidates.reduce(
+            (best, t) => (t.length > best.length ? t : best),
+            "",
+          );
+          if (resumeCorpus.length >= 80) {
+            hydratedPremiumBodyRef.current = resumeCorpus;
+            lastPremiumWinningCorpusRef.current = resumeCorpus;
+            premiumPipelineOutputBodyRef.current = resumeCorpus;
+            setAgreementDocumentText(resumeCorpus);
+          }
           // Hydrate live signer UI from persisted draft parties (same authority as signer setup).
           const parties = next.parties ?? [];
           const names = parties.map((p) => String((p as { signerName?: string }).signerName ?? "").trim());
@@ -17072,10 +17096,18 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
   useLayoutEffect(() => {
     if (!onSimpleCreateShellChrome) return;
+    const dashboardSignerSetupResumeActive = isDashboardSignerSetupResumeUiActive({
+      openSignerSetupOnResume,
+      createFlowPhase,
+      paidProInlineSignerSetupLatched,
+    });
     onSimpleCreateShellChrome({
-      paidProReviewReady,
-      freeStarterReviewShellActive,
-      lifecycleStage: simpleCreateShellLifecycleStage,
+      paidProReviewReady: paidProReviewReady || dashboardSignerSetupResumeActive,
+      freeStarterReviewShellActive: dashboardSignerSetupResumeActive
+        ? false
+        : freeStarterReviewShellActive,
+      lifecycleStage: dashboardSignerSetupResumeActive ? "sign" : simpleCreateShellLifecycleStage,
+      dashboardSignerSetupResumeActive,
     });
     if (
       import.meta.env.DEV &&
@@ -17091,6 +17123,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         paidProReviewReady: false,
         freeStarterReviewShellActive: false,
         lifecycleStage: "draft",
+        dashboardSignerSetupResumeActive: false,
       });
   }, [
     paidProReviewReady,
@@ -17100,6 +17133,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     createUiStage,
     paidProAuthoritative,
     createFlowPhase,
+    openSignerSetupOnResume,
+    paidProInlineSignerSetupLatched,
   ]);
 
   const paidProDistinctValidRecipientEmailCount = useMemo(() => {
@@ -21292,6 +21327,18 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         reason: "unified_cta_inactive",
       };
     }
+    // Dashboard signer-setup resume owns the sticky CTA — never Retry Pro draft / Describe agreement.
+    if (dashboardSignerSetupResumeUiActive && paidProCanonicalReviewSignerSetupActive) {
+      const resumeCta = resolveDashboardSignerSetupResumePrimaryCta({
+        signerDetailsComplete: paidProSignerDetailsGate.complete,
+      });
+      return {
+        label: resumeCta.label,
+        action: resumeCta.action,
+        disabled: false,
+        reason: resumeCta.reason,
+      };
+    }
     if (paidProCanonicalStickyCta) {
       if (!paidProCanonicalStickyCta.showStickyBar) {
         return {
@@ -22019,6 +22066,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     paidProCanonicalStickyCta,
     paidProCanonicalReviewSignerSetupActive,
     paidProSignerSetupStickyCtaSurfaceActive,
+    dashboardSignerSetupResumeUiActive,
+    paidProSignerDetailsGate.complete,
     canonicalPaidCreateFlowFirstReviewActive,
     authoritativeCreateFlowReviewShellInput,
     paidProFirstReviewCorpusReady,
@@ -26608,9 +26657,31 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       premiumReturnWaitActive,
     ],
   );
+  const dashboardSignerSetupResumePreviewPlain = useMemo(() => {
+    if (!dashboardSignerSetupResumeUiActive) return "";
+    const fromRefs = [
+      resolvePaidProPostFinalizeReviewPlain(),
+      displayPolishedPaidProPlain,
+      (premiumPaidReadonlyPick.plainText || "").trim(),
+      (hydratedPremiumBodyRef.current || "").trim(),
+      (lastPremiumWinningCorpusRef.current || "").trim(),
+      (premiumPipelineOutputBodyRef.current || "").trim(),
+      (agreementDocumentText || "").trim(),
+    ];
+    return fromRefs.reduce((best, t) => (String(t || "").trim().length > best.length ? String(t || "").trim() : best), "");
+  }, [
+    dashboardSignerSetupResumeUiActive,
+    displayPolishedPaidProPlain,
+    premiumPaidReadonlyPick.plainText,
+    agreementDocumentText,
+    premiumSurfaceGateTick,
+    reviewDocRefreshTick,
+  ]);
   const paidProReviewBranchSnapshot = useMemo((): PaidProReviewBranchSnapshot => {
     const path = paidProReviewBranchPath.path;
     const documentMounted =
+      (dashboardSignerSetupResumeUiActive &&
+        dashboardSignerSetupResumePreviewPlain.trim().length >= 80) ||
       path === "forced_embedded" ||
       path === "forced_standalone" ||
       path === "legacy_simple_review" ||
@@ -26636,8 +26707,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       documentMounted,
       chromeMounted,
       signerMounted,
-      path,
-      reason: paidProReviewBranchPath.reason,
+      path: dashboardSignerSetupResumeUiActive ? "dashboard_signer_setup_resume" : path,
+      reason: dashboardSignerSetupResumeUiActive
+        ? "dashboard_signer_setup_resume_shell"
+        : paidProReviewBranchPath.reason,
     };
   }, [
     paidProReviewBranchPath,
@@ -26650,6 +26723,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     paidProCanonicalReviewCorpusReady,
     paidProCanonicalReviewCorpusLen,
     premiumPaidDocumentSurface,
+    dashboardSignerSetupResumeUiActive,
+    dashboardSignerSetupResumePreviewPlain,
   ]);
   useEffect(() => {
     if (!premiumPaidDocumentSurface) return;
@@ -29923,6 +29998,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             return;
           }
           case "complete_recipient_details": {
+            if (cta.reason === "dashboard_signer_setup_resume_incomplete") {
+              scrollGuidedSignerSetupIntoView();
+              document
+                .getElementById(PAID_PRO_FIRST_REVIEW_INLINE_SIGNER_SETUP_DOM_ID)
+                ?.scrollIntoView({ behavior: "smooth", block: "start" });
+              return;
+            }
             // Genesis / paid first-review: open inline signer setup — never regenerate.
             if (
               shouldOpenPaidProFirstReviewSignerSetupOnAddDetails({
@@ -30109,6 +30191,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             return;
           }
           case "guided_continue": {
+            if (cta.reason === "dashboard_signer_setup_resume_complete") {
+              finalizePaidProSignerMetadataAndOpenReviewDecision();
+              handlePaidProPrepareSignaturesFromFirstReview();
+              return;
+            }
             if (
               cta.reason === "paid_pro_signer_details_complete" &&
               paidProInlineSignerSetupLatched &&
@@ -32486,10 +32573,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                             : null}
                           {!paidProReviewCompactChrome ? (
                             <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-slate-400 sm:text-[11px]">
-                              {(createUiStage === CreateUiStage.RECIPIENTS || paidProRecipientSetupOnDraft) &&
-                              minimalProSendRecipientChrome
-                                ? "Agreement"
-                                : PREVIEW_BLOCK_TITLE}
+                              {dashboardSignerSetupResumeUiActive
+                                ? "Signer details"
+                                : (createUiStage === CreateUiStage.RECIPIENTS || paidProRecipientSetupOnDraft) &&
+                                    minimalProSendRecipientChrome
+                                  ? "Agreement"
+                                  : PREVIEW_BLOCK_TITLE}
                             </p>
                           ) : null}
                           {!paidProReviewCompactChrome ? (
@@ -32502,16 +32591,18 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                     : "mt-1 text-[11px] leading-relaxed text-slate-500 sm:text-xs"
                               }
                             >
-                              {premiumPaidDocumentSurface
-                                ? (createUiStage === CreateUiStage.RECIPIENTS || paidProRecipientSetupOnDraft) &&
-                                    minimalProSendRecipientChrome
-                                  ? canProceedWithPaidProDocument
-                                    ? "Full agreement below. Not legal advice."
-                                    : "Finish a usable Pro document before continuing — or use the recovery options in the box below. Not legal advice."
-                                  : canProceedWithPaidProDocument
-                                    ? "Not legal advice."
-                                    : "Finish a usable Pro document before continuing — or use the recovery options in the box below. Not legal advice."
-                                : "Not legal advice. Signer lines are added when you send."}
+                              {dashboardSignerSetupResumeUiActive
+                                ? "Add name, title, and email for each party. Agreement preview is locked below. Not legal advice."
+                                : premiumPaidDocumentSurface
+                                  ? (createUiStage === CreateUiStage.RECIPIENTS || paidProRecipientSetupOnDraft) &&
+                                      minimalProSendRecipientChrome
+                                    ? canProceedWithPaidProDocument
+                                      ? "Full agreement below. Not legal advice."
+                                      : "Finish a usable Pro document before continuing — or use the recovery options in the box below. Not legal advice."
+                                    : canProceedWithPaidProDocument
+                                      ? "Not legal advice."
+                                      : "Finish a usable Pro document before continuing — or use the recovery options in the box below. Not legal advice."
+                                  : "Not legal advice. Signer lines are added when you send."}
                             </p>
                           ) : null}
                           <div
@@ -32532,7 +32623,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                   reviewShellMounted
                                   snapshot={paidProReviewBranchSnapshot}
                                 />
-                                {showGuidedCompletionRecovery && activeGuidedCompletionSession ? (
+                                {showGuidedCompletionRecovery &&
+                                activeGuidedCompletionSession &&
+                                !dashboardSignerSetupResumeUiActive ? (
                                   <div className="mx-auto mb-4 w-full max-w-[850px] px-0 sm:px-1">
                                     <div
                                       className="rounded-lg border border-stone-400/40 bg-stone-50/95 px-4 py-5 sm:px-6 sm:py-6"
@@ -32826,8 +32919,35 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                                   }).source
                                             }
                                           />
+                                        ) : dashboardSignerSetupResumeUiActive ? (
+                                          <div
+                                            data-testid="dashboard-signer-setup-agreement-preview"
+                                            data-document-mounted={
+                                              dashboardSignerSetupResumePreviewPlain.trim().length >= 80
+                                                ? "true"
+                                                : "false"
+                                            }
+                                          >
+                                            <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-stone-500">
+                                              Agreement preview
+                                            </p>
+                                            <p className="mt-1 text-xs leading-relaxed text-stone-600">
+                                              Locked while you complete signer details. Nothing is sent from this step.
+                                            </p>
+                                            {dashboardSignerSetupResumePreviewPlain.trim() ? (
+                                              <pre className="mt-4 max-h-[min(42vh,30rem)] overflow-y-auto whitespace-pre-wrap font-serif text-[15px] leading-[1.85] text-stone-900 [text-wrap:pretty]">
+                                                {dashboardSignerSetupResumePreviewPlain}
+                                              </pre>
+                                            ) : (
+                                              <p className="mt-4 text-sm text-stone-600" role="status">
+                                                Loading your saved agreement preview…
+                                              </p>
+                                            )}
+                                          </div>
                                         ) : null}
-                                        {showPaidProForcedFirstReviewTrackChooser && !premiumReviewDocEditorOpen ? (
+                                        {showPaidProForcedFirstReviewTrackChooser &&
+                                        !premiumReviewDocEditorOpen &&
+                                        !dashboardSignerSetupResumeUiActive ? (
                                           <PaidProForcedFirstReviewChrome
                                             signersReady={paidProReviewSignerStatusReady}
                                             signerMetadataFinalized={paidProSignerMetadataFinalized}
@@ -32918,7 +33038,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                               {...nPartySignerSetupPanelProps}
                                               paidProInlineRecipientShell
                                               hidePrimarySendCta={Boolean(
-                                                paidProCanonicalStickyCta?.showStickyBar,
+                                                paidProCanonicalStickyCta?.showStickyBar ||
+                                                  dashboardSignerSetupResumeUiActive,
                                               )}
                                               isPremiumRecipientSurface={false}
                                               showProTierAdvanced={tierAllowsAdvancedFullDraftReveal(tier)}
@@ -32957,7 +33078,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                               sendDisabled={effectivePrimaryCtaDisabled}
                                               sendRequiresConfirmStep={false}
                                               recipientBlockForceExpanded={paidProRecipientBlockForceExpanded}
-                                              premiumPrimarySendLabelOverride={PAID_PRO_SIGNER_DETAILS_INCOMPLETE_CTA}
+                                              premiumPrimarySendLabelOverride={
+                                                dashboardSignerSetupResumeUiActive
+                                                  ? paidProSignerDetailsGate.complete
+                                                    ? DASHBOARD_SIGNER_SETUP_RESUME_COMPLETE_CTA
+                                                    : DASHBOARD_SIGNER_SETUP_RESUME_INCOMPLETE_CTA
+                                                  : PAID_PRO_SIGNER_DETAILS_INCOMPLETE_CTA
+                                              }
                                               primaryCtaHelperText={paidProSignerDetailsGate.blockerMessage}
                                               guidedSigningTrustSlot={guidedSigningTrustSlot}
                                               partyDisplaySlots={resolvedPartyDisplaySlots}

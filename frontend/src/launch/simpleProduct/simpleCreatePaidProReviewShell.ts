@@ -14,6 +14,11 @@ export { PREMIUM_PRO_REVIEW_SCROLL_ANCHOR_ID } from "../../lib/premiumPostChecko
 export const SIMPLE_CREATE_PAID_PRO_REVIEW_SUBTITLE =
   "Nothing is sent or signed until you choose the next step.";
 
+/** Dedicated shell when dashboard Complete signer details resumes into `/app/create`. */
+export const SIMPLE_CREATE_SIGNER_SETUP_RESUME_TITLE = "Complete signer details";
+export const SIMPLE_CREATE_SIGNER_SETUP_RESUME_SUBTITLE =
+  "Add name, title, and email for each party. Your agreement stays locked until you continue.";
+
 export const SIMPLE_CREATE_PAID_PRO_REVIEW_CONTROL_LINE = AGREEMENT_LIFECYCLE_CONTROL_LINE;
 
 /** @deprecated Use {@link AGREEMENT_LIFECYCLE_PROGRESS_LABELS} from agreementLifecycleRail. */

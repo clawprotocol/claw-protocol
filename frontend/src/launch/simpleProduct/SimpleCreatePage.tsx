@@ -94,6 +94,8 @@ import {
   PREMIUM_PRO_REVIEW_SCROLL_ANCHOR_ID,
   SIMPLE_CREATE_PAID_PRO_REVIEW_SUBTITLE,
   SIMPLE_CREATE_PAID_PRO_REVIEW_TITLE,
+  SIMPLE_CREATE_SIGNER_SETUP_RESUME_SUBTITLE,
+  SIMPLE_CREATE_SIGNER_SETUP_RESUME_TITLE,
   SIMPLE_CREATE_STARTER_CONTROL_LINE,
   SIMPLE_CREATE_STARTER_HERO_SUBHEAD,
   SIMPLE_CREATE_STARTER_HERO_TITLE,
@@ -471,15 +473,18 @@ export function SimpleCreatePage() {
   const [homeTransitionVisible, setHomeTransitionVisible] = useState(
     homeHeroAutoGenerate && !checkoutBackRestoreActive,
   );
+  const [dashboardSignerSetupResumeShell, setDashboardSignerSetupResumeShell] = useState(false);
   const onSimpleCreateShellChrome = useCallback(
     (state: {
       paidProReviewReady: boolean;
       freeStarterReviewShellActive: boolean;
       lifecycleStage: import("../../agreement/agreementLifecycleRail").AgreementLifecycleStageId;
+      dashboardSignerSetupResumeActive?: boolean;
     }) => {
       setPaidProReviewReadyShell(state.paidProReviewReady);
       setFreeStarterReviewShellActive(state.freeStarterReviewShellActive);
       setShellLifecycleStage(state.lifecycleStage);
+      setDashboardSignerSetupResumeShell(Boolean(state.dashboardSignerSetupResumeActive));
     },
     [],
   );
@@ -497,20 +502,24 @@ export function SimpleCreatePage() {
       ? undefined
       : lifecycleStepForStage("draft");
   const shellProgressLabels = AGREEMENT_LIFECYCLE_PROGRESS_LABELS;
-  const shellTitle = paidProReviewReadyShell
-    ? SIMPLE_CREATE_PAID_PRO_REVIEW_TITLE
-    : quickSendTypedArrival
-      ? "Shape your draft"
-      : isFreshSimpleCreateStart
-        ? SIMPLE_CREATE_STARTER_HERO_TITLE
-        : "Describe your deal";
-  const shellSubtitle = paidProReviewReadyShell
-    ? SIMPLE_CREATE_PAID_PRO_REVIEW_SUBTITLE
-    : quickSendTypedArrival
-      ? "We turned your input into a structured draft for the same send/sign/proof workflow."
-      : isFreshSimpleCreateStart
-        ? SIMPLE_CREATE_STARTER_HERO_SUBHEAD
-        : "Start typing or speaking — LawDog auto-structures parties, term, scope, and obligations as you go (edit inline in preview). Review, share, or prepare for signing when you're ready.";
+  const shellTitle = dashboardSignerSetupResumeShell
+    ? SIMPLE_CREATE_SIGNER_SETUP_RESUME_TITLE
+    : paidProReviewReadyShell
+      ? SIMPLE_CREATE_PAID_PRO_REVIEW_TITLE
+      : quickSendTypedArrival
+        ? "Shape your draft"
+        : isFreshSimpleCreateStart
+          ? SIMPLE_CREATE_STARTER_HERO_TITLE
+          : "Describe your deal";
+  const shellSubtitle = dashboardSignerSetupResumeShell
+    ? SIMPLE_CREATE_SIGNER_SETUP_RESUME_SUBTITLE
+    : paidProReviewReadyShell
+      ? SIMPLE_CREATE_PAID_PRO_REVIEW_SUBTITLE
+      : quickSendTypedArrival
+        ? "We turned your input into a structured draft for the same send/sign/proof workflow."
+        : isFreshSimpleCreateStart
+          ? SIMPLE_CREATE_STARTER_HERO_SUBHEAD
+          : "Start typing or speaking — LawDog auto-structures parties, term, scope, and obligations as you go (edit inline in preview). Review, share, or prepare for signing when you're ready.";
   const hideIntakeMarketingChrome =
     paidProReviewReadyShell ||
     homeTransitionVisible ||

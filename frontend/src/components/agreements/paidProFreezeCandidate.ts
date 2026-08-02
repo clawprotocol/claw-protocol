@@ -830,7 +830,9 @@ function applyCanonicalNoticeAuthorityBeforeFreezeValidation(
     acceptedCorpus: text,
   });
   const integrity = preparePaidProImmutableReviewedDocument(text);
-  assertPaidProReviewedDocumentIntegrity(integrity.text);
+  if (!isCreatorDashboardSignerSetupResumeActive()) {
+    assertPaidProReviewedDocumentIntegrity(integrity.text);
+  }
   return reconcileExecutionRolesBeforeFreezeCommit(integrity.text);
 }
 
@@ -1040,7 +1042,9 @@ export function assertPaidProFreezeCandidateGates(
   {
     const integrity = preparePaidProImmutableReviewedDocument(safeForCommit);
     safeForCommit = integrity.text;
-    assertPaidProReviewedDocumentIntegrity(safeForCommit);
+    if (!isCreatorDashboardSignerSetupResumeActive()) {
+      assertPaidProReviewedDocumentIntegrity(safeForCommit);
+    }
   }
 
   const postNoticeStructure = applyPaidProSectionStructureCompletenessAuthority(safeForCommit, {
@@ -1310,7 +1314,9 @@ export function assertPaidProFreezeCandidateGates(
   {
     const integrity = preparePaidProImmutableReviewedDocument(safeForCommit);
     safeForCommit = reconcileExecutionRolesBeforeFreezeCommit(integrity.text);
-    assertPaidProReviewedDocumentIntegrity(safeForCommit);
+    if (!isCreatorDashboardSignerSetupResumeActive()) {
+      assertPaidProReviewedDocumentIntegrity(safeForCommit);
+    }
   }
 
   return finalizePreparedFreezeCandidateText(trim(args.text), safeForCommit, {

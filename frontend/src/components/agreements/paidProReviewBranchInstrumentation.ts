@@ -18,6 +18,7 @@ export type PaidProReviewBranchPath =
   | "legacy_guided"
   | "legacy_runtime_authority_wait"
   | "legacy_other"
+  | "dashboard_signer_setup_resume"
   | "blocked_can_display"
   | "blocked_premium_wait"
   | "blocked_starter_textarea"
