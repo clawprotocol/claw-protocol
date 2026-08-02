@@ -155,11 +155,14 @@ def mint_staging_auth_magic_link(
 
     base = supabase_url().rstrip("/")
     key = supabase_service_role_key()
+    if not base.startswith("http://") and not base.startswith("https://"):
+        raise ValueError("supabase_url_invalid")
     url = f"{base}/auth/v1/admin/generate_link"
+    # GoTrue Admin OpenAPI: redirect_to is top-level (JS SDK maps options.redirectTo).
     body = {
         "type": "magiclink",
         "email": normalized,
-        "options": {"redirect_to": redirect},
+        "redirect_to": redirect,
     }
     headers = {
         "apikey": key,
@@ -167,11 +170,19 @@ def mint_staging_auth_magic_link(
         "Content-Type": "application/json",
     }
     try:
-        with httpx.Client(timeout=25.0) as client:
+        # trust_env=False: inherited HTTP(S)_PROXY on some hosts breaks Supabase egress
+        # and surfaces as ProxyError → 502 supabase_request_failed.
+        with httpx.Client(timeout=25.0, trust_env=False) as client:
             res = client.post(url, headers=headers, json=body)
     except Exception as exc:
-        log.warning("staging_auth_magic_link_http_error error=%s", type(exc).__name__)
-        raise ValueError("supabase_request_failed") from exc
+        exc_name = type(exc).__name__
+        log.warning(
+            "staging_auth_magic_link_http_error error=%s detail=%s url_host=%s",
+            exc_name,
+            str(exc)[:160],
+            base.split("/")[2] if "://" in base else "?",
+        )
+        raise ValueError(f"supabase_request_failed:{exc_name}") from exc
 
     if res.status_code >= 400:
         log.warning(
@@ -186,15 +197,13 @@ def mint_staging_auth_magic_link(
     except Exception as exc:
         raise ValueError("supabase_invalid_json") from exc
 
-    action_link = ""
-    if isinstance(payload, dict):
-        action_link = str(payload.get("action_link") or "").strip()
-        if not action_link:
-            props = payload.get("properties")
-            if isinstance(props, dict):
-                action_link = str(props.get("action_link") or "").strip()
+    action_link = _extract_action_link(payload)
 
     if not action_link.startswith("http"):
+        log.warning(
+            "staging_auth_magic_link_action_link_missing keys=%s",
+            sorted(payload.keys())[:20] if isinstance(payload, dict) else type(payload).__name__,
+        )
         raise ValueError("action_link_missing")
 
     log.info(
@@ -203,3 +212,27 @@ def mint_staging_auth_magic_link(
         redirect.split("/")[2] if "://" in redirect else "?",
     )
     return action_link, payload if isinstance(payload, dict) else {}
+
+
+def _extract_action_link(payload: Any) -> str:
+    if not isinstance(payload, dict):
+        return ""
+    direct = str(payload.get("action_link") or "").strip()
+    if direct.startswith("http"):
+        return direct
+    props = payload.get("properties")
+    if isinstance(props, dict):
+        nested = str(props.get("action_link") or "").strip()
+        if nested.startswith("http"):
+            return nested
+    data = payload.get("data")
+    if isinstance(data, dict):
+        nested = str(data.get("action_link") or "").strip()
+        if nested.startswith("http"):
+            return nested
+        props = data.get("properties")
+        if isinstance(props, dict):
+            nested = str(props.get("action_link") or "").strip()
+            if nested.startswith("http"):
+                return nested
+    return ""

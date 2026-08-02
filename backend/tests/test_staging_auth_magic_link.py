@@ -82,7 +82,7 @@ def test_mint_calls_supabase_admin(monkeypatch: pytest.MonkeyPatch) -> None:
 
     class _Client:
         def __init__(self, *args: Any, **kwargs: Any) -> None:
-            pass
+            captured["client_kwargs"] = kwargs
 
         def __enter__(self) -> "_Client":
             return self
@@ -104,8 +104,11 @@ def test_mint_calls_supabase_admin(monkeypatch: pytest.MonkeyPatch) -> None:
     )
     assert "verify" in link
     assert captured["url"].endswith("/auth/v1/admin/generate_link")
+    assert captured["client_kwargs"].get("trust_env") is False
     assert captured["json"]["type"] == "magiclink"
     assert captured["json"]["email"] == "cryptocurated21+lawdogtest2@gmail.com"
+    assert captured["json"]["redirect_to"].endswith("/app/auth/callback?next=/app")
+    assert "options" not in captured["json"]
 
 
 def test_mint_blocked_in_production(monkeypatch: pytest.MonkeyPatch) -> None:

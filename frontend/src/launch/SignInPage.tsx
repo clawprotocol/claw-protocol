@@ -101,13 +101,14 @@ export function SignInPage() {
             setBusy(true);
             setStatus(null);
             logProductEvent("magic_link_requested", { surface: "sign_in_page_staging_bypass" });
-            void signInEmail(target, { returningSignIn: true })
+            void signInEmail(target, { returningSignIn: true, stagingDirectOnly: true })
               .then((result) => {
                 if (result.mode === "staging_redirect") {
                   setStatus("Signing you in via staging test login…");
                   return;
                 }
-                setStatus("Check your email for a sign-in link.");
+                // stagingDirectOnly must never resolve as email_sent
+                setStatus("Staging test login did not complete.");
               })
               .catch((err) =>
                 setStatus(err instanceof Error ? err.message : "Staging test login failed."),

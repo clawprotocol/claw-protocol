@@ -21,7 +21,7 @@ export type AuthContextValue = {
   user: User | null;
   signInEmail: (
     email: string,
-    opts?: { returningSignIn?: boolean },
+    opts?: { returningSignIn?: boolean; stagingDirectOnly?: boolean },
   ) => Promise<{ mode: "email_sent" | "staging_redirect" }>;
   signInGoogle: (opts?: { returningSignIn?: boolean }) => Promise<void>;
   signOut: () => Promise<void>;
@@ -89,15 +89,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
   }, [enabled, finalizeUser]);
 
-  const signInEmail = useCallback(async (email: string, opts?: { returningSignIn?: boolean }) => {
-    const continuationId = await prepareAuthContinuation({
-      returningSignIn: opts?.returningSignIn,
-      workflowStage: opts?.returningSignIn ? "dashboard" : "claim",
-      destinationPath: opts?.returningSignIn ? "/app" : undefined,
-      provider: "email",
-    });
-    return signInWithEmailMagicLink(email, buildAuthCallbackUrl(undefined, continuationId));
-  }, []);
+  const signInEmail = useCallback(
+    async (email: string, opts?: { returningSignIn?: boolean; stagingDirectOnly?: boolean }) => {
+      const continuationId = await prepareAuthContinuation({
+        returningSignIn: opts?.returningSignIn,
+        workflowStage: opts?.returningSignIn ? "dashboard" : "claim",
+        destinationPath: opts?.returningSignIn ? "/app" : undefined,
+        provider: "email",
+      });
+      return signInWithEmailMagicLink(email, buildAuthCallbackUrl(undefined, continuationId), {
+        stagingDirectOnly: opts?.stagingDirectOnly,
+      });
+    },
+    [],
+  );
 
   const signInGoogle = useCallback(async (opts?: { returningSignIn?: boolean }) => {
     const continuationId = await prepareAuthContinuation({

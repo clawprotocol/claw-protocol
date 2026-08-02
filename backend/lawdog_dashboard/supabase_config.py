@@ -6,17 +6,31 @@ import os
 from typing import Any, Dict
 
 
+def _clean_env_value(raw: str) -> str:
+    """Strip whitespace and accidental surrounding quotes from Railway/dashboard paste."""
+    value = (raw or "").strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in ("'", '"'):
+        value = value[1:-1].strip()
+    return value
+
+
 def supabase_url() -> str:
-    return (
-        os.getenv("SUPABASE_URL", "").strip()
-        or os.getenv("CLAW_SUPABASE_URL", "").strip()
+    value = _clean_env_value(
+        os.getenv("SUPABASE_URL", "") or os.getenv("CLAW_SUPABASE_URL", "")
     )
+    value = value.rstrip("/")
+    # Operators sometimes paste REST/Auth base paths; Admin calls need project origin.
+    for suffix in ("/rest/v1", "/auth/v1", "/rest", "/auth"):
+        if value.lower().endswith(suffix):
+            value = value[: -len(suffix)].rstrip("/")
+            break
+    return value
 
 
 def supabase_service_role_key() -> str:
-    return (
-        os.getenv("SUPABASE_SERVICE_ROLE_KEY", "").strip()
-        or os.getenv("CLAW_SUPABASE_SERVICE_ROLE_KEY", "").strip()
+    return _clean_env_value(
+        os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
+        or os.getenv("CLAW_SUPABASE_SERVICE_ROLE_KEY", "")
     )
 
 

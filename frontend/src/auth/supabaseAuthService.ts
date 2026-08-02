@@ -72,9 +72,15 @@ export type EmailMagicLinkSignInResult =
   | { mode: "email_sent" }
   | { mode: "staging_redirect" };
 
+export type EmailMagicLinkSignInOptions = {
+  /** Staging GTM path only — never fall back to OTP email (avoids false "check email" success). */
+  stagingDirectOnly?: boolean;
+};
+
 export async function signInWithEmailMagicLink(
   email: string,
   redirectTo?: string,
+  opts?: EmailMagicLinkSignInOptions,
 ): Promise<EmailMagicLinkSignInResult> {
   const client = getSupabaseBrowserClient();
   if (!client || !isSupabaseAuthEnabled()) {
@@ -88,15 +94,16 @@ export async function signInWithEmailMagicLink(
   } = await import("./stagingAuthMagicLink");
   const redirect = redirectTo || buildAuthCallbackUrl();
   const trimmed = email.trim();
+  const stagingSurface =
+    isStagingAuthMagicLinkClientSurface() && isStagingAuthAllowlistedEmailClient(trimmed);
+  const stagingDirectOnly = Boolean(opts?.stagingDirectOnly);
 
   // Prefer staging Admin mint for allowlisted GTM accounts — avoids OTP email throttle.
-  if (isStagingAuthMagicLinkClientSurface() && isStagingAuthAllowlistedEmailClient(trimmed)) {
-    try {
-      await redirectViaStagingAuthMagicLink(trimmed, redirect);
-      return { mode: "staging_redirect" };
-    } catch {
-      // Fall through to normal OTP (e.g. API not redeployed yet).
-    }
+  // Never fall through to OTP on this path: a failed mint + successful OTP enqueue
+  // incorrectly shows "Check your email for a sign-in link."
+  if (stagingSurface || stagingDirectOnly) {
+    await redirectViaStagingAuthMagicLink(trimmed, redirect);
+    return { mode: "staging_redirect" };
   }
 
   const { error } = await client.auth.signInWithOtp({
