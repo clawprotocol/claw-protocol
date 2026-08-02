@@ -47,7 +47,11 @@ describe("Test293 paid Pro document body router forced visible shell", () => {
     expect(router.hasSoT).toBe(true);
     expect(router.sotLen).toBeGreaterThanOrEqual(PAID_PRO_DOCUMENT_BODY_SOT_MIN_LEN);
     expect(router.branch).toBe("paid_pro_visible_shell_forced");
-    expect(router.reason).toBe("frozen_sot_len_meets_threshold");
+    // SoT establish also latches review-session authority; either forced reason is valid.
+    expect([
+      "frozen_sot_len_meets_threshold",
+      "review_session_authority_len_meets_threshold",
+    ]).toContain(router.reason);
     expect(router.forced).toBe(true);
   });
 

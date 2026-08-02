@@ -25,6 +25,7 @@ import {
 import { resolvePaidProPostFinalizeUserVisiblePlain } from "./paidProDisplayPlainAuthority";
 import { isPaidProPostFinalizeHydratedCorpusLocked } from "./paidProSignerMetadataCommitPolicy";
 import type { VisibleProPaperDiagnosticsTrace } from "./visibleProPaperRenderBoundary";
+import { readAcceptedPipelineReviewCorpusPlain } from "./paidProAcceptedPipelineReviewCorpus";
 import {
   getPaidProSourceOfTruth,
   getPaidProSourceOfTruthText,
@@ -180,7 +181,15 @@ export function PaidProVisibleDocumentShell({
   const shellRef = useRef<HTMLDivElement>(null);
   const hasSoT = hasPaidProSourceOfTruth();
   const sotPlain = hasSoT ? getPaidProSourceOfTruthText().trim() : "";
-  const sotLen = sotPlain.length;
+  const pipelinePlain = readAcceptedPipelineReviewCorpusPlain().trim();
+  // Treat accepted pipeline corpus as display authority when SoT latch lags (resume / race).
+  const authoritativePlain =
+    sotPlain.length >= PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN
+      ? sotPlain
+      : pipelinePlain.length >= PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN
+        ? pipelinePlain
+        : sotPlain || pipelinePlain;
+  const sotLen = authoritativePlain.length;
   const htmlLen = html.trim().length;
   const paidProFirstReviewActive = Boolean(displayContext?.paidProActive ?? displayContext?.premiumPaidDocumentSurface);
   // Parent may wire acceptedCanonicalPlain before agreementId / verified GET land.
@@ -188,24 +197,29 @@ export function PaidProVisibleDocumentShell({
     ...(displayContext ?? {}),
     acceptedCanonicalPlain:
       trimOrEmpty(displayContext?.acceptedCanonicalPlain) ||
-      (hasSoT ? sotPlain : ""),
+      authoritativePlain,
     paidProActive: paidProFirstReviewActive || Boolean(displayContext?.paidProActive),
   };
   const canonicalPlain = resolveCanonicalPlainForVisibleShell(displayContextWithCanonical);
   const paintPlain =
     canonicalPlain.plain.length >= PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN
       ? canonicalPlain.plain
-      : hasSoT && sotLen >= PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN
-        ? sotPlain
+      : authoritativePlain.length >= PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN
+        ? authoritativePlain
         : "";
   const paintSource =
     canonicalPlain.plain.length >= PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN
       ? canonicalPlain.source
       : paintPlain
-        ? "paid_pro_accepted_canonical_source_of_truth"
+        ? hasSoT
+          ? "paid_pro_accepted_canonical_source_of_truth"
+          : "pipeline_accepted_corpus"
         : authoritativeSource;
+  // Pipeline-accepted corpus is display authority even when SoT latch has not frozen yet.
+  const displayAuthorityReady =
+    hasSoT || authoritativePlain.length >= PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN;
   const { branch, reason } = resolvePaidProVisibleShellRenderBranch({
-    hasSoT,
+    hasSoT: displayAuthorityReady,
     sotLen,
     htmlLen,
     canonicalPlainLen: paintPlain.length,
@@ -218,12 +232,12 @@ export function PaidProVisibleDocumentShell({
   useEffect(() => {
     logPaidProVisibleShellOwnerMounted({
       componentName: PAID_PRO_VISIBLE_SHELL_COMPONENT_NAME,
-      hasSoT,
+      hasSoT: displayAuthorityReady,
       sotLen,
       childCount: shellRef.current?.childElementCount ?? 0,
     });
     logPaidProVisibleShellRenderBranch({ branch, reason });
-  }, [hasSoT, sotLen, branch, reason]);
+  }, [displayAuthorityReady, sotLen, branch, reason]);
 
   useEffect(() => {
     if (!isPaidProPostFinalizeHydratedCorpusLocked()) return;

@@ -66,7 +66,7 @@ describe("dashboard signer-setup resume dedicated shell", () => {
   it("renders locked agreement preview and mounts signer fields on resume shell", () => {
     expect(intakeSrc).toContain('data-testid="dashboard-signer-setup-agreement-preview"');
     expect(intakeSrc).toContain("dashboard_signer_setup_resume");
-    expect(intakeSrc).toContain("Seed locked agreement preview from persisted workspace corpus");
+    expect(intakeSrc).toContain("Seed locked agreement preview + display authority from accepted server corpus");
     expect(intakeSrc).toContain("PaidProSignerFieldsMountShell");
     expect(intakeSrc).toContain("forceDashboardSignerSetupResume");
   });

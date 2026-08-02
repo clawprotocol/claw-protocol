@@ -161,15 +161,20 @@ export function PaidProDocumentBodyForcedRoute({
     });
   }, [router.hasSoT, router.sotLen, router.branch, router.reason]);
 
-  // Parent→shell boundary: wire immutable review-session authority (else SoT) so
-  // paint cannot race on missing agreementId / verified GET or a competing hash.
+  // Parent→shell boundary: wire immutable review-session authority (else SoT / pipeline)
+  // so paint cannot race on missing agreementId / verified GET or a competing hash.
+  // Router may already force with pipeline/canonical sotLen while hasPaidProSourceOfTruth()
+  // is still false — must still hand that plain to PaidProVisibleDocumentShell.
   const authorityPlain = resolvePaidProReviewSessionAuthorityPaintPlain()?.plain.trim() || "";
-  const acceptedCanonicalPlain =
-    authorityPlain.length >= PAID_PRO_DOCUMENT_BODY_SOT_MIN_LEN
-      ? authorityPlain
-      : hasPaidProSourceOfTruth()
-        ? getPaidProSourceOfTruthText().trim()
-        : (displayContext?.acceptedCanonicalPlain || "").trim();
+  const sotPlain = hasPaidProSourceOfTruth() ? getPaidProSourceOfTruthText().trim() : "";
+  const pipelinePlain = readAcceptedPipelineReviewCorpusPlain().trim();
+  const parentPlain = (displayContext?.acceptedCanonicalPlain || "").trim();
+  const acceptedCanonicalPlain = [
+    authorityPlain,
+    sotPlain,
+    pipelinePlain,
+    parentPlain,
+  ].reduce((best, t) => (t.length > best.length ? t : best), "");
   const shellDisplayContext: PaidProFirstReviewVisibleDisplayArgs = {
     ...(displayContext ?? {}),
     paidProActive: true,

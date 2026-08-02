@@ -635,7 +635,10 @@ import {
   resolveCanonicalReviewCorpusLenForRender,
   resolvePaidProDocumentBodyRouter,
 } from "./paidProDocumentBodyRouter";
-import { hasProfessionallyValidatedPipelineReviewCorpusForRender } from "./paidProAcceptedPipelineReviewCorpus";
+import {
+  hasProfessionallyValidatedPipelineReviewCorpusForRender,
+  readAcceptedPipelineReviewCorpusPlain,
+} from "./paidProAcceptedPipelineReviewCorpus";
 import { PaidProForcedFirstReviewChrome } from "./paidProForcedFirstReviewChrome";
 import { PaidProReviewRenderInvariantProbe } from "./PaidProReviewRenderInvariantProbe";
 import {
@@ -16313,13 +16316,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           setSignaturePreparationRequested(false);
           setPaidProInlineSignerSetupLatched(true);
           setPaidProSignerMetadataFinalizedLatch(false);
-          // Seed locked agreement preview from persisted workspace corpus (no regen / no freeze).
+          // Seed locked agreement preview + display authority from accepted server corpus.
           const resumeCorpusCandidates = [
             String((adForHydrate as { premium_full_document_text?: string }).premium_full_document_text ?? "").trim(),
             String(
               (adForHydrate as { premium_server_full_document_text?: string }).premium_server_full_document_text ?? "",
             ).trim(),
             String((adForHydrate as { server_full_document_text?: string }).server_full_document_text ?? "").trim(),
+            readAcceptedPipelineReviewCorpusPlain(),
             String((next as { purpose?: string }).purpose ?? "").trim(),
           ];
           const resumeCorpus = resumeCorpusCandidates.reduce(
@@ -16331,6 +16335,29 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             lastPremiumWinningCorpusRef.current = resumeCorpus;
             premiumPipelineOutputBodyRef.current = resumeCorpus;
             setAgreementDocumentText(resumeCorpus);
+            // Latch pipeline + SoT display authority so ForcedRoute / VisibleShell paint the corpus.
+            try {
+              commitCanonicalPaidProReviewSessionMarkers({
+                corpusPlain: resumeCorpus,
+                pipelineSource: "server_full_draft",
+              });
+            } catch {
+              /* preview still paints from refs */
+            }
+            if (!hasPaidProSourceOfTruth() && resumeCorpus.length >= 1000) {
+              try {
+                establishPaidProSourceOfTruth({
+                  text: resumeCorpus,
+                  source: "server_full_draft",
+                  draft: next,
+                  intakeText: rawIntake,
+                  allowShorterOverwrite: true,
+                  generationOutcome: "ok",
+                });
+              } catch {
+                /* pipeline markers are enough for resume preview paint */
+              }
+            }
           }
           // Hydrate live signer UI from persisted draft parties (same authority as signer setup).
           const parties = next.parties ?? [];
@@ -26661,6 +26688,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     if (!dashboardSignerSetupResumeUiActive) return "";
     const fromRefs = [
       resolvePaidProPostFinalizeReviewPlain(),
+      hasPaidProSourceOfTruth() ? getPaidProSourceOfTruthText() : "",
+      readAcceptedPipelineReviewCorpusPlain(),
       displayPolishedPaidProPlain,
       (premiumPaidReadonlyPick.plainText || "").trim(),
       (hydratedPremiumBodyRef.current || "").trim(),
@@ -32899,6 +32928,52 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                             disabled={(isGenerating && !draft) || upgradeLockActive || loading}
                                             editorRef={agreementPreviewEditorRef}
                                           />
+                                        ) : dashboardSignerSetupResumeUiActive ? (
+                                          // Resume preview must win over ForcedRoute: router can force with
+                                          // pipeline sotLen while hasSoT/display authority still lag.
+                                          <div
+                                            data-testid="dashboard-signer-setup-agreement-preview"
+                                            data-document-mounted={
+                                              dashboardSignerSetupResumePreviewPlain.trim().length >= 80
+                                                ? "true"
+                                                : "false"
+                                            }
+                                          >
+                                            <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-stone-500">
+                                              Agreement preview
+                                            </p>
+                                            <p className="mt-1 text-xs leading-relaxed text-stone-600">
+                                              Locked while you complete signer details. Nothing is sent from this step.
+                                            </p>
+                                            {dashboardSignerSetupResumePreviewPlain.trim().length >= 80 ? (
+                                              <pre className="mt-4 max-h-[min(42vh,30rem)] overflow-y-auto whitespace-pre-wrap font-serif text-[15px] leading-[1.85] text-stone-900 [text-wrap:pretty]">
+                                                {dashboardSignerSetupResumePreviewPlain}
+                                              </pre>
+                                            ) : paidProForcedFirstReviewActive ? (
+                                              <PaidProDocumentBodyForcedRoute
+                                                embedded
+                                                router={paidProDocumentBodyRouter}
+                                                html={premiumReadonlyAgreementHtml}
+                                                suppressEmptyFallback={blockProEmptyDocumentFallback}
+                                                compactDocumentTopPadding={paidProReviewCompactChrome}
+                                                visibleProPaperTrace={visibleProPaperTrace}
+                                                displayContext={{
+                                                  ...paidProFirstReviewDisplayContext,
+                                                  acceptedCanonicalPlain:
+                                                    dashboardSignerSetupResumePreviewPlain ||
+                                                    readAcceptedPipelineReviewCorpusPlain() ||
+                                                    paidProFirstReviewDisplayContext?.acceptedCanonicalPlain,
+                                                  paidProActive: true,
+                                                  premiumPaidDocumentSurface: true,
+                                                }}
+                                                authoritativeSource="server_full_draft"
+                                              />
+                                            ) : (
+                                              <p className="mt-4 text-sm text-stone-600" role="status">
+                                                Loading your saved agreement preview…
+                                              </p>
+                                            )}
+                                          </div>
                                         ) : paidProForcedFirstReviewActive ? (
                                           <PaidProDocumentBodyForcedRoute
                                             embedded
@@ -32919,31 +32994,6 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                                   }).source
                                             }
                                           />
-                                        ) : dashboardSignerSetupResumeUiActive ? (
-                                          <div
-                                            data-testid="dashboard-signer-setup-agreement-preview"
-                                            data-document-mounted={
-                                              dashboardSignerSetupResumePreviewPlain.trim().length >= 80
-                                                ? "true"
-                                                : "false"
-                                            }
-                                          >
-                                            <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-stone-500">
-                                              Agreement preview
-                                            </p>
-                                            <p className="mt-1 text-xs leading-relaxed text-stone-600">
-                                              Locked while you complete signer details. Nothing is sent from this step.
-                                            </p>
-                                            {dashboardSignerSetupResumePreviewPlain.trim() ? (
-                                              <pre className="mt-4 max-h-[min(42vh,30rem)] overflow-y-auto whitespace-pre-wrap font-serif text-[15px] leading-[1.85] text-stone-900 [text-wrap:pretty]">
-                                                {dashboardSignerSetupResumePreviewPlain}
-                                              </pre>
-                                            ) : (
-                                              <p className="mt-4 text-sm text-stone-600" role="status">
-                                                Loading your saved agreement preview…
-                                              </p>
-                                            )}
-                                          </div>
                                         ) : null}
                                         {showPaidProForcedFirstReviewTrackChooser &&
                                         !premiumReviewDocEditorOpen &&
