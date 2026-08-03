@@ -324,6 +324,12 @@ export function AdminConsolePage(props: { initialAdminSecret?: string } = {}) {
                 maxLength={500}
                 autoComplete="off"
               />
+              <p className="mt-2 text-[11px] text-slate-500">
+                Referral codes / payouts:{" "}
+                <a className="text-sky-300 underline" href="/app/ops/genesis-referral">
+                  Genesis Referral Ops
+                </a>
+              </p>
               {!genesisReasonReady ? (
                 <p className="mt-1 text-[11px] text-amber-200/80">Enter at least 3 characters before granting or revoking.</p>
               ) : null}

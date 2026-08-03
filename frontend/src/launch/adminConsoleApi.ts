@@ -217,3 +217,77 @@ export const adminPayoutBatchAction = (
     },
     { reason },
   );
+
+/** Genesis Referral Access — ops summary row (admin). */
+export type GenesisReferralOpsAffiliateRow = {
+  id: string;
+  user_id: string;
+  display_name: string;
+  referral_code: string;
+  community_slug?: string | null;
+  affiliate_status: string;
+  payout_rate: number;
+  referral_link_path?: string;
+  capture_visits?: number;
+  converted_referrals: number;
+  active_referred_subscriptions?: number;
+  commission_pending_usd: number;
+  commission_payable_usd: number;
+  commission_paid_usd: number;
+  commission_void_usd?: number;
+  commission_total_usd?: number;
+};
+
+export type CreateGenesisReferralAffiliateBody = {
+  user_id: string;
+  display_name: string;
+  referral_code: string;
+  community_slug?: string | null;
+  affiliate_status: "active" | "paused" | "revoked";
+  payout_rate: number;
+  reason: string;
+};
+
+export const fetchGenesisReferralOpsSummary = () =>
+  adminFetch("/v1/genesis-referral/ops/summary", undefined, {
+    reason: ADMIN_CONSOLE_CONNECT_REASON,
+  }) as Promise<{ affiliates?: GenesisReferralOpsAffiliateRow[]; count?: number }>;
+
+export const adminCreateGenesisReferralAffiliate = (body: CreateGenesisReferralAffiliateBody) =>
+  adminFetch(
+    "/v1/genesis-referral/ops/affiliates",
+    {
+      method: "POST",
+      body: JSON.stringify(body),
+    },
+    { reason: body.reason },
+  ) as Promise<{ ok?: boolean; affiliate?: GenesisReferralOpsAffiliateRow }>;
+
+/** Download commissions CSV for manual payout reconciliation. */
+export async function downloadGenesisReferralCommissionsCsv(): Promise<void> {
+  const sec = readAdminConsoleSecret().trim();
+  if (!sec) throw new Error("missing_admin_secret");
+  const res = await fetch(`${API_BASE}/v1/genesis-referral/ops/commissions/export.csv`, {
+    credentials: "include",
+    headers: clawAgreementHeaders({
+      "x-claw-admin-secret": sec,
+      "x-claw-admin-reason": "genesis_ops_commissions_export",
+    }),
+  });
+  if (!res.ok) {
+    const txt = await res.text();
+    let detail: unknown = txt;
+    try {
+      detail = JSON.parse(txt)?.detail ?? txt;
+    } catch {
+      /* keep text */
+    }
+    throw new Error(formatAdminApiErrorDetail(detail, res.status));
+  }
+  const blob = await res.blob();
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = "genesis_commissions.csv";
+  a.click();
+  URL.revokeObjectURL(a.href);
+}

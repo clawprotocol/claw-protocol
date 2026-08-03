@@ -146,11 +146,12 @@ def upsert_genesis_affiliate(
         con.execute(
             """
             UPDATE genesis_affiliates
-            SET display_name = ?, community_slug = ?, affiliate_status = ?,
+            SET user_id = ?, display_name = ?, community_slug = ?, affiliate_status = ?,
                 payout_rate = ?, updated_at = ?
             WHERE id = ?
             """,
             (
+                user_id.strip(),
                 display_name.strip()[:160],
                 (community_slug or "").strip()[:80] or None,
                 affiliate_status,
@@ -458,10 +459,29 @@ def admin_ops_summary(con: sqlite3.Connection) -> Dict[str, Any]:
     for a in affiliates:
         d = _row_to_dict(a)
         uid = str(d["user_id"])
-        d["converted_referrals"] = con.execute(
-            "SELECT COUNT(*) FROM referral_attributions WHERE referrer_user_id = ? AND converted_at IS NOT NULL",
-            (uid,),
-        ).fetchone()[0]
+        code = str(d.get("referral_code") or "")
+        d["referral_link_path"] = f"/app/create?ref={code}" if code else ""
+        d["capture_visits"] = int(
+            con.execute(
+                "SELECT COUNT(*) FROM referral_attributions WHERE referrer_user_id = ?",
+                (uid,),
+            ).fetchone()[0]
+        )
+        d["converted_referrals"] = int(
+            con.execute(
+                "SELECT COUNT(*) FROM referral_attributions WHERE referrer_user_id = ? AND converted_at IS NOT NULL",
+                (uid,),
+            ).fetchone()[0]
+        )
+        d["active_referred_subscriptions"] = int(
+            con.execute(
+                """
+                SELECT COUNT(DISTINCT referred_org_id) FROM affiliate_commissions
+                WHERE referrer_user_id = ? AND status IN ('pending', 'payable', 'paid')
+                """,
+                (uid,),
+            ).fetchone()[0]
+        )
         for status in ("pending", "payable", "paid", "void"):
             d[f"commission_{status}_usd"] = round(
                 float(
@@ -475,6 +495,12 @@ def admin_ops_summary(con: sqlite3.Connection) -> Dict[str, Any]:
                 ),
                 2,
             )
+        d["commission_total_usd"] = round(
+            float(d["commission_pending_usd"])
+            + float(d["commission_payable_usd"])
+            + float(d["commission_paid_usd"]),
+            2,
+        )
         rows.append(d)
     return {"affiliates": rows, "count": len(rows)}
 

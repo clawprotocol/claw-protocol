@@ -330,3 +330,79 @@ def test_self_referral_blocked_on_convert(tmp_path: Path, monkeypatch: pytest.Mo
     )
     assert not out.get("ok")
     assert out.get("error") == "self_referral"
+
+
+def test_upsert_updates_user_id_and_status(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    e = _store(tmp_path, monkeypatch)
+    create_genesis_affiliate(
+        e,
+        user_id="user_old",
+        display_name="Old Name",
+        referral_code="EDITCODE",
+        affiliate_status="active",
+        payout_rate=0.30,
+    )
+    create_genesis_affiliate(
+        e,
+        user_id="user_new",
+        display_name="New Name",
+        referral_code="EDITCODE",
+        affiliate_status="paused",
+        payout_rate=0.25,
+        community_slug="genesis-dogs",
+    )
+    with e._conn() as con:
+        row = con.execute(
+            "SELECT user_id, display_name, affiliate_status, payout_rate FROM genesis_affiliates WHERE referral_code = ?",
+            ("EDITCODE",),
+        ).fetchone()
+        n = con.execute("SELECT COUNT(*) FROM genesis_affiliates").fetchone()[0]
+    assert n == 1
+    assert row[0] == "user_new"
+    assert row[1] == "New Name"
+    assert row[2] == "paused"
+    assert float(row[3]) == pytest.approx(0.25)
+
+
+def test_admin_ops_summary_includes_reconciliation_fields(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from backend.economics.genesis_referral_store import admin_ops_summary
+
+    e = _store(tmp_path, monkeypatch)
+    _seed_affiliate(e)
+    capture_referral_visit(
+        e,
+        referral_code="GENESISDOG",
+        visitor_id="visitor_ops_summary_1",
+        source_path="/app/create?ref=GENESISDOG",
+    )
+    convert_referral(
+        e,
+        referral_code="GENESISDOG",
+        visitor_id="visitor_ops_summary_1",
+        referred_org_id="org_ops_sum",
+        referred_user_id="user_ops_sum",
+    )
+    e.upsert_stripe_customer_org(stripe_customer_id="cus_ops_sum", org_id="org_ops_sum")
+    handle_genesis_invoice_paid(
+        e,
+        {
+            "id": "in_ops_sum",
+            "customer": "cus_ops_sum",
+            "amount_paid": 3900,
+            "metadata": {"org_id": "org_ops_sum", "referral_code": "GENESISDOG", "plan_code": "pro"},
+            "subscription": "sub_ops_sum",
+        },
+    )
+    with e._conn() as con:
+        summary = admin_ops_summary(con)
+    assert summary["count"] == 1
+    row = summary["affiliates"][0]
+    assert row["referral_code"] == "GENESISDOG"
+    assert row["referral_link_path"] == "/app/create?ref=GENESISDOG"
+    assert row["capture_visits"] == 1
+    assert row["converted_referrals"] == 1
+    assert row["active_referred_subscriptions"] == 1
+    assert float(row["commission_pending_usd"]) == pytest.approx(11.70)
+    assert float(row["commission_total_usd"]) == pytest.approx(11.70)
