@@ -92,6 +92,7 @@ describe("dashboard resume placeholder address finalize", () => {
   it("finalize with placeholder address UI still produces signing-ready corpus", () => {
     const authority = buildLivePaidProSignerMetadataAuthority(
       {
+        partyCount: 2,
         partySignerNames: ["Alice Resume", "Bob Resume"],
         partySignerTitles: ["CEO", "General Counsel"],
         partyAddresses: [
