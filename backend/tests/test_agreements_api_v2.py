@@ -2624,6 +2624,8 @@ def test_vs01_signing_seed_endpoint_ok(monkeypatch, tmp_path):
     pytest.importorskip("fitz")
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_USAGE_ECONOMICS_ENABLED", "0")
+    monkeypatch.delenv("CLAW_COMMERCIAL_MODE", raising=False)
     client = TestClient(app)
     h = {"X-Claw-Org-Id": "test-vs01-seed-org", "X-Claw-Test-Auth-User-Id": "test-owner"}
     create_res = client.post(
@@ -2657,6 +2659,11 @@ def test_vs01_signing_seed_endpoint_ok(monkeypatch, tmp_path):
     assert isinstance(doc_id, str) and doc_id.startswith("doc_")
     hsh = body.get("content_sha256")
     assert isinstance(hsh, str) and len(hsh) == 64
+    from backend.services import document_service
+
+    meta = document_service.get_document_meta(doc_id) or {}
+    assert meta.get("owner_org_id") == "test-vs01-seed-org"
+    assert meta.get("agreement_id") == agreement_id
 
 
 def test_vs01_signing_seed_ok_when_economics_watermark_raises(monkeypatch, tmp_path):

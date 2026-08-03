@@ -665,6 +665,8 @@ export function formatUsNoticeAddressForDisplay(address: string): string[] {
 export function formatNoticeAddressLines(address: string): string[] {
   const trimmed = address.trim();
   if (!trimmed) return [];
+  // Never re-emit pre-signer notice placeholders into finalized notice stanzas.
+  if (/provided during signer setup/i.test(trimmed)) return [];
   const explicitLines = trimmed
     .split(/\n/)
     .map((line) => line.trim())

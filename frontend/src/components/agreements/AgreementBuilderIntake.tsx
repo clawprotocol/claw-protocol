@@ -2030,6 +2030,21 @@ function humanizePrimaryCtaBlockedReason(reason: string | undefined): string {
   }
 }
 
+/** True when hardError is already user-facing signer-finalize copy (must not be genericized). */
+function isActionableSignerFinalizeErrorRaw(raw: string): boolean {
+  const m = (raw || "").trim();
+  if (!m) return false;
+  return (
+    /Signer details could not be applied/i.test(m) ||
+    /Could not persist the finalized agreement snapshot/i.test(m) ||
+    /Could not persist frozen signing authority/i.test(m) ||
+    /Missing durable agreement id for signer finalize/i.test(m) ||
+    /Frozen signing authority was not built/i.test(m) ||
+    /Could not advance review authority/i.test(m) ||
+    /Stay in signer setup and try again/i.test(m)
+  );
+}
+
 /** Copy for true technical failures only (not partial intake). */
 function humanizeHardIntakeError(raw: string): string {
   const m = (raw || "").trim();
@@ -2038,6 +2053,10 @@ function humanizeHardIntakeError(raw: string): string {
   }
   if (isHydrateIntakeErrorRaw(m)) {
     return INTAKE_ERROR_HYDRATE;
+  }
+  // Keep finalize/signer-setup failures actionable — do not collapse to the generic save footer.
+  if (isActionableSignerFinalizeErrorRaw(m)) {
+    return m;
   }
   return INTAKE_HARD_SAVE_GENERIC;
 }
@@ -33243,7 +33262,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                                     : DASHBOARD_SIGNER_SETUP_RESUME_INCOMPLETE_CTA
                                                   : PAID_PRO_SIGNER_DETAILS_INCOMPLETE_CTA
                                               }
-                                              primaryCtaHelperText={paidProSignerDetailsGate.blockerMessage}
+                                              primaryCtaHelperText={
+                                                guidedSigningConfirmationBlockMessage ||
+                                                paidProSignerDetailsGate.blockerMessage
+                                              }
                                               guidedSigningTrustSlot={guidedSigningTrustSlot}
                                               partyDisplaySlots={resolvedPartyDisplaySlots}
                                               signerSetupPartyIdentities={signerSetupPartyIdentities}
@@ -33829,7 +33851,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                               sendRequiresConfirmStep={false}
                                               recipientBlockForceExpanded={paidProRecipientBlockForceExpanded}
                                               premiumPrimarySendLabelOverride={PAID_PRO_SIGNER_DETAILS_INCOMPLETE_CTA}
-                                              primaryCtaHelperText={paidProSignerDetailsGate.blockerMessage}
+                                              primaryCtaHelperText={
+                                                guidedSigningConfirmationBlockMessage ||
+                                                paidProSignerDetailsGate.blockerMessage
+                                              }
                                               guidedSigningTrustSlot={guidedSigningTrustSlot}
                                               partyDisplaySlots={resolvedPartyDisplaySlots}
                                               signerSetupPartyIdentities={signerSetupPartyIdentities}

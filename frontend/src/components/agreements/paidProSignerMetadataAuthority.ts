@@ -29,6 +29,7 @@ import {
   isTripartiteLabeledPartiesIntake,
   labeledPartyBlocksForSignerMetadata,
 } from "./labeledPartyBlockParse";
+import { normalizeCanonicalPartyAddress } from "./canonicalPartyStructuredAddress";
 import {
   authorityPartiesFromIntakeSignerMetadata,
   mergeIntakeSignerMetadataIntoAuthorityParties,
@@ -577,7 +578,10 @@ export function buildPaidProSignerMetadataParties(
       signerEmail: signerEmailForIndex(ui, uiSlot),
       signerName: norm(ui.partySignerNames[uiSlot]),
       signerTitle: norm(ui.partySignerTitles[uiSlot]),
-      partyAddress: norm(ui.partyAddresses[uiSlot]),
+      partyAddress: normalizeCanonicalPartyAddress(ui.partyAddresses[uiSlot], {
+        slot: i,
+        source: "metadata_authority_parties",
+      }),
     });
   }
   const filled = fillPartyLegalNamesFromFrozenManifestAndIntake(parties, opts);

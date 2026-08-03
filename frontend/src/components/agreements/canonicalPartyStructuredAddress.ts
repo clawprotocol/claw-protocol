@@ -22,6 +22,12 @@ const INLINE_ADDRESS_BOUNDARY_RE =
 const NOTICE_INSTRUCTION_INLINE_BOUNDARY_RE =
   /,\s*(?:each party should\b|signature block\b|in witness whereof\b|parties (?:shall )?execute\b|parties (?:have|may) (?:signed|executed)\b)/i;
 
+/**
+ * Pre-signer notice placeholder copied from SoT into address fields on resume.
+ * Must never be treated as a real postal address (finalize rejects corpora that still contain it).
+ */
+const SIGNER_SETUP_ADDRESS_PLACEHOLDER_RE = /provided during signer setup/i;
+
 function inlineAddressBoundaryMatch(segment: string): RegExpMatchArray | null {
   const partyMatch = segment.match(INLINE_ADDRESS_BOUNDARY_RE);
   if (partyMatch) return partyMatch;
@@ -78,6 +84,7 @@ export function isPartyAddressBoundaryLine(line: string | null | undefined): boo
 export function isPartyAddressContaminationSegment(segment: string | null | undefined): boolean {
   const t = cleanAddressLine(String(segment ?? ""));
   if (!t) return true;
+  if (SIGNER_SETUP_ADDRESS_PLACEHOLDER_RE.test(t)) return true;
   if (isPartyAddressBoundaryLine(t)) return true;
   if (PARTY_ROLE_PAREN_RE.test(t)) return true;
   if (isStructuredPromptSectionLabelToken(t)) return true;
@@ -166,8 +173,24 @@ export function sanitizeCanonicalPartyAddress(
   value: string | null | undefined,
   opts?: { slot?: number; source?: string },
 ): string {
-  const joined = joinCanonicalPartyAddressLines(splitCanonicalPartyAddressLines(value));
   const raw = String(value ?? "").trim();
+  if (!raw) return "";
+  // Entire field is (or is dominated by) the pre-signer notice placeholder — treat as empty.
+  if (SIGNER_SETUP_ADDRESS_PLACEHOLDER_RE.test(raw)) {
+    const withoutPlaceholder = raw
+      .replace(SIGNER_SETUP_ADDRESS_PLACEHOLDER_RE, "")
+      .replace(/^[\s,;:]+|[\s,;:]+$/g, "")
+      .trim();
+    if (!withoutPlaceholder || isPartyAddressContaminationSegment(withoutPlaceholder)) {
+      logPartyAddressBoundaryTrimmed({
+        slot: opts?.slot,
+        removedSuffixPreview: raw.slice(0, 120),
+        source: opts?.source ?? "sanitizeCanonicalPartyAddress:signer_setup_placeholder",
+      });
+      return "";
+    }
+  }
+  const joined = joinCanonicalPartyAddressLines(splitCanonicalPartyAddressLines(value));
   if (raw && joined && raw.length > joined.length + 4) {
     logPartyAddressBoundaryTrimmed({
       slot: opts?.slot,

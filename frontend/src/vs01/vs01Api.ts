@@ -1,3 +1,4 @@
+import { clawAgreementHeaders } from "../agreement/agreementOrgHeaders";
 import { apiUrl, resolveApiBase } from "../lib/clawApi";
 
 function apiBase(): string {
@@ -122,7 +123,11 @@ export async function fetchDocumentContent(documentId: string): Promise<Blob> {
   const enc = encodeURIComponent(documentId.trim());
   const url = apiUrl(`/v1/documents/${enc}/content`);
 
-  const res = await fetch(url, { method: "GET" });
+  // Commercial staging/prod require org + auth headers; seed docs are owner-bound.
+  const res = await fetch(url, {
+    method: "GET",
+    headers: clawAgreementHeaders({ Accept: "application/pdf, application/octet-stream, */*" }),
+  });
 
   if (!res.ok) {
     const text = await res.text();

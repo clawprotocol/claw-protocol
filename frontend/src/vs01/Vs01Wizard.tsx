@@ -728,10 +728,13 @@ export function Vs01Wizard({
     let cancelled = false;
     void (async () => {
       const hydrateLocalPaidProBridge = (): boolean => {
-        if (!sid.startsWith("local_doc_")) return false;
         if (bridgeHydratedSeedSid.current === sid) return true;
         const bridgeParams = new URLSearchParams(window.location.search);
         const agreementBridgeQuery = bridgeParams.get("agreement_bridge") === "1";
+        // local_doc_* always; server doc_* when agreement_bridge=1 (session already has corpus).
+        const allowBridgeCorpusHydrate =
+          sid.startsWith("local_doc_") || (agreementBridgeQuery && sid.startsWith("doc_"));
+        if (!allowBridgeCorpusHydrate) return false;
         const rawBridge = readAgreementVs01BridgeSession();
         const bridge: AgreementVs01BridgeSession | null =
           rawBridge && rawBridge.vs01DocumentId.trim() === sid

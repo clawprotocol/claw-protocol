@@ -7,6 +7,7 @@ from fastapi.testclient import TestClient
 
 from backend.main import app
 from backend.services import document_service
+from backend.tests.conftest_auth_security import make_authenticated_user_headers
 
 pytestmark = pytest.mark.unit
 
@@ -35,6 +36,8 @@ def _env_common(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
     monkeypatch.setenv("CLAW_ARTIFACT_REGISTRY_DB_PATH", str(tmp_path / "registry.sqlite3"))
     monkeypatch.setenv("CLAW_DOCUMENTS_DIR", str(tmp_path / "documents"))
     monkeypatch.setenv("CLAW_STORAGE_BACKEND", "local")
+    monkeypatch.setenv("CLAW_USAGE_ECONOMICS_ENABLED", "0")
+    monkeypatch.delenv("CLAW_COMMERCIAL_MODE", raising=False)
     reset_artifact_repository_singleton()
 
 
@@ -91,6 +94,69 @@ def test_vs01_seed_then_content_returns_pdf_bytes(monkeypatch: pytest.MonkeyPatc
 
     meta = document_service.get_document_meta(doc_id) or {}
     assert meta.get("agreement_id") == agreement_id
+    assert meta.get("owner_org_id") == "test-org-vs01-content-test354"
+
+
+def test_vs01_seed_content_ok_under_commercial_mode(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    """Resume finalize → esign bridge: seed must stamp owner_org_id; content requires owner headers."""
+    from backend.storage.artifact_repository import reset_artifact_repository_singleton
+    from backend.usage_economics import store as usage_economics_store_mod
+    from backend.usage_economics.genesis_dog_entitlement import GRANT_SOURCE_ADMIN, grant_entitlement
+
+    pytest.importorskip("fitz")
+    usage_economics_store_mod._store = None  # noqa: SLF001
+    monkeypatch.setenv("CLAW_ENVIRONMENT", "test")
+    monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setenv("CLAW_BLOB_ROOT", str(tmp_path / "blobs"))
+    monkeypatch.setenv("CLAW_ARTIFACT_REGISTRY_DB_PATH", str(tmp_path / "registry.sqlite3"))
+    monkeypatch.setenv("CLAW_DOCUMENTS_DIR", str(tmp_path / "documents"))
+    monkeypatch.setenv("CLAW_STORAGE_BACKEND", "local")
+    monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_COMMERCIAL_MODE", "1")
+    monkeypatch.setenv("CLAW_USAGE_ECONOMICS_ENABLED", "1")
+    monkeypatch.setenv("CLAW_NODE_MODE", "api")
+    reset_artifact_repository_singleton()
+
+    user = "vs01-seed-commercial-owner"
+    grant_entitlement(user_id=user, granted_by="test", grant_source=GRANT_SOURCE_ADMIN)
+    headers = make_authenticated_user_headers(user)
+    client = TestClient(app, raise_server_exceptions=False)
+    create_res = client.post(
+        "/api/agreements/draft",
+        headers={**headers, "Content-Type": "application/json"},
+        json={
+            "title": "VS01 Commercial Seed Content",
+            "jurisdiction": "TX",
+            "parties": [
+                {"name": "Red Mesa Logistics LLC", "role": "client", "email": "owner@example.com"},
+                {"name": "Harbor Peak Automation LLC", "role": "service_provider", "email": "cp@example.com"},
+            ],
+            "purpose": "Consulting services for automation implementation and support.",
+            "payment_terms": "Net 30",
+            "duration": "1 year",
+            "due_date": None,
+            "effective_date": None,
+        },
+    )
+    assert create_res.status_code == 200, create_res.text
+    agreement_id = create_res.json()["id"]
+
+    seed = client.post(
+        f"/api/agreements/{agreement_id}/vs01-signing-seed",
+        headers=headers,
+        json={},
+    )
+    assert seed.status_code == 200, seed.text
+    doc_id = seed.json()["document_id"]
+    meta = document_service.get_document_meta(doc_id) or {}
+    assert meta.get("owner_org_id") == f"user-{user}"
+
+    anon = client.get(f"/v1/documents/{doc_id}/content")
+    assert anon.status_code in (401, 403), anon.text
+
+    content = client.get(f"/v1/documents/{doc_id}/content", headers=headers)
+    assert content.status_code == 200, content.text
+    assert content.content.startswith(b"%PDF")
 
 
 def test_document_content_survives_malformed_meta(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:

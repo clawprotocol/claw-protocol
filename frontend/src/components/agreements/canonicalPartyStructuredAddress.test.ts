@@ -56,4 +56,19 @@ describe("canonicalPartyStructuredAddress", () => {
     expect(isPartyAddressBoundaryLine("Purpose,")).toBe(true);
     expect(isPartyAddressBoundaryLine("Initial Term,")).toBe(true);
   });
+
+  it("rejects pre-signer notice placeholder addresses copied into resume fields", () => {
+    expect(sanitizeCanonicalPartyAddress("provided during signer setup")).toBe("");
+    expect(normalizeCanonicalPartyAddress("provided during signer setup")).toBe("");
+    expect(
+      sanitizeCanonicalPartyAddress("provided during signer setup, If to LawDog Demo LLC:"),
+    ).toBe("");
+    expect(
+      normalizeCanonicalPartyAddress("Email: provided during signer setup\nAddress: provided during signer setup"),
+    ).toBe("");
+    // Real street addresses are unchanged.
+    expect(sanitizeCanonicalPartyAddress("100 Market Street, Chicago, IL 60601")).toBe(
+      "100 Market Street, Chicago, IL 60601",
+    );
+  });
 });

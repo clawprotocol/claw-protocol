@@ -25,4 +25,12 @@ describe("Vs01Wizard agreement bridge (static)", () => {
     expect(s).toContain("[vs01-recipient-route-guard]");
     expect(s).toContain("onStepChange");
   });
+
+  it("hydrates agreement_bridge=1 for server doc_* from session corpus (resume finalize)", () => {
+    const s = readFileSync(join(__dirname, "Vs01Wizard.tsx"), "utf8");
+    expect(s).toContain("allowBridgeCorpusHydrate");
+    expect(s).toContain('sid.startsWith("doc_")');
+    expect(s).toContain("agreementBridgeQuery && sid.startsWith(\"doc_\")");
+    expect(s).toContain("Could not load this document");
+  });
 });

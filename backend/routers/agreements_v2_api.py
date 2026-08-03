@@ -9273,10 +9273,19 @@ def post_agreement_vs01_signing_seed(
         ) from exc
 
     pdf_len = len(built.pdf_bytes or b"")
+    # Stamp owner_org_id so subsequent GET /v1/documents/{id}/content succeeds in commercial mode
+    # (same bind as POST /v1/documents). Seed already passed _owner_mutation_guards.
+    try:
+        owner_org_id = require_claw_org_id_header(request).strip()
+    except HTTPException:
+        owner_org_id = ""
     # --- finalize_document ---
     try:
         meta = document_service.finalize_document(
-            built.pdf_bytes, content_type="application/pdf", agreement_id=aid
+            built.pdf_bytes,
+            content_type="application/pdf",
+            agreement_id=aid,
+            owner_org_id=owner_org_id or None,
         )
     except Exception as exc:
         _seed_store_ctx = document_service.document_storage_seed_error_context()
