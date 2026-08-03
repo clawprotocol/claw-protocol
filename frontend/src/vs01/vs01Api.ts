@@ -1,4 +1,5 @@
 import { clawAgreementHeaders } from "../agreement/agreementOrgHeaders";
+import { refreshCachedAccessToken } from "../auth/authAccessTokenCache";
 import { apiUrl, resolveApiBase } from "../lib/clawApi";
 
 function apiBase(): string {
@@ -122,6 +123,10 @@ export async function createSignSession(
 export async function fetchDocumentContent(documentId: string): Promise<Blob> {
   const enc = encodeURIComponent(documentId.trim());
   const url = apiUrl(`/v1/documents/${enc}/content`);
+
+  // Cold esign deep-links can mount before AuthProvider writes the in-memory token cache.
+  // Refresh from the Supabase session so commercial owner-bound GETs include Authorization.
+  await refreshCachedAccessToken();
 
   // Commercial staging/prod require org + auth headers; seed docs are owner-bound.
   const res = await fetch(url, {

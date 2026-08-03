@@ -18,6 +18,8 @@ import { getVs01UrlBootstrap } from "./vs01UrlBootstrap";
 import { resolveReviewerEffectiveAccessToken } from "../agreement/reviewerTokenPersistence";
 import { markAgreementFieldsPlacedCount, markAgreementPacketPrepared, isAgreementPacketPrepared } from "./vs01WorkspaceSigningStatus";
 import { fetchDocumentContent, getReceipt } from "./vs01Api";
+import { useAuth } from "../auth/AuthProvider";
+import { shouldDeferVs01SeedDocumentLoad } from "./vs01SeedDocumentAuthGate";
 import { useLaunchNav } from "../launch/LaunchNavContext";
 import { stashHeroIntakePrefill } from "../launch/heroIntakePrefill";
 import { prepareFreshMarketingEntry } from "../launch/marketingSession";
@@ -177,6 +179,7 @@ export function Vs01Wizard({
   onStepChange,
 }: Vs01WizardProps) {
   const access = useAccess();
+  const { enabled: authEnabled, loading: authLoading } = useAuth();
   const { navigate } = useLaunchNav();
   const handleQuickHandoffTypedIntake = useCallback(
     (text: string) => {
@@ -725,6 +728,8 @@ export function Vs01Wizard({
     const sid = (seedDocumentId || "").trim();
     if (!sid) return;
     if (VS01_URL_BOOT?.documentId?.trim()) return;
+    // Wait for AuthProvider session restore so clawAgreementHeaders can attach Bearer.
+    if (shouldDeferVs01SeedDocumentLoad({ authEnabled, authLoading })) return;
     let cancelled = false;
     void (async () => {
       const hydrateLocalPaidProBridge = (): boolean => {
@@ -846,6 +851,7 @@ export function Vs01Wizard({
         const buf = await blob.arrayBuffer();
         const hex = (await sha256Bytes(buf)).toLowerCase();
         if (cancelled) return;
+        setError(null);
         setDocumentId(sid);
         setContentSha256(hex);
 
@@ -1054,7 +1060,7 @@ export function Vs01Wizard({
     return () => {
       cancelled = true;
     };
-  }, [seedDocumentId, goToStep, hideStepper]);
+  }, [seedDocumentId, goToStep, hideStepper, authEnabled, authLoading]);
 
   const handleFinalized = useCallback(
     (payload: Vs01FinalizeDocumentPayload) => {

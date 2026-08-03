@@ -33,4 +33,12 @@ describe("Vs01Wizard agreement bridge (static)", () => {
     expect(s).toContain("agreementBridgeQuery && sid.startsWith(\"doc_\")");
     expect(s).toContain("Could not load this document");
   });
+
+  it("defers cold-open seed document fetch until auth token cache can be hydrated", () => {
+    const s = readFileSync(join(__dirname, "Vs01Wizard.tsx"), "utf8");
+    expect(s).toContain('from "../auth/AuthProvider"');
+    expect(s).toContain("shouldDeferVs01SeedDocumentLoad");
+    expect(s).toContain("authLoading");
+    expect(s).toMatch(/\[seedDocumentId,\s*goToStep,\s*hideStepper,\s*authEnabled,\s*authLoading\]/);
+  });
 });

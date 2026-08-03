@@ -9,8 +9,9 @@ describe("vs01Api document content auth", () => {
     expect(src).toContain("clawAgreementHeaders");
     const fnStart = src.indexOf("export async function fetchDocumentContent");
     expect(fnStart).toBeGreaterThanOrEqual(0);
-    const fnBody = src.slice(fnStart, fnStart + 700);
+    const fnBody = src.slice(fnStart, fnStart + 900);
     expect(fnBody).toContain("clawAgreementHeaders");
+    expect(fnBody).toContain("refreshCachedAccessToken");
     expect(fnBody).toMatch(/method:\s*["']GET["']/);
   });
 });
