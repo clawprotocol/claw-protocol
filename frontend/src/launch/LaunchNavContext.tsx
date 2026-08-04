@@ -13,6 +13,7 @@ import {
   getGenesisReferralCheckoutPayload,
   getOrCreateGenesisVisitorId,
 } from "./genesisReferral/genesisReferralCapture";
+import { captureGenesisDogOnboardingFromLocation } from "./genesisReferral/genesisDogOnboardingCapture";
 import { postGenesisReferralCapture } from "./genesisReferral/genesisReferralApi";
 import { hasCheckoutBackRestoreSnapshot } from "../components/agreements/checkoutBackRestore";
 import { resetHeroHandoffForCreateNavigationWithoutPayload } from "./heroIntakePrefill";
@@ -95,6 +96,7 @@ export function LaunchNavProvider({ children }: { children: React.ReactNode }) {
     syncLawdogFlowFromPathname(window.location.pathname);
     rememberAffiliateCodeFromPathname(window.location.pathname);
     rememberAffiliateCodeFromSearch(window.location.search);
+    captureGenesisDogOnboardingFromLocation(window.location.pathname, window.location.search);
     if (shouldMarkWorkspaceSessionForPath(window.location.pathname)) {
       markAuthenticatedWorkspaceSession();
     }

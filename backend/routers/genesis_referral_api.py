@@ -186,6 +186,7 @@ async def affiliate_me(request: Request) -> Dict[str, Any]:
 
 @router.post("/ops/affiliates")
 async def ops_create_affiliate(request: Request, body: CreateGenesisAffiliateBody) -> Dict[str, Any]:
+    from backend.admin_console.store import get_admin_console_store
     from backend.security.privileged_ops import PERM_MUTATE_SUPPORT
 
     _require_admin(
@@ -196,7 +197,7 @@ async def ops_create_affiliate(request: Request, body: CreateGenesisAffiliateBod
         target_id=(body.referral_code or "affiliate")[:128],
     )
     eco = get_economics_store()
-    return genesis_svc.create_genesis_affiliate(
+    out = genesis_svc.create_genesis_affiliate(
         eco,
         user_id=body.user_id,
         display_name=body.display_name,
@@ -205,6 +206,15 @@ async def ops_create_affiliate(request: Request, body: CreateGenesisAffiliateBod
         affiliate_status=body.affiliate_status,
         payout_rate=body.payout_rate,
     )
+    # Activated affiliates leave the Genesis Dog candidate queue.
+    if str(body.affiliate_status or "").strip().lower() == "active":
+        try:
+            admin_store = get_admin_console_store()
+            admin_store.init_schema()
+            admin_store.clear_affiliate_candidate(body.user_id)
+        except Exception:
+            pass
+    return out
 
 
 @router.get("/ops/summary")
@@ -221,6 +231,61 @@ async def ops_summary(request: Request) -> Dict[str, Any]:
     eco.init_schema()
     with eco._conn() as con:
         return admin_ops_summary(con)
+
+
+@router.get("/ops/candidates")
+async def ops_genesis_dog_candidates(request: Request) -> Dict[str, Any]:
+    """
+    Genesis Dog signup candidates — signed up via /genesis-dogs join flow,
+    not yet an active affiliate.
+    """
+    from backend.admin_console.store import get_admin_console_store
+    from backend.security.privileged_ops import PERM_READ_OPS
+
+    _require_admin(
+        request,
+        permission=PERM_READ_OPS,
+        action_type="genesis_ops_candidates",
+        target_id="candidates",
+    )
+    admin_store = get_admin_console_store()
+    admin_store.init_schema()
+    eco = get_economics_store()
+    eco.init_schema()
+    active_user_ids: set[str] = set()
+    with eco._conn() as con:
+        try:
+            rows = con.execute(
+                """
+                SELECT user_id FROM genesis_affiliates
+                WHERE lower(coalesce(affiliate_status, '')) = 'active'
+                """
+            ).fetchall()
+            for r in rows:
+                uid = str(dict(r).get("user_id") or "").strip()
+                if uid:
+                    active_user_ids.add(uid)
+        except Exception:
+            pass
+    candidates = []
+    for row in admin_store.list_genesis_dog_affiliate_candidates(limit=200):
+        uid = str(row.get("user_id") or "").strip()
+        if not uid or uid in active_user_ids:
+            continue
+        candidates.append(
+            {
+                "user_id": uid,
+                "org_id": row.get("org_id"),
+                "email": row.get("email"),
+                "display_name": row.get("display_name"),
+                "community_slug": row.get("community_slug") or "genesis-dogs",
+                "signup_intent": row.get("signup_intent") or "genesis-referral",
+                "affiliate_candidate": True,
+                "created_at": row.get("created_at"),
+                "updated_at": row.get("updated_at"),
+            }
+        )
+    return {"ok": True, "candidates": candidates, "count": len(candidates)}
 
 
 @router.get("/ops/commissions/export.csv")

@@ -9,6 +9,10 @@ import {
   resolveEntitlementRepairOrgCandidates,
 } from "../launch/paidCheckoutOrgContext";
 import { anonymousSessionHeaders } from "./anonymousSessionHeaders";
+import {
+  clearGenesisDogOnboardingIntent,
+  genesisDogOnboardingBindFields,
+} from "../launch/genesisReferral/genesisDogOnboardingCapture";
 
 export type BindUserOrgResponse = {
   ok: boolean;
@@ -28,6 +32,7 @@ export async function bindAuthenticatedUserToWorkspace(args: {
   const previousOrgId = getOrgId();
   const subscriptionSourceOrgId = readPaidCheckoutOrgId();
   const entitlementRepairCandidates = resolveEntitlementRepairOrgCandidates();
+  const genesisDog = genesisDogOnboardingBindFields();
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
     Accept: "application/json",
@@ -49,6 +54,13 @@ export async function bindAuthenticatedUserToWorkspace(args: {
       entitlement_repair_candidates:
         entitlementRepairCandidates.length > 0 ? entitlementRepairCandidates : undefined,
       claim_method: args.claimMethod ?? "unknown",
+      ...(genesisDog
+        ? {
+            community_slug: genesisDog.community_slug,
+            signup_intent: genesisDog.signup_intent,
+            affiliate_candidate: genesisDog.affiliate_candidate,
+          }
+        : {}),
     }),
   });
   if (!res.ok) {
@@ -57,6 +69,9 @@ export async function bindAuthenticatedUserToWorkspace(args: {
   const data = (await readJson<BindUserOrgResponse>(res)) as BindUserOrgResponse;
   if (data.org_id) {
     setOrgId(data.org_id);
+  }
+  if (genesisDog) {
+    clearGenesisDogOnboardingIntent();
   }
   return data;
 }

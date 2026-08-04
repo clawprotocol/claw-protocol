@@ -3,6 +3,10 @@
  */
 
 import { apiUrl, errorMessageFromResponse, readJson } from "../lib/clawApi";
+import {
+  clearGenesisDogOnboardingIntent,
+  genesisDogOnboardingBindFields,
+} from "../launch/genesisReferral/genesisDogOnboardingCapture";
 import { anonymousSessionHeaders } from "./anonymousSessionHeaders";
 import type { AuthWorkflowStage } from "./authContinuationContext";
 import { logAuthDiagnostic } from "./anonymousSessionApi";
@@ -99,6 +103,7 @@ export async function finalizeAuthOnServer(args: {
   subscriptionSourceOrgId?: string | null;
   entitlementRepairCandidates?: string[];
 }): Promise<FinalizeAuthResponse> {
+  const genesisDog = genesisDogOnboardingBindFields();
   const res = await fetch(apiUrl("/v1/workspace/finalize-auth"), {
     method: "POST",
     headers: {
@@ -116,6 +121,13 @@ export async function finalizeAuthOnServer(args: {
         args.entitlementRepairCandidates && args.entitlementRepairCandidates.length > 0
           ? args.entitlementRepairCandidates
           : undefined,
+      ...(genesisDog
+        ? {
+            community_slug: genesisDog.community_slug,
+            signup_intent: genesisDog.signup_intent,
+            affiliate_candidate: genesisDog.affiliate_candidate,
+          }
+        : {}),
     }),
   });
   if (!res.ok) {
@@ -123,6 +135,9 @@ export async function finalizeAuthOnServer(args: {
   }
   const data = (await readJson<FinalizeAuthResponse>(res)) as FinalizeAuthResponse;
   clearContinuationId();
+  if (genesisDog) {
+    clearGenesisDogOnboardingIntent();
+  }
   logAuthDiagnostic("auth_finalize_completed", {
     org_id: data.org_id,
     migrated_agreement_count: data.migrated_agreement_count,

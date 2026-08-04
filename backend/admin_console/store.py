@@ -77,6 +77,9 @@ class AdminConsoleStore:
                   org_id TEXT NOT NULL,
                   email TEXT,
                   display_name TEXT,
+                  community_slug TEXT,
+                  signup_intent TEXT,
+                  affiliate_candidate INTEGER NOT NULL DEFAULT 0,
                   created_at TEXT NOT NULL,
                   updated_at TEXT NOT NULL
                 );
@@ -84,6 +87,8 @@ class AdminConsoleStore:
                   ON workspace_user_identities (email);
                 CREATE INDEX IF NOT EXISTS idx_workspace_user_identities_updated
                   ON workspace_user_identities (updated_at DESC);
+                CREATE INDEX IF NOT EXISTS idx_workspace_user_identities_affiliate_candidate
+                  ON workspace_user_identities (affiliate_candidate, updated_at DESC);
                 """
             )
             # Additive migrations for older DBs.
@@ -95,6 +100,19 @@ class AdminConsoleStore:
                 con.execute("ALTER TABLE admin_action_audit ADD COLUMN actor_role TEXT")
             if "correlation_id" not in cols:
                 con.execute("ALTER TABLE admin_action_audit ADD COLUMN correlation_id TEXT")
+            ident_cols = {
+                str(r[1])
+                for r in con.execute("PRAGMA table_info(workspace_user_identities)").fetchall()
+            }
+            if "community_slug" not in ident_cols:
+                con.execute("ALTER TABLE workspace_user_identities ADD COLUMN community_slug TEXT")
+            if "signup_intent" not in ident_cols:
+                con.execute("ALTER TABLE workspace_user_identities ADD COLUMN signup_intent TEXT")
+            if "affiliate_candidate" not in ident_cols:
+                con.execute(
+                    "ALTER TABLE workspace_user_identities "
+                    "ADD COLUMN affiliate_candidate INTEGER NOT NULL DEFAULT 0"
+                )
 
     def get_admin_user(self, admin_user_id: str) -> Optional[Dict[str, Any]]:
         uid = (admin_user_id or "").strip()
@@ -359,6 +377,9 @@ class AdminConsoleStore:
         org_id: str,
         email: str | None = None,
         display_name: str | None = None,
+        community_slug: str | None = None,
+        signup_intent: str | None = None,
+        affiliate_candidate: bool | None = None,
     ) -> None:
         """Persist safe customer identity for Admin Console email/display lookup."""
         uid = (user_id or "").strip()
@@ -373,23 +394,57 @@ class AdminConsoleStore:
         dn = (display_name or "").strip() or None
         if dn:
             dn = dn[:160]
+        slug = (community_slug or "").strip()[:80] or None
+        intent = (signup_intent or "").strip()[:80] or None
         now = _utc_now()
         with self._conn() as con:
+            existing = con.execute(
+                "SELECT affiliate_candidate FROM workspace_user_identities WHERE user_id = ?",
+                (uid,),
+            ).fetchone()
+            if affiliate_candidate is None:
+                next_cand = int(existing["affiliate_candidate"] if existing else 0)
+            else:
+                next_cand = 1 if affiliate_candidate else 0
             con.execute(
                 """
                 INSERT INTO workspace_user_identities (
-                  user_id, org_id, email, display_name, created_at, updated_at
+                  user_id, org_id, email, display_name,
+                  community_slug, signup_intent, affiliate_candidate,
+                  created_at, updated_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(user_id) DO UPDATE SET
                   org_id = excluded.org_id,
                   email = COALESCE(excluded.email, workspace_user_identities.email),
                   display_name = COALESCE(
                     excluded.display_name, workspace_user_identities.display_name
                   ),
+                  community_slug = COALESCE(
+                    excluded.community_slug, workspace_user_identities.community_slug
+                  ),
+                  signup_intent = COALESCE(
+                    excluded.signup_intent, workspace_user_identities.signup_intent
+                  ),
+                  affiliate_candidate = excluded.affiliate_candidate,
                   updated_at = excluded.updated_at
                 """,
-                (uid, oid, em, dn, now, now),
+                (uid, oid, em, dn, slug, intent, next_cand, now, now),
+            )
+
+    def clear_affiliate_candidate(self, user_id: str) -> None:
+        uid = (user_id or "").strip()
+        if not uid:
+            return
+        now = _utc_now()
+        with self._conn() as con:
+            con.execute(
+                """
+                UPDATE workspace_user_identities
+                SET affiliate_candidate = 0, updated_at = ?
+                WHERE user_id = ?
+                """,
+                (now, uid),
             )
 
     def get_workspace_user_identity(self, user_id: str) -> Optional[Dict[str, Any]]:
@@ -399,7 +454,9 @@ class AdminConsoleStore:
         with self._conn() as con:
             row = con.execute(
                 """
-                SELECT user_id, org_id, email, display_name, created_at, updated_at
+                SELECT user_id, org_id, email, display_name,
+                       community_slug, signup_intent, affiliate_candidate,
+                       created_at, updated_at
                 FROM workspace_user_identities
                 WHERE user_id = ?
                 """,
@@ -412,8 +469,29 @@ class AdminConsoleStore:
         with self._conn() as con:
             rows = con.execute(
                 """
-                SELECT user_id, org_id, email, display_name, created_at, updated_at
+                SELECT user_id, org_id, email, display_name,
+                       community_slug, signup_intent, affiliate_candidate,
+                       created_at, updated_at
                 FROM workspace_user_identities
+                ORDER BY datetime(updated_at) DESC
+                LIMIT ?
+                """,
+                (lim,),
+            ).fetchall()
+        return [dict(r) for r in rows]
+
+    def list_genesis_dog_affiliate_candidates(self, *, limit: int = 200) -> List[Dict[str, Any]]:
+        """Users who signed up via Genesis Dog onboarding and are not active affiliates yet."""
+        lim = max(1, min(int(limit), 1000))
+        with self._conn() as con:
+            rows = con.execute(
+                """
+                SELECT user_id, org_id, email, display_name,
+                       community_slug, signup_intent, affiliate_candidate,
+                       created_at, updated_at
+                FROM workspace_user_identities
+                WHERE affiliate_candidate = 1
+                  AND COALESCE(signup_intent, '') = 'genesis-referral'
                 ORDER BY datetime(updated_at) DESC
                 LIMIT ?
                 """,

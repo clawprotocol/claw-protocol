@@ -31,6 +31,7 @@ import { LawdogSignaturesPage } from "./launch/LawdogSignaturesPage";
 import { LawdogReferralRedirect, parseLawdogReferralPath } from "./launch/LawdogReferralRedirect";
 import { AffiliatePayoutOpsPage } from "./launch/affiliate/AffiliatePayoutOpsPage";
 import { GenesisAffiliateDashboardPage } from "./launch/genesisReferral/GenesisAffiliateDashboardPage";
+import { GenesisDogOnboardingRedirect } from "./launch/genesisReferral/GenesisDogOnboardingRedirect";
 import { GenesisReferralOpsPage } from "./launch/genesisReferral/GenesisReferralOpsPage";
 import { AdminConsoleRouteShell } from "./launch/AdminConsoleRouteShell";
 import { canAccessOperatorGrowthDashboard, OperatorGrowthDashboard } from "./launch/ops/OperatorGrowthDashboard";
@@ -469,6 +470,9 @@ export function ClawProductApp() {
   }
   if (pathNorm === "/affiliate-terms") {
     return <AffiliateTermsPage />;
+  }
+  if (pathNorm === "/genesis-dogs") {
+    return <GenesisDogOnboardingRedirect />;
   }
 
   if (recipientSignBootstrap) {

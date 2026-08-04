@@ -15,6 +15,7 @@ vi.mock("../adminConsoleApi", async () => {
     ...actual,
     readAdminConsoleSecret: vi.fn(() => "test-admin-secret"),
     fetchGenesisReferralOpsSummary: vi.fn(),
+    fetchGenesisDogAffiliateCandidates: vi.fn(),
     adminCreateGenesisReferralAffiliate: vi.fn(),
     downloadGenesisReferralCommissionsCsv: vi.fn(async () => undefined),
     fetchAdminUsers: vi.fn(),
@@ -26,6 +27,7 @@ import {
   adminCreateGenesisReferralAffiliate,
   downloadGenesisReferralCommissionsCsv,
   fetchAdminUsers,
+  fetchGenesisDogAffiliateCandidates,
   fetchGenesisReferralOpsSummary,
   readAdminConsoleSecret,
 } from "../adminConsoleApi";
@@ -81,6 +83,20 @@ describe("GenesisReferralOpsPage", () => {
           agreement_count: 0,
         },
       ],
+    });
+    vi.mocked(fetchGenesisDogAffiliateCandidates).mockResolvedValue({
+      ok: true,
+      candidates: [
+        {
+          user_id: "user-pending-1",
+          email: "pending+dog@example.com",
+          display_name: "Pending Dog",
+          community_slug: "genesis-dogs",
+          signup_intent: "genesis-referral",
+          affiliate_candidate: true,
+        },
+      ],
+      count: 1,
     });
     vi.mocked(adminCreateGenesisReferralAffiliate).mockResolvedValue({
       ok: true,
@@ -183,5 +199,43 @@ describe("GenesisReferralOpsPage", () => {
     expect(fetchGenesisReferralOpsSummary).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole("button", { name: /Open Admin Dashboard/i }));
     expect(navigate).toHaveBeenCalledWith("/app/admin");
+  });
+
+  it("lists Genesis Dog candidates and activates without manual user_id copy", async () => {
+    render(<GenesisReferralOpsPage />);
+    await waitFor(() => expect(fetchGenesisDogAffiliateCandidates).toHaveBeenCalled());
+    expect(screen.getByTestId("genesis-ops-candidates").textContent).toMatch(/Pending Dog/);
+    expect(screen.getByTestId("genesis-ops-copy-signup-link")).toBeTruthy();
+    expect(screen.getByTestId("genesis-ops-signup-link").textContent).toMatch(/\/genesis-dogs$/);
+
+    fireEvent.click(screen.getByTestId("genesis-ops-activate-user-pending-1"));
+    await waitFor(() => {
+      expect(adminCreateGenesisReferralAffiliate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          user_id: "user-pending-1",
+          display_name: "Pending Dog",
+          affiliate_status: "active",
+          community_slug: "genesis-dogs",
+          reason: "gtm genesis dog candidate activate",
+        }),
+      );
+    });
+    await waitFor(() => expect(screen.getByTestId("genesis-ops-activated-link")).toBeTruthy());
+    expect(screen.getByTestId("genesis-ops-activated-link").textContent).toMatch(/ref=SECONDDOG/);
+  });
+
+  it("shows signup-link guidance when plus-email lookup finds no user", async () => {
+    render(<GenesisReferralOpsPage />);
+    await waitFor(() => expect(fetchGenesisReferralOpsSummary).toHaveBeenCalled());
+
+    fireEvent.change(screen.getByTestId("genesis-ops-lookup"), {
+      target: { value: "missing+alias@example.com" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /Lookup/i }));
+
+    await waitFor(() => expect(screen.getByTestId("genesis-ops-lookup-empty")).toBeTruthy());
+    expect(screen.getByTestId("genesis-ops-lookup-empty").textContent).toMatch(
+      /Send them the Genesis Dog signup link first/i,
+    );
   });
 });

@@ -314,10 +314,27 @@ export type CreateGenesisReferralAffiliateBody = {
   reason: string;
 };
 
+export type GenesisDogAffiliateCandidate = {
+  user_id: string;
+  org_id?: string | null;
+  email?: string | null;
+  display_name?: string | null;
+  community_slug?: string | null;
+  signup_intent?: string | null;
+  affiliate_candidate?: boolean;
+  created_at?: string | null;
+  updated_at?: string | null;
+};
+
 export const fetchGenesisReferralOpsSummary = () =>
   adminFetch("/v1/genesis-referral/ops/summary", undefined, {
     reason: ADMIN_CONSOLE_CONNECT_REASON,
   }) as Promise<{ affiliates?: GenesisReferralOpsAffiliateRow[]; count?: number }>;
+
+export const fetchGenesisDogAffiliateCandidates = () =>
+  adminFetch("/v1/genesis-referral/ops/candidates", undefined, {
+    reason: ADMIN_CONSOLE_CONNECT_REASON,
+  }) as Promise<{ candidates?: GenesisDogAffiliateCandidate[]; count?: number; ok?: boolean }>;
 
 export const adminCreateGenesisReferralAffiliate = (body: CreateGenesisReferralAffiliateBody) =>
   adminFetch(

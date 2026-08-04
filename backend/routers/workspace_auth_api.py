@@ -79,6 +79,9 @@ def _persist_workspace_user_identity(
     org_id: str,
     email: Optional[str] = None,
     display_name: Optional[str] = None,
+    community_slug: Optional[str] = None,
+    signup_intent: Optional[str] = None,
+    affiliate_candidate: Optional[bool] = None,
 ) -> None:
     """Upsert safe identity metadata for Admin Console Genesis grants (no tokens / bodies)."""
     em, dn = _safe_identity_from_request(request, email=email, display_name=display_name)
@@ -90,6 +93,9 @@ def _persist_workspace_user_identity(
             org_id=org_id,
             email=em,
             display_name=dn,
+            community_slug=community_slug,
+            signup_intent=signup_intent,
+            affiliate_candidate=affiliate_candidate,
         )
     except Exception:
         _log.exception(
@@ -97,6 +103,20 @@ def _persist_workspace_user_identity(
             user_id,
             org_id,
         )
+
+
+def _normalize_genesis_dog_onboarding(
+    *,
+    community_slug: Optional[str],
+    signup_intent: Optional[str],
+    affiliate_candidate: Optional[bool],
+) -> tuple[Optional[str], Optional[str], Optional[bool]]:
+    """Accept only the Genesis Dog affiliate-candidate signup shape."""
+    slug = (community_slug or "").strip().lower().replace("_", "-")
+    intent = (signup_intent or "").strip().lower().replace("_", "-")
+    if slug == "genesis-dogs" and intent == "genesis-referral" and affiliate_candidate is True:
+        return "genesis-dogs", "genesis-referral", True
+    return None, None, None
 
 
 class BindUserOrgIn(BaseModel):
@@ -109,6 +129,9 @@ class BindUserOrgIn(BaseModel):
     """Explicit org ids that may hold an orphaned Pro subscription for this bound user."""
     entitlement_repair_candidates: Optional[list[str]] = Field(default=None, max_length=8)
     claim_method: Optional[str] = Field(default=None, max_length=64)
+    community_slug: Optional[str] = Field(default=None, max_length=80)
+    signup_intent: Optional[str] = Field(default=None, max_length=80)
+    affiliate_candidate: Optional[bool] = None
 
 
 def _stable_org_id_for_user(user_id: str) -> str:
@@ -250,6 +273,9 @@ class FinalizeAuthIn(BaseModel):
     claim_method: Optional[str] = Field(default=None, max_length=64)
     subscription_source_org_id: Optional[str] = Field(default=None, max_length=128)
     entitlement_repair_candidates: Optional[list[str]] = Field(default=None, max_length=8)
+    community_slug: Optional[str] = Field(default=None, max_length=80)
+    signup_intent: Optional[str] = Field(default=None, max_length=80)
+    affiliate_candidate: Optional[bool] = None
 
 
 @router.post("/anonymous-session")
@@ -365,10 +391,22 @@ async def finalize_auth(request: Request, body: FinalizeAuthIn) -> Dict[str, Any
     cont_row = store.get_continuation(body.continuation_id.strip())
     if not cont_row:
         raise HTTPException(status_code=404, detail={"code": "continuation_not_found"})
+    slug, intent, candidate = _normalize_genesis_dog_onboarding(
+        community_slug=body.community_slug,
+        signup_intent=body.signup_intent,
+        affiliate_candidate=body.affiliate_candidate,
+    )
     if cont_row.get("consumed_at"):
         # Idempotent retry by same user
         if str(cont_row.get("claimed_user_id") or "") == user_id:
-            _persist_workspace_user_identity(request, user_id=user_id, org_id=org_id)
+            _persist_workspace_user_identity(
+                request,
+                user_id=user_id,
+                org_id=org_id,
+                community_slug=slug,
+                signup_intent=intent,
+                affiliate_candidate=candidate,
+            )
             dest = build_destination_with_agreement(
                 destination_path=str(cont_row.get("destination_path") or "/app"),
                 agreement_id=str(cont_row.get("agreement_id") or "") or None,
@@ -403,7 +441,14 @@ async def finalize_auth(request: Request, body: FinalizeAuthIn) -> Dict[str, Any
 
     prev_org = str(cont_row.get("org_id") or "").strip()
     ensure_organization(org_id, name=user_id)
-    _persist_workspace_user_identity(request, user_id=user_id, org_id=org_id)
+    _persist_workspace_user_identity(
+        request,
+        user_id=user_id,
+        org_id=org_id,
+        community_slug=slug,
+        signup_intent=intent,
+        affiliate_candidate=candidate,
+    )
 
     migrated: list[str] = []
     if not is_returning and prev_org and prev_org != org_id:
@@ -513,6 +558,11 @@ async def bind_user_org(request: Request, body: BindUserOrgIn) -> Dict[str, Any]
     org_id = _stable_org_id_for_user(user_id)
     display = (body.display_name or body.email or "LawDog workspace").strip()[:200]
     claim_method = (body.claim_method or "unknown").strip()[:64]
+    slug, intent, candidate = _normalize_genesis_dog_onboarding(
+        community_slug=body.community_slug,
+        signup_intent=body.signup_intent,
+        affiliate_candidate=body.affiliate_candidate,
+    )
 
     ensure_organization(org_id, name=display)
     _persist_workspace_user_identity(
@@ -521,6 +571,9 @@ async def bind_user_org(request: Request, body: BindUserOrgIn) -> Dict[str, Any]
         org_id=org_id,
         email=body.email,
         display_name=body.display_name,
+        community_slug=slug,
+        signup_intent=intent,
+        affiliate_candidate=candidate,
     )
 
     migrated_agreements: list[str] = []

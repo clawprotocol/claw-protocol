@@ -13,6 +13,10 @@ import { displayNameFromUser, finalizeAuthenticatedSession } from "./postAuthFin
 import { prepareAuthContinuation } from "./prepareAuthContinuation";
 import { setCachedAccessToken, clearCachedAccessToken } from "./authAccessTokenCache";
 import { bindAuthenticatedUserToWorkspace } from "./workspaceBindingApi";
+import {
+  GENESIS_DOG_ONBOARDING_DESTINATION,
+  hasGenesisDogOnboardingIntent,
+} from "../launch/genesisReferral/genesisDogOnboardingCapture";
 
 export type AuthContextValue = {
   enabled: boolean;
@@ -89,12 +93,34 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     };
   }, [enabled, finalizeUser]);
 
+  const genesisStampAttemptRef = useRef<string | null>(null);
+  // Already-signed-in users who open the Genesis Dog signup link still need candidacy stamped.
+  useEffect(() => {
+    const user = session?.user;
+    if (!enabled || !user || !hasGenesisDogOnboardingIntent()) return;
+    if (genesisStampAttemptRef.current === user.id) return;
+    genesisStampAttemptRef.current = user.id;
+    void bindAuthenticatedUserToWorkspace({
+      userId: user.id,
+      email: user.email,
+      displayName: displayNameFromUser(user),
+      claimMethod: "session_restore",
+      accessToken: session?.access_token,
+    }).catch(() => {
+      // Allow a later attempt if bind raced ahead of session readiness.
+      if (genesisStampAttemptRef.current === user.id) {
+        genesisStampAttemptRef.current = null;
+      }
+    });
+  }, [enabled, session?.access_token, session?.user]);
+
   const signInEmail = useCallback(
     async (email: string, opts?: { returningSignIn?: boolean; stagingDirectOnly?: boolean }) => {
+      const genesisDest = hasGenesisDogOnboardingIntent() ? GENESIS_DOG_ONBOARDING_DESTINATION : undefined;
       const continuationId = await prepareAuthContinuation({
         returningSignIn: opts?.returningSignIn,
         workflowStage: opts?.returningSignIn ? "dashboard" : "claim",
-        destinationPath: opts?.returningSignIn ? "/app" : undefined,
+        destinationPath: genesisDest ?? (opts?.returningSignIn ? "/app" : undefined),
         provider: "email",
       });
       return signInWithEmailMagicLink(email, buildAuthCallbackUrl(undefined, continuationId), {
@@ -105,10 +131,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   );
 
   const signInGoogle = useCallback(async (opts?: { returningSignIn?: boolean }) => {
+    const genesisDest = hasGenesisDogOnboardingIntent() ? GENESIS_DOG_ONBOARDING_DESTINATION : undefined;
     const continuationId = await prepareAuthContinuation({
       returningSignIn: opts?.returningSignIn,
       workflowStage: opts?.returningSignIn ? "dashboard" : "claim",
-      destinationPath: opts?.returningSignIn ? "/app" : undefined,
+      destinationPath: genesisDest ?? (opts?.returningSignIn ? "/app" : undefined),
       provider: "google",
     });
     await signInWithGoogle(buildAuthCallbackUrl(undefined, continuationId));

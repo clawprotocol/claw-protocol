@@ -5,8 +5,10 @@ import {
   adminCreateGenesisReferralAffiliate,
   downloadGenesisReferralCommissionsCsv,
   fetchAdminUsers,
+  fetchGenesisDogAffiliateCandidates,
   fetchGenesisReferralOpsSummary,
   readAdminConsoleSecret,
+  type GenesisDogAffiliateCandidate,
   type GenesisReferralOpsAffiliateRow,
 } from "../adminConsoleApi";
 import {
@@ -16,12 +18,18 @@ import {
   type AdminConsoleUserRow,
 } from "../adminConsoleUsers";
 import { useLaunchNav } from "../LaunchNavContext";
+import {
+  buildGenesisDogSignupLink,
+  suggestGenesisReferralCode,
+} from "./genesisDogOnboardingCapture";
 import { buildGenesisReferralLink } from "./genesisReferralCapture";
 
 type StatusFilter = "all" | "active" | "paused" | "revoked";
 
 const DEFAULT_PAYOUT = 0.3;
 const DEFAULT_SLUG = "genesis-dogs";
+const LOOKUP_NO_USER_MESSAGE =
+  "No LawDog user found. Send them the Genesis Dog signup link first, then return here to activate them.";
 
 function money(n: number | undefined): string {
   return `$${Number(n ?? 0).toFixed(2)}`;
@@ -43,18 +51,24 @@ function emptyForm() {
 export function GenesisReferralOpsPage() {
   const { navigate } = useLaunchNav();
   const [rows, setRows] = useState<GenesisReferralOpsAffiliateRow[]>([]);
+  const [candidates, setCandidates] = useState<GenesisDogAffiliateCandidate[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [okMsg, setOkMsg] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [activatingUserId, setActivatingUserId] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [editingCode, setEditingCode] = useState<string | null>(null);
   const [form, setForm] = useState(emptyForm);
   const [userMatches, setUserMatches] = useState<AdminConsoleUserRow[]>([]);
   const [usersLoaded, setUsersLoaded] = useState<AdminConsoleUserRow[] | null>(null);
   const [lookupBusy, setLookupBusy] = useState(false);
+  const [lookupEmpty, setLookupEmpty] = useState(false);
+  const [copiedSignup, setCopiedSignup] = useState(false);
+  const [lastActivatedLink, setLastActivatedLink] = useState<string | null>(null);
 
   const hasAdminSecret = Boolean(readAdminConsoleSecret().trim());
+  const signupLink = useMemo(() => buildGenesisDogSignupLink(), []);
 
   const load = useCallback(async () => {
     if (!readAdminConsoleSecret().trim()) {
@@ -62,17 +76,23 @@ export function GenesisReferralOpsPage() {
       setError(null);
       setLoading(false);
       setRows([]);
+      setCandidates([]);
       return;
     }
     setLoading(true);
     setError(null);
     try {
-      const data = await fetchGenesisReferralOpsSummary();
+      const [data, cand] = await Promise.all([
+        fetchGenesisReferralOpsSummary(),
+        fetchGenesisDogAffiliateCandidates().catch(() => ({ candidates: [] })),
+      ]);
       setRows(data.affiliates ?? []);
+      setCandidates(cand.candidates ?? []);
     } catch (e) {
       const msg = e instanceof Error ? e.message : "Could not load summary";
       setError(msg === "missing_admin_secret" ? MISSING_ADMIN_SECRET_MESSAGE : msg);
       setRows([]);
+      setCandidates([]);
     } finally {
       setLoading(false);
     }
@@ -101,10 +121,12 @@ export function GenesisReferralOpsPage() {
     const q = form.lookup.trim();
     if (!q) {
       setUserMatches([]);
+      setLookupEmpty(false);
       return;
     }
     setLookupBusy(true);
     setError(null);
+    setLookupEmpty(false);
     try {
       const users = await ensureUsersLoaded();
       const matches = filterAdminConsoleUsers(users, q).slice(0, 8);
@@ -115,6 +137,9 @@ export function GenesisReferralOpsPage() {
         // Allow direct user_id paste when admin users list has no email match.
         if (!q.includes("@")) {
           setForm((f) => ({ ...f, userId: q }));
+          setLookupEmpty(false);
+        } else {
+          setLookupEmpty(true);
         }
       }
     } catch (e) {
@@ -123,6 +148,56 @@ export function GenesisReferralOpsPage() {
       setUserMatches([]);
     } finally {
       setLookupBusy(false);
+    }
+  }
+
+  async function copySignupLink(): Promise<void> {
+    try {
+      await navigator.clipboard.writeText(signupLink);
+      setCopiedSignup(true);
+      window.setTimeout(() => setCopiedSignup(false), 2000);
+    } catch {
+      setError("Could not copy signup link.");
+    }
+  }
+
+  async function activateCandidate(c: GenesisDogAffiliateCandidate): Promise<void> {
+    const userId = (c.user_id || "").trim();
+    if (!userId) return;
+    const displayName = (c.display_name || c.email || userId).trim();
+    const existingCodes = new Set(rows.map((r) => (r.referral_code || "").toUpperCase()));
+    let referralCode = suggestGenesisReferralCode({
+      email: c.email,
+      displayName: c.display_name,
+      userId,
+    });
+    if (existingCodes.has(referralCode)) {
+      referralCode = `${referralCode}${userId.replace(/[^A-Za-z0-9]/g, "").slice(0, 4)}`.toUpperCase().slice(0, 24);
+    }
+    setActivatingUserId(userId);
+    setError(null);
+    setOkMsg(null);
+    setLastActivatedLink(null);
+    try {
+      const res = await adminCreateGenesisReferralAffiliate({
+        user_id: userId,
+        display_name: displayName,
+        referral_code: referralCode,
+        community_slug: c.community_slug || DEFAULT_SLUG,
+        affiliate_status: "active",
+        payout_rate: DEFAULT_PAYOUT,
+        reason: "gtm genesis dog candidate activate",
+      });
+      const code = res.affiliate?.referral_code || referralCode;
+      const link = buildGenesisReferralLink(code);
+      setLastActivatedLink(link);
+      setOkMsg(`Activated affiliate ${code}. Referral link ready to copy.`);
+      await load();
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Activate failed";
+      setError(msg === "missing_admin_secret" ? MISSING_ADMIN_SECRET_MESSAGE : msg);
+    } finally {
+      setActivatingUserId(null);
     }
   }
 
@@ -188,10 +263,12 @@ export function GenesisReferralOpsPage() {
         reason,
       });
       const code = res.affiliate?.referral_code || referralCode.toUpperCase();
+      const link = buildGenesisReferralLink(code);
+      setLastActivatedLink(form.affiliateStatus === "active" ? link : null);
       setOkMsg(
         editingCode
           ? `Updated affiliate ${code}.`
-          : `Created affiliate ${code}. Dog can copy link at /app/genesis-referral.`,
+          : `Created affiliate ${code}. Referral link ready to copy.`,
       );
       resetForm();
       await load();
@@ -230,13 +307,24 @@ export function GenesisReferralOpsPage() {
           <button type="button" className="vs01-btn vs01-btn--secondary text-sm" onClick={() => void load()}>
             Refresh
           </button>
-          <button type="button" className="vs01-btn vs01-btn--primary text-sm" onClick={() => void onExportCsv()}>
+          <button
+            type="button"
+            className="vs01-btn vs01-btn--primary text-sm"
+            onClick={() => void copySignupLink()}
+            data-testid="genesis-ops-copy-signup-link"
+          >
+            {copiedSignup ? "Signup link copied" : "Copy Genesis Dog signup link"}
+          </button>
+          <button type="button" className="vs01-btn vs01-btn--secondary text-sm" onClick={() => void onExportCsv()}>
             Export commissions CSV
           </button>
           <button type="button" className="vs01-btn vs01-btn--secondary text-sm" onClick={() => navigate("/app/admin")}>
             Admin Dashboard
           </button>
         </div>
+        <p className="text-xs text-slate-500 font-mono break-all" data-testid="genesis-ops-signup-link">
+          {signupLink}
+        </p>
 
         {!hasAdminSecret ? (
           <div
@@ -303,6 +391,11 @@ export function GenesisReferralOpsPage() {
                     </li>
                   ))}
                 </ul>
+              ) : null}
+              {lookupEmpty ? (
+                <p className="sm:col-span-2 text-sm text-amber-200" data-testid="genesis-ops-lookup-empty">
+                  {LOOKUP_NO_USER_MESSAGE}
+                </p>
               ) : null}
               <label className="block text-xs text-slate-400">
                 user_id
@@ -416,6 +509,66 @@ export function GenesisReferralOpsPage() {
             {okMsg}
           </p>
         ) : null}
+        {lastActivatedLink ? (
+          <div
+            className="rounded-xl border border-emerald-800/50 bg-emerald-950/20 px-4 py-3 text-sm space-y-2"
+            data-testid="genesis-ops-activated-link"
+          >
+            <p className="text-emerald-100">Referral link</p>
+            <p className="font-mono text-xs text-emerald-200/90 break-all">{lastActivatedLink}</p>
+            <button
+              type="button"
+              className="vs01-btn vs01-btn--secondary vs01-btn--compact text-sm"
+              onClick={() => void navigator.clipboard.writeText(lastActivatedLink)}
+            >
+              Copy referral link
+            </button>
+          </div>
+        ) : null}
+
+        <section
+          className="rounded-xl border border-slate-700/60 bg-slate-900/40 p-4 space-y-3"
+          data-testid="genesis-ops-candidates"
+        >
+          <h2 className="text-sm font-semibold text-slate-100">Genesis Dog candidates</h2>
+          <p className="text-xs text-slate-500">
+            Users who signed up through the Genesis Dog link and are waiting for affiliate activation.
+          </p>
+          {!loading && candidates.length === 0 ? (
+            <p className="text-sm text-slate-500" data-testid="genesis-ops-candidates-empty">
+              No pending candidates.
+            </p>
+          ) : null}
+          {candidates.length > 0 ? (
+            <ul className="divide-y divide-slate-800 rounded-md border border-slate-700/50">
+              {candidates.map((c) => (
+                <li
+                  key={c.user_id}
+                  className="flex flex-wrap items-center justify-between gap-3 px-3 py-3 text-sm"
+                  data-testid={`genesis-ops-candidate-${c.user_id}`}
+                >
+                  <div className="min-w-0">
+                    <p className="font-medium text-slate-100 truncate">
+                      {c.display_name || c.email || "Genesis Dog candidate"}
+                    </p>
+                    <p className="text-xs text-slate-500 font-mono break-all">
+                      {c.email || "—"} · {c.user_id}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    className="vs01-btn vs01-btn--primary vs01-btn--compact text-sm"
+                    disabled={activatingUserId === c.user_id}
+                    onClick={() => void activateCandidate(c)}
+                    data-testid={`genesis-ops-activate-${c.user_id}`}
+                  >
+                    {activatingUserId === c.user_id ? "Activating…" : "Activate Affiliate"}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </section>
 
         <div className="flex flex-wrap items-center gap-3">
           <label className="text-xs text-slate-400 flex items-center gap-2">

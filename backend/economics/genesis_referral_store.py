@@ -141,7 +141,15 @@ def upsert_genesis_affiliate(
     if not code:
         raise ValueError("invalid_referral_code")
     now = _utc_now_iso()
+    uid = user_id.strip()
     existing = get_genesis_affiliate_by_code(con, code)
+    # Prefer an existing row for this user so re-activate / double-submit cannot
+    # create a second affiliate under a different generated code.
+    if not existing:
+        by_user = get_genesis_affiliate_by_user_id(con, uid)
+        if by_user:
+            existing = by_user
+            code = normalize_referral_code(str(by_user.get("referral_code") or code)) or code
     if existing:
         con.execute(
             """
@@ -151,7 +159,7 @@ def upsert_genesis_affiliate(
             WHERE id = ?
             """,
             (
-                user_id.strip(),
+                uid,
                 display_name.strip()[:160],
                 (community_slug or "").strip()[:80] or None,
                 affiliate_status,
@@ -173,7 +181,7 @@ def upsert_genesis_affiliate(
         """,
         (
             aff_id,
-            user_id.strip(),
+            uid,
             display_name.strip()[:160],
             code,
             (community_slug or "").strip()[:80] or None,
