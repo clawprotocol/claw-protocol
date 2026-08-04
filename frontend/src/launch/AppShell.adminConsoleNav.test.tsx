@@ -73,4 +73,22 @@ describe("AppShell Admin Console More menu", () => {
     await user.click(within(menu).getByRole("menuitem", { name: /admin console/i }));
     expect(mockNavigate).toHaveBeenCalledWith("/app/admin");
   });
+
+  it("shows Genesis Referral Ops in More when backend authorizes operator", async () => {
+    capabilityState.capability = {
+      authorized: true,
+      role: "support_operator",
+      userId: "op-1",
+    };
+    const user = userEvent.setup();
+    render(
+      <AppShell title="Dashboard" subtitle="Your agreements">
+        <div>child</div>
+      </AppShell>,
+    );
+    await user.click(screen.getByTestId("app-shell-nav-more"));
+    const menu = screen.getByTestId("app-shell-nav-more-menu");
+    await user.click(within(menu).getByRole("menuitem", { name: /genesis referral/i }));
+    expect(mockNavigate).toHaveBeenCalledWith("/app/ops/genesis-referral");
+  });
 });

@@ -3,8 +3,19 @@ import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/re
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AdminConsolePage } from "./AdminConsolePage";
 
+const navigate = vi.fn();
+
 vi.mock("./LaunchNavContext", () => ({
-  useLaunchNav: () => ({ navigate: vi.fn(), pathname: "/app/admin", search: "" }),
+  useLaunchNav: () => ({ navigate, pathname: "/app/admin", search: "" }),
+}));
+
+vi.mock("../auth/AuthProvider", () => ({
+  useAuth: () => ({
+    enabled: true,
+    loading: false,
+    session: { access_token: "test-session-token", user: { id: "op-1" } },
+    user: { id: "op-1" },
+  }),
 }));
 
 vi.mock("./useOperatorConsoleCapability", () => ({
@@ -27,8 +38,11 @@ vi.mock("../access/AccessContext", () => ({
 }));
 
 vi.mock("./adminConsoleApi", () => ({
+  ADMIN_SECRET_REJECTED_MESSAGE:
+    "Admin secret was rejected. Re-enter the correct secret and click Connect.",
   readAdminConsoleSecret: vi.fn(() => ""),
   writeAdminConsoleSecret: vi.fn(),
+  clearAdminConsoleSecret: vi.fn(),
   fetchAdminOverview: vi.fn(async () => ({ premium_unlock_failures: 0, delivery_failures: 0 })),
   fetchAdminUsers: vi.fn(async () => ({
     users: [
@@ -72,6 +86,7 @@ vi.mock("./genesisBetaPaymentBypassAuth", () => ({
 
 import {
   adminGrantGenesisEntitlement,
+  clearAdminConsoleSecret,
   fetchAdminOverview,
   writeAdminConsoleSecret,
 } from "./adminConsoleApi";
@@ -80,6 +95,7 @@ import { bootstrapQaPaymentBypassAdminSession } from "./genesisBetaPaymentBypass
 describe("AdminConsolePage connected state", () => {
   afterEach(() => {
     cleanup();
+    navigate.mockClear();
     vi.clearAllMocks();
   });
 
@@ -153,5 +169,36 @@ describe("AdminConsolePage connected state", () => {
       "cryptocurated21@example.com",
     );
     expect(document.body.textContent).not.toMatch(/payment_terms|"purpose"|private text not for admin/i);
+  });
+
+  it("exposes Genesis Referral Ops under Links and Users", async () => {
+    render(<AdminConsolePage initialAdminSecret="ops-secret" />);
+    await waitFor(() => expect(fetchAdminOverview).toHaveBeenCalled());
+
+    fireEvent.click(screen.getByRole("button", { name: /^Links$/ }));
+    fireEvent.click(screen.getByTestId("admin-links-genesis-referral-ops"));
+    expect(navigate).toHaveBeenCalledWith("/app/ops/genesis-referral");
+
+    fireEvent.click(screen.getByRole("button", { name: /^Users$/ }));
+    fireEvent.click(screen.getByTestId("admin-genesis-referral-ops-link"));
+    expect(navigate).toHaveBeenCalledWith("/app/ops/genesis-referral");
+  });
+
+  it("Disconnect clears the admin secret via clearAdminConsoleSecret", async () => {
+    render(<AdminConsolePage initialAdminSecret="ops-secret" />);
+    await waitFor(() => expect(fetchAdminOverview).toHaveBeenCalled());
+    fireEvent.click(screen.getByTestId("admin-console-disconnect"));
+    expect(clearAdminConsoleSecret).toHaveBeenCalled();
+    expect(screen.getByPlaceholderText("x-claw-admin-secret")).toHaveProperty("value", "");
+  });
+
+  it("clears connected HQ metrics when privileged load returns rejected secret", async () => {
+    vi.mocked(fetchAdminOverview).mockImplementationOnce(async () => {
+      throw new Error("Admin secret was rejected. Re-enter the correct secret and click Connect.");
+    });
+    render(<AdminConsolePage initialAdminSecret="bad-secret" />);
+    await waitFor(() => expect(screen.getByTestId("admin-console-error")).toBeTruthy());
+    expect(screen.getByTestId("admin-console-error").textContent).toMatch(/rejected/i);
+    expect(screen.getByText(/ACTIVE USERS/i).closest("div")?.textContent).toMatch(/Not connected/i);
   });
 });

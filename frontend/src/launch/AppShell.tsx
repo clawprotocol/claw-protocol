@@ -67,11 +67,18 @@ export function AppShell(props: {
     { label: "Work product", path: "/app/work-product", title: "Briefs and memos from your materials" },
   );
   if (showAdminConsoleNav) {
-    overflowItems.push({
-      label: "Admin Console",
-      path: "/app/admin",
-      title: "Operator Admin Console (support operators only)",
-    });
+    overflowItems.push(
+      {
+        label: "Admin Console",
+        path: "/app/admin",
+        title: "Operator Admin Console (support operators only)",
+      },
+      {
+        label: "Genesis Referral — Ops",
+        path: "/app/ops/genesis-referral",
+        title: "Create Genesis Dog affiliates and export commissions",
+      },
+    );
   }
 
   return (

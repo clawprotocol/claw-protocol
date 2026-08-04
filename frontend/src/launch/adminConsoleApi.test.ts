@@ -3,8 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("../agreement/agreementOrgHeaders", () => ({
   clawAgreementHeaders: (extra?: Record<string, string>) => ({
-    "X-Claw-Org-Id": "user-op",
-    Authorization: "Bearer test-token",
+    "X-Claw-Org-Id": "anon-org",
     ...(extra || {}),
   }),
 }));
@@ -13,24 +12,57 @@ vi.mock("../lib/clawApi", () => ({
   resolveApiBase: () => "https://api.example.test",
 }));
 
+vi.mock("../auth/authAccessTokenCache", () => ({
+  refreshCachedAccessToken: vi.fn(async () => "hydrated-access-token"),
+}));
+
+import { refreshCachedAccessToken } from "../auth/authAccessTokenCache";
 import {
   ADMIN_CONSOLE_CONNECT_REASON,
+  ADMIN_SECRET_REJECTED_MESSAGE,
+  MISSING_ADMIN_SECRET_MESSAGE,
   adminGrantGenesisEntitlement,
   adminRevokeGenesisEntitlement,
+  clearAdminConsoleSecret,
   fetchAdminOverview,
   formatAdminApiErrorDetail,
+  mapAdminApiHttpError,
+  readAdminConsoleSecret,
   writeAdminConsoleSecret,
 } from "./adminConsoleApi";
 
 describe("adminConsoleApi", () => {
   beforeEach(() => {
     writeAdminConsoleSecret("staging-admin-secret");
+    localStorage.removeItem("claw_admin_console_secret_v1");
   });
 
   afterEach(() => {
-    writeAdminConsoleSecret("");
+    clearAdminConsoleSecret();
+    vi.mocked(refreshCachedAccessToken).mockResolvedValue("hydrated-access-token");
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
+  });
+
+  it("persists admin secret to sessionStorage only (not localStorage)", () => {
+    writeAdminConsoleSecret("shared-ops-secret");
+    expect(sessionStorage.getItem("claw_admin_console_secret_v1")).toBe("shared-ops-secret");
+    expect(localStorage.getItem("claw_admin_console_secret_v1")).toBeNull();
+    expect(readAdminConsoleSecret()).toBe("shared-ops-secret");
+  });
+
+  it("clearAdminConsoleSecret removes session key and stale localStorage key", () => {
+    writeAdminConsoleSecret("shared-ops-secret");
+    localStorage.setItem("claw_admin_console_secret_v1", "stale-from-old-build");
+    clearAdminConsoleSecret();
+    expect(sessionStorage.getItem("claw_admin_console_secret_v1")).toBeNull();
+    expect(localStorage.getItem("claw_admin_console_secret_v1")).toBeNull();
+    expect(readAdminConsoleSecret()).toBe("");
+  });
+
+  it("throws a clear message when admin secret is missing", async () => {
+    writeAdminConsoleSecret("");
+    await expect(fetchAdminOverview()).rejects.toThrow(MISSING_ADMIN_SECRET_MESSAGE);
   });
 
   it("formats object FastAPI detail instead of [object Object]", () => {
@@ -55,6 +87,7 @@ describe("adminConsoleApi", () => {
 
     await fetchAdminOverview();
 
+    expect(refreshCachedAccessToken).toHaveBeenCalled();
     expect(fetchMock).toHaveBeenCalledWith(
       "https://api.example.test/v1/admin/overview",
       expect.objectContaining({
@@ -62,9 +95,38 @@ describe("adminConsoleApi", () => {
         headers: expect.objectContaining({
           "x-claw-admin-secret": "staging-admin-secret",
           "x-claw-admin-reason": ADMIN_CONSOLE_CONNECT_REASON,
+          Authorization: "Bearer hydrated-access-token",
         }),
       }),
     );
+  });
+
+  it("rehydrates JWT after refresh-equivalent reconnect and still sends session secret", async () => {
+    writeAdminConsoleSecret("session-secret-after-refresh");
+    vi.mocked(refreshCachedAccessToken).mockResolvedValueOnce("token-after-refresh");
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      text: async () => JSON.stringify({ active_users: 2 }),
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await fetchAdminOverview();
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://api.example.test/v1/admin/overview",
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          "x-claw-admin-secret": "session-secret-after-refresh",
+          Authorization: "Bearer token-after-refresh",
+        }),
+      }),
+    );
+  });
+
+  it("maps forbidden invalid secret 403 to a clear reconnect message", () => {
+    expect(
+      mapAdminApiHttpError({ code: "forbidden", message: "Invalid operator secret." }, 403),
+    ).toBe(ADMIN_SECRET_REJECTED_MESSAGE);
   });
 
   it("sends operator audit reason in header and body for Genesis grant/revoke", async () => {
@@ -102,7 +164,7 @@ describe("adminConsoleApi", () => {
     );
   });
 
-  it("surfaces object detail code/message on failed privileged calls", async () => {
+  it("surfaces a clear operator-role message on failed privileged calls", async () => {
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => ({
@@ -116,7 +178,23 @@ describe("adminConsoleApi", () => {
     );
 
     await expect(fetchAdminOverview()).rejects.toThrow(
-      "operator_role_required: Authenticated principal is not an active operator.",
+      "Your account is not an active operator. Operator role is required for Admin Dashboard.",
     );
+  });
+
+  it("surfaces admin secret rejected on forbidden invalid secret responses", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: false,
+        status: 403,
+        text: async () =>
+          JSON.stringify({
+            detail: { code: "forbidden", message: "Invalid operator secret." },
+          }),
+      })),
+    );
+
+    await expect(fetchAdminOverview()).rejects.toThrow(ADMIN_SECRET_REJECTED_MESSAGE);
   });
 });

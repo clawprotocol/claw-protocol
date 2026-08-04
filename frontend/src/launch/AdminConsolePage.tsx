@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useAuth } from "../auth/AuthProvider";
 import { AppShell } from "./AppShell";
 import {
+  ADMIN_SECRET_REJECTED_MESSAGE,
   adminPayoutBatchAction,
   adminGrantGenesisEntitlement,
   adminRefreshEntitlement,
@@ -14,6 +16,7 @@ import {
   fetchAdminDeliveries,
   fetchAdminOverview,
   fetchAdminUsers,
+  clearAdminConsoleSecret,
   readAdminConsoleSecret,
   writeAdminConsoleSecret,
 } from "./adminConsoleApi";
@@ -23,10 +26,17 @@ import {
   filterAdminConsoleUsers,
   normalizeAdminConsoleUser,
 } from "./adminConsoleUsers";
+import { useLaunchNav } from "./LaunchNavContext";
 
 type FounderTab = "hq" | "money" | "users" | "queue" | "partners" | "systems" | "links";
 
-type LinkItem = { label: string; href: string; note: string };
+type LinkItem = {
+  label: string;
+  href: string;
+  note: string;
+  /** Same-origin SPA route — use LaunchNav instead of opening a new tab. */
+  internal?: boolean;
+};
 
 function isDeliveryBlocked(row: Record<string, unknown>): boolean {
   const status = String(row.status || "").toLowerCase();
@@ -44,6 +54,8 @@ function moneyValue(v: unknown): string {
 }
 
 export function AdminConsolePage(props: { initialAdminSecret?: string } = {}) {
+  const { navigate } = useLaunchNav();
+  const { enabled: authEnabled, loading: authLoading, session } = useAuth();
   const secretInputRef = useRef<HTMLInputElement>(null);
   const [secret, setSecret] = useState(() => props.initialAdminSecret?.trim() || readAdminConsoleSecret());
   const [tab, setTab] = useState<FounderTab>("hq");
@@ -86,6 +98,12 @@ export function AdminConsolePage(props: { initialAdminSecret?: string } = {}) {
   }, [overview]);
   const launchLinks = useMemo<LinkItem[]>(
     () => [
+      {
+        label: "Genesis Referral — Ops",
+        href: "/app/ops/genesis-referral",
+        note: "Create Genesis Dog affiliates, review stats, export commissions",
+        internal: true,
+      },
       { label: "Stripe", href: String(import.meta.env.VITE_FOUNDER_LINK_STRIPE || ""), note: "Billing and subscriptions" },
       { label: "OpenAI", href: String(import.meta.env.VITE_FOUNDER_LINK_OPENAI || ""), note: "Usage and model diagnostics" },
       { label: "Logs", href: String(import.meta.env.VITE_FOUNDER_LINK_LOGS || ""), note: "Application and error logs" },
@@ -132,7 +150,16 @@ export function AdminConsolePage(props: { initialAdminSecret?: string } = {}) {
       setAudit((au.actions || []) as Record<string, unknown>[]);
       setPayoutBatches((pb.batches || []) as Record<string, unknown>[]);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed loading Founder HQ");
+      const msg = e instanceof Error ? e.message : "Failed loading Founder HQ";
+      // Do not leave a "connected" HQ shell when privileged calls 403.
+      setOverview(null);
+      setUsers([]);
+      setAgreements([]);
+      setDeliveries([]);
+      setAffiliates([]);
+      setAudit([]);
+      setPayoutBatches([]);
+      setError(msg);
     } finally {
       setLoading(false);
     }
@@ -140,13 +167,19 @@ export function AdminConsolePage(props: { initialAdminSecret?: string } = {}) {
 
   const autoLoadedRef = useRef(false);
   useEffect(() => {
+    // Wait for AuthProvider to hydrate JWT cache before privileged admin calls.
+    if (authLoading) return;
+    if (authEnabled && !session) {
+      setError("Sign in required before connecting Admin Dashboard.");
+      return;
+    }
     const bootstrapSecret = props.initialAdminSecret?.trim() || readAdminConsoleSecret().trim();
     if (!bootstrapSecret || autoLoadedRef.current) return;
     autoLoadedRef.current = true;
     writeAdminConsoleSecret(bootstrapSecret);
     setSecret(bootstrapSecret);
     void loadFounderHq(bootstrapSecret);
-  }, [props.initialAdminSecret, loadFounderHq]);
+  }, [authLoading, authEnabled, session, props.initialAdminSecret, loadFounderHq]);
 
   const doAction = async (id: string, fn: () => Promise<unknown>) => {
     setBusyId(id);
@@ -159,6 +192,20 @@ export function AdminConsolePage(props: { initialAdminSecret?: string } = {}) {
     } finally {
       setBusyId(null);
     }
+  };
+
+  const disconnectAdminSecret = () => {
+    clearAdminConsoleSecret();
+    setSecret("");
+    if (secretInputRef.current) secretInputRef.current.value = "";
+    setOverview(null);
+    setUsers([]);
+    setAgreements([]);
+    setDeliveries([]);
+    setAffiliates([]);
+    setAudit([]);
+    setPayoutBatches([]);
+    setError(null);
   };
 
   return (
@@ -184,7 +231,24 @@ export function AdminConsolePage(props: { initialAdminSecret?: string } = {}) {
             >
               {loading ? "Connecting…" : "Connect"}
             </button>
+            <button
+              type="button"
+              className="vs01-btn vs01-btn--secondary vs01-btn--compact"
+              data-testid="admin-console-disconnect"
+              disabled={loading}
+              onClick={disconnectAdminSecret}
+            >
+              Disconnect
+            </button>
           </div>
+          {error ? (
+            <p className="mt-2 text-xs text-rose-300" data-testid="admin-console-error">
+              {error}
+              {error === ADMIN_SECRET_REJECTED_MESSAGE || /rejected|reconnect/i.test(error)
+                ? " Use Connect after correcting the secret."
+                : null}
+            </p>
+          ) : null}
         </div>
 
         <div className="flex flex-wrap gap-2">
@@ -214,7 +278,6 @@ export function AdminConsolePage(props: { initialAdminSecret?: string } = {}) {
         </div>
 
         {loading ? <p className="text-xs text-slate-500">Loading…</p> : null}
-        {error ? <p className="text-xs text-rose-300">{error}</p> : null}
 
         {tab === "hq" ? (
           <div className="space-y-3">
@@ -326,9 +389,14 @@ export function AdminConsolePage(props: { initialAdminSecret?: string } = {}) {
               />
               <p className="mt-2 text-[11px] text-slate-500">
                 Referral codes / payouts:{" "}
-                <a className="text-sky-300 underline" href="/app/ops/genesis-referral">
-                  Genesis Referral Ops
-                </a>
+                <button
+                  type="button"
+                  className="text-sky-300 underline"
+                  data-testid="admin-genesis-referral-ops-link"
+                  onClick={() => navigate("/app/ops/genesis-referral")}
+                >
+                  Genesis Referral — Ops
+                </button>
               </p>
               {!genesisReasonReady ? (
                 <p className="mt-1 text-[11px] text-amber-200/80">Enter at least 3 characters before granting or revoking.</p>
@@ -583,9 +651,25 @@ export function AdminConsolePage(props: { initialAdminSecret?: string } = {}) {
                 <p className="text-sm font-medium text-slate-200">{item.label}</p>
                 <p className="mt-1 text-slate-500">{item.note}</p>
                 {item.href ? (
-                  <a className="mt-2 inline-flex rounded border border-slate-700 bg-slate-900/50 px-2 py-1 text-slate-100" href={item.href} target="_blank" rel="noreferrer">
-                    Open
-                  </a>
+                  item.internal ? (
+                    <button
+                      type="button"
+                      className="mt-2 inline-flex rounded border border-slate-700 bg-slate-900/50 px-2 py-1 text-slate-100"
+                      data-testid="admin-links-genesis-referral-ops"
+                      onClick={() => navigate(item.href)}
+                    >
+                      Open
+                    </button>
+                  ) : (
+                    <a
+                      className="mt-2 inline-flex rounded border border-slate-700 bg-slate-900/50 px-2 py-1 text-slate-100"
+                      href={item.href}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      Open
+                    </a>
+                  )
                 ) : (
                   <p className="mt-2 text-slate-400">Not connected</p>
                 )}

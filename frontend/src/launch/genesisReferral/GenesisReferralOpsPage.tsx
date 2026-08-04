@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react";
 import { AppShell } from "../AppShell";
 import {
+  MISSING_ADMIN_SECRET_MESSAGE,
   adminCreateGenesisReferralAffiliate,
   downloadGenesisReferralCommissionsCsv,
   fetchAdminUsers,
@@ -53,10 +54,14 @@ export function GenesisReferralOpsPage() {
   const [usersLoaded, setUsersLoaded] = useState<AdminConsoleUserRow[] | null>(null);
   const [lookupBusy, setLookupBusy] = useState(false);
 
+  const hasAdminSecret = Boolean(readAdminConsoleSecret().trim());
+
   const load = useCallback(async () => {
     if (!readAdminConsoleSecret().trim()) {
-      setError("Set admin secret in /app/admin first.");
+      // Dedicated banner handles missing-secret UX; avoid raw missing_admin_secret text.
+      setError(null);
       setLoading(false);
+      setRows([]);
       return;
     }
     setLoading(true);
@@ -65,7 +70,8 @@ export function GenesisReferralOpsPage() {
       const data = await fetchGenesisReferralOpsSummary();
       setRows(data.affiliates ?? []);
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not load summary");
+      const msg = e instanceof Error ? e.message : "Could not load summary";
+      setError(msg === "missing_admin_secret" ? MISSING_ADMIN_SECRET_MESSAGE : msg);
       setRows([]);
     } finally {
       setLoading(false);
@@ -112,7 +118,8 @@ export function GenesisReferralOpsPage() {
         }
       }
     } catch (e) {
-      setError(e instanceof Error ? e.message : "User lookup failed");
+      const msg = e instanceof Error ? e.message : "User lookup failed";
+      setError(msg === "missing_admin_secret" ? MISSING_ADMIN_SECRET_MESSAGE : msg);
       setUserMatches([]);
     } finally {
       setLookupBusy(false);
@@ -189,7 +196,8 @@ export function GenesisReferralOpsPage() {
       resetForm();
       await load();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Create/update failed");
+      const msg = err instanceof Error ? err.message : "Create/update failed";
+      setError(msg === "missing_admin_secret" ? MISSING_ADMIN_SECRET_MESSAGE : msg);
     } finally {
       setSaving(false);
     }
@@ -200,7 +208,8 @@ export function GenesisReferralOpsPage() {
     try {
       await downloadGenesisReferralCommissionsCsv();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "CSV export failed");
+      const msg = err instanceof Error ? err.message : "CSV export failed";
+      setError(msg === "missing_admin_secret" ? MISSING_ADMIN_SECRET_MESSAGE : msg);
     }
   }
 
@@ -225,9 +234,25 @@ export function GenesisReferralOpsPage() {
             Export commissions CSV
           </button>
           <button type="button" className="vs01-btn vs01-btn--secondary text-sm" onClick={() => navigate("/app/admin")}>
-            Admin console
+            Admin Dashboard
           </button>
         </div>
+
+        {!hasAdminSecret ? (
+          <div
+            className="rounded-xl border border-amber-700/50 bg-amber-950/30 px-4 py-3 text-sm text-amber-100"
+            data-testid="genesis-ops-missing-secret"
+          >
+            <p>{MISSING_ADMIN_SECRET_MESSAGE}</p>
+            <button
+              type="button"
+              className="vs01-btn vs01-btn--secondary vs01-btn--compact mt-3 text-sm"
+              onClick={() => navigate("/app/admin")}
+            >
+              Open Admin Dashboard
+            </button>
+          </div>
+        ) : null}
 
         <section
           className="rounded-xl border border-slate-700/60 bg-slate-900/40 p-4 space-y-3"
@@ -381,7 +406,7 @@ export function GenesisReferralOpsPage() {
         </section>
 
         {loading ? <p className="text-sm text-slate-500">Loading…</p> : null}
-        {error ? (
+        {error && !(!hasAdminSecret && error === MISSING_ADMIN_SECRET_MESSAGE) ? (
           <p className="text-sm text-amber-300" data-testid="genesis-ops-error">
             {error}
           </p>

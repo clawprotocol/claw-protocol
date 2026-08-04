@@ -9,15 +9,20 @@ vi.mock("../LaunchNavContext", () => ({
   useLaunchNav: () => ({ navigate, pathname: "/app/ops/genesis-referral", search: "" }),
 }));
 
-vi.mock("../adminConsoleApi", () => ({
-  readAdminConsoleSecret: vi.fn(() => "test-admin-secret"),
-  fetchGenesisReferralOpsSummary: vi.fn(),
-  adminCreateGenesisReferralAffiliate: vi.fn(),
-  downloadGenesisReferralCommissionsCsv: vi.fn(async () => undefined),
-  fetchAdminUsers: vi.fn(),
-}));
+vi.mock("../adminConsoleApi", async () => {
+  const actual = await vi.importActual<typeof import("../adminConsoleApi")>("../adminConsoleApi");
+  return {
+    ...actual,
+    readAdminConsoleSecret: vi.fn(() => "test-admin-secret"),
+    fetchGenesisReferralOpsSummary: vi.fn(),
+    adminCreateGenesisReferralAffiliate: vi.fn(),
+    downloadGenesisReferralCommissionsCsv: vi.fn(async () => undefined),
+    fetchAdminUsers: vi.fn(),
+  };
+});
 
 import {
+  MISSING_ADMIN_SECRET_MESSAGE,
   adminCreateGenesisReferralAffiliate,
   downloadGenesisReferralCommissionsCsv,
   fetchAdminUsers,
@@ -63,6 +68,15 @@ describe("GenesisReferralOpsPage", () => {
           user_id: "user-dog-1",
           email: "dog1@example.com",
           display_name: "First Dog",
+          plan_type: "free",
+          agreement_count: 0,
+        },
+        {
+          id: "org:user-lawdogtest2",
+          org_id: "org:user-lawdogtest2",
+          user_id: "eb72e4d2-c803-490d-80ee-d17634b8ebfb",
+          email: "cryptocurated21+lawdogtest2@gmail.com",
+          display_name: "LawDog Test 2",
           plan_type: "free",
           agreement_count: 0,
         },
@@ -138,5 +152,36 @@ describe("GenesisReferralOpsPage", () => {
     await waitFor(() => expect(fetchGenesisReferralOpsSummary).toHaveBeenCalled());
     fireEvent.click(screen.getByRole("button", { name: /Export commissions CSV/i }));
     await waitFor(() => expect(downloadGenesisReferralCommissionsCsv).toHaveBeenCalled());
+  });
+
+  it("looks up plus-addressed Gmail without stripping the +tag", async () => {
+    render(<GenesisReferralOpsPage />);
+    await waitFor(() => expect(fetchGenesisReferralOpsSummary).toHaveBeenCalled());
+
+    fireEvent.change(screen.getByTestId("genesis-ops-lookup"), {
+      target: { value: "cryptocurated21+lawdogtest2@gmail.com" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /Lookup/i }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId("genesis-ops-user-id")).toHaveProperty(
+        "value",
+        "eb72e4d2-c803-490d-80ee-d17634b8ebfb",
+      );
+    });
+    expect(fetchAdminUsers).toHaveBeenCalled();
+  });
+
+  it("shows a clear missing-secret message instead of raw missing_admin_secret", async () => {
+    vi.mocked(readAdminConsoleSecret).mockReturnValue("");
+    render(<GenesisReferralOpsPage />);
+    await waitFor(() => expect(screen.getByTestId("genesis-ops-missing-secret")).toBeTruthy());
+    expect(screen.getByTestId("genesis-ops-missing-secret").textContent).toContain(
+      MISSING_ADMIN_SECRET_MESSAGE,
+    );
+    expect(document.body.textContent).not.toMatch(/\bmissing_admin_secret\b/);
+    expect(fetchGenesisReferralOpsSummary).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: /Open Admin Dashboard/i }));
+    expect(navigate).toHaveBeenCalledWith("/app/admin");
   });
 });

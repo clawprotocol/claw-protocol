@@ -1,15 +1,28 @@
 import { clawAgreementHeaders } from "../agreement/agreementOrgHeaders";
+import { refreshCachedAccessToken } from "../auth/authAccessTokenCache";
 import { resolveApiBase } from "../lib/clawApi";
 
 const API_BASE = resolveApiBase();
+/** Shared admin-secret key for Founder HQ and ops routes (sessionStorage only). */
 const ADMIN_SECRET_KEY = "claw_admin_console_secret_v1";
 
 /** Fixed read-only audit reason for Admin Console Connect / list loads. */
 export const ADMIN_CONSOLE_CONNECT_REASON = "admin_console_connect";
 
+/** Operator-facing copy when Connect has not persisted an admin secret yet. */
+export const MISSING_ADMIN_SECRET_MESSAGE =
+  "Admin secret missing. Connect from Admin Dashboard first, then reopen Genesis Referral Ops.";
+
+/** Operator-facing copy when backend rejects x-claw-admin-secret. */
+export const ADMIN_SECRET_REJECTED_MESSAGE =
+  "Admin secret was rejected. Re-enter the correct secret and click Connect.";
+
+export const ADMIN_SIGN_IN_REQUIRED_MESSAGE =
+  "Sign in required. Refresh the page or sign in again, then reconnect Admin Dashboard.";
+
 export function readAdminConsoleSecret(): string {
   try {
-    return sessionStorage.getItem(ADMIN_SECRET_KEY) || "";
+    return (sessionStorage.getItem(ADMIN_SECRET_KEY) || "").trim();
   } catch {
     return "";
   }
@@ -21,7 +34,20 @@ export function writeAdminConsoleSecret(secret: string): void {
     if (!s) sessionStorage.removeItem(ADMIN_SECRET_KEY);
     else sessionStorage.setItem(ADMIN_SECRET_KEY, s);
   } catch {
-    // ignore
+    /* ignore */
+  }
+}
+
+/**
+ * Clear the in-session admin secret and remove any stale localStorage copy
+ * left by older builds that mirrored the key.
+ */
+export function clearAdminConsoleSecret(): void {
+  writeAdminConsoleSecret("");
+  try {
+    localStorage.removeItem(ADMIN_SECRET_KEY);
+  } catch {
+    /* ignore */
   }
 }
 
@@ -47,23 +73,63 @@ export function formatAdminApiErrorDetail(detail: unknown, fallbackStatus: numbe
   return `http_${fallbackStatus}`;
 }
 
+export function mapAdminApiHttpError(detail: unknown, status: number): string {
+  const formatted = formatAdminApiErrorDetail(detail, status);
+  const lower = formatted.toLowerCase();
+  if (status === 403) {
+    if (
+      lower.includes("invalid operator secret") ||
+      lower.includes("admin_secret") ||
+      lower.includes("\"code\":\"forbidden\"") ||
+      lower.startsWith("forbidden")
+    ) {
+      return ADMIN_SECRET_REJECTED_MESSAGE;
+    }
+    if (lower.includes("operator_role_required")) {
+      return "Your account is not an active operator. Operator role is required for Admin Dashboard.";
+    }
+  }
+  if (status === 401) {
+    return ADMIN_SIGN_IN_REQUIRED_MESSAGE;
+  }
+  return formatted;
+}
+
+/**
+ * Privileged admin headers: session secret + hydrated Supabase JWT.
+ * Always force Authorization — do not depend on org-id prefix or cold in-memory cache.
+ */
+export async function buildAdminAuthHeaders(
+  opts?: { reason?: string; extra?: Record<string, string> },
+): Promise<Record<string, string>> {
+  const sec = readAdminConsoleSecret().trim();
+  if (!sec) throw new Error(MISSING_ADMIN_SECRET_MESSAGE);
+  const token = (await refreshCachedAccessToken()).trim();
+  if (!token) throw new Error(ADMIN_SIGN_IN_REQUIRED_MESSAGE);
+  const reason = (opts?.reason || "").trim() || ADMIN_CONSOLE_CONNECT_REASON;
+  const headers = clawAgreementHeaders({
+    "Content-Type": "application/json",
+    "x-claw-admin-secret": sec,
+    "x-claw-admin-reason": reason,
+    ...(opts?.extra || {}),
+  }) as Record<string, string>;
+  headers.Authorization = `Bearer ${token}`;
+  return headers;
+}
+
 async function adminFetch(
   path: string,
   init?: RequestInit,
   opts?: { reason?: string },
 ): Promise<unknown> {
-  const sec = readAdminConsoleSecret().trim();
-  if (!sec) throw new Error("missing_admin_secret");
-  const reason = (opts?.reason || "").trim() || ADMIN_CONSOLE_CONNECT_REASON;
+  const headers = await buildAdminAuthHeaders({
+    reason: opts?.reason,
+    extra: (init?.headers as Record<string, string> | undefined) || undefined,
+  });
   const res = await fetch(`${API_BASE}${path}`, {
     ...init,
     credentials: "include",
-    headers: clawAgreementHeaders({
-      "Content-Type": "application/json",
-      "x-claw-admin-secret": sec,
-      "x-claw-admin-reason": reason,
-      ...(init?.headers as Record<string, string> | undefined),
-    }),
+    headers,
   });
   const txt = await res.text();
   let data: Record<string, unknown> = {};
@@ -76,7 +142,7 @@ async function adminFetch(
     }
   }
   if (!res.ok) {
-    throw new Error(formatAdminApiErrorDetail(data.detail ?? data.error, res.status));
+    throw new Error(mapAdminApiHttpError(data.detail ?? data.error, res.status));
   }
   return data;
 }
@@ -265,14 +331,11 @@ export const adminCreateGenesisReferralAffiliate = (body: CreateGenesisReferralA
 
 /** Download commissions CSV for manual payout reconciliation. */
 export async function downloadGenesisReferralCommissionsCsv(): Promise<void> {
-  const sec = readAdminConsoleSecret().trim();
-  if (!sec) throw new Error("missing_admin_secret");
+  const headers = await buildAdminAuthHeaders({ reason: "genesis_ops_commissions_export" });
+  delete headers["Content-Type"];
   const res = await fetch(`${API_BASE}/v1/genesis-referral/ops/commissions/export.csv`, {
     credentials: "include",
-    headers: clawAgreementHeaders({
-      "x-claw-admin-secret": sec,
-      "x-claw-admin-reason": "genesis_ops_commissions_export",
-    }),
+    headers,
   });
   if (!res.ok) {
     const txt = await res.text();
@@ -282,7 +345,7 @@ export async function downloadGenesisReferralCommissionsCsv(): Promise<void> {
     } catch {
       /* keep text */
     }
-    throw new Error(formatAdminApiErrorDetail(detail, res.status));
+    throw new Error(mapAdminApiHttpError(detail, res.status));
   }
   const blob = await res.blob();
   const a = document.createElement("a");
