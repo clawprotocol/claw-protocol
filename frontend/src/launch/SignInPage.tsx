@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useLaunchNav } from "./LaunchNavContext";
 import { useAuth } from "../auth/AuthProvider";
 import { isGoogleAuthConfigured } from "../auth/supabaseAuthService";
@@ -7,15 +7,23 @@ import {
   stagingAuthDefaultTestEmail,
 } from "../auth/stagingAuthMagicLink";
 import { logProductEvent } from "../lib/experimentation/productEvents";
+import { resolveSignInNextDestination } from "./genesisReferral/genesisReferralColdCreateGate";
+import { getGenesisReferralCode } from "./genesisReferral/genesisReferralCapture";
 
-/** Returning-user sign-in — no pending draft; lands on dashboard after auth. */
+/** Returning-user sign-in — lands on dashboard, or `?next=` (e.g. referral create return). */
 export function SignInPage() {
-  const { navigate } = useLaunchNav();
+  const { navigate, search } = useLaunchNav();
   const { enabled, loading, user, signInEmail, signInGoogle } = useAuth();
   const stagingAuthSurface = isStagingAuthMagicLinkClientSurface();
   const [email, setEmail] = useState(() => (stagingAuthSurface ? stagingAuthDefaultTestEmail() : ""));
   const [status, setStatus] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const destinationPath = useMemo(() => resolveSignInNextDestination(search, "/app"), [search]);
+  const referralCode = useMemo(() => getGenesisReferralCode(), []);
+  const signInOpts = useMemo(
+    () => ({ returningSignIn: true as const, destinationPath }),
+    [destinationPath],
+  );
 
   if (!enabled) {
     return (
@@ -30,23 +38,31 @@ export function SignInPage() {
   }
 
   if (user) {
-    navigate("/app");
+    navigate(destinationPath);
     return null;
   }
 
   return (
     <div className="mx-auto max-w-md px-4 py-12">
       <h1 className="text-xl font-semibold text-white">Sign in to LawDog</h1>
-      <p className="mt-2 text-sm text-slate-400">Access your agreements and workspace.</p>
+      <p className="mt-2 text-sm text-slate-400">
+        {referralCode
+          ? "Sign in to continue with your referral invite and open create."
+          : "Access your agreements and workspace."}
+      </p>
       {isGoogleAuthConfigured() ? (
         <button
           type="button"
           className="mt-6 w-full rounded-lg border border-slate-600 bg-slate-900 px-4 py-2.5 text-sm font-medium text-slate-100 hover:bg-slate-800 disabled:opacity-60"
           disabled={busy}
           onClick={() => {
-            logProductEvent("dashboard_sign_in_initiated", { surface: "sign_in_page", method: "google" });
+            logProductEvent("dashboard_sign_in_initiated", {
+              surface: "sign_in_page",
+              method: "google",
+              has_referral: Boolean(referralCode),
+            });
             setBusy(true);
-            void signInGoogle({ returningSignIn: true })
+            void signInGoogle(signInOpts)
               .catch((err) => setStatus(err instanceof Error ? err.message : "Could not start Google sign-in."))
               .finally(() => setBusy(false));
           }}
@@ -61,8 +77,11 @@ export function SignInPage() {
           if (!email.trim() || busy) return;
           setBusy(true);
           setStatus(null);
-          logProductEvent("magic_link_requested", { surface: "sign_in_page" });
-          void signInEmail(email.trim(), { returningSignIn: true })
+          logProductEvent("magic_link_requested", {
+            surface: "sign_in_page",
+            has_referral: Boolean(referralCode),
+          });
+          void signInEmail(email.trim(), signInOpts)
             .then((result) => {
               if (result.mode === "staging_redirect") {
                 setStatus("Signing you in via staging test login…");
@@ -101,7 +120,7 @@ export function SignInPage() {
             setBusy(true);
             setStatus(null);
             logProductEvent("magic_link_requested", { surface: "sign_in_page_staging_bypass" });
-            void signInEmail(target, { returningSignIn: true, stagingDirectOnly: true })
+            void signInEmail(target, { ...signInOpts, stagingDirectOnly: true })
               .then((result) => {
                 if (result.mode === "staging_redirect") {
                   setStatus("Signing you in via staging test login…");

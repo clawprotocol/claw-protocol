@@ -18,18 +18,20 @@ const LS_AUTH = "lawdog_mock_is_authenticated";
 const LS_PLAN_OVERRIDE = "lawdog_mock_monetization_plan";
 
 /**
- * Mock auth: default `true` so free-tier + second-agreement paywall is testable in dev.
- * Set `localStorage.lawdog_mock_is_authenticated = "false"` for anonymous (no block).
+ * Mock auth override for localhost UX / QA.
+ * - Explicit `localStorage.lawdog_mock_is_authenticated` wins when set.
+ * - In DEV only, default `true` so free-tier paywall flows are testable without a session.
+ * - Production builds must never pretend the visitor is signed in (cold GTM links 401 otherwise).
  */
 export function readMockIsAuthenticated(): boolean {
-  if (typeof window === "undefined") return true;
+  if (typeof window === "undefined") return false;
   try {
     const v = window.localStorage.getItem(LS_AUTH);
     if (v === "0" || v === "false") return false;
     if (v === "1" || v === "true") return true;
-    return true;
+    return Boolean(import.meta.env.DEV);
   } catch {
-    return true;
+    return Boolean(import.meta.env.DEV);
   }
 }
 

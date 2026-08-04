@@ -18,6 +18,13 @@ import {
   hasGenesisDogOnboardingIntent,
 } from "../launch/genesisReferral/genesisDogOnboardingCapture";
 
+export type AuthSignInOpts = {
+  returningSignIn?: boolean;
+  stagingDirectOnly?: boolean;
+  /** Allowlisted internal path (e.g. `/app/create?ref=CODE`). Overrides returning `/app` default. */
+  destinationPath?: string;
+};
+
 export type AuthContextValue = {
   enabled: boolean;
   loading: boolean;
@@ -25,9 +32,9 @@ export type AuthContextValue = {
   user: User | null;
   signInEmail: (
     email: string,
-    opts?: { returningSignIn?: boolean; stagingDirectOnly?: boolean },
+    opts?: AuthSignInOpts,
   ) => Promise<{ mode: "email_sent" | "staging_redirect" }>;
-  signInGoogle: (opts?: { returningSignIn?: boolean }) => Promise<void>;
+  signInGoogle: (opts?: AuthSignInOpts) => Promise<void>;
   signOut: () => Promise<void>;
 };
 
@@ -114,32 +121,41 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     });
   }, [enabled, session?.access_token, session?.user]);
 
+  const resolveSignInDestination = useCallback((opts?: AuthSignInOpts): string | undefined => {
+    if (hasGenesisDogOnboardingIntent()) return GENESIS_DOG_ONBOARDING_DESTINATION;
+    const explicit = (opts?.destinationPath || "").trim();
+    if (explicit) return explicit;
+    if (opts?.returningSignIn) return "/app";
+    return undefined;
+  }, []);
+
   const signInEmail = useCallback(
-    async (email: string, opts?: { returningSignIn?: boolean; stagingDirectOnly?: boolean }) => {
-      const genesisDest = hasGenesisDogOnboardingIntent() ? GENESIS_DOG_ONBOARDING_DESTINATION : undefined;
+    async (email: string, opts?: AuthSignInOpts) => {
       const continuationId = await prepareAuthContinuation({
         returningSignIn: opts?.returningSignIn,
         workflowStage: opts?.returningSignIn ? "dashboard" : "claim",
-        destinationPath: genesisDest ?? (opts?.returningSignIn ? "/app" : undefined),
+        destinationPath: resolveSignInDestination(opts),
         provider: "email",
       });
       return signInWithEmailMagicLink(email, buildAuthCallbackUrl(undefined, continuationId), {
         stagingDirectOnly: opts?.stagingDirectOnly,
       });
     },
-    [],
+    [resolveSignInDestination],
   );
 
-  const signInGoogle = useCallback(async (opts?: { returningSignIn?: boolean }) => {
-    const genesisDest = hasGenesisDogOnboardingIntent() ? GENESIS_DOG_ONBOARDING_DESTINATION : undefined;
-    const continuationId = await prepareAuthContinuation({
-      returningSignIn: opts?.returningSignIn,
-      workflowStage: opts?.returningSignIn ? "dashboard" : "claim",
-      destinationPath: genesisDest ?? (opts?.returningSignIn ? "/app" : undefined),
-      provider: "google",
-    });
-    await signInWithGoogle(buildAuthCallbackUrl(undefined, continuationId));
-  }, []);
+  const signInGoogle = useCallback(
+    async (opts?: AuthSignInOpts) => {
+      const continuationId = await prepareAuthContinuation({
+        returningSignIn: opts?.returningSignIn,
+        workflowStage: opts?.returningSignIn ? "dashboard" : "claim",
+        destinationPath: resolveSignInDestination(opts),
+        provider: "google",
+      });
+      await signInWithGoogle(buildAuthCallbackUrl(undefined, continuationId));
+    },
+    [resolveSignInDestination],
+  );
 
   const signOut = useCallback(async () => {
     await signOutAuth();

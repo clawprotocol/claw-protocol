@@ -50,7 +50,12 @@ import { fetchWorkspaceIndex } from "../../agreement/agreementWorkspaceApi";
 import { hasCurrentSessionFreeStarterIntent } from "../../components/agreements/paidProSessionEligibility";
 import { getLawdogTrustNudges } from "../../tracking/lawdogSession";
 import { UpgradeToProModal } from "../../monetization/UpgradeToProModal";
-import { readLawDogUserMonetizationState } from "../../monetization/lawDogMonetization";
+import { useAuth } from "../../auth/AuthProvider";
+import {
+  prepareColdReferralCreateRedirect,
+  referralCodeFromCreateSearch,
+  resolveColdReferralCreateRedirect,
+} from "../genesisReferral/genesisReferralColdCreateGate";
 import {
   NO_ATTORNEY_CLIENT,
   PRODUCT_NOT_LAW_FIRM,
@@ -108,9 +113,33 @@ const STARTER_TEMPLATE =
 
 export function SimpleCreatePage() {
   const access = useAccess();
-  const { navigate, search } = useLaunchNav();
+  const { navigate, search, pathname } = useLaunchNav();
+  const { user: authUser, loading: authLoading } = useAuth();
+  const isReallyAuthenticated = Boolean(authUser);
   const showFirstHints = useFirstSessionHint("create");
   const firstSessionLive = useMemo(() => isFirstLawdogSession(), []);
+
+  // Cold GTM referral links must not run entitlement probes (mock-auth 401).
+  // Capture ?ref= then send signed-out visitors to sign-in with return destination.
+  const coldReferralRedirect = useMemo(
+    () =>
+      resolveColdReferralCreateRedirect({
+        authLoading,
+        isAuthenticated: isReallyAuthenticated,
+        search,
+      }),
+    [authLoading, isReallyAuthenticated, search],
+  );
+  useEffect(() => {
+    const gate = prepareColdReferralCreateRedirect({
+      authLoading,
+      isAuthenticated: isReallyAuthenticated,
+      search,
+      pathname,
+    });
+    if (!gate) return;
+    navigate(gate.redirectTo);
+  }, [authLoading, isReallyAuthenticated, search, pathname, navigate]);
   const [starterSeed, setStarterSeed] = useState<string | undefined>(undefined);
   const [otherWaysOpen, setOtherWaysOpen] = useState(false);
   const [heroHandoff] = useState(() => readHeroIntakeHandoffForCreate());
@@ -191,10 +220,8 @@ export function SimpleCreatePage() {
     ],
   );
 
-  const monetizationUser = useMemo(
-    () => readLawDogUserMonetizationState(access.tier, access.usage),
-    [access.tier, access.usage],
-  );
+  // Create entitlement gating must use real Supabase auth — never the monetization mock default.
+  const createAuthAuthenticated = isReallyAuthenticated;
   const [workspaceProEntitled, setWorkspaceProEntitled] = useState(false);
   const [commercialEntitlement, setCommercialEntitlement] =
     useState<CommercialEntitlementDecision | null>(null);
@@ -203,7 +230,7 @@ export function SimpleCreatePage() {
     () =>
       resolveWorkspaceCreateAccess({
         authentication: resolveAuthenticationState({
-          isAuthenticated: monetizationUser.isAuthenticated,
+          isAuthenticated: createAuthAuthenticated,
         }),
         entitlement: resolveEntitlementStateFromTier(access.tier),
         isStarterAnonymousSession: hasCurrentSessionFreeStarterIntent(),
@@ -226,12 +253,12 @@ export function SimpleCreatePage() {
             }
           : null,
       }),
-    [access.tier, monetizationUser.isAuthenticated, workspaceProEntitled, commercialEntitlement],
+    [access.tier, createAuthAuthenticated, workspaceProEntitled, commercialEntitlement],
   );
   const isResumingOwnedAgreement = Boolean(readCreateReviewAgreementResumeId());
   const hasCheckoutPendingMarker = Boolean(readCreateComplexityResume()?.awaitingProCheckout);
   const editorGatedUntilEntitlement = shouldGateCreateEditorUntilEntitlementReady({
-    isAuthenticated: monetizationUser.isAuthenticated,
+    isAuthenticated: createAuthAuthenticated,
     commercialEntitlementReady,
     isResumingOwnedAgreement,
     hasCheckoutPendingMarker,
@@ -295,15 +322,18 @@ export function SimpleCreatePage() {
   const primedDraftForHandoffRetryRef = useRef<AgreementDraft | null>(null);
 
   useEffect(() => {
+    if (coldReferralRedirect) return;
     void bootstrapWorkspaceOrg();
     setReEngageBanner(peekCreateOrHomeBanner("create"));
-  }, []);
+  }, [coldReferralRedirect]);
 
   useEffect(() => {
+    if (coldReferralRedirect) return;
     void ensureAffiliateAttributionForOrg(getOrgId());
-  }, []);
+  }, [coldReferralRedirect]);
 
   useEffect(() => {
+    if (coldReferralRedirect) return;
     let cancelled = false;
     void fetchWorkspaceProEntitlement().then((ok) => {
       if (!cancelled) setWorkspaceProEntitled(ok);
@@ -316,7 +346,7 @@ export function SimpleCreatePage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [coldReferralRedirect]);
 
   useEffect(() => {
     if (!consumeLawdogFocusCreateIntake()) return;
@@ -526,6 +556,21 @@ export function SimpleCreatePage() {
     anonymousStarterReviewChrome ||
     hideAgreementEditor;
   const accessChoiceShell = showAccessChoiceScreen || editorGatedUntilEntitlement;
+
+  if (coldReferralRedirect || (authLoading && Boolean(referralCodeFromCreateSearch(search)))) {
+    return (
+      <SimpleFlowShell
+        title="Continue with your invite"
+        subtitle="Taking you to sign-in so we can apply your referral…"
+        logoHomeHref="/"
+        hideAffiliateNav
+      >
+        <p className="text-sm text-slate-400" data-testid="cold-referral-signin-redirect">
+          Redirecting to sign-in…
+        </p>
+      </SimpleFlowShell>
+    );
+  }
 
   return (
     <SimpleFlowShell
