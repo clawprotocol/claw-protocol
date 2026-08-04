@@ -172,3 +172,68 @@ def test_bind_identity_backfill_on_repeat_session(isolated_identity_env):
     assert len(found) == 1
     assert found[0]["email"] == email
     assert found[0]["display_name"] == "Crypto Curated"
+
+
+def test_legacy_workspace_identity_schema_migrates_genesis_dog_columns(tmp_path, monkeypatch):
+    """Existing admin DBs must ALTER before indexing affiliate_candidate."""
+    import sqlite3
+
+    from backend.admin_console.store import AdminConsoleStore
+
+    db_path = tmp_path / "legacy_admin.sqlite3"
+    monkeypatch.setenv("CLAW_ADMIN_CONSOLE_DB_PATH", str(db_path))
+
+    with sqlite3.connect(db_path) as con:
+        con.execute(
+            """
+            CREATE TABLE workspace_user_identities (
+              user_id TEXT PRIMARY KEY,
+              org_id TEXT NOT NULL,
+              email TEXT,
+              display_name TEXT,
+              created_at TEXT NOT NULL,
+              updated_at TEXT NOT NULL
+            )
+            """
+        )
+        con.execute(
+            """
+            INSERT INTO workspace_user_identities
+              (user_id, org_id, email, display_name, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            (
+                "uid-legacy-1",
+                "user-uid-legacy-1",
+                "cryptocurated21+lawdogtest2@gmail.com",
+                "Legacy",
+                "2026-01-01T00:00:00Z",
+                "2026-01-01T00:00:00Z",
+            ),
+        )
+
+    store = AdminConsoleStore(str(db_path))
+    store.init_schema()  # must not raise on pre-genesis-dog schema
+
+    with sqlite3.connect(db_path) as con:
+        cols = {str(r[1]) for r in con.execute("PRAGMA table_info(workspace_user_identities)")}
+    assert "community_slug" in cols
+    assert "signup_intent" in cols
+    assert "affiliate_candidate" in cols
+
+    store.upsert_workspace_user_identity(
+        user_id="uid-legacy-1",
+        org_id="user-uid-legacy-1",
+        email="cryptocurated21+lawdogtest2@gmail.com",
+        display_name="Legacy",
+        community_slug="genesis-dogs",
+        signup_intent="genesis-referral",
+        affiliate_candidate=True,
+    )
+    row = store.get_workspace_user_identity("uid-legacy-1")
+    assert row is not None
+    assert row["email"] == "cryptocurated21+lawdogtest2@gmail.com"
+    assert row["community_slug"] == "genesis-dogs"
+    assert int(row["affiliate_candidate"] or 0) == 1
+    cands = store.list_genesis_dog_affiliate_candidates()
+    assert any(c.get("user_id") == "uid-legacy-1" for c in cands)

@@ -87,8 +87,6 @@ class AdminConsoleStore:
                   ON workspace_user_identities (email);
                 CREATE INDEX IF NOT EXISTS idx_workspace_user_identities_updated
                   ON workspace_user_identities (updated_at DESC);
-                CREATE INDEX IF NOT EXISTS idx_workspace_user_identities_affiliate_candidate
-                  ON workspace_user_identities (affiliate_candidate, updated_at DESC);
                 """
             )
             # Additive migrations for older DBs.
@@ -113,6 +111,13 @@ class AdminConsoleStore:
                     "ALTER TABLE workspace_user_identities "
                     "ADD COLUMN affiliate_candidate INTEGER NOT NULL DEFAULT 0"
                 )
+            # Index depends on migrated columns — must run after ALTER on legacy DBs.
+            con.execute(
+                """
+                CREATE INDEX IF NOT EXISTS idx_workspace_user_identities_affiliate_candidate
+                  ON workspace_user_identities (affiliate_candidate, updated_at DESC)
+                """
+            )
 
     def get_admin_user(self, admin_user_id: str) -> Optional[Dict[str, Any]]:
         uid = (admin_user_id or "").strip()
@@ -506,8 +511,9 @@ _store: Optional[AdminConsoleStore] = None
 def get_admin_console_store() -> AdminConsoleStore:
     global _store
     if _store is None:
-        _store = AdminConsoleStore()
-        _store.init_schema()
+        store = AdminConsoleStore()
+        store.init_schema()
+        _store = store
     return _store
 
 
