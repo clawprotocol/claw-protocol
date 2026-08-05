@@ -51,11 +51,17 @@ import { hasCurrentSessionFreeStarterIntent } from "../../components/agreements/
 import { getLawdogTrustNudges } from "../../tracking/lawdogSession";
 import { UpgradeToProModal } from "../../monetization/UpgradeToProModal";
 import { useAuth } from "../../auth/AuthProvider";
+import { bindAuthenticatedUserToWorkspace } from "../../auth/workspaceBindingApi";
+import { displayNameFromUser } from "../../auth/postAuthFinalizer";
 import {
   prepareColdReferralCreateRedirect,
   referralCodeFromCreateSearch,
   resolveColdReferralCreateRedirect,
 } from "../genesisReferral/genesisReferralColdCreateGate";
+import {
+  isUserWorkspaceOrgId,
+  resolveCreateWorkspaceProbeReadiness,
+} from "./createWorkspaceProbeReadiness";
 import {
   NO_ATTORNEY_CLIENT,
   PRODUCT_NOT_LAW_FIRM,
@@ -114,10 +120,12 @@ const STARTER_TEMPLATE =
 export function SimpleCreatePage() {
   const access = useAccess();
   const { navigate, search, pathname } = useLaunchNav();
-  const { user: authUser, loading: authLoading } = useAuth();
+  const { user: authUser, loading: authLoading, session: authSession } = useAuth();
   const isReallyAuthenticated = Boolean(authUser);
   const showFirstHints = useFirstSessionHint("create");
   const firstSessionLive = useMemo(() => isFirstLawdogSession(), []);
+  const [workspaceOrgId, setWorkspaceOrgId] = useState(() => getOrgId());
+  const hasColdReferralInSearch = Boolean(referralCodeFromCreateSearch(search));
 
   // Cold GTM referral links must not run entitlement probes (mock-auth 401).
   // Capture ?ref= then send signed-out visitors to sign-in with return destination.
@@ -140,6 +148,68 @@ export function SimpleCreatePage() {
     if (!gate) return;
     navigate(gate.redirectTo);
   }, [authLoading, isReallyAuthenticated, search, pathname, navigate]);
+
+  const probeReadiness = useMemo(
+    () =>
+      resolveCreateWorkspaceProbeReadiness({
+        authLoading,
+        isAuthenticated: isReallyAuthenticated,
+        orgId: workspaceOrgId,
+        coldReferralRedirect: Boolean(coldReferralRedirect),
+        hasColdReferralInSearch,
+      }),
+    [
+      authLoading,
+      isReallyAuthenticated,
+      workspaceOrgId,
+      coldReferralRedirect,
+      hasColdReferralInSearch,
+    ],
+  );
+  const probesReady = probeReadiness.ready;
+  const awaitingAuthWorkspace =
+    !probesReady &&
+    (probeReadiness.reason === "awaiting_user_org" ||
+      probeReadiness.reason === "auth_loading" ||
+      probeReadiness.reason === "cold_referral_auth_pending");
+
+  // After OAuth return, bind until claw_org_id is user-* — never probe with anon-*.
+  useEffect(() => {
+    if (!isReallyAuthenticated || !authUser) return;
+    if (isUserWorkspaceOrgId(getOrgId())) {
+      setWorkspaceOrgId(getOrgId());
+      return;
+    }
+    let cancelled = false;
+    void bindAuthenticatedUserToWorkspace({
+      userId: authUser.id,
+      email: authUser.email,
+      displayName: displayNameFromUser(authUser),
+      claimMethod: "session_restore",
+      accessToken: authSession?.access_token,
+    })
+      .then((bind) => {
+        if (cancelled) return;
+        setWorkspaceOrgId(bind.org_id || getOrgId());
+      })
+      .catch(() => {
+        if (!cancelled) setWorkspaceOrgId(getOrgId());
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isReallyAuthenticated, authUser, authSession?.access_token]);
+
+  // If bind cannot settle, leave create rather than probing anon-* forever.
+  useEffect(() => {
+    if (probeReadiness.ready || probeReadiness.reason !== "awaiting_user_org") return;
+    const timer = window.setTimeout(() => {
+      if (!isUserWorkspaceOrgId(getOrgId())) {
+        navigate("/app");
+      }
+    }, 8000);
+    return () => window.clearTimeout(timer);
+  }, [probeReadiness, navigate]);
   const [starterSeed, setStarterSeed] = useState<string | undefined>(undefined);
   const [otherWaysOpen, setOtherWaysOpen] = useState(false);
   const [heroHandoff] = useState(() => readHeroIntakeHandoffForCreate());
@@ -272,10 +342,16 @@ export function SimpleCreatePage() {
     ((!createAccessVerdict.allowed && createAccessVerdict.showUpgradeModal) ||
       createAccessVerdict.showGenesisAllowanceExhausted);
   const entitlementProbeBlocked =
-    commercialEntitlementReady && createAccessVerdict.showEntitlementProbeError;
+    probesReady &&
+    commercialEntitlementReady &&
+    createAccessVerdict.showEntitlementProbeError;
   const hideAgreementEditor =
-    editorGatedUntilEntitlement || showAccessChoiceScreen || entitlementProbeBlocked;
-  const intakeInteractionBlocked = creationBlockedForUi || entitlementProbeBlocked;
+    editorGatedUntilEntitlement ||
+    showAccessChoiceScreen ||
+    entitlementProbeBlocked ||
+    awaitingAuthWorkspace;
+  const intakeInteractionBlocked =
+    creationBlockedForUi || entitlementProbeBlocked || awaitingAuthWorkspace;
   const genesisWithinAllowance =
     commercialEntitlementReady &&
     createAccessVerdict.allowed &&
@@ -322,19 +398,27 @@ export function SimpleCreatePage() {
   const primedDraftForHandoffRetryRef = useRef<AgreementDraft | null>(null);
 
   useEffect(() => {
-    if (coldReferralRedirect) return;
-    void bootstrapWorkspaceOrg();
+    if (!probesReady) return;
+    // Authenticated create must keep user-* org — never mint/refresh anon session here.
+    if (!isReallyAuthenticated) {
+      void bootstrapWorkspaceOrg().then((oid) => setWorkspaceOrgId(oid || getOrgId()));
+    } else {
+      setWorkspaceOrgId(getOrgId());
+    }
     setReEngageBanner(peekCreateOrHomeBanner("create"));
-  }, [coldReferralRedirect]);
+  }, [probesReady, isReallyAuthenticated]);
 
   useEffect(() => {
-    if (coldReferralRedirect) return;
+    if (!probesReady) return;
+    if (isReallyAuthenticated && !isUserWorkspaceOrgId(getOrgId())) return;
     void ensureAffiliateAttributionForOrg(getOrgId());
-  }, [coldReferralRedirect]);
+  }, [probesReady, isReallyAuthenticated, workspaceOrgId]);
 
   useEffect(() => {
-    if (coldReferralRedirect) return;
+    if (!probesReady) return;
+    if (isReallyAuthenticated && !isUserWorkspaceOrgId(getOrgId())) return;
     let cancelled = false;
+    setCommercialEntitlementReady(false);
     void fetchWorkspaceProEntitlement().then((ok) => {
       if (!cancelled) setWorkspaceProEntitled(ok);
     });
@@ -346,7 +430,7 @@ export function SimpleCreatePage() {
     return () => {
       cancelled = true;
     };
-  }, [coldReferralRedirect]);
+  }, [probesReady, isReallyAuthenticated, workspaceOrgId]);
 
   useEffect(() => {
     if (!consumeLawdogFocusCreateIntake()) return;
@@ -557,7 +641,7 @@ export function SimpleCreatePage() {
     hideAgreementEditor;
   const accessChoiceShell = showAccessChoiceScreen || editorGatedUntilEntitlement;
 
-  if (coldReferralRedirect || (authLoading && Boolean(referralCodeFromCreateSearch(search)))) {
+  if (coldReferralRedirect || (!isReallyAuthenticated && hasColdReferralInSearch)) {
     return (
       <SimpleFlowShell
         title="Continue with your invite"
@@ -567,6 +651,21 @@ export function SimpleCreatePage() {
       >
         <p className="text-sm text-slate-400" data-testid="cold-referral-signin-redirect">
           Redirecting to sign-in…
+        </p>
+      </SimpleFlowShell>
+    );
+  }
+
+  if (awaitingAuthWorkspace) {
+    return (
+      <SimpleFlowShell
+        title="Finishing sign-in"
+        subtitle="Restoring your workspace before create…"
+        logoHomeHref="/app"
+        hideAffiliateNav
+      >
+        <p className="text-sm text-slate-400" data-testid="create-auth-workspace-settling">
+          Confirming your signed-in workspace…
         </p>
       </SimpleFlowShell>
     );

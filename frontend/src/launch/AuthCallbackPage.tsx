@@ -5,6 +5,11 @@ import { getAuthSession } from "../auth/supabaseAuthService";
 import { finalizeAuthenticatedSessionFromAuthCallback } from "../auth/authCallbackFinalizeDedup";
 import { logProductEvent } from "../lib/experimentation/productEvents";
 import { writeContinuationId } from "../auth/authContinuationApi";
+import { resolveSafeRedirectPath } from "../auth/safeRedirectResolver";
+import { bindAuthenticatedUserToWorkspace } from "../auth/workspaceBindingApi";
+import { displayNameFromUser } from "../auth/postAuthFinalizer";
+import { getOrgId } from "./orgContext";
+import { isStaleAnonymousOrgId, isUserWorkspaceOrgId } from "./simpleProduct/createWorkspaceProbeReadiness";
 
 function inferClaimMethod(user: User): "magic_link" | "google" | "session_restore" {
   const provider =
@@ -45,12 +50,31 @@ export function AuthCallbackPage() {
           claimMethod: inferClaimMethod(session.user),
           continuationId,
         });
+        // OAuth return must hydrate user-* org before create/dashboard probes run.
+        if (isStaleAnonymousOrgId(getOrgId())) {
+          await bindAuthenticatedUserToWorkspace({
+            userId: session.user.id,
+            email: session.user.email,
+            displayName: displayNameFromUser(session.user),
+            claimMethod: inferClaimMethod(session.user),
+            accessToken: session.access_token,
+          });
+        }
         if (result.usedFallback) {
           logProductEvent("continuation_fallback_used", { surface: "auth_callback" });
         } else {
           logProductEvent("continuation_restored", { surface: "auth_callback" });
         }
-        if (!cancel) navigate(result.destinationPath);
+        const nextDest = resolveSafeRedirectPath(params.get("next"), "");
+        const destination = nextDest || result.destinationPath;
+        if (!cancel) {
+          if (!isUserWorkspaceOrgId(getOrgId())) {
+            // Prefer dashboard over create when org bind did not settle — avoids anon-* probes.
+            navigate("/app");
+            return;
+          }
+          navigate(destination);
+        }
       } catch (e) {
         if (!cancel) {
           setError(e instanceof Error ? e.message : "Sign-in failed.");
