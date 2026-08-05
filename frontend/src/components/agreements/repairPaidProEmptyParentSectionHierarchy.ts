@@ -305,7 +305,11 @@ function foldNonAdjacentHardFailProvisionFamilies(
       if (remove.has(childMeta.index)) continue;
       const child = mutated.get(childMeta.index) ?? childMeta.block;
       if (!isHardFailProvisionFamilyTitle(child.title)) continue;
-      if (!titlesAffinity(parent.title, child.title)) continue;
+      // Notices/Term hard-fail pairs often lack parent→child affinity rules
+      // ("Notices" vs "Notices and Communications") — still collapse them.
+      const sameNoticesFamily =
+        /\bnotices?\b/i.test(parent.title) && /\bnotices?\b/i.test(child.title);
+      if (!sameNoticesFamily && !titlesAffinity(parent.title, child.title)) continue;
       demoteChildIntoParent(parent, child);
       remove.add(childMeta.index);
       folded += 1;

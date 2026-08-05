@@ -272,12 +272,18 @@ export function diagnosePaidProReviewedDocumentIntegrity(
   const duplicateProvisionFamilies = [...familyCounts.entries()]
     .filter(([, n]) => n >= 2)
     .map(([f]) => f);
-  // Notices often appear both as a General Terms subsection and a later top-level section.
+  // Notices often appear both as a General Terms subsection and a later orphan top-level
+  // section. A Notices parent with its own Notices.* child (after demote) is valid.
   const witnessIdx = resolveAuthoritativeWitnessIndex(text);
   const headForNotices = witnessIdx >= 0 ? text.slice(0, witnessIdx) : text;
-  const noticesTop = (headForNotices.match(/^\d+\.\s+Notices?\b/gim) || []).length;
-  const noticesSub = (headForNotices.match(/^\d+\.\d+\s+Notices?\b/gim) || []).length;
-  if (noticesTop >= 1 && noticesSub >= 1) {
+  const topNoticeNums = [...headForNotices.matchAll(/^(\d+)\.\s+Notices?\b/gim)].map((m) => m[1]!);
+  const subNoticeParents = [...headForNotices.matchAll(/^(\d+)\.\d+\s+Notices?\b/gim)].map(
+    (m) => m[1]!,
+  );
+  const hasOrphanTopNoticesBesideForeignSub = topNoticeNums.some((n) =>
+    subNoticeParents.some((p) => p !== n),
+  );
+  if (hasOrphanTopNoticesBesideForeignSub) {
     if (!duplicateProvisionFamilies.includes("notices")) duplicateProvisionFamilies.push("notices");
   }
   // Term+cancellation parents that remain as siblings after failed demote are the P0 signal.
@@ -329,8 +335,12 @@ export function diagnosePaidProReviewedDocumentIntegrity(
 
 /**
  * Drop a later top-level Notices section when Notices already exists as a subsection
- * (common LawDog splice: General Terms → 18.3 Notices plus orphan 19. Notices).
- * Also collapse duplicate Notices subsections under the same parent.
+ * under a *different* parent (common LawDog splice: General Terms → 18.3 Notices plus
+ * orphan 19. Notices). Also collapse duplicate top-level Notices siblings
+ * ("Notices" + "Notices and Communications") and duplicate Notices subsections.
+ *
+ * Do not drop a top-level Notices heading that is the parent of its own Notices.* child
+ * (that shape is produced by non-adjacent hard-fail demote and must stay).
  */
 export function repairDuplicateTopLevelNoticesSection(text: string): {
   text: string;
@@ -346,7 +356,11 @@ export function repairDuplicateTopLevelNoticesSection(text: string): {
   let skipping = false;
   let removedTop = false;
   let seenSubNotices = false;
-  const hasSubNotices = /^\d+\.\d+\s+Notices?\b/im.test(head);
+  let seenTopNotices = false;
+  const subNoticesParents = new Set(
+    [...head.matchAll(/^(\d+)\.\d+\s+Notices?\b/gim)].map((m) => m[1]!),
+  );
+  const isTopNoticesHeading = (t: string) => /^\d+\.\s+Notices?\b/i.test(t);
   for (let i = 0; i < lines.length; i += 1) {
     const t = clean(lines[i] || "");
     if (skipping) {
@@ -356,10 +370,20 @@ export function repairDuplicateTopLevelNoticesSection(text: string): {
         continue;
       }
     }
-    if (hasSubNotices && /^\d+\.\s+Notices?\b/i.test(t)) {
-      skipping = true;
-      removedTop = true;
-      continue;
+    if (isTopNoticesHeading(t)) {
+      const num = t.match(/^(\d+)/)?.[1] ?? "";
+      const orphanTopWhileSubExistsElsewhere = [...subNoticesParents].some((p) => p !== num);
+      if (orphanTopWhileSubExistsElsewhere || seenTopNotices) {
+        skipping = true;
+        removedTop = true;
+        repairs.push(
+          seenTopNotices
+            ? "integrity:drop_duplicate_top_level_notices_sibling"
+            : "integrity:drop_duplicate_top_level_notices",
+        );
+        continue;
+      }
+      seenTopNotices = true;
     }
     if (/^\d+\.\d+\s+Notices?\b/i.test(t)) {
       if (seenSubNotices) {
@@ -371,7 +395,6 @@ export function repairDuplicateTopLevelNoticesSection(text: string): {
     }
     out.push(lines[i]!);
   }
-  if (removedTop) repairs.push("integrity:drop_duplicate_top_level_notices");
   if (repairs.length === 0) return { text: raw, repairs };
   const merged = out.join("\n").replace(/\n{3,}/g, "\n\n").trim();
   return {

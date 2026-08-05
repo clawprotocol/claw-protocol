@@ -97,6 +97,63 @@ describe("PixelForge-shaped duplicate provision family", () => {
     expect(prepared.text).toMatch(/\d+\.\d+\s+Notices\b/);
   });
 
+  it("collapses duplicate top-level Notices shells (Notices + Notices and Communications)", () => {
+    const pad = "Additional commercial detail — the parties cooperate in good faith. ".repeat(30);
+    const defective = [
+      "SERVICES AGREEMENT",
+      "",
+      'This Agreement is between PixelForge Labs ("Client") and Alex Rivera ("Service Provider").',
+      "",
+      "1. Purpose",
+      "This Agreement sets forth the terms for mobile app UI design services.",
+      "2. Scope of Services",
+      "Service Provider will design the Client mobile app UI for six weeks.",
+      "3. Fees and Payment",
+      "Client will pay a flat fee of $4,500.",
+      "4. Term and Cancellation",
+      "The initial term is six (6) weeks from the Effective Date.",
+      "5. Intellectual Property",
+      "Client owns final designs once paid in full.",
+      "6. Term",
+      "Either party may cancel with seven (7) days' written notice.",
+      "7. Confidentiality",
+      "Each party will protect Confidential Information.",
+      "8. Notices",
+      "If to PixelForge Labs: Attention: Authorized Signer.",
+      "If to Alex Rivera: Attention: Authorized Signer.",
+      "9. Notices and Communications",
+      "If to PixelForge Labs: Attention: Authorized Signer.",
+      "If to Alex Rivera: Attention: Authorized Signer.",
+      "10. Governing Law",
+      "This Agreement shall be governed by applicable law.",
+      "",
+      pad,
+      "",
+      "IN WITNESS WHEREOF, the Parties execute this Agreement.",
+      "",
+      "CLIENT:",
+      "PixelForge Labs",
+      "By: __________________________",
+      "",
+      "SERVICE PROVIDER:",
+      "Alex Rivera",
+      "By: __________________________",
+    ].join("\n");
+
+    const before = diagnosePaidProReviewedDocumentIntegrity(defective);
+    expect(before.reasons).toContain("duplicate_provision_family");
+    expect(before.duplicateProvisionFamilies).toEqual(
+      expect.arrayContaining(["term", "notices"]),
+    );
+
+    const prepared = preparePaidProImmutableReviewedDocument(defective);
+    expect(prepared.ok, prepared.diagnostics.reasons.join(",")).toBe(true);
+    expect(prepared.diagnostics.reasons).not.toContain("duplicate_provision_family");
+    expect(prepared.text).toMatch(/\d+(?:\.\d+)?\s+Notices\b/);
+    expect(prepared.text).not.toMatch(/^\d+\.\s+Notices and Communications\s*$/m);
+    expect((prepared.text.match(/^\d+\.\s+Notices?\b/gim) || []).length).toBeLessThanOrEqual(1);
+  });
+
   it("demotes non-adjacent Term shells separated by IP (production-shaped)", () => {
     const pad = "Additional commercial detail — the parties cooperate in good faith. ".repeat(40);
     const defective = [
