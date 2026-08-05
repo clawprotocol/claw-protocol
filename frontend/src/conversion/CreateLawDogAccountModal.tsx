@@ -6,7 +6,8 @@ import {
   PRODUCT_NOT_LAW_FIRM,
   WHO_MAY_USE_PRODUCT_LANE_SHORT,
 } from "../compliance/disclosureCopy";
-import { LAWDOG_COLORS, LAWDOG_LOGO_SRC } from "../design/tokens";
+import { LAWDOG_COLORS } from "../design/tokens";
+import { LawdogBrand } from "../components/ui/LawdogBrand";
 import { logProductEvent } from "../lib/experimentation/productEvents";
 import {
   persistProductLegalAcceptanceAsync,
@@ -110,14 +111,9 @@ export function CreateLawDogAccountModal({
         className="relative z-[1] w-full max-w-md rounded-2xl border border-slate-700/90 bg-slate-950 px-6 py-6 shadow-[0_24px_64px_rgba(0,0,0,0.45)]"
       >
         <div className="mb-4 flex flex-col items-center text-center">
-          <img
-            src={LAWDOG_LOGO_SRC}
-            alt=""
-            width={40}
-            height={40}
-            className="lawdog-claim-modal-logo-glow h-10 w-10 object-contain opacity-90 brightness-0 invert"
-            decoding="async"
-          />
+          <span className="lawdog-claim-modal-logo-glow inline-flex opacity-90">
+            <LawdogBrand variant="emblem" size="md" surface="dark" />
+          </span>
         </div>
         <h2 id="lawdog-create-account-title" className="text-center text-lg font-semibold text-slate-50">
           Claim your agreement

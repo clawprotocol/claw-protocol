@@ -1,4 +1,4 @@
-import { LAWDOG_EMBLEM_SRC } from "../../design/tokens";
+import { LawdogEmblem } from "./LawdogEmblem";
 
 export type LawdogBrandSize = "xs" | "sm" | "md";
 export type LawdogBrandSurface = "light" | "dark";
@@ -10,10 +10,6 @@ const PX: Record<LawdogBrandSize, number> = {
   md: 28,
 };
 
-function emblemFilterClass(surface: LawdogBrandSurface): string {
-  return surface === "dark" ? "brightness-0 invert" : "";
-}
-
 type LawdogBrandProps = {
   variant: LawdogBrandVariant;
   size: LawdogBrandSize;
@@ -22,35 +18,25 @@ type LawdogBrandProps = {
 };
 
 /**
- * LawDog emblem (PNG) with optional wordmark — light-touch, fixed pixel sizes for crisp nav.
+ * LawDog emblem (vector) with optional wordmark — currentColor for crisp light/dark chrome.
  */
 export function LawdogBrand({ variant, size, surface, className = "" }: LawdogBrandProps) {
   const px = PX[size];
-  const img = (
-    <img
-      src={LAWDOG_EMBLEM_SRC}
-      alt=""
-      aria-hidden
-      width={px}
-      height={px}
-      className={`object-contain ${emblemFilterClass(surface)}`.trim()}
-      decoding="async"
-    />
-  );
+  const tone = surface === "dark" ? "text-slate-100" : "text-slate-900";
+  const emblem = <LawdogEmblem size={px} />;
 
   if (variant === "emblem") {
     return (
-      <span className={`inline-flex shrink-0 items-center justify-center ${className}`.trim()} aria-hidden>
-        {img}
+      <span className={`inline-flex shrink-0 items-center justify-center ${tone} ${className}`.trim()} aria-hidden>
+        {emblem}
       </span>
     );
   }
 
-  const textTone = surface === "dark" ? "text-slate-100" : "text-slate-900";
   return (
-    <span className={`inline-flex items-center gap-2.5 shrink-0 ${className}`.trim()}>
-      {img}
-      <span className={`font-semibold tracking-tight ${textTone} text-sm sm:text-base`}>LawDog</span>
+    <span className={`inline-flex items-center gap-2.5 shrink-0 ${tone} ${className}`.trim()}>
+      {emblem}
+      <span className="font-semibold tracking-tight text-sm sm:text-base">LawDog</span>
     </span>
   );
 }

@@ -1,4 +1,4 @@
-import { LAWDOG_EMBLEM_SRC } from "../../design/tokens";
+import { LawdogEmblem } from "./LawdogEmblem";
 
 type Props = {
   /** ~22px height */
@@ -13,6 +13,7 @@ const HEIGHT: Record<NonNullable<Props["size"]>, number> = {
 
 /**
  * Small inline LawDog mark for “recorded” / success surfaces — entrance animation via `.lawdog-recorded-mark`.
+ * Inherits success green from parent `color` (currentColor).
  */
 export function LawdogRecordedMark({ size = "sm", className = "" }: Props) {
   const h = HEIGHT[size];
@@ -22,14 +23,7 @@ export function LawdogRecordedMark({ size = "sm", className = "" }: Props) {
       style={{ width: h, height: h }}
       aria-hidden
     >
-      <img
-        src={LAWDOG_EMBLEM_SRC}
-        alt=""
-        width={h}
-        height={h}
-        className="object-contain brightness-0 invert"
-        decoding="async"
-      />
+      <LawdogEmblem size={h} />
     </span>
   );
 }

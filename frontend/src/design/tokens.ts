@@ -43,8 +43,11 @@ export const LAWDOG_AFFILIATE_PASTELS: Record<AffiliateLandingColorKey, string> 
   red: LAWDOG_COLORS.pastel_red,
 };
 
-/** Dog-head emblem (transparent PNG); use on light as-is, invert on dark chrome. */
-export const LAWDOG_EMBLEM_SRC = "/assets/lawdog-emblem.png";
+/** Dog-head emblem — prefer `LawdogEmblem` / `LawdogBrand` (inline SVG, currentColor). */
+export const LAWDOG_EMBLEM_SRC = "/assets/lawdog-emblem.svg";
+
+/** True-alpha PNG fallback for non-React surfaces (emails, OG, etc.). */
+export const LAWDOG_EMBLEM_PNG_SRC = "/assets/lawdog-emblem.png";
 
 /** @deprecated Prefer LAWDOG_EMBLEM_SRC — kept for older imports; points at emblem. */
 export const LAWDOG_LOGO_SRC = LAWDOG_EMBLEM_SRC;
