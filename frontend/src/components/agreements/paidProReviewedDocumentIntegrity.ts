@@ -354,7 +354,6 @@ export function repairDuplicateTopLevelNoticesSection(text: string): {
   const lines = head.split("\n");
   const out: string[] = [];
   let skipping = false;
-  let removedTop = false;
   let seenSubNotices = false;
   let seenTopNotices = false;
   const subNoticesParents = new Set(
@@ -375,7 +374,6 @@ export function repairDuplicateTopLevelNoticesSection(text: string): {
       const orphanTopWhileSubExistsElsewhere = [...subNoticesParents].some((p) => p !== num);
       if (orphanTopWhileSubExistsElsewhere || seenTopNotices) {
         skipping = true;
-        removedTop = true;
         repairs.push(
           seenTopNotices
             ? "integrity:drop_duplicate_top_level_notices_sibling"
