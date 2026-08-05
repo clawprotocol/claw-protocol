@@ -268,6 +268,63 @@ function renderBlocks(blocks: HeadingBlock[]): string {
   return out.join("\n").replace(/\n{3,}/g, "\n\n").trim();
 }
 
+
+type TopBlock = Extract<HeadingBlock, { kind: "top" }>;
+
+/**
+ * Collapse later hard-fail family tops (term/notices) into the first parent even when
+ * intervening non-affinity sections (IP, Confidentiality, …) break the adjacent fold scan.
+ * Production services drafts often emit Term and Cancellation … IP … Term.
+ */
+function foldNonAdjacentHardFailProvisionFamilies(
+  blocks: HeadingBlock[],
+  repairs: string[],
+): HeadingBlock[] {
+  const tops: Array<{ index: number; block: TopBlock }> = [];
+  for (let i = 0; i < blocks.length; i += 1) {
+    const b = blocks[i]!;
+    if (b.kind === "top") tops.push({ index: i, block: b });
+  }
+  if (tops.length < 2) return blocks;
+
+  const remove = new Set<number>();
+  const mutated = new Map<number, TopBlock>();
+
+  for (let a = 0; a < tops.length; a += 1) {
+    const parentMeta = tops[a]!;
+    if (remove.has(parentMeta.index)) continue;
+    if (!isHardFailProvisionFamilyTitle(parentMeta.block.title)) continue;
+    const parent: TopBlock = {
+      ...(mutated.get(parentMeta.index) ?? parentMeta.block),
+      children: [...(mutated.get(parentMeta.index) ?? parentMeta.block).children],
+      bodyLines: [...(mutated.get(parentMeta.index) ?? parentMeta.block).bodyLines],
+    };
+    let folded = 0;
+    for (let b = a + 1; b < tops.length; b += 1) {
+      const childMeta = tops[b]!;
+      if (remove.has(childMeta.index)) continue;
+      const child = mutated.get(childMeta.index) ?? childMeta.block;
+      if (!isHardFailProvisionFamilyTitle(child.title)) continue;
+      if (!titlesAffinity(parent.title, child.title)) continue;
+      demoteChildIntoParent(parent, child);
+      remove.add(childMeta.index);
+      folded += 1;
+    }
+    if (folded > 0) {
+      mutated.set(parentMeta.index, parent);
+      repairs.push(`nonadjacent_hard_fail_family_demote:${parentMeta.block.num}:${folded}`);
+    }
+  }
+
+  if (remove.size === 0 && mutated.size === 0) return blocks;
+  const out: HeadingBlock[] = [];
+  for (let i = 0; i < blocks.length; i += 1) {
+    if (remove.has(i)) continue;
+    out.push(mutated.get(i) ?? blocks[i]!);
+  }
+  return out;
+}
+
 export function repairPaidProEmptyParentSectionHierarchy(
   text: string,
 ): RepairPaidProEmptyParentSectionHierarchyResult {
@@ -319,9 +376,10 @@ export function repairPaidProEmptyParentSectionHierarchy(
     i += 1;
   }
 
+  const collapsed = foldNonAdjacentHardFailProvisionFamilies(next, repairs);
   if (repairs.length === 0) return { text: raw, repairs };
 
-  const mergedHead = renderBlocks(next);
+  const mergedHead = renderBlocks(collapsed);
   const out = tail ? `${mergedHead}\n\n${tail.trim()}` : mergedHead;
   return { text: out.replace(/\n{3,}/g, "\n\n").trim(), repairs };
 }
