@@ -167,13 +167,26 @@ function topBlockHasBody(block: Extract<HeadingBlock, { kind: "top" }>): boolean
   return block.bodyLines.some((l) => clean(l).length > 0);
 }
 
-/** Short category shells ("Services", "Liability") that still splice a sibling child heading. */
+/**
+ * Category shells that still splice a sibling child heading even when they already
+ * have a short body ("Services", "Fees and Payment", "Term and Cancellation",
+ * "Scope of Services"). Longer operative titles (5+ words) are left alone.
+ */
 function isIncompleteCategoryParentTitle(title: string): boolean {
   const words = clean(title).split(/\s+/).filter(Boolean);
-  if (words.length === 0 || words.length > 2) return false;
-  return /\b(services?|fees?|payment|term|liabilit|indemn|ownership|data|representations|suspension|breach|access)\b/i.test(
+  if (words.length === 0 || words.length > 4) return false;
+  // Allow "X and Y" / "Scope of Services" style shells; reject long operative titles.
+  if (words.length > 2 && !/\b(and|of|for|&)\b/i.test(title)) {
+    return false;
+  }
+  return /\b(services?|fees?|payment|term|cancellation|liabilit|indemn|ownership|data|warrant|suspension|breach|access|intellectual)\b/i.test(
     title,
   );
+}
+
+/** Term/notices duplicates always hard-fail integrity — fold affinity siblings even with parent body. */
+function isHardFailProvisionFamilyTitle(title: string): boolean {
+  return /\bterm\b(?!\w)|cancellation|\bnotices?\b/i.test(title);
 }
 
 function shouldAttemptParentChildFold(
@@ -183,7 +196,11 @@ function shouldAttemptParentChildFold(
   if (!titlesAffinity(parent.title, child.title)) return false;
   if (!topBlockHasBody(parent)) return true;
   // Parent already has body but remains an incomplete category title with a spliced sibling.
-  return isIncompleteCategoryParentTitle(parent.title);
+  if (isIncompleteCategoryParentTitle(parent.title)) return true;
+  // Non-empty Term/Cancellation/Notices siblings still hard-fail reviewed-document integrity.
+  return (
+    isHardFailProvisionFamilyTitle(parent.title) && isHardFailProvisionFamilyTitle(child.title)
+  );
 }
 
 function demoteChildIntoParent(
