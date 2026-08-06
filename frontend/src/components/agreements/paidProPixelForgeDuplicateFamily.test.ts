@@ -221,6 +221,54 @@ describe("PixelForge-shaped duplicate provision family", () => {
     expect(prepared.diagnostics.reasons).not.toContain("duplicate_provision_family");
   });
 
+  it("force-collapses hard-fail families and GTM-accepts substantive drafts", () => {
+    const pad = "Additional commercial detail — the parties cooperate in good faith. ".repeat(40);
+    const defective = [
+      "SERVICES AGREEMENT",
+      "",
+      'This Agreement is between PixelForge Labs ("Client") and Alex Rivera ("Service Provider").',
+      "",
+      "1. Project Term Schedule",
+      "Six week engagement from the Effective Date.",
+      "2. Services",
+      "Mobile app UI design services.",
+      "3. Fees",
+      "Flat fee of $4,500.",
+      "4. Early Cancellation Rights",
+      "Either party may cancel with seven days written notice.",
+      "5. Notices",
+      "If to PixelForge Labs: Attention: Authorized Signer.",
+      "If to Alex Rivera: Attention: Authorized Signer.",
+      "6. Notices and Communications",
+      "Notices may be delivered by email.",
+      "7. Governing Law",
+      "Governed by applicable law.",
+      "",
+      pad,
+      "",
+      "IN WITNESS WHEREOF, the Parties execute this Agreement.",
+      "",
+      "CLIENT:",
+      "PixelForge Labs",
+      "By: __________________________",
+      "",
+      "SERVICE PROVIDER:",
+      "Alex Rivera",
+      "By: __________________________",
+    ].join("\n");
+
+    expect(defective.trim().length).toBeGreaterThanOrEqual(2500);
+    const before = diagnosePaidProReviewedDocumentIntegrity(defective);
+    expect(before.reasons).toContain("duplicate_provision_family");
+    const demote = repairPaidProEmptyParentSectionHierarchy(defective);
+    expect(demote.repairs.length).toBeGreaterThan(0);
+    const prepared = preparePaidProImmutableReviewedDocument(defective);
+    expect(prepared.ok, prepared.diagnostics.reasons.join(",")).toBe(true);
+    expect(prepared.diagnostics.reasons).not.toContain("duplicate_provision_family");
+    expect(prepared.text).not.toMatch(/^\d+\.\s+Early Cancellation Rights\s*$/m);
+    expect(prepared.text).not.toMatch(/^\d+\.\s+Notices and Communications\s*$/m);
+  });
+
   it("collapses Term + Cancellation across intervening services/fees without affinity miss", () => {
     const pad = "Additional commercial detail — the parties cooperate in good faith. ".repeat(40);
     const defective = [

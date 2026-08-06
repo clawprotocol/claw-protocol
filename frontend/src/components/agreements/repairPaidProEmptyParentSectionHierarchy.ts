@@ -341,6 +341,63 @@ function foldNonAdjacentHardFailProvisionFamilies(
   return out;
 }
 
+/** Map a top-level title onto the hard-fail provision families (term | notices). */
+function hardFailProvisionFamilyKey(title: string): "term" | "notices" | null {
+  if (/\bnotices?\b/i.test(title)) return "notices";
+  if (/\bterm\b(?!\w)|cancellation/i.test(title)) return "term";
+  return null;
+}
+
+/**
+ * Nuclear collapse: every later top in the same hard-fail family demotes into the first
+ * parent of that family. Affinity is intentionally ignored — OpenAI often emits
+ * Term / Cancellation / Notices siblings that ChatGPT users would accept as one clause.
+ */
+function forceCollapseHardFailProvisionFamilies(
+  blocks: HeadingBlock[],
+  repairs: string[],
+): HeadingBlock[] {
+  const tops: Array<{ index: number; block: TopBlock }> = [];
+  for (let i = 0; i < blocks.length; i += 1) {
+    const b = blocks[i]!;
+    if (b.kind === "top") tops.push({ index: i, block: b });
+  }
+  if (tops.length < 2) return blocks;
+
+  const firstByFamily = new Map<"term" | "notices", number>();
+  const remove = new Set<number>();
+  const mutated = new Map<number, TopBlock>();
+
+  for (const meta of tops) {
+    const fam = hardFailProvisionFamilyKey(meta.block.title);
+    if (!fam) continue;
+    if (!firstByFamily.has(fam)) {
+      firstByFamily.set(fam, meta.index);
+      continue;
+    }
+    const parentIdx = firstByFamily.get(fam)!;
+    if (remove.has(parentIdx)) continue;
+    const parent: TopBlock = {
+      ...(mutated.get(parentIdx) ?? (blocks[parentIdx] as TopBlock)),
+      children: [...(mutated.get(parentIdx) ?? (blocks[parentIdx] as TopBlock)).children],
+      bodyLines: [...(mutated.get(parentIdx) ?? (blocks[parentIdx] as TopBlock)).bodyLines],
+    };
+    const child = mutated.get(meta.index) ?? meta.block;
+    demoteChildIntoParent(parent, child);
+    mutated.set(parentIdx, parent);
+    remove.add(meta.index);
+    repairs.push(`force_hard_fail_family_collapse:${fam}:${meta.block.num}`);
+  }
+
+  if (remove.size === 0) return blocks;
+  const out: HeadingBlock[] = [];
+  for (let i = 0; i < blocks.length; i += 1) {
+    if (remove.has(i)) continue;
+    out.push(mutated.get(i) ?? blocks[i]!);
+  }
+  return out;
+}
+
 export function repairPaidProEmptyParentSectionHierarchy(
   text: string,
 ): RepairPaidProEmptyParentSectionHierarchyResult {
@@ -393,9 +450,10 @@ export function repairPaidProEmptyParentSectionHierarchy(
   }
 
   const collapsed = foldNonAdjacentHardFailProvisionFamilies(next, repairs);
+  const forced = forceCollapseHardFailProvisionFamilies(collapsed, repairs);
   if (repairs.length === 0) return { text: raw, repairs };
 
-  const mergedHead = renderBlocks(collapsed);
+  const mergedHead = renderBlocks(forced);
   const out = tail ? `${mergedHead}\n\n${tail.trim()}` : mergedHead;
   return { text: out.replace(/\n{3,}/g, "\n\n").trim(), repairs };
 }

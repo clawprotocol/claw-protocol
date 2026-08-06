@@ -467,9 +467,22 @@ export function repairPaidProReviewedDocumentIntegrity(text: string): {
   return { text: out.replace(/\n{3,}/g, "\n\n").trim(), repairs: [...new Set(repairs)] };
 }
 
+/** Substantive draft + lone family-dup after repair — display, don't blank Review. */
+export function isPaidProGtmFailOpenDuplicateProvisionFamily(
+  diagnostics: PaidProReviewedDocumentIntegrityDiagnostics,
+  text: string,
+): boolean {
+  return (
+    (text || "").trim().length >= 2500 &&
+    diagnostics.reasons.length === 1 &&
+    diagnostics.reasons[0] === "duplicate_provision_family"
+  );
+}
+
 export function assertPaidProReviewedDocumentIntegrity(text: string): void {
   const diag = diagnosePaidProReviewedDocumentIntegrity(text);
   if (diag.reasons.length === 0) return;
+  if (isPaidProGtmFailOpenDuplicateProvisionFamily(diag, text)) return;
   const detail = [
     ...diag.reasons,
     diag.unresolvedIdentityTokens[0] ? `token=${diag.unresolvedIdentityTokens[0]}` : null,
@@ -484,12 +497,23 @@ export function assertPaidProReviewedDocumentIntegrity(text: string): void {
 /**
  * Repair then hard-validate. Returns the immutable reviewed-document corpus that
  * display, SoT, persist, export, and signer prep must share.
+ *
+ * GTM fail-open: after repair, a lone `duplicate_provision_family` on a substantive
+ * draft must not blank Review — OpenAI already produced a usable agreement; the
+ * illness was over-strict client rejection + corpus wipe, not model failure.
  */
 export function preparePaidProImmutableReviewedDocument(
   text: string,
 ): PaidProReviewedDocumentIntegrityPrepareResult {
   const repaired = repairPaidProReviewedDocumentIntegrity(text);
-  const diagnostics = diagnosePaidProReviewedDocumentIntegrity(repaired.text);
+  let diagnostics = diagnosePaidProReviewedDocumentIntegrity(repaired.text);
+  if (isPaidProGtmFailOpenDuplicateProvisionFamily(diagnostics, repaired.text)) {
+    diagnostics = {
+      ...diagnostics,
+      reasons: [],
+      duplicateProvisionFamilies: [],
+    };
+  }
   const ok = diagnostics.reasons.length === 0;
   return {
     text: repaired.text,

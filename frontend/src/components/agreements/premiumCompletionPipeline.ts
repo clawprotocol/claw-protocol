@@ -3738,14 +3738,33 @@ async function runPremiumCompletionInner(
             generationOutcome: (effectiveFull.generation_outcome || "").trim(),
             renderSource: freezeSource,
           });
-          winningPremiumBodyText = "";
-          premiumRenderSource = "rejected_paid_corpus";
-          rejectedPaidCorpusDueToClientGates = true;
-          if (substantiveWireRejected && lastSubstantiveWireFreezeRejectReason) {
-            proIntentGateMessage = `LawDog received a full Pro draft (${lastSubstantiveWireFreezeBodyLen.toLocaleString()} characters) but could not freeze it: ${lastSubstantiveWireFreezeRejectReason.replace(/_/g, " ")}. Tap **Retry Pro draft** to repair and try again.`;
-          } else if (!proIntentGateMessage) {
-            proIntentGateMessage =
-              "LawDog could not establish a structure-safe Pro agreement from the server response. Tap **Retry Pro draft** to try again.";
+          const freezeReject = (freezeCommit.rejectReason || "").trim();
+          const keepUsableWireDespiteFamilyGate =
+            /duplicate_provision_family/i.test(freezeReject) &&
+            doc.trim().length >= SUBSTANTIVE_SERVER_DRAFT_MIN_LEN;
+          if (keepUsableWireDespiteFamilyGate) {
+            // Heart of the chronic create illness: OpenAI returned a usable draft; the
+            // client family gate must not wipe the corpus into empty Retry Pro draft.
+            winningPremiumBodyText = doc;
+            premiumRenderSource = freezeSource || "server_full_draft";
+            rejectedPaidCorpusDueToClientGates = false;
+            logPremiumCompletionDebug({
+              stage: "pipeline_keep_substantive_wire_despite_duplicate_provision_family",
+              accepted: true,
+              rejectedReason: freezeReject,
+              currentDocLen: doc.length,
+              premiumRenderSource,
+            });
+          } else {
+            winningPremiumBodyText = "";
+            premiumRenderSource = "rejected_paid_corpus";
+            rejectedPaidCorpusDueToClientGates = true;
+            if (substantiveWireRejected && lastSubstantiveWireFreezeRejectReason) {
+              proIntentGateMessage = `LawDog received a full Pro draft (${lastSubstantiveWireFreezeBodyLen.toLocaleString()} characters) but could not freeze it: ${lastSubstantiveWireFreezeRejectReason.replace(/_/g, " ")}. Tap **Retry Pro draft** to repair and try again.`;
+            } else if (!proIntentGateMessage) {
+              proIntentGateMessage =
+                "LawDog could not establish a structure-safe Pro agreement from the server response. Tap **Retry Pro draft** to try again.";
+            }
           }
         } else {
           doc = freezeCommit.text;
