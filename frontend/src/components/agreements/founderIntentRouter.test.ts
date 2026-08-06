@@ -31,4 +31,15 @@ describe("founderIntentRouter", () => {
       "Need a contractor agreement for a developer. They should own all their work product but we also need full exclusive ownership of everything they create. Month-to-month but lock in for 3 years. Need it simple and founder-friendly.";
     expect(isFounderEquityVestingIntent(intake)).toBe(false);
   });
+
+  it("does not treat PixelForge-style services intake with startup client as founder vesting", () => {
+    const intake =
+      "I need a simple services agreement between me (Alex Rivera, freelance product designer) and a small startup called PixelForge Labs. I’m going to design their new mobile app UI for the next 6 weeks. Flat fee of $4,500, paid 50% up front and 50% on final delivery.";
+    expect(isFounderEquityVestingIntent(intake)).toBe(false);
+  });
+
+  it("still treats bare startup alone as weak founder cue only when no commercial services cues", () => {
+    expect(isFounderEquityVestingIntent("Need paperwork for my startup")).toBe(false);
+    expect(isFounderEquityVestingIntent("Founders splitting equity at a startup")).toBe(true);
+  });
 });

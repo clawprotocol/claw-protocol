@@ -64,6 +64,13 @@ describe("agreementIntentContract (LawDog Pro universal)", () => {
     expect(v.ok).toBe(true);
   });
 
+  it("PixelForge services intake with startup client routes to consulting_services not founder", () => {
+    const intake =
+      "I need a simple services agreement between me (Alex Rivera, freelance product designer) and a small startup called PixelForge Labs. I’m going to design their new mobile app UI for the next 6 weeks. Flat fee of $4,500, paid 50% up front and 50% on final delivery.";
+    const c = resolveAgreementIntentContract(intake);
+    expect(c.intent_id).toBe("consulting_services");
+  });
+
   it("founder vesting requires professional title, rejects generic AGRR shell", () => {
     const c = resolveAgreementIntentContract("60/40 vesting between two founders, four-year, equity split");
     expect(c.intent_id).toBe("founder_equity_vesting");

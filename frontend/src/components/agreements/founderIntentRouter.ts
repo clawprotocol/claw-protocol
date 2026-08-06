@@ -16,6 +16,13 @@ const ADVISOR_REFERRAL_COMMERCIAL_EXCLUDE =
 const CONTRACTOR_DEVELOPER_EXCLUDE =
   /\b(?:contractor\s+agreement|independent\s+contractor|developer|work\s+product|1099)\b/i;
 
+/**
+ * Commercial services / freelance design deals often say "startup" as the client type.
+ * That must not route to founder equity vesting unless strict cap-table cues exist.
+ */
+const COMMERCIAL_SERVICES_EXCLUDE =
+  /\b(?:services?\s+agreement|freelance|flat\s+fee|product\s+designer|ui\s+design|mobile\s+app\s+ui|design\s+services|wireframes?|deliverables?|paid\s+50%|portfolio)\b/i;
+
 /** “Founder-friendly” tone — not an equity vesting request. */
 const FOUNDER_FRIENDLY_TONE = /\bfounder[-\s]?friendly\b/i;
 
@@ -23,13 +30,12 @@ const FOUNDER_FRIENDLY_TONE = /\bfounder[-\s]?friendly\b/i;
 const FOUNDER_EQUITY_STRICT =
   /\b(?:founder\s+vesting|founders?\s+agreement|equity\s+vesting|cap\s+table|60\s*\/\s*40|40\s*\/\s*60|cliff|vesting\s+schedule|startup\s+equity|reprice|seed\s+round)\b/i;
 
-/** Weaker founder cues — only used when commercial-advisor exclusions do not apply. */
-const FOUNDER_EQUITY_INTENT = new RegExp(
-  [
-    "\\b(founder|founders?|vesting|equit(y|ies?)|startup)\\b",
-  ].join(""),
-  "i",
-);
+/**
+ * Weaker founder cues — only used when commercial exclusions do not apply.
+ * Bare "startup" is NOT enough (PixelForge-style client descriptions); require
+ * founder/vesting/equity language.
+ */
+const FOUNDER_EQUITY_INTENT = /\b(?:founders?|vesting|equit(?:y|ies))\b/i;
 
 export function isFounderEquityVestingIntent(intakeText: string | null | undefined): boolean {
   const t = (intakeText || "").replace(/\r\n/g, "\n").trim();
@@ -38,6 +44,9 @@ export function isFounderEquityVestingIntent(intakeText: string | null | undefin
     return false;
   }
   if (CONTRACTOR_DEVELOPER_EXCLUDE.test(t) && !FOUNDER_EQUITY_STRICT.test(t)) {
+    return false;
+  }
+  if (COMMERCIAL_SERVICES_EXCLUDE.test(t) && !FOUNDER_EQUITY_STRICT.test(t)) {
     return false;
   }
   if (FOUNDER_FRIENDLY_TONE.test(t) && !FOUNDER_EQUITY_STRICT.test(t)) {

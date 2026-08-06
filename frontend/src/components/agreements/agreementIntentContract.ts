@@ -496,14 +496,16 @@ export function resolveAgreementIntentContract(rawIntake: string | null | undefi
   ) {
     return contractConsulting(raw);
   }
+  // Commercial services before weak founder routing — "startup" client copy must not
+  // steal PixelForge-style services intakes into founder_equity_vesting.
+  if (SERVICES_AGREEMENT.test(raw) && isCommercialServicesIntake(raw)) {
+    return contractConsulting(raw);
+  }
   if (isFounderEquityVestingIntent(raw)) {
     return fromDeterministic(
       { id: "founder_equity", title: "Founder Vesting Agreement", clausePackSeed: "" } as DeterministicIntentResolution,
       raw,
     );
-  }
-  if (SERVICES_AGREEMENT.test(raw) && isCommercialServicesIntake(raw)) {
-    return contractConsulting(raw);
   }
   if (intakeHasEstateFamilyContext(raw) && !/b2b|invoice|saas|vendor|msa|enterprise|logo contract/i.test(raw)) {
     return contractEstate(raw);

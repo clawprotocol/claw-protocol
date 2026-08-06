@@ -220,4 +220,49 @@ describe("PixelForge-shaped duplicate provision family", () => {
     expect(prepared.ok, prepared.diagnostics.reasons.join(",")).toBe(true);
     expect(prepared.diagnostics.reasons).not.toContain("duplicate_provision_family");
   });
+
+  it("collapses Term + Cancellation across intervening services/fees without affinity miss", () => {
+    const pad = "Additional commercial detail — the parties cooperate in good faith. ".repeat(40);
+    const defective = [
+      "SERVICES AGREEMENT",
+      "",
+      'This Agreement is between PixelForge Labs ("Client") and Alex Rivera ("Service Provider").',
+      "",
+      "1. Term",
+      "This Agreement continues for six (6) weeks unless ended earlier.",
+      "2. Services",
+      "Designer provides mobile app UI design services.",
+      "3. Fee and Payment",
+      "Flat fee of US $4,500; 50% up front and 50% on final delivery.",
+      "4. Ownership and Portfolio Rights",
+      "Client owns finals once paid; Designer may show work in portfolio.",
+      "5. Cancellation",
+      "Either party may cancel with seven (7) days written notice and payment for work completed.",
+      "6. Notices",
+      "If to PixelForge Labs: Attention: Authorized Signer.",
+      "If to Alex Rivera: Attention: Authorized Signer.",
+      "7. Governing Law",
+      "This Agreement shall be governed by applicable law.",
+      "",
+      pad,
+      "",
+      "IN WITNESS WHEREOF, the Parties execute this Agreement.",
+      "",
+      "CLIENT:",
+      "PixelForge Labs",
+      "By: __________________________",
+      "",
+      "SERVICE PROVIDER:",
+      "Alex Rivera",
+      "By: __________________________",
+    ].join("\n");
+
+    const before = diagnosePaidProReviewedDocumentIntegrity(defective);
+    expect(before.duplicateProvisionFamilies).toContain("term");
+
+    const prepared = preparePaidProImmutableReviewedDocument(defective);
+    expect(prepared.ok, prepared.diagnostics.reasons.join(",")).toBe(true);
+    expect(prepared.text).not.toMatch(/^\d+\.\s+Cancellation\s*$/m);
+    expect(prepared.text).toMatch(/\d+\.\d+\s+Cancellation\b/);
+  });
 });

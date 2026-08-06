@@ -788,6 +788,11 @@ export function noticeStanzaHasAddressPollution(stanza: string): boolean {
   return rawJoined.length > sanitized.length + 4 || NOTICE_ADDRESS_INSTRUCTIONAL_LINE_RE.test(rawJoined);
 }
 
+const NOTICE_PRIMARY_CONTACT_FALLBACK_LINE = "provided during signer setup.";
+const NOTICE_SIGNER_SETUP_EMAIL_LINE = "Email: provided during signer setup";
+const NOTICE_SIGNER_SETUP_ADDRESS_LINE = "Address: provided during signer setup";
+const NOTICE_SIGNER_SETUP_ATTENTION_LINE = "Attention: Authorized Signer";
+
 /** Repair Address lines inside one operative If-to notice stanza. */
 export function sanitizeNoticeStanzaAddressContent(stanza: string): { stanza: string; repaired: boolean } {
   if (!/Address(?:\s+for\s+Notice)?\s*:/i.test(stanza || "")) {
@@ -806,8 +811,11 @@ export function sanitizeNoticeStanzaAddressContent(stanza: string): { stanza: st
     if (headerMatch) {
       const inlineBody = (headerMatch[1] ?? "").trim();
       if (formatted.length === 0 && !inlineBody) {
+        // Never leave a bare `Address:` label — freeze hard-fails orphan_address_line.
+        // Prefer the signer-setup placeholder when intake has no postal address yet.
         inAddress = true;
-        out.push(line);
+        if (trimmed !== NOTICE_SIGNER_SETUP_ADDRESS_LINE) repaired = true;
+        out.push(NOTICE_SIGNER_SETUP_ADDRESS_LINE);
         continue;
       }
       if (formatted.length <= 1) {
@@ -866,11 +874,6 @@ function repairNoticeStanzaAddressBoundariesInCorpus(corpus: string): { text: st
     repairs,
   };
 }
-
-const NOTICE_PRIMARY_CONTACT_FALLBACK_LINE = "provided during signer setup.";
-const NOTICE_SIGNER_SETUP_EMAIL_LINE = "Email: provided during signer setup";
-const NOTICE_SIGNER_SETUP_ADDRESS_LINE = "Address: provided during signer setup";
-const NOTICE_SIGNER_SETUP_ATTENTION_LINE = "Attention: Authorized Signer";
 
 export function isBareEntityOnlyNoticeStanza(stanza: string): boolean {
   const lines = stanza
