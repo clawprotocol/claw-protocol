@@ -53,7 +53,16 @@ vi.mock("./adminConsoleApi", () => ({
         email: "cryptocurated21@example.com",
         display_name: "Crypto Curated",
         plan_type: "free",
-        agreement_count: 1,
+        premium_active: false,
+        agreement_count: 5,
+        access_type: "genesis_dog",
+        commercial_state: "genesis",
+        commercial_grant_source: "admin_grant",
+        agreement_allowance: 5,
+        agreements_used: 5,
+        agreements_remaining: 0,
+        period_ends_at: "2026-08-31T23:59:59Z",
+        can_create_persisted_agreement: false,
       },
       {
         id: "org:user-other-9",
@@ -62,6 +71,13 @@ vi.mock("./adminConsoleApi", () => ({
         email: "other@example.com",
         display_name: "Other User",
         plan_type: "free",
+        premium_active: false,
+        access_type: "free",
+        commercial_state: "none",
+        agreement_allowance: 0,
+        agreements_used: 0,
+        agreements_remaining: 0,
+        can_create_persisted_agreement: false,
       },
     ],
   })),
@@ -135,6 +151,13 @@ describe("AdminConsolePage connected state", () => {
     expect(firstCard.textContent).toContain("cryptocurated21@example.com");
     expect(firstCard.textContent).toContain("cryptocurated21");
     expect(firstCard.textContent).toContain("org:user-cryptocurated21");
+    expect(firstCard.getAttribute("data-access-type")).toBe("genesis_dog");
+    expect(screen.getAllByTestId("admin-user-access-badge")[0].textContent).toContain("Genesis Dog");
+    expect(screen.getAllByTestId("admin-user-access-detail")[0].textContent).toMatch(
+      /0 of 5 new agreements remaining/,
+    );
+    // Subscription plan=free must not be the only access signal — badge clarifies Genesis.
+    expect(firstCard.textContent).toMatch(/Subscription plan=free/);
 
     const grant = screen.getAllByRole("button", { name: /grant genesis dog/i })[0];
     expect((grant as HTMLButtonElement).disabled).toBe(true);

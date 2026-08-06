@@ -264,6 +264,52 @@ def _user_id_from_subject_ref(subject_ref: str, subscription: Optional[Dict[str,
     return None
 
 
+def _access_type_from_commercial_state(state: str) -> str:
+    s = str(state or "").strip().lower()
+    if s == "genesis":
+        return "genesis_dog"
+    if s == "pro":
+        return "paid_pro"
+    if s == "pending_genesis":
+        return "pending_genesis"
+    if s == "guest":
+        return "guest"
+    return "free"
+
+
+def _enrich_user_commercial_access(user: Dict[str, Any]) -> Dict[str, Any]:
+    """Attach commercial access fields so Admin Users can distinguish Genesis vs Paid Pro."""
+    from backend.usage_economics.commercial_entitlement import resolve_commercial_entitlement
+
+    ref = str(user.get("org_id") or user.get("id") or "").strip()
+    if not ref:
+        user["access_type"] = "free"
+        user["commercial_state"] = "none"
+        user["commercial_grant_source"] = None
+        user["agreement_allowance"] = 0
+        user["agreements_used"] = int(user.get("agreement_count") or 0)
+        user["agreements_remaining"] = 0
+        user["period_ends_at"] = None
+        user["can_create_persisted_agreement"] = False
+        return user
+    decision = resolve_commercial_entitlement(ref)
+    state = str(decision.get("state") or "none")
+    used = decision.get("agreements_used")
+    if used is None:
+        used = int(user.get("agreement_count") or 0)
+    user["access_type"] = _access_type_from_commercial_state(state)
+    user["commercial_state"] = state
+    user["commercial_grant_source"] = decision.get("grant_source")
+    user["agreement_allowance"] = decision.get("agreement_allowance")
+    user["agreements_used"] = int(used or 0)
+    user["agreements_remaining"] = decision.get("agreements_remaining")
+    user["period_ends_at"] = decision.get("period_ends_at")
+    user["can_create_persisted_agreement"] = bool(decision.get("can_create_persisted_agreement"))
+    # Keep agreement_count aligned with the commercial meter when available.
+    user["agreement_count"] = int(used or 0)
+    return user
+
+
 def _safe_bool(v: Any) -> bool:
     if isinstance(v, bool):
         return v
@@ -547,6 +593,7 @@ def admin_users(request: Request, limit: int = Query(default=200, ge=1, le=500))
             }
         )
         seen_user_ids.add(uid)
+    users = [_enrich_user_commercial_access(u) for u in users[:limit]]
     return {"users": users}
 
 

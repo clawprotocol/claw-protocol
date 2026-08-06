@@ -33,6 +33,32 @@ describe("adminConsoleUsers", () => {
     expect(identified.orgId).toBe("org:user-uid-21");
   });
 
+  it("normalizes commercial access fields for Genesis vs Paid Pro display", () => {
+    const genesis = normalizeAdminConsoleUser({
+      id: "org:user-uid-21",
+      org_id: "org:user-uid-21",
+      user_id: "uid-21",
+      email: "cryptocurated21@example.com",
+      display_name: "Crypto Curated",
+      plan_type: "free",
+      premium_active: false,
+      access_type: "genesis_dog",
+      commercial_state: "genesis",
+      commercial_grant_source: "admin_grant",
+      agreement_allowance: 5,
+      agreements_used: 5,
+      agreements_remaining: 0,
+      period_ends_at: "2026-08-31T23:59:59Z",
+      can_create_persisted_agreement: false,
+      agreement_count: 5,
+    });
+    expect(genesis.accessType).toBe("genesis_dog");
+    expect(genesis.commercialState).toBe("genesis");
+    expect(genesis.agreementAllowance).toBe(5);
+    expect(genesis.agreementsRemaining).toBe(0);
+    expect(genesis.canCreatePersistedAgreement).toBe(false);
+  });
+
   it("matches search by email, display name, user id, or org id", () => {
     expect(adminConsoleUserMatchesQuery(identified, "cryptocurated21")).toBe(true);
     expect(adminConsoleUserMatchesQuery(identified, "Crypto Curated")).toBe(true);

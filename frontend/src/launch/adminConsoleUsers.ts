@@ -13,6 +13,15 @@ export type AdminConsoleUserRow = {
   planType: string;
   premiumActive: boolean;
   agreementCount: number;
+  /** Operator-facing access type: genesis_dog | paid_pro | pending_genesis | guest | free */
+  accessType: string | null;
+  commercialState: string | null;
+  commercialGrantSource: string | null;
+  agreementAllowance: number | null;
+  agreementsUsed: number | null;
+  agreementsRemaining: number | null;
+  periodEndsAt: string | null;
+  canCreatePersistedAgreement: boolean;
   raw: Record<string, unknown>;
 };
 
@@ -21,12 +30,19 @@ function strOrNull(v: unknown): string | null {
   return s ? s : null;
 }
 
+function numOrNull(v: unknown): number | null {
+  if (v == null || v === "") return null;
+  const n = Number(v);
+  return Number.isFinite(n) ? n : null;
+}
+
 export function normalizeAdminConsoleUser(raw: Record<string, unknown>): AdminConsoleUserRow {
   const id = String(raw.id || "").trim();
   const orgId = strOrNull(raw.org_id) || id;
   const userId = strOrNull(raw.user_id);
   const email = strOrNull(raw.email);
   const displayName = strOrNull(raw.display_name);
+  const agreementCount = Number(raw.agreement_count || 0);
   return {
     id,
     orgId,
@@ -36,7 +52,15 @@ export function normalizeAdminConsoleUser(raw: Record<string, unknown>): AdminCo
     accountStatus: String(raw.account_status || "active"),
     planType: String(raw.plan_type || "free"),
     premiumActive: Boolean(raw.premium_active),
-    agreementCount: Number(raw.agreement_count || 0),
+    agreementCount,
+    accessType: strOrNull(raw.access_type),
+    commercialState: strOrNull(raw.commercial_state),
+    commercialGrantSource: strOrNull(raw.commercial_grant_source),
+    agreementAllowance: numOrNull(raw.agreement_allowance),
+    agreementsUsed: numOrNull(raw.agreements_used) ?? agreementCount,
+    agreementsRemaining: numOrNull(raw.agreements_remaining),
+    periodEndsAt: strOrNull(raw.period_ends_at),
+    canCreatePersistedAgreement: Boolean(raw.can_create_persisted_agreement),
     raw,
   };
 }

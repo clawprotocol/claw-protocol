@@ -22,12 +22,21 @@ import {
   writeAdminConsoleSecret,
 } from "./adminConsoleApi";
 import { bootstrapQaPaymentBypassAdminSession } from "./genesisBetaPaymentBypassAuth";
+import { presentAdminConsoleAccess } from "./adminConsoleUserAccess";
 import {
   adminConsoleGenesisTargetId,
   filterAdminConsoleUsers,
   normalizeAdminConsoleUser,
 } from "./adminConsoleUsers";
 import { useLaunchNav } from "./LaunchNavContext";
+
+const ACCESS_BADGE_CLASS: Record<string, string> = {
+  genesis: "border-emerald-700/60 bg-emerald-950/50 text-emerald-100",
+  pro: "border-sky-700/60 bg-sky-950/50 text-sky-100",
+  pending: "border-amber-700/60 bg-amber-950/40 text-amber-100",
+  neutral: "border-slate-700/70 bg-slate-900/70 text-slate-200",
+  muted: "border-slate-800 bg-slate-950/50 text-slate-400",
+};
 
 type FounderTab = "hq" | "money" | "users" | "queue" | "partners" | "systems" | "links";
 
@@ -376,7 +385,7 @@ export function AdminConsolePage(props: { initialAdminSecret?: string } = {}) {
               data-testid="admin-genesis-audit-reason"
             >
               <label className="text-xs text-slate-400" htmlFor="admin-genesis-audit-reason">
-                Audit reason (required for Grant / Revoke Genesis Dog)
+                Audit reason (required for Grant / Revoke / Reset Genesis usage)
               </label>
               <input
                 id="admin-genesis-audit-reason"
@@ -400,7 +409,9 @@ export function AdminConsolePage(props: { initialAdminSecret?: string } = {}) {
                 </button>
               </p>
               {!genesisReasonReady ? (
-                <p className="mt-1 text-[11px] text-amber-200/80">Enter at least 3 characters before granting or revoking.</p>
+                <p className="mt-1 text-[11px] text-amber-200/80">
+                  Enter at least 3 characters before granting, revoking, or resetting Genesis usage.
+                </p>
               ) : null}
             </div>
             {filteredUsers.slice(0, 80).map((u) => {
@@ -409,14 +420,38 @@ export function AdminConsolePage(props: { initialAdminSecret?: string } = {}) {
               const disabled = u.accountStatus === "disabled";
               const title =
                 u.email || u.displayName || u.userId || subjectRef || "Unknown user";
+              const access = presentAdminConsoleAccess({
+                accessType: u.accessType,
+                commercialState: u.commercialState,
+                premiumActive: u.premiumActive,
+                planType: u.planType,
+                agreementAllowance: u.agreementAllowance,
+                agreementsUsed: u.agreementsUsed,
+                agreementsRemaining: u.agreementsRemaining,
+                periodEndsAt: u.periodEndsAt,
+                agreementCount: u.agreementCount,
+              });
+              const badgeClass = ACCESS_BADGE_CLASS[access.tone] || ACCESS_BADGE_CLASS.neutral;
               return (
                 <div
                   key={subjectRef || genesisTarget}
                   className="rounded border border-slate-800 bg-slate-950/25 p-3 text-xs"
                   data-testid="admin-user-card"
+                  data-access-type={access.accessType}
                 >
-                  <p className="text-sm font-medium text-slate-100" data-testid="admin-user-primary-label">
-                    {title}
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <p className="text-sm font-medium text-slate-100" data-testid="admin-user-primary-label">
+                      {title}
+                    </p>
+                    <span
+                      className={`inline-flex rounded border px-2 py-0.5 text-[11px] font-medium ${badgeClass}`}
+                      data-testid="admin-user-access-badge"
+                    >
+                      {access.badgeLabel}
+                    </span>
+                  </div>
+                  <p className="mt-1 text-[11px] text-slate-300" data-testid="admin-user-access-detail">
+                    {access.detailLine}
                   </p>
                   <dl className="mt-2 grid gap-1 text-[11px] text-slate-400 sm:grid-cols-2">
                     <div>
@@ -436,8 +471,13 @@ export function AdminConsolePage(props: { initialAdminSecret?: string } = {}) {
                       <dd className="inline text-slate-300">{u.orgId || subjectRef || "—"}</dd>
                     </div>
                   </dl>
-                  <p className="mt-2 text-slate-500">
-                    plan={u.planType} premium={String(u.premiumActive)} agreements={u.agreementCount}
+                  <p className="mt-2 text-[11px] text-slate-500">
+                    Subscription plan={u.planType}
+                    {" · "}
+                    premium={u.premiumActive ? "active" : "inactive"}
+                    {u.commercialGrantSource ? ` · grant=${u.commercialGrantSource}` : ""}
+                    {" · "}
+                    account={disabled ? "disabled" : "active"}
                   </p>
                   <div className="mt-2 flex flex-wrap gap-2">
                     <button

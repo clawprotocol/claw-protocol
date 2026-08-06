@@ -308,10 +308,29 @@ def test_admin_users_returns_safe_identity_fields(monkeypatch, tmp_path):
     assert row["email"] == "cryptocurated21@example.com"
     assert row["display_name"] == "Crypto Curated"
     assert row["user_id"] == uid
+    assert "access_type" in row
+    assert "commercial_state" in row
+    assert row["access_type"] in ("free", "genesis_dog", "paid_pro", "pending_genesis", "guest")
     assert "purpose" not in row
     assert "payment_terms" not in row
     assert "parties" not in row
     assert "versions" not in row
+
+    grant = client.post(
+        f"/v1/admin/users/{uid}/genesis-entitlement/grant",
+        headers=_ops_headers(reason="admin users access badge grant"),
+        json={"reason": "admin users access badge grant"},
+    )
+    assert grant.status_code == 200, grant.text
+    after = client.get("/v1/admin/users", headers=_ops_headers())
+    assert after.status_code == 200
+    granted = [u for u in (after.json().get("users") or []) if u.get("user_id") == uid]
+    assert len(granted) == 1
+    assert granted[0]["access_type"] == "genesis_dog"
+    assert granted[0]["commercial_state"] == "genesis"
+    assert granted[0]["plan_type"] == "free"
+    assert int(granted[0].get("agreement_allowance") or 0) == 5
+    assert int(granted[0].get("agreements_remaining") or 0) >= 0
 
 
 def test_admin_agreements_local_respects_limit_bounded_load_draft(monkeypatch, tmp_path):
