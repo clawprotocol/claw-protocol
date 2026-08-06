@@ -54,8 +54,7 @@ import {
 } from "./normalizePaidProOrphanSubsections";
 import { repairPaidProOrphanSectionNumbers } from "./paidProOrphanSectionNumberRepair";
 import {
-  intakeHasFullLegalEntityParties,
-  resolveCanonicalPartyIdentitiesFromIntake,
+  resolveCommercialPartyRecordsForOpeningRepair,
 } from "./canonicalPartyIdentityResolver";
 import { buildPartyEntriesFromManifestRecords, frozenManifestRecitalNeedsRewrite, normalizeOpeningRecital } from "./paidProAgreementPolish";
 import {
@@ -499,10 +498,10 @@ export function preparePaidProFreezeCandidateText(
     safeForCommit = recital.text;
     if (recital.log.applied) repairs.push("opening:normalize_multiparty_recital");
   } else if (
-    intakeHasFullLegalEntityParties(args.intakeText ?? null, partyNameList) &&
     !intakeDescribesBrandLicensingDistributionManufacturingStack(args.intakeText ?? "")
   ) {
-    const identityRecords = resolveCanonicalPartyIdentitiesFromIntake(
+    // Include sole-prop / brand commercial parties (not only LLC/Inc entity suffixes).
+    const identityRecords = resolveCommercialPartyRecordsForOpeningRepair(
       args.intakeText ?? "",
       partyNameList,
       roleLabels.length >= 2 ? roleLabels : undefined,

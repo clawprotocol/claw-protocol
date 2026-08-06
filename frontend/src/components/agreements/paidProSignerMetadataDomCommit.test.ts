@@ -62,6 +62,31 @@ describe("paidProSignerMetadataDomCommit", () => {
     expect(merged.partySignerNames[1]).toBe("Michael Torres");
   });
 
+  it("does not let empty visible DOM remount wipe filled React signer metadata", () => {
+    mountSignerInput("r1-signer-name", "");
+    mountSignerInput("r2-signer-name", "");
+    mountSignerInput("r1-signer-title", "");
+    mountSignerInput("r2-signer-title", "");
+    mountSignerInput("r1-email", "");
+    mountSignerInput("r2-email", "");
+    const filled = baseUi({
+      recipient1Email: "client@example.com",
+      recipient2Email: "provider@example.com",
+      partySignerNames: ["Sarah Mitchell", "Michael Torres"],
+      partySignerTitles: ["CEO", "President"],
+      partyAddresses: ["123 Main St", "456 Oak Ave"],
+    });
+    const merged = mergeLiveSignerMetadataUiWithDomCommit(filled);
+    expect(merged.partySignerNames).toEqual(["Sarah Mitchell", "Michael Torres"]);
+    expect(merged.partySignerTitles).toEqual(["CEO", "President"]);
+    expect(merged.recipient1Email).toBe("client@example.com");
+    expect(merged.recipient2Email).toBe("provider@example.com");
+    const authority = buildPaidProSignerMetadataAuthorityForFinalize(filled);
+    expect(authority.parties[0]?.signerName).toBe("Sarah Mitchell");
+    expect(authority.parties[1]?.signerName).toBe("Michael Torres");
+    expect(authority.parties[1]?.signerTitle).toBe("President");
+  });
+
   it("prefers corrected Party 2 legal entity spelling from visible DOM over stale React state", () => {
     mountSignerInput("r2-name", IRON_VALE);
     const merged = mergeLiveSignerMetadataUiWithDomCommit(baseUi({ recipient2Name: IRON_VAL }));

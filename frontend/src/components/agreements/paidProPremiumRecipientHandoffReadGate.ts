@@ -138,19 +138,13 @@ export function applyPremiumRecipientHandoffReadGate(
 
   const counts = countSignerMetadataSlots(cappedHandoff, partySlotCount);
 
-  if (
-    populatedCount > 0 ||
-    entityAddressCounts.entities >= 2 ||
-    entityAddressCounts.addresses >= 2
-  ) {
+  // Signer-name-populated handoffs latch for stale-empty merge protection.
+  if (populatedCount > 0) {
     lastPopulatedHandoff = cappedHandoff;
     sessionEverHadPopulatedHandoff = true;
     latchSignerMetadataEffectiveMax(counts);
     logSignerMetadataEffective({
-      source:
-        populatedCount > 0
-          ? "handoff_read_populated"
-          : "handoff_read_intake_manifest_entities",
+      source: "handoff_read_populated",
       partySlots: counts.partySlots,
       slotsWithSignerName: counts.slotsWithSignerName,
       slotsWithSignerTitle: counts.slotsWithSignerTitle,
@@ -175,10 +169,16 @@ export function applyPremiumRecipientHandoffReadGate(
   const monotonicPartyLatchSatisfied =
     monotonicMax.partySlots >= 3 &&
     (priorPopulated?.partySlots ?? 0) >= 3;
+  // Only restore against empty reads when a prior handoff actually had signer names.
+  // Entity/address-only latch previously set sessionEverHadPopulatedHandoff with
+  // priorSlotsWithSignerName: 0 and blocked live signer UI from applying.
+  const priorHadSignerNames =
+    (priorPopulated?.slotsWithSignerName ?? 0) > 0 || monotonicMax.slotsWithSignerName > 0;
 
   if (
     sessionEverHadPopulatedHandoff &&
     lastPopulatedHandoff &&
+    priorHadSignerNames &&
     (partyFingerprintMatch || monotonicSignerLatchSatisfied || monotonicPartyLatchSatisfied)
   ) {
     logSignerMetadataStaleEmptyReadIgnored({
@@ -200,6 +200,19 @@ export function applyPremiumRecipientHandoffReadGate(
       ignoredEmptyRead: true,
     });
     return merged;
+  }
+
+  // Entity/address-only intake manifest: pass through, but do NOT latch as signer-populated.
+  if (entityAddressCounts.entities >= 2 || entityAddressCounts.addresses >= 2) {
+    latchSignerMetadataEffectiveMax(counts);
+    logSignerMetadataEffective({
+      source: "handoff_read_intake_manifest_entities",
+      partySlots: counts.partySlots,
+      slotsWithSignerName: counts.slotsWithSignerName,
+      slotsWithSignerTitle: counts.slotsWithSignerTitle,
+      ignoredEmptyRead: false,
+    });
+    return cappedHandoff;
   }
 
   if (populatedCount === 0) {

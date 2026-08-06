@@ -500,6 +500,31 @@ export function resolveCanonicalPartyIdentitiesFromIntake(
   });
 }
 
+/**
+ * Party records for opening title/recital repair — includes sole-prop / brand commercial
+ * names when the authoritative-entity resolver returns empty (Alex Rivera / PixelForge Labs).
+ */
+export function resolveCommercialPartyRecordsForOpeningRepair(
+  intakeRaw: string | null | undefined,
+  partyNames?: readonly string[] | null,
+  roleLabels?: readonly string[] | null,
+): CanonicalPartyIdentityRecord[] {
+  const fromIntake = resolveCanonicalPartyIdentitiesFromIntake(intakeRaw, partyNames, roleLabels);
+  if (fromIntake.length >= 2) return fromIntake;
+  const names = (partyNames ?? [])
+    .map((n) => String(n || "").replace(/\s+/g, " ").trim())
+    .filter((n) => n.length >= 2 && !/^(?:party|parties)$/i.test(n));
+  if (names.length < 2) return [];
+  return names.slice(0, 12).map((fullLegalName, index) => ({
+    fullLegalName,
+    roleLabel: roleLabelForIndex(index, roleLabels?.[index], intakeRaw),
+    displayAlias: definedShortNameFromLegalEntity(fullLegalName),
+    signerName: null,
+    signerTitle: null,
+    partyAddress: null,
+  }));
+}
+
 export function canonicalPartyRecordsFromSignerIdentities(
   identities: readonly SignerCanonicalPartyIdentity[],
 ): CanonicalPartyIdentityRecord[] {

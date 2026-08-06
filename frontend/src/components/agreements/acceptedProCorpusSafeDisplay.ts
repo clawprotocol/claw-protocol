@@ -7,6 +7,7 @@ import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import {
   intakeHasFullLegalEntityParties,
   resolveCanonicalPartyIdentitiesFromSources,
+  resolveCommercialPartyRecordsForOpeningRepair,
 } from "./canonicalPartyIdentityResolver";
 import { readFrozenCanonicalManifestPartyNames } from "./frozenCanonicalManifestAuthority";
 import { labeledPartyLegalEntities } from "./labeledPartyBlockParse";
@@ -109,7 +110,9 @@ function paidProSafeDisplayHasAuthoritativeParties(
   partyNames: readonly string[],
 ): boolean {
   if (partyNames.filter(isAuthoritativeLegalEntityName).length >= 2) return true;
-  return intakeHasFullLegalEntityParties(intakeRaw, partyNames);
+  if (intakeHasFullLegalEntityParties(intakeRaw, partyNames)) return true;
+  // Sole-prop / brand commercial parties still need opening title repair on safe display.
+  return partyNames.map((n) => String(n || "").trim()).filter((n) => n.length >= 2).length >= 2;
 }
 
 function resolvePaidProSafeDisplayPartyRecords(
@@ -121,12 +124,15 @@ function resolvePaidProSafeDisplayPartyRecords(
   const roleLabels = (draft?.parties ?? [])
     .map((p) => String(p?.role ?? "").trim())
     .filter((r) => r.length >= 2);
-  return resolveCanonicalPartyIdentitiesFromSources({
+  const roles = roleLabels.length >= 2 ? roleLabels : undefined;
+  const fromSources = resolveCanonicalPartyIdentitiesFromSources({
     rawIntake: intakeRaw,
     starterNames: partyNames,
     generatedBody: null,
-    roleLabels: roleLabels.length >= 2 ? roleLabels : undefined,
+    roleLabels: roles,
   });
+  if (fromSources.length >= 2) return fromSources;
+  return resolveCommercialPartyRecordsForOpeningRepair(intakeRaw, partyNames, roles);
 }
 
 function canonicalPartyNamesFromAcceptanceContext(

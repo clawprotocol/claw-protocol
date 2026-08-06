@@ -64,8 +64,20 @@ function mergeSignerRow(
   const next = [...current];
   while (next.length <= index) next.push("");
   if (domValue == null) return next;
-  next[index] = normalizeSignerField(domValue);
+  const normalized = normalizeSignerField(domValue);
+  const prior = normalizeSignerField(next[index] ?? "");
+  // Empty visible DOM must not clobber non-empty React UI (remount / second-mount race).
+  // Intentional clears already update React via onChange before finalize.
+  if (!normalized && prior) return next;
+  next[index] = normalized;
   return next;
+}
+
+/** Prefer non-empty DOM; keep prior React value when visible DOM is empty. */
+function mergeDomOrPrior(domValue: string | null, prior: string): string {
+  if (domValue == null) return prior;
+  const trimmed = domValue.trim();
+  return trimmed || prior;
 }
 
 /** Merge visible DOM inputs over React UI state — manual corrections in focused fields win. */
@@ -117,12 +129,15 @@ export function mergeLiveSignerMetadataUiWithDomCommit(
     const legalDom = readVisiblePartyFieldDomValue(i, "legal-name");
     if (legalDom != null) {
       while (extraPartyLegalNames.length <= i - 2) extraPartyLegalNames.push("");
-      extraPartyLegalNames[i - 2] = legalDom.trim();
+      const priorLegal = extraPartyLegalNames[i - 2] ?? "";
+      extraPartyLegalNames[i - 2] = mergeDomOrPrior(legalDom, priorLegal);
     }
     const emailDom = readVisiblePartyFieldDomValue(i, "email");
     if (emailDom != null) {
       while (extraPartyReviewEmails.length <= i - 2) extraPartyReviewEmails.push("");
-      extraPartyReviewEmails[i - 2] = stripRecipientEmailNoise(emailDom);
+      const priorEmail = extraPartyReviewEmails[i - 2] ?? "";
+      const cleaned = stripRecipientEmailNoise(emailDom);
+      extraPartyReviewEmails[i - 2] = cleaned || priorEmail;
     }
     partySignerNames = mergeSignerRow(partySignerNames, i, readVisiblePartyFieldDomValue(i, "signer-name"));
     partySignerTitles = mergeSignerRow(partySignerTitles, i, readVisiblePartyFieldDomValue(i, "signer-title"));
@@ -132,10 +147,16 @@ export function mergeLiveSignerMetadataUiWithDomCommit(
   return {
     ...ui,
     partyCount,
-    recipient1Name: r1Name != null ? r1Name.trim() : ui.recipient1Name,
-    recipient2Name: r2Name != null ? r2Name.trim() : ui.recipient2Name,
-    recipient1Email: r1Email != null ? stripRecipientEmailNoise(r1Email) : ui.recipient1Email,
-    recipient2Email: r2Email != null ? stripRecipientEmailNoise(r2Email) : ui.recipient2Email,
+    recipient1Name: mergeDomOrPrior(r1Name, ui.recipient1Name),
+    recipient2Name: mergeDomOrPrior(r2Name, ui.recipient2Name),
+    recipient1Email:
+      r1Email != null
+        ? stripRecipientEmailNoise(r1Email) || ui.recipient1Email
+        : ui.recipient1Email,
+    recipient2Email:
+      r2Email != null
+        ? stripRecipientEmailNoise(r2Email) || ui.recipient2Email
+        : ui.recipient2Email,
     extraPartyLegalNames,
     extraPartyReviewEmails,
     partySignerNames,

@@ -2412,7 +2412,10 @@ export function ensureOperativeIfToNoticeDelivery(
       if (addr && !noticesRegionIncludesAddress(addr)) return true;
       return false;
     });
-  const hasPlaceholderTokens = NOTICE_PLACEHOLDER_TOKEN_RE.test(noticesRegion);
+  // Bracket tokens and live "provided during signer setup" lines both force notice rebuild.
+  const hasPlaceholderTokens =
+    NOTICE_PLACEHOLDER_TOKEN_RE.test(noticesRegion) ||
+    /provided during signer setup/i.test(noticesRegion);
   const hasExecutionPollution = noticesRegionHasExecutionPollution(noticesRegion);
   const hasInlineMalformedNotices = hasInlineMalformedNoticeStanzas(corpus);
   const hasBareNoticeStanzas = hasBareEntityOnlyNoticeStanzas(corpus);
