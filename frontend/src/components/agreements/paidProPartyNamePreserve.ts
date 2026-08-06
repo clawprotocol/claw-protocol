@@ -375,6 +375,22 @@ export function stripTrailingPartyMetadataLabel(name: string): string {
   return words.slice(0, -1).join(" ").trim();
 }
 
+/**
+ * Job-title / occupational phrases from intake appositives
+ * ("Alex Rivera, freelance product designer") must never become a third party slot.
+ */
+const OCCUPATIONAL_OR_JOB_TITLE_PARTY_RE =
+  /^(?:(?:a|an|the)\s+)?(?:freelance|independent)?\s*(?:product\s+|ui\s+|ux\s+|graphic\s+|web\s+|software\s+|mobile\s+)?(?:designer|developer|engineer|consultant|contractor|freelancer|attorney|lawyer|accountant|ceo|cto|cfo|coo|founder|president|manager|director|officer|analyst|specialist|architect)(?:\s+(?:and|&)\s+[a-z]+)?$/i;
+
+export function isOccupationalOrJobTitlePartyName(name: string): boolean {
+  const t = (name || "").replace(/\s+/g, " ").trim();
+  if (!t || t.length < 3) return false;
+  if (ENTITY_SUFFIX.test(t)) return false;
+  if (OCCUPATIONAL_OR_JOB_TITLE_PARTY_RE.test(t)) return true;
+  // Bare title tokens that leak as party rows.
+  return /^(?:ceo|cto|cfo|coo|founder|president|director|manager|officer)$/i.test(t);
+}
+
 /** Reject contract prose fragments mistaken for party names. */
 export function isDisallowedPartyPhrase(name: string): boolean {
   const t = normPartyLabel(name);
@@ -388,11 +404,13 @@ export function isAuthoritativeLegalEntityName(name: string): boolean {
   const raw = (name || "").replace(/\s+/g, " ").trim();
   if (looksLikeAuthorizedSignersBulletLine(raw)) return false;
   if (hasPartyMetadataLabelContamination(raw)) return false;
+  if (isOccupationalOrJobTitlePartyName(raw)) return false;
   if (isPartyMetadataFieldLabelValue(raw)) return false;
   if (isStateLegalFormOnlyName(raw)) return false;
   const t = isolateLegalEntityFromContaminatedName(raw);
   if (t.length < 3 || isDisallowedPartyPhrase(t)) return false;
   if (hasPartyMetadataLabelContamination(t)) return false;
+  if (isOccupationalOrJobTitlePartyName(t)) return false;
   if (isStateLegalFormOnlyName(t)) return false;
   if (isPartyMetadataFieldLabelValue(t)) return false;
   if (/^(?:my|our|the|your|their|each|both|either)\s+company$/i.test(t)) return false;

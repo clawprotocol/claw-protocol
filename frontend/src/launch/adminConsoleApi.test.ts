@@ -22,6 +22,7 @@ import {
   ADMIN_SECRET_REJECTED_MESSAGE,
   MISSING_ADMIN_SECRET_MESSAGE,
   adminGrantGenesisEntitlement,
+  adminResetGenesisMonthlyUsage,
   adminRevokeGenesisEntitlement,
   clearAdminConsoleSecret,
   fetchAdminOverview,
@@ -139,6 +140,7 @@ describe("adminConsoleApi", () => {
 
     await adminGrantGenesisEntitlement("user-cryptocurated21", reason);
     await adminRevokeGenesisEntitlement("user-cryptocurated21", reason);
+    await adminResetGenesisMonthlyUsage("user-cryptocurated21", reason);
 
     expect(fetchMock).toHaveBeenNthCalledWith(
       1,
@@ -160,6 +162,19 @@ describe("adminConsoleApi", () => {
         method: "POST",
         headers: expect.objectContaining({ "x-claw-admin-reason": reason }),
         body: JSON.stringify({ reason }),
+      }),
+    );
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      3,
+      "https://api.example.test/v1/admin/users/user-cryptocurated21/genesis-usage/reconcile",
+      expect.objectContaining({
+        method: "POST",
+        headers: expect.objectContaining({ "x-claw-admin-reason": reason }),
+        body: JSON.stringify({
+          reason,
+          mode: "reset_month_to_zero",
+          dry_run: false,
+        }),
       }),
     );
   });

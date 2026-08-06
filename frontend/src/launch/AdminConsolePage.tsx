@@ -6,6 +6,7 @@ import {
   adminPayoutBatchAction,
   adminGrantGenesisEntitlement,
   adminRefreshEntitlement,
+  adminResetGenesisMonthlyUsage,
   adminRevokeGenesisEntitlement,
   adminSetAffiliateStatus,
   adminSetUserDisabled,
@@ -474,6 +475,22 @@ export function AdminConsolePage(props: { initialAdminSecret?: string } = {}) {
                       }
                     >
                       Revoke Genesis Dog
+                    </button>
+                    <button
+                      type="button"
+                      className="vs01-btn vs01-btn--secondary vs01-btn--compact"
+                      disabled={
+                        !genesisReasonReady ||
+                        !genesisTarget ||
+                        busyId === `genesis-reset-usage:${genesisTarget}`
+                      }
+                      onClick={() =>
+                        void doAction(`genesis-reset-usage:${genesisTarget}`, () =>
+                          adminResetGenesisMonthlyUsage(genesisTarget, genesisAuditReason.trim()),
+                        )
+                      }
+                    >
+                      Reset Genesis monthly usage
                     </button>
                     <button
                       type="button"

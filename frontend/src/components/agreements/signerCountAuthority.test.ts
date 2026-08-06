@@ -100,6 +100,22 @@ describe("signerCountAuthority", () => {
     expect(resolution.count).toBe(2);
   });
 
+  it("does not promote freelance job-title appositives into a third party slot", () => {
+    const intake =
+      "I need a simple services agreement between me (Alex Rivera, freelance product designer) and a small startup called PixelForge Labs. Flat fee of $4,500.";
+    const resolution = resolveAuthoritativeSignerCount({
+      intakeText: intake,
+      draftParties: [
+        { name: "Alex Rivera" },
+        { name: "PixelForge Labs" },
+        { name: "Freelance Product Designer" },
+      ],
+      rawPartyCount: 3,
+    });
+    expect(resolution.count).toBe(2);
+    expect(resolution.draftCount).toBe(2);
+  });
+
   it("generated agreement party count ignores decorative third signature block", () => {
     const count = resolveGeneratedAgreementPartyCount({
       intakeText: TEST372_FREE_STACKED_PARTY_INTAKE,

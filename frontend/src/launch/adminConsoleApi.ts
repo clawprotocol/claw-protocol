@@ -221,6 +221,28 @@ export const adminGetGenesisEntitlement = (userId: string) =>
     { reason: ADMIN_CONSOLE_CONNECT_REASON },
   ) as Promise<Record<string, unknown>>;
 
+/** Reset this user's Genesis Dog monthly agreement meter to 0 (audited). */
+export const adminResetGenesisMonthlyUsage = (userId: string, reason: string) =>
+  adminFetch(
+    `/v1/admin/users/${encodeURIComponent(userId)}/genesis-usage/reconcile`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        reason,
+        mode: "reset_month_to_zero",
+        dry_run: false,
+      }),
+    },
+    { reason },
+  ) as Promise<Record<string, unknown>>;
+
+export const adminGetGenesisUsage = (userId: string) =>
+  adminFetch(
+    `/v1/admin/users/${encodeURIComponent(userId)}/genesis-usage`,
+    undefined,
+    { reason: ADMIN_CONSOLE_CONNECT_REASON },
+  ) as Promise<Record<string, unknown>>;
+
 export const adminMigrateLegacyGenesisAffiliates = (reason: string) =>
   adminFetch(
     `/v1/admin/genesis-entitlement/migrate-legacy-affiliates`,

@@ -769,22 +769,13 @@ def admin_get_genesis_entitlement(user_id: str, request: Request) -> Dict[str, A
 
 @router.get("/users/{user_id}/genesis-usage")
 def admin_get_genesis_usage(user_id: str, request: Request) -> Dict[str, Any]:
-    """Staging/test only: trace Genesis monthly meter rows (no agreement bodies / tokens)."""
+    """Trace Genesis monthly meter rows for support (no agreement bodies / tokens)."""
     from backend.services.agreement_draft_store import draft_exists
     from backend.usage_economics.commercial_entitlement import (
         resolve_commercial_entitlement,
         utc_month_period_bounds,
     )
 
-    env = claw_environment()
-    if env not in ("staging", "test"):
-        raise HTTPException(
-            status_code=403,
-            detail={
-                "code": "staging_only",
-                "message": "Genesis usage trace is staging/test only.",
-            },
-        )
     uid = _user_id_from_admin_path(user_id)
     _privileged(
         request,
@@ -859,25 +850,16 @@ def admin_reconcile_genesis_usage(
     user_id: str, body: GenesisUsageReconcileBody, request: Request
 ) -> Dict[str, Any]:
     """
-    Staging/test only: reset this user's Genesis monthly meter to 0 (audited).
+    Reset this user's Genesis monthly meter to 0 (audited support action).
 
-    Does not alter production or other users. Refunds agreement_owner rows for the
-    current UTC month and reverses subject_counters charges.
+    Refunds agreement_owner rows for the current UTC month and reverses
+    subject_counters charges. Requires PERM_MUTATE_SUPPORT + audit reason.
     """
     from backend.usage_economics.commercial_entitlement import (
         resolve_commercial_entitlement,
         utc_month_period_bounds,
     )
 
-    env = claw_environment()
-    if env not in ("staging", "test"):
-        raise HTTPException(
-            status_code=403,
-            detail={
-                "code": "staging_only",
-                "message": "Genesis usage reconcile is staging/test only.",
-            },
-        )
     uid = _user_id_from_admin_path(user_id)
     principal = _privileged(
         request,

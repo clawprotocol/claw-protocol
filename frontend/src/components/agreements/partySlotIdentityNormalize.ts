@@ -11,8 +11,10 @@ import { PARTY_ENTITY_SUFFIX_RE } from "./canonicalPartyIdentityResolver";
 import { partyLegalNamesMatch } from "./paidProAcceptedCorpusPartyRoles";
 import { PAID_PRO_AUTHORITY_MAX_PARTIES } from "./paidProAuthorityLimits";
 import {
+  hasPartyMetadataLabelContamination,
   isAuthoritativeLegalEntityName,
   isDisallowedPartyPhrase,
+  isOccupationalOrJobTitlePartyName,
   isStateLegalFormOnlyName,
 } from "./paidProPartyNamePreserve";
 import { isolateLegalEntityFromContaminatedName } from "./starterPartyIdentityIsolation";
@@ -245,6 +247,8 @@ export function isInvalidPartySlotLegalEntity(name: string): boolean {
   if (isInternalPartyAliasToken(t)) return true;
   if (isStateLegalFormOnlyName(t)) return true;
   if (isDisallowedPartyPhrase(t)) return true;
+  if (hasPartyMetadataLabelContamination(t)) return true;
+  if (isOccupationalOrJobTitlePartyName(t)) return true;
   return false;
 }
 

@@ -327,7 +327,24 @@ function resolveAuthoritativeSignerCountCore(args: SignerCountAuthorityArgs): Si
     entityPool.length < 3 &&
     frozenManifestCount < 3 &&
     consumedManifestCount < 3;
-  if (intakeClearlyTwoParty && count > 2 && explicitManifestPartyCount < 3) {
+  // Freelance sole-prop intakes ("between me (Alex Rivera, freelance product designer) and …")
+  // often yield empty betweenDeduped (parentheses) while draft rows still resolve to exactly 2
+  // commercial names once job-title appositives are filtered by countRealParties.
+  const draftClearlyTwoPartyCommercial =
+    draftCount === 2 &&
+    authoritativeIntakeCount <= 2 &&
+    labeledCount < 3 &&
+    quotedCount < 3 &&
+    entityPool.length < 3 &&
+    frozenManifestCount < 3 &&
+    consumedManifestCount < 3 &&
+    explicitManifestPartyCount < 3 &&
+    !explicitMultiParty;
+  if (
+    (intakeClearlyTwoParty || draftClearlyTwoPartyCommercial) &&
+    count > 2 &&
+    explicitManifestPartyCount < 3
+  ) {
     count = 2;
     source = "party_slot_count";
   } else if (

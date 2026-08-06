@@ -73,6 +73,7 @@ vi.mock("./adminConsoleApi", () => ({
   adminRefreshEntitlement: vi.fn(),
   adminGrantGenesisEntitlement: vi.fn(async () => ({ ok: true })),
   adminRevokeGenesisEntitlement: vi.fn(async () => ({ ok: true })),
+  adminResetGenesisMonthlyUsage: vi.fn(async () => ({ ok: true })),
   adminSetUserDisabled: vi.fn(),
   adminFlagAgreement: vi.fn(),
   adminResendDelivery: vi.fn(),
@@ -86,6 +87,7 @@ vi.mock("./genesisBetaPaymentBypassAuth", () => ({
 
 import {
   adminGrantGenesisEntitlement,
+  adminResetGenesisMonthlyUsage,
   clearAdminConsoleSecret,
   fetchAdminOverview,
   writeAdminConsoleSecret,
@@ -143,6 +145,16 @@ describe("AdminConsolePage connected state", () => {
     fireEvent.click(grant);
     await waitFor(() => {
       expect(adminGrantGenesisEntitlement).toHaveBeenCalledWith(
+        "cryptocurated21",
+        "staging acceptance grant for cryptocurated21",
+      );
+    });
+
+    const resetUsage = screen.getAllByRole("button", { name: /reset genesis monthly usage/i })[0];
+    expect((resetUsage as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(resetUsage);
+    await waitFor(() => {
+      expect(adminResetGenesisMonthlyUsage).toHaveBeenCalledWith(
         "cryptocurated21",
         "staging acceptance grant for cryptocurated21",
       );

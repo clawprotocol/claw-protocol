@@ -152,10 +152,50 @@ _CLAUSE_FAMILY_INTAKE_RES = (
 )
 
 
+_OCCUPATIONAL_OR_JOB_TITLE_PARTY_RE = re.compile(
+    r"^(?:(?:a|an|the)\s+)?(?:freelance|independent)?\s*"
+    r"(?:product\s+|ui\s+|ux\s+|graphic\s+|web\s+|software\s+|mobile\s+)?"
+    r"(?:designer|developer|engineer|consultant|contractor|freelancer|"
+    r"attorney|lawyer|accountant|ceo|cto|cfo|coo|founder|president|"
+    r"manager|director|officer|analyst|specialist|architect)$",
+    re.I,
+)
+_METADATA_LABEL_PARTY_RE = re.compile(
+    r"^(?:role|attn|attention|email|by|name|title|address|contact)$",
+    re.I,
+)
+_ENTITY_SUFFIX_PARTY_RE = re.compile(
+    r"\b(?:LLC|L\.L\.C\.|Inc\.?|Incorporated|Corp\.?|Corporation|Ltd\.?|Limited|LLP|PLLC|LP|L\.P\.)\b",
+    re.I,
+)
+
+
+def _is_non_commercial_party_name(name: str) -> bool:
+    t = " ".join(str(name or "").split()).strip()
+    if not t:
+        return True
+    if _METADATA_LABEL_PARTY_RE.match(t):
+        return True
+    if _ENTITY_SUFFIX_PARTY_RE.search(t):
+        return False
+    if _OCCUPATIONAL_OR_JOB_TITLE_PARTY_RE.match(t):
+        return True
+    words = t.split()
+    if len(words) >= 2 and _METADATA_LABEL_PARTY_RE.match(words[-1] or ""):
+        return True
+    return False
+
+
 def _premium_intake_party_count(context: Optional[Dict[str, Any]]) -> int:
     parties = (context or {}).get("parties")
     if isinstance(parties, list):
-        return sum(1 for p in parties if isinstance(p, dict) and str(p.get("name") or "").strip())
+        return sum(
+            1
+            for p in parties
+            if isinstance(p, dict)
+            and str(p.get("name") or "").strip()
+            and not _is_non_commercial_party_name(str(p.get("name") or ""))
+        )
     return 0
 
 

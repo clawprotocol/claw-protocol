@@ -4,9 +4,18 @@ import {
   preserveFullLegalPartyNamesInOpeningAndSignatures,
   preserveFullLegalPartyNames,
   collapseDuplicateNoticeEntityLines,
+  isOccupationalOrJobTitlePartyName,
+  isAuthoritativeLegalEntityName,
 } from "./paidProPartyNamePreserve";
 
 describe("paidProPartyNamePreserve", () => {
+  it("rejects occupational appositives as party legal entities", () => {
+    expect(isOccupationalOrJobTitlePartyName("Freelance Product Designer")).toBe(true);
+    expect(isAuthoritativeLegalEntityName("Freelance Product Designer")).toBe(false);
+    expect(isOccupationalOrJobTitlePartyName("Alex Rivera")).toBe(false);
+    expect(isOccupationalOrJobTitlePartyName("PixelForge Labs")).toBe(false);
+  });
+
   it("derives short forms from legal entity names", () => {
     expect(shortFormsFromLegalName("Ironclad Systems Group LLC")).toContain("Ironclad");
     expect(shortFormsFromLegalName("Silver Mesa Analytics LP")).toContain("Silver Mesa");

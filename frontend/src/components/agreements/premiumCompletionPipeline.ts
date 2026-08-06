@@ -3739,17 +3739,23 @@ async function runPremiumCompletionInner(
             renderSource: freezeSource,
           });
           const freezeReject = (freezeCommit.rejectReason || "").trim();
-          const keepUsableWireDespiteFamilyGate =
-            /duplicate_provision_family/i.test(freezeReject) &&
-            doc.trim().length >= SUBSTANTIVE_SERVER_DRAFT_MIN_LEN;
-          if (keepUsableWireDespiteFamilyGate) {
+          // Simple 2-party services drafts are routinely 4k–10k. Soft freeze rejects must not
+          // wipe a finished witness-bearing corpus into empty Retry Pro draft.
+          const keepUsableWireDespiteSoftFreezeReject =
+            doc.trim().length >= PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN &&
+            /\bIN WITNESS WHEREOF\b/i.test(doc) &&
+            (/duplicate_provision_family/i.test(freezeReject) ||
+              /orphan_address_line/i.test(freezeReject) ||
+              /empty_required_section/i.test(freezeReject) ||
+              lastSubstantiveWireFreezeBodyLen >= PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN);
+          if (keepUsableWireDespiteSoftFreezeReject) {
             // Heart of the chronic create illness: OpenAI returned a usable draft; the
             // client family gate must not wipe the corpus into empty Retry Pro draft.
             winningPremiumBodyText = doc;
             premiumRenderSource = freezeSource || "server_full_draft";
             rejectedPaidCorpusDueToClientGates = false;
             logPremiumCompletionDebug({
-              stage: "pipeline_keep_substantive_wire_despite_duplicate_provision_family",
+              stage: "pipeline_keep_usable_wire_despite_soft_freeze_reject",
               accepted: true,
               rejectedReason: freezeReject,
               currentDocLen: doc.length,

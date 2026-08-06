@@ -122,11 +122,30 @@ export type PartyLike = { name?: string | null };
  * Real-party count: filters out placeholder rows, then returns the cardinality.
  * READ-ONLY — does not mutate or truncate the input array.
  */
+/** Job-title appositives that must not inflate starter/Pro party counts. */
+const NON_PARTY_OCCUPATIONAL_NAME_RE =
+  /^(?:(?:a|an|the)\s+)?(?:freelance|independent)?\s*(?:product\s+|ui\s+|ux\s+|graphic\s+|web\s+|software\s+|mobile\s+)?(?:designer|developer|engineer|consultant|contractor|freelancer|attorney|lawyer|accountant|ceo|cto|cfo|coo|founder|president|manager|director|officer|analyst|specialist|architect)$/i;
+
+const NON_PARTY_METADATA_NAME_RE =
+  /^(?:role|attn|attention|email|by|name|title|address|contact)$/i;
+
+function isNonCommercialPartyName(name: string | null | undefined): boolean {
+  const t = (name || "").replace(/\s+/g, " ").trim();
+  if (!t) return true;
+  if (NON_PARTY_METADATA_NAME_RE.test(t)) return true;
+  if (NON_PARTY_OCCUPATIONAL_NAME_RE.test(t)) return true;
+  const words = t.split(/\s+/);
+  if (words.length >= 2 && NON_PARTY_METADATA_NAME_RE.test(words[words.length - 1]!)) return true;
+  return false;
+}
+
 export function countRealParties(parties: ReadonlyArray<PartyLike> | null | undefined): number {
   if (!parties || parties.length === 0) return 0;
   let n = 0;
   for (const p of parties) {
-    if (!isPlaceholderPartyName(p?.name)) n += 1;
+    if (isPlaceholderPartyName(p?.name)) continue;
+    if (isNonCommercialPartyName(p?.name)) continue;
+    n += 1;
   }
   return n;
 }
