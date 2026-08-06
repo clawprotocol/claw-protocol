@@ -16,6 +16,7 @@ import {
   fetchAdminAudit,
   fetchAdminDeliveries,
   fetchAdminOverview,
+  fetchAdminUserActionHistory,
   fetchAdminUsers,
   clearAdminConsoleSecret,
   readAdminConsoleSecret,
@@ -23,6 +24,11 @@ import {
 } from "./adminConsoleApi";
 import { bootstrapQaPaymentBypassAdminSession } from "./genesisBetaPaymentBypassAuth";
 import { presentAdminConsoleAccess } from "./adminConsoleUserAccess";
+import {
+  normalizeAdminConsoleUserHistoryAction,
+  presentAdminConsoleUserHistoryAction,
+  type AdminConsoleUserHistoryAction,
+} from "./adminConsoleUserHistory";
 import {
   adminConsoleGenesisTargetId,
   filterAdminConsoleUsers,
@@ -82,6 +88,12 @@ export function AdminConsolePage(props: { initialAdminSecret?: string } = {}) {
   const [audit, setAudit] = useState<Record<string, unknown>[]>([]);
   const [payoutBatches, setPayoutBatches] = useState<Record<string, unknown>[]>([]);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [historyOpenByUser, setHistoryOpenByUser] = useState<Record<string, boolean>>({});
+  const [historyByUser, setHistoryByUser] = useState<Record<string, AdminConsoleUserHistoryAction[]>>(
+    {},
+  );
+  const [historyErrorByUser, setHistoryErrorByUser] = useState<Record<string, string>>({});
+  const [historyBusyId, setHistoryBusyId] = useState<string | null>(null);
 
   const blockedDeliveries = useMemo(() => deliveries.filter(isDeliveryBlocked), [deliveries]);
   const normalizedUsers = useMemo(
@@ -191,12 +203,50 @@ export function AdminConsolePage(props: { initialAdminSecret?: string } = {}) {
     void loadFounderHq(bootstrapSecret);
   }, [authLoading, authEnabled, session, props.initialAdminSecret, loadFounderHq]);
 
+  const loadUserActionHistory = useCallback(async (userId: string) => {
+    const uid = userId.trim();
+    if (!uid) return;
+    setHistoryBusyId(uid);
+    setHistoryErrorByUser((prev) => {
+      const next = { ...prev };
+      delete next[uid];
+      return next;
+    });
+    try {
+      const res = await fetchAdminUserActionHistory(uid);
+      const rows = Array.isArray(res.actions) ? res.actions : [];
+      setHistoryByUser((prev) => ({
+        ...prev,
+        [uid]: rows.map((r) => normalizeAdminConsoleUserHistoryAction(r as Record<string, unknown>)),
+      }));
+    } catch (e) {
+      setHistoryErrorByUser((prev) => ({
+        ...prev,
+        [uid]: e instanceof Error ? e.message : "Failed loading history",
+      }));
+    } finally {
+      setHistoryBusyId((cur) => (cur === uid ? null : cur));
+    }
+  }, []);
+
+  const toggleUserHistory = (userId: string) => {
+    const uid = userId.trim();
+    if (!uid) return;
+    const opening = !historyOpenByUser[uid];
+    setHistoryOpenByUser((prev) => ({ ...prev, [uid]: opening }));
+    if (opening) void loadUserActionHistory(uid);
+  };
+
   const doAction = async (id: string, fn: () => Promise<unknown>) => {
     setBusyId(id);
     setError(null);
     try {
       await fn();
       await loadFounderHq();
+      const openIds = Object.entries(historyOpenByUser)
+        .filter(([, open]) => open)
+        .map(([uid]) => uid);
+      await Promise.all(openIds.map((uid) => loadUserActionHistory(uid)));
     } catch (e) {
       setError(e instanceof Error ? e.message : "Action failed");
     } finally {
@@ -215,6 +265,10 @@ export function AdminConsolePage(props: { initialAdminSecret?: string } = {}) {
     setAffiliates([]);
     setAudit([]);
     setPayoutBatches([]);
+    setHistoryOpenByUser({});
+    setHistoryByUser({});
+    setHistoryErrorByUser({});
+    setHistoryBusyId(null);
     setError(null);
   };
 
@@ -544,7 +598,59 @@ export function AdminConsolePage(props: { initialAdminSecret?: string } = {}) {
                     >
                       {disabled ? "Enable account" : "Disable account"}
                     </button>
+                    {genesisTarget ? (
+                      <button
+                        type="button"
+                        className="vs01-btn vs01-btn--secondary vs01-btn--compact"
+                        data-testid="admin-user-history-toggle"
+                        aria-expanded={Boolean(historyOpenByUser[genesisTarget])}
+                        disabled={historyBusyId === genesisTarget}
+                        onClick={() => toggleUserHistory(genesisTarget)}
+                      >
+                        {historyOpenByUser[genesisTarget]
+                          ? historyBusyId === genesisTarget
+                            ? "Loading history…"
+                            : "Hide history"
+                          : "History"}
+                      </button>
+                    ) : null}
                   </div>
+                  {genesisTarget && historyOpenByUser[genesisTarget] ? (
+                    <div
+                      className="mt-3 rounded border border-slate-800 bg-slate-900/40 p-2"
+                      data-testid="admin-user-history-panel"
+                    >
+                      <p className="text-[11px] font-medium text-slate-300">User history</p>
+                      <p className="mt-0.5 text-[10px] text-slate-500">
+                        Audited Genesis grant / revoke / monthly usage reset and account actions for this user.
+                      </p>
+                      {historyErrorByUser[genesisTarget] ? (
+                        <p className="mt-2 text-[11px] text-amber-200">{historyErrorByUser[genesisTarget]}</p>
+                      ) : null}
+                      {(historyByUser[genesisTarget] || []).length === 0 &&
+                      !historyErrorByUser[genesisTarget] &&
+                      historyBusyId !== genesisTarget ? (
+                        <p className="mt-2 text-[11px] text-slate-500">No audited actions for this user yet.</p>
+                      ) : null}
+                      <ul className="mt-2 space-y-2">
+                        {(historyByUser[genesisTarget] || []).map((row) => {
+                          const presented = presentAdminConsoleUserHistoryAction(row);
+                          return (
+                            <li
+                              key={row.id || `${row.actionType}:${row.createdAt}`}
+                              className="rounded border border-slate-800/80 bg-slate-950/40 p-2"
+                              data-testid="admin-user-history-row"
+                              data-action-type={row.actionType}
+                            >
+                              <p className="text-[11px] font-medium text-slate-100">{presented.title}</p>
+                              <p className="mt-0.5 text-[11px] text-slate-300">{presented.detailLine}</p>
+                              <p className="mt-0.5 text-[10px] text-slate-500">{presented.metaLine}</p>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    </div>
+                  ) : null}
                 </div>
               );
             })}
@@ -689,11 +795,17 @@ export function AdminConsolePage(props: { initialAdminSecret?: string } = {}) {
             </div>
             <div className="rounded-xl border border-slate-800/80 bg-slate-950/30 p-3 text-xs">
               <p className="mb-2 text-slate-300">Recent admin actions</p>
+              <p className="mb-2 text-[11px] text-slate-500">
+                Global feed. For Genesis resets on one account, open Users → History on that card.
+              </p>
               {audit.slice(0, 20).map((a) => (
                 <div key={String(a.id || Math.random())} className="mb-2 rounded border border-slate-800 bg-slate-900/40 p-2">
                   <p className="text-slate-200">
                     {String(a.action_type || "action")} · {String(a.target_type || "")}:{String(a.target_id || "")}
                   </p>
+                  {String(a.reason || "").trim() ? (
+                    <p className="text-slate-300">reason={String(a.reason)}</p>
+                  ) : null}
                   <p className="text-slate-500">by={String(a.admin_user_id || "unknown")} at={String(a.created_at || "")}</p>
                 </div>
               ))}

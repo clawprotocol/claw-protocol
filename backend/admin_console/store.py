@@ -360,6 +360,47 @@ class AdminConsoleStore:
             ).fetchall()
         return [dict(r) for r in rows]
 
+    def list_admin_action_audit_for_targets(
+        self,
+        *,
+        target_ids: List[str],
+        limit: int = 50,
+        action_types: List[str] | None = None,
+        action_type_prefixes: List[str] | None = None,
+    ) -> List[Dict[str, Any]]:
+        """Recent audited admin actions for one or more target ids (user / org refs)."""
+        ids = [str(t or "").strip() for t in (target_ids or []) if str(t or "").strip()]
+        if not ids:
+            return []
+        lim = max(1, min(int(limit), 200))
+        exact = [str(a or "").strip() for a in (action_types or []) if str(a or "").strip()]
+        prefixes = [str(p or "").strip() for p in (action_type_prefixes or []) if str(p or "").strip()]
+        placeholders = ",".join("?" for _ in ids)
+        clauses = [f"target_id IN ({placeholders})"]
+        params: List[Any] = list(ids)
+        type_clauses: List[str] = []
+        for a in exact:
+            type_clauses.append("action_type = ?")
+            params.append(a)
+        for p in prefixes:
+            type_clauses.append("action_type LIKE ?")
+            params.append(f"{p}%")
+        if type_clauses:
+            clauses.append("(" + " OR ".join(type_clauses) + ")")
+        params.append(lim)
+        sql = f"""
+            SELECT id, admin_user_id, action_type, target_type, target_id, reason,
+                   before_snapshot_json, after_snapshot_json, created_at,
+                   actor_role, correlation_id
+            FROM admin_action_audit
+            WHERE {" AND ".join(clauses)}
+            ORDER BY datetime(created_at) DESC
+            LIMIT ?
+        """
+        with self._conn() as con:
+            rows = con.execute(sql, tuple(params)).fetchall()
+        return [dict(r) for r in rows]
+
     def list_admin_user_identity_rows(self, *, limit: int = 500) -> List[Dict[str, Any]]:
         """Safe identity rows for Admin Console Users (id, email, role) — no secrets."""
         lim = max(1, min(int(limit), 1000))

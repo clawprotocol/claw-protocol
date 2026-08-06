@@ -332,6 +332,30 @@ def test_admin_users_returns_safe_identity_fields(monkeypatch, tmp_path):
     assert int(granted[0].get("agreement_allowance") or 0) == 5
     assert int(granted[0].get("agreements_remaining") or 0) >= 0
 
+    reset = client.post(
+        f"/v1/admin/users/{uid}/genesis-usage/reconcile",
+        headers=_ops_headers(reason="Reset Genesis Dog monthly allowance for testing"),
+        json={
+            "reason": "Reset Genesis Dog monthly allowance for testing",
+            "mode": "reset_month_to_zero",
+            "dry_run": False,
+        },
+    )
+    assert reset.status_code == 200, reset.text
+    history = client.get(
+        f"/v1/admin/users/{uid}/action-history",
+        headers=_ops_headers(reason="admin console read"),
+    )
+    assert history.status_code == 200, history.text
+    actions = history.json().get("actions") or []
+    types = [str(a.get("action_type") or "") for a in actions]
+    assert "genesis_usage_reconcile" in types
+    assert "genesis_entitlement_grant" in types
+    reset_row = next(a for a in actions if a.get("action_type") == "genesis_usage_reconcile")
+    assert reset_row.get("reason") == "Reset Genesis Dog monthly allowance for testing"
+    assert "agreements_used_before" in reset_row
+    assert "agreements_used_after" in reset_row
+
 
 def test_admin_agreements_local_respects_limit_bounded_load_draft(monkeypatch, tmp_path):
     _seed_env(monkeypatch, tmp_path)

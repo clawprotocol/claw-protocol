@@ -679,6 +679,62 @@ def _user_id_from_admin_path(user_id: str) -> str:
     return uid
 
 
+def _user_action_history_target_ids(uid: str) -> List[str]:
+    """Match audit rows written against raw user id or org:user-* subject refs."""
+    clean = (uid or "").strip()
+    if not clean:
+        return []
+    return [clean, f"org:user-{clean}", f"user-{clean}"]
+
+
+def _parse_audit_snapshot(raw: Any) -> Dict[str, Any]:
+    if isinstance(raw, dict):
+        return raw
+    if isinstance(raw, str) and raw.strip():
+        try:
+            parsed = json.loads(raw)
+            return parsed if isinstance(parsed, dict) else {}
+        except Exception:
+            return {}
+    return {}
+
+
+def _summarize_user_action_history_row(row: Dict[str, Any]) -> Dict[str, Any]:
+    """Safe operator-facing audit row (reason + commercial meter deltas; no agreement bodies)."""
+    before = _parse_audit_snapshot(row.get("before_snapshot_json"))
+    after = _parse_audit_snapshot(row.get("after_snapshot_json"))
+    action = str(row.get("action_type") or "").strip()
+    summary: Dict[str, Any] = {
+        "id": row.get("id"),
+        "action_type": action,
+        "target_type": row.get("target_type"),
+        "target_id": row.get("target_id"),
+        "reason": row.get("reason"),
+        "admin_user_id": row.get("admin_user_id"),
+        "actor_role": row.get("actor_role"),
+        "created_at": row.get("created_at"),
+        "correlation_id": row.get("correlation_id"),
+    }
+    if action == "genesis_usage_reconcile":
+        summary["agreements_used_before"] = before.get("agreements_used")
+        summary["agreements_used_after"] = after.get("agreements_used")
+        refunded = after.get("refunded_agreement_ids")
+        if isinstance(refunded, list):
+            summary["refunded_count"] = len(refunded)
+        summary["dry_run"] = bool(after.get("dry_run") if "dry_run" in after else before.get("dry_run"))
+    elif action in ("genesis_entitlement_grant", "genesis_entitlement_revoke"):
+        summary["entitlement_before_active"] = (
+            before.get("active") if "active" in before else before.get("status")
+        )
+        summary["entitlement_after_active"] = (
+            after.get("active") if "active" in after else after.get("status")
+        )
+    elif action == "set_user_status":
+        summary["disabled_before"] = before.get("abuse_flag")
+        summary["disabled_after"] = after.get("abuse_flag")
+    return summary
+
+
 @router.post("/users/{user_id}/genesis-entitlement/grant")
 def admin_grant_genesis_entitlement(
     user_id: str, body: GenesisEntitlementGrantBody, request: Request
@@ -790,13 +846,11 @@ def admin_get_genesis_entitlement(user_id: str, request: Request) -> Dict[str, A
     row = get_entitlement(uid)
     decision = resolve_commercial_entitlement(f"org:user-{uid}")
     store = get_admin_console_store()
-    audit = store.list_admin_action_audit(limit=50)
-    related = [
-        a
-        for a in audit
-        if str(a.get("target_id") or "") == uid
-        and str(a.get("action_type") or "").startswith("genesis_entitlement_")
-    ]
+    related = store.list_admin_action_audit_for_targets(
+        target_ids=_user_action_history_target_ids(uid),
+        limit=20,
+        action_type_prefixes=["genesis_entitlement_", "genesis_usage_"],
+    )
     return {
         "ok": True,
         "user_id": uid,
@@ -810,7 +864,36 @@ def admin_get_genesis_entitlement(user_id: str, request: Request) -> Dict[str, A
             "period_ends_at": decision.get("period_ends_at"),
             "can_create_persisted_agreement": decision.get("can_create_persisted_agreement"),
         },
-        "audit": related[:20],
+        "audit": [_summarize_user_action_history_row(a) for a in related],
+    }
+
+
+@router.get("/users/{user_id}/action-history")
+def admin_user_action_history(
+    user_id: str,
+    request: Request,
+    limit: int = Query(default=40, ge=1, le=100),
+) -> Dict[str, Any]:
+    """Per-user admin action history (Genesis grant/revoke/reset, account status, entitlement refresh)."""
+    uid = _user_id_from_admin_path(user_id)
+    _privileged(
+        request,
+        permission=PERM_READ_OPS,
+        action_type="admin_user_action_history",
+        target_type="user",
+        target_id=uid,
+        reason="admin_console_read",
+    )
+    rows = get_admin_console_store().list_admin_action_audit_for_targets(
+        target_ids=_user_action_history_target_ids(uid),
+        limit=limit,
+        action_types=["set_user_status", "refresh_entitlement"],
+        action_type_prefixes=["genesis_entitlement_", "genesis_usage_"],
+    )
+    return {
+        "ok": True,
+        "user_id": uid,
+        "actions": [_summarize_user_action_history_row(a) for a in rows],
     }
 
 

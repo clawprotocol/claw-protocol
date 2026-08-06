@@ -243,6 +243,14 @@ export const adminGetGenesisUsage = (userId: string) =>
     { reason: ADMIN_CONSOLE_CONNECT_REASON },
   ) as Promise<Record<string, unknown>>;
 
+/** Per-user audited admin actions (Genesis grant/revoke/reset, status, refresh). */
+export const fetchAdminUserActionHistory = (userId: string, limit = 40) =>
+  adminFetch(
+    `/v1/admin/users/${encodeURIComponent(userId)}/action-history?limit=${encodeURIComponent(String(limit))}`,
+    undefined,
+    { reason: ADMIN_CONSOLE_CONNECT_REASON },
+  ) as Promise<{ ok?: boolean; user_id?: string; actions?: unknown[] }>;
+
 export const adminMigrateLegacyGenesisAffiliates = (reason: string) =>
   adminFetch(
     `/v1/admin/genesis-entitlement/migrate-legacy-affiliates`,

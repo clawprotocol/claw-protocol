@@ -86,6 +86,24 @@ vi.mock("./adminConsoleApi", () => ({
   fetchAdminAffiliates: vi.fn(async () => ({ affiliates: [] })),
   fetchAdminAudit: vi.fn(async () => ({ actions: [] })),
   fetchAdminAffiliatePayoutBatches: vi.fn(async () => ({ batches: [] })),
+  fetchAdminUserActionHistory: vi.fn(async () => ({
+    ok: true,
+    user_id: "cryptocurated21",
+    actions: [
+      {
+        id: "hist-reset-1",
+        action_type: "genesis_usage_reconcile",
+        reason: "Reset Genesis Dog 5 Monthly Allowance for Testing",
+        admin_user_id: "ops_admin",
+        actor_role: "admin",
+        created_at: "2026-08-06T16:38:00Z",
+        agreements_used_before: 5,
+        agreements_used_after: 0,
+        refunded_count: 5,
+        dry_run: false,
+      },
+    ],
+  })),
   adminRefreshEntitlement: vi.fn(),
   adminGrantGenesisEntitlement: vi.fn(async () => ({ ok: true })),
   adminRevokeGenesisEntitlement: vi.fn(async () => ({ ok: true })),
@@ -106,6 +124,7 @@ import {
   adminResetGenesisMonthlyUsage,
   clearAdminConsoleSecret,
   fetchAdminOverview,
+  fetchAdminUserActionHistory,
   writeAdminConsoleSecret,
 } from "./adminConsoleApi";
 import { bootstrapQaPaymentBypassAdminSession } from "./genesisBetaPaymentBypassAuth";
@@ -182,6 +201,25 @@ describe("AdminConsolePage connected state", () => {
         "staging acceptance grant for cryptocurated21",
       );
     });
+  });
+
+  it("loads per-user History including Genesis monthly usage resets", async () => {
+    render(<AdminConsolePage initialAdminSecret="ops-secret" />);
+    await waitFor(() => {
+      expect(fetchAdminOverview).toHaveBeenCalled();
+    });
+    fireEvent.click(screen.getByRole("button", { name: /^Users$/ }));
+    const historyBtn = screen.getAllByTestId("admin-user-history-toggle")[0];
+    fireEvent.click(historyBtn);
+    await waitFor(() => {
+      expect(fetchAdminUserActionHistory).toHaveBeenCalledWith("cryptocurated21");
+    });
+    const panel = await screen.findByTestId("admin-user-history-panel");
+    expect(panel.textContent).toContain("Reset Genesis monthly usage");
+    expect(panel.textContent).toContain("used 5 → 0");
+    expect(panel.textContent).toContain("Reset Genesis Dog 5 Monthly Allowance for Testing");
+    const row = screen.getByTestId("admin-user-history-row");
+    expect(row.getAttribute("data-action-type")).toBe("genesis_usage_reconcile");
   });
 
   it("filters users by exact email without exposing agreement bodies", async () => {
