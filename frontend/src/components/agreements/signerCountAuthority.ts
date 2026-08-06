@@ -26,7 +26,10 @@ import {
   dedupeEntityCandidatesToLegalParties,
   extractAgreementEntityCandidates,
 } from "../../agreement/partyPlaceholderDisplay";
-import { extractBetweenPartyNameList } from "./partyBetweenParse";
+import {
+  extractBetweenPartyNameListForAuthority,
+  isBetweenClausePartyCandidate,
+} from "./partyBetweenParse";
 import { countRealParties } from "./starterPartyLimits";
 import { readLegalPartyCountFromTypedHandoff } from "./starterToPaidPartyHandoff";
 import { intakeDescribesBrandLicensingDistributionManufacturingStack } from "./paidProAgreementTitleScope";
@@ -303,19 +306,26 @@ function resolveAuthoritativeSignerCountCore(args: SignerCountAuthorityArgs): Si
   }
 
   const betweenDeduped = dedupeEntityCandidatesToLegalParties(
-    extractBetweenPartyNameList(intake).filter(isAuthoritativeLegalEntityName),
+    extractBetweenPartyNameListForAuthority(intake).filter(
+      (n) => isBetweenClausePartyCandidate(n) || isAuthoritativeLegalEntityName(n),
+    ),
   );
   const entityPool = dedupeEntityCandidatesToLegalParties(
     extractAgreementEntityCandidates(intake).filter(isAuthoritativeLegalEntityName),
   );
+  const authoritativeDraftEntities = collapsePartySlotCandidates(draftNames).filter(
+    isAuthoritativeLegalEntityName,
+  );
+  // Do not let placeholder/notice party_slot_count alone mark multi-party when the commercial
+  // draft only resolved two real parties (Genesis sole-prop + brand intakes).
   const explicitMultiParty =
     labeledCount >= 3 ||
     quotedCount >= 3 ||
     betweenDeduped.length >= 3 ||
     entityPool.length >= 3 ||
     manifestPartyCount >= 3 ||
-    partySlotCount >= 3 ||
-    collapsePartySlotCandidates(draftNames).filter(isAuthoritativeLegalEntityName).length >= 3;
+    (partySlotCount >= 3 && draftCount >= 3) ||
+    authoritativeDraftEntities.length >= 3;
   // Clear two-party "between A and B" intakes must not flash 3/4 during preview repair when
   // transient party_slot_count inflates from notice/OCR noise. Only promote above 2 when intake
   // itself (labels/quotes/entity pool/frozen SoT) authoritatively describes 3+ parties.
@@ -328,8 +338,7 @@ function resolveAuthoritativeSignerCountCore(args: SignerCountAuthorityArgs): Si
     frozenManifestCount < 3 &&
     consumedManifestCount < 3;
   // Freelance sole-prop intakes ("between me (Alex Rivera, freelance product designer) and …")
-  // often yield empty betweenDeduped (parentheses) while draft rows still resolve to exactly 2
-  // commercial names once job-title appositives are filtered by countRealParties.
+  // must clamp to 2 even when notice repair briefly emits a third Party C slot.
   const draftClearlyTwoPartyCommercial =
     draftCount === 2 &&
     authoritativeIntakeCount <= 2 &&
@@ -339,7 +348,8 @@ function resolveAuthoritativeSignerCountCore(args: SignerCountAuthorityArgs): Si
     frozenManifestCount < 3 &&
     consumedManifestCount < 3 &&
     explicitManifestPartyCount < 3 &&
-    !explicitMultiParty;
+    betweenDeduped.length <= 2 &&
+    authoritativeDraftEntities.length <= 2;
   if (
     (intakeClearlyTwoParty || draftClearlyTwoPartyCommercial) &&
     count > 2 &&
@@ -360,7 +370,13 @@ function resolveAuthoritativeSignerCountCore(args: SignerCountAuthorityArgs): Si
     source = "party_slot_count";
   }
 
-  if (manifestPartyCount >= 3 && count < manifestPartyCount) {
+  // Never re-inflate a clear 2-party commercial intake from transient party_slot_count
+  // (placeholder Party C / notice-repair noise) after the clamp above.
+  if (
+    manifestPartyCount >= 3 &&
+    count < manifestPartyCount &&
+    !(intakeClearlyTwoParty || draftClearlyTwoPartyCommercial)
+  ) {
     count = manifestPartyCount;
     if (explicitManifestPartyCount >= 3 && labeledCount >= 3) {
       source = "labeled_parties";

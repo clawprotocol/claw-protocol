@@ -170,11 +170,31 @@ _ENTITY_SUFFIX_PARTY_RE = re.compile(
 )
 
 
+_PRONOUN_OR_PLACEHOLDER_PARTY_RE = re.compile(
+    r"^(?:me|i|you|we|they|party\s*[a-z0-9]+)$",
+    re.I,
+)
+_GENERIC_STARTUP_PHRASE_PARTY_RE = re.compile(
+    r"^(?:an?\s+)?(?:small\s+)?(?:startup|company|business|firm)$",
+    re.I,
+)
+_NON_PARTY_PROSE_FRAGMENT_RE = re.compile(
+    r"^(?:mobile\s+app|final\s+designs?|new\s+mobile\s+app(?:\s+ui)?)$",
+    re.I,
+)
+
+
 def _is_non_commercial_party_name(name: str) -> bool:
     t = " ".join(str(name or "").split()).strip()
     if not t:
         return True
     if _METADATA_LABEL_PARTY_RE.match(t):
+        return True
+    if _PRONOUN_OR_PLACEHOLDER_PARTY_RE.match(t):
+        return True
+    if _GENERIC_STARTUP_PHRASE_PARTY_RE.match(t):
+        return True
+    if _NON_PARTY_PROSE_FRAGMENT_RE.match(t):
         return True
     if _ENTITY_SUFFIX_PARTY_RE.search(t):
         return False

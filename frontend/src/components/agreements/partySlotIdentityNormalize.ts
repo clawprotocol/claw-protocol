@@ -4,7 +4,11 @@
  */
 
 import { labeledPartyLegalEntities, quotedRolePartyLegalEntities } from "./labeledPartyBlockParse";
-import { extractBetweenPartyNameList } from "./partyBetweenParse";
+import {
+  extractBetweenPartyNameList,
+  extractBetweenPartyNameListForAuthority,
+  isBetweenClausePartyCandidate,
+} from "./partyBetweenParse";
 import { resolveStarterTwoPartyCommercialAuthority } from "./canonicalPartyRoleAuthority";
 import { dedupeEntityCandidatesToLegalParties, extractAgreementEntityCandidates } from "../../agreement/partyPlaceholderDisplay";
 import { PARTY_ENTITY_SUFFIX_RE } from "./canonicalPartyIdentityResolver";
@@ -263,8 +267,13 @@ export function resolveAuthoritativeIntakePartyNames(intakeContext?: string | nu
   const entityPool = dedupeEntityCandidatesToLegalParties(
     extractAgreementEntityCandidates(intake).filter(isAuthoritativeLegalEntityName),
   ).filter((n) => !isInvalidPartySlotLegalEntity(n));
-  const fromBetween = collapsePartySlotCandidates(extractBetweenPartyNameList(intake)).filter(
-    (n) => n.length >= 2 && !isInvalidPartySlotLegalEntity(n) && isAuthoritativeLegalEntityName(n),
+  const fromBetween = collapsePartySlotCandidates(
+    extractBetweenPartyNameListForAuthority(intake),
+  ).filter(
+    (n) =>
+      n.length >= 2 &&
+      !isInvalidPartySlotLegalEntity(n) &&
+      (isAuthoritativeLegalEntityName(n) || isBetweenClausePartyCandidate(n)),
   );
   const declaredCount = resolveDeclaredExplicitPartyCount(intake);
   if (declaredCount !== null && declaredCount >= 3) {
@@ -291,8 +300,11 @@ export function resolveAuthoritativeIntakePartyNames(intakeContext?: string | nu
   if (quoted.length >= 2) return quoted;
   if (entityPool.length >= 2) return entityPool;
   if (numbered.length >= 2) return numbered;
-  return collapsePartySlotCandidates(extractBetweenPartyNameList(intake)).filter(
-    (n) => n.length >= 2 && !isInvalidPartySlotLegalEntity(n) && isAuthoritativeLegalEntityName(n),
+  return collapsePartySlotCandidates(extractBetweenPartyNameListForAuthority(intake)).filter(
+    (n) =>
+      n.length >= 2 &&
+      !isInvalidPartySlotLegalEntity(n) &&
+      (isAuthoritativeLegalEntityName(n) || isBetweenClausePartyCandidate(n)),
   );
 }
 

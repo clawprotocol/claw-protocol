@@ -391,6 +391,32 @@ def test_simple_two_party_substance_floor_is_base_not_10k():
     )
 
 
+def test_polluted_three_slot_context_still_uses_simple_substance_floor():
+    """Pronoun / startup-phrase / Party C noise must not flip Genesis simple drafts to the 10k floor."""
+    intake = (
+        "I need a simple services agreement between me (Alex Rivera, freelance product designer) "
+        "and a small startup called PixelForge Labs. Flat fee of $4,500."
+    )
+    polluted = {
+        "title": "Services Agreement",
+        "parties": [
+            {"name": "me", "role": "Service Provider"},
+            {"name": "a small startup", "role": "Client"},
+            {"name": "Party C", "role": "Party"},
+            {"name": "Alex Rivera", "role": "Service Provider"},
+            {"name": "PixelForge Labs", "role": "Client"},
+            {"name": "Freelance Product Designer", "role": "Title"},
+        ],
+        "purpose": "Mobile app UI design",
+        "payment_terms": "$4,500 50/50",
+        "agreement_family": "services_agreement",
+    }
+    assert (
+        premium_full_draft_substance_min_len_for_context(intake, polluted)
+        == PREMIUM_FULL_DRAFT_BASE_MIN_LEN
+    )
+
+
 def test_simple_two_party_mid_length_corpus_meets_substance_floor():
     """A usable ~3.5k simple services corpus must clear the simple substance floor (GTM PixelForge)."""
     intake = (

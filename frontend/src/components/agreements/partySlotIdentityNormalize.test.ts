@@ -40,6 +40,22 @@ describe("partySlotIdentityNormalize", () => {
     expect(collapsePartySlotCandidates(names)).toEqual([RED_MESA, HARBOR_PEAK]);
   });
 
+  it("Alex Rivera / PixelForge sole-prop intake resolves to exactly two parties", () => {
+    const intake =
+      "I need a simple services agreement between me (Alex Rivera, freelance product designer) " +
+      "and a small startup called PixelForge Labs. I'm going to design their new mobile app UI " +
+      "for the next 6 weeks. Flat fee of $4,500.";
+    expect(extractBetweenPartyNameList(intake)).toEqual(["Alex Rivera", "PixelForge Labs"]);
+    expect(extractBetweenPartyNameListForAuthority(intake)).toEqual([
+      "Alex Rivera",
+      "PixelForge Labs",
+    ]);
+    expect(resolveAuthoritativeIntakePartyNames(intake)).toEqual([
+      "Alex Rivera",
+      "PixelForge Labs",
+    ]);
+  });
+
   it("four-party oxford comma between list", () => {
     const intake =
       "Services agreement between Acme LLC, Beta Inc, Gamma Studios, and Delta Holdings. Fee $7,500/month. Term 12 months.";

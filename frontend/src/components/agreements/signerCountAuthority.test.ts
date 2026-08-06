@@ -116,6 +116,30 @@ describe("signerCountAuthority", () => {
     expect(resolution.draftCount).toBe(2);
   });
 
+  it("clamps sole-prop PixelForge intake to 2 from intake alone when Party C slot noise appears", () => {
+    const intake =
+      "I need a simple services agreement between me (Alex Rivera, freelance product designer) " +
+      "and a small startup called PixelForge Labs. Flat fee of $4,500.";
+    const fromIntakeOnly = resolveAuthoritativeSignerCount({
+      intakeText: intake,
+      draftParties: [],
+      rawPartyCount: 0,
+    });
+    expect(fromIntakeOnly.count).toBe(2);
+
+    const withPlaceholderThird = resolveAuthoritativeSignerCount({
+      intakeText: intake,
+      draftParties: [
+        { name: "Alex Rivera" },
+        { name: "PixelForge Labs" },
+        { name: "Party C" },
+      ],
+      rawPartyCount: 3,
+    });
+    expect(withPlaceholderThird.count).toBe(2);
+    expect(withPlaceholderThird.draftCount).toBe(2);
+  });
+
   it("generated agreement party count ignores decorative third signature block", () => {
     const count = resolveGeneratedAgreementPartyCount({
       intakeText: TEST372_FREE_STACKED_PARTY_INTAKE,

@@ -250,6 +250,10 @@ function extractBetweenPartyNameListInternal(raw: string, useAuthorityCandidates
 
 /** Ordered party names after "between …" — N-party aware (entity suffixes preserved). */
 export function extractBetweenPartyNameList(raw: string): string[] {
+  // Prefer authority candidates first so sole-prop + brand intakes
+  // ("Alex Rivera", "PixelForge Labs") are not dropped by entity-suffix-only filters.
+  const authority = extractBetweenPartyNameListInternal(raw, true);
+  if (authority.length >= 2) return authority;
   return extractBetweenPartyNameListInternal(raw, false);
 }
 

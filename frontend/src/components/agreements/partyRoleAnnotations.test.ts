@@ -29,6 +29,27 @@ describe("preCleanBetweenTailForMultiPartySplit", () => {
     expect(cleaned).toMatch(/John Smith/i);
     expect(cleaned).toMatch(/First County Escrow/i);
   });
+
+  it("preserves sole-prop name inside job-title parenthetical (Alex Rivera / PixelForge)", () => {
+    const tail =
+      "me (Alex Rivera, freelance product designer) and a small startup called PixelForge Labs";
+    const cleaned = preCleanBetweenTailForMultiPartySplit(tail);
+    expect(cleaned).toMatch(/Alex Rivera/i);
+    expect(cleaned).toMatch(/PixelForge Labs/i);
+    expect(cleaned).not.toMatch(/freelance product designer/i);
+    expect(cleaned).not.toMatch(/\bme\b/i);
+    expect(cleaned).not.toMatch(/small startup called/i);
+  });
+
+  it("still drops pure role parentheticals like (seller)", () => {
+    const cleaned = preCleanBetweenTailForMultiPartySplit(
+      "Apex Sellers LLC (seller) and Chen Family Trust (buyer)",
+    );
+    expect(cleaned).toMatch(/Apex Sellers LLC/i);
+    expect(cleaned).toMatch(/Chen Family Trust/i);
+    expect(cleaned).not.toMatch(/\(seller\)/i);
+    expect(cleaned).not.toMatch(/\(buyer\)/i);
+  });
 });
 
 describe("stripPartyRoleAnnotations", () => {

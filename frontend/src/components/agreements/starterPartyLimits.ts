@@ -90,8 +90,9 @@ export function getStarterPartyCountNotice(status: StarterPartyCountStatus): str
  */
 const PLACEHOLDER_PARTY_PATTERNS: RegExp[] = [
   /^\s*$/,
-  /^party\s*[a-z]?\s*$/i,
-  /^party[_\s-]?[ab]\d*$/i,
+  /^party\s*[a-z0-9]?\s*$/i,
+  /^party[_\s-]?[a-z0-9]+\d*$/i,
+  /^party\s+[a-z0-9]+\s*$/i,
   /^party\s+\d+\s*$/i,
   /^(?:LLC|L\.L\.C\.|Inc\.?|Incorporated|Corp\.?|Corporation|Ltd\.?|Limited|LLP|PLLC|LP|L\.P\.|Co\.?|Company)\.?$/i,
   /^signer\s*\d*\s*$/i,

@@ -108,6 +108,55 @@ export function stripPartyRoleAnnotations(name: string): { name: string; role: s
 }
 
 /**
+ * True when a parenthetical is only a role/capacity tag (`(seller)`, `(designer)`),
+ * not a person/brand plus job-title appositive (`(Alex Rivera, freelance product designer)`).
+ */
+export function isPureRoleParenthetical(inner: string): boolean {
+  const t = String(inner || "").replace(/\s+/g, " ").trim();
+  if (!t) return false;
+  if (/^trustee\s+of\b/i.test(t)) return true;
+  if (!ROLE_TOKEN_RE.test(t)) return false;
+  // "Alex Rivera, freelance product designer" — keep; only the title half is role-like.
+  if (/,/.test(t)) {
+    const left = t.split(",")[0]?.trim() || "";
+    const words = left.split(/\s+/).filter(Boolean);
+    const looksLikeName =
+      words.length >= 2 &&
+      words.length <= 6 &&
+      words.every((w) => /^[A-Z][A-Za-z0-9&.'-]*$/.test(w) || /^[A-Z]\.$/.test(w));
+    if (looksLikeName) return false;
+  }
+  // Entire inner is role-ish tokens (optionally with a/an/the/freelance).
+  const roleOnly =
+    /^(?:(?:a|an|the)\s+)?(?:freelance|independent)?\s*[a-z][a-z\s\-]{1,40}$/i.test(t) &&
+    ROLE_TOKEN_RE.test(t);
+  return roleOnly;
+}
+
+/**
+ * `(Alex Rivera, freelance product designer)` → promote `Alex Rivera` into the between clause.
+ * Pure role tags `(seller)` still drop.
+ */
+export function rewritePersonJobTitleParenthetical(inner: string): string | null {
+  const t = String(inner || "").replace(/\s+/g, " ").trim();
+  if (!t || !/,/.test(t)) return null;
+  const comma = t.indexOf(",");
+  const person = t.slice(0, comma).trim();
+  const title = t.slice(comma + 1).trim();
+  if (!person || !title) return null;
+  const words = person.split(/\s+/).filter(Boolean);
+  const looksLikeName =
+    words.length >= 2 &&
+    words.length <= 6 &&
+    words.every((w) => /^[A-Z][A-Za-z0-9&.'-]*$/.test(w) || /^[A-Z]\.$/.test(w));
+  if (!looksLikeName) return null;
+  if (!ROLE_TOKEN_RE.test(title) && !/\b(?:freelance|independent|product|ui|ux)\b/i.test(title)) {
+    return null;
+  }
+  return person;
+}
+
+/**
  * Pre-clean a "between …" tail before multi-party splitting. Removes
  *   - parenthetical role hints `(landlord)` / `(seller)` / `(advisor)` …
  *   - inline "<name>, as <role>," clauses (so the comma-and split doesn't drop the role half)
@@ -125,10 +174,16 @@ export function preCleanBetweenTailForMultiPartySplit(tail: string): string {
   s = s.replace(/\s*,\s*with\s+/gi, " and ");
   // "Name, Trustee of the X Trust" — parenthesize so comma+and splitting does not fragment the trust line.
   s = s.replace(/,\s*(Trustee\s+of\s+(?:the\s+)?[A-Z][A-Za-z0-9&'\-\s]+?\bTrust\b)/gi, " ($1)");
-  // Drop parenthetical role hints anywhere in the tail.
+  // Parentheticals: promote "Name, job title" to the bare name; drop pure role tags only.
   s = s.replace(/\s*\(\s*([^)]{2,120})\s*\)/g, (whole, inner: string) => {
-    return ROLE_TOKEN_RE.test(inner) || /^trustee\s+of\b/i.test(inner) ? "" : whole;
+    const promoted = rewritePersonJobTitleParenthetical(inner);
+    if (promoted) return ` ${promoted}`;
+    return isPureRoleParenthetical(inner) ? "" : whole;
   });
+  // Sole-prop pronouns left beside a promoted name: "me Alex Rivera" → "Alex Rivera".
+  s = s.replace(/\b(?:me|I)\s+(?=[A-Z][A-Za-z])/g, "");
+  // "a small startup called PixelForge Labs" → "PixelForge Labs".
+  s = s.replace(/\b(?:an?\s+)?(?:small\s+)?(?:startup|company|business|firm)\s+called\s+/gi, "");
   // Strip ", as <role>," / ", as <role>" interpolations.
   s = s.replace(
     /\s*,\s*as\s+(?:an?\s+|the\s+)?([a-z][a-z\s\-]{2,40})(?=,|\s+and\b|\.|$)/gi,

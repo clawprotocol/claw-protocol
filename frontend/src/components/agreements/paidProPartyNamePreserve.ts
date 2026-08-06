@@ -5,7 +5,11 @@
 
 import { dedupeEntityCandidatesToLegalParties, extractAgreementEntityCandidates } from "../../agreement/partyPlaceholderDisplay";
 import { labeledPartyLegalEntities, quotedRolePartyLegalEntities } from "./labeledPartyBlockParse";
-import { extractBetweenPartyNameList } from "./partyBetweenParse";
+import {
+  extractBetweenPartyNameList,
+  extractBetweenPartyNameListForAuthority,
+  isBetweenClausePartyCandidate,
+} from "./partyBetweenParse";
 import { looksLikeAuthorizedSignersBulletLine } from "./intakeSignerMetadataAuthority";
 import { isolateLegalEntityFromContaminatedName } from "./starterPartyIdentityIsolation";
 import { partyLegalNamesMatch } from "./paidProAcceptedCorpusPartyRoles";
@@ -441,7 +445,9 @@ export function resolveFullLegalPartiesFromIntake(
   if (fromLabeled.length >= 3) return fromLabeled;
   if (fromQuoted.length === 2) return fromQuoted;
   if (fromLabeled.length === 2) return fromLabeled;
-  const fromBetween = extractBetweenPartyNameList(intake).filter(isAuthoritativeLegalEntityName);
+  const fromBetween = extractBetweenPartyNameListForAuthority(intake).filter(
+    (n) => isAuthoritativeLegalEntityName(n) || isBetweenClausePartyCandidate(n),
+  );
   const betweenDeduped = dedupeEntityCandidatesToLegalParties(fromBetween);
   const entityPool = dedupeEntityCandidatesToLegalParties(
     extractAgreementEntityCandidates(intake).filter(isAuthoritativeLegalEntityName),
@@ -471,7 +477,9 @@ export function resolveAuthoritativePartiesForRecitalPolish(
 ): string[] {
   const intake = String(intakeRaw || "").trim();
   const fromLabeled = labeledPartyLegalEntities(intake).filter(isAuthoritativeLegalEntityName);
-  const fromBetween = extractBetweenPartyNameList(intake).filter(isAuthoritativeLegalEntityName);
+  const fromBetween = extractBetweenPartyNameListForAuthority(intake).filter(
+    (n) => isAuthoritativeLegalEntityName(n) || isBetweenClausePartyCandidate(n),
+  );
   const fromIntakeEntities = extractAgreementEntityCandidates(intake).filter(isAuthoritativeLegalEntityName);
 
   let authoritative: string[] = [];
