@@ -336,10 +336,43 @@ export function isPartyMetadataFieldLabelValue(name: string): boolean {
  * (no trailing colon) captured by the colon-role parser.
  */
 const PARTY_METADATA_ROLE_LABEL_RE =
-  /^(?:address|physical\s+address|mailing\s+address|party\s+address|registered\s+address|principal\s+address|authorized\s+signer|signatory|signer(?:\s+name|\s+title|\s+email)?|representative(?:\s+name|\s+title)?|represented\s+by|human\s+signer|e-?mail|email(?:\s+for\s+notice)?|notice\s+email|contact\s+email|attn|attention|phone|tel|telephone|mobile|fax|contact|title|name|role)$/i;
+  /^(?:address|physical\s+address|mailing\s+address|party\s+address|registered\s+address|principal\s+address|authorized\s+signer|signatory|signer(?:\s+name|\s+title|\s+email)?|representative(?:\s+name|\s+title)?|represented\s+by|human\s+signer|e-?mail|email(?:\s+for\s+notice)?|notice\s+email|contact\s+email|attn|attention|phone|tel|telephone|mobile|fax|contact|title|name|role|by)$/i;
 
 export function isPartyMetadataRoleLabel(roleLabel: string): boolean {
-  return PARTY_METADATA_ROLE_LABEL_RE.test((roleLabel || "").replace(/\s+/g, " ").trim());
+  return PARTY_METADATA_ROLE_LABEL_RE.test((roleLabel || "").replace(/\s+/g, " ").trim().replace(/:$/, ""));
+}
+
+/**
+ * Bare signer/contact field tokens that must never become party legal names
+ * (alone or fused onto a real party: "Alex Rivera Role", "PixelForge Labs Attn").
+ */
+const PARTY_METADATA_TOKEN_RE =
+  /^(?:address|attn|attention|role|e-?mail|email|by|name|title|phone|tel|telephone|mobile|fax|contact|signatory|signer)$/i;
+
+export function isPartyMetadataToken(token: string): boolean {
+  return PARTY_METADATA_TOKEN_RE.test((token || "").replace(/\s+/g, " ").trim().replace(/:$/, ""));
+}
+
+/** True when a candidate party name is a field label or ends with a fused field-label token. */
+export function hasPartyMetadataLabelContamination(name: string): boolean {
+  const t = (name || "").replace(/\s+/g, " ").trim().replace(/:$/, "");
+  if (!t) return false;
+  if (isPartyMetadataFieldLabelValue(t) || isPartyMetadataRoleLabel(t) || isPartyMetadataToken(t)) {
+    return true;
+  }
+  const words = t.split(/\s+/).filter(Boolean);
+  if (words.length >= 2 && isPartyMetadataToken(words[words.length - 1]!)) return true;
+  return false;
+}
+
+/** Strip a trailing fused metadata token ("Alex Rivera Role" → "Alex Rivera"). */
+export function stripTrailingPartyMetadataLabel(name: string): string {
+  const t = (name || "").replace(/\s+/g, " ").trim().replace(/:$/, "");
+  if (!t) return "";
+  const words = t.split(/\s+/).filter(Boolean);
+  if (words.length < 2) return hasPartyMetadataLabelContamination(t) ? "" : t;
+  if (!isPartyMetadataToken(words[words.length - 1]!)) return t;
+  return words.slice(0, -1).join(" ").trim();
 }
 
 /** Reject contract prose fragments mistaken for party names. */
@@ -354,10 +387,12 @@ export function isDisallowedPartyPhrase(name: string): boolean {
 export function isAuthoritativeLegalEntityName(name: string): boolean {
   const raw = (name || "").replace(/\s+/g, " ").trim();
   if (looksLikeAuthorizedSignersBulletLine(raw)) return false;
+  if (hasPartyMetadataLabelContamination(raw)) return false;
   if (isPartyMetadataFieldLabelValue(raw)) return false;
   if (isStateLegalFormOnlyName(raw)) return false;
   const t = isolateLegalEntityFromContaminatedName(raw);
   if (t.length < 3 || isDisallowedPartyPhrase(t)) return false;
+  if (hasPartyMetadataLabelContamination(t)) return false;
   if (isStateLegalFormOnlyName(t)) return false;
   if (isPartyMetadataFieldLabelValue(t)) return false;
   if (/^(?:my|our|the|your|their|each|both|either)\s+company$/i.test(t)) return false;

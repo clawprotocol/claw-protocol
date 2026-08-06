@@ -8,6 +8,7 @@ import {
   isRecitalFragmentExecutionPartyLine,
   repairDuplicatedLegalEntitySuffixPhrase,
 } from "./paidProLegalEntityNameHygiene";
+import { hasPartyMetadataLabelContamination } from "./paidProPartyNamePreserve";
 import { sortIdentitiesForExecutionBlockOrder } from "./paidProSignerMetadataMergeGate";
 
 export function partyLegalNamesMatch(a: string, b: string): boolean {
@@ -23,6 +24,10 @@ export function partyLegalNamesMatch(a: string, b: string): boolean {
     .replace(/[.,;:]+$/g, "");
   if (!na || !nb) return false;
   if (na === nb) return true;
+  // Do not treat "Alex Rivera" ≡ "Alex Rivera Role/Attn/Email" (metadata-tail fusion).
+  if (hasPartyMetadataLabelContamination(a) || hasPartyMetadataLabelContamination(b)) {
+    return false;
+  }
   if (na.startsWith(nb) || nb.startsWith(na)) return true;
   return na.startsWith(`${nb} `) || nb.startsWith(`${na} `);
 }

@@ -9,6 +9,10 @@ import {
   looksLikeAuthorizedSignersBulletLine,
   stripAuthorizedSignersBulletLegalEntity,
 } from "./intakeSignerMetadataAuthority";
+import {
+  hasPartyMetadataLabelContamination,
+  stripTrailingPartyMetadataLabel,
+} from "./paidProPartyNamePreserve";
 
 const LEADING_CONNECTOR_CHAIN_RE =
   /^(?:(?:and|between)\s+)*(?:(?:engages?|hires?|retains?|appoints?|contracts?\s+with)\s+)+/i;
@@ -64,7 +68,11 @@ export function stripTrailingJurisdictionClause(name: string): string {
 export function hasSignerPartyLegalEntityDisplayPollution(name: string): boolean {
   const t = norm(name);
   if (!t) return false;
-  return hasRawDisplayPollutionMarkers(t) || hasTrailingJurisdictionClausePollution(t);
+  return (
+    hasRawDisplayPollutionMarkers(t) ||
+    hasTrailingJurisdictionClausePollution(t) ||
+    hasPartyMetadataLabelContamination(t)
+  );
 }
 
 /** @deprecated Prefer {@link hasSignerPartyLegalEntityDisplayPollution}. */
@@ -111,8 +119,14 @@ export function sanitizeSignerPartyLegalEntityDisplay(
   if (hasTrailingJurisdictionClausePollution(s)) {
     s = stripTrailingJurisdictionClause(s);
   }
+  if (hasPartyMetadataLabelContamination(s)) {
+    s = stripTrailingPartyMetadataLabel(s);
+  }
   if (s && hasRawDisplayPollutionMarkers(s)) {
     s = extractTrailingLegalEntity(s);
+  }
+  if (hasPartyMetadataLabelContamination(s)) {
+    s = "";
   }
   if (s !== before && opts?.log !== false) {
     logPaidProSignerEntityDisplaySanitized({

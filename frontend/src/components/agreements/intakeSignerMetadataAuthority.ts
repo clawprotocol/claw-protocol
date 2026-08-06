@@ -11,7 +11,11 @@ import {
 } from "./intakeSignerInstructionParse";
 import { entitiesMatchForSignerMetadata } from "./universalSignerMetadataAuthority";
 import { looksLikeEmail, stripRecipientEmailNoise } from "./recipientEmailValidation";
-import { isAuthoritativeLegalEntityName } from "./paidProPartyNamePreserve";
+import {
+  hasPartyMetadataLabelContamination,
+  isAuthoritativeLegalEntityName,
+  stripTrailingPartyMetadataLabel,
+} from "./paidProPartyNamePreserve";
 import { normalizeCanonicalPartyAddress } from "./canonicalPartyStructuredAddress";
 import type { PaidProSignerMetadataParty } from "./paidProSignerMetadataAuthority";
 import { extractIntakePartyManifestRows } from "./intakePartyManifestAuthority";
@@ -106,6 +110,7 @@ export function isLikelyHumanSignerName(value: string): boolean {
   const t = value.replace(/\s+/g, " ").trim();
   if (t.length < 2 || t.length > 48) return false;
   if (isLegalEntityName(t) || isAuthoritativeLegalEntityName(t)) return false;
+  if (hasPartyMetadataLabelContamination(t)) return false;
   if (new RegExp(`${ENTITY_SUFFIX_PATTERN}$`, "i").test(t)) return false;
   if (looksLikeConcatenatedSignerNames(t)) return false;
   const words = t.split(/\s+/);
@@ -167,6 +172,22 @@ export function resolveAuthorityPartyLegalNameField(
     return parseAuthorizedSignersBulletLine(t)?.legalEntity ?? fallback;
   }
   if (looksLikeConcatenatedSignerNames(t)) return fallback;
+  if (hasPartyMetadataLabelContamination(t)) {
+    const stripped = stripTrailingPartyMetadataLabel(t);
+    if (
+      stripped &&
+      stripped !== t &&
+      !hasPartyMetadataLabelContamination(stripped) &&
+      (isLikelyHumanSignerName(stripped) ||
+        isLegalEntityName(stripped) ||
+        isAuthoritativeLegalEntityName(stripped))
+    ) {
+      return stripped;
+    }
+    const fb = fallback.replace(/\s+/g, " ").trim();
+    if (fb && !hasPartyMetadataLabelContamination(fb)) return fb;
+    return "";
+  }
   if (isLikelyHumanSignerName(t)) {
     const fb = fallback.replace(/\s+/g, " ").trim();
     // Prefer a structured entity when the caller already has one (signer name vs entity).

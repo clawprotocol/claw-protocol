@@ -24,8 +24,11 @@ import {
 } from "./signerPartyLegalEntityDisplaySanitizer";
 import { extractBetweenPartyNameList } from "./partyBetweenParse";
 import {
+  hasPartyMetadataLabelContamination,
   isAuthoritativeLegalEntityName,
   isDisallowedPartyPhrase,
+  isPartyMetadataRoleLabel,
+  isPartyMetadataToken,
 } from "./paidProPartyNamePreserve";
 import { resolveAuthoritativeLegalPartyIdentities } from "./legalPartyIdentityAuthority";
 import {
@@ -925,7 +928,7 @@ export function detectSignerSlotContamination(
 const SIG_ROLE_HEADING_RE =
   /^(?:CLIENT|SERVICE\s+PROVIDER|PROVIDER|CONTRACTOR|CONSULTANT|COMPANY|VENDOR|CUSTOMER|SUPPLIER|LICENSOR|LICENSEE|DISCLOSING\s+PARTY|RECEIVING\s+PARTY|EMPLOYER|EMPLOYEE|LANDLORD|TENANT|BUYER|SELLER|PARTY(?:\s+(?:\d+|[A-Z]|ONE|TWO|THREE|FOUR|FIVE))?)\s*:?\s*$/i;
 const SIG_FIELD_RE =
-  /^(?:By|Name|Printed?\s*Name|Print\s*Name|Title|Date|Email|E-?mail|Signature|Signed|Address)\s*[:_]|^_{3,}|^[_\s]+$/i;
+  /^(?:By|Name|Printed?\s*Name|Print\s*Name|Title|Date|Email|E-?mail|Signature|Signed|Address|Role|Attn|Attention|Contact)\s*[:_]?|^_{3,}|^[_\s]+$/i;
 const SIG_ROLE_TAG_TAIL_RE =
   /\s*\(\s*["“]?(?:the\s+)?(?:client|service\s+provider|provider|contractor|consultant|company|vendor|customer|supplier|licensor|licensee|disclosing\s+party|receiving\s+party|employer|employee|landlord|tenant|buyer|seller|party(?:\s+\w+)?)["”]?\s*\)\s*$/i;
 
@@ -972,6 +975,14 @@ export function extractSignerEntitiesFromSignatureBlock(
     const candidate = norm(
       (inlineParty ? inlineParty[1] : line).replace(SIG_ROLE_TAG_TAIL_RE, ""),
     );
+    if (
+      hasPartyMetadataLabelContamination(candidate) ||
+      isPartyMetadataRoleLabel(candidate) ||
+      isPartyMetadataToken(candidate)
+    ) {
+      afterRoleHeading = false;
+      continue;
+    }
     const isEntity =
       candidate.length >= 2 &&
       candidate.length <= 90 &&

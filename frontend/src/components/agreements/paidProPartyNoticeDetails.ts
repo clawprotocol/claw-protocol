@@ -20,7 +20,13 @@ import {
   resolveCanonicalPartyIdentitiesFromIntake,
   resolveCanonicalPartyIdentitiesFromSources,
 } from "./canonicalPartyIdentityResolver";
-import { isAuthoritativeLegalEntityName, collapseDuplicateNoticeEntityLines, collapseDuplicatedLegalEntityPhrase } from "./paidProPartyNamePreserve";
+import {
+  collapseDuplicateNoticeEntityLines,
+  collapseDuplicatedLegalEntityPhrase,
+  hasPartyMetadataLabelContamination,
+  isAuthoritativeLegalEntityName,
+  stripTrailingPartyMetadataLabel,
+} from "./paidProPartyNamePreserve";
 import { isIntakeSectionLabelLine } from "./intakeSectionLabels";
 import {
   isPartyAddressBoundaryLine,
@@ -311,9 +317,17 @@ export function noticeStanzaHasLegalEntityLine(stanza: string): boolean {
     .map((line) => line.trim())
     .filter(Boolean);
   const entityLine = lines[1] ?? "";
-  if (entityLine.length >= 3) return true;
+  const usableEntity = (value: string): boolean => {
+    const v = value.trim();
+    if (v.length < 3) return false;
+    if (hasPartyMetadataLabelContamination(v)) return false;
+    if (/^provided during signer setup\.?$/i.test(v)) return false;
+    return true;
+  };
+  if (usableEntity(entityLine)) return true;
+  if (isCanonicalPositionalNoticeEntityIdentity(entityLine)) return true;
   const fused = lines[0]?.match(/^If to\s+(.+?)\s*:\s*(.+)$/i);
-  return Boolean(fused && fused[2].trim().length >= 3);
+  return Boolean(fused && usableEntity(fused[2] ?? ""));
 }
 
 function resolveCompleteOperativeNoticesFamilyEndForFreeze(text: string, noticesStart: number): number {
@@ -607,6 +621,9 @@ export function noticeStanzaHasRoleLabelCorruption(stanza: string): boolean {
     return false;
   }
   if (ROLE_ONLY_IF_TO_HEADER_RE.test(header)) return true;
+  const ifToEntity = header.match(/^If to\s+(.+?)\s*:\s*$/i)?.[1]?.trim() ?? "";
+  if (ifToEntity && hasPartyMetadataLabelContamination(ifToEntity)) return true;
+  if (entityLine && hasPartyMetadataLabelContamination(entityLine)) return true;
   return lines.some((line) => {
     const t = line.trim();
     return CORRUPTED_NOTICE_ROLE_FUSION_RE.test(t) || CORRUPTED_NOTICE_ROLE_ATTENTION_RE.test(t);
@@ -1047,8 +1064,23 @@ function resolveNoticeStanzaLegalEntity(
     const corpusLegal = fromCorpus[party.partyIndex]?.fullLegalName?.trim() ?? "";
     if (corpusLegal.length >= 2 && isAuthoritativeLegalEntityName(corpusLegal)) return corpusLegal;
   }
-  if (fromDraft.length >= 2) return fromDraft;
-  if (direct.length >= 2) return direct;
+  const sanitizeFallback = (value: string): string => {
+    const raw = value.trim();
+    if (raw.length < 2) return "";
+    if (!hasPartyMetadataLabelContamination(raw)) return raw;
+    const stripped = stripTrailingPartyMetadataLabel(raw);
+    if (
+      stripped.length >= 2 &&
+      !hasPartyMetadataLabelContamination(stripped)
+    ) {
+      return stripped;
+    }
+    return "";
+  };
+  const safeDraft = sanitizeFallback(fromDraft);
+  if (safeDraft) return safeDraft;
+  const safeDirect = sanitizeFallback(direct);
+  if (safeDirect) return safeDirect;
   logPaidProNoticeEntityMissingDiagnostic({
     partyIndex: party.partyIndex,
     resolvedLegal: `Party ${party.partyIndex + 1}`,
@@ -1298,8 +1330,9 @@ function noticeStanzaComplete(stanza: string, party?: PaidProSignerMetadataParty
   if (noticeStanzaHasRoleLabelCorruption(trimmed)) return false;
   if (DANGLING_IF_TO_RE.test(`\n${trimmed}`)) return false;
   if (/^If to\s*:\s*$/i.test(trimmed)) return false;
-  const hasAttn = /Attn:/i.test(trimmed);
-  const hasEmailLine = /Email(?:\s+for\s+Notice)?\s*:/i.test(trimmed);
+  // Attn/Email must be real field lines — not fused into the If-to header ("If to Alex Rivera Attn:").
+  const hasAttn = /(?:^|\n)\s*Attn\s*:/i.test(trimmed);
+  const hasEmailLine = /(?:^|\n)\s*Email(?:\s+for\s+Notice)?\s*:/i.test(trimmed);
   const hasSafeFallback = /primary business address and email on file/i.test(trimmed);
   const requiredEmail = party?.signerEmail?.trim() ?? "";
   if (requiredEmail) {
