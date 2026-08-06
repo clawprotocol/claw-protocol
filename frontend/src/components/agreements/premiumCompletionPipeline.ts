@@ -140,6 +140,7 @@ import {
   MUTUAL_CONSULTING_LIGHTWEIGHT_SECTION_CEILING,
 } from "./paidProMutualConsultingQualityFloor";
 import { canShowPremiumSuccess } from "./premiumSuccessGate";
+import { PREMIUM_USABLE_BODY_MIN_LEN } from "./premiumPostCheckoutApplyEligible";
 import { isAuthoritativePremiumPipelineRenderSource } from "./premiumRenderSourceResolver";
 import { paidProPipelineAcceptedCorpusHash } from "./paidProPipelineAcceptedCorpus";
 import {
@@ -4741,6 +4742,47 @@ async function runPremiumCompletionInner(
     };
   }
   if (premiumRenderSource === "premium_generation_retryable") {
+    const salvageOnRetry = (winningPremiumBodyText || "").trim();
+    // If a usable Pro corpus already froze/hydrated in-session, do not wipe it into empty Retry.
+    if (
+      salvageOnRetry.length >= PREMIUM_USABLE_BODY_MIN_LEN &&
+      /IN WITNESS WHEREOF|executed this Agreement/i.test(salvageOnRetry) &&
+      !/\b(?:starter preview|live preview|preview only|fallback preview)\b/i.test(salvageOnRetry)
+    ) {
+      if (tierAEnabled) tierADiag.premiumPipelineSource = "server_full_draft_degraded";
+      logPremiumCompletionDebug({
+        stage: "pipeline_return_generation_retryable_salvage",
+        accepted: true,
+        rejectedReason: "generation_retryable_salvaged",
+        premiumRenderSource: "server_full_draft_degraded",
+        winningLen: salvageOnRetry.length,
+      });
+      return {
+        premiumDraft: stripClientPremiumArtifactBlocksFromDraft({
+          ...outMerged,
+          premium_full_document_text: salvageOnRetry,
+          premium_server_full_document_text: salvageOnRetry,
+        }),
+        premiumParties,
+        recipientCandidates,
+        winningPremiumBodyText: salvageOnRetry,
+        premiumRenderSource: "server_full_draft_degraded",
+        premiumReview,
+        premiumFinalizeAudit,
+        premiumReviewRoute,
+        staleIntakeOrGeneration: false,
+        agreementGenerationId: input.agreementGenerationId,
+        premiumRequestIntakeFingerprint: input.premiumRequestIntakeFingerprint,
+        founderDetailsGateMessage: null,
+        proIntentGateMessage: null,
+        serverGenerationDegraded: {
+          code: "generation_retryable_salvage",
+          message: "Preserved in-session Pro corpus after generation_retryable wire outcome.",
+        },
+        premiumGenerationRetryable: false,
+        tierADiagnostic: tierADiag,
+      };
+    }
     if (tierAEnabled) tierADiag.premiumPipelineSource = premiumRenderSource;
     logPremiumCompletionDebug({
       stage: "pipeline_return_premium_generation_retryable",

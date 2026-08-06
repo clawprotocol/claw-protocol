@@ -25,9 +25,11 @@ from fastapi.testclient import TestClient
 
 import backend.routers.agreements_v2_api as av2
 from backend.agreements.premium_full_draft_quality_gate import (
+    PREMIUM_FULL_DRAFT_BASE_MIN_LEN,
     PREMIUM_FULL_DRAFT_COMPLEX_MIN_LEN,
     PREMIUM_FULL_DRAFT_FRONTEND_FREEZE_MIN_LEN,
     premium_full_draft_body_meets_substance_floor,
+    premium_full_draft_substance_min_len_for_context,
 )
 from backend.main import app
 from backend.usage_economics import store as usage_economics_store_mod
@@ -367,12 +369,76 @@ def test_four_party_full_intake_produces_accepted_corpus(monkeypatch, tmp_path):
 # --- TEST562: frontend-freeze-floor alignment + server-side regeneration ----------------------
 
 
+def test_simple_two_party_substance_floor_is_base_not_10k():
+    """Genesis Dog PixelForge-class intakes must not be forced to the multiparty 10k floor."""
+    intake = (
+        "I need a simple services agreement between me (Alex Rivera, freelance product designer) "
+        "and a small startup called PixelForge Labs. Flat fee of $4,500."
+    )
+    ctx = {
+        "title": "Services Agreement",
+        "parties": [
+            {"name": "Alex Rivera", "role": "Service Provider"},
+            {"name": "PixelForge Labs", "role": "Client"},
+        ],
+        "purpose": "Mobile app UI design",
+        "payment_terms": "$4,500 50/50",
+        "agreement_family": "services_agreement",
+    }
+    assert premium_full_draft_substance_min_len_for_context(intake, ctx) == PREMIUM_FULL_DRAFT_BASE_MIN_LEN
+    assert premium_full_draft_substance_min_len_for_context(FOUR_PARTY_INTAKE, _four_party_context()) >= (
+        PREMIUM_FULL_DRAFT_FRONTEND_FREEZE_MIN_LEN
+    )
+
+
+def test_simple_two_party_mid_length_corpus_meets_substance_floor():
+    """A usable ~3.5k simple services corpus must clear the simple substance floor (GTM PixelForge)."""
+    intake = (
+        "I need a simple services agreement between me (Alex Rivera, freelance product designer) "
+        "and a small startup called PixelForge Labs. Flat fee of $4,500, paid 50% up front."
+    )
+    ctx = {
+        "title": "Services Agreement",
+        "parties": [
+            {"name": "Alex Rivera", "role": "Service Provider"},
+            {"name": "PixelForge Labs", "role": "Client"},
+        ],
+        "purpose": "Mobile app UI design for 6 weeks",
+        "payment_terms": "$4,500 paid 50% up front and 50% on delivery",
+        "agreement_family": "services_agreement",
+    }
+    body = (
+        "SERVICES AGREEMENT\n\n"
+        "This Agreement is entered into by Alex Rivera (\"Service Provider\") and "
+        "PixelForge Labs (\"Client\").\n\n"
+        "1. SCOPE OF SERVICES. Service Provider will design the Client's new mobile app UI "
+        "for six (6) weeks under a flat-fee engagement.\n"
+        "2. FEES AND PAYMENT. Client shall pay a flat fee of $4,500, fifty percent (50%) up front "
+        "and fifty percent (50%) on final delivery.\n"
+        "3. INTELLECTUAL PROPERTY. Client owns the final designs once paid in full; Service Provider "
+        "retains portfolio display rights.\n"
+        "4. CONFIDENTIALITY. Each party shall protect the other party's non-public information.\n"
+        "5. TERM AND TERMINATION. Either party may cancel with seven (7) days' notice; Service Provider "
+        "is paid for work completed through the effective termination date.\n"
+        "6. GOVERNING LAW. This Agreement is governed by the laws of the applicable jurisdiction.\n"
+        "7. NOTICES. Notices may be delivered by email to the addresses the parties designate.\n\n"
+        "IN WITNESS WHEREOF, the parties have executed this Agreement.\n\n"
+        "CLIENT:\nPixelForge Labs\nBy: __________________________\n\n"
+        "SERVICE PROVIDER:\nAlex Rivera\nBy: __________________________\n"
+    )
+    # Pad into the observed production band (~3.3k–4.7k) without reaching the multiparty 10k floor.
+    body = body + ("\nAdditional operative detail for clarity. " * 40)
+    assert PREMIUM_FULL_DRAFT_BASE_MIN_LEN <= len(body) < PREMIUM_FULL_DRAFT_FRONTEND_FREEZE_MIN_LEN
+    ok, reasons = premium_full_draft_body_meets_substance_floor(body, intake=intake, context=ctx)
+    assert ok is True, reasons
+
+
 def test_mid_length_body_shape_matches_test562_symptom():
-    """The mid-length fixture clears the legacy floor but is below the frontend freeze floor."""
+    """The mid-length multiparty fixture clears the legacy floor but is below the frontend freeze floor."""
     body = _mid_length_four_party_body()
     assert len(body) >= PREMIUM_FULL_DRAFT_COMPLEX_MIN_LEN
     assert len(body) < PREMIUM_FULL_DRAFT_FRONTEND_FREEZE_MIN_LEN
-    # Under the aligned floor this body is NOT a returnable Pro corpus.
+    # Under the aligned multiparty floor this body is NOT a returnable Pro corpus.
     ok, reasons = premium_full_draft_body_meets_substance_floor(
         body, intake=FOUR_PARTY_INTAKE, context=_four_party_context()
     )

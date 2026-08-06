@@ -115,16 +115,13 @@ PREMIUM_FULL_DRAFT_COMPLEX_MIN_LEN = 6_000
 
 PREMIUM_FULL_DRAFT_FRONTEND_FREEZE_MIN_LEN = 10_000
 """
-Frontend Source-of-Truth freeze floor. MUST stay in sync with
+Frontend strong-length floor for complex / multi-party Pro corpora. Aligns with
 ``frontend/src/components/agreements/premiumAcceptancePolicy.ts`` ``SUBSTANTIVE_SERVER_DRAFT_MIN_LEN``.
 
-The frontend rejects any ``server_full_draft`` body with ``0 < len < SUBSTANTIVE_SERVER_DRAFT_MIN_LEN``
-(``mislabeled_server_full_draft_below_substantive_min`` in ``paidProSourceOfTruth.ts``). The backend's
-"returnable as a completed Pro corpus" floor therefore CANNOT be lower than this value: a body between the
-old backend floor (1.6k / 6k) and the frontend freeze floor (10k) would be emitted as a successful
-``server_full_document_text`` and then hard-rejected by the frontend, producing an empty Review. The
-substance floor below is clamped to this value so the backend only ever returns ``server_full`` bodies the
-frontend will actually freeze — everything shorter is surfaced as an explicit retryable failure instead.
+This is NOT a universal reject floor. Simple two-party commercial services drafts are routinely
+2.5k–8k chars; the frontend already freezes those via the concise / structurally-complete path.
+Clamping every intake to 10k made the API return ``premium_generation_insufficient`` (empty body)
+for usable Genesis Dog drafts and stranded create on Retry Pro draft.
 """
 
 PREMIUM_FULL_DRAFT_MIN_CLAUSE_FAMILIES = 5
@@ -252,18 +249,16 @@ def premium_full_draft_substance_min_len_for_context(
     """
     Context-aware minimum length. Complex / multi-party intakes require a longer corpus.
 
-    The returned floor is clamped to ``PREMIUM_FULL_DRAFT_FRONTEND_FREEZE_MIN_LEN`` so the backend never
-    accepts a body the frontend would reject at Source-of-Truth freeze. (The base/complex distinction is
-    retained for intent, but both are at least the frontend freeze floor.)
+    Complex / multi-party stays clamped to the frontend strong freeze floor (10k).
+    Simple two-party commercial services use the base floor (1.6k) plus clause-family /
+    execution checks — matching the frontend concise authoritative acceptance path.
     """
     party_count = _premium_intake_party_count(context)
     complex_signal = bool(_COMPLEX_PREMIUM_INTAKE_RE.search(intake or ""))
     family_requests = _premium_intake_clause_family_requests(intake or "")
     if party_count >= 3 or complex_signal or family_requests >= 4:
-        base = PREMIUM_FULL_DRAFT_COMPLEX_MIN_LEN
-    else:
-        base = PREMIUM_FULL_DRAFT_BASE_MIN_LEN
-    return max(base, PREMIUM_FULL_DRAFT_FRONTEND_FREEZE_MIN_LEN)
+        return max(PREMIUM_FULL_DRAFT_COMPLEX_MIN_LEN, PREMIUM_FULL_DRAFT_FRONTEND_FREEZE_MIN_LEN)
+    return PREMIUM_FULL_DRAFT_BASE_MIN_LEN
 
 
 def premium_full_draft_body_meets_substance_floor(

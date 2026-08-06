@@ -3240,6 +3240,46 @@ function isPremiumGenerationRetryablePipelineResult(result: PremiumCompletionRes
   );
 }
 
+/** Prefer mounting a freeze-accepted / hydrated Pro corpus over empty Retry when API marks generation_retryable. */
+function pickUsableGenerationRetrySalvageCorpus(candidates: Array<string | null | undefined>): string {
+  let best = "";
+  for (const c of candidates) {
+    const t = String(c || "").trim();
+    if (t.length > best.length) best = t;
+  }
+  // Simple commercial services drafts routinely land 2.5k–8k; never salvage stubs.
+  if (best.length < 1_600) return "";
+  if (/\b(?:starter preview|live preview|preview only|fallback preview|retry pro draft)\b/i.test(best)) {
+    return "";
+  }
+  if (!/IN WITNESS WHEREOF|executed this Agreement/i.test(best)) return "";
+  return best;
+}
+
+function remapGenerationRetryableResultToDegradedSalvage(
+  result: PremiumCompletionResult,
+  salvage: string,
+): PremiumCompletionResult {
+  const draft = result.premiumDraft
+    ? {
+        ...result.premiumDraft,
+        premium_full_document_text: salvage,
+        premium_server_full_document_text: salvage,
+      }
+    : result.premiumDraft;
+  return {
+    ...result,
+    premiumDraft: draft,
+    winningPremiumBodyText: salvage,
+    premiumRenderSource: "server_full_draft_degraded",
+    premiumGenerationRetryable: false,
+    serverGenerationDegraded: result.serverGenerationDegraded ?? {
+      code: "generation_retryable_salvage",
+      message: "Mounted freeze-accepted Pro corpus after generation_retryable wire outcome.",
+    },
+  };
+}
+
 function isPremiumRetryablePipelineResult(result: PremiumCompletionResult): boolean {
   return isPremiumRecoverablePipelineResult(result);
 }
@@ -6828,7 +6868,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       raw,
     );
     try {
-      const result = await ensurePremiumCompletion({
+      let result = await ensurePremiumCompletion({
         intakeText: mergedIntake,
         originalUserIntakeRawForMerge: originalMergeHint,
         structuredDraft: gateDraft,
@@ -6852,20 +6892,39 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         return;
       }
       if (isPremiumGenerationRetryablePipelineResult(result)) {
-        logPremiumRetryPreservedContext({
-          context: "entitled_rewrite_generation_retryable",
-          agreementId: agreementIdForPass,
-          agreementGenerationId: sessionGenForPass,
-          intakeFingerprint: shortIntakeFingerprint(mergedIntake),
-        });
-        setProFullDraftCustomGateMessage(null);
-        setProFullDraftQualityRetry(false);
-        setHardError(null);
-        setPremiumPostCheckoutPhase("generation_retry");
-        setPremiumPipelineUserMessage(null);
-        lastPremiumPipelineRenderSourceRef.current = result.premiumRenderSource;
-        setPremiumTruthPipelineSource(result.premiumRenderSource);
-        return;
+        const salvage = pickUsableGenerationRetrySalvageCorpus([
+          result.winningPremiumBodyText,
+          premiumPipelineOutputBodyRef.current,
+          lastPremiumWinningCorpusRef.current,
+          hydratedPremiumBodyRef.current,
+          lastKnownGoodAuthoritativeDraftRef.current,
+          acceptedReviewCorpusRef.current,
+        ]);
+        if (salvage) {
+          if (import.meta.env.MODE !== "test") {
+            // eslint-disable-next-line no-console
+            console.warn("[premium-flow] entitled_rewrite_generation_retryable_salvage_mount", {
+              corpusLen: salvage.length,
+              agreementIdShort: (agreementIdForPass || "").slice(0, 8) || null,
+            });
+          }
+          result = remapGenerationRetryableResultToDegradedSalvage(result, salvage);
+        } else {
+          logPremiumRetryPreservedContext({
+            context: "entitled_rewrite_generation_retryable",
+            agreementId: agreementIdForPass,
+            agreementGenerationId: sessionGenForPass,
+            intakeFingerprint: shortIntakeFingerprint(mergedIntake),
+          });
+          setProFullDraftCustomGateMessage(null);
+          setProFullDraftQualityRetry(false);
+          setHardError(null);
+          setPremiumPostCheckoutPhase("generation_retry");
+          setPremiumPipelineUserMessage(null);
+          lastPremiumPipelineRenderSourceRef.current = result.premiumRenderSource;
+          setPremiumTruthPipelineSource(result.premiumRenderSource);
+          return;
+        }
       }
       if (isPremiumNetworkRetryablePipelineResult(result)) {
         logPremiumSessionConsistency({
@@ -7848,7 +7907,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         });
       };
 
-      const applySuccess = async (result: PremiumCompletionResult) => {
+      const applySuccess = async (incomingResult: PremiumCompletionResult) => {
+        let result = incomingResult;
         const extendedWaitAtApplyStart = premiumModalExtendedWaitActiveRef.current;
         const hardFailopenAtApplyStart = premiumPostCheckoutModalHardFailopenRef.current;
         const patienceExtendedAtApplyStart = premiumReturnPatienceExtendedRef.current;
@@ -7872,35 +7932,53 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           return;
         }
         if (isPremiumGenerationRetryablePipelineResult(result)) {
-          if (!premiumGapBaseIntakeRef.current.trim()) {
-            premiumGapBaseIntakeRef.current = mergedIntake;
+          const salvage = pickUsableGenerationRetrySalvageCorpus([
+            result.winningPremiumBodyText,
+            premiumPipelineOutputBodyRef.current,
+            lastPremiumWinningCorpusRef.current,
+            hydratedPremiumBodyRef.current,
+            lastKnownGoodAuthoritativeDraftRef.current,
+            acceptedReviewCorpusRef.current,
+          ]);
+          if (salvage) {
+            if (import.meta.env.MODE !== "test") {
+              // eslint-disable-next-line no-console
+              console.warn("[premium-flow] apply_success_generation_retryable_salvage_mount", {
+                corpusLen: salvage.length,
+              });
+            }
+            result = remapGenerationRetryableResultToDegradedSalvage(result, salvage);
+          } else {
+            if (!premiumGapBaseIntakeRef.current.trim()) {
+              premiumGapBaseIntakeRef.current = mergedIntake;
+            }
+            logPremiumRetryPreservedContext({
+              context: "applySuccess_generation_retryable",
+              agreementId: (reviewAgreementIdRef.current || readCreateReviewAgreementResumeId() || "").trim() || null,
+              agreementGenerationId: result.agreementGenerationId ?? getOrInitSessionAgreementGenerationId(),
+              intakeFingerprint: shortIntakeFingerprint(mergedIntake),
+            });
+            setPremiumServerGenerationDegraded(null);
+            setHardError(null);
+            setProFullDraftCustomGateMessage(null);
+            setProFullDraftQualityRetry(false);
+            clearPremiumForkUserSendMode();
+            paidProPremiumSendIntentRef.current = null;
+            clearPremiumSendIntent();
+            setPremiumSendModeUserChoice(null);
+            setPremiumSendModeTouched(false);
+            if (peekAdvancedFullDraftCheckoutGrant()) consumeAdvancedFullDraftCheckoutGrant();
+            lastPremiumPipelineRenderSourceRef.current = result.premiumRenderSource;
+            setPremiumTruthPipelineSource(result.premiumRenderSource);
+            // Do not wipe hydrated Pro bytes — recovery UI can still surface them.
+            setPremiumRefineReview(null);
+            setPremiumFinalizeAudit(null);
+            setPremiumReviewRoute(null);
+            setPremiumPostCheckoutPhase("generation_retry");
+            setPremiumPipelineUserMessage(null);
+            logPremiumModalInfo("[premium-modal-stage]", { to: "generation_retry", ts: new Date().toISOString() });
+            return;
           }
-          logPremiumRetryPreservedContext({
-            context: "applySuccess_generation_retryable",
-            agreementId: (reviewAgreementIdRef.current || readCreateReviewAgreementResumeId() || "").trim() || null,
-            agreementGenerationId: result.agreementGenerationId ?? getOrInitSessionAgreementGenerationId(),
-            intakeFingerprint: shortIntakeFingerprint(mergedIntake),
-          });
-          setPremiumServerGenerationDegraded(null);
-          setHardError(null);
-          setProFullDraftCustomGateMessage(null);
-          setProFullDraftQualityRetry(false);
-          clearPremiumForkUserSendMode();
-          paidProPremiumSendIntentRef.current = null;
-          clearPremiumSendIntent();
-          setPremiumSendModeUserChoice(null);
-          setPremiumSendModeTouched(false);
-          if (peekAdvancedFullDraftCheckoutGrant()) consumeAdvancedFullDraftCheckoutGrant();
-          lastPremiumPipelineRenderSourceRef.current = result.premiumRenderSource;
-          setPremiumTruthPipelineSource(result.premiumRenderSource);
-          premiumPipelineOutputBodyRef.current = "";
-          setPremiumRefineReview(null);
-          setPremiumFinalizeAudit(null);
-          setPremiumReviewRoute(null);
-          setPremiumPostCheckoutPhase("generation_retry");
-          setPremiumPipelineUserMessage(null);
-          logPremiumModalInfo("[premium-modal-stage]", { to: "generation_retry", ts: new Date().toISOString() });
-          return;
         }
         if (isPremiumCorsBlockedPipelineResult(result)) {
           if (!premiumGapBaseIntakeRef.current.trim()) {

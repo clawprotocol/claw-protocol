@@ -48,7 +48,8 @@ const SERVER_FULL_DRAFT_SOURCES: ReadonlySet<string> = new Set([
   "server_full_draft_degraded",
 ]);
 
-const CONCISE_AUTHORITATIVE_PAID_ENTITY_RE = /\b(?:LLC|L\.L\.C\.|Inc\.|Corp\.|Corporation|Ltd\.)\b/i;
+const CONCISE_AUTHORITATIVE_PAID_ENTITY_RE =
+  /\b(?:LLC|L\.L\.C\.|Inc\.|Corp\.|Corporation|Ltd\.|Labs|Laboratory|Company|Co\.|Partners|Partnership|LLP|P\.C\.|PC|PLLC)\b/i;
 
 /** Same floor as acceptedProposalCorpusText purpose minimum. */
 export const CONCISE_AUTHORITATIVE_ESTABLISH_MIN_LEN = 120;
@@ -132,7 +133,7 @@ export function assessGenericOperativeStructureCompleteness(text: string): {
   const t = text.trim();
   const bodyLow = t.toLowerCase();
   if (t.length < 800) blockers.push("below_generic_operative_min_len");
-  if (!/\b(?:LLC|L\.L\.C\.|Inc\.|Corp\.|Corporation|Ltd\.)\b/i.test(t)) {
+  if (!CONCISE_AUTHORITATIVE_PAID_ENTITY_RE.test(t)) {
     blockers.push("missing_legal_entity_parties");
   }
   const executionBlockCount = countPaidProExecutionBlocks(t);

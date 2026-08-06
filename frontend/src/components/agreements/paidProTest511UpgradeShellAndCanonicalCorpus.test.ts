@@ -190,6 +190,9 @@ describe("TEST511 — paid create skips legacy upgrade shell and renders canonic
     const ensureIdx = rewriteBlock.indexOf("ensurePremiumCompletion");
     expect(mintIdx).toBeGreaterThan(-1);
     expect(ensureIdx).toBeGreaterThan(mintIdx);
+    // generation_retryable must salvage freeze-accepted corpora instead of empty Retry.
+    expect(intake).toContain("entitled_rewrite_generation_retryable_salvage_mount");
+    expect(intake).toContain("pickUsableGenerationRetrySalvageCorpus");
   });
 
   it("7 — after freeze, authoritative review plain prefers server corpus over starter preview", () => {
