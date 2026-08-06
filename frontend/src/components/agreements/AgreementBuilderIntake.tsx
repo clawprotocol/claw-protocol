@@ -3252,7 +3252,12 @@ function pickUsableGenerationRetrySalvageCorpus(candidates: Array<string | null 
   if (/\b(?:starter preview|live preview|preview only|fallback preview|retry pro draft)\b/i.test(best)) {
     return "";
   }
-  if (!/IN WITNESS WHEREOF|executed this Agreement/i.test(best)) return "";
+  // Local premium deliverable previews often use By:/signature blocks without "IN WITNESS WHEREOF".
+  const hasExecutionSignal =
+    /IN WITNESS WHEREOF|executed this Agreement|^\s*By:\s*_{2,}/im.test(best) ||
+    (/^\s*(?:CLIENT|SERVICE PROVIDER|PARTY\s+\d+)\s*:/im.test(best) && /_{3,}/.test(best)) ||
+    (best.match(/^\s*\d+\.\s+[A-Za-z]/gm) || []).length >= 4;
+  if (!hasExecutionSignal) return "";
   return best;
 }
 
@@ -6899,6 +6904,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           hydratedPremiumBodyRef.current,
           lastKnownGoodAuthoritativeDraftRef.current,
           acceptedReviewCorpusRef.current,
+          buildAgreementPreviewTextCore(gateDraft, {
+            starterPreview: false,
+            premiumDeliverablePreview: true,
+            intakeText: mergedIntake,
+          }),
         ]);
         if (salvage) {
           if (import.meta.env.MODE !== "test") {
@@ -6992,10 +7002,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         modalParty2NameRef.current,
         mergedIntake,
       );
-      const winning = (result.winningPremiumBodyText || "").trim();
-      const usePaidAuthoritativeBody =
+      let winning = (result.winningPremiumBodyText || "").trim();
+      let usePaidAuthoritativeBody =
         isAuthoritativePremiumPipelineRenderSource(result.premiumRenderSource) && winning.length >= 500;
-      const resolvedPersist = resolvePremiumRenderSource({
+      let resolvedPersist = resolvePremiumRenderSource({
         draft: merged.draft,
         intakeText: mergedIntake,
         premiumWinningCorpusFallback: winning,
@@ -7008,7 +7018,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           }),
       });
       if (import.meta.env.DEV) emitPremiumRenderResolveLog(resolvedPersist);
-      const snapshotCoalesce = resolveAuthoritativePremiumSnapshotPlain({
+      let snapshotCoalesce = resolveAuthoritativePremiumSnapshotPlain({
         winningBody: winning,
         resolvedText: resolvedPersist.text,
         pipelineSource: result.premiumRenderSource,
@@ -7016,7 +7026,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         intakeText: mergedIntake,
         draft: merged.draft,
       });
-      const snapshotPlain = snapshotCoalesce.text.trim();
+      let snapshotPlain = snapshotCoalesce.text.trim();
       const contractIc = resolveAgreementIntentContract(mergedIntake);
       const fin = isPaidProFinishedAgreement({
         text: snapshotPlain,
@@ -7030,44 +7040,108 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         serverGenerationDegraded: Boolean(result.serverGenerationDegraded),
       });
       if (!fin.ok) {
-        logPaidProGenerationTerminalTransition({
-          reason: "entitled_rewrite_validation_failed",
-          outcome: "retry_recoverable",
-        });
-        setPremiumServerGenerationDegraded(null);
-        if (contractIc.pro_strict) {
-          const d = buildPremiumDetailsGateCopy(contractIc, fin.gate?.validation.reasons ?? fin.reasons);
-          setProFullDraftCustomGateMessage(
-            [d.title, d.body, "", d.bullets.map((b) => `• ${b}`).join("\n")].filter(Boolean).join("\n\n"),
-          );
+        const failOpenCorpus = pickUsableGenerationRetrySalvageCorpus([
+          snapshotPlain,
+          winning,
+          premiumPipelineOutputBodyRef.current,
+          lastPremiumWinningCorpusRef.current,
+          hydratedPremiumBodyRef.current,
+          lastKnownGoodAuthoritativeDraftRef.current,
+          acceptedReviewCorpusRef.current,
+          buildAgreementPreviewTextCore(merged.draft, {
+            starterPreview: false,
+            premiumDeliverablePreview: true,
+            intakeText: mergedIntake,
+          }),
+        ]);
+        // GTM: never wipe a usable Pro corpus into empty Retry because finished-agreement
+        // heuristics failed after freeze/handoff already held a substantive draft.
+        if (failOpenCorpus) {
+          if (import.meta.env.MODE !== "test") {
+            // eslint-disable-next-line no-console
+            console.warn("[premium-flow] entitled_rewrite_validation_failed_fail_open_mount", {
+              corpusLen: failOpenCorpus.length,
+              reasons: fin.reasons?.slice?.(0, 6) ?? fin.reasons,
+            });
+          }
+          result = {
+            ...result,
+            winningPremiumBodyText: failOpenCorpus,
+            premiumRenderSource:
+              result.premiumRenderSource === "server_full_draft" ||
+              result.premiumRenderSource === "server_full_draft_retry" ||
+              result.premiumRenderSource === "server_full_draft_degraded"
+                ? result.premiumRenderSource
+                : "server_full_draft_degraded",
+            serverGenerationDegraded: result.serverGenerationDegraded ?? {
+              code: "entitled_rewrite_validation_fail_open",
+              message: "Mounted substantive Pro corpus after finished-agreement gate failed.",
+            },
+          };
+          winning = failOpenCorpus;
+          usePaidAuthoritativeBody = true;
+          resolvedPersist = resolvePremiumRenderSource({
+            draft: merged.draft,
+            intakeText: mergedIntake,
+            premiumWinningCorpusFallback: winning,
+            paidAuthoritativeProBody: winning,
+            hydratedAuthoritativeBodyHint: winning,
+            buildLivePreview: () =>
+              buildAgreementPreviewTextCore(merged.draft, {
+                starterPreview: false,
+                premiumDeliverablePreview: true,
+              }),
+          });
+          snapshotCoalesce = resolveAuthoritativePremiumSnapshotPlain({
+            winningBody: winning,
+            resolvedText: resolvedPersist.text,
+            pipelineSource: result.premiumRenderSource,
+            resolvedSource: resolvedPersist.premium_render_source,
+            intakeText: mergedIntake,
+            draft: merged.draft,
+          });
+          snapshotPlain = (snapshotCoalesce.text || failOpenCorpus).trim() || failOpenCorpus;
+          // Continue with remapped corpus — do not clear refs / force quality retry.
         } else {
-          setProFullDraftCustomGateMessage(null);
+          logPaidProGenerationTerminalTransition({
+            reason: "entitled_rewrite_validation_failed",
+            outcome: "retry_recoverable",
+          });
+          setPremiumServerGenerationDegraded(null);
+          if (contractIc.pro_strict) {
+            const d = buildPremiumDetailsGateCopy(contractIc, fin.gate?.validation.reasons ?? fin.reasons);
+            setProFullDraftCustomGateMessage(
+              [d.title, d.body, "", d.bullets.map((b) => `• ${b}`).join("\n")].filter(Boolean).join("\n\n"),
+            );
+          } else {
+            setProFullDraftCustomGateMessage(null);
+          }
+          setProFullDraftQualityRetry(true);
+          setHardError(null);
+          premiumPipelineOutputBodyRef.current = "";
+          setPremiumRefineReview(null);
+          setPremiumFinalizeAudit(null);
+          setPremiumReviewRoute(null);
+          commitParsedDraftToReviewFlow(stripClientPremiumArtifactBlocksFromDraft(merged.draft), {
+            forceReviewDisplay: true,
+          });
+          setCreateFlowPhase("draft_ready_for_review");
+          setDisplayPhase("review");
+          setCreateUiStage(CreateUiStage.DRAFT);
+          setPremiumPersistedFlowActive(false);
+          setPremiumSendPathUnlocked(false);
+          agreementDocumentDirtyRef.current = false;
+          setAgreementDocumentText("");
+          setReviewDocRefreshTick((n) => n + 1);
+          setPremiumPostCheckoutPhase(resolvePaidProGenerationFailurePostCheckoutPhase());
+          setPremiumPipelineUserMessage(null);
+          premiumModalExtendedWaitActiveRef.current = false;
+          setPremiumCheckoutModalExtendedWait(false);
+          setPremiumAuthoritativeRequestInFlight(false);
+          setLoading(false);
+          setCreateFlowDraftPersistError(null);
+          return;
         }
-        setProFullDraftQualityRetry(true);
-        setHardError(null);
-        premiumPipelineOutputBodyRef.current = "";
-        setPremiumRefineReview(null);
-        setPremiumFinalizeAudit(null);
-        setPremiumReviewRoute(null);
-        commitParsedDraftToReviewFlow(stripClientPremiumArtifactBlocksFromDraft(merged.draft), {
-          forceReviewDisplay: true,
-        });
-        setCreateFlowPhase("draft_ready_for_review");
-        setDisplayPhase("review");
-        setCreateUiStage(CreateUiStage.DRAFT);
-        setPremiumPersistedFlowActive(false);
-        setPremiumSendPathUnlocked(false);
-        agreementDocumentDirtyRef.current = false;
-        setAgreementDocumentText("");
-        setReviewDocRefreshTick((n) => n + 1);
-        setPremiumPostCheckoutPhase(resolvePaidProGenerationFailurePostCheckoutPhase());
-        setPremiumPipelineUserMessage(null);
-        premiumModalExtendedWaitActiveRef.current = false;
-        setPremiumCheckoutModalExtendedWait(false);
-        setPremiumAuthoritativeRequestInFlight(false);
-        setLoading(false);
-        setCreateFlowDraftPersistError(null);
-        return;
       }
       const premiumDeliverablePlain = buildAgreementPreviewTextCore(merged.draft, {
         starterPreview: false,
@@ -7242,19 +7316,77 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           })
         : false;
       if (!canonicalEntered) {
-        logPaidProGenerationTerminalTransition({
-          reason: "entitled_rewrite_canonical_blocked",
-          outcome: "retry_recoverable",
-        });
-        const failureTerminal = isDashboardPaidCreateRouteActive()
-          ? planDashboardPaidCreateValidationFailureTerminal()
-          : null;
-        setProFullDraftQualityRetry(true);
-        setProFullDraftCustomGateMessage(
-          "Your Pro agreement is still preparing. Tap **Retry Pro draft** if this does not update shortly.",
-        );
-        setCreateFlowPhase(failureTerminal?.createFlowPhase ?? "draft_ready_for_review");
-        setDisplayPhase(failureTerminal?.displayPhase ?? "review");
+        const canonicalSalvage = pickUsableGenerationRetrySalvageCorpus([
+          finalizePlan.corpusPlain,
+          entitledReviewCorpus,
+          winning,
+          snapshotPlain,
+        ]);
+        if (canonicalSalvage) {
+          if (import.meta.env.MODE !== "test") {
+            // eslint-disable-next-line no-console
+            console.warn("[premium-flow] entitled_rewrite_canonical_blocked_fail_open_mount", {
+              corpusLen: canonicalSalvage.length,
+              blockedReason: finalizePlan.blockedReason ?? "canonical_entry_failed",
+            });
+          }
+          try {
+            establishPaidProSourceOfTruth({
+              text: canonicalSalvage,
+              source:
+                result.premiumRenderSource === "server_full_draft" ||
+                result.premiumRenderSource === "server_full_draft_retry" ||
+                result.premiumRenderSource === "server_full_draft_degraded"
+                  ? result.premiumRenderSource
+                  : "server_full_draft_degraded",
+              draft: mergedDraftPersist,
+              intakeText: mergedIntake,
+              agreementGenerationId: result.agreementGenerationId ?? sessionGenForPass,
+              reviewSessionId: result.agreementGenerationId ?? sessionGenForPass,
+              generationOutcome: result.serverGenerationDegraded ? "degraded" : "ok",
+            });
+            setPremiumPersistedFlowActive(true);
+            setPremiumSendPathUnlocked(true);
+            setProFullDraftQualityRetry(false);
+            setAgreementDocumentText(canonicalSalvage);
+            commitParsedDraftToReviewFlow(
+              {
+                ...mergedDraftPersist,
+                premium_full_document_text: canonicalSalvage,
+                premium_server_full_document_text: canonicalSalvage,
+              },
+              { forceReviewDisplay: true },
+            );
+            guidedFinalReviewExplicitlyUnlockedRef.current = true;
+          } catch (canonicalFailOpenErr) {
+            if (import.meta.env.MODE !== "test") {
+              // eslint-disable-next-line no-console
+              console.warn("[premium-flow] entitled_rewrite_canonical_fail_open_sot_failed", canonicalFailOpenErr);
+            }
+            logPaidProGenerationTerminalTransition({
+              reason: "entitled_rewrite_canonical_blocked",
+              outcome: "retry_recoverable",
+            });
+            setProFullDraftQualityRetry(true);
+            setProFullDraftCustomGateMessage(
+              "Your Pro agreement is still preparing. Tap **Retry Pro draft** if this does not update shortly.",
+            );
+          }
+        } else {
+          logPaidProGenerationTerminalTransition({
+            reason: "entitled_rewrite_canonical_blocked",
+            outcome: "retry_recoverable",
+          });
+          const failureTerminal = isDashboardPaidCreateRouteActive()
+            ? planDashboardPaidCreateValidationFailureTerminal()
+            : null;
+          setProFullDraftQualityRetry(true);
+          setProFullDraftCustomGateMessage(
+            "Your Pro agreement is still preparing. Tap **Retry Pro draft** if this does not update shortly.",
+          );
+          setCreateFlowPhase(failureTerminal?.createFlowPhase ?? "draft_ready_for_review");
+          setDisplayPhase(failureTerminal?.displayPhase ?? "review");
+        }
         if (import.meta.env.DEV) {
           // eslint-disable-next-line no-console
           console.warn("[paid-pro-acceptance-routing]", {
@@ -7263,6 +7395,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             finalizeHelper: FINALIZE_CANONICAL_PAID_PRO_PIPELINE_SUCCESS_HELPER,
             blockedReason: finalizePlan.blockedReason ?? "canonical_entry_failed",
             corpusLen: finalizePlan.corpusPlain.length,
+            failOpenMounted: Boolean(canonicalSalvage),
           });
         }
       } else {

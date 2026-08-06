@@ -4743,10 +4743,14 @@ async function runPremiumCompletionInner(
   }
   if (premiumRenderSource === "premium_generation_retryable") {
     const salvageOnRetry = (winningPremiumBodyText || "").trim();
+    const salvageHasExecution =
+      /IN WITNESS WHEREOF|executed this Agreement|^\s*By:\s*_{2,}/im.test(salvageOnRetry) ||
+      (/^\s*(?:CLIENT|SERVICE PROVIDER|PARTY\s+\d+)\s*:/im.test(salvageOnRetry) && /_{3,}/.test(salvageOnRetry)) ||
+      (salvageOnRetry.match(/^\s*\d+\.\s+[A-Za-z]/gm) || []).length >= 4;
     // If a usable Pro corpus already froze/hydrated in-session, do not wipe it into empty Retry.
     if (
-      salvageOnRetry.length >= PREMIUM_USABLE_BODY_MIN_LEN &&
-      /IN WITNESS WHEREOF|executed this Agreement/i.test(salvageOnRetry) &&
+      salvageOnRetry.length >= 1_600 &&
+      salvageHasExecution &&
       !/\b(?:starter preview|live preview|preview only|fallback preview)\b/i.test(salvageOnRetry)
     ) {
       if (tierAEnabled) tierADiag.premiumPipelineSource = "server_full_draft_degraded";

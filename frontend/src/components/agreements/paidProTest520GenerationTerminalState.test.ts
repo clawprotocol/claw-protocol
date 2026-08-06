@@ -121,13 +121,15 @@ describe("TEST520 — paid Pro generation exits processing after validation fail
   });
 
   it("AgreementBuilderIntake never sets processing after arming quality retry on validation failure paths", () => {
-    const applySuccessBlock = intakeSrc.slice(
-      intakeSrc.indexOf("const applySuccess = (result: PremiumCompletionResult) =>"),
-      intakeSrc.indexOf("const runModelPass = async"),
-    );
+    const applySuccessIdx = intakeSrc.indexOf("const applySuccess = async (incomingResult: PremiumCompletionResult)");
+    const applySuccessLegacyIdx = intakeSrc.indexOf("const applySuccess = (result: PremiumCompletionResult) =>");
+    const applyStart = applySuccessIdx >= 0 ? applySuccessIdx : applySuccessLegacyIdx;
+    const applySuccessBlock = intakeSrc.slice(applyStart, intakeSrc.indexOf("const runModelPass = async"));
+    expect(applyStart).toBeGreaterThan(-1);
     expect(applySuccessBlock).toContain("resolvePaidProGenerationFailurePostCheckoutPhase");
+    // Same failure branch only — a later success path may set processing after an earlier return.
     expect(applySuccessBlock).not.toMatch(
-      /setProFullDraftQualityRetry\(true\)[\s\S]{0,400}setPremiumPostCheckoutPhase\("processing"\)/,
+      /setProFullDraftQualityRetry\(true\);(?:(?!\breturn\b)[\s\S]){0,400}setPremiumPostCheckoutPhase\("processing"\)/,
     );
 
     const rewriteBlock = intakeSrc.slice(
@@ -136,6 +138,7 @@ describe("TEST520 — paid Pro generation exits processing after validation fail
     );
     expect(rewriteBlock).toContain("entitled_rewrite_validation_failed");
     expect(rewriteBlock).toContain("resolvePaidProGenerationFailurePostCheckoutPhase");
+    expect(rewriteBlock).toContain("entitled_rewrite_validation_failed_fail_open_mount");
     expect(rewriteBlock).not.toMatch(
       /isPaidProFinishedAgreement\([\s\S]*?entitled_rewrite_validation_failed[\s\S]*?setPremiumPostCheckoutPhase\("processing"\)/,
     );
