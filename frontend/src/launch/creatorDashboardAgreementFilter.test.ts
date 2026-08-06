@@ -49,7 +49,7 @@ describe("creatorDashboardAgreementFilter", () => {
     expect(resolveCreatorDashboardFeaturedAgreementId(rows)).toBe("ag_active");
   });
 
-  it("hides stale QA drafts for first-time dashboard focus", () => {
+  it("hides sibling drafts when featured agreement is already in review", () => {
     sessionStorage.setItem(LAWDOG_ENTRY_CONTEXT_KEY, "new");
     sessionStorage.setItem(AGREEMENT_CREATE_REVIEW_RESUME_KEY, "ag_active");
     const rows = [
@@ -94,7 +94,31 @@ describe("creatorDashboardAgreementFilter", () => {
     expect(isLegitimateAdditionalCreatorDashboardAgreement(rows[1]!)).toBe(true);
   });
 
-  it("shows only the resume agreement when session resume id is set", () => {
+  it("keeps peer drafts visible even when a create-resume id is set", () => {
+    sessionStorage.setItem(AGREEMENT_CREATE_REVIEW_RESUME_KEY, "ag_active_draft");
+    const rows = [
+      row({
+        id: "ag_peer_draft",
+        updated_at: "2026-06-01T00:00:00.000Z",
+        title: "Services Agreement",
+      }),
+      row({
+        id: "ag_active_draft",
+        updated_at: "2026-05-01T00:00:00.000Z",
+        title: "Services Agreement",
+      }),
+    ];
+
+    const filtered = filterCreatorDashboardAgreements(rows);
+    expect(filtered.featuredAgreementId).toBe("ag_active_draft");
+    expect(filtered.visibleRows.map((r) => r.id).sort()).toEqual([
+      "ag_active_draft",
+      "ag_peer_draft",
+    ]);
+    expect(filtered.hiddenStaleCount).toBe(0);
+  });
+
+  it("features resume id and keeps other in-review agreements visible", () => {
     sessionStorage.setItem(AGREEMENT_CREATE_REVIEW_RESUME_KEY, "ag_active");
     const rows = [
       row({ id: "ag_stale_draft", updated_at: "2026-06-01T00:00:00.000Z", title: "Old QA draft" }),
@@ -116,7 +140,7 @@ describe("creatorDashboardAgreementFilter", () => {
 
     const filtered = filterCreatorDashboardAgreements(rows);
     expect(filtered.featuredAgreementId).toBe("ag_active");
-    expect(filtered.visibleRows.map((r) => r.id)).toEqual(["ag_active"]);
-    expect(filtered.hiddenStaleCount).toBe(2);
+    expect(filtered.visibleRows.map((r) => r.id).sort()).toEqual(["ag_active", "ag_other_review"]);
+    expect(filtered.hiddenStaleCount).toBe(1);
   });
 });

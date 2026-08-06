@@ -19,29 +19,15 @@ import {
   hydratePaidProExecutionBlockWithSignerMetadata,
   signerMetadataAuthorityHasHydratableFields,
 } from "./hydratePaidProExecutionBlockWithSignerMetadata";
-import { readConsumedPaidProSignerMetadataAuthority } from "./paidProSignerMetadataAuthority";
+import {
+  readConsumedPaidProSignerMetadataAuthority,
+  recipientMetadataToAuthorityParties,
+} from "./paidProSignerMetadataAuthority";
 import {
   applySignatureNoticeContactFieldsToCorpus,
   ensureOperativeIfToNoticeDelivery,
 } from "./paidProPartyNoticeDetails";
 import { repairJoinedTopLevelSectionHeadings } from "./sectionStructureAuthority";
-
-/**
- * TEST560 — notice stanzas still carrying the pre-signer-setup placeholder
- * ("Email: provided during signer setup" / "Address: provided during signer setup")
- * must be hydrated on the post-finalize display surface even when execution blocks are filled.
- */
-export const NOTICE_SIGNER_SETUP_PLACEHOLDER_RE = /provided during signer setup/i;
-
-/** True when a corpus is signing-ready: no setup placeholders and no blank Name/Title lines. */
-export function isPaidProSigningReadyHydratedCorpus(plain: string): boolean {
-  const body = (plain || "").trim();
-  if (body.length < PAID_PRO_AUTHORITY_MIN_LEN) return false;
-  if (NOTICE_SIGNER_SETUP_PLACEHOLDER_RE.test(body)) return false;
-  if (countBlankSignerMetadataLinesInExecutionBlock(body) > 0) return false;
-  return true;
-}
-import { recipientMetadataToAuthorityParties } from "./paidProSignerMetadataAuthority";
 import { PAID_PRO_AUTHORITY_MIN_LEN } from "./paidProAgreementAuthority";
 import {
   PAID_PRO_FINAL_HYDRATED_CORPUS_MIN_LEN,
@@ -53,6 +39,24 @@ import {
   applyReviewReadyMetadataBackfill,
   collectReviewReadyCorpusHints,
 } from "../../launch/simpleProduct/reviewReadyHydratedDisplayCorpus";
+
+/**
+ * TEST560 — notice stanzas still carrying the pre-signer-setup placeholder
+ * ("Email: provided during signer setup" / "Address: provided during signer setup")
+ * must be hydrated on the post-finalize display surface even when execution blocks are filled.
+ */
+export const NOTICE_SIGNER_SETUP_PLACEHOLDER_RE = /provided during signer setup/i;
+
+/** True when a corpus is signing-ready: no setup placeholders and no blank required Name/Title lines. */
+export function isPaidProSigningReadyHydratedCorpus(plain: string): boolean {
+  const body = (plain || "").trim();
+  if (body.length < PAID_PRO_AUTHORITY_MIN_LEN) return false;
+  if (NOTICE_SIGNER_SETUP_PLACEHOLDER_RE.test(body)) return false;
+  // Only count blank Title/Name when authority supplied those values (optional title stays blank).
+  const parties = readConsumedPaidProSignerMetadataAuthority()?.parties;
+  if (countBlankSignerMetadataLinesInExecutionBlock(body, parties) > 0) return false;
+  return true;
+}
 
 /** Render-time enrichment — does not mutate the frozen signing snapshot store. */
 export function enrichPaidProPostFinalizeDisplayCorpus(

@@ -156,7 +156,7 @@ export function stripAuthorizedSignersBulletLegalEntity(value: string): string {
   return normalizeExtractedLegalEntity(value) || value.replace(/\s+/g, " ").trim();
 }
 
-/** Legal entity field value — rejects signer names, scope phrases, and concatenated names. */
+/** Legal entity field value — rejects concatenated names and scope phrases; keeps sole-prop / brand parties. */
 export function resolveAuthorityPartyLegalNameField(
   value: string,
   fallback = "",
@@ -166,7 +166,16 @@ export function resolveAuthorityPartyLegalNameField(
   if (looksLikeAuthorizedSignersBulletLine(t)) {
     return parseAuthorizedSignersBulletLine(t)?.legalEntity ?? fallback;
   }
-  if (isLikelyHumanSignerName(t) || looksLikeConcatenatedSignerNames(t)) return fallback;
+  if (looksLikeConcatenatedSignerNames(t)) return fallback;
+  if (isLikelyHumanSignerName(t)) {
+    const fb = fallback.replace(/\s+/g, " ").trim();
+    // Prefer a structured entity when the caller already has one (signer name vs entity).
+    if (fb && (isLegalEntityName(fb) || isAuthoritativeLegalEntityName(fb))) return fb;
+    // Freelancer / sole-prop / 2-word brand parties use individual names as the legal party.
+    // Reject 3+ word human-like phrases without an entity suffix (usually scope prose).
+    if (t.split(/\s+/).length <= 2) return t;
+    return fallback;
+  }
   if (!isLegalEntityName(t) && !isAuthoritativeLegalEntityName(t)) return fallback;
   return t;
 }

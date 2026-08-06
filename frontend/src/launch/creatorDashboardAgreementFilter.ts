@@ -48,39 +48,31 @@ export function shouldFocusCreatorDashboardOnSingleAgreement(): boolean {
   return entry === "new" || Boolean(readCreateReviewAgreementResumeId());
 }
 
+/**
+ * Hide sibling draft rows only when the featured agreement is already in the
+ * post-intake pipeline (review sent / signing). Peer drafts from separate creates
+ * must remain visible — resume focus alone must not collapse the dashboard to one card.
+ */
+export function shouldTrimSiblingCreatorDashboardDrafts(
+  featuredRow: WorkspaceIndexAgreement | null,
+): boolean {
+  if (!featuredRow) return false;
+  if (!isLegitimateAdditionalCreatorDashboardAgreement(featuredRow)) return false;
+  return Boolean((featuredRow.review_sent_at || "").trim());
+}
+
 export function filterCreatorDashboardAgreements(
   rows: readonly WorkspaceIndexAgreement[],
 ): CreatorDashboardAgreementFilterResult {
   const dedupedRows = filterSupersededStaleDraftWorkspaceRows(rows);
   const sorted = sortCreatorDashboardRows(dedupedRows);
   const featuredAgreementId = resolveCreatorDashboardFeaturedAgreementId(sorted);
-  const resumeId = (readCreateReviewAgreementResumeId() || "").trim();
-  const focusSingle = shouldFocusCreatorDashboardOnSingleAgreement();
-
-  if (resumeId && focusSingle) {
-    const featured = featuredAgreementId && sorted.some((row) => row.id === featuredAgreementId)
-      ? featuredAgreementId
-      : resumeId;
-    const visibleRows = sorted.filter((row) => row.id === featured);
-    return {
-      featuredAgreementId: featured,
-      visibleRows,
-      hiddenStaleCount: Math.max(0, sorted.length - visibleRows.length),
-    };
-  }
-
   const featuredRow = featuredAgreementId
     ? sorted.find((row) => row.id === featuredAgreementId) ?? null
     : null;
-  const trimStaleDrafts =
-    focusSingle ||
-    Boolean(
-      featuredRow &&
-        isLegitimateAdditionalCreatorDashboardAgreement(featuredRow) &&
-        Boolean((featuredRow.review_sent_at || "").trim()),
-    );
+  const trimSiblingDrafts = shouldTrimSiblingCreatorDashboardDrafts(featuredRow);
 
-  if (!trimStaleDrafts) {
+  if (!trimSiblingDrafts) {
     return {
       featuredAgreementId,
       visibleRows: sorted,

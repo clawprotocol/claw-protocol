@@ -101,6 +101,9 @@ describe("TEST414_SIGNER_METADATA_LEGAL_ENTITY_ALIGNMENT", () => {
       "Harbor Peak Automation LLC",
     );
     expect(resolveAuthorityPartyLegalNameField("Shared Warehouse Automation", "")).toBe("");
+    // Sole-prop / 2-word brand party slots keep their legal names when no entity fallback exists.
+    expect(resolveAuthorityPartyLegalNameField("Alex Rivera", "")).toBe("Alex Rivera");
+    expect(resolveAuthorityPartyLegalNameField("PixelForge Labs", "")).toBe("PixelForge Labs");
   });
 
   it("2-party agreement keeps entity and signer fields aligned", () => {

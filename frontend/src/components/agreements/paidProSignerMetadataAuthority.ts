@@ -766,7 +766,13 @@ export function authorityPartiesToCanonicalPartyIdentities(
   return parties.map((p) => {
     const authorityLegal = sanitizeAuthorityPartyLegalName(p.partyLegalName);
     const legal = authorityLegal || slotIsolatedCanonicalEntity(p.partyIndex, slots);
-    const isIndividual = legal ? isIndividualPartyName(legal) : false;
+    const signerName = p.signerName.trim();
+    // Distinct human signer ⇒ entity representative, even when the party label looks
+    // individual/brand-like (e.g. "PixelForge Labs" + signer "Pixel Gin").
+    const isIndividual = legal
+      ? isIndividualPartyName(legal) &&
+        (!signerName || partyLegalNamesMatch(signerName, legal))
+      : false;
     const roleLabel = resolveRoleLabelForAuthorityParty(legal, p.partyIndex, roleContext);
     const blockHeading = useEntityHeadings
       ? authorityExecutionBlockHeading(p)
@@ -776,7 +782,7 @@ export function authorityPartiesToCanonicalPartyIdentities(
       partyDisplayName: legal,
       email: p.signerEmail,
       partyAddress: p.partyAddress.trim() || null,
-      representativeName: p.signerName.trim() || null,
+      representativeName: signerName || null,
       title: p.signerTitle.trim() || null,
       blockHeading,
       isIndividual,
@@ -791,7 +797,11 @@ export function buildCanonicalFinalPartyManifestFromAuthority(
   return {
     parties: authority.parties.map((p) => {
       const legal = sanitizeAuthorityPartyLegalName(p.partyLegalName);
-      const isIndividual = legal ? isIndividualPartyName(legal) : false;
+      const signerName = p.signerName.trim();
+      const isIndividual = legal
+        ? isIndividualPartyName(legal) &&
+          (!signerName || partyLegalNamesMatch(signerName, legal))
+        : false;
       const roleLabel = resolveRoleLabelForAuthorityParty(legal, p.partyIndex, roleContext);
       const role = manifestRoleFromRoleLabel(roleLabel, p.partyIndex);
       return {
@@ -799,7 +809,7 @@ export function buildCanonicalFinalPartyManifestFromAuthority(
         role,
         partyName: legal,
         email: p.signerEmail,
-        signerName: p.signerName.trim() || null,
+        signerName: signerName || null,
         signerTitle: p.signerTitle.trim() || null,
         roleLabel,
         signerKind: isIndividual ? ("individual" as const) : ("entity_representative" as const),

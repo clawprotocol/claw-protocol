@@ -237,11 +237,16 @@ function isAgreementTitleParagraph(part: string): boolean {
 function isOpeningParagraph(part: string): boolean {
   const t = part.trim();
   if (/^\d+(?:\.\d+)*\.\s+/.test(t)) return false;
-  if (/^This\s+(?:Services\s+)?Agreement\s+(?:constitutes|may\s+be\s+amended|is\s+governed)\b/i.test(t)) {
+  if (
+    /^This\s+(?:[\w]+\s+){0,6}Agreement\s+(?:constitutes|may\s+be\s+amended|is\s+governed)\b/i.test(t)
+  ) {
     return false;
   }
-  if (!/\bThis\s+(?:Services\s+)?Agreement\b/i.test(t) || !/\bbetween\b/i.test(t)) return false;
-  if (/^(?:This\s+(?:Services\s+)?Agreement|This\s+Agreement)\s+is\s+(?:entered\s+into|between)/i.test(t)) {
+  // Services / Independent Contractor / Consulting / etc. opening recitals.
+  if (!/\bThis\s+(?:[\w]+\s+){0,6}Agreement\b/i.test(t) || !/\bbetween\b/i.test(t)) return false;
+  if (
+    /^(?:This\s+(?:[\w]+\s+){0,6}Agreement|This\s+Agreement)\s+is\s+(?:entered\s+into|between)/i.test(t)
+  ) {
     return true;
   }
   if (/\bThis\s+Agreement\s+is\s+entered\s+into\b[\s\S]{0,180}?\bThis\s+Agreement\s+is\s+between\b/i.test(t)) {

@@ -2,6 +2,8 @@
  * Repair numbered section continuity after canonical dedupe — no gaps (1, 2.1, 5.1 without 2–4).
  */
 
+import { isAuthoritativePaidProAgreementDocumentTitleLine } from "./paidProAgreementTitleScope";
+
 const TOP_LEVEL_RE = /^(\d+)\.\s+(?!\d)(.+)$/;
 const SUB_LEVEL_RE = /^(\d+)\.(\d+)\.?\s+(.+)$/;
 const BARE_SUB_RE = /^(\d+)\.(\d+)\.?\s*$/;
@@ -105,6 +107,13 @@ function parseBlocks(body: string): { preamble: string[]; blocks: ParsedBlock[] 
         heading: top[2]!.trim(),
         headingKey: headingKey(top[2]!),
       };
+      continue;
+    }
+
+    // Keep agreement document titles in the preamble — do not renumber them as §1.
+    if (isAuthoritativePaidProAgreementDocumentTitleLine(t)) {
+      if (current) current.lines.push(raw);
+      else preamble.push(raw);
       continue;
     }
 

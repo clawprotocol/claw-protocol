@@ -44,4 +44,23 @@ describe("normalizeProAgreementSectionContinuity", () => {
     expect(text).toMatch(/1\.1\s+Payment/);
     expect(text).toContain("$5,000");
   });
+
+  it("keeps agreement document title as preamble instead of renumbering as section 1", () => {
+    const input = [
+      "INDEPENDENT CONTRACTOR AGREEMENT",
+      "",
+      "This Independent Contractor Agreement (the \"Agreement\") is between Alex Rivera and PixelForge Labs.",
+      "",
+      "1. Project and Services",
+      "Alex will design the mobile app UI.",
+      "",
+      "2. Compensation and Payment",
+      "Flat fee of $4,500.",
+    ].join("\n");
+    const { text } = normalizeProAgreementSectionContinuity(input);
+    expect(text).toMatch(/^INDEPENDENT CONTRACTOR AGREEMENT/m);
+    expect(text).not.toMatch(/^1\.\s+INDEPENDENT CONTRACTOR AGREEMENT/m);
+    expect(text).toMatch(/^1\.\s+Project and Services/m);
+    expect(text).toMatch(/^2\.\s+Compensation and Payment/m);
+  });
 });
