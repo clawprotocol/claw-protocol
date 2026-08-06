@@ -140,7 +140,6 @@ import {
   MUTUAL_CONSULTING_LIGHTWEIGHT_SECTION_CEILING,
 } from "./paidProMutualConsultingQualityFloor";
 import { canShowPremiumSuccess } from "./premiumSuccessGate";
-import { PREMIUM_USABLE_BODY_MIN_LEN } from "./premiumPostCheckoutApplyEligible";
 import { isAuthoritativePremiumPipelineRenderSource } from "./premiumRenderSourceResolver";
 import { paidProPipelineAcceptedCorpusHash } from "./paidProPipelineAcceptedCorpus";
 import {
