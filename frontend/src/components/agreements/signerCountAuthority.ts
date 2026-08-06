@@ -316,7 +316,21 @@ function resolveAuthoritativeSignerCountCore(args: SignerCountAuthorityArgs): Si
     manifestPartyCount >= 3 ||
     partySlotCount >= 3 ||
     collapsePartySlotCandidates(draftNames).filter(isAuthoritativeLegalEntityName).length >= 3;
-  if (
+  // Clear two-party "between A and B" intakes must not flash 3/4 during preview repair when
+  // transient party_slot_count inflates from notice/OCR noise. Only promote above 2 when intake
+  // itself (labels/quotes/entity pool/frozen SoT) authoritatively describes 3+ parties.
+  const intakeClearlyTwoParty =
+    betweenDeduped.length === 2 &&
+    authoritativeIntakeCount <= 2 &&
+    labeledCount < 3 &&
+    quotedCount < 3 &&
+    entityPool.length < 3 &&
+    frozenManifestCount < 3 &&
+    consumedManifestCount < 3;
+  if (intakeClearlyTwoParty && count > 2 && explicitManifestPartyCount < 3) {
+    count = 2;
+    source = "party_slot_count";
+  } else if (
     betweenDeduped.length === 2 &&
     !explicitMultiParty &&
     count > 2 &&

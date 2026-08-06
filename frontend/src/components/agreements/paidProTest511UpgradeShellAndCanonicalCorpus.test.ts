@@ -162,7 +162,7 @@ describe("TEST511 — paid create skips legacy upgrade shell and renders canonic
 
   it("4 — auto-rewrite fires when paid_pro shell active and starter review is latched", () => {
     const effectIdx = intake.indexOf("paidCreateFlowAutoRewriteGenRef.current = gen");
-    const effectBlock = intake.slice(effectIdx - 900, effectIdx + 400);
+    const effectBlock = intake.slice(effectIdx - 1600, effectIdx + 400);
     expect(effectBlock).toContain("shouldUsePaidProCreateFlowReviewShell(authoritativeCreateFlowReviewShellInput)");
     expect(effectBlock).not.toContain("if (shouldUsePaidProCreateFlowReviewShell(authoritativeCreateFlowReviewShellInput)) return;");
     expect(effectBlock).toContain("resolveProvisionalWorkspaceProEntitledForCreate()");
@@ -178,10 +178,18 @@ describe("TEST511 — paid create skips legacy upgrade shell and renders canonic
 
   it("6 — paid generation uses premium model class (GPT-5.5 server path)", () => {
     const rewriteIdx = intake.indexOf("const runEntitledPremiumImprovementRewrite = React.useCallback");
-    const rewriteBlock = intake.slice(rewriteIdx, rewriteIdx + 3500);
+    const rewriteBlock = intake.slice(rewriteIdx, rewriteIdx + 7500);
     expect(rewriteBlock).toContain('aiModelClass: "premium"');
     expect(rewriteBlock).toContain("ensurePremiumCompletion");
     expect(rewriteBlock).toContain('premiumGenerationCallReason: "entitled_rewrite"');
+    // Genesis / entitled create: mint draft id before premium-full-draft so freeze-accepted
+    // corpus can prepareCommercialReviewSnapshotAuthority (avoids Retry + documentMounted=false).
+    expect(rewriteBlock).toContain("entitled_rewrite_minted_agreement_id");
+    expect(rewriteBlock).toContain("postNewDraft(gateDraft, mergedIntake");
+    const mintIdx = rewriteBlock.indexOf("entitled_rewrite_minted_agreement_id");
+    const ensureIdx = rewriteBlock.indexOf("ensurePremiumCompletion");
+    expect(mintIdx).toBeGreaterThan(-1);
+    expect(ensureIdx).toBeGreaterThan(mintIdx);
   });
 
   it("7 — after freeze, authoritative review plain prefers server corpus over starter preview", () => {

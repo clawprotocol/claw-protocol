@@ -6792,8 +6792,33 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     const mergedIntake = buildPremiumMergedIntakeWithUserNotes(raw, pendingUpgradePromptRef.current.trim());
     premiumGapBaseIntakeRef.current = mergedIntake;
     const sessionGenForPass = getOrInitSessionAgreementGenerationId();
-    const agreementIdForPass =
+    let agreementIdForPass =
       (reviewAgreementIdRef.current || readCreateReviewAgreementResumeId() || "").trim() || null;
+    // Genesis / entitled create often has no prior draft id. Without minting one here, freeze can
+    // succeed with a full Pro corpus and still land on Retry Pro draft (documentMounted=false)
+    // because prepareCommercialReviewSnapshotAuthority requires an agreement id.
+    if (!agreementIdForPass) {
+      try {
+        const minted = await postNewDraft(gateDraft, mergedIntake, {
+          reviewFirstHandoffPersist: true,
+        });
+        agreementIdForPass = minted.id;
+        reviewAgreementIdRef.current = agreementIdForPass;
+        writeCreateReviewAgreementResumeId(agreementIdForPass);
+        setReviewAgreementId(agreementIdForPass);
+        if (import.meta.env.MODE !== "test") {
+          // eslint-disable-next-line no-console
+          console.info("[premium-flow] entitled_rewrite_minted_agreement_id", {
+            agreementIdShort: agreementIdForPass.slice(0, 8),
+          });
+        }
+      } catch (mintErr) {
+        if (import.meta.env.MODE !== "test") {
+          // eslint-disable-next-line no-console
+          console.warn("[premium-flow] entitled_rewrite_mint_agreement_failed", mintErr);
+        }
+      }
+    }
     const guidedFlowId = resolveGuidedFlowId(mergedIntake, buildLiveDraftPreview(mergedIntake));
     const originalMergeHint = pickLongestPremiumIntakeCorpus(
       48,
@@ -7053,27 +7078,48 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           generationSessionId: result.agreementGenerationId ?? sessionGenForPass,
         });
         if (!prepared.ok) {
-          logPaidProGenerationTerminalTransition({
-            reason: "entitled_rewrite_snapshot_prepare_failed",
-            outcome: "retry_recoverable",
-          });
-          setProFullDraftQualityRetry(true);
-          setPremiumSendPathUnlocked(false);
-          setProFullDraftCustomGateMessage(
-            "Your Pro agreement could not be locked for review on the server. Tap **Retry Pro draft**.",
-          );
-          setLoading(false);
-          entitledPremiumRewriteInFlightRef.current = false;
-          return;
+          // GTM fail-open: freeze already accepted a substantive Pro corpus. Prefer local SoT + paint
+          // over empty Retry when server snapshot prepare flakes after a successful draft mint.
+          if (entitledReviewCorpus.length >= 500) {
+            if (import.meta.env.MODE !== "test") {
+              // eslint-disable-next-line no-console
+              console.warn("[premium-flow] entitled_rewrite_snapshot_prepare_failed_fail_open", {
+                agreementIdShort: agreementIdForPass.slice(0, 8),
+                corpusLen: entitledReviewCorpus.length,
+                prepareCode: prepared.code,
+              });
+            }
+            lastPremiumWinningCorpusRef.current = entitledReviewCorpus;
+            premiumPipelineOutputBodyRef.current = entitledReviewCorpus;
+            hydratedPremiumBodyRef.current = entitledReviewCorpus;
+            lastKnownGoodAuthoritativeDraftRef.current = entitledReviewCorpus;
+            acceptedReviewCorpusRef.current = entitledReviewCorpus;
+            authoritativeAgreementSnapshotRef.current = entitledReviewCorpus;
+            guidedFinalReviewExplicitlyUnlockedRef.current = true;
+          } else {
+            logPaidProGenerationTerminalTransition({
+              reason: "entitled_rewrite_snapshot_prepare_failed",
+              outcome: "retry_recoverable",
+            });
+            setProFullDraftQualityRetry(true);
+            setPremiumSendPathUnlocked(false);
+            setProFullDraftCustomGateMessage(
+              "Your Pro agreement could not be locked for review on the server. Tap **Retry Pro draft**.",
+            );
+            setLoading(false);
+            entitledPremiumRewriteInFlightRef.current = false;
+            return;
+          }
+        } else {
+          entitledReviewCorpus = prepared.snapshot.corpus_plain;
+          lastPremiumWinningCorpusRef.current = entitledReviewCorpus;
+          premiumPipelineOutputBodyRef.current = entitledReviewCorpus;
+          hydratedPremiumBodyRef.current = entitledReviewCorpus;
+          lastKnownGoodAuthoritativeDraftRef.current = entitledReviewCorpus;
+          acceptedReviewCorpusRef.current = entitledReviewCorpus;
+          authoritativeAgreementSnapshotRef.current = entitledReviewCorpus;
+          guidedFinalReviewExplicitlyUnlockedRef.current = true;
         }
-        entitledReviewCorpus = prepared.snapshot.corpus_plain;
-        lastPremiumWinningCorpusRef.current = entitledReviewCorpus;
-        premiumPipelineOutputBodyRef.current = entitledReviewCorpus;
-        hydratedPremiumBodyRef.current = entitledReviewCorpus;
-        lastKnownGoodAuthoritativeDraftRef.current = entitledReviewCorpus;
-        acceptedReviewCorpusRef.current = entitledReviewCorpus;
-        authoritativeAgreementSnapshotRef.current = entitledReviewCorpus;
-        guidedFinalReviewExplicitlyUnlockedRef.current = true;
       }
       const handoff = tryEstablishAcceptedPremiumCorpusForCreateFlowHandoff({
         winningBody: entitledReviewCorpus,
@@ -8873,11 +8919,34 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           };
           // Commercial: await server GET authority before any review/send unlock or corpus paint.
           // Never fire-and-forget unlock from local pipeline bytes (that left SoT live with blank paint).
-          const agreementIdForSnapshot = (
+          let agreementIdForSnapshot = (
             reviewAgreementIdRef.current ||
             readCreateReviewAgreementResumeId() ||
             ""
           ).trim();
+          if (!agreementIdForSnapshot && snapshotPlain.trim().length >= 500) {
+            try {
+              const minted = await postNewDraft(mergedDraftPersist, mergedIntake, {
+                reviewFirstHandoffPersist: true,
+              });
+              agreementIdForSnapshot = minted.id;
+              reviewAgreementIdRef.current = agreementIdForSnapshot;
+              writeCreateReviewAgreementResumeId(agreementIdForSnapshot);
+              setReviewAgreementId(agreementIdForSnapshot);
+              if (import.meta.env.MODE !== "test") {
+                // eslint-disable-next-line no-console
+                console.info("[premium-flow] apply_success_minted_agreement_id", {
+                  agreementIdShort: agreementIdForSnapshot.slice(0, 8),
+                  corpusLen: snapshotPlain.trim().length,
+                });
+              }
+            } catch (mintErr) {
+              if (import.meta.env.MODE !== "test") {
+                // eslint-disable-next-line no-console
+                console.warn("[premium-flow] apply_success_mint_agreement_failed", mintErr);
+              }
+            }
+          }
           if (!agreementIdForSnapshot) {
             setProFullDraftCustomGateMessage(
               "Server review snapshot requires an agreement id. Reload or contact support@lawdog.me.",
@@ -8905,45 +8974,57 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             generationSessionId: sessionGenId,
           });
           if (!prepared.ok) {
-            setProFullDraftCustomGateMessage(
-              "Your Pro agreement could not be locked for review on the server. Tap retry before continuing.",
-            );
-            setPremiumSendPathUnlocked(false);
-            setPremiumPersistedFlowActive(false);
-            setPremiumPostCheckoutPhase(null);
-            setPremiumPipelineUserMessage(null);
-            setProFullDraftQualityRetry(true);
-            if (import.meta.env.DEV) {
-              // eslint-disable-next-line no-console
-              console.warn("[canonical-review-snapshot] prepare failed", prepared.code);
+            if (snapshotPlain.trim().length < 500) {
+              setProFullDraftCustomGateMessage(
+                "Your Pro agreement could not be locked for review on the server. Tap retry before continuing.",
+              );
+              setPremiumSendPathUnlocked(false);
+              setPremiumPersistedFlowActive(false);
+              setPremiumPostCheckoutPhase(null);
+              setPremiumPipelineUserMessage(null);
+              setProFullDraftQualityRetry(true);
+              if (import.meta.env.DEV) {
+                // eslint-disable-next-line no-console
+                console.warn("[canonical-review-snapshot] prepare failed", prepared.code);
+              }
+              return;
             }
-            return;
+            if (import.meta.env.MODE !== "test") {
+              // eslint-disable-next-line no-console
+              console.warn("[premium-flow] apply_success_snapshot_prepare_failed_fail_open", {
+                agreementIdShort: agreementIdForSnapshot.slice(0, 8),
+                corpusLen: snapshotPlain.trim().length,
+                prepareCode: prepared.code,
+              });
+            }
+            // Continue with local freeze-accepted corpus rather than empty Retry.
+          } else {
+            if (
+              prepared.snapshot.snapshot_id !== prepared.display.snapshotId ||
+              prepared.snapshot.corpus_sha256.toLowerCase() !== prepared.display.corpusSha256.toLowerCase() ||
+              prepared.snapshot.corpus_length !== prepared.display.corpusLength
+            ) {
+              setProFullDraftCustomGateMessage(
+                "Server review snapshot authority mismatch. Prepare is blocked. Contact support@lawdog.me.",
+              );
+              setPremiumSendPathUnlocked(false);
+              setPremiumPersistedFlowActive(false);
+              setPremiumPostCheckoutPhase(null);
+              setPremiumPipelineUserMessage(null);
+              setProFullDraftQualityRetry(true);
+              return;
+            }
+            reviewCorpus = prepared.snapshot.corpus_plain;
+            snapshotPlain = reviewCorpus;
+            mergedDraftPersist = mergePremiumDraftWithServerCorpusFields(merged.draft, {
+              authoritativePlain: reviewCorpus,
+              serverFullFromApi: reviewCorpus,
+              premiumRenderSource:
+                resolvedPersist.premium_render_source === "server_full_document_text"
+                  ? "server_full_document_text"
+                  : result.premiumRenderSource,
+            });
           }
-          if (
-            prepared.snapshot.snapshot_id !== prepared.display.snapshotId ||
-            prepared.snapshot.corpus_sha256.toLowerCase() !== prepared.display.corpusSha256.toLowerCase() ||
-            prepared.snapshot.corpus_length !== prepared.display.corpusLength
-          ) {
-            setProFullDraftCustomGateMessage(
-              "Server review snapshot authority mismatch. Prepare is blocked. Contact support@lawdog.me.",
-            );
-            setPremiumSendPathUnlocked(false);
-            setPremiumPersistedFlowActive(false);
-            setPremiumPostCheckoutPhase(null);
-            setPremiumPipelineUserMessage(null);
-            setProFullDraftQualityRetry(true);
-            return;
-          }
-          reviewCorpus = prepared.snapshot.corpus_plain;
-          snapshotPlain = reviewCorpus;
-          mergedDraftPersist = mergePremiumDraftWithServerCorpusFields(merged.draft, {
-            authoritativePlain: reviewCorpus,
-            serverFullFromApi: reviewCorpus,
-            premiumRenderSource:
-              resolvedPersist.premium_render_source === "server_full_document_text"
-                ? "server_full_document_text"
-                : result.premiumRenderSource,
-          });
           try {
             establishPaidProSourceOfTruth({
               text: reviewCorpus,
@@ -8954,7 +9035,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
               reviewSessionId: sessionGenId,
               generationOutcome: generationOutcomeLabel,
             });
-            // Unlock + paint only after matching server GET authority.
+            // Unlock + paint after server GET authority (or local fail-open corpus).
             setPremiumPersistedFlowActive(true);
             setPremiumSendPathUnlocked(true);
             commitParsedDraftToReviewFlow(mergedDraftPersist, { forceReviewDisplay: true });

@@ -83,6 +83,23 @@ describe("signerCountAuthority", () => {
     expect(resolution.source).toBe("labeled_parties");
   });
 
+  it("keeps clear between-A-and-B intakes at 2 when preview party slots inflate to 3/4", () => {
+    const intake =
+      "I need a simple services agreement between me (Alex Rivera, freelance product designer) and a small startup called PixelForge Labs. Flat fee of $4,500.";
+    const resolution = resolveAuthoritativeSignerCount({
+      intakeText: intake,
+      draftParties: [
+        { name: "Alex Rivera" },
+        { name: "PixelForge Labs" },
+        { name: "Party 3" },
+        { name: "Notice Contact LLC" },
+      ],
+      rawPartyCount: 4,
+      corpusPlain: TWO_PARTY_CORPUS_WITH_EXTRA_BLOCK,
+    });
+    expect(resolution.count).toBe(2);
+  });
+
   it("generated agreement party count ignores decorative third signature block", () => {
     const count = resolveGeneratedAgreementPartyCount({
       intakeText: TEST372_FREE_STACKED_PARTY_INTAKE,
