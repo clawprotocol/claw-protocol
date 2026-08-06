@@ -6,7 +6,6 @@
 import { dedupeEntityCandidatesToLegalParties, extractAgreementEntityCandidates } from "../../agreement/partyPlaceholderDisplay";
 import { labeledPartyLegalEntities, quotedRolePartyLegalEntities } from "./labeledPartyBlockParse";
 import {
-  extractBetweenPartyNameList,
   extractBetweenPartyNameListForAuthority,
   isBetweenClausePartyCandidate,
 } from "./partyBetweenParse";
