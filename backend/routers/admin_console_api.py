@@ -477,6 +477,13 @@ def admin_users(request: Request, limit: int = Query(default=200, ge=1, le=500))
         if uid:
             workspace_identity_by_user[uid] = row
 
+    admin_created_by_user: Dict[str, str] = {}
+    for row in admin_identity_rows:
+        aid = str(row.get("id") or "").strip()
+        created = str(row.get("created_at") or "").strip()
+        if aid and created:
+            admin_created_by_user[aid] = created
+
     users: List[Dict[str, Any]] = []
     seen_user_ids: set[str] = set()
     for s in subjects:
@@ -498,6 +505,12 @@ def admin_users(request: Request, limit: int = Query(default=200, ge=1, le=500))
         display_name = ident_display or (affiliate_display_by_user.get(uid) if uid else None)
         # Align with customer Genesis meter (agreement_owner count this UTC month), not lifetime counters.
         monthly_used = int(ustore.agreements_created_since(ref, period_start))
+        # Prefer workspace bind timestamp; do not misuse subject updated_at as "created".
+        created_at = str((ident or {}).get("created_at") or "").strip()
+        created_source = "workspace_identity" if created_at else None
+        if not created_at and uid and uid in admin_created_by_user:
+            created_at = admin_created_by_user[uid]
+            created_source = "admin_users"
         users.append(
             {
                 "id": ref,
@@ -505,8 +518,9 @@ def admin_users(request: Request, limit: int = Query(default=200, ge=1, le=500))
                 "user_id": uid,
                 "email": email,
                 "display_name": display_name,
-                "created_at": str(s.get("updated_at") or ""),
-                "last_active_at": str(s.get("updated_at") or ""),
+                "created_at": created_at,
+                "created_source": created_source,
+                "last_active_at": str(s.get("updated_at") or created_at or ""),
                 "account_status": "disabled" if _safe_bool(s.get("abuse_flag")) else "active",
                 "plan_type": str((sub or {}).get("plan_code") or "free"),
                 "premium_active": str((sub or {}).get("status") or "") == "active",
@@ -546,6 +560,7 @@ def admin_users(request: Request, limit: int = Query(default=200, ge=1, le=500))
                 "display_name": str(row.get("display_name") or "").strip()
                 or affiliate_display_by_user.get(uid),
                 "created_at": str(row.get("created_at") or ""),
+                "created_source": "workspace_identity" if str(row.get("created_at") or "").strip() else None,
                 "last_active_at": str(row.get("updated_at") or row.get("created_at") or ""),
                 "account_status": "active",
                 "plan_type": "free",
@@ -579,6 +594,7 @@ def admin_users(request: Request, limit: int = Query(default=200, ge=1, le=500))
                 "email": email,
                 "display_name": affiliate_display_by_user.get(uid),
                 "created_at": str(row.get("created_at") or ""),
+                "created_source": "admin_users" if str(row.get("created_at") or "").strip() else None,
                 "last_active_at": str(row.get("last_login_at") or row.get("created_at") or ""),
                 "account_status": "active" if int(row.get("is_active") or 0) else "disabled",
                 "plan_type": "free",
@@ -714,6 +730,7 @@ def _summarize_user_action_history_row(row: Dict[str, Any]) -> Dict[str, Any]:
         "actor_role": row.get("actor_role"),
         "created_at": row.get("created_at"),
         "correlation_id": row.get("correlation_id"),
+        "has_snapshots": bool(before or after),
     }
     if action == "genesis_usage_reconcile":
         summary["agreements_used_before"] = before.get("agreements_used")
@@ -733,6 +750,119 @@ def _summarize_user_action_history_row(row: Dict[str, Any]) -> Dict[str, Any]:
         summary["disabled_before"] = before.get("abuse_flag")
         summary["disabled_after"] = after.get("abuse_flag")
     return summary
+
+
+def _dedupe_user_action_history_rows(rows: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Prefer detail audits (with snapshots) over privileged-gate duplicates for the same action."""
+    best: Dict[tuple, Dict[str, Any]] = {}
+    order: List[tuple] = []
+    for row in rows:
+        action = str(row.get("action_type") or "").strip()
+        target = str(row.get("target_id") or "").strip()
+        reason = str(row.get("reason") or "").strip()
+        created = str(row.get("created_at") or "").strip()
+        # Bucket to the minute so gate + detail writes collapse.
+        bucket = created[:16] if created else ""
+        key = (action, target, reason, bucket)
+        if key not in best:
+            best[key] = row
+            order.append(key)
+            continue
+        prev = best[key]
+        prev_score = 1 if prev.get("has_snapshots") else 0
+        next_score = 1 if row.get("has_snapshots") else 0
+        if next_score > prev_score:
+            best[key] = row
+    return [best[k] for k in order]
+
+
+def _pick_earliest_iso(*candidates: Any) -> Optional[str]:
+    best: Optional[str] = None
+    best_key: Optional[str] = None
+    for raw in candidates:
+        s = str(raw or "").strip()
+        if not s:
+            continue
+        key = s.replace("Z", "+00:00")
+        if best_key is None or key < best_key:
+            best = s
+            best_key = key
+    return best
+
+
+def _resolve_user_created_at(uid: str) -> Dict[str, Optional[str]]:
+    """Best-known LawDog account first-seen timestamp for admin display."""
+    clean = (uid or "").strip()
+    if not clean:
+        return {"created_at": None, "source": None}
+    admin_store = get_admin_console_store()
+    admin_store.init_schema()
+    ident = admin_store.get_workspace_user_identity(clean)
+    if ident and str(ident.get("created_at") or "").strip():
+        return {"created_at": str(ident.get("created_at")).strip(), "source": "workspace_identity"}
+
+    for row in admin_store.list_admin_user_identity_rows(limit=1000):
+        if str(row.get("id") or "").strip() == clean and str(row.get("created_at") or "").strip():
+            return {"created_at": str(row.get("created_at")).strip(), "source": "admin_users"}
+
+    try:
+        from backend.economics.genesis_referral_store import (
+            ensure_genesis_referral_schema,
+            get_genesis_affiliate_by_user_id,
+        )
+        from backend.economics.store import get_economics_store
+
+        eco = get_economics_store()
+        eco.init_schema()
+        with eco._conn() as con:
+            ensure_genesis_referral_schema(con)
+            aff = get_genesis_affiliate_by_user_id(con, clean)
+        if aff and str(aff.get("created_at") or "").strip():
+            return {"created_at": str(aff.get("created_at")).strip(), "source": "genesis_affiliate"}
+    except Exception:
+        pass
+
+    try:
+        from backend.usage_economics.genesis_dog_entitlement import get_entitlement
+
+        ent = get_entitlement(clean)
+        if ent and str(ent.get("granted_at") or "").strip():
+            return {"created_at": str(ent.get("granted_at")).strip(), "source": "genesis_entitlement"}
+    except Exception:
+        pass
+
+    try:
+        ustore = get_usage_economics_store()
+        ustore.init_schema()
+        subject = f"org:user-{clean}"
+        rows = ustore.list_agreement_owner_rows_for_subject(subject, since_iso="1970-01-01T00:00:00Z", limit=500)
+        earliest = _pick_earliest_iso(*[r.get("created_at") for r in rows])
+        if earliest:
+            return {"created_at": earliest, "source": "first_agreement_meter"}
+    except Exception:
+        pass
+
+    return {"created_at": None, "source": None}
+
+
+def _user_created_history_entry(uid: str, created: Dict[str, Optional[str]]) -> Optional[Dict[str, Any]]:
+    created_at = (created.get("created_at") or "").strip() if created else ""
+    if not created_at:
+        return None
+    source = (created.get("source") or "").strip() or "unknown"
+    return {
+        "id": f"user-created:{uid}",
+        "action_type": "user_created",
+        "target_type": "user",
+        "target_id": uid,
+        "reason": "LawDog account first recorded",
+        "admin_user_id": None,
+        "actor_role": None,
+        "created_at": created_at,
+        "correlation_id": None,
+        "has_snapshots": False,
+        "created_source": source,
+    }
 
 
 @router.post("/users/{user_id}/genesis-entitlement/grant")
@@ -886,14 +1016,24 @@ def admin_user_action_history(
     )
     rows = get_admin_console_store().list_admin_action_audit_for_targets(
         target_ids=_user_action_history_target_ids(uid),
-        limit=limit,
+        limit=max(limit, 40),
         action_types=["set_user_status", "refresh_entitlement"],
         action_type_prefixes=["genesis_entitlement_", "genesis_usage_"],
     )
+    actions = _dedupe_user_action_history_rows(
+        [_summarize_user_action_history_row(a) for a in rows]
+    )[:limit]
+    created = _resolve_user_created_at(uid)
+    created_entry = _user_created_history_entry(uid, created)
+    if created_entry:
+        # Newest-first list: keep creation as the oldest trailing landmark.
+        actions = [*actions, created_entry]
     return {
         "ok": True,
         "user_id": uid,
-        "actions": [_summarize_user_action_history_row(a) for a in rows],
+        "user_created_at": created.get("created_at"),
+        "user_created_source": created.get("source"),
+        "actions": actions,
     }
 
 

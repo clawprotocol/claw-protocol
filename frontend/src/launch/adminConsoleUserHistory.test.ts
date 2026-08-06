@@ -26,6 +26,22 @@ describe("adminConsoleUserHistory", () => {
     expect(p.metaLine).toContain("by ops_admin");
   });
 
+  it("presents User created as a history landmark", () => {
+    const p = presentAdminConsoleUserHistoryAction(
+      normalizeAdminConsoleUserHistoryAction({
+        id: "user-created:uid-21",
+        action_type: "user_created",
+        reason: "LawDog account first recorded",
+        created_at: "2026-07-01T15:00:00Z",
+        created_source: "workspace_identity",
+      }),
+    );
+    expect(p.title).toBe("User created");
+    expect(p.detailLine).toContain("LawDog account first recorded");
+    expect(p.detailLine).toContain("workspace_identity");
+    expect(p.metaLine).toMatch(/Account created/);
+  });
+
   it("labels grant and revoke distinctly", () => {
     expect(
       presentAdminConsoleUserHistoryAction(

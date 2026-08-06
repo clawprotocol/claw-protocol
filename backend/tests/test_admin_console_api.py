@@ -347,14 +347,22 @@ def test_admin_users_returns_safe_identity_fields(monkeypatch, tmp_path):
         headers=_ops_headers(reason="admin console read"),
     )
     assert history.status_code == 200, history.text
-    actions = history.json().get("actions") or []
+    body = history.json()
+    actions = body.get("actions") or []
     types = [str(a.get("action_type") or "") for a in actions]
     assert "genesis_usage_reconcile" in types
     assert "genesis_entitlement_grant" in types
+    assert "user_created" in types
+    assert body.get("user_created_at")
+    assert types.count("genesis_usage_reconcile") == 1  # gate+detail audits collapsed
     reset_row = next(a for a in actions if a.get("action_type") == "genesis_usage_reconcile")
     assert reset_row.get("reason") == "Reset Genesis Dog monthly allowance for testing"
     assert "agreements_used_before" in reset_row
     assert "agreements_used_after" in reset_row
+    created_row = next(a for a in actions if a.get("action_type") == "user_created")
+    assert created_row.get("created_at") == body.get("user_created_at")
+    # Newest-first: account created is the trailing landmark.
+    assert actions[-1]["action_type"] == "user_created"
 
 
 def test_admin_agreements_local_respects_limit_bounded_load_draft(monkeypatch, tmp_path):

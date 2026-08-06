@@ -13,6 +13,7 @@ export type AdminConsoleUserHistoryAction = {
   agreementsUsedAfter: number | null;
   refundedCount: number | null;
   dryRun: boolean;
+  createdSource: string | null;
   raw: Record<string, unknown>;
 };
 
@@ -47,6 +48,7 @@ export function normalizeAdminConsoleUserHistoryAction(
     agreementsUsedAfter: numOrNull(raw.agreements_used_after),
     refundedCount: numOrNull(raw.refunded_count),
     dryRun: Boolean(raw.dry_run),
+    createdSource: strOrNull(raw.created_source),
     raw,
   };
 }
@@ -71,6 +73,16 @@ export function presentAdminConsoleUserHistoryAction(
   let title = type || "Admin action";
   let detailLine = action.reason || "No reason recorded";
 
+  if (type === "user_created") {
+    title = "User created";
+    const source = action.createdSource ? ` · source=${action.createdSource}` : "";
+    detailLine = `${action.reason || "LawDog account first recorded"}${source}`;
+    return {
+      title,
+      detailLine,
+      metaLine: `Account created · ${formatWhen(action.createdAt)}`,
+    };
+  }
   if (type === "genesis_usage_reconcile") {
     title = action.dryRun ? "Reset Genesis monthly usage (dry run)" : "Reset Genesis monthly usage";
     const parts: string[] = [];

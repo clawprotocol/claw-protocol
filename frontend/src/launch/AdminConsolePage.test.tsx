@@ -63,6 +63,8 @@ vi.mock("./adminConsoleApi", () => ({
         agreements_remaining: 0,
         period_ends_at: "2026-08-31T23:59:59Z",
         can_create_persisted_agreement: false,
+        created_at: "2026-07-01T15:00:00Z",
+        created_source: "workspace_identity",
       },
       {
         id: "org:user-other-9",
@@ -89,6 +91,8 @@ vi.mock("./adminConsoleApi", () => ({
   fetchAdminUserActionHistory: vi.fn(async () => ({
     ok: true,
     user_id: "cryptocurated21",
+    user_created_at: "2026-07-01T15:00:00Z",
+    user_created_source: "workspace_identity",
     actions: [
       {
         id: "hist-reset-1",
@@ -101,6 +105,13 @@ vi.mock("./adminConsoleApi", () => ({
         agreements_used_after: 0,
         refunded_count: 5,
         dry_run: false,
+      },
+      {
+        id: "user-created:cryptocurated21",
+        action_type: "user_created",
+        reason: "LawDog account first recorded",
+        created_at: "2026-07-01T15:00:00Z",
+        created_source: "workspace_identity",
       },
     ],
   })),
@@ -177,6 +188,8 @@ describe("AdminConsolePage connected state", () => {
     );
     // Subscription plan=free must not be the only access signal — badge clarifies Genesis.
     expect(firstCard.textContent).toMatch(/Subscription plan=free/);
+    expect(screen.getAllByTestId("admin-user-created-at")[0].textContent).toMatch(/Created:/);
+    expect(screen.getAllByTestId("admin-user-created-at")[0].textContent).not.toBe("Created: —");
 
     const grant = screen.getAllByRole("button", { name: /grant genesis dog/i })[0];
     expect((grant as HTMLButtonElement).disabled).toBe(true);
@@ -218,8 +231,11 @@ describe("AdminConsolePage connected state", () => {
     expect(panel.textContent).toContain("Reset Genesis monthly usage");
     expect(panel.textContent).toContain("used 5 → 0");
     expect(panel.textContent).toContain("Reset Genesis Dog 5 Monthly Allowance for Testing");
-    const row = screen.getByTestId("admin-user-history-row");
-    expect(row.getAttribute("data-action-type")).toBe("genesis_usage_reconcile");
+    expect(panel.textContent).toContain("User created");
+    expect(panel.textContent).toContain("LawDog account first recorded");
+    const rows = screen.getAllByTestId("admin-user-history-row");
+    expect(rows[0].getAttribute("data-action-type")).toBe("genesis_usage_reconcile");
+    expect(rows[rows.length - 1].getAttribute("data-action-type")).toBe("user_created");
   });
 
   it("filters users by exact email without exposing agreement bodies", async () => {

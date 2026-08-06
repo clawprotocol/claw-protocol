@@ -22,6 +22,9 @@ export type AdminConsoleUserRow = {
   agreementsRemaining: number | null;
   periodEndsAt: string | null;
   canCreatePersistedAgreement: boolean;
+  /** Best-known account first-seen timestamp (ISO). */
+  createdAt: string | null;
+  createdSource: string | null;
   raw: Record<string, unknown>;
 };
 
@@ -61,8 +64,25 @@ export function normalizeAdminConsoleUser(raw: Record<string, unknown>): AdminCo
     agreementsRemaining: numOrNull(raw.agreements_remaining),
     periodEndsAt: strOrNull(raw.period_ends_at),
     canCreatePersistedAgreement: Boolean(raw.can_create_persisted_agreement),
+    createdAt: strOrNull(raw.created_at),
+    createdSource: strOrNull(raw.created_source),
     raw,
   };
+}
+
+/** Operator-facing created timestamp for Users cards. */
+export function formatAdminConsoleUserCreatedAt(iso: string | null | undefined): string {
+  const raw = String(iso || "").trim();
+  if (!raw) return "—";
+  const d = new Date(raw);
+  if (Number.isNaN(d.getTime())) return raw;
+  return d.toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
 }
 
 /** Target id for Genesis grant/revoke — prefer stable auth user id. */

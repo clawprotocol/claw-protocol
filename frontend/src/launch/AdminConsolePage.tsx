@@ -32,6 +32,7 @@ import {
 import {
   adminConsoleGenesisTargetId,
   filterAdminConsoleUsers,
+  formatAdminConsoleUserCreatedAt,
   normalizeAdminConsoleUser,
 } from "./adminConsoleUsers";
 import { useLaunchNav } from "./LaunchNavContext";
@@ -524,6 +525,12 @@ export function AdminConsolePage(props: { initialAdminSecret?: string } = {}) {
                       <dt className="inline text-slate-500">Org ID: </dt>
                       <dd className="inline text-slate-300">{u.orgId || subjectRef || "—"}</dd>
                     </div>
+                    <div className="sm:col-span-2" data-testid="admin-user-created-at">
+                      <dt className="inline text-slate-500">Created: </dt>
+                      <dd className="inline text-slate-200">
+                        {formatAdminConsoleUserCreatedAt(u.createdAt)}
+                      </dd>
+                    </div>
                   </dl>
                   <p className="mt-2 text-[11px] text-slate-500">
                     Subscription plan={u.planType}
@@ -622,7 +629,8 @@ export function AdminConsolePage(props: { initialAdminSecret?: string } = {}) {
                     >
                       <p className="text-[11px] font-medium text-slate-300">User history</p>
                       <p className="mt-0.5 text-[10px] text-slate-500">
-                        Audited Genesis grant / revoke / monthly usage reset and account actions for this user.
+                        Account created, plus audited Genesis grant / revoke / monthly usage reset and account
+                        actions.
                       </p>
                       {historyErrorByUser[genesisTarget] ? (
                         <p className="mt-2 text-[11px] text-amber-200">{historyErrorByUser[genesisTarget]}</p>
