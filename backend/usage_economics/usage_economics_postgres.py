@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import threading
 from contextlib import contextmanager
 from datetime import datetime, timezone
@@ -781,6 +782,56 @@ def incr_ai_calls(subject_ref: str, n: int, now_iso: str) -> None:
             """,
             (subject_ref, nn, ts),
         )
+
+
+def list_agreement_ids_from_analytics_for_subject(
+    subject_ref: str, *, limit: int = 500
+) -> List[str]:
+    subj = (subject_ref or "").strip()
+    if not subj:
+        return []
+    lim = max(1, min(int(limit), 2000))
+    out: List[str] = []
+    seen: set[str] = set()
+    with _tx() as conn:
+        cur = conn.execute(
+            """
+            SELECT event_type, payload_json FROM analytics_events
+            WHERE subject_ref = %s
+              AND event_type IN (
+                'agreement_created', 'keys_consumed', 'genesis_usage_reconciled'
+              )
+            ORDER BY created_at DESC
+            LIMIT %s
+            """,
+            (subj, lim),
+        )
+        rows = cur.fetchall()
+    for row in rows:
+        raw = row.get("payload_json")
+        payload: Dict[str, Any]
+        if isinstance(raw, dict):
+            payload = raw
+        elif isinstance(raw, str) and raw.strip():
+            try:
+                parsed = json.loads(raw)
+                payload = parsed if isinstance(parsed, dict) else {}
+            except Exception:
+                continue
+        else:
+            continue
+        aid = str(payload.get("agreement_id") or "").strip()
+        if aid and aid not in seen:
+            seen.add(aid)
+            out.append(aid)
+        refunded = payload.get("refunded_agreement_ids")
+        if isinstance(refunded, list):
+            for item in refunded:
+                a = str(item or "").strip()
+                if a and a not in seen:
+                    seen.add(a)
+                    out.append(a)
+    return out
 
 
 def emit_event(

@@ -488,27 +488,132 @@ class UsageEconomicsStore:
                 return False
             return True
 
+    def list_agreement_ids_from_analytics_for_subject(
+        self, subject_ref: str, *, limit: int = 500
+    ) -> List[str]:
+        """Agreement ids previously associated with subject via usage analytics events."""
+        subj = (subject_ref or "").strip()
+        if not subj:
+            return []
+        lim = max(1, min(int(limit), 2000))
+        if self._pg:
+            from backend.usage_economics import usage_economics_postgres as uep
+
+            return uep.list_agreement_ids_from_analytics_for_subject(subj, limit=lim)
+        out: List[str] = []
+        seen: set[str] = set()
+        with self._conn() as con:
+            rows = con.execute(
+                """
+                SELECT event_type, payload_json FROM analytics_events
+                WHERE subject_ref = ?
+                  AND event_type IN (
+                    'agreement_created', 'keys_consumed', 'genesis_usage_reconciled'
+                  )
+                ORDER BY datetime(created_at) DESC
+                LIMIT ?
+                """,
+                (subj, lim),
+            ).fetchall()
+        for row in rows:
+            try:
+                payload = json.loads(str(row["payload_json"] or "{}"))
+            except Exception:
+                continue
+            if not isinstance(payload, dict):
+                continue
+            aid = str(payload.get("agreement_id") or "").strip()
+            if aid and aid not in seen:
+                seen.add(aid)
+                out.append(aid)
+            refunded = payload.get("refunded_agreement_ids")
+            if isinstance(refunded, list):
+                for raw in refunded:
+                    a = str(raw or "").strip()
+                    if a and a not in seen:
+                        seen.add(a)
+                        out.append(a)
+        return out
+
+    def _agreement_ids_from_admin_genesis_audits(self, subject_ref: str) -> List[str]:
+        """Ids recorded on prior admin Genesis usage resets for this user."""
+        subj = (subject_ref or "").strip()
+        if not subj.startswith("org:user-"):
+            return []
+        uid = subj[len("org:user-") :].strip()
+        if not uid:
+            return []
+        try:
+            from backend.admin_console.store import get_admin_console_store
+        except Exception:
+            return []
+        try:
+            admin = get_admin_console_store()
+            admin.init_schema()
+            rows = admin.list_admin_action_audit_for_targets(
+                target_ids=[uid, subj, f"user-{uid}"],
+                limit=50,
+                action_types=["genesis_usage_reconcile"],
+            )
+        except Exception:
+            return []
+        out: List[str] = []
+        seen: set[str] = set()
+        for row in rows:
+            for key in ("before_snapshot_json", "after_snapshot_json"):
+                raw = row.get(key)
+                snap: Dict[str, Any]
+                if isinstance(raw, dict):
+                    snap = raw
+                elif isinstance(raw, str) and raw.strip():
+                    try:
+                        parsed = json.loads(raw)
+                        snap = parsed if isinstance(parsed, dict) else {}
+                    except Exception:
+                        snap = {}
+                else:
+                    snap = {}
+                for field in (
+                    "candidate_ids",
+                    "refunded_agreement_ids",
+                    "healed_agreement_ids",
+                ):
+                    vals = snap.get(field)
+                    if not isinstance(vals, list):
+                        continue
+                    for raw_id in vals:
+                        a = str(raw_id or "").strip()
+                        if a and a not in seen:
+                            seen.add(a)
+                            out.append(a)
+        return out
+
     def heal_orphaned_agreement_ownership_for_subject(self, subject_ref: str) -> List[str]:
         """
         Re-attach ownership for drafts/org agreements missing owner rows (usage-exempt).
 
-        Used after legacy hard-delete monthly resets so existing agreements reopen.
+        Discovers candidates from Supabase, draft metadata, usage analytics, and prior
+        admin Genesis reset audits. Used after legacy hard-delete monthly resets.
         """
         subj = (subject_ref or "").strip()
         if not subj:
             return []
         candidates: List[str] = []
         seen: set[str] = set()
+
+        def _add(aid: str) -> None:
+            a = (aid or "").strip()
+            if a and a not in seen:
+                seen.add(a)
+                candidates.append(a)
+
         try:
             from backend.lawdog_dashboard.workspace_index import (
                 supabase_agreement_ids_for_subject,
             )
 
             for aid in supabase_agreement_ids_for_subject(subj):
-                a = (aid or "").strip()
-                if a and a not in seen:
-                    seen.add(a)
-                    candidates.append(a)
+                _add(aid)
         except Exception:
             pass
         try:
@@ -523,15 +628,57 @@ class UsageEconomicsStore:
                     continue
                 try:
                     if (_recoverable_subject_from_draft(a) or "").strip() == subj:
-                        seen.add(a)
-                        candidates.append(a)
+                        _add(a)
                 except Exception:
                     continue
         except Exception:
             pass
+        try:
+            for aid in self.list_agreement_ids_from_analytics_for_subject(subj):
+                _add(aid)
+        except Exception:
+            pass
+        try:
+            for aid in self._agreement_ids_from_admin_genesis_audits(subj):
+                _add(aid)
+        except Exception:
+            pass
+
+        supabase_set: set[str] = set()
+        try:
+            from backend.lawdog_dashboard.workspace_index import (
+                supabase_agreement_ids_for_subject,
+            )
+
+            supabase_set = {
+                str(a or "").strip()
+                for a in supabase_agreement_ids_for_subject(subj)
+                if str(a or "").strip()
+            }
+        except Exception:
+            supabase_set = set()
+
+        try:
+            from backend.services.agreement_draft_store import draft_exists
+        except Exception:
+            draft_exists = None  # type: ignore[assignment]
+
         healed: List[str] = []
         for aid in candidates:
             if self.owner_subject_for_agreement(aid) == subj:
+                continue
+            if self.owner_subject_for_agreement(aid):
+                # Owned by a different subject — do not steal.
+                continue
+            durable = False
+            if aid in supabase_set:
+                durable = True
+            elif draft_exists is not None:
+                try:
+                    durable = bool(draft_exists(aid))
+                except Exception:
+                    durable = False
+            if not durable:
                 continue
             if self.ensure_agreement_owner_usage_exempt(
                 agreement_id=aid, subject_ref=subj

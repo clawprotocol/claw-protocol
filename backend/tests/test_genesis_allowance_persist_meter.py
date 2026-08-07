@@ -333,3 +333,66 @@ def test_genesis_monthly_reset_keeps_existing_agreements_accessible(isolated_env
     )
     assert again.status_code == 200, again.text
     assert resolve_commercial_entitlement(subject)["agreements_used"] == 1
+
+
+def test_legacy_hard_delete_reset_healed_from_analytics_and_audit(isolated_env):
+    """
+    Reproduce prod retest: ownership rows were hard-deleted by an older reset.
+    Opening workspace-index / re-running reconcile must restore access without
+    recharging the monthly meter.
+    """
+    client, usage, _eco = isolated_env
+    uid = f"genesis-heal-{uuid.uuid4().hex[:8]}"
+    subject = f"org:user-{uid}"
+    grant_entitlement(user_id=uid, granted_by="ops", grant_source=GRANT_SOURCE_ADMIN)
+
+    created_ids: list[str] = []
+    for i in range(2):
+        r = client.post(
+            "/api/agreements/draft",
+            headers=_auth(uid),
+            json=_draft_body(f"heal-{i}"),
+        )
+        assert r.status_code == 200, r.text
+        created_ids.append(r.json()["id"])
+
+    # Capture a reconcile audit with candidate ids (as production did), then
+    # simulate the legacy hard-delete wipe.
+    audit_reset = client.post(
+        f"/v1/admin/users/{uid}/genesis-usage/reconcile",
+        headers=_admin(),
+        json={
+            "reason": "legacy hard-delete simulation audit",
+            "mode": "reset_month_to_zero",
+            "dry_run": False,
+        },
+    )
+    assert audit_reset.status_code == 200, audit_reset.text
+    for aid in created_ids:
+        # Soft-refund first leaves rows; force the old wipe behavior.
+        assert usage.delete_agreement_owner(aid) is True
+        assert usage.owner_subject_for_agreement(aid) is None
+
+    assert resolve_commercial_entitlement(subject)["agreements_used"] == 0
+    blocked = client.get(f"/api/agreements/{created_ids[0]}", headers=_auth(uid))
+    assert blocked.status_code == 403, blocked.text
+
+    # Dashboard load heals from analytics + admin audit candidate ids.
+    idx = client.get("/api/agreements/workspace-index", headers=_auth(uid))
+    assert idx.status_code == 200, idx.text
+    idx_ids = {row["id"] for row in (idx.json().get("agreements") or [])}
+    assert set(created_ids).issubset(idx_ids)
+
+    for aid in created_ids:
+        get = client.get(f"/api/agreements/{aid}", headers=_auth(uid))
+        assert get.status_code == 200, get.text
+        assert usage.owner_subject_for_agreement(aid) == subject
+        row = next(
+            r
+            for r in usage.list_agreement_owner_rows_for_subject(subject, limit=50)
+            if str(r.get("agreement_id")) == aid
+        )
+        assert int(row.get("usage_refunded") or 0) == 1
+
+    # Healed ownership is usage-exempt — allowance stays full.
+    assert resolve_commercial_entitlement(subject)["agreements_remaining"] == 5

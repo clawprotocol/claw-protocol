@@ -5970,6 +5970,21 @@ def get_agreements_workspace_index(request: Request) -> Dict[str, Any]:
     require_commercial_owner_principal(request)
     subject = resolve_subject_from_request(request)
     assert_guest_workflow_denied(subject_ref=subject, surface="workspace_history")
+    # Restore ownership wiped by legacy hard-delete Genesis monthly resets before listing.
+    try:
+        from backend.usage_economics.store import get_usage_economics_store
+
+        ustore = get_usage_economics_store()
+        ustore.init_schema()
+        healed = ustore.heal_orphaned_agreement_ownership_for_subject(subject)
+        if healed:
+            log.info(
+                "workspace_index_ownership_healed subject=%s count=%s",
+                subject,
+                len(healed),
+            )
+    except Exception:
+        log.exception("workspace_index_ownership_heal_failed subject=%s", subject)
     folder_names = _folder_name_map_for_subject(subject)
     summaries: List[Dict[str, Any]] = []
     skipped: List[Dict[str, str]] = []
@@ -5981,24 +5996,6 @@ def get_agreements_workspace_index(request: Request) -> Dict[str, Any]:
     supabase_rows = supabase_rows_by_id_for_subject(subject)
     for aid in agreement_ids:
         listed = workspace_lists_agreement_for_subject(aid, subject)
-        if not listed and aid in supabase_rows:
-            # Legacy hard-delete monthly resets removed ownership; restore without
-            # re-consuming allowance so dashboard drafts remain openable.
-            try:
-                from backend.usage_economics.store import get_usage_economics_store
-
-                ustore = get_usage_economics_store()
-                ustore.init_schema()
-                if ustore.ensure_agreement_owner_usage_exempt(
-                    agreement_id=aid, subject_ref=subject
-                ):
-                    listed = workspace_lists_agreement_for_subject(aid, subject)
-            except Exception:
-                log.exception(
-                    "workspace_index_ownership_heal_failed agreement_id=%s subject=%s",
-                    aid,
-                    subject,
-                )
         if not listed and aid not in supabase_rows:
             continue
         try:
