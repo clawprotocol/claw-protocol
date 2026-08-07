@@ -63,6 +63,36 @@ export function shouldForcePaidProReviewDocumentRender(): boolean {
   );
 }
 
+/**
+ * Review document card gate — corpus force must win over transient canDisplay / runtime-authority
+ * gaps so a locked Pro body cannot flash then unmount (documentRendererCount: 0).
+ */
+export function resolveShowPaidProReviewDocumentCard(args: {
+  dashboardSignerSetupResumeUiActive?: boolean;
+  canDisplayPaidProAgreementDocument: boolean;
+}): boolean {
+  return Boolean(
+    args.dashboardSignerSetupResumeUiActive ||
+      args.canDisplayPaidProAgreementDocument ||
+      shouldForcePaidProReviewDocumentRender(),
+  );
+}
+
+/** Once a canonical Pro corpus is locked, leave generating/hydrating display phases. */
+export function shouldExitPaidProGeneratingDisplayPhase(args: {
+  displayPhase: string;
+  corpusForcesDocumentRender: boolean;
+}): boolean {
+  if (!args.corpusForcesDocumentRender) return false;
+  return (
+    args.displayPhase === "intake" ||
+    args.displayPhase === "generating_draft" ||
+    args.displayPhase === "hydrating_generated" ||
+    args.displayPhase === "preparing_review" ||
+    args.displayPhase === "editing_pro"
+  );
+}
+
 export type PaidProDocumentBodyRouterBranch = "paid_pro_visible_shell_forced" | "legacy";
 
 export type PaidProDocumentBodyRouterState = {

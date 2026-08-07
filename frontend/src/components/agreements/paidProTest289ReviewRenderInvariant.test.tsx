@@ -201,6 +201,8 @@ describe("Test289 paid Pro review render branch + invariant", () => {
   it("AgreementBuilderIntake widens review document card gate and wires branch instrumentation", () => {
     const intakeSrc = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
     expect(intakeSrc).toContain("showPaidProReviewDocumentCard");
+    expect(intakeSrc).toContain("resolveShowPaidProReviewDocumentCard");
+    expect(intakeSrc).toContain("shouldForcePaidProReviewDocumentRender");
     expect(intakeSrc).toContain("PaidProReviewRenderInvariantProbe");
     expect(intakeSrc).toContain("logPaidProReviewBranch");
     expect(intakeSrc).toContain("paidProCanonicalReviewCorpusReady");

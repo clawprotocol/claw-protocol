@@ -97,7 +97,12 @@ describe("Test293 paid Pro document body router forced visible shell", () => {
   it("AgreementBuilderIntake resolves router from frozen SoT only (no shell-active gate)", () => {
     const intakeSrc = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
     expect(intakeSrc).toContain("resolvePaidProDocumentBodyRouter()");
+    // Live resolve each render — memoizing against shell-key without corpus ticks caused
+    // forced:false while canonical len still met threshold (flash-then-empty Review).
     expect(intakeSrc).toMatch(
+      /const paidProDocumentBodyRouter = resolvePaidProDocumentBodyRouter\(\)/,
+    );
+    expect(intakeSrc).not.toMatch(
       /const paidProDocumentBodyRouter = useMemo\(\s*\(\) => resolvePaidProDocumentBodyRouter\(\)/,
     );
     const routerBlock = intakeSrc.slice(

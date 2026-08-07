@@ -634,6 +634,9 @@ import {
   PaidProDocumentBodyForcedRoute,
   resolveCanonicalReviewCorpusLenForRender,
   resolvePaidProDocumentBodyRouter,
+  resolveShowPaidProReviewDocumentCard,
+  shouldExitPaidProGeneratingDisplayPhase,
+  shouldForcePaidProReviewDocumentRender,
 } from "./paidProDocumentBodyRouter";
 import {
   hasProfessionallyValidatedPipelineReviewCorpusForRender,
@@ -14855,12 +14858,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     ],
   );
 
-  /** Test293: SoT-only gate — forces visible document shell before legacy #fadeWrapper branches. */
-  const paidProDocumentBodyRouter = useMemo(
-    () => resolvePaidProDocumentBodyRouter(),
-    // Include reviewAgreementId so verified-GET paint remounts when id lands after prepare.
-    [premiumSurfaceGateTick, reviewDocRefreshTick, reviewAgreementId, createFlowAuthoritativeShellReactiveKey],
-  );
+  /**
+   * Test293: SoT-only gate — forces visible document shell before legacy #fadeWrapper branches.
+   * Resolve live each render: memoizing against shell-key/agreementId without corpus ticks left
+   * `forced:false` while canonical len still reported ≥ min (flash-then-empty Review).
+   */
+  const paidProDocumentBodyRouter = resolvePaidProDocumentBodyRouter();
 
   const isAuthoritativePaidProReviewActive = useMemo(
     () =>
@@ -15037,19 +15040,39 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   );
 
   useEffect(() => {
-    if (!guardProDocumentDisplayPhase) return;
-    if (displayPhase === "intake") {
-      if (import.meta.env.DEV) {
-        // eslint-disable-next-line no-console
-        console.warn("[STATE GUARD VIOLATION] Pro document fell back to intake", {
-          displayPhase,
-          createFlowPhase,
-          createUiStage,
-        });
-      }
-      setDisplayPhase("review");
+    const corpusForcesDocumentRender =
+      shouldForcePaidProReviewDocumentRender() || authoritativePremiumUiCommitted;
+    const shouldGuardPaidSurface = guardProDocumentDisplayPhase || premiumPaidDocumentSurface;
+    if (!shouldGuardPaidSurface) return;
+    if (
+      !shouldExitPaidProGeneratingDisplayPhase({
+        displayPhase,
+        corpusForcesDocumentRender,
+      })
+    ) {
+      return;
     }
-  }, [guardProDocumentDisplayPhase, displayPhase, createFlowPhase, createUiStage]);
+    if (import.meta.env.DEV && displayPhase === "intake") {
+      // eslint-disable-next-line no-console
+      console.warn("[STATE GUARD VIOLATION] Pro document fell back to intake", {
+        displayPhase,
+        createFlowPhase,
+        createUiStage,
+      });
+    }
+    setDisplayPhase("review");
+    if (loading) setLoading(false);
+  }, [
+    guardProDocumentDisplayPhase,
+    premiumPaidDocumentSurface,
+    authoritativePremiumUiCommitted,
+    displayPhase,
+    createFlowPhase,
+    createUiStage,
+    loading,
+    premiumSurfaceGateTick,
+    reviewDocRefreshTick,
+  ]);
 
   /**
    * Free/starter (non–LawDog-Pro-deliverable) document review. Broader than `!premiumPaidDocumentSurface`
@@ -19680,6 +19703,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
   const canProceedWithPaidProDocument = useMemo(() => {
     if (!premiumPaidDocumentSurface) return true;
+    if (proUpgradeUseStarterView) return false;
+    // Locked canonical corpus must keep Review workable even when runtime authority /
+    // readonly picker briefly lag (flash-then-empty with Structuring CTA).
+    if (shouldForcePaidProReviewDocumentRender()) return true;
     if (
       shouldSuppressPremiumNetworkRecoverableForPaidCreateFlow({
         draft: draft ?? null,
@@ -19690,12 +19717,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       }) &&
       paidProFirstReviewCorpusReady
     ) {
-      if (proUpgradeUseStarterView) return false;
       if (premiumPaidUnavailableRetry) return false;
       return proTruthIsPremiumDocumentReady(premiumProTruthSnapshot);
     }
     if (!paidProRuntimeAuthority.established || !paidProRuntimeAuthority.canRenderProReviewShell) return false;
-    if (proUpgradeUseStarterView) return false;
     if (premiumPaidUnavailableRetry) return false;
     const t = (premiumPaidReadonlyPick.plainText || "").trim();
     if (t.length < 500) return false;
@@ -19722,6 +19747,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     paidProRuntimeAuthority.canRenderProReviewShell,
     paidProFirstReviewCorpusReady,
     agreementDocumentText,
+    premiumSurfaceGateTick,
+    reviewDocRefreshTick,
   ]);
 
   /** “Continue to reviewer / signer” after checkout while still on DRAFT (before recipients). */
@@ -26972,27 +26999,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       guidedCompletionRenderDocument,
     ],
   );
-  const paidProCanonicalReviewCorpusReady = useMemo(
-    () => hasCanonicalReviewCorpusForRender(),
-    [premiumSurfaceGateTick, reviewDocRefreshTick],
-  );
-  const paidProCanonicalReviewCorpusLen = useMemo(
-    () => resolveCanonicalReviewCorpusLenForRender(),
-    [premiumSurfaceGateTick, reviewDocRefreshTick],
-  );
+  // Live reads — must not diverge from paidProDocumentBodyRouter / shouldForce.
+  const paidProCanonicalReviewCorpusReady = hasCanonicalReviewCorpusForRender();
+  const paidProCanonicalReviewCorpusLen = resolveCanonicalReviewCorpusLenForRender();
   /** Test289: mount review document card when canonical corpus exists even if runtime authority gate is transiently false. */
-  const showPaidProReviewDocumentCard = useMemo(
-    () =>
-      dashboardSignerSetupResumeUiActive ||
-      canDisplayPaidProAgreementDocument ||
-      (paidProDocumentBodyRouter.forced && paidProCanonicalReviewCorpusReady),
-    [
-      dashboardSignerSetupResumeUiActive,
-      canDisplayPaidProAgreementDocument,
-      paidProDocumentBodyRouter.forced,
-      paidProCanonicalReviewCorpusReady,
-    ],
-  );
+  const showPaidProReviewDocumentCard = resolveShowPaidProReviewDocumentCard({
+    dashboardSignerSetupResumeUiActive,
+    canDisplayPaidProAgreementDocument,
+  });
   const paidProReviewBranchPath = useMemo(
     () =>
       resolvePaidProReviewBranchPath({
