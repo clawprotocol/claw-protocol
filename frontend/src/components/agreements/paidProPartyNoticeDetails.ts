@@ -2412,10 +2412,15 @@ export function ensureOperativeIfToNoticeDelivery(
       if (addr && !noticesRegionIncludesAddress(addr)) return true;
       return false;
     });
-  // Bracket tokens and live "provided during signer setup" lines both force notice rebuild.
+  // Bracket tokens always force rebuild. Live "provided during signer setup" lines only
+  // force rebuild when authority has contact to apply — otherwise freeze-time rebuilds
+  // with empty signer metadata churn headings into section_heading_title_anomaly rejects.
+  const authorityHasContactToApply = authorityParties.some(
+    (p) => p.signerEmail.trim() || p.partyAddress.trim() || p.signerName.trim(),
+  );
   const hasPlaceholderTokens =
     NOTICE_PLACEHOLDER_TOKEN_RE.test(noticesRegion) ||
-    /provided during signer setup/i.test(noticesRegion);
+    (authorityHasContactToApply && /provided during signer setup/i.test(noticesRegion));
   const hasExecutionPollution = noticesRegionHasExecutionPollution(noticesRegion);
   const hasInlineMalformedNotices = hasInlineMalformedNoticeStanzas(corpus);
   const hasBareNoticeStanzas = hasBareEntityOnlyNoticeStanzas(corpus);

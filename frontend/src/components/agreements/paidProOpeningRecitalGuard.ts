@@ -455,6 +455,27 @@ export function ensurePaidProMultiPartyAgreementOpening(
   return repairPaidProMultiPartyAgreementOpening(text, records, intakeText);
 }
 
+/**
+ * True when the corpus needs a full title/recital rewrite (missing title / naked party / §1-first).
+ * Already-titled server drafts with minor recital gaps must not full-rewrite — that churn
+ * interacts with notice/heading authorities and can reject freeze as section_heading_title_anomaly.
+ */
+export function needsPaidProServicesOpeningTitleRepair(text: string): boolean {
+  const body = (text || "").replace(/\r\n/g, "\n").trim();
+  if (!body) return true;
+  const first = meaningfulLines(body, 1)[0] ?? "";
+  if (/^\d+\.\s/.test(first)) return true;
+  if (/^This Agreement is between/i.test(first)) return true;
+  const sec1Idx = findOpeningSectionOneIndex(body);
+  const preSec1 = sec1Idx >= 0 ? body.slice(0, sec1Idx) : body.slice(0, 2_500);
+  if (!PAID_PRO_CANONICAL_TITLE_RE.test(preSec1)) return true;
+  const titleLine = meaningfulLines(preSec1, 1)[0] ?? "";
+  if (!PAID_PRO_CANONICAL_TITLE_RE.test(titleLine) && !/AGREEMENT\s*$/i.test(titleLine)) {
+    return true;
+  }
+  return false;
+}
+
 export function ensurePaidProServicesAgreementOpening(
   text: string,
   records: readonly CanonicalPartyIdentityRecord[],
@@ -464,6 +485,10 @@ export function ensurePaidProServicesAgreementOpening(
     return { text, repairs: [] };
   }
   if (!detectPaidProMalformedServicesOpening(text, records)) {
+    return { text, repairs: [] };
+  }
+  // Preserve already-titled Pro corpora; only full-rewrite when the document title is missing.
+  if (!needsPaidProServicesOpeningTitleRepair(text)) {
     return { text, repairs: [] };
   }
   const repaired = repairPaidProServicesAgreementOpening(text, records, intakeText);

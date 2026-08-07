@@ -15,12 +15,22 @@ import {
 } from "./paidProSignerMetadataAuthority";
 import { buildPaidProSignerMetadataAuthorityForFinalize } from "./paidProSignerMetadataDomCommit";
 import { resolveCommercialPartyRecordsForOpeningRepair } from "./canonicalPartyIdentityResolver";
-import { ensurePaidProServicesAgreementOpening } from "./paidProOpeningRecitalGuard";
+import {
+  ensurePaidProServicesAgreementOpening,
+  needsPaidProServicesOpeningTitleRepair,
+} from "./paidProOpeningRecitalGuard";
 import { establishPaidProSourceOfTruth } from "./paidProSourceOfTruth";
 import { isPaidProSigningReadyHydratedCorpus } from "./paidProPostFinalizeReviewSurface";
 import { resolvePaidProSignerFinalizeRawCorpus } from "./paidProSignerFinalizeRawCorpus";
 import { resetPaidProPipelineTestIsolation } from "./paidProPipelineTestIsolation";
-import { markCurrentSessionProEntitlementComplete } from "./paidProSessionEligibility";
+import {
+  markCurrentSessionProEntitlementComplete,
+  markCurrentSessionProIntent,
+} from "./paidProSessionEligibility";
+import { buildPaidProFreezeCandidate } from "./paidProFreezeCandidate";
+import { latchAcceptedServerFullDraftAuthority } from "./premiumAcceptancePolicy";
+import { validatePaidProOutput } from "./paidProCorpusAcceptance";
+import { ensureOperativeIfToNoticeDelivery } from "./paidProPartyNoticeDetails";
 import {
   applyPremiumRecipientHandoffReadGate,
   resetPaidProPremiumRecipientHandoffReadGateForTests,
@@ -186,6 +196,7 @@ describe("Alex/PixelForge signer finalize signing-ready", () => {
       "By: ____________________",
       "Name: ____________________",
     ].join("\n");
+    expect(needsPaidProServicesOpeningTitleRepair(untitled)).toBe(true);
     const records = resolveCommercialPartyRecordsForOpeningRepair(INTAKE, [ALEX, PIXEL]);
     expect(records).toHaveLength(2);
     expect(records[0]?.fullLegalName).toBe(ALEX);
@@ -195,6 +206,177 @@ describe("Alex/PixelForge signer finalize signing-ready", () => {
     expect(repaired.text).toMatch(/entered into as of the Effective Date/i);
     expect(repaired.text).toContain(ALEX);
     expect(repaired.text).toContain(PIXEL);
+  });
+
+  it("does not full-rewrite an already-titled Pro corpus (avoids freeze heading anomaly)", () => {
+    const titled = [
+      "SERVICES AGREEMENT",
+      "",
+      `This Services Agreement (this "Agreement") is entered into as of the Effective Date by and between ${ALEX} and ${PIXEL}.`,
+      "",
+      "1. Services and Project Term",
+      "Alex will design the mobile app UI for six weeks.",
+      "",
+      "IN WITNESS WHEREOF, the Parties execute this Agreement.",
+      `CLIENT: ${ALEX}`,
+      `SERVICE PROVIDER: ${PIXEL}`,
+    ].join("\n");
+    expect(needsPaidProServicesOpeningTitleRepair(titled)).toBe(false);
+    const records = resolveCommercialPartyRecordsForOpeningRepair(INTAKE, [ALEX, PIXEL]);
+    const repaired = ensurePaidProServicesAgreementOpening(titled, records, INTAKE);
+    expect(repaired.repairs).toEqual([]);
+    expect(repaired.text).toBe(titled);
+  });
+
+  it("freeze + validation accept titled Alex/PixelForge server draft without section_heading_title_anomaly", () => {
+    markCurrentSessionProIntent();
+    markCurrentSessionProEntitlementComplete({ source: "qa_bypass" });
+    let body = [
+      "SERVICES AGREEMENT",
+      "",
+      `This Services Agreement (this "Agreement") is entered into as of the Effective Date by and between ${ALEX} ("Client") and ${PIXEL} ("Service Provider").`,
+      "",
+      "1. Services and Project Term",
+      "Alex will design the mobile app UI for six weeks.",
+      "",
+      "2. Compensation and Payment",
+      "Flat fee of $4,500, paid 50% up front and 50% on final delivery.",
+      "",
+      "3. Ownership and Portfolio",
+      "They own the final designs once paid in full.",
+      "",
+      "4. Termination",
+      "Either party may cancel with 7 days notice.",
+      "",
+      "5. Confidentiality",
+      "Each Party shall protect confidential information.",
+      "",
+      "6. Notices",
+      "Notices must be in writing.",
+      `If to ${ALEX}:`,
+      "Email: provided during signer setup",
+      "Address: provided during signer setup",
+      `If to ${PIXEL}:`,
+      "Email: provided during signer setup",
+      "Address: provided during signer setup",
+      "",
+      "7. Governing Law",
+      "This Agreement is governed by applicable law.",
+      "",
+      "IN WITNESS WHEREOF, the Parties execute this Agreement.",
+      `CLIENT: ${ALEX}`,
+      "By: ____________________",
+      "Name: ____________________",
+      "Title: ____________________",
+      `SERVICE PROVIDER: ${PIXEL}`,
+      "By: ____________________",
+      "Name: ____________________",
+      "Title: ____________________",
+    ].join("\n");
+    while (body.length < 10_000) {
+      body +=
+        "\n\nSupplemental commercial provision. Each Party shall maintain commercially reasonable records.";
+    }
+    latchAcceptedServerFullDraftAuthority(body, "server_full_draft");
+    const draft = {
+      title: "Services Agreement",
+      parties: [
+        { name: ALEX, role: "Client" },
+        { name: PIXEL, role: "Service Provider" },
+      ],
+    };
+    // Empty-authority notice pass must not force placeholder rebuild at freeze.
+    const notice = ensureOperativeIfToNoticeDelivery(
+      body,
+      [
+        {
+          partyIndex: 0,
+          partyLegalName: ALEX,
+          signerEmail: "",
+          signerName: "",
+          signerTitle: "",
+          partyAddress: "",
+        },
+        {
+          partyIndex: 1,
+          partyLegalName: PIXEL,
+          signerEmail: "",
+          signerName: "",
+          signerTitle: "",
+          partyAddress: "",
+        },
+      ],
+      { intakeText: INTAKE },
+    );
+    expect(notice.repairs.join(" ")).not.toMatch(/rebuild_stanza/i);
+
+    const freeze = buildPaidProFreezeCandidate({
+      text: body,
+      intakeText: INTAKE,
+      draft: draft as never,
+      source: "server_full_draft",
+    });
+    expect(freeze.rejectReason).not.toBe("section_heading_title_anomaly");
+    expect(freeze.ok, freeze.rejectReason ?? "freeze failed").toBe(true);
+    expect(freeze.text).toMatch(/SERVICES AGREEMENT/i);
+
+    const validation = validatePaidProOutput({
+      text: body,
+      rawIntake: INTAKE,
+      draft: draft as never,
+      premiumPipelineSource: "server_full_draft",
+    });
+    expect(validation.reasons).not.toContain("section_heading_title_anomaly");
+    expect(validation.ok).toBe(true);
+  });
+
+  it("freeze accepts untitled §1-first Alex/PixelForge corpus after title repair", () => {
+    markCurrentSessionProIntent();
+    markCurrentSessionProEntitlementComplete({ source: "qa_bypass" });
+    let body = [
+      "1. Services and Project Term",
+      "Alex will design the mobile app UI for six weeks.",
+      "",
+      "2. Compensation and Payment",
+      "Flat fee of $4,500.",
+      "",
+      "3. Notices",
+      "Notices must be in writing.",
+      `If to ${ALEX}:`,
+      "Email: provided during signer setup",
+      "Address: provided during signer setup",
+      `If to ${PIXEL}:`,
+      "Email: provided during signer setup",
+      "Address: provided during signer setup",
+      "",
+      "IN WITNESS WHEREOF, the Parties execute this Agreement.",
+      `CLIENT: ${ALEX}`,
+      "By: ____________________",
+      "Name: ____________________",
+      `SERVICE PROVIDER: ${PIXEL}`,
+      "By: ____________________",
+      "Name: ____________________",
+    ].join("\n");
+    while (body.length < 10_000) {
+      body +=
+        "\n\nSupplemental commercial provision. Each Party shall maintain commercially reasonable records.";
+    }
+    latchAcceptedServerFullDraftAuthority(body, "server_full_draft");
+    const freeze = buildPaidProFreezeCandidate({
+      text: body,
+      intakeText: INTAKE,
+      draft: {
+        title: "Services Agreement",
+        parties: [
+          { name: ALEX, role: "Client" },
+          { name: PIXEL, role: "Service Provider" },
+        ],
+      } as never,
+      source: "server_full_draft",
+    });
+    expect(freeze.rejectReason).not.toBe("section_heading_title_anomaly");
+    expect(freeze.ok, freeze.rejectReason ?? "freeze failed").toBe(true);
+    expect(freeze.text).toMatch(/^SERVICES AGREEMENT/m);
   });
 
   it("entity-only intake handoff does not latch empty signer merge that blocks live UI", () => {

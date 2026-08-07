@@ -110,9 +110,7 @@ function paidProSafeDisplayHasAuthoritativeParties(
   partyNames: readonly string[],
 ): boolean {
   if (partyNames.filter(isAuthoritativeLegalEntityName).length >= 2) return true;
-  if (intakeHasFullLegalEntityParties(intakeRaw, partyNames)) return true;
-  // Sole-prop / brand commercial parties still need opening title repair on safe display.
-  return partyNames.map((n) => String(n || "").trim()).filter((n) => n.length >= 2).length >= 2;
+  return intakeHasFullLegalEntityParties(intakeRaw, partyNames);
 }
 
 function resolvePaidProSafeDisplayPartyRecords(
@@ -124,15 +122,12 @@ function resolvePaidProSafeDisplayPartyRecords(
   const roleLabels = (draft?.parties ?? [])
     .map((p) => String(p?.role ?? "").trim())
     .filter((r) => r.length >= 2);
-  const roles = roleLabels.length >= 2 ? roleLabels : undefined;
-  const fromSources = resolveCanonicalPartyIdentitiesFromSources({
+  return resolveCanonicalPartyIdentitiesFromSources({
     rawIntake: intakeRaw,
     starterNames: partyNames,
     generatedBody: null,
-    roleLabels: roles,
+    roleLabels: roleLabels.length >= 2 ? roleLabels : undefined,
   });
-  if (fromSources.length >= 2) return fromSources;
-  return resolveCommercialPartyRecordsForOpeningRepair(intakeRaw, partyNames, roles);
 }
 
 function canonicalPartyNamesFromAcceptanceContext(
@@ -279,15 +274,27 @@ function applyAcceptedProCorpusSafeDisplayCore(
   }
 
   if (
-    hasAuthoritativeParties &&
-    records.length === 2 &&
     (opts?.draft?.parties ?? []).filter((p) => String(p?.name ?? "").trim().length >= 2).length <= 2 &&
     !intakeDescribesBrandLicensingDistributionManufacturingStack(intakeRaw ?? "")
   ) {
-    const openingGuard = ensurePaidProServicesAgreementOpening(out, records, intakeRaw);
-    if (openingGuard.text !== out) {
-      out = openingGuard.text;
-      repairs.push(...openingGuard.repairs);
+    // Opening title repair for LLC/Inc and sole-prop/brand commercial parties.
+    // Do not reuse this for full party-identity repair (that path stays entity-gated above).
+    const openingRecords =
+      records.length >= 2
+        ? records
+        : resolveCommercialPartyRecordsForOpeningRepair(
+            intakeRaw,
+            partyNames,
+            (opts?.draft?.parties ?? [])
+              .map((p) => String(p?.role ?? "").trim())
+              .filter((r) => r.length >= 2),
+          );
+    if (openingRecords.length >= 2) {
+      const openingGuard = ensurePaidProServicesAgreementOpening(out, openingRecords, intakeRaw);
+      if (openingGuard.text !== out) {
+        out = openingGuard.text;
+        repairs.push(...openingGuard.repairs);
+      }
     }
   }
 
