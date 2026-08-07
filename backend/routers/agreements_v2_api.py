@@ -5980,7 +5980,26 @@ def get_agreements_workspace_index(request: Request) -> Dict[str, Any]:
     )
     supabase_rows = supabase_rows_by_id_for_subject(subject)
     for aid in agreement_ids:
-        if aid not in supabase_rows and not workspace_lists_agreement_for_subject(aid, subject):
+        listed = workspace_lists_agreement_for_subject(aid, subject)
+        if not listed and aid in supabase_rows:
+            # Legacy hard-delete monthly resets removed ownership; restore without
+            # re-consuming allowance so dashboard drafts remain openable.
+            try:
+                from backend.usage_economics.store import get_usage_economics_store
+
+                ustore = get_usage_economics_store()
+                ustore.init_schema()
+                if ustore.ensure_agreement_owner_usage_exempt(
+                    agreement_id=aid, subject_ref=subject
+                ):
+                    listed = workspace_lists_agreement_for_subject(aid, subject)
+            except Exception:
+                log.exception(
+                    "workspace_index_ownership_heal_failed agreement_id=%s subject=%s",
+                    aid,
+                    subject,
+                )
+        if not listed and aid not in supabase_rows:
             continue
         try:
             d = load_draft(aid)

@@ -113,6 +113,7 @@ class UsageEconomicsStore:
                 "ALTER TABLE agreement_owner ADD COLUMN anonymous_source_org TEXT",
                 "ALTER TABLE agreement_owner ADD COLUMN guest_temp INTEGER NOT NULL DEFAULT 0",
                 "ALTER TABLE agreement_owner ADD COLUMN idempotency_key TEXT",
+                "ALTER TABLE agreement_owner ADD COLUMN usage_refunded INTEGER NOT NULL DEFAULT 0",
             ):
                 try:
                     con.execute(col_sql)
@@ -214,6 +215,7 @@ class UsageEconomicsStore:
                     SELECT COUNT(*) AS c FROM agreement_owner
                     WHERE subject_ref = ? AND created_at >= ?
                       AND COALESCE(guest_temp, 0) = 0
+                      AND COALESCE(usage_refunded, 0) = 0
                     """,
                     (subj, start),
                 ).fetchone()
@@ -318,7 +320,8 @@ class UsageEconomicsStore:
                     """
                     SELECT agreement_id, subject_ref, created_at, completed_at,
                            internal_keys_draft, guest_temp, idempotency_key,
-                           claimed_at, claim_method, anonymous_source_org
+                           claimed_at, claim_method, anonymous_source_org,
+                           COALESCE(usage_refunded, 0) AS usage_refunded
                     FROM agreement_owner
                     WHERE subject_ref = ? AND created_at >= ?
                     ORDER BY datetime(created_at) DESC
@@ -331,7 +334,8 @@ class UsageEconomicsStore:
                     """
                     SELECT agreement_id, subject_ref, created_at, completed_at,
                            internal_keys_draft, guest_temp, idempotency_key,
-                           claimed_at, claim_method, anonymous_source_org
+                           claimed_at, claim_method, anonymous_source_org,
+                           COALESCE(usage_refunded, 0) AS usage_refunded
                     FROM agreement_owner
                     WHERE subject_ref = ?
                     ORDER BY datetime(created_at) DESC
@@ -344,7 +348,7 @@ class UsageEconomicsStore:
     def delete_agreement_owner(self, agreement_id: str) -> bool:
         """
         Remove ownership meter row and reverse subject_counters when the row was charged
-        (non-guest). Used for save/meter rollback and staging reconcile.
+        (non-guest and not already soft-refunded). Used for save/meter rollback.
         """
         aid = (agreement_id or "").strip()
         if not aid:
@@ -357,7 +361,9 @@ class UsageEconomicsStore:
         with self._conn() as con:
             row = con.execute(
                 """
-                SELECT subject_ref, internal_keys_draft, COALESCE(guest_temp, 0) AS guest_temp
+                SELECT subject_ref, internal_keys_draft,
+                       COALESCE(guest_temp, 0) AS guest_temp,
+                       COALESCE(usage_refunded, 0) AS usage_refunded
                 FROM agreement_owner WHERE agreement_id = ?
                 """,
                 (aid,),
@@ -367,10 +373,11 @@ class UsageEconomicsStore:
             subj = str(row["subject_ref"] or "").strip()
             keys = int(row["internal_keys_draft"] or 0)
             guest = int(row["guest_temp"] or 0) == 1
+            already_refunded = int(row["usage_refunded"] or 0) == 1
             cur = con.execute("DELETE FROM agreement_owner WHERE agreement_id = ?", (aid,))
             if cur.rowcount <= 0:
                 return False
-            if subj and not guest:
+            if subj and not guest and not already_refunded:
                 con.execute(
                     """
                     UPDATE subject_counters SET
@@ -383,13 +390,167 @@ class UsageEconomicsStore:
                 )
             return True
 
+    def mark_agreement_owner_usage_refunded(self, agreement_id: str) -> bool:
+        """
+        Soft-refund one ownership row: keep workspace access, exclude from monthly meters,
+        and reverse subject_counters once when the row was previously charged.
+        """
+        aid = (agreement_id or "").strip()
+        if not aid:
+            return False
+        if self._pg:
+            from backend.usage_economics import usage_economics_postgres as uep
+
+            return uep.mark_agreement_owner_usage_refunded(aid)
+        now = _utc_now()
+        with self._conn() as con:
+            row = con.execute(
+                """
+                SELECT subject_ref, internal_keys_draft,
+                       COALESCE(guest_temp, 0) AS guest_temp,
+                       COALESCE(usage_refunded, 0) AS usage_refunded
+                FROM agreement_owner WHERE agreement_id = ?
+                """,
+                (aid,),
+            ).fetchone()
+            if not row:
+                return False
+            if int(row["guest_temp"] or 0) == 1:
+                return False
+            if int(row["usage_refunded"] or 0) == 1:
+                return False
+            subj = str(row["subject_ref"] or "").strip()
+            keys = int(row["internal_keys_draft"] or 0)
+            cur = con.execute(
+                """
+                UPDATE agreement_owner
+                SET usage_refunded = 1
+                WHERE agreement_id = ? AND COALESCE(usage_refunded, 0) = 0
+                """,
+                (aid,),
+            )
+            if cur.rowcount <= 0:
+                return False
+            if subj:
+                con.execute(
+                    """
+                    UPDATE subject_counters SET
+                      agreements_created = MAX(0, agreements_created - 1),
+                      keys_consumed_total = MAX(0, keys_consumed_total - ?),
+                      updated_at = ?
+                    WHERE subject_ref = ?
+                    """,
+                    (keys, now, subj),
+                )
+            return True
+
+    def ensure_agreement_owner_usage_exempt(
+        self,
+        *,
+        agreement_id: str,
+        subject_ref: str,
+    ) -> bool:
+        """
+        Restore missing ownership without consuming monthly allowance.
+
+        Returns True when a usage-exempt owner row was inserted. Returns False when the
+        row already exists for this subject, belongs to another subject, or insert fails.
+        """
+        aid = (agreement_id or "").strip()
+        subj = (subject_ref or "").strip()
+        if not aid or not subj:
+            return False
+        if self._pg:
+            from backend.usage_economics import usage_economics_postgres as uep
+
+            return uep.ensure_agreement_owner_usage_exempt(
+                agreement_id=aid, subject_ref=subj
+            )
+        now = _utc_now()
+        with self._conn() as con:
+            existing = con.execute(
+                "SELECT subject_ref FROM agreement_owner WHERE agreement_id = ?",
+                (aid,),
+            ).fetchone()
+            if existing:
+                return False
+            try:
+                con.execute(
+                    """
+                    INSERT INTO agreement_owner (
+                      agreement_id, subject_ref, created_at, internal_keys_draft,
+                      guest_temp, usage_refunded
+                    ) VALUES (?, ?, ?, 0, 0, 1)
+                    """,
+                    (aid, subj, now),
+                )
+            except Exception:
+                return False
+            return True
+
+    def heal_orphaned_agreement_ownership_for_subject(self, subject_ref: str) -> List[str]:
+        """
+        Re-attach ownership for drafts/org agreements missing owner rows (usage-exempt).
+
+        Used after legacy hard-delete monthly resets so existing agreements reopen.
+        """
+        subj = (subject_ref or "").strip()
+        if not subj:
+            return []
+        candidates: List[str] = []
+        seen: set[str] = set()
+        try:
+            from backend.lawdog_dashboard.workspace_index import (
+                supabase_agreement_ids_for_subject,
+            )
+
+            for aid in supabase_agreement_ids_for_subject(subj):
+                a = (aid or "").strip()
+                if a and a not in seen:
+                    seen.add(a)
+                    candidates.append(a)
+        except Exception:
+            pass
+        try:
+            from backend.ops.ownership_inspector import _recoverable_subject_from_draft
+            from backend.services.agreement_draft_store import (
+                list_draft_agreement_ids_newest_first,
+            )
+
+            for aid in list_draft_agreement_ids_newest_first():
+                a = (aid or "").strip()
+                if not a or a in seen:
+                    continue
+                try:
+                    if (_recoverable_subject_from_draft(a) or "").strip() == subj:
+                        seen.add(a)
+                        candidates.append(a)
+                except Exception:
+                    continue
+        except Exception:
+            pass
+        healed: List[str] = []
+        for aid in candidates:
+            if self.owner_subject_for_agreement(aid) == subj:
+                continue
+            if self.ensure_agreement_owner_usage_exempt(
+                agreement_id=aid, subject_ref=subj
+            ):
+                healed.append(aid)
+        return healed
+
     def refund_agreement_owners_since(
         self,
         *,
         subject_ref: str,
         period_start_iso: str,
     ) -> List[str]:
-        """Delete non-guest agreement_owner rows for subject since period_start; return ids."""
+        """
+        Soft-refund non-guest agreement_owner rows for subject since period_start.
+
+        Keeps ownership so existing agreements remain accessible; marks usage_refunded
+        so monthly allowance meters no longer count them. Returns refunded ids.
+        """
         subj = (subject_ref or "").strip()
         start = (period_start_iso or "").strip()
         if not subj or not start:
@@ -399,10 +560,12 @@ class UsageEconomicsStore:
         for row in rows:
             if int(row.get("guest_temp") or 0):
                 continue
+            if int(row.get("usage_refunded") or 0):
+                continue
             aid = str(row.get("agreement_id") or "").strip()
             if not aid:
                 continue
-            if self.delete_agreement_owner(aid):
+            if self.mark_agreement_owner_usage_refunded(aid):
                 refunded.append(aid)
         return refunded
 
@@ -599,6 +762,7 @@ class UsageEconomicsStore:
                 SELECT COUNT(*) AS c FROM agreement_owner
                 WHERE subject_ref = ? AND created_at >= ?
                   AND COALESCE(guest_temp, 0) = 0
+                  AND COALESCE(usage_refunded, 0) = 0
                 """,
                 (subject_ref, start),
             ).fetchone()

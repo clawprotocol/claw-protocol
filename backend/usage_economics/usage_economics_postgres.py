@@ -200,6 +200,7 @@ def try_insert_agreement_owner_with_monthly_cap(
                 SELECT COUNT(*) AS c FROM agreement_owner
                 WHERE subject_ref = %s AND created_at >= %s::timestamptz
                   AND COALESCE(guest_temp, 0) = 0
+                  AND COALESCE(usage_refunded, 0) = 0
                 """,
                 (subj, _ts(start)),
             )
@@ -282,7 +283,8 @@ def list_agreement_owner_rows_for_subject(
                 """
                 SELECT agreement_id, subject_ref, created_at, completed_at,
                        internal_keys_draft, guest_temp, idempotency_key,
-                       claimed_at, claim_method, anonymous_source_org
+                       claimed_at, claim_method, anonymous_source_org,
+                       COALESCE(usage_refunded, 0) AS usage_refunded
                 FROM agreement_owner
                 WHERE subject_ref = %s AND created_at >= %s::timestamptz
                 ORDER BY created_at DESC
@@ -295,7 +297,8 @@ def list_agreement_owner_rows_for_subject(
                 """
                 SELECT agreement_id, subject_ref, created_at, completed_at,
                        internal_keys_draft, guest_temp, idempotency_key,
-                       claimed_at, claim_method, anonymous_source_org
+                       claimed_at, claim_method, anonymous_source_org,
+                       COALESCE(usage_refunded, 0) AS usage_refunded
                 FROM agreement_owner
                 WHERE subject_ref = %s
                 ORDER BY created_at DESC
@@ -315,7 +318,9 @@ def delete_agreement_owner(agreement_id: str) -> bool:
     with _tx() as conn:
         cur = conn.execute(
             """
-            SELECT subject_ref, internal_keys_draft, COALESCE(guest_temp, 0) AS guest_temp
+            SELECT subject_ref, internal_keys_draft,
+                   COALESCE(guest_temp, 0) AS guest_temp,
+                   COALESCE(usage_refunded, 0) AS usage_refunded
             FROM agreement_owner WHERE agreement_id = %s
             """,
             (aid,),
@@ -326,10 +331,11 @@ def delete_agreement_owner(agreement_id: str) -> bool:
         subj = str(row.get("subject_ref") or "").strip()
         keys = int(row.get("internal_keys_draft") or 0)
         guest = int(row.get("guest_temp") or 0) == 1
+        already_refunded = int(row.get("usage_refunded") or 0) == 1
         cur = conn.execute("DELETE FROM agreement_owner WHERE agreement_id = %s", (aid,))
         if int(cur.rowcount or 0) <= 0:
             return False
-        if subj and not guest:
+        if subj and not guest and not already_refunded:
             conn.execute(
                 """
                 UPDATE subject_counters SET
@@ -340,6 +346,86 @@ def delete_agreement_owner(agreement_id: str) -> bool:
                 """,
                 (keys, _ts(now), subj),
             )
+        return True
+
+
+def mark_agreement_owner_usage_refunded(agreement_id: str) -> bool:
+    aid = (agreement_id or "").strip()
+    if not aid:
+        return False
+    now = _utc_now_iso()
+    with _tx() as conn:
+        cur = conn.execute(
+            """
+            SELECT subject_ref, internal_keys_draft,
+                   COALESCE(guest_temp, 0) AS guest_temp,
+                   COALESCE(usage_refunded, 0) AS usage_refunded
+            FROM agreement_owner WHERE agreement_id = %s
+            """,
+            (aid,),
+        )
+        row = cur.fetchone()
+        if not row:
+            return False
+        if int(row.get("guest_temp") or 0) == 1:
+            return False
+        if int(row.get("usage_refunded") or 0) == 1:
+            return False
+        subj = str(row.get("subject_ref") or "").strip()
+        keys = int(row.get("internal_keys_draft") or 0)
+        cur = conn.execute(
+            """
+            UPDATE agreement_owner
+            SET usage_refunded = 1
+            WHERE agreement_id = %s AND COALESCE(usage_refunded, 0) = 0
+            """,
+            (aid,),
+        )
+        if int(cur.rowcount or 0) <= 0:
+            return False
+        if subj:
+            conn.execute(
+                """
+                UPDATE subject_counters SET
+                  agreements_created = GREATEST(0, agreements_created - 1),
+                  keys_consumed_total = GREATEST(0, keys_consumed_total - %s),
+                  updated_at = %s::timestamptz
+                WHERE subject_ref = %s
+                """,
+                (keys, _ts(now), subj),
+            )
+        return True
+
+
+def ensure_agreement_owner_usage_exempt(
+    *,
+    agreement_id: str,
+    subject_ref: str,
+) -> bool:
+    aid = (agreement_id or "").strip()
+    subj = (subject_ref or "").strip()
+    if not aid or not subj:
+        return False
+    now = _utc_now_iso()
+    with _tx() as conn:
+        cur = conn.execute(
+            "SELECT subject_ref FROM agreement_owner WHERE agreement_id = %s",
+            (aid,),
+        )
+        if cur.fetchone():
+            return False
+        try:
+            conn.execute(
+                """
+                INSERT INTO agreement_owner (
+                  agreement_id, subject_ref, created_at, internal_keys_draft,
+                  guest_temp, usage_refunded
+                ) VALUES (%s, %s, %s::timestamptz, 0, 0, 1)
+                """,
+                (aid, subj, _ts(now)),
+            )
+        except Exception:
+            return False
         return True
 
 
@@ -495,6 +581,7 @@ def agreements_created_this_utc_month(subject_ref: str, month_start_iso: str) ->
             SELECT COUNT(*) AS c FROM agreement_owner
             WHERE subject_ref = %s AND created_at >= %s::timestamptz
               AND COALESCE(guest_temp, 0) = 0
+              AND COALESCE(usage_refunded, 0) = 0
             """,
             (subject_ref, _ts(month_start_iso)),
         )

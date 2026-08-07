@@ -6,6 +6,7 @@ import { AppDashboard } from "./AppDashboard";
 import type { AgreementDraft } from "../agreement/agreementTypes";
 import type { WorkspaceIndexAgreement } from "../agreement/agreementWorkspaceApi";
 import * as agreementWorkspaceApi from "../agreement/agreementWorkspaceApi";
+import * as commercialEntitlement from "../access/commercialEntitlement";
 import * as agreementToVs01SigningBridge from "./simpleProduct/agreementToVs01SigningBridge";
 import * as creatorDashboardPrepareSignatureLinks from "./creatorDashboardPrepareSignatureLinks";
 import { AGREEMENT_CREATE_REVIEW_RESUME_KEY } from "../components/agreements/agreementIntakeStorage";
@@ -881,5 +882,54 @@ describe("AppDashboard creator-centric surface", () => {
         (call) => typeof call[0] === "string" && call[0].startsWith(`/app/send/${agreementId}`),
       ),
     ).toBe(false);
+  });
+
+  it("shows Genesis monthly allowance on the dashboard", async () => {
+    vi.spyOn(commercialEntitlement, "fetchCommercialEntitlement").mockResolvedValue({
+      state: "genesis",
+      grantSource: "admin",
+      agreementAllowance: 5,
+      agreementsUsed: 0,
+      agreementsRemaining: 5,
+      periodEndsAt: "2026-08-31T23:59:59.999Z",
+      canCreatePersistedAgreement: true,
+      canSaveGuestDraft: false,
+      entitlement: "genesis_allowance",
+      createAllowed: true,
+      upgradeRequired: false,
+      reason: null,
+      genesisAllowance: {
+        active: true,
+        limit: 5,
+        used: 0,
+        remaining: 5,
+        period_start: "2026-08-01T00:00:00.000Z",
+        period_end: "2026-08-31T23:59:59.999Z",
+        allowed: true,
+      },
+      proAllowance: null,
+      freeAllowance: null,
+      authFailure: false,
+      probeFailure: false,
+      tier: "genesis",
+      raw: null,
+    });
+    vi.spyOn(agreementWorkspaceApi, "fetchWorkspaceIndex").mockResolvedValue({
+      agreements: [indexRow({ id: "ag_ready" })],
+      skipped: [],
+      error: null,
+    });
+    vi.spyOn(agreementWorkspaceApi, "fetchAgreementDraft").mockResolvedValue({
+      ok: true,
+      draft: draftWithParties(),
+    });
+
+    render(<AppDashboard />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("dashboard-allowance-status").textContent).toMatch(
+        /Genesis Dog access:\s*5 of 5 new agreements remaining this month/i,
+      );
+    });
   });
 });

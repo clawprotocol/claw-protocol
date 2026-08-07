@@ -1122,8 +1122,10 @@ def admin_reconcile_genesis_usage(
     """
     Reset this user's Genesis monthly meter to 0 (audited support action).
 
-    Refunds agreement_owner rows for the current UTC month and reverses
-    subject_counters charges. Requires PERM_MUTATE_SUPPORT + audit reason.
+    Soft-refunds agreement_owner rows for the current UTC month (keeps ownership
+    so existing agreements remain accessible) and reverses subject_counters
+    charges. Also heals orphaned ownership from prior hard-delete resets.
+    Requires PERM_MUTATE_SUPPORT + audit reason.
     """
     from backend.usage_economics.commercial_entitlement import (
         resolve_commercial_entitlement,
@@ -1148,13 +1150,17 @@ def admin_reconcile_genesis_usage(
     candidate_ids = [
         str(r.get("agreement_id") or "").strip()
         for r in rows
-        if str(r.get("agreement_id") or "").strip() and not int(r.get("guest_temp") or 0)
+        if str(r.get("agreement_id") or "").strip()
+        and not int(r.get("guest_temp") or 0)
+        and not int(r.get("usage_refunded") or 0)
     ]
     refunded: List[str] = []
+    healed: List[str] = []
     if not body.dry_run:
         refunded = ustore.refund_agreement_owners_since(
             subject_ref=subject, period_start_iso=period_start
         )
+        healed = ustore.heal_orphaned_agreement_ownership_for_subject(subject)
         ustore.emit_event(
             subject_ref=subject,
             event_type="genesis_usage_reconciled",
@@ -1163,6 +1169,7 @@ def admin_reconcile_genesis_usage(
                 "period_start": period_start,
                 "period_end": period_end,
                 "refunded_agreement_ids": refunded,
+                "healed_agreement_ids": healed,
                 "actor": principal.user_id,
                 "reason": (body.reason or "").strip(),
             },
@@ -1182,6 +1189,7 @@ def admin_reconcile_genesis_usage(
         after={
             "agreements_used": after.get("agreements_used"),
             "refunded_agreement_ids": refunded if not body.dry_run else candidate_ids,
+            "healed_agreement_ids": healed if not body.dry_run else [],
             "dry_run": bool(body.dry_run),
         },
     )
@@ -1194,6 +1202,7 @@ def admin_reconcile_genesis_usage(
         "period_start": period_start,
         "period_end": period_end,
         "refunded_agreement_ids": refunded if not body.dry_run else [],
+        "healed_agreement_ids": healed if not body.dry_run else [],
         "candidate_agreement_ids": candidate_ids,
         "commercial_before": {
             "agreements_used": before.get("agreements_used"),

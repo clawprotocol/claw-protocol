@@ -239,22 +239,25 @@ def test_zero_persisted_drafts_but_five_credits_reconcile(isolated_env):
     assert after["agreements_used"] == 0
     assert after["agreements_remaining"] == 5
     assert after["state"] == STATE_GENESIS
+    # Soft refund keeps ownership rows so workspace access is not erased.
+    assert len(usage.list_agreement_ids_for_subject(subject)) == 5
+    refunded_by_id = {
+        str(r.get("agreement_id") or ""): r
+        for r in usage.list_agreement_owner_rows_for_subject(subject, limit=500)
+    }
+    for aid in ghost_ids:
+        assert aid in refunded_by_id
+        assert int(refunded_by_id[aid].get("usage_refunded") or 0) == 1
 
-    # Production-like env must reject both staging-only endpoints.
-    import os
-
-    os.environ["CLAW_ENVIRONMENT"] = "production"
-    blocked_get = client.get(f"/v1/admin/users/{uid}/genesis-usage", headers=_admin())
-    assert blocked_get.status_code == 403
-    assert (blocked_get.json().get("detail") or {}).get("code") == "staging_only"
-    blocked = client.post(
+    # Idempotent: second reset finds nothing left to soft-refund.
+    again = client.post(
         f"/v1/admin/users/{uid}/genesis-usage/reconcile",
         headers=_admin(),
-        json={"reason": "must fail in production", "dry_run": False},
+        json={"reason": "staging reconcile lawdogtest2 ghosts again", "dry_run": False},
     )
-    assert blocked.status_code == 403
-    assert (blocked.json().get("detail") or {}).get("code") == "staging_only"
-    os.environ["CLAW_ENVIRONMENT"] = "test"
+    assert again.status_code == 200, again.text
+    assert again.json()["refunded_agreement_ids"] == []
+    assert resolve_commercial_entitlement(subject)["agreements_used"] == 0
 
 
 def test_successful_persist_then_meter_one_credit(isolated_env):
@@ -270,3 +273,63 @@ def test_successful_persist_then_meter_one_credit(isolated_env):
     assert draft_exists(aid)
     assert usage.agreements_created_this_utc_month(subject) == 1
     assert resolve_commercial_entitlement(subject)["agreements_remaining"] == 4
+
+
+def test_genesis_monthly_reset_keeps_existing_agreements_accessible(isolated_env):
+    """Admin Reset Genesis monthly usage must not erase saved agreements."""
+    client, usage, _eco = isolated_env
+    uid = f"genesis-keep-{uuid.uuid4().hex[:8]}"
+    subject = f"org:user-{uid}"
+    grant_entitlement(user_id=uid, granted_by="ops", grant_source=GRANT_SOURCE_ADMIN)
+
+    created_ids: list[str] = []
+    for i in range(2):
+        r = client.post(
+            "/api/agreements/draft",
+            headers=_auth(uid),
+            json=_draft_body(f"keep-{i}"),
+        )
+        assert r.status_code == 200, r.text
+        created_ids.append(r.json()["id"])
+
+    assert usage.agreements_created_this_utc_month(subject) == 2
+    before_idx = client.get("/api/agreements/workspace-index", headers=_auth(uid))
+    assert before_idx.status_code == 200, before_idx.text
+    before_ids = {row["id"] for row in (before_idx.json().get("agreements") or [])}
+    assert set(created_ids).issubset(before_ids)
+
+    reset = client.post(
+        f"/v1/admin/users/{uid}/genesis-usage/reconcile",
+        headers=_admin(),
+        json={
+            "reason": "reset keeps agreements accessible",
+            "mode": "reset_month_to_zero",
+            "dry_run": False,
+        },
+    )
+    assert reset.status_code == 200, reset.text
+    assert set(reset.json().get("refunded_agreement_ids") or []) == set(created_ids)
+
+    after = resolve_commercial_entitlement(subject)
+    assert after["agreements_used"] == 0
+    assert after["agreements_remaining"] == 5
+
+    after_idx = client.get("/api/agreements/workspace-index", headers=_auth(uid))
+    assert after_idx.status_code == 200, after_idx.text
+    after_ids = {row["id"] for row in (after_idx.json().get("agreements") or [])}
+    assert set(created_ids).issubset(after_ids)
+
+    for aid in created_ids:
+        get = client.get(f"/api/agreements/{aid}", headers=_auth(uid))
+        assert get.status_code == 200, get.text
+        owner = usage.owner_subject_for_agreement(aid)
+        assert owner == subject
+
+    # Soft-refunded rows no longer consume allowance; new create is allowed.
+    again = client.post(
+        "/api/agreements/draft",
+        headers=_auth(uid),
+        json=_draft_body("after-reset"),
+    )
+    assert again.status_code == 200, again.text
+    assert resolve_commercial_entitlement(subject)["agreements_used"] == 1

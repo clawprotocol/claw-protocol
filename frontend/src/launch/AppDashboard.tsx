@@ -89,6 +89,14 @@ import {
   consumeReviewDeliveryHandoffNotice,
   type ReviewDeliveryHandoffNotice,
 } from "./reviewDeliveryHandoffNotice";
+import {
+  fetchCommercialEntitlement,
+  type CommercialEntitlementDecision,
+} from "../access/commercialEntitlement";
+import {
+  formatGenesisAllowanceStatusCopy,
+  formatProAllowanceStatusCopy,
+} from "./simpleProduct/createEntitlementUi";
 
 export type WorkspaceMode = "empty" | "active" | "power";
 
@@ -115,6 +123,8 @@ export function AppDashboard() {
   const [signingProgressByAgreementId, setSigningProgressByAgreementId] = useState<
     Record<string, CreatorSigningProgressSnapshot>
   >({});
+  const [commercialEntitlement, setCommercialEntitlement] =
+    useState<CommercialEntitlementDecision | null>(null);
   const draftingRedirectedRef = useRef(false);
   const prepareSignatureLinksLaunchRef = useRef<string | null>(null);
 
@@ -180,6 +190,16 @@ export function AppDashboard() {
   useEffect(() => {
     void reloadWorkspaceIndex();
   }, [reloadWorkspaceIndex]);
+
+  useEffect(() => {
+    let cancelled = false;
+    void fetchCommercialEntitlement().then((decision) => {
+      if (!cancelled) setCommercialEntitlement(decision);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     const bumpSigningStatus = () => setSigningStatusEpoch((epoch) => epoch + 1);
@@ -269,6 +289,25 @@ export function AppDashboard() {
     () => attentionRows.filter((row) => row.id !== featuredAgreementId),
     [attentionRows, featuredAgreementId],
   );
+
+  const allowanceStatusCopy = useMemo(() => {
+    if (!commercialEntitlement) return null;
+    if (commercialEntitlement.state === "genesis") {
+      return formatGenesisAllowanceStatusCopy({
+        agreementsRemaining: commercialEntitlement.agreementsRemaining,
+        agreementAllowance: commercialEntitlement.agreementAllowance,
+        periodEndsAt: commercialEntitlement.periodEndsAt,
+      });
+    }
+    if (commercialEntitlement.state === "pro") {
+      return formatProAllowanceStatusCopy({
+        agreementsRemaining: commercialEntitlement.agreementsRemaining,
+        agreementAllowance: commercialEntitlement.agreementAllowance,
+        periodEndsAt: commercialEntitlement.periodEndsAt,
+      });
+    }
+    return null;
+  }, [commercialEntitlement]);
 
   const entryResolved = useMemo(
     () => resolveLawdogEntryContext(safeRecent.length, indexLoading),
@@ -726,6 +765,14 @@ export function AppDashboard() {
           <span className="mt-1 block text-sm text-slate-500">
             See what you&apos;re working on, what to do next, and how close each agreement is to signing.
           </span>
+          {allowanceStatusCopy ? (
+            <span
+              className="mt-2 block text-sm text-slate-300"
+              data-testid="dashboard-allowance-status"
+            >
+              {allowanceStatusCopy}
+            </span>
+          ) : null}
         </>
       }
     >

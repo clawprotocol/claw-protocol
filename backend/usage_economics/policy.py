@@ -809,13 +809,14 @@ def try_repair_missing_agreement_ownership(agreement_id: str, verified_subject: 
     if store.owner_subject_for_agreement(aid):
         return store.owner_subject_for_agreement(aid) == subj
     try:
-        store.insert_agreement_owner(
-            agreement_id=aid,
-            subject_ref=subj,
-            internal_keys_draft=0,
-        )
+        # Usage-exempt restore: never re-consume monthly allowance when ownership
+        # was lost (e.g. legacy hard-delete Genesis monthly reset).
+        if not store.ensure_agreement_owner_usage_exempt(
+            agreement_id=aid, subject_ref=subj
+        ):
+            return False
         log.info(
-            "ownership_repaired_from_draft_metadata agreement_id=%s subject=%s",
+            "ownership_repaired_from_draft_metadata agreement_id=%s subject=%s usage_exempt=1",
             aid,
             subj,
         )
@@ -986,6 +987,9 @@ def workspace_lists_agreement_for_subject(agreement_id: str, subject_ref: str) -
     store = get_usage_economics_store()
     store.init_schema()
     owner = store.owner_subject_for_agreement(agreement_id)
+    if owner is None:
+        if try_repair_missing_agreement_ownership(agreement_id, subject_ref):
+            owner = store.owner_subject_for_agreement(agreement_id)
     if owner is None:
         return False
     return owner == subject_ref
