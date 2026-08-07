@@ -7,6 +7,7 @@ import {
   fetchAgreementDraft,
   fetchAgreementDraftWithSigningLock,
   fetchAgreementAuditSignedFlag,
+  patchWorkspaceArchive,
   type WorkspaceIndexAgreement,
 } from "../agreement/agreementWorkspaceApi";
 import { dedupeWorkspaceIndexAgreements } from "./workspaceIndexDedupe";
@@ -17,7 +18,10 @@ import {
 } from "./lawdogEntryContext";
 import { canAccessOperatorGrowthDashboard } from "./ops/OperatorGrowthDashboard";
 import { CreatorDashboardAgreementList } from "./CreatorDashboardAgreementList";
-import { LawdogAgreementsTable } from "./LawdogAgreementsTable";
+import {
+  LawdogAgreementsTable,
+  type LawdogWorkspaceArchiveRequest,
+} from "./LawdogAgreementsTable";
 import { DashboardKpiCards } from "./DashboardKpiCards";
 import { DashboardWhatsNextPanel } from "./DashboardWhatsNextPanel";
 import { DashboardFirstUserOnboarding } from "./DashboardFirstUserOnboarding";
@@ -32,6 +36,7 @@ import {
   deriveCreatorDashboardStatus,
   deriveCreatorDashboardStatusPillFromGate,
   deriveCreatorNextActionLabel,
+  displayCreatorAgreementTitle,
   resolveCreatorDashboardIndexPreviewForDiagnostics,
   resolveEffectiveCreatorDashboardReviewRows,
   sortCreatorDashboardRows,
@@ -100,6 +105,13 @@ import {
 
 export type WorkspaceMode = "empty" | "active" | "power";
 
+type DashboardArchiveNotice = {
+  kind: "success" | "error";
+  title: string;
+  body: string;
+  showViewArchived: boolean;
+};
+
 /** Status line for recent-agreement rows (workspace index). */
 export function workspaceAgreementStatusLabel(r: WorkspaceIndexAgreement): string {
   return workspaceAgreementStatusBadge(r);
@@ -118,6 +130,7 @@ export function AppDashboard() {
   const [prepareNoticeByAgreementId, setPrepareNoticeByAgreementId] = useState<Record<string, string>>({});
   const [reviewDeliveryHandoffNotice, setReviewDeliveryHandoffNotice] =
     useState<ReviewDeliveryHandoffNotice | null>(null);
+  const [archiveNotice, setArchiveNotice] = useState<DashboardArchiveNotice | null>(null);
   const [signingStatusEpoch, setSigningStatusEpoch] = useState(0);
   const [auditCompletedByAgreementId, setAuditCompletedByAgreementId] = useState<Record<string, boolean>>({});
   const [signingProgressByAgreementId, setSigningProgressByAgreementId] = useState<
@@ -127,6 +140,7 @@ export function AppDashboard() {
     useState<CommercialEntitlementDecision | null>(null);
   const draftingRedirectedRef = useRef(false);
   const prepareSignatureLinksLaunchRef = useRef<string | null>(null);
+  const rowsSnapshotBeforeArchiveRef = useRef<WorkspaceIndexAgreement[] | null>(null);
 
   const hydrateAuditCompletionFlags = useCallback(async (sourceRows: readonly WorkspaceIndexAgreement[]) => {
     const candidates = sourceRows.filter(workspaceRowNeedsCompletionAuditHydration);
@@ -164,8 +178,9 @@ export function AppDashboard() {
     }
   }, []);
 
-  const reloadWorkspaceIndex = useCallback(async () => {
-    setIndexLoading(true);
+  const reloadWorkspaceIndex = useCallback(async (opts?: { quiet?: boolean }) => {
+    const quiet = Boolean(opts?.quiet);
+    if (!quiet) setIndexLoading(true);
     setIndexError(null);
     const { agreements, skipped, error } = await fetchWorkspaceIndex();
     const deduped = dedupeWorkspaceIndexAgreements(agreements);
@@ -182,7 +197,7 @@ export function AppDashboard() {
       });
     }
     setIndexError(error);
-    setIndexLoading(false);
+    if (!quiet) setIndexLoading(false);
     void hydrateAuditCompletionFlags(deduped);
     void hydrateSigningProgressFlags(deduped);
   }, [hydrateAuditCompletionFlags, hydrateSigningProgressFlags]);
@@ -269,21 +284,34 @@ export function AppDashboard() {
     () => sortCreatorDashboardRows(filteredDashboard.visibleRows),
     [filteredDashboard.visibleRows],
   );
-  const dashboardKpis = useMemo(() => countLawdogDashboardKpis(safeRecent), [safeRecent]);
-  const attentionRows = useMemo(
-    () =>
-      safeRecent.filter((row) =>
-        lawdogAgreementNeedsAttention(row, deriveCreatorDashboardStatus(row)),
-      ),
+  const activeRecent = useMemo(
+    () => safeRecent.filter((row) => !String(row.workspace_archived_at || "").trim()),
     [safeRecent],
   );
+  const archivedCount = useMemo(
+    () => safeRecent.filter((row) => Boolean(String(row.workspace_archived_at || "").trim())).length,
+    [safeRecent],
+  );
+  const dashboardKpis = useMemo(() => countLawdogDashboardKpis(activeRecent), [activeRecent]);
+  const attentionRows = useMemo(
+    () =>
+      activeRecent.filter((row) =>
+        lawdogAgreementNeedsAttention(row, deriveCreatorDashboardStatus(row)),
+      ),
+    [activeRecent],
+  );
   const featuredAgreementId = useMemo(
-    () => resolveDashboardFeaturedAgreementId(filteredDashboard.featuredAgreementId, attentionRows, safeRecent),
-    [filteredDashboard.featuredAgreementId, attentionRows, safeRecent],
+    () =>
+      resolveDashboardFeaturedAgreementId(
+        filteredDashboard.featuredAgreementId,
+        attentionRows,
+        activeRecent,
+      ),
+    [filteredDashboard.featuredAgreementId, attentionRows, activeRecent],
   );
   const featuredRow = useMemo(
-    () => safeRecent.find((row) => row.id === featuredAgreementId) ?? null,
-    [safeRecent, featuredAgreementId],
+    () => activeRecent.find((row) => row.id === featuredAgreementId) ?? null,
+    [activeRecent, featuredAgreementId],
   );
   const secondaryAttentionRows = useMemo(
     () => attentionRows.filter((row) => row.id !== featuredAgreementId),
@@ -310,8 +338,8 @@ export function AppDashboard() {
   }, [commercialEntitlement]);
 
   const entryResolved = useMemo(
-    () => resolveLawdogEntryContext(safeRecent.length, indexLoading),
-    [safeRecent.length, indexLoading],
+    () => resolveLawdogEntryContext(activeRecent.length, indexLoading),
+    [activeRecent.length, indexLoading],
   );
 
   useEffect(() => {
@@ -725,6 +753,53 @@ export function AppDashboard() {
     [navigate, withClearEntry],
   );
 
+  const handleWorkspaceArchive = useCallback(
+    (request: LawdogWorkspaceArchiveRequest) => {
+      const { agreementId, archived } = request;
+      const title = displayCreatorAgreementTitle(request.title);
+      const archivedAt = archived ? new Date().toISOString() : null;
+      setRows((prev) => {
+        rowsSnapshotBeforeArchiveRef.current = prev;
+        return prev.map((row) =>
+          row.id === agreementId ? { ...row, workspace_archived_at: archivedAt } : row,
+        );
+      });
+      if (archived) {
+        setArchiveNotice({
+          kind: "success",
+          title: `"${title}" archived`,
+          body: "View it under Agreements → Archive.",
+          showViewArchived: true,
+        });
+      } else {
+        setArchiveNotice({
+          kind: "success",
+          title: `"${title}" restored`,
+          body: "It's back in your active agreements.",
+          showViewArchived: false,
+        });
+      }
+      void (async () => {
+        const ok = await patchWorkspaceArchive(agreementId, archived);
+        if (!ok) {
+          if (rowsSnapshotBeforeArchiveRef.current) {
+            setRows(rowsSnapshotBeforeArchiveRef.current);
+          }
+          setArchiveNotice({
+            kind: "error",
+            title: archived ? "Could not archive agreement" : "Could not unarchive agreement",
+            body: "Please try again.",
+            showViewArchived: false,
+          });
+          return;
+        }
+        rowsSnapshotBeforeArchiveRef.current = null;
+        void reloadWorkspaceIndex({ quiet: true });
+      })();
+    },
+    [reloadWorkspaceIndex],
+  );
+
   const handleWhatsNextPrimaryAction = useCallback(
     (row: WorkspaceIndexAgreement) => {
       const reviewRows = reviewRowsByAgreementId[row.id] ?? [];
@@ -817,11 +892,50 @@ export function AppDashboard() {
           </div>
         ) : null}
 
-        {!indexLoading && safeRecent.length > 0 ? (
+        {archiveNotice ? (
+          <div
+            className={`mb-6 rounded-xl border px-4 py-3 text-sm ${
+              archiveNotice.kind === "success"
+                ? "border-emerald-800/40 bg-emerald-950/25 text-emerald-100"
+                : "border-amber-800/40 bg-amber-950/25 text-amber-100"
+            }`}
+            role="status"
+            aria-live="polite"
+            data-testid="dashboard-archive-notice"
+          >
+            <p className="font-medium">{archiveNotice.title}</p>
+            <p className="mt-1 opacity-90">{archiveNotice.body}</p>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {archiveNotice.showViewArchived ? (
+                <button
+                  type="button"
+                  className="vs01-btn vs01-btn--primary vs01-btn--compact"
+                  data-testid="dashboard-archive-notice-view"
+                  onClick={() => {
+                    setArchiveNotice(null);
+                    withClearEntry(() => navigate("/app/agreements"));
+                  }}
+                >
+                  View archived
+                </button>
+              ) : null}
+              <button
+                type="button"
+                className="vs01-btn vs01-btn--secondary vs01-btn--compact"
+                data-testid="dashboard-archive-notice-dismiss"
+                onClick={() => setArchiveNotice(null)}
+              >
+                Dismiss
+              </button>
+            </div>
+          </div>
+        ) : null}
+
+        {!indexLoading && activeRecent.length > 0 ? (
           <>
             <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
               <p className="text-sm text-slate-400" data-testid="dashboard-agreement-count">
-                {safeRecent.length} agreement{safeRecent.length === 1 ? "" : "s"}
+                {activeRecent.length} agreement{activeRecent.length === 1 ? "" : "s"}
               </p>
               <button
                 type="button"
@@ -838,11 +952,33 @@ export function AppDashboard() {
 
         {indexLoading ? (
           <p className="text-sm text-slate-400">Loading agreements…</p>
-        ) : safeRecent.length === 0 ? (
-          <DashboardFirstUserOnboarding
-            agreementCount={0}
-            onCreateAgreement={() => withClearEntry(navigateToCreateNewAgreement)}
-          />
+        ) : activeRecent.length === 0 ? (
+          <>
+            {archivedCount > 0 ? (
+              <div
+                className="mb-6 rounded-xl border border-slate-800/70 bg-slate-950/20 px-4 py-4 text-sm text-slate-300"
+                data-testid="dashboard-only-archived-empty"
+              >
+                <p className="font-medium text-slate-100">No active agreements</p>
+                <p className="mt-1 text-slate-400">
+                  You have {archivedCount} archived agreement{archivedCount === 1 ? "" : "s"} under
+                  Agreements → Archive.
+                </p>
+                <button
+                  type="button"
+                  className="vs01-btn vs01-btn--secondary vs01-btn--compact mt-3"
+                  data-testid="dashboard-view-archived-empty"
+                  onClick={() => withClearEntry(() => navigate("/app/agreements"))}
+                >
+                  View archived agreements
+                </button>
+              </div>
+            ) : null}
+            <DashboardFirstUserOnboarding
+              agreementCount={0}
+              onCreateAgreement={() => withClearEntry(navigateToCreateNewAgreement)}
+            />
+          </>
         ) : (
           <div className="mt-2 space-y-8">
             {featuredRow ? (
@@ -860,9 +996,9 @@ export function AppDashboard() {
               />
             ) : null}
 
-            {safeRecent.length <= 3 ? (
+            {activeRecent.length <= 3 ? (
               <DashboardFirstUserOnboarding
-                agreementCount={safeRecent.length}
+                agreementCount={activeRecent.length}
                 onCreateAgreement={() => withClearEntry(navigateToCreateNewAgreement)}
               />
             ) : null}
@@ -892,11 +1028,22 @@ export function AppDashboard() {
               </section>
             ) : null}
             <section aria-label="All agreements">
-              <h2 className="mb-3 text-sm font-semibold uppercase tracking-[0.12em] text-slate-500">
-                All agreements
-              </h2>
+              <div className="mb-3 flex flex-wrap items-end justify-between gap-2">
+                <h2 className="text-sm font-semibold uppercase tracking-[0.12em] text-slate-500">
+                  All agreements
+                </h2>
+                <button
+                  type="button"
+                  className="text-sm text-slate-400 underline underline-offset-2 hover:text-slate-200"
+                  data-testid="dashboard-view-archived-link"
+                  onClick={() => withClearEntry(() => navigate("/app/agreements"))}
+                >
+                  View archived agreements
+                  {archivedCount > 0 ? ` (${archivedCount})` : ""}
+                </button>
+              </div>
               <LawdogAgreementsTable
-                rows={safeRecent}
+                rows={activeRecent}
                 draftByAgreementId={draftByAgreementId}
                 signingProgressByAgreementId={signingProgressByAgreementId}
                 onNavigate={(path, meta) =>
@@ -906,7 +1053,7 @@ export function AppDashboard() {
                   })
                 }
                 onFocusReviewStatus={handleFocusAgreementReviewStatus}
-                onArchiveComplete={() => void reloadWorkspaceIndex()}
+                onWorkspaceArchive={handleWorkspaceArchive}
               />
             </section>
           </div>

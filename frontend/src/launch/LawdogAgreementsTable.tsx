@@ -1,7 +1,6 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { AgreementDraft } from "../agreement/agreementTypes";
 import type { WorkspaceIndexAgreement } from "../agreement/agreementWorkspaceApi";
-import { patchWorkspaceArchive } from "../agreement/agreementWorkspaceApi";
 import { downloadCompletedSignedAgreementPdf } from "../agreement/completedSignedAgreementPdfDownload";
 import {
   creatorDashboardPrimaryAction,
@@ -21,12 +20,23 @@ import {
 import { initializeNewAgreementSession } from "./newAgreementSessionReset";
 import { markPaidDashboardCreateContext } from "./paidDashboardCreateContext";
 
+export type LawdogWorkspaceArchiveRequest = {
+  agreementId: string;
+  title: string;
+  archived: boolean;
+};
+
 type Props = {
   rows: readonly WorkspaceIndexAgreement[];
   draftByAgreementId?: Readonly<Record<string, AgreementDraft | null>>;
-  signingProgressByAgreementId?: Readonly<Record<string, import("./creatorDashboardSigningProgress").CreatorSigningProgressSnapshot>>;
+  signingProgressByAgreementId?: Readonly<
+    Record<string, import("./creatorDashboardSigningProgress").CreatorSigningProgressSnapshot>
+  >;
   onNavigate: (path: string, meta?: { kind?: string; agreementId?: string }) => void;
   onFocusReviewStatus?: (agreementId: string) => void;
+  /** Parent owns optimistic UI + PATCH + soft reload. */
+  onWorkspaceArchive?: (request: LawdogWorkspaceArchiveRequest) => void;
+  /** @deprecated Prefer onWorkspaceArchive. Kept for older call sites/tests. */
   onArchiveComplete?: () => void;
 };
 
@@ -37,9 +47,32 @@ export function LawdogAgreementsTable(props: Props) {
     signingProgressByAgreementId = {},
     onNavigate,
     onFocusReviewStatus,
+    onWorkspaceArchive,
     onArchiveComplete,
   } = props;
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const [pdfDownloadBusyId, setPdfDownloadBusyId] = useState<string | null>(null);
+  const [pdfErrorById, setPdfErrorById] = useState<Record<string, string>>({});
+  const menuRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!openMenuId) return;
+    const onPointerDown = (ev: MouseEvent) => {
+      const target = ev.target as Node | null;
+      if (menuRef.current && target && !menuRef.current.contains(target)) {
+        setOpenMenuId(null);
+      }
+    };
+    const onKeyDown = (ev: KeyboardEvent) => {
+      if (ev.key === "Escape") setOpenMenuId(null);
+    };
+    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [openMenuId]);
 
   if (rows.length === 0) return null;
 
@@ -69,6 +102,10 @@ export function LawdogAgreementsTable(props: Props) {
             const contentUnavailable = row.content_unavailable === true;
             const canDownload = internalStatus === "completed" && !contentUnavailable;
             const downloadBusy = pdfDownloadBusyId === row.id;
+            const isArchived = Boolean(row.workspace_archived_at);
+            const menuOpen = openMenuId === row.id;
+            const title = displayCreatorAgreementTitle(row.title);
+            const pdfError = pdfErrorById[row.id] ?? null;
 
             return (
               <tr
@@ -80,13 +117,21 @@ export function LawdogAgreementsTable(props: Props) {
                 data-lawdog-content-unavailable={contentUnavailable ? "true" : "false"}
               >
                 <td className="px-4 py-3 font-medium text-slate-100">
-                  {displayCreatorAgreementTitle(row.title)}
+                  {title}
                   {contentUnavailable ? (
                     <p
                       className="mt-1 text-xs font-normal text-amber-200/90"
                       data-testid={`lawdog-agreement-content-unavailable-${row.id}`}
                     >
                       Agreement content unavailable — metadata only.
+                    </p>
+                  ) : null}
+                  {pdfError ? (
+                    <p
+                      className="mt-1 text-xs font-normal text-amber-200/90"
+                      data-testid={`lawdog-action-download-error-${row.id}`}
+                    >
+                      {pdfError}
                     </p>
                   ) : null}
                 </td>
@@ -106,7 +151,10 @@ export function LawdogAgreementsTable(props: Props) {
                   </span>
                 </td>
                 <td className="px-4 py-3">
-                  <div className="flex flex-wrap gap-1.5">
+                  <div
+                    className="relative flex flex-wrap items-center gap-1.5"
+                    ref={menuOpen ? menuRef : undefined}
+                  >
                     <button
                       type="button"
                       className="vs01-btn vs01-btn--compact vs01-btn--secondary !mt-0"
@@ -149,56 +197,107 @@ export function LawdogAgreementsTable(props: Props) {
                     <button
                       type="button"
                       className="vs01-btn vs01-btn--compact vs01-btn--secondary !mt-0"
-                      data-testid={`lawdog-action-duplicate-${row.id}`}
+                      data-testid={`lawdog-action-more-${row.id}`}
+                      aria-haspopup="menu"
+                      aria-expanded={menuOpen}
                       disabled={contentUnavailable}
                       onClick={() => {
                         if (contentUnavailable) return;
-                        initializeNewAgreementSession({ priorAgreementId: row.id });
-                        markPaidDashboardCreateContext("dashboard_duplicate");
-                        onNavigate("/app/create");
+                        setOpenMenuId((prev) => (prev === row.id ? null : row.id));
                       }}
                     >
-                      Duplicate
+                      More
                     </button>
-                    <button
-                      type="button"
-                      className="vs01-btn vs01-btn--compact vs01-btn--secondary !mt-0"
-                      data-testid={`lawdog-action-download-${row.id}`}
-                      disabled={!canDownload || contentUnavailable || downloadBusy}
-                      onClick={() => {
-                        if (!canDownload || contentUnavailable || downloadBusy) return;
-                        void (async () => {
-                          setPdfDownloadBusyId(row.id);
-                          try {
-                            await downloadCompletedSignedAgreementPdf({
-                              agreementId: row.id,
-                              title: row.title,
-                            });
-                          } catch {
-                            /* surface stays quiet; owner can retry from view-signed */
-                          } finally {
-                            setPdfDownloadBusyId(null);
+                    {menuOpen ? (
+                      <div
+                        role="menu"
+                        className="absolute right-0 top-full z-20 mt-1 min-w-[11rem] rounded-lg border border-slate-700 bg-slate-950 py-1 shadow-lg"
+                        data-testid={`lawdog-action-menu-${row.id}`}
+                      >
+                        <button
+                          type="button"
+                          role="menuitem"
+                          className="block w-full px-3 py-2 text-left text-sm text-slate-200 hover:bg-slate-900"
+                          data-testid={`lawdog-action-duplicate-${row.id}`}
+                          onClick={() => {
+                            setOpenMenuId(null);
+                            initializeNewAgreementSession({ priorAgreementId: row.id });
+                            markPaidDashboardCreateContext("dashboard_duplicate");
+                            onNavigate("/app/create");
+                          }}
+                        >
+                          Duplicate
+                        </button>
+                        {canDownload ? (
+                          <button
+                            type="button"
+                            role="menuitem"
+                            className="block w-full px-3 py-2 text-left text-sm text-slate-200 hover:bg-slate-900 disabled:opacity-50"
+                            data-testid={`lawdog-action-download-${row.id}`}
+                            disabled={downloadBusy}
+                            onClick={() => {
+                              if (downloadBusy) return;
+                              void (async () => {
+                                setPdfDownloadBusyId(row.id);
+                                setPdfErrorById((prev) => {
+                                  const next = { ...prev };
+                                  delete next[row.id];
+                                  return next;
+                                });
+                                try {
+                                  await downloadCompletedSignedAgreementPdf({
+                                    agreementId: row.id,
+                                    title: row.title,
+                                  });
+                                  setOpenMenuId(null);
+                                } catch {
+                                  setPdfErrorById((prev) => ({
+                                    ...prev,
+                                    [row.id]: "PDF download failed. Try again from the signed view.",
+                                  }));
+                                } finally {
+                                  setPdfDownloadBusyId(null);
+                                }
+                              })();
+                            }}
+                          >
+                            {downloadBusy ? "Preparing PDF…" : CREATOR_DOWNLOAD_PDF_LABEL}
+                          </button>
+                        ) : null}
+                        <button
+                          type="button"
+                          role="menuitem"
+                          className="block w-full px-3 py-2 text-left text-sm text-slate-200 hover:bg-slate-900"
+                          data-testid={
+                            isArchived
+                              ? `lawdog-action-unarchive-${row.id}`
+                              : `lawdog-action-archive-${row.id}`
                           }
-                        })();
-                      }}
-                    >
-                      {downloadBusy ? "Preparing PDF…" : CREATOR_DOWNLOAD_PDF_LABEL}
-                    </button>
-                    <button
-                      type="button"
-                      className="vs01-btn vs01-btn--compact vs01-btn--secondary !mt-0"
-                      data-testid={`lawdog-action-archive-${row.id}`}
-                      disabled={Boolean(row.workspace_archived_at) || contentUnavailable}
-                      onClick={() => {
-                        if (contentUnavailable) return;
-                        void (async () => {
-                          const ok = await patchWorkspaceArchive(row.id, true);
-                          if (ok) onArchiveComplete?.();
-                        })();
-                      }}
-                    >
-                      Archive
-                    </button>
+                          onClick={() => {
+                            setOpenMenuId(null);
+                            const request: LawdogWorkspaceArchiveRequest = {
+                              agreementId: row.id,
+                              title,
+                              archived: !isArchived,
+                            };
+                            if (onWorkspaceArchive) {
+                              onWorkspaceArchive(request);
+                              return;
+                            }
+                            // Legacy path used by older tests/call sites.
+                            void (async () => {
+                              const { patchWorkspaceArchive } = await import(
+                                "../agreement/agreementWorkspaceApi"
+                              );
+                              const ok = await patchWorkspaceArchive(row.id, !isArchived);
+                              if (ok) onArchiveComplete?.();
+                            })();
+                          }}
+                        >
+                          {isArchived ? "Unarchive" : "Archive"}
+                        </button>
+                      </div>
+                    ) : null}
                   </div>
                 </td>
               </tr>

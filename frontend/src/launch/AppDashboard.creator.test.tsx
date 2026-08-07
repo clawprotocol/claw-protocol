@@ -932,4 +932,95 @@ describe("AppDashboard creator-centric surface", () => {
       );
     });
   });
+
+  it("excludes archived rows from All agreements and links to Agreements Archive", async () => {
+    vi.spyOn(agreementWorkspaceApi, "fetchWorkspaceIndex").mockResolvedValue({
+      agreements: [
+        indexRow({ id: "ag_active", title: "Active Services" }),
+        indexRow({
+          id: "ag_archived",
+          title: "Archived Services",
+          workspace_archived_at: "2026-06-16T00:00:00.000Z",
+        }),
+      ],
+      skipped: [],
+      error: null,
+    });
+    vi.spyOn(agreementWorkspaceApi, "fetchAgreementDraft").mockResolvedValue({
+      ok: true,
+      draft: draftWithParties(),
+    });
+
+    render(<AppDashboard />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("lawdog-agreement-row-ag_active")).toBeTruthy();
+    });
+    expect(screen.queryByTestId("lawdog-agreement-row-ag_archived")).toBeNull();
+    expect(screen.getByTestId("dashboard-view-archived-link").textContent).toMatch(/View archived/);
+    expect(screen.getByTestId("dashboard-agreement-count").textContent).toMatch(/1 agreement/);
+  });
+
+  it("archives optimistically with banner and quiet reload without blanking the list", async () => {
+    const user = userEvent.setup();
+    let indexCalls = 0;
+    vi.spyOn(agreementWorkspaceApi, "fetchWorkspaceIndex").mockImplementation(async () => {
+      indexCalls += 1;
+      if (indexCalls === 1) {
+        return {
+          agreements: [
+            indexRow({ id: "ag_keep", title: "Keep Me" }),
+            indexRow({ id: "ag_archive_me", title: "Archive Me" }),
+          ],
+          skipped: [],
+          error: null,
+        };
+      }
+      return {
+        agreements: [
+          indexRow({ id: "ag_keep", title: "Keep Me" }),
+          indexRow({
+            id: "ag_archive_me",
+            title: "Archive Me",
+            workspace_archived_at: "2026-06-16T00:00:00.000Z",
+          }),
+        ],
+        skipped: [],
+        error: null,
+      };
+    });
+    vi.spyOn(agreementWorkspaceApi, "fetchAgreementDraft").mockResolvedValue({
+      ok: true,
+      draft: draftWithParties(),
+    });
+    const patchSpy = vi
+      .spyOn(agreementWorkspaceApi, "patchWorkspaceArchive")
+      .mockResolvedValue(true);
+
+    render(<AppDashboard />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId("lawdog-agreement-row-ag_archive_me")).toBeTruthy();
+    });
+
+    await user.click(screen.getByTestId("lawdog-action-more-ag_archive_me"));
+    await user.click(screen.getByTestId("lawdog-action-archive-ag_archive_me"));
+
+    expect(screen.queryByText("Loading agreements…")).toBeNull();
+    expect(screen.queryByTestId("lawdog-agreement-row-ag_archive_me")).toBeNull();
+    expect(screen.getByTestId("lawdog-agreement-row-ag_keep")).toBeTruthy();
+    await waitFor(() => {
+      expect(screen.getByTestId("dashboard-archive-notice").textContent).toMatch(
+        /Archive Me.*archived/i,
+      );
+    });
+    expect(screen.getByTestId("dashboard-archive-notice-view")).toBeTruthy();
+    expect(patchSpy).toHaveBeenCalledWith("ag_archive_me", true);
+
+    await waitFor(() => {
+      expect(indexCalls).toBeGreaterThanOrEqual(2);
+    });
+    expect(screen.queryByText("Loading agreements…")).toBeNull();
+    expect(screen.getByTestId("lawdog-agreement-row-ag_keep")).toBeTruthy();
+  });
 });
