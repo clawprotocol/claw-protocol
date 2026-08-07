@@ -639,6 +639,7 @@ import {
   shouldForcePaidProReviewDocumentRender,
 } from "./paidProDocumentBodyRouter";
 import {
+  hasAcceptedPipelineReviewCorpusForRender,
   hasProfessionallyValidatedPipelineReviewCorpusForRender,
   readAcceptedPipelineReviewCorpusPlain,
 } from "./paidProAcceptedPipelineReviewCorpus";
@@ -972,6 +973,7 @@ import {
   logPaidProPostFinalizeHydrationBlocked,
   resolvePaidProPostFinalizeReviewHash,
   resolvePaidProPostFinalizeReviewPlain,
+  resolvePaidProSignerFinalizeSigningReadyPlain,
 } from "./paidProPostFinalizeReviewSurface";
 import {
   resolvePaidProDisplayPlainForSurface,
@@ -27671,8 +27673,17 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         : sanitizeProUserMessage(proFullDraftCustomGateMessage) ||
           guidedCompletionFriendlyCopy.body ||
           "Your intake is still available. Add or clarify details, retry a full Pro draft, or work from your starter version.";
+  // Never overlay Retry on a locked / force-mounted Pro review corpus (pipeline-accepted
+  // or SoT). That was the errant "Retry Pro draft" button over a successful Review.
+  const paidProReviewCorpusLocksOutRetry = Boolean(
+    hasPaidProSourceOfTruth() ||
+      shouldForcePaidProReviewDocumentRender() ||
+      acceptedPaidProAuthorityActive ||
+      hasAcceptedPipelineReviewCorpusForRender(),
+  );
   const showRetryAsPrimaryCta = Boolean(
     !dashboardSignerSetupResumeUiActive &&
+      !paidProReviewCorpusLocksOutRetry &&
       simpleCreateUnifiedBottomCta &&
       createProductionTwoPane &&
       createUiStage === CreateUiStage.DRAFT &&
@@ -27853,6 +27864,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     createProductionTwoPane &&
       createUiStage === CreateUiStage.DRAFT &&
       !paidProInlineStickyBarCopy?.subline &&
+      // Paid Pro first-review / signer-setup owns sticky copy — never "Add recipient emails"
+      // / "Create review links" while the Pro document card is the active surface.
+      !paidProFirstReviewSurfaceActive &&
+      !paidProCanonicalReviewSignerSetupActive &&
+      !shouldForcePaidProReviewDocumentRender() &&
       Boolean(draft) &&
       !isGenerating &&
       !draftPreCommitFreeze &&
@@ -29208,12 +29224,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       // Await durable persist below — never advance into broken final review on 403/404.
       persistFrozenToBackend: false,
     });
-    const signingReadyPlain = (
-      resolvePaidProPostFinalizeReviewPlain() ||
-      getAuthoritativeSigningSnapshot()?.corpus ||
-      hydrated.corpus ||
-      ""
-    ).trim();
+    const signingReadyPlain = resolvePaidProSignerFinalizeSigningReadyPlain({
+      hydratedCorpus: hydrated.corpus,
+      postFinalizePlain: resolvePaidProPostFinalizeReviewPlain(),
+      snapshotCorpus: getAuthoritativeSigningSnapshot()?.corpus,
+    });
     if (!isPaidProSigningReadyHydratedCorpus(signingReadyPlain) || hydrated.rejected) {
       rollbackFinalizeFailure(
         "Signer details could not be applied to the agreement. Update signer details and finalize again before preparing for signing.",

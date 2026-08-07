@@ -58,6 +58,27 @@ export function isPaidProSigningReadyHydratedCorpus(plain: string): boolean {
   return true;
 }
 
+/**
+ * Pick the first signing-ready corpus after finalize hydrate + snapshot write.
+ * Never prefer a non-empty but non-ready post-finalize plain over a ready hydrated body
+ * (that flash caused "Signer details could not be applied" after successful hydrate).
+ */
+export function resolvePaidProSignerFinalizeSigningReadyPlain(args: {
+  hydratedCorpus: string;
+  postFinalizePlain?: string | null;
+  snapshotCorpus?: string | null;
+}): string {
+  const candidates = [
+    args.hydratedCorpus,
+    args.postFinalizePlain,
+    args.snapshotCorpus,
+  ]
+    .map((t) => (t || "").trim())
+    .filter((t) => t.length > 0);
+  const ready = candidates.find((t) => isPaidProSigningReadyHydratedCorpus(t));
+  return ready || candidates[0] || "";
+}
+
 /** Render-time enrichment — does not mutate the frozen signing snapshot store. */
 export function enrichPaidProPostFinalizeDisplayCorpus(
   plain: string,
