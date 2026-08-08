@@ -139,7 +139,47 @@ describe("buildAgreementIntakeClarification", () => {
     expect(rewrite).toMatch(/security commitments/i);
     expect(rewrite).toMatch(/payment dispute|withhold/i);
     expect(rewrite).toMatch(/PHI|PCI|Out of scope|Data scope/i);
+    expect(rewrite).toMatch(/children'?s\s+data/i);
     expect(rewrite).not.toMatch(/pilot agreement/i);
+  });
+
+  it("guides nonsensical / low-signal prompts with a starter template (universal)", () => {
+    const mash = assessAgreementIntakeCapability("asdfasdfasdf qwerty zxcvbnm lorem ipsum dolor ".repeat(6));
+    expect(mash.ok).toBe(false);
+    if (mash.ok) return;
+    expect(mash.code).toBe("low_signal");
+    expect(mash.clarification.suggestedRewrite).toMatch(/Draft a .+ agreement between/i);
+
+    const junk = assessAgreementIntakeCapability(
+      "!!! ### @@@ 🚀🚀🚀 random pasted chat nonsense without any companies fees or contracts " +
+        "blah blah blah filler filler filler more filler and emoji spam 🎉🎉🎉",
+    );
+    expect(junk.ok).toBe(false);
+    if (junk.ok) return;
+    expect(junk.code).toBe("low_signal");
+  });
+
+  it("guides too-thin draft-between shells that lack fee/term/type", () => {
+    const decision = assessAgreementIntakeCapability(
+      "Draft an agreement between Alpha and Beta about stuff.",
+    );
+    expect(decision.ok).toBe(false);
+    if (decision.ok) return;
+    expect(decision.code).toBe("needs_commercial_basics");
+  });
+
+  it("preserves children’s / COPPA exclusions from list-style data-scope sentences", () => {
+    const c = buildAgreementIntakeClarification(
+      "Hey LawDog, help me thinking through a customer contract. 12-month SaaS, $100k ACV.\n" +
+        "It should not involve PHI, PCI, children's data, or government classified information.\n" +
+        "Can you help me figure out:\n" +
+        "1. Whether we should accept their paper with edits.\n" +
+        "2. Which terms are actual deal risks.\n" +
+        "I'm not looking for a law school memo.",
+    );
+    expect(c?.kind).toBe("counsel_prep");
+    expect(c?.suggestedRewrite || "").toMatch(/children'?s\s+data/i);
+    expect(c?.whatWeHeard.join(" ")).toMatch(/children'?s\s+data/i);
   });
 
   it("covers a wide spectrum of commercial topics across deal families (product-wide)", () => {

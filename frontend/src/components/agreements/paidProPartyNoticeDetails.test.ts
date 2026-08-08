@@ -7,6 +7,7 @@ import {
   ensureExecutionBlockNoticeContactFieldLines,
   repairCollapsedInlineNoticeStanzas,
   relocateMisplacedNoticesSectionBeforeGoverningLaw,
+  resolveCanonicalNoticePartyCount,
 } from "./paidProPartyNoticeDetails";
 import { buildLivePaidProSignerMetadataAuthority } from "./paidProSignerMetadataAuthority";
 import { buildHydratedAuthoritativeSigningCorpusFromAuthority } from "./authoritativeSignerHydration";
@@ -72,6 +73,26 @@ describe("paidProPartyNoticeDetails", () => {
   afterEach(() => {
     clearPaidProSourceOfTruth();
     clearAuthoritativeSigningSnapshot();
+  });
+
+  it("caps notice party count at 2 for clear between-A-and-B placeholder intakes", () => {
+    const intake =
+      "Draft a 12-month SaaS subscription agreement between [Your Company Legal Name] and [Customer Legal Name] " +
+      "for approximately $240k ACV. Governing law: [State].";
+    const fiveSlots = Array.from({ length: 5 }, (_, partyIndex) => ({
+      partyIndex,
+      partyLegalName: partyIndex === 0 ? "[Your Company Legal Name]" : partyIndex === 1 ? "[Customer Legal Name]" : "",
+      signerEmail: "",
+      signerName: "",
+      signerTitle: "",
+      partyAddress: "",
+    }));
+    expect(
+      resolveCanonicalNoticePartyCount(fiveSlots, {
+        intakeText: intake,
+        draftPartyNames: ["[Your Company Legal Name]", "[Customer Legal Name]"],
+      }),
+    ).toBe(2);
   });
 
   it("buildPartyNoticeDetailsBlock includes email and address, omits blank address", () => {

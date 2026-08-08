@@ -38,6 +38,7 @@ import {
   resolveAuthoritativeSignerCount,
   resolveIntakeManifestAuthorityCount,
 } from "./signerCountAuthority";
+import { extractBetweenPartyRawPair } from "./partyBetweenParse";
 import {
   applyContactAuthorityExecutionBlockIntegrity,
   stripExecutionBlockContactContamination,
@@ -425,6 +426,28 @@ function defuseEntityWitnessFusionLine(line: string): { line: string; repaired: 
   return { line: cleaned, repaired: cleaned !== trimmed };
 }
 
+/**
+ * Clear “between A and B” intakes (including bracket placeholders) must stay bipartite for
+ * notice stanza authority — UI max party slots must not invent Party 3–5 repairs/warnings.
+ */
+function resolveClearBipartiteBetweenNoticeCeiling(intake: string): number {
+  const text = (intake || "").trim();
+  if (!text) return 0;
+  if (/\b(?:three|four|five|3|4|5)\s+parties\b/i.test(text)) return 0;
+  if (/\bParty\s*3\b/i.test(text) && /\bParty\s*[12]\b/i.test(text)) return 0;
+  if (/\bamong\b/i.test(text) && /,/.test(text)) return 0;
+  const pair = extractBetweenPartyRawPair(text);
+  if (!pair) return 0;
+  // Oxford multi-party: "A, B, and C" — left side carries an "and" or multiple comma segments.
+  if (/\band\b/i.test(pair.leftRaw)) return 0;
+  const leftCommaParts = pair.leftRaw
+    .split(",")
+    .map((p) => p.trim())
+    .filter((p) => p.length >= 2 && !/^(?:inc|llc|ltd|corp|co)\.?$/i.test(p));
+  if (leftCommaParts.length >= 2) return 0;
+  return 2;
+}
+
 export function resolveCanonicalNoticePartyCount(
   parties: readonly PaidProSignerMetadataParty[],
   roleContext?: PaidProPartyRoleContext | null,
@@ -433,7 +456,10 @@ export function resolveCanonicalNoticePartyCount(
   // TEST538 — never let a contaminated parties list expand the notice authority past the number of
   // real legal parties the immutable intake manifest resolves (phantom 5th / Party 1 placeholder).
   const ceiling = resolveIntakeManifestAuthorityCount(roleContext?.intakeText ?? "");
-  return ceiling >= 2 ? Math.min(rawCount, ceiling) : rawCount;
+  const bipartite = resolveClearBipartiteBetweenNoticeCeiling(roleContext?.intakeText ?? "");
+  let count = ceiling >= 2 ? Math.min(rawCount, ceiling) : rawCount;
+  if (bipartite === 2) count = Math.min(count, 2);
+  return count;
 }
 
 function resolveCanonicalNoticePartyCountRaw(
@@ -441,6 +467,10 @@ function resolveCanonicalNoticePartyCountRaw(
   roleContext?: PaidProPartyRoleContext | null,
 ): number {
   const intake = roleContext?.intakeText?.trim() ?? "";
+  const bipartiteCeiling = resolveClearBipartiteBetweenNoticeCeiling(intake);
+  if (bipartiteCeiling === 2) {
+    return 2;
+  }
   const draftPartyNames =
     roleContext?.draftPartyNames ??
     parties.map((p) => p.partyLegalName).filter((n) => n.trim().length >= 2);
@@ -1008,8 +1038,26 @@ function noticeStanzaHasEntityLine(stanza: string): boolean {
   return Boolean(entityLine && entityLine.length >= 3 && ENTITY_SUFFIX_LINE_RE.test(entityLine));
 }
 
-function logPaidProNoticeEntityMissingDiagnostic(payload: { partyIndex: number; resolvedLegal: string }): void {
+function logPaidProNoticeEntityMissingDiagnostic(payload: {
+  partyIndex: number;
+  resolvedLegal: string;
+  /** When set, suppress expected Party-N fallbacks past the deal’s party count. */
+  noticePartyCap?: number;
+}): void {
   if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
+  const cap = payload.noticePartyCap;
+  if (
+    typeof cap === "number" &&
+    cap >= 2 &&
+    payload.partyIndex >= cap &&
+    /^Party\s+\d+$/i.test(payload.resolvedLegal)
+  ) {
+    return;
+  }
+  // Ordinary 2-party drafts often carry unused UI slots; Party 3+ positional fallback is noise.
+  if (payload.partyIndex >= 2 && /^Party\s+\d+$/i.test(payload.resolvedLegal)) {
+    return;
+  }
   // eslint-disable-next-line no-console
   console.warn("[paid-pro-notice-entity-missing]", payload);
 }
@@ -1077,6 +1125,14 @@ function resolveNoticeStanzaLegalEntity(
     }
     return "";
   };
+  // Bracket template placeholders from suggested rewrites are acceptable interim identities.
+  const bracketPlaceholder = (value: string): string => {
+    const t = value.trim();
+    return /^\[[^\]]{2,80}\]$/.test(t) ? t : "";
+  };
+  const fromBracket = bracketPlaceholder(direct) || bracketPlaceholder(fromDraft);
+  if (fromBracket) return fromBracket;
+
   const safeDraft = sanitizeFallback(fromDraft);
   if (safeDraft) return safeDraft;
   const safeDirect = sanitizeFallback(direct);
@@ -1084,6 +1140,7 @@ function resolveNoticeStanzaLegalEntity(
   logPaidProNoticeEntityMissingDiagnostic({
     partyIndex: party.partyIndex,
     resolvedLegal: `Party ${party.partyIndex + 1}`,
+    noticePartyCap: authorityParties.length,
   });
   return `Party ${party.partyIndex + 1}`;
 }

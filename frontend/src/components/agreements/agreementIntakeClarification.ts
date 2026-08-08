@@ -13,7 +13,9 @@ export type AgreementIntakeClarificationKind =
   | "missing_named_parties"
   | "too_sparse"
   | "needs_commercial_basics"
-  | "ambiguous_request";
+  | "ambiguous_request"
+  /** Keyboard mash, spam, or long noise with almost no draftable commercial signal. */
+  | "low_signal";
 
 export type AgreementIntakeClarification = {
   kind: AgreementIntakeClarificationKind;
@@ -177,6 +179,23 @@ function extractAskBullets(raw: string): string[] {
   return out;
 }
 
+function pushUniqueLabel(list: string[], label: string): void {
+  if (!list.some((x) => x.toLowerCase() === label.toLowerCase())) list.push(label);
+}
+
+/** Map a short data-scope token into a stable exclusion label (or null). */
+function exclusionLabelFromToken(token: string): string | null {
+  const p = token.replace(/\s+/g, " ").trim().toLowerCase();
+  if (!p || p.length > 64) return null;
+  if (/\bphi\b|\bhipaa\b/.test(p)) return "PHI/HIPAA";
+  if (/\bpci\b|payment\s+card/.test(p)) return "PCI";
+  if (/\bchild|\bcoppa\b|\bminors?\b/.test(p)) return "children's data";
+  if (/\bclassif|\bitar\b|\bcui\b|controlled\s+(?:unclassified|gov)/.test(p)) {
+    return "classified / controlled gov data";
+  }
+  return null;
+}
+
 function extractDataScopeNotes(raw: string): string[] {
   const notes: string[] = [];
   const includes: string[] = [];
@@ -190,12 +209,99 @@ function extractDataScopeNotes(raw: string): string[] {
   if (includes.length) notes.push(`Handles: ${includes.join(", ")}`);
 
   const exclusions: string[] = [];
-  if (/\bPHI\b|\bHIPAA\b/i.test(raw)) exclusions.push("PHI/HIPAA");
-  if (/\bPCI\b|\bpayment\s+card\b/i.test(raw)) exclusions.push("PCI");
-  if (/\bchildren'?s\s+data\b|\bCOPPA\b/i.test(raw)) exclusions.push("children’s data");
-  if (/\b(?:government\s+)?classified\b|\bITAR\b|\bCUI\b/i.test(raw)) exclusions.push("classified / controlled gov data");
+  if (/\bPHI\b|\bHIPAA\b/i.test(raw)) pushUniqueLabel(exclusions, "PHI/HIPAA");
+  if (/\bPCI\b|\bpayment\s+card\b/i.test(raw)) pushUniqueLabel(exclusions, "PCI");
+  // Straight / curly apostrophe, "child data", COPPA, minors.
+  if (
+    /\bchildren[''\u2019]?s\s+data\b|\bchild(?:ren)?\s+data\b|\bCOPPA\b|\bminors?[''\u2019]?s?\s+data\b/i.test(
+      raw,
+    )
+  ) {
+    pushUniqueLabel(exclusions, "children's data");
+  }
+  if (/\b(?:government\s+)?classified\b|\bITAR\b|\bCUI\b|\bcontrolled\s+(?:unclassified|gov)/i.test(raw)) {
+    pushUniqueLabel(exclusions, "classified / controlled gov data");
+  }
+
+  // List patterns: "should not involve PHI, PCI, children's data, or …"
+  const listRe =
+    /(?:should\s+not\s+involve|must\s+not\s+(?:include|involve)|(?:does|do)\s+not\s+(?:include|involve)|excludes?|out\s+of\s+scope|no(?:t)?\s+(?:include|involving))\s*:?\s*([^.!\n]{6,240})/gi;
+  let lm: RegExpExecArray | null;
+  while ((lm = listRe.exec(raw))) {
+    const chunk = lm[1] || "";
+    for (const part of chunk.split(/\s*(?:,|;|\bor\b|\band\b)\s*/i)) {
+      const label = exclusionLabelFromToken(part);
+      if (label) pushUniqueLabel(exclusions, label);
+    }
+  }
+
   if (exclusions.length) notes.push(`Out of scope: ${exclusions.join(", ")}`);
   return notes;
+}
+
+/** Rough commercial-signal score used to distinguish draftable notes from noise. */
+function commercialSignalScore(raw: string): number {
+  let score = 0;
+  if (MONEY_RE.test(raw)) score += 3;
+  if (TERM_RE.test(raw)) score += 2;
+  if (
+    SAAS_RE.test(raw) ||
+    PILOT_RE.test(raw) ||
+    SERVICES_RE.test(raw) ||
+    NDA_RE.test(raw) ||
+    LICENSE_RE.test(raw) ||
+    EMPLOYMENT_RE.test(raw) ||
+    LOAN_RE.test(raw) ||
+    LEASE_RE.test(raw)
+  ) {
+    score += 2;
+  }
+  if (BETWEEN_PARTIES_RE.test(raw)) score += 2;
+  if (DRAFT_INTENT_RE.test(raw)) score += 1;
+  score += Math.min(extractTopicChips(raw).length, 6);
+  if (extractDataScopeNotes(raw).length) score += 2;
+  if (extractGoverningLaw(raw)) score += 1;
+  if (COUNSEL_PREP_SIGNAL_RE.test(raw)) score += 1;
+  return score;
+}
+
+/**
+ * True when the prompt is mostly gibberish, spam, or padding with almost nothing
+ * LawDog can turn into an agreement (universal — every account).
+ */
+function looksLowSignalOrNonsensical(raw: string): boolean {
+  const compact = raw.replace(/\s+/g, " ").trim();
+  if (compact.length < 6) return false;
+
+  const alnum = compact.replace(/[^a-zA-Z0-9]/g, "");
+  if (/^(?:(.)\1{5,}|[asdfghjkl;']{10,}|[qwertyuiop]{10,}|[zxcvbnm]{10,})$/i.test(alnum)) {
+    return true;
+  }
+  if (/(.)\1{7,}/.test(compact)) return true;
+
+  const letters = (compact.match(/[A-Za-z]/g) || []).length;
+  const letterRatio = letters / Math.max(compact.length, 1);
+  if (compact.length >= 48 && letterRatio < 0.42) return true;
+
+  const score = commercialSignalScore(raw);
+  if (score >= 3) return false;
+
+  const words = compact
+    .toLowerCase()
+    .split(/[^a-z0-9]+/)
+    .filter((w) => w.length >= 2);
+  const dealHits = words.filter((w) =>
+    /^(?:draft|create|write|agreement|contract|between|parties?|fee|term|nda|saas|services?|payment|month|months|year|years|llc|inc|pilot|subscription|msa|sow)$/.test(
+      w,
+    ),
+  ).length;
+
+  // Long inundation with almost no deal vocabulary.
+  if (compact.length >= 220 && score <= 1 && dealHits <= 1) return true;
+  if (compact.length >= 80 && score === 0 && dealHits === 0) return true;
+  if (words.length >= 28 && dealHits <= 1 && score <= 1) return true;
+
+  return false;
 }
 
 function extractExpansionNote(raw: string): string | null {
@@ -317,6 +423,7 @@ function buildCommercialSuggestedRewrite(raw: string): string {
       `Draft a ${typePhrase} between [Party A Legal Name] and [Party B Legal Name] ` +
       `covering confidential business information for a ${term} term.` +
       topicLine +
+      dataLine +
       ` Governing law: ${gov}.`
     );
   }
@@ -367,6 +474,7 @@ function buildCommercialSuggestedRewrite(raw: string): string {
     `Draft a ${typePhrase} between [Party A Legal Name] and [Party B Legal Name] for [scope], ` +
     `fee ${fee}, term ${term}.` +
     topicLine +
+    dataLine +
     ` Governing law: ${gov}.`
   );
 }
@@ -452,6 +560,38 @@ function draftExampleForDeal(deal: DealType): string {
   }
 }
 
+function lowSignalClarification(raw: string): AgreementIntakeClarification {
+  const score = commercialSignalScore(raw);
+  const heard: string[] = [];
+  if (raw.length >= 200) {
+    heard.push(
+      `About ${raw.length.toLocaleString()} characters of text, but almost no draftable deal facts (signal score ${score}).`,
+    );
+  } else if (raw.length) {
+    heard.push(`You wrote: “${raw.slice(0, 140)}${raw.length > 140 ? "…" : ""}”`);
+  }
+  heard.push("We could not reliably extract parties, fee, term, or agreement type.");
+  return {
+    kind: "low_signal",
+    title: "We need a clearer, factual draft request",
+    why:
+      "This prompt doesn’t contain enough usable commercial information for LawDog to draft an agreement. " +
+      "Paste the deal facts (who, what, fee, term) — not filler, spam, or unrelated notes.",
+    whatWeHeard: heard,
+    guidedSteps: [
+      "Start with: “Draft a [type] agreement between [Party A Legal Name] and [Party B Legal Name]…”.",
+      "Add scope, fee (if any), and term in plain sentences.",
+      "Drop nonsense, pasted junk, or questions that aren’t deal terms.",
+      "Optional: keep data-scope lines (what data is in / out of scope) if they matter.",
+    ],
+    suggestedRewrite:
+      "Draft a services agreement between [Party A Legal Name] and [Party B Legal Name] for [scope], " +
+      "fee [amount], term [duration]. Use clear, practical language. Governing law: [State].",
+    primaryCtaLabel: "Use starter template",
+    secondaryCtaLabel: "Keep editing",
+  };
+}
+
 export function buildAgreementIntakeClarification(rawIntake: string): AgreementIntakeClarification | null {
   const raw = (rawIntake || "").replace(/\r\n/g, "\n").trim();
   if (raw.length < 6) return null;
@@ -463,12 +603,43 @@ export function buildAgreementIntakeClarification(rawIntake: string): AgreementI
   const hasMoney = MONEY_RE.test(raw);
   const hasTerm = TERM_RE.test(raw);
   const deal = dealTypeLabel(raw);
+  const signal = commercialSignalScore(raw);
+  const lowSignal = looksLowSignalOrNonsensical(raw);
 
-  if (hasDraftIntent && hasBetweenParties) return null;
+  // Noise / gibberish / inundation with no salvageable deal — before other branches.
+  if (lowSignal && !(counselSignals && (numberedAdvisory || raw.length >= 900))) {
+    return lowSignalClarification(raw);
+  }
+
+  // Draft-shaped prompts proceed when there is a recognizable deal type and/or economics/term.
+  // Bare “draft an agreement between A and B” without fee/term/type still needs basics.
+  if (hasDraftIntent && hasBetweenParties) {
+    const hasDealType = deal !== "generic";
+    const hasTopics = extractTopicChips(raw).length > 0;
+    if (hasMoney || hasTerm || hasDealType || hasTopics) return null;
+    return {
+      kind: "needs_commercial_basics",
+      title: "Add scope, fee, or term",
+      why: "We see a draft request and parties, but not enough deal facts to build a useful agreement.",
+      whatWeHeard: [
+        "A “draft … between …” shape was detected.",
+        "Fee, term, and agreement type still look thin or missing.",
+      ],
+      guidedSteps: [
+        "Name the agreement type (services, NDA, SaaS, pilot, etc.).",
+        "Add what work or rights it covers, plus fee and term if you know them.",
+        "Keep any data-scope exclusions you care about (e.g. no PHI, PCI, or children’s data).",
+      ],
+      suggestedRewrite: buildGenericSuggestedRewrite(raw),
+      primaryCtaLabel: "Use suggested draft request",
+      secondaryCtaLabel: "Keep editing",
+    };
+  }
 
   if ((counselSignals && numberedAdvisory && !hasBetweenParties) || (counselSignals && raw.length >= 900 && !hasDraftIntent)) {
     const suggested = buildCommercialSuggestedRewrite(raw);
     const topicCount = extractTopicChips(raw).length;
+    const dataNotes = extractDataScopeNotes(raw);
     return {
       kind: "counsel_prep",
       title: "This reads like negotiation prep — not a draftable agreement yet",
@@ -482,6 +653,9 @@ export function buildAgreementIntakeClarification(rawIntake: string): AgreementI
         topicCount > 0
           ? "Keep the commercial facts already listed below (fee, term, and the topics we extracted)."
           : "Keep the commercial facts you already listed (fee, term, and key risk topics).",
+        dataNotes.length > 0
+          ? "Keep the data-scope lines (handles / out of scope) — they belong in the draft request."
+          : "If data scope matters, say what data is in and out of scope (e.g. no PHI, PCI, or children’s data).",
         "Save negotiation strategy / “what to push” questions for your attorney or AE playbook outside LawDog.",
       ],
       suggestedRewrite: suggested,
@@ -490,7 +664,7 @@ export function buildAgreementIntakeClarification(rawIntake: string): AgreementI
     };
   }
 
-  if (raw.length < 40 && !hasBetweenParties) {
+  if ((raw.length < 40 && !hasBetweenParties) || (signal === 0 && raw.length < 80 && !hasBetweenParties)) {
     return {
       kind: "too_sparse",
       title: "Add a few basics so we can draft",
@@ -500,6 +674,7 @@ export function buildAgreementIntakeClarification(rawIntake: string): AgreementI
         "Name Party A and Party B (legal names).",
         "Say the agreement type (services, NDA, pilot, SaaS, consulting, etc.).",
         "Add fee and term if you know them.",
+        "Optional: note data that is in or out of scope.",
       ],
       suggestedRewrite: buildGenericSuggestedRewrite(raw),
       primaryCtaLabel: "Use starter template",
@@ -517,7 +692,8 @@ export function buildAgreementIntakeClarification(rawIntake: string): AgreementI
     LICENSE_RE.test(raw) ||
     EMPLOYMENT_RE.test(raw) ||
     LOAN_RE.test(raw) ||
-    LEASE_RE.test(raw);
+    LEASE_RE.test(raw) ||
+    signal >= 3;
 
   if (looksCommercial && !hasBetweenParties) {
     const suggested = buildGenericSuggestedRewrite(raw);
@@ -536,7 +712,7 @@ export function buildAgreementIntakeClarification(rawIntake: string): AgreementI
       whatWeHeard: heard,
       guidedSteps: [
         "Add: “between [Your Company LLC] and [Customer Inc.].”",
-        "Keep the fee, term, and scope you already wrote.",
+        "Keep the fee, term, scope, and data-scope facts you already wrote.",
         "Then tap Create draft again.",
       ],
       suggestedRewrite: suggested,
@@ -545,7 +721,7 @@ export function buildAgreementIntakeClarification(rawIntake: string): AgreementI
     };
   }
 
-  if (hasBetweenParties && !hasDraftIntent && !hasMoney && !hasTerm && raw.length < 120) {
+  if (hasBetweenParties && !hasDraftIntent && !hasMoney && !hasTerm && (raw.length < 120 || signal < 3)) {
     return {
       kind: "needs_commercial_basics",
       title: "Add scope, fee, or term",
@@ -562,28 +738,44 @@ export function buildAgreementIntakeClarification(rawIntake: string): AgreementI
     };
   }
 
+  // Long / inundated notes: salvage what we can, force a draft-shaped rewrite.
   if (raw.length >= 400 && !hasDraftIntent && !hasBetweenParties) {
     const topics = extractTopicChips(raw);
+    const dataNotes = extractDataScopeNotes(raw);
+    if (signal <= 1 && topics.length === 0 && dataNotes.length === 0) {
+      return lowSignalClarification(raw);
+    }
     return {
       kind: "ambiguous_request",
       title: "We need a clearer draft request",
-      why: "This prompt is detailed, but it isn’t shaped as “draft an agreement between named parties.”",
+      why:
+        "This prompt is long or mixed with extra notes, but it isn’t shaped as “draft an agreement between named parties.” " +
+        "We’ll keep the commercial facts we can read and drop the rest.",
       whatWeHeard: [
         `About ${raw.length.toLocaleString()} characters of notes.`,
         hasMoney ? `Economics mentioned: ${extractMoneyPhrases(raw).join(", ")}.` : "Economics were not clearly stated.",
         hasTerm ? `Term mentioned: ${extractTermPhrase(raw)}.` : "Term was not clearly stated.",
         ...(topics.length ? [`Topics detected (${topics.length}): ${topics.slice(0, 14).join("; ")}.`] : []),
-        ...extractDataScopeNotes(raw).map((n) => `${n}.`),
+        ...dataNotes.map((n) => `${n}.`),
+        ...(signal <= 2
+          ? ["Much of the text looks unrelated or non-commercial — only salvageable facts are listed above."]
+          : []),
       ],
       guidedSteps: [
         "Lead with: “Draft a [type] agreement between [A] and [B]…”.",
-        "Pull only the deal facts you want in the contract (drop advice questions).",
+        "Pull only the deal facts you want in the contract (drop advice questions and filler).",
+        "Keep data-scope exclusions if you stated them (PHI, PCI, children’s data, etc.).",
         "Or use the suggested rewrite and fill in the bracketed names.",
       ],
       suggestedRewrite: buildGenericSuggestedRewrite(raw),
       primaryCtaLabel: "Use suggested draft request",
       secondaryCtaLabel: "I’ll rewrite it",
     };
+  }
+
+  // Medium-length prompts with no commercial anchors.
+  if (signal === 0 && raw.length >= 40) {
+    return lowSignalClarification(raw);
   }
 
   return null;
