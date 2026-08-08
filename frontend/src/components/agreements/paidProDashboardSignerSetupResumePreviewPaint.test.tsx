@@ -29,9 +29,15 @@ const intakeSrc = readFileSync(join(here, "AgreementBuilderIntake.tsx"), "utf8")
 const AGREEMENT_ID = "9d6d1be0-55dd-415a-bf61-fee9db743674";
 
 function buildAcceptedServerDraft(len = 2200): string {
-  const body = Array.from({ length: 40 }, (_, i) => `Section ${i + 1}. Accepted server full draft clause.`).join(
-    "\n\n",
-  );
+  const body = [
+    "1. Services and Project Term",
+    "Designer will provide product design services for Client's new mobile app UI during the six-week period starting on the Effective Date.",
+    "",
+    "2. Fees and Payment",
+    "Client shall pay Designer a fixed fee of $12,000 as set forth in Exhibit A.",
+    "",
+    ...Array.from({ length: 30 }, (_, i) => `Section ${i + 3}. Accepted server full draft clause.`),
+  ].join("\n\n");
   const head =
     "SERVICES AGREEMENT\n\nThis Agreement is between Acme Test Co and LawDog Demo LLC.\n\n";
   return (head + body).padEnd(len, " ");
@@ -81,19 +87,55 @@ describe("dashboard signer-setup resume paints accepted server_full_draft previe
     unmount();
   });
 
-  it("resume shell prefers locked preview over ForcedRoute empty gate", () => {
+  it("resume shell paints ForcedRoute with acceptedCanonicalPlain (styled title + headings)", () => {
     armCreatorDashboardSignerSetupResume(AGREEMENT_ID);
-    expect(intakeSrc).toContain("Resume preview must win over ForcedRoute");
-    expect(intakeSrc).toContain("commitCanonicalPaidProReviewSessionMarkers");
     expect(intakeSrc).toContain('data-testid="dashboard-signer-setup-agreement-preview"');
+    expect(intakeSrc).toContain("Resume preview must paint through ForcedRoute");
+    expect(intakeSrc).toContain("acceptedCanonicalPlain:");
+    // Must not regress to a raw <pre> dump of the resume plain (strips h1/h2 styling).
+    expect(intakeSrc).not.toMatch(
+      /dashboardSignerSetupResumePreviewPlain\.trim\(\)\.length >= 80 \? \(\s*<pre/,
+    );
     const resumePreviewIdx = intakeSrc.indexOf(
-      ") : dashboardSignerSetupResumeUiActive ? (\n                                          // Resume preview must win over ForcedRoute",
+      ") : dashboardSignerSetupResumeUiActive ? (\n                                          // Resume preview must paint through ForcedRoute",
+    );
+    const forcedInsideResumeIdx = intakeSrc.indexOf(
+      "<PaidProDocumentBodyForcedRoute",
+      resumePreviewIdx,
     );
     const forcedAfterResumeIdx = intakeSrc.indexOf(
       ") : paidProForcedFirstReviewActive ? (\n                                          <PaidProDocumentBodyForcedRoute",
     );
     expect(resumePreviewIdx).toBeGreaterThan(0);
-    expect(forcedAfterResumeIdx).toBeGreaterThan(resumePreviewIdx);
+    expect(forcedInsideResumeIdx).toBeGreaterThan(resumePreviewIdx);
+    expect(forcedAfterResumeIdx).toBeGreaterThan(forcedInsideResumeIdx);
+  });
+
+  it("ForcedRoute with resume plain paints document title h1 and bold section h2", () => {
+    const corpus = buildAcceptedServerDraft(2400);
+    const router = resolvePaidProDocumentBodyRouter();
+    const { container, unmount } = render(
+      <PaidProDocumentBodyForcedRoute
+        embedded
+        router={router}
+        html=""
+        displayContext={{
+          paidProActive: true,
+          premiumPaidDocumentSurface: true,
+          premiumCheckoutCompleted: true,
+          acceptedCanonicalPlain: corpus,
+        }}
+        authoritativeSource="server_full_draft"
+      />,
+    );
+    const title = container.querySelector("h1");
+    expect(title?.textContent?.trim()).toMatch(/SERVICES AGREEMENT/i);
+    const headings = Array.from(container.querySelectorAll("h2.premium-doc-section-heading")).map(
+      (el) => el.textContent?.trim() || "",
+    );
+    expect(headings.some((h) => /1\.\s*Services and Project Term/i.test(h))).toBe(true);
+    expect(headings.some((h) => /2\.\s*Fees and Payment/i.test(h))).toBe(true);
+    unmount();
   });
 
   it("branch resolver accepts pipeline authority length without frozen SoT flag", () => {

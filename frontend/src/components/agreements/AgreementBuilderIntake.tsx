@@ -33377,12 +33377,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                             editorRef={agreementPreviewEditorRef}
                                           />
                                         ) : dashboardSignerSetupResumeUiActive ? (
-                                          // Resume preview must win over ForcedRoute: router can force with
-                                          // pipeline sotLen while hasSoT/display authority still lag.
+                                          // Resume preview must paint through ForcedRoute (styled h1/h2), not a raw
+                                          // <pre>, so title + section heading bold match the first-review document.
+                                          // Seed acceptedCanonicalPlain so paint wins even when SoT/display lag.
                                           <div
                                             data-testid="dashboard-signer-setup-agreement-preview"
                                             data-document-mounted={
-                                              dashboardSignerSetupResumePreviewPlain.trim().length >= 80
+                                              dashboardSignerSetupResumePreviewPlain.trim().length >= 80 ||
+                                              paidProForcedFirstReviewActive
                                                 ? "true"
                                                 : "false"
                                             }
@@ -33393,29 +33395,28 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                             <p className="mt-1 text-xs leading-relaxed text-stone-600">
                                               Locked while you complete signer details. Nothing is sent from this step.
                                             </p>
-                                            {dashboardSignerSetupResumePreviewPlain.trim().length >= 80 ? (
-                                              <pre className="mt-4 max-h-[min(42vh,30rem)] overflow-y-auto whitespace-pre-wrap font-serif text-[15px] leading-[1.85] text-stone-900 [text-wrap:pretty]">
-                                                {dashboardSignerSetupResumePreviewPlain}
-                                              </pre>
-                                            ) : paidProForcedFirstReviewActive ? (
-                                              <PaidProDocumentBodyForcedRoute
-                                                embedded
-                                                router={paidProDocumentBodyRouter}
-                                                html={premiumReadonlyAgreementHtml}
-                                                suppressEmptyFallback={blockProEmptyDocumentFallback}
-                                                compactDocumentTopPadding={paidProReviewCompactChrome}
-                                                visibleProPaperTrace={visibleProPaperTrace}
-                                                displayContext={{
-                                                  ...paidProFirstReviewDisplayContext,
-                                                  acceptedCanonicalPlain:
-                                                    dashboardSignerSetupResumePreviewPlain ||
-                                                    readAcceptedPipelineReviewCorpusPlain() ||
-                                                    paidProFirstReviewDisplayContext?.acceptedCanonicalPlain,
-                                                  paidProActive: true,
-                                                  premiumPaidDocumentSurface: true,
-                                                }}
-                                                authoritativeSource="server_full_draft"
-                                              />
+                                            {dashboardSignerSetupResumePreviewPlain.trim().length >= 80 ||
+                                            paidProForcedFirstReviewActive ? (
+                                              <div className="mt-4 max-h-[min(42vh,30rem)] overflow-y-auto">
+                                                <PaidProDocumentBodyForcedRoute
+                                                  embedded
+                                                  router={paidProDocumentBodyRouter}
+                                                  html={premiumReadonlyAgreementHtml}
+                                                  suppressEmptyFallback={blockProEmptyDocumentFallback}
+                                                  compactDocumentTopPadding={paidProReviewCompactChrome}
+                                                  visibleProPaperTrace={visibleProPaperTrace}
+                                                  displayContext={{
+                                                    ...paidProFirstReviewDisplayContext,
+                                                    acceptedCanonicalPlain:
+                                                      dashboardSignerSetupResumePreviewPlain ||
+                                                      readAcceptedPipelineReviewCorpusPlain() ||
+                                                      paidProFirstReviewDisplayContext?.acceptedCanonicalPlain,
+                                                    paidProActive: true,
+                                                    premiumPaidDocumentSurface: true,
+                                                  }}
+                                                  authoritativeSource="server_full_draft"
+                                                />
+                                              </div>
                                             ) : (
                                               <p className="mt-4 text-sm text-stone-600" role="status">
                                                 Loading your saved agreement preview…
