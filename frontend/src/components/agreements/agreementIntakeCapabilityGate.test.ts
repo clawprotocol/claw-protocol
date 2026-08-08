@@ -74,6 +74,37 @@ describe("assessAgreementIntakeCapability", () => {
   });
 });
 
+const COUNSEL_PREP_ENTERPRISE_SAAS = `Hey LawDog, I need help thinking through a customer contract issue.
+
+We're trying to get a new enterprise customer over the line. It's a 12-month SaaS subscription, around $240k ACV, with a possible expansion if the first team rollout goes well.
+
+The customer wants to use their paper instead of ours. I'm fine being flexible, but their agreement has a few terms that seem pretty heavy for this deal size and for what the product actually does.
+
+Some of the things they're asking for:
+- unlimited liability for data security, confidentiality, IP claims, and service failures
+- a 99.9% uptime SLA with service credits and termination rights
+- custom security obligations that go beyond our current security program
+- full audit rights, including on-site audits and interviews with our personnel
+- approval rights over all subprocessors
+- 30-day termination for convenience
+- customer ownership of all data, configurations, reports, outputs, and "derivative works"
+- broad indemnity for any losses connected to use of the product
+- a right to withhold payment if there's any dispute
+- a requirement that we support their internal policies even if they change later
+
+Our product will handle their internal business records, employee names/emails, and usage analytics. It should not involve PHI, PCI, children's data, or government classified information.
+
+Can you help me figure out:
+1. Whether we should accept their paper and mark it up or push them back to our MSA/order form/DPA.
+2. Which terms are the biggest commercial or legal risks.
+3. What our preferred and fallback positions should be on liability, SLA, security commitments, audit rights, subprocessors, IP/output ownership, indemnity, termination, and payment disputes.
+4. Where we can make reasonable concessions without creating bad precedent.
+5. Suggested language or redline concepts for the most problematic clauses.
+6. A short AE-friendly note explaining our position without making this feel like a legal standoff.
+7. What I should confirm with security, product, finance, and legal before responding.
+
+Please keep this practical. I need deal guidance, not a long memo. Tell me what to push back on, what we can probably live with, and what needs attorney review before we agree.`;
+
 describe("buildAgreementIntakeClarification", () => {
   it("extracts retest pilot economics into the suggested rewrite", () => {
     const c = buildAgreementIntakeClarification(COUNSEL_PREP_PILOT);
@@ -81,6 +112,34 @@ describe("buildAgreementIntakeClarification", () => {
     expect(c!.kind).toBe("counsel_prep");
     expect(c!.whatWeHeard.some((h) => /60-day|\$15k|mid-market|negotiation/i.test(h))).toBe(true);
     expect(c!.primaryCtaLabel).toMatch(/suggested draft request/i);
+  });
+
+  it("thoroughly salvages enterprise SaaS counsel-prep facts into heard + rewrite", () => {
+    const c = buildAgreementIntakeClarification(COUNSEL_PREP_ENTERPRISE_SAAS);
+    expect(c).not.toBeNull();
+    expect(c!.kind).toBe("counsel_prep");
+    const heard = c!.whatWeHeard.join(" | ");
+    expect(heard).toMatch(/12-month/i);
+    expect(heard).toMatch(/\$240k/i);
+    expect(heard).toMatch(/enterprise/i);
+    expect(heard).toMatch(/their paper/i);
+    expect(heard).toMatch(/SLA|uptime/i);
+    expect(heard).toMatch(/subprocessor/i);
+    expect(heard).toMatch(/indemnity/i);
+    expect(heard).toMatch(/withhold|payment dispute/i);
+    expect(heard).toMatch(/PHI|PCI/i);
+    expect(heard).toMatch(/topics called out \(\d{2,}\)|topics called out \(1[0-4]\)/i);
+
+    const rewrite = c!.suggestedRewrite || "";
+    expect(rewrite).toMatch(/Draft a 12-month SaaS subscription agreement between/i);
+    expect(rewrite).toMatch(/\$240k/i);
+    expect(rewrite).toMatch(/uptime SLA|service credits/i);
+    expect(rewrite).toMatch(/subprocessor/i);
+    expect(rewrite).toMatch(/IP \/ outputs|data ownership/i);
+    expect(rewrite).toMatch(/security commitments/i);
+    expect(rewrite).toMatch(/payment dispute|withhold/i);
+    expect(rewrite).toMatch(/PHI|PCI|Out of scope|Data scope/i);
+    expect(rewrite).not.toMatch(/pilot agreement/i);
   });
 });
 
