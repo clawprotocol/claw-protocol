@@ -53,12 +53,21 @@ export const REVIEW_LINK_READY_ALL_APPROVED_BODY =
 
 export const REVIEW_LINK_READY_BACK_TO_DASHBOARD_LABEL = "Back to dashboard";
 
+function dashboardVerboseLogsEnabled(): boolean {
+  if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return false;
+  try {
+    return typeof localStorage !== "undefined" && localStorage.getItem("claw_dashboard_debug_logs") === "1";
+  } catch {
+    return false;
+  }
+}
+
 export function logDashboardWhatsNextCtaClick(payload: {
   agreementId: string;
   action: string;
   targetRoute: string;
 }): void {
-  if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
+  if (!dashboardVerboseLogsEnabled()) return;
   // eslint-disable-next-line no-console
   console.info("[dashboard-whats-next-cta-click]", payload);
 }
@@ -71,7 +80,7 @@ export function logCreatorDashboardAgreementStatusLoaded(payload: {
   partyCount: number;
   nextAction: string;
 }): void {
-  if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
+  if (!dashboardVerboseLogsEnabled()) return;
   const key = JSON.stringify(payload);
   if (key === lastCreatorDashboardStatusLogKey) return;
   lastCreatorDashboardStatusLogKey = key;
@@ -268,7 +277,11 @@ export function logCreatorDashboardPrepareSignatureClick(payload: {
   }
 }
 
-let lastCreatorDashboardReviewGateLogKey = "";
+let lastCreatorDashboardReviewGateLogKeys = new Set<string>();
+
+export function resetCreatorDashboardReviewGateLogsForTests(): void {
+  lastCreatorDashboardReviewGateLogKeys = new Set();
+}
 
 export function logCreatorDashboardReviewGate(payload: {
   agreementId: string;
@@ -280,11 +293,11 @@ export function logCreatorDashboardReviewGate(payload: {
   prepareSignatureLinksEnabled: boolean;
   source: string;
 }): void {
-  if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
-  const key = JSON.stringify(payload);
-  if (key === lastCreatorDashboardReviewGateLogKey) return;
-  lastCreatorDashboardReviewGateLogKey = key;
+  // Hot path: default off — N agreements × re-renders previously flooded DevTools (~10k info).
+  if (!dashboardVerboseLogsEnabled()) return;
   const id = payload.agreementId.trim();
+  if (!id || lastCreatorDashboardReviewGateLogKeys.has(id)) return;
+  lastCreatorDashboardReviewGateLogKeys.add(id);
   // eslint-disable-next-line no-console
   console.info("[creator-dashboard-review-gate]", {
     agreementIdShort: id.length <= 12 ? id : `${id.slice(0, 8)}…`,
@@ -308,9 +321,9 @@ export function logDashboardInitialState(payload: {
   statusPill: string;
   source: string;
 }): void {
-  if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
+  if (!dashboardVerboseLogsEnabled()) return;
   const id = payload.agreementId.trim();
-  if (lastDashboardInitialStateLogKeys.has(id)) return;
+  if (!id || lastDashboardInitialStateLogKeys.has(id)) return;
   lastDashboardInitialStateLogKeys.add(id);
   // eslint-disable-next-line no-console
   console.info("[dashboard-initial-state]", {
@@ -325,6 +338,10 @@ export function logDashboardInitialState(payload: {
 
 let lastDashboardPostReviewGateStateLogKeys = new Set<string>();
 
+export function resetDashboardPostReviewGateStateLogsForTests(): void {
+  lastDashboardPostReviewGateStateLogKeys = new Set();
+}
+
 export function logDashboardPostReviewGateState(payload: {
   agreementId: string;
   approvedCount: number;
@@ -333,11 +350,10 @@ export function logDashboardPostReviewGateState(payload: {
   statusPill: string | null;
   source: string;
 }): void {
-  if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
+  if (!dashboardVerboseLogsEnabled()) return;
   const id = payload.agreementId.trim();
-  const key = `${id}:${payload.approvedCount}:${payload.requiredPartyCount}:${payload.allApproved}:${payload.statusPill}:${payload.source}`;
-  if (lastDashboardPostReviewGateStateLogKeys.has(key)) return;
-  lastDashboardPostReviewGateStateLogKeys.add(key);
+  if (!id || lastDashboardPostReviewGateStateLogKeys.has(id)) return;
+  lastDashboardPostReviewGateStateLogKeys.add(id);
   // eslint-disable-next-line no-console
   console.info("[dashboard-post-review-gate-state]", {
     agreementIdShort: id.length <= 12 ? id : `${id.slice(0, 8)}…`,

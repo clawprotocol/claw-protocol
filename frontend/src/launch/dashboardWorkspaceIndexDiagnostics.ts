@@ -40,10 +40,19 @@ export function buildDashboardWorkspaceIndexRowDiagnostic(
   };
 }
 
+function dashboardVerboseLogsEnabled(): boolean {
+  if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return false;
+  try {
+    return typeof localStorage !== "undefined" && localStorage.getItem("claw_dashboard_debug_logs") === "1";
+  } catch {
+    return false;
+  }
+}
+
 export function logDashboardWorkspaceIndexRow(
   payload: DashboardWorkspaceIndexRowDiagnostic,
 ): void {
-  if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
+  if (!dashboardVerboseLogsEnabled()) return;
   const key = JSON.stringify(payload);
   if (lastRowLogKeys.has(key)) return;
   lastRowLogKeys.add(key);
@@ -55,7 +64,7 @@ export function logDashboardWorkspaceIndexSkippedRow(payload: {
   agreementId: string;
   skippedReason: string;
 }): void {
-  if (typeof import.meta !== "undefined" && import.meta.env?.MODE === "test") return;
+  if (!dashboardVerboseLogsEnabled()) return;
   const diagnostic: DashboardWorkspaceIndexRowDiagnostic = {
     agreementId: payload.agreementId,
     source: "workspace_index",

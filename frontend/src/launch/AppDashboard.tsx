@@ -102,6 +102,14 @@ import {
   formatGenesisAllowanceStatusCopy,
   formatProAllowanceStatusCopy,
 } from "./simpleProduct/createEntitlementUi";
+import {
+  DASHBOARD_HOME_TABLE_PAGE_SIZE,
+  DASHBOARD_PRIORITY_HYDRATION_LIMIT,
+  DASHBOARD_REVIEW_REFRESH_INTERVAL_MS,
+  DASHBOARD_SECONDARY_ATTENTION_LIMIT,
+  selectDashboardPriorityHydrationRows,
+  sliceDashboardHomeTableRows,
+} from "./dashboardLoadBudget";
 
 export type WorkspaceMode = "empty" | "active" | "power";
 
@@ -138,45 +146,58 @@ export function AppDashboard() {
   >({});
   const [commercialEntitlement, setCommercialEntitlement] =
     useState<CommercialEntitlementDecision | null>(null);
+  const [showAllHomeAgreements, setShowAllHomeAgreements] = useState(false);
   const draftingRedirectedRef = useRef(false);
   const prepareSignatureLinksLaunchRef = useRef<string | null>(null);
   const rowsSnapshotBeforeArchiveRef = useRef<WorkspaceIndexAgreement[] | null>(null);
 
-  const hydrateAuditCompletionFlags = useCallback(async (sourceRows: readonly WorkspaceIndexAgreement[]) => {
-    const candidates = sourceRows.filter(workspaceRowNeedsCompletionAuditHydration);
-    if (candidates.length === 0) return;
-    const flags = await Promise.all(
-      candidates.map(async (row) => {
-        const signed = await fetchAgreementAuditSignedFlag(row.id);
-        return signed ? row.id : null;
-      }),
-    );
-    const next: Record<string, boolean> = {};
-    for (const id of flags) {
-      if (id) next[id] = true;
-    }
-    if (Object.keys(next).length > 0) {
-      setAuditCompletedByAgreementId((prev) => ({ ...prev, ...next }));
-    }
-  }, []);
+  const hydrateAuditCompletionFlags = useCallback(
+    async (sourceRows: readonly WorkspaceIndexAgreement[], opts?: { limit?: number }) => {
+      const limit = opts?.limit ?? DASHBOARD_HOME_TABLE_PAGE_SIZE;
+      const candidates = sourceRows
+        .filter(workspaceRowNeedsCompletionAuditHydration)
+        .slice(0, Math.max(0, limit));
+      if (candidates.length === 0) return;
+      const flags = await Promise.all(
+        candidates.map(async (row) => {
+          const signed = await fetchAgreementAuditSignedFlag(row.id);
+          return signed ? row.id : null;
+        }),
+      );
+      const next: Record<string, boolean> = {};
+      for (const id of flags) {
+        if (id) next[id] = true;
+      }
+      if (Object.keys(next).length > 0) {
+        setAuditCompletedByAgreementId((prev) => ({ ...prev, ...next }));
+      }
+    },
+    [],
+  );
 
-  const hydrateSigningProgressFlags = useCallback(async (sourceRows: readonly WorkspaceIndexAgreement[]) => {
-    const candidates = sourceRows.filter(workspaceRowNeedsSigningProgressHydration);
-    if (candidates.length === 0) return;
-    const entries = await Promise.all(
-      candidates.map(async (row) => {
-        const snap = await fetchServerSigningProgressSnapshot(row.id);
-        return snap ? ([row.id, snap] as const) : null;
-      }),
-    );
-    const next: Record<string, CreatorSigningProgressSnapshot> = {};
-    for (const entry of entries) {
-      if (entry) next[entry[0]] = entry[1];
-    }
-    if (Object.keys(next).length > 0) {
-      setSigningProgressByAgreementId((prev) => ({ ...prev, ...next }));
-    }
-  }, []);
+  const hydrateSigningProgressFlags = useCallback(
+    async (sourceRows: readonly WorkspaceIndexAgreement[], opts?: { limit?: number }) => {
+      const limit = opts?.limit ?? DASHBOARD_HOME_TABLE_PAGE_SIZE;
+      const candidates = sourceRows
+        .filter(workspaceRowNeedsSigningProgressHydration)
+        .slice(0, Math.max(0, limit));
+      if (candidates.length === 0) return;
+      const entries = await Promise.all(
+        candidates.map(async (row) => {
+          const snap = await fetchServerSigningProgressSnapshot(row.id);
+          return snap ? ([row.id, snap] as const) : null;
+        }),
+      );
+      const next: Record<string, CreatorSigningProgressSnapshot> = {};
+      for (const entry of entries) {
+        if (entry) next[entry[0]] = entry[1];
+      }
+      if (Object.keys(next).length > 0) {
+        setSigningProgressByAgreementId((prev) => ({ ...prev, ...next }));
+      }
+    },
+    [],
+  );
 
   const reloadWorkspaceIndex = useCallback(async (opts?: { quiet?: boolean }) => {
     const quiet = Boolean(opts?.quiet);
@@ -198,8 +219,8 @@ export function AppDashboard() {
     }
     setIndexError(error);
     if (!quiet) setIndexLoading(false);
-    void hydrateAuditCompletionFlags(deduped);
-    void hydrateSigningProgressFlags(deduped);
+    void hydrateAuditCompletionFlags(deduped, { limit: DASHBOARD_HOME_TABLE_PAGE_SIZE });
+    void hydrateSigningProgressFlags(deduped, { limit: DASHBOARD_HOME_TABLE_PAGE_SIZE });
   }, [hydrateAuditCompletionFlags, hydrateSigningProgressFlags]);
 
   useEffect(() => {
@@ -243,13 +264,13 @@ export function AppDashboard() {
           return;
         }
       }
-      void hydrateAuditCompletionFlags(rows);
-      void hydrateSigningProgressFlags(rows);
+      void hydrateAuditCompletionFlags(rows, { limit: DASHBOARD_HOME_TABLE_PAGE_SIZE });
+      void hydrateSigningProgressFlags(rows, { limit: DASHBOARD_HOME_TABLE_PAGE_SIZE });
     };
     const onFocus = () => {
       bumpSigningStatus();
-      void hydrateAuditCompletionFlags(rows);
-      void hydrateSigningProgressFlags(rows);
+      void hydrateAuditCompletionFlags(rows, { limit: DASHBOARD_HOME_TABLE_PAGE_SIZE });
+      void hydrateSigningProgressFlags(rows, { limit: DASHBOARD_HOME_TABLE_PAGE_SIZE });
     };
     window.addEventListener("focus", onFocus);
     window.addEventListener("storage", onStorage);
@@ -314,8 +335,33 @@ export function AppDashboard() {
     [activeRecent, featuredAgreementId],
   );
   const secondaryAttentionRows = useMemo(
-    () => attentionRows.filter((row) => row.id !== featuredAgreementId),
+    () =>
+      attentionRows
+        .filter((row) => row.id !== featuredAgreementId)
+        .slice(0, DASHBOARD_SECONDARY_ATTENTION_LIMIT),
     [attentionRows, featuredAgreementId],
+  );
+  const homeTableRows = useMemo(
+    () => sliceDashboardHomeTableRows(activeRecent, showAllHomeAgreements),
+    [activeRecent, showAllHomeAgreements],
+  );
+  const priorityHydrationRows = useMemo(
+    () =>
+      selectDashboardPriorityHydrationRows({
+        featuredId: featuredAgreementId,
+        attentionRows,
+        activeRows: activeRecent,
+        limit: showAllHomeAgreements
+          ? Math.max(DASHBOARD_PRIORITY_HYDRATION_LIMIT, homeTableRows.length)
+          : DASHBOARD_PRIORITY_HYDRATION_LIMIT,
+      }),
+    [
+      featuredAgreementId,
+      attentionRows,
+      activeRecent,
+      showAllHomeAgreements,
+      homeTableRows.length,
+    ],
   );
 
   const allowanceStatusCopy = useMemo(() => {
@@ -376,15 +422,9 @@ export function AppDashboard() {
   }, [indexLoading, rows.length, filteredDashboard]);
 
   const refreshDashboardReviewHydration = useCallback(async () => {
-    if (indexLoading || safeRecent.length === 0) return;
-    // Also hydrate draft/ready rows so signer-metadata completeness can divert Continue Editing
-    // away from /app/send when signature details are incomplete.
-    const targets = safeRecent.filter((row) => {
-      if (creatorDashboardNeedsAuthoritativeReviewHydration(row)) return true;
-      const status = deriveCreatorDashboardStatus(row);
-      return status === "draft" || status === "ready_for_signing" || status === "review_approved";
-    });
-    if (targets.length === 0) return;
+    if (indexLoading || priorityHydrationRows.length === 0) return;
+    // Cap fan-out: featured + attention + a few drafts — not every workspace row.
+    const targets = priorityHydrationRows;
     const entries = await Promise.all(
       targets.map(async (row) => {
         const { draft } = await fetchAgreementDraft(row.id);
@@ -405,50 +445,54 @@ export function AppDashboard() {
       }
       return next;
     });
-  }, [indexLoading, safeRecent]);
+  }, [indexLoading, priorityHydrationRows]);
 
   useEffect(() => {
     void refreshDashboardReviewHydration();
   }, [refreshDashboardReviewHydration]);
 
   useEffect(() => {
-    if (indexLoading || safeRecent.length === 0) return;
-    const targets = safeRecent.filter((row) => {
-      if (creatorDashboardNeedsAuthoritativeReviewHydration(row)) return true;
-      const status = deriveCreatorDashboardStatus(row);
-      return status === "draft" || status === "ready_for_signing" || status === "review_approved";
-    });
-    if (targets.length === 0) return;
+    if (indexLoading || priorityHydrationRows.length === 0) return;
     const intervalId =
       typeof import.meta !== "undefined" && import.meta.env?.MODE === "test"
         ? null
         : window.setInterval(() => {
             void refreshDashboardReviewHydration();
-          }, 12_000);
+          }, DASHBOARD_REVIEW_REFRESH_INTERVAL_MS);
+    // Focus/visibility: refresh priority drafts only — avoid full index + N hydrations.
     const refreshOnReturn = () => {
-      void reloadWorkspaceIndex();
       void refreshDashboardReviewHydration();
     };
     const onVis = () => {
       if (document.visibilityState === "visible") refreshOnReturn();
     };
-    const onFocus = () => {
-      refreshOnReturn();
-    };
     if (typeof import.meta === "undefined" || import.meta.env?.MODE !== "test") {
       document.addEventListener("visibilitychange", onVis);
-      window.addEventListener("focus", onFocus);
+      window.addEventListener("focus", refreshOnReturn);
     }
     return () => {
       if (intervalId !== null) window.clearInterval(intervalId);
       document.removeEventListener("visibilitychange", onVis);
-      window.removeEventListener("focus", onFocus);
+      window.removeEventListener("focus", refreshOnReturn);
     };
-  }, [indexLoading, safeRecent, refreshDashboardReviewHydration, reloadWorkspaceIndex]);
+  }, [indexLoading, priorityHydrationRows.length, refreshDashboardReviewHydration]);
+
+  useEffect(() => {
+    if (!showAllHomeAgreements || activeRecent.length === 0) return;
+    void hydrateAuditCompletionFlags(activeRecent, { limit: 40 });
+    void hydrateSigningProgressFlags(activeRecent, { limit: 40 });
+    void refreshDashboardReviewHydration();
+  }, [
+    showAllHomeAgreements,
+    activeRecent,
+    hydrateAuditCompletionFlags,
+    hydrateSigningProgressFlags,
+    refreshDashboardReviewHydration,
+  ]);
 
   useEffect(() => {
     if (indexLoading) return;
-    for (const row of safeRecent) {
+    for (const row of priorityHydrationRows) {
       if (!creatorDashboardNeedsAuthoritativeReviewHydration(row)) continue;
       const preview = resolveCreatorDashboardIndexPreviewForDiagnostics(row);
       logDashboardInitialState({
@@ -460,11 +504,11 @@ export function AppDashboard() {
         source: "workspace_index",
       });
     }
-  }, [indexLoading, safeRecent]);
+  }, [indexLoading, priorityHydrationRows]);
 
   useEffect(() => {
     if (indexLoading) return;
-    for (const row of safeRecent) {
+    for (const row of priorityHydrationRows) {
       const reviewRows = reviewRowsByAgreementId[row.id] ?? [];
       const reviewGate = resolveCreatorDashboardReviewGate(row, reviewRows, {
         draft: draftByAgreementId[row.id] ?? null,
@@ -504,7 +548,7 @@ export function AppDashboard() {
           .replace(/\s+/g, "_"),
       });
     }
-  }, [indexLoading, safeRecent, reviewRowsByAgreementId, draftByAgreementId, signingStatusEpoch]);
+  }, [indexLoading, priorityHydrationRows, reviewRowsByAgreementId, draftByAgreementId, signingStatusEpoch]);
 
   const handleFocusAgreementReviewStatus = useCallback((agreementId: string) => {
     const id = agreementId.trim();
@@ -1043,7 +1087,7 @@ export function AppDashboard() {
                 </button>
               </div>
               <LawdogAgreementsTable
-                rows={activeRecent}
+                rows={homeTableRows}
                 draftByAgreementId={draftByAgreementId}
                 signingProgressByAgreementId={signingProgressByAgreementId}
                 onNavigate={(path, meta) =>
@@ -1055,6 +1099,33 @@ export function AppDashboard() {
                 onFocusReviewStatus={handleFocusAgreementReviewStatus}
                 onWorkspaceArchive={handleWorkspaceArchive}
               />
+              {!showAllHomeAgreements && activeRecent.length > DASHBOARD_HOME_TABLE_PAGE_SIZE ? (
+                <div className="mt-3 flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-xs text-slate-500" data-testid="dashboard-agreements-truncated-hint">
+                    Showing {homeTableRows.length} of {activeRecent.length} agreements
+                  </p>
+                  <button
+                    type="button"
+                    className="vs01-btn vs01-btn--secondary vs01-btn--compact"
+                    data-testid="dashboard-show-all-agreements"
+                    onClick={() => setShowAllHomeAgreements(true)}
+                  >
+                    Show all {activeRecent.length}
+                  </button>
+                </div>
+              ) : null}
+              {showAllHomeAgreements && activeRecent.length > DASHBOARD_HOME_TABLE_PAGE_SIZE ? (
+                <div className="mt-3">
+                  <button
+                    type="button"
+                    className="text-sm text-slate-400 underline underline-offset-2 hover:text-slate-200"
+                    data-testid="dashboard-show-fewer-agreements"
+                    onClick={() => setShowAllHomeAgreements(false)}
+                  >
+                    Show fewer
+                  </button>
+                </div>
+              ) : null}
             </section>
           </div>
         )}
