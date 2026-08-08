@@ -110,7 +110,6 @@ import {
 } from "../../agreement/ownerRecipientSuggestedEditsCopy";
 import {
   OWNER_PORTABLE_REVIEW_SUB,
-  PORTABLE_REVIEW_HEADER,
   PORTABLE_REVIEW_OCR_FOOTNOTE,
   PORTABLE_REVIEW_PASTE_LABEL,
   PORTABLE_REVIEW_PASTE_PLACEHOLDER,
@@ -1524,12 +1523,16 @@ const AgreementReview: React.FC<Props> = ({
         }
         return { title: "Awaiting signature", detail: pendingSignerModel.summary };
       }
+      // Status pill already says Ready for review — skip the duplicate banner on negotiate draft.
+      if (section === "draft") return null;
       return {
         title: "Ready for review",
         detail:
           "Details are complete. Share a review link from Recipients when you want counterparty input — nothing is final until signatures.",
       };
     }
+    // Draft-only banner duplicates the status pill on the negotiate step.
+    if (section === "draft") return null;
     return {
       title: "Draft only",
       detail:
@@ -3418,11 +3421,21 @@ const AgreementReview: React.FC<Props> = ({
       </div>
     ) : null;
 
+  const versionHistoryOpenByDefault = Boolean(
+    vb?.pendingRecipientNotice || showNegotiationAssistant,
+  );
+
   const versionTimeline =
     showWorkspaceRichHistory && vb && vb.versions.length > 0 ? (
-      <div className="rounded-lg border border-slate-800/90 bg-slate-900/45 p-4">
-        <div className="text-xs font-semibold uppercase tracking-wide text-slate-400">Version history</div>
-        <p className="mt-1 text-[10px] leading-snug text-slate-500">
+      <details
+        className="rounded-lg border border-slate-800/90 bg-slate-900/45 p-4"
+        open={versionHistoryOpenByDefault}
+        data-testid="workspace-version-history"
+      >
+        <summary className="cursor-pointer list-none text-xs font-semibold uppercase tracking-wide text-slate-400 marker:content-none [&::-webkit-details-marker]:hidden">
+          Version history ({vb.versions.length})
+        </summary>
+        <p className="mt-2 text-[10px] leading-snug text-slate-500">
           Each row is a saved version — who changed it, what happened, and when. Open a row to preview that revision.
         </p>
         <ol className="mt-3 list-none space-y-2 p-0">
@@ -3584,7 +3597,7 @@ const AgreementReview: React.FC<Props> = ({
             );
           })}
         </ol>
-      </div>
+      </details>
     ) : null;
 
   const lastChangeCallout =
@@ -4053,11 +4066,14 @@ const AgreementReview: React.FC<Props> = ({
 
   const workWithAnotherAiSection =
     isWorkspace && viewingHead ? (
-      <div className="rounded-lg border border-dashed border-slate-600/70 bg-slate-950/35 p-4">
-        <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-          {PORTABLE_REVIEW_HEADER}
-        </div>
-        <p className="mt-1 text-[10px] leading-snug text-slate-500">
+      <details
+        className="rounded-lg border border-dashed border-slate-600/70 bg-slate-950/35 p-4"
+        data-testid="workspace-preferred-tool-optional"
+      >
+        <summary className="cursor-pointer list-none text-[11px] font-semibold uppercase tracking-wide text-slate-500 marker:content-none [&::-webkit-details-marker]:hidden">
+          Work elsewhere (optional)
+        </summary>
+        <p className="mt-2 text-[10px] leading-snug text-slate-500">
           {AI_ASSISTIVE_SHORT} {OWNER_PORTABLE_REVIEW_SUB} Use{" "}
           <span className="text-slate-400">Assisted → Preview changes</span> or{" "}
           <span className="text-slate-400">Direct compare</span> below. LawDog-native suggestions stay above.
@@ -4150,7 +4166,7 @@ const AgreementReview: React.FC<Props> = ({
             </div>
           </>
         )}
-      </div>
+      </details>
     ) : null;
 
   const workspaceAdvancedPanel = (
@@ -4241,30 +4257,23 @@ const AgreementReview: React.FC<Props> = ({
         </div>
       </div>
       {shareFlash ? <p className="mt-2 text-[10px] text-emerald-400/95">{shareFlash}</p> : null}
-      {postVs01SignatureFirstLanding ? (
-        <details className="mt-2 rounded-md border border-slate-800/60 bg-slate-950/30 px-2 py-1.5">
-          <summary className="cursor-pointer text-[10px] font-medium text-slate-500">
-            Workspace and version history (optional)
-          </summary>
-          <p className="mt-2 text-[10px] leading-snug text-slate-500">
-            Owners merge revisions into the draft; recipients review or propose changes; signatures happen after the
-            agreement is stable and locked.
-          </p>
-          <p className="mt-1 text-[10px] leading-snug text-slate-500">Changes are versioned and auditable in LawDog.</p>
-        </details>
-      ) : (
-        <>
-          <p className="mt-2 text-[10px] leading-snug text-slate-500">
-            Owners merge revisions into the draft; recipients review or propose changes; signatures happen after the
-            agreement is stable and locked.
-          </p>
-          <p className="mt-1 text-[10px] leading-snug text-slate-500">Changes are versioned and auditable in LawDog.</p>
-        </>
-      )}
-      <p className="mt-2 text-[10px] text-slate-600">
-        Agreement ID (for support):{" "}
-        <span className="font-mono text-slate-500">{draft.id}</span>
-      </p>
+      <details
+        className="mt-2 rounded-md border border-slate-800/60 bg-slate-950/30 px-2 py-1.5"
+        data-testid="workspace-optional-details"
+      >
+        <summary className="cursor-pointer text-[10px] font-medium text-slate-500">
+          Workspace details (optional)
+        </summary>
+        <p className="mt-2 text-[10px] leading-snug text-slate-500">
+          Owners merge revisions into the draft; recipients review or propose changes; signatures happen after the
+          agreement is stable and locked.
+        </p>
+        <p className="mt-1 text-[10px] leading-snug text-slate-500">Changes are versioned and auditable in LawDog.</p>
+        <p className="mt-2 text-[10px] text-slate-600">
+          Agreement ID (for support):{" "}
+          <span className="font-mono text-slate-500">{draft.id}</span>
+        </p>
+      </details>
     </div>
   ) : (
     <div className="flex flex-wrap items-center justify-between gap-2">
@@ -4441,9 +4450,6 @@ const AgreementReview: React.FC<Props> = ({
         <p className="mb-3 text-[10px] font-medium leading-snug text-slate-400">{workspaceDraftStatusLine}</p>
       ) : null}
       {!simpleHomeProEntitlementBypass ? <UpgradeLimitNotice gate={revisionPlanGate} className="mb-3" /> : null}
-      <p className="mb-3 text-[12px] leading-relaxed text-slate-400">
-        Describe the change you want. We&apos;ll preview it before anything is applied.
-      </p>
       <div className="flex flex-col gap-3">
         <VoiceAugmentedTextArea
           value={editInstruction}
@@ -4457,9 +4463,6 @@ const AgreementReview: React.FC<Props> = ({
           placeholder={revisionInstructionPlaceholder}
           className="min-h-[6.5rem] w-full resize-y rounded-lg border border-slate-600 bg-slate-950 px-3 py-2.5 pb-12 pr-14 text-sm leading-relaxed text-slate-100 placeholder:text-slate-500"
         />
-        <p className="text-[10px] leading-snug text-slate-500">
-          Nothing changes in your draft until you preview and choose to apply. Safe to experiment.
-        </p>
         <button
           type="button"
           className="btn w-full shrink-0 rounded-lg bg-emerald-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-emerald-500 disabled:opacity-60 sm:w-auto sm:self-start"
@@ -4684,8 +4687,6 @@ const AgreementReview: React.FC<Props> = ({
         />
       ) : null}
       {showWorkspaceRichHistory ? recipientProposalPanel : null}
-      {showWorkspaceRichHistory ? versionTimeline : null}
-      {showWorkspaceRichHistory ? negotiationTimelineSection : null}
       {showNegotiationAssistant && headVer ? (
         <NegotiationAssistantPanel
           agreementId={agreementId}
@@ -4726,14 +4727,13 @@ const AgreementReview: React.FC<Props> = ({
           }
         />
       ) : null}
-      {isWorkspace ? lastChangeCallout : null}
-      {compareChangesPanel}
+      {/* Document + revise first for GTM resume; secondary chrome collapses below. */}
       {isWorkspace ? previewBlock : null}
       {isWorkspace ? (
         signingLocked ? (
           <p className="rounded-lg border border-slate-800/80 bg-slate-950/30 px-4 py-3 text-xs text-slate-400">
             {collaborationReadOnly
-              ? "Review is closed on the final version. Version history above is read-only."
+              ? "Review is closed on the final version. Version history is read-only."
               : "Review is closed on the final signing version. Reopen review below if terms need to change again."}
           </p>
         ) : collaborationReadOnly ? (
@@ -4741,16 +4741,20 @@ const AgreementReview: React.FC<Props> = ({
             Read-only history for this completed agreement.
           </p>
         ) : viewingHead ? (
-          <>
-            {reviseBlock}
-            {workWithAnotherAiSection}
-          </>
+          reviseBlock
         ) : (
           <p className="rounded-lg border border-slate-800/80 bg-slate-950/30 px-4 py-3 text-xs text-slate-400">
-            You’re viewing an earlier version. Select the latest row in version history to suggest a new change.
+            You’re viewing an earlier version. Open Version history and select the latest row to suggest a new change.
           </p>
         )
       ) : null}
+      {isWorkspace ? lastChangeCallout : null}
+      {compareChangesPanel}
+      {isWorkspace && viewingHead && !signingLocked && !collaborationReadOnly
+        ? workWithAnotherAiSection
+        : null}
+      {showWorkspaceRichHistory ? versionTimeline : null}
+      {showWorkspaceRichHistory ? negotiationTimelineSection : null}
       {!isWorkspace ? reviseBlock : null}
       {!isWorkspace ? compareChangesPanel : null}
       {!isWorkspace ? previewBlock : null}

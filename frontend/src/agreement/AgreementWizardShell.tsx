@@ -578,11 +578,17 @@ export function AgreementWizardShell(props: AgreementWizardShellProps = {}) {
         ) : null}
 
         {!showPostVs01SimpleFirst ? (
-          <>
-            <p className="vs01-agreement-ws-eyebrow">Agreement workspace</p>
-            <h2 className="vs01-card-title vs01-agreement-ws-step-title">{STEP_INTRO[step]?.title ?? ""}</h2>
-            <p className="vs01-card-help vs01-agreement-ws-step-sub">{STEP_INTRO[step]?.subtitle ?? ""}</p>
-          </>
+          openAgreementId?.trim() ? (
+            <h2 className="vs01-card-title vs01-agreement-ws-step-title">
+              {STEP_INTRO[step]?.title ?? ""}
+            </h2>
+          ) : (
+            <>
+              <p className="vs01-agreement-ws-eyebrow">Agreement workspace</p>
+              <h2 className="vs01-card-title vs01-agreement-ws-step-title">{STEP_INTRO[step]?.title ?? ""}</h2>
+              <p className="vs01-card-help vs01-agreement-ws-step-sub">{STEP_INTRO[step]?.subtitle ?? ""}</p>
+            </>
+          )
         ) : null}
 
         {step > 0 && agreementId?.trim() && wizardDraftReady && wizardBoot === "ready" && postVs01SignatureFirstLanding ? (
@@ -590,18 +596,20 @@ export function AgreementWizardShell(props: AgreementWizardShellProps = {}) {
         ) : null}
 
         {step > 0 && agreementId?.trim() && !showPostVs01SimpleFirst ? (
-          step === 1 ? (
-            <details className="mb-4 rounded-lg border border-slate-800/60 bg-slate-950/25 px-3 py-2">
-              <summary className="cursor-pointer list-none text-[11px] font-medium text-slate-500 marker:content-none [&::-webkit-details-marker]:hidden">
-                Agreement Memory &amp; reuse
-              </summary>
-              <div className="mt-3 border-t border-slate-800/50 pt-3">
-                <AgreementMemoryAgreementStrip agreementId={agreementId.trim()} compact />
-              </div>
-            </details>
-          ) : (
-            <AgreementMemoryAgreementStrip agreementId={agreementId.trim()} />
-          )
+          <details
+            className="mb-4 rounded-lg border border-slate-800/60 bg-slate-950/25 px-3 py-2"
+            data-testid="agreement-memory-optional"
+          >
+            <summary className="cursor-pointer list-none text-[11px] font-medium text-slate-500 marker:content-none [&::-webkit-details-marker]:hidden">
+              Agreement Memory &amp; reuse (optional)
+            </summary>
+            <div className="mt-3 border-t border-slate-800/50 pt-3">
+              <AgreementMemoryAgreementStrip
+                agreementId={agreementId.trim()}
+                compact={step === 1 || Boolean(openAgreementId?.trim())}
+              />
+            </div>
+          </details>
         ) : null}
 
         {step > 0 && agreementId?.trim() && wizardDraftReady && wizardBoot === "ready" && !postVs01SignatureFirstLanding ? (
