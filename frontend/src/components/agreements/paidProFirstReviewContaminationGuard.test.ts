@@ -78,6 +78,7 @@ describe("first-review contamination fail-closed", () => {
 
     expect(painted.plain).toBe("");
     expect(painted.fallbackReason || "").toMatch(/intake_corpus_contamination/);
+    // Structural mismatch still clears SoT so Retry cannot remount the wrong deal.
     expect(hasPaidProSourceOfTruth()).toBe(false);
   });
 

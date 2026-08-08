@@ -191,13 +191,20 @@ export function resolveGuidedCompletionRenderDocument(
 
   if (args.paidProCreateFlowReviewGate) {
     const validated = norm(args.validatedCorpusPlain);
-    if (validated.length >= GUIDED_MIN_AUTHORITATIVE_BODY_LEN) {
+    const failOpenCandidates: Array<{ plain: string; source: GuidedRenderDocumentSource; usedLkg: boolean }> = [
+      { plain: validated, source: "authoritative_hydrated_premium", usedLkg: false },
+      { plain: authHydrated, source: "authoritative_hydrated_premium", usedLkg: false },
+      { plain: lastKnown, source: "last_known_good_authoritative", usedLkg: true },
+      { plain: adt, source: "agreement_document_text", usedLkg: false },
+    ];
+    for (const cand of failOpenCandidates) {
+      if (cand.plain.length < GUIDED_MIN_AUTHORITATIVE_BODY_LEN) continue;
       const resolution: GuidedRenderDocumentResolution = {
-        plainText: validated,
-        source: "authoritative_hydrated_premium",
-        usedLastKnownGood: false,
+        plainText: cand.plain,
+        source: cand.source,
+        usedLastKnownGood: cand.usedLkg,
         blockedEmptyState: Boolean(args.guidedCompletionActive),
-        authoritativeLen: validated.length,
+        authoritativeLen: cand.plain.length,
         downgradeBlocked: false,
       };
       logGuidedRenderAuthority(resolution, { guidedActive: args.guidedCompletionActive, paidProGate: true });

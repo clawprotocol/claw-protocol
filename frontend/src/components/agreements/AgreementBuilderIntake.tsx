@@ -1652,6 +1652,7 @@ import {
 } from "./paidProPipelineAcceptedCorpus";
 import {
   computeCreateFlowPaidProReviewReady,
+  hasAcceptedPaidCreateFlowFreezeLatch,
   hasPaidCreateFlowPipelineAcceptance,
   isCanonicalPaidCreateFlowFirstReviewActive,
   isCanonicalPaidCreateFlowReviewSurfaceEligible,
@@ -6802,8 +6803,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     if (entitledPremiumRewriteInFlightRef.current) return;
     // Reload race: in-memory SoT is empty until hydrate; never re-generate over an accepted snap.
     const acceptedSnap = readPremiumCompletionSnapshot();
+    const validatedPaint = resolveValidatedPaidProReviewCorpus();
     if (
       hasPaidProSourceOfTruth() ||
+      hasAcceptedPaidCreateFlowFreezeLatch() ||
+      validatedPaint.len >= 500 ||
       shouldBlockEntitledRewriteForAcceptedPaidProSnapshot(acceptedSnap)
     ) {
       // Never hydrate review-ready state from local storage alone — layout reload
@@ -15314,6 +15318,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     if (!shouldUsePaidProCreateFlowReviewShell(authoritativeCreateFlowReviewShellInput)) return;
     if (entitledPremiumRewriteInFlightRef.current) return;
     if (hasPaidProSourceOfTruth()) return;
+    // Freeze latch / validated corpus already accepted — a second entitled_rewrite
+    // clears pipeline authority and blanks the just-painted Niceman/Waffle (etc.) body.
+    if (hasAcceptedPaidCreateFlowFreezeLatch()) return;
+    if (resolveValidatedPaidProReviewCorpus().len >= 500) return;
     const acceptedSnapForRewrite = readPremiumCompletionSnapshot();
     if (shouldBlockEntitledRewriteForAcceptedPaidProSnapshot(acceptedSnapForRewrite)) {
       // Never paint review-ready from local storage — await server GET authority.

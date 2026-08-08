@@ -29,9 +29,18 @@ import {
 } from "./paidProReviewSessionAuthority";
 import { isPaidProPostFinalizeHydratedCorpusLocked } from "./paidProSignerMetadataCommitPolicy";
 import { resolvePaidProPostFinalizeReviewPlain } from "./paidProPostFinalizeReviewSurface";
+import { hasAcceptedPaidCreateFlowFreezeLatch } from "./authoritativeCreateFlowReviewShell";
+import { getLatchedAcceptedServerFullDraftAuthority } from "./premiumAcceptancePolicy";
+import { PAID_PRO_AUTHORITY_MIN_LEN } from "./paidProAuthorityConstants";
 
 /** Minimum frozen SoT length to force visible document shell (inclusive). */
 export const PAID_PRO_DOCUMENT_BODY_SOT_MIN_LEN = 1000;
+
+function latchedAcceptedFreezeCorpusLen(): number {
+  if (!hasAcceptedPaidCreateFlowFreezeLatch()) return 0;
+  const body = getLatchedAcceptedServerFullDraftAuthority()?.body.trim() ?? "";
+  return body.length >= PAID_PRO_AUTHORITY_MIN_LEN ? body.length : 0;
+}
 
 /** Read-only canonical review corpus length for render routing (no SoT mutation). */
 export function resolveCanonicalReviewCorpusLenForRender(): number {
@@ -46,6 +55,8 @@ export function resolveCanonicalReviewCorpusLenForRender(): number {
   if (frozen?.canonicalText?.trim()) return frozen.canonicalText.trim().length;
   const pipelineLen = acceptedPipelineReviewCorpusLen();
   if (pipelineLen >= PAID_PRO_DOCUMENT_BODY_SOT_MIN_LEN) return pipelineLen;
+  const latchLen = latchedAcceptedFreezeCorpusLen();
+  if (latchLen >= PAID_PRO_DOCUMENT_BODY_SOT_MIN_LEN) return latchLen;
   return 0;
 }
 
@@ -53,7 +64,9 @@ export function hasCanonicalReviewCorpusForRender(): boolean {
   if (hasPaidProReviewSessionAuthority() || hasPaidProSourceOfTruth() || hasFrozenCanonicalAgreementCorpus()) {
     return true;
   }
-  return hasAcceptedPipelineReviewCorpusForRender();
+  if (hasAcceptedPipelineReviewCorpusForRender()) return true;
+  // Keep just-accepted create-flow freeze paint mounted even if SoT establish lagged.
+  return latchedAcceptedFreezeCorpusLen() >= PAID_PRO_DOCUMENT_BODY_SOT_MIN_LEN;
 }
 
 export function shouldForcePaidProReviewDocumentRender(): boolean {

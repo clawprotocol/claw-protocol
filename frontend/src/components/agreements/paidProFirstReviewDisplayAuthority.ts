@@ -110,7 +110,15 @@ function rejectContaminatedFirstReviewPlain(
       corpusLen: body.length,
     });
   }
-  clearPaidProSourceOfTruth();
+  // Only nuclear-clear on structural economics/counsel mismatch. Never clear solely
+  // because paint-time intake lagged a just-accepted matching corpus — that blanks
+  // Niceman/Waffle (etc.) after a successful flash.
+  const structuralWipe = fidelity.reasons.some(
+    (r) => r.startsWith("economics_scope_mismatch") || r.startsWith("counsel_prep_intake_with_unrelated"),
+  );
+  if (structuralWipe) {
+    clearPaidProSourceOfTruth();
+  }
   return {
     plain: "",
     blocked: true,

@@ -53,6 +53,8 @@ describe("agreement intake universality (all LawDog accounts)", () => {
     expect(INTAKE_SRC).toContain(
       "intakeText: (intakeCombined || currentPremiumMergedIntakeKey || \"\").trim()",
     );
+    // After freeze accept, never auto-fire a second entitled_rewrite that blanks paint.
+    expect(INTAKE_SRC).toContain("hasAcceptedPaidCreateFlowFreezeLatch()");
     // Both guided call sites must prep before parse (regression: one path skipped the gate).
     const guidedPrepCount = (INTAKE_SRC.match(/prepareIntentionalCreateDraftSubmit\(guidedRaw\)/g) || [])
       .length;

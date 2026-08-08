@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import type { AgreementIntakeClarification } from "./agreementIntakeClarification";
 
 export function AgreementIntakeClarificationPanel(props: {
@@ -7,12 +8,28 @@ export function AgreementIntakeClarificationPanel(props: {
 }) {
   const { clarification, onUseSuggested, onEditMyself } = props;
   const hasSuggested = Boolean(clarification.suggestedRewrite?.trim());
+  const rootRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const el = rootRef.current;
+    if (!el) return;
+    try {
+      el.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    } catch {
+      el.scrollIntoView();
+    }
+    // Focus primary action for keyboard/AT users without stealing mid-edit focus from textarea
+    // when they chose "edit myself" (panel unmounts). On mount, announce via region.
+  }, [clarification.kind, clarification.title]);
 
   return (
     <div
+      ref={rootRef}
+      id="agreement-intake-clarification"
       className="mt-4 space-y-4 rounded-lg border border-amber-900/40 bg-slate-900/55 p-4 sm:p-5"
       role="region"
       aria-labelledby="agreement-intake-clarification-title"
+      data-testid="agreement-intake-clarification"
     >
       <div>
         <h2
