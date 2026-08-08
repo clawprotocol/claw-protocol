@@ -1689,7 +1689,11 @@ import {
   logPaidDashboardCreateContextOnMount,
   readPaidDashboardCreateContext,
 } from "../../launch/paidDashboardCreateContext";
-import { bootstrapDirectAuthenticatedCreateEntryIfNeeded } from "../../launch/newAgreementSessionReset";
+import {
+  bootstrapDirectAuthenticatedCreateEntryIfNeeded,
+  clearPriorPaidAuthorityForFreshCreateSubmit,
+} from "../../launch/newAgreementSessionReset";
+import { assessAgreementIntakeCapability } from "./agreementIntakeCapabilityGate";
 import { useDashboardPaidCreateFunnelTelemetry } from "../../launch/useDashboardPaidCreateFunnelTelemetry";
 import { useAuth } from "../../auth/AuthProvider";
 
@@ -2051,6 +2055,17 @@ function isActionableSignerFinalizeErrorRaw(raw: string): boolean {
 }
 
 /** Copy for true technical failures only (not partial intake). */
+function isActionableIntakeCapabilityErrorRaw(raw: string): boolean {
+  const m = (raw || "").trim();
+  if (!m) return false;
+  return (
+    /\bnot a draftable agreement\b/i.test(m) ||
+    /\bdeal-counsel prep\b/i.test(m) ||
+    /\bRephrase as a draft request\b/i.test(m) ||
+    /\bexecutable agreements from parties\b/i.test(m)
+  );
+}
+
 function humanizeHardIntakeError(raw: string): string {
   const m = (raw || "").trim();
   if (!m) {
@@ -2061,6 +2076,10 @@ function humanizeHardIntakeError(raw: string): string {
   }
   // Keep finalize/signer-setup failures actionable — do not collapse to the generic save footer.
   if (isActionableSignerFinalizeErrorRaw(m)) {
+    return m;
+  }
+  // Counsel-prep / non-draftable intake capability gates must stay specific.
+  if (isActionableIntakeCapabilityErrorRaw(m)) {
     return m;
   }
   return INTAKE_HARD_SAVE_GENERIC;
@@ -13515,6 +13534,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       intakeBaselineCommitted,
       freshSimpleCreateUx,
     });
+    if (resolved.text.trim().length >= 6) {
+      // Same-session Create draft must not paint a prior paid Pro SoT / freeze.
+      clearPriorPaidAuthorityForFreshCreateSubmit();
+      hydratedPremiumBodyRef.current = "";
+      lastKnownGoodAuthoritativeDraftRef.current = "";
+      lastPremiumWinningCorpusRef.current = "";
+    }
     if (freshSimpleCreateUx && resolved.text.length > 0) {
       logStarterCreateSubmit(resolved.text, resolved.source);
       setIntakeBaselineCommitted("");
@@ -30738,6 +30764,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
               const rawSubmitted = prepareFreshStarterCreateSubmit();
               if (createProductionTwoPane) {
                 if (rawSubmitted.length < 6) return;
+                const intakeCapability = assessAgreementIntakeCapability(rawSubmitted);
+                if (!intakeCapability.ok) {
+                  setHardError(intakeCapability.userMessage);
+                  setLoading(false);
+                  setCreateFlowPhase("capturing_input");
+                  setDisplayPhase("intake");
+                  setCreateUiStage(CreateUiStage.INPUT);
+                  return;
+                }
                 const live = buildLiveDraftPreview(rawSubmitted);
                 if (
                   !isUsablePartialIntakeStructure(live, rawSubmitted) &&
@@ -30945,6 +30980,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         const rawSubmitted = prepareFreshStarterCreateSubmit();
         if (createProductionTwoPane) {
           if (rawSubmitted.length < 6) return;
+          const intakeCapability = assessAgreementIntakeCapability(rawSubmitted);
+          if (!intakeCapability.ok) {
+            setHardError(intakeCapability.userMessage);
+            setLoading(false);
+            setCreateFlowPhase("capturing_input");
+            setDisplayPhase("intake");
+            setCreateUiStage(CreateUiStage.INPUT);
+            return;
+          }
           const live = buildLiveDraftPreview(rawSubmitted);
           if (
             !isUsablePartialIntakeStructure(live, rawSubmitted) &&

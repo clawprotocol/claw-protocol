@@ -99,7 +99,19 @@ export function splitInlineNumberedSectionMarkerFromLine(line: string): string {
 /** Split one line when a numbered heading and body sentence are glued together. */
 export function splitGluedSectionHeadingFromLine(line: string): string {
   const trimmed = line.trim();
-  if (!trimmed || trimmed.length < 24 || !/^\d+\./.test(trimmed)) return line;
+  if (!trimmed || !/^\d+\./.test(trimmed)) return line;
+
+  // Short no-space glue (`9. General Terms9.1` = 19 chars) must split before the length gate.
+  const mainThenSubNoSpaceEarly = trimmed.match(MAIN_THEN_SUBSECTION_NO_SPACE_GLUE_RE);
+  if (mainThenSubNoSpaceEarly?.[1] && mainThenSubNoSpaceEarly[2]?.trim()) {
+    const heading = mainThenSubNoSpaceEarly[1].trim();
+    const subsection = mainThenSubNoSpaceEarly[2].trim();
+    if (heading.length >= MIN_MAIN_HEADING_LEN && heading.length <= 110 && subsection.length >= 3) {
+      return `${heading}\n${subsection}`;
+    }
+  }
+
+  if (trimmed.length < 24) return line;
 
   const starterKnownSlashHeadingRe =
     /^\d+\.\s+(?:Scope of Services\s*\/\s*Purpose|Services Term and Effective Date|Term and Effective Date)\s*$/i;

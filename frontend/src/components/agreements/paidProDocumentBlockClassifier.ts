@@ -17,6 +17,7 @@ import {
   PAID_PRO_SUBSECTION_NUMBER_RE,
   parsePaidProNumberedSectionLine,
 } from "./paidProNumberedSectionHeading";
+import { repairJoinedTopLevelSectionHeadings } from "./sectionStructureAuthority";
 
 export {
   isPaidProNumberedSectionHeadingLine,
@@ -207,7 +208,9 @@ export function splitSinglePaidProDocumentBlock(block: string): string[] {
 
 /** Split plain text into render blocks with main headings isolated from body text. */
 export function splitPaidProDocumentBlocks(raw: string): string[] {
-  const parts = (raw || "").replace(/\r\n/g, "\n").split(/\n\n+/);
+  // Last-mile: repair letter-glued / mis-nested subsections before classify+paint.
+  const structure = repairJoinedTopLevelSectionHeadings((raw || "").replace(/\r\n/g, "\n"));
+  const parts = structure.text.split(/\n\n+/);
   const out: string[] = [];
   for (const part of parts) {
     const block = part.trim();

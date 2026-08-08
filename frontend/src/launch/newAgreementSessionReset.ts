@@ -140,6 +140,17 @@ export function clearStalePaidProAuthorityForFreshFreeStarter(opts?: {
 }
 
 /**
+ * Intentional Create-draft submit on /app/create (same session as a prior Pro draft).
+ * Clears paid SoT / freeze / snapshot so a new intake cannot paint the previous agreement.
+ * Does not wipe checkout-return or full dashboard session bootstrap keys.
+ */
+export function clearPriorPaidAuthorityForFreshCreateSubmit(): void {
+  if (hasPremiumCheckoutReturnInUrl()) return;
+  clearStalePaidProAuthorityForFreshFreeStarter({ preserveCheckoutReturn: true });
+  bumpAgreementGenerationIdForFreshSession();
+}
+
+/**
  * Reset global create-flow state before navigating to /app/create.
  * Does not remove vs01_signing_packet_status_v1:{agreementId} or other per-agreement keys.
  */

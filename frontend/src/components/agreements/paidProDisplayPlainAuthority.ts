@@ -25,6 +25,7 @@ import { shouldUsePaidProSourceOfTruthDisplayOnly, resolvePaidProAuthoritativeDi
 import { enrichPaidProPostFinalizeDisplayCorpus } from "./paidProPostFinalizeReviewSurface";
 import { isPaidProPostFinalizeHydratedCorpusLocked } from "./paidProSignerMetadataCommitPolicy";
 import { hashPaidProCorpus, type PaidProDocumentSurface } from "./paidProSourceOfTruthState";
+import { repairJoinedTopLevelSectionHeadings } from "./sectionStructureAuthority";
 
 export type PaidProUserVisibleDisplaySurface =
   | PaidProDocumentSurface
@@ -48,6 +49,11 @@ export function isPaidProUserVisibleDocumentSurface(surface: string): boolean {
 export function projectPaidProFrozenSoTDisplayPlain(text: string): string {
   let out = (text || "").replace(/\r\n/g, "\n").trimEnd();
   if (!out) return out;
+
+  // Presentation-only: letter-glued subsections (`General Terms9.1`) and mis-nested N.x.
+  // Does not persist; keeps frozen SoT store intact while every visible surface paints cleanly.
+  const structureJoined = repairJoinedTopLevelSectionHeadings(out);
+  if (structureJoined.repairs.length > 0) out = structureJoined.text;
 
   const titleOpening = repairPaidProDocumentTitleOpening(out);
   if (titleOpening.repairs.length > 0) out = titleOpening.text;
