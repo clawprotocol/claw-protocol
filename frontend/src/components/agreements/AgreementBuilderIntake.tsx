@@ -31152,10 +31152,6 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           return;
         }
         await finalizeIntakeCapture();
-        if (createUiStage === CreateUiStage.INPUT) {
-          // Defensive: INPUT should have returned above after prep.
-          return;
-        }
         if (createUiStage === CreateUiStage.DRAFT) {
           if (missing.length > 0 && !createProductionTwoPane) {
             await runProductionLocalDraftParse({ handoffSource: "draft_reparse_missing" });
