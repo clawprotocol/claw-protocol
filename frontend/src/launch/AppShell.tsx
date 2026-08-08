@@ -12,6 +12,7 @@ import { LawdogLogoLink } from "../components/ui/LawdogLogoLink";
 import { LawdogBrand } from "../components/ui/LawdogBrand";
 import { useActiveGenesisAffiliateAccess } from "./genesisReferral/genesisAffiliateAccess";
 import { useOperatorConsoleCapability } from "./useOperatorConsoleCapability";
+import { initializeNewAgreementSession } from "./newAgreementSessionReset";
 import "../joy/joy.css";
 
 export type AppShellNavMode = "default" | "esign_bridge_focused" | "minimal" | "public_completed";
@@ -54,6 +55,8 @@ export function AppShell(props: {
     { label: "Settings", path: "/app/settings", title: "Account and workspace settings" },
   ];
   const navigateToPaidWorkspaceCreate = () => {
+    // Same isolation as Dashboard → Create new: never inherit a prior signer-setup arm.
+    initializeNewAgreementSession();
     navigate("/app/create", {
       paidDashboardCreate: true,
       paidDashboardCreateSource: "dashboard_paid_create",

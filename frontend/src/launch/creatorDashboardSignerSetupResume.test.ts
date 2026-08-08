@@ -4,6 +4,7 @@ import { writeCreateReviewAgreementResumeId } from "../components/agreements/agr
 import { shouldRestoreStoredCreateReviewDraftSnapshot } from "../components/agreements/createReviewRefreshRestore";
 import {
   armCreatorDashboardSignerSetupResume,
+  clearCreatorDashboardSignerSetupResume,
   consumeCreatorDashboardSignerSetupResume,
   creatorDashboardSignerSetupPath,
   DASHBOARD_SIGNER_SETUP_RESUME_SOURCE,
@@ -11,8 +12,10 @@ import {
   isDashboardSignerSetupResumeUiActive,
   parseResumeSignerSetupAgreementIdFromPath,
   parseResumeSignerSetupAgreementIdFromSearch,
+  peekCreatorDashboardSignerSetupResume,
   prepareCreatorDashboardSignerSetupNavigation,
 } from "./creatorDashboardReviewLinkRouting";
+import { initializeNewAgreementSession } from "./newAgreementSessionReset";
 import {
   isDashboardPaidCreateRouteActive,
   markPaidDashboardCreateContext,
@@ -73,5 +76,16 @@ describe("dashboard Complete signer details → create resume", () => {
         paidProInlineSignerSetupLatched: true,
       }),
     ).toBe(true);
+  });
+
+  it("Create new agreement clears leftover signer-setup arm so create cannot auto-resume", () => {
+    armCreatorDashboardSignerSetupResume(AGREEMENT_ID);
+    writeCreateReviewAgreementResumeId(AGREEMENT_ID);
+    expect(peekCreatorDashboardSignerSetupResume()).toBe(AGREEMENT_ID);
+    initializeNewAgreementSession();
+    expect(peekCreatorDashboardSignerSetupResume()).toBeNull();
+    expect(isCreatorDashboardSignerSetupResumeActive("")).toBe(false);
+    clearCreatorDashboardSignerSetupResume();
+    expect(peekCreatorDashboardSignerSetupResume()).toBeNull();
   });
 });

@@ -13,9 +13,7 @@ import {
 } from "../../components/agreements/agreementIntakeStorage";
 import {
   armCreatorDashboardSignerSetupResume,
-  isCreatorDashboardSignerSetupResumeActive,
   parseResumeSignerSetupAgreementIdFromSearch,
-  peekCreatorDashboardSignerSetupResume,
 } from "../creatorDashboardReviewLinkRouting";
 import { readCreateComplexityResume } from "../../components/agreements/agreementCreateComplexityResume";
 import {
@@ -222,16 +220,17 @@ export function SimpleCreatePage() {
     }
   }, [search]);
   // Sticky for this create-page mount: must survive URL strip after intake arms signer setup.
+  // Only honor the session arm when URL explicitly requests resume_signer_setup — leftover
+  // arms from a prior Complete-signer-details visit must not auto-open an old agreement on
+  // Dashboard → Create new (initializeNewAgreementSession also clears the arm).
   const [resumeSignerSetupAgreementId] = useState(() => {
     const fromSearch = parseResumeSignerSetupAgreementIdFromSearch(
       typeof window !== "undefined" ? window.location.search : search,
     );
     if (fromSearch) return fromSearch;
-    return (peekCreatorDashboardSignerSetupResume() || "").trim();
+    return "";
   });
-  const openSignerSetupOnResume = Boolean(
-    resumeSignerSetupAgreementId || isCreatorDashboardSignerSetupResumeActive(search),
-  );
+  const openSignerSetupOnResume = Boolean(resumeSignerSetupAgreementId);
 
   useEffect(() => {
     const id = resumeSignerSetupAgreementId;
@@ -588,7 +587,7 @@ export function SimpleCreatePage() {
     homeHeroAutoGenerate && !checkoutBackRestoreActive,
   );
   const [dashboardSignerSetupResumeShell, setDashboardSignerSetupResumeShell] = useState(() =>
-    Boolean(peekCreatorDashboardSignerSetupResume()),
+    Boolean(resumeSignerSetupAgreementId),
   );
   const onSimpleCreateShellChrome = useCallback(
     (state: {
@@ -662,8 +661,7 @@ export function SimpleCreatePage() {
     // Already-signed-in create/resume must not flash OAuth "Finishing sign-in".
     // When signer-setup resume is armed, keep that chrome so the settle does not
     // look like a create-prompt hop before the agreement preview mounts.
-    const resumeSettling =
-      dashboardSignerSetupResumeShell || Boolean(peekCreatorDashboardSignerSetupResume());
+    const resumeSettling = dashboardSignerSetupResumeShell || Boolean(resumeSignerSetupAgreementId);
     const settlingSignedIn = isReallyAuthenticated;
     return (
       <SimpleFlowShell

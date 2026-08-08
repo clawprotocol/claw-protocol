@@ -142,6 +142,15 @@ export function armCreatorDashboardSignerSetupResume(agreementId: string): void 
   }
 }
 
+/** Drop leftover Complete-signer-details arm so Create new agreement cannot auto-resume. */
+export function clearCreatorDashboardSignerSetupResume(): void {
+  try {
+    sessionStorage.removeItem(DASHBOARD_RESUME_SIGNER_SETUP_SS_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
 /** Strip resume_signer_setup only after signer setup has been armed on create. */
 export function stripResumeSignerSetupQueryFromCreateUrl(): string | null {
   if (typeof window === "undefined") return null;

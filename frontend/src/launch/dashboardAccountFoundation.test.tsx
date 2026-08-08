@@ -84,6 +84,7 @@ describe("dashboard account foundation", () => {
 
   it("create new agreement from dashboard starts clean draft state", async () => {
     sessionStorage.setItem(AGREEMENT_CREATE_REVIEW_RESUME_KEY, "ag_stale");
+    sessionStorage.setItem("claw_dashboard_resume_signer_setup_v1", "ag_stale");
     vi.spyOn(agreementWorkspaceApi, "fetchWorkspaceIndex").mockResolvedValue({
       agreements: [indexRow({ id: "ag_ready", all_reviewers_approved: true })],
       skipped: [],
@@ -100,7 +101,11 @@ describe("dashboard account foundation", () => {
     });
     await user.click(screen.getByTestId("dashboard-create-new-agreement"));
     expect(sessionStorage.getItem(AGREEMENT_CREATE_REVIEW_RESUME_KEY)).toBeNull();
-    expect(mockNavigate).toHaveBeenCalledWith("/app/create");
+    expect(sessionStorage.getItem("claw_dashboard_resume_signer_setup_v1")).toBeNull();
+    expect(mockNavigate).toHaveBeenCalledWith("/app/create", {
+      paidDashboardCreate: true,
+      paidDashboardCreateSource: "dashboard_paid_create",
+    });
   });
 
   it("existing signed agreement remains fully signed after returning to dashboard", async () => {

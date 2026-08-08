@@ -39,6 +39,7 @@ import {
 } from "../components/agreements/paidProSessionEligibility";
 import { resetHeroHandoffForCreateNavigationWithoutPayload } from "./heroIntakePrefill";
 import { clearLawdogEntryContext, setLawdogEntryContext } from "./lawdogEntryContext";
+import { clearCreatorDashboardSignerSetupResume } from "./creatorDashboardReviewLinkRouting";
 import { clearAgreementVs01BridgeSession } from "./simpleProduct/agreementToVs01SigningBridge";
 import { REVIEW_DELIVERY_HANDOFF_NOTICE_KEY } from "./reviewDeliveryHandoffNotice";
 
@@ -68,6 +69,7 @@ const SESSION_PREFIXES_TO_CLEAR = [
   "claw_agreement_vs01_bridge_handoff_v1",
   "claw_authoritative_agreement_version_v1",
   "claw_hero_intake_prefill_v1",
+  "claw_dashboard_resume_signer_setup_v1",
   "lawdog_entry_context",
   "lawdog_focus_create_intake",
   REVIEW_DELIVERY_HANDOFF_NOTICE_KEY,
@@ -148,6 +150,8 @@ export function initializeNewAgreementSession(opts?: {
   clearAgreementCreatorIntakeStorage();
   clearCreateReviewAgreementResumeId();
   clearCreateReviewDraftReadyMarker();
+  // Prior "Complete signer details" arms this latch; Create new must never inherit it.
+  clearCreatorDashboardSignerSetupResume();
   resetHeroHandoffForCreateNavigationWithoutPayload();
   clearLawdogEntryContext();
   clearAgreementVs01BridgeSession();

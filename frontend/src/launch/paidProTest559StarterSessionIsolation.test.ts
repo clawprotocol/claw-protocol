@@ -200,8 +200,10 @@ describe("paidProTest559 Starter session isolation", () => {
 
   it("11 — prior route/query resume markers cleared", () => {
     writeCreateReviewAgreementResumeId("ag_old");
+    sessionStorage.setItem("claw_dashboard_resume_signer_setup_v1", "ag_old");
     initializeNewAgreementSession();
     expect(sessionStorage.getItem(AGREEMENT_CREATE_REVIEW_RESUME_KEY)).toBeNull();
+    expect(sessionStorage.getItem("claw_dashboard_resume_signer_setup_v1")).toBeNull();
   });
 
   it("12 — reload simulation: explicit reset then new agreement id", () => {
