@@ -34,6 +34,7 @@ import {
 } from "./paidProDisplayPlainAuthority";
 import { isPaidProPostFinalizeHydratedCorpusLocked } from "./paidProSignerMetadataCommitPolicy";
 import {
+  clearPaidProSourceOfTruth,
   getPaidProSourceOfTruthText,
   hashPaidProCorpus,
   hasPaidProSourceOfTruth,
@@ -46,6 +47,7 @@ import {
   PAID_PRO_REVIEW_SESSION_AUTHORITY_SOURCE,
   resolvePaidProReviewSessionAuthorityPaintPlain,
 } from "./paidProReviewSessionAuthority";
+import { detectPaidProCorpusIntakeContamination } from "./paidProIntakeCorpusFidelity";
 
 export const PAID_PRO_ACCEPTED_CANONICAL_SOT_DISPLAY_SOURCE =
   "paid_pro_accepted_canonical_source_of_truth";
@@ -82,6 +84,38 @@ export type PaidProFirstReviewVisibleDisplayArgs = {
 
 function trim(s: string | null | undefined): string {
   return (s || "").trim();
+}
+
+function rejectContaminatedFirstReviewPlain(
+  plain: string,
+  intakeText: string | null | undefined,
+): { plain: string; blocked: boolean; reason: string | null } {
+  const intake = trim(intakeText);
+  const body = trim(plain);
+  if (!intake || body.length < PAID_PRO_AUTHORITY_MIN_LEN) {
+    return { plain: body, blocked: false, reason: null };
+  }
+  const fidelity = detectPaidProCorpusIntakeContamination({
+    intakeText: intake,
+    corpusText: body,
+  });
+  if (!fidelity.contaminated) {
+    return { plain: body, blocked: false, reason: null };
+  }
+  if (typeof import.meta === "undefined" || import.meta.env?.MODE !== "test") {
+    // eslint-disable-next-line no-console
+    console.warn("[paid-pro-intake-corpus-contamination]", {
+      reasons: fidelity.reasons,
+      intakeLen: intake.length,
+      corpusLen: body.length,
+    });
+  }
+  clearPaidProSourceOfTruth();
+  return {
+    plain: "",
+    blocked: true,
+    reason: `intake_corpus_contamination:${fidelity.reasons.slice(0, 3).join(",")}`,
+  };
 }
 
 export function isPaidProFirstReviewVisibleDisplayActive(
@@ -227,8 +261,19 @@ export function resolvePaidProFirstReviewVisibleDisplayPlain(
         verifiedPlain.length >= PAID_PRO_AUTHORITY_MIN_LEN &&
         hashPaidProCorpus(verifiedPlain) === hashPaidProCorpus(acceptedCanonical.plain)
       ) {
+        const fidelity = rejectContaminatedFirstReviewPlain(verifiedPlain, args.intakeText);
+        if (fidelity.blocked) {
+          return {
+            plain: "",
+            source: "none",
+            fallbackReason: fidelity.reason,
+            hasSoT: false,
+            hasServerFullDoc,
+            paidProActive,
+          };
+        }
         return {
-          plain: verifiedPlain,
+          plain: fidelity.plain,
           source: "verified_server_canonical_review_snapshot",
           fallbackReason: null,
           hasSoT,
@@ -237,8 +282,19 @@ export function resolvePaidProFirstReviewVisibleDisplayPlain(
         };
       }
     }
+    const fidelity = rejectContaminatedFirstReviewPlain(acceptedCanonical.plain, args.intakeText);
+    if (fidelity.blocked) {
+      return {
+        plain: "",
+        source: "none",
+        fallbackReason: fidelity.reason,
+        hasSoT: false,
+        hasServerFullDoc,
+        paidProActive,
+      };
+    }
     return {
-      plain: acceptedCanonical.plain,
+      plain: fidelity.plain,
       source:
         acceptedCanonical.source === PAID_PRO_REVIEW_SESSION_AUTHORITY_SOURCE
           ? PAID_PRO_REVIEW_SESSION_AUTHORITY_SOURCE

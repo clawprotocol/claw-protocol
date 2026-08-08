@@ -1693,7 +1693,9 @@ import {
   bootstrapDirectAuthenticatedCreateEntryIfNeeded,
   clearPriorPaidAuthorityForFreshCreateSubmit,
 } from "../../launch/newAgreementSessionReset";
-import { assessAgreementIntakeCapability } from "./agreementIntakeCapabilityGate";
+import {
+  evaluateIntentionalCreateDraftSubmit,
+} from "./agreementIntakeCapabilityGate";
 import { useDashboardPaidCreateFunnelTelemetry } from "../../launch/useDashboardPaidCreateFunnelTelemetry";
 import { useAuth } from "../../auth/AuthProvider";
 
@@ -11780,17 +11782,36 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       return;
     }
     const text = (initialIntakeText ?? intakeStepBufferRef.current ?? "").trim();
-    if (text.length < 6) return;
+    // Product-wide (all accounts): same clear + capability gate as /app/create Create draft.
+    // Inline evaluate here — prepareIntentionalCreateDraftSubmit is declared later in this component.
+    const homeDecision = evaluateIntentionalCreateDraftSubmit(text);
+    if (homeDecision.action === "noop") return;
+    clearPriorPaidAuthorityForFreshCreateSubmit();
+    hydratedPremiumBodyRef.current = "";
+    lastKnownGoodAuthoritativeDraftRef.current = "";
+    lastPremiumWinningCorpusRef.current = "";
+    premiumPipelineOutputBodyRef.current = "";
+    agreementDocumentTextRef.current = "";
+    setAgreementDocumentText("");
+    if (homeDecision.action === "block_capability") {
+      homeAutoGenerateConsumedRef.current = true;
+      setHardError(homeDecision.message);
+      setLoading(false);
+      setCreateFlowPhase("capturing_input");
+      setDisplayPhase("intake");
+      setCreateUiStage(CreateUiStage.INPUT);
+      return;
+    }
     homeAutoGenerateStartedRef.current = true;
-    logHomeCreateSubmit(text);
-    if (commitStarterMultiPartyProGate(text)) {
+    logHomeCreateSubmit(homeDecision.text);
+    if (commitStarterMultiPartyProGate(homeDecision.text)) {
       homeAutoGenerateConsumedRef.current = true;
       return;
     }
     beginStarterDraftGeneration();
     void (async () => {
       await runProductionLocalDraftParse({
-        rawOverride: text,
+        rawOverride: homeDecision.text,
         handoffSource: "home_create_submit",
       });
     })();
@@ -13526,6 +13547,36 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     returnToIntakeEditing();
   }, [createProductionTwoPane, draft, createUiStage, returnToIntakeEditing]);
 
+  /** Wipe in-memory paid Pro paint buffers so a new intake cannot inherit a prior body. */
+  const wipeInMemoryPaidCreatePaintBuffers = React.useCallback(() => {
+    clearPriorPaidAuthorityForFreshCreateSubmit();
+    hydratedPremiumBodyRef.current = "";
+    lastKnownGoodAuthoritativeDraftRef.current = "";
+    lastPremiumWinningCorpusRef.current = "";
+    premiumPipelineOutputBodyRef.current = "";
+    agreementDocumentTextRef.current = "";
+    setAgreementDocumentText("");
+  }, []);
+
+  /**
+   * Shared Create-draft prep for every INPUT generate path (stageA, guided, voice).
+   * Clears prior SoT/body and applies counsel-prep capability gate.
+   */
+  const prepareIntentionalCreateDraftSubmit = React.useCallback(
+    (
+      rawIntake: string,
+    ): { ok: true; text: string } | { ok: false; blocked: boolean; message: string } => {
+      const decision = evaluateIntentionalCreateDraftSubmit(rawIntake);
+      if (decision.action === "noop") return { ok: false, blocked: false, message: "" };
+      wipeInMemoryPaidCreatePaintBuffers();
+      if (decision.action === "block_capability") {
+        return { ok: false, blocked: true, message: decision.message };
+      }
+      return { ok: true, text: decision.text };
+    },
+    [wipeInMemoryPaidCreatePaintBuffers],
+  );
+
   /** Fresh `/app/create`: textarea at click time wins; clears stale starter baseline before parse. */
   const prepareFreshStarterCreateSubmit = React.useCallback((): string => {
     const resolved = resolveStarterCreateSubmitText({
@@ -13535,11 +13586,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       freshSimpleCreateUx,
     });
     if (resolved.text.trim().length >= 6) {
-      // Same-session Create draft must not paint a prior paid Pro SoT / freeze.
-      clearPriorPaidAuthorityForFreshCreateSubmit();
-      hydratedPremiumBodyRef.current = "";
-      lastKnownGoodAuthoritativeDraftRef.current = "";
-      lastPremiumWinningCorpusRef.current = "";
+      wipeInMemoryPaidCreatePaintBuffers();
     }
     if (freshSimpleCreateUx && resolved.text.length > 0) {
       logStarterCreateSubmit(resolved.text, resolved.source);
@@ -13549,7 +13596,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       setBaselineActionAck(null);
     }
     return resolved.text;
-  }, [freshSimpleCreateUx, intakeBaselineCommitted]);
+  }, [freshSimpleCreateUx, intakeBaselineCommitted, wipeInMemoryPaidCreatePaintBuffers]);
 
   const startFreshStarterDictation = React.useCallback(() => {
     setDictationStartNonce((n) => n + 1);
@@ -21125,6 +21172,16 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     draftVoiceHandledRef.current = true;
     void (async () => {
       if (createProductionTwoPane) {
+        const voiceRaw = stripTrailingDraftNowCommand(intakeGuidanceCombined).trim();
+        const voicePrep = prepareIntentionalCreateDraftSubmit(voiceRaw);
+        if (!voicePrep.ok) {
+          if (voicePrep.blocked && voicePrep.message) setHardError(voicePrep.message);
+          setLoading(false);
+          setCreateFlowPhase("capturing_input");
+          setDisplayPhase("intake");
+          setCreateUiStage(CreateUiStage.INPUT);
+          return;
+        }
         console.debug("[handoff-start]", {
           source: "voice_draft_now",
           createUiStage,
@@ -21135,20 +21192,22 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         setLoading(true);
         setCreateFlowPhase("generating_draft");
         setDisplayPhase("generating_draft");
-      }
-      await finalizeIntakeCapture();
-      if (createProductionTwoPane) {
+        await finalizeIntakeCapture();
         setIntakeStepBuffer((prev) => stripTrailingDraftNowCommand(prev));
         flushDebouncedStepBuffer({ forceFlash: true });
         trackFunnelEvent("generate_clicked", {
           ready_state: guidedStructureComplete && !isGenerating,
-          intake_chars: intakeGuidanceCombined.trim().length,
+          intake_chars: voicePrep.text.length,
           max_step_reached: funnelMaxStepRef.current,
           production_phase: "voice_draft_now",
         });
-        await runProductionLocalDraftParse({ handoffSource: "voice_draft_now" });
+        await runProductionLocalDraftParse({
+          rawOverride: voicePrep.text,
+          handoffSource: "voice_draft_now",
+        });
         return;
       }
+      await finalizeIntakeCapture();
       handleDraftNowCommit({ stripVoiceCommand: true });
     })();
   }, [
@@ -21165,6 +21224,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     stripTrailingDraftNowCommand,
     flushDebouncedStepBuffer,
     runProductionLocalDraftParse,
+    prepareIntentionalCreateDraftSubmit,
     trackFunnelEvent,
     intakeGuidanceCombined,
     guidedStructureComplete,
@@ -30738,6 +30798,18 @@ const AgreementBuilderIntake: React.FC<Props> = ({
               return;
             }
             if (createProductionTwoPane && createUiStage === CreateUiStage.INPUT && guidedStructureComplete) {
+              const guidedRaw = (textareaRef.current?.value || intakeCombined).trim();
+              const guidedPrep = prepareIntentionalCreateDraftSubmit(guidedRaw);
+              if (!guidedPrep.ok) {
+                if (guidedPrep.blocked && guidedPrep.message) {
+                  setHardError(guidedPrep.message);
+                }
+                setLoading(false);
+                setCreateFlowPhase("capturing_input");
+                setDisplayPhase("intake");
+                setCreateUiStage(CreateUiStage.INPUT);
+                return;
+              }
               console.debug("[handoff-start]", {
                 source: "executePrimaryCta_INPUT_to_DRAFT",
                 createUiStage,
@@ -30752,11 +30824,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
               await finalizeIntakeCapture();
               trackFunnelEvent("generate_clicked", {
                 ready_state: guidedStructureComplete && !isGenerating,
-                intake_chars: intakeCombined.trim().length,
+                intake_chars: guidedPrep.text.length,
                 max_step_reached: funnelMaxStepRef.current,
                 production_phase: "local_draft_parse",
               });
-              await runProductionLocalDraftParse({ handoffSource: "guided_input_generate" });
+              await runProductionLocalDraftParse({
+                rawOverride: guidedPrep.text,
+                handoffSource: "guided_input_generate",
+              });
               return;
             }
             if (stageAInputFirst) {
@@ -30764,15 +30839,16 @@ const AgreementBuilderIntake: React.FC<Props> = ({
               const rawSubmitted = prepareFreshStarterCreateSubmit();
               if (createProductionTwoPane) {
                 if (rawSubmitted.length < 6) return;
-                const intakeCapability = assessAgreementIntakeCapability(rawSubmitted);
-                if (!intakeCapability.ok) {
-                  setHardError(intakeCapability.userMessage);
+                const intakeCapability = evaluateIntentionalCreateDraftSubmit(rawSubmitted);
+                if (intakeCapability.action === "block_capability") {
+                  setHardError(intakeCapability.message);
                   setLoading(false);
                   setCreateFlowPhase("capturing_input");
                   setDisplayPhase("intake");
                   setCreateUiStage(CreateUiStage.INPUT);
                   return;
                 }
+                if (intakeCapability.action === "noop") return;
                 const live = buildLiveDraftPreview(rawSubmitted);
                 if (
                   !isUsablePartialIntakeStructure(live, rawSubmitted) &&
@@ -30980,15 +31056,16 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         const rawSubmitted = prepareFreshStarterCreateSubmit();
         if (createProductionTwoPane) {
           if (rawSubmitted.length < 6) return;
-          const intakeCapability = assessAgreementIntakeCapability(rawSubmitted);
-          if (!intakeCapability.ok) {
-            setHardError(intakeCapability.userMessage);
+          const intakeCapability = evaluateIntentionalCreateDraftSubmit(rawSubmitted);
+          if (intakeCapability.action === "block_capability") {
+            setHardError(intakeCapability.message);
             setLoading(false);
             setCreateFlowPhase("capturing_input");
             setDisplayPhase("intake");
             setCreateUiStage(CreateUiStage.INPUT);
             return;
           }
+          if (intakeCapability.action === "noop") return;
           const live = buildLiveDraftPreview(rawSubmitted);
           if (
             !isUsablePartialIntakeStructure(live, rawSubmitted) &&
@@ -31038,6 +31115,18 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       }
       if (createProductionTwoPane && guidedStructureComplete) {
         if (createUiStage === CreateUiStage.INPUT) {
+          const guidedRaw = (textareaRef.current?.value || intakeCombined).trim();
+          const guidedPrep = prepareIntentionalCreateDraftSubmit(guidedRaw);
+          if (!guidedPrep.ok) {
+            if (guidedPrep.blocked && guidedPrep.message) {
+              setHardError(guidedPrep.message);
+            }
+            setLoading(false);
+            setCreateFlowPhase("capturing_input");
+            setDisplayPhase("intake");
+            setCreateUiStage(CreateUiStage.INPUT);
+            return;
+          }
           console.debug("[handoff-start]", {
             source: "runPrimary_guided_input",
             createUiStage,
@@ -31049,16 +31138,22 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           setDisplayPhase("generating_draft");
           setCreateUiStage(CreateUiStage.DRAFT);
           setLoading(true);
-        }
-        await finalizeIntakeCapture();
-        if (createUiStage === CreateUiStage.INPUT) {
+          await finalizeIntakeCapture();
           trackFunnelEvent("generate_clicked", {
             ready_state: guidedStructureComplete && !isGenerating,
-            intake_chars: intakeCombined.trim().length,
+            intake_chars: guidedPrep.text.length,
             max_step_reached: funnelMaxStepRef.current,
             production_phase: "local_draft_parse",
           });
-          await runProductionLocalDraftParse({ handoffSource: "guided_input_generate" });
+          await runProductionLocalDraftParse({
+            rawOverride: guidedPrep.text,
+            handoffSource: "guided_input_generate",
+          });
+          return;
+        }
+        await finalizeIntakeCapture();
+        if (createUiStage === CreateUiStage.INPUT) {
+          // Defensive: INPUT should have returned above after prep.
           return;
         }
         if (createUiStage === CreateUiStage.DRAFT) {

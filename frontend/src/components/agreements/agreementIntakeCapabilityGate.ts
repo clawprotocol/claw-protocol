@@ -63,3 +63,23 @@ export function assessAgreementIntakeCapability(rawIntake: string): AgreementInt
 
   return { ok: true };
 }
+
+export type IntentionalCreateDraftSubmitDecision =
+  | { action: "proceed"; text: string }
+  | { action: "block_capability"; text: string; message: string }
+  | { action: "noop" };
+
+/**
+ * Shared Create-draft submit evaluation for every INPUT generate path
+ * (stageA, guided_input_generate, voice_draft_now). Caller must clear paid
+ * authority before proceeding when action === "proceed".
+ */
+export function evaluateIntentionalCreateDraftSubmit(rawIntake: string): IntentionalCreateDraftSubmitDecision {
+  const text = (rawIntake || "").replace(/\r\n/g, "\n").trim();
+  if (text.length < 6) return { action: "noop" };
+  const capability = assessAgreementIntakeCapability(text);
+  if (!capability.ok) {
+    return { action: "block_capability", text, message: capability.userMessage };
+  }
+  return { action: "proceed", text };
+}
