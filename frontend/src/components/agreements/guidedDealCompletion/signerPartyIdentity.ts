@@ -93,10 +93,15 @@ export function resolvePaidProPolishPartyNamesFromIdentities(
 }
 
 const BRACKET_PARTY_MAP: readonly { re: RegExp; partyIndex: number }[] = [
+  { re: /\[your\s+company\s+legal\s+name\]/gi, partyIndex: 0 },
   { re: /\[your\s+company\s+name\]/gi, partyIndex: 0 },
-  { re: /\[service\s+provider\s+name\]/gi, partyIndex: 1 },
+  { re: /\[provider\s+legal\s+name\]/gi, partyIndex: 0 },
+  { re: /\[company\s+legal\s+name\]/gi, partyIndex: 0 },
   { re: /\[client\s+legal\s+name\]/gi, partyIndex: 0 },
-  { re: /\[counterparty\s+name\]/gi, partyIndex: 1 },
+  { re: /\[customer\s+legal\s+name\]/gi, partyIndex: 1 },
+  { re: /\[customer\s+name\]/gi, partyIndex: 1 },
+  { re: /\[service\s+provider\s+(?:legal\s+)?name\]/gi, partyIndex: 1 },
+  { re: /\[counterparty\s+(?:legal\s+)?name\]/gi, partyIndex: 1 },
 ];
 
 function replaceBracketPartyPlaceholders(

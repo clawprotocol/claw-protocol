@@ -122,7 +122,9 @@ function replaceProCorpusPartyPlaceholders(
     if (clientName) {
       next = next
         .replace(/\b(?:party_a|partyA)\b\s*(?:\(\s*the\s+["“]?Client["”]?\s*\))?/gi, `${clientName} ("${clientRole}")`)
-        .replace(/\[Your Company Name\]/gi, clientName);
+        .replace(/\[Your Company Legal Name\]/gi, clientName)
+        .replace(/\[Your Company Name\]/gi, clientName)
+        .replace(/\[Provider Legal Name\]/gi, clientName);
     }
     if (providerName) {
       next = next
@@ -130,7 +132,10 @@ function replaceProCorpusPartyPlaceholders(
           /\b(?:party_b|partyB)\b\s*(?:\(\s*the\s+["“]?Service Provider["”]?\s*\))?/gi,
           `${providerName} ("${providerRole}")`,
         )
-        .replace(/\[Service Provider Name\]/gi, providerName);
+        .replace(/\[Customer Legal Name\]/gi, providerName)
+        .replace(/\[Customer Name\]/gi, providerName)
+        .replace(/\[Service Provider Name\]/gi, providerName)
+        .replace(/\[Service Provider Legal Name\]/gi, providerName);
     }
     if (!PLACEHOLDER_PARTY_RE.test(next)) {
       if (next !== before) repairs.push("placeholder_party:resolved");

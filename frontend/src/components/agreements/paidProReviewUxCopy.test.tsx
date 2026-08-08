@@ -38,7 +38,10 @@ describe("paidProReviewUxCopy", () => {
       />,
     );
     expect(screen.queryByTestId("paid-pro-review-compact-header")).toBeNull();
-    expect(screen.queryByTestId("paid-pro-review-status-supporting")).toBeNull();
+    // Compact shell still shows signer-field guidance while details are incomplete.
+    expect(screen.getByTestId("paid-pro-review-status-supporting").textContent).toMatch(
+      /signer name|legal entity|signature lines/i,
+    );
     expect(screen.getByTestId("paid-pro-review-status-panel").textContent).toContain(
       "Signer details needed",
     );

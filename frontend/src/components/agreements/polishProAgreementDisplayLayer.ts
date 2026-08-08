@@ -55,6 +55,7 @@ import {
   resolvePaidProFrozenDisplayPlain,
   shouldSkipPostFreezeDriftForReadonlyHtmlStrip,
 } from "./paidProPostFreezeCorpusInvariant";
+import { applyIntakeDraftPlaceholders } from "./applyIntakeDraftPlaceholders";
 
 export { detectProReviewDisplaySanityViolations } from "./paidProReviewDisplaySanity";
 export type { PaidProDisplaySanityExecutionContext } from "./paidProReviewDisplaySanity";
@@ -602,14 +603,54 @@ export function polishProAgreementDisplayLayer(
   const input = trim(raw);
   if (!input) return { text: "", repairs: [] };
   if (shouldBlockPaidProStructuralMutationAfterAcceptance() && !opts?.retainSignatureExecutionBlock) {
-    const out = resolvePaidProFrozenDisplayPlain(input);
+    let out = resolvePaidProFrozenDisplayPlain(input);
+    const repairs: string[] = ["display:authoritative_sot_passthrough"];
+    // Fact-fill only: clarification-style brackets + known governing law from intake.
+    // Does not rewrite operative deal terms.
+    const partyNames = canonicalPartyNamesFromDraft(opts?.draft);
+    const filled = applyIntakeDraftPlaceholders({
+      text: out,
+      intakeText: opts?.intakeText ?? null,
+      partyNames,
+    });
+    if (filled.text !== out) {
+      out = filled.text;
+      repairs.push(...filled.repairs);
+    }
+    // Facilitation: if the model omitted the signature skeleton, append it before exhibits
+    // so review shows where signing will land (signer name/title/email still come from setup).
+    if (!/\bIN WITNESS WHEREOF\b/i.test(out)) {
+      const manifest = resolveAcceptanceManifestRecordsForExecution({
+        draft: opts?.draft ?? null,
+        intakeText: opts?.intakeText ?? null,
+      });
+      if (manifest.length >= 2 && !isGenericPaidProAcceptanceManifestFallback(manifest)) {
+        const exec = ensurePaidProAcceptanceExecutionBlockInvariant(out, manifest);
+        if (exec.text !== out) {
+          out = exec.text;
+          repairs.push(...exec.repairs);
+        }
+      }
+    }
     logPostFreezeCorpusDrift({ surface: "polishProAgreementDisplayLayer", renderedText: out });
-    logExecutionBlockLocation(out, "polishProAgreementDisplayLayer:passthrough");
-    logExecutionBlockCount(out, "polishProAgreementDisplayLayer:passthrough");
-    return { text: out, repairs: ["display:authoritative_sot_passthrough"] };
+    logExecutionBlockLocation(out, "polishProAgreementDisplayLayer:passthrough_fact_fill");
+    logExecutionBlockCount(out, "polishProAgreementDisplayLayer:passthrough_fact_fill");
+    return { text: out, repairs };
   }
   const repairs: string[] = [];
   let out = basicNormalize(input);
+
+  {
+    const earlyFill = applyIntakeDraftPlaceholders({
+      text: out,
+      intakeText: opts?.intakeText ?? null,
+      partyNames: canonicalPartyNamesFromDraft(opts?.draft),
+    });
+    if (earlyFill.text !== out) {
+      out = earlyFill.text;
+      repairs.push(...earlyFill.repairs);
+    }
+  }
 
   const fillerStrip = stripRepeatedSupplementalProvisionsFiller(out);
   if (fillerStrip.repairs.length > 0 || fillerStrip.strippedCount > 0) {

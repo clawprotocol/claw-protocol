@@ -4,6 +4,7 @@ import {
   resolvePaidProReviewTrustSteps,
   type PaidProReviewTrustStep,
 } from "./paidProReviewTrustUx";
+import { corpusHasClarificationStyleIdentityPlaceholders } from "./applyIntakeDraftPlaceholders";
 
 type Props = {
   signersReady: boolean;
@@ -12,6 +13,10 @@ type Props = {
   signingReadyHydrated?: boolean;
   /** `/app/create` compact review — status steps only, no supporting paragraph. */
   compactShell?: boolean;
+  /** Review preview still has clarification-style party brackets. */
+  hasUnresolvedIdentityPlaceholders?: boolean;
+  /** When set, detect clarification-style identity brackets in the painted preview. */
+  previewPlainText?: string | null;
 };
 
 function StepIcon({ state }: { state: PaidProReviewTrustStep["state"] }) {
@@ -50,16 +55,24 @@ export function PaidProReviewStatusPanel({
   signerMetadataFinalized,
   signingReadyHydrated,
   compactShell = false,
+  hasUnresolvedIdentityPlaceholders = false,
+  previewPlainText = null,
 }: Props) {
   const steps = resolvePaidProReviewTrustSteps({
     signersReady,
     signerMetadataFinalized,
     signingReadyHydrated,
   });
+  const identityPlaceholdersRemain =
+    hasUnresolvedIdentityPlaceholders ||
+    Boolean(previewPlainText && corpusHasClarificationStyleIdentityPlaceholders(previewPlainText));
   // Always surface signer-field guidance while details are incomplete, even on compact shells.
   const supporting =
     !signersReady || !compactShell
-      ? resolvePaidProReviewSupportingCopy({ signersReady })
+      ? resolvePaidProReviewSupportingCopy({
+          signersReady,
+          hasUnresolvedIdentityPlaceholders: identityPlaceholdersRemain,
+        })
       : null;
 
   return (

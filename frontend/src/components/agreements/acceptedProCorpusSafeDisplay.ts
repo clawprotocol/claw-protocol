@@ -20,6 +20,7 @@ import {
   manifestRecordsForPaidProAcceptance,
 } from "./paidProAcceptanceExecutionBlockInvariant";
 import { neutralizeHarmlessEntityMetadataPlaceholders } from "./harmlessEntityMetadataPlaceholders";
+import { applyIntakeDraftPlaceholders } from "./applyIntakeDraftPlaceholders";
 import { repairFullAgreementPartyIdentity } from "./canonicalPartyIdentityResolver";
 import { ensurePaidProServicesAgreementOpening } from "./paidProOpeningRecitalGuard";
 import { stripTrailingLegacyEntitySignatureLines } from "./paidProReviewRenderCorpus";
@@ -207,11 +208,23 @@ function applyAcceptedProCorpusSafeDisplayCore(
   out = md.text;
   repairs.push(...md.repairs);
 
+  const intakeRaw = opts?.intakeText ?? null;
+  // Fill clarification-style brackets from intake BEFORE harmless [State]/[Address] neutralization.
+  const intakePlaceholders = applyIntakeDraftPlaceholders({
+    text: out,
+    intakeText: intakeRaw,
+    partyNames: (opts?.draft?.parties ?? [])
+      .map((p) => String(p?.name ?? "").trim())
+      .filter((n) => n.length >= 2),
+  });
+  if (intakePlaceholders.text !== out) {
+    out = intakePlaceholders.text;
+    repairs.push(...intakePlaceholders.repairs);
+  }
+
   const entityNeutral = neutralizeHarmlessEntityMetadataPlaceholders(out);
   out = entityNeutral.text;
   repairs.push(...entityNeutral.repairs);
-
-  const intakeRaw = opts?.intakeText ?? null;
   if (intakeRaw && intakeDescribesBrandLicensingDistributionManufacturingStack(intakeRaw)) {
     const brandAuthority = applyBrandLicensingFrozenCorpusAuthority(out, opts?.draft ?? null, intakeRaw);
     if (brandAuthority.text !== out) {

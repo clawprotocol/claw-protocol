@@ -1012,11 +1012,13 @@ export function assertPaidProFreezeCandidateGates(
     draft: args.draft ?? null,
     intakeText: args.intakeText ?? null,
   });
+  const missingWitnessClause = !/\bIN WITNESS WHEREOF\b/i.test(safeForCommit);
   if (
     preFreezeExecutionManifest.length >= 2 &&
     !isGenericPaidProAcceptanceManifestFallback(preFreezeExecutionManifest) &&
     !isSubstantiveBrandLicensingCorpus(trim(args.text), args.intakeText) &&
-    (preFreezeExecutionManifest.length >= 3 ||
+    (missingWitnessClause ||
+      preFreezeExecutionManifest.length >= 3 ||
       executionHeadingsContainIntakeInstructionLeakage(safeForCommit) ||
       !executionBlockMatchesManifestRecords(safeForCommit, preFreezeExecutionManifest))
   ) {

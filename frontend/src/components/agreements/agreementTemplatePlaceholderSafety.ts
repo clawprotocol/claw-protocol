@@ -271,10 +271,14 @@ const GENERIC_UPPER_BRACKET_RE = /\[[A-Z][A-Z0-9\s/&.'_\-]{1,55}\]/g;
 const SEMANTIC_PARTY_PLACEHOLDER_PATTERNS: readonly { re: RegExp; label: string }[] = [
   { re: /\bparty[_\s-]?a\b/gi, label: "party_a" },
   { re: /\bparty[_\s-]?b\b/gi, label: "party_b" },
+  { re: /\[your\s+company\s+legal\s+name\]/gi, label: "[Your Company Legal Name]" },
   { re: /\[your\s+company\s+name\]/gi, label: "[Your Company Name]" },
-  { re: /\[service\s+provider\s+name\]/gi, label: "[Service Provider Name]" },
+  { re: /\[provider\s+legal\s+name\]/gi, label: "[Provider Legal Name]" },
+  { re: /\[customer\s+legal\s+name\]/gi, label: "[Customer Legal Name]" },
+  { re: /\[customer\s+name\]/gi, label: "[Customer Name]" },
+  { re: /\[service\s+provider\s+(?:legal\s+)?name\]/gi, label: "[Service Provider Name]" },
   { re: /\[client\s+legal\s+name\]/gi, label: "[Client Legal Name]" },
-  { re: /\[counterparty\s+name\]/gi, label: "[Counterparty Name]" },
+  { re: /\[counterparty\s+(?:legal\s+)?name\]/gi, label: "[Counterparty Name]" },
   { re: /\{\{\s*party[_\s-]?a\s*\}\}/gi, label: "{{party_a}}" },
   { re: /\{\{\s*party[_\s-]?b\s*\}\}/gi, label: "{{party_b}}" },
 ];

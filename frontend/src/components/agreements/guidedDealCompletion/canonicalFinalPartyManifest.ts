@@ -79,14 +79,17 @@ export type GuidedFinalReviewPartyBlockReason =
   | "service_provider_party_name_missing";
 
 const TEMPLATE_PARTY_PLACEHOLDER_RES: readonly RegExp[] = [
+  /^\[?\s*your\s+company\s+legal\s+name\s*\]?$/i,
   /^\[?\s*your\s+company\s+name\s*\]?$/i,
-  /^\[?\s*service\s+provider\s+name\s*\]?$/i,
+  /^\[?\s*service\s+provider(?:\s+legal)?\s+name\s*\]?$/i,
+  /^\[?\s*customer(?:\s+legal)?\s+name\s*\]?$/i,
   /^\[?\s*client(?:'s)?(?:\s+full)?\s+legal\s+name\s*\]?$/i,
   /^\[?\s*client\s+name\s*\]?$/i,
-  /^\[?\s*provider\s+name\s*\]?$/i,
-  /^\[?\s*counterparty\s+name\s*\]?$/i,
-  /^your\s+company\s+name$/i,
-  /^service\s+provider\s+name$/i,
+  /^\[?\s*provider(?:\s+legal)?\s+name\s*\]?$/i,
+  /^\[?\s*counterparty(?:\s+legal)?\s+name\s*\]?$/i,
+  /^your\s+company(?:\s+legal)?\s+name$/i,
+  /^customer(?:\s+legal)?\s+name$/i,
+  /^service\s+provider(?:\s+legal)?\s+name$/i,
   /^client$/i,
   /^service\s+provider$/i,
 ];
@@ -495,16 +498,25 @@ export function applyCanonicalManifestPlaceholdersToCorpus(
   };
 
   if (client?.partyName) {
+    replaceAll(/\[?\s*Your Company Legal Name\s*\]?/gi, client.partyName, "party:your_company_legal_name");
     replaceAll(/\[?\s*Your Company Name\s*\]?/gi, client.partyName, "party:your_company_name");
+    replaceAll(/\[Provider Legal Name\]/gi, client.partyName, "party:provider_legal_name");
+    replaceAll(/\[Company Legal Name\]/gi, client.partyName, "party:company_legal_name");
     replaceAll(/\[Client(?:'s)?(?:\s+Full)?\s+Legal Name\]/gi, client.partyName, "party:client_legal_name");
     replaceAll(/\[Client's Full Legal Name\]/gi, client.partyName, "party:client_legal_name_apostrophe");
     replaceAll(/\[Client Name\]/gi, client.partyName, "party:client_name");
+    replaceAll(/\bYour Company Legal Name\b/g, client.partyName, "party:your_company_legal_name_plain");
     replaceAll(/\bYour Company Name\b/g, client.partyName, "party:your_company_name_plain");
   }
   if (provider?.partyName) {
+    replaceAll(/\[Customer Legal Name\]/gi, provider.partyName, "party:customer_legal_name");
+    replaceAll(/\[Customer Name\]/gi, provider.partyName, "party:customer_name");
     replaceAll(/\[?\s*Service Provider Name\s*\]?/gi, provider.partyName, "party:service_provider_name");
+    replaceAll(/\[Service Provider Legal Name\]/gi, provider.partyName, "party:service_provider_legal_name");
     replaceAll(/\[Provider Name\]/gi, provider.partyName, "party:provider_name");
+    replaceAll(/\[Counterparty(?: Legal)? Name\]/gi, provider.partyName, "party:counterparty_name");
     replaceAll(/\bService Provider Name\b/g, provider.partyName, "party:service_provider_name_plain");
+    replaceAll(/\bCustomer Legal Name\b/g, provider.partyName, "party:customer_legal_name_plain");
   }
 
   const addressPhrase = "address on file";
@@ -526,12 +538,16 @@ export function applyCanonicalManifestPlaceholdersToCorpus(
 }
 
 const FATAL_PARTY_NAME_PLACEHOLDER_RES: readonly RegExp[] = [
+  /\[?\s*Your Company Legal Name\s*\]?/i,
   /\[?\s*Your Company Name\s*\]?/i,
   /\[?\s*Service Provider Name\s*\]?/i,
+  /\[Customer Legal Name\]/i,
   /\[Client(?:'s)?(?:\s+Full)?\s+Legal Name\]/i,
   /\[Client Name\]/i,
-  /\[Provider Name\]/i,
+  /\[Provider(?: Legal)? Name\]/i,
+  /\bYour Company Legal Name\b/,
   /\bYour Company Name\b/,
+  /\bCustomer Legal Name\b/,
   /\bService Provider Name\b/,
 ];
 

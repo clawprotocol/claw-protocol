@@ -548,6 +548,7 @@ export function SimpleProFinalReviewScreen({
           signerMetadataFinalized={signerMetadataFinalized}
           signingReadyHydrated={signerMetadataFinalized}
           compactShell={hideInPanelTitleChrome}
+          previewPlainText={paidReviewPlain}
         />
       ) : null}
       {showSignerSavedBanner ? (

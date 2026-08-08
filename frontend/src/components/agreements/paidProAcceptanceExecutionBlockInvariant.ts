@@ -640,9 +640,15 @@ function rebuildCanonicalExecutionTailFromPrefix(
   records: readonly CanonicalPartyIdentityRecord[],
 ): string {
   const prefix = stripStaleSignatureRoleBlocksFromPrefix(operativePrefixWithoutExecution(text));
-  return `${prefix}\n\n${buildCanonicalExecutionTailFromManifest(records)}\n`
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
+  const tail = buildCanonicalExecutionTailFromManifest(records);
+  // Keep signature blocks before exhibits so users see them at the natural document end.
+  const exhibitIdx = prefix.search(/(?:^|\n)\s*EXHIBIT\s+[A-Z0-9]/im);
+  if (exhibitIdx >= 0) {
+    const before = prefix.slice(0, exhibitIdx).trimEnd();
+    const exhibits = prefix.slice(exhibitIdx).trim();
+    return `${before}\n\n${tail}\n\n${exhibits}\n`.replace(/\n{3,}/g, "\n\n").trim();
+  }
+  return `${prefix}\n\n${tail}\n`.replace(/\n{3,}/g, "\n\n").trim();
 }
 
 function executionBlockCoversManifestPartyNames(

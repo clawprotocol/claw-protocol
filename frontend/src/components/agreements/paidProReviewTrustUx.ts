@@ -33,7 +33,11 @@ export function resolvePaidProReviewSignerStatusReady(args: {
 }
 
 export const PAID_PRO_REVIEW_SUPPORTING_BEFORE_SIGNERS =
-  "Add legal entity, signer name, email, and title for each party before preparing signature links.";
+  "Add legal entity, signer name, email, and title for each party. Signature lines and notice contacts use those details — nothing is sent until you confirm.";
+
+/** When the draft still shows clarification-style brackets after generate. */
+export const PAID_PRO_REVIEW_SUPPORTING_IDENTITY_PLACEHOLDERS =
+  "Party names from your prompt should appear in the draft. If any brackets remain, continue to signer details to lock legal names, emails, and titles before preparing signature links.";
 
 export const PAID_PRO_REVIEW_SUPPORTING_AFTER_SIGNERS =
   "Signer details are saved in the agreement. Continue when you are ready to prepare signature links.";
@@ -97,10 +101,12 @@ export function resolvePaidProReviewTrustSteps(args: {
 
 export function resolvePaidProReviewSupportingCopy(args: {
   signersReady: boolean;
+  /** True when review preview still has [Your Company Legal Name]-style tokens. */
+  hasUnresolvedIdentityPlaceholders?: boolean;
 }): string {
-  return args.signersReady
-    ? PAID_PRO_REVIEW_SUPPORTING_AFTER_SIGNERS
-    : PAID_PRO_REVIEW_SUPPORTING_BEFORE_SIGNERS;
+  if (args.signersReady) return PAID_PRO_REVIEW_SUPPORTING_AFTER_SIGNERS;
+  if (args.hasUnresolvedIdentityPlaceholders) return PAID_PRO_REVIEW_SUPPORTING_IDENTITY_PLACEHOLDERS;
+  return PAID_PRO_REVIEW_SUPPORTING_BEFORE_SIGNERS;
 }
 
 export function resolvePaidProFinalVersionCopy(args: {

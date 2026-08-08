@@ -103,6 +103,7 @@ export function PaidProForcedFirstReviewChrome({
         signerMetadataFinalized={signerMetadataFinalized}
         signingReadyHydrated={signerMetadataFinalized && !hydrationBlocked}
         compactShell={compactShell}
+        previewPlainText={getCopyPlainText()}
       />
       {showSignerSavedBanner ? (
         <PaidProSignerSavedConfirmationBanner mappings={signerSavedMappings} />
