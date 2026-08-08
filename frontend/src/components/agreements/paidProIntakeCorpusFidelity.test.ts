@@ -66,7 +66,8 @@ describe("evaluateIntentionalCreateDraftSubmit", () => {
     const decision = evaluateIntentionalCreateDraftSubmit(COUNSEL_PREP);
     expect(decision.action).toBe("block_capability");
     if (decision.action === "block_capability") {
-      expect(decision.message).toMatch(/negotiation|deal-counsel/i);
+      expect(decision.message).toMatch(/negotiation|executable agreements/i);
+      expect(decision.clarification.suggestedRewrite).toMatch(/Draft a .+ between/i);
     }
   });
 });

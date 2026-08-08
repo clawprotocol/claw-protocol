@@ -11,6 +11,7 @@ import { detectPaidProCorpusIntakeContamination } from "./paidProIntakeCorpusFid
 
 const ROOT = resolve(__dirname);
 const CAPABILITY_SRC = readFileSync(resolve(ROOT, "agreementIntakeCapabilityGate.ts"), "utf8");
+const CLARIFICATION_SRC = readFileSync(resolve(ROOT, "agreementIntakeClarification.ts"), "utf8");
 const FIDELITY_SRC = readFileSync(resolve(ROOT, "paidProIntakeCorpusFidelity.ts"), "utf8");
 const CLEAR_SRC = readFileSync(
   resolve(ROOT, "../../launch/newAgreementSessionReset.ts"),
@@ -24,6 +25,7 @@ const ACCOUNT_SCOPED_RE =
 describe("agreement intake universality (all LawDog accounts)", () => {
   it("capability / fidelity / clear modules have no account-scoped branches", () => {
     expect(CAPABILITY_SRC).not.toMatch(ACCOUNT_SCOPED_RE);
+    expect(CLARIFICATION_SRC).not.toMatch(ACCOUNT_SCOPED_RE);
     expect(FIDELITY_SRC).not.toMatch(ACCOUNT_SCOPED_RE);
     expect(CLEAR_SRC).not.toMatch(ACCOUNT_SCOPED_RE);
   });
@@ -41,6 +43,8 @@ describe("agreement intake universality (all LawDog accounts)", () => {
     // Shared prep is the product choke point for clear + capability gate.
     expect(INTAKE_SRC).toContain("prepareIntentionalCreateDraftSubmit");
     expect(INTAKE_SRC).toContain("evaluateIntentionalCreateDraftSubmit");
+    expect(INTAKE_SRC).toContain("applyIntakeCapabilityBlock");
+    expect(INTAKE_SRC).toContain("AgreementIntakeClarificationPanel");
     // Both guided call sites must prep before parse (regression: one path skipped the gate).
     const guidedPrepCount = (INTAKE_SRC.match(/prepareIntentionalCreateDraftSubmit\(guidedRaw\)/g) || [])
       .length;

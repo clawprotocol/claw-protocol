@@ -127,6 +127,8 @@ import {
   type StarterComplexityGateAssessment,
 } from "./starterMultiPartyProGate";
 import { StarterMultiPartyProGatePanel } from "./StarterMultiPartyProGatePanel";
+import { AgreementIntakeClarificationPanel } from "./AgreementIntakeClarificationPanel";
+import type { AgreementIntakeClarification } from "./agreementIntakeClarification";
 import { looksLikeRefinementIntent } from "./reviewRefineIntent";
 import { mergeProPreservingRefineParsed } from "./reviewRefineMerge";
 import { PremiumProGenerationWaitPanel } from "./PremiumProGenerationWaitPanel";
@@ -1695,6 +1697,7 @@ import {
 } from "../../launch/newAgreementSessionReset";
 import {
   evaluateIntentionalCreateDraftSubmit,
+  type IntentionalCreateDraftSubmitDecision,
 } from "./agreementIntakeCapabilityGate";
 import { useDashboardPaidCreateFunnelTelemetry } from "../../launch/useDashboardPaidCreateFunnelTelemetry";
 import { useAuth } from "../../auth/AuthProvider";
@@ -2063,8 +2066,13 @@ function isActionableIntakeCapabilityErrorRaw(raw: string): boolean {
   return (
     /\bnot a draftable agreement\b/i.test(m) ||
     /\bdeal-counsel prep\b/i.test(m) ||
+    /\bnegotiation prep\b/i.test(m) ||
     /\bRephrase as a draft request\b/i.test(m) ||
-    /\bexecutable agreements from parties\b/i.test(m)
+    /\bHow to fix it\b/i.test(m) ||
+    /\bSuggested draft request\b/i.test(m) ||
+    /\bName the parties to continue\b/i.test(m) ||
+    /\bAdd a few basics so we can draft\b/i.test(m) ||
+    /\bexecutable agreements from (?:named )?parties\b/i.test(m)
   );
 }
 
@@ -3412,6 +3420,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const [baselineActionAck, setBaselineActionAck] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [hardError, setHardError] = useState<string | null>(null);
+  /** Guided remediation when Create draft is blocked for intake shape (all accounts). */
+  const [intakeClarification, setIntakeClarification] = useState<AgreementIntakeClarification | null>(
+    null,
+  );
   /** Calm inline copy when POST /refine fails; do not clear the step buffer. */
   const [reviewRefineUserMessage, setReviewRefineUserMessage] = useState<string | null>(null);
   const [missing, setMissing] = useState<MissingKey[]>([]);
@@ -11795,7 +11807,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     setAgreementDocumentText("");
     if (homeDecision.action === "block_capability") {
       homeAutoGenerateConsumedRef.current = true;
-      setHardError(homeDecision.message);
+      // Inline (applyIntakeCapabilityBlock is declared later in this component).
+      setHardError(null);
+      setIntakeClarification(homeDecision.clarification);
       setLoading(false);
       setCreateFlowPhase("capturing_input");
       setDisplayPhase("intake");
@@ -13558,20 +13572,72 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     setAgreementDocumentText("");
   }, []);
 
+  const applyIntakeCapabilityBlock = React.useCallback(
+    (decision: Extract<IntentionalCreateDraftSubmitDecision, { action: "block_capability" }>) => {
+      setHardError(null);
+      setIntakeClarification(decision.clarification);
+      setLoading(false);
+      setCreateFlowPhase("capturing_input");
+      setDisplayPhase("intake");
+      setCreateUiStage(CreateUiStage.INPUT);
+    },
+    [],
+  );
+
+  const dismissIntakeClarification = React.useCallback(() => {
+    setIntakeClarification(null);
+    window.requestAnimationFrame(() => textareaRef.current?.focus());
+  }, []);
+
+  const applyIntakeClarificationSuggestedRewrite = React.useCallback(() => {
+    const rewrite = intakeClarification?.suggestedRewrite?.trim();
+    if (!rewrite) {
+      dismissIntakeClarification();
+      return;
+    }
+    setIntakeStepBuffer(rewrite);
+    setDebouncedStepBuffer(rewrite);
+    setIntakeClarification(null);
+    setHardError(null);
+    window.requestAnimationFrame(() => {
+      const el = textareaRef.current;
+      if (!el) return;
+      el.focus();
+      try {
+        el.setSelectionRange(rewrite.length, rewrite.length);
+      } catch {
+        /* ignore selection errors on unsupported hosts */
+      }
+    });
+  }, [dismissIntakeClarification, intakeClarification?.suggestedRewrite]);
+
   /**
    * Shared Create-draft prep for every INPUT generate path (stageA, guided, voice).
-   * Clears prior SoT/body and applies counsel-prep capability gate.
+   * Clears prior SoT/body and applies universal intake capability clarification.
    */
   const prepareIntentionalCreateDraftSubmit = React.useCallback(
     (
       rawIntake: string,
-    ): { ok: true; text: string } | { ok: false; blocked: boolean; message: string } => {
+    ):
+      | { ok: true; text: string }
+      | {
+          ok: false;
+          blocked: boolean;
+          message: string;
+          clarification?: AgreementIntakeClarification;
+        } => {
       const decision = evaluateIntentionalCreateDraftSubmit(rawIntake);
       if (decision.action === "noop") return { ok: false, blocked: false, message: "" };
       wipeInMemoryPaidCreatePaintBuffers();
       if (decision.action === "block_capability") {
-        return { ok: false, blocked: true, message: decision.message };
+        return {
+          ok: false,
+          blocked: true,
+          message: decision.message,
+          clarification: decision.clarification,
+        };
       }
+      setIntakeClarification(null);
       return { ok: true, text: decision.text };
     },
     [wipeInMemoryPaidCreatePaintBuffers],
@@ -21175,11 +21241,16 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         const voiceRaw = stripTrailingDraftNowCommand(intakeGuidanceCombined).trim();
         const voicePrep = prepareIntentionalCreateDraftSubmit(voiceRaw);
         if (!voicePrep.ok) {
-          if (voicePrep.blocked && voicePrep.message) setHardError(voicePrep.message);
-          setLoading(false);
-          setCreateFlowPhase("capturing_input");
-          setDisplayPhase("intake");
-          setCreateUiStage(CreateUiStage.INPUT);
+          if (voicePrep.blocked && voicePrep.clarification) {
+            applyIntakeCapabilityBlock({
+              action: "block_capability",
+              text: voiceRaw,
+              message: voicePrep.message,
+              clarification: voicePrep.clarification,
+            });
+          } else if (voicePrep.blocked && voicePrep.message) {
+            setHardError(voicePrep.message);
+          }
           return;
         }
         console.debug("[handoff-start]", {
@@ -21189,6 +21260,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           displayPhase_before: displayPhase,
         });
         setHardError(null);
+        setIntakeClarification(null);
         setLoading(true);
         setCreateFlowPhase("generating_draft");
         setDisplayPhase("generating_draft");
@@ -30801,13 +30873,16 @@ const AgreementBuilderIntake: React.FC<Props> = ({
               const guidedRaw = (textareaRef.current?.value || intakeCombined).trim();
               const guidedPrep = prepareIntentionalCreateDraftSubmit(guidedRaw);
               if (!guidedPrep.ok) {
-                if (guidedPrep.blocked && guidedPrep.message) {
+                if (guidedPrep.blocked && guidedPrep.clarification) {
+                  applyIntakeCapabilityBlock({
+                    action: "block_capability",
+                    text: guidedRaw,
+                    message: guidedPrep.message,
+                    clarification: guidedPrep.clarification,
+                  });
+                } else if (guidedPrep.blocked && guidedPrep.message) {
                   setHardError(guidedPrep.message);
                 }
-                setLoading(false);
-                setCreateFlowPhase("capturing_input");
-                setDisplayPhase("intake");
-                setCreateUiStage(CreateUiStage.INPUT);
                 return;
               }
               console.debug("[handoff-start]", {
@@ -30817,6 +30892,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                 displayPhase_before: displayPhase,
               });
               setHardError(null);
+              setIntakeClarification(null);
               setCreateFlowPhase("generating_draft");
               setDisplayPhase("generating_draft");
               setCreateUiStage(CreateUiStage.DRAFT);
@@ -30841,14 +30917,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                 if (rawSubmitted.length < 6) return;
                 const intakeCapability = evaluateIntentionalCreateDraftSubmit(rawSubmitted);
                 if (intakeCapability.action === "block_capability") {
-                  setHardError(intakeCapability.message);
-                  setLoading(false);
-                  setCreateFlowPhase("capturing_input");
-                  setDisplayPhase("intake");
-                  setCreateUiStage(CreateUiStage.INPUT);
+                  applyIntakeCapabilityBlock(intakeCapability);
                   return;
                 }
                 if (intakeCapability.action === "noop") return;
+                setIntakeClarification(null);
                 const live = buildLiveDraftPreview(rawSubmitted);
                 if (
                   !isUsablePartialIntakeStructure(live, rawSubmitted) &&
@@ -31058,14 +31131,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           if (rawSubmitted.length < 6) return;
           const intakeCapability = evaluateIntentionalCreateDraftSubmit(rawSubmitted);
           if (intakeCapability.action === "block_capability") {
-            setHardError(intakeCapability.message);
-            setLoading(false);
-            setCreateFlowPhase("capturing_input");
-            setDisplayPhase("intake");
-            setCreateUiStage(CreateUiStage.INPUT);
+            applyIntakeCapabilityBlock(intakeCapability);
             return;
           }
           if (intakeCapability.action === "noop") return;
+          setIntakeClarification(null);
           const live = buildLiveDraftPreview(rawSubmitted);
           if (
             !isUsablePartialIntakeStructure(live, rawSubmitted) &&
@@ -31118,13 +31188,16 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           const guidedRaw = (textareaRef.current?.value || intakeCombined).trim();
           const guidedPrep = prepareIntentionalCreateDraftSubmit(guidedRaw);
           if (!guidedPrep.ok) {
-            if (guidedPrep.blocked && guidedPrep.message) {
+            if (guidedPrep.blocked && guidedPrep.clarification) {
+              applyIntakeCapabilityBlock({
+                action: "block_capability",
+                text: guidedRaw,
+                message: guidedPrep.message,
+                clarification: guidedPrep.clarification,
+              });
+            } else if (guidedPrep.blocked && guidedPrep.message) {
               setHardError(guidedPrep.message);
             }
-            setLoading(false);
-            setCreateFlowPhase("capturing_input");
-            setDisplayPhase("intake");
-            setCreateUiStage(CreateUiStage.INPUT);
             return;
           }
           console.debug("[handoff-start]", {
@@ -31134,6 +31207,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             displayPhase_before: displayPhase,
           });
           setHardError(null);
+          setIntakeClarification(null);
           setCreateFlowPhase("generating_draft");
           setDisplayPhase("generating_draft");
           setCreateUiStage(CreateUiStage.DRAFT);
@@ -32339,11 +32413,26 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                       onApply={handleStarterQuickAddApply}
                       addedToastLabel={intakeClauseAddedToast}
                       className={
-                        simpleCreateStickyBottomBarVisible
+                        simpleCreateStickyBottomBarVisible && !intakeClarification
                           ? "mt-4 mb-24 sm:mb-20"
                           : "mt-4 mb-6"
                       }
                     />
+                  ) : null}
+                  {intakeClarification &&
+                  createProductionTwoPane &&
+                  createUiStage === CreateUiStage.INPUT ? (
+                    <div
+                      className={
+                        simpleCreateStickyBottomBarVisible ? "mb-24 sm:mb-20" : "mb-6"
+                      }
+                    >
+                      <AgreementIntakeClarificationPanel
+                        clarification={intakeClarification}
+                        onUseSuggested={applyIntakeClarificationSuggestedRewrite}
+                        onEditMyself={dismissIntakeClarification}
+                      />
+                    </div>
                   ) : null}
                   {simpleProductFlow &&
                   liveWorkspaceTwoPane &&
@@ -36758,7 +36847,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         </div>
       ) : null}
 
-      {hardErrorForUi ? (
+      {intakeClarification &&
+      !(createProductionTwoPane && createUiStage === CreateUiStage.INPUT) ? (
+        <AgreementIntakeClarificationPanel
+          clarification={intakeClarification}
+          onUseSuggested={applyIntakeClarificationSuggestedRewrite}
+          onEditMyself={dismissIntakeClarification}
+        />
+      ) : !intakeClarification && hardErrorForUi ? (
         <div
           className={`mt-4 rounded-lg border px-3 py-3 text-sm sm:text-[0.9375rem] md:text-base lg:text-[1.0625rem] lg:leading-relaxed ${
             errorIsHydrate

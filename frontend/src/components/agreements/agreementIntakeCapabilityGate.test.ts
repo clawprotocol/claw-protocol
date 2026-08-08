@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { assessAgreementIntakeCapability } from "./agreementIntakeCapabilityGate";
+import {
+  assessAgreementIntakeCapability,
+  buildAgreementIntakeClarification,
+  evaluateIntentionalCreateDraftSubmit,
+} from "./agreementIntakeCapabilityGate";
 
 const COUNSEL_PREP_PILOT = `Hey LawDog, I need help with a customer agreement issue.
 
@@ -18,14 +22,20 @@ Can you help me figure out:
 Please keep it practical and GTM-focused. I'm not looking for a law school memo.`;
 
 describe("assessAgreementIntakeCapability", () => {
-  it("blocks counsel-prep / negotiation Q&A that is not a draftable agreement", () => {
+  it("blocks counsel-prep / negotiation Q&A with guided clarification + suggested rewrite", () => {
     const decision = assessAgreementIntakeCapability(COUNSEL_PREP_PILOT);
     expect(decision.ok).toBe(false);
     if (decision.ok) return;
-    expect(decision.code).toBe("counsel_prep_not_draftable");
-    expect(decision.userMessage).toMatch(/negotiation|deal-counsel/i);
-    expect(decision.userMessage).toMatch(/executable agreements/i);
-    expect(decision.userMessage).toMatch(/Rephrase as a draft request/i);
+    expect(decision.code).toBe("counsel_prep");
+    expect(decision.clarification.kind).toBe("counsel_prep");
+    expect(decision.clarification.whatWeHeard.length).toBeGreaterThan(0);
+    expect(decision.clarification.guidedSteps.length).toBeGreaterThanOrEqual(3);
+    expect(decision.clarification.suggestedRewrite).toMatch(/Draft a .+pilot agreement between/i);
+    expect(decision.clarification.suggestedRewrite).toMatch(/\$15k|\$15,000/i);
+    expect(decision.clarification.suggestedRewrite).toMatch(/\[Your Company Legal Name\]/);
+    expect(decision.clarification.suggestedRewrite).toMatch(/\[Customer Legal Name\]/);
+    expect(decision.userMessage).toMatch(/negotiation prep|executable agreements/i);
+    expect(decision.userMessage).toMatch(/How to fix it/i);
   });
 
   it("allows an explicit draft-between-parties pilot agreement request", () => {
@@ -42,5 +52,43 @@ describe("assessAgreementIntakeCapability", () => {
       "Create a services agreement between Alex Rivera and PixelForge Labs for mobile app UI design for 6 weeks at $4500.",
     );
     expect(decision.ok).toBe(true);
+  });
+
+  it("guides sparse prompts that lack parties and deal basics", () => {
+    const decision = assessAgreementIntakeCapability("need an NDA");
+    expect(decision.ok).toBe(false);
+    if (decision.ok) return;
+    expect(decision.code).toBe("too_sparse");
+    expect(decision.clarification.suggestedRewrite).toMatch(/non-disclosure|NDA|\[Party/i);
+  });
+
+  it("guides commercial prompts that omit named parties", () => {
+    const decision = assessAgreementIntakeCapability(
+      "We need a 60-day paid SaaS pilot for about $15k converting to annual if it works. Include liability and SOC 2.",
+    );
+    expect(decision.ok).toBe(false);
+    if (decision.ok) return;
+    expect(decision.code).toBe("missing_named_parties");
+    expect(decision.clarification.guidedSteps.some((s) => /between/i.test(s))).toBe(true);
+    expect(decision.clarification.suggestedRewrite).toMatch(/between \[/i);
+  });
+});
+
+describe("buildAgreementIntakeClarification", () => {
+  it("extracts retest pilot economics into the suggested rewrite", () => {
+    const c = buildAgreementIntakeClarification(COUNSEL_PREP_PILOT);
+    expect(c).not.toBeNull();
+    expect(c!.kind).toBe("counsel_prep");
+    expect(c!.whatWeHeard.some((h) => /60-day|\$15k|mid-market|negotiation/i.test(h))).toBe(true);
+    expect(c!.primaryCtaLabel).toMatch(/suggested draft request/i);
+  });
+});
+
+describe("evaluateIntentionalCreateDraftSubmit", () => {
+  it("returns clarification on block_capability for counsel-prep", () => {
+    const decision = evaluateIntentionalCreateDraftSubmit(COUNSEL_PREP_PILOT);
+    expect(decision.action).toBe("block_capability");
+    if (decision.action !== "block_capability") return;
+    expect(decision.clarification.suggestedRewrite).toBeTruthy();
   });
 });
