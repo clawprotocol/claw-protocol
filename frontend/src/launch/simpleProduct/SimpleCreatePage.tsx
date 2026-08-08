@@ -587,7 +587,9 @@ export function SimpleCreatePage() {
   const [homeTransitionVisible, setHomeTransitionVisible] = useState(
     homeHeroAutoGenerate && !checkoutBackRestoreActive,
   );
-  const [dashboardSignerSetupResumeShell, setDashboardSignerSetupResumeShell] = useState(false);
+  const [dashboardSignerSetupResumeShell, setDashboardSignerSetupResumeShell] = useState(() =>
+    Boolean(peekCreatorDashboardSignerSetupResume()),
+  );
   const onSimpleCreateShellChrome = useCallback(
     (state: {
       paidProReviewReady: boolean;
@@ -657,15 +659,37 @@ export function SimpleCreatePage() {
   }
 
   if (awaitingAuthWorkspace) {
+    // Already-signed-in create/resume must not flash OAuth "Finishing sign-in".
+    // When signer-setup resume is armed, keep that chrome so the settle does not
+    // look like a create-prompt hop before the agreement preview mounts.
+    const resumeSettling =
+      dashboardSignerSetupResumeShell || Boolean(peekCreatorDashboardSignerSetupResume());
+    const settlingSignedIn = isReallyAuthenticated;
     return (
       <SimpleFlowShell
-        title="Finishing sign-in"
-        subtitle="Restoring your workspace before create…"
+        title={
+          resumeSettling
+            ? SIMPLE_CREATE_SIGNER_SETUP_RESUME_TITLE
+            : settlingSignedIn
+              ? "Opening create"
+              : "Finishing sign-in"
+        }
+        subtitle={
+          resumeSettling
+            ? SIMPLE_CREATE_SIGNER_SETUP_RESUME_SUBTITLE
+            : settlingSignedIn
+              ? "Restoring your workspace…"
+              : "Restoring your workspace before create…"
+        }
         logoHomeHref="/app"
         hideAffiliateNav
       >
         <p className="text-sm text-slate-400" data-testid="create-auth-workspace-settling">
-          Confirming your signed-in workspace…
+          {resumeSettling
+            ? "Loading your agreement preview…"
+            : settlingSignedIn
+              ? "Confirming your workspace…"
+              : "Confirming your signed-in workspace…"}
         </p>
       </SimpleFlowShell>
     );

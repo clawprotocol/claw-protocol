@@ -56,7 +56,11 @@ export function resolveCanonicalPlainForVisibleShell(
   logTest310DisplaySource(resolution);
   const projectedPlain =
     resolution.plain.length >= PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN
-      ? projectPaidProVisibleTitleDisplayPlain(resolution.plain)
+      ? projectPaidProVisibleTitleDisplayPlain(resolution.plain, {
+          fallbackTitle: args.draft?.title,
+          intakeText: args.intakeText,
+          family: args.draft?.agreement_family,
+        })
       : resolution.plain;
   if (projectedPlain.length >= PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN) {
     if (projectedPlain.length >= 80) {

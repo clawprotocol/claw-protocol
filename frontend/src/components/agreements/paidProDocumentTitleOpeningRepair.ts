@@ -7,6 +7,8 @@ import { resolveAuthoritativeWitnessIndex } from "./paidProExecutionBlockNormali
 import {
   summarizePaidProDocumentBlockClassifications,
 } from "./paidProDocumentBlockClassifier";
+import { resolvePaidProUniversalDisplayTitle } from "./paidProUniversalDisplayTitle";
+import type { AgreementFamily } from "./agreementFamilyRouter";
 
 export const PAID_PRO_GLUED_DOCUMENT_TITLE_OPENING_RE =
   /^((?:MUTUAL\s+)?[A-Z][A-Z\s&]{4,80}AGREEMENT)\s+(This\b[\s\S]+)$/;
@@ -167,12 +169,57 @@ export function repairPaidProDocumentTitleOpening(text: string): {
   return { text: out, repairs };
 }
 
+export type ProjectPaidProVisibleTitleOpts = {
+  /** Draft / persisted agreement title (e.g. "Services Agreement"). */
+  fallbackTitle?: string | null;
+  /** Raw create / resume intake prompt — drives intent-specific titles. */
+  intakeText?: string | null;
+  /** Routed agreement family when known. */
+  family?: AgreementFamily | string | null;
+};
+
+/**
+ * When the corpus has no classified document title, prepend the best universal title
+ * for this prompt (employment / consulting / IP / services / …) — display-only.
+ */
+export function ensurePaidProVisibleDocumentTitleOpening(
+  plain: string,
+  opts?: ProjectPaidProVisibleTitleOpts,
+): { text: string; repairs: string[] } {
+  const body = (plain || "").replace(/\r\n/g, "\n").trim();
+  const repairs: string[] = [];
+  if (body.length < 40) return { text: body, repairs };
+  if (summarizePaidProDocumentBlockClassifications(body).titleCount >= 1) {
+    return { text: body, repairs };
+  }
+
+  const resolved = resolvePaidProUniversalDisplayTitle({
+    draftTitle: opts?.fallbackTitle,
+    intakeText: opts?.intakeText,
+    family: opts?.family,
+    corpusPlain: body,
+  });
+  if (!resolved.titleUpper) return { text: body, repairs };
+
+  repairs.push("display:ensure_missing_document_title");
+  return {
+    text: `${resolved.titleUpper}\n\n${body}`.replace(/\n{3,}/g, "\n\n"),
+    repairs,
+  };
+}
+
 /** Final visible-shell title projection — idempotent display-only separator + recital cleanup. */
-export function projectPaidProVisibleTitleDisplayPlain(plain: string): string {
+export function projectPaidProVisibleTitleDisplayPlain(
+  plain: string,
+  opts?: ProjectPaidProVisibleTitleOpts,
+): string {
   const body = (plain || "").trim();
   if (body.length < 40) return body;
   const repaired = repairPaidProDocumentTitleOpening(body);
-  if (repaired.repairs.length > 0) return repaired.text;
-  if (summarizePaidProDocumentBlockClassifications(body).titleCount >= 1) return body;
-  return repairPaidProDocumentTitleOpening(body).text || body;
+  const afterRepair = repaired.repairs.length > 0 ? repaired.text : body;
+  if (summarizePaidProDocumentBlockClassifications(afterRepair).titleCount >= 1) {
+    return afterRepair;
+  }
+  const ensured = ensurePaidProVisibleDocumentTitleOpening(afterRepair, opts);
+  return ensured.text || afterRepair;
 }

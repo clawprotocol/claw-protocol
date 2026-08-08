@@ -138,6 +138,74 @@ describe("dashboard signer-setup resume paints accepted server_full_draft previe
     unmount();
   });
 
+  it("ForcedRoute injects display title when resume corpus opens at section 1", () => {
+    const body = [
+      "1. Services and Project Term",
+      "Designer will provide product design services for Client's new mobile app UI during the six-week period starting on the Effective Date.",
+      "",
+      "2. Fees and Payment",
+      "Client shall pay Designer a fixed fee of $12,000 as set forth in Exhibit A.",
+      "",
+      ...Array.from({ length: 30 }, (_, i) => `Section ${i + 3}. Accepted server full draft clause.`),
+    ].join("\n\n");
+    const corpus = body.padEnd(2400, " ");
+    const router = resolvePaidProDocumentBodyRouter();
+    const { container, unmount } = render(
+      <PaidProDocumentBodyForcedRoute
+        embedded
+        router={router}
+        html=""
+        displayContext={{
+          paidProActive: true,
+          premiumPaidDocumentSurface: true,
+          premiumCheckoutCompleted: true,
+          acceptedCanonicalPlain: corpus,
+          draft: { title: "Services Agreement" } as never,
+          intakeText:
+            "Services agreement between Designer Co and Client LLC for mobile app UI design. $12,000.",
+        }}
+        authoritativeSource="server_full_draft"
+      />,
+    );
+    expect(container.querySelector("h1")?.textContent?.trim()).toMatch(/SERVICES AGREEMENT/i);
+    const headings = Array.from(container.querySelectorAll("h2.premium-doc-section-heading")).map(
+      (el) => el.textContent?.trim() || "",
+    );
+    expect(headings.some((h) => /1\.\s*Services and Project Term/i.test(h))).toBe(true);
+    unmount();
+  });
+
+  it("ForcedRoute paints employment title from intake when corpus has no title line", () => {
+    const body = [
+      "1. Position and Duties",
+      "Employee will perform the duties of Senior Engineer for Employer during the employment term.",
+      "",
+      "2. Compensation",
+      "Employer shall pay Employee an annual salary as set forth in Exhibit A.",
+      "",
+      ...Array.from({ length: 30 }, (_, i) => `Section ${i + 3}. Employment clause body text.`),
+    ].join("\n\n");
+    const corpus = body.padEnd(2400, " ");
+    const router = resolvePaidProDocumentBodyRouter();
+    const { container, unmount } = render(
+      <PaidProDocumentBodyForcedRoute
+        embedded
+        router={router}
+        html=""
+        displayContext={{
+          paidProActive: true,
+          premiumPaidDocumentSurface: true,
+          premiumCheckoutCompleted: true,
+          acceptedCanonicalPlain: corpus,
+          intakeText: "Employment agreement between Acme Inc and Pat Lee. Full-time. California law.",
+        }}
+        authoritativeSource="server_full_draft"
+      />,
+    );
+    expect(container.querySelector("h1")?.textContent?.trim()).toMatch(/EMPLOYMENT AGREEMENT/i);
+    unmount();
+  });
+
   it("branch resolver accepts pipeline authority length without frozen SoT flag", () => {
     const len = 2400;
     expect(

@@ -175,8 +175,19 @@ export function explicitIntentCanonicalTitle(rawIntake: string | null | undefine
   if (/\bpartnership\s+agreement\b/.test(low)) return "Partnership Agreement";
   if (/\bjoint\s+venture\s+agreement\b/.test(low)) return "Joint Venture Agreement";
   if (/\bequipment\s+(?:rental|lease)\s+agreement\b/.test(low)) return "Equipment Lease Agreement";
-  if (/\bemployment\s+(?:agreement|contract)\b/.test(low)) return "Employment Agreement";
+  if (/\b(?:employment|employee)\s+(?:agreement|contract)\b/.test(low)) return "Employment Agreement";
   if (/\bindependent\s+contractor\s+(?:agreement|contract)\b/.test(low)) return "Independent Contractor Agreement";
+  if (
+    /\bintellectual\s+property\s+(?:assignment\s+)?(?:agreement|contract)\b/.test(low) ||
+    /\bip\s+assignment\s+(?:agreement|contract)\b/.test(low)
+  ) {
+    return /\bassignment\b/.test(low)
+      ? "Intellectual Property Assignment Agreement"
+      : "Intellectual Property Agreement";
+  }
+  if (/\bproprietary\s+information\s+(?:agreement|contract)\b/.test(low)) {
+    return "Proprietary Information Agreement";
+  }
 
   // Tripartite / multi-party software + revenue share (regression: LLC party names must not force OA shell).
   if (
@@ -230,8 +241,13 @@ export function explicitIntentCanonicalTitle(rawIntake: string | null | undefine
   ) {
     return "SaaS Reseller and White-Label Services Agreement";
   }
-  if (/\bservices?\s+(?:agreement|contract)\b/.test(low)) return "Services Agreement";
+  // Consulting before generic "services agreement" so "consulting services agreement"
+  // does not collapse to plain Services Agreement.
+  if (/\bconsulting\s+services?\s+(?:agreement|contract)\b/.test(low)) {
+    return "Consulting Services Agreement";
+  }
   if (/\bconsulting\s+(?:agreement|contract)\b/.test(low)) return "Consulting Agreement";
+  if (/\bservices?\s+(?:agreement|contract)\b/.test(low)) return "Services Agreement";
   return null;
 }
 
