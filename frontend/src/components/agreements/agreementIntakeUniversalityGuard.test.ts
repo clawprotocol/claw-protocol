@@ -45,6 +45,14 @@ describe("agreement intake universality (all LawDog accounts)", () => {
     expect(INTAKE_SRC).toContain("evaluateIntentionalCreateDraftSubmit");
     expect(INTAKE_SRC).toContain("applyIntakeCapabilityBlock");
     expect(INTAKE_SRC).toContain("AgreementIntakeClarificationPanel");
+    // Rewrite / intentional submit must overwrite session original (not if-richer only).
+    expect(INTAKE_SRC).toContain("writeOriginalUserIntakeRawAtDraftCommit(rewrite)");
+    expect(INTAKE_SRC).toContain("writeOriginalUserIntakeRawAtDraftCommit(decision.text)");
+    expect(INTAKE_SRC).toContain("writeOriginalUserIntakeRawAtDraftCommit(rawSubmitted)");
+    // First-review contamination intake prefers live create text over longest-wins.
+    expect(INTAKE_SRC).toContain(
+      "intakeText: (intakeCombined || currentPremiumMergedIntakeKey || \"\").trim()",
+    );
     // Both guided call sites must prep before parse (regression: one path skipped the gate).
     const guidedPrepCount = (INTAKE_SRC.match(/prepareIntentionalCreateDraftSubmit\(guidedRaw\)/g) || [])
       .length;

@@ -11816,6 +11816,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       setCreateUiStage(CreateUiStage.INPUT);
       return;
     }
+    writeOriginalUserIntakeRawAtDraftCommit(homeDecision.text);
     homeAutoGenerateStartedRef.current = true;
     logHomeCreateSubmit(homeDecision.text);
     if (commitStarterMultiPartyProGate(homeDecision.text)) {
@@ -13595,6 +13596,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       dismissIntakeClarification();
       return;
     }
+    // Overwrite (not if-richer) so longer counsel-prep cannot stick as contamination intake.
+    writeOriginalUserIntakeRawAtDraftCommit(rewrite);
     setIntakeStepBuffer(rewrite);
     setDebouncedStepBuffer(rewrite);
     setIntakeClarification(null);
@@ -13637,6 +13640,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           clarification: decision.clarification,
         };
       }
+      // Latch the submitted rewrite as the contamination / checkout intake authority.
+      writeOriginalUserIntakeRawAtDraftCommit(decision.text);
       setIntakeClarification(null);
       return { ok: true, text: decision.text };
     },
@@ -18652,7 +18657,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const paidProFirstReviewDisplayContext = useMemo(
     () => ({
       draft: (reviewDraft ?? draft) ?? null,
-      intakeText: (currentPremiumMergedIntakeKey || intakeCombined || "").trim(),
+      // Prefer live create intake over longest-wins session corpus. Otherwise a
+      // prior longer counsel-prep dump can false-trigger contamination wipe after
+      // the user revises and generates a matching Acme/ZYX (etc.) body.
+      intakeText: (intakeCombined || currentPremiumMergedIntakeKey || "").trim(),
       premiumRenderSource:
         premiumTruthPipelineSource ?? lastPremiumPipelineRenderSourceRef.current,
       premiumCheckoutCompleted,
@@ -30921,6 +30929,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                   return;
                 }
                 if (intakeCapability.action === "noop") return;
+                writeOriginalUserIntakeRawAtDraftCommit(rawSubmitted);
                 setIntakeClarification(null);
                 const live = buildLiveDraftPreview(rawSubmitted);
                 if (
@@ -31135,6 +31144,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             return;
           }
           if (intakeCapability.action === "noop") return;
+          writeOriginalUserIntakeRawAtDraftCommit(rawSubmitted);
           setIntakeClarification(null);
           const live = buildLiveDraftPreview(rawSubmitted);
           if (

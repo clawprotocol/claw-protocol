@@ -80,4 +80,53 @@ describe("first-review contamination fail-closed", () => {
     expect(painted.fallbackReason || "").toMatch(/intake_corpus_contamination/);
     expect(hasPaidProSourceOfTruth()).toBe(false);
   });
+
+  it("keeps Acme/ZYX SaaS body painted even if display intake is stale counsel-prep", () => {
+    const acmeBody = [
+      "SERVICES AGREEMENT",
+      "",
+      "This Services Agreement is between Acme LLC (Client) and ZYX Corp (Service Provider).",
+      "",
+      "1. Scope",
+      "Service Provider will provide a 60-day SaaS pilot program.",
+      "",
+      "2. Fees",
+      "Client will pay $15,000 for the pilot with optional conversion near $150,000 annually.",
+      "",
+      "9.1 Notices",
+      "If to Acme LLC:",
+      "Acme LLC",
+      "",
+      "If to ZYX Corp:",
+      "ZYX Corp",
+      "",
+      "IN WITNESS WHEREOF, the Parties execute this Agreement.",
+      "",
+      "CLIENT: Acme LLC",
+      "By: __________________________",
+      "",
+      "SERVICE PROVIDER:",
+      "ZYX Corp",
+      "By: __________________________",
+    ].join("\n");
+    const gen = getOrInitSessionAgreementGenerationId();
+    establishPaidProSourceOfTruth({
+      text: acmeBody,
+      source: "server_full_draft",
+      agreementGenerationId: gen,
+      reviewSessionId: gen,
+    });
+
+    const painted = resolvePaidProFirstReviewVisibleDisplayPlain({
+      intakeText: COUNSEL_PREP,
+      paidProActive: true,
+      premiumCheckoutCompleted: true,
+      premiumPaidDocumentSurface: true,
+    });
+
+    expect(painted.plain.length).toBeGreaterThan(200);
+    expect(painted.plain).toMatch(/Acme LLC/);
+    expect(painted.fallbackReason || "").not.toMatch(/intake_corpus_contamination/);
+    expect(hasPaidProSourceOfTruth()).toBe(true);
+  });
 });

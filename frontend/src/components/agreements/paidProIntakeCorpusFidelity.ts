@@ -1,6 +1,11 @@
 /**
  * Fail-closed detection when a painted corpus clearly belongs to a different intake
  * (e.g. Alex Rivera / PixelForge $4,500 design body under a SaaS pilot negotiation prompt).
+ *
+ * Party-name absence alone is not enough: session longest-wins can briefly hold a
+ * prior counsel-prep dump while the live rewrite already produced the matching body.
+ * Require an independent economics / scope mismatch (or counsel-prep + unrelated
+ * executed design corpus) before wiping paint.
  */
 
 export type PaidProIntakeCorpusFidelityResult = {
@@ -29,8 +34,8 @@ function extractCorpusPartyHints(corpus: string): string[] {
 }
 
 /**
- * Returns contaminated=true when multiple independent signals show the corpus
- * is from a prior/unrelated deal relative to the current intake.
+ * Returns contaminated=true when structural signals show the corpus is from a
+ * prior/unrelated deal relative to the current intake.
  */
 export function detectPaidProCorpusIntakeContamination(args: {
   intakeText: string;
@@ -53,10 +58,6 @@ export function detectPaidProCorpusIntakeContamination(args: {
       reasons.push(`corpus_party_absent_from_intake:${party}`);
     }
   }
-  if (absentParties >= 2) {
-    // Strong enough alone — two named parties from another deal.
-    return { contaminated: true, reasons };
-  }
 
   const intakePilotSaas =
     /\b(?:60[-\s]?day|saas|\$15k|\$15,?000|150k|pilot\s+agreement)\b/.test(intake);
@@ -74,8 +75,14 @@ export function detectPaidProCorpusIntakeContamination(args: {
     reasons.push("counsel_prep_intake_with_unrelated_executed_design_corpus");
   }
 
-  return {
-    contaminated: reasons.length >= 2 || (absentParties >= 1 && reasons.length >= 2),
-    reasons,
-  };
+  const structuralReasons = reasons.filter((r) => !r.startsWith("corpus_party_absent_from_intake:"));
+  // Structural mismatch is required. Party absence alone must not wipe a valid
+  // just-generated body when display intake briefly lags the live rewrite.
+  const contaminated =
+    structuralReasons.length >= 1 &&
+    (structuralReasons.length >= 2 ||
+      absentParties >= 1 ||
+      structuralReasons.some((r) => r.startsWith("economics_scope_mismatch")));
+
+  return { contaminated, reasons };
 }

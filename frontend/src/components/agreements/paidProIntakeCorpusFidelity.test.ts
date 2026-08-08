@@ -38,6 +38,43 @@ PixelForge Labs
 By: __________________________
 `;
 
+const ACME_SAAS_REWRITE =
+  "Draft a 60-day paid SaaS pilot agreement between Acme LLC and ZYX Corp for $15k. " +
+  "If the pilot succeeds, it may convert to an annual SaaS subscription near $150k. " +
+  "Cover liability caps, IP / work product, termination for convenience, audit rights, " +
+  "most-favored pricing, indemnity, data deletion, and no model-training use of data. " +
+  "Governing law: Texas.";
+
+const ACME_SAAS_BODY = `SERVICES AGREEMENT
+
+This Services Agreement is entered into between Acme LLC ("Client") and ZYX Corp ("Service Provider").
+
+1. COMMERCIAL RELATIONSHIP & SCOPE
+Service Provider will provide a 60-day pilot program for a SaaS solution.
+
+2. FEES & SPEND CONTROLS
+Client will pay $15,000 for the pilot. If successful, the parties may convert to an annual subscription near $150,000.
+
+3. TERM & KEY DATES
+Services Term is 60 days from the Effective Date.
+
+9.1 Notices
+If to Acme LLC:
+Acme LLC
+
+If to ZYX Corp:
+ZYX Corp
+
+IN WITNESS WHEREOF, the Parties execute this Agreement.
+
+CLIENT: Acme LLC
+By: __________________________
+
+SERVICE PROVIDER:
+ZYX Corp
+By: __________________________
+`;
+
 describe("paidProIntakeCorpusFidelity", () => {
   it("flags PixelForge design corpus under SaaS pilot counsel-prep intake", () => {
     const result = detectPaidProCorpusIntakeContamination({
@@ -58,6 +95,33 @@ describe("paidProIntakeCorpusFidelity", () => {
       corpusText: PIXELFORGE_BODY,
     });
     expect(result.contaminated).toBe(false);
+  });
+
+  it("does not wipe matching Acme/ZYX SaaS rewrite + generated SaaS body", () => {
+    const result = detectPaidProCorpusIntakeContamination({
+      intakeText: ACME_SAAS_REWRITE,
+      corpusText: ACME_SAAS_BODY,
+    });
+    expect(result.contaminated).toBe(false);
+  });
+
+  it("does not wipe Acme/ZYX SaaS body when stale longer counsel-prep is the compared intake", () => {
+    // Retest failure mode: longest-wins session still held counsel-prep after rewrite generate.
+    const result = detectPaidProCorpusIntakeContamination({
+      intakeText: COUNSEL_PREP,
+      corpusText: ACME_SAAS_BODY,
+    });
+    expect(result.contaminated).toBe(false);
+    expect(result.reasons.some((r) => /Acme LLC|ZYX Corp/i.test(r))).toBe(true);
+  });
+
+  it("still wipes PixelForge body under a SaaS rewrite intake (economics mismatch)", () => {
+    const result = detectPaidProCorpusIntakeContamination({
+      intakeText: ACME_SAAS_REWRITE,
+      corpusText: PIXELFORGE_BODY,
+    });
+    expect(result.contaminated).toBe(true);
+    expect(result.reasons.some((r) => /economics_scope_mismatch/i.test(r))).toBe(true);
   });
 });
 
