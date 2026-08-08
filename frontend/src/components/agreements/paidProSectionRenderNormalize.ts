@@ -4,6 +4,7 @@
 
 import { repairGluedSectionHeadingsInText, splitGluedSectionHeadingFromLine } from "./documentSectionHeadingSplit";
 import { resolveAuthoritativeWitnessIndex } from "./paidProExecutionBlockNormalization";
+import { repairJoinedTopLevelSectionHeadings } from "./sectionStructureAuthority";
 
 export type PaidProSectionNormalizeResult = {
   text: string;
@@ -63,7 +64,11 @@ export function normalizePaidProSectionRender(text: string): PaidProSectionNorma
   const tail = witnessIdx >= 0 ? text.slice(witnessIdx) : "";
 
   let fixedHeadingBodyCollapse = 0;
-  const glued = repairGluedSectionHeadingsInText(head);
+  const structureJoined = repairJoinedTopLevelSectionHeadings(head);
+  const glued = repairGluedSectionHeadingsInText(structureJoined.text);
+  if (structureJoined.repairs.length > 0 || glued !== structureJoined.text) {
+    fixedHeadingBodyCollapse += 1;
+  }
   const expanded: string[] = [];
   for (const line of glued.split("\n")) {
     const split = splitGluedProSectionLine(line);
@@ -74,6 +79,12 @@ export function normalizePaidProSectionRender(text: string): PaidProSectionNorma
   const beforeSpacing = expanded.join("\n");
   let normalizedHead = ensureHeadingBodySpacing(beforeSpacing.replace(/\n{3,}/g, "\n\n"));
   if (normalizedHead !== beforeSpacing) {
+    fixedHeadingBodyCollapse += 1;
+  }
+  // Second pass: after line splits, pull N.x blocks that still sit under a later main section.
+  const relocated = repairJoinedTopLevelSectionHeadings(normalizedHead);
+  if (relocated.repairs.some((r) => r.startsWith("relocate_misplaced_subsections"))) {
+    normalizedHead = relocated.text;
     fixedHeadingBodyCollapse += 1;
   }
   const result: PaidProSectionNormalizeResult = {

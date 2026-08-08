@@ -162,6 +162,72 @@ describe("sectionStructureIntegrity", () => {
     expect(repaired.text).not.toMatch(/void12\.2 Notices/);
   });
 
+  it("Case M — letter-glued main→subsection and misplaced N.x under later main are repaired (any N/M)", () => {
+    const cases = [
+      {
+        parent: 9,
+        title: "General Terms",
+        later: 10,
+        laterTitle: "NOTICES",
+        subs: ["9.2 Force Majeure", "9.3 Assignment"],
+      },
+      {
+        parent: 3,
+        title: "Payment Terms",
+        later: 4,
+        laterTitle: "Invoicing",
+        subs: ["3.2 Late Fees", "3.3 Expenses"],
+      },
+      {
+        parent: 18,
+        title: "Miscellaneous",
+        later: 19,
+        laterTitle: "Notices",
+        subs: ["18.2 Severability", "18.3 Waiver"],
+      },
+    ] as const;
+
+    for (const c of cases) {
+      const input = [
+        `${c.parent - 1}. Prior`,
+        "Prior body.",
+        "",
+        `${c.parent}. ${c.title}${c.parent}.1`,
+        "First Sub",
+        "First subsection body.",
+        "",
+        `${c.later}. ${c.laterTitle}`,
+        "Later main body.",
+        "",
+        ...c.subs.flatMap((line) => [line, "Subsection body."]),
+        "",
+        `${c.later + 1}. Governing Law`,
+        "Governing body.",
+      ].join("\n");
+
+      const repaired = repairJoinedTopLevelSectionHeadings(input);
+      expect(repaired.text, String(c.parent)).not.toMatch(
+        new RegExp(`${c.title.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}${c.parent}\\.1`),
+      );
+      expect(repaired.text, String(c.parent)).toMatch(
+        new RegExp(`^${c.parent}\\.\\s+${c.title.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, "m"),
+      );
+      const laterIdx = repaired.text.search(
+        new RegExp(`^${c.later}\\.\\s+${c.laterTitle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, "im"),
+      );
+      expect(laterIdx, String(c.parent)).toBeGreaterThan(0);
+      for (const sub of c.subs) {
+        const idx = repaired.text.search(new RegExp(`^${sub.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, "m"));
+        expect(idx, sub).toBeGreaterThan(0);
+        expect(idx, sub).toBeLessThan(laterIdx);
+      }
+      expect(
+        repaired.repairs.some((r) => r.includes("relocate_misplaced_subsections")),
+        String(c.parent),
+      ).toBe(true);
+    }
+  });
+
   it("Case I — Test379/380/381/382 starter previews remain structurally sound", () => {
     const intakes = [
       TEST379_FOUR_PARTY_LOGISTICS_PLATFORM_INTAKE,

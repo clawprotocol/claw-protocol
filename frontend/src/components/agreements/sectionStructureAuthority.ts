@@ -7,6 +7,7 @@
  */
 
 import { splitGluedSectionHeadingFromLine } from "./documentSectionHeadingSplit";
+import { resolveAuthoritativeWitnessIndex } from "./paidProExecutionBlockNormalization";
 import { isPaidProNumberedSectionHeadingLine } from "./paidProNumberedSectionHeading";
 
 export type SectionStructureAnomalyCode =
@@ -48,6 +49,9 @@ const TOP_LEVEL_NUM_RE = /^(\d+)\.\s+(?!\d)(.+)$/;
 const SUB_LEVEL_RE = /^(\d+)\.(\d+)\.?\s*(.*)$/;
 const LETTERED_LIST_RE = /^\(([a-z])\)\s+(.+)$/i;
 const HEADING_BODY_GLUE_RE = /^(\d+\.\s+(?!\d+\.\d).+?)\s+(\d+\.\d+\s+.+)$/s;
+/** e.g. `9. General Terms9.1` / `9. General Terms9.1 Notices` — no whitespace before subsection. */
+const HEADING_SUBSECTION_NO_SPACE_GLUE_RE =
+  /^(\d+\.\s+(?!\d+\.\d).+[A-Za-z])(\d+\.\d+(?:\.\d+)*(?:\s+\S.*)?)$/;
 
 let lastStructureIntegrityLogKey = "";
 
@@ -139,7 +143,7 @@ function detectHeadingBodyCollapse(lines: readonly string[]): SectionStructureDi
   for (let i = 0; i < lines.length; i += 1) {
     const trimmed = lines[i]!.trim();
     if (!trimmed) continue;
-    if (HEADING_BODY_GLUE_RE.test(trimmed)) {
+    if (HEADING_SUBSECTION_NO_SPACE_GLUE_RE.test(trimmed) || HEADING_BODY_GLUE_RE.test(trimmed)) {
       diagnostics.push({
         code: "heading_body_collapse",
         message: "Main section heading glued to subsection on same line",
@@ -469,12 +473,24 @@ function repairOrphanNumberingRestarts(lines: string[]): { lines: string[]; repa
 
 /** Sentence-ending period glued to a top-level section heading (e.g. "...termination.12. Disputes"). */
 const JOINED_TOP_LEVEL_SECTION_HEADING_RE = /([a-z)])(\.)(\d{1,2}\.\s+)(?=[A-Z][A-Za-z])/g;
-/** e.g. venue.12.4 Notices — subsection glued to prior sentence without line break. */
+/**
+ * e.g. venue.12.4 Notices — subsection glued to prior sentence without line break.
+ * Prior char must not be a digit/dot so legitimate deeper markers like `18.1.1 Title`
+ * are never split into `18.` + `1.1 Title`.
+ */
 const JOINED_SUBSECTION_HEADING_RE =
-  /([a-zA-Z0-9),.;])(\.)(\d{1,2}\.\d+(?:\.\d+)?\s+)(?=[A-Z][A-Za-z])/g;
-/** e.g. void12.2 Notices — word ending glued to subsection without sentence period. */
+  /([a-zA-Z),;])(\.)(\d{1,2}\.\d+(?:\.\d+)?\s+)(?=[A-Z][A-Za-z])/g;
+/**
+ * Word/letter glued to any subsection marker (any parent N, any depth):
+ * `General Terms9.1`, `Liability14.2 Cap`, `Miscellaneous18.1.1`, `Terms9.1Notices`.
+ * No-title form requires EOL so mid-line tokens like `version2.1 release` are left alone.
+ */
 const WORD_GLUED_SUBSECTION_HEADING_RE =
-  /([a-zA-Z)])(1[0-9]|[2-9])\.(\d+)\s+([A-Z][A-Za-z ,&/-]+)/g;
+  /([a-zA-Z)])(\d{1,2})\.(\d+(?:\.\d+)*)(?:(?:\s+([A-Z][A-Za-z ,&/-]+))|([A-Z][a-zA-Z][A-Za-z ,&/-]*)|(?=\s*$))/gm;
+
+/** Bare or titled subsection line — title may be absent (on the next line). */
+const SUBSECTION_LINE_RE = /^(\d+)\.(\d+)(?:\.\d+)*(?:\s+\S.*)?$/;
+const MAIN_SECTION_LINE_RE = /^(\d+)\.(?!\d)\s+\S/;
 
 export function repairWordGluedSubsectionHeadings(text: string): { text: string; repairs: string[] } {
   const normalized = (text || "").replace(/\r\n/g, "\n");
@@ -485,16 +501,153 @@ export function repairWordGluedSubsectionHeadings(text: string): { text: string;
   let repairs = 0;
   const repaired = normalized.replace(
     WORD_GLUED_SUBSECTION_HEADING_RE,
-    (_match, prior: string, section: string, subsection: string, title: string) => {
+    (
+      _match: string,
+      prior: string,
+      section: string,
+      subsection: string,
+      spacedTitle: string | undefined,
+      gluedTitle: string | undefined,
+      offset: number,
+      full: string,
+    ) => {
+      const parentNum = Number.parseInt(section, 10);
       const subNum = Number.parseInt(subsection, 10);
+      if (!Number.isFinite(parentNum) || parentNum <= 0) return _match;
       if (!Number.isFinite(subNum) || subNum <= 0) return _match;
       repairs += 1;
-      return `${prior}.\n\n${section}.${subsection} ${title}`;
+      const title = (spacedTitle || gluedTitle || "").trim();
+      const titlePart = title ? ` ${title}` : "";
+      const lineStart = full.lastIndexOf("\n", offset - 1) + 1;
+      const linePrefix = full.slice(lineStart, offset + prior.length);
+      // Heading glue (`9. General Terms9.1`) — keep title clean. Sentence glue (`void12.2`) — restore period.
+      const isHeadingGlue = /^\d+\.\s+(?!\d)[A-Z][\w\s/&,'-]*[A-Za-z]$/.test(linePrefix);
+      const period = isHeadingGlue ? "" : ".";
+      return `${prior}${period}\n\n${section}.${subsection}${titlePart}`;
     },
   );
   return {
     text: repaired.replace(/\n{3,}/g, "\n\n"),
     repairs: repairs > 0 ? [`word_glued_subsection_heading:${repairs}`] : [],
+  };
+}
+
+/**
+ * Move any N.x / N.x.y subsection blocks that appear after a later top-level section M (M > N)
+ * back under their parent section N (before the first main section > N). Number- and
+ * title-agnostic — covers Notices splices and any equivalent mis-nesting.
+ */
+export function relocateMisplacedSubsectionsAfterLaterMainSection(text: string): {
+  text: string;
+  repairs: string[];
+} {
+  const raw = (text || "").replace(/\r\n/g, "\n");
+  if (!raw.trim()) return { text: raw, repairs: [] };
+  const witnessIdx = resolveAuthoritativeWitnessIndex(raw);
+  const head = witnessIdx >= 0 ? raw.slice(0, witnessIdx) : raw;
+  const tail = witnessIdx >= 0 ? raw.slice(witnessIdx) : "";
+  const lines = head.split("\n");
+
+  type Span = { start: number; end: number; parent: number };
+  const misplaced: Span[] = [];
+  const seenMainSections = new Set<number>();
+  let lastMain = 0;
+  let i = 0;
+  while (i < lines.length) {
+    const trimmed = (lines[i] || "").trim();
+    const main = trimmed.match(MAIN_SECTION_LINE_RE);
+    if (main) {
+      lastMain = Number(main[1]);
+      if (Number.isFinite(lastMain) && lastMain > 0) seenMainSections.add(lastMain);
+      i += 1;
+      continue;
+    }
+    const sub = trimmed.match(SUBSECTION_LINE_RE);
+    if (sub) {
+      const parent = Number(sub[1]);
+      // Only relocate when parent section N already exists earlier — avoids pulling
+      // stray orphan subsections (e.g. 1.5 after §7) ahead of later mains.
+      if (lastMain > parent && parent > 0 && seenMainSections.has(parent)) {
+        const start = i;
+        i += 1;
+        while (i < lines.length) {
+          const next = (lines[i] || "").trim();
+          if (!next) {
+            i += 1;
+            continue;
+          }
+          if (MAIN_SECTION_LINE_RE.test(next)) break;
+          if (SUBSECTION_LINE_RE.test(next)) break;
+          i += 1;
+        }
+        misplaced.push({ start, end: i, parent });
+        continue;
+      }
+    }
+    i += 1;
+  }
+
+  if (misplaced.length === 0) return { text: raw, repairs: [] };
+
+  // Group contiguous misplaced spans by parent (preserve relative order).
+  const byParent = new Map<number, Span[]>();
+  for (const span of misplaced) {
+    const bucket = byParent.get(span.parent) ?? [];
+    bucket.push(span);
+    byParent.set(span.parent, bucket);
+  }
+
+  const extractIndexes = new Set<number>();
+  const inserts = new Map<number, string[]>(); // insert-before line index → blocks
+  for (const [parent, spans] of byParent) {
+    // Find the first main heading with number > parent (insertion point).
+    let insertBefore = -1;
+    for (let li = 0; li < lines.length; li += 1) {
+      const m = (lines[li] || "").trim().match(MAIN_SECTION_LINE_RE);
+      if (!m) continue;
+      const n = Number(m[1]);
+      if (n > parent) {
+        insertBefore = li;
+        break;
+      }
+    }
+    if (insertBefore < 0) continue;
+    const blockLines: string[] = [];
+    for (const span of spans) {
+      for (let li = span.start; li < span.end; li += 1) {
+        extractIndexes.add(li);
+        blockLines.push(lines[li] ?? "");
+      }
+    }
+    while (blockLines.length && !(blockLines[0] || "").trim()) blockLines.shift();
+    while (blockLines.length && !(blockLines[blockLines.length - 1] || "").trim()) blockLines.pop();
+    if (!blockLines.length) continue;
+    const existing = inserts.get(insertBefore) ?? [];
+    if (existing.length) existing.push("");
+    existing.push(...blockLines);
+    inserts.set(insertBefore, existing);
+  }
+
+  if (inserts.size === 0) return { text: raw, repairs: [] };
+
+  const out: string[] = [];
+  for (let li = 0; li < lines.length; li += 1) {
+    const toInsert = inserts.get(li);
+    if (toInsert?.length) {
+      if (out.length && (out[out.length - 1] || "").trim()) out.push("");
+      out.push(...toInsert);
+      if ((lines[li] || "").trim()) out.push("");
+    }
+    if (extractIndexes.has(li)) continue;
+    out.push(lines[li] ?? "");
+  }
+
+  const merged = `${out.join("\n")}${tail ? `\n\n${tail.trimStart()}` : ""}`
+    .replace(/\n{3,}/g, "\n\n")
+    .trimEnd();
+  return {
+    text: merged,
+    repairs: [`relocate_misplaced_subsections_after_later_main:${misplaced.length}`],
   };
 }
 
@@ -522,27 +675,26 @@ export function repairJoinedTopLevelSectionHeadings(text: string): { text: strin
   const normalized = (text || "").replace(/\r\n/g, "\n");
   const wordGlued = repairWordGluedSubsectionHeadings(normalized);
   const subsection = repairJoinedSubsectionHeadings(wordGlued.text);
-  const working = subsection.text;
+  let working = subsection.text;
   const repairs: string[] = [...wordGlued.repairs, ...subsection.repairs];
-  if (!JOINED_TOP_LEVEL_SECTION_HEADING_RE.test(working)) {
-    return {
-      text: working,
-      repairs,
-    };
+  if (JOINED_TOP_LEVEL_SECTION_HEADING_RE.test(working)) {
+    JOINED_TOP_LEVEL_SECTION_HEADING_RE.lastIndex = 0;
+    let topLevelRepairs = 0;
+    working = working.replace(JOINED_TOP_LEVEL_SECTION_HEADING_RE, (_match, prior, period, heading) => {
+      topLevelRepairs += 1;
+      return `${prior}${period}\n\n${heading}`;
+    });
+    if (topLevelRepairs > 0) repairs.push(`joined_top_level_section_heading:${topLevelRepairs}`);
   }
   JOINED_TOP_LEVEL_SECTION_HEADING_RE.lastIndex = 0;
-  let topLevelRepairs = 0;
-  const repaired = working.replace(JOINED_TOP_LEVEL_SECTION_HEADING_RE, (_match, prior, period, heading) => {
-    topLevelRepairs += 1;
-    return `${prior}${period}\n\n${heading}`;
-  });
-  const repairTags = [
-    ...repairs,
-    ...(topLevelRepairs > 0 ? [`joined_top_level_section_heading:${topLevelRepairs}`] : []),
-  ];
+  const relocated = relocateMisplacedSubsectionsAfterLaterMainSection(working);
+  if (relocated.repairs.length > 0) {
+    working = relocated.text;
+    repairs.push(...relocated.repairs);
+  }
   return {
-    text: repaired.replace(/\n{3,}/g, "\n\n"),
-    repairs: repairTags,
+    text: working.replace(/\n{3,}/g, "\n\n"),
+    repairs,
   };
 }
 
@@ -550,6 +702,11 @@ function repairHeadingBodyCollapse(lines: string[]): { lines: string[]; repairs:
   const repairs: string[] = [];
   const out = lines.map((line) => {
     const trimmed = line.trim();
+    const noSpaceGlue = trimmed.match(HEADING_SUBSECTION_NO_SPACE_GLUE_RE);
+    if (noSpaceGlue?.[1] && noSpaceGlue[2]) {
+      repairs.push("heading_body_collapse:main_subsection_no_space_split");
+      return `${noSpaceGlue[1].trim()}\n${noSpaceGlue[2].trim()}`;
+    }
     const glued = trimmed.match(HEADING_BODY_GLUE_RE);
     if (glued?.[1] && glued[2]) {
       repairs.push("heading_body_collapse:main_subsection_split");

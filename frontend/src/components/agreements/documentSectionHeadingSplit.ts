@@ -19,6 +19,9 @@ const MAIN_SECTION_GLUE_RE = new RegExp(
 
 /** Main section heading immediately followed by subsection on same line (test337/test345). */
 const MAIN_THEN_SUBSECTION_GLUE_RE = /^(\d+\.\s+(?!\d+\.\d).+?)\s+(\d+\.\d+\s+.+)$/s;
+/** e.g. `9. General Terms9.1` — main heading glued to subsection with no whitespace. */
+const MAIN_THEN_SUBSECTION_NO_SPACE_GLUE_RE =
+  /^(\d+\.\s+(?!\d+\.\d).+[A-Za-z])(\d+\.\d+(?:\.\d+)*(?:\s+\S.*)?)$/;
 
 /** Explicit body cues after a glued main heading title (test345 short titles). */
 const MAIN_HEADING_BODY_CUE_RE =
@@ -132,6 +135,15 @@ export function splitGluedSectionHeadingFromLine(line: string): string {
     }
   }
 
+  const mainThenSubNoSpace = trimmed.match(MAIN_THEN_SUBSECTION_NO_SPACE_GLUE_RE);
+  if (mainThenSubNoSpace?.[1] && mainThenSubNoSpace[2]?.trim()) {
+    const heading = mainThenSubNoSpace[1].trim();
+    const subsection = mainThenSubNoSpace[2].trim();
+    if (heading.length >= MIN_MAIN_HEADING_LEN && heading.length <= 110 && subsection.length >= 3) {
+      return `${heading}\n${subsection}`;
+    }
+  }
+
   const mainThenSub = trimmed.match(MAIN_THEN_SUBSECTION_GLUE_RE);
   if (mainThenSub?.[1] && mainThenSub[2]?.trim()) {
     const heading = mainThenSub[1].trim();
@@ -188,6 +200,15 @@ export function repairGluedSectionHeadingsInText(text: string): string {
   t = t.replace(/([.!?])\s+(\d+\.\d+\s+)/g, "$1\n\n$2");
   t = t.replace(/([^\n])\s+(\d+\.\s+(?!\d+\.\d)[A-Z])/g, "$1\n\n$2");
   t = t.replace(/([a-z])(\d{1,2}\.\s+(?!\d+\.\d)[A-Z])/g, "$1\n\n$2");
+  // Any title letter glued to any subsection marker: `Terms9.1`, `Liability14.2 Cap`, `Terms9.1Notices`.
+  t = t.replace(
+    /([A-Za-z])(\d{1,2}\.\d+(?:\.\d+)*)(?:(\s+[A-Z][A-Za-z ,&/-]+)|([A-Z][a-zA-Z][A-Za-z ,&/-]*)|(?=\s*$))/gm,
+    (_m, letter: string, marker: string, spacedTitle?: string, gluedTitle?: string) => {
+      if (spacedTitle) return `${letter}\n\n${marker}${spacedTitle}`;
+      if (gluedTitle) return `${letter}\n\n${marker} ${gluedTitle}`;
+      return `${letter}\n\n${marker}`;
+    },
+  );
   t = t.replace(/([A-Za-z]{2,})\.(\d+\.\d+\s+)/g, "$1\n\n$2");
   t = t.replace(/([A-Za-z]{2,})\.(\d+\.\s+(?!\d+\.\d))/g, "$1\n\n$2");
   t = t.replace(/([A-Za-z]+)\."(\d+\.\s+)/g, "$1.\"\n\n$2");

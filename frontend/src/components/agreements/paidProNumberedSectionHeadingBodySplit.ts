@@ -189,6 +189,15 @@ export function detectHeadingBodyBoundaryInSectionTitle(
           headingLemma.add(lemma);
           continue;
         }
+        // Compound legal titles where the second word is also a common body opener.
+        if (
+          (prev === "independent" && lemma === "contractor") ||
+          (prev === "service" && lemma === "provider") ||
+          (prev === "general" && lemma === "contractor")
+        ) {
+          headingLemma.add(lemma);
+          continue;
+        }
         splitAt = i;
         break;
       }
