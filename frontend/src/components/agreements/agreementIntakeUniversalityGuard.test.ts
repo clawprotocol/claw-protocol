@@ -13,6 +13,7 @@ const ROOT = resolve(__dirname);
 const CAPABILITY_SRC = readFileSync(resolve(ROOT, "agreementIntakeCapabilityGate.ts"), "utf8");
 const CLARIFICATION_SRC = readFileSync(resolve(ROOT, "agreementIntakeClarification.ts"), "utf8");
 const FIDELITY_SRC = readFileSync(resolve(ROOT, "paidProIntakeCorpusFidelity.ts"), "utf8");
+const PLACEHOLDER_FILL_SRC = readFileSync(resolve(ROOT, "applyIntakeDraftPlaceholders.ts"), "utf8");
 const CLEAR_SRC = readFileSync(
   resolve(ROOT, "../../launch/newAgreementSessionReset.ts"),
   "utf8",
@@ -23,10 +24,11 @@ const ACCOUNT_SCOPED_RE =
   /\b(?:orgId|userId|user_id|org_id|accountId|workspaceId|Anthem|Blanchard|047b01af|Genesis Dog|genesisDogsOnly|allowlist|email\s*===)\b/;
 
 describe("agreement intake universality (all LawDog accounts)", () => {
-  it("capability / fidelity / clear modules have no account-scoped branches", () => {
+  it("capability / fidelity / clear / placeholder-fill modules have no account-scoped branches", () => {
     expect(CAPABILITY_SRC).not.toMatch(ACCOUNT_SCOPED_RE);
     expect(CLARIFICATION_SRC).not.toMatch(ACCOUNT_SCOPED_RE);
     expect(FIDELITY_SRC).not.toMatch(ACCOUNT_SCOPED_RE);
+    expect(PLACEHOLDER_FILL_SRC).not.toMatch(ACCOUNT_SCOPED_RE);
     expect(CLEAR_SRC).not.toMatch(ACCOUNT_SCOPED_RE);
   });
 

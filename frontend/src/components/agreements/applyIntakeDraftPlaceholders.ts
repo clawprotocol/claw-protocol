@@ -62,7 +62,7 @@ function usablePartyName(name: string | null | undefined): string {
   ) {
     return "";
   }
-  // Prefer authoritative entities; still allow short “ABC LLC” / sole-prop names.
+  // Prefer authoritative entities; still allow short entity / sole-prop names.
   if (isAuthoritativeLegalEntityName(t)) return t;
   if (/^(?:LLC|Inc|Corp|Ltd)\.?$/i.test(t)) return "";
   if (t.split(/\s+/).length >= 1 && t.length >= 3) return t;
@@ -93,7 +93,8 @@ function replaceAll(re: RegExp, value: string, text: string): { text: string; hi
 }
 
 /**
- * Soft-patch Excluded Data when intake named children’s/COPPA but the model dropped it.
+ * Soft-patch excluded-data language when intake named children’s/COPPA but the model dropped it.
+ * Deal-family agnostic: matches common exclusion list tails across SaaS / services / DPA prose.
  */
 function ensureChildrenDataExclusion(text: string, intake: string): { text: string; repairs: string[] } {
   if (!/\bchildren[''\u2019]?s\s+data\b|\bCOPPA\b|\bminors?[''\u2019]?s?\s+data\b/i.test(intake)) {
@@ -102,15 +103,19 @@ function ensureChildrenDataExclusion(text: string, intake: string): { text: stri
   if (/\bchildren[''\u2019]?s\s+data\b|\bCOPPA\b/i.test(text)) {
     return { text, repairs: [] };
   }
-  // Prefer the Excluded Data / will not submit sentence used in SaaS drafts.
-  const excludedRe =
-    /(will not submit to the Service[\s\S]{0,280}?)(classified information(?:\s*,?\s*or\s+controlled government data)?)/i;
-  if (excludedRe.test(text)) {
+  const listTailRes: readonly RegExp[] = [
+    // “… HIPAA, … PCI …, classified … or controlled government data”
+    /((?:will not|must not|shall not)\s+(?:submit|include|process|accept)[\s\S]{0,320}?)(classified information(?:\s*,?\s*or\s+controlled(?:\s+government)?\s+data)?)/i,
+    // “Out of scope: PHI/HIPAA, PCI, … classified …”
+    /(Out of scope:\s*[^.\n]{0,200}?)(classified(?:\s*\/\s*controlled(?:\s+gov)?\s+data)?|controlled(?:\s+government)?\s+data)/i,
+    // Generic exclusion lists ending in classified / controlled gov data
+    /((?:Excluded Data|excludes?|does not include)[^\n.]{0,240}?)(classified information(?:\s*,?\s*or\s+controlled(?:\s+government)?\s+data)?)/i,
+  ];
+  for (const re of listTailRes) {
+    if (!re.test(text)) continue;
+    re.lastIndex = 0;
     return {
-      text: text.replace(
-        excludedRe,
-        "$1children's data, $2",
-      ),
+      text: text.replace(re, "$1children's data, $2"),
       repairs: ["data_scope:children_exclusion_restored"],
     };
   }
