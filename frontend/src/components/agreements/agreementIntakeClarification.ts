@@ -3,8 +3,9 @@
  * into guided remediation with a suggested draftable rewrite.
  * Product-wide: no account, tier, or user branching.
  *
- * For overloaded negotiation notes: salvage every commercial fact we can detect
- * (economics, term, paper choice, risk topics, data scope) into whatWeHeard + rewrite.
+ * Goal: salvage as wide a spectrum of commercial material as practical from
+ * overloaded negotiation notes (economics, term, paper choice, risk topics,
+ * data scope, venue, renewal, insurance, etc.) into whatWeHeard + rewrite.
  */
 
 export type AgreementIntakeClarificationKind =
@@ -31,54 +32,88 @@ export type AgreementIntakeClarification = {
 };
 
 const DRAFT_INTENT_RE =
-  /\b(?:draft|create|write|prepare|generate)\b[\s\S]{0,80}\b(?:agreement|contract|msa|sow|nda|pilot\s+agreement|order\s+form|subscription\s+agreement)\b/i;
+  /\b(?:draft|create|write|prepare|generate)\b[\s\S]{0,80}\b(?:agreement|contract|msa|sow|nda|pilot\s+agreement|order\s+form|subscription\s+agreement|master\s+services)\b/i;
 
 const BETWEEN_PARTIES_RE = /\bbetween\b[\s\S]{0,160}\band\b/i;
 
 const COUNSEL_PREP_SIGNAL_RE =
-  /\b(?:help\s+me\s+(?:figure\s+out|thinking\s+through)|what\s+positions\s+i\s+should\s+take|negotiation\s+plan|fallback\s+(?:language|positions)|clause\s+edits|deal\s+(?:risks?|guidance)|lawyering\s+the\s+deal|not\s+looking\s+for\s+a\s+(?:law\s+school\s+)?memo|confirm\s+(?:internally|with\s+security|with\s+.{0,20}legal)\s+before|push\s+them\s+back|accept\s+their\s+.{0,40}(?:with\s+edits|paper)|which\s+terms\s+are\s+(?:actual\s+)?(?:deal\s+)?risks|AE[-\s]?friendly\s+note|redline\s+concepts|needs?\s+attorney\s+review)\b/i;
+  /\b(?:help\s+me\s+(?:figure\s+out|thinking\s+through)|what\s+positions\s+i\s+should\s+take|negotiation\s+plan|fallback\s+(?:language|positions)|clause\s+edits|deal\s+(?:risks?|guidance)|lawyering\s+the\s+deal|not\s+looking\s+for\s+a\s+(?:law\s+school\s+)?memo|confirm\s+(?:internally|with\s+security|with\s+.{0,20}legal)\s+before|push\s+them\s+back|accept\s+their\s+.{0,40}(?:with\s+edits|paper)|which\s+terms\s+are\s+(?:actual\s+)?(?:deal\s+)?risks|AE[-\s]?friendly\s+note|redline\s+concepts|needs?\s+attorney\s+review|mark\s*it\s*up|counter[-\s]?proposal)\b/i;
 
 const NUMBERED_ADVISORY_QUESTIONS_RE =
   /(?:^|\n)\s*(?:1[\).\]]|1\.)\s+(?:whether|which|what|how|where)\b[\s\S]{40,}(?:^|\n)\s*(?:2[\).\]]|2\.)\s+/im;
 
 const MONEY_RE =
-  /\$\s?\d[\d,]*(?:\.\d+)?\s*(?:k|m)?|\b\d[\d,]*(?:\.\d+)?\s*(?:dollars?|usd|acv)\b|\b\d+\s*k\b/i;
+  /\$\s?\d[\d,]*(?:\.\d+)?\s*(?:k|m)?|\b\d[\d,]*(?:\.\d+)?\s*(?:dollars?|usd|acv|arr|mrr|tcv)\b|\b\d+\s*k\b|\b\d+(?:\.\d+)?%\s*(?:equity|ownership)\b/i;
 const TERM_RE =
-  /\b(?:\d+\s*[-–]?\s*(?:day|days|week|weeks|month|months|year|years)|sixty[-\s]?day|6[-\s]?week|twelve[-\s]?month)\b/i;
-const SAAS_RE = /\b(?:saas|software\s+as\s+a\s+service|subscription)\b/i;
-const PILOT_RE = /\b(?:pilot\s+agreement|paid\s+pilot|\bpilot\b)\b/i;
-const NDA_RE = /\b(?:mutual\s+)?(?:non[-\s]?disclosure|nda)\b/i;
-const SERVICES_RE = /\b(?:services?\s+agreement|consulting|design|development|freelance)\b/i;
+  /\b(?:\d+\s*[-–]?\s*(?:day|days|week|weeks|month|months|year|years)|sixty[-\s]?day|6[-\s]?week|twelve[-\s]?month|auto[-\s]?renew(?:al)?|evergreen|perpetual)\b/i;
+const SAAS_RE = /\b(?:saas|software\s+as\s+a\s+service|subscription|ARR|MRR|ACV)\b/i;
+const PILOT_RE = /\b(?:pilot\s+agreement|paid\s+pilot|\bpilot\b|proof[-\s]?of[-\s]?concept|POC)\b/i;
+const NDA_RE = /\b(?:mutual\s+)?(?:non[-\s]?disclosure|nda|confidentiality\s+agreement)\b/i;
+const SERVICES_RE =
+  /\b(?:services?\s+agreement|consulting|design|development|freelance|statement\s+of\s+work|\bSOW\b|master\s+services|\bMSA\b)\b/i;
+const LICENSE_RE = /\b(?:license\s+agreement|software\s+license|IP\s+license|end[-\s]?user\s+license|\bEULA\b)\b/i;
+const EMPLOYMENT_RE =
+  /\b(?:employment\s+agreement|independent\s+contractor|contractor\s+agreement|offer\s+letter|vesting|equity\s+grant)\b/i;
+const LOAN_RE = /\b(?:promissory\s+note|loan\s+agreement|principal|interest\s+rate|repayment\s+schedule)\b/i;
+const LEASE_RE = /\b(?:lease\s+agreement|landlord|tenant|rent\s+commencement|premises)\b/i;
 
-/** Universal commercial / risk topic detectors — order is display priority. */
+/**
+ * Universal commercial / risk topic detectors — broad spectrum, display-priority order.
+ * Keep labels draftable (what to put in the agreement), not negotiation strategy.
+ */
 const TOPIC_CHECKS: ReadonlyArray<[RegExp, string]> = [
-  [/\bunlimited\s+liability\b|\bliability\s+caps?\b|\bliability\s+for\b/i, "capped (not unlimited) liability"],
-  [/\b99\.9\s*%|\buptime\s+SLA\b|\bservice\s+credits?\b|\bSLA\b/i, "uptime SLA / service credits"],
-  [/\bcustom\s+security\b|\bsecurity\s+obligations?\b|\bsecurity\s+program\b|\bsecurity\s+commitments?\b/i, "security commitments aligned to your program"],
+  // Liability / risk transfer
+  [/\bunlimited\s+liability\b|\bliability\s+caps?\b|\bliability\s+for\b|\bconsequential\s+damages?\b|\bindirect\s+damages?\b/i, "capped (not unlimited) liability"],
+  [/\bindemnit/i, "balanced indemnity"],
+  [/\binsurance\b|\bcyber\s+liability\b|\bCOI\b|\bcertificate\s+of\s+insurance\b/i, "insurance requirements"],
+  // Performance / ops
+  [/\b99\.9\s*%|\buptime\s+SLA\b|\bservice\s+credits?\b|\bSLA\b|\bresponse\s+time\b|\bseverity\s+level\b/i, "uptime SLA / service credits"],
+  [/\bacceptance\s+(?:criteria|testing|period)\b|\bUAT\b|\bmilestone\s+acceptance\b/i, "acceptance criteria"],
+  [/\bwarrant(?:y|ies)\b|\bdisclaimers?\s+of\s+warrant/i, "warranty / disclaimer balance"],
+  [/\bsupport\s+(?:hours|obligations?|levels?)\b|\bmaintenance\s+(?:and\s+)?support\b/i, "support / maintenance"],
+  // Security / privacy / data
+  [/\bcustom\s+security\b|\bsecurity\s+obligations?\b|\bsecurity\s+program\b|\bsecurity\s+commitments?\b|\bISO\s*27001\b|\bpenetration\s+test/i, "security commitments aligned to your program"],
+  [/\bSOC\s*2\b/i, "SOC 2 security representations"],
   [/\baudit\s+rights?\b|\bon[-\s]?site\s+audits?\b|\binterviews?\s+with\s+(?:our\s+)?personnel\b/i, "scoped audit rights"],
   [/\bsubprocessors?\b/i, "subprocessor notice / approval limits"],
-  [/\bterminat(?:e|ion).{0,48}convenience\b|\b30[-\s]?day\s+termination\b/i, "termination for convenience"],
+  [/\bDPA\b|\bdata\s+processing\b|\bGDPR\b|\bCCPA\b|\bCPRA\b/i, "DPA / privacy terms"],
+  [/\bdelet(?:e|ion).{0,40}data\b|\breturn\s+(?:or\s+)?destroy\b/i, "data deletion / return"],
+  [/\bmodel\s+training\b|\btrain(?:ing)?\s+(?:AI|models?)\b/i, "no model-training use of data"],
+  [/\bconfidential/i, "confidentiality"],
+  [/\bdata\s+residency\b|\bdata\s+localization\b|\bstay\s+in\s+(?:the\s+)?(?:US|EU|UK)\b/i, "data residency limits"],
+  // IP / ownership
   [
-    /\bderivative\s+works?\b|\bownership\s+of\s+(?:all\s+)?(?:data|configurations?|reports?|outputs?)\b|\bIP\s+(?:ownership|claims?)\b|\bwork\s+product\b|\bintellectual\s+property\b/i,
+    /\bderivative\s+works?\b|\bownership\s+of\s+(?:all\s+)?(?:data|configurations?|reports?|outputs?)\b|\bIP\s+(?:ownership|claims?|assignment)\b|\bwork\s+product\b|\bintellectual\s+property\b|\bwork\s+for\s+hire\b|\bsource\s+code\s+escrow\b/i,
     "IP / outputs / data ownership",
   ],
-  [/\bindemnit/i, "balanced indemnity"],
-  [/\bwithhold\s+payment\b|\bpayment\s+if\s+there.?s\s+any\s+dispute\b|\bpayment\s+disputes?\b/i, "payment dispute / withhold rights"],
-  [/\binternal\s+policies\b|\bpolicies\s+even\s+if\s+they\s+change\b/i, "no open-ended policy change obligations"],
-  [/\bmost[-\s]?favored\b/i, "most-favored pricing"],
-  [/\bdelet(?:e|ion).{0,40}data\b/i, "data deletion"],
-  [/\bmodel\s+training\b/i, "no model-training use of data"],
-  [/\bSOC\s*2\b/i, "SOC 2 security representations"],
-  [/\bconfidential/i, "confidentiality"],
-  [/\bDPA\b|\bdata\s+processing\b/i, "DPA / data processing terms"],
+  [/\blicense\s+(?:grant|scope|restrictions?)\b|\bnon[-\s]?exclusive\s+license\b/i, "license grant / scope"],
+  [/\bpublicity\b|\bpress\s+release\b|\blogo\s+use\b|\bcase\s+stud(?:y|ies)\b/i, "publicity / logo use limits"],
+  // Term / exit / commercial mechanics
+  [/\bterminat(?:e|ion).{0,48}convenience\b|\b30[-\s]?day\s+termination\b|\bfor\s+convenience\b/i, "termination for convenience"],
+  [/\bterminat(?:e|ion).{0,40}cause\b|\bmaterial\s+breach\b|\bcure\s+period\b/i, "termination for cause / cure"],
+  [/\bauto[-\s]?renew|\brenewal\s+notice\b|\bnon[-\s]?renew\b|\bevergreen\b/i, "renewal / notice terms"],
+  [/\bwithhold\s+payment\b|\bpayment\s+if\s+there.?s\s+any\s+dispute\b|\bpayment\s+disputes?\b|\bset[-\s]?off\b/i, "payment dispute / withhold rights"],
+  [/\blate\s+fee|\binterest\s+on\s+(?:late\s+)?(?:payments?|invoices?)\b|\bnet\s+\d+\b|\bpayment\s+terms?\b/i, "payment timing / late fees"],
+  [/\bprice\s+(?:increase|adjustment|escalation)\b|\bmost[-\s]?favored\b|\bMFN\b/i, "pricing / MFN / increases"],
+  [/\binternal\s+policies\b|\bpolicies\s+even\s+if\s+they\s+change\b|\bflow[-\s]?down\b/i, "no open-ended policy change obligations"],
+  [/\bchange\s+orders?\b|\bscope\s+creep\b|\bout[-\s]?of[-\s]?scope\b/i, "change-order / scope controls"],
+  [/\bexclusiv(?:e|ity)\b|\bnon[-\s]?compete\b|\bnon[-\s]?solicit/i, "exclusivity / non-solicit limits"],
+  [/\bassignment\b|\bchange\s+of\s+control\b/i, "assignment / change of control"],
+  [/\bforce\s+majeure\b/i, "force majeure"],
+  [/\bgoverning\s+law\b|\bvenue\b|\barbitration\b|\bjury\s+waiver\b|\bdispute\s+resolution\b/i, "governing law / dispute forum"],
+  // People / equity / finance adjacent (still draftable)
+  [/\bvesting\b|\bcliff\b|\bequity\s+grant\b|\boption\s+grant\b/i, "equity / vesting terms"],
+  [/\bnon[-\s]?solicit(?:ation)?\b|\bgarden\s+leave\b/i, "non-solicit / post-term limits"],
 ];
+
+const MAX_TOPIC_CHIPS = 18;
 
 function extractMoneyPhrases(raw: string): string[] {
   const out: string[] = [];
   const re =
-    /\$\s?\d[\d,]*(?:\.\d+)?(?:\s*(?:k|m|K|M))?(?:\s*ACV)?|\b\d+\s*k(?:-ish)?(?:\s*ACV)?\b|\b\d[\d,]*\s*(?:dollars?|usd)\b/gi;
+    /\$\s?\d[\d,]*(?:\.\d+)?(?:\s*(?:k|m|K|M))?(?:\s*(?:ACV|ARR|MRR|TCV))?|\b\d+\s*k(?:-ish)?(?:\s*(?:ACV|ARR|MRR))?\b|\b\d[\d,]*\s*(?:dollars?|usd)\b|\b\d+(?:\.\d+)?%\s*(?:equity|ownership)\b/gi;
   let m: RegExpExecArray | null;
-  while ((m = re.exec(raw)) && out.length < 4) {
+  while ((m = re.exec(raw)) && out.length < 5) {
     out.push(m[0].replace(/\s+/g, " ").trim());
   }
   return out;
@@ -86,9 +121,19 @@ function extractMoneyPhrases(raw: string): string[] {
 
 function extractTermPhrase(raw: string): string | null {
   const m = raw.match(
-    /\b(?:\d+\s*[-–]?\s*(?:day|days|week|weeks|month|months|year|years)|sixty[-\s]?day|6[-\s]?week|twelve[-\s]?month)\b/i,
+    /\b(?:\d+\s*[-–]?\s*(?:day|days|week|weeks|month|months|year|years)|sixty[-\s]?day|6[-\s]?week|twelve[-\s]?month|auto[-\s]?renew(?:al)?|evergreen|perpetual)\b/i,
   );
   return m?.[0]?.replace(/\s+/g, " ").trim() ?? null;
+}
+
+function extractGoverningLaw(raw: string): string | null {
+  const m = raw.match(
+    /\b(?:governing\s+law|governed\s+by(?:\s+the\s+laws?\s+of)?|laws?\s+of)\s*[:\-]?\s*([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)?|[A-Z]{2})\b/,
+  );
+  if (m?.[1]) return m[1].trim();
+  // Common shorthand: "Governing law: Texas."
+  const m2 = raw.match(/\bGoverning\s+law\s*:\s*([A-Za-z][A-Za-z\s]{1,40})/i);
+  return m2?.[1]?.trim().replace(/[.;,]+$/, "") || null;
 }
 
 function extractTopicChips(raw: string): string[] {
@@ -105,42 +150,50 @@ function extractTopicChips(raw: string): string[] {
     if (matchedChecks.some(([re]) => re.test(bullet))) continue;
     if (chips.some((c) => c.toLowerCase() === bullet.toLowerCase())) continue;
     chips.push(bullet);
-    if (chips.length >= 14) break;
+    if (chips.length >= MAX_TOPIC_CHIPS) break;
   }
-  return chips.slice(0, 14);
+  return chips.slice(0, MAX_TOPIC_CHIPS);
 }
 
 /** Short commercial asks from markdown/plain bullets (max ~12 words each). */
 function extractAskBullets(raw: string): string[] {
   const out: string[] = [];
   const blockMatch = raw.match(
-    /(?:asking\s+for|terms?\s+that\s+seem|key\s+terms?|their\s+agreement\s+has)[:\s]*\n((?:[ \t]*[-*•].+\n?){2,})/i,
+    /(?:asking\s+for|terms?\s+that\s+seem|key\s+terms?|their\s+(?:agreement|paper)\s+has|includes?(?:\s+the\s+following)?|heavy\s+for\s+this\s+deal)[:\s]*\n((?:[ \t]*(?:[-*•]|\d+[.)])\s+.+\n?){2,})/i,
   );
   const block = blockMatch?.[1] || raw;
   for (const line of block.split("\n")) {
-    const m = line.match(/^[ \t]*[-*•]\s+(.{8,160})$/);
+    const m = line.match(/^[ \t]*(?:[-*•]|\d+[.)])\s+(.{8,180})$/);
     if (!m) continue;
     const cleaned = m[1].replace(/\s+/g, " ").trim().replace(/[.;,:]+$/, "");
     if (cleaned.length < 8) continue;
-    // Compress long bullets to a short commercial label for the rewrite list.
+    // Skip pure advisory questions inside numbered counsel checklists.
+    if (/^(?:whether|which|what|how|where)\b/i.test(cleaned)) continue;
     const words = cleaned.split(/\s+/);
     const short = words.length > 12 ? `${words.slice(0, 12).join(" ")}…` : cleaned;
     out.push(short);
-    if (out.length >= 12) break;
+    if (out.length >= 14) break;
   }
   return out;
 }
 
 function extractDataScopeNotes(raw: string): string[] {
   const notes: string[] = [];
-  if (/\b(?:business\s+records?|employee\s+names?|usage\s+(?:analytics|data)|internal\s+business)\b/i.test(raw)) {
-    notes.push("Handles ordinary business records / employee contact / usage analytics");
+  const includes: string[] = [];
+  if (/\bbusiness\s+records?\b/i.test(raw)) includes.push("business records");
+  if (/\bemployee\s+names?(?:\/emails?)?\b|\bemails?\b/i.test(raw) && /\bemployee\b/i.test(raw)) {
+    includes.push("employee names/emails");
   }
+  if (/\busage\s+(?:analytics|data)\b/i.test(raw)) includes.push("usage analytics");
+  if (/\bPII\b|\bpersonal\s+data\b/i.test(raw)) includes.push("personal data / PII");
+  if (/\bcustomer\s+content\b|\bcustomer\s+data\b/i.test(raw)) includes.push("customer data/content");
+  if (includes.length) notes.push(`Handles: ${includes.join(", ")}`);
+
   const exclusions: string[] = [];
-  if (/\bPHI\b/i.test(raw)) exclusions.push("PHI");
-  if (/\bPCI\b/i.test(raw)) exclusions.push("PCI");
-  if (/\bchildren'?s\s+data\b/i.test(raw)) exclusions.push("children’s data");
-  if (/\b(?:government\s+)?classified\b/i.test(raw)) exclusions.push("classified information");
+  if (/\bPHI\b|\bHIPAA\b/i.test(raw)) exclusions.push("PHI/HIPAA");
+  if (/\bPCI\b|\bpayment\s+card\b/i.test(raw)) exclusions.push("PCI");
+  if (/\bchildren'?s\s+data\b|\bCOPPA\b/i.test(raw)) exclusions.push("children’s data");
+  if (/\b(?:government\s+)?classified\b|\bITAR\b|\bCUI\b/i.test(raw)) exclusions.push("classified / controlled gov data");
   if (exclusions.length) notes.push(`Out of scope: ${exclusions.join(", ")}`);
   return notes;
 }
@@ -155,23 +208,73 @@ function extractExpansionNote(raw: string): string | null {
   return null;
 }
 
-function dealTypeLabel(raw: string): "saas_subscription" | "saas_pilot" | "services" | "nda" | "generic" {
-  if (PILOT_RE.test(raw) && SAAS_RE.test(raw)) return "saas_pilot";
-  if (PILOT_RE.test(raw) && MONEY_RE.test(raw)) return "saas_pilot";
-  if (SAAS_RE.test(raw) || /\bACV\b/i.test(raw)) return "saas_subscription";
-  if (NDA_RE.test(raw)) return "nda";
+function extractCounterpartySegment(raw: string): string | null {
+  if (/\benterprise\b/i.test(raw)) return "enterprise";
+  if (/\bmid[-\s]?market\b/i.test(raw)) return "mid-market";
+  if (/\bSMB\b|\bsmall\s+business\b/i.test(raw)) return "SMB";
+  if (/\bstartup\b/i.test(raw)) return "startup";
+  return null;
+}
+
+type DealType =
+  | "saas_subscription"
+  | "saas_pilot"
+  | "services"
+  | "nda"
+  | "license"
+  | "employment"
+  | "loan"
+  | "lease"
+  | "generic";
+
+function dealTypeLabel(raw: string): DealType {
+  if (PILOT_RE.test(raw) && (SAAS_RE.test(raw) || MONEY_RE.test(raw))) return "saas_pilot";
+  if (SAAS_RE.test(raw) || /\bACV\b|\bARR\b|\bMRR\b/i.test(raw)) return "saas_subscription";
+  if (NDA_RE.test(raw) && !SERVICES_RE.test(raw) && !SAAS_RE.test(raw)) return "nda";
+  if (LICENSE_RE.test(raw)) return "license";
+  if (EMPLOYMENT_RE.test(raw)) return "employment";
+  if (LOAN_RE.test(raw)) return "loan";
+  if (LEASE_RE.test(raw)) return "lease";
   if (SERVICES_RE.test(raw)) return "services";
   return "generic";
+}
+
+function agreementTypePhrase(deal: DealType, term: string): string {
+  switch (deal) {
+    case "saas_pilot":
+      return `${term} paid SaaS pilot agreement`;
+    case "saas_subscription":
+      return `${term} SaaS subscription agreement`;
+    case "nda":
+      return "mutual non-disclosure agreement";
+    case "license":
+      return `${term} software license agreement`;
+    case "employment":
+      return "independent contractor agreement";
+    case "loan":
+      return "promissory note / loan agreement";
+    case "lease":
+      return `${term} commercial lease agreement`;
+    case "services":
+      return `${term} services agreement`;
+    default:
+      return "[agreement type]";
+  }
 }
 
 function buildCommercialSuggestedRewrite(raw: string): string {
   const deal = dealTypeLabel(raw);
   const money = extractMoneyPhrases(raw);
-  const term = extractTermPhrase(raw) || (deal === "saas_subscription" ? "12-month" : "60-day");
-  const fee = money[0] || (deal === "saas_subscription" ? "[annual fee / ACV]" : "[fee amount]");
+  const term =
+    extractTermPhrase(raw) ||
+    (deal === "saas_subscription" || deal === "license" ? "12-month" : deal === "nda" ? "2-year" : "60-day");
+  const fee =
+    money[0] ||
+    (deal === "saas_subscription" ? "[annual fee / ACV]" : deal === "loan" ? "[principal]" : "[fee amount]");
   const topics = extractTopicChips(raw);
   const dataNotes = extractDataScopeNotes(raw);
   const expansion = extractExpansionNote(raw);
+  const gov = extractGoverningLaw(raw) || "[State]";
 
   const topicLine =
     topics.length > 0
@@ -180,52 +283,91 @@ function buildCommercialSuggestedRewrite(raw: string): string {
   const dataLine =
     dataNotes.length > 0 ? ` Data scope: ${dataNotes.join("; ").replace(/\.$/, "")}.` : "";
   const expansionLine = expansion ? ` ${expansion}.` : "";
+  const typePhrase = agreementTypePhrase(deal, term);
 
   if (deal === "saas_pilot") {
     const conversion =
-      money.find((m) => m !== fee && (/150|annual|k/i.test(m) || /ACV/i.test(m))) || money[1] || "";
+      money.find((m) => m !== fee && (/150|annual|k|ACV|ARR/i.test(m))) || money[1] || "";
     const convertBit = conversion
       ? ` If the pilot succeeds, it may convert to an annual SaaS subscription near ${conversion}.`
       : expansion
         ? ` ${expansion}.`
         : "";
     return (
-      `Draft a ${term} paid SaaS pilot agreement between [Your Company Legal Name] and [Customer Legal Name] for ${fee}.` +
+      `Draft a ${typePhrase} between [Your Company Legal Name] and [Customer Legal Name] for ${fee}.` +
       convertBit +
       topicLine +
       dataLine +
-      ` Use clear, practical language. Governing law: [State].`
+      ` Use clear, practical language. Governing law: ${gov}.`
     );
   }
 
   if (deal === "saas_subscription") {
     return (
-      `Draft a ${term} SaaS subscription agreement between [Your Company Legal Name] and [Customer Legal Name] for approximately ${fee}.` +
+      `Draft a ${typePhrase} between [Your Company Legal Name] and [Customer Legal Name] for approximately ${fee}.` +
       expansionLine +
       topicLine +
       dataLine +
-      ` Use clear, practical language. Governing law: [State].`
+      ` Use clear, practical language. Governing law: ${gov}.`
     );
   }
 
   if (deal === "nda") {
     return (
-      "Draft a mutual non-disclosure agreement between [Party A Legal Name] and [Party B Legal Name] " +
-      "covering confidential business information for a 2-year term. Governing law: [State]."
+      `Draft a ${typePhrase} between [Party A Legal Name] and [Party B Legal Name] ` +
+      `covering confidential business information for a ${term} term.` +
+      topicLine +
+      ` Governing law: ${gov}.`
+    );
+  }
+
+  if (deal === "license") {
+    return (
+      `Draft a ${typePhrase} between [Licensor Legal Name] and [Licensee Legal Name] for ${fee}.` +
+      topicLine +
+      dataLine +
+      ` Governing law: ${gov}.`
+    );
+  }
+
+  if (deal === "employment") {
+    return (
+      `Draft an ${typePhrase} between [Company Legal Name] and [Contractor Legal Name] for ${term} at ${fee}.` +
+      topicLine +
+      ` Cover services, payment, IP ownership of work product, and termination. Governing law: ${gov}.`
+    );
+  }
+
+  if (deal === "loan") {
+    return (
+      `Draft a ${typePhrase} between [Lender Legal Name] and [Borrower Legal Name] for principal ${fee}, term ${term}.` +
+      topicLine +
+      ` Governing law: ${gov}.`
+    );
+  }
+
+  if (deal === "lease") {
+    return (
+      `Draft a ${typePhrase} between [Landlord Legal Name] and [Tenant Legal Name] at ${fee}.` +
+      topicLine +
+      ` Governing law: ${gov}.`
     );
   }
 
   if (deal === "services" || MONEY_RE.test(raw)) {
     return (
-      `Draft a services agreement between [Provider Legal Name] and [Client Legal Name] for ${term} at ${fee}.` +
+      `Draft a ${typePhrase} between [Provider Legal Name] and [Client Legal Name] for ${term} at ${fee}.` +
       topicLine +
-      ` Describe the services, payment schedule, ownership of deliverables, and termination. Governing law: [State].`
+      dataLine +
+      ` Describe the services, payment schedule, ownership of deliverables, and termination. Governing law: ${gov}.`
     );
   }
 
   return (
-    "Draft a [agreement type] between [Party A Legal Name] and [Party B Legal Name] for [scope], " +
-    "fee [amount], term [duration]. Governing law: [State]."
+    `Draft a ${typePhrase} between [Party A Legal Name] and [Party B Legal Name] for [scope], ` +
+    `fee ${fee}, term ${term}.` +
+    topicLine +
+    ` Governing law: ${gov}.`
   );
 }
 
@@ -237,35 +379,38 @@ function heardFromCounselPrep(raw: string): string[] {
   const heard: string[] = [];
   const deal = dealTypeLabel(raw);
 
-  if (/\btheir\s+paper\b|\bcustomer\s+wants\s+to\s+use\s+their\b|\baccept\s+their\s+paper\b/i.test(raw)) {
+  if (/\btheir\s+paper\b|\bcustomer\s+wants\s+to\s+use\s+their\b|\baccept\s+their\s+paper\b|\bmark\s*it\s*up\b/i.test(raw)) {
     heard.push("Customer wants to use their paper; you’re weighing markup vs pushing to your form.");
   } else if (PILOT_RE.test(raw)) {
     heard.push("You’re evaluating a customer’s proposed paper (not asking us to draft your form yet).");
   } else if (deal === "saas_subscription") {
-    heard.push("This is framed as enterprise SaaS deal guidance, not a draft-between-parties request.");
+    heard.push("This is framed as SaaS / subscription deal guidance, not a draft-between-parties request.");
+  } else {
+    heard.push("This is framed as negotiation / deal guidance, not a draft-between-parties request.");
   }
 
-  if (/\benterprise\b/i.test(raw)) heard.push("Deal context: enterprise customer.");
-  if (/\bmid[-\s]?market\b/i.test(raw)) heard.push("Counterparty described as mid-market (legal name not given).");
+  const segment = extractCounterpartySegment(raw);
+  if (segment) heard.push(`Deal context: ${segment} customer (legal name not given).`);
 
   const term = extractTermPhrase(raw);
   if (term) {
-    heard.push(deal === "saas_subscription" ? `Subscription term mentioned: ${term}.` : `Term mentioned: ${term}.`);
+    heard.push(
+      deal === "saas_subscription" || deal === "license"
+        ? `Term mentioned: ${term}.`
+        : `Term mentioned: ${term}.`,
+    );
   }
   const money = extractMoneyPhrases(raw);
   if (money.length) {
-    heard.push(
-      /\bACV\b/i.test(raw)
-        ? `Economics mentioned: ${money.join(", ")} (ACV / fee).`
-        : `Economics mentioned: ${money.join(", ")}.`,
-    );
+    const econLabel = /\b(?:ACV|ARR|MRR|TCV)\b/i.test(raw) ? " (ACV/ARR/MRR/fee)" : "";
+    heard.push(`Economics mentioned: ${money.join(", ")}${econLabel}.`);
   }
 
   const expansion = extractExpansionNote(raw);
   if (expansion) heard.push(`${expansion}.`);
 
-  if (/\bMSA|order\s+form|DPA\b/i.test(raw)) {
-    heard.push("You’re comparing their paper vs your MSA / order form / DPA process.");
+  if (/\bMSA|order\s+form|DPA|their\s+paper|our\s+paper\b/i.test(raw)) {
+    heard.push("You’re comparing their paper vs your form set (MSA / order form / DPA or equivalent).");
   }
 
   const topics = extractTopicChips(raw);
@@ -277,10 +422,34 @@ function heardFromCounselPrep(raw: string): string[] {
     heard.push(`${note}.`);
   }
 
+  const gov = extractGoverningLaw(raw);
+  if (gov) heard.push(`Governing law cue: ${gov}.`);
+
   if (NUMBERED_ADVISORY_QUESTIONS_RE.test(raw)) {
     heard.push("The ask is a numbered negotiation / counsel checklist, not a draft request.");
   }
   return heard;
+}
+
+function draftExampleForDeal(deal: DealType): string {
+  switch (deal) {
+    case "saas_subscription":
+      return "Draft a 12-month SaaS subscription agreement between…";
+    case "saas_pilot":
+      return "Draft a 60-day SaaS pilot agreement between…";
+    case "nda":
+      return "Draft a mutual NDA between…";
+    case "license":
+      return "Draft a software license agreement between…";
+    case "employment":
+      return "Draft an independent contractor agreement between…";
+    case "loan":
+      return "Draft a promissory note between…";
+    case "lease":
+      return "Draft a commercial lease between…";
+    default:
+      return "Draft a services agreement between…";
+  }
 }
 
 export function buildAgreementIntakeClarification(rawIntake: string): AgreementIntakeClarification | null {
@@ -293,6 +462,7 @@ export function buildAgreementIntakeClarification(rawIntake: string): AgreementI
   const numberedAdvisory = NUMBERED_ADVISORY_QUESTIONS_RE.test(raw);
   const hasMoney = MONEY_RE.test(raw);
   const hasTerm = TERM_RE.test(raw);
+  const deal = dealTypeLabel(raw);
 
   if (hasDraftIntent && hasBetweenParties) return null;
 
@@ -307,10 +477,10 @@ export function buildAgreementIntakeClarification(rawIntake: string): AgreementI
         "It does not produce attorney negotiation memos or markups of the other side’s paper.",
       whatWeHeard: heardFromCounselPrep(raw),
       guidedSteps: [
-        "Name both legal entities (your company and the customer).",
-        "Say you want a draft (not advice) — e.g. “Draft a 12-month SaaS subscription agreement between…”.",
+        "Name both legal entities (your company and the other party).",
+        `Say you want a draft (not advice) — e.g. “${draftExampleForDeal(deal)}”.`,
         topicCount > 0
-          ? "Keep the commercial facts already listed below (fee, term, and the risk topics we extracted)."
+          ? "Keep the commercial facts already listed below (fee, term, and the topics we extracted)."
           : "Keep the commercial facts you already listed (fee, term, and key risk topics).",
         "Save negotiation strategy / “what to push” questions for your attorney or AE playbook outside LawDog.",
       ],
@@ -328,7 +498,7 @@ export function buildAgreementIntakeClarification(rawIntake: string): AgreementI
       whatWeHeard: raw.length ? [`You wrote: “${raw.slice(0, 120)}${raw.length > 120 ? "…" : ""}”`] : [],
       guidedSteps: [
         "Name Party A and Party B (legal names).",
-        "Say the agreement type (services, NDA, pilot, consulting, etc.).",
+        "Say the agreement type (services, NDA, pilot, SaaS, consulting, etc.).",
         "Add fee and term if you know them.",
       ],
       suggestedRewrite: buildGenericSuggestedRewrite(raw),
@@ -337,15 +507,27 @@ export function buildAgreementIntakeClarification(rawIntake: string): AgreementI
     };
   }
 
-  if ((hasMoney || hasTerm || SAAS_RE.test(raw) || PILOT_RE.test(raw) || SERVICES_RE.test(raw) || NDA_RE.test(raw)) && !hasBetweenParties) {
+  const looksCommercial =
+    hasMoney ||
+    hasTerm ||
+    SAAS_RE.test(raw) ||
+    PILOT_RE.test(raw) ||
+    SERVICES_RE.test(raw) ||
+    NDA_RE.test(raw) ||
+    LICENSE_RE.test(raw) ||
+    EMPLOYMENT_RE.test(raw) ||
+    LOAN_RE.test(raw) ||
+    LEASE_RE.test(raw);
+
+  if (looksCommercial && !hasBetweenParties) {
     const suggested = buildGenericSuggestedRewrite(raw);
     const heard: string[] = [];
     if (hasMoney) heard.push(`Fee / economics mentioned: ${extractMoneyPhrases(raw).join(", ") || "yes"}.`);
     if (hasTerm) heard.push(`Term mentioned: ${extractTermPhrase(raw) || "yes"}.`);
-    if (SAAS_RE.test(raw) || PILOT_RE.test(raw)) heard.push("Looks like a SaaS / subscription or pilot deal.");
-    if (NDA_RE.test(raw)) heard.push("Looks like an NDA request.");
+    if (deal !== "generic") heard.push(`Looks like a ${deal.replace(/_/g, " ")} request.`);
     const topics = extractTopicChips(raw);
-    if (topics.length) heard.push(`Topics detected: ${topics.slice(0, 8).join("; ")}.`);
+    if (topics.length) heard.push(`Topics detected (${topics.length}): ${topics.slice(0, 12).join("; ")}.`);
+    for (const note of extractDataScopeNotes(raw)) heard.push(`${note}.`);
     heard.push("Legal party names are missing or not in a “between A and B” form.");
     return {
       kind: "missing_named_parties",
@@ -390,7 +572,8 @@ export function buildAgreementIntakeClarification(rawIntake: string): AgreementI
         `About ${raw.length.toLocaleString()} characters of notes.`,
         hasMoney ? `Economics mentioned: ${extractMoneyPhrases(raw).join(", ")}.` : "Economics were not clearly stated.",
         hasTerm ? `Term mentioned: ${extractTermPhrase(raw)}.` : "Term was not clearly stated.",
-        ...(topics.length ? [`Topics detected: ${topics.slice(0, 10).join("; ")}.`] : []),
+        ...(topics.length ? [`Topics detected (${topics.length}): ${topics.slice(0, 14).join("; ")}.`] : []),
+        ...extractDataScopeNotes(raw).map((n) => `${n}.`),
       ],
       guidedSteps: [
         "Lead with: “Draft a [type] agreement between [A] and [B]…”.",

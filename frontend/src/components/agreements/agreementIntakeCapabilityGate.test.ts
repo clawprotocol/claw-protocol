@@ -141,6 +141,66 @@ describe("buildAgreementIntakeClarification", () => {
     expect(rewrite).toMatch(/PHI|PCI|Out of scope|Data scope/i);
     expect(rewrite).not.toMatch(/pilot agreement/i);
   });
+
+  it("covers a wide spectrum of commercial topics across deal families (product-wide)", () => {
+    const mega = `Hey LawDog, help me thinking through a customer contract issue before we respond.
+
+It's a 24-month SaaS subscription, about $480k ARR, auto-renewal with 90-day renewal notice.
+Customer paper asks for:
+- unlimited liability and consequential damages
+- 99.95% uptime SLA with service credits
+- SOC 2 Type II plus ISO 27001 and penetration testing rights
+- full audit rights and subprocessor approval
+- GDPR/CCPA DPA with EU data residency
+- source code escrow and work-for-hire on outputs
+- most-favored pricing and annual price increases capped
+- insurance with cyber liability COI
+- arbitration in New York and jury waiver
+- assignment restrictions on change of control
+- force majeure carveouts
+- non-solicit for 12 months
+- publicity / logo use without approval
+- late fees on invoices and net 30 payment terms
+- change orders for out-of-scope work
+
+We process customer content and PII. No PHI, PCI, or children's data.
+Governing law: Delaware.
+
+Can you help me figure out:
+1. Whether we should accept their paper with edits or push to our MSA/order form/DPA.
+2. Which terms are the biggest commercial risks.
+3. What preferred and fallback positions should be.
+I'm not looking for a law school memo.`;
+
+    const c = buildAgreementIntakeClarification(mega);
+    expect(c).not.toBeNull();
+    expect(c!.kind).toBe("counsel_prep");
+    const blob = `${c!.whatWeHeard.join(" ")} ${c!.suggestedRewrite}`;
+    for (const needle of [
+      /24-month/i,
+      /\$480k|480k/i,
+      /renewal|auto-?renew/i,
+      /liability/i,
+      /SLA|uptime/i,
+      /SOC\s*2/i,
+      /subprocessor/i,
+      /DPA|privacy|GDPR|CCPA/i,
+      /IP|ownership|escrow|work for hire/i,
+      /MFN|pricing|price/i,
+      /insurance/i,
+      /governing law|Delaware|arbitration|dispute/i,
+      /assignment|change of control/i,
+      /force majeure/i,
+      /publicity|logo/i,
+      /payment|late fee|net 30/i,
+      /PII|PHI|PCI/i,
+    ]) {
+      expect(blob, `missing spectrum needle ${needle}`).toMatch(needle);
+    }
+    expect(c!.suggestedRewrite).toMatch(/Draft a 24-month SaaS subscription agreement between/i);
+    // No account / identity coupling in salvage output.
+    expect(blob).not.toMatch(/Anthem|Blanchard|047b01af|Genesis Dog/i);
+  });
 });
 
 describe("evaluateIntentionalCreateDraftSubmit", () => {
