@@ -4,8 +4,6 @@
  * messy legal names, affiliates, governing-law variants, stale-session clear, and
  * clarification follow-up. Not limited to the prior bipartite NDA reproduction path.
  */
-import { readFileSync } from "node:fs";
-import { resolve } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   assessAgreementIntakeCapability,
@@ -40,8 +38,6 @@ import {
   clearPriorPaidAuthorityForFreshCreateSubmit,
   initializeNewAgreementSession,
 } from "../../launch/newAgreementSessionReset";
-
-const ROOT = resolve(__dirname);
 
 type FamilyCase = {
   family: string;
