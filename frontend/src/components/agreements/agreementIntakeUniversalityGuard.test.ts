@@ -32,6 +32,31 @@ describe("agreement intake universality (all LawDog accounts)", () => {
     expect(CLEAR_SRC).not.toMatch(ACCOUNT_SCOPED_RE);
   });
 
+  it("universal GTM party-authority spectrum suite is present (multi-family, not NDA-only)", () => {
+    const spectrum = readFileSync(
+      resolve(ROOT, "paidProUniversalGtmPartyAuthorityRegression.test.ts"),
+      "utf8",
+    );
+    expect(spectrum).toMatch(/family: "msa"/);
+    expect(spectrum).toMatch(/family: "saas_subscription"/);
+    expect(spectrum).toMatch(/family: "license"/);
+    expect(spectrum).toMatch(/family: "dpa"/);
+    expect(spectrum).toMatch(/family: "purchase"/);
+    expect(spectrum).toMatch(/family: "loi"/);
+    expect(spectrum).toMatch(/family: "amendment"/);
+    expect(spectrum).toMatch(/All affiliates will sign/);
+    expect(spectrum).toMatch(/will not sign/);
+    expect(spectrum).toMatch(/Governing law: New York/);
+    expect(spectrum).toMatch(/Governing law: Delaware/);
+    expect(spectrum).toMatch(/Governing law: California/);
+    expect(spectrum).toMatch(/Governing law: Texas/);
+    expect(spectrum).toMatch(/initializeNewAgreementSession/);
+    expect(spectrum).toMatch(/clarification follow-up/);
+    expect(spectrum).toMatch(/assertCanonicalPartySurfacesAgree/);
+    // Fixture entities only — no personal/account identifiers as case anchors.
+    expect(spectrum).not.toMatch(/\b(?:Anthem|Blanchard|047b01af)\b/);
+  });
+
   it("every INPUT generate handoff goes through intentional create prep", () => {
     for (const handoff of [
       "guided_input_generate",
