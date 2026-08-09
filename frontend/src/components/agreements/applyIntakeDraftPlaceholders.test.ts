@@ -61,6 +61,34 @@ describe("applyIntakeDraftPlaceholders", () => {
   });
 });
 
+describe("N-party ordered placeholder fill (2–4)", () => {
+  it("fills Party 1..3 Legal Name brackets from among intake", () => {
+    const intake =
+      "Draft a services agreement among River Alpha LLC, Harbor Beta Inc, and Summit Gamma LP " +
+      "for $22,000 over 90 days. Governing law: Colorado.";
+    const body =
+      "This Agreement is among [Party 1 Legal Name], [Party 2 Legal Name], and [Party 3 Legal Name]. " +
+      "Governing law: [State].";
+    const { text } = applyIntakeDraftPlaceholders({ text: body, intakeText: intake });
+    expect(text).toContain("River Alpha LLC");
+    expect(text).toContain("Harbor Beta Inc");
+    expect(text).toContain("Summit Gamma LP");
+    expect(text).toContain("Colorado");
+    expect(text).not.toMatch(/\[Party [123] Legal Name\]|\[State\]/i);
+  });
+
+  it("fills four Party N brackets and does not invent a fifth", () => {
+    const intake =
+      "Draft among One LLC, Two Inc, Three Corp, and Four LP for $40k over 6 months. Governing law: Oregon.";
+    const body =
+      "Parties: [Party 1 Legal Name]; [Party 2 Legal Name]; [Party 3 Legal Name]; [Party 4 Legal Name]; [Party 5 Legal Name].";
+    const { text } = applyIntakeDraftPlaceholders({ text: body, intakeText: intake });
+    expect(text).toContain("One LLC");
+    expect(text).toContain("Four LP");
+    expect(text).toMatch(/\[Party 5 Legal Name\]/);
+  });
+});
+
 describe("execution tail before exhibits", () => {
   it("rebuilds signature skeleton before EXHIBIT sections", async () => {
     const { ensurePaidProAcceptanceExecutionBlockInvariant } = await import(

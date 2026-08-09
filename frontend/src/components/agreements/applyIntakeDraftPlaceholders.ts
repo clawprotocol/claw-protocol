@@ -1,11 +1,12 @@
 /**
  * Universal intake→corpus placeholder fill for clarification-style brackets the model
- * often echoes ([Your Company Legal Name], [Customer Legal Name], [State], …).
+ * often echoes ([Your Company Legal Name], [Customer Legal Name], [Party N Legal Name], [State], …).
  * Product-wide: no account / tier branching. Never invents parties — only substitutes
- * when intake (or explicit party names) already resolve them.
+ * when intake (or explicit party names) already resolve them. Supports ordered N = 2–4.
  */
 
 import { extractBetweenPartyNameList } from "./partyBetweenParse";
+import { PAID_PRO_GTM_MAX_SIGNING_PARTIES } from "./paidProAuthorityLimits";
 import { isAuthoritativeLegalEntityName } from "./paidProPartyNamePreserve";
 import { isPlaceholderPartyName } from "./starterPartyLimits";
 
@@ -13,25 +14,36 @@ const GOV_LAW_RE =
   /\b(?:Governing\s+law|governed\s+by(?:\s+the\s+laws?\s+of)?|laws?\s+of)\s*[:\-]?\s*([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)?|[A-Z]{2})\b/;
 const GOV_LAW_LABEL_RE = /\bGoverning\s+law\s*:\s*([A-Za-z][A-Za-z\s]{1,40})/i;
 
-/** Party-0 (first between / “your company” / provider-as-vendor) bracket forms. */
-const PARTY0_BRACKET_RES: readonly RegExp[] = [
-  /\[\s*Your\s+Company\s+Legal\s+Name\s*\]/gi,
-  /\[\s*Your\s+Company\s+Name\s*\]/gi,
-  /\[\s*Provider\s+Legal\s+Name\s*\]/gi,
-  /\[\s*Company\s+Legal\s+Name\s*\]/gi,
-  /\[\s*Party\s+A\s+Legal\s+Name\s*\]/gi,
+/** Role / legacy brackets mapped by ordered slot index (0-based). */
+const ROLE_BRACKET_RES_BY_INDEX: ReadonlyArray<readonly RegExp[]> = [
+  [
+    /\[\s*Your\s+Company\s+Legal\s+Name\s*\]/gi,
+    /\[\s*Your\s+Company\s+Name\s*\]/gi,
+    /\[\s*Provider\s+Legal\s+Name\s*\]/gi,
+    /\[\s*Company\s+Legal\s+Name\s*\]/gi,
+    /\[\s*Party\s+A\s+Legal\s+Name\s*\]/gi,
+    /\[\s*Licensor\s+Legal\s+Name\s*\]/gi,
+    /\[\s*Lender\s+Legal\s+Name\s*\]/gi,
+    /\[\s*Landlord\s+Legal\s+Name\s*\]/gi,
+  ],
+  [
+    /\[\s*Customer\s+Legal\s+Name\s*\]/gi,
+    /\[\s*Customer\s+Name\s*\]/gi,
+    /\[\s*Client\s+Legal\s+Name\s*\]/gi,
+    /\[\s*Client(?:'s)?(?:\s+Full)?\s+Legal\s+Name\s*\]/gi,
+    /\[\s*Service\s+Provider\s+(?:Legal\s+)?Name\s*\]/gi,
+    /\[\s*Counterparty\s+(?:Legal\s+)?Name\s*\]/gi,
+    /\[\s*Party\s+B\s+Legal\s+Name\s*\]/gi,
+    /\[\s*Licensee\s+Legal\s+Name\s*\]/gi,
+    /\[\s*Contractor\s+Legal\s+Name\s*\]/gi,
+    /\[\s*Borrower\s+Legal\s+Name\s*\]/gi,
+    /\[\s*Tenant\s+Legal\s+Name\s*\]/gi,
+  ],
 ];
 
-/** Party-1 (counterparty / customer / service provider) bracket forms. */
-const PARTY1_BRACKET_RES: readonly RegExp[] = [
-  /\[\s*Customer\s+Legal\s+Name\s*\]/gi,
-  /\[\s*Customer\s+Name\s*\]/gi,
-  /\[\s*Client\s+Legal\s+Name\s*\]/gi,
-  /\[\s*Client(?:'s)?(?:\s+Full)?\s+Legal\s+Name\s*\]/gi,
-  /\[\s*Service\s+Provider\s+(?:Legal\s+)?Name\s*\]/gi,
-  /\[\s*Counterparty\s+(?:Legal\s+)?Name\s*\]/gi,
-  /\[\s*Party\s+B\s+Legal\s+Name\s*\]/gi,
-];
+function partyNLegalNameBracketRe(oneBased: number): RegExp {
+  return new RegExp(`\\[\\s*Party\\s+${oneBased}\\s+Legal\\s+Name\\s*\\]`, "gi");
+}
 
 export function extractGoverningLawFromIntake(raw: string | null | undefined): string | null {
   const text = String(raw || "");
@@ -69,19 +81,40 @@ function usablePartyName(name: string | null | undefined): string {
   return "";
 }
 
+function extractLabeledPartyNames(intakeText: string): string[] {
+  const labeled: string[] = [];
+  const lineRe = /(?:^|\n)\s*Party\s*[1-9]\s*[:\-]\s*([^\n]{2,80})/gim;
+  let m: RegExpExecArray | null;
+  while ((m = lineRe.exec(intakeText))) {
+    const name = usablePartyName((m[1] || "").replace(/[.;,]+$/, ""));
+    if (name) labeled.push(name);
+  }
+  return labeled;
+}
+
+/**
+ * Ordered signing-party names from intake / explicit list, length 2–4 when resolvable.
+ * Never invents Party 3/4 — returns only names present in intake or explicitNames.
+ */
 export function resolveIntakeDraftPartyNames(
   intakeText: string | null | undefined,
   explicitNames?: readonly string[] | null,
-): [string, string] | null {
+): string[] | null {
   const fromExplicit = (explicitNames || []).map(usablePartyName).filter(Boolean);
-  if (fromExplicit.length >= 2) return [fromExplicit[0]!, fromExplicit[1]!];
-
   const between = extractBetweenPartyNameList(String(intakeText || ""))
     .map(usablePartyName)
     .filter(Boolean);
-  if (between.length >= 2) return [between[0]!, between[1]!];
-
-  return null;
+  const labeled = extractLabeledPartyNames(String(intakeText || ""));
+  const ordered =
+    fromExplicit.length >= 2
+      ? fromExplicit
+      : between.length >= 2
+        ? between
+        : labeled.length >= 2
+          ? labeled
+          : [];
+  if (ordered.length < 2) return null;
+  return ordered.slice(0, PAID_PRO_GTM_MAX_SIGNING_PARTIES);
 }
 
 function replaceAll(re: RegExp, value: string, text: string): { text: string; hit: boolean } {
@@ -142,19 +175,21 @@ export function applyIntakeDraftPlaceholders(args: {
 
   const parties = resolveIntakeDraftPartyNames(args.intakeText, args.partyNames);
   if (parties) {
-    const [party0, party1] = parties;
-    for (const re of PARTY0_BRACKET_RES) {
-      const next = replaceAll(re, party0, out);
-      if (next.hit) {
-        out = next.text;
-        repairs.push(`intake_placeholder:party0:${re.source}`);
+    for (let i = 0; i < parties.length; i++) {
+      const name = parties[i]!;
+      const roleRes = ROLE_BRACKET_RES_BY_INDEX[i] || [];
+      for (const re of roleRes) {
+        const next = replaceAll(re, name, out);
+        if (next.hit) {
+          out = next.text;
+          repairs.push(`intake_placeholder:party${i}:${re.source}`);
+        }
       }
-    }
-    for (const re of PARTY1_BRACKET_RES) {
-      const next = replaceAll(re, party1, out);
-      if (next.hit) {
-        out = next.text;
-        repairs.push(`intake_placeholder:party1:${re.source}`);
+      const nRe = partyNLegalNameBracketRe(i + 1);
+      const nextN = replaceAll(nRe, name, out);
+      if (nextN.hit) {
+        out = nextN.text;
+        repairs.push(`intake_placeholder:party${i}:Party_${i + 1}_Legal_Name`);
       }
     }
   }
@@ -181,6 +216,7 @@ export function corpusHasClarificationStyleIdentityPlaceholders(text: string): b
     /\[\s*Customer\s+(?:Legal\s+)?Name\s*\]/i.test(t) ||
     /\[\s*Client\s+(?:Legal\s+)?Name\s*\]/i.test(t) ||
     /\[\s*Service\s+Provider\s+(?:Legal\s+)?Name\s*\]/i.test(t) ||
-    /\[\s*Provider\s+Legal\s+Name\s*\]/i.test(t)
+    /\[\s*Provider\s+Legal\s+Name\s*\]/i.test(t) ||
+    /\[\s*Party\s+[1-4]\s+Legal\s+Name\s*\]/i.test(t)
   );
 }

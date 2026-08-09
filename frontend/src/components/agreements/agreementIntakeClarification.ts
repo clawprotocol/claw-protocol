@@ -6,7 +6,15 @@
  * Goal: salvage as wide a spectrum of commercial material as practical from
  * overloaded negotiation notes (economics, term, paper choice, risk topics,
  * data scope, venue, renewal, insurance, etc.) into whatWeHeard + rewrite.
+ *
+ * Signing parties: default 2; expand suggested rewrites to 3–4 only when intake
+ * clearly lists/declares that many; cap at 4 (never invent Party 5).
  */
+
+import { extractBetweenPartyNameList } from "./partyBetweenParse";
+import { resolveDeclaredExplicitPartyCount } from "./partySlotIdentityNormalize";
+import { PAID_PRO_GTM_MAX_SIGNING_PARTIES } from "./paidProAuthorityLimits";
+import { isAuthoritativeLegalEntityName } from "./paidProPartyNamePreserve";
 
 export type AgreementIntakeClarificationKind =
   | "counsel_prep"
@@ -15,7 +23,9 @@ export type AgreementIntakeClarificationKind =
   | "needs_commercial_basics"
   | "ambiguous_request"
   /** Keyboard mash, spam, or long noise with almost no draftable commercial signal. */
-  | "low_signal";
+  | "low_signal"
+  /** 5+ signing entities / affiliates — GTM supports 2–4 only. */
+  | "party_count_cap";
 
 export type AgreementIntakeClarification = {
   kind: AgreementIntakeClarificationKind;
@@ -36,7 +46,7 @@ export type AgreementIntakeClarification = {
 const DRAFT_INTENT_RE =
   /\b(?:draft|create|write|prepare|generate)\b[\s\S]{0,80}\b(?:agreement|contract|msa|sow|nda|pilot\s+agreement|order\s+form|subscription\s+agreement|master\s+services)\b/i;
 
-const BETWEEN_PARTIES_RE = /\bbetween\b[\s\S]{0,160}\band\b/i;
+const BETWEEN_PARTIES_RE = /\b(?:between|among)\b[\s\S]{0,220}\band\b/i;
 
 const COUNSEL_PREP_SIGNAL_RE =
   /\b(?:help\s+me\s+(?:figure\s+out|thinking\s+through)|what\s+positions\s+i\s+should\s+take|negotiation\s+plan|fallback\s+(?:language|positions)|clause\s+edits|deal\s+(?:risks?|guidance)|lawyering\s+the\s+deal|not\s+looking\s+for\s+a\s+(?:law\s+school\s+)?memo|confirm\s+(?:internally|with\s+security|with\s+.{0,20}legal)\s+before|push\s+them\s+back|accept\s+their\s+.{0,40}(?:with\s+edits|paper)|which\s+terms\s+are\s+(?:actual\s+)?(?:deal\s+)?risks|AE[-\s]?friendly\s+note|redline\s+concepts|needs?\s+attorney\s+review|mark\s*it\s*up|counter[-\s]?proposal)\b/i;
@@ -109,6 +119,86 @@ const TOPIC_CHECKS: ReadonlyArray<[RegExp, string]> = [
 ];
 
 const MAX_TOPIC_CHIPS = 18;
+
+/** GTM product ceiling for clarification templates (2–4 signing parties). */
+export const CLARIFICATION_MAX_SIGNING_PARTIES = PAID_PRO_GTM_MAX_SIGNING_PARTIES;
+
+function looksLikeUsablePartyLabel(name: string): boolean {
+  const t = name.replace(/\s+/g, " ").trim();
+  if (t.length < 2) return false;
+  if (/^\[/.test(t) || /^Party\s+\d+$/i.test(t)) return false;
+  if (isAuthoritativeLegalEntityName(t)) return true;
+  const words = t.split(/\s+/);
+  return words.length >= 2 && words.length <= 8 && !/^(?:the|a|an)\b/i.test(t);
+}
+
+function countLabeledPartySlots(raw: string): number {
+  const re = /(?:^|\n)\s*Party\s*([1-9])\s*[:\-]/gim;
+  let max = 0;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(raw))) {
+    const n = Number(m[1]);
+    if (n > max) max = n;
+  }
+  return max;
+}
+
+/** Ordered legal-name candidates from between/among or Party N: lines (not capped). */
+export function extractListedSigningPartyNames(raw: string): string[] {
+  const between = extractBetweenPartyNameList(raw).filter(looksLikeUsablePartyLabel);
+  if (between.length >= 2) return between;
+  const labeled: string[] = [];
+  const lineRe = /(?:^|\n)\s*Party\s*[1-9]\s*[:\-]\s*([^\n]{2,80})/gim;
+  let m: RegExpExecArray | null;
+  while ((m = lineRe.exec(raw))) {
+    const name = (m[1] || "").replace(/\s+/g, " ").trim().replace(/[.;,]+$/, "");
+    if (looksLikeUsablePartyLabel(name)) labeled.push(name);
+  }
+  return labeled;
+}
+
+export type SigningPartyCountSignals = {
+  listed: number;
+  declared: number | null;
+  overCap: boolean;
+  /** Target for suggested rewrite: 2–4 */
+  suggestedCount: number;
+};
+
+export function resolveSigningPartyCountSignals(raw: string): SigningPartyCountSignals {
+  const text = String(raw || "");
+  const declaredBase = resolveDeclaredExplicitPartyCount(text);
+  const fiveDeclared = /\b(?:five|5)\s+parties\b|\bfive[\s-]party\b/i.test(text);
+  const declared = fiveDeclared ? 5 : declaredBase;
+  const listedNames = extractListedSigningPartyNames(text);
+  const labeledSlots = countLabeledPartySlots(text);
+  const listed = Math.max(listedNames.length, labeledSlots);
+  const affiliates =
+    /\ball\s+affiliates\s+will\s+sign\b|\bevery\s+affiliate\b|\bunlimited\s+parties\b/i.test(text);
+  const overCap = Boolean(affiliates || (declared != null && declared >= 5) || listed >= 5);
+  let suggestedCount = 2;
+  if (declared === 3 || declared === 4) suggestedCount = declared;
+  else if (listed >= 3 && listed <= 4) suggestedCount = listed;
+  else if (overCap) suggestedCount = CLARIFICATION_MAX_SIGNING_PARTIES;
+  suggestedCount = Math.min(Math.max(suggestedCount, 2), CLARIFICATION_MAX_SIGNING_PARTIES);
+  return { listed, declared, overCap, suggestedCount };
+}
+
+/** `between A and B` or `among A, B, and C` using known names or [Party N Legal Name]. */
+export function buildSigningPartyClause(
+  count: number,
+  knownNames?: readonly string[] | null,
+): string {
+  const n = Math.min(Math.max(count, 2), CLARIFICATION_MAX_SIGNING_PARTIES);
+  const slots = Array.from({ length: n }, (_, i) => {
+    const known = String(knownNames?.[i] || "").trim();
+    if (known && looksLikeUsablePartyLabel(known)) return known;
+    return `[Party ${i + 1} Legal Name]`;
+  });
+  if (n === 2) return `between ${slots[0]} and ${slots[1]}`;
+  const head = slots.slice(0, -1).join(", ");
+  return `among ${head}, and ${slots[n - 1]}`;
+}
 
 function extractMoneyPhrases(raw: string): string[] {
   const out: string[] = [];
@@ -368,6 +458,28 @@ function agreementTypePhrase(deal: DealType, term: string): string {
   }
 }
 
+function bipartiteDealPartyClause(deal: DealType): string {
+  switch (deal) {
+    case "saas_pilot":
+    case "saas_subscription":
+      return "between [Your Company Legal Name] and [Customer Legal Name]";
+    case "nda":
+      return "between [Party A Legal Name] and [Party B Legal Name]";
+    case "license":
+      return "between [Licensor Legal Name] and [Licensee Legal Name]";
+    case "employment":
+      return "between [Company Legal Name] and [Contractor Legal Name]";
+    case "loan":
+      return "between [Lender Legal Name] and [Borrower Legal Name]";
+    case "lease":
+      return "between [Landlord Legal Name] and [Tenant Legal Name]";
+    case "services":
+      return "between [Provider Legal Name] and [Client Legal Name]";
+    default:
+      return "between [Party 1 Legal Name] and [Party 2 Legal Name]";
+  }
+}
+
 function buildCommercialSuggestedRewrite(raw: string): string {
   const deal = dealTypeLabel(raw);
   const money = extractMoneyPhrases(raw);
@@ -381,6 +493,12 @@ function buildCommercialSuggestedRewrite(raw: string): string {
   const dataNotes = extractDataScopeNotes(raw);
   const expansion = extractExpansionNote(raw);
   const gov = extractGoverningLaw(raw) || "[State]";
+  const partySignals = resolveSigningPartyCountSignals(raw);
+  const knownNames = extractListedSigningPartyNames(raw).slice(0, CLARIFICATION_MAX_SIGNING_PARTIES);
+  const partyClause =
+    partySignals.suggestedCount >= 3
+      ? buildSigningPartyClause(partySignals.suggestedCount, knownNames)
+      : bipartiteDealPartyClause(deal);
 
   const topicLine =
     topics.length > 0
@@ -400,7 +518,7 @@ function buildCommercialSuggestedRewrite(raw: string): string {
         ? ` ${expansion}.`
         : "";
     return (
-      `Draft a ${typePhrase} between [Your Company Legal Name] and [Customer Legal Name] for ${fee}.` +
+      `Draft a ${typePhrase} ${partyClause} for ${fee}.` +
       convertBit +
       topicLine +
       dataLine +
@@ -410,7 +528,7 @@ function buildCommercialSuggestedRewrite(raw: string): string {
 
   if (deal === "saas_subscription") {
     return (
-      `Draft a ${typePhrase} between [Your Company Legal Name] and [Customer Legal Name] for approximately ${fee}.` +
+      `Draft a ${typePhrase} ${partyClause} for approximately ${fee}.` +
       expansionLine +
       topicLine +
       dataLine +
@@ -420,7 +538,7 @@ function buildCommercialSuggestedRewrite(raw: string): string {
 
   if (deal === "nda") {
     return (
-      `Draft a ${typePhrase} between [Party A Legal Name] and [Party B Legal Name] ` +
+      `Draft a ${typePhrase} ${partyClause} ` +
       `covering confidential business information for a ${term} term.` +
       topicLine +
       dataLine +
@@ -430,7 +548,7 @@ function buildCommercialSuggestedRewrite(raw: string): string {
 
   if (deal === "license") {
     return (
-      `Draft a ${typePhrase} between [Licensor Legal Name] and [Licensee Legal Name] for ${fee}.` +
+      `Draft a ${typePhrase} ${partyClause} for ${fee}.` +
       topicLine +
       dataLine +
       ` Governing law: ${gov}.`
@@ -439,7 +557,7 @@ function buildCommercialSuggestedRewrite(raw: string): string {
 
   if (deal === "employment") {
     return (
-      `Draft an ${typePhrase} between [Company Legal Name] and [Contractor Legal Name] for ${term} at ${fee}.` +
+      `Draft an ${typePhrase} ${partyClause} for ${term} at ${fee}.` +
       topicLine +
       ` Cover services, payment, IP ownership of work product, and termination. Governing law: ${gov}.`
     );
@@ -447,7 +565,7 @@ function buildCommercialSuggestedRewrite(raw: string): string {
 
   if (deal === "loan") {
     return (
-      `Draft a ${typePhrase} between [Lender Legal Name] and [Borrower Legal Name] for principal ${fee}, term ${term}.` +
+      `Draft a ${typePhrase} ${partyClause} for principal ${fee}, term ${term}.` +
       topicLine +
       ` Governing law: ${gov}.`
     );
@@ -455,7 +573,7 @@ function buildCommercialSuggestedRewrite(raw: string): string {
 
   if (deal === "lease") {
     return (
-      `Draft a ${typePhrase} between [Landlord Legal Name] and [Tenant Legal Name] at ${fee}.` +
+      `Draft a ${typePhrase} ${partyClause} at ${fee}.` +
       topicLine +
       ` Governing law: ${gov}.`
     );
@@ -463,7 +581,7 @@ function buildCommercialSuggestedRewrite(raw: string): string {
 
   if (deal === "services" || MONEY_RE.test(raw)) {
     return (
-      `Draft a ${typePhrase} between [Provider Legal Name] and [Client Legal Name] for ${term} at ${fee}.` +
+      `Draft a ${typePhrase} ${partyClause} for ${term} at ${fee}.` +
       topicLine +
       dataLine +
       ` Describe the services, payment schedule, ownership of deliverables, and termination. Governing law: ${gov}.`
@@ -471,7 +589,7 @@ function buildCommercialSuggestedRewrite(raw: string): string {
   }
 
   return (
-    `Draft a ${typePhrase} between [Party A Legal Name] and [Party B Legal Name] for [scope], ` +
+    `Draft a ${typePhrase} ${partyClause} for [scope], ` +
     `fee ${fee}, term ${term}.` +
     topicLine +
     dataLine +
@@ -597,7 +715,8 @@ export function buildAgreementIntakeClarification(rawIntake: string): AgreementI
   if (raw.length < 6) return null;
 
   const hasDraftIntent = DRAFT_INTENT_RE.test(raw);
-  const hasBetweenParties = BETWEEN_PARTIES_RE.test(raw);
+  const listedSigningNames = extractListedSigningPartyNames(raw);
+  const hasBetweenParties = BETWEEN_PARTIES_RE.test(raw) || listedSigningNames.length >= 2;
   const counselSignals = COUNSEL_PREP_SIGNAL_RE.test(raw);
   const numberedAdvisory = NUMBERED_ADVISORY_QUESTIONS_RE.test(raw);
   const hasMoney = MONEY_RE.test(raw);
@@ -605,14 +724,49 @@ export function buildAgreementIntakeClarification(rawIntake: string): AgreementI
   const deal = dealTypeLabel(raw);
   const signal = commercialSignalScore(raw);
   const lowSignal = looksLowSignalOrNonsensical(raw);
+  const partySignals = resolveSigningPartyCountSignals(raw);
 
   // Noise / gibberish / inundation with no salvageable deal — before other branches.
   if (lowSignal && !(counselSignals && (numberedAdvisory || raw.length >= 900))) {
     return lowSignalClarification(raw);
   }
 
+  // Too many signing parties for this GTM version (2–4) — before proceed.
+  if (partySignals.overCap) {
+    const known = extractListedSigningPartyNames(raw).slice(0, CLARIFICATION_MAX_SIGNING_PARTIES);
+    const heard: string[] = [];
+    if (partySignals.listed >= 5) {
+      heard.push(`About ${partySignals.listed} party-like names were detected — more than this version can sign.`);
+    }
+    if (partySignals.declared != null && partySignals.declared >= 5) {
+      heard.push(`The prompt asks for ${partySignals.declared} parties.`);
+    }
+    if (/\baffiliate/i.test(raw)) {
+      heard.push("Affiliate / open-ended signer language was detected.");
+    }
+    if (known.length) heard.push(`Keeping the first ${known.length} names in the suggested rewrite: ${known.join("; ")}.`);
+    heard.push("LawDog drafts executable agreements for 2–4 signing parties in this version.");
+    return {
+      kind: "party_count_cap",
+      title: "List 2–4 signing parties",
+      why:
+        "This version supports two to four legal entities that will execute the agreement. " +
+        "Pick the parties that will sign (in order) and leave affiliates or notice-only entities out of the party list.",
+      whatWeHeard: heard,
+      guidedSteps: [
+        "List 2–4 legal entity names that will sign, in order (e.g. “among A LLC, B Inc, and C LP”).",
+        "Keep fee, term, scope, and data-scope facts you already wrote.",
+        "Add extra affiliates later only if they are true contracting parties — or note them in the body without making them signers.",
+      ],
+      suggestedRewrite: buildCommercialSuggestedRewrite(raw),
+      primaryCtaLabel: "Use suggested draft request",
+      secondaryCtaLabel: "I’ll edit the party list",
+    };
+  }
+
   // Draft-shaped prompts proceed when there is a recognizable deal type and/or economics/term.
   // Bare “draft an agreement between A and B” without fee/term/type still needs basics.
+  // Do not ask about Party 3/4 when two clear parties already suffice.
   if (hasDraftIntent && hasBetweenParties) {
     const hasDealType = deal !== "generic";
     const hasTopics = extractTopicChips(raw).length > 0;
@@ -640,6 +794,10 @@ export function buildAgreementIntakeClarification(rawIntake: string): AgreementI
     const suggested = buildCommercialSuggestedRewrite(raw);
     const topicCount = extractTopicChips(raw).length;
     const dataNotes = extractDataScopeNotes(raw);
+    const partyHint =
+      partySignals.suggestedCount >= 3
+        ? `Name all ${partySignals.suggestedCount} legal entities that will sign (in order).`
+        : "Name both legal entities (your company and the other party). You can add a 3rd/4th signer later in signer setup if needed.";
     return {
       kind: "counsel_prep",
       title: "This reads like negotiation prep — not a draftable agreement yet",
@@ -648,7 +806,7 @@ export function buildAgreementIntakeClarification(rawIntake: string): AgreementI
         "It does not produce attorney negotiation memos or markups of the other side’s paper.",
       whatWeHeard: heardFromCounselPrep(raw),
       guidedSteps: [
-        "Name both legal entities (your company and the other party).",
+        partyHint,
         `Say you want a draft (not advice) — e.g. “${draftExampleForDeal(deal)}”.`,
         topicCount > 0
           ? "Keep the commercial facts already listed below (fee, term, and the topics we extracted)."
@@ -671,7 +829,7 @@ export function buildAgreementIntakeClarification(rawIntake: string): AgreementI
       why: "We need named parties and what the agreement is for before LawDog can build a draft.",
       whatWeHeard: raw.length ? [`You wrote: “${raw.slice(0, 120)}${raw.length > 120 ? "…" : ""}”`] : [],
       guidedSteps: [
-        "Name Party A and Party B (legal names).",
+        "Name the legal entities that will sign (usually two; up to four).",
         "Say the agreement type (services, NDA, pilot, SaaS, consulting, etc.).",
         "Add fee and term if you know them.",
         "Optional: note data that is in or out of scope.",
@@ -704,14 +862,24 @@ export function buildAgreementIntakeClarification(rawIntake: string): AgreementI
     const topics = extractTopicChips(raw);
     if (topics.length) heard.push(`Topics detected (${topics.length}): ${topics.slice(0, 12).join("; ")}.`);
     for (const note of extractDataScopeNotes(raw)) heard.push(`${note}.`);
-    heard.push("Legal party names are missing or not in a “between A and B” form.");
+    if (partySignals.declared === 3 || partySignals.declared === 4) {
+      heard.push(`You mentioned a ${partySignals.declared}-party deal — list those ${partySignals.declared} legal names.`);
+    } else if (partySignals.listed === 1) {
+      heard.push("Only one party-like name was detected; agreements need at least two signers.");
+    } else {
+      heard.push("Legal party names are missing or not in a “between A and B” / “among A, B, and C” form.");
+    }
+    const partyStep =
+      partySignals.suggestedCount >= 3
+        ? `Add: “${buildSigningPartyClause(partySignals.suggestedCount)}”.`
+        : "Add: “between [Your Company LLC] and [Customer Inc.].” (Add a 3rd/4th party only if they will sign.)";
     return {
       kind: "missing_named_parties",
       title: "Name the parties to continue",
-      why: "We can see commercial details, but not clear legal names for both sides.",
+      why: "We can see commercial details, but not clear legal names for every signing party (2–4).",
       whatWeHeard: heard,
       guidedSteps: [
-        "Add: “between [Your Company LLC] and [Customer Inc.].”",
+        partyStep,
         "Keep the fee, term, scope, and data-scope facts you already wrote.",
         "Then tap Create draft again.",
       ],
@@ -762,7 +930,7 @@ export function buildAgreementIntakeClarification(rawIntake: string): AgreementI
           : []),
       ],
       guidedSteps: [
-        "Lead with: “Draft a [type] agreement between [A] and [B]…”.",
+        "Lead with: “Draft a [type] agreement between [A] and [B]…” (or among A, B, and C for 3–4 signers).",
         "Pull only the deal facts you want in the contract (drop advice questions and filler).",
         "Keep data-scope exclusions if you stated them (PHI, PCI, children’s data, etc.).",
         "Or use the suggested rewrite and fill in the bracketed names.",

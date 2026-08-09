@@ -16,6 +16,7 @@ import {
   isSignerSetupBeyondGeneratedPartyCount,
   removeAddedSignerPartyState,
   resolveGeneratedAgreementPartyCount,
+  resolveInitialSignerSetupPartyCount,
   resolveSignerSetupUiPartyCount,
 } from "./paidProNPartySignerSetup";
 import {
@@ -74,16 +75,51 @@ describe("paidProNPartySignerSetup", () => {
   });
 
   it("two-party intake authority blocks UI inflation without explicit multi-party", () => {
+    // Bipartite intake + only two draft identities stays at 2 even if UI/raw count asks for 3.
     expect(
       resolveAuthoritativePartySlotCount({
         intakeText: "between Alpha LLC and Beta Inc",
-        draftPartyNames: ["Alpha LLC", "Beta Inc", "Gamma Corp"],
+        draftPartyNames: ["Alpha LLC", "Beta Inc"],
         rawPartyCount: 3,
         userExpandedPartyCount: 3,
       }),
     ).toBe(2);
     expect(canAddAnotherSignerParty(2)).toBe(true);
+    expect(canAddAnotherSignerParty(3)).toBe(true);
+    // GTM UX ceiling is 4 — Add party must not open a 5th slot.
+    expect(canAddAnotherSignerParty(4)).toBe(false);
     expect(canAddAnotherSignerParty(PAID_PRO_SIGNER_SETUP_MAX_UI_PARTIES)).toBe(false);
+  });
+
+  it("initial signer setup opens at intake/generated count (min 2), not max UI slots", () => {
+    expect(
+      resolveInitialSignerSetupPartyCount({
+        generatedPartyCount: 2,
+        intakeText: "Draft a services agreement between Alpha LLC and Beta Inc for $5k.",
+        draftParties: [{ name: "Alpha LLC" }, { name: "Beta Inc" }],
+      }),
+    ).toBe(2);
+    expect(
+      resolveInitialSignerSetupPartyCount({
+        generatedPartyCount: 3,
+        intakeText:
+          "Draft a services agreement among Alpha LLC, Beta Inc, and Gamma Corp for $10k for 6 months.",
+        draftParties: [{ name: "Alpha LLC" }, { name: "Beta Inc" }, { name: "Gamma Corp" }],
+      }),
+    ).toBe(3);
+    expect(
+      resolveInitialSignerSetupPartyCount({
+        generatedPartyCount: 5,
+        intakeText: "five parties among A LLC, B Inc, C LP, D Corp, and E Ltd",
+        draftParties: [
+          { name: "A LLC" },
+          { name: "B Inc" },
+          { name: "C LP" },
+          { name: "D Corp" },
+          { name: "E Ltd" },
+        ],
+      }),
+    ).toBe(4);
   });
 
   it("builds four legal parties from UI state", () => {

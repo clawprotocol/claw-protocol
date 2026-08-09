@@ -1,4 +1,9 @@
-import { PAID_PRO_AUTHORITY_MAX_PARTIES } from "./paidProAuthorityLimits";
+import {
+  PAID_PRO_AUTHORITY_MAX_PARTIES,
+  PAID_PRO_GTM_MAX_SIGNING_PARTIES,
+} from "./paidProAuthorityLimits";
+
+export { PAID_PRO_GTM_MAX_SIGNING_PARTIES } from "./paidProAuthorityLimits";
 import { countRealParties } from "./starterPartyLimits";
 import {
   consumeAuthoritativeSignerCount,
@@ -224,8 +229,26 @@ export function resolveSignerSetupUiPartyCount(
   );
 }
 
+/**
+ * Add-party expands only by explicit user action, up to the GTM signing ceiling (2–4).
+ * Does not jump to authority max slots on first review.
+ */
 export function canAddAnotherSignerParty(signerSetupUiPartyCount: number): boolean {
-  return signerSetupUiPartyCount < PAID_PRO_SIGNER_SETUP_MAX_UI_PARTIES;
+  return signerSetupUiPartyCount < PAID_PRO_GTM_MAX_SIGNING_PARTIES;
+}
+
+/** Initial / synced signer-setup row count from intake+draft — min 2, max GTM 4. */
+export function resolveInitialSignerSetupPartyCount(args: {
+  generatedPartyCount: number;
+  intakeText?: string | null;
+  draftParties?: readonly { name?: string | null }[];
+}): number {
+  const generated = resolveGeneratedAgreementPartyCount({
+    draftParties: args.draftParties,
+    intakeText: args.intakeText,
+  });
+  const n = Math.max(args.generatedPartyCount, generated, 2);
+  return Math.min(n, PAID_PRO_GTM_MAX_SIGNING_PARTIES);
 }
 
 export function resolveLegalEntityNameForPartyIndex(

@@ -100,4 +100,23 @@ describe("applyIntakeDraftPlaceholders universality", () => {
     expect(text).toMatch(/\[State\]/);
     expect(repairs.filter((r) => r.startsWith("intake_placeholder:party"))).toHaveLength(0);
   });
+
+  it("fills ordered 3- and 4-party Party N brackets without account branching", () => {
+    const three = applyIntakeDraftPlaceholders({
+      text: "Among [Party 1 Legal Name], [Party 2 Legal Name], and [Party 3 Legal Name].",
+      intakeText:
+        "Draft a services agreement among Cedar Ridge LLC, Maple Grove Inc, and Pine Valley LP for $9k over 45 days.",
+    });
+    expect(three.text).toBe("Among Cedar Ridge LLC, Maple Grove Inc, and Pine Valley LP.");
+
+    const four = applyIntakeDraftPlaceholders({
+      text:
+        "Among [Party 1 Legal Name], [Party 2 Legal Name], [Party 3 Legal Name], and [Party 4 Legal Name].",
+      intakeText:
+        "Draft among Oak LLC, Birch Inc, Elm Corp, and Willow LP for $15k over 60 days.",
+    });
+    expect(four.text).toContain("Oak LLC");
+    expect(four.text).toContain("Willow LP");
+    expect(four.text).not.toMatch(/\[Party [1-4] Legal Name\]/);
+  });
 });

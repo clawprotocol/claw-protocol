@@ -251,3 +251,92 @@ describe("evaluateIntentionalCreateDraftSubmit", () => {
     expect(decision.clarification.suggestedRewrite).toBeTruthy();
   });
 });
+
+describe("2–4 party edge spectrum (product-wide)", () => {
+  it("defaults sparse prompts to a 2-party starter rewrite", () => {
+    const decision = assessAgreementIntakeCapability("need an NDA");
+    expect(decision.ok).toBe(false);
+    if (decision.ok) return;
+    expect(decision.clarification.suggestedRewrite).toMatch(/between .+ and .+/i);
+    expect(decision.clarification.suggestedRewrite).not.toMatch(/among/i);
+    expect(decision.clarification.suggestedRewrite).not.toMatch(/Party 5/i);
+  });
+
+  it("counsel-prep rewrite stays bipartite until more parties are named", () => {
+    const c = buildAgreementIntakeClarification(COUNSEL_PREP_ENTERPRISE_SAAS);
+    expect(c?.kind).toBe("counsel_prep");
+    expect(c?.suggestedRewrite).toMatch(/between \[Your Company Legal Name\] and \[Customer Legal Name\]/i);
+    expect(c?.suggestedRewrite).not.toMatch(/Party 3|among/i);
+  });
+
+  it("three-party labeled commercial prompt suggests among A, B, and C brackets", () => {
+    const decision = assessAgreementIntakeCapability(
+      "We need a three-party services agreement for $25k over 90 days covering integration work. " +
+        "Include liability caps and confidentiality.",
+    );
+    expect(decision.ok).toBe(false);
+    if (decision.ok) return;
+    expect(decision.code).toBe("missing_named_parties");
+    expect(decision.clarification.suggestedRewrite).toMatch(
+      /among \[Party 1 Legal Name\], \[Party 2 Legal Name\], and \[Party 3 Legal Name\]/i,
+    );
+    expect(decision.clarification.suggestedRewrite).not.toMatch(/Party 5/i);
+  });
+
+  it("allows a clear 3-party among draft with fee and term", () => {
+    const decision = assessAgreementIntakeCapability(
+      "Draft a 6-month services agreement among Alpha Services LLC, Beta Operations Inc, and Gamma Partners LP " +
+        "for $40,000 covering joint integration work. Include IP ownership and termination for convenience.",
+    );
+    expect(decision.ok).toBe(true);
+  });
+
+  it("four-party among draft proceeds; rewrite helpers use four brackets when parties missing", () => {
+    const ok = assessAgreementIntakeCapability(
+      "Draft a four-party services agreement among Alpha LLC, Beta Inc, Gamma Corp, and Delta LP " +
+        "for $80k over 12 months for shared platform operations.",
+    );
+    expect(ok.ok).toBe(true);
+
+    const missing = assessAgreementIntakeCapability(
+      "Need a four-party SaaS subscription for about $120k ACV for 12 months with SOC 2 and liability caps.",
+    );
+    expect(missing.ok).toBe(false);
+    if (missing.ok) return;
+    expect(missing.code).toBe("missing_named_parties");
+    expect(missing.clarification.suggestedRewrite).toMatch(
+      /among \[Party 1 Legal Name\], \[Party 2 Legal Name\], \[Party 3 Legal Name\], and \[Party 4 Legal Name\]/i,
+    );
+  });
+
+  it("caps 5+ entity / affiliate prompts at 2–4 signing parties", () => {
+    const five = assessAgreementIntakeCapability(
+      "Draft a services agreement among Alpha LLC, Beta Inc, Gamma Corp, Delta LP, and Echo Holdings LLC " +
+        "for $50k over 6 months covering shared ops. Include confidentiality.",
+    );
+    expect(five.ok).toBe(false);
+    if (five.ok) return;
+    expect(five.code).toBe("party_count_cap");
+    expect(five.clarification.title).toMatch(/2–4|2-4/i);
+    expect(five.clarification.suggestedRewrite).toMatch(/among /i);
+    expect(five.clarification.suggestedRewrite).toMatch(/Alpha LLC/);
+    expect(five.clarification.suggestedRewrite).toMatch(/Delta LP/);
+    expect(five.clarification.suggestedRewrite).not.toMatch(/Echo Holdings|Party 5/i);
+
+    const affiliates = assessAgreementIntakeCapability(
+      "Draft a SaaS subscription between Northstar LLC and Contoso Inc for $100k ACV. All affiliates will sign. Term 12 months.",
+    );
+    expect(affiliates.ok).toBe(false);
+    if (affiliates.ok) return;
+    expect(affiliates.code).toBe("party_count_cap");
+  });
+
+  it("does not account-branch on party-count salvage output", () => {
+    const c = buildAgreementIntakeClarification(
+      "Draft among A1 LLC, B2 Inc, C3 LP, D4 Corp, and E5 Ltd for $10k services over 30 days.",
+    );
+    expect(c?.kind).toBe("party_count_cap");
+    const blob = `${c?.whatWeHeard.join(" ")} ${c?.suggestedRewrite}`;
+    expect(blob).not.toMatch(/Anthem|Blanchard|047b01af|Genesis Dog|orgId|userId/i);
+  });
+});

@@ -1414,6 +1414,7 @@ import {
   formatSignerSetupBeyondGeneratedWarningTitle,
   removeAddedSignerPartyState,
   resolveGeneratedAgreementPartyCount,
+  resolveInitialSignerSetupPartyCount,
   resolveSignerSetupUiPartyCount,
 } from "./paidProNPartySignerSetup";
 import { resolveAuthoritativeSignerCount } from "./signerCountAuthority";
@@ -4356,7 +4357,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     if (authoritative < signerSetupUiPartyCountRef.current) {
       setSignerSetupUiPartyCount(authoritative);
     } else if (generatedCount > signerSetupUiPartyCountRef.current) {
-      setSignerSetupUiPartyCount(Math.min(generatedCount, PAID_PRO_SIGNER_SETUP_MAX_UI_PARTIES));
+      // Expand only to intake/generated count, capped at GTM 2–4 — never jump to max UI slots.
+      setSignerSetupUiPartyCount(
+        resolveInitialSignerSetupPartyCount({
+          generatedPartyCount: generatedCount,
+          intakeText,
+          draftParties: draft?.parties,
+        }),
+      );
     }
     if (draft?.creator_coordinator_only) {
       setCreatorCoordinatorOnly(true);
