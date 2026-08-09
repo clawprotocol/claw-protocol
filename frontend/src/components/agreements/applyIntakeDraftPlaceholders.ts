@@ -7,6 +7,7 @@
 
 import { extractBetweenPartyNameList } from "./partyBetweenParse";
 import { PAID_PRO_GTM_MAX_SIGNING_PARTIES } from "./paidProAuthorityLimits";
+import { partyLegalNamesMatch } from "./paidProAcceptedCorpusPartyRoles";
 import { isAuthoritativeLegalEntityName } from "./paidProPartyNamePreserve";
 import { isPlaceholderPartyName } from "./starterPartyLimits";
 
@@ -160,6 +161,57 @@ export type ApplyIntakeDraftPlaceholdersResult = {
   repairs: string[];
 };
 
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * When OpenAI ships demo/wrong opening identities that do not match the intake
+ * between/among names, overlay intake names onto the corpus.
+ * Prose stays the oracle; clear legal names stay intake-authoritative.
+ */
+function overlayIntakePartyIdentitiesOntoCorpus(
+  text: string,
+  intakeParties: readonly string[],
+): { text: string; repairs: string[] } {
+  if (intakeParties.length < 2) return { text, repairs: [] };
+  const opening = extractBetweenPartyNameList(text.slice(0, 1400))
+    .map(usablePartyName)
+    .filter(Boolean);
+  if (opening.length < 2) return { text, repairs: [] };
+
+  const n = Math.min(intakeParties.length, opening.length, PAID_PRO_GTM_MAX_SIGNING_PARTIES);
+  const intakeSlice = intakeParties.slice(0, n);
+  const openingSlice = opening.slice(0, n);
+  const alreadyAligned = openingSlice.every((name, i) =>
+    partyLegalNamesMatch(name, intakeSlice[i]!) ||
+    intakeSlice.some((intake) => partyLegalNamesMatch(name, intake)),
+  );
+  if (alreadyAligned) return { text, repairs: [] };
+
+  // Only overlay when none of the opening entities appear in intake (true wrong demo set).
+  const openingForeign = openingSlice.every(
+    (name) => !intakeSlice.some((intake) => partyLegalNamesMatch(name, intake)),
+  );
+  if (!openingForeign) return { text, repairs: [] };
+
+  let out = text;
+  const repairs: string[] = [];
+  // Replace longer names first so multi-word entities win over shorter prefixes.
+  const pairs = openingSlice
+    .map((from, i) => ({ from, to: intakeSlice[i]! }))
+    .filter((p) => p.from && p.to && !partyLegalNamesMatch(p.from, p.to))
+    .sort((a, b) => b.from.length - a.from.length);
+  for (const { from, to } of pairs) {
+    const re = new RegExp(`(?<![\\w])${escapeRegExp(from)}(?![\\w])`, "g");
+    if (!re.test(out)) continue;
+    re.lastIndex = 0;
+    out = out.replace(re, to);
+    repairs.push(`intake_identity_overlay:${from}→${to}`);
+  }
+  return { text: out, repairs };
+}
+
 /**
  * Fill clarification-style identity / governing-law brackets from intake facts.
  * Safe to run early on every Pro acceptance / display path.
@@ -192,6 +244,9 @@ export function applyIntakeDraftPlaceholders(args: {
         repairs.push(`intake_placeholder:party${i}:Party_${i + 1}_Legal_Name`);
       }
     }
+    const overlay = overlayIntakePartyIdentitiesOntoCorpus(out, parties);
+    out = overlay.text;
+    repairs.push(...overlay.repairs);
   }
 
   const gov = extractGoverningLawFromIntake(args.intakeText);

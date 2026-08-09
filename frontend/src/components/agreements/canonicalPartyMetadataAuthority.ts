@@ -328,6 +328,11 @@ function mergeRecordFields(
   ) => {
     const next = incoming[field].trim();
     if (!next) return;
+    // Intake legal names are identity authority — overwrite stale prior-deal entities.
+    if (field === "partyLegalName" && incoming.source === "structured_intake") {
+      target[field] = next;
+      return;
+    }
     if (userEdited || !target[field].trim()) target[field] = next;
   };
   assign("partyLegalName");
@@ -347,8 +352,9 @@ function mergeRecordFields(
     }
   }
   if (userEdited) target.source = incoming.source;
-  else if (incoming.source === "structured_intake" && target.source === "generic_placeholder") {
-    target.source = incoming.source;
+  else if (incoming.source === "structured_intake") {
+    // New intake identity/count is authoritative even when prior slots were non-placeholder.
+    target.source = "structured_intake";
   }
 }
 
@@ -376,14 +382,18 @@ function preservePartyIdsOnMerge(
   const byEntity = new Map(
     existing.parties.filter((p) => p.partyLegalName.trim()).map((p) => [normEntityKey(p.partyLegalName), p]),
   );
-  const count = Math.max(existing.parties.length, incomingParties.length);
+  // Incoming authority wins on length — never keep stale Party 3–5 empty slots from a prior deal.
+  const count =
+    incomingParties.length >= 2
+      ? incomingParties.length
+      : Math.max(existing.parties.length, incomingParties.length);
   const out: CanonicalPartyMetadataRecord[] = [];
   for (let i = 0; i < count; i += 1) {
     const inc = incomingParties[i];
     const matched =
       (inc?.partyId && byId.get(inc.partyId)) ||
       (inc?.partyLegalName.trim() && byEntity.get(normEntityKey(inc.partyLegalName))) ||
-      existing.parties[i];
+      (inc ? existing.parties[i] : undefined);
     const base: CanonicalPartyMetadataRecord = matched
       ? { ...matched, partyIndex: i }
       : {
@@ -585,14 +595,15 @@ export function buildCanonicalPartyMetadataBundle(args: {
     legalEntities: args.legalEntities,
     intakeText: args.intakeText,
   });
+  // Intake-resolved legal entities fix the slot count. Do not inflate from a prior
+  // session's empty Party 3–5 rows in existing/consumed/ui lists.
   const partyCount =
     legalEntities.length >= 2
       ? legalEntities.length
       : Math.max(
           legalEntities.length,
-          args.uiParties?.length ?? 0,
-          args.consumedAuthority?.parties.length ?? 0,
-          args.existing?.parties.length ?? 0,
+          args.uiParties?.filter((p) => p.partyLegalName.trim().length >= 2).length ?? 0,
+          args.consumedAuthority?.parties.filter((p) => p.partyLegalName.trim().length >= 2).length ?? 0,
           1,
         );
   const intakeAligned = alignIntakeSignerMetadataToLegalEntities(args.intakeText, legalEntities);
@@ -669,7 +680,8 @@ export function buildCanonicalPartyMetadataBundle(args: {
   if (hasUiSignal) source = uiSource;
   else if (hasIntakeSignal) source = "structured_intake";
   else if (hasConsumedSignal) source = "freeze_snapshot";
-  const parties = args.existing ? preservePartyIdsOnMerge(args.existing, merged) : merged;
+  const mergedWithIds = args.existing ? preservePartyIdsOnMerge(args.existing, merged) : merged;
+  const parties = partyCount >= 2 ? mergedWithIds.slice(0, partyCount) : mergedWithIds;
   const bundleId = args.existing?.bundleId ?? createBundleId();
   return {
     bundleId,

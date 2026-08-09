@@ -34,6 +34,10 @@ import { clearPaidProPostAcceptanceValidatorCache } from "../components/agreemen
 import { clearPaidProPremiumRecipientHandoffReadGate } from "../components/agreements/paidProPremiumRecipientHandoffReadGate";
 import { clearPremiumPartyNamesHandoff } from "../components/agreements/premiumPartyNamesHandoff";
 import {
+  CANONICAL_PARTY_METADATA_SESSION_KEY,
+  clearCanonicalPartyMetadata,
+} from "../components/agreements/canonicalPartyMetadataAuthority";
+import {
   bumpAgreementGenerationIdForFreshSession,
   clearCurrentSessionProEntitlementMarkers,
 } from "../components/agreements/paidProSessionEligibility";
@@ -70,6 +74,7 @@ const SESSION_PREFIXES_TO_CLEAR = [
   "claw_authoritative_agreement_version_v1",
   "claw_hero_intake_prefill_v1",
   "claw_dashboard_resume_signer_setup_v1",
+  CANONICAL_PARTY_METADATA_SESSION_KEY,
   "lawdog_entry_context",
   "lawdog_focus_create_intake",
   REVIEW_DELIVERY_HANDOFF_NOTICE_KEY,
@@ -125,6 +130,8 @@ export function clearStalePaidProAuthorityForFreshFreeStarter(opts?: {
   clearPaidProPremiumRecipientHandoffReadGate();
   clearPaidProSourceOfTruth();
   clearConsumedPaidProSignerMetadataAuthority();
+  // Stale 5-slot canonical metadata was re-projecting Party 3–5 onto fresh 2-party creates.
+  clearCanonicalPartyMetadata();
   clearAuthoritativeSigningSnapshot();
   clearPaidProPinnedSignerAppliedCorpus();
   clearPaidProReviewRenderFusedRepairCache();
@@ -177,6 +184,7 @@ export function initializeNewAgreementSession(opts?: {
   clearedInMemoryModules.push(
     "paidProSourceOfTruth",
     "paidProSignerMetadataAuthority",
+    "canonicalPartyMetadata",
     "authoritativeSigningSnapshot",
     "paidProPinnedSignerAppliedCorpus",
     "paidProReviewRenderFusedRepairCache",

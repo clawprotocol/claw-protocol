@@ -1607,15 +1607,30 @@ export function repairFusedNoticesHeadingToPriorClause(corpus: string): {
 } {
   const repairs: string[] = [];
   let text = (corpus || "").replace(/\r\n/g, "\n");
-  const fusedRe = /([a-z])(\.\d+(?:\.\d+)?\.\s+)Notices\b/gi;
-  if (!fusedRe.test(text)) return { text: corpus, repairs: [] };
-  fusedRe.lastIndex = 0;
-  text = text.replace(fusedRe, (_match, priorLetter: string, sectionPart: string) => {
-    const numMatch = sectionPart.match(/\.(\d+(?:\.\d+)?)\.\s+/);
-    const num = numMatch?.[1] ?? "11";
-    repairs.push("notice:defuse_fused_notices_heading");
-    return `${priorLetter}\n\n${num}. NOTICES`;
-  });
+  // "…Agreement.12. Notices" / "…letter.12. Notices"
+  const fusedDotRe = /([a-z])(\.\d+(?:\.\d+)?\.\s+)Notices\b/gi;
+  // "…Agreement12. Notices" (no separating punctuation before the section number)
+  const fusedBareRe = /([A-Za-z])(\d+\.\s+)Notices\b/g;
+  const hadDot = fusedDotRe.test(text);
+  fusedDotRe.lastIndex = 0;
+  const hadBare = fusedBareRe.test(text);
+  fusedBareRe.lastIndex = 0;
+  if (!hadDot && !hadBare) return { text: corpus, repairs: [] };
+  if (hadDot) {
+    text = text.replace(fusedDotRe, (_match, priorLetter: string, sectionPart: string) => {
+      const numMatch = sectionPart.match(/\.(\d+(?:\.\d+)?)\.\s+/);
+      const num = numMatch?.[1] ?? "11";
+      repairs.push("notice:defuse_fused_notices_heading");
+      return `${priorLetter}\n\n${num}. NOTICES`;
+    });
+  }
+  if (hadBare) {
+    text = text.replace(fusedBareRe, (_match, priorLetter: string, sectionPart: string) => {
+      const num = sectionPart.match(/^(\d+)/)?.[1] ?? "12";
+      repairs.push("notice:defuse_fused_notices_heading_bare");
+      return `${priorLetter}\n\n${num}. NOTICES`;
+    });
+  }
   return { text, repairs };
 }
 
@@ -1981,7 +1996,13 @@ export function ensureOperativeNoticeStanzaCountAuthorityAtFreeze(
     .map((s) => s.trim())
     .filter((stanza) => stanza && noticeStanzaHasLegalEntityLine(stanza)).length;
 
-  if (regionCount >= authorityParties.length && completeCount >= authorityParties.length) {
+  // Excess Party 3–5 stanzas on a 2-party deal must always trim — "enough complete" is not enough.
+  if (regionCount > authorityParties.length) {
+    const trimmed = trimOperativeNoticeStanzasToPartyCount(corpus, authorityParties.length);
+    if (trimmed.repairs.length > 0) {
+      return { text: trimmed.text, repairs: trimmed.repairs };
+    }
+  } else if (regionCount === authorityParties.length && completeCount >= authorityParties.length) {
     return { text: corpus, repairs: [] };
   }
 
@@ -2024,12 +2045,29 @@ export function repairIncompleteIfToNoticeStanzas(
   if (noticesIdxEarly >= 0) {
     const witnessIdxEarly = resolveAuthoritativeWitnessIndex(text);
     const noticesEndEarly = witnessIdxEarly >= 0 ? witnessIdxEarly : text.length;
-    const fullNoticesRegionEarly = text.slice(noticesIdxEarly, noticesEndEarly);
-    const existingStanzasEarly = fullNoticesRegionEarly
+    let fullNoticesRegionEarly = text.slice(noticesIdxEarly, noticesEndEarly);
+    let existingStanzasEarly = fullNoticesRegionEarly
       .split(/\n(?=If to\s+)/i)
       .slice(1)
       .map((s) => s.trim())
       .filter(Boolean);
+    if (existingStanzasEarly.length > authorityParties.length) {
+      const trimmedEarly = trimOperativeNoticeStanzasToPartyCount(text, authorityParties.length);
+      if (trimmedEarly.repairs.length > 0) {
+        repairs.push(...trimmedEarly.repairs);
+        text = trimmedEarly.text;
+        const noticesIdx = findNoticesSectionStart(text);
+        const witnessIdx = resolveAuthoritativeWitnessIndex(text);
+        if (noticesIdx >= 0) {
+          fullNoticesRegionEarly = text.slice(noticesIdx, witnessIdx >= 0 ? witnessIdx : text.length);
+          existingStanzasEarly = fullNoticesRegionEarly
+            .split(/\n(?=If to\s+)/i)
+            .slice(1)
+            .map((s) => s.trim())
+            .filter(Boolean);
+        }
+      }
+    }
     const consumedEarly = new Set<number>();
     const manifestRepairRequired = noticeAuthorityRequiresManifestRepair(
       existingStanzasEarly,
@@ -2062,11 +2100,10 @@ export function repairIncompleteIfToNoticeStanzas(
     } else {
       allCompleteEarly = false;
     }
-    const noticesRegionEarly = text.slice(noticesIdxEarly, noticesEndEarly);
     if (
       allCompleteEarly &&
-      !NOTICE_PLACEHOLDER_TOKEN_RE.test(noticesRegionEarly) &&
-      !noticesRegionHasExecutionPollution(noticesRegionEarly) &&
+      !NOTICE_PLACEHOLDER_TOKEN_RE.test(fullNoticesRegionEarly) &&
+      !noticesRegionHasExecutionPollution(fullNoticesRegionEarly) &&
       !hasInlineMalformedNoticeStanzas(fullNoticesRegionEarly)
     ) {
       const addressRepair = repairNoticeStanzaAddressBoundariesInCorpus(text);
@@ -2248,7 +2285,9 @@ export function repairIncompleteIfToNoticeStanzas(
     text = dedupedHeadings.text;
   }
   const trimmed = trimOperativeNoticeStanzasToPartyCount(text, authorityParties.length);
-  if (trimmed.repairs.length > 0 && trimmed.text.length >= text.length - 100) {
+  // Always keep excess-stanza trims (Party 3–5 on a 2-party deal). The old length-100
+  // guard discarded those trims when three placeholder stanzas were removed.
+  if (trimmed.repairs.length > 0) {
     repairs.push(...trimmed.repairs);
     text = trimmed.text;
   }
