@@ -19,12 +19,16 @@ import {
 describe("Pro delivery track UI wiring", () => {
   it("AgreementBuilderIntake exposes canonical decision chrome on Pro review-ready state", () => {
     const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
+    const chrome = readFileSync(join(__dirname, "paidProForcedFirstReviewChrome.tsx"), "utf8");
     const shell = readFileSync(join(__dirname, "../../launch/simpleProduct/simpleCreatePaidProReviewShell.ts"), "utf8");
     expect(intake).toContain("PaidProForcedFirstReviewChrome");
-    expect(intake).toContain("paid-pro-forced-prepare-signatures");
+    expect(chrome).toContain("paid-pro-forced-prepare-signatures");
+    expect(chrome).toContain("paid-pro-delivery-track-chooser");
+    expect(chrome).toContain("PAID_PRO_DELIVERY_TRACK_REVIEW_CTA");
     expect(intake).toContain("shouldShowPaidProReviewDecisionChrome");
     expect(shell).toContain("Review your agreement draft");
-    expect(shell).toContain("Nothing is sent or signed until you choose the next step.");
+    expect(shell).toMatch(/party review \(basic track-changes\)|Nothing is sent/i);
+    expect(shell).toMatch(/prepare for signing/i);
     expect(intake).toContain("logAgreementFlowStep");
     expect(intake).toContain("logProDeliveryTrackState");
     expect(intake).toContain("canChooseProDeliveryTrack");
@@ -34,11 +38,11 @@ describe("Pro delivery track UI wiring", () => {
 
   it("review-first decision chrome does not leak signer setup fields before signatures are chosen", () => {
     const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
-    const chromeBlock = intake.slice(
-      intake.indexOf("PaidProForcedFirstReviewChrome"),
-      intake.indexOf("PaidProForcedFirstReviewChrome") + 2400,
-    );
+    const chromeIdx = intake.indexOf("<PaidProForcedFirstReviewChrome");
+    expect(chromeIdx).toBeGreaterThan(-1);
+    const chromeBlock = intake.slice(chromeIdx, chromeIdx + 12000);
     expect(chromeBlock).toContain("onPrepareSignatures");
+    expect(chromeBlock).toContain("onShareForReview");
     expect(chromeBlock).not.toContain("Signer name");
     expect(chromeBlock).not.toContain("Signer title");
     expect(chromeBlock).not.toContain("Party address");
@@ -48,28 +52,26 @@ describe("Pro delivery track UI wiring", () => {
   it("signer setup legal entity inputs prefer canonical party names over display labels", () => {
     const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
     expect(intake).toContain("signerSetupPartyIdentities");
-    expect(intake).toContain("legalEntityFieldValue");
+    expect(intake).toContain("legalEntityValue");
     expect(intake).toContain("resolveSignerSetupPartyIdentities");
     expect(intake).toContain("resolveSignerSetupRenderSlot");
     const fieldsStart = intake.indexOf("const recipientFields = (");
-    const fieldsBlock = intake.slice(fieldsStart, fieldsStart + 7600);
+    const fieldsBlock = intake.slice(fieldsStart, fieldsStart + 24000);
     expect(fieldsBlock).toContain("canonicalLegalEntity");
-    expect(fieldsBlock).toContain("value={legalEntityFieldValue}");
+    expect(fieldsBlock).toContain("value={legalEntityValue}");
     expect(fieldsBlock).not.toContain("resolveEditableSignerLegalEntityForSlot");
     const identityModule = readFileSync(join(__dirname, "signerSetupPartyIdentity.ts"), "utf8");
     expect(identityModule).toContain("[signer-identity-source]");
     expect(identityModule).toContain("[illegal-signer-render-binding-blocked]");
-    const chooserBlock = intake.slice(
-      intake.indexOf("PaidProForcedFirstReviewChrome"),
-      intake.indexOf("PaidProForcedFirstReviewChrome") + 2400,
-    );
+    const chromeIdx = intake.indexOf("<PaidProForcedFirstReviewChrome");
+    const chooserBlock = intake.slice(chromeIdx, chromeIdx + 2400);
     expect(chooserBlock).not.toContain("Add signers / prepare signature links");
   });
 
   it("review mode does not request signer title or address, while signature prep does", () => {
     const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
     const fieldsStart = intake.indexOf("const recipientFields = (");
-    const fieldsBlock = intake.slice(fieldsStart, fieldsStart + 12000);
+    const fieldsBlock = intake.slice(fieldsStart, fieldsStart + 40000);
     expect(fieldsBlock).toContain("Party address (optional)");
     expect(fieldsBlock).toContain("Signer title (optional)");
     expect(fieldsBlock).toContain("{signaturePrepMode ? (");
@@ -104,7 +106,8 @@ describe("Pro delivery track UI wiring", () => {
     expect(trackBlock).toContain("signaturePreparationRequested");
     expect(trackBlock).not.toMatch(/signerDetailsAreComplete[\s\S]{0,80}prepareSignatureLinksRequested\s*=/);
     expect(intake).toContain("paidProSignerSetupRequiredBeforeDelivery");
-    expect(intake).toContain("Add signer details before continuing.");
+    expect(intake).toContain("PAID_PRO_SIGNER_DETAILS_INCOMPLETE_CTA");
+    expect(intake).toContain("before continuing.");
     expect(intake).toContain('data-testid="pro-review-add-signer-details"');
     expect(intake).toContain('enterFinalReviewRecipientSetup("signature")');
     expect(intake).not.toContain('enterFinalReviewRecipientSetup(mode === "review" ? "review_only" : "signature")');

@@ -348,6 +348,14 @@ import {
   resolvePaidProIntakeLegalEntityAddressPrefillComplete,
   type SignerSetupPartyIdentity,
 } from "./signerSetupPartyIdentity";
+import {
+  PAID_PRO_DELIVERY_TRACK_REVIEW_CTA,
+  PAID_PRO_DELIVERY_TRACK_REVIEW_DESCRIPTION,
+  PAID_PRO_DELIVERY_TRACK_REVIEW_TITLE,
+  PAID_PRO_DELIVERY_TRACK_SHARE_FOR_REVIEW_CTA,
+  PAID_PRO_DELIVERY_TRACK_SIGNATURE_STICKY_LABEL,
+  PAID_PRO_DELIVERY_TRACK_SWITCH_TO_SIGNATURE_CTA,
+} from "./paidProDeliveryTrackGtmCopy";
 import { ensurePremiumCompletion } from "./premiumCompletionEnsure";
 import { beginPaidProPaymentToReviewTrace } from "./paidProPaymentToReviewTrace";
 import { paidProVerboseQaLogsEnabled } from "./paidProPerfLogging";
@@ -18218,8 +18226,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     if (!premiumSignersSurfaceReady || !premiumReviewRoute) return null;
     if (effectivePremiumSendMode === "review") {
       return {
-        title: "Share for review",
-        body: "Recipients can read the draft, suggest plain-English edits, and approve. Nothing changes unless you accept it.",
+        title: PAID_PRO_DELIVERY_TRACK_REVIEW_TITLE,
+        body: PAID_PRO_DELIVERY_TRACK_REVIEW_DESCRIPTION,
       };
     }
     if (effectivePremiumSendMode === "signature") {
@@ -22438,9 +22446,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         }
         const streamlineContinueLabel =
           streamlineFirstRunReviewUi && premiumForkSurfaceActive && !paidProAuthoritative
-            ? "Add signers / prepare signature links"
+            ? PAID_PRO_DELIVERY_TRACK_SIGNATURE_STICKY_LABEL
             : streamlineFirstRunReviewUi && !paidProAuthoritative
-              ? "Add signers / prepare signature links"
+              ? PAID_PRO_DELIVERY_TRACK_SIGNATURE_STICKY_LABEL
               : "Continue";
         if (!showUpgradeToFullDraftOnReview && premiumPersistedFlowActive && !peekPremiumRecipientsSurfaceReleased()) {
           const reviewPath = effectivePremiumSendMode === "review";
@@ -22465,7 +22473,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             };
           }
           return {
-            label: reviewPath ? "Send for review / compare edits" : "Add signers / prepare signature links",
+            label: reviewPath
+              ? PAID_PRO_DELIVERY_TRACK_REVIEW_CTA
+              : PAID_PRO_DELIVERY_TRACK_SIGNATURE_STICKY_LABEL,
             action: "premium_continue_to_signers",
             disabled: proTruthBlocksPaidContinue,
             reason: proTruthBlocksPaidContinue
@@ -30236,8 +30246,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   ]);
 
   const handleProSendForReview = React.useCallback(() => {
-    // TEST577: choosing "Send for review / compare edits" selects the review track — release any
-    // latched signature-prep intent so the delivery track resolves to review.
+    // TEST577: choosing "Send for review" (Option B / party redline) selects the review track —
+    // release any latched signature-prep intent so the delivery track resolves to review.
     setPaidProSignaturePrepIntentLatched(false);
     const reviewBodyPlain =
       resolvePaidProPostFinalizeReviewPlain() ||
@@ -34189,7 +34199,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                                 : PAID_PRO_SIGNER_DETAILS_INCOMPLETE_CTA
                                           }
                                           signatureSecondaryLabel="Change signing order"
-                                          reviewSecondaryLabel="Send for review / compare edits"
+                                          reviewSecondaryLabel={PAID_PRO_DELIVERY_TRACK_REVIEW_CTA}
                                           onChangeSigningOrder={
                                             paidProInlineSignersReady
                                               ? undefined
@@ -34519,7 +34529,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                             onClick={() => handleFinalizeRoutePrimaryAction("review")}
                                             data-testid="pro-review-track-continue"
                                           >
-                                            Share for review
+                                            {PAID_PRO_DELIVERY_TRACK_SHARE_FOR_REVIEW_CTA}
                                           </button>
                                           <button
                                             type="button"
@@ -34528,7 +34538,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                             onClick={() => handlePremiumSendModePick("signature")}
                                             data-testid="pro-review-track-switch-signing"
                                           >
-                                            Prepare signatures instead
+                                            {PAID_PRO_DELIVERY_TRACK_SWITCH_TO_SIGNATURE_CTA}
                                           </button>
                                         </div>
                                       ) : (
@@ -34587,7 +34597,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                                 className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-emerald-500 sm:text-[13px]"
                                                 onClick={() => handleFinalizeRoutePrimaryAction("review")}
                                               >
-                                                Send for review
+                                                {PAID_PRO_DELIVERY_TRACK_REVIEW_CTA}
                                               </button>
                                               <button
                                                 type="button"

@@ -33,23 +33,23 @@ export function resolvePaidProReviewSignerStatusReady(args: {
 }
 
 export const PAID_PRO_REVIEW_SUPPORTING_BEFORE_SIGNERS =
-  "Add legal entity, signer name, email, and title for each party. Signature lines and notice contacts use those details — nothing is sent until you confirm.";
+  "Add legal entity, signer name, email, and title for each party. Those details feed notices and either party-review links or signature links — nothing is sent until you confirm.";
 
 /** When the draft still shows clarification-style brackets after generate. */
 export const PAID_PRO_REVIEW_SUPPORTING_IDENTITY_PLACEHOLDERS =
-  "Party names from your prompt should appear in the draft. If any brackets remain, continue to signer details to lock legal names, emails, and titles before preparing signature links.";
+  "Party names from your prompt should appear in the draft. If any brackets remain, continue to signer details to lock legal names, emails, and titles before review or signing.";
 
 export const PAID_PRO_REVIEW_SUPPORTING_AFTER_SIGNERS =
-  "Signer details are saved in the agreement. Continue when you are ready to prepare signature links.";
+  "Signer details are saved. Choose send for review (basic track-changes with the other parties) or prepare for signing when terms are final.";
 
 /** Shown only on non-compact shells that still render the final-version card. */
 export const PAID_PRO_FINAL_VERSION_HEADLINE = "Next step";
 
 export const PAID_PRO_FINAL_VERSION_BEFORE_SIGNERS =
-  "Add signer details below (legal entity, signer name, email, and title), then prepare signature links when you are ready.";
+  "Add signer details below (legal entity, signer name, email, and title), then choose party review or prepare signature links.";
 
 export const PAID_PRO_FINAL_VERSION_READY_FOR_SIGNATURE =
-  "Prepare signature links when you are ready to share them with signers.";
+  "Send for party review with basic track-changes, or prepare signature links when you are ready to share them.";
 
 export const PAID_PRO_SIGNER_SAVED_BANNER_HEADLINE = "Signer details saved.";
 
@@ -92,8 +92,8 @@ export function resolvePaidProReviewTrustSteps(args: {
       label: linksDone
         ? "Ready for signing"
         : signersDone
-          ? "Ready to prepare signing links"
-          : "Signature links ready",
+          ? "Choose review or signing"
+          : "Review or signature links",
       state: linksDone ? "done" : "pending",
     },
   ];

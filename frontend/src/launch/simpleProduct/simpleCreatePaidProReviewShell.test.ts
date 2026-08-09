@@ -94,7 +94,7 @@ describe("Simple create shell copy contract", () => {
   it("AgreementBuilderIntake reports paid Pro review readiness to the create shell", () => {
     const p = join(__dirname, "../../components/agreements/AgreementBuilderIntake.tsx");
     const s = readFileSync(p, "utf8");
-    expect(s).toContain("computeSimpleCreatePaidProReviewReady");
+    expect(s).toContain("computeCreateFlowPaidProReviewReady");
     expect(s).toContain("onSimpleCreateShellChrome");
     expect(s).toContain("paidProReviewReady");
     expect(s).toContain("freeStarterReviewShellActive");

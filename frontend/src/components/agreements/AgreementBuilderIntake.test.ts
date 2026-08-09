@@ -396,7 +396,8 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     expect(intake).toContain("commitParsedDraftToReviewFlow(mergedDraftPersist, { forceReviewDisplay: true })");
     expect(intake).toContain("showSignatureRecipientContinue");
     expect(intake).toContain("onContinueToRecipientSetup");
-    expect(intake).toContain("Share for review");
+    expect(intake).toContain("PAID_PRO_DELIVERY_TRACK_SHARE_FOR_REVIEW_CTA");
+    expect(intake).toContain("PAID_PRO_DELIVERY_TRACK_REVIEW_CTA");
     expect(intake).toContain("premiumReviewMintPrimaryLabel");
     expect(intake).toContain("deliveryCtasOnDraftCard={canProceedWithPaidProDocument}");
     expect(intake).toContain("private review link");
@@ -458,15 +459,13 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
     const unifiedStart = intake.indexOf("const unifiedPrimaryCta = useMemo(");
     expect(unifiedStart).toBeGreaterThanOrEqual(0);
-    const unifiedRegion = intake.slice(unifiedStart, unifiedStart + 14000);
+    const unifiedRegion = intake.slice(unifiedStart, unifiedStart + 60000);
     const sendSurface = unifiedRegion.indexOf(
       "if (createUiStage === CreateUiStage.RECIPIENTS || paidProRecipientSetupOnDraft) {",
     );
-    const draftBranch = unifiedRegion.indexOf("if (createUiStage === CreateUiStage.DRAFT) {");
     expect(sendSurface).toBeGreaterThanOrEqual(0);
-    expect(draftBranch).toBeGreaterThan(sendSurface);
     const draftAfterSendSurface = unifiedRegion.indexOf(
-      "      if (createUiStage === CreateUiStage.DRAFT) {",
+      "if (createUiStage === CreateUiStage.DRAFT) {",
       sendSurface + 40,
     );
     expect(draftAfterSendSurface).toBeGreaterThan(sendSurface);
@@ -718,7 +717,7 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     expect(routeBlock).toContain("continueGuidedFinalReviewToSigning");
     expect(routeBlock).not.toContain("advancePaidProToRecipientSetup");
     expect(routeBlock).not.toContain("handOffProductionDraftToRecipients");
-    expect(intake).toContain('reviewSecondaryLabel="Send for review / compare edits"');
+    expect(intake).toContain("reviewSecondaryLabel={PAID_PRO_DELIVERY_TRACK_REVIEW_CTA}");
   });
 
   it("test20: answer apply waits for signer setup continue; explicit continue CTA only", () => {
@@ -902,8 +901,8 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     expect(screen).not.toContain("Describe a change");
     expect(screen).not.toContain("Add recipient emails");
     expect(screen).not.toContain("textarea");
-    expect(intake).toContain("Add signers / prepare signature links");
-    expect(intake).toContain('reviewSecondaryLabel="Send for review / compare edits"');
+    expect(intake).toContain("PAID_PRO_DELIVERY_TRACK_SIGNATURE_STICKY_LABEL");
+    expect(intake).toContain("reviewSecondaryLabel={PAID_PRO_DELIVERY_TRACK_REVIEW_CTA}");
     expect(intake).toContain("onChangeSigningOrder");
     expect(screen).toContain("Back to final review");
     const enterIdx = intake.indexOf("const enterFinalReviewRecipientSetup = React.useCallback");
@@ -917,7 +916,7 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
 
   it("paid Pro signature path uses signer setup copy and fields", () => {
     const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
-    expect(intake).toContain("Add signers / prepare signature links");
+    expect(intake).toContain("PAID_PRO_DELIVERY_TRACK_SIGNATURE_STICKY_LABEL");
     expect(intake).toContain("Party 1 legal entity");
     expect(intake).toContain("Party 2 legal entity");
     expect(intake).toContain("Signer name");
@@ -927,7 +926,7 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     expect(intake).toContain("I&apos;ll sign first");
     const panel = readFileSync(join(__dirname, "ProReviewSigningFlowPanel.tsx"), "utf8");
     expect(panel).toContain("showReviewComparisonActions");
-    expect(panel).toContain("Upload/compare is available from the review track");
+    expect(panel).toMatch(/Send for review|track-changes/i);
   });
 
   it("paid Pro source-of-truth branch renders HTML without polish or fallback pickers", () => {

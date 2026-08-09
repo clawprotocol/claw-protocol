@@ -1,4 +1,14 @@
 import type { PremiumSendIntent } from "../../launch/simpleProduct/premiumSendIntent";
+import {
+  PAID_PRO_DELIVERY_TRACK_CHOOSER_EYEBROW,
+  PAID_PRO_DELIVERY_TRACK_REVIEW_CTA,
+  PAID_PRO_DELIVERY_TRACK_REVIEW_DESCRIPTION,
+  PAID_PRO_DELIVERY_TRACK_REVIEW_TITLE,
+  PAID_PRO_DELIVERY_TRACK_SIGNATURE_CTA,
+  PAID_PRO_DELIVERY_TRACK_SIGNATURE_DESCRIPTION,
+  PAID_PRO_DELIVERY_TRACK_SIGNATURE_TITLE,
+  PAID_PRO_DELIVERY_TRACK_TRUST_LINE,
+} from "./paidProDeliveryTrackGtmCopy";
 
 export type PremiumSendNextStepForkLabels = {
   reviewTitle?: string;
@@ -19,20 +29,19 @@ export type PremiumSendNextStepForkProps = {
 
 /**
  * Premium flow: maps to existing review vs signature send modes.
- * Copy tuned for “business package” review (not internal jargon).
+ * Practical GTM: Option B (party review / redline) is peer to Option A (signing).
  */
 export function PremiumSendNextStepFork({ selected, onPick, compact, labels }: PremiumSendNextStepForkProps) {
   const pad = compact ? "p-3.5 sm:p-4.5" : "p-5 sm:p-6";
   const gap = compact ? "gap-2.5" : "gap-3.5";
-  const reviewTitle = labels?.reviewTitle ?? "Share for review";
+  const reviewTitle = labels?.reviewTitle ?? PAID_PRO_DELIVERY_TRACK_REVIEW_TITLE;
   const reviewDescription =
-    labels?.reviewDescription ??
-    "Invite reviewers to comment and redline before any signature request is sent.";
-  const reviewCta = labels?.reviewCta ?? "Share for review";
-  const signatureTitle = labels?.signatureTitle ?? "Prepare signatures";
+    labels?.reviewDescription ?? PAID_PRO_DELIVERY_TRACK_REVIEW_DESCRIPTION;
+  const reviewCta = labels?.reviewCta ?? PAID_PRO_DELIVERY_TRACK_REVIEW_CTA;
+  const signatureTitle = labels?.signatureTitle ?? PAID_PRO_DELIVERY_TRACK_SIGNATURE_TITLE;
   const signatureDescription =
-    labels?.signatureDescription ?? "Add signers for tracked e-sign once terms are final.";
-  const signatureCta = labels?.signatureCta ?? "Prepare signatures";
+    labels?.signatureDescription ?? PAID_PRO_DELIVERY_TRACK_SIGNATURE_DESCRIPTION;
+  const signatureCta = labels?.signatureCta ?? PAID_PRO_DELIVERY_TRACK_SIGNATURE_CTA;
   return (
     <section
       className={`rounded-xl border border-slate-700/55 bg-slate-900/40 ${pad}`}
@@ -42,7 +51,7 @@ export function PremiumSendNextStepFork({ selected, onPick, compact, labels }: P
         id="premium-next-step-heading"
         className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400"
       >
-        Review your agreement
+        {PAID_PRO_DELIVERY_TRACK_CHOOSER_EYEBROW}
       </p>
       <div className={`mt-3.5 grid ${gap} sm:grid-cols-2`}>
         <div
@@ -83,12 +92,12 @@ export function PremiumSendNextStepFork({ selected, onPick, compact, labels }: P
         </div>
       </div>
       <p className="mt-3 text-[10px] leading-relaxed text-slate-500 sm:text-[11px]">
-        You stay in control. Nothing is sent until you confirm recipients and press final send.
+        {PAID_PRO_DELIVERY_TRACK_TRUST_LINE}
       </p>
       <p className="mt-1.5 text-[10px] leading-relaxed text-slate-500 sm:text-[11px]">
         {selected === "signature"
-          ? "Need one more pass first? Switch back to review before preparing signatures."
-          : "Once review comments are resolved, prepare signatures in one click."}
+          ? "Need a redline pass with the other parties first? Switch back to review before preparing signatures."
+          : "Once track-changes comments are resolved, prepare for signing in one click."}
       </p>
     </section>
   );

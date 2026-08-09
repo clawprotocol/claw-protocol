@@ -28,7 +28,15 @@ describe("paidProWorkflowGuidance", () => {
     const copy = resolvePaidProReviewNextStepCopy({ signersReady: false });
     expect(copy.stepLabel).toMatch(/Step 3 of 4/i);
     expect(copy.nextLine).toMatch(/No one signs|not signing/i);
-    expect(copy.nextLine).toMatch(/signer details/i);
+    expect(copy.nextLine).toMatch(/party contacts|signer details/i);
+    expect(copy.nextLine).toMatch(/track-changes|party review|signature links/i);
+  });
+
+  it("when signers ready, next-step copy offers review or signing", () => {
+    const copy = resolvePaidProReviewNextStepCopy({ signersReady: true });
+    expect(copy.headline).toMatch(/Choose review or signing/i);
+    expect(copy.nextLine).toMatch(/track-changes/i);
+    expect(copy.nextLine).toMatch(/signature links/i);
   });
 
   it("review callout renders step guidance above document flow", () => {
@@ -45,7 +53,7 @@ describe("paidProWorkflowGuidance", () => {
     expect(banner.textContent).toContain(PAID_PRO_SIGNER_SETUP_ORIENTATION_BODY);
     expect(banner.textContent).toMatch(/No one signs here/i);
     expect(screen.getByTestId("paid-pro-signer-setup-workflow-trail").textContent).toMatch(
-      /Review → Signer details → Signature links → Signing/,
+      /Review → Signer details → Party review or signature links → Done/,
     );
   });
 

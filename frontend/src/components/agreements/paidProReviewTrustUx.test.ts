@@ -18,7 +18,7 @@ describe("paidProReviewTrustUx", () => {
       "Agreement draft generated",
       "Automated draft checks completed",
       "Signer details needed",
-      "Signature links ready",
+      "Review or signature links",
     ]);
     expect(steps.filter((s) => s.state === "done").map((s) => s.id)).toEqual([
       "agreement_generated",
@@ -57,7 +57,7 @@ describe("paidProReviewTrustUx", () => {
   it("does not claim Ready for signing before finalize produces a signing-ready corpus", () => {
     const beforeFinalize = resolvePaidProReviewTrustSteps({ signersReady: true });
     expect(beforeFinalize.find((s) => s.id === "signature_links_ready")?.label).toBe(
-      "Ready to prepare signing links",
+      "Choose review or signing",
     );
     expect(beforeFinalize.find((s) => s.id === "signature_links_ready")?.state).toBe("pending");
     const hydrateFailed = resolvePaidProReviewTrustSteps({

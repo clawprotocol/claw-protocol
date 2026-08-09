@@ -16,14 +16,15 @@ describe("paidProSignerSetupCopy", () => {
     expect(PAID_PRO_SIGNER_SETUP_ORIENTATION_HEADLINE).toBe("Add signer details");
     expect(banner.textContent).toContain(PAID_PRO_SIGNER_SETUP_ORIENTATION_BODY);
     expect(PAID_PRO_SIGNER_SETUP_ORIENTATION_BODY).toMatch(
-      /Enter who will sign for each party/i,
+      /Enter who will sign \(or review\) for each party/i,
     );
     expect(PAID_PRO_SIGNER_SETUP_ORIENTATION_BODY).toMatch(/No one signs here/i);
+    expect(PAID_PRO_SIGNER_SETUP_ORIENTATION_BODY).toMatch(/track-changes|party review/i);
     expect(screen.getByTestId("paid-pro-signer-setup-workflow-trail").textContent).toBe(
       PAID_PRO_SIGNER_SETUP_WORKFLOW_TRAIL,
     );
     expect(PAID_PRO_SIGNER_SETUP_WORKFLOW_TRAIL).toBe(
-      "Review → Signer details → Signature links → Signing",
+      "Review → Signer details → Party review or signature links → Done",
     );
   });
 });

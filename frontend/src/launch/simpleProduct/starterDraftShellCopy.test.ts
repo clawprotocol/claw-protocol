@@ -18,7 +18,7 @@ import {
 describe("starter draft shell copy", () => {
   it("exports lifecycle-aware hero and control line", () => {
     expect(SIMPLE_CREATE_STARTER_HERO_TITLE).toMatch(/Draft it fast/i);
-    expect(SIMPLE_CREATE_STARTER_HERO_SUBHEAD).toMatch(/share for review/i);
+    expect(SIMPLE_CREATE_STARTER_HERO_SUBHEAD).toMatch(/party review|track-changes/i);
     expect(SIMPLE_CREATE_STARTER_HERO_SUBHEAD).toMatch(/prepare for signing/i);
     expect(SIMPLE_CREATE_STARTER_CONTROL_LINE).toMatch(/review, improve, share, sign, or stop/i);
     expect(FUNNEL_FREE_STARTER_HEADLINE).toBe("Your agreement is ready");

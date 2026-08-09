@@ -1,5 +1,6 @@
 /**
  * Post-signer-finalize review decision chrome for forced paid Pro document route.
+ * Practical GTM: equal Option A (signing) vs Option B (party review / redline).
  */
 
 import { useEffect } from "react";
@@ -13,7 +14,18 @@ import { logPaidProSignaturePrepCtaVisible } from "./paidProSignaturePrepUi";
 import {
   resolvePaidProPostFinalizeSignerDetailsActionLabel,
 } from "./paidProPostFinalizeEditSignerDetails";
-import { PAID_PRO_PREPARE_ESIGN_DECISION_CTA } from "./signerSetupPartyIdentity";
+import {
+  PAID_PRO_DELIVERY_TRACK_BEFORE_SIGNERS_HINT,
+  PAID_PRO_DELIVERY_TRACK_CHOOSER_EYEBROW,
+  PAID_PRO_DELIVERY_TRACK_REVIEW_BUSY_CTA,
+  PAID_PRO_DELIVERY_TRACK_REVIEW_CTA,
+  PAID_PRO_DELIVERY_TRACK_REVIEW_DESCRIPTION,
+  PAID_PRO_DELIVERY_TRACK_REVIEW_TITLE,
+  PAID_PRO_DELIVERY_TRACK_SIGNATURE_CTA,
+  PAID_PRO_DELIVERY_TRACK_SIGNATURE_DESCRIPTION,
+  PAID_PRO_DELIVERY_TRACK_SIGNATURE_TITLE,
+  PAID_PRO_DELIVERY_TRACK_TRUST_LINE,
+} from "./paidProDeliveryTrackGtmCopy";
 
 export type PaidProSignerSavedMapping = {
   partyLegalName: string;
@@ -125,51 +137,105 @@ export function PaidProForcedFirstReviewChrome({
         data-testid="paid-pro-forced-first-review-actions"
       >
         <p className="text-[10px] font-semibold uppercase tracking-[0.16em] text-stone-500">
-          Choose your next step
+          {PAID_PRO_DELIVERY_TRACK_CHOOSER_EYEBROW}
         </p>
         {!signersReady && onEditSignerDetails ? (
-          <button
-            type="button"
-            className="w-full rounded-lg bg-emerald-800 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700 disabled:opacity-45"
-            disabled={primaryActionsDisabled}
-            onClick={() => {
-              logPostFinalizeAction("add_signer_details");
-              onEditSignerDetails();
-            }}
-            data-testid="paid-pro-forced-add-signer-details"
-          >
-            {signerDetailsActionLabel}
-          </button>
+          <>
+            <p
+              className="text-xs leading-relaxed text-stone-600"
+              data-testid="paid-pro-delivery-track-before-signers-hint"
+            >
+              {PAID_PRO_DELIVERY_TRACK_BEFORE_SIGNERS_HINT}
+            </p>
+            <button
+              type="button"
+              className="w-full rounded-lg bg-emerald-800 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700 disabled:opacity-45"
+              disabled={primaryActionsDisabled}
+              onClick={() => {
+                logPostFinalizeAction("add_signer_details");
+                onEditSignerDetails();
+              }}
+              data-testid="paid-pro-forced-add-signer-details"
+            >
+              {signerDetailsActionLabel}
+            </button>
+          </>
         ) : (
-          <button
-            type="button"
-            className="w-full rounded-lg bg-emerald-800 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700 disabled:opacity-45"
-            disabled={primaryActionsDisabled || !signersReady}
-            onClick={() => {
-              logPostFinalizeAction("prepare_for_signing");
-              onPrepareSignatures();
-            }}
-            data-testid="paid-pro-forced-prepare-signatures"
+          <div
+            className="grid gap-2.5 sm:grid-cols-2"
+            data-testid="paid-pro-delivery-track-chooser"
           >
-            {PAID_PRO_PREPARE_ESIGN_DECISION_CTA}
-          </button>
+            <div
+              className="flex flex-col rounded-lg border border-stone-200/90 bg-stone-50/80 px-3 py-3"
+              data-testid="paid-pro-delivery-track-signature-card"
+            >
+              <p className="text-sm font-semibold text-stone-900">
+                {PAID_PRO_DELIVERY_TRACK_SIGNATURE_TITLE}
+              </p>
+              <p className="mt-1.5 flex-1 text-xs leading-relaxed text-stone-600">
+                {PAID_PRO_DELIVERY_TRACK_SIGNATURE_DESCRIPTION}
+              </p>
+              <button
+                type="button"
+                className="mt-3 w-full rounded-lg bg-emerald-800 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700 disabled:opacity-45"
+                disabled={primaryActionsDisabled || !signersReady}
+                onClick={() => {
+                  logPostFinalizeAction("prepare_for_signing");
+                  onPrepareSignatures();
+                }}
+                data-testid="paid-pro-forced-prepare-signatures"
+              >
+                {PAID_PRO_DELIVERY_TRACK_SIGNATURE_CTA}
+              </button>
+            </div>
+            <div
+              className="flex flex-col rounded-lg border border-emerald-200/80 bg-emerald-50/50 px-3 py-3"
+              data-testid="paid-pro-delivery-track-review-card"
+            >
+              <p className="text-sm font-semibold text-stone-900">
+                {PAID_PRO_DELIVERY_TRACK_REVIEW_TITLE}
+              </p>
+              <p className="mt-1.5 flex-1 text-xs leading-relaxed text-stone-600">
+                {PAID_PRO_DELIVERY_TRACK_REVIEW_DESCRIPTION}
+              </p>
+              <button
+                type="button"
+                className="mt-3 w-full rounded-lg border border-emerald-700/40 bg-white px-4 py-2.5 text-sm font-semibold text-emerald-900 shadow-sm hover:bg-emerald-50 disabled:opacity-45"
+                disabled={primaryActionsDisabled || reviewBusy || !signersReady}
+                onClick={() => {
+                  logPostFinalizeAction("send_for_review");
+                  onShareForReview();
+                }}
+                data-testid="paid-pro-forced-share-for-review"
+              >
+                {reviewBusy
+                  ? PAID_PRO_DELIVERY_TRACK_REVIEW_BUSY_CTA
+                  : PAID_PRO_DELIVERY_TRACK_REVIEW_CTA}
+              </button>
+            </div>
+          </div>
         )}
         <div
           className="flex flex-col gap-2 sm:flex-row sm:flex-wrap"
           data-testid="paid-pro-forced-first-review-secondary-actions"
         >
-          <button
-            type="button"
-            className="w-full rounded-lg border border-stone-300/90 bg-white px-3 py-2 text-xs font-semibold text-stone-800 sm:w-auto"
-            disabled={primaryActionsDisabled || reviewBusy || !signersReady}
-            onClick={() => {
-              logPostFinalizeAction("send_for_review");
-              onShareForReview();
-            }}
-            data-testid="paid-pro-forced-share-for-review"
-          >
-            {reviewBusy ? "Creating review links…" : "Send for review / compare edits"}
-          </button>
+          {!signersReady ? (
+            <button
+              type="button"
+              className="w-full rounded-lg border border-stone-300/90 bg-white px-3 py-2 text-xs font-semibold text-stone-800 sm:w-auto"
+              disabled={primaryActionsDisabled || reviewBusy || !signersReady}
+              onClick={() => {
+                logPostFinalizeAction("send_for_review");
+                onShareForReview();
+              }}
+              data-testid="paid-pro-forced-share-for-review"
+              title="Add party contacts first, then send for review with track-changes"
+            >
+              {reviewBusy
+                ? PAID_PRO_DELIVERY_TRACK_REVIEW_BUSY_CTA
+                : PAID_PRO_DELIVERY_TRACK_REVIEW_CTA}
+            </button>
+          ) : null}
           <PremiumAgreementCopyButton
             getPlainText={getCopyPlainText}
             onCopyIntent={() => logPostFinalizeAction("copy_agreement")}
@@ -221,7 +287,7 @@ export function PaidProForcedFirstReviewChrome({
           </p>
         ) : null}
         <p className="text-[11px] leading-relaxed text-stone-600">
-          Nothing is sent or signed until you confirm the next step.
+          {PAID_PRO_DELIVERY_TRACK_TRUST_LINE}
         </p>
       </div>
     </div>

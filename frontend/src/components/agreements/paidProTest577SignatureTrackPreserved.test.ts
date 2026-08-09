@@ -76,7 +76,7 @@ describe("TEST577 signature delivery track survives the signer-setup phase", () 
     ).toBe("signature");
   });
 
-  it("Send for review / compare edits still selects the review track", () => {
+  it("Send for review (Option B) still selects the review track", () => {
     // Choosing the review track releases the latch → delivery track resolves to review.
     expect(
       resolveProDeliveryTrackSelected({

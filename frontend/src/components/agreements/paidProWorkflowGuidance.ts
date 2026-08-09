@@ -1,6 +1,12 @@
 /**
  * Paid Pro workflow discoverability copy (Test216) — UX guidance only, no corpus/SoT changes.
+ * Practical GTM: signer details unlock either Option A (signing) or Option B (party review / redline).
  */
+
+import {
+  PAID_PRO_REVIEW_STEP_HEADLINE_CHOOSE_TRACK,
+  PAID_PRO_REVIEW_STEP_NEXT_CHOOSE_TRACK,
+} from "./paidProDeliveryTrackGtmCopy";
 
 export const PAID_PRO_WORKFLOW_TOTAL_STEPS = 4;
 
@@ -11,18 +17,17 @@ export const PAID_PRO_REVIEW_STEP_HEADLINE = "Signer details next";
 export const PAID_PRO_REVIEW_STEP_NEXT_PREFIX = "Next:";
 
 export const PAID_PRO_REVIEW_STEP_NEXT_SIGNER_SETUP =
-  "Add signer details to create signature links. No one signs on this step.";
+  "Add party contacts so you can prepare signature links or send the draft for review with basic track-changes. No one signs on this step.";
 
-export const PAID_PRO_REVIEW_STEP_NEXT_SIGNATURE_PREP =
-  "Prepare signature links when you are ready. Signing happens only after you share a link.";
+export const PAID_PRO_REVIEW_STEP_NEXT_SIGNATURE_PREP = PAID_PRO_REVIEW_STEP_NEXT_CHOOSE_TRACK;
 
 export const PAID_PRO_SIGNER_SETUP_ORIENTATION_HEADLINE = "Add signer details";
 
 export const PAID_PRO_SIGNER_SETUP_ORIENTATION_BODY =
-  "Enter who will sign for each party. No one signs here — LawDog creates signature links only after you confirm.";
+  "Enter who will sign (or review) for each party. No one signs here — after you confirm, you can send for party review with track-changes or prepare signature links.";
 
 export const PAID_PRO_SIGNER_SETUP_WORKFLOW_TRAIL =
-  "Review → Signer details → Signature links → Signing";
+  "Review → Signer details → Party review or signature links → Done";
 
 export const PAID_PRO_STICKY_CTA_DIRECTION_LABEL = "Continue below";
 
@@ -51,7 +56,9 @@ export function resolvePaidProReviewNextStepCopy(args: {
   }
   return {
     stepLabel: PAID_PRO_REVIEW_STEP_LABEL,
-    headline: PAID_PRO_REVIEW_STEP_HEADLINE,
+    headline: args.signersReady
+      ? PAID_PRO_REVIEW_STEP_HEADLINE_CHOOSE_TRACK
+      : PAID_PRO_REVIEW_STEP_HEADLINE,
     nextLine: args.signersReady
       ? PAID_PRO_REVIEW_STEP_NEXT_SIGNATURE_PREP
       : PAID_PRO_REVIEW_STEP_NEXT_SIGNER_SETUP,

@@ -12,7 +12,7 @@ export const SIMPLE_CREATE_PAID_PRO_REVIEW_TITLE = "Review your agreement draft"
 export { PREMIUM_PRO_REVIEW_SCROLL_ANCHOR_ID } from "../../lib/premiumPostCheckoutReturnUx";
 
 export const SIMPLE_CREATE_PAID_PRO_REVIEW_SUBTITLE =
-  "Nothing is sent or signed until you choose the next step.";
+  "Confirm the draft, then choose party review (basic track-changes) or prepare for signing. Nothing is sent until you confirm.";
 
 /** Dedicated shell when dashboard Complete signer details resumes into `/app/create`. */
 export const SIMPLE_CREATE_SIGNER_SETUP_RESUME_TITLE = "Complete signer details";
@@ -28,7 +28,7 @@ export { AGREEMENT_LIFECYCLE_PROGRESS_LABELS as SIMPLE_CREATE_STARTER_PROGRESS_L
 export const SIMPLE_CREATE_STARTER_HERO_TITLE = "Draft it fast. Review it before it moves.";
 
 export const SIMPLE_CREATE_STARTER_HERO_SUBHEAD =
-  "Type or speak what you need. LawDog creates a starter draft you can review, improve, share for review, or prepare for signing when you're ready.";
+  "Paste the deal. LawDog drafts for your named parties — then send for party review with basic track-changes, or prepare for signing.";
 
 /** Trust line under starter hero — lifecycle-aware, not send-only. */
 export const SIMPLE_CREATE_STARTER_CONTROL_LINE =
@@ -37,7 +37,7 @@ export const SIMPLE_CREATE_STARTER_CONTROL_LINE =
 export const PRO_REVIEW_DOCUMENT_PANEL_HEADING = "Review your agreement draft";
 
 export const PRO_REVIEW_DOCUMENT_PANEL_SUBCOPY =
-  "Nothing is sent or signed until you choose the next step.";
+  "Confirm the draft, then choose party review (basic track-changes) or prepare for signing. Nothing is sent until you confirm.";
 
 /**
  * `/app/create` shell chrome: suppress generic “Create an agreement in minutes” marketing while authoritative

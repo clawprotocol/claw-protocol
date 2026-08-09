@@ -166,7 +166,8 @@ export function ProReviewSigningFlowPanel({
               ) : null}
             </div>
             <p className="mt-1.5 text-[10px] leading-relaxed text-stone-500">
-              Upload/compare stays in the review track and appears after choosing review/compare.
+              Party review uses suggest-edits and basic track-changes. Upload/compare appears after you choose
+              Send for review.
             </p>
           </div>
         ) : null}
@@ -187,8 +188,8 @@ export function ProReviewSigningFlowPanel({
               <p className="text-[11px] text-stone-600">{uploadedSource.fileName}</p>
             ) : null}
             <p className="text-[11px] leading-relaxed text-stone-600">
-              LawDog cannot show a redline against your draft yet. Use this file for signing or keep the LawDog
-              version.
+              File upload redline is not available here yet. For basic track-changes, use Send for review with the
+              other parties (suggest edits), or use this file for signing / keep the LawDog version.
             </p>
             <div className="flex flex-col gap-1.5 sm:flex-row sm:flex-wrap">
               {onUseUploadedForSigning ? (
@@ -305,7 +306,8 @@ export function ProReviewSigningFlowPanel({
       </div>
 
       <p className="mt-2 text-[11px] leading-relaxed text-stone-500">
-        Signature setup is the default path. Upload/compare is available from the review track.
+        After signer details: prepare for signing, or send for review so the other parties can propose basic
+        track-changes edits.
       </p>
 
       {uploadError ? (
@@ -324,8 +326,9 @@ export function ProReviewSigningFlowPanel({
             <p className="text-[11px] text-stone-600">{uploadedSource.fileName}</p>
           ) : null}
           <p className="text-[11px] leading-relaxed text-stone-600">
-            Uploaded version saved. Full redline comparison is coming soon. You can use this version for signing
-            or continue with the LawDog draft.
+            Uploaded version saved. Full file-to-file redline comparison is coming soon — party review still
+            supports basic track-changes via suggest edits. You can use this version for signing or keep the
+            LawDog draft.
           </p>
           <div className="flex flex-col gap-1.5 sm:flex-row sm:flex-wrap">
             {onCompareChanges ? (
