@@ -87,12 +87,20 @@ export function draftPartyPlaceholdersOkViaLivePreview(
   return !draftHasPlaceholderParties(synthetic);
 }
 
+/**
+ * Known fixture / demo legal entities from older LawDog templates. Safe to replace when intake
+ * or the accepted corpus carries the user's real party names (Alpha/Beacon/Cedar, etc.).
+ */
+const DISPOSABLE_DEMO_PARTY_LEGAL_NAME_RE =
+  /^(?:abc\s+llc|sample\s+corp(?:oration)?|sample\s+co\.?|acme\s+test\s+co\.?|lawdog\s+demo\s+llc)$/i;
+
 /** True when stored recipient name is an auto/template seed (safe to replace from reviewed draft). */
 export function isRecipientHandoffSeedDisposable(name: string): boolean {
   const t = sanitizePartiesInput((name || "").trim());
   if (!t) return true;
   if (PLACEHOLDER_PARTY_NAME_RE.test(t)) return true;
   if (/^party\s*[ab]$/i.test(t.replace(/\s+/g, " "))) return true;
+  if (DISPOSABLE_DEMO_PARTY_LEGAL_NAME_RE.test(t)) return true;
   return false;
 }
 

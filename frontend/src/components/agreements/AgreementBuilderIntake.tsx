@@ -2063,9 +2063,11 @@ function isActionableSignerFinalizeErrorRaw(raw: string): boolean {
     /Could not persist the finalized agreement snapshot/i.test(m) ||
     /Could not persist frozen signing authority/i.test(m) ||
     /Missing durable agreement id for signer finalize/i.test(m) ||
+    /could not save this agreement before finalizing signers/i.test(m) ||
     /Frozen signing authority was not built/i.test(m) ||
     /Could not advance review authority/i.test(m) ||
-    /Stay in signer setup and try again/i.test(m)
+    /Stay in signer setup and try again/i.test(m) ||
+    /Tap Retry to save/i.test(m)
   );
 }
 
@@ -3521,6 +3523,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   /** Bumped when leaving review/create so in-flight POST /draft cannot repopulate a cleared workspace id. */
   const reviewWorkspaceSessionRef = useRef(0);
   const reviewAgreementEnsurePromiseRef = useRef<Promise<string | null> | null>(null);
+  /** One-shot: mint workspace id while signer setup is open so finalize is not the first persist. */
+  const signerSetupWorkspaceEnsureStartedRef = useRef(false);
   const reviewWorkspaceBootstrapDepthRef = useRef(0);
   const [reviewWorkspaceBootstrapping, setReviewWorkspaceBootstrapping] = useState(false);
   /** Bumps when user hits “Continue” with placeholder parties so the review card can pulse the parties row. */
@@ -6757,11 +6761,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         });
         setPartySignerNames(handoff.signerNames);
         setPartySignerTitles(handoff.signerTitles);
+        // Prefer handoff/intake legal names over disposable demo seeds (ABC LLC / Sample Corp).
         if (legalNames[0]) {
-          setRecipient1Name((prev) => (prev.trim() ? prev : legalNames[0]!));
+          setRecipient1Name((prev) => pickRecipientNameForHandoff(prev, legalNames[0]!));
         }
         if (legalNames[1]) {
-          setRecipient2Name((prev) => (prev.trim() ? prev : legalNames[1]!));
+          setRecipient2Name((prev) => pickRecipientNameForHandoff(prev, legalNames[1]!));
         }
         if (handoff.partyAddresses.some(Boolean)) {
           setPartyAddresses((prev) => {
@@ -6780,7 +6785,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             while (next.length < legalNames.length - 2) next.push("");
             for (let i = 2; i < legalNames.length; i++) {
               const legal = legalNames[i]?.trim() ?? "";
-              if (legal && !(next[i - 2] ?? "").trim()) next[i - 2] = legal;
+              if (!legal) continue;
+              next[i - 2] = pickRecipientNameForHandoff(next[i - 2] ?? "", legal);
             }
             return next;
           });
@@ -16488,6 +16494,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
   useEffect(() => {
     reviewAgreementIdRef.current = reviewAgreementId;
+    if (!reviewAgreementId?.trim()) {
+      signerSetupWorkspaceEnsureStartedRef.current = false;
+    }
   }, [reviewAgreementId]);
 
   useLayoutEffect(() => {
@@ -19293,6 +19302,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     if (!createFlowSendRecipientEditorOpen) {
       setCreateFlowSendRecipientEditorOpen(true);
     }
+    const existingWorkspaceId = (
+      reviewAgreementIdRef.current ||
+      readCreateReviewAgreementResumeId() ||
+      ""
+    ).trim();
+    if (!existingWorkspaceId && !signerSetupWorkspaceEnsureStartedRef.current) {
+      signerSetupWorkspaceEnsureStartedRef.current = true;
+      void ensureReviewAgreementWorkspaceId();
+    }
   }, [
     firstReviewDeliveryTrackDecisionActive,
     paidProFirstReviewSignerSetupRequired,
@@ -19309,6 +19327,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     recipient2Name,
     extraPartyLegalNames,
     partyAddresses,
+    ensureReviewAgreementWorkspaceId,
   ]);
 
   const paidProCanonicalStickyCta = useMemo(() => {
@@ -29385,11 +29404,6 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     const signerMetadata = authorityPartiesToRecipientMetadata(authority.parties, [
       ...extraPartyReviewEmails,
     ]);
-    const durableAgreementId = (
-      reviewAgreementIdRef.current ||
-      readCreateReviewAgreementResumeId() ||
-      ""
-    ).trim();
     const rollbackFinalizeFailure = (message: string) => {
       clearAuthoritativeSigningSnapshot();
       clearPaidProPinnedSignerAppliedCorpus();
@@ -29402,6 +29416,36 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       bumpPremiumSurfaceGateTick();
       scrollGuidedSignerSetupIntoView();
     };
+    // Paid create can paint a full review corpus before a workspace row exists. Mint/bind the
+    // durable agreement id here so signer finalize does not dead-end on "reload from dashboard".
+    let durableAgreementId = (
+      reviewAgreementIdRef.current ||
+      readCreateReviewAgreementResumeId() ||
+      productionSendBarAgreementIdRef.current ||
+      ""
+    ).trim();
+    if (!durableAgreementId) {
+      setCreateFlowDraftPersistError(null);
+      try {
+        durableAgreementId = (await ensureReviewAgreementWorkspaceId())?.trim() || "";
+      } catch {
+        durableAgreementId = "";
+      }
+      durableAgreementId = (
+        durableAgreementId ||
+        reviewAgreementIdRef.current ||
+        readCreateReviewAgreementResumeId() ||
+        productionSendBarAgreementIdRef.current ||
+        ""
+      ).trim();
+    }
+    if (!durableAgreementId) {
+      const msg =
+        "LawDog could not save this agreement before finalizing signers. Tap Retry to save, then continue — nothing was finalized.";
+      setCreateFlowDraftPersistError(msg);
+      rollbackFinalizeFailure(msg);
+      return false;
+    }
     createAuthoritativeSigningSnapshot({
       corpus: hydrated.corpus,
       signerMetadata,
@@ -29428,12 +29472,6 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       return false;
     }
     pinFinalizedSignerAppliedCorpus(signingReadyPlain, "paid_pro_signer_metadata_finalize");
-    if (!durableAgreementId) {
-      rollbackFinalizeFailure(
-        "Missing durable agreement id for signer finalize. Reload from the dashboard and try again.",
-      );
-      return false;
-    }
     const prepared = await prepareCommercialReviewSnapshotAuthority({
       agreementId: durableAgreementId,
       corpusPlain: signingReadyPlain,
@@ -29533,6 +29571,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     recipientsDeferred,
     pinFinalizedSignerAppliedCorpus,
     createFlowPhase,
+    ensureReviewAgreementWorkspaceId,
   ]);
 
   finalizePaidProSignerMetadataAndOpenReviewDecisionRef.current =
