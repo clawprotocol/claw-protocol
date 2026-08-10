@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import {
   assessAgreementIntakeCapability,
   buildAgreementIntakeClarification,
@@ -159,13 +161,51 @@ describe("buildAgreementIntakeClarification", () => {
     expect(junk.code).toBe("low_signal");
   });
 
-  it("guides too-thin draft-between shells that lack fee/term/type", () => {
+  it("guides too-thin draft-between shells that lack fee/term/purpose", () => {
     const decision = assessAgreementIntakeCapability(
       "Draft an agreement between Alpha and Beta about stuff.",
     );
     expect(decision.ok).toBe(false);
     if (decision.ok) return;
     expect(decision.code).toBe("needs_commercial_basics");
+  });
+
+  it("allows substantive custom prompts without memorized deal-family labels", () => {
+    const peacefulJourney = assessAgreementIntakeCapability(
+      "please create a agreement between Peaceful Journey LLC and Truity Credit Union for understanding " +
+        "that delinquent mortgage payments and equity line of credit payments will be satisfied through " +
+        "either settlement or Judgment of tortious interference and defamation civil cases of which " +
+        "Cynthia Blanchard is a claimant once the case settles or wins period effective upon signing " +
+        "date of both parties",
+    );
+    expect(peacefulJourney.ok).toBe(true);
+
+    const spectrum = [
+      "Create an agreement between Harbor Peak LLC and Red Mesa Credit Union regarding satisfaction of " +
+        "delinquent mortgage and HELOC balances from settlement or judgment proceeds in related civil claims, " +
+        "effective upon signing.",
+      "Draft an agreement between Orion Labs LLC and Vega Partners LP to memorialize that revenue-share " +
+        "payments from the joint catalog will be split 60/40 after platform fees, commencing on the signing date.",
+      "Please create an agreement between Northstar Analytics LLC and Contoso Holdings Inc for understanding " +
+        "that Contoso will release claims against Northstar upon receipt of the negotiated lump-sum settlement " +
+        "payment, effective upon execution by both parties.",
+      "Write an agreement between Cedar Craft Co and Delta Distributors LLC covering exclusive wholesale " +
+        "distribution of Cedar's seasonal product line in Texas, with purchase orders as the ordering mechanism.",
+    ];
+    for (const intake of spectrum) {
+      const decision = assessAgreementIntakeCapability(intake);
+      expect(decision.ok, intake.slice(0, 80)).toBe(true);
+    }
+  });
+
+  it("clarification gate does not require catalog deal-family keywords to proceed", () => {
+    // Source-lock: draft+parties+purpose path must not demand NDA/SaaS/services labels.
+    const file = readFileSync(join(__dirname, "agreementIntakeClarification.ts"), "utf8");
+    expect(file).toContain("hasSubstantiveDealPurpose");
+    expect(file).toMatch(/hasMoney \|\| hasTerm \|\| hasDealType \|\| hasTopics \|\| hasPurpose/);
+    expect(file).not.toMatch(
+      /if \(hasDraftIntent && hasBetweenParties\)[\s\S]{0,400}Name the agreement type \(services, NDA, SaaS/,
+    );
   });
 
   it("preserves children’s / COPPA exclusions from list-style data-scope sentences", () => {

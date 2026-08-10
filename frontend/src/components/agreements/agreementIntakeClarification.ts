@@ -58,6 +58,9 @@ const MONEY_RE =
   /\$\s?\d[\d,]*(?:\.\d+)?\s*(?:k|m)?|\b\d[\d,]*(?:\.\d+)?\s*(?:dollars?|usd|acv|arr|mrr|tcv)\b|\b\d+\s*k\b|\b\d+(?:\.\d+)?%\s*(?:equity|ownership)\b/i;
 const TERM_RE =
   /\b(?:\d+\s*[-–]?\s*(?:day|days|week|weeks|month|months|year|years)|sixty[-\s]?day|6[-\s]?week|twelve[-\s]?month|auto[-\s]?renew(?:al)?|evergreen|perpetual)\b/i;
+/** Commencement / effective-date cues — count as term-like facts for any deal family. */
+const EFFECTIVE_DATE_RE =
+  /\beffective\s+(?:upon|on|as\s+of|date)|upon\s+(?:the\s+)?(?:signing|execution)(?:\s+date)?\b|\bcommenc(?:e|es|ement)\s+(?:on|upon|as\s+of|date)\b/i;
 const SAAS_RE = /\b(?:saas|software\s+as\s+a\s+service|subscription|ARR|MRR|ACV)\b/i;
 const PILOT_RE = /\b(?:pilot\s+agreement|paid\s+pilot|\bpilot\b|proof[-\s]?of[-\s]?concept|POC)\b/i;
 const NDA_RE = /\b(?:mutual\s+)?(?:non[-\s]?disclosure|nda|confidentiality\s+agreement)\b/i;
@@ -215,7 +218,73 @@ function extractTermPhrase(raw: string): string | null {
   const m = raw.match(
     /\b(?:\d+\s*[-–]?\s*(?:day|days|week|weeks|month|months|year|years)|sixty[-\s]?day|6[-\s]?week|twelve[-\s]?month|auto[-\s]?renew(?:al)?|evergreen|perpetual)\b/i,
   );
-  return m?.[0]?.replace(/\s+/g, " ").trim() ?? null;
+  if (m?.[0]) return m[0].replace(/\s+/g, " ").trim();
+  const effective = raw.match(
+    /\beffective\s+(?:upon|on|as\s+of)\s+(?:signing|execution|the\s+date)[^.;,]{0,40}|\bupon\s+(?:the\s+)?(?:signing|execution)\s+date\b/i,
+  );
+  return effective?.[0]?.replace(/\s+/g, " ").trim() ?? null;
+}
+
+const PURPOSE_CONNECTOR_RE =
+  /\b(?:for|about|regarding|concerning|covering|whereby|under\s+which|to\s+(?:document|memorialize|confirm|establish|set\s+forth)|understanding\s+that|so\s+that|such\s+that)\b\s+/i;
+
+const THIN_PURPOSE_ONLY_RE =
+  /^(?:stuff|things|business|it|work|services?|a\s+deal|the\s+deal|something|whatever|misc(?:ellaneous)?)\b/i;
+
+const PURPOSE_STOPWORDS = new Set([
+  "the",
+  "a",
+  "an",
+  "and",
+  "or",
+  "of",
+  "to",
+  "in",
+  "on",
+  "for",
+  "that",
+  "this",
+  "with",
+  "will",
+  "be",
+  "is",
+  "are",
+  "as",
+  "by",
+  "from",
+  "their",
+  "its",
+  "both",
+  "either",
+  "through",
+  "which",
+  "whom",
+  "ones",
+  "case",
+  "into",
+  "any",
+  "all",
+]);
+
+/**
+ * Prompt-agnostic: draft + named parties + a real purpose/scope clause may proceed
+ * even when the ask is not a memorized deal family (NDA / SaaS / services / etc.).
+ * Bare “draft … between A and B about stuff” stays blocked.
+ */
+export function hasSubstantiveDealPurpose(raw: string): boolean {
+  const text = String(raw || "").replace(/\s+/g, " ").trim();
+  if (text.length < 72) return false;
+  const connector = PURPOSE_CONNECTOR_RE.exec(text);
+  if (!connector || connector.index == null) return false;
+  const body = text.slice(connector.index + connector[0].length).replace(/\s+/g, " ").trim();
+  const words = body.split(/\s+/).filter(Boolean);
+  if (words.length < 8) return false;
+  if (words.length <= 12 && THIN_PURPOSE_ONLY_RE.test(body)) return false;
+  const content = words.filter((w) => {
+    const t = w.toLowerCase().replace(/[^a-z0-9']/g, "");
+    return t.length > 2 && !PURPOSE_STOPWORDS.has(t);
+  });
+  return content.length >= 5;
 }
 
 function extractGoverningLaw(raw: string): string | null {
@@ -333,7 +402,7 @@ function extractDataScopeNotes(raw: string): string[] {
 function commercialSignalScore(raw: string): number {
   let score = 0;
   if (MONEY_RE.test(raw)) score += 3;
-  if (TERM_RE.test(raw)) score += 2;
+  if (TERM_RE.test(raw) || EFFECTIVE_DATE_RE.test(raw)) score += 2;
   if (
     SAAS_RE.test(raw) ||
     PILOT_RE.test(raw) ||
@@ -348,6 +417,7 @@ function commercialSignalScore(raw: string): number {
   }
   if (BETWEEN_PARTIES_RE.test(raw)) score += 2;
   if (DRAFT_INTENT_RE.test(raw)) score += 1;
+  if (hasSubstantiveDealPurpose(raw)) score += 2;
   score += Math.min(extractTopicChips(raw).length, 6);
   if (extractDataScopeNotes(raw).length) score += 2;
   if (extractGoverningLaw(raw)) score += 1;
@@ -720,7 +790,8 @@ export function buildAgreementIntakeClarification(rawIntake: string): AgreementI
   const counselSignals = COUNSEL_PREP_SIGNAL_RE.test(raw);
   const numberedAdvisory = NUMBERED_ADVISORY_QUESTIONS_RE.test(raw);
   const hasMoney = MONEY_RE.test(raw);
-  const hasTerm = TERM_RE.test(raw);
+  const hasTerm = TERM_RE.test(raw) || EFFECTIVE_DATE_RE.test(raw);
+  const hasPurpose = hasSubstantiveDealPurpose(raw);
   const deal = dealTypeLabel(raw);
   const signal = commercialSignalScore(raw);
   const lowSignal = looksLowSignalOrNonsensical(raw);
@@ -764,24 +835,25 @@ export function buildAgreementIntakeClarification(rawIntake: string): AgreementI
     };
   }
 
-  // Draft-shaped prompts proceed when there is a recognizable deal type and/or economics/term.
-  // Bare “draft an agreement between A and B” without fee/term/type still needs basics.
+  // Draft-shaped prompts proceed when there is purpose/scope, economics, term, topics,
+  // or a named deal family — never require a memorized catalog type (NDA/SaaS/services).
+  // Bare “draft an agreement between A and B” without substance still needs basics.
   // Do not ask about Party 3/4 when two clear parties already suffice.
   if (hasDraftIntent && hasBetweenParties) {
     const hasDealType = deal !== "generic";
     const hasTopics = extractTopicChips(raw).length > 0;
-    if (hasMoney || hasTerm || hasDealType || hasTopics) return null;
+    if (hasMoney || hasTerm || hasDealType || hasTopics || hasPurpose) return null;
     return {
       kind: "needs_commercial_basics",
-      title: "Add scope, fee, or term",
+      title: "Add what the parties are agreeing to",
       why: "We see a draft request and parties, but not enough deal facts to build a useful agreement.",
       whatWeHeard: [
         "A “draft … between …” shape was detected.",
-        "Fee, term, and agreement type still look thin or missing.",
+        "Scope / purpose, fee, and term still look thin or missing.",
       ],
       guidedSteps: [
-        "Name the agreement type (services, NDA, SaaS, pilot, etc.).",
-        "Add what work or rights it covers, plus fee and term if you know them.",
+        "Say what the parties are agreeing to (scope, rights, payment treatment, settlement, work, etc.).",
+        "Add fee and term or effective date if you know them — any agreement shape is fine.",
         "Keep any data-scope exclusions you care about (e.g. no PHI, PCI, or children’s data).",
       ],
       suggestedRewrite: buildGenericSuggestedRewrite(raw),
@@ -830,8 +902,8 @@ export function buildAgreementIntakeClarification(rawIntake: string): AgreementI
       whatWeHeard: raw.length ? [`You wrote: “${raw.slice(0, 120)}${raw.length > 120 ? "…" : ""}”`] : [],
       guidedSteps: [
         "Name the legal entities that will sign (usually two; up to four).",
-        "Say the agreement type (services, NDA, pilot, SaaS, consulting, etc.).",
-        "Add fee and term if you know them.",
+        "Say what they are agreeing to (any commercial arrangement — not limited to NDA/SaaS/services).",
+        "Add fee and term or effective date if you know them.",
         "Optional: note data that is in or out of scope.",
       ],
       suggestedRewrite: buildGenericSuggestedRewrite(raw),
@@ -889,15 +961,22 @@ export function buildAgreementIntakeClarification(rawIntake: string): AgreementI
     };
   }
 
-  if (hasBetweenParties && !hasDraftIntent && !hasMoney && !hasTerm && (raw.length < 120 || signal < 3)) {
+  if (
+    hasBetweenParties &&
+    !hasDraftIntent &&
+    !hasMoney &&
+    !hasTerm &&
+    !hasPurpose &&
+    (raw.length < 120 || signal < 3)
+  ) {
     return {
       kind: "needs_commercial_basics",
-      title: "Add scope, fee, or term",
+      title: "Add what the parties are agreeing to",
       why: "Parties are clearer than the deal itself — add what they’re agreeing to.",
       whatWeHeard: ["A between-parties phrase was detected.", "Fee / term / scope still look thin."],
       guidedSteps: [
-        "Add what work or rights the agreement covers.",
-        "Add payment (if any) and how long it lasts.",
+        "Add what the parties are agreeing to (scope, rights, payment treatment, work, etc.).",
+        "Add payment (if any) and how long it lasts or when it becomes effective.",
         "Start with “Draft a … agreement between …”.",
       ],
       suggestedRewrite: buildGenericSuggestedRewrite(raw),
