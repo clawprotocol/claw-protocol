@@ -144,7 +144,7 @@ describe("paidPro universal finalize persist GTM (all prompt types)", () => {
       const identities: SignerSetupPartyIdentity[] = case_.parties.map((name) => ({
         legalEntityName: name,
         displayName: name,
-        source: "intake" as const,
+        source: "intake_manifest" as const,
       }));
       const demos = ["ABC LLC", "Sample Corp", "LawDog Demo LLC"];
       for (let i = 0; i < identities.length; i++) {

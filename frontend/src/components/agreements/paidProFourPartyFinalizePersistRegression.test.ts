@@ -96,10 +96,10 @@ describe("paidPro 4-party finalize persist + fused notices (universal)", () => {
 
   it("disposable demo seeds never override canonical intake party names in signer fields", () => {
     const identities: SignerSetupPartyIdentity[] = [
-      { legalEntityName: "Alpha LLC", displayName: "Alpha LLC", source: "intake" },
-      { legalEntityName: "Beacon Inc", displayName: "Beacon Inc", source: "intake" },
-      { legalEntityName: "Cedar LP", displayName: "Cedar LP", source: "intake" },
-      { legalEntityName: "Delta Co", displayName: "Delta Co", source: "intake" },
+      { legalEntityName: "Alpha LLC", displayName: "Alpha LLC", source: "intake_manifest" },
+      { legalEntityName: "Beacon Inc", displayName: "Beacon Inc", source: "intake_manifest" },
+      { legalEntityName: "Cedar LP", displayName: "Cedar LP", source: "intake_manifest" },
+      { legalEntityName: "Delta Co", displayName: "Delta Co", source: "intake_manifest" },
     ];
     expect(
       resolveSignerPartyLegalEntityDisplayValue({
