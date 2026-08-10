@@ -1607,6 +1607,8 @@ import {
   shouldRunAutoPersistAfterAuthoritativeCommit,
 } from "./paidProReviewReadyWorkspacePersist";
 import {
+  ensurePaidProReviewSessionAuthorityFromVisibleCorpus,
+  hasPaidProReviewSessionAuthority,
   replacePaidProReviewSessionAuthorityAfterSignerFinalize,
   resolvePaidProReviewSessionAuthorityPersistPlain,
 } from "./paidProReviewSessionAuthority";
@@ -5637,7 +5639,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       hydratedPremiumBody: hydratedPremiumBodyRef.current,
     });
     const sessionAuthorityPlain = resolvePaidProReviewSessionAuthorityPersistPlain();
-    const corpusPlain =
+    let corpusPlain =
       sessionAuthorityPlain.trim().length >= PAID_PRO_AUTHORITY_MIN_LEN
         ? sessionAuthorityPlain
         : resolveCreateFlowAcceptedPipelineCorpusPlain({
@@ -5647,6 +5649,24 @@ const AgreementBuilderIntake: React.FC<Props> = ({
               lastPremiumWinningCorpusRef.current || premiumPipelineOutputBodyRef.current,
             hydratedPremiumBody: hydratedPremiumBodyRef.current,
           });
+    if (corpusPlain.trim().length < PAID_PRO_AUTHORITY_MIN_LEN && hasPaidProSourceOfTruth()) {
+      const sot = getPaidProSourceOfTruthText().trim();
+      if (sot.length >= PAID_PRO_AUTHORITY_MIN_LEN) corpusPlain = sot;
+    }
+    // Pipeline/SoT can paint review without session authority; latch authority from that
+    // visible corpus so workspace mint is not blocked (universal — any family / party count).
+    if (
+      useReviewFirstPersist &&
+      !hasPaidProReviewSessionAuthority() &&
+      corpusPlain.trim().length >= PAID_PRO_AUTHORITY_MIN_LEN
+    ) {
+      ensurePaidProReviewSessionAuthorityFromVisibleCorpus({
+        corpusPlain,
+        source: "ensure_workspace_visible_corpus",
+      });
+      const latched = resolvePaidProReviewSessionAuthorityPersistPlain().trim();
+      if (latched.length >= PAID_PRO_AUTHORITY_MIN_LEN) corpusPlain = latched;
+    }
     const draftForPersist =
       useReviewFirstPersist && corpusPlain.trim().length >= PAID_PRO_AUTHORITY_MIN_LEN
         ? mergeDraftForPaidCreateFlowPersist(snapshot, corpusPlain)
@@ -5657,7 +5677,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         persistCorpusPlain: corpusPlain,
       });
       if (!paintReady.ready) {
-        if (import.meta.env.DEV) {
+        if (import.meta.env.DEV || typeof console !== "undefined") {
           // eslint-disable-next-line no-console
           console.warn("[paid-pro-workspace-persist-blocked]", {
             reason: paintReady.reason,
@@ -29426,6 +29446,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     ).trim();
     if (!durableAgreementId) {
       setCreateFlowDraftPersistError(null);
+      setProFullDraftQualityRetry(false);
       try {
         durableAgreementId = (await ensureReviewAgreementWorkspaceId())?.trim() || "";
       } catch {

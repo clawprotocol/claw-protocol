@@ -1607,10 +1607,10 @@ export function repairFusedNoticesHeadingToPriorClause(corpus: string): {
 } {
   const repairs: string[] = [];
   let text = (corpus || "").replace(/\r\n/g, "\n");
-  // "…Agreement.12. Notices" / "…letter.12. Notices"
+  // "…Agreement.12. Notices" / "…letter.12. Notices" (any Notices casing)
   const fusedDotRe = /([a-z])(\.\d+(?:\.\d+)?\.\s+)Notices\b/gi;
-  // "…Agreement12. Notices" (no separating punctuation before the section number)
-  const fusedBareRe = /([A-Za-z])(\d+\.\s+)Notices\b/g;
+  // "…Agreement12. Notices" / "…Agreement12. NOTICES" (no separating punctuation)
+  const fusedBareRe = /([A-Za-z])(\d+\.\s+)Notices\b/gi;
   const hadDot = fusedDotRe.test(text);
   fusedDotRe.lastIndex = 0;
   const hadBare = fusedBareRe.test(text);

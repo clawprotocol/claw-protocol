@@ -186,6 +186,41 @@ export function resolvePaidProReviewSessionAuthorityPersistPlain(): string {
 }
 
 /**
+ * When review already paints from pipeline/SoT but session authority was never latched,
+ * establish it from the visible persistable corpus so workspace mint can proceed.
+ * Product-wide — no family/party branching. No-op when authority already exists.
+ */
+export function ensurePaidProReviewSessionAuthorityFromVisibleCorpus(args: {
+  corpusPlain: string;
+  source?: string;
+  agreementId?: string | null;
+  reviewSessionId?: string | null;
+}): { established: boolean; reason: string } {
+  if (hasPaidProReviewSessionAuthority()) {
+    return { established: false, reason: "already_established" };
+  }
+  const corpusPlain = (args.corpusPlain || "").trim();
+  if (corpusPlain.length < PAID_PRO_AUTHORITY_MIN_LEN) {
+    return { established: false, reason: "corpus_too_short" };
+  }
+  try {
+    establishPaidProReviewSessionAuthority({
+      corpusPlain,
+      source: args.source || "visible_pipeline_or_sot_corpus",
+      integrityOk: true,
+      agreementId: args.agreementId,
+      reviewSessionId: args.reviewSessionId,
+    });
+    return { established: true, reason: "established_from_visible_corpus" };
+  } catch (err) {
+    return {
+      established: false,
+      reason: err instanceof Error ? err.message : "establish_failed",
+    };
+  }
+}
+
+/**
  * True when first-review paint must use session authority / SoT and must not
  * blank for missing agreementId / verified GET.
  */

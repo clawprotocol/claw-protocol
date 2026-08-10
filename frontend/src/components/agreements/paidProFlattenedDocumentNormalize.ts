@@ -17,7 +17,11 @@ import { repairPaidProEmptyParentSectionHierarchy } from "./repairPaidProEmptyPa
 import { reconcileNamedSectionCrossReferences } from "./paidProReviewedDocumentIntegrity";
 import { normalizePaidProCopyQuality } from "./paidProCopyQualityNormalize";
 import { repairMalformedSectionAnyReference } from "./paidProFrozenManifestDisplayAuthority";
-import { repairBareEntityOnlyNoticeStanzas, repairCollapsedInlineNoticeStanzas } from "./paidProPartyNoticeDetails";
+import {
+  repairBareEntityOnlyNoticeStanzas,
+  repairCollapsedInlineNoticeStanzas,
+  repairFusedNoticesHeadingToPriorClause,
+} from "./paidProPartyNoticeDetails";
 import { repairPaidProDocumentTitleOpening } from "./paidProDocumentTitleOpeningRepair";
 import { PAID_PRO_AUTHORITY_MIN_LEN } from "./paidProAgreementAuthority";
 import { getPaidProSourceOfTruthText, hasPaidProSourceOfTruth } from "./paidProSourceOfTruth";
@@ -182,6 +186,12 @@ export function preparePaidProReviewDisplayPlain(
   const norm = normalizeFlattenedPaidProDocumentBlocks(text);
   let out = norm.text;
   repairs.push(...norm.repairs);
+  // Universal: defuse `…Agreement12. NOTICES` before structure analyze (display path, not freeze-only).
+  const fusedNotices = repairFusedNoticesHeadingToPriorClause(out);
+  if (fusedNotices.repairs.length > 0) {
+    out = fusedNotices.text;
+    repairs.push(...fusedNotices.repairs);
+  }
   const stripped = stripInlineStaleServerSignatureTailBeforeWitness(out);
   out = stripped.text;
   repairs.push(...stripped.repairs);

@@ -166,6 +166,8 @@ function isDeliberateSignerLegalEntityUserOverride(
   if (partyLegalNamesMatch(current, canonical)) return false;
   const contamination = detectSignerSlotContamination(slotIndex, current, slotIdentities);
   if (contamination.contaminated) return false;
+  // Demo fixture seeds (ABC LLC / Sample Corp) are never deliberate overrides of intake parties.
+  if (isRecipientHandoffSeedDisposable(current) && canonical) return false;
   if (hasSignerPartyLegalEntityDisplayPollution(canonical)) return true;
   if (!hasLegalEntitySuffix(current)) return false;
   return true;
@@ -189,6 +191,10 @@ export function resolveSignerPartyLegalEntityDisplayValue(args: {
     args.source || "user_input",
   );
   if (!current) return canonical;
+  // Disposable demo seeds never win over a real canonical intake/handoff name.
+  if (isRecipientHandoffSeedDisposable(current) && canonical) {
+    return canonical;
+  }
   const contamination = detectSignerSlotContamination(args.slotIndex, current, args.slotIdentities);
   if (contamination.contaminated) {
     const corrected = sanitizeSlotLegalEntityDisplay(
