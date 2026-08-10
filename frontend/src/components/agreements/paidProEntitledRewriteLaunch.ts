@@ -104,7 +104,8 @@ export type EntitledRewriteGenerationFailureTerminalPlan = {
   proFullDraftCustomGateMessage: string;
   agreementDocumentPlain: "";
   createFlowPhase: CreateFlowProductionPhase;
-  displayPhase: "generating_draft" | "review";
+  /** Always review/recovery — never leave generating_draft armed (stuck spinner / Structuring CTA). */
+  displayPhase: "review";
   createUiStage: typeof CreateUiStage.DRAFT;
   clearPipelineRefs: true;
   terminalReason: PaidProGenerationTerminalReason;
@@ -113,7 +114,8 @@ export type EntitledRewriteGenerationFailureTerminalPlan = {
 
 export function planEntitledRewriteGenerationFailureTerminal(args: {
   reason: PaidProGenerationTerminalReason;
-  dashboardRoute: boolean;
+  /** @deprecated Ignored — dashboard and non-dashboard share the same recovery phases. */
+  dashboardRoute?: boolean;
   customMessage?: string | null;
 }): EntitledRewriteGenerationFailureTerminalPlan {
   const retryCopy =
@@ -128,8 +130,9 @@ export function planEntitledRewriteGenerationFailureTerminal(args: {
     hardError: null,
     proFullDraftCustomGateMessage: retryCopy,
     agreementDocumentPlain: "",
-    createFlowPhase: args.dashboardRoute ? "generating_draft" : "draft_ready_for_review",
-    displayPhase: args.dashboardRoute ? "generating_draft" : "review",
+    // review_recovery is selected via proFullDraftQualityRetry — do not keep generating_draft.
+    createFlowPhase: "draft_ready_for_review",
+    displayPhase: "review",
     createUiStage: CreateUiStage.DRAFT,
     clearPipelineRefs: true,
     terminalReason: args.reason,

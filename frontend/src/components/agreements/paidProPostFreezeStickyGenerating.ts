@@ -31,8 +31,12 @@ export function shouldSuppressPaidProGeneratingPrimaryCta(args: {
   inlineSignerSetupLatched: boolean;
   canonicalReviewSignerSetupActive: boolean;
   signerSetupStickyCtaSurfaceActive: boolean;
+  /** Quality-retry recovery must show Retry, not “Structuring key terms…”. */
+  proFullDraftQualityRetry?: boolean;
+  failedPremiumCorpusActive?: boolean;
 }): boolean {
   if (!args.isGenerating) return false;
+  if (args.proFullDraftQualityRetry || args.failedPremiumCorpusActive) return true;
   if (args.signerSetupStickyCtaSurfaceActive) return true;
   if (
     args.hasSourceOfTruth &&

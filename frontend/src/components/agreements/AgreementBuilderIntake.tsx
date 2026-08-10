@@ -7281,6 +7281,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         setProFullDraftCustomGateMessage(
           "Your Pro agreement could not be locked for review on the server. Tap **Retry Pro draft**.",
         );
+        setCreateFlowPhase("draft_ready_for_review");
+        setDisplayPhase("review");
+        setPremiumPostCheckoutPhase(resolvePaidProGenerationFailurePostCheckoutPhase());
+        setPremiumPipelineUserMessage(null);
+        premiumModalExtendedWaitActiveRef.current = false;
+        setPremiumCheckoutModalExtendedWait(false);
+        setPremiumAuthoritativeRequestInFlight(false);
         setLoading(false);
         entitledPremiumRewriteInFlightRef.current = false;
         return;
@@ -7323,6 +7330,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             setProFullDraftCustomGateMessage(
               "Your Pro agreement could not be locked for review on the server. Tap **Retry Pro draft**.",
             );
+            setCreateFlowPhase("draft_ready_for_review");
+            setDisplayPhase("review");
+            setPremiumPostCheckoutPhase(resolvePaidProGenerationFailurePostCheckoutPhase());
+            setPremiumPipelineUserMessage(null);
+            premiumModalExtendedWaitActiveRef.current = false;
+            setPremiumCheckoutModalExtendedWait(false);
+            setPremiumAuthoritativeRequestInFlight(false);
             setLoading(false);
             entitledPremiumRewriteInFlightRef.current = false;
             return;
@@ -7530,10 +7544,23 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         console.warn("[premium-flow] entitled_rewrite_failed", e);
       }
       setHardError("We couldn't refresh your Pro draft right now. Try again in a moment.");
-      setPremiumPostCheckoutPhase(null);
+      setProFullDraftQualityRetry(true);
+      setCreateFlowPhase("draft_ready_for_review");
+      setDisplayPhase("review");
+      setPremiumPostCheckoutPhase(resolvePaidProGenerationFailurePostCheckoutPhase());
       setPremiumPipelineUserMessage(null);
+      premiumModalExtendedWaitActiveRef.current = false;
+      setPremiumCheckoutModalExtendedWait(false);
+      setPremiumAuthoritativeRequestInFlight(false);
+      setLoading(false);
     } finally {
       entitledPremiumRewriteInFlightRef.current = false;
+      // Never leave the generate wait modal armed after entitled rewrite exits.
+      setPremiumPostCheckoutPhase((prev) =>
+        prev === "processing" || prev === "network_retry" || prev === "generation_retry"
+          ? null
+          : prev,
+      );
     }
   }, [
     draft,
@@ -22322,6 +22349,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             inlineSignerSetupLatched: paidProInlineSignerSetupLatched,
             canonicalReviewSignerSetupActive: paidProCanonicalReviewSignerSetupActive,
             signerSetupStickyCtaSurfaceActive: paidProSignerSetupStickyCtaSurfaceActive,
+            proFullDraftQualityRetry,
+            failedPremiumCorpusActive,
           })
         ) {
           return {

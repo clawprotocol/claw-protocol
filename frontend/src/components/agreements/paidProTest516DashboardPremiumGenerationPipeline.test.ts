@@ -148,7 +148,10 @@ describe("TEST516 — dashboard premium generation pipeline (not routing)", () =
     expect(terminal.proFullDraftQualityRetry).toBe(true);
     expect(terminal.premiumPersistedFlowActive).toBe(false);
     expect(terminal.agreementDocumentPlain).toBe("");
-    expect(terminal.displayPhase).toBe("generating_draft");
+    // Recovery must leave generating_draft so wait modal / Structuring CTA cannot stick.
+    expect(terminal.displayPhase).toBe("review");
+    expect(terminal.createFlowPhase).toBe("draft_ready_for_review");
+    expect(terminal.premiumPostCheckoutPhase).toBe(null);
     expect(terminal.createUiStage).toBe(CreateUiStage.DRAFT);
   });
 

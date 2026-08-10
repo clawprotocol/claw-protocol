@@ -170,7 +170,8 @@ describe("TEST524 — dashboard_paid_create canonical screen flow", () => {
   it("validation failure shows recovery before blank review document", () => {
     markPaidDashboardCreateContextForTests(DASHBOARD_PAID_CREATE_ROUTE_SOURCE);
     const terminal = planDashboardPaidCreateValidationFailureTerminal();
-    expect(terminal.displayPhase).toBe("generating_draft");
+    expect(terminal.displayPhase).toBe("review");
+    expect(terminal.createFlowPhase).toBe("draft_ready_for_review");
     expect(terminal.agreementDocumentPlain).toBe("");
     const authority = resolvePaidProReviewAuthority({
       workspaceProEntitled: true,

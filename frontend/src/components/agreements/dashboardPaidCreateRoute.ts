@@ -130,7 +130,7 @@ export function computeDashboardPaidCreateReviewShellReady(
 export type DashboardPaidCreateValidationFailurePlan = {
   proFullDraftQualityRetry: true;
   createFlowPhase: CreateFlowProductionPhase;
-  displayPhase: "generating_draft";
+  displayPhase: "review";
   createUiStage: typeof CreateUiStage.DRAFT;
   premiumPersistedFlowActive: false;
   premiumSendPathUnlocked: false;
@@ -139,12 +139,8 @@ export type DashboardPaidCreateValidationFailurePlan = {
 };
 
 export function planDashboardPaidCreateValidationFailureTerminal(): DashboardPaidCreateValidationFailurePlan {
-  const base = planPaidProCreateValidationFailureTerminal();
-  return {
-    ...base,
-    displayPhase: "generating_draft",
-    createFlowPhase: "generating_draft",
-  };
+  // Same recovery phases as first-paid create — review_recovery comes from qualityRetry, not generating_draft.
+  return planPaidProCreateValidationFailureTerminal();
 }
 
 export function evaluateDashboardPaidCreatePipelineGate(
