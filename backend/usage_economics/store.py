@@ -726,7 +726,11 @@ class UsageEconomicsStore:
             return uep.list_agreement_ids_for_subject(subj)
         with self._conn() as con:
             rows = con.execute(
-                "SELECT agreement_id FROM agreement_owner WHERE subject_ref = ?",
+                """
+                SELECT agreement_id FROM agreement_owner
+                WHERE subject_ref = ?
+                ORDER BY created_at DESC, agreement_id DESC
+                """,
                 (subj,),
             ).fetchall()
             return [str(r[0]).strip() for r in rows if str(r[0] or "").strip()]

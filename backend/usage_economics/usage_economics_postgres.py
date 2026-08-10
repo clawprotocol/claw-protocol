@@ -436,7 +436,11 @@ def list_agreement_ids_for_subject(subject_ref: str) -> list[str]:
         return []
     with _tx() as conn:
         cur = conn.execute(
-            "SELECT agreement_id FROM agreement_owner WHERE subject_ref = %s",
+            """
+            SELECT agreement_id FROM agreement_owner
+            WHERE subject_ref = %s
+            ORDER BY created_at DESC NULLS LAST, agreement_id DESC
+            """,
             (subj,),
         )
         rows = cur.fetchall()

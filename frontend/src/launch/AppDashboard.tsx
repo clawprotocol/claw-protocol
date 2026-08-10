@@ -23,6 +23,7 @@ import {
   type LawdogWorkspaceArchiveRequest,
 } from "./LawdogAgreementsTable";
 import { DashboardKpiCards } from "./DashboardKpiCards";
+import { DashboardIndexLoadingShell } from "./DashboardIndexLoadingShell";
 import { DashboardWhatsNextPanel } from "./DashboardWhatsNextPanel";
 import { DashboardFirstUserOnboarding } from "./DashboardFirstUserOnboarding";
 import { resolveDashboardFeaturedAgreementId } from "./dashboardWhatsNextPresentation";
@@ -79,14 +80,10 @@ import {
   logDashboardWorkspaceIndexRow,
   logDashboardWorkspaceIndexSkippedRow,
 } from "./dashboardWorkspaceIndexDiagnostics";
-import {
-  mergeWorkspaceAgreementCompletion,
-  workspaceRowNeedsCompletionAuditHydration,
-} from "./creatorDashboardAgreementCompletion";
+import { mergeWorkspaceAgreementCompletion } from "./creatorDashboardAgreementCompletion";
 import { mergeWorkspaceRowFromSigningProgress } from "./ownerSigningStatusResolver";
 import {
   fetchServerSigningProgressSnapshot,
-  workspaceRowNeedsSigningProgressHydration,
   type CreatorSigningProgressSnapshot,
 } from "./creatorDashboardSigningProgress";
 import { readSigningPacketStatus } from "../vs01/vs01SigningPacketStatusStore";
@@ -107,7 +104,11 @@ import {
   DASHBOARD_PRIORITY_HYDRATION_LIMIT,
   DASHBOARD_REVIEW_REFRESH_INTERVAL_MS,
   DASHBOARD_SECONDARY_ATTENTION_LIMIT,
+  DASHBOARD_SIGNING_HYDRATION_DEFER_MS,
+  selectDashboardAuditHydrationRows,
   selectDashboardPriorityHydrationRows,
+  selectDashboardSigningProgressHydrationRows,
+  seedAuditCompletedFromWorkspaceIndex,
   sliceDashboardHomeTableRows,
 } from "./dashboardLoadBudget";
 
@@ -154,9 +155,7 @@ export function AppDashboard() {
   const hydrateAuditCompletionFlags = useCallback(
     async (sourceRows: readonly WorkspaceIndexAgreement[], opts?: { limit?: number }) => {
       const limit = opts?.limit ?? DASHBOARD_HOME_TABLE_PAGE_SIZE;
-      const candidates = sourceRows
-        .filter(workspaceRowNeedsCompletionAuditHydration)
-        .slice(0, Math.max(0, limit));
+      const candidates = selectDashboardAuditHydrationRows(sourceRows, limit);
       if (candidates.length === 0) return;
       const flags = await Promise.all(
         candidates.map(async (row) => {
@@ -178,9 +177,7 @@ export function AppDashboard() {
   const hydrateSigningProgressFlags = useCallback(
     async (sourceRows: readonly WorkspaceIndexAgreement[], opts?: { limit?: number }) => {
       const limit = opts?.limit ?? DASHBOARD_HOME_TABLE_PAGE_SIZE;
-      const candidates = sourceRows
-        .filter(workspaceRowNeedsSigningProgressHydration)
-        .slice(0, Math.max(0, limit));
+      const candidates = selectDashboardSigningProgressHydrationRows(sourceRows, limit);
       if (candidates.length === 0) return;
       const entries = await Promise.all(
         candidates.map(async (row) => {
@@ -206,6 +203,11 @@ export function AppDashboard() {
     const { agreements, skipped, error } = await fetchWorkspaceIndex();
     const deduped = dedupeWorkspaceIndexAgreements(agreements);
     setRows(deduped);
+    // Trust index completion flags immediately — no wait on audit GETs for already-signed rows.
+    const seeded = seedAuditCompletedFromWorkspaceIndex(deduped);
+    if (Object.keys(seeded).length > 0) {
+      setAuditCompletedByAgreementId((prev) => ({ ...prev, ...seeded }));
+    }
     for (const row of agreements) {
       logDashboardWorkspaceIndexRow(
         buildDashboardWorkspaceIndexRowDiagnostic(row),
@@ -220,7 +222,25 @@ export function AppDashboard() {
     setIndexError(error);
     if (!quiet) setIndexLoading(false);
     void hydrateAuditCompletionFlags(deduped, { limit: DASHBOARD_HOME_TABLE_PAGE_SIZE });
-    void hydrateSigningProgressFlags(deduped, { limit: DASHBOARD_HOME_TABLE_PAGE_SIZE });
+    // Defer signing-progress fan-out so first paint is not competing with verify GETs.
+    const runSigningHydration = () => {
+      void hydrateSigningProgressFlags(deduped, { limit: DASHBOARD_HOME_TABLE_PAGE_SIZE });
+    };
+    const deferMs = DASHBOARD_SIGNING_HYDRATION_DEFER_MS;
+    if (typeof window === "undefined") {
+      runSigningHydration();
+    } else {
+      const ric = (
+        window as Window & {
+          requestIdleCallback?: (cb: () => void) => number;
+        }
+      ).requestIdleCallback;
+      if (deferMs <= 0 && typeof ric === "function") {
+        ric(runSigningHydration);
+      } else {
+        window.setTimeout(runSigningHydration, Math.max(0, deferMs));
+      }
+    }
   }, [hydrateAuditCompletionFlags, hydrateSigningProgressFlags]);
 
   useEffect(() => {
@@ -975,6 +995,13 @@ export function AppDashboard() {
           </div>
         ) : null}
 
+        {indexLoading ? (
+          <DashboardIndexLoadingShell
+            onCreateAgreement={() => withClearEntry(navigateToCreateNewAgreement)}
+            cardCount={3}
+          />
+        ) : null}
+
         {!indexLoading && activeRecent.length > 0 ? (
           <>
             <div className="mb-6 flex flex-wrap items-center justify-between gap-3">
@@ -994,9 +1021,7 @@ export function AppDashboard() {
           </>
         ) : null}
 
-        {indexLoading ? (
-          <p className="text-sm text-slate-400">Loading agreements…</p>
-        ) : activeRecent.length === 0 ? (
+        {!indexLoading && activeRecent.length === 0 ? (
           <>
             {archivedCount > 0 ? (
               <div
@@ -1023,7 +1048,7 @@ export function AppDashboard() {
               onCreateAgreement={() => withClearEntry(navigateToCreateNewAgreement)}
             />
           </>
-        ) : (
+        ) : !indexLoading ? (
           <div className="mt-2 space-y-8">
             {featuredRow ? (
               <DashboardWhatsNextPanel
@@ -1128,7 +1153,7 @@ export function AppDashboard() {
               ) : null}
             </section>
           </div>
-        )}
+        ) : null}
       </LawdogDashboardLayout>
 
       {canAccessOperatorGrowthDashboard() ? (

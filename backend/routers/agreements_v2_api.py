@@ -8,12 +8,13 @@ import json
 import logging
 import os
 import re
+import threading
 import time
 import traceback
 import uuid
 from difflib import SequenceMatcher
 from datetime import datetime, timezone
-from typing import Any, Dict, List, Literal, Optional, Tuple, cast
+from typing import Any, Dict, List, Literal, Optional, Set, Tuple, cast
 
 from fastapi import APIRouter, File, HTTPException, Request, Response, UploadFile
 from fastapi.responses import JSONResponse
@@ -5961,45 +5962,97 @@ def recipient_access_validate(token: str = "", agreement_id: str = "") -> Dict[s
     }
 
 
+# Subjects already scheduled for background ownership heal this process (healthy accounts).
+_workspace_index_heal_scheduled: Set[str] = set()
+_workspace_index_heal_lock = threading.Lock()
+
+
+def _schedule_workspace_index_ownership_heal(subject_ref: str) -> None:
+    """Fire-and-forget orphan heal so healthy dashboards never wait on a global draft scan."""
+    subj = (subject_ref or "").strip()
+    if not subj:
+        return
+    with _workspace_index_heal_lock:
+        if subj in _workspace_index_heal_scheduled:
+            return
+        _workspace_index_heal_scheduled.add(subj)
+
+    def _run() -> None:
+        try:
+            from backend.usage_economics.store import get_usage_economics_store
+
+            ustore = get_usage_economics_store()
+            ustore.init_schema()
+            healed = ustore.heal_orphaned_agreement_ownership_for_subject(subj)
+            if healed:
+                log.info(
+                    "workspace_index_ownership_healed_async subject=%s count=%s",
+                    subj,
+                    len(healed),
+                )
+        except Exception:
+            log.exception("workspace_index_ownership_heal_async_failed subject=%s", subj)
+
+    threading.Thread(target=_run, name="workspace-index-heal", daemon=True).start()
+
+
 @router.get("/workspace-index")
 def get_agreements_workspace_index(request: Request) -> Dict[str, Any]:
     """Lightweight list for Agreement Workspace landing (local / single-tenant style)."""
     from backend.security.commercial_auth import require_commercial_owner_principal
     from backend.usage_economics.policy import assert_guest_workflow_denied
+    from backend.usage_economics.store import get_usage_economics_store
 
     require_commercial_owner_principal(request)
     subject = resolve_subject_from_request(request)
     assert_guest_workflow_denied(subject_ref=subject, surface="workspace_history")
-    # Restore ownership wiped by legacy hard-delete Genesis monthly resets before listing.
+    t0 = time.perf_counter()
+    heal_ms = 0.0
+    owned_ids: List[str] = []
+    used_global_draft_scan = False
+    # Prefer subject-scoped ownership rows. Sync heal only when the subject has none
+    # (recovery after legacy resets); otherwise never block on a global draft scan.
     try:
-        from backend.usage_economics.store import get_usage_economics_store
-
         ustore = get_usage_economics_store()
         ustore.init_schema()
-        healed = ustore.heal_orphaned_agreement_ownership_for_subject(subject)
-        if healed:
-            log.info(
-                "workspace_index_ownership_healed subject=%s count=%s",
-                subject,
-                len(healed),
-            )
+        owned_ids = list(ustore.list_agreement_ids_for_subject(subject) or [])
+        if not owned_ids:
+            t_heal = time.perf_counter()
+            healed = ustore.heal_orphaned_agreement_ownership_for_subject(subject)
+            heal_ms = (time.perf_counter() - t_heal) * 1000.0
+            if healed:
+                log.info(
+                    "workspace_index_ownership_healed subject=%s count=%s",
+                    subject,
+                    len(healed),
+                )
+                owned_ids = list(ustore.list_agreement_ids_for_subject(subject) or [])
+        else:
+            _schedule_workspace_index_ownership_heal(subject)
     except Exception:
-        log.exception("workspace_index_ownership_heal_failed subject=%s", subject)
+        log.exception("workspace_index_ownership_resolve_failed subject=%s", subject)
     folder_names = _folder_name_map_for_subject(subject)
     summaries: List[Dict[str, Any]] = []
     skipped: List[Dict[str, str]] = []
-    local_ids = list_draft_agreement_ids_newest_first()
+    if owned_ids:
+        local_ids = list(owned_ids)
+    else:
+        # Last resort: host-wide draft ids (empty ownership after failed heal).
+        local_ids = list_draft_agreement_ids_newest_first()
+        used_global_draft_scan = True
     agreement_ids = merge_workspace_index_agreement_ids(
         subject_ref=subject,
         local_ids_newest_first=local_ids,
     )
     supabase_rows = supabase_rows_by_id_for_subject(subject)
+    draft_loads = 0
     for aid in agreement_ids:
         listed = workspace_lists_agreement_for_subject(aid, subject)
         if not listed and aid not in supabase_rows:
             continue
         try:
             d = load_draft(aid)
+            draft_loads += 1
         except Exception as exc:
             sb_row = supabase_rows.get(aid)
             if sb_row:
@@ -6100,6 +6153,23 @@ def get_agreements_workspace_index(request: Request) -> Dict[str, Any]:
                 reason,
             )
             continue
+    summaries.sort(
+        key=lambda row: str(row.get("updated_at") or row.get("created_at") or ""),
+        reverse=True,
+    )
+    elapsed_ms = (time.perf_counter() - t0) * 1000.0
+    log.info(
+        "workspace_index_ms=%.1f draft_loads=%s heal_ms=%.1f owned_ids=%s "
+        "agreement_ids=%s summaries=%s global_draft_scan=%s subject=%s",
+        elapsed_ms,
+        draft_loads,
+        heal_ms,
+        len(owned_ids),
+        len(agreement_ids),
+        len(summaries),
+        used_global_draft_scan,
+        subject,
+    )
     return {"agreements": summaries, "skipped": skipped}
 
 
