@@ -142,9 +142,13 @@ export function finalizePaidProSigningCorpusText(
   corpus: string,
   parties?: readonly PaidProSignerMetadataParty[],
   roleContext?: PaidProPartyRoleContext | null,
+  opts?: { signatureRegionOnly?: boolean },
 ): { text: string; repairs: string[] } {
   const repairs: string[] = [];
   let text = (corpus || "").replace(/\r\n/g, "\n").trimEnd();
+  // Signature-region hydration may fill existing notice contacts / execution fields, but must
+  // not invent a Notices section or reflow operative headings (operative fingerprint stable).
+  const signatureRegionOnly = opts?.signatureRegionOnly === true;
 
   const stripped = stripPaidProSignerSummaryBlocksFromCorpus(text);
   if (stripped.removed > 0) {
@@ -189,29 +193,31 @@ export function finalizePaidProSigningCorpusText(
 
   const contactAuthority = applyContactAuthorityExecutionBlockIntegrity(text, {
     source: "finalize_paid_pro_signing_corpus",
-    ensureNoticesClause: true,
+    ensureNoticesClause: !signatureRegionOnly,
   });
   if (contactAuthority.repaired) {
     text = contactAuthority.text;
     repairs.push(...contactAuthority.repairs.map((tag) => `contact_authority:${tag}`));
   }
 
-  const gluedHeadings = repairGluedSectionHeadingsInText(text);
-  if (gluedHeadings !== text) {
-    text = gluedHeadings;
-    repairs.push("glued_section_headings_pre_notice");
-  }
-  const structure = repairSectionStructureIntegrity(text);
-  if (structure.repaired) {
-    text = structure.text;
-    repairs.push(...structure.repairs.map((tag) => `structure:${tag}`));
-  }
+  if (!signatureRegionOnly) {
+    const gluedHeadings = repairGluedSectionHeadingsInText(text);
+    if (gluedHeadings !== text) {
+      text = gluedHeadings;
+      repairs.push("glued_section_headings_pre_notice");
+    }
+    const structure = repairSectionStructureIntegrity(text);
+    if (structure.repaired) {
+      text = structure.text;
+      repairs.push(...structure.repairs.map((tag) => `structure:${tag}`));
+    }
 
-  if (parties && parties.length >= 2) {
-    const noticeDelivery = ensureOperativeIfToNoticeDelivery(text, parties, roleContext);
-    if (noticeDelivery.repairs.length > 0) {
-      text = noticeDelivery.text;
-      repairs.push(...noticeDelivery.repairs.map((tag) => `notice_delivery:${tag}`));
+    if (parties && parties.length >= 2) {
+      const noticeDelivery = ensureOperativeIfToNoticeDelivery(text, parties, roleContext);
+      if (noticeDelivery.repairs.length > 0) {
+        text = noticeDelivery.text;
+        repairs.push(...noticeDelivery.repairs.map((tag) => `notice_delivery:${tag}`));
+      }
     }
   }
 
