@@ -23,6 +23,7 @@ import { clearPaidProVisibleRenderMemo } from "./paidProVisibleRenderMemo";
 import { hashPaidProCorpus } from "./paidProSourceOfTruth";
 import { stripRecipientEmailNoise } from "./recipientEmailValidation";
 import { resolveCanonicalPartyIdentitiesFromIntake } from "./canonicalPartyIdentityResolver";
+import { isPreservableIntakeRole } from "./canonicalPartyRoleAuthority";
 import { resolveAcceptedCorpusRoleLabelForLegalName } from "./paidProAcceptedCorpusPartyRoles";
 import {
   isQuadripartiteLabeledPartiesIntake,
@@ -329,12 +330,15 @@ function resolveRoleLabelForAuthorityParty(
   partyIndex: number,
   context?: PaidProPartyRoleContext | null,
 ): string {
+  // Intake-declared commercial roles (Buyer/Vendor/Agency/…) win over opening-parenthetical
+  // defaults that freeze prep may have normalized to Client/Service Provider.
+  const intakeRole = resolveIntakeRoleLabelForLegalName(legalName, context);
+  if (intakeRole && isPreservableIntakeRole(intakeRole)) return intakeRole;
   const corpusRole = resolveAcceptedCorpusRoleLabelForLegalName(
     legalName,
     context?.acceptedCorpus ?? null,
   );
   if (corpusRole) return corpusRole;
-  const intakeRole = resolveIntakeRoleLabelForLegalName(legalName, context);
   if (intakeRole) return intakeRole;
   return displayRoleLabelFromRoleLabel("", partyIndex);
 }

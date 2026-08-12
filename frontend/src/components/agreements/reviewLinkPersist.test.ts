@@ -8,19 +8,24 @@ describe("Test274 review-link persist blocker", () => {
   it("runPersistAndOpen never fake-succeeds when reviewFirstHandoffPersist is true", () => {
     const fnIdx = intake.indexOf("async function runPersistAndOpen");
     const catchIdx = intake.indexOf("} catch (e: unknown) {", fnIdx);
-    const catchBlock = intake.slice(catchIdx, catchIdx + 3200);
+    const catchBlock = intake.slice(catchIdx, catchIdx + 4500);
     expect(catchBlock).toContain("if (reviewFirstHandoffPersist)");
     expect(catchBlock).toContain("logReviewLinkPersistFailure");
     expect(catchBlock).toContain("return false");
-    const fakeSuccessIdx = catchBlock.indexOf("if (createProductionTwoPane && !hydrate && structuredOk)");
     const reviewGuardIdx = catchBlock.indexOf("if (reviewFirstHandoffPersist)");
+    const reviewReturnIdx = catchBlock.indexOf("return false", reviewGuardIdx);
+    const recoverIdx = catchBlock.indexOf("shouldRecoverPaidCreateFlowFromPersistFailure");
+    const fakeSuccessIdx = catchBlock.indexOf("if (createProductionTwoPane && !hydrate && structuredOk)");
     expect(reviewGuardIdx).toBeGreaterThan(-1);
-    expect(fakeSuccessIdx).toBeGreaterThan(reviewGuardIdx);
+    expect(reviewReturnIdx).toBeGreaterThan(reviewGuardIdx);
+    // Review-first must return false before any paid-create recover / fake-success path.
+    if (recoverIdx >= 0) expect(reviewReturnIdx).toBeLessThan(recoverIdx);
+    if (fakeSuccessIdx >= 0) expect(reviewReturnIdx).toBeLessThan(fakeSuccessIdx);
   });
 
   it("failReviewFirstPersist surfaces dedicated panel via reviewFirstHandoffError not hardError", () => {
     const handoffIdx = intake.indexOf("const completeGuidedPaidProReviewFirstHandoff = React.useCallback");
-    const block = intake.slice(handoffIdx, handoffIdx + 9000);
+    const block = intake.slice(handoffIdx, handoffIdx + 14000);
     expect(block).toContain("const failReviewFirstPersist = (");
     expect(block).toContain("setHardError(null)");
     expect(block).toContain("setReviewFirstHandoffError(message)");
@@ -52,16 +57,19 @@ describe("Test274 review-link persist blocker", () => {
     expect(intake).toContain("setReviewLinkPersistFailureDiagnostics(null)");
   });
 
-  it("successful review handoff routes to /app/done/:id", () => {
+  it("successful review handoff routes via paid Pro post-recipient owner path", () => {
     const handoffIdx = intake.indexOf("const completeGuidedPaidProReviewFirstHandoff = React.useCallback");
-    const block = intake.slice(handoffIdx, handoffIdx + 14000);
-    expect(block).toContain("const donePath = `/app/done/${encodeURIComponent(id)}`");
+    const block = intake.slice(handoffIdx, handoffIdx + 16000);
+    // Navigation is owned by executePaidProPostRecipientSetupHandoff (ownerRoutePath),
+    // which may be /app or /app/done depending on review delivery mode.
+    expect(block).toContain("executePaidProPostRecipientSetupHandoff");
     expect(block).toContain("logReviewFirstNavigateDone");
+    expect(block).toContain("result.ownerRoutePath");
   });
 
   it("persist failure uses persist_failed reason instead of agreement_id_missing UX", () => {
     const handoffIdx = intake.indexOf("const completeGuidedPaidProReviewFirstHandoff = React.useCallback");
-    const block = intake.slice(handoffIdx, handoffIdx + 9000);
+    const block = intake.slice(handoffIdx, handoffIdx + 14000);
     expect(block).toContain("failReviewFirstPersist(");
     expect(block).toContain('"persist_failed"');
     expect(block).toContain("REVIEW_LINK_PERSIST_BLOCKING_MESSAGE");

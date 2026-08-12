@@ -1,5 +1,9 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { clearPaidProSourceOfTruth, establishPaidProSourceOfTruth } from "./paidProSourceOfTruth";
+import {
+  clearPaidProSourceOfTruth,
+  establishPaidProSourceOfTruth,
+  getPaidProSourceOfTruthText,
+} from "./paidProSourceOfTruth";
 import {
   GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN,
   resolveSimpleProFinalReviewCorpus,
@@ -11,8 +15,15 @@ describe("simpleProFinalReviewCorpus (test28)", () => {
   });
 
   it("hard-stops to paidProSourceOfTruth instead of 624/653 fallback after acceptance", () => {
-    const source = "Accepted paid Pro agreement body. ".repeat(180);
+    // Freeze-viable accepted body: substantive wire + real execution block.
+    // Do not invent Party 1/Party 2 notices/signatures — execution must already be present.
+    const source = `${"Accepted paid Pro agreement body. ".repeat(180)}\n\nIN WITNESS WHEREOF, the Parties have executed this Agreement.\n`;
     establishPaidProSourceOfTruth({ text: source });
+    const sot = getPaidProSourceOfTruthText().trim();
+    expect(sot.length).toBeGreaterThanOrEqual(GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN);
+    expect(sot).toContain("IN WITNESS WHEREOF");
+    expect(sot).not.toMatch(/If to Party\s+\d+/i);
+    expect(sot).not.toMatch(/provided during signer setup/i);
     const out = resolveSimpleProFinalReviewCorpus({
       authoritativePlain: "x".repeat(624),
       pickerPlain: "y".repeat(653),
@@ -20,8 +31,10 @@ describe("simpleProFinalReviewCorpus (test28)", () => {
       renderedPreviewPlain: "p".repeat(773),
       finalReviewAuthorityOnly: true,
     });
-    expect(out.plainText).toBe(source.trim());
+    // Hard-stop: final review must use established SoT, not short picker/preview fallbacks.
+    expect(out.plainText).toBe(sot);
     expect(out.source).toBe("authoritative_hydrated");
+    expect(out.plainText.length).toBeGreaterThan(2000);
   });
 
   it("recovers final review display when display corpus empty but recovery snapshot is full", () => {

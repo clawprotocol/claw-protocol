@@ -36,6 +36,7 @@ import {
   normalizePlaceholderToken,
   parseSignatureContactSlot,
 } from "./agreementTemplatePlaceholderSafety";
+import { intakePartyManifestIsAuthoritative } from "./intakePartyManifestAuthority";
 import { repairIncompleteIfToNoticeStanzas } from "./paidProPartyNoticeDetails";
 import { restoreExactIntakeEmails } from "./paidProEmailMask";
 import { getPaidProSourceOfTruthText, hasPaidProSourceOfTruth } from "./paidProSourceOfTruth";
@@ -372,13 +373,25 @@ export function enforceUserVisibleRenderTokenAuthority(
     repairs.push("authority:numbered_email_substitution");
   }
 
-  if (parties.length >= 2 && !ctx?.skipNoticeRepair) {
+  const hasAuthoritativeNoticeParties = parties.some((p) => {
+    const name = String(p.partyLegalName || "").trim();
+    return name.length >= 3 && !/^Party\s+\d+$/i.test(name);
+  });
+  // Intake-labeled manifests may still need notice repair even when consumed authority
+  // slots are contaminated with Party N placeholders (TEST540).
+  const mayRepairNoticesFromIntake = intakePartyManifestIsAuthoritative(ctx?.intakeRaw);
+  if (
+    parties.length >= 2 &&
+    (hasAuthoritativeNoticeParties || mayRepairNoticesFromIntake) &&
+    !ctx?.skipNoticeRepair
+  ) {
     // TEST540 — this terminal render-token gate previously called notice repair WITHOUT a role
     // context, dropping the authoritative intake identity even though `ctx.intakeRaw` was in scope.
     // When `parties` was rebuilt from a contaminated consumed-authority snapshot (a "Party 1"
     // placeholder in slot 0), the notice resolver had no manifest to recover the real entity and
     // degraded slot 0 to "Party N" — the exact `paid-pro-notice-entity-missing` / Party 1 failure.
     // Threading the intake manifest identity here lets the resolver restore the canonical entity.
+    // Empty / positional Party N slots must not invent NOTICES scaffolding (commercial no-invent).
     const noticeRoleContext: PaidProPartyRoleContext = {
       intakeText: ctx?.intakeRaw ?? null,
       draftPartyNames: (ctx?.partyNames ?? parties.map((p) => p.partyLegalName))

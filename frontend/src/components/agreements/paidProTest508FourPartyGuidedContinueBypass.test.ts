@@ -11,7 +11,7 @@ import {
   clearCachedSubscriptionEntitlement,
   writeCachedSubscriptionEntitlement,
 } from "../../access/subscriptionEntitlementCache";
-import { getOrgId } from "../../launch/orgContext";
+import { getOrgId, setOrgId } from "../../launch/orgContext";
 import {
   assessStarterComplexityGate,
   buildMultiPartyProGateTitle,
@@ -32,9 +32,11 @@ import {
 } from "./paidProTest507Fixtures";
 
 const intakeSrc = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
+const TEST508_RETURNING_PAID_ORG = "user-test-508-returning-paid";
 
 function seedProvisionalPaidMarkerWithoutWorkspaceState(): void {
-  const orgId = getOrgId().trim() || "test-org";
+  setOrgId(TEST508_RETURNING_PAID_ORG);
+  const orgId = getOrgId().trim() || TEST508_RETURNING_PAID_ORG;
   markPersistedWorkspaceUsageTierForTests("paid", orgId);
 }
 
@@ -42,6 +44,7 @@ describe("TEST508 — guided_continue /app/create bypasses starter gate for prov
   beforeEach(() => {
     sessionStorage.clear();
     localStorage.clear();
+    setOrgId(TEST508_RETURNING_PAID_ORG);
     invalidateWorkspaceProEntitlementCache();
     markWorkspaceProEntitlementResolvedForTests(null);
     clearCachedSubscriptionEntitlement();
@@ -55,6 +58,7 @@ describe("TEST508 — guided_continue /app/create bypasses starter gate for prov
   afterEach(() => {
     sessionStorage.clear();
     localStorage.clear();
+    setOrgId("local-org");
     invalidateWorkspaceProEntitlementCache();
     markWorkspaceProEntitlementResolvedForTests(null);
     markPersistedWorkspaceUsageTierForTests(null);
@@ -175,7 +179,8 @@ describe("TEST508 — guided_continue /app/create bypasses starter gate for prov
   });
 
   it("subscription cache alone enables bypass without react workspace state", () => {
-    const orgId = getOrgId().trim() || "test-org";
+    setOrgId(TEST508_RETURNING_PAID_ORG);
+    const orgId = getOrgId().trim() || TEST508_RETURNING_PAID_ORG;
     writeCachedSubscriptionEntitlement(
       { plan_code: "pro", status: "active", org_id: orgId },
       orgId,

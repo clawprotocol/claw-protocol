@@ -22,6 +22,7 @@ import { mergeLabeledPartyAuthorityIntoParties, mergeDraftSignerContactFieldsOnt
 import { manifestRecordsForPaidProAcceptance, isGenericPaidProAcceptanceManifestFallback } from "./paidProAcceptanceExecutionBlockInvariant";
 import { resolveCanonicalPartyIdentitiesFromSources } from "./canonicalPartyIdentityResolver";
 import { resolvePartiesForReviewRender } from "./paidProReviewRenderParties";
+import { intakePartyManifestIsAuthoritative } from "./intakePartyManifestAuthority";
 import { resolveAuthoritativeSignerCount } from "./signerCountAuthority";
 import {
   containsUnresolvedRenderTokens,
@@ -113,23 +114,8 @@ export function resolvePaidProNoticeAuthorityPartiesForFreeze(args: {
   const authoritativePartyCountAfterCorpus = parties.filter((p) =>
     isAuthoritativeLegalEntityName(p.partyLegalName.trim()),
   ).length;
-  if (
-    authoritativePartyCountAfterCorpus < 2 &&
-    manifestRecords.length >= 2 &&
-    isGenericPaidProAcceptanceManifestFallback(manifestRecords)
-  ) {
-    parties = mergeDraftSignerContactFieldsOntoParties(
-      manifestRecords.slice(0, PAID_PRO_SIGNER_SETUP_MAX_UI_PARTIES).map((record, partyIndex) => ({
-        partyIndex,
-        partyLegalName: record.fullLegalName,
-        signerEmail: "",
-        signerName: (record.signerName?.trim() || "").trim(),
-        signerTitle: (record.signerTitle?.trim() || "").trim(),
-        partyAddress: (record.partyAddress?.trim() || "").trim(),
-      })),
-      args.draft ?? null,
-    );
-  }
+  // Generic Party 1 / Party 2 fallback must NOT invent notice stanzas or contact placeholders.
+  // Notices require authoritative legal entities (or omit the section until signer setup).
   const seed =
     args.reviewParties && args.reviewParties.length >= 2 ? [...args.reviewParties] : parties;
   return [...resolveNoticeStructuralValidationParties(seed, roleContext)];
@@ -192,13 +178,24 @@ export function applyPaidProNoticeContactAuthority(
     acceptedCorpus: opts?.acceptedCorpus ?? out,
   };
 
-  const headingRepair = ensureCanonicalNoticesSectionHeadingForFreeze(out);
-  if (headingRepair.repairs.length > 0) {
-    out = headingRepair.text;
-    repairs.push(...headingRepair.repairs);
+  const hasAuthoritativeNoticeParties = parties.some((p) => {
+    const name = String(p.partyLegalName || "").trim();
+    if (name.length < 3 || /^Party\s+\d+$/i.test(name)) return false;
+    // Positional / metadata placeholders are not notice-contact authority.
+    return !/^party\s*\d+$/i.test(name);
+  });
+
+  // Do not invent NOTICES / "provided during signer setup" scaffolding for generic
+  // Party 1 / Party 2 placeholders — that mutates accepted SoT without real entities.
+  if (hasAuthoritativeNoticeParties) {
+    const headingRepair = ensureCanonicalNoticesSectionHeadingForFreeze(out);
+    if (headingRepair.repairs.length > 0) {
+      out = headingRepair.text;
+      repairs.push(...headingRepair.repairs);
+    }
   }
 
-  if (parties.length >= 2) {
+  if (parties.length >= 2 && hasAuthoritativeNoticeParties) {
     const canonicalPartyCount = resolveAuthoritativeSignerCount({
       intakeText: intakeRaw,
       draftPartyNames: roleContext.draftPartyNames ?? undefined,
@@ -259,6 +256,10 @@ export function applyPaidProNoticeContactAuthority(
     partyNames: parties.map((p) => p.partyLegalName),
     surface,
     blockOnUnresolved: opts?.blockOnUnresolved ?? true,
+    // Token-gate notice repair would otherwise synthesize Party 1/Party 2 scaffolding
+    // from empty render-token slots when no authoritative entities exist.
+    skipNoticeRepair:
+      !hasAuthoritativeNoticeParties && !intakePartyManifestIsAuthoritative(intakeRaw),
   });
   out = tokenGate.text;
   repairs.push(...tokenGate.repairs);

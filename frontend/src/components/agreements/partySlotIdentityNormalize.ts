@@ -217,7 +217,14 @@ export function isInternalPartyAliasToken(name: string): boolean {
 export function isInternalPartyAliasRole(role: string | null | undefined): boolean {
   const t = (role || "").replace(/\s+/g, " ").trim();
   if (!t) return false;
-  return isInternalPartyAliasToken(t);
+  // Only party_a / party_b / numbered party tokens are internal role aliases.
+  // Do NOT reuse isInternalPartyAliasToken here — that regex also matches commercial
+  // role labels (vendor, customer, client, contractor) used as fake entity *names*.
+  // Those labels are valid user-declared roles and must survive preserveIntakeRole.
+  if (/^\(?\s*["'“”]?party[_\s-]?[ab]\d*["'“”]?\s*\)?$/i.test(t)) return true;
+  if (/^party[_\s-]?\d+$/i.test(t)) return true;
+  if (/\bparty[_\s-]?[ab]\b/i.test(t) && t.length < 28) return true;
+  return false;
 }
 
 export function stripInternalPartyAliasParentheticals(raw: string): string {

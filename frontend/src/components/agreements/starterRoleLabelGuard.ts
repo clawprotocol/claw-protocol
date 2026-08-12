@@ -13,6 +13,8 @@ const AGREEMENT_ROLE_LABELS = new Set([
   "consultant",
   "contractor",
   "vendor",
+  "agency",
+  "supplier",
   "landlord",
   "lessor",
   "tenant",

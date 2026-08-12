@@ -309,11 +309,20 @@ export function resolveSimpleProFinalReviewCorpus(args: {
     };
   }
 
+  // Recovery / last-known-good and already-selected authoritative hydrated bodies are
+  // display recovery after acceptance — do not clear them for missing pipeline validation.
+  // Validation is required for picker/pipeline candidates that compete into authority.
+  const recoveryOrPinnedAuthority =
+    source === "last_known_good" ||
+    corpusRecovered ||
+    (source === "authoritative_hydrated" &&
+      (hasPaidProSourceOfTruth() || plainText === authoritative || plainText === pinned));
   if (
     authorityOnly &&
     !args.isFreeStarterReview &&
     plainText.length >= GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN &&
     !hasPaidProSourceOfTruth() &&
+    !recoveryOrPinnedAuthority &&
     !hasPaidProPipelineValidationForCorpus({
       text: plainText,
       source: "server_full_draft",

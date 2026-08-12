@@ -383,36 +383,28 @@ export function resolveCreateFlowAuthoritativeReviewPlain(args: {
   const validatedPipeline = readAcceptedPipelineReviewCorpusPlain();
   if (validatedPipeline.length >= PAID_PRO_AUTHORITY_MIN_LEN) return validatedPipeline;
 
+  // Create-flow authoritative review plain requires validated pipeline acceptance.
+  // Hash-only session latch / unvalidated hydrated fragments must not surface (TEST523).
+  if (!hasPaidCreateFlowPipelineAcceptance()) {
+    return "";
+  }
+
   const snap = readPremiumCompletionSnapshot();
   const snapBody = (snap?.premiumWinningBodyText || snap?.premiumReadonlyPlainText || "").trim();
-  if (
-    snap?.premiumAccepted &&
-    snapBody.length >= PAID_PRO_AUTHORITY_MIN_LEN &&
-    hasPaidProPipelineSessionAcceptance({ text: snapBody, source: "server_full_draft" })
-  ) {
+  if (snap?.premiumAccepted && snapBody.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
     return snapBody;
   }
 
   const latched = getLatchedAcceptedServerFullDraftAuthority();
   const latchedBody = latched?.body.trim() ?? "";
-  if (
-    latchedBody.length >= PAID_PRO_AUTHORITY_MIN_LEN &&
-    (latched?.freezeEstablished ||
-      hasPaidProPipelineSessionAcceptance({
-        text: latchedBody,
-        source: latched?.source ?? "server_full_draft",
-      }))
-  ) {
+  if (latchedBody.length >= PAID_PRO_AUTHORITY_MIN_LEN && latched?.freezeEstablished) {
     return latchedBody;
   }
 
   const pipelineWinning = (args.pipelineWinningBody || "").trim();
   const hydratedPremium = (args.hydratedPremiumBody || "").trim();
   for (const candidate of [pipelineWinning, hydratedPremium]) {
-    if (
-      candidate.length >= PAID_PRO_AUTHORITY_MIN_LEN &&
-      hasPaidProPipelineSessionAcceptance({ text: candidate, source: "server_full_draft" })
-    ) {
+    if (candidate.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
       return candidate;
     }
   }

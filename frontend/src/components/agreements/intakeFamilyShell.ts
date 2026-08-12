@@ -27,6 +27,7 @@ import { preserveExtractedFacts } from "./draftFactPreservation";
 import { normalizeAgreementDisplayTitle, resolveCanonicalAgreementTitle } from "./canonicalAgreementTitle";
 import { isPaymentSemanticallySafe } from "./paymentSemanticGuard";
 import { applyPartyNameCasingPassToDraft } from "../../agreement/partyNameDisplayCasing";
+import { isPreservableIntakeRole } from "./canonicalPartyRoleAuthority";
 
 const MAX_PARTY_NAME_LEN = 280;
 
@@ -658,6 +659,12 @@ export function runIntakeDefaultsAndRoles(
             row.id === p.id ||
             row.name.trim().toLowerCase() === p.name.trim().toLowerCase(),
         );
+        // User-declared commercial roles from legal-party authority (Buyer/Vendor/etc.)
+        // must not be overwritten by smart-default Client/Service Provider labels.
+        const authorityRole = (p.role || "").trim();
+        if (authorityRole && authorityRole.toLowerCase() !== "party" && isPreservableIntakeRole(authorityRole)) {
+          return p;
+        }
         return overlay?.role && overlay.role !== "party" ? { ...p, role: overlay.role } : p;
       }),
     };

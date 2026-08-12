@@ -341,6 +341,16 @@ export function resolveCanonicalPartyIdentitiesFromSources(args: {
     (args.roleLabels?.length ?? 0) >= 3;
   if (lineSeparatedParties.length === 2 && !likelyMultiParty) {
     const manifestNames = lineSeparatedParties.slice(0, 12);
+    let lineSeparatedRoleLabels = [...(args.roleLabels ?? [])];
+    if (lineSeparatedRoleLabels.length < 2 && args.rawIntake) {
+      const structured = parseIntakeToStructuredAgreement(args.rawIntake);
+      const fromHints = manifestNames.map(
+        (name) => structured.partyRoleHints[name.toLowerCase()] || "",
+      );
+      if (fromHints.filter((r) => r && r !== "party").length >= 2) {
+        lineSeparatedRoleLabels = fromHints;
+      }
+    }
     const signerBySlot = resolveUniversalSignerMetadataBySlot({
       legalEntities: manifestNames,
       intakeText: args.rawIntake,
@@ -352,7 +362,7 @@ export function resolveCanonicalPartyIdentitiesFromSources(args: {
       const signer = signerBySlot[index];
       return {
         fullLegalName: full,
-        roleLabel: roleLabelForIndex(index, args.roleLabels?.[index], args.rawIntake),
+        roleLabel: roleLabelForIndex(index, lineSeparatedRoleLabels[index], args.rawIntake),
         displayAlias: definedShortNameFromLegalEntity(full),
         signerName: signer?.signerName?.trim() || null,
         signerTitle: signer?.signerTitle?.trim() || null,

@@ -393,12 +393,18 @@ export function logPostFreezeCorpusDrift(args: {
   const rendered = (args.renderedText || "").trim();
   if (rendered.length < 200) return;
 
+  // Readonly HTML entry audits input plain separately from post-strip display; do not
+  // hard-fail when callers pass pre-freeze or signature-bearing plain into the builder.
+  if (shouldSkipPostFreezeDriftForReadonlyHtmlStrip(args.surface)) {
+    return;
+  }
+
   const frozenPlain = resolvePaidProFrozenAuthoritativePlain();
   const decision = decidePostFreezeCorpusInstrumentation({
     surface: args.surface,
     renderedText: rendered,
     frozenHash: args.frozenHash,
-    mutationSource: args.mutationSource,
+    mutationSource: args.mutationSource ?? "readonly_display_strip",
     frozenPlain: frozenPlain ?? undefined,
   });
 

@@ -465,10 +465,17 @@ export function resolveStarterTwoPartyCommercialAuthority(
     providerName = entities[1]!;
   }
 
-  const providerRole = resolveProviderDisplayRole(providerName, roleHints);
+  const clientHint = roleHints[normalizeEntityKey(clientName)] || "";
+  const providerHint = roleHints[normalizeEntityKey(providerName)] || "";
+  const clientRole =
+    clientHint && isPreservableIntakeRole(clientHint) ? titleCaseRole(clientHint) : "Client";
+  const providerRole =
+    providerHint && isPreservableIntakeRole(providerHint)
+      ? titleCaseRole(providerHint)
+      : resolveProviderDisplayRole(providerName, roleHints);
   const authority: StarterTwoPartyCommercialAuthority = {
     parties: [
-      { name: clientName, role: "Client" },
+      { name: clientName, role: clientRole },
       { name: providerName, role: providerRole },
     ],
     clientName,

@@ -2288,8 +2288,17 @@ async function runPremiumCompletionInner(
         }
         const structureStartedAt =
           typeof performance !== "undefined" ? performance.now() : Date.now();
+        // Thin-services expansion must not promote short json_parse/degraded wire past the
+        // paid authoritative floor — gate on wire length, not post-expansion doc length.
+        const thinExpandWireLen = Math.max(
+          lastWireAuthoritativeBodyLen,
+          wireServerFullDocumentText.length,
+          wireDocumentText.length,
+          pipelineNormalizedAuthoritativeText.trim().length,
+        );
         if (
           isCommercialServicesIntake(preGateIntake) &&
+          thinExpandWireLen >= PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN &&
           doc.length < PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN &&
           (doc.length < 2_500 ||
             countNumberedAgreementSections(doc) <= MUTUAL_CONSULTING_LIGHTWEIGHT_SECTION_CEILING)
@@ -3047,6 +3056,8 @@ async function runPremiumCompletionInner(
         (pipelineNormalizedAuthoritativeText.length >= SEND_HANDOFF_AUTHORITATIVE_MIN_LEN
           ? pipelineNormalizedAuthoritativeText
           : "");
+      // Gate on original wire lengths only — never include post-expansion `doc` length,
+      // which would let thin-services prep promote a short degraded body past the floor.
       const degradedJsonParseWithoutSubstantiveServerFull =
         isDegradedJsonParseWithoutSubstantiveServerFull({
           generationOutcome: wireGenerationOutcomeOnWire,
@@ -3055,8 +3066,8 @@ async function runPremiumCompletionInner(
           wireDocumentText: wireDocumentText,
           wireAuthoritativeBodyLen: Math.max(
             wireAuthoritativeBodyLen,
+            originalWireServerFullDocumentText.length,
             pipelineNormalizedAuthoritativeText.length,
-            (doc || "").trim().length,
           ),
         });
       const serverFullDoc =

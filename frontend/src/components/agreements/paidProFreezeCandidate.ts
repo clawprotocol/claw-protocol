@@ -782,10 +782,18 @@ function ensureGenericManifestExecutionBlockBeforeNoticeFreeze(
     draft: args.draft ?? null,
     intakeText: args.intakeText ?? null,
   });
-  if (!isGenericPaidProAcceptanceManifestFallback(manifest)) {
+  // Generic Party 1/Party 2 fallback must not invent execution/signature chrome on an
+  // already-accepted body — that mutates SoT and fabricates notice/signature scaffolding.
+  if (isGenericPaidProAcceptanceManifestFallback(manifest)) {
     return safeForCommit;
   }
   return appendProExecutionBlockIfMissing(safeForCommit, manifest).text;
+}
+
+function freezeNoticePartiesAreAuthoritative(
+  parties: readonly PaidProSignerMetadataParty[],
+): boolean {
+  return parties.some((p) => !isNonAuthoritativeFreezePartyName(p.partyLegalName));
 }
 
 function repairPaidProCanonicalNoticeAuthorityAtFreeze(
@@ -805,6 +813,11 @@ function repairPaidProCanonicalNoticeAuthorityAtFreeze(
   }
   const sealed = sealPaidProNoticesExecutionBoundaryInCorpus(noticeFinalize.text);
   const noticeValidationCtx = resolveFreezeNoticeValidationContext(prep, args, sealed.text);
+  // Generic Party 1/Party 2 must not invent operative notice scaffolding at freeze —
+  // that mutates accepted SoT without real legal entities (commercial no-invent rule).
+  if (!freezeNoticePartiesAreAuthoritative(noticeValidationCtx.parties)) {
+    return sealed.text;
+  }
   const entityHydrated = ensureOperativeNoticeStanzaEntityLinesAtFreeze(
     sealed.text,
     noticeValidationCtx.parties,
@@ -1112,7 +1125,10 @@ export function assertPaidProFreezeCandidateGates(
     draftPartyNames: prep.parties.map((p) => p.name),
     manifestPartyCount: prep.parties.length,
   }).count;
-  if (canonicalNoticePartyCount >= 2) {
+  const freezeHasAuthoritativeNoticeParties = prep.parties.some(
+    (p) => String(p.name || "").trim().length >= 3 && !/^Party\s+\d+$/i.test(String(p.name || "").trim()),
+  );
+  if (canonicalNoticePartyCount >= 2 && freezeHasAuthoritativeNoticeParties) {
     const preClauseNoticesHeading = ensureCanonicalNoticesSectionHeadingForFreeze(safeForCommit);
     if (preClauseNoticesHeading.repairs.length > 0) {
       safeForCommit = preClauseNoticesHeading.text;
@@ -1159,12 +1175,14 @@ export function assertPaidProFreezeCandidateGates(
   });
   safeForCommit = finalizeBoundary.text;
 
-  const preClauseNoticesHeading = ensureCanonicalNoticesSectionHeadingForFreeze(safeForCommit);
-  if (preClauseNoticesHeading.repairs.length > 0) {
-    safeForCommit = preClauseNoticesHeading.text;
+  if (freezeHasAuthoritativeNoticeParties) {
+    const preClauseNoticesHeading = ensureCanonicalNoticesSectionHeadingForFreeze(safeForCommit);
+    if (preClauseNoticesHeading.repairs.length > 0) {
+      safeForCommit = preClauseNoticesHeading.text;
+    }
   }
 
-  if (canonicalNoticePartyCount >= 2) {
+  if (canonicalNoticePartyCount >= 2 && freezeHasAuthoritativeNoticeParties) {
     const postBoundaryNoticeDedupe = repairDuplicateOperativeNoticeStanzas(
       safeForCommit,
       canonicalNoticePartyCount,
@@ -1356,9 +1374,11 @@ export function assertPaidProFreezeCandidateGates(
     if (emptyNoticeShells.repairs.length > 0) {
       safeForCommit = emptyNoticeShells.text;
     }
-    const terminalNoticesHeading = ensureCanonicalNoticesSectionHeadingForFreeze(safeForCommit);
-    if (terminalNoticesHeading.repairs.length > 0) {
-      safeForCommit = terminalNoticesHeading.text;
+    if (freezeHasAuthoritativeNoticeParties) {
+      const terminalNoticesHeading = ensureCanonicalNoticesSectionHeadingForFreeze(safeForCommit);
+      if (terminalNoticesHeading.repairs.length > 0) {
+        safeForCommit = terminalNoticesHeading.text;
+      }
     }
     const terminalStructure = applyPaidProSectionStructureCompletenessAuthority(safeForCommit, {
       source: `${surface}_terminal_post_notice_repair`,

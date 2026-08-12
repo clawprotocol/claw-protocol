@@ -21,6 +21,7 @@ import {
   resolveNoticeStructuralValidationParties,
   resolveCanonicalNoticePartyCount,
 } from "./paidProPartyNoticeDetails";
+import { intakePartyManifestIsAuthoritative } from "./intakePartyManifestAuthority";
 import type { PaidProPartyRoleContext, PaidProSignerMetadataParty } from "./paidProSignerMetadataAuthority";
 import { qualifiesAsConciseAuthoritativePaidServerDraft } from "./paidProSubstantiveCorpusAssessment";
 
@@ -269,8 +270,16 @@ export function validateNoticesClauseFamilyStructuralIntegrity(
   // cache-independent, which is why the TEST541 safe-display cache fixes did not clear the live failure.
   // The pure-diagnostic callsite (no parties list) keeps its conservative context-free count.
   const callerSuppliedPartiesList = Array.isArray(opts?.parties);
-  const requiredStanzas =
-    callerSuppliedPartiesList && canonicalAuthorityPartyCount >= 2
+  const partiesHaveAuthoritativeNames = (opts?.parties ?? []).some((p) => {
+    const name = String(p.partyLegalName || "").trim();
+    return name.length >= 3 && !/^Party\s+\d+$/i.test(name);
+  });
+  const intakeHasAuthoritativeManifest = intakePartyManifestIsAuthoritative(opts?.intakeText);
+  // Without real entity authority, do not require inventing Party 1/Party 2 notice scaffolding.
+  const noticeAuthorityPresent = partiesHaveAuthoritativeNames || intakeHasAuthoritativeManifest;
+  const requiredStanzas = !noticeAuthorityPresent
+    ? 0
+    : callerSuppliedPartiesList && canonicalAuthorityPartyCount >= 2
       ? canonicalAuthorityPartyCount
       : requiredNoticeStanzaCount(opts?.parties, opts?.requireTwoPartyStanzas !== false);
   const noticeValidationPartySource =
@@ -293,6 +302,10 @@ export function validateNoticesClauseFamilyStructuralIntegrity(
   }
 
   if (!hasOperativeNoticesFamily) {
+    if (!noticeAuthorityPresent) {
+      // Commercial no-invent: omit notices until signer/entity authority exists.
+      return violations;
+    }
     violations.push({
       family: "notices",
       code: "missing_notices_heading",

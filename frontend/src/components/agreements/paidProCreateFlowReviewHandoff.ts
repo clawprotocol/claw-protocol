@@ -153,7 +153,8 @@ export function shouldUsePaidCreateFlowReviewFirstPersist(args?: {
   agreementDocumentText?: string;
   draft?: ParsedDraftShape | null;
 }): boolean {
-  if (hasPaidCreateFlowPipelineAcceptance()) return true;
+  // Hash alone is not acceptance — require professional validation (TEST522/TEST523).
+  if (!hasPaidCreateFlowPipelineAcceptance()) return false;
   const corpusPlain = resolveCreateFlowAcceptedPipelineCorpusPlain({
     draft: args?.draft ?? null,
     agreementDocumentText: args?.agreementDocumentText,
@@ -161,11 +162,8 @@ export function shouldUsePaidCreateFlowReviewFirstPersist(args?: {
     hydratedPremiumBody: args?.hydratedPremiumBody,
   }).trim();
   if (corpusPlain.length < PAID_PRO_AUTHORITY_MIN_LEN) return false;
-  if (hasPaidProPipelineSessionAcceptance({ text: corpusPlain, source: "server_full_draft" })) {
-    return true;
-  }
   // Local premiumAccepted snap is not commercial legal authority.
-  return false;
+  return true;
 }
 
 /** Merge accepted paid corpus onto draft before POST /api/agreements/draft. */

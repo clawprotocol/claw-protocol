@@ -18,7 +18,11 @@ function varStub(id: string, label: string, question: string): DealVariable {
     label,
     question,
     severity: "important",
-    suggestedDefaults: [],
+    // Pills without answerable defaults are filtered as non-user-facing; provide real options.
+    suggestedDefaults: [
+      { id: "opt_a", label: "Option A", value: "option_a" },
+      { id: "custom", label: "Custom", value: "" },
+    ],
     agreementImpact: "test",
     requiredForExecution: true,
     applicableAgreementFamilies: ["services_agreement"],
