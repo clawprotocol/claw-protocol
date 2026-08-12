@@ -16,7 +16,8 @@ import {
 } from "./paidProExecutionBlockEntityHeading";
 import { repairSplitPaidProHeadingFragments } from "./repairSplitPaidProHeadingFragments";
 import { repairMalformedSectionAnyReference } from "./paidProFrozenManifestDisplayAuthority";
-import { repairPaidProDocumentTitleOpening } from "./paidProDocumentTitleOpeningRepair";
+import { repairPaidProDocumentTitleOpening, needsPaidProDocumentTitleOpeningRepair } from "./paidProDocumentTitleOpeningRepair";
+import { summarizePaidProDocumentBlockClassifications } from "./paidProDocumentBlockClassifier";
 import { repairCollapsedInlineNoticeStanzas } from "./paidProPartyNoticeDetails";
 import { ensureBlankLineBeforeWitnessBlock } from "./paidProExecutionBlockNormalization";
 import {
@@ -54,16 +55,26 @@ export function projectPaidProFrozenSoTDisplayPlain(text: string): string {
   let out = (text || "").replace(/\r\n/g, "\n").trimEnd();
   if (!out) return out;
 
+  const blockSummary = summarizePaidProDocumentBlockClassifications(out);
+  const wellStructuredFrozen =
+    blockSummary.titleCount >= 1 && blockSummary.mainSectionHeadingCount >= 1;
+
   // Presentation-only: letter-glued subsections (`General Terms9.1`) and mis-nested N.x.
   // Does not persist; keeps frozen SoT store intact while every visible surface paints cleanly.
-  const structureJoined = repairJoinedTopLevelSectionHeadings(out);
+  const structureJoined = wellStructuredFrozen
+    ? { text: out, repairs: [] as string[] }
+    : repairJoinedTopLevelSectionHeadings(out);
   if (structureJoined.repairs.length > 0) out = structureJoined.text;
 
-  // Flattened freeze snapshots still need display section / (a)(b)(c) breaks.
-  const flattened = normalizeFlattenedPaidProDocumentBlocks(out);
+  const flattened = wellStructuredFrozen
+    ? { text: out, repairs: [] as string[] }
+    : normalizeFlattenedPaidProDocumentBlocks(out);
   if (flattened.repairs.length > 0) out = flattened.text;
 
-  const titleOpening = repairPaidProDocumentTitleOpening(out);
+  const titleOpening =
+    wellStructuredFrozen && !needsPaidProDocumentTitleOpeningRepair(out)
+      ? { text: out, repairs: [] as string[] }
+      : repairPaidProDocumentTitleOpening(out);
   if (titleOpening.repairs.length > 0) out = titleOpening.text;
 
   const splitTail = repairSplitPaidProHeadingFragments(out);

@@ -6846,6 +6846,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     gateDraft?: ParsedDraftShape;
     rawIntake?: string;
   }) => {
+    // Canonical paid Pro review after pipeline success: planFinalizeCanonicalPaidProPipelineSuccess
+    // then enterCanonicalPaidProReviewFlow (same contract as post_checkout_apply_success).
+    const finalizeCanonicalPaidProPipelineSuccess = planFinalizeCanonicalPaidProPipelineSuccess;
     if (entitledPremiumRewriteInFlightRef.current) return;
     // Reload race: in-memory SoT is empty until hydrate; never re-generate over an accepted snap.
     const acceptedSnap = readPremiumCompletionSnapshot();
@@ -7388,7 +7391,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         serverGenerationDegraded: result.serverGenerationDegraded ?? null,
         ...(acceptedEntitled ? snapshotFieldsFromAcceptedPremiumCanonical(acceptedEntitled) : {}),
       });
-      const finalizePlan = planFinalizeCanonicalPaidProPipelineSuccess({
+      const finalizePlan = finalizeCanonicalPaidProPipelineSuccess({
         source: dashboardCanonicalSource,
         corpusPlain: entitledReviewCorpus,
         winningBody: winning,
@@ -30164,17 +30167,51 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
   const handleProSendForSignature = React.useCallback(() => {
     traceSigningAdvance("handleProSendForSignature:enter");
-    const postFinalizeSigningReadyEarly =
-      paidProSignerMetadataFinalized ||
-      hasAuthoritativeSigningSnapshot() ||
-      paidProSignerMetadataFinalizedLatch;
+    const stickySigningFinalized =
+      hasAuthoritativeSigningSnapshot() || paidProSignerMetadataFinalizedLatch;
+    const postFinalizeSigningReady =
+      paidProSignerMetadataFinalized || stickySigningFinalized;
     if (
       (acceptedPaidProAuthorityActive || paidProReviewDecisionPhase === "decision_2") &&
-      !postFinalizeSigningReadyEarly &&
+      !postFinalizeSigningReady &&
       !paidProSignatureDetailsReady
     ) {
       traceSigningAdvance("handleProSendForSignature:signer_setup");
       enterFinalReviewRecipientSetup("signature");
+      return;
+    }
+    const canonicalSigningAdvanceEligible =
+      acceptedPaidProAuthorityActive ||
+      paidProReviewDecisionPhase === "decision_2" ||
+      postFinalizeSigningReady;
+    if (canonicalSigningAdvanceEligible) {
+      if (!postFinalizeSigningReady && !paidProSignatureDetailsReady) {
+        traceSigningAdvance("handleProSendForSignature:signer_setup");
+        enterFinalReviewRecipientSetup("signature");
+        return;
+      }
+      if (
+        !hasAuthoritativeSigningSnapshot() &&
+        !paidProSignerMetadataFinalizedLatch &&
+        paidProSignatureDetailsReady
+      ) {
+        void finalizePaidProSignerMetadataAndOpenReviewDecision();
+      }
+      const signingReadyNow = postFinalizeSigningReady || stickySigningFinalized;
+      if (!signingReadyNow) {
+        traceSigningAdvance("handleProSendForSignature:finalize_incomplete");
+        return;
+      }
+      traceSigningAdvance("handleProSendForSignature:post_finalize_advance");
+      if (!hasAuthoritativeSigningSnapshot()) {
+        void finalizePaidProSignerMetadataAndOpenReviewDecision();
+      }
+      markSigningPreparationRequested();
+      setSignaturePreparationRequested(true);
+      setPaidProInlineSignerSetupLatched(false);
+      finalReviewSendIntentRef.current = "signature";
+      handlePremiumSendModePick("signature");
+      void enterGuidedSignatureTrackRoute();
       return;
     }
     if (guidedCompletionActive) {
@@ -30194,43 +30231,6 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       paidProAuthoritative,
     });
     logSimpleProFinalReviewContinueToSigning({ bodyLen: bodyPlain.length });
-    const postFinalizeSigningReady =
-      paidProSignerMetadataFinalized ||
-      hasAuthoritativeSigningSnapshot() ||
-      paidProSignerMetadataFinalizedLatch;
-    const canonicalSigningAdvanceEligible =
-      acceptedPaidProAuthorityActive ||
-      paidProReviewDecisionPhase === "decision_2" ||
-      postFinalizeSigningReady;
-    if (canonicalSigningAdvanceEligible) {
-      if (!postFinalizeSigningReady && !paidProSignatureDetailsReady) {
-        traceSigningAdvance("handleProSendForSignature:signer_setup");
-        enterFinalReviewRecipientSetup("signature");
-        return;
-      }
-      if (!postFinalizeSigningReady && paidProSignatureDetailsReady) {
-        void finalizePaidProSignerMetadataAndOpenReviewDecision();
-      }
-      const signingReadyNow =
-        postFinalizeSigningReady ||
-        hasAuthoritativeSigningSnapshot() ||
-        paidProSignerMetadataFinalizedLatch;
-      if (!signingReadyNow) {
-        traceSigningAdvance("handleProSendForSignature:finalize_incomplete");
-        return;
-      }
-      traceSigningAdvance("handleProSendForSignature:post_finalize_advance");
-      if (!hasAuthoritativeSigningSnapshot()) {
-        void finalizePaidProSignerMetadataAndOpenReviewDecision();
-      }
-      markSigningPreparationRequested();
-      setSignaturePreparationRequested(true);
-      setPaidProInlineSignerSetupLatched(false);
-      finalReviewSendIntentRef.current = "signature";
-      handlePremiumSendModePick("signature");
-      void enterGuidedSignatureTrackRoute();
-      return;
-    }
     if (canProceedGuidedFinalReviewToSigning && paidProSignatureDetailsReady) {
       traceSigningAdvance("handleProSendForSignature:guided_continue");
       continueGuidedFinalReviewToSigning({ intent: "signature" });

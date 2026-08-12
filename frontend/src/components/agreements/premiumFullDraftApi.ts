@@ -817,7 +817,7 @@ export async function postPremiumFullDraftOnce(args: {
     responseBodyLen: bodyText.length,
   });
   markPaidProPremiumHttpEndAt();
-  ingestPaidProPaymentToReviewServerTiming(res.headers.get("X-Claw-Paid-Pro-Server-Timing"));
+  ingestPaidProPaymentToReviewServerTiming(res.headers?.get?.("X-Claw-Paid-Pro-Server-Timing") ?? null);
   const ratioFields = resolvePremiumGenerationRatioSourceField(parsed);
   logPremiumGenerationRatio({
     sessionGenerationId: args.agreementGenerationId ?? null,

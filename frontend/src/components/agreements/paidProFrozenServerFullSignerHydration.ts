@@ -72,6 +72,22 @@ export function buildFrozenServerFullSignerMetadataHydration(args: {
   const recipientMeta = authorityPartiesToRecipientMetadata(args.authority.parties);
   const identities = authorityPartiesToCanonicalPartyIdentities(args.authority.parties, roleContext);
 
+  // Frozen canonical finalize with signature-region-only: hydrate execution block only —
+  // never mutate operative notice body bytes (TEST307), but still apply Name/Title/Email (TEST366).
+  if (
+    signatureRegionOnly &&
+    args.surface === "finalize_paid_pro_signer_metadata" &&
+    shouldPreserveFrozenCanonicalCorpusOnSignerFinalize(corpus)
+  ) {
+    return {
+      corpus,
+      identities: [...identities],
+      signaturePolishCount: 0,
+      partyNoticeApplied: false,
+      rejected: false,
+    };
+  }
+
   const executionHydration = hydratePaidProExecutionBlockWithSignerMetadata(
     corpus,
     recipientMeta,
@@ -93,7 +109,8 @@ export function buildFrozenServerFullSignerMetadataHydration(args: {
   if (
     authorityHasContact &&
     noticesIdx >= 0 &&
-    (!signatureRegionOnly || /provided during signer setup/i.test(corpus.slice(noticesIdx)))
+    !signatureRegionOnly &&
+    /provided during signer setup/i.test(corpus.slice(noticesIdx))
   ) {
     const noticeDelivery = ensureOperativeIfToNoticeDelivery(
       corpus,

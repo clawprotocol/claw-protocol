@@ -12,8 +12,10 @@ import {
 
 import {
   resolveAgreementTitleFromIntakeScope,
+  isAuthoritativePaidProAgreementDocumentTitleLine,
   type AgreementTitleScopeDecision,
 } from "./paidProAgreementTitleScope";
+import { repairPaidProDocumentTitleOpening } from "./paidProDocumentTitleOpeningRepair";
 
 export const PAID_PRO_MUTUAL_CONSULTING_TITLE = "MUTUAL CONSULTING AND IMPLEMENTATION AGREEMENT";
 export const PAID_PRO_CONSULTING_TITLE = "CONSULTING AND IMPLEMENTATION AGREEMENT";
@@ -419,8 +421,9 @@ export function repairPaidProServicesAgreementOpening(
 export function buildCanonicalPaidProMultiPartyOpeningRecital(
   records: readonly CanonicalPartyIdentityRecord[],
   intakeText?: string | null,
+  titleOverride?: string | null,
 ): string {
-  const title = resolvePaidProServicesAgreementTitle(intakeText);
+  const title = (titleOverride || "").trim() || resolvePaidProServicesAgreementTitle(intakeText);
   const mutual = /MUTUAL/i.test(title);
   const openingLine = definedMultiPartyAgreementOpeningLine(records, {
     consulting: /CONSULTING/i.test(title),
@@ -467,6 +470,18 @@ export function detectPaidProMalformedMultiPartyOpening(
   return false;
 }
 
+function readCorpusDocumentTitleUpper(text: string): string | null {
+  const titleRepair = repairPaidProDocumentTitleOpening(text);
+  const scan = titleRepair.repairs.length > 0 ? titleRepair.text : text;
+  for (const line of scan.replace(/\r\n/g, "\n").split("\n")) {
+    const trimmed = line.trim();
+    if (isAuthoritativePaidProAgreementDocumentTitleLine(trimmed)) {
+      return trimmed.replace(/\s+/g, " ").trim().toUpperCase();
+    }
+  }
+  return null;
+}
+
 /**
  * Atomically replace malformed multi-party opening before Section 1.
  */
@@ -479,6 +494,11 @@ export function repairPaidProMultiPartyAgreementOpening(
   if (records.length < 3) return { text, repairs };
 
   let body = (text || "").replace(/\r\n/g, "\n").trim();
+  const titleRepair = repairPaidProDocumentTitleOpening(body);
+  if (titleRepair.repairs.length > 0) {
+    body = titleRepair.text;
+    repairs.push(...titleRepair.repairs);
+  }
   const adjacent = repairAdjacentDuplicatePartyNamesInOpening(body, records);
   body = adjacent.text;
   repairs.push(...adjacent.repairs);
@@ -504,7 +524,8 @@ export function repairPaidProMultiPartyAgreementOpening(
   const remainder = executionTail
     ? `${remainderBody}\n\n${executionTail}`.replace(/\n{3,}/g, "\n\n").trim()
     : remainderBody;
-  const opening = buildCanonicalPaidProMultiPartyOpeningRecital(records, intakeText);
+  const preservedTitle = readCorpusDocumentTitleUpper(body);
+  const opening = buildCanonicalPaidProMultiPartyOpeningRecital(records, intakeText, preservedTitle);
   repairs.push("opening:prepend_canonical_multiparty_recital");
   if (preservedPrefix) repairs.push("opening:preserve_pre_section_one_operative_blocks");
   return { text: `${opening}${remainder}`, repairs };
@@ -551,25 +572,32 @@ export function ensurePaidProServicesAgreementOpening(
   if (records.length < 2) {
     return { text, repairs: [] };
   }
-  if (!detectPaidProMalformedServicesOpening(text, records)) {
-    return { text, repairs: [] };
+  const titleFirst = repairPaidProDocumentTitleOpening(text);
+  let working = titleFirst.repairs.length > 0 ? titleFirst.text : text;
+  const repairs = [...titleFirst.repairs];
+  if (records.length >= 3) {
+    const multi = ensurePaidProMultiPartyAgreementOpening(working, records, intakeText);
+    return { text: multi.text, repairs: [...repairs, ...multi.repairs] };
+  }
+  if (!detectPaidProMalformedServicesOpening(working, records)) {
+    return { text: working, repairs };
   }
   // Preserve already-titled Pro corpora unless the canonical entered-into recital is absent.
   // Title-only short-circuit previously left "is between" openers frozen as SoT.
-  const head = text.slice(0, 4_000);
+  const head = working.slice(0, 4_000);
   const hasCanonicalEnteredInto =
     /entered\s+into\s+as\s+of\s+the\s+Effective\s+Date\s+by\s+and\s+between/i.test(head);
-  if (!needsPaidProServicesOpeningTitleRepair(text) && hasCanonicalEnteredInto) {
-    return { text, repairs: [] };
+  if (!needsPaidProServicesOpeningTitleRepair(working) && hasCanonicalEnteredInto) {
+    return { text: working, repairs };
   }
-  const repaired = repairPaidProServicesAgreementOpening(text, records, intakeText);
+  const repaired = repairPaidProServicesAgreementOpening(working, records, intakeText);
   if (import.meta.env?.DEV && import.meta.env?.MODE !== "test" && repaired.repairs.length > 0) {
     // eslint-disable-next-line no-console
     console.info("[paid-pro-opening-recital-guard]", {
       repairs: repaired.repairs,
-      lenBefore: text.length,
+      lenBefore: working.length,
       lenAfter: repaired.text.length,
     });
   }
-  return repaired;
+  return { text: repaired.text, repairs: [...repairs, ...repaired.repairs] };
 }

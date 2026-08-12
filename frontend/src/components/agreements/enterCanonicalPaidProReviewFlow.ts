@@ -46,6 +46,11 @@ export type EnterCanonicalPaidProReviewFlowArgs = {
   premiumRenderResolveSource?: string | null;
   /** When true, skip re-entry if final review already opened (returning create latch). */
   respectAlreadyOpened?: boolean;
+  /**
+   * Fresh pipeline success (post-checkout / entitled rewrite) — validation latch is committed
+   * during canonical entry, not required before planning.
+   */
+  assumeFreshPipelineValidation?: boolean;
 };
 
 export type CanonicalPaidProReviewUiPlan = {
@@ -159,7 +164,10 @@ export function planEnterCanonicalPaidProReviewFlow(
   // Returning paid-create and first-paid routes must not enter canonical review on a
   // hash-only / unvalidated corpus (TEST515). Post-checkout apply still commits markers
   // via commitAcceptedPaidProCorpusHandoffSync after evaluateFirstPaidCreatePipelineGate.
-  if (args.source === "returning_paid_create" || args.source === "post_checkout_apply_success") {
+  if (
+    !args.assumeFreshPipelineValidation &&
+    args.source === "returning_paid_create"
+  ) {
     const latched = hasPaidProPipelineValidationForCorpus({
       text: corpusPlain,
       source: pipelineSource,
@@ -388,6 +396,7 @@ export function planFinalizeCanonicalPaidProPipelineSuccess(
     ...args,
     corpusPlain,
     respectAlreadyOpened: false,
+    assumeFreshPipelineValidation: true,
   });
   return {
     canEnterCanonicalReview: canonicalPlan.shouldApply,

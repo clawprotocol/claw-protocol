@@ -75,16 +75,10 @@ function extractPartiesFromEntityCandidates(context: string): string[] {
  * Falls back to Party A / Party B only when nothing usable is detected.
  */
 export function extractAgreementParties(input: ExtractAgreementPartiesInput): string[] {
-  const resolved = resolveSignerCardPartyNames(input);
-  if (resolved.length > 0 && !(resolved.length === 2 && resolved[0] === "Party A")) {
-    return dedupePreserveOrder(resolved);
-  }
-
-  const intakeText = (input.intakeText || "").trim();
   const fromDraft = dedupePreserveOrder(
     orderedAuthoritativePartyDisplayNames(
       input.parties ? [...input.parties] : null,
-      intakeText || null,
+      (input.intakeText || "").trim() || null,
     ),
   );
 
@@ -92,6 +86,13 @@ export function extractAgreementParties(input: ExtractAgreementPartiesInput): st
 
   const context = buildContextText(input);
   const fromBetween = extractPartiesFromBetweenClause(context);
+  if (fromBetween.length >= 3) return fromBetween;
+
+  const resolved = resolveSignerCardPartyNames(input);
+  if (resolved.length > 0 && !(resolved.length === 2 && resolved[0] === "Party A")) {
+    return dedupePreserveOrder(resolved);
+  }
+
   if (fromBetween.length > 0) return fromBetween;
 
   const fromText = extractPartiesFromEntityCandidates(context);

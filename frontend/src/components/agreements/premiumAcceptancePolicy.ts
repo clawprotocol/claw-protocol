@@ -97,6 +97,10 @@ export function isDegradedJsonParseWithoutSubstantiveServerFull(args: {
   const outcome = (args.generationOutcome || "").trim().toLowerCase();
   if (outcome !== "degraded") return false;
   if (!isNonfatalGenerationFailureCode(args.failureCode)) return false;
+  // json_parse degrades structured intelligence metadata only — a long document_text alias
+  // promoted client-side into server_full must not masquerade as substantive server_full
+  // when the original wire had no server_full (TEST434/437).
+  if ((args.failureCode || "").trim() === "json_parse") return true;
   const serverFullLen = (args.wireServerFullDocumentText || "").trim().length;
   if (serverFullLen >= PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN) return false;
   const wireLen =

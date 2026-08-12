@@ -435,22 +435,12 @@ export function establishPaidProSourceOfTruth(args: {
       return existingSot;
     }
   }
-  latchPaidProPipelineAcceptanceForConciseAuthoritativeBody({
-    text: trim(args.text),
-    source: requestedSource,
-    intakeText: args.intakeText ?? null,
-    draft: args.draft ?? null,
-  });
   const substantiveAssessment = assessPaidProSubstantiveServerDraftCorpus({
     text: trim(args.text),
     source: requestedSource,
     intakeText: args.intakeText ?? null,
     draft: args.draft ?? null,
     generationOutcome: args.generationOutcome ?? null,
-  });
-  const pipelineSessionAccepted = hasPaidProPipelineSessionAcceptance({
-    text: trim(args.text),
-    source: requestedSource,
   });
   const mislabeledSubstantiveServerSource =
     paidProServerFullDraftBelowSubstantiveMin({
@@ -459,14 +449,32 @@ export function establishPaidProSourceOfTruth(args: {
       intakeText: args.intakeText ?? null,
       draft: args.draft ?? null,
       generationOutcome: args.generationOutcome ?? null,
-    }) &&
-    !args.allowShorterOverwrite &&
-    !pipelineSessionAccepted;
+    }) && !args.allowShorterOverwrite;
   if (mislabeledSubstantiveServerSource) {
     throw new Error(
       `[paid-pro-sot-establishment-blocked] mislabeled_server_full_draft_below_substantive_min;len=${wireLen};classification=${substantiveAssessment.classification}`,
     );
   }
+  if (
+    generationOutcome === "degraded" &&
+    wireLen < SUBSTANTIVE_SERVER_DRAFT_MIN_LEN &&
+    (requestedSource === "server_full_draft" || requestedSource === "server_full_draft_degraded") &&
+    !args.allowShorterOverwrite
+  ) {
+    throw new Error(
+      `[paid-pro-sot-establishment-blocked] degraded_response_without_substantive_server_full;len=${wireLen}`,
+    );
+  }
+  latchPaidProPipelineAcceptanceForConciseAuthoritativeBody({
+    text: trim(args.text),
+    source: requestedSource,
+    intakeText: args.intakeText ?? null,
+    draft: args.draft ?? null,
+  });
+  const pipelineSessionAccepted = hasPaidProPipelineSessionAcceptance({
+    text: trim(args.text),
+    source: requestedSource,
+  });
   if (
     generationOutcome === "degraded" &&
     wireLen < SUBSTANTIVE_SERVER_DRAFT_MIN_LEN &&

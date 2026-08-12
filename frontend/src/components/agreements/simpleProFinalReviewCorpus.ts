@@ -74,7 +74,11 @@ export function resolveSimpleProFinalReviewCorpus(args: {
     authorityOnly &&
     !args.isFreeStarterReview &&
     explicitPipelineWinning.length >= GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN &&
-    (norm(args.authoritativePlain).length < GUIDED_MIN_AUTHORITATIVE_BODY_LEN)
+    (norm(args.authoritativePlain).length < GUIDED_MIN_AUTHORITATIVE_BODY_LEN) &&
+    hasPaidProPipelineValidationForCorpus({
+      text: explicitPipelineWinning,
+      source: "server_full_draft",
+    })
   ) {
     // Create-flow recovery: explicit pipeline-winning body wins over empty/starter hydrated.
     return {
@@ -331,7 +335,8 @@ export function resolveSimpleProFinalReviewCorpus(args: {
     source === "last_known_good" ||
     corpusRecovered ||
     (source === "authoritative_hydrated" &&
-      (hasPaidProSourceOfTruth() || plainText === authoritative || plainText === pinned));
+      (hasPaidProSourceOfTruth() ||
+        (pinned.length >= GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN && plainText === pinned)));
   if (
     authorityOnly &&
     !args.isFreeStarterReview &&

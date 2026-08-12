@@ -233,17 +233,21 @@ export function createAuthoritativeSigningSnapshot(
     !/provided during signer setup/i.test(rawInput);
   // Preserve caller-hydrated signing-ready corpus bytes. Re-running full finalize hygiene here
   // invents Notices/Email stanzas and undoes signature-region-only hydrate (TEST307).
-  const preserveFrozenCanonicalCorpus =
-    args.preserveFrozenServerFullHydratedCorpus === true && inputSigningReady;
+  const preserveFrozenCanonicalCorpus = args.preserveFrozenServerFullHydratedCorpus === true;
   const frozenServerFullMinimalHydration =
-    (preserveFrozenCanonicalCorpus || inputMatchesFrozenSoT || inputSigningReady) &&
+    !preserveFrozenCanonicalCorpus &&
+    (inputMatchesFrozenSoT || inputSigningReady) &&
     inputSigningReady;
 
   let corpus: string;
-  if (preserveFrozenCanonicalCorpus || frozenServerFullMinimalHydration) {
+  if (preserveFrozenCanonicalCorpus) {
+    corpus = rawInput;
+  } else if (frozenServerFullMinimalHydration) {
     const dedupe = stripDuplicateConsecutiveExecutionEntityLines(rawInput);
     corpus = dedupe.text.trim();
-    corpus = threadPartyAddressesIntoNoticeStanzas(corpus, parties, args.intakeText ?? null);
+    if (!inputMatchesFrozenSoT) {
+      corpus = threadPartyAddressesIntoNoticeStanzas(corpus, parties, args.intakeText ?? null);
+    }
   } else {
     rawInput = ensureExecutionBlockNoticeContactFieldLines(rawInput).text.trim();
     // Signature-region hygiene: fill execution Name/Title without inventing Notices/Email.
@@ -303,6 +307,7 @@ export function createAuthoritativeSigningSnapshot(
     if (dedupe.repairs.length > 0) {
       corpus = dedupe.text.trim();
     }
+    corpus = threadPartyAddressesIntoNoticeStanzas(corpus, parties, args.intakeText ?? null);
   }
   const hash = hashPaidProCorpus(corpus);
   const frozenAt = Date.now();

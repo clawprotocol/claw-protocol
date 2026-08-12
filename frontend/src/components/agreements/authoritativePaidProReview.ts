@@ -36,15 +36,12 @@ import {
 } from "./paidProSourceOfTruth";
 import { PAID_PRO_REVIEW_SIGNER_DETAILS_NEEDED_STATUS } from "./paidProReviewTrustUx";
 import { isPaidProPostFinalizeHydratedCorpusLocked } from "./paidProSignerMetadataCommitPolicy";
-import {
-  resolvePaidProDisplayPlainForSurface,
-  resolvePaidProPostFinalizeUserVisiblePlain,
-} from "./paidProDisplayPlainAuthority";
+import { resolvePaidProDisplayPlainForSurface } from "./paidProDisplayPlainAuthority";
 import { resolvePaidProPostFinalizeReviewPlain } from "./paidProPostFinalizeReviewSurface";
 
 export { PAID_PRO_REVIEW_SIGNER_DETAILS_NEEDED_STATUS };
 
-export const PAID_PRO_REVIEW_SHELL_TITLE = "Agreement draft ready";
+export const PAID_PRO_REVIEW_SHELL_TITLE = "Agreement ready";
 export const PAID_PRO_REVIEW_SHELL_SUBTITLE =
   "Review the agreement draft below. Next, add signer details to create signature links.";
 export const PAID_PRO_REVIEW_SHELL_SAFETY_LINE =
@@ -95,7 +92,7 @@ function finalizeAuthoritativePaidProReviewPlain(text: string): string {
   if (isPaidProPostFinalizeHydratedCorpusLocked()) {
     const locked = resolvePaidProPostFinalizeReviewPlain();
     if (locked.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
-      return resolvePaidProPostFinalizeUserVisiblePlain(locked);
+      return locked;
     }
   }
   const trimmed = text.trim();
@@ -123,9 +120,9 @@ export function resolveAuthoritativePaidProReviewPlain(
   args?: AuthoritativePaidProReviewInput,
 ): string {
   if (isPaidProPostFinalizeHydratedCorpusLocked()) {
-    const locked = resolvePaidProPostFinalizeReviewPlain();
+    const locked = resolvePaidProPostFinalizeReviewPlain(args?.draft ?? null);
     if (locked.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
-      return resolvePaidProPostFinalizeUserVisiblePlain(locked, args?.draft ?? null);
+      return locked;
     }
   }
   if (shouldUsePaidProSourceOfTruthDisplayOnly()) {

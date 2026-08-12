@@ -3065,7 +3065,7 @@ async function runPremiumCompletionInner(
         isDegradedJsonParseWithoutSubstantiveServerFull({
           generationOutcome: wireGenerationOutcomeOnWire,
           failureCode: wireFailureCodeOnWire,
-          wireServerFullDocumentText: wireServerFullDocumentText,
+          wireServerFullDocumentText: originalWireServerFullDocumentText,
           wireDocumentText: wireDocumentText,
           wireAuthoritativeBodyLen: Math.max(
             wireAuthoritativeBodyLen,
@@ -3079,6 +3079,7 @@ async function runPremiumCompletionInner(
       const serverHardFailureForWin =
         serverFailureCodeForWin === "airlock_blocked" || serverFailureCodeForWin === "dev_context_leak";
       const serverFullDocumentAuthoritative =
+        !degradedJsonParseWithoutSubstantiveServerFull &&
         authoritativeServerFullOnWire.length >= SERVER_FULL_DOCUMENT_AUTHORITATIVE_MIN_LEN &&
         serverFullDocumentWinsOverClientGates({
           serverFullDocumentLen: authoritativeServerFullOnWire.length,
@@ -3735,39 +3736,76 @@ async function runPremiumCompletionInner(
             !vPaidAuthoritativeSubstantive &&
             intakeDescribesBrandLicensingDistributionManufacturingStack(rawForSoT || rawIntake)
           ) {
-            const structural = buildPaidProStructuralRecoveryBody({
-              intakeText: rawForSoT || rawIntake,
-              draft: mergedForApi,
-            });
-            if (structural.ok) {
-              const structuralPrep = preparePaidProServerDocumentForAcceptance(
-                structural.body,
-                mergedForApi,
-                rawForSoT || rawIntake,
-                { surface: "premium_completion_pipeline:mislabeled_brand_structural_recovery" },
-              );
-              const structuralGate = buildPaidProFreezeCandidate({
-                text: structuralPrep.text,
-                source: "structural_recovery",
+            if (degradedJsonParseWithoutSubstantiveServerFull) {
+              const brandLocal = buildPremiumPostCheckoutLocalRecoveryProDraft({
                 draft: mergedForApi,
-                intakeText: rawForSoT || rawIntake,
-                agreementGenerationId: input.agreementGenerationId ?? null,
-                generationOutcome: (effectiveFull.generation_outcome || "").trim(),
-                surface: "premium_completion_pipeline:mislabeled_brand_structural_recovery",
+                rawIntake: rawForSoT || rawIntake,
+                intakeLower: intakeLowerGlobal,
+                recoverySurface: PREMIUM_DEGRADED_SERVER_LOCAL_RECOVERY_RENDER_SOURCE,
               });
               if (
-                structuralGate.ok &&
-                structuralGate.text.length >= PAID_PRO_RECOVERY_MIN_DISPLAY_LEN &&
-                brandLicensingFreezeAuthorityPasses(
-                  structuralGate.text,
-                  rawForSoT || rawIntake,
-                  mergedForApi,
-                )
+                brandLocal.ok &&
+                brandLocal.body.trim().length >= PAID_PRO_RECOVERY_MIN_DISPLAY_LEN &&
+                countOperativeIfToNoticeStanzas(brandLocal.body) >= 4
               ) {
-                doc = structuralGate.text;
-                freezeCommit = structuralGate;
-                freezeAcceptedSource = "structural_recovery";
-                structuralRecovered = true;
+                const localPrep = preparePaidProServerDocumentForAcceptance(
+                  brandLocal.body,
+                  mergedForApi,
+                  rawForSoT || rawIntake,
+                  { surface: "premium_completion_pipeline:mislabeled_brand_local_recovery" },
+                );
+                const localGate = buildPaidProFreezeCandidate({
+                  text: localPrep.text,
+                  source: PREMIUM_DEGRADED_SERVER_LOCAL_RECOVERY_RENDER_SOURCE,
+                  draft: mergedForApi,
+                  intakeText: rawForSoT || rawIntake,
+                  agreementGenerationId: input.agreementGenerationId ?? null,
+                  generationOutcome: (effectiveFull.generation_outcome || "").trim(),
+                  surface: "premium_completion_pipeline:mislabeled_brand_local_recovery",
+                });
+                if (localGate.ok && localGate.text.length >= PAID_PRO_RECOVERY_MIN_DISPLAY_LEN) {
+                  doc = localGate.text;
+                  freezeCommit = localGate;
+                  freezeAcceptedSource = PREMIUM_DEGRADED_SERVER_LOCAL_RECOVERY_RENDER_SOURCE;
+                  structuralRecovered = true;
+                }
+              }
+            }
+            if (!structuralRecovered && !degradedJsonParseWithoutSubstantiveServerFull) {
+              const structural = buildPaidProStructuralRecoveryBody({
+                intakeText: rawForSoT || rawIntake,
+                draft: mergedForApi,
+              });
+              if (structural.ok) {
+                const structuralPrep = preparePaidProServerDocumentForAcceptance(
+                  structural.body,
+                  mergedForApi,
+                  rawForSoT || rawIntake,
+                  { surface: "premium_completion_pipeline:mislabeled_brand_structural_recovery" },
+                );
+                const structuralGate = buildPaidProFreezeCandidate({
+                  text: structuralPrep.text,
+                  source: "structural_recovery",
+                  draft: mergedForApi,
+                  intakeText: rawForSoT || rawIntake,
+                  agreementGenerationId: input.agreementGenerationId ?? null,
+                  generationOutcome: (effectiveFull.generation_outcome || "").trim(),
+                  surface: "premium_completion_pipeline:mislabeled_brand_structural_recovery",
+                });
+                if (
+                  structuralGate.ok &&
+                  structuralGate.text.length >= PAID_PRO_RECOVERY_MIN_DISPLAY_LEN &&
+                  brandLicensingFreezeAuthorityPasses(
+                    structuralGate.text,
+                    rawForSoT || rawIntake,
+                    mergedForApi,
+                  )
+                ) {
+                  doc = structuralGate.text;
+                  freezeCommit = structuralGate;
+                  freezeAcceptedSource = "structural_recovery";
+                  structuralRecovered = true;
+                }
               }
             }
           }
@@ -3844,9 +3882,14 @@ async function runPremiumCompletionInner(
             renderSource: freezeSource,
           });
           const freezeReject = (freezeCommit.rejectReason || "").trim();
+          const mislabeledJsonParseWithoutWireServerFull =
+            freezeReject === "mislabeled_server_full_without_wire_server_full" ||
+            (degradedJsonParseWithoutSubstantiveServerFull &&
+              originalWireServerFullDocumentText.length < PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN);
           // Simple 2-party services drafts are routinely 4k–10k. Soft freeze rejects must not
           // wipe a finished witness-bearing corpus into empty Retry Pro draft.
           const keepUsableWireDespiteSoftFreezeReject =
+            !mislabeledJsonParseWithoutWireServerFull &&
             doc.trim().length >= PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN &&
             /\bIN WITNESS WHEREOF\b/i.test(doc) &&
             (/duplicate_provision_family/i.test(freezeReject) ||
@@ -4044,7 +4087,8 @@ async function runPremiumCompletionInner(
               originalWireServerFullDocumentText.length < PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN);
           if (
             freezeAcceptedSource === "structural_recovery" ||
-            freezeAcceptedSource === "deterministic_recovery_freeze_candidate"
+            freezeAcceptedSource === "deterministic_recovery_freeze_candidate" ||
+            freezeAcceptedSource === PREMIUM_DEGRADED_SERVER_LOCAL_RECOVERY_RENDER_SOURCE
           ) {
             premiumRenderSource = freezeAcceptedSource;
           } else if (serverGenDegraded || originalWireJsonParseDegraded) {
@@ -4092,6 +4136,19 @@ async function runPremiumCompletionInner(
               premiumRenderSource = PREMIUM_DEGRADED_SERVER_LOCAL_RECOVERY_RENDER_SOURCE;
               freezeAcceptedSource = PREMIUM_DEGRADED_SERVER_LOCAL_RECOVERY_RENDER_SOURCE;
             }
+          }
+          if (
+            originalWireJsonParseDegraded &&
+            originalWireServerFullDocumentText.length < PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN &&
+            premiumRenderSource !== PREMIUM_DEGRADED_SERVER_LOCAL_RECOVERY_RENDER_SOURCE &&
+            (premiumRenderSource === "server_full_draft_degraded" ||
+              premiumRenderSource === "server_full_draft" ||
+              premiumRenderSource === "server_full_draft_retry")
+          ) {
+            winningPremiumBodyText = "";
+            premiumRenderSource = "rejected_paid_corpus";
+            rejectedPaidCorpusDueToClientGates = true;
+            doc = "";
           }
           if (import.meta.env.DEV) {
             console.info("[premium-render-source]", {
@@ -4374,7 +4431,8 @@ async function runPremiumCompletionInner(
           shouldAttemptPreserve &&
           !preserveBlockedByStructuralFatals &&
           brandLicensingPreserveIntake &&
-          !substantiveServerFullNoticeScaffoldingOnlyReject
+          !substantiveServerFullNoticeScaffoldingOnlyReject &&
+          !degradedJsonParseWithoutSubstantiveServerFull
         ) {
           const structural = buildPaidProStructuralRecoveryBody({
             intakeText: intakeSForPreserve,
@@ -5113,6 +5171,63 @@ async function runPremiumCompletionInner(
             lastWireServerFullDocumentLen > 0 ? "present" : "",
         }));
     if (brandLicensingRejectedRecoveryEligible) {
+      const jsonParseDegradedNoWireServerFull = isDegradedJsonParseWithoutSubstantiveServerFull({
+        generationOutcome: lastWireGenerationOutcome,
+        failureCode: serverDegradedHttpMetaForRecovery?.code ?? serverGenerationDegraded?.code ?? null,
+        wireServerFullDocumentText: lastWireServerFullDocumentLen > 0 ? "present" : "",
+      });
+      if (jsonParseDegradedNoWireServerFull) {
+        const intakeLocalRecovery = buildPremiumPostCheckoutLocalRecoveryProDraft({
+          draft: outMerged,
+          rawIntake: intakeForRecovery,
+          intakeLower: intakeLowerGlobal,
+          recoverySurface: PREMIUM_DEGRADED_SERVER_LOCAL_RECOVERY_RENDER_SOURCE,
+        });
+        const intakeRecoveryPreview = intakeLocalRecovery.ok
+          ? previewPostCheckoutRecoverySotCommit({
+              body: intakeLocalRecovery.body,
+              draft: outMerged,
+              intakeText: intakeForRecovery,
+              premiumRenderSource: PREMIUM_DEGRADED_SERVER_LOCAL_RECOVERY_RENDER_SOURCE,
+            })
+          : null;
+        if (intakeLocalRecovery.ok && intakeRecoveryPreview?.eligible) {
+          const recoverySource = PREMIUM_DEGRADED_SERVER_LOCAL_RECOVERY_RENDER_SOURCE;
+          if (tierAEnabled) tierADiag.premiumPipelineSource = recoverySource;
+          logPremiumCompletionDebug({
+            stage: "premium_degraded_server_local_recovery",
+            recoveryCandidateEligible: true,
+            rejectedReason: undefined,
+            premiumRenderSource: recoverySource,
+            bodyLen: intakeLocalRecovery.body.length,
+            displayPlainLen: intakeRecoveryPreview.displayPlainLen,
+            lastClientGate: lastClientGateTrace,
+            note: "brand_json_parse_rejected_local_recovery",
+          });
+          outMerged = stripClientPremiumArtifactBlocksFromDraft({
+            ...outMerged,
+            premium_full_document_text: intakeLocalRecovery.body,
+          });
+          return {
+            premiumDraft: outMerged,
+            premiumParties,
+            recipientCandidates,
+            winningPremiumBodyText: intakeLocalRecovery.body,
+            premiumRenderSource: recoverySource,
+            premiumReview,
+            premiumFinalizeAudit,
+            premiumReviewRoute,
+            staleIntakeOrGeneration: false,
+            agreementGenerationId: input.agreementGenerationId,
+            premiumRequestIntakeFingerprint: input.premiumRequestIntakeFingerprint,
+            founderDetailsGateMessage: null,
+            proIntentGateMessage: null,
+            serverGenerationDegraded: serverGenerationDegraded ?? serverDegradedHttpMetaForRecovery,
+            premiumDegradedServerLocalRecovery: true,
+            tierADiagnostic: tierADiag,
+          };
+        }
+      }
       const brandStructural = buildPaidProStructuralRecoveryBody({
         intakeText: intakeForRecovery,
         draft: outMerged,

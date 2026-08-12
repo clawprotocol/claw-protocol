@@ -54,8 +54,9 @@ export function resolveCanonicalPlainForVisibleShell(
 ): { plain: string; source: string } {
   const resolution = resolvePaidProFirstReviewVisibleDisplayPlain(args);
   logTest310DisplaySource(resolution);
+  const skipTitleProjection = isPaidProPostFinalizeHydratedCorpusLocked();
   const projectedPlain =
-    resolution.plain.length >= PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN
+    resolution.plain.length >= PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN && !skipTitleProjection
       ? projectPaidProVisibleTitleDisplayPlain(resolution.plain, {
           fallbackTitle: args.draft?.title,
           intakeText: args.intakeText,

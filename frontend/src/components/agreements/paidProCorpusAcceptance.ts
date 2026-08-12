@@ -650,6 +650,13 @@ export function validatePaidProOutput(args: {
     })
   ) {
     /* substantive server draft passed freeze — do not re-reject as starter shell */
+  } else if (substantiveServerDraft && freezeCandidate.ok && wireAuthoritativeClauseCoverage && !acc.ok) {
+    if (requiresAcceptedCorpusPreservationProof) {
+      const preservation = assertAcceptedCorpusPreservationProof();
+      if (!preservation.ok) {
+        return rejectAt("accepted_corpus_preservation", preservation.reasons);
+      }
+    }
   } else {
     if (!acc.ok) {
       return rejectAt("rejectPremiumBodyForProRender", acc.reasons);

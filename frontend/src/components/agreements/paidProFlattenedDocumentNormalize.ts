@@ -85,7 +85,7 @@ export function normalizeFlattenedPaidProDocumentBlocks(text: string): {
     "$1\n\n$2",
   );
 
-  out = out.replace(/([a-z0-9])\s+(\d+\.\s+(?!\d+\.\d)[A-Z][A-Za-z])/g, "$1\n\n$2");
+  out = out.replace(/([a-z0-9])[^\S\n]+(\d+\.\s+(?!\d+\.\d)[A-Z][A-Za-z])/g, "$1\n\n$2");
 
   // "1. Services and Scope 1.1 Services" → main heading + subsection on separate blocks.
   out = out.replace(

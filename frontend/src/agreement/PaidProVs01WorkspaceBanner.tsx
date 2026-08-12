@@ -132,7 +132,7 @@ export function PaidProVs01WorkspaceBanner({ agreementId, visible }: Props) {
         <LawdogRecordedMark size="sm" />
         <div className="min-w-0 flex-1 space-y-2">
           <h3 id={`${panelId}-title`} className="text-base font-semibold tracking-tight text-emerald-100">
-            {packetPrepare ? "Signature links are ready" : "Saved in LawDog"}
+            {packetPrepare ? "Signing packet ready" : "Saved in LawDog"}
           </h3>
           <p className="text-sm font-medium text-slate-100">{completionLine}</p>
           <p className="text-xs text-slate-500">{title}</p>
