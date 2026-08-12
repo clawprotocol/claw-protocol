@@ -274,6 +274,21 @@ export function validateNoticesClauseFamilyStructuralIntegrity(
     const name = String(p.partyLegalName || "").trim();
     return name.length >= 3 && !/^Party\s+\d+$/i.test(name);
   });
+  const partiesHaveNoticeContacts = (opts?.parties ?? []).some((p) => {
+    const row = p as {
+      signerEmail?: string;
+      email?: string;
+      partyAddress?: string;
+      address?: string;
+    };
+    const email = String(row.signerEmail || row.email || "").trim();
+    const address = String(row.partyAddress || row.address || "").trim();
+    // Ignore signer-setup placeholders — those are not real contact authority.
+    if (/provided during signer setup/i.test(email) || /provided during signer setup/i.test(address)) {
+      return false;
+    }
+    return email.length > 0 || address.length > 0;
+  });
   const intakeHasAuthoritativeManifest = intakePartyManifestIsAuthoritative(opts?.intakeText);
   // Without real entity authority, do not require inventing Party 1/Party 2 notice scaffolding.
   const noticeAuthorityPresent = partiesHaveAuthoritativeNames || intakeHasAuthoritativeManifest;
@@ -302,8 +317,9 @@ export function validateNoticesClauseFamilyStructuralIntegrity(
   }
 
   if (!hasOperativeNoticesFamily) {
-    if (!noticeAuthorityPresent) {
-      // Commercial no-invent: omit notices until signer/entity authority exists.
+    if (!noticeAuthorityPresent || !partiesHaveNoticeContacts) {
+      // Commercial no-invent: omit notices until entity authority AND contact fields exist.
+      // Legal names alone must not force invented notice emails/addresses.
       return violations;
     }
     violations.push({

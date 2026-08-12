@@ -3570,7 +3570,13 @@ async function runPremiumCompletionInner(
             wireHasSubstantiveServerFullCorpus ||
             wireCorpusForFreeze.length >= SUBSTANTIVE_SERVER_DRAFT_MIN_LEN ||
             originalWireServerFullDocumentText.length >= SUBSTANTIVE_SERVER_DRAFT_MIN_LEN;
-          if (!skipDeterministicRecoveryForSubstantiveWire) {
+          // Known-party placeholder repair already produced an authoritative server body —
+          // keep server_full_draft provenance; do not replace with deterministic recovery.
+          const skipDeterministicRecoveryForPartyPlaceholderRepair = partyPlaceholderRepairAccept;
+          if (
+            !skipDeterministicRecoveryForSubstantiveWire &&
+            !skipDeterministicRecoveryForPartyPlaceholderRepair
+          ) {
             const recovery = previewRecoverPaidProFreezeCandidate({
               draft: mergedForApi,
               intakeText: rawForSoT || rawIntake,
@@ -3958,6 +3964,14 @@ async function runPremiumCompletionInner(
           );
           if (postWitnessCommit.repairs.length > 0) {
             doc = postWitnessCommit.text;
+          }
+          // Terminal heading-authority pass — wire restore / freeze retry must not leave
+          // split titles like "Revenue Allocation Among" / "Service Providers" (TEST431).
+          if (detectPaidProSectionHeadingTitleAnomalies(doc).length > 0) {
+            const terminalHeading = applyPaidProSectionHeadingTitleAuthority(doc);
+            if (terminalHeading.repairs.length > 0) {
+              doc = terminalHeading.text;
+            }
           }
           winningPremiumBodyText = doc;
           if (
@@ -5228,10 +5242,18 @@ async function runPremiumCompletionInner(
         preview: intakeRecoveryPreview,
       };
     };
+    // A non-empty short json_parse wire below the paid floor must reject cleanly —
+    // do not invent a ~5k local recovery SoT (json_parse degraded floor contract).
+    const shortNonemptyJsonParseWireBelowFloor =
+      premiumJsonParseDegradedAttemptCount > 0 &&
+      lastWireAuthoritativeBodyLen > 0 &&
+      lastWireAuthoritativeBodyLen < PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN &&
+      lastWireServerFullDocumentLen < PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN;
     if (
       rejectedPaidCorpusDueToClientGates &&
       !premiumBodyHardRejectedForDevContextLeak &&
       !substantiveServerFullOnWire &&
+      !shortNonemptyJsonParseWireBelowFloor &&
       (degradedJsonParseNoWireServerFull ||
         (!jsonParseClientRejected &&
           lastWireAuthoritativeBodyLen < PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN))

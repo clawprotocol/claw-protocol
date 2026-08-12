@@ -773,21 +773,11 @@ function resolveFreezeNoticeValidationContext(
 
 function ensureGenericManifestExecutionBlockBeforeNoticeFreeze(
   safeForCommit: string,
-  args: PreparePaidProFreezeCandidateArgs,
+  _args: PreparePaidProFreezeCandidateArgs,
 ): string {
-  if (/\bIN WITNESS WHEREOF\b/i.test(safeForCommit)) {
-    return safeForCommit;
-  }
-  const manifest = manifestRecordsForPaidProAcceptance({
-    draft: args.draft ?? null,
-    intakeText: args.intakeText ?? null,
-  });
-  // Generic Party 1/Party 2 fallback must not invent execution/signature chrome on an
-  // already-accepted body — that mutates SoT and fabricates notice/signature scaffolding.
-  if (isGenericPaidProAcceptanceManifestFallback(manifest)) {
-    return safeForCommit;
-  }
-  return appendProExecutionBlockIfMissing(safeForCommit, manifest).text;
+  // Never invent IN WITNESS / blank By:____ chrome into an accepted corpus that lacked it.
+  // That mutates SoT with cosmetic signature scaffolding; signing prepare owns execution blocks.
+  return safeForCommit;
 }
 
 function freezeNoticePartiesAreAuthoritative(
