@@ -184,15 +184,14 @@ def _attach_anon_session_cookie(*, response: Response, request: Request, token: 
 
 
 def _target_can_import_guest_drafts(target_org_id: str) -> bool:
-    """Import guest drafts into a workspace only after Genesis Dog or Pro entitlement."""
+    """Import guest drafts into a workspace only after Pro entitlement."""
     from backend.usage_economics.commercial_entitlement import (
-        STATE_GENESIS,
         STATE_PRO,
         resolve_commercial_entitlement,
     )
 
     decision = resolve_commercial_entitlement(f"org:{(target_org_id or '').strip()}")
-    return str(decision.get("state") or "") in (STATE_GENESIS, STATE_PRO)
+    return str(decision.get("state") or "") == STATE_PRO
 
 
 def _migrate_drafts_for_claim(
@@ -488,7 +487,15 @@ async def finalize_auth(request: Request, body: FinalizeAuthIn) -> Dict[str, Any
     if cont_row.get("agreement_id"):
         owner = ustore.owner_subject_for_agreement(str(cont_row["agreement_id"]))
         if owner and owner != f"org:{org_id}":
-            raise HTTPException(status_code=403, detail={"code": "post_claim_agreement_mismatch"})
+            # Guest import may be deferred until Genesis/Pro; ownership stays on prev org.
+            deferred_ok = (
+                bool(prev_org)
+                and not migrated
+                and owner == f"org:{prev_org}"
+                and not _target_can_import_guest_drafts(org_id)
+            )
+            if not deferred_ok:
+                raise HTTPException(status_code=403, detail={"code": "post_claim_agreement_mismatch"})
 
     return {
         "ok": True,

@@ -369,11 +369,29 @@ def apply_stripe_checkout_session_authority(
     if customer_id:
         economics.upsert_stripe_customer_org(stripe_customer_id=customer_id, org_id=org_id)
 
+    session_md = session.get("metadata") if isinstance(session.get("metadata"), dict) else {}
+
+    def _enrich_checkout_subscription(sub_obj: Dict[str, Any]) -> Dict[str, Any]:
+        """Stripe expanded subscriptions often omit Checkout session metadata/customer."""
+        enriched = dict(sub_obj)
+        if customer_id and not enriched.get("customer"):
+            enriched["customer"] = customer_id
+        sub_md = enriched.get("metadata") if isinstance(enriched.get("metadata"), dict) else {}
+        merged_md = {**session_md, **sub_md}
+        if org_id:
+            merged_md.setdefault("org_id", org_id)
+            merged_md.setdefault("claw_org_id", org_id)
+        if merged_md:
+            enriched["metadata"] = merged_md
+        if not str(enriched.get("status") or "").strip():
+            enriched["status"] = "active"
+        return enriched
+
     sub_sid = session.get("subscription")
     if isinstance(sub_sid, dict):
         result = apply_stripe_subscription_object(
             economics,
-            sub_sid,
+            _enrich_checkout_subscription(sub_sid),
             plan_code_override=plan_code,
             payment_id=payment_id,
         )
@@ -387,7 +405,7 @@ def apply_stripe_checkout_session_authority(
             "id": stripe_sub_id,
             "customer": customer_id or None,
             "status": "active",
-            "metadata": session.get("metadata") if isinstance(session.get("metadata"), dict) else {},
+            "metadata": session_md,
         }
         result = apply_stripe_subscription_object(
             economics,

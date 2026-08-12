@@ -594,6 +594,23 @@ def agreements_created_this_utc_month(subject_ref: str, month_start_iso: str) ->
     return int(row["c"] or 0) if row else 0
 
 
+def agreements_finalized_since(subject_ref: str, period_start_iso: str) -> int:
+    with _tx() as conn:
+        cur = conn.execute(
+            """
+            SELECT COUNT(*) AS c FROM agreement_owner
+            WHERE subject_ref = %s
+              AND completed_at IS NOT NULL
+              AND completed_at >= %s::timestamptz
+              AND COALESCE(guest_temp, 0) = 0
+              AND COALESCE(usage_refunded, 0) = 0
+            """,
+            (subject_ref, _ts(period_start_iso)),
+        )
+        row = cur.fetchone()
+    return int(row["c"] or 0) if row else 0
+
+
 def get_genesis_dog_entitlement(user_id: str) -> Optional[Dict[str, Any]]:
     with _tx() as conn:
         cur = conn.execute(
@@ -759,13 +776,20 @@ def set_abuse_flag(subject_ref: str, value: int, now_iso: str) -> None:
 
 
 def set_soft_throttle(subject_ref: str, value: int, now_iso: str) -> None:
+    ts = _ts(now_iso)
     with _tx() as conn:
         conn.execute(
             """
-            UPDATE subject_counters SET soft_throttle_flag = %s, updated_at = %s::timestamptz
-            WHERE subject_ref = %s
+            INSERT INTO subject_counters (
+              subject_ref, keys_consumed_total, agreements_created, agreements_finalized,
+              ai_calls_count, abuse_flag, soft_throttle_flag, updated_at
+            )
+            VALUES (%s, 0, 0, 0, 0, 0, %s, %s::timestamptz)
+            ON CONFLICT (subject_ref) DO UPDATE SET
+              soft_throttle_flag = EXCLUDED.soft_throttle_flag,
+              updated_at = EXCLUDED.updated_at
             """,
-            (int(value), _ts(now_iso), subject_ref),
+            (subject_ref, int(value), ts),
         )
 
 

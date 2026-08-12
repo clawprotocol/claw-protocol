@@ -2,12 +2,33 @@
 
 from __future__ import annotations
 
+from backend.tests.entitlement_test_support import ensure_headers_entitled, ensure_org_pro_entitlement
+
 import uuid
 
 import pytest
 from fastapi.testclient import TestClient
 
 from backend.main import app
+
+
+@pytest.fixture(autouse=True)
+def _entitle_owner_org_after_env(tmp_path, monkeypatch):
+    """Grant Pro for primary owner headers once tmp_path-backed DBs are configured."""
+    monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
+    monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ONRAMP_DB_PATH", str(tmp_path / "onramp.sqlite3"))
+    monkeypatch.setenv("CLAW_TREASURY_DB_PATH", str(tmp_path / "treasury.sqlite3"))
+    from backend.economics.store import reset_economics_store_for_tests
+    reset_economics_store_for_tests()
+    for _name in ("_ORG_H", "_OWNER_H", "OWNER_HEADERS", "_HEADERS", "ORG_HEADERS", "_OWNER", "_ORG_A", "_ORG", "_STAGING_ORG"):
+        h = globals().get(_name)
+        if isinstance(h, dict) and h.get("X-Claw-Org-Id"):
+            ensure_headers_entitled(h)
+    yield
+    reset_economics_store_for_tests()
+
 from backend.security.anonymous_session_store import reset_anonymous_session_store_for_tests
 from backend.tests.conftest_auth_security import auth_secrets, mint_anonymous_session, make_test_auth_headers
 from backend.usage_economics.store import UsageEconomicsStore
@@ -72,7 +93,7 @@ def test_bind_user_org_migrates_drafts_from_anon_org(isolated_usage):
     user_id = "supabase-user-anon-claim"
     stable_org = f"user-{user_id}"
     aid = f"ag-anon-{uuid.uuid4().hex[:8]}"
-    grant_entitlement(user_id=user_id, granted_by="test", grant_source=GRANT_SOURCE_ADMIN)
+    ensure_org_pro_entitlement(f\"user-{user_id}\", user_id=user_id)
 
     isolated_usage.insert_agreement_owner(
         agreement_id=aid,
@@ -138,7 +159,7 @@ def test_bind_user_org_idempotent_second_call(isolated_usage):
     anon_org, token, headers = mint_anonymous_session(client)
     user_id = "supabase-user-idempotent"
     aid = f"ag-idem-{uuid.uuid4().hex[:8]}"
-    grant_entitlement(user_id=user_id, granted_by="test", grant_source=GRANT_SOURCE_ADMIN)
+    ensure_org_pro_entitlement(f\"user-{user_id}\", user_id=user_id)
 
     isolated_usage.insert_agreement_owner(
         agreement_id=aid,

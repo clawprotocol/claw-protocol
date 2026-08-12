@@ -32,6 +32,7 @@ def _env_common(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
 
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path / "data"))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     monkeypatch.setenv("CLAW_BLOB_ROOT", str(tmp_path / "blobs"))
     monkeypatch.setenv("CLAW_ARTIFACT_REGISTRY_DB_PATH", str(tmp_path / "registry.sqlite3"))
     monkeypatch.setenv("CLAW_DOCUMENTS_DIR", str(tmp_path / "documents"))
@@ -101,7 +102,7 @@ def test_vs01_seed_content_ok_under_commercial_mode(monkeypatch: pytest.MonkeyPa
     """Resume finalize → esign bridge: seed must stamp owner_org_id; content requires owner headers."""
     from backend.storage.artifact_repository import reset_artifact_repository_singleton
     from backend.usage_economics import store as usage_economics_store_mod
-    from backend.usage_economics.genesis_dog_entitlement import GRANT_SOURCE_ADMIN, grant_entitlement
+    from backend.tests.entitlement_test_support import ensure_org_pro_entitlement
 
     pytest.importorskip("fitz")
     usage_economics_store_mod._store = None  # noqa: SLF001
@@ -112,13 +113,14 @@ def test_vs01_seed_content_ok_under_commercial_mode(monkeypatch: pytest.MonkeyPa
     monkeypatch.setenv("CLAW_DOCUMENTS_DIR", str(tmp_path / "documents"))
     monkeypatch.setenv("CLAW_STORAGE_BACKEND", "local")
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     monkeypatch.setenv("CLAW_COMMERCIAL_MODE", "1")
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_ENABLED", "1")
     monkeypatch.setenv("CLAW_NODE_MODE", "api")
     reset_artifact_repository_singleton()
 
     user = "vs01-seed-commercial-owner"
-    grant_entitlement(user_id=user, granted_by="test", grant_source=GRANT_SOURCE_ADMIN)
+    ensure_org_pro_entitlement(f\"user-{user}\", user_id=user)
     headers = make_authenticated_user_headers(user)
     client = TestClient(app, raise_server_exceptions=False)
     create_res = client.post(

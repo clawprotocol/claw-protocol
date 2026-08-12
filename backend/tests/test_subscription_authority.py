@@ -196,9 +196,9 @@ def test_invoice_paid_syncs_subscription_before_affiliate_earning(
     inv = {
         "id": "in_inv_aff",
         "customer": "cus_invaff",
-        "amount_paid": 2900,
-        "billing_reason": "subscription_cycle",
-        "metadata": {"org_id": "org-inv-aff"},
+        "amount_paid": 9900,
+        "billing_reason": "subscription_create",
+        "metadata": {"org_id": "org-inv-aff", "plan_code": "pro"},
         "subscription": "sub_invaff",
         "period_end": end_ts,
         "charge": None,
@@ -206,12 +206,31 @@ def test_invoice_paid_syncs_subscription_before_affiliate_earning(
     }
     r = handle_invoice_paid(economics_store, inv)
     assert r.get("ok") is True
-    assert r.get("earning_id")
+    assert r.get("earning_id"), r
     row = economics_store.get_subscription_by_org("org-inv-aff")
     assert row is not None
     assert row["current_period_end"] == stripe_timestamp_to_iso(end_ts)
     assert row["stripe_subscription_id"] == "sub_invaff"
     assert is_subscription_entitled(row)
+    # Renewal cycles sync entitlement but must not mint a second legacy earning.
+    cycle_end = _future_ts(90)
+    r_cycle = handle_invoice_paid(
+        economics_store,
+        {
+            **inv,
+            "id": "in_inv_aff_cycle",
+            "billing_reason": "subscription_cycle",
+            "period_end": cycle_end,
+        },
+    )
+    assert r_cycle.get("ok") is True
+    assert r_cycle.get("ignored") is True
+    assert r_cycle.get("reason") == "first_invoice_only"
+    assert r_cycle.get("earning_id") is None
+    row2 = economics_store.get_subscription_by_org("org-inv-aff")
+    assert row2 is not None
+    assert row2["current_period_end"] == stripe_timestamp_to_iso(cycle_end)
+    assert is_subscription_entitled(row2)
 
 
 def test_dispatch_handles_subscription_created(economics_store: EconomicsStore) -> None:

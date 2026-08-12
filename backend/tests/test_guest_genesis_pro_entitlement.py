@@ -1,4 +1,4 @@
-"""Guest → Genesis Dog → Pro commercial entitlement model."""
+"""Guest | Pro buyers; Genesis affiliate status is not a create entitlement."""
 
 from __future__ import annotations
 
@@ -11,22 +11,18 @@ from fastapi.testclient import TestClient
 from backend.affiliates.genesis_referral_service import create_genesis_affiliate
 from backend.economics.store import get_economics_store, reset_economics_store_for_tests
 from backend.main import app
-from backend.usage_economics import constants as uc
 from backend.usage_economics.commercial_entitlement import (
-    STATE_GENESIS,
+    AFFILIATE_STATUS_GENESIS,
     STATE_GUEST,
     STATE_NONE,
-    STATE_PENDING_GENESIS,
     STATE_PRO,
     resolve_commercial_entitlement,
 )
 from backend.usage_economics.genesis_dog_entitlement import (
-    GRANT_SOURCE_ADMIN,
-    GRANT_SOURCE_LEGACY_AFFILIATE,
+    GenesisCreateGrantIssuanceRetired,
     get_entitlement,
     grant_entitlement,
     resolve_genesis_dog_access,
-    revoke_entitlement,
 )
 from backend.usage_economics.store import UsageEconomicsStore
 
@@ -47,7 +43,6 @@ def isolated_entitlement_env(tmp_path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage_eco.sqlite3"))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_ENABLED", "1")
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_STRICT_IN_DEV", "1")
-    monkeypatch.setenv("CLAW_GENESIS_MONTHLY_AGREEMENT_ALLOWANCE", "5")
     monkeypatch.setenv("CLAW_PRO_BILLING_PERIOD_AGREEMENT_ALLOWANCE", "25")
     monkeypatch.setenv("CLAW_RATE_LIMIT_RPS", "1000")
     monkeypatch.setenv("CLAW_RATE_LIMIT_BURST", "1000")
@@ -100,274 +95,61 @@ def _draft_body(title: str = "T") -> dict:
     }
 
 
-def _mint_anon(client: TestClient) -> dict:
-    r = client.post("/v1/workspace/anonymous-session")
-    assert r.status_code == 200, r.text
-    body = r.json()
-    return {
-        "X-Claw-Org-Id": body["org_id"],
-        "X-Claw-Anonymous-Session": body["token"],
-        "Content-Type": "application/json",
-    }
-
-
-def _activate_paid(eco, user_id: str, *, period_days: int = 30) -> None:
-    org = f"user-{user_id}"
-    end = (datetime.now(timezone.utc) + timedelta(days=period_days)).isoformat().replace("+00:00", "Z")
+def _activate_paid(eco, uid: str) -> None:
     eco.insert_subscription(
         sub_id=f"sub-{uuid.uuid4().hex[:12]}",
-        org_id=org,
-        user_id=user_id,
+        org_id=f"user-{uid}",
+        user_id=uid,
         plan_code="pro",
         status="active",
         payment_id=f"pay-{uuid.uuid4().hex[:10]}",
-        expires_at=end,
-        current_period_end=end,
+        expires_at=None,
+        current_period_end=(datetime.now(timezone.utc) + timedelta(days=30))
+        .isoformat()
+        .replace("+00:00", "Z"),
     )
 
 
-def test_1_guest_generates_one_temporary_draft(isolated_entitlement_env):
-    client, _eco, usage = isolated_entitlement_env
-    h = _mint_anon(client)
-    r = client.post("/api/agreements/draft", headers=h, json=_draft_body("Guest1"))
-    assert r.status_code == 200, r.text
-    aid = r.json()["id"]
-    row = usage.get_agreement_owner_row(aid)
-    assert row is not None
-    decision = resolve_commercial_entitlement(f"org:{h['X-Claw-Org-Id']}")
+def test_guest_temp_draft_only(isolated_entitlement_env):
+    _client, _eco, _usage = isolated_entitlement_env
+    decision = resolve_commercial_entitlement(f"org:anon-{uuid.uuid4().hex[:8]}")
     assert decision["state"] == STATE_GUEST
     assert decision["can_create_persisted_agreement"] is False
-    assert decision["can_save_guest_draft"] is False  # already used the one draft
+    assert decision["can_save_guest_draft"] is True
 
 
-def test_2_guest_cannot_workspace_history_or_share(isolated_entitlement_env):
+def test_authenticated_none_cannot_create_without_pro(isolated_entitlement_env):
     client, _eco, _usage = isolated_entitlement_env
-    h = _mint_anon(client)
-    created = client.post("/api/agreements/draft", headers=h, json=_draft_body("GuestHist"))
-    assert created.status_code == 200, created.text
-    aid = created.json()["id"]
-    hist = client.get("/api/agreements/workspace-index", headers=h)
-    assert hist.status_code in (401, 403)
-    share = client.post(f"/api/agreements/{aid}/review-sent", headers=h)
-    assert share.status_code in (401, 403)
-    proof = client.get(f"/api/agreements/{aid}/proof-status", headers=h)
-    assert proof.status_code == 403
-    detail = proof.json().get("detail") or {}
-    assert detail.get("code") in (uc.GUEST_WORKFLOW_DENIED, "agreement_read_denied", "auth_required")
-
-
-def test_3_genesis_request_does_not_grant(isolated_entitlement_env):
-    client, _eco, _usage = isolated_entitlement_env
-    uid = "pending-user"
-    h = _auth(uid)
-    before = resolve_commercial_entitlement(f"org:user-{uid}")
-    assert before["state"] == STATE_NONE
-    r = client.post(
-        "/v1/workspace/genesis-access-request",
-        headers=h,
-        json={"reason": "please invite me"},
-    )
-    assert r.status_code == 200, r.text
-    body = r.json()
-    assert body["granted"] is False
-    after = resolve_commercial_entitlement(f"org:user-{uid}")
-    assert after["state"] == STATE_PENDING_GENESIS
-    assert after["can_create_persisted_agreement"] is False
-    assert get_entitlement(uid) is None
-
-
-def test_authenticated_none_usage_summary_blocks_persisted_create(isolated_entitlement_env):
-    """Backend authority for unentitled signed-in Create access-choice (no editor grant)."""
-    client, _eco, _usage = isolated_entitlement_env
-    uid = "unentitled-create"
-    h = _auth(uid)
-    summary = client.get("/api/agreements/usage/summary", headers=h)
-    assert summary.status_code == 200, summary.text
-    body = summary.json()
-    assert body["state"] == STATE_NONE
-    assert body["can_create_persisted_agreement"] is False
-    assert body["can_save_guest_draft"] is False
-    commercial = body.get("commercial") or {}
-    assert commercial.get("state") == STATE_NONE
-    assert commercial.get("can_create_persisted_agreement") is False
-    blocked = client.post("/api/agreements/draft", headers=h, json=_draft_body("NoAccess"))
+    uid = "auth-none"
+    blocked = client.post("/api/agreements/draft", headers=_auth(uid), json=_draft_body("Nope"))
     assert blocked.status_code == 403
+    d = resolve_commercial_entitlement(f"org:user-{uid}")
+    assert d["state"] == STATE_NONE
+    assert d["can_create_persisted_agreement"] is False
+    assert d.get("affiliate_status") == "none"
 
 
-def test_guest_may_create_one_temp_draft_before_conversion(isolated_entitlement_env):
-    """Guest value-before-conversion: first temp draft allowed; persistence denied."""
+def test_admin_genesis_create_grant_issuance_retired(isolated_entitlement_env):
     client, _eco, _usage = isolated_entitlement_env
-    h = _mint_anon(client)
-    before = resolve_commercial_entitlement(f"org:{h['X-Claw-Org-Id']}")
-    assert before["state"] == STATE_GUEST
-    assert before["can_save_guest_draft"] is True
-    assert before["can_create_persisted_agreement"] is False
-    created = client.post("/api/agreements/draft", headers=h, json=_draft_body("GuestValue"))
-    assert created.status_code == 200, created.text
-    after = resolve_commercial_entitlement(f"org:{h['X-Claw-Org-Id']}")
-    assert after["state"] == STATE_GUEST
-    assert after["can_save_guest_draft"] is False
-    assert after["can_create_persisted_agreement"] is False
-    # Second draft requires Genesis/Pro — value moment already delivered.
-    blocked = client.post("/api/agreements/draft", headers=h, json=_draft_body("GuestAgain"))
-    assert blocked.status_code == 403
-
-
-def test_public_and_customer_cannot_grant_genesis(isolated_entitlement_env):
-    client, _eco, _usage = isolated_entitlement_env
-    uid = "no-public-grant"
-    # Unauthenticated
-    r0 = client.post(
+    uid = "grant-retired"
+    res = client.post(
         f"/v1/admin/users/{uid}/genesis-entitlement/grant",
+        headers=_admin_headers(),
         json={"reason": "should_fail"},
     )
-    assert r0.status_code in (401, 403)
-    # Authenticated customer without operator role/secret
-    r1 = client.post(
-        f"/v1/admin/users/{uid}/genesis-entitlement/grant",
-        headers=_auth("customer-only"),
-        json={"reason": "should_fail"},
-    )
-    assert r1.status_code in (401, 403)
+    assert res.status_code == 410
+    assert res.json()["detail"]["code"] == "genesis_create_grant_issuance_retired"
+    with pytest.raises(GenesisCreateGrantIssuanceRetired):
+        grant_entitlement(user_id=uid, granted_by="test")
     assert get_entitlement(uid) is None
+    active, _src, row = resolve_genesis_dog_access(uid)
+    assert active is False
+    assert row is None
 
 
-def test_4_admin_grant_five_agreements(isolated_entitlement_env):
-    client, _eco, _usage = isolated_entitlement_env
-    uid = "genesis-five"
-    admin = _admin_headers()
-    grant = client.post(
-        f"/v1/admin/users/{uid}/genesis-entitlement/grant",
-        headers=admin,
-        json={"reason": "invite_selected_user"},
-    )
-    assert grant.status_code == 200, grant.text
-    assert grant.json().get("audit_id")
-    h = _auth(uid)
-    for i in range(5):
-        r = client.post("/api/agreements/draft", headers=h, json=_draft_body(f"G{i}"))
-        assert r.status_code == 200, r.text
-    blocked = client.post("/api/agreements/draft", headers=h, json=_draft_body("over"))
-    assert blocked.status_code == 403
-    summary = client.get("/api/agreements/usage/summary", headers=h).json()
-    assert summary["state"] == STATE_GENESIS
-    assert summary["agreement_allowance"] == 5
-    assert summary["agreements_used"] == 5
-    assert summary["agreements_remaining"] == 0
-
-
-def test_5_grant_revoke_expiry_audited(isolated_entitlement_env):
-    client, _eco, _usage = isolated_entitlement_env
-    uid = "genesis-audit"
-    admin = _admin_headers()
-    past = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat().replace("+00:00", "Z")
-    g = client.post(
-        f"/v1/admin/users/{uid}/genesis-entitlement/grant",
-        headers=admin,
-        json={"reason": "grant_with_expiry", "expires_at": past},
-    )
-    assert g.status_code == 200, g.text
-    assert g.json()["audit_id"]
-    # Expired → denied even if we also create an active affiliate.
-    create_genesis_affiliate(
-        get_economics_store(),
-        user_id=uid,
-        display_name="Dog",
-        referral_code=f"GEN_{uid[:8].upper()}",
-        affiliate_status="active",
-    )
-    decision = resolve_commercial_entitlement(f"org:user-{uid}")
-    assert decision["state"] == STATE_NONE
-    # Re-grant active, then revoke.
-    g2 = client.post(
-        f"/v1/admin/users/{uid}/genesis-entitlement/grant",
-        headers=admin,
-        json={"reason": "regrant_active"},
-    )
-    assert g2.status_code == 200
-    rev = client.post(
-        f"/v1/admin/users/{uid}/genesis-entitlement/revoke",
-        headers=admin,
-        json={"reason": "revoke_selected_user"},
-    )
-    assert rev.status_code == 200, rev.text
-    assert rev.json()["audit_id"]
-    got = client.get(f"/v1/admin/users/{uid}/genesis-entitlement", headers=admin)
-    assert got.status_code == 200, got.text
-    assert got.json()["entitlement"]["status"] == "revoked"
-    assert any(
-        str(a.get("action_type") or "").startswith("genesis_entitlement_")
-        for a in got.json().get("audit") or []
-    )
-
-
-def test_6_and_7_only_new_persisted_create_decrements_not_revision(isolated_entitlement_env):
-    client, _eco, usage = isolated_entitlement_env
-    uid = "genesis-meter"
-    grant_entitlement(user_id=uid, granted_by="test", grant_source=GRANT_SOURCE_ADMIN)
-    h = _auth(uid)
-    r = client.post("/api/agreements/draft", headers=h, json=_draft_body("One"))
-    assert r.status_code == 200, r.text
-    aid = r.json()["id"]
-    used_after_create = resolve_commercial_entitlement(f"org:user-{uid}")["agreements_used"]
-    assert used_after_create == 1
-    # Simulate revision/update — no new ownership insert.
-    patch = client.patch(
-        f"/api/agreements/{aid}",
-        headers=h,
-        json={"title": "Revised title"},
-    )
-    # Patch may 404/405 depending on API; metering must not increase regardless.
-    _ = patch.status_code
-    used_after_revision = resolve_commercial_entitlement(f"org:user-{uid}")["agreements_used"]
-    assert used_after_revision == 1
-    assert usage.agreements_created_this_utc_month(f"org:user-{uid}") == 1
-
-
-def test_8_genesis_monthly_reset(isolated_entitlement_env):
-    _client, _eco, usage = isolated_entitlement_env
-    uid = "genesis-rollover"
-    subject = f"org:user-{uid}"
-    grant_entitlement(user_id=uid, granted_by="test", grant_source=GRANT_SOURCE_ADMIN)
-    prior = datetime(2020, 1, 15, tzinfo=timezone.utc).isoformat().replace("+00:00", "Z")
-    with usage._conn() as con:  # noqa: SLF001
-        for i in range(5):
-            con.execute(
-                """
-                INSERT INTO agreement_owner (agreement_id, subject_ref, created_at, internal_keys_draft, guest_temp)
-                VALUES (?, ?, ?, 0, 0)
-                """,
-                (f"old-{i}", subject, prior),
-            )
-        con.commit()
-    decision = resolve_commercial_entitlement(subject)
-    assert decision["state"] == STATE_GENESIS
-    assert decision["agreements_used"] == 0
-    assert decision["can_create_persisted_agreement"] is True
-
-
-def test_9_pro_stripe_billing_period_allowance(isolated_entitlement_env):
-    client, eco, _usage = isolated_entitlement_env
-    uid = "pro-cap"
-    _activate_paid(eco, uid)
-    h = _auth(uid)
-    decision = resolve_commercial_entitlement(f"org:user-{uid}")
-    assert decision["state"] == STATE_PRO
-    assert decision["grant_source"] == "stripe"
-    assert decision["agreement_allowance"] == 25
-    # Create up to configured test allowance via env is 25 — sample a few and confirm summary.
-    for i in range(3):
-        assert client.post("/api/agreements/draft", headers=h, json=_draft_body(f"P{i}")).status_code == 200
-    summary = client.get("/api/agreements/usage/summary", headers=h).json()
-    assert summary["state"] == STATE_PRO
-    assert summary["agreements_used"] == 3
-    assert summary["agreements_remaining"] == 22
-    assert summary["commercial"]["pro_allowance"]["limit"] == 25
-
-
-def test_10_support_operator_independent_and_revoked_beats_affiliate(isolated_entitlement_env):
-    client, eco, _usage = isolated_entitlement_env
-    uid = "revoked-vs-affiliate"
+def test_affiliate_does_not_grant_buyer_create(isolated_entitlement_env):
+    _client, eco, _usage = isolated_entitlement_env
+    uid = "aff-only"
     create_genesis_affiliate(
         eco,
         user_id=uid,
@@ -375,26 +157,58 @@ def test_10_support_operator_independent_and_revoked_beats_affiliate(isolated_en
         referral_code=f"GEN_{uid[:8].upper()}",
         affiliate_status="active",
     )
-    # Dual-read: active affiliate without entitlement row → legacy Genesis.
-    active, src, _ = resolve_genesis_dog_access(uid)
-    assert active is True
-    assert src == GRANT_SOURCE_LEGACY_AFFILIATE
-    # Explicit revoke denies despite affiliate.
-    revoke_entitlement(user_id=uid, revoked_by="ops", reason="revoke_test")
-    active2, src2, row = resolve_genesis_dog_access(uid)
-    assert active2 is False
-    assert src2 == "none"
+    d = resolve_commercial_entitlement(f"org:user-{uid}")
+    assert d["state"] == STATE_NONE
+    assert d["can_create_persisted_agreement"] is False
+    assert d["affiliate_status"] == AFFILIATE_STATUS_GENESIS
+    active, _src, _row = resolve_genesis_dog_access(uid)
+    assert active is False
+
+
+def test_legacy_genesis_row_readable_but_no_create(isolated_entitlement_env, monkeypatch):
+    monkeypatch.setenv("CLAW_ALLOW_GENESIS_CREATE_GRANT_ISSUANCE", "1")
+    uid = "legacy-row"
+    grant_entitlement(user_id=uid, granted_by="migration-tool")
+    monkeypatch.delenv("CLAW_ALLOW_GENESIS_CREATE_GRANT_ISSUANCE", raising=False)
+    row = get_entitlement(uid)
     assert row is not None
-    decision = resolve_commercial_entitlement(f"org:user-{uid}")
-    assert decision["state"] == STATE_NONE
-    # support_operator role alone does not create customer Genesis entitlement.
-    assert get_entitlement("boot-ops") is None
-    admin = _admin_headers("boot-ops")
-    g = client.post(
-        f"/v1/admin/users/{uid}/genesis-entitlement/grant",
-        headers=admin,
-        json={"reason": "regrant_after_revoke"},
-    )
-    assert g.status_code == 200, g.text
-    assert get_entitlement("boot-ops") is None
-    assert resolve_commercial_entitlement(f"org:user-{uid}")["state"] == STATE_GENESIS
+    d = resolve_commercial_entitlement(f"org:user-{uid}")
+    assert d["state"] == STATE_NONE
+    assert d["can_create_persisted_agreement"] is False
+    legacy = d.get("legacy_genesis_create_grant") or {}
+    assert legacy.get("present") is True
+    assert legacy.get("create_granted") is False
+    assert legacy.get("migration_required") is True
+
+
+def test_pro_stripe_finalize_meter(isolated_entitlement_env):
+    client, eco, usage = isolated_entitlement_env
+    uid = "pro-cap"
+    _activate_paid(eco, uid)
+    h = _auth(uid)
+    subject = f"org:user-{uid}"
+    decision = resolve_commercial_entitlement(subject)
+    assert decision["state"] == STATE_PRO
+    assert decision["agreement_allowance"] == 25
+    for i in range(3):
+        assert client.post("/api/agreements/draft", headers=h, json=_draft_body(f"P{i}")).status_code == 200
+    summary = client.get("/api/agreements/usage/summary", headers=h).json()
+    assert summary["state"] == STATE_PRO
+    assert summary["agreements_used"] == 0
+    assert summary["commercial"]["pro_allowance"].get("meter") == "finalized"
+    for i in range(3):
+        aid = f"fin-pro-{i}"
+        usage.try_insert_agreement_owner_with_monthly_cap(
+            agreement_id=aid,
+            subject_ref=subject,
+            internal_keys_draft=0,
+            monthly_cap=None,
+            period_start_iso="",
+            guest_temp=False,
+        )
+        assert usage.mark_agreement_completed(
+            agreement_id=aid, subject_ref=subject, internal_keys_finalize=1
+        )
+    summary2 = client.get("/api/agreements/usage/summary", headers=h).json()
+    assert summary2["agreements_used"] == 3
+    assert summary2["agreements_remaining"] == 22

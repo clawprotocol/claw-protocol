@@ -10,7 +10,11 @@ from decimal import Decimal, ROUND_HALF_UP
 from typing import Any, Dict, Optional
 
 from backend.affiliates.genesis_referral_service import resolve_genesis_commission_context
-from backend.economics.genesis_referral_store import insert_affiliate_commission, void_commissions_for_invoice
+from backend.economics.genesis_referral_store import (
+    count_non_voided_commissions_for_referred_org,
+    insert_affiliate_commission,
+    void_commissions_for_invoice,
+)
 from backend.economics.store import EconomicsStore
 
 _log = logging.getLogger("claw.genesis_referral.stripe")
@@ -96,6 +100,19 @@ def handle_genesis_invoice_paid(economics: EconomicsStore, invoice: Dict[str, An
     if not ctx:
         return {"ok": True, "ignored": True, "reason": "no_genesis_attribution"}
 
+    # Idempotent retry of the same invoice must surface as duplicate before first-invoice gate.
+    idem_key = f"genesis:invoice:{inv_id}"
+    with economics._conn() as con:
+        existing = con.execute(
+            "SELECT id FROM affiliate_commissions WHERE idempotency_key = ? OR stripe_invoice_id = ?",
+            (idem_key, inv_id),
+        ).fetchone()
+        if existing:
+            return {"ok": True, "duplicate": True, "commission_id": str(existing[0])}
+        prior = count_non_voided_commissions_for_referred_org(con, org_id)
+    if prior > 0:
+        return {"ok": True, "ignored": True, "reason": "first_invoice_only"}
+
     rate = Decimal(str(ctx["commission_rate"]))
     gross = (Decimal(amount_cents) / Decimal(100)).quantize(Decimal("0.01"))
     commission = (gross * rate).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
@@ -122,7 +139,7 @@ def handle_genesis_invoice_paid(economics: EconomicsStore, invoice: Dict[str, An
             stripe_subscription_id=stripe_sub_id,
             period_start=period_start,
             period_end=period_end,
-            idempotency_key=f"genesis:invoice:{inv_id}",
+            idempotency_key=idem_key,
         )
         con.commit()
 

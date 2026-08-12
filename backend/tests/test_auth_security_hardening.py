@@ -92,6 +92,12 @@ def test_bind_requires_authenticated_user(isolated_usage):
 
 
 def test_continuation_finalize_without_session_storage(isolated_usage):
+    """Finalize migrates guest drafts only when target has Genesis/Pro (product contract)."""
+    from backend.usage_economics.genesis_dog_entitlement import (
+        GRANT_SOURCE_ADMIN,
+        grant_entitlement,
+    )
+
     client = TestClient(app)
     org_id, token, headers = mint_anonymous_session(client)
     aid = f"ag-cont-{uuid.uuid4().hex[:8]}"
@@ -113,6 +119,7 @@ def test_continuation_finalize_without_session_storage(isolated_usage):
     assert cont.status_code == 200, cont.text
     continuation_id = cont.json()["continuation_id"]
     user_id = "magic-link-user"
+    ensure_org_pro_entitlement(f\"user-{user_id}\", user_id=user_id)
     fin = client.post(
         "/v1/workspace/finalize-auth",
         headers={**headers, **make_test_auth_headers(user_id)},

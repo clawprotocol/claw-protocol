@@ -17,22 +17,16 @@ class PlanDict(TypedDict, total=False):
     payout_share_bps: int
 
 
+# Paid-beta contract: Pro is the sole self-serve paid plan ($99). Plus/starter is not a launch SKU.
 PLANS: Dict[str, PlanDict] = {
-    "starter": {
-        "monthly_usd": Decimal("29.00"),
-        "included_keys": 50,
-        "overage_mode": "metered",
-        "usage_enabled": True,
-        "affiliate_eligible": True,
-        "payout_share_bps": 1_000,
-    },
     "pro": {
         "monthly_usd": Decimal("99.00"),
         "included_keys": 200,
         "overage_mode": "metered",
         "usage_enabled": True,
         "affiliate_eligible": True,
-        "payout_share_bps": 1_500,
+        # 30% of first settled Pro invoice ($29.70 on $99) — Genesis ledger is authoritative.
+        "payout_share_bps": 3_000,
     },
     "enterprise": {
         "monthly_usd": Decimal("499.00"),
@@ -59,8 +53,11 @@ SERVICE_KEY_COSTS: Dict[str, int] = {
 
 
 def get_plan(plan_code: str) -> PlanDict:
-    key = (plan_code or "starter").strip().lower() or "starter"
-    base = PLANS.get(key) or PLANS["starter"]
+    key = (plan_code or "pro").strip().lower() or "pro"
+    # Legacy "starter"/"plus" codes resolve to Pro — Plus is not a launch SKU.
+    if key in {"starter", "plus", "standard", "paid_pro", "business"}:
+        key = "pro"
+    base = PLANS.get(key) or PLANS["pro"]
     return dict(base)
 
 

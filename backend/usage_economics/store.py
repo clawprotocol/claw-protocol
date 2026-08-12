@@ -898,6 +898,30 @@ class UsageEconomicsStore:
         start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0).isoformat().replace("+00:00", "Z")
         return self.agreements_created_since(subject_ref, start)
 
+    def agreements_finalized_since(self, subject_ref: str, period_start_iso: str) -> int:
+        """Count successfully finalized agreements for subject since period_start (inclusive).
+
+        Paid-beta Pro quota meters finalizations — not creates, previews, retries, or repairs.
+        """
+        start = (period_start_iso or "").strip()
+        if not start:
+            return 0
+        if self._pg:
+            from backend.usage_economics import usage_economics_postgres as uep
+
+            return uep.agreements_finalized_since(subject_ref, start)
+        with self._conn() as con:
+            row = con.execute(
+                """
+                SELECT COUNT(*) AS c FROM agreement_owner
+                WHERE subject_ref = ? AND completed_at IS NOT NULL AND completed_at >= ?
+                  AND COALESCE(guest_temp, 0) = 0
+                  AND COALESCE(usage_refunded, 0) = 0
+                """,
+                (subject_ref, start),
+            ).fetchone()
+            return int(row[0]) if row else 0
+
     def agreements_created_since(self, subject_ref: str, period_start_iso: str) -> int:
         """Count persisted agreement creates for subject since period_start (inclusive)."""
         start = (period_start_iso or "").strip()
@@ -1004,12 +1028,19 @@ class UsageEconomicsStore:
             uep.set_soft_throttle(subject_ref, value, now)
             return
         with self._conn() as con:
+            # Upsert: guest subjects may not have a counters row yet.
             con.execute(
                 """
-                UPDATE subject_counters SET soft_throttle_flag = ?, updated_at = ?
-                WHERE subject_ref = ?
+                INSERT INTO subject_counters (
+                    subject_ref, keys_consumed_total, agreements_created, agreements_finalized,
+                    ai_calls_count, abuse_flag, soft_throttle_flag, updated_at
+                )
+                VALUES (?, 0, 0, 0, 0, 0, ?, ?)
+                ON CONFLICT(subject_ref) DO UPDATE SET
+                    soft_throttle_flag = excluded.soft_throttle_flag,
+                    updated_at = excluded.updated_at
                 """,
-                (int(value), now, subject_ref),
+                (subject_ref, int(value), now),
             )
 
     def incr_ai_calls(self, subject_ref: str, n: int = 1) -> None:

@@ -99,6 +99,32 @@ def require_commercial_owner_principal(request: Request) -> str:
     return require_authenticated_dashboard_principal(request)
 
 
+def require_paid_pro_principal(request: Request) -> str:
+    """
+    Authenticated commercial owner with active Pro entitlement.
+
+    Paid-beta contract: Genesis and authenticated-none must not invoke Pro
+    premium-drafting routes (e.g. ``/premium-full-draft``).
+    """
+    user_id = require_commercial_owner_principal(request)
+    from backend.usage_economics.commercial_entitlement import STATE_PRO, resolve_commercial_entitlement
+    from backend.utils.enforce import resolve_subject_from_request
+
+    subject = resolve_subject_from_request(request)
+    decision = resolve_commercial_entitlement(subject)
+    state = str(decision.get("state") or "").strip().lower()
+    if state != STATE_PRO:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "premium_draft_requires_pro",
+                "message": "Premium drafting requires an active LawDog Pro subscription.",
+                "state": state or "none",
+            },
+        )
+    return user_id
+
+
 def require_org_matches_principal(request: Request, org_id: str) -> str:
     """
     Bind a path/body org_id to the verified principal's workspace.

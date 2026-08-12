@@ -121,6 +121,10 @@ def get_entitlement(user_id: str) -> Optional[Dict[str, Any]]:
         return _row_dict(row)
 
 
+class GenesisCreateGrantIssuanceRetired(RuntimeError):
+    """Genesis create grants are retired — Genesis is affiliate status only."""
+
+
 def grant_entitlement(
     *,
     user_id: str,
@@ -129,6 +133,23 @@ def grant_entitlement(
     expires_at: Optional[str] = None,
     allowance_override: Optional[int] = None,
 ) -> Dict[str, Any]:
+    """Refuse new Genesis create-grant issuance (affiliate role is separate).
+
+    Existing rows remain readable via ``get_entitlement`` for migration inventory.
+    Set ``CLAW_ALLOW_GENESIS_CREATE_GRANT_ISSUANCE=1`` only for emergency repair
+    tooling — never for product buyer flows.
+    """
+    import os
+
+    if os.getenv("CLAW_ALLOW_GENESIS_CREATE_GRANT_ISSUANCE", "").strip().lower() not in (
+        "1",
+        "true",
+        "yes",
+    ):
+        raise GenesisCreateGrantIssuanceRetired(
+            "genesis_create_grant_issuance_retired: Genesis is affiliate/partner "
+            "status only. Grant LawDog Pro for buyer create entitlement."
+        )
     uid = (user_id or "").strip()
     actor = (granted_by or "").strip()
     if not uid:
@@ -415,9 +436,11 @@ def backfill_legacy_affiliate_grants(
 
 def resolve_genesis_dog_access(user_id: str) -> Tuple[bool, str, Optional[Dict[str, Any]]]:
     """
-    Return ``(active, grant_source, entitlement_row_or_none)``.
+    Return ``(active_for_create, grant_source, entitlement_row_or_none)``.
 
-    ``grant_source`` is admin | legacy_migration | legacy_affiliate | none.
+    Create activation is always False — Genesis is not a buyer create tier.
+    Rows are still returned for admin/migration read compatibility.
+    Affiliate dual-read no longer unlocks create.
     """
     uid = (user_id or "").strip()
     if not uid:
@@ -425,27 +448,6 @@ def resolve_genesis_dog_access(user_id: str) -> Tuple[bool, str, Optional[Dict[s
 
     row = get_entitlement(uid)
     if row is not None:
-        if is_commercially_active(row):
-            src = str(row.get("grant_source") or GRANT_SOURCE_ADMIN).strip() or GRANT_SOURCE_ADMIN
-            return True, src, row
-        # Explicit revoked or expired — deny even if affiliate is active.
+        # Preserve row for inventory; never treat as create-active.
         return False, GRANT_SOURCE_NONE, row
-
-    # Temporary dual-read: active affiliate only when no entitlement row exists.
-    from backend.economics.genesis_referral_store import ensure_genesis_referral_schema
-    from backend.economics.store import get_economics_store
-    from backend.security.genesis_affiliate_access import resolve_active_genesis_affiliate
-
-    eco = get_economics_store()
-    eco.init_schema()
-    with eco._conn() as con:  # noqa: SLF001
-        ensure_genesis_referral_schema(con)
-        aff = resolve_active_genesis_affiliate(con, uid)
-    if aff is not None:
-        log.info(
-            "genesis_legacy_affiliate_fallback user_id=%s affiliate_id=%s",
-            uid,
-            aff.get("id") or aff.get("referral_code"),
-        )
-        return True, GRANT_SOURCE_LEGACY_AFFILIATE, None
     return False, GRANT_SOURCE_NONE, None
