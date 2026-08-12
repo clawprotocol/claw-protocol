@@ -6,6 +6,8 @@ Anonymous / guessed-id / cross-org / cross-party access must fail in commercial 
 
 from __future__ import annotations
 
+from backend.tests.entitlement_test_support import ensure_headers_entitled, ensure_org_pro_entitlement
+
 import base64
 from decimal import Decimal
 from pathlib import Path
@@ -14,6 +16,25 @@ import pytest
 from fastapi.testclient import TestClient
 
 from backend.main import app
+
+
+@pytest.fixture(autouse=True)
+def _entitle_owner_org_after_env(tmp_path, monkeypatch):
+    """Grant Pro for primary owner headers once tmp_path-backed DBs are configured."""
+    monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
+    monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ONRAMP_DB_PATH", str(tmp_path / "onramp.sqlite3"))
+    monkeypatch.setenv("CLAW_TREASURY_DB_PATH", str(tmp_path / "treasury.sqlite3"))
+    from backend.economics.store import reset_economics_store_for_tests
+    reset_economics_store_for_tests()
+    for _name in ("_ORG_H", "_OWNER_H", "OWNER_HEADERS", "_HEADERS", "ORG_HEADERS", "_OWNER"):
+        h = globals().get(_name)
+        if isinstance(h, dict) and h.get("X-Claw-Org-Id"):
+            ensure_headers_entitled(h)
+    yield
+    reset_economics_store_for_tests()
+
 from backend.security.recipient_access_token import mint_recipient_access_token
 from backend.services import document_service, receipt_service, signature_service
 from backend.services.agreement_draft_store import save_draft
@@ -325,9 +346,10 @@ def test_usage_receipt_and_bundle_org_bound(client: TestClient, monkeypatch, tmp
 
 def test_public_verify_not_raw_receipt_download(client: TestClient, monkeypatch):
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_ENABLED", "1")
+    headers = ensure_headers_entitled(_owner("owner-a"))
     created = client.post(
         "/api/agreements/draft",
-        headers=_owner("owner-a"),
+        headers=headers,
         json={
             "title": "Public Verify",
             "jurisdiction": "TX",

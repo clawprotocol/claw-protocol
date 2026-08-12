@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from backend.tests.entitlement_test_support import ensure_headers_entitled, ensure_org_pro_entitlement
+
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -34,6 +36,7 @@ def _reset_usage_economics_singleton():
 def _env_staging_invalid(monkeypatch: pytest.MonkeyPatch, tmp_path, mode: str) -> None:
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     monkeypatch.setenv("CLAW_ENVIRONMENT", "staging")
     configure_production_like_jwt(monkeypatch)
     monkeypatch.setenv("RESEND_API_KEY", "re_test")
@@ -54,6 +57,7 @@ def _env_staging_invalid(monkeypatch: pytest.MonkeyPatch, tmp_path, mode: str) -
 def _env_staging_explicit(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     monkeypatch.setenv("CLAW_ENVIRONMENT", "staging")
     configure_production_like_jwt(monkeypatch)
     monkeypatch.setenv("CLAW_AGREEMENT_SIGNING_TOKEN_SECRET", _EXPLICIT)
@@ -64,6 +68,7 @@ def _env_staging_explicit(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
 
 
 def _create_agreement(client: TestClient) -> str:
+    ensure_headers_entitled(_ORG_H)
     create_res = client.post(
         "/api/agreements/draft",
         headers=_ORG_H,

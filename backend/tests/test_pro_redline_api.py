@@ -1,5 +1,6 @@
 """API tests for Pro redline import / accept / reject (owner-only paths)."""
 
+from backend.tests.entitlement_test_support import ensure_headers_entitled, ensure_org_pro_entitlement
 import pytest
 from fastapi.testclient import TestClient
 
@@ -11,6 +12,22 @@ from backend.usage_economics import store as usage_economics_store_mod
 pytestmark = pytest.mark.unit
 
 _ORG_H = {"X-Claw-Org-Id": "test-org-pro-redline", "X-Claw-Test-Auth-User-Id": "test-owner"}
+
+
+@pytest.fixture(autouse=True)
+def _entitle_owner_org_after_env(tmp_path, monkeypatch):
+    """Grant Pro for module owner headers once tmp_path-backed DBs are configured."""
+    monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
+    monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ONRAMP_DB_PATH", str(tmp_path / "onramp.sqlite3"))
+    monkeypatch.setenv("CLAW_TREASURY_DB_PATH", str(tmp_path / "treasury.sqlite3"))
+    from backend.economics.store import reset_economics_store_for_tests
+    reset_economics_store_for_tests()
+    ensure_headers_entitled(_ORG_H)
+    yield
+    reset_economics_store_for_tests()
+
 
 
 @pytest.fixture(autouse=True)
@@ -32,6 +49,7 @@ def _seed_pro_corpus(raw: dict, text: str) -> None:
 def test_pro_redline_import_accept_creates_version(monkeypatch, tmp_path):
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     client = TestClient(app)
     create_res = client.post(
         "/api/agreements/draft",
@@ -84,7 +102,9 @@ def test_pro_redline_import_accept_creates_version(monkeypatch, tmp_path):
 def test_pro_redline_import_reject_keeps_corpus(monkeypatch, tmp_path):
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     client = TestClient(app)
+    ensure_headers_entitled(_ORG_H)
     create_res = client.post(
         "/api/agreements/draft",
         headers=_ORG_H,
@@ -130,7 +150,9 @@ def test_accept_import_canonical_matches_imported_and_clears_stale_rendered(monk
     """Stale rendered_document_text must not outrank accepted corpus (export / send handoff)."""
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     client = TestClient(app)
+    ensure_headers_entitled(_ORG_H)
     create_res = client.post(
         "/api/agreements/draft",
         headers=_ORG_H,
@@ -177,7 +199,9 @@ def test_accept_import_canonical_matches_imported_and_clears_stale_rendered(monk
 def test_export_txt_matches_canonical_after_accept_and_survives_review_sent(monkeypatch, tmp_path):
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     client = TestClient(app)
+    ensure_headers_entitled(_ORG_H)
     create_res = client.post(
         "/api/agreements/draft",
         headers=_ORG_H,
@@ -216,7 +240,9 @@ def test_export_txt_matches_canonical_after_accept_and_survives_review_sent(monk
 def test_reject_import_preserves_corpus_after_reload(monkeypatch, tmp_path):
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     client = TestClient(app)
+    ensure_headers_entitled(_ORG_H)
     create_res = client.post(
         "/api/agreements/draft",
         headers=_ORG_H,
@@ -256,7 +282,9 @@ def test_reject_import_preserves_corpus_after_reload(monkeypatch, tmp_path):
 def test_version_history_persists_after_reload(monkeypatch, tmp_path):
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     client = TestClient(app)
+    ensure_headers_entitled(_ORG_H)
     create_res = client.post(
         "/api/agreements/draft",
         headers=_ORG_H,
@@ -292,12 +320,14 @@ def test_import_stores_full_imported_text_without_truncation(monkeypatch, tmp_pa
     """pending_import.imported_text must hold the full payload (snapshots may truncate separately)."""
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     monkeypatch.setattr(
         agreements_v2_api,
         "compute_pro_redline_block_diff",
         lambda _base, _imp: ([{"kind": "equal", "text": "stub"}], 0),
     )
     client = TestClient(app)
+    ensure_headers_entitled(_ORG_H)
     create_res = client.post(
         "/api/agreements/draft",
         headers=_ORG_H,
@@ -330,7 +360,9 @@ def test_import_stores_full_imported_text_without_truncation(monkeypatch, tmp_pa
 def test_pro_redline_import_file_rejects_non_txt(monkeypatch, tmp_path):
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     client = TestClient(app)
+    ensure_headers_entitled(_ORG_H)
     create_res = client.post(
         "/api/agreements/draft",
         headers=_ORG_H,

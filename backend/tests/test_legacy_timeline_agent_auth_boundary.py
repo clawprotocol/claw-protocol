@@ -31,6 +31,7 @@ def client(monkeypatch, tmp_path):
     monkeypatch.setenv("CLAW_BLOB_ROOT", str(tmp_path / "blobs"))
     monkeypatch.setenv("CLAW_ARTIFACT_REGISTRY_DB_PATH", str(tmp_path / "registry.sqlite3"))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     monkeypatch.setenv("CLAW_AGREEMENT_SIGNING_TOKEN_SECRET", _SECRET)
     monkeypatch.setenv("CLAW_COMMERCIAL_MODE", "1")
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_ENABLED", "0")

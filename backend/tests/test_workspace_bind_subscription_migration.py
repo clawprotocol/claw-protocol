@@ -21,16 +21,23 @@ from backend.usage_economics.store import UsageEconomicsStore
 def isolated_stores(tmp_path, monkeypatch: pytest.MonkeyPatch):
     eco_path = str(tmp_path / "economics.sqlite3")
     usage_path = str(tmp_path / "usage_eco.sqlite3")
+    monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", eco_path)
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", usage_path)
+    monkeypatch.setenv("CLAW_ONRAMP_DB_PATH", str(tmp_path / "onramp.sqlite3"))
+    monkeypatch.setenv("CLAW_TREASURY_DB_PATH", str(tmp_path / "treasury.sqlite3"))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_ENABLED", "1")
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_STRICT_IN_DEV", "1")
 
     import backend.economics.store as eco_store_mod
+    import backend.payments.store as onramp_store_mod
+    import backend.treasury.treasury_store as treasury_store_mod
     import backend.usage_economics.store as ue_store_mod
 
     eco_store_mod._store = None
     ue_store_mod._store = None
+    onramp_store_mod._store = None
+    treasury_store_mod._store = None
 
     eco = get_economics_store()
     eco.init_schema()
@@ -41,6 +48,8 @@ def isolated_stores(tmp_path, monkeypatch: pytest.MonkeyPatch):
 
     eco_store_mod._store = None
     ue_store_mod._store = None
+    onramp_store_mod._store = None
+    treasury_store_mod._store = None
 
 
 def _activate_pro_on_org(eco, org_id: str, user_id: str | None = None) -> None:
@@ -123,11 +132,13 @@ def test_paid_user_workspace_org_can_create_draft_after_bind(isolated_stores):
     assert r3.status_code == 200, r3.text
 
 
-def test_free_user_still_blocked_at_third_draft(isolated_stores):
+def test_authenticated_without_paid_plan_blocked_on_first_draft(isolated_stores, monkeypatch):
+    """Authenticated Free tier removed — first draft requires Genesis or Pro."""
+    monkeypatch.setenv("CLAW_USAGE_ECONOMICS_ENABLED", "1")
+    monkeypatch.setenv("CLAW_USAGE_ECONOMICS_STRICT_IN_DEV", "1")
     _eco, _usage = isolated_stores
     client = TestClient(app)
-    h = {"X-Claw-Org-Id": "test-org-free-488", "X-Claw-Test-Auth-User-Id": "test-owner"}
-
+    h = {"X-Claw-Org-Id": "test-org-free-489", "X-Claw-Test-Auth-User-Id": "test-owner"}
     draft_body = {
         "title": "T",
         "jurisdiction": "CA",
@@ -138,13 +149,10 @@ def test_free_user_still_blocked_at_third_draft(isolated_stores):
         "due_date": None,
         "effective_date": None,
     }
-    for _ in range(2):
-        r = client.post("/api/agreements/draft", headers=h, json=draft_body)
-        assert r.status_code == 200, r.text
-
-    r3 = client.post("/api/agreements/draft", headers=h, json={**draft_body, "title": "T3"})
-    assert r3.status_code == 403
-    assert r3.json().get("detail", {}).get("code") == "draft_limit_reached"
+    r = client.post("/api/agreements/draft", headers=h, json=draft_body)
+    assert r.status_code == 403
+    detail = r.json().get("detail") or {}
+    assert detail.get("code") == "entitlement_required"
 
 
 def test_lazy_subscription_migration_by_user_id(isolated_stores):
@@ -271,28 +279,4 @@ def test_draft_post_auto_repair_without_client_header_when_bound_has_agreements(
     )
     assert r.status_code == 200, r.text
     assert subject_has_paid_plan(f"org:{stable_org}", economics=eco) is True
-
-    _eco, _usage = isolated_stores
-    client = TestClient(app)
-    h = {"X-Claw-Org-Id": "test-org-free-489", "X-Claw-Test-Auth-User-Id": "test-owner"}
-
-    draft_body = {
-        "title": "T",
-        "jurisdiction": "CA",
-        "parties": [{"name": "A", "role": "owner"}],
-        "purpose": "p",
-        "payment_terms": "pt",
-        "duration": None,
-        "due_date": None,
-        "effective_date": None,
-    }
-    for _ in range(2):
-        assert client.post("/api/agreements/draft", headers=h, json=draft_body).status_code == 200
-
-    r3 = client.post("/api/agreements/draft", headers=h, json={**draft_body, "title": "T3"})
-    assert r3.status_code == 403
-    detail = r3.json().get("detail") or {}
-    assert detail.get("code") == "draft_limit_reached"
-    assert detail.get("paywall") is True
-    assert isinstance(detail.get("message"), str)
 

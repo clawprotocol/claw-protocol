@@ -35,6 +35,16 @@ def _reset_usage_economics_singleton():
     usage_economics_store_mod._store = None  # noqa: SLF001
 
 
+@pytest.fixture(autouse=True)
+def _grant_pro_for_premium_draft(tmp_path, monkeypatch):
+    monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
+    monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    from backend.tests.entitlement_test_support import ensure_headers_entitled
+
+    ensure_headers_entitled(_ORG_H)
+
+
 def _long_commercial_body(extra: str = "") -> str:
     base = (
         "1. Scope. Designer shall deliver logo concepts, revisions, and final files.\n"
@@ -106,6 +116,7 @@ def test_premium_full_draft_server_timing_header_only_with_perf_trace(
 ) -> None:
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     import backend.routers.agreements_v2_api as av2
 
@@ -145,6 +156,7 @@ def test_premium_full_draft_timing_does_not_mutate_response_body(
 ) -> None:
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     import backend.routers.agreements_v2_api as av2
 
@@ -168,6 +180,7 @@ def test_cors_exposes_paid_pro_server_timing_header(
 ) -> None:
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     import backend.routers.agreements_v2_api as av2
 
@@ -204,6 +217,7 @@ def test_repair_path_records_llm_repair_or_regen_span(
 ) -> None:
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     import backend.routers.agreements_v2_api as av2
 

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from backend.tests.entitlement_test_support import ensure_headers_entitled, ensure_org_pro_entitlement
+
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -40,6 +42,7 @@ def _env(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
     monkeypatch.setenv("CLAW_ENVIRONMENT", "test")
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     monkeypatch.setenv("RESEND_API_KEY", "re_test")
     monkeypatch.setenv("EMAIL_FROM", "LawDog <notifications@lawdog.me>")
     monkeypatch.setenv("CLAW_APP_PUBLIC_ORIGIN", "https://app.example.com")
@@ -61,6 +64,7 @@ def _mock_resend_success() -> MagicMock:
 
 
 def _create_agreement(client: TestClient, headers=None) -> str:
+    headers = ensure_headers_entitled(dict(headers or _ORG_H))
     create_res = client.post(
         "/api/agreements/draft",
         headers=headers or _ORG_H,

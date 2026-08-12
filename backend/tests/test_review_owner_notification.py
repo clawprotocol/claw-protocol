@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from backend.tests.entitlement_test_support import ensure_headers_entitled, ensure_org_pro_entitlement
+
 from unittest.mock import MagicMock, patch
 
 import re
@@ -19,6 +21,22 @@ from backend.usage_economics import store as usage_economics_store_mod
 pytestmark = pytest.mark.unit
 
 _ORG_H = {"X-Claw-Org-Id": "test-org-owner-notify", "X-Claw-Test-Auth-User-Id": "test-owner"}
+
+
+@pytest.fixture(autouse=True)
+def _entitle_owner_org_after_env(tmp_path, monkeypatch):
+    """Grant Pro for module owner headers once tmp_path-backed DBs are configured."""
+    monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
+    monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ONRAMP_DB_PATH", str(tmp_path / "onramp.sqlite3"))
+    monkeypatch.setenv("CLAW_TREASURY_DB_PATH", str(tmp_path / "treasury.sqlite3"))
+    from backend.economics.store import reset_economics_store_for_tests
+    reset_economics_store_for_tests()
+    ensure_headers_entitled(_ORG_H)
+    yield
+    reset_economics_store_for_tests()
+
 
 
 @pytest.fixture(autouse=True)
@@ -43,6 +61,7 @@ def _mock_resend_success() -> MagicMock:
 def _env_common(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     monkeypatch.setenv("RESEND_API_KEY", "re_test")
     monkeypatch.setenv("EMAIL_FROM", "LawDog <notifications@lawdog.me>")
     monkeypatch.setenv("CLAW_APP_PUBLIC_ORIGIN", "https://app.example.com")
@@ -50,6 +69,7 @@ def _env_common(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
 
 
 def _create_two_party_agreement(client: TestClient) -> str:
+    ensure_headers_entitled(_ORG_H)
     create_res = client.post(
         "/api/agreements/draft",
         headers=_ORG_H,
@@ -165,6 +185,7 @@ def test_missing_owner_email_skips_notification_without_failing_approval(
     _env_common(monkeypatch, tmp_path)
     mock_client = _mock_resend_success()
     client = TestClient(app)
+    ensure_headers_entitled(_ORG_H)
     create_res = client.post(
         "/api/agreements/draft",
         headers=_ORG_H,
@@ -263,6 +284,7 @@ def test_client_role_owner_email_receives_notification(
     _env_common(monkeypatch, tmp_path)
     mock_client = _mock_resend_success()
     client = TestClient(app)
+    ensure_headers_entitled(_ORG_H)
     create_res = client.post(
         "/api/agreements/draft",
         headers=_ORG_H,
@@ -313,6 +335,7 @@ def test_partial_reviewer_approval_uses_dashboard_notification(
     _env_common(monkeypatch, tmp_path)
     mock_client = _mock_resend_success()
     client = TestClient(app)
+    ensure_headers_entitled(_ORG_H)
     create_res = client.post(
         "/api/agreements/draft",
         headers=_ORG_H,

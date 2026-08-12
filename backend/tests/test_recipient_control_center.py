@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from backend.tests.entitlement_test_support import ensure_headers_entitled, ensure_org_pro_entitlement
+
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -27,6 +29,22 @@ _ORG_H = {"X-Claw-Org-Id": "test-org-recipient-control", "X-Claw-Test-Auth-User-
 
 
 @pytest.fixture(autouse=True)
+def _entitle_owner_org_after_env(tmp_path, monkeypatch):
+    """Grant Pro for module owner headers once tmp_path-backed DBs are configured."""
+    monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
+    monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ONRAMP_DB_PATH", str(tmp_path / "onramp.sqlite3"))
+    monkeypatch.setenv("CLAW_TREASURY_DB_PATH", str(tmp_path / "treasury.sqlite3"))
+    from backend.economics.store import reset_economics_store_for_tests
+    reset_economics_store_for_tests()
+    ensure_headers_entitled(_ORG_H)
+    yield
+    reset_economics_store_for_tests()
+
+
+
+@pytest.fixture(autouse=True)
 def _reset_usage_economics_singleton():
     from backend.usage_economics import store as usage_economics_store_mod
 
@@ -38,11 +56,16 @@ def _reset_usage_economics_singleton():
 def _env_common(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     monkeypatch.setenv("RESEND_API_KEY", "re_test")
     monkeypatch.setenv("EMAIL_FROM", "LawDog <notifications@lawdog.me>")
     monkeypatch.setenv("CLAW_APP_PUBLIC_ORIGIN", "https://app.example.com")
     monkeypatch.setenv("CLAW_AGREEMENT_SIGNING_TOKEN_SECRET", "unit-test-signing-invite-secret")
     monkeypatch.setenv("CLAW_REVIEW_DELIVERY_MODE", "email")
+    ensure_headers_entitled(_ORG_H)
+    from backend.economics.store import reset_economics_store_for_tests
+    reset_economics_store_for_tests()
+    ensure_headers_entitled(_ORG_H)
 
 
 def _mock_resend_success() -> MagicMock:
@@ -58,6 +81,7 @@ def _mock_resend_success() -> MagicMock:
 
 
 def _create_agreement(client: TestClient, monkeypatch_resend: bool = True) -> tuple[str, str]:
+    ensure_headers_entitled(_ORG_H)
     create_res = client.post(
         "/api/agreements/draft",
         headers=_ORG_H,
@@ -306,6 +330,7 @@ def test_recipient_delivery_status_paid_pro_reviewer_without_party_ids(
     """test351: Harbor Peak-style reviewer row without persisted party ids."""
     _env_common(monkeypatch, tmp_path)
     client = TestClient(app)
+    ensure_headers_entitled(_ORG_H)
     create_res = client.post(
         "/api/agreements/draft",
         headers=_ORG_H,
@@ -357,6 +382,7 @@ def test_recipient_delivery_status_client_service_provider_roles(
 ) -> None:
     _env_common(monkeypatch, tmp_path)
     client = TestClient(app)
+    ensure_headers_entitled(_ORG_H)
     create_res = client.post(
         "/api/agreements/draft",
         headers=_ORG_H,

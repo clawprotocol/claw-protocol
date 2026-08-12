@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from backend.tests.entitlement_test_support import ensure_headers_entitled, ensure_org_pro_entitlement
+
 import os
 from typing import Any, Dict, List
 from unittest.mock import patch
@@ -22,6 +24,26 @@ from backend.usage_economics import store as usage_economics_store_mod
 pytestmark = pytest.mark.unit
 
 _ORG = {"X-Claw-Org-Id": "lawdog-sync-org", "X-Claw-Test-Auth-User-Id": "test-owner"}
+
+
+@pytest.fixture(autouse=True)
+def _entitle_owner_org_after_env(tmp_path, monkeypatch):
+    """Grant Pro for primary owner headers once tmp_path-backed DBs are configured."""
+    monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
+    monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ONRAMP_DB_PATH", str(tmp_path / "onramp.sqlite3"))
+    monkeypatch.setenv("CLAW_TREASURY_DB_PATH", str(tmp_path / "treasury.sqlite3"))
+    from backend.economics.store import reset_economics_store_for_tests
+    reset_economics_store_for_tests()
+    for _name in ("_ORG_H", "_OWNER_H", "OWNER_HEADERS", "_HEADERS", "ORG_HEADERS", "_OWNER", "_ORG_A", "_ORG", "_STAGING_ORG"):
+        h = globals().get(_name)
+        if isinstance(h, dict) and h.get("X-Claw-Org-Id"):
+            ensure_headers_entitled(h)
+    yield
+    reset_economics_store_for_tests()
+
+
 
 
 @pytest.fixture(autouse=True)
@@ -170,11 +192,13 @@ def test_create_draft_syncs_supabase(
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_ENABLED", "1")
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     _enable_supabase(monkeypatch)
     fake = supabase_client_factory()
 
     with patch("backend.lawdog_dashboard.supabase_service.httpx.Client", lambda *a, **k: fake):
         client = TestClient(app)
+        ensure_headers_entitled(_ORG)
         res = client.post(
             "/api/agreements/draft",
             headers=_ORG,
@@ -203,10 +227,12 @@ def test_create_draft_succeeds_when_supabase_sync_fails(
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_ENABLED", "1")
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     _enable_supabase(monkeypatch)
 
     with patch("backend.lawdog_dashboard.supabase_service._request", return_value=False):
         client = TestClient(app)
+        ensure_headers_entitled(_ORG)
         res = client.post(
             "/api/agreements/draft",
             headers=_ORG,
@@ -241,11 +267,13 @@ def test_update_field_title_syncs_supabase(
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_ENABLED", "1")
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     _enable_supabase(monkeypatch)
     fake = supabase_client_factory()
 
     with patch("backend.lawdog_dashboard.supabase_service.httpx.Client", lambda *a, **k: fake):
         client = TestClient(app)
+        ensure_headers_entitled(_ORG)
         created = client.post(
             "/api/agreements/draft",
             headers=_ORG,
@@ -281,11 +309,13 @@ def test_update_field_parties_replaces_agreement_parties(
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_ENABLED", "1")
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     _enable_supabase(monkeypatch)
     fake = supabase_client_factory()
 
     with patch("backend.lawdog_dashboard.supabase_service.httpx.Client", lambda *a, **k: fake):
         client = TestClient(app)
+        ensure_headers_entitled(_ORG)
         created = client.post(
             "/api/agreements/draft",
             headers=_ORG,
@@ -333,11 +363,13 @@ def test_review_sent_syncs_review_sent_at(
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_ENABLED", "1")
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     _enable_supabase(monkeypatch)
     fake = supabase_client_factory()
 
     with patch("backend.lawdog_dashboard.supabase_service.httpx.Client", lambda *a, **k: fake):
         client = TestClient(app)
+        ensure_headers_entitled(_ORG)
         created = client.post(
             "/api/agreements/draft",
             headers=_ORG,
@@ -368,11 +400,13 @@ def test_workspace_archive_syncs_workspace_archived_at(
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_ENABLED", "1")
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     _enable_supabase(monkeypatch)
     fake = supabase_client_factory()
 
     with patch("backend.lawdog_dashboard.supabase_service.httpx.Client", lambda *a, **k: fake):
         client = TestClient(app)
+        ensure_headers_entitled(_ORG)
         created = client.post(
             "/api/agreements/draft",
             headers=_ORG,
@@ -406,8 +440,10 @@ def test_workspace_index_prefers_local_draft_over_supabase(
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_ENABLED", "1")
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     _enable_supabase(monkeypatch)
     client = TestClient(app)
+    ensure_headers_entitled(_ORG)
     created = client.post(
         "/api/agreements/draft",
         headers=_ORG,
@@ -455,6 +491,7 @@ def test_workspace_index_supabase_fallback_marks_content_unavailable(
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_ENABLED", "1")
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     _enable_supabase(monkeypatch)
     client = TestClient(app)
 

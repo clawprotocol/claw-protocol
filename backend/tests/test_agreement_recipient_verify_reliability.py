@@ -1,5 +1,6 @@
 """Reliability for recipient-access-token mint, access/validate, and public /verify API."""
 
+from backend.tests.entitlement_test_support import ensure_headers_entitled, ensure_org_pro_entitlement
 from unittest import mock
 
 import pytest
@@ -20,6 +21,26 @@ _STAGING_ORG = owner_headers_production_like(user_id="recipient-verify-owner")
 
 
 @pytest.fixture(autouse=True)
+def _entitle_owner_org_after_env(tmp_path, monkeypatch):
+    """Grant Pro for primary owner headers once tmp_path-backed DBs are configured."""
+    monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
+    monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ONRAMP_DB_PATH", str(tmp_path / "onramp.sqlite3"))
+    monkeypatch.setenv("CLAW_TREASURY_DB_PATH", str(tmp_path / "treasury.sqlite3"))
+    from backend.economics.store import reset_economics_store_for_tests
+    reset_economics_store_for_tests()
+    for _name in ("_ORG_H", "_OWNER_H", "OWNER_HEADERS", "_HEADERS", "ORG_HEADERS", "_OWNER", "_ORG_A", "_ORG", "_STAGING_ORG"):
+        h = globals().get(_name)
+        if isinstance(h, dict) and h.get("X-Claw-Org-Id"):
+            ensure_headers_entitled(h)
+    yield
+    reset_economics_store_for_tests()
+
+
+
+
+@pytest.fixture(autouse=True)
 def _reset_usage_economics_singleton():
     usage_economics_store_mod._store = None  # noqa: SLF001
     yield
@@ -27,6 +48,7 @@ def _reset_usage_economics_singleton():
 
 
 def _create_draft_with_parties(client: TestClient, headers=None) -> str:
+    headers = ensure_headers_entitled(dict(headers or _ORG))
     c = client.post(
         "/api/agreements/draft",
         headers=headers or _ORG,
@@ -54,6 +76,7 @@ def test_recipient_access_token_mint_succeeds_without_explicit_secret_non_prod(
     """(a) Valid agreement + parties: mint returns 200 and token when secret uses non-prod fallback."""
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     monkeypatch.setenv("CLAW_ENVIRONMENT", "local")
     monkeypatch.delenv("CLAW_AGREEMENT_SIGNING_TOKEN_SECRET", raising=False)
     client = TestClient(app)
@@ -77,6 +100,7 @@ def test_recipient_access_token_mint_succeeds_without_explicit_secret_non_prod(
 def test_recipient_access_token_persists_review_first_final_corpus(monkeypatch, tmp_path):
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     monkeypatch.setenv("CLAW_ENVIRONMENT", "local")
     monkeypatch.setenv("CLAW_AGREEMENT_SIGNING_TOKEN_SECRET", "unit-test-review-first-corpus")
     client = TestClient(app)
@@ -113,6 +137,7 @@ def test_recipient_access_token_does_not_503_without_signing_lock(monkeypatch, t
     """(b) Review mint must not 503 when optional signing-lock / proof fields are absent."""
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     monkeypatch.setenv("CLAW_ENVIRONMENT", "staging")
     configure_production_like_jwt(monkeypatch)
     # Staging requires an explicit signing-token secret (no shared fallback).
@@ -135,6 +160,7 @@ def test_recipient_access_token_does_not_503_without_signing_lock(monkeypatch, t
 def test_recipient_access_token_mint_422_when_staging_and_secret_unset(monkeypatch, tmp_path):
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     monkeypatch.setenv("CLAW_ENVIRONMENT", "staging")
     configure_production_like_jwt(monkeypatch)
     monkeypatch.delenv("CLAW_AGREEMENT_SIGNING_TOKEN_SECRET", raising=False)
@@ -156,6 +182,7 @@ def test_public_verify_does_not_500_when_overview_hash_raises(monkeypatch, tmp_p
     """(c) Existing agreement: degraded 200 payload if verification bundle raises."""
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     monkeypatch.setenv("CLAW_PUBLIC_AGREEMENT_VERIFY", "1")
     client = TestClient(app)
     aid = _create_draft_with_parties(client)
@@ -180,6 +207,7 @@ def test_public_verify_missing_agreement_404_structured(monkeypatch, tmp_path):
     """(d) Missing agreement returns 404 with safe structured detail."""
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     monkeypatch.setenv("CLAW_PUBLIC_AGREEMENT_VERIFY", "1")
     client = TestClient(app)
     r = client.get("/api/agreements/public/agreement-id-that-does-not-exist-000/verify")
@@ -192,6 +220,7 @@ def test_public_verify_missing_agreement_404_structured(monkeypatch, tmp_path):
 def test_recipient_access_token_mint_422_when_prod_and_secret_unset(monkeypatch, tmp_path):
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     monkeypatch.setenv("CLAW_ENVIRONMENT", "production")
     configure_production_like_jwt(monkeypatch)
     monkeypatch.delenv("CLAW_AGREEMENT_SIGNING_TOKEN_SECRET", raising=False)
@@ -211,6 +240,7 @@ def test_recipient_access_token_mint_422_when_prod_and_secret_unset(monkeypatch,
 def test_recipient_access_token_mint_retries_on_transient_mint_failure(monkeypatch, tmp_path):
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     monkeypatch.setenv("CLAW_ENVIRONMENT", "local")
     monkeypatch.setenv("CLAW_AGREEMENT_SIGNING_TOKEN_SECRET", "unit-test-mint-retry-secret")
     client = TestClient(app)
@@ -231,6 +261,7 @@ def test_recipient_access_token_mint_retries_on_transient_mint_failure(monkeypat
 def test_recipient_access_token_mint_422_after_exhausted_retries(monkeypatch, tmp_path):
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     monkeypatch.setenv("CLAW_ENVIRONMENT", "local")
     monkeypatch.setenv("CLAW_AGREEMENT_SIGNING_TOKEN_SECRET", "unit-test-mint-exhaust-secret")
     client = TestClient(app)
@@ -251,6 +282,7 @@ def test_recipient_access_token_mint_422_after_exhausted_retries(monkeypatch, tm
 def test_recipient_access_validate_422_when_prod_and_secret_unset(monkeypatch, tmp_path):
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     monkeypatch.setenv("CLAW_ENVIRONMENT", "production")
     monkeypatch.delenv("CLAW_AGREEMENT_SIGNING_TOKEN_SECRET", raising=False)
     client = TestClient(app)

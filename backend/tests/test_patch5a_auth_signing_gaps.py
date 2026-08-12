@@ -5,12 +5,33 @@ and legacy router fail-closed in commercial mode.
 
 from __future__ import annotations
 
+from backend.tests.entitlement_test_support import ensure_headers_entitled, ensure_org_pro_entitlement
+
 import base64
 
 import pytest
 from fastapi.testclient import TestClient
 
 from backend.main import app
+
+
+@pytest.fixture(autouse=True)
+def _entitle_owner_org_after_env(tmp_path, monkeypatch):
+    """Grant Pro for primary owner headers once tmp_path-backed DBs are configured."""
+    monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
+    monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ONRAMP_DB_PATH", str(tmp_path / "onramp.sqlite3"))
+    monkeypatch.setenv("CLAW_TREASURY_DB_PATH", str(tmp_path / "treasury.sqlite3"))
+    from backend.economics.store import reset_economics_store_for_tests
+    reset_economics_store_for_tests()
+    for _name in ("_ORG_H", "_OWNER_H", "OWNER_HEADERS", "_HEADERS", "ORG_HEADERS", "_OWNER"):
+        h = globals().get(_name)
+        if isinstance(h, dict) and h.get("X-Claw-Org-Id"):
+            ensure_headers_entitled(h)
+    yield
+    reset_economics_store_for_tests()
+
 from backend.security.recipient_access_token import mint_recipient_access_token
 from backend.services.agreement_draft_store import load_draft
 from backend.services.agreement_signing_lock_store import write_signing_lock
@@ -38,6 +59,7 @@ def client(monkeypatch, tmp_path):
     monkeypatch.setenv("CLAW_LAYOUT_ANALYSIS_DIR", str(tmp_path / "layout"))
     monkeypatch.setenv("CLAW_STORAGE_BACKEND", "local")
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     monkeypatch.setenv("CLAW_AGREEMENT_SIGNING_TOKEN_SECRET", _SECRET)
     monkeypatch.setenv("CLAW_COMMERCIAL_MODE", "1")
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_ENABLED", "0")
@@ -52,9 +74,10 @@ def _owner(user: str = "owner-a") -> dict[str, str]:
 
 def _create_owned_draft(client: TestClient, *, user: str = "owner-a") -> str:
     """Create draft; ownership registers even when economics metering is off (commercial)."""
+    headers = ensure_headers_entitled(_owner(user))
     r = client.post(
         "/api/agreements/draft",
-        headers=_owner(user),
+        headers=headers,
         json={
             "title": "Owned",
             "jurisdiction": "TX",
