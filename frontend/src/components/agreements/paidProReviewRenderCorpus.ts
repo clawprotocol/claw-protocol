@@ -862,7 +862,7 @@ export function resolvePaidProReviewRenderPlain(
       if (args?.skipUserVisibleDisplayPrep) return body;
       const titled = projectPaidProVisibleTitleDisplayPlain(body, {
         intakeText: args?.intakeText ?? null,
-        draft: args?.draft ?? null,
+        fallbackTitle: args?.draft?.title ?? null,
       });
       return projectPaidProFrozenSoTDisplayPlain(titled);
     }
@@ -938,7 +938,7 @@ export function resolvePaidProReviewRenderPlain(
           ? resolvePaidProAuthoritativeDisplayPlain(args)
           : projectPaidProVisibleTitleDisplayPlain(getPaidProSourceOfTruthText().trim(), {
               intakeText: args?.intakeText ?? null,
-              draft: args?.draft ?? null,
+              fallbackTitle: args?.draft?.title ?? null,
             }),
     );
     logPostFreezeCorpusDrift({
