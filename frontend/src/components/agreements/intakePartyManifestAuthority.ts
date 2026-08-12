@@ -32,7 +32,7 @@ const COLON_MANIFEST_ADDRESS_RE =
 const COLON_MANIFEST_ENTITY_TYPE_RE = /,\s*(a|an)\s+(.+)$/i;
 
 const NON_PARTY_COLON_ROLE_RE =
-  /^(?:term|fee|payment|governing|note|include|prepare|total|major|each|confidentiality|dispute|governing law)\b/i;
+  /^(?:term|fee|payment|governing|note|include|prepare|total|major|each|confidentiality|dispute|governing law|organization|org|affiliate(?:\s+referral)?|reviewer(?:\s+email)?|notice\s+contact|deliver\s+to|delivery|contacts?)\b/i;
 
 function normalizeManifestEntity(raw: string): string {
   const entity = extractLegalEntityFromIntakeLine(raw);

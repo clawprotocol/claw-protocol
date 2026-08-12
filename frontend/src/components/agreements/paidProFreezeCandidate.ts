@@ -33,6 +33,7 @@ import { applyPaidProSectionHeadingTitleAuthority } from "./paidProSectionHeadin
 import { diagnosePaidProCorpusDuplication, repairPaidProCorpusDuplication } from "./paidProCorpusDuplicationAuthority";
 import {
   ensureCanonicalNoticesSectionHeadingForFreeze,
+  removeEmptyNoticesSubsectionShells,
   repairDuplicateOperativeNoticeStanzas,
   sealPaidProNoticesExecutionBoundaryInCorpus,
   ensureOperativeNoticeStanzaEntityLinesAtFreeze,
@@ -1319,6 +1320,29 @@ export function assertPaidProFreezeCandidateGates(
       assertPaidProReviewedDocumentIntegrity(safeForCommit);
     }
   }
+
+  // Late notice-heading / title-authority passes can reintroduce empty `N.1 NOTICES` shells
+  // after the earlier structure assert — repair then fail closed before freeze commit returns.
+  {
+    const emptyNoticeShells = removeEmptyNoticesSubsectionShells(safeForCommit);
+    if (emptyNoticeShells.repairs.length > 0) {
+      safeForCommit = emptyNoticeShells.text;
+    }
+    const terminalNoticesHeading = ensureCanonicalNoticesSectionHeadingForFreeze(safeForCommit);
+    if (terminalNoticesHeading.repairs.length > 0) {
+      safeForCommit = terminalNoticesHeading.text;
+    }
+    const terminalStructure = applyPaidProSectionStructureCompletenessAuthority(safeForCommit, {
+      source: `${surface}_terminal_post_notice_repair`,
+      phase: "pre_freeze",
+      blockOnFatal: false,
+    });
+    safeForCommit = terminalStructure.text;
+  }
+  safeForCommit = assertPaidProSectionStructureCompletenessForFreeze(
+    safeForCommit,
+    `${surface}_terminal_post_notice`,
+  );
 
   return finalizePreparedFreezeCandidateText(trim(args.text), safeForCommit, {
     intakeText: args.intakeText ?? null,

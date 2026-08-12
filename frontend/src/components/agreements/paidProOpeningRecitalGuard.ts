@@ -487,8 +487,12 @@ export function ensurePaidProServicesAgreementOpening(
   if (!detectPaidProMalformedServicesOpening(text, records)) {
     return { text, repairs: [] };
   }
-  // Preserve already-titled Pro corpora; only full-rewrite when the document title is missing.
-  if (!needsPaidProServicesOpeningTitleRepair(text)) {
+  // Preserve already-titled Pro corpora unless the canonical entered-into recital is absent.
+  // Title-only short-circuit previously left "is between" openers frozen as SoT.
+  const head = text.slice(0, 4_000);
+  const hasCanonicalEnteredInto =
+    /entered\s+into\s+as\s+of\s+the\s+Effective\s+Date\s+by\s+and\s+between/i.test(head);
+  if (!needsPaidProServicesOpeningTitleRepair(text) && hasCanonicalEnteredInto) {
     return { text, repairs: [] };
   }
   const repaired = repairPaidProServicesAgreementOpening(text, records, intakeText);

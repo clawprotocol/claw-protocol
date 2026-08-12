@@ -560,6 +560,13 @@ function expandShortPartyLabelsToFullLegal(text: string, fullNames: readonly str
 }
 
 function preserveInSlice(slice: string, fullNames: readonly string[]): string {
+  // Outer polish may already have installed [[LDG_EMAIL_N]] / [[LDG_URL_N]] tokens.
+  // Remasking then unmasking with an empty local table previously wiped those tokens
+  // (Email: lines became empty), breaking intake-email preservation.
+  if (/\[\[LDG_(?:EMAIL|URL)_\d+\]\]/i.test(slice)) {
+    const expanded = expandShortPartyLabelsToFullLegal(slice, fullNames);
+    return collapseDuplicateNoticeEntityLines(expanded, fullNames);
+  }
   const { text: masked, emails } = maskEmailAddresses(slice);
   const expanded = expandShortPartyLabelsToFullLegal(masked, fullNames);
   const deduped = collapseDuplicateNoticeEntityLines(expanded, fullNames);

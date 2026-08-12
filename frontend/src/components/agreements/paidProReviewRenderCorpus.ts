@@ -579,13 +579,30 @@ export function repairFusedPartyLegalNamesForReviewDisplay(
     repaired = true;
   }
 
-  // Include signature-region lines — fused headings often appear after IN WITNESS WHEREOF.
-  const fusedLine = text.split("\n").find((line) => isFusedOrConcatenatedPartyLegalName(line.trim()));
-  if (fusedLine && authParties.length >= 2) {
-    const client = authorityPartiesToCanonicalPartyIdentities(authParties)[0]?.partyDisplayName.trim();
-    if (client) text = text.split(fusedLine.trim()).join(client);
-    repaired = true;
-    if (authParties.length >= 2) {
+  // Signature-region only — opening recitals legitimately name both parties and must never be
+  // rewritten to a single client label (that destroyed TEST435 SoT review display).
+  const signatureIdx = signaturePatchStartIndex(text);
+  if (signatureIdx >= 0 && authParties.length >= 2) {
+    const head = text.slice(0, signatureIdx);
+    const tail = text.slice(signatureIdx);
+    const fusedLine = tail
+      .split("\n")
+      .find((line) => {
+        const trimmed = line.trim();
+        if (!trimmed || !isFusedOrConcatenatedPartyLegalName(trimmed)) return false;
+        // Operative prose / entered-into lines can appear if the patch index is early; skip them.
+        if (/\bentered into\b/i.test(trimmed)) return false;
+        if (/\bby and between\b/i.test(trimmed)) return false;
+        if (/^If to\s+/i.test(trimmed)) return false;
+        return true;
+      });
+    if (fusedLine) {
+      const client = authorityPartiesToCanonicalPartyIdentities(authParties)[0]?.partyDisplayName.trim();
+      if (client) {
+        const repairedTail = tail.split(fusedLine.trim()).join(client);
+        text = `${head}${repairedTail}`;
+        repaired = true;
+      }
       const dedupeAfter = stripDuplicateLegacySignatureBlocksAfterAuthoritative(text, authParties);
       text = dedupeAfter.text;
       repaired = dedupeAfter.removed > 0 || repaired;
@@ -828,7 +845,12 @@ export function resolvePaidProReviewRenderPlain(
   const finishUserVisiblePlain = (plain: string): string => {
     let body = (plain || "").trim();
     if (body.length < PAID_PRO_AUTHORITY_MIN_LEN) return body;
-    // Frozen SoT display-only skips the full sanitizer; still separate fused legal-name lines.
+    // Frozen SoT display-only: presentation projection only. Fused-name signing repairs strip
+    // Party Notice Details and can rewrite openings — never run them on accepted SoT display.
+    if (shouldUsePaidProSourceOfTruthDisplayOnly()) {
+      if (args?.skipUserVisibleDisplayPrep) return body;
+      return applyPaidProUserVisibleDisplayPrep(body);
+    }
     if (corpusContainsFusedPartyLegalName(body)) {
       const parties = resolvePartiesForReviewRender(args);
       body = repairFusedPartyLegalNamesForReviewDisplay(body, parties).text.trim();

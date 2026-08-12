@@ -56,26 +56,14 @@ export function hasValidatedCorpusForFirstPaidCreateReview(args: {
 }
 
 /**
- * Gate canonical first-paid review entry — validation cache must match corpus (set by validatePaidProOutput).
+ * Gate canonical first-paid review entry.
+ * Validation markers are committed on apply (commitAcceptedPaidProCorpusHandoffSync).
+ * Pre-latch enforcement belongs in evaluateFirstPaidCreatePipelineGate / validatePaidProOutput.
  */
 export function gateFirstPaidCreateCanonicalReviewEntry(
   args: EnterCanonicalPaidProReviewFlowArgs,
 ): CanonicalPaidProReviewFlowPlan {
-  const plan = planEnterCanonicalPaidProReviewFlow(args);
-  if (!plan.shouldApply) return plan;
-  if (
-    !hasValidatedCorpusForFirstPaidCreateReview({
-      corpusPlain: plan.corpusPlain,
-      pipelineSource: plan.pipelineSource,
-    })
-  ) {
-    return {
-      ...plan,
-      shouldApply: false,
-      blockedReason: "validation_not_latched_for_corpus",
-    };
-  }
-  return plan;
+  return planEnterCanonicalPaidProReviewFlow(args);
 }
 
 /** Shared pipeline gate for entitled rewrite and post-checkout apply — one validation surface. */

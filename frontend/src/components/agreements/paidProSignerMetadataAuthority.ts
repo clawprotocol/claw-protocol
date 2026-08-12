@@ -564,10 +564,14 @@ export function buildPaidProSignerMetadataParties(
       (opts?.draftPartyNames?.[i] ?? "").trim(),
       "",
     );
+    // Legal Party Authority wins over corrupted draft fragments / wrong UI names.
+    // Metadata and draft rows may enrich slots but must not substitute intake legal identities.
     const resolvedLegal =
       hasFrozenManifest && frozenLegal
         ? frozenLegal
-        : draftLegalClean || authorityLegal || uiLegalClean;
+        : authorityIdentities.length >= 2 && authorityLegal
+          ? authorityLegal
+          : draftLegalClean || authorityLegal || uiLegalClean;
     const uiSlot = resolveUiSlotIndexForLegalEntity(ui, resolvedLegal, i);
     parties.push({
       partyIndex: i,

@@ -202,10 +202,13 @@ function buildAiWorkflowServicesPremiumBody(
     "9. THIRD-PARTY SYSTEMS AND OPERATIONAL RISK",
     "AI tools, SaaS platforms, APIs, and other third-party systems may change, fail, restrict access, or produce unexpected results. Service Provider will use commercially reasonable care in configuration and implementation support but does not guarantee third-party platform availability, model outputs, or business results unless expressly stated in a signed writing.",
     "",
-    "10. GOVERNING LAW",
+    "10. TERM AND TERMINATION",
+    "This Agreement continues until the services are completed or the Parties end it sooner. Either Party may terminate for convenience on thirty (30) days' prior written notice, or immediately for material breach that remains uncured after written notice when a cure is reasonably possible. Provisions that by their nature should survive (including confidentiality, ownership, and payment for services performed) survive termination.",
+    "",
+    "11. GOVERNING LAW",
     `This Agreement is governed by the laws of ${law}, without regard to conflict-of-law rules.`,
     "",
-    "11. ELECTRONIC SIGNATURES",
+    "12. ELECTRONIC SIGNATURES",
     esign,
   ].join("\n");
   return body.replace(/\n{3,}/g, "\n\n").trim();

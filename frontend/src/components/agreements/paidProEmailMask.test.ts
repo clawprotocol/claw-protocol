@@ -24,6 +24,11 @@ describe("paidProEmailMask", () => {
     expect(restored).toBe(raw);
   });
 
+  it("does not wipe pre-existing LDG masks when unmask table is empty", () => {
+    const alreadyMasked = "Email: [[LDG_EMAIL_0]]\nEmail: [[LDG_EMAIL_1]]";
+    expect(unmaskEmailAddresses(alreadyMasked, [])).toBe(alreadyMasked);
+  });
+
   it("does not let underscore-rich legacy masks break on word-boundary expansion", () => {
     const { text: masked, emails } = maskProtectedSpans(`Notify ${EMAILS[0]}`);
     expect(masked).toMatch(/\[\[LDG_EMAIL_0\]\]/);

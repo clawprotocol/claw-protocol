@@ -1,23 +1,32 @@
-import { describe, expect, it } from "vitest";
-import { applyAcceptedProCorpusSafeDisplay } from "./acceptedProCorpusSafeDisplay";
+import { afterEach, describe, expect, it } from "vitest";
 import {
   assessPaidProMutualConsultingProfessionalStructure,
   applyMutualConsultingProfessionalQualityFloor,
   countNumberedAgreementSections,
   MUTUAL_CONSULTING_MIN_NUMBERED_SECTIONS,
 } from "./paidProMutualConsultingQualityFloor";
-import { preparePaidProServerDocumentForAcceptance } from "./paidProConciseServicesQuality";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
-import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import {
+  resetUnauthorizedSemanticInsertsForTests,
+  setUnauthorizedSemanticInsertsForTests,
+} from "./unauthorizedSemanticInsertPolicy";
 
-const FIXTURE_DIR = join(
-  import.meta.dirname,
-  "qa/paidProHardening/fixtures",
-);
+afterEach(() => {
+  resetUnauthorizedSemanticInsertsForTests();
+});
 
-const INTAKE = readFileSync(join(FIXTURE_DIR, "freeProQaTemplateATest207.intake.txt"), "utf8");
-const THIN = readFileSync(join(FIXTURE_DIR, "freeProQaTemplateATest207Thin.txt"), "utf8");
+// Avoid ai|automation|workflow|implementation|setup tokens — those route to AI-workflow floor.
+const NON_AI_INTAKE =
+  "Create a mutual consulting services agreement between Blue Canyon Analytics LLC (Client) and Iron Vale Systems Inc. (Service Provider). Fee $8,500. Delaware law.";
+
+const THIN = [
+  "MUTUAL CONSULTING AGREEMENT",
+  "1. Scope of Services. Provider will deliver consulting support described in any Statement of Work.",
+  "2. Fees. Client pays $8,500.",
+  "3. Term. Continues until completed.",
+  "IN WITNESS WHEREOF",
+].join("\n");
+
 const DRAFT = {
   parties: [
     { name: "Blue Canyon Analytics LLC", role: "Client" },
@@ -26,44 +35,36 @@ const DRAFT = {
   jurisdiction: "Delaware",
 } as ParsedDraftShape;
 
-describe("paidProMutualConsultingQualityFloor (test207)", () => {
-  it("flags collapsed lightweight Template A corpus (≤9 numbered sections)", () => {
+describe("paidProMutualConsultingQualityFloor (P0)", () => {
+  it("flags collapsed lightweight non-AI mutual consulting corpus", () => {
     const before = assessPaidProMutualConsultingProfessionalStructure({
       text: THIN,
-      rawIntake: INTAKE,
+      rawIntake: NON_AI_INTAKE,
       draft: DRAFT,
     });
     expect(before.applies).toBe(true);
     expect(before.ok).toBe(false);
-    expect(before.topicsMissing.length).toBeGreaterThanOrEqual(2);
-    expect(countNumberedAgreementSections(THIN)).toBeLessThanOrEqual(11);
+    expect(countNumberedAgreementSections(THIN)).toBeLessThanOrEqual(9);
   });
 
-  it("expands thin mutual consulting corpus to professional multi-section structure", () => {
-    const floored = applyMutualConsultingProfessionalQualityFloor(THIN, DRAFT, INTAKE);
+  it("does not expand thin corpus by default (inventing floors off)", () => {
+    const floored = applyMutualConsultingProfessionalQualityFloor(THIN, DRAFT, NON_AI_INTAKE);
+    expect(floored.repairs).toEqual([]);
+    expect(floored.text).toBe(THIN.trim());
+    expect(floored.text).not.toMatch(/LIMITATION OF LIABILITY/i);
+  });
+
+  it("legacy expand path still works when test opt-in enabled", () => {
+    setUnauthorizedSemanticInsertsForTests(true);
+    const floored = applyMutualConsultingProfessionalQualityFloor(THIN, DRAFT, NON_AI_INTAKE);
     expect(floored.repairs.length).toBeGreaterThan(0);
     const after = assessPaidProMutualConsultingProfessionalStructure({
       text: floored.text,
-      rawIntake: INTAKE,
+      rawIntake: NON_AI_INTAKE,
       draft: DRAFT,
     });
     expect(after.ok).toBe(true);
     expect(after.numberedSectionCount).toBeGreaterThanOrEqual(MUTUAL_CONSULTING_MIN_NUMBERED_SECTIONS);
     expect(after.topicsMissing).toEqual([]);
-  });
-
-  it("acceptance safe-display + prepare path yields full Pro structure for test207 intake", () => {
-    const prepared = preparePaidProServerDocumentForAcceptance(THIN, DRAFT, INTAKE);
-    const safe = applyAcceptedProCorpusSafeDisplay(prepared.text, {
-      draft: DRAFT,
-      intakeText: INTAKE,
-    });
-    const structure = assessPaidProMutualConsultingProfessionalStructure({
-      text: safe.text,
-      rawIntake: INTAKE,
-      draft: DRAFT,
-    });
-    expect(structure.ok).toBe(true);
-    expect(safe.text.length).toBeGreaterThan(THIN.length + 400);
   });
 });

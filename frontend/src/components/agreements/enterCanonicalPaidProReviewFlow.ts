@@ -23,10 +23,7 @@ import { runPaidProSignerMetadataAuthoritySeed } from "./paidProSignerMetadataSe
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import { resolveLegalEntitiesForCanonicalMetadata } from "./canonicalLegalEntitiesForMetadata";
 import { markPaidProPipelineAcceptedCorpusHash, readPaidProPipelineAcceptedCorpusBody } from "./paidProPipelineAcceptedCorpus";
-import {
-  hasPaidProPipelineValidationForCorpus,
-  markPaidProPipelineValidationPassed,
-} from "./paidProPostAcceptanceValidatorCache";
+import { markPaidProPipelineValidationPassed } from "./paidProPostAcceptanceValidatorCache";
 
 export type CanonicalPaidProReviewEntrySource =
   | "post_checkout_apply_success"
@@ -156,14 +153,9 @@ export function planEnterCanonicalPaidProReviewFlow(
     return { ...baseBlocked, blockedReason: "create_flow_routing_gate" };
   }
 
-  if (
-    !hasPaidProPipelineValidationForCorpus({
-      text: corpusPlain,
-      source: pipelineSource,
-    })
-  ) {
-    return { ...baseBlocked, blockedReason: "validation_not_latched_for_corpus" };
-  }
+  // Do not require a prior validation latch here. Canonical entry commits markers via
+  // commitAcceptedPaidProCorpusHandoffSync / markPipelineValidationPassed on apply.
+  // Callers that need pre-validation use evaluateFirstPaidCreatePipelineGate.
 
   return {
     shouldApply: true,

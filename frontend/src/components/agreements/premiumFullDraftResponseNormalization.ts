@@ -87,9 +87,13 @@ function readSubstantiveDegradedJsonParseDocumentText(
   ] as const) {
     const candidate = readWireStringField(base, keys);
     if (!candidate) continue;
-    if (substantiveDegradedJsonParseWireBodyUsable(candidate, base)) {
-      return { text: candidate, sourceField: keys[0] ?? "document_text" };
+    if (!substantiveDegradedJsonParseWireBodyUsable(candidate, base)) continue;
+    // Prefer unwrapped operative prose so callers keep json_envelope.* provenance.
+    if (looksLikePremiumResponseJsonWrapper(candidate)) {
+      const unwrapped = tryUnwrapPremiumJsonEnvelopeDocument(candidate);
+      if (unwrapped?.text) return unwrapped;
     }
+    return { text: candidate, sourceField: keys[0] ?? "document_text" };
   }
   return null;
 }
@@ -366,13 +370,28 @@ export function normalizePremiumFullDraftResponsePayload(
   raw: Partial<PremiumFullDraftResult> & Record<string, unknown> | null | undefined,
 ): NormalizedPremiumFullDraftPayload {
   const base = (raw ?? {}) as PremiumFullDraftResult & Record<string, unknown>;
+  // Resolve provenance against the raw wire BEFORE alias promotion copies the body into
+  // server_full_document_text (which would otherwise steal sourceField).
+  const prePromotionResolved = resolvePremiumFullDraftAuthoritativeBody(base);
   const promotion = promoteSubstantiveDegradedJsonParseWireToServerFull(base);
   const resolved = resolvePremiumFullDraftAuthoritativeBody(promotion.wire);
   let authoritativeText = resolved.text;
-  let sourceField = resolved.sourceField ?? promotion.sourceField;
+  let sourceField =
+    prePromotionResolved.sourceField ?? promotion.sourceField ?? resolved.sourceField;
   if (authoritativeText.length < promotion.body.length) {
     authoritativeText = promotion.body;
-    sourceField = sourceField ?? promotion.sourceField ?? "document_text";
+    sourceField =
+      prePromotionResolved.sourceField ??
+      promotion.sourceField ??
+      sourceField ??
+      "document_text";
+  }
+  if (
+    !sourceField &&
+    prePromotionResolved.text &&
+    prePromotionResolved.text === authoritativeText
+  ) {
+    sourceField = prePromotionResolved.sourceField;
   }
   const rawServerFull = readWireStringField(base, [
     "server_full_document_text",

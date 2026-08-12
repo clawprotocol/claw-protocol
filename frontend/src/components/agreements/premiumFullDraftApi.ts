@@ -255,6 +255,8 @@ export type PremiumFullDraftResult = {
   retryable?: boolean;
   /** Operator-safe model identifier from premium-full-draft route (no secrets). */
   generation_model?: string;
+  /** Eval-only stage trace when CLAW_DRAFT_QUALITY_TRACE=1 on the server. */
+  draft_quality_trace?: Record<string, unknown> | null;
   pro_intelligence_packet?: Partial<ProAgreementIntelligencePacket>;
 };
 

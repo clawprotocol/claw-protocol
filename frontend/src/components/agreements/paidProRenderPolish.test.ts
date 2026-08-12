@@ -76,6 +76,12 @@ describe("applyPaidProRenderPolish", () => {
   });
 
   it("opening recital in first 1,000 chars uses full legal party names", () => {
+    /**
+     * Behavioral contract (updated with role-defined recital polish):
+     * - OLD: short trade-name aliases in parens, e.g. Ironclad Systems Group LLC (“Ironclad”)
+     * - NEW: full legal names with role-defined terms, e.g. Ironclad Systems Group LLC (“Client”)
+     * Full legal names must appear; the short comma-separated trade-name list must not remain.
+     */
     const body = padOperative(
       "entered into by and among Ironclad, Harborline, Northwind, Silver Mesa, and VertexGrid.\nKEY CONTACTS\n[EMAIL_1]\n",
       20_000,
@@ -87,7 +93,7 @@ describe("applyPaidProRenderPolish", () => {
     for (const party of IRONCLAD_PARTIES) {
       expect(opening).toContain(party);
     }
-    expect(opening).toMatch(/\(.*Ironclad.*\)/);
+    expect(opening).toMatch(/\(\s*[“"](?:Client|Service Provider|Party)[”"]\s*\)/i);
     expect(opening).not.toMatch(/among Ironclad, Harborline, Northwind, Silver Mesa, and VertexGrid/i);
   });
 

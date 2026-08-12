@@ -2724,7 +2724,11 @@ export function AgreementRecipientReview({
       setError(RECIPIENT_QUICK_CHANGE_TOO_LARGE_HINT);
       return;
     }
-    const revGate = access.check("revision_preview");
+    // Tokenized recipient review is invitation-authorized. Do not apply the viewer's
+    // create-tier revision_preview quota (Guest is 0 and would block all suggested changes).
+    const revGate = recipientAccessToken?.trim()
+      ? { allowed: true as const }
+      : access.check("revision_preview");
     if (!revGate.allowed) {
       setError(revGate.message || "Revision preview limit reached.");
       return;
@@ -2848,7 +2852,10 @@ export function AgreementRecipientReview({
     const instCombined = (opts?.instructionPlain ?? instruction).trim();
     if (!paste || !draft) return false;
     if (!opts?.importPipeline && previewing) return false;
-    const revGate = access.check("revision_preview");
+    // Tokenized recipient review is invitation-authorized — skip viewer create-tier quota.
+    const revGate = recipientAccessToken?.trim()
+      ? { allowed: true as const }
+      : access.check("revision_preview");
     if (!revGate.allowed) {
       setError(revGate.message || "Revision preview limit reached.");
       return false;

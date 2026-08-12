@@ -112,15 +112,19 @@ export function resolveAuthoritativeCreateFlowReviewShell(
   }
   if (input.premiumCheckoutCompleted) return "paid_pro";
 
-  // local-org / empty bootstrap: never select paid_pro from path, dashboard marker, or cached entitlement.
+  // local-org / empty bootstrap: never select paid_pro from path/dashboard inference alone.
+  // Explicit workspace Pro entitlement, checkout completion, and accepted corpora still win.
   if (mustBlockPaidEntitlementForLegacyFallbackOrg()) {
     if (hasPaidProSourceOfTruth()) return "paid_pro";
     if (input.paidProAuthoritative) return "paid_pro";
     if (input.premiumPersistedFlowActive || input.premiumSendPathUnlocked) return "paid_pro";
+    if (input.workspaceProEntitled) return "paid_pro";
     if (hasCurrentSessionProEntitlement()) return "paid_pro";
     if (hasAcceptedPaidCreateFlowFreezeLatch()) return "paid_pro";
     if (hasPaidCreateFlowPipelineAcceptance()) return "paid_pro";
     if (readDisplayReviewSnapshotAuthority()?.snapshotId) return "paid_pro";
+    const legacySnap = readPremiumCompletionSnapshot();
+    if (legacySnap?.premiumAccepted === true) return "paid_pro";
     return "free_starter";
   }
 

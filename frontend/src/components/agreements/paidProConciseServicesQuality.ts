@@ -254,7 +254,9 @@ export function assessConciseCommercialServicesProQuality(args: {
     (/\bin\s+witness\s+whereof\b/i.test(bodyLow) && countPaidProExecutionBlocks(text) >= 1);
   (esignOk ? requiredFactsFound : requiredFactsMissing).push("electronic_signatures");
 
-  const termOk = /\bterminat(?:ion|e)?\b/i.test(bodyLow);
+  // Match terminate / termination / terminated / terminating — stitched Term clauses often
+  // say "unless extended or terminated" without a standalone "Termination" heading word.
+  const termOk = /\bterminat(?:ion|e[ds]?|ing)?\b/i.test(bodyLow);
   (termOk ? requiredFactsFound : requiredFactsMissing).push("termination");
 
   const ownershipOk =

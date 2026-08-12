@@ -222,6 +222,16 @@ import {
 } from "./canonicalPartyIdentityResolver";
 import { applyAcceptedProCorpusSafeDisplay } from "./acceptedProCorpusSafeDisplay";
 import {
+  draftQualityClientTraceEnabled,
+  logDraftQualityClientTrace,
+  newDraftQualityClientTrace,
+  recordDraftQualityClientStage,
+} from "./draftQualityStageTrace";
+import {
+  evaluatePreSoTSemanticInsertGate,
+  logPreSoTSemanticInsertResult,
+} from "./preSoTSemanticInsertValidation";
+import {
   brandLicensingFreezeAuthorityPasses,
 } from "./paidProBrandLicensingFreezeAuthority";
 import { intakeDescribesBrandLicensingDistributionManufacturingStack } from "./paidProAgreementTitleScope";
@@ -1907,6 +1917,30 @@ async function runPremiumCompletionInner(
     const premiumServerModelMs = Math.round(
       (typeof performance !== "undefined" ? performance.now() : Date.now()) - premiumRequestStartedAt,
     );
+    const dqClientTrace = draftQualityClientTraceEnabled()
+      ? newDraftQualityClientTrace(
+          String(
+            (fullResp.ok &&
+              (fullResp.result as PremiumFullDraftResult & { draft_quality_trace?: { trace_id?: string } })
+                .draft_quality_trace?.trace_id) ||
+              input.agreementGenerationId ||
+              "",
+          ),
+        )
+      : null;
+    if (dqClientTrace && fullResp.ok) {
+      const serverTrace = (fullResp.result as PremiumFullDraftResult).draft_quality_trace;
+      void recordDraftQualityClientStage(
+        dqClientTrace,
+        "post_server_wire",
+        (fullResp.result.server_full_document_text || fullResp.result.document_text || "").trim(),
+        {
+          generationOutcome: (fullResp.result.generation_outcome || "").trim(),
+          repairLen: (fullResp.result.server_repair_document_text || "").trim().length,
+          hasServerTrace: Boolean(serverTrace),
+        },
+      );
+    }
     const wireMeta = fullResp.ok
       ? {
           responseBodyLen: JSON.stringify(fullResp.result).length,
@@ -2577,11 +2611,14 @@ async function runPremiumCompletionInner(
             failureCode: effectiveFull.server_generation_failure_code,
             accRejected: true,
           });
+        // Use the *original* wire server_full, not the post-promotion alias. Promoting a
+        // mid-length json_parse `document_text` into `server_full_document_text` must not
+        // suppress brand-licensing structural retry (TEST448: 8.5k degraded → 28k retry).
         const brandLicensingDegradedJsonParseRetry =
           intakeDescribesBrandLicensingDistributionManufacturingStack(rawForSoT || rawIntake) &&
           String(effectiveFull.generation_outcome || "").trim() === "degraded" &&
           String(effectiveFull.server_generation_failure_code || "").trim() === "json_parse" &&
-          !(wireServerFullDocumentText || "").trim() &&
+          originalWireServerFullDocumentText.length < SUBSTANTIVE_SERVER_DRAFT_MIN_LEN &&
           (doc || "").trim().length < SUBSTANTIVE_SERVER_DRAFT_MIN_LEN;
         if (skipStructuralRetry) {
           paidProPerfRecordInstant("json_parse_degraded_handling", 0, {
@@ -3982,6 +4019,35 @@ async function runPremiumCompletionInner(
               acceptedFreezeHash: freezeCommit.hash ?? paidProPipelineAcceptedCorpusHash(doc) ?? undefined,
             });
           }
+          // Pre-SoT semantic-insert validation: detect client floors not on server wire / intake.
+          // Observe-by-default (P0); enforce when VITE_PRE_SOT_SEMANTIC_INSERT_GATE=1.
+          const preSoTInsertGate = evaluatePreSoTSemanticInsertGate({
+            serverWireText: originalWireServerFullDocumentText || wireServerFullDocumentText || "",
+            finalFreezeCandidateText: doc,
+            intakeText: rawForSoT || rawIntake,
+          });
+          logPreSoTSemanticInsertResult(preSoTInsertGate);
+          if (preSoTInsertGate.blocked) {
+            logPremiumAcceptanceDecision({
+              accepted: false,
+              reason: "pre_sot_semantic_insert_gate_blocked",
+              bodyLen: doc.length,
+              fatalPlaceholderCount: 0,
+              structuralFatalCount: preSoTInsertGate.findings.length,
+              generationOutcome: (effectiveFull.generation_outcome || "").trim() || "ok",
+              renderSource: premiumRenderSource,
+            });
+            logPremiumCompletionDebug({
+              stage: "pre_sot_semantic_insert_gate_blocked",
+              accepted: false,
+              rejectedReason: preSoTInsertGate.findings.map((f) => f.id).join(","),
+              bodyLen: doc.length,
+            });
+            winningPremiumBodyText = "";
+            premiumRenderSource = "rejected_paid_corpus";
+            proIntentGateMessage =
+              "LawDog blocked freezing this draft because client polish inserted substantive terms not present in the server draft or intake. Tap **Retry Pro draft**, or disable inventing floors in eval mode.";
+          } else {
           paidProPerfSpanStart("post_accept_commit_render");
           freezeAcceptedPremiumBodyForSession(
             input.agreementGenerationId,
@@ -4050,6 +4116,7 @@ async function runPremiumCompletionInner(
             substantiveValidatedLen,
             vPaidAuthoritativeSubstantive,
           });
+          } // end pre-SoT insert gate else (freeze allowed)
         }
       } else {
         const intakeSForGate = (rawForSoT || rawIntake) || "";
@@ -5433,6 +5500,19 @@ async function runPremiumCompletionInner(
       attemptSequence,
       outcome: "fallback",
     });
+  }
+
+  if (draftQualityClientTraceEnabled()) {
+    const clientTrace = newDraftQualityClientTrace(input.agreementGenerationId || "");
+    void (async () => {
+      await recordDraftQualityClientStage(clientTrace, "post_client_accept", pipelineWinningBody, {
+        premiumRenderSource: String(premiumRenderSource || ""),
+      });
+      await recordDraftQualityClientStage(clientTrace, "post_render_winning", pipelineWinningBody || finalFallback, {
+        premiumRenderSource: String(premiumRenderSource || ""),
+      });
+      logDraftQualityClientTrace(clientTrace);
+    })();
   }
 
   return {

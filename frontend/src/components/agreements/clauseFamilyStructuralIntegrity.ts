@@ -22,6 +22,7 @@ import {
   resolveCanonicalNoticePartyCount,
 } from "./paidProPartyNoticeDetails";
 import type { PaidProPartyRoleContext, PaidProSignerMetadataParty } from "./paidProSignerMetadataAuthority";
+import { qualifiesAsConciseAuthoritativePaidServerDraft } from "./paidProSubstantiveCorpusAssessment";
 
 export type ClauseFamilyStructuralViolation = {
   family: OperativeClauseFamily | "structural";
@@ -441,11 +442,15 @@ export function validateExecutionClauseFamilyStructuralIntegrity(
   const violations: ClauseFamilyStructuralViolation[] = [];
   const blocks = countPaidProExecutionBlocks(corpus);
   if (blocks === 0) {
-    violations.push({
-      family: "execution_block",
-      code: "missing_execution_block",
-      message: "Execution block (IN WITNESS WHEREOF) is required before freeze.",
-    });
+    // Concise commercial Pro drafts may freeze before signer-setup adds witness /
+    // execution blocks when Electronic Signatures + numbered structure already qualify.
+    if (!qualifiesAsConciseAuthoritativePaidServerDraft(corpus)) {
+      violations.push({
+        family: "execution_block",
+        code: "missing_execution_block",
+        message: "Execution block (IN WITNESS WHEREOF) is required before freeze.",
+      });
+    }
   }
   if (blocks > 1) {
     violations.push({

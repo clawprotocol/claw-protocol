@@ -8,6 +8,7 @@ import { repairGluedSectionHeadingsInText, splitGluedSectionHeadingFromLine } fr
 import { applySectionStructureIntegrity } from "./sectionStructureAuthority";
 import { applyContactAuthorityExecutionBlockIntegrity } from "./contactAuthorityExecutionBlockIntegrity";
 import { repairInlineCollapsedStarterLayout } from "./starterPreviewFormatting";
+import { maskProtectedSpans, unmaskProtectedSpans } from "./paidProEmailMask";
 
 export type DocumentQualityFloorResult = {
   text: string;
@@ -25,7 +26,10 @@ const MALFORMED_PUNCTUATION_RES: readonly { pattern: RegExp; replacement: string
 const TERMINATION_HEADING_RE = /^\s*\d+\.?\s*termination\b/i;
 
 function repairMalformedPunctuation(text: string): { text: string; repairs: string[] } {
-  let out = text;
+  // Mask emails/URLs first — "missing_space_after_punct" would otherwise turn
+  // ethan.cole@ironcladsg.com into ethan. cole@ironcladsg. com.
+  const { text: masked, emails, urls } = maskProtectedSpans(text);
+  let out = masked;
   const repairs: string[] = [];
   for (const { pattern, replacement, tag } of MALFORMED_PUNCTUATION_RES) {
     pattern.lastIndex = 0;
@@ -36,7 +40,7 @@ function repairMalformedPunctuation(text: string): { text: string; repairs: stri
     }
     pattern.lastIndex = 0;
   }
-  return { text: out, repairs };
+  return { text: unmaskProtectedSpans(out, emails, urls), repairs };
 }
 
 const ESIGN_NOTICE_RE =

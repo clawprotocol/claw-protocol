@@ -420,6 +420,18 @@ function applyAcceptedProCorpusSafeDisplayCore(
   }
 
   if (wouldMateriallyShrinkAcceptedCorpus(input.length, out.length)) {
+    // Opening title/recital repairs must not be discarded by a later length gate —
+    // that left malformed openers frozen as SoT (Paid Pro opening contract).
+    const openingPreserved =
+      repairs.some((r) => r.startsWith("opening:")) &&
+      /entered\s+into\s+as\s+of\s+the\s+Effective\s+Date\s+by\s+and\s+between/i.test(out) &&
+      !/entered\s+into\s+as\s+of\s+the\s+Effective\s+Date\s+by\s+and\s+between/i.test(input);
+    if (openingPreserved) {
+      return {
+        text: out,
+        repairs: [...new Set([...repairs, "safe:final_shrink_opening_preserved"])],
+      };
+    }
     return {
       text: input,
       repairs: [...repairs, "safe:final_shrink_blocked"],

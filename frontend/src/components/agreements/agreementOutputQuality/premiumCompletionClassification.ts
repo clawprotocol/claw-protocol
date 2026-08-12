@@ -48,7 +48,9 @@ export function classifyPremiumCompletionOutcome(args: {
   const missing = args.missingMaterial ?? [];
   const server = (args.serverOutcome || "").trim().toLowerCase();
 
-  if (server === "degraded") return "degraded";
+  // Wire "degraded" (e.g. json_parse) must not veto a substantive normalized body.
+  // Short degraded stubs stay degraded; ≥4k operative prose continues to length gates.
+  if (server === "degraded" && len < 4_000) return "degraded";
   if (args.validationFailed && len < 900) return "clarification_required_before_authoritative_commit";
 
   const body = stripAdvisoryLanguageFromAgreementBody(args.documentText);

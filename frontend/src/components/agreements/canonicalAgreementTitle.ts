@@ -228,6 +228,13 @@ export function explicitIntentCanonicalTitle(rawIntake: string | null | undefine
   if (/\bapi\s+integration\s+(?:agreement|contract)\b/.test(low)) return "API Integration Agreement";
   if (/\bcloud\s+migration\s+(?:agreement|contract)\b/.test(low)) return "Cloud Migration Agreement";
   if (/\btechnology\s+services?\s+(?:agreement|contract)\b/.test(low)) return "Technology Services Agreement";
+  // Prefer consulting+implementation over bare "implementation agreement" — otherwise
+  // "...consulting and implementation agreement..." collapses to Implementation Agreement.
+  if (/\b(?:mutual\s+)?consulting\s+(?:and|&)\s+implementation\s+(?:agreement|contract)\b/.test(low)) {
+    return /\bmutual\b/.test(low)
+      ? "Mutual Consulting and Implementation Agreement"
+      : "Consulting and Implementation Agreement";
+  }
   if (/\bimplementation\s+(?:agreement|contract)\b/.test(low)) return "Implementation Agreement";
   if (/\bsupport\s+services\s+(?:agreement|contract)\b/.test(low)) return "Support Services Agreement";
   if (/\bdevelopment\s+(?:agreement|contract)\b/.test(low)) return "Development Agreement";

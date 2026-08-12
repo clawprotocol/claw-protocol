@@ -1363,6 +1363,8 @@ function buildIfToNoticeStanza(
   }
   const email = party.signerEmail.trim();
   const addressLines = formatNoticeAddressLines(party.partyAddress);
+  // Product/safety conflict: some fixtures forbid live emails in operative notices;
+  // others require them. Keep prior materialization until founder decides.
   if (email) lines.push(`Email: ${email}`);
   if (addressLines.length > 0) {
     lines.push("Address:", ...addressLines);
@@ -1635,6 +1637,56 @@ export function repairFusedNoticesHeadingToPriorClause(corpus: string): {
 }
 
 /**
+ * Resolve the content span for a regex match that may include a leading `(?:^|\n)`.
+ * Avoids `indexOf("\\n", matchIndex)` collapsing to a zero-width span when matchIndex
+ * already points at the newline — which previously fused `10. NOTICES`+`11. NOTICES`.
+ */
+function resolveMatchedLineSpan(
+  text: string,
+  matchIndex: number,
+): { start: number; end: number; line: string } {
+  let start = Math.max(0, matchIndex);
+  if (start < text.length && text[start] === "\n") start += 1;
+  while (start < text.length && (text[start] === " " || text[start] === "\t")) start += 1;
+  let end = text.indexOf("\n", start);
+  if (end < 0) end = text.length;
+  return { start, end, line: text.slice(start, end).trim() };
+}
+
+function hasTopLevelNoticesParentForMajor(head: string, major: string): boolean {
+  if (!major) return false;
+  return new RegExp(`(?:^|\\n)\\s*${major}\\.(?!\\d)\\s+NOTICES\\s*$`, "im").test(head);
+}
+
+/** Drop empty `N.M NOTICES` shells when parent `N. NOTICES` already exists. */
+export function removeEmptyNoticesSubsectionShells(corpus: string): {
+  text: string;
+  repairs: string[];
+} {
+  const witnessIdx = resolveAuthoritativeWitnessIndex(corpus || "");
+  const head = witnessIdx >= 0 ? corpus.slice(0, witnessIdx) : corpus;
+  const tail = witnessIdx >= 0 ? corpus.slice(witnessIdx) : "";
+  const lines = (head || "").replace(/\r\n/g, "\n").split("\n");
+  const repairs: string[] = [];
+  const out: string[] = [];
+  for (const line of lines) {
+    const trimmed = line.trim();
+    const sub = trimmed.match(/^(\d+)\.(\d+)\s+NOTICES\s*$/i);
+    if (sub?.[1] && hasTopLevelNoticesParentForMajor(head, sub[1])) {
+      repairs.push(`notice:remove_empty_notices_subsection:${sub[1]}.${sub[2]}`);
+      continue;
+    }
+    out.push(line);
+  }
+  if (!repairs.length) return { text: corpus, repairs: [] };
+  const newHead = out.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd();
+  return {
+    text: (tail ? `${newHead}\n\n${tail.trimStart()}` : newHead).replace(/\n{3,}/g, "\n\n").trimEnd(),
+    repairs,
+  };
+}
+
+/**
  * Insert or normalize a canonical `N. NOTICES` heading before operative If-to stanzas.
  * Pre-freeze only — repairs missing or notice-equivalent headings instead of rejecting.
  */
@@ -1669,19 +1721,32 @@ export function ensureCanonicalNoticesSectionHeadingForFreeze(corpus: string): {
 
   if (corpusHasCanonicalNoticesHeading(head)) {
     const eq = head.match(NOTICE_EQUIVALENT_SECTION_HEADING_RE);
-    if (eq?.[0] && !/\bNotices\b/i.test(eq[0])) {
-      const lineStart = eq.index ?? 0;
-      const lineEnd = head.indexOf("\n", lineStart);
-      const oldLine = head.slice(lineStart, lineEnd >= 0 ? lineEnd : head.length).trim();
-      const num = oldLine.match(/^(\d+)/)?.[1] ?? String(inferNoticesSectionNumber(head.slice(0, lineStart)));
-      const replacement = `${num}. NOTICES`;
-      const newHead =
-        head.slice(0, lineStart) +
-        (lineStart > 0 && head[lineStart - 1] === "\n" ? "\n" : "") +
-        replacement +
-        (lineEnd >= 0 ? head.slice(lineEnd) : "");
-      repairs.push("notice:normalize_equivalent_heading_to_notices");
-      return { text: `${newHead}\n\n${tail}`.replace(/\n{3,}/g, "\n\n").trimEnd(), repairs };
+    if (eq?.[0] && eq.index != null && !/\bNotices\b/i.test(eq[0])) {
+      const { start, end, line: oldLine } = resolveMatchedLineSpan(head, eq.index);
+      const major =
+        oldLine.match(/^(\d+)/)?.[1] ??
+        String(inferNoticesSectionNumber(head.slice(0, start)));
+      if (hasTopLevelNoticesParentForMajor(head, major)) {
+        const newHead = `${head.slice(0, start).trimEnd()}\n\n${head.slice(end).trimStart()}`
+          .replace(/\n{3,}/g, "\n\n")
+          .trimEnd();
+        repairs.push("notice:remove_equivalent_subsection_under_parent_notices");
+        text = `${newHead}\n\n${tail}`.replace(/\n{3,}/g, "\n\n").trimEnd();
+      } else {
+        const replacement = `${major}. NOTICES`;
+        const newHead = `${head.slice(0, start).trimEnd()}\n\n${replacement}\n\n${head
+          .slice(end)
+          .trimStart()}`
+          .replace(/\n{3,}/g, "\n\n")
+          .trimEnd();
+        repairs.push("notice:normalize_equivalent_heading_to_notices");
+        text = `${newHead}\n\n${tail}`.replace(/\n{3,}/g, "\n\n").trimEnd();
+      }
+    }
+    const stripped = removeEmptyNoticesSubsectionShells(text);
+    if (stripped.repairs.length > 0) {
+      repairs.push(...stripped.repairs);
+      text = stripped.text;
     }
     return { text, repairs };
   }
@@ -1698,24 +1763,37 @@ export function ensureCanonicalNoticesSectionHeadingForFreeze(corpus: string): {
 
   const eqBefore = beforeInsert.match(NOTICE_EQUIVALENT_SECTION_HEADING_RE);
   if (eqBefore?.index != null) {
-    const lineStart = eqBefore.index;
-    const lineEnd = beforeInsert.indexOf("\n", lineStart);
-    const oldLine = beforeInsert.slice(lineStart, lineEnd >= 0 ? lineEnd : beforeInsert.length).trim();
-    const num = oldLine.match(/^(\d+)/)?.[1] ?? String(inferNoticesSectionNumber(beforeInsert.slice(0, lineStart)));
+    const { start, end, line: oldLine } = resolveMatchedLineSpan(beforeInsert, eqBefore.index);
+    const num =
+      oldLine.match(/^(\d+)/)?.[1] ??
+      String(inferNoticesSectionNumber(beforeInsert.slice(0, start)));
     const newHead =
-      beforeInsert.slice(0, lineStart).trimEnd() +
-      `\n\n${num}. NOTICES` +
-      (lineEnd >= 0 ? beforeInsert.slice(lineEnd) : "") +
-      (afterInsert ? `\n\n${afterInsert}` : "");
+      `${beforeInsert.slice(0, start).trimEnd()}\n\n${num}. NOTICES\n\n${beforeInsert
+        .slice(end)
+        .trimStart()}${afterInsert ? `\n\n${afterInsert}` : ""}`
+        .replace(/\n{3,}/g, "\n\n")
+        .trimEnd();
     repairs.push("notice:replace_equivalent_with_notices");
-    return { text: `${newHead}\n\n${tail}`.replace(/\n{3,}/g, "\n\n").trimEnd(), repairs };
+    text = `${newHead}\n\n${tail}`.replace(/\n{3,}/g, "\n\n").trimEnd();
+    const stripped = removeEmptyNoticesSubsectionShells(text);
+    if (stripped.repairs.length > 0) {
+      repairs.push(...stripped.repairs);
+      text = stripped.text;
+    }
+    return { text, repairs };
   }
 
   const sectionNum = inferNoticesSectionNumber(beforeInsert);
   const headingBlock = `${sectionNum}. NOTICES\n\nNotices under this Agreement must be in writing and delivered as set forth below.\n\n`;
   const newHead = `${beforeInsert}\n\n${headingBlock}${afterInsert}`;
   repairs.push("notice:insert_missing_notices_heading");
-  return { text: `${newHead}\n\n${tail}`.replace(/\n{3,}/g, "\n\n").trimEnd(), repairs };
+  text = `${newHead}\n\n${tail}`.replace(/\n{3,}/g, "\n\n").trimEnd();
+  const stripped = removeEmptyNoticesSubsectionShells(text);
+  if (stripped.repairs.length > 0) {
+    repairs.push(...stripped.repairs);
+    text = stripped.text;
+  }
+  return { text, repairs };
 }
 
 export function findNoticesSectionStart(text: string): number {

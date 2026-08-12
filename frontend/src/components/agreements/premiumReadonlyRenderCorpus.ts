@@ -32,6 +32,7 @@ import { hasAuthoritativeSigningSnapshot } from "./authoritativeSigningSnapshot"
 import { resolvePaidProPostFinalizeReviewPlain } from "./paidProPostFinalizeReviewSurface";
 import { PAID_PRO_AUTHORITY_MIN_LEN } from "./paidProAgreementAuthority";
 import { canonicalizeProAgreementText } from "./proAgreementCanonicalizer";
+import { unauthorizedSemanticInsertsAllowed } from "./unauthorizedSemanticInsertPolicy";
 import {
   enforceAuthoritativeProCorpusDisplay,
   logProCorpusSourceMap,
@@ -113,6 +114,10 @@ export function applyAiWorkflowServicesQualityFloorToFallback(
   draft: ParsedDraftShape | null | undefined,
   intakeText?: string,
 ): string {
+  // P0: inventing AI-workflow operative sections requires authority; disabled by default.
+  if (!unauthorizedSemanticInsertsAllowed()) {
+    return (text || "").trim();
+  }
   const base = (text || "")
     .replace(/\[Not yet specified\]/gi, "The services begin on the effective date and continue until completed or terminated under this Agreement.")
     .trim();

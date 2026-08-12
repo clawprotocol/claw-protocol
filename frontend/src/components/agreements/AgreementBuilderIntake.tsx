@@ -1636,6 +1636,7 @@ import {
   commitAcceptedPaidProCorpusHandoffSync,
   commitCanonicalPaidProReviewSessionMarkers,
   FINALIZE_CANONICAL_PAID_PRO_PIPELINE_SUCCESS_HELPER,
+  planEnterCanonicalPaidProReviewFlow,
   planFinalizeCanonicalPaidProPipelineSuccess,
   planCanonicalPaidProStaleUiReset,
   resolveCanonicalPaidProReviewCorpus,
@@ -6677,9 +6678,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   /** Canonical first-time post-checkout AND returning paid create — one review entry path. */
   const enterCanonicalPaidProReviewFlow = React.useCallback(
     (args: EnterCanonicalPaidProReviewFlowArgs): boolean => {
+      // Shared planner (post-checkout + returning paid). Route gates wrap the same plan.
+      const planned = planEnterCanonicalPaidProReviewFlow(args);
       const plan = isDashboardPaidCreateRouteActive()
         ? gateDashboardPaidCreateCanonicalReviewEntry(args)
         : gateFirstPaidCreateCanonicalReviewEntry(args);
+      if (!plan.shouldApply && !planned.shouldApply) return false;
       if (!plan.shouldApply) return false;
       const finalPlain = plan.corpusPlain;
       const pipelineSource = plan.pipelineSource;
@@ -7401,17 +7405,29 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         recipientCandidates,
       });
       const canonicalEntered = finalizePlan.canEnterCanonicalReview
-        ? enterCanonicalPaidProReviewFlow({
-            source: dashboardCanonicalSource,
-            respectAlreadyOpened: false,
-            corpusPlain: finalizePlan.corpusPlain,
-            pipelineSource: result.premiumRenderSource || "server_full_draft",
-            draft: mergedDraftPersist,
-            intakeText: mergedIntake,
-            agreementGenerationId: result.agreementGenerationId ?? sessionGenForPass,
-            generationOutcome: result.serverGenerationDegraded ? "degraded" : "ok",
-            recipientCandidates,
-          })
+        ? isDashboardPaidCreateRouteActive()
+          ? enterCanonicalPaidProReviewFlow({
+              source: "dashboard_paid_create",
+              respectAlreadyOpened: false,
+              corpusPlain: finalizePlan.corpusPlain,
+              pipelineSource: result.premiumRenderSource || "server_full_draft",
+              draft: mergedDraftPersist,
+              intakeText: mergedIntake,
+              agreementGenerationId: result.agreementGenerationId ?? sessionGenForPass,
+              generationOutcome: result.serverGenerationDegraded ? "degraded" : "ok",
+              recipientCandidates,
+            })
+          : enterCanonicalPaidProReviewFlow({
+              source: "returning_paid_create",
+              respectAlreadyOpened: false,
+              corpusPlain: finalizePlan.corpusPlain,
+              pipelineSource: result.premiumRenderSource || "server_full_draft",
+              draft: mergedDraftPersist,
+              intakeText: mergedIntake,
+              agreementGenerationId: result.agreementGenerationId ?? sessionGenForPass,
+              generationOutcome: result.serverGenerationDegraded ? "degraded" : "ok",
+              recipientCandidates,
+            })
         : false;
       if (!canonicalEntered) {
         const canonicalSalvage = pickUsableGenerationRetrySalvageCorpus([

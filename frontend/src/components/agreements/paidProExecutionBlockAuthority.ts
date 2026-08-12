@@ -57,8 +57,10 @@ function countCompletePartySignatureSections(text: string): {
     serviceProviderWithBy,
     witnessBlocks: (body.match(/\bIN WITNESS WHEREOF\b/gi) || []).length,
     legacyEntitySignatureLines: (tail.match(LEGACY_ENTITY_INLINE_SIGNATURE_RE) || []).length,
-    clientHeadings: (tail.match(/^\s*CLIENT\s*:/gim) || []).length,
-    serviceProviderHeadings: (tail.match(/^\s*SERVICE\s+PROVIDER\s*:/gim) || []).length,
+    // Case-sensitive: title-case entity lines (`Client: Acme LLC`) must not count as
+    // signature-role headings (`CLIENT:`).
+    clientHeadings: (tail.match(/^\s*CLIENT\s*:/gm) || []).length,
+    serviceProviderHeadings: (tail.match(/^\s*SERVICE\s+PROVIDER\s*:/gm) || []).length,
   };
 }
 

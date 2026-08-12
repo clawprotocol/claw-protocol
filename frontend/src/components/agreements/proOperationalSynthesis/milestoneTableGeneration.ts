@@ -4,6 +4,7 @@
 
 import { intakeSpecifiesSimpleFixedFee } from "../canonicalPartyIdentityResolver";
 import { definedShortNameFromLegalEntity } from "../paidProAgreementPolish";
+import { unauthorizedSemanticInsertsAllowed } from "../unauthorizedSemanticInsertPolicy";
 import type { PartyResponsibilityProfile } from "./types";
 
 const MILESTONE_INTAKE_RE =
@@ -40,6 +41,10 @@ export function applyMilestoneTableGeneration(
   paymentTerms: string,
   responsibilities: readonly PartyResponsibilityProfile[],
 ): { text: string; inserted: boolean } {
+  // P0: inventing milestone acceptance obligations requires authority; disabled by default.
+  if (!unauthorizedSemanticInsertsAllowed()) {
+    return { text, inserted: false };
+  }
   if (!intakeHasMilestones(intakeRaw, paymentTerms)) {
     return { text, inserted: false };
   }

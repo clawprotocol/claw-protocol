@@ -239,6 +239,12 @@ export function detectHeadingBodyBoundaryInSectionTitle(
   if (headingTitle.split(/\s+/).filter(Boolean).length > 24) return null;
   if (body.length < 4) return null;
   if (OPERATIVE_VERB_RE.test(headingTitle) && !/\b(?:AND|OR|OF|FOR)\b/.test(headingTitle)) return null;
+  // `1. Clause 1. Terms…` — a mid-title numeral is not a body boundary. Splitting here
+  // yields empty `N. Clause` parents and corrupts operative fingerprints.
+  const bodyLead = cleanToken(words[splitAt] || "");
+  if (/^\d+\.?$/.test(bodyLead) || /^\d+\.\s+\S/.test(body)) {
+    return null;
+  }
   return { headingTitle, body };
 }
 
