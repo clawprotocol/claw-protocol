@@ -1,48 +1,57 @@
 import type { AccessTier, AiModelClass, TierEntitlements } from "./types";
 
 /**
- * Central entitlement definitions — adjust caps here only.
- * `null` numeric limits mean unlimited.
+ * Legacy local tier table — paid-beta contract makes backend
+ * `resolve_commercial_entitlement` the sole create/capability SoT.
+ *
+ * These caps are display/fallback only. Do not grant Free create, Plus, or
+ * unlimited Pro from this table. Prefer `commercialEntitlement` server decisions.
+ *
+ * Mapping (legacy AccessTier → contract ladder):
+ * - free → Guest-equivalent (no persisted create)
+ * - standard → retired Plus SKU (no create; upgrade to Pro)
+ * - premium → Pro ($99 / 25 workflows per billing period)
+ * - admin → operator override
  */
 export const TIER_CONFIG: Record<AccessTier, TierEntitlements> = {
   free: {
-    label: "Free",
-    can_create_agreements: true,
-    can_use_esign: true,
-    max_active_agreements: 5,
-    max_recipient_reviews_per_month: 8,
-    max_revision_previews_per_month: 10,
-    max_signature_requests_per_month: 4,
-    max_verification_packets_per_month: 12,
-    max_vs01_counterparties: 3,
+    label: "Guest",
+    can_create_agreements: false,
+    can_use_esign: false,
+    max_active_agreements: 1,
+    max_recipient_reviews_per_month: 0,
+    max_revision_previews_per_month: 0,
+    max_signature_requests_per_month: 0,
+    max_verification_packets_per_month: 0,
+    max_vs01_counterparties: 0,
     effective_ai_model_class: "basic",
     can_use_premium_voice: false,
     can_access_public_verify_branding_controls: false,
   },
   standard: {
-    label: "Standard",
-    can_create_agreements: true,
-    can_use_esign: true,
-    max_active_agreements: 25,
-    max_recipient_reviews_per_month: 40,
-    max_revision_previews_per_month: 60,
-    max_signature_requests_per_month: 25,
-    max_verification_packets_per_month: 80,
-    max_vs01_counterparties: 8,
+    label: "Retired (use Genesis or Pro)",
+    can_create_agreements: false,
+    can_use_esign: false,
+    max_active_agreements: 0,
+    max_recipient_reviews_per_month: 0,
+    max_revision_previews_per_month: 0,
+    max_signature_requests_per_month: 0,
+    max_verification_packets_per_month: 0,
+    max_vs01_counterparties: 0,
     effective_ai_model_class: "basic",
     can_use_premium_voice: false,
     can_access_public_verify_branding_controls: false,
   },
   premium: {
-    label: "Premium",
+    label: "Pro",
     can_create_agreements: true,
     can_use_esign: true,
-    max_active_agreements: null,
-    max_recipient_reviews_per_month: null,
-    max_revision_previews_per_month: null,
-    max_signature_requests_per_month: null,
-    max_verification_packets_per_month: null,
-    max_vs01_counterparties: null,
+    max_active_agreements: 25,
+    max_recipient_reviews_per_month: 25,
+    max_revision_previews_per_month: 25,
+    max_signature_requests_per_month: 25,
+    max_verification_packets_per_month: 25,
+    max_vs01_counterparties: 25,
     effective_ai_model_class: "premium",
     can_use_premium_voice: true,
     can_access_public_verify_branding_controls: true,

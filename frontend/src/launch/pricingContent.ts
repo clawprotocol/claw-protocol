@@ -163,7 +163,7 @@ export const FIRST_SESSION_CREATE_INTAKE_PLACEHOLDER =
   "Example: Create a services agreement between…";
 
 export const PRICING_COMPARE_TEASER =
-  "Try LawDog (free) · LawDog Plus · LawDog Pro · Enterprise. Simple subscription tiers — monthly or annual.";
+  "Try LawDog (Guest) · LawDog Pro · Enterprise. Simple subscription tiers — monthly or annual. Plus is retired.";
 
 export const FORBIDDEN_PUBLIC_CLAIMS = [
   "fully compliant",

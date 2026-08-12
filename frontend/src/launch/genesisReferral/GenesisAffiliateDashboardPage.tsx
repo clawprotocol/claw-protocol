@@ -74,7 +74,7 @@ function GenesisAffiliateDashboardBody() {
         <div className="max-w-2xl space-y-6">
           <p className="text-sm text-slate-300">
             Welcome, <strong className="text-slate-100">{data.affiliate?.display_name}</strong>. Share your link for
-            LawDog Pro ($39/month). You earn a <strong className="text-slate-100">30% recurring referral share</strong>{" "}
+            LawDog Pro ($99/month). You earn a <strong className="text-slate-100">30% recurring referral share</strong>{" "}
             while referred Pro subscriptions remain active.
           </p>
 

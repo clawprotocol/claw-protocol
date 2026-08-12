@@ -26,10 +26,17 @@ import {
   pricingPageCopyBlob,
 } from "./pricingContent";
 
+/**
+ * Commercial beta buyer plans: Guest and Pro only.
+ * Plus is retired. Genesis is an affiliate/referral role — not a buyer plan card.
+ * Self-serve Stripe checkout is Pro only ($99 / 25 finalized premium agreements).
+ *
+ * Legacy id `"starter"` is retained only so old deep links normalize to Pro checkout.
+ */
 export type LaunchPricingTier = {
   id: "starter" | "pro" | "enterprise";
   name: string;
-  /** Self-serve list price per month in USD; null for Enterprise / custom. */
+  /** Self-serve list price per month in USD; null for Guest / Enterprise / custom. */
   monthlyPriceUsd: number | null;
   /** Internal monthly usage allowance for metering; null when custom. Not shown in product UI. */
   includedKeysPerMonth: number | null;
@@ -45,51 +52,46 @@ export type LaunchPricingTier = {
 export const LAUNCH_PRICING_TIERS: LaunchPricingTier[] = [
   {
     id: "starter",
-    name: "LawDog Plus",
-    monthlyPriceUsd: 16,
-    includedKeysPerMonth: 10,
+    name: "Guest",
+    monthlyPriceUsd: null,
+    includedKeysPerMonth: null,
     overagePerKeyUsd: 0.5,
-    capacityLine: "Unlimited agreements",
-    bestFor: "Create and send agreements in minutes — without watermarks, with export and send.",
+    capacityLine: "Temporary sample draft — not a paid plan",
+    bestFor: "Try a temporary draft before subscribing to LawDog Pro.",
     bullets: [
-      "Unlimited agreements",
-      "Remove watermark on outbound sends",
-      "Export and send — professional delivery",
-      "Basic AI drafting from plain language",
+      "One temporary draft to sample the workflow",
+      "Watermarked preview — no Pro premium drafting",
+      "Upgrade to Pro to persist, finalize, and send",
+      "Not a Stripe subscription SKU",
     ],
     ctaAction: "start",
-    highlighted: true,
   },
   {
     id: "pro",
     name: "LawDog Pro",
-    monthlyPriceUsd: 39,
+    monthlyPriceUsd: 99,
     includedKeysPerMonth: 100,
     overagePerKeyUsd: 0.5,
-    capacityLine: "For teams that ship agreements every week",
-    bestFor: "Turn drafts into real agreements instantly — with team workflows and advanced drafting help.",
+    capacityLine: "25 successfully finalized premium agreements per billing period",
+    bestFor: "Paid premium drafting, review, and signing workflows for teams that ship agreements every month.",
     bullets: [
-      "Team features — shared workspace and collaboration",
-      "Advanced AI — summaries, redlines, and deeper review assist (assistive, not legal advice)",
-      "Integrations — connect the tools your team already uses",
-      "Everything in LawDog Plus",
+      "$99/month — 25 successfully finalized premium agreements per billing period",
+      "Failed generations, previews, retries, and repairs do not consume quota",
+      "Premium AI full-draft generation (Pro only)",
+      "Team review, redlines, export, and e-sign workflows",
     ],
     ctaAction: "start",
+    highlighted: true,
   },
-  /**
-   * Enterprise is custom-priced in-product (see ConversionPricingTriad). Commercially, deals may
-   * reference usage-based constructs internally (MSA / order form only) — e.g. per-agreement bands,
-   * per-Key metering, per-API throughput — but those unit models are not shown on the public pricing grid.
-   */
   {
     id: "enterprise",
     name: "Enterprise",
     monthlyPriceUsd: null,
     includedKeysPerMonth: null,
     overagePerKeyUsd: 0.5,
-    capacityLine: "Sales-assisted when your program outgrows self-serve LawDog Plus and LawDog Pro",
+    capacityLine: "Sales-assisted when your program outgrows self-serve LawDog Pro",
     bestFor:
-      "CLM-scale value: high-volume agreements, APIs into your stack, compliance and governance, plus org-wide Agreement Memory — scoped with your legal and procurement teams.",
+      "CLM-scale value: high-volume agreements, APIs into your stack, compliance and governance — scoped with your legal and procurement teams.",
     bullets: [
       "Volume agreement programs across teams, regions, or subsidiaries",
       "API access for automation and integrations alongside your CLM workflow",
@@ -114,8 +116,8 @@ export const PRICING_FAQ = [
     a: "Most e-sign stops at a signed file. LawDog emphasizes a structured path from draft to send to proof, so you can show what recipients saw without asking them to trust a black box.",
   },
   {
-    q: "What does “unlimited agreements” include?",
-    a: "LawDog Plus and LawDog Pro are subscription plans built for normal business agreement work. If you are running high-volume agreement programs, need APIs and governance at scale, or want org-wide intelligence packaged with procurement, Enterprise is the right conversation — custom pricing, not list SKUs.",
+    q: "What is included in LawDog Pro?",
+    a: "LawDog Pro is $99/month with 25 successfully finalized premium agreements per billing period. Failed generations, previews, retries, and repairs do not consume quota. Buyer plans are Guest and Pro only — Plus is retired. Genesis is an affiliate/referral program, not a customer plan.",
   },
   {
     q: "Can I cancel?",
@@ -123,11 +125,11 @@ export const PRICING_FAQ = [
   },
   {
     q: "What is Advanced Work Product?",
-    a: "It is how Pro and eligible plans turn materials you already have in LawDog into structured drafts — briefs, memos, white papers, and similar — without treating the result as proof or legal advice. Plus includes a smaller set (for example executive summaries and issue analyses); Pro expands the library. Always review outputs with qualified people.",
+    a: "It is how Pro turns materials you already have in LawDog into structured drafts — briefs, memos, white papers, and similar — without treating the result as proof or legal advice. Always review outputs with qualified people.",
   },
   {
-    q: "What do the paid tiers change in practice?",
-    a: "Try LawDog lets you sample drafting and preview with tight limits. LawDog Plus is the subscription for unlimited agreements, watermark-free sends, export, and basic AI drafting. LawDog Pro adds team features, advanced AI help, and integrations. Enterprise is custom pricing for volume programs, API access, compliance packaging, and org-level Agreement Memory — aligned with how CLM vendors price strategic deals.",
+    q: "What do the tiers change in practice?",
+    a: "Guest lets you sample a temporary draft. LawDog Pro ($99/month) unlocks premium full-draft workflows with 25 successfully finalized agreements per billing period. Genesis affiliates earn $29.70 on the first successfully settled Pro invoice after the refund window. Enterprise is custom pricing for volume programs and API access.",
   },
 ] as const;
 

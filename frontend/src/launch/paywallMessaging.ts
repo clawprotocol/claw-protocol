@@ -48,8 +48,10 @@ export const CONTEXTUAL_ONE_TIME_UNLOCK_USD = 9;
 /** Send conversion modal: daily value line under subscription price. */
 export function sendModalValueCompressionLine(monthlyUsd: number): string {
   const daily = monthlyUsd / 30;
-  if (daily < 0.5) return "Unlimited agreements with LawDog Pro for less than $0.50/day";
-  return `Unlimited agreements with LawDog Pro — about $${daily.toFixed(2)}/day`;
+  if (daily < 0.5) {
+    return "LawDog Pro: 25 finalized premium agreements/month for less than $0.50/day";
+  }
+  return `LawDog Pro: 25 finalized premium agreements/month — about $${daily.toFixed(2)}/day`;
 }
 
 export const PAYWALL_SEND_MODAL_SOCIAL_PROOF_BADGE = "Most users choose this";

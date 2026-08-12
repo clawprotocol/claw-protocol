@@ -126,9 +126,11 @@ export function resolveSendPaywallCopy(variantId: SendPaywallVariantId): Resolve
   const opener = PAYWALL_SEND_FINAL_MODE_QUESTION;
 
   let valueCompressionLine =
-    plusMonthlyUsd != null ? sendModalValueCompressionLine(plusMonthlyUsd) : "Unlimited agreements with LawDog Pro";
+    plusMonthlyUsd != null
+      ? sendModalValueCompressionLine(plusMonthlyUsd)
+      : "LawDog Pro: 25 finalized premium agreements per billing period";
   if (d.value_compression === "flat_monthly" && plusMonthlyUsd != null) {
-    valueCompressionLine = `Unlimited agreements with LawDog Pro — ${formatMoneyUsdWhole(plusMonthlyUsd)}/month`;
+    valueCompressionLine = `LawDog Pro: 25 finalized premium agreements — ${formatMoneyUsdWhole(plusMonthlyUsd)}/month`;
   }
 
   let socialBadge = PAYWALL_SEND_MODAL_SOCIAL_PROOF_BADGE;

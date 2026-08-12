@@ -1,9 +1,13 @@
 import { resolveCurrentUser, readStoredDisplayName } from "./currentUser";
 
-export const AFFILIATE_MONTHLY_PLAN_USD = 39;
+/** Pro list price used for Genesis first-invoice commission display. */
+export const AFFILIATE_MONTHLY_PLAN_USD = 99;
 export const AFFILIATE_COMMISSION_RATE = 0.3;
-export const AFFILIATE_MONTHLY_COMMISSION_USD =
+/** $29.70 on the first successfully settled Pro invoice (payable after refund window). */
+export const AFFILIATE_FIRST_INVOICE_COMMISSION_USD =
   Math.round(AFFILIATE_MONTHLY_PLAN_USD * AFFILIATE_COMMISSION_RATE * 100) / 100;
+/** @deprecated Use AFFILIATE_FIRST_INVOICE_COMMISSION_USD — commission is not recurring monthly. */
+export const AFFILIATE_MONTHLY_COMMISSION_USD = AFFILIATE_FIRST_INVOICE_COMMISSION_USD;
 
 export type AffiliateReferralRow = {
   id: string;

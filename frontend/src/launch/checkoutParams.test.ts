@@ -17,8 +17,13 @@ describe("checkoutParams", () => {
     expect(safeReturnToForAgreement("right", "/app/send/right?phase=send")).toBe("/app/send/right?phase=send");
   });
 
-  it("resolveCheckoutTier maps enterprise param to highlighted self-serve tier", () => {
+  it("resolveCheckoutTier maps enterprise param to Pro self-serve checkout", () => {
     const t = resolveCheckoutTier(parseTierIdParam("enterprise"));
-    expect(t.id).toBe("starter");
+    expect(t.id).toBe("pro");
+  });
+
+  it("resolveCheckoutTier maps legacy starter/plus deep links to Pro", () => {
+    expect(resolveCheckoutTier(parseTierIdParam("starter")).id).toBe("pro");
+    expect(resolveCheckoutTier(parseTierIdParam("plus")).id).toBe("pro");
   });
 });

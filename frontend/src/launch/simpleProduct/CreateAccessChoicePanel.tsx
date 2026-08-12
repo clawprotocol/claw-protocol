@@ -4,27 +4,26 @@ import {
 } from "./createEntitlementUi";
 
 export type CreateAccessChoicePanelProps = {
-  onRequestGenesis: () => void;
+  /** @deprecated Genesis buyer request retired — ignored. */
+  onRequestGenesis?: () => void;
   onChoosePro: () => void;
   onBackToDashboard: () => void;
   /** Only when the backend confirms an accessible persisted agreement. */
   hasAccessibleAgreement?: boolean;
   onViewAgreement?: () => void;
-  /** Optional note when a Genesis request is already pending. */
+  /** @deprecated Ignored — Genesis is not a buyer plan. */
   pendingGenesis?: boolean;
+  /** @deprecated Ignored. */
   requestBusy?: boolean;
   /** When false, omit the heading (page shell already shows it). Default true. */
   showHeading?: boolean;
 };
 
 export function CreateAccessChoicePanel({
-  onRequestGenesis,
   onChoosePro,
   onBackToDashboard,
   hasAccessibleAgreement = false,
   onViewAgreement,
-  pendingGenesis = false,
-  requestBusy = false,
   showHeading = true,
 }: CreateAccessChoicePanelProps) {
   return (
@@ -40,21 +39,7 @@ export function CreateAccessChoicePanel({
       <p className={`text-sm leading-relaxed text-slate-400 ${showHeading ? "mt-3" : ""}`}>
         {CREATE_ACCESS_CHOICE_BODY}
       </p>
-      {pendingGenesis ? (
-        <p className="mt-3 text-xs leading-relaxed text-amber-200/85" data-testid="create-access-choice-pending">
-          Your Genesis access request is pending administrator review. You can still choose Pro now.
-        </p>
-      ) : null}
       <div className="mt-6 flex flex-col gap-3">
-        <button
-          type="button"
-          className="vs01-btn vs01-btn--secondary min-h-[2.75rem] w-full"
-          disabled={requestBusy || pendingGenesis}
-          onClick={onRequestGenesis}
-          data-testid="create-access-choice-request-genesis"
-        >
-          {pendingGenesis ? "Genesis request pending" : "Request Genesis access"}
-        </button>
         <button
           type="button"
           className="vs01-btn vs01-btn--primary min-h-[2.75rem] w-full"

@@ -1,7 +1,7 @@
 /**
- * Client mirror of server commercial entitlement authority (Guest → Genesis → Pro).
+ * Client mirror of server commercial entitlement authority (Guest | Pro buyers).
+ * Genesis is affiliate status only — never grant create from Genesis payloads.
  * Never grant create access from local flags alone — use fetchCommercialEntitlement.
- * Do not hard-code allowances or reset dates; render from the server response.
  */
 
 import { fetchAgreementUsageSummary, type AgreementUsageSummary } from "../agreement/agreementWorkspaceApi";
@@ -84,11 +84,14 @@ function parseAllowanceBlock(raw: unknown): GenesisAllowanceSnapshot | null {
 
 function normalizeState(raw: unknown, entitlement: string, tier: string | null): CommercialProductState {
   const s = String(raw || "").trim();
-  if (s === "guest" || s === "pending_genesis" || s === "genesis" || s === "pro" || s === "none") {
+  // Retired Genesis buyer states normalize to none (affiliate status is separate).
+  if (s === "pending_genesis" || s === "genesis" || entitlement === "genesis_allowance" || tier === "genesis") {
+    return "none";
+  }
+  if (s === "guest" || s === "pro" || s === "none") {
     return s;
   }
   if (entitlement === "paid_pro" || tier === "paid") return "pro";
-  if (entitlement === "genesis_allowance" || tier === "genesis") return "genesis";
   if (entitlement === "guest" || tier === "guest") return "guest";
   return "none";
 }
@@ -140,9 +143,7 @@ export function commercialDecisionFromUsageSummary(
   const canCreatePersistedAgreement = Boolean(
     c?.can_create_persisted_agreement ??
       data.can_create_persisted_agreement ??
-      (state === "pro" || state === "genesis"
-        ? Boolean(c?.create_allowed)
-        : false),
+      (state === "pro" ? Boolean(c?.create_allowed) : false),
   );
   const canSaveGuestDraft = Boolean(
     c?.can_save_guest_draft ?? data.can_save_guest_draft ?? (state === "guest" && c?.create_allowed),

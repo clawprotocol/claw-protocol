@@ -82,7 +82,7 @@ describe("authenticatedWorkspaceAccessPolicy", () => {
     expect(verdict.reason).toBe("entitlement_required");
     expect(verdict.showUpgradeModal).toBe(false);
     expect(verdict.showAccessChoiceScreen).toBe(true);
-    expect(verdict.showRequestGenesisCta).toBe(true);
+    expect(verdict.showRequestGenesisCta).toBe(false);
   });
 
   it("keeps guest draft allowed without access-choice paywall before value", () => {
@@ -106,7 +106,7 @@ describe("authenticatedWorkspaceAccessPolicy", () => {
     expect(verdict.showUpgradeModal).toBe(false);
   });
 
-  it("allows Genesis access without access-choice screen", () => {
+  it("does not treat retired Genesis buyer payloads as create entitlement", () => {
     const verdict = resolveWorkspaceCreateAccess({
       authentication: "authenticated",
       entitlement: "none",
@@ -122,9 +122,10 @@ describe("authenticatedWorkspaceAccessPolicy", () => {
         agreementsRemaining: 4,
       },
     });
-    expect(verdict.allowed).toBe(true);
-    expect(verdict.reason).toBe("genesis_allowance");
-    expect(verdict.showAccessChoiceScreen).toBe(false);
+    expect(verdict.allowed).toBe(false);
+    expect(verdict.reason).toBe("entitlement_required");
+    expect(verdict.showAccessChoiceScreen).toBe(true);
+    expect(verdict.showRequestGenesisCta).toBe(false);
     expect(verdict.showUpgradeModal).toBe(false);
   });
 
@@ -142,13 +143,31 @@ describe("authenticatedWorkspaceAccessPolicy", () => {
     expect(verdict.showEntitlementProbeError).toBe(false);
   });
 
-  it("allows entitled owner create", () => {
+  it("allows entitled owner create only from server Pro commercial entitlement", () => {
+    const withoutProbe = resolveWorkspaceCreateAccess({
+      authentication: "authenticated",
+      entitlement: "active",
+      isStarterAnonymousSession: false,
+      isResumingOwnedAgreement: false,
+      hasCheckoutPendingMarker: false,
+    });
+    expect(withoutProbe.allowed).toBe(false);
+    expect(withoutProbe.reason).toBe("entitlement_required");
+
     const verdict = resolveWorkspaceCreateAccess({
       authentication: "authenticated",
       entitlement: "active",
       isStarterAnonymousSession: false,
       isResumingOwnedAgreement: false,
       hasCheckoutPendingMarker: false,
+      commercialEntitlement: {
+        state: "pro",
+        entitlement: "paid_pro",
+        createAllowed: true,
+        canCreatePersistedAgreement: true,
+        agreementAllowance: 25,
+        agreementsRemaining: 24,
+      },
     });
     expect(verdict.allowed).toBe(true);
     expect(verdict.reason).toBe("entitled_owner");

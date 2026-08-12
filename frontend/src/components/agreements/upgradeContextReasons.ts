@@ -95,5 +95,5 @@ export function buildUpgradeContextReasons(input: BuildUpgradeContextReasonsInpu
 
 /** Basic vs Plus contrast under plan cards (create-flow checkout); keeps continuity with upsell value story. */
 export function checkoutLossAversionFromIntentSignals(_signals: readonly string[] | null | undefined): string {
-  return "Starter draft = simple send link. Plus = collaborate on revisions, stronger protections, tracked signatures, and proof history.";
+  return "Guest draft = temporary sample. Pro = collaborate on revisions, stronger protections, tracked signatures, and proof history ($99/mo, 25 finalized).";
 }

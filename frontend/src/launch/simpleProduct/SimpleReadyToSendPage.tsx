@@ -136,7 +136,7 @@ export function SimpleReadyToSendPage(props: { agreementId: string }) {
         <section aria-label="Choose a plan" className="space-y-4 overflow-x-clip">
           <p className="text-sm leading-relaxed text-slate-400">{rts.pageSubtitle}</p>
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <p className="text-xs text-slate-500">Most people choose Plus for unlimited agreements and watermark-free sends.</p>
+            <p className="text-xs text-slate-500">Most people choose Pro for 25 finalized agreements per period and watermark-free sends.</p>
             <PricingCadenceToggle value={cadence} onChange={setCadenceAndStore} idPrefix="ready-cadence" className="shrink-0" />
           </div>
           <LawdogValueBulletsList variant="dark" className="mt-4 space-y-2" />
