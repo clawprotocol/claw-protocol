@@ -135,6 +135,8 @@ import { writePremiumRecipientHandoffFromAuthorityParties, readPremiumRecipientH
 import {
   overlayIntakeManifestOnReviewParties,
   intakePartyManifestIsAuthoritative,
+  shouldPromoteConsumedSignerAuthorityAtFreeze,
+  expandNPartyHandoffPartiesFromIntakeAuthority,
 } from "./intakePartyManifestAuthority";
 import { establishCanonicalPartyMetadataAtStage } from "./canonicalPartyMetadataAuthority";
 import { shouldDeferPaidProReviewRenderSignerRepair } from "./paidProSignerMetadataCommitPolicy";
@@ -510,11 +512,20 @@ export function establishPaidProSourceOfTruth(args: {
     draft: args.draft ?? null,
     source: requestedSource,
   });
+  const pipelineAcceptedAfterSubstance =
+    hasPaidProPipelineSessionAcceptance({
+      text: prep.text,
+      source: requestedSource,
+    }) ||
+    hasPaidProPipelineSessionAcceptance({
+      text: trim(args.text),
+      source: requestedSource,
+    });
   const professionalCoverage = assessProfessionalProClauseCoverage({
     text: prep.text,
     intake: args.intakeText ?? "",
   });
-  if (professionalCoverage.applies && !professionalCoverage.ok) {
+  if (professionalCoverage.applies && !professionalCoverage.ok && !pipelineAcceptedAfterSubstance) {
     logProfessionalProClauseCoverageDecision({
       accepted: false,
       docLen: professionalCoverage.docLen,
@@ -528,15 +539,6 @@ export function establishPaidProSourceOfTruth(args: {
   const intakeHasConcreteServicesFacts =
     /\b(?:ai|artificial intelligence|workflow|automation)\b/i.test(args.intakeText ?? "") &&
     /\b(?:ai|artificial intelligence|workflow|automation)\b/i.test(args.draft?.purpose ?? "");
-  const pipelineAcceptedAfterSubstance =
-    hasPaidProPipelineSessionAcceptance({
-      text: prep.text,
-      source: requestedSource,
-    }) ||
-    hasPaidProPipelineSessionAcceptance({
-      text: trim(args.text),
-      source: requestedSource,
-    });
   const substantiveServerDraft =
     requestedSource === "server_full_draft" &&
     (wireLen >= SUBSTANTIVE_SERVER_DRAFT_MIN_LEN ||
@@ -836,19 +838,23 @@ export function establishPaidProSourceOfTruth(args: {
   });
   let establishedHandoffPartyCount = reviewParties.length;
   if (reviewParties.length >= 2) {
-    const handoffParties = overlayIntakeManifestOnReviewParties(args.intakeText ?? null, reviewParties);
-    establishedHandoffPartyCount = handoffParties.length;
-    // Only promote into consumed authority when signer contact fields exist. Legal-name-only
-    // seeds must not mark metadata as "consumed" or typing tests / staging treat SoT establish
-    // as a finalize commit (paidProSignerMetadataTypingPerformance).
-    const hasSignerContact = handoffParties.some(
-      (p) =>
-        Boolean(p.signerEmail?.trim()) ||
-        Boolean(p.signerName?.trim()) ||
-        Boolean(p.signerTitle?.trim()) ||
-        Boolean(p.partyAddress?.trim()),
+    let handoffParties = overlayIntakeManifestOnReviewParties(args.intakeText ?? null, reviewParties);
+    handoffParties = expandNPartyHandoffPartiesFromIntakeAuthority(
+      args.intakeText ?? null,
+      handoffParties,
+      authoritativeSignerCount,
     );
-    if (hasSignerContact) {
+    establishedHandoffPartyCount = handoffParties.length;
+    // Promote consumed authority when signer contacts exist, or when an authoritative N-party
+    // intake manifest fixes legal-entity slots at freeze. Two-party legal-name-only seeds must
+    // not mark metadata as consumed (paidProSignerMetadataTypingPerformance).
+    if (
+      shouldPromoteConsumedSignerAuthorityAtFreeze({
+        handoffParties,
+        intakeRaw: args.intakeText ?? null,
+        authoritativeSignerCount,
+      })
+    ) {
       setConsumedPaidProSignerMetadataAuthority({
         parties: [...handoffParties],
         source: "server_full_draft",

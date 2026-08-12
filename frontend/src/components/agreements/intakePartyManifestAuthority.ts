@@ -7,7 +7,7 @@ import { normalizeCanonicalPartyAddress } from "./canonicalPartyStructuredAddres
 import { isAuthoritativeLegalEntityName, isPartyMetadataRoleLabel } from "./paidProPartyNamePreserve";
 import { partyLegalNamesMatch } from "./paidProSignerMetadataAuthority";
 import type { PaidProSignerMetadataParty } from "./paidProSignerMetadataAuthority";
-import { extractLegalEntityFromIntakeLine, resolveDeclaredExplicitPartyCount } from "./partySlotIdentityNormalize";
+import { extractLegalEntityFromIntakeLine, resolveDeclaredExplicitPartyCount, resolveAuthoritativeIntakePartyNames } from "./partySlotIdentityNormalize";
 
 export type IntakePartyManifestRow = {
   /** 1-based index from numbered intake line. */
@@ -291,6 +291,64 @@ export function intakePartyManifestIsAuthoritative(intakeRaw: string | null | un
   const declared = resolveDeclaredExplicitPartyCount(String(intakeRaw ?? ""));
   if (declared != null && declared >= 3) return rows.length >= declared;
   return rows.length >= 2;
+}
+
+/** Promote consumed signer authority at freeze when contacts exist or N-party manifest slots are fixed. */
+export function shouldPromoteConsumedSignerAuthorityAtFreeze(args: {
+  handoffParties: readonly PaidProSignerMetadataParty[];
+  intakeRaw: string | null | undefined;
+  authoritativeSignerCount?: number;
+}): boolean {
+  const hasSignerContact = args.handoffParties.some(
+    (p) =>
+      Boolean(p.signerEmail?.trim()) ||
+      Boolean(p.signerName?.trim()) ||
+      Boolean(p.signerTitle?.trim()) ||
+      Boolean(p.partyAddress?.trim()),
+  );
+  if (hasSignerContact) return true;
+  const signerCount = Math.max(
+    args.authoritativeSignerCount ?? 0,
+    args.handoffParties.length,
+  );
+  if (signerCount < 3) return false;
+  if (intakePartyManifestIsAuthoritative(args.intakeRaw)) return true;
+  const intakeNames = resolveAuthoritativeIntakePartyNames(args.intakeRaw).filter(
+    isAuthoritativeLegalEntityName,
+  );
+  return intakeNames.length >= 3 && intakeNames.length >= signerCount;
+}
+
+/** Expand collapsed review handoff to authoritative N-party intake entities at freeze. */
+export function expandNPartyHandoffPartiesFromIntakeAuthority(
+  intakeRaw: string | null | undefined,
+  handoffParties: readonly PaidProSignerMetadataParty[],
+  authoritativeSignerCount: number,
+): PaidProSignerMetadataParty[] {
+  if (authoritativeSignerCount < 3 || handoffParties.length >= authoritativeSignerCount) {
+    return [...handoffParties];
+  }
+  const manifestParties = buildSignerMetadataPartiesFromIntakeManifest(intakeRaw);
+  const intakeNames =
+    manifestParties.length >= authoritativeSignerCount
+      ? manifestParties.map((p) => p.partyLegalName)
+      : resolveAuthoritativeIntakePartyNames(intakeRaw).filter(isAuthoritativeLegalEntityName);
+  if (intakeNames.length < authoritativeSignerCount) return [...handoffParties];
+  return intakeNames.slice(0, authoritativeSignerCount).map((partyLegalName, partyIndex) => {
+    const byEntity = handoffParties.find((p) =>
+      partyLegalNamesMatch(p.partyLegalName, partyLegalName),
+    );
+    const byIndex = handoffParties[partyIndex];
+    const existing = byEntity ?? byIndex;
+    return {
+      partyIndex,
+      partyLegalName,
+      signerEmail: existing?.signerEmail?.trim() || "",
+      signerName: existing?.signerName?.trim() || "",
+      signerTitle: existing?.signerTitle?.trim() || "",
+      partyAddress: existing?.partyAddress?.trim() || "",
+    };
+  });
 }
 
 /** Build signer metadata parties from intake manifest — entity, role, and address only. */

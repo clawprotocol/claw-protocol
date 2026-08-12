@@ -53,7 +53,10 @@ import { normalizePaidProOrphanSubsections } from "./normalizePaidProOrphanSubse
 import { repairPaidProOrphanSectionNumbers } from "./paidProOrphanSectionNumberRepair";
 import { applySectionStructureIntegrity } from "./sectionStructureAuthority";
 import { applyContactAuthorityExecutionBlockIntegrity } from "./contactAuthorityExecutionBlockIntegrity";
-import { applyPaidProUserVisibleDisplayPrep } from "./paidProDisplayPlainAuthority";
+import {
+  applyPaidProUserVisibleDisplayPrep,
+  projectPaidProFrozenSoTDisplayPlain,
+} from "./paidProDisplayPlainAuthority";
 import { enforceUserVisibleRenderTokenAuthority } from "./userVisibleRenderTokenAuthority";
 import { applyPaidProSignerMetadataMergeGate } from "./paidProSignerMetadataMergeGate";
 import { enforcePaidProSingleExecutionBlock } from "./paidProExecutionBlockNormalization";
@@ -105,6 +108,7 @@ import {
   repairExecutionBlockEntityHeadingLines,
 } from "./paidProExecutionBlockEntityHeading";
 import { applyPaidProSoTSignerExecutionOverlay } from "./paidProSoTSignerExecutionOverlay";
+import { projectPaidProVisibleTitleDisplayPlain } from "./paidProDocumentTitleOpeningRepair";
 import { sanitizePaidProDomainScopeContamination } from "./paidProDomainScopeGuard";
 
 const LABELED_SIGNATURE_BLOCK_START =
@@ -778,14 +782,18 @@ function finalizePaidProReviewRenderPlain(
   text: string,
   args?: ResolvePaidProReviewRenderPlainArgs,
 ): string {
+  const trimmed = (text || "").trim();
+  // Never synthesize title/opening from intake party records without a substantive corpus —
+  // pipeline validation alone must not mount review text (TEST423).
+  if (trimmed.length < PAID_PRO_AUTHORITY_MIN_LEN) return trimmed;
   const parties = resolvePartiesForReviewRender(args);
-  if (parties.length < 2) return text.trim();
+  if (parties.length < 2) return trimmed;
   const roleContext = paidProPartyRoleContextFromArgs(args);
   const records = canonicalPartyRecordsFromSignerIdentities(
     authorityPartiesToCanonicalPartyIdentities(parties, roleContext),
   );
-  if (records.length < 2) return text.trim();
-  let out = text;
+  if (records.length < 2) return trimmed;
+  let out = trimmed;
   if (parties.length >= 2) {
     out = stripTrailingLegacyEntitySignatureLines(out).text;
   }
@@ -852,7 +860,11 @@ export function resolvePaidProReviewRenderPlain(
     // Party Notice Details and can rewrite openings — never run them on accepted SoT display.
     if (shouldUsePaidProSourceOfTruthDisplayOnly()) {
       if (args?.skipUserVisibleDisplayPrep) return body;
-      return applyPaidProUserVisibleDisplayPrep(body);
+      const titled = projectPaidProVisibleTitleDisplayPlain(body, {
+        intakeText: args?.intakeText ?? null,
+        draft: args?.draft ?? null,
+      });
+      return projectPaidProFrozenSoTDisplayPlain(titled);
     }
     if (corpusContainsFusedPartyLegalName(body)) {
       const parties = resolvePartiesForReviewRender(args);
@@ -924,7 +936,10 @@ export function resolvePaidProReviewRenderPlain(
       () =>
         needsSignerOverlay
           ? resolvePaidProAuthoritativeDisplayPlain(args)
-          : getPaidProSourceOfTruthText().trim(),
+          : projectPaidProVisibleTitleDisplayPlain(getPaidProSourceOfTruthText().trim(), {
+              intakeText: args?.intakeText ?? null,
+              draft: args?.draft ?? null,
+            }),
     );
     logPostFreezeCorpusDrift({
       surface: "paid_pro_review_render",
@@ -962,12 +977,8 @@ export function resolvePaidProReviewRenderPlain(
   if (!needsSignerOverlay) {
     writeMemoizedPaidProReviewPlain(memoKey, rendered);
   }
-  // Frozen SoT without signer overlay: keep authoritative bytes for review/copy hash parity.
-  // Display projection stays available via explicit HTML / display-prep helpers.
-  const visible =
-    shouldUsePaidProSourceOfTruthDisplayOnly() && !needsSignerOverlay
-      ? (rendered || "").trim()
-      : finishUserVisiblePlain(rendered);
+  // Apply display-only prep (title opening repair, etc.) while keeping SoT bytes immutable in store.
+  const visible = finishUserVisiblePlain(rendered);
   if (visible.length >= 200 && hasPaidProSourceOfTruth()) {
     auditPaidProReviewRenderCorpus(visible);
     auditPaidProReviewRenderSotParity({
