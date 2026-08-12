@@ -30,12 +30,17 @@ type HeadingBlock =
 
 const PARENT_CHILD_AFFINITY: Array<{ parent: RegExp; child: RegExp }> = [
   {
-    parent: /\bservices?\b|\baccess\b/i,
-    child: /\bsubscription\b|\bservices?\b|\baccess\b|\bdeliver/i,
+    parent: /\bscope\b|\bservices?\b|\baccess\b/i,
+    child: /\bsubscription\b|\bservices?\b|\baccess\b|\bdeliver|\bproject\b|\boverview\b/i,
   },
   {
-    parent: /\bfees?\b|\bpayment\b|\bcompensation\b|\bconsideration\b/i,
-    child: /\bsubscription\b|\binvoic|\btax|\bdisputed\b|\bfee\b|\bpayment\b/i,
+    parent: /\bcommercial\b|\bfees?\b|\bpayment\b|\bcompensation\b|\bconsideration\b/i,
+    child:
+      /\bsubscription\b|\binvoic|\btax|\bdisputed\b|\bfee\b|\bpayment\b|\brevenue\b|\ballocation\b/i,
+  },
+  {
+    parent: /\bgovernance\b|\bcoordination\b/i,
+    child: /\bgovernance\b|\bcoordination\b|\blead\b|\bstakeholder\b/i,
   },
   {
     parent: /\bterm\b|\bcancell|\bterminat/i,

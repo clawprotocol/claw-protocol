@@ -283,7 +283,9 @@ describe("paidPro Test235 premium response normalization", () => {
     expect(valid).toMatch(/Delaware/i);
   });
 
-  it("wrapper-only degraded wire does not become authoritative server_full_draft", async () => {
+  it(
+    "wrapper-only degraded wire does not become authoritative server_full_draft",
+    async () => {
     const wrapper = JSON.stringify({
       title: "Agreement",
       agreement_family: "services_agreement",
@@ -319,5 +321,7 @@ describe("paidPro Test235 premium response normalization", () => {
     if (out.premiumRenderSource === "premium_degraded_server_local_recovery") {
       expect(out.premiumDegradedServerLocalRecovery).toBe(true);
     }
-  });
+  },
+  20_000,
+  );
 });

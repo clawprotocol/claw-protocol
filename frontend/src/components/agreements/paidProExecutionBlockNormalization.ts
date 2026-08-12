@@ -339,10 +339,12 @@ export function truncatePostCanonicalExecutionPollution(
       }
       continue;
     }
+    // Require a trailing colon so legal-name lines like "Party 1" (placeholder entity text
+    // under CLIENT:) are never mistaken for an extra role heading and truncating the block.
     if (
       expectedPartyCount <= 2 &&
       (clientHeadings > 0 || serviceProviderHeadings > 0) &&
-      /^\s*(?:CONSULTANT|PROVIDER|PARTY\s+\d+)\s*:?\s*$/i.test(trimmed)
+      /^\s*(?:CONSULTANT|PROVIDER|PARTY\s+\d+)\s*:\s*$/i.test(trimmed)
     ) {
       cutAt = i;
       repairs.push("execution_block:strip_extra_role_heading");
@@ -502,16 +504,17 @@ export function enforcePaidProSingleExecutionBlock(
     }
   }
 
+  const isGenericPlaceholderPartyName = (name: string): boolean => /^party\s*\d+$/i.test(name.trim());
   const authorityParties = (opts?.authorityParties ?? [])
     .map((p) => String(p.partyLegalName ?? p.legalName ?? "").replace(/\s+/g, " ").trim())
-    .filter((n) => n.length >= 3);
+    .filter((n) => n.length >= 3 && !isGenericPlaceholderPartyName(n));
   const frozenNames = readFrozenCanonicalManifestPartyNames()
     .map((n) => n.replace(/\s+/g, " ").trim())
-    .filter((n) => n.length >= 3);
+    .filter((n) => n.length >= 3 && !isGenericPlaceholderPartyName(n));
   const labeledNames = labeledPartyLegalEntities(String(opts?.intakeText ?? ""));
   const explicitDraftNames = (opts?.draftPartyNames ?? [])
     .map((n) => String(n ?? "").trim())
-    .filter((n) => n.length >= 3);
+    .filter((n) => n.length >= 3 && !isGenericPlaceholderPartyName(n));
   const authoritativePartyCount = consumeAuthoritativeSignerCount(
     "enforcePaidProSingleExecutionBlock",
     {

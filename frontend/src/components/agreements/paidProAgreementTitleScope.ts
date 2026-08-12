@@ -210,7 +210,12 @@ export function resolveAgreementTitleFromIntakeScope(
 ): AgreementTitleScopeDecision {
   const intake = String(intakeText || "").trim();
   const scope = intakeScopeBlob(intake);
-  const mutual = /\bmutual\b/i.test(intake);
+  // Require mutual agreement-type intent — do not treat "mutual confidentiality"
+  // (or similar clause language) as a Mutual Consulting / Mutual Services title.
+  const mutual =
+    /\bmutual\s+consulting\b/i.test(intake) ||
+    /\bmutual\s+services\b/i.test(intake) ||
+    /\bcreate\s+(?:a\s+)?mutual\s+(?:consulting|services|agreement)\b/i.test(intake);
 
   const explicit = explicitIntentCanonicalTitle(intake);
   const genericExplicitServices = explicit && /^services agreement$/i.test(explicit);

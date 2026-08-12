@@ -90,6 +90,10 @@ function parseColonRoleManifestLine(line: string, partyNumber: number): IntakePa
   // are NOT party manifest rows. Without this, stacked signer-block intake seeds phantom parties
   // from street addresses / job titles and drops the real legal entities entirely.
   if (isPartyMetadataRoleLabel(roleLabel)) return null;
+  // "Acme LLC signer: Jane Doe, CEO" / "Acme LLC signer: Jane Doe, Authorized Signatory, a@b.com"
+  // is per-entity signer metadata — not a Role: Entity manifest row. Treating the human name as
+  // partyLegalName collapses N-party recovery to phantom signer entities and empty handoff slots.
+  if (/\bsigner\s*$/i.test(roleLabel)) return null;
   if (NUMBERED_MANIFEST_LINE_RE.test(line) || BULLET_MANIFEST_LINE_RE.test(line)) return null;
   return parseColonRoleManifestBody(m[2], partyNumber, roleLabel);
 }

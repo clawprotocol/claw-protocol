@@ -354,8 +354,13 @@ function applyAcceptedProCorpusSafeDisplayCore(
   if (mayNormalizeExecutionBlock) {
     const expectedParties = Math.max(executionRecords.length, 2);
     const beforeInvariant = analyzePaidProExecutionBlockInvariant(out, { expectedParties });
+    // Generic Party 1/Party 2 fallbacks must not drive rebuild authority — they replace real
+    // corpus entity lines and historically truncated the witness tail to a bare CLIENT:.
+    const authoritativeExecutionParties = isGenericPaidProAcceptanceManifestFallback(executionRecords)
+      ? []
+      : executionRecords.map((r) => ({ partyLegalName: r.fullLegalName }));
     const execution = enforcePaidProSingleExecutionBlock(out, {
-      authorityParties: executionRecords.map((r) => ({ partyLegalName: r.fullLegalName })),
+      authorityParties: authoritativeExecutionParties,
       intakeText: intakeRaw,
       draftPartyNames: partyNames,
     });

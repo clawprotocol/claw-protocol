@@ -319,7 +319,8 @@ describe("vs01SigningCorpus", () => {
   });
 
   it("uses paidProSourceOfTruth directly and skips short handoff fallback after acceptance", () => {
-    const accepted = `${longOperativePad()}\n1. Fees. Client pays Provider $5,000.\n2. Texas law.`;
+    // SoT establishment requires a substantive (≥10k) non-mislabeled corpus — pad to a real Pro body.
+    const accepted = `${longOperativePad().repeat(4)}\n1. Fees. Client pays Provider $5,000.\n2. Texas law.${witnessBlock()}`;
     establishAcceptedPremiumCanonicalCorpus({
       rawAcceptedBody: accepted,
       pipelineSource: "server_full_draft",

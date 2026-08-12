@@ -410,6 +410,11 @@ export function isDisallowedPartyPhrase(name: string): boolean {
 export function isAuthoritativeLegalEntityName(name: string): boolean {
   const raw = (name || "").replace(/\s+/g, " ").trim();
   if (looksLikeAuthorizedSignersBulletLine(raw)) return false;
+  // Human signer + title lines must never qualify as legal entities
+  // (e.g. "Ethan Cole, Authorized Signatory." from "Acme LLC signer: …" intake).
+  if (/,\s*(?:authorized\s+signatory|ceo|cfo|coo|cto|president|director|partner|manager)\b/i.test(raw)) {
+    return false;
+  }
   if (hasPartyMetadataLabelContamination(raw)) return false;
   if (isOccupationalOrJobTitlePartyName(raw)) return false;
   if (isPartyMetadataFieldLabelValue(raw)) return false;

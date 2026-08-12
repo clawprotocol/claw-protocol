@@ -103,7 +103,9 @@ export function isDegradedJsonParseWithoutSubstantiveServerFull(args: {
     args.wireAuthoritativeBodyLen ??
     Math.max(serverFullLen, (args.wireDocumentText || "").trim().length);
   if (wireLen >= PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN) return false;
-  return serverFullLen === 0 && wireLen === 0;
+  // Short contaminated aliases still count as "no substantive server full" — only
+  // bodies at/above PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN are substantive.
+  return true;
 }
 
 /** A paid body has the required commercial sections (services/IP/term/governing-law/signature). */

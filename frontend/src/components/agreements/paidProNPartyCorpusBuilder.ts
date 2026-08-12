@@ -50,9 +50,24 @@ function buildSignatureBlocks(
   labeled: readonly LabeledPartyBlock[],
   rawIntake: string,
 ): string[] {
+  // 3+ party recovery corpora use entity-name headings (canonical multiparty shape).
+  // CLIENT/SERVICE PROVIDER role headings are only for classic 2-party execution tails.
+  const useEntityHeadings = parties.length >= 3;
   return parties.map((party, index) => {
     const block = labeled.find((b) => b.legalEntity === party) ?? labeled[index];
-    const heading = multiPartyExecutionBlockHeading(index, rawIntake);
+    const heading = useEntityHeadings
+      ? party.trim().toUpperCase()
+      : multiPartyExecutionBlockHeading(index, rawIntake);
+    if (useEntityHeadings) {
+      return [
+        `${heading}:`,
+        "By: ______________________________",
+        `Name: ${block?.signerName || "______________________________"}`,
+        `Title: ${block?.signerTitle || "______________________________"}`,
+        `Email: ${block?.signerEmail || "______________________________"}`,
+        "Date: ______________________________",
+      ].join("\n");
+    }
     return [
       `${heading}:`,
       party,

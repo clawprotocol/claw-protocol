@@ -231,7 +231,11 @@ export function explicitIntentCanonicalTitle(rawIntake: string | null | undefine
   // Prefer consulting+implementation over bare "implementation agreement" — otherwise
   // "...consulting and implementation agreement..." collapses to Implementation Agreement.
   if (/\b(?:mutual\s+)?consulting\s+(?:and|&)\s+implementation\s+(?:agreement|contract)\b/.test(low)) {
-    return /\bmutual\b/.test(low)
+    // Require mutual agreement-type intent — ignore "mutual confidentiality" clause language.
+    const mutualAgreementIntent =
+      /\bmutual\s+consulting\b/.test(low) ||
+      /\bcreate\s+(?:a\s+)?mutual\s+(?:consulting|services|agreement)\b/.test(low);
+    return mutualAgreementIntent
       ? "Mutual Consulting and Implementation Agreement"
       : "Consulting and Implementation Agreement";
   }

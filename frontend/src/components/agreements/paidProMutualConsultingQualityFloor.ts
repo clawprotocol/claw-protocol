@@ -72,6 +72,8 @@ export function assessPaidProMutualConsultingProfessionalStructure(args: {
   const text = (args.text || "").trim();
   const intake = (args.rawIntake || "").trim();
   const numberedSectionCount = countNumberedAgreementSections(text);
+  // Product invariant (Template A / AI-workflow): intakes with AI/automation/workflow/
+  // implementation+services route to the AI-workflow floor, not mutual-consulting applies.
   const aiWorkflowServices =
     /\b(?:ai|automation|workflow|configuration|implementation|setup)\b/i.test(intake) &&
     /\bservices?\b/i.test(intake);

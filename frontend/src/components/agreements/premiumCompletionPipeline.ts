@@ -5174,9 +5174,11 @@ async function runPremiumCompletionInner(
         tierADiagnostic: tierADiag,
       };
     }
+    // Treat short/non-substantive server_full aliases the same as missing — a 320-char
+    // contaminated json_parse body must not suppress deterministic local recovery.
     const degradedJsonParseNoWireServerFull =
       premiumJsonParseDegradedAttemptCount > 0 &&
-      lastWireServerFullDocumentLen === 0 &&
+      lastWireServerFullDocumentLen < PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN &&
       lastWireAuthoritativeBodyLen < PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN &&
       pipelineNormalizedAuthoritativeText.length < PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN;
     const tryDeterministicIntakeRecovery = () => {
@@ -5315,13 +5317,13 @@ async function runPremiumCompletionInner(
         };
       }
     }
+    // Do not blanket-block late local recovery for short json_parse wire — that case is
+    // exactly when deterministic intake recovery must surface a usable Pro draft.
     const blockLateThinWireRecovery =
       premiumBodyHardRejectedForDevContextLeak ||
       substantiveServerFullOnWire ||
       lastSubstantiveWireFreezeBodyLen >= SUBSTANTIVE_SERVER_DRAFT_MIN_LEN ||
-      (rejectedPaidCorpusDueToClientGates && Boolean(lastSubstantiveWireFreezeRejectReason)) ||
-      (lastWireAuthoritativeBodyLen < PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN &&
-        premiumJsonParseDegradedAttemptCount > 0);
+      (rejectedPaidCorpusDueToClientGates && Boolean(lastSubstantiveWireFreezeRejectReason));
     const localRecovery = buildPremiumPostCheckoutLocalRecoveryProDraft({
       draft: outMerged,
       rawIntake: rawForSoT || rawIntake,

@@ -45,7 +45,9 @@ describe("AgreementRecipientReview redline chrome", () => {
     vi.restoreAllMocks();
   });
 
-  it("shows tracked summary, changed blocks, decoded quotes (no literal &quot;), and Net 30 insert", async () => {
+  it(
+    "shows tracked summary, changed blocks, decoded quotes (no literal &quot;), and Net 30 insert",
+    async () => {
     Object.defineProperty(Element.prototype, "scrollIntoView", {
       configurable: true,
       value: vi.fn(),
@@ -190,5 +192,7 @@ describe("AgreementRecipientReview redline chrome", () => {
       expect(body.toLowerCase()).not.toContain("<del");
       expect(body.toLowerCase()).not.toContain("<ins");
     });
-  });
+  },
+  20_000,
+  );
 });

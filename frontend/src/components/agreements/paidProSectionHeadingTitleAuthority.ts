@@ -12,6 +12,7 @@ import { isPaidProNumberedSectionHeadingLine } from "./paidProNumberedSectionHea
 import {
   isDanglingPaidProMainHeadingPrefix,
   isPaidProHeadingContinuationFragment,
+  isCompletePaidProShortHeadingTitle,
   repairSplitPaidProHeadingFragments,
 } from "./repairSplitPaidProHeadingFragments";
 import {
@@ -97,10 +98,17 @@ export function isIncompletePaidProHeadingTitle(title: string): boolean {
   if (!title || title.length < 2) return false;
   if (/\.\s+[A-Za-z]/.test(title)) return false;
   if (BODY_VERB_RE.test(title)) return false;
+  // Canonical short titles (Termination, Notices, Term, …) are complete — do not
+  // flag continuation-split anomalies that repair cannot/should not merge.
+  if (isCompletePaidProShortHeadingTitle(title)) return false;
   if (isDanglingPaidProMainHeadingPrefix(title)) return true;
   if (/,\s*$/.test(title)) return true;
   const words = title.split(/\s+/).filter(Boolean);
-  if (words.length <= 2 && !/[.!?]$/.test(title)) return true;
+  // Two-word titles are incomplete only when they dangle mid-phrase (… and / … of).
+  if (words.length === 1) return true;
+  if (words.length === 2 && /\b(and|or|&|of|for|the|to|with|upon|under|by|among)\s*$/i.test(title)) {
+    return true;
+  }
   return false;
 }
 

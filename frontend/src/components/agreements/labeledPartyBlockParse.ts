@@ -75,6 +75,16 @@ export function stripIntakeBulletPrefix(line: string): string {
 function looksLikeUnlabeledSignerTitleLine(line: string): boolean {
   const t = stripIntakeBulletPrefix(line);
   if (!t || isPartyMetadataFieldLabelLine(t)) return false;
+  // Next-party headers must never become the prior block's title
+  // (e.g. "Party 2 (Lead Consultant):" after Party 1's entity line).
+  if (
+    PARTY_BLOCK_HEADER_RE.test(t) ||
+    PARTY_BLOCK_WITH_ROLE_HEADER_RE.test(t) ||
+    PARTY_BLOCK_WITH_ROLE_INLINE_RE.test(t) ||
+    COORDINATOR_BLOCK_HEADER_RE.test(t)
+  ) {
+    return false;
+  }
   if (looksLikeStackedPartyEmailLine(t)) return false;
   if (looksLikeStackedPartyLegalEntityLine(t) && !t.includes(":")) return false;
   if (looksLikeStackedPartyPersonNameLine(t)) return false;
@@ -95,7 +105,14 @@ function isPositionalSignerTitleCandidate(line: string): boolean {
   if (matchLabeledPartyField(t)) return false;
   if (looksLikeStackedPartyEmailLine(t)) return false;
   if (looksLikeStackedPartyLegalEntityLine(t) && !t.includes(":")) return false;
-  if (PARTY_BLOCK_HEADER_RE.test(t) || COORDINATOR_BLOCK_HEADER_RE.test(t)) return false;
+  if (
+    PARTY_BLOCK_HEADER_RE.test(t) ||
+    PARTY_BLOCK_WITH_ROLE_HEADER_RE.test(t) ||
+    PARTY_BLOCK_WITH_ROLE_INLINE_RE.test(t) ||
+    COORDINATOR_BLOCK_HEADER_RE.test(t)
+  ) {
+    return false;
+  }
   return true;
 }
 
@@ -349,6 +366,14 @@ function applyStackedPartyLine(block: LabeledPartyBlock, line: string): void {
     return;
   }
   if (
+    PARTY_BLOCK_HEADER_RE.test(t) ||
+    PARTY_BLOCK_WITH_ROLE_HEADER_RE.test(t) ||
+    PARTY_BLOCK_WITH_ROLE_INLINE_RE.test(t) ||
+    COORDINATOR_BLOCK_HEADER_RE.test(t)
+  ) {
+    return;
+  }
+  if (
     !block.address &&
     !isIntakeSectionLabelLine(t) &&
     !isStructuredPromptSectionLabelToken(t) &&
@@ -524,7 +549,12 @@ export function parseEntityHeaderContactBlocks(raw: string): LabeledPartyBlock[]
       flushCurrent();
       continue;
     }
-    if (PARTY_BLOCK_HEADER_RE.test(line) || COORDINATOR_BLOCK_HEADER_RE.test(line)) {
+    if (
+      PARTY_BLOCK_HEADER_RE.test(line) ||
+      PARTY_BLOCK_WITH_ROLE_HEADER_RE.test(line) ||
+      PARTY_BLOCK_WITH_ROLE_INLINE_RE.test(line) ||
+      COORDINATOR_BLOCK_HEADER_RE.test(line)
+    ) {
       flushCurrent();
       continue;
     }

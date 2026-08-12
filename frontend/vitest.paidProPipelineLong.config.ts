@@ -12,6 +12,7 @@ export const PAID_PRO_PIPELINE_LONG_INCLUDE = [
   "src/components/agreements/paidProTest427GenesisDogSimulation.test.ts",
   "src/components/agreements/paidProTest428UxOverlay.test.ts",
   "src/components/agreements/paidProTest429FourPartyNorthStarRegression.test.ts",
+  "src/components/agreements/paidProTest431FourPartyHeadingAnomalyRegression.test.ts",
   "src/components/agreements/paidProTest448BrandLicensingOrchestration.test.ts",
   "src/components/agreements/paidProTest517ServerDocumentTextAlias.test.ts",
 ] as const;
