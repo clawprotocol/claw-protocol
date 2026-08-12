@@ -119,7 +119,7 @@ def test_continuation_finalize_without_session_storage(isolated_usage):
     assert cont.status_code == 200, cont.text
     continuation_id = cont.json()["continuation_id"]
     user_id = "magic-link-user"
-    ensure_org_pro_entitlement(f\"user-{user_id}\", user_id=user_id)
+    ensure_org_pro_entitlement(f"user-{user_id}", user_id=user_id)
     fin = client.post(
         "/v1/workspace/finalize-auth",
         headers={**headers, **make_test_auth_headers(user_id)},

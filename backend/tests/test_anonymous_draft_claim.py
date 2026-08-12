@@ -93,7 +93,7 @@ def test_bind_user_org_migrates_drafts_from_anon_org(isolated_usage):
     user_id = "supabase-user-anon-claim"
     stable_org = f"user-{user_id}"
     aid = f"ag-anon-{uuid.uuid4().hex[:8]}"
-    ensure_org_pro_entitlement(f\"user-{user_id}\", user_id=user_id)
+    ensure_org_pro_entitlement(f"user-{user_id}", user_id=user_id)
 
     isolated_usage.insert_agreement_owner(
         agreement_id=aid,
@@ -159,7 +159,7 @@ def test_bind_user_org_idempotent_second_call(isolated_usage):
     anon_org, token, headers = mint_anonymous_session(client)
     user_id = "supabase-user-idempotent"
     aid = f"ag-idem-{uuid.uuid4().hex[:8]}"
-    ensure_org_pro_entitlement(f\"user-{user_id}\", user_id=user_id)
+    ensure_org_pro_entitlement(f"user-{user_id}", user_id=user_id)
 
     isolated_usage.insert_agreement_owner(
         agreement_id=aid,

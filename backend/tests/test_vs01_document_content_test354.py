@@ -120,7 +120,7 @@ def test_vs01_seed_content_ok_under_commercial_mode(monkeypatch: pytest.MonkeyPa
     reset_artifact_repository_singleton()
 
     user = "vs01-seed-commercial-owner"
-    ensure_org_pro_entitlement(f\"user-{user}\", user_id=user)
+    ensure_org_pro_entitlement(f"user-{user}", user_id=user)
     headers = make_authenticated_user_headers(user)
     client = TestClient(app, raise_server_exceptions=False)
     create_res = client.post(

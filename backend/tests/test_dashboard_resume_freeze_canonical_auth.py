@@ -44,7 +44,7 @@ def client(monkeypatch, tmp_path):
 def _grant_genesis(user_id: str) -> None:
     from backend.tests.entitlement_test_support import ensure_org_pro_entitlement
 
-    ensure_org_pro_entitlement(f\"user-{user_id}\", user_id=user_id)
+    ensure_org_pro_entitlement(f"user-{user_id}", user_id=user_id)
 
 
 def _create_owned_draft(client: TestClient, *, user: str) -> str:

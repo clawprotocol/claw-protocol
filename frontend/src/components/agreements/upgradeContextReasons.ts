@@ -93,7 +93,7 @@ export function buildUpgradeContextReasons(input: BuildUpgradeContextReasonsInpu
   ];
 }
 
-/** Basic vs Plus contrast under plan cards (create-flow checkout); keeps continuity with upsell value story. */
+/** Guest vs Pro contrast under plan cards (create-flow checkout). */
 export function checkoutLossAversionFromIntentSignals(_signals: readonly string[] | null | undefined): string {
   return "Guest draft = temporary sample. Pro = collaborate on revisions, stronger protections, tracked signatures, and proof history ($99/mo, 25 finalized).";
 }
