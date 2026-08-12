@@ -1,4 +1,4 @@
-"""Admin Console workspace identity — bind → search by email → grant Genesis Dog."""
+"""Admin Console workspace identity — bind → search by email → Genesis grant retired (410)."""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from fastapi.testclient import TestClient
 
 from backend.main import app
 from backend.tests.conftest_auth_security import make_test_auth_headers
-from backend.usage_economics.commercial_entitlement import STATE_GENESIS
+from backend.usage_economics.commercial_entitlement import STATE_NONE
 
 
 @pytest.fixture()
@@ -20,7 +20,6 @@ def isolated_identity_env(tmp_path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_ENABLED", "1")
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_STRICT_IN_DEV", "1")
-    monkeypatch.setenv("CLAW_GENESIS_MONTHLY_AGREEMENT_ALLOWANCE", "5")
     monkeypatch.setenv("CLAW_ADMIN_SECRET", "admin-test-secret")
     monkeypatch.setenv("CLAW_ADMIN_CONSOLE_DB_PATH", str(tmp_path / "admin.sqlite3"))
     monkeypatch.setenv("CLAW_ANON_SESSION_SECRET", "test-anon-session-secret")
@@ -56,7 +55,7 @@ def _admin_headers(*, reason: str = "staging acceptance grant") -> dict[str, str
 def test_bind_persist_identity_admin_search_grant_genesis_e2e(isolated_identity_env):
     """
     Authenticate a fresh user → admin search by exact email (plus-alias) →
-    grant Genesis Dog → user refresh sees Genesis Dog 5/5.
+    Genesis create grant returns 410 (affiliate-only; no buyer create entitlement).
     """
     client = isolated_identity_env
     uid = f"uid-identity-{uuid.uuid4().hex[:10]}"
@@ -114,11 +113,11 @@ def test_bind_persist_identity_admin_search_grant_genesis_e2e(isolated_identity_
         headers=_admin_headers(reason="staging acceptance grant for plus-alias"),
         json={"reason": "staging acceptance grant for plus-alias"},
     )
-    assert grant.status_code == 200, grant.text
-    assert grant.json().get("ok") is True
-    assert grant.json().get("audit_id")
+    assert grant.status_code == 410, grant.text
+    detail = grant.json().get("detail") or {}
+    assert detail.get("code") == "genesis_create_grant_issuance_retired"
 
-    # User refreshes entitlement summary — Genesis Dog 5/5.
+    # User refresh — no buyer create entitlement from retired Genesis grant.
     summary = client.get(
         "/api/agreements/usage/summary",
         headers={
@@ -128,10 +127,10 @@ def test_bind_persist_identity_admin_search_grant_genesis_e2e(isolated_identity_
     )
     assert summary.status_code == 200, summary.text
     body = summary.json()
-    assert body["state"] == STATE_GENESIS
-    assert body["agreement_allowance"] == 5
-    assert body["agreements_used"] == 0
-    assert body["agreements_remaining"] == 5
+    assert body["state"] == STATE_NONE
+    assert body.get("can_create_persisted_agreement") is False
+    assert int(body.get("agreement_allowance") or 0) == 0
+    assert body.get("agreements_remaining") == 0
 
 
 def test_bind_identity_backfill_on_repeat_session(isolated_identity_env):

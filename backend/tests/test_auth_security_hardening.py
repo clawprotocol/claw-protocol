@@ -92,11 +92,8 @@ def test_bind_requires_authenticated_user(isolated_usage):
 
 
 def test_continuation_finalize_without_session_storage(isolated_usage):
-    """Finalize migrates guest drafts only when target has Genesis/Pro (product contract)."""
-    from backend.usage_economics.genesis_dog_entitlement import (
-        GRANT_SOURCE_ADMIN,
-        grant_entitlement,
-    )
+    """Finalize migrates guest drafts only when target has Pro (product contract)."""
+    from backend.tests.entitlement_test_support import ensure_org_pro_entitlement
 
     client = TestClient(app)
     org_id, token, headers = mint_anonymous_session(client)

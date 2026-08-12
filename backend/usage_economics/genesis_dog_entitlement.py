@@ -405,10 +405,40 @@ def backfill_legacy_affiliate_grants(
     granted_by: str = "legacy_migration",
     dry_run: bool = False,
 ) -> Dict[str, Any]:
-    """Insert legacy_migration grants for active affiliates lacking an entitlement row."""
+    """Inventory active affiliates lacking a legacy create-grant row.
+
+    Create-grant backfill writes are retired (Genesis is affiliate status only).
+    Dry-run and apply both return inventory counts; apply inserts only when
+    ``CLAW_ALLOW_GENESIS_CREATE_GRANT_ISSUANCE=1`` (emergency repair).
+    """
+    import os
+
     preview = preview_legacy_affiliate_backfill()
     if dry_run:
         return preview
+
+    allow = os.getenv("CLAW_ALLOW_GENESIS_CREATE_GRANT_ISSUANCE", "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+    if not allow:
+        return {
+            "dry_run": False,
+            "issuance_retired": True,
+            "active_affiliates": preview["active_affiliates"],
+            "candidates": preview["candidates"],
+            "would_insert": preview["would_insert"],
+            "would_insert_user_ids": preview["would_insert_user_ids"],
+            "inserted": 0,
+            "skipped": preview["skipped"],
+            "skipped_revoked_or_expired": preview["skipped_revoked_or_expired"],
+            "message": (
+                "Genesis create-grant backfill is retired. Inventory only — "
+                "grant LawDog Pro for buyer create; do not insert genesis_dog_entitlements."
+            ),
+            "granted_by": (granted_by or "").strip() or None,
+        }
 
     inserted = 0
     for uid in preview["would_insert_user_ids"]:
@@ -425,6 +455,7 @@ def backfill_legacy_affiliate_grants(
         inserted += 1
     return {
         "dry_run": False,
+        "issuance_retired": False,
         "active_affiliates": preview["active_affiliates"],
         "candidates": preview["candidates"],
         "would_insert": preview["would_insert"],

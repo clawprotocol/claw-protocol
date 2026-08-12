@@ -1,0 +1,64 @@
+{
+  "schema_version": "semantic_term_families.v1",
+  "coverage_note": "Fingerprint detectors for known inventing floors — NOT general semantic validation. Novel or paraphrased model-generated terms may evade detection.",
+  "families": [
+    {
+      "id": "uptime_99_5",
+      "unauthorized_fragment": ", with a target monthly uptime availability of 99.5%, excluding scheduled maintenance, emergency maintenance, force majeure events, third-party failures outside a party’s reasonable control, and acts or omissions of other parties",
+      "authority_intake_fragment": "Include 99.5% uptime SLA.",
+      "frontend_id": "uptime_99_5",
+      "backend_code": "uptime_99_5"
+    },
+    {
+      "id": "negotiation_15_business_days",
+      "unauthorized_fragment": " The parties will engage in good faith negotiations for at least fifteen (15) business days before commencing litigation, arbitration, or other formal proceedings.",
+      "authority_intake_fragment": "Require at least 15 business days of good-faith negotiation before litigation.",
+      "frontend_id": "negotiation_15_business_days",
+      "backend_code": "negotiation_15_business_days"
+    },
+    {
+      "id": "attorneys_fees_prevailing",
+      "unauthorized_fragment": " The prevailing Party in any action or proceeding arising out of or relating to this Agreement is entitled to recover its reasonable attorneys’ fees and costs to the extent permitted by applicable law.",
+      "authority_intake_fragment": "Include prevailing party attorneys fees.",
+      "frontend_id": "attorneys_fees_prevailing",
+      "backend_code": "attorneys_fees_prevailing"
+    },
+    {
+      "id": "survival_topic_expansion",
+      "unauthorized_fragment": " The provisions concerning payment obligations accrued before termination, confidentiality, intellectual property, data rights, and limitation of liability shall survive expiration or termination.",
+      "authority_intake_fragment": "Clauses shall survive termination including confidentiality and intellectual property protections.",
+      "frontend_id": null,
+      "backend_code": "survival_topic_expansion",
+      "note": "Backend fingerprint present; frontend enterprise polish disabled separately."
+    },
+    {
+      "id": "milestone_acceptance_invented",
+      "unauthorized_fragment": "Acceptance: Each milestone is deemed accepted when the designated party representative confirms completion in writing",
+      "authority_intake_fragment": "Milestones are deemed accepted under written acceptance criteria.",
+      "frontend_id": "milestone_acceptance_invented",
+      "backend_code": "milestone_acceptance_invented"
+    },
+    {
+      "id": "ai_workflow_acceptance_floor",
+      "unauthorized_fragment": "1. ACCEPTANCE AND DEMONSTRATION REVIEW\nProvider will demo.",
+      "authority_intake_fragment": "Include ACCEPTANCE AND DEMONSTRATION REVIEW for the AI workflow.",
+      "frontend_id": "ai_workflow_acceptance_floor",
+      "backend_code": "ai_workflow_acceptance_floor"
+    },
+    {
+      "id": "mutual_consulting_lol_cap",
+      "unauthorized_fragment": "Direct damages are capped to fees paid in the twelve (12) months preceding the claim.",
+      "authority_intake_fragment": "Liability cap equals fees paid in the prior 12 months.",
+      "frontend_id": "mutual_consulting_lol_cap_12mo",
+      "backend_code": "mutual_consulting_lol_cap"
+    },
+    {
+      "id": "delaware_default_from_floor",
+      "unauthorized_fragment": "Governed by the laws of the State of Delaware.",
+      "authority_intake_fragment": "Governing law is Delaware.",
+      "frontend_id": "delaware_default_from_floor",
+      "backend_code": null,
+      "note": "Frontend pre-SoT fingerprint; backend gate may not yet include this family."
+    }
+  ]
+}

@@ -10,9 +10,7 @@ import pytest
 from backend.agreements.semantic_term_authority import assert_persistable_paid_pro_corpus
 
 FIXTURE = (
-    Path(__file__).resolve().parents[2]
-    / "evals"
-    / "draft-quality"
+    Path(__file__).resolve().parent
     / "fixtures"
     / "semantic_term_families.json"
 )

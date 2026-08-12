@@ -1,20 +1,29 @@
-"""Genesis allowance must charge only after successful persisted draft; retries are idempotent."""
+"""Genesis affiliate status must not grant or consume buyer create quota.
+
+Guest temp-draft rules and Pro finalize metering are covered in
+``test_guest_genesis_pro_entitlement.py`` / commercial entitlement policy tests.
+"""
 
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timezone
 
 import pytest
 from fastapi.testclient import TestClient
 
+from backend.affiliates.genesis_referral_service import create_genesis_affiliate
 from backend.main import app
 from backend.usage_economics.commercial_entitlement import (
-    STATE_GENESIS,
+    AFFILIATE_STATUS_GENESIS,
+    STATE_NONE,
     resolve_commercial_entitlement,
-    utc_month_period_bounds,
 )
-from backend.usage_economics.genesis_dog_entitlement import GRANT_SOURCE_ADMIN, grant_entitlement
+from backend.usage_economics.genesis_dog_entitlement import (
+    GRANT_SOURCE_ADMIN,
+    GenesisCreateGrantIssuanceRetired,
+    get_entitlement,
+    grant_entitlement,
+)
 from backend.usage_economics.store import UsageEconomicsStore
 
 
@@ -34,7 +43,6 @@ def isolated_env(tmp_path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_ENABLED", "1")
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_STRICT_IN_DEV", "1")
-    monkeypatch.setenv("CLAW_GENESIS_MONTHLY_AGREEMENT_ALLOWANCE", "5")
     monkeypatch.setenv("CLAW_ADMIN_SECRET", "admin-test-secret")
     monkeypatch.setenv("CLAW_ADMIN_CONSOLE_DB_PATH", str(tmp_path / "admin.sqlite3"))
     monkeypatch.setenv("CLAW_ANON_SESSION_SECRET", "test-anon-session-secret")
@@ -64,7 +72,7 @@ def _admin() -> dict:
         "X-Claw-Test-Auth-User-Id": "ops_admin",
         "X-Claw-Test-Operator-Role": "support_operator",
         "x-claw-admin-secret": "admin-test-secret",
-        "x-claw-admin-reason": "staging genesis usage reconcile",
+        "x-claw-admin-reason": "staging genesis affiliate contract",
         "x-request-id": "corr-genesis-meter",
     }
 
@@ -82,317 +90,87 @@ def _draft_body(title: str = "T") -> dict:
     }
 
 
-def test_failed_persist_consumes_zero_genesis_allowance(isolated_env, monkeypatch):
-    client, usage, _eco = isolated_env
-    uid = "genesis-fail-persist"
+def test_genesis_affiliate_does_not_grant_or_consume_create_quota(isolated_env):
+    client, usage, eco = isolated_env
+    uid = f"genesis-aff-{uuid.uuid4().hex[:8]}"
     subject = f"org:user-{uid}"
-    grant_entitlement(user_id=uid, granted_by="ops", grant_source=GRANT_SOURCE_ADMIN)
-
-    def boom(*_a, **_k):
-        raise RuntimeError("simulated_persist_failure")
-
-    monkeypatch.setattr(
-        "backend.routers.agreements_v2_api._save_draft_sync",
-        boom,
+    create_genesis_affiliate(
+        eco,
+        user_id=uid,
+        display_name="Affiliate Only",
+        referral_code=f"AFF_{uid[:8].upper()}",
+        affiliate_status="active",
     )
-    with pytest.raises(RuntimeError, match="simulated_persist_failure"):
-        client.post("/api/agreements/draft", headers=_auth(uid), json=_draft_body("fail"))
+
+    decision = resolve_commercial_entitlement(subject)
+    assert decision["state"] == STATE_NONE
+    assert decision["affiliate_status"] == AFFILIATE_STATUS_GENESIS
+    assert decision["can_create_persisted_agreement"] is False
+    assert decision["agreement_allowance"] == 0
+    assert decision.get("genesis_allowance") is None
+
+    blocked = client.post("/api/agreements/draft", headers=_auth(uid), json=_draft_body("nope"))
+    assert blocked.status_code == 403, blocked.text
     assert usage.agreements_created_this_utc_month(subject) == 0
     assert usage.list_agreement_ids_for_subject(subject) == []
-    decision = resolve_commercial_entitlement(subject)
-    assert decision["state"] == STATE_GENESIS
-    assert decision["agreements_used"] == 0
-    assert decision["agreements_remaining"] == 5
-
-
-def test_idempotent_retry_does_not_double_charge(isolated_env):
-    client, usage, _eco = isolated_env
-    uid = "genesis-idem-persist"
-    subject = f"org:user-{uid}"
-    grant_entitlement(user_id=uid, granted_by="ops", grant_source=GRANT_SOURCE_ADMIN)
-    h = {
-        **_auth(uid),
-        "X-Claw-Draft-Idempotency-Key": "review-first:gen-session-1",
-    }
-    r1 = client.post("/api/agreements/draft", headers=h, json=_draft_body("one"))
-    assert r1.status_code == 200, r1.text
-    aid = r1.json()["id"]
-    r2 = client.post("/api/agreements/draft", headers=h, json=_draft_body("two"))
-    assert r2.status_code == 200, r2.text
-    assert r2.json()["id"] == aid
-    assert r2.json().get("idempotent") is True
-    assert usage.agreements_created_this_utc_month(subject) == 1
-    decision = resolve_commercial_entitlement(subject)
-    assert decision["agreements_used"] == 1
-    assert decision["agreements_remaining"] == 4
-
-
-def test_review_ready_persist_reloads_on_workspace_index_without_duplicate(isolated_env):
-    """
-    Persist one review-ready draft → workspace-index lists exactly that id on reload;
-    idempotent retry must not duplicate the row or burn another Genesis allowance.
-    """
-    client, usage, _eco = isolated_env
-    uid = "genesis-reload-dashboard"
-    subject = f"org:user-{uid}"
-    grant_entitlement(user_id=uid, granted_by="ops", grant_source=GRANT_SOURCE_ADMIN)
-    h = {
-        **_auth(uid),
-        "X-Claw-Review-First-Persist": "1",
-        "X-Claw-Draft-Idempotency-Key": "review-first:reload-session-1",
-    }
-    created = client.post("/api/agreements/draft", headers=h, json=_draft_body("LawDog / Acme"))
-    assert created.status_code == 200, created.text
-    aid = created.json()["id"]
-    owner = usage.get_agreement_owner_row(aid)
-    assert owner is not None
-    assert owner["subject_ref"] == subject
-
-    idx1 = client.get("/api/agreements/workspace-index", headers=_auth(uid))
-    assert idx1.status_code == 200, idx1.text
-    ids1 = [row["id"] for row in (idx1.json().get("agreements") or [])]
-    assert ids1.count(aid) == 1
-    assert len(ids1) == 1
-
-    # Simulate /app reload + Continue Editing retry of the same review-first key.
-    retry = client.post("/api/agreements/draft", headers=h, json=_draft_body("LawDog / Acme"))
-    assert retry.status_code == 200, retry.text
-    assert retry.json()["id"] == aid
-    assert retry.json().get("idempotent") is True
-
-    idx2 = client.get("/api/agreements/workspace-index", headers=_auth(uid))
-    assert idx2.status_code == 200, idx2.text
-    ids2 = [row["id"] for row in (idx2.json().get("agreements") or [])]
-    assert ids2 == [aid]
-    assert usage.agreements_created_this_utc_month(subject) == 1
-    decision = resolve_commercial_entitlement(subject)
-    assert decision["agreements_used"] == 1
-    assert decision["agreements_remaining"] == 4
-
-
-def test_zero_persisted_drafts_but_five_credits_reconcile(isolated_env):
-    """
-    Reproduce staging mismatch: agreement_owner meters exist without drafts,
-    Admin lifetime counters can show 0 while customer used=5.
-    """
-    from backend.services.agreement_draft_store import draft_exists
-
-    client, usage, _eco = isolated_env
-    uid = "eb72e4d2-c803-490d-80ee-d17634b8ebfb"
-    subject = f"org:user-{uid}"
-    grant_entitlement(user_id=uid, granted_by="ops", grant_source=GRANT_SOURCE_ADMIN)
-    period_start, _ = utc_month_period_bounds()
-    now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-
-    # Ghost meters (old bug: charge before durable review-ready persist / failed UI retries).
-    with usage._conn() as con:
-        for i in range(5):
-            con.execute(
-                """
-                INSERT INTO agreement_owner (
-                  agreement_id, subject_ref, created_at, internal_keys_draft, guest_temp
-                ) VALUES (?, ?, ?, 3, 0)
-                """,
-                (f"ghost-{uid}-{i}", subject, now),
-            )
-        # Intentionally do NOT bump subject_counters — Admin Users showed agreements=0.
-        con.commit()
-
-    decision = resolve_commercial_entitlement(subject)
-    assert decision["agreements_used"] == 5
-    assert decision["agreements_remaining"] == 0
-    ghost_ids = usage.list_agreement_ids_for_subject(subject)
-    assert len(ghost_ids) == 5
-    assert all(not draft_exists(aid) for aid in ghost_ids)
-
-    usage_trace = client.get(f"/v1/admin/users/{uid}/genesis-usage", headers=_admin())
-    assert usage_trace.status_code == 200, usage_trace.text
-    body = usage_trace.json()
-    assert body["commercial"]["agreements_used"] == 5
-    assert len(body["meter_records"]) == 5
-    assert all(rec["persisted_draft_exists"] is False for rec in body["meter_records"])
-
-    users = client.get("/v1/admin/users", headers=_admin()).json().get("users") or []
-    match = [u for u in users if u.get("user_id") == uid]
-    # After alignment, Admin Users monthly agreement_count matches customer meter.
-    if match:
-        assert match[0]["agreement_count"] == 5
-
-    dry = client.post(
-        f"/v1/admin/users/{uid}/genesis-usage/reconcile",
-        headers=_admin(),
-        json={"reason": "staging reconcile lawdogtest2 ghosts", "dry_run": True},
-    )
-    assert dry.status_code == 200, dry.text
-    assert len(dry.json()["candidate_agreement_ids"]) == 5
-    assert resolve_commercial_entitlement(subject)["agreements_used"] == 5
-
-    reset = client.post(
-        f"/v1/admin/users/{uid}/genesis-usage/reconcile",
-        headers=_admin(),
-        json={"reason": "staging reconcile lawdogtest2 ghosts", "dry_run": False},
-    )
-    assert reset.status_code == 200, reset.text
-    assert reset.json().get("audit_id")
-    assert len(reset.json()["refunded_agreement_ids"]) == 5
-    after = resolve_commercial_entitlement(subject)
-    assert after["agreements_used"] == 0
-    assert after["agreements_remaining"] == 5
-    assert after["state"] == STATE_GENESIS
-    # Soft refund keeps ownership rows so workspace access is not erased.
-    assert len(usage.list_agreement_ids_for_subject(subject)) == 5
-    refunded_by_id = {
-        str(r.get("agreement_id") or ""): r
-        for r in usage.list_agreement_owner_rows_for_subject(subject, limit=500)
-    }
-    for aid in ghost_ids:
-        assert aid in refunded_by_id
-        assert int(refunded_by_id[aid].get("usage_refunded") or 0) == 1
-
-    # Idempotent: second reset finds nothing left to soft-refund.
-    again = client.post(
-        f"/v1/admin/users/{uid}/genesis-usage/reconcile",
-        headers=_admin(),
-        json={"reason": "staging reconcile lawdogtest2 ghosts again", "dry_run": False},
-    )
-    assert again.status_code == 200, again.text
-    assert again.json()["refunded_agreement_ids"] == []
-    assert resolve_commercial_entitlement(subject)["agreements_used"] == 0
-
-
-def test_successful_persist_then_meter_one_credit(isolated_env):
-    client, usage, _eco = isolated_env
-    uid = f"genesis-ok-{uuid.uuid4().hex[:8]}"
-    subject = f"org:user-{uid}"
-    grant_entitlement(user_id=uid, granted_by="ops", grant_source=GRANT_SOURCE_ADMIN)
-    r = client.post("/api/agreements/draft", headers=_auth(uid), json=_draft_body("ok"))
-    assert r.status_code == 200, r.text
-    aid = r.json()["id"]
-    from backend.services.agreement_draft_store import draft_exists
-
-    assert draft_exists(aid)
-    assert usage.agreements_created_this_utc_month(subject) == 1
-    assert resolve_commercial_entitlement(subject)["agreements_remaining"] == 4
-
-
-def test_genesis_monthly_reset_keeps_existing_agreements_accessible(isolated_env):
-    """Admin Reset Genesis monthly usage must not erase saved agreements."""
-    client, usage, _eco = isolated_env
-    uid = f"genesis-keep-{uuid.uuid4().hex[:8]}"
-    subject = f"org:user-{uid}"
-    grant_entitlement(user_id=uid, granted_by="ops", grant_source=GRANT_SOURCE_ADMIN)
-
-    created_ids: list[str] = []
-    for i in range(2):
-        r = client.post(
-            "/api/agreements/draft",
-            headers=_auth(uid),
-            json=_draft_body(f"keep-{i}"),
-        )
-        assert r.status_code == 200, r.text
-        created_ids.append(r.json()["id"])
-
-    assert usage.agreements_created_this_utc_month(subject) == 2
-    before_idx = client.get("/api/agreements/workspace-index", headers=_auth(uid))
-    assert before_idx.status_code == 200, before_idx.text
-    before_ids = {row["id"] for row in (before_idx.json().get("agreements") or [])}
-    assert set(created_ids).issubset(before_ids)
-
-    reset = client.post(
-        f"/v1/admin/users/{uid}/genesis-usage/reconcile",
-        headers=_admin(),
-        json={
-            "reason": "reset keeps agreements accessible",
-            "mode": "reset_month_to_zero",
-            "dry_run": False,
-        },
-    )
-    assert reset.status_code == 200, reset.text
-    assert set(reset.json().get("refunded_agreement_ids") or []) == set(created_ids)
 
     after = resolve_commercial_entitlement(subject)
     assert after["agreements_used"] == 0
-    assert after["agreements_remaining"] == 5
-
-    after_idx = client.get("/api/agreements/workspace-index", headers=_auth(uid))
-    assert after_idx.status_code == 200, after_idx.text
-    after_ids = {row["id"] for row in (after_idx.json().get("agreements") or [])}
-    assert set(created_ids).issubset(after_ids)
-
-    for aid in created_ids:
-        get = client.get(f"/api/agreements/{aid}", headers=_auth(uid))
-        assert get.status_code == 200, get.text
-        owner = usage.owner_subject_for_agreement(aid)
-        assert owner == subject
-
-    # Soft-refunded rows no longer consume allowance; new create is allowed.
-    again = client.post(
-        "/api/agreements/draft",
-        headers=_auth(uid),
-        json=_draft_body("after-reset"),
-    )
-    assert again.status_code == 200, again.text
-    assert resolve_commercial_entitlement(subject)["agreements_used"] == 1
+    assert after["can_create_persisted_agreement"] is False
+    assert after["affiliate_status"] == AFFILIATE_STATUS_GENESIS
 
 
-def test_legacy_hard_delete_reset_healed_from_analytics_and_audit(isolated_env):
-    """
-    Reproduce prod retest: ownership rows were hard-deleted by an older reset.
-    Opening workspace-index / re-running reconcile must restore access without
-    recharging the monthly meter.
-    """
-    client, usage, _eco = isolated_env
-    uid = f"genesis-heal-{uuid.uuid4().hex[:8]}"
+def test_legacy_genesis_create_row_readable_but_does_not_meter_create(
+    isolated_env, monkeypatch
+):
+    _client, usage, _eco = isolated_env
+    uid = f"legacy-create-{uuid.uuid4().hex[:8]}"
     subject = f"org:user-{uid}"
-    grant_entitlement(user_id=uid, granted_by="ops", grant_source=GRANT_SOURCE_ADMIN)
+    monkeypatch.setenv("CLAW_ALLOW_GENESIS_CREATE_GRANT_ISSUANCE", "1")
+    grant_entitlement(user_id=uid, granted_by="migration-tool", grant_source=GRANT_SOURCE_ADMIN)
+    monkeypatch.delenv("CLAW_ALLOW_GENESIS_CREATE_GRANT_ISSUANCE", raising=False)
 
-    created_ids: list[str] = []
-    for i in range(2):
-        r = client.post(
-            "/api/agreements/draft",
-            headers=_auth(uid),
-            json=_draft_body(f"heal-{i}"),
-        )
-        assert r.status_code == 200, r.text
-        created_ids.append(r.json()["id"])
+    row = get_entitlement(uid)
+    assert row is not None
+    assert str(row.get("status") or "") == "active"
 
-    # Capture a reconcile audit with candidate ids (as production did), then
-    # simulate the legacy hard-delete wipe.
-    audit_reset = client.post(
-        f"/v1/admin/users/{uid}/genesis-usage/reconcile",
-        headers=_admin(),
-        json={
-            "reason": "legacy hard-delete simulation audit",
-            "mode": "reset_month_to_zero",
-            "dry_run": False,
-        },
+    decision = resolve_commercial_entitlement(subject)
+    assert decision["state"] == STATE_NONE
+    assert decision["can_create_persisted_agreement"] is False
+    legacy = decision.get("legacy_genesis_create_grant") or {}
+    assert legacy.get("present") is True
+    assert legacy.get("create_granted") is False
+    assert legacy.get("migration_required") is True
+    assert usage.agreements_created_this_utc_month(subject) == 0
+
+
+def test_admin_genesis_create_grant_returns_410_without_create_entitlement(isolated_env):
+    client, _usage, eco = isolated_env
+    uid = f"grant-410-{uuid.uuid4().hex[:8]}"
+    subject = f"org:user-{uid}"
+    create_genesis_affiliate(
+        eco,
+        user_id=uid,
+        display_name="Grant Denied",
+        referral_code=f"G410_{uid[:8].upper()}",
+        affiliate_status="active",
     )
-    assert audit_reset.status_code == 200, audit_reset.text
-    for aid in created_ids:
-        # Soft-refund first leaves rows; force the old wipe behavior.
-        assert usage.delete_agreement_owner(aid) is True
-        assert usage.owner_subject_for_agreement(aid) is None
 
-    assert resolve_commercial_entitlement(subject)["agreements_used"] == 0
-    blocked = client.get(f"/api/agreements/{created_ids[0]}", headers=_auth(uid))
-    assert blocked.status_code == 403, blocked.text
+    grant = client.post(
+        f"/v1/admin/users/{uid}/genesis-entitlement/grant",
+        headers=_admin(),
+        json={"reason": "must not create buyer entitlement"},
+    )
+    assert grant.status_code == 410, grant.text
+    detail = grant.json().get("detail") or {}
+    assert detail.get("code") == "genesis_create_grant_issuance_retired"
+    assert get_entitlement(uid) is None
 
-    # Dashboard load heals from analytics + admin audit candidate ids.
-    idx = client.get("/api/agreements/workspace-index", headers=_auth(uid))
-    assert idx.status_code == 200, idx.text
-    idx_ids = {row["id"] for row in (idx.json().get("agreements") or [])}
-    assert set(created_ids).issubset(idx_ids)
+    with pytest.raises(GenesisCreateGrantIssuanceRetired):
+        grant_entitlement(user_id=uid, granted_by="ops", grant_source=GRANT_SOURCE_ADMIN)
 
-    for aid in created_ids:
-        get = client.get(f"/api/agreements/{aid}", headers=_auth(uid))
-        assert get.status_code == 200, get.text
-        assert usage.owner_subject_for_agreement(aid) == subject
-        row = next(
-            r
-            for r in usage.list_agreement_owner_rows_for_subject(subject, limit=50)
-            if str(r.get("agreement_id")) == aid
-        )
-        assert int(row.get("usage_refunded") or 0) == 1
-
-    # Healed ownership is usage-exempt — allowance stays full.
-    assert resolve_commercial_entitlement(subject)["agreements_remaining"] == 5
+    decision = resolve_commercial_entitlement(subject)
+    assert decision["state"] == STATE_NONE
+    assert decision["affiliate_status"] == AFFILIATE_STATUS_GENESIS
+    assert decision["can_create_persisted_agreement"] is False
+    assert decision["agreement_allowance"] == 0
