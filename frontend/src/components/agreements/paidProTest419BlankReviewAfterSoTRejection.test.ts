@@ -4,18 +4,12 @@ import { getOrInitSessionAgreementGenerationId } from "../../lib/agreementGenera
 import { validatePaidProOutput } from "./paidProCorpusAcceptance";
 import { preparePaidProServerDocumentForAcceptance } from "./paidProConciseServicesQuality";
 import {
-  clearCurrentSessionProEntitlementMarkers,
   markCurrentSessionProEntitlementComplete,
   markCurrentSessionProIntent,
 } from "./paidProSessionEligibility";
 import { markPaidProPipelineValidationPassed } from "./paidProPostAcceptanceValidatorCache";
-import {
-  clearPremiumPartyNamesHandoff,
-  resetPremiumRecipientHandoffDedupForTests,
-} from "./premiumPartyNamesHandoff";
 import { shouldImmediateAuthoritativePremiumCommit } from "./premiumImmediateAuthoritativeCommitGate";
 import {
-  clearPaidProSourceOfTruth,
   establishPaidProSourceOfTruth,
   getPaidProSourceOfTruthText,
   hasPaidProSourceOfTruth,

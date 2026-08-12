@@ -305,7 +305,8 @@ export function commitAcceptedReviewCorpusPromotion(args: {
       establishPaidProSourceOfTruth({
         text,
         source: "server_full_draft",
-        draft: args.draft ?? null,
+        // AgreementDraft is a superset wire shape; freeze only needs parties/purpose fields.
+        draft: (args.draft as Parameters<typeof establishPaidProSourceOfTruth>[0]["draft"]) ?? null,
         intakeText:
           typeof args.draft?.purpose === "string" && args.draft.purpose.trim().length > 20
             ? args.draft.purpose

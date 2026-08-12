@@ -3,15 +3,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getOrInitSessionAgreementGenerationId } from "../../lib/agreementGenerationId";
 import { validatePaidProOutput } from "./paidProCorpusAcceptance";
 import {
-  clearCurrentSessionProEntitlementMarkers,
   markCurrentSessionProEntitlementComplete,
   markCurrentSessionProIntent,
 } from "./paidProSessionEligibility";
 import { markPaidProPipelineValidationPassed } from "./paidProPostAcceptanceValidatorCache";
-import {
-  clearPremiumPartyNamesHandoff,
-  resetPremiumRecipientHandoffDedupForTests,
-} from "./premiumPartyNamesHandoff";
 import { shouldImmediateAuthoritativePremiumCommit } from "./premiumImmediateAuthoritativeCommitGate";
 import {
   buildPaidProFreezeCandidate,

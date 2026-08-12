@@ -416,7 +416,6 @@ function polishSignatureBlocksWithPartyIdentities(
   const tail = text.slice(patchStart);
   const existingSigBody = tail.replace(/^\s*(?:IN WITNESS WHEREOF[^\n]*\n)?/i, "").trim();
   const witnessLine = tail.match(/^\s*(IN WITNESS WHEREOF[^\n]*)/i)?.[1] ?? "IN WITNESS WHEREOF";
-  const mergedTail = `${witnessLine}\n\n${blocks.join("\n\n")}\n`;
   const hasPlaceholderSig =
     /\[your\s+company\s+name\]/i.test(existingSigBody) ||
     /\[service\s+provider\s+name\]/i.test(existingSigBody) ||

@@ -20,7 +20,7 @@ import { repairProfessionalCorpusContamination } from "./paidProProfessionalCorp
 import type { PaidProPartyRoleContext, PaidProSignerMetadataParty } from "./paidProSignerMetadataAuthority";
 import { isAuthoritativeLegalEntityName } from "./paidProPartyNamePreserve";
 import { mergeLabeledPartyAuthorityIntoParties, mergeDraftSignerContactFieldsOntoParties } from "./paidProSignerMetadataAuthority";
-import { manifestRecordsForPaidProAcceptance, isGenericPaidProAcceptanceManifestFallback } from "./paidProAcceptanceExecutionBlockInvariant";
+import { manifestRecordsForPaidProAcceptance } from "./paidProAcceptanceExecutionBlockInvariant";
 import { resolveCanonicalPartyIdentitiesFromSources } from "./canonicalPartyIdentityResolver";
 import { resolvePartiesForReviewRender } from "./paidProReviewRenderParties";
 import { intakePartyManifestIsAuthoritative } from "./intakePartyManifestAuthority";
@@ -112,9 +112,6 @@ export function resolvePaidProNoticeAuthorityPartiesForFreeze(args: {
       }
     }
   }
-  const authoritativePartyCountAfterCorpus = parties.filter((p) =>
-    isAuthoritativeLegalEntityName(p.partyLegalName.trim()),
-  ).length;
   // Generic Party 1 / Party 2 fallback must NOT invent notice stanzas or contact placeholders.
   // Notices require authoritative legal entities (or omit the section until signer setup).
   const seed =

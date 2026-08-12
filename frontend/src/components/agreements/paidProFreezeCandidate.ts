@@ -18,7 +18,6 @@ import {
   manifestRecordsForPaidProAcceptance,
   resolveAcceptanceManifestRecordsForExecution,
 } from "./paidProAcceptanceExecutionBlockInvariant";
-import { appendProExecutionBlockIfMissing } from "./proExecutionBlockAppend";
 import { assertPaidProSingleExecutionBlock } from "./paidProExecutionBlockAuthority";
 import { guardPaidProAcceptedServerFullDraftCommit } from "./paidProAcceptedServerFullDraftCommitGuard";
 import { assertClauseFamilyStructuralIntegrityForFreeze } from "./clauseFamilyStructuralIntegrity";

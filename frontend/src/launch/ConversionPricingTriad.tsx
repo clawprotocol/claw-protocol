@@ -28,7 +28,8 @@ export function ConversionPricingTriad(props: {
   onEnterprise: () => void;
   bridge?: boolean;
 }) {
-  const { cadence, onFree, onStarter, onPro, onEnterprise, bridge } = props;
+  const { cadence, onFree, onStarter: _onStarter, onPro, onEnterprise, bridge } = props;
+  void _onStarter;
   const pro = tierById("pro");
   const enterprise = tierById("enterprise");
   const sidePad = bridge ? "p-4 sm:p-5" : "p-5 sm:p-6";

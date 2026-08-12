@@ -3,7 +3,6 @@ import { AppShell } from "./AppShell";
 import { LawdogDashboardLayout } from "./LawdogProductNav";
 import {
   AFFILIATE_MONTHLY_COMMISSION_USD,
-  AFFILIATE_COMMISSION_RATE,
   affiliateShareEmailHref,
   affiliateShareXHref,
   formatAffiliateUsd,
