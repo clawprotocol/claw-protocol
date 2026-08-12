@@ -147,3 +147,10 @@ tmp_claw_data/
 frontend/test-results/
 frontend/manual-qa-report.json
 frontend/.playwright-browsers/
+evals/draft-quality/traces/local/
+evals/draft-quality/results/runs/
+evals/draft-quality/results/blinded_packets/**/KEY_DO_NOT_SHARE_WITH_RATER.json
+.env
+.env.*
+!.env.example
+evals/commercial-readiness/baselines/*-console*.txt

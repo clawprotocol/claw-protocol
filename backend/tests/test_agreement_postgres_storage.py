@@ -6,12 +6,18 @@ Optional integration: set ``CLAW_AGREEMENT_PG_TEST_URL`` to a writable ``postgre
 from __future__ import annotations
 
 import os
+import uuid
 
 import pytest
 
 from backend.utils.agreement_version_store import AgreementVersionStore
 
-_PG = os.getenv("CLAW_AGREEMENT_PG_TEST_URL", "").strip()
+_PG_RAW = os.getenv("CLAW_AGREEMENT_PG_TEST_URL", "").strip()
+# Tolerate accidental `DSN=` / `CLAW_AGREEMENT_PG_TEST_URL=` prefixes from shell helpers.
+_PG = _PG_RAW
+for _prefix in ("CLAW_AGREEMENT_PG_TEST_URL=", "DSN="):
+    if _PG.startswith(_prefix):
+        _PG = _PG[len(_prefix) :].strip()
 
 
 @pytest.mark.skipif(not _PG, reason="CLAW_AGREEMENT_PG_TEST_URL not set")
@@ -29,7 +35,8 @@ def test_agreement_postgres_draft_version_lock_roundtrip(monkeypatch):
 
     agreement_sql._pg_migrations_applied = False  # noqa: SLF001 — allow fresh migrate against test DB
 
-    aid = "test_pg_agreement_unit_id"
+    # Unique id so consecutive suite runs against a shared ephemeral PG do not collide.
+    aid = f"test_pg_agreement_{uuid.uuid4().hex[:12]}"
     ads.save_draft({"id": aid, "title": "T", "jurisdiction": "TX"})
     got = ads.load_draft(aid)
     assert got["id"] == aid
