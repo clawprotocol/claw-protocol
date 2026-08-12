@@ -1,7 +1,7 @@
 """Commercial beta lifecycle — checkout, webhooks, quota, refunds, affiliate, bypass.
 
-Canonical model: Guest + Pro buyers; Pro $99 / 25 finalized; Genesis affiliate
-earns $29.70 on first settled Pro invoice after refund window. Plus retired.
+Canonical model: Guest + Pro buyers; Pro $49 / 10 finalized; Genesis affiliate
+earns 30% of first eligible net Pro payment (e.g. $14.70 on $49) after refund window. Plus retired.
 """
 
 from __future__ import annotations
@@ -60,7 +60,7 @@ def life_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage_eco.sqlite3"))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_ENABLED", "1")
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_STRICT_IN_DEV", "1")
-    monkeypatch.setenv("CLAW_PRO_BILLING_PERIOD_AGREEMENT_ALLOWANCE", "25")
+    monkeypatch.setenv("CLAW_PRO_BILLING_PERIOD_AGREEMENT_ALLOWANCE", "10")
     monkeypatch.setenv("CLAW_RATE_LIMIT_RPS", "1000")
     monkeypatch.setenv("CLAW_RATE_LIMIT_BURST", "1000")
 
@@ -147,7 +147,7 @@ def test_checkout_session_completed_activates_pro_entitlement(life_env):
     decision = resolve_commercial_entitlement(f"org:{org}")
     assert decision["state"] == STATE_PRO
     assert decision["can_create_persisted_agreement"] is True
-    assert decision["agreement_allowance"] == 25
+    assert decision["agreement_allowance"] == 10
     row = eco.get_subscription_by_org(org)
     assert is_subscription_entitled(row)
     assert eco.get_org_for_stripe_customer("cus_act") == org
@@ -173,7 +173,7 @@ def test_out_of_order_invoice_paid_before_checkout_still_safe(life_env):
         {
             "id": "in_orphan",
             "customer": "cus_unknown",
-            "amount_paid": 9900,
+            "amount_paid": 4900,
             "metadata": {"plan_code": "pro"},
         },
     )
@@ -198,14 +198,14 @@ def test_pro_quota_meters_finalizations_not_creates_or_retries(life_env):
         )
     d1 = resolve_commercial_entitlement(subject)
     assert d1["agreements_used"] == 0
-    assert d1["agreements_remaining"] == 25
+    assert d1["agreements_remaining"] == 10
     # Finalize consumes one
     assert usage.mark_agreement_completed(
         agreement_id="draft-0", subject_ref=subject, internal_keys_finalize=1
     )
     d2 = resolve_commercial_entitlement(subject)
     assert d2["agreements_used"] == 1
-    assert d2["agreements_remaining"] == 24
+    assert d2["agreements_remaining"] == 9
     # Idempotent finalize retry does not double-count
     assert (
         usage.mark_agreement_completed(
@@ -226,7 +226,7 @@ def test_pro_quota_exhaustion_denies_create_and_renewal_resets(life_env):
     # Stamp finalizations inside the active Stripe period window (not before started_at).
     inside_period = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
     with usage._conn() as con:
-        for i in range(25):
+        for i in range(10):
             aid = f"fin-{i}"
             con.execute(
                 """
@@ -238,7 +238,7 @@ def test_pro_quota_exhaustion_denies_create_and_renewal_resets(life_env):
             )
         con.commit()
     d = resolve_commercial_entitlement(subject)
-    assert d["agreements_used"] == 25
+    assert d["agreements_used"] == 10
     assert d["agreements_remaining"] == 0
     blocked = client.post(
         "/api/agreements/draft",
@@ -322,14 +322,14 @@ def test_refund_voids_pending_genesis_commission(life_env):
         {
             "id": "in_life_1",
             "customer": "cus_life",
-            "amount_paid": 9900,
+            "amount_paid": 4900,
             "metadata": {"org_id": "org_life_sub", "referral_code": "GENLIFE1", "plan_code": "pro"},
         },
     )
     assert r.get("commission_id")
     voided = handle_genesis_charge_refunded(
         eco,
-        {"id": "ch_life", "refunded": True, "amount_refunded": 9900, "invoice": "in_life_1"},
+        {"id": "ch_life", "refunded": True, "amount_refunded": 4900, "invoice": "in_life_1"},
     )
     assert voided.get("voided", 0) >= 1
 
@@ -337,7 +337,7 @@ def test_refund_voids_pending_genesis_commission(life_env):
 # --- 5. Affiliate attribution / first invoice / self-referral ---
 
 
-def test_genesis_first_invoice_only_commission_2970(life_env):
+def test_genesis_first_invoice_only_commission_1470(life_env):
     _client, eco, _usage = life_env
     create_genesis_affiliate(
         eco, user_id="user_aff", display_name="Aff", referral_code="GENFIRST"
@@ -355,18 +355,18 @@ def test_genesis_first_invoice_only_commission_2970(life_env):
         {
             "id": "in_first",
             "customer": "cus_first",
-            "amount_paid": 9900,
+            "amount_paid": 4900,
             "metadata": {"org_id": "org_first", "referral_code": "GENFIRST", "plan_code": "pro"},
         },
     )
     assert first.get("ok")
-    assert float(first.get("commission_amount") or 0) == pytest.approx(29.70)
+    assert float(first.get("commission_amount") or 0) == pytest.approx(14.70)
     second = handle_genesis_invoice_paid(
         eco,
         {
             "id": "in_second",
             "customer": "cus_first",
-            "amount_paid": 9900,
+            "amount_paid": 4900,
             "metadata": {"org_id": "org_first", "referral_code": "GENFIRST", "plan_code": "pro"},
         },
     )
@@ -525,7 +525,7 @@ def test_failed_payment_does_not_create_genesis_commission(life_env):
         {
             "id": "in_fail",
             "customer": "cus_fail",
-            "amount_due": 9900,
+            "amount_due": 4900,
             "metadata": {"org_id": "org_fail", "referral_code": "GENFAIL", "plan_code": "pro"},
         },
     )

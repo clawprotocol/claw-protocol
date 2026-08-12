@@ -49,7 +49,7 @@ export function readMockMonetizationPlanOverride(): LawDogMonetizationPlan | nul
 
 /**
  * Map access tier → monetization plan.
- * - `standard` → Pro (25 finalized agreements / billing period; Plus retired).
+ * - `standard` → Pro (10 finalized agreements / billing period; Plus retired).
  * - `premium` / `admin` → Power (advanced features on top of Pro).
  */
 export function monetizationPlanFromAccessTier(tier: AccessTier): LawDogMonetizationPlan {

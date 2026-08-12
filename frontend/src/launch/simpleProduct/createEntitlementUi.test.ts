@@ -90,12 +90,12 @@ describe("createEntitlementUi", () => {
 
   it("formats Pro allowance and renewal from server fields", () => {
     const copy = formatProAllowanceStatusCopy({
-      agreementsRemaining: 20,
-      agreementAllowance: 25,
+      agreementsRemaining: 7,
+      agreementAllowance: 10,
       periodEndsAt: "2026-08-15T00:00:00Z",
     });
     expect(copy).toMatch(
-      /^Pro access: 20 of 25 successfully finalized premium agreements remaining this billing period\. Renews /,
+      /^Pro access: 7 of 10 successfully finalized premium agreements remaining this billing period\. Renews /,
     );
   });
 });

@@ -136,7 +136,7 @@ export function CreateFlowAgreementCheckoutPricing({ tier, cadence, onCadenceCha
       </div>
 
       <p className="text-center text-[15px] font-medium leading-7 text-slate-200 sm:text-left sm:text-base">
-        LawDog Pro includes 25 successfully finalized premium agreements per billing period — revise, send, and sign on your timeline.
+        LawDog Pro includes 10 successfully finalized premium agreements per billing period — revise, send, and sign on your timeline.
       </p>
 
       {planFootnote ? (

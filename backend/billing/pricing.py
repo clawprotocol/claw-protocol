@@ -17,15 +17,17 @@ class PlanDict(TypedDict, total=False):
     payout_share_bps: int
 
 
-# Paid-beta contract: Pro is the sole self-serve paid plan ($99). Plus/starter is not a launch SKU.
+# Launch contract: Pro is the sole self-serve paid plan ($49 / 10 finalized).
+# Plus/starter is not a launch SKU. Genesis commission = payout_share_bps of eligible net
+# (first invoice only; ledger calculates from invoice — do not hardcode dollar amounts).
 PLANS: Dict[str, PlanDict] = {
     "pro": {
-        "monthly_usd": Decimal("99.00"),
+        "monthly_usd": Decimal("49.00"),
         "included_keys": 200,
         "overage_mode": "metered",
         "usage_enabled": True,
         "affiliate_eligible": True,
-        # 30% of first settled Pro invoice ($29.70 on $99) — Genesis ledger is authoritative.
+        # 30% of first eligible net Pro payment (e.g. $14.70 on standard $49).
         "payout_share_bps": 3_000,
     },
     "enterprise": {

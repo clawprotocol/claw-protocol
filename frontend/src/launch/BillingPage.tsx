@@ -160,7 +160,7 @@ export function BillingPage() {
         <section aria-label="Plans" className="overflow-x-clip">
           <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
             <p className="max-w-xl text-sm leading-relaxed text-slate-500">
-              Create and send agreements in minutes. Try LawDog as a Guest, subscribe to LawDog Pro ($99/mo), or talk to us for Enterprise. Plus is retired.
+              Create and send agreements in minutes. Try LawDog as a Guest, subscribe to LawDog Pro ($49/mo), or talk to us for Enterprise. Plus is retired.
             </p>
             <PricingCadenceToggle value={cadence} onChange={setCadenceAndStore} idPrefix="billing-cadence" className="shrink-0" />
           </div>

@@ -232,7 +232,7 @@ def assert_can_create_draft(*, subject_ref: str, request_ip: str) -> None:
                     "code": uc.PRO_BILLING_PERIOD_ALLOWANCE_EXHAUSTED,
                     "message": (
                         "You've used this billing period's Pro finalized-agreement allowance "
-                        "(25 successfully finalized premium agreements). "
+                        "(10 successfully finalized premium agreements). "
                         "Your allowance renews at the end of the current Stripe period."
                     ),
                     "paywall": True,
@@ -410,7 +410,7 @@ def record_draft_created(
                         "code": uc.PRO_BILLING_PERIOD_ALLOWANCE_EXHAUSTED,
                         "message": (
                             "You've used this billing period's Pro finalized-agreement allowance "
-                            "(25 successfully finalized premium agreements). "
+                            "(10 successfully finalized premium agreements). "
                             "Your allowance renews at the end of the current Stripe period."
                         ),
                         "paywall": True,

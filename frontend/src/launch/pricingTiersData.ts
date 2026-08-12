@@ -29,7 +29,7 @@ import {
 /**
  * Commercial beta buyer plans: Guest and Pro only.
  * Plus is retired. Genesis is an affiliate/referral role — not a buyer plan card.
- * Self-serve Stripe checkout is Pro only ($99 / 25 finalized premium agreements).
+ * Self-serve Stripe checkout is Pro only ($49 / 10 finalized premium agreements).
  *
  * Legacy id `"starter"` is retained only so old deep links normalize to Pro checkout.
  */
@@ -69,13 +69,13 @@ export const LAUNCH_PRICING_TIERS: LaunchPricingTier[] = [
   {
     id: "pro",
     name: "LawDog Pro",
-    monthlyPriceUsd: 99,
+    monthlyPriceUsd: 49,
     includedKeysPerMonth: 100,
     overagePerKeyUsd: 0.5,
-    capacityLine: "25 successfully finalized premium agreements per billing period",
+    capacityLine: "10 successfully finalized premium agreements per billing period",
     bestFor: "Paid premium drafting, review, and signing workflows for teams that ship agreements every month.",
     bullets: [
-      "$99/month — 25 successfully finalized premium agreements per billing period",
+      "$49/month — 10 successfully finalized premium agreements per billing period",
       "Failed generations, previews, retries, and repairs do not consume quota",
       "Premium AI full-draft generation (Pro only)",
       "Team review, redlines, export, and e-sign workflows",
@@ -117,7 +117,7 @@ export const PRICING_FAQ = [
   },
   {
     q: "What is included in LawDog Pro?",
-    a: "LawDog Pro is $99/month with 25 successfully finalized premium agreements per billing period. Failed generations, previews, retries, and repairs do not consume quota. Buyer plans are Guest and Pro only — Plus is retired. Genesis is an affiliate/referral program, not a customer plan.",
+    a: "LawDog Pro is $49/month with 10 successfully finalized premium agreements per billing period. Failed generations, previews, retries, and repairs do not consume quota. Buyer plans are Guest and Pro only — Plus is retired. Genesis is an affiliate/referral program, not a customer plan.",
   },
   {
     q: "Can I cancel?",
@@ -129,7 +129,7 @@ export const PRICING_FAQ = [
   },
   {
     q: "What do the tiers change in practice?",
-    a: "Guest lets you sample a temporary draft. LawDog Pro ($99/month) unlocks premium full-draft workflows with 25 successfully finalized agreements per billing period. Genesis affiliates earn $29.70 on the first successfully settled Pro invoice after the refund window. Enterprise is custom pricing for volume programs and API access.",
+    a: "Guest lets you sample a temporary draft. LawDog Pro ($49/month) unlocks premium full-draft workflows with 10 successfully finalized agreements per billing period. Genesis affiliates earn 30% of the first eligible net Pro payment after discounts (excluding tax), payable after the refund window — $14.70 at the standard $49 price. Enterprise is custom pricing for volume programs and API access.",
   },
 ] as const;
 

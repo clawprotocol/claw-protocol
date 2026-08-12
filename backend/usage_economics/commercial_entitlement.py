@@ -66,7 +66,7 @@ def genesis_monthly_agreement_allowance() -> int:
 
 
 def pro_billing_period_agreement_allowance() -> int:
-    """Configured Pro billing-period finalized-agreement allowance (default 25)."""
+    """Configured Pro billing-period finalized-agreement allowance (default 10)."""
     default = int(uc.DEFAULT_PRO_BILLING_PERIOD_AGREEMENT_ALLOWANCE)
     raw = os.getenv("CLAW_PRO_BILLING_PERIOD_AGREEMENT_ALLOWANCE", "").strip()
     if not raw:

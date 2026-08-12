@@ -102,7 +102,7 @@ def test_webhook_creates_commission_at_30_percent(tmp_path: Path, monkeypatch: p
     inv = {
         "id": "in_genesis_1",
         "customer": "cus_genesis",
-        "amount_paid": 9900,
+        "amount_paid": 4900,
         "billing_reason": "subscription_create",
         "metadata": {"org_id": "org_subscriber", "referral_code": "GENESISDOG", "plan_code": "pro"},
         "subscription": "sub_genesis_1",
@@ -117,7 +117,7 @@ def test_webhook_creates_commission_at_30_percent(tmp_path: Path, monkeypatch: p
         ).fetchone()
     assert row is not None
     assert float(row[0]) == pytest.approx(0.30)
-    assert float(row[1]) == pytest.approx(29.70)
+    assert float(row[1]) == pytest.approx(14.70)
     assert row[2] == "pending"
 
 
@@ -143,7 +143,7 @@ def test_inactive_affiliate_does_not_earn(tmp_path: Path, monkeypatch: pytest.Mo
         {
             "id": "in_paused",
             "customer": "cus_paused",
-            "amount_paid": 9900,
+            "amount_paid": 4900,
             "metadata": {"org_id": "org_paused_sub", "referral_code": "PAUSED1", "plan_code": "pro"},
             "subscription": None,
         },
@@ -169,14 +169,14 @@ def test_refunded_invoice_voids_commission(tmp_path: Path, monkeypatch: pytest.M
         {
             "id": "in_refund_me",
             "customer": "cus_ref",
-            "amount_paid": 9900,
+            "amount_paid": 4900,
             "metadata": {"org_id": "org_refund", "referral_code": "GENESISDOG", "plan_code": "pro"},
             "subscription": None,
         },
     )
     void_r = handle_genesis_charge_refunded(
         e,
-        {"id": "ch_ref", "refunded": True, "amount_refunded": 9900, "invoice": "in_refund_me"},
+        {"id": "ch_ref", "refunded": True, "amount_refunded": 4900, "invoice": "in_refund_me"},
     )
     assert void_r.get("voided") == 1
     with e._conn() as con:
@@ -200,7 +200,7 @@ def test_invoice_paid_idempotent_duplicate(tmp_path: Path, monkeypatch: pytest.M
     inv = {
         "id": "in_idem_1",
         "customer": "cus_idem",
-        "amount_paid": 9900,
+        "amount_paid": 4900,
         "metadata": {"org_id": "org_idem", "referral_code": "GENESISDOG", "plan_code": "pro"},
         "subscription": None,
     }
@@ -228,7 +228,7 @@ def test_refund_does_not_void_paid_commission(tmp_path: Path, monkeypatch: pytes
         {
             "id": "in_paid_keep",
             "customer": "cus_paid",
-            "amount_paid": 9900,
+            "amount_paid": 4900,
             "metadata": {"org_id": "org_paid", "referral_code": "GENESISDOG", "plan_code": "pro"},
             "subscription": None,
         },
@@ -241,7 +241,7 @@ def test_refund_does_not_void_paid_commission(tmp_path: Path, monkeypatch: pytes
         con.commit()
     void_r = handle_genesis_charge_refunded(
         e,
-        {"id": "ch_paid", "refunded": True, "amount_refunded": 9900, "invoice": "in_paid_keep"},
+        {"id": "ch_paid", "refunded": True, "amount_refunded": 4900, "invoice": "in_paid_keep"},
     )
     assert void_r.get("voided") == 0
     with e._conn() as con:
@@ -273,7 +273,7 @@ def test_revoked_affiliate_does_not_earn(tmp_path: Path, monkeypatch: pytest.Mon
         {
             "id": "in_revoked",
             "customer": "cus_revoked",
-            "amount_paid": 9900,
+            "amount_paid": 4900,
             "metadata": {"org_id": "org_revoked_sub", "referral_code": "REVOKED1", "plan_code": "pro"},
             "subscription": None,
         },
@@ -302,7 +302,7 @@ def test_self_referral_blocked_at_commission_resolution(
         {
             "id": "in_self",
             "customer": "cus_self",
-            "amount_paid": 9900,
+            "amount_paid": 4900,
             "metadata": {
                 "org_id": "org_other",
                 "referral_code": "GENESISDOG",
@@ -390,7 +390,7 @@ def test_admin_ops_summary_includes_reconciliation_fields(
         {
             "id": "in_ops_sum",
             "customer": "cus_ops_sum",
-            "amount_paid": 9900,
+            "amount_paid": 4900,
             "metadata": {"org_id": "org_ops_sum", "referral_code": "GENESISDOG", "plan_code": "pro"},
             "subscription": "sub_ops_sum",
         },
@@ -404,5 +404,5 @@ def test_admin_ops_summary_includes_reconciliation_fields(
     assert row["capture_visits"] == 1
     assert row["converted_referrals"] == 1
     assert row["active_referred_subscriptions"] == 1
-    assert float(row["commission_pending_usd"]) == pytest.approx(29.70)
-    assert float(row["commission_total_usd"]) == pytest.approx(29.70)
+    assert float(row["commission_pending_usd"]) == pytest.approx(14.70)
+    assert float(row["commission_total_usd"]) == pytest.approx(14.70)

@@ -299,7 +299,7 @@ export function GenesisReferralOpsPage() {
     >
       <div className="max-w-6xl space-y-6">
         <p className="text-sm text-slate-400">
-          Genesis Referral Access: 30% recurring share on active LawDog Pro ($99/mo). Manual payouts only — no automated
+          Genesis Referral Access: 30% of the first eligible net Pro payment ($49/mo list; e.g. $14.70). Manual payouts only — no automated
           sending.
         </p>
 

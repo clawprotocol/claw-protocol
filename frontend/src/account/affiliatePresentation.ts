@@ -1,9 +1,13 @@
 import { resolveCurrentUser, readStoredDisplayName } from "./currentUser";
 
-/** Pro list price used for Genesis first-invoice commission display. */
-export const AFFILIATE_MONTHLY_PLAN_USD = 99;
+/** Pro list price used for Genesis first-invoice commission *display* examples. */
+export const AFFILIATE_MONTHLY_PLAN_USD = 49;
 export const AFFILIATE_COMMISSION_RATE = 0.3;
-/** $29.70 on the first successfully settled Pro invoice (payable after refund window). */
+/**
+ * Illustrative commission at the standard Pro list price (30% of $49 = $14.70).
+ * Live ledger amounts are calculated from eligible net payment (after discounts, excluding tax)
+ * — never hardcoded in payment handlers.
+ */
 export const AFFILIATE_FIRST_INVOICE_COMMISSION_USD =
   Math.round(AFFILIATE_MONTHLY_PLAN_USD * AFFILIATE_COMMISSION_RATE * 100) / 100;
 /** @deprecated Use AFFILIATE_FIRST_INVOICE_COMMISSION_USD — commission is not recurring monthly. */

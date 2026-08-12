@@ -42,7 +42,7 @@ export function LawdogAffiliatePage() {
         <>
           <span className="block text-sm text-slate-400">
             Genesis affiliates earn {formatAffiliateUsd(AFFILIATE_MONTHLY_COMMISSION_USD)} on the first
-            successfully settled Pro ($99) invoice, payable after the refund window.
+            successfully settled Pro invoice (30% of eligible net after discounts, excluding tax; $14.70 at the standard $49 price), payable after the refund window.
           </span>
         </>
       }

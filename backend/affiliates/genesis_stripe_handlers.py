@@ -38,6 +38,42 @@ def _metadata_plan_code(obj: Dict[str, Any]) -> Optional[str]:
     return str(pc).strip().lower() if pc else None
 
 
+def eligible_net_payment_cents(invoice: Dict[str, Any]) -> int:
+    """Eligible net Pro payment after discounts, excluding tax (integer cents).
+
+    Prefers Stripe ``total_excluding_tax`` when present. Falls back to
+    ``amount_paid`` minus tax / ``total_tax_amounts``. Never invents amounts.
+    """
+    tex = invoice.get("total_excluding_tax")
+    if tex is not None:
+        try:
+            return max(0, int(tex))
+        except (TypeError, ValueError):
+            pass
+    try:
+        amount_paid = int(invoice.get("amount_paid") or 0)
+    except (TypeError, ValueError):
+        amount_paid = 0
+    tax = invoice.get("tax")
+    tax_cents = 0
+    if tax is not None:
+        try:
+            tax_cents = max(0, int(tax))
+        except (TypeError, ValueError):
+            tax_cents = 0
+    else:
+        totals = invoice.get("total_tax_amounts") or []
+        if isinstance(totals, list):
+            for row in totals:
+                if not isinstance(row, dict):
+                    continue
+                try:
+                    tax_cents += max(0, int(row.get("amount") or 0))
+                except (TypeError, ValueError):
+                    continue
+    return max(0, amount_paid - tax_cents)
+
+
 def _invoice_period(invoice: Dict[str, Any]) -> tuple[Optional[str], Optional[str]]:
     lines = invoice.get("lines") or {}
     data = lines.get("data") if isinstance(lines, dict) else None
@@ -65,7 +101,7 @@ def handle_genesis_invoice_paid(economics: EconomicsStore, invoice: Dict[str, An
     if not inv_id:
         return {"ok": False, "error": "missing_invoice_id"}
 
-    amount_cents = int(invoice.get("amount_paid") or 0)
+    amount_cents = eligible_net_payment_cents(invoice)
     if amount_cents <= 0:
         return {"ok": True, "ignored": True, "reason": "zero_amount"}
 

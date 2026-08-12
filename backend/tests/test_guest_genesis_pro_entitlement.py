@@ -43,7 +43,7 @@ def isolated_entitlement_env(tmp_path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage_eco.sqlite3"))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_ENABLED", "1")
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_STRICT_IN_DEV", "1")
-    monkeypatch.setenv("CLAW_PRO_BILLING_PERIOD_AGREEMENT_ALLOWANCE", "25")
+    monkeypatch.setenv("CLAW_PRO_BILLING_PERIOD_AGREEMENT_ALLOWANCE", "10")
     monkeypatch.setenv("CLAW_RATE_LIMIT_RPS", "1000")
     monkeypatch.setenv("CLAW_RATE_LIMIT_BURST", "1000")
     monkeypatch.setenv("CLAW_ADMIN_SECRET", "test-admin-secret")
@@ -189,7 +189,7 @@ def test_pro_stripe_finalize_meter(isolated_entitlement_env):
     subject = f"org:user-{uid}"
     decision = resolve_commercial_entitlement(subject)
     assert decision["state"] == STATE_PRO
-    assert decision["agreement_allowance"] == 25
+    assert decision["agreement_allowance"] == 10
     for i in range(3):
         assert client.post("/api/agreements/draft", headers=h, json=_draft_body(f"P{i}")).status_code == 200
     summary = client.get("/api/agreements/usage/summary", headers=h).json()
@@ -211,4 +211,4 @@ def test_pro_stripe_finalize_meter(isolated_entitlement_env):
         )
     summary2 = client.get("/api/agreements/usage/summary", headers=h).json()
     assert summary2["agreements_used"] == 3
-    assert summary2["agreements_remaining"] == 22
+    assert summary2["agreements_remaining"] == 7

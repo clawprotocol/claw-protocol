@@ -14,8 +14,8 @@ describe("affiliatePresentation", () => {
     );
   });
 
-  it("uses 30% commission on $99/month plan", () => {
-    expect(AFFILIATE_MONTHLY_COMMISSION_USD).toBe(29.7);
+  it("uses 30% commission on $49/month plan", () => {
+    expect(AFFILIATE_MONTHLY_COMMISSION_USD).toBe(14.7);
   });
 
   it("slugifies affiliate handles safely", () => {

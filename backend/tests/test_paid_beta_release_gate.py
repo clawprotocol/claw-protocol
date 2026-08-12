@@ -1,7 +1,7 @@
 """Focused paid-beta release gate — critical commercial paths only.
 
 Covers: Pro entitlement for premium draft, Genesis denial, concurrent finalization
-atomicity, and billing plan contract ($99 / Pro-only). Does not run paid LLM APIs.
+atomicity, and billing plan contract ($49 / Pro-only). Does not run paid LLM APIs.
 """
 
 from __future__ import annotations
@@ -50,9 +50,9 @@ def client() -> TestClient:
     return TestClient(app)
 
 
-def test_billing_plan_pro_is_99_usd_and_starter_maps_to_pro():
+def test_billing_plan_pro_is_49_usd_and_starter_maps_to_pro():
     pro = get_plan("pro")
-    assert pro["monthly_usd"] == __import__("decimal").Decimal("99.00")
+    assert pro["monthly_usd"] == __import__("decimal").Decimal("49.00")
     assert get_plan("starter")["monthly_usd"] == pro["monthly_usd"]
     assert get_plan("plus")["monthly_usd"] == pro["monthly_usd"]
     assert "starter" not in PLANS
@@ -96,7 +96,7 @@ def test_pro_principal_passes_premium_draft_gate(client: TestClient, monkeypatch
     ensure_headers_entitled(_ORG_H)
     decision = resolve_commercial_entitlement(f"org:{_ORG}")
     assert decision["state"] == STATE_PRO
-    assert decision.get("agreement_allowance") == 25
+    assert decision.get("agreement_allowance") == 10
 
     monkeypatch.setattr(
         "backend.routers.agreements_v2_api.OPENAI_API_KEY",

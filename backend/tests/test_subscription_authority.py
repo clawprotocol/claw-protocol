@@ -196,7 +196,7 @@ def test_invoice_paid_syncs_subscription_before_affiliate_earning(
     inv = {
         "id": "in_inv_aff",
         "customer": "cus_invaff",
-        "amount_paid": 9900,
+        "amount_paid": 4900,
         "billing_reason": "subscription_create",
         "metadata": {"org_id": "org-inv-aff", "plan_code": "pro"},
         "subscription": "sub_invaff",

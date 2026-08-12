@@ -49,9 +49,9 @@ export const CONTEXTUAL_ONE_TIME_UNLOCK_USD = 9;
 export function sendModalValueCompressionLine(monthlyUsd: number): string {
   const daily = monthlyUsd / 30;
   if (daily < 0.5) {
-    return "LawDog Pro: 25 finalized premium agreements/month for less than $0.50/day";
+    return "LawDog Pro: 10 finalized premium agreements/month for less than $0.50/day";
   }
-  return `LawDog Pro: 25 finalized premium agreements/month — about $${daily.toFixed(2)}/day`;
+  return `LawDog Pro: 10 finalized premium agreements/month — about $${daily.toFixed(2)}/day`;
 }
 
 export const PAYWALL_SEND_MODAL_SOCIAL_PROOF_BADGE = "Most users choose this";

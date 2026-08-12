@@ -57,4 +57,4 @@ export function formatProAllowanceStatusCopy(args: {
 export const CREATE_ACCESS_CHOICE_HEADING = "Continue with LawDog";
 
 export const CREATE_ACCESS_CHOICE_BODY =
-  "LawDog Pro ($99/month) unlocks saved agreement workflows — premium drafting, invite review, prepare signatures, and keep a proof record. Guest drafts are temporary samples only. Genesis is an affiliate program, not a buyer plan.";
+  "LawDog Pro ($49/month) unlocks saved agreement workflows — premium drafting, invite review, prepare signatures, and keep a proof record. Guest drafts are temporary samples only. Genesis is an affiliate program, not a buyer plan.";

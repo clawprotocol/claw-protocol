@@ -95,5 +95,5 @@ export function buildUpgradeContextReasons(input: BuildUpgradeContextReasonsInpu
 
 /** Guest vs Pro contrast under plan cards (create-flow checkout). */
 export function checkoutLossAversionFromIntentSignals(_signals: readonly string[] | null | undefined): string {
-  return "Guest draft = temporary sample. Pro = collaborate on revisions, stronger protections, tracked signatures, and proof history ($99/mo, 25 finalized).";
+  return "Guest draft = temporary sample. Pro = collaborate on revisions, stronger protections, tracked signatures, and proof history ($49/mo, 10 finalized).";
 }

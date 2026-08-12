@@ -25,7 +25,7 @@ describe("commercialEntitlement", () => {
       tier: "paid",
       state: "pro",
       grant_source: "stripe",
-      agreement_allowance: 25,
+      agreement_allowance: 10,
       agreements_used: 10,
       agreements_remaining: 15,
       period_ends_at: "2026-08-01T00:00:00Z",
@@ -42,7 +42,7 @@ describe("commercialEntitlement", () => {
       commercial: {
         state: "pro",
         grant_source: "stripe",
-        agreement_allowance: 25,
+        agreement_allowance: 10,
         agreements_used: 10,
         agreements_remaining: 15,
         period_ends_at: "2026-08-01T00:00:00Z",
@@ -57,7 +57,7 @@ describe("commercialEntitlement", () => {
     });
     expect(decision.state).toBe("pro");
     expect(decision.grantSource).toBe("stripe");
-    expect(decision.agreementAllowance).toBe(25);
+    expect(decision.agreementAllowance).toBe(10);
     expect(decision.canCreatePersistedAgreement).toBe(true);
     const verdict = resolveWorkspaceCreateAccess({
       authentication: "authenticated",
