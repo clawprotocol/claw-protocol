@@ -37,6 +37,7 @@ import {
   hasPaidProPipelineSessionAcceptance,
   hasPaidProPipelineValidationForCorpus,
   markPaidProAuthoritativeValidationPassed,
+  markPaidProPipelineValidationPassed,
 } from "./paidProPostAcceptanceValidatorCache";
 import { corpusHashForScanCache, runCachedCorpusScan } from "./paidProCorpusScanCache";
 import {
@@ -735,6 +736,14 @@ function preparePaidProServerDocumentForAcceptanceCore(
   }
 
   const result = { text: out.trim(), repairs: [...new Set(repairs)] };
+  if (
+    hasPaidProPipelineValidationForCorpus({
+      text: normalizedInput,
+      source: "server_full_draft",
+    })
+  ) {
+    markPaidProPipelineValidationPassed({ text: result.text, source: "server_full_draft" });
+  }
   tracePaidProAcceptancePipelineStage({
     stage: "after_preparePaidProServerDocumentForAcceptance",
     source: "server_full_draft",

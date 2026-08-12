@@ -444,6 +444,10 @@ export function establishPaidProSourceOfTruth(args: {
     draft: args.draft ?? null,
     generationOutcome: args.generationOutcome ?? null,
   });
+  const pipelineSessionAcceptedEarly = hasPaidProPipelineSessionAcceptance({
+    text: trim(args.text),
+    source: requestedSource,
+  });
   const mislabeledSubstantiveServerSource =
     paidProServerFullDraftBelowSubstantiveMin({
       text: trim(args.text),
@@ -451,20 +455,10 @@ export function establishPaidProSourceOfTruth(args: {
       intakeText: args.intakeText ?? null,
       draft: args.draft ?? null,
       generationOutcome: args.generationOutcome ?? null,
-    }) && !args.allowShorterOverwrite;
+    }) && !args.allowShorterOverwrite && !pipelineSessionAcceptedEarly;
   if (mislabeledSubstantiveServerSource) {
     throw new Error(
       `[paid-pro-sot-establishment-blocked] mislabeled_server_full_draft_below_substantive_min;len=${wireLen};classification=${substantiveAssessment.classification}`,
-    );
-  }
-  if (
-    generationOutcome === "degraded" &&
-    wireLen < SUBSTANTIVE_SERVER_DRAFT_MIN_LEN &&
-    (requestedSource === "server_full_draft" || requestedSource === "server_full_draft_degraded") &&
-    !args.allowShorterOverwrite
-  ) {
-    throw new Error(
-      `[paid-pro-sot-establishment-blocked] degraded_response_without_substantive_server_full;len=${wireLen}`,
     );
   }
   latchPaidProPipelineAcceptanceForConciseAuthoritativeBody({

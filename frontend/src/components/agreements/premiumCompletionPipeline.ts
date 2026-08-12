@@ -2670,11 +2670,15 @@ async function runPremiumCompletionInner(
             wireAuthoritativeBodyLen,
             (wireDocumentText || "").trim().length,
           ) >= SUBSTANTIVE_SERVER_DRAFT_MIN_LEN;
+        const degradedJsonParseClientRejected =
+          !acc0.ok &&
+          (effectiveFull.generation_outcome || "").trim() === "degraded" &&
+          (effectiveFull.server_generation_failure_code || "").trim() === "json_parse";
         if (
           (brandLicensingDegradedJsonParseRetry || !acc0.ok) &&
           structuralRetryEnabled &&
           !isLongCommerciallyUsablePremiumBody(doc.length) &&
-          !hasSubstantiveAuthoritativeWireBody &&
+          (!hasSubstantiveAuthoritativeWireBody || degradedJsonParseClientRejected) &&
           (!skipStructuralRetry || brandLicensingDegradedJsonParseRetry)
         ) {
           const preStructuralRetryDoc = doc;
@@ -5370,7 +5374,7 @@ async function runPremiumCompletionInner(
       (serverDegradedHttpMetaForRecovery?.code === "json_parse" ||
         serverGenerationDegraded?.code === "json_parse" ||
         premiumJsonParseDegradedAttemptCount >= 1);
-    if (rejectedPaidCorpusDueToClientGates && substantiveServerFullOnWire) {
+    if (rejectedPaidCorpusDueToClientGates && substantiveServerFullOnWire && !jsonParseClientRejected) {
       if (tierAEnabled) tierADiag.premiumPipelineSource = premiumRenderSource;
       logDeterministicProFallbackDecision(
         DETERMINISTIC_PRO_FALLBACK_REASON.noCanonicalFreezeAfterRejection,
@@ -5468,11 +5472,12 @@ async function runPremiumCompletionInner(
     if (
       rejectedPaidCorpusDueToClientGates &&
       !premiumBodyHardRejectedForDevContextLeak &&
-      !substantiveServerFullOnWire &&
-      (degradedJsonParseNoWireServerFull ||
-        (!shortNonemptyJsonParseWireBelowFloor &&
-          !jsonParseClientRejected &&
-          lastWireAuthoritativeBodyLen < PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN))
+      (jsonParseClientRejected ||
+        (!substantiveServerFullOnWire &&
+          (degradedJsonParseNoWireServerFull ||
+            (!shortNonemptyJsonParseWireBelowFloor &&
+              !jsonParseClientRejected &&
+              lastWireAuthoritativeBodyLen < PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN))))
     ) {
       const deterministic = tryDeterministicIntakeRecovery();
       if (deterministic.accepted) {
