@@ -105,7 +105,7 @@ function finalizeAuthoritativePaidProReviewPlain(text: string): string {
   const openingRecords = resolveCommercialPartyRecordsForOpeningRepair(
     "",
     (parties ?? []).map((p) => p.partyLegalName),
-    (parties ?? []).map((p) => p.roleLabel),
+    (parties ?? []).map((p) => p.roleLabel ?? ""),
   );
   const openingRepaired = repairDuplicateAgreementOpening(
     repaired,

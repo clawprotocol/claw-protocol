@@ -186,7 +186,7 @@ export function buildHydratedAuthoritativeSigningCorpusFromAuthority(args: {
     const openingRecords = resolveCommercialPartyRecordsForOpeningRepair(
       args.intakeRaw ?? "",
       args.authority.parties.map((p) => p.partyLegalName),
-      args.authority.parties.map((p) => p.roleLabel),
+      args.authority.parties.map((p) => p.roleLabel ?? ""),
     );
     rawCorpus = repairDuplicateAgreementOpening(
       rawCorpus,
