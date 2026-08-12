@@ -215,7 +215,19 @@ function resolvePartiesForReviewRenderCore(
 
   const draftAuthorityParties = partiesFromDraftAuthority();
   if (draftAuthorityParties) {
-    return mergeCanonicalBundleWhenSignerMetadataPresent(draftAuthorityParties, intakeRaw);
+    // Draft legal names win for entity slots, but consumed/live signer email/name/title
+    // must still merge — otherwise diagnostics and notice hydration lose @emails.
+    const consumed = readConsumedPaidProSignerMetadataAuthority()?.parties ?? null;
+    const liveParties = args?.liveSignerMetadataUi
+      ? buildPaidProSignerMetadataParties(args.liveSignerMetadataUi)
+      : null;
+    const preferLive = isPaidProReviewSignerMetadataSessionActive();
+    const mergedMeta = mergeLiveSignerFieldsOntoParties(
+      mergeLiveSignerFieldsOntoParties(draftAuthorityParties, consumed, false),
+      liveParties,
+      preferLive,
+    );
+    return mergeCanonicalBundleWhenSignerMetadataPresent(mergedMeta, intakeRaw);
   }
 
   const frozenManifestNames = readFrozenCanonicalManifestPartyNames();

@@ -184,6 +184,7 @@ export function buildHydratedAuthoritativeSigningCorpusFromAuthority(args: {
       authority: args.authority,
       intakeRaw: args.intakeRaw,
       surface: args.surface,
+      signatureRegionOnly: args.signatureRegionOnly !== false && !isFinalizeSurface,
     });
   }
 
@@ -345,6 +346,7 @@ export function buildHydratedAuthoritativeSigningCorpusFromAuthority(args: {
       result.corpus,
       args.authority.parties,
       roleContext,
+      { signatureRegionOnly: args.signatureRegionOnly !== false },
     );
     if (finalized.text !== result.corpus) {
       result = {

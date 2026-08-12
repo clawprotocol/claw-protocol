@@ -54,9 +54,12 @@ export function buildFrozenServerFullSignerMetadataHydration(args: {
   authority: PaidProSignerMetadataAuthority;
   intakeRaw: string;
   surface: string;
+  /** When true, fill execution/notice contacts only — never invent a Notices section. */
+  signatureRegionOnly?: boolean;
 }): HydratedAuthoritativeSigningCorpusResult {
   const rawCorpusLenBeforeHydration = (args.rawCorpus || "").trim().length;
   let corpus = (args.rawCorpus || "").trim();
+  const signatureRegionOnly = args.signatureRegionOnly !== false;
   const roleContext = {
     intakeText: args.intakeRaw,
     acceptedCorpus: corpus,
@@ -74,9 +77,15 @@ export function buildFrozenServerFullSignerMetadataHydration(args: {
     corpus = executionHydration.corpus;
   }
 
-  const noticeDelivery = ensureOperativeIfToNoticeDelivery(corpus, args.authority.parties, roleContext);
-  if (noticeDelivery.repairs.length > 0) {
-    corpus = noticeDelivery.text.trim();
+  // Commercial contract: never invent notice structure during signature-region hydration.
+  // Only synthesize operative If-to delivery when doing full finalize hydration.
+  let noticeDeliveryRepairs = 0;
+  if (!signatureRegionOnly) {
+    const noticeDelivery = ensureOperativeIfToNoticeDelivery(corpus, args.authority.parties, roleContext);
+    noticeDeliveryRepairs = noticeDelivery.repairs.length;
+    if (noticeDeliveryRepairs > 0) {
+      corpus = noticeDelivery.text.trim();
+    }
   }
 
   const contactStrip = applySignatureNoticeContactFieldsToCorpus(corpus, args.authority.parties, roleContext);
@@ -89,14 +98,18 @@ export function buildFrozenServerFullSignerMetadataHydration(args: {
     corpus = dedupe.text;
   }
 
-  const joined = repairJoinedTopLevelSectionHeadings(corpus);
-  if (joined.repairs.length > 0) {
-    corpus = joined.text;
-  }
+  let joinedRepairs = 0;
+  if (!signatureRegionOnly) {
+    const joined = repairJoinedTopLevelSectionHeadings(corpus);
+    joinedRepairs = joined.repairs.length;
+    if (joinedRepairs > 0) {
+      corpus = joined.text;
+    }
 
-  const collapsedNotices = repairCollapsedInlineNoticeStanzas(corpus);
-  if (collapsedNotices.repairs.length > 0) {
-    corpus = collapsedNotices.text;
+    const collapsedNotices = repairCollapsedInlineNoticeStanzas(corpus);
+    if (collapsedNotices.repairs.length > 0) {
+      corpus = collapsedNotices.text;
+    }
   }
 
   const signerCount = args.authority.parties.length;
@@ -126,7 +139,8 @@ export function buildFrozenServerFullSignerMetadataHydration(args: {
       canonicalHash,
       finalizedHash,
       signerFieldOnlyDelta,
-      signerHydrationApplied: executionHydration.applied || noticeDelivery.repairs.length > 0 || contactStrip.applied,
+      signerHydrationApplied:
+        executionHydration.applied || noticeDeliveryRepairs > 0 || contactStrip.applied,
       blankSignerLinesRemaining,
     });
   }
@@ -136,11 +150,11 @@ export function buildFrozenServerFullSignerMetadataHydration(args: {
     identities: [...identities],
     signaturePolishCount:
       executionHydration.fieldsHydrated +
-      noticeDelivery.repairs.length +
+      noticeDeliveryRepairs +
       (contactStrip.applied ? 1 : 0) +
       dedupe.repairs.length +
-      joined.repairs.length,
-    partyNoticeApplied: noticeDelivery.repairs.length > 0 || contactStrip.applied,
+      joinedRepairs,
+    partyNoticeApplied: noticeDeliveryRepairs > 0 || contactStrip.applied,
     rejected: false,
   };
 }

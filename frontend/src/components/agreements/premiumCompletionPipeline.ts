@@ -2176,6 +2176,10 @@ async function runPremiumCompletionInner(
         }
       }
       let doc = (effectiveFull.document_text || "").trim();
+      // Prefer the pre-promotion authoritative resolution when polish/alias paths leave a shorter doc.
+      if (pipelineNormalizedAuthoritativeText.trim().length > doc.length) {
+        doc = pipelineNormalizedAuthoritativeText.trim();
+      }
       if (premiumWireBodyRejectedForDevContextLeak) {
         doc = "";
       }
@@ -2357,6 +2361,15 @@ async function runPremiumCompletionInner(
               ? wireGenerationOutcomeOnWire
               : legacyGenerationOutcomeFromClassification(classified),
         };
+        // Restore normalized authoritative prose when local polish/domain guards catastrophically
+        // shrink a substantive json_parse / alternate-field wire body.
+        const normalizedAuthoritative = pipelineNormalizedAuthoritativeText.trim();
+        if (
+          normalizedAuthoritative.length >= PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN &&
+          doc.length < Math.floor(normalizedAuthoritative.length * 0.55)
+        ) {
+          doc = normalizedAuthoritative;
+        }
         if (
           wireFailureCodeOnWire === "json_parse" &&
           doc.length >= PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN
@@ -2367,7 +2380,10 @@ async function runPremiumCompletionInner(
             server_generation_failure_code: wireFailureCodeOnWire,
             generation_outcome: (wireGenerationOutcomeOnWire || "degraded") as PremiumFullDraftResult["generation_outcome"],
           }).wire as PremiumFullDraftResult;
-          pipelineNormalizedAuthoritativeText = doc;
+          // Never let a shorter polished doc clobber a longer wire-normalized authority.
+          if (doc.length >= Math.floor(normalizedAuthoritative.length * 0.85)) {
+            pipelineNormalizedAuthoritativeText = doc;
+          }
           syncPremiumWireMetadataFromEffective(effectiveFull);
         }
       }
@@ -3360,6 +3376,7 @@ async function runPremiumCompletionInner(
               ? "server_full_draft_retry"
               : "server_full_draft";
         const wireCorpusForFreeze = (
+          pipelineNormalizedAuthoritativeText ||
           wireServerFullDocumentText ||
           wireDocumentText ||
           (doc || "").trim()

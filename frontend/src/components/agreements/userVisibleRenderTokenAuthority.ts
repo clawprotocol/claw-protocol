@@ -66,6 +66,11 @@ export type RenderTokenAuthorityContext = {
   surface?: string;
   /** When true, unresolved tokens after authority recovery block progression. */
   blockOnUnresolved?: boolean;
+  /**
+   * When true, skip inventing/normalizing Notices / If-to stanzas.
+   * Signature-region hydration must not mutate the operative body fingerprint.
+   */
+  skipNoticeRepair?: boolean;
 };
 
 export type RenderTokenAuthorityOutcome = {
@@ -333,7 +338,7 @@ export function enforceUserVisibleRenderTokenAuthority(
     repairs.push("authority:numbered_email_substitution");
   }
 
-  if (parties.length >= 2) {
+  if (parties.length >= 2 && !ctx?.skipNoticeRepair) {
     // TEST540 — this terminal render-token gate previously called notice repair WITHOUT a role
     // context, dropping the authoritative intake identity even though `ctx.intakeRaw` was in scope.
     // When `parties` was rebuilt from a contaminated consumed-authority snapshot (a "Party 1"

@@ -233,16 +233,23 @@ export function finalizePaidProSigningCorpusText(
     partyNames: parties?.map((p) => p.partyLegalName) ?? null,
     surface: "finalize_paid_pro_signing_corpus",
     blockOnUnresolved: false,
+    // Signature-region hydration must not invent Notices or reflow operative headings.
+    skipNoticeRepair: signatureRegionOnly,
   });
   if (outputIntegrity.repairs.length > 0) {
     text = outputIntegrity.text;
     repairs.push(...outputIntegrity.repairs.map((tag) => `output_integrity:${tag}`));
   }
 
-  const fusion = repairDocumentBoundaryFusion(text);
-  if (fusion.text !== text) {
-    text = fusion.text;
-    repairs.push(...fusion.repairs.map((r) => `signing:${r}`));
+  // Boundary fusion rewrite treats normal "Terms.\n2. Clause" section breaks as glued
+  // headings (`\s` matches newlines) and mutates the operative fingerprint. Skip on
+  // signature-region-only hydration — operative body is already authoritative.
+  if (!signatureRegionOnly) {
+    const fusion = repairDocumentBoundaryFusion(text);
+    if (fusion.text !== text) {
+      text = fusion.text;
+      repairs.push(...fusion.repairs.map((r) => `signing:${r}`));
+    }
   }
 
   return { text: text.trimEnd() + (text.endsWith("\n") ? "" : "\n"), repairs };

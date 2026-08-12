@@ -192,7 +192,8 @@ function preserveSubstantiveServerFullDraftCorpusLength(
   const entry = trim(entryText);
   const out = trim(mutatedText);
   if (!isSubstantiveServerFullDraftSource(source)) return out;
-  if (entry.length < SUBSTANTIVE_SERVER_DRAFT_MIN_LEN) return out;
+  // Preserve any parse-degraded / alternate-field wire body (≥4k), not only 10k+ brand corpora.
+  if (entry.length < PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN) return out;
   const floor = Math.max(
     PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN,
     Math.floor(entry.length * 0.85),
@@ -1283,10 +1284,21 @@ export function assertPaidProFreezeCandidateGates(
       args.intakeText ?? null,
     );
   } else {
+    // Relocate post-witness Additional/Supplemental padding before strip so json_parse /
+    // alternate-field wire bodies (≥4k) are not catastrophically shortened at freeze.
+    const relocatedPadding = relocatePostWitnessNumberedPaddingBeforeWitness(safeForCommit);
+    if (relocatedPadding.relocatedCount > 0) {
+      safeForCommit = relocatedPadding.text;
+    }
     const postWitnessFinal = stripNumberedOperativeSectionsAfterExecution(safeForCommit);
     if (postWitnessFinal.strippedCount > 0) {
       safeForCommit = postWitnessFinal.text;
     }
+    safeForCommit = preserveSubstantiveServerFullDraftCorpusLength(
+      freezeEntryText,
+      safeForCommit,
+      requestedSource,
+    );
   }
   assertNoNumberedOperativeSectionAfterWitness(safeForCommit);
 

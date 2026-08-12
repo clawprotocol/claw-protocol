@@ -344,6 +344,28 @@ export function sanitizePaidProDomainScopeContamination(
   }
 
   const after = detectUnsupportedDomainContamination(text, intakeText);
+  const cleaned = text.replace(/\n{3,}/g, "\n\n").trim();
+  // Never let domain-scope cleanup catastrophically shrink a substantive server corpus
+  // (e.g. stripping AI-workflow wording that the draft purpose already authorized).
+  const originalLen = (corpus || "").trim().length;
+  if (
+    originalLen >= 4_000 &&
+    cleaned.length < Math.floor(originalLen * 0.55) &&
+    cleaned.length < 4_000
+  ) {
+    if (import.meta.env.DEV) {
+      // eslint-disable-next-line no-console
+      console.info(LOG_PREFIX, {
+        surface: opts?.logSurface ?? "unknown",
+        beforeRules: before.ruleIds,
+        afterRules: after.ruleIds,
+        repairs: [...repairs, "skipped_catastrophic_domain_shrink"],
+        originalLen,
+        cleanedLen: cleaned.length,
+      });
+    }
+    return { text: (corpus || "").replace(/\r\n/g, "\n").trim(), repairs: [] };
+  }
   if (repairs.length > 0 && import.meta.env.DEV) {
     // eslint-disable-next-line no-console
     console.info(LOG_PREFIX, {
@@ -354,7 +376,7 @@ export function sanitizePaidProDomainScopeContamination(
     });
   }
 
-  return { text: text.replace(/\n{3,}/g, "\n\n").trim(), repairs };
+  return { text: cleaned, repairs };
 }
 
 /** Convenience wrapper for render/acceptance pipelines. */

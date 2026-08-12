@@ -455,7 +455,10 @@ export function validatePaidProOutput(args: {
     }
     if (
       serverFullDocExists &&
-      validationCorpus.length < PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN
+      validationCorpus.length < PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN &&
+      // Only treat as thin when the caller input was also thin — prep shrinkage of a
+      // substantive server body must not reject an otherwise valid Pro corpus.
+      (args.text || "").trim().length < PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN
     ) {
       return rejectAt("freeze_candidate_thin_vs_server_full", ["freeze_candidate_thin_vs_server_full"]);
     }

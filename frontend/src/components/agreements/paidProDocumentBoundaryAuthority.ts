@@ -71,13 +71,15 @@ export function repairDocumentBoundaryFusion(text: string): { text: string; repa
   let out = (text || "").replace(/\r\n/g, "\n");
   const before = out;
 
+  // Use horizontal whitespace only — `\s` includes newlines and would rewrite already
+  // correct multi-line section breaks (`Terms.\n2. Clause`) into blank-line reflows.
   out = out.replace(/([A-Za-z]+)\."(\d+\.\s+)/g, "$1.\"\n\n$2");
   out = out.replace(/([a-z]+)\.(\d+\.\s+Notices\b)/gi, "$1.\n\n$2");
   out = out.replace(/([a-z]+)\.(\d+\.\s+GOVERNING\b)/gi, "$1.\n\n$2");
-  out = out.replace(/([a-z])\.\s*(\d+\.\s+(?!\d+\.\d)(?:Notices|GOVERNING|Services|Relationship))/gi, "$1.\n\n$2");
-  out = out.replace(/([a-z])\.\s*(\d+\.\s+(?!\d+\.\d)[A-Z])/g, "$1.\n\n$2");
+  out = out.replace(/([a-z])\.[^\S\n]*(\d+\.\s+(?!\d+\.\d)(?:Notices|GOVERNING|Services|Relationship))/gi, "$1.\n\n$2");
+  out = out.replace(/([a-z])\.[^\S\n]*(\d+\.\s+(?!\d+\.\d)[A-Z])/g, "$1.\n\n$2");
   out = out.replace(/(\d)\.(\d+\.\s+(?!\d+\.\d)[A-Z])/g, "$1.\n\n$2");
-  out = out.replace(/([.!?)"\u201d])\s*(\d+\.\s+(?!\d+\.\d)[A-Z])/g, "$1\n\n$2");
+  out = out.replace(/([.!?)"\u201d])[^\S\n]*(\d+\.\s+(?!\d+\.\d)[A-Z])/g, "$1\n\n$2");
 
   if (hasInlineMalformedNoticeStanzas(out)) {
     out = out.replace(/\s+(If to\s+)/gi, "\n\n$1");
