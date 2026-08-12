@@ -70,12 +70,13 @@ export const LAUNCH_PRICING_TIERS: LaunchPricingTier[] = [
     id: "pro",
     name: "LawDog Pro",
     monthlyPriceUsd: 49,
-    includedKeysPerMonth: 100,
+    // Inert compatibility field — not buyer-facing quota (quota = finalized agreements).
+    includedKeysPerMonth: 200,
     overagePerKeyUsd: 0.5,
-    capacityLine: "10 successfully finalized premium agreements per billing period",
+    capacityLine: "10 successfully finalized premium agreements each month",
     bestFor: "Paid premium drafting, review, and signing workflows for teams that ship agreements every month.",
     bullets: [
-      "$49/month — 10 successfully finalized premium agreements per billing period",
+      "$49/month or $490/year paid upfront — 10 successfully finalized premium agreements each month",
       "Failed generations, previews, retries, and repairs do not consume quota",
       "Premium AI full-draft generation (Pro only)",
       "Team review, redlines, export, and e-sign workflows",
@@ -117,11 +118,11 @@ export const PRICING_FAQ = [
   },
   {
     q: "What is included in LawDog Pro?",
-    a: "LawDog Pro is $49/month with 10 successfully finalized premium agreements per billing period. Failed generations, previews, retries, and repairs do not consume quota. Buyer plans are Guest and Pro only — Plus is retired. Genesis is an affiliate/referral program, not a customer plan.",
+    a: "LawDog Pro is $49/month or $490/year paid upfront, with 10 successfully finalized premium agreements each month (UTC calendar month in technical terms). Failed generations, previews, retries, and repairs do not consume quota. Buyer plans are Guest and Pro only — Plus is retired. Genesis is an affiliate/referral program, not a customer plan.",
   },
   {
     q: "Can I cancel?",
-    a: "Yes, when you are on a self-serve paid plan with billing connected — use Billing to cancel or change. Monthly subscriptions renew each billing period until you cancel. Annual checkout is one upfront charge for the term shown; what happens after that term, and any refund eligibility, follow the Terms of Service and your order summary.",
+    a: "Yes, when you are on a self-serve paid plan with billing connected — use Billing to cancel or change. Monthly subscriptions renew until you cancel. Annual checkout is $490 paid upfront for the year shown; access continues through the paid term. Refund eligibility follows the Terms of Service and your order summary.",
   },
   {
     q: "What is Advanced Work Product?",
@@ -129,7 +130,7 @@ export const PRICING_FAQ = [
   },
   {
     q: "What do the tiers change in practice?",
-    a: "Guest lets you sample a temporary draft. LawDog Pro ($49/month) unlocks premium full-draft workflows with 10 successfully finalized agreements per billing period. Genesis affiliates earn 30% of the first eligible net Pro payment after discounts (excluding tax), payable after the refund window — $14.70 at the standard $49 price. Enterprise is custom pricing for volume programs and API access.",
+    a: "Guest lets you sample a temporary draft. LawDog Pro ($49/month or $490/year) unlocks premium full-draft workflows with 10 successfully finalized agreements each month. Genesis affiliates earn 30% of the first eligible net Pro payment after discounts (excluding tax), payable after the refund window — $14.70 monthly or $147.00 annual at standard pricing. Renewals do not earn another commission. Enterprise is custom pricing for volume programs and API access.",
   },
 ] as const;
 

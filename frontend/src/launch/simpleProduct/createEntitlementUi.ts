@@ -51,7 +51,7 @@ export function formatProAllowanceStatusCopy(args: {
   if (typeof args.agreementsRemaining !== "number" || typeof args.agreementAllowance !== "number") {
     return null;
   }
-  return `Pro access: ${args.agreementsRemaining} of ${args.agreementAllowance} successfully finalized premium agreements remaining this billing period. Renews ${formatPeriodEndsLabel(args.periodEndsAt)}.`;
+  return `Pro access: ${args.agreementsRemaining} of ${args.agreementAllowance} successfully finalized premium agreements remaining this month. Resets ${formatPeriodEndsLabel(args.periodEndsAt)}.`;
 }
 
 export const CREATE_ACCESS_CHOICE_HEADING = "Continue with LawDog";

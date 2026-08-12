@@ -54,10 +54,10 @@ describe("GenesisReferralOpsPage", () => {
           capture_visits: 4,
           converted_referrals: 2,
           active_referred_subscriptions: 1,
-          commission_pending_usd: 11.7,
+          commission_pending_usd: 14.7,
           commission_payable_usd: 0,
-          commission_paid_usd: 23.4,
-          commission_total_usd: 35.1,
+          commission_paid_usd: 29.4,
+          commission_total_usd: 44.1,
         },
       ],
       count: 1,
@@ -123,8 +123,8 @@ describe("GenesisReferralOpsPage", () => {
     expect(screen.getByText("FIRSTDOG")).toBeTruthy();
     expect(screen.getByText("4")).toBeTruthy();
     expect(screen.getByText("2")).toBeTruthy();
-    expect(screen.getByText("$11.70")).toBeTruthy();
-    expect(screen.getByText("$35.10")).toBeTruthy();
+    expect(screen.getByText("$14.70")).toBeTruthy();
+    expect(screen.getByText("$44.10")).toBeTruthy();
     expect(screen.getByText(/\/app\/create\?ref=FIRSTDOG/)).toBeTruthy();
   });
 

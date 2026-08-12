@@ -203,7 +203,7 @@ def _evaluate(
         "doc_len": len(doc),
         "correctness_score": correctness,
         "aha_score": aha,
-        "would_pay_39": would_pay,
+        "would_pay_49": would_pay,
         "failures": failures,
         "recommended_fix": "; ".join(fixes[:3]) if fixes else "None for deterministic layer",
         "premium_expectations": row.get("premium_expectations") or [],
@@ -254,14 +254,14 @@ def _render_markdown(results: List[Dict[str, Any]], *, live_available: bool) -> 
         "",
         "## Summary table",
         "",
-        "| Fixture | Prompt summary | Pro reviewed? | Correctness | AHA | $39? | Top failure |",
+        "| Fixture | Prompt summary | Pro reviewed? | Correctness | AHA | $49? | Top failure |",
         "|---------|----------------|---------------|-------------|-----|------|-------------|",
     ]
     for r in results:
         fail = (r["failures"] or ["—"])[0][:60]
         lines.append(
             f"| {r['fixture_id']} | {r['prompt_summary'][:50]}… | {r['pro_output_reviewed']} | "
-            f"{r['correctness_score']} | {r['aha_score']} | {r['would_pay_39']} | {fail} |"
+            f"{r['correctness_score']} | {r['aha_score']} | {r['would_pay_49']} | {fail} |"
         )
     lines.extend(["", "## Per-scenario detail", ""])
     for r in results:
@@ -281,7 +281,7 @@ def _render_markdown(results: List[Dict[str, Any]], *, live_available: bool) -> 
                 f"- **Premium expectations:** {', '.join(r['premium_expectations'])}",
                 f"- **Correctness (1–5):** {r['correctness_score']}",
                 f"- **AHA (1–5):** {r['aha_score']}",
-                f"- **Would pay $39?** {r['would_pay_39']}",
+                f"- **Would pay $49?** {r['would_pay_49']}",
                 f"- **Failures:**",
             ]
         )
@@ -328,7 +328,7 @@ def main() -> int:
             "doc_len": 0,
             "correctness_score": "—",
             "aha_score": "—",
-            "would_pay_39": "—",
+            "would_pay_49": "—",
             "failures": ["Not run — requires two devices / incognito recipient link"],
             "recommended_fix": "Execute Flow E; score trust/shareable on recipient readonly",
             "premium_expectations": ["Trust chips", "Inviter context", "Safe-area mobile"],
@@ -362,7 +362,7 @@ def main() -> int:
     md += (
         "1. **Live Pro scoring pass** — Run `CLAW_EVAL_LIVE_PRO=1` with staging API key; fill scores in this file.\n"
         "2. **Contradiction → model compliance** — Add quality-gate check that operative doc does not contain both exclusive and non-exclusive grants when `contradiction_notes` present.\n"
-        "3. **Degraded UX labeling** — Ensure checkout return clearly distinguishes degraded fallback from full Pro so QA/users do not score fallback as $39 value.\n"
+        "3. **Degraded UX labeling** — Ensure checkout return clearly distinguishes degraded fallback from full Pro so QA/users do not score fallback as $49 value.\n"
     )
 
     out = RESULTS_DIR / f"pro_output_correctness_{date.today().isoformat()}.md"

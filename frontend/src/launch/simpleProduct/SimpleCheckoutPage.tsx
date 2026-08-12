@@ -231,12 +231,12 @@ export function SimpleCheckoutPage(props: { agreementId: string }) {
     }
   }, [cadenceFromUrl]);
 
-  /** Create-flow checkout: anchor annual when URL omits cadence (conversion path). */
+  /** Create-flow checkout: monthly is the paid-beta default when URL omits cadence. */
   useEffect(() => {
     if (agreementId !== CREATE_FLOW_CHECKOUT_AGREEMENT_ID || isSingleAgreementCheckout) return;
     if (cadenceFromUrl) return;
-    setCadence("annual");
-    setPricingCadencePreference("annual");
+    setCadence("monthly");
+    setPricingCadencePreference("monthly");
   }, [agreementId, isSingleAgreementCheckout, cadenceFromUrl]);
 
   useEffect(() => {
@@ -332,13 +332,16 @@ export function SimpleCheckoutPage(props: { agreementId: string }) {
           ? appendReturnToQueryParam(returnTo, "premiumCompletion", "1")
           : returnTo;
       navigate(destination);
-      await syncDemoSubscriptionEntitlementIfApplicable({
-        userId: user?.id ?? "demo-checkout",
-        orgId: getOrgId(),
-        devBypass: paymentMode === "dev_bypass",
-        qaBypass: paymentMode === "qa_bypass",
-        localDemoCard: paymentMode === "demo_card",
-      });
+      // $9 single-agreement unlock must never activate Pro / demo subscription entitlement.
+      if (!isSingleAgreementCheckout) {
+        await syncDemoSubscriptionEntitlementIfApplicable({
+          userId: user?.id ?? "demo-checkout",
+          orgId: getOrgId(),
+          devBypass: paymentMode === "dev_bypass",
+          qaBypass: paymentMode === "qa_bypass",
+          localDemoCard: paymentMode === "demo_card",
+        });
+      }
       inFlightRef.current = false;
       setProcessing(false);
     },
@@ -347,6 +350,13 @@ export function SimpleCheckoutPage(props: { agreementId: string }) {
 
   async function startStripeCheckout(): Promise<void> {
     if (finishedRef.current || processing || amountUsd == null) return;
+    // $9 single-agreement unlock is not a Pro subscription — refuse Stripe subscription mode.
+    if (isSingleAgreementCheckout) {
+      fail(
+        "One-time unlock uses a separate payment path. Use the demo card or contact support for Stripe one-time checkout.",
+      );
+      return;
+    }
     inFlightRef.current = true;
     setProcessing(true);
     setPaymentError(null);

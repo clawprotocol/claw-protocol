@@ -611,6 +611,26 @@ def agreements_finalized_since(subject_ref: str, period_start_iso: str) -> int:
     return int(row["c"] or 0) if row else 0
 
 
+def agreements_finalized_in_period(
+    subject_ref: str, period_start_iso: str, period_end_iso: str
+) -> int:
+    with _tx() as conn:
+        cur = conn.execute(
+            """
+            SELECT COUNT(*) AS c FROM agreement_owner
+            WHERE subject_ref = %s
+              AND completed_at IS NOT NULL
+              AND completed_at >= %s::timestamptz
+              AND completed_at < %s::timestamptz
+              AND COALESCE(guest_temp, 0) = 0
+              AND COALESCE(usage_refunded, 0) = 0
+            """,
+            (subject_ref, _ts(period_start_iso), _ts(period_end_iso)),
+        )
+        row = cur.fetchone()
+    return int(row["c"] or 0) if row else 0
+
+
 def get_genesis_dog_entitlement(user_id: str) -> Optional[Dict[str, Any]]:
     with _tx() as conn:
         cur = conn.execute(

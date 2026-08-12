@@ -80,7 +80,7 @@ export function ConversionPricingTriad(props: {
         aria-labelledby="plan-pro-heading"
       >
         <p className="text-center text-[10px] font-bold uppercase tracking-[0.12em] text-emerald-300/95">
-          Most popular · {pro.name}
+          {pro.name}
         </p>
         <h2 id="plan-pro-heading" className="mt-2 text-center text-xl font-bold text-white sm:text-2xl">
           Create, finalize, and send agreements

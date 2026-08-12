@@ -95,7 +95,7 @@ describe("createEntitlementUi", () => {
       periodEndsAt: "2026-08-15T00:00:00Z",
     });
     expect(copy).toMatch(
-      /^Pro access: 7 of 10 successfully finalized premium agreements remaining this billing period\. Renews /,
+      /^Pro access: 7 of 10 successfully finalized premium agreements remaining this month\. Resets /,
     );
   });
 });

@@ -168,6 +168,10 @@ export function SendConversionModal(props: {
                 >
                   {oneTimePhrase}
                 </button>
+                <p className="mt-2 text-[11px] leading-relaxed text-slate-600">
+                  One-time unlocks only this agreement. Pro is better for ongoing drafting, review, saving, sending,
+                  and up to 10 finalized agreements each month.
+                </p>
               </div>
 
               <p className="text-center text-xs leading-relaxed text-slate-500 sm:text-left">{PRICING_CREDIBILITY_ONE_WORKFLOW}</p>

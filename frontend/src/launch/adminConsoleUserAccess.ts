@@ -94,7 +94,7 @@ export function presentAdminConsoleAccess(args: {
   if (accessType === "paid_pro") {
     const quota =
       allowance > 0
-        ? `${remaining} of ${allowance} new agreements remaining this billing period${
+        ? `${remaining} of ${allowance} finalized agreements remaining this month${
             resets ? ` · Renews ${resets}` : ""
           }`
         : "Paid Pro subscription active";

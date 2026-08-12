@@ -1,6 +1,11 @@
 # CLAW Pricing & Unit Economics (Draft)
 
-> **Purpose:** Define CLAW end-user utility tiers and pricing using the outcome-first, incentive-sound architecture (admin-death avoidance + anti-capture), with explicit cost floors and anti-spam math.
+> **ARCHIVAL — not the current paid-beta offer.** Authoritative commercial contract:
+> Pro **$49/month** or **$490/year** upfront; **10 finalized / UTC calendar month**;
+> Genesis **30% first eligible net** ($14.70 / $147). See `docs/product/PRICING_ROI_DECISION.md`
+> and `evals/commercial-readiness/COMMERCIAL_TRUTH_TABLE.md`.
+
+> **Purpose:** Historical draft defining CLAW end-user utility tiers and pricing using the outcome-first, incentive-sound architecture (admin-death avoidance + anti-capture), with explicit cost floors and anti-spam math.
 
 ---
 

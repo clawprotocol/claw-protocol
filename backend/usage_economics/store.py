@@ -902,6 +902,7 @@ class UsageEconomicsStore:
         """Count successfully finalized agreements for subject since period_start (inclusive).
 
         Paid-beta Pro quota meters finalizations — not creates, previews, retries, or repairs.
+        Prefer ``agreements_finalized_in_period`` for UTC calendar-month windows.
         """
         start = (period_start_iso or "").strip()
         if not start:
@@ -919,6 +920,34 @@ class UsageEconomicsStore:
                   AND COALESCE(usage_refunded, 0) = 0
                 """,
                 (subject_ref, start),
+            ).fetchone()
+            return int(row[0]) if row else 0
+
+    def agreements_finalized_in_period(
+        self, subject_ref: str, period_start_iso: str, period_end_iso: str
+    ) -> int:
+        """Count durable finalizations in half-open ``[period_start, period_end)``.
+
+        Idempotent duplicates / refunded rows do not count. Used for Pro UTC-month quota.
+        """
+        start = (period_start_iso or "").strip()
+        end = (period_end_iso or "").strip()
+        if not start or not end:
+            return 0
+        if self._pg:
+            from backend.usage_economics import usage_economics_postgres as uep
+
+            return uep.agreements_finalized_in_period(subject_ref, start, end)
+        with self._conn() as con:
+            row = con.execute(
+                """
+                SELECT COUNT(*) AS c FROM agreement_owner
+                WHERE subject_ref = ? AND completed_at IS NOT NULL
+                  AND completed_at >= ? AND completed_at < ?
+                  AND COALESCE(guest_temp, 0) = 0
+                  AND COALESCE(usage_refunded, 0) = 0
+                """,
+                (subject_ref, start, end),
             ).fetchone()
             return int(row[0]) if row else 0
 

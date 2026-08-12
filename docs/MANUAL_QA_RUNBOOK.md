@@ -36,7 +36,7 @@ Step-by-step flows for GTM validation. Pair with `QA_MATRIX.md`, fixtures in `qa
 ## Flow B — Pro upgrade
 
 1. From Flow A draft, click **upgrade / Pro** (exact CTA per current UI)
-2. Confirm tier = **Pro** (~$39/mo positioning)
+2. Confirm tier = **Pro** (~$49/mo positioning)
 3. Complete Stripe checkout (test card `4242…`)
 4. **Verify:** return lands on agreement/checkout route with same `agreementId`
 5. **Verify:** premium body visible — **no flash** of short starter text (watch first 2s)

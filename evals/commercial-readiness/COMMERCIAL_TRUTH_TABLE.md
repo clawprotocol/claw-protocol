@@ -1,25 +1,18 @@
-# Commercial truth table (GTM launch contract)
+# Commercial truth table — $49 / $490 / 10-per-UTC-month
 
-**Buyer plans:** Guest and Pro only. Plus retired. Genesis = affiliate status only.
-
-| Fact | Contract |
-|---|---|
-| Pro price | **$49/month** |
-| Pro quota | **10 successfully finalized premium agreements** / billing period |
-| Quota unit | Consumed only after **successful, durable finalization** |
-| Non-consuming | Previews, drafts, failed gens/finalizations, retries, repairs, duplicates, recovery |
-| Reset | Each billing period; **no rollover** |
-| Cancellation | Access through paid period; no subsequent reset/renewal |
-| Genesis commission | **30% of first eligible net Pro payment** (after discounts, **excluding tax**), payable after refund window. At standard $49 → **$14.70** (calculated, not hardcoded) |
-| Commission exclusions | Renewals, retries, duplicate webhooks, failed payments, refunds, self-referrals, later invoices |
-
-## Alignment checklist
-
-| Surface | Expected | Status |
+| Surface | Contract | Status |
 |---|---|---|
-| BE `pricing.py` Pro monthly | $49.00 | ALIGNED |
-| BE default finalize allowance | 10 | ALIGNED |
-| BE Genesis commission | 30% of `eligible_net_payment_cents` (tax excluded); first invoice only | ALIGNED |
-| FE pricing / paywall / billing copy | $49 / 10 | ALIGNED |
-| FE affiliate display constant | Illustrative $14.70 from $49 × 30% | ALIGNED |
-| Tests lifecycle / GTM contract | $49 → $14.70; quota 10 | ALIGNED |
+| Pro monthly price | **$49** | ALIGNED (`backend/billing/pricing.py`, FE tiers) |
+| Pro annual price | **$490 paid upfront** | ALIGNED (FE `annualPrepayUsd`; BE `annual_usd`) |
+| Pro quota | **10 successfully finalized** / **UTC calendar month** | ALIGNED (`commercial_entitlement._pro_quota_period_bounds`) |
+| Monthly vs annual quota | Identical window + limit | ALIGNED |
+| Reset | Next UTC month start; **no rollover** | ALIGNED |
+| Cadence default | **Monthly** (paid beta); annual requires affirmative selection | ALIGNED (FE storage + create checkout) |
+| Consume triggers | Durable successful finalization only | ALIGNED |
+| Genesis commission | 30% first eligible net (ex-tax) | ALIGNED (ledger); UI first-payment-only |
+| Illustrative Genesis | $14.70 monthly / $147.00 annual | ALIGNED (display constants; not hardcoded in handlers) |
+| $9 unlock | Agreement-scoped; not Pro | ALIGNED (session path; Stripe subscription refused) |
+| Plus / unlimited Pro | Retired / not a buyer SKU | ALIGNED |
+| Customer ROI | Hypothesis only | **NOT VALIDATED** — needs real cohort data |
+
+`$49` remains a paid-beta pricing hypothesis. Code consistency is not customer ROI validation.

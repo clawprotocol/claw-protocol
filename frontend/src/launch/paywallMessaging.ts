@@ -54,7 +54,8 @@ export function sendModalValueCompressionLine(monthlyUsd: number): string {
   return `LawDog Pro: 10 finalized premium agreements/month — about $${daily.toFixed(2)}/day`;
 }
 
-export const PAYWALL_SEND_MODAL_SOCIAL_PROOF_BADGE = "Most users choose this";
+/** Neutral label — do not invent social proof without real cohort data. */
+export const PAYWALL_SEND_MODAL_SOCIAL_PROOF_BADGE = "Subscription option";
 
 export const PAYWALL_SEND_MODAL_MICRO_URGENCY = "About 10 seconds to upgrade to send";
 

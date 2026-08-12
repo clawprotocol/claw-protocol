@@ -128,7 +128,7 @@ export function resolveSendPaywallCopy(variantId: SendPaywallVariantId): Resolve
   let valueCompressionLine =
     plusMonthlyUsd != null
       ? sendModalValueCompressionLine(plusMonthlyUsd)
-      : "LawDog Pro: 10 finalized premium agreements per billing period";
+      : "LawDog Pro: 10 finalized premium agreements each month";
   if (d.value_compression === "flat_monthly" && plusMonthlyUsd != null) {
     valueCompressionLine = `LawDog Pro: 10 finalized premium agreements — ${formatMoneyUsdWhole(plusMonthlyUsd)}/month`;
   }

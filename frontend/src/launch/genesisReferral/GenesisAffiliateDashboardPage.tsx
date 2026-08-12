@@ -6,7 +6,7 @@ import { fetchGenesisAffiliateDashboard, type GenesisAffiliateDashboard } from "
 import { RequireActiveGenesisAffiliate } from "./RequireActiveGenesisAffiliate";
 
 const GOOD_STANDING_NOTE =
-  "Genesis Referral Access pays a 30% recurring referral share while referred Pro subscriptions remain active, subject to good standing and fair-use participation. Payouts are processed manually during early launch.";
+  "Earn 30% of the first eligible net LawDog Pro payment after discounts, excluding tax, payable after the refund window. At standard pricing, that is $14.70 for a monthly signup or $147.00 for an annual signup. Renewals do not earn another commission. Payouts are processed manually during early launch and remain subject to good standing and fair-use participation.";
 
 export function GenesisAffiliateDashboardPage() {
   return (
@@ -57,7 +57,7 @@ function GenesisAffiliateDashboardBody() {
   return (
     <AppShell
       title="Genesis Referral Access"
-      subtitle="30% recurring referral share on LawDog Pro"
+      subtitle="30% of the first eligible net LawDog Pro payment"
       navMode="minimal"
       compactFooter
     >
@@ -74,8 +74,10 @@ function GenesisAffiliateDashboardBody() {
         <div className="max-w-2xl space-y-6">
           <p className="text-sm text-slate-300">
             Welcome, <strong className="text-slate-100">{data.affiliate?.display_name}</strong>. Share your link for
-            LawDog Pro ($49/month). You earn a <strong className="text-slate-100">30% share of the first eligible net Pro payment</strong>{" "}
-            after discounts (excluding tax), payable after the refund window — not on renewals.
+            LawDog Pro ($49/month or $490/year). You earn{" "}
+            <strong className="text-slate-100">30% of the first eligible net Pro payment</strong> after discounts
+            (excluding tax), payable after the refund window — $14.70 monthly or $147.00 annual at standard pricing.
+            Renewals do not earn another commission.
           </p>
 
           <section className="rounded-xl border border-slate-700/60 bg-slate-900/40 p-4 space-y-2">

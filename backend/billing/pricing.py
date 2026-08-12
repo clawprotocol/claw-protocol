@@ -10,6 +10,7 @@ from backend.economics.config import affiliate_default_bps
 
 class PlanDict(TypedDict, total=False):
     monthly_usd: Decimal
+    annual_usd: Decimal
     included_keys: int
     overage_mode: str
     usage_enabled: bool
@@ -17,21 +18,25 @@ class PlanDict(TypedDict, total=False):
     payout_share_bps: int
 
 
-# Launch contract: Pro is the sole self-serve paid plan ($49 / 10 finalized).
+# Launch contract: Pro $49/mo or $490/year upfront; 10 finalized / UTC calendar month.
 # Plus/starter is not a launch SKU. Genesis commission = payout_share_bps of eligible net
 # (first invoice only; ledger calculates from invoice — do not hardcode dollar amounts).
+# included_keys / overage_mode are inert internal compatibility fields — they do not
+# grant buyer quota or bill overages at paid-beta launch (quota = finalized agreements).
 PLANS: Dict[str, PlanDict] = {
     "pro": {
         "monthly_usd": Decimal("49.00"),
+        "annual_usd": Decimal("490.00"),
         "included_keys": 200,
         "overage_mode": "metered",
         "usage_enabled": True,
         "affiliate_eligible": True,
-        # 30% of first eligible net Pro payment (e.g. $14.70 on standard $49).
+        # 30% of first eligible net Pro payment (e.g. $14.70 on $49; $147 on $490).
         "payout_share_bps": 3_000,
     },
     "enterprise": {
         "monthly_usd": Decimal("499.00"),
+        "annual_usd": Decimal("4990.00"),
         "included_keys": 2_000,
         "overage_mode": "metered",
         "usage_enabled": True,

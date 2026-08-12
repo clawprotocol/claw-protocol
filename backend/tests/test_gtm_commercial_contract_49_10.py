@@ -147,11 +147,17 @@ def test_only_durable_finalize_consumes_and_duplicate_finalize_is_one_unit(gtm_e
     assert d["agreements_remaining"] == 9
 
 
-def test_renewal_restores_quota_to_10_exactly_once(gtm_env):
+def test_utc_month_boundary_resets_quota_not_subscription_renewal(gtm_env, monkeypatch):
+    """Quota resets on the UTC calendar month — not when Stripe renews the subscription."""
+    from backend.usage_economics import commercial_entitlement as ce
+
     eco, usage = gtm_env
     org = _activate_pro(eco, "renew10")
     subject = f"org:{org}"
-    inside = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    real_bounds = ce.utc_month_period_bounds
+    jan = datetime(2026, 1, 15, 12, 0, 0, tzinfo=timezone.utc)
+    monkeypatch.setattr(ce, "utc_month_period_bounds", lambda now=None: real_bounds(jan))
+    inside = jan.isoformat().replace("+00:00", "Z")
     with usage._conn() as con:
         for i in range(10):
             con.execute(
@@ -164,14 +170,8 @@ def test_renewal_restores_quota_to_10_exactly_once(gtm_env):
             )
         con.commit()
     assert resolve_commercial_entitlement(subject)["agreements_remaining"] == 0
-    future_start = (datetime.now(timezone.utc) + timedelta(days=40)).isoformat().replace(
-        "+00:00", "Z"
-    )
-    used_new = usage.agreements_finalized_since(subject, future_start)
-    assert used_new == 0
-    # New period window ⇒ full allowance again when period_start advances
-    d = resolve_commercial_entitlement(subject)
-    # Entitlement period is driven by subscription row; force a renewed period end/start via new sub
+
+    # Stripe annual renewal mid-month must not refresh quota.
     eco.insert_subscription(
         sub_id=f"sub-renew-{uuid.uuid4().hex[:8]}",
         org_id=org,
@@ -180,12 +180,20 @@ def test_renewal_restores_quota_to_10_exactly_once(gtm_env):
         status="active",
         payment_id=f"pay-renew-{uuid.uuid4().hex[:8]}",
         expires_at=None,
-        current_period_end=(datetime.now(timezone.utc) + timedelta(days=60)).isoformat().replace(
+        current_period_end=(datetime.now(timezone.utc) + timedelta(days=365)).isoformat().replace(
             "+00:00", "Z"
         ),
     )
-    # Count from future_start proves prior finalizations are outside the new window
-    assert usage.agreements_finalized_since(subject, future_start) == 0
+    assert resolve_commercial_entitlement(subject)["agreements_remaining"] == 0
+
+    feb = datetime(2026, 2, 1, 0, 0, 0, tzinfo=timezone.utc)
+    # Re-pin from the real implementation captured before any patch, not the jan pin.
+    monkeypatch.setattr(ce, "utc_month_period_bounds", lambda now=None: real_bounds(feb))
+    d = resolve_commercial_entitlement(subject)
+    assert d["agreements_used"] == 0
+    assert d["agreements_remaining"] == 10
+    assert d["pro_allowance"]["period_start"].startswith("2026-02-01")
+    assert d["pro_allowance"]["resets_at"].startswith("2026-03-01")
 
 
 def test_first_eligible_49_produces_1470_commission(gtm_env):

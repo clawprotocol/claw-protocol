@@ -17,9 +17,8 @@ those users to Pro (see commercial-readiness migration note).
 
 from __future__ import annotations
 
-import calendar
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Any, Dict, Optional, Tuple
 
 from backend.usage_economics import constants as uc
@@ -66,7 +65,10 @@ def genesis_monthly_agreement_allowance() -> int:
 
 
 def pro_billing_period_agreement_allowance() -> int:
-    """Configured Pro billing-period finalized-agreement allowance (default 10)."""
+    """Configured Pro finalized-agreement allowance per UTC calendar month (default 10).
+
+    Billing cadence (monthly vs annual) does not change this window or limit.
+    """
     default = int(uc.DEFAULT_PRO_BILLING_PERIOD_AGREEMENT_ALLOWANCE)
     raw = os.getenv("CLAW_PRO_BILLING_PERIOD_AGREEMENT_ALLOWANCE", "").strip()
     if not raw:
@@ -83,15 +85,21 @@ def pro_billing_period_agreement_allowance() -> int:
 
 
 def utc_month_period_bounds(now: Optional[datetime] = None) -> Tuple[str, str]:
-    """Return (period_start, period_end) ISO-Z for the current UTC calendar month."""
+    """Return half-open UTC calendar-month bounds: ``[period_start, period_end)``.
+
+    ``period_end`` is the first instant of the next UTC month (reset timestamp).
+    Finalizations count when ``period_start <= completed_at < period_end``.
+    """
     dt = now or datetime.now(timezone.utc)
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
     else:
         dt = dt.astimezone(timezone.utc)
     start = dt.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-    last_day = calendar.monthrange(start.year, start.month)[1]
-    end = start.replace(day=last_day, hour=23, minute=59, second=59, microsecond=0)
+    if start.month == 12:
+        end = start.replace(year=start.year + 1, month=1)
+    else:
+        end = start.replace(month=start.month + 1)
     return (
         start.isoformat().replace("+00:00", "Z"),
         end.isoformat().replace("+00:00", "Z"),
@@ -123,61 +131,17 @@ def subject_is_active_genesis(subject_ref: str) -> bool:
     return _affiliate_status_for_user(uid) == AFFILIATE_STATUS_GENESIS
 
 
-def _parse_iso(ts: Optional[str]) -> Optional[datetime]:
-    raw = (ts or "").strip()
-    if not raw:
-        return None
-    try:
-        if raw.endswith("Z"):
-            raw = raw[:-1] + "+00:00"
-        dt = datetime.fromisoformat(raw)
-        if dt.tzinfo is None:
-            dt = dt.replace(tzinfo=timezone.utc)
-        return dt.astimezone(timezone.utc)
-    except ValueError:
-        return None
+def _pro_quota_period_bounds(
+    subject_ref: str, *, now: Optional[datetime] = None
+) -> Tuple[str, str]:
+    """UTC calendar-month quota window for every Pro subscriber.
 
-
-def _pro_period_bounds(subject_ref: str) -> Tuple[str, str]:
-    """Billing-period start/end for Pro metering from the subscription row."""
-    from backend.billing import subscriptions as subs
-    from backend.billing.subscription_authority import is_subscription_entitled
-    from backend.economics.store import get_economics_store
-    from backend.utils.enforce import org_id_from_subject
-
-    oid = org_id_from_subject(subject_ref) or ""
-    eco = get_economics_store()
-    eco.init_schema()
-    row = subs.get_subscription_for_org(eco, oid) if oid else None
-    if not is_subscription_entitled(row) and oid.startswith("user-"):
-        uid = oid[5:].strip()
-        if uid:
-            row = eco.get_subscription_by_user_id(uid)
-    if not row or not is_subscription_entitled(row):
-        return utc_month_period_bounds()
-
-    period_end = (
-        str(row.get("current_period_end") or "").strip()
-        or str(row.get("expires_at") or "").strip()
-    )
-    period_start = (
-        str(row.get("current_period_start") or "").strip()
-        or str(row.get("started_at") or "").strip()
-    )
-    end_dt = _parse_iso(period_end)
-    start_dt = _parse_iso(period_start)
-    if end_dt and not start_dt:
-        start_dt = end_dt - timedelta(days=31)
-    if not start_dt:
-        start_dt = datetime.now(timezone.utc).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-    if not end_dt:
-        end_dt = start_dt + timedelta(days=31)
-    if end_dt and start_dt and (end_dt - start_dt).days > 40:
-        start_dt = end_dt - timedelta(days=31)
-    return (
-        start_dt.isoformat().replace("+00:00", "Z"),
-        end_dt.isoformat().replace("+00:00", "Z"),
-    )
+    Subscription dates gate whether access is active; billing cadence (monthly vs
+    annual) must never widen, shrink, or future-date this quota window. Annual
+    ``current_period_end`` values are intentionally ignored for metering.
+    """
+    del subject_ref  # Access already gated by subject_has_paid_plan before call.
+    return utc_month_period_bounds(now)
 
 
 def _affiliate_status_for_user(user_id: str) -> str:
@@ -304,8 +268,10 @@ def resolve_commercial_entitlement(subject_ref: str) -> Dict[str, Any]:
 
     if subject_has_paid_plan(subject_ref):
         limit = pro_billing_period_agreement_allowance()
-        period_start, period_end = _pro_period_bounds(subject_ref)
-        used = int(store.agreements_finalized_since(subject_ref, period_start))
+        period_start, period_end = _pro_quota_period_bounds(subject_ref)
+        used = int(
+            store.agreements_finalized_in_period(subject_ref, period_start, period_end)
+        )
         remaining = max(0, limit - used)
         allowed = remaining > 0
         pro_block = {
@@ -315,6 +281,8 @@ def resolve_commercial_entitlement(subject_ref: str) -> Dict[str, Any]:
             "remaining": remaining,
             "period_start": period_start,
             "period_end": period_end,
+            "resets_at": period_end,
+            "window": "utc_calendar_month",
             "allowed": allowed,
             "meter": "finalized",
         }

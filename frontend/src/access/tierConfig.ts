@@ -10,7 +10,7 @@ import type { AccessTier, AiModelClass, TierEntitlements } from "./types";
  * Mapping (legacy AccessTier → contract ladder):
  * - free → Guest-equivalent (no persisted create)
  * - standard → retired Plus SKU (no create; upgrade to Pro)
- * - premium → Pro ($49 / 10 successfully finalized agreements per billing period)
+ * - premium → Pro ($49 / 10 successfully finalized agreements each UTC calendar month)
  * - admin → operator override
  */
 export const TIER_CONFIG: Record<AccessTier, TierEntitlements> = {

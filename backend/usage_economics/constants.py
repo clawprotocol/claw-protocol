@@ -34,7 +34,8 @@ GENESIS_MONTHLY_AGREEMENT_ALLOWANCE_MIN = 1
 GENESIS_MONTHLY_AGREEMENT_ALLOWANCE_MAX = 100
 GENESIS_MONTHLY_ALLOWANCE_EXHAUSTED = "genesis_monthly_allowance_exhausted"
 
-# Stripe Pro billing-period agreement creations (hard cap).
+# Stripe Pro successfully finalized agreements per UTC calendar month (hard cap).
+# Applies identically for monthly and annual subscribers — not per billing period.
 # Override with CLAW_PRO_BILLING_PERIOD_AGREEMENT_ALLOWANCE — accepted range [1, 500].
 DEFAULT_PRO_BILLING_PERIOD_AGREEMENT_ALLOWANCE = 10
 PRO_BILLING_PERIOD_AGREEMENT_ALLOWANCE_MIN = 1

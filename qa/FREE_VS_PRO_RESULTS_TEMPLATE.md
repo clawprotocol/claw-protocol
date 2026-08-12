@@ -72,7 +72,7 @@ Copy this file to `qa/results/free-vs-pro-YYYY-MM-DD.md` per session.
 | Question | Answer |
 |----------|--------|
 | **Pro AHA overall (1–5)** | |
-| **Would pay $39/mo?** | yes / no / maybe |
+| **Would pay $49/mo?** | yes / no / maybe |
 | **Fixes needed** | |
 
 ---
