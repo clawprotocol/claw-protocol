@@ -58,8 +58,13 @@ export function buildTest420MalformedServerDraft(): string {
   });
   if (!fallback.ok) return "";
   let body = fallback.body;
+  // Bare Communications is not a Notices family opener — freeze must fail-closed (TEST419/420).
   body = body.replace(/^\d+\.\s+NOTICES\s*$/gim, "10. COMMUNICATIONS");
   body = body.replace(/^\d+\.\s+Notices\s*$/gim, "10. Communications");
+  while (body.length <= 5000) {
+    body +=
+      "\n\nOperational Detail. The Parties will document service milestones, analytics deliverables, logistics handoffs, and revenue reconciliation procedures in good faith under this Agreement.";
+  }
   return body;
 }
 

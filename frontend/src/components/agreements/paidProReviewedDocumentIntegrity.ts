@@ -125,6 +125,8 @@ function headingTitleHasInlineBody(title: string): boolean {
   if (!t) return false;
   // "TITLE. Body continues…" or "Clause 1. Terms…"
   if (/^[A-Za-z][^.]{0,80}\.\s+\S/.test(t)) return true;
+  // Compact operative filler headings ("Operative clause 1.") are body-bearing, not empty shells.
+  if (/\boperative\s+clause\b/i.test(t)) return true;
   // Long title lines are already substantive (not empty parent shells).
   if (t.length >= 48) return true;
   return false;

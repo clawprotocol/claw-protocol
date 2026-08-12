@@ -19,7 +19,10 @@ import {
 } from "./intakeSignerInstructionParse";
 import { preCleanBetweenTailForMultiPartySplit, stripPartyRoleAnnotations, truncatePartyClauseTailAtLabeledFields } from "./partyRoleAnnotations";
 import { mergeIntakeDeclaredRolesIntoPartyHints } from "./canonicalPartyRoleAuthority";
-import { extractLineSeparatedLegalEntityParties } from "./partySlotIdentityNormalize";
+import {
+  extractLineSeparatedLegalEntityParties,
+  normalizeAgreementPartyName,
+} from "./partySlotIdentityNormalize";
 
 export type IntakeStructuredAgreement = {
   parties: string[];
@@ -293,7 +296,9 @@ function splitMultiPartyCommaListInternal(line: string, strict: boolean): string
   //      Real list separators in user prose are virtually always lowercase " and ".
   const COMMA_OXFORD_SPLIT = /\s*,\s*(?:and\s+)?/i;
   const STANDALONE_LOWERCASE_AND_SPLIT = /\s+and\s+/;
-  const segments = masked
+  // Detach entity-suffix commas ("Name, LLC") before Oxford segmentation.
+  const maskedForSplit = normalizeAgreementPartyName(masked);
+  const segments = maskedForSplit
     .split(COMMA_OXFORD_SPLIT)
     .flatMap((s) => s.split(STANDALONE_LOWERCASE_AND_SPLIT))
     .map((s) => s.trim())

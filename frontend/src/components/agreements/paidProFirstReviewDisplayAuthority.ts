@@ -47,6 +47,7 @@ import {
   PAID_PRO_REVIEW_SESSION_AUTHORITY_SOURCE,
   resolvePaidProReviewSessionAuthorityPaintPlain,
 } from "./paidProReviewSessionAuthority";
+import { getAuthoritativeAgreementDocument } from "./authoritativeAgreementDocument";
 import { detectPaidProCorpusIntakeContamination } from "./paidProIntakeCorpusFidelity";
 
 export const PAID_PRO_ACCEPTED_CANONICAL_SOT_DISPLAY_SOURCE =
@@ -192,6 +193,11 @@ function resolveAcceptedCanonicalPaintPlain(
   if (fromParent.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
     return { plain: fromParent, source: PAID_PRO_ACCEPTED_CANONICAL_SOT_DISPLAY_SOURCE };
   }
+  // Accepted authoritative document store (pre-SoT establish) must still paint review.
+  const fromAuthoritativeDoc = trim(getAuthoritativeAgreementDocument()?.fullCorpusText);
+  if (fromAuthoritativeDoc.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
+    return { plain: fromAuthoritativeDoc, source: "authoritativeAgreementDocument" };
+  }
   return { plain: "", source: "none" };
 }
 
@@ -217,8 +223,9 @@ export function resolvePaidProFirstReviewVisibleDisplayPlain(
       return {
         plain: authorityPaint.plain,
         source:
-          authorityPaint.source === PAID_PRO_REVIEW_SESSION_AUTHORITY_SOURCE
-            ? PAID_PRO_REVIEW_SESSION_AUTHORITY_SOURCE
+          authorityPaint.source === PAID_PRO_REVIEW_SESSION_AUTHORITY_SOURCE ||
+          authorityPaint.source === "authoritativeAgreementDocument"
+            ? authorityPaint.source
             : PAID_PRO_ACCEPTED_CANONICAL_SOT_DISPLAY_SOURCE,
         fallbackReason: null,
         hasSoT,
@@ -304,8 +311,9 @@ export function resolvePaidProFirstReviewVisibleDisplayPlain(
     return {
       plain: fidelity.plain,
       source:
-        acceptedCanonical.source === PAID_PRO_REVIEW_SESSION_AUTHORITY_SOURCE
-          ? PAID_PRO_REVIEW_SESSION_AUTHORITY_SOURCE
+        acceptedCanonical.source === PAID_PRO_REVIEW_SESSION_AUTHORITY_SOURCE ||
+        acceptedCanonical.source === "authoritativeAgreementDocument"
+          ? acceptedCanonical.source
           : PAID_PRO_ACCEPTED_CANONICAL_SOT_DISPLAY_SOURCE,
       fallbackReason: null,
       hasSoT,

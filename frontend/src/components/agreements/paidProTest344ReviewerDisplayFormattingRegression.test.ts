@@ -38,6 +38,7 @@ import {
   getPaidProDocumentForSurface,
   hashPaidProCorpus,
 } from "./paidProSourceOfTruth";
+import { markPaidProPipelineValidationPassed } from "./paidProPostAcceptanceValidatorCache";
 import { resolvePaidProPostFinalizeReviewPlain } from "./paidProPostFinalizeReviewSurface";
 import { resolvePaidProReviewLinkCorpusPlain } from "./paidProReviewLinkCorpusParity";
 import { resolvePaidProReviewRenderPlain } from "./paidProReviewRenderCorpus";
@@ -96,6 +97,7 @@ function qaAuthority() {
 
 function armFlattenedFinalizeSnapshot(flattenedCorpus: string) {
   const authority = qaAuthority();
+  markPaidProPipelineValidationPassed({ text: flattenedCorpus, source: "server_full_draft" });
   establishPaidProSourceOfTruth({
     text: flattenedCorpus,
     source: "server_full_draft",

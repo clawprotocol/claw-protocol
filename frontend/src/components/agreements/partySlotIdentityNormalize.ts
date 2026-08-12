@@ -230,11 +230,15 @@ export function stripInternalPartyAliasParentheticals(raw: string): string {
     .trim();
 }
 
-/** "Red Mesa Logistics, LLC" → "Red Mesa Logistics LLC" when safe. */
+/**
+ * "Red Mesa Logistics, LLC" → "Red Mesa Logistics LLC" when safe.
+ * Global so multi-party tails ("A, LLC and B, Inc.") do not keep suffix commas that
+ * Oxford / comma list splitters would treat as party separators.
+ */
 export function normalizeCommaSeparatedEntitySuffix(raw: string): string {
   let s = stripInternalPartyAliasParentheticals(raw);
   s = s.replace(
-    /,\s*((?:LLC|L\.L\.C\.|Inc\.?|Incorporated|Corp\.?|Corporation|Ltd\.?|Limited|LLP|PLLC|LP|L\.P\.|Co\.?|Company)\.?)\s*$/i,
+    /,\s*((?:LLC|L\.L\.C\.|Inc\.?|Incorporated|Corp\.?|Corporation|Ltd\.?|Limited|LLP|PLLC|LP|L\.P\.|Co\.?|Company)\.?)\b/gi,
     " $1",
   );
   return s.replace(/\s+/g, " ").trim();

@@ -419,7 +419,17 @@ function polishSignatureBlocksWithPartyIdentities(
     /name\s*:\s*_{6,}/i.test(existingSigBody);
 
   if (hasPlaceholderSig && isSafeSignatureTailReplacement(text, marker)) {
-    return { text: text.slice(0, marker) + mergedTail, count: blockCount };
+    // Prefer patching from an existing witness so we never keep
+    // "…Agreement." + "IN WITNESS WHEREOF" glued when marker points at CLIENT:.
+    const witnessIdx = text.search(/\bIN WITNESS WHEREOF\b/i);
+    const patchFrom = witnessIdx >= 0 && witnessIdx <= marker ? witnessIdx : marker;
+    const before = text.slice(0, patchFrom).trimEnd();
+    const existingWitnessLine =
+      witnessIdx >= 0
+        ? text.slice(witnessIdx).match(/^[^\n]*/)?.[0]?.trim() || witnessLine
+        : witnessLine;
+    const finalTail = `${existingWitnessLine}\n\n${blocks.join("\n\n")}\n`;
+    return { text: `${before}\n\n${finalTail}`, count: blockCount };
   }
 
   if (hasPlaceholderSig && marker < 0) {

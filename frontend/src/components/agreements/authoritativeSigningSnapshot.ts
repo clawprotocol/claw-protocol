@@ -18,7 +18,12 @@ import {
 } from "./canonicalPartyLegalNameSanitizer";
 import { setPaidProPinnedSignerAppliedCorpus } from "./paidProFinalHydratedCorpus";
 import { auditPaidProSignerFinalizeCorpus } from "./paidProCorpusLifecycleDiff";
-import { ensureExecutionBlockNoticeContactFieldLines, ensureOperativeIfToNoticeDelivery } from "./paidProPartyNoticeDetails";
+import {
+  ensureExecutionBlockNoticeContactFieldLines,
+  ensureOperativeIfToNoticeDelivery,
+  findNoticesSectionStart,
+  applySignatureNoticeContactFieldsToCorpus,
+} from "./paidProPartyNoticeDetails";
 import { finalizePaidProSigningCorpusText } from "./paidProSignerSigningCorpusHygiene";
 import { tracePaidProCorpusMutation } from "./paidProMutationTrace";
 import {
@@ -26,7 +31,6 @@ import {
   countBlankSignerMetadataLinesInExecutionBlock,
   signerMetadataAuthorityHasHydratableFields,
 } from "./hydratePaidProExecutionBlockWithSignerMetadata";
-import { applySignatureNoticeContactFieldsToCorpus } from "./paidProPartyNoticeDetails";
 import { getPaidProSourceOfTruth, getPaidProSourceOfTruthText, hasPaidProSourceOfTruth } from "./paidProSourceOfTruth";
 import { stripDuplicateConsecutiveExecutionEntityLines } from "./paidProExecutionBlockEntityHeading";
 import { PAID_PRO_AUTHORITY_MIN_LEN } from "./paidProAgreementAuthority";
@@ -96,6 +100,9 @@ function threadPartyAddressesIntoNoticeStanzas(
   intakeText: string | null,
 ): string {
   if (parties.length < 2) return corpus;
+  // Never invent a Notices section at snapshot write — signature-region finalize may
+  // intentionally omit operative notice contacts (TEST307). Only thread into an existing region.
+  if (findNoticesSectionStart(corpus) < 0) return corpus;
   const hasAnyAddress = parties.some((p) => p.partyAddress.trim().length > 0);
   if (!hasAnyAddress) return corpus;
   const noticeDelivery = ensureOperativeIfToNoticeDelivery(corpus, parties, {
@@ -224,12 +231,13 @@ export function createAuthoritativeSigningSnapshot(
     rawInput.length >= PAID_PRO_AUTHORITY_MIN_LEN &&
     countBlankSignerMetadataLinesInExecutionBlock(rawInput, parties) === 0 &&
     !/provided during signer setup/i.test(rawInput);
-  // Preserve operative SoT bytes only when the caller already produced a signing-ready
-  // hydrated corpus. Never re-store unhydrated SoT placeholders after signer finalize.
+  // Preserve caller-hydrated signing-ready corpus bytes. Re-running full finalize hygiene here
+  // invents Notices/Email stanzas and undoes signature-region-only hydrate (TEST307).
   const preserveFrozenCanonicalCorpus =
     args.preserveFrozenServerFullHydratedCorpus === true && inputSigningReady;
   const frozenServerFullMinimalHydration =
-    (preserveFrozenCanonicalCorpus || inputMatchesFrozenSoT) && inputSigningReady;
+    (preserveFrozenCanonicalCorpus || inputMatchesFrozenSoT || inputSigningReady) &&
+    inputSigningReady;
 
   let corpus: string;
   if (preserveFrozenCanonicalCorpus || frozenServerFullMinimalHydration) {
@@ -238,6 +246,7 @@ export function createAuthoritativeSigningSnapshot(
     corpus = threadPartyAddressesIntoNoticeStanzas(corpus, parties, args.intakeText ?? null);
   } else {
     rawInput = ensureExecutionBlockNoticeContactFieldLines(rawInput).text.trim();
+    // Signature-region hygiene: fill execution Name/Title without inventing Notices/Email.
     corpus = finalizePaidProSigningCorpusText(
       applyCanonicalPartyLegalNamesToSigningCorpus(rawInput, parties).text,
       parties,
@@ -246,6 +255,7 @@ export function createAuthoritativeSigningSnapshot(
         intakeText: args.intakeText ?? null,
         draftPartyNames: parties.map((p) => p.partyLegalName).filter((n) => n.trim().length >= 2),
       },
+      { signatureRegionOnly: true },
     ).text.trim();
     if (signerMetadataAuthorityHasHydratableFields(signerMetadata)) {
       const roleContext = { acceptedCorpus: (args.corpus || "").trim() };
@@ -260,9 +270,9 @@ export function createAuthoritativeSigningSnapshot(
         if (retry.applied) corpus = retry.corpus.trim();
       }
       if (countBlankSignerMetadataLinesInExecutionBlock(corpus) > 0 && hasPaidProSourceOfTruth()) {
-        const sot = getPaidProSourceOfTruthText().trim();
-        if (sot.length >= PAID_PRO_AUTHORITY_MIN_LEN && sot !== corpus) {
-          const sotHydration = hydrateFrom(sot);
+        const sotText = getPaidProSourceOfTruthText().trim();
+        if (sotText.length >= PAID_PRO_AUTHORITY_MIN_LEN && sotText !== corpus) {
+          const sotHydration = hydrateFrom(sotText);
           if (
             sotHydration.applied &&
             countBlankSignerMetadataLinesInExecutionBlock(sotHydration.corpus) <
@@ -279,7 +289,8 @@ export function createAuthoritativeSigningSnapshot(
         if (finalHydration.applied) corpus = finalHydration.corpus.trim();
       }
     }
-    if (parties.length >= 2) {
+    // Fill incomplete existing If-to stanzas only — never invent a Notices section here.
+    if (parties.length >= 2 && findNoticesSectionStart(corpus) >= 0) {
       const noticeDelivery = ensureOperativeIfToNoticeDelivery(corpus, parties, {
         intakeText: args.intakeText ?? null,
         draftPartyNames: parties.map((p) => p.partyLegalName).filter((n) => n.trim().length >= 2),

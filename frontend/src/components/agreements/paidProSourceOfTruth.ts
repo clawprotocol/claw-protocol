@@ -811,12 +811,24 @@ export function establishPaidProSourceOfTruth(args: {
   if (reviewParties.length >= 2) {
     const handoffParties = overlayIntakeManifestOnReviewParties(args.intakeText ?? null, reviewParties);
     establishedHandoffPartyCount = handoffParties.length;
-    setConsumedPaidProSignerMetadataAuthority({
-      parties: [...handoffParties],
-      source: "server_full_draft",
-      hash: hashPaidProSignerMetadataAuthority(handoffParties),
-      updatedAt: Date.now(),
-    });
+    // Only promote into consumed authority when signer contact fields exist. Legal-name-only
+    // seeds must not mark metadata as "consumed" or typing tests / staging treat SoT establish
+    // as a finalize commit (paidProSignerMetadataTypingPerformance).
+    const hasSignerContact = handoffParties.some(
+      (p) =>
+        Boolean(p.signerEmail?.trim()) ||
+        Boolean(p.signerName?.trim()) ||
+        Boolean(p.signerTitle?.trim()) ||
+        Boolean(p.partyAddress?.trim()),
+    );
+    if (hasSignerContact) {
+      setConsumedPaidProSignerMetadataAuthority({
+        parties: [...handoffParties],
+        source: "server_full_draft",
+        hash: hashPaidProSignerMetadataAuthority(handoffParties),
+        updatedAt: Date.now(),
+      });
+    }
     writePremiumRecipientHandoffFromAuthorityParties(handoffParties);
     if (intakePartyManifestIsAuthoritative(args.intakeText ?? null)) {
       establishCanonicalPartyMetadataAtStage({

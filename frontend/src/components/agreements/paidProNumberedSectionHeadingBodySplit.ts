@@ -116,6 +116,29 @@ function tokenLooksLikeHeadingContinuation(word: string): boolean {
   );
 }
 
+/**
+ * Capitalized particles / short openers that begin body sentences rather than heading titles.
+ * TEST345: "Acceptance To the extent…" and "Term The term…" must split before the opener.
+ */
+function capitalizedBodyOpenerAt(words: readonly string[], index: number): boolean {
+  if (index < 1 || index >= words.length) return false;
+  const word = words[index]!;
+  if (!/^[A-Z]/.test(word)) return false;
+  const lemma = cleanToken(word).toLowerCase();
+  const next = words[index + 1] ? cleanToken(words[index + 1]!).toLowerCase() : "";
+  if (lemma === "to" && next === "the") return true;
+  if (lemma === "during" && next === "the") return true;
+  if (
+    ["the", "this", "each", "either", "any", "neither", "both", "a", "an", "as", "in", "for"].includes(
+      lemma,
+    )
+  ) {
+    // "The term…", "This Agreement…" — opener is capitalized and not an interior particle.
+    return true;
+  }
+  return false;
+}
+
 /** Detect heading vs body boundary inside the title portion of a numbered section line. */
 export function detectHeadingBodyBoundaryInSectionTitle(
   titlePart: string,
@@ -137,7 +160,17 @@ export function detectHeadingBodyBoundaryInSectionTitle(
       continue;
     }
 
+    // Subsection markers (`5.1 …`) start the body/subheading — never absorb into the main title.
+    if (/^\d+\.\d+/.test(cleanToken(word))) {
+      splitAt = i;
+      break;
+    }
+
     if (isHeadingParticleToken(word)) {
+      if (capitalizedBodyOpenerAt(words, i)) {
+        splitAt = i;
+        break;
+      }
       continue;
     }
 
@@ -167,6 +200,13 @@ export function detectHeadingBodyBoundaryInSectionTitle(
       }
 
       if (headingLemma.has(lemma)) {
+        const prevLemma = i > 0 ? cleanToken(words[i - 1]!).toLowerCase() : "";
+        // "Effect of Termination" / "and Termination" — repeated lemma after a particle
+        // is still the title; the body repeat comes after a non-particle (TEST344).
+        if (isHeadingParticleToken(words[i - 1] || "") || prevLemma === "and" || prevLemma === "or") {
+          headingLemma.add(lemma);
+          continue;
+        }
         const rest = words.slice(i + 1);
         if (rest.length === 0 || rest.every((w) => tokenLooksLikeHeadingContinuation(w))) {
           continue;
@@ -206,14 +246,29 @@ export function detectHeadingBodyBoundaryInSectionTitle(
       const restAllHeading = rest.every((w) => tokenLooksLikeHeadingContinuation(w));
       if (!restAllHeading) {
         for (let j = 0; j < rest.length; j += 1) {
+          const abs = i + j;
           const rw = rest[j]!;
+          if (/^\d+\.\d+/.test(cleanToken(rw)) || capitalizedBodyOpenerAt(words, abs)) {
+            splitAt = abs;
+            break;
+          }
           const rLemma = cleanToken(rw).toLowerCase();
+          const prevAtAbs = abs > 0 ? words[abs - 1]! : "";
+          // Same title-continuation rule as the main walk: "of Termination" stays in-title.
+          if (
+            headingLemma.has(rLemma) &&
+            (isHeadingParticleToken(prevAtAbs) ||
+              cleanToken(prevAtAbs).toLowerCase() === "and" ||
+              cleanToken(prevAtAbs).toLowerCase() === "or")
+          ) {
+            continue;
+          }
           if (
             isBodySentenceStarterToken(rw) ||
             headingLemma.has(rLemma) ||
             (!tokenLooksLikeHeadingContinuation(rw) && j > 0)
           ) {
-            splitAt = i + j;
+            splitAt = abs;
             break;
           }
         }
@@ -245,6 +300,8 @@ export function detectHeadingBodyBoundaryInSectionTitle(
   if (/^\d+\.?$/.test(bodyLead) || /^\d+\.\s+\S/.test(body)) {
     return null;
   }
+  // Main heading must not retain a trailing subsection marker (`Fees and Payment 5.1`).
+  if (/\b\d+\.\d+\s*$/.test(headingTitle)) return null;
   return { headingTitle, body };
 }
 
@@ -262,7 +319,21 @@ export function splitGluedNumberedSectionLine(
     const title = periodGlue[2].trim();
     const body = periodGlue[3].trim();
     const heading = `${periodGlue[1]}. ${title}`.trim();
+    // Reject period-glue titles that already swallowed a repeated body opener
+    // ("…Termination Termination for Convenience. Either…") — prefer the word walk.
+    const seenTitleLemmas = new Set<string>();
+    let titleHasRepeatedContentToken = false;
+    for (const w of title.split(/\s+/).filter(Boolean)) {
+      const lemma = cleanToken(w).toLowerCase();
+      if (!lemma || isHeadingParticleToken(w) || !/^[A-Z]/.test(w)) continue;
+      if (seenTitleLemmas.has(lemma)) {
+        titleHasRepeatedContentToken = true;
+        break;
+      }
+      seenTitleLemmas.add(lemma);
+    }
     if (
+      !titleHasRepeatedContentToken &&
       title.split(/\s+/).filter(Boolean).length <= 12 &&
       !/\b(?:clause|section|item|schedule|exhibit)\s+\d+\b/i.test(title) &&
       !/^(?:Terms\.?\s*)+$/i.test(body) &&

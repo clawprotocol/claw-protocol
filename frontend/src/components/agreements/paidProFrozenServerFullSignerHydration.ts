@@ -88,9 +88,18 @@ export function buildFrozenServerFullSignerMetadataHydration(args: {
     }
   }
 
-  const contactStrip = applySignatureNoticeContactFieldsToCorpus(corpus, args.authority.parties, roleContext);
-  if (contactStrip.applied) {
-    corpus = contactStrip.text.trim();
+  // Signature-region-only finalize (TEST307) must hydrate Name/Title in the execution
+  // block without writing Email: lines into operative notice stanzas.
+  let contactStrip = { applied: false, text: corpus };
+  if (!signatureRegionOnly) {
+    contactStrip = applySignatureNoticeContactFieldsToCorpus(
+      corpus,
+      args.authority.parties,
+      roleContext,
+    );
+    if (contactStrip.applied) {
+      corpus = contactStrip.text.trim();
+    }
   }
 
   const dedupe = stripDuplicateConsecutiveExecutionEntityLines(corpus);

@@ -201,6 +201,19 @@ function preserveSubstantiveServerFullDraftCorpusLength(
   return out.length >= floor ? out : entry;
 }
 
+/** Collapse adjacent duplicate paragraphs so freeze prep stays idempotent on re-gate. */
+function collapseAdjacentDuplicateParagraphs(text: string): string {
+  const parts = (text || "").replace(/\r\n/g, "\n").split(/\n{2,}/);
+  const out: string[] = [];
+  for (const part of parts) {
+    const trimmed = part.trim();
+    if (!trimmed) continue;
+    if (out.length > 0 && out[out.length - 1]!.trim() === trimmed) continue;
+    out.push(part);
+  }
+  return out.join("\n\n").trim();
+}
+
 function finalizePreparedFreezeCandidateText(
   entryText: string,
   mutatedText: string,
@@ -217,7 +230,10 @@ function finalizePreparedFreezeCandidateText(
     args.source ?? null,
   );
   // Length floor may restore the entry corpus; always re-align signature roles last.
-  return reconcileExecutionRolesBeforeFreezeCommit(lengthPreserved);
+  const reconciled = reconcileExecutionRolesBeforeFreezeCommit(lengthPreserved);
+  // Notice/contamination passes can re-splice identical intake crumbs ("Term is twelve months")
+  // on every re-gate — collapse them so candidate hashes stay stable.
+  return collapseAdjacentDuplicateParagraphs(reconciled);
 }
 
 function finalizeSubstantiveBrandLicensingCorpusAfterWitness(

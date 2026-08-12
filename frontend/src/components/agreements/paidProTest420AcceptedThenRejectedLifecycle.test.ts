@@ -42,11 +42,13 @@ import {
   TEST420_PRODUCTION_INTAKE,
   test420Draft,
 } from "./paidProTest420Fixtures";
+import { resetPaidProPipelineTestIsolation } from "./paidProPipelineTestIsolation";
 
 describe("TEST420 — unify Pro acceptance, SoT freeze, recovery, and render authority", () => {
   const storage = new Map<string, string>();
 
   beforeEach(() => {
+    resetPaidProPipelineTestIsolation();
     vi.stubGlobal("sessionStorage", {
       getItem: (k: string) => storage.get(k) ?? null,
       setItem: (k: string, v: string) => storage.set(k, v),
@@ -58,10 +60,7 @@ describe("TEST420 — unify Pro acceptance, SoT freeze, recovery, and render aut
   });
 
   afterEach(() => {
-    clearPaidProSourceOfTruth();
-    clearPremiumPartyNamesHandoff();
-    clearCurrentSessionProEntitlementMarkers();
-    resetPremiumRecipientHandoffDedupForTests();
+    resetPaidProPipelineTestIsolation();
     storage.clear();
     vi.unstubAllGlobals();
   });

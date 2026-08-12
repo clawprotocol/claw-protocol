@@ -52,6 +52,7 @@ import { hasProGenerationAdoptionForSession } from "./paidProGenerationAdoption"
 import {
   commitPaidProPipelineValidationAcceptance,
   hasPaidProPipelineSessionAcceptance,
+  markPaidProPipelineValidationPassed,
 } from "./paidProPostAcceptanceValidatorCache";
 import { applyPaidProCorpusDuplicationAuthority } from "./paidProCorpusDuplicationAuthority";
 import { intakeDescribesBrandLicensingDistributionManufacturingStack } from "./paidProAgreementTitleScope";
@@ -471,77 +472,94 @@ export function validatePaidProOutput(args: {
         source: pipelineSource ?? "server_full_draft",
       }) ||
         hasProGenerationAdoptionForSession());
-    if (!serverFullDocExists) {
-      if (pipelineAcceptedSubstantive) {
-        return rejectAt("paid_pro_validation", [
-          freezeCandidate.rejectReason ?? "freeze_candidate_rejected",
-          "substantive_pipeline_accepted_recovery_blocked",
-        ]);
-      }
-      const recovery = previewRecoverPaidProFreezeCandidate({
-        draft: args.draft ?? null,
-        intakeText: rawI,
-        surface: "validatePaidProOutput_recovery",
-      });
-      logPaidProFreezeCandidateDecision({
-        accepted: recovery.ok,
-        source: "deterministic_recovery_freeze_candidate",
-        preparedFreezeCandidateHash: recovery.hash,
-        validationInputHash: validationCorpusHash,
-        validationInputMatchesPreparedFreeze:
-          Boolean(preparedStableHash) && validationCorpusHash === preparedStableHash,
-        rejectReason: recovery.rejectReason,
-        candidateLen: recovery.text.length,
-      });
-      if (recovery.ok) {
-        const wireProfessional = assessProfessionalProClauseCoverage({
-          text: rawInput,
-          intake: rawI,
-        });
-        if (shouldRejectProfessionalProCorpus(wireProfessional)) {
-          return rejectAt("professional_pro_clause_coverage", [
-            ...wireProfessional.missingClauses.map((c) => `professional_${c}`),
-            `docLen=${wireProfessional.docLen}`,
-          ]);
-        }
-        const professional = assessProfessionalProClauseCoverage({
-          text: recovery.text,
-          intake: rawI,
-        });
-        if (shouldRejectProfessionalProCorpus(professional)) {
-          return rejectAt("professional_pro_clause_coverage", [
-            ...professional.missingClauses.map((c) => `professional_${c}`),
-            `docLen=${professional.docLen}`,
-          ]);
-        }
-        const recoverySubstance = validateProMinimumSubstance({
-          text: recovery.text,
-          rawIntake: rawI,
-          draft: args.draft ?? null,
-          source: pipelineSource ?? "deterministic_recovery_freeze_candidate",
-        });
-        if (recoverySubstance.applies && !recoverySubstance.ok) {
-          return rejectAt("minimum_substance", recoverySubstance.missingSections);
-        }
-        logDecision(
-          true,
-          [
-            "deterministic_recovery_freeze_candidate_ok",
-            freezeCandidate.rejectReason ?? "server_freeze_failed",
-          ],
-          "deterministic_recovery_freeze_candidate_ok",
-        );
-        recordPipelineValidationAcceptance(recovery.text);
-        return {
-          ok: true,
-          reasons: ["deterministic_recovery_freeze_candidate_ok"],
-        };
-      }
-    } else if (substantiveServerDraft) {
+    // Substantive server_full (>=10k) must not be silently replaced by intake recovery.
+    if (substantiveServerDraft) {
       return rejectAt("paid_pro_validation", [
         freezeCandidate.rejectReason ?? "freeze_candidate_rejected",
         "substantive_server_draft_recovery_blocked",
       ]);
+    }
+    // Thin / mid-band freeze failures (including non-substantive server_full) may recover
+    // from intake — TEST420 malformed drafts sit in this band (>5k, <10k).
+    if (!serverFullDocExists && pipelineAcceptedSubstantive) {
+      return rejectAt("paid_pro_validation", [
+        freezeCandidate.rejectReason ?? "freeze_candidate_rejected",
+        "substantive_pipeline_accepted_recovery_blocked",
+      ]);
+    }
+    const recovery = previewRecoverPaidProFreezeCandidate({
+      draft: args.draft ?? null,
+      intakeText: rawI,
+      surface: "validatePaidProOutput_recovery",
+    });
+    logPaidProFreezeCandidateDecision({
+      accepted: recovery.ok,
+      source: "deterministic_recovery_freeze_candidate",
+      preparedFreezeCandidateHash: recovery.hash,
+      validationInputHash: validationCorpusHash,
+      validationInputMatchesPreparedFreeze:
+        Boolean(preparedStableHash) && validationCorpusHash === preparedStableHash,
+      rejectReason: recovery.rejectReason,
+      candidateLen: recovery.text.length,
+    });
+    if (recovery.ok) {
+      const wireProfessional = assessProfessionalProClauseCoverage({
+        text: rawInput,
+        intake: rawI,
+      });
+      if (shouldRejectProfessionalProCorpus(wireProfessional)) {
+        return rejectAt("professional_pro_clause_coverage", [
+          ...wireProfessional.missingClauses.map((c) => `professional_${c}`),
+          `docLen=${wireProfessional.docLen}`,
+        ]);
+      }
+      const professional = assessProfessionalProClauseCoverage({
+        text: recovery.text,
+        intake: rawI,
+      });
+      if (shouldRejectProfessionalProCorpus(professional)) {
+        return rejectAt("professional_pro_clause_coverage", [
+          ...professional.missingClauses.map((c) => `professional_${c}`),
+          `docLen=${professional.docLen}`,
+        ]);
+      }
+      const recoverySubstance = validateProMinimumSubstance({
+        text: recovery.text,
+        rawIntake: rawI,
+        draft: args.draft ?? null,
+        source: pipelineSource ?? "deterministic_recovery_freeze_candidate",
+      });
+      // Recovery already passed freeze gates. Soft commercial-fact gaps / opening heuristics
+      // must not block deterministic recovery for missing_notices_heading mid-band drafts (TEST419/420).
+      if (recoverySubstance.applies && !recoverySubstance.ok) {
+        const hardMissing = recoverySubstance.missingSections.filter(
+          (section) =>
+            String(section).startsWith("professional_") ||
+            section === "party_names" ||
+            section === "services_scope",
+        );
+        if (hardMissing.length > 0) {
+          return rejectAt("minimum_substance", hardMissing);
+        }
+      }
+      logDecision(
+        true,
+        [
+          "deterministic_recovery_freeze_candidate_ok",
+          freezeCandidate.rejectReason ?? "server_freeze_failed",
+        ],
+        "deterministic_recovery_freeze_candidate_ok",
+      );
+      // Validation may recover from intake, but must not mount a canonical review corpus
+      // until SoT establish/tryRecover commits it (TEST420 blank-review-before-recovery).
+      markPaidProPipelineValidationPassed({
+        text: recovery.text,
+        source: pipelineSource ?? "deterministic_recovery_freeze_candidate",
+      });
+      return {
+        ok: true,
+        reasons: ["deterministic_recovery_freeze_candidate_ok"],
+      };
     }
     return rejectAt("paid_pro_validation", [
       freezeCandidate.rejectReason ?? "freeze_candidate_rejected",

@@ -103,6 +103,7 @@ import {
   REVIEW_INVITATIONS_SENT_TITLE,
   ownerPostReviewSendUsesDashboard,
 } from "./reviewDeliveryOwnerRouting";
+import { PaidProReviewReviewerLinksTable } from "./PaidProReviewReviewerLinksTable";
 import {
   CREATOR_PREPARE_SIGNATURE_LINKS_LABEL,
   REVIEW_LINK_READY_ALL_APPROVED_BODY,
@@ -148,6 +149,7 @@ export function SimpleDonePage(props: { agreementId: string }) {
     [agreementId, reviewLinksTick],
   );
   const [reviewBundleCopyFlash, setReviewBundleCopyFlash] = useState(false);
+  const [reviewerRowCopyFlashByKey, setReviewerRowCopyFlashByKey] = useState<Record<string, boolean>>({});
   const [ownerHandoffDraft, setOwnerHandoffDraft] = useState<AgreementDraft | null>(null);
   const [ownerSigningLockVid, setOwnerSigningLockVid] = useState<string | null>(null);
   const [finalizeNavigating, setFinalizeNavigating] = useState(false);
@@ -840,12 +842,16 @@ export function SimpleDonePage(props: { agreementId: string }) {
     };
     const showReviewFlowDiagPanel = reviewFlowDiagLocal;
     const emailDeliveryActive = ownerPostReviewSendUsesDashboard();
+    // Approval-state titles win over dashboard email-delivery chrome so owner done
+    // still shows "All reviewers approved" / "Review link ready" when those apply.
     const reviewReadyTitle =
-      emailDeliveryActive && reviewLinksReady && anyReviewHref
-        ? REVIEW_INVITATIONS_SENT_TITLE
+      reviewLinksReady && anyReviewHref && reviewApprovalAgg.flowShellTitle === "All reviewers approved"
+        ? "All reviewers approved"
         : reviewLinksReady && anyReviewHref && reviewApprovalAgg.flowShellTitle === "Review link created"
           ? "Review link ready"
-          : flowShellTitle;
+          : emailDeliveryActive && reviewLinksReady && anyReviewHref
+            ? REVIEW_INVITATIONS_SENT_TITLE
+            : flowShellTitle;
     const reviewReadyDescription =
       reviewReadyTitle === REVIEW_INVITATIONS_SENT_TITLE
         ? REVIEW_INVITATIONS_SENT_BODY
@@ -1026,16 +1032,42 @@ export function SimpleDonePage(props: { agreementId: string }) {
                   onOpenParty={(row) => openPartyReviewerSimulation(row.partyIndex, row.displayName)}
                 />
                 {multiReviewer ? (
-                  <RecipientControlCenter
-                    agreementId={agreementId}
-                    phase="review"
-                    title="Recipient delivery"
-                    linkByParticipantKey={reviewRecipientLinkByKey}
-                    onDraftUpdated={(draft) => {
-                      setOwnerHandoffDraft(draft);
-                      setReviewLinksTick((t) => t + 1);
-                    }}
-                  />
+                  <>
+                    <PaidProReviewReviewerLinksTable
+                      rows={normalizedReviewerRows}
+                      statuses={reviewerRowStatuses}
+                      rowCopyFlashByKey={reviewerRowCopyFlashByKey}
+                      onCopyRow={(rowKey, href) => {
+                        if (!href.trim()) return;
+                        void navigator.clipboard.writeText(href).then(() => {
+                          setReviewerRowCopyFlashByKey((prev) => ({ ...prev, [rowKey]: true }));
+                          window.setTimeout(() => {
+                            setReviewerRowCopyFlashByKey((prev) => ({ ...prev, [rowKey]: false }));
+                          }, 2000);
+                        });
+                      }}
+                      onOpenRow={(href, ctx) => {
+                        if (!href.trim()) return;
+                        logReviewLinkOpen({
+                          agreementId,
+                          rowIndex: ctx.rowIndex,
+                          partyIndex: ctx.partyIndex,
+                          recipientId: ctx.recipientId,
+                        });
+                        window.open(href, "_blank", "noopener,noreferrer");
+                      }}
+                    />
+                    <RecipientControlCenter
+                      agreementId={agreementId}
+                      phase="review"
+                      title="Recipient delivery"
+                      linkByParticipantKey={reviewRecipientLinkByKey}
+                      onDraftUpdated={(draft) => {
+                        setOwnerHandoffDraft(draft);
+                        setReviewLinksTick((t) => t + 1);
+                      }}
+                    />
+                  </>
                 ) : null}
                 <ReviewActions className="mt-4">
                   {showBottomCopyPrimary ? (

@@ -32,6 +32,7 @@ import { resolvePaidProPostFinalizeReviewPlain } from "./paidProPostFinalizeRevi
 import { hasAcceptedPaidCreateFlowFreezeLatch } from "./authoritativeCreateFlowReviewShell";
 import { getLatchedAcceptedServerFullDraftAuthority } from "./premiumAcceptancePolicy";
 import { PAID_PRO_AUTHORITY_MIN_LEN } from "./paidProAuthorityConstants";
+import { getAuthoritativeAgreementDocument } from "./authoritativeAgreementDocument";
 
 /** Minimum frozen SoT length to force visible document shell (inclusive). */
 export const PAID_PRO_DOCUMENT_BODY_SOT_MIN_LEN = 1000;
@@ -40,6 +41,11 @@ function latchedAcceptedFreezeCorpusLen(): number {
   if (!hasAcceptedPaidCreateFlowFreezeLatch()) return 0;
   const body = getLatchedAcceptedServerFullDraftAuthority()?.body.trim() ?? "";
   return body.length >= PAID_PRO_AUTHORITY_MIN_LEN ? body.length : 0;
+}
+
+function authoritativeAgreementDocumentCorpusLen(): number {
+  const body = getAuthoritativeAgreementDocument()?.fullCorpusText?.trim() ?? "";
+  return body.length >= PAID_PRO_DOCUMENT_BODY_SOT_MIN_LEN ? body.length : 0;
 }
 
 /** Read-only canonical review corpus length for render routing (no SoT mutation). */
@@ -57,6 +63,8 @@ export function resolveCanonicalReviewCorpusLenForRender(): number {
   if (pipelineLen >= PAID_PRO_DOCUMENT_BODY_SOT_MIN_LEN) return pipelineLen;
   const latchLen = latchedAcceptedFreezeCorpusLen();
   if (latchLen >= PAID_PRO_DOCUMENT_BODY_SOT_MIN_LEN) return latchLen;
+  const authoritativeLen = authoritativeAgreementDocumentCorpusLen();
+  if (authoritativeLen >= PAID_PRO_DOCUMENT_BODY_SOT_MIN_LEN) return authoritativeLen;
   return 0;
 }
 
@@ -66,7 +74,8 @@ export function hasCanonicalReviewCorpusForRender(): boolean {
   }
   if (hasAcceptedPipelineReviewCorpusForRender()) return true;
   // Keep just-accepted create-flow freeze paint mounted even if SoT establish lagged.
-  return latchedAcceptedFreezeCorpusLen() >= PAID_PRO_DOCUMENT_BODY_SOT_MIN_LEN;
+  if (latchedAcceptedFreezeCorpusLen() >= PAID_PRO_DOCUMENT_BODY_SOT_MIN_LEN) return true;
+  return authoritativeAgreementDocumentCorpusLen() >= PAID_PRO_DOCUMENT_BODY_SOT_MIN_LEN;
 }
 
 export function shouldForcePaidProReviewDocumentRender(): boolean {
@@ -218,10 +227,11 @@ export function PaidProDocumentBodyForcedRoute({
   const sotPlain = hasPaidProSourceOfTruth() ? getPaidProSourceOfTruthText().trim() : "";
   const pipelinePlain = readAcceptedPipelineReviewCorpusPlain().trim();
   const parentPlain = (displayContext?.acceptedCanonicalPlain || "").trim();
+  const authoritativeDocPlain = getAuthoritativeAgreementDocument()?.fullCorpusText?.trim() || "";
   const acceptedCanonicalPlain =
     postFinalizePlain.length >= PAID_PRO_DOCUMENT_BODY_SOT_MIN_LEN
       ? postFinalizePlain
-      : [authorityPlain, sotPlain, pipelinePlain, parentPlain].reduce(
+      : [authorityPlain, sotPlain, pipelinePlain, authoritativeDocPlain, parentPlain].reduce(
           (best, t) => (t.length > best.length ? t : best),
           "",
         );

@@ -4550,7 +4550,7 @@ async function runPremiumCompletionInner(
           source: recoverySource,
         });
         logPremiumCompletionDebug({
-          stage: "premium_degraded_server_local_recovery",
+          stage: "premium_degraded_thin_wire_local_recovery",
           recoveryCandidateEligible: true,
           premiumRenderSource: recoverySource,
           bodyLen: thinLocalRecovery.body.length,
@@ -5338,52 +5338,49 @@ async function runPremiumCompletionInner(
           premiumRenderSource: PREMIUM_DEGRADED_SERVER_LOCAL_RECOVERY_RENDER_SOURCE,
         })
       : null;
-    if (
-      !substantiveServerFullOnWire &&
-      !blockLateThinWireRecovery &&
-      localRecovery.ok &&
-      degradedRecoveryPreview?.eligible
-    ) {
-      const recoverySource = PREMIUM_DEGRADED_SERVER_LOCAL_RECOVERY_RENDER_SOURCE;
-      if (tierAEnabled) tierADiag.premiumPipelineSource = recoverySource;
-      logDeterministicProFallbackDecision(DETERMINISTIC_PRO_FALLBACK_REASON.accepted, {
-        bodyLen: localRecovery.body.length,
-        displayPlainLen: degradedRecoveryPreview.displayPlainLen,
-        jsonParseAttempts: premiumJsonParseDegradedAttemptCount,
-        note: "late_local_recovery",
-      });
-      logPremiumCompletionDebug({
-        stage: "premium_degraded_server_local_recovery",
-        recoveryCandidateEligible: true,
-        rejectedReason: undefined,
-        premiumRenderSource: recoverySource,
-        bodyLen: localRecovery.body.length,
-        displayPlainLen: degradedRecoveryPreview.displayPlainLen,
-        lastClientGate: lastClientGateTrace,
-      });
-      outMerged = stripClientPremiumArtifactBlocksFromDraft({
-        ...outMerged,
-        premium_full_document_text: localRecovery.body,
-      });
-      return {
-        premiumDraft: outMerged,
-        premiumParties,
-        recipientCandidates,
-        winningPremiumBodyText: localRecovery.body,
-        premiumRenderSource: recoverySource,
-        premiumReview,
-        premiumFinalizeAudit,
-        premiumReviewRoute,
-        staleIntakeOrGeneration: false,
-        agreementGenerationId: input.agreementGenerationId,
-        premiumRequestIntakeFingerprint: input.premiumRequestIntakeFingerprint,
-        founderDetailsGateMessage: null,
-        proIntentGateMessage: null,
-        serverGenerationDegraded: serverGenerationDegraded ?? serverDegradedHttpMetaForRecovery,
-        premiumDegradedServerRecoverable: true,
-        premiumDegradedServerLocalRecovery: true,
-        tierADiagnostic: tierADiag,
-      };
+    if (localRecovery.ok && degradedRecoveryPreview?.eligible) {
+      if (!substantiveServerFullOnWire && !blockLateThinWireRecovery) {
+        const recoverySource = PREMIUM_DEGRADED_SERVER_LOCAL_RECOVERY_RENDER_SOURCE;
+        if (tierAEnabled) tierADiag.premiumPipelineSource = recoverySource;
+        logDeterministicProFallbackDecision(DETERMINISTIC_PRO_FALLBACK_REASON.accepted, {
+          bodyLen: localRecovery.body.length,
+          displayPlainLen: degradedRecoveryPreview.displayPlainLen,
+          jsonParseAttempts: premiumJsonParseDegradedAttemptCount,
+          note: "late_local_recovery",
+        });
+        logPremiumCompletionDebug({
+          stage: "premium_degraded_server_local_recovery",
+          recoveryCandidateEligible: true,
+          rejectedReason: undefined,
+          premiumRenderSource: recoverySource,
+          bodyLen: localRecovery.body.length,
+          displayPlainLen: degradedRecoveryPreview.displayPlainLen,
+          lastClientGate: lastClientGateTrace,
+        });
+        outMerged = stripClientPremiumArtifactBlocksFromDraft({
+          ...outMerged,
+          premium_full_document_text: localRecovery.body,
+        });
+        return {
+          premiumDraft: outMerged,
+          premiumParties,
+          recipientCandidates,
+          winningPremiumBodyText: localRecovery.body,
+          premiumRenderSource: recoverySource,
+          premiumReview,
+          premiumFinalizeAudit,
+          premiumReviewRoute,
+          staleIntakeOrGeneration: false,
+          agreementGenerationId: input.agreementGenerationId,
+          premiumRequestIntakeFingerprint: input.premiumRequestIntakeFingerprint,
+          founderDetailsGateMessage: null,
+          proIntentGateMessage: null,
+          serverGenerationDegraded: serverGenerationDegraded ?? serverDegradedHttpMetaForRecovery,
+          premiumDegradedServerRecoverable: true,
+          premiumDegradedServerLocalRecovery: true,
+          tierADiagnostic: tierADiag,
+        };
+      }
     }
     if (localRecovery.ok && degradedRecoveryPreview && !degradedRecoveryPreview.eligible) {
       logPremiumCompletionDebug({

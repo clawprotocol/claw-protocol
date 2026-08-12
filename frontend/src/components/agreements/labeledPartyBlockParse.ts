@@ -280,9 +280,9 @@ function matchLabeledPartyField(line: string): { key: keyof Omit<LabeledPartyBlo
   for (const { key, re } of LABELED_FIELD_RES) {
     const m = normalized.match(re);
     if (!m?.[1]) continue;
-    const value = cleanFieldValue(m[1]);
-    if (!value) continue;
-    return { key, value };
+    // Keep Unknown/TBD matches as labeled fields with empty values so they do not
+    // fall through to stacked address capture (TEST367).
+    return { key, value: cleanFieldValue(m[1]) };
   }
   return null;
 }
@@ -303,6 +303,8 @@ function applyLabeledFieldToBlock(
     return lineIndex;
   }
   if (labeled.key === "address") {
+    // Empty/Unknown address labels must not start multiline capture into Purpose/prose.
+    if (!labeled.value) return lineIndex;
     return appendMultilineAddress(block, labeled.value, lines, lineIndex);
   }
   block[labeled.key] = labeled.value;

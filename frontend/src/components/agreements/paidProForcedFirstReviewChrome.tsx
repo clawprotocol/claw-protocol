@@ -178,7 +178,7 @@ export function PaidProForcedFirstReviewChrome({
               <button
                 type="button"
                 className="mt-3 w-full rounded-lg bg-emerald-800 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700 disabled:opacity-45"
-                disabled={primaryActionsDisabled || !signersReady}
+                disabled={primaryActionsDisabled}
                 onClick={() => {
                   logPostFinalizeAction("prepare_for_signing");
                   onPrepareSignatures();
@@ -201,7 +201,7 @@ export function PaidProForcedFirstReviewChrome({
               <button
                 type="button"
                 className="mt-3 w-full rounded-lg border border-emerald-700/40 bg-white px-4 py-2.5 text-sm font-semibold text-emerald-900 shadow-sm hover:bg-emerald-50 disabled:opacity-45"
-                disabled={primaryActionsDisabled || reviewBusy || !signersReady}
+                disabled={primaryActionsDisabled || reviewBusy}
                 onClick={() => {
                   logPostFinalizeAction("send_for_review");
                   onShareForReview();
@@ -219,23 +219,6 @@ export function PaidProForcedFirstReviewChrome({
           className="flex flex-col gap-2 sm:flex-row sm:flex-wrap"
           data-testid="paid-pro-forced-first-review-secondary-actions"
         >
-          {!signersReady ? (
-            <button
-              type="button"
-              className="w-full rounded-lg border border-stone-300/90 bg-white px-3 py-2 text-xs font-semibold text-stone-800 sm:w-auto"
-              disabled={primaryActionsDisabled || reviewBusy || !signersReady}
-              onClick={() => {
-                logPostFinalizeAction("send_for_review");
-                onShareForReview();
-              }}
-              data-testid="paid-pro-forced-share-for-review"
-              title="Add party contacts first, then send for review with track-changes"
-            >
-              {reviewBusy
-                ? PAID_PRO_DELIVERY_TRACK_REVIEW_BUSY_CTA
-                : PAID_PRO_DELIVERY_TRACK_REVIEW_CTA}
-            </button>
-          ) : null}
           <PremiumAgreementCopyButton
             getPlainText={getCopyPlainText}
             onCopyIntent={() => logPostFinalizeAction("copy_agreement")}

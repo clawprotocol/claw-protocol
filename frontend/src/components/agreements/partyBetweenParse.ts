@@ -11,6 +11,7 @@ import { normalizePartyNameFragment } from "./partyIntakeNormalize";
 import {
   collapsePartySlotCandidates,
   isInvalidPartySlotLegalEntity,
+  mergeSplitEntitySuffixFragments,
   normalizeAgreementPartyName,
   splitCommaSeparatedPartyNames,
 } from "./partySlotIdentityNormalize";
@@ -84,7 +85,10 @@ const ENTITY_SUFFIX_AFTER_PERIOD_RE =
   /^(?:Inc\.?|Corp\.?|Ltd\.?|LLC|L\.L\.C\.?|LLP|PLC|P\.C\.?|Co\.?)\b/i;
 
 function isOxfordCommaPartyList(tail: string): boolean {
-  return /,/.test(tail) && /\s+and\s+\S/i.test(tail);
+  // Ignore entity-suffix commas ("Name, LLC") so bilateral between-clauses are not
+  // misclassified as Oxford party lists.
+  const structural = normalizeAgreementPartyName(tail);
+  return /,/.test(structural) && /\s+and\s+\S/i.test(structural);
 }
 
 function findGeneralBetweenSentenceEnd(tail: string): number {
@@ -165,11 +169,15 @@ const COMMA_OXFORD_PARTY_SPLIT = /\s*,\s*(?:and\s+)?/i;
 const STANDALONE_LOWERCASE_AND_SPLIT = /\s+and\s+/;
 
 function splitBetweenPartyListSegments(tail: string): string[] {
-  return tail
+  // Detach ", LLC" / ", Inc." before structural splits so entity-suffix commas never
+  // become Oxford separators (TEST330: "Red Mesa Logistics, LLC and Harbor…").
+  const prepared = normalizeAgreementPartyName(tail);
+  const rough = prepared
     .split(COMMA_OXFORD_PARTY_SPLIT)
     .flatMap((s) => s.split(STANDALONE_LOWERCASE_AND_SPLIT))
     .map((s) => s.trim())
     .filter(Boolean);
+  return mergeSplitEntitySuffixFragments(rough.map(normalizeAgreementPartyName));
 }
 
 function extractBetweenPartyNameListFromOxfordTail(tail: string, useAuthorityCandidates: boolean): string[] {

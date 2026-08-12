@@ -179,6 +179,8 @@ export function buildHydratedAuthoritativeSigningCorpusFromAuthority(args: {
 
   // Frozen SoT finalize: apply signer-metadata-only hydration (notices + execution Name/Title/Email)
   // so the authoritative signing snapshot is signing-ready — never store pre-signer placeholders.
+  // Honor an explicit signatureRegionOnly=true from callers (TEST307) so finalize does not
+  // force Email: lines into the operative notice body when only the signature block should change.
   if (
     shouldUseFrozenServerFullSourceOfTruthMinimalHydration(rawCorpus) ||
     (isFinalizeSurface && shouldPreserveFrozenCanonicalCorpusOnSignerFinalize(rawCorpus))
@@ -188,7 +190,10 @@ export function buildHydratedAuthoritativeSigningCorpusFromAuthority(args: {
       authority: args.authority,
       intakeRaw: args.intakeRaw,
       surface: args.surface,
-      signatureRegionOnly: args.signatureRegionOnly !== false && !isFinalizeSurface,
+      signatureRegionOnly:
+        args.signatureRegionOnly === true
+          ? true
+          : args.signatureRegionOnly !== false && !isFinalizeSurface,
     });
   }
 
@@ -268,7 +273,9 @@ export function buildHydratedAuthoritativeSigningCorpusFromAuthority(args: {
     return (tail.match(/^name\s*:\s*(?!_{4,})(?!\s*$).+/gim) || []).length >= signerCount;
   })();
   const synthesisForbidden = forbidPaidProExecutionBlockSynthesis(result.corpus, signerCount);
-  if (!result.rejected && (!hasBlocks || !hasPopulatedNames) && !synthesisForbidden) {
+  if (!result.rejected && (!hasBlocks || !hasPopulatedNames)) {
+    // Always attempt rebuild/reconcile — when synthesis is forbidden the helper reconciles
+    // role headings in place instead of appending a second IN WITNESS WHEREOF (TEST330).
     const rebuilt = rebuildSignatureBlocksWithPartyIdentities(result.corpus, identities);
     if (rebuilt.count > 0) {
       result = {
@@ -278,40 +285,42 @@ export function buildHydratedAuthoritativeSigningCorpusFromAuthority(args: {
       };
       logSignatureBlockSource({
         surface: args.surface,
-        source: "authority_signature_block_rebuild",
+        source: synthesisForbidden
+          ? "authority_signature_block_reconcile"
+          : "authority_signature_block_rebuild",
         hasFilledBlocks: corpusSignatureBlocksHaveRequiredByLines(rebuilt.text, signerCount),
         signerCount,
       });
+    } else if (synthesisForbidden) {
+      logPaidProExecutionBlockSynthesisBlocked({
+        surface: args.surface,
+        reason: "hydration_signature_block_rebuild_skipped",
+      });
+      const retryHydration = hydratePaidProExecutionBlockWithSignerMetadata(
+        result.corpus,
+        recipientMeta,
+        roleContext,
+        { overwriteExistingMetadata: isFinalizeSurface },
+      );
+      if (retryHydration.applied && retryHydration.corpus !== result.corpus) {
+        result = {
+          ...result,
+          corpus: retryHydration.corpus,
+          signaturePolishCount: result.signaturePolishCount + retryHydration.fieldsHydrated,
+        };
+        logPaidProSignerMetadataHydrationApplied({
+          surface: `${args.surface}:synthesis_forbidden_retry`,
+          fieldsHydrated: retryHydration.fieldsHydrated,
+          rawLen: result.corpus.length,
+          hydratedLen: retryHydration.corpus.length,
+        });
+      }
     } else if (typeof import.meta !== "undefined" && import.meta.env?.DEV) {
       logSignerHydrationMismatch({
         surface: args.surface,
         reason: "post_finalize_missing_signature_block",
         rawLen: result.corpus.length,
         afterLen: rebuilt.text.length,
-      });
-    }
-  } else if (synthesisForbidden && (!hasBlocks || !hasPopulatedNames)) {
-    logPaidProExecutionBlockSynthesisBlocked({
-      surface: args.surface,
-      reason: "hydration_signature_block_rebuild_skipped",
-    });
-    const retryHydration = hydratePaidProExecutionBlockWithSignerMetadata(
-      result.corpus,
-      recipientMeta,
-      roleContext,
-      { overwriteExistingMetadata: isFinalizeSurface },
-    );
-    if (retryHydration.applied && retryHydration.corpus !== result.corpus) {
-      result = {
-        ...result,
-        corpus: retryHydration.corpus,
-        signaturePolishCount: result.signaturePolishCount + retryHydration.fieldsHydrated,
-      };
-      logPaidProSignerMetadataHydrationApplied({
-        surface: `${args.surface}:synthesis_forbidden_retry`,
-        fieldsHydrated: retryHydration.fieldsHydrated,
-        rawLen: result.corpus.length,
-        hydratedLen: retryHydration.corpus.length,
       });
     }
   }

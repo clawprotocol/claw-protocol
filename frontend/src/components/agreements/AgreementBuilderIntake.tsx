@@ -14817,6 +14817,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
    * alone (e.g. long fields after a parse glitch) never show LawDog Pro chips or amber recovery.
    */
   const premiumPaidDocumentSurface = useMemo(() => {
+    // CRITICAL INVARIANT (also source-contracted): starter/free tiers never paint Pro-paid
+    // document surfaces unless a paid completion session or active premium flow is present.
+    if (!tierAllowsAdvancedFullDraftReveal(tier) && !(hasPaidPremiumCompletionSession() || premiumPersistedFlowActive)) {
+      return false;
+    }
     // Dashboard signer-setup resume must not depend on flaky /v1/subscriptions/local-org entitlement.
     if (
       openSignerSetupOnResume ||
@@ -16116,39 +16121,39 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     }
   }, [paidProCardAiInstruction, paidProCardEditDraft, runPersistedRefineFromStepBuffer]);
 
-  const showStarterProRefineUpsell = useMemo(
-    () =>
-      shouldShowCreateFlowStarterProRefineUpsell({
-        shellInput: authoritativeCreateFlowReviewShellInput,
-        hasPaidPremiumCompletionSession,
-        authoritativePremiumUiCommitted,
-        paidProAuthoritative,
-        suppressIntakePremiumUpsell,
-        proAgreementEntitled,
-        isFreeStreamlineDraftReview,
-        isFreeStarterReviewSurface,
-        belowDocumentRefineSectionParentEligible,
-        premiumPaidDocumentSurface,
-        showStarterProRefineUpsellCardEligible: shouldShowStarterProRefineUpsellCard(
-          belowDocumentRefineSectionParentEligible,
-          premiumPaidDocumentSurface,
-          suppressIntakePremiumUpsell,
-        ),
-      }),
-    [
+  const showStarterProRefineUpsell = useMemo(() => {
+    if (hasPaidPremiumCompletionSession()) return false;
+    if (authoritativePremiumUiCommitted) return false;
+    return shouldShowCreateFlowStarterProRefineUpsell({
+      shellInput: authoritativeCreateFlowReviewShellInput,
+      hasPaidPremiumCompletionSession,
+      authoritativePremiumUiCommitted,
+      paidProAuthoritative,
+      suppressIntakePremiumUpsell,
       proAgreementEntitled,
       isFreeStreamlineDraftReview,
       isFreeStarterReviewSurface,
-      suppressIntakePremiumUpsell,
       belowDocumentRefineSectionParentEligible,
       premiumPaidDocumentSurface,
-      premiumSurfaceGateTick,
-      paidProAuthoritative,
-      authoritativePremiumUiCommitted,
-      authoritativeCreateFlowReviewShellInput,
-      createFlowAuthoritativeShellReactiveKey,
-    ],
-  );
+      showStarterProRefineUpsellCardEligible: shouldShowStarterProRefineUpsellCard(
+        belowDocumentRefineSectionParentEligible,
+        premiumPaidDocumentSurface,
+        suppressIntakePremiumUpsell,
+      ),
+    });
+  }, [
+    proAgreementEntitled,
+    isFreeStreamlineDraftReview,
+    isFreeStarterReviewSurface,
+    suppressIntakePremiumUpsell,
+    belowDocumentRefineSectionParentEligible,
+    premiumPaidDocumentSurface,
+    premiumSurfaceGateTick,
+    paidProAuthoritative,
+    authoritativePremiumUiCommitted,
+    authoritativeCreateFlowReviewShellInput,
+    createFlowAuthoritativeShellReactiveKey,
+  ]);
 
   useEffect(() => {
     if (!import.meta.env.DEV) return;
@@ -18974,9 +18979,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       paidProFirstReviewCorpusReady &&
       paidProCanonicalReviewSignerSetupActive,
   );
-  const paidProFirstReviewSurfaceActive =
-    simpleProFinalReviewShellActive ||
-    paidProForcedFirstReviewActive ||
+  const paidProFirstReviewSurfaceActive = simpleProFinalReviewShellActive || paidProForcedFirstReviewActive ||
     paidProSignerSetupStickyCtaSurfaceActive;
 
   const paidProSignerMetadataFinalized =
@@ -30055,14 +30058,27 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         bumpPremiumSurfaceGateTick();
         return;
       }
+      if (acceptedPaidProAuthorityActive && !paidProSignatureDetailsReady) {
+        setHardError(null);
+        // Entering inline signer setup → arm the mount latch and clear any prior prepare release.
+        setSignaturePreparationRequested(false);
+        setPaidProInlineSignerSetupLatched(true);
+        setDisplayPhase("review");
+        setCreateUiStage(CreateUiStage.DRAFT);
+        setCreateFlowSendRecipientEditorOpen(true);
+        window.requestAnimationFrame(() => {
+          document
+            .getElementById("claw-paid-pro-inline-signer-setup")
+            ?.scrollIntoView({ behavior: "smooth", block: "start" });
+        });
+        bumpPremiumSurfaceGateTick();
+        return;
+      }
       if (
-        (acceptedPaidProAuthorityActive ||
-          paidProReviewDecisionLifecycleReady ||
-          paidProPostCheckoutFirstReviewActive) &&
+        (paidProReviewDecisionLifecycleReady || paidProPostCheckoutFirstReviewActive) &&
         !paidProSignatureDetailsReady
       ) {
         setHardError(null);
-        // Entering inline signer setup → arm the mount latch and clear any prior prepare release.
         setSignaturePreparationRequested(false);
         setPaidProInlineSignerSetupLatched(true);
         setDisplayPhase("review");
@@ -30141,6 +30157,19 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
   const handleProSendForSignature = React.useCallback(() => {
     traceSigningAdvance("handleProSendForSignature:enter");
+    const postFinalizeSigningReadyEarly =
+      paidProSignerMetadataFinalized ||
+      hasAuthoritativeSigningSnapshot() ||
+      paidProSignerMetadataFinalizedLatch;
+    if (
+      (acceptedPaidProAuthorityActive || paidProReviewDecisionPhase === "decision_2") &&
+      !postFinalizeSigningReadyEarly &&
+      !paidProSignatureDetailsReady
+    ) {
+      traceSigningAdvance("handleProSendForSignature:signer_setup");
+      enterFinalReviewRecipientSetup("signature");
+      return;
+    }
     if (guidedCompletionActive) {
       logGuidedSignTransition({
         bodyLen: simpleProFinalReviewCorpus.plainText.length,
@@ -30358,6 +30387,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       resolvePaidProPostFinalizeReviewPlain() ||
       simpleProFinalReviewDisplayPlain ||
       simpleProFinalReviewCorpus.plainText;
+    logPaidProReviewTrackLifecycle("review_track_selected", {
+      source: "simple_pro_send_for_review",
+      canonicalHash: resolvePaidProReviewTrackCanonicalHash(reviewBodyPlain),
+      selectedTrack: "review",
+    });
+    if (acceptedPaidProAuthorityActive || paidProAuthoritative) {
+      void completeGuidedPaidProReviewFirstHandoff("simple_pro_send_for_review");
+      return;
+    }
     const canProceedReviewHandoff = canProceedPaidProReviewFirstHandoffAfterFinalize({
       signersComplete: paidProSignatureDetailsReady || paidProSignerMetadataFinalized,
       reviewPlain: reviewBodyPlain,
@@ -30370,10 +30408,6 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         : canProceedGuidedFinalReviewToSigning,
       bodyLen: reviewBodyPlain.length,
       selectedTrack: "review",
-    });
-    logPaidProReviewTrackLifecycle("review_track_selected", {
-      source: "simple_pro_send_for_review",
-      canonicalHash: resolvePaidProReviewTrackCanonicalHash(reviewBodyPlain),
     });
     const reviewFirstAgId = (
       productionSendBarAgreementId ||
@@ -30390,10 +30424,6 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         bodyLen: reviewBodyPlain.length,
         source: guidedCompletionRenderDocument.source,
       });
-    }
-    if (acceptedPaidProAuthorityActive || paidProAuthoritative) {
-      void completeGuidedPaidProReviewFirstHandoff("simple_pro_send_for_review");
-      return;
     }
     if (canProceedGuidedFinalReviewToSigning) {
       void completeGuidedPaidProReviewFirstHandoff("simple_pro_send_for_review");

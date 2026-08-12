@@ -128,6 +128,25 @@ export function splitGluedSectionHeadingFromLine(line: string): string {
     return `${starterTermBodyGlue[1].trim()}\n${starterTermBodyGlue[2].trim()}`;
   }
 
+  // Prefer explicit body-cue / main→subsection splits before heuristic word walks (TEST345).
+  const bodyCue = trimmed.match(MAIN_HEADING_BODY_CUE_RE);
+  if (bodyCue?.[1] && bodyCue[2]?.trim()) {
+    const heading = bodyCue[1].trim();
+    const body = bodyCue[2].trim();
+    if (heading.length >= MIN_MAIN_HEADING_LEN && heading.length <= 110 && body.length >= 8) {
+      return `${heading}\n${body}`;
+    }
+  }
+
+  const mainThenSubEarly = trimmed.match(MAIN_THEN_SUBSECTION_GLUE_RE);
+  if (mainThenSubEarly?.[1] && mainThenSubEarly[2]?.trim()) {
+    const heading = mainThenSubEarly[1].trim();
+    const subsection = mainThenSubEarly[2].trim();
+    if (heading.length >= MIN_MAIN_HEADING_LEN && heading.length <= 110 && subsection.length >= 8) {
+      return `${heading}\n${subsection}`;
+    }
+  }
+
   const structural = splitGluedNumberedSectionLine(trimmed);
   if (structural) {
     return `${structural.heading}\n${structural.body}`;
@@ -162,15 +181,6 @@ export function splitGluedSectionHeadingFromLine(line: string): string {
     const subsection = mainThenSub[2].trim();
     if (heading.length >= MIN_MAIN_HEADING_LEN && heading.length <= 110 && subsection.length >= 8) {
       return `${heading}\n${subsection}`;
-    }
-  }
-
-  const bodyCue = trimmed.match(MAIN_HEADING_BODY_CUE_RE);
-  if (bodyCue?.[1] && bodyCue[2]?.trim()) {
-    const heading = bodyCue[1].trim();
-    const body = bodyCue[2].trim();
-    if (heading.length >= MIN_MAIN_HEADING_LEN && heading.length <= 110 && body.length >= 8) {
-      return `${heading}\n${body}`;
     }
   }
 

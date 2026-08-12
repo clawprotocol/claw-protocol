@@ -1415,7 +1415,11 @@ export function corpusHasCanonicalNoticesHeading(text: string): boolean {
 
 /** Non-canonical numbered headings that still open an operative Notices clause family. */
 const NOTICE_EQUIVALENT_SECTION_HEADING_RE =
-  /(?:^|\n)\s*\d+(?:\.\d+)?(?:\.\s*|\s+)(?:Notice\s+Provisions?|Notice\s+Delivery|Communications|Notice\s+and\s+Contact)\b/i;
+  /(?:^|\n)\s*\d+(?:\.\d+)?(?:\.\s*|\s+)(?:Notice\s+Provisions?|Notice\s+Delivery|Notice\s+and\s+Contact)\b/i;
+
+/** Bare "Communications" is not a Notices family opener — TEST419/420 require freeze fail-closed. */
+const BARE_COMMUNICATIONS_SECTION_HEADING_RE =
+  /(?:^|\n)\s*\d+(?:\.\d+)?(?:\.\s*|\s+)Communications?\b/i;
 
 function inferNoticesSectionNumber(beforeRegion: string): number {
   const sectionNums: number[] = [];
@@ -1707,6 +1711,14 @@ export function ensureCanonicalNoticesSectionHeadingForFreeze(corpus: string): {
   const witnessIdx = resolveAuthoritativeWitnessIndex(text);
   let head = witnessIdx >= 0 ? text.slice(0, witnessIdx) : text;
   let tail = witnessIdx >= 0 ? text.slice(witnessIdx) : "";
+  // Fail-closed: bare Communications must not be rewritten into NOTICES (TEST419/420).
+  if (
+    BARE_COMMUNICATIONS_SECTION_HEADING_RE.test(head) &&
+    !corpusHasCanonicalNoticesHeading(head) &&
+    !NOTICE_EQUIVALENT_SECTION_HEADING_RE.test(head)
+  ) {
+    return { text: corpus, repairs: [] };
+  }
   const stanzaCount = (head.match(/^If to\s+/gim) || []).length;
   if (stanzaCount < 1) return { text: corpus, repairs: [] };
 
@@ -1816,6 +1828,8 @@ export function corpusHasOperativeNoticesHeading(text: string): boolean {
   const normalized = (text || "").replace(/\r\n/g, "\n");
   if (corpusHasCanonicalNoticesHeading(normalized)) return true;
   if (NOTICE_EQUIVALENT_SECTION_HEADING_RE.test(normalized)) return true;
+  // Bare Communications is intentionally not a Notices opener (TEST419/420 freeze fail-closed).
+  if (BARE_COMMUNICATIONS_SECTION_HEADING_RE.test(normalized)) return false;
   if (findNoticesSectionStart(normalized) >= 0) return true;
   return (normalized.match(/^If to\s+/gim) || []).length >= 2;
 }
