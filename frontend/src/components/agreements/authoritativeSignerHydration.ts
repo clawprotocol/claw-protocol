@@ -29,6 +29,8 @@ import {
 import { applyCanonicalPartyLegalNamesToSigningCorpus } from "./canonicalPartyLegalNameSanitizer";
 import { finalizePaidProSigningCorpusText } from "./paidProSignerSigningCorpusHygiene";
 import { repairMalformedPaidProAgreementRecital } from "./paidProAgreementRecitalRepair";
+import { repairDuplicateAgreementOpening } from "./canonicalPartyIdentityResolver";
+import { resolveCommercialPartyRecordsForOpeningRepair } from "./canonicalPartyIdentityResolver";
 import { stripPremiumIntelligenceCalloutsFromCorpus } from "./premiumDocumentIntelligenceStrip";
 import { repairSignatureNameLinesUsingLegalEntity } from "./paidProSignatureNameLineRepair";
 import {
@@ -177,6 +179,21 @@ export function buildHydratedAuthoritativeSigningCorpusFromAuthority(args: {
   const rawCorpusLenBeforeHydration = rawCorpus.length;
   const isFinalizeSurface = args.surface === "finalize_paid_pro_signer_metadata";
 
+  // Recital / duplicate-opening repair must run even on the frozen SoT minimal-hydration path —
+  // otherwise fused openers ("is This Agreement is between") survive into pinned review plain.
+  if (args.repairRecital) {
+    rawCorpus = repairMalformedPaidProAgreementRecital(rawCorpus, args.authority.parties).text;
+    const openingRecords = resolveCommercialPartyRecordsForOpeningRepair(
+      args.intakeRaw ?? "",
+      args.authority.parties.map((p) => p.partyLegalName),
+      args.authority.parties.map((p) => p.roleLabel),
+    );
+    rawCorpus = repairDuplicateAgreementOpening(
+      rawCorpus,
+      openingRecords.length >= 2 ? openingRecords : undefined,
+    ).text;
+  }
+
   // Frozen SoT finalize: apply signer-metadata-only hydration (notices + execution Name/Title/Email)
   // so the authoritative signing snapshot is signing-ready — never store pre-signer placeholders.
   // Honor an explicit signatureRegionOnly=true from callers (TEST307) so finalize does not
@@ -195,10 +212,6 @@ export function buildHydratedAuthoritativeSigningCorpusFromAuthority(args: {
           ? true
           : args.signatureRegionOnly !== false && !isFinalizeSurface,
     });
-  }
-
-  if (args.repairRecital) {
-    rawCorpus = repairMalformedPaidProAgreementRecital(rawCorpus, args.authority.parties).text;
   }
   const roleContext = {
     intakeText: args.intakeRaw,

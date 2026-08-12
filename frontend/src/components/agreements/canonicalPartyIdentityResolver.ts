@@ -830,7 +830,7 @@ export function repairDuplicateAgreementOpening(
     }
     let next = input.replace(
       DUPLICATE_OPENING_REPLACE,
-      'This $1 Agreement (the "Agreement") is entered into by and between',
+      'This Agreement (the "Agreement") is entered into by and between',
     );
     next = next.replace(
       GENERIC_DUPLICATE_OPENING_REPLACE,
@@ -1067,10 +1067,19 @@ export function intakeSpecifiesSimpleFixedFee(
 ): boolean {
   const intakeBlob = String(intakeRaw || "");
   if (!/\$\s*[\d,]{3,}/.test(intakeBlob)) return false;
+  // Hedged / incomplete fee tables are not "simple fixed fee" — guided confirmation must still run.
+  if (
+    /\b(?:maybe|approximately|about|roughly|probably|estimated)\b/i.test(intakeBlob) ||
+    /\b(?:TBD|\?\?\?|to be confirmed|to be determined)\b/i.test(intakeBlob)
+  ) {
+    return false;
+  }
   if (
     /\b(?:milestone|schedule\s+a|phase\s+(?:\d|one|two|three|acceptance)|installment|40\s*%|30\s*%)\b/i.test(
       intakeBlob,
-    )
+    ) ||
+    /\|\s*phase\s*\|/i.test(intakeBlob) ||
+    /\b(?:build|rollout)\b[\s\S]{0,40}\b(?:TBD|\?\?\?)\b/i.test(intakeBlob)
   ) {
     return false;
   }

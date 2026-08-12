@@ -31,7 +31,8 @@ describe("SimpleProFinalReviewScreen review-first routing (static)", () => {
   it("mint 422 uses reviewFirstHandoffError only — not setHardError on mint failure", () => {
     const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
     const handoffIdx = intake.indexOf("const completeGuidedPaidProReviewFirstHandoff = React.useCallback");
-    const block = intake.slice(handoffIdx, handoffIdx + 12000);
+    const handoffEnd = intake.indexOf("const enterGuidedSignatureTrackRoute = React.useCallback", handoffIdx);
+    const block = intake.slice(handoffIdx, handoffEnd > handoffIdx ? handoffEnd : handoffIdx + 20000);
     expect(block).toContain("const failReviewFirstMint = (");
     expect(block).toContain("setHardError(null);");
     expect(block).toContain("setReviewFirstHandoffError(message);");

@@ -15,6 +15,9 @@ export const PAID_PRO_PIPELINE_LONG_INCLUDE = [
   "src/components/agreements/paidProTest431FourPartyHeadingAnomalyRegression.test.ts",
   "src/components/agreements/paidProTest448BrandLicensingOrchestration.test.ts",
   "src/components/agreements/paidProTest517ServerDocumentTextAlias.test.ts",
+  "src/components/agreements/premiumCompletionPipeline.test.ts",
+  "src/components/agreements/premiumPaidCorpusFivePartyQa.test.ts",
 ] as const;
 
-export const PAID_PRO_PIPELINE_LONG_TEST_TIMEOUT_MS = 10_000;
+/** Contended CPU + 15k–30k wire freeze prep routinely exceeds 10s (TEST431 ~15s alone). */
+export const PAID_PRO_PIPELINE_LONG_TEST_TIMEOUT_MS = 30_000;

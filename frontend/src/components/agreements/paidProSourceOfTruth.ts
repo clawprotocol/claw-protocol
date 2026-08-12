@@ -33,7 +33,10 @@ import {
   latchPaidProPipelineAcceptanceForConciseAuthoritativeBody,
 } from "./paidProPostAcceptanceValidatorCache";
 import { PAID_PRO_RUNTIME_AUTHORITY_MIN_LEN } from "./paidProAuthorityConstants";
-import { SUBSTANTIVE_SERVER_DRAFT_MIN_LEN } from "./premiumAcceptancePolicy";
+import {
+  SUBSTANTIVE_SERVER_DRAFT_MIN_LEN,
+  latchAcceptedServerFullDraftAuthority,
+} from "./premiumAcceptancePolicy";
 import {
   assessPaidProSubstantiveServerDraftCorpus,
   paidProServerFullDraftBelowSubstantiveMin,
@@ -708,7 +711,11 @@ export function establishPaidProSourceOfTruth(args: {
     source: "canonical_freeze",
     surface: "paid_pro_source_of_truth_establish",
   });
-  const acceptedCorpusText = driftGuard.displayText;
+  // Latched server_full_draft preserve path: freeze/display must not rewrite latched
+  // authoritative bytes after acceptance latch (Test245 authority stability).
+  const acceptedCorpusText = prep.repairs.includes("freeze_prep_preserved_latched_server_full_draft")
+    ? prep.text
+    : driftGuard.displayText;
   const acceptedCorpusHash = hashPaidProCorpus(acceptedCorpusText);
   if (preEstablishFreezeHash && preEstablishFreezeHash !== acceptedCorpusHash) {
     logCanonicalEstablishReconcile({
@@ -763,6 +770,10 @@ export function establishPaidProSourceOfTruth(args: {
     reason: "authoritative_source_of_truth_established",
   });
   replacePaidProSourceOfTruth(record);
+  // SoT establish is the freeze boundary — arm shortening guards for later candidates.
+  latchAcceptedServerFullDraftAuthority(record.text, "server_full_draft", {
+    freezeEstablished: true,
+  });
   logExecutionBlockLocation(record.text, "paid_pro_source_of_truth_establish");
   logExecutionBlockCount(record.text, "paid_pro_source_of_truth_establish");
   logPostFreezeCorpusDrift({

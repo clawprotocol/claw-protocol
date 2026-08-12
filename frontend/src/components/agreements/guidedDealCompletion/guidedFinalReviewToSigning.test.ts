@@ -478,13 +478,21 @@ Date: _________________________
     expect(intake).toContain("logGuidedSignatureGenericSendBypassed");
     expect(intake).toContain('logSource: "guided_signature_track"');
     const handoffIdx = intake.indexOf("const completeGuidedSigningHandoff = React.useCallback");
-    const handoffBlock = intake.slice(handoffIdx, handoffIdx + 2200);
+    const handoffEnd = intake.indexOf(
+      "const finalizePaidProSignerMetadataAndOpenReviewDecision = React.useCallback",
+      handoffIdx,
+    );
+    const handoffBlock = intake.slice(handoffIdx, handoffEnd > handoffIdx ? handoffEnd : handoffIdx + 5000);
     expect(handoffBlock).toContain("ensureGuidedSigningCorpusReady");
     expect(handoffBlock).toContain("mergeDraftPartiesFromCanonicalIdentities");
     expect(handoffBlock).toContain("enterGuidedSignatureTrackRoute");
     expect(handoffBlock).not.toContain("void onGenerate()");
     const signingIdx = intake.indexOf("const continueGuidedFinalReviewToSigning = React.useCallback");
-    const signingBlock = intake.slice(signingIdx, signingIdx + 1200);
+    const signingEnd = intake.indexOf("const handleProSendForReview = React.useCallback", signingIdx);
+    const signingBlock = intake.slice(
+      signingIdx,
+      signingEnd > signingIdx ? signingEnd : signingIdx + 4000,
+    );
     expect(signingBlock).toContain("enterGuidedSignatureTrackRoute");
   });
 

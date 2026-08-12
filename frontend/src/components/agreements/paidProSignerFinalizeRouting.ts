@@ -46,9 +46,16 @@ export function scrollPaidProReviewDecisionIntoView(): void {
 
 /** Source-level assertion helper for regression tests. */
 export function paidProSignerFinalizeBlockContainsForbiddenRoutes(source: string): string[] {
-  const start = source.indexOf("const finalizePaidProSignerMetadataAndOpenReviewDecision");
+  // Prefer the useCallback definition — the earlier `...DecisionRef` declaration shares a prefix.
+  const start = source.indexOf(
+    "const finalizePaidProSignerMetadataAndOpenReviewDecision = React.useCallback",
+  );
   if (start < 0) return PAID_PRO_SIGNER_FINALIZE_FORBIDDEN_ROUTE_MARKERS.slice();
   const end = source.indexOf("const continueGuidedFinalReviewToSigning", start);
   const block = source.slice(start, end > start ? end : start + 3500);
-  return PAID_PRO_SIGNER_FINALIZE_FORBIDDEN_ROUTE_MARKERS.filter((marker) => block.includes(marker));
+  // Ignore comment-only mentions of forbidden markers (routing docs in nearby comments).
+  const codeOnly = block
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/\/\/[^\n]*/g, "");
+  return PAID_PRO_SIGNER_FINALIZE_FORBIDDEN_ROUTE_MARKERS.filter((marker) => codeOnly.includes(marker));
 }

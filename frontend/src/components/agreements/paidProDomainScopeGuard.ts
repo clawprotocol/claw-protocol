@@ -184,6 +184,10 @@ function stripDomainSections(text: string, intake: string): { text: string; remo
 
   for (const line of lines) {
     const trimmed = line.trim();
+    // Never strip the execution/signature tail — domain sections end at IN WITNESS.
+    if (/\bIN WITNESS WHEREOF\b/i.test(trimmed)) {
+      skipping = false;
+    }
     if (isNumberedSectionHeading(trimmed)) {
       const isDomainSection = DOMAIN_SECTION_HEADING_RES.some((re) => re.test(trimmed));
       const isPreservedLegal = PRESERVED_LEGAL_HEADING_RES.test(trimmed);

@@ -712,6 +712,28 @@ function preparePaidProServerDocumentForAcceptanceCore(
     repairs.push("prepare:substantive_brand_licensing_corpus_preserved");
   }
 
+  // Execution-invariant / substantive-wire rollback can restore contaminated tails.
+  // Re-apply domain scope + orphan strip as the last mutation so orphans and
+  // acceptance/demo contamination cannot survive prepare.
+  const finalDomain = applyPaidProDomainScopeGuard(out, intakeText, {
+    logSurface: "acceptance_prep_final",
+  });
+  if (finalDomain !== out) {
+    out = finalDomain;
+    repairs.push("domain_scope:final_contamination_sanitized");
+  }
+  const finalPartyLegalNames =
+    records.length >= 2 ? records.map((r) => r.fullLegalName) : partyNames;
+  if (finalPartyLegalNames.length >= 2) {
+    const finalOrphan = removeOrphanPartyLinesBeforeExecutionTail(out, finalPartyLegalNames, {
+      surface: `${surface}:final`,
+    });
+    if (finalOrphan.detected) {
+      out = finalOrphan.text;
+      repairs.push(...finalOrphan.repairs.map((r) => `${r}:final`));
+    }
+  }
+
   const result = { text: out.trim(), repairs: [...new Set(repairs)] };
   tracePaidProAcceptancePipelineStage({
     stage: "after_preparePaidProServerDocumentForAcceptance",

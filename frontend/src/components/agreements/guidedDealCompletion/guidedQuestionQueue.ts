@@ -63,6 +63,19 @@ function semanticIntentForVariable(v: DealVariable): string {
   return v.id;
 }
 
+function preferVariableInPaymentCluster(a: DealVariable, b: DealVariable): DealVariable {
+  // Without a concrete fee amount, "how paid" beats "confirm total fee".
+  const rank = (id: string): number => {
+    if (id === "project_fee_phase_confirmation") return 0;
+    if (id === "payment_structure") return 1;
+    if (id === "phase_payment_allocation") return 2;
+    if (id === "total_fee_confirmation") return 3;
+    if (id === "milestone_schedule") return 4;
+    return 5;
+  };
+  return rank(a.id) <= rank(b.id) ? a : b;
+}
+
 export function dedupeGuidedQuestionsBySemanticIntent(args: {
   variables: readonly DealVariable[];
   answered?: Readonly<Record<string, string>>;
@@ -72,7 +85,7 @@ export function dedupeGuidedQuestionsBySemanticIntent(args: {
   for (const v of args.variables) {
     if (isResolved(v.id, args.answered, args.skipped)) intentByAnswered.add(semanticIntentForVariable(v));
   }
-  const seenIntent = new Set<string>();
+  const seenIntent = new Map<string, DealVariable>();
   const variables: DealVariable[] = [];
   const removedIds: string[] = [];
   const blockedRepeatIds: string[] = [];
@@ -86,11 +99,24 @@ export function dedupeGuidedQuestionsBySemanticIntent(args: {
       blockedRepeatIds.push(v.id);
       continue;
     }
-    if (seenIntent.has(intent)) {
+    const existing = seenIntent.get(intent);
+    if (existing) {
+      if (intent === "payment_structure") {
+        const preferred = preferVariableInPaymentCluster(existing, v);
+        if (preferred.id !== existing.id) {
+          removedIds.push(existing.id);
+          const idx = variables.findIndex((x) => x.id === existing.id);
+          if (idx >= 0) variables[idx] = preferred;
+          seenIntent.set(intent, preferred);
+        } else {
+          removedIds.push(v.id);
+        }
+        continue;
+      }
       removedIds.push(v.id);
       continue;
     }
-    seenIntent.add(intent);
+    seenIntent.set(intent, v);
     variables.push(v);
   }
   return { variables, removedIds, blockedRepeatIds };

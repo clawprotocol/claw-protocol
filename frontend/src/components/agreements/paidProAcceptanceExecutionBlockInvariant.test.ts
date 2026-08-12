@@ -137,15 +137,18 @@ describe("paidProAcceptanceExecutionBlockInvariant", () => {
     expect(witnessIdx).toBeGreaterThan(section107);
   });
 
-  it("preparePaidProServerDocumentForAcceptance repairs Test250-style body before acceptance", () => {
+  it("preparePaidProServerDocumentForAcceptance does not invent execution chrome when witness is missing", () => {
     const raw = test250StyleServerBodyWithoutExecution();
     const { text, repairs } = preparePaidProServerDocumentForAcceptance(raw, DRAFT, INTAKE);
-    expect(repairs.some((r) => r.includes("acceptance_execution_block"))).toBe(true);
-    expect(countWitnessExecutionSections(text)).toBe(1);
-    expect(countPaidProExecutionBlocks(text)).toBe(1);
+    // Explicit no-invent: acceptance prepare only normalizes an existing witness tail;
+    // signing prepare owns blank By:____ / IN WITNESS append.
+    expect(repairs.some((r) => r.includes("acceptance_execution_block"))).toBe(false);
+    expect(countWitnessExecutionSections(text)).toBe(0);
+    expect(countPaidProExecutionBlocks(text)).toBe(0);
+    expect(text).not.toMatch(/\bIN WITNESS WHEREOF\b/i);
   });
 
-  it("frozen SoT after establish has witnessCount 1 and executionBlockCount 1", () => {
+  it("frozen SoT after establish does not invent execution chrome when prepare left witness missing", () => {
     const raw = test250StyleServerBodyWithoutExecution();
     const prepared = preparePaidProServerDocumentForAcceptance(raw, DRAFT, INTAKE);
     latchPipelineAcceptance(prepared.text);
@@ -156,10 +159,12 @@ describe("paidProAcceptanceExecutionBlockInvariant", () => {
       intakeText: INTAKE,
     });
     const sot = getPaidProSourceOfTruthText();
-    expect(countWitnessExecutionSections(sot)).toBe(1);
-    expect(countPaidProExecutionBlocks(sot)).toBe(1);
-    expect(sot).toContain("CLIENT:");
-    expect(sot).toContain("SERVICE PROVIDER:");
+    expect(countWitnessExecutionSections(sot)).toBe(0);
+    expect(countPaidProExecutionBlocks(sot)).toBe(0);
+    expect(sot).not.toMatch(/\bIN WITNESS WHEREOF\b/i);
+    // Operative party identity from the server body is preserved without signature scaffolding.
+    expect(sot).toContain(PAID_PRO_HARDENING_CLIENT);
+    expect(sot).toContain(PAID_PRO_HARDENING_PROVIDER);
   });
 
   it("leaves an already-canonical single execution block unchanged through prepare on long services body", () => {
@@ -201,10 +206,12 @@ describe("paidProAcceptanceExecutionBlockInvariant", () => {
     expect(hashPaidProCorpus(polished.text)).toBe(sotHash);
   });
 
-  it("safe display path appends execution before enforce when witness missing", () => {
+  it("safe display path does not invent execution chrome when witness is missing", () => {
     const raw = test250StyleServerBodyWithoutExecution();
     const safe = applyAcceptedProCorpusSafeDisplay(raw, { draft: DRAFT, intakeText: INTAKE });
-    expect(safe.repairs.some((r) => r.includes("acceptance_execution_block"))).toBe(true);
-    expect(countPaidProExecutionBlocks(safe.text)).toBe(1);
+    // Default safe display never invents blank signature chrome; opt-in append owns that.
+    expect(safe.repairs.some((r) => r.includes("acceptance_execution_block"))).toBe(false);
+    expect(countPaidProExecutionBlocks(safe.text)).toBe(0);
+    expect(safe.text).not.toMatch(/\bIN WITNESS WHEREOF\b/i);
   });
 });

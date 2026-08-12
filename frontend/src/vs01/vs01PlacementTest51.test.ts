@@ -193,6 +193,8 @@ describe("VS01 placement test51 — initials safe zones", () => {
       roles: r,
       recipientPlacedFields: [],
       senderPlacedFields: merged,
+      // Geometry parity covers initials only when prepare explicitly enabled them.
+      initialsEnabled: true,
     });
     const prepHash = signingFieldGeometryHash(merged);
     const recHash = signingFieldGeometryHash(recipient);

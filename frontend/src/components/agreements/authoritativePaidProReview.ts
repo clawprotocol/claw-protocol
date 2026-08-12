@@ -7,6 +7,10 @@ import { PAID_PRO_AUTHORITY_MIN_LEN } from "./paidProAgreementAuthority";
 import { isAuthoritativePremiumPipelineRenderSource } from "./premiumRenderSourceResolver";
 import { readAuthoritativeSigningCorpus } from "./authoritativeSigningSnapshot";
 import { repairMalformedPaidProAgreementRecital } from "./paidProAgreementRecitalRepair";
+import {
+  repairDuplicateAgreementOpening,
+  resolveCommercialPartyRecordsForOpeningRepair,
+} from "./canonicalPartyIdentityResolver";
 import { stripPremiumIntelligenceCalloutsFromCorpus } from "./premiumDocumentIntelligenceStrip";
 import {
   PAID_PRO_FINAL_HYDRATED_CORPUS_MIN_LEN,
@@ -98,7 +102,16 @@ function finalizeAuthoritativePaidProReviewPlain(text: string): string {
   if (trimmed.length < PAID_PRO_AUTHORITY_MIN_LEN) return trimmed;
   const parties = readConsumedPaidProSignerMetadataAuthority()?.parties;
   const repaired = repairMalformedPaidProAgreementRecital(trimmed, parties).text.trim();
-  const stripped = stripPremiumIntelligenceCalloutsFromCorpus(repaired);
+  const openingRecords = resolveCommercialPartyRecordsForOpeningRepair(
+    "",
+    (parties ?? []).map((p) => p.partyLegalName),
+    (parties ?? []).map((p) => p.roleLabel),
+  );
+  const openingRepaired = repairDuplicateAgreementOpening(
+    repaired,
+    openingRecords.length >= 2 ? openingRecords : undefined,
+  ).text.trim();
+  const stripped = stripPremiumIntelligenceCalloutsFromCorpus(openingRepaired);
   return resolvePaidProDisplayPlainForSurface({
     surface: "review",
     sourcePlain: stripped,
@@ -116,10 +129,12 @@ export function resolveAuthoritativePaidProReviewPlain(
     }
   }
   if (shouldUsePaidProSourceOfTruthDisplayOnly()) {
-    return resolvePaidProAuthoritativeDisplayPlain({
-      draft: args?.draft ?? null,
-      intakeText: args?.intakeText ?? null,
-    });
+    return finalizeAuthoritativePaidProReviewPlain(
+      resolvePaidProAuthoritativeDisplayPlain({
+        draft: args?.draft ?? null,
+        intakeText: args?.intakeText ?? null,
+      }),
+    );
   }
   const pinnedPlain = readPaidProPinnedSignerAppliedCorpus().trim();
   if (pinnedPlain.length >= PAID_PRO_FINAL_HYDRATED_CORPUS_MIN_LEN) {
@@ -244,10 +259,12 @@ export function resolvePaidProFinalReviewVisiblePlain(args: {
   displayCandidatePlain?: string | null;
 }): string {
   if (shouldUsePaidProSourceOfTruthDisplayOnly()) {
-    return resolvePaidProAuthoritativeDisplayPlain({
-      draft: args?.draft ?? null,
-      intakeText: args?.intakeText ?? null,
-    });
+    return finalizeAuthoritativePaidProReviewPlain(
+      resolvePaidProAuthoritativeDisplayPlain({
+        draft: args?.draft ?? null,
+        intakeText: args?.intakeText ?? null,
+      }),
+    );
   }
   const renderPlain = resolvePaidProReviewRenderPlain({
     draft: args.draft ?? null,

@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import { buildHydratedAuthoritativeSigningCorpusFromAuthority } from "./authoritativeSignerHydration";
 import { clearAuthoritativeSigningSnapshot } from "./authoritativeSigningSnapshot";
@@ -36,6 +36,11 @@ import {
 import { buildLivePaidProSignerMetadataAuthority } from "./paidProSignerMetadataAuthority";
 import { resetPaidProReviewSignerMetadataSessionActiveForTests } from "./paidProReviewRenderSessionGate";
 import { setConsumedPaidProSignerMetadataAuthority, clearConsumedPaidProSignerMetadataAuthority } from "./paidProSignerMetadataAuthority";
+import {
+  markPaidReviewSessionPremiumGeneration,
+  resetPaidReviewSessionCorpusInvariantForTests,
+} from "./paidProReviewSessionCorpusInvariantState";
+import { getOrInitSessionAgreementGenerationId } from "../../lib/agreementGenerationId";
 
 const BLUE = "Blue Canyon Analytics LLC";
 const IRON = "Iron Vale Systems Inc.";
@@ -99,11 +104,18 @@ describe("paidPro Test270 corpus diff / handoff / scroll", () => {
     resetPaidProPremiumRecipientHandoffReadGateForTests();
     resetPremiumRecipientHandoffDedupForTests();
     resetPaidProReviewStabilityForTests();
+    resetPaidReviewSessionCorpusInvariantForTests();
     clearPaidProSourceOfTruth();
     clearAuthoritativeSigningSnapshot();
     clearFrozenCanonicalAgreementCorpus();
     clearConsumedPaidProSignerMetadataAuthority();
     resetPaidProReviewSignerMetadataSessionActiveForTests();
+    vi.unstubAllEnvs();
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.restoreAllMocks();
   });
 
   it("classifies signer finalize drift as signer_metadata_only without substantive clause delta", () => {
@@ -125,9 +137,10 @@ describe("paidPro Test270 corpus diff / handoff / scroll", () => {
   });
 
   it("logs lifecycle checkpoints canonical_freeze → signer_finalize", () => {
-    vi.stubEnv("MODE", "development");
     vi.stubEnv("VITE_PAID_PRO_PERF_TRACE", "1");
     const info = vi.spyOn(console, "info").mockImplementation(() => {});
+    const generationId = getOrInitSessionAgreementGenerationId();
+    markPaidReviewSessionPremiumGeneration(generationId, "test270_ensure_premium_completion");
     const snap = buildCanonicalAgreementSnapshot({
       surface: "test270",
       tier: "pro",
@@ -137,6 +150,7 @@ describe("paidPro Test270 corpus diff / handoff / scroll", () => {
         { name: IRON, role: "Service Provider" },
       ],
       minLen: 500,
+      reviewSessionId: generationId,
     });
     freezeCanonicalAgreementSnapshot(snap, "server_full_document_text");
     expect(readPaidProCorpusLifecycleCheckpoint("canonical_freeze")?.hash).toBeTruthy();
@@ -165,7 +179,6 @@ describe("paidPro Test270 corpus diff / handoff / scroll", () => {
       executionBlockCountAfter: 1,
     });
     info.mockRestore();
-    vi.unstubAllEnvs();
   });
 
   it("Blue Canyon fixture: review and copy share hash; signer finalize explains drift", () => {

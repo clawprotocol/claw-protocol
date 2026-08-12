@@ -219,9 +219,11 @@ describe("Recipient signing pipeline — diagnostics", () => {
     expect(src).toContain("manifestDecodeError");
   });
 
-  it("vs01UrlBootstrap persists portable canonical packet when URL decodes one", () => {
+  it("vs01UrlBootstrap seeds portable packet and defers persistence to server authority", () => {
     const src = readFileSync(join(__dirname, "vs01UrlBootstrap.ts"), "utf8");
-    expect(src).toContain("storeVs01CanonicalPacketPortable(documentId, canonicalPacket)");
+    expect(src).toContain("storeVs01CanonicalPacketSeed(canonicalPacket.seed)");
+    expect(src).toContain("defer portable persistence to server authority bootstrap");
+    expect(src).not.toContain("storeVs01CanonicalPacketPortable(documentId, canonicalPacket)");
   });
 
   it("vs01UrlBootstrap warns on hydration miss (zero fields despite manifest)", () => {

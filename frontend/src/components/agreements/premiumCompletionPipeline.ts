@@ -5340,8 +5340,9 @@ async function runPremiumCompletionInner(
         preview: intakeRecoveryPreview,
       };
     };
-    // A non-empty short json_parse wire below the paid floor must reject cleanly —
-    // do not invent a ~5k local recovery SoT (json_parse degraded floor contract).
+    // Short non-empty json_parse wires below the paid floor must not invent SoT via the
+    // late/server-candidate recovery paths below. Contaminated aliases still use the
+    // deterministic intake path (degradedJsonParseNoWireServerFull / Test210-class).
     const shortNonemptyJsonParseWireBelowFloor =
       premiumJsonParseDegradedAttemptCount > 0 &&
       lastWireAuthoritativeBodyLen > 0 &&
@@ -5351,9 +5352,9 @@ async function runPremiumCompletionInner(
       rejectedPaidCorpusDueToClientGates &&
       !premiumBodyHardRejectedForDevContextLeak &&
       !substantiveServerFullOnWire &&
-      !shortNonemptyJsonParseWireBelowFloor &&
       (degradedJsonParseNoWireServerFull ||
-        (!jsonParseClientRejected &&
+        (!shortNonemptyJsonParseWireBelowFloor &&
+          !jsonParseClientRejected &&
           lastWireAuthoritativeBodyLen < PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN))
     ) {
       const deterministic = tryDeterministicIntakeRecovery();

@@ -106,7 +106,11 @@ import {
 } from "./paidProBrandLicensingFreezeAuthority";
 import { repairBrandLicensingRoleFidelityInCorpus } from "./paidProBrandLicensingRoleFidelityRepair";
 import { intakeDescribesBrandLicensingDistributionManufacturingStack } from "./paidProAgreementTitleScope";
-import { SUBSTANTIVE_SERVER_DRAFT_MIN_LEN, PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN } from "./premiumAcceptancePolicy";
+import {
+  SUBSTANTIVE_SERVER_DRAFT_MIN_LEN,
+  PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN,
+  getLatchedAcceptedServerFullDraftAuthority,
+} from "./premiumAcceptancePolicy";
 import { preparePaidProServerDocumentForAcceptance } from "./paidProConciseServicesQuality";
 import {
   assertProfessionalCorpusCleanForFreeze,
@@ -350,6 +354,36 @@ export function preparePaidProFreezeCandidateText(
   const surface = args.surface ?? "paid_pro_freeze_candidate";
   const repairs: string[] = [];
   const inputTrimmed = trim(args.text);
+  // Latched accepted server_full_draft must freeze as-is — opening/quality floors must not
+  // invent or rewrite operative prose after the authority latch (Test245).
+  const latchedAccepted = getLatchedAcceptedServerFullDraftAuthority();
+  if (
+    latchedAccepted &&
+    latchedAccepted.body === inputTrimmed &&
+    (requestedSource === "server_full_draft" ||
+      requestedSource === "server_full_document_text" ||
+      requestedSource === latchedAccepted.source)
+  ) {
+    const reviewParties = resolvePartiesForReviewRender({
+      draft: args.draft ?? null,
+      intakeText: args.intakeText ?? null,
+    });
+    const parties: CanonicalAgreementSnapshotParty[] = reviewParties
+      .map((p) => ({
+        name: p.partyLegalName.trim(),
+        role: null,
+        email: p.signerEmail?.trim() || null,
+        partyAddress: p.partyAddress?.trim() || null,
+      }))
+      .filter((p) => p.name.length >= 2);
+    return {
+      text: inputTrimmed,
+      hash: hashPaidProCorpus(inputTrimmed),
+      reviewParties,
+      parties,
+      repairs: ["freeze_prep_preserved_latched_server_full_draft"],
+    };
+  }
   const inputPipelineHash = paidProPipelineAcceptedCorpusHash(inputTrimmed);
   const pipelineHashEarly = readPaidProPipelineAcceptedCorpusHash();
   if (
