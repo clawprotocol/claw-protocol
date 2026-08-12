@@ -241,6 +241,7 @@ function evaluatePaidProSotEstablishmentForSnapshot(args: {
   intakeRaw: string;
   partyNames: readonly string[];
   surface: string;
+  allowUserApprovedShortCorpus?: boolean;
 }) {
   const decision = resolvePaidProSotEstablishmentDecision({
     snapshot: args.snapshot,
@@ -250,6 +251,7 @@ function evaluatePaidProSotEstablishmentForSnapshot(args: {
     adoptedHash: args.adoptedHash,
     intakeRaw: args.intakeRaw,
     partyNames: args.partyNames,
+    allowUserApprovedShortCorpus: args.allowUserApprovedShortCorpus,
   });
   logPaidProSotEstablishmentDecision(decision, args.surface);
   if (decision.warnOnly) {
@@ -628,6 +630,7 @@ export function establishPaidProSourceOfTruth(args: {
     intakeRaw,
     partyNames,
     surface: "establish_paid_pro_source_of_truth",
+    allowUserApprovedShortCorpus: Boolean(args.allowShorterOverwrite),
   });
 
   if (establishmentDecision.blocked) {
@@ -676,6 +679,7 @@ export function establishPaidProSourceOfTruth(args: {
         intakeRaw,
         partyNames,
         surface: "establish_paid_pro_source_of_truth_retry",
+        allowUserApprovedShortCorpus: Boolean(args.allowShorterOverwrite),
       });
     }
   }
@@ -876,6 +880,7 @@ export function establishPaidProSourceOfTruth(args: {
       source: requestedSource,
       integrityOk: true,
       reviewSessionId: record.reviewSessionId ?? null,
+      allowUserApprovedRevision: Boolean(args.allowShorterOverwrite),
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -1182,6 +1187,23 @@ export function getPaidProDocumentForSurface(
     reason: `surface:${surface}`,
   });
   const executionBlockAppended = false;
+  const preserveHydratedExecutionCorpus =
+    hydrated.signerMetadataApplied &&
+    (hydrated.source === "pinned_signer_applied_corpus" ||
+      hydrated.source === "authoritative_signing_snapshot");
+  const partiesForOverlayGate = resolvePartiesForReviewRender(opts);
+  const consumedAuthorityOverlayActive =
+    partiesForOverlayGate.length >= 2 &&
+    (consumedAuthoritySignerMetadataComplete(partiesForOverlayGate) ||
+      isPaidProReviewSignerMetadataSessionActive());
+  // Frozen SoT / pinned execution bytes are surface authority when no live signer overlay
+  // is active. Heading polish must not rewrite document hashes for review/copy consumers.
+  const preserveAuthoritativeSurfaceBytes =
+    preserveHydratedExecutionCorpus ||
+    (!signerMetadataApplied &&
+      !hydrated.signerMetadataApplied &&
+      !consumedAuthorityOverlayActive);
+
   if (
     surface === "review" ||
     surface === "copy" ||
@@ -1190,26 +1212,24 @@ export function getPaidProDocumentForSurface(
     surface === "vs01" ||
     surface === "finalized"
   ) {
-    const reviewCopyPlain = resolvePaidProReviewRenderPlain({
-      ...opts,
-      skipUserVisibleDisplayPrep: surface === "vs01",
-      deferSignerMetadataRepair: shouldDeferPaidProReviewRenderSignerRepair({
-        signerMetadataSessionActive: isPaidProReviewSignerMetadataSessionActive(),
-      }),
-    });
-    const aligned = reviewCopyPlain;
-    const preserveHydratedExecutionCorpus =
-      hydrated.signerMetadataApplied &&
-      (hydrated.source === "pinned_signer_applied_corpus" ||
-        hydrated.source === "authoritative_signing_snapshot");
-    if (aligned.length >= PAID_PRO_RUNTIME_AUTHORITY_MIN_LEN && !preserveHydratedExecutionCorpus) {
-      text = aligned;
-      hash = hashPaidProCorpus(text);
-      if (!signerMetadataApplied) {
-        const partiesForGate = resolvePartiesForReviewRender(opts);
-        if (consumedAuthoritySignerMetadataComplete(partiesForGate)) {
-          signerMetadataApplied = true;
-          corpusSource = "signer_hydrated_from_authority";
+    if (!preserveAuthoritativeSurfaceBytes) {
+      const reviewCopyPlain = resolvePaidProReviewRenderPlain({
+        ...opts,
+        skipUserVisibleDisplayPrep: surface === "vs01",
+        deferSignerMetadataRepair: shouldDeferPaidProReviewRenderSignerRepair({
+          signerMetadataSessionActive: isPaidProReviewSignerMetadataSessionActive(),
+        }),
+      });
+      const aligned = reviewCopyPlain;
+      if (aligned.length >= PAID_PRO_RUNTIME_AUTHORITY_MIN_LEN) {
+        text = aligned;
+        hash = hashPaidProCorpus(text);
+        if (!signerMetadataApplied) {
+          const partiesForGate = resolvePartiesForReviewRender(opts);
+          if (consumedAuthoritySignerMetadataComplete(partiesForGate)) {
+            signerMetadataApplied = true;
+            corpusSource = "signer_hydrated_from_authority";
+          }
         }
       }
     }
@@ -1225,7 +1245,7 @@ export function getPaidProDocumentForSurface(
     }
   }
 
-  if (isPaidProUserVisibleDocumentSurface(surface)) {
+  if (isPaidProUserVisibleDocumentSurface(surface) && !preserveAuthoritativeSurfaceBytes) {
     const displayPlain = resolvePaidProDisplayPlainForSurface({
       surface,
       sourcePlain: text,

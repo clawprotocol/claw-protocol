@@ -10,7 +10,7 @@ import {
   clearCachedSubscriptionEntitlement,
   writeCachedSubscriptionEntitlement,
 } from "../../access/subscriptionEntitlementCache";
-import { getOrgId } from "../../launch/orgContext";
+import { getOrgId, setOrgId } from "../../launch/orgContext";
 import {
   resolveAuthoritativeCreateFlowReviewShell,
   shouldUsePaidProCreateFlowReviewShell,
@@ -33,6 +33,7 @@ import {
 } from "./enterCanonicalPaidProReviewFlow";
 import { resolveAuthoritativeSignerCount } from "./signerCountAuthority";
 import { clearCurrentSessionProEntitlementMarkers } from "./paidProSessionEligibility";
+import { markPaidProPipelineValidationPassed } from "./paidProPostAcceptanceValidatorCache";
 import {
   TEST507_FOUR_PARTY_INTAKE,
   TEST507_FOUR_PARTY_LEGAL,
@@ -40,9 +41,12 @@ import {
 
 const intakeSrc = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
 
+const TEST507_PAID_ORG = "test-org-507-paid";
+
 function seedPaidWorkspaceEntitlement(): void {
+  setOrgId(TEST507_PAID_ORG);
   markWorkspaceProEntitlementResolvedForTests(true);
-  const orgId = getOrgId().trim() || "test-org";
+  const orgId = getOrgId().trim() || TEST507_PAID_ORG;
   writeCachedSubscriptionEntitlement(
     { plan_code: "pro", status: "active", org_id: orgId },
     orgId,
@@ -53,6 +57,7 @@ describe("TEST507 — returning paid 4-party create bypasses free multi-party Pr
   beforeEach(() => {
     sessionStorage.clear();
     localStorage.clear();
+    setOrgId(TEST507_PAID_ORG);
     invalidateWorkspaceProEntitlementCache();
     clearCachedSubscriptionEntitlement();
     clearCurrentSessionProEntitlementMarkers();
@@ -155,9 +160,12 @@ describe("TEST507 — returning paid 4-party create bypasses free multi-party Pr
         paidProAuthoritative: true,
       }),
     ).toBe(true);
+    const corpusPlain = "x".repeat(2600);
+    // Returning paid-create requires a latched pipeline acceptance (TEST515) before canonical entry.
+    markPaidProPipelineValidationPassed({ text: corpusPlain, source: "server_full_draft" });
     const plan = planEnterCanonicalPaidProReviewFlow({
       source: "returning_paid_create",
-      corpusPlain: "x".repeat(2600),
+      corpusPlain,
       pipelineSource: "server_full_draft",
       draft: {
         parties: TEST507_FOUR_PARTY_LEGAL.map((name, i) => ({

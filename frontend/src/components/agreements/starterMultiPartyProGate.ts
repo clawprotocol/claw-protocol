@@ -286,11 +286,18 @@ export function assessStarterComplexityGate(raw: string): StarterComplexityGateA
   const intake = String(raw || "").trim();
   const legalAuthority = resolveLegalPartyAuthorityForIntake(intake);
   const authorityPartyNames = readLegalPartyNamesFromAuthority(legalAuthority.parties);
-  const parties =
-    authorityPartyNames.length >= 2 ? authorityPartyNames : resolveStarterGatePartyLegalEntities(intake);
-  const extractedEntityCount = parties.length;
+  const starterGateParties = resolveStarterGatePartyLegalEntities(intake);
   const indexedPartyMax = maxIndexedPartyOrSigner(intake);
   const numberedPartyMax = maxNumberedListPartyIndex(intake);
+  // Prefer numbered-list / starter-gate entities when they recover more parties than
+  // authority alone (Evergreen `N. Entity LLC (Role)` lists can drop a Services LLC).
+  const parties =
+    starterGateParties.length > authorityPartyNames.length
+      ? starterGateParties
+      : authorityPartyNames.length >= 2
+        ? authorityPartyNames
+        : starterGateParties;
+  const extractedEntityCount = parties.length;
   const signerSlots = countSignerDetailSlots(intake);
   const partyCount = Math.max(extractedEntityCount, indexedPartyMax, numberedPartyMax);
   const revenuePctCount = countRevenueSharePercentages(intake);

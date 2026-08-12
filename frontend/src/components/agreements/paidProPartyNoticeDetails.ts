@@ -873,7 +873,6 @@ export function sanitizeNoticeStanzaAddressContent(stanza: string): { stanza: st
     const trimmed = line.trim();
     const headerMatch = trimmed.match(NOTICE_ADDRESS_HEADER_RE);
     if (headerMatch) {
-      const inlineBody = (headerMatch[1] ?? "").trim();
       // Empty sanitize result covers bare `Address:` and placeholder-only bodies
       // ("Address: provided during signer setup") — never emit orphan `Address:`.
       if (formatted.length === 0) {

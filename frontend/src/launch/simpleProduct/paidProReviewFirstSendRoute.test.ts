@@ -25,10 +25,12 @@ describe("paid Pro review-first send route (no generic /app/send gate)", () => {
     );
   });
 
-  it("paid Pro post-recipient handoff mints review links to /app/done for review intent", () => {
+  it("paid Pro post-recipient handoff mints review links then routes via owner post-review resolver", () => {
     const handoff = readFileSync(join(__dirname, "paidProPostRecipientSetupHandoff.ts"), "utf8");
     expect(handoff).toContain('premiumSendIntent === "review"');
-    expect(handoff).toContain("navigate(`/app/done/");
+    // Contract: mint + resolveOwnerPostReviewSendRoute (dashboard/done), not a hardcoded /app/send gate.
+    expect(handoff).toContain("resolveOwnerPostReviewSendRoute");
+    expect(handoff).toContain("void options.navigate(route.path)");
     expect(handoff).toContain("shouldSkipPaidProPrepareReviewLinkInterstitial");
     expect(handoff).toContain("reviewLinkMintFailureUserCopy");
     expect(handoff).toContain("resolveReviewFirstMintFailureUserMessage");

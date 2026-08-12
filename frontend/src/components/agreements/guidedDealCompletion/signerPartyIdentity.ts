@@ -301,10 +301,41 @@ function fillSignatureNameUnderscoreLines(
       const partyIndex = resolvePartyIndexForSignatureLine(lines, i, identities);
       const id = identities[partyIndex];
       const title = id?.title?.trim() ?? "";
-      if (!title) continue;
-      if (/_{4,}/.test(trimmed) || /^title\s*:\s*$/i.test(trimmed)) {
+      if (title && (/_{4,}/.test(trimmed) || /^title\s*:\s*$/i.test(trimmed))) {
         const indent = lines[i].match(/^\s*/)?.[0] ?? "";
         lines[i] = `${indent}Title: ${title}`;
+        replacements += 1;
+      }
+      const email = id?.email?.trim() ?? "";
+      const address = String(id?.partyAddress ?? "").trim();
+      const lookAhead = [lines[i + 1], lines[i + 2], lines[i + 3]]
+        .map((l) => (l ?? "").trim())
+        .filter(Boolean);
+      const hasEmailSoon = lookAhead.some((l) => /^email\s*:/i.test(l));
+      const hasAddressSoon = lookAhead.some((l) => /^address\s*:/i.test(l));
+      const indent = lines[i].match(/^\s*/)?.[0] ?? "";
+      if (email && !hasEmailSoon) {
+        lines.splice(i + 1, 0, `${indent}Email: ${email}`);
+        replacements += 1;
+        i += 1;
+      }
+      if (address && !hasAddressSoon) {
+        // Prefer after Email when we just inserted/found one.
+        const insertAt =
+          /^email\s*:/i.test((lines[i + 1] ?? "").trim()) ? i + 2 : i + 1;
+        lines.splice(insertAt, 0, `${indent}Address: ${address}`);
+        replacements += 1;
+        i = insertAt;
+      }
+      continue;
+    }
+
+    if (/^email\s*:/i.test(trimmed) && !/^email\s+for\s+notices?\s*:/i.test(trimmed)) {
+      const partyIndex = resolvePartyIndexForSignatureLine(lines, i, identities);
+      const email = identities[partyIndex]?.email?.trim() ?? "";
+      if (email && (/_{4,}/.test(trimmed) || /^email\s*:\s*$/i.test(trimmed))) {
+        const indent = lines[i].match(/^\s*/)?.[0] ?? "";
+        lines[i] = `${indent}Email: ${email}`;
         replacements += 1;
       }
     }

@@ -40,7 +40,7 @@ export type ClauseFamilyStructuralIntegrityReport = {
 
 /** Operative notice delivery language — allow short intervening punctuation/words. */
 const NOTICES_OPERATIVE_TEXT_RE =
-  /\bnotices?\b(?:\s*[:.—-]?\s*|\s+)(?:(?:acceptable\s+via|by)\s+)?(?:must|shall|are|is|will|may|under\s+this\s+agreement|email|e-?mail)\b/i;
+  /(?:\bnotices?\b(?:\s*[:.—-]?\s*|\s+)(?:(?:acceptable\s+via|by)\s+)?(?:must|shall|are|is|will|may|under\s+this\s+agreement|email|e-?mail)\b|\b(?:any\s+)?notices?\s+(?:required\s+or\s+permitted\s+)?under\s+this\s+agreement\s+(?:must|shall|may|will)\b|\bnotices?\b[\s\S]{0,100}?\b(?:must|shall|may|will)\s+be\s+in\s+writing\b)/i;
 
 const ORPHAN_EMAIL_LINE_RE = /^\s*Email(?:\s+for\s+Notice)?\s*:\s*$/i;
 const ORPHAN_ADDRESS_LINE_RE = /^\s*Address(?:\s+for\s+Notice)?\s*:\s*$/i;

@@ -64,12 +64,26 @@ export function qualifiesAsConciseAuthoritativePaidServerDraft(text: string): bo
   const sectionCount = countNumberedSections(t);
   const hasWitnessClose = /IN WITNESS WHEREOF|executed this Agreement/i.test(t);
   const hasEsignClose = /\belectronic\s+signatures?\b|\be-?sign\b|\bcounterparts?\b/i.test(t);
+  const hasAgreementTitle = /^\s*[A-Z][A-Z0-9\s,&'/()-]{4,}\s*$/m.test(t);
+  const hasOpeningRecital =
+    /\b(?:this\s+agreement\s+is\s+between|this\s+agreement\s+is\s+entered\s+into|entered\s+into\s+as\s+of)\b/i.test(
+      t,
+    );
   // Concise commercial Pro drafts may close with an Electronic Signatures section before
   // signer-setup adds witness/execution blocks — still authoritative when structure is strong.
-  // Concise commercial drafts may use markdown section headings + e-sign close
-  // without a full 6-section numbered outline or IN WITNESS WHEREOF block.
-  if (!hasWitnessClose && !(hasEsignClose && sectionCount >= 3)) return false;
-  if (sectionCount < 3 && !/^\s*[A-Z][A-Z0-9\s,&-]{4,}\s*$/m.test(t)) return false;
+  // Naked-head repair may yield opening + operative body without an ALL-CAPS title line yet.
+  const strongOpeningWithoutClose =
+    hasOpeningRecital &&
+    (hasAgreementTitle || t.length >= 800) &&
+    (sectionCount >= 1 || t.length >= 800);
+  if (
+    !hasWitnessClose &&
+    !(hasEsignClose && sectionCount >= 3) &&
+    !strongOpeningWithoutClose
+  ) {
+    return false;
+  }
+  if (sectionCount < 1 && !hasAgreementTitle && t.length < 800) return false;
   if (/\b(?:starter preview|live preview|preview only|fallback preview|retry pro draft)\b/i.test(t)) {
     return false;
   }

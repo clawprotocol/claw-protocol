@@ -115,10 +115,11 @@ export function resolveAuthoritativeCreateFlowReviewShell(
   // local-org / empty bootstrap: never select paid_pro from path/dashboard inference alone.
   // Explicit workspace Pro entitlement, checkout completion, and accepted corpora still win.
   if (mustBlockPaidEntitlementForLegacyFallbackOrg()) {
+    // local-org / empty bootstrap: never trust workspaceProEntitled alone (Case F).
+    // Accepted corpora, session Pro markers, and checkout completion still win.
     if (hasPaidProSourceOfTruth()) return "paid_pro";
     if (input.paidProAuthoritative) return "paid_pro";
     if (input.premiumPersistedFlowActive || input.premiumSendPathUnlocked) return "paid_pro";
-    if (input.workspaceProEntitled) return "paid_pro";
     if (hasCurrentSessionProEntitlement()) return "paid_pro";
     if (hasAcceptedPaidCreateFlowFreezeLatch()) return "paid_pro";
     if (hasPaidCreateFlowPipelineAcceptance()) return "paid_pro";

@@ -23,8 +23,6 @@ import {
   type PaidProDocumentSurface,
 } from "./paidProSourceOfTruthState";
 import { tracePaidProCorpusMutation } from "./paidProMutationTrace";
-import { consumedAuthoritySignerMetadataComplete } from "./paidProSignerMetadataCommitPolicy";
-import { isPaidProReviewSignerMetadataSessionActive } from "./paidProReviewRenderSessionGate";
 import { resolvePaidProReviewRenderPlain } from "./paidProReviewRenderCorpus";
 
 export const PAID_PRO_FINAL_HYDRATED_CORPUS_MIN_LEN = 500;
@@ -94,13 +92,9 @@ function authorityHasSignerMetadata(): boolean {
 function hydrateFromConsumedAuthority(rawCorpus: string, intakeRaw: string): string {
   const authority = readConsumedPaidProSignerMetadataAuthority();
   if (!authority || !authorityHasSignerMetadata()) return "";
-  if (
-    !paidProSignerExecutionCorpusIsFrozen() &&
-    !(
-      consumedAuthoritySignerMetadataComplete(authority.parties) &&
-      !isPaidProReviewSignerMetadataSessionActive()
-    )
-  ) {
+  // Live consumed-authority hydrate only after finalize pin/snapshot — never rewrite
+  // pre-signer SoT from incomplete typing sessions (partial-metadata body prefix tests).
+  if (!paidProSignerExecutionCorpusIsFrozen()) {
     return "";
   }
   const hydrated = buildHydratedAuthoritativeSigningCorpusFromAuthority({

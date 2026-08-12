@@ -338,12 +338,18 @@ export function extractLineSeparatedLegalEntityParties(intakeRaw: string): strin
     if (/^total\s+(?:contract\s+value|project\s+fee)/i.test(line)) continue;
     if (/^(?:term|fee|payment|governing|duration|oklahoma|texas|law)\b/i.test(line)) continue;
     if (looksLikeAuthorizedSignersBulletLine(line)) continue;
-    if (/workflow|consulting|automation|services?\b/i.test(line) && !PARTY_ENTITY_SUFFIX_RE.test(line)) {
-      continue;
-    }
+    // Filter service/workflow phrase lines on the extracted entity (not the raw line).
+    // Numbered role-tagged lines like `3. Delta Integration Services LLC (Systems Integrator)`
+    // end with `)` so end-anchored suffix checks on the raw line falsely skip real parties.
     const normalized = NUMBERED_PARTY_ENTITY_LINE_RE.test(line)
       ? extractLegalEntityFromIntakeLine(line)
       : normalizeAgreementPartyName(isolateLegalEntityFromContaminatedName(line));
+    if (
+      /workflow|consulting|automation|services?\b/i.test(normalized) &&
+      !PARTY_ENTITY_SUFFIX_RE.test(normalized)
+    ) {
+      continue;
+    }
     if (
       normalized.length >= 3 &&
       !isInvalidPartySlotLegalEntity(normalized) &&

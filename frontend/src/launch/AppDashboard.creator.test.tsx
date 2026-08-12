@@ -884,7 +884,8 @@ describe("AppDashboard creator-centric surface", () => {
     ).toBe(false);
   });
 
-  it("shows Genesis monthly allowance on the dashboard", async () => {
+  it("does not paint Genesis buyer create-tier allowance on the dashboard", async () => {
+    // Contract: Guest/Pro are buyer create tiers; Genesis is affiliate-only (no allowance chrome).
     vi.spyOn(commercialEntitlement, "fetchCommercialEntitlement").mockResolvedValue({
       state: "genesis",
       grantSource: "admin",
@@ -927,10 +928,10 @@ describe("AppDashboard creator-centric surface", () => {
     render(<AppDashboard />);
 
     await waitFor(() => {
-      expect(screen.getByTestId("dashboard-allowance-status").textContent).toMatch(
-        /Genesis Dog access:\s*5 of 5 new agreements remaining this month/i,
-      );
+      expect(screen.getByText(/All agreements/i)).toBeTruthy();
     });
+    expect(screen.queryByTestId("dashboard-allowance-status")).toBeNull();
+    expect(document.body.textContent || "").not.toMatch(/Genesis Dog access:\s*\d+\s+of\s+\d+/i);
   });
 
   it("excludes archived rows from All agreements and links to Agreements Archive", async () => {

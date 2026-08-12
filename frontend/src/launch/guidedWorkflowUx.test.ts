@@ -34,11 +34,13 @@ describe("guided workflow copy", () => {
     expect(PRO_CTA_CONTINUE).toBe("Continue with Pro");
     expect(PRO_CTA_KEEP_FREE_DRAFT).toBe("Keep free draft");
     expect(PRO_CTA_EDIT_FREE_DRAFT).toBe("Edit free draft");
-    expect(PRO_UPGRADE_FREE_BULLETS).toContain("Copy your draft text");
+    // Contract: Free column is 1–2 party draft capability (not download / auto-share framing).
+    expect(PRO_UPGRADE_FREE_BULLETS).toContain("Copy/edit wording");
+    expect(PRO_UPGRADE_FREE_BULLETS).toContain("Simple 1–2 party draft");
     expect(PRO_UPGRADE_FREE_BULLETS.join(" ").toLowerCase()).not.toMatch(/download/);
-    expect(PRO_UPGRADE_FREE_COLUMN_HELPER).toMatch(/collaboration, signatures, and proof records/i);
-    expect(PRO_UPGRADE_FREE_BULLETS).toContain("Nothing is shared automatically");
-    expect(PRO_UPGRADE_PRO_BULLETS[0]).toBe("Send a private review link");
+    expect(PRO_UPGRADE_FREE_COLUMN_HELPER).toMatch(/simple 1–2 party drafts/i);
+    expect(PRO_UPGRADE_PRO_BULLETS[0]).toBe("Multi-party and advanced agreements");
+    expect(PRO_UPGRADE_PRO_BULLETS).toContain("Review links and requested changes");
   });
 });
 

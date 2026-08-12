@@ -423,6 +423,8 @@ export type PaidProSignerMetadataParty = {
   signerName: string;
   signerTitle: string;
   partyAddress: string;
+  /** Optional intake/role-alias label (Buyer/Vendor/…); never invents parties. */
+  roleLabel?: string;
 };
 
 export type PaidProSignerMetadataAuthoritySource =

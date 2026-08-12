@@ -29,7 +29,7 @@ const PARTY_SECTION_HEADING_RE =
   /^(?:CLIENT|SERVICE\s+PROVIDER|ANALYTICS\s+PROVIDER|PARTY(?:\s+\d+)?)\s*:\s*(.*)$/i;
 
 const SIG_FIELD_RE =
-  /^(By|Name|Title|Date|Email\s+for\s+Notices?|Address\s+for\s+Notices?)\s*:\s*(.*)$/i;
+  /^(By|Name|Title|Date|Email(?:\s+for\s+Notices?)?|Address(?:\s+for\s+Notices?)?)\s*:\s*(.*)$/i;
 
 const ENTITY_SUFFIX_LINE_RE =
   /\b(?:LLC|L\.L\.C\.|Inc\.?|Incorporated|Corp\.?|Corporation|Ltd\.?|Limited|LLP|PLLC|LP|L\.P\.)\b/i;
@@ -136,7 +136,17 @@ function hydrateFieldLine(
     if (!title && isBlankSigValue(value)) missing.push(`title:${party.partyIndex}`);
     return { line, hydrated: 0, missing };
   }
+  if (/^email$/i.test(field)) {
+    const email = (party.signerEmail || identity.email || "").trim();
+    if (email && (overwrite || isBlankSigValue(value))) {
+      const next = fillSigFieldLine(line, "Email", email);
+      if (next.trim() === trimmed) return { line, hydrated: 0, missing };
+      return { line: next, hydrated: 1, missing };
+    }
+    return { line, hydrated: 0, missing };
+  }
   if (/^email\s+for\s+notice/i.test(field) || /^address\s+for\s+notice/i.test(field)) {
+    // Strip legacy "Email/Address for Notice" labels; bare Email: is filled above / inserted below.
     return { line: "", hydrated: 0, missing: [] };
   }
   return { line, hydrated: 0, missing };
@@ -245,6 +255,33 @@ export function hydratePaidProExecutionBlockWithSignerMetadata(
         fieldsHydrated += hydrated.hydrated;
       }
       missingFields.push(...hydrated.missing);
+
+      // After Title, insert bare Email:/Address: when authority has contact and the block lacks them.
+      if (/^title\s*:/i.test(lines[i]!.trim()) && currentParty) {
+        const email = (currentParty.party.signerEmail || currentParty.identity.email || "").trim();
+        const address = (
+          currentParty.party.partyAddress ||
+          currentParty.identity.partyAddress ||
+          ""
+        ).trim();
+        const lookAhead = [lines[i + 1], lines[i + 2], lines[i + 3]]
+          .map((l) => (l ?? "").trim())
+          .filter(Boolean);
+        const hasEmailSoon = lookAhead.some((l) => /^email\s*:/i.test(l));
+        const hasAddressSoon = lookAhead.some((l) => /^address\s*:/i.test(l));
+        const indent = lines[i]!.match(/^\s*/)?.[0] ?? "";
+        if (email && !hasEmailSoon) {
+          lines.splice(i + 1, 0, `${indent}Email: ${email}`);
+          fieldsHydrated += 1;
+          i += 1;
+        }
+        if (address && !hasAddressSoon) {
+          const insertAt = /^email\s*:/i.test((lines[i + 1] ?? "").trim()) ? i + 2 : i + 1;
+          lines.splice(insertAt, 0, `${indent}Address: ${address}`);
+          fieldsHydrated += 1;
+          i = insertAt;
+        }
+      }
     }
 
     offset += lines[i].length + 1;

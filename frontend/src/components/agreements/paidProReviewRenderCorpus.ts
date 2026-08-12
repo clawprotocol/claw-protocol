@@ -30,7 +30,10 @@ import {
   setConsumedPaidProSignerMetadataAuthority,
   type PaidProSignerMetadataAuthority,
 } from "./paidProSignerMetadataAuthority";
-import { resolvePaidProUnifiedSurfaceCorpus } from "./paidProAgreementAuthorityChain";
+import {
+  isPaidProExecutionCorpusSource,
+  resolvePaidProUnifiedSurfaceCorpus,
+} from "./paidProAgreementAuthorityChain";
 import {
   resolvePaidProFinalHydratedCorpusForSurface,
   type PaidProFinalHydratedCorpusSource,
@@ -872,6 +875,18 @@ export function resolvePaidProReviewRenderPlain(
       return visible;
     }
   }
+  // Pinned / snapshot execution corpus is the shared review+copy authority — do not invent
+  // Notices or re-polish away from the finalized bytes (surface parity / clipboard path).
+  const executionUnified = resolvePaidProUnifiedSurfaceCorpus();
+  if (
+    executionUnified &&
+    isPaidProExecutionCorpusSource(executionUnified.source) &&
+    executionUnified.text.length >= PAID_PRO_AUTHORITY_MIN_LEN
+  ) {
+    const visible = executionUnified.text.trim();
+    auditPaidProReviewRenderCorpus(visible);
+    return visible;
+  }
   const partiesForRender = resolvePartiesForReviewRender(args);
   const needsSignerOverlay = paidProReviewRenderNeedsSignerExecutionOverlay({
     deferSignerMetadataRepair: args?.deferSignerMetadataRepair,
@@ -890,25 +905,31 @@ export function resolvePaidProReviewRenderPlain(
   const memoKey = buildPaidProReviewPlainMemoKey(seedForMemo, surface);
   const memoHit = readMemoizedPaidProReviewPlain(memoKey);
   if (memoHit != null && !needsSignerOverlay && !isPaidProPostFinalizeHydratedCorpusLocked()) {
+    if (shouldUsePaidProSourceOfTruthDisplayOnly()) {
+      return (memoHit || "").trim();
+    }
     return finishUserVisiblePlain(
-      shouldUsePaidProSourceOfTruthDisplayOnly()
-        ? memoHit
-        : normalizePaidProOrphanSubsections(memoHit, { source: `${surface}:memo` }).text,
+      normalizePaidProOrphanSubsections(memoHit, { source: `${surface}:memo` }).text,
     );
   }
 
   let rendered: string;
   if (shouldUsePaidProSourceOfTruthDisplayOnly()) {
+    // No signer overlay: authoritative review/copy bytes are the frozen SoT itself.
+    // Presentation projection belongs in HTML helpers, not document-surface plain.
     rendered = tracePaidProQaPassText(
       "resolvePaidProReviewRenderPlain",
       `${surface}:display_only_sot`,
       seedForMemo,
-      () => resolvePaidProAuthoritativeDisplayPlain(args),
+      () =>
+        needsSignerOverlay
+          ? resolvePaidProAuthoritativeDisplayPlain(args)
+          : getPaidProSourceOfTruthText().trim(),
     );
     logPostFreezeCorpusDrift({
       surface: "paid_pro_review_render",
       renderedText: rendered,
-      mutationSource: "signer_identity_apply",
+      mutationSource: needsSignerOverlay ? "signer_identity_apply" : "unknown",
     });
     logExecutionBlockLocation(rendered, "paid_pro_review_render");
     logExecutionBlockCount(rendered, "paid_pro_review_render");
@@ -941,7 +962,12 @@ export function resolvePaidProReviewRenderPlain(
   if (!needsSignerOverlay) {
     writeMemoizedPaidProReviewPlain(memoKey, rendered);
   }
-  const visible = finishUserVisiblePlain(rendered);
+  // Frozen SoT without signer overlay: keep authoritative bytes for review/copy hash parity.
+  // Display projection stays available via explicit HTML / display-prep helpers.
+  const visible =
+    shouldUsePaidProSourceOfTruthDisplayOnly() && !needsSignerOverlay
+      ? (rendered || "").trim()
+      : finishUserVisiblePlain(rendered);
   if (visible.length >= 200 && hasPaidProSourceOfTruth()) {
     auditPaidProReviewRenderCorpus(visible);
     auditPaidProReviewRenderSotParity({

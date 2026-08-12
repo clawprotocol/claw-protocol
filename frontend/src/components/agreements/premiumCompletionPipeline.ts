@@ -368,6 +368,8 @@ export type PremiumCompletionResult = {
     staleOrFingerprintMismatch: boolean;
     premiumPipelineSource: PremiumRenderSource;
   };
+  /** Wire generation_outcome echo for authoritative-commit gating (ok|degraded|…). */
+  generationOutcome?: string | null;
   /** When the API returned 200 with a non-model structured fallback (checkout still valid). */
   serverGenerationDegraded?: { code: string; message: string } | null;
   /** Transient browser/network failure during premium-full-draft — free draft must stay visible; retry in modal. */

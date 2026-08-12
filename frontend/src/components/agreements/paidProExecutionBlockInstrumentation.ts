@@ -404,7 +404,7 @@ export function logPostFreezeCorpusDrift(args: {
     surface: args.surface,
     renderedText: rendered,
     frozenHash: args.frozenHash,
-    mutationSource: args.mutationSource ?? "readonly_display_strip",
+    mutationSource: args.mutationSource ?? "unknown",
     frozenPlain: frozenPlain ?? undefined,
   });
 
