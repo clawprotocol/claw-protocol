@@ -72,7 +72,13 @@ export type CanonicalPartyIdentity = {
   partyAddress?: string;
 };
 
-const WITNESS_RE = /\b(?:IN WITNESS WHEREOF|SIGNATURES?|EXECUTION)\b/i;
+/**
+ * Signature-region anchors for opening/body splits.
+ * Do not treat a mid-document "Execution" e-sign section heading as the witness tail —
+ * that historically truncated Scope/Fees/Governing Law before defined-opening repair.
+ */
+const WITNESS_RE =
+  /\bIN WITNESS WHEREOF\b|\bEXECUTION\s*[—–-]\s*SIGNATURES?\b|\bEXECUTION\s+BLOCK\b|^\s*SIGNATURES?\s*:?\s*$/im;
 
 export function logCanonicalPartyIdentityPreserved(args: {
   canonicalLegalName: string;
@@ -738,9 +744,11 @@ export function stripDanglingPartyMetadataFragments(text: string): { text: strin
   replace(/\s+with\s+its\s*(?=(?:and\b|\.|,|\n|$))/gi, " ", "party_address:strip_dangling_with_its");
   replace(/,\s*with\s+(?:its\s+)?principal\s+place\s+of\s+business\s+at\s*(?=(?:and\b|\.|,|\n|$))/gi, "", "party_address:strip_empty_principal_place");
   replace(/\s+with\s+(?:its\s+)?principal\s+place\s+of\s+business\s+at\s*(?=(?:and\b|\.|,|\n|$))/gi, " ", "party_address:strip_empty_principal_place");
+  // Do not collapse ", and" → " and": N-party Oxford lists and address tails
+  // (e.g. "…Dr, Seattle, and Prairie Nova…") must stay idempotent across freeze.
   next = next
     .replace(/\s+,/g, ",")
-    .replace(/,\s+and\b/gi, " and")
+    .replace(/\s*,\s*,/g, ",")
     .replace(/[ \t]{2,}/g, " ")
     .replace(/ \./g, ".")
     .trim();
@@ -754,7 +762,6 @@ function stripUnsuppliedAddressPlaceholders(text: string): { text: string; repai
     .replace(/,\s*with\s+its\s*(?=and\b|\.|,)/gi, "")
     .replace(/\s+with\s+(?=and\b)/gi, " ")
     .replace(/\s*,\s*,/g, ",")
-    .replace(/,\s+and\b/gi, " and")
     .replace(/[ \t]{2,}/g, " ")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
@@ -958,16 +965,25 @@ export function repairCanonicalPartyIdentityInCorpus(
   let head = out.slice(0, headLen);
   const rest = out.slice(headLen);
   const openingLine = definedOpeningLine(client, provider);
+  // Allow "This Services Agreement is between…" (words between This and Agreement).
+  // Stop before numbered sections OR unnumbered commercial headings so Scope/Fees are
+  // never swallowed when blank lines were collapsed.
   const openingRe =
-    /(?:this\s+agreement\s*(?:\([^)]*\))?\s*is\s+)?(?:entered\s+into\s+)?(?:by\s+and\s+)?between\b[\s\S]*?\.\s*(?=\n\n|\n\s*\d+\.\s+|\(collectively|\[SIGNATURE|$)/i;
+    /(?:this\s+(?:[\w/&'.-]+\s+){0,6}?agreement\s*(?:\([^)]*\))?\s*is\s+)?(?:entered\s+into\s+)?(?:by\s+and\s+)?between\b[\s\S]*?\.\s*(?=\n\n|\n\s*\d+\.\s+|\n\s*(?:Scope|Fees?|Payment|Compensation|Term|Governing|Confidential(?:ity)?|Execution|Ownership|Work\s+Product|Termination|Notices?|Intellectual)\b|\(collectively|\[SIGNATURE|$)/i;
   const preservePaidProOpening = shouldPreservePaidProMutualConsultingOpening(head, records);
   const twoPartyCommercialOpening = records.length === 2;
   if (!preservePaidProOpening && twoPartyCommercialOpening && openingRe.test(head)) {
     const openingMatch = head.match(openingRe);
+    const matched = openingMatch?.[0] ?? "";
+    const crossedOperativeHeading =
+      /\n\s*(?:Scope|Fees?|Payment|Compensation|Term|Governing|Confidential(?:ity)?|Execution|Ownership|Work\s+Product|Termination|Notices?)\b/i.test(
+        matched,
+      );
     if (
       openingMatch &&
-      openingMatch[0].length <= 380 &&
-      !/\d+\.\s+[A-Za-z]/.test(openingMatch[0])
+      matched.length <= 380 &&
+      !crossedOperativeHeading &&
+      !/\d+\.\s+[A-Za-z]/.test(matched)
     ) {
       head = head.replace(openingRe, () => {
         repairs.push("party_identity:defined_opening");

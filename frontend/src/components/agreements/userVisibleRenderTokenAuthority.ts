@@ -28,6 +28,11 @@ import {
   substitutePaidProIntakeContactPlaceholders,
 } from "./paidProIntakeContactSubstitution";
 import {
+  isExecutionSignatureContext,
+  isInSignatureRegion,
+  isNumberedSignatureContactToken,
+  isOperativeSignatureContactMisuse,
+  isTailSignatureSection,
   normalizePlaceholderToken,
   parseSignatureContactSlot,
 } from "./agreementTemplatePlaceholderSafety";
@@ -286,6 +291,16 @@ export function buildRenderTokenAuthorityParties(
   }));
 }
 
+const SIGNATURE_STUB_BLANK = "_________________________";
+
+function isSignatureFieldRenderToken(token: string): boolean {
+  const n = normalizePlaceholderToken(token);
+  if (isNumberedSignatureContactToken(token)) return true;
+  return /^(?:(?:SIGNER|PARTY|CONTACT|ORG|COMPANY|CLIENT)_)?(?:NAME|TITLE|DATE|EMAIL|SIGNATURE|INITIALS?|PARTY_NAME|SIGNER_NAME|LEGAL_NAME|PRINTED_NAME|DATE_OF_AGREEMENT|EFFECTIVE_DATE|AGREEMENT_DATE)(?:_\d+)?$/i.test(
+    n,
+  );
+}
+
 function replaceUnresolvedTokensFromAuthority(
   text: string,
   ctx: RenderTokenAuthorityContext,
@@ -295,15 +310,34 @@ function replaceUnresolvedTokensFromAuthority(
   let out = text;
 
   const tokens = scanUnresolvedRenderTokens(out);
-  for (const { token } of tokens) {
+  for (const { token, index } of tokens) {
+    if (isOperativeSignatureContactMisuse(token, out, index)) continue;
     const resolved = resolveRenderTokenFromAuthority(token, ctx);
-    if (!resolved || resolved === token) continue;
-    const escaped = token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const next = out.replace(new RegExp(escaped, "g"), resolved);
-    if (next !== out) {
-      out = next;
-      replacedCount += 1;
-      repairs.push(`token:${token.slice(0, 40)}→authority`);
+    if (resolved && resolved !== token) {
+      const escaped = token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const next = out.replace(new RegExp(escaped, "g"), resolved);
+      if (next !== out) {
+        out = next;
+        replacedCount += 1;
+        repairs.push(`token:${token.slice(0, 40)}→authority`);
+      }
+      continue;
+    }
+    // Signature-line stubs without structured values must blank-fill in execution context
+    // so document-boundary validation matches finalizeUserVisibleAgreementPlainText.
+    if (
+      isSignatureFieldRenderToken(token) &&
+      (isExecutionSignatureContext(out, index) ||
+        isInSignatureRegion(out, index) ||
+        isTailSignatureSection(out, index))
+    ) {
+      const escaped = token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const next = out.replace(new RegExp(escaped, "g"), SIGNATURE_STUB_BLANK);
+      if (next !== out) {
+        out = next;
+        replacedCount += 1;
+        repairs.push(`token:${token.slice(0, 40)}→signature_blank`);
+      }
     }
   }
 

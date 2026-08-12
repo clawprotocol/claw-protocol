@@ -109,6 +109,7 @@ export function mapDeterministicIntentIdToAgreementIntentId(
         logo_brand: "design_creative",
         graphic_design: "design_creative",
         web_presence: "software_web_dev",
+        saas_subscription: "software_web_dev",
         loan: "loan_repayment",
         founder_equity: "founder_equity_vesting",
         growth_advisor: "consulting_services",
@@ -160,6 +161,25 @@ function fromDeterministic(
       ],
       minSec: "Build scope, acceptance, change orders, IP, warranty/support, fees.",
       forbid: ["at-will", "estate bequest", "vesting for equity holders"],
+    },
+    saas_subscription: {
+      intent: "software_web_dev",
+      extraTerms: [
+        "saas",
+        "subscription",
+        "software",
+        "platform",
+        "api",
+        "reseller",
+        "white-label",
+        "workflow",
+        "services",
+        "fees",
+        "renewal",
+      ],
+      minSec:
+        "SaaS/reseller access scope, fees and renewal, data/security, IP, support/SLA, and termination — not estate or founder-equity framing.",
+      forbid: ["at-will employment", "estate bequest", "vesting for equity holders"],
     },
     loan: {
       intent: "loan_repayment",

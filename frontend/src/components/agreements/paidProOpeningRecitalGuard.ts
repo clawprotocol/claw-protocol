@@ -127,7 +127,10 @@ function openingSliceBeforeSection1(text: string): string {
  * Preserve substantive numbered sections that appear before the first Section 1 anchor.
  * Wire malformations may insert commercial sections (e.g. Revenue Allocation) ahead of Section 1.
  */
-function extractPreservedOperativePrefixBeforeSectionOne(operative: string, sec1Idx: number): string {
+function extractPreservedNumberedOperativePrefixBeforeSectionOne(
+  operative: string,
+  sec1Idx: number,
+): string {
   if (sec1Idx <= 0) return "";
   const prefix = operative.slice(0, sec1Idx).trim();
   if (!prefix) return "";
@@ -148,6 +151,57 @@ function extractPreservedOperativePrefixBeforeSectionOne(operative: string, sec1
     if (block) blocks.push(block);
   }
   return blocks.join("\n\n").trim();
+}
+
+const OPENING_RECITAL_LINE_RE =
+  /^(?:This\b.+\bAgreement\b|\bThis Agreement is between\b)/i;
+const OPENING_RECITAL_BODY_RE =
+  /\b(?:entered\s+into|is\s+between|by\s+and\s+between|by\s+and\s+among)\b/i;
+
+/**
+ * Preserve commercial operative content before Section 1 when opening repair rewrites the
+ * title/recital. Covers numbered pre-§1 sections and unnumbered heading blocks (e.g. markdown
+ * "## Fees" stripped to "Fees") that would otherwise be discarded with the old opening.
+ */
+function extractPreservedOperativePrefixBeforeSectionOne(operative: string, sec1Idx: number): string {
+  if (sec1Idx <= 0) return "";
+  const numbered = extractPreservedNumberedOperativePrefixBeforeSectionOne(operative, sec1Idx);
+  if (numbered) return numbered;
+
+  const prefix = operative.slice(0, sec1Idx).replace(/\r\n/g, "\n");
+  if (!prefix.trim()) return "";
+
+  const lines = prefix.split("\n");
+  let idx = 0;
+  while (idx < lines.length) {
+    const t = (lines[idx] ?? "").trim();
+    if (!t) {
+      idx += 1;
+      continue;
+    }
+    if (PAID_PRO_CANONICAL_TITLE_RE.test(t) || /AGREEMENT\s*$/i.test(t)) {
+      idx += 1;
+      continue;
+    }
+    break;
+  }
+  while (idx < lines.length) {
+    const t = (lines[idx] ?? "").trim();
+    if (!t) {
+      idx += 1;
+      continue;
+    }
+    const isRecital =
+      OPENING_RECITAL_LINE_RE.test(t) ||
+      (OPENING_RECITAL_BODY_RE.test(t) && /\b(?:Agreement|Party|Parties)\b/i.test(t));
+    if (!isRecital) break;
+    idx += 1;
+    while (idx < lines.length && !(lines[idx] ?? "").trim()) idx += 1;
+    break;
+  }
+
+  const rest = lines.slice(idx).join("\n").trim();
+  return rest.length >= 20 ? rest : "";
 }
 
 /** True when paid Pro services corpus lacks a valid title + recital before Section 1. */
@@ -340,12 +394,17 @@ export function repairPaidProServicesAgreementOpening(
 
   const { operative, executionTail } = splitOperativeAndExecutionTail(body);
   const sec1Idx = findOpeningSectionOneIndex(operative);
+  const preservedPrefix = extractPreservedOperativePrefixBeforeSectionOne(operative, sec1Idx);
   const operativeRemainder = sec1Idx >= 0 ? operative.slice(sec1Idx).trim() : operative;
-  const remainder = executionTail
-    ? `${operativeRemainder}\n\n${executionTail}`.replace(/\n{3,}/g, "\n\n").trim()
+  const remainderBody = preservedPrefix
+    ? `${preservedPrefix}\n\n${operativeRemainder}`.replace(/\n{3,}/g, "\n\n").trim()
     : operativeRemainder;
+  const remainder = executionTail
+    ? `${remainderBody}\n\n${executionTail}`.replace(/\n{3,}/g, "\n\n").trim()
+    : remainderBody;
   const opening = buildCanonicalPaidProServicesOpeningRecital(client, provider, intakeText);
   repairs.push("opening:prepend_canonical_services_recital");
+  if (preservedPrefix) repairs.push("opening:preserve_pre_section_one_operative_blocks");
   return { text: `${opening}${remainder}`, repairs };
 }
 

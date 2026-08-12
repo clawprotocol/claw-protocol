@@ -124,6 +124,7 @@ import { logPaidProDriftCorpusCaptureOnce } from "./paidProDriftCorpusCapture";
 import { tracePaidProCorpusMutation } from "./paidProMutationTrace";
 import { tracePaidProAcceptancePipelineStage } from "./paidProAcceptancePipelineTrace";
 import {
+  clearConsumedPaidProSignerMetadataAuthority,
   hashPaidProSignerMetadataAuthority,
   setConsumedPaidProSignerMetadataAuthority,
 } from "./paidProSignerMetadataAuthority";
@@ -305,6 +306,9 @@ export function clearPaidProSourceOfTruth(): void {
   clearPaidProReviewSessionAuthorityForTests();
   clearAuthoritativeAgreementDocument();
   clearFrozenCanonicalAgreementCorpus();
+  // Stale consumed signer metadata must not rebuild the next deal's execution block /
+  // handoff slots after SoT clear (cross-intake N-party contamination).
+  clearConsumedPaidProSignerMetadataAuthority();
   clearPaidProSignerStagingDisplayCorpus();
   clearPaidProReviewRenderFusedRepairCache();
   clearPaidProPinnedSignerAppliedCorpus();

@@ -17,8 +17,8 @@ describe("paidProReviewUxCopy", () => {
   afterEach(() => cleanup());
 
   it("uses simplified review shell copy without duplicate review/final-agreement phrasing", () => {
-    expect(PAID_PRO_REVIEW_SHELL_TITLE).toBe("Agreement ready");
-    expect(PAID_PRO_REVIEW_SHELL_SUBTITLE).toMatch(/Review the agreement below/i);
+    expect(PAID_PRO_REVIEW_SHELL_TITLE).toBe("Agreement draft ready");
+    expect(PAID_PRO_REVIEW_SHELL_SUBTITLE).toMatch(/Review the agreement draft below/i);
     expect(PAID_PRO_INLINE_SIGNER_SECTION_TITLE).toBe("Signer details");
     expect(PAID_PRO_REVIEW_SUPPORTING_BEFORE_SIGNERS).not.toMatch(/final agreement/i);
     expect(PAID_PRO_REVIEW_SUPPORTING_BEFORE_SIGNERS).not.toMatch(/Review your agreement/i);

@@ -536,9 +536,24 @@ export function enforcePaidProSingleExecutionBlock(
             opts?.draftPartyNames ?? null,
           )
         : [];
-  const manifestLegalNames =
-    frozenNames.length >= authoritativePartyCount &&
+  const currentDealNames =
+    authorityParties.length >= 2
+      ? authorityParties
+      : explicitDraftNames.length >= 2
+        ? explicitDraftNames
+        : labeledNames.length >= 2
+          ? labeledNames
+          : intakeManifest.map((rec) => rec.fullLegalName.trim()).filter((n) => n.length >= 3);
+  const frozenAlignsWithCurrentDeal =
     frozenNames.length >= 2 &&
+    currentDealNames.length >= 2 &&
+    frozenNames.length === currentDealNames.length &&
+    currentDealNames.every((name) =>
+      frozenNames.some((frozen) => partyLegalNamesMatch(frozen, name)),
+    );
+  const manifestLegalNames =
+    frozenAlignsWithCurrentDeal &&
+    frozenNames.length >= authoritativePartyCount &&
     authorityParties.length >= 2
       ? frozenNames.slice(0, authoritativePartyCount)
       : authorityParties.length >= authoritativePartyCount && authorityParties.length >= 2

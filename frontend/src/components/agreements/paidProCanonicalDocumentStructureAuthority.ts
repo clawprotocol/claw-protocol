@@ -250,11 +250,13 @@ export function applyPaidProCanonicalDocumentStructureAuthority(
   const leaks = detectPaidProPlainParagraphHeadingLeaks(out);
   diagnostics.headingDemotionCount = leaks.plainParagraphHeadingLeakCount;
 
+  // Same-line glue only — multi-line heading+body blocks are normal section shape.
   const remainingHeadingBodyCollapses = classifyPaidProDocumentBlocks(out).filter((block) => {
     if (block.kind !== "main_section_heading") return false;
-    const remainder = block.block.slice(block.firstLine.length).trim();
-    return Boolean(
-      remainder && !isPaidProNumberedSectionHeadingLine(remainder.split("\n")[0]?.trim() ?? ""),
+    const first = block.firstLine.trim();
+    if (/^\d+\.\s+(?!\d+\.\d)[^.\n]{2,80}?\.\s+[A-Z][\s\S]{8,}$/.test(first)) return true;
+    return /^\d+\.\s+(?!\d+\.\d).{3,80}?\s+(?:The|This|Each|Either|Client|Provider|Service\s+Provider|Upon|Unless|If|When|During|Within)\b/.test(
+      first,
     );
   }).length;
   if (remainingHeadingBodyCollapses > 0) {

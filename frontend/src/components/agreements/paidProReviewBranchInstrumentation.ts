@@ -177,7 +177,7 @@ export const PAID_PRO_REVIEW_DOCUMENT_RENDERER_SELECTORS = [
 export const PAID_PRO_REVIEW_CTA_REGION_SELECTORS = [
   '[data-testid="paid-pro-forced-first-review-actions"]',
   '[data-testid="simple-pro-final-review-actions"]',
-  '[data-testid="pro-delivery-track-chooser"]',
+  '[data-testid="paid-pro-delivery-track-chooser"]',
   '[data-testid="pro-review-track-actions"]',
   '[data-testid="paid-pro-inline-signer-setup"]',
 ] as const;

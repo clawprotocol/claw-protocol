@@ -7,30 +7,12 @@ import {
   rejectPremiumDegradedFiller,
 } from "./premiumFullDraftClientAcceptance";
 import { validatePaidProOutput } from "./paidProCorpusAcceptance";
+import { IRONCLAD_JOINT_ROLLOUT_INTAKE } from "./ironcladJointRolloutFixtures";
+
+export { IRONCLAD_JOINT_ROLLOUT_INTAKE } from "./ironcladJointRolloutFixtures";
 
 const QA_SAAS_RESELLER_INTAKE =
   "Create a SaaS reseller and white-label services agreement between Redwood Peak Ventures LLC, Atlas Harbor Technologies Inc., Meridian Workforce Group LLC, Prairie Signal Holdings LP, and NovaGrid Systems LLC. Scope includes white-label deployment of workflow automation software, API integrations, and enterprise data protections. Total fee $124,750. Governing law Delaware. Include confidentiality, indemnification, and electronic signatures.";
-
-/** Production Ironclad / 5-party joint rollout intake (Texas law). */
-export const IRONCLAD_JOINT_ROLLOUT_INTAKE = `Need an agreement between Ironclad Systems Group LLC, Harborline Data Solutions Inc., Northwind Automation Partners LLC, Silver Mesa Analytics LP, and VertexGrid Technologies LLC for a joint AI software and infrastructure rollout project.
-
-Main people involved:
-
-* Ethan Cole — CEO at Ironclad — ethan.cole@ironcladsg.com
-* Maya Bennett — CTO at Harborline — maya.bennett@harborlinedata.com
-* Lucas Reed — Managing Partner at Northwind — lucas.reed@northwindap.io
-* Olivia Hart — Ops Director at Silver Mesa — olivia.hart@silvermesaanalytics.com
-* Adrian Vale — President at VertexGrid — adrian.vale@vertexgridtech.com
-
-The deal should cover white-label AI workflow software, API integrations, onboarding and migration help, analytics dashboards, monitoring, support, and ongoing maintenance.
-
-Total contract value is $187,500 paid over 6 milestone payments tied to deployment stages and launch targets.
-
-Initial term should be 24 months with automatic yearly renewal unless someone gives 45 days notice.
-
-Use Texas law.
-
-Please include normal enterprise protections like confidentiality, cybersecurity/data protection obligations, IP ownership, liability limits, indemnification, uptime/SLA expectations, dispute resolution, non-solicitation/non-circumvention, audit rights, force majeure, termination rights, and electronic signatures.`;
 
 const IRONCLAD_PARTIES = [
   "Ironclad Systems Group LLC",
@@ -50,12 +32,28 @@ const FIVE_PARTIES = [
 
 const FIVE_SIGNERS = ["Ethan Cole", "Maya Bennett", "Lucas Reed", "Olivia Hart", "Adrian Vale"] as const;
 
+/** Pad operative body before the witness/signature block so polish cannot strip length as post-witness noise. */
 function padOperative(core: string, targetLen = 26_000): string {
   const pad = "\n\nThe parties agree to cooperate in good faith on commercial terms. ".repeat(400);
-  let t = core;
-  while (t.length < targetLen) t += pad;
-  return t;
+  const witnessIdx = core.search(/\bIN WITNESS WHEREOF\b|\bSIGNATURES?\b/i);
+  const head = witnessIdx >= 0 ? core.slice(0, witnessIdx) : core;
+  const tail = witnessIdx >= 0 ? core.slice(witnessIdx) : "";
+  let mid = "";
+  while (head.length + mid.length + tail.length < targetLen) mid += pad;
+  return `${head}${mid}${tail ? `\n\n${tail}` : ""}`;
 }
+
+/** Multiline headings (title line + body) — avoid same-line `1. Scope. Body…` glue that trips heading-title anomaly hard-rejects. */
+const IRONCLAD_PROFESSIONAL_CLAUSES = [
+  "3. Term and Termination.",
+  "Either Party may terminate for material breach after thirty (30) days' written notice and opportunity to cure, or for convenience on forty-five (45) days' notice.",
+  "4. Governing Law.",
+  "This Agreement is governed by the laws of the State of Texas, without regard to conflict-of-law principles.",
+  "5. Notices.",
+  "Formal notices under this Agreement must be in writing and delivered to each Party's designated notice contact.",
+  "6. Confidentiality and Commercial Protections.",
+  "Confidentiality, cybersecurity, IP ownership, indemnification, SLA, and dispute resolution apply as stated in the intake.",
+].join("\n");
 
 function buildFivePartyPaidCorpus(opts?: { signatureBracketStubs?: boolean }): string {
   const partyBlock = FIVE_PARTIES.join(", ");
@@ -151,12 +149,18 @@ describe("five-party paid Pro corpus acceptance (production QA)", () => {
     ).join(" ");
     const core = [
       "CONFIDENTIALITY AND COMMERCIAL PROTECTIONS AGREEMENT",
-      `Among ${IRONCLAD_PARTIES.join(", ")}.`,
-      "1. Scope. AI workflow software and infrastructure rollout.",
-      "2. Fees. $187,500 milestone payments.",
+      "",
+      `This Agreement is entered into among ${IRONCLAD_PARTIES.join(", ")}.`,
+      "",
+      "1. Scope.",
+      "AI workflow software and infrastructure rollout.",
+      "2. Fees.",
+      "$187,500 milestone payments.",
+      IRONCLAD_PROFESSIONAL_CLAUSES,
+      "",
       "IN WITNESS WHEREOF:",
       sig,
-    ].join(" ");
+    ].join("\n");
     const body = padOperative(core, 30_000);
 
     const fin = finalizeUserVisibleAgreementPlainText(body, {
@@ -191,9 +195,15 @@ describe("five-party paid Pro corpus acceptance (production QA)", () => {
     }).join("\n\n");
     const core = [
       "CONFIDENTIALITY AND COMMERCIAL PROTECTIONS AGREEMENT",
-      `Among ${IRONCLAD_PARTIES.join(", ")}.`,
-      "1. Scope. Joint AI software and infrastructure rollout.",
-      "2. Fees. $187,500 milestone payments.",
+      "",
+      `This Agreement is entered into among ${IRONCLAD_PARTIES.join(", ")}.`,
+      "",
+      "1. Scope.",
+      "Joint AI software and infrastructure rollout.",
+      "2. Fees.",
+      "$187,500 milestone payments.",
+      IRONCLAD_PROFESSIONAL_CLAUSES,
+      "",
       "IN WITNESS WHEREOF:",
       sigBlock,
     ].join("\n");
@@ -286,15 +296,22 @@ describe("five-party paid Pro corpus acceptance (production QA)", () => {
     const core = [
       "CONFIDENTIALITY AND COMMERCIAL PROTECTIONS AGREEMENT",
       "",
-      `This Agreement is among ${IRONCLAD_PARTIES.join(", ")}.`,
+      `This Agreement is entered into among ${IRONCLAD_PARTIES.join(", ")}.`,
       "",
-      "1. Scope. White-label AI workflow software, API integrations, onboarding, analytics, and maintenance.",
-      "2. Fees. Total contract value of $187,500 across six milestone payments.",
-      "3. Term. Twenty-four (24) months with annual renewal and 45-day notice.",
-      "4. Governing Law. Laws of the State of Texas.",
-      "5. Confidentiality, cybersecurity, IP ownership, indemnification, SLA, and dispute resolution.",
+      "1. Scope.",
+      "White-label AI workflow software, API integrations, onboarding, analytics, and maintenance.",
+      "2. Fees.",
+      "Total contract value of $187,500 across six milestone payments.",
+      "3. Term and Termination.",
+      "Twenty-four (24) months with annual renewal and 45-day notice. Either Party may terminate for material breach after thirty (30) days' written notice and opportunity to cure.",
+      "4. Governing Law.",
+      "This Agreement is governed by the laws of the State of Texas, without regard to conflict-of-law principles.",
+      "5. Notices.",
+      "Formal notices under this Agreement must be in writing and delivered to each Party's designated notice contact.",
+      "6. Confidentiality and Commercial Protections.",
+      "Confidentiality, cybersecurity, IP ownership, indemnification, SLA, and dispute resolution apply as stated in the intake.",
       "",
-      "Effective as of [DATE OF AGREEMENT].",
+      "Effective as of the Effective Date.",
       "",
       "IN WITNESS WHEREOF:",
       sigBlock,

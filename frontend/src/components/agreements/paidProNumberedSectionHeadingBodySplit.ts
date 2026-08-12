@@ -253,6 +253,25 @@ export function splitGluedNumberedSectionLine(
   line: string,
 ): { heading: string; body: string } | null {
   const trimmed = line.trim();
+  // Prefer explicit "N. Title. Body…" period glue before heuristic word walks.
+  // Heuristics alone mis-split "1. Scope. White-label deployment…" after "White-label".
+  const periodGlue = trimmed.match(
+    /^(\d{1,2})\.\s+(?!\d+\.\d)([^.\n]{2,80}?)\.\s+([A-Z][\s\S]{8,})$/,
+  );
+  if (periodGlue?.[1] && periodGlue[2] && periodGlue[3]) {
+    const title = periodGlue[2].trim();
+    const body = periodGlue[3].trim();
+    const heading = `${periodGlue[1]}. ${title}`.trim();
+    if (
+      title.split(/\s+/).filter(Boolean).length <= 12 &&
+      !/\b(?:clause|section|item|schedule|exhibit)\s+\d+\b/i.test(title) &&
+      !/^(?:Terms\.?\s*)+$/i.test(body) &&
+      (isPaidProNumberedSectionHeadingLine(heading) || title.length >= 2)
+    ) {
+      return { heading, body };
+    }
+  }
+
   const match = trimmed.match(NUMBERED_MAIN_LINE_RE);
   if (!match?.[1] || !match[2]) return null;
 

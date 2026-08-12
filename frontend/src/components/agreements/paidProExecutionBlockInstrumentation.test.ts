@@ -16,12 +16,19 @@ import {
   logPostFreezeCorpusDrift,
   setPaidProInstrumentationLogForceForTests,
 } from "./paidProExecutionBlockInstrumentation";
+import { SUBSTANTIVE_SERVER_DRAFT_MIN_LEN } from "./premiumAcceptancePolicy";
 
 const WITNESS_TAIL =
   "\n\nIN WITNESS WHEREOF, the parties execute.\n\nCLIENT:\nAlpha LLC\n\nSERVICE PROVIDER:\nBeta LLC\n";
 
 function corpusBody(marker: string): string {
-  return `${"Consulting scope and deliverables. ".repeat(24)}\n\n10. Final.\n${marker}`;
+  // Establish requires substantive server_full_draft length — pad operative body only.
+  let operative = `${"Consulting scope and deliverables. ".repeat(24)}\n\n10. Final.\n`;
+  const filler = " Additional implementation and acceptance terms apply. ";
+  while (operative.length + marker.length < SUBSTANTIVE_SERVER_DRAFT_MIN_LEN + 200) {
+    operative += filler;
+  }
+  return `${operative}${marker}`;
 }
 
 describe("paidProExecutionBlockInstrumentation", () => {
