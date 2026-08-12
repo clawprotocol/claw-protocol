@@ -595,8 +595,13 @@ export function enforcePaidProSingleExecutionBlock(
 
   const body = operativeBodyWithoutExecutionTails(text);
   const expectedPartyCount = Math.max(manifestLegalNames.length, authoritativePartyCount, roles.length);
+  // Unlabeled 3-party and all 4+ party deals use uppercase legal-entity execution headings.
+  // Exact-three labeled intakes keep role headings (CLIENT / SERVICE PROVIDER / …).
   const useEntityHeadings =
-    manifestLegalNames.length >= 3 && (!quadParty || quadLabeled) && !tripartiteLabeled;
+    !tripartiteLabeled &&
+    (manifestLegalNames.length >= 4 ||
+      quadLabeled ||
+      (manifestLegalNames.length >= 3 && !quadParty));
 
   const identities: CanonicalPartyIdentity[] =
     manifestRoles && manifestLegalNames.length >= 2
@@ -648,10 +653,13 @@ export function enforcePaidProSingleExecutionBlock(
   for (const id of identities) {
     const heading = (id.blockHeading || "").trim();
     const legal = id.partyDisplayName.trim();
-    // Entity-heading mode: heading is the legal name — do not repeat it on the next line.
+    // Entity-heading mode: uppercase legal name alone (no ROLE: colon), matching
+    // buildMultiPartyEntityNameExecutionSection / TEST401 signature-section shape.
     const headingCore = heading.replace(/:$/, "").trim();
     if (useEntityHeadings && legal && headingCore.toLowerCase() === legal.toLowerCase()) {
-      stubLines.push(`${headingCore}:`, "");
+      stubLines.push(headingCore.toUpperCase(), "");
+    } else if (useEntityHeadings && headingCore) {
+      stubLines.push(headingCore.toUpperCase(), "");
     } else {
       stubLines.push(`${headingCore || heading}:`, legal, "");
     }

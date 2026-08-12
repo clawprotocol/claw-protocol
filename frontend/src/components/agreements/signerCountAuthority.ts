@@ -261,6 +261,10 @@ function resolveAuthoritativeSignerCountCore(args: SignerCountAuthorityArgs): Si
     partySlotCount >= 3 ? partySlotCount : 0,
   );
 
+  const intakeNamesAuthoritative = resolveAuthoritativeIntakePartyNames(intake).filter(
+    isAuthoritativeLegalEntityName,
+  );
+
   let count = partySlotCount;
   let source: SignerCountAuthorityResolution["source"] = "party_slot_count";
 
@@ -270,6 +274,14 @@ function resolveAuthoritativeSignerCountCore(args: SignerCountAuthorityArgs): Si
   } else if (authoritativeIntakeCount >= 2) {
     count = authoritativeIntakeCount;
     source = "labeled_parties";
+  } else if (
+    // Prefer real multi-party draft/intake identity over a collapsed party_slot_count of 2
+    // caused by phantom coordinator / drift fragments on an otherwise 3+/4-party deal.
+    (collapsedDraft >= 3 || intakeNamesAuthoritative.length >= 3 || draftCount >= 3) &&
+    partySlotCount < Math.max(collapsedDraft, intakeNamesAuthoritative.length, draftCount)
+  ) {
+    count = Math.max(collapsedDraft, intakeNamesAuthoritative.length, draftCount);
+    source = collapsedDraft >= 3 || draftCount >= 3 ? "draft_parties" : "party_slot_count";
   } else if (partySlotCount >= 2) {
     count = partySlotCount;
     source = "party_slot_count";

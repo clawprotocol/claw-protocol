@@ -60,6 +60,10 @@ import {
 import { repairExecutionBlockEntityHeadingLines } from "./paidProExecutionBlockEntityHeading";
 import { hashPaidProCorpus } from "./paidProSourceOfTruth";
 import { resolvePaidProFrozenAuthoritativeHash } from "./paidProPostFreezeCorpusInvariant";
+import {
+  ensureOperativeIfToNoticeDelivery,
+  findNoticesSectionStart,
+} from "./paidProPartyNoticeDetails";
 
 export type HydratedAuthoritativeSigningCorpusResult = {
   corpus: string;
@@ -217,14 +221,41 @@ export function buildHydratedAuthoritativeSigningCorpusFromAuthority(args: {
       rawLen: rawCorpusLenBeforeHydration,
     });
   }
+  // Fill existing operative If-to notice placeholders from authority contact fields.
+  // Signature-region mode must not invent a Notices section, but must resolve known emails/addresses
+  // when the corpus already has an If-to notices region with "provided during signer setup".
+  let partyNoticeApplied = false;
+  const signatureRegionOnly = args.signatureRegionOnly !== false;
+  const authorityHasContact = args.authority.parties.some(
+    (p) => p.signerEmail.trim() || p.partyAddress.trim() || p.signerName.trim(),
+  );
+  const noticesIdx = findNoticesSectionStart(rawCorpus);
+  if (
+    authorityHasContact &&
+    noticesIdx >= 0 &&
+    (!signatureRegionOnly || /provided during signer setup/i.test(rawCorpus.slice(noticesIdx)))
+  ) {
+    const noticeDelivery = ensureOperativeIfToNoticeDelivery(
+      rawCorpus,
+      args.authority.parties,
+      roleContext,
+    );
+    if (noticeDelivery.repairs.length > 0 || noticeDelivery.text !== rawCorpus) {
+      rawCorpus = noticeDelivery.text;
+      partyNoticeApplied = noticeDelivery.repairs.length > 0;
+    }
+  }
   const identities = authorityPartiesToCanonicalPartyIdentities(args.authority.parties, roleContext);
   let result = buildHydratedAuthoritativeSigningCorpus({
     rawCorpus,
     identities,
     intakeRaw: args.intakeRaw,
     surface: args.surface,
-    signatureRegionOnly: args.signatureRegionOnly !== false,
+    signatureRegionOnly,
   });
+  if (partyNoticeApplied) {
+    result = { ...result, partyNoticeApplied: true };
+  }
   const signerCount = resolveHydrationAuthoritativeSignerCount(
     identities,
     args.intakeRaw,
@@ -295,7 +326,7 @@ export function buildHydratedAuthoritativeSigningCorpusFromAuthority(args: {
       ...result,
       corpus: canonicalParties.text,
       signaturePolishCount: result.signaturePolishCount + (canonicalParties.repaired ? 1 : 0),
-      partyNoticeApplied: false,
+      partyNoticeApplied: result.partyNoticeApplied,
     };
     if (canonicalParties.repaired) {
       logSignatureBlockSource({
@@ -346,15 +377,39 @@ export function buildHydratedAuthoritativeSigningCorpusFromAuthority(args: {
       result.corpus,
       args.authority.parties,
       roleContext,
-      { signatureRegionOnly: args.signatureRegionOnly !== false },
+      { signatureRegionOnly },
     );
     if (finalized.text !== result.corpus) {
       result = {
         ...result,
         corpus: finalized.text,
         signaturePolishCount: result.signaturePolishCount + finalized.repairs.length,
-        partyNoticeApplied: false,
+        partyNoticeApplied: result.partyNoticeApplied,
       };
+    }
+  }
+
+  // Re-apply notice contact hydration after finalize hygiene — some repair steps restore
+  // "provided during signer setup" placeholders in an existing If-to notices region.
+  if (!result.rejected && result.corpus && authorityHasContact) {
+    const noticesAfter = findNoticesSectionStart(result.corpus);
+    if (
+      noticesAfter >= 0 &&
+      (!signatureRegionOnly || /provided during signer setup/i.test(result.corpus.slice(noticesAfter)))
+    ) {
+      const noticeAgain = ensureOperativeIfToNoticeDelivery(
+        result.corpus,
+        args.authority.parties,
+        roleContext,
+      );
+      if (noticeAgain.text !== result.corpus) {
+        result = {
+          ...result,
+          corpus: noticeAgain.text,
+          signaturePolishCount: result.signaturePolishCount + Math.max(1, noticeAgain.repairs.length),
+          partyNoticeApplied: true,
+        };
+      }
     }
   }
 

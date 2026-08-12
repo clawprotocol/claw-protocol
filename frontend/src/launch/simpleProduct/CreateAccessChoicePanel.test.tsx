@@ -17,8 +17,10 @@ describe("CreateAccessChoicePanel", () => {
       />,
     );
     expect(screen.getByRole("heading", { name: /continue with lawdog/i })).toBeTruthy();
-    expect(screen.getByText(/administrator-granted/i)).toBeTruthy();
-    expect(screen.getByTestId("create-access-choice-request-genesis")).toBeTruthy();
+    // Genesis is affiliate-only — no buyer request CTA / administrator-granted Genesis path.
+    expect(screen.queryByText(/administrator-granted/i)).toBeNull();
+    expect(screen.queryByTestId("create-access-choice-request-genesis")).toBeNull();
+    expect(screen.getByText(/genesis is an affiliate program/i)).toBeTruthy();
     expect(screen.getByTestId("create-access-choice-choose-pro")).toBeTruthy();
     expect(screen.getByTestId("create-access-choice-back")).toBeTruthy();
     expect(screen.queryByTestId("create-access-choice-view-agreement")).toBeNull();

@@ -288,11 +288,11 @@ export function resolveAuthoritativeIntakePartyNames(intakeContext?: string | nu
   if (numbered.length >= 3) return numbered;
   // Ordered between/among clause wins over length-sorted entityPool for 3+ party slot order.
   if (preferOrderedBetweenPartyList(fromBetween, entityPool)) return fromBetween;
-  if (entityPool.length >= 3) return entityPool;
+  if (entityPool.length >= 3) return orderPartyNamesByIntakeAppearance(entityPool, intake);
   if (numbered.length >= 2 && numbered.length >= entityPool.length) return numbered;
   if (fromBetween.length >= 2 && fromBetween.length >= lineSeparated.length) return fromBetween;
   if (lineSeparated.length >= 2) return lineSeparated;
-  if (entityPool.length >= 2) return entityPool;
+  if (entityPool.length >= 2) return orderPartyNamesByIntakeAppearance(entityPool, intake);
   if (labeled.length >= 2) return labeled;
   const quoted = quotedRolePartyLegalEntities(intake)
     .map(normalizeAgreementPartyName)
@@ -462,13 +462,18 @@ export function resolveAuthoritativePartySlotCount(args: {
   const rowNames = args.draftPartyNames ?? [];
   const hasDrift = partySlotListHasDriftFragments(rowNames, args.intakeText);
   const collapsed = selectAuthoritativeTwoPartySlots(rowNames);
-  if (hasDrift && collapsed.length === 2) return 2;
-  if (hasDrift && intakeNames.length === 2) return 2;
+  // Phantom coordinator / invalid fragments must not collapse a true 3+/4-party draft or
+  // intake entity pool back to two slots.
+  if (hasDrift && collapsed.length === 2 && !explicitMultiParty) return 2;
+  if (hasDrift && intakeNames.length === 2 && !explicitMultiParty) return 2;
 
   const validCollapsed = collapsePartySlotCandidates(rowNames);
   if (rowNames.length > 2 && validCollapsed.length === 2 && !explicitMultiParty) return 2;
 
   if (quoted.length >= 3) return quoted.length;
+  if (collapsedDraftAuthoritative.length >= 3) {
+    return Math.min(collapsedDraftAuthoritative.length, PAID_PRO_AUTHORITY_MAX_PARTIES);
+  }
   if (entityPool.length >= 3) return entityPool.length;
 
   let legalCount = Math.max(args.rawPartyCount ?? rowNames.length, quoted.length || labeled.length || 2);

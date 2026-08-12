@@ -596,11 +596,25 @@ function preparePaidProServerDocumentForAcceptanceCore(
   }
 
   const invariantBeforeEnsure = analyzePaidProExecutionBlockInvariant(out, { expectedParties });
+  const needsMultiPartyEntityHeadingUpgrade =
+    records.length >= 3 &&
+    !isGenericPaidProAcceptanceManifestFallback(records) &&
+    (() => {
+      const witnessIdx = out.search(/\bIN WITNESS WHEREOF\b/i);
+      if (witnessIdx < 0) return true;
+      const tail = out.slice(witnessIdx);
+      // Title-case entity blocks without uppercase headings must be rebuilt for N-party Pro.
+      return !records.every((rec) => {
+        const heading = String(rec.fullLegalName || "").trim().toUpperCase();
+        if (!heading) return false;
+        const escaped = heading.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        return new RegExp(`(?:^|\\n\\n)${escaped}\\s*\\n\\nBy:`, "m").test(tail);
+      });
+    })();
   if (
     records.length >= 2 &&
     !isGenericPaidProAcceptanceManifestFallback(records) &&
-    !invariantAtPrepareEntry.ok &&
-    !invariantBeforeEnsure.ok
+    ((!invariantAtPrepareEntry.ok && !invariantBeforeEnsure.ok) || needsMultiPartyEntityHeadingUpgrade)
   ) {
     const execution = ensurePaidProAcceptanceExecutionBlockInvariant(out, records);
     if (execution.text !== out) {

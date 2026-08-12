@@ -91,6 +91,10 @@ export function collapseRepeatedEntityMentionCandidate(raw: string): string {
 const LEADING_PARTY_ROLE_LABEL_RE =
   /^(?:client|customer|buyer|seller|vendor|licensor|licensee|landlord|tenant|employer|employee|contractor|consultant|subcontractor|prime\s+contractor|service\s+provider|analytics\s+provider|provider|party\s*[a-d0-9]+)\s*:\s*/i;
 
+/** Structured intake field labels fused onto entity values ("Legal entity / party name: Acme LLC"). */
+const LEADING_PARTY_METADATA_FIELD_LABEL_RE =
+  /^(?:legal\s+entity(?:\s*\/\s*party\s+name)?|party\s+name|representative(?:\s*\([^)]*\)|\s+name|\s+title)?|represented\s+by|human\s+signer|authorized\s+signer|signer(?:\s+name|\s+title|\s+email)?|physical\s+address|mailing\s+address|party\s+address|address|e-?mail|email|title|name)\s*:\s*/i;
+
 /**
  * Truncate a contaminated party label at the first legal-entity suffix.
  * "Blue Canyon Analytics LLC Sarah Mitchell CEO sarah" → "Blue Canyon Analytics LLC"
@@ -102,6 +106,12 @@ export function isolateLegalEntityFromContaminatedName(raw: string): string {
   // tails emit `CLIENT:\nClient: Acme LLC` and case-insensitive heading counts double).
   for (let i = 0; i < 2; i += 1) {
     const stripped = s.replace(LEADING_PARTY_ROLE_LABEL_RE, "").trim();
+    if (stripped === s) break;
+    s = stripped;
+  }
+  // Field-label prefixes from Party N bullet manifests must not stick to the entity.
+  for (let i = 0; i < 2; i += 1) {
+    const stripped = s.replace(LEADING_PARTY_METADATA_FIELD_LABEL_RE, "").trim();
     if (stripped === s) break;
     s = stripped;
   }

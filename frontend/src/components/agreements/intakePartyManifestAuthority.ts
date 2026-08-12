@@ -102,6 +102,21 @@ function parseManifestBody(body: string, partyNumber: number): IntakePartyManife
   let rest = String(body ?? "").replace(/\s+/g, " ").trim();
   if (!rest) return null;
 
+  // Party-N bullet metadata (`• Email: …`, `• Representative (human signer): …`) is never a
+  // party identity row. Legal-entity field bullets keep only the entity value.
+  const fieldLabelMatch = rest.match(
+    /^(legal\s+entity(?:\s*\/\s*party\s+name)?|party\s+name|representative(?:\s*\([^)]*\)|\s+name|\s+title)?|represented\s+by|human\s+signer|authorized\s+signer|signer(?:\s+name|\s+title|\s+email)?|physical\s+address|mailing\s+address|party\s+address|address|e-?mail|email|title|name)\s*:\s*(.*)$/i,
+  );
+  if (fieldLabelMatch) {
+    const label = fieldLabelMatch[1]!.trim();
+    const value = (fieldLabelMatch[2] || "").trim();
+    if (!/^(?:legal\s+entity(?:\s*\/\s*party\s+name)?|party\s+name)$/i.test(label)) {
+      return null;
+    }
+    rest = value;
+    if (!rest) return null;
+  }
+
   let roleLabel = "";
   const parenOnly = rest.match(/^(.+?)\s*\(([^)]+)\)\s*\.?\s*$/);
   if (parenOnly && !US_CITY_STATE_ZIP_TAIL_RE.test(rest)) {

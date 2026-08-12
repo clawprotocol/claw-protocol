@@ -188,10 +188,11 @@ export function reconcileExecutionBlockToRoleIdentities(
     const heading = id.blockHeading.trim().replace(/:$/, "");
     const legal = id.partyDisplayName.trim();
     const entityHeading = heading.toLowerCase() === legal.toLowerCase();
-    // Entity-heading blocks use the legal name as the heading only (no duplicate name line).
-    const lines = entityHeading ? [`${heading}:`] : [`${heading}:`, legal];
+    // Entity-heading blocks: uppercase legal name + blank line (no ROLE-style colon), matching
+    // buildMultiPartyEntityNameExecutionSection / acceptance invariant shape.
+    const lines = entityHeading ? [heading.toUpperCase(), ""] : [`${heading}:`, legal];
     const headingRe = new RegExp(
-      `^\\s*${heading.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*:`,
+      `^\\s*${heading.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*:?`,
       "im",
     );
     const headingIdx = tail.search(headingRe);
