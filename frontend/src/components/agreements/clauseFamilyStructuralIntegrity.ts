@@ -471,9 +471,11 @@ export function validateExecutionClauseFamilyStructuralIntegrity(
   const violations: ClauseFamilyStructuralViolation[] = [];
   const blocks = countPaidProExecutionBlocks(corpus);
   if (blocks === 0) {
-    // Concise commercial Pro drafts may freeze before signer-setup adds witness /
-    // execution blocks when Electronic Signatures + numbered structure already qualify.
-    if (!qualifiesAsConciseAuthoritativePaidServerDraft(corpus)) {
+    // Concise / e-sign-closed commercial Pro drafts may freeze before signer-setup adds
+    // witness / blank By:____ chrome. Signing prepare owns execution append.
+    const hasEsignClose =
+      /\belectronic\s+signatures?\b|\be-?sign\b|\bcounterparts?\b/i.test(corpus);
+    if (!qualifiesAsConciseAuthoritativePaidServerDraft(corpus) && !hasEsignClose) {
       violations.push({
         family: "execution_block",
         code: "missing_execution_block",

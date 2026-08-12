@@ -10,6 +10,7 @@ import {
   ensureOperativeIfToNoticeDelivery,
   ensureOperativeNoticeStanzaCountAuthorityAtFreeze,
   ensureOperativeNoticeStanzaEntityLinesAtFreeze,
+  findNoticesSectionStart,
   repairDuplicateOperativeNoticeStanzas,
   repairFusedNoticesHeadingToPriorClause,
   resolveNoticeStructuralValidationParties,
@@ -184,10 +185,24 @@ export function applyPaidProNoticeContactAuthority(
     // Positional / metadata placeholders are not notice-contact authority.
     return !/^party\s*\d+$/i.test(name);
   });
+  // Commercial no-invent: legal names alone must not force "provided during signer setup"
+  // notice emails/addresses. Require real contact fields before inventing Notices scaffolding.
+  const hasRealNoticeContacts = parties.some((p) => {
+    const email = String(p.signerEmail || "").trim();
+    const address = String(p.partyAddress || "").trim();
+    if (!email && !address) return false;
+    if (/provided during signer setup/i.test(email) || /provided during signer setup/i.test(address)) {
+      return false;
+    }
+    return true;
+  });
+  const mayMutateNoticeScaffolding =
+    hasAuthoritativeNoticeParties &&
+    (hasRealNoticeContacts || findNoticesSectionStart(out) >= 0);
 
   // Do not invent NOTICES / "provided during signer setup" scaffolding for generic
   // Party 1 / Party 2 placeholders — that mutates accepted SoT without real entities.
-  if (hasAuthoritativeNoticeParties) {
+  if (mayMutateNoticeScaffolding && hasRealNoticeContacts) {
     const headingRepair = ensureCanonicalNoticesSectionHeadingForFreeze(out);
     if (headingRepair.repairs.length > 0) {
       out = headingRepair.text;
@@ -195,7 +210,7 @@ export function applyPaidProNoticeContactAuthority(
     }
   }
 
-  if (parties.length >= 2 && hasAuthoritativeNoticeParties) {
+  if (parties.length >= 2 && mayMutateNoticeScaffolding && hasRealNoticeContacts) {
     const canonicalPartyCount = resolveAuthoritativeSignerCount({
       intakeText: intakeRaw,
       draftPartyNames: roleContext.draftPartyNames ?? undefined,
@@ -257,9 +272,10 @@ export function applyPaidProNoticeContactAuthority(
     surface,
     blockOnUnresolved: opts?.blockOnUnresolved ?? true,
     // Token-gate notice repair would otherwise synthesize Party 1/Party 2 scaffolding
-    // from empty render-token slots when no authoritative entities exist.
+    // or "provided during signer setup" emails when no real contact authority exists.
     skipNoticeRepair:
-      !hasAuthoritativeNoticeParties && !intakePartyManifestIsAuthoritative(intakeRaw),
+      !hasRealNoticeContacts ||
+      (!hasAuthoritativeNoticeParties && !intakePartyManifestIsAuthoritative(intakeRaw)),
   });
   out = tokenGate.text;
   repairs.push(...tokenGate.repairs);

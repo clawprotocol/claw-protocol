@@ -3642,6 +3642,19 @@ async function runPremiumCompletionInner(
             }
           }
         }
+        if (!freezeCommit.ok && partyPlaceholderRepairAccept) {
+          // Known-party placeholder repair already produced the authoritative server body —
+          // keep server_full_draft provenance instead of structural_recovery replacement.
+          freezeCommit = {
+            ok: true,
+            text: doc,
+            hash: hashPaidProCorpus(doc),
+            rejectReason: null,
+            reviewParties: freezeCommit.reviewParties,
+            parties: freezeCommit.parties,
+          };
+          freezeAcceptedSource = usedClientRetry ? "server_full_draft_retry" : "server_full_draft";
+        }
         if (!freezeCommit.ok) {
           if (!vPaidAuthoritativeSubstantive && !wireHasSubstantiveServerFullCorpus) {
             const structural = buildPaidProStructuralRecoveryBody({
@@ -5298,8 +5311,9 @@ async function runPremiumCompletionInner(
       }
     }
     const skipServerDegradedRecovery =
-      jsonParseClientRejected &&
-      lastWireServerFullDocumentLen < SUBSTANTIVE_SERVER_DRAFT_MIN_LEN;
+      (jsonParseClientRejected &&
+        lastWireServerFullDocumentLen < SUBSTANTIVE_SERVER_DRAFT_MIN_LEN) ||
+      shortNonemptyJsonParseWireBelowFloor;
     if (
       !substantiveServerFullOnWire &&
       !skipServerDegradedRecovery &&
@@ -5350,11 +5364,12 @@ async function runPremiumCompletionInner(
         };
       }
     }
-    // Do not blanket-block late local recovery for short json_parse wire — that case is
-    // exactly when deterministic intake recovery must surface a usable Pro draft.
+    // Short non-empty json_parse wire below the paid floor must stay rejected (no local SoT invent).
+    // Tiny/empty contaminated aliases may still recover via the earlier deterministic path.
     const blockLateThinWireRecovery =
       premiumBodyHardRejectedForDevContextLeak ||
       substantiveServerFullOnWire ||
+      shortNonemptyJsonParseWireBelowFloor ||
       lastSubstantiveWireFreezeBodyLen >= SUBSTANTIVE_SERVER_DRAFT_MIN_LEN ||
       (rejectedPaidCorpusDueToClientGates && Boolean(lastSubstantiveWireFreezeRejectReason));
     const localRecovery = buildPremiumPostCheckoutLocalRecoveryProDraft({

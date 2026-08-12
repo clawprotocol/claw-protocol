@@ -33,6 +33,7 @@ import { applyPaidProSectionHeadingTitleAuthority } from "./paidProSectionHeadin
 import { diagnosePaidProCorpusDuplication, repairPaidProCorpusDuplication } from "./paidProCorpusDuplicationAuthority";
 import {
   ensureCanonicalNoticesSectionHeadingForFreeze,
+  findNoticesSectionStart,
   removeEmptyNoticesSubsectionShells,
   repairDuplicateOperativeNoticeStanzas,
   sealPaidProNoticesExecutionBoundaryInCorpus,
@@ -462,9 +463,12 @@ export function preparePaidProFreezeCandidateText(
   const skipAcceptanceExecutionSynthesis = isGenericPaidProAcceptanceManifestFallback(
     acceptanceManifest,
   );
+  // Only normalize an existing witness/execution tail — do not invent blank By:____ chrome
+  // onto an accepted review corpus that never had a signature block.
   if (
     !skipAcceptanceExecutionSynthesis &&
-    !isSubstantiveBrandLicensingCorpus(authorityTrimmed, args.intakeText)
+    !isSubstantiveBrandLicensingCorpus(authorityTrimmed, args.intakeText) &&
+    /\bIN WITNESS WHEREOF\b/i.test(safeForCommit)
   ) {
     const exec = ensurePaidProAcceptanceExecutionBlockInvariant(safeForCommit, acceptanceManifest);
     safeForCommit = exec.text;
@@ -808,6 +812,20 @@ function repairPaidProCanonicalNoticeAuthorityAtFreeze(
   if (!freezeNoticePartiesAreAuthoritative(noticeValidationCtx.parties)) {
     return sealed.text;
   }
+  // Legal names alone must not invent a Notices section / placeholder contacts at freeze.
+  // Existing Notices may still need entity-line hydration (incomplete If-to stanzas).
+  const hasRealNoticeContacts = noticeValidationCtx.parties.some((p) => {
+    const email = String(p.signerEmail || "").trim();
+    const address = String(p.partyAddress || "").trim();
+    if (!email && address.length <= 8) return false;
+    if (/provided during signer setup/i.test(email) || /provided during signer setup/i.test(address)) {
+      return false;
+    }
+    return Boolean(email) || address.length > 8;
+  });
+  if (!hasRealNoticeContacts && findNoticesSectionStart(sealed.text) < 0) {
+    return sealed.text;
+  }
   const entityHydrated = ensureOperativeNoticeStanzaEntityLinesAtFreeze(
     sealed.text,
     noticeValidationCtx.parties,
@@ -817,6 +835,9 @@ function repairPaidProCanonicalNoticeAuthorityAtFreeze(
       acceptedCorpus: sealed.text,
     },
   );
+  if (!hasRealNoticeContacts) {
+    return entityHydrated.text;
+  }
   const stanzaCountReconciled = ensureOperativeNoticeStanzaCountAuthorityAtFreeze(
     entityHydrated.text,
     noticeValidationCtx.parties,
@@ -1034,12 +1055,14 @@ export function assertPaidProFreezeCandidateGates(
     intakeText: args.intakeText ?? null,
   });
   const missingWitnessClause = !/\bIN WITNESS WHEREOF\b/i.test(safeForCommit);
+  // When witness is missing, do not invent blank signature chrome at freeze — signing prepare owns that.
+  // When witness exists, repair/normalize the existing execution block only.
   if (
+    !missingWitnessClause &&
     preFreezeExecutionManifest.length >= 2 &&
     !isGenericPaidProAcceptanceManifestFallback(preFreezeExecutionManifest) &&
     !isSubstantiveBrandLicensingCorpus(trim(args.text), args.intakeText) &&
-    (missingWitnessClause ||
-      preFreezeExecutionManifest.length >= 3 ||
+    (preFreezeExecutionManifest.length >= 3 ||
       executionHeadingsContainIntakeInstructionLeakage(safeForCommit) ||
       !executionBlockMatchesManifestRecords(safeForCommit, preFreezeExecutionManifest))
   ) {

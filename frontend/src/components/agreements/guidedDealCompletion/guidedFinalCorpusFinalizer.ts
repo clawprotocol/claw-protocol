@@ -68,6 +68,7 @@ import {
 } from "./guidedAnswerSemanticMerger";
 import { filterManifestMissingWithSemanticEvidence } from "./guidedSemanticManifestValidation";
 import { MINIMUM_COMMERCIAL_SPECIFICITY_SCORE } from "../commercialSpecificity";
+import { ensureOperativeIfToNoticeDelivery } from "../paidProPartyNoticeDetails";
 
 export const GUIDED_FINAL_CORPUS_MIN_LEN = 1500;
 
@@ -756,6 +757,28 @@ export function finalizeGuidedProAgreementCorpus(
   diagnostics.commercialSpecificityScore = canonicalized.commercialSpecificity?.score ?? 100;
   diagnostics.repairs.push(...canonicalized.repairs.map((r) => `canonical:${r}`));
   diagnostics.repairs.push(...canonicalized.warnings.map((w) => `canonical_warning:${w}`));
+  // Place real signer contact fields into Notices before snapshot integrity — never invent emails.
+  if (args.signerIdentities.length >= 2) {
+    const noticeParties = args.signerIdentities.map((id, partyIndex) => ({
+      partyIndex,
+      partyLegalName: id.partyDisplayName,
+      signerName: id.representativeName?.trim() || (id.isIndividual ? id.partyDisplayName : ""),
+      signerTitle: id.title?.trim() || "",
+      signerEmail: id.email?.trim() || "",
+      partyAddress: id.partyAddress?.trim() || "",
+    }));
+    const hasRealContacts = noticeParties.some((p) => p.signerEmail || p.partyAddress);
+    if (hasRealContacts) {
+      const noticed = ensureOperativeIfToNoticeDelivery(body, noticeParties, {
+        intakeText: args.originalIntake ?? null,
+        draftPartyNames: noticeParties.map((p) => p.partyLegalName),
+      });
+      if (noticed.repairs.length > 0) {
+        body = noticed.text;
+        diagnostics.repairs.push(...noticed.repairs.map((r) => `notice:${r}`));
+      }
+    }
+  }
   const canonicalSnapshot = buildCanonicalAgreementSnapshot({
     surface: "guided_final_corpus_finalizer",
     tier: "pro",

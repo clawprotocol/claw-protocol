@@ -45,13 +45,25 @@ const NEW_CITY = "Boise";
 const PARTY1_ADDRESS_OLD = `1027 S. Rainbow Blvd., #124, ${OLD_CITY}, ID 34213`;
 const PARTY1_ADDRESS_NEW = `1027 S. Rainbow Blvd., #124, ${NEW_CITY}, ID 34213`;
 
-function buildCorpus(_party1Address: string) {
+function buildCorpus(party1Address: string) {
+  // Contact authority: addresses live in Notices (not execution-block Address for Notice lines).
   return [
     "MUTUAL CONSULTING AND IMPLEMENTATION AGREEMENT",
     "",
     `This Agreement is between ${BLUE} ("Client") and ${IRON} ("Service Provider").`,
     "",
     ...Array.from({ length: 28 }, (_, i) => `Section ${i + 1}. Operative clause ${i + 1}.`),
+    "",
+    "29. NOTICES",
+    "Notices under this Agreement must be in writing and delivered as set forth below.",
+    "",
+    `If to ${BLUE}:`,
+    `Address: ${party1Address}`,
+    "Email: bca342@me.com",
+    "",
+    `If to ${IRON}:`,
+    "Address: 8945 Hayride Rd., Metairie, LA 70003",
+    "Email: ivs345@gmail.com",
     "",
     "IN WITNESS WHEREOF, the Parties execute this Agreement.",
     "",

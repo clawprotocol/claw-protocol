@@ -653,7 +653,17 @@ export function noticeStanzaHasRoleLabelCorruption(stanza: string): boolean {
   if (ROLE_ONLY_IF_TO_HEADER_RE.test(header)) return true;
   const ifToEntity = header.match(/^If to\s+(.+?)\s*:\s*$/i)?.[1]?.trim() ?? "";
   if (ifToEntity && hasPartyMetadataLabelContamination(ifToEntity)) return true;
-  if (entityLine && hasPartyMetadataLabelContamination(entityLine)) return true;
+  // Line 2 may be Address:/Email:/Attn: when the entity line is omitted — that is incomplete,
+  // not role-label corruption (empty_notice_entity_name covers the missing entity).
+  const entityLooksLikeContactField =
+    /^(?:Address|Email|Attn|Attention|Phone|Tel)\b/i.test(entityLine);
+  if (
+    entityLine &&
+    !entityLooksLikeContactField &&
+    hasPartyMetadataLabelContamination(entityLine)
+  ) {
+    return true;
+  }
   return lines.some((line) => {
     const t = line.trim();
     return CORRUPTED_NOTICE_ROLE_FUSION_RE.test(t) || CORRUPTED_NOTICE_ROLE_ATTENTION_RE.test(t);
@@ -835,7 +845,6 @@ export function noticeStanzaHasAddressPollution(stanza: string): boolean {
   return rawJoined.length > sanitized.length + 4 || NOTICE_ADDRESS_INSTRUCTIONAL_LINE_RE.test(rawJoined);
 }
 
-const NOTICE_PRIMARY_CONTACT_FALLBACK_LINE = "provided during signer setup.";
 const NOTICE_SIGNER_SETUP_EMAIL_LINE = "Email: provided during signer setup";
 const NOTICE_SIGNER_SETUP_ADDRESS_LINE = "Address: provided during signer setup";
 const NOTICE_SIGNER_SETUP_ATTENTION_LINE = "Attention: Authorized Signer";
@@ -1369,9 +1378,8 @@ function buildIfToNoticeStanza(
   if (addressLines.length > 0) {
     lines.push("Address:", ...addressLines);
   }
-  if (!email && addressLines.length === 0) {
-    lines.push(NOTICE_PRIMARY_CONTACT_FALLBACK_LINE);
-  }
+  // Commercial no-invent: do not synthesize "provided during signer setup" contact lines.
+  // Entity-only stanzas stand until real email/address authority exists.
   return lines.join("\n");
 }
 
@@ -2033,6 +2041,18 @@ export function ensureOperativeNoticeStanzaEntityLinesAtFreeze(
       rebuiltStanzas.push(candidate);
       continue;
     }
+    if (candidate) {
+      // Preserve existing Email/Address lines — inject the legal entity under If-to only.
+      const legal = resolveNoticeStanzaLegalEntity(party, authorityParties, roleContext);
+      const lines = candidate.split("\n");
+      const header = lines[0]?.trim() || `If to ${legal}:`;
+      const rest = lines.slice(1);
+      rebuiltStanzas.push(
+        stripInvalidNoticeStanzaLines([header, legal, ...rest].join("\n"), canonicalNames),
+      );
+      repairs.push(`notice:hydrate_entity_line_party_${i + 1}`);
+      continue;
+    }
     rebuiltStanzas.push(
       stripInvalidNoticeStanzaLines(
         buildIfToNoticeStanza(party, authorityParties, roleContext),
@@ -2237,6 +2257,20 @@ export function repairIncompleteIfToNoticeStanzas(
         stanzaCount: authorityParties.length,
       });
     } else if (authorityParties.length >= 2) {
+      // Commercial no-invent: legal names alone must not force a Notices section with
+      // placeholder contact lines. Require real email/address before scaffolding Notices.
+      const hasRealNoticeContacts = authorityParties.some((p) => {
+        const email = p.signerEmail.trim();
+        const address = p.partyAddress.trim();
+        if (!email && address.length <= 8) return false;
+        if (/provided during signer setup/i.test(email) || /provided during signer setup/i.test(address)) {
+          return false;
+        }
+        return Boolean(email) || address.length > 8;
+      });
+      if (!hasRealNoticeContacts) {
+        return { text: text.trimEnd(), repairs };
+      }
       const witnessIdx = resolveAuthoritativeWitnessIndex(text);
       const head = witnessIdx >= 0 ? text.slice(0, witnessIdx) : text;
       const tail = witnessIdx >= 0 ? text.slice(witnessIdx) : "";
@@ -2528,7 +2562,7 @@ export function hydrateOperativeNoticeStanzasFromSignerMetadata(
   const authorityParties = enrichNoticeAuthorityParties(parties, roleContext);
   if (!corpus?.trim() || authorityParties.length < 2) return { text: corpus, repairs: [] };
   const hasContactMetadata = authorityParties.some(
-    (p) => p.signerEmail.trim() || p.partyAddress.trim() || p.signerName.trim(),
+    (p) => p.signerEmail.trim() || p.partyAddress.trim().length > 8,
   );
   if (!hasContactMetadata) return { text: corpus, repairs: [] };
   return repairIncompleteIfToNoticeStanzas(corpus, authorityParties, roleContext);
@@ -2544,6 +2578,19 @@ export function ensureOperativeIfToNoticeDelivery(
   if (!corpus?.trim() || authorityParties.length < 2) return { text: corpus, repairs: [] };
 
   const noticesIdx = findNoticesSectionStart(corpus);
+  const authorityHasRealContactFields = authorityParties.some((p) => {
+    const email = p.signerEmail.trim();
+    const address = p.partyAddress.trim();
+    if (!email && address.length <= 8) return false;
+    if (/provided during signer setup/i.test(email) || /provided during signer setup/i.test(address)) {
+      return false;
+    }
+    return Boolean(email) || address.length > 8;
+  });
+  // Signer display names alone must not invent Notices / "provided during signer setup".
+  if (!authorityHasRealContactFields && noticesIdx < 0) {
+    return { text: corpus, repairs: [] };
+  }
   const witnessIdx = resolveAuthoritativeWitnessIndex(corpus);
   const noticesRegion =
     noticesIdx >= 0 ? corpus.slice(noticesIdx, witnessIdx >= 0 ? witnessIdx : corpus.length) : "";
@@ -2601,11 +2648,9 @@ export function ensureOperativeIfToNoticeDelivery(
       return false;
     });
   // Bracket tokens always force rebuild. Live "provided during signer setup" lines only
-  // force rebuild when authority has contact to apply — otherwise freeze-time rebuilds
-  // with empty signer metadata churn headings into section_heading_title_anomaly rejects.
-  const authorityHasContactToApply = authorityParties.some(
-    (p) => p.signerEmail.trim() || p.partyAddress.trim() || p.signerName.trim(),
-  );
+  // force rebuild when authority has real email/address to apply — otherwise freeze-time
+  // rebuilds with empty contact metadata invent placeholder Notices scaffolding.
+  const authorityHasContactToApply = authorityHasRealContactFields;
   const hasPlaceholderTokens =
     NOTICE_PLACEHOLDER_TOKEN_RE.test(noticesRegion) ||
     (authorityHasContactToApply && /provided during signer setup/i.test(noticesRegion));

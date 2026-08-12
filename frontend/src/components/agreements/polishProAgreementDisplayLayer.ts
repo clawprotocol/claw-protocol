@@ -766,7 +766,13 @@ export function polishProAgreementDisplayLayer(
     repairs.push(...sections.repairs);
   }
 
-  if (records.length >= 2 && !opts?.reviewDisplayMode) {
+  // Do not invent blank By:____ chrome onto review corpora that lack a witness block.
+  // Signing prepare owns execution append; display polish only normalizes existing tails.
+  if (
+    records.length >= 2 &&
+    !opts?.reviewDisplayMode &&
+    /\bIN WITNESS WHEREOF\b/i.test(out)
+  ) {
     out = appendProExecutionBlockIfMissing(out, records).text;
   }
 

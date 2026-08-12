@@ -261,11 +261,18 @@ export function detectPaidProMalformedServicesOpening(
     return true;
   }
 
+  const hasValidRecitalVerb = (region: string): boolean =>
+    /\bentered\s+into\b/i.test(region) ||
+    /\bis\s+between\b/i.test(region) ||
+    /\bby\s+and\s+between\b/i.test(region) ||
+    /\bby\s+and\s+among\b/i.test(region) ||
+    /\bentered\s+by\s+and\s+between\b/i.test(region);
+
   if (sec1Idx < 0) {
-    return !/entered\s+into/i.test(body.slice(0, 2_500));
+    return !hasValidRecitalVerb(body.slice(0, 2_500));
   }
 
-  if (!/entered\s+into/i.test(preSec1)) {
+  if (!hasValidRecitalVerb(preSec1)) {
     return true;
   }
   if (client && !preSec1.includes(client)) {
@@ -277,7 +284,8 @@ export function detectPaidProMalformedServicesOpening(
   if (!/\(\s*["']?Client["']?\s*\)/i.test(preSec1)) {
     return true;
   }
-  if (!/\(\s*["']?Service Provider["']?\s*\)/i.test(preSec1)) {
+  // Accept intake role aliases (Provider / Service Provider) — commercial role-alias preserve.
+  if (!/\(\s*["']?(?:Service\s+Provider|Provider)["']?\s*\)/i.test(preSec1)) {
     return true;
   }
   if (/Effective\s+Date\s+This\s+Agreement\s+is\s+between/i.test(preSec1)) {

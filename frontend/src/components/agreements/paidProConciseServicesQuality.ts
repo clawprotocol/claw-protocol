@@ -601,7 +601,8 @@ function preparePaidProServerDocumentForAcceptanceCore(
     !isGenericPaidProAcceptanceManifestFallback(records) &&
     (() => {
       const witnessIdx = out.search(/\bIN WITNESS WHEREOF\b/i);
-      if (witnessIdx < 0) return true;
+      // Missing witness must not force invent — signing prepare owns execution append.
+      if (witnessIdx < 0) return false;
       const tail = out.slice(witnessIdx);
       // Title-case entity blocks without uppercase headings must be rebuilt for N-party Pro.
       return !records.every((rec) => {
@@ -611,9 +612,11 @@ function preparePaidProServerDocumentForAcceptanceCore(
         return new RegExp(`(?:^|\\n\\n)${escaped}\\s*\\n\\nBy:`, "m").test(tail);
       });
     })();
+  // Only normalize an existing witness/execution tail — never invent blank By:____ chrome.
   if (
     records.length >= 2 &&
     !isGenericPaidProAcceptanceManifestFallback(records) &&
+    /\bIN WITNESS WHEREOF\b/i.test(out) &&
     ((!invariantAtPrepareEntry.ok && !invariantBeforeEnsure.ok) || needsMultiPartyEntityHeadingUpgrade)
   ) {
     const execution = ensurePaidProAcceptanceExecutionBlockInvariant(out, records);

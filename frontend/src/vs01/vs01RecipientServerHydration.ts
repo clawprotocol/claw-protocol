@@ -20,6 +20,7 @@ import { scopeRecipientManifestToLockedSigner } from "./vs01RecipientFieldScope"
 import { filterPacketManifestFieldsForRole } from "./vs01SigningPacketManifest";
 import {
   hydrateRecipientSigningFields,
+  isRecipientSignerMarkedComplete,
   isRecipientSigningEditableType,
   stripLockedSignerEditableValuesOnHydrate,
 } from "./recipientSigningFieldUtils";
@@ -110,10 +111,23 @@ function hydrateFieldsFromPortable(args: {
     lockedSignerRoleId,
     portableRoles: hydratedPortable.roles,
   });
+  // Keep valued signature/initials for completed non-locked signers so party-2 open
+  // still shows party-1's locked signature (TEST367). Do not pull prepare typedName
+  // for unsigned counterparties.
+  const completedOtherSignerFields = lock
+    ? manifestFields.filter((f) => {
+        const rid = (f.assignedSignerRoleId ?? "").trim();
+        if (!rid || rid === lock) return false;
+        if (!isRecipientSigningEditableType(f.type)) return false;
+        if (!isRecipientSignerMarkedComplete(agreementId, rid)) return false;
+        return typeof f.value === "string" && f.value.trim().length > 0;
+      })
+    : [];
+  const fieldsForHydrate = [...scopedManifestFields, ...completedOtherSignerFields];
   const displayFields = hydrateRecipientSigningFields(
     stripLockedSignerEditableValuesOnHydrate(
       ensureRecipientFieldDefaults(
-        scopedManifestFields,
+        fieldsForHydrate,
         recipientName,
         recipientEmail,
         {

@@ -193,7 +193,9 @@ export function finalizePaidProSigningCorpusText(
 
   const contactAuthority = applyContactAuthorityExecutionBlockIntegrity(text, {
     source: "finalize_paid_pro_signing_corpus",
-    ensureNoticesClause: !signatureRegionOnly,
+    // Never invent a Notices clause here — operative notice delivery below only runs
+    // when real contact authority exists (commercial no-invent).
+    ensureNoticesClause: false,
   });
   if (contactAuthority.repaired) {
     text = contactAuthority.text;

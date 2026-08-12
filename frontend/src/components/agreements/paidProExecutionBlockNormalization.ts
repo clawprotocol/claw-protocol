@@ -644,6 +644,18 @@ export function enforcePaidProSingleExecutionBlock(
     return { text, repairs: [...new Set(repairs)] };
   }
 
+  // Commercial no-invent: do not synthesize IN WITNESS / blank By:____ chrome onto a
+  // review/display corpus that never had an execution region. Signing prepare owns append.
+  if (resolveAuthoritativeWitnessIndex(text) < 0) {
+    text = stripRecitalFragmentExecutionLinesFromTail(text, repairs);
+    const truncated = truncatePostCanonicalExecutionPollution(text, { expectedPartyCount });
+    if (truncated.text !== text) {
+      repairs.push(...truncated.repairs);
+      text = truncated.text;
+    }
+    return { text, repairs: [...new Set(repairs)] };
+  }
+
   const stubLines = [
     body,
     "",

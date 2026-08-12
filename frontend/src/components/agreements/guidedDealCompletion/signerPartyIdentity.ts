@@ -12,6 +12,7 @@ import type { PremiumRecipientHandoffV2 } from "../premiumPartyNamesHandoff";
 import type { ResolveGuidedPreReviewSignerSlotsArgs } from "./resolveGuidedPreReviewSignerSlots";
 import { paidProSignerMetadataForensicLineageEnabled } from "../paidProSignerMetadataAuthority";
 import {
+  corpusSignatureBlocksHaveRequiredByLines,
   findSignatureRegionEnd,
   findSignatureRegionStart,
   isSafeSignatureTailReplacement,
@@ -371,10 +372,13 @@ export function rebuildSignatureBlocksWithPartyIdentities(
       reason: "authoritative_execution_block_present",
     });
     const reconciled = reconcileExecutionBlockToRoleIdentities(text, identities);
-    if (reconciled.repairs > 0) {
+    if (
+      reconciled.repairs > 0 &&
+      corpusSignatureBlocksHaveRequiredByLines(reconciled.text, identities.length)
+    ) {
       return { text: reconciled.text, count: reconciled.repairs };
     }
-    return { text, count: 0 };
+    // Fall through to canonical rebuild when By/Date anchors are still missing (TEST43).
   }
   const { blocks, count } = buildSignatureBlocks(identities);
   if (!blocks.length) return { text, count: 0 };
