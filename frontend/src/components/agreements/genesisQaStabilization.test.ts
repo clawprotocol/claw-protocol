@@ -33,7 +33,8 @@ const LONG_SCOPE =
 function session(answers: Record<string, string>): GuidedCompletionSession {
   const ids = Object.keys(answers);
   return {
-    sessionKey: "genesis:qa",
+    // Pro guided QA session — Genesis is affiliate-only, never a buyer tier.
+    sessionKey: "pro:guided-qa",
     queue: ids,
     variables: ids.map((id) => ({
       id,
@@ -239,7 +240,7 @@ This Agreement is governed by the laws of the State of ${law}.
   };
 });
 
-function expectCleanGenesisCorpus(body: string): void {
+function expectCleanGuidedProCorpus(body: string, parties: readonly string[]): void {
   expect(body).not.toMatch(/\[(?:ORG|ADDRESS|PERSON|PARTY|CLIENT|PROVIDER)/i);
   expect(body).not.toMatch(/\bparty[_\s-]?[ab]\b/i);
   expect(body).not.toMatch(/Final review needs another pass|guided_corpus_finalize_failed|missingState/i);
@@ -252,6 +253,11 @@ function expectCleanGenesisCorpus(body: string): void {
   expect((body.match(/^\s*\d+\.\s+Electronic Signatures\b/gim) ?? []).length).toBeLessThanOrEqual(1);
   expect((body.match(/Electronic signatures and counterparts are permitted/gi) ?? []).length).toBeLessThanOrEqual(1);
   expect((body.match(/\bThis Agreement is governed by the laws of the State\b/gi) ?? []).length).toBe(1);
+  const allowedRepeat = new Set(
+    parties.map((p) => p.replace(/\s+/g, " ").trim().toLowerCase()).filter(Boolean),
+  );
+  // Party legal names legitimately repeat across recital, notice stanzas, and signature blocks
+  // once real contact authority is threaded (no-invent notices).
   const normalizedLines = body
     .split("\n")
     .map((line) => line.replace(/\s+/g, " ").trim().toLowerCase())
@@ -259,7 +265,8 @@ function expectCleanGenesisCorpus(body: string): void {
       (line) =>
         line &&
         !/^\d+\.\s+/.test(line) &&
-        !/^(?:by:|name:|title:|date:|client:|service provider:|signature:)/.test(line),
+        !/^(?:by:|name:|title:|date:|client:|service provider:|signature:|if to\b)/.test(line) &&
+        !allowedRepeat.has(line),
     );
   const duplicateLines = normalizedLines.filter((line, index) => normalizedLines.indexOf(line) !== index);
   expect(duplicateLines).toEqual([]);
@@ -284,11 +291,11 @@ function expectCommercialRealism(fixture: GenesisFixture, body: string): void {
   }
 }
 
-describe("Genesis QA stabilization layer", () => {
+describe("Pro guided QA stabilization layer", () => {
   for (const fixture of FIXTURES) {
     it(`${fixture.name}: input -> free draft -> Pro/guided facts -> signer setup -> frozen snapshot`, () => {
       const freeSnapshot = buildCanonicalAgreementSnapshot({
-        surface: "genesis_free_fixture",
+        surface: "pro_guided_free_fixture",
         tier: "starter",
         candidates: [{ source: "free_starter", text: fixture.corpus.slice(0, 1300) }],
         intakeText: fixture.intake,
@@ -307,13 +314,13 @@ describe("Genesis QA stabilization layer", () => {
         originalIntake: fixture.intake,
       });
       expect(result.ok).toBe(true);
-      expectCleanGenesisCorpus(result.body);
+      expectCleanGuidedProCorpus(result.body, fixture.parties);
       expectCommercialRealism(fixture, result.body);
       expect(result.body).toContain(fixture.parties[0]);
       expect(result.body).toContain(fixture.parties[1]);
 
       const snapshot = buildCanonicalAgreementSnapshot({
-        surface: "genesis_final_review_fixture",
+        surface: "pro_guided_final_review_fixture",
         tier: "pro",
         candidates: [{ source: "finalized_signer_applied_guided_corpus", text: result.body }],
         intakeText: fixture.intake,
@@ -337,7 +344,7 @@ describe("Genesis QA stabilization layer", () => {
         signerMetadata: null,
       });
       const reviewFirstSnapshot = buildCanonicalAgreementSnapshot({
-        surface: "genesis_review_first_fixture",
+        surface: "pro_guided_review_first_fixture",
         tier: "pro",
         candidates: [{ source: "accepted_review", text: frozen!.canonicalText }],
         intakeText: fixture.intake,

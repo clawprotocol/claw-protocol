@@ -5600,7 +5600,8 @@ export function AgreementRecipientReview({
             ← Back to agreement
           </button>
 
-          {needsPersonalizedLink && !recipientPreview ? (
+          {/* Token alone is not party attribution when parties have ids — still allow review, block submit. */}
+          {!hasReviewerAttribution && partiesHaveIds && !recipientPreview ? (
             <p
               className="text-[11px] leading-snug text-slate-500"
               data-testid="recipient-review-personal-link-optional-notice"

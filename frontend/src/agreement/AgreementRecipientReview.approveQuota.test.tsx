@@ -130,14 +130,15 @@ describe("AgreementRecipientReview approve + localStorage quota", () => {
     await approveDraftFromReviewFirst();
 
     await waitFor(() => {
-      expect(screen.getByTestId("recipient-approved-waiting-header").textContent).toContain("Review submitted");
+      // Bob is the sole required reviewer — approval completes the review set.
+      expect(screen.getByTestId("recipient-approved-waiting-header").textContent).toContain(
+        "All reviews complete",
+      );
     });
 
     expect(screen.queryByText(/Failed to execute 'setItem'/i)).toBeNull();
     expect(screen.queryByText(/exceeded the quota/i)).toBeNull();
-    expect(screen.getByTestId("recipient-approved-waiting-body").textContent).toContain(
-      "remaining reviewer(s)",
-    );
+    expect(screen.getByTestId("recipient-approved-waiting-header")).toBeTruthy();
     expect(setItem.mock.calls.some(([k]) => String(k).startsWith("claw_agreement_versions_v1:"))).toBe(true);
     expect(screen.queryByRole("heading", { name: recipientPartyReviewCopy.looksGood })).toBeNull();
   });

@@ -396,15 +396,21 @@ export function stripTrailingPartyMetadataLabel(name: string): string {
 /**
  * Job-title / occupational phrases from intake appositives
  * ("Alex Rivera, freelance product designer") must never become a third party slot.
+ * TEST536 — bare signer titles ("Chief Executive Officer", "Managing Partner", "VP Engineering")
+ * also leak from stacked `Signer Title:` blocks via the capitalized-words heuristic.
  */
 const OCCUPATIONAL_OR_JOB_TITLE_PARTY_RE =
   /^(?:(?:a|an|the)\s+)?(?:freelance|independent)?\s*(?:product\s+|ui\s+|ux\s+|graphic\s+|web\s+|software\s+|mobile\s+)?(?:designer|developer|engineer|consultant|contractor|freelancer|attorney|lawyer|accountant|ceo|cto|cfo|coo|founder|president|manager|director|officer|analyst|specialist|architect)(?:\s+(?:and|&)\s+[a-z]+)?$/i;
+
+const EXECUTIVE_OR_SIGNER_TITLE_PARTY_RE =
+  /^(?:chief\s+(?:executive|operating|financial|technology|marketing|security|product|legal|information|revenue|people|compliance)\s+officer|managing\s+partner|general\s+partner|vice\s+president(?:\s+(?:of\s+)?[\w&/-]+)?|vp(?:\s+(?:of\s+)?[\w&/-]+)?|authorized\s+signatory|signatory)$/i;
 
 export function isOccupationalOrJobTitlePartyName(name: string): boolean {
   const t = (name || "").replace(/\s+/g, " ").trim();
   if (!t || t.length < 3) return false;
   if (ENTITY_SUFFIX.test(t)) return false;
   if (OCCUPATIONAL_OR_JOB_TITLE_PARTY_RE.test(t)) return true;
+  if (EXECUTIVE_OR_SIGNER_TITLE_PARTY_RE.test(t)) return true;
   // Bare title tokens that leak as party rows.
   return /^(?:ceo|cto|cfo|coo|founder|president|director|manager|officer)$/i.test(t);
 }
@@ -415,6 +421,28 @@ export function isDisallowedPartyPhrase(name: string): boolean {
   if (!t || t.length < 3) return true;
   if (/^party\s*\d+$/i.test(t)) return true;
   return DISALLOWED_PARTY_PHRASE_RE.some((re) => re.test(t));
+}
+
+/**
+ * TEST536/537 — bare postal lines ("710 Discovery Parkway, Raleigh, NC 27609") satisfy the
+ * capitalized-words heuristic below and must never become legal-entity party slots.
+ */
+function looksLikeUsPostalAddressLine(name: string): boolean {
+  const t = (name || "").replace(/\s+/g, " ").trim();
+  if (!t) return false;
+  // Street-number lead + city, ST ZIP tail (with or without street-type token).
+  if (/^\d{1,6}\s+\S/.test(t) && /,\s*[A-Z]{2}\s+\d{5}(?:-\d{4})?\.?$/i.test(t)) return true;
+  // Street-type + ZIP without requiring leading number (continuation / PO lines).
+  if (
+    /\b(?:Street|St\.?|Avenue|Ave\.?|Road|Rd\.?|Boulevard|Blvd\.?|Drive|Dr\.?|Lane|Ln\.?|Way|Court|Ct\.?|Parkway|Pkwy\.?|Place|Pl\.?|Circle|Cir\.?|Highway|Hwy\.?)\b/i.test(
+      t,
+    ) &&
+    /\b\d{5}(?:-\d{4})?\b/.test(t) &&
+    !ENTITY_SUFFIX.test(t)
+  ) {
+    return true;
+  }
+  return false;
 }
 
 /** True when the label looks like a full legal entity (intake-authoritative), not body prose or titles. */
@@ -429,6 +457,7 @@ export function isAuthoritativeLegalEntityName(name: string): boolean {
   if (hasPartyMetadataLabelContamination(raw)) return false;
   if (isOccupationalOrJobTitlePartyName(raw)) return false;
   if (isPartyMetadataFieldLabelValue(raw)) return false;
+  if (looksLikeUsPostalAddressLine(raw)) return false;
   if (isStateLegalFormOnlyName(raw)) return false;
   const t = isolateLegalEntityFromContaminatedName(raw);
   if (t.length < 3 || isDisallowedPartyPhrase(t)) return false;
@@ -436,6 +465,7 @@ export function isAuthoritativeLegalEntityName(name: string): boolean {
   if (isOccupationalOrJobTitlePartyName(t)) return false;
   if (isStateLegalFormOnlyName(t)) return false;
   if (isPartyMetadataFieldLabelValue(t)) return false;
+  if (looksLikeUsPostalAddressLine(t)) return false;
   if (/^(?:my|our|the|your|their|each|both|either)\s+company$/i.test(t)) return false;
   if (/^(?:client|customer|vendor|contractor|service\s+provider|provider|party\s*[ab])$/i.test(t)) {
     return false;

@@ -14,15 +14,16 @@ export const PAID_PRO_GLUED_DOCUMENT_TITLE_OPENING_RE =
   /^((?:MUTUAL\s+)?[A-Z][A-Z\s&]{4,80}AGREEMENT)\s+(This\b[\s\S]+)$/;
 
 const PAID_PRO_CANONICAL_TITLE_EXTRACT_RE =
-  /\b((?:MUTUAL\s+)?(?:CONSULTING\s+(?:AND\s+IMPLEMENTATION\s+|SERVICES\s+)?|SERVICES\s+)?(?:CONSULTING\s+AND\s+IMPLEMENTATION\s+|CONSULTING\s+SERVICES\s+|BUSINESS\s+CONSULTING\s+|SOFTWARE\s+DEVELOPMENT\s+SERVICES\s+)?AGREEMENT)\b/i;
+  /\b((?:MUTUAL\s+)?(?:CONSULTING\s+(?:AND\s+IMPLEMENTATION\s+|SERVICES\s+)?|SERVICES\s+|SOFTWARE\s+DEVELOPMENT\s+(?:SERVICES\s+)?|FREELANCE\s+SOFTWARE\s+DEVELOPMENT\s+|WEB\s+DEVELOPMENT\s+|SAAS\s+(?:SUBSCRIPTION\s+|SERVICES\s+)?)?(?:CONSULTING\s+AND\s+IMPLEMENTATION\s+|CONSULTING\s+SERVICES\s+|BUSINESS\s+CONSULTING\s+|SOFTWARE\s+DEVELOPMENT\s+(?:SERVICES\s+)?)?AGREEMENT)\b/i;
 
 const PAID_PRO_STANDALONE_TITLE_LINE_RE =
   /^(?:MUTUAL\s+)?[A-Z][A-Z\s&]{4,80}AGREEMENT\s*$/i;
 
 const PAID_PRO_CAPS_TITLE_SCAN_RE = /\b(?:MUTUAL\s+)?[A-Z][A-Z\s&]{4,80}AGREEMENT\b/g;
 
+/** Formal recital opener — must not match mid-prose "enter into this Agreement". */
 const PAID_PRO_RECITAL_START_RE =
-  /\bThis\s+(?:(?:Mutual|MUTUAL)\s+)?(?:Consulting\s+(?:and\s+Implementation\s+|Services\s+)?|Services\s+|SERVICES\s+)?(?:Consulting\s+and\s+Implementation\s+|Consulting\s+Services\s+|Software\s+Development\s+Services\s+)?Agreement\b/i;
+  /(?:^|[.!?]\s+)This\s+(?:(?:Mutual|MUTUAL)\s+)?(?:Consulting\s+(?:and\s+Implementation\s+|Services\s+)?|Services\s+|SERVICES\s+|Software\s+Development\s+(?:Services\s+)?|Freelance\s+Software\s+Development\s+|Web\s+Development\s+)?(?:Consulting\s+and\s+Implementation\s+|Consulting\s+Services\s+|Software\s+Development\s+Services\s+)?Agreement\b/i;
 
 function escapeRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
@@ -35,8 +36,26 @@ function openingSliceBeforeSectionOne(text: string): string {
 }
 
 function extractCanonicalTitleUpper(opening: string): string | null {
+  // Prefer a standalone first-line caps title (avoids truncating
+  // "SOFTWARE DEVELOPMENT AGREEMENT" down to bare "AGREEMENT").
+  const firstLine = opening
+    .split("\n")
+    .map((line) => line.trim())
+    .find(Boolean);
+  if (firstLine && PAID_PRO_STANDALONE_TITLE_LINE_RE.test(firstLine)) {
+    return firstLine.replace(/\s+/g, " ").trim().toUpperCase();
+  }
+  const caps = opening.match(PAID_PRO_CAPS_TITLE_SCAN_RE) ?? [];
+  if (caps.length > 0) {
+    const longest = [...caps].sort((a, b) => b.length - a.length)[0]!;
+    const normalized = longest.replace(/\s+/g, " ").trim().toUpperCase();
+    // Bare "AGREEMENT" is never an authoritative document title by itself.
+    if (normalized !== "AGREEMENT") return normalized;
+  }
   const match = opening.match(PAID_PRO_CANONICAL_TITLE_EXTRACT_RE);
-  return match?.[1]?.replace(/\s+/g, " ").trim().toUpperCase() ?? null;
+  const extracted = match?.[1]?.replace(/\s+/g, " ").trim().toUpperCase() ?? null;
+  if (extracted === "AGREEMENT") return null;
+  return extracted;
 }
 
 function countCapsTitleOccurrences(opening: string): number {
@@ -60,6 +79,9 @@ export function hasStandaloneTitleParagraph(opening: string): boolean {
 
 function recitalRepeatsTitlePhrase(openingFlat: string, titleUpper: string): boolean {
   if (!titleUpper.trim()) return false;
+  // Bare "AGREEMENT" matches ordinary prose ("enter into this Agreement") — never treat that
+  // as a collapsed title/recital duplication signal.
+  if (/^AGREEMENT$/i.test(titleUpper.trim())) return false;
   const titleEsc = escapeRegex(titleUpper);
   return new RegExp(`\\bThis\\s+${titleEsc}\\b`).test(openingFlat);
 }

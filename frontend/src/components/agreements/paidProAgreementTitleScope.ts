@@ -119,10 +119,15 @@ function intakeScopeBlob(intake: string): string {
     .split(/\n+/)
     .map((line) => line.trim())
     .filter(Boolean);
-  const scopeLines = lines.filter((line) =>
-    /^(?:scope|purpose|services?|deliverables?|objective|background)\s*:/i.test(line),
-  );
-  if (scopeLines.length) return scopeLines.join(" ");
+  const scopeHeaderRe = /^(?:scope|purpose|services?|deliverables?|objective|background)\s*:/i;
+  // Only exclusive-scope when the header carries inline substance. Bare `Background:` /
+  // `Scope:` labels must not starve stack detection of the lead-in instruction prose
+  // (e.g. "manufacturing, licensing, distribution, and marketing…").
+  const meaningfulScope = lines
+    .filter((line) => scopeHeaderRe.test(line))
+    .map((line) => line.replace(scopeHeaderRe, "").trim())
+    .filter((inline) => inline.length >= 8);
+  if (meaningfulScope.length) return meaningfulScope.join(" ");
   // Exclude per-party signer metadata lines — role titles like "Marketing" / "Licensing"
   // must not trigger brand-licensing stack heuristics on revenue-share intakes.
   const proseLines = lines.filter((line) => !/\bsigner:\s/i.test(line));

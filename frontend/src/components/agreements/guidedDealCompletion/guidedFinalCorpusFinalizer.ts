@@ -68,7 +68,10 @@ import {
 } from "./guidedAnswerSemanticMerger";
 import { filterManifestMissingWithSemanticEvidence } from "./guidedSemanticManifestValidation";
 import { MINIMUM_COMMERCIAL_SPECIFICITY_SCORE } from "../commercialSpecificity";
-import { ensureOperativeIfToNoticeDelivery } from "../paidProPartyNoticeDetails";
+import {
+  ensureOperativeIfToNoticeDelivery,
+  repairFusedNoticesHeadingToPriorClause,
+} from "../paidProPartyNoticeDetails";
 
 export const GUIDED_FINAL_CORPUS_MIN_LEN = 1500;
 
@@ -779,6 +782,15 @@ export function finalizeGuidedProAgreementCorpus(
       }
     }
   }
+  // Defuse `…clause.7. Notices` fusion before snapshot integrity (no-invent notices still need a
+  // clean heading boundary when a Notices family already exists from intake/answers).
+  {
+    const defused = repairFusedNoticesHeadingToPriorClause(body);
+    if (defused.repairs.length > 0) {
+      body = defused.text;
+      diagnostics.repairs.push(...defused.repairs);
+    }
+  }
   const canonicalSnapshot = buildCanonicalAgreementSnapshot({
     surface: "guided_final_corpus_finalizer",
     tier: "pro",
@@ -866,6 +878,13 @@ export function finalizeGuidedProAgreementCorpus(
   });
   body = stabilizedForSigning.text;
   diagnostics.repairs.push(...stabilizedForSigning.repairs.map((r) => `compiler:${r}`));
+  {
+    const defusedAfterStabilize = repairFusedNoticesHeadingToPriorClause(body);
+    if (defusedAfterStabilize.repairs.length > 0) {
+      body = defusedAfterStabilize.text;
+      diagnostics.repairs.push(...defusedAfterStabilize.repairs.map((r) => `post_stabilize:${r}`));
+    }
+  }
 
   const fatalScan =
     args.signerIdentities.length > 0 || Boolean(args.signerManifest)

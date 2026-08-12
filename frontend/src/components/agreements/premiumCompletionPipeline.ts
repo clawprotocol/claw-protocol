@@ -161,6 +161,7 @@ import {
   PREMIUM_NETWORK_LOCAL_RECOVERY_RENDER_SOURCE,
 } from "./premiumNetworkRecoveryLocalDraft";
 import { previewPostCheckoutRecoverySotCommit } from "./paidProPostCheckoutRecoveryAuthority";
+import { countOperativeIfToNoticeStanzas } from "./paidProPartyNoticeDetails";
 import {
   DETERMINISTIC_PRO_FALLBACK_REASON,
   logDeterministicProFallbackDecision,
@@ -3380,8 +3381,16 @@ async function runPremiumCompletionInner(
           agreement_family: familyDecision.family,
         });
         winningPremiumBodyText = doc;
-        const freezeSource =
-          degradedJsonParseWithoutSubstantiveServerFull && authoritativeServerFullOnWire.length === 0
+        // json_parse with empty server_full_document_text is a degraded wire even when
+        // document_text is long — do not mislabel it as authoritative server_full_draft
+        // (pipelineNormalizedAuthoritativeText can still populate authoritativeServerFullOnWire).
+        const jsonParseDegradedWireWithoutServerFull =
+          String(wireFailureCodeOnWire || "").trim() === "json_parse" &&
+          originalWireServerFullDocumentText.length < PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN;
+        const freezeSource = jsonParseDegradedWireWithoutServerFull
+          ? "server_full_draft_degraded"
+          : degradedJsonParseWithoutSubstantiveServerFull &&
+              originalWireServerFullDocumentText.length < PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN
             ? "server_full_draft_degraded"
             : usedClientRetry
               ? "server_full_draft_retry"
@@ -3446,12 +3455,7 @@ async function runPremiumCompletionInner(
           }
         }
         doc = preparedForFreeze.text;
-        let freezeAcceptedSource: PremiumRenderSource =
-          degradedJsonParseWithoutSubstantiveServerFull && authoritativeServerFullOnWire.length === 0
-            ? "server_full_draft_degraded"
-            : usedClientRetry
-              ? "server_full_draft_retry"
-              : "server_full_draft";
+        let freezeAcceptedSource: PremiumRenderSource = freezeSource;
         let freezeCommit = resolvePaidProFreezeCommitText({
           text: doc,
           source: freezeSource,
@@ -3561,7 +3565,12 @@ async function runPremiumCompletionInner(
             if (vpaidWireFreeze.ok && vpaidWireFreeze.text.length >= SUBSTANTIVE_SERVER_DRAFT_MIN_LEN) {
               doc = vpaidWireDisplay;
               freezeCommit = vpaidWireFreeze;
-              freezeAcceptedSource = usedClientRetry ? "server_full_draft_retry" : "server_full_draft";
+              freezeAcceptedSource =
+                freezeSource === "server_full_draft_degraded" || freezeSource === "server_full_draft_retry"
+                  ? freezeSource
+                  : usedClientRetry
+                    ? "server_full_draft_retry"
+                    : "server_full_draft";
             }
           }
         }
@@ -3638,7 +3647,12 @@ async function runPremiumCompletionInner(
             ) {
               doc = substantiveFreeze.text;
               freezeCommit = substantiveFreeze;
-              freezeAcceptedSource = usedClientRetry ? "server_full_draft_retry" : "server_full_draft";
+              freezeAcceptedSource =
+                freezeSource === "server_full_draft_degraded" || freezeSource === "server_full_draft_retry"
+                  ? freezeSource
+                  : usedClientRetry
+                    ? "server_full_draft_retry"
+                    : "server_full_draft";
             }
           }
         }
@@ -3653,7 +3667,12 @@ async function runPremiumCompletionInner(
             reviewParties: freezeCommit.reviewParties,
             parties: freezeCommit.parties,
           };
-          freezeAcceptedSource = usedClientRetry ? "server_full_draft_retry" : "server_full_draft";
+          freezeAcceptedSource =
+            freezeSource === "server_full_draft_degraded" || freezeSource === "server_full_draft_retry"
+              ? freezeSource
+              : usedClientRetry
+                ? "server_full_draft_retry"
+                : "server_full_draft";
         }
         if (!freezeCommit.ok) {
           if (!vPaidAuthoritativeSubstantive && !wireHasSubstantiveServerFullCorpus) {
@@ -3920,7 +3939,12 @@ async function runPremiumCompletionInner(
                 parties: freezeCommit.parties,
               };
             }
-            freezeAcceptedSource = usedClientRetry ? "server_full_draft_retry" : "server_full_draft";
+            freezeAcceptedSource =
+              freezeSource === "server_full_draft_degraded" || freezeSource === "server_full_draft_retry"
+                ? freezeSource
+                : usedClientRetry
+                  ? "server_full_draft_retry"
+                  : "server_full_draft";
             outMerged = stripClientPremiumArtifactBlocksFromDraft({
               ...outMerged,
               premium_full_document_text: doc,
@@ -3953,7 +3977,12 @@ async function runPremiumCompletionInner(
               ) {
                 doc = wireWinFreeze.text;
                 freezeCommit = wireWinFreeze;
-                freezeAcceptedSource = usedClientRetry ? "server_full_draft_retry" : "server_full_draft";
+                freezeAcceptedSource =
+                  freezeSource === "server_full_draft_degraded" || freezeSource === "server_full_draft_retry"
+                    ? freezeSource
+                    : usedClientRetry
+                      ? "server_full_draft_retry"
+                      : "server_full_draft";
               } else {
                 doc = wireDisplayed;
               }
@@ -4002,12 +4031,21 @@ async function runPremiumCompletionInner(
             rawIntake: rawForSoT || rawIntake,
             draft: mergedForApi,
           });
+          // Original wire json_parse/degraded must keep degraded provenance even when a long
+          // document_text was promoted into server_full aliases (serverGenDegraded clears once
+          // the body is usable — freezeAcceptedSource can also be overwritten by wire wins).
+          const originalWireJsonParseDegraded =
+            ((full.generation_outcome || "").trim() === "degraded" &&
+              (full.server_generation_failure_code || "").trim() === "json_parse" &&
+              originalWireServerFullDocumentText.length < PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN) ||
+            (premiumJsonParseDegradedAttemptCount > 0 &&
+              originalWireServerFullDocumentText.length < PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN);
           if (
             freezeAcceptedSource === "structural_recovery" ||
             freezeAcceptedSource === "deterministic_recovery_freeze_candidate"
           ) {
             premiumRenderSource = freezeAcceptedSource;
-          } else if (serverGenDegraded) {
+          } else if (serverGenDegraded || originalWireJsonParseDegraded) {
             const fc = (effectiveFull.server_generation_failure_code || "").trim();
             if (fc !== "airlock_blocked" && fc !== "dev_context_leak") {
               premiumRenderSource = "server_full_draft_degraded";
@@ -4018,12 +4056,50 @@ async function runPremiumCompletionInner(
             premiumRenderSource = freezeAcceptedSource;
           }
           outMerged = applyAuthoritativeFamilyToDraft(outMerged, familyDecision);
+          // Terminal provenance correction: json_parse degraded must not report as plain
+          // server_full_draft (API normalize may already alias document_text into server_full).
+          if (
+            premiumRenderSource === "server_full_draft" &&
+            ((full.server_generation_failure_code || "").trim() === "json_parse" ||
+              premiumJsonParseDegradedAttemptCount > 0)
+          ) {
+            premiumRenderSource = "server_full_draft_degraded";
+            freezeAcceptedSource = "server_full_draft_degraded";
+          }
+          // Brand-licensing json_parse wires often lack If-to notice stanzas — prefer the
+          // deterministic local recovery corpus (TEST439 / TEST440 professional floor).
+          if (
+            (premiumRenderSource === "server_full_draft_degraded" ||
+              premiumJsonParseDegradedAttemptCount > 0) &&
+            intakeDescribesBrandLicensingDistributionManufacturingStack(rawForSoT || rawIntake) &&
+            countOperativeIfToNoticeStanzas(doc) < 4
+          ) {
+            const brandLocal = buildPremiumPostCheckoutLocalRecoveryProDraft({
+              draft: mergedForApi,
+              rawIntake: rawForSoT || rawIntake,
+              intakeLower: intakeLowerGlobal,
+              recoverySurface: PREMIUM_DEGRADED_SERVER_LOCAL_RECOVERY_RENDER_SOURCE,
+            });
+            if (
+              brandLocal.ok &&
+              brandLocal.body.trim().length >= PAID_PRO_RECOVERY_MIN_DISPLAY_LEN &&
+              countOperativeIfToNoticeStanzas(brandLocal.body) >= 4
+            ) {
+              doc = brandLocal.body.trim();
+              winningPremiumBodyText = doc;
+              premiumRenderSource = PREMIUM_DEGRADED_SERVER_LOCAL_RECOVERY_RENDER_SOURCE;
+              freezeAcceptedSource = PREMIUM_DEGRADED_SERVER_LOCAL_RECOVERY_RENDER_SOURCE;
+            }
+          }
           if (import.meta.env.DEV) {
             console.info("[premium-render-source]", {
               premiumRenderSource,
               doc_len: doc.length,
               client_retry: usedClientRetry,
               server_gen_degraded: serverGenDegraded,
+              json_parse_attempts: premiumJsonParseDegradedAttemptCount,
+              original_wire_server_full_len: originalWireServerFullDocumentText.length,
+              wire_failure_code: (full.server_generation_failure_code || "").trim(),
             });
           }
           if (import.meta.env.MODE !== "test" && !serverGenDegraded) {
@@ -4768,16 +4844,25 @@ async function runPremiumCompletionInner(
           premiumRenderSource: PREMIUM_NETWORK_LOCAL_RECOVERY_RENDER_SOURCE,
         })
       : null;
-    if (localRecovery.ok && networkRecoveryPreview?.eligible) {
+    // Network path: return a displayable local recovery body even when SoT preview is
+    // ineligible (e.g. duplicate_notice_stanza from generic Client/Developer draft labels).
+    // Checkout can still retry the network call; users must not see an empty Pro surface.
+    if (
+      localRecovery.ok &&
+      localRecovery.body.trim().length >= PAID_PRO_RECOVERY_MIN_DISPLAY_LEN &&
+      (networkRecoveryPreview?.eligible ||
+        !networkRecoveryPreview ||
+        networkRecoveryPreview.blockReason === "duplicate_notice_stanza")
+    ) {
       const recoverySource = PREMIUM_NETWORK_LOCAL_RECOVERY_RENDER_SOURCE;
       if (tierAEnabled) tierADiag.premiumPipelineSource = recoverySource;
       logPremiumCompletionDebug({
         stage: "premium_network_local_recovery",
-        recoveryCandidateEligible: true,
-        rejectedReason: undefined,
+        recoveryCandidateEligible: Boolean(networkRecoveryPreview?.eligible),
+        rejectedReason: networkRecoveryPreview?.blockReason ?? undefined,
         premiumRenderSource: recoverySource,
         bodyLen: localRecovery.body.length,
-        displayPlainLen: networkRecoveryPreview.displayPlainLen,
+        displayPlainLen: networkRecoveryPreview?.displayPlainLen ?? localRecovery.body.length,
       });
       outMerged = stripClientPremiumArtifactBlocksFromDraft({
         ...outMerged,

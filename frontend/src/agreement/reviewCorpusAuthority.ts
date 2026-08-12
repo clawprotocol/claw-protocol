@@ -12,7 +12,11 @@ import {
 import { commitPaidProPostFinalizeClauseEditRevision } from "../components/agreements/paidProPostFinalizeEditSave";
 import { isPaidProPostFinalizeHydratedCorpusLocked } from "../components/agreements/paidProSignerMetadataCommitPolicy";
 import { resolvePaidProPostFinalizeReviewPlain } from "../components/agreements/paidProPostFinalizeReviewSurface";
-import { hashPaidProCorpus } from "../components/agreements/paidProSourceOfTruth";
+import {
+  establishPaidProSourceOfTruth,
+  hashPaidProCorpus,
+  hasPaidProSourceOfTruth,
+} from "../components/agreements/paidProSourceOfTruth";
 import { resolveReviewFirstDisplayCorpus } from "../launch/simpleProduct/reviewFirstDisplayCorpus";
 
 export type ReviewCorpusAuthoritySurface =
@@ -293,6 +297,24 @@ export function commitAcceptedReviewCorpusPromotion(args: {
 
   syncAuthoritativeSigningSnapshotMetadataFromCorpus(text);
   writeReviewFirstPinnedCorpus(id, text);
+
+  // Keep Pro SoT aligned with the accepted/promoted corpus so reviewer HTML does not
+  // re-surface the pre-accept frozen body (TEST321 Boose→Boise).
+  if (hasPaidProSourceOfTruth() && text.length >= 500) {
+    try {
+      establishPaidProSourceOfTruth({
+        text,
+        source: "server_full_draft",
+        draft: args.draft ?? null,
+        intakeText:
+          typeof args.draft?.purpose === "string" && args.draft.purpose.trim().length > 20
+            ? args.draft.purpose
+            : "consulting agreement",
+      });
+    } catch {
+      // Soft: promotion still commits snapshot/pin even if freeze re-establish is blocked.
+    }
+  }
 
   let afterAcceptHash = acceptedProposalHash;
   let reviewSnapshotHash: string | null = snapshotHashBefore;

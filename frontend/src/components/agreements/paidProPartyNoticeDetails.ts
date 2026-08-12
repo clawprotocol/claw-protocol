@@ -323,10 +323,15 @@ export function noticeStanzaHasLegalEntityLine(stanza: string): boolean {
     if (v.length < 3) return false;
     if (hasPartyMetadataLabelContamination(v)) return false;
     if (/^provided during signer setup\.?$/i.test(v)) return false;
+    if (/^(?:Address|Email|Attn|Attention|Fax|Phone)\s*:/i.test(v)) return false;
     return true;
   };
   if (usableEntity(entityLine)) return true;
   if (isCanonicalPositionalNoticeEntityIdentity(entityLine)) return true;
+  // `If to Blue Canyon Analytics LLC:` — entity lives in the header when Address/Email follow.
+  const headerEntity = lines[0]?.match(/^If to\s+(.+?)\s*:\s*$/i);
+  if (headerEntity && usableEntity(headerEntity[1] ?? "")) return true;
+  if (headerEntity && isCanonicalPositionalNoticeEntityIdentity(headerEntity[1] ?? "")) return true;
   const fused = lines[0]?.match(/^If to\s+(.+?)\s*:\s*(.+)$/i);
   return Boolean(fused && usableEntity(fused[2] ?? ""));
 }
@@ -2012,10 +2017,21 @@ export function ensureOperativeNoticeStanzaEntityLinesAtFreeze(
   const noticesEnd = witnessIdx >= 0 ? witnessIdx : corpus.length;
   const before = corpus.slice(0, noticesIdx);
   const after = corpus.slice(noticesEnd);
-  const fullRegion = corpus.slice(noticesIdx, noticesEnd);
-  const blocks = fullRegion.split(/\n(?=If to\s+)/i);
+  const noticesFamilyEnd = resolveOperativeNoticesFamilyEnd(corpus, noticesIdx);
+  const noticesRegion = corpus.slice(noticesIdx, noticesFamilyEnd);
+  const middle = corpus.slice(noticesFamilyEnd, noticesEnd);
+  const middleParts = middle.split(/\n(?=If to\s+)/i);
+  const middleClean = (middleParts[0] ?? "").trim();
+  const misplacedMiddleStanzas = middleParts
+    .slice(1)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const blocks = noticesRegion.split(/\n(?=If to\s+)/i);
   const intro = blocks[0]?.trim() ?? "";
-  const existingStanzas = blocks.slice(1).map((s) => s.trim()).filter(Boolean);
+  const existingStanzas = [
+    ...blocks.slice(1).map((s) => s.trim()).filter(Boolean),
+    ...misplacedMiddleStanzas,
+  ];
   const repairs: string[] = [];
   const canonicalNames = authorityParties.map((party) =>
     resolveNoticeStanzaLegalEntity(party, authorityParties, roleContext),
@@ -2063,7 +2079,7 @@ export function ensureOperativeNoticeStanzaEntityLinesAtFreeze(
   }
 
   if (repairs.length === 0) {
-    const stanzaCount = (fullRegion.match(/^If to\s+/gim) || []).length;
+    const stanzaCount = (noticesRegion.match(/^If to\s+/gim) || []).length + misplacedMiddleStanzas.length;
     const completeCount = existingStanzas.filter((stanza) => noticeStanzaHasLegalEntityLine(stanza)).length;
     if (stanzaCount >= authorityParties.length && completeCount >= authorityParties.length) {
       return { text: corpus, repairs: [] };
@@ -2081,8 +2097,9 @@ export function ensureOperativeNoticeStanzaEntityLinesAtFreeze(
     .join("\n\n")
     .replace(/\n{3,}/g, "\n\n")
     .trimEnd();
-  const text = after.trimStart()
-    ? `${before}${mergedNotices}\n\n${after.trimStart()}`.replace(/\n{3,}/g, "\n\n").trimEnd()
+  const afterNotices = [middleClean, after.trimStart()].filter(Boolean).join("\n\n");
+  const text = afterNotices
+    ? `${before}${mergedNotices}\n\n${afterNotices}`.replace(/\n{3,}/g, "\n\n").trimEnd()
     : `${before}${mergedNotices}`.replace(/\n{3,}/g, "\n\n").trimEnd();
   return { text, repairs };
 }
@@ -2300,7 +2317,14 @@ export function repairIncompleteIfToNoticeStanzas(
   const noticesFamilyEnd = resolveOperativeNoticesFamilyEnd(text, noticesIdx);
   let noticesRegion = text.slice(noticesIdx, noticesFamilyEnd);
   const middle = text.slice(noticesFamilyEnd, noticesEnd);
-  const middleBeforeIfTo = middle.split(/\n(?=If to\s+)/i)[0]?.trim() ?? "";
+  // Later sections (§9/§10) must stay in `middle` — never fold them into the Notices intro
+  // or rebuilt If-to stanzas land after ELECTRONIC SIGNATURES (post-freeze drift).
+  const middleParts = middle.split(/\n(?=If to\s+)/i);
+  const middleClean = (middleParts[0] ?? "").trim();
+  const misplacedMiddleStanzas = middleParts
+    .slice(1)
+    .map((s) => s.trim())
+    .filter(Boolean);
 
   if (hasInlineMalformedNoticeStanzas(fullNoticesRegion)) {
     noticesRegion = noticesRegion.replace(/\s+(If to\s+)/gi, "\n\n$1");
@@ -2313,19 +2337,18 @@ export function repairIncompleteIfToNoticeStanzas(
   }
   noticesRegion = normalizedRegion.text;
 
-  const blocks = fullNoticesRegion.split(/\n(?=If to\s+)/i);
-  const introParts = [blocks[0]?.trim() ?? ""];
-  if (middleBeforeIfTo && !introParts[0]?.includes(middleBeforeIfTo)) {
-    introParts.push(middleBeforeIfTo);
-  }
-  const intro = introParts.filter(Boolean).join("\n\n");
-  const existingStanzas = blocks.slice(1).map((s) => s.trim()).filter(Boolean);
+  const blocks = noticesRegion.split(/\n(?=If to\s+)/i);
+  const intro = (blocks[0] ?? "").trim();
+  const existingStanzas = [
+    ...blocks.slice(1).map((s) => s.trim()).filter(Boolean),
+    ...misplacedMiddleStanzas,
+  ];
   let tailAfterStanzas = "";
   if (blocks.length > 1) {
     const lastBlock = blocks[blocks.length - 1] ?? "";
-    const relIdx = fullNoticesRegion.lastIndexOf(lastBlock);
+    const relIdx = noticesRegion.lastIndexOf(lastBlock);
     if (relIdx >= 0) {
-      tailAfterStanzas = fullNoticesRegion.slice(relIdx + lastBlock.length).trim();
+      tailAfterStanzas = noticesRegion.slice(relIdx + lastBlock.length).trim();
     }
   }
   const rebuiltStanzas: string[] = [];
@@ -2392,7 +2415,7 @@ export function repairIncompleteIfToNoticeStanzas(
   const mergedParts = [`${intro.trimEnd()}\n\n${rebuiltStanzas.join("\n\n")}`.replace(/\n{3,}/g, "\n\n").trimEnd()];
   if (tailAfterStanzas) mergedParts.push(tailAfterStanzas);
   let mergedNotices = mergedParts.join("\n\n");
-  const preservedHeading = fullNoticesRegion.match(/(?:^|\n)\s*(\d+\.\s+NOTICES\s*)(?:\n|$)/im)?.[1]?.trim();
+  const preservedHeading = noticesRegion.match(/(?:^|\n)\s*(\d+\.\s+NOTICES\s*)(?:\n|$)/im)?.[1]?.trim();
   const introHasNoticesHeading = /(?:^|\n)\s*(?:\d+\.\s+)?NOTICES\s*$/im.test(intro);
   if (preservedHeading && !corpusHasCanonicalNoticesHeading(mergedNotices) && !introHasNoticesHeading) {
     const introBlock = noticeIntroAlreadyHasDeliveryLanguage(mergedNotices)
@@ -2401,8 +2424,9 @@ export function repairIncompleteIfToNoticeStanzas(
     mergedNotices = introBlock.replace(/\n{3,}/g, "\n\n").trimEnd();
     repairs.push("notice:preserve_notices_section_heading");
   }
-  text = after.trimStart()
-    ? `${before}${mergedNotices}\n\n${after.trimStart()}`.replace(/\n{3,}/g, "\n\n").trimEnd()
+  const afterNotices = [middleClean, after.trimStart()].filter(Boolean).join("\n\n");
+  text = afterNotices
+    ? `${before}${mergedNotices}\n\n${afterNotices}`.replace(/\n{3,}/g, "\n\n").trimEnd()
     : `${before}${mergedNotices}`.replace(/\n{3,}/g, "\n\n").trimEnd();
   logPaidProNoticeSectionIntegrity({ repairs, partyCount: authorityParties.length, stanzaCount });
   const dedupedHeadings = dedupeDuplicateStandaloneNoticesHeadings(text);

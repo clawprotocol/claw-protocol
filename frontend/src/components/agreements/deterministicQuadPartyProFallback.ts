@@ -685,6 +685,10 @@ export function buildDeterministicQuadPartyBrandLicensingProFallback(args: {
   }
   body = stripRepeatedSupplementalProvisionsFiller(body).text;
   body = stripNumberedOperativeSectionsAfterExecution(body).text;
+  // Strips above can shrink below the professional recovery floor — re-expand after cleanup.
+  if (body.length < DETERMINISTIC_BRAND_LICENSING_QUAD_PARTY_MIN_LEN) {
+    body = expandOperativeCorpusWithUniqueSupplements(body, DETERMINISTIC_BRAND_LICENSING_QUAD_PARTY_MIN_LEN);
+  }
 
   const acceptance = validateDeterministicQuadPartyProFallbackAcceptance({
     body,

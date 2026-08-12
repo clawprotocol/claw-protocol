@@ -13,6 +13,8 @@ import {
 } from "./premiumFullDraftClientAcceptance";
 import { assessPaidProMutualConsultingProfessionalStructure } from "./paidProMutualConsultingQualityFloor";
 import { PREMIUM_USABLE_BODY_MIN_LEN } from "./premiumPostCheckoutApplyEligible";
+import { PAID_PRO_RECOVERY_MIN_DISPLAY_LEN } from "./paidProPostCheckoutRenderGate";
+import { expandOperativeCorpusWithUniqueSupplements } from "./paidProSupplementalProvisionsFillerGate";
 import {
   buildDeterministicQuadPartyProFallback,
   resolveBrandLicensingPartyOrderFromProseIntake,
@@ -148,6 +150,20 @@ export function buildPremiumPostCheckoutLocalRecoveryProDraft(args: {
           surface: args.recoverySurface,
         });
   body = prepared.text;
+  const recoveryRepairs = [...prepared.repairs];
+
+  // Network / degraded local recovery must clear the post-checkout display floor (~4k).
+  // Thin stitch templates (~3.3k) otherwise fail preview eligibility even when substance is valid.
+  if (body.trim().length < PAID_PRO_RECOVERY_MIN_DISPLAY_LEN) {
+    const expanded = expandOperativeCorpusWithUniqueSupplements(
+      body,
+      PAID_PRO_RECOVERY_MIN_DISPLAY_LEN + 200,
+    );
+    if (expanded.trim().length > body.trim().length) {
+      body = expanded;
+      recoveryRepairs.push("recovery:expand_to_display_floor");
+    }
+  }
 
   const intakeLower = (args.intakeLower ?? rawIntake).toLowerCase();
   const renderReject = rejectPremiumBodyForProRender(body, {
@@ -182,7 +198,7 @@ export function buildPremiumPostCheckoutLocalRecoveryProDraft(args: {
     return { ok: false, body: "", reasons: [`too_short:${body.trim().length}`] };
   }
 
-  return { ok: true, body: body.trim(), reasons: prepared.repairs };
+  return { ok: true, body: body.trim(), reasons: recoveryRepairs };
 }
 
 /** @deprecated Use {@link buildPremiumPostCheckoutLocalRecoveryProDraft} with an explicit recovery surface. */

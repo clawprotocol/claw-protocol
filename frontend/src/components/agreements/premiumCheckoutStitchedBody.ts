@@ -111,7 +111,7 @@ export function buildPremiumPostCheckoutStitchedBody(
     ].join("\n"),
     [
       "8. NOTICES",
-      "Notices, approvals, and formal communications under this Agreement may be given by e-mail to the addresses the parties designate, with copies to other contacts they provide in the signature block or a written notice of address. Either Party may change its notice e-mail on written notice to the other Party.",
+      "Notices under this Agreement may be given by email to the addresses the parties designate, with copies to other contacts they provide in the signature block or a written notice of address. Either Party may change its notice email on written notice to the other Party.",
     ].join("\n"),
     [
       "9. GOVERNING LAW; VENUE",

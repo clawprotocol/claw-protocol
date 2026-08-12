@@ -36,6 +36,7 @@ import {
   findNoticesSectionStart,
   removeEmptyNoticesSubsectionShells,
   repairDuplicateOperativeNoticeStanzas,
+  repairFusedNoticesHeadingToPriorClause,
   sealPaidProNoticesExecutionBoundaryInCorpus,
   ensureOperativeNoticeStanzaEntityLinesAtFreeze,
   ensureOperativeNoticeStanzaCountAuthorityAtFreeze,
@@ -810,7 +811,7 @@ function repairPaidProCanonicalNoticeAuthorityAtFreeze(
   // Generic Party 1/Party 2 must not invent operative notice scaffolding at freeze —
   // that mutates accepted SoT without real legal entities (commercial no-invent rule).
   if (!freezeNoticePartiesAreAuthoritative(noticeValidationCtx.parties)) {
-    return sealed.text;
+    return repairFusedNoticesHeadingToPriorClause(sealed.text).text;
   }
   // Legal names alone must not invent a Notices section / placeholder contacts at freeze.
   // Existing Notices may still need entity-line hydration (incomplete If-to stanzas).
@@ -824,7 +825,7 @@ function repairPaidProCanonicalNoticeAuthorityAtFreeze(
     return Boolean(email) || address.length > 8;
   });
   if (!hasRealNoticeContacts && findNoticesSectionStart(sealed.text) < 0) {
-    return sealed.text;
+    return repairFusedNoticesHeadingToPriorClause(sealed.text).text;
   }
   const entityHydrated = ensureOperativeNoticeStanzaEntityLinesAtFreeze(
     sealed.text,
@@ -836,7 +837,7 @@ function repairPaidProCanonicalNoticeAuthorityAtFreeze(
     },
   );
   if (!hasRealNoticeContacts) {
-    return entityHydrated.text;
+    return repairFusedNoticesHeadingToPriorClause(entityHydrated.text).text;
   }
   const stanzaCountReconciled = ensureOperativeNoticeStanzaCountAuthorityAtFreeze(
     entityHydrated.text,
@@ -847,7 +848,9 @@ function repairPaidProCanonicalNoticeAuthorityAtFreeze(
       acceptedCorpus: entityHydrated.text,
     },
   );
-  return stanzaCountReconciled.text;
+  // Stanza rebuilds can re-fuse `….N. Notices` onto prior prose — defuse before freeze assert.
+  const defused = repairFusedNoticesHeadingToPriorClause(stanzaCountReconciled.text);
+  return defused.text;
 }
 
 function applyCanonicalNoticeAuthorityBeforeFreezeValidation(

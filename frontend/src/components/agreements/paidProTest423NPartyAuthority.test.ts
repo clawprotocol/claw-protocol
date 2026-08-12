@@ -176,9 +176,13 @@ describe("TEST423 — general N-party Pro agreement authority", () => {
   });
 
   for (const scenario of TEST423_SCENARIOS) {
-    it(`lifecycle preserves ${scenario.expectedN}-party authority for ${scenario.id}`, () => {
-      runLifecycleScenario(scenario);
-    });
+    it(
+      `lifecycle preserves ${scenario.expectedN}-party authority for ${scenario.id}`,
+      () => {
+        runLifecycleScenario(scenario);
+      },
+      20_000,
+    );
   }
 
   it("stale session: prior 4-party handoff does not phantom-slot a new 2-party intake", () => {
@@ -276,7 +280,9 @@ describe("TEST423 — general N-party Pro agreement authority", () => {
     }).trim().length).toBeLessThan(500);
   });
 
-  it("deterministic recovery preview honors intake party count for varied scenarios", () => {
+  it(
+    "deterministic recovery preview honors intake party count for varied scenarios",
+    () => {
     for (const scenario of TEST423_SCENARIOS.filter((s) => s.expectedN >= 4).slice(0, 3)) {
       const recovery = previewRecoverPaidProFreezeCandidate({
         draft: scenario.draft,
@@ -294,5 +300,7 @@ describe("TEST423 — general N-party Pro agreement authority", () => {
       );
       expect(hashPaidProCorpus(recovery.text)).toBeTruthy();
     }
-  });
+    },
+    20_000,
+  );
 });

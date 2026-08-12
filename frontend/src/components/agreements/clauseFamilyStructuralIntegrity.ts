@@ -22,6 +22,7 @@ import {
   resolveCanonicalNoticePartyCount,
 } from "./paidProPartyNoticeDetails";
 import { intakePartyManifestIsAuthoritative } from "./intakePartyManifestAuthority";
+import { isAuthoritativeLegalEntityName } from "./paidProPartyNamePreserve";
 import type { PaidProPartyRoleContext, PaidProSignerMetadataParty } from "./paidProSignerMetadataAuthority";
 import { qualifiesAsConciseAuthoritativePaidServerDraft } from "./paidProSubstantiveCorpusAssessment";
 
@@ -37,8 +38,9 @@ export type ClauseFamilyStructuralIntegrityReport = {
   familyPresence: Partial<Record<OperativeClauseFamily, boolean>>;
 };
 
+/** Operative notice delivery language — allow short intervening punctuation/words. */
 const NOTICES_OPERATIVE_TEXT_RE =
-  /\bnotices?\s+(?:must|shall|are|is|will|may|under\s+this\s+agreement)\b/i;
+  /\bnotices?\b(?:\s*[:.—-]?\s*|\s+)(?:(?:acceptable\s+via|by)\s+)?(?:must|shall|are|is|will|may|under\s+this\s+agreement|email|e-?mail)\b/i;
 
 const ORPHAN_EMAIL_LINE_RE = /^\s*Email(?:\s+for\s+Notice)?\s*:\s*$/i;
 const ORPHAN_ADDRESS_LINE_RE = /^\s*Address(?:\s+for\s+Notice)?\s*:\s*$/i;
@@ -272,7 +274,8 @@ export function validateNoticesClauseFamilyStructuralIntegrity(
   const callerSuppliedPartiesList = Array.isArray(opts?.parties);
   const partiesHaveAuthoritativeNames = (opts?.parties ?? []).some((p) => {
     const name = String(p.partyLegalName || "").trim();
-    return name.length >= 3 && !/^Party\s+\d+$/i.test(name);
+    // Role labels ("Client", "Developer") are not legal-entity authority for notice stanzas.
+    return name.length >= 3 && !/^Party\s+\d+$/i.test(name) && isAuthoritativeLegalEntityName(name);
   });
   const partiesHaveNoticeContacts = (opts?.parties ?? []).some((p) => {
     const row = p as {
@@ -292,11 +295,14 @@ export function validateNoticesClauseFamilyStructuralIntegrity(
   const intakeHasAuthoritativeManifest = intakePartyManifestIsAuthoritative(opts?.intakeText);
   // Without real entity authority, do not require inventing Party 1/Party 2 notice scaffolding.
   const noticeAuthorityPresent = partiesHaveAuthoritativeNames || intakeHasAuthoritativeManifest;
-  const requiredStanzas = !noticeAuthorityPresent
-    ? 0
-    : callerSuppliedPartiesList && canonicalAuthorityPartyCount >= 2
-      ? canonicalAuthorityPartyCount
-      : requiredNoticeStanzaCount(opts?.parties, opts?.requireTwoPartyStanzas !== false);
+  // Commercial no-invent: legal names / intake manifests alone must not force If-to stanzas
+  // until email or address contact authority exists. Operative notice prose is enough until then.
+  const requiredStanzas =
+    !noticeAuthorityPresent || !partiesHaveNoticeContacts
+      ? 0
+      : callerSuppliedPartiesList && canonicalAuthorityPartyCount >= 2
+        ? canonicalAuthorityPartyCount
+        : requiredNoticeStanzaCount(opts?.parties, opts?.requireTwoPartyStanzas !== false);
   const noticeValidationPartySource =
     canonicalAuthorityPartyCount >= 2 ? "canonical_authority_parties" : "minimum_two_party";
 

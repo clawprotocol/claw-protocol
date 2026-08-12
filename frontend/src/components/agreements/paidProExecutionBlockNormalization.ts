@@ -118,6 +118,16 @@ export function stripPreWitnessExecutionPollutionFromPrefix(prefix: string): {
     }
 
     if (isStandaloneSignaturesHeadingLine(line)) {
+      // Keep a bare SIGNATURES heading that immediately precedes IN WITNESS WHEREOF,
+      // or that is already the terminal line of a pre-witness prefix (witness sliced off).
+      let peek = i + 1;
+      while (peek < lines.length && !(lines[peek] ?? "").trim()) peek += 1;
+      const nextNonEmpty = (lines[peek] ?? "").trim();
+      if (!nextNonEmpty || /^\s*IN WITNESS WHEREOF\b/i.test(nextNonEmpty)) {
+        out.push(line);
+        i += 1;
+        continue;
+      }
       repairs.push("execution_block:strip_pre_witness_signatures_section");
       i += 1;
       while (i < lines.length) {
@@ -130,6 +140,7 @@ export function stripPreWitnessExecutionPollutionFromPrefix(prefix: string): {
         if (IF_TO_NOTICE_STANZA_HEADER_RE.test(t)) break;
         if (roleHeadingStartsExecutionCluster(lines, i)) break;
         if (isStandaloneSignaturesHeadingLine(lines[i] ?? "")) break;
+        if (/^\s*IN WITNESS WHEREOF\b/i.test(t)) break;
         if (EXECUTION_FIELD_LINE_RE.test(t)) {
           if (isWithinIfToNoticeStanza(lines, i)) break;
           i += 1;

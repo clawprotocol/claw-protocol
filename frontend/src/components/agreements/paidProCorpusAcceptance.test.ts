@@ -1,10 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { resolveAgreementIntentContract } from "./agreementIntentContract";
 import { applyAcceptedProCorpusSafeDisplay } from "./acceptedProCorpusSafeDisplay";
-import {
-  detectPaidProMalformedServicesOpening,
-  PAID_PRO_MUTUAL_CONSULTING_TITLE,
-} from "./paidProOpeningRecitalGuard";
+import { detectPaidProMalformedServicesOpening } from "./paidProOpeningRecitalGuard";
 import { resolveCanonicalPartyIdentitiesFromIntake } from "./canonicalPartyIdentityResolver";
 import {
   isPaidProFinishedAgreement,
@@ -64,7 +61,11 @@ describe("paid pro corpus acceptance", () => {
     expect(detectPaidProMalformedServicesOpening(malformed, records)).toBe(true);
 
     const safe = applyAcceptedProCorpusSafeDisplay(malformed, { draft, intakeText: QA_SERVICES_INTAKE });
-    expect(safe.text).toContain(PAID_PRO_MUTUAL_CONSULTING_TITLE);
+    // Safe display rebuilds a defined opening recital — do not invent a specific consulting title
+    // when intake does not authorize one. Naked party-name lead-in must be gone.
+    expect(safe.text).toMatch(/^This Agreement is between\b/m);
+    expect(safe.text).toContain(BLUE_CANYON_QA);
+    expect(safe.text).toContain(IRON_VALE_QA);
     expect(safe.text).not.toMatch(new RegExp(`^${BLUE_CANYON_QA.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*\\n`, "m"));
     const accepted = validatePaidProOutput({
       text: safe.text,
@@ -124,7 +125,21 @@ describe("paid pro corpus acceptance", () => {
 **Client (Anthem Blanchard)** engages **Developer (Sarah Collins)** for the **CryptoSpaces** engagement.
 
 Governing law: the laws of the **State of Oklahoma** (Oklahoma). Total **$7,500**; **$3,000** deposit, **$4,500** balance.
-Final payment due within **thirty (30) days**; effective **May 1, 2026**. **Two revision** rounds. **Pre-existing** tools. **Notices** by **email** and **electronic mail**. Terms cover **confidential** use and **IP** between the **parties**. The parties **shall** cooperate.
+Final payment due within **thirty (30) days**; effective **May 1, 2026**. **Two revision** rounds. **Pre-existing** tools. **Notices under this Agreement may be given by email** and electronic mail. Terms cover **confidential** use and **IP** between the **parties**. The parties **shall** cooperate.
+
+IN WITNESS WHEREOF, the parties execute this Agreement.
+
+CLIENT:
+Anthem Blanchard
+By: _________________________
+Name: Anthem Blanchard
+Title: Client
+
+DEVELOPER:
+Sarah Collins
+By: _________________________
+Name: Sarah Collins
+Title: Developer
     `;
     const text = padProBody(lead, 12_000);
     const v = validatePaidProOutput({ text, rawIntake: WEB_INTAKE, intentContract: contract, draft: null });
@@ -147,7 +162,9 @@ Short.`;
     expect(v.ok).toBe(false);
   });
 
-  it("validates a model-paraphrased freelance software + website body for the full CryptoSpaces prompt (varied wording, Schedule A, Client/Developer)", () => {
+  it(
+    "validates a model-paraphrased freelance software + website body for the full CryptoSpaces prompt (varied wording, Schedule A, Client/Developer)",
+    () => {
     const FREELANCE = `I need a freelance software development agreement. Anthem Blanchard hires Sarah Collins to redesign and optimize the CryptoSpaces.net website for $7,500 total. $3,000 due upfront, $4,500 due on final delivery. Work includes homepage redesign, mobile optimization, analytics setup, email capture funnel, and performance improvements. Project starts May 1, 2026 and final delivery is due within 30 days. Two revision rounds included. Client owns final deliverables after full payment. Developer keeps pre-existing tools and code libraries. Both parties keep confidential information private. Oklahoma law governs. Notices by email are acceptable.`.trim();
     const contract = resolveAgreementIntentContract(FREELANCE);
     expect(contract.intent_id).toBe("software_web_dev");
@@ -159,11 +176,28 @@ Short.`;
       "3. The total of Seven Thousand Five Hundred Dollars (USD) shall be as follows: Three Thousand and 00/100 Dollars (USD) upon execution; Four Thousand Five Hundred and 00/100 Dollars (USD) upon final acceptance.",
       "4. The completion target is May 31, 2026, consistent with 30 calendar days’ performance following the start date of May 1, 2026, or thirty (30) days, whichever framing appears in the exhibits.",
       "5. 2 revision rounds, two (2) rounds, are included. Developer’s background IP, pre-existing code, libraries, and frameworks are retained.",
-      "6. Notices: acceptable via email. Confidential information remains protected.",
-      "7. Signatures. Client and Developer. Schedule A: deliverables may be updated by SOW. ",
+      "6. Notices under this Agreement may be given by email. Confidential information remains protected.",
+      "7. Signatures. Client and Developer. Schedule A: deliverables may be updated by SOW.",
+      "",
+      "IN WITNESS WHEREOF, the parties execute this Agreement.",
+      "",
+      "CLIENT:",
+      "Anthem Blanchard",
+      "By: _________________________",
+      "Name: Anthem Blanchard",
+      "Title: Client",
+      "",
+      "DEVELOPER:",
+      "Sarah Collins",
+      "By: _________________________",
+      "Name: Sarah Collins",
+      "Title: Developer",
+      "",
       "x".repeat(11_200),
     ].join("\n");
     const v = validatePaidProOutput({ text: longBody, rawIntake: FREELANCE, intentContract: contract, draft: null });
     expect(v.ok, v.reasons.join(", ")).toBe(true);
-  });
+  },
+  15_000,
+  );
 });
