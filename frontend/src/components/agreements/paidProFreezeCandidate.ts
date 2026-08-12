@@ -225,16 +225,44 @@ function finalizePreparedFreezeCandidateText(
     mutatedText,
     args.intakeText ?? null,
   );
+  // Collapse duplicate crumbs first, then apply the length floor so intentional
+  // adjacent-dup cleanup cannot undo substantive server-draft length preservation.
+  const collapsed = collapseAdjacentDuplicateParagraphs(brandPreserved);
   const lengthPreserved = preserveSubstantiveServerFullDraftCorpusLength(
     entryText,
-    brandPreserved,
+    collapsed,
     args.source ?? null,
   );
   // Length floor may restore the entry corpus; always re-align signature roles last.
-  const reconciled = reconcileExecutionRolesBeforeFreezeCommit(lengthPreserved);
-  // Notice/contamination passes can re-splice identical intake crumbs ("Term is twelve months")
-  // on every re-gate — collapse them so candidate hashes stay stable.
-  return collapseAdjacentDuplicateParagraphs(reconciled);
+  return reconcileExecutionRolesBeforeFreezeCommit(lengthPreserved);
+}
+
+/** Re-apply sole-prop/services title after length restore can reinstate §1-first wire. */
+function reapplyServicesOpeningAfterLengthRestore(
+  text: string,
+  args: PreparePaidProFreezeCandidateArgs,
+): { text: string; repairs: string[] } {
+  if (intakeDescribesBrandLicensingDistributionManufacturingStack(args.intakeText ?? "")) {
+    return { text, repairs: [] };
+  }
+  const partyNameList = (args.draft?.parties ?? [])
+    .map((p) => String(p?.name ?? "").trim())
+    .filter((n) => n.length >= 2);
+  const roleLabels = (args.draft?.parties ?? [])
+    .map((p) => String(p?.role ?? "").trim())
+    .filter((r) => r.length >= 2);
+  const identityRecords = resolveCommercialPartyRecordsForOpeningRepair(
+    args.intakeText ?? "",
+    partyNameList,
+    roleLabels.length >= 2 ? roleLabels : undefined,
+  );
+  if (identityRecords.length < 2) return { text, repairs: [] };
+  const opening = ensurePaidProServicesAgreementOpening(
+    text,
+    identityRecords,
+    args.intakeText ?? null,
+  );
+  return { text: opening.text, repairs: opening.repairs ?? [] };
 }
 
 function finalizeSubstantiveBrandLicensingCorpusAfterWitness(
@@ -349,18 +377,44 @@ export function preparePaidProFreezeCandidateText(
           partyAddress: p.partyAddress?.trim() || null,
         }))
         .filter((p) => p.name.length >= 2);
+      let skippedText = reconciled;
+      const skippedRepairs = [
+        "freeze_prep_skipped_pipeline_validated_corpus",
+        ...integrity.repairs.map((r) => `reviewed_doc_integrity:${r}`),
+        ...(reconciled !== integrity.text
+          ? ["freeze_prep:reconcile_execution_block_roles"]
+          : []),
+      ];
+      if (!intakeDescribesBrandLicensingDistributionManufacturingStack(args.intakeText ?? "")) {
+        const skipPartyNames = (args.draft?.parties ?? [])
+          .map((p) => String(p?.name ?? "").trim())
+          .filter((n) => n.length >= 2);
+        const skipRoles = (args.draft?.parties ?? [])
+          .map((p) => String(p?.role ?? "").trim())
+          .filter((r) => r.length >= 2);
+        const skipIdentity = resolveCommercialPartyRecordsForOpeningRepair(
+          args.intakeText ?? "",
+          skipPartyNames,
+          skipRoles.length >= 2 ? skipRoles : undefined,
+        );
+        if (skipIdentity.length >= 2) {
+          const opening = ensurePaidProServicesAgreementOpening(
+            skippedText,
+            skipIdentity,
+            args.intakeText ?? null,
+          );
+          if (opening.repairs.length > 0) {
+            skippedText = opening.text;
+            skippedRepairs.push(...opening.repairs);
+          }
+        }
+      }
       return {
-        text: reconciled,
-        hash: hashPaidProCorpus(reconciled),
+        text: skippedText,
+        hash: hashPaidProCorpus(skippedText),
         reviewParties,
         parties,
-        repairs: [
-          "freeze_prep_skipped_pipeline_validated_corpus",
-          ...integrity.repairs.map((r) => `reviewed_doc_integrity:${r}`),
-          ...(reconciled !== integrity.text
-            ? ["freeze_prep:reconcile_execution_block_roles"]
-            : []),
-        ],
+        repairs: skippedRepairs,
       };
     }
     // Integrity failed — do not skip into a defective SoT; run full freeze prep.
@@ -674,10 +728,19 @@ export function preparePaidProFreezeCandidateText(
     repairs.push("freeze_prep:reconcile_execution_block_roles");
   }
 
-  const finalizedText = finalizePreparedFreezeCandidateText(authorityTrimmed, safeForCommit, {
+  let finalizedText = finalizePreparedFreezeCandidateText(authorityTrimmed, safeForCommit, {
     intakeText: args.intakeText ?? null,
     source: requestedSource,
   });
+  // Substantive length restore can reinstate an untitled §1-first wire body after opening
+  // repair. Re-apply services title/recital last so freeze candidates always surface a title.
+  if (acceptanceManifestForOpening.length < 3) {
+    const openingRestore = reapplyServicesOpeningAfterLengthRestore(finalizedText, args);
+    if (openingRestore.repairs.length > 0) {
+      finalizedText = openingRestore.text;
+      repairs.push(...openingRestore.repairs);
+    }
+  }
   return {
     text: finalizedText,
     hash: hashPaidProCorpus(finalizedText),
@@ -891,6 +954,8 @@ export function assertPaidProFreezeCandidateGates(
     inputTrimmed.length >= SUBSTANTIVE_SERVER_DRAFT_MIN_LEN;
   const inputPipelineHash = paidProPipelineAcceptedCorpusHash(inputTrimmed);
   const pipelineHash = readPaidProPipelineAcceptedCorpusHash();
+  // Prefer prepared freeze text (title/recital repairs) over raw wire on stable-pipeline shortcuts.
+  const stablePipelineBody = trim(prep.text) || inputTrimmed;
   if (
     !substantiveBrandWireFreeze &&
     inputTrimmed.length >= 4000 &&
@@ -900,7 +965,7 @@ export function assertPaidProFreezeCandidateGates(
     hasPaidProPipelineValidationForCorpus({ text: inputTrimmed, source: requestedSource })
   ) {
     return applyCanonicalNoticeAuthorityBeforeFreezeValidation(
-      inputTrimmed,
+      stablePipelineBody,
       prep,
       args,
       surface,
@@ -917,7 +982,7 @@ export function assertPaidProFreezeCandidateGates(
     })
   ) {
     return applyCanonicalNoticeAuthorityBeforeFreezeValidation(
-      inputTrimmed,
+      stablePipelineBody,
       prep,
       args,
       surface,
@@ -1180,6 +1245,7 @@ export function assertPaidProFreezeCandidateGates(
     surface: `${surface}_freeze_finalize_boundary`,
     parties: prep.reviewParties,
     draftPartyCount: args.draft?.parties?.length ?? 0,
+    skipReviewDisplayNormalize: true,
     handoffPartySlots: (() => {
       const handoff = readPremiumRecipientHandoff();
       if (!handoff) return prep.reviewParties.length;
@@ -1407,10 +1473,16 @@ export function assertPaidProFreezeCandidateGates(
     `${surface}_terminal_post_notice`,
   );
 
-  return finalizePreparedFreezeCandidateText(trim(args.text), safeForCommit, {
+  let gated = finalizePreparedFreezeCandidateText(trim(args.text), safeForCommit, {
     intakeText: args.intakeText ?? null,
     source: requestedSource,
   });
+  // Length restore can reinstate untitled §1-first wire after prep title repair.
+  const openingRestore = reapplyServicesOpeningAfterLengthRestore(gated, args);
+  if (openingRestore.repairs.length > 0) {
+    gated = openingRestore.text;
+  }
+  return gated;
 }
 
 /** Non-throwing gate evaluation for acceptance / pipeline. */

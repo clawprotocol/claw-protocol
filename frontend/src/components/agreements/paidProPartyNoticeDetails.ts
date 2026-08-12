@@ -324,14 +324,17 @@ export function noticeStanzaHasLegalEntityLine(stanza: string): boolean {
     if (hasPartyMetadataLabelContamination(v)) return false;
     if (/^provided during signer setup\.?$/i.test(v)) return false;
     if (/^(?:Address|Email|Attn|Attention|Fax|Phone)\s*:/i.test(v)) return false;
+    // Header-only "If to Party 2:" is incomplete — positional names count only as a body line.
+    if (isCanonicalPositionalNoticeEntityIdentity(v)) return false;
     return true;
   };
   if (usableEntity(entityLine)) return true;
+  // Body-line positional identity (If to Party 2:\nParty 2) is authoritative for fixtures.
   if (isCanonicalPositionalNoticeEntityIdentity(entityLine)) return true;
-  // `If to Blue Canyon Analytics LLC:` — entity lives in the header when Address/Email follow.
+  // `If to Blue Canyon Analytics LLC:` — real entity may live in the header when Address/Email follow.
+  // Do not treat header-only Party N as a complete entity line (TEST581 heading-only rebuild).
   const headerEntity = lines[0]?.match(/^If to\s+(.+?)\s*:\s*$/i);
   if (headerEntity && usableEntity(headerEntity[1] ?? "")) return true;
-  if (headerEntity && isCanonicalPositionalNoticeEntityIdentity(headerEntity[1] ?? "")) return true;
   const fused = lines[0]?.match(/^If to\s+(.+?)\s*:\s*(.+)$/i);
   return Boolean(fused && usableEntity(fused[2] ?? ""));
 }
@@ -871,10 +874,10 @@ export function sanitizeNoticeStanzaAddressContent(stanza: string): { stanza: st
     const headerMatch = trimmed.match(NOTICE_ADDRESS_HEADER_RE);
     if (headerMatch) {
       const inlineBody = (headerMatch[1] ?? "").trim();
-      if (formatted.length === 0 && !inlineBody) {
-        // Never leave a bare `Address:` label — freeze hard-fails orphan_address_line.
-        // Prefer the signer-setup placeholder when intake has no postal address yet.
-        inAddress = true;
+      // Empty sanitize result covers bare `Address:` and placeholder-only bodies
+      // ("Address: provided during signer setup") — never emit orphan `Address:`.
+      if (formatted.length === 0) {
+        inAddress = false;
         if (trimmed !== NOTICE_SIGNER_SETUP_ADDRESS_LINE) repaired = true;
         out.push(NOTICE_SIGNER_SETUP_ADDRESS_LINE);
         continue;

@@ -164,7 +164,7 @@ describe("dashboard account foundation", () => {
     render(<AppDashboard />);
     await waitFor(() => {
       expect(screen.getByTestId(`lawdog-agreement-status-${agreementId}`).textContent).toContain(
-        "Signed",
+        "Completed",
       );
     });
     expect(screen.getByTestId(`lawdog-action-open-${agreementId}`)).toBeTruthy();
@@ -325,6 +325,14 @@ describe("dashboard account foundation", () => {
 
   it("resolveCurrentUser provides dev/local fallback without blocking QA", () => {
     localStorage.setItem("claw_org_id", "local-org");
+    // Org slug alone is never auth — seed the explicit e2e/dev bridge for QA.
+    sessionStorage.setItem(
+      "claw_e2e_auth_session_v1",
+      JSON.stringify({
+        user: { id: "local-org", email: "qa@example.test" },
+        access_token: "test",
+      }),
+    );
     const user = resolveCurrentUser();
     expect(user.isAuthenticated).toBe(true);
     expect(user.id).toBe("local-org");

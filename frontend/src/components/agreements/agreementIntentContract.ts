@@ -635,7 +635,15 @@ function countNeedles(hay: string, terms: string[]): number {
       if (t === "ip" && /\bip\b/.test(hay)) n += 1;
       continue;
     }
-    if (hay.includes(t)) n += 1;
+    // Prefer stem match so "fees" hits "fee", "deliverables" hits "deliverable", etc.
+    if (hay.includes(t)) {
+      n += 1;
+      continue;
+    }
+    if (t.length >= 4 && t.endsWith("s")) {
+      const singular = t.slice(0, -1);
+      if (hay.includes(singular)) n += 1;
+    }
   }
   return n;
 }
@@ -655,7 +663,12 @@ function hasOperativeProDepth(hay: string, docLen: number, minDocLen: number = 1
   if (/\b(notice|notices|notif|email|electronic\s+mail)\b/i.test(hay)) score += 1;
   if (/\b(revision|change\s+order|scope|acceptance|warrant)\b/i.test(hay)) score += 1;
   if (/\b(confidential|indemn|limitation\s+of\s+liabilit|liability)\b/i.test(hay)) score += 1;
-  if (/\b(execution|signatur|counterpart|electronic)\b/i.test(hay)) score += 1;
+  if (
+    /\b(execution|signatur|counterpart|electronic)\b/i.test(hay) ||
+    /\bin\s+witness\s+whereof\b/i.test(hay)
+  ) {
+    score += 1;
+  }
   return score >= 6;
 }
 

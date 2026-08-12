@@ -23,7 +23,10 @@ import { runPaidProSignerMetadataAuthoritySeed } from "./paidProSignerMetadataSe
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import { resolveLegalEntitiesForCanonicalMetadata } from "./canonicalLegalEntitiesForMetadata";
 import { markPaidProPipelineAcceptedCorpusHash, readPaidProPipelineAcceptedCorpusBody } from "./paidProPipelineAcceptedCorpus";
-import { markPaidProPipelineValidationPassed } from "./paidProPostAcceptanceValidatorCache";
+import {
+  hasPaidProPipelineValidationForCorpus,
+  markPaidProPipelineValidationPassed,
+} from "./paidProPostAcceptanceValidatorCache";
 
 export type CanonicalPaidProReviewEntrySource =
   | "post_checkout_apply_success"
@@ -153,9 +156,18 @@ export function planEnterCanonicalPaidProReviewFlow(
     return { ...baseBlocked, blockedReason: "create_flow_routing_gate" };
   }
 
-  // Do not require a prior validation latch here. Canonical entry commits markers via
-  // commitAcceptedPaidProCorpusHandoffSync / markPipelineValidationPassed on apply.
-  // Callers that need pre-validation use evaluateFirstPaidCreatePipelineGate.
+  // Returning paid-create and first-paid routes must not enter canonical review on a
+  // hash-only / unvalidated corpus (TEST515). Post-checkout apply still commits markers
+  // via commitAcceptedPaidProCorpusHandoffSync after evaluateFirstPaidCreatePipelineGate.
+  if (args.source === "returning_paid_create" || args.source === "post_checkout_apply_success") {
+    const latched = hasPaidProPipelineValidationForCorpus({
+      text: corpusPlain,
+      source: pipelineSource,
+    });
+    if (!latched) {
+      return { ...baseBlocked, blockedReason: "validation_not_latched_for_corpus" };
+    }
+  }
 
   return {
     shouldApply: true,

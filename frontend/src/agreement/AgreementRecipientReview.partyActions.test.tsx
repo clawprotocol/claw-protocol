@@ -218,8 +218,9 @@ describe("AgreementRecipientReview review-first actions", () => {
 
     await userEvent.click(screen.getByTestId("recipient-review-propose-updated-draft"));
     const paste = await screen.findByTestId("recipient-edit-draft-textarea");
-    await userEvent.clear(paste);
-    await userEvent.type(paste, `AI Automation Services Agreement\n\n${UPDATED_SCHEDULE_A}`);
+    fireEvent.change(paste, {
+      target: { value: `AI Automation Services Agreement\n\n${UPDATED_SCHEDULE_A}` },
+    });
     const livePreview = await screen.findByTestId("recipient-review-proposed-update-preview");
     expect(within(livePreview).getByText(/Updated agreement pasted/i)).toBeTruthy();
     expect(within(livePreview).getByText(/Review changes to continue/i)).toBeTruthy();
@@ -280,8 +281,9 @@ describe("AgreementRecipientReview review-first actions", () => {
     // "missing attribution" chrome is not shown, and submit remains available after preview.
     expect(screen.queryByTestId("recipient-review-personal-link-optional-notice")).toBeNull();
     const paste = await screen.findByTestId("recipient-edit-draft-textarea");
-    await userEvent.clear(paste);
-    await userEvent.type(paste, `AI Automation Services Agreement\n\n${UPDATED_SCHEDULE_A}`);
+    fireEvent.change(paste, {
+      target: { value: `AI Automation Services Agreement\n\n${UPDATED_SCHEDULE_A}` },
+    });
     expect((await screen.findByTestId("recipient-review-proposed-update-state")).textContent).toContain(
       "Ready to review",
     );
@@ -331,8 +333,9 @@ describe("AgreementRecipientReview review-first actions", () => {
 
     await userEvent.click(screen.getByTestId("recipient-review-propose-updated-draft"));
     const paste = await screen.findByTestId("recipient-edit-draft-textarea");
-    await userEvent.clear(paste);
-    await userEvent.type(paste, `AI Automation Services Agreement\n\n${UPDATED_SCHEDULE_A}`);
+    fireEvent.change(paste, {
+      target: { value: `AI Automation Services Agreement\n\n${UPDATED_SCHEDULE_A}` },
+    });
     expect(screen.getByTestId("recipient-compare-versions-button")).toHaveProperty("disabled", false);
     await userEvent.click(screen.getByTestId("recipient-compare-versions-button"));
     expect((await screen.findByTestId("recipient-preview-summary-heading")).textContent).toBe("Changes detected");

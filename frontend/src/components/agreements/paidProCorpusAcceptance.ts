@@ -262,6 +262,14 @@ export function validatePaidProOutput(args: {
   const substantiveServerDraft =
     serverFullDocExists && inputLen >= SUBSTANTIVE_SERVER_DRAFT_MIN_LEN;
 
+  // Empty/near-empty wire labeled as server_full must not recover into a false accept.
+  if (isAuthoritativePremiumPipelineProvenance(pipelineSource) && inputLen < 24) {
+    return {
+      ok: false,
+      reasons: ["empty_server_full_draft_body"],
+    };
+  }
+
   let validationInput = rawInput;
   let preparationStage = "raw_input";
   const acceptanceRepairs: string[] = [];

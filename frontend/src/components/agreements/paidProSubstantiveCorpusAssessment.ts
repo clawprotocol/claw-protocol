@@ -66,7 +66,9 @@ export function qualifiesAsConciseAuthoritativePaidServerDraft(text: string): bo
   const hasEsignClose = /\belectronic\s+signatures?\b|\be-?sign\b|\bcounterparts?\b/i.test(t);
   // Concise commercial Pro drafts may close with an Electronic Signatures section before
   // signer-setup adds witness/execution blocks — still authoritative when structure is strong.
-  if (!hasWitnessClose && !(hasEsignClose && sectionCount >= 6)) return false;
+  // Concise commercial drafts may use markdown section headings + e-sign close
+  // without a full 6-section numbered outline or IN WITNESS WHEREOF block.
+  if (!hasWitnessClose && !(hasEsignClose && sectionCount >= 3)) return false;
   if (sectionCount < 3 && !/^\s*[A-Z][A-Z0-9\s,&-]{4,}\s*$/m.test(t)) return false;
   if (/\b(?:starter preview|live preview|preview only|fallback preview|retry pro draft)\b/i.test(t)) {
     return false;
@@ -87,7 +89,10 @@ export function isPaidProServerFullDraftSource(source: string | null | undefined
 }
 
 function countNumberedSections(text: string): number {
-  return (text.match(/^\s*\d+\.\s+[A-Za-z]/gm) ?? []).length;
+  const numbered = (text.match(/^\s*\d+\.\s+[A-Za-z]/gm) ?? []).length;
+  // Markdown ATX headings (## Scope) count as structural sections for concise Pro drafts.
+  const markdown = (text.match(/^\s{0,3}#{1,3}\s+\S+/gm) ?? []).length;
+  return Math.max(numbered, markdown);
 }
 
 function appearsPreviewOrRecoveryStub(text: string): boolean {

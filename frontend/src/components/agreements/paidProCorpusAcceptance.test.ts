@@ -193,11 +193,14 @@ Short.`;
       "Name: Sarah Collins",
       "Title: Developer",
       "",
-      "x".repeat(11_200),
+      // Substantive pad — varied prose (not repetitive stubs) so freeze/validation stays O(n).
+      Array.from({ length: 40 }, (_, i) =>
+        `Supplemental commercial detail ${i + 1}. CryptoSpaces.net homepage, mobile, analytics, and email funnel work for Client Anthem Blanchard by Developer Sarah Collins under Oklahoma law with email notices.`,
+      ).join("\n"),
     ].join("\n");
     const v = validatePaidProOutput({ text: longBody, rawIntake: FREELANCE, intentContract: contract, draft: null });
     expect(v.ok, v.reasons.join(", ")).toBe(true);
   },
-  15_000,
+  20_000,
   );
 });

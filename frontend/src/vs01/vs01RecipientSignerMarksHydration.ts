@@ -83,12 +83,20 @@ export function resolveRecipientInitialsEnabled(args: {
   portable: Vs01CanonicalPacketPortableV1 | null | undefined;
   packetRevision?: string | null;
 }): boolean {
-  // Prepare revision wins over polluted server portable (TEST368).
+  // Authoritative server portable beats a stale URL `_0_` suffix (TEST473/475).
+  // Prepare-time `_0_` still wins over polluted portable when revision fieldCount disagrees (TEST368).
   const fromRevision = parseInitialsEnabledFromPacketRevision(args.packetRevision);
-  if (fromRevision === false) return false;
-  if (args.portable && portableHasAuthoritativeInitials(args.portable)) {
+  const hasAuth = Boolean(args.portable && portableHasAuthoritativeInitials(args.portable));
+  if (fromRevision === false) {
+    if (!hasAuth || !args.portable) return false;
+    const countMatch = /_(0|1)_(\d+)$/.exec((args.packetRevision ?? "").trim());
+    const revCount = countMatch ? Number(countMatch[2]) : NaN;
+    if (Number.isFinite(revCount) && revCount !== args.portable.fieldCount) {
+      return false;
+    }
     return true;
   }
+  if (hasAuth) return true;
   const portable = args.portable
     ? normalizeVs01PortableInitialsPolicy(args.portable, { packetRevision: args.packetRevision })
     : null;

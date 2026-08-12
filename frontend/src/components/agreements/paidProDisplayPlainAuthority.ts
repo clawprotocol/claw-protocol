@@ -19,7 +19,11 @@ import { repairMalformedSectionAnyReference } from "./paidProFrozenManifestDispl
 import { repairPaidProDocumentTitleOpening } from "./paidProDocumentTitleOpeningRepair";
 import { repairCollapsedInlineNoticeStanzas } from "./paidProPartyNoticeDetails";
 import { ensureBlankLineBeforeWitnessBlock } from "./paidProExecutionBlockNormalization";
-import { preparePaidProReviewDisplayPlain } from "./paidProFlattenedDocumentNormalize";
+import {
+  normalizeFlattenedPaidProDocumentBlocks,
+  preparePaidProReviewDisplayPlain,
+  stripInlineStaleServerSignatureTailBeforeWitness,
+} from "./paidProFlattenedDocumentNormalize";
 import { readConsumedPaidProSignerMetadataAuthority } from "./paidProSignerMetadataAuthority";
 import { shouldUsePaidProSourceOfTruthDisplayOnly, resolvePaidProAuthoritativeDisplayPlain, type ResolvePaidProAuthoritativeDisplayPlainArgs } from "./paidProAuthoritativeRenderGate";
 import { enrichPaidProPostFinalizeDisplayCorpus } from "./paidProPostFinalizeReviewSurface";
@@ -55,6 +59,10 @@ export function projectPaidProFrozenSoTDisplayPlain(text: string): string {
   const structureJoined = repairJoinedTopLevelSectionHeadings(out);
   if (structureJoined.repairs.length > 0) out = structureJoined.text;
 
+  // Flattened freeze snapshots still need display section / (a)(b)(c) breaks.
+  const flattened = normalizeFlattenedPaidProDocumentBlocks(out);
+  if (flattened.repairs.length > 0) out = flattened.text;
+
   const titleOpening = repairPaidProDocumentTitleOpening(out);
   if (titleOpening.repairs.length > 0) out = titleOpening.text;
 
@@ -63,6 +71,9 @@ export function projectPaidProFrozenSoTDisplayPlain(text: string): string {
 
   const sectionAny = repairMalformedSectionAnyReference(out);
   if (sectionAny.repaired) out = sectionAny.text;
+
+  const staleSig = stripInlineStaleServerSignatureTailBeforeWitness(out);
+  if (staleSig.repairs.length > 0) out = staleSig.text;
 
   if (isPaidProPostFinalizeHydratedCorpusLocked()) {
     const inlineSignatures = out.replace(/([.!?])\s+\bSIGNATURES\b\s*$/gim, "$1");

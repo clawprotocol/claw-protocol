@@ -118,7 +118,7 @@ export function evaluateFirstPaidCreatePipelineGate(
   else if (!finished.ok) blockedReason = "finished_agreement_gate_failed";
   else if (!validationLatched) blockedReason = "validation_not_latched_for_corpus";
 
-  const canonicalPlan = gateFirstPaidCreateCanonicalReviewEntry({
+  let canonicalPlan = gateFirstPaidCreateCanonicalReviewEntry({
     ...args,
     source: args.source,
     corpusPlain: finalize.corpusPlain,
@@ -126,6 +126,17 @@ export function evaluateFirstPaidCreatePipelineGate(
     draft: args.draft ?? null,
     intakeText,
   });
+  // Keep plan/gate agreement: rejected professional validation never yields shouldApply.
+  if (!validation.ok && canonicalPlan.shouldApply) {
+    canonicalPlan = {
+      ...canonicalPlan,
+      shouldApply: false,
+      blockedReason: "professional_validation_rejected",
+      establishSourceOfTruth: false,
+      commitReviewArtifact: false,
+      markPipelineValidationPassed: false,
+    };
+  }
 
   return {
     validationOk: validation.ok,

@@ -35,6 +35,11 @@ export type PaidProDocumentBoundaryAuthorityOpts = PaidProNoticeContactAuthority
   handoffPartySlots?: number;
   /** When true, clause-family structural validation is deferred to the terminal freeze gate. */
   deferClauseFamilyStructuralValidation?: boolean;
+  /**
+   * Freeze path: skip review-display flatten. Display normalize can collapse contiguous
+   * `N.M … clause K.` subsection padding into fatal truncated families (TEST500).
+   */
+  skipReviewDisplayNormalize?: boolean;
 };
 
 export type PaidProDocumentBoundaryAuthorityResult = {
@@ -134,10 +139,12 @@ export function applyPaidProDocumentBoundaryAuthority(
     repairs.push(...fusion.repairs);
   }
 
-  const display = preparePaidProReviewDisplayPlain(out);
-  if (display.text !== out) {
-    out = display.text;
-    repairs.push(...display.repairs.map((r) => `display:${r}`));
+  if (!opts?.skipReviewDisplayNormalize) {
+    const display = preparePaidProReviewDisplayPlain(out);
+    if (display.text !== out) {
+      out = display.text;
+      repairs.push(...display.repairs.map((r) => `display:${r}`));
+    }
   }
 
   if (/\bIN WITNESS WHEREOF\b/i.test(out)) {
@@ -257,6 +264,7 @@ export function assertPaidProDocumentBoundaryAuthorityForFreeze(
       ...opts,
       blockOnViolation: false,
       blockOnUnresolved: true,
+      skipReviewDisplayNormalize: true,
       surface: opts?.surface ?? "paid_pro_document_boundary_freeze",
     });
     out = result.text;

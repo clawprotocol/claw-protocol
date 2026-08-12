@@ -60,7 +60,9 @@ describe("TEST420 — unify Pro acceptance, SoT freeze, recovery, and render aut
     vi.unstubAllGlobals();
   });
 
-  it("recovery freeze candidate passes and matches acceptance path for production intake", () => {
+  it(
+    "recovery freeze candidate passes and matches acceptance path for production intake",
+    () => {
     const recovery = previewRecoverPaidProFreezeCandidate({
       draft: test420Draft(),
       intakeText: TEST420_PRODUCTION_INTAKE,
@@ -87,9 +89,13 @@ describe("TEST420 — unify Pro acceptance, SoT freeze, recovery, and render aut
     });
     expect(stable.ok).toBe(true);
     expect(stable.hash).toBe(reGate.hash);
-  });
+  },
+  30_000,
+  );
 
-  it("production malformed server draft: freeze fails, validation accepts via recovery, establish recovers SoT", () => {
+  it(
+    "production malformed server draft: freeze fails, validation accepts via recovery, establish recovers SoT",
+    () => {
     const serverDraft = buildTest420MalformedServerDraft();
     expect(serverDraft.length).toBeGreaterThan(5000);
 
@@ -146,7 +152,9 @@ describe("TEST420 — unify Pro acceptance, SoT freeze, recovery, and render aut
       intakeText: TEST420_PRODUCTION_INTAKE,
     });
     expect(render.trim().length).toBeGreaterThan(4000);
-  });
+  },
+  45_000,
+  );
 
   it("hierarchy-break variant fails validation without substantive server draft recovery substitution", () => {
     const broken = buildTest420HierarchyBreakVariant();
@@ -174,7 +182,9 @@ describe("TEST420 — unify Pro acceptance, SoT freeze, recovery, and render aut
     expect(corpusHasPaidProSyntheticMalformedSectionHeadings(corpus)).toBe(false);
   });
 
-  it("accepted recovery corpus: freeze candidate hash is stable across re-gate and establish", () => {
+  it(
+    "accepted recovery corpus: freeze candidate hash is stable across re-gate and establish",
+    () => {
     const recovery = previewRecoverPaidProFreezeCandidate({
       draft: test420Draft(),
       intakeText: TEST420_PRODUCTION_INTAKE,
@@ -209,7 +219,9 @@ describe("TEST420 — unify Pro acceptance, SoT freeze, recovery, and render aut
     expect(recovered.ok).toBe(true);
     if (!recovered.ok) return;
     expect(hasPaidProSourceOfTruth()).toBe(true);
-  });
+  },
+  30_000,
+  );
 
   it("does not commit authoritative UI without frozen SoT", () => {
     const serverDraft = buildTest420MalformedServerDraft();

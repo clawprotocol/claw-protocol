@@ -21,17 +21,33 @@ const PAID_PRO_STANDALONE_TITLE_LINE_RE =
 
 const PAID_PRO_CAPS_TITLE_SCAN_RE = /\b(?:MUTUAL\s+)?[A-Z][A-Z\s&]{4,80}AGREEMENT\b/g;
 
-/** Formal recital opener — must not match mid-prose "enter into this Agreement". */
+/**
+ * Formal recital opener.
+ * - Must not match mid-prose "enter into this Agreement".
+ * - Must not match bare mid-body "Venue. This Agreement is governed…" —
+ *   require a typed agreement phrase (Services / Consulting / …).
+ * - Captures `This…` so callers can slice at the word This, not a leading `. `.
+ */
 const PAID_PRO_RECITAL_START_RE =
-  /(?:^|[.!?]\s+)This\s+(?:(?:Mutual|MUTUAL)\s+)?(?:Consulting\s+(?:and\s+Implementation\s+|Services\s+)?|Services\s+|SERVICES\s+|Software\s+Development\s+(?:Services\s+)?|Freelance\s+Software\s+Development\s+|Web\s+Development\s+)?(?:Consulting\s+and\s+Implementation\s+|Consulting\s+Services\s+|Software\s+Development\s+Services\s+)?Agreement\b/i;
+  /(?:^|[.!?]\s+)(This\s+(?:(?:Mutual|MUTUAL)\s+)?(?:Consulting\s+(?:and\s+Implementation\s+|Services\s+)?|Services\s+|SERVICES\s+|Software\s+Development\s+(?:Services\s+)?|Freelance\s+Software\s+Development\s+|Web\s+Development\s+|Consulting\s+and\s+Implementation\s+|Consulting\s+Services\s+|Software\s+Development\s+Services\s+|Business\s+Consulting\s+)Agreement)\b/i;
 
 function escapeRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+/** Line-start §1, or flattened "…LLC. 1. Services" / "…) 1. Services". */
+function findFirstOperativeSectionOneIndex(text: string): number {
+  const normalized = (text || "").replace(/\r\n/g, "\n");
+  const lineStart = normalized.search(/^\s*1\.\s+(?!\d)/m);
+  if (lineStart >= 0) return lineStart;
+  // Flattened corpora keep section 1 mid-string after the recital sentence.
+  const flat = normalized.search(/(?<=[.!?"')\]]\s)1\.\s+(?!\d)[A-Za-z]/);
+  return flat >= 0 ? flat : -1;
+}
+
 function openingSliceBeforeSectionOne(text: string): string {
   const normalized = (text || "").replace(/\r\n/g, "\n");
-  const sec1Idx = normalized.search(/^\s*1\.\s+(?!\d)/m);
+  const sec1Idx = findFirstOperativeSectionOneIndex(normalized);
   return sec1Idx >= 0 ? normalized.slice(0, sec1Idx) : normalized.slice(0, 2_500);
 }
 
@@ -156,16 +172,27 @@ export function repairPaidProDocumentTitleOpening(text: string): {
   const prefix = witnessIdx >= 0 ? working.slice(0, witnessIdx) : working;
   const tail = witnessIdx >= 0 ? working.slice(witnessIdx) : "";
 
-  const sec1Idx = prefix.search(/^\s*1\.\s+(?!\d)/m);
+  const sec1Idx = findFirstOperativeSectionOneIndex(prefix);
   const openingPart = sec1Idx >= 0 ? prefix.slice(0, sec1Idx) : prefix;
   const bodyPart = sec1Idx >= 0 ? prefix.slice(sec1Idx) : "";
+  // Never treat a long operative body as the "opening" — flattened corpora without a
+  // detectable §1 would otherwise feed the entire document into recital collapse.
+  if (sec1Idx < 0 && openingPart.replace(/\s+/g, " ").trim().length > 900) {
+    return { text: working, repairs };
+  }
 
   const titleUpper = extractCanonicalTitleUpper(openingPart);
   if (!titleUpper) return { text: working, repairs };
 
   const openingFlat = openingPart.replace(/\n+/g, " ").replace(/\s+/g, " ").trim();
   const titleEsc = escapeRegex(titleUpper);
-  let recitalIdx = openingFlat.search(PAID_PRO_RECITAL_START_RE);
+  const recitalMatch = PAID_PRO_RECITAL_START_RE.exec(openingFlat);
+  let recitalIdx = -1;
+  if (recitalMatch && typeof recitalMatch.index === "number") {
+    // Slice at captured `This…`, not a leading sentence punctuation group.
+    const captured = recitalMatch[1] ?? recitalMatch[0];
+    recitalIdx = openingFlat.indexOf(captured, recitalMatch.index);
+  }
   if (recitalIdx < 0) {
     const gluedIdx = openingFlat.search(new RegExp(`${titleEsc}\\s+This\\b`, "i"));
     if (gluedIdx < 0) return { text: working, repairs };

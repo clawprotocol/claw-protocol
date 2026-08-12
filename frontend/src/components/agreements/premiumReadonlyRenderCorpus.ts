@@ -668,14 +668,21 @@ export function pickPremiumPaidReadonlyPlainText(args: {
 
   if (args.premiumCheckoutCompleted) {
     const extraCandidates: PaidProCorpusAuthorityCandidate[] = [];
+    const apiUnavailable = isPremiumGenerationApiUnavailablePipelineSource(pipeSrc);
+    const outageLocalTier = (
+      renderSource: string,
+    ): ReturnType<typeof mapRenderSourceToAuthorityTier> =>
+      apiUnavailable
+        ? "locally_generated_paid_pro"
+        : mapRenderSourceToAuthorityTier({
+            renderSource,
+            pipelineSource: args.lastPremiumPipelineRenderSource,
+          });
     const hydrated = (args.authoritativeHydratedPlainText || "").trim();
     if (hydrated.length >= 500) {
       extraCandidates.push({
         plainText: hydrated,
-        tier: mapRenderSourceToAuthorityTier({
-          renderSource: "server_full_document_text",
-          pipelineSource: args.lastPremiumPipelineRenderSource,
-        }),
+        tier: outageLocalTier("server_full_document_text"),
         sourceLabel: "hydrated_authoritative",
         pipelineSource: args.lastPremiumPipelineRenderSource ?? null,
         sticky: true,
@@ -685,10 +692,7 @@ export function pickPremiumPaidReadonlyPlainText(args: {
     if (sticky.length >= 500 && sticky !== hydrated) {
       extraCandidates.push({
         plainText: sticky,
-        tier: mapRenderSourceToAuthorityTier({
-          renderSource: "server_full_document_text",
-          pipelineSource: args.lastPremiumPipelineRenderSource,
-        }),
+        tier: outageLocalTier("server_full_document_text"),
         sourceLabel: "sticky_authoritative",
         pipelineSource: args.lastPremiumPipelineRenderSource ?? null,
         sticky: true,
@@ -698,10 +702,7 @@ export function pickPremiumPaidReadonlyPlainText(args: {
     if (legacy.length >= 500 && legacy !== paidFallback && legacy !== hydrated) {
       extraCandidates.push({
         plainText: legacy,
-        tier: mapRenderSourceToAuthorityTier({
-          renderSource: "legacy_snapshot",
-          pipelineSource: args.lastPremiumPipelineRenderSource,
-        }),
+        tier: outageLocalTier("legacy_snapshot"),
         sourceLabel: "legacy_snapshot",
         pipelineSource: args.lastPremiumPipelineRenderSource ?? null,
       });
@@ -717,10 +718,7 @@ export function pickPremiumPaidReadonlyPlainText(args: {
       allowLocalDeterministicFallback: !shouldBlockPaidProLocalCorpusFallback(pipeSrc),
       extraCandidates,
       stickyPlainText: sticky || hydrated || paidFallback,
-      stickyTier: mapRenderSourceToAuthorityTier({
-        renderSource: "server_full_document_text",
-        pipelineSource: args.lastPremiumPipelineRenderSource,
-      }),
+      stickyTier: outageLocalTier("server_full_document_text"),
     });
     if (surface.mode === "premium_unavailable_retry") {
       logPaidProStarterCloneBlocked({

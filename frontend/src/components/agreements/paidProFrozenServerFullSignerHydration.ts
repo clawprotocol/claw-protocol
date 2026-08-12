@@ -9,7 +9,12 @@ import {
   authorityPartiesToCanonicalPartyIdentities,
   authorityPartiesToRecipientMetadata,
 } from "./paidProSignerMetadataAuthority";
-import { applySignatureNoticeContactFieldsToCorpus, ensureOperativeIfToNoticeDelivery, repairCollapsedInlineNoticeStanzas } from "./paidProPartyNoticeDetails";
+import {
+  applySignatureNoticeContactFieldsToCorpus,
+  ensureOperativeIfToNoticeDelivery,
+  findNoticesSectionStart,
+  repairCollapsedInlineNoticeStanzas,
+} from "./paidProPartyNoticeDetails";
 import {
   countBlankSignerMetadataLinesInExecutionBlock,
   hydratePaidProExecutionBlockWithSignerMetadata,
@@ -77,13 +82,26 @@ export function buildFrozenServerFullSignerMetadataHydration(args: {
     corpus = executionHydration.corpus;
   }
 
-  // Commercial contract: never invent notice structure during signature-region hydration.
-  // Only synthesize operative If-to delivery when doing full finalize hydration.
+  // Never invent a Notices section in signature-region mode. When Notices already exist
+  // with "provided during signer setup" placeholders and authority has real contacts,
+  // resolve those placeholders (parity with non-frozen finalize hydration).
   let noticeDeliveryRepairs = 0;
-  if (!signatureRegionOnly) {
-    const noticeDelivery = ensureOperativeIfToNoticeDelivery(corpus, args.authority.parties, roleContext);
+  const noticesIdx = findNoticesSectionStart(corpus);
+  const authorityHasContact = args.authority.parties.some(
+    (p) => p.signerEmail.trim() || p.partyAddress.trim() || p.signerName.trim(),
+  );
+  if (
+    authorityHasContact &&
+    noticesIdx >= 0 &&
+    (!signatureRegionOnly || /provided during signer setup/i.test(corpus.slice(noticesIdx)))
+  ) {
+    const noticeDelivery = ensureOperativeIfToNoticeDelivery(
+      corpus,
+      args.authority.parties,
+      roleContext,
+    );
     noticeDeliveryRepairs = noticeDelivery.repairs.length;
-    if (noticeDeliveryRepairs > 0) {
+    if (noticeDeliveryRepairs > 0 || noticeDelivery.text !== corpus) {
       corpus = noticeDelivery.text.trim();
     }
   }

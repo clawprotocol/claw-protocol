@@ -154,10 +154,13 @@ export function resolvePaidProReviewRenderSurface(args: {
   if (paidFallback.length >= 500) {
     candidates.push({
       plainText: paidFallback,
-      tier: mapRenderSourceToAuthorityTier({
-        renderSource: "server_full_document_text",
-        pipelineSource: args.pipelineSource,
-      }),
+      // Network/API outage sticky bodies are locally held Pro corpora — not server_full.
+      tier: pipelineUnavailable
+        ? "locally_generated_paid_pro"
+        : mapRenderSourceToAuthorityTier({
+            renderSource: "server_full_document_text",
+            pipelineSource: args.pipelineSource,
+          }),
       sourceLabel: "paid_authoritative_fallback",
       pipelineSource: args.pipelineSource,
       sticky: true,

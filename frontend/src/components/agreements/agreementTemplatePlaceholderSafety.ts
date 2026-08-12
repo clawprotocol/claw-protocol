@@ -836,6 +836,12 @@ export function classifyTemplateFragment(
   const anchorsOk = corpusHasResolvedPartyAnchors(text, partyNames, intakeRaw);
   const base = decisionBase(token, text, index, inExec, isTail);
 
+  // Entity-metadata brackets ([State]/[Address]/…) are non-fatal and neutralized later.
+  // Must win over signature-allowlist / operative-material fatality (ADDRESS is allowlisted).
+  if (isHarmlessEntityMetadataBracketToken(token)) {
+    return { ...base, category: "soft_field_label", fatal: false };
+  }
+
   if (isNumberedSignatureContactToken(token)) {
     if (isOperativeSignatureContactMisuse(token, text, index)) {
       return { ...base, category: "internal_slot", fatal: true };

@@ -9114,8 +9114,16 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             qualityRetryActive: false,
             serverGenerationDegraded: Boolean(result.serverGenerationDegraded),
           });
+          const authoritativeCommittedForGate = resolveAuthoritativePremiumCommitted({
+            winningPremiumBodyText: winning,
+            premiumRenderSource: result.premiumRenderSource,
+            premiumRenderResolveSource: resolvedPersist.premium_render_source,
+            agreementDocumentText: snapshotPlain,
+            generationOutcome: result.generationOutcome ?? null,
+          });
           const skipQualityRetryForAdvisoryOnly =
-            winning.length >= 15_000 && !result.structuralCatastrophic;
+            authoritativeCommittedForGate.committed ||
+            (winning.length >= 15_000 && !result.structuralCatastrophic);
           if (!fin.ok && !skipQualityRetryForAdvisoryOnly) {
             // TEST536 — restore post-validation deterministic recovery. A professional-clause-coverage
             // rejection of a substantive-but-incomplete server draft must NOT strand the paid user on the
@@ -19849,67 +19857,66 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       authoritativeRepairAppliedRef.current = false;
       return;
     }
-    if (
-      shouldSuppressPremiumAuthoritativeRehydrate({
-        createFlowPhase: createFlowPhaseRef.current,
-        createUiStage: String(createUiStageRef.current),
-        finalizedSigningCorpusLen: Math.max(
-          finalizedSigningCorpusRef.current.trim().length,
-          guidedVs01SigningHandoffRef.current?.corpusText.length ?? 0,
-        ),
-      })
-    ) {
-      return;
-    }
-    if (proFullDraftQualityRetry) setProFullDraftQualityRetry(false);
-    if (proUpgradeUseStarterView) setProUpgradeUseStarterView(false);
-    if (premiumPostCheckoutPhase) setPremiumPostCheckoutPhase(null);
-    setPremiumAuthoritativeRequestInFlight(false);
-    premiumModalExtendedWaitActiveRef.current = false;
-    setPremiumCheckoutModalExtendedWait(false);
-    setPremiumReturnPatienceExtended(false);
-    const snap = readPremiumCompletionSnapshot();
-    const corpus = (
-      snap?.premiumWinningBodyText ||
-      lastPremiumWinningCorpusRef.current ||
-      premiumPipelineOutputBodyRef.current ||
-      ""
-    ).trim();
-    if (
-      !authoritativeRepairAppliedRef.current &&
-      corpus.length >= 500 &&
-      agreementDocumentTextRef.current.trim().length < 500
-    ) {
-      authoritativeRepairAppliedRef.current = true;
-      const collapsed = collapseDuplicateEsignNoticesInFullPreview(corpus);
-      syncAuthoritativePremiumDocumentRefs(collapsed, authoritativePremiumDocRefs, {
-        pipelineSource:
-          snap?.premiumPipelineRenderSource ?? lastPremiumPipelineRenderSourceRef.current ?? "server_full_draft",
-        premiumRenderResolveSource: snap?.premiumRenderResolveSource ?? "server_full_document_text",
-      });
-      commitReviewArtifact({ plainText: collapsed, source: "premium_authoritative", bumpApplyCount: false });
-      setAgreementDocumentText(collapsed);
-      agreementDocumentDirtyRef.current = false;
-      setDisplayPhase("review");
-      setCreateFlowPhase("draft_ready_for_review");
-      setCreateUiStage(CreateUiStage.DRAFT);
-      setPreviewPaneRevealed(true);
-      bumpPremiumSurfaceGateTick();
-      resetPremiumReviewScrollToTop({
-        reason: "payment_success_authoritative_apply",
-        afterPlain: collapsed,
-      });
-    }
-    cleanPremiumUrlAfterAuthoritativeCommit();
-    if (!authoritativePremiumRepairLoggedRef.current) {
-      authoritativePremiumRepairLoggedRef.current = true;
-      logPremiumAuthoritativeCommit({
-        bodyLen: corpus.length,
-        source: snap?.premiumPipelineRenderSource ?? lastPremiumPipelineRenderSourceRef.current,
-        generationOutcome: "ok",
-      });
-      if (hasFrozenPaidProAuthoritativeSnapshot()) {
-        logPremiumFallbackSuppressed("authoritative_doc_present");
+    if (authoritativePremiumUiCommitted) {
+      if (
+        shouldSuppressPremiumAuthoritativeRehydrate({
+          createFlowPhase: createFlowPhaseRef.current,
+          createUiStage: String(createUiStageRef.current),
+          finalizedSigningCorpusLen: Math.max(
+            finalizedSigningCorpusRef.current.trim().length,
+            guidedVs01SigningHandoffRef.current?.corpusText.length ?? 0,
+          ),
+        })
+      ) {
+        return;
+      }
+      if (proFullDraftQualityRetry) setProFullDraftQualityRetry(false);
+      if (proUpgradeUseStarterView) setProUpgradeUseStarterView(false);
+      if (premiumPostCheckoutPhase) setPremiumPostCheckoutPhase(null);
+      setPremiumAuthoritativeRequestInFlight(false);
+      premiumModalExtendedWaitActiveRef.current = false;
+      setPremiumCheckoutModalExtendedWait(false);
+      setPremiumReturnPatienceExtended(false);
+      const snap = readPremiumCompletionSnapshot();
+      const corpus = (
+        snap?.premiumWinningBodyText ||
+        lastPremiumWinningCorpusRef.current ||
+        premiumPipelineOutputBodyRef.current ||
+        ""
+      ).trim();
+      if (
+        !authoritativeRepairAppliedRef.current &&
+        corpus.length >= 500 &&
+        agreementDocumentTextRef.current.trim().length < 500
+      ) {
+        authoritativeRepairAppliedRef.current = true;
+        const collapsed = collapseDuplicateEsignNoticesInFullPreview(corpus);
+        syncAuthoritativePremiumDocumentRefs(collapsed, authoritativePremiumDocRefs, {
+          pipelineSource:
+            snap?.premiumPipelineRenderSource ?? lastPremiumPipelineRenderSourceRef.current ?? "server_full_draft",
+          premiumRenderResolveSource: snap?.premiumRenderResolveSource ?? "server_full_document_text",
+        });
+        commitReviewArtifact({ plainText: collapsed, source: "premium_authoritative", bumpApplyCount: false });
+        setAgreementDocumentText(collapsed);
+        agreementDocumentDirtyRef.current = false;
+        setDisplayPhase("review");
+        setCreateFlowPhase("draft_ready_for_review");
+        setCreateUiStage(CreateUiStage.DRAFT);
+        setPreviewPaneRevealed(true);
+        bumpPremiumSurfaceGateTick();
+        resetPremiumReviewScrollToTop({ reason: "payment_success_authoritative_apply", afterPlain: collapsed });
+      }
+      cleanPremiumUrlAfterAuthoritativeCommit();
+      if (!authoritativePremiumRepairLoggedRef.current) {
+        authoritativePremiumRepairLoggedRef.current = true;
+        logPremiumAuthoritativeCommit({
+          bodyLen: corpus.length,
+          source: snap?.premiumPipelineRenderSource ?? lastPremiumPipelineRenderSourceRef.current,
+          generationOutcome: "ok",
+        });
+        if (hasFrozenPaidProAuthoritativeSnapshot()) {
+          logPremiumFallbackSuppressed("authoritative_doc_present");
+        }
       }
     }
   }, [

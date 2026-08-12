@@ -197,9 +197,12 @@ export function applyPaidProNoticeContactAuthority(
     hasAuthoritativeNoticeParties &&
     (hasRealNoticeContacts || findNoticesSectionStart(out) >= 0);
 
-  // Do not invent NOTICES / "provided during signer setup" scaffolding for generic
-  // Party 1 / Party 2 placeholders — that mutates accepted SoT without real entities.
-  if (mayMutateNoticeScaffolding && hasRealNoticeContacts) {
+  // When Notices already exists (or real contacts authorize scaffolding), reconcile
+  // heading + If-to stanza coverage. buildIfToNoticeStanza stays entity-only when
+  // email/address authority is absent — no "provided during signer setup" invention.
+  // Creating a brand-new Notices region without contacts remains blocked inside
+  // ensureOperativeIfToNoticeDelivery / repairIncompleteIfToNoticeStanzas.
+  if (mayMutateNoticeScaffolding) {
     const headingRepair = ensureCanonicalNoticesSectionHeadingForFreeze(out);
     if (headingRepair.repairs.length > 0) {
       out = headingRepair.text;
@@ -207,7 +210,7 @@ export function applyPaidProNoticeContactAuthority(
     }
   }
 
-  if (parties.length >= 2 && mayMutateNoticeScaffolding && hasRealNoticeContacts) {
+  if (parties.length >= 2 && mayMutateNoticeScaffolding) {
     const canonicalPartyCount = resolveAuthoritativeSignerCount({
       intakeText: intakeRaw,
       draftPartyNames: roleContext.draftPartyNames ?? undefined,

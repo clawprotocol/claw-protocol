@@ -348,8 +348,24 @@ export function validateNoticesClauseFamilyStructuralIntegrity(
   const stanzaCount = countIfToStanzas(region);
   const stanzasSatisfyAuthority =
     requiredStanzas > 0 && stanzaCount >= requiredStanzas;
+  // When no-invent sets requiredStanzas=0, existing If-to stanzas with entity lines still
+  // count as operative Notices substance (heading-only "10. Notices." is not enough alone).
+  const stanzasProvideOperativeSubstance = (() => {
+    if (stanzaCount < 1) return false;
+    const blocks = region
+      .split(/\n(?=If to\s+)/i)
+      .slice(1)
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const withEntity = blocks.filter((s) => stanzaHasLegalEntityLine(s)).length;
+    return withEntity >= Math.min(2, stanzaCount) && withEntity >= 1;
+  })();
 
-  if (!NOTICES_OPERATIVE_TEXT_RE.test(region) && !stanzasSatisfyAuthority) {
+  if (
+    !NOTICES_OPERATIVE_TEXT_RE.test(region) &&
+    !stanzasSatisfyAuthority &&
+    !stanzasProvideOperativeSubstance
+  ) {
     violations.push({
       family: "notices",
       code: "missing_operative_notice_text",
@@ -569,11 +585,19 @@ export function assertClauseFamilyStructuralIntegrityForFreeze(
     phase: opts?.phase ?? "post_acceptance",
   });
   if (!report.ok) {
-    logClauseFamilyStructuralDiagnostic(corpus, report, {
+    // No-invent: freeze must not invent IN WITNESS / blank By:____ chrome.
+    // Signing prepare owns execution append — do not hard-block freeze/SoT solely for
+    // a missing witness when the corpus is otherwise structurally acceptable.
+    const blocking = report.violations.filter((v) => v.code !== "missing_execution_block");
+    if (blocking.length === 0) {
+      return;
+    }
+    const filteredReport = { ...report, ok: false, violations: blocking };
+    logClauseFamilyStructuralDiagnostic(corpus, filteredReport, {
       surface: opts?.surface ?? "freeze",
       phase: opts?.phase ?? "post_acceptance",
     });
-    const codes = report.violations.map((v) => v.code).join(",");
+    const codes = blocking.map((v) => v.code).join(",");
     throw new Error(
       `[paid-pro-clause-family-structural-blocked] surface=${opts?.surface ?? "freeze"} codes=${codes}`,
     );

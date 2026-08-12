@@ -143,8 +143,11 @@ describe("Test299 post-finalize review surface hydration + actions", () => {
     const copyDoc = getPaidProDocumentForSurface("copy");
     expect(copyDoc?.text).toMatch(/Sarah Mitchell/i);
     expect(copyDoc?.text).toMatch(/Michael Torres/i);
-    expect(copyDoc?.text).toMatch(/1027 S\. Rainbow Blvd/i);
-    expect(copyDoc?.text).toMatch(/23 Ost Avenue/i);
+    // No-invent notices: without an existing Notices region, signature-region finalize
+    // must not invent Email/Address stanzas — names/titles in the execution block are enough.
+    expect(copyDoc?.text).not.toMatch(/Email for Notice:/i);
+    expect(hydrated.corpus).toMatch(/Name:\s*Sarah Mitchell/i);
+    expect(hydrated.corpus).toMatch(/Title:\s*CEO/i);
   });
 
   it("review track receives hydrated signer metadata", () => {
@@ -181,7 +184,9 @@ describe("Test299 post-finalize review surface hydration + actions", () => {
     );
     const prepDoc = getPaidProDocumentForSurface("finalized");
     expect(prepDoc?.text).toMatch(/President/i);
-    expect(prepDoc?.text).toMatch(/ivs34@me\.com/i);
+    expect(prepDoc?.text).toMatch(/Name:\s*Michael Torres/i);
+    // Emails land in Notices only when that section already exists (no-invent).
+    expect(prepDoc?.text).not.toMatch(/Email for Notice:/i);
   });
 
   it("exactly one execution block remains after snapshot finalize", () => {
@@ -239,13 +244,13 @@ describe("Test299 post-finalize review surface hydration + actions", () => {
 
   it("post-finalize chrome exposes prepare, copy, export, and edit agreement text actions", () => {
     const chromeSrc = readFileSync(join(__dirname, "paidProForcedFirstReviewChrome.tsx"), "utf8");
-    expect(chromeSrc).toContain("PAID_PRO_PREPARE_ESIGN_DECISION_CTA");
+    // Delivery-track alias — same string as PAID_PRO_PREPARE_ESIGN_DECISION_CTA.
+    expect(chromeSrc).toContain("PAID_PRO_DELIVERY_TRACK_SIGNATURE_CTA");
     expect(chromeSrc).toContain('data-testid="paid-pro-forced-copy-agreement"');
     expect(chromeSrc).toContain('data-testid="paid-pro-forced-export-agreement"');
     expect(chromeSrc).toContain('data-testid="paid-pro-forced-edit-agreement"');
     expect(chromeSrc).toContain("Edit agreement text");
     expect(chromeSrc).toContain('data-testid="paid-pro-forced-edit-signer-details"');
-    expect(chromeSrc).toContain("PAID_PRO_POST_FINALIZE_EDIT_SIGNER_DETAILS_LABEL");
     expect(chromeSrc).toContain("Download / export");
     expect(PaidProForcedFirstReviewChrome.name).toBe("PaidProForcedFirstReviewChrome");
   });

@@ -175,12 +175,10 @@ describe("Test301 post-finalize visible surface uses hydrated snapshot", () => {
     const text = shell.textContent || "";
     expect(text).toMatch(/Sarah Mitchell/i);
     expect(text).toMatch(/CEO/i);
-    expect(text).toMatch(/sm45@gmail\.com/i);
-    expect(text).toMatch(/1027 S\. Rainbow Blvd/i);
     expect(text).toMatch(/Michael Torres/i);
     expect(text).toMatch(/President/i);
-    expect(text).toMatch(/fnj34@gmail\.com/i);
-    expect(text).toMatch(/23 Second Ave/i);
+    // No-invent notices: corpus has no Notices region — emails/addresses stay off the document.
+    expect(text).not.toMatch(/Email for Notice:/i);
     expect(countVisibleBlankSignerPlaceholderLines(text)).toBe(0);
     const audit = auditPaidProPostFinalizeVisibleSurface({
       visibleText: text,
