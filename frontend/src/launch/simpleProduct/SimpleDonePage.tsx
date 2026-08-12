@@ -220,7 +220,7 @@ export function SimpleDonePage(props: { agreementId: string }) {
   const headline = signed
     ? JOY_COPY.signSealedProof
     : confirmedSend
-      ? "Agreement ready"
+      ? "Links created—share when ready"
       : JOY_COPY.readyToSendHeadline;
   const subline = signed
     ? "Everyone who needed to sign has signed."
@@ -1220,7 +1220,7 @@ export function SimpleDonePage(props: { agreementId: string }) {
     <SimpleFlowShell
       step={lifecycleStepForStage("proof")}
       progressLabels={AGREEMENT_LIFECYCLE_PROGRESS_LABELS}
-      title={signed ? "Agreement complete" : confirmedSend ? "Agreement ready" : "Next step"}
+      title={signed ? "Agreement complete" : confirmedSend ? "Links created—share when ready" : "Next step"}
       subtitle={title ? `“${title}”` : JOY_COPY.taglineMoveWithProof}
     >
       <div className="vs01-card vs01-card--envelope space-y-6 text-center sm:text-left">

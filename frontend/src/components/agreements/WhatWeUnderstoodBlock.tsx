@@ -1,18 +1,25 @@
 import { useLayoutEffect, useRef, useState } from "react";
 import type { LivePreviewInlineField } from "./liveDraftHeuristics";
-import type { UnderstoodBullet } from "./intakeWhatWeUnderstood";
+import { UNDERSTOOD_PROVENANCE_LABEL, type UnderstoodBullet } from "./intakeWhatWeUnderstood";
 
 export function WhatWeUnderstoodBlock(props: {
   bullets: UnderstoodBullet[];
   onCommitInline: (field: LivePreviewInlineField, next: string) => void;
   onFocusMainInput: () => void;
   disabled?: boolean;
-  /** Defaults to legacy “We understood:” — production create uses “We captured:”. */
+  /** Defaults to “What LawDog understood”. */
   title?: string;
   /** Primary edit control label */
   editDetailsLabel?: string;
 }) {
-  const { bullets, onCommitInline, onFocusMainInput, disabled, title = "We understood:", editDetailsLabel = "Edit" } = props;
+  const {
+    bullets,
+    onCommitInline,
+    onFocusMainInput,
+    disabled,
+    title = "What LawDog understood",
+    editDetailsLabel = "Edit",
+  } = props;
   const [editingKind, setEditingKind] = useState<UnderstoodBullet["kind"] | null>(null);
   const [draft, setDraft] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
@@ -88,8 +95,14 @@ export function WhatWeUnderstoodBlock(props: {
               ) : (
                 <span className="text-[13px] font-medium text-slate-100 sm:text-sm">{b.displayValue}</span>
               )}
-              {b.needsConfirmation ? (
-                <span className="ml-1.5 text-[11px] font-medium text-amber-200/90 sm:text-xs">Needs confirmation</span>
+              {b.provenance && b.provenance !== "confirmed" ? (
+                <span className="ml-1.5 text-[11px] font-medium text-amber-200/90 sm:text-xs">
+                  {UNDERSTOOD_PROVENANCE_LABEL[b.provenance]}
+                </span>
+              ) : b.needsConfirmation ? (
+                <span className="ml-1.5 text-[11px] font-medium text-amber-200/90 sm:text-xs">
+                  {UNDERSTOOD_PROVENANCE_LABEL.inferred}
+                </span>
               ) : null}
             </div>
           </li>

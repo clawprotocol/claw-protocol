@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import logging
+import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
@@ -178,6 +179,43 @@ def _messages_after_user_airlock(
     return out
 
 
+def _cached_tokens_from_usage(usage: Any) -> Optional[int]:
+    if usage is None:
+        return None
+    details = getattr(usage, "prompt_tokens_details", None) or getattr(usage, "input_tokens_details", None)
+    if details is None and isinstance(usage, dict):
+        details = usage.get("prompt_tokens_details") or usage.get("input_tokens_details")
+        cached = usage.get("cached_tokens")
+        if cached is not None and details is None:
+            return cached
+    if details is None:
+        return getattr(usage, "cached_tokens", None)
+    if isinstance(details, dict):
+        return details.get("cached_tokens")
+    return getattr(details, "cached_tokens", None)
+
+
+def _privacy_safe_llm_telemetry(record: Dict[str, Any]) -> None:
+    """Log per-call metadata only. Never log prompts, completions, emails, or agreement text."""
+    log.info(
+        "[claw-llm-telemetry] purpose=%s requested_model=%s returned_model=%s "
+        "prompt_tokens=%s completion_tokens=%s total_tokens=%s cached_tokens=%s "
+        "latency_ms=%s finish_reason=%s repair_status=%s validation_accepted=%s status=%s",
+        record.get("call_purpose"),
+        record.get("requested_model"),
+        record.get("returned_model"),
+        record.get("prompt_tokens"),
+        record.get("completion_tokens"),
+        record.get("total_tokens"),
+        record.get("cached_tokens"),
+        record.get("latency_ms"),
+        record.get("finish_reason"),
+        record.get("repair_status"),
+        record.get("validation_accepted"),
+        record.get("status"),
+    )
+
+
 def call_legal_llm(
     messages: List[Dict[str, Any]],
     model: Optional[str] = None,
@@ -187,6 +225,9 @@ def call_legal_llm(
     usage_sink: Optional[List[Dict[str, Any]]] = None,
     airlock_profile: AirlockPolicyProfile = "default",
     airlock_log_context: Optional[str] = None,
+    call_purpose: Optional[str] = None,
+    repair_status: Optional[str] = None,
+    validation_accepted: Optional[bool] = None,
     **kwargs: Any,
 ) -> str:
     """
@@ -207,6 +248,10 @@ def call_legal_llm(
         retaining hard litigation tokens such as ``plaintiff`` / ``subpoena``). Under ``agreement_outbound``,
         standalone ``attorney`` / ``lawyer`` tokens are also ignored so repair JSON may include routine fee clauses.
       - ``airlock_log_context`` — optional short route label for blocked-airlock logs (no user substance).
+      - ``call_purpose`` — privacy-safe purpose label (structured_extraction, agreement_drafting,
+        explicit_revision, conditional_repair). Never include user content.
+      - ``repair_status`` — ``none`` / ``repair`` / ``retry`` / ``regen``.
+      - ``validation_accepted`` — set when the caller already knows deterministic validation outcome.
     """
     kwargs.pop("trace_context", None)
     if kwargs:
@@ -221,9 +266,13 @@ def call_legal_llm(
         airlock_log_context=airlock_log_context,
     )
     client = _get_client()
-    resolved_model = model or DEFAULT_MODEL
+    requested_model = model or DEFAULT_MODEL
+    resolved_model = requested_model
     tokens_kwargs = build_chat_completion_tokens_kwargs(resolved_model, max_tokens)
     tokens_param = next(iter(tokens_kwargs.keys()))
+    purpose = (call_purpose or airlock_log_context or "unspecified").strip() or "unspecified"
+    repair = (repair_status or "none").strip() or "none"
+    started = time.perf_counter()
 
     try:
         resp = client.chat.completions.create(
@@ -233,6 +282,25 @@ def call_legal_llm(
             **tokens_kwargs,
         )
     except Exception as exc:
+        latency_ms = int((time.perf_counter() - started) * 1000)
+        fail_record = {
+            "call_purpose": purpose,
+            "requested_model": requested_model,
+            "returned_model": None,
+            "prompt_tokens": None,
+            "completion_tokens": None,
+            "total_tokens": None,
+            "cached_tokens": None,
+            "latency_ms": latency_ms,
+            "finish_reason": None,
+            "repair_status": repair,
+            "validation_accepted": validation_accepted,
+            "status": "fail",
+            "error_type": type(exc).__name__,
+        }
+        _privacy_safe_llm_telemetry(fail_record)
+        if usage_sink is not None:
+            usage_sink.append(fail_record)
         print(f"[premium-api-fail] model={resolved_model} tokens_param={tokens_param} error={type(exc).__name__}:{exc}")
         log.warning(
             "[premium-api-fail] model=%s tokens_param=%s error=%s:%s",
@@ -242,19 +310,37 @@ def call_legal_llm(
             exc,
         )
         raise
+    latency_ms = int((time.perf_counter() - started) * 1000)
     print(f"[premium-api-ok] model={resolved_model} tokens_param={tokens_param} status=ok")
     log.info("[premium-api-ok] model=%s tokens_param=%s status=ok", resolved_model, tokens_param)
+    u = getattr(resp, "usage", None)
+    choice0 = resp.choices[0] if getattr(resp, "choices", None) else None
+    finish_reason = getattr(choice0, "finish_reason", None) if choice0 is not None else None
+    returned_model = getattr(resp, "model", None) or resolved_model
+    record = {
+        "call_purpose": purpose,
+        "requested_model": requested_model,
+        "returned_model": returned_model,
+        "model": returned_model,
+        "prompt_tokens": getattr(u, "prompt_tokens", None) if u is not None else None,
+        "completion_tokens": getattr(u, "completion_tokens", None) if u is not None else None,
+        "total_tokens": getattr(u, "total_tokens", None) if u is not None else None,
+        "cached_tokens": _cached_tokens_from_usage(u),
+        "latency_ms": latency_ms,
+        "finish_reason": finish_reason,
+        "repair_status": repair,
+        "validation_accepted": validation_accepted,
+        "status": "ok",
+        "temperature": temperature,
+        "max_tokens": max_tokens,
+        "tokens_param": tokens_param,
+        "response_id": getattr(resp, "id", None) or "",
+        "request_id": getattr(resp, "_request_id", None) or getattr(resp, "request_id", None) or "",
+        "system_fingerprint": getattr(resp, "system_fingerprint", None) or "",
+    }
+    _privacy_safe_llm_telemetry(record)
     if usage_sink is not None:
-        u = getattr(resp, "usage", None)
-        if u is not None:
-            usage_sink.append(
-                {
-                    "model": getattr(resp, "model", None) or resolved_model,
-                    "prompt_tokens": getattr(u, "prompt_tokens", None),
-                    "completion_tokens": getattr(u, "completion_tokens", None),
-                    "total_tokens": getattr(u, "total_tokens", None),
-                }
-            )
+        usage_sink.append(record)
     return (resp.choices[0].message.content or "").strip()
 
 

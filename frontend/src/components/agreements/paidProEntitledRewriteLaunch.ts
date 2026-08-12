@@ -94,20 +94,24 @@ export function shouldTreatEntitledRewritePipelineResultAsGenerationFailure(
   return false;
 }
 
+export const ENTITLED_REWRITE_FAILURE_CUSTOMER_COPY =
+  "LawDog could not finish this request. Your notes and last saved agreement are unchanged. Retry when you are ready.";
+
 export type EntitledRewriteGenerationFailureTerminalPlan = {
-  proFullDraftQualityRetry: true;
+  proFullDraftQualityRetry: false;
   premiumPersistedFlowActive: false;
   premiumSendPathUnlocked: false;
   premiumPostCheckoutPhase: null;
   premiumPipelineUserMessage: null;
-  hardError: string | null;
+  hardError: string;
   proFullDraftCustomGateMessage: string;
   agreementDocumentPlain: "";
   createFlowPhase: CreateFlowProductionPhase;
-  /** Always review/recovery — never leave generating_draft armed (stuck spinner / Structuring CTA). */
-  displayPhase: "review";
-  createUiStage: typeof CreateUiStage.DRAFT;
+  /** Return to intake — never leave generating_draft armed, and never paint empty review as success. */
+  displayPhase: "intake";
+  createUiStage: typeof CreateUiStage.INPUT;
   clearPipelineRefs: true;
+  clearLocalDraft: true;
   terminalReason: PaidProGenerationTerminalReason;
   terminalOutcome: PaidProGenerationTerminalOutcome;
 };
@@ -118,23 +122,21 @@ export function planEntitledRewriteGenerationFailureTerminal(args: {
   dashboardRoute?: boolean;
   customMessage?: string | null;
 }): EntitledRewriteGenerationFailureTerminalPlan {
-  const retryCopy =
-    args.customMessage?.trim() ||
-    "Your Pro agreement is still preparing. Tap **Retry Pro draft** if this does not update shortly.";
+  const retryCopy = args.customMessage?.trim() || ENTITLED_REWRITE_FAILURE_CUSTOMER_COPY;
   return {
-    proFullDraftQualityRetry: true,
+    proFullDraftQualityRetry: false,
     premiumPersistedFlowActive: false,
     premiumSendPathUnlocked: false,
     premiumPostCheckoutPhase: null,
     premiumPipelineUserMessage: null,
-    hardError: null,
+    hardError: retryCopy,
     proFullDraftCustomGateMessage: retryCopy,
     agreementDocumentPlain: "",
-    // review_recovery is selected via proFullDraftQualityRetry — do not keep generating_draft.
-    createFlowPhase: "draft_ready_for_review",
-    displayPhase: "review",
-    createUiStage: CreateUiStage.DRAFT,
+    createFlowPhase: "capturing_input",
+    displayPhase: "intake",
+    createUiStage: CreateUiStage.INPUT,
     clearPipelineRefs: true,
+    clearLocalDraft: true,
     terminalReason: args.reason,
     terminalOutcome: "retry_recoverable",
   };

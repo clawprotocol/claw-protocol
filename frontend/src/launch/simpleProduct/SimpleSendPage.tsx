@@ -1118,9 +1118,6 @@ export function SimpleSendPage(props: { agreementId: string }) {
         onBeginOneTimeUnlock={() => {
           setPaywallOpen(false);
           setPaywallCopy(null);
-          navigate(
-            `/app/checkout/${encodeURIComponent(agreementId)}?intent=single_agreement&returnTo=${encodeURIComponent(billingReturnTo)}`,
-          );
         }}
       />
     </SimpleFlowShell>

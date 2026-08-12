@@ -37,7 +37,7 @@ describe("vs01AutoSignaturePacket", () => {
 
   it("Vs01PrepPreparedBanner only uses prepared copy when ready", () => {
     const src = readFileSync(join(__dirname, "Vs01PrepPreparedBanner.tsx"), "utf8");
-    expect(src).toContain('ready ? "Ready for signing."');
+    expect(src).toContain('ready ? "Links created—share when ready."');
     expect(src).toContain("Preparing agreement.");
   });
 

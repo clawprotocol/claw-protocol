@@ -66,7 +66,7 @@ export function resolveProReviewSigningFlowState(args: {
   if (args.signersReady && args.guidedApplied) {
     return {
       id: "ready_for_signing",
-      label: "Ready for signing",
+      label: "Ready to create signing links",
       detail: "Signer details added — LawDog will prepare the packet",
     };
   }

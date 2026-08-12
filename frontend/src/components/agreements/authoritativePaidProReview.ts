@@ -35,13 +35,14 @@ import {
   hasPaidProSourceOfTruth,
 } from "./paidProSourceOfTruth";
 import { PAID_PRO_REVIEW_SIGNER_DETAILS_NEEDED_STATUS } from "./paidProReviewTrustUx";
+import { CUSTOMER_JOURNEY_STATE } from "./customerJourneyReadiness";
 import { isPaidProPostFinalizeHydratedCorpusLocked } from "./paidProSignerMetadataCommitPolicy";
 import { resolvePaidProDisplayPlainForSurface } from "./paidProDisplayPlainAuthority";
 import { resolvePaidProPostFinalizeReviewPlain } from "./paidProPostFinalizeReviewSurface";
 
 export { PAID_PRO_REVIEW_SIGNER_DETAILS_NEEDED_STATUS };
 
-export const PAID_PRO_REVIEW_SHELL_TITLE = "Agreement ready";
+export const PAID_PRO_REVIEW_SHELL_TITLE = "Draft created—review recommended";
 export const PAID_PRO_REVIEW_SHELL_SUBTITLE =
   "Review the agreement draft below. Next, add signer details to create signature links.";
 export const PAID_PRO_REVIEW_SHELL_SAFETY_LINE =
@@ -50,12 +51,13 @@ export const PAID_PRO_REVIEW_SHELL_SAFETY_LINE =
 export const PAID_PRO_REVIEW_BADGE = "Agreement draft";
 export const PAID_PRO_REVIEW_CHIP_VERSION = "Agreement draft";
 /** @deprecated Prefer {@link resolvePaidProReviewChipState} for stage-accurate copy. */
-export const PAID_PRO_REVIEW_CHIP_STATE = "Ready for signature";
+export const PAID_PRO_REVIEW_CHIP_STATE = CUSTOMER_JOURNEY_STATE.readyToCreateSigningLinks;
 
 /** Same label as trust-rail signer step — status, not an action. */
 export const PAID_PRO_REVIEW_CHIP_READY_FOR_SIGNER_SETUP = PAID_PRO_REVIEW_SIGNER_DETAILS_NEEDED_STATUS;
-export const PAID_PRO_REVIEW_CHIP_READY_TO_PREPARE_SIGNING_LINKS = "Ready to prepare signing links";
-export const PAID_PRO_REVIEW_CHIP_READY_FOR_SIGNING = "Ready for signing";
+export const PAID_PRO_REVIEW_CHIP_READY_TO_PREPARE_SIGNING_LINKS =
+  CUSTOMER_JOURNEY_STATE.readyToCreateSigningLinks;
+export const PAID_PRO_REVIEW_CHIP_READY_FOR_SIGNING = CUSTOMER_JOURNEY_STATE.linksCreatedShareWhenReady;
 
 /** Display-only review status chip — does not change workflow state machine. */
 export function resolvePaidProReviewChipState(args: {

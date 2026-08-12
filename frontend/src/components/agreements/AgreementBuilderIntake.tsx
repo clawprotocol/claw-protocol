@@ -269,6 +269,26 @@ import {
 } from "./partyIntakeNormalize";
 import { buildWeCapturedSummaryBullets, buildWhatWeUnderstoodBullets } from "./intakeWhatWeUnderstood";
 import { WhatWeUnderstoodBlock } from "./WhatWeUnderstoodBlock";
+import { IntakeContractingPartyEditor } from "./IntakePartyEditorPanel";
+import { JourneyActionBanner } from "./JourneyActionBanner";
+import {
+  type JourneyActionFeedback,
+  feedbackAfterDirectSave,
+  feedbackAfterDirectSaveFailed,
+  feedbackAfterGeneration,
+  feedbackAfterLinkFailure,
+  feedbackAfterModelFailure,
+  feedbackAfterReviewLinksCreated,
+  feedbackCreatingAgreement,
+  feedbackCreatingLinks,
+  feedbackFailed,
+  feedbackSucceeded,
+} from "./journeyActionFeedback";
+import {
+  namedIntakeContractingParties,
+  normalizeIntakePartyEditorRows,
+  upsertLabeledPartyRows,
+} from "./intakeContractingPartyEditor";
 import { CreateDraftReviewCard } from "./CreateDraftReviewCard";
 import {
   STARTER_PARTY_PRO_REQUIRED_CTA_LABEL,
@@ -1418,8 +1438,11 @@ import {
   canAddAnotherSignerParty,
   canRemoveSignerSetupParty,
   evaluateSignerSetupGeneratedPartyGuard,
+  formatPartySetupRowStatus,
   formatSignerSetupBeyondGeneratedWarningBody,
   formatSignerSetupBeyondGeneratedWarningTitle,
+  POST_GENERATION_ADD_PARTY_CONTRACTING_LABEL,
+  POST_GENERATION_ADD_PARTY_REVIEWER_LABEL,
   removeAddedSignerPartyState,
   resolveGeneratedAgreementPartyCount,
   resolveInitialSignerSetupPartyCount,
@@ -2373,6 +2396,9 @@ type CreateFlowSendRecipientsPanelProps = {
   onRemoveSignerParty?: (partyIndex: number) => void;
   signerSetupBeyondGeneratedWarning?: string | null;
   signerSetupGeneratedPartyCount?: number;
+  postGenAddPartyChoiceOpen?: boolean;
+  onPostGenAddAsContractingParty?: () => void;
+  onPostGenAddAsReviewerOnly?: () => void;
   creatorCoordinatorOnly?: boolean;
   onCreatorCoordinatorOnlyChange?: (checked: boolean) => void;
   extraPartyLegalNames?: string[];
@@ -2438,6 +2464,9 @@ function CreateFlowSendRecipientsPanel({
   onRemoveSignerParty,
   signerSetupBeyondGeneratedWarning = null,
   signerSetupGeneratedPartyCount = 2,
+  postGenAddPartyChoiceOpen = false,
+  onPostGenAddAsContractingParty,
+  onPostGenAddAsReviewerOnly,
   creatorCoordinatorOnly = false,
   onCreatorCoordinatorOnlyChange,
   extraPartyLegalNames = [],
@@ -2450,7 +2479,10 @@ function CreateFlowSendRecipientsPanel({
       : finalReviewSendIntent === "signature"
         ? "signature"
         : effectivePremiumSendMode;
-  const signaturePrepMode = paidProInlineRecipientShell ? true : resolvedSendMode === "signature";
+  const signaturePrepMode =
+    resolvedSendMode === "review"
+      ? false
+      : paidProInlineRecipientShell || resolvedSendMode === "signature";
   const notifySignerMetadataFieldEdit = (args: {
     partyIndex: number;
     field: PaidProSignerMetadataField;
@@ -2563,7 +2595,7 @@ function CreateFlowSendRecipientsPanel({
           />
         </div>
       ) : null}
-      {paidProInlineRecipientShell && signerSetupBeyondGeneratedWarning ? (
+      {paidProInlineRecipientShell && (signerSetupBeyondGeneratedWarning || postGenAddPartyChoiceOpen) ? (
         <div
           className="mb-4 rounded-lg border border-amber-500/35 bg-amber-950/25 px-3 py-2.5 text-xs leading-relaxed text-amber-100/95"
           role="alert"
@@ -2573,6 +2605,26 @@ function CreateFlowSendRecipientsPanel({
             {formatSignerSetupBeyondGeneratedWarningTitle(signerSetupGeneratedPartyCount)}
           </p>
           <p className="mt-1.5">{formatSignerSetupBeyondGeneratedWarningBody()}</p>
+          {postGenAddPartyChoiceOpen ? (
+            <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+              <button
+                type="button"
+                data-testid="post-gen-add-contracting-party"
+                className="rounded-md bg-emerald-500/90 px-3 py-1.5 text-xs font-semibold text-emerald-950 hover:bg-emerald-400"
+                onClick={onPostGenAddAsContractingParty}
+              >
+                {POST_GENERATION_ADD_PARTY_CONTRACTING_LABEL}
+              </button>
+              <button
+                type="button"
+                data-testid="post-gen-add-reviewer-only"
+                className="rounded-md border border-slate-500/60 bg-slate-900/80 px-3 py-1.5 text-xs font-semibold text-slate-100 hover:border-emerald-400/50"
+                onClick={onPostGenAddAsReviewerOnly}
+              >
+                {POST_GENERATION_ADD_PARTY_REVIEWER_LABEL}
+              </button>
+            </div>
+          ) : null}
         </div>
       ) : null}
       {partiesForSetup.map((party, idx) => {
@@ -2790,7 +2842,13 @@ function CreateFlowSendRecipientsPanel({
           >
             <div className="flex items-start justify-between gap-3">
               <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">
-                Party {idx + 1} legal entity
+                {formatPartySetupRowStatus({
+                  partyIndex: idx,
+                  legalEntity: legalEntityValue,
+                  signerName: partySignerNames[idx] ?? "",
+                  email: emailVal,
+                  signaturePrepMode,
+                })}
               </p>
               {paidProInlineRecipientShell &&
               signaturePrepMode &&
@@ -2892,13 +2950,13 @@ function CreateFlowSendRecipientsPanel({
                   : idx === 0
                     ? "Reviewer 1 email"
                     : idx === 1
-                      ? "Reviewer 2 email (optional)"
-                      : "Review link email (optional)"}
+                      ? "Reviewer 2 email"
+                      : "Review link email"}
               </span>
               <span className="mt-0.5 block text-[10px] font-normal text-slate-500">
                 {signaturePrepMode
                   ? "Email for this signer. LawDog creates links; it does not email automatically."
-                  : "Add email for review link delivery/labeling — optional. LawDog does not email automatically."}
+                  : "Add a valid email for this review link. LawDog does not email automatically."}
               </span>
               <input
                 type="email"
@@ -2907,8 +2965,8 @@ function CreateFlowSendRecipientsPanel({
                   idx === 0
                     ? signaturePrepMode ? "Signer 1 email" : "Reviewer 1 email"
                     : idx === 1
-                      ? signaturePrepMode ? "Signer 2 email" : "Reviewer 2 email (optional)"
-                      : `${partyLine} — review link email (optional)`
+                      ? signaturePrepMode ? "Signer 2 email" : "Reviewer 2 email"
+                      : `${partyLine} — review link email`
                 }
                 value={emailVal}
                 onChange={(e) => onEmailChange(e.target.value)}
@@ -3472,9 +3530,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const [paidProEditReturnResumeActive, setPaidProEditReturnResumeActive] = useState(false);
   const [followUpEnterReady, setFollowUpEnterReady] = useState(false);
   const [intakeAckLine, setIntakeAckLine] = useState<string | null>(null);
+  const [journeyActionFeedback, setJourneyActionFeedback] = useState<JourneyActionFeedback | null>(null);
   const [scopeGuessConfirmed, setScopeGuessConfirmed] = useState(false);
   const [partiesGuessConfirmed, setPartiesGuessConfirmed] = useState(false);
   const [termGuessConfirmed, setTermGuessConfirmed] = useState(false);
+  const [intakePartyEditorRows, setIntakePartyEditorRows] = useState<string[]>(["", ""]);
+  const intakePartyEditorTouchedRef = useRef(false);
+  const [postGenAddPartyChoiceOpen, setPostGenAddPartyChoiceOpen] = useState(false);
   const prevFirstMissingRef = useRef<GuidedFieldKey | "bootstrap" | null | "unset">("unset");
   const funnelStartedAtRef = useRef<number>(Date.now());
   const funnelEventTsRef = useRef<Record<string, number>>({});
@@ -4968,6 +5030,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       draftPreCommitFreeze ||
       (createProductionTwoPane && createFlowPhase !== "capturing_input"),
   );
+
+  useEffect(() => {
+    if (intakePartyEditorTouchedRef.current) return;
+    const extracted = parseIntakeToStructuredAgreement(intakeGuidanceCombined.trim()).parties;
+    setIntakePartyEditorRows(normalizeIntakePartyEditorRows(extracted));
+  }, [intakeGuidanceCombined]);
 
   useEffect(() => {
     setPreviewFieldOverrides((prev) => {
@@ -6889,8 +6957,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         dashboardRoute: isDashboardPaidCreateRouteActive(),
         customMessage:
           launchCtx.reason === "missing_raw_intake"
-            ? "Add your agreement details, then tap **Create draft** again."
-            : "Your structured draft is still preparing. Tap **Create draft** again in a moment.",
+            ? "Add your agreement details, then tap **Create agreement** again."
+            : "Your structured draft is still preparing. Tap **Create agreement** again in a moment.",
       });
       logPaidProGenerationTerminalTransition({
         reason: terminal.terminalReason,
@@ -6915,6 +6983,22 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         authoritativeAgreementSnapshotRef.current = "";
         setAgreementDocumentText(terminal.agreementDocumentPlain);
       }
+      if (terminal.clearLocalDraft) {
+        setDraft(null);
+        setPreviewPaneRevealed(false);
+      }
+      {
+        const notes = (launch?.rawIntake || readOriginalUserIntakeRaw() || intakeCombinedRef.current || "").trim();
+        if (notes) {
+          setIntakeStepBuffer(notes);
+          setDebouncedStepBuffer(notes);
+        }
+      }
+      setJourneyActionFeedback(
+        feedbackFailed("create_agreement", "Agreement was not created", feedbackAfterModelFailure(), {
+          remedyLabel: "Retry",
+        }),
+      );
       setLoading(false);
       return;
     }
@@ -7001,7 +7085,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             intakeText: mergedIntake,
           }),
         ]);
-        if (salvage) {
+        if (salvage && hasPaidProSourceOfTruth()) {
           if (import.meta.env.MODE !== "test") {
             // eslint-disable-next-line no-console
             console.warn("[premium-flow] entitled_rewrite_generation_retryable_salvage_mount", {
@@ -7017,13 +7101,39 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             agreementGenerationId: sessionGenForPass,
             intakeFingerprint: shortIntakeFingerprint(mergedIntake),
           });
-          setProFullDraftCustomGateMessage(null);
-          setProFullDraftQualityRetry(false);
-          setHardError(null);
-          setPremiumPostCheckoutPhase("generation_retry");
-          setPremiumPipelineUserMessage(null);
+          const terminal = planEntitledRewriteGenerationFailureTerminal({
+            reason: "no_server_authority",
+            dashboardRoute: isDashboardPaidCreateRouteActive(),
+          });
+          setProFullDraftQualityRetry(terminal.proFullDraftQualityRetry);
+          setProFullDraftCustomGateMessage(terminal.proFullDraftCustomGateMessage);
+          setPremiumPersistedFlowActive(terminal.premiumPersistedFlowActive);
+          setPremiumSendPathUnlocked(terminal.premiumSendPathUnlocked);
+          setPremiumPostCheckoutPhase(terminal.premiumPostCheckoutPhase);
+          setPremiumPipelineUserMessage(terminal.premiumPipelineUserMessage);
+          setHardError(terminal.hardError);
+          setCreateFlowPhase(terminal.createFlowPhase);
+          setDisplayPhase(terminal.displayPhase);
+          setCreateUiStage(terminal.createUiStage);
           lastPremiumPipelineRenderSourceRef.current = result.premiumRenderSource;
           setPremiumTruthPipelineSource(result.premiumRenderSource);
+          {
+            const notes = (raw || readOriginalUserIntakeRaw() || intakeCombinedRef.current || "").trim();
+            if (notes) {
+              setIntakeStepBuffer(notes);
+              setDebouncedStepBuffer(notes);
+            }
+          }
+          if (terminal.clearLocalDraft) {
+            setDraft(null);
+            setPreviewPaneRevealed(false);
+          }
+          setJourneyActionFeedback(
+            feedbackFailed("create_agreement", "Agreement was not created", feedbackAfterModelFailure(), {
+              remedyLabel: "Retry",
+            }),
+          );
+          setLoading(false);
           return;
         }
       }
@@ -7034,15 +7144,49 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           agreementGenerationId: sessionGenForPass,
           intakeFingerprint: shortIntakeFingerprint(mergedIntake),
         });
-        setProFullDraftCustomGateMessage(null);
-        setProFullDraftQualityRetry(false);
-        setHardError(null);
-        setPremiumPostCheckoutPhase("premium_network_recoverable");
-        setPremiumPipelineUserMessage(null);
-        setProFullDraftCustomGateMessage(PREMIUM_NETWORK_RECOVERABLE_HEADLINE);
-        setProFullDraftQualityRetry(true);
+        if (hasPaidProSourceOfTruth()) {
+          setProFullDraftCustomGateMessage(PREMIUM_NETWORK_RECOVERABLE_HEADLINE);
+          setProFullDraftQualityRetry(true);
+          setHardError(null);
+          setPremiumPostCheckoutPhase("premium_network_recoverable");
+          setPremiumPipelineUserMessage(null);
+          lastPremiumPipelineRenderSourceRef.current = result.premiumRenderSource;
+          setPremiumTruthPipelineSource(result.premiumRenderSource);
+          return;
+        }
+        const terminal = planEntitledRewriteGenerationFailureTerminal({
+          reason: "no_server_authority",
+          dashboardRoute: isDashboardPaidCreateRouteActive(),
+        });
+        setProFullDraftQualityRetry(terminal.proFullDraftQualityRetry);
+        setProFullDraftCustomGateMessage(terminal.proFullDraftCustomGateMessage);
+        setPremiumPersistedFlowActive(terminal.premiumPersistedFlowActive);
+        setPremiumSendPathUnlocked(terminal.premiumSendPathUnlocked);
+        setPremiumPostCheckoutPhase(terminal.premiumPostCheckoutPhase);
+        setPremiumPipelineUserMessage(terminal.premiumPipelineUserMessage);
+        setHardError(terminal.hardError);
+        setCreateFlowPhase(terminal.createFlowPhase);
+        setDisplayPhase(terminal.displayPhase);
+        setCreateUiStage(terminal.createUiStage);
         lastPremiumPipelineRenderSourceRef.current = result.premiumRenderSource;
         setPremiumTruthPipelineSource(result.premiumRenderSource);
+        {
+          const notes = (raw || readOriginalUserIntakeRaw() || intakeCombinedRef.current || "").trim();
+          if (notes) {
+            setIntakeStepBuffer(notes);
+            setDebouncedStepBuffer(notes);
+          }
+        }
+        setJourneyActionFeedback(
+          feedbackFailed("create_agreement", "Agreement was not created", feedbackAfterModelFailure(), {
+            remedyLabel: "Retry",
+          }),
+        );
+        if (terminal.clearLocalDraft) {
+          setDraft(null);
+          setPreviewPaneRevealed(false);
+        }
+        setLoading(false);
         return;
       }
       if (
@@ -7078,6 +7222,22 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         lastPremiumWinningCorpusRef.current = "";
         hydratedPremiumBodyRef.current = "";
         setAgreementDocumentText("");
+        {
+          const notes = (raw || readOriginalUserIntakeRaw() || intakeCombinedRef.current || "").trim();
+          if (notes) {
+            setIntakeStepBuffer(notes);
+            setDebouncedStepBuffer(notes);
+          }
+        }
+        setJourneyActionFeedback(
+          feedbackFailed("create_agreement", "Agreement was not created", feedbackAfterModelFailure(), {
+            remedyLabel: "Retry",
+          }),
+        );
+        if (terminal.clearLocalDraft) {
+          setDraft(null);
+          setPreviewPaneRevealed(false);
+        }
         setLoading(false);
         return;
       }
@@ -7283,18 +7443,39 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           reason: "entitled_rewrite_missing_agreement_or_corpus",
           outcome: "retry_recoverable",
         });
-        setProFullDraftQualityRetry(true);
-        setPremiumSendPathUnlocked(false);
-        setProFullDraftCustomGateMessage(
-          "Your Pro agreement could not be locked for review on the server. Tap **Retry Pro draft**.",
-        );
-        setCreateFlowPhase("draft_ready_for_review");
-        setDisplayPhase("review");
-        setPremiumPostCheckoutPhase(resolvePaidProGenerationFailurePostCheckoutPhase());
+        const terminal = planEntitledRewriteGenerationFailureTerminal({
+          reason: "entitled_rewrite_missing_agreement_or_corpus",
+          dashboardRoute: isDashboardPaidCreateRouteActive(),
+        });
+        setProFullDraftQualityRetry(terminal.proFullDraftQualityRetry);
+        setProFullDraftCustomGateMessage(terminal.proFullDraftCustomGateMessage);
+        setPremiumPersistedFlowActive(terminal.premiumPersistedFlowActive);
+        setPremiumSendPathUnlocked(terminal.premiumSendPathUnlocked);
+        setHardError(terminal.hardError);
+        setCreateFlowPhase(terminal.createFlowPhase);
+        setDisplayPhase(terminal.displayPhase);
+        setCreateUiStage(terminal.createUiStage);
+        setPremiumPostCheckoutPhase(null);
         setPremiumPipelineUserMessage(null);
         premiumModalExtendedWaitActiveRef.current = false;
         setPremiumCheckoutModalExtendedWait(false);
         setPremiumAuthoritativeRequestInFlight(false);
+        {
+          const notes = (raw || readOriginalUserIntakeRaw() || intakeCombinedRef.current || "").trim();
+          if (notes) {
+            setIntakeStepBuffer(notes);
+            setDebouncedStepBuffer(notes);
+          }
+        }
+        if (terminal.clearLocalDraft) {
+          setDraft(null);
+          setPreviewPaneRevealed(false);
+        }
+        setJourneyActionFeedback(
+          feedbackFailed("create_agreement", "Agreement was not created", feedbackAfterModelFailure(), {
+            remedyLabel: "Retry",
+          }),
+        );
         setLoading(false);
         entitledPremiumRewriteInFlightRef.current = false;
         return;
@@ -7309,9 +7490,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           generationSessionId: result.agreementGenerationId ?? sessionGenForPass,
         });
         if (!prepared.ok) {
-          // GTM fail-open: freeze already accepted a substantive Pro corpus. Prefer local SoT + paint
-          // over empty Retry when server snapshot prepare flakes after a successful draft mint.
-          if (entitledReviewCorpus.length >= 500) {
+          // Fail-open only when a prior accepted Pro corpus already exists.
+          // First-create model/API failure must restore intake — never an empty review.
+          if (entitledReviewCorpus.length >= 500 && hasPaidProSourceOfTruth()) {
             if (import.meta.env.MODE !== "test") {
               // eslint-disable-next-line no-console
               console.warn("[premium-flow] entitled_rewrite_snapshot_prepare_failed_fail_open", {
@@ -7332,18 +7513,39 @@ const AgreementBuilderIntake: React.FC<Props> = ({
               reason: "entitled_rewrite_snapshot_prepare_failed",
               outcome: "retry_recoverable",
             });
-            setProFullDraftQualityRetry(true);
-            setPremiumSendPathUnlocked(false);
-            setProFullDraftCustomGateMessage(
-              "Your Pro agreement could not be locked for review on the server. Tap **Retry Pro draft**.",
-            );
-            setCreateFlowPhase("draft_ready_for_review");
-            setDisplayPhase("review");
-            setPremiumPostCheckoutPhase(resolvePaidProGenerationFailurePostCheckoutPhase());
+            const terminal = planEntitledRewriteGenerationFailureTerminal({
+              reason: "entitled_rewrite_snapshot_prepare_failed",
+              dashboardRoute: isDashboardPaidCreateRouteActive(),
+            });
+            setProFullDraftQualityRetry(terminal.proFullDraftQualityRetry);
+            setProFullDraftCustomGateMessage(terminal.proFullDraftCustomGateMessage);
+            setPremiumPersistedFlowActive(terminal.premiumPersistedFlowActive);
+            setPremiumSendPathUnlocked(terminal.premiumSendPathUnlocked);
+            setHardError(terminal.hardError);
+            setCreateFlowPhase(terminal.createFlowPhase);
+            setDisplayPhase(terminal.displayPhase);
+            setCreateUiStage(terminal.createUiStage);
+            setPremiumPostCheckoutPhase(null);
             setPremiumPipelineUserMessage(null);
             premiumModalExtendedWaitActiveRef.current = false;
             setPremiumCheckoutModalExtendedWait(false);
             setPremiumAuthoritativeRequestInFlight(false);
+            {
+              const notes = (raw || readOriginalUserIntakeRaw() || intakeCombinedRef.current || "").trim();
+              if (notes) {
+                setIntakeStepBuffer(notes);
+                setDebouncedStepBuffer(notes);
+              }
+            }
+            if (terminal.clearLocalDraft) {
+              setDraft(null);
+              setPreviewPaneRevealed(false);
+            }
+            setJourneyActionFeedback(
+              feedbackFailed("create_agreement", "Agreement was not created", feedbackAfterModelFailure(), {
+                remedyLabel: "Retry",
+              }),
+            );
             setLoading(false);
             entitledPremiumRewriteInFlightRef.current = false;
             return;
@@ -7358,6 +7560,39 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           authoritativeAgreementSnapshotRef.current = entitledReviewCorpus;
           guidedFinalReviewExplicitlyUnlockedRef.current = true;
         }
+      }
+      if (!hasPaidProSourceOfTruth() && entitledReviewCorpus.trim().length < GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN) {
+        const terminal = planEntitledRewriteGenerationFailureTerminal({
+          reason: "entitled_rewrite_missing_agreement_or_corpus",
+          dashboardRoute: isDashboardPaidCreateRouteActive(),
+        });
+        setProFullDraftQualityRetry(terminal.proFullDraftQualityRetry);
+        setProFullDraftCustomGateMessage(terminal.proFullDraftCustomGateMessage);
+        setPremiumPersistedFlowActive(terminal.premiumPersistedFlowActive);
+        setPremiumSendPathUnlocked(terminal.premiumSendPathUnlocked);
+        setHardError(terminal.hardError);
+        setCreateFlowPhase(terminal.createFlowPhase);
+        setDisplayPhase(terminal.displayPhase);
+        setCreateUiStage(terminal.createUiStage);
+        {
+          const notes = (raw || readOriginalUserIntakeRaw() || intakeCombinedRef.current || "").trim();
+          if (notes) {
+            setIntakeStepBuffer(notes);
+            setDebouncedStepBuffer(notes);
+          }
+        }
+        if (terminal.clearLocalDraft) {
+          setDraft(null);
+          setPreviewPaneRevealed(false);
+        }
+        setJourneyActionFeedback(
+          feedbackFailed("create_agreement", "Agreement was not created", feedbackAfterModelFailure(), {
+            remedyLabel: "Retry",
+          }),
+        );
+        setLoading(false);
+        entitledPremiumRewriteInFlightRef.current = false;
+        return;
       }
       const handoff = tryEstablishAcceptedPremiumCorpusForCreateFlowHandoff({
         winningBody: entitledReviewCorpus,
@@ -7562,15 +7797,39 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         // eslint-disable-next-line no-console
         console.warn("[premium-flow] entitled_rewrite_failed", e);
       }
-      setHardError("We couldn't refresh your Pro draft right now. Try again in a moment.");
-      setProFullDraftQualityRetry(true);
-      setCreateFlowPhase("draft_ready_for_review");
-      setDisplayPhase("review");
-      setPremiumPostCheckoutPhase(resolvePaidProGenerationFailurePostCheckoutPhase());
+      const terminal = planEntitledRewriteGenerationFailureTerminal({
+        reason: "entitled_rewrite_aborted",
+        dashboardRoute: isDashboardPaidCreateRouteActive(),
+      });
+      setProFullDraftQualityRetry(terminal.proFullDraftQualityRetry);
+      setProFullDraftCustomGateMessage(terminal.proFullDraftCustomGateMessage);
+      setPremiumPersistedFlowActive(terminal.premiumPersistedFlowActive);
+      setPremiumSendPathUnlocked(terminal.premiumSendPathUnlocked);
+      setHardError(terminal.hardError);
+      setCreateFlowPhase(terminal.createFlowPhase);
+      setDisplayPhase(terminal.displayPhase);
+      setCreateUiStage(terminal.createUiStage);
+      setPremiumPostCheckoutPhase(null);
       setPremiumPipelineUserMessage(null);
       premiumModalExtendedWaitActiveRef.current = false;
       setPremiumCheckoutModalExtendedWait(false);
       setPremiumAuthoritativeRequestInFlight(false);
+      {
+        const notes = (raw || readOriginalUserIntakeRaw() || intakeCombinedRef.current || "").trim();
+        if (notes) {
+          setIntakeStepBuffer(notes);
+          setDebouncedStepBuffer(notes);
+        }
+      }
+      setJourneyActionFeedback(
+        feedbackFailed("create_agreement", "Agreement was not created", feedbackAfterModelFailure(), {
+          remedyLabel: "Retry",
+        }),
+      );
+      if (terminal.clearLocalDraft) {
+        setDraft(null);
+        setPreviewPaneRevealed(false);
+      }
       setLoading(false);
     } finally {
       entitledPremiumRewriteInFlightRef.current = false;
@@ -11298,6 +11557,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     setCreateUiStage(CreateUiStage.DRAFT);
     setLoading(true);
     setPreviewPaneRevealed(true);
+    setJourneyActionFeedback(feedbackCreatingAgreement());
   }, []);
 
   const beginStarterDraftGeneration = React.useCallback(() => {
@@ -11320,6 +11580,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     setCreateUiStage(CreateUiStage.DRAFT);
     setLoading(true);
     setPreviewPaneRevealed(true);
+    setJourneyActionFeedback(feedbackCreatingAgreement());
   }, [draft, currentPremiumMergedIntakeKey, intakeCombined]);
 
   const resolvePaidCreateGateBypassContext = React.useCallback(
@@ -11684,8 +11945,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         : parsed;
       setDraft(launchDraft);
       setFollowUpDetailTotal(0);
-      setIntakeStepBuffer("");
-      setDebouncedStepBuffer("");
+      if (!skipFreeStarterCreateSubmit) {
+        setIntakeStepBuffer("");
+        setDebouncedStepBuffer("");
+      }
       agreementDocumentDirtyRef.current = false;
       setReviewDocRefreshTick((n) => n + 1);
       writeCreateReviewDraftSnapshot(parsed);
@@ -11739,7 +12002,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     } catch {
       setDisplayPhase("intake");
       setCreateFlowPhase("capturing_input");
-      setCreateUiStage(CreateUiStage.DRAFT);
+      setCreateUiStage(CreateUiStage.INPUT);
+      setJourneyActionFeedback(
+        feedbackFailed("create_agreement", "Agreement was not created", feedbackAfterModelFailure(), {
+          remedyLabel: "Retry",
+        }),
+      );
+      setHardError(feedbackAfterModelFailure());
       return false;
     } finally {
       productionStickyLabelModeRef.current = null;
@@ -13681,6 +13950,21 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       setCreateFlowPhase("capturing_input");
       setDisplayPhase("intake");
       setCreateUiStage(CreateUiStage.INPUT);
+      setPreviewPaneRevealed(true);
+      const focusParty = decision.clarification.kind === "missing_named_parties" || decision.clarification.kind === "too_sparse";
+      const focusSelector = focusParty ? '[data-testid="intake-party-1-name"]' : "textarea";
+      setJourneyActionFeedback({
+        kind: "blocked",
+        actionId: "create_agreement",
+        title: decision.clarification.title,
+        body: decision.message || decision.clarification.why,
+        remedyLabel: "Go to the first missing field",
+        focusSelector,
+      });
+      window.requestAnimationFrame(() => {
+        const el = document.querySelector(focusSelector) as HTMLElement | null;
+        el?.focus();
+      });
     },
     [],
   );
@@ -18088,8 +18372,24 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const handleAddAnotherSignerParty = React.useCallback(() => {
     setSignerSetupUiPartyCount((prev) => {
       if (!canAddAnotherSignerParty(prev)) return prev;
+      const next = prev + 1;
+      if (next > generatedAgreementPartyCount) {
+        setPostGenAddPartyChoiceOpen(true);
+        return prev;
+      }
+      return next;
+    });
+  }, [generatedAgreementPartyCount]);
+  const handlePostGenAddAsContractingParty = React.useCallback(() => {
+    setPostGenAddPartyChoiceOpen(false);
+    setSignerSetupUiPartyCount((prev) => {
+      if (!canAddAnotherSignerParty(prev)) return prev;
       return prev + 1;
     });
+  }, []);
+  const handlePostGenAddAsReviewerOnly = React.useCallback(() => {
+    setPostGenAddPartyChoiceOpen(false);
+    setExtraPartyReviewEmails((prev) => [...prev, ""]);
   }, []);
   const handleRemoveSignerParty = React.useCallback((partyIndex: number) => {
     const next = removeAddedSignerPartyState(partyIndex, {
@@ -18122,6 +18422,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     onRemoveSignerParty: handleRemoveSignerParty,
     signerSetupBeyondGeneratedWarning: signerSetupGeneratedPartyGuard.warningMessage,
     signerSetupGeneratedPartyCount: generatedAgreementPartyCount,
+    postGenAddPartyChoiceOpen,
+    onPostGenAddAsContractingParty: handlePostGenAddAsContractingParty,
+    onPostGenAddAsReviewerOnly: handlePostGenAddAsReviewerOnly,
     creatorCoordinatorOnly,
     onCreatorCoordinatorOnlyChange: setCreatorCoordinatorOnly,
     extraPartyLegalNames,
@@ -20941,7 +21244,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           ? "✓ Description captured"
           : `✓ Added: ${getAddedValueSnippet(prev as GuidedFieldKey, agreementIntakeDraft, raw, livePreviewModel, intakeStepBuffer) || getCaptureAcknowledgement(fid, prev as GuidedFieldKey)}`;
       setIntakeAckLine(line);
-      const timer = window.setTimeout(() => setIntakeAckLine(null), 700);
+      const timer = window.setTimeout(() => setIntakeAckLine(null), 12_000);
       prevFirstMissingRef.current = cur;
       return () => clearTimeout(timer);
     }
@@ -20962,6 +21265,72 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     freshSimpleCreateUx,
     isUserTyping,
   ]);
+  React.useEffect(() => {
+    if (
+      createFlowPhase === "draft_ready_for_review" &&
+      draft &&
+      journeyActionFeedback?.actionId === "create_agreement" &&
+      journeyActionFeedback.kind === "working" &&
+      !hardError &&
+      (hasPaidProSourceOfTruth() || (agreementDocumentTextRef.current || "").trim().length >= 500)
+    ) {
+      setJourneyActionFeedback(
+        feedbackSucceeded(
+          "create_agreement",
+          "Agreement created",
+          feedbackAfterGeneration({ captured: ["parties", "scope"] }),
+        ),
+      );
+    }
+  }, [createFlowPhase, draft, journeyActionFeedback, hardError]);
+  React.useEffect(() => {
+    if (
+      hardError &&
+      journeyActionFeedback?.actionId === "create_agreement" &&
+      journeyActionFeedback.kind === "working"
+    ) {
+      setJourneyActionFeedback(
+        feedbackFailed("create_agreement", "Agreement was not created", feedbackAfterModelFailure(), {
+          remedyLabel: "Retry",
+        }),
+      );
+    }
+  }, [hardError, journeyActionFeedback]);
+  React.useEffect(() => {
+    if (loading || isGenerating) return;
+    if (journeyActionFeedback?.actionId !== "create_agreement") return;
+    if (journeyActionFeedback.kind !== "working") return;
+    if (createUiStage === CreateUiStage.INPUT && createFlowPhase === "capturing_input") return;
+    if (createFlowPhase !== "draft_ready_for_review" && displayPhase !== "review") return;
+    if (resolveValidatedPaidProReviewCorpus().len >= 500) return;
+    const notes = (
+      readOriginalUserIntakeRaw() ||
+      intakeCombinedRef.current ||
+      intakeStepBufferRef.current ||
+      ""
+    ).trim();
+    const terminal = planEntitledRewriteGenerationFailureTerminal({ reason: "no_server_authority" });
+    setProFullDraftQualityRetry(terminal.proFullDraftQualityRetry);
+    setProFullDraftCustomGateMessage(terminal.proFullDraftCustomGateMessage);
+    setPremiumPersistedFlowActive(terminal.premiumPersistedFlowActive);
+    setPremiumSendPathUnlocked(terminal.premiumSendPathUnlocked);
+    setHardError(terminal.hardError);
+    setCreateFlowPhase(terminal.createFlowPhase);
+    setDisplayPhase(terminal.displayPhase);
+    setCreateUiStage(terminal.createUiStage);
+    if (notes) {
+      setIntakeStepBuffer(notes);
+      setDebouncedStepBuffer(notes);
+    }
+    setDraft(null);
+    setPreviewPaneRevealed(false);
+    setJourneyActionFeedback(
+      feedbackFailed("create_agreement", "Agreement was not created", feedbackAfterModelFailure(), {
+        remedyLabel: "Retry",
+      }),
+    );
+    setLoading(false);
+  }, [loading, isGenerating, createFlowPhase, displayPhase, createUiStage, journeyActionFeedback, draft]);
   const hardErrorForUi = useMemo(() => {
     if (!hardError) return null;
     /** Paid Pro review-first mint failures use inline panel on final review — never the generic save footer. */
@@ -21443,14 +21812,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const showWhatWeUnderstood = Boolean(
     simpleProductFlow &&
       liveWorkspaceTwoPane &&
-      !createProductionTwoPane &&
       !isGenerating &&
       !draftNowCommitted &&
       !draftPreCommitFreeze &&
       !simpleCreateDraftInputLocked &&
       intakeGuidanceCombined.trim().length >= 8 &&
       whatWeUnderstoodDisplayBullets.length > 0 &&
-      !(createProductionTwoPane && !stageAInputFirst),
+      (!createProductionTwoPane || createFlowPhase === "capturing_input"),
   );
 
   const unifiedClauseSuggestionItems = useMemo(
@@ -21796,7 +22164,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     : stageAInputFirst
       ? stageAContinueBlocked
         ? "Describe your agreement"
-        : "Create draft"
+        : "Create agreement"
       : createProductionTwoPane &&
           createUiStage === CreateUiStage.DRAFT &&
           !stageAInputFirst &&
@@ -22096,7 +22464,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     if (stageAInputFirst) {
       const dis = stageAContinueBlocked;
       return {
-        label: isGenerating ? primaryBusyLabel : dis ? "Describe your agreement" : "Create draft",
+        label: isGenerating ? primaryBusyLabel : dis ? "Describe your agreement" : "Create agreement",
         action: "guided_continue",
         disabled: dis,
         reason: dis
@@ -22133,7 +22501,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           label: empty
             ? "Describe your agreement"
             : guidedStructureComplete
-              ? "Create draft"
+              ? "Create agreement"
               : "Continue",
           action: "guided_continue",
           disabled: dis,
@@ -27130,7 +27498,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
   const premiumRecipientSendHelper = useMemo(() => {
     if (guidedPacketSendBlocked) {
-      return "Refresh signing packet before you send.";
+      return "The agreement changed after links were created. Create new links for this version.";
     }
     if (guidedSignerSetupPrimaryHelper) return guidedSignerSetupPrimaryHelper;
     return createFlowRecipientPrimaryHelper;
@@ -27758,10 +28126,21 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     }
     setProFinalReviewSaveBusy(true);
     setProFinalReviewSaveAck(false);
+    setJourneyActionFeedback({
+      kind: "working",
+      actionId: "direct_save",
+      title: "Saving changes",
+      body: "Saving your agreement text. Don’t tap Save again until this finishes.",
+    });
     if (hasPaidProSourceOfTruth()) {
       const stable = await commitPaidProUserApprovedRevision(raw, "pro_final_review_plain_edit_revision");
       if (!stable) {
         setProFinalReviewSaveBusy(false);
+        setJourneyActionFeedback(
+          feedbackFailed("direct_save", "Save did not complete", feedbackAfterDirectSaveFailed(), {
+            remedyLabel: "Try saving again",
+          }),
+        );
         return;
       }
       clearPaidProSignerStagingDisplayCorpus();
@@ -27771,7 +28150,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       proFinalReviewUserEditedRef.current = true;
       setProFinalReviewSaveBusy(false);
       setProFinalReviewSaveAck(true);
-      window.setTimeout(() => setProFinalReviewSaveAck(false), 2200);
+      setJourneyActionFeedback(feedbackSucceeded("direct_save", "Changes saved", feedbackAfterDirectSave()));
       return;
     }
     const repaired = repairFinalGradeGuidedCorpus(raw, {
@@ -27783,7 +28162,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     setProFinalReviewEditPlain(repaired.text);
     setProFinalReviewSaveBusy(false);
     setProFinalReviewSaveAck(true);
-    window.setTimeout(() => setProFinalReviewSaveAck(false), 2200);
+    setJourneyActionFeedback(feedbackSucceeded("direct_save", "Changes saved", feedbackAfterDirectSave()));
   }, [
     proFinalReviewEditPlain,
     guidedSignerCanonicalIdentities,
@@ -28514,6 +28893,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       setReviewFirstSigningTokenSecretMissing(false);
       setReviewLinkPersistFailureDiagnostics(null);
       reviewLinkPersistFailureRef.current = null;
+      setJourneyActionFeedback(feedbackCreatingLinks(effectivePremiumSendMode === "signature" ? "signing" : "review"));
       logReviewFirstHandoffStart({ source, phase: createFlowPhase });
 
       const failReviewFirstPersist = (
@@ -28545,6 +28925,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         setHardError(null);
         setReviewFirstHandoffError(userMessage);
         setReviewLinkPersistFailureDiagnostics(diag);
+        setJourneyActionFeedback(
+          feedbackFailed(
+            "create_links",
+            "Links were not created",
+            feedbackAfterLinkFailure({ kind: "review", saved: true, fieldRemedy: "Retry creating links" }),
+            { remedyLabel: "Try again" },
+          ),
+        );
       };
 
       const failReviewFirstMint = (
@@ -28561,6 +28949,18 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         setHardError(null);
         setReviewFirstSigningTokenSecretMissing(envConfigMissing);
         setReviewFirstHandoffError(message);
+        setJourneyActionFeedback(
+          feedbackFailed(
+            "create_links",
+            "Links were not created",
+            feedbackAfterLinkFailure({
+              kind: effectivePremiumSendMode === "signature" ? "signing" : "review",
+              saved: true,
+              fieldRemedy: "Check the highlighted field",
+            }),
+            { remedyLabel: "Try again" },
+          ),
+        );
         if (envConfigMissing) {
           logReviewFirstEnvTokenSecretMissing({
             agreementId: agreementIdForLog ?? productionSendBarAgreementId ?? reviewAgreementId,
@@ -28822,6 +29222,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           source,
           canonicalHash: reviewTrackCanonicalHash,
         });
+        setJourneyActionFeedback(
+          feedbackSucceeded(
+            "create_links",
+            "Links created—share when ready",
+            feedbackAfterReviewLinksCreated(Math.max(1, paidProDistinctValidRecipientEmailCount)),
+          ),
+        );
         logReviewFirstNavigateDone({ agreementId: id, path: result.ownerRoutePath, source });
         clearPremiumSendIntent();
         clearReviewFirstHandoffSource();
@@ -32605,10 +33012,39 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                         simpleCreateStickyBottomBarVisible ? "mb-24 sm:mb-20" : "mb-6"
                       }
                     >
+                      {journeyActionFeedback ? (
+                        <div className="mb-3">
+                          <JourneyActionBanner
+                            feedback={journeyActionFeedback}
+                            onDismiss={() => setJourneyActionFeedback(null)}
+                            onRemedy={() => {
+                              const sel = journeyActionFeedback.focusSelector;
+                              if (!sel) return;
+                              const el = document.querySelector(sel) as HTMLElement | null;
+                              el?.focus();
+                            }}
+                          />
+                        </div>
+                      ) : null}
                       <AgreementIntakeClarificationPanel
                         clarification={intakeClarification}
                         onUseSuggested={applyIntakeClarificationSuggestedRewrite}
                         onEditMyself={dismissIntakeClarification}
+                      />
+                    </div>
+                  ) : null}
+                  {journeyActionFeedback &&
+                  !(intakeClarification && createProductionTwoPane && createUiStage === CreateUiStage.INPUT) ? (
+                    <div className="mb-3">
+                      <JourneyActionBanner
+                        feedback={journeyActionFeedback}
+                        onDismiss={() => setJourneyActionFeedback(null)}
+                        onRemedy={() => {
+                          const sel = journeyActionFeedback.focusSelector;
+                          if (!sel) return;
+                          const el = document.querySelector(sel) as HTMLElement | null;
+                          el?.focus();
+                        }}
                       />
                     </div>
                   ) : null}
@@ -32660,12 +33096,31 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                       Detected timing details — you can refine them in review.
                     </p>
                   ) : null}
+                  {createProductionTwoPane &&
+                  createFlowPhase === "capturing_input" &&
+                  !isGenerating &&
+                  !draftNowCommitted &&
+                  !draftPreCommitFreeze ? (
+                    <IntakeContractingPartyEditor
+                      rows={intakePartyEditorRows}
+                      disabled={whatWeUnderstoodInlineDisabled && !intakeClarification}
+                      onChange={(rows) => {
+                        intakePartyEditorTouchedRef.current = true;
+                        setIntakePartyEditorRows(rows);
+                        const named = namedIntakeContractingParties(rows);
+                        if (named.length >= 2) {
+                          setIntakeStepBuffer((prev) => upsertLabeledPartyRows(prev, named));
+                          flushDebouncedStepBuffer({ forceFlash: true });
+                        }
+                      }}
+                    />
+                  ) : null}
                   {showWhatWeUnderstood ? (
                     <WhatWeUnderstoodBlock
                       bullets={whatWeUnderstoodDisplayBullets}
                       onCommitInline={(field, next) => handleInlinePreviewCommit(field, next)}
                       disabled={whatWeUnderstoodInlineDisabled}
-                      title={createProductionTwoPane ? "We captured:" : undefined}
+                      title="What LawDog understood"
                       editDetailsLabel={createProductionTwoPane ? "Edit details" : undefined}
                       onFocusMainInput={() => {
                         setMobileWorkspacePane("edit");
@@ -33294,10 +33749,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                           <div
                             className="mb-4 rounded-lg border border-emerald-800/35 bg-emerald-950/15 px-3 py-2.5 sm:px-4"
                             role="status"
-                            aria-label="Agreement draft ready"
+                            aria-label="Draft created—review recommended"
                           >
                             <p className="text-[10px] font-semibold uppercase tracking-[0.12em] text-emerald-200/90 sm:text-[11px]">
-                              Agreement draft ready
+                              Draft created—review recommended
                             </p>
                             <p className="mt-1 text-[11px] leading-snug text-slate-400 sm:text-xs">
                               Full text is in the preview — finish recipient details below. Nothing sends until you confirm
@@ -33316,7 +33771,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                               eyebrowLabel={
                                 premiumPaidReadonlyPick.sourceUsed === "server_full_document_text"
                                   ? "LawDog Pro agreement"
-                                  : "Agreement ready for review"
+                                  : "Draft created—review recommended"
                               }
                               cardHeading="Review summary"
                               cardIntro={
@@ -37152,7 +37607,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
               </div>
               <div>
                 <label className="text-xs font-medium uppercase tracking-wide text-slate-500" htmlFor="claw-modal-p2-email">
-                  Party 2 email (optional)
+                  Party 2 email
                 </label>
                 <input
                   id="claw-modal-p2-email"

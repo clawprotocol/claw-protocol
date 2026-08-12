@@ -174,7 +174,7 @@ describe("canonicalWorkingAgreementDraft (test40)", () => {
       reason: "signers_incomplete",
       workingDraftLen: 2796,
     });
-    expect(modal.headline).toBe("Signer details needed.");
+    expect(modal.headline).toBe("Add signer details.");
     expect(modal.ctaLabel).toBe("Edit signer details");
   });
 

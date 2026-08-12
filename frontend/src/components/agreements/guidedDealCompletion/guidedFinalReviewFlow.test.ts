@@ -65,7 +65,7 @@ describe("guided final review flow", () => {
     expect(screen).toContain("simple-pro-send-for-review");
     expect(screen).toContain("simple-pro-copy-agreement");
     expect(screen).toContain("This is the version that will be sent.");
-    expect(screen).toContain("Edit agreement text");
+    expect(screen).toContain("Edit agreement directly");
     expect(screen).not.toContain("simple-pro-continue-to-signing");
     expect(screen).not.toContain("simple-pro-suggest-changes-toggle");
   });

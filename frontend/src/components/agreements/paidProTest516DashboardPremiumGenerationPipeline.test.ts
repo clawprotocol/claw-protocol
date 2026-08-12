@@ -145,14 +145,15 @@ describe("TEST516 — dashboard premium generation pipeline (not routing)", () =
       reason: "entitled_rewrite_aborted",
       dashboardRoute: true,
     });
-    expect(terminal.proFullDraftQualityRetry).toBe(true);
+    expect(terminal.proFullDraftQualityRetry).toBe(false);
     expect(terminal.premiumPersistedFlowActive).toBe(false);
     expect(terminal.agreementDocumentPlain).toBe("");
     // Recovery must leave generating_draft so wait modal / Structuring CTA cannot stick.
-    expect(terminal.displayPhase).toBe("review");
-    expect(terminal.createFlowPhase).toBe("draft_ready_for_review");
+    expect(terminal.displayPhase).toBe("intake");
+    expect(terminal.createFlowPhase).toBe("capturing_input");
     expect(terminal.premiumPostCheckoutPhase).toBe(null);
-    expect(terminal.createUiStage).toBe(CreateUiStage.DRAFT);
+    expect(terminal.createUiStage).toBe(CreateUiStage.INPUT);
+    expect(terminal.hardError).toMatch(/unchanged/i);
   });
 
   it("6 — accepted premium body passes generation gate", () => {

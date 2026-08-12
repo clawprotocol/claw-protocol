@@ -27,7 +27,7 @@ export function Vs01PrepPreparedBanner({
       data-testid="vs01-prep-prepared-banner"
     >
       <p className={ready ? "text-sm font-semibold text-slate-950" : "text-sm font-semibold text-slate-950"}>
-        {ready ? "Ready for signing." : "Preparing agreement."}
+        {ready ? "Links created—share when ready." : "Preparing agreement."}
       </p>
       <p className={ready ? "mt-0.5 text-xs text-slate-600" : "mt-0.5 text-xs text-slate-600"}>
         {ready

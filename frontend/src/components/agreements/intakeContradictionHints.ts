@@ -8,7 +8,8 @@ export type IntakeContradictionKind =
   | "refund_policy"
   | "termination_notice"
   | "worker_classification"
-  | "governing_law_venue";
+  | "governing_law_venue"
+  | "payment_amount";
 
 export type IntakeContradictionHint = {
   kind: IntakeContradictionKind;
@@ -44,6 +45,38 @@ const LAW_VENUE: IntakeContradictionHint = {
   message:
     "Governing law / courts / region may conflict — confirm one state or country for enforcement.",
 };
+
+function extractDistinctPaymentAmounts(raw: string): string[] {
+  const found: string[] = [];
+  const re = /\$\s?(\d[\d,]*(?:\.\d+)?)/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(raw))) {
+    const n = Number((m[1] || "").replace(/,/g, ""));
+    if (!Number.isFinite(n) || n <= 0) continue;
+    const label = m[0].replace(/\s+/g, "");
+    if (!found.some((x) => x.replace(/[$,]/g, "") === label.replace(/[$,]/g, ""))) {
+      found.push(label.startsWith("$") ? label : `$${label}`);
+    }
+  }
+  return found;
+}
+
+function hasPaymentAmountConflict(raw: string): boolean {
+  if (/\b(?:split|milestone|installment|deposit|retain(?:er)?|optional\s+support)\b/i.test(raw)) {
+    return false;
+  }
+  return extractDistinctPaymentAmounts(raw).length >= 2;
+}
+
+function paymentAmountConflictHint(raw: string): IntakeContradictionHint {
+  const amounts = extractDistinctPaymentAmounts(raw);
+  const a = amounts[0] || "$A";
+  const b = amounts[1] || "$B";
+  return {
+    kind: "payment_amount",
+    message: `Two payment amounts were provided: ${a} and ${b}. Which amount should govern?`,
+  };
+}
 
 function hasExclusiveAndNonExclusive(low: string): boolean {
   const hasExclusive = /\bexclusive\b/i.test(low);
@@ -102,6 +135,7 @@ export function detectIntakeContradictionHints(raw: string, limit = 2): IntakeCo
     out.push(h);
   };
   if (hasExclusiveAndNonExclusive(low)) push(EXCLUSIVE_NON_EXCLUSIVE);
+  if (hasPaymentAmountConflict(text)) push(paymentAmountConflictHint(text));
   if (hasRefundConflict(low)) push(REFUND_CONFLICT);
   if (hasTerminationNoticeConflict(low)) push(TERMINATION_NOTICE);
   if (hasWorkerClassificationConflict(low)) push(WORKER_CLASS);

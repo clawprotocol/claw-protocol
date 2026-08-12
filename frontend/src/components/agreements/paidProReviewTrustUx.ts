@@ -2,6 +2,8 @@
  * Paid Pro review trust / workflow clarity — copy and step models only (no corpus changes).
  */
 
+import { CUSTOMER_JOURNEY_STATE } from "./customerJourneyReadiness";
+
 export type PaidProReviewTrustStepId =
   | "agreement_generated"
   | "legal_review_complete"
@@ -19,11 +21,11 @@ export type PaidProReviewTrustStep = {
 export const PAID_PRO_REVIEW_STATUS_HEADLINE = "Review status";
 
 /** Canonical status while signer metadata is incomplete (document chip + trust rail). */
-export const PAID_PRO_REVIEW_SIGNER_DETAILS_NEEDED_STATUS = "Signer details needed";
+export const PAID_PRO_REVIEW_SIGNER_DETAILS_NEEDED_STATUS = CUSTOMER_JOURNEY_STATE.addSignerDetails;
 
 /**
  * Review trust rail + status chip only — routing/CTA gates still use the live signer-details gate.
- * After {@link hasAuthoritativeSigningSnapshot}, never show "Signer details needed" on status surfaces.
+ * After {@link hasAuthoritativeSigningSnapshot}, never show "Add signer details" on status surfaces.
  */
 export function resolvePaidProReviewSignerStatusReady(args: {
   signerDetailsGateComplete: boolean;
@@ -33,7 +35,7 @@ export function resolvePaidProReviewSignerStatusReady(args: {
 }
 
 export const PAID_PRO_REVIEW_SUPPORTING_BEFORE_SIGNERS =
-  "Add legal entity, signer name, email, and title for each party. Those details feed notices and either party-review links or signature links — nothing is sent until you confirm.";
+  "Choose send for review or prepare for signing. Review needs reviewer emails. Signature needs one authorized signer name and email for each contracting party. Title is optional. Nothing is emailed automatically.";
 
 /** When the draft still shows clarification-style brackets after generate. */
 export const PAID_PRO_REVIEW_SUPPORTING_IDENTITY_PLACEHOLDERS =
@@ -46,7 +48,7 @@ export const PAID_PRO_REVIEW_SUPPORTING_AFTER_SIGNERS =
 export const PAID_PRO_FINAL_VERSION_HEADLINE = "Next step";
 
 export const PAID_PRO_FINAL_VERSION_BEFORE_SIGNERS =
-  "Add signer details below (legal entity, signer name, email, and title), then choose party review or prepare signature links.";
+  "Choose send for review or prepare signature links. Review needs reviewer emails. Signature needs an authorized signer name and email for each party.";
 
 export const PAID_PRO_FINAL_VERSION_READY_FOR_SIGNATURE =
   "Send for party review with basic track-changes, or prepare signature links when you are ready to share them.";
@@ -90,7 +92,7 @@ export function resolvePaidProReviewTrustSteps(args: {
     {
       id: "signature_links_ready",
       label: linksDone
-        ? "Ready for signing"
+        ? CUSTOMER_JOURNEY_STATE.readyToCreateSigningLinks
         : signersDone
           ? "Choose review or signing"
           : "Review or signature links",

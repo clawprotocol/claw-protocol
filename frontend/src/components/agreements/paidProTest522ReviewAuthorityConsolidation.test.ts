@@ -134,6 +134,6 @@ describe("TEST522 — single Paid Pro review authority", () => {
     });
     expect(authority!.contentReady).toBe(true);
     expect(authority!.renderAllowed).toBe(true);
-    expect(authority!.shellTitle).toBe("Agreement ready");
+    expect(authority!.shellTitle).toBe("Draft created—review recommended");
   });
 });

@@ -62,6 +62,7 @@ describe("buildWeCapturedSummaryBullets", () => {
     expect(type?.displayValue).toContain("Consulting");
     expect(type?.displayValue).not.toMatch(/^Suggested type:/i);
     expect(type?.needsConfirmation).toBe(false);
+    expect(bullets.map((b) => b.kind)).toEqual(["type", "parties", "scope", "payment", "term", "special"]);
   });
 
   it("keeps suggested type when agreement category is only inferred, not plainly stated", () => {

@@ -632,7 +632,7 @@ describe("signerSetupPartyIdentity", () => {
       recipient2Email: "",
       extraPartyReviewEmails: [],
     });
-    expect(gate.blockerMessage).toBe("Add signer name and email for Red Mesa Logistics LLC.");
+    expect(gate.blockerMessage).toBe("Add an authorized signer name and email for Red Mesa Logistics LLC.");
     expect(gate.firstIncompleteFieldKey).toBe("r1-signer-name");
     expect(gate.ctaLabel).toBe(PAID_PRO_SIGNER_DETAILS_INCOMPLETE_CTA);
   });
@@ -649,7 +649,7 @@ describe("signerSetupPartyIdentity", () => {
       extraPartyReviewEmails: [],
     });
     expect(gate.complete).toBe(false);
-    expect(gate.blockerMessage).toBe("Add signer name and email for Harbor Peak Automation LLC.");
+    expect(gate.blockerMessage).toBe("Add an authorized signer name and email for Harbor Peak Automation LLC.");
     expect(gate.firstIncompleteFieldKey).toBe("r2-signer-name");
   });
 

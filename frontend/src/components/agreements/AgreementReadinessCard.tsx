@@ -1,10 +1,11 @@
 import type { AgreementReadinessLevel, AgreementReadinessResult } from "../../agreement/agreementReadiness";
 import { READINESS_HEADLINES, readinessCtaHelper } from "../../agreement/agreementReadiness";
+import { CUSTOMER_JOURNEY_STATE } from "./customerJourneyReadiness";
 
 const STEPS: { id: AgreementReadinessLevel; label: string }[] = [
-  { id: "early", label: "Draft started" },
-  { id: "usable", label: "Ready for review" },
-  { id: "ready", label: "Ready for signature setup" },
+  { id: "early", label: CUSTOMER_JOURNEY_STATE.describe },
+  { id: "usable", label: CUSTOMER_JOURNEY_STATE.readyToCreate },
+  { id: "ready", label: CUSTOMER_JOURNEY_STATE.readyToCreate },
 ];
 
 function stepIndex(level: AgreementReadinessLevel): number {
@@ -29,10 +30,9 @@ export function AgreementReadinessCard(props: {
   showCtaHelper?: boolean;
 }) {
   const { result, surface, compact, flowPhase = "review", showSendPrepNote, showCtaHelper } = props;
-  const { level, score, maxScore, checklistRows, suggestions } = result;
+  const { level, checklistRows, suggestions } = result;
   const copy = READINESS_HEADLINES[level];
   const active = stepIndex(level);
-  const pct = maxScore > 0 ? Math.min(100, Math.round((score / maxScore) * 100)) : 0;
 
   return (
     <div
@@ -63,15 +63,6 @@ export function AgreementReadinessCard(props: {
               {s.label}
             </span>
           ))}
-        </div>
-        <div
-          className="mt-2 h-1 overflow-hidden rounded-full bg-slate-800/80"
-          role="progressbar"
-          aria-valuenow={score}
-          aria-valuemin={0}
-          aria-valuemax={maxScore}
-        >
-          <div className="h-full rounded-full bg-emerald-500/50 transition-all" style={{ width: `${pct}%` }} />
         </div>
       </div>
 

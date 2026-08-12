@@ -17,14 +17,14 @@ export const PAID_PRO_REVIEW_STEP_HEADLINE = "Signer details next";
 export const PAID_PRO_REVIEW_STEP_NEXT_PREFIX = "Next:";
 
 export const PAID_PRO_REVIEW_STEP_NEXT_SIGNER_SETUP =
-  "Add party contacts so you can prepare signature links or send the draft for review with basic track-changes. No one signs on this step.";
+  "Add party contacts so you can create private review links or signing links. No one signs on this step. Nothing is emailed automatically.";
 
 export const PAID_PRO_REVIEW_STEP_NEXT_SIGNATURE_PREP = PAID_PRO_REVIEW_STEP_NEXT_CHOOSE_TRACK;
 
 export const PAID_PRO_SIGNER_SETUP_ORIENTATION_HEADLINE = "Add signer details";
 
 export const PAID_PRO_SIGNER_SETUP_ORIENTATION_BODY =
-  "Enter who will sign (or review) for each party. No one signs here — after you confirm, you can send for party review with track-changes or prepare signature links.";
+  "Enter who will sign (or review) for each party. No one signs here — after you confirm, you can create private review links or signing links. Nothing is emailed automatically.";
 
 export const PAID_PRO_SIGNER_SETUP_WORKFLOW_TRAIL =
   "Review → Signer details → Party review or signature links → Done";

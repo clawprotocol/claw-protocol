@@ -1087,7 +1087,7 @@ export function SimpleCreatePage() {
                 isFreshSimpleCreateStart ? FIRST_SESSION_CREATE_INTAKE_PLACEHOLDER : SIMPLE_CREATE_INTAKE_PLACEHOLDER
               }
               simpleProductFlowSubmitLabel={
-                isFreshSimpleCreateStart ? "Create draft" : quickSendTypedArrival ? "Review" : "Review"
+                isFreshSimpleCreateStart ? "Create agreement" : quickSendTypedArrival ? "Review" : "Review"
               }
               simpleProductFollowUpSubmitLabel="Next"
               simpleProductFlowGeneratingLabel={

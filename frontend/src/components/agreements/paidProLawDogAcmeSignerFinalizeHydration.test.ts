@@ -281,6 +281,6 @@ describe("LawDog/Acme signer finalize → signing-ready document hydration P0", 
       signerMetadataFinalized: true,
       signingReadyHydrated: true,
     });
-    expect(trust.find((s) => s.id === "signature_links_ready")?.label).toBe("Ready for signing");
+    expect(trust.find((s) => s.id === "signature_links_ready")?.label).toBe("Ready to create signing links");
   });
 });

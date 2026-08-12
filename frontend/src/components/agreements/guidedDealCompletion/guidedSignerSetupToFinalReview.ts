@@ -238,7 +238,7 @@ export function resolveGuidedFinalizeModalBlockedPresentation(args: {
     case "signer_field_focused":
       return {
         kind: "signers_needed",
-        headline: "Signer details needed.",
+        headline: "Add signer details.",
         body: userMessageForGuidedSignerSetupContinueBlock(args.reason),
         ctaLabel: "Edit signer details",
         footnote: "Update signer details below, then continue.",

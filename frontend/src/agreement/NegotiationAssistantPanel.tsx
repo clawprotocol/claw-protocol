@@ -57,7 +57,7 @@ type Props = {
   }) => Promise<boolean>;
   /** Increment after a negotiation-sourced revision is committed to clear “Write your own counter”. */
   negotiationCommitSeq?: number;
-  /** basic | premium — server tier routing (defaults gpt-5.4-nano / gpt-5.4-mini via env). */
+  /** basic | premium — server tier routing (defaults gpt-4o-mini / gpt-4o via env). */
   aiModelClass?: "basic" | "premium";
 };
 

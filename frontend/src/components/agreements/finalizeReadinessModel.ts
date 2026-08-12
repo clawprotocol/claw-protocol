@@ -4,13 +4,15 @@ import type { PremiumCompletenessRow } from "./premiumReviewCompleteness";
 import type { PremiumRefineResponse, SuggestedNextStep } from "./premiumRefineApi";
 import { scanDocumentPlaceholderLines } from "./documentPlaceholderScan";
 
+import { CUSTOMER_JOURNEY_STATE } from "./customerJourneyReadiness";
+
 export type FinalizeReadiness = "needs_details" | "good_draft" | "ready_for_review" | "ready_for_signature";
 
 const READINESS_COPY: Record<FinalizeReadiness, string> = {
-  needs_details: "Needs details",
-  good_draft: "Good draft",
-  ready_for_review: "In good shape",
-  ready_for_signature: "Ready to send",
+  needs_details: CUSTOMER_JOURNEY_STATE.decisionsNeededBeforeSignature,
+  good_draft: CUSTOMER_JOURNEY_STATE.draftCreatedReviewRecommended,
+  ready_for_review: CUSTOMER_JOURNEY_STATE.readyToCreateReviewLinks,
+  ready_for_signature: CUSTOMER_JOURNEY_STATE.readyToCreateSigningLinks,
 };
 
 export function formatFinalizeReadiness(r: FinalizeReadiness): string {
@@ -119,6 +121,10 @@ export function resolveFinalizeReadiness(args: {
 
   if (args.sendModeTouched) {
     if (args.sendMode === "review") {
+      if (blockerCount >= 1) {
+        if (ph >= 1 || blockerCount >= 3) return "needs_details";
+        return "good_draft";
+      }
       return "ready_for_review";
     }
     if (args.sendMode === "signature") {
@@ -206,17 +212,17 @@ export function resolveFinalizeReadiness(args: {
 
 export function finalizeTagline(missingCount: number, readiness: FinalizeReadiness): string {
   if (readiness === "ready_for_signature") {
-    return "You chose the signature path — add tweaks below if you need them.";
+    return "Signer details are complete. Create signing links when you are ready — nothing is emailed automatically.";
   }
   if (readiness === "ready_for_review") {
     return missingCount > 0
-      ? "Close the remaining gaps, then move to review when you are ready."
-      : "Strong draft — move to review or signature when you are ready.";
+      ? "Close the remaining gaps, then create review links when you are ready."
+      : "Create review links, or continue to signature when terms are final.";
   }
   if (readiness === "good_draft") {
-    return missingCount > 0 ? "A few things to double-check before you continue." : "Strong draft created.";
+    return missingCount > 0 ? "A few things to confirm before signature." : "Draft created—review recommended.";
   }
   return missingCount > 0
     ? "Tighten the items below, then update the agreement or pick a path."
-    : "Strong draft created.";
+    : "Draft created—review recommended.";
 }

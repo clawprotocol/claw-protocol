@@ -8,7 +8,7 @@ const SEVERITY_RANK: Record<DealVariableSeverity, number> = {
   optional: 2,
 };
 
-const MAX_GUIDED_QUEUE = 5;
+const MAX_GUIDED_QUEUE = 3;
 const MAX_INTRO_LABELS = 3;
 
 /** Business-order priority for contractor/contradiction flows (lower = earlier). */
@@ -95,7 +95,7 @@ export function buildGuidedCompletionIntro(
   const pct = session.completenessPercent;
   if (remaining.length === 0) {
     return {
-      headline: "Your agreement looks ready to review.",
+      headline: "Draft created—review recommended.",
       subline: "You can still refine any term before sending.",
       completenessPercent: pct,
       remainingLabels: [],
@@ -106,8 +106,8 @@ export function buildGuidedCompletionIntro(
   const more = remaining.length > MAX_INTRO_LABELS ? ` (+${remaining.length - MAX_INTRO_LABELS} more)` : "";
 
   return {
-    headline: `Your agreement is ${pct}% complete.`,
-    subline: `We still need: ${shortList}${more}. Let's finish them.`,
+    headline: "Decisions needed before signature.",
+    subline: `We still need: ${shortList}${more}. These are recommended — they are not a technical failure.`,
     completenessPercent: pct,
     remainingLabels: remaining,
   };

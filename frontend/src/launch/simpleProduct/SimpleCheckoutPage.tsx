@@ -36,6 +36,7 @@ import {
 } from "../../components/agreements/checkoutBackRestore";
 import { checkoutInvoiceUsd, formatMoneyUsdWhole } from "../pricingKeyMath";
 import { CONTEXTUAL_ONE_TIME_UNLOCK_USD } from "../paywallMessaging";
+import { isSingleAgreementCheckoutIntent } from "../oneTimeAgreementUnlock";
 import { checkoutPayloadFromPaywallAttribution, clearPaywallAttribution } from "../paywallAttribution";
 import { getPricingCadencePreference, setPricingCadencePreference, type PricingCadence } from "../pricingCadenceStorage";
 import type { LaunchPricingTier } from "../pricingTiersData";
@@ -194,7 +195,7 @@ export function SimpleCheckoutPage(props: { agreementId: string }) {
   const ck = dc.checkout;
   const checkoutLogged = useRef(false);
   const params = useMemo(() => new URLSearchParams(search), [search]);
-  const isSingleAgreementCheckout = useMemo(() => params.get("intent") === "single_agreement", [params]);
+  const isSingleAgreementCheckout = useMemo(() => isSingleAgreementCheckoutIntent(params), [params]);
 
   const tierFromUrl = parseTierIdParam(params.get("tier"));
   const tier: LaunchPricingTier = useMemo(() => resolveCheckoutTier(tierFromUrl), [tierFromUrl]);

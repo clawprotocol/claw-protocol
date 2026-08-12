@@ -792,7 +792,7 @@ function auditEventLabel(eventType: string): string {
 }
 
 function workspaceStatusPillLabel(status: "Draft" | "Complete Draft" | "Signed"): string {
-  if (status === "Complete Draft") return "Ready for review";
+  if (status === "Complete Draft") return "Draft created—review recommended";
   if (status === "Signed") return "Sealed";
   return "Draft only";
 }
@@ -6940,7 +6940,7 @@ const AgreementReview: React.FC<Props> = ({
                             ) : (
                             <>
                               <p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-emerald-200/95">
-                                {simpleHomeReviewLinkSendStep ? "Recipient setup" : "Agreement ready"}
+                                {simpleHomeReviewLinkSendStep ? "Recipient setup" : "Draft created—review recommended"}
                               </p>
                               <p className="mt-2 text-sm leading-relaxed text-slate-400">
                                 {simpleHomeReviewLinkSendStep

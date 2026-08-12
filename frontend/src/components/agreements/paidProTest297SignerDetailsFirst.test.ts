@@ -143,7 +143,8 @@ describe("Test297 paid Pro signer-details-first on forced render path", () => {
     expect(intakeSrc).toContain("shouldArmPaidProFirstReviewSignerSetupLatch");
     expect(intakeSrc).toContain("paidProFirstReviewSignerSetupRequired");
     expect(intakeSrc).toContain("showPaidProForcedFirstReviewTrackChooser");
-    expect(intakeSrc).toContain("paidProInlineRecipientShell ? true : resolvedSendMode === \"signature\"");
+    expect(intakeSrc).toContain("resolvedSendMode === \"review\"");
+    expect(intakeSrc).toContain("paidProInlineRecipientShell || resolvedSendMode === \"signature\"");
     const forcedBlock = intakeSrc.slice(
       intakeSrc.indexOf("paidProForcedFirstReviewActive ? ("),
       intakeSrc.indexOf("paidProForcedFirstReviewActive ? (") + 12000,

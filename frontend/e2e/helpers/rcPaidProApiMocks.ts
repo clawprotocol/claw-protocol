@@ -215,6 +215,8 @@ export async function installRcPaidProApiRoutes(
     premiumBody?: string;
     /** When false, parse mock stays two-party while premium body may still be quad. */
     parsePartyCount?: 2 | 3 | 4;
+    /** Fail POST /premium-full-draft inside the catch-all mock (overrides success body). */
+    premiumFullDraftFailure?: { status: number; detail: unknown };
   },
 ) {
   const draftId = opts?.draftId ?? "ag_rc_paid_pro";
@@ -539,6 +541,14 @@ export async function installRcPaidProApiRoutes(
     }
 
     if (url.includes("/api/agreements/premium-full-draft") && method === "POST") {
+      if (opts?.premiumFullDraftFailure) {
+        await route.fulfill({
+          status: opts.premiumFullDraftFailure.status,
+          contentType: "application/json",
+          body: JSON.stringify({ detail: opts.premiumFullDraftFailure.detail }),
+        });
+        return;
+      }
       await route.fulfill({
         status: 200,
         contentType: "application/json",

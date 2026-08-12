@@ -20,3 +20,5 @@ Clean separation (do not mix):
 **Server hydration** — call `hydrateRuntimeUiConfigV1(payload)` with `RuntimeUiConfigV1` when API is ready; partial payloads merge safely.
 
 **Cleanup** — remove release flags after launch; keep `CONTROL_PLANE.md` in sync when adding keys.
+
+**Paid-beta:** the `$9` one-agreement unlock is **out of this release**. There is no feature gate, env var, or operator switch that can enable it. Checkout code that still mentions `single_agreement` is unreachable because `isOneTimeAgreementUnlockEnabled()` and `isSingleAgreementCheckoutIntent()` always return false.

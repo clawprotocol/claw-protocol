@@ -458,9 +458,9 @@ function formatPaidProSignerDetailsBlockerMessage(
   }
   const needsName = partyBlockers.some((b) => b.field === "signer_name");
   const needsEmail = partyBlockers.some((b) => b.field === "email");
-  if (needsName && needsEmail) return `Add signer name and email for ${label}.`;
-  if (needsName) return `Add a signer name for ${label}.`;
-  return `Add a signer email for ${label}.`;
+  if (needsName && needsEmail) return `Add an authorized signer name and email for ${label}.`;
+  if (needsName) return `Add an authorized signer name for ${label}.`;
+  return `Enter a valid signer email for ${label}.`;
 }
 
 export type ResolvePaidProSignerDetailsGateArgs = {
@@ -500,7 +500,11 @@ export function resolvePaidProSignerDetailsGate(
     const signerName = norm(args.partySignerNames[i] ?? "");
     const email = paidProEmailForIndex(args, i);
     if (!legal) blockers.push({ partyIndex: i, field: "legal_entity", reason: "missing" });
-    if (!signerName) blockers.push({ partyIndex: i, field: "signer_name", reason: "missing" });
+    const companyNameUsedAsSigner =
+      Boolean(legal) && Boolean(signerName) && hasLegalEntitySuffix(legal) && signerName === norm(legal);
+    if (!signerName || companyNameUsedAsSigner) {
+      blockers.push({ partyIndex: i, field: "signer_name", reason: "missing" });
+    }
     if (!email) {
       blockers.push({ partyIndex: i, field: "email", reason: "missing" });
     } else if (!looksLikeEmail(email)) {

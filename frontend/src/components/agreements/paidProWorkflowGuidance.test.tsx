@@ -29,14 +29,14 @@ describe("paidProWorkflowGuidance", () => {
     expect(copy.stepLabel).toMatch(/Step 3 of 4/i);
     expect(copy.nextLine).toMatch(/No one signs|not signing/i);
     expect(copy.nextLine).toMatch(/party contacts|signer details/i);
-    expect(copy.nextLine).toMatch(/track-changes|party review|signature links/i);
+    expect(copy.nextLine).toMatch(/private review links|signing links/i);
   });
 
   it("when signers ready, next-step copy offers review or signing", () => {
     const copy = resolvePaidProReviewNextStepCopy({ signersReady: true });
     expect(copy.headline).toMatch(/Choose review or signing/i);
-    expect(copy.nextLine).toMatch(/track-changes/i);
-    expect(copy.nextLine).toMatch(/signature links/i);
+    expect(copy.nextLine).toMatch(/private review links/i);
+    expect(copy.nextLine).toMatch(/signing links/i);
   });
 
   it("review callout renders step guidance above document flow", () => {

@@ -34,7 +34,7 @@ describe("workspaceSigningStatusLabel", () => {
       workspaceSigningStatusLabel(
         row({ has_server_signing_lock: true, locked_version_id: "v1" }),
       ),
-    ).toBe("Signing in progress");
+    ).toBe("Waiting for signatures");
   });
 
   it("uses Waiting for review when review links sent", () => {
@@ -45,7 +45,7 @@ describe("workspaceSigningStatusLabel", () => {
 
   it("uses local packet prepared flag", () => {
     markAgreementPacketPrepared("ag_ws");
-    expect(workspaceSigningStatusLabel(row({ id: "ag_ws" }))).toBe("Signing in progress");
+    expect(workspaceSigningStatusLabel(row({ id: "ag_ws" }))).toBe("Waiting for signatures");
     expect(isAgreementPacketPrepared("ag_ws")).toBe(true);
   });
 });

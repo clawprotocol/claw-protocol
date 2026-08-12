@@ -46,7 +46,7 @@ describe("buildStableGuidedQuestionQueue", () => {
     const result = buildStableGuidedQuestionQueue({ variables: vars });
     expect(result.queue).toContain("project_fee_phase_confirmation");
     expect(result.queue).not.toContain("total_fee_confirmation");
-    expect(result.queue.length).toBeLessThanOrEqual(5);
+    expect(result.queue.length).toBeLessThanOrEqual(3);
     expect(result.removedIds.length + result.blockedRepeatIds.length).toBeGreaterThanOrEqual(0);
     logGuidedQuestionQueueBuilt({ total: 6, visible: result.queue.length, ids: result.queue });
     logGuidedQuestionDedupe({ removedIds: ["total_fee_confirmation"] });

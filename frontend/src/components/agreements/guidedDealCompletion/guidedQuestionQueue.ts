@@ -6,7 +6,7 @@ import type { DealVariable } from "./types";
 import { prioritizeDealVariables } from "./variablePrioritizationLayer";
 import { filterUserAnswerableGuidedVariables } from "./userAnswerableGuidedQuestion";
 
-const MAX_GUIDED_QUEUE = 5;
+const MAX_GUIDED_QUEUE = 3;
 
 /** When one id is queued, suppress near-duplicate fee questions. */
 const CANONICAL_EXCLUDES: Record<string, readonly string[]> = {

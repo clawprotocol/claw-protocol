@@ -1,5 +1,6 @@
 import type { AgreementDraft } from "./agreementTypes";
 import type { LivePreviewModel } from "../components/agreements/liveDraftHeuristics";
+import { CUSTOMER_JOURNEY_STATE } from "../components/agreements/customerJourneyReadiness";
 
 export type AgreementReadinessLevel = "early" | "usable" | "ready";
 
@@ -304,21 +305,21 @@ export function computeIntakeReadiness(intakeTrimmed: string, model: LivePreview
 
 export const READINESS_HEADLINES: Record<AgreementReadinessLevel, { title: string; subtitle: string }> = {
   early: {
-    title: "Draft started",
-    subtitle: "Good start — add detail if you want, or continue and refine on the next step.",
+    title: CUSTOMER_JOURNEY_STATE.describe,
+    subtitle: "Add the two legal names and one sentence describing the work, rights, or exchange.",
   },
   usable: {
-    title: "Ready for review",
-    subtitle: "The main terms are taking shape. Review the details, then continue when you're comfortable.",
+    title: CUSTOMER_JOURNEY_STATE.readyToCreate,
+    subtitle: "The parties and purpose are in place. Create the agreement, then confirm remaining details.",
   },
   ready: {
-    title: "Ready for signature setup",
-    subtitle: "This draft has the key product signals we look for before send.",
+    title: CUSTOMER_JOURNEY_STATE.readyToCreate,
+    subtitle: "Create the agreement. You can confirm payment, dates, and special terms after the draft exists.",
   },
 };
 
 export function readinessCtaHelper(level: AgreementReadinessLevel): string {
-  if (level === "early") return "Continue when you’re ready — you can always add more on the next step.";
-  if (level === "usable") return "Review details, then continue to signature setup.";
-  return "You're ready to continue.";
+  if (level === "early") return "Add who is agreeing and what they are agreeing to, then create the agreement.";
+  if (level === "usable") return "Create the agreement — remaining details can be confirmed next.";
+  return "Create the agreement.";
 }

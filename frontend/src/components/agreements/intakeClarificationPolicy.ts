@@ -193,7 +193,7 @@ function isFieldMissing(field: IntakeBlockingField, parsed: ParsedDraftShape): b
   }
 }
 
-function candidateMissingFields(parsed: ParsedDraftShape): IntakeBlockingField[] {
+function recommendedMissingFields(parsed: ParsedDraftShape): IntakeBlockingField[] {
   const fam = parsed.agreement_family;
   if (fam === "operating_agreement" || fam === "nda") {
     const out: IntakeBlockingField[] = [];
@@ -231,9 +231,20 @@ export function computeBlockingIntakeGaps(
   parsed: ParsedDraftShape,
   intakeText: string,
 ): IntakeBlockingField[] {
-  return candidateMissingFields(parsed).filter(
+  const blocking: IntakeBlockingField[] = ["parties", "purpose"];
+  return blocking.filter(
     (field) => fieldInferenceTier(field, intakeText, parsed) >= 3 && isFieldMissing(field, parsed),
   );
+}
+
+/** Non-blocking recommended gaps — at most three, never a generation failure. */
+export function computeRecommendedIntakeGaps(
+  parsed: ParsedDraftShape,
+  _intakeText: string,
+): IntakeBlockingField[] {
+  return recommendedMissingFields(parsed)
+    .filter((field) => field !== "parties" && field !== "purpose")
+    .slice(0, 3);
 }
 
 /**

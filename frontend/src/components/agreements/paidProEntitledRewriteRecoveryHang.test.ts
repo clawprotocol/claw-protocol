@@ -12,15 +12,18 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 describe("paidPro entitled rewrite recovery hang (universal)", () => {
-  it("failure terminals clear wait phase and leave review recovery — not generating_draft", () => {
+  it("failure terminals clear wait phase and return to intake — not generating_draft or empty review", () => {
     const entitled = planEntitledRewriteGenerationFailureTerminal({
       reason: "entitled_rewrite_missing_agreement_or_corpus",
       dashboardRoute: true,
     });
     expect(entitled.premiumPostCheckoutPhase).toBe(null);
-    expect(entitled.displayPhase).toBe("review");
-    expect(entitled.createFlowPhase).toBe("draft_ready_for_review");
-    expect(entitled.proFullDraftQualityRetry).toBe(true);
+    expect(entitled.displayPhase).toBe("intake");
+    expect(entitled.createFlowPhase).toBe("capturing_input");
+    expect(entitled.createUiStage).toBe(CreateUiStage.INPUT);
+    expect(entitled.proFullDraftQualityRetry).toBe(false);
+    expect(entitled.clearLocalDraft).toBe(true);
+    expect(entitled.hardError).toMatch(/notes and last saved agreement are unchanged/i);
 
     const dashboard = planDashboardPaidCreateValidationFailureTerminal();
     expect(dashboard.displayPhase).toBe("review");
@@ -56,11 +59,12 @@ describe("paidPro entitled rewrite recovery hang (universal)", () => {
     const snapIdx = intake.indexOf('reason: "entitled_rewrite_snapshot_prepare_failed"');
     expect(missingIdx).toBeGreaterThan(-1);
     expect(snapIdx).toBeGreaterThan(-1);
-    for (const idx of [missingIdx, snapIdx]) {
-      const block = intake.slice(idx, idx + 900);
-      expect(block).toContain("resolvePaidProGenerationFailurePostCheckoutPhase");
-      expect(block).toContain('setDisplayPhase("review")');
-    }
+    const missingBlock = intake.slice(missingIdx, missingIdx + 1600);
+    expect(missingBlock).toContain("planEntitledRewriteGenerationFailureTerminal");
+    expect(missingBlock).toContain("setDisplayPhase(terminal.displayPhase)");
+    const snapBlock = intake.slice(snapIdx, snapIdx + 1800);
+    expect(snapBlock).toContain("planEntitledRewriteGenerationFailureTerminal");
+    expect(snapBlock).toContain("setDisplayPhase(terminal.displayPhase)");
     expect(intake).toMatch(
       /finally\s*\{[\s\S]{0,400}setPremiumPostCheckoutPhase\(\(prev\)\s*=>/,
     );

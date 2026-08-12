@@ -38,11 +38,11 @@ export const PAYWALL_SEND_FINAL_FOOTER = "Nothing is sent until you confirm.";
 /** Urgency lines under the headline (send conversion modal). */
 export const PAYWALL_URGENCY_PRIMARY = "You’re one step away from using this agreement.";
 
-/** Subscription-first nudge; one-time unlock is offered separately as a quiet fallback in the send modal. */
+/** Subscription-first nudge. The $9 one-time unlock is a dormant post-GTM experiment (off by default). */
 export const PAYWALL_URGENCY_SECONDARY =
   "LawDog Pro keeps send, export, and save open for whatever you draft next.";
 
-/** One-time unlock price (USD) — only offered after value exists (e.g. send conversion), not on pricing triad. */
+/** One-time unlock price (USD) — dormant post-GTM experiment; hidden unless the off-by-default flag is on. */
 export const CONTEXTUAL_ONE_TIME_UNLOCK_USD = 9;
 
 /** Send conversion modal: daily value line under subscription price. */

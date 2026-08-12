@@ -1,11 +1,21 @@
 /**
- * Short “what we understood” bullets from live preview heuristics (max 4).
+ * Compact “What LawDog understood” checkpoint from live preview + structured extraction.
+ * Confidence stays internal — customer labels are Confirmed / Inferred / Still needed.
  */
 
 import type { LivePreviewInlineField, LivePreviewModel } from "./liveDraftHeuristics";
 import { getCanonicalAgreementTypeForCreate } from "./agreementTypeCanonical";
+import { parseIntakeToStructuredAgreement } from "./intakeStructuredAgreementModel";
 
-export type UnderstoodBulletKind = "parties" | "type" | "payment" | "scope" | "term";
+export type UnderstoodBulletKind = "parties" | "type" | "payment" | "scope" | "term" | "special";
+
+export type UnderstoodProvenance = "confirmed" | "inferred" | "still_needed";
+
+export const UNDERSTOOD_PROVENANCE_LABEL: Record<UnderstoodProvenance, string> = {
+  confirmed: "Confirmed from your description",
+  inferred: "Inferred—please check",
+  still_needed: "Still needed",
+};
 
 export type UnderstoodBullet = {
   kind: UnderstoodBulletKind;
@@ -15,8 +25,9 @@ export type UnderstoodBullet = {
   /** Full value for labeled-line commit */
   commitValue: string;
   inlineField?: LivePreviewInlineField;
-  /** Low-confidence extraction — show “Needs confirmation” in UI. */
+  /** Low-confidence extraction — show “Inferred—please check” in UI. */
   needsConfirmation?: boolean;
+  provenance: UnderstoodProvenance;
 };
 
 /** Local quick-check confirms — clear “Needs confirmation” without waiting for re-parse. */
@@ -55,8 +66,32 @@ function paymentDisplayAndCommit(model: LivePreviewModel): { display: string; co
   return null;
 }
 
+function partiesDisplayFromModel(raw: string, model: LivePreviewModel): string {
+  const structured = parseIntakeToStructuredAgreement(raw);
+  if (structured.parties.length >= 2) {
+    if (structured.parties.length === 2) return `${structured.parties[0]} and ${structured.parties[1]}`;
+    const head = structured.parties.slice(0, -1).join(", ");
+    return `${head}, and ${structured.parties[structured.parties.length - 1]}`;
+  }
+  if (model.partiesStructured) {
+    return `${model.partiesStructured.party_1} and ${model.partiesStructured.party_2}`;
+  }
+  return (model.partiesLine || "").trim();
+}
+
+function provenanceFor(args: {
+  hasValue: boolean;
+  inferred?: boolean;
+  confirmed?: boolean;
+}): UnderstoodProvenance {
+  if (!args.hasValue) return "still_needed";
+  if (args.confirmed) return "confirmed";
+  if (args.inferred) return "inferred";
+  return "confirmed";
+}
+
 /**
- * Parties → Type → Payment → Scope → Term, capped at four bullets.
+ * Parties → Type → Payment → Scope → Term, capped at four bullets (legacy compact).
  */
 export function buildWhatWeUnderstoodBullets(model: LivePreviewModel): UnderstoodBullet[] {
   const slots: UnderstoodBullet[] = [];
@@ -71,6 +106,7 @@ export function buildWhatWeUnderstoodBullets(model: LivePreviewModel): Understoo
       displayValue: truncate(partiesFull, 96),
       commitValue: partiesFull,
       inlineField: "Parties",
+      provenance: "confirmed",
     });
   }
 
@@ -81,6 +117,7 @@ export function buildWhatWeUnderstoodBullets(model: LivePreviewModel): Understoo
       label: "Type",
       displayValue: dt,
       commitValue: dt,
+      provenance: "confirmed",
     });
   }
 
@@ -92,6 +129,7 @@ export function buildWhatWeUnderstoodBullets(model: LivePreviewModel): Understoo
       displayValue: pay.display,
       commitValue: pay.commit,
       inlineField: "Payment",
+      provenance: "confirmed",
     });
   }
 
@@ -103,6 +141,7 @@ export function buildWhatWeUnderstoodBullets(model: LivePreviewModel): Understoo
       displayValue: truncate(scopeFull),
       commitValue: scopeFull,
       inlineField: "Scope",
+      provenance: "confirmed",
     });
   }
 
@@ -114,15 +153,34 @@ export function buildWhatWeUnderstoodBullets(model: LivePreviewModel): Understoo
       displayValue: truncate(termFull, 56),
       commitValue: termFull,
       inlineField: "Term",
+      provenance: "confirmed",
     });
   }
 
   return slots.slice(0, 4);
 }
 
+function bullet(
+  kind: UnderstoodBulletKind,
+  label: string,
+  display: string,
+  commit: string,
+  provenance: UnderstoodProvenance,
+  inlineField?: LivePreviewInlineField,
+): UnderstoodBullet {
+  return {
+    kind,
+    label,
+    displayValue: display,
+    commitValue: commit,
+    inlineField,
+    needsConfirmation: provenance === "inferred",
+    provenance,
+  };
+}
+
 /**
- * Compact “We captured” summary: canonical agreement type + parties, payment, scope, term only.
- * Type label is single-sourced from guided flow routing (not raw docTitle alone).
+ * Compact “What LawDog understood” summary: type, parties, scope, payment, timing, special terms.
  */
 export function buildWeCapturedSummaryBullets(
   raw: string,
@@ -132,67 +190,92 @@ export function buildWeCapturedSummaryBullets(
   const slots: UnderstoodBullet[] = [];
   const qc = quickCheckConfirmed ?? undefined;
   const canon = getCanonicalAgreementTypeForCreate(raw, model);
-  slots.push({
-    kind: "type",
-    label: canon.isSuggested ? "Suggested agreement type" : "Agreement type",
-    displayValue: canon.isSuggested ? `Suggested type: ${canon.headline}` : canon.headline,
-    commitValue: canon.headline,
-    needsConfirmation: canon.isSuggested,
-  });
+  const structured = parseIntakeToStructuredAgreement(raw);
+  slots.push(
+    bullet(
+      "type",
+      canon.isSuggested ? "Suggested agreement type" : "Agreement type",
+      canon.isSuggested ? `Suggested type: ${canon.headline}` : canon.headline,
+      canon.headline,
+      provenanceFor({ hasValue: Boolean(canon.headline), inferred: canon.isSuggested }),
+    ),
+  );
 
-  const partiesFull = model.partiesStructured
-    ? `${model.partiesStructured.party_1} and ${model.partiesStructured.party_2}`
-    : (model.partiesLine || "").trim();
-  if (partiesFull) {
-    slots.push({
-      kind: "parties",
-      label: "Parties",
-      displayValue: truncate(partiesFull, 96),
-      commitValue: partiesFull,
-      inlineField: "Parties",
-      needsConfirmation: Boolean(model.partiesUncertain) && !qc?.parties,
-    });
-  }
+  const partiesFull = partiesDisplayFromModel(raw, model);
+  slots.push(
+    bullet(
+      "parties",
+      "Contracting parties",
+      partiesFull ? truncate(partiesFull, 96) : "Still needed",
+      partiesFull,
+      provenanceFor({
+        hasValue: Boolean(partiesFull),
+        inferred: Boolean(model.partiesUncertain) && !qc?.parties,
+        confirmed: Boolean(partiesFull) && (!model.partiesUncertain || Boolean(qc?.parties)),
+      }),
+      "Parties",
+    ),
+  );
+
+  const scopeFull = (model.scopeLine || model.servicesLine || structured.scope || "").trim();
+  const ex = model.extraction;
+  const lowScope =
+    Boolean(ex?.scopeInferred) || (ex && ex.scopeConfidence < 0.72) || (ex && ex.scopeSignalPresent && ex.scopeConfidence < 0.78);
+  slots.push(
+    bullet(
+      "scope",
+      "Scope",
+      scopeFull ? truncate(scopeFull) : "Still needed",
+      scopeFull,
+      provenanceFor({
+        hasValue: Boolean(scopeFull),
+        inferred: Boolean(lowScope) && !qc?.scope,
+        confirmed: Boolean(scopeFull) && (!lowScope || Boolean(qc?.scope)),
+      }),
+      "Scope",
+    ),
+  );
 
   const pay = paymentDisplayAndCommit(model);
-  if (pay) {
-    slots.push({
-      kind: "payment",
-      label: "Payment",
-      displayValue: pay.display,
-      commitValue: pay.commit,
-      inlineField: "Payment",
-    });
-  }
+  const payValue = pay?.display || structured.payment.trim();
+  slots.push(
+    bullet(
+      "payment",
+      "Payment",
+      payValue ? truncate(payValue, 52) : "Still needed",
+      pay?.commit || payValue,
+      provenanceFor({ hasValue: Boolean(payValue) }),
+      "Payment",
+    ),
+  );
 
-  const scopeFull = (model.scopeLine || model.servicesLine || "").trim();
-  if (scopeFull) {
-    const ex = model.extraction;
-    const lowScope =
-      Boolean(ex?.scopeInferred) || (ex && ex.scopeConfidence < 0.72) || (ex && ex.scopeSignalPresent && ex.scopeConfidence < 0.78);
-    slots.push({
-      kind: "scope",
-      label: "Scope",
-      displayValue: truncate(scopeFull),
-      commitValue: scopeFull,
-      inlineField: "Scope",
-      needsConfirmation: lowScope && !qc?.scope,
-    });
-  }
+  const termFull = (model.termLine || model.scheduleLine || structured.term || "").trim();
+  const lowTerm = Boolean(ex?.termInferred) || (ex && ex.termConfidence < 0.72);
+  slots.push(
+    bullet(
+      "term",
+      "Timing",
+      termFull ? truncate(termFull, 56) : "Still needed",
+      termFull,
+      provenanceFor({
+        hasValue: Boolean(termFull),
+        inferred: Boolean(lowTerm) && !qc?.term,
+        confirmed: Boolean(termFull) && (!lowTerm || Boolean(qc?.term)),
+      }),
+      "Term",
+    ),
+  );
 
-  const termFull = (model.termLine || model.scheduleLine || "").trim();
-  if (termFull) {
-    const ex = model.extraction;
-    const lowTerm = Boolean(ex?.termInferred) || (ex && ex.termConfidence < 0.72);
-    slots.push({
-      kind: "term",
-      label: "Term",
-      displayValue: truncate(termFull, 56),
-      commitValue: termFull,
-      inlineField: "Term",
-      needsConfirmation: lowTerm && !qc?.term,
-    });
-  }
+  const special = (model.obligationsLine || structured.confidentiality || structured.termination || "").trim();
+  slots.push(
+    bullet(
+      "special",
+      "Important special terms",
+      special ? truncate(special) : "Still needed",
+      special,
+      provenanceFor({ hasValue: Boolean(special) }),
+    ),
+  );
 
   return slots;
 }

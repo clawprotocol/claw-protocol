@@ -23,6 +23,11 @@ describe("intakeContradictionHints", () => {
     expect(hints.some((h) => h.kind === "worker_classification")).toBe(true);
   });
 
+  it("flags conflicting payment amounts", () => {
+    const hints = detectIntakeContradictionHints("Fee $5,000. Price $7,500.");
+    expect(hints.some((h) => h.kind === "payment_amount")).toBe(true);
+  });
+
   it("returns null for clean short intake", () => {
     expect(buildIntakeContradictionWarning("NDA between Acme and Beta, 2 years, Texas")).toBeNull();
   });

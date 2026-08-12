@@ -121,7 +121,7 @@ describe("resolveReviewShellChrome", () => {
       displayPhase: "review",
     });
     clearPaidProPipelineAcceptedCorpusHashForTests();
-    expect(chrome.title).toBe("Agreement draft ready");
+    expect(chrome.title).toBe("Draft created—review recommended");
     expect(chrome.paidProReviewReady).toBe(true);
     expect(chrome.paidProReviewContentReady).toBe(true);
   });

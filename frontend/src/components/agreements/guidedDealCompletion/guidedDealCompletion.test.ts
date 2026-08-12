@@ -512,7 +512,7 @@ describe("guidedDealCompletion", () => {
       ),
     ).toBe(true);
     expect(session!.queue.length).toBeGreaterThanOrEqual(3);
-    expect(session!.queue.length).toBeLessThanOrEqual(5);
+    expect(session!.queue.length).toBeLessThanOrEqual(3);
     const firstQ = getCurrentVariable(session!)?.question ?? "";
     expect(firstQ).toMatch(
       /How should the developer be paid|Who (?:should own the work product|owns deliverables)|total contract fee/i,

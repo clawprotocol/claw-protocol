@@ -17,7 +17,7 @@ describe("paidProReviewUxCopy", () => {
   afterEach(() => cleanup());
 
   it("uses simplified review shell copy without duplicate review/final-agreement phrasing", () => {
-    expect(PAID_PRO_REVIEW_SHELL_TITLE).toBe("Agreement draft ready");
+    expect(PAID_PRO_REVIEW_SHELL_TITLE).toBe("Draft created—review recommended");
     expect(PAID_PRO_REVIEW_SHELL_SUBTITLE).toMatch(/Review the agreement draft below/i);
     expect(PAID_PRO_INLINE_SIGNER_SECTION_TITLE).toBe("Signer details");
     expect(PAID_PRO_REVIEW_SUPPORTING_BEFORE_SIGNERS).not.toMatch(/final agreement/i);
@@ -43,7 +43,7 @@ describe("paidProReviewUxCopy", () => {
       /signer name|legal entity|signature lines/i,
     );
     expect(screen.getByTestId("paid-pro-review-status-panel").textContent).toContain(
-      "Signer details needed",
+      "Add signer details",
     );
     expect(screen.queryByTestId("paid-pro-review-next-step-callout")).toBeNull();
     expect(screen.queryByTestId("paid-pro-final-version-indicator")).toBeNull();

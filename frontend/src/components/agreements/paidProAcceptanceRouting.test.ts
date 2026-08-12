@@ -191,7 +191,7 @@ describe("paidProAcceptanceRouting", () => {
     expect(PAID_PRO_REVIEW_CHIP_VERSION.toLowerCase()).toContain("draft");
     expect(PAID_PRO_REVIEW_CHIP_VERSION.toLowerCase()).not.toContain("pro");
     expect(PAID_PRO_REVIEW_CHIP_STATE.toLowerCase()).toContain("ready");
-    expect(resolvePaidProReviewChipState({ signersReady: false })).toBe("Signer details needed");
+    expect(resolvePaidProReviewChipState({ signersReady: false })).toBe("Add signer details");
   });
 
   it("paid SoT accepted with incomplete signer metadata keeps canonical corpus and skips home regen", () => {

@@ -109,7 +109,7 @@ describe("Pro review footer — AI automation services QA", () => {
       documentText: AUTOMATION_BODY,
     });
     expect(raw).toBe("needs_details");
-    expect(formatFinalizeReadiness(raw)).toBe("Needs details");
+    expect(formatFinalizeReadiness(raw)).toBe("Decisions needed before signature");
     expect(footer.hideFinalizeGapBullets).toBe(true);
   });
 

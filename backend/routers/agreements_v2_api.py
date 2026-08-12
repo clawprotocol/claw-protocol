@@ -2195,6 +2195,7 @@ def premium_refine(request: Request, body: PremiumRefineRequest) -> PremiumRefin
             max_tokens=max_out,
             temperature=0.2 if body.action == "update" else 0.15,
             airlock_profile="agreement_outbound",
+            call_purpose="explicit_revision",
         )
         log.info(
             "claw_premium route=premium_refine openai_response_chars=%d action=%s",
@@ -2937,6 +2938,7 @@ def premium_finalize_audit(request: Request, body: PremiumFinalizeAuditRequest) 
             ],
             model=llm_model,
             max_tokens=max_out,
+            call_purpose="finalize_audit",
             temperature=0.1,
             airlock_profile="agreement_outbound",
         )
@@ -3012,6 +3014,7 @@ def premium_review_route(request: Request, body: PremiumReviewRouteRequest) -> P
             model=llm_model,
             max_tokens=max_out,
             temperature=0.1,
+            call_purpose="review_route",
             airlock_profile="agreement_outbound",
         )
         parsed = _extract_json_object(llm_text)
@@ -4372,6 +4375,7 @@ def _revise_llm_once(
                 {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
             ],
             model=llm_model,
+            call_purpose="structured_revision",
             max_tokens=max_tokens,
             temperature=temperature,
             trace_context=trace_context,
@@ -4571,6 +4575,7 @@ def parse_agreement_intake(request: Request, body: AgreementParseRequest) -> Agr
             temperature=0.0,
             usage_sink=usage_holder,
             airlock_profile="agreement_outbound",
+            call_purpose="structured_extraction",
         )
         parsed = _extract_json_object(llm_text)
         if body.ai_model_class == "premium":
@@ -4665,6 +4670,7 @@ def premium_missing_facts(request: Request, body: PremiumMissingFactsRequest) ->
                 {"role": "user", "content": json.dumps(user_payload, ensure_ascii=False)},
             ],
             model=llm_model,
+            call_purpose="missing_facts",
             max_tokens=max_out,
             temperature=0.1,
             airlock_profile="agreement_outbound",
@@ -4952,6 +4958,7 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Respo
             usage_sink=dq_usage_primary,
             airlock_profile="agreement_outbound",
             airlock_log_context="premium_full_draft:primary",
+            call_purpose="agreement_drafting",
         )
         _primary_finish = str((dq_usage_primary[-1] if dq_usage_primary else {}).get("finish_reason") or "")
         if _primary_finish.strip().lower() == "length":
@@ -5072,6 +5079,8 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Respo
                 temperature=0.15,
                 usage_sink=dq_usage_regen if dq_trace.enabled else None,
                 airlock_profile="agreement_outbound",
+                call_purpose="agreement_drafting",
+                repair_status="regen",
                 airlock_log_context="premium_full_draft:json_parse_regen",
             )
             if dq_trace.enabled:
@@ -5282,6 +5291,8 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Respo
                 temperature=0.22,
                 usage_sink=dq_usage_repair if dq_trace.enabled else None,
                 airlock_profile="agreement_outbound",
+                call_purpose="conditional_repair",
+                repair_status="repair",
                 airlock_log_context="premium_full_draft:repair",
             )
             repair_llm_ms = (time.perf_counter() - llm_repair_started) * 1000
@@ -5367,6 +5378,8 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Respo
                 max_tokens=max_out,
                 temperature=0.12,
                 usage_sink=dq_usage_clean if dq_trace.enabled else None,
+                call_purpose="agreement_drafting",
+                repair_status="retry",
                 airlock_profile="agreement_outbound",
                 airlock_log_context="premium_full_draft:sanitized_retry",
             )
@@ -5797,6 +5810,7 @@ def premium_agreement_review(request: Request, body: PremiumAgreementReviewReque
             model=llm_model,
             max_tokens=max_out,
             temperature=0.2,
+            call_purpose="premium_review",
             airlock_profile="agreement_outbound",
         )
         log.info("claw_premium route=premium_review openai_response_chars=%d", len((llm_text or "").strip()))
@@ -10672,6 +10686,7 @@ def _negotiate_assist_llm(
             model=llm_model,
             max_tokens=768,
             temperature=0.2,
+            call_purpose="recipient_negotiation",
             trace_context=trace_context,
             airlock_profile="agreement_outbound",
             airlock_log_context="negotiation_risk_triage",
