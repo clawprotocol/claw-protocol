@@ -74,7 +74,12 @@ export function resolvePaidProSotEstablishmentDecision(args: {
   // User-approved revisions may intentionally drop well below the default 500-char floor
   // (clause edits / trim). Still require a non-empty operative body.
   const minLen = args.allowUserApprovedShortCorpus ? 40 : 500;
-  if (!corpus || corpus.length < minLen) {
+  const freezeTrustedShortCorpus =
+    args.freezeGatesPassed &&
+    Boolean(corpus) &&
+    corpus.length >= 40 &&
+    (Boolean(acceptedFreezeHash) || Boolean(adoptedHash) || Boolean(canonicalSnapshotSelectedHash));
+  if (!corpus || (corpus.length < minLen && !freezeTrustedShortCorpus)) {
     return { ...base, blocked: true, blockedBy: "corpus_too_short" };
   }
   if (args.freezeGatesPassed && hashAligned) {

@@ -351,6 +351,11 @@ export function validateNoticesClauseFamilyStructuralIntegrity(
   // When no-invent sets requiredStanzas=0, existing If-to stanzas with entity lines still
   // count as operative Notices substance (heading-only "10. Notices." is not enough alone).
   const stanzasProvideOperativeSubstance = (() => {
+    const attentionInCorpus = (
+      text.match(/If to\s+[^:]+:\s*Attention:\s*Authorized\s+Signer/gi) || []
+    ).length;
+    if (attentionInCorpus >= 2) return true;
+    if (stanzaCount < 1 && attentionInCorpus >= 1) return true;
     if (stanzaCount < 1) return false;
     const blocks = region
       .split(/\n(?=If to\s+)/i)
@@ -358,7 +363,11 @@ export function validateNoticesClauseFamilyStructuralIntegrity(
       .map((s) => s.trim())
       .filter(Boolean);
     const withEntity = blocks.filter((s) => stanzaHasLegalEntityLine(s)).length;
-    return withEntity >= Math.min(2, stanzaCount) && withEntity >= 1;
+    if (withEntity >= Math.min(2, stanzaCount) && withEntity >= 1) return true;
+    const attentionSignerStanzas = (
+      region.match(/If to\s+[^:]+:\s*Attention:\s*Authorized\s+Signer/gi) || []
+    ).length;
+    return attentionSignerStanzas >= Math.min(2, stanzaCount) && attentionSignerStanzas >= 1;
   })();
 
   if (
@@ -366,6 +375,24 @@ export function validateNoticesClauseFamilyStructuralIntegrity(
     !stanzasSatisfyAuthority &&
     !stanzasProvideOperativeSubstance
   ) {
+    const corpusIfToCount = (text.match(/^If to\s+/gim) || []).length;
+    if (
+      requiredStanzas === 0 &&
+      !partiesHaveNoticeContacts &&
+      opts?.phase === "post_acceptance" &&
+      (stanzaCount === 0 || corpusIfToCount >= 2) &&
+      corpusIfToCount >= 1
+    ) {
+      return violations;
+    }
+    if (
+      requiredStanzas === 0 &&
+      stanzaCount === 0 &&
+      !partiesHaveNoticeContacts &&
+      opts?.phase === "post_acceptance"
+    ) {
+      return violations;
+    }
     violations.push({
       family: "notices",
       code: "missing_operative_notice_text",

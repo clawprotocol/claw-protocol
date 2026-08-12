@@ -39,6 +39,7 @@ import {
   sealPaidProNoticesExecutionBoundaryInCorpus,
   ensureOperativeNoticeStanzaEntityLinesAtFreeze,
   ensureOperativeNoticeStanzaCountAuthorityAtFreeze,
+  ensureOperativeIfToNoticeDelivery,
   trimOperativeNoticeStanzasToPartyCount,
 } from "./paidProPartyNoticeDetails";
 import {
@@ -932,11 +933,25 @@ function repairPaidProCanonicalNoticeAuthorityAtFreeze(
       acceptedCorpus: sealed.text,
     },
   );
+  let noticeReady = entityHydrated.text;
   if (!hasRealNoticeContacts) {
-    return repairFusedNoticesHeadingToPriorClause(entityHydrated.text).text;
+    const delivery = ensureOperativeIfToNoticeDelivery(
+      noticeReady,
+      noticeValidationCtx.parties,
+      {
+        intakeText: args.intakeText ?? null,
+        draftPartyNames: noticeValidationCtx.draftPartyNames,
+        acceptedCorpus: noticeReady,
+      },
+      { allowEntityOnlyNoticesAtFreeze: true },
+    );
+    noticeReady = delivery.text;
+    if (delivery.repairs.length > 0) {
+      noticeReady = sealPaidProNoticesExecutionBoundaryInCorpus(noticeReady).text;
+    }
   }
   const stanzaCountReconciled = ensureOperativeNoticeStanzaCountAuthorityAtFreeze(
-    entityHydrated.text,
+    noticeReady,
     noticeValidationCtx.parties,
     {
       intakeText: args.intakeText ?? null,
@@ -1045,6 +1060,11 @@ export function assertPaidProFreezeCandidateGates(
   assertPaidProFreezeCandidateManifestCountAgreement(prep, args);
 
   const freezeEntryText = trim(args.text);
+  if (containsUnresolvedRenderTokens(freezeEntryText)) {
+    throw new Error(
+      "[paid-pro-sot-freeze-blocked] unresolved_render_tokens_in_freeze_entry",
+    );
+  }
   if (isSubstantiveBrandLicensingCorpus(freezeEntryText, args.intakeText)) {
     let substantiveText = preserveSubstantiveBrandLicensingCorpusLength(
       freezeEntryText,

@@ -13,9 +13,11 @@ import {
   findNoticesSectionStart,
   repairDuplicateOperativeNoticeStanzas,
   repairFusedNoticesHeadingToPriorClause,
+  repairIncompleteIfToNoticeStanzas,
   resolveNoticeStructuralValidationParties,
   trimOperativeNoticeStanzasToPartyCount,
 } from "./paidProPartyNoticeDetails";
+import { resolveAuthoritativeWitnessIndex } from "./paidProExecutionBlockNormalization";
 import { repairProfessionalCorpusContamination } from "./paidProProfessionalCorpusContamination";
 import type { PaidProPartyRoleContext, PaidProSignerMetadataParty } from "./paidProSignerMetadataAuthority";
 import { isAuthoritativeLegalEntityName } from "./paidProPartyNamePreserve";
@@ -182,8 +184,9 @@ export function applyPaidProNoticeContactAuthority(
     // Positional / metadata placeholders are not notice-contact authority.
     return !/^party\s*\d+$/i.test(name);
   });
-  // Commercial no-invent: legal names alone must not force "provided during signer setup"
-  // notice emails/addresses. Require real contact fields before inventing Notices scaffolding.
+  // Commercial no-invent: legal names alone must not invent placeholder emails/addresses
+  // ("provided during signer setup"). Entity-only Notices scaffolding is allowed only on
+  // freeze/establish surfaces when an execution witness already exists (TEST579).
   const hasRealNoticeContacts = parties.some((p) => {
     const email = String(p.signerEmail || "").trim();
     const address = String(p.partyAddress || "").trim();
@@ -193,16 +196,33 @@ export function applyPaidProNoticeContactAuthority(
     }
     return true;
   });
+  const freezeOrEstablishSurface =
+    /(?:freeze|establish|prep_notice|canonical_notice)/i.test(surface) &&
+    !/(?:compat|compatibility_preview|validation_preview)/i.test(surface);
+  const witnessPresent = resolveAuthoritativeWitnessIndex(out) >= 0;
+  const allowEntityOnlyNoticesAtFreeze = freezeOrEstablishSurface && witnessPresent;
   const mayMutateNoticeScaffolding =
     hasAuthoritativeNoticeParties &&
-    (hasRealNoticeContacts || findNoticesSectionStart(out) >= 0);
+    (hasRealNoticeContacts ||
+      findNoticesSectionStart(out) >= 0 ||
+      allowEntityOnlyNoticesAtFreeze);
 
-  // When Notices already exists (or real contacts authorize scaffolding), reconcile
+  // When Notices already exists (or freeze/entity authority authorizes scaffolding), reconcile
   // heading + If-to stanza coverage. buildIfToNoticeStanza stays entity-only when
   // email/address authority is absent — no "provided during signer setup" invention.
-  // Creating a brand-new Notices region without contacts remains blocked inside
-  // ensureOperativeIfToNoticeDelivery / repairIncompleteIfToNoticeStanzas.
   if (mayMutateNoticeScaffolding) {
+    if (allowEntityOnlyNoticesAtFreeze && findNoticesSectionStart(out) < 0) {
+      const inserted = repairIncompleteIfToNoticeStanzas(
+        out,
+        parties,
+        { ...roleContext, acceptedCorpus: out },
+        { allowEntityOnlyNoticesAtFreeze: true },
+      );
+      if (inserted.repairs.length > 0) {
+        out = inserted.text;
+        repairs.push(...inserted.repairs);
+      }
+    }
     const headingRepair = ensureCanonicalNoticesSectionHeadingForFreeze(out);
     if (headingRepair.repairs.length > 0) {
       out = headingRepair.text;
@@ -225,10 +245,15 @@ export function applyPaidProNoticeContactAuthority(
       out = contaminationRepair.text;
       repairs.push(...contaminationRepair.repairs);
     }
-    const noticeDelivery = ensureOperativeIfToNoticeDelivery(out, parties, {
-      ...roleContext,
-      acceptedCorpus: out,
-    });
+    const noticeDelivery = ensureOperativeIfToNoticeDelivery(
+      out,
+      parties,
+      {
+        ...roleContext,
+        acceptedCorpus: out,
+      },
+      { allowEntityOnlyNoticesAtFreeze },
+    );
     if (noticeDelivery.repairs.length > 0) {
       out = noticeDelivery.text;
       repairs.push(...noticeDelivery.repairs.map((r) => `notice:${r}`));

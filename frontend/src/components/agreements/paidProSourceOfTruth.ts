@@ -32,7 +32,7 @@ import {
   hasPaidProPipelineSessionAcceptance,
   latchPaidProPipelineAcceptanceForConciseAuthoritativeBody,
 } from "./paidProPostAcceptanceValidatorCache";
-import { PAID_PRO_RUNTIME_AUTHORITY_MIN_LEN } from "./paidProAuthorityConstants";
+import { PAID_PRO_AUTHORITY_MIN_LEN, PAID_PRO_RUNTIME_AUTHORITY_MIN_LEN } from "./paidProAuthorityConstants";
 import {
   SUBSTANTIVE_SERVER_DRAFT_MIN_LEN,
   latchAcceptedServerFullDraftAuthority,
@@ -472,8 +472,7 @@ export function establishPaidProSourceOfTruth(args: {
     wireLen < SUBSTANTIVE_SERVER_DRAFT_MIN_LEN &&
     (requestedSource === "server_full_draft" || requestedSource === "server_full_draft_degraded") &&
     !args.allowShorterOverwrite &&
-    !pipelineSessionAccepted &&
-    !substantiveAssessment.qualifiesForServerFullDraftAcceptance
+    !pipelineSessionAccepted
   ) {
     throw new Error(
       `[paid-pro-sot-establishment-blocked] degraded_response_without_substantive_server_full;len=${wireLen}`,
@@ -553,7 +552,12 @@ export function establishPaidProSourceOfTruth(args: {
         allowedToOverride: false,
         reason: `minimum_substance_advisory_substantive_server;malformedOpening=${minimumSubstance.malformedOpening};docLen=${wireLen}`,
       });
-    } else if (intakeHasConcreteServicesFacts && minimumSubstance.missingSections.length > 0) {
+    } else if (
+      intakeHasConcreteServicesFacts &&
+      minimumSubstance.missingSections.length > 0 &&
+      !substantiveServerDraft &&
+      !(professionalCoverage.applies && professionalCoverage.ok)
+    ) {
       throw new Error(
         `[pro-minimum-substance-blocked] missingSections=${minimumSubstance.missingSections.join(",")}`,
       );
@@ -880,7 +884,11 @@ export function establishPaidProSourceOfTruth(args: {
       source: requestedSource,
       integrityOk: true,
       reviewSessionId: record.reviewSessionId ?? null,
-      allowUserApprovedRevision: Boolean(args.allowShorterOverwrite),
+      allowUserApprovedRevision:
+        Boolean(args.allowShorterOverwrite) ||
+        (freezeGatesPassed &&
+          record.text.length >= 40 &&
+          record.text.length < PAID_PRO_AUTHORITY_MIN_LEN),
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

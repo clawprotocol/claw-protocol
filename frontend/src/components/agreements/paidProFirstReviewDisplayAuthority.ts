@@ -17,6 +17,13 @@ import {
 } from "../../agreement/canonicalReviewSnapshotApi";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import { PAID_PRO_AUTHORITY_MIN_LEN } from "./paidProAgreementAuthority";
+
+const PAID_PRO_FREEZE_TRUSTED_SOT_MIN_LEN = 40;
+
+function meetsFirstReviewPaintFloor(len: number, trustedShortSoT = false): boolean {
+  if (len >= PAID_PRO_AUTHORITY_MIN_LEN) return true;
+  return trustedShortSoT && len >= PAID_PRO_FREEZE_TRUSTED_SOT_MIN_LEN;
+}
 import {
   classifyPaidProDocumentBlocks,
   detectPaidProPlainParagraphHeadingLeaks,
@@ -90,10 +97,14 @@ function trim(s: string | null | undefined): string {
 function rejectContaminatedFirstReviewPlain(
   plain: string,
   intakeText: string | null | undefined,
+  opts?: { trustedShortSoT?: boolean },
 ): { plain: string; blocked: boolean; reason: string | null } {
   const intake = trim(intakeText);
   const body = trim(plain);
-  if (!intake || body.length < PAID_PRO_AUTHORITY_MIN_LEN) {
+  const paintFloor = opts?.trustedShortSoT
+    ? PAID_PRO_FREEZE_TRUSTED_SOT_MIN_LEN
+    : PAID_PRO_AUTHORITY_MIN_LEN;
+  if (!intake || body.length < paintFloor) {
     return { plain: body, blocked: false, reason: null };
   }
   const fidelity = detectPaidProCorpusIntakeContamination({
@@ -182,12 +193,12 @@ function resolveAcceptedCanonicalPaintPlain(
   // Immutable review-session authority wins over live SoT / parent props so paint
   // cannot race on missing agreementId or a competing longer persist candidate.
   const fromAuthority = resolvePaidProReviewSessionAuthorityPaintPlain();
-  if (fromAuthority && fromAuthority.plain.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
+  if (fromAuthority && meetsFirstReviewPaintFloor(fromAuthority.plain.length, true)) {
     return { plain: fromAuthority.plain, source: fromAuthority.source };
   }
   const fromParent = trim(args.acceptedCanonicalPlain);
   const fromSoT = hasPaidProSourceOfTruth() ? trim(getPaidProSourceOfTruthText()) : "";
-  if (fromSoT.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
+  if (meetsFirstReviewPaintFloor(fromSoT.length, true)) {
     return { plain: fromSoT, source: PAID_PRO_ACCEPTED_CANONICAL_SOT_DISPLAY_SOURCE };
   }
   if (fromParent.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
@@ -219,7 +230,7 @@ export function resolvePaidProFirstReviewVisibleDisplayPlain(
     // Still paint immutable review-session authority when present — missing
     // displayContext flags must not blank an accepted server snapshot.
     const authorityPaint = resolveAcceptedCanonicalPaintPlain(args);
-    if (authorityPaint.plain.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
+    if (meetsFirstReviewPaintFloor(authorityPaint.plain.length, hasPaidProSourceOfTruth())) {
       return {
         plain: authorityPaint.plain,
         source:
@@ -250,12 +261,8 @@ export function resolvePaidProFirstReviewVisibleDisplayPlain(
       draft as import("../../agreement/agreementTypes").AgreementDraft | null,
     ).trim();
     if (locked.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
-      const plain = resolvePaidProPostFinalizeUserVisiblePlain(
-        locked,
-        draft as import("../../agreement/agreementTypes").AgreementDraft | null,
-      );
       return {
-        plain,
+        plain: locked,
         source: "authoritative_signing_snapshot",
         fallbackReason: null,
         hasSoT,
@@ -268,15 +275,17 @@ export function resolvePaidProFirstReviewVisibleDisplayPlain(
   // One-authority rule: accepted review-session corpus paints immediately and
   // must not be replaced by a diverging verified-GET / pipeline candidate.
   const acceptedCanonical = resolveAcceptedCanonicalPaintPlain(args);
-  if (acceptedCanonical.plain.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
+  if (meetsFirstReviewPaintFloor(acceptedCanonical.plain.length, hasSoT)) {
     if (agreementId && hasVerifiedCommercialDisplayCorpus(agreementId)) {
       const verified = readVerifiedCommercialDisplayCorpus(agreementId);
       const verifiedPlain = trim(verified?.corpusPlain);
       if (
-        verifiedPlain.length >= PAID_PRO_AUTHORITY_MIN_LEN &&
+        meetsFirstReviewPaintFloor(verifiedPlain.length, hasSoT) &&
         hashPaidProCorpus(verifiedPlain) === hashPaidProCorpus(acceptedCanonical.plain)
       ) {
-        const fidelity = rejectContaminatedFirstReviewPlain(verifiedPlain, args.intakeText);
+        const fidelity = rejectContaminatedFirstReviewPlain(verifiedPlain, args.intakeText, {
+          trustedShortSoT: hasSoT,
+        });
         if (fidelity.blocked) {
           return {
             plain: "",
@@ -297,7 +306,9 @@ export function resolvePaidProFirstReviewVisibleDisplayPlain(
         };
       }
     }
-    const fidelity = rejectContaminatedFirstReviewPlain(acceptedCanonical.plain, args.intakeText);
+    const fidelity = rejectContaminatedFirstReviewPlain(acceptedCanonical.plain, args.intakeText, {
+      trustedShortSoT: hasSoT,
+    });
     if (fidelity.blocked) {
       return {
         plain: "",

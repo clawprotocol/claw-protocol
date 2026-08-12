@@ -38,7 +38,7 @@ export function readPaidProReviewSessionAuthority(): PaidProReviewSessionAuthori
 
 export function hasPaidProReviewSessionAuthority(): boolean {
   const a = activeAuthority;
-  return Boolean(a && a.integrityOk && a.corpusPlain.trim().length >= PAID_PRO_AUTHORITY_MIN_LEN);
+  return Boolean(a && a.integrityOk && a.corpusPlain.trim().length >= 40);
 }
 
 /**

@@ -336,7 +336,11 @@ export function noticeStanzaHasLegalEntityLine(stanza: string): boolean {
   const headerEntity = lines[0]?.match(/^If to\s+(.+?)\s*:\s*$/i);
   if (headerEntity && usableEntity(headerEntity[1] ?? "")) return true;
   const fused = lines[0]?.match(/^If to\s+(.+?)\s*:\s*(.+)$/i);
-  return Boolean(fused && usableEntity(fused[2] ?? ""));
+  if (fused) {
+    if (usableEntity(fused[1] ?? "")) return true;
+    if (usableEntity(fused[2] ?? "")) return true;
+  }
+  return false;
 }
 
 function resolveCompleteOperativeNoticesFamilyEndForFreeze(text: string, noticesStart: number): number {
@@ -2163,6 +2167,7 @@ export function repairIncompleteIfToNoticeStanzas(
   corpus: string,
   parties: readonly PaidProSignerMetadataParty[],
   roleContext?: PaidProPartyRoleContext | null,
+  opts?: { allowEntityOnlyNoticesAtFreeze?: boolean },
 ): { text: string; repairs: string[] } {
   const cap = resolveCanonicalNoticePartyCount(parties, roleContext);
   const cappedParties = parties.slice(0, cap);
@@ -2287,8 +2292,16 @@ export function repairIncompleteIfToNoticeStanzas(
         }
         return Boolean(email) || address.length > 8;
       });
-      if (!hasRealNoticeContacts) {
+      if (!hasRealNoticeContacts && !opts?.allowEntityOnlyNoticesAtFreeze) {
         return { text: text.trimEnd(), repairs };
+      }
+      if (opts?.allowEntityOnlyNoticesAtFreeze) {
+        if (BARE_COMMUNICATIONS_SECTION_HEADING_RE.test(text)) {
+          return { text: text.trimEnd(), repairs };
+        }
+        if ((text.match(/^If to\s+/gim) || []).length > 0) {
+          return { text: text.trimEnd(), repairs };
+        }
       }
       const witnessIdx = resolveAuthoritativeWitnessIndex(text);
       const head = witnessIdx >= 0 ? text.slice(0, witnessIdx) : text;
@@ -2599,7 +2612,18 @@ export function ensureOperativeIfToNoticeDelivery(
   corpus: string,
   parties: readonly PaidProSignerMetadataParty[],
   roleContext?: PaidProPartyRoleContext | null,
+  opts?: { allowEntityOnlyNoticesAtFreeze?: boolean },
 ): { text: string; repairs: string[] } {
+  const allowEntityOnlyNoticesAtFreeze = Boolean(opts?.allowEntityOnlyNoticesAtFreeze);
+  if (
+    allowEntityOnlyNoticesAtFreeze &&
+    findNoticesSectionStart(corpus) < 0 &&
+    resolveAuthoritativeWitnessIndex(corpus) >= 0
+  ) {
+    return repairIncompleteIfToNoticeStanzas(corpus, parties, roleContext, {
+      allowEntityOnlyNoticesAtFreeze: true,
+    });
+  }
   const authorityParties = enrichNoticeAuthorityParties(parties, roleContext);
   if (!corpus?.trim() || authorityParties.length < 2) return { text: corpus, repairs: [] };
 
@@ -2614,7 +2638,7 @@ export function ensureOperativeIfToNoticeDelivery(
     return Boolean(email) || address.length > 8;
   });
   // Signer display names alone must not invent Notices / "provided during signer setup".
-  if (!authorityHasRealContactFields && noticesIdx < 0) {
+  if (!authorityHasRealContactFields && noticesIdx < 0 && !allowEntityOnlyNoticesAtFreeze) {
     return { text: corpus, repairs: [] };
   }
   const witnessIdx = resolveAuthoritativeWitnessIndex(corpus);
@@ -2682,7 +2706,9 @@ export function ensureOperativeIfToNoticeDelivery(
     (authorityHasContactToApply && /provided during signer setup/i.test(noticesRegion));
   const hasExecutionPollution = noticesRegionHasExecutionPollution(noticesRegion);
   const hasInlineMalformedNotices = hasInlineMalformedNoticeStanzas(corpus);
-  const hasBareNoticeStanzas = hasBareEntityOnlyNoticeStanzas(corpus);
+  const hasBareNoticeStanzas = allowEntityOnlyNoticesAtFreeze
+    ? false
+    : hasBareEntityOnlyNoticeStanzas(corpus);
   const operativeStanzaCount = countOperativeIfToStanzasInRegion(noticesRegion);
   const stanzaCountMismatch = operativeStanzaCount < authorityParties.length;
   if (
@@ -2708,7 +2734,9 @@ export function ensureOperativeIfToNoticeDelivery(
     }
     return { text: corpus, repairs: [] };
   }
-  const repaired = repairIncompleteIfToNoticeStanzas(corpus, authorityParties, roleContext);
+  const repaired = repairIncompleteIfToNoticeStanzas(corpus, authorityParties, roleContext, {
+    allowEntityOnlyNoticesAtFreeze,
+  });
   const witnessSeparated = ensureBlankLineBeforeWitnessBlock(repaired.text);
   const merged = {
     text: witnessSeparated.text,
