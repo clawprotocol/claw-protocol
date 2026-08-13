@@ -56,15 +56,9 @@ const ACME_EMAIL = "cryptocurated21+acme@gmail.com";
 const LAWDOG_EMAIL = "cryptocurated21+lawdog@gmail.com";
 const SIGNER_TITLE = "Authorized Signer";
 
-function padCorpus(body: string): string {
-  const pad = "The parties agree to cooperate in good faith on the engagement terms. ".repeat(40);
-  return `${body.trim()}\n\n${pad}`;
-}
-
-/** Pre-signer first-review draft with placeholders + blank execution lines (staging repro). */
 function buildLawDogAcmePreSignerCorpus(): string {
-  return padCorpus(
-    [
+  return [
+      "SERVICES AGREEMENT",
       "SERVICES AGREEMENT",
       "",
       `This Services Agreement (this "Agreement") is entered into as of the Effective Date by and between ${ACME} ("Client") and ${LAWDOG} ("Service Provider").`,
@@ -116,8 +110,7 @@ function buildLawDogAcmePreSignerCorpus(): string {
       "Name: __________________________",
       "Title: __________________________",
       "Date: __________________________",
-    ].join("\n"),
-  );
+    ].join("\n");
 }
 
 function buildAcmeLawDogAuthority() {
@@ -195,6 +188,8 @@ describe("LawDog/Acme signer finalize → signing-ready document hydration P0", 
       repairRecital: false,
     });
     expect(hydrated.rejected).not.toBe(true);
+    expect(hydrated.corpus).not.toMatch(/provided during signer setup/i);
+    expect(countBlankSignerMetadataLinesInExecutionBlock(hydrated.corpus)).toBe(0);
     expect(isPaidProSigningReadyHydratedCorpus(hydrated.corpus)).toBe(true);
 
     const signerMetadata = authorityPartiesToRecipientMetadata(authority.parties);
@@ -282,5 +277,100 @@ describe("LawDog/Acme signer finalize → signing-ready document hydration P0", 
       signingReadyHydrated: true,
     });
     expect(trust.find((s) => s.id === "signature_links_ready")?.label).toBe("Ready to create signing links");
+  });
+
+  it("complete 3-party and 4-party agreements establish authority and reach signer finalization", () => {
+    const cases: Array<{ names: string[]; signers: string[]; emails: string[] }> = [
+      {
+        names: ["Red Mesa Logistics LLC", "Harbor Peak Automation LLC", "Blue Canyon Analytics LLC"],
+        signers: ["Sarah Mitchell", "Michael Torres", "Priya Shah"],
+        emails: ["sarah@example.test", "michael@example.test", "priya@example.test"],
+      },
+      {
+        names: [
+          "Redwood Biologics, Inc.",
+          "Summit AI Consulting LLC",
+          "Blue Harbor Systems LLC",
+          "Iron Gate Security LLC",
+        ],
+        signers: ["Ava Chen", "Noah Patel", "Maya Brooks", "Luis Ortega"],
+        emails: ["ava@example.test", "noah@example.test", "maya@example.test", "luis@example.test"],
+      },
+    ];
+    for (const c of cases) {
+      reset();
+      const body = [
+        "PROFESSIONAL SERVICES AGREEMENT",
+        "",
+        `This Agreement is entered into as of the Effective Date by and between ${c.names.join(", ")}.`,
+        "",
+        "1. Services. The providers will deliver the scoped professional services.",
+        "2. Fees and Payment. Fees are due monthly. Consideration is $10,000.",
+        "3. Term. The term is twelve (12) months. Either party may terminate for material breach.",
+        "4. Confidentiality. Each party will protect Confidential Information.",
+        "5. Governing Law. Delaware law governs this Agreement.",
+        "6. Notices. Notices may be sent by email.",
+        "7. Electronic Signatures. Electronic signatures and counterparts are permitted.",
+        "",
+        "IN WITNESS WHEREOF, the Parties execute this Agreement.",
+        "",
+        ...c.names.flatMap((name) => [
+          `${name}`,
+          "By: __________________________",
+          "Name: __________________________",
+          "Title: __________________________",
+          "",
+        ]),
+      ].join("\n");
+      expect(body.length).toBeLessThan(10_000);
+      establishPaidProSourceOfTruth({
+        text: body,
+        source: "server_full_draft",
+        intakeText: `Agreement among ${c.names.join(", ")} for professional services.`,
+        generationOutcome: "ok",
+      });
+      const extraEmails = c.emails.slice(2);
+      const authority = buildLivePaidProSignerMetadataAuthority(
+        {
+          partyCount: c.names.length,
+          recipient1Name: c.names[0],
+          recipient2Name: c.names[1],
+          recipient1Email: c.emails[0],
+          recipient2Email: c.emails[1],
+          extraPartyReviewEmails: extraEmails,
+          partySignerNames: c.signers,
+          partySignerTitles: c.signers.map(() => SIGNER_TITLE),
+          partyAddresses: c.names.map(() => ""),
+        },
+        "live_ui",
+        {
+          intakeText: `Agreement among ${c.names.join(", ")} for professional services.`,
+          draftPartyNames: c.names,
+        },
+      );
+      setConsumedPaidProSignerMetadataAuthority(authority);
+      const hydrated = buildHydratedAuthoritativeSigningCorpusFromAuthority({
+        rawCorpus: getPaidProSourceOfTruthText(),
+        authority,
+        intakeRaw: `Agreement among ${c.names.join(", ")} for professional services.`,
+        surface: "finalize_paid_pro_signer_metadata",
+        signatureRegionOnly: true,
+        repairRecital: false,
+      });
+      expect(hydrated.rejected).not.toBe(true);
+      expect(authority.parties).toHaveLength(c.names.length);
+      for (let i = 0; i < c.signers.length; i += 1) {
+        expect(authority.parties[i]?.signerName).toBe(c.signers[i]);
+        expect(authority.parties[i]?.signerEmail).toBe(c.emails[i]);
+      }
+      const handoff = evaluatePaidProSigningHandoffReadiness({
+        intakeText: `Agreement among ${c.names.join(", ")} for professional services.`,
+        draftPartyNames: c.names,
+        requiredPartyCount: c.names.length,
+      });
+      expect(handoff.ok).toBe(true);
+      const witnessHits = getPaidProSourceOfTruthText().match(/IN WITNESS WHEREOF/gi) ?? [];
+      expect(witnessHits.length).toBe(1);
+    }
   });
 });

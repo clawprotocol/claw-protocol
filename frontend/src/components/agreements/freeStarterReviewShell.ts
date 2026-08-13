@@ -207,6 +207,10 @@ export function shouldGateGuidedRenderAuthorityForFreeReview(
     premiumPaidDocumentSurface: boolean;
   },
 ): boolean {
+  // Paid-Pro entitlement or an authoritative paid-Pro create-flow shell must never
+  // take the free-review guided-authority gate — even when local-org bootstrap
+  // refuses to resolve the shell from workspaceProEntitled alone.
+  if (input.workspaceProEntitled) return false;
   if (resolveAuthoritativeCreateFlowReviewShell(input) === "paid_pro") return false;
   if (input.isFreeStreamlineDraftReview || input.isFreeStarterReviewSurface) return true;
   if (!input.premiumPaidDocumentSurface) return true;

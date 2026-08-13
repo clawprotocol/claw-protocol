@@ -51,7 +51,17 @@ export function feedbackAfterDirectSaveFailed(): string {
 }
 
 export function feedbackAfterModelFailure(): string {
-  return "LawDog could not finish this request. Your notes and last saved agreement are unchanged. Retry when you are ready.";
+  return "Your information is unchanged.";
+}
+
+export function feedbackAfterFailedCreate(safeReason?: string | null): JourneyActionFeedback {
+  const reason = (safeReason || "").trim();
+  const body = reason
+    ? `Your information is unchanged. ${reason}`
+    : "Your information is unchanged.";
+  return feedbackFailed("create_agreement", "LawDog couldn't create the agreement.", body, {
+    remedyLabel: "Retry",
+  });
 }
 
 export function feedbackLinksInvalidated(): string {

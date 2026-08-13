@@ -61,13 +61,7 @@ import {
 } from "./hydratePaidProExecutionBlockWithSignerMetadata";
 import { repairExecutionBlockEntityHeadingLines } from "./paidProExecutionBlockEntityHeading";
 import { resolveAuthoritativeWitnessIndex } from "./paidProExecutionBlockNormalization";
-import { PAID_PRO_AUTHORITY_MIN_LEN } from "./paidProAgreementAuthority";
-import { readPaidProPipelineAcceptedCorpusBody } from "./paidProPipelineAcceptedCorpus";
-import {
-  getPaidProSourceOfTruth,
-  hasPaidProSourceOfTruth,
-  hashPaidProCorpus,
-} from "./paidProSourceOfTruth";
+import { hashPaidProCorpus } from "./paidProSourceOfTruth";
 import { resolvePaidProFrozenAuthoritativeHash } from "./paidProPostFreezeCorpusInvariant";
 import {
   ensureOperativeIfToNoticeDelivery,
@@ -202,48 +196,6 @@ export function buildHydratedAuthoritativeSigningCorpusFromAuthority(args: {
   }
 
   if (
-    isFinalizeSurface &&
-    args.signatureRegionOnly === true &&
-    !args.repairRecital
-  ) {
-    const rawTrim = rawCorpus.trim();
-    const latchedAccepted = readPaidProPipelineAcceptedCorpusBody()?.trim() ?? "";
-    if (latchedAccepted.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
-      const roleContext = {
-        intakeText: args.intakeRaw,
-        acceptedCorpus: latchedAccepted,
-      };
-      return {
-        corpus: latchedAccepted,
-        identities: authorityPartiesToCanonicalPartyIdentities(args.authority.parties, roleContext),
-        signaturePolishCount: 0,
-        partyNoticeApplied: false,
-        rejected: false,
-      };
-    }
-    if (hasPaidProSourceOfTruth()) {
-      const sot = getPaidProSourceOfTruth();
-      if (
-        sot &&
-        sot.text.trim().length >= PAID_PRO_AUTHORITY_MIN_LEN &&
-        (rawTrim === sot.text.trim() || hashPaidProCorpus(rawTrim) === sot.hash)
-      ) {
-        const roleContext = {
-          intakeText: args.intakeRaw,
-          acceptedCorpus: sot.text.trim(),
-        };
-        return {
-          corpus: sot.text.trim(),
-          identities: authorityPartiesToCanonicalPartyIdentities(args.authority.parties, roleContext),
-          signaturePolishCount: 0,
-          partyNoticeApplied: false,
-          rejected: false,
-        };
-      }
-    }
-  }
-
-  if (
     shouldUseFrozenServerFullSourceOfTruthMinimalHydration(rawCorpus) ||
     (isFinalizeSurface && shouldPreserveFrozenCanonicalCorpusOnSignerFinalize(rawCorpus))
   ) {
@@ -304,6 +256,7 @@ export function buildHydratedAuthoritativeSigningCorpusFromAuthority(args: {
   });
   const witnessFirstFinalizeNotices =
     isFinalizeSurface &&
+    !signatureRegionOnly &&
     authorityHasRealContact &&
     noticesIdx < 0 &&
     resolveAuthoritativeWitnessIndex(rawCorpus) >= 0;

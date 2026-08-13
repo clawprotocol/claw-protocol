@@ -39,6 +39,17 @@ async function capture(page: Page, slug: string): Promise<void> {
 }
 
 async function fulfillUsageAndPolicy(page: Page): Promise<void> {
+  await page.route("**/health**", async (route) => {
+    if (route.request().method() !== "GET") {
+      await route.fallback();
+      return;
+    }
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ ok: true }),
+    });
+  });
   await page.route("**/api/agreements/usage**", async (route) => {
     if (route.request().method() !== "GET") {
       await route.fallback();
@@ -69,24 +80,29 @@ async function fulfillUsageAndPolicy(page: Page): Promise<void> {
   });
 }
 
-function installDistinctLinkMint(page: Page, count: number, fail = false): { minted: string[] } {
-  const minted: string[] = [];
+function installDistinctLinkMint(
+  page: Page,
+  count: number,
+  ctl: { fail: boolean; minted: string[] },
+): void {
   void page.route("**/recipient-links/mint**", async (route) => {
     if (route.request().method() !== "POST") {
       await route.fallback();
       return;
     }
-    if (fail) {
+    if (ctl.fail) {
       await route.fulfill({
         status: 503,
         contentType: "application/json",
-        body: JSON.stringify({ detail: { code: "recipient_link_mint_failed", message: "Link service unavailable." } }),
+        body: JSON.stringify({
+          detail: { code: "recipient_link_mint_failed", message: "Link service unavailable." },
+        }),
       });
       return;
     }
     const rows = Array.from({ length: count }, (_, i) => {
-      const href = `https://example.test/review/gtm/${i + 1}-${Date.now()}`;
-      minted.push(href);
+      const href = `https://example.test/review/gtm/${i + 1}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+      ctl.minted.push(href);
       return {
         partyId: `p-${i + 1}`,
         displayName: `Party ${i + 1}`,
@@ -105,7 +121,7 @@ function installDistinctLinkMint(page: Page, count: number, fail = false): { min
       await route.fallback();
       return;
     }
-    if (fail) {
+    if (ctl.fail) {
       await route.fulfill({
         status: 503,
         contentType: "application/json",
@@ -113,20 +129,19 @@ function installDistinctLinkMint(page: Page, count: number, fail = false): { min
       });
       return;
     }
-    const href = `https://example.test/private/${minted.length + 1}-${Date.now()}`;
-    minted.push(href);
+    const href = `https://example.test/private/${ctl.minted.length + 1}-${Date.now()}`;
+    ctl.minted.push(href);
     await route.fulfill({
       status: 200,
       contentType: "application/json",
       body: JSON.stringify({
-        token: `tok_gtm_${minted.length}_${Date.now()}`,
+        token: `tok_gtm_${ctl.minted.length}_${Date.now()}`,
         expires_in_seconds: 86400,
         locked_version_id: "v1",
         review_url: href,
       }),
     });
   });
-  return { minted };
 }
 
 async function openEntitledCreate(page: Page): Promise<void> {
@@ -145,6 +160,13 @@ async function clickCreateAgreement(page: Page): Promise<void> {
   const btn = page.getByRole("button", { name: /create agreement/i }).first();
   await expect(btn).toBeVisible({ timeout: 20_000 });
   await btn.click();
+}
+
+async function fillRecipientField(page: Page, key: string, value: string): Promise<void> {
+  const input = page.locator(`[data-claw-recipient-field="${key}"]`).first();
+  await expect(input).toBeVisible({ timeout: 30_000 });
+  await input.scrollIntoViewIfNeeded();
+  await input.fill(value);
 }
 
 for (const vp of VIEWPORTS) {
@@ -184,6 +206,7 @@ for (const vp of VIEWPORTS) {
       await capture(page, `${vp.name}-01-sparse-blocked`);
 
       const remedy = page.getByTestId("journey-action-remedy").or(clarification.getByRole("button").last());
+      await expect(remedy.first()).toBeVisible({ timeout: 10_000 });
       await remedy.first().click();
       const party1 = page.getByTestId("intake-party-1-name");
       await expect(party1).toBeVisible({ timeout: 10_000 });
@@ -201,35 +224,64 @@ for (const vp of VIEWPORTS) {
       await fillCreateIntake(page, SHARED_TWO_PARTY_INTAKE);
       await clickCreateAgreement(page);
 
-      await expect(page.getByText(/Red Mesa Logistics|Harbor Peak Automation/i).first()).toBeVisible({
+      await expect(page.getByText(/Red Mesa Logistics LLC/i).first()).toBeVisible({
         timeout: 120_000,
       });
+      await expect(page.getByText(/Harbor Peak Automation LLC/i).first()).toBeVisible({
+        timeout: 20_000,
+      });
+      await expect(page.getByText(/We cannot reach the LawDog API/i)).toHaveCount(0);
+      const createdBanner = page.getByTestId("journey-action-banner");
+      await expect(createdBanner).toBeVisible({ timeout: 30_000 });
+      await expect(createdBanner).toHaveAttribute("data-journey-action-kind", "succeeded");
+      await expect(createdBanner).toContainText(/Agreement created/i);
       await capture(page, `${vp.name}-02-two-party-created`);
 
       const editToggle = page.getByTestId("simple-pro-edit-agreement-text-toggle");
-      if (await editToggle.isVisible().catch(() => false)) {
-        await editToggle.click();
-        const editor = page.getByTestId("simple-pro-edit-agreement-plain-input");
-        await expect(editor).toBeVisible({ timeout: 15_000 });
-        const original = await editor.inputValue();
-        await editor.fill(`${original}\n\nDirect edit: warehouse hours are 8am–6pm.`);
-        await expect(page.getByText(/unsaved|not saved/i).first()).toBeVisible({ timeout: 10_000 }).catch(() => undefined);
-        await page.getByTestId("simple-pro-save-agreement-edits").click();
-        await expect(page.getByText(/Changes saved|Saved/i).first()).toBeVisible({ timeout: 20_000 });
-        await capture(page, `${vp.name}-02-direct-edit-saved`);
-      }
+      await expect(editToggle).toBeVisible({ timeout: 30_000 });
+      await editToggle.click();
+      const editor = page.getByTestId("simple-pro-edit-agreement-plain-input");
+      await expect(editor).toBeVisible({ timeout: 15_000 });
+      const original = await editor.inputValue();
+      const edited = `${original}\n\nDirect edit: warehouse hours are 8am–6pm.`;
+      await editor.fill(edited);
+      await expect(page.getByTestId("simple-pro-unsaved")).toBeVisible({ timeout: 10_000 });
+      await expect(page.getByTestId("simple-pro-unsaved")).toContainText(/Unsaved changes/i);
+      await page.getByTestId("simple-pro-save-agreement-edits").click();
+      await expect(page.getByText(/Saving changes|Saving…/i).first()).toBeVisible({ timeout: 10_000 });
+      await expect(page.getByTestId("simple-pro-save-ack")).toBeVisible({ timeout: 20_000 });
+      await expect(page.getByTestId("journey-action-banner")).toContainText(/Changes saved/i);
+      await capture(page, `${vp.name}-02-direct-edit-saved`);
 
-      await page.route("**/api/agreements/draft**", async (route) => {
-        if (route.request().method() === "POST" || route.request().method() === "PUT" || route.request().method() === "PATCH") {
+      await page.reload({ waitUntil: "domcontentloaded" });
+      await waitForAuthoritativeProReview(page);
+      await expect(page.getByText(/warehouse hours are 8am/i).first()).toBeVisible({ timeout: 60_000 });
+
+      await page.route("**/canonical-review-snapshot**", async (route) => {
+        if (route.request().method() === "POST") {
           await route.fulfill({
             status: 503,
             contentType: "application/json",
-            body: JSON.stringify({ detail: "persist_failed" }),
+            body: JSON.stringify({ detail: { code: "snapshot_persist_failed", message: "Could not lock this revision." } }),
           });
           return;
         }
         await route.fallback();
       });
+
+      const editToggleAfter = page.getByTestId("simple-pro-edit-agreement-text-toggle");
+      await expect(editToggleAfter).toBeVisible({ timeout: 30_000 });
+      await editToggleAfter.click();
+      const editorAfter = page.getByTestId("simple-pro-edit-agreement-plain-input");
+      await expect(editorAfter).toBeVisible({ timeout: 15_000 });
+      const keep = `${await editorAfter.inputValue()}\n\nFailed-save marker remains in the editor.`;
+      await editorAfter.fill(keep);
+      await page.getByTestId("simple-pro-save-agreement-edits").click();
+      await expect(page.getByTestId("journey-action-banner")).toHaveAttribute("data-journey-action-kind", "failed", {
+        timeout: 20_000,
+      });
+      await expect(page.getByTestId("journey-action-banner")).toContainText(/unsaved text is still in the editor|Save did not complete/i);
+      await expect(editorAfter).toHaveValue(/Failed-save marker remains in the editor/);
     });
 
     test("3. three-party review track: emails required, bad email focuses field, links + failure", async ({
@@ -239,46 +291,50 @@ for (const vp of VIEWPORTS) {
       await clearRcApiMocks(page);
       await seedRcPaidCheckoutReturn(page, SHARED_TRIPARTITE_INTAKE, "ag_gtm_three_party");
       await installRcPaidProApiRoutes(page, drafts, { draftId: "ag_gtm_three_party", partyCount: 3 });
-      const mint = installDistinctLinkMint(page, 3);
+      const mint = { fail: true, minted: [] as string[] };
+      installDistinctLinkMint(page, 3, mint);
 
       await page.goto("/app/create?checkout=success", { waitUntil: "domcontentloaded" });
       await waitForAuthoritativeProReview(page);
       await waitForPaidProReviewDecisionSurface(page);
-      await expect(page.getByText(/Red Mesa Logistics|Harbor Peak Automation|Blue Canyon/i).first()).toBeVisible({
-        timeout: 30_000,
-      });
+      await expect(page.getByText(/Red Mesa Logistics/i).first()).toBeVisible({ timeout: 30_000 });
+      await expect(page.getByText(/Harbor Peak Automation/i).first()).toBeVisible({ timeout: 10_000 });
+      await expect(page.getByText(/Blue Canyon/i).first()).toBeVisible({ timeout: 10_000 });
       await capture(page, `${vp.name}-03-three-party-review`);
 
-      const reviewBtn = page
-        .getByTestId("simple-pro-send-for-review")
-        .or(page.getByRole("button", { name: /Send for review|Create review links/i }))
-        .first();
-      if (await reviewBtn.isVisible().catch(() => false)) {
-        await reviewBtn.click();
-      }
+      const reviewBtn = page.getByTestId("simple-pro-send-for-review").first();
+      await expect(reviewBtn).toBeVisible({ timeout: 30_000 });
+      await reviewBtn.click();
 
-      const email2 = page.locator('[data-claw-recipient-field="r2-email"]').first();
-      if (await email2.isVisible().catch(() => false)) {
-        await email2.fill("not-an-email");
-        const createReview = page.getByRole("button", { name: /Create review links/i }).first();
-        if (await createReview.isVisible().catch(() => false)) {
-          await createReview.click();
-          await expect(page.locator(":focus")).toBeVisible({ timeout: 10_000 });
-          await capture(page, `${vp.name}-03-bad-email-focus`);
-          await email2.fill("reviewer2@example.test");
-        }
-      }
+      await fillRecipientField(page, "r1-email", "reviewer1@example.test");
+      await fillRecipientField(page, "r2-email", "not-an-email");
+      await fillRecipientField(page, "party-2-email", "reviewer3@example.test");
 
       const createReview = page.getByRole("button", { name: /Create review links/i }).first();
-      if (await createReview.isVisible().catch(() => false)) {
-        await createReview.click();
-        await expect(page.getByText(/Nothing was emailed|nothing is emailed|does not email/i).first()).toBeVisible({
-          timeout: 30_000,
-        });
-        await capture(page, `${vp.name}-03-review-links-created`);
-      }
+      await expect(createReview).toBeVisible({ timeout: 20_000 });
+      await createReview.click();
+      const focused = page.locator(":focus");
+      await expect(focused).toBeVisible({ timeout: 10_000 });
+      await expect(focused).toHaveAttribute("data-claw-recipient-field", "r2-email");
+      await capture(page, `${vp.name}-03-bad-email-focus`);
 
-      expect(mint.minted.length).toBeGreaterThanOrEqual(0);
+      await fillRecipientField(page, "r2-email", "reviewer2@example.test");
+      await createReview.click();
+      await expect(page.getByTestId("journey-action-banner")).toHaveAttribute("data-journey-action-kind", "failed", {
+        timeout: 20_000,
+      });
+      await expect(page.locator('[data-claw-recipient-field="r1-email"]').first()).toHaveValue("reviewer1@example.test");
+      await expect(page.locator('[data-claw-recipient-field="r2-email"]').first()).toHaveValue("reviewer2@example.test");
+      await expect(page.locator('[data-claw-recipient-field="party-2-email"]').first()).toHaveValue(
+        "reviewer3@example.test",
+      );
+
+      mint.fail = false;
+      await createReview.click();
+      await expect(page.getByText(/Nothing was emailed|does not email/i).first()).toBeVisible({ timeout: 30_000 });
+      const unique = [...new Set(mint.minted)];
+      expect(unique.length).toBe(3);
+      await capture(page, `${vp.name}-03-review-links-created`);
     });
 
     test("4. four-party signature track: missing field, four links, edit invalidates links", async ({ page }) => {
@@ -286,48 +342,70 @@ for (const vp of VIEWPORTS) {
       await clearRcApiMocks(page);
       await seedRcPaidCheckoutReturn(page, RC_QUAD_PARTY_INTAKE, "ag_gtm_four_party");
       await installRcPaidProApiRoutes(page, drafts, { draftId: "ag_gtm_four_party", partyCount: 4 });
-      installDistinctLinkMint(page, 4);
+      const mint = { fail: false, minted: [] as string[] };
+      installDistinctLinkMint(page, 4, mint);
 
       await page.goto("/app/create?checkout=success", { waitUntil: "domcontentloaded" });
       await waitForAuthoritativeProReview(page);
       await waitForPaidProReviewDecisionSurface(page);
-      await expect(page.getByText(/Redwood|Summit|Blue Harbor|Iron Gate/i).first()).toBeVisible({
-        timeout: 30_000,
-      });
+      await expect(page.getByText(/Redwood/i).first()).toBeVisible({ timeout: 30_000 });
+      await expect(page.getByText(/Summit/i).first()).toBeVisible({ timeout: 10_000 });
+      await expect(page.getByText(/Blue Harbor/i).first()).toBeVisible({ timeout: 10_000 });
+      await expect(page.getByText(/Iron Gate/i).first()).toBeVisible({ timeout: 10_000 });
       await capture(page, `${vp.name}-04-four-party-signers`);
 
       const signatureTrack = page
         .getByTestId("paid-pro-forced-prepare-signatures")
         .or(page.getByTestId("simple-pro-send-for-signature"))
-        .or(page.getByRole("button", { name: /Prepare for signing|Send for signature|Add signers/i }))
         .first();
-      if (await signatureTrack.isVisible().catch(() => false)) {
-        await signatureTrack.click();
-      }
+      await expect(signatureTrack).toBeVisible({ timeout: 30_000 });
+      await signatureTrack.click();
 
-      const createSigning = page.getByRole("button", { name: /Create signing links|Prepare for signing|Send for signature/i }).first();
-      if (await createSigning.isVisible().catch(() => false)) {
-        await createSigning.click();
-        const missing = page.getByText(/authorized signer|signer email|Party \d needs/i).first();
-        if (await missing.isVisible().catch(() => false)) {
-          await capture(page, `${vp.name}-04-missing-signer-field`);
-        }
-      }
+      await expect(page.locator('[data-claw-recipient-field="r1-signer-name"]').first()).toBeVisible({
+        timeout: 30_000,
+      });
+      await expect(page.locator('[data-claw-recipient-field="r2-signer-name"]').first()).toBeVisible();
+      await expect(page.locator('[data-claw-recipient-field="party-2-signer-name"]').first()).toBeVisible();
+      await expect(page.locator('[data-claw-recipient-field="party-3-signer-name"]').first()).toBeVisible();
+
+      await fillRecipientField(page, "r1-signer-name", "Redwood Biologics, Inc.");
+      await fillRecipientField(page, "r1-email", "ava@example.test");
+      const createSigning = page.getByRole("button", { name: /Create signing links|Prepare for signing/i }).first();
+      await expect(createSigning).toBeVisible({ timeout: 20_000 });
+      await createSigning.click();
+      await expect(page.getByText(/authorized signer name/i).first()).toBeVisible({ timeout: 15_000 });
+      await expect(page.locator(":focus")).toHaveAttribute("data-claw-recipient-field", "r1-signer-name");
+      await capture(page, `${vp.name}-04-missing-signer-field`);
+
+      await fillRecipientField(page, "r1-name", "Redwood Biologics, Inc.");
+      await fillRecipientField(page, "r1-signer-name", "Ava Chen");
+      await fillRecipientField(page, "r1-email", "ava@example.test");
+      await fillRecipientField(page, "r2-name", "Summit AI Consulting LLC");
+      await fillRecipientField(page, "r2-signer-name", "Noah Patel");
+      await fillRecipientField(page, "r2-email", "noah@example.test");
+      await fillRecipientField(page, "party-2-legal-name", "Blue Harbor Systems LLC");
+      await fillRecipientField(page, "party-2-signer-name", "Maya Brooks");
+      await fillRecipientField(page, "party-2-email", "maya@example.test");
+      await fillRecipientField(page, "party-3-legal-name", "Iron Gate Security LLC");
+      await fillRecipientField(page, "party-3-signer-name", "Luis Ortega");
+      await fillRecipientField(page, "party-3-email", "luis@example.test");
+
+      await createSigning.click();
+      await expect(page.getByText(/Nothing was emailed|does not email/i).first()).toBeVisible({ timeout: 30_000 });
+      expect([...new Set(mint.minted)].length).toBe(4);
 
       const editToggle = page.getByTestId("simple-pro-edit-agreement-text-toggle");
-      if (await editToggle.isVisible().catch(() => false)) {
-        await editToggle.click();
-        const editor = page.getByTestId("simple-pro-edit-agreement-plain-input");
-        if (await editor.isVisible().catch(() => false)) {
-          const original = await editor.inputValue();
-          await editor.fill(`${original}\n\nPost-link edit requires new links.`);
-          await page.getByTestId("simple-pro-save-agreement-edits").click();
-          await expect(
-            page.getByText(/changed after|new links|refresh signing|recreate/i).first(),
-          ).toBeVisible({ timeout: 20_000 });
-          await capture(page, `${vp.name}-04-links-invalidated`);
-        }
-      }
+      await expect(editToggle).toBeVisible({ timeout: 20_000 });
+      await editToggle.click();
+      const editor = page.getByTestId("simple-pro-edit-agreement-plain-input");
+      await expect(editor).toBeVisible({ timeout: 15_000 });
+      const original = await editor.inputValue();
+      await editor.fill(`${original}\n\nPost-link edit requires new links.`);
+      await page.getByTestId("simple-pro-save-agreement-edits").click();
+      await expect(
+        page.getByText(/changed after|no longer valid|new links|refresh signing|recreate/i).first(),
+      ).toBeVisible({ timeout: 20_000 });
+      await capture(page, `${vp.name}-04-links-invalidated`);
     });
 
     test("5. model timeout never erases intake or shows false success", async ({ page }) => {
@@ -343,6 +421,7 @@ for (const vp of VIEWPORTS) {
             code: "premium_full_draft_unavailable",
             message: "The Pro draft did not complete. Your notes are still here — retry.",
           },
+          failRemaining: { current: 1 },
         },
       });
 
@@ -351,22 +430,27 @@ for (const vp of VIEWPORTS) {
       await fillCreateIntake(page, intake);
       await clickCreateAgreement(page);
 
-      await expect(
-        page.getByText(/could not finish this request|notes and last saved agreement are unchanged|Agreement was not created/i).first(),
-      ).toBeVisible({ timeout: 40_000 });
-      await expect(page.getByText(/^Agreement created\b/i)).toHaveCount(0);
-      await capture(page, `${vp.name}-05-model-failure-retry`);
       const banner = page.getByTestId("journey-action-banner");
-      if (await banner.isVisible().catch(() => false)) {
-        await expect(banner).toHaveAttribute("data-journey-action-kind", "failed");
-      }
-      const intakePreserved = await page.evaluate(() => {
-        const nodes = Array.from(document.querySelectorAll("textarea, input, [contenteditable='true']"));
-        return nodes.some((el) =>
-          /Acme LLC and Beta Inc/i.test((el as HTMLTextAreaElement).value || el.textContent || ""),
-        );
+      await expect(banner).toBeVisible({ timeout: 40_000 });
+      await expect(banner).toHaveAttribute("data-journey-action-kind", "failed");
+      await expect(banner).toContainText(/couldn't create the agreement/i);
+      await expect(banner).toContainText(/Your information is unchanged/i);
+      await expect(page.getByText(/^Agreement created\b/i)).toHaveCount(0);
+      await expect(page.getByTestId("journey-action-remedy")).toBeVisible();
+      await capture(page, `${vp.name}-05-model-failure-retry`);
+
+      const intakeBox = page.getByRole("textbox").first();
+      await expect(intakeBox).toBeVisible({ timeout: 15_000 });
+      await expect(intakeBox).toHaveValue(/Acme LLC and Beta Inc/);
+      await expect(page.getByText(/Review your agreement draft/i)).toHaveCount(0);
+
+      await page.getByTestId("journey-action-remedy").click();
+      await expect(page.getByText(/Red Mesa Logistics|Harbor Peak Automation|Acme LLC|Beta Inc/i).first()).toBeVisible({
+        timeout: 120_000,
       });
-      expect(intakePreserved, "intake text must remain after model failure").toBe(true);
+      await expect(page.getByTestId("journey-action-banner")).toHaveAttribute("data-journey-action-kind", "succeeded", {
+        timeout: 30_000,
+      });
     });
   });
 }

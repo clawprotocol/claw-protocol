@@ -92,7 +92,7 @@ describe("customer journey in-flight states", () => {
   it("direct-save and model-failure copy do not claim success", () => {
     expect(feedbackAfterDirectSave()).toMatch(/Changes saved/);
     expect(feedbackAfterDirectSaveFailed()).toMatch(/unsaved text is still in the editor/i);
-    expect(feedbackAfterModelFailure()).toMatch(/last saved agreement are unchanged/i);
+    expect(feedbackAfterModelFailure()).toMatch(/Your information is unchanged/i);
     expect(feedbackLinksInvalidated()).toMatch(/no longer valid/i);
     expect(feedbackCreatingAgreement().kind).toBe("working");
     expect(feedbackCreatingLinks("signing").body).toMatch(/signing links/i);

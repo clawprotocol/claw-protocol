@@ -509,7 +509,7 @@ describe("paidProAcceptanceRouting", () => {
       const block = intake.slice(start, start + 4500);
       expect(block).toContain("paidProSignerDetailsGate.firstIncompleteFieldKey");
       expect(block).toContain("focusVisibleRecipientInput(focusKey)");
-      expect(block).toContain("claw-paid-pro-inline-signer-setup");
+      expect(block).toContain("PAID_PRO_FIRST_REVIEW_INLINE_SIGNER_SETUP_DOM_ID");
       expect(block).toContain("scrollGuidedSignerSetupIntoView()");
     });
   });

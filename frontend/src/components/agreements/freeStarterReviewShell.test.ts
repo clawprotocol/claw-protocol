@@ -225,7 +225,7 @@ describe("shouldGateGuidedRenderAuthorityForFreeReview", () => {
     ).toBe(true);
   });
 
-  it("does not gate guided authority when authoritative create-flow shell is paid_pro", () => {
+  it("does not gate guided authority when workspace is Pro entitled even if free-surface flags are stale", () => {
     expect(
       shouldGateGuidedRenderAuthorityForFreeReview({
         workspaceProEntitled: true,
@@ -234,6 +234,25 @@ describe("shouldGateGuidedRenderAuthorityForFreeReview", () => {
         premiumPaidDocumentSurface: false,
       }),
     ).toBe(false);
+  });
+
+  it("still gates free users and does not treat an empty corpus as paid review success", () => {
+    expect(
+      shouldGateGuidedRenderAuthorityForFreeReview({
+        workspaceProEntitled: false,
+        isFreeStreamlineDraftReview: true,
+        isFreeStarterReviewSurface: true,
+        premiumPaidDocumentSurface: false,
+      }),
+    ).toBe(true);
+    expect(
+      shouldGateGuidedRenderAuthorityForFreeReview({
+        workspaceProEntitled: false,
+        isFreeStreamlineDraftReview: false,
+        isFreeStarterReviewSurface: false,
+        premiumPaidDocumentSurface: false,
+      }),
+    ).toBe(true);
   });
 });
 

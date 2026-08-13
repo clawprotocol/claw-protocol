@@ -231,9 +231,6 @@ export function assessPaidProSubstantiveServerDraftCorpus(args: {
   if (!raw) blockers.push("empty_corpus");
   if (appearsPreviewOrRecoveryStub(raw)) blockers.push("preview_or_recovery_stub");
   if (appearsThinRepetitiveCorpus(raw)) blockers.push("thin_repetitive_corpus");
-  if (RECOVERY_NOTICE_SCAFFOLDING_RE.test(raw) && rawLength < SUBSTANTIVE_SERVER_DRAFT_MIN_LEN) {
-    blockers.push("recovery_notice_scaffolding");
-  }
   if (placeholderCount > 0) blockers.push("unresolved_placeholders");
   const appearsTruncated = detectPaidProCorpusAbruptTruncation(raw);
   if (appearsTruncated) blockers.push("truncated");
@@ -250,11 +247,27 @@ export function assessPaidProSubstantiveServerDraftCorpus(args: {
   const professional = assessProfessionalProClauseCoverage({ text: raw, intake: intakeText });
   const conciseHeuristic = qualifiesAsConciseAuthoritativePaidServerDraft(raw);
   const genericStructure = assessGenericOperativeStructureCompleteness(raw);
-
-  const professionalMaterialSatisfied =
+  const professionalMaterialSatisfiedEarly =
     professional.applies &&
     professional.materialClausesMissing.length === 0 &&
     (professional.ok || professional.conciseComplete);
+  const otherwiseStructurallyComplete =
+    hasRequiredSections ||
+    professionalMaterialSatisfiedEarly ||
+    conciseHeuristic ||
+    genericStructure.ok;
+  // Pre-signer notices ("provided during signer setup") are not recovery stubs when the
+  // agreement is otherwise structurally complete. Only treat the phrase as scaffolding on
+  // thin/incomplete bodies below the strong length floor.
+  if (
+    RECOVERY_NOTICE_SCAFFOLDING_RE.test(raw) &&
+    rawLength < SUBSTANTIVE_SERVER_DRAFT_MIN_LEN &&
+    !otherwiseStructurallyComplete
+  ) {
+    blockers.push("recovery_notice_scaffolding");
+  }
+
+  const professionalMaterialSatisfied = professionalMaterialSatisfiedEarly;
 
   const structurallyComplete =
     blockers.length === 0 &&

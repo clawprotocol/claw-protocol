@@ -23,7 +23,7 @@ describe("paidPro entitled rewrite recovery hang (universal)", () => {
     expect(entitled.createUiStage).toBe(CreateUiStage.INPUT);
     expect(entitled.proFullDraftQualityRetry).toBe(false);
     expect(entitled.clearLocalDraft).toBe(true);
-    expect(entitled.hardError).toMatch(/notes and last saved agreement are unchanged/i);
+    expect(entitled.hardError).toMatch(/unchanged/i);
 
     const dashboard = planDashboardPaidCreateValidationFailureTerminal();
     expect(dashboard.displayPhase).toBe("review");
@@ -60,10 +60,10 @@ describe("paidPro entitled rewrite recovery hang (universal)", () => {
     expect(missingIdx).toBeGreaterThan(-1);
     expect(snapIdx).toBeGreaterThan(-1);
     const missingBlock = intake.slice(missingIdx, missingIdx + 1600);
-    expect(missingBlock).toContain("planEntitledRewriteGenerationFailureTerminal");
+    expect(missingBlock).toContain("commitEntitledRewriteGenerationFailureTerminal");
     expect(missingBlock).toContain("setDisplayPhase(terminal.displayPhase)");
     const snapBlock = intake.slice(snapIdx, snapIdx + 1800);
-    expect(snapBlock).toContain("planEntitledRewriteGenerationFailureTerminal");
+    expect(snapBlock).toContain("commitEntitledRewriteGenerationFailureTerminal");
     expect(snapBlock).toContain("setDisplayPhase(terminal.displayPhase)");
     expect(intake).toMatch(
       /finally\s*\{[\s\S]{0,400}setPremiumPostCheckoutPhase\(\(prev\)\s*=>/,

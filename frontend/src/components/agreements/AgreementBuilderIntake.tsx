@@ -275,6 +275,7 @@ import {
   type JourneyActionFeedback,
   feedbackAfterDirectSave,
   feedbackAfterDirectSaveFailed,
+  feedbackAfterFailedCreate,
   feedbackAfterGeneration,
   feedbackAfterLinkFailure,
   feedbackAfterModelFailure,
@@ -1677,7 +1678,13 @@ import {
   resolveDashboardPaidCreateCanonicalReviewSource,
 } from "./dashboardPaidCreateRoute";
 import {
+  commitEntitledRewriteGenerationFailureTerminal,
+  FAILED_CREATE_RECOVERY_TITLE,
   planEntitledRewriteGenerationFailureTerminal,
+  readFailedCreateRecoveryLatch,
+  shouldHoldFailedCreateIntakeRecovery,
+  clearFailedCreateRecoveryLatch,
+  extractSafeFailedCreateReason,
   resolveEntitledRewriteLaunchContext,
   shouldTreatEntitledRewritePipelineResultAsGenerationFailure,
   syncEntitledRewriteDraftSnapshot,
@@ -4658,6 +4665,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   );
   /** Production DRAFT review canvas: includes generating_draft so the same layout shows a skeleton instead of a separate “loading” screen. */
   const productionDraftPrimaryReviewSurface = Boolean(
+    !shouldHoldFailedCreateIntakeRecovery() &&
     createProductionTwoPane &&
       createUiStage === CreateUiStage.DRAFT &&
       (draft !== null ||
@@ -5857,6 +5865,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     next: ParsedDraftShape,
     opts?: { forceReviewDisplay?: boolean },
   ): void {
+    if (shouldHoldFailedCreateIntakeRecovery()) {
+      return;
+    }
     let nextDraft = canonicalizeStarterDraftForReview(next);
     const raw = intakeCombined.trim();
     if (raw.length >= 8) {
@@ -6746,6 +6757,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   /** Canonical first-time post-checkout AND returning paid create — one review entry path. */
   const enterCanonicalPaidProReviewFlow = React.useCallback(
     (args: EnterCanonicalPaidProReviewFlowArgs): boolean => {
+      if (shouldHoldFailedCreateIntakeRecovery()) return false;
       // Shared planner (post-checkout + returning paid). Route gates wrap the same plan.
       const planned = planEnterCanonicalPaidProReviewFlow(args);
       const plan = isDashboardPaidCreateRouteActive()
@@ -6952,7 +6964,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     });
     if (!launchCtx.ok) {
       entitledPremiumRewriteInFlightRef.current = false;
-      const terminal = planEntitledRewriteGenerationFailureTerminal({
+      const terminal = commitEntitledRewriteGenerationFailureTerminal({
         reason: "entitled_rewrite_aborted",
         dashboardRoute: isDashboardPaidCreateRouteActive(),
         customMessage:
@@ -6995,9 +7007,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         }
       }
       setJourneyActionFeedback(
-        feedbackFailed("create_agreement", "Agreement was not created", feedbackAfterModelFailure(), {
-          remedyLabel: "Retry",
-        }),
+        feedbackAfterFailedCreate(),
       );
       setLoading(false);
       return;
@@ -7101,7 +7111,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             agreementGenerationId: sessionGenForPass,
             intakeFingerprint: shortIntakeFingerprint(mergedIntake),
           });
-          const terminal = planEntitledRewriteGenerationFailureTerminal({
+          const terminal = commitEntitledRewriteGenerationFailureTerminal({
             reason: "no_server_authority",
             dashboardRoute: isDashboardPaidCreateRouteActive(),
           });
@@ -7129,7 +7139,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             setPreviewPaneRevealed(false);
           }
           setJourneyActionFeedback(
-            feedbackFailed("create_agreement", "Agreement was not created", feedbackAfterModelFailure(), {
+            feedbackFailed("create_agreement", FAILED_CREATE_RECOVERY_TITLE, feedbackAfterModelFailure(), {
               remedyLabel: "Retry",
             }),
           );
@@ -7154,7 +7164,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           setPremiumTruthPipelineSource(result.premiumRenderSource);
           return;
         }
-        const terminal = planEntitledRewriteGenerationFailureTerminal({
+        const terminal = commitEntitledRewriteGenerationFailureTerminal({
           reason: "no_server_authority",
           dashboardRoute: isDashboardPaidCreateRouteActive(),
         });
@@ -7178,7 +7188,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           }
         }
         setJourneyActionFeedback(
-          feedbackFailed("create_agreement", "Agreement was not created", feedbackAfterModelFailure(), {
+          feedbackFailed("create_agreement", FAILED_CREATE_RECOVERY_TITLE, feedbackAfterModelFailure(), {
             remedyLabel: "Retry",
           }),
         );
@@ -7204,7 +7214,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           reason: "no_server_authority",
           outcome: "retry_recoverable",
         });
-        const terminal = planEntitledRewriteGenerationFailureTerminal({
+        const terminal = commitEntitledRewriteGenerationFailureTerminal({
           reason: "no_server_authority",
           dashboardRoute: isDashboardPaidCreateRouteActive(),
         });
@@ -7230,7 +7240,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           }
         }
         setJourneyActionFeedback(
-          feedbackFailed("create_agreement", "Agreement was not created", feedbackAfterModelFailure(), {
+          feedbackFailed("create_agreement", FAILED_CREATE_RECOVERY_TITLE, feedbackAfterModelFailure(), {
             remedyLabel: "Retry",
           }),
         );
@@ -7443,7 +7453,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           reason: "entitled_rewrite_missing_agreement_or_corpus",
           outcome: "retry_recoverable",
         });
-        const terminal = planEntitledRewriteGenerationFailureTerminal({
+        const terminal = commitEntitledRewriteGenerationFailureTerminal({
           reason: "entitled_rewrite_missing_agreement_or_corpus",
           dashboardRoute: isDashboardPaidCreateRouteActive(),
         });
@@ -7472,7 +7482,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           setPreviewPaneRevealed(false);
         }
         setJourneyActionFeedback(
-          feedbackFailed("create_agreement", "Agreement was not created", feedbackAfterModelFailure(), {
+          feedbackFailed("create_agreement", FAILED_CREATE_RECOVERY_TITLE, feedbackAfterModelFailure(), {
             remedyLabel: "Retry",
           }),
         );
@@ -7513,7 +7523,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
               reason: "entitled_rewrite_snapshot_prepare_failed",
               outcome: "retry_recoverable",
             });
-            const terminal = planEntitledRewriteGenerationFailureTerminal({
+            const terminal = commitEntitledRewriteGenerationFailureTerminal({
               reason: "entitled_rewrite_snapshot_prepare_failed",
               dashboardRoute: isDashboardPaidCreateRouteActive(),
             });
@@ -7542,7 +7552,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
               setPreviewPaneRevealed(false);
             }
             setJourneyActionFeedback(
-              feedbackFailed("create_agreement", "Agreement was not created", feedbackAfterModelFailure(), {
+              feedbackFailed("create_agreement", FAILED_CREATE_RECOVERY_TITLE, feedbackAfterModelFailure(), {
                 remedyLabel: "Retry",
               }),
             );
@@ -7562,7 +7572,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         }
       }
       if (!hasPaidProSourceOfTruth() && entitledReviewCorpus.trim().length < GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN) {
-        const terminal = planEntitledRewriteGenerationFailureTerminal({
+        const terminal = commitEntitledRewriteGenerationFailureTerminal({
           reason: "entitled_rewrite_missing_agreement_or_corpus",
           dashboardRoute: isDashboardPaidCreateRouteActive(),
         });
@@ -7586,7 +7596,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           setPreviewPaneRevealed(false);
         }
         setJourneyActionFeedback(
-          feedbackFailed("create_agreement", "Agreement was not created", feedbackAfterModelFailure(), {
+          feedbackFailed("create_agreement", FAILED_CREATE_RECOVERY_TITLE, feedbackAfterModelFailure(), {
             remedyLabel: "Retry",
           }),
         );
@@ -7797,9 +7807,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         // eslint-disable-next-line no-console
         console.warn("[premium-flow] entitled_rewrite_failed", e);
       }
-      const terminal = planEntitledRewriteGenerationFailureTerminal({
+      const priorAgreement = getPaidProSourceOfTruthText().trim().length >= PAID_PRO_AUTHORITY_MIN_LEN;
+      const notes = (raw || readOriginalUserIntakeRaw() || intakeCombinedRef.current || "").trim();
+      const terminal = commitEntitledRewriteGenerationFailureTerminal({
         reason: "entitled_rewrite_aborted",
         dashboardRoute: isDashboardPaidCreateRouteActive(),
+        hasAuthoritativeAgreement: priorAgreement,
+        safeReason: extractSafeFailedCreateReason(e),
+        intakeNotes: notes,
       });
       setProFullDraftQualityRetry(terminal.proFullDraftQualityRetry);
       setProFullDraftCustomGateMessage(terminal.proFullDraftCustomGateMessage);
@@ -7814,21 +7829,27 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       premiumModalExtendedWaitActiveRef.current = false;
       setPremiumCheckoutModalExtendedWait(false);
       setPremiumAuthoritativeRequestInFlight(false);
-      {
-        const notes = (raw || readOriginalUserIntakeRaw() || intakeCombinedRef.current || "").trim();
-        if (notes) {
-          setIntakeStepBuffer(notes);
-          setDebouncedStepBuffer(notes);
-        }
+      if (notes) {
+        setIntakeStepBuffer(notes);
+        setDebouncedStepBuffer(notes);
       }
-      setJourneyActionFeedback(
-        feedbackFailed("create_agreement", "Agreement was not created", feedbackAfterModelFailure(), {
-          remedyLabel: "Retry",
-        }),
-      );
+      setJourneyActionFeedback(feedbackAfterFailedCreate(extractSafeFailedCreateReason(e)));
+      if (terminal.holdIntakeRecovery) {
+        reviewAgreementIdRef.current = null;
+        setReviewAgreementId(null);
+        clearCreateReviewAgreementResumeId();
+        clearCreateReviewDraftReadyMarker();
+      }
       if (terminal.clearLocalDraft) {
         setDraft(null);
         setPreviewPaneRevealed(false);
+        setAgreementDocumentText("");
+      }
+      if (terminal.holdIntakeRecovery) {
+        window.requestAnimationFrame(() => {
+          const el = document.querySelector<HTMLTextAreaElement>("textarea");
+          el?.focus();
+        });
       }
       setLoading(false);
     } finally {
@@ -11542,6 +11563,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   ]);
 
   const beginReturningPaidProCreateGeneration = React.useCallback(() => {
+    clearFailedCreateRecoveryLatch();
     setHardError(null);
     setProUpgradeUseStarterView(false);
     setProFullDraftQualityRetry(false);
@@ -11561,6 +11583,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   }, []);
 
   const beginStarterDraftGeneration = React.useCallback(() => {
+    clearFailedCreateRecoveryLatch();
     if (
       shouldBlockStarterRegenerationAfterPaidAuthority({
         draft: draft ?? null,
@@ -12004,9 +12027,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       setCreateFlowPhase("capturing_input");
       setCreateUiStage(CreateUiStage.INPUT);
       setJourneyActionFeedback(
-        feedbackFailed("create_agreement", "Agreement was not created", feedbackAfterModelFailure(), {
-          remedyLabel: "Retry",
-        }),
+        feedbackAfterFailedCreate(),
       );
       setHardError(feedbackAfterModelFailure());
       return false;
@@ -14140,6 +14161,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   }, [isGenerating]);
 
   useEffect(() => {
+    if (shouldHoldFailedCreateIntakeRecovery()) return;
     if (!shouldDismissStarterPreparingOverlayForProGate({
       createFlowPhase,
       hasDraft: Boolean(draft),
@@ -15575,6 +15597,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   );
 
   useEffect(() => {
+    if (shouldHoldFailedCreateIntakeRecovery()) return;
     const corpusForcesDocumentRender =
       shouldForcePaidProReviewDocumentRender() || authoritativePremiumUiCommitted;
     const shouldGuardPaidSurface = guardProDocumentDisplayPhase || premiumPaidDocumentSurface;
@@ -15866,6 +15889,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   ]);
 
   useEffect(() => {
+    if (shouldHoldFailedCreateIntakeRecovery()) return;
     if (!isFreeStreamlineDraftReview) return;
     if (displayPhase !== "intake" || createFlowPhase !== "draft_ready_for_review" || !draft) return;
     logFreeReviewLegacySurfaceBlocked({
@@ -21266,6 +21290,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     isUserTyping,
   ]);
   React.useEffect(() => {
+    if (shouldHoldFailedCreateIntakeRecovery()) return;
     if (
       createFlowPhase === "draft_ready_for_review" &&
       draft &&
@@ -21290,26 +21315,36 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       journeyActionFeedback.kind === "working"
     ) {
       setJourneyActionFeedback(
-        feedbackFailed("create_agreement", "Agreement was not created", feedbackAfterModelFailure(), {
-          remedyLabel: "Retry",
-        }),
+        feedbackAfterFailedCreate(),
       );
     }
   }, [hardError, journeyActionFeedback]);
   React.useEffect(() => {
-    if (loading || isGenerating) return;
-    if (journeyActionFeedback?.actionId !== "create_agreement") return;
-    if (journeyActionFeedback.kind !== "working") return;
-    if (createUiStage === CreateUiStage.INPUT && createFlowPhase === "capturing_input") return;
-    if (createFlowPhase !== "draft_ready_for_review" && displayPhase !== "review") return;
-    if (resolveValidatedPaidProReviewCorpus().len >= 500) return;
+    if (!shouldHoldFailedCreateIntakeRecovery()) return;
+    const latch = readFailedCreateRecoveryLatch();
     const notes = (
+      latch?.notes ||
       readOriginalUserIntakeRaw() ||
       intakeCombinedRef.current ||
       intakeStepBufferRef.current ||
       ""
     ).trim();
-    const terminal = planEntitledRewriteGenerationFailureTerminal({ reason: "no_server_authority" });
+    const alreadyIntake =
+      createUiStage === CreateUiStage.INPUT &&
+      createFlowPhase === "capturing_input" &&
+      displayPhase === "intake" &&
+      !draft;
+    if (alreadyIntake) {
+      if (notes && (intakeStepBufferRef.current || "").trim() !== notes) {
+        setIntakeStepBuffer(notes);
+        setDebouncedStepBuffer(notes);
+      }
+      return;
+    }
+    const terminal = planEntitledRewriteGenerationFailureTerminal({
+      reason: "no_server_authority",
+      intakeNotes: notes,
+    });
     setProFullDraftQualityRetry(terminal.proFullDraftQualityRetry);
     setProFullDraftCustomGateMessage(terminal.proFullDraftCustomGateMessage);
     setPremiumPersistedFlowActive(terminal.premiumPersistedFlowActive);
@@ -21324,12 +21359,17 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     }
     setDraft(null);
     setPreviewPaneRevealed(false);
-    setJourneyActionFeedback(
-      feedbackFailed("create_agreement", "Agreement was not created", feedbackAfterModelFailure(), {
-        remedyLabel: "Retry",
-      }),
-    );
+    setAgreementDocumentText("");
+    reviewAgreementIdRef.current = null;
+    setReviewAgreementId(null);
+    clearCreateReviewAgreementResumeId();
+    clearCreateReviewDraftReadyMarker();
+    setJourneyActionFeedback(feedbackAfterFailedCreate(latch?.reason || null));
     setLoading(false);
+    window.requestAnimationFrame(() => {
+      const el = document.querySelector<HTMLTextAreaElement>("textarea");
+      el?.focus();
+    });
   }, [loading, isGenerating, createFlowPhase, displayPhase, createUiStage, journeyActionFeedback, draft]);
   const hardErrorForUi = useMemo(() => {
     if (!hardError) return null;
@@ -33018,6 +33058,21 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                             feedback={journeyActionFeedback}
                             onDismiss={() => setJourneyActionFeedback(null)}
                             onRemedy={() => {
+                              if (
+                                journeyActionFeedback.actionId === "create_agreement" &&
+                                journeyActionFeedback.kind === "failed"
+                              ) {
+                                const notes =
+                                  readFailedCreateRecoveryLatch()?.notes ||
+                                  intakeCombinedRef.current ||
+                                  "";
+                                clearFailedCreateRecoveryLatch();
+                                void runProductionLocalDraftParse({
+                                  rawOverride: notes,
+                                  handoffSource: "failed_create_retry",
+                                });
+                                return;
+                              }
                               const sel = journeyActionFeedback.focusSelector;
                               if (!sel) return;
                               const el = document.querySelector(sel) as HTMLElement | null;
@@ -33040,6 +33095,21 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                         feedback={journeyActionFeedback}
                         onDismiss={() => setJourneyActionFeedback(null)}
                         onRemedy={() => {
+                          if (
+                            journeyActionFeedback.actionId === "create_agreement" &&
+                            journeyActionFeedback.kind === "failed"
+                          ) {
+                            const notes =
+                              readFailedCreateRecoveryLatch()?.notes ||
+                              intakeCombinedRef.current ||
+                              "";
+                            clearFailedCreateRecoveryLatch();
+                            void runProductionLocalDraftParse({
+                              rawOverride: notes,
+                              handoffSource: "failed_create_retry",
+                            });
+                            return;
+                          }
                           const sel = journeyActionFeedback.focusSelector;
                           if (!sel) return;
                           const el = document.querySelector(sel) as HTMLElement | null;

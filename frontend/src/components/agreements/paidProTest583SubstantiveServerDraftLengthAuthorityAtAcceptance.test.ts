@@ -3,12 +3,12 @@ import { beforeEach, describe, expect, it } from "vitest";
 import { fingerprintAgreementBody } from "./guidedDealCompletion/guidedSigningPacketVersion";
 import { guardPaidProAcceptedServerFullDraftCommit } from "./paidProAcceptedServerFullDraftCommitGuard";
 import { buildTest444ServerFullDraft, TEST444_INTAKE, test444Draft } from "./paidProTest444Fixtures";
-import { buildPaidProStructuralRecoveryBody } from "./paidProStructuralRecovery";
 import {
   TEST429_FOUR_PARTY_NORTH_STAR_INTAKE,
 } from "./paidProTest429FourPartyNorthStarFixtures";
 import { test433FourPartyDraft } from "./paidProTest433FourPartyLiveFreezeFixtures";
 import {
+  assessGenericOperativeStructureCompleteness,
   assessPaidProSubstantiveServerDraftCorpus,
   paidProServerFullDraftBelowSubstantiveMin,
 } from "./paidProSubstantiveCorpusAssessment";
@@ -291,14 +291,16 @@ describe("TEST583 — substantive server-draft length authority at acceptance", 
     expect(second).toEqual(first);
   });
 
-  it("L — structural recovery mislabeled as server_full_draft stays rejected", () => {
-    const structural = buildPaidProStructuralRecoveryBody({
-      intakeText: TEST429_FOUR_PARTY_NORTH_STAR_INTAKE,
-      draft: test433FourPartyDraft(),
-    });
-    expect(structural.ok).toBe(true);
+  it("L — thin structural recovery stub mislabeled as server_full_draft stays rejected", () => {
+    const stub = [
+      "STRUCTURAL RECOVERY STUB",
+      "Parties and operative terms were not produced.",
+      "Email: provided during signer setup",
+      "Address: provided during signer setup",
+      "Outline heading. ".repeat(80),
+    ].join("\n");
     const guarded = guardPaidProAcceptedServerFullDraftCommit({
-      candidateText: structural.body,
+      candidateText: stub,
       candidateSource: "server_full_draft",
       renderSource: "server_full_draft",
       generationOutcome: "ok",
@@ -307,5 +309,85 @@ describe("TEST583 — substantive server-draft length authority at acceptance", 
     });
     expect(guarded.rejected).toBe(true);
     expect(guarded.reason).toBe("mislabeled_server_full_draft_below_substantive_min");
+  });
+
+  it("M — concise structurally complete pre-signer agreement with notice placeholders is accepted", () => {
+    const preSigner = [
+      "SERVICES AGREEMENT",
+      "",
+      'This Services Agreement (this "Agreement") is entered into as of the Effective Date by and between Acme Test Co ("Client") and LawDog Demo LLC ("Service Provider").',
+      "",
+      "1. Services",
+      "Provider will provide agreement-drafting software access to Client for one thousand dollars ($1,000) per month.",
+      "2. Term",
+      "The term is thirty (30) days from the Effective Date. Either party may cancel with seven (7) days' written notice.",
+      "3. Fees and Payment",
+      "Client will pay Provider the subscription fee monthly.",
+      "4. Confidentiality",
+      "Each party will protect Confidential Information disclosed under this Agreement.",
+      "5. Termination",
+      "Either party may terminate for material breach after a seven (7) day cure period.",
+      "6. Governing Law",
+      "This Agreement shall be governed by the laws of Illinois.",
+      "7. Electronic Signatures",
+      "Electronic signatures and counterparts are permitted.",
+      "",
+      "IN WITNESS WHEREOF, the Parties execute this Agreement.",
+      "",
+      "CLIENT: Acme Test Co",
+      "By: __________________________",
+      "Name: __________________________",
+      "",
+      "SERVICE PROVIDER: LawDog Demo LLC",
+      "By: __________________________",
+      "Name: __________________________",
+      "",
+      "If to Acme Test Co:",
+      "Email: provided during signer setup",
+      "Address: provided during signer setup",
+      "",
+      "If to LawDog Demo LLC:",
+      "Email: provided during signer setup",
+      "Address: provided during signer setup",
+    ].join("\n");
+    expect(preSigner.length).toBeLessThan(SUBSTANTIVE_SERVER_DRAFT_MIN_LEN);
+    const assessment = assessPaidProSubstantiveServerDraftCorpus({
+      text: preSigner,
+      source: "server_full_draft",
+      intakeText: "Create a services agreement between LawDog Demo LLC and Acme Test Co.",
+    });
+    expect(assessment.blockers).not.toContain("recovery_notice_scaffolding");
+    expect(assessment.qualifiesForServerFullDraftAcceptance).toBe(true);
+    expect(() =>
+      establishPaidProSourceOfTruth({
+        text: preSigner,
+        source: "server_full_draft",
+        intakeText: "Create a services agreement between LawDog Demo LLC and Acme Test Co.",
+        generationOutcome: "ok",
+      }),
+    ).not.toThrow();
+  });
+
+  it("N — long but structurally incomplete outline fails with a specific reason", () => {
+    const outline = [
+      "SERVICES AGREEMENT OUTLINE",
+      "Summary only. Parties and operative terms are not drafted.",
+      "1. Header",
+      "2. Background",
+      "3. Next steps",
+      "Outline heading. ".repeat(220),
+    ].join("\n");
+    expect(outline.length).toBeGreaterThan(3_000);
+    expect(outline.length).toBeLessThan(SUBSTANTIVE_SERVER_DRAFT_MIN_LEN);
+    const assessment = assessPaidProSubstantiveServerDraftCorpus({
+      text: outline,
+      source: "server_full_draft",
+    });
+    expect(assessment.qualifiesForServerFullDraftAcceptance).toBe(false);
+    expect(assessment.structurallyComplete).toBe(false);
+    const structure = assessGenericOperativeStructureCompleteness(outline);
+    expect(structure.ok).toBe(false);
+    expect(structure.blockers).toContain("missing_execution_block");
+    expect(structure.blockers).toContain("missing_legal_entity_parties");
   });
 });

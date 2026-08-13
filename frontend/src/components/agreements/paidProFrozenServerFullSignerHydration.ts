@@ -8,7 +8,9 @@ import type { PaidProSignerMetadataAuthority } from "./paidProSignerMetadataAuth
 import {
   authorityPartiesToCanonicalPartyIdentities,
   authorityPartiesToRecipientMetadata,
+  type PaidProSignerMetadataParty,
 } from "./paidProSignerMetadataAuthority";
+import { partyLegalNamesMatch } from "./paidProAcceptedCorpusPartyRoles";
 import {
   applySignatureNoticeContactFieldsToCorpus,
   ensureOperativeIfToNoticeDelivery,
@@ -53,6 +55,72 @@ export function shouldPreserveFrozenCanonicalCorpusOnSignerFinalize(rawCorpus: s
   return shouldUseFrozenPaidProSourceOfTruthMinimalHydration(rawCorpus);
 }
 
+/** Replace existing If-to Email/Address placeholder lines without rebuilding the Notices family. */
+function fillExistingIfToSignerSetupPlaceholders(
+  corpus: string,
+  parties: readonly PaidProSignerMetadataParty[],
+): { text: string; applied: boolean; replacements: number } {
+  if (!/provided during signer setup/i.test(corpus) || !/^If to\s+/im.test(corpus)) {
+    return { text: corpus, applied: false, replacements: 0 };
+  }
+  const lines = corpus.replace(/\r\n/g, "\n").split("\n");
+  let currentParty: PaidProSignerMetadataParty | null = null;
+  let replacements = 0;
+  const out: string[] = [];
+  for (const line of lines) {
+    const trimmed = line.trim();
+    const ifTo = trimmed.match(/^If to\s+(.+?)\s*:\s*$/i);
+    if (ifTo) {
+      const entity = (ifTo[1] ?? "").trim();
+      currentParty = parties.find((p) => partyLegalNamesMatch(entity, p.partyLegalName)) ?? null;
+      out.push(line);
+      continue;
+    }
+    if (/^IN WITNESS WHEREOF\b/i.test(trimmed) || /^(?:CLIENT|SERVICE\s+PROVIDER)\s*:/i.test(trimmed)) {
+      currentParty = null;
+      out.push(line);
+      continue;
+    }
+    if (currentParty && /^(?:Attn|Attention)\s*:\s*Authorized Signer\s*$/i.test(trimmed)) {
+      const signerName = currentParty.signerName.trim();
+      if (signerName) {
+        const indent = line.match(/^\s*/)?.[0] ?? "";
+        const title = currentParty.signerTitle.trim();
+        out.push(
+          title
+            ? `${indent}Attn: ${signerName}, ${title}`
+            : `${indent}Attention: ${signerName}`,
+        );
+        replacements += 1;
+        continue;
+      }
+    }
+    if (currentParty && /^Email\s*:\s*provided during signer setup\.?$/i.test(trimmed)) {
+      const email = currentParty.signerEmail.trim();
+      if (email && !/provided during signer setup/i.test(email)) {
+        const indent = line.match(/^\s*/)?.[0] ?? "";
+        out.push(`${indent}Email: ${email}`);
+        replacements += 1;
+        continue;
+      }
+    }
+    if (currentParty && /^Address\s*:\s*provided during signer setup\.?$/i.test(trimmed)) {
+      const address = currentParty.partyAddress.trim();
+      if (address.length > 8 && !/provided during signer setup/i.test(address)) {
+        const indent = line.match(/^\s*/)?.[0] ?? "";
+        out.push(`${indent}Address: ${address}`);
+        replacements += 1;
+        continue;
+      }
+      replacements += 1;
+      continue;
+    }
+    out.push(line);
+  }
+  if (replacements === 0) return { text: corpus, applied: false, replacements: 0 };
+  return { text: out.join("\n"), applied: true, replacements };
+}
+
 /** Hydrate signer metadata into frozen server_full SoT without regenerating operative text. */
 export function buildFrozenServerFullSignerMetadataHydration(args: {
   rawCorpus: string;
@@ -72,22 +140,6 @@ export function buildFrozenServerFullSignerMetadataHydration(args: {
   const recipientMeta = authorityPartiesToRecipientMetadata(args.authority.parties);
   const identities = authorityPartiesToCanonicalPartyIdentities(args.authority.parties, roleContext);
 
-  // Frozen canonical finalize with signature-region-only: hydrate execution block only —
-  // never mutate operative notice body bytes (TEST307), but still apply Name/Title/Email (TEST366).
-  if (
-    signatureRegionOnly &&
-    args.surface === "finalize_paid_pro_signer_metadata" &&
-    shouldPreserveFrozenCanonicalCorpusOnSignerFinalize(corpus)
-  ) {
-    return {
-      corpus,
-      identities: [...identities],
-      signaturePolishCount: 0,
-      partyNoticeApplied: false,
-      rejected: false,
-    };
-  }
-
   const executionHydration = hydratePaidProExecutionBlockWithSignerMetadata(
     corpus,
     recipientMeta,
@@ -98,28 +150,35 @@ export function buildFrozenServerFullSignerMetadataHydration(args: {
     corpus = executionHydration.corpus;
   }
 
-  // Never invent a Notices section in signature-region mode. When Notices already exist
-  // with "provided during signer setup" placeholders and authority has real contacts,
-  // resolve those placeholders (parity with non-frozen finalize hydration).
+  // Never invent a Notices section in signature-region mode. Fill existing If-to
+  // "provided during signer setup" lines in place — do not rebuild the Notices family
+  // (that rewrite joined unrelated headings such as "termination.12." on brand-licensing SoT).
   let noticeDeliveryRepairs = 0;
-  const noticesIdx = findNoticesSectionStart(corpus);
-  const authorityHasContact = args.authority.parties.some(
-    (p) => p.signerEmail.trim() || p.partyAddress.trim() || p.signerName.trim(),
-  );
-  if (
-    authorityHasContact &&
-    noticesIdx >= 0 &&
-    !signatureRegionOnly &&
-    /provided during signer setup/i.test(corpus.slice(noticesIdx))
-  ) {
-    const noticeDelivery = ensureOperativeIfToNoticeDelivery(
-      corpus,
-      args.authority.parties,
-      roleContext,
+  if (signatureRegionOnly) {
+    const filled = fillExistingIfToSignerSetupPlaceholders(corpus, args.authority.parties);
+    if (filled.applied) {
+      corpus = filled.text;
+      noticeDeliveryRepairs = filled.replacements;
+    }
+  } else {
+    const noticesIdx = findNoticesSectionStart(corpus);
+    const authorityHasContact = args.authority.parties.some(
+      (p) => p.signerEmail.trim() || p.partyAddress.trim() || p.signerName.trim(),
     );
-    noticeDeliveryRepairs = noticeDelivery.repairs.length;
-    if (noticeDeliveryRepairs > 0 || noticeDelivery.text !== corpus) {
-      corpus = noticeDelivery.text.trim();
+    if (
+      authorityHasContact &&
+      noticesIdx >= 0 &&
+      /provided during signer setup/i.test(corpus.slice(noticesIdx))
+    ) {
+      const noticeDelivery = ensureOperativeIfToNoticeDelivery(
+        corpus,
+        args.authority.parties,
+        roleContext,
+      );
+      noticeDeliveryRepairs = noticeDelivery.repairs.length;
+      if (noticeDeliveryRepairs > 0 || noticeDelivery.text !== corpus) {
+        corpus = noticeDelivery.text.trim();
+      }
     }
   }
 

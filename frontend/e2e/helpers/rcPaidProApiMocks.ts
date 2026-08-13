@@ -183,6 +183,7 @@ export async function clearRcApiMocks(page: Page): Promise<void> {
   rcCanonicalSnapshotStore.clear();
   const ctx = page.context();
   const patterns: Array<string | RegExp> = [
+    /\/(api\/|v1\/|health)/,
     /\/(api\/|v1\/workspace\/)/,
     "**/v1/workspace/finalize-auth**",
     "**/v1/workspace/bind-user-org**",
@@ -216,7 +217,12 @@ export async function installRcPaidProApiRoutes(
     /** When false, parse mock stays two-party while premium body may still be quad. */
     parsePartyCount?: 2 | 3 | 4;
     /** Fail POST /premium-full-draft inside the catch-all mock (overrides success body). */
-    premiumFullDraftFailure?: { status: number; detail: unknown };
+    premiumFullDraftFailure?: {
+      status: number;
+      detail: unknown;
+      /** When set, fail this many times then succeed. */
+      failRemaining?: { current: number };
+    };
   },
 ) {
   const draftId = opts?.draftId ?? "ag_rc_paid_pro";
@@ -245,7 +251,7 @@ export async function installRcPaidProApiRoutes(
     }
   }, mockPartyNames);
 
-  return page.route(/\/(api\/|v1\/workspace\/)/, async (route) => {
+  return page.route(/\/(api\/|v1\/|health)/, async (route) => {
     const url = route.request().url();
     const method = route.request().method();
 
@@ -517,6 +523,31 @@ export async function installRcPaidProApiRoutes(
       return;
     }
 
+    if (url.includes("/v1/subscriptions/") && method === "GET") {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          subscription: {
+            id: "sub_rc_paid_pro",
+            org_id: ANON_ORG,
+            plan_code: "pro",
+            status: "active",
+          },
+        }),
+      });
+      return;
+    }
+
+    if (url.includes("/v1/genesis-referral/")) {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ ok: true, allowed: false, reason: "genesis_affiliate_access_denied" }),
+      });
+      return;
+    }
+
     if (url.includes("/api/agreements/usage") && method === "GET") {
       await route.fulfill({
         status: 200,
@@ -541,13 +572,19 @@ export async function installRcPaidProApiRoutes(
     }
 
     if (url.includes("/api/agreements/premium-full-draft") && method === "POST") {
-      if (opts?.premiumFullDraftFailure) {
-        await route.fulfill({
-          status: opts.premiumFullDraftFailure.status,
-          contentType: "application/json",
-          body: JSON.stringify({ detail: opts.premiumFullDraftFailure.detail }),
-        });
-        return;
+      const fail = opts?.premiumFullDraftFailure;
+      if (fail) {
+        const remaining = fail.failRemaining;
+        const shouldFail = !remaining || remaining.current > 0;
+        if (remaining && remaining.current > 0) remaining.current -= 1;
+        if (shouldFail) {
+          await route.fulfill({
+            status: fail.status,
+            contentType: "application/json",
+            body: JSON.stringify({ detail: fail.detail }),
+          });
+          return;
+        }
       }
       await route.fulfill({
         status: 200,
