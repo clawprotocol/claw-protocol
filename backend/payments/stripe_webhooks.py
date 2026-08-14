@@ -17,6 +17,19 @@ from backend.economics.store import get_economics_store
 router = APIRouter(tags=["payments-stripe"])
 _log = logging.getLogger("claw.payments.stripe_webhook")
 
+_TRANSIENT_AUTHORITY_REASONS = frozenset({"no_org_mapping"})
+_TRANSIENT_AUTHORITY_ERRORS = frozenset({"missing_org_id", "missing_org_id_after_authority"})
+
+
+def _is_transient_authority_failure(result: Dict[str, Any]) -> bool:
+    if not isinstance(result, dict):
+        return False
+    if str(result.get("reason") or "") in _TRANSIENT_AUTHORITY_REASONS:
+        return True
+    if str(result.get("error") or "") in _TRANSIENT_AUTHORITY_ERRORS:
+        return True
+    return False
+
 
 def _dev_bypass_signature() -> bool:
     """
@@ -50,12 +63,19 @@ async def stripe_webhook(request: Request) -> Dict[str, Any]:
     eco = get_economics_store()
     eco.init_schema()
     # Idempotent at event-id boundary (Stripe retries). Handlers must also idempotency-key writes.
-    if event_id and not eco.insert_stripe_webhook_event_once(event_id):
-        _log.info("stripe_webhook duplicate event_id=%s type=%s", event_id, event.get("type"))
-        return {"ok": True, "duplicate": True, "event_id": event_id}
+    claimed = False
+    if event_id:
+        if not eco.insert_stripe_webhook_event_once(event_id):
+            _log.info("stripe_webhook duplicate event_id=%s type=%s", event_id, event.get("type"))
+            return {"ok": True, "duplicate": True, "event_id": event_id}
+        claimed = True
 
     result = dispatch_stripe_event(eco, event)
     # Log type + ok/ignored keys only — never log full invoice bodies or customer PII.
     summary = {k: result.get(k) for k in ("ok", "ignored", "duplicate", "reason", "error") if k in result}
     _log.info("stripe_webhook type=%s event_id=%s summary=%s", event.get("type"), event_id, summary)
+    if _is_transient_authority_failure(result):
+        if claimed:
+            eco.delete_stripe_webhook_event(event_id)
+        raise HTTPException(status_code=503, detail="stripe_authority_not_ready")
     return {"ok": True, "event_id": event_id or None, "result": result}

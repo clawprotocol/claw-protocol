@@ -63,7 +63,13 @@ def handle_invoice_paid(economics: EconomicsStore, invoice: Dict[str, Any]) -> D
         org_id = economics.get_org_for_stripe_customer(customer_id)
     if not org_id:
         _log.info("invoice.paid skip: no org_id invoice=%s", inv_id)
-        return {**subscription_sync, "ok": True, "ignored": True, "reason": "no_org_mapping"}
+        return {
+            **subscription_sync,
+            "ok": False,
+            "ignored": True,
+            "retryable": True,
+            "reason": "no_org_mapping",
+        }
 
     amount_cents = int(invoice.get("amount_paid") or 0)
     if amount_cents <= 0:

@@ -41,17 +41,33 @@ def create_checkout_session(
         "line_items[0][quantity]": "1",
         "success_url": success_url,
         "cancel_url": cancel_url,
-        "subscription_data[metadata][org_id]": metadata.get("org_id", ""),
-        "subscription_data[metadata][claw_org_id]": metadata.get("claw_org_id", metadata.get("org_id", "")),
-        "subscription_data[metadata][plan_code]": metadata.get("plan_code", "pro"),
     }
     if customer_email:
         payload["customer_email"] = customer_email
+
+    # Checkout.session.completed webhooks commonly deliver `subscription` as an ID
+    # string, not an expanded object. Authority must live on Session metadata as
+    # well as Subscription metadata so org mapping does not require a retrieve.
+    org_id = str(metadata.get("org_id") or metadata.get("claw_org_id") or "").strip()
+    claw_org_id = str(metadata.get("claw_org_id") or org_id).strip()
+    plan_code = str(metadata.get("plan_code") or "pro").strip() or "pro"
+    merged: Dict[str, str] = {}
     for key, val in metadata.items():
-        if key in ("org_id", "claw_org_id", "plan_code"):
+        if val is None:
             continue
-        if val:
-            payload[f"metadata[{key}]"] = str(val)[:500]
+        text = str(val).strip()
+        if text:
+            merged[str(key)] = text[:500]
+    if org_id:
+        merged["org_id"] = org_id[:500]
+        merged["claw_org_id"] = claw_org_id[:500]
+    merged["plan_code"] = plan_code[:500]
+    user_id = str(metadata.get("user_id") or "").strip()
+    if user_id:
+        merged["user_id"] = user_id[:500]
+    for key, val in merged.items():
+        payload[f"metadata[{key}]"] = val
+        payload[f"subscription_data[metadata][{key}]"] = val
     return _stripe_request("POST", "/checkout/sessions", payload)
 
 

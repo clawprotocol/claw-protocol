@@ -110,7 +110,7 @@ def handle_genesis_invoice_paid(economics: EconomicsStore, invoice: Dict[str, An
     if not org_id and customer_id:
         org_id = economics.get_org_for_stripe_customer(customer_id)
     if not org_id:
-        return {"ok": True, "ignored": True, "reason": "no_org_mapping"}
+        return {"ok": False, "ignored": True, "retryable": True, "reason": "no_org_mapping"}
 
     plan_code = _metadata_plan_code(invoice)
     link_sub = invoice.get("subscription")

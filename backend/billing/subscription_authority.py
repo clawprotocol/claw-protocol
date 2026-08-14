@@ -259,7 +259,13 @@ def apply_invoice_paid_subscription_renewal(
         stripe_customer_id=customer_id or None,
     )
     if not org_id:
-        return {"ok": True, "ignored": True, "reason": "no_org_mapping", "invoice_id": inv_id}
+        return {
+            "ok": False,
+            "ignored": True,
+            "retryable": True,
+            "reason": "no_org_mapping",
+            "invoice_id": inv_id,
+        }
 
     sub_sid = invoice.get("subscription")
     stripe_sub_id: Optional[str] = None

@@ -166,7 +166,7 @@ def test_stripe_webhook_event_id_dedupe_skips_second_delivery(life_env):
 
 
 def test_out_of_order_invoice_paid_before_checkout_still_safe(life_env):
-    """invoice.paid without prior checkout must not invent entitlement or crash."""
+    """invoice.paid without prior checkout must not invent entitlement; it stays retryable."""
     _client, eco, _usage = life_env
     out = handle_genesis_invoice_paid(
         eco,
@@ -177,8 +177,10 @@ def test_out_of_order_invoice_paid_before_checkout_still_safe(life_env):
             "metadata": {"plan_code": "pro"},
         },
     )
-    assert out.get("ok") is True
-    assert out.get("ignored") or out.get("reason")
+    assert out.get("reason") == "no_org_mapping"
+    assert out.get("ok") is False
+    assert out.get("retryable") is True
+    assert eco.get_subscription_by_org("user-orphan") is None
 
 
 # --- 3. Quota consumption / exhaustion / renewal ---
@@ -286,7 +288,7 @@ def test_subscription_canceled_loses_pro_create(life_env):
     uid = "cancel-pro"
     org = _activate_pro(eco, uid)
     h = _auth(uid)
-    assert _draft(client, h, "before") 
+    assert _draft(client, h, "before")
     eco.insert_subscription(
         sub_id=f"sub-cancel-{uid}",
         org_id=org,
