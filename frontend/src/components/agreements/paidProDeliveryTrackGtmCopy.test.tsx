@@ -58,23 +58,32 @@ describe("paidProDeliveryTrackGtmCopy", () => {
   });
 
   it("forced chrome foreshadows Option B before signer details are complete", () => {
+    const onShareForReview = vi.fn();
+    const onEditSignerDetails = vi.fn();
+    const onPrepareSignatures = vi.fn();
     render(
       <PaidProForcedFirstReviewChrome
         signersReady={false}
         signerMetadataFinalized={false}
         getCopyPlainText={() => "body"}
         onEditAgreement={vi.fn()}
-        onEditSignerDetails={vi.fn()}
+        onEditSignerDetails={onEditSignerDetails}
         onExportAgreement={vi.fn()}
-        onShareForReview={vi.fn()}
-        onPrepareSignatures={vi.fn()}
+        onShareForReview={onShareForReview}
+        onPrepareSignatures={onPrepareSignatures}
       />,
     );
     expect(screen.getByTestId("paid-pro-delivery-track-before-signers-hint").textContent).toMatch(
       /reviewer emails|authorized signer/i,
     );
     expect(screen.getByTestId("paid-pro-forced-add-signer-details")).toBeTruthy();
+    expect(screen.getByTestId("simple-pro-send-for-review")).toBeTruthy();
     expect(screen.queryByTestId("paid-pro-delivery-track-chooser")).toBeNull();
+    fireEvent.click(screen.getByTestId("simple-pro-send-for-signature"));
+    expect(onEditSignerDetails).toHaveBeenCalledTimes(1);
+    expect(onPrepareSignatures).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByTestId("simple-pro-send-for-review"));
+    expect(onShareForReview).toHaveBeenCalledTimes(1);
   });
 
   it("PremiumSendNextStepFork defaults use the same GTM Option A/B copy", () => {

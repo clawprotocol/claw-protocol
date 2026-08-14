@@ -191,6 +191,8 @@ function resolveReviewHrefFromMint(
 export async function mintSimpleDoneReviewRecipientLinkRows(args: {
   agreementId: string;
   draft: AgreementDraft;
+  /** Post-recipient confirmation may explicitly request a reviewer link for the owner row too. */
+  includeOwnerWithReadyReviewEmail?: boolean;
   /** Authoritative signing corpus for preflight logging (guided Pro handoff). */
   signingCorpusPlain?: string | null;
   signingCorpusSource?: string | null;
@@ -221,9 +223,14 @@ export async function mintSimpleDoneReviewRecipientLinkRows(args: {
   let lastMintErrorDetail: string | undefined;
   let lastMintErrorCode: string | undefined;
   for (let i = 0; i < list.length; i++) {
-    if (i === ownerIdx) continue;
+    if (i === ownerIdx && !args.includeOwnerWithReadyReviewEmail) continue;
     const p = list[i]!;
-    if (!rowReadyForReviewLinkInvite(p, i, list)) continue;
+    const ownerExplicitlyReady =
+      i === ownerIdx &&
+      Boolean((p.name || "").trim()) &&
+      /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(p.email || "").trim());
+    const counterpartyReady = rowReadyForReviewLinkInvite(p, i, list);
+    if (!ownerExplicitlyReady && !counterpartyReady) continue;
     const wf = String(p.role || "").trim().toLowerCase();
     const role: "signer" | "reviewer" | "recipient" =
       wf === "signer" ? "signer" : wf === "reviewer" ? "reviewer" : "recipient";
@@ -241,7 +248,7 @@ export async function mintSimpleDoneReviewRecipientLinkRows(args: {
       },
       mintKey,
       {
-        recipientCount: Math.max(0, list.length - 1),
+        recipientCount: Math.max(0, list.length - (args.includeOwnerWithReadyReviewEmail ? 0 : 1)),
         signerCount: list.filter((p) => (p.name || "").trim().length > 0).length,
         hasDocumentText: signingCorpusLen > 0 || draftDocumentLen > 0,
         documentTextLen: signingCorpusLen > 0 ? signingCorpusLen : draftDocumentLen || undefined,

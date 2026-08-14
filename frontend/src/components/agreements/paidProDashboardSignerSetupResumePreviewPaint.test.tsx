@@ -97,14 +97,14 @@ describe("dashboard signer-setup resume paints accepted server_full_draft previe
       /dashboardSignerSetupResumePreviewPlain\.trim\(\)\.length >= 80 \? \(\s*<pre/,
     );
     const resumePreviewIdx = intakeSrc.indexOf(
-      ") : dashboardSignerSetupResumeUiActive ? (\n                                          // Resume preview must paint through ForcedRoute",
+      ") : dashboardSignerSetupResumeUiActive ? (",
     );
     const forcedInsideResumeIdx = intakeSrc.indexOf(
       "<PaidProDocumentBodyForcedRoute",
       resumePreviewIdx,
     );
     const forcedAfterResumeIdx = intakeSrc.indexOf(
-      ") : paidProForcedFirstReviewActive ? (\n                                          <PaidProDocumentBodyForcedRoute",
+      ") : paidProForcedFirstReviewActive || paidProReviewRecipientSetupActive ? (",
     );
     expect(resumePreviewIdx).toBeGreaterThan(0);
     expect(forcedInsideResumeIdx).toBeGreaterThan(resumePreviewIdx);

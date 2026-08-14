@@ -17,6 +17,7 @@ import {
   GENESIS_DOG_ONBOARDING_DESTINATION,
   hasGenesisDogOnboardingIntent,
 } from "../launch/genesisReferral/genesisDogOnboardingCapture";
+import { readE2eAuthSessionForDev } from "./e2eAuthSessionBridge";
 
 export type AuthSignInOpts = {
   returningSignIn?: boolean;
@@ -46,9 +47,13 @@ function isAuthCallbackPath(): boolean {
 }
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const enabled = isSupabaseAuthEnabled();
+  // The Playwright bridge is already restricted to Vite DEV/test on a non-public
+  // hostname. Treat that validated local session as enabled auth even when the
+  // test server intentionally has no live Supabase credentials.
+  const e2eSession = readE2eAuthSessionForDev();
+  const enabled = isSupabaseAuthEnabled() || Boolean(e2eSession);
   const [loading, setLoading] = useState(enabled);
-  const [session, setSession] = useState<Session | null>(null);
+  const [session, setSession] = useState<Session | null>(e2eSession);
   const finalizedUserRef = useRef<string | null>(null);
 
   const finalizeUser = useCallback(async (user: User, claimMethod: "magic_link" | "google" | "session_restore") => {

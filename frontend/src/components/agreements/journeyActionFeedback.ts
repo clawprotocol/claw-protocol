@@ -14,6 +14,67 @@ export type JourneyActionFeedback = {
   focusSelector?: string;
 };
 
+export const JOURNEY_ACTION_FLASH_EVENT = "claw:journey-action-flash";
+const JOURNEY_ACTION_FLASH_KEY = "claw_journey_action_flash_v1";
+const JOURNEY_ACTION_FLASH_TTL_MS = 10 * 60 * 1000;
+
+type JourneyActionFlashRecord = {
+  feedback: JourneyActionFeedback;
+  createdAt: number;
+};
+
+function validJourneyActionFeedback(value: unknown): value is JourneyActionFeedback {
+  if (!value || typeof value !== "object") return false;
+  const candidate = value as Partial<JourneyActionFeedback>;
+  return (
+    ["working", "succeeded", "blocked", "failed"].includes(String(candidate.kind)) &&
+    typeof candidate.actionId === "string" &&
+    typeof candidate.title === "string" &&
+    typeof candidate.body === "string"
+  );
+}
+
+/** Publish feedback that must remain visible after an SPA route transition. */
+export function publishJourneyActionFlash(feedback: JourneyActionFeedback): void {
+  if (typeof window === "undefined") return;
+  const record: JourneyActionFlashRecord = { feedback, createdAt: Date.now() };
+  try {
+    window.sessionStorage.setItem(JOURNEY_ACTION_FLASH_KEY, JSON.stringify(record));
+  } catch {
+    /* the in-memory event still delivers feedback when storage is unavailable */
+  }
+  window.dispatchEvent(new CustomEvent<JourneyActionFeedback>(JOURNEY_ACTION_FLASH_EVENT, { detail: feedback }));
+}
+
+export function readJourneyActionFlash(): JourneyActionFeedback | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = window.sessionStorage.getItem(JOURNEY_ACTION_FLASH_KEY);
+    if (!raw) return null;
+    const record = JSON.parse(raw) as Partial<JourneyActionFlashRecord>;
+    if (
+      typeof record.createdAt !== "number" ||
+      Date.now() - record.createdAt > JOURNEY_ACTION_FLASH_TTL_MS ||
+      !validJourneyActionFeedback(record.feedback)
+    ) {
+      window.sessionStorage.removeItem(JOURNEY_ACTION_FLASH_KEY);
+      return null;
+    }
+    return record.feedback;
+  } catch {
+    return null;
+  }
+}
+
+export function clearJourneyActionFlash(): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.sessionStorage.removeItem(JOURNEY_ACTION_FLASH_KEY);
+  } catch {
+    /* no-op */
+  }
+}
+
 export function feedbackWorking(actionId: string, title: string, body: string): JourneyActionFeedback {
   return { kind: "working", actionId, title, body };
 }

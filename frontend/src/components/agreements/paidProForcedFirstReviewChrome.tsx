@@ -157,7 +157,25 @@ export function PaidProForcedFirstReviewChrome({
               }}
               data-testid="paid-pro-forced-add-signer-details"
             >
-              {signerDetailsActionLabel}
+              <span data-testid="simple-pro-send-for-signature">
+                {signerDetailsActionLabel}
+              </span>
+            </button>
+            <button
+              type="button"
+              className="w-full rounded-lg border border-emerald-700/40 bg-white px-4 py-2.5 text-sm font-semibold text-emerald-900 shadow-sm hover:bg-emerald-50 disabled:opacity-45"
+              disabled={primaryActionsDisabled || reviewBusy}
+              onClick={() => {
+                logPostFinalizeAction("send_for_review");
+                onShareForReview();
+              }}
+              data-testid="paid-pro-forced-share-for-review"
+            >
+              <span data-testid="simple-pro-send-for-review">
+                {reviewBusy
+                  ? PAID_PRO_DELIVERY_TRACK_REVIEW_BUSY_CTA
+                  : PAID_PRO_DELIVERY_TRACK_REVIEW_CTA}
+              </span>
             </button>
           </>
         ) : (
@@ -185,7 +203,9 @@ export function PaidProForcedFirstReviewChrome({
                 }}
                 data-testid="paid-pro-forced-prepare-signatures"
               >
-                {PAID_PRO_DELIVERY_TRACK_SIGNATURE_CTA}
+                <span data-testid="simple-pro-send-for-signature">
+                  {PAID_PRO_DELIVERY_TRACK_SIGNATURE_CTA}
+                </span>
               </button>
             </div>
             <div
@@ -208,9 +228,11 @@ export function PaidProForcedFirstReviewChrome({
                 }}
                 data-testid="paid-pro-forced-share-for-review"
               >
-                {reviewBusy
-                  ? PAID_PRO_DELIVERY_TRACK_REVIEW_BUSY_CTA
-                  : PAID_PRO_DELIVERY_TRACK_REVIEW_CTA}
+                <span data-testid="simple-pro-send-for-review">
+                  {reviewBusy
+                    ? PAID_PRO_DELIVERY_TRACK_REVIEW_BUSY_CTA
+                    : PAID_PRO_DELIVERY_TRACK_REVIEW_CTA}
+                </span>
               </button>
             </div>
           </div>
@@ -261,7 +283,7 @@ export function PaidProForcedFirstReviewChrome({
             }}
             data-testid="paid-pro-forced-edit-agreement"
           >
-            Edit agreement text
+            <span data-testid="simple-pro-edit-agreement-text-toggle">Edit agreement text</span>
           </button>
         </div>
         {exportError ? (

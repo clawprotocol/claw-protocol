@@ -501,7 +501,9 @@ export function resolvePaidProSignerDetailsGate(
     const email = paidProEmailForIndex(args, i);
     if (!legal) blockers.push({ partyIndex: i, field: "legal_entity", reason: "missing" });
     const companyNameUsedAsSigner =
-      Boolean(legal) && Boolean(signerName) && hasLegalEntitySuffix(legal) && signerName === norm(legal);
+      Boolean(signerName) &&
+      (hasLegalEntitySuffix(signerName) ||
+        (Boolean(legal) && hasLegalEntitySuffix(legal) && signerName === norm(legal)));
     if (!signerName || companyNameUsedAsSigner) {
       blockers.push({ partyIndex: i, field: "signer_name", reason: "missing" });
     }

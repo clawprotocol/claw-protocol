@@ -391,7 +391,13 @@ export function paidProSignerSetupUiStateFromRecipientSetup(
       ? partyEmails.slice(2).map((x) => String(x ?? ""))
       : [];
   const legalExtras = (setup?.recipientPartyLegalNames ?? []).map((x) => String(x ?? ""));
-  const uiCount = Math.max(setup?.signerSetupUiPartyCount ?? 0, draftParties.length, 2);
+  const uiCount = Math.max(
+    setup?.signerSetupUiPartyCount ?? 0,
+    partyEmails?.length ?? 0,
+    setup?.recipientPartyLegalNames?.length ? setup.recipientPartyLegalNames.length + 2 : 0,
+    draftParties.length,
+    2,
+  );
   return {
     creatorCoordinatorOnly: Boolean(setup?.creatorCoordinatorOnly),
     signerSetupUiPartyCount: Math.min(uiCount, PAID_PRO_SIGNER_SETUP_MAX_UI_PARTIES),

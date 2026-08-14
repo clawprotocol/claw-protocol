@@ -169,5 +169,8 @@ export function buildPaidProSignerMetadataAuthorityForFinalize(
   ui: LiveSignerMetadataUiState,
   opts?: { intakeText?: string | null; draftPartyNames?: readonly string[] },
 ): PaidProSignerMetadataAuthority {
-  return buildLivePaidProSignerMetadataAuthority(mergeLiveSignerMetadataUiWithDomCommit(ui), "live_ui", opts);
+  return buildLivePaidProSignerMetadataAuthority(mergeLiveSignerMetadataUiWithDomCommit(ui), "live_ui", {
+    ...opts,
+    preferCompleteUiLegalEntityAuthority: true,
+  });
 }

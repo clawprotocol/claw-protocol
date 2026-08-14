@@ -82,7 +82,10 @@ describe("Test271 review track routing (static intake wiring)", () => {
 
   it("handleProSendForReview never gates review on paidProSignatureDetailsReady", () => {
     const handleIdx = intake.indexOf("const handleProSendForReview = React.useCallback");
-    const block = intake.slice(handleIdx, handleIdx + 1800);
+    const handleEnd = intake.indexOf("const handleFinalizeRoutePrimaryAction", handleIdx);
+    const block = intake.slice(handleIdx, handleEnd);
+    expect(block).toContain("if (acceptedPaidProAuthorityActive || paidProAuthoritative)");
+    expect(block).toContain('enterFinalReviewRecipientSetup("review_only")');
     expect(block).toContain('void completeGuidedPaidProReviewFirstHandoff("simple_pro_send_for_review")');
     expect(block).toContain('selectedTrack: "review"');
     expect(block).toContain('logPaidProReviewTrackLifecycle("review_track_selected"');
@@ -103,7 +106,8 @@ describe("Test271 review track routing (static intake wiring)", () => {
     const reviewBranch = enterBlock.slice(reviewOnlyIdx, signatureGateIdx);
     expect(reviewBranch).not.toContain("handlePremiumReviewFirstContinueToSigners");
     expect(reviewBranch).not.toContain("claw-paid-pro-inline-signer-setup");
-    expect(reviewBranch).toContain("completeGuidedPaidProReviewFirstHandoff");
+    expect(reviewBranch).toContain('handlePremiumSendModePick("review")');
+    expect(reviewBranch).toContain("setCreateFlowSendRecipientEditorOpen(true)");
   });
 
   it("enterFinalReviewRecipientSetup signature path still uses signer setup gate", () => {

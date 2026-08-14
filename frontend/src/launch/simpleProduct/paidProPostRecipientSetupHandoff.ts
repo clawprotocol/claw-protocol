@@ -136,6 +136,7 @@ async function mintAndPersistReviewLinksForHandoff(
     const minted = await mintSimpleDoneReviewRecipientLinkRows({
       agreementId: id,
       draft: draftForMint,
+      includeOwnerWithReadyReviewEmail: true,
       signingCorpusPlain: signingCorpusPlain || undefined,
       signingCorpusSource: signingCorpusPlain
         ? (agreementCorpusSource ?? "review_first_pinned_corpus").trim() || "review_first_pinned_corpus"
@@ -399,24 +400,6 @@ export async function executePaidProPostRecipientSetupHandoff(options: {
       };
     }
     writeGuidedVs01SigningHandoffSession(handoff);
-  }
-
-  try {
-    const minted = await mintSimpleDoneReviewRecipientLinkRows({
-      agreementId: id,
-      draft: draftForBridge,
-      signingCorpusPlain: signingCorpusPlain || undefined,
-      signingCorpusSource: handoff?.source,
-    });
-    if (reviewLinkMintHasUsableUrls(minted.rows)) {
-      writeSimpleDoneReviewRecipientLinks({
-        agreementId: id,
-        recipients: minted.rows,
-        agreementPartyDisplayNames: orderedAuthoritativePartyDisplayNames(options.draft.parties),
-      });
-    }
-  } catch {
-    /* VS01 bridge may still proceed; owner can copy links from done later if needed */
   }
 
   // eslint-disable-next-line no-console

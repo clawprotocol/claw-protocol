@@ -145,27 +145,37 @@ export function mergeReviewLinkRecipientEmailsOntoHydratedDraft(
 
 export function mergeLiveDraftWithRecipientSetupForReviewLinks(
   liveDraft: AgreementDraft | null,
-  recipientSetup: { recipient1Email?: string | null; recipient2Email?: string | null; recipientPartyEmails?: readonly (string | null | undefined)[] } | null,
+  recipientSetup: {
+    recipient1Email?: string | null;
+    recipient2Email?: string | null;
+    recipientPartyEmails?: readonly (string | null | undefined)[];
+    recipient1Name?: string | null;
+    recipient2Name?: string | null;
+    recipientPartyLegalNames?: readonly (string | null | undefined)[];
+  } | null,
 ): AgreementDraft | null {
   if (!liveDraft) return null;
   if (!recipientSetup) return liveDraft;
   const arr = recipientSetup.recipientPartyEmails;
-  if (Array.isArray(arr) && arr.length > 0) {
-    return mergePaidProRecipientSetupEmailsIntoDraft(liveDraft, arr) ?? liveDraft;
-  }
-  const s1 = plausibleSlotEmail(recipientSetup.recipient1Email);
-  const s2 = plausibleSlotEmail(recipientSetup.recipient2Email);
-  if (!s1 && !s2) return liveDraft;
-  const parties = [...(liveDraft.parties ?? [])] as AgreementParty[];
+  const withEmails =
+    Array.isArray(arr) && arr.length > 0
+      ? mergePaidProRecipientSetupEmailsIntoDraft(liveDraft, arr) ?? liveDraft
+      : mergePaidProRecipientSetupEmailsIntoDraft(liveDraft, {
+          recipient1Email: recipientSetup.recipient1Email,
+          recipient2Email: recipientSetup.recipient2Email,
+        }) ?? liveDraft;
+  const parties = [...(withEmails.parties ?? [])] as AgreementParty[];
   let changed = false;
-  const slots = [s1, s2];
-  for (let i = 0; i < slots.length && i < parties.length; i++) {
-    const raw = slots[i];
-    if (!raw) continue;
-    const prev = (parties[i].email ?? "").trim();
-    if (prev === raw) continue;
-    parties[i] = { ...parties[i], email: raw };
+  const legalNames = [
+    String(recipientSetup.recipient1Name ?? "").trim(),
+    String(recipientSetup.recipient2Name ?? "").trim(),
+    ...(recipientSetup.recipientPartyLegalNames ?? []).map((name) => String(name ?? "").trim()),
+  ];
+  for (let i = 0; i < legalNames.length && i < parties.length; i++) {
+    const name = legalNames[i];
+    if (!name || parties[i]?.name?.trim() === name) continue;
+    parties[i] = { ...parties[i], name };
     changed = true;
   }
-  return changed ? { ...liveDraft, parties } : liveDraft;
+  return changed ? { ...withEmails, parties } : withEmails;
 }

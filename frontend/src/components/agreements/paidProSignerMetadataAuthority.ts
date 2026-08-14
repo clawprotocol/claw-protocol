@@ -521,7 +521,11 @@ function signerEmailForIndex(ui: LiveSignerMetadataUiState, index: number): stri
 
 export function buildPaidProSignerMetadataParties(
   ui: LiveSignerMetadataUiState,
-  opts?: { intakeText?: string | null; draftPartyNames?: readonly string[] },
+  opts?: {
+    intakeText?: string | null;
+    draftPartyNames?: readonly string[];
+    preferCompleteUiLegalEntityAuthority?: boolean;
+  },
 ): PaidProSignerMetadataParty[] {
   const frozenNames = readFrozenCanonicalManifestPartyNames();
   const hasFrozenManifest = frozenNames.filter((n) => n.trim().length >= 2).length >= 2;
@@ -557,12 +561,34 @@ export function buildPaidProSignerMetadataParties(
           },
           ui.partyCount,
         );
+  const completeUiLegalEntities = Array.from({ length: count }, (_, index) =>
+    partyLegalNameForIndex(ui, index).trim(),
+  );
+  const signerContactKeys = new Set(
+    ui.partySignerNames
+      .map((name) => normalizedLegalNameKey(name))
+      .filter(Boolean),
+  );
+  // Explicit signer finalization already requires a legal-entity value for every visible party.
+  // Do not re-run the intake extraction heuristic here: it can reject valid corrected names and
+  // resurrect a stale frozen manifest. A signer name copied into a legal-entity field is not a
+  // complete UI authority, though; in that case retain the canonical intake/manifest identity.
+  const hasCompleteUiLegalEntityAuthority =
+    completeUiLegalEntities.length >= 2 &&
+    completeUiLegalEntities.every(
+      (name) => name.length >= 2 && !signerContactKeys.has(normalizedLegalNameKey(name)),
+    );
   const parties: PaidProSignerMetadataParty[] = [];
   for (let i = 0; i < count; i++) {
     const frozenLegal = (frozenNames[i] ?? "").trim();
     const authorityLegal = authorityIdentities[i]?.legalEntityName ?? "";
     const uiLegal = partyLegalNameForIndex(ui, i);
-    const uiLegalClean = resolveAuthorityPartyLegalNameField(uiLegal, "");
+    const uiLegalClean =
+      resolveAuthorityPartyLegalNameField(uiLegal, "") ||
+      sanitizeSignerPartyLegalEntityDisplay(uiLegal, {
+        partyIndex: i,
+        source: "metadata_authority",
+      });
     const draftLegalClean = resolveAuthorityPartyLegalNameField(
       (opts?.draftPartyNames?.[i] ?? "").trim(),
       "",
@@ -570,7 +596,9 @@ export function buildPaidProSignerMetadataParties(
     // Legal Party Authority wins over corrupted draft fragments / wrong UI names.
     // Metadata and draft rows may enrich slots but must not substitute intake legal identities.
     const resolvedLegal =
-      hasFrozenManifest && frozenLegal
+      opts?.preferCompleteUiLegalEntityAuthority && hasCompleteUiLegalEntityAuthority && uiLegalClean
+        ? uiLegalClean
+        : hasFrozenManifest && frozenLegal
         ? frozenLegal
         : authorityIdentities.length >= 2 && authorityLegal
           ? authorityLegal
@@ -591,10 +619,17 @@ export function buildPaidProSignerMetadataParties(
       }),
     });
   }
-  const filled = fillPartyLegalNamesFromFrozenManifestAndIntake(parties, opts);
-  const legalEntitiesForMerge = hasFrozenManifest
-    ? frozenNames.slice(0, count)
-    : filled.map((p) => p.partyLegalName);
+  const explicitFinalizeAuthority = Boolean(
+    opts?.preferCompleteUiLegalEntityAuthority && hasCompleteUiLegalEntityAuthority,
+  );
+  const filled = explicitFinalizeAuthority
+    ? parties
+    : fillPartyLegalNamesFromFrozenManifestAndIntake(parties, opts);
+  const legalEntitiesForMerge = explicitFinalizeAuthority
+    ? filled.map((p) => p.partyLegalName)
+    : hasFrozenManifest
+      ? frozenNames.slice(0, count)
+      : filled.map((p) => p.partyLegalName);
   return mergeIntakeSignerMetadataIntoAuthorityParties(
     filled,
     opts?.intakeText,
@@ -666,7 +701,11 @@ export function resolvePaidProPostFinalizeSignerDetailsEditSeed(): PaidProSigner
 export function buildLivePaidProSignerMetadataAuthority(
   ui: LiveSignerMetadataUiState,
   source: PaidProSignerMetadataAuthoritySource = "live_ui",
-  opts?: { intakeText?: string | null; draftPartyNames?: readonly string[] },
+  opts?: {
+    intakeText?: string | null;
+    draftPartyNames?: readonly string[];
+    preferCompleteUiLegalEntityAuthority?: boolean;
+  },
 ): PaidProSignerMetadataAuthority {
   const parties = buildPaidProSignerMetadataParties(ui, opts);
   return {

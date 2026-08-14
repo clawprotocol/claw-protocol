@@ -114,6 +114,53 @@ describe("paidProSignerMetadataDomCommit", () => {
     expect(authority.parties[1]?.signerTitle).toBe("President");
   });
 
+  it("keeps four explicitly confirmed UI legal entities aligned with their signer rows", () => {
+    mountSignerInput("r1-name", "Redwood Biologics, Inc.");
+    mountSignerInput("r2-name", "Summit AI Consulting LLC");
+    mountSignerInput("party-2-legal-name", "Blue Harbor Systems LLC");
+    mountSignerInput("party-3-legal-name", "Iron Gate Security LLC");
+    mountSignerInput("party-2-signer-name", "Maya Brooks");
+    mountSignerInput("party-3-signer-name", "Luis Ortega");
+    mountSignerInput("party-2-email", "maya@example.test");
+    mountSignerInput("party-3-email", "luis@example.test");
+
+    const authority = buildPaidProSignerMetadataAuthorityForFinalize(
+      baseUi({
+        partyCount: 4,
+        recipient1Name: "Redwood Biologics, Inc.",
+        recipient2Name: "Summit AI Consulting LLC",
+        recipient1Email: "ava@example.test",
+        recipient2Email: "noah@example.test",
+        extraPartyLegalNames: ["Blue Harbor Systems LLC", "Iron Gate Security LLC"],
+        extraPartyReviewEmails: ["maya@example.test", "luis@example.test"],
+        partySignerNames: ["Ava Chen", "Noah Patel", "Maya Brooks", "Luis Ortega"],
+      }),
+      {
+        intakeText:
+          "* Redwood Biologics Inc. and * Summit AI Consulting LLC; Blue Harbor Systems LLC and Iron Gate Security LLC also participate.",
+        draftPartyNames: [
+          "* Redwood Biologics Inc.",
+          "Redwood Biologics Inc",
+          "* Summit AI Consulting LLC",
+          "Summit AI Consulting LLC",
+        ],
+      },
+    );
+
+    expect(authority.parties.map((party) => party.partyLegalName)).toEqual([
+      "Redwood Biologics, Inc.",
+      "Summit AI Consulting LLC",
+      "Blue Harbor Systems LLC",
+      "Iron Gate Security LLC",
+    ]);
+    expect(authority.parties.map((party) => party.signerName)).toEqual([
+      "Ava Chen",
+      "Noah Patel",
+      "Maya Brooks",
+      "Luis Ortega",
+    ]);
+  });
+
   it("defers review render repair only while signer metadata session is active on accepted SoT", () => {
     vi.spyOn(paidProSourceOfTruth, "hasPaidProSourceOfTruth").mockReturnValue(true);
     vi.spyOn(authoritativeSigningSnapshot, "hasAuthoritativeSigningSnapshot").mockReturnValue(false);

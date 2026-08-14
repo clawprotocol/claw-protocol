@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import "../vs01/vs01.css";
 import "./launch.css";
 import { useFeatureGate } from "../config/featureFlags/useFeatureGate";
@@ -13,6 +13,13 @@ import { LawdogBrand } from "../components/ui/LawdogBrand";
 import { useActiveGenesisAffiliateAccess } from "./genesisReferral/genesisAffiliateAccess";
 import { useOperatorConsoleCapability } from "./useOperatorConsoleCapability";
 import { initializeNewAgreementSession } from "./newAgreementSessionReset";
+import { JourneyActionBanner } from "../components/agreements/JourneyActionBanner";
+import {
+  JOURNEY_ACTION_FLASH_EVENT,
+  clearJourneyActionFlash,
+  readJourneyActionFlash,
+  type JourneyActionFeedback,
+} from "../components/agreements/journeyActionFeedback";
 import "../joy/joy.css";
 
 export type AppShellNavMode = "default" | "esign_bridge_focused" | "minimal" | "public_completed";
@@ -48,6 +55,20 @@ export function AppShell(props: {
   const minimalNav = navMode === "minimal";
   const publicCompletedNav = navMode === "public_completed";
   const [moreOpen, setMoreOpen] = useState(false);
+  const [journeyActionFlash, setJourneyActionFlash] = useState<JourneyActionFeedback | null>(() =>
+    readJourneyActionFlash(),
+  );
+
+  useEffect(() => {
+    const handleJourneyActionFlash = (event: Event) => {
+      const feedback = (event as CustomEvent<JourneyActionFeedback>).detail;
+      if (feedback) setJourneyActionFlash(feedback);
+    };
+    window.addEventListener(JOURNEY_ACTION_FLASH_EVENT, handleJourneyActionFlash);
+    const stored = readJourneyActionFlash();
+    if (stored) setJourneyActionFlash(stored);
+    return () => window.removeEventListener(JOURNEY_ACTION_FLASH_EVENT, handleJourneyActionFlash);
+  }, []);
 
   const overflowItems: OverflowNavItem[] = [
     { label: "Billing", path: "/app/billing", title: "Compare plans, subscription status, and payment" },
@@ -236,6 +257,18 @@ export function AppShell(props: {
             {subtitle ? <div className="vs01-header-subtitle">{subtitle}</div> : null}
           </div>
         </header>
+
+        {journeyActionFlash ? (
+          <div className="mb-4" data-testid="app-shell-journey-action-flash">
+            <JourneyActionBanner
+              feedback={journeyActionFlash}
+              onDismiss={() => {
+                clearJourneyActionFlash();
+                setJourneyActionFlash(null);
+              }}
+            />
+          </div>
+        ) : null}
 
         <main className="vs01-main">{children}</main>
 

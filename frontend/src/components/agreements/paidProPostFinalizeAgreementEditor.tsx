@@ -11,6 +11,9 @@ type Props = {
   onCancel: () => void;
   disabled?: boolean;
   editorRef?: RefObject<HTMLTextAreaElement | null>;
+  dirty?: boolean;
+  saving?: boolean;
+  savedAck?: boolean;
 };
 
 export function PaidProPostFinalizeAgreementEditor({
@@ -20,6 +23,9 @@ export function PaidProPostFinalizeAgreementEditor({
   onCancel,
   disabled = false,
   editorRef,
+  dirty = false,
+  saving = false,
+  savedAck = false,
 }: Props) {
   return (
     <div data-testid="paid-pro-post-finalize-agreement-editor">
@@ -27,11 +33,11 @@ export function PaidProPostFinalizeAgreementEditor({
         <button
           type="button"
           className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-emerald-500 disabled:opacity-50 sm:text-[13px]"
-          disabled={disabled}
+          disabled={disabled || saving || !dirty}
           onClick={onSave}
-          data-testid="paid-pro-post-finalize-edit-save"
+          data-testid="simple-pro-save-agreement-edits"
         >
-          Save changes
+          {saving ? "Saving…" : savedAck ? "Changes saved" : "Save changes"}
         </button>
         <button
           type="button"
@@ -51,10 +57,31 @@ export function PaidProPostFinalizeAgreementEditor({
         value={value}
         onChange={(e) => onChange(e.target.value)}
         spellCheck
-        disabled={disabled}
+        disabled={disabled || saving}
         aria-label="Agreement document"
-        data-testid="paid-pro-post-finalize-edit-textarea"
+        data-testid="simple-pro-edit-agreement-plain-input"
       />
+      {saving ? (
+        <p className="mt-1.5 text-[11px] font-medium text-stone-700" role="status">
+          Saving changes…
+        </p>
+      ) : savedAck ? (
+        <p
+          className="mt-1.5 text-[11px] font-medium text-emerald-800"
+          role="status"
+          data-testid="simple-pro-save-ack"
+        >
+          Changes saved. The agreement text is updated.
+        </p>
+      ) : dirty ? (
+        <p
+          className="mt-1.5 text-[11px] font-medium text-amber-800"
+          role="status"
+          data-testid="simple-pro-unsaved"
+        >
+          Unsaved changes
+        </p>
+      ) : null}
     </div>
   );
 }

@@ -69,10 +69,40 @@ function fillExistingIfToSignerSetupPlaceholders(
   const out: string[] = [];
   for (const line of lines) {
     const trimmed = line.trim();
-    const ifTo = trimmed.match(/^If to\s+(.+?)\s*:\s*$/i);
+    const ifTo = trimmed.match(/^If to\s+(.+?)\s*:\s*(.*)$/i);
     if (ifTo) {
       const entity = (ifTo[1] ?? "").trim();
       currentParty = parties.find((p) => partyLegalNamesMatch(entity, p.partyLegalName)) ?? null;
+      const inlineRemainder = (ifTo[2] ?? "").trim();
+      if (currentParty && inlineRemainder) {
+        const signerName = currentParty.signerName.trim();
+        const signerTitle = currentParty.signerTitle.trim();
+        const email = currentParty.signerEmail.trim();
+        const address = currentParty.partyAddress.trim();
+        let nextLine = line;
+        if (signerName) {
+          nextLine = nextLine.replace(
+            /\b(?:Attn|Attention)\s*:\s*Authorized Signer\b/i,
+            signerTitle ? `Attention: ${signerName}, ${signerTitle}` : `Attention: ${signerName}`,
+          );
+        }
+        if (email && !/provided during signer setup/i.test(email)) {
+          nextLine = nextLine.replace(
+            /\bEmail\s*:\s*provided during signer setup\.?/i,
+            `Email: ${email}`,
+          );
+        }
+        nextLine = address.length > 8 && !/provided during signer setup/i.test(address)
+          ? nextLine.replace(
+              /\bAddress\s*:\s*provided during signer setup\.?/i,
+              `Address: ${address}`,
+            )
+          : nextLine.replace(/\s*\bAddress\s*:\s*provided during signer setup\.?/i, "");
+        if (nextLine !== line) replacements += 1;
+        out.push(nextLine);
+        currentParty = null;
+        continue;
+      }
       out.push(line);
       continue;
     }
@@ -117,8 +147,20 @@ function fillExistingIfToSignerSetupPlaceholders(
     }
     out.push(line);
   }
+  let nextText = out.join("\n");
+  // A stale pre-finalize manifest can leave an unmatched setup-only notice row. Once the
+  // confirmed signer authority has been applied, those tokens are neither user data nor valid
+  // contract text. Remove only the unresolved placeholder lines/fragments; never remove real
+  // contact values or rebuild the Notices family.
+  const withoutUnresolvedPlaceholders = nextText
+    .replace(/^[ \t]*(?:Email|Address)\s*:\s*provided during signer setup\.?[ \t]*\n?/gim, "")
+    .replace(/\s+\b(?:Email|Address)\s*:\s*provided during signer setup\.?/gi, "");
+  if (withoutUnresolvedPlaceholders !== nextText) {
+    nextText = withoutUnresolvedPlaceholders;
+    replacements += 1;
+  }
   if (replacements === 0) return { text: corpus, applied: false, replacements: 0 };
-  return { text: out.join("\n"), applied: true, replacements };
+  return { text: nextText, applied: true, replacements };
 }
 
 /** Hydrate signer metadata into frozen server_full SoT without regenerating operative text. */

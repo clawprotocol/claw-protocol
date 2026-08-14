@@ -138,6 +138,35 @@ describe("mintSimpleDoneReviewRecipientLinkRows", () => {
     expect(body.recipient_party_id).toBe("p_rev");
   });
 
+  it("includes an explicitly confirmed owner reviewer email after recipient setup", async () => {
+    let n = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        n += 1;
+        return {
+          ok: true,
+          json: async () => ({ token: `tok_confirmed_${n}`, expires_in_seconds: 3600, locked_version_id: "lv1" }),
+        };
+      }) as unknown as typeof fetch,
+    );
+    const draft = {
+      id: "ag_confirmed_owner",
+      parties: [
+        { id: "p_owner", name: "Owner", role: "owner", email: "owner-review@example.com" },
+        { id: "p_rev", name: "Reviewer", role: "reviewer", email: "reviewer@example.com" },
+      ],
+    } as AgreementDraft;
+    const { rows, attemptedMintCount } = await mintSimpleDoneReviewRecipientLinkRows({
+      agreementId: "ag_confirmed_owner",
+      draft,
+      includeOwnerWithReadyReviewEmail: true,
+    });
+    expect(attemptedMintCount).toBe(2);
+    expect(rows).toHaveLength(2);
+    expect(new Set(rows.map((row) => row.reviewHref)).size).toBe(2);
+  });
+
   it("returns signing_token_secret_not_configured code on 422", async () => {
     vi.stubGlobal(
       "fetch",

@@ -169,13 +169,14 @@ describe("Test302 post-finalize edit agreement text opens hydrated editor", () =
         onChange={() => {}}
         onSave={onSave}
         onCancel={onCancel}
+        dirty
       />,
     );
     const editor = screen.getByTestId("paid-pro-post-finalize-agreement-editor");
-    const textarea = within(editor).getByTestId("paid-pro-post-finalize-edit-textarea") as HTMLTextAreaElement;
+    const textarea = within(editor).getByTestId("simple-pro-edit-agreement-plain-input") as HTMLTextAreaElement;
     expect(textarea.value).toMatch(/Sarah Mitchell/i);
     expect(textarea.value).toMatch(/Michael Torres/i);
-    fireEvent.click(within(editor).getByTestId("paid-pro-post-finalize-edit-save"));
+    fireEvent.click(within(editor).getByTestId("simple-pro-save-agreement-edits"));
     fireEvent.click(within(editor).getByTestId("paid-pro-post-finalize-edit-cancel"));
     expect(onSave).toHaveBeenCalledTimes(1);
     expect(onCancel).toHaveBeenCalledTimes(1);

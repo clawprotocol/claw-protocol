@@ -39,6 +39,33 @@ async function capture(page: Page, slug: string): Promise<void> {
 }
 
 async function fulfillUsageAndPolicy(page: Page): Promise<void> {
+  await page.route("**/v1/workspace/bind-user-org**", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        ok: true,
+        org_id: "user-e2e-user-rc-authority",
+        user_id: "e2e-user-rc-authority",
+        migrated_agreement_count: 0,
+        migrated_agreement_ids: [],
+      }),
+    });
+  });
+  await page.route("**/v1/subscriptions/**", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        subscription: {
+          id: "sub_rc_paid_pro",
+          org_id: "user-e2e-user-rc-authority",
+          plan_code: "pro",
+          status: "active",
+        },
+      }),
+    });
+  });
   await page.route("**/health**", async (route) => {
     if (route.request().method() !== "GET") {
       await route.fallback();
@@ -60,9 +87,29 @@ async function fulfillUsageAndPolicy(page: Page): Promise<void> {
       contentType: "application/json",
       body: JSON.stringify({
         tier: "paid",
+        state: "pro",
+        grant_source: "stripe",
         agreements_used: 0,
         agreements_limit: 10,
+        agreements_remaining: 10,
+        agreement_allowance: 10,
+        can_create_persisted_agreement: true,
+        can_save_guest_draft: false,
         watermark_required: false,
+        commercial: {
+          state: "pro",
+          entitlement: "paid_pro",
+          grant_source: "stripe",
+          agreement_allowance: 10,
+          agreements_used: 0,
+          agreements_remaining: 10,
+          period_ends_at: "2026-09-01T00:00:00.000Z",
+          can_create_persisted_agreement: true,
+          can_save_guest_draft: false,
+          create_allowed: true,
+          upgrade_required: false,
+          reason: null,
+        },
       }),
     });
   });
@@ -331,6 +378,7 @@ for (const vp of VIEWPORTS) {
 
       mint.fail = false;
       await createReview.click();
+      await expect.poll(() => new Set(mint.minted).size, { timeout: 30_000 }).toBe(3);
       await expect(page.getByText(/Nothing was emailed|does not email/i).first()).toBeVisible({ timeout: 30_000 });
       const unique = [...new Set(mint.minted)];
       expect(unique.length).toBe(3);
@@ -370,7 +418,9 @@ for (const vp of VIEWPORTS) {
 
       await fillRecipientField(page, "r1-signer-name", "Redwood Biologics, Inc.");
       await fillRecipientField(page, "r1-email", "ava@example.test");
-      const createSigning = page.getByRole("button", { name: /Create signing links|Prepare for signing/i }).first();
+      const createSigning = page.getByRole("button", {
+        name: /Save signer details|Complete signer details|Create signing links|Prepare for signing/i,
+      }).first();
       await expect(createSigning).toBeVisible({ timeout: 20_000 });
       await createSigning.click();
       await expect(page.getByText(/authorized signer name/i).first()).toBeVisible({ timeout: 15_000 });
@@ -390,10 +440,38 @@ for (const vp of VIEWPORTS) {
       await fillRecipientField(page, "party-3-signer-name", "Luis Ortega");
       await fillRecipientField(page, "party-3-email", "luis@example.test");
 
-      await createSigning.click();
-      await expect(page.getByText(/Nothing was emailed|does not email/i).first()).toBeVisible({ timeout: 30_000 });
+      const finalizeSignerDetails = page.getByRole("button", {
+        name: /Save signer details|Complete signer details|Finalize signer details and continue to review decision|Continue to signature links|Create signing links/i,
+      }).first();
+      await expect(finalizeSignerDetails).toBeVisible({ timeout: 20_000 });
+      await finalizeSignerDetails.click();
+      await capture(page, `${vp.name}-04-post-finalize-decision`);
+      const prepareSigning = page
+        .getByTestId("paid-pro-forced-prepare-signatures")
+        .or(page.getByTestId("simple-pro-send-for-signature"))
+        .first();
+      const signingSuccess = page.getByText(/Nothing was emailed|does not email/i).first();
+      await expect(prepareSigning.or(signingSuccess).first()).toBeVisible({ timeout: 30_000 });
+      if (!(await signingSuccess.isVisible())) {
+        await page.evaluate(() => {
+          const explicit = document.querySelector<HTMLButtonElement>(
+            '[data-testid="paid-pro-forced-prepare-signatures"]',
+          );
+          const legacy = document
+            .querySelector<HTMLElement>('[data-testid="simple-pro-send-for-signature"]')
+            ?.closest<HTMLButtonElement>("button");
+          const button = explicit ?? legacy ?? null;
+          if (!button) return false;
+          button.click();
+          return true;
+        });
+      }
+      await expect.poll(() => new Set(mint.minted).size, { timeout: 30_000 }).toBe(4);
+      await expect(signingSuccess).toBeVisible({ timeout: 30_000 });
       expect([...new Set(mint.minted)].length).toBe(4);
 
+      await page.goto("/app/create?checkout=success", { waitUntil: "domcontentloaded" });
+      await waitForAuthoritativeProReview(page);
       const editToggle = page.getByTestId("simple-pro-edit-agreement-text-toggle");
       await expect(editToggle).toBeVisible({ timeout: 20_000 });
       await editToggle.click();

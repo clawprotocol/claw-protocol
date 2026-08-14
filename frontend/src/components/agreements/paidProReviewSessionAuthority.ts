@@ -8,6 +8,7 @@
 
 import { hashPaidProCorpus } from "./paidProSourceOfTruthState";
 import { PAID_PRO_AUTHORITY_MIN_LEN } from "./paidProAuthorityConstants";
+import { advancePaidReviewSessionCanonicalSoTAfterSignerFinalize } from "./paidProReviewSessionCorpusInvariantState";
 
 export const PAID_PRO_REVIEW_SESSION_AUTHORITY_SOURCE = "review_session_authority";
 
@@ -131,6 +132,10 @@ export function replacePaidProReviewSessionAuthorityAfterSignerFinalize(args: {
     reviewSessionId: (args.reviewSessionId || prior?.reviewSessionId || "").trim() || null,
     establishedAt: Date.now(),
   };
+  advancePaidReviewSessionCanonicalSoTAfterSignerFinalize({
+    reviewSessionId: activeAuthority.reviewSessionId,
+    canonicalPlain: activeAuthority.corpusPlain,
+  });
   if (typeof import.meta !== "undefined" && import.meta.env?.MODE !== "test") {
     // eslint-disable-next-line no-console
     console.info("[paid-pro-review-session-authority]", {

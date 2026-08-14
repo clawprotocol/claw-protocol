@@ -255,4 +255,29 @@ describe("mergeLiveDraftWithRecipientSetupForReviewLinks", () => {
     expect(out?.parties[0].email).toContain("ok.test");
     expect(out?.parties[1].email).toContain("ok.test");
   });
+
+  it("hydrates multi-party legal names with their confirmed review emails", () => {
+    const d = {
+      id: "ag-5",
+      parties: [
+        { name: "A", role: "party" },
+        { name: "B", role: "party" },
+        { name: "", role: "party" },
+      ],
+    } as AgreementDraft;
+    const out = mergeLiveDraftWithRecipientSetupForReviewLinks(d, {
+      recipient1Email: "a@ok.test",
+      recipient2Email: "b@ok.test",
+      recipientPartyEmails: ["a@ok.test", "b@ok.test", "c@ok.test"],
+      recipient1Name: "A LLC",
+      recipient2Name: "B LLC",
+      recipientPartyLegalNames: ["C LLC"],
+    });
+    expect(out?.parties.map((party) => party.name)).toEqual(["A LLC", "B LLC", "C LLC"]);
+    expect(out?.parties.map((party) => party.email)).toEqual([
+      "a@ok.test",
+      "b@ok.test",
+      "c@ok.test",
+    ]);
+  });
 });

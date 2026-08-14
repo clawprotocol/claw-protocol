@@ -15,6 +15,9 @@ import {
   feedbackCreatingLinks,
   feedbackFailed,
   feedbackLinksInvalidated,
+  clearJourneyActionFlash,
+  publishJourneyActionFlash,
+  readJourneyActionFlash,
   feedbackSucceeded,
   feedbackWorking,
 } from "./journeyActionFeedback";
@@ -53,6 +56,19 @@ describe("JourneyActionBanner rendered states", () => {
       />,
     );
     expect(screen.getByTestId("journey-action-banner").getAttribute("data-journey-action-kind")).toBe("failed");
+  });
+
+  it("keeps consequential success feedback available across route transitions until dismissed", () => {
+    clearJourneyActionFlash();
+    const feedback = feedbackSucceeded(
+      "create_links",
+      "Signing links created—share when ready",
+      "Four private signing links were created. Nothing was emailed.",
+    );
+    publishJourneyActionFlash(feedback);
+    expect(readJourneyActionFlash()).toEqual(feedback);
+    clearJourneyActionFlash();
+    expect(readJourneyActionFlash()).toBeNull();
   });
 });
 
