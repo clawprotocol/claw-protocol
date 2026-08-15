@@ -86,7 +86,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     void getAuthSession().then(async (s) => {
       setSession(s);
       if (s?.access_token) setCachedAccessToken(s.access_token);
-      else clearCachedAccessToken();
       if (s?.user && !isAuthCallbackPath()) {
         await finalizeUser(s.user, "session_restore");
       }
@@ -95,7 +94,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     unsub = onAuthStateChange((s) => {
       setSession(s);
       if (s?.access_token) setCachedAccessToken(s.access_token);
-      else clearCachedAccessToken();
       if (s?.user && !isAuthCallbackPath()) {
         void finalizeUser(s.user, "session_restore");
       }
@@ -166,6 +164,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await signOutAuth();
     setSession(null);
     finalizedUserRef.current = null;
+    clearCachedAccessToken();
   }, []);
 
   const value = useMemo(

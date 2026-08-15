@@ -20,10 +20,12 @@ export async function refreshCachedAccessToken(): Promise<string> {
     const { getAuthSession } = await import("./supabaseAuthService");
     const session = await getAuthSession();
     const token = session?.access_token?.trim() ?? "";
-    setCachedAccessToken(token);
-    return token;
+    if (token) {
+      setCachedAccessToken(token);
+      return token;
+    }
+    return getCachedAccessToken();
   } catch {
-    clearCachedAccessToken();
-    return "";
+    return getCachedAccessToken();
   }
 }
