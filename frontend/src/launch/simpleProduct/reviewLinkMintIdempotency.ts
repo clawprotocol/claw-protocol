@@ -1,4 +1,4 @@
-import type { AgreementDraft, AgreementParty } from "../../agreement/agreementTypes";
+import type { AgreementParty } from "../../agreement/agreementTypes";
 import { clawAgreementHeaders } from "../../agreement/agreementOrgHeaders";
 import { resolveApiBase } from "../../lib/clawApi";
 import type { ReviewerLinkRow } from "./reviewerLinkRowModel";
