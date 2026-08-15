@@ -114,7 +114,7 @@ async def post_verify_checkout_session(request: Request, body: VerifyCheckoutSes
     if session_org and str(session_org).strip() != org_id:
         raise HTTPException(status_code=403, detail="org_mismatch")
     session_agreement = str((session.get("metadata") or {}).get("agreement_id") or "").strip()
-    if session_agreement:
+    if session_agreement and session_agreement != CREATE_FLOW_CHECKOUT_AGREEMENT_ID:
         assert_agreement_accessible(request, session_agreement)
 
     eco = get_economics_store()

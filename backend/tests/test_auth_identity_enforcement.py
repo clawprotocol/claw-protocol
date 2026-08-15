@@ -367,6 +367,44 @@ def test_staging_checkout_ignores_localhost_origin_header(isolated_usage, monkey
     )
 
 
+def test_verify_create_flow_checkout_skips_sentinel_ownership(isolated_usage, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_test_create_flow")
+    monkeypatch.setenv("STRIPE_PRICE_PRO_MONTHLY", "price_test_monthly")
+    monkeypatch.setattr(
+        "backend.routers.billing_checkout_api.retrieve_checkout_session",
+        lambda _sid: {
+            "id": "cs_test_verify_sentinel",
+            "status": "complete",
+            "payment_status": "paid",
+            "customer": "cus_test_verify",
+            "subscription": "sub_test_verify",
+            "metadata": {
+                "agreement_id": "__claw_create_checkout__",
+                "org_id": "user-verify-sentinel",
+                "claw_org_id": "user-verify-sentinel",
+                "plan_code": "pro",
+                "user_id": "verify-sentinel",
+            },
+        },
+    )
+    monkeypatch.setattr(
+        "backend.routers.billing_checkout_api.sync_subscription_from_stripe_checkout_session",
+        lambda _eco, _session: {"ok": True, "org_id": "user-verify-sentinel", "plan_code": "pro"},
+    )
+    monkeypatch.setattr(
+        "backend.routers.billing_checkout_api.get_economics_store",
+        lambda: type("Eco", (), {"get_subscription_by_org": staticmethod(lambda _oid: {"status": "active", "plan_code": "pro"})})(),
+    )
+    client = TestClient(app)
+    res = client.post(
+        "/v1/billing/verify-checkout-session",
+        headers=make_authenticated_user_headers("verify-sentinel"),
+        json={"session_id": "cs_test_verify_sentinel"},
+    )
+    assert res.status_code == 200, res.text
+    assert res.json()["ok"] is True
+
+
 def test_unregistered_agreement_checkout_still_rejected(isolated_usage, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_test_create_flow")
     monkeypatch.setenv("STRIPE_PRICE_PRO_MONTHLY", "price_test_monthly")
