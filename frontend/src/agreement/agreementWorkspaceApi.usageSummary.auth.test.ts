@@ -47,4 +47,19 @@ describe("fetchAgreementUsageSummary auth", () => {
     const headers = (init?.headers ?? {}) as Record<string, string>;
     expect(headers.Authorization).toBe("Bearer hydrated-access-token");
   });
+
+  it("sends the refreshed token even when the sync header cache is empty", async () => {
+    vi.mocked(refreshCachedAccessToken).mockResolvedValueOnce("refreshed-but-uncached");
+    vi.mocked(fetch).mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ commercial: { state: "pro" } }),
+    } as Response);
+
+    await fetchAgreementUsageSummary();
+
+    const [, init] = vi.mocked(fetch).mock.calls[0] ?? [];
+    const headers = (init?.headers ?? {}) as Record<string, string>;
+    expect(headers.Authorization).toBe("Bearer refreshed-but-uncached");
+  });
 });

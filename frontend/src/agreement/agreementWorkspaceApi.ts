@@ -779,11 +779,13 @@ export async function fetchAgreementUsageSummary(): Promise<{
   authFailure?: boolean;
 }> {
   try {
+    const headers = { ...(clawAgreementHeaders() as Record<string, string>) };
     if (getOrgId().startsWith("user-")) {
-      await refreshCachedAccessToken();
+      const token = await refreshCachedAccessToken();
+      if (token) headers.Authorization = `Bearer ${token}`;
     }
     const res = await fetch(`${base()}/api/agreements/usage/summary`, {
-      headers: clawAgreementHeaders(),
+      headers,
       credentials: "include",
     });
     if (res.status === 401 || res.status === 403) {
