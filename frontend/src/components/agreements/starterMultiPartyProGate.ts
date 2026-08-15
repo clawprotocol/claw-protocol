@@ -6,7 +6,7 @@ import { runIntakeDefaultsAndRoles } from "./intakeFamilyShell";
 import { defaultIntakePartyRoleLabels } from "./partyRoleIntake";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import { parseLabeledPartyBlocks, resolveStarterGatePartyLegalEntities } from "./labeledPartyBlockParse";
-import { maxNumberedListPartyIndex } from "./partySlotIdentityNormalize";
+import { maxNumberedListPartyIndex, resolveDeclaredExplicitPartyCount } from "./partySlotIdentityNormalize";
 import { countRealParties } from "./starterPartyLimits";
 import { buildAgreementPreviewText } from "./agreementPreviewFromDraft";
 import {
@@ -299,7 +299,8 @@ export function assessStarterComplexityGate(raw: string): StarterComplexityGateA
         : starterGateParties;
   const extractedEntityCount = parties.length;
   const signerSlots = countSignerDetailSlots(intake);
-  const partyCount = Math.max(extractedEntityCount, indexedPartyMax, numberedPartyMax);
+  const declaredPartyCount = resolveDeclaredExplicitPartyCount(intake) ?? 0;
+  const partyCount = Math.max(extractedEntityCount, indexedPartyMax, numberedPartyMax, declaredPartyCount);
   const revenuePctCount = countRevenueSharePercentages(intake);
   const hasRevenueShare = detectRevenueShareLanguage(intake);
   const hasCoordinator = detectCoordinatorOrNonPartyActor(intake);
@@ -309,7 +310,7 @@ export function assessStarterComplexityGate(raw: string): StarterComplexityGateA
   const hasSignerOverflow = detectSignerCandidateOverflow(intake);
   const reasons: StarterComplexityGateReason[] = [];
 
-  if (extractedEntityCount > 2 || indexedPartyMax >= 3 || numberedPartyMax >= 3) {
+  if (extractedEntityCount > 2 || indexedPartyMax >= 3 || numberedPartyMax >= 3 || declaredPartyCount >= 3) {
     reasons.push("three_plus_legal_parties");
   }
   if (hasRevenueShare && (partyCount >= 2 || revenuePctCount >= 3)) {
@@ -496,6 +497,30 @@ export function shouldResolveStarterHomeTransitionToReviewReady(input: {
   );
 }
 
+export const CREATE_FLOW_PREPARATION_FAILSAFE_MS = 8_000;
+export const CREATE_FLOW_PREPARATION_FAILSAFE_MESSAGE =
+  "We couldn't prepare the review. Add the party names and try again.";
+export const CREATE_FLOW_PREPARATION_FAILSAFE_EDIT_LABEL = "Edit details";
+export const CREATE_FLOW_PREPARATION_FAILSAFE_RETRY_LABEL = "Try again";
+
+/** Bounded fail-safe: empty authority must not leave the preparing overlay up indefinitely. */
+export function shouldFailSafeEmptyAuthorityPreparation(input: {
+  displayPhase: string;
+  isGenerating: boolean;
+  hasDraft: boolean;
+  hasAuthoritativeReviewBody: boolean;
+  preparingStartedAtMs: number | null;
+  nowMs: number;
+  timeoutMs?: number;
+}): boolean {
+  if (input.hasDraft || input.hasAuthoritativeReviewBody || input.isGenerating) return false;
+  if (input.preparingStartedAtMs == null) return false;
+  if (!(STARTER_PREPARING_OVERLAY_DISPLAY_PHASES as readonly string[]).includes(input.displayPhase)) {
+    return false;
+  }
+  return input.nowMs - input.preparingStartedAtMs >= (input.timeoutMs ?? CREATE_FLOW_PREPARATION_FAILSAFE_MS);
+}
+
 /** Safety: dismiss "Preparing your agreement" overlay once Pro gate is applied without a draft. */
 export function shouldDismissStarterPreparingOverlayForProGate(input: {
   createFlowPhase: string;
@@ -518,7 +543,12 @@ export function logStarterComplexityGateApplied(): void {
 
 /** Labeled-party draft for Pro checkout — only after user chooses Build Pro. */
 export function buildStarterProCheckoutPendingDraft(rawIntake: string): ParsedDraftShape {
-  return runIntakeDefaultsAndRoles(emptyStarterCheckoutPendingShell(), rawIntake.trim(), true, defaultIntakePartyRoleLabels());
+  const intake = rawIntake.trim();
+  const gate = assessStarterComplexityGate(intake);
+  if (isThreePlusLegalPartyGate(gate) && gate.parties.length < 3) {
+    return emptyStarterCheckoutPendingShell();
+  }
+  return runIntakeDefaultsAndRoles(emptyStarterCheckoutPendingShell(), intake, true, defaultIntakePartyRoleLabels());
 }
 
 /** Party lines for the gate summary UI. */

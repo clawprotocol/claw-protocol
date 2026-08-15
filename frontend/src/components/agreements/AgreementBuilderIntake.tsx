@@ -119,11 +119,16 @@ import { shouldInterceptAdvancedDocumentFamily } from "./agreementLaunchFamilies
 import {
   assessStarterComplexityGate,
   buildStarterProCheckoutPendingDraft,
+  CREATE_FLOW_PREPARATION_FAILSAFE_EDIT_LABEL,
+  CREATE_FLOW_PREPARATION_FAILSAFE_MESSAGE,
+  CREATE_FLOW_PREPARATION_FAILSAFE_RETRY_LABEL,
   emptyStarterCheckoutPendingShell,
   logStarterComplexityGateApplied,
   rejectIneligibleStarterDraftAfterParse,
   shouldDismissStarterPreparingOverlayForProGate,
+  shouldFailSafeEmptyAuthorityPreparation,
   shouldResolveStarterHomeTransitionToReviewReady,
+  STARTER_PREPARING_OVERLAY_DISPLAY_PHASES,
   type StarterComplexityGateAssessment,
 } from "./starterMultiPartyProGate";
 import { StarterMultiPartyProGatePanel } from "./StarterMultiPartyProGatePanel";
@@ -3694,6 +3699,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const [complexityPendingParsed, setComplexityPendingParsed] = useState<ParsedDraftShape | null>(null);
   const [starterMultiPartyProGate, setStarterMultiPartyProGate] =
     useState<StarterComplexityGateAssessment | null>(null);
+  const [emptyAuthorityPrepFailSafe, setEmptyAuthorityPrepFailSafe] = useState(false);
+  const prepOverlayStartedAtRef = useRef<number | null>(null);
   const complexityPendingParsedRef = useRef<ParsedDraftShape | null>(null);
   const complexityResumeHydratedRef = useRef(false);
   const [advancedFullDraftPaywallOpen, setAdvancedFullDraftPaywallOpen] = useState(false);
@@ -12252,6 +12259,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       return;
     }
     const text = (initialIntakeText ?? intakeStepBufferRef.current ?? "").trim();
+    // Explicit 3+ party declarations must hit the Pro gate before capability clarification.
+    if (commitStarterMultiPartyProGate(text)) {
+      homeAutoGenerateConsumedRef.current = true;
+      return;
+    }
     // Product-wide (all accounts): same clear + capability gate as /app/create Create draft.
     // Inline evaluate here — prepareIntentionalCreateDraftSubmit is declared later in this component.
     const homeDecision = evaluateIntentionalCreateDraftSubmit(text);
@@ -12277,10 +12289,6 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     writeOriginalUserIntakeRawAtDraftCommit(homeDecision.text);
     homeAutoGenerateStartedRef.current = true;
     logHomeCreateSubmit(homeDecision.text);
-    if (commitStarterMultiPartyProGate(homeDecision.text)) {
-      homeAutoGenerateConsumedRef.current = true;
-      return;
-    }
     beginStarterDraftGeneration();
     void (async () => {
       await runProductionLocalDraftParse({
@@ -14102,6 +14110,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           message: string;
           clarification?: AgreementIntakeClarification;
         } => {
+      if (commitStarterMultiPartyProGate(rawIntake)) {
+        return { ok: false, blocked: false, message: "" };
+      }
       const decision = evaluateIntentionalCreateDraftSubmit(rawIntake);
       if (decision.action === "noop") return { ok: false, blocked: false, message: "" };
       wipeInMemoryPaidCreatePaintBuffers();
@@ -14118,7 +14129,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       setIntakeClarification(null);
       return { ok: true, text: decision.text };
     },
-    [wipeInMemoryPaidCreatePaintBuffers],
+    [wipeInMemoryPaidCreatePaintBuffers, commitStarterMultiPartyProGate],
   );
 
   /** Fresh `/app/create`: textarea at click time wins; clears stale starter baseline before parse. */
@@ -14239,7 +14250,45 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     }
     setDisplayPhase("review");
     if (loading) setLoading(false);
+    setEmptyAuthorityPrepFailSafe(false);
   }, [createFlowPhase, draft, displayPhase, loading]);
+
+  useEffect(() => {
+    const overlayActive = (STARTER_PREPARING_OVERLAY_DISPLAY_PHASES as readonly string[]).includes(
+      displayPhase,
+    );
+    if (!overlayActive || isGenerating || draft) {
+      prepOverlayStartedAtRef.current = null;
+      return;
+    }
+    if (prepOverlayStartedAtRef.current == null) {
+      prepOverlayStartedAtRef.current = Date.now();
+    }
+    const startedAt = prepOverlayStartedAtRef.current;
+    const id = window.setInterval(() => {
+      const hasAuthoritativeBody = Boolean(
+        String(agreementDocumentTextRef.current || "").trim() ||
+          String(hydratedPremiumBodyRef.current || "").trim(),
+      );
+      if (
+        !shouldFailSafeEmptyAuthorityPreparation({
+          displayPhase,
+          isGenerating,
+          hasDraft: Boolean(draft),
+          hasAuthoritativeReviewBody: hasAuthoritativeBody,
+          preparingStartedAtMs: startedAt,
+          nowMs: Date.now(),
+        })
+      ) {
+        return;
+      }
+      setEmptyAuthorityPrepFailSafe(true);
+      setDisplayPhase("intake");
+      setLoading(false);
+      setCreateFlowPhase("capturing_input");
+    }, 1000);
+    return () => window.clearInterval(id);
+  }, [createFlowPhase, displayPhase, isGenerating, draft]);
 
   useEffect(() => {
     if (!homeHeroAutoGenerate || !onHomeGuidedTransitionPhase) return;
@@ -31704,6 +31753,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
               const rawSubmitted = prepareFreshStarterCreateSubmit();
               if (createProductionTwoPane) {
                 if (rawSubmitted.length < 6) return;
+                await resolvePaidCreateSubmitEntitlement();
+                if (commitStarterMultiPartyProGate(rawSubmitted)) {
+                  await finalizeIntakeCapture();
+                  return;
+                }
                 const intakeCapability = evaluateIntentionalCreateDraftSubmit(rawSubmitted);
                 if (intakeCapability.action === "block_capability") {
                   applyIntakeCapabilityBlock(intakeCapability);
@@ -31727,11 +31781,6 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                   createFlowPhase_before: createFlowPhase,
                   displayPhase_before: displayPhase,
                 });
-                await resolvePaidCreateSubmitEntitlement();
-                if (commitStarterMultiPartyProGate(rawSubmitted)) {
-                  await finalizeIntakeCapture();
-                  return;
-                }
                 const returningPaidBootstrap = planReturningPaidCreateSubmitBootstrap({
                   tier,
                   workspaceProEntitled:
@@ -31919,6 +31968,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         const rawSubmitted = prepareFreshStarterCreateSubmit();
         if (createProductionTwoPane) {
           if (rawSubmitted.length < 6) return;
+          await resolvePaidCreateSubmitEntitlement();
+          if (commitStarterMultiPartyProGate(rawSubmitted)) {
+            return;
+          }
           const intakeCapability = evaluateIntentionalCreateDraftSubmit(rawSubmitted);
           if (intakeCapability.action === "block_capability") {
             applyIntakeCapabilityBlock(intakeCapability);
@@ -31940,10 +31993,6 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             createFlowPhase_before: createFlowPhase,
             displayPhase_before: displayPhase,
           });
-          await resolvePaidCreateSubmitEntitlement();
-          if (commitStarterMultiPartyProGate(rawSubmitted)) {
-            return;
-          }
           const returningPaidBootstrap = planReturningPaidCreateSubmitBootstrap({
             tier,
             workspaceProEntitled:
@@ -37521,7 +37570,44 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         </p>
       ) : null}
 
-      {displayPhase === "preparing_review" ? (
+      {emptyAuthorityPrepFailSafe ? (
+        <div
+          className="mx-auto mt-4 max-w-lg rounded-xl border border-amber-700/50 bg-amber-950/40 px-5 py-4 text-center"
+          role="alert"
+          data-testid="create-flow-prep-failsafe"
+        >
+          <p className="text-sm font-medium text-amber-100">{CREATE_FLOW_PREPARATION_FAILSAFE_MESSAGE}</p>
+          <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:justify-center">
+            <button
+              type="button"
+              className="rounded-lg border border-slate-600/70 bg-slate-900/75 px-4 py-2 text-sm font-semibold text-slate-100"
+              onClick={() => {
+                setEmptyAuthorityPrepFailSafe(false);
+                setCreateUiStage(CreateUiStage.INPUT);
+                setDisplayPhase("intake");
+                setCreateFlowPhase("capturing_input");
+                window.requestAnimationFrame(() => textareaRef.current?.focus());
+              }}
+            >
+              {CREATE_FLOW_PREPARATION_FAILSAFE_EDIT_LABEL}
+            </button>
+            <button
+              type="button"
+              className="rounded-lg bg-emerald-500 px-4 py-2 text-sm font-semibold text-emerald-950"
+              onClick={() => {
+                setEmptyAuthorityPrepFailSafe(false);
+                const raw = intakeCombined.trim();
+                if (commitStarterMultiPartyProGate(raw)) return;
+                window.requestAnimationFrame(() => textareaRef.current?.focus());
+              }}
+            >
+              {CREATE_FLOW_PREPARATION_FAILSAFE_RETRY_LABEL}
+            </button>
+          </div>
+        </div>
+      ) : null}
+
+      {displayPhase === "preparing_review" && !emptyAuthorityPrepFailSafe ? (
         <div
           className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/45 px-4"
           role="status"

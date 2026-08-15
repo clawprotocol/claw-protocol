@@ -9,6 +9,13 @@ import {
   resolveCurrentUser,
 } from "../account/currentUser";
 import { useLaunchNav } from "../launch/LaunchNavContext";
+import {
+  buildSignInContinuationPath,
+  CHECKOUT_SIGN_IN_BODY,
+  CHECKOUT_SIGN_IN_CTA,
+  CHECKOUT_SIGN_IN_HEADING,
+  isSecureCheckoutPath,
+} from "./safeRedirectResolver";
 
 export function RequireAuthenticatedDashboard({
   children,
@@ -16,8 +23,9 @@ export function RequireAuthenticatedDashboard({
   children: React.ReactNode;
 }): React.ReactElement {
   const { enabled, loading, user } = useAuth();
-  const { pathname, navigate } = useLaunchNav();
+  const { pathname, search, navigate } = useLaunchNav();
   const path = (pathname || "").replace(/\/$/, "") || "/";
+  const checkoutContinuation = isSecureCheckoutPath(path);
 
   if (isPublicTokenAgreementSurface(path)) {
     return <>{children}</>;
@@ -48,17 +56,21 @@ export function RequireAuthenticatedDashboard({
 
   return (
     <div className="mx-auto max-w-lg px-4 py-16 text-center" data-testid="auth-dashboard-required">
-      <h1 className="text-xl font-semibold text-stone-900">Sign in required</h1>
+      <h1 className="text-xl font-semibold text-stone-900">
+        {checkoutContinuation ? CHECKOUT_SIGN_IN_HEADING : "Sign in required"}
+      </h1>
       <p className="mt-2 text-sm text-stone-600">
-        Your dashboard and account surfaces require a signed-in session. Org headers alone are not enough.
+        {checkoutContinuation
+          ? CHECKOUT_SIGN_IN_BODY
+          : "Your dashboard and account surfaces require a signed-in session. Org headers alone are not enough."}
       </p>
       <button
         type="button"
         className="mt-6 rounded-lg bg-emerald-800 px-4 py-2 text-sm font-semibold text-white"
         data-testid="auth-dashboard-sign-in"
-        onClick={() => navigate("/app/sign-in")}
+        onClick={() => navigate(buildSignInContinuationPath(pathname, search))}
       >
-        Sign in
+        {checkoutContinuation ? CHECKOUT_SIGN_IN_CTA : "Sign in"}
       </button>
     </div>
   );

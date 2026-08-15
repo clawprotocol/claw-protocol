@@ -30,6 +30,8 @@ export type SubscriptionFetch = {
   noSubscription: boolean;
   /** True when the probe failed due to missing/invalid auth (HTTP 401/403). */
   authFailure?: boolean;
+  /** True when no session exists — anonymous 401 is expected, not an entitlement error. */
+  anonymousExpected?: boolean;
 };
 
 async function billingAuthHeaders(): Promise<Record<string, string>> {
@@ -69,6 +71,10 @@ export async function fetchSubscription(orgId: string): Promise<SubscriptionFetc
   const oid = (orgId || "").trim();
   if (!oid) return { data: null, error: null, noSubscription: false };
   try {
+    const session = await getAuthSession();
+    if (!session?.access_token?.trim()) {
+      return { data: null, error: null, noSubscription: false, anonymousExpected: true };
+    }
     const res = await fetch(apiUrl(`/v1/subscriptions/${encodeURIComponent(oid)}`), {
       headers: await billingAuthHeaders(),
       credentials: "include",

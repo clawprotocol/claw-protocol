@@ -83,7 +83,8 @@ export function clearCachedSubscriptionEntitlement(): void {
 export async function refreshSubscriptionEntitlement(orgId?: string): Promise<SubscriptionEntitlementSnapshot | null> {
   const oid = (orgId ?? getOrgId()).trim();
   if (!oid) return null;
-  const { data, error, noSubscription, authFailure } = await fetchSubscription(oid);
+  const { data, error, noSubscription, authFailure, anonymousExpected } = await fetchSubscription(oid);
+  if (anonymousExpected) return null;
   if (error) {
     const existing = readCachedSubscriptionEntitlement();
     if (existing?.orgId === oid && existing.tier) {

@@ -111,10 +111,14 @@ export function resolveDeclaredExplicitPartyCount(intakeRaw: string): number | n
   const t = String(intakeRaw || "").toLowerCase();
   if (/\b(?:among|between)\s+(?:the\s+)?following\s+four\s+parties\b/.test(t)) return 4;
   if (/\b(?:all\s+)?four\s+parties\b/.test(t)) return 4;
+  if (/\b(?:all\s+)?4\s+parties\b/.test(t)) return 4;
   if (/\bfour[\s-]party\b/.test(t)) return 4;
+  if (/\b4[\s-]party\b/.test(t)) return 4;
   if (/\b(?:among|between)\s+(?:the\s+)?following\s+three\s+parties\b/.test(t)) return 3;
   if (/\b(?:all\s+)?three\s+parties\b/.test(t)) return 3;
+  if (/\b(?:all\s+)?3\s+parties\b/.test(t)) return 3;
   if (/\bthree[\s-]party\b/.test(t)) return 3;
+  if (/\b3[\s-]party\b/.test(t)) return 3;
   return null;
 }
 

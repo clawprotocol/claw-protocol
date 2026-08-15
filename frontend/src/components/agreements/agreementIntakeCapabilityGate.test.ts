@@ -309,6 +309,20 @@ describe("2–4 party edge spectrum (product-wide)", () => {
     expect(c?.suggestedRewrite).not.toMatch(/Party 3|among/i);
   });
 
+  it("unnamed explicit three-party NDA asks for the three legal names and does not invent a two-party draft", () => {
+    const prompt =
+      "Provide an NDA for 3 parties using Texas law for proprietary IP for the statutory limit";
+    const decision = assessAgreementIntakeCapability(prompt);
+    expect(decision.ok).toBe(false);
+    if (decision.ok) return;
+    expect(decision.code).toBe("missing_named_parties");
+    expect(decision.clarification.whatWeHeard.join(" ")).toMatch(/3-party deal/i);
+    expect(decision.clarification.suggestedRewrite).toMatch(
+      /among \[Party 1 Legal Name\], \[Party 2 Legal Name\], and \[Party 3 Legal Name\]/i,
+    );
+    expect(decision.clarification.suggestedRewrite).not.toMatch(/between \[Your Company LLC\] and \[Customer Inc\.\]/i);
+  });
+
   it("three-party labeled commercial prompt suggests among A, B, and C brackets", () => {
     const decision = assessAgreementIntakeCapability(
       "We need a three-party services agreement for $25k over 90 days covering integration work. " +
