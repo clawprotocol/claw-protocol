@@ -420,6 +420,6 @@ export async function assertPaidProSignerDetailsPopulated(page: Page): Promise<v
 export async function startFreshAgreementFromHomepage(page: Page, prompt: string): Promise<void> {
   await page.goto("/", { waitUntil: "domcontentloaded" });
   await page.locator("#claw-hero-intake").fill(prompt);
-  await page.getByRole("button", { name: "Create free draft" }).click();
+  await page.getByRole("button", { name: /Draft free|Create free draft/i }).click();
   await expect(page).toHaveURL(/\/app\/create/, { timeout: 30_000 });
 }
