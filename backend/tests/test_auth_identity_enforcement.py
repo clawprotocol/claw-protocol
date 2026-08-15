@@ -171,13 +171,25 @@ def test_anonymous_session_cannot_access_user_workspace(isolated_usage):
         headers={
             "X-Claw-Org-Id": "user-attacker",
             "X-Claw-Anon-Session": token,
-            **make_test_auth_headers("attacker"),
             "Content-Type": "application/json",
         },
         json=_draft_payload(),
     )
     assert res.status_code == 403
     assert res.json()["detail"]["code"] == "anonymous_credential_on_user_workspace"
+
+
+def test_leftover_anonymous_credential_does_not_block_matching_user_workspace(isolated_usage):
+    mint_client = TestClient(app)
+    _org_id, token, _ = mint_anonymous_session(mint_client)
+    client = TestClient(app)
+    headers = ensure_headers_entitled(make_authenticated_user_headers("returning-buyer"))
+    res = client.get(
+        "/api/agreements/usage/summary",
+        headers={**headers, "X-Claw-Anon-Session": token},
+    )
+    assert res.status_code == 200, res.text
+    assert res.json().get("commercial") or res.json().get("tier") is not None
 
 
 def test_authenticated_user_cannot_read_other_owner_agreement(isolated_usage):
@@ -264,6 +276,52 @@ def test_anonymous_org_header_alone_cannot_create_draft(isolated_usage):
 
 
 # --- Stripe tampering ---
+
+
+def test_create_flow_checkout_sentinel_allows_verified_user_without_agreement_row(
+    isolated_usage, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_test_create_flow")
+    monkeypatch.setenv("STRIPE_PRICE_PRO_MONTHLY", "price_test_monthly")
+    monkeypatch.setattr(
+        "backend.routers.billing_checkout_api.create_checkout_session",
+        lambda **_kwargs: {
+            "id": "cs_test_create_flow",
+            "url": "https://checkout.stripe.com/c/pay/cs_test_create_flow",
+        },
+    )
+    client = TestClient(app)
+    _org_id, token, _ = mint_anonymous_session(client)
+    headers = make_authenticated_user_headers("create-flow-buyer")
+    res = client.post(
+        "/v1/billing/checkout-session",
+        headers={**headers, "X-Claw-Anon-Session": token},
+        json={
+            "agreement_id": "__claw_create_checkout__",
+            "cadence": "monthly",
+            "return_to": "/app/create?restore=starterReview",
+        },
+    )
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["ok"] is True
+    assert body["session_id"] == "cs_test_create_flow"
+    assert body["checkout_url"].startswith("https://checkout.stripe.com/")
+    assert body["org_id"] == "user-create-flow-buyer"
+
+
+def test_unregistered_agreement_checkout_still_rejected(isolated_usage, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_test_create_flow")
+    monkeypatch.setenv("STRIPE_PRICE_PRO_MONTHLY", "price_test_monthly")
+    client = TestClient(app)
+    headers = make_authenticated_user_headers("create-flow-buyer")
+    res = client.post(
+        "/v1/billing/checkout-session",
+        headers=headers,
+        json={"agreement_id": "ag-not-registered", "cadence": "monthly", "return_to": "/app/create"},
+    )
+    assert res.status_code == 403
+    assert res.json()["detail"]["code"] == "ownership_not_registered"
 
 
 def test_user_a_cannot_checkout_user_b_agreement(isolated_usage, monkeypatch: pytest.MonkeyPatch):

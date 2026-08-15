@@ -25,6 +25,9 @@ from backend.security.supabase_jwt import extract_bearer_token, verify_supabase_
 router = APIRouter(prefix="/v1/billing", tags=["billing-checkout"])
 _log = logging.getLogger("claw.billing.checkout_api")
 
+# Frontend create-flow sentinel — no workspace row exists yet (anonymous → Pro).
+CREATE_FLOW_CHECKOUT_AGREEMENT_ID = "__claw_create_checkout__"
+
 
 class CheckoutSessionIn(BaseModel):
     agreement_id: str = Field(..., min_length=1, max_length=256)
@@ -66,7 +69,10 @@ async def post_checkout_session(request: Request, body: CheckoutSessionIn) -> Di
         raise HTTPException(status_code=503, detail="stripe_checkout_not_configured")
 
     agreement_id = body.agreement_id.strip()
-    _, org_id = assert_agreement_accessible(request, agreement_id)
+    if agreement_id == CREATE_FLOW_CHECKOUT_AGREEMENT_ID:
+        org_id = require_verified_org_id(request)
+    else:
+        _, org_id = assert_agreement_accessible(request, agreement_id)
     return_to = resolve_safe_redirect_path(body.return_to.strip() or "/app/create", "/app/create")
     if not is_allowlisted_internal_path(return_to):
         return_to = "/app/create"

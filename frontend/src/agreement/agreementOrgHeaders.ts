@@ -14,7 +14,7 @@ export function clawAgreementHeaders(extra?: HeadersInit): HeadersInit {
   const orgId = getOrgId();
   const base: Record<string, string> = {
     "X-Claw-Org-Id": orgId,
-    ...anonymousSessionHeaders(),
+    ...(orgId.startsWith("user-") ? {} : anonymousSessionHeaders()),
   };
   if (orgId.startsWith("user-")) {
     const token = getCachedAccessToken();
