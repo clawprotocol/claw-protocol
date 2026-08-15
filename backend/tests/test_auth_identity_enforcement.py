@@ -283,12 +283,18 @@ def test_create_flow_checkout_sentinel_allows_verified_user_without_agreement_ro
 ):
     monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_test_create_flow")
     monkeypatch.setenv("STRIPE_PRICE_PRO_MONTHLY", "price_test_monthly")
-    monkeypatch.setattr(
-        "backend.routers.billing_checkout_api.create_checkout_session",
-        lambda **_kwargs: {
+    captured: dict = {}
+
+    def _fake_create(**kwargs):
+        captured.update(kwargs)
+        return {
             "id": "cs_test_create_flow",
             "url": "https://checkout.stripe.com/c/pay/cs_test_create_flow",
-        },
+        }
+
+    monkeypatch.setattr(
+        "backend.routers.billing_checkout_api.create_checkout_session",
+        _fake_create,
     )
     client = TestClient(app)
     _org_id, token, _ = mint_anonymous_session(client)
@@ -308,6 +314,57 @@ def test_create_flow_checkout_sentinel_allows_verified_user_without_agreement_ro
     assert body["session_id"] == "cs_test_create_flow"
     assert body["checkout_url"].startswith("https://checkout.stripe.com/")
     assert body["org_id"] == "user-create-flow-buyer"
+    assert captured["success_url"].startswith("http://localhost:5173/app/create?restore=starterReview")
+    assert "checkout_session_id={CHECKOUT_SESSION_ID}" in captured["success_url"]
+    assert captured["cancel_url"].startswith("http://localhost:5173/app/checkout/__claw_create_checkout__")
+
+
+def test_staging_checkout_ignores_localhost_origin_header(isolated_usage, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr("backend.billing.checkout_app_origin.claw_environment", lambda: "staging")
+    monkeypatch.delenv("LAWDOG_APP_ORIGIN", raising=False)
+    monkeypatch.delenv("VITE_LAWDOG_APP_ORIGIN", raising=False)
+    monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_test_create_flow")
+    monkeypatch.setenv("STRIPE_PRICE_PRO_MONTHLY", "price_test_monthly")
+    captured: dict = {}
+
+    def _fake_create(**kwargs):
+        captured.update(kwargs)
+        return {
+            "id": "cs_test_staging_origin",
+            "url": "https://checkout.stripe.com/c/pay/cs_test_staging_origin",
+        }
+
+    monkeypatch.setattr(
+        "backend.routers.billing_checkout_api.create_checkout_session",
+        _fake_create,
+    )
+    client = TestClient(app)
+    headers = make_authenticated_user_headers("staging-origin-buyer")
+    res = client.post(
+        "/v1/billing/checkout-session",
+        headers={
+            **headers,
+            "Origin": "http://localhost:5173",
+            "Host": "evil.example",
+            "X-Forwarded-Host": "evil.example",
+            "X-Forwarded-Proto": "http",
+        },
+        json={
+            "agreement_id": "__claw_create_checkout__",
+            "cadence": "monthly",
+            "return_to": "/app/create?restore=starterReview",
+        },
+    )
+    assert res.status_code == 200, res.text
+    assert captured["success_url"].startswith(
+        "https://believable-gentleness-staging.up.railway.app/app/create?restore=starterReview"
+    )
+    assert "localhost" not in captured["success_url"]
+    assert "evil.example" not in captured["success_url"]
+    assert "checkout_session_id={CHECKOUT_SESSION_ID}" in captured["success_url"]
+    assert captured["cancel_url"] == (
+        "https://believable-gentleness-staging.up.railway.app/app/checkout/__claw_create_checkout__"
+    )
 
 
 def test_unregistered_agreement_checkout_still_rejected(isolated_usage, monkeypatch: pytest.MonkeyPatch):

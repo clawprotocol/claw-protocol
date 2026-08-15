@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import os
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, HTTPException, Request
@@ -14,11 +13,11 @@ from backend.billing.stripe_config import (
     stripe_price_pro_annual,
     stripe_price_pro_monthly,
 )
+from backend.billing.checkout_app_origin import build_checkout_cancel_url, build_checkout_success_url
 from backend.billing.stripe_client import create_checkout_session, retrieve_checkout_session
 from backend.billing.stripe_subscription_sync import sync_subscription_from_stripe_checkout_session
 from backend.economics.store import get_economics_store
 from backend.payments.stripe_checkout_helpers import lawdog_pro_checkout_metadata
-from backend.security.safe_redirect import is_allowlisted_internal_path, resolve_safe_redirect_path
 from backend.security.workspace_identity import assert_agreement_accessible, require_verified_org_id
 from backend.security.supabase_jwt import extract_bearer_token, verify_supabase_access_token
 
@@ -40,10 +39,6 @@ class CheckoutSessionIn(BaseModel):
 
 class VerifyCheckoutSessionIn(BaseModel):
     session_id: str = Field(..., min_length=1, max_length=256)
-
-
-def _app_origin() -> str:
-    return os.getenv("LAWDOG_APP_ORIGIN", os.getenv("VITE_LAWDOG_APP_ORIGIN", "http://localhost:5173")).rstrip("/")
 
 
 def _price_for_cadence(cadence: str) -> str:
@@ -73,16 +68,8 @@ async def post_checkout_session(request: Request, body: CheckoutSessionIn) -> Di
         org_id = require_verified_org_id(request)
     else:
         _, org_id = assert_agreement_accessible(request, agreement_id)
-    return_to = resolve_safe_redirect_path(body.return_to.strip() or "/app/create", "/app/create")
-    if not is_allowlisted_internal_path(return_to):
-        return_to = "/app/create"
-
-    success_sep = "&" if "?" in return_to else "?"
-    success_url = (
-        f"{_app_origin()}{return_to}{success_sep}"
-        f"premiumCompletion=1&checkout_session_id={{CHECKOUT_SESSION_ID}}"
-    )
-    cancel_url = f"{_app_origin()}/app/checkout/{agreement_id}"
+    success_url = build_checkout_success_url(return_to=body.return_to.strip() or "/app/create")
+    cancel_url = build_checkout_cancel_url(agreement_id=agreement_id)
 
     metadata = lawdog_pro_checkout_metadata(
         org_id=org_id,
