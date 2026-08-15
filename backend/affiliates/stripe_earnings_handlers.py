@@ -18,6 +18,7 @@ from backend.affiliates import service as affiliate_service
 from backend.billing import pricing
 from backend.billing.subscription_authority import (
     apply_invoice_paid_subscription_renewal,
+    _subscription_id_from_invoice,
     apply_stripe_subscription_object,
 )
 from backend.economics import config as econ_config
@@ -75,12 +76,7 @@ def handle_invoice_paid(economics: EconomicsStore, invoice: Dict[str, Any]) -> D
     if amount_cents <= 0:
         return {**subscription_sync, "ok": True, "ignored": True, "reason": "zero_amount"}
 
-    sub_sid = invoice.get("subscription")
-    stripe_sub_id: Optional[str] = None
-    if isinstance(sub_sid, str) and sub_sid.strip():
-        stripe_sub_id = sub_sid.strip()
-    elif isinstance(sub_sid, dict):
-        stripe_sub_id = str(sub_sid.get("id") or "").strip() or None
+    stripe_sub_id = _subscription_id_from_invoice(invoice)
 
     if stripe_sub_id and not economics.subscription_qualifies_for_affiliate_earning(stripe_sub_id):
         _log.info("invoice.paid skip: subscription not qualifying sub=%s", stripe_sub_id)

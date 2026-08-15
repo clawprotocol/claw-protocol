@@ -52,3 +52,22 @@ def test_create_checkout_session_writes_org_identity_on_session_and_subscription
     assert data["subscription_data[metadata][user_id]"] == "user-payload-1"
     assert data["subscription_data[metadata][agreement_id]"] == "agr-payload-1"
     assert data["customer_email"] == "buyer@example.test"
+
+
+def test_retrieve_checkout_session_expands_subscription(monkeypatch) -> None:
+    captured: Dict[str, Any] = {}
+
+    def _fake_request(method: str, path: str, data: Dict[str, Any]) -> Dict[str, Any]:
+        captured["method"] = method
+        captured["path"] = path
+        captured["data"] = dict(data)
+        return {"id": "cs_expand", "subscription": {"id": "sub_expand"}}
+
+    monkeypatch.setattr("backend.billing.stripe_client._stripe_request", _fake_request)
+    from backend.billing.stripe_client import retrieve_checkout_session
+
+    session = retrieve_checkout_session("cs_expand")
+    assert session["id"] == "cs_expand"
+    assert captured["method"] == "GET"
+    assert captured["path"] == "/checkout/sessions/cs_expand"
+    assert captured["data"].get("expand[]") == "subscription"

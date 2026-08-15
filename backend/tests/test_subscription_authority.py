@@ -17,6 +17,7 @@ from backend.affiliates.stripe_earnings_handlers import (
 )
 from backend.billing.subscription_authority import (
     apply_invoice_paid_subscription_renewal,
+    apply_stripe_checkout_session_authority,
     apply_stripe_subscription_object,
     is_subscription_entitled,
     stripe_timestamp_to_iso,
@@ -99,6 +100,137 @@ def test_subscription_deleted_marks_canceled(economics_store: EconomicsStore) ->
     row = economics_store.get_subscription_by_org("org-del")
     assert row is not None
     assert row["status"] == "canceled"
+
+
+def test_checkout_session_expires_at_is_not_billing_period(economics_store: EconomicsStore) -> None:
+    session_expiry = int(datetime.now(timezone.utc).timestamp()) + 1800
+    r = apply_stripe_checkout_session_authority(
+        economics_store,
+        {
+            "id": "cs_expiry_trap",
+            "object": "checkout.session",
+            "status": "complete",
+            "payment_status": "paid",
+            "customer": "cus_expiry_trap",
+            "expires_at": session_expiry,
+            "subscription": "sub_expiry_trap",
+            "metadata": {"org_id": "org-expiry-trap", "plan_code": "pro"},
+        },
+    )
+    assert r.get("ok") is True
+    row = economics_store.get_subscription_by_org("org-expiry-trap")
+    assert row is not None
+    assert row["status"] == "active"
+    assert row["plan_code"] == "pro"
+    assert row.get("expires_at") in (None, "")
+    assert row.get("current_period_end") in (None, "")
+    assert is_subscription_entitled(row)
+    assert stripe_timestamp_to_iso(session_expiry) not in (
+        row.get("expires_at"),
+        row.get("current_period_end"),
+    )
+
+
+def test_retrieved_subscription_overwrites_stale_checkout_expiry(
+    economics_store: EconomicsStore,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stale = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat().replace("+00:00", "Z")
+    economics_store.upsert_subscription_authority(
+        org_id="org-stale-expiry",
+        user_id="user-stale",
+        plan_code="pro",
+        status="active",
+        expires_at=stale,
+        current_period_end=stale,
+        canceled_at=None,
+        stripe_subscription_id="sub_stale_expiry",
+        stripe_customer_id="cus_stale_expiry",
+        payment_id="stripe:checkout_session:cs_stale",
+        renewed_at=stale,
+    )
+    assert not is_subscription_entitled(economics_store.get_subscription_by_org("org-stale-expiry"))
+    future_ts = _future_ts(30)
+
+    def _fake_retrieve(sid: str) -> dict:
+        assert sid == "sub_stale_expiry"
+        return {
+            "id": sid,
+            "object": "subscription",
+            "customer": "cus_stale_expiry",
+            "status": "active",
+            "current_period_end": future_ts,
+            "metadata": {"org_id": "org-stale-expiry", "plan_code": "pro"},
+        }
+
+    monkeypatch.setattr(
+        "backend.billing.stripe_client.retrieve_subscription",
+        _fake_retrieve,
+    )
+    r = apply_stripe_checkout_session_authority(
+        economics_store,
+        {
+            "id": "cs_stale",
+            "status": "complete",
+            "payment_status": "paid",
+            "customer": "cus_stale_expiry",
+            "expires_at": int(datetime.now(timezone.utc).timestamp()) + 900,
+            "subscription": "sub_stale_expiry",
+            "metadata": {"org_id": "org-stale-expiry", "plan_code": "pro", "user_id": "user-stale"},
+        },
+    )
+    assert r.get("ok") is True
+    row = economics_store.get_subscription_by_org("org-stale-expiry")
+    assert row is not None
+    assert row["current_period_end"] == stripe_timestamp_to_iso(future_ts)
+    assert row["expires_at"] == stripe_timestamp_to_iso(future_ts)
+    assert is_subscription_entitled(row)
+
+
+def test_invoice_paid_prefers_line_period_over_invoice_period_end(
+    economics_store: EconomicsStore,
+) -> None:
+    economics_store.upsert_stripe_customer_org(stripe_customer_id="cus_line_period", org_id="org-line-period")
+    near_now = int(datetime.now(timezone.utc).timestamp())
+    cycle_end = _future_ts(30)
+    inv = {
+        "id": "in_line_period",
+        "customer": "cus_line_period",
+        "amount_paid": 4900,
+        "subscription": "sub_line_period",
+        "period_end": near_now,
+        "lines": {"data": [{"period": {"start": near_now, "end": cycle_end}}]},
+        "metadata": {"org_id": "org-line-period", "plan_code": "pro"},
+    }
+    r = apply_invoice_paid_subscription_renewal(economics_store, inv)
+    assert r.get("ok") is True
+    row = economics_store.get_subscription_by_org("org-line-period")
+    assert row is not None
+    assert row["current_period_end"] == stripe_timestamp_to_iso(cycle_end)
+    assert is_subscription_entitled(row)
+
+
+def test_invoice_paid_reads_v2_parent_subscription_id(economics_store: EconomicsStore) -> None:
+    economics_store.upsert_stripe_customer_org(stripe_customer_id="cus_v2_parent", org_id="org-v2-parent")
+    cycle_end = _future_ts(31)
+    inv = {
+        "id": "in_v2_parent",
+        "customer": "cus_v2_parent",
+        "amount_paid": 4900,
+        "parent": {
+            "type": "subscription_details",
+            "subscription_details": {"subscription": "sub_v2_parent"},
+        },
+        "lines": {"data": [{"period": {"end": cycle_end}}]},
+        "metadata": {"org_id": "org-v2-parent", "plan_code": "pro"},
+    }
+    r = apply_invoice_paid_subscription_renewal(economics_store, inv)
+    assert r.get("ok") is True
+    row = economics_store.get_subscription_by_org("org-v2-parent")
+    assert row is not None
+    assert row["stripe_subscription_id"] == "sub_v2_parent"
+    assert row["current_period_end"] == stripe_timestamp_to_iso(cycle_end)
+    assert is_subscription_entitled(row)
 
 
 def test_invoice_paid_extends_period_end(economics_store: EconomicsStore) -> None:

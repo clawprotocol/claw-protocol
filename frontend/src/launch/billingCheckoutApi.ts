@@ -5,6 +5,7 @@
 import { apiUrl, errorMessageFromResponse, readJson } from "../lib/clawApi";
 import { getAffiliateCodeForAttribution } from "../launch/affiliate/affiliateAttributionContext";
 import { clawAgreementHeaders } from "../agreement/agreementOrgHeaders";
+import { setCachedAccessToken } from "../auth/authAccessTokenCache";
 import { getAuthSession } from "../auth/supabaseAuthService";
 
 export type CheckoutSessionResponse = {
@@ -67,13 +68,21 @@ export async function createBillingCheckoutSession(args: {
 }
 
 export async function verifyBillingCheckoutSession(sessionId: string): Promise<VerifyCheckoutSessionResponse> {
+  const session = await getAuthSession();
+  if (session?.access_token) {
+    setCachedAccessToken(session.access_token);
+  }
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    Accept: "application/json",
+    ...(clawAgreementHeaders() as Record<string, string>),
+  };
+  if (session?.access_token) {
+    headers.Authorization = `Bearer ${session.access_token}`;
+  }
   const res = await fetch(apiUrl("/v1/billing/verify-checkout-session"), {
     method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Accept: "application/json",
-      ...(clawAgreementHeaders() as Record<string, string>),
-    },
+    headers,
     credentials: "include",
     body: JSON.stringify({ session_id: sessionId }),
   });

@@ -1,6 +1,8 @@
 import type { AgreementDraft } from "./agreementTypes";
 import { normalizeAgreementDraftFromApi } from "./agreementDraftNormalize";
 import { clawAgreementHeaders } from "./agreementOrgHeaders";
+import { refreshCachedAccessToken } from "../auth/authAccessTokenCache";
+import { getOrgId } from "../launch/orgContext";
 import { recipientAgreementReadHeaders } from "./recipientAccessApi";
 import { apiUrl, logClawClientWarning, resolveApiBase } from "../lib/clawApi";
 
@@ -777,6 +779,9 @@ export async function fetchAgreementUsageSummary(): Promise<{
   authFailure?: boolean;
 }> {
   try {
+    if (getOrgId().startsWith("user-")) {
+      await refreshCachedAccessToken();
+    }
     const res = await fetch(`${base()}/api/agreements/usage/summary`, {
       headers: clawAgreementHeaders(),
       credentials: "include",

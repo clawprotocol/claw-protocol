@@ -20,7 +20,10 @@ def _stripe_request(method: str, path: str, data: Dict[str, Any]) -> Dict[str, A
         raise RuntimeError("stripe_not_configured")
     url = f"{STRIPE_API_BASE}{path}"
     with httpx.Client(timeout=30.0) as client:
-        res = client.request(method, url, data=data, auth=(key, ""))
+        if method.upper() == "GET":
+            res = client.request(method, url, params=data or None, auth=(key, ""))
+        else:
+            res = client.request(method, url, data=data, auth=(key, ""))
     if res.status_code >= 400:
         _log.warning("stripe_api_error path=%s status=%s body=%s", path, res.status_code, res.text[:500])
         raise RuntimeError(f"stripe_api_{res.status_code}")
@@ -72,4 +75,16 @@ def create_checkout_session(
 
 
 def retrieve_checkout_session(session_id: str) -> Dict[str, Any]:
-    return _stripe_request("GET", f"/checkout/sessions/{session_id}", {})
+    """Retrieve a Checkout Session with the Subscription expanded for period dates."""
+    return _stripe_request(
+        "GET",
+        f"/checkout/sessions/{session_id}",
+        {"expand[]": "subscription"},
+    )
+
+
+def retrieve_subscription(subscription_id: str) -> Dict[str, Any]:
+    sid = (subscription_id or "").strip()
+    if not sid:
+        raise RuntimeError("missing_subscription_id")
+    return _stripe_request("GET", f"/subscriptions/{sid}", {})
