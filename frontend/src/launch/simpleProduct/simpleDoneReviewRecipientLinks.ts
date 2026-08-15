@@ -9,6 +9,15 @@ import {
 import { REVIEW_FIRST_SIGNING_TOKEN_SECRET_USER_MESSAGE } from "./reviewFirstSendSurface";
 import { resolveReviewLinkAssumedOwnerPartyIndex, rowReadyForReviewLinkInvite } from "./reviewLinkRecipientEmailMerge";
 import type { ReviewerLinkRow } from "./reviewerLinkRowModel";
+import {
+  endReviewLinkPartyMint,
+  existingReviewLinkRowForParty,
+  fetchReviewLinkMintAuthority,
+  hydrateReviewPartyIdsFromAuthority,
+  mergeReviewLinkRowsByPartyId,
+  stableReviewRecipientPartyId,
+  tryBeginReviewLinkPartyMint,
+} from "./reviewLinkMintIdempotency";
 import { extractReviewLinkTokenFromHref, redactReviewUrlForLog } from "./reviewerLinkRowModel";
 import { recipientLinkTokenFingerprint } from "../../agreement/recipientLinkTokenFingerprint";
 import { appendQaRecipientSimulationQueryToReviewHref } from "../../agreement/lawdogViewerContext";
@@ -199,6 +208,8 @@ export async function mintSimpleDoneReviewRecipientLinkRows(args: {
 }): Promise<{
   rows: SimpleDoneReviewRecipientLinkRow[];
   attemptedMintCount: number;
+  reusedCount: number;
+  alreadyReady: boolean;
   firstErrorStatus?: number;
   lastMintErrorDetail?: string;
   lastMintErrorCode?: string;
@@ -206,8 +217,13 @@ export async function mintSimpleDoneReviewRecipientLinkRows(args: {
   const mintKey =
     (import.meta as unknown as { env?: { VITE_RECIPIENT_LINK_MINT_KEY?: string } }).env?.VITE_RECIPIENT_LINK_MINT_KEY ||
     "";
-  const parties = args.draft.parties || [];
+  const authority = await fetchReviewLinkMintAuthority(args.agreementId);
+  const parties = hydrateReviewPartyIdsFromAuthority(args.draft.parties || [], authority.parties);
   const list = parties as AgreementParty[];
+  const existingRows = mergeReviewLinkRowsByPartyId(
+    readSimpleDoneReviewRecipientLinks(args.agreementId)?.recipients,
+    [],
+  );
   const ownerIdx = resolveReviewLinkAssumedOwnerPartyIndex(list);
   const inviter = String(list[ownerIdx]?.name ?? "").trim();
   const signingCorpusLen = (args.signingCorpusPlain ?? "").trim().length;
@@ -219,9 +235,11 @@ export async function mintSimpleDoneReviewRecipientLinkRows(args: {
   const origin = typeof window !== "undefined" ? window.location.origin : "";
   const out: SimpleDoneReviewRecipientLinkRow[] = [];
   let attemptedMintCount = 0;
+  let reusedCount = 0;
   let firstErrorStatus: number | undefined;
   let lastMintErrorDetail: string | undefined;
   let lastMintErrorCode: string | undefined;
+  const readyIndexes: number[] = [];
   for (let i = 0; i < list.length; i++) {
     if (i === ownerIdx && !args.includeOwnerWithReadyReviewEmail) continue;
     const p = list[i]!;
@@ -231,72 +249,121 @@ export async function mintSimpleDoneReviewRecipientLinkRows(args: {
       /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(p.email || "").trim());
     const counterpartyReady = rowReadyForReviewLinkInvite(p, i, list);
     if (!ownerExplicitlyReady && !counterpartyReady) continue;
+    readyIndexes.push(i);
+  }
+  const missingReadyPartyId = readyIndexes.some((i) => !stableReviewRecipientPartyId(list[i]?.id));
+  if (missingReadyPartyId) {
+    firstErrorStatus = 400;
+    lastMintErrorDetail = "recipient_party_id_required";
+    lastMintErrorCode = "recipient_party_id_required";
+  }
+  const seenPartyIds = new Set<string>();
+  for (const i of readyIndexes) {
+    if (missingReadyPartyId) break;
+    if (i === ownerIdx && !args.includeOwnerWithReadyReviewEmail) continue;
+    const p = list[i]!;
     const wf = String(p.role || "").trim().toLowerCase();
     const role: "signer" | "reviewer" | "recipient" =
       wf === "signer" ? "signer" : wf === "reviewer" ? "reviewer" : "recipient";
-    const partyId = p.id && !String(p.id).startsWith("legacy_") ? String(p.id).trim() : undefined;
+    const partyId = stableReviewRecipientPartyId(p.id);
+    if (partyId && seenPartyIds.has(partyId)) continue;
+    if (partyId) seenPartyIds.add(partyId);
+    const reuse =
+      (partyId && existingReviewLinkRowForParty(existingRows, partyId)) ||
+      (partyId && authority.activeInvitePartyIds.has(partyId)
+        ? existingReviewLinkRowForParty(existingRows, partyId)
+        : undefined);
+    if (partyId && authority.activeInvitePartyIds.has(partyId)) {
+      reusedCount += 1;
+      if (reuse?.reviewHref?.trim()) {
+        out.push({
+          ...reuse,
+          recipientPartyId: partyId,
+          reviewer_id: partyId,
+          party_index: i,
+          token_status: "active",
+        });
+      }
+      continue;
+    }
+    if (!partyId) {
+      if (firstErrorStatus === undefined) firstErrorStatus = 400;
+      lastMintErrorDetail = "recipient_party_id_required";
+      lastMintErrorCode = "recipient_party_id_required";
+      continue;
+    }
+    if (!tryBeginReviewLinkPartyMint(args.agreementId, partyId)) {
+      reusedCount += 1;
+      if (reuse?.reviewHref?.trim()) out.push({ ...reuse, recipientPartyId: partyId, reviewer_id: partyId });
+      continue;
+    }
     attemptedMintCount += 1;
-    const res = await mintRecipientAccessTokenResult(
-      args.agreementId,
-      {
-        mode: "review",
-        role,
-        recipient_party_id: partyId || undefined,
-        inviter_display_name: inviter || undefined,
-        review_first_document_text: signingCorpusLen > 0 ? args.signingCorpusPlain?.trim() : undefined,
-        review_first_document_source: signingCorpusLen > 0 ? args.signingCorpusSource ?? "review_first_pinned_corpus" : undefined,
-      },
-      mintKey,
-      {
-        recipientCount: Math.max(0, list.length - (args.includeOwnerWithReadyReviewEmail ? 0 : 1)),
-        signerCount: list.filter((p) => (p.name || "").trim().length > 0).length,
-        hasDocumentText: signingCorpusLen > 0 || draftDocumentLen > 0,
-        documentTextLen: signingCorpusLen > 0 ? signingCorpusLen : draftDocumentLen || undefined,
-        hasTitle: Boolean((args.draft.title || "").trim()),
-        hasPartyLabels: list.filter((p) => (p.name || "").trim()).length > 0,
-        documentTextSource:
-          signingCorpusLen > 0
-            ? args.signingCorpusSource ?? "signing_corpus_plain"
-            : draftDocumentLen > 0
-              ? "draft_fields"
-              : "none",
-      },
-    );
-    if (!res.ok) {
-      if (firstErrorStatus === undefined) firstErrorStatus = res.status;
-      lastMintErrorDetail = res.detail ?? res.message;
-      lastMintErrorCode = res.code;
-      continue;
-    }
-    const reviewHref = resolveReviewHrefFromMint(args.agreementId, origin, res.data).trim();
-    if (!reviewHref) {
-      if (firstErrorStatus === undefined) firstErrorStatus = 200;
-      lastMintErrorDetail = "empty_review_href";
-      lastMintErrorCode = "empty_review_href";
-      continue;
-    }
-    const displayName = String(p.name || "").trim() || "Recipient";
-    const recipientEmail = String((p as { email?: string }).email ?? "").trim() || undefined;
-    const createdAt = new Date().toISOString();
-    const row: SimpleDoneReviewRecipientLinkRow = {
-      displayName,
-      reviewHref,
-      party_index: i,
-      party_name: displayName,
-      reviewer_name: displayName,
-      token_status: "active",
-      created_at: createdAt,
-      ...(recipientEmail ? { recipientEmail, reviewer_email: recipientEmail } : {}),
-      ...(partyId ? { recipientPartyId: partyId, reviewer_id: partyId } : {}),
-    };
-    out.push(row);
-    if (import.meta.env.DEV) {
-      // eslint-disable-next-line no-console
-      console.info("[review-link-mint-row]", {
-        agreementIdShort: args.agreementId.trim().length <= 12 ? args.agreementId.trim() : `${args.agreementId.trim().slice(0, 8)}…`,
-        partyIndex: i,
-        reviewUrlForLog: redactReviewUrlForLog(reviewHref),
-      });
+    try {
+      const res = await mintRecipientAccessTokenResult(
+        args.agreementId,
+        {
+          mode: "review",
+          role,
+          recipient_party_id: partyId,
+          inviter_display_name: inviter || undefined,
+          review_first_document_text: signingCorpusLen > 0 ? args.signingCorpusPlain?.trim() : undefined,
+          review_first_document_source: signingCorpusLen > 0 ? args.signingCorpusSource ?? "review_first_pinned_corpus" : undefined,
+        },
+        mintKey,
+        {
+          recipientCount: Math.max(0, list.length - (args.includeOwnerWithReadyReviewEmail ? 0 : 1)),
+          signerCount: list.filter((party) => (party.name || "").trim().length > 0).length,
+          hasDocumentText: signingCorpusLen > 0 || draftDocumentLen > 0,
+          documentTextLen: signingCorpusLen > 0 ? signingCorpusLen : draftDocumentLen || undefined,
+          hasTitle: Boolean((args.draft.title || "").trim()),
+          hasPartyLabels: list.filter((party) => (party.name || "").trim()).length > 0,
+          documentTextSource:
+            signingCorpusLen > 0
+              ? args.signingCorpusSource ?? "signing_corpus_plain"
+              : draftDocumentLen > 0
+                ? "draft_fields"
+                : "none",
+        },
+      );
+      if (!res.ok) {
+        if (firstErrorStatus === undefined) firstErrorStatus = res.status;
+        lastMintErrorDetail = res.detail ?? res.message;
+        lastMintErrorCode = res.code;
+        continue;
+      }
+      const reviewHref = resolveReviewHrefFromMint(args.agreementId, origin, res.data).trim();
+      if (!reviewHref) {
+        if (firstErrorStatus === undefined) firstErrorStatus = 200;
+        lastMintErrorDetail = "empty_review_href";
+        lastMintErrorCode = "empty_review_href";
+        continue;
+      }
+      const displayName = String(p.name || "").trim() || "Recipient";
+      const recipientEmail = String((p as { email?: string }).email ?? "").trim() || undefined;
+      const createdAt = new Date().toISOString();
+      const row: SimpleDoneReviewRecipientLinkRow = {
+        displayName,
+        reviewHref,
+        party_index: i,
+        party_name: displayName,
+        reviewer_name: displayName,
+        token_status: "active",
+        created_at: createdAt,
+        ...(recipientEmail ? { recipientEmail, reviewer_email: recipientEmail } : {}),
+        recipientPartyId: partyId,
+        reviewer_id: partyId,
+      };
+      out.push(row);
+      if (import.meta.env.DEV) {
+        // eslint-disable-next-line no-console
+        console.info("[review-link-mint-row]", {
+          agreementIdShort: args.agreementId.trim().length <= 12 ? args.agreementId.trim() : `${args.agreementId.trim().slice(0, 8)}…`,
+          partyIndex: i,
+          reviewUrlForLog: redactReviewUrlForLog(reviewHref),
+        });
+      }
+    } finally {
+      endReviewLinkPartyMint(args.agreementId, partyId);
     }
   }
   if (import.meta.env.DEV && out.length > 1) {
@@ -323,7 +390,37 @@ export async function mintSimpleDoneReviewRecipientLinkRows(args: {
       });
     }
   }
-  return { rows: out, attemptedMintCount, firstErrorStatus, lastMintErrorDetail, lastMintErrorCode };
+  const requiredIds = list
+    .map((party, idx) => {
+      if (idx === ownerIdx && !args.includeOwnerWithReadyReviewEmail) return "";
+      const ownerReady =
+        idx === ownerIdx &&
+        Boolean((party.name || "").trim()) &&
+        /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(party.email || "").trim());
+      if (!ownerReady && !rowReadyForReviewLinkInvite(party, idx, list)) return "";
+      return stableReviewRecipientPartyId(party.id);
+    })
+    .filter(Boolean);
+  const merged = mergeReviewLinkRowsByPartyId(existingRows, out);
+  const alreadyReady =
+    attemptedMintCount === 0 &&
+    readyIndexes.length > 0 &&
+    (requiredIds.length > 0
+      ? requiredIds.every(
+          (id) =>
+            authority.activeInvitePartyIds.has(id) ||
+            Boolean(existingReviewLinkRowForParty(existingRows, id)?.reviewHref?.trim()),
+        )
+      : authority.activeInvitePartyIds.size >= readyIndexes.length);
+  return {
+    rows: merged,
+    attemptedMintCount,
+    reusedCount,
+    alreadyReady,
+    firstErrorStatus: alreadyReady ? undefined : firstErrorStatus,
+    lastMintErrorDetail: alreadyReady ? undefined : lastMintErrorDetail,
+    lastMintErrorCode: alreadyReady ? undefined : lastMintErrorCode,
+  };
 }
 
 /** Mint a single review magic link for QA party simulation (including owner / Party 1). */

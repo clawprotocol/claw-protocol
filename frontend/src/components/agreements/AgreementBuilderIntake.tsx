@@ -284,6 +284,7 @@ import {
   feedbackAfterGeneration,
   feedbackAfterLinkFailure,
   feedbackAfterModelFailure,
+  feedbackAfterReviewLinksAlreadyReady,
   feedbackAfterReviewLinksCreated,
   feedbackAfterSigningLinksCreated,
   feedbackCreatingAgreement,
@@ -577,6 +578,7 @@ import {
   executePaidProPostRecipientSetupHandoff,
   shouldSkipPaidProPrepareReviewLinkInterstitial,
 } from "../../launch/simpleProduct/paidProPostRecipientSetupHandoff";
+import { REVIEW_LINKS_ALREADY_READY_MESSAGE } from "../../launch/simpleProduct/reviewLinkMintIdempotency";
 import {
   clearReviewFirstHandoffSource,
   clearReviewFirstMintInFlight,
@@ -29430,14 +29432,18 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         });
         const result = await executePaidProPostRecipientSetupHandoff({
           navigate: (to) => {
+            void navigate(to);
+          },
+          onReviewLinksReady: ({ alreadyReady }) => {
             publishJourneyActionFlash(
               feedbackSucceeded(
                 "create_links",
-                "Links created—share when ready",
-                feedbackAfterReviewLinksCreated(Math.max(1, paidProDistinctValidRecipientEmailCount)),
+                alreadyReady ? REVIEW_LINKS_ALREADY_READY_MESSAGE : "Links created—share when ready",
+                alreadyReady
+                  ? feedbackAfterReviewLinksAlreadyReady()
+                  : feedbackAfterReviewLinksCreated(Math.max(1, paidProDistinctValidRecipientEmailCount)),
               ),
             );
-            void navigate(to);
           },
           agreementId: id,
           draft: primedForHandoff,
@@ -29466,8 +29472,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         setJourneyActionFeedback(
           feedbackSucceeded(
             "create_links",
-            "Links created—share when ready",
-            feedbackAfterReviewLinksCreated(Math.max(1, paidProDistinctValidRecipientEmailCount)),
+            result.alreadyReady ? REVIEW_LINKS_ALREADY_READY_MESSAGE : "Links created—share when ready",
+            result.alreadyReady
+              ? feedbackAfterReviewLinksAlreadyReady()
+              : feedbackAfterReviewLinksCreated(Math.max(1, paidProDistinctValidRecipientEmailCount)),
           ),
         );
         logReviewFirstNavigateDone({ agreementId: id, path: result.ownerRoutePath, source });

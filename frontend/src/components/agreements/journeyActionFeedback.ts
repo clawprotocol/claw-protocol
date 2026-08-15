@@ -171,6 +171,10 @@ export function feedbackAfterReviewLinksCreated(count: number): string {
   return `${formatCount(n)} ${noun} created. Nothing was emailed. Copy and share each link when ready.`;
 }
 
+export function feedbackAfterReviewLinksAlreadyReady(): string {
+  return "Existing review links were kept. Nothing new was created.";
+}
+
 export function feedbackAfterSigningLinksCreated(count: number): string {
   const n = Math.max(0, count);
   const noun = n === 1 ? "private signing link was" : "private signing links were";

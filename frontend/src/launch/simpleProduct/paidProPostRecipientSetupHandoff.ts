@@ -30,6 +30,7 @@ import {
   reviewLinkMintHasUsableUrls,
   writeSimpleDoneReviewRecipientLinks,
 } from "./simpleDoneReviewRecipientLinks";
+import { REVIEW_LINKS_ALREADY_READY_MESSAGE } from "./reviewLinkMintIdempotency";
 import {
   logReviewFirstOwnerRouteResolved,
   resolveOwnerPostReviewSendRoute,
@@ -66,6 +67,8 @@ export type PaidProPostRecipientSetupResult =
       ok: true;
       destination: "vs01" | "done" | "dashboard";
       ownerRoutePath: string;
+      alreadyReady?: boolean;
+      userMessage?: string;
     }
   | { ok: false; failure: PaidProPostRecipientSetupFailure };
 
@@ -86,6 +89,11 @@ export function shouldSkipPaidProPrepareReviewLinkInterstitial(params: {
   return false;
 }
 
+const reviewLinkHandoffInFlight = new Map<
+  string,
+  Promise<{ ok: true; alreadyReady: boolean } | { ok: false; failure: PaidProPostRecipientSetupFailure }>
+>();
+
 async function mintAndPersistReviewLinksForHandoff(
   agreementId: string,
   draft: AgreementDraft,
@@ -93,8 +101,40 @@ async function mintAndPersistReviewLinksForHandoff(
   agreementCorpusText?: string | null,
   logSource?: string,
   agreementCorpusSource?: string | null,
-): Promise<{ ok: true } | { ok: false; failure: PaidProPostRecipientSetupFailure }> {
+): Promise<
+  | { ok: true; alreadyReady: boolean }
+  | { ok: false; failure: PaidProPostRecipientSetupFailure }
+> {
   const id = agreementId.trim();
+  const existing = reviewLinkHandoffInFlight.get(id);
+  if (existing) return existing;
+  const work = mintAndPersistReviewLinksForHandoffUnlocked(
+    id,
+    draft,
+    premiumSendIntent,
+    agreementCorpusText,
+    logSource,
+    agreementCorpusSource,
+  );
+  reviewLinkHandoffInFlight.set(id, work);
+  try {
+    return await work;
+  } finally {
+    if (reviewLinkHandoffInFlight.get(id) === work) reviewLinkHandoffInFlight.delete(id);
+  }
+}
+
+async function mintAndPersistReviewLinksForHandoffUnlocked(
+  id: string,
+  draft: AgreementDraft,
+  premiumSendIntent: PremiumSendIntent,
+  agreementCorpusText?: string | null,
+  logSource?: string,
+  agreementCorpusSource?: string | null,
+): Promise<
+  | { ok: true; alreadyReady: boolean }
+  | { ok: false; failure: PaidProPostRecipientSetupFailure }
+> {
   const draftForMint = mergeDraftWithReviewFirstPinnedCorpus(draft, id);
   const signingCorpusPlain = (agreementCorpusText ?? peekReviewFirstPinnedCorpus(id) ?? "").trim();
   const draftDocumentLen = Math.max(
@@ -148,6 +188,19 @@ async function mintAndPersistReviewLinksForHandoff(
       lastMintErrorDetail: minted.lastMintErrorDetail,
       lastMintErrorCode: minted.lastMintErrorCode,
     };
+    if (minted.alreadyReady && minted.attemptedMintCount === 0) {
+      writeSimpleDoneReviewRecipientLinks({
+        agreementId: id,
+        recipients: linkRows,
+        agreementPartyDisplayNames: orderedAuthoritativePartyDisplayNames(draftForMint.parties),
+      });
+      logReviewFirstMintSuccess({
+        agreementId: id,
+        source: logSource ?? null,
+        recipientCount: linkRows.length,
+      });
+      return { ok: true, alreadyReady: true };
+    }
   } catch {
     mintThrew = true;
     linkRows = [];
@@ -190,7 +243,7 @@ async function mintAndPersistReviewLinksForHandoff(
     recipients: linkRows,
     agreementPartyDisplayNames: orderedAuthoritativePartyDisplayNames(draftForMint.parties),
   });
-  return { ok: true };
+  return { ok: true, alreadyReady: false };
 }
 
 export type ReviewSentHandoffResult = {
@@ -259,6 +312,7 @@ export async function executePaidProPostRecipientSetupHandoff(options: {
   draft: AgreementDraft;
   premiumSendIntent: PremiumSendIntent;
   recipientSetup?: RecipientSetupEmailInput | null;
+  onReviewLinksReady?: (info: { alreadyReady: boolean }) => void;
   logSource: string;
   /** Final agreement plain text for VS01 signature-block anchor placement. */
   agreementCorpusText?: string | null;
@@ -293,14 +347,33 @@ export async function executePaidProPostRecipientSetupHandoff(options: {
         agreementId: id,
         source: options.logSource,
       });
+      const minted = await mintAndPersistReviewLinksForHandoff(
+        id,
+        options.draft,
+        options.premiumSendIntent,
+        options.agreementCorpusText,
+        options.logSource,
+        options.agreementCorpusSource,
+      );
+      if (minted.ok) {
+        const route = resolveOwnerPostReviewSendRoute(id, {
+          reviewSentOk: true,
+          reviewEmailDeliveryAttempted: true,
+          reviewInviteEmailsSent: true,
+        });
+        options.onReviewLinksReady?.({ alreadyReady: true });
+        void options.navigate(route.path);
+        return {
+          ok: true,
+          destination: route.destination,
+          ownerRoutePath: route.path,
+          alreadyReady: true,
+          userMessage: REVIEW_LINKS_ALREADY_READY_MESSAGE,
+        };
+      }
       return {
         ok: false,
-        failure: {
-          agreementId: id,
-          reason: "review_link_mint",
-          userMessage: "Review links are already being created. Wait a moment and retry.",
-          premiumSendIntent: options.premiumSendIntent,
-        },
+        failure: minted.failure,
       };
     }
     setReviewFirstMintInFlight(id);
@@ -314,6 +387,7 @@ export async function executePaidProPostRecipientSetupHandoff(options: {
         options.agreementCorpusSource,
       );
       if (!minted.ok) return { ok: false, failure: minted.failure };
+      const alreadyReady = minted.alreadyReady === true;
       const rolePersist = await persistReviewEmailPartyRolesOnServer(
         id,
         options.draft,
@@ -364,11 +438,14 @@ export async function executePaidProPostRecipientSetupHandoff(options: {
       if (route.destination === "dashboard") {
         writeCreateReviewAgreementResumeId(id);
       }
+      options.onReviewLinksReady?.({ alreadyReady });
       void options.navigate(route.path);
       return {
         ok: true,
         destination: route.destination,
         ownerRoutePath: route.path,
+        alreadyReady,
+        ...(alreadyReady ? { userMessage: REVIEW_LINKS_ALREADY_READY_MESSAGE } : {}),
       };
     } finally {
       clearReviewFirstMintInFlight();

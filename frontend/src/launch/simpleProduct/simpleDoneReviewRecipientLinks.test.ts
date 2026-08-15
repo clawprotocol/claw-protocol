@@ -131,9 +131,11 @@ describe("mintSimpleDoneReviewRecipientLinkRows", () => {
     expect(rows[0]!.reviewHref).not.toContain("/verify/");
     const fetchMock = vi.mocked(fetch);
     expect(fetchMock).toHaveBeenCalled();
-    const url = String(fetchMock.mock.calls[0]?.[0] ?? "");
+    const mintCall = fetchMock.mock.calls.find((c) => String(c[0] ?? "").includes("/recipient-access-token"));
+    expect(mintCall).toBeTruthy();
+    const url = String(mintCall?.[0] ?? "");
     expect(url).toContain("/recipient-access-token");
-    const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body ?? "{}"));
+    const body = JSON.parse(String(mintCall?.[1]?.body ?? "{}"));
     expect(body.mode).toBe("review");
     expect(body.recipient_party_id).toBe("p_rev");
   });
@@ -142,7 +144,10 @@ describe("mintSimpleDoneReviewRecipientLinkRows", () => {
     let n = 0;
     vi.stubGlobal(
       "fetch",
-      vi.fn(async () => {
+      vi.fn(async (input: RequestInfo | URL) => {
+        if (!String(input).includes("/recipient-access-token")) {
+          return { ok: true, json: async () => ({ draft: {} }) };
+        }
         n += 1;
         return {
           ok: true,
@@ -282,7 +287,10 @@ describe("mintSimpleDoneReviewRecipientLinkRows", () => {
     let n = 0;
     vi.stubGlobal(
       "fetch",
-      vi.fn(async () => {
+      vi.fn(async (input: RequestInfo | URL) => {
+        if (!String(input).includes("/recipient-access-token")) {
+          return { ok: true, json: async () => ({ draft: {} }) };
+        }
         n += 1;
         return {
           ok: true,

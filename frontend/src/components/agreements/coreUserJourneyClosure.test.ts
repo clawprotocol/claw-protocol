@@ -30,6 +30,7 @@ import {
   feedbackAfterGeneration,
   feedbackAfterLinkFailure,
   feedbackAfterPartyAdded,
+  feedbackAfterReviewLinksAlreadyReady,
   feedbackAfterReviewLinksCreated,
   feedbackAfterSigningLinksCreated,
 } from "./journeyActionFeedback";
@@ -380,6 +381,7 @@ describe("core user journey closure — readiness and feedback", () => {
     );
     expect(feedbackAfterPartyAdded("Harbor LLC", 3)).toMatch(/Harbor LLC was added as Party 3/);
     expect(feedbackAfterReviewLinksCreated(3)).toMatch(/Nothing was emailed/);
+    expect(feedbackAfterReviewLinksAlreadyReady()).toBe("Existing review links were kept. Nothing new was created.");
     expect(feedbackAfterSigningLinksCreated(3)).toMatch(/Each signer receives a different link/);
     expect(
       feedbackAfterLinkFailure({ kind: "signing", saved: true, fieldRemedy: "Correct Party 2’s email" }),
