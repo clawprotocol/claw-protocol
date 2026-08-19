@@ -16,11 +16,13 @@ export function clawAgreementHeaders(extra?: HeadersInit): HeadersInit {
     "X-Claw-Org-Id": orgId,
     ...(orgId.startsWith("user-") ? {} : anonymousSessionHeaders()),
   };
-  if (orgId.startsWith("user-")) {
-    const token = getCachedAccessToken();
-    if (token) {
-      base.Authorization = `Bearer ${token}`;
-    }
+  // Always include auth token when available, regardless of org ID format.
+  // The org ID may still be settling (local-org, anon-*) even when the user
+  // has a valid session. Sending the token allows backend to identify the
+  // authenticated user and return correct entitlement state.
+  const token = getCachedAccessToken();
+  if (token) {
+    base.Authorization = `Bearer ${token}`;
   }
   const affiliateCode = getAffiliateCodeForAttribution();
   if (affiliateCode) {

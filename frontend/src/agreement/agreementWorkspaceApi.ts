@@ -780,10 +780,12 @@ export async function fetchAgreementUsageSummary(): Promise<{
 }> {
   try {
     const headers = { ...(clawAgreementHeaders() as Record<string, string>) };
-    if (getOrgId().startsWith("user-")) {
-      const token = (await refreshCachedAccessToken()) || getCachedAccessToken();
-      if (token) headers.Authorization = `Bearer ${token}`;
-    }
+    // Always attempt to include auth token for authenticated users.
+    // The org ID may still be settling (local-org, anon-*) even when the user
+    // has a valid session. Without the token, backend returns guest/none state
+    // and the frontend incorrectly shows the paywall for entitled Pro users.
+    const token = (await refreshCachedAccessToken()) || getCachedAccessToken();
+    if (token) headers.Authorization = `Bearer ${token}`;
     const res = await fetch(`${base()}/api/agreements/usage/summary`, {
       headers,
       credentials: "include",
