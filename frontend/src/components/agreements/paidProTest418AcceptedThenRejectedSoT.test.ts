@@ -1,7 +1,6 @@
 /** @vitest-environment jsdom */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { getOrInitSessionAgreementGenerationId } from "../../lib/agreementGenerationId";
-import { preparePaidProServerDocumentForAcceptance } from "./paidProConciseServicesQuality";
 import { evaluatePaidProCorpusSoTFreezeCompatibility } from "./paidProSoTStructuralRecovery";
 import {
   applyPaidProSectionStructureCompletenessAuthority,
@@ -38,7 +37,7 @@ import {
   buildTest418HierarchyBreakCorpus,
   test418Draft,
 } from "./paidProTest418Fixtures";
-import { buildTest419AcceptedServerDraftMissingNoticesHeading } from "./paidProTest419Fixtures";
+import { buildTest416SyntheticMalformedSectionCorpus } from "./paidProTest416Fixtures";
 import { resetPaidProPipelineTestIsolation } from "./paidProPipelineTestIsolation";
 
 describe("TEST418 — accepted-then-rejected Pro SoT dead-end and structural retry handling", () => {
@@ -78,23 +77,19 @@ describe("TEST418 — accepted-then-rejected Pro SoT dead-end and structural ret
   });
 
   it("does not hydrate partial SoT after structural freeze failure — recovery or retry only", () => {
-    const serverDraft = buildTest419AcceptedServerDraftMissingNoticesHeading();
-    const prepared = preparePaidProServerDocumentForAcceptance(
-      serverDraft,
-      test418Draft(),
-      TEST418_MUTUAL_CONSULTING_INTAKE,
-      { surface: "test418" },
-    );
-    markPaidProPipelineValidationPassed({ text: prepared.text, source: "server_full_draft_retry" });
+    // Renamed-notices / empty-shell poisons are repaired through freeze. Preserve the
+    // no-partial-hydrate invariant with the unrepairable synthetic malformed heading corpus.
+    const poisoned = buildTest416SyntheticMalformedSectionCorpus();
+    markPaidProPipelineValidationPassed({ text: poisoned, source: "server_full_draft_retry" });
 
     expect(() =>
       establishPaidProSourceOfTruth({
-        text: prepared.text,
+        text: poisoned,
         source: "server_full_draft_retry",
         draft: test418Draft(),
         intakeText: TEST418_MUTUAL_CONSULTING_INTAKE,
       }),
-    ).toThrow(/paid-pro-sot-freeze-blocked|section_structure|paid-pro-clause-family|missing_notices/);
+    ).toThrow(/paid-pro-sot-freeze-blocked|section_structure|paid-pro-clause-family|missing_notices|synthetic/);
 
     const msg =
       "paid-pro-sot-freeze-blocked section_structure_incomplete reason=section_structure_synthetic_malformed_headings";

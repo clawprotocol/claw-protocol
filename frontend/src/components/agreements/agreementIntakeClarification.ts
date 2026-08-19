@@ -273,18 +273,33 @@ const PURPOSE_STOPWORDS = new Set([
  */
 export function hasSubstantiveDealPurpose(raw: string): boolean {
   const text = String(raw || "").replace(/\s+/g, " ").trim();
-  if (text.length < 72) return false;
+  if (text.length < 40) return false;
   const connector = PURPOSE_CONNECTOR_RE.exec(text);
-  if (!connector || connector.index == null) return false;
+  if (!connector || connector.index == null) {
+    if (
+      /\bwill\s+(?:provide|pay|license|perform|deliver|design|build|consult)\b/i.test(text) &&
+      text.split(/\s+/).length >= 10
+    ) {
+      const content = text
+        .split(/\s+/)
+        .filter(Boolean)
+        .filter((w) => {
+          const t = w.toLowerCase().replace(/[^a-z0-9']/g, "");
+          return t.length > 2 && !PURPOSE_STOPWORDS.has(t);
+        });
+      return content.length >= 4;
+    }
+    return false;
+  }
   const body = text.slice(connector.index + connector[0].length).replace(/\s+/g, " ").trim();
   const words = body.split(/\s+/).filter(Boolean);
-  if (words.length < 8) return false;
+  if (words.length < 3) return false;
   if (words.length <= 12 && THIN_PURPOSE_ONLY_RE.test(body)) return false;
   const content = words.filter((w) => {
     const t = w.toLowerCase().replace(/[^a-z0-9']/g, "");
     return t.length > 2 && !PURPOSE_STOPWORDS.has(t);
   });
-  return content.length >= 5;
+  return content.length >= 2;
 }
 
 function extractGoverningLaw(raw: string): string | null {
@@ -749,22 +764,21 @@ function draftExampleForDeal(deal: DealType): string {
 }
 
 function lowSignalClarification(raw: string): AgreementIntakeClarification {
-  const score = commercialSignalScore(raw);
   const heard: string[] = [];
   if (raw.length >= 200) {
     heard.push(
-      `About ${raw.length.toLocaleString()} characters of text, but almost no draftable deal facts (signal score ${score}).`,
+      `About ${raw.length.toLocaleString()} characters of text, but almost no draftable deal facts.`,
     );
   } else if (raw.length) {
     heard.push(`You wrote: “${raw.slice(0, 140)}${raw.length > 140 ? "…" : ""}”`);
   }
-  heard.push("We could not reliably extract parties, fee, term, or agreement type.");
+  heard.push("We could not reliably extract who is agreeing or what they are agreeing to.");
   return {
     kind: "low_signal",
-    title: "We need a clearer, factual draft request",
+    title: "I can draft this once I know who is agreeing and what they are agreeing to",
     why:
-      "This prompt doesn’t contain enough usable commercial information for LawDog to draft an agreement. " +
-      "Paste the deal facts (who, what, fee, term) — not filler, spam, or unrelated notes.",
+      "Add the two legal names and one sentence describing the work, rights, or exchange. " +
+      "Paste the deal facts — not filler, spam, or unrelated notes.",
     whatWeHeard: heard,
     guidedSteps: [
       "Start with: “Draft a [type] agreement between [Party A Legal Name] and [Party B Legal Name]…”.",
@@ -845,15 +859,15 @@ export function buildAgreementIntakeClarification(rawIntake: string): AgreementI
     if (hasMoney || hasTerm || hasDealType || hasTopics || hasPurpose) return null;
     return {
       kind: "needs_commercial_basics",
-      title: "Add what the parties are agreeing to",
-      why: "We see a draft request and parties, but not enough deal facts to build a useful agreement.",
+      title: "I can draft this once I know what they are agreeing to",
+      why: "Add one sentence describing the work, rights, or exchange. Payment, dates, and governing law can wait.",
       whatWeHeard: [
         "A “draft … between …” shape was detected.",
-        "Scope / purpose, fee, and term still look thin or missing.",
+        "Scope / purpose still looks thin or missing.",
       ],
       guidedSteps: [
         "Say what the parties are agreeing to (scope, rights, payment treatment, settlement, work, etc.).",
-        "Add fee and term or effective date if you know them — any agreement shape is fine.",
+        "Add fee and term or effective date if you know them — they are not required to create a draft.",
         "Keep any data-scope exclusions you care about (e.g. no PHI, PCI, or children’s data).",
       ],
       suggestedRewrite: buildGenericSuggestedRewrite(raw),
@@ -897,13 +911,13 @@ export function buildAgreementIntakeClarification(rawIntake: string): AgreementI
   if ((raw.length < 40 && !hasBetweenParties) || (signal === 0 && raw.length < 80 && !hasBetweenParties)) {
     return {
       kind: "too_sparse",
-      title: "Add a few basics so we can draft",
-      why: "We need named parties and what the agreement is for before LawDog can build a draft.",
+      title: "I can draft this once I know who is agreeing and what they are agreeing to",
+      why: "Add the two legal names and one sentence describing the work, rights, or exchange.",
       whatWeHeard: raw.length ? [`You wrote: “${raw.slice(0, 120)}${raw.length > 120 ? "…" : ""}”`] : [],
       guidedSteps: [
         "Name the legal entities that will sign (usually two; up to four).",
         "Say what they are agreeing to (any commercial arrangement — not limited to NDA/SaaS/services).",
-        "Add fee and term or effective date if you know them.",
+        "Add fee and term or effective date if you know them — they are not required to create a draft.",
         "Optional: note data that is in or out of scope.",
       ],
       suggestedRewrite: buildGenericSuggestedRewrite(raw),
@@ -953,7 +967,7 @@ export function buildAgreementIntakeClarification(rawIntake: string): AgreementI
       guidedSteps: [
         partyStep,
         "Keep the fee, term, scope, and data-scope facts you already wrote.",
-        "Then tap Create draft again.",
+        "Then tap Create agreement again.",
       ],
       suggestedRewrite: suggested,
       primaryCtaLabel: "Use suggested draft request",
@@ -971,12 +985,12 @@ export function buildAgreementIntakeClarification(rawIntake: string): AgreementI
   ) {
     return {
       kind: "needs_commercial_basics",
-      title: "Add what the parties are agreeing to",
-      why: "Parties are clearer than the deal itself — add what they’re agreeing to.",
-      whatWeHeard: ["A between-parties phrase was detected.", "Fee / term / scope still look thin."],
+      title: "I can draft this once I know what they are agreeing to",
+      why: "Parties are clearer than the deal itself — add one sentence describing the work, rights, or exchange.",
+      whatWeHeard: ["A between-parties phrase was detected.", "Scope / purpose still looks thin."],
       guidedSteps: [
         "Add what the parties are agreeing to (scope, rights, payment treatment, work, etc.).",
-        "Add payment (if any) and how long it lasts or when it becomes effective.",
+        "Add payment (if any) and how long it lasts or when it becomes effective if you know them.",
         "Start with “Draft a … agreement between …”.",
       ],
       suggestedRewrite: buildGenericSuggestedRewrite(raw),
@@ -997,7 +1011,7 @@ export function buildAgreementIntakeClarification(rawIntake: string): AgreementI
       title: "We need a clearer draft request",
       why:
         "This prompt is long or mixed with extra notes, but it isn’t shaped as “draft an agreement between named parties.” " +
-        "We’ll keep the commercial facts we can read and drop the rest.",
+        "Your original text is preserved. We summarized the commercial facts we could read — nothing was dropped silently.",
       whatWeHeard: [
         `About ${raw.length.toLocaleString()} characters of notes.`,
         hasMoney ? `Economics mentioned: ${extractMoneyPhrases(raw).join(", ")}.` : "Economics were not clearly stated.",
@@ -1010,7 +1024,7 @@ export function buildAgreementIntakeClarification(rawIntake: string): AgreementI
       ],
       guidedSteps: [
         "Lead with: “Draft a [type] agreement between [A] and [B]…” (or among A, B, and C for 3–4 signers).",
-        "Pull only the deal facts you want in the contract (drop advice questions and filler).",
+        "Keep the deal facts you want in the contract; leave advice questions for later.",
         "Keep data-scope exclusions if you stated them (PHI, PCI, children’s data, etc.).",
         "Or use the suggested rewrite and fill in the bracketed names.",
       ],

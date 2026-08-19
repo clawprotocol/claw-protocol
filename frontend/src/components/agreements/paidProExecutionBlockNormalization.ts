@@ -118,6 +118,16 @@ export function stripPreWitnessExecutionPollutionFromPrefix(prefix: string): {
     }
 
     if (isStandaloneSignaturesHeadingLine(line)) {
+      // Keep a bare SIGNATURES heading that immediately precedes IN WITNESS WHEREOF,
+      // or that is already the terminal line of a pre-witness prefix (witness sliced off).
+      let peek = i + 1;
+      while (peek < lines.length && !(lines[peek] ?? "").trim()) peek += 1;
+      const nextNonEmpty = (lines[peek] ?? "").trim();
+      if (!nextNonEmpty || /^\s*IN WITNESS WHEREOF\b/i.test(nextNonEmpty)) {
+        out.push(line);
+        i += 1;
+        continue;
+      }
       repairs.push("execution_block:strip_pre_witness_signatures_section");
       i += 1;
       while (i < lines.length) {
@@ -130,6 +140,7 @@ export function stripPreWitnessExecutionPollutionFromPrefix(prefix: string): {
         if (IF_TO_NOTICE_STANZA_HEADER_RE.test(t)) break;
         if (roleHeadingStartsExecutionCluster(lines, i)) break;
         if (isStandaloneSignaturesHeadingLine(lines[i] ?? "")) break;
+        if (/^\s*IN WITNESS WHEREOF\b/i.test(t)) break;
         if (EXECUTION_FIELD_LINE_RE.test(t)) {
           if (isWithinIfToNoticeStanza(lines, i)) break;
           i += 1;
@@ -339,10 +350,12 @@ export function truncatePostCanonicalExecutionPollution(
       }
       continue;
     }
+    // Require a trailing colon so legal-name lines like "Party 1" (placeholder entity text
+    // under CLIENT:) are never mistaken for an extra role heading and truncating the block.
     if (
       expectedPartyCount <= 2 &&
       (clientHeadings > 0 || serviceProviderHeadings > 0) &&
-      /^\s*(?:CONSULTANT|PROVIDER|PARTY\s+\d+)\s*:?\s*$/i.test(trimmed)
+      /^\s*(?:CONSULTANT|PROVIDER|PARTY\s+\d+)\s*:\s*$/i.test(trimmed)
     ) {
       cutAt = i;
       repairs.push("execution_block:strip_extra_role_heading");
@@ -502,16 +515,17 @@ export function enforcePaidProSingleExecutionBlock(
     }
   }
 
+  const isGenericPlaceholderPartyName = (name: string): boolean => /^party\s*\d+$/i.test(name.trim());
   const authorityParties = (opts?.authorityParties ?? [])
     .map((p) => String(p.partyLegalName ?? p.legalName ?? "").replace(/\s+/g, " ").trim())
-    .filter((n) => n.length >= 3);
+    .filter((n) => n.length >= 3 && !isGenericPlaceholderPartyName(n));
   const frozenNames = readFrozenCanonicalManifestPartyNames()
     .map((n) => n.replace(/\s+/g, " ").trim())
-    .filter((n) => n.length >= 3);
+    .filter((n) => n.length >= 3 && !isGenericPlaceholderPartyName(n));
   const labeledNames = labeledPartyLegalEntities(String(opts?.intakeText ?? ""));
   const explicitDraftNames = (opts?.draftPartyNames ?? [])
     .map((n) => String(n ?? "").trim())
-    .filter((n) => n.length >= 3);
+    .filter((n) => n.length >= 3 && !isGenericPlaceholderPartyName(n));
   const authoritativePartyCount = consumeAuthoritativeSignerCount(
     "enforcePaidProSingleExecutionBlock",
     {
@@ -533,9 +547,24 @@ export function enforcePaidProSingleExecutionBlock(
             opts?.draftPartyNames ?? null,
           )
         : [];
-  const manifestLegalNames =
-    frozenNames.length >= authoritativePartyCount &&
+  const currentDealNames =
+    authorityParties.length >= 2
+      ? authorityParties
+      : explicitDraftNames.length >= 2
+        ? explicitDraftNames
+        : labeledNames.length >= 2
+          ? labeledNames
+          : intakeManifest.map((rec) => rec.fullLegalName.trim()).filter((n) => n.length >= 3);
+  const frozenAlignsWithCurrentDeal =
     frozenNames.length >= 2 &&
+    currentDealNames.length >= 2 &&
+    frozenNames.length === currentDealNames.length &&
+    currentDealNames.every((name) =>
+      frozenNames.some((frozen) => partyLegalNamesMatch(frozen, name)),
+    );
+  const manifestLegalNames =
+    frozenAlignsWithCurrentDeal &&
+    frozenNames.length >= authoritativePartyCount &&
     authorityParties.length >= 2
       ? frozenNames.slice(0, authoritativePartyCount)
       : authorityParties.length >= authoritativePartyCount && authorityParties.length >= 2
@@ -577,8 +606,13 @@ export function enforcePaidProSingleExecutionBlock(
 
   const body = operativeBodyWithoutExecutionTails(text);
   const expectedPartyCount = Math.max(manifestLegalNames.length, authoritativePartyCount, roles.length);
+  // Unlabeled 3-party and all 4+ party deals use uppercase legal-entity execution headings.
+  // Exact-three labeled intakes keep role headings (CLIENT / SERVICE PROVIDER / …).
   const useEntityHeadings =
-    manifestLegalNames.length >= 3 && (!quadParty || quadLabeled) && !tripartiteLabeled;
+    !tripartiteLabeled &&
+    (manifestLegalNames.length >= 4 ||
+      quadLabeled ||
+      (manifestLegalNames.length >= 3 && !quadParty));
 
   const identities: CanonicalPartyIdentity[] =
     manifestRoles && manifestLegalNames.length >= 2
@@ -621,6 +655,18 @@ export function enforcePaidProSingleExecutionBlock(
     return { text, repairs: [...new Set(repairs)] };
   }
 
+  // Commercial no-invent: do not synthesize IN WITNESS / blank By:____ chrome onto a
+  // review/display corpus that never had an execution region. Signing prepare owns append.
+  if (resolveAuthoritativeWitnessIndex(text) < 0) {
+    text = stripRecitalFragmentExecutionLinesFromTail(text, repairs);
+    const truncated = truncatePostCanonicalExecutionPollution(text, { expectedPartyCount });
+    if (truncated.text !== text) {
+      repairs.push(...truncated.repairs);
+      text = truncated.text;
+    }
+    return { text, repairs: [...new Set(repairs)] };
+  }
+
   const stubLines = [
     body,
     "",
@@ -630,10 +676,13 @@ export function enforcePaidProSingleExecutionBlock(
   for (const id of identities) {
     const heading = (id.blockHeading || "").trim();
     const legal = id.partyDisplayName.trim();
-    // Entity-heading mode: heading is the legal name — do not repeat it on the next line.
+    // Entity-heading mode: uppercase legal name alone (no ROLE: colon), matching
+    // buildMultiPartyEntityNameExecutionSection / TEST401 signature-section shape.
     const headingCore = heading.replace(/:$/, "").trim();
     if (useEntityHeadings && legal && headingCore.toLowerCase() === legal.toLowerCase()) {
-      stubLines.push(`${headingCore}:`, "");
+      stubLines.push(headingCore.toUpperCase(), "");
+    } else if (useEntityHeadings && headingCore) {
+      stubLines.push(headingCore.toUpperCase(), "");
     } else {
       stubLines.push(`${headingCore || heading}:`, legal, "");
     }

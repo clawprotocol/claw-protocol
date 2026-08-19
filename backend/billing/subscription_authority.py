@@ -118,6 +118,12 @@ def _plan_code_from_stripe_subscription(sub: Dict[str, Any], default: str = "pro
 
 
 def _current_period_end_from_subscription(sub: Dict[str, Any]) -> Optional[str]:
+    # Checkout Session.expires_at is a payment-window deadline, not a billing period.
+    if str(sub.get("object") or "") == "checkout.session":
+        nested = sub.get("subscription")
+        if isinstance(nested, dict):
+            return _current_period_end_from_subscription(nested)
+        return None
     cpe = sub.get("current_period_end")
     if cpe is not None:
         return stripe_timestamp_to_iso(cpe)
@@ -126,6 +132,71 @@ def _current_period_end_from_subscription(sub: Dict[str, Any]) -> Optional[str]:
         data = details.get("data") or []
         if data and isinstance(data[0], dict):
             return stripe_timestamp_to_iso(data[0].get("current_period_end"))
+    return None
+
+
+def _subscription_id_from_invoice(invoice: Dict[str, Any]) -> Optional[str]:
+    sub_sid = invoice.get("subscription")
+    if isinstance(sub_sid, str) and sub_sid.strip():
+        return sub_sid.strip()
+    if isinstance(sub_sid, dict):
+        sid = str(sub_sid.get("id") or "").strip()
+        if sid:
+            return sid
+    parent = invoice.get("parent") or {}
+    if isinstance(parent, dict):
+        details = parent.get("subscription_details") or {}
+        if isinstance(details, dict):
+            nested = details.get("subscription")
+            if isinstance(nested, str) and nested.strip():
+                return nested.strip()
+            if isinstance(nested, dict):
+                sid = str(nested.get("id") or "").strip()
+                if sid:
+                    return sid
+    return None
+
+
+def _period_end_from_invoice(invoice: Dict[str, Any]) -> Optional[str]:
+    """Billing period end — prefer line-item period, never Checkout Session expiry.
+
+    Invoice.period_end is the window during which line items were added (often
+    ≈ invoice creation). Line ``period.end`` is the subscription cycle end.
+    """
+    lines = invoice.get("lines") or {}
+    if isinstance(lines, dict):
+        data = lines.get("data") or []
+        if data and isinstance(data[0], dict):
+            period = data[0].get("period") or {}
+            if isinstance(period, dict) and period.get("end") is not None:
+                iso = stripe_timestamp_to_iso(period.get("end"))
+                if iso:
+                    return iso
+    parent = invoice.get("parent") or {}
+    if isinstance(parent, dict):
+        details = parent.get("subscription_details") or {}
+        if isinstance(details, dict) and details.get("current_period_end") is not None:
+            iso = stripe_timestamp_to_iso(details.get("current_period_end"))
+            if iso:
+                return iso
+    if invoice.get("period_end") is not None:
+        return stripe_timestamp_to_iso(invoice.get("period_end"))
+    return None
+
+
+def _retrieve_subscription_object(subscription_id: str) -> Optional[Dict[str, Any]]:
+    sid = (subscription_id or "").strip()
+    if not sid:
+        return None
+    try:
+        from backend.billing.stripe_client import retrieve_subscription
+
+        obj = retrieve_subscription(sid)
+    except Exception:
+        _log.info("stripe_subscription_retrieve_skipped id=%s", sid[:24])
+        return None
+    if isinstance(obj, dict) and str(obj.get("id") or "").strip():
+        return obj
     return None
 
 
@@ -259,26 +330,18 @@ def apply_invoice_paid_subscription_renewal(
         stripe_customer_id=customer_id or None,
     )
     if not org_id:
-        return {"ok": True, "ignored": True, "reason": "no_org_mapping", "invoice_id": inv_id}
+        return {
+            "ok": False,
+            "ignored": True,
+            "retryable": True,
+            "reason": "no_org_mapping",
+            "invoice_id": inv_id,
+        }
 
     sub_sid = invoice.get("subscription")
-    stripe_sub_id: Optional[str] = None
-    if isinstance(sub_sid, str) and sub_sid.strip():
-        stripe_sub_id = sub_sid.strip()
-    elif isinstance(sub_sid, dict):
-        stripe_sub_id = str(sub_sid.get("id") or "").strip() or None
+    stripe_sub_id = _subscription_id_from_invoice(invoice)
 
-    period_end: Optional[str] = None
-    if invoice.get("period_end") is not None:
-        period_end = stripe_timestamp_to_iso(invoice.get("period_end"))
-    if not period_end:
-        lines = invoice.get("lines") or {}
-        if isinstance(lines, dict):
-            data = lines.get("data") or []
-            if data and isinstance(data[0], dict):
-                period = data[0].get("period") or {}
-                if isinstance(period, dict):
-                    period_end = stripe_timestamp_to_iso(period.get("end"))
+    period_end = _period_end_from_invoice(invoice)
 
     if isinstance(sub_sid, dict):
         sub_result = apply_stripe_subscription_object(
@@ -369,11 +432,29 @@ def apply_stripe_checkout_session_authority(
     if customer_id:
         economics.upsert_stripe_customer_org(stripe_customer_id=customer_id, org_id=org_id)
 
+    session_md = session.get("metadata") if isinstance(session.get("metadata"), dict) else {}
+
+    def _enrich_checkout_subscription(sub_obj: Dict[str, Any]) -> Dict[str, Any]:
+        """Stripe expanded subscriptions often omit Checkout session metadata/customer."""
+        enriched = dict(sub_obj)
+        if customer_id and not enriched.get("customer"):
+            enriched["customer"] = customer_id
+        sub_md = enriched.get("metadata") if isinstance(enriched.get("metadata"), dict) else {}
+        merged_md = {**session_md, **sub_md}
+        if org_id:
+            merged_md.setdefault("org_id", org_id)
+            merged_md.setdefault("claw_org_id", org_id)
+        if merged_md:
+            enriched["metadata"] = merged_md
+        if not str(enriched.get("status") or "").strip():
+            enriched["status"] = "active"
+        return enriched
+
     sub_sid = session.get("subscription")
     if isinstance(sub_sid, dict):
         result = apply_stripe_subscription_object(
             economics,
-            sub_sid,
+            _enrich_checkout_subscription(sub_sid),
             plan_code_override=plan_code,
             payment_id=payment_id,
         )
@@ -383,20 +464,25 @@ def apply_stripe_checkout_session_authority(
 
     stripe_sub_id = sub_sid.strip() if isinstance(sub_sid, str) and sub_sid.strip() else None
     if stripe_sub_id:
-        minimal_sub: Dict[str, Any] = {
+        retrieved = _retrieve_subscription_object(stripe_sub_id)
+        sub_obj = retrieved if retrieved is not None else {
             "id": stripe_sub_id,
             "customer": customer_id or None,
             "status": "active",
-            "metadata": session.get("metadata") if isinstance(session.get("metadata"), dict) else {},
+            "metadata": session_md,
         }
         result = apply_stripe_subscription_object(
             economics,
-            minimal_sub,
+            _enrich_checkout_subscription(sub_obj),
             plan_code_override=plan_code,
             payment_id=payment_id,
         )
         result["plan_code"] = plan_code
         result["payment_id"] = payment_id
+        if retrieved is None:
+            result["source"] = "checkout_session_subscription_id"
+        else:
+            result["source"] = "retrieved_subscription"
         return result
 
     sub_id = economics.upsert_subscription_authority(

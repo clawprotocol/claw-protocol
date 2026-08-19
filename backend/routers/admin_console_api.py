@@ -869,50 +869,40 @@ def _user_created_history_entry(uid: str, created: Dict[str, Optional[str]]) -> 
 def admin_grant_genesis_entitlement(
     user_id: str, body: GenesisEntitlementGrantBody, request: Request
 ) -> Dict[str, Any]:
-    """Grant Genesis Dog commercial access. Writes only genesis_dog_entitlements (+ audit)."""
-    from backend.usage_economics.commercial_entitlement import resolve_commercial_entitlement
+    """Retired: Genesis create grants are not a buyer tier. Activate Pro instead."""
+    from fastapi import HTTPException
+
     from backend.usage_economics.genesis_dog_entitlement import (
-        GRANT_SOURCE_ADMIN,
+        GenesisCreateGrantIssuanceRetired,
         get_entitlement,
-        grant_entitlement,
     )
 
     uid = _user_id_from_admin_path(user_id)
-    principal = _privileged(
+    _privileged(
         request,
         permission=PERM_MUTATE_SUPPORT,
-        action_type="genesis_entitlement_grant",
+        action_type="genesis_entitlement_grant_denied",
         target_type="genesis_dog_entitlement",
         target_id=uid,
         reason=body.reason,
     )
     before = get_entitlement(uid)
-    after = grant_entitlement(
-        user_id=uid,
-        granted_by=principal.user_id,
-        grant_source=GRANT_SOURCE_ADMIN,
-        expires_at=(body.expires_at or "").strip() or None,
-        allowance_override=body.allowance_override,
+    raise HTTPException(
+        status_code=410,
+        detail={
+            "code": "genesis_create_grant_issuance_retired",
+            "message": (
+                "Genesis create entitlement issuance is retired. Genesis is an "
+                "affiliate/partner status only. Grant LawDog Pro for buyer create access."
+            ),
+            "legacy_row": before,
+            "migration": (
+                "Inventory active genesis_dog_entitlements rows and grant Pro "
+                "subscriptions — do not re-enable create via STATE_GENESIS."
+            ),
+            "error_type": GenesisCreateGrantIssuanceRetired.__name__,
+        },
     )
-    audit_id = _audit(
-        principal,
-        action_type="genesis_entitlement_grant",
-        target_type="genesis_dog_entitlement",
-        target_id=uid,
-        reason=(body.reason or "").strip(),
-        before=before,
-        after=after,
-    )
-    decision = resolve_commercial_entitlement(f"org:user-{uid}")
-    return {
-        "ok": True,
-        "user_id": uid,
-        "entitlement": after,
-        "commercial": decision,
-        "audit_id": audit_id,
-        "actor": principal.user_id,
-        "actor_role": principal.role,
-    }
 
 
 @router.post("/users/{user_id}/genesis-entitlement/revoke")

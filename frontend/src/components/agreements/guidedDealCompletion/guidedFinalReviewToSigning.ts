@@ -431,7 +431,12 @@ export function prepareGuidedSigningCorpusCleanup(args: {
     signerCount >= 2 && !corpusSignatureBlocksHaveRequiredByLines(out, signerCount);
   if ((needsSignatureTail || lacksByAnchors) && signerCount >= 2) {
     const rebuilt = rebuildSignatureBlocksWithPartyIdentities(out, identities.slice(0, signerCount));
-    if (!shouldRejectSignerIdentityCorpusShrink(out.length, rebuilt.text.length)) {
+    // Missing By anchors must be repaired even when post-signature filler would look like a shrink.
+    const allowShrinkForByRepair = lacksByAnchors && rebuilt.count > 0;
+    if (
+      allowShrinkForByRepair ||
+      !shouldRejectSignerIdentityCorpusShrink(out.length, rebuilt.text.length)
+    ) {
       out = rebuilt.text;
       if (rebuilt.count > 0) repairs.push(lacksByAnchors ? "signature:by_lines_added" : "signature:block_rebuilt");
     }

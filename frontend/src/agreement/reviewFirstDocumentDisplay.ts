@@ -29,6 +29,11 @@ import {
   reviewTrackExecutionMetadataComplete,
   type ReviewReadyHydratedDisplayCorpusSurface,
 } from "../launch/simpleProduct/reviewReadyHydratedDisplayCorpus";
+import {
+  getPaidProSourceOfTruthText,
+  hasPaidProSourceOfTruth,
+  hashPaidProCorpus,
+} from "../components/agreements/paidProSourceOfTruth";
 
 const MIN_CORPUS_FOR_PREMIUM_HTML = 500;
 
@@ -45,7 +50,29 @@ export function buildReviewFirstDocumentDisplayHtml(args: {
   agreementId?: string | null;
 }): string {
   const surface = args.surface ?? "reviewer";
-  let corpus = repairDuplicatedEntityPunctuationInDisplay((args.corpusText || "").trim());
+  const passedCorpus = (args.corpusText || "").trim();
+  const frozenSoT = hasPaidProSourceOfTruth() ? getPaidProSourceOfTruthText().trim() : "";
+  // Review track + active Pro SoT: prefer frozen (may include freeze-hydrated notices).
+  // Prefer a caller corpus only when it is not a shorter stale subset — e.g. accepted
+  // proposal promotion (Boose→Boise) where passed carries newer markers and similar length.
+  let inputCorpus = passedCorpus;
+  if (frozenSoT.length >= MIN_CORPUS_FOR_PREMIUM_HTML && isReviewTrackHydrationSurface(surface)) {
+    if (!passedCorpus || hashPaidProCorpus(passedCorpus) === hashPaidProCorpus(frozenSoT)) {
+      inputCorpus = frozenSoT;
+    } else {
+      const passedHasUniqueMarker = passedCorpus
+        .split("\n")
+        .map((line) => line.trim())
+        .filter((line) => line.length > 24)
+        .some((line) => !frozenSoT.includes(line));
+      const passedLooksLikeStaleSubset = passedCorpus.length + 80 < frozenSoT.length;
+      inputCorpus =
+        passedHasUniqueMarker && !passedLooksLikeStaleSubset ? passedCorpus : frozenSoT;
+    }
+  } else if (frozenSoT.length >= MIN_CORPUS_FOR_PREMIUM_HTML && !passedCorpus) {
+    inputCorpus = frozenSoT;
+  }
+  let corpus = repairDuplicatedEntityPunctuationInDisplay(inputCorpus);
   if (
     corpus.length >= 80 &&
     args.draft &&

@@ -191,7 +191,7 @@ describe("paidProAcceptanceRouting", () => {
     expect(PAID_PRO_REVIEW_CHIP_VERSION.toLowerCase()).toContain("draft");
     expect(PAID_PRO_REVIEW_CHIP_VERSION.toLowerCase()).not.toContain("pro");
     expect(PAID_PRO_REVIEW_CHIP_STATE.toLowerCase()).toContain("ready");
-    expect(resolvePaidProReviewChipState({ signersReady: false })).toBe("Signer details needed");
+    expect(resolvePaidProReviewChipState({ signersReady: false })).toBe("Add signer details");
   });
 
   it("paid SoT accepted with incomplete signer metadata keeps canonical corpus and skips home regen", () => {
@@ -509,7 +509,7 @@ describe("paidProAcceptanceRouting", () => {
       const block = intake.slice(start, start + 4500);
       expect(block).toContain("paidProSignerDetailsGate.firstIncompleteFieldKey");
       expect(block).toContain("focusVisibleRecipientInput(focusKey)");
-      expect(block).toContain("claw-paid-pro-inline-signer-setup");
+      expect(block).toContain("PAID_PRO_FIRST_REVIEW_INLINE_SIGNER_SETUP_DOM_ID");
       expect(block).toContain("scrollGuidedSignerSetupIntoView()");
     });
   });

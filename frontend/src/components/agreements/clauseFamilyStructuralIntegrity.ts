@@ -21,7 +21,10 @@ import {
   resolveNoticeStructuralValidationParties,
   resolveCanonicalNoticePartyCount,
 } from "./paidProPartyNoticeDetails";
+import { intakePartyManifestIsAuthoritative } from "./intakePartyManifestAuthority";
+import { isAuthoritativeLegalEntityName } from "./paidProPartyNamePreserve";
 import type { PaidProPartyRoleContext, PaidProSignerMetadataParty } from "./paidProSignerMetadataAuthority";
+import { qualifiesAsConciseAuthoritativePaidServerDraft } from "./paidProSubstantiveCorpusAssessment";
 
 export type ClauseFamilyStructuralViolation = {
   family: OperativeClauseFamily | "structural";
@@ -35,8 +38,9 @@ export type ClauseFamilyStructuralIntegrityReport = {
   familyPresence: Partial<Record<OperativeClauseFamily, boolean>>;
 };
 
+/** Operative notice delivery language — allow short intervening punctuation/words. */
 const NOTICES_OPERATIVE_TEXT_RE =
-  /\bnotices?\s+(?:must|shall|are|is|will|may|under\s+this\s+agreement)\b/i;
+  /(?:\bnotices?\b(?:\s*[:.—-]?\s*|\s+)(?:(?:acceptable\s+via|by)\s+)?(?:must|shall|are|is|will|may|under\s+this\s+agreement|email|e-?mail)\b|\b(?:any\s+)?notices?\s+(?:required\s+or\s+permitted\s+)?under\s+this\s+agreement\s+(?:must|shall|may|will)\b|\bnotices?\b[\s\S]{0,100}?\b(?:must|shall|may|will)\s+be\s+in\s+writing\b)/i;
 
 const ORPHAN_EMAIL_LINE_RE = /^\s*Email(?:\s+for\s+Notice)?\s*:\s*$/i;
 const ORPHAN_ADDRESS_LINE_RE = /^\s*Address(?:\s+for\s+Notice)?\s*:\s*$/i;
@@ -268,10 +272,37 @@ export function validateNoticesClauseFamilyStructuralIntegrity(
   // cache-independent, which is why the TEST541 safe-display cache fixes did not clear the live failure.
   // The pure-diagnostic callsite (no parties list) keeps its conservative context-free count.
   const callerSuppliedPartiesList = Array.isArray(opts?.parties);
+  const partiesHaveAuthoritativeNames = (opts?.parties ?? []).some((p) => {
+    const name = String(p.partyLegalName || "").trim();
+    // Role labels ("Client", "Developer") are not legal-entity authority for notice stanzas.
+    return name.length >= 3 && !/^Party\s+\d+$/i.test(name) && isAuthoritativeLegalEntityName(name);
+  });
+  const partiesHaveNoticeContacts = (opts?.parties ?? []).some((p) => {
+    const row = p as {
+      signerEmail?: string;
+      email?: string;
+      partyAddress?: string;
+      address?: string;
+    };
+    const email = String(row.signerEmail || row.email || "").trim();
+    const address = String(row.partyAddress || row.address || "").trim();
+    // Ignore signer-setup placeholders — those are not real contact authority.
+    if (/provided during signer setup/i.test(email) || /provided during signer setup/i.test(address)) {
+      return false;
+    }
+    return email.length > 0 || address.length > 0;
+  });
+  const intakeHasAuthoritativeManifest = intakePartyManifestIsAuthoritative(opts?.intakeText);
+  // Without real entity authority, do not require inventing Party 1/Party 2 notice scaffolding.
+  const noticeAuthorityPresent = partiesHaveAuthoritativeNames || intakeHasAuthoritativeManifest;
+  // Commercial no-invent: legal names / intake manifests alone must not force If-to stanzas
+  // until email or address contact authority exists. Operative notice prose is enough until then.
   const requiredStanzas =
-    callerSuppliedPartiesList && canonicalAuthorityPartyCount >= 2
-      ? canonicalAuthorityPartyCount
-      : requiredNoticeStanzaCount(opts?.parties, opts?.requireTwoPartyStanzas !== false);
+    !noticeAuthorityPresent || !partiesHaveNoticeContacts
+      ? 0
+      : callerSuppliedPartiesList && canonicalAuthorityPartyCount >= 2
+        ? canonicalAuthorityPartyCount
+        : requiredNoticeStanzaCount(opts?.parties, opts?.requireTwoPartyStanzas !== false);
   const noticeValidationPartySource =
     canonicalAuthorityPartyCount >= 2 ? "canonical_authority_parties" : "minimum_two_party";
 
@@ -292,6 +323,11 @@ export function validateNoticesClauseFamilyStructuralIntegrity(
   }
 
   if (!hasOperativeNoticesFamily) {
+    if (!noticeAuthorityPresent || !partiesHaveNoticeContacts) {
+      // Commercial no-invent: omit notices until entity authority AND contact fields exist.
+      // Legal names alone must not force invented notice emails/addresses.
+      return violations;
+    }
     violations.push({
       family: "notices",
       code: "missing_notices_heading",
@@ -312,8 +348,51 @@ export function validateNoticesClauseFamilyStructuralIntegrity(
   const stanzaCount = countIfToStanzas(region);
   const stanzasSatisfyAuthority =
     requiredStanzas > 0 && stanzaCount >= requiredStanzas;
+  // When no-invent sets requiredStanzas=0, existing If-to stanzas with entity lines still
+  // count as operative Notices substance (heading-only "10. Notices." is not enough alone).
+  const stanzasProvideOperativeSubstance = (() => {
+    const attentionInCorpus = (
+      text.match(/If to\s+[^:]+:\s*Attention:\s*Authorized\s+Signer/gi) || []
+    ).length;
+    if (attentionInCorpus >= 2) return true;
+    if (stanzaCount < 1 && attentionInCorpus >= 1) return true;
+    if (stanzaCount < 1) return false;
+    const blocks = region
+      .split(/\n(?=If to\s+)/i)
+      .slice(1)
+      .map((s) => s.trim())
+      .filter(Boolean);
+    const withEntity = blocks.filter((s) => stanzaHasLegalEntityLine(s)).length;
+    if (withEntity >= Math.min(2, stanzaCount) && withEntity >= 1) return true;
+    const attentionSignerStanzas = (
+      region.match(/If to\s+[^:]+:\s*Attention:\s*Authorized\s+Signer/gi) || []
+    ).length;
+    return attentionSignerStanzas >= Math.min(2, stanzaCount) && attentionSignerStanzas >= 1;
+  })();
 
-  if (!NOTICES_OPERATIVE_TEXT_RE.test(region) && !stanzasSatisfyAuthority) {
+  if (
+    !NOTICES_OPERATIVE_TEXT_RE.test(region) &&
+    !stanzasSatisfyAuthority &&
+    !stanzasProvideOperativeSubstance
+  ) {
+    const corpusIfToCount = (text.match(/^If to\s+/gim) || []).length;
+    if (
+      requiredStanzas === 0 &&
+      !partiesHaveNoticeContacts &&
+      opts?.phase === "post_acceptance" &&
+      (stanzaCount === 0 || corpusIfToCount >= 2) &&
+      corpusIfToCount >= 1
+    ) {
+      return violations;
+    }
+    if (
+      requiredStanzas === 0 &&
+      stanzaCount === 0 &&
+      !partiesHaveNoticeContacts &&
+      opts?.phase === "post_acceptance"
+    ) {
+      return violations;
+    }
     violations.push({
       family: "notices",
       code: "missing_operative_notice_text",
@@ -441,11 +520,17 @@ export function validateExecutionClauseFamilyStructuralIntegrity(
   const violations: ClauseFamilyStructuralViolation[] = [];
   const blocks = countPaidProExecutionBlocks(corpus);
   if (blocks === 0) {
-    violations.push({
-      family: "execution_block",
-      code: "missing_execution_block",
-      message: "Execution block (IN WITNESS WHEREOF) is required before freeze.",
-    });
+    // Concise / e-sign-closed commercial Pro drafts may freeze before signer-setup adds
+    // witness / blank By:____ chrome. Signing prepare owns execution append.
+    const hasEsignClose =
+      /\belectronic\s+signatures?\b|\be-?sign\b|\bcounterparts?\b/i.test(corpus);
+    if (!qualifiesAsConciseAuthoritativePaidServerDraft(corpus) && !hasEsignClose) {
+      violations.push({
+        family: "execution_block",
+        code: "missing_execution_block",
+        message: "Execution block (IN WITNESS WHEREOF) is required before freeze.",
+      });
+    }
   }
   if (blocks > 1) {
     violations.push({
@@ -527,11 +612,19 @@ export function assertClauseFamilyStructuralIntegrityForFreeze(
     phase: opts?.phase ?? "post_acceptance",
   });
   if (!report.ok) {
-    logClauseFamilyStructuralDiagnostic(corpus, report, {
+    // No-invent: freeze must not invent IN WITNESS / blank By:____ chrome.
+    // Signing prepare owns execution append — do not hard-block freeze/SoT solely for
+    // a missing witness when the corpus is otherwise structurally acceptable.
+    const blocking = report.violations.filter((v) => v.code !== "missing_execution_block");
+    if (blocking.length === 0) {
+      return;
+    }
+    const filteredReport = { ...report, ok: false, violations: blocking };
+    logClauseFamilyStructuralDiagnostic(corpus, filteredReport, {
       surface: opts?.surface ?? "freeze",
       phase: opts?.phase ?? "post_acceptance",
     });
-    const codes = report.violations.map((v) => v.code).join(",");
+    const codes = blocking.map((v) => v.code).join(",");
     throw new Error(
       `[paid-pro-clause-family-structural-blocked] surface=${opts?.surface ?? "freeze"} codes=${codes}`,
     );

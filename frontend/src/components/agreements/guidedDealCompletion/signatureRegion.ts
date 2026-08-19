@@ -30,6 +30,11 @@ export function findSignatureRegionStart(text: string): number {
     const idx = witnessMatches[i].index ?? -1;
     if (idx >= len * 0.72) return idx;
   }
+  // Signature-region-only corpora begin at the witness clause (index 0). The minPos gate
+  // would otherwise skip it and land on CLIENT:, causing a second IN WITNESS glue (TEST330).
+  if (witnessMatches.length >= 1 && (witnessMatches[0]?.index ?? -1) === 0) {
+    return 0;
+  }
 
   const clientIdx = text.search(CLIENT_BLOCK_RE);
   if (clientIdx >= minPos) return clientIdx;
@@ -82,7 +87,10 @@ export function findSignatureRegionEnd(text: string, start: number): number {
       continue;
     }
     const isWitness = /^\s*IN WITNESS WHEREOF\b/i.test(trimmed);
-    const isHeading = /^\s*(?:CLIENT|SERVICE PROVIDER|ANALYTICS PROVIDER|PARTY\s+\d+)\s*:?\s*$/i.test(trimmed);
+    const isHeading =
+      /^\s*(?:CLIENT|SERVICE PROVIDER|ANALYTICS PROVIDER|PARTY\s+\d+)\s*:?\s*$/i.test(trimmed) ||
+      // Corrupted/legacy `PARTY: Entity Name` execution headings (TEST330).
+      /^\s*PARTY\s*:\s*\S+/i.test(trimmed);
     const isSigField =
       /^\s*(?:By|Name|Title|Date|Email|Signature)\s*:/i.test(trimmed) || /^_{4,}$/.test(trimmed);
     if (isWitness || isHeading || isSigField) {

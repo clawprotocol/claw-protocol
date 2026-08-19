@@ -380,9 +380,13 @@ function manifestRecordsFromPartyNames(
 ): CanonicalPartyIdentityRecord[] {
   const intake = String(intakeText ?? "").trim();
   if (intake) {
-    const fromLabeled = manifestRecordsFromLabeledPartyBlocks(intake);
+    const fromLabeled = manifestRecordsFromLabeledPartyBlocks(intake).filter((rec) =>
+      isAuthoritativeLegalEntityName(rec.fullLegalName),
+    );
     if (fromLabeled.length >= 2) return fromLabeled;
-    const fromQuoted = manifestRecordsFromQuotedRoleLines(intake);
+    const fromQuoted = manifestRecordsFromQuotedRoleLines(intake).filter((rec) =>
+      isAuthoritativeLegalEntityName(rec.fullLegalName),
+    );
     if (fromQuoted.length >= 2) return fromQuoted;
   }
 

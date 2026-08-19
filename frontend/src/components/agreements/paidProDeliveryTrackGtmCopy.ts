@@ -11,7 +11,7 @@ export const PAID_PRO_DELIVERY_TRACK_SIGNATURE_CTA = PAID_PRO_PREPARE_ESIGN_DECI
 export const PAID_PRO_DELIVERY_TRACK_SIGNATURE_TITLE = "Prepare for signing";
 
 export const PAID_PRO_DELIVERY_TRACK_SIGNATURE_DESCRIPTION =
-  "Add or confirm signers, then create tracked e-sign links when the terms are final.";
+  "Confirm one authorized signer for each contracting party, then create private signing links. Nothing is emailed automatically; you decide when to share each link.";
 
 /** Option B — review draft with counterparties (basic track-changes / redline). */
 export const PAID_PRO_DELIVERY_TRACK_REVIEW_CTA = "Send for review";
@@ -19,7 +19,7 @@ export const PAID_PRO_DELIVERY_TRACK_REVIEW_CTA = "Send for review";
 export const PAID_PRO_DELIVERY_TRACK_REVIEW_TITLE = "Review with other parties";
 
 export const PAID_PRO_DELIVERY_TRACK_REVIEW_DESCRIPTION =
-  "Invite the other parties to review this draft and propose basic track-changes edits before any signature request is sent.";
+  "Create private review links so the parties can confirm the agreement or suggest changes. Nothing is emailed automatically; you decide when to share each link.";
 
 export const PAID_PRO_DELIVERY_TRACK_REVIEW_BUSY_CTA = "Creating review links…";
 
@@ -39,7 +39,7 @@ export const PAID_PRO_DELIVERY_TRACK_SHARE_FOR_REVIEW_CTA = "Share for review";
 export const PAID_PRO_DELIVERY_TRACK_CHOOSER_EYEBROW = "Choose your next step";
 
 export const PAID_PRO_DELIVERY_TRACK_BEFORE_SIGNERS_HINT =
-  "First add party contacts. Then you can prepare signature links, or send the draft for review so the other parties can propose track-changes edits.";
+  "For review, add reviewer emails. For signature, add one authorized signer for each contracting party. Nothing is emailed automatically.";
 
 export const PAID_PRO_DELIVERY_TRACK_TRUST_LINE =
   "Nothing is sent or signed until you confirm the next step.";
@@ -48,4 +48,4 @@ export const PAID_PRO_DELIVERY_TRACK_TRUST_LINE =
 export const PAID_PRO_REVIEW_STEP_HEADLINE_CHOOSE_TRACK = "Choose review or signing";
 
 export const PAID_PRO_REVIEW_STEP_NEXT_CHOOSE_TRACK =
-  "Send the draft for party review with basic track-changes, or prepare signature links when terms are final. Nothing is sent until you confirm.";
+  "Create private review links, or confirm one authorized signer for each party and create signing links. Nothing is emailed automatically.";

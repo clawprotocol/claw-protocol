@@ -92,9 +92,11 @@ describe("TEST430 — auth and workspace persistence", () => {
     writeCurrentUserDisplayName("QA Partner");
     expect(readStoredDisplayName()).toBe("QA Partner");
     const user = resolveCurrentUser();
-    expect(user.id).toBe("org-test430-user");
+    // Org/workspace context alone is never authentication (Guest contract).
+    expect(user.id).toBe("anonymous");
     expect(user.displayName).toBe("QA Partner");
-    expect(user.isAuthenticated).toBe(true);
+    expect(user.isAuthenticated).toBe(false);
+    expect(user.source).toBe("anonymous");
   });
 
   it("records product legal assent locally for signup continuity", () => {

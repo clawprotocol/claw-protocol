@@ -9,6 +9,8 @@ import {
   clearPartialPaidProAuthoritativeState,
   previewRecoverPaidProFreezeCandidate,
 } from "./paidProFreezeCandidate";
+import { validateNoticesClauseFamilyStructuralIntegrity } from "./clauseFamilyStructuralIntegrity";
+import { resolvePaidProNoticeAuthorityPartiesForFreeze } from "./paidProNoticeContactAuthority";
 import { markPaidProPipelineValidationPassed } from "./paidProPostAcceptanceValidatorCache";
 import {
   establishPaidProSourceOfTruth,
@@ -73,6 +75,28 @@ export function evaluatePaidProCorpusSoTFreezeCompatibility(
     source?: string;
   },
 ): { ok: boolean; rejectReason: string | null; text: string } {
+  const previewSurface = opts?.source ?? "sot_freeze_compatibility_preview";
+  if (/(?:compat|compatibility_preview)/i.test(previewSurface)) {
+    const parties =
+      opts?.parties ??
+      resolvePaidProNoticeAuthorityPartiesForFreeze({
+        draft: opts?.draft ?? null,
+        intakeText: opts?.intakeText ?? null,
+        acceptedCorpus: text,
+      });
+    const violations = validateNoticesClauseFamilyStructuralIntegrity(text, {
+      parties,
+      intakeText: opts?.intakeText ?? null,
+      draftPartyNames: (opts?.draft?.parties ?? [])
+        .map((p) => String(p?.name ?? "").trim())
+        .filter(Boolean),
+      acceptedCorpus: text,
+    });
+    const missingHeading = violations.find((v) => v.code === "missing_notices_heading");
+    if (missingHeading) {
+      return { ok: false, rejectReason: "missing_notices_heading", text: text.trim() };
+    }
+  }
   const result = buildPaidProFreezeCandidate({
     text,
     draft: opts?.draft ?? null,

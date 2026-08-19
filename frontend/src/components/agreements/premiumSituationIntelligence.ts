@@ -36,6 +36,8 @@ export const CONTRADICTION_DOC_NOTES: Record<IntakeContradictionKind, string> = 
     "Employee and contractor signals both appeared — confirm the relationship before relying on this draft.",
   governing_law_venue:
     "Governing law / venue references may conflict — pick one jurisdiction in review before signing.",
+  payment_amount:
+    "Two payment amounts were provided — confirm which amount should govern before sending.",
 };
 
 function normIntake(raw: string): string {

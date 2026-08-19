@@ -17,15 +17,17 @@ export function maskEmailAddresses(text: string): { text: string; emails: string
 }
 
 export function unmaskEmailAddresses(text: string, emails: readonly string[]): string {
-  let out = text.replace(EMAIL_MASK_RE, (_, idx) => {
+  // Never destroy unknown mask tokens (e.g. outer polish masks seen by an inner
+  // remask/unmask cycle with an empty emails table).
+  let out = text.replace(EMAIL_MASK_RE, (token, idx) => {
     const i = parseInt(idx, 10);
-    return Number.isFinite(i) && emails[i] != null ? emails[i] : "";
+    return Number.isFinite(i) && emails[i] != null ? emails[i]! : token;
   });
   // Legacy unicode masks from older builds
   const LEGACY_EMAIL_RE = /\uE000PAID_PRO_EMAIL_(\d+)\uE001/g;
-  out = out.replace(LEGACY_EMAIL_RE, (_, idx) => {
+  out = out.replace(LEGACY_EMAIL_RE, (token, idx) => {
     const i = parseInt(idx, 10);
-    return Number.isFinite(i) && emails[i] != null ? emails[i] : "";
+    return Number.isFinite(i) && emails[i] != null ? emails[i]! : token;
   });
   return out;
 }
@@ -53,14 +55,14 @@ export function unmaskProtectedSpans(
   urls: readonly string[],
 ): string {
   let out = unmaskEmailAddresses(text, emails);
-  out = out.replace(URL_MASK_RE, (_, idx) => {
+  out = out.replace(URL_MASK_RE, (token, idx) => {
     const i = parseInt(idx, 10);
-    return Number.isFinite(i) && urls[i] != null ? urls[i] : "";
+    return Number.isFinite(i) && urls[i] != null ? urls[i]! : token;
   });
   const LEGACY_URL_RE = /\uE000PAID_PRO_URL_(\d+)\uE001/g;
-  out = out.replace(LEGACY_URL_RE, (_, idx) => {
+  out = out.replace(LEGACY_URL_RE, (token, idx) => {
     const i = parseInt(idx, 10);
-    return Number.isFinite(i) && urls[i] != null ? urls[i] : "";
+    return Number.isFinite(i) && urls[i] != null ? urls[i]! : token;
   });
   return out;
 }

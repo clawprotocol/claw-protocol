@@ -4,18 +4,12 @@ import { getOrInitSessionAgreementGenerationId } from "../../lib/agreementGenera
 import { validatePaidProOutput } from "./paidProCorpusAcceptance";
 import { preparePaidProServerDocumentForAcceptance } from "./paidProConciseServicesQuality";
 import {
-  clearCurrentSessionProEntitlementMarkers,
   markCurrentSessionProEntitlementComplete,
   markCurrentSessionProIntent,
 } from "./paidProSessionEligibility";
 import { markPaidProPipelineValidationPassed } from "./paidProPostAcceptanceValidatorCache";
-import {
-  clearPremiumPartyNamesHandoff,
-  resetPremiumRecipientHandoffDedupForTests,
-} from "./premiumPartyNamesHandoff";
 import { shouldImmediateAuthoritativePremiumCommit } from "./premiumImmediateAuthoritativeCommitGate";
 import {
-  clearPaidProSourceOfTruth,
   establishPaidProSourceOfTruth,
   getPaidProSourceOfTruthText,
   hasPaidProSourceOfTruth,
@@ -34,11 +28,13 @@ import {
   test419Draft,
 } from "./paidProTest419Fixtures";
 import { buildTest418HierarchyBreakCorpus } from "./paidProTest418Fixtures";
+import { resetPaidProPipelineTestIsolation } from "./paidProPipelineTestIsolation";
 
 describe("TEST419 — blank Pro review after SoT pre-freeze structural rejection", () => {
   const storage = new Map<string, string>();
 
   beforeEach(() => {
+    resetPaidProPipelineTestIsolation();
     vi.stubGlobal("sessionStorage", {
       getItem: (k: string) => storage.get(k) ?? null,
       setItem: (k: string, v: string) => storage.set(k, v),
@@ -50,10 +46,7 @@ describe("TEST419 — blank Pro review after SoT pre-freeze structural rejection
   });
 
   afterEach(() => {
-    clearPaidProSourceOfTruth();
-    clearPremiumPartyNamesHandoff();
-    clearCurrentSessionProEntitlementMarkers();
-    resetPremiumRecipientHandoffDedupForTests();
+    resetPaidProPipelineTestIsolation();
     storage.clear();
     vi.unstubAllGlobals();
   });

@@ -697,7 +697,7 @@ export function SimpleProFinalReviewScreen({
           className="rounded-md border border-amber-300/80 bg-amber-50 px-2.5 py-2 text-[11px] font-medium text-amber-950"
           role="alert"
         >
-          Agreement changed — refresh signing packet before sending.
+          Agreement changed after links were created. Those links are no longer valid. Create new links for this version.
         </p>
       ) : null}
 
@@ -908,7 +908,7 @@ export function SimpleProFinalReviewScreen({
                   }}
                   data-testid="simple-pro-edit-agreement-text-toggle"
                 >
-                  {editAgreementTextOpen ? "Hide agreement text editor" : "Edit agreement text"}
+                  {editAgreementTextOpen ? "Hide direct editor" : "Edit agreement directly"}
                 </button>
               ) : null}
             </div>
@@ -933,7 +933,7 @@ export function SimpleProFinalReviewScreen({
                 className="text-xs font-semibold text-stone-900"
                 htmlFor="simple-pro-edit-agreement-plain-input"
               >
-                Edit agreement text before sending
+                Edit agreement directly — no AI call
               </label>
               <textarea
                 id="simple-pro-edit-agreement-plain-input"
@@ -943,6 +943,19 @@ export function SimpleProFinalReviewScreen({
                 onChange={(e) => onEditablePlainTextChange?.(e.target.value)}
                 data-testid="simple-pro-edit-agreement-plain-input"
               />
+              {savePlainTextBusy ? (
+                <p className="mt-1.5 text-[11px] font-medium text-stone-700" role="status">
+                  Saving changes…
+                </p>
+              ) : savePlainTextAck ? (
+                <p className="mt-1.5 text-[11px] font-medium text-emerald-800" role="status" data-testid="simple-pro-save-ack">
+                  Changes saved. The agreement text is updated.
+                </p>
+              ) : (editablePlainText ?? "").trim() !== editAgreementTextBaselineRef.current ? (
+                <p className="mt-1.5 text-[11px] font-medium text-amber-800" role="status" data-testid="simple-pro-unsaved">
+                  Unsaved changes
+                </p>
+              ) : null}
               <div className="mt-2 flex flex-col gap-1.5 sm:flex-row sm:flex-wrap">
                 <button
                   type="button"
@@ -951,7 +964,7 @@ export function SimpleProFinalReviewScreen({
                   onClick={onSavePlainTextEdits}
                   data-testid="simple-pro-save-agreement-edits"
                 >
-                  {savePlainTextBusy ? "Saving…" : savePlainTextAck ? "Saved ✓" : "Save edits"}
+                  {savePlainTextBusy ? "Saving…" : savePlainTextAck ? "Changes saved" : "Save edits"}
                 </button>
                 <button
                   type="button"
@@ -977,7 +990,7 @@ export function SimpleProFinalReviewScreen({
                 className="text-xs font-semibold text-stone-900"
                 htmlFor="simple-pro-edit-agreement-text-input"
               >
-                {canDirectEditPlainText ? "Or suggest AI edits" : "Edit or paste changes before sending"}
+                {canDirectEditPlainText ? "Ask LawDog to revise" : "Edit or paste changes before sending"}
               </label>
               <textarea
                 id="simple-pro-edit-agreement-text-input"

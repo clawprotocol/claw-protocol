@@ -37,6 +37,8 @@ export function resolvePaidProSotEstablishmentDecision(args: {
   adoptedHash?: string | null;
   intakeRaw: string;
   partyNames: readonly string[];
+  /** User-approved revision may intentionally shorten below the default 500-char floor. */
+  allowUserApprovedShortCorpus?: boolean;
 }): PaidProSotEstablishmentDecision {
   const corpus = trim(args.corpusText);
   const sotCandidateHash = corpusHash(corpus);
@@ -69,7 +71,15 @@ export function resolvePaidProSotEstablishmentDecision(args: {
   if (fatalPlaceholderIssueCodes.length > 0) {
     return { ...base, blocked: true, blockedBy: "fatal_placeholder" };
   }
-  if (!corpus || corpus.length < 500) {
+  // User-approved revisions may intentionally drop well below the default 500-char floor
+  // (clause edits / trim). Still require a non-empty operative body.
+  const minLen = args.allowUserApprovedShortCorpus ? 40 : 500;
+  const freezeTrustedShortCorpus =
+    args.freezeGatesPassed &&
+    Boolean(corpus) &&
+    corpus.length >= 40 &&
+    (Boolean(acceptedFreezeHash) || Boolean(adoptedHash) || Boolean(canonicalSnapshotSelectedHash));
+  if (!corpus || (corpus.length < minLen && !freezeTrustedShortCorpus)) {
     return { ...base, blocked: true, blockedBy: "corpus_too_short" };
   }
   if (args.freezeGatesPassed && hashAligned) {

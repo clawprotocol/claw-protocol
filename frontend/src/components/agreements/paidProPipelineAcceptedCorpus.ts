@@ -28,6 +28,17 @@ export function markPaidProPipelineAcceptedCorpusHash(text: string): void {
   }
 }
 
+/**
+ * Replace the accepted pipeline body after an explicit user-approved revision.
+ * Normal pipeline acceptance remains longest-wins; approved edits may delete text.
+ */
+export function replacePaidProPipelineAcceptedCorpusAfterApprovedRevision(text: string): void {
+  const t = (text || "").trim();
+  pipelineAcceptedCorpusHash = paidProPipelineAcceptedCorpusHash(t);
+  pipelineAcceptedCorpusBody =
+    t.length >= PIPELINE_ACCEPTED_CORPUS_BODY_MIN_LEN ? t : null;
+}
+
 export function readPaidProPipelineAcceptedCorpusHash(): string | null {
   return pipelineAcceptedCorpusHash;
 }

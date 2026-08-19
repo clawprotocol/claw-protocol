@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { detectAgreementFamily, isAiSoftwareInfrastructureRolloutPrompt } from "./agreementFamilyRouter";
 import { applyPaidProRenderPolish, clearPaidProRenderPolishCacheForTests } from "./paidProRenderPolish";
-import { IRONCLAD_JOINT_ROLLOUT_INTAKE } from "./premiumPaidCorpusFivePartyQa.test";
+import { IRONCLAD_JOINT_ROLLOUT_INTAKE } from "./ironcladJointRolloutFixtures";
 
 const IRONCLAD_PARTIES = [
   "Ironclad Systems Group LLC",

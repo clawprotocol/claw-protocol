@@ -75,7 +75,7 @@ Does the product feel **responsible**, not reckless?
 
 ### 6. Worth paying for (`worth_it`)
 
-Holistic willingness to pay **$39/mo** for this workflow.
+Holistic willingness to pay **$49/mo** for this workflow.
 
 Consider: time saved, anxiety reduced, recipient-ready quality.
 

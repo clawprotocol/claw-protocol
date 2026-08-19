@@ -3,7 +3,6 @@ import { consumeOneFreeSendCredit, readFreeSendCredits } from "../freeSendCredit
 import { logProductEvent } from "../../lib/experimentation/productEvents";
 import { SampleArtifactsPreview } from "../SampleArtifactsPreview";
 import { PRICING_CREDIBILITY_ONE_WORKFLOW } from "../pricingContent";
-import { formatMoneyUsdWhole } from "../pricingKeyMath";
 import { stashPaywallAttribution } from "../paywallAttribution";
 import {
   getSendConversionPaywallVariantId,
@@ -14,7 +13,6 @@ import {
 } from "../paywallExperiment";
 import {
   CONVERSION_GUARANTEE_INLINE,
-  CONTEXTUAL_ONE_TIME_UNLOCK_USD,
   PAYWALL_URGENCY_SECONDARY,
 } from "../paywallMessaging";
 
@@ -41,7 +39,7 @@ export function SendConversionModal(props: {
     onContinueToSend,
     onFreeCreditSend,
     onUpgradeAndSend,
-    onBeginOneTimeUnlock,
+    onBeginOneTimeUnlock: _onBeginOneTimeUnlock,
     onGoPro,
     paywallHeadline,
     paywallSub,
@@ -53,7 +51,6 @@ export function SendConversionModal(props: {
   const headline = (paywallHeadline || copy.headlineDefault).trim();
   const subline = (paywallSub || copy.subDefault).trim();
   const credits = readFreeSendCredits();
-  const oneTimePhrase = `${formatMoneyUsdWhole(CONTEXTUAL_ONE_TIME_UNLOCK_USD)} for this agreement`;
 
   const expPayload = useMemo(() => paywallExperimentLogPayload(variantId), [variantId]);
   const primaryCtaRef = useRef<HTMLButtonElement>(null);
@@ -153,23 +150,6 @@ export function SendConversionModal(props: {
 
           <div className="mt-8 min-h-0 flex-1 overflow-y-auto overscroll-contain border-t border-slate-800/70 pt-6">
             <div className="space-y-5 pb-2">
-              <p className="text-center text-[11px] text-slate-600 sm:text-left">or</p>
-
-              <div className="text-center sm:text-left">
-                <p className="text-xs font-normal text-slate-500">{copy.oneTimeQuestion}</p>
-                <button
-                  type="button"
-                  title={copy.oneTimeHoverTitle}
-                  className="mt-1 inline-block max-w-full text-left text-xs font-normal text-slate-500 underline-offset-2 hover:text-slate-400 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-600 focus-visible:ring-offset-2 focus-visible:ring-offset-slate-950"
-                  onClick={() => {
-                    logProductEvent("unlock_clicked", { agreementId, intent: "single_agreement", ...expPayload });
-                    onBeginOneTimeUnlock();
-                  }}
-                >
-                  {oneTimePhrase}
-                </button>
-              </div>
-
               <p className="text-center text-xs leading-relaxed text-slate-500 sm:text-left">{PRICING_CREDIBILITY_ONE_WORKFLOW}</p>
               <SampleArtifactsPreview variant="app" density="compact" />
 

@@ -1,4 +1,5 @@
 import type { WorkspaceIndexAgreement } from "../agreement/agreementWorkspaceApi";
+import { CUSTOMER_JOURNEY_STATE } from "../components/agreements/customerJourneyReadiness";
 import { readPaidProVs01PostSignHandoff } from "./vs01PaidProPostSignHandoff";
 import { readSigningPacketStatus } from "./vs01SigningPacketStatusStore";
 
@@ -92,11 +93,11 @@ export function readLocalSigningProgressSnapshot(agreementId: string): SigningPr
 }
 
 export function formatSigningProgressLabel(progress: SigningProgressSnapshot): string {
-  if (progress.fullySigned) return "Fully signed";
+  if (progress.fullySigned) return CUSTOMER_JOURNEY_STATE.fullyExecuted;
   if (progress.partiallySigned && progress.requiredCount > 0) {
     return `${progress.signedCount} of ${progress.requiredCount} signed`;
   }
-  return "Signature links ready";
+  return CUSTOMER_JOURNEY_STATE.linksCreatedShareWhenReady;
 }
 
 export function isAgreementPartiallySignedLocal(agreementId: string): boolean {
@@ -111,23 +112,23 @@ export function workspaceSigningStatusLabel(
   row: WorkspaceIndexAgreement,
   progress?: SigningProgressSnapshot | null,
 ): string {
-  if (row.completed_signed) return "Fully signed";
-  if (isAgreementFullySignedLocal(row.id)) return "Fully signed";
-  if (progress?.fullySigned) return "Fully signed";
+  if (row.completed_signed) return CUSTOMER_JOURNEY_STATE.fullyExecuted;
+  if (isAgreementFullySignedLocal(row.id)) return CUSTOMER_JOURNEY_STATE.fullyExecuted;
+  if (progress?.fullySigned) return CUSTOMER_JOURNEY_STATE.fullyExecuted;
   if (progress?.partiallySigned) return formatSigningProgressLabel(progress);
   const local = readLocalSigningProgressSnapshot(row.id);
-  if (local?.fullySigned) return "Fully signed";
+  if (local?.fullySigned) return CUSTOMER_JOURNEY_STATE.fullyExecuted;
   if (local?.partiallySigned) return formatSigningProgressLabel(local);
-  if (row.has_server_signing_lock) return "Signing in progress";
-  if (isAgreementPacketPrepared(row.id)) return "Signing in progress";
-  if (row.all_reviewers_approved) return "Ready to prepare signing";
+  if (row.has_server_signing_lock) return CUSTOMER_JOURNEY_STATE.waitingForSignatures;
+  if (isAgreementPacketPrepared(row.id)) return CUSTOMER_JOURNEY_STATE.waitingForSignatures;
+  if (row.all_reviewers_approved) return CUSTOMER_JOURNEY_STATE.readyToCreateSigningLinks;
   const req = row.review_approvals_required ?? 0;
   const done = row.review_approvals_completed ?? 0;
   if (row.reviewer_approved && req > 1) {
     return `${done} of ${req} reviewers approved`;
   }
-  if (row.reviewer_approved) return "Ready to prepare signing";
-  if (row.review_sent_at) return "Waiting for review";
-  if (row.version_ledger_count > 0) return "Ready to prepare signing";
-  return "Draft";
+  if (row.reviewer_approved) return CUSTOMER_JOURNEY_STATE.readyToCreateSigningLinks;
+  if (row.review_sent_at) return CUSTOMER_JOURNEY_STATE.waitingForReview;
+  if (row.version_ledger_count > 0) return CUSTOMER_JOURNEY_STATE.readyToCreateSigningLinks;
+  return CUSTOMER_JOURNEY_STATE.draftCreatedReviewRecommended;
 }

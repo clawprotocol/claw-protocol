@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 
 from backend.affiliates.stripe_earnings_handlers import (
     dispatch_stripe_event,
@@ -14,6 +17,7 @@ from backend.affiliates.stripe_earnings_handlers import (
 )
 from backend.billing.subscription_authority import (
     apply_invoice_paid_subscription_renewal,
+    apply_stripe_checkout_session_authority,
     apply_stripe_subscription_object,
     is_subscription_entitled,
     stripe_timestamp_to_iso,
@@ -96,6 +100,137 @@ def test_subscription_deleted_marks_canceled(economics_store: EconomicsStore) ->
     row = economics_store.get_subscription_by_org("org-del")
     assert row is not None
     assert row["status"] == "canceled"
+
+
+def test_checkout_session_expires_at_is_not_billing_period(economics_store: EconomicsStore) -> None:
+    session_expiry = int(datetime.now(timezone.utc).timestamp()) + 1800
+    r = apply_stripe_checkout_session_authority(
+        economics_store,
+        {
+            "id": "cs_expiry_trap",
+            "object": "checkout.session",
+            "status": "complete",
+            "payment_status": "paid",
+            "customer": "cus_expiry_trap",
+            "expires_at": session_expiry,
+            "subscription": "sub_expiry_trap",
+            "metadata": {"org_id": "org-expiry-trap", "plan_code": "pro"},
+        },
+    )
+    assert r.get("ok") is True
+    row = economics_store.get_subscription_by_org("org-expiry-trap")
+    assert row is not None
+    assert row["status"] == "active"
+    assert row["plan_code"] == "pro"
+    assert row.get("expires_at") in (None, "")
+    assert row.get("current_period_end") in (None, "")
+    assert is_subscription_entitled(row)
+    assert stripe_timestamp_to_iso(session_expiry) not in (
+        row.get("expires_at"),
+        row.get("current_period_end"),
+    )
+
+
+def test_retrieved_subscription_overwrites_stale_checkout_expiry(
+    economics_store: EconomicsStore,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    stale = (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat().replace("+00:00", "Z")
+    economics_store.upsert_subscription_authority(
+        org_id="org-stale-expiry",
+        user_id="user-stale",
+        plan_code="pro",
+        status="active",
+        expires_at=stale,
+        current_period_end=stale,
+        canceled_at=None,
+        stripe_subscription_id="sub_stale_expiry",
+        stripe_customer_id="cus_stale_expiry",
+        payment_id="stripe:checkout_session:cs_stale",
+        renewed_at=stale,
+    )
+    assert not is_subscription_entitled(economics_store.get_subscription_by_org("org-stale-expiry"))
+    future_ts = _future_ts(30)
+
+    def _fake_retrieve(sid: str) -> dict:
+        assert sid == "sub_stale_expiry"
+        return {
+            "id": sid,
+            "object": "subscription",
+            "customer": "cus_stale_expiry",
+            "status": "active",
+            "current_period_end": future_ts,
+            "metadata": {"org_id": "org-stale-expiry", "plan_code": "pro"},
+        }
+
+    monkeypatch.setattr(
+        "backend.billing.stripe_client.retrieve_subscription",
+        _fake_retrieve,
+    )
+    r = apply_stripe_checkout_session_authority(
+        economics_store,
+        {
+            "id": "cs_stale",
+            "status": "complete",
+            "payment_status": "paid",
+            "customer": "cus_stale_expiry",
+            "expires_at": int(datetime.now(timezone.utc).timestamp()) + 900,
+            "subscription": "sub_stale_expiry",
+            "metadata": {"org_id": "org-stale-expiry", "plan_code": "pro", "user_id": "user-stale"},
+        },
+    )
+    assert r.get("ok") is True
+    row = economics_store.get_subscription_by_org("org-stale-expiry")
+    assert row is not None
+    assert row["current_period_end"] == stripe_timestamp_to_iso(future_ts)
+    assert row["expires_at"] == stripe_timestamp_to_iso(future_ts)
+    assert is_subscription_entitled(row)
+
+
+def test_invoice_paid_prefers_line_period_over_invoice_period_end(
+    economics_store: EconomicsStore,
+) -> None:
+    economics_store.upsert_stripe_customer_org(stripe_customer_id="cus_line_period", org_id="org-line-period")
+    near_now = int(datetime.now(timezone.utc).timestamp())
+    cycle_end = _future_ts(30)
+    inv = {
+        "id": "in_line_period",
+        "customer": "cus_line_period",
+        "amount_paid": 4900,
+        "subscription": "sub_line_period",
+        "period_end": near_now,
+        "lines": {"data": [{"period": {"start": near_now, "end": cycle_end}}]},
+        "metadata": {"org_id": "org-line-period", "plan_code": "pro"},
+    }
+    r = apply_invoice_paid_subscription_renewal(economics_store, inv)
+    assert r.get("ok") is True
+    row = economics_store.get_subscription_by_org("org-line-period")
+    assert row is not None
+    assert row["current_period_end"] == stripe_timestamp_to_iso(cycle_end)
+    assert is_subscription_entitled(row)
+
+
+def test_invoice_paid_reads_v2_parent_subscription_id(economics_store: EconomicsStore) -> None:
+    economics_store.upsert_stripe_customer_org(stripe_customer_id="cus_v2_parent", org_id="org-v2-parent")
+    cycle_end = _future_ts(31)
+    inv = {
+        "id": "in_v2_parent",
+        "customer": "cus_v2_parent",
+        "amount_paid": 4900,
+        "parent": {
+            "type": "subscription_details",
+            "subscription_details": {"subscription": "sub_v2_parent"},
+        },
+        "lines": {"data": [{"period": {"end": cycle_end}}]},
+        "metadata": {"org_id": "org-v2-parent", "plan_code": "pro"},
+    }
+    r = apply_invoice_paid_subscription_renewal(economics_store, inv)
+    assert r.get("ok") is True
+    row = economics_store.get_subscription_by_org("org-v2-parent")
+    assert row is not None
+    assert row["stripe_subscription_id"] == "sub_v2_parent"
+    assert row["current_period_end"] == stripe_timestamp_to_iso(cycle_end)
+    assert is_subscription_entitled(row)
 
 
 def test_invoice_paid_extends_period_end(economics_store: EconomicsStore) -> None:
@@ -196,9 +331,9 @@ def test_invoice_paid_syncs_subscription_before_affiliate_earning(
     inv = {
         "id": "in_inv_aff",
         "customer": "cus_invaff",
-        "amount_paid": 2900,
-        "billing_reason": "subscription_cycle",
-        "metadata": {"org_id": "org-inv-aff"},
+        "amount_paid": 4900,
+        "billing_reason": "subscription_create",
+        "metadata": {"org_id": "org-inv-aff", "plan_code": "pro"},
         "subscription": "sub_invaff",
         "period_end": end_ts,
         "charge": None,
@@ -206,12 +341,254 @@ def test_invoice_paid_syncs_subscription_before_affiliate_earning(
     }
     r = handle_invoice_paid(economics_store, inv)
     assert r.get("ok") is True
-    assert r.get("earning_id")
+    assert r.get("earning_id"), r
     row = economics_store.get_subscription_by_org("org-inv-aff")
     assert row is not None
     assert row["current_period_end"] == stripe_timestamp_to_iso(end_ts)
     assert row["stripe_subscription_id"] == "sub_invaff"
     assert is_subscription_entitled(row)
+    # Renewal cycles sync entitlement but must not mint a second legacy earning.
+    cycle_end = _future_ts(90)
+    r_cycle = handle_invoice_paid(
+        economics_store,
+        {
+            **inv,
+            "id": "in_inv_aff_cycle",
+            "billing_reason": "subscription_cycle",
+            "period_end": cycle_end,
+        },
+    )
+    assert r_cycle.get("ok") is True
+    assert r_cycle.get("ignored") is True
+    assert r_cycle.get("reason") == "first_invoice_only"
+    assert r_cycle.get("earning_id") is None
+    row2 = economics_store.get_subscription_by_org("org-inv-aff")
+    assert row2 is not None
+    assert row2["current_period_end"] == stripe_timestamp_to_iso(cycle_end)
+    assert is_subscription_entitled(row2)
+
+
+def test_string_subscription_id_checkout_writes_customer_and_subscription_maps(
+    economics_store: EconomicsStore,
+) -> None:
+    """Real Stripe webhooks often send subscription as an ID string, not an object."""
+    event = {
+        "type": "checkout.session.completed",
+        "data": {
+            "object": {
+                "id": "cs_string_sub",
+                "status": "complete",
+                "payment_status": "paid",
+                "customer": "cus_string_sub",
+                "subscription": "sub_string_sub",
+                "metadata": {
+                    "org_id": "org-string-sub",
+                    "claw_org_id": "org-string-sub",
+                    "plan_code": "pro",
+                    "user_id": "user-string-sub",
+                },
+            }
+        },
+    }
+    r = dispatch_stripe_event(economics_store, event)
+    assert r.get("ok") is True
+    assert not r.get("ignored"), r
+    assert economics_store.get_org_for_stripe_customer("cus_string_sub") == "org-string-sub"
+    link = economics_store.get_stripe_subscription_org("sub_string_sub")
+    assert link is not None
+    assert link["org_id"] == "org-string-sub"
+    row = economics_store.get_subscription_by_org("org-string-sub")
+    assert row is not None
+    assert row["status"] == "active"
+    assert row["plan_code"] == "pro"
+    assert row["stripe_subscription_id"] == "sub_string_sub"
+    assert row["stripe_customer_id"] == "cus_string_sub"
+    assert is_subscription_entitled(row)
+
+
+def test_invoice_before_checkout_is_retryable_then_succeeds_after_authority(
+    economics_store: EconomicsStore,
+) -> None:
+    invoice = {
+        "id": "in_before_cs",
+        "customer": "cus_order",
+        "amount_paid": 4900,
+        "subscription": "sub_order",
+        "period_end": _future_ts(30),
+        "metadata": {"plan_code": "pro"},
+    }
+    first = apply_invoice_paid_subscription_renewal(economics_store, invoice)
+    assert first.get("ok") is False
+    assert first.get("reason") == "no_org_mapping"
+    assert first.get("retryable") is True
+    assert economics_store.get_org_for_stripe_customer("cus_order") is None
+    assert economics_store.get_subscription_by_org("org-order") is None
+
+    checkout = {
+        "type": "checkout.session.completed",
+        "data": {
+            "object": {
+                "id": "cs_order",
+                "status": "complete",
+                "payment_status": "paid",
+                "customer": "cus_order",
+                "subscription": "sub_order",
+                "metadata": {
+                    "org_id": "org-order",
+                    "claw_org_id": "org-order",
+                    "plan_code": "pro",
+                    "user_id": "user-order",
+                },
+            }
+        },
+    }
+    activated = dispatch_stripe_event(economics_store, checkout)
+    assert activated.get("ok") is True
+    assert economics_store.get_org_for_stripe_customer("cus_order") == "org-order"
+    assert is_subscription_entitled(economics_store.get_subscription_by_org("org-order"))
+
+    later = apply_invoice_paid_subscription_renewal(economics_store, invoice)
+    assert later.get("ok") is True
+    assert later.get("reason") != "no_org_mapping"
+    assert later.get("org_id") == "org-order"
+    row = economics_store.get_subscription_by_org("org-order")
+    assert row is not None
+    assert row["stripe_subscription_id"] == "sub_order"
+    assert is_subscription_entitled(row)
+
+
+def test_duplicate_checkout_dispatch_does_not_duplicate_entitlement(
+    economics_store: EconomicsStore,
+) -> None:
+    event = {
+        "type": "checkout.session.completed",
+        "data": {
+            "object": {
+                "id": "cs_dup_auth",
+                "status": "complete",
+                "payment_status": "paid",
+                "customer": "cus_dup_auth",
+                "subscription": "sub_dup_auth",
+                "metadata": {
+                    "org_id": "org-dup-auth",
+                    "claw_org_id": "org-dup-auth",
+                    "plan_code": "pro",
+                    "user_id": "user-dup-auth",
+                },
+            }
+        },
+    }
+    first = dispatch_stripe_event(economics_store, event)
+    second = dispatch_stripe_event(economics_store, event)
+    assert first.get("ok") is True
+    assert second.get("ok") is True
+    row = economics_store.get_subscription_by_org("org-dup-auth")
+    assert row is not None
+    assert is_subscription_entitled(row)
+    with economics_store._conn() as con:
+        n = con.execute(
+            "SELECT COUNT(*) AS c FROM subscriptions WHERE org_id = ?",
+            ("org-dup-auth",),
+        ).fetchone()
+    assert int(n["c"] if n["c"] is not None else n[0]) == 1
+
+
+def test_webhook_http_invoice_before_checkout_retries_then_dedupes(
+    economics_store: EconomicsStore,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("CLAW_ENVIRONMENT", "test")
+    monkeypatch.setenv("CLAW_STRIPE_WEBHOOK_DEV_UNSIGNED", "1")
+    monkeypatch.delenv("STRIPE_WEBHOOK_SECRET", raising=False)
+    from backend.payments.stripe_webhooks import router as stripe_webhook_router
+
+    app = FastAPI()
+    app.include_router(stripe_webhook_router)
+    client = TestClient(app)
+
+    invoice_event = {
+        "id": "evt_http_inv_early",
+        "type": "invoice.paid",
+        "data": {
+            "object": {
+                "id": "in_http_early",
+                "customer": "cus_http_auth",
+                "amount_paid": 4900,
+                "subscription": "sub_http_auth",
+                "period_end": _future_ts(30),
+                "metadata": {},
+            }
+        },
+    }
+    early = client.post(
+        "/webhook/stripe",
+        content=json.dumps(invoice_event),
+        headers={"Content-Type": "application/json"},
+    )
+    assert early.status_code == 503
+    assert early.json().get("detail") == "stripe_authority_not_ready"
+    assert economics_store.insert_stripe_webhook_event_once("evt_http_inv_early") is True
+    assert economics_store.delete_stripe_webhook_event("evt_http_inv_early") is True
+
+    checkout_event = {
+        "id": "evt_http_cs",
+        "type": "checkout.session.completed",
+        "data": {
+            "object": {
+                "id": "cs_http_auth",
+                "status": "complete",
+                "payment_status": "paid",
+                "customer": "cus_http_auth",
+                "subscription": "sub_http_auth",
+                "metadata": {
+                    "org_id": "org-http-auth",
+                    "claw_org_id": "org-http-auth",
+                    "plan_code": "pro",
+                    "user_id": "user-http-auth",
+                },
+            }
+        },
+    }
+    activated = client.post(
+        "/webhook/stripe",
+        content=json.dumps(checkout_event),
+        headers={"Content-Type": "application/json"},
+    )
+    assert activated.status_code == 200
+    assert activated.json().get("ok") is True
+    assert activated.json().get("duplicate") is not True
+    assert is_subscription_entitled(economics_store.get_subscription_by_org("org-http-auth"))
+
+    dup_checkout = client.post(
+        "/webhook/stripe",
+        content=json.dumps(checkout_event),
+        headers={"Content-Type": "application/json"},
+    )
+    assert dup_checkout.status_code == 200
+    assert dup_checkout.json().get("duplicate") is True
+
+    later = client.post(
+        "/webhook/stripe",
+        content=json.dumps(invoice_event),
+        headers={"Content-Type": "application/json"},
+    )
+    assert later.status_code == 200, later.text
+    assert later.json().get("ok") is True
+    assert later.json().get("result", {}).get("reason") != "no_org_mapping"
+
+    dup_invoice = client.post(
+        "/webhook/stripe",
+        content=json.dumps(invoice_event),
+        headers={"Content-Type": "application/json"},
+    )
+    assert dup_invoice.status_code == 200
+    assert dup_invoice.json().get("duplicate") is True
+    with economics_store._conn() as con:
+        n = con.execute(
+            "SELECT COUNT(*) AS c FROM subscriptions WHERE org_id = ?",
+            ("org-http-auth",),
+        ).fetchone()
+    assert int(n["c"] if n["c"] is not None else n[0]) == 1
 
 
 def test_dispatch_handles_subscription_created(economics_store: EconomicsStore) -> None:

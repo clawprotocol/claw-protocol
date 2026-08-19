@@ -170,7 +170,10 @@ export function validatePaidProCorpusCandidate(args: {
   const intake = (args.intakeText || "").trim();
   if (intake.length >= 24 && t.length >= 400) {
     const useSoftIntent =
-      args.tier === "deterministic_paid_pro_fallback" || args.tier === "locally_generated_paid_pro";
+      args.tier === "deterministic_paid_pro_fallback" ||
+      args.tier === "locally_generated_paid_pro" ||
+      // Soften server ranking so soft intent gaps cannot demote a richer server body.
+      args.tier === "server_authoritative_paid_pro";
     const v = validatePaidProOutput({
       text: t,
       rawIntake: intake,
@@ -189,11 +192,9 @@ export function validatePaidProCorpusCandidate(args: {
           r.includes("estate_sibling") ||
           r.includes("dev_context"),
       );
-      if (useSoftIntent) {
-        if (hardReasons.length) reasons.push(...hardReasons);
-      } else if (hardReasons.length || args.tier === "server_authoritative_paid_pro") {
-        reasons.push(...(hardReasons.length ? hardReasons : v.reasons));
-      }
+      // Soft intent / paraphrasing gaps must not demote an otherwise richer server
+      // corpus below a valid local candidate during authority ranking.
+      if (hardReasons.length) reasons.push(...hardReasons);
     }
   }
 

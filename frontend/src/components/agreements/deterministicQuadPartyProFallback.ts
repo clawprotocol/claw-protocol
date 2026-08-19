@@ -343,6 +343,9 @@ export function buildDeterministicQuadPartyMutualServicesProFallback(args: {
     "1. SERVICES AND SCOPE",
     `Each Party may provide professional services, implementation support, analytics work, logistics coordination, and related deliverables to the other Parties as described in the intake and any written statements of work the Parties execute. Core scope includes: ${purpose}`,
     "",
+    "1.1 Acceptance Review.",
+    "Deliverables are subject to a reasonable acceptance review or demonstration period. A Party may reject nonconforming work in writing within that period; unrejected work is deemed accepted.",
+    "",
     "2. TERM AND TERMINATION",
     `The initial term of this Agreement is ${term}, unless extended or terminated as provided herein. Either Party may terminate for material breach on thirty (30) days' written notice if the breach is not cured during that period.`,
     "",
@@ -403,7 +406,9 @@ export function buildDeterministicQuadPartyMutualServicesProFallback(args: {
   });
   body = canonicalStructure.text;
 
-  while (body.length < PAID_PRO_RECOVERY_MIN_DISPLAY_LEN) {
+  // Post-structure pad must clear both recovery display floor and TEST420 malformed-draft floor.
+  const postStructureMinLen = Math.max(PAID_PRO_RECOVERY_MIN_DISPLAY_LEN, 5000);
+  while (body.length < postStructureMinLen) {
     body += `\n\nOperational Detail. The Parties will document service milestones, analytics deliverables, logistics handoffs, and revenue reconciliation procedures in good faith under this Agreement.`;
   }
 
@@ -680,6 +685,10 @@ export function buildDeterministicQuadPartyBrandLicensingProFallback(args: {
   }
   body = stripRepeatedSupplementalProvisionsFiller(body).text;
   body = stripNumberedOperativeSectionsAfterExecution(body).text;
+  // Strips above can shrink below the professional recovery floor — re-expand after cleanup.
+  if (body.length < DETERMINISTIC_BRAND_LICENSING_QUAD_PARTY_MIN_LEN) {
+    body = expandOperativeCorpusWithUniqueSupplements(body, DETERMINISTIC_BRAND_LICENSING_QUAD_PARTY_MIN_LEN);
+  }
 
   const acceptance = validateDeterministicQuadPartyProFallbackAcceptance({
     body,

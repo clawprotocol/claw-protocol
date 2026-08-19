@@ -45,6 +45,13 @@ export const PAID_PRO_COORDINATOR_TOGGLE_HELPER =
 
 export const PAID_PRO_ADD_ANOTHER_PARTY_LABEL = "Add another party";
 
+export const POST_GENERATION_ADD_PARTY_CONTRACTING_LABEL =
+  "Add as a contracting party and update the agreement";
+
+export const POST_GENERATION_ADD_PARTY_REVIEWER_LABEL = "Add as a reviewer only";
+
+export type PostGenerationAddedPersonChoice = "contracting_party" | "reviewer_only";
+
 export const PAID_PRO_REMOVE_PARTY_LABEL = "Remove party";
 
 export function formatSignerSetupBeyondGeneratedWarningTitle(generatedPartyCount: number): string {
@@ -53,11 +60,37 @@ export function formatSignerSetupBeyondGeneratedWarningTitle(generatedPartyCount
 }
 
 export function formatSignerSetupBeyondGeneratedWarningBody(): string {
-  return "To add another legal party, regenerate the agreement so the agreement text, review flow, signature blocks, signer roles, and signing invitations stay synchronized.";
+  return "Choose whether to add a contracting party (and update the agreement) or add a reviewer only. Contracting parties are never changed silently.";
 }
 
 export function formatSignerSetupBeyondGeneratedWarning(generatedPartyCount: number): string {
   return `${formatSignerSetupBeyondGeneratedWarningTitle(generatedPartyCount)} ${formatSignerSetupBeyondGeneratedWarningBody()}`;
+}
+
+/** Visible completion state for one 2–4 party setup row. */
+export function formatPartySetupRowStatus(args: {
+  partyIndex: number;
+  legalEntity: string;
+  signerName: string;
+  email: string;
+  signaturePrepMode: boolean;
+}): string {
+  const n = args.partyIndex + 1;
+  const legal = args.legalEntity.trim();
+  const signer = args.signerName.trim();
+  const email = stripRecipientEmailNoise(args.email);
+  if (!legal) return `Party ${n} — party name needed.`;
+  if (args.signaturePrepMode) {
+    const companyAsSigner =
+      /\b(?:LLC|L\.L\.C\.|Inc\.?|Incorporated|Corp\.?|Corporation|Ltd\.?|Limited|LLP|PLLC|LP|Co\.?|Company)\.?$/i.test(
+        legal,
+      ) && signer.toLowerCase() === legal.toLowerCase();
+    if (!signer || companyAsSigner) return `Party ${n} — authorized signer name needed.`;
+    if (!email || !looksLikeEmail(email)) return `Party ${n} — signer email needed.`;
+    return `Party ${n} — complete.`;
+  }
+  if (!email || !looksLikeEmail(email)) return `Party ${n} — reviewer email needed.`;
+  return `Party ${n} — complete.`;
 }
 
 export type ResolveGeneratedAgreementPartyCountArgs = {
@@ -358,7 +391,13 @@ export function paidProSignerSetupUiStateFromRecipientSetup(
       ? partyEmails.slice(2).map((x) => String(x ?? ""))
       : [];
   const legalExtras = (setup?.recipientPartyLegalNames ?? []).map((x) => String(x ?? ""));
-  const uiCount = Math.max(setup?.signerSetupUiPartyCount ?? 0, draftParties.length, 2);
+  const uiCount = Math.max(
+    setup?.signerSetupUiPartyCount ?? 0,
+    partyEmails?.length ?? 0,
+    setup?.recipientPartyLegalNames?.length ? setup.recipientPartyLegalNames.length + 2 : 0,
+    draftParties.length,
+    2,
+  );
   return {
     creatorCoordinatorOnly: Boolean(setup?.creatorCoordinatorOnly),
     signerSetupUiPartyCount: Math.min(uiCount, PAID_PRO_SIGNER_SETUP_MAX_UI_PARTIES),

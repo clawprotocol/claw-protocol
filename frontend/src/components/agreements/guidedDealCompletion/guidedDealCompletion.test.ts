@@ -64,6 +64,7 @@ import {
   preserveGuidedSessionProgress,
 } from "./guidedSessionPersistence";
 import { applyProBodyHardIntegrityGate } from "./proBodyHardIntegrityGate";
+import { buildStableGuidedQuestionQueue } from "./guidedQuestionQueue";
 import { referralDefectiveBodyFixture } from "../qaManualTenPrompts";
 import type { DealVariable } from "./types";
 
@@ -223,13 +224,12 @@ describe("guidedDealCompletion", () => {
 
   it("keeps guided queue length stable when material extraction shrinks on rerender", () => {
     const key = buildGuidedSessionKey("gen-stable", "fp-abc");
-    const fourItems = [
+    const threeItems = [
       "payment_timing",
       "referral_economics",
       "governing_venue",
-      "saas_sla",
     ] as const;
-    const material = fourItems.map((id) => ({
+    const material = threeItems.map((id) => ({
       id,
       label: id.replace(/_/g, " "),
       question: `Question for ${id}?`,
@@ -247,12 +247,12 @@ describe("guidedDealCompletion", () => {
     })!;
     const locked = lockGuidedSession(full, key);
     expect(locked.sessionKey).toBe(key);
-    expect(locked.frozenTotalQuestions).toBe(4);
+    expect(locked.frozenTotalQuestions).toBe(3);
     expect(locked.variables.length).toBeGreaterThan(0);
     const persisted = {
       sessionKey: key,
-      frozenTotalQuestions: 4,
-      queue: [...fourItems],
+      frozenTotalQuestions: 3,
+      queue: [...threeItems],
       variables: full.variables,
       answered: {},
       skippedIds: [] as string[],
@@ -272,8 +272,42 @@ describe("guidedDealCompletion", () => {
       key,
     );
     expect(merged).not.toBeNull();
-    expect(frozenQuestionTotal(merged!)).toBe(4);
-    expect(merged!.queue.length).toBe(4);
+    expect(frozenQuestionTotal(merged!)).toBe(3);
+    expect(merged!.queue.length).toBe(3);
+  });
+
+  it("caps the compact clarification queue at three and lets a deferred item appear after earlier answers", () => {
+    const vars = [
+      "payment_timing",
+      "saas_sla",
+      "governing_venue",
+      "referral_economics",
+    ].map((id) => ({
+      id,
+      category: "general" as const,
+      label: id.replace(/_/g, " "),
+      question: `Question for ${id}?`,
+      severity: "important" as const,
+      suggestedDefaults: [{ id: "custom", label: "Custom", value: "" }],
+      agreementImpact: "Matters.",
+      requiredForExecution: false,
+      applicableAgreementFamilies: ["saas_msa" as const],
+      uiControlType: "text" as const,
+      currentValue: null,
+      confidence: 0.8,
+      affectsSections: ["general"],
+    }));
+    const first = buildStableGuidedQuestionQueue({ variables: vars });
+    expect(first.queue.length).toBe(3);
+    expect(first.queue[0]).toBe("payment_timing");
+    expect(first.queue).not.toContain("referral_economics");
+    const afterFirstAnswer = buildStableGuidedQuestionQueue({
+      variables: vars,
+      answered: { payment_timing: "Net 30" },
+    });
+    expect(afterFirstAnswer.queue.length).toBe(3);
+    expect(afterFirstAnswer.queue).not.toContain("payment_timing");
+    expect(afterFirstAnswer.queue).toContain("referral_economics");
   });
 
   it("exposes selectable Custom pill defaults for referral economics", () => {
@@ -512,10 +546,10 @@ describe("guidedDealCompletion", () => {
       ),
     ).toBe(true);
     expect(session!.queue.length).toBeGreaterThanOrEqual(3);
-    expect(session!.queue.length).toBeLessThanOrEqual(5);
+    expect(session!.queue.length).toBeLessThanOrEqual(3);
     const firstQ = getCurrentVariable(session!)?.question ?? "";
     expect(firstQ).toMatch(
-      /How should the developer be paid|Who should own the work product|total contract fee/i,
+      /How should the developer be paid|Who (?:should own the work product|owns deliverables)|total contract fee/i,
     );
     expect(getCurrentVariable(session!)?.suggestedDefaults.some((p) => p.id === "custom")).toBe(true);
   });

@@ -78,21 +78,24 @@ describe("createEntitlementUi", () => {
     ).toBe(false);
   });
 
-  it("formats Genesis allowance from server fields", () => {
+  it("does not render Genesis buyer allowance copy (affiliate-only contract)", () => {
+    // Genesis is an affiliate/partner status, never a buyer drafting entitlement.
     const copy = formatGenesisAllowanceStatusCopy({
       agreementsRemaining: 3,
       agreementAllowance: 5,
       periodEndsAt: "2026-07-31T23:59:59Z",
     });
-    expect(copy).toMatch(/^Genesis Dog access: 3 of 5 new agreements remaining this month\. Resets /);
+    expect(copy).toBeNull();
   });
 
   it("formats Pro allowance and renewal from server fields", () => {
     const copy = formatProAllowanceStatusCopy({
-      agreementsRemaining: 20,
-      agreementAllowance: 25,
+      agreementsRemaining: 7,
+      agreementAllowance: 10,
       periodEndsAt: "2026-08-15T00:00:00Z",
     });
-    expect(copy).toMatch(/^Pro access: 20 of 25 new agreements remaining this billing period\. Renews /);
+    expect(copy).toMatch(
+      /^Pro access: 7 of 10 successfully finalized premium agreements remaining this month\. Resets /,
+    );
   });
 });

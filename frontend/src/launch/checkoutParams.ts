@@ -10,7 +10,9 @@ export function extractAgreementIdFromSendReturnUrl(returnTo: string): string | 
 
 export function parseTierIdParam(raw: string | null): LaunchPricingTier["id"] | null {
   const id = (raw || "").trim().toLowerCase();
-  if (id === "starter" || id === "pro" || id === "enterprise") return id;
+  // Paid-beta: self-serve checkout is Pro only. Legacy "starter"/Plus deep links → Pro.
+  if (id === "starter" || id === "plus") return "pro";
+  if (id === "pro" || id === "enterprise") return id;
   return null;
 }
 
@@ -19,15 +21,16 @@ export function parseCadenceParam(raw: string | null): PricingCadence | null {
   return null;
 }
 
-/** Self-serve checkout uses Starter/Pro; Enterprise falls back to highlighted tier. */
+/** Self-serve checkout is Pro only; Enterprise falls back to highlighted Pro. */
 export function resolveCheckoutTier(tierParam: LaunchPricingTier["id"] | null): LaunchPricingTier {
-  if (tierParam === "enterprise") {
-    return LAUNCH_PRICING_TIERS.find((t) => t.highlighted) ?? LAUNCH_PRICING_TIERS[1];
-  }
-  if (tierParam && LAUNCH_PRICING_TIERS.some((t) => t.id === tierParam)) {
-    return LAUNCH_PRICING_TIERS.find((t) => t.id === tierParam)!;
-  }
-  return LAUNCH_PRICING_TIERS.find((t) => t.highlighted) ?? LAUNCH_PRICING_TIERS[1];
+  const pro =
+    LAUNCH_PRICING_TIERS.find((t) => t.id === "pro") ??
+    LAUNCH_PRICING_TIERS.find((t) => t.highlighted) ??
+    LAUNCH_PRICING_TIERS[0]!;
+  if (tierParam === "enterprise") return pro;
+  if (tierParam === "pro") return pro;
+  // Legacy starter/Plus ids already normalized to "pro" by parseTierIdParam.
+  return pro;
 }
 
 /** Ensure return target matches this checkout’s agreement (send intent only). */

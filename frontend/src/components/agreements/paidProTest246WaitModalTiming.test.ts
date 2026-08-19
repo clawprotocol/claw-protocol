@@ -79,7 +79,7 @@ describe("paidPro Test246 wait modal timing", () => {
     });
     expect(phase).toBe("patience_extended");
     const view = resolvePremiumProWaitModalView(phase);
-    expect(view.title).toMatch(/Finalizing your Pro agreement/i);
+    expect(view.title).toMatch(/Finalizing your agreement draft/i);
     expect(view.statusLine).toMatch(/still active/i);
     expect(view.showRecoveryActions).toBe(false);
   });

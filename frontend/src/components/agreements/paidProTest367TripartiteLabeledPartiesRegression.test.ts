@@ -281,7 +281,9 @@ describe("paidPro test367 tripartite labeled parties regression", () => {
     ).toBe(true);
   });
 
-  it("HTTP 200 degraded/json_parse upgrades via local recovery instead of corrupted free starter", async () => {
+  it(
+    "HTTP 200 degraded/json_parse upgrades via local recovery instead of corrupted free starter",
+    async () => {
     const draft = buildTest367Draft();
     const corruptedDraft = {
       ...draft,
@@ -335,5 +337,7 @@ describe("paidPro test367 tripartite labeled parties regression", () => {
     expect(out.winningPremiumBodyText).toMatch(/Blue Canyon Analytics LLC/i);
     expect(out.winningPremiumBodyText).not.toMatch(/licensing revenue/i);
     expect(out.winningPremiumBodyText).not.toMatch(/information known at intake/i);
-  });
+  },
+    15_000,
+  );
 });

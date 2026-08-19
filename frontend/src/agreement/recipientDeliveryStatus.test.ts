@@ -1,6 +1,7 @@
 /** @vitest-environment jsdom */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { resetRuntimeEnvironmentCacheForTests } from "../config/runtimeEnvironment";
 import { fetchRecipientDeliveryStatus } from "./recipientDeliveryStatus";
 
 describe("recipientDeliveryStatus API routing", () => {
@@ -19,11 +20,14 @@ describe("recipientDeliveryStatus API routing", () => {
     });
     vi.stubGlobal("fetch", fetchMock);
     vi.stubEnv("VITE_CLAW_API_BASE", "https://claw-protocol-production.up.railway.app");
+    // Runtime env is memoized; clear after stub so apiUrl sees the configured production base.
+    resetRuntimeEnvironmentCacheForTests();
   });
 
   afterEach(() => {
     vi.unstubAllEnvs();
     vi.unstubAllGlobals();
+    resetRuntimeEnvironmentCacheForTests();
   });
 
   it("uses configured API base instead of window.location.origin", async () => {

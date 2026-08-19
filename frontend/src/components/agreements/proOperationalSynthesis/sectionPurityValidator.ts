@@ -65,13 +65,15 @@ export function parseAgreementSections(text: string): ParsedAgreementSection[] {
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
-    const m = line.match(numberedHeadingRe) || line.match(allCapsHeadingRe);
+    const numberedMatch = line.match(numberedHeadingRe);
+    const m = numberedMatch || line.match(allCapsHeadingRe);
     const trimmed = line.replace(/\.\s*$/, "");
     const isAllCapsTitle = Boolean(line.match(allCapsHeadingRe));
+    const isNumberedHeading = Boolean(numberedMatch);
     const isHeading =
       Boolean(m) &&
       trimmed.length < 72 &&
-      (isAllCapsTitle || !line.includes(".")) &&
+      (isAllCapsTitle || isNumberedHeading || !line.includes(".")) &&
       !/\b(?:shall|are|is|will|must|agreed|below|listed|resolved|provided)\b/i.test(trimmed);
     if (isHeading && m) {
       if (current) sections.push(current);

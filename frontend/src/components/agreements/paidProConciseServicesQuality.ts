@@ -37,6 +37,7 @@ import {
   hasPaidProPipelineSessionAcceptance,
   hasPaidProPipelineValidationForCorpus,
   markPaidProAuthoritativeValidationPassed,
+  markPaidProPipelineValidationPassed,
 } from "./paidProPostAcceptanceValidatorCache";
 import { corpusHashForScanCache, runCachedCorpusScan } from "./paidProCorpusScanCache";
 import {
@@ -254,7 +255,9 @@ export function assessConciseCommercialServicesProQuality(args: {
     (/\bin\s+witness\s+whereof\b/i.test(bodyLow) && countPaidProExecutionBlocks(text) >= 1);
   (esignOk ? requiredFactsFound : requiredFactsMissing).push("electronic_signatures");
 
-  const termOk = /\bterminat(?:ion|e)?\b/i.test(bodyLow);
+  // Match terminate / termination / terminated / terminating — stitched Term clauses often
+  // say "unless extended or terminated" without a standalone "Termination" heading word.
+  const termOk = /\bterminat(?:ion|e[ds]?|ing)?\b/i.test(bodyLow);
   (termOk ? requiredFactsFound : requiredFactsMissing).push("termination");
 
   const ownershipOk =
@@ -594,11 +597,28 @@ function preparePaidProServerDocumentForAcceptanceCore(
   }
 
   const invariantBeforeEnsure = analyzePaidProExecutionBlockInvariant(out, { expectedParties });
+  const needsMultiPartyEntityHeadingUpgrade =
+    records.length >= 3 &&
+    !isGenericPaidProAcceptanceManifestFallback(records) &&
+    (() => {
+      const witnessIdx = out.search(/\bIN WITNESS WHEREOF\b/i);
+      // Missing witness must not force invent — signing prepare owns execution append.
+      if (witnessIdx < 0) return false;
+      const tail = out.slice(witnessIdx);
+      // Title-case entity blocks without uppercase headings must be rebuilt for N-party Pro.
+      return !records.every((rec) => {
+        const heading = String(rec.fullLegalName || "").trim().toUpperCase();
+        if (!heading) return false;
+        const escaped = heading.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+        return new RegExp(`(?:^|\\n\\n)${escaped}\\s*\\n\\nBy:`, "m").test(tail);
+      });
+    })();
+  // Only normalize an existing witness/execution tail — never invent blank By:____ chrome.
   if (
     records.length >= 2 &&
     !isGenericPaidProAcceptanceManifestFallback(records) &&
-    !invariantAtPrepareEntry.ok &&
-    !invariantBeforeEnsure.ok
+    /\bIN WITNESS WHEREOF\b/i.test(out) &&
+    ((!invariantAtPrepareEntry.ok && !invariantBeforeEnsure.ok) || needsMultiPartyEntityHeadingUpgrade)
   ) {
     const execution = ensurePaidProAcceptanceExecutionBlockInvariant(out, records);
     if (execution.text !== out) {
@@ -693,7 +713,37 @@ function preparePaidProServerDocumentForAcceptanceCore(
     repairs.push("prepare:substantive_brand_licensing_corpus_preserved");
   }
 
+  // Execution-invariant / substantive-wire rollback can restore contaminated tails.
+  // Re-apply domain scope + orphan strip as the last mutation so orphans and
+  // acceptance/demo contamination cannot survive prepare.
+  const finalDomain = applyPaidProDomainScopeGuard(out, intakeText, {
+    logSurface: "acceptance_prep_final",
+  });
+  if (finalDomain !== out) {
+    out = finalDomain;
+    repairs.push("domain_scope:final_contamination_sanitized");
+  }
+  const finalPartyLegalNames =
+    records.length >= 2 ? records.map((r) => r.fullLegalName) : partyNames;
+  if (finalPartyLegalNames.length >= 2) {
+    const finalOrphan = removeOrphanPartyLinesBeforeExecutionTail(out, finalPartyLegalNames, {
+      surface: `${surface}:final`,
+    });
+    if (finalOrphan.detected) {
+      out = finalOrphan.text;
+      repairs.push(...finalOrphan.repairs.map((r) => `${r}:final`));
+    }
+  }
+
   const result = { text: out.trim(), repairs: [...new Set(repairs)] };
+  if (
+    hasPaidProPipelineValidationForCorpus({
+      text: normalizedInput,
+      source: "server_full_draft",
+    })
+  ) {
+    markPaidProPipelineValidationPassed({ text: result.text, source: "server_full_draft" });
+  }
   tracePaidProAcceptancePipelineStage({
     stage: "after_preparePaidProServerDocumentForAcceptance",
     source: "server_full_draft",

@@ -6,24 +6,29 @@ import threading
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Set
 
-_email_send_locks_guard = threading.Lock()
-_email_send_locks: Dict[str, threading.Lock] = {}
+_completion_locks_guard = threading.Lock()
+_completion_locks: Dict[str, threading.RLock] = {}
 
 
-def vs01_completion_email_lock(agreement_id: str) -> threading.Lock:
-    """Serialize completion-email send + audit append per agreement (concurrent final signers)."""
+def vs01_signer_complete_lock(agreement_id: str) -> threading.RLock:
+    """Serialize mutate + persist + finalize + completion-email + audit per agreement."""
     aid = (agreement_id or "").strip()
-    with _email_send_locks_guard:
-        lock = _email_send_locks.get(aid)
+    with _completion_locks_guard:
+        lock = _completion_locks.get(aid)
         if lock is None:
-            lock = threading.Lock()
-            _email_send_locks[aid] = lock
+            lock = threading.RLock()
+            _completion_locks[aid] = lock
         return lock
 
 
+def vs01_completion_email_lock(agreement_id: str) -> threading.RLock:
+    """Backward-compatible alias — email path shares the full completion lock."""
+    return vs01_signer_complete_lock(agreement_id)
+
+
 def reset_vs01_completion_email_locks_for_tests() -> None:
-    with _email_send_locks_guard:
-        _email_send_locks.clear()
+    with _completion_locks_guard:
+        _completion_locks.clear()
 
 
 def required_vs01_signer_role_ids(draft: Dict[str, Any]) -> Set[str]:

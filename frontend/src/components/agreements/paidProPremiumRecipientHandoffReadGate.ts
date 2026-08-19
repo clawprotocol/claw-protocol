@@ -12,6 +12,7 @@ import {
 import { signerMetadataInputRaw } from "../../agreement/signerMetadataNormalize";
 import {
   countSignerMetadataSlots,
+  clearSignerMetadataEffectiveMaxForSession,
   latchSignerMetadataEffectiveMax,
   logSignerMetadataEffective,
   logSignerMetadataStaleEmptyReadIgnored,
@@ -106,6 +107,46 @@ export function applyPremiumRecipientHandoffReadGate(
     explicitPartySlotCount >= 2 &&
     explicitPartySlotCount < indexedHandoffSlots
   ) {
+    const drop = indexedHandoffSlots - explicitPartySlotCount;
+    // Drop of 2+ ⇒ new smaller intake (e.g. 4→2): clear stale entity/signer identity so
+    // prior-deal parties cannot phantom-slot. Drop of 1 ⇒ phantom-tail cap on the same deal:
+    // keep the surviving slots' identity and only trim the extra row.
+    if (drop >= 2) {
+      const blankSlot = {
+        name: "",
+        email: "",
+        role: "party",
+        signerName: "",
+        signerTitle: "",
+        partyAddress: "",
+      };
+      const cleared: PremiumRecipientHandoffV2 = {
+        v: 2,
+        party1: { ...blankSlot },
+        party2: { ...blankSlot },
+        savedAt: handoff.savedAt,
+        ...(explicitPartySlotCount > 2
+          ? {
+              partyIndexSlots: Array.from({ length: explicitPartySlotCount - 2 }, () => ({
+                ...blankSlot,
+              })),
+            }
+          : {}),
+      };
+      lastPopulatedHandoff = null;
+      sessionEverHadPopulatedHandoff = false;
+      clearSignerMetadataEffectiveMaxForSession();
+      const counts = countSignerMetadataSlots(cleared, explicitPartySlotCount);
+      latchSignerMetadataEffectiveMax(counts);
+      logSignerMetadataEffective({
+        source: "handoff_read_party_count_shrink_cleared",
+        partySlots: counts.partySlots,
+        slotsWithSignerName: counts.slotsWithSignerName,
+        slotsWithSignerTitle: counts.slotsWithSignerTitle,
+        ignoredEmptyRead: false,
+      });
+      return cleared;
+    }
     const trimmed = trimPremiumRecipientHandoffToPartyCount(handoff, explicitPartySlotCount);
     const counts = countSignerMetadataSlots(trimmed, explicitPartySlotCount);
     if (counts.slotsWithSignerName > 0) {

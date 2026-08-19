@@ -57,6 +57,16 @@ export function resolveSignerCardPartyNames(input: ExtractAgreementPartiesInput)
   const orderedSlots = draftNames.length > 0 ? draftNames : fromRendered;
   /** Intake "between …" list is authoritative for full legal names — not draft short aliases. */
   const authoritative = resolveFullLegalPartiesFromIntake(null, intake);
+  // Labeled multi-party intakes (3+) must keep every draft/rendered LLC slot — never collapse to 2.
+  if (draftNames.length >= 3) {
+    return draftNames.map((n) => finalizePartyDisplayNameForUserFacing(n, intake));
+  }
+  if (authoritative.length >= 3) {
+    return authoritative.map((n) => finalizePartyDisplayNameForUserFacing(n, intake));
+  }
+  if (fromRendered.length >= 3) {
+    return fromRendered.map((n) => finalizePartyDisplayNameForUserFacing(n, intake));
+  }
   if (authoritative.length >= 2) {
     return authoritative.slice(0, 2).map((n) => finalizePartyDisplayNameForUserFacing(n, intake));
   }

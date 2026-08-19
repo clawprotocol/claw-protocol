@@ -50,9 +50,24 @@ function buildSignatureBlocks(
   labeled: readonly LabeledPartyBlock[],
   rawIntake: string,
 ): string[] {
+  // 3+ party recovery corpora use entity-name headings (canonical multiparty shape).
+  // CLIENT/SERVICE PROVIDER role headings are only for classic 2-party execution tails.
+  const useEntityHeadings = parties.length >= 3;
   return parties.map((party, index) => {
     const block = labeled.find((b) => b.legalEntity === party) ?? labeled[index];
-    const heading = multiPartyExecutionBlockHeading(index, rawIntake);
+    const heading = useEntityHeadings
+      ? party.trim().toUpperCase()
+      : multiPartyExecutionBlockHeading(index, rawIntake);
+    if (useEntityHeadings) {
+      return [
+        `${heading}:`,
+        "By: ______________________________",
+        `Name: ${block?.signerName || "______________________________"}`,
+        `Title: ${block?.signerTitle || "______________________________"}`,
+        `Email: ${block?.signerEmail || "______________________________"}`,
+        "Date: ______________________________",
+      ].join("\n");
+    }
     return [
       `${heading}:`,
       party,
@@ -98,6 +113,9 @@ export function buildNPartyPaidProServerCorpus(args: {
     "",
     "1. SERVICES AND SCOPE",
     `Each Party may provide ${purpose}`,
+    "",
+    "1.1 Acceptance Review.",
+    "Deliverables are subject to a reasonable acceptance review or demonstration period. A Party may reject nonconforming work in writing within that period; unrejected work is deemed accepted.",
     "",
     "2. TERM AND TERMINATION",
     `The initial term is ${term}, unless extended or terminated as provided herein.`,

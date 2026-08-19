@@ -9,6 +9,7 @@ import {
   MUTUAL_CONSULTING_TOPIC_FAMILY,
 } from "./clauseFamilyRegistry";
 import { gateOperativeClauseFamilyAppend } from "./documentCompositionAuthority";
+import { unauthorizedSemanticInsertsAllowed } from "./unauthorizedSemanticInsertPolicy";
 
 export type MutualConsultingStructureTopic =
   | "services_scope"
@@ -71,6 +72,8 @@ export function assessPaidProMutualConsultingProfessionalStructure(args: {
   const text = (args.text || "").trim();
   const intake = (args.rawIntake || "").trim();
   const numberedSectionCount = countNumberedAgreementSections(text);
+  // Product invariant (Template A / AI-workflow): intakes with AI/automation/workflow/
+  // implementation+services route to the AI-workflow floor, not mutual-consulting applies.
   const aiWorkflowServices =
     /\b(?:ai|automation|workflow|configuration|implementation|setup)\b/i.test(intake) &&
     /\bservices?\b/i.test(intake);
@@ -117,6 +120,10 @@ export function applyMutualConsultingProfessionalQualityFloor(
 ): { text: string; repairs: string[] } {
   const repairs: string[] = [];
   let out = (text || "").replace(/\r\n?/g, "\n").trim();
+  // P0: do not append inventing operative sections without authority.
+  if (!unauthorizedSemanticInsertsAllowed()) {
+    return { text: out, repairs };
+  }
   const assessment = assessPaidProMutualConsultingProfessionalStructure({
     text: out,
     rawIntake: intakeText,

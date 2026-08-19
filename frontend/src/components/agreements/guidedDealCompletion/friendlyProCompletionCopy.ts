@@ -17,7 +17,7 @@ export const GUIDED_COMPLETION_SUBHEADING =
 export const GUIDED_QUESTION_FOOTER_COPY =
   "Finish these quick questions — LawDog will apply them in one clean update.";
 
-export const GUIDED_READY_STATE_HEADLINE = "Agreement validated and ready for signatures.";
+export const GUIDED_READY_STATE_HEADLINE = "Draft created—review recommended.";
 export const GUIDED_READY_STATE_SUBCOPY =
   "Review the improved agreement before sharing it for review or signature.";
 export const GUIDED_READY_STATE_BODY =

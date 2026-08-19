@@ -32,8 +32,11 @@ import {
   hasPaidProPipelineSessionAcceptance,
   latchPaidProPipelineAcceptanceForConciseAuthoritativeBody,
 } from "./paidProPostAcceptanceValidatorCache";
-import { PAID_PRO_RUNTIME_AUTHORITY_MIN_LEN } from "./paidProAuthorityConstants";
-import { SUBSTANTIVE_SERVER_DRAFT_MIN_LEN } from "./premiumAcceptancePolicy";
+import { PAID_PRO_AUTHORITY_MIN_LEN, PAID_PRO_RUNTIME_AUTHORITY_MIN_LEN } from "./paidProAuthorityConstants";
+import {
+  SUBSTANTIVE_SERVER_DRAFT_MIN_LEN,
+  latchAcceptedServerFullDraftAuthority,
+} from "./premiumAcceptancePolicy";
 import {
   assessPaidProSubstantiveServerDraftCorpus,
   paidProServerFullDraftBelowSubstantiveMin,
@@ -124,6 +127,7 @@ import { logPaidProDriftCorpusCaptureOnce } from "./paidProDriftCorpusCapture";
 import { tracePaidProCorpusMutation } from "./paidProMutationTrace";
 import { tracePaidProAcceptancePipelineStage } from "./paidProAcceptancePipelineTrace";
 import {
+  clearConsumedPaidProSignerMetadataAuthority,
   hashPaidProSignerMetadataAuthority,
   setConsumedPaidProSignerMetadataAuthority,
 } from "./paidProSignerMetadataAuthority";
@@ -131,6 +135,8 @@ import { writePremiumRecipientHandoffFromAuthorityParties, readPremiumRecipientH
 import {
   overlayIntakeManifestOnReviewParties,
   intakePartyManifestIsAuthoritative,
+  shouldPromoteConsumedSignerAuthorityAtFreeze,
+  expandNPartyHandoffPartiesFromIntakeAuthority,
 } from "./intakePartyManifestAuthority";
 import { establishCanonicalPartyMetadataAtStage } from "./canonicalPartyMetadataAuthority";
 import { shouldDeferPaidProReviewRenderSignerRepair } from "./paidProSignerMetadataCommitPolicy";
@@ -237,6 +243,7 @@ function evaluatePaidProSotEstablishmentForSnapshot(args: {
   intakeRaw: string;
   partyNames: readonly string[];
   surface: string;
+  allowUserApprovedShortCorpus?: boolean;
 }) {
   const decision = resolvePaidProSotEstablishmentDecision({
     snapshot: args.snapshot,
@@ -246,6 +253,7 @@ function evaluatePaidProSotEstablishmentForSnapshot(args: {
     adoptedHash: args.adoptedHash,
     intakeRaw: args.intakeRaw,
     partyNames: args.partyNames,
+    allowUserApprovedShortCorpus: args.allowUserApprovedShortCorpus,
   });
   logPaidProSotEstablishmentDecision(decision, args.surface);
   if (decision.warnOnly) {
@@ -305,6 +313,9 @@ export function clearPaidProSourceOfTruth(): void {
   clearPaidProReviewSessionAuthorityForTests();
   clearAuthoritativeAgreementDocument();
   clearFrozenCanonicalAgreementCorpus();
+  // Stale consumed signer metadata must not rebuild the next deal's execution block /
+  // handoff slots after SoT clear (cross-intake N-party contamination).
+  clearConsumedPaidProSignerMetadataAuthority();
   clearPaidProSignerStagingDisplayCorpus();
   clearPaidProReviewRenderFusedRepairCache();
   clearPaidProPinnedSignerAppliedCorpus();
@@ -426,12 +437,6 @@ export function establishPaidProSourceOfTruth(args: {
       return existingSot;
     }
   }
-  latchPaidProPipelineAcceptanceForConciseAuthoritativeBody({
-    text: trim(args.text),
-    source: requestedSource,
-    intakeText: args.intakeText ?? null,
-    draft: args.draft ?? null,
-  });
   const substantiveAssessment = assessPaidProSubstantiveServerDraftCorpus({
     text: trim(args.text),
     source: requestedSource,
@@ -439,7 +444,7 @@ export function establishPaidProSourceOfTruth(args: {
     draft: args.draft ?? null,
     generationOutcome: args.generationOutcome ?? null,
   });
-  const pipelineSessionAccepted = hasPaidProPipelineSessionAcceptance({
+  const pipelineSessionAcceptedEarly = hasPaidProPipelineSessionAcceptance({
     text: trim(args.text),
     source: requestedSource,
   });
@@ -450,21 +455,28 @@ export function establishPaidProSourceOfTruth(args: {
       intakeText: args.intakeText ?? null,
       draft: args.draft ?? null,
       generationOutcome: args.generationOutcome ?? null,
-    }) &&
-    !args.allowShorterOverwrite &&
-    !pipelineSessionAccepted;
+    }) && !args.allowShorterOverwrite && !pipelineSessionAcceptedEarly;
   if (mislabeledSubstantiveServerSource) {
     throw new Error(
       `[paid-pro-sot-establishment-blocked] mislabeled_server_full_draft_below_substantive_min;len=${wireLen};classification=${substantiveAssessment.classification}`,
     );
   }
+  latchPaidProPipelineAcceptanceForConciseAuthoritativeBody({
+    text: trim(args.text),
+    source: requestedSource,
+    intakeText: args.intakeText ?? null,
+    draft: args.draft ?? null,
+  });
+  const pipelineSessionAccepted = hasPaidProPipelineSessionAcceptance({
+    text: trim(args.text),
+    source: requestedSource,
+  });
   if (
     generationOutcome === "degraded" &&
     wireLen < SUBSTANTIVE_SERVER_DRAFT_MIN_LEN &&
     (requestedSource === "server_full_draft" || requestedSource === "server_full_draft_degraded") &&
     !args.allowShorterOverwrite &&
-    !pipelineSessionAccepted &&
-    !substantiveAssessment.qualifiesForServerFullDraftAcceptance
+    !pipelineSessionAccepted
   ) {
     throw new Error(
       `[paid-pro-sot-establishment-blocked] degraded_response_without_substantive_server_full;len=${wireLen}`,
@@ -494,11 +506,20 @@ export function establishPaidProSourceOfTruth(args: {
     draft: args.draft ?? null,
     source: requestedSource,
   });
+  const pipelineAcceptedAfterSubstance =
+    hasPaidProPipelineSessionAcceptance({
+      text: prep.text,
+      source: requestedSource,
+    }) ||
+    hasPaidProPipelineSessionAcceptance({
+      text: trim(args.text),
+      source: requestedSource,
+    });
   const professionalCoverage = assessProfessionalProClauseCoverage({
     text: prep.text,
     intake: args.intakeText ?? "",
   });
-  if (professionalCoverage.applies && !professionalCoverage.ok) {
+  if (professionalCoverage.applies && !professionalCoverage.ok && !pipelineAcceptedAfterSubstance) {
     logProfessionalProClauseCoverageDecision({
       accepted: false,
       docLen: professionalCoverage.docLen,
@@ -512,15 +533,6 @@ export function establishPaidProSourceOfTruth(args: {
   const intakeHasConcreteServicesFacts =
     /\b(?:ai|artificial intelligence|workflow|automation)\b/i.test(args.intakeText ?? "") &&
     /\b(?:ai|artificial intelligence|workflow|automation)\b/i.test(args.draft?.purpose ?? "");
-  const pipelineAcceptedAfterSubstance =
-    hasPaidProPipelineSessionAcceptance({
-      text: prep.text,
-      source: requestedSource,
-    }) ||
-    hasPaidProPipelineSessionAcceptance({
-      text: trim(args.text),
-      source: requestedSource,
-    });
   const substantiveServerDraft =
     requestedSource === "server_full_draft" &&
     (wireLen >= SUBSTANTIVE_SERVER_DRAFT_MIN_LEN ||
@@ -544,7 +556,12 @@ export function establishPaidProSourceOfTruth(args: {
         allowedToOverride: false,
         reason: `minimum_substance_advisory_substantive_server;malformedOpening=${minimumSubstance.malformedOpening};docLen=${wireLen}`,
       });
-    } else if (intakeHasConcreteServicesFacts && minimumSubstance.missingSections.length > 0) {
+    } else if (
+      intakeHasConcreteServicesFacts &&
+      minimumSubstance.missingSections.length > 0 &&
+      !substantiveServerDraft &&
+      !(professionalCoverage.applies && professionalCoverage.ok)
+    ) {
       throw new Error(
         `[pro-minimum-substance-blocked] missingSections=${minimumSubstance.missingSections.join(",")}`,
       );
@@ -621,6 +638,7 @@ export function establishPaidProSourceOfTruth(args: {
     intakeRaw,
     partyNames,
     surface: "establish_paid_pro_source_of_truth",
+    allowUserApprovedShortCorpus: Boolean(args.allowShorterOverwrite),
   });
 
   if (establishmentDecision.blocked) {
@@ -669,6 +687,7 @@ export function establishPaidProSourceOfTruth(args: {
         intakeRaw,
         partyNames,
         surface: "establish_paid_pro_source_of_truth_retry",
+        allowUserApprovedShortCorpus: Boolean(args.allowShorterOverwrite),
       });
     }
   }
@@ -704,7 +723,11 @@ export function establishPaidProSourceOfTruth(args: {
     source: "canonical_freeze",
     surface: "paid_pro_source_of_truth_establish",
   });
-  const acceptedCorpusText = driftGuard.displayText;
+  // Latched server_full_draft preserve path: freeze/display must not rewrite latched
+  // authoritative bytes after acceptance latch (Test245 authority stability).
+  const acceptedCorpusText = prep.repairs.includes("freeze_prep_preserved_latched_server_full_draft")
+    ? prep.text
+    : driftGuard.displayText;
   const acceptedCorpusHash = hashPaidProCorpus(acceptedCorpusText);
   if (preEstablishFreezeHash && preEstablishFreezeHash !== acceptedCorpusHash) {
     logCanonicalEstablishReconcile({
@@ -759,6 +782,10 @@ export function establishPaidProSourceOfTruth(args: {
     reason: "authoritative_source_of_truth_established",
   });
   replacePaidProSourceOfTruth(record);
+  // SoT establish is the freeze boundary — arm shortening guards for later candidates.
+  latchAcceptedServerFullDraftAuthority(record.text, "server_full_draft", {
+    freezeEstablished: true,
+  });
   logExecutionBlockLocation(record.text, "paid_pro_source_of_truth_establish");
   logExecutionBlockCount(record.text, "paid_pro_source_of_truth_establish");
   logPostFreezeCorpusDrift({
@@ -805,14 +832,30 @@ export function establishPaidProSourceOfTruth(args: {
   });
   let establishedHandoffPartyCount = reviewParties.length;
   if (reviewParties.length >= 2) {
-    const handoffParties = overlayIntakeManifestOnReviewParties(args.intakeText ?? null, reviewParties);
+    let handoffParties = overlayIntakeManifestOnReviewParties(args.intakeText ?? null, reviewParties);
+    handoffParties = expandNPartyHandoffPartiesFromIntakeAuthority(
+      args.intakeText ?? null,
+      handoffParties,
+      authoritativeSignerCount,
+    );
     establishedHandoffPartyCount = handoffParties.length;
-    setConsumedPaidProSignerMetadataAuthority({
-      parties: [...handoffParties],
-      source: "server_full_draft",
-      hash: hashPaidProSignerMetadataAuthority(handoffParties),
-      updatedAt: Date.now(),
-    });
+    // Promote consumed authority when signer contacts exist, or when an authoritative N-party
+    // intake manifest fixes legal-entity slots at freeze. Two-party legal-name-only seeds must
+    // not mark metadata as consumed (paidProSignerMetadataTypingPerformance).
+    if (
+      shouldPromoteConsumedSignerAuthorityAtFreeze({
+        handoffParties,
+        intakeRaw: args.intakeText ?? null,
+        authoritativeSignerCount,
+      })
+    ) {
+      setConsumedPaidProSignerMetadataAuthority({
+        parties: [...handoffParties],
+        source: "server_full_draft",
+        hash: hashPaidProSignerMetadataAuthority(handoffParties),
+        updatedAt: Date.now(),
+      });
+    }
     writePremiumRecipientHandoffFromAuthorityParties(handoffParties);
     if (intakePartyManifestIsAuthoritative(args.intakeText ?? null)) {
       establishCanonicalPartyMetadataAtStage({
@@ -849,6 +892,11 @@ export function establishPaidProSourceOfTruth(args: {
       source: requestedSource,
       integrityOk: true,
       reviewSessionId: record.reviewSessionId ?? null,
+      allowUserApprovedRevision:
+        Boolean(args.allowShorterOverwrite) ||
+        (freezeGatesPassed &&
+          record.text.length >= 40 &&
+          record.text.length < PAID_PRO_AUTHORITY_MIN_LEN),
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -1155,6 +1203,23 @@ export function getPaidProDocumentForSurface(
     reason: `surface:${surface}`,
   });
   const executionBlockAppended = false;
+  const preserveHydratedExecutionCorpus =
+    hydrated.signerMetadataApplied &&
+    (hydrated.source === "pinned_signer_applied_corpus" ||
+      hydrated.source === "authoritative_signing_snapshot");
+  const partiesForOverlayGate = resolvePartiesForReviewRender(opts);
+  const consumedAuthorityOverlayActive =
+    partiesForOverlayGate.length >= 2 &&
+    (consumedAuthoritySignerMetadataComplete(partiesForOverlayGate) ||
+      isPaidProReviewSignerMetadataSessionActive());
+  // Frozen SoT / pinned execution bytes are surface authority when no live signer overlay
+  // is active. Heading polish must not rewrite document hashes for review/copy consumers.
+  const preserveAuthoritativeSurfaceBytes =
+    preserveHydratedExecutionCorpus ||
+    (!signerMetadataApplied &&
+      !hydrated.signerMetadataApplied &&
+      !consumedAuthorityOverlayActive);
+
   if (
     surface === "review" ||
     surface === "copy" ||
@@ -1163,26 +1228,24 @@ export function getPaidProDocumentForSurface(
     surface === "vs01" ||
     surface === "finalized"
   ) {
-    const reviewCopyPlain = resolvePaidProReviewRenderPlain({
-      ...opts,
-      skipUserVisibleDisplayPrep: surface === "vs01",
-      deferSignerMetadataRepair: shouldDeferPaidProReviewRenderSignerRepair({
-        signerMetadataSessionActive: isPaidProReviewSignerMetadataSessionActive(),
-      }),
-    });
-    const aligned = reviewCopyPlain;
-    const preserveHydratedExecutionCorpus =
-      hydrated.signerMetadataApplied &&
-      (hydrated.source === "pinned_signer_applied_corpus" ||
-        hydrated.source === "authoritative_signing_snapshot");
-    if (aligned.length >= PAID_PRO_RUNTIME_AUTHORITY_MIN_LEN && !preserveHydratedExecutionCorpus) {
-      text = aligned;
-      hash = hashPaidProCorpus(text);
-      if (!signerMetadataApplied) {
-        const partiesForGate = resolvePartiesForReviewRender(opts);
-        if (consumedAuthoritySignerMetadataComplete(partiesForGate)) {
-          signerMetadataApplied = true;
-          corpusSource = "signer_hydrated_from_authority";
+    if (!preserveAuthoritativeSurfaceBytes) {
+      const reviewCopyPlain = resolvePaidProReviewRenderPlain({
+        ...opts,
+        skipUserVisibleDisplayPrep: surface === "vs01",
+        deferSignerMetadataRepair: shouldDeferPaidProReviewRenderSignerRepair({
+          signerMetadataSessionActive: isPaidProReviewSignerMetadataSessionActive(),
+        }),
+      });
+      const aligned = reviewCopyPlain;
+      if (aligned.length >= PAID_PRO_RUNTIME_AUTHORITY_MIN_LEN) {
+        text = aligned;
+        hash = hashPaidProCorpus(text);
+        if (!signerMetadataApplied) {
+          const partiesForGate = resolvePartiesForReviewRender(opts);
+          if (consumedAuthoritySignerMetadataComplete(partiesForGate)) {
+            signerMetadataApplied = true;
+            corpusSource = "signer_hydrated_from_authority";
+          }
         }
       }
     }
@@ -1198,7 +1261,7 @@ export function getPaidProDocumentForSurface(
     }
   }
 
-  if (isPaidProUserVisibleDocumentSurface(surface)) {
+  if (isPaidProUserVisibleDocumentSurface(surface) && !preserveAuthoritativeSurfaceBytes) {
     const displayPlain = resolvePaidProDisplayPlainForSurface({
       surface,
       sourcePlain: text,

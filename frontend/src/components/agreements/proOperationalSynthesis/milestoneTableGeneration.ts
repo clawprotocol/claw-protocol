@@ -40,6 +40,8 @@ export function applyMilestoneTableGeneration(
   paymentTerms: string,
   responsibilities: readonly PartyResponsibilityProfile[],
 ): { text: string; inserted: boolean } {
+  // Intake-signaled milestones authorize a draft schedule shell (not free inventing).
+  // Unauthorized inventing floors remain gated elsewhere via unauthorizedSemanticInsertsAllowed.
   if (!intakeHasMilestones(intakeRaw, paymentTerms)) {
     return { text, inserted: false };
   }

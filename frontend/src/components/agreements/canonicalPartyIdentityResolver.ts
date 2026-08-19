@@ -72,7 +72,13 @@ export type CanonicalPartyIdentity = {
   partyAddress?: string;
 };
 
-const WITNESS_RE = /\b(?:IN WITNESS WHEREOF|SIGNATURES?|EXECUTION)\b/i;
+/**
+ * Signature-region anchors for opening/body splits.
+ * Do not treat a mid-document "Execution" e-sign section heading as the witness tail —
+ * that historically truncated Scope/Fees/Governing Law before defined-opening repair.
+ */
+const WITNESS_RE =
+  /\bIN WITNESS WHEREOF\b|\bEXECUTION\s*[—–-]\s*SIGNATURES?\b|\bEXECUTION\s+BLOCK\b|^\s*SIGNATURES?\s*:?\s*$/im;
 
 export function logCanonicalPartyIdentityPreserved(args: {
   canonicalLegalName: string;
@@ -335,6 +341,16 @@ export function resolveCanonicalPartyIdentitiesFromSources(args: {
     (args.roleLabels?.length ?? 0) >= 3;
   if (lineSeparatedParties.length === 2 && !likelyMultiParty) {
     const manifestNames = lineSeparatedParties.slice(0, 12);
+    let lineSeparatedRoleLabels = [...(args.roleLabels ?? [])];
+    if (lineSeparatedRoleLabels.length < 2 && args.rawIntake) {
+      const structured = parseIntakeToStructuredAgreement(args.rawIntake);
+      const fromHints = manifestNames.map(
+        (name) => structured.partyRoleHints[name.toLowerCase()] || "",
+      );
+      if (fromHints.filter((r) => r && r !== "party").length >= 2) {
+        lineSeparatedRoleLabels = fromHints;
+      }
+    }
     const signerBySlot = resolveUniversalSignerMetadataBySlot({
       legalEntities: manifestNames,
       intakeText: args.rawIntake,
@@ -346,7 +362,7 @@ export function resolveCanonicalPartyIdentitiesFromSources(args: {
       const signer = signerBySlot[index];
       return {
         fullLegalName: full,
-        roleLabel: roleLabelForIndex(index, args.roleLabels?.[index], args.rawIntake),
+        roleLabel: roleLabelForIndex(index, lineSeparatedRoleLabels[index], args.rawIntake),
         displayAlias: definedShortNameFromLegalEntity(full),
         signerName: signer?.signerName?.trim() || null,
         signerTitle: signer?.signerTitle?.trim() || null,
@@ -738,9 +754,11 @@ export function stripDanglingPartyMetadataFragments(text: string): { text: strin
   replace(/\s+with\s+its\s*(?=(?:and\b|\.|,|\n|$))/gi, " ", "party_address:strip_dangling_with_its");
   replace(/,\s*with\s+(?:its\s+)?principal\s+place\s+of\s+business\s+at\s*(?=(?:and\b|\.|,|\n|$))/gi, "", "party_address:strip_empty_principal_place");
   replace(/\s+with\s+(?:its\s+)?principal\s+place\s+of\s+business\s+at\s*(?=(?:and\b|\.|,|\n|$))/gi, " ", "party_address:strip_empty_principal_place");
+  // Do not collapse ", and" → " and": N-party Oxford lists and address tails
+  // (e.g. "…Dr, Seattle, and Prairie Nova…") must stay idempotent across freeze.
   next = next
     .replace(/\s+,/g, ",")
-    .replace(/,\s+and\b/gi, " and")
+    .replace(/\s*,\s*,/g, ",")
     .replace(/[ \t]{2,}/g, " ")
     .replace(/ \./g, ".")
     .trim();
@@ -754,7 +772,6 @@ function stripUnsuppliedAddressPlaceholders(text: string): { text: string; repai
     .replace(/,\s*with\s+its\s*(?=and\b|\.|,)/gi, "")
     .replace(/\s+with\s+(?=and\b)/gi, " ")
     .replace(/\s*,\s*,/g, ",")
-    .replace(/,\s+and\b/gi, " and")
     .replace(/[ \t]{2,}/g, " ")
     .replace(/\n{3,}/g, "\n\n")
     .trim();
@@ -813,7 +830,7 @@ export function repairDuplicateAgreementOpening(
     }
     let next = input.replace(
       DUPLICATE_OPENING_REPLACE,
-      'This $1 Agreement (the "Agreement") is entered into by and between',
+      'This Agreement (the "Agreement") is entered into by and between',
     );
     next = next.replace(
       GENERIC_DUPLICATE_OPENING_REPLACE,
@@ -958,16 +975,25 @@ export function repairCanonicalPartyIdentityInCorpus(
   let head = out.slice(0, headLen);
   const rest = out.slice(headLen);
   const openingLine = definedOpeningLine(client, provider);
+  // Allow "This Services Agreement is between…" (words between This and Agreement).
+  // Stop before numbered sections OR unnumbered commercial headings so Scope/Fees are
+  // never swallowed when blank lines were collapsed.
   const openingRe =
-    /(?:this\s+agreement\s*(?:\([^)]*\))?\s*is\s+)?(?:entered\s+into\s+)?(?:by\s+and\s+)?between\b[\s\S]*?\.\s*(?=\n\n|\n\s*\d+\.\s+|\(collectively|\[SIGNATURE|$)/i;
+    /(?:this\s+(?:[\w/&'.-]+\s+){0,6}?agreement\s*(?:\([^)]*\))?\s*is\s+)?(?:entered\s+into\s+)?(?:by\s+and\s+)?between\b[\s\S]*?\.\s*(?=\n\n|\n\s*\d+\.\s+|\n\s*(?:Scope|Fees?|Payment|Compensation|Term|Governing|Confidential(?:ity)?|Execution|Ownership|Work\s+Product|Termination|Notices?|Intellectual)\b|\(collectively|\[SIGNATURE|$)/i;
   const preservePaidProOpening = shouldPreservePaidProMutualConsultingOpening(head, records);
   const twoPartyCommercialOpening = records.length === 2;
   if (!preservePaidProOpening && twoPartyCommercialOpening && openingRe.test(head)) {
     const openingMatch = head.match(openingRe);
+    const matched = openingMatch?.[0] ?? "";
+    const crossedOperativeHeading =
+      /\n\s*(?:Scope|Fees?|Payment|Compensation|Term|Governing|Confidential(?:ity)?|Execution|Ownership|Work\s+Product|Termination|Notices?)\b/i.test(
+        matched,
+      );
     if (
       openingMatch &&
-      openingMatch[0].length <= 380 &&
-      !/\d+\.\s+[A-Za-z]/.test(openingMatch[0])
+      matched.length <= 380 &&
+      !crossedOperativeHeading &&
+      !/\d+\.\s+[A-Za-z]/.test(matched)
     ) {
       head = head.replace(openingRe, () => {
         repairs.push("party_identity:defined_opening");
@@ -1041,10 +1067,19 @@ export function intakeSpecifiesSimpleFixedFee(
 ): boolean {
   const intakeBlob = String(intakeRaw || "");
   if (!/\$\s*[\d,]{3,}/.test(intakeBlob)) return false;
+  // Hedged / incomplete fee tables are not "simple fixed fee" — guided confirmation must still run.
+  if (
+    /\b(?:maybe|approximately|about|roughly|probably|estimated)\b/i.test(intakeBlob) ||
+    /\b(?:TBD|\?\?\?|to be confirmed|to be determined)\b/i.test(intakeBlob)
+  ) {
+    return false;
+  }
   if (
     /\b(?:milestone|schedule\s+a|phase\s+(?:\d|one|two|three|acceptance)|installment|40\s*%|30\s*%)\b/i.test(
       intakeBlob,
-    )
+    ) ||
+    /\|\s*phase\s*\|/i.test(intakeBlob) ||
+    /\b(?:build|rollout)\b[\s\S]{0,40}\b(?:TBD|\?\?\?)\b/i.test(intakeBlob)
   ) {
     return false;
   }

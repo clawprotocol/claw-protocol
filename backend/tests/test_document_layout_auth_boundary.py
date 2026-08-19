@@ -23,6 +23,7 @@ def client(monkeypatch, tmp_path):
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_LAYOUT_ANALYSIS_DIR", str(tmp_path / "layout"))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     monkeypatch.setenv("CLAW_COMMERCIAL_MODE", "1")
     return TestClient(app)
 

@@ -56,26 +56,14 @@ export function hasValidatedCorpusForFirstPaidCreateReview(args: {
 }
 
 /**
- * Gate canonical first-paid review entry — validation cache must match corpus (set by validatePaidProOutput).
+ * Gate canonical first-paid review entry.
+ * Validation markers are committed on apply (commitAcceptedPaidProCorpusHandoffSync).
+ * Pre-latch enforcement belongs in evaluateFirstPaidCreatePipelineGate / validatePaidProOutput.
  */
 export function gateFirstPaidCreateCanonicalReviewEntry(
   args: EnterCanonicalPaidProReviewFlowArgs,
 ): CanonicalPaidProReviewFlowPlan {
-  const plan = planEnterCanonicalPaidProReviewFlow(args);
-  if (!plan.shouldApply) return plan;
-  if (
-    !hasValidatedCorpusForFirstPaidCreateReview({
-      corpusPlain: plan.corpusPlain,
-      pipelineSource: plan.pipelineSource,
-    })
-  ) {
-    return {
-      ...plan,
-      shouldApply: false,
-      blockedReason: "validation_not_latched_for_corpus",
-    };
-  }
-  return plan;
+  return planEnterCanonicalPaidProReviewFlow(args);
 }
 
 /** Shared pipeline gate for entitled rewrite and post-checkout apply — one validation surface. */
@@ -130,7 +118,7 @@ export function evaluateFirstPaidCreatePipelineGate(
   else if (!finished.ok) blockedReason = "finished_agreement_gate_failed";
   else if (!validationLatched) blockedReason = "validation_not_latched_for_corpus";
 
-  const canonicalPlan = gateFirstPaidCreateCanonicalReviewEntry({
+  let canonicalPlan = gateFirstPaidCreateCanonicalReviewEntry({
     ...args,
     source: args.source,
     corpusPlain: finalize.corpusPlain,
@@ -138,6 +126,17 @@ export function evaluateFirstPaidCreatePipelineGate(
     draft: args.draft ?? null,
     intakeText,
   });
+  // Keep plan/gate agreement: rejected professional validation never yields shouldApply.
+  if (!validation.ok && canonicalPlan.shouldApply) {
+    canonicalPlan = {
+      ...canonicalPlan,
+      shouldApply: false,
+      blockedReason: "professional_validation_rejected",
+      establishSourceOfTruth: false,
+      commitReviewArtifact: false,
+      markPipelineValidationPassed: false,
+    };
+  }
 
   return {
     validationOk: validation.ok,

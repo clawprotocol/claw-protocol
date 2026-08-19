@@ -15,6 +15,7 @@ import {
 import { partyLegalNamesMatch } from "./paidProAcceptedCorpusPartyRoles";
 import { parseIntakeToStructuredAgreement } from "./intakeStructuredAgreementModel";
 import { starterCommercialRoleForIndex } from "./starterRoleLabelGuard";
+import { isInternalPartyAliasRole } from "./partySlotIdentityNormalize";
 
 export type CanonicalPartyRoleSlot = {
   index: number;
@@ -159,7 +160,8 @@ export function resolveCanonicalPartyRoleLabel(input: {
   preserveIntakeRole?: boolean;
 }): string {
   const explicit = String(input.explicitRole ?? "").trim();
-  if (explicit.length >= 2 && !isGenericCanonicalRole(explicit)) {
+  // party_a / party_b / PARTY_A are internal extraction aliases — never user-visible roles.
+  if (explicit.length >= 2 && !isGenericCanonicalRole(explicit) && !isInternalPartyAliasRole(explicit)) {
     if (input.preserveIntakeRole && isPreservableIntakeRole(explicit)) {
       return titleCaseRole(explicit);
     }
@@ -463,10 +465,17 @@ export function resolveStarterTwoPartyCommercialAuthority(
     providerName = entities[1]!;
   }
 
-  const providerRole = resolveProviderDisplayRole(providerName, roleHints);
+  const clientHint = roleHints[normalizeEntityKey(clientName)] || "";
+  const providerHint = roleHints[normalizeEntityKey(providerName)] || "";
+  const clientRole =
+    clientHint && isPreservableIntakeRole(clientHint) ? titleCaseRole(clientHint) : "Client";
+  const providerRole =
+    providerHint && isPreservableIntakeRole(providerHint)
+      ? titleCaseRole(providerHint)
+      : resolveProviderDisplayRole(providerName, roleHints);
   const authority: StarterTwoPartyCommercialAuthority = {
     parties: [
-      { name: clientName, role: "Client" },
+      { name: clientName, role: clientRole },
       { name: providerName, role: providerRole },
     ],
     clientName,

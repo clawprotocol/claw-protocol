@@ -323,12 +323,24 @@ export function noticeStanzaHasLegalEntityLine(stanza: string): boolean {
     if (v.length < 3) return false;
     if (hasPartyMetadataLabelContamination(v)) return false;
     if (/^provided during signer setup\.?$/i.test(v)) return false;
+    if (/^(?:Address|Email|Attn|Attention|Fax|Phone)\s*:/i.test(v)) return false;
+    // Header-only "If to Party 2:" is incomplete — positional names count only as a body line.
+    if (isCanonicalPositionalNoticeEntityIdentity(v)) return false;
     return true;
   };
   if (usableEntity(entityLine)) return true;
+  // Body-line positional identity (If to Party 2:\nParty 2) is authoritative for fixtures.
   if (isCanonicalPositionalNoticeEntityIdentity(entityLine)) return true;
+  // `If to Blue Canyon Analytics LLC:` — real entity may live in the header when Address/Email follow.
+  // Do not treat header-only Party N as a complete entity line (TEST581 heading-only rebuild).
+  const headerEntity = lines[0]?.match(/^If to\s+(.+?)\s*:\s*$/i);
+  if (headerEntity && usableEntity(headerEntity[1] ?? "")) return true;
   const fused = lines[0]?.match(/^If to\s+(.+?)\s*:\s*(.+)$/i);
-  return Boolean(fused && usableEntity(fused[2] ?? ""));
+  if (fused) {
+    if (usableEntity(fused[1] ?? "")) return true;
+    if (usableEntity(fused[2] ?? "")) return true;
+  }
+  return false;
 }
 
 function resolveCompleteOperativeNoticesFamilyEndForFreeze(text: string, noticesStart: number): number {
@@ -653,7 +665,17 @@ export function noticeStanzaHasRoleLabelCorruption(stanza: string): boolean {
   if (ROLE_ONLY_IF_TO_HEADER_RE.test(header)) return true;
   const ifToEntity = header.match(/^If to\s+(.+?)\s*:\s*$/i)?.[1]?.trim() ?? "";
   if (ifToEntity && hasPartyMetadataLabelContamination(ifToEntity)) return true;
-  if (entityLine && hasPartyMetadataLabelContamination(entityLine)) return true;
+  // Line 2 may be Address:/Email:/Attn: when the entity line is omitted — that is incomplete,
+  // not role-label corruption (empty_notice_entity_name covers the missing entity).
+  const entityLooksLikeContactField =
+    /^(?:Address|Email|Attn|Attention|Phone|Tel)\b/i.test(entityLine);
+  if (
+    entityLine &&
+    !entityLooksLikeContactField &&
+    hasPartyMetadataLabelContamination(entityLine)
+  ) {
+    return true;
+  }
   return lines.some((line) => {
     const t = line.trim();
     return CORRUPTED_NOTICE_ROLE_FUSION_RE.test(t) || CORRUPTED_NOTICE_ROLE_ATTENTION_RE.test(t);
@@ -835,7 +857,6 @@ export function noticeStanzaHasAddressPollution(stanza: string): boolean {
   return rawJoined.length > sanitized.length + 4 || NOTICE_ADDRESS_INSTRUCTIONAL_LINE_RE.test(rawJoined);
 }
 
-const NOTICE_PRIMARY_CONTACT_FALLBACK_LINE = "provided during signer setup.";
 const NOTICE_SIGNER_SETUP_EMAIL_LINE = "Email: provided during signer setup";
 const NOTICE_SIGNER_SETUP_ADDRESS_LINE = "Address: provided during signer setup";
 const NOTICE_SIGNER_SETUP_ATTENTION_LINE = "Attention: Authorized Signer";
@@ -856,11 +877,10 @@ export function sanitizeNoticeStanzaAddressContent(stanza: string): { stanza: st
     const trimmed = line.trim();
     const headerMatch = trimmed.match(NOTICE_ADDRESS_HEADER_RE);
     if (headerMatch) {
-      const inlineBody = (headerMatch[1] ?? "").trim();
-      if (formatted.length === 0 && !inlineBody) {
-        // Never leave a bare `Address:` label — freeze hard-fails orphan_address_line.
-        // Prefer the signer-setup placeholder when intake has no postal address yet.
-        inAddress = true;
+      // Empty sanitize result covers bare `Address:` and placeholder-only bodies
+      // ("Address: provided during signer setup") — never emit orphan `Address:`.
+      if (formatted.length === 0) {
+        inAddress = false;
         if (trimmed !== NOTICE_SIGNER_SETUP_ADDRESS_LINE) repaired = true;
         out.push(NOTICE_SIGNER_SETUP_ADDRESS_LINE);
         continue;
@@ -1363,13 +1383,14 @@ function buildIfToNoticeStanza(
   }
   const email = party.signerEmail.trim();
   const addressLines = formatNoticeAddressLines(party.partyAddress);
+  // Product/safety conflict: some fixtures forbid live emails in operative notices;
+  // others require them. Keep prior materialization until founder decides.
   if (email) lines.push(`Email: ${email}`);
   if (addressLines.length > 0) {
     lines.push("Address:", ...addressLines);
   }
-  if (!email && addressLines.length === 0) {
-    lines.push(NOTICE_PRIMARY_CONTACT_FALLBACK_LINE);
-  }
+  // Commercial no-invent: do not synthesize "provided during signer setup" contact lines.
+  // Entity-only stanzas stand until real email/address authority exists.
   return lines.join("\n");
 }
 
@@ -1413,7 +1434,11 @@ export function corpusHasCanonicalNoticesHeading(text: string): boolean {
 
 /** Non-canonical numbered headings that still open an operative Notices clause family. */
 const NOTICE_EQUIVALENT_SECTION_HEADING_RE =
-  /(?:^|\n)\s*\d+(?:\.\d+)?(?:\.\s*|\s+)(?:Notice\s+Provisions?|Notice\s+Delivery|Communications|Notice\s+and\s+Contact)\b/i;
+  /(?:^|\n)\s*\d+(?:\.\d+)?(?:\.\s*|\s+)(?:Notice\s+Provisions?|Notice\s+Delivery|Notice\s+and\s+Contact)\b/i;
+
+/** Bare "Communications" is not a Notices family opener — TEST419/420 require freeze fail-closed. */
+const BARE_COMMUNICATIONS_SECTION_HEADING_RE =
+  /(?:^|\n)\s*\d+(?:\.\d+)?(?:\.\s*|\s+)Communications?\b/i;
 
 function inferNoticesSectionNumber(beforeRegion: string): number {
   const sectionNums: number[] = [];
@@ -1635,6 +1660,56 @@ export function repairFusedNoticesHeadingToPriorClause(corpus: string): {
 }
 
 /**
+ * Resolve the content span for a regex match that may include a leading `(?:^|\n)`.
+ * Avoids `indexOf("\\n", matchIndex)` collapsing to a zero-width span when matchIndex
+ * already points at the newline — which previously fused `10. NOTICES`+`11. NOTICES`.
+ */
+function resolveMatchedLineSpan(
+  text: string,
+  matchIndex: number,
+): { start: number; end: number; line: string } {
+  let start = Math.max(0, matchIndex);
+  if (start < text.length && text[start] === "\n") start += 1;
+  while (start < text.length && (text[start] === " " || text[start] === "\t")) start += 1;
+  let end = text.indexOf("\n", start);
+  if (end < 0) end = text.length;
+  return { start, end, line: text.slice(start, end).trim() };
+}
+
+function hasTopLevelNoticesParentForMajor(head: string, major: string): boolean {
+  if (!major) return false;
+  return new RegExp(`(?:^|\\n)\\s*${major}\\.(?!\\d)\\s+NOTICES\\s*$`, "im").test(head);
+}
+
+/** Drop empty `N.M NOTICES` shells when parent `N. NOTICES` already exists. */
+export function removeEmptyNoticesSubsectionShells(corpus: string): {
+  text: string;
+  repairs: string[];
+} {
+  const witnessIdx = resolveAuthoritativeWitnessIndex(corpus || "");
+  const head = witnessIdx >= 0 ? corpus.slice(0, witnessIdx) : corpus;
+  const tail = witnessIdx >= 0 ? corpus.slice(witnessIdx) : "";
+  const lines = (head || "").replace(/\r\n/g, "\n").split("\n");
+  const repairs: string[] = [];
+  const out: string[] = [];
+  for (const line of lines) {
+    const trimmed = line.trim();
+    const sub = trimmed.match(/^(\d+)\.(\d+)\s+NOTICES\s*$/i);
+    if (sub?.[1] && hasTopLevelNoticesParentForMajor(head, sub[1])) {
+      repairs.push(`notice:remove_empty_notices_subsection:${sub[1]}.${sub[2]}`);
+      continue;
+    }
+    out.push(line);
+  }
+  if (!repairs.length) return { text: corpus, repairs: [] };
+  const newHead = out.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd();
+  return {
+    text: (tail ? `${newHead}\n\n${tail.trimStart()}` : newHead).replace(/\n{3,}/g, "\n\n").trimEnd(),
+    repairs,
+  };
+}
+
+/**
  * Insert or normalize a canonical `N. NOTICES` heading before operative If-to stanzas.
  * Pre-freeze only — repairs missing or notice-equivalent headings instead of rejecting.
  */
@@ -1655,6 +1730,14 @@ export function ensureCanonicalNoticesSectionHeadingForFreeze(corpus: string): {
   const witnessIdx = resolveAuthoritativeWitnessIndex(text);
   let head = witnessIdx >= 0 ? text.slice(0, witnessIdx) : text;
   let tail = witnessIdx >= 0 ? text.slice(witnessIdx) : "";
+  // Fail-closed: bare Communications must not be rewritten into NOTICES (TEST419/420).
+  if (
+    BARE_COMMUNICATIONS_SECTION_HEADING_RE.test(head) &&
+    !corpusHasCanonicalNoticesHeading(head) &&
+    !NOTICE_EQUIVALENT_SECTION_HEADING_RE.test(head)
+  ) {
+    return { text: corpus, repairs: [] };
+  }
   const stanzaCount = (head.match(/^If to\s+/gim) || []).length;
   if (stanzaCount < 1) return { text: corpus, repairs: [] };
 
@@ -1669,19 +1752,32 @@ export function ensureCanonicalNoticesSectionHeadingForFreeze(corpus: string): {
 
   if (corpusHasCanonicalNoticesHeading(head)) {
     const eq = head.match(NOTICE_EQUIVALENT_SECTION_HEADING_RE);
-    if (eq?.[0] && !/\bNotices\b/i.test(eq[0])) {
-      const lineStart = eq.index ?? 0;
-      const lineEnd = head.indexOf("\n", lineStart);
-      const oldLine = head.slice(lineStart, lineEnd >= 0 ? lineEnd : head.length).trim();
-      const num = oldLine.match(/^(\d+)/)?.[1] ?? String(inferNoticesSectionNumber(head.slice(0, lineStart)));
-      const replacement = `${num}. NOTICES`;
-      const newHead =
-        head.slice(0, lineStart) +
-        (lineStart > 0 && head[lineStart - 1] === "\n" ? "\n" : "") +
-        replacement +
-        (lineEnd >= 0 ? head.slice(lineEnd) : "");
-      repairs.push("notice:normalize_equivalent_heading_to_notices");
-      return { text: `${newHead}\n\n${tail}`.replace(/\n{3,}/g, "\n\n").trimEnd(), repairs };
+    if (eq?.[0] && eq.index != null && !/\bNotices\b/i.test(eq[0])) {
+      const { start, end, line: oldLine } = resolveMatchedLineSpan(head, eq.index);
+      const major =
+        oldLine.match(/^(\d+)/)?.[1] ??
+        String(inferNoticesSectionNumber(head.slice(0, start)));
+      if (hasTopLevelNoticesParentForMajor(head, major)) {
+        const newHead = `${head.slice(0, start).trimEnd()}\n\n${head.slice(end).trimStart()}`
+          .replace(/\n{3,}/g, "\n\n")
+          .trimEnd();
+        repairs.push("notice:remove_equivalent_subsection_under_parent_notices");
+        text = `${newHead}\n\n${tail}`.replace(/\n{3,}/g, "\n\n").trimEnd();
+      } else {
+        const replacement = `${major}. NOTICES`;
+        const newHead = `${head.slice(0, start).trimEnd()}\n\n${replacement}\n\n${head
+          .slice(end)
+          .trimStart()}`
+          .replace(/\n{3,}/g, "\n\n")
+          .trimEnd();
+        repairs.push("notice:normalize_equivalent_heading_to_notices");
+        text = `${newHead}\n\n${tail}`.replace(/\n{3,}/g, "\n\n").trimEnd();
+      }
+    }
+    const stripped = removeEmptyNoticesSubsectionShells(text);
+    if (stripped.repairs.length > 0) {
+      repairs.push(...stripped.repairs);
+      text = stripped.text;
     }
     return { text, repairs };
   }
@@ -1698,24 +1794,37 @@ export function ensureCanonicalNoticesSectionHeadingForFreeze(corpus: string): {
 
   const eqBefore = beforeInsert.match(NOTICE_EQUIVALENT_SECTION_HEADING_RE);
   if (eqBefore?.index != null) {
-    const lineStart = eqBefore.index;
-    const lineEnd = beforeInsert.indexOf("\n", lineStart);
-    const oldLine = beforeInsert.slice(lineStart, lineEnd >= 0 ? lineEnd : beforeInsert.length).trim();
-    const num = oldLine.match(/^(\d+)/)?.[1] ?? String(inferNoticesSectionNumber(beforeInsert.slice(0, lineStart)));
+    const { start, end, line: oldLine } = resolveMatchedLineSpan(beforeInsert, eqBefore.index);
+    const num =
+      oldLine.match(/^(\d+)/)?.[1] ??
+      String(inferNoticesSectionNumber(beforeInsert.slice(0, start)));
     const newHead =
-      beforeInsert.slice(0, lineStart).trimEnd() +
-      `\n\n${num}. NOTICES` +
-      (lineEnd >= 0 ? beforeInsert.slice(lineEnd) : "") +
-      (afterInsert ? `\n\n${afterInsert}` : "");
+      `${beforeInsert.slice(0, start).trimEnd()}\n\n${num}. NOTICES\n\n${beforeInsert
+        .slice(end)
+        .trimStart()}${afterInsert ? `\n\n${afterInsert}` : ""}`
+        .replace(/\n{3,}/g, "\n\n")
+        .trimEnd();
     repairs.push("notice:replace_equivalent_with_notices");
-    return { text: `${newHead}\n\n${tail}`.replace(/\n{3,}/g, "\n\n").trimEnd(), repairs };
+    text = `${newHead}\n\n${tail}`.replace(/\n{3,}/g, "\n\n").trimEnd();
+    const stripped = removeEmptyNoticesSubsectionShells(text);
+    if (stripped.repairs.length > 0) {
+      repairs.push(...stripped.repairs);
+      text = stripped.text;
+    }
+    return { text, repairs };
   }
 
   const sectionNum = inferNoticesSectionNumber(beforeInsert);
   const headingBlock = `${sectionNum}. NOTICES\n\nNotices under this Agreement must be in writing and delivered as set forth below.\n\n`;
   const newHead = `${beforeInsert}\n\n${headingBlock}${afterInsert}`;
   repairs.push("notice:insert_missing_notices_heading");
-  return { text: `${newHead}\n\n${tail}`.replace(/\n{3,}/g, "\n\n").trimEnd(), repairs };
+  text = `${newHead}\n\n${tail}`.replace(/\n{3,}/g, "\n\n").trimEnd();
+  const stripped = removeEmptyNoticesSubsectionShells(text);
+  if (stripped.repairs.length > 0) {
+    repairs.push(...stripped.repairs);
+    text = stripped.text;
+  }
+  return { text, repairs };
 }
 
 export function findNoticesSectionStart(text: string): number {
@@ -1738,6 +1847,8 @@ export function corpusHasOperativeNoticesHeading(text: string): boolean {
   const normalized = (text || "").replace(/\r\n/g, "\n");
   if (corpusHasCanonicalNoticesHeading(normalized)) return true;
   if (NOTICE_EQUIVALENT_SECTION_HEADING_RE.test(normalized)) return true;
+  // Bare Communications is intentionally not a Notices opener (TEST419/420 freeze fail-closed).
+  if (BARE_COMMUNICATIONS_SECTION_HEADING_RE.test(normalized)) return false;
   if (findNoticesSectionStart(normalized) >= 0) return true;
   return (normalized.match(/^If to\s+/gim) || []).length >= 2;
 }
@@ -1912,10 +2023,21 @@ export function ensureOperativeNoticeStanzaEntityLinesAtFreeze(
   const noticesEnd = witnessIdx >= 0 ? witnessIdx : corpus.length;
   const before = corpus.slice(0, noticesIdx);
   const after = corpus.slice(noticesEnd);
-  const fullRegion = corpus.slice(noticesIdx, noticesEnd);
-  const blocks = fullRegion.split(/\n(?=If to\s+)/i);
+  const noticesFamilyEnd = resolveOperativeNoticesFamilyEnd(corpus, noticesIdx);
+  const noticesRegion = corpus.slice(noticesIdx, noticesFamilyEnd);
+  const middle = corpus.slice(noticesFamilyEnd, noticesEnd);
+  const middleParts = middle.split(/\n(?=If to\s+)/i);
+  const middleClean = (middleParts[0] ?? "").trim();
+  const misplacedMiddleStanzas = middleParts
+    .slice(1)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const blocks = noticesRegion.split(/\n(?=If to\s+)/i);
   const intro = blocks[0]?.trim() ?? "";
-  const existingStanzas = blocks.slice(1).map((s) => s.trim()).filter(Boolean);
+  const existingStanzas = [
+    ...blocks.slice(1).map((s) => s.trim()).filter(Boolean),
+    ...misplacedMiddleStanzas,
+  ];
   const repairs: string[] = [];
   const canonicalNames = authorityParties.map((party) =>
     resolveNoticeStanzaLegalEntity(party, authorityParties, roleContext),
@@ -1941,6 +2063,18 @@ export function ensureOperativeNoticeStanzaEntityLinesAtFreeze(
       rebuiltStanzas.push(candidate);
       continue;
     }
+    if (candidate) {
+      // Preserve existing Email/Address lines — inject the legal entity under If-to only.
+      const legal = resolveNoticeStanzaLegalEntity(party, authorityParties, roleContext);
+      const lines = candidate.split("\n");
+      const header = lines[0]?.trim() || `If to ${legal}:`;
+      const rest = lines.slice(1);
+      rebuiltStanzas.push(
+        stripInvalidNoticeStanzaLines([header, legal, ...rest].join("\n"), canonicalNames),
+      );
+      repairs.push(`notice:hydrate_entity_line_party_${i + 1}`);
+      continue;
+    }
     rebuiltStanzas.push(
       stripInvalidNoticeStanzaLines(
         buildIfToNoticeStanza(party, authorityParties, roleContext),
@@ -1951,7 +2085,7 @@ export function ensureOperativeNoticeStanzaEntityLinesAtFreeze(
   }
 
   if (repairs.length === 0) {
-    const stanzaCount = (fullRegion.match(/^If to\s+/gim) || []).length;
+    const stanzaCount = (noticesRegion.match(/^If to\s+/gim) || []).length + misplacedMiddleStanzas.length;
     const completeCount = existingStanzas.filter((stanza) => noticeStanzaHasLegalEntityLine(stanza)).length;
     if (stanzaCount >= authorityParties.length && completeCount >= authorityParties.length) {
       return { text: corpus, repairs: [] };
@@ -1969,8 +2103,9 @@ export function ensureOperativeNoticeStanzaEntityLinesAtFreeze(
     .join("\n\n")
     .replace(/\n{3,}/g, "\n\n")
     .trimEnd();
-  const text = after.trimStart()
-    ? `${before}${mergedNotices}\n\n${after.trimStart()}`.replace(/\n{3,}/g, "\n\n").trimEnd()
+  const afterNotices = [middleClean, after.trimStart()].filter(Boolean).join("\n\n");
+  const text = afterNotices
+    ? `${before}${mergedNotices}\n\n${afterNotices}`.replace(/\n{3,}/g, "\n\n").trimEnd()
     : `${before}${mergedNotices}`.replace(/\n{3,}/g, "\n\n").trimEnd();
   return { text, repairs };
 }
@@ -2032,6 +2167,7 @@ export function repairIncompleteIfToNoticeStanzas(
   corpus: string,
   parties: readonly PaidProSignerMetadataParty[],
   roleContext?: PaidProPartyRoleContext | null,
+  opts?: { allowEntityOnlyNoticesAtFreeze?: boolean },
 ): { text: string; repairs: string[] } {
   const cap = resolveCanonicalNoticePartyCount(parties, roleContext);
   const cappedParties = parties.slice(0, cap);
@@ -2145,6 +2281,28 @@ export function repairIncompleteIfToNoticeStanzas(
         stanzaCount: authorityParties.length,
       });
     } else if (authorityParties.length >= 2) {
+      // Commercial no-invent: legal names alone must not force a Notices section with
+      // placeholder contact lines. Require real email/address before scaffolding Notices.
+      const hasRealNoticeContacts = authorityParties.some((p) => {
+        const email = p.signerEmail.trim();
+        const address = p.partyAddress.trim();
+        if (!email && address.length <= 8) return false;
+        if (/provided during signer setup/i.test(email) || /provided during signer setup/i.test(address)) {
+          return false;
+        }
+        return Boolean(email) || address.length > 8;
+      });
+      if (!hasRealNoticeContacts && !opts?.allowEntityOnlyNoticesAtFreeze) {
+        return { text: text.trimEnd(), repairs };
+      }
+      if (opts?.allowEntityOnlyNoticesAtFreeze) {
+        if (BARE_COMMUNICATIONS_SECTION_HEADING_RE.test(text)) {
+          return { text: text.trimEnd(), repairs };
+        }
+        if ((text.match(/^If to\s+/gim) || []).length > 0) {
+          return { text: text.trimEnd(), repairs };
+        }
+      }
       const witnessIdx = resolveAuthoritativeWitnessIndex(text);
       const head = witnessIdx >= 0 ? text.slice(0, witnessIdx) : text;
       const tail = witnessIdx >= 0 ? text.slice(witnessIdx) : "";
@@ -2174,7 +2332,14 @@ export function repairIncompleteIfToNoticeStanzas(
   const noticesFamilyEnd = resolveOperativeNoticesFamilyEnd(text, noticesIdx);
   let noticesRegion = text.slice(noticesIdx, noticesFamilyEnd);
   const middle = text.slice(noticesFamilyEnd, noticesEnd);
-  const middleBeforeIfTo = middle.split(/\n(?=If to\s+)/i)[0]?.trim() ?? "";
+  // Later sections (§9/§10) must stay in `middle` — never fold them into the Notices intro
+  // or rebuilt If-to stanzas land after ELECTRONIC SIGNATURES (post-freeze drift).
+  const middleParts = middle.split(/\n(?=If to\s+)/i);
+  const middleClean = (middleParts[0] ?? "").trim();
+  const misplacedMiddleStanzas = middleParts
+    .slice(1)
+    .map((s) => s.trim())
+    .filter(Boolean);
 
   if (hasInlineMalformedNoticeStanzas(fullNoticesRegion)) {
     noticesRegion = noticesRegion.replace(/\s+(If to\s+)/gi, "\n\n$1");
@@ -2187,19 +2352,18 @@ export function repairIncompleteIfToNoticeStanzas(
   }
   noticesRegion = normalizedRegion.text;
 
-  const blocks = fullNoticesRegion.split(/\n(?=If to\s+)/i);
-  const introParts = [blocks[0]?.trim() ?? ""];
-  if (middleBeforeIfTo && !introParts[0]?.includes(middleBeforeIfTo)) {
-    introParts.push(middleBeforeIfTo);
-  }
-  const intro = introParts.filter(Boolean).join("\n\n");
-  const existingStanzas = blocks.slice(1).map((s) => s.trim()).filter(Boolean);
+  const blocks = noticesRegion.split(/\n(?=If to\s+)/i);
+  const intro = (blocks[0] ?? "").trim();
+  const existingStanzas = [
+    ...blocks.slice(1).map((s) => s.trim()).filter(Boolean),
+    ...misplacedMiddleStanzas,
+  ];
   let tailAfterStanzas = "";
   if (blocks.length > 1) {
     const lastBlock = blocks[blocks.length - 1] ?? "";
-    const relIdx = fullNoticesRegion.lastIndexOf(lastBlock);
+    const relIdx = noticesRegion.lastIndexOf(lastBlock);
     if (relIdx >= 0) {
-      tailAfterStanzas = fullNoticesRegion.slice(relIdx + lastBlock.length).trim();
+      tailAfterStanzas = noticesRegion.slice(relIdx + lastBlock.length).trim();
     }
   }
   const rebuiltStanzas: string[] = [];
@@ -2266,7 +2430,7 @@ export function repairIncompleteIfToNoticeStanzas(
   const mergedParts = [`${intro.trimEnd()}\n\n${rebuiltStanzas.join("\n\n")}`.replace(/\n{3,}/g, "\n\n").trimEnd()];
   if (tailAfterStanzas) mergedParts.push(tailAfterStanzas);
   let mergedNotices = mergedParts.join("\n\n");
-  const preservedHeading = fullNoticesRegion.match(/(?:^|\n)\s*(\d+\.\s+NOTICES\s*)(?:\n|$)/im)?.[1]?.trim();
+  const preservedHeading = noticesRegion.match(/(?:^|\n)\s*(\d+\.\s+NOTICES\s*)(?:\n|$)/im)?.[1]?.trim();
   const introHasNoticesHeading = /(?:^|\n)\s*(?:\d+\.\s+)?NOTICES\s*$/im.test(intro);
   if (preservedHeading && !corpusHasCanonicalNoticesHeading(mergedNotices) && !introHasNoticesHeading) {
     const introBlock = noticeIntroAlreadyHasDeliveryLanguage(mergedNotices)
@@ -2275,8 +2439,9 @@ export function repairIncompleteIfToNoticeStanzas(
     mergedNotices = introBlock.replace(/\n{3,}/g, "\n\n").trimEnd();
     repairs.push("notice:preserve_notices_section_heading");
   }
-  text = after.trimStart()
-    ? `${before}${mergedNotices}\n\n${after.trimStart()}`.replace(/\n{3,}/g, "\n\n").trimEnd()
+  const afterNotices = [middleClean, after.trimStart()].filter(Boolean).join("\n\n");
+  text = afterNotices
+    ? `${before}${mergedNotices}\n\n${afterNotices}`.replace(/\n{3,}/g, "\n\n").trimEnd()
     : `${before}${mergedNotices}`.replace(/\n{3,}/g, "\n\n").trimEnd();
   logPaidProNoticeSectionIntegrity({ repairs, partyCount: authorityParties.length, stanzaCount });
   const dedupedHeadings = dedupeDuplicateStandaloneNoticesHeadings(text);
@@ -2436,7 +2601,7 @@ export function hydrateOperativeNoticeStanzasFromSignerMetadata(
   const authorityParties = enrichNoticeAuthorityParties(parties, roleContext);
   if (!corpus?.trim() || authorityParties.length < 2) return { text: corpus, repairs: [] };
   const hasContactMetadata = authorityParties.some(
-    (p) => p.signerEmail.trim() || p.partyAddress.trim() || p.signerName.trim(),
+    (p) => p.signerEmail.trim() || p.partyAddress.trim().length > 8,
   );
   if (!hasContactMetadata) return { text: corpus, repairs: [] };
   return repairIncompleteIfToNoticeStanzas(corpus, authorityParties, roleContext);
@@ -2447,11 +2612,35 @@ export function ensureOperativeIfToNoticeDelivery(
   corpus: string,
   parties: readonly PaidProSignerMetadataParty[],
   roleContext?: PaidProPartyRoleContext | null,
+  opts?: { allowEntityOnlyNoticesAtFreeze?: boolean },
 ): { text: string; repairs: string[] } {
+  const allowEntityOnlyNoticesAtFreeze = Boolean(opts?.allowEntityOnlyNoticesAtFreeze);
+  if (
+    allowEntityOnlyNoticesAtFreeze &&
+    findNoticesSectionStart(corpus) < 0 &&
+    resolveAuthoritativeWitnessIndex(corpus) >= 0
+  ) {
+    return repairIncompleteIfToNoticeStanzas(corpus, parties, roleContext, {
+      allowEntityOnlyNoticesAtFreeze: true,
+    });
+  }
   const authorityParties = enrichNoticeAuthorityParties(parties, roleContext);
   if (!corpus?.trim() || authorityParties.length < 2) return { text: corpus, repairs: [] };
 
   const noticesIdx = findNoticesSectionStart(corpus);
+  const authorityHasRealContactFields = authorityParties.some((p) => {
+    const email = p.signerEmail.trim();
+    const address = p.partyAddress.trim();
+    if (!email && address.length <= 8) return false;
+    if (/provided during signer setup/i.test(email) || /provided during signer setup/i.test(address)) {
+      return false;
+    }
+    return Boolean(email) || address.length > 8;
+  });
+  // Signer display names alone must not invent Notices / "provided during signer setup".
+  if (!authorityHasRealContactFields && noticesIdx < 0 && !allowEntityOnlyNoticesAtFreeze) {
+    return { text: corpus, repairs: [] };
+  }
   const witnessIdx = resolveAuthoritativeWitnessIndex(corpus);
   const noticesRegion =
     noticesIdx >= 0 ? corpus.slice(noticesIdx, witnessIdx >= 0 ? witnessIdx : corpus.length) : "";
@@ -2509,17 +2698,17 @@ export function ensureOperativeIfToNoticeDelivery(
       return false;
     });
   // Bracket tokens always force rebuild. Live "provided during signer setup" lines only
-  // force rebuild when authority has contact to apply — otherwise freeze-time rebuilds
-  // with empty signer metadata churn headings into section_heading_title_anomaly rejects.
-  const authorityHasContactToApply = authorityParties.some(
-    (p) => p.signerEmail.trim() || p.partyAddress.trim() || p.signerName.trim(),
-  );
+  // force rebuild when authority has real email/address to apply — otherwise freeze-time
+  // rebuilds with empty contact metadata invent placeholder Notices scaffolding.
+  const authorityHasContactToApply = authorityHasRealContactFields;
   const hasPlaceholderTokens =
     NOTICE_PLACEHOLDER_TOKEN_RE.test(noticesRegion) ||
     (authorityHasContactToApply && /provided during signer setup/i.test(noticesRegion));
   const hasExecutionPollution = noticesRegionHasExecutionPollution(noticesRegion);
   const hasInlineMalformedNotices = hasInlineMalformedNoticeStanzas(corpus);
-  const hasBareNoticeStanzas = hasBareEntityOnlyNoticeStanzas(corpus);
+  const hasBareNoticeStanzas = allowEntityOnlyNoticesAtFreeze
+    ? false
+    : hasBareEntityOnlyNoticeStanzas(corpus);
   const operativeStanzaCount = countOperativeIfToStanzasInRegion(noticesRegion);
   const stanzaCountMismatch = operativeStanzaCount < authorityParties.length;
   if (
@@ -2545,7 +2734,9 @@ export function ensureOperativeIfToNoticeDelivery(
     }
     return { text: corpus, repairs: [] };
   }
-  const repaired = repairIncompleteIfToNoticeStanzas(corpus, authorityParties, roleContext);
+  const repaired = repairIncompleteIfToNoticeStanzas(corpus, authorityParties, roleContext, {
+    allowEntityOnlyNoticesAtFreeze,
+  });
   const witnessSeparated = ensureBlankLineBeforeWitnessBlock(repaired.text);
   const merged = {
     text: witnessSeparated.text,

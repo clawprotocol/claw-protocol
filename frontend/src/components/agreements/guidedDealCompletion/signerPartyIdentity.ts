@@ -12,6 +12,7 @@ import type { PremiumRecipientHandoffV2 } from "../premiumPartyNamesHandoff";
 import type { ResolveGuidedPreReviewSignerSlotsArgs } from "./resolveGuidedPreReviewSignerSlots";
 import { paidProSignerMetadataForensicLineageEnabled } from "../paidProSignerMetadataAuthority";
 import {
+  corpusSignatureBlocksHaveRequiredByLines,
   findSignatureRegionEnd,
   findSignatureRegionStart,
   isSafeSignatureTailReplacement,
@@ -300,10 +301,41 @@ function fillSignatureNameUnderscoreLines(
       const partyIndex = resolvePartyIndexForSignatureLine(lines, i, identities);
       const id = identities[partyIndex];
       const title = id?.title?.trim() ?? "";
-      if (!title) continue;
-      if (/_{4,}/.test(trimmed) || /^title\s*:\s*$/i.test(trimmed)) {
+      if (title && (/_{4,}/.test(trimmed) || /^title\s*:\s*$/i.test(trimmed))) {
         const indent = lines[i].match(/^\s*/)?.[0] ?? "";
         lines[i] = `${indent}Title: ${title}`;
+        replacements += 1;
+      }
+      const email = id?.email?.trim() ?? "";
+      const address = String(id?.partyAddress ?? "").trim();
+      const lookAhead = [lines[i + 1], lines[i + 2], lines[i + 3]]
+        .map((l) => (l ?? "").trim())
+        .filter(Boolean);
+      const hasEmailSoon = lookAhead.some((l) => /^email\s*:/i.test(l));
+      const hasAddressSoon = lookAhead.some((l) => /^address\s*:/i.test(l));
+      const indent = lines[i].match(/^\s*/)?.[0] ?? "";
+      if (email && !hasEmailSoon) {
+        lines.splice(i + 1, 0, `${indent}Email: ${email}`);
+        replacements += 1;
+        i += 1;
+      }
+      if (address && !hasAddressSoon) {
+        // Prefer after Email when we just inserted/found one.
+        const insertAt =
+          /^email\s*:/i.test((lines[i + 1] ?? "").trim()) ? i + 2 : i + 1;
+        lines.splice(insertAt, 0, `${indent}Address: ${address}`);
+        replacements += 1;
+        i = insertAt;
+      }
+      continue;
+    }
+
+    if (/^email\s*:/i.test(trimmed) && !/^email\s+for\s+notices?\s*:/i.test(trimmed)) {
+      const partyIndex = resolvePartyIndexForSignatureLine(lines, i, identities);
+      const email = identities[partyIndex]?.email?.trim() ?? "";
+      if (email && (/_{4,}/.test(trimmed) || /^email\s*:\s*$/i.test(trimmed))) {
+        const indent = lines[i].match(/^\s*/)?.[0] ?? "";
+        lines[i] = `${indent}Email: ${email}`;
         replacements += 1;
       }
     }
@@ -371,10 +403,13 @@ export function rebuildSignatureBlocksWithPartyIdentities(
       reason: "authoritative_execution_block_present",
     });
     const reconciled = reconcileExecutionBlockToRoleIdentities(text, identities);
-    if (reconciled.repairs > 0) {
+    if (
+      reconciled.repairs > 0 &&
+      corpusSignatureBlocksHaveRequiredByLines(reconciled.text, identities.length)
+    ) {
       return { text: reconciled.text, count: reconciled.repairs };
     }
-    return { text, count: 0 };
+    // Fall through to canonical rebuild when By/Date anchors are still missing (TEST43).
   }
   const { blocks, count } = buildSignatureBlocks(identities);
   if (!blocks.length) return { text, count: 0 };
@@ -412,14 +447,23 @@ function polishSignatureBlocksWithPartyIdentities(
   const tail = text.slice(patchStart);
   const existingSigBody = tail.replace(/^\s*(?:IN WITNESS WHEREOF[^\n]*\n)?/i, "").trim();
   const witnessLine = tail.match(/^\s*(IN WITNESS WHEREOF[^\n]*)/i)?.[1] ?? "IN WITNESS WHEREOF";
-  const mergedTail = `${witnessLine}\n\n${blocks.join("\n\n")}\n`;
   const hasPlaceholderSig =
     /\[your\s+company\s+name\]/i.test(existingSigBody) ||
     /\[service\s+provider\s+name\]/i.test(existingSigBody) ||
     /name\s*:\s*_{6,}/i.test(existingSigBody);
 
   if (hasPlaceholderSig && isSafeSignatureTailReplacement(text, marker)) {
-    return { text: text.slice(0, marker) + mergedTail, count: blockCount };
+    // Prefer patching from an existing witness so we never keep
+    // "…Agreement." + "IN WITNESS WHEREOF" glued when marker points at CLIENT:.
+    const witnessIdx = text.search(/\bIN WITNESS WHEREOF\b/i);
+    const patchFrom = witnessIdx >= 0 && witnessIdx <= marker ? witnessIdx : marker;
+    const before = text.slice(0, patchFrom).trimEnd();
+    const existingWitnessLine =
+      witnessIdx >= 0
+        ? text.slice(witnessIdx).match(/^[^\n]*/)?.[0]?.trim() || witnessLine
+        : witnessLine;
+    const finalTail = `${existingWitnessLine}\n\n${blocks.join("\n\n")}\n`;
+    return { text: `${before}\n\n${finalTail}`, count: blockCount };
   }
 
   if (hasPlaceholderSig && marker < 0) {

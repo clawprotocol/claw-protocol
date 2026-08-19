@@ -13,7 +13,7 @@ import {
   setConsumedPaidProSignerMetadataAuthority,
   type PaidProSignerMetadataAuthority,
 } from "../../paidProSignerMetadataAuthority";
-import { establishPaidProSourceOfTruth } from "../../paidProSourceOfTruth";
+import { establishPaidProSourceOfTruth, getPaidProSourceOfTruth } from "../../paidProSourceOfTruth";
 
 export const PAID_PRO_HARDENING_CLIENT = "Blue Canyon Analytics LLC";
 export const PAID_PRO_HARDENING_PROVIDER = "Iron Vale Systems Inc.";
@@ -137,7 +137,15 @@ export function armPaidProHardeningSession(args: {
   }
   const recital = repairMalformedPaidProAgreementRecital(acceptedText);
   acceptedText = recital.text;
-  establishPaidProSourceOfTruth({ text: acceptedText, source: "server_full_draft" });
+  establishPaidProSourceOfTruth({
+    text: acceptedText,
+    source: "server_full_draft",
+    draft: args.fixture.draft,
+    intakeText: args.fixture.intakeText,
+  });
+  // Prefer the frozen SoT corpus so callers compare hash/length against the committed body.
+  const established = getPaidProSourceOfTruth()?.text?.trim();
+  if (established) acceptedText = established;
   let authority: PaidProSignerMetadataAuthority | undefined;
   if (args.withSignerMetadata) {
     authority = buildTest204SignerAuthority();

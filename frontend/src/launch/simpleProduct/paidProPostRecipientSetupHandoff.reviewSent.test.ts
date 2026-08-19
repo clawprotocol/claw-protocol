@@ -33,6 +33,9 @@ import {
 vi.mock("./simpleDoneReviewRecipientLinks", () => ({
   mintSimpleDoneReviewRecipientLinkRows: vi.fn(async () => ({
     rows: [{ displayName: "R1", reviewHref: "https://app.example.com/agreements/a1/review?t=tok" }],
+    attemptedMintCount: 1,
+    reusedCount: 0,
+    alreadyReady: false,
     firstErrorStatus: undefined,
     lastMintErrorDetail: undefined,
     lastMintErrorCode: undefined,

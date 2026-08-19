@@ -1,6 +1,10 @@
 /**
- * Review-link creation/display must use the same locked post-finalize signing snapshot
- * as the creator post-finalize review surface — never canonical SoT or frozen corpus.
+ * Review-link creation/display must use the same locked post-finalize snapshot
+ * as the creator review surface — never canonical SoT or a different frozen corpus.
+ *
+ * Hash equality is the parity invariant. An execution/signature block is required
+ * only when the snapshot already has one (signing-track). Review-first drafts may
+ * have no execution block; matching hashes must still allow mint.
  */
 
 import { PAID_PRO_AUTHORITY_MIN_LEN } from "./paidProAgreementAuthority";
@@ -47,12 +51,14 @@ export function auditPaidProReviewLinkCorpusParity(args: {
   const executionBlockCount = integrity.executionBlockCount;
   const hydrated = blankSignerLinesRemaining === 0 && executionBlockCount === 1;
   const locked = isPaidProPostFinalizeHydratedCorpusLocked();
-  const invariantOk =
-    !locked ||
-    (creatorHash.length > 0 &&
-      reviewLinkHash.length > 0 &&
-      creatorHash === reviewLinkHash &&
-      integrity.invariantOk);
+  const hashesMatch =
+    creatorHash.length > 0 && reviewLinkHash.length > 0 && creatorHash === reviewLinkHash;
+  const reviewFirstWithoutExecutionBlock =
+    executionBlockCount === 0 &&
+    blankSignerLinesRemaining === 0 &&
+    !integrity.executionHeadingMetadataLeak;
+  const executionIntegrityOk = integrity.invariantOk || reviewFirstWithoutExecutionBlock;
+  const invariantOk = !locked || (hashesMatch && executionIntegrityOk);
   return {
     creatorHash,
     reviewLinkHash,

@@ -1,3 +1,4 @@
+from backend.tests.entitlement_test_support import ensure_headers_entitled, ensure_org_pro_entitlement
 import json
 
 import pytest
@@ -14,7 +15,24 @@ _ORG_H = {"X-Claw-Org-Id": "test-org-api-v2", "X-Claw-Test-Auth-User-Id": "test-
 
 
 @pytest.fixture(autouse=True)
+def _entitle_owner_org_after_env(tmp_path, monkeypatch):
+    """Grant Pro for module owner headers once tmp_path-backed DBs are configured."""
+    monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
+    monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ONRAMP_DB_PATH", str(tmp_path / "onramp.sqlite3"))
+    monkeypatch.setenv("CLAW_TREASURY_DB_PATH", str(tmp_path / "treasury.sqlite3"))
+    from backend.economics.store import reset_economics_store_for_tests
+    reset_economics_store_for_tests()
+    ensure_headers_entitled(_ORG_H)
+    yield
+    reset_economics_store_for_tests()
+
+
+
+@pytest.fixture(autouse=True)
 def _reset_usage_economics_singleton():
+    import backend.usage_economics.store as usage_economics_store_mod
     usage_economics_store_mod._store = None  # noqa: SLF001
     yield
     usage_economics_store_mod._store = None  # noqa: SLF001
@@ -23,6 +41,7 @@ def _reset_usage_economics_singleton():
 def test_party_internal_placeholder_stripped_and_role_mapped(monkeypatch, tmp_path):
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     client = TestClient(app)
     create_res = client.post(
         "/api/agreements/draft",
@@ -64,7 +83,9 @@ def test_party_internal_placeholder_stripped_and_role_mapped(monkeypatch, tmp_pa
 def test_api_agreements_v2_create_update_render_no_template_leakage(monkeypatch, tmp_path):
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     client = TestClient(app)
+    ensure_headers_entitled(_ORG_H)
     create_res = client.post(
         "/api/agreements/draft",
         headers=_ORG_H,
@@ -110,7 +131,9 @@ def test_recipient_magic_link_validate_party_and_agreement_id(monkeypatch, tmp_p
     monkeypatch.setenv("CLAW_AGREEMENT_SIGNING_TOKEN_SECRET", "unit-test-signing-secret-for-magic-link")
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     client = TestClient(app)
+    ensure_headers_entitled(_ORG_H)
     create_res = client.post(
         "/api/agreements/draft",
         headers=_ORG_H,
@@ -188,9 +211,11 @@ def test_recipient_magic_link_validate_party_and_agreement_id(monkeypatch, tmp_p
 def test_signing_ceremony_multi_signer_and_immutability(monkeypatch, tmp_path):
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     monkeypatch.setenv("CLAW_AGREEMENT_SIGNING_TOKEN_SECRET", "unit-test-signing-ceremony-secret")
     usage_economics_store_mod._store = None  # noqa: SLF001
     client = TestClient(app)
+    ensure_headers_entitled(_ORG_H)
     create_res = client.post(
         "/api/agreements/draft",
         headers=_ORG_H,
@@ -334,9 +359,11 @@ def test_signing_ceremony_multi_signer_and_immutability(monkeypatch, tmp_path):
 def test_negotiation_locked_blocks_owner_edits_unlock_restores(monkeypatch, tmp_path):
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     monkeypatch.setenv("CLAW_AGREEMENT_SIGNING_TOKEN_SECRET", "unit-test-signing-lock-guard-secret")
     usage_economics_store_mod._store = None  # noqa: SLF001
     client = TestClient(app)
+    ensure_headers_entitled(_ORG_H)
     create_res = client.post(
         "/api/agreements/draft",
         headers=_ORG_H,
@@ -424,11 +451,13 @@ def test_negotiation_locked_blocks_owner_edits_unlock_restores(monkeypatch, tmp_
 def test_signing_complete_rejects_stale_draft_vs_lock_hash(monkeypatch, tmp_path):
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     monkeypatch.setenv("CLAW_AGREEMENT_SIGNING_TOKEN_SECRET", "unit-test-stale-lock-hash-secret")
     usage_economics_store_mod._store = None  # noqa: SLF001
     from backend.services.agreement_draft_store import load_draft, save_draft
 
     client = TestClient(app)
+    ensure_headers_entitled(_ORG_H)
     create_res = client.post(
         "/api/agreements/draft",
         headers=_ORG_H,
@@ -513,9 +542,11 @@ def test_signing_complete_rejects_stale_draft_vs_lock_hash(monkeypatch, tmp_path
 def test_public_agreement_verify_redacted(monkeypatch, tmp_path):
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     usage_economics_store_mod._store = None  # noqa: SLF001
     monkeypatch.setenv("CLAW_PUBLIC_AGREEMENT_VERIFY", "1")
     client = TestClient(app)
+    ensure_headers_entitled(_ORG_H)
     create_res = client.post(
         "/api/agreements/draft",
         headers=_ORG_H,
@@ -551,8 +582,10 @@ def test_public_agreement_verify_redacted(monkeypatch, tmp_path):
 def test_workspace_index_folder_tags_and_patch(monkeypatch, tmp_path):
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     monkeypatch.setenv("CLAW_PROOF_LAYER_DB_PATH", str(tmp_path / "proof_layer.sqlite3"))
     client = TestClient(app)
+    ensure_headers_entitled(_ORG_H)
     create_res = client.post(
         "/api/agreements/draft",
         headers=_ORG_H,
@@ -607,9 +640,11 @@ def test_workspace_index_folder_tags_and_patch(monkeypatch, tmp_path):
 def test_workspace_index_reviewer_approved_flag(monkeypatch, tmp_path):
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     from backend.services import agreement_draft_store as ads
 
     client = TestClient(app)
+    ensure_headers_entitled(_ORG_H)
     create_res = client.post(
         "/api/agreements/draft",
         headers=_ORG_H,
@@ -644,9 +679,11 @@ def test_workspace_index_reviewer_approved_flag(monkeypatch, tmp_path):
 def test_workspace_index_multi_reviewer_partial_rollup(monkeypatch, tmp_path):
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     from backend.services import agreement_draft_store as ads
 
     client = TestClient(app)
+    ensure_headers_entitled(_ORG_H)
     create_res = client.post(
         "/api/agreements/draft",
         headers=_ORG_H,
@@ -693,8 +730,10 @@ def test_workspace_index_multi_reviewer_partial_rollup(monkeypatch, tmp_path):
 def test_workspace_index_skips_malformed_agreement_without_500(monkeypatch, tmp_path):
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     monkeypatch.setenv("CLAW_PROOF_LAYER_DB_PATH", str(tmp_path / "proof_layer.sqlite3"))
     client = TestClient(app)
+    ensure_headers_entitled(_ORG_H)
     good_res = client.post(
         "/api/agreements/draft",
         headers=_ORG_H,
@@ -748,7 +787,9 @@ def test_workspace_index_skips_malformed_agreement_without_500(monkeypatch, tmp_
 def test_review_delivery_dry_run_payload_count(monkeypatch, tmp_path):
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     client = TestClient(app)
+    ensure_headers_entitled(_ORG_H)
     create_res = client.post(
         "/api/agreements/draft",
         headers=_ORG_H,
@@ -784,7 +825,9 @@ def test_agreements_refine_alias_requires_instruction(monkeypatch, tmp_path):
     """POST /refine delegates to /revise — empty instruction is rejected."""
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     client = TestClient(app)
+    ensure_headers_entitled(_ORG_H)
     create_res = client.post(
         "/api/agreements/draft",
         headers=_ORG_H,
@@ -812,6 +855,7 @@ def test_parse_premium_returns_503_without_heuristic_fallback(monkeypatch, tmp_p
     """Premium path must not silently downgrade to heuristic/basic parse on LLM failure."""
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     import backend.routers.agreements_v2_api as av2
 
     def boom(*args, **kwargs):
@@ -836,6 +880,7 @@ def test_parse_premium_returns_503_without_heuristic_fallback(monkeypatch, tmp_p
 def test_parse_basic_falls_back_to_heuristic_when_llm_fails(monkeypatch, tmp_path):
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     import backend.routers.agreements_v2_api as av2
 
     def boom(*args, **kwargs):
@@ -857,6 +902,7 @@ def test_parse_basic_falls_back_to_heuristic_when_llm_fails(monkeypatch, tmp_pat
 def test_parse_premium_returns_extract_when_model_includes_optional_fields(monkeypatch, tmp_path):
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     import backend.routers.agreements_v2_api as av2
 
     def fake_llm(*args, **kwargs):
@@ -899,6 +945,7 @@ def test_parse_premium_returns_extract_when_model_includes_optional_fields(monke
 def test_parse_basic_extract_is_null(monkeypatch, tmp_path):
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     import backend.routers.agreements_v2_api as av2
 
     def fake_llm(*args, **kwargs):
@@ -932,6 +979,7 @@ def test_parse_basic_extract_is_null(monkeypatch, tmp_path):
 def test_parse_premium_invalid_extract_fields_coerced_to_safe_extract(monkeypatch, tmp_path):
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     import backend.routers.agreements_v2_api as av2
 
     def fake_llm(*args, **kwargs):
@@ -971,6 +1019,7 @@ def test_parse_premium_invalid_extract_fields_coerced_to_safe_extract(monkeypatc
 def test_premium_full_draft_ok(monkeypatch, tmp_path):
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test-unit")
     import backend.routers.agreements_v2_api as av2
 
@@ -1043,6 +1092,7 @@ def test_premium_full_draft_repair_pass_uses_agreement_outbound_airlock_profile(
     """Primary + quality-triggered repair must both use agreement_outbound (no stricter default on repair)."""
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test-unit")
     import backend.routers.agreements_v2_api as av2
 
@@ -1124,6 +1174,7 @@ def test_premium_full_draft_saas_reseller_qa_prompt_not_airlock_blocked(monkeypa
     """Regression: ordinary commercial QA intake must reach the model (airlock must not pre-block)."""
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test-unit")
     import backend.routers.agreements_v2_api as av2
     from backend.tests.test_privilege_policy import LAWDOG_QA_SAAS_RESELLER_PROMPT
@@ -1196,6 +1247,7 @@ def test_premium_full_draft_degraded_503_when_llm_fails(monkeypatch, tmp_path):
     """Model failure returns an explicit empty-body retry — never a synthesized starter body."""
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     import backend.routers.agreements_v2_api as av2
 
     def boom(*args, **kwargs):
@@ -1223,6 +1275,7 @@ def test_premium_full_draft_degraded_airlock_returns_empty_document(monkeypatch,
     """Airlock failures must not inject fake Pro agreement text into document_text."""
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test-unit")
     import backend.routers.agreements_v2_api as av2
     from backend.llm_router import ExternalAIBlockedError
@@ -1261,6 +1314,7 @@ def test_premium_full_draft_degraded_never_synthesizes_starter_body(monkeypatch,
     """The deterministic starter/preview fallback is removed: no local text on a model failure."""
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     import backend.routers.agreements_v2_api as av2
 
     def boom(*args, **kwargs):
@@ -1291,6 +1345,7 @@ def test_premium_full_draft_returns_503_structured_when_wire_encode_fails(monkey
     """Regression: serialization must return complete JSON (CORS-safe) instead of connection reset."""
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     import backend.routers.agreements_v2_api as av2
 
     def fake_llm(*args, **kwargs):
@@ -1334,6 +1389,7 @@ def test_premium_full_draft_sanitize_wire_nested_replaces_non_utf8_strings():
 def test_premium_agreement_review_ok(monkeypatch, tmp_path):
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     import backend.routers.agreements_v2_api as av2
 
     def fake_llm(*args, **kwargs):
@@ -1372,6 +1428,7 @@ def test_premium_agreement_review_ok(monkeypatch, tmp_path):
 def test_premium_missing_facts_ok(monkeypatch, tmp_path):
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     import backend.routers.agreements_v2_api as av2
 
     def fake_llm(*args, **kwargs):
@@ -1411,6 +1468,7 @@ def test_premium_missing_facts_ok(monkeypatch, tmp_path):
 def test_premium_missing_facts_fail_open_empty(monkeypatch, tmp_path):
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     import backend.routers.agreements_v2_api as av2
 
     def boom(*args, **kwargs):
@@ -1430,6 +1488,7 @@ def test_premium_missing_facts_fail_open_empty(monkeypatch, tmp_path):
 def test_premium_refine_update_ok(monkeypatch, tmp_path):
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     import backend.routers.agreements_v2_api as av2
 
     def fake_llm(*args, **kwargs):
@@ -1465,6 +1524,7 @@ def test_premium_refine_update_ok(monkeypatch, tmp_path):
 def test_premium_refine_update_requires_refinement_prompt(monkeypatch, tmp_path):
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     client = TestClient(app)
     res = client.post(
         "/api/agreements/premium-refine",
@@ -1482,6 +1542,7 @@ def test_premium_refine_update_requires_refinement_prompt(monkeypatch, tmp_path)
 def test_premium_refine_ask_missing_preserves_document(monkeypatch, tmp_path):
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     import backend.routers.agreements_v2_api as av2
 
     def fake_llm(*args, **kwargs):
@@ -1515,6 +1576,7 @@ def test_premium_refine_ask_missing_preserves_document(monkeypatch, tmp_path):
 def test_premium_refine_503_on_llm_failure(monkeypatch, tmp_path):
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     import backend.routers.agreements_v2_api as av2
 
     def boom(*args, **kwargs):
@@ -1585,6 +1647,7 @@ def _premium_refine_doc_fees_and_payment_schedule() -> str:
 def test_premium_refine_late_fee_fees_and_payment_section_inserts_before_schedule(monkeypatch, tmp_path):
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     import backend.routers.agreements_v2_api as av2
 
     def boom(*args, **kwargs):
@@ -1619,6 +1682,7 @@ def test_premium_refine_update_identical_llm_output_returns_fail_open(monkeypatc
     """Full refine echoing the input must not look like a successful apply (fail-open summary)."""
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     import backend.routers.agreements_v2_api as av2
 
     doc_local = "LONG AGREEMENT\n" + ("Body line with enough chars for narrow skip.\n" * 120)
@@ -1659,6 +1723,7 @@ def test_premium_refine_late_fee_narrow_deterministic_skips_llm(monkeypatch, tmp
     """Narrow late-fee path inserts without calling full-document refine LLM."""
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     import backend.routers.agreements_v2_api as av2
 
     def boom(*args, **kwargs):
@@ -1695,6 +1760,7 @@ def test_premium_refine_late_fee_narrow_still_200_when_record_ai_call_raises(mon
     """Usage accounting failures must not 503 a successful deterministic narrow refine."""
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     import backend.routers.agreements_v2_api as av2
 
     def boom_llm(*_a, **_k):
@@ -1727,6 +1793,7 @@ def test_premium_refine_narrow_exception_falls_back_to_full_llm(monkeypatch, tmp
     """Unexpected narrow-path errors fall back to full refine instead of failing the request."""
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     import backend.routers.agreements_v2_api as av2
 
     doc_local = _premium_refine_long_fixture_doc()
@@ -1765,6 +1832,7 @@ def test_premium_refine_narrow_exception_full_llm_fail_returns_200_unchanged(mon
     """action=update: narrow throws and full refine fails → 200 with unchanged document (no 503)."""
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     import backend.routers.agreements_v2_api as av2
 
     doc_local = _premium_refine_long_fixture_doc()
@@ -1798,6 +1866,7 @@ def test_premium_refine_update_llm_failure_fail_open_unchanged(monkeypatch, tmp_
     """Non-narrow update: LLM outage returns 200 + unchanged document + warning (not 503)."""
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     import backend.routers.agreements_v2_api as av2
 
     def boom_llm(*_a, **_k):
@@ -1829,6 +1898,7 @@ def test_premium_refine_fail_open_preserves_exact_request_bytes_including_traili
     """LLM failure fail-open must echo request current_document_text byte-for-byte (no strip)."""
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     import backend.routers.agreements_v2_api as av2
 
     def boom_llm(*_a, **_k):
@@ -1860,6 +1930,7 @@ def test_premium_refine_client_deliverables_narrow_deterministic_skips_llm(monke
     """Narrow path: client approval before final payment + deliverables — full document, no shrink."""
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     import backend.routers.agreements_v2_api as av2
 
     def boom(*args, **kwargs):
@@ -1896,6 +1967,7 @@ def test_premium_refine_late_fee_narrow_llm_anchor_when_no_payment_header(monkey
     """Without a Payment heading, narrow path falls back to LLM anchor patch."""
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     import backend.routers.agreements_v2_api as av2
 
     body = [
@@ -1943,6 +2015,7 @@ def test_premium_refine_late_fee_narrow_llm_anchor_when_no_payment_header(monkey
 def test_premium_finalize_audit_ok_deal_specific(monkeypatch, tmp_path):
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     import backend.routers.agreements_v2_api as av2
 
     def fake_llm(*args, **kwargs):
@@ -1981,6 +2054,7 @@ def test_premium_finalize_audit_ok_deal_specific(monkeypatch, tmp_path):
 def test_premium_finalize_audit_fail_open_200_when_llm_unavailable(monkeypatch, tmp_path):
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     import backend.routers.agreements_v2_api as av2
 
     def boom(*args, **kwargs):
@@ -2005,6 +2079,7 @@ def test_premium_finalize_audit_fail_open_200_when_llm_unavailable(monkeypatch, 
 def test_premium_finalize_audit_malformed_payload_normalizes(monkeypatch, tmp_path):
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     import backend.routers.agreements_v2_api as av2
 
     def fake_llm(*args, **kwargs):
@@ -2036,6 +2111,7 @@ def test_premium_finalize_audit_malformed_payload_normalizes(monkeypatch, tmp_pa
 def test_premium_review_route_ok(monkeypatch, tmp_path):
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     import backend.routers.agreements_v2_api as av2
 
     def fake_llm(*args, **kwargs):
@@ -2078,6 +2154,7 @@ def test_premium_review_route_ok(monkeypatch, tmp_path):
 def test_premium_review_route_malformed_payload_normalizes(monkeypatch, tmp_path):
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     import backend.routers.agreements_v2_api as av2
 
     def fake_llm(*args, **kwargs):
@@ -2117,6 +2194,7 @@ def test_premium_review_route_malformed_payload_normalizes(monkeypatch, tmp_path
 def test_premium_review_route_fallback_on_llm_failure(monkeypatch, tmp_path):
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     import backend.routers.agreements_v2_api as av2
 
     def boom(*args, **kwargs):
@@ -2144,6 +2222,7 @@ def test_premium_review_route_fallback_on_llm_failure(monkeypatch, tmp_path):
 def test_premium_review_route_warehouse_downgrades_fix_to_review(monkeypatch, tmp_path):
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     import backend.routers.agreements_v2_api as av2
 
     def fake_llm(*args, **kwargs):
@@ -2184,6 +2263,7 @@ def test_premium_review_route_warehouse_downgrades_fix_to_review(monkeypatch, tm
 def test_premium_review_route_referral_downgrades_fix_to_review(monkeypatch, tmp_path):
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     import backend.routers.agreements_v2_api as av2
 
     def fake_llm(*args, **kwargs):
@@ -2221,6 +2301,7 @@ def test_premium_review_route_referral_downgrades_fix_to_review(monkeypatch, tmp
 def test_premium_review_route_broken_draft_stays_fix(monkeypatch, tmp_path):
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     import backend.routers.agreements_v2_api as av2
 
     def fake_llm(*args, **kwargs):
@@ -2259,6 +2340,7 @@ def test_premium_review_route_broken_draft_stays_fix(monkeypatch, tmp_path):
 def test_premium_review_route_clean_deal_stays_signature(monkeypatch, tmp_path):
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     import backend.routers.agreements_v2_api as av2
 
     def fake_llm(*args, **kwargs):
@@ -2297,6 +2379,7 @@ def test_premium_review_route_clean_deal_stays_signature(monkeypatch, tmp_path):
 def test_premium_review_route_polish_coffee_cart_replaces_generic_unresolved(monkeypatch, tmp_path):
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     import backend.routers.agreements_v2_api as av2
 
     def fake_llm(*args, **kwargs):
@@ -2341,6 +2424,7 @@ def test_premium_review_route_polish_coffee_cart_replaces_generic_unresolved(mon
 def test_premium_review_route_polish_referral_replaces_generic_unresolved(monkeypatch, tmp_path):
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     import backend.routers.agreements_v2_api as av2
 
     def fake_llm(*args, **kwargs):
@@ -2381,6 +2465,7 @@ def test_premium_review_route_polish_referral_replaces_generic_unresolved(monkey
 def test_premium_review_route_unresolved_items_rank_business_risk_first(monkeypatch, tmp_path):
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     import backend.routers.agreements_v2_api as av2
 
     def fake_llm(*args, **kwargs):
@@ -2424,6 +2509,7 @@ def test_premium_review_route_unresolved_items_rank_business_risk_first(monkeypa
 def test_premium_agreement_review_fail_open_200_when_llm_fails(monkeypatch, tmp_path):
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     import backend.routers.agreements_v2_api as av2
 
     def boom(*args, **kwargs):
@@ -2581,6 +2667,7 @@ def test_vs01_signing_seed_endpoint_ok_with_s3_backend_uses_legacy_finalize(monk
     reset_artifact_repository_singleton()
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     monkeypatch.setenv("CLAW_UNIFIED_ARTIFACT_STORE", "1")
     monkeypatch.setenv("CLAW_ARTIFACT_REGISTRY_DB_PATH", str(tmp_path / "artifact_registry.sqlite3"))
     monkeypatch.setenv("CLAW_BLOB_ROOT", str(tmp_path / "blobs"))
@@ -2589,6 +2676,7 @@ def test_vs01_signing_seed_endpoint_ok_with_s3_backend_uses_legacy_finalize(monk
     reset_artifact_repository_singleton()
     client = TestClient(app)
     h = {"X-Claw-Org-Id": "test-vs01-seed-s3-fallback", "X-Claw-Test-Auth-User-Id": "test-owner"}
+    ensure_headers_entitled(h)
     create_res = client.post(
         "/api/agreements/draft",
         headers=h,
@@ -2624,10 +2712,12 @@ def test_vs01_signing_seed_endpoint_ok(monkeypatch, tmp_path):
     pytest.importorskip("fitz")
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_ENABLED", "0")
     monkeypatch.delenv("CLAW_COMMERCIAL_MODE", raising=False)
     client = TestClient(app)
     h = {"X-Claw-Org-Id": "test-vs01-seed-org", "X-Claw-Test-Auth-User-Id": "test-owner"}
+    ensure_headers_entitled(h)
     create_res = client.post(
         "/api/agreements/draft",
         headers=h,
@@ -2673,8 +2763,10 @@ def test_vs01_signing_seed_ok_when_economics_watermark_raises(monkeypatch, tmp_p
     pytest.importorskip("fitz")
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     client = TestClient(app)
     h = {"X-Claw-Org-Id": "test-vs01-seed-econ-fail", "X-Claw-Test-Auth-User-Id": "test-owner"}
+    ensure_headers_entitled(h)
     create_res = client.post(
         "/api/agreements/draft",
         headers=h,
@@ -2717,8 +2809,10 @@ def test_vs01_signing_seed_structured_detail_when_render_html_raises(monkeypatch
     pytest.importorskip("fitz")
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     client = TestClient(app)
     h = {"X-Claw-Org-Id": "test-vs01-seed-render-err", "X-Claw-Test-Auth-User-Id": "test-owner"}
+    ensure_headers_entitled(h)
     create_res = client.post(
         "/api/agreements/draft",
         headers=h,
@@ -2764,6 +2858,7 @@ def test_vs01_signing_seed_structured_detail_when_finalize_storage_exhausted(mon
     pytest.importorskip("fitz")
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     monkeypatch.setattr("backend.services.document_service.unified_artifact_store_enabled", lambda: False)
 
     def _always_fail(*_a, **_k):
@@ -2772,6 +2867,7 @@ def test_vs01_signing_seed_structured_detail_when_finalize_storage_exhausted(mon
     monkeypatch.setattr(ds, "_write_legacy_layout", _always_fail)
     client = TestClient(app)
     h = {"X-Claw-Org-Id": "test-vs01-seed-storage-exhausted", "X-Claw-Test-Auth-User-Id": "test-owner"}
+    ensure_headers_entitled(h)
     create_res = client.post(
         "/api/agreements/draft",
         headers=h,
@@ -2814,8 +2910,10 @@ def test_vs01_signing_seed_structured_detail_when_finalize_meta_missing_document
     pytest.importorskip("fitz")
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     client = TestClient(app)
     h = {"X-Claw-Org-Id": "test-vs01-seed-bad-meta", "X-Claw-Test-Auth-User-Id": "test-owner"}
+    ensure_headers_entitled(h)
     create_res = client.post(
         "/api/agreements/draft",
         headers=h,
@@ -2859,7 +2957,9 @@ def test_recipient_preview_export_pdf_requires_recipient_token_or_org(monkeypatc
     monkeypatch.setenv("CLAW_AGREEMENT_SIGNING_TOKEN_SECRET", "unit-test-signing-secret-for-magic-link")
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     client = TestClient(app)
+    ensure_headers_entitled(_ORG_H)
     create_res = client.post(
         "/api/agreements/draft",
         headers=_ORG_H,

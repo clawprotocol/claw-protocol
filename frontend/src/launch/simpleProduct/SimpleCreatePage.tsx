@@ -49,6 +49,7 @@ import { hasCurrentSessionFreeStarterIntent } from "../../components/agreements/
 import { getLawdogTrustNudges } from "../../tracking/lawdogSession";
 import { UpgradeToProModal } from "../../monetization/UpgradeToProModal";
 import { useAuth } from "../../auth/AuthProvider";
+import { setCachedAccessToken } from "../../auth/authAccessTokenCache";
 import { bindAuthenticatedUserToWorkspace } from "../../auth/workspaceBindingApi";
 import { displayNameFromUser } from "../../auth/postAuthFinalizer";
 import {
@@ -416,6 +417,7 @@ export function SimpleCreatePage() {
   useEffect(() => {
     if (!probesReady) return;
     if (isReallyAuthenticated && !isUserWorkspaceOrgId(getOrgId())) return;
+    if (authSession?.access_token) setCachedAccessToken(authSession.access_token);
     let cancelled = false;
     setCommercialEntitlementReady(false);
     void fetchWorkspaceProEntitlement().then((ok) => {
@@ -429,7 +431,7 @@ export function SimpleCreatePage() {
     return () => {
       cancelled = true;
     };
-  }, [probesReady, isReallyAuthenticated, workspaceOrgId]);
+  }, [probesReady, isReallyAuthenticated, workspaceOrgId, authSession?.access_token]);
 
   useEffect(() => {
     if (!consumeLawdogFocusCreateIntake()) return;
@@ -1028,6 +1030,7 @@ export function SimpleCreatePage() {
               type="button"
               className="vs01-btn vs01-btn--secondary vs01-btn--compact mt-3"
               onClick={() => {
+                if (authSession?.access_token) setCachedAccessToken(authSession.access_token);
                 setCommercialEntitlementReady(false);
                 void fetchCommercialEntitlement().then((decision) => {
                   setCommercialEntitlement(decision);
@@ -1087,7 +1090,7 @@ export function SimpleCreatePage() {
                 isFreshSimpleCreateStart ? FIRST_SESSION_CREATE_INTAKE_PLACEHOLDER : SIMPLE_CREATE_INTAKE_PLACEHOLDER
               }
               simpleProductFlowSubmitLabel={
-                isFreshSimpleCreateStart ? "Create draft" : quickSendTypedArrival ? "Review" : "Review"
+                isFreshSimpleCreateStart ? "Create agreement" : quickSendTypedArrival ? "Review" : "Review"
               }
               simpleProductFollowUpSubmitLabel="Next"
               simpleProductFlowGeneratingLabel={

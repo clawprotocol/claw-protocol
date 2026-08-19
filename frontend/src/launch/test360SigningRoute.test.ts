@@ -21,8 +21,20 @@ function approvedDraft(): AgreementDraft {
     title: "Services Agreement",
     jurisdiction: "CA",
     parties: [
-      { name: "Red Mesa Logistics LLC", role: "owner", email: "owner@example.test" },
-      { name: "Harbor Peak Automation LLC", role: "party", email: "cp@example.test" },
+      {
+        name: "Red Mesa Logistics LLC",
+        role: "owner",
+        email: "owner@example.test",
+        signerName: "Riley Owner",
+        signerTitle: "CEO",
+      },
+      {
+        name: "Harbor Peak Automation LLC",
+        role: "party",
+        email: "cp@example.test",
+        signerName: "Harper Counterparty",
+        signerTitle: "COO",
+      },
     ],
     purpose: "Services",
     payment_terms: "Net 30",

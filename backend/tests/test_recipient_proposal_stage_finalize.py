@@ -1,9 +1,30 @@
 from __future__ import annotations
 
+from backend.tests.entitlement_test_support import ensure_headers_entitled, ensure_org_pro_entitlement
+
 import pytest
 from fastapi.testclient import TestClient
 
 from backend.main import app
+
+
+@pytest.fixture(autouse=True)
+def _entitle_owner_org_after_env(tmp_path, monkeypatch):
+    """Grant Pro for primary owner headers once tmp_path-backed DBs are configured."""
+    monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
+    monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ONRAMP_DB_PATH", str(tmp_path / "onramp.sqlite3"))
+    monkeypatch.setenv("CLAW_TREASURY_DB_PATH", str(tmp_path / "treasury.sqlite3"))
+    from backend.economics.store import reset_economics_store_for_tests
+    reset_economics_store_for_tests()
+    for _name in ("_ORG_H", "_OWNER_H", "OWNER_HEADERS", "_HEADERS", "ORG_HEADERS", "_OWNER"):
+        h = globals().get(_name)
+        if isinstance(h, dict) and h.get("X-Claw-Org-Id"):
+            ensure_headers_entitled(h)
+    yield
+    reset_economics_store_for_tests()
+
 
 
 @pytest.fixture()
@@ -11,11 +32,13 @@ def isolated_agreement_env(monkeypatch: pytest.MonkeyPatch, tmp_path):
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_ENABLED", "1")
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     monkeypatch.setenv("CLAW_AGREEMENT_SIGNING_TOKEN_SECRET", "unit-test-recipient-proposal-stage")
     yield tmp_path
 
 
 def _draft_with_reviewer(client: TestClient, org_hdr: dict) -> tuple[str, dict]:
+    ensure_headers_entitled(org_hdr)
     r = client.post(
         "/api/agreements/draft",
         headers=org_hdr,
@@ -224,6 +247,7 @@ def test_stage_infers_assumed_owner_counterparty_without_explicit_owner(
     """Paid-pro style: both parties role=party; index 0 treated as owner."""
     client = TestClient(app)
     org = {"X-Claw-Org-Id": "org-assumed-owner", "X-Claw-Test-Auth-User-Id": "test-owner"}
+    ensure_headers_entitled(org)
     r = client.post(
         "/api/agreements/draft",
         headers=org,
@@ -273,6 +297,7 @@ def test_stage_infers_assumed_owner_counterparty_without_explicit_owner(
 def test_stage_fails_ambiguous_multiple_counterparties(monkeypatch, isolated_agreement_env):
     client = TestClient(app)
     org = {"X-Claw-Org-Id": "org-ambiguous", "X-Claw-Test-Auth-User-Id": "test-owner"}
+    ensure_headers_entitled(org)
     r = client.post(
         "/api/agreements/draft",
         headers=org,

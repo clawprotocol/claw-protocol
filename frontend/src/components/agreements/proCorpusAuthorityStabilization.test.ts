@@ -195,11 +195,11 @@ describe("pro corpus authority stabilization", () => {
 
   it("hides stale Add signers footer CTA when delivery track chooser is active", () => {
     const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
+    const chrome = readFileSync(join(__dirname, "paidProForcedFirstReviewChrome.tsx"), "utf8");
     expect(intake).toContain("pro_delivery_track_chooser_active");
     expect(intake).toContain("proDeliveryTrackChooserActive");
-    const chooserIdx = intake.indexOf('data-testid="pro-delivery-track-chooser"');
+    expect(chrome).toContain('data-testid="paid-pro-delivery-track-chooser"');
     const ctaIdx = intake.indexOf("proDeliveryTrackChooserActive");
-    expect(chooserIdx).toBeGreaterThan(0);
     expect(ctaIdx).toBeGreaterThan(0);
   });
 

@@ -17,7 +17,10 @@ import {
   hasPaidProSourceOfTruth,
   type PaidProSourceOfTruth,
 } from "./paidProSourceOfTruth";
-import { hasPaidProPipelineSessionAcceptance } from "./paidProPostAcceptanceValidatorCache";
+import {
+  hasPaidProPipelineSessionAcceptance,
+  markPaidProPipelineValidationPassed,
+} from "./paidProPostAcceptanceValidatorCache";
 import { analyzePaidProSectionStructureCompleteness } from "./paidProSectionStructureCompletenessAuthority";
 import { intakeDescribesBrandLicensingDistributionManufacturingStack } from "./paidProAgreementTitleScope";
 import {
@@ -308,6 +311,7 @@ export function tryCommitPostCheckoutRecoveryToPaidProSourceOfTruth(args: {
       reviewCorpusLen: preview.displayPlainLen,
     };
   }
+  markPaidProPipelineValidationPassed({ text: freezeCommit.text, source: "server_full_draft" });
   try {
     const record = establishPaidProSourceOfTruth({
       text: freezeCommit.text,

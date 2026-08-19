@@ -2,12 +2,33 @@
 
 from __future__ import annotations
 
+from backend.tests.entitlement_test_support import ensure_headers_entitled, ensure_org_pro_entitlement
+
 from unittest.mock import patch
 
 import pytest
 from fastapi.testclient import TestClient
 
 from backend.main import app
+
+
+@pytest.fixture(autouse=True)
+def _entitle_owner_org_after_env(tmp_path, monkeypatch):
+    """Grant Pro for primary owner headers once tmp_path-backed DBs are configured."""
+    monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
+    monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ONRAMP_DB_PATH", str(tmp_path / "onramp.sqlite3"))
+    monkeypatch.setenv("CLAW_TREASURY_DB_PATH", str(tmp_path / "treasury.sqlite3"))
+    from backend.economics.store import reset_economics_store_for_tests
+    reset_economics_store_for_tests()
+    for _name in ("_ORG_H", "_OWNER_H", "OWNER_HEADERS", "_HEADERS", "ORG_HEADERS", "_OWNER", "_ORG_A", "_ORG", "_STAGING_ORG"):
+        h = globals().get(_name)
+        if isinstance(h, dict) and h.get("X-Claw-Org-Id"):
+            ensure_headers_entitled(h)
+    yield
+    reset_economics_store_for_tests()
+
 from backend.services.agreement_draft_store import load_draft, save_draft
 
 _ORG_ID = "test-org-vs01-complete"
@@ -90,6 +111,7 @@ def client(monkeypatch, tmp_path):
     monkeypatch.setenv("CLAW_ENVIRONMENT", "test")
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     monkeypatch.setenv("CLAW_AGREEMENT_SIGNING_TOKEN_SECRET", "unit-test-vs01-complete-secret")
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_ENABLED", "0")
     monkeypatch.delenv("CLAW_ALLOW_TOKENLESS_SIGNER_COMPLETE", raising=False)
@@ -98,9 +120,10 @@ def client(monkeypatch, tmp_path):
 
 
 def _create_two_signer_agreement(client: TestClient) -> str:
+    headers = ensure_headers_entitled(_org_headers())
     create_res = client.post(
         "/api/agreements/draft",
-        headers=_org_headers(),
+        headers=headers,
         json={
             "title": "VS01 completion test",
             "jurisdiction": "TX",

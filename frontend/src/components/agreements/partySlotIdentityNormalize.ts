@@ -111,10 +111,14 @@ export function resolveDeclaredExplicitPartyCount(intakeRaw: string): number | n
   const t = String(intakeRaw || "").toLowerCase();
   if (/\b(?:among|between)\s+(?:the\s+)?following\s+four\s+parties\b/.test(t)) return 4;
   if (/\b(?:all\s+)?four\s+parties\b/.test(t)) return 4;
+  if (/\b(?:all\s+)?4\s+parties\b/.test(t)) return 4;
   if (/\bfour[\s-]party\b/.test(t)) return 4;
+  if (/\b4[\s-]party\b/.test(t)) return 4;
   if (/\b(?:among|between)\s+(?:the\s+)?following\s+three\s+parties\b/.test(t)) return 3;
   if (/\b(?:all\s+)?three\s+parties\b/.test(t)) return 3;
+  if (/\b(?:all\s+)?3\s+parties\b/.test(t)) return 3;
   if (/\bthree[\s-]party\b/.test(t)) return 3;
+  if (/\b3[\s-]party\b/.test(t)) return 3;
   return null;
 }
 
@@ -217,7 +221,14 @@ export function isInternalPartyAliasToken(name: string): boolean {
 export function isInternalPartyAliasRole(role: string | null | undefined): boolean {
   const t = (role || "").replace(/\s+/g, " ").trim();
   if (!t) return false;
-  return isInternalPartyAliasToken(t);
+  // Only party_a / party_b / numbered party tokens are internal role aliases.
+  // Do NOT reuse isInternalPartyAliasToken here — that regex also matches commercial
+  // role labels (vendor, customer, client, contractor) used as fake entity *names*.
+  // Those labels are valid user-declared roles and must survive preserveIntakeRole.
+  if (/^\(?\s*["'“”]?party[_\s-]?[ab]\d*["'“”]?\s*\)?$/i.test(t)) return true;
+  if (/^party[_\s-]?\d+$/i.test(t)) return true;
+  if (/\bparty[_\s-]?[ab]\b/i.test(t) && t.length < 28) return true;
+  return false;
 }
 
 export function stripInternalPartyAliasParentheticals(raw: string): string {
@@ -230,11 +241,15 @@ export function stripInternalPartyAliasParentheticals(raw: string): string {
     .trim();
 }
 
-/** "Red Mesa Logistics, LLC" → "Red Mesa Logistics LLC" when safe. */
+/**
+ * "Red Mesa Logistics, LLC" → "Red Mesa Logistics LLC" when safe.
+ * Global so multi-party tails ("A, LLC and B, Inc.") do not keep suffix commas that
+ * Oxford / comma list splitters would treat as party separators.
+ */
 export function normalizeCommaSeparatedEntitySuffix(raw: string): string {
   let s = stripInternalPartyAliasParentheticals(raw);
   s = s.replace(
-    /,\s*((?:LLC|L\.L\.C\.|Inc\.?|Incorporated|Corp\.?|Corporation|Ltd\.?|Limited|LLP|PLLC|LP|L\.P\.|Co\.?|Company)\.?)\s*$/i,
+    /,\s*((?:LLC|L\.L\.C\.|Inc\.?|Incorporated|Corp\.?|Corporation|Ltd\.?|Limited|LLP|PLLC|LP|L\.P\.|Co\.?|Company)\.?)\b/gi,
     " $1",
   );
   return s.replace(/\s+/g, " ").trim();
@@ -288,11 +303,11 @@ export function resolveAuthoritativeIntakePartyNames(intakeContext?: string | nu
   if (numbered.length >= 3) return numbered;
   // Ordered between/among clause wins over length-sorted entityPool for 3+ party slot order.
   if (preferOrderedBetweenPartyList(fromBetween, entityPool)) return fromBetween;
-  if (entityPool.length >= 3) return entityPool;
+  if (entityPool.length >= 3) return orderPartyNamesByIntakeAppearance(entityPool, intake);
   if (numbered.length >= 2 && numbered.length >= entityPool.length) return numbered;
   if (fromBetween.length >= 2 && fromBetween.length >= lineSeparated.length) return fromBetween;
   if (lineSeparated.length >= 2) return lineSeparated;
-  if (entityPool.length >= 2) return entityPool;
+  if (entityPool.length >= 2) return orderPartyNamesByIntakeAppearance(entityPool, intake);
   if (labeled.length >= 2) return labeled;
   const quoted = quotedRolePartyLegalEntities(intake)
     .map(normalizeAgreementPartyName)
@@ -327,12 +342,18 @@ export function extractLineSeparatedLegalEntityParties(intakeRaw: string): strin
     if (/^total\s+(?:contract\s+value|project\s+fee)/i.test(line)) continue;
     if (/^(?:term|fee|payment|governing|duration|oklahoma|texas|law)\b/i.test(line)) continue;
     if (looksLikeAuthorizedSignersBulletLine(line)) continue;
-    if (/workflow|consulting|automation|services?\b/i.test(line) && !PARTY_ENTITY_SUFFIX_RE.test(line)) {
-      continue;
-    }
+    // Filter service/workflow phrase lines on the extracted entity (not the raw line).
+    // Numbered role-tagged lines like `3. Delta Integration Services LLC (Systems Integrator)`
+    // end with `)` so end-anchored suffix checks on the raw line falsely skip real parties.
     const normalized = NUMBERED_PARTY_ENTITY_LINE_RE.test(line)
       ? extractLegalEntityFromIntakeLine(line)
       : normalizeAgreementPartyName(isolateLegalEntityFromContaminatedName(line));
+    if (
+      /workflow|consulting|automation|services?\b/i.test(normalized) &&
+      !PARTY_ENTITY_SUFFIX_RE.test(normalized)
+    ) {
+      continue;
+    }
     if (
       normalized.length >= 3 &&
       !isInvalidPartySlotLegalEntity(normalized) &&
@@ -462,13 +483,18 @@ export function resolveAuthoritativePartySlotCount(args: {
   const rowNames = args.draftPartyNames ?? [];
   const hasDrift = partySlotListHasDriftFragments(rowNames, args.intakeText);
   const collapsed = selectAuthoritativeTwoPartySlots(rowNames);
-  if (hasDrift && collapsed.length === 2) return 2;
-  if (hasDrift && intakeNames.length === 2) return 2;
+  // Phantom coordinator / invalid fragments must not collapse a true 3+/4-party draft or
+  // intake entity pool back to two slots.
+  if (hasDrift && collapsed.length === 2 && !explicitMultiParty) return 2;
+  if (hasDrift && intakeNames.length === 2 && !explicitMultiParty) return 2;
 
   const validCollapsed = collapsePartySlotCandidates(rowNames);
   if (rowNames.length > 2 && validCollapsed.length === 2 && !explicitMultiParty) return 2;
 
   if (quoted.length >= 3) return quoted.length;
+  if (collapsedDraftAuthoritative.length >= 3) {
+    return Math.min(collapsedDraftAuthoritative.length, PAID_PRO_AUTHORITY_MAX_PARTIES);
+  }
   if (entityPool.length >= 3) return entityPool.length;
 
   let legalCount = Math.max(args.rawPartyCount ?? rowNames.length, quoted.length || labeled.length || 2);

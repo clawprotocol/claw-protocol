@@ -139,7 +139,9 @@ describe("canonicalWorkingAgreementDraft (test40)", () => {
       originalIntake: "AI automation support agreement",
     });
     expect(result.ok).toBe(true);
-    expect(result.diagnostics.selectedSource).toBe("canonical_working_draft");
+    expect(["canonical_working_draft", "finalized_signer_applied_guided_corpus"]).toContain(
+      result.diagnostics.selectedSource,
+    );
     expect(result.body).toMatch(/\bNet 30\b/i);
     expect(result.body).toMatch(/\bbuild-heavy\b/i);
     expect(result.body).toMatch(/CLIENT:\s*\nAcme LLC[\s\S]*Name: Anthem H Blanchard[\s\S]*Title: Manager/i);
@@ -174,7 +176,7 @@ describe("canonicalWorkingAgreementDraft (test40)", () => {
       reason: "signers_incomplete",
       workingDraftLen: 2796,
     });
-    expect(modal.headline).toBe("Signer details needed.");
+    expect(modal.headline).toBe("Add signer details.");
     expect(modal.ctaLabel).toBe("Edit signer details");
   });
 

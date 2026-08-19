@@ -49,13 +49,38 @@ vi.mock("./premiumFullDraftApi", async (importOriginal) => {
 
 const longAcceptedDoc = padProBody(
   `
-# Web Development Agreement
+WEB DEVELOPMENT AGREEMENT
 
-## Parties
-**Client (Anthem Blanchard)** engages **Developer (Sarah Collins)** for the **CryptoSpaces** engagement.
+This Agreement is between Anthem Blanchard ("Client") and Sarah Collins ("Developer") for CryptoSpaces.net.
 
-Governing law: the laws of the **State of Oklahoma** (Oklahoma). Total **$7,500**; **$3,000** deposit, **$4,500** balance.
-Final payment due within **thirty (30) days**; effective **May 1, 2026**. **Two revision** rounds. **Pre-existing** tools. **Notices** by **email** and **electronic mail**. Terms cover **confidential** use and **IP** between the **parties**. The parties **shall** cooperate.
+1. SERVICES
+Developer will perform website redesign and optimization services for Client.
+
+2. FEES
+Total fee is $7,500 ($3,000 deposit, $4,500 balance). Effective May 1, 2026. Two revision rounds. Pre-existing tools retained by Developer.
+
+3. GOVERNING LAW
+This Agreement is governed by the laws of the State of Oklahoma.
+
+4. NOTICES
+Notices under this Agreement may be given by email to the addresses the parties designate in writing.
+
+5. CONFIDENTIALITY AND IP
+Terms cover confidential use and IP between the parties. The parties shall cooperate.
+
+IN WITNESS WHEREOF, the parties execute this Agreement.
+
+CLIENT:
+Anthem Blanchard
+By: _________________________
+Name: Anthem Blanchard
+Title: Client
+
+DEVELOPER:
+Sarah Collins
+By: _________________________
+Name: Sarah Collins
+Title: Developer
     `,
   12_000,
 );

@@ -14,11 +14,12 @@ describe("buildUpgradeContextReasons", () => {
     expect(r.join(" ")).toMatch(/profit|money|distributions/i);
   });
 
-  it("checkout footnote contrasts Basic send link with Plus collaboration and proof", () => {
+  it("checkout footnote contrasts Guest sample with Pro collaboration and proof", () => {
     const line = checkoutLossAversionFromIntentSignals(["exit", "liability"]);
-    expect(line).toMatch(/simple send link/i);
+    expect(line).toMatch(/Guest draft/i);
     expect(line).toMatch(/collaborate on revisions/i);
     expect(line).toMatch(/proof history/i);
+    expect(line).not.toMatch(/\bPlus\b/);
     expect(checkoutLossAversionFromIntentSignals([])).toBe(line);
   });
 

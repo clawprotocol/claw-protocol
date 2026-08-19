@@ -119,6 +119,19 @@ export function repairDuplicateOpeningsPreferResolvedIdentity(text: string): {
   return { text: out.replace(/\n{3,}/g, "\n\n").trim(), repairs };
 }
 
+/** Same-line operative body after a short title (`1. Clause 1. Terms…` / `2. PAYMENT. Client shall…`). */
+function headingTitleHasInlineBody(title: string): boolean {
+  const t = clean(title);
+  if (!t) return false;
+  // "TITLE. Body continues…" or "Clause 1. Terms…"
+  if (/^[A-Za-z][^.]{0,80}\.\s+\S/.test(t)) return true;
+  // Compact operative filler headings ("Operative clause 1.") are body-bearing, not empty shells.
+  if (/\boperative\s+clause\b/i.test(t)) return true;
+  // Long title lines are already substantive (not empty parent shells).
+  if (t.length >= 48) return true;
+  return false;
+}
+
 function collectTopLevelHeadings(text: string): Array<{ num: string; title: string; empty: boolean }> {
   const witnessIdx = resolveAuthoritativeWitnessIndex(text);
   const head = witnessIdx >= 0 ? text.slice(0, witnessIdx) : text;
@@ -127,6 +140,7 @@ function collectTopLevelHeadings(text: string): Array<{ num: string; title: stri
   for (let i = 0; i < lines.length; i += 1) {
     const m = clean(lines[i] || "").match(TOP_RE);
     if (!m) continue;
+    const title = m[2]!.trim();
     let j = i + 1;
     let hasBody = false;
     while (j < lines.length) {
@@ -147,8 +161,8 @@ function collectTopLevelHeadings(text: string): Array<{ num: string; title: stri
     })();
     out.push({
       num: m[1]!,
-      title: m[2]!.trim(),
-      empty: !hasBody && !nextTopOrSub,
+      title,
+      empty: !hasBody && !nextTopOrSub && !headingTitleHasInlineBody(title),
     });
   }
   return out;

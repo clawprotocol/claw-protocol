@@ -112,8 +112,11 @@ export function resolveAuthoritativeCreateFlowReviewShell(
   }
   if (input.premiumCheckoutCompleted) return "paid_pro";
 
-  // local-org / empty bootstrap: never select paid_pro from path, dashboard marker, or cached entitlement.
+  // local-org / empty bootstrap: never select paid_pro from path/dashboard inference alone.
+  // Explicit workspace Pro entitlement, checkout completion, and accepted corpora still win.
   if (mustBlockPaidEntitlementForLegacyFallbackOrg()) {
+    // local-org / empty bootstrap: never trust workspaceProEntitled alone (Case F).
+    // Accepted corpora, session Pro markers, and checkout completion still win.
     if (hasPaidProSourceOfTruth()) return "paid_pro";
     if (input.paidProAuthoritative) return "paid_pro";
     if (input.premiumPersistedFlowActive || input.premiumSendPathUnlocked) return "paid_pro";
@@ -121,6 +124,8 @@ export function resolveAuthoritativeCreateFlowReviewShell(
     if (hasAcceptedPaidCreateFlowFreezeLatch()) return "paid_pro";
     if (hasPaidCreateFlowPipelineAcceptance()) return "paid_pro";
     if (readDisplayReviewSnapshotAuthority()?.snapshotId) return "paid_pro";
+    const legacySnap = readPremiumCompletionSnapshot();
+    if (legacySnap?.premiumAccepted === true) return "paid_pro";
     return "free_starter";
   }
 
@@ -379,36 +384,28 @@ export function resolveCreateFlowAuthoritativeReviewPlain(args: {
   const validatedPipeline = readAcceptedPipelineReviewCorpusPlain();
   if (validatedPipeline.length >= PAID_PRO_AUTHORITY_MIN_LEN) return validatedPipeline;
 
+  // Create-flow authoritative review plain requires validated pipeline acceptance.
+  // Hash-only session latch / unvalidated hydrated fragments must not surface (TEST523).
+  if (!hasPaidCreateFlowPipelineAcceptance()) {
+    return "";
+  }
+
   const snap = readPremiumCompletionSnapshot();
   const snapBody = (snap?.premiumWinningBodyText || snap?.premiumReadonlyPlainText || "").trim();
-  if (
-    snap?.premiumAccepted &&
-    snapBody.length >= PAID_PRO_AUTHORITY_MIN_LEN &&
-    hasPaidProPipelineSessionAcceptance({ text: snapBody, source: "server_full_draft" })
-  ) {
+  if (snap?.premiumAccepted && snapBody.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
     return snapBody;
   }
 
   const latched = getLatchedAcceptedServerFullDraftAuthority();
   const latchedBody = latched?.body.trim() ?? "";
-  if (
-    latchedBody.length >= PAID_PRO_AUTHORITY_MIN_LEN &&
-    (latched?.freezeEstablished ||
-      hasPaidProPipelineSessionAcceptance({
-        text: latchedBody,
-        source: latched?.source ?? "server_full_draft",
-      }))
-  ) {
+  if (latchedBody.length >= PAID_PRO_AUTHORITY_MIN_LEN && latched?.freezeEstablished) {
     return latchedBody;
   }
 
   const pipelineWinning = (args.pipelineWinningBody || "").trim();
   const hydratedPremium = (args.hydratedPremiumBody || "").trim();
   for (const candidate of [pipelineWinning, hydratedPremium]) {
-    if (
-      candidate.length >= PAID_PRO_AUTHORITY_MIN_LEN &&
-      hasPaidProPipelineSessionAcceptance({ text: candidate, source: "server_full_draft" })
-    ) {
+    if (candidate.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
       return candidate;
     }
   }

@@ -131,11 +131,45 @@ describe("mintSimpleDoneReviewRecipientLinkRows", () => {
     expect(rows[0]!.reviewHref).not.toContain("/verify/");
     const fetchMock = vi.mocked(fetch);
     expect(fetchMock).toHaveBeenCalled();
-    const url = String(fetchMock.mock.calls[0]?.[0] ?? "");
+    const mintCall = fetchMock.mock.calls.find((c) => String(c[0] ?? "").includes("/recipient-access-token"));
+    expect(mintCall).toBeTruthy();
+    const url = String(mintCall?.[0] ?? "");
     expect(url).toContain("/recipient-access-token");
-    const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body ?? "{}"));
+    const body = JSON.parse(String(mintCall?.[1]?.body ?? "{}"));
     expect(body.mode).toBe("review");
     expect(body.recipient_party_id).toBe("p_rev");
+  });
+
+  it("includes an explicitly confirmed owner reviewer email after recipient setup", async () => {
+    let n = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (input: RequestInfo | URL) => {
+        if (!String(input).includes("/recipient-access-token")) {
+          return { ok: true, json: async () => ({ draft: {} }) };
+        }
+        n += 1;
+        return {
+          ok: true,
+          json: async () => ({ token: `tok_confirmed_${n}`, expires_in_seconds: 3600, locked_version_id: "lv1" }),
+        };
+      }) as unknown as typeof fetch,
+    );
+    const draft = {
+      id: "ag_confirmed_owner",
+      parties: [
+        { id: "p_owner", name: "Owner", role: "owner", email: "owner-review@example.com" },
+        { id: "p_rev", name: "Reviewer", role: "reviewer", email: "reviewer@example.com" },
+      ],
+    } as AgreementDraft;
+    const { rows, attemptedMintCount } = await mintSimpleDoneReviewRecipientLinkRows({
+      agreementId: "ag_confirmed_owner",
+      draft,
+      includeOwnerWithReadyReviewEmail: true,
+    });
+    expect(attemptedMintCount).toBe(2);
+    expect(rows).toHaveLength(2);
+    expect(new Set(rows.map((row) => row.reviewHref)).size).toBe(2);
   });
 
   it("returns signing_token_secret_not_configured code on 422", async () => {
@@ -253,7 +287,10 @@ describe("mintSimpleDoneReviewRecipientLinkRows", () => {
     let n = 0;
     vi.stubGlobal(
       "fetch",
-      vi.fn(async () => {
+      vi.fn(async (input: RequestInfo | URL) => {
+        if (!String(input).includes("/recipient-access-token")) {
+          return { ok: true, json: async () => ({ draft: {} }) };
+        }
         n += 1;
         return {
           ok: true,

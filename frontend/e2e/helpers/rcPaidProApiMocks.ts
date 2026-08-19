@@ -28,6 +28,8 @@ export const RC_PAID_ECONOMICS = {
 
 export const RC_ENTITLED_USAGE = {
   tier: "paid",
+  state: "pro",
+  grant_source: "stripe",
   agreements_used: 0,
   agreements_limit: 100,
   agreements_created: 0,
@@ -35,10 +37,28 @@ export const RC_ENTITLED_USAGE = {
   drafts_active: 0,
   agreements_remaining: 100,
   drafts_remaining: 100,
+  agreement_allowance: 100,
+  period_ends_at: "2026-09-01T00:00:00.000Z",
+  can_create_persisted_agreement: true,
+  can_save_guest_draft: false,
   watermark_required: false,
   storage_persistent: true,
   paywall_required: false,
   soft_throttle: false,
+  commercial: {
+    state: "pro",
+    entitlement: "paid_pro",
+    grant_source: "stripe",
+    agreement_allowance: 100,
+    agreements_used: 0,
+    agreements_remaining: 100,
+    period_ends_at: "2026-09-01T00:00:00.000Z",
+    can_create_persisted_agreement: true,
+    can_save_guest_draft: false,
+    create_allowed: true,
+    upgrade_required: false,
+    reason: null,
+  },
 };
 
 export type RcDraftRecord = {
@@ -57,7 +77,8 @@ export type RcDraftRecord = {
   updated_at: string;
 };
 
-const ANON_ORG = "anon-rc-paid-pro-org";
+const RC_PAID_USER_ORG = "user-e2e-user-rc-authority";
+const RC_ANON_ORG = "anon-rc-paid-pro-org";
 
 /** In-process mock store for canonical review snapshots (POST→GET→accept). */
 const rcCanonicalSnapshotStore = new Map<
@@ -76,10 +97,19 @@ const rcCanonicalSnapshotStore = new Map<
   }
 >();
 
+/** Frozen signer authority must survive its production POST → GET boundary in browser proofs. */
+const rcFrozenSigningAuthorityStore = new Map<string, unknown>();
+
 export async function seedEntitledPaidProBrowserState(page: Page): Promise<void> {
   await seedE2eAuthSession(page);
   await page.addInitScript((orgId: string) => {
     try {
+      const generationId = "rc-e2e-entitled";
+      const entitlementMarker = JSON.stringify({
+        v: 1,
+        generationId,
+        markedAt: Date.now(),
+      });
       localStorage.setItem("claw_org_id", orgId);
       localStorage.setItem("claw_subscription_entitlement_v1", "paid");
       localStorage.setItem(
@@ -87,13 +117,14 @@ export async function seedEntitledPaidProBrowserState(page: Page): Promise<void>
         JSON.stringify({ orgId, tier: "paid", fetchedAt: Date.now() }),
       );
       sessionStorage.setItem("claw_authenticated_workspace_session", "1");
-      sessionStorage.setItem("claw_pro_entitlement_session_v1", "rc-e2e-entitled");
-      sessionStorage.setItem("claw_pro_intent_session_v1", "rc-e2e-entitled");
+      sessionStorage.setItem("claw_active_agreement_generation_id_v1", generationId);
+      sessionStorage.setItem("claw_pro_entitlement_session_v1", entitlementMarker);
+      sessionStorage.setItem("claw_pro_intent_session_v1", entitlementMarker);
       sessionStorage.setItem("claw_paid_dashboard_create_context_v1", "dashboard_paid_create");
     } catch {
       /* ignore */
     }
-  }, ANON_ORG);
+  }, RC_PAID_USER_ORG);
 }
 
 const RC_TWO_PARTY_PENDING_DRAFT = {
@@ -175,14 +206,16 @@ export async function seedRcPaidCheckoutReturn(
         /* ignore */
       }
     },
-    { orgId: ANON_ORG, intakeText: intake, pending: pendingDraft, agreementId: draftId },
+    { orgId: RC_PAID_USER_ORG, intakeText: intake, pending: pendingDraft, agreementId: draftId },
   );
 }
 
 export async function clearRcApiMocks(page: Page): Promise<void> {
   rcCanonicalSnapshotStore.clear();
+  rcFrozenSigningAuthorityStore.clear();
   const ctx = page.context();
   const patterns: Array<string | RegExp> = [
+    /\/(api\/|v1\/|health)/,
     /\/(api\/|v1\/workspace\/)/,
     "**/v1/workspace/finalize-auth**",
     "**/v1/workspace/bind-user-org**",
@@ -215,6 +248,13 @@ export async function installRcPaidProApiRoutes(
     premiumBody?: string;
     /** When false, parse mock stays two-party while premium body may still be quad. */
     parsePartyCount?: 2 | 3 | 4;
+    /** Fail POST /premium-full-draft inside the catch-all mock (overrides success body). */
+    premiumFullDraftFailure?: {
+      status: number;
+      detail: unknown;
+      /** When set, fail this many times then succeed. */
+      failRemaining?: { current: number };
+    };
   },
 ) {
   const draftId = opts?.draftId ?? "ag_rc_paid_pro";
@@ -243,7 +283,7 @@ export async function installRcPaidProApiRoutes(
     }
   }, mockPartyNames);
 
-  return page.route(/\/(api\/|v1\/workspace\/)/, async (route) => {
+  return page.route(/\/(api\/|v1\/|health)/, async (route) => {
     const url = route.request().url();
     const method = route.request().method();
 
@@ -266,6 +306,43 @@ export async function installRcPaidProApiRoutes(
           signing_token_configured: true,
           review_link_mint_enabled: true,
           signing_token_env_var_detected: "CLAW_AGREEMENT_SIGNING_TOKEN_SECRET",
+        }),
+      });
+      return;
+    }
+
+    if (url.includes("/frozen-signing-authority")) {
+      const agreementMatch = url.match(/\/api\/agreements\/([^/?]+)\/frozen-signing-authority/);
+      const agreementId = agreementMatch?.[1] ? decodeURIComponent(agreementMatch[1]) : draftId;
+      if (method === "POST") {
+        const body = (route.request().postDataJSON() ?? {}) as { snapshot?: unknown };
+        rcFrozenSigningAuthorityStore.set(agreementId, body.snapshot ?? null);
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({ ok: true, snapshot: body.snapshot ?? null }),
+        });
+        return;
+      }
+      const snapshot = rcFrozenSigningAuthorityStore.get(agreementId);
+      await route.fulfill({
+        status: snapshot ? 200 : 404,
+        contentType: "application/json",
+        body: JSON.stringify(snapshot ? { snapshot } : { detail: "not_found" }),
+      });
+      return;
+    }
+
+    if (url.includes("/v1/workspace/bind-user-org") && method === "POST") {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          ok: true,
+          org_id: RC_PAID_USER_ORG,
+          user_id: "e2e-user-rc-authority",
+          migrated_agreement_count: 0,
+          migrated_agreement_ids: [],
         }),
       });
       return;
@@ -506,11 +583,36 @@ export async function installRcPaidProApiRoutes(
         contentType: "application/json",
         body: JSON.stringify({
           ok: true,
-          org_id: ANON_ORG,
+          org_id: RC_ANON_ORG,
           session_id: "rc-e2e-session",
           token: "rc-e2e-token",
           expires_in_seconds: 86400,
         }),
+      });
+      return;
+    }
+
+    if (url.includes("/v1/subscriptions/") && method === "GET") {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          subscription: {
+            id: "sub_rc_paid_pro",
+            org_id: RC_PAID_USER_ORG,
+            plan_code: "pro",
+            status: "active",
+          },
+        }),
+      });
+      return;
+    }
+
+    if (url.includes("/v1/genesis-referral/")) {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ ok: true, allowed: false, reason: "genesis_affiliate_access_denied" }),
       });
       return;
     }
@@ -539,6 +641,20 @@ export async function installRcPaidProApiRoutes(
     }
 
     if (url.includes("/api/agreements/premium-full-draft") && method === "POST") {
+      const fail = opts?.premiumFullDraftFailure;
+      if (fail) {
+        const remaining = fail.failRemaining;
+        const shouldFail = !remaining || remaining.current > 0;
+        if (remaining && remaining.current > 0) remaining.current -= 1;
+        if (shouldFail) {
+          await route.fulfill({
+            status: fail.status,
+            contentType: "application/json",
+            body: JSON.stringify({ detail: fail.detail }),
+          });
+          return;
+        }
+      }
       await route.fulfill({
         status: 200,
         contentType: "application/json",
@@ -669,7 +785,6 @@ export async function installRcPaidProApiRoutes(
       const allowServiceBoundaryFallback =
         url.includes("/signing-links-sent") ||
         url.includes("/signing-packet/") ||
-        url.includes("/frozen-signing-authority") ||
         url.includes("/vs01-signer-complete") ||
         url.includes("/vs01-ensure-signed-snapshot") ||
         url.includes("/agreements/public/");

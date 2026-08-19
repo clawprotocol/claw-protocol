@@ -44,7 +44,7 @@ export async function fetchNegotiateAssist(args: {
   negotiationPosture?: NegotiationPosture;
   /** Defaults to owner (workspace). Recipients should pass "recipient" for server rate limits. */
   sessionType?: AiSessionType;
-  /** basic | premium — server maps via CLAW_LLM_MODEL_* env (defaults gpt-5.4-nano / gpt-5.4-mini). Enterprise/concierge is not a client key; operators use deployment env (e.g. gpt-5.4). */
+  /** basic | premium — server maps via CLAW_LLM_MODEL_* (defaults gpt-4o-mini / gpt-4o). Do not put model IDs in product logic. */
   aiModelClass?: "basic" | "premium";
 }): Promise<NegotiateAssistResponse> {
   const posture = args.negotiationPosture ?? "cooperative";

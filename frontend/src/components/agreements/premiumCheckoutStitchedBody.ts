@@ -111,7 +111,7 @@ export function buildPremiumPostCheckoutStitchedBody(
     ].join("\n"),
     [
       "8. NOTICES",
-      "Notices, approvals, and formal communications under this Agreement may be given by e-mail to the addresses the parties designate, with copies to other contacts they provide in the signature block or a written notice of address. Either Party may change its notice e-mail on written notice to the other Party.",
+      "Notices under this Agreement may be given by email to the addresses the parties designate, with copies to other contacts they provide in the signature block or a written notice of address. Either Party may change its notice email on written notice to the other Party.",
     ].join("\n"),
     [
       "9. GOVERNING LAW; VENUE",
@@ -202,10 +202,13 @@ function buildAiWorkflowServicesPremiumBody(
     "9. THIRD-PARTY SYSTEMS AND OPERATIONAL RISK",
     "AI tools, SaaS platforms, APIs, and other third-party systems may change, fail, restrict access, or produce unexpected results. Service Provider will use commercially reasonable care in configuration and implementation support but does not guarantee third-party platform availability, model outputs, or business results unless expressly stated in a signed writing.",
     "",
-    "10. GOVERNING LAW",
+    "10. TERM AND TERMINATION",
+    "This Agreement continues until the services are completed or the Parties end it sooner. Either Party may terminate for convenience on thirty (30) days' prior written notice, or immediately for material breach that remains uncured after written notice when a cure is reasonably possible. Provisions that by their nature should survive (including confidentiality, ownership, and payment for services performed) survive termination.",
+    "",
+    "11. GOVERNING LAW",
     `This Agreement is governed by the laws of ${law}, without regard to conflict-of-law rules.`,
     "",
-    "11. ELECTRONIC SIGNATURES",
+    "12. ELECTRONIC SIGNATURES",
     esign,
   ].join("\n");
   return body.replace(/\n{3,}/g, "\n\n").trim();
@@ -227,19 +230,51 @@ function tripartiteTitleFromIntake(draft: ParsedDraftShape, rawIntake: string): 
   );
 }
 
+function cleanTripartiteField(value: string | null | undefined): string {
+  const t = String(value || "").trim();
+  if (!t) return "";
+  if (/^(unknown|tbd|n\/?a|not yet specified|\[not yet specified\])$/i.test(t)) return "";
+  // Reject mis-captured labeled-field / intake prose blobs as contact fields.
+  if (/\b(?:signer\s+name|signer\s+title|signer\s+email|legal\s+entity|purpose)\s*:/i.test(t)) return "";
+  if (/\bunknown\b/i.test(t)) return "";
+  if (/\blicensing revenue\b/i.test(t)) return "";
+  return t;
+}
+
 function buildTripartiteWitnessExecutionBlocks(labeledBlocks: readonly LabeledPartyBlock[]): string[] {
   return labeledBlocks.map((block, index) => {
     const heading = tripartiteExecutionBlockHeading(index);
+    const signerName = cleanTripartiteField(block.signerName);
+    const signerTitle = cleanTripartiteField(block.signerTitle);
     const lines = [
       `${heading}:`,
       block.legalEntity,
       "By: ______________________________",
-      `Name: ${block.signerName || "______________________________"}`,
-      `Title: ${block.signerTitle || "______________________________"}`,
+      `Name: ${signerName || "______________________________"}`,
+      `Title: ${signerTitle || "______________________________"}`,
       "Date: ______________________________",
     ];
     return lines.join("\n");
   });
+}
+
+function buildTripartiteNoticeContactBlocks(labeledBlocks: readonly LabeledPartyBlock[]): string[] {
+  const blocks: string[] = [];
+  for (const block of labeledBlocks) {
+    const email = cleanTripartiteField(block.signerEmail);
+    const address = cleanTripartiteField(block.address);
+    const signerName = cleanTripartiteField(block.signerName);
+    const signerTitle = cleanTripartiteField(block.signerTitle);
+    if (!email && !address && !signerName) continue;
+    const lines = [`If to ${block.legalEntity}:`, block.legalEntity];
+    if (signerName) {
+      lines.push(`Attn: ${signerName}${signerTitle ? `, ${signerTitle}` : ""}`);
+    }
+    if (email) lines.push(`Email: ${email}`);
+    if (address) lines.push(`Address: ${address}`);
+    blocks.push(lines.join("\n"));
+  }
+  return blocks;
 }
 
 function suggestSoftwareDevTitle(d: ParsedDraftShape, raw: string): string {
@@ -345,7 +380,17 @@ export function buildTripartitePremiumPostCheckoutStitchedBody(
     "",
     "Notices under this Agreement must be in writing and may be delivered by email, nationally recognized overnight courier, certified mail, or any other method the parties later approve in writing. A notice sent by email is effective when sent, provided the sender does not receive an automated delivery failure notice. A notice sent by courier or certified mail is effective when delivered or when delivery is refused.",
     "",
-    "Unless a party designates a different notice address in writing, email notices may be sent to the email address that party provides through the LawDog signing process. Mailing notices may be sent to the address that party provides through the LawDog signing process or later designates in writing.",
+  );
+  const noticeContacts = buildTripartiteNoticeContactBlocks(labeledBlocks);
+  if (noticeContacts.length > 0) {
+    blocks.push(...noticeContacts.flatMap((b) => ["", b]));
+  } else {
+    blocks.push(
+      "",
+      "Unless a party designates a different notice address in writing, email notices may be sent to the email address that party provides through the LawDog signing process. Mailing notices may be sent to the address that party provides through the LawDog signing process or later designates in writing.",
+    );
+  }
+  blocks.push(
     "",
     `${nextSection + 4}. MISCELLANEOUS`,
     "This Agreement constitutes the entire understanding among the Parties regarding the subject matter. Amendments must be in writing and signed by all Parties. If any provision is unenforceable, the remainder stays in effect.",

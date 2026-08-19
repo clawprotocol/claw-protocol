@@ -64,6 +64,33 @@ from backend.agreements.premium_agreement_finalization import (
     PremiumFinalizationResult,
     finalize_premium_agreement_if_needed,
 )
+from backend.agreements.draft_quality_ablation import (
+    H2A_NO_INTEL_SYSTEM_PROMPT,
+    PROSE_ONLY_SYSTEM_PROMPT,
+    SHORT_PROSE_SYSTEM_PROMPT,
+    UNSTRUCTURED_SYSTEM_PROMPT,
+    ablation_max_tokens_override,
+    ablation_temperature_override,
+    h2a_no_intel_field as draft_quality_h2a,
+    output_shape as draft_quality_output_shape,
+    prose_only_json as draft_quality_prose_only,
+    short_system_prompt as draft_quality_short_prompt,
+    skip_global_repair as draft_quality_skip_repair,
+)
+from backend.agreements.draft_quality_trace import (
+    api_trace_summary_allowed,
+    corpus_sha256 as draft_quality_corpus_sha256,
+    new_trace as new_draft_quality_trace,
+)
+from backend.agreements.semantic_term_authority import (
+    AuthorityGateResult,
+    assert_persistable_paid_pro_corpus,
+)
+from backend.agreements.explicit_acceptance_authority import (
+    ExplicitAcceptanceError,
+    ExplicitAcceptanceRecord,
+    establish_explicit_acceptance,
+)
 from backend.agreements.premium_full_draft_quality_gate import (
     build_free_reference_blob,
     build_premium_full_draft_repair_user_payload,
@@ -159,6 +186,113 @@ from backend.lawdog_dashboard.workspace_index import (
 )
 
 log = logging.getLogger(__name__)
+
+
+def _gate_persistable_sot_corpus(
+    *,
+    corpus: str,
+    intake_text: str = "",
+    prior_server_corpus: str = "",
+    finish_reason: str = "",
+    explicit_user_accepted_terms: str = "",
+    explicit_acceptance: Optional[ExplicitAcceptanceRecord] = None,
+    expected_tenant_id: str = "",
+    expected_actor_id: str = "",
+    expected_agreement_id: str = "",
+    expected_agreement_version: str = "",
+    expected_source_action: str = "",
+    expected_source_proposal_id: str = "",
+    surface: str,
+) -> AuthorityGateResult:
+    """Fail-closed gate before any path may write Paid Pro SoT corpus fields."""
+    from backend.agreements.explicit_acceptance_authority import assert_acceptance_covers_corpus
+
+    if explicit_acceptance is not None:
+        try:
+            assert_acceptance_covers_corpus(
+                explicit_acceptance,
+                tenant_id=expected_tenant_id or explicit_acceptance.tenant_id,
+                actor_id=expected_actor_id or explicit_acceptance.actor_id,
+                agreement_id=expected_agreement_id or explicit_acceptance.agreement_id,
+                agreement_version=expected_agreement_version
+                or explicit_acceptance.agreement_version,
+                corpus=corpus,
+                source_action=expected_source_action or explicit_acceptance.source_action,
+                source_proposal_id=expected_source_proposal_id
+                or explicit_acceptance.source_proposal_id,
+            )
+        except ExplicitAcceptanceError as exc:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "code": exc.code,
+                    "message": exc.message,
+                    "surface": surface,
+                },
+            ) from exc
+    gate = assert_persistable_paid_pro_corpus(
+        corpus=corpus,
+        intake_text=intake_text,
+        prior_server_corpus=prior_server_corpus,
+        finish_reason=finish_reason,
+        explicit_user_accepted_terms=explicit_user_accepted_terms,
+        explicit_acceptance=explicit_acceptance,
+    )
+    if gate.blocked:
+        log.error(
+            "[semantic-term-authority] event=blocked_sot_persist surface=%s codes=%s",
+            surface,
+            ",".join(f.code for f in gate.findings[:12]),
+        )
+        code = "unauthorized_semantic_insert"
+        if any(f.code == "finish_reason_length" for f in gate.findings):
+            code = "generation_truncated"
+        elif any(f.code.startswith("acceptance_") for f in gate.findings):
+            code = "explicit_acceptance_required"
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": code,
+                "message": "Cannot persist corpus: authority/truncation/acceptance gate failed",
+                "surface": surface,
+                "diagnostic": gate.as_diagnostic(),
+            },
+        )
+    return gate
+
+
+def _establish_owner_acceptance_for_persist(
+    *,
+    request: Request,
+    agreement_id: str,
+    agreement_version: str,
+    accepted_text: str,
+    source_action: str,
+    source_proposal_id: str = "",
+) -> ExplicitAcceptanceRecord:
+    """Server-side acceptance binding from the authenticated owner principal."""
+    subject = resolve_subject_from_request(request)
+    tenant = (org_id_from_subject(subject) or subject or "").strip()
+    actor = (
+        (request.headers.get("X-Claw-Test-Auth-User-Id") or "").strip()
+        or (request.headers.get("X-Claw-User-Id") or "").strip()
+        or tenant
+    )
+    try:
+        return establish_explicit_acceptance(
+            tenant_id=tenant,
+            actor_id=actor,
+            agreement_id=agreement_id,
+            agreement_version=str(agreement_version),
+            accepted_text=accepted_text,
+            source_action=source_action,
+            source_proposal_id=source_proposal_id,
+        )
+    except ExplicitAcceptanceError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail={"code": exc.code, "message": exc.message, "surface": source_action},
+        ) from exc
 
 
 def _save_draft_sync(
@@ -641,6 +775,10 @@ class AgreementDraft(AgreementDraftCreate):
     premium_render_source: Optional[str] = None
     """Pro review redline v1: pending import diff, reviewer suggestions, version ledger (JSON-only)."""
     pro_redline_v1: Optional[Dict[str, Any]] = None
+    """Server-established explicit acceptance binding for inventing-floor bypass (never a client Boolean)."""
+    explicit_acceptance_v1: Optional[Dict[str, Any]] = None
+    """Completion evidence package for fully executed agreements (who signed, when, corpus hash, retrieval)."""
+    completion_evidence_v1: Optional[Dict[str, Any]] = None
 
 
 def _merge_agreement_draft(base: AgreementDraft, **updates: Any) -> AgreementDraft:
@@ -870,6 +1008,8 @@ class PremiumFullDraftResponse(BaseModel):
     generation_model: str = ""
     """True when the client may retry premium-full-draft without a new free draft."""
     retryable: bool = False
+    """Eval-only metadata summary (hashes/usage/finish_reason). Never includes corpora. Non-production + TRACE only."""
+    draft_quality_trace: Optional[Dict[str, Any]] = None
 
 
 class PremiumFinalizationClarificationAnswer(BaseModel):
@@ -1065,6 +1205,14 @@ def _degraded_user_message_for_code(code: str) -> str:
         "premium_generation_insufficient": (
             "The full Pro draft didn't come back complete this time. Your Pro upgrade is saved — "
             "please use **Retry Pro draft** to generate the full agreement again."
+        ),
+        "output_truncated": (
+            "The draft was cut off before completion. No partial agreement was saved. "
+            "Please use **Retry Pro draft**."
+        ),
+        "unauthorized_semantic_insert": (
+            "LawDog blocked freezing text that introduced material terms without authority. "
+            "Your last valid draft was preserved. Please use **Retry Pro draft**."
         ),
         "dev_context_leak": "Your agreement is ready. You can refine any wording below, or use **Retry Pro draft** for a fresh pass.",
         "payload_limits": "Your agreement is ready. Try shortening the intake and using **Retry Pro draft**, or keep editing the text below.",
@@ -2049,6 +2197,7 @@ def premium_refine(request: Request, body: PremiumRefineRequest) -> PremiumRefin
             max_tokens=max_out,
             temperature=0.2 if body.action == "update" else 0.15,
             airlock_profile="agreement_outbound",
+            call_purpose="explicit_revision",
         )
         log.info(
             "claw_premium route=premium_refine openai_response_chars=%d action=%s",
@@ -2791,6 +2940,7 @@ def premium_finalize_audit(request: Request, body: PremiumFinalizeAuditRequest) 
             ],
             model=llm_model,
             max_tokens=max_out,
+            call_purpose="finalize_audit",
             temperature=0.1,
             airlock_profile="agreement_outbound",
         )
@@ -2866,6 +3016,7 @@ def premium_review_route(request: Request, body: PremiumReviewRouteRequest) -> P
             model=llm_model,
             max_tokens=max_out,
             temperature=0.1,
+            call_purpose="review_route",
             airlock_profile="agreement_outbound",
         )
         parsed = _extract_json_object(llm_text)
@@ -4226,6 +4377,7 @@ def _revise_llm_once(
                 {"role": "user", "content": json.dumps(payload, ensure_ascii=False)},
             ],
             model=llm_model,
+            call_purpose="structured_revision",
             max_tokens=max_tokens,
             temperature=temperature,
             trace_context=trace_context,
@@ -4425,6 +4577,7 @@ def parse_agreement_intake(request: Request, body: AgreementParseRequest) -> Agr
             temperature=0.0,
             usage_sink=usage_holder,
             airlock_profile="agreement_outbound",
+            call_purpose="structured_extraction",
         )
         parsed = _extract_json_object(llm_text)
         if body.ai_model_class == "premium":
@@ -4519,6 +4672,7 @@ def premium_missing_facts(request: Request, body: PremiumMissingFactsRequest) ->
                 {"role": "user", "content": json.dumps(user_payload, ensure_ascii=False)},
             ],
             model=llm_model,
+            call_purpose="missing_facts",
             max_tokens=max_out,
             temperature=0.1,
             airlock_profile="agreement_outbound",
@@ -4643,14 +4797,19 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Respo
     """
     One-shot premium model: full agreement document (not stitched field transforms).
     Returns JSON with `document_text` as the primary body for LawDog Pro read-only preview.
+
+    Paid-beta contract: Pro entitlement required — Genesis and authenticated-none are denied.
     """
-    from backend.security.commercial_auth import require_commercial_owner_principal
-    require_commercial_owner_principal(request)
+    from backend.security.commercial_auth import require_paid_pro_principal
+    require_paid_pro_principal(request)
     ok_txt, msg_txt = validate_negotiate_text(body.intake_text, "owner")
     if not ok_txt:
         raise HTTPException(status_code=400, detail=msg_txt)
     request_ip = request.client.host if request.client else "unknown"
     max_out = max(2000, int(os.environ.get("CLAW_PREMIUM_FULL_DRAFT_MAX_TOKENS", "8000")))
+    _ablation_max = ablation_max_tokens_override()
+    if _ablation_max is not None:
+        max_out = _ablation_max
     sim_regen = bool(getattr(body, "similarity_regeneration", False))
     llm_model = resolve_llm_model_for_access_class("premium_regen" if sim_regen else "premium")
     if sim_regen:
@@ -4750,6 +4909,38 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Respo
             server_timing=server_timing,
             request=request,
         )
+    primary_temp = 0.2 if sim_regen else 0.15
+    _ablation_temp = ablation_temperature_override()
+    if _ablation_temp is not None:
+        primary_temp = _ablation_temp
+
+    def _ablation_system_prompt() -> str:
+        shape = draft_quality_output_shape()
+        if shape == "unstructured":
+            return UNSTRUCTURED_SYSTEM_PROMPT
+        if draft_quality_h2a():
+            return H2A_NO_INTEL_SYSTEM_PROMPT
+        if draft_quality_prose_only() or shape == "single_field":
+            return PROSE_ONLY_SYSTEM_PROMPT
+        if draft_quality_short_prompt():
+            return SHORT_PROSE_SYSTEM_PROMPT
+        return _premium_full_draft_system_prompt()
+
+    _sys_prompt_for_hash = _ablation_system_prompt()
+    dq_trace = new_draft_quality_trace(
+        trace_id=f"{session_hint}-{client_gen[:12] if client_gen != 'n/a' else 'na'}",
+        model_id=str(llm_model or ""),
+        temperature=primary_temp,
+        max_tokens=max_out,
+        intake_text=intake_s,
+        payload_json_len=len(json.dumps(user_payload, ensure_ascii=False)),
+        sim_regen=sim_regen,
+        prompt_text_for_hash=_sys_prompt_for_hash,
+        correlation_id=client_gen if client_gen != "n/a" else session_hint,
+        fixture_version=(os.environ.get("CLAW_DRAFT_QUALITY_FIXTURE_VERSION") or "").strip(),
+    )
+    # Always capture usage/finish_reason so truncation cannot silently reach SoT.
+    dq_usage_primary: List[Dict[str, Any]] = []
     try:
         if server_timing is not None:
             server_timing.mark_instant(
@@ -4760,15 +4951,67 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Respo
         llm_primary_started = time.perf_counter()
         llm_text = call_legal_llm(
             messages=[
-                {"role": "system", "content": _premium_full_draft_system_prompt()},
+                {"role": "system", "content": _sys_prompt_for_hash},
                 {"role": "user", "content": json.dumps(user_payload, ensure_ascii=False)},
             ],
             model=llm_model,
             max_tokens=max_out,
-            temperature=0.2 if sim_regen else 0.15,
+            temperature=primary_temp,
+            usage_sink=dq_usage_primary,
             airlock_profile="agreement_outbound",
             airlock_log_context="premium_full_draft:primary",
+            call_purpose="agreement_drafting",
         )
+        _primary_finish = str((dq_usage_primary[-1] if dq_usage_primary else {}).get("finish_reason") or "")
+        if _primary_finish.strip().lower() == "length":
+            log.error(
+                "[premium-full-draft] event=truncated_output finish_reason=length "
+                "session_hint=%s completion_tokens=%s",
+                session_hint,
+                (dq_usage_primary[-1] if dq_usage_primary else {}).get("completion_tokens"),
+            )
+            dm = _premium_full_draft_degraded_response(
+                intake_s=intake_s,
+                ctx_dict=ctx_dict,
+                failure_code="output_truncated",
+                failure_message=(
+                    "The draft was truncated before completion. No partial agreement was frozen. "
+                    "Tap Retry Pro draft."
+                ),
+            )
+            return _premium_full_draft_finalize_http_response(
+                dm,
+                intake_len=len(intake_s),
+                session_hint=session_hint,
+                server_timing=server_timing,
+                request=request,
+            )
+        if dq_trace.enabled:
+            u0 = dq_usage_primary[-1] if dq_usage_primary else {}
+            if u0.get("model"):
+                dq_trace.model_id = str(u0.get("model"))
+            dq_trace.record_llm_call(
+                label="primary",
+                usage=u0,
+                finish_reason=str(u0.get("finish_reason") or ""),
+                response_chars=len((llm_text or "").strip()),
+                temperature=primary_temp,
+                max_tokens=max_out,
+                model=str(u0.get("model") or llm_model or ""),
+                request_id=str(u0.get("request_id") or ""),
+                response_id=str(u0.get("response_id") or ""),
+                latency_ms=round((time.perf_counter() - llm_primary_started) * 1000, 2),
+            )
+            dq_trace.record_stage("raw_model_response", llm_text or "", extra={"parse": "pending"})
+            log.info(
+                "[draft-quality-trace] event=primary_llm finish_reason=%s "
+                "completion_tokens=%s response_chars=%s model=%s response_id=%s",
+                u0.get("finish_reason"),
+                u0.get("completion_tokens"),
+                len((llm_text or "").strip()),
+                u0.get("model") or llm_model,
+                u0.get("response_id") or "",
+            )
         if server_timing is not None:
             server_timing.record(
                 "backend_llm_primary",
@@ -4827,6 +5070,7 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Respo
             # the normal parsed-JSON path (this except block completes without re-raising, so execution
             # continues at ``out_primary = _normalize_premium_full_draft_result(parsed)`` below).
             regen_started = time.perf_counter()
+            dq_usage_regen: List[Dict[str, Any]] = []
             llm_regen = call_legal_llm(
                 messages=[
                     {"role": "system", "content": _premium_full_draft_system_prompt()},
@@ -4835,9 +5079,24 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Respo
                 model=llm_model,
                 max_tokens=max_out,
                 temperature=0.15,
+                usage_sink=dq_usage_regen if dq_trace.enabled else None,
                 airlock_profile="agreement_outbound",
+                call_purpose="agreement_drafting",
+                repair_status="regen",
                 airlock_log_context="premium_full_draft:json_parse_regen",
             )
+            if dq_trace.enabled:
+                ur = dq_usage_regen[-1] if dq_usage_regen else {}
+                dq_trace.record_llm_call(
+                    label="json_parse_regen",
+                    usage=ur,
+                    finish_reason=str(ur.get("finish_reason") or ""),
+                    response_chars=len((llm_regen or "").strip()),
+                    temperature=0.15,
+                    max_tokens=max_out,
+                    model=str(ur.get("model") or llm_model or ""),
+                )
+                dq_trace.record_stage("raw_model_response_regen", llm_regen or "")
             if server_timing is not None:
                 server_timing.record(
                     "backend_llm_repair_or_regen",
@@ -4888,6 +5147,31 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Respo
                 )
                 raise parse_exc
         out_primary = _normalize_premium_full_draft_result(parsed)
+        if dq_trace.enabled:
+            primary_auth = (
+                (out_primary.authoritative_draft or out_primary.document_text or "").strip()
+            )
+            intel_dump = ""
+            try:
+                intel_dump = json.dumps(
+                    out_primary.agreement_intelligence.model_dump()
+                    if hasattr(out_primary.agreement_intelligence, "model_dump")
+                    else {},
+                    ensure_ascii=False,
+                )
+            except Exception:
+                intel_dump = ""
+            dq_trace.record_stage(
+                "post_normalize_authoritative_draft",
+                primary_auth,
+                extra={
+                    "intelligence_json_len": len(intel_dump),
+                    "intelligence_sha256": draft_quality_corpus_sha256(intel_dump)
+                    if intel_dump
+                    else "",
+                    "title_len": len((out_primary.title or "").strip()),
+                },
+            )
         if server_timing is not None:
             server_timing.record(
                 "backend_parse_normalize",
@@ -4949,6 +5233,18 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Respo
             (out_primary.document_text or "").strip(), intake=intake_s, context=ctx_dict
         )
         needs_regeneration = (not ok_all) or (not primary_substance_ok)
+        if draft_quality_skip_repair():
+            needs_regeneration = False
+            if dq_trace.enabled:
+                dq_trace.record_stage(
+                    "ablation_skip_repair",
+                    (out_primary.document_text or "").strip(),
+                    extra={
+                        "would_have_repaired": bool((not ok_all) or (not primary_substance_ok)),
+                        "quality_ok": bool(ok_all),
+                        "substance_ok": bool(primary_substance_ok),
+                    },
+                )
         repair_reasons = list(
             dict.fromkeys(
                 [*reject_reasons, *(primary_substance_reasons if not primary_substance_ok else [])]
@@ -4986,6 +5282,7 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Respo
                 raise ValueError("repair_payload_too_large")
             airlock_wire_text = json.dumps(repair_payload, ensure_ascii=False)
             llm_repair_started = time.perf_counter()
+            dq_usage_repair: List[Dict[str, Any]] = []
             llm_repair = call_legal_llm(
                 messages=[
                     {"role": "system", "content": premium_full_draft_repair_system_prompt()},
@@ -4994,10 +5291,26 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Respo
                 model=llm_model,
                 max_tokens=max_out,
                 temperature=0.22,
+                usage_sink=dq_usage_repair if dq_trace.enabled else None,
                 airlock_profile="agreement_outbound",
+                call_purpose="conditional_repair",
+                repair_status="repair",
                 airlock_log_context="premium_full_draft:repair",
             )
             repair_llm_ms = (time.perf_counter() - llm_repair_started) * 1000
+            if dq_trace.enabled:
+                urep = dq_usage_repair[-1] if dq_usage_repair else {}
+                dq_trace.record_llm_call(
+                    label="repair",
+                    usage=urep,
+                    finish_reason=str(urep.get("finish_reason") or ""),
+                    response_chars=len((llm_repair or "").strip()),
+                    temperature=0.22,
+                    max_tokens=max_out,
+                    model=str(urep.get("model") or llm_model or ""),
+                )
+                dq_trace.gate_reasons = list(repair_reasons)[:32]
+                dq_trace.record_stage("raw_repair_response", llm_repair or "")
             if server_timing is not None:
                 server_timing.record(
                     "backend_llm_repair",
@@ -5012,6 +5325,11 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Respo
             intelligence_parse_start = time.perf_counter()
             parsed_repair = _extract_json_object(llm_repair)
             out = _normalize_premium_full_draft_result(parsed_repair)
+            if dq_trace.enabled:
+                dq_trace.record_stage(
+                    "post_repair_authoritative_draft",
+                    (out.authoritative_draft or out.document_text or "").strip(),
+                )
             if server_timing is not None:
                 server_timing.record(
                     "backend_parse_normalize",
@@ -5052,6 +5370,7 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Respo
                 raise ValueError("clean_premium_user_payload_too_large")
             airlock_wire_text = json.dumps(up_clean, ensure_ascii=False)
             llm_sanitized_started = time.perf_counter()
+            dq_usage_clean: List[Dict[str, Any]] = []
             llm_clean = call_legal_llm(
                 messages=[
                     {"role": "system", "content": _premium_full_draft_system_prompt()},
@@ -5060,10 +5379,25 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Respo
                 model=llm_model,
                 max_tokens=max_out,
                 temperature=0.12,
+                usage_sink=dq_usage_clean if dq_trace.enabled else None,
+                call_purpose="agreement_drafting",
+                repair_status="retry",
                 airlock_profile="agreement_outbound",
                 airlock_log_context="premium_full_draft:sanitized_retry",
             )
             sanitized_llm_ms = (time.perf_counter() - llm_sanitized_started) * 1000
+            if dq_trace.enabled:
+                uc = dq_usage_clean[-1] if dq_usage_clean else {}
+                dq_trace.record_llm_call(
+                    label="sanitized_retry",
+                    usage=uc,
+                    finish_reason=str(uc.get("finish_reason") or ""),
+                    response_chars=len((llm_clean or "").strip()),
+                    temperature=0.12,
+                    max_tokens=max_out,
+                    model=str(uc.get("model") or llm_model or ""),
+                )
+                dq_trace.record_stage("raw_sanitized_retry_response", llm_clean or "")
             if server_timing is not None:
                 server_timing.record(
                     "backend_llm_sanitized_retry",
@@ -5078,6 +5412,11 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Respo
             intelligence_parse_start = time.perf_counter()
             parsed_c = _extract_json_object(llm_clean)
             out_clean = _normalize_premium_full_draft_result(parsed_c)
+            if dq_trace.enabled:
+                dq_trace.record_stage(
+                    "post_sanitized_authoritative_draft",
+                    (out_clean.authoritative_draft or out_clean.document_text or "").strip(),
+                )
             if server_timing is not None:
                 server_timing.record(
                     "backend_parse_normalize",
@@ -5257,6 +5596,68 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Respo
             int(repair_used),
             generation_outcome,
         )
+        # Fail-closed authority gate: known inventing-floor fingerprints absent from intake
+        # must not leave the API as a successful freeze candidate.
+        _primary_fr = str((dq_usage_primary[-1] if dq_usage_primary else {}).get("finish_reason") or "")
+        auth_gate = assert_persistable_paid_pro_corpus(
+            corpus=doc,
+            intake_text=intake_s,
+            prior_server_corpus=(out_primary.document_text or "").strip(),
+            finish_reason=_primary_fr,
+        )
+        if auth_gate.blocked:
+            log.error(
+                "[semantic-term-authority] event=blocked_premium_full_draft codes=%s",
+                ",".join(f.code for f in auth_gate.findings[:12]),
+            )
+            dm = _premium_full_draft_degraded_response(
+                intake_s=intake_s,
+                ctx_dict=ctx_dict,
+                failure_code="unauthorized_semantic_insert",
+                failure_message=_degraded_user_message_for_code("unauthorized_semantic_insert"),
+            )
+            return _premium_full_draft_finalize_http_response(
+                dm,
+                intake_len=len(intake_s),
+                session_hint=session_hint,
+                server_timing=server_timing,
+                request=request,
+            )
+
+        dq_summary: Optional[Dict[str, Any]] = None
+        if dq_trace.enabled:
+            dq_trace.generation_outcome = str(generation_outcome)
+            dq_trace.gate_reasons = list(final_reasons)[:32]
+            dq_trace.record_stage(
+                "post_server_final_document",
+                doc,
+                extra={
+                    "repair_used": bool(repair_used),
+                    "generation_outcome": str(generation_outcome),
+                },
+            )
+            # Metadata-only summary may attach on non-production when TRACE=1.
+            # Full corpora never ride the HTTP response.
+            if api_trace_summary_allowed():
+                dq_summary = dq_trace.summary()
+            try:
+                persisted = dq_trace.persist_local()
+                dq_trace.safe_log_event("complete")
+                log.info(
+                    "[draft-quality-trace] event=complete_meta trace_id=%s persisted=%s "
+                    "stages=%s llm_calls=%s finish_reasons=%s api_summary=%s",
+                    dq_trace.trace_id,
+                    "1" if persisted else "0",
+                    len(dq_trace.stages),
+                    len(dq_trace.llm_calls),
+                    ",".join(str(c.get("finish_reason") or "") for c in dq_trace.llm_calls),
+                    int(dq_summary is not None),
+                )
+            except Exception as persist_exc:
+                log.warning(
+                    "[draft-quality-trace] event=persist_failed err=%s",
+                    type(persist_exc).__name__,
+                )
         ok_model = PremiumFullDraftResponse(
             title=out.title,
             agreement_family=out.agreement_family,
@@ -5273,6 +5674,7 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Respo
             generation_ok=bool(doc.strip()),
             generation_model=str(llm_model or ""),
             retryable=False,
+            draft_quality_trace=dq_summary,
         )
         return _premium_full_draft_finalize_http_response(
             ok_model,
@@ -5410,6 +5812,7 @@ def premium_agreement_review(request: Request, body: PremiumAgreementReviewReque
             model=llm_model,
             max_tokens=max_out,
             temperature=0.2,
+            call_purpose="premium_review",
             airlock_profile="agreement_outbound",
         )
         log.info("claw_premium route=premium_review openai_response_chars=%d", len((llm_text or "").strip()))
@@ -5433,10 +5836,20 @@ def premium_agreement_review(request: Request, body: PremiumAgreementReviewReque
 
 @router.get("/usage/summary")
 def get_agreement_usage_summary(request: Request) -> Dict[str, Any]:
-    """User-facing usage (no internal Key units)."""
+    """User-facing usage (no internal Key units).
+
+    Guests with a valid anonymous session may read their own summary (TTL /
+    soft-throttle). Authenticated workspaces require a verified owner principal.
+    """
     from backend.security.commercial_auth import require_commercial_owner_principal
-    require_commercial_owner_principal(request)
-    return usage_summary_for_subject(resolve_subject_from_request(request))
+    from backend.security.request_identity import resolve_workspace_identity
+    from backend.usage_economics.policy import require_claw_org_id_header
+
+    require_claw_org_id_header(request)
+    identity = resolve_workspace_identity(request)
+    if identity.kind != "anonymous":
+        require_commercial_owner_principal(request)
+    return usage_summary_for_subject(identity.subject_ref)
 
 
 def _ensure_agreement_parties_have_ids(parties: List[AgreementParty]) -> List[AgreementParty]:
@@ -5794,6 +6207,34 @@ def _persist_review_first_final_corpus_if_supplied(
     existing_hash = _review_first_corpus_hash(existing) if existing else ""
     if existing_hash == corpus_hash:
         return
+
+    # Fail-closed: do not persist mutated SoT corpus with unauthorized inventing-floor fingerprints.
+    intake_auth = str(getattr(draft, "intake_text", None) or getattr(draft, "purpose", None) or "")
+    prior_server = str(
+        getattr(draft, "server_full_document_text", None)
+        or getattr(draft, "premium_server_full_document_text", None)
+        or existing
+        or ""
+    )
+    auth_gate = assert_persistable_paid_pro_corpus(
+        corpus=corpus,
+        intake_text=intake_auth,
+        prior_server_corpus=prior_server,
+    )
+    if auth_gate.blocked:
+        log.error(
+            "[semantic-term-authority] event=blocked_review_first_persist agreement_id_short=%s codes=%s",
+            agreement_id[:8],
+            ",".join(f.code for f in auth_gate.findings[:12]),
+        )
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "unauthorized_semantic_insert",
+                "message": "Cannot persist corpus: material terms lack authority",
+                "diagnostic": auth_gate.as_diagnostic(),
+            },
+        )
 
     pro_redline = dict(draft.pro_redline_v1 or {})
     pro_redline["review_first_final_corpus"] = {
@@ -7733,255 +8174,284 @@ def post_vs01_signer_complete(
         merge_fresh_audit_for_vs01_signer,
         orchestrate_vs01_signer_complete,
         resolve_participant_id_for_signer_role,
+        vs01_signer_complete_lock,
     )
 
-    draft = _load_or_404(aid)
-    stored_pkt = draft.vs01_signing_packet_v1 if isinstance(draft.vs01_signing_packet_v1, dict) else {}
-    packet_state = str(stored_pkt.get("packet_state") or "active").strip().lower()
-    if packet_state in ("cancelled", "superseded"):
-        raise HTTPException(
-            status_code=403,
-            detail={
-                "code": f"packet_{packet_state}",
-                "message": (
-                    "This signing packet was cancelled or replaced. "
-                    "Ask the sender for a new signing link."
-                ),
-            },
-        )
-    frozen_chk = draft.frozen_signing_authority_v1 if isinstance(draft.frozen_signing_authority_v1, dict) else {}
-    frozen_state = str(
-        frozen_chk.get("packetState") or frozen_chk.get("packet_state") or "active"
-    ).strip().lower()
-    if frozen_state in ("cancelled", "superseded"):
-        raise HTTPException(
-            status_code=403,
-            detail={
-                "code": f"packet_{frozen_state}",
-                "message": (
-                    "This signing packet was cancelled or replaced. "
-                    "Ask the sender for a new signing link."
-                ),
-            },
-        )
-
-    now = (body.signed_at or "").strip() or _utc_now_iso()
-    signed_date_iso = (body.signed_date_iso or "").strip() or now[:10]
-    signed_date_display = (body.signed_date_display or "").strip()
-    if not signed_date_display and signed_date_iso:
-        try:
-            from backend.services.vs01_fully_executed_snapshot import _format_signing_date_display
-
-            signed_date_display = _format_signing_date_display(signed_date_iso)
-        except Exception:
-            signed_date_display = signed_date_iso
-    participant_id = resolve_participant_id_for_signer_role(
-        draft.model_dump(),
-        signer_role_id,
-        body.participant_id or "",
-    )
-    lock_row = read_signing_lock(aid)
-    lv = str((lock_row or {}).get("locked_version_id") or "").strip() or None
-    fp = _agreement_version_hash(aid, lv, draft) if lv else None
-    display_name = (body.display_name or "").strip()
-    if not display_name and participant_id:
-        sp = _signer_party_by_participant_id(draft, participant_id)
-        if sp:
-            display_name = (sp.name or "").strip()
-
-    from backend.services.accepted_review_snapshot import requires_accepted_snapshot_for_continuation
-
-    # Commercial post-cutover: every completion path must bind accepted snapshot,
-    # including requests that omit portable_packet (hydrate from stored packet).
-    require_snap = requires_accepted_snapshot_for_continuation(draft)
-    stored_portable = stored_pkt.get("portable") if isinstance(stored_pkt.get("portable"), dict) else None
-    portable_packet = body.portable_packet if isinstance(body.portable_packet, dict) else None
-    if require_snap:
-        if portable_packet is None and isinstance(stored_portable, dict):
-            portable_packet = dict(stored_portable)
-        if not isinstance(portable_packet, dict):
+    with vs01_signer_complete_lock(aid):
+        draft = _load_or_404(aid)
+        stored_pkt = draft.vs01_signing_packet_v1 if isinstance(draft.vs01_signing_packet_v1, dict) else {}
+        packet_state = str(stored_pkt.get("packet_state") or "active").strip().lower()
+        if packet_state in ("cancelled", "superseded"):
             raise HTTPException(
-                status_code=400,
+                status_code=403,
                 detail={
-                    "code": "accepted_review_snapshot_required",
-                    "message": "Signer completion requires an accepted review snapshot binding.",
+                    "code": f"packet_{packet_state}",
+                    "message": (
+                        "This signing packet was cancelled or replaced. "
+                        "Ask the sender for a new signing link."
+                    ),
                 },
             )
-        portable_packet = _attest_portable_envelope_or_400(
-            agreement_id=aid,
-            portable=portable_packet,
-            draft=draft,
-            stored_portable=stored_portable,
-            surface="vs01_signer_complete",
-            require_accepted_snapshot=True,
-        )
-    elif isinstance(portable_packet, dict):
-        portable_packet = _attest_portable_envelope_or_400(
-            agreement_id=aid,
-            portable=portable_packet,
-            draft=draft,
-            stored_portable=stored_portable,
-            surface="vs01_signer_complete",
-            require_accepted_snapshot=False,
-        )
-
-    pending = orchestrate_vs01_signer_complete(
-        draft.model_dump(),
-        signer_role_id=signer_role_id,
-        participant_id=participant_id,
-        display_name=display_name,
-        document_id=(body.document_id or "").strip(),
-        signed_at=now,
-        signed_date_iso=signed_date_iso,
-        signed_date_display=signed_date_display,
-        locked_version_id=lv,
-        agreement_version_hash=fp,
-        portable_packet=portable_packet,
-    )
-
-    fresh = _load_or_404(aid)
-    outcome = merge_fresh_audit_for_vs01_signer(
-        fresh.model_dump(),
-        pending,
-        signer_role_id=signer_role_id,
-        portable_packet=portable_packet,
-    )
-
-    completion_emails_sent = completion_emails_already_sent(outcome.audit)
-
-    if outcome.audit_mutated:
-        from backend.services.recipient_delivery_registry import get_registry_revision
-
-        draft_dict_to_save = outcome.draft_dict
-        base_rev = get_registry_revision(draft_dict_to_save)
-        registry_mutated = False
-        # Replay protection: consume/supersede active signing invite JTI after recipient complete.
-        # Phase must be "signing" to match validate_recipient_access_token_for_agreement.
-        if auth_mode == "recipient" and participant_id:
-            from backend.services.recipient_delivery_registry import (
-                extract_jti_from_token,
-                supersede_active_invite,
+        frozen_chk = draft.frozen_signing_authority_v1 if isinstance(draft.frozen_signing_authority_v1, dict) else {}
+        frozen_state = str(
+            frozen_chk.get("packetState") or frozen_chk.get("packet_state") or "active"
+        ).strip().lower()
+        if frozen_state in ("cancelled", "superseded"):
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "code": f"packet_{frozen_state}",
+                    "message": (
+                        "This signing packet was cancelled or replaced. "
+                        "Ask the sender for a new signing link."
+                    ),
+                },
             )
 
-            draft_dict_to_save = supersede_active_invite(
-                dict(draft_dict_to_save),
-                phase="signing",
-                participant_id=participant_id,
-                jti=extract_jti_from_token(recipient_token_raw or ""),
-                audit_log=list(outcome.audit),
-            )
-            registry_mutated = True
-        next_draft = _merge_agreement_draft(
-            fresh,
-            updated_at=now,
-            audit_log=draft_dict_to_save.get("audit_log") or outcome.audit,
-            vs01_signing_packet_v1=draft_dict_to_save.get("vs01_signing_packet_v1"),
-            recipient_delivery_v1=draft_dict_to_save.get("recipient_delivery_v1"),
-        )
-        if registry_mutated:
-            _save_draft_registry_cas_sync(
-                next_draft.model_dump(), request, expected_revision=base_rev
-            )
-        else:
-            _save_draft_sync(next_draft.model_dump(), request)
-
-        if outcome.newly_finalized:
-            assert_can_complete_agreement(agreement_id=aid)
-            record_agreement_finalized(agreement_id=aid)
-            record_public_feed_event_if_applicable(
-                draft_dict=next_draft.model_dump(),
-                event_type="signed",
-                at=now,
-            )
+        now = (body.signed_at or "").strip() or _utc_now_iso()
+        signed_date_iso = (body.signed_date_iso or "").strip() or now[:10]
+        signed_date_display = (body.signed_date_display or "").strip()
+        if not signed_date_display and signed_date_iso:
             try:
-                from backend.integrations.hooks_emit import (
-                    claw_emit_integration_event,
-                    claw_org_id_for_registered_agreement,
+                from backend.services.vs01_fully_executed_snapshot import _format_signing_date_display
+
+                signed_date_display = _format_signing_date_display(signed_date_iso)
+            except Exception:
+                signed_date_display = signed_date_iso
+        participant_id = resolve_participant_id_for_signer_role(
+            draft.model_dump(),
+            signer_role_id,
+            body.participant_id or "",
+        )
+        lock_row = read_signing_lock(aid)
+        lv = str((lock_row or {}).get("locked_version_id") or "").strip() or None
+        fp = _agreement_version_hash(aid, lv, draft) if lv else None
+        display_name = (body.display_name or "").strip()
+        if not display_name and participant_id:
+            sp = _signer_party_by_participant_id(draft, participant_id)
+            if sp:
+                display_name = (sp.name or "").strip()
+
+        from backend.services.accepted_review_snapshot import requires_accepted_snapshot_for_continuation
+
+        # Commercial post-cutover: every completion path must bind accepted snapshot,
+        # including requests that omit portable_packet (hydrate from stored packet).
+        require_snap = requires_accepted_snapshot_for_continuation(draft)
+        stored_portable = stored_pkt.get("portable") if isinstance(stored_pkt.get("portable"), dict) else None
+        portable_packet = body.portable_packet if isinstance(body.portable_packet, dict) else None
+        if require_snap:
+            if portable_packet is None and isinstance(stored_portable, dict):
+                portable_packet = dict(stored_portable)
+            if not isinstance(portable_packet, dict):
+                raise HTTPException(
+                    status_code=400,
+                    detail={
+                        "code": "accepted_review_snapshot_required",
+                        "message": "Signer completion requires an accepted review snapshot binding.",
+                    },
+                )
+            portable_packet = _attest_portable_envelope_or_400(
+                agreement_id=aid,
+                portable=portable_packet,
+                draft=draft,
+                stored_portable=stored_portable,
+                surface="vs01_signer_complete",
+                require_accepted_snapshot=True,
+            )
+        elif isinstance(portable_packet, dict):
+            portable_packet = _attest_portable_envelope_or_400(
+                agreement_id=aid,
+                portable=portable_packet,
+                draft=draft,
+                stored_portable=stored_portable,
+                surface="vs01_signer_complete",
+                require_accepted_snapshot=False,
+            )
+
+        pending = orchestrate_vs01_signer_complete(
+            draft.model_dump(),
+            signer_role_id=signer_role_id,
+            participant_id=participant_id,
+            display_name=display_name,
+            document_id=(body.document_id or "").strip(),
+            signed_at=now,
+            signed_date_iso=signed_date_iso,
+            signed_date_display=signed_date_display,
+            locked_version_id=lv,
+            agreement_version_hash=fp,
+            portable_packet=portable_packet,
+        )
+
+        fresh = _load_or_404(aid)
+        outcome = merge_fresh_audit_for_vs01_signer(
+            fresh.model_dump(),
+            pending,
+            signer_role_id=signer_role_id,
+            portable_packet=portable_packet,
+        )
+
+        completion_emails_sent = completion_emails_already_sent(outcome.audit)
+
+        if outcome.audit_mutated:
+            from backend.services.recipient_delivery_registry import get_registry_revision
+
+            draft_dict_to_save = outcome.draft_dict
+            base_rev = get_registry_revision(draft_dict_to_save)
+            registry_mutated = False
+            # Replay protection: consume/supersede active signing invite JTI after recipient complete.
+            # Phase must be "signing" to match validate_recipient_access_token_for_agreement.
+            if auth_mode == "recipient" and participant_id:
+                from backend.services.recipient_delivery_registry import (
+                    extract_jti_from_token,
+                    supersede_active_invite,
                 )
 
-                oid = claw_org_id_for_registered_agreement(aid)
-                if oid:
-                    fp_short = fp[:24] if fp else ""
-                    claw_emit_integration_event(
-                        oid,
-                        "agreement.signed",
-                        "agreement",
-                        aid,
-                        {"locked_version_id": lv, "agreement_version_hash_prefix": fp_short},
-                    )
-                    claw_emit_integration_event(
-                        oid,
-                        "agreement.completed",
-                        "agreement",
-                        aid,
-                        {"locked_version_id": lv, "lifecycle": "fully_executed"},
-                    )
-            except Exception:
-                pass
-
-    if outcome.fully_executed:
-        from backend.services.vs01_fully_executed_snapshot import ensure_fully_executed_snapshot_on_draft
-
-        reloaded_for_snap = _load_or_404(aid)
-        ensured = ensure_fully_executed_snapshot_on_draft(
-            reloaded_for_snap.model_dump(),
-            agreement_id=aid,
-        )
-        if ensured.mutated:
-            snap_draft = _merge_agreement_draft(
-                reloaded_for_snap,
+                draft_dict_to_save = supersede_active_invite(
+                    dict(draft_dict_to_save),
+                    phase="signing",
+                    participant_id=participant_id,
+                    jti=extract_jti_from_token(recipient_token_raw or ""),
+                    audit_log=list(outcome.audit),
+                )
+                registry_mutated = True
+            next_draft = _merge_agreement_draft(
+                fresh,
                 updated_at=now,
-                vs01_signing_packet_v1=ensured.draft_dict.get("vs01_signing_packet_v1"),
+                audit_log=draft_dict_to_save.get("audit_log") or outcome.audit,
+                vs01_signing_packet_v1=draft_dict_to_save.get("vs01_signing_packet_v1"),
+                recipient_delivery_v1=draft_dict_to_save.get("recipient_delivery_v1"),
             )
-            _save_draft_sync(snap_draft.model_dump(), request)
-
-    if outcome.fully_executed:
-        from backend.services.vs01_signer_completion import vs01_completion_email_lock
-
-        with vs01_completion_email_lock(aid):
-            reloaded = _load_or_404(aid)
-            reloaded_audit = list(reloaded.model_dump().get("audit_log") or [])
-            if completion_emails_already_sent(reloaded_audit):
-                completion_emails_sent = True
+            if registry_mutated:
+                _save_draft_registry_cas_sync(
+                    next_draft.model_dump(), request, expected_revision=base_rev
+                )
             else:
+                _save_draft_sync(next_draft.model_dump(), request)
+
+            if outcome.newly_finalized:
+                assert_can_complete_agreement(agreement_id=aid)
+                record_agreement_finalized(agreement_id=aid)
+                record_public_feed_event_if_applicable(
+                    draft_dict=next_draft.model_dump(),
+                    event_type="signed",
+                    at=now,
+                )
                 try:
-                    from backend.services.email.signing_completion_delivery import (
-                        maybe_send_signing_completion_emails,
+                    from backend.integrations.hooks_emit import (
+                        claw_emit_integration_event,
+                        claw_org_id_for_registered_agreement,
                     )
 
-                    notify_audit = maybe_send_signing_completion_emails(
-                        agreement_id=aid,
-                        draft={**reloaded.model_dump(), "audit_log": reloaded_audit},
-                        org_id=resolve_subject_from_request(request),
-                    )
-                    if notify_audit:
-                        fresh_for_email = _load_or_404(aid)
-                        fresh_audit = list(fresh_for_email.model_dump().get("audit_log") or [])
-                        if not completion_emails_already_sent(fresh_audit):
-                            email_audit = list(fresh_audit)
-                            email_audit.append(AuditEvent.model_validate(notify_audit).model_dump())
-                            next_email = _merge_agreement_draft(
-                                fresh_for_email,
-                                updated_at=now,
-                                audit_log=email_audit,
-                            )
-                            _save_draft_sync(next_email.model_dump(), request)
-                            completion_emails_sent = True
-                        else:
-                            completion_emails_sent = True
+                    oid = claw_org_id_for_registered_agreement(aid)
+                    if oid:
+                        fp_short = fp[:24] if fp else ""
+                        claw_emit_integration_event(
+                            oid,
+                            "agreement.signed",
+                            "agreement",
+                            aid,
+                            {"locked_version_id": lv, "agreement_version_hash_prefix": fp_short},
+                        )
+                        claw_emit_integration_event(
+                            oid,
+                            "agreement.completed",
+                            "agreement",
+                            aid,
+                            {"locked_version_id": lv, "lifecycle": "fully_executed"},
+                        )
                 except Exception:
-                    logging.getLogger(__name__).exception(
-                        "vs01_signing_completion_email_failed agreement_id=%s",
-                        aid,
-                    )
+                    pass
 
-    return {
-        "ok": True,
-        "already_signed": outcome.already_signed,
-        "fully_executed": outcome.fully_executed,
-        "completion_emails_sent": completion_emails_sent,
-        "auth_mode": auth_mode,
-    }
+        if outcome.fully_executed:
+            from backend.services.vs01_fully_executed_snapshot import ensure_fully_executed_snapshot_on_draft
+
+            reloaded_for_snap = _load_or_404(aid)
+            ensured = ensure_fully_executed_snapshot_on_draft(
+                reloaded_for_snap.model_dump(),
+                agreement_id=aid,
+            )
+            if ensured.mutated:
+                snap_draft = _merge_agreement_draft(
+                    reloaded_for_snap,
+                    updated_at=now,
+                    vs01_signing_packet_v1=ensured.draft_dict.get("vs01_signing_packet_v1"),
+                )
+                _save_draft_sync(snap_draft.model_dump(), request)
+
+        completion_evidence_created = False
+        if outcome.fully_executed:
+            from backend.services.completion_evidence_package import (
+                completion_evidence_package_ready,
+                persist_completion_evidence_package,
+            )
+            from backend.config.email_config import app_public_origin
+
+            reloaded_for_evidence = _load_or_404(aid)
+            if not completion_evidence_package_ready(reloaded_for_evidence.model_dump()):
+                origin = (app_public_origin() or "").rstrip("/")
+                evidence_draft = persist_completion_evidence_package(
+                    reloaded_for_evidence.model_dump(),
+                    agreement_id=aid,
+                    origin=origin,
+                )
+                if evidence_draft.get("completion_evidence_v1"):
+                    evidence_merged = _merge_agreement_draft(
+                        reloaded_for_evidence,
+                        updated_at=now,
+                        completion_evidence_v1=evidence_draft.get("completion_evidence_v1"),
+                        audit_log=evidence_draft.get("audit_log"),
+                    )
+                    _save_draft_sync(evidence_merged.model_dump(), request)
+                    completion_evidence_created = True
+
+        if outcome.fully_executed:
+            from backend.services.vs01_signer_completion import vs01_completion_email_lock
+
+            with vs01_completion_email_lock(aid):
+                reloaded = _load_or_404(aid)
+                reloaded_audit = list(reloaded.model_dump().get("audit_log") or [])
+                if completion_emails_already_sent(reloaded_audit):
+                    completion_emails_sent = True
+                else:
+                    try:
+                        from backend.services.email.signing_completion_delivery import (
+                            maybe_send_signing_completion_emails,
+                        )
+
+                        notify_audit = maybe_send_signing_completion_emails(
+                            agreement_id=aid,
+                            draft={**reloaded.model_dump(), "audit_log": reloaded_audit},
+                            org_id=resolve_subject_from_request(request),
+                        )
+                        if notify_audit:
+                            fresh_for_email = _load_or_404(aid)
+                            fresh_audit = list(fresh_for_email.model_dump().get("audit_log") or [])
+                            if not completion_emails_already_sent(fresh_audit):
+                                email_audit = list(fresh_audit)
+                                email_audit.append(AuditEvent.model_validate(notify_audit).model_dump())
+                                next_email = _merge_agreement_draft(
+                                    fresh_for_email,
+                                    updated_at=now,
+                                    audit_log=email_audit,
+                                )
+                                _save_draft_sync(next_email.model_dump(), request)
+                                completion_emails_sent = True
+                            else:
+                                completion_emails_sent = True
+                    except Exception:
+                        logging.getLogger(__name__).exception(
+                            "vs01_signing_completion_email_failed agreement_id=%s",
+                            aid,
+                        )
+
+        return {
+            "ok": True,
+            "already_signed": outcome.already_signed,
+            "fully_executed": outcome.fully_executed,
+            "completion_evidence_created": completion_evidence_created,
+            "completion_emails_sent": completion_emails_sent,
+            "auth_mode": auth_mode,
+        }
 
 
 @router.post("/{agreement_id}/vs01-ensure-signed-snapshot")
@@ -9118,6 +9588,103 @@ def get_public_completed_signed_export_pdf(agreement_id: str) -> Response:
     return build_completed_signed_pdf_response(agreement_id=aid, draft=draft)
 
 
+@router.get("/{agreement_id}/completion-evidence")
+def get_completion_evidence(agreement_id: str, request: Request) -> Dict[str, Any]:
+    """
+    Retrieve completion evidence package for a fully-executed agreement.
+
+    Returns the tamper-evident evidence package containing:
+    - Signer attribution (who signed, when, party identity)
+    - Corpus hash (what record was signed)
+    - Retrieval paths for each party
+
+    Accessible by:
+    - Agreement owner
+    - Recipients with valid token bound to the agreement
+
+    Evidence is informational only. CLAW does not adjudicate disputes or
+    determine enforceability.
+    """
+    from backend.services.completion_evidence_package import (
+        completion_evidence_package_ready,
+        persist_completion_evidence_package,
+        read_completion_evidence_from_draft,
+    )
+    from backend.config.email_config import app_public_origin
+
+    aid = (agreement_id or "").strip()
+    if not aid:
+        raise HTTPException(status_code=400, detail="missing_agreement_id")
+
+    auth_mode: Optional[str] = None
+    if _agreements_write_allowed():
+        try:
+            _owner_mutation_guards(request, aid, surface="completion_evidence")
+            auth_mode = "owner"
+        except HTTPException:
+            pass
+
+    if not auth_mode:
+        try:
+            assert_agreement_full_draft_read_allowed(request, aid)
+            auth_mode = "recipient"
+        except HTTPException:
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "code": "access_denied",
+                    "message": "Access to completion evidence requires owner or recipient authorization.",
+                },
+            )
+
+    draft = _load_or_404(aid)
+    if not _agreement_draft_fully_executed(draft):
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "agreement_not_fully_executed",
+                "message": "Completion evidence is only available for fully executed agreements.",
+            },
+        )
+
+    evidence = read_completion_evidence_from_draft(draft.model_dump())
+    if not evidence:
+        origin = (app_public_origin() or "").rstrip("/")
+        updated_draft = persist_completion_evidence_package(
+            draft.model_dump(),
+            agreement_id=aid,
+            origin=origin,
+        )
+        if updated_draft.get("completion_evidence_v1"):
+            now = _utc_now_iso()
+            merged = _merge_agreement_draft(
+                draft,
+                updated_at=now,
+                completion_evidence_v1=updated_draft.get("completion_evidence_v1"),
+                audit_log=updated_draft.get("audit_log"),
+            )
+            _save_draft_sync(merged.model_dump(), request)
+            evidence = updated_draft.get("completion_evidence_v1")
+
+    if not evidence:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "evidence_unavailable",
+                "message": (
+                    "Completion evidence package could not be built. "
+                    "The fully executed snapshot may not be available yet."
+                ),
+            },
+        )
+
+    return {
+        "ok": True,
+        "evidence": evidence,
+        "auth_mode": auth_mode,
+    }
+
+
 def _draft_placeholder_intake_corpus(draft: AgreementDraft) -> str:
     """Best-effort intake allowlist for placeholder validation (party names, emails, purpose)."""
     parts: List[str] = []
@@ -9683,8 +10250,35 @@ def pro_redline_accept_import(agreement_id: str, request: Request) -> Dict[str, 
         )
     imported = fixed_imp.strip()
     base_before = _canonical_agreement_plain_from_raw(raw)
-    now = _utc_now_iso()
     from_v = int(pr.get("version_counter") or 0)
+    acceptance = _establish_owner_acceptance_for_persist(
+        request=request,
+        agreement_id=agreement_id,
+        agreement_version=str(from_v),
+        accepted_text=imported,
+        source_action="pro_redline_accept_import",
+        source_proposal_id=pid,
+    )
+    _gate_persistable_sot_corpus(
+        corpus=imported,
+        intake_text=str(raw.get("intake_text") or raw.get("purpose") or ""),
+        prior_server_corpus=str(
+            raw.get("server_full_document_text")
+            or raw.get("premium_server_full_document_text")
+            or base_before
+            or ""
+        ),
+        explicit_acceptance=acceptance,
+        expected_tenant_id=acceptance.tenant_id,
+        expected_actor_id=acceptance.actor_id,
+        expected_agreement_id=agreement_id,
+        expected_agreement_version=str(from_v),
+        expected_source_action="pro_redline_accept_import",
+        expected_source_proposal_id=pid,
+        surface="pro_redline_accept_import",
+    )
+    raw["explicit_acceptance_v1"] = acceptance.as_dict()
+    now = _utc_now_iso()
     pr["version_counter"] = from_v + 1
     base_snap, base_trunc = _truncate_redline_snapshot(base_before)
     imp_snap, imp_trunc = _truncate_redline_snapshot(imported)
@@ -9720,7 +10314,11 @@ def pro_redline_accept_import(agreement_id: str, request: Request) -> Dict[str, 
             event_type="pro_redline_import_accepted",
             at=now,
             field="pro_redline_v1",
-            value={"pending_id": pid, "version_number": pr["version_counter"]},
+            value={
+                "pending_id": pid,
+                "version_number": pr["version_counter"],
+                "explicit_acceptance_v1": acceptance.as_dict(),
+            },
         ).model_dump()
     )
     raw["audit_log"] = audit
@@ -9937,7 +10535,34 @@ def pro_redline_suggestion_mark_applied(
                 },
             )
         applied_doc = fixed_doc.strip()
+        accepted_ver = str(int(pr.get("version_counter") or 0))
+        acceptance = _establish_owner_acceptance_for_persist(
+            request=request,
+            agreement_id=agreement_id,
+            agreement_version=accepted_ver,
+            accepted_text=applied_doc,
+            source_action="pro_redline_mark_applied",
+            source_proposal_id=suggestion_id,
+        )
+        _gate_persistable_sot_corpus(
+            corpus=applied_doc,
+            intake_text=str(raw.get("intake_text") or raw.get("purpose") or ""),
+            prior_server_corpus=str(
+                raw.get("server_full_document_text")
+                or raw.get("premium_server_full_document_text")
+                or ""
+            ),
+            explicit_acceptance=acceptance,
+            expected_tenant_id=acceptance.tenant_id,
+            expected_actor_id=acceptance.actor_id,
+            expected_agreement_id=agreement_id,
+            expected_agreement_version=accepted_ver,
+            expected_source_action="pro_redline_mark_applied",
+            expected_source_proposal_id=suggestion_id,
+            surface="pro_redline_mark_applied",
+        )
         raw["server_full_document_text"] = applied_doc
+        raw["explicit_acceptance_v1"] = acceptance.as_dict()
         raw["premium_server_full_document_text"] = applied_doc
         raw["premium_full_document_text"] = applied_doc
         raw["document_text"] = applied_doc
@@ -10187,6 +10812,7 @@ def _negotiate_assist_llm(
             model=llm_model,
             max_tokens=768,
             temperature=0.2,
+            call_purpose="recipient_negotiation",
             trace_context=trace_context,
             airlock_profile="agreement_outbound",
             airlock_log_context="negotiation_risk_triage",
@@ -11525,11 +12151,39 @@ def apply_recipient_proposal(
         else {}
     )
     if len(accepted_corpus) >= 80:
+        accepted_ver = str(len(current.versions or []))
+        acceptance = _establish_owner_acceptance_for_persist(
+            request=request,
+            agreement_id=agreement_id,
+            agreement_version=accepted_ver,
+            accepted_text=accepted_corpus,
+            source_action="recipient_proposal_applied",
+            source_proposal_id=pid_apply,
+        )
+        _gate_persistable_sot_corpus(
+            corpus=accepted_corpus,
+            intake_text=str(getattr(current, "intake_text", None) or current.purpose or ""),
+            prior_server_corpus=str(
+                getattr(current, "server_full_document_text", None)
+                or getattr(current, "premium_server_full_document_text", None)
+                or current.purpose
+                or ""
+            ),
+            explicit_acceptance=acceptance,
+            expected_tenant_id=acceptance.tenant_id,
+            expected_actor_id=acceptance.actor_id,
+            expected_agreement_id=agreement_id,
+            expected_agreement_version=accepted_ver,
+            expected_source_action="recipient_proposal_applied",
+            expected_source_proposal_id=pid_apply,
+            surface="recipient_proposal_applied",
+        )
         pro_redline["review_first_final_corpus"] = {
             "text": accepted_corpus,
             "source": "recipient_proposal_applied",
             "hash": _corpus_fingerprint(accepted_corpus),
             "persisted_at": now,
+            "explicit_acceptance_v1": acceptance.as_dict(),
         }
     next_draft = AgreementDraft(
         id=current.id,

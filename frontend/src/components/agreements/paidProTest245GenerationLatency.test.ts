@@ -152,9 +152,11 @@ afterEach(() => {
 describe("paidPro Test245 generation latency attribution", () => {
   it("keeps ~17k server_full_draft authoritative and blocks shorter commit", () => {
     expect(serverBody.length).toBeGreaterThanOrEqual(LONG_PREMIUM_AUTHORITATIVE_MIN_LEN);
-    const hash = hashPaidProCorpus(serverBody);
-    latchAcceptedServerFullDraftAuthority(serverBody, "server_full_draft");
-    establishPaidProSourceOfTruth({ text: serverBody, source: "server_full_draft" });
+    const authoritative = serverBody.trim();
+    const hash = hashPaidProCorpus(authoritative);
+    latchAcceptedServerFullDraftAuthority(authoritative, "server_full_draft");
+    establishPaidProSourceOfTruth({ text: authoritative, source: "server_full_draft" });
+    expect(getPaidProSourceOfTruth()?.text).toBe(authoritative);
     expect(getPaidProSourceOfTruth()?.hash).toBe(hash);
     const short = buildServerBody(4_711);
     const guard = guardPaidProAcceptedServerFullDraftCommit({

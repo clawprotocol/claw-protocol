@@ -16,7 +16,7 @@ import {
 describe("paidProReviewStatusCopy", () => {
   it("chip state matches trust rail while signer details are still needed", () => {
     expect(PAID_PRO_REVIEW_CHIP_READY_FOR_SIGNER_SETUP).toBe(PAID_PRO_REVIEW_SIGNER_DETAILS_NEEDED_STATUS);
-    expect(PAID_PRO_REVIEW_SIGNER_DETAILS_NEEDED_STATUS).toBe("Signer details needed");
+    expect(PAID_PRO_REVIEW_SIGNER_DETAILS_NEEDED_STATUS).toBe("Add signer details");
     expect(
       resolvePaidProReviewChipState({ signersReady: false, signingLinksCreated: false, reviewFirstNeutral: false }),
     ).toBe(PAID_PRO_REVIEW_SIGNER_DETAILS_NEEDED_STATUS);
@@ -76,7 +76,7 @@ describe("paidProReviewStatusCopy", () => {
   it("trust steps do not show Ready for signing while signer details are still needed", () => {
     const steps = resolvePaidProReviewTrustSteps({ signersReady: false });
     const labels = steps.map((s) => s.label).join(" ");
-    expect(labels).toContain("Signer details needed");
+    expect(labels).toContain("Add signer details");
     expect(labels).not.toMatch(/Ready for signing\b/i);
   });
 });

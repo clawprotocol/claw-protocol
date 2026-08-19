@@ -76,18 +76,6 @@ export type PaidProAuthorityMeta = {
 /**
  * Same decision as {@link isPaidProAgreementAuthoritative} plus a stable `reason` for logging / QA.
  */
-function isActiveCheckoutReturnWindow(): boolean {
-  if (typeof window === "undefined") return false;
-  try {
-    const u = new URL(window.location.href);
-    if (u.searchParams.get("premiumCompletion") === "1") return true;
-    if (u.searchParams.get("checkout_session_id")) return true;
-  } catch {
-    /* ignore */
-  }
-  return false;
-}
-
 export function resolvePaidProAgreementAuthoritative(input: PaidProAgreementAuthorityInput): PaidProAuthorityMeta {
   const d = input.draft ?? null;
   const corpusLen = d
@@ -101,10 +89,11 @@ export function resolvePaidProAgreementAuthoritative(input: PaidProAgreementAuth
   const premium_render_source = rsRaw || null;
 
   const hasStoredPaidSession = hasStoredPaidPremiumCompletionSession();
+  // Settled checkout writes a session marker (+ pro entitlement). Honor it in production even
+  // after the user navigates away from the checkout-return URL — the marker is the settlement proof.
   if (
     hasStoredPaidSession &&
-    !(hasCurrentSessionFreeStarterIntent() && !hasCurrentSessionProEntitlement()) &&
-    (!isProdBuild() || isActiveCheckoutReturnWindow())
+    !(hasCurrentSessionFreeStarterIntent() && !hasCurrentSessionProEntitlement())
   ) {
     return { authoritative: true, reason: "paid_premium_completion_session", corpusLen, premium_render_source };
   }

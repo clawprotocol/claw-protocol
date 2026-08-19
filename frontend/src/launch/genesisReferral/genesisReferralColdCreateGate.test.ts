@@ -93,5 +93,8 @@ describe("genesisReferralColdCreateGate", () => {
     expect(resolveSignInNextDestination("?next=https://evil.example", "/app")).toBe("/app");
     expect(resolveSignInNextDestination("?next=//evil.example", "/app")).toBe("/app");
     expect(resolveSignInNextDestination("", "/app")).toBe("/app");
+    const checkout =
+      "/app/checkout/__claw_create_checkout__?tier=pro&cadence=monthly&returnTo=%2Fapp%2Fcreate";
+    expect(resolveSignInNextDestination(`?next=${encodeURIComponent(checkout)}`, "/app")).toBe(checkout);
   });
 });

@@ -50,7 +50,7 @@ export function PricingCadenceToggle(props: {
                 ✓
               </span>
             ) : null}
-            Annual <span className="font-normal normal-case text-slate-500">(recommended)</span>
+            Annual
           </span>
         </button>
       </div>

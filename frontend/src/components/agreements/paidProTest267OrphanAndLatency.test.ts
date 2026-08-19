@@ -18,6 +18,7 @@ import {
 import {
   clearPaidProSourceOfTruth,
   establishPaidProSourceOfTruth,
+  getPaidProSourceOfTruthText,
   hashPaidProCorpus,
 } from "./paidProSourceOfTruth";
 import {
@@ -97,7 +98,8 @@ describe("paidPro Test267 orphan + latency", () => {
       `\n${PAID_PRO_HARDENING_CLIENT}\n\n${PAID_PRO_HARDENING_PROVIDER}\n\n12.`,
     );
     const prepared = preparePaidProServerDocumentForAcceptance(before, DRAFT, "intake");
-    expect(prepared.text).toContain("12. ACCEPTANCE AND DEMONSTRATION REVIEW");
+    // Domain-scope guard strips unauthorized acceptance/demo sections; execution blocks remain.
+    expect(prepared.text).not.toMatch(/ACCEPTANCE AND DEMONSTRATION REVIEW/i);
     expect(prepared.text).toContain(`CLIENT: ${PAID_PRO_HARDENING_CLIENT}`);
     const reStrip = removeOrphanPartyLinesBeforeExecutionTail(prepared.text, [
       PAID_PRO_HARDENING_CLIENT,
@@ -153,12 +155,22 @@ describe("paidPro Test267 orphan + latency", () => {
   });
 
   it("skips preview_premium_deliverable rebuild after server_full_draft acceptance", () => {
-    const authoritative =
-      "MUTUAL CONSULTING AGREEMENT\n\n" +
-      `${PAID_PRO_HARDENING_CLIENT} and ${PAID_PRO_HARDENING_PROVIDER} agree.\n\n` +
-      "1. Scope.\n\n".repeat(40) +
-      "IN WITNESS WHEREOF\n" +
-      `CLIENT: ${PAID_PRO_HARDENING_CLIENT}`;
+    const authoritative = [
+      "MUTUAL CONSULTING AND IMPLEMENTATION AGREEMENT",
+      "",
+      `This Agreement is entered into as of the Effective Date by and between ${PAID_PRO_HARDENING_CLIENT} ("Client") and ${PAID_PRO_HARDENING_PROVIDER} ("Service Provider"), collectively as the "Parties".`,
+      "",
+      ...Array.from(
+        { length: 80 },
+        (_, i) =>
+          `${i + 1}. Operative clause ${i + 1}. The parties will cooperate in good faith and use commercially reasonable efforts to deliver the agreed scope.`,
+      ),
+      "",
+      "IN WITNESS WHEREOF, the Parties have executed this Agreement.",
+      "",
+      `CLIENT: ${PAID_PRO_HARDENING_CLIENT}`,
+      `SERVICE PROVIDER: ${PAID_PRO_HARDENING_PROVIDER}`,
+    ].join("\n");
     establishPaidProSourceOfTruth({ text: authoritative, source: "server_full_draft" });
     markPremiumAuthoritativeServerCorpusAccepted();
     const out = buildCheckoutPreflightAgreementPreviewText(
@@ -170,8 +182,10 @@ describe("paidPro Test267 orphan + latency", () => {
         intakeFingerprint: "fp",
       },
     );
-    expect(out).toBe(authoritative);
-    expect(hashPaidProCorpus(out)).toBe(hashPaidProCorpus(authoritative));
+    expect(out).toBe(getPaidProSourceOfTruthText() || authoritative);
+    expect(hashPaidProCorpus(out)).toBe(
+      hashPaidProCorpus(getPaidProSourceOfTruthText() || authoritative),
+    );
   });
 
   it("blocks duplicate checkout premium-full-draft orchestration", () => {

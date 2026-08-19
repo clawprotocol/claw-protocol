@@ -36,6 +36,24 @@ describe("repairPaidProDocumentTitleOpening", () => {
     expect(summarizePaidProDocumentBlockClassifications(repaired.text).titleCount).toBe(1);
     expect(summarizePaidProDocumentBlockClassifications(collapsed).titleCount).toBe(1);
   });
+
+  it("preserves flattened operative body and does not latch mid-doc This Agreement", () => {
+    const flattened = [
+      "SERVICES AGREEMENT",
+      'This Services Agreement (the "Agreement") is entered into upon full execution by both parties',
+      "by and between Red Mesa Logistics LLC and Harbor Peak Automation LLC.",
+      "1. Services",
+      "1.1 Scope of Services. Service Provider will provide professional services including AI workflow consulting.",
+      "11.7 Governing Law and Venue. This Agreement is governed by Oklahoma law.",
+      "11.8 Counterparts and Electronic Signatures. The parties may execute electronically.",
+    ].join(" ");
+    const repaired = repairPaidProDocumentTitleOpening(flattened);
+    expect(repaired.text.length).toBeGreaterThan(flattened.length * 0.85);
+    expect(repaired.text).toMatch(/1\.\s+Services/);
+    expect(repaired.text).toMatch(/1\.1\s+Scope of Services/);
+    expect(repaired.text).toMatch(/11\.7\s+Governing Law/);
+    expect(repaired.text).not.toMatch(/^SERVICES AGREEMENT\n\nThis \. This Agreement/m);
+  });
 });
 
 describe("ensurePaidProVisibleDocumentTitleOpening", () => {

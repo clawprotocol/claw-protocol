@@ -45,12 +45,11 @@ describe("Review link handoff UX (LawDog)", () => {
     expect(s).toContain("recipient-review-first-actions");
     expect(s).toContain("recipient-review-approve-draft");
     expect(s).toContain("recipient-review-propose-updated-draft");
-    expect(s).toContain("recipient-review-more-options");
-    expect(s).toContain("recipient-review-edit-draft");
-    expect(s).toContain("recipient-review-upload-updated-draft");
-    expect(s).toContain("recipient-review-download-actions");
+    expect(s).toContain("recipient-revised-version-panel");
+    expect(s).toContain("recipient-edit-draft-textarea");
+    expect(s).toContain("recipient-manual-upload-revised-draft");
+    expect(s).toContain("recipient-review-download-pdf");
     expect(s).toContain("recipient-review-change-visibility-summary");
-    expect(s).toContain("Changes proposed");
     expect(s).toContain("recipient-summary-card");
     expect(s).toContain("recipient-document-shell");
     expect(s).toContain("← Back to agreement");
@@ -58,8 +57,6 @@ describe("Review link handoff UX (LawDog)", () => {
     expect(s).not.toContain("Bring back suggested edits");
     expect(s).not.toContain("You're reviewing this agreement");
     expect(s).not.toContain("Back to read-only view");
-    expect(s).toContain("recipient-manual-edit-draft-mode");
-    expect(s).toContain("recipient-manual-upload-revised-draft");
     expect(s).toContain("recipient-suggested-changes-panel");
     expect(s).toContain("recipient-suggested-changes-document");
     expect(s).not.toContain("recipient-tab-redline");
@@ -70,7 +67,9 @@ describe("Review link handoff UX (LawDog)", () => {
   it("Premium fork CTA matches recipient setup wording", () => {
     const p = join(__dirname, "../../components/agreements/PremiumSendNextStepFork.tsx");
     const s = readFileSync(p, "utf8");
-    expect(s).toContain("Continue to confirmation");
+    expect(s).toContain("PAID_PRO_DELIVERY_TRACK_REVIEW_CTA");
+    expect(s).toContain("pro-delivery-track-review");
+    expect(s).toContain("pro-delivery-track-signing");
     expect(s).not.toContain("Open reviewer setup");
   });
 });

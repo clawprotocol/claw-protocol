@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from backend.tests.entitlement_test_support import ensure_headers_entitled, ensure_org_pro_entitlement
+
 import hashlib
 import hmac
 import json
@@ -13,6 +15,25 @@ import pytest
 from fastapi.testclient import TestClient
 
 from backend.main import app
+
+
+@pytest.fixture(autouse=True)
+def _entitle_owner_org_after_env(tmp_path, monkeypatch):
+    """Grant Pro for primary owner headers once tmp_path-backed DBs are configured."""
+    monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
+    monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ONRAMP_DB_PATH", str(tmp_path / "onramp.sqlite3"))
+    monkeypatch.setenv("CLAW_TREASURY_DB_PATH", str(tmp_path / "treasury.sqlite3"))
+    from backend.economics.store import reset_economics_store_for_tests
+    reset_economics_store_for_tests()
+    for _name in ("_ORG_H", "_OWNER_H", "OWNER_HEADERS", "_HEADERS", "ORG_HEADERS", "_OWNER", "_ORG_A", "_ORG", "_STAGING_ORG"):
+        h = globals().get(_name)
+        if isinstance(h, dict) and h.get("X-Claw-Org-Id"):
+            ensure_headers_entitled(h)
+    yield
+    reset_economics_store_for_tests()
+
 from backend.security.anonymous_session_store import reset_anonymous_session_store_for_tests
 from backend.tests.conftest_auth_security import (
     auth_secrets,
@@ -129,9 +150,10 @@ def test_jwt_user_a_with_user_b_header_returns_403(isolated_usage):
 def test_authenticated_user_can_create_draft(isolated_usage):
     client = TestClient(app)
     user = "owner-create"
+    headers = ensure_headers_entitled(make_authenticated_user_headers(user))
     res = client.post(
         "/api/agreements/draft",
-        headers={**make_authenticated_user_headers(user), "Content-Type": "application/json"},
+        headers={**headers, "Content-Type": "application/json"},
         json=_draft_payload(),
     )
     assert res.status_code == 200, res.text
@@ -149,13 +171,25 @@ def test_anonymous_session_cannot_access_user_workspace(isolated_usage):
         headers={
             "X-Claw-Org-Id": "user-attacker",
             "X-Claw-Anon-Session": token,
-            **make_test_auth_headers("attacker"),
             "Content-Type": "application/json",
         },
         json=_draft_payload(),
     )
     assert res.status_code == 403
     assert res.json()["detail"]["code"] == "anonymous_credential_on_user_workspace"
+
+
+def test_leftover_anonymous_credential_does_not_block_matching_user_workspace(isolated_usage):
+    mint_client = TestClient(app)
+    _org_id, token, _ = mint_anonymous_session(mint_client)
+    client = TestClient(app)
+    headers = ensure_headers_entitled(make_authenticated_user_headers("returning-buyer"))
+    res = client.get(
+        "/api/agreements/usage/summary",
+        headers={**headers, "X-Claw-Anon-Session": token},
+    )
+    assert res.status_code == 200, res.text
+    assert res.json().get("commercial") or res.json().get("tier") is not None
 
 
 def test_authenticated_user_cannot_read_other_owner_agreement(isolated_usage):
@@ -212,7 +246,7 @@ def test_org_header_cannot_repair_missing_ownership(isolated_usage):
 
 def test_new_draft_registers_ownership(isolated_usage):
     client = TestClient(app)
-    headers = make_authenticated_user_headers("draft-owner")
+    headers = ensure_headers_entitled(make_authenticated_user_headers("draft-owner"))
     org_id = headers["X-Claw-Org-Id"]
     res = client.post(
         "/api/agreements/draft",
@@ -226,20 +260,163 @@ def test_new_draft_registers_ownership(isolated_usage):
     assert row["subject_ref"] == f"org:{org_id}"
 
 
-def test_anonymous_session_cannot_create_draft_without_principal(isolated_usage):
-    """Commercial principal enforcement: anon org cookie alone is insufficient."""
+def test_anonymous_org_header_alone_cannot_create_draft(isolated_usage):
+    """Guest create requires a minted anonymous session credential, not org id alone."""
     client = TestClient(app)
-    _org_id, _t, headers = mint_anonymous_session(client)
     res = client.post(
         "/api/agreements/draft",
-        headers={**headers, "Content-Type": "application/json"},
+        headers={
+            "X-Claw-Org-Id": f"anon-{uuid.uuid4().hex[:10]}",
+            "Content-Type": "application/json",
+        },
         json=_draft_payload(),
     )
     assert res.status_code == 401
-    assert res.json()["detail"]["code"] == "auth_required"
+    assert res.json()["detail"]["code"] == "anonymous_session_required"
 
 
 # --- Stripe tampering ---
+
+
+def test_create_flow_checkout_sentinel_allows_verified_user_without_agreement_row(
+    isolated_usage, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_test_create_flow")
+    monkeypatch.setenv("STRIPE_PRICE_PRO_MONTHLY", "price_test_monthly")
+    captured: dict = {}
+
+    def _fake_create(**kwargs):
+        captured.update(kwargs)
+        return {
+            "id": "cs_test_create_flow",
+            "url": "https://checkout.stripe.com/c/pay/cs_test_create_flow",
+        }
+
+    monkeypatch.setattr(
+        "backend.routers.billing_checkout_api.create_checkout_session",
+        _fake_create,
+    )
+    client = TestClient(app)
+    _org_id, token, _ = mint_anonymous_session(client)
+    headers = make_authenticated_user_headers("create-flow-buyer")
+    res = client.post(
+        "/v1/billing/checkout-session",
+        headers={**headers, "X-Claw-Anon-Session": token},
+        json={
+            "agreement_id": "__claw_create_checkout__",
+            "cadence": "monthly",
+            "return_to": "/app/create?restore=starterReview",
+        },
+    )
+    assert res.status_code == 200, res.text
+    body = res.json()
+    assert body["ok"] is True
+    assert body["session_id"] == "cs_test_create_flow"
+    assert body["checkout_url"].startswith("https://checkout.stripe.com/")
+    assert body["org_id"] == "user-create-flow-buyer"
+    assert captured["success_url"].startswith("http://localhost:5173/app/create?restore=starterReview")
+    assert "checkout_session_id={CHECKOUT_SESSION_ID}" in captured["success_url"]
+    assert captured["cancel_url"].startswith("http://localhost:5173/app/checkout/__claw_create_checkout__")
+
+
+def test_staging_checkout_ignores_localhost_origin_header(isolated_usage, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr("backend.billing.checkout_app_origin.claw_environment", lambda: "staging")
+    monkeypatch.delenv("LAWDOG_APP_ORIGIN", raising=False)
+    monkeypatch.delenv("VITE_LAWDOG_APP_ORIGIN", raising=False)
+    monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_test_create_flow")
+    monkeypatch.setenv("STRIPE_PRICE_PRO_MONTHLY", "price_test_monthly")
+    captured: dict = {}
+
+    def _fake_create(**kwargs):
+        captured.update(kwargs)
+        return {
+            "id": "cs_test_staging_origin",
+            "url": "https://checkout.stripe.com/c/pay/cs_test_staging_origin",
+        }
+
+    monkeypatch.setattr(
+        "backend.routers.billing_checkout_api.create_checkout_session",
+        _fake_create,
+    )
+    client = TestClient(app)
+    headers = make_authenticated_user_headers("staging-origin-buyer")
+    res = client.post(
+        "/v1/billing/checkout-session",
+        headers={
+            **headers,
+            "Origin": "http://localhost:5173",
+            "Host": "evil.example",
+            "X-Forwarded-Host": "evil.example",
+            "X-Forwarded-Proto": "http",
+        },
+        json={
+            "agreement_id": "__claw_create_checkout__",
+            "cadence": "monthly",
+            "return_to": "/app/create?restore=starterReview",
+        },
+    )
+    assert res.status_code == 200, res.text
+    assert captured["success_url"].startswith(
+        "https://believable-gentleness-staging.up.railway.app/app/create?restore=starterReview"
+    )
+    assert "localhost" not in captured["success_url"]
+    assert "evil.example" not in captured["success_url"]
+    assert "checkout_session_id={CHECKOUT_SESSION_ID}" in captured["success_url"]
+    assert captured["cancel_url"] == (
+        "https://believable-gentleness-staging.up.railway.app/app/checkout/__claw_create_checkout__"
+    )
+
+
+def test_verify_create_flow_checkout_skips_sentinel_ownership(isolated_usage, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_test_create_flow")
+    monkeypatch.setenv("STRIPE_PRICE_PRO_MONTHLY", "price_test_monthly")
+    monkeypatch.setattr(
+        "backend.routers.billing_checkout_api.retrieve_checkout_session",
+        lambda _sid: {
+            "id": "cs_test_verify_sentinel",
+            "status": "complete",
+            "payment_status": "paid",
+            "customer": "cus_test_verify",
+            "subscription": "sub_test_verify",
+            "metadata": {
+                "agreement_id": "__claw_create_checkout__",
+                "org_id": "user-verify-sentinel",
+                "claw_org_id": "user-verify-sentinel",
+                "plan_code": "pro",
+                "user_id": "verify-sentinel",
+            },
+        },
+    )
+    monkeypatch.setattr(
+        "backend.routers.billing_checkout_api.sync_subscription_from_stripe_checkout_session",
+        lambda _eco, _session: {"ok": True, "org_id": "user-verify-sentinel", "plan_code": "pro"},
+    )
+    monkeypatch.setattr(
+        "backend.routers.billing_checkout_api.get_economics_store",
+        lambda: type("Eco", (), {"get_subscription_by_org": staticmethod(lambda _oid: {"status": "active", "plan_code": "pro"})})(),
+    )
+    client = TestClient(app)
+    res = client.post(
+        "/v1/billing/verify-checkout-session",
+        headers=make_authenticated_user_headers("verify-sentinel"),
+        json={"session_id": "cs_test_verify_sentinel"},
+    )
+    assert res.status_code == 200, res.text
+    assert res.json()["ok"] is True
+
+
+def test_unregistered_agreement_checkout_still_rejected(isolated_usage, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_test_create_flow")
+    monkeypatch.setenv("STRIPE_PRICE_PRO_MONTHLY", "price_test_monthly")
+    client = TestClient(app)
+    headers = make_authenticated_user_headers("create-flow-buyer")
+    res = client.post(
+        "/v1/billing/checkout-session",
+        headers=headers,
+        json={"agreement_id": "ag-not-registered", "cadence": "monthly", "return_to": "/app/create"},
+    )
+    assert res.status_code == 403
+    assert res.json()["detail"]["code"] == "ownership_not_registered"
 
 
 def test_user_a_cannot_checkout_user_b_agreement(isolated_usage, monkeypatch: pytest.MonkeyPatch):

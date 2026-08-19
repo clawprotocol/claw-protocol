@@ -16,11 +16,16 @@ import { clearPaidProSourceOfTruth, establishPaidProSourceOfTruth } from "./paid
 const CANONICAL_PLAIN = [
   "CONSULTING AND IMPLEMENTATION AGREEMENT",
   "",
+  "This Agreement is entered into as of the Effective Date by and between Blue Canyon Analytics LLC (\"Client\") and Iron Vale Systems Inc. (\"Service Provider\"), collectively as the \"Parties\".",
+  "",
   "Section 1. Scope of services and deliverables.",
   "",
-  ...Array.from({ length: 30 }, (_, i) => `Section ${i + 2}. Operative clause ${i + 1}.`),
+  ...Array.from({ length: 120 }, (_, i) => `Section ${i + 2}. Operative clause ${i + 1}. The parties will cooperate in good faith and use commercially reasonable efforts.`),
   "",
   "IN WITNESS WHEREOF, the Parties execute this Agreement.",
+  "",
+  "CLIENT: Blue Canyon Analytics LLC",
+  "SERVICE PROVIDER: Iron Vale Systems Inc.",
 ].join("\n\n");
 
 const HOLLOW_HTML = `<div class="premium-doc-body min-h-[12rem]" aria-hidden="true">${" ".repeat(1800)}</div>`;

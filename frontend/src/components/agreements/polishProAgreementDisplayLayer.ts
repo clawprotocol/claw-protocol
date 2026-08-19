@@ -284,7 +284,7 @@ function normalizedOpeningParagraph(
   if (/\bThis\s+Agreement\s+is\s+entered\s+into\b[\s\S]{0,180}?\bThis\s+Agreement\s+is\s+between\b/i.test(out)) {
     out = out.replace(
       /\bThis\s+Agreement\s+is\s+entered\s+into\b[\s\S]{0,180}?\bThis\s+Agreement\s+is\s+between\b/i,
-      "This Agreement is between",
+      'This Agreement is entered into as of the Effective Date by and between',
     );
     repairs.push("opening:collapse_entered_into_between_duplicate");
   }
@@ -384,13 +384,16 @@ export function stripMalformedProReviewDisplayArtifacts(text: string): { text: s
   let out = text;
   if (FUSED_TITLE_OPENING_RE.test(out)) {
     FUSED_TITLE_OPENING_RE.lastIndex = 0;
-    out = out.replace(FUSED_TITLE_OPENING_RE, "$1 is between");
+    out = out.replace(
+      FUSED_TITLE_OPENING_RE,
+      '$1 is entered into as of the Effective Date by and between',
+    );
     repairs.push("display:collapse_fused_title_opening");
   }
   if (/entered\s+into\s+as\s+of\s+the\s+effective\s+date\s+This\s+Agreement\s+is\s+between/i.test(out)) {
     out = out.replace(
       /entered\s+into\s+as\s+of\s+the\s+effective\s+date\s+This\s+Agreement\s+is\s+between/gi,
-      "is between",
+      "entered into as of the Effective Date by and between",
     );
     repairs.push("display:collapse_effective_date_duplicate_opening");
   }
@@ -569,7 +572,7 @@ export function sanitizeProReviewDisplayText(
       logProReviewDisplaySanityBlocked({ reason, source, hash: inputHash });
     }
     out = out
-      .replace(FUSED_TITLE_OPENING_RE, "$1 is between")
+      .replace(FUSED_TITLE_OPENING_RE, "$1 is entered into as of the Effective Date by and between")
       .replace(/\.signature[\s.]*(?:below)?\.?/gi, ".")
       .replace(/\bsignature\s+below\b\.?/gi, "")
       .replace(/\bIN WITNESS WHEREOF[\s\S]*$/i, "")
@@ -763,7 +766,13 @@ export function polishProAgreementDisplayLayer(
     repairs.push(...sections.repairs);
   }
 
-  if (records.length >= 2 && !opts?.reviewDisplayMode) {
+  // Do not invent blank By:____ chrome onto review corpora that lack a witness block.
+  // Signing prepare owns execution append; display polish only normalizes existing tails.
+  if (
+    records.length >= 2 &&
+    !opts?.reviewDisplayMode &&
+    /\bIN WITNESS WHEREOF\b/i.test(out)
+  ) {
     out = appendProExecutionBlockIfMissing(out, records).text;
   }
 

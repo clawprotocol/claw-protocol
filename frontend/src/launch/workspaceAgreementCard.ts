@@ -1,5 +1,6 @@
 import type { WorkspaceIndexAgreement } from "../agreement/agreementWorkspaceApi";
 import { workspaceSigningStatusLabel } from "../vs01/vs01WorkspaceSigningStatus";
+import { CUSTOMER_JOURNEY_STATE } from "../components/agreements/customerJourneyReadiness";
 
 export type WorkspaceAgreementCardAction = {
   label: string;
@@ -15,13 +16,13 @@ export function workspaceAgreementPrimaryAction(
   row: WorkspaceIndexAgreement,
 ): WorkspaceAgreementCardAction {
   const status = workspaceSigningStatusLabel(row);
-  if (status === "Fully signed") {
+  if (status === CUSTOMER_JOURNEY_STATE.fullyExecuted) {
     return { label: "Open", kind: "open" };
   }
-  if (status === "Signing in progress") {
+  if (status === CUSTOMER_JOURNEY_STATE.waitingForSignatures) {
     return { label: "Track signing", kind: "track_signing" };
   }
-  if (status === "Waiting for review" || status.includes("reviewer")) {
+  if (status === CUSTOMER_JOURNEY_STATE.waitingForReview || status.includes("reviewer")) {
     return { label: "Review", kind: "review" };
   }
   return { label: "Resume", kind: "resume" };

@@ -29,6 +29,8 @@ import {
 import { applyCanonicalPartyLegalNamesToSigningCorpus } from "./canonicalPartyLegalNameSanitizer";
 import { finalizePaidProSigningCorpusText } from "./paidProSignerSigningCorpusHygiene";
 import { repairMalformedPaidProAgreementRecital } from "./paidProAgreementRecitalRepair";
+import { repairDuplicateAgreementOpening } from "./canonicalPartyIdentityResolver";
+import { resolveCommercialPartyRecordsForOpeningRepair } from "./canonicalPartyIdentityResolver";
 import { stripPremiumIntelligenceCalloutsFromCorpus } from "./premiumDocumentIntelligenceStrip";
 import { repairSignatureNameLinesUsingLegalEntity } from "./paidProSignatureNameLineRepair";
 import {
@@ -58,8 +60,13 @@ import {
   logPaidProSignerMetadataHydrationMissing,
 } from "./hydratePaidProExecutionBlockWithSignerMetadata";
 import { repairExecutionBlockEntityHeadingLines } from "./paidProExecutionBlockEntityHeading";
+import { resolveAuthoritativeWitnessIndex } from "./paidProExecutionBlockNormalization";
 import { hashPaidProCorpus } from "./paidProSourceOfTruth";
 import { resolvePaidProFrozenAuthoritativeHash } from "./paidProPostFreezeCorpusInvariant";
+import {
+  ensureOperativeIfToNoticeDelivery,
+  findNoticesSectionStart,
+} from "./paidProPartyNoticeDetails";
 
 export type HydratedAuthoritativeSigningCorpusResult = {
   corpus: string;
@@ -173,8 +180,21 @@ export function buildHydratedAuthoritativeSigningCorpusFromAuthority(args: {
   const rawCorpusLenBeforeHydration = rawCorpus.length;
   const isFinalizeSurface = args.surface === "finalize_paid_pro_signer_metadata";
 
-  // Frozen SoT finalize: apply signer-metadata-only hydration (notices + execution Name/Title/Email)
-  // so the authoritative signing snapshot is signing-ready — never store pre-signer placeholders.
+  // Recital / duplicate-opening repair must run even on the frozen SoT minimal-hydration path —
+  // otherwise fused openers ("is This Agreement is between") survive into pinned review plain.
+  if (args.repairRecital) {
+    rawCorpus = repairMalformedPaidProAgreementRecital(rawCorpus, args.authority.parties).text;
+    const openingRecords = resolveCommercialPartyRecordsForOpeningRepair(
+      args.intakeRaw ?? "",
+      args.authority.parties.map((p) => p.partyLegalName),
+      args.authority.parties.map((p) => p.roleLabel ?? ""),
+    );
+    rawCorpus = repairDuplicateAgreementOpening(
+      rawCorpus,
+      openingRecords.length >= 2 ? openingRecords : undefined,
+    ).text;
+  }
+
   if (
     shouldUseFrozenServerFullSourceOfTruthMinimalHydration(rawCorpus) ||
     (isFinalizeSurface && shouldPreserveFrozenCanonicalCorpusOnSignerFinalize(rawCorpus))
@@ -184,11 +204,11 @@ export function buildHydratedAuthoritativeSigningCorpusFromAuthority(args: {
       authority: args.authority,
       intakeRaw: args.intakeRaw,
       surface: args.surface,
+      signatureRegionOnly:
+        args.signatureRegionOnly === true
+          ? true
+          : args.signatureRegionOnly !== false && !isFinalizeSurface,
     });
-  }
-
-  if (args.repairRecital) {
-    rawCorpus = repairMalformedPaidProAgreementRecital(rawCorpus, args.authority.parties).text;
   }
   const roleContext = {
     intakeText: args.intakeRaw,
@@ -216,14 +236,57 @@ export function buildHydratedAuthoritativeSigningCorpusFromAuthority(args: {
       rawLen: rawCorpusLenBeforeHydration,
     });
   }
+  // Fill existing operative If-to notice placeholders from authority contact fields.
+  // Signature-region mode must not invent a Notices section, but must resolve known emails/addresses
+  // when the corpus already has an If-to notices region with "provided during signer setup".
+  let partyNoticeApplied = false;
+  const signatureRegionOnly = args.signatureRegionOnly !== false;
+  const authorityHasContact = args.authority.parties.some(
+    (p) => p.signerEmail.trim() || p.partyAddress.trim() || p.signerName.trim(),
+  );
+  const noticesIdx = findNoticesSectionStart(rawCorpus);
+  const authorityHasRealContact = args.authority.parties.some((p) => {
+    const email = p.signerEmail.trim();
+    const address = p.partyAddress.trim();
+    if (!email && address.length <= 8) return false;
+    if (/provided during signer setup/i.test(email) || /provided during signer setup/i.test(address)) {
+      return false;
+    }
+    return Boolean(email) || address.length > 8;
+  });
+  const witnessFirstFinalizeNotices =
+    isFinalizeSurface &&
+    !signatureRegionOnly &&
+    authorityHasRealContact &&
+    noticesIdx < 0 &&
+    resolveAuthoritativeWitnessIndex(rawCorpus) >= 0;
+  if (
+    authorityHasContact &&
+    (witnessFirstFinalizeNotices ||
+      (noticesIdx >= 0 &&
+        (!signatureRegionOnly || /provided during signer setup/i.test(rawCorpus.slice(noticesIdx)))))
+  ) {
+    const noticeDelivery = ensureOperativeIfToNoticeDelivery(
+      rawCorpus,
+      args.authority.parties,
+      roleContext,
+    );
+    if (noticeDelivery.repairs.length > 0 || noticeDelivery.text !== rawCorpus) {
+      rawCorpus = noticeDelivery.text;
+      partyNoticeApplied = noticeDelivery.repairs.length > 0;
+    }
+  }
   const identities = authorityPartiesToCanonicalPartyIdentities(args.authority.parties, roleContext);
   let result = buildHydratedAuthoritativeSigningCorpus({
     rawCorpus,
     identities,
     intakeRaw: args.intakeRaw,
     surface: args.surface,
-    signatureRegionOnly: args.signatureRegionOnly !== false,
+    signatureRegionOnly,
   });
+  if (partyNoticeApplied) {
+    result = { ...result, partyNoticeApplied: true };
+  }
   const signerCount = resolveHydrationAuthoritativeSignerCount(
     identities,
     args.intakeRaw,
@@ -236,7 +299,9 @@ export function buildHydratedAuthoritativeSigningCorpusFromAuthority(args: {
     return (tail.match(/^name\s*:\s*(?!_{4,})(?!\s*$).+/gim) || []).length >= signerCount;
   })();
   const synthesisForbidden = forbidPaidProExecutionBlockSynthesis(result.corpus, signerCount);
-  if (!result.rejected && (!hasBlocks || !hasPopulatedNames) && !synthesisForbidden) {
+  if (!result.rejected && (!hasBlocks || !hasPopulatedNames)) {
+    // Always attempt rebuild/reconcile — when synthesis is forbidden the helper reconciles
+    // role headings in place instead of appending a second IN WITNESS WHEREOF (TEST330).
     const rebuilt = rebuildSignatureBlocksWithPartyIdentities(result.corpus, identities);
     if (rebuilt.count > 0) {
       result = {
@@ -246,40 +311,42 @@ export function buildHydratedAuthoritativeSigningCorpusFromAuthority(args: {
       };
       logSignatureBlockSource({
         surface: args.surface,
-        source: "authority_signature_block_rebuild",
+        source: synthesisForbidden
+          ? "authority_signature_block_reconcile"
+          : "authority_signature_block_rebuild",
         hasFilledBlocks: corpusSignatureBlocksHaveRequiredByLines(rebuilt.text, signerCount),
         signerCount,
       });
+    } else if (synthesisForbidden) {
+      logPaidProExecutionBlockSynthesisBlocked({
+        surface: args.surface,
+        reason: "hydration_signature_block_rebuild_skipped",
+      });
+      const retryHydration = hydratePaidProExecutionBlockWithSignerMetadata(
+        result.corpus,
+        recipientMeta,
+        roleContext,
+        { overwriteExistingMetadata: isFinalizeSurface },
+      );
+      if (retryHydration.applied && retryHydration.corpus !== result.corpus) {
+        result = {
+          ...result,
+          corpus: retryHydration.corpus,
+          signaturePolishCount: result.signaturePolishCount + retryHydration.fieldsHydrated,
+        };
+        logPaidProSignerMetadataHydrationApplied({
+          surface: `${args.surface}:synthesis_forbidden_retry`,
+          fieldsHydrated: retryHydration.fieldsHydrated,
+          rawLen: result.corpus.length,
+          hydratedLen: retryHydration.corpus.length,
+        });
+      }
     } else if (typeof import.meta !== "undefined" && import.meta.env?.DEV) {
       logSignerHydrationMismatch({
         surface: args.surface,
         reason: "post_finalize_missing_signature_block",
         rawLen: result.corpus.length,
         afterLen: rebuilt.text.length,
-      });
-    }
-  } else if (synthesisForbidden && (!hasBlocks || !hasPopulatedNames)) {
-    logPaidProExecutionBlockSynthesisBlocked({
-      surface: args.surface,
-      reason: "hydration_signature_block_rebuild_skipped",
-    });
-    const retryHydration = hydratePaidProExecutionBlockWithSignerMetadata(
-      result.corpus,
-      recipientMeta,
-      roleContext,
-      { overwriteExistingMetadata: isFinalizeSurface },
-    );
-    if (retryHydration.applied && retryHydration.corpus !== result.corpus) {
-      result = {
-        ...result,
-        corpus: retryHydration.corpus,
-        signaturePolishCount: result.signaturePolishCount + retryHydration.fieldsHydrated,
-      };
-      logPaidProSignerMetadataHydrationApplied({
-        surface: `${args.surface}:synthesis_forbidden_retry`,
-        fieldsHydrated: retryHydration.fieldsHydrated,
-        rawLen: result.corpus.length,
-        hydratedLen: retryHydration.corpus.length,
       });
     }
   }
@@ -294,7 +361,7 @@ export function buildHydratedAuthoritativeSigningCorpusFromAuthority(args: {
       ...result,
       corpus: canonicalParties.text,
       signaturePolishCount: result.signaturePolishCount + (canonicalParties.repaired ? 1 : 0),
-      partyNoticeApplied: false,
+      partyNoticeApplied: result.partyNoticeApplied,
     };
     if (canonicalParties.repaired) {
       logSignatureBlockSource({
@@ -345,14 +412,39 @@ export function buildHydratedAuthoritativeSigningCorpusFromAuthority(args: {
       result.corpus,
       args.authority.parties,
       roleContext,
+      { signatureRegionOnly },
     );
     if (finalized.text !== result.corpus) {
       result = {
         ...result,
         corpus: finalized.text,
         signaturePolishCount: result.signaturePolishCount + finalized.repairs.length,
-        partyNoticeApplied: false,
+        partyNoticeApplied: result.partyNoticeApplied,
       };
+    }
+  }
+
+  // Re-apply notice contact hydration after finalize hygiene — some repair steps restore
+  // "provided during signer setup" placeholders in an existing If-to notices region.
+  if (!result.rejected && result.corpus && authorityHasContact) {
+    const noticesAfter = findNoticesSectionStart(result.corpus);
+    if (
+      noticesAfter >= 0 &&
+      (!signatureRegionOnly || /provided during signer setup/i.test(result.corpus.slice(noticesAfter)))
+    ) {
+      const noticeAgain = ensureOperativeIfToNoticeDelivery(
+        result.corpus,
+        args.authority.parties,
+        roleContext,
+      );
+      if (noticeAgain.text !== result.corpus) {
+        result = {
+          ...result,
+          corpus: noticeAgain.text,
+          signaturePolishCount: result.signaturePolishCount + Math.max(1, noticeAgain.repairs.length),
+          partyNoticeApplied: true,
+        };
+      }
     }
   }
 

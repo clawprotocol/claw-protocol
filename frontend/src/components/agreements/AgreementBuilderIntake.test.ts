@@ -1214,4 +1214,17 @@ describe("homepage starter_review mount (no paid Pro SoT)", () => {
     const previewBlock = intake.slice(previewIdx, previewIdx + 500);
     expect(previewBlock).toContain("paidProPostSignerMetadataFreezeRef.current");
   });
+
+  it("home and create submit apply explicit multi-party Pro gate before capability or generation", () => {
+    const homeIdx = intake.indexOf('handoffSource: "home_create_submit"');
+    const homeBlock = intake.slice(Math.max(0, homeIdx - 2500), homeIdx);
+    expect(homeBlock.indexOf("commitStarterMultiPartyProGate")).toBeGreaterThan(-1);
+    expect(homeBlock.indexOf("commitStarterMultiPartyProGate")).toBeLessThan(
+      homeBlock.indexOf("evaluateIntentionalCreateDraftSubmit"),
+    );
+    expect(intake).toContain("shouldFailSafeEmptyAuthorityPreparation");
+    expect(intake).toContain("CREATE_FLOW_PREPARATION_FAILSAFE_MESSAGE");
+    expect(intake).toContain("CREATE_FLOW_PREPARATION_FAILSAFE_EDIT_LABEL");
+    expect(intake).toContain('data-testid="create-flow-prep-failsafe"');
+  });
 });

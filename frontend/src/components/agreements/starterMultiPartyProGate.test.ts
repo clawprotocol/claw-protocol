@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { buildAgreementPreviewText } from "./agreementPreviewFromDraft";
 import { runIntakeDefaultsAndRoles } from "./intakeFamilyShell";
@@ -6,7 +8,11 @@ import {
   assessStarterComplexityGate,
   assessStarterMultiPartyProRequirement,
   buildStarterProCheckoutPendingDraft,
+  CREATE_FLOW_PREPARATION_FAILSAFE_MESSAGE,
   detectRevenueShareLanguage,
+  isThreePlusLegalPartyGate,
+  resolveStarterMultiPartyProGatePresentation,
+  shouldFailSafeEmptyAuthorityPreparation,
 } from "./starterMultiPartyProGate";
 import { TEST371_QUADRIPARTITE_LABELED_PARTIES_INTAKE } from "./paidProTest371QuadrpartiteFixtures";
 
@@ -190,6 +196,87 @@ Revenue share: 20% of licensing revenue to Beta Corp.`;
     expect(gate.required).toBe(true);
     expect(gate.reasons).toContain("revenue_share_or_allocation");
     expect(gate.partyCount).toBe(2);
+  });
+});
+
+const UNNAMED_THREE_PARTY_NUMERIC =
+  "Provide an NDA for 3 parties using Texas law for proprietary IP for the statutory limit";
+const UNNAMED_THREE_PARTY_WORD = "Provide an NDA for three parties using Texas law for proprietary IP";
+
+describe("explicit unnamed three-party Pro gate", () => {
+  it("numeric 'for 3 parties' prompt resolves to three-party Pro gating", () => {
+    const gate = assessStarterComplexityGate(UNNAMED_THREE_PARTY_NUMERIC);
+    expect(gate.required).toBe(true);
+    expect(gate.reasons).toContain("three_plus_legal_parties");
+    expect(gate.partyCount).toBe(3);
+    expect(isThreePlusLegalPartyGate(gate)).toBe(true);
+    expect(resolveStarterMultiPartyProGatePresentation(gate).title).toBe(
+      "This agreement includes 3 parties and requires Pro.",
+    );
+  });
+
+  it("word-form 'for three parties' resolves to the same Pro gate", () => {
+    const gate = assessStarterComplexityGate(UNNAMED_THREE_PARTY_WORD);
+    expect(gate.required).toBe(true);
+    expect(gate.reasons).toContain("three_plus_legal_parties");
+    expect(isThreePlusLegalPartyGate(gate)).toBe(true);
+  });
+
+  it("unnamed parties stay actionable and never create a two-party review", () => {
+    const gate = assessStarterComplexityGate(UNNAMED_THREE_PARTY_NUMERIC);
+    expect(gate.parties.length).toBeLessThan(2);
+    expect(gate.parties).not.toEqual(expect.arrayContaining(["Acme LLC", "Beta Corp"]));
+    const pending = buildStarterProCheckoutPendingDraft(UNNAMED_THREE_PARTY_NUMERIC);
+    expect(pending.parties.filter((p) => String(p.name || "").trim()).length).toBeLessThan(2);
+  });
+
+  it("empty-authority preparation cannot spin indefinitely", () => {
+    expect(
+      shouldFailSafeEmptyAuthorityPreparation({
+        displayPhase: "preparing_review",
+        isGenerating: false,
+        hasDraft: false,
+        hasAuthoritativeReviewBody: false,
+        preparingStartedAtMs: 1_000,
+        nowMs: 1_000 + 8_000,
+      }),
+    ).toBe(true);
+    expect(
+      shouldFailSafeEmptyAuthorityPreparation({
+        displayPhase: "preparing_review",
+        isGenerating: true,
+        hasDraft: false,
+        hasAuthoritativeReviewBody: false,
+        preparingStartedAtMs: 1_000,
+        nowMs: 1_000 + 60_000,
+      }),
+    ).toBe(false);
+    expect(
+      shouldFailSafeEmptyAuthorityPreparation({
+        displayPhase: "preparing_review",
+        isGenerating: false,
+        hasDraft: true,
+        hasAuthoritativeReviewBody: false,
+        preparingStartedAtMs: 1_000,
+        nowMs: 1_000 + 8_000,
+      }),
+    ).toBe(false);
+    expect(CREATE_FLOW_PREPARATION_FAILSAFE_MESSAGE).toBe(
+      "We couldn't prepare the review. Add the party names and try again.",
+    );
+  });
+
+  it("create intake applies the explicit multi-party Pro gate before capability or generation", () => {
+    const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
+    const homeIdx = intake.indexOf('handoffSource: "home_create_submit"');
+    const homeBlock = intake.slice(Math.max(0, homeIdx - 2500), homeIdx);
+    expect(homeBlock.indexOf("commitStarterMultiPartyProGate")).toBeGreaterThan(-1);
+    expect(homeBlock.indexOf("commitStarterMultiPartyProGate")).toBeLessThan(
+      homeBlock.indexOf("evaluateIntentionalCreateDraftSubmit"),
+    );
+    expect(intake).toContain("shouldFailSafeEmptyAuthorityPreparation");
+    expect(intake).toContain("CREATE_FLOW_PREPARATION_FAILSAFE_MESSAGE");
+    expect(intake).toContain('data-testid="create-flow-prep-failsafe"');
   });
 });
 

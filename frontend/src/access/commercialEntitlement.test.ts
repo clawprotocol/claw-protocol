@@ -25,7 +25,7 @@ describe("commercialEntitlement", () => {
       tier: "paid",
       state: "pro",
       grant_source: "stripe",
-      agreement_allowance: 25,
+      agreement_allowance: 10,
       agreements_used: 10,
       agreements_remaining: 15,
       period_ends_at: "2026-08-01T00:00:00Z",
@@ -42,7 +42,7 @@ describe("commercialEntitlement", () => {
       commercial: {
         state: "pro",
         grant_source: "stripe",
-        agreement_allowance: 25,
+        agreement_allowance: 10,
         agreements_used: 10,
         agreements_remaining: 15,
         period_ends_at: "2026-08-01T00:00:00Z",
@@ -57,7 +57,7 @@ describe("commercialEntitlement", () => {
     });
     expect(decision.state).toBe("pro");
     expect(decision.grantSource).toBe("stripe");
-    expect(decision.agreementAllowance).toBe(25);
+    expect(decision.agreementAllowance).toBe(10);
     expect(decision.canCreatePersistedAgreement).toBe(true);
     const verdict = resolveWorkspaceCreateAccess({
       authentication: "authenticated",
@@ -77,7 +77,7 @@ describe("commercialEntitlement", () => {
     expect(verdict.showUpgradeModal).toBe(false);
   });
 
-  it("does not show Pro upgrade modal for active Genesis within allowance", () => {
+  it("does not grant create from retired Genesis buyer payloads", () => {
     const verdict = resolveWorkspaceCreateAccess({
       authentication: "authenticated",
       entitlement: "none",
@@ -95,13 +95,14 @@ describe("commercialEntitlement", () => {
         periodEndsAt: "2026-07-31T23:59:59Z",
       },
     });
-    expect(verdict.allowed).toBe(true);
-    expect(verdict.reason).toBe("genesis_allowance");
+    expect(verdict.allowed).toBe(false);
+    expect(verdict.reason).toBe("entitlement_required");
     expect(verdict.showUpgradeModal).toBe(false);
-    expect(verdict.showGenesisAllowanceExhausted).toBe(false);
+    expect(verdict.showRequestGenesisCta).toBe(false);
+    expect(verdict.showAccessChoiceScreen).toBe(true);
   });
 
-  it("shows Genesis-specific exhausted path, not generic free upgrade modal", () => {
+  it("maps exhausted Genesis buyer payloads to Pro access choice, not Genesis CTA", () => {
     const verdict = resolveWorkspaceCreateAccess({
       authentication: "authenticated",
       entitlement: "none",
@@ -119,8 +120,9 @@ describe("commercialEntitlement", () => {
     });
     expect(verdict.allowed).toBe(false);
     expect(verdict.showUpgradeModal).toBe(false);
-    expect(verdict.showGenesisAllowanceExhausted).toBe(true);
-    expect(verdict.reason).toBe("genesis_allowance_exhausted");
+    expect(verdict.showGenesisAllowanceExhausted).toBe(false);
+    expect(verdict.showRequestGenesisCta).toBe(false);
+    expect(verdict.reason).toBe("entitlement_required");
   });
 
   it("allows guest temporary draft from server can_save_guest_draft", () => {
@@ -177,7 +179,7 @@ describe("commercialEntitlement", () => {
     });
     expect(verdict.allowed).toBe(false);
     expect(verdict.reason).toBe("entitlement_required");
-    expect(verdict.showRequestGenesisCta).toBe(true);
+    expect(verdict.showRequestGenesisCta).toBe(false);
     expect(verdict.showUpgradeModal).toBe(false);
     expect(verdict.showAccessChoiceScreen).toBe(true);
   });

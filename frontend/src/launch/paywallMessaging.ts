@@ -38,21 +38,24 @@ export const PAYWALL_SEND_FINAL_FOOTER = "Nothing is sent until you confirm.";
 /** Urgency lines under the headline (send conversion modal). */
 export const PAYWALL_URGENCY_PRIMARY = "You’re one step away from using this agreement.";
 
-/** Subscription-first nudge; one-time unlock is offered separately as a quiet fallback in the send modal. */
+/** Subscription-first nudge. The $9 one-time unlock is a dormant post-GTM experiment (off by default). */
 export const PAYWALL_URGENCY_SECONDARY =
   "LawDog Pro keeps send, export, and save open for whatever you draft next.";
 
-/** One-time unlock price (USD) — only offered after value exists (e.g. send conversion), not on pricing triad. */
+/** One-time unlock price (USD) — dormant post-GTM experiment; hidden unless the off-by-default flag is on. */
 export const CONTEXTUAL_ONE_TIME_UNLOCK_USD = 9;
 
 /** Send conversion modal: daily value line under subscription price. */
 export function sendModalValueCompressionLine(monthlyUsd: number): string {
   const daily = monthlyUsd / 30;
-  if (daily < 0.5) return "Unlimited agreements with LawDog Pro for less than $0.50/day";
-  return `Unlimited agreements with LawDog Pro — about $${daily.toFixed(2)}/day`;
+  if (daily < 0.5) {
+    return "LawDog Pro: 10 finalized premium agreements/month for less than $0.50/day";
+  }
+  return `LawDog Pro: 10 finalized premium agreements/month — about $${daily.toFixed(2)}/day`;
 }
 
-export const PAYWALL_SEND_MODAL_SOCIAL_PROOF_BADGE = "Most users choose this";
+/** Neutral label — do not invent social proof without real cohort data. */
+export const PAYWALL_SEND_MODAL_SOCIAL_PROOF_BADGE = "Subscription option";
 
 export const PAYWALL_SEND_MODAL_MICRO_URGENCY = "About 10 seconds to upgrade to send";
 

@@ -8,6 +8,7 @@
 
 import { hashPaidProCorpus } from "./paidProSourceOfTruthState";
 import { PAID_PRO_AUTHORITY_MIN_LEN } from "./paidProAuthorityConstants";
+import { advancePaidReviewSessionCanonicalSoTAfterSignerFinalize } from "./paidProReviewSessionCorpusInvariantState";
 
 export const PAID_PRO_REVIEW_SESSION_AUTHORITY_SOURCE = "review_session_authority";
 
@@ -38,7 +39,7 @@ export function readPaidProReviewSessionAuthority(): PaidProReviewSessionAuthori
 
 export function hasPaidProReviewSessionAuthority(): boolean {
   const a = activeAuthority;
-  return Boolean(a && a.integrityOk && a.corpusPlain.trim().length >= PAID_PRO_AUTHORITY_MIN_LEN);
+  return Boolean(a && a.integrityOk && a.corpusPlain.trim().length >= 40);
 }
 
 /**
@@ -51,10 +52,13 @@ export function establishPaidProReviewSessionAuthority(args: {
   integrityOk?: boolean;
   reviewSessionId?: string | null;
   agreementId?: string | null;
+  /** User-approved SoT revision may replace the prior session authority with a shorter body. */
+  allowUserApprovedRevision?: boolean;
 }): PaidProReviewSessionAuthorityRecord {
   const corpusPlain = (args.corpusPlain || "").trim();
   const hash = hashPaidProCorpus(corpusPlain);
-  const integrityOk = args.integrityOk !== false && corpusPlain.length >= PAID_PRO_AUTHORITY_MIN_LEN;
+  const minLen = args.allowUserApprovedRevision ? 40 : PAID_PRO_AUTHORITY_MIN_LEN;
+  const integrityOk = args.integrityOk !== false && corpusPlain.length >= minLen;
   if (!integrityOk) {
     throw new Error(
       `[paid-pro-review-session-authority-blocked] integrity_or_length_failed len=${corpusPlain.length}`,
@@ -64,9 +68,13 @@ export function establishPaidProReviewSessionAuthority(args: {
     if (activeAuthority.hash === hash) {
       return activeAuthority;
     }
-    throw new Error(
-      `[paid-pro-review-session-authority-blocked] one_authority_violation existing=${activeAuthority.hash} incoming=${hash}`,
-    );
+    if (args.allowUserApprovedRevision) {
+      activeAuthority = null;
+    } else {
+      throw new Error(
+        `[paid-pro-review-session-authority-blocked] one_authority_violation existing=${activeAuthority.hash} incoming=${hash}`,
+      );
+    }
   }
   activeAuthority = {
     corpusPlain,
@@ -124,6 +132,10 @@ export function replacePaidProReviewSessionAuthorityAfterSignerFinalize(args: {
     reviewSessionId: (args.reviewSessionId || prior?.reviewSessionId || "").trim() || null,
     establishedAt: Date.now(),
   };
+  advancePaidReviewSessionCanonicalSoTAfterSignerFinalize({
+    reviewSessionId: activeAuthority.reviewSessionId,
+    canonicalPlain: activeAuthority.corpusPlain,
+  });
   if (typeof import.meta !== "undefined" && import.meta.env?.MODE !== "test") {
     // eslint-disable-next-line no-console
     console.info("[paid-pro-review-session-authority]", {

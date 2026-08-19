@@ -128,6 +128,25 @@ export function splitGluedSectionHeadingFromLine(line: string): string {
     return `${starterTermBodyGlue[1].trim()}\n${starterTermBodyGlue[2].trim()}`;
   }
 
+  // Prefer explicit body-cue / main→subsection splits before heuristic word walks (TEST345).
+  const bodyCue = trimmed.match(MAIN_HEADING_BODY_CUE_RE);
+  if (bodyCue?.[1] && bodyCue[2]?.trim()) {
+    const heading = bodyCue[1].trim();
+    const body = bodyCue[2].trim();
+    if (heading.length >= MIN_MAIN_HEADING_LEN && heading.length <= 110 && body.length >= 8) {
+      return `${heading}\n${body}`;
+    }
+  }
+
+  const mainThenSubEarly = trimmed.match(MAIN_THEN_SUBSECTION_GLUE_RE);
+  if (mainThenSubEarly?.[1] && mainThenSubEarly[2]?.trim()) {
+    const heading = mainThenSubEarly[1].trim();
+    const subsection = mainThenSubEarly[2].trim();
+    if (heading.length >= MIN_MAIN_HEADING_LEN && heading.length <= 110 && subsection.length >= 8) {
+      return `${heading}\n${subsection}`;
+    }
+  }
+
   const structural = splitGluedNumberedSectionLine(trimmed);
   if (structural) {
     return `${structural.heading}\n${structural.body}`;
@@ -165,15 +184,6 @@ export function splitGluedSectionHeadingFromLine(line: string): string {
     }
   }
 
-  const bodyCue = trimmed.match(MAIN_HEADING_BODY_CUE_RE);
-  if (bodyCue?.[1] && bodyCue[2]?.trim()) {
-    const heading = bodyCue[1].trim();
-    const body = bodyCue[2].trim();
-    if (heading.length >= MIN_MAIN_HEADING_LEN && heading.length <= 110 && body.length >= 8) {
-      return `${heading}\n${body}`;
-    }
-  }
-
   const namedSub = trimmed.match(MAIN_PLUS_NAMED_SUBSECTION_GLUE_RE);
   if (namedSub?.[1] && namedSub[2] && namedSub[3]?.trim()) {
     return `${namedSub[1]}\n${namedSub[2]}\n${namedSub[3].trim()}`;
@@ -181,7 +191,18 @@ export function splitGluedSectionHeadingFromLine(line: string): string {
 
   const mainPeriod = trimmed.match(MAIN_PERIOD_GLUE_RE);
   if (mainPeriod?.[1] && mainPeriod[2]?.trim() && !/^\d+\.\d/.test(mainPeriod[2])) {
-    return `${mainPeriod[1]}.\n${mainPeriod[2].trim()}`;
+    const heading = mainPeriod[1].trim();
+    const body = mainPeriod[2].trim();
+    // `1. Clause 1. Terms. Terms…` — indexed clause/section titles keep inline body.
+    // Peeling after the first "Terms." corrupts operative fingerprints and freeze integrity.
+    if (
+      /\b(?:clause|section|item|schedule|exhibit)\s+\d+\b/i.test(heading) ||
+      /^(?:Terms\.?\s*)+$/i.test(body)
+    ) {
+      // keep glued
+    } else {
+      return `${heading}.\n${body}`;
+    }
   }
 
   const glued = trimmed.match(MAIN_SECTION_GLUE_RE);
@@ -204,9 +225,25 @@ export function splitGluedSectionHeadingFromLine(line: string): string {
   return line;
 }
 
+const INDEXED_CLAUSE_TITLE_PROTECT_RE =
+  /\b(Clause|Section|Item|Schedule|Exhibit)\s+(\d+)\./gi;
+
+/** Shield `Clause 1.` / `Section 2.` mid-title indexes from section-break regexes. */
+function protectIndexedClauseTitleNumbers(text: string): {
+  text: string;
+  restore: (s: string) => string;
+} {
+  const textOut = text.replace(INDEXED_CLAUSE_TITLE_PROTECT_RE, "$1\uE000$2\uE001");
+  return {
+    text: textOut,
+    restore: (s: string) => s.replace(/\uE000/g, " ").replace(/\uE001/g, "."),
+  };
+}
+
 /** Repair inline glue between sections and within long numbered lines. */
 export function repairGluedSectionHeadingsInText(text: string): string {
-  let t = (text || "").replace(/\r\n/g, "\n");
+  const protectedTitles = protectIndexedClauseTitleNumbers((text || "").replace(/\r\n/g, "\n"));
+  let t = protectedTitles.text;
 
   t = t.replace(/([.!?])\s+(\d+\.\s+[A-Z])/g, "$1\n\n$2");
   t = t.replace(/([.!?])\s+(\d+\.\d+\s+)/g, "$1\n\n$2");
@@ -243,5 +280,5 @@ export function repairGluedSectionHeadingsInText(text: string): string {
 
   t = repairInlineLetteredEnumerationsInText(t);
 
-  return t.replace(/\n{3,}/g, "\n\n");
+  return protectedTitles.restore(t.replace(/\n{3,}/g, "\n\n"));
 }

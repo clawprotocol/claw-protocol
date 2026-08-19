@@ -257,7 +257,7 @@ def test_admin_overview_pg_path_does_not_call_load_draft(monkeypatch, tmp_path):
 
 
 def test_admin_users_returns_safe_identity_fields(monkeypatch, tmp_path):
-    """Admin Users lists email / user_id / display_name for safe Genesis grants — no agreement bodies."""
+    """Admin Users lists email / user_id / display_name — no agreement bodies; Genesis grant is 410."""
     _seed_env(monkeypatch, tmp_path)
     from backend.admin_console.store import get_admin_console_store
     from backend.economics.genesis_referral_store import (
@@ -311,6 +311,8 @@ def test_admin_users_returns_safe_identity_fields(monkeypatch, tmp_path):
     assert "access_type" in row
     assert "commercial_state" in row
     assert row["access_type"] in ("free", "genesis_dog", "paid_pro", "pending_genesis", "guest")
+    assert row["commercial_state"] in ("none", "guest", "pro", "genesis", "pending_genesis")
+    assert row.get("can_create_persisted_agreement") is False
     assert "purpose" not in row
     assert "payment_terms" not in row
     assert "parties" not in row
@@ -321,27 +323,19 @@ def test_admin_users_returns_safe_identity_fields(monkeypatch, tmp_path):
         headers=_ops_headers(reason="admin users access badge grant"),
         json={"reason": "admin users access badge grant"},
     )
-    assert grant.status_code == 200, grant.text
+    assert grant.status_code == 410, grant.text
+    detail = grant.json().get("detail") or {}
+    assert detail.get("code") == "genesis_create_grant_issuance_retired"
+
     after = client.get("/v1/admin/users", headers=_ops_headers())
     assert after.status_code == 200
     granted = [u for u in (after.json().get("users") or []) if u.get("user_id") == uid]
     assert len(granted) == 1
-    assert granted[0]["access_type"] == "genesis_dog"
-    assert granted[0]["commercial_state"] == "genesis"
-    assert granted[0]["plan_type"] == "free"
-    assert int(granted[0].get("agreement_allowance") or 0) == 5
-    assert int(granted[0].get("agreements_remaining") or 0) >= 0
+    # Affiliate remains a partner badge path; grant must not create a buyer create tier.
+    assert granted[0]["commercial_state"] == "none"
+    assert granted[0].get("can_create_persisted_agreement") is False
+    assert int(granted[0].get("agreement_allowance") or 0) == 0
 
-    reset = client.post(
-        f"/v1/admin/users/{uid}/genesis-usage/reconcile",
-        headers=_ops_headers(reason="Reset Genesis Dog monthly allowance for testing"),
-        json={
-            "reason": "Reset Genesis Dog monthly allowance for testing",
-            "mode": "reset_month_to_zero",
-            "dry_run": False,
-        },
-    )
-    assert reset.status_code == 200, reset.text
     history = client.get(
         f"/v1/admin/users/{uid}/action-history",
         headers=_ops_headers(reason="admin console read"),
@@ -350,15 +344,8 @@ def test_admin_users_returns_safe_identity_fields(monkeypatch, tmp_path):
     body = history.json()
     actions = body.get("actions") or []
     types = [str(a.get("action_type") or "") for a in actions]
-    assert "genesis_usage_reconcile" in types
-    assert "genesis_entitlement_grant" in types
-    assert "user_created" in types
+    assert "genesis_entitlement_grant_denied" in types or "user_created" in types
     assert body.get("user_created_at")
-    assert types.count("genesis_usage_reconcile") == 1  # gate+detail audits collapsed
-    reset_row = next(a for a in actions if a.get("action_type") == "genesis_usage_reconcile")
-    assert reset_row.get("reason") == "Reset Genesis Dog monthly allowance for testing"
-    assert "agreements_used_before" in reset_row
-    assert "agreements_used_after" in reset_row
     created_row = next(a for a in actions if a.get("action_type") == "user_created")
     assert created_row.get("created_at") == body.get("user_created_at")
     # Newest-first: account created is the trailing landmark.

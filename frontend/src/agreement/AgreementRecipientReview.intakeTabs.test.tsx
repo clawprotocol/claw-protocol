@@ -81,7 +81,7 @@ describe("AgreementRecipientReview revise workflow routing", () => {
     expect(screen.queryByTestId("recipient-manual-propose-controls")).toBeNull();
     expect(screen.getAllByText("Suggest revision").length).toBeGreaterThan(0);
     expect(screen.getAllByText(/Edit your agreement in any software you prefer/i).length).toBeGreaterThan(0);
-    expect(screen.getAllByText(/LawDog will compare the wording and show all material changes before submission/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/When finished, paste the FULL updated agreement below/i).length).toBeGreaterThan(0);
     expect(screen.queryByRole("button", { name: /Manual compare/i })).toBeNull();
   });
 

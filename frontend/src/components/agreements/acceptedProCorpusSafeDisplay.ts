@@ -262,16 +262,19 @@ function applyAcceptedProCorpusSafeDisplayCore(
           draft: opts?.draft ?? null,
           intakeText: intakeRaw,
         });
+  // Only normalize an existing witness/execution tail — do not invent blank By:____ chrome
+  // onto a review corpus that never had a signature block (signing prepare owns that).
   if (
     executionRecords.length >= 2 &&
-    !isGenericPaidProAcceptanceManifestFallback(executionRecords)
+    !isGenericPaidProAcceptanceManifestFallback(executionRecords) &&
+    /\bIN WITNESS WHEREOF\b/i.test(out)
   ) {
     const execInvariant = ensurePaidProAcceptanceExecutionBlockInvariant(out, executionRecords);
     if (execInvariant.text !== out) {
       out = execInvariant.text;
       repairs.push(...execInvariant.repairs);
     }
-  } else if (opts?.appendExecutionBlockIfMissing) {
+  } else if (opts?.appendExecutionBlockIfMissing && /\bIN WITNESS WHEREOF\b/i.test(out) === false) {
     const exec = appendProExecutionBlockIfMissing(out, records);
     if (exec.text !== out) {
       out = exec.text;
@@ -354,8 +357,13 @@ function applyAcceptedProCorpusSafeDisplayCore(
   if (mayNormalizeExecutionBlock) {
     const expectedParties = Math.max(executionRecords.length, 2);
     const beforeInvariant = analyzePaidProExecutionBlockInvariant(out, { expectedParties });
+    // Generic Party 1/Party 2 fallbacks must not drive rebuild authority — they replace real
+    // corpus entity lines and historically truncated the witness tail to a bare CLIENT:.
+    const authoritativeExecutionParties = isGenericPaidProAcceptanceManifestFallback(executionRecords)
+      ? []
+      : executionRecords.map((r) => ({ partyLegalName: r.fullLegalName }));
     const execution = enforcePaidProSingleExecutionBlock(out, {
-      authorityParties: executionRecords.map((r) => ({ partyLegalName: r.fullLegalName })),
+      authorityParties: authoritativeExecutionParties,
       intakeText: intakeRaw,
       draftPartyNames: partyNames,
     });
@@ -420,6 +428,18 @@ function applyAcceptedProCorpusSafeDisplayCore(
   }
 
   if (wouldMateriallyShrinkAcceptedCorpus(input.length, out.length)) {
+    // Opening title/recital repairs must not be discarded by a later length gate —
+    // that left malformed openers frozen as SoT (Paid Pro opening contract).
+    const openingPreserved =
+      repairs.some((r) => r.startsWith("opening:")) &&
+      /entered\s+into\s+as\s+of\s+the\s+Effective\s+Date\s+by\s+and\s+between/i.test(out) &&
+      !/entered\s+into\s+as\s+of\s+the\s+Effective\s+Date\s+by\s+and\s+between/i.test(input);
+    if (openingPreserved) {
+      return {
+        text: out,
+        repairs: [...new Set([...repairs, "safe:final_shrink_opening_preserved"])],
+      };
+    }
     return {
       text: input,
       repairs: [...repairs, "safe:final_shrink_blocked"],

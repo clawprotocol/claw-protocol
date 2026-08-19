@@ -7,6 +7,8 @@ Public verify remains intentionally public and minimally disclosing.
 
 from __future__ import annotations
 
+from backend.tests.entitlement_test_support import ensure_headers_entitled, ensure_org_pro_entitlement
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -24,6 +26,7 @@ def client(monkeypatch, tmp_path):
     monkeypatch.setenv("CLAW_ENVIRONMENT", "test")
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     monkeypatch.setenv("CLAW_AGREEMENT_SIGNING_TOKEN_SECRET", _SECRET)
     monkeypatch.setenv("CLAW_PUBLIC_AGREEMENT_VERIFY", "1")
     monkeypatch.delenv("CLAW_RECIPIENT_ACCESS_TOKEN_REQUIRED", raising=False)
@@ -37,6 +40,7 @@ def _owner(user: str = "owner-a") -> dict[str, str]:
 
 def _create_owned_draft(client: TestClient, *, user: str = "owner-a", title: str = "Owned") -> str:
     """Create under economics ON so ownership is registered, then caller may disable economics."""
+    ensure_headers_entitled(_owner(user))
     r = client.post(
         "/api/agreements/draft",
         headers=_owner(user),

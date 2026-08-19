@@ -114,6 +114,41 @@ test.describe("GTM anonymous Starter → Upgrade authority", () => {
     await expect(page).toHaveURL(/\/app\/sign-in/);
   });
 
+  test("explicit unnamed three-party prompt shows Pro gate without spinning prepare", async ({ page }) => {
+    test.setTimeout(90_000);
+    await seedAnonymousStarterBrowserState(page);
+    await installFreeStarterApiRoutes(page, new Map(), "ag_gtm_three_party");
+    await submitHomepageHeroToCreate(
+      page,
+      "Provide an NDA for 3 parties using Texas law for proprietary IP for the statutory limit",
+    );
+    await expect(
+      page.getByRole("heading", { name: /includes 3 parties and requires Pro/i }),
+    ).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByRole("button", { name: /Continue with Pro/i })).toBeVisible();
+    await expect(page.getByText("Preparing your review screen")).toHaveCount(0);
+    await expect(page.getByRole("heading", { name: "Review your draft" })).toHaveCount(0);
+  });
+
+  test("signed-out checkout preserves the complete destination through sign-in", async ({ page }) => {
+    await seedAnonymousStarterBrowserState(page);
+    await page.goto(
+      "/app/checkout/__claw_create_checkout__?tier=pro&cadence=monthly&returnTo=%2Fapp%2Fcreate",
+    );
+    await expect(page.getByRole("heading", { name: "Sign in to continue to secure checkout" })).toBeVisible();
+    await expect(
+      page.getByText(
+        "Your draft is saved. After signing in, you'll return here to choose your plan and complete payment.",
+      ),
+    ).toBeVisible();
+    await page.getByRole("button", { name: "Sign in and continue" }).click();
+    await expect(page).toHaveURL(/\/app\/sign-in\?next=/);
+    const url = new URL(page.url());
+    expect(url.searchParams.get("next")).toBe(
+      "/app/checkout/__claw_create_checkout__?tier=pro&cadence=monthly&returnTo=/app/create",
+    );
+  });
+
   test("Case B — Starter upgrade CTA routes to checkout", async ({ page }) => {
     test.setTimeout(120_000);
     const drafts = new Map();

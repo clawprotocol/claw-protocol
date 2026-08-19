@@ -28,9 +28,15 @@ import {
   substitutePaidProIntakeContactPlaceholders,
 } from "./paidProIntakeContactSubstitution";
 import {
+  isExecutionSignatureContext,
+  isInSignatureRegion,
+  isNumberedSignatureContactToken,
+  isOperativeSignatureContactMisuse,
+  isTailSignatureSection,
   normalizePlaceholderToken,
   parseSignatureContactSlot,
 } from "./agreementTemplatePlaceholderSafety";
+import { intakePartyManifestIsAuthoritative } from "./intakePartyManifestAuthority";
 import { repairIncompleteIfToNoticeStanzas } from "./paidProPartyNoticeDetails";
 import { restoreExactIntakeEmails } from "./paidProEmailMask";
 import { getPaidProSourceOfTruthText, hasPaidProSourceOfTruth } from "./paidProSourceOfTruth";
@@ -66,6 +72,11 @@ export type RenderTokenAuthorityContext = {
   surface?: string;
   /** When true, unresolved tokens after authority recovery block progression. */
   blockOnUnresolved?: boolean;
+  /**
+   * When true, skip inventing/normalizing Notices / If-to stanzas.
+   * Signature-region hydration must not mutate the operative body fingerprint.
+   */
+  skipNoticeRepair?: boolean;
 };
 
 export type RenderTokenAuthorityOutcome = {
@@ -281,6 +292,16 @@ export function buildRenderTokenAuthorityParties(
   }));
 }
 
+const SIGNATURE_STUB_BLANK = "_________________________";
+
+function isSignatureFieldRenderToken(token: string): boolean {
+  const n = normalizePlaceholderToken(token);
+  if (isNumberedSignatureContactToken(token)) return true;
+  return /^(?:(?:SIGNER|PARTY|CONTACT|ORG|COMPANY|CLIENT)_)?(?:NAME|TITLE|DATE|EMAIL|SIGNATURE|INITIALS?|PARTY_NAME|SIGNER_NAME|LEGAL_NAME|PRINTED_NAME|DATE_OF_AGREEMENT|EFFECTIVE_DATE|AGREEMENT_DATE)(?:_\d+)?$/i.test(
+    n,
+  );
+}
+
 function replaceUnresolvedTokensFromAuthority(
   text: string,
   ctx: RenderTokenAuthorityContext,
@@ -290,15 +311,34 @@ function replaceUnresolvedTokensFromAuthority(
   let out = text;
 
   const tokens = scanUnresolvedRenderTokens(out);
-  for (const { token } of tokens) {
+  for (const { token, index } of tokens) {
+    if (isOperativeSignatureContactMisuse(token, out, index)) continue;
     const resolved = resolveRenderTokenFromAuthority(token, ctx);
-    if (!resolved || resolved === token) continue;
-    const escaped = token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const next = out.replace(new RegExp(escaped, "g"), resolved);
-    if (next !== out) {
-      out = next;
-      replacedCount += 1;
-      repairs.push(`token:${token.slice(0, 40)}→authority`);
+    if (resolved && resolved !== token) {
+      const escaped = token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const next = out.replace(new RegExp(escaped, "g"), resolved);
+      if (next !== out) {
+        out = next;
+        replacedCount += 1;
+        repairs.push(`token:${token.slice(0, 40)}→authority`);
+      }
+      continue;
+    }
+    // Signature-line stubs without structured values must blank-fill in execution context
+    // so document-boundary validation matches finalizeUserVisibleAgreementPlainText.
+    if (
+      isSignatureFieldRenderToken(token) &&
+      (isExecutionSignatureContext(out, index) ||
+        isInSignatureRegion(out, index) ||
+        isTailSignatureSection(out, index))
+    ) {
+      const escaped = token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const next = out.replace(new RegExp(escaped, "g"), SIGNATURE_STUB_BLANK);
+      if (next !== out) {
+        out = next;
+        replacedCount += 1;
+        repairs.push(`token:${token.slice(0, 40)}→signature_blank`);
+      }
     }
   }
 
@@ -333,13 +373,25 @@ export function enforceUserVisibleRenderTokenAuthority(
     repairs.push("authority:numbered_email_substitution");
   }
 
-  if (parties.length >= 2) {
+  const hasAuthoritativeNoticeParties = parties.some((p) => {
+    const name = String(p.partyLegalName || "").trim();
+    return name.length >= 3 && !/^Party\s+\d+$/i.test(name);
+  });
+  // Intake-labeled manifests may still need notice repair even when consumed authority
+  // slots are contaminated with Party N placeholders (TEST540).
+  const mayRepairNoticesFromIntake = intakePartyManifestIsAuthoritative(ctx?.intakeRaw);
+  if (
+    parties.length >= 2 &&
+    (hasAuthoritativeNoticeParties || mayRepairNoticesFromIntake) &&
+    !ctx?.skipNoticeRepair
+  ) {
     // TEST540 — this terminal render-token gate previously called notice repair WITHOUT a role
     // context, dropping the authoritative intake identity even though `ctx.intakeRaw` was in scope.
     // When `parties` was rebuilt from a contaminated consumed-authority snapshot (a "Party 1"
     // placeholder in slot 0), the notice resolver had no manifest to recover the real entity and
     // degraded slot 0 to "Party N" — the exact `paid-pro-notice-entity-missing` / Party 1 failure.
     // Threading the intake manifest identity here lets the resolver restore the canonical entity.
+    // Empty / positional Party N slots must not invent NOTICES scaffolding (commercial no-invent).
     const noticeRoleContext: PaidProPartyRoleContext = {
       intakeText: ctx?.intakeRaw ?? null,
       draftPartyNames: (ctx?.partyNames ?? parties.map((p) => p.partyLegalName))

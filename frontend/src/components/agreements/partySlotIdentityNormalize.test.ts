@@ -7,6 +7,7 @@ import {
   isStandaloneLegalEntitySuffix,
   normalizeAgreementPartyName,
   resolveAuthoritativeIntakePartyNames,
+  resolveDeclaredExplicitPartyCount,
   splitCommaSeparatedPartyNames,
 } from "./partySlotIdentityNormalize";
 
@@ -111,5 +112,22 @@ describe("partySlotIdentityNormalize", () => {
       shorter,
       longer,
     ]);
+  });
+
+  it("recognizes conservative explicit numeric and word-form party declarations", () => {
+    expect(
+      resolveDeclaredExplicitPartyCount(
+        "Provide an NDA for 3 parties using Texas law for proprietary IP for the statutory limit",
+      ),
+    ).toBe(3);
+    expect(resolveDeclaredExplicitPartyCount("Provide an NDA for three parties using Texas law")).toBe(3);
+    expect(resolveDeclaredExplicitPartyCount("Need an NDA among 3 parties for proprietary IP")).toBe(3);
+    expect(resolveDeclaredExplicitPartyCount("Need a three-party NDA under Texas law")).toBe(3);
+    expect(resolveDeclaredExplicitPartyCount("Need a 3-party NDA under Texas law")).toBe(3);
+    expect(resolveDeclaredExplicitPartyCount("Need an NDA for 4 parties using Texas law")).toBe(4);
+    expect(resolveDeclaredExplicitPartyCount("Need an NDA among 4 parties")).toBe(4);
+    expect(resolveDeclaredExplicitPartyCount("Need a four-party brand license")).toBe(4);
+    expect(resolveDeclaredExplicitPartyCount("Need a 4-party joint venture")).toBe(4);
+    expect(resolveDeclaredExplicitPartyCount("Consulting agreement between Acme LLC and Beta Corp.")).toBeNull();
   });
 });

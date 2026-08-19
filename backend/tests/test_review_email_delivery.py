@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from backend.tests.entitlement_test_support import ensure_headers_entitled, ensure_org_pro_entitlement
+
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -13,6 +15,22 @@ from backend.usage_economics import store as usage_economics_store_mod
 pytestmark = pytest.mark.unit
 
 _ORG_H = {"X-Claw-Org-Id": "test-org-review-email", "X-Claw-Test-Auth-User-Id": "test-owner"}
+
+
+@pytest.fixture(autouse=True)
+def _entitle_owner_org_after_env(tmp_path, monkeypatch):
+    """Grant Pro for module owner headers once tmp_path-backed DBs are configured."""
+    monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
+    monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ONRAMP_DB_PATH", str(tmp_path / "onramp.sqlite3"))
+    monkeypatch.setenv("CLAW_TREASURY_DB_PATH", str(tmp_path / "treasury.sqlite3"))
+    from backend.economics.store import reset_economics_store_for_tests
+    reset_economics_store_for_tests()
+    ensure_headers_entitled(_ORG_H)
+    yield
+    reset_economics_store_for_tests()
+
 
 
 @pytest.fixture(autouse=True)
@@ -60,6 +78,7 @@ def _mock_resend_success() -> MagicMock:
 def test_manual_mode_sends_zero_emails(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     monkeypatch.setenv("CLAW_REVIEW_DELIVERY_MODE", "manual")
     monkeypatch.setenv("RESEND_API_KEY", "re_test")
     monkeypatch.setenv("EMAIL_FROM", "noreply@example.com")
@@ -80,6 +99,7 @@ def test_manual_mode_sends_zero_emails(monkeypatch: pytest.MonkeyPatch, tmp_path
 def test_email_mode_sends_review_invites(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     monkeypatch.setenv("CLAW_REVIEW_DELIVERY_MODE", "email")
     monkeypatch.setenv("RESEND_API_KEY", "re_test")
     monkeypatch.setenv("EMAIL_FROM", "LawDog <noreply@example.com>")
@@ -106,6 +126,7 @@ def test_email_mode_sends_review_invites(monkeypatch: pytest.MonkeyPatch, tmp_pa
 def test_resend_failure_does_not_fail_review_sent(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     monkeypatch.setenv("CLAW_REVIEW_DELIVERY_MODE", "email")
     monkeypatch.setenv("RESEND_API_KEY", "re_test")
     monkeypatch.setenv("EMAIL_FROM", "noreply@example.com")
@@ -137,6 +158,7 @@ def test_resend_failure_leaves_invite_marker_unset_and_allows_retry(
     """Failed Resend attempts must not set review_invite_emails_sent_at so review-sent can retry."""
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     monkeypatch.setenv("CLAW_REVIEW_DELIVERY_MODE", "email")
     monkeypatch.setenv("RESEND_API_KEY", "re_test")
     monkeypatch.setenv("EMAIL_FROM", "noreply@example.com")
@@ -173,6 +195,7 @@ def test_paid_pro_mint_then_role_email_patch_review_sent_sends_one_external_invi
     """Paid Pro handoff: server draft lacks emails until PATCH; review-sent sends one external invite."""
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     monkeypatch.setenv("CLAW_ENVIRONMENT", "local")
     monkeypatch.setenv("CLAW_AGREEMENT_SIGNING_TOKEN_SECRET", "unit-test-review-email-paid-pro")
     monkeypatch.setenv("CLAW_REVIEW_DELIVERY_MODE", "manual_and_email")
@@ -182,6 +205,7 @@ def test_paid_pro_mint_then_role_email_patch_review_sent_sends_one_external_invi
 
     mock_client = _mock_resend_success()
     client = TestClient(app)
+    ensure_headers_entitled(_ORG_H)
     create_res = client.post(
         "/api/agreements/draft",
         headers=_ORG_H,
@@ -261,6 +285,7 @@ def test_roles_only_patch_without_emails_skips_resend_and_leaves_marker_unset(
     """Roles without persisted emails: no Resend, no idempotency marker."""
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     monkeypatch.setenv("CLAW_REVIEW_DELIVERY_MODE", "email")
     monkeypatch.setenv("RESEND_API_KEY", "re_test")
     monkeypatch.setenv("EMAIL_FROM", "noreply@example.com")
@@ -268,6 +293,7 @@ def test_roles_only_patch_without_emails_skips_resend_and_leaves_marker_unset(
 
     mock_client = _mock_resend_success()
     client = TestClient(app)
+    ensure_headers_entitled(_ORG_H)
     create_res = client.post(
         "/api/agreements/draft",
         headers=_ORG_H,
@@ -314,6 +340,7 @@ def test_roles_only_patch_without_emails_skips_resend_and_leaves_marker_unset(
 def test_missing_email_config_does_not_fail_review_sent(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     monkeypatch.setenv("CLAW_REVIEW_DELIVERY_MODE", "email")
     monkeypatch.delenv("RESEND_API_KEY", raising=False)
     monkeypatch.delenv("EMAIL_FROM", raising=False)
@@ -337,6 +364,7 @@ def test_owner_party_excluded_external_reviewer_receives_invite(
     """Owner/self party email is excluded; external reviewer receives the Resend invite."""
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     monkeypatch.setenv("CLAW_REVIEW_DELIVERY_MODE", "manual_and_email")
     monkeypatch.setenv("RESEND_API_KEY", "re_test")
     monkeypatch.setenv("EMAIL_FROM", "noreply@example.com")
@@ -344,6 +372,7 @@ def test_owner_party_excluded_external_reviewer_receives_invite(
 
     mock_client = _mock_resend_success()
     client = TestClient(app)
+    ensure_headers_entitled(_ORG_H)
     create_res = client.post(
         "/api/agreements/draft",
         headers=_ORG_H,
@@ -390,6 +419,7 @@ def test_paid_pro_corpus_persist_then_review_sent_still_sends_emails(
     """Paid Pro: token mint corpus persist sets review_sent_at before review-sent; emails still send once."""
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     monkeypatch.setenv("CLAW_ENVIRONMENT", "local")
     monkeypatch.setenv("CLAW_AGREEMENT_SIGNING_TOKEN_SECRET", "unit-test-review-email-paid-pro")
     monkeypatch.setenv("CLAW_REVIEW_DELIVERY_MODE", "manual_and_email")
@@ -433,6 +463,7 @@ def test_paid_pro_corpus_persist_then_review_sent_still_sends_emails(
 def test_duplicate_review_sent_does_not_resend_emails(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     monkeypatch.setenv("CLAW_REVIEW_DELIVERY_MODE", "email")
     monkeypatch.setenv("RESEND_API_KEY", "re_test")
     monkeypatch.setenv("EMAIL_FROM", "noreply@example.com")
@@ -457,6 +488,7 @@ def test_paid_pro_client_service_provider_roles_skip_without_owner(
     """Paid Pro drafts often use client/service_provider — not owner-normalized — until frontend persists roles."""
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     monkeypatch.setenv("CLAW_REVIEW_DELIVERY_MODE", "email")
     monkeypatch.setenv("RESEND_API_KEY", "re_test")
     monkeypatch.setenv("EMAIL_FROM", "noreply@example.com")
@@ -464,6 +496,7 @@ def test_paid_pro_client_service_provider_roles_skip_without_owner(
 
     mock_client = _mock_resend_success()
     client = TestClient(app)
+    ensure_headers_entitled(_ORG_H)
     create_res = client.post(
         "/api/agreements/draft",
         headers=_ORG_H,
@@ -510,6 +543,7 @@ def test_explicit_owner_role_after_party_patch_sends_invite(
     """After parties carry explicit owner role, Resend targets external reviewer only."""
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     monkeypatch.setenv("CLAW_REVIEW_DELIVERY_MODE", "email")
     monkeypatch.setenv("RESEND_API_KEY", "re_test")
     monkeypatch.setenv("EMAIL_FROM", "noreply@example.com")
@@ -517,6 +551,7 @@ def test_explicit_owner_role_after_party_patch_sends_invite(
 
     mock_client = _mock_resend_success()
     client = TestClient(app)
+    ensure_headers_entitled(_ORG_H)
     create_res = client.post(
         "/api/agreements/draft",
         headers=_ORG_H,
@@ -706,6 +741,7 @@ def test_no_owner_role_skips_resend_and_leaves_marker_unset(
     """Missing owner role: zero Resend calls, owner_role_missing log, no idempotency marker."""
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     monkeypatch.setenv("CLAW_REVIEW_DELIVERY_MODE", "email")
     monkeypatch.setenv("RESEND_API_KEY", "re_test")
     monkeypatch.setenv("EMAIL_FROM", "noreply@example.com")
@@ -713,6 +749,7 @@ def test_no_owner_role_skips_resend_and_leaves_marker_unset(
 
     mock_client = _mock_resend_success()
     client = TestClient(app)
+    ensure_headers_entitled(_ORG_H)
     create_res = client.post(
         "/api/agreements/draft",
         headers=_ORG_H,
@@ -755,6 +792,7 @@ def test_owner_at_index_1_counterparty_invited_integration(
     """Owner at index 1: counterparty at index 0 receives Resend invite."""
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     monkeypatch.setenv("CLAW_REVIEW_DELIVERY_MODE", "email")
     monkeypatch.setenv("RESEND_API_KEY", "re_test")
     monkeypatch.setenv("EMAIL_FROM", "noreply@example.com")
@@ -762,6 +800,7 @@ def test_owner_at_index_1_counterparty_invited_integration(
 
     mock_client = _mock_resend_success()
     client = TestClient(app)
+    ensure_headers_entitled(_ORG_H)
     create_res = client.post(
         "/api/agreements/draft",
         headers=_ORG_H,
@@ -797,6 +836,7 @@ def test_mint_preset_review_sent_at_still_requires_review_sent_for_email_deliver
     """Regression: corpus mint sets review_sent_at early; review-sent must still run email delivery."""
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     monkeypatch.setenv("CLAW_ENVIRONMENT", "local")
     monkeypatch.setenv("CLAW_AGREEMENT_SIGNING_TOKEN_SECRET", "unit-test-review-email-paid-pro")
     monkeypatch.setenv("CLAW_REVIEW_DELIVERY_MODE", "manual_and_email")
@@ -806,6 +846,7 @@ def test_mint_preset_review_sent_at_still_requires_review_sent_for_email_deliver
 
     mock_client = _mock_resend_success()
     client = TestClient(app)
+    ensure_headers_entitled(_ORG_H)
     create_res = client.post(
         "/api/agreements/draft",
         headers=_ORG_H,
@@ -869,6 +910,7 @@ def test_owner_in_middle_of_four_party_list_integration(
     """Owner in middle of list: only owner excluded; all other valid parties invited."""
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     monkeypatch.setenv("CLAW_REVIEW_DELIVERY_MODE", "email")
     monkeypatch.setenv("RESEND_API_KEY", "re_test")
     monkeypatch.setenv("EMAIL_FROM", "noreply@example.com")
@@ -876,6 +918,7 @@ def test_owner_in_middle_of_four_party_list_integration(
 
     mock_client = _mock_resend_success()
     client = TestClient(app)
+    ensure_headers_entitled(_ORG_H)
     create_res = client.post(
         "/api/agreements/draft",
         headers=_ORG_H,

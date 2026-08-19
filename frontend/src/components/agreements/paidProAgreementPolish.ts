@@ -26,6 +26,7 @@ import { shouldBlockPaidProStructuralMutationAfterAcceptance } from "./paidProAu
 import { logPaidProPostFreezeMutationAttempt } from "./paidProFreezeDiagnostics";
 import { shouldLogPaidProPolishDiagnostic } from "./paidProDiagnosticLogPolicy";
 import { tracePaidProQaPassWithText } from "./paidProQaPerfTrace";
+import { unauthorizedSemanticInsertsAllowed } from "./unauthorizedSemanticInsertPolicy";
 
 const ENTITY_SUFFIX =
   /\s+(?:LLC|L\.L\.C\.|Inc\.?|Incorporated|Corp\.?|Corporation|Ltd\.?|Limited|LLP|PLLC|LP|Co\.?|Company|DAO|Foundation|Trust)\.?$/i;
@@ -639,6 +640,20 @@ function polishAttorneysFees(text: string): { text: string; added: boolean } {
 }
 
 export function applyEnterpriseClausePolish(text: string): { text: string; log: EnterprisePolishLog } {
+  // P0: hard-coded inventing floors are unauthorized without intake/user authority.
+  // Disabled by default (including production). See unauthorizedSemanticInsertPolicy.ts.
+  if (!unauthorizedSemanticInsertsAllowed()) {
+    return {
+      text: text || "",
+      log: {
+        effectiveDateAdded: false,
+        disputeWindowAdded: false,
+        uptimeTargetAdded: false,
+        survivalPolished: false,
+        attorneysFeesAdded: false,
+      },
+    };
+  }
   let working = text;
   const effective = polishEffectiveDate(working);
   working = effective.text;
@@ -798,12 +813,14 @@ export function polishPaidProAgreementText(
   const purityFinal = applySectionPurityPass(working);
   working = purityFinal.text;
 
-  const milestoneFinal = applyMilestoneTableGeneration(
-    working,
-    intakeRaw || "",
-    intakeRaw || "",
-    synthesis.responsibilities,
-  );
+  const milestoneFinal = unauthorizedSemanticInsertsAllowed()
+    ? applyMilestoneTableGeneration(
+        working,
+        intakeRaw || "",
+        intakeRaw || "",
+        synthesis.responsibilities,
+      )
+    : { text: working, inserted: false };
   working = milestoneFinal.text;
   working = softenProDocumentTone(working);
 

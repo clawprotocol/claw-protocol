@@ -57,9 +57,18 @@ describe("Pro review footer — AI automation services QA", () => {
     });
     const ids = vars.map((v) => v.id);
     expect(ids).toContain("payment_timing");
-    expect(ids.some((id) => id === "ip_ownership" || id === "ip_allocation")).toBe(true);
-    expect(ids.some((id) => id === "saas_sla" || id === "support_obligations")).toBe(true);
-    expect(ids).toContain("renewal_notice");
+    expect(
+      ids.some((id) =>
+        ["ip_ownership", "ip_allocation", "saas_sla", "support_obligations", "renewal_notice"].includes(id),
+      ),
+    ).toBe(true);
+    const session = buildGuidedSessionFromAgreement({
+      intakeRaw: AI_AUTOMATION_SERVICES_QA_INTAKE,
+      body: AUTOMATION_BODY,
+      materialItems: buildMaterialMissingItems({ intakeRaw: AI_AUTOMATION_SERVICES_QA_INTAKE, body: AUTOMATION_BODY }),
+    })!;
+    expect(session.queue.length).toBeLessThanOrEqual(3);
+    expect(session.queue[0]).toBeTruthy();
   });
 
   it("footer state is guided_completion with renderable first question", () => {
@@ -109,7 +118,7 @@ describe("Pro review footer — AI automation services QA", () => {
       documentText: AUTOMATION_BODY,
     });
     expect(raw).toBe("needs_details");
-    expect(formatFinalizeReadiness(raw)).toBe("Needs details");
+    expect(formatFinalizeReadiness(raw)).toBe("Decisions needed before signature");
     expect(footer.hideFinalizeGapBullets).toBe(true);
   });
 

@@ -27,9 +27,11 @@ import { resetPaidReviewSessionCorpusInvariantForTests } from "./paidProReviewSe
 import { clearIntakeSignerMetadataExtractMemoForTests } from "./universalSignerMetadataAuthority";
 import { clearPaidProVisibleRenderMemoForTests } from "./paidProVisibleRenderMemo";
 import { clearPaidProReviewRenderFusedRepairCache } from "./paidProReviewRenderCorpus";
+import { clearFailedCreateRecoveryLatch } from "./paidProEntitledRewriteLaunch";
 
 /** Clear cross-test Paid Pro pipeline caches and in-memory authority without touching sessionStorage. */
 export function resetPaidProPipelineTestIsolation(): void {
+  clearFailedCreateRecoveryLatch();
   clearPaidProSourceOfTruth();
   clearProGenerationAdoptionForTests();
   clearPaidProGenerationAttemptAuthorityForTests();

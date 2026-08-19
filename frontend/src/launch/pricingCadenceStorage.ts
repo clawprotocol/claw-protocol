@@ -9,7 +9,8 @@ export function getPricingCadencePreference(): PricingCadence {
   } catch {
     /* ignore */
   }
-  return "annual";
+  // Paid-beta default: monthly. Annual requires affirmative selection.
+  return "monthly";
 }
 
 export function setPricingCadencePreference(c: PricingCadence): void {

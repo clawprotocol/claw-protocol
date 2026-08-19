@@ -188,11 +188,15 @@ describe("paidPro Test216A routing", () => {
 
     it("handleProSendForSignature arms preparation before guided signing track", () => {
       const start = intake.indexOf("const handleProSendForSignature = React.useCallback");
-      const block = intake.slice(start, start + 2200);
+      const end = intake.indexOf("const handlePaidProPrepareSignaturesFromFirstReview", start);
+      const block = intake.slice(start, end > start ? end : start + 5000);
       expect(block).toContain("hasAuthoritativeSigningSnapshot()");
       expect(block).toContain("markSigningPreparationRequested()");
       expect(block).toContain("enterGuidedSignatureTrackRoute");
-      expect(block).toContain("markSigningPreparationRequested()");
+      const prepAt = block.indexOf("markSigningPreparationRequested()");
+      const routeAt = block.indexOf("enterGuidedSignatureTrackRoute");
+      expect(prepAt).toBeGreaterThanOrEqual(0);
+      expect(routeAt).toBeGreaterThan(prepAt);
     });
   });
 });

@@ -14,7 +14,7 @@ def lawdog_pro_checkout_metadata(
     visitor_id: Optional[str] = None,
     user_id: Optional[str] = None,
 ) -> Dict[str, str]:
-    """Metadata for LawDog Pro ($39/mo) checkout — attach to session, customer, and subscription."""
+    """Metadata for LawDog Pro ($49/mo) checkout — attach to session, customer, and subscription."""
     return build_stripe_checkout_metadata(
         org_id=org_id,
         referral_code=referral_code,

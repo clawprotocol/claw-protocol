@@ -8,8 +8,15 @@ import type { PaidProSignerMetadataAuthority } from "./paidProSignerMetadataAuth
 import {
   authorityPartiesToCanonicalPartyIdentities,
   authorityPartiesToRecipientMetadata,
+  type PaidProSignerMetadataParty,
 } from "./paidProSignerMetadataAuthority";
-import { applySignatureNoticeContactFieldsToCorpus, ensureOperativeIfToNoticeDelivery, repairCollapsedInlineNoticeStanzas } from "./paidProPartyNoticeDetails";
+import { partyLegalNamesMatch } from "./paidProAcceptedCorpusPartyRoles";
+import {
+  applySignatureNoticeContactFieldsToCorpus,
+  ensureOperativeIfToNoticeDelivery,
+  findNoticesSectionStart,
+  repairCollapsedInlineNoticeStanzas,
+} from "./paidProPartyNoticeDetails";
 import {
   countBlankSignerMetadataLinesInExecutionBlock,
   hydratePaidProExecutionBlockWithSignerMetadata,
@@ -48,15 +55,126 @@ export function shouldPreserveFrozenCanonicalCorpusOnSignerFinalize(rawCorpus: s
   return shouldUseFrozenPaidProSourceOfTruthMinimalHydration(rawCorpus);
 }
 
+/** Replace existing If-to Email/Address placeholder lines without rebuilding the Notices family. */
+function fillExistingIfToSignerSetupPlaceholders(
+  corpus: string,
+  parties: readonly PaidProSignerMetadataParty[],
+): { text: string; applied: boolean; replacements: number } {
+  if (!/provided during signer setup/i.test(corpus) || !/^If to\s+/im.test(corpus)) {
+    return { text: corpus, applied: false, replacements: 0 };
+  }
+  const lines = corpus.replace(/\r\n/g, "\n").split("\n");
+  let currentParty: PaidProSignerMetadataParty | null = null;
+  let replacements = 0;
+  const out: string[] = [];
+  for (const line of lines) {
+    const trimmed = line.trim();
+    const ifTo = trimmed.match(/^If to\s+(.+?)\s*:\s*(.*)$/i);
+    if (ifTo) {
+      const entity = (ifTo[1] ?? "").trim();
+      currentParty = parties.find((p) => partyLegalNamesMatch(entity, p.partyLegalName)) ?? null;
+      const inlineRemainder = (ifTo[2] ?? "").trim();
+      if (currentParty && inlineRemainder) {
+        const signerName = currentParty.signerName.trim();
+        const signerTitle = currentParty.signerTitle.trim();
+        const email = currentParty.signerEmail.trim();
+        const address = currentParty.partyAddress.trim();
+        let nextLine = line;
+        if (signerName) {
+          nextLine = nextLine.replace(
+            /\b(?:Attn|Attention)\s*:\s*Authorized Signer\b/i,
+            signerTitle ? `Attention: ${signerName}, ${signerTitle}` : `Attention: ${signerName}`,
+          );
+        }
+        if (email && !/provided during signer setup/i.test(email)) {
+          nextLine = nextLine.replace(
+            /\bEmail\s*:\s*provided during signer setup\.?/i,
+            `Email: ${email}`,
+          );
+        }
+        nextLine = address.length > 8 && !/provided during signer setup/i.test(address)
+          ? nextLine.replace(
+              /\bAddress\s*:\s*provided during signer setup\.?/i,
+              `Address: ${address}`,
+            )
+          : nextLine.replace(/\s*\bAddress\s*:\s*provided during signer setup\.?/i, "");
+        if (nextLine !== line) replacements += 1;
+        out.push(nextLine);
+        currentParty = null;
+        continue;
+      }
+      out.push(line);
+      continue;
+    }
+    if (/^IN WITNESS WHEREOF\b/i.test(trimmed) || /^(?:CLIENT|SERVICE\s+PROVIDER)\s*:/i.test(trimmed)) {
+      currentParty = null;
+      out.push(line);
+      continue;
+    }
+    if (currentParty && /^(?:Attn|Attention)\s*:\s*Authorized Signer\s*$/i.test(trimmed)) {
+      const signerName = currentParty.signerName.trim();
+      if (signerName) {
+        const indent = line.match(/^\s*/)?.[0] ?? "";
+        const title = currentParty.signerTitle.trim();
+        out.push(
+          title
+            ? `${indent}Attn: ${signerName}, ${title}`
+            : `${indent}Attention: ${signerName}`,
+        );
+        replacements += 1;
+        continue;
+      }
+    }
+    if (currentParty && /^Email\s*:\s*provided during signer setup\.?$/i.test(trimmed)) {
+      const email = currentParty.signerEmail.trim();
+      if (email && !/provided during signer setup/i.test(email)) {
+        const indent = line.match(/^\s*/)?.[0] ?? "";
+        out.push(`${indent}Email: ${email}`);
+        replacements += 1;
+        continue;
+      }
+    }
+    if (currentParty && /^Address\s*:\s*provided during signer setup\.?$/i.test(trimmed)) {
+      const address = currentParty.partyAddress.trim();
+      if (address.length > 8 && !/provided during signer setup/i.test(address)) {
+        const indent = line.match(/^\s*/)?.[0] ?? "";
+        out.push(`${indent}Address: ${address}`);
+        replacements += 1;
+        continue;
+      }
+      replacements += 1;
+      continue;
+    }
+    out.push(line);
+  }
+  let nextText = out.join("\n");
+  // A stale pre-finalize manifest can leave an unmatched setup-only notice row. Once the
+  // confirmed signer authority has been applied, those tokens are neither user data nor valid
+  // contract text. Remove only the unresolved placeholder lines/fragments; never remove real
+  // contact values or rebuild the Notices family.
+  const withoutUnresolvedPlaceholders = nextText
+    .replace(/^[ \t]*(?:Email|Address)\s*:\s*provided during signer setup\.?[ \t]*\n?/gim, "")
+    .replace(/\s+\b(?:Email|Address)\s*:\s*provided during signer setup\.?/gi, "");
+  if (withoutUnresolvedPlaceholders !== nextText) {
+    nextText = withoutUnresolvedPlaceholders;
+    replacements += 1;
+  }
+  if (replacements === 0) return { text: corpus, applied: false, replacements: 0 };
+  return { text: nextText, applied: true, replacements };
+}
+
 /** Hydrate signer metadata into frozen server_full SoT without regenerating operative text. */
 export function buildFrozenServerFullSignerMetadataHydration(args: {
   rawCorpus: string;
   authority: PaidProSignerMetadataAuthority;
   intakeRaw: string;
   surface: string;
+  /** When true, fill execution/notice contacts only — never invent a Notices section. */
+  signatureRegionOnly?: boolean;
 }): HydratedAuthoritativeSigningCorpusResult {
   const rawCorpusLenBeforeHydration = (args.rawCorpus || "").trim().length;
   let corpus = (args.rawCorpus || "").trim();
+  const signatureRegionOnly = args.signatureRegionOnly !== false;
   const roleContext = {
     intakeText: args.intakeRaw,
     acceptedCorpus: corpus,
@@ -74,14 +192,50 @@ export function buildFrozenServerFullSignerMetadataHydration(args: {
     corpus = executionHydration.corpus;
   }
 
-  const noticeDelivery = ensureOperativeIfToNoticeDelivery(corpus, args.authority.parties, roleContext);
-  if (noticeDelivery.repairs.length > 0) {
-    corpus = noticeDelivery.text.trim();
+  // Never invent a Notices section in signature-region mode. Fill existing If-to
+  // "provided during signer setup" lines in place — do not rebuild the Notices family
+  // (that rewrite joined unrelated headings such as "termination.12." on brand-licensing SoT).
+  let noticeDeliveryRepairs = 0;
+  if (signatureRegionOnly) {
+    const filled = fillExistingIfToSignerSetupPlaceholders(corpus, args.authority.parties);
+    if (filled.applied) {
+      corpus = filled.text;
+      noticeDeliveryRepairs = filled.replacements;
+    }
+  } else {
+    const noticesIdx = findNoticesSectionStart(corpus);
+    const authorityHasContact = args.authority.parties.some(
+      (p) => p.signerEmail.trim() || p.partyAddress.trim() || p.signerName.trim(),
+    );
+    if (
+      authorityHasContact &&
+      noticesIdx >= 0 &&
+      /provided during signer setup/i.test(corpus.slice(noticesIdx))
+    ) {
+      const noticeDelivery = ensureOperativeIfToNoticeDelivery(
+        corpus,
+        args.authority.parties,
+        roleContext,
+      );
+      noticeDeliveryRepairs = noticeDelivery.repairs.length;
+      if (noticeDeliveryRepairs > 0 || noticeDelivery.text !== corpus) {
+        corpus = noticeDelivery.text.trim();
+      }
+    }
   }
 
-  const contactStrip = applySignatureNoticeContactFieldsToCorpus(corpus, args.authority.parties, roleContext);
-  if (contactStrip.applied) {
-    corpus = contactStrip.text.trim();
+  // Signature-region-only finalize (TEST307) must hydrate Name/Title in the execution
+  // block without writing Email: lines into operative notice stanzas.
+  let contactStrip = { applied: false, text: corpus };
+  if (!signatureRegionOnly) {
+    contactStrip = applySignatureNoticeContactFieldsToCorpus(
+      corpus,
+      args.authority.parties,
+      roleContext,
+    );
+    if (contactStrip.applied) {
+      corpus = contactStrip.text.trim();
+    }
   }
 
   const dedupe = stripDuplicateConsecutiveExecutionEntityLines(corpus);
@@ -89,14 +243,18 @@ export function buildFrozenServerFullSignerMetadataHydration(args: {
     corpus = dedupe.text;
   }
 
-  const joined = repairJoinedTopLevelSectionHeadings(corpus);
-  if (joined.repairs.length > 0) {
-    corpus = joined.text;
-  }
+  let joinedRepairs = 0;
+  if (!signatureRegionOnly) {
+    const joined = repairJoinedTopLevelSectionHeadings(corpus);
+    joinedRepairs = joined.repairs.length;
+    if (joinedRepairs > 0) {
+      corpus = joined.text;
+    }
 
-  const collapsedNotices = repairCollapsedInlineNoticeStanzas(corpus);
-  if (collapsedNotices.repairs.length > 0) {
-    corpus = collapsedNotices.text;
+    const collapsedNotices = repairCollapsedInlineNoticeStanzas(corpus);
+    if (collapsedNotices.repairs.length > 0) {
+      corpus = collapsedNotices.text;
+    }
   }
 
   const signerCount = args.authority.parties.length;
@@ -126,7 +284,8 @@ export function buildFrozenServerFullSignerMetadataHydration(args: {
       canonicalHash,
       finalizedHash,
       signerFieldOnlyDelta,
-      signerHydrationApplied: executionHydration.applied || noticeDelivery.repairs.length > 0 || contactStrip.applied,
+      signerHydrationApplied:
+        executionHydration.applied || noticeDeliveryRepairs > 0 || contactStrip.applied,
       blankSignerLinesRemaining,
     });
   }
@@ -136,11 +295,11 @@ export function buildFrozenServerFullSignerMetadataHydration(args: {
     identities: [...identities],
     signaturePolishCount:
       executionHydration.fieldsHydrated +
-      noticeDelivery.repairs.length +
+      noticeDeliveryRepairs +
       (contactStrip.applied ? 1 : 0) +
       dedupe.repairs.length +
-      joined.repairs.length,
-    partyNoticeApplied: noticeDelivery.repairs.length > 0 || contactStrip.applied,
+      joinedRepairs,
+    partyNoticeApplied: noticeDeliveryRepairs > 0 || contactStrip.applied,
     rejected: false,
   };
 }

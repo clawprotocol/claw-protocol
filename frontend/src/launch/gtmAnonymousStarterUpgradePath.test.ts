@@ -286,5 +286,12 @@ describe("GTM blocker — anonymous Starter → Upgrade → Pro", () => {
       expect(signInSrc).toContain("returningSignIn: true");
       expect(signInSrc).toContain("Sign in to LawDog");
     });
+
+    it("checkout continuation uses saved-draft copy and resumes the next destination", () => {
+      expect(signInSrc).toContain("CHECKOUT_SIGN_IN_HEADING");
+      expect(signInSrc).toContain("CHECKOUT_SIGN_IN_BODY");
+      expect(signInSrc).toContain("resolveSignInNextDestination");
+      expect(signInSrc).toContain("navigate(destinationPath)");
+    });
   });
 });

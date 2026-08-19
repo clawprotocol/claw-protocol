@@ -65,7 +65,7 @@ describe("guided final review flow", () => {
     expect(screen).toContain("simple-pro-send-for-review");
     expect(screen).toContain("simple-pro-copy-agreement");
     expect(screen).toContain("This is the version that will be sent.");
-    expect(screen).toContain("Edit agreement text");
+    expect(screen).toContain("Edit agreement directly");
     expect(screen).not.toContain("simple-pro-continue-to-signing");
     expect(screen).not.toContain("simple-pro-suggest-changes-toggle");
   });
@@ -85,7 +85,9 @@ describe("guided final review flow", () => {
     expect(intake).toContain("simpleProFinalReviewHtml");
     expect(intake).toContain("agreementHtml={simpleProFinalReviewHtml}");
     expect(intake).not.toMatch(/simpleProFinalReviewHtml\s*\|\|\s*premiumReadonlyAgreementHtml/);
-    expect(intake).toContain("finalReviewAuthorityOnly: simpleProFinalReviewActive");
+    expect(intake).toMatch(
+      /finalReviewAuthorityOnly:\s*[\s\S]{0,220}?simpleProFinalReviewActive/,
+    );
     expect(intake).toContain("finalReviewSendPathChosenRef");
     expect(intake).toContain("guidedFrozenAfterApplyRef");
     expect(intake).toContain("freezeGuidedSessionAfterApply");

@@ -48,7 +48,10 @@ const STARTER_SHELL_SERVER_BODY = [
   "State of Delaware.",
   "5. Termination",
   "Either party may terminate with thirty days notice.",
-  ...Array.from({ length: 40 }, (_, i) => `6.${i + 1} Additional operative detail clause ${i + 1}.`),
+  // Parent + contiguous subsections (avoid trailing `clause N.` indexes that fusion/display
+  // parsers misread as glued section markers).
+  "6. Additional Terms",
+  ...Array.from({ length: 40 }, (_, i) => `6.${i + 1} Additional operative detail for subsection ${i + 1}.`),
 ].join("\n");
 
 const PREMIUM_DELIVERABLE = `PROFESSIONAL SERVICES AGREEMENT
@@ -70,10 +73,16 @@ Each party shall maintain confidentiality of proprietary information.
 5. Intellectual Property
 Deliverables shall be owned by Client upon payment.
 
-6. Governing Law
+6. Acceptance and Review
+Client shall review deliverables and provide written acceptance or rejection within ten (10) days.
+
+7. Termination
+Either party may terminate this Agreement for convenience upon thirty (30) days' written notice.
+
+8. Governing Law
 This Agreement shall be governed by the laws of Delaware.
 
-7. Signatures
+9. Signatures
 IN WITNESS WHEREOF, the parties execute this Agreement.
 
 ${"Additional operative clause with commercial detail. ".repeat(55)}`;

@@ -18,7 +18,6 @@ import {
   manifestRecordsForPaidProAcceptance,
   resolveAcceptanceManifestRecordsForExecution,
 } from "./paidProAcceptanceExecutionBlockInvariant";
-import { appendProExecutionBlockIfMissing } from "./proExecutionBlockAppend";
 import { assertPaidProSingleExecutionBlock } from "./paidProExecutionBlockAuthority";
 import { guardPaidProAcceptedServerFullDraftCommit } from "./paidProAcceptedServerFullDraftCommitGuard";
 import { assertClauseFamilyStructuralIntegrityForFreeze } from "./clauseFamilyStructuralIntegrity";
@@ -33,10 +32,14 @@ import { applyPaidProSectionHeadingTitleAuthority } from "./paidProSectionHeadin
 import { diagnosePaidProCorpusDuplication, repairPaidProCorpusDuplication } from "./paidProCorpusDuplicationAuthority";
 import {
   ensureCanonicalNoticesSectionHeadingForFreeze,
+  findNoticesSectionStart,
+  removeEmptyNoticesSubsectionShells,
   repairDuplicateOperativeNoticeStanzas,
+  repairFusedNoticesHeadingToPriorClause,
   sealPaidProNoticesExecutionBoundaryInCorpus,
   ensureOperativeNoticeStanzaEntityLinesAtFreeze,
   ensureOperativeNoticeStanzaCountAuthorityAtFreeze,
+  ensureOperativeIfToNoticeDelivery,
   trimOperativeNoticeStanzasToPartyCount,
 } from "./paidProPartyNoticeDetails";
 import {
@@ -104,7 +107,11 @@ import {
 } from "./paidProBrandLicensingFreezeAuthority";
 import { repairBrandLicensingRoleFidelityInCorpus } from "./paidProBrandLicensingRoleFidelityRepair";
 import { intakeDescribesBrandLicensingDistributionManufacturingStack } from "./paidProAgreementTitleScope";
-import { SUBSTANTIVE_SERVER_DRAFT_MIN_LEN, PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN } from "./premiumAcceptancePolicy";
+import {
+  SUBSTANTIVE_SERVER_DRAFT_MIN_LEN,
+  PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN,
+  getLatchedAcceptedServerFullDraftAuthority,
+} from "./premiumAcceptancePolicy";
 import { preparePaidProServerDocumentForAcceptance } from "./paidProConciseServicesQuality";
 import {
   assertProfessionalCorpusCleanForFreeze,
@@ -191,12 +198,26 @@ function preserveSubstantiveServerFullDraftCorpusLength(
   const entry = trim(entryText);
   const out = trim(mutatedText);
   if (!isSubstantiveServerFullDraftSource(source)) return out;
-  if (entry.length < SUBSTANTIVE_SERVER_DRAFT_MIN_LEN) return out;
+  // Preserve any parse-degraded / alternate-field wire body (≥4k), not only 10k+ brand corpora.
+  if (entry.length < PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN) return out;
   const floor = Math.max(
     PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN,
     Math.floor(entry.length * 0.85),
   );
   return out.length >= floor ? out : entry;
+}
+
+/** Collapse adjacent duplicate paragraphs so freeze prep stays idempotent on re-gate. */
+function collapseAdjacentDuplicateParagraphs(text: string): string {
+  const parts = (text || "").replace(/\r\n/g, "\n").split(/\n{2,}/);
+  const out: string[] = [];
+  for (const part of parts) {
+    const trimmed = part.trim();
+    if (!trimmed) continue;
+    if (out.length > 0 && out[out.length - 1]!.trim() === trimmed) continue;
+    out.push(part);
+  }
+  return out.join("\n\n").trim();
 }
 
 function finalizePreparedFreezeCandidateText(
@@ -209,13 +230,44 @@ function finalizePreparedFreezeCandidateText(
     mutatedText,
     args.intakeText ?? null,
   );
+  // Collapse duplicate crumbs first, then apply the length floor so intentional
+  // adjacent-dup cleanup cannot undo substantive server-draft length preservation.
+  const collapsed = collapseAdjacentDuplicateParagraphs(brandPreserved);
   const lengthPreserved = preserveSubstantiveServerFullDraftCorpusLength(
     entryText,
-    brandPreserved,
+    collapsed,
     args.source ?? null,
   );
   // Length floor may restore the entry corpus; always re-align signature roles last.
   return reconcileExecutionRolesBeforeFreezeCommit(lengthPreserved);
+}
+
+/** Re-apply sole-prop/services title after length restore can reinstate §1-first wire. */
+function reapplyServicesOpeningAfterLengthRestore(
+  text: string,
+  args: PreparePaidProFreezeCandidateArgs,
+): { text: string; repairs: string[] } {
+  if (intakeDescribesBrandLicensingDistributionManufacturingStack(args.intakeText ?? "")) {
+    return { text, repairs: [] };
+  }
+  const partyNameList = (args.draft?.parties ?? [])
+    .map((p) => String(p?.name ?? "").trim())
+    .filter((n) => n.length >= 2);
+  const roleLabels = (args.draft?.parties ?? [])
+    .map((p) => String(p?.role ?? "").trim())
+    .filter((r) => r.length >= 2);
+  const identityRecords = resolveCommercialPartyRecordsForOpeningRepair(
+    args.intakeText ?? "",
+    partyNameList,
+    roleLabels.length >= 2 ? roleLabels : undefined,
+  );
+  if (identityRecords.length < 2) return { text, repairs: [] };
+  const opening = ensurePaidProServicesAgreementOpening(
+    text,
+    identityRecords,
+    args.intakeText ?? null,
+  );
+  return { text: opening.text, repairs: opening.repairs ?? [] };
 }
 
 function finalizeSubstantiveBrandLicensingCorpusAfterWitness(
@@ -303,6 +355,36 @@ export function preparePaidProFreezeCandidateText(
   const surface = args.surface ?? "paid_pro_freeze_candidate";
   const repairs: string[] = [];
   const inputTrimmed = trim(args.text);
+  // Latched accepted server_full_draft must freeze as-is — opening/quality floors must not
+  // invent or rewrite operative prose after the authority latch (Test245).
+  const latchedAccepted = getLatchedAcceptedServerFullDraftAuthority();
+  if (
+    latchedAccepted &&
+    latchedAccepted.body === inputTrimmed &&
+    (requestedSource === "server_full_draft" ||
+      requestedSource === "server_full_document_text" ||
+      requestedSource === latchedAccepted.source)
+  ) {
+    const reviewParties = resolvePartiesForReviewRender({
+      draft: args.draft ?? null,
+      intakeText: args.intakeText ?? null,
+    });
+    const parties: CanonicalAgreementSnapshotParty[] = reviewParties
+      .map((p) => ({
+        name: p.partyLegalName.trim(),
+        role: null,
+        email: p.signerEmail?.trim() || null,
+        partyAddress: p.partyAddress?.trim() || null,
+      }))
+      .filter((p) => p.name.length >= 2);
+    return {
+      text: inputTrimmed,
+      hash: hashPaidProCorpus(inputTrimmed),
+      reviewParties,
+      parties,
+      repairs: ["freeze_prep_preserved_latched_server_full_draft"],
+    };
+  }
   const inputPipelineHash = paidProPipelineAcceptedCorpusHash(inputTrimmed);
   const pipelineHashEarly = readPaidProPipelineAcceptedCorpusHash();
   if (
@@ -330,18 +412,44 @@ export function preparePaidProFreezeCandidateText(
           partyAddress: p.partyAddress?.trim() || null,
         }))
         .filter((p) => p.name.length >= 2);
+      let skippedText = reconciled;
+      const skippedRepairs = [
+        "freeze_prep_skipped_pipeline_validated_corpus",
+        ...integrity.repairs.map((r) => `reviewed_doc_integrity:${r}`),
+        ...(reconciled !== integrity.text
+          ? ["freeze_prep:reconcile_execution_block_roles"]
+          : []),
+      ];
+      if (!intakeDescribesBrandLicensingDistributionManufacturingStack(args.intakeText ?? "")) {
+        const skipPartyNames = (args.draft?.parties ?? [])
+          .map((p) => String(p?.name ?? "").trim())
+          .filter((n) => n.length >= 2);
+        const skipRoles = (args.draft?.parties ?? [])
+          .map((p) => String(p?.role ?? "").trim())
+          .filter((r) => r.length >= 2);
+        const skipIdentity = resolveCommercialPartyRecordsForOpeningRepair(
+          args.intakeText ?? "",
+          skipPartyNames,
+          skipRoles.length >= 2 ? skipRoles : undefined,
+        );
+        if (skipIdentity.length >= 2) {
+          const opening = ensurePaidProServicesAgreementOpening(
+            skippedText,
+            skipIdentity,
+            args.intakeText ?? null,
+          );
+          if (opening.repairs.length > 0) {
+            skippedText = opening.text;
+            skippedRepairs.push(...opening.repairs);
+          }
+        }
+      }
       return {
-        text: reconciled,
-        hash: hashPaidProCorpus(reconciled),
+        text: skippedText,
+        hash: hashPaidProCorpus(skippedText),
         reviewParties,
         parties,
-        repairs: [
-          "freeze_prep_skipped_pipeline_validated_corpus",
-          ...integrity.repairs.map((r) => `reviewed_doc_integrity:${r}`),
-          ...(reconciled !== integrity.text
-            ? ["freeze_prep:reconcile_execution_block_roles"]
-            : []),
-        ],
+        repairs: skippedRepairs,
       };
     }
     // Integrity failed — do not skip into a defective SoT; run full freeze prep.
@@ -444,9 +552,12 @@ export function preparePaidProFreezeCandidateText(
   const skipAcceptanceExecutionSynthesis = isGenericPaidProAcceptanceManifestFallback(
     acceptanceManifest,
   );
+  // Only normalize an existing witness/execution tail — do not invent blank By:____ chrome
+  // onto an accepted review corpus that never had a signature block.
   if (
     !skipAcceptanceExecutionSynthesis &&
-    !isSubstantiveBrandLicensingCorpus(authorityTrimmed, args.intakeText)
+    !isSubstantiveBrandLicensingCorpus(authorityTrimmed, args.intakeText) &&
+    /\bIN WITNESS WHEREOF\b/i.test(safeForCommit)
   ) {
     const exec = ensurePaidProAcceptanceExecutionBlockInvariant(safeForCommit, acceptanceManifest);
     safeForCommit = exec.text;
@@ -652,10 +763,19 @@ export function preparePaidProFreezeCandidateText(
     repairs.push("freeze_prep:reconcile_execution_block_roles");
   }
 
-  const finalizedText = finalizePreparedFreezeCandidateText(authorityTrimmed, safeForCommit, {
+  let finalizedText = finalizePreparedFreezeCandidateText(authorityTrimmed, safeForCommit, {
     intakeText: args.intakeText ?? null,
     source: requestedSource,
   });
+  // Substantive length restore can reinstate an untitled §1-first wire body after opening
+  // repair. Re-apply services title/recital last so freeze candidates always surface a title.
+  if (acceptanceManifestForOpening.length < 3) {
+    const openingRestore = reapplyServicesOpeningAfterLengthRestore(finalizedText, args);
+    if (openingRestore.repairs.length > 0) {
+      finalizedText = openingRestore.text;
+      repairs.push(...openingRestore.repairs);
+    }
+  }
   return {
     text: finalizedText,
     hash: hashPaidProCorpus(finalizedText),
@@ -755,19 +875,17 @@ function resolveFreezeNoticeValidationContext(
 
 function ensureGenericManifestExecutionBlockBeforeNoticeFreeze(
   safeForCommit: string,
-  args: PreparePaidProFreezeCandidateArgs,
+  _args: PreparePaidProFreezeCandidateArgs,
 ): string {
-  if (/\bIN WITNESS WHEREOF\b/i.test(safeForCommit)) {
-    return safeForCommit;
-  }
-  const manifest = manifestRecordsForPaidProAcceptance({
-    draft: args.draft ?? null,
-    intakeText: args.intakeText ?? null,
-  });
-  if (!isGenericPaidProAcceptanceManifestFallback(manifest)) {
-    return safeForCommit;
-  }
-  return appendProExecutionBlockIfMissing(safeForCommit, manifest).text;
+  // Never invent IN WITNESS / blank By:____ chrome into an accepted corpus that lacked it.
+  // That mutates SoT with cosmetic signature scaffolding; signing prepare owns execution blocks.
+  return safeForCommit;
+}
+
+function freezeNoticePartiesAreAuthoritative(
+  parties: readonly PaidProSignerMetadataParty[],
+): boolean {
+  return parties.some((p) => !isNonAuthoritativeFreezePartyName(p.partyLegalName));
 }
 
 function repairPaidProCanonicalNoticeAuthorityAtFreeze(
@@ -787,6 +905,25 @@ function repairPaidProCanonicalNoticeAuthorityAtFreeze(
   }
   const sealed = sealPaidProNoticesExecutionBoundaryInCorpus(noticeFinalize.text);
   const noticeValidationCtx = resolveFreezeNoticeValidationContext(prep, args, sealed.text);
+  // Generic Party 1/Party 2 must not invent operative notice scaffolding at freeze —
+  // that mutates accepted SoT without real legal entities (commercial no-invent rule).
+  if (!freezeNoticePartiesAreAuthoritative(noticeValidationCtx.parties)) {
+    return repairFusedNoticesHeadingToPriorClause(sealed.text).text;
+  }
+  // Legal names alone must not invent a Notices section / placeholder contacts at freeze.
+  // Existing Notices may still need entity-line hydration (incomplete If-to stanzas).
+  const hasRealNoticeContacts = noticeValidationCtx.parties.some((p) => {
+    const email = String(p.signerEmail || "").trim();
+    const address = String(p.partyAddress || "").trim();
+    if (!email && address.length <= 8) return false;
+    if (/provided during signer setup/i.test(email) || /provided during signer setup/i.test(address)) {
+      return false;
+    }
+    return Boolean(email) || address.length > 8;
+  });
+  if (!hasRealNoticeContacts && findNoticesSectionStart(sealed.text) < 0) {
+    return repairFusedNoticesHeadingToPriorClause(sealed.text).text;
+  }
   const entityHydrated = ensureOperativeNoticeStanzaEntityLinesAtFreeze(
     sealed.text,
     noticeValidationCtx.parties,
@@ -796,8 +933,25 @@ function repairPaidProCanonicalNoticeAuthorityAtFreeze(
       acceptedCorpus: sealed.text,
     },
   );
+  let noticeReady = entityHydrated.text;
+  if (!hasRealNoticeContacts) {
+    const delivery = ensureOperativeIfToNoticeDelivery(
+      noticeReady,
+      noticeValidationCtx.parties,
+      {
+        intakeText: args.intakeText ?? null,
+        draftPartyNames: noticeValidationCtx.draftPartyNames,
+        acceptedCorpus: noticeReady,
+      },
+      { allowEntityOnlyNoticesAtFreeze: true },
+    );
+    noticeReady = delivery.text;
+    if (delivery.repairs.length > 0) {
+      noticeReady = sealPaidProNoticesExecutionBoundaryInCorpus(noticeReady).text;
+    }
+  }
   const stanzaCountReconciled = ensureOperativeNoticeStanzaCountAuthorityAtFreeze(
-    entityHydrated.text,
+    noticeReady,
     noticeValidationCtx.parties,
     {
       intakeText: args.intakeText ?? null,
@@ -805,7 +959,9 @@ function repairPaidProCanonicalNoticeAuthorityAtFreeze(
       acceptedCorpus: entityHydrated.text,
     },
   );
-  return stanzaCountReconciled.text;
+  // Stanza rebuilds can re-fuse `….N. Notices` onto prior prose — defuse before freeze assert.
+  const defused = repairFusedNoticesHeadingToPriorClause(stanzaCountReconciled.text);
+  return defused.text;
 }
 
 function applyCanonicalNoticeAuthorityBeforeFreezeValidation(
@@ -847,6 +1003,8 @@ export function assertPaidProFreezeCandidateGates(
     inputTrimmed.length >= SUBSTANTIVE_SERVER_DRAFT_MIN_LEN;
   const inputPipelineHash = paidProPipelineAcceptedCorpusHash(inputTrimmed);
   const pipelineHash = readPaidProPipelineAcceptedCorpusHash();
+  // Prefer prepared freeze text (title/recital repairs) over raw wire on stable-pipeline shortcuts.
+  const stablePipelineBody = trim(prep.text) || inputTrimmed;
   if (
     !substantiveBrandWireFreeze &&
     inputTrimmed.length >= 4000 &&
@@ -856,7 +1014,7 @@ export function assertPaidProFreezeCandidateGates(
     hasPaidProPipelineValidationForCorpus({ text: inputTrimmed, source: requestedSource })
   ) {
     return applyCanonicalNoticeAuthorityBeforeFreezeValidation(
-      inputTrimmed,
+      stablePipelineBody,
       prep,
       args,
       surface,
@@ -873,7 +1031,7 @@ export function assertPaidProFreezeCandidateGates(
     })
   ) {
     return applyCanonicalNoticeAuthorityBeforeFreezeValidation(
-      inputTrimmed,
+      stablePipelineBody,
       prep,
       args,
       surface,
@@ -902,6 +1060,11 @@ export function assertPaidProFreezeCandidateGates(
   assertPaidProFreezeCandidateManifestCountAgreement(prep, args);
 
   const freezeEntryText = trim(args.text);
+  if (containsUnresolvedRenderTokens(freezeEntryText)) {
+    throw new Error(
+      "[paid-pro-sot-freeze-blocked] unresolved_render_tokens_in_freeze_entry",
+    );
+  }
   if (isSubstantiveBrandLicensingCorpus(freezeEntryText, args.intakeText)) {
     let substantiveText = preserveSubstantiveBrandLicensingCorpusLength(
       freezeEntryText,
@@ -1013,12 +1176,14 @@ export function assertPaidProFreezeCandidateGates(
     intakeText: args.intakeText ?? null,
   });
   const missingWitnessClause = !/\bIN WITNESS WHEREOF\b/i.test(safeForCommit);
+  // When witness is missing, do not invent blank signature chrome at freeze — signing prepare owns that.
+  // When witness exists, repair/normalize the existing execution block only.
   if (
+    !missingWitnessClause &&
     preFreezeExecutionManifest.length >= 2 &&
     !isGenericPaidProAcceptanceManifestFallback(preFreezeExecutionManifest) &&
     !isSubstantiveBrandLicensingCorpus(trim(args.text), args.intakeText) &&
-    (missingWitnessClause ||
-      preFreezeExecutionManifest.length >= 3 ||
+    (preFreezeExecutionManifest.length >= 3 ||
       executionHeadingsContainIntakeInstructionLeakage(safeForCommit) ||
       !executionBlockMatchesManifestRecords(safeForCommit, preFreezeExecutionManifest))
   ) {
@@ -1094,7 +1259,10 @@ export function assertPaidProFreezeCandidateGates(
     draftPartyNames: prep.parties.map((p) => p.name),
     manifestPartyCount: prep.parties.length,
   }).count;
-  if (canonicalNoticePartyCount >= 2) {
+  const freezeHasAuthoritativeNoticeParties = prep.parties.some(
+    (p) => String(p.name || "").trim().length >= 3 && !/^Party\s+\d+$/i.test(String(p.name || "").trim()),
+  );
+  if (canonicalNoticePartyCount >= 2 && freezeHasAuthoritativeNoticeParties) {
     const preClauseNoticesHeading = ensureCanonicalNoticesSectionHeadingForFreeze(safeForCommit);
     if (preClauseNoticesHeading.repairs.length > 0) {
       safeForCommit = preClauseNoticesHeading.text;
@@ -1131,6 +1299,7 @@ export function assertPaidProFreezeCandidateGates(
     surface: `${surface}_freeze_finalize_boundary`,
     parties: prep.reviewParties,
     draftPartyCount: args.draft?.parties?.length ?? 0,
+    skipReviewDisplayNormalize: true,
     handoffPartySlots: (() => {
       const handoff = readPremiumRecipientHandoff();
       if (!handoff) return prep.reviewParties.length;
@@ -1141,12 +1310,14 @@ export function assertPaidProFreezeCandidateGates(
   });
   safeForCommit = finalizeBoundary.text;
 
-  const preClauseNoticesHeading = ensureCanonicalNoticesSectionHeadingForFreeze(safeForCommit);
-  if (preClauseNoticesHeading.repairs.length > 0) {
-    safeForCommit = preClauseNoticesHeading.text;
+  if (freezeHasAuthoritativeNoticeParties) {
+    const preClauseNoticesHeading = ensureCanonicalNoticesSectionHeadingForFreeze(safeForCommit);
+    if (preClauseNoticesHeading.repairs.length > 0) {
+      safeForCommit = preClauseNoticesHeading.text;
+    }
   }
 
-  if (canonicalNoticePartyCount >= 2) {
+  if (canonicalNoticePartyCount >= 2 && freezeHasAuthoritativeNoticeParties) {
     const postBoundaryNoticeDedupe = repairDuplicateOperativeNoticeStanzas(
       safeForCommit,
       canonicalNoticePartyCount,
@@ -1282,10 +1453,21 @@ export function assertPaidProFreezeCandidateGates(
       args.intakeText ?? null,
     );
   } else {
+    // Relocate post-witness Additional/Supplemental padding before strip so json_parse /
+    // alternate-field wire bodies (≥4k) are not catastrophically shortened at freeze.
+    const relocatedPadding = relocatePostWitnessNumberedPaddingBeforeWitness(safeForCommit);
+    if (relocatedPadding.relocatedCount > 0) {
+      safeForCommit = relocatedPadding.text;
+    }
     const postWitnessFinal = stripNumberedOperativeSectionsAfterExecution(safeForCommit);
     if (postWitnessFinal.strippedCount > 0) {
       safeForCommit = postWitnessFinal.text;
     }
+    safeForCommit = preserveSubstantiveServerFullDraftCorpusLength(
+      freezeEntryText,
+      safeForCommit,
+      requestedSource,
+    );
   }
   assertNoNumberedOperativeSectionAfterWitness(safeForCommit);
 
@@ -1320,10 +1502,41 @@ export function assertPaidProFreezeCandidateGates(
     }
   }
 
-  return finalizePreparedFreezeCandidateText(trim(args.text), safeForCommit, {
+  // Late notice-heading / title-authority passes can reintroduce empty `N.1 NOTICES` shells
+  // after the earlier structure assert — repair then fail closed before freeze commit returns.
+  {
+    const emptyNoticeShells = removeEmptyNoticesSubsectionShells(safeForCommit);
+    if (emptyNoticeShells.repairs.length > 0) {
+      safeForCommit = emptyNoticeShells.text;
+    }
+    if (freezeHasAuthoritativeNoticeParties) {
+      const terminalNoticesHeading = ensureCanonicalNoticesSectionHeadingForFreeze(safeForCommit);
+      if (terminalNoticesHeading.repairs.length > 0) {
+        safeForCommit = terminalNoticesHeading.text;
+      }
+    }
+    const terminalStructure = applyPaidProSectionStructureCompletenessAuthority(safeForCommit, {
+      source: `${surface}_terminal_post_notice_repair`,
+      phase: "pre_freeze",
+      blockOnFatal: false,
+    });
+    safeForCommit = terminalStructure.text;
+  }
+  safeForCommit = assertPaidProSectionStructureCompletenessForFreeze(
+    safeForCommit,
+    `${surface}_terminal_post_notice`,
+  );
+
+  let gated = finalizePreparedFreezeCandidateText(trim(args.text), safeForCommit, {
     intakeText: args.intakeText ?? null,
     source: requestedSource,
   });
+  // Length restore can reinstate untitled §1-first wire after prep title repair.
+  const openingRestore = reapplyServicesOpeningAfterLengthRestore(gated, args);
+  if (openingRestore.repairs.length > 0) {
+    gated = openingRestore.text;
+  }
+  return gated;
 }
 
 /** Non-throwing gate evaluation for acceptance / pipeline. */

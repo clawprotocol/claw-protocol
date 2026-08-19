@@ -21,9 +21,38 @@ function padProBody(core: string, minLen: number): string {
 
 const longAcceptedDoc = padProBody(
   `
-# Web Development Agreement
-Parties: Client (Anthem Blanchard) and Developer (Sarah Collins) for CryptoSpaces.
-Governing law: Oklahoma. Total $7,500. Effective May 1, 2026. Email notices. The parties shall cooperate.
+WEB DEVELOPMENT AGREEMENT
+
+This Agreement is between Anthem Blanchard ("Client") and Sarah Collins ("Developer") for CryptoSpaces.net.
+
+1. SERVICES
+Developer will perform website redesign and optimization services for Client.
+
+2. FEES
+Total fee is $7,500. Effective May 1, 2026.
+
+3. GOVERNING LAW
+This Agreement is governed by the laws of the State of Oklahoma.
+
+4. NOTICES
+Notices under this Agreement may be given by email to the addresses the parties designate in writing.
+
+5. CONFIDENTIALITY
+Each party will protect confidential information with reasonable care.
+
+IN WITNESS WHEREOF, the parties execute this Agreement.
+
+CLIENT:
+Anthem Blanchard
+By: _________________________
+Name: Anthem Blanchard
+Title: Client
+
+DEVELOPER:
+Sarah Collins
+By: _________________________
+Name: Sarah Collins
+Title: Developer
   `,
   12_000,
 );

@@ -23,7 +23,7 @@ import {
   readPaidCheckoutOrgId,
   resolveEntitlementRepairOrgCandidates,
 } from "../launch/paidCheckoutOrgContext";
-import { logAuthDiagnostic } from "./anonymousSessionApi";
+import { clearAnonymousSession, logAuthDiagnostic } from "./anonymousSessionApi";
 import { commitPostAuthOwnershipMigration } from "./ownershipMigrationFinalize";
 import { readCreateReviewAgreementResumeId } from "../components/agreements/agreementIntakeStorage";
 
@@ -84,6 +84,7 @@ export async function finalizeAuthenticatedSession(args: {
         entitlementRepairCandidates: resolveEntitlementRepairOrgCandidates(),
       });
       setOrgId(server.org_id);
+      clearAnonymousSession();
       await refreshSubscriptionEntitlement();
       clearAuthContinuationContext();
       clearContinuationId();
@@ -132,6 +133,7 @@ export async function finalizeAuthenticatedSession(args: {
     accessToken: accessToken || undefined,
   });
 
+  clearAnonymousSession();
   await refreshSubscriptionEntitlement();
 
   const ctx = readAuthContinuationContext();

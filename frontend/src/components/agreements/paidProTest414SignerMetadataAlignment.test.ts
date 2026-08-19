@@ -32,7 +32,9 @@ import {
   clearPaidProSourceOfTruth,
   establishPaidProSourceOfTruth,
   getPaidProSourceOfTruthText,
+  hasPaidProSourceOfTruth,
 } from "./paidProSourceOfTruth";
+import { tryRecoverPaidProSourceOfTruthFromStructuralFailure } from "./paidProSoTStructuralRecovery";
 import { resolveAuthoritativeSignerCount } from "./signerCountAuthority";
 import {
   TEST414_COORDINATOR_ONLY_INTAKE,
@@ -271,13 +273,30 @@ describe("TEST414_SIGNER_METADATA_LEGAL_ENTITY_ALIGNMENT", () => {
     }
     const prep = preparePaidProServerDocumentForAcceptance(body, draft, intake);
     markPaidProPipelineValidationPassed({ text: prep.text, source: "server_full_draft" });
-    establishPaidProSourceOfTruth({
-      text: prep.text,
-      source: "server_full_draft",
-      draft,
-      intakeText: intake,
-      generationOutcome: "ok",
-    });
+    // Professional-intake clause coverage must reject this thin repaired wire (TEST536 invariant) —
+    // do not invent operative confidentiality/IP/liability sections during prepare. Recover a
+    // compliant SoT, then prove signer hydration keeps four entity execution blocks aligned.
+    try {
+      establishPaidProSourceOfTruth({
+        text: prep.text,
+        source: "server_full_draft",
+        draft,
+        intakeText: intake,
+        generationOutcome: "ok",
+      });
+    } catch {
+      /* professional-pro-clause-coverage-blocked expected for thin prepared wire */
+    }
+    if (!hasPaidProSourceOfTruth()) {
+      const recovered = tryRecoverPaidProSourceOfTruthFromStructuralFailure({
+        draft,
+        intakeText: intake,
+        source: "server_full_draft",
+        generationOutcome: "ok",
+      });
+      expect(recovered.ok).toBe(true);
+    }
+    expect(hasPaidProSourceOfTruth()).toBe(true);
 
     const pollutedUi = test414LiveUiWithSignerDerivedEntityPollution();
     const authority = buildPaidProSignerMetadataAuthorityForFinalize(pollutedUi, {

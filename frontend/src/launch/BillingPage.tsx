@@ -43,7 +43,7 @@ const OUTCOME_ROWS = [
   {
     title: "Enterprise",
     detail:
-      "Custom pricing for volume agreement programs, API access, compliance packaging, and org-level Agreement Memory — when Plus and Pro are not enough.",
+      "Custom pricing for volume agreement programs, API access, compliance packaging, and org-level Agreement Memory — when Pro self-serve is not enough.",
   },
 ] as const;
 
@@ -160,7 +160,7 @@ export function BillingPage() {
         <section aria-label="Plans" className="overflow-x-clip">
           <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
             <p className="max-w-xl text-sm leading-relaxed text-slate-500">
-              Create and send agreements in minutes. Try LawDog free, subscribe on LawDog Plus or LawDog Pro, or talk to us for Enterprise.
+              Create and send agreements in minutes. Try LawDog as a Guest, subscribe to LawDog Pro ($49/mo), or talk to us for Enterprise. Plus is retired.
             </p>
             <PricingCadenceToggle value={cadence} onChange={setCadenceAndStore} idPrefix="billing-cadence" className="shrink-0" />
           </div>

@@ -9,7 +9,7 @@ import {
   captureGenesisReferralFromSearch,
   normalizeGenesisReferralCode,
 } from "./genesisReferralCapture";
-import { resolveSafeRedirectPath } from "../../auth/safeRedirectResolver";
+import { resolveSignInContinuationDestination } from "../../auth/safeRedirectResolver";
 
 export function referralCodeFromCreateSearch(search: string): string | null {
   try {
@@ -68,14 +68,7 @@ export function resolveSignInNextDestination(
   search: string,
   fallback = "/app",
 ): string {
-  try {
-    const q = new URLSearchParams(search || "");
-    const next = (q.get("next") || "").trim();
-    if (!next) return fallback;
-    return resolveSafeRedirectPath(next, fallback);
-  } catch {
-    return fallback;
-  }
+  return resolveSignInContinuationDestination(search, fallback);
 }
 
 /** Absolute referral link helper retained for ops/docs; cold gate uses path-only dest. */

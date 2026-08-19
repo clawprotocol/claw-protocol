@@ -207,6 +207,29 @@ export function applyPaidProRenderPolish(
   });
   working = unmaskProtectedSpans(agreementPolish.text, emails, urls);
 
+  const structure = validateAndRepairPremiumAgreementStructure(working, { surface });
+  working = structure.text;
+
+  const quality = finalizeAgreementOutput(working, {
+    intakeRaw,
+    partyNames: partyNames ?? undefined,
+    surface,
+    tier: "premium",
+  });
+  working = quality.text;
+  const mayAppendWitness =
+    !/\bIN WITNESS WHEREOF\b/i.test(working) &&
+    (partyNames?.length ?? 0) >= 2 &&
+    !(hasPaidProSourceOfTruth() && forbidPaidProExecutionBlockSynthesis(working, partyNames!.length));
+  if (mayAppendWitness) {
+    const signatureBlocks = (partyNames ?? [])
+      .map((party) => `${party}\nBy: _________________________`)
+      .join("\n\n");
+    working = `${working.trim()}\n\nIN WITNESS WHEREOF, the Parties will execute this Agreement through the LawDog signing workflow.\n\n${signatureBlocks}`;
+  }
+
+  // Restore/verify after structure + finalize — those passes historically corrupted
+  // emails (e.g. punctuation floor inserting spaces into ethan.cole@…).
   let repairedCount = 0;
   let guard = verifyIntakeEmailsPreserved(intakeRaw, working, intakeEmails);
   if (guard.mutatedEmailCount > 0 && intakeEmails.length > 0) {
@@ -239,27 +262,6 @@ export function applyPaidProRenderPolish(
   }
 
   logPaidProEmailMutationGuard({ surface, ...guard, repairedCount });
-
-  const structure = validateAndRepairPremiumAgreementStructure(working, { surface });
-  working = structure.text;
-
-  const quality = finalizeAgreementOutput(working, {
-    intakeRaw,
-    partyNames: partyNames ?? undefined,
-    surface,
-    tier: "premium",
-  });
-  working = quality.text;
-  const mayAppendWitness =
-    !/\bIN WITNESS WHEREOF\b/i.test(working) &&
-    (partyNames?.length ?? 0) >= 2 &&
-    !(hasPaidProSourceOfTruth() && forbidPaidProExecutionBlockSynthesis(working, partyNames!.length));
-  if (mayAppendWitness) {
-    const signatureBlocks = (partyNames ?? [])
-      .map((party) => `${party}\nBy: _________________________`)
-      .join("\n\n");
-    working = `${working.trim()}\n\nIN WITNESS WHEREOF, the Parties will execute this Agreement through the LawDog signing workflow.\n\n${signatureBlocks}`;
-  }
   working = markCanonicalCommittedText(working);
 
   if (!isIdempotentPolishOutput(baseText, working) && import.meta.env.DEV) {

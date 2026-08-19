@@ -181,7 +181,25 @@ describe("fetchPremiumAdvisoryEnrichmentAfterAccept", () => {
   });
 
   it("logs skip diagnostic only when QA verbose/perf trace is enabled", async () => {
-    const body = padProBody("CONSULTING AGREEMENT\n\n1. SCOPE\nWork.\n\nIN WITNESS WHEREOF\n\nAcme\nBeta", 1200);
+    const body = padProBody(
+      [
+        "CONSULTING AGREEMENT",
+        "",
+        "This Agreement is between Acme LLC and Beta Inc.",
+        "",
+        "1. SCOPE",
+        "Professional services work.",
+        "",
+        "IN WITNESS WHEREOF, the Parties execute this Agreement.",
+        "",
+        "CLIENT: Acme LLC",
+        "By: _________________________",
+        "",
+        "SERVICE PROVIDER: Beta Inc.",
+        "By: _________________________",
+      ].join("\n"),
+      1200,
+    );
     establishTestPaidProSot(body, draft);
     vi.stubEnv("MODE", "production");
     vi.stubEnv("DEV", false);

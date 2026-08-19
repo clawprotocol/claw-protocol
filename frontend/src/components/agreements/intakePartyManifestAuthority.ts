@@ -7,7 +7,7 @@ import { normalizeCanonicalPartyAddress } from "./canonicalPartyStructuredAddres
 import { isAuthoritativeLegalEntityName, isPartyMetadataRoleLabel } from "./paidProPartyNamePreserve";
 import { partyLegalNamesMatch } from "./paidProSignerMetadataAuthority";
 import type { PaidProSignerMetadataParty } from "./paidProSignerMetadataAuthority";
-import { extractLegalEntityFromIntakeLine, resolveDeclaredExplicitPartyCount } from "./partySlotIdentityNormalize";
+import { extractLegalEntityFromIntakeLine, resolveDeclaredExplicitPartyCount, resolveAuthoritativeIntakePartyNames } from "./partySlotIdentityNormalize";
 
 export type IntakePartyManifestRow = {
   /** 1-based index from numbered intake line. */
@@ -32,7 +32,7 @@ const COLON_MANIFEST_ADDRESS_RE =
 const COLON_MANIFEST_ENTITY_TYPE_RE = /,\s*(a|an)\s+(.+)$/i;
 
 const NON_PARTY_COLON_ROLE_RE =
-  /^(?:term|fee|payment|governing|note|include|prepare|total|major|each|confidentiality|dispute|governing law)\b/i;
+  /^(?:term|fee|payment|governing|note|include|prepare|total|major|each|confidentiality|dispute|governing law|organization|org|affiliate(?:\s+referral)?|reviewer(?:\s+email)?|notice\s+contact|deliver\s+to|delivery|contacts?)\b/i;
 
 function normalizeManifestEntity(raw: string): string {
   const entity = extractLegalEntityFromIntakeLine(raw);
@@ -90,6 +90,10 @@ function parseColonRoleManifestLine(line: string, partyNumber: number): IntakePa
   // are NOT party manifest rows. Without this, stacked signer-block intake seeds phantom parties
   // from street addresses / job titles and drops the real legal entities entirely.
   if (isPartyMetadataRoleLabel(roleLabel)) return null;
+  // "Acme LLC signer: Jane Doe, CEO" / "Acme LLC signer: Jane Doe, Authorized Signatory, a@b.com"
+  // is per-entity signer metadata — not a Role: Entity manifest row. Treating the human name as
+  // partyLegalName collapses N-party recovery to phantom signer entities and empty handoff slots.
+  if (/\bsigner\s*$/i.test(roleLabel)) return null;
   if (NUMBERED_MANIFEST_LINE_RE.test(line) || BULLET_MANIFEST_LINE_RE.test(line)) return null;
   return parseColonRoleManifestBody(m[2], partyNumber, roleLabel);
 }
@@ -97,6 +101,21 @@ function parseColonRoleManifestLine(line: string, partyNumber: number): IntakePa
 function parseManifestBody(body: string, partyNumber: number): IntakePartyManifestRow | null {
   let rest = String(body ?? "").replace(/\s+/g, " ").trim();
   if (!rest) return null;
+
+  // Party-N bullet metadata (`• Email: …`, `• Representative (human signer): …`) is never a
+  // party identity row. Legal-entity field bullets keep only the entity value.
+  const fieldLabelMatch = rest.match(
+    /^(legal\s+entity(?:\s*\/\s*party\s+name)?|party\s+name|representative(?:\s*\([^)]*\)|\s+name|\s+title)?|represented\s+by|human\s+signer|authorized\s+signer|signer(?:\s+name|\s+title|\s+email)?|physical\s+address|mailing\s+address|party\s+address|address|e-?mail|email|title|name)\s*:\s*(.*)$/i,
+  );
+  if (fieldLabelMatch) {
+    const label = fieldLabelMatch[1]!.trim();
+    const value = (fieldLabelMatch[2] || "").trim();
+    if (!/^(?:legal\s+entity(?:\s*\/\s*party\s+name)?|party\s+name)$/i.test(label)) {
+      return null;
+    }
+    rest = value;
+    if (!rest) return null;
+  }
 
   let roleLabel = "";
   const parenOnly = rest.match(/^(.+?)\s*\(([^)]+)\)\s*\.?\s*$/);
@@ -272,6 +291,64 @@ export function intakePartyManifestIsAuthoritative(intakeRaw: string | null | un
   const declared = resolveDeclaredExplicitPartyCount(String(intakeRaw ?? ""));
   if (declared != null && declared >= 3) return rows.length >= declared;
   return rows.length >= 2;
+}
+
+/** Promote consumed signer authority at freeze when contacts exist or N-party manifest slots are fixed. */
+export function shouldPromoteConsumedSignerAuthorityAtFreeze(args: {
+  handoffParties: readonly PaidProSignerMetadataParty[];
+  intakeRaw: string | null | undefined;
+  authoritativeSignerCount?: number;
+}): boolean {
+  const hasSignerContact = args.handoffParties.some(
+    (p) =>
+      Boolean(p.signerEmail?.trim()) ||
+      Boolean(p.signerName?.trim()) ||
+      Boolean(p.signerTitle?.trim()) ||
+      Boolean(p.partyAddress?.trim()),
+  );
+  if (hasSignerContact) return true;
+  const signerCount = Math.max(
+    args.authoritativeSignerCount ?? 0,
+    args.handoffParties.length,
+  );
+  if (signerCount < 3) return false;
+  if (intakePartyManifestIsAuthoritative(args.intakeRaw)) return true;
+  const intakeNames = resolveAuthoritativeIntakePartyNames(args.intakeRaw).filter(
+    isAuthoritativeLegalEntityName,
+  );
+  return intakeNames.length >= 3 && intakeNames.length >= signerCount;
+}
+
+/** Expand collapsed review handoff to authoritative N-party intake entities at freeze. */
+export function expandNPartyHandoffPartiesFromIntakeAuthority(
+  intakeRaw: string | null | undefined,
+  handoffParties: readonly PaidProSignerMetadataParty[],
+  authoritativeSignerCount: number,
+): PaidProSignerMetadataParty[] {
+  if (authoritativeSignerCount < 3 || handoffParties.length >= authoritativeSignerCount) {
+    return [...handoffParties];
+  }
+  const manifestParties = buildSignerMetadataPartiesFromIntakeManifest(intakeRaw);
+  const intakeNames =
+    manifestParties.length >= authoritativeSignerCount
+      ? manifestParties.map((p) => p.partyLegalName)
+      : resolveAuthoritativeIntakePartyNames(intakeRaw).filter(isAuthoritativeLegalEntityName);
+  if (intakeNames.length < authoritativeSignerCount) return [...handoffParties];
+  return intakeNames.slice(0, authoritativeSignerCount).map((partyLegalName, partyIndex) => {
+    const byEntity = handoffParties.find((p) =>
+      partyLegalNamesMatch(p.partyLegalName, partyLegalName),
+    );
+    const byIndex = handoffParties[partyIndex];
+    const existing = byEntity ?? byIndex;
+    return {
+      partyIndex,
+      partyLegalName,
+      signerEmail: existing?.signerEmail?.trim() || "",
+      signerName: existing?.signerName?.trim() || "",
+      signerTitle: existing?.signerTitle?.trim() || "",
+      partyAddress: existing?.partyAddress?.trim() || "",
+    };
+  });
 }
 
 /** Build signer metadata parties from intake manifest — entity, role, and address only. */

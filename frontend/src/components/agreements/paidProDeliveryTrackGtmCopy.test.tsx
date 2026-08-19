@@ -20,7 +20,7 @@ describe("paidProDeliveryTrackGtmCopy", () => {
     expect(PAID_PRO_DELIVERY_TRACK_SIGNATURE_CTA).toBe("Prepare for signing");
     expect(PAID_PRO_DELIVERY_TRACK_REVIEW_CTA).toBe("Send for review");
     expect(PAID_PRO_DELIVERY_TRACK_REVIEW_TITLE).toMatch(/other parties/i);
-    expect(PAID_PRO_DELIVERY_TRACK_REVIEW_DESCRIPTION).toMatch(/track-changes/i);
+    expect(PAID_PRO_DELIVERY_TRACK_REVIEW_DESCRIPTION).toMatch(/private review links/i);
     expect(PAID_PRO_DELIVERY_TRACK_REVIEW_DESCRIPTION).not.toMatch(/compare edits/i);
   });
 
@@ -49,7 +49,7 @@ describe("paidProDeliveryTrackGtmCopy", () => {
       PAID_PRO_DELIVERY_TRACK_REVIEW_TITLE,
     );
     expect(screen.getByTestId("paid-pro-delivery-track-review-card").textContent).toMatch(
-      /track-changes/i,
+      /private review links|Nothing is emailed/i,
     );
     fireEvent.click(screen.getByTestId("paid-pro-forced-share-for-review"));
     expect(onShareForReview).toHaveBeenCalledTimes(1);
@@ -58,23 +58,32 @@ describe("paidProDeliveryTrackGtmCopy", () => {
   });
 
   it("forced chrome foreshadows Option B before signer details are complete", () => {
+    const onShareForReview = vi.fn();
+    const onEditSignerDetails = vi.fn();
+    const onPrepareSignatures = vi.fn();
     render(
       <PaidProForcedFirstReviewChrome
         signersReady={false}
         signerMetadataFinalized={false}
         getCopyPlainText={() => "body"}
         onEditAgreement={vi.fn()}
-        onEditSignerDetails={vi.fn()}
+        onEditSignerDetails={onEditSignerDetails}
         onExportAgreement={vi.fn()}
-        onShareForReview={vi.fn()}
-        onPrepareSignatures={vi.fn()}
+        onShareForReview={onShareForReview}
+        onPrepareSignatures={onPrepareSignatures}
       />,
     );
     expect(screen.getByTestId("paid-pro-delivery-track-before-signers-hint").textContent).toMatch(
-      /track-changes/i,
+      /reviewer emails|authorized signer/i,
     );
     expect(screen.getByTestId("paid-pro-forced-add-signer-details")).toBeTruthy();
+    expect(screen.getByTestId("simple-pro-send-for-review")).toBeTruthy();
     expect(screen.queryByTestId("paid-pro-delivery-track-chooser")).toBeNull();
+    fireEvent.click(screen.getByTestId("simple-pro-send-for-signature"));
+    expect(onEditSignerDetails).toHaveBeenCalledTimes(1);
+    expect(onPrepareSignatures).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByTestId("simple-pro-send-for-review"));
+    expect(onShareForReview).toHaveBeenCalledTimes(1);
   });
 
   it("PremiumSendNextStepFork defaults use the same GTM Option A/B copy", () => {
@@ -87,6 +96,6 @@ describe("paidProDeliveryTrackGtmCopy", () => {
     );
     expect(
       screen.getByTestId("pro-delivery-track-review").closest("div")?.textContent,
-    ).toMatch(/track-changes|other parties/i);
+    ).toMatch(/private review links|other parties|Nothing is emailed/i);
   });
 });

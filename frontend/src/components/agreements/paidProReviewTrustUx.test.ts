@@ -17,7 +17,7 @@ describe("paidProReviewTrustUx", () => {
     expect(steps.map((s) => s.label)).toEqual([
       "Agreement draft generated",
       "Automated draft checks completed",
-      "Signer details needed",
+      "Add signer details",
       "Review or signature links",
     ]);
     expect(steps.filter((s) => s.state === "done").map((s) => s.id)).toEqual([
@@ -43,7 +43,7 @@ describe("paidProReviewTrustUx", () => {
       "Agreement generated",
       "Automated draft checks completed",
       "Signer details added",
-      "Ready for signing",
+      "Ready to create signing links",
     ]);
     expect(steps.every((s) => s.state === "done")).toBe(true);
     expect(resolvePaidProReviewSupportingCopy({ signersReady: true })).toBe(

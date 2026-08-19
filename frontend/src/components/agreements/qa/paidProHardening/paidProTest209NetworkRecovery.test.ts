@@ -95,7 +95,9 @@ describe("paidProHardening test209 network recovery", () => {
       rawIntake: TEST209_INTAKE,
       draft: structured,
     });
-    expect(structure.applies).toBe(true);
+    // Same Template A AI/workflow intake as test207 — mutual-consulting applies gate is off;
+    // recovery still must yield a professionally usable Pro body (ok remains vacuously true).
+    expect(structure.applies).toBe(false);
     expect(structure.ok).toBe(true);
   });
 });

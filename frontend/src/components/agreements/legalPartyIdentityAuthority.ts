@@ -84,6 +84,13 @@ function isNonPartyMetadataToken(name: string): boolean {
   if (!t) return true;
   if (looksLikeEmail(t)) return true;
   if (/^(?:reviewer|notice|delivery|archive|billing)@/i.test(t)) return true;
+  if (
+    /^(?:organization|org|affiliate|reviewer|notice\s+contact|deliver\s+to|delivery|contacts?)\b/i.test(
+      t,
+    )
+  ) {
+    return true;
+  }
   return false;
 }
 

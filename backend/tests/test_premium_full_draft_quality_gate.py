@@ -352,10 +352,13 @@ class TestMultiPartyPresenceGate:
 def test_premium_full_draft_invokes_repair_on_quality_fail(monkeypatch, tmp_path):
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test-unit")
     import backend.routers.agreements_v2_api as av2
+    from backend.tests.entitlement_test_support import ensure_headers_entitled
 
     monkeypatch.setattr(av2, "OPENAI_API_KEY", "sk-test-unit")
+    ensure_headers_entitled(_ORG_H)
 
     good_body = _long_commercial_body(
         "\nFlat fee **$1,500** for logo work including **two revision rounds**.\n"

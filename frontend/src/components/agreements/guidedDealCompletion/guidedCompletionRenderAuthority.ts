@@ -190,21 +190,16 @@ export function resolveGuidedCompletionRenderDocument(
   const starter = norm(args.starterFallbackPlain);
 
   if (args.paidProCreateFlowReviewGate) {
+    // Create-flow paid review: validated corpus only. Hash/hydration without validation
+    // must not fail-open into authoritative display (TEST523).
     const validated = norm(args.validatedCorpusPlain);
-    const failOpenCandidates: Array<{ plain: string; source: GuidedRenderDocumentSource; usedLkg: boolean }> = [
-      { plain: validated, source: "authoritative_hydrated_premium", usedLkg: false },
-      { plain: authHydrated, source: "authoritative_hydrated_premium", usedLkg: false },
-      { plain: lastKnown, source: "last_known_good_authoritative", usedLkg: true },
-      { plain: adt, source: "agreement_document_text", usedLkg: false },
-    ];
-    for (const cand of failOpenCandidates) {
-      if (cand.plain.length < GUIDED_MIN_AUTHORITATIVE_BODY_LEN) continue;
+    if (validated.length >= GUIDED_MIN_AUTHORITATIVE_BODY_LEN) {
       const resolution: GuidedRenderDocumentResolution = {
-        plainText: cand.plain,
-        source: cand.source,
-        usedLastKnownGood: cand.usedLkg,
+        plainText: validated,
+        source: "authoritative_hydrated_premium",
+        usedLastKnownGood: false,
         blockedEmptyState: Boolean(args.guidedCompletionActive),
-        authoritativeLen: cand.plain.length,
+        authoritativeLen: validated.length,
         downgradeBlocked: false,
       };
       logGuidedRenderAuthority(resolution, { guidedActive: args.guidedCompletionActive, paidProGate: true });

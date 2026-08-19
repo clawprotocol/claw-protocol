@@ -40,13 +40,13 @@ export function resolveGuidedReviewFlowState(args: {
     if (args.signersReady) {
       return {
         id: "ready_for_signature",
-        label: "Agreement validated and ready for signatures.",
+        label: "Ready to create signing links.",
         detail: "Signing version ready",
       };
     }
     return {
       id: "agreement_updated",
-      label: "Agreement validated and ready for signatures.",
+      label: "Draft created—review recommended.",
       detail: "Review the improved agreement before sharing it for review or signature.",
     };
   }

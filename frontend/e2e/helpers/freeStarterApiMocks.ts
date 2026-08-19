@@ -245,7 +245,7 @@ export function installFreeStarterApiRoutes(
 export async function submitHomepageHeroToCreate(page: Page, prompt = PROD_QA_FREELANCE_PROMPT): Promise<void> {
   await page.goto("/", { waitUntil: "domcontentloaded" });
   await page.locator("#claw-hero-intake").fill(prompt);
-  await page.getByRole("button", { name: "Create free draft" }).click();
+  await page.getByRole("button", { name: /Draft free|Create free draft/i }).click();
   await expect(page).toHaveURL(/\/app\/create/, { timeout: 30_000 });
 }
 

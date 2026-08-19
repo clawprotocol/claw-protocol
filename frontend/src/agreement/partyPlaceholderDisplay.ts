@@ -122,11 +122,23 @@ export function dedupeEntityCandidatesToLegalParties(candidates: readonly string
   return kept;
 }
 
+/** Non-party metadata lines that must never seed legal-entity candidates. */
+const NON_PARTY_METADATA_LINE_RE =
+  /^(?:organization|org|affiliate(?:\s+referral)?|reviewer(?:\s+email)?|notice\s+contact|deliver\s+to|delivery|contacts?)\s*:/i;
+
+function stripNonPartyMetadataLines(raw: string): string {
+  return String(raw || "")
+    .replace(/\r\n/g, "\n")
+    .split("\n")
+    .filter((line) => !NON_PARTY_METADATA_LINE_RE.test(line.trim()))
+    .join("\n");
+}
+
 /**
  * Ordered entity-like phrases from free text (between X and Y, Org suffixes, etc.).
  */
 export function extractAgreementEntityCandidates(context: string): string[] {
-  const text = (context || "").trim();
+  const text = stripNonPartyMetadataLines(context || "").trim();
   if (!text) return [];
   const out: string[] = [];
   const seen = new Set<string>();

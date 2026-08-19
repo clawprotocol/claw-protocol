@@ -187,6 +187,15 @@ export function resolveBrandLicensingEntityForRoleSlot(
   if (fromMap) return fromMap.fullLegalName;
 
   const parties = (partyNames ?? map.map((e) => e.fullLegalName)).filter(isAuthoritativeLegalEntityName);
+
+  // Four-party labeled stacks (Licensor / Brand Owner / Manufacturer / Distributor) omit a
+  // separate marketing role — align with deterministic recovery (fourth party slot).
+  if (slot === "marketing_ecommerce_manager" && parties.length >= 4) {
+    if (parties[3]) return parties[3];
+    const licensor = map.find((e) => /\blicensor\b/i.test(e.roleLabel));
+    if (licensor) return licensor.fullLegalName;
+  }
+
   if (parties.length < 4) return null;
 
   // Only use index fallback when intake has zero explicit role labels.

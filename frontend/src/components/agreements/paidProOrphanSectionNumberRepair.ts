@@ -86,7 +86,10 @@ const BODY_CONTINUATION_START_RE =
   /^(?:Provider|Client|will|shall|may|must|party|parties|agrees?|represents?)\b/i;
 
 export function isFalseFragmentSectionTitle(title: string): boolean {
-  const words = title.trim().split(/\s+/).filter(Boolean);
+  const trimmed = title.trim();
+  // Execution role headings (CLIENT: / SERVICE PROVIDER:) are signature blocks, not orphan section titles.
+  if (/^(?:CLIENT|SERVICE\s+PROVIDER|PARTY\s+\d+)\s*:?\s*$/i.test(trimmed)) return false;
+  const words = trimmed.split(/\s+/).filter(Boolean);
   if (words.length !== 1) return false;
   const normalized = words[0].replace(/[.,;:]+$/, "").toLowerCase();
   return FALSE_FRAGMENT_SECTION_TITLE_WORDS.has(normalized);

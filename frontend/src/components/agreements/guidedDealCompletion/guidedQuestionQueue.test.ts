@@ -18,7 +18,11 @@ function varStub(id: string, label: string, question: string): DealVariable {
     label,
     question,
     severity: "important",
-    suggestedDefaults: [],
+    // Pills without answerable defaults are filtered as non-user-facing; provide real options.
+    suggestedDefaults: [
+      { id: "opt_a", label: "Option A", value: "option_a" },
+      { id: "custom", label: "Custom", value: "" },
+    ],
     agreementImpact: "test",
     requiredForExecution: true,
     applicableAgreementFamilies: ["services_agreement"],
@@ -42,7 +46,7 @@ describe("buildStableGuidedQuestionQueue", () => {
     const result = buildStableGuidedQuestionQueue({ variables: vars });
     expect(result.queue).toContain("project_fee_phase_confirmation");
     expect(result.queue).not.toContain("total_fee_confirmation");
-    expect(result.queue.length).toBeLessThanOrEqual(5);
+    expect(result.queue.length).toBeLessThanOrEqual(3);
     expect(result.removedIds.length + result.blockedRepeatIds.length).toBeGreaterThanOrEqual(0);
     logGuidedQuestionQueueBuilt({ total: 6, visible: result.queue.length, ids: result.queue });
     logGuidedQuestionDedupe({ removedIds: ["total_fee_confirmation"] });

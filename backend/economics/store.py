@@ -1712,6 +1712,15 @@ class EconomicsStore:
         except sqlite3.IntegrityError:
             return False
 
+    def delete_stripe_webhook_event(self, event_id: str) -> bool:
+        """Unclaim a webhook event so Stripe can retry a transient authority miss."""
+        eid = (event_id or "").strip()
+        if not eid:
+            return False
+        with self._conn() as con:
+            cur = con.execute("DELETE FROM stripe_webhook_events WHERE id = ?", (eid,))
+            return int(cur.rowcount or 0) > 0
+
     def insert_affiliate_earning(
         self,
         *,

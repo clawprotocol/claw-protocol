@@ -13,8 +13,9 @@ export function extractExecutionBlockSignerLines(
   const idx = corpus.search(headingRe);
   if (idx < 0) return { nameLine: "", titleLine: "" };
   const tail = corpus.slice(idx, idx + 1600);
-  const nameMatch = tail.match(/\nName:\s*([^\n]*)/i);
-  const titleMatch = tail.match(/\nTitle:\s*([^\n]*)/i);
+  // Accept Name:/Title: at block start or after newline (execution overlays vary).
+  const nameMatch = tail.match(/(?:^|\n)\s*Name:\s*([^\n]*)/i);
+  const titleMatch = tail.match(/(?:^|\n)\s*Title:\s*([^\n]*)/i);
   return {
     nameLine: (nameMatch?.[1] ?? "").trim(),
     titleLine: (titleMatch?.[1] ?? "").trim(),

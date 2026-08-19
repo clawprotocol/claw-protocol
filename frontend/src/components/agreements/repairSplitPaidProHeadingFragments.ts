@@ -34,7 +34,7 @@ const COMPLETE_SUBSECTION_HEADING_TITLE_RE =
 
 function isSubsectionDanglingPrefix(title: string): boolean {
   if (!title || title.length < 3) return false;
-  if (COMPLETE_SUBSECTION_HEADING_TITLE_RE.test(title.trim())) return false;
+  if (isCompletePaidProShortHeadingTitle(title)) return false;
   if (/\.\s+[A-Za-z]/.test(title)) return false;
   if (BODY_VERB_RE.test(title)) return false;
   if (DANGLING_HEADING_TAIL_RE.test(title)) return true;
@@ -128,16 +128,31 @@ function parseMainSectionPrefixLine(
 
 /** Complete single-token main headings that should not merge with the next line. */
 const COMPLETE_SINGLE_TOKEN_MAIN_HEADING_RE =
-  /^(?:Term|Notices?|Fees|Confidentiality|Termination|Assignment|Miscellaneous|Definitions|Recitals|Indemnity|Warranty|Services)$/i;
+  /^(?:Term|Notices?|Fees|Confidentiality|Termination|Assignment|Miscellaneous|Definitions|Recitals|Indemnity|Warranty|Services|Governance|Coordination|Payment|Compensation)$/i;
+
+/** Complete two-word operative titles that must not be treated as split fragments. */
+const COMPLETE_MULTI_TOKEN_MAIN_HEADING_RE =
+  /^(?:Governing Law(?:\s+and\s+Venue)?|General Provisions|Commercial Terms|Scope of Services|Limitation of Liability|Project Overview|Independent Contractors|Relationship of Parties)$/i;
 
 /** Incomplete prefixes that commonly wrap onto the next line (e.g. Independent / Contractor). */
 const INCOMPLETE_SINGLE_TOKEN_MAIN_HEADING_RE =
-  /^(?:Independent|General|Limitation|Mutual|Intellectual|Governing|Representations?|Ownership)$/i;
+  /^(?:Independent|General|Limitation|Mutual|Intellectual|Governing|Representations?|Ownership|Lead|Revenue|Internal)$/i;
+
+/** True when a short heading title is already a canonical complete clause name. */
+export function isCompletePaidProShortHeadingTitle(title: string): boolean {
+  const trimmed = (title || "").trim();
+  if (!trimmed) return false;
+  if (COMPLETE_SINGLE_TOKEN_MAIN_HEADING_RE.test(trimmed)) return true;
+  if (COMPLETE_MULTI_TOKEN_MAIN_HEADING_RE.test(trimmed)) return true;
+  if (COMPLETE_SUBSECTION_HEADING_TITLE_RE.test(trimmed)) return true;
+  return false;
+}
 
 export function isDanglingPaidProMainHeadingPrefix(title: string): boolean {
   if (!title || title.length < 3) return false;
   if (/\.\s+[A-Za-z]/.test(title)) return false;
   if (BODY_VERB_RE.test(title)) return false;
+  if (isCompletePaidProShortHeadingTitle(title)) return false;
   if (DANGLING_HEADING_TAIL_RE.test(title)) return true;
   if (/,\s*$/.test(title)) return true;
   const words = title.split(/\s+/).filter(Boolean);

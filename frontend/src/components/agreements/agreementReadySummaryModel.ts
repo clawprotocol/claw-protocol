@@ -1,6 +1,7 @@
 import type { AgreementDraft } from "../../agreement/agreementTypes";
 import { normalizeJurisdictionDisplay } from "../../agreement/jurisdictionNormalize";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
+import { CUSTOMER_JOURNEY_STATE } from "./customerJourneyReadiness";
 
 export type AgreementReadySummaryDraftSource = Pick<
   AgreementDraft,
@@ -84,6 +85,6 @@ export function buildAgreementReadySummaryModel(draft: AgreementReadySummaryDraf
     governingLaw,
     effectiveDate,
     purpose,
-    statusLabel: "Ready for review",
+    statusLabel: CUSTOMER_JOURNEY_STATE.draftCreatedReviewRecommended,
   };
 }

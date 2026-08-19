@@ -52,6 +52,17 @@ def _ensure_openai_key(monkeypatch):
     monkeypatch.setattr(av2, "OPENAI_API_KEY", "sk-test-premium-reliability")
 
 
+@pytest.fixture(autouse=True)
+def _grant_pro_for_premium_draft(tmp_path, monkeypatch):
+    """Paid-beta: /premium-full-draft requires Pro — grant owner Pro in economics store."""
+    monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
+    monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    from backend.tests.entitlement_test_support import ensure_headers_entitled
+
+    ensure_headers_entitled(_ORG_H)
+
+
 FOUR_PARTY_INTAKE = (
     "Four-party master services and reseller agreement between Redwood Peak Ventures LLC (Client), "
     "Atlas Harbor Technologies Inc. (Vendor), Silverline Integration Partners LLC (Integrator), and "
@@ -218,6 +229,7 @@ def test_fixture_full_corpus_clears_complex_substance_floor():
 def test_success_returns_substantive_server_full_above_min_len(monkeypatch, tmp_path):
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
 
     monkeypatch.setattr(av2, "call_legal_llm", lambda *a, **k: json.dumps(_full_corpus_json()))
     client = TestClient(app)
@@ -240,6 +252,7 @@ def test_success_returns_substantive_server_full_above_min_len(monkeypatch, tmp_
 def test_short_model_output_returns_retry_not_server_full(monkeypatch, tmp_path):
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
 
     # ~2353-char body for a complex four-party agreement: below the complex substance floor.
     short_doc = (
@@ -279,6 +292,7 @@ def test_short_model_output_returns_retry_not_server_full(monkeypatch, tmp_path)
 def test_json_parse_failure_with_substantive_body_preserves_body(monkeypatch, tmp_path):
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
 
     # Model returned prose instead of JSON, but the prose is a full, substantive corpus.
     prose_corpus = _full_four_party_corpus()
@@ -308,6 +322,7 @@ def test_json_parse_failure_with_substantive_body_preserves_body(monkeypatch, tm
 def test_json_parse_failure_without_substantive_body_cannot_promote_starter(monkeypatch, tmp_path):
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
 
     # Non-JSON, and far too short to be a full corpus.
     junk = "I'm sorry, I can't complete that request right now."
@@ -337,6 +352,7 @@ def test_json_parse_failure_without_substantive_body_cannot_promote_starter(monk
 def test_four_party_full_intake_produces_accepted_corpus(monkeypatch, tmp_path):
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
 
     monkeypatch.setattr(av2, "call_legal_llm", lambda *a, **k: json.dumps(_full_corpus_json()))
     client = TestClient(app)
@@ -476,6 +492,7 @@ def test_thin_primary_repaired_to_substantive_returns_full_server_full(monkeypat
     """A thin (6k–10k) primary must trigger server-side regeneration; the substantive repair is returned."""
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
 
     calls = {"n": 0}
 
@@ -511,6 +528,7 @@ def test_persistently_thin_returns_retryable_not_thin_server_full(monkeypatch, t
     """
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
 
     thin_body = _mid_length_four_party_body()
     monkeypatch.setattr(av2, "call_legal_llm", lambda *a, **k: json.dumps(_mid_length_corpus_json()))
@@ -533,6 +551,7 @@ def test_json_parse_thin_regenerates_then_recovers_substantive(monkeypatch, tmp_
     """A non-JSON, non-substantive first turn triggers one clean regeneration before failing."""
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
 
     calls = {"n": 0}
 
@@ -557,6 +576,7 @@ def test_diagnostics_log_emits_required_fields_on_success(monkeypatch, tmp_path,
     """Diagnostics (requirement #4): raw model len, document_text len, server_full len, validation, reason."""
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
 
     monkeypatch.setattr(av2, "call_legal_llm", lambda *a, **k: json.dumps(_full_corpus_json()))
     client = TestClient(app)
@@ -583,6 +603,7 @@ def test_diagnostics_log_emits_required_fields_on_degraded(monkeypatch, tmp_path
     """Diagnostics must also be emitted on the degraded/retry path."""
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
 
     monkeypatch.setattr(av2, "call_legal_llm", lambda *a, **k: json.dumps(_mid_length_corpus_json()))
     client = TestClient(app)

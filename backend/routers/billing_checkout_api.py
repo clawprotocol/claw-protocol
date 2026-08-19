@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import os
 from typing import Any, Dict, Optional
 
 from fastapi import APIRouter, HTTPException, Request
@@ -14,16 +13,19 @@ from backend.billing.stripe_config import (
     stripe_price_pro_annual,
     stripe_price_pro_monthly,
 )
+from backend.billing.checkout_app_origin import build_checkout_cancel_url, build_checkout_success_url
 from backend.billing.stripe_client import create_checkout_session, retrieve_checkout_session
 from backend.billing.stripe_subscription_sync import sync_subscription_from_stripe_checkout_session
 from backend.economics.store import get_economics_store
 from backend.payments.stripe_checkout_helpers import lawdog_pro_checkout_metadata
-from backend.security.safe_redirect import is_allowlisted_internal_path, resolve_safe_redirect_path
 from backend.security.workspace_identity import assert_agreement_accessible, require_verified_org_id
 from backend.security.supabase_jwt import extract_bearer_token, verify_supabase_access_token
 
 router = APIRouter(prefix="/v1/billing", tags=["billing-checkout"])
 _log = logging.getLogger("claw.billing.checkout_api")
+
+# Frontend create-flow sentinel — no workspace row exists yet (anonymous → Pro).
+CREATE_FLOW_CHECKOUT_AGREEMENT_ID = "__claw_create_checkout__"
 
 
 class CheckoutSessionIn(BaseModel):
@@ -37,10 +39,6 @@ class CheckoutSessionIn(BaseModel):
 
 class VerifyCheckoutSessionIn(BaseModel):
     session_id: str = Field(..., min_length=1, max_length=256)
-
-
-def _app_origin() -> str:
-    return os.getenv("LAWDOG_APP_ORIGIN", os.getenv("VITE_LAWDOG_APP_ORIGIN", "http://localhost:5173")).rstrip("/")
 
 
 def _price_for_cadence(cadence: str) -> str:
@@ -66,17 +64,12 @@ async def post_checkout_session(request: Request, body: CheckoutSessionIn) -> Di
         raise HTTPException(status_code=503, detail="stripe_checkout_not_configured")
 
     agreement_id = body.agreement_id.strip()
-    _, org_id = assert_agreement_accessible(request, agreement_id)
-    return_to = resolve_safe_redirect_path(body.return_to.strip() or "/app/create", "/app/create")
-    if not is_allowlisted_internal_path(return_to):
-        return_to = "/app/create"
-
-    success_sep = "&" if "?" in return_to else "?"
-    success_url = (
-        f"{_app_origin()}{return_to}{success_sep}"
-        f"premiumCompletion=1&checkout_session_id={{CHECKOUT_SESSION_ID}}"
-    )
-    cancel_url = f"{_app_origin()}/app/checkout/{agreement_id}"
+    if agreement_id == CREATE_FLOW_CHECKOUT_AGREEMENT_ID:
+        org_id = require_verified_org_id(request)
+    else:
+        _, org_id = assert_agreement_accessible(request, agreement_id)
+    success_url = build_checkout_success_url(return_to=body.return_to.strip() or "/app/create")
+    cancel_url = build_checkout_cancel_url(agreement_id=agreement_id)
 
     metadata = lawdog_pro_checkout_metadata(
         org_id=org_id,
@@ -121,7 +114,7 @@ async def post_verify_checkout_session(request: Request, body: VerifyCheckoutSes
     if session_org and str(session_org).strip() != org_id:
         raise HTTPException(status_code=403, detail="org_mismatch")
     session_agreement = str((session.get("metadata") or {}).get("agreement_id") or "").strip()
-    if session_agreement:
+    if session_agreement and session_agreement != CREATE_FLOW_CHECKOUT_AGREEMENT_ID:
         assert_agreement_accessible(request, session_agreement)
 
     eco = get_economics_store()

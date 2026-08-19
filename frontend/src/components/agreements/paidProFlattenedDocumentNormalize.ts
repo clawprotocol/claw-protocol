@@ -35,9 +35,11 @@ import { reconcileExecutionBlockToRoleIdentities } from "./paidProSignerMetadata
 
 function expandInlineSignatureMarkersToLines(prefix: string): string {
   return prefix
-    .replace(/\s+(\bSIGNATURES\b\s+The\s+parties)/gi, "\n\n$1")
-    .replace(/\s+(\bSIGNATURES\b\s*:)/gi, "\n\n$1")
-    .replace(/([.!?])\s+\bSIGNATURES\b\s*$/gim, "$1")
+    // Never split "ELECTRONIC SIGNATURES" — only isolate stale "SIGNATURES The parties…" tails.
+    .replace(/(?<!\bELECTRONIC)\s+(\bSIGNATURES\b\s+The\s+parties)/gi, "\n\n$1")
+    .replace(/(?<!\bELECTRONIC)\s+(\bSIGNATURES\b\s*:)/gi, "\n\n$1")
+    // Same-line only: `\s` must not cross newlines or a trailing `.\n\nSIGNATURES` heading is erased.
+    .replace(/([.!?])[^\S\n]+\bSIGNATURES\b\s*$/gim, "$1")
     .replace(/\s+(\bCLIENT\s*:)/gi, "\n$1")
     .replace(/\s+(\bSERVICE\s+PROVIDER\s*:)/gi, "\n$1")
     .replace(/\s+(By\s*:)/gi, "\n$1")
@@ -83,7 +85,7 @@ export function normalizeFlattenedPaidProDocumentBlocks(text: string): {
     "$1\n\n$2",
   );
 
-  out = out.replace(/([a-z0-9])\s+(\d+\.\s+(?!\d+\.\d)[A-Z][A-Za-z])/g, "$1\n\n$2");
+  out = out.replace(/([a-z0-9])[^\S\n]+(\d+\.\s+(?!\d+\.\d)[A-Z][A-Za-z])/g, "$1\n\n$2");
 
   // "1. Services and Scope 1.1 Services" → main heading + subsection on separate blocks.
   out = out.replace(

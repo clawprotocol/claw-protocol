@@ -101,6 +101,24 @@ export function latchPaidReviewSessionCanonicalSoTHash(args: {
   sessions.set(sessionId, session);
 }
 
+/**
+ * Signer finalization is an explicit, user-approved revision of the canonical
+ * agreement body. Advance the session baseline atomically so the first render
+ * of the hydrated signing corpus becomes the new display latch.
+ */
+export function advancePaidReviewSessionCanonicalSoTAfterSignerFinalize(args: {
+  reviewSessionId?: string | null;
+  canonicalPlain: string;
+}): void {
+  const plain = (args.canonicalPlain || "").trim();
+  if (plain.length < 80) return;
+  const sessionId = resolveReviewSessionId(args.reviewSessionId);
+  const session = readOrCreateSession(sessionId);
+  session.latchedCanonicalSoTHash = fingerprintAgreementBody(plain);
+  session.latchedReviewDisplayHash = null;
+  sessions.set(sessionId, session);
+}
+
 export function readPaidReviewSessionCorpusInvariant(
   reviewSessionId?: string | null,
 ): PaidReviewSessionCorpusInvariantRecord | null {

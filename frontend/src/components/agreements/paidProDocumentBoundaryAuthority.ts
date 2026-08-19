@@ -35,6 +35,11 @@ export type PaidProDocumentBoundaryAuthorityOpts = PaidProNoticeContactAuthority
   handoffPartySlots?: number;
   /** When true, clause-family structural validation is deferred to the terminal freeze gate. */
   deferClauseFamilyStructuralValidation?: boolean;
+  /**
+   * Freeze path: skip review-display flatten. Display normalize can collapse contiguous
+   * `N.M … clause K.` subsection padding into fatal truncated families (TEST500).
+   */
+  skipReviewDisplayNormalize?: boolean;
 };
 
 export type PaidProDocumentBoundaryAuthorityResult = {
@@ -71,13 +76,15 @@ export function repairDocumentBoundaryFusion(text: string): { text: string; repa
   let out = (text || "").replace(/\r\n/g, "\n");
   const before = out;
 
+  // Use horizontal whitespace only — `\s` includes newlines and would rewrite already
+  // correct multi-line section breaks (`Terms.\n2. Clause`) into blank-line reflows.
   out = out.replace(/([A-Za-z]+)\."(\d+\.\s+)/g, "$1.\"\n\n$2");
   out = out.replace(/([a-z]+)\.(\d+\.\s+Notices\b)/gi, "$1.\n\n$2");
   out = out.replace(/([a-z]+)\.(\d+\.\s+GOVERNING\b)/gi, "$1.\n\n$2");
-  out = out.replace(/([a-z])\.\s*(\d+\.\s+(?!\d+\.\d)(?:Notices|GOVERNING|Services|Relationship))/gi, "$1.\n\n$2");
-  out = out.replace(/([a-z])\.\s*(\d+\.\s+(?!\d+\.\d)[A-Z])/g, "$1.\n\n$2");
+  out = out.replace(/([a-z])\.[^\S\n]*(\d+\.\s+(?!\d+\.\d)(?:Notices|GOVERNING|Services|Relationship))/gi, "$1.\n\n$2");
+  out = out.replace(/([a-z])\.[^\S\n]*(\d+\.\s+(?!\d+\.\d)[A-Z])/g, "$1.\n\n$2");
   out = out.replace(/(\d)\.(\d+\.\s+(?!\d+\.\d)[A-Z])/g, "$1.\n\n$2");
-  out = out.replace(/([.!?)"\u201d])\s*(\d+\.\s+(?!\d+\.\d)[A-Z])/g, "$1\n\n$2");
+  out = out.replace(/([.!?)"\u201d])[^\S\n]*(\d+\.\s+(?!\d+\.\d)[A-Z])/g, "$1\n\n$2");
 
   if (hasInlineMalformedNoticeStanzas(out)) {
     out = out.replace(/\s+(If to\s+)/gi, "\n\n$1");
@@ -132,10 +139,12 @@ export function applyPaidProDocumentBoundaryAuthority(
     repairs.push(...fusion.repairs);
   }
 
-  const display = preparePaidProReviewDisplayPlain(out);
-  if (display.text !== out) {
-    out = display.text;
-    repairs.push(...display.repairs.map((r) => `display:${r}`));
+  if (!opts?.skipReviewDisplayNormalize) {
+    const display = preparePaidProReviewDisplayPlain(out);
+    if (display.text !== out) {
+      out = display.text;
+      repairs.push(...display.repairs.map((r) => `display:${r}`));
+    }
   }
 
   if (/\bIN WITNESS WHEREOF\b/i.test(out)) {
@@ -255,6 +264,7 @@ export function assertPaidProDocumentBoundaryAuthorityForFreeze(
       ...opts,
       blockOnViolation: false,
       blockOnUnresolved: true,
+      skipReviewDisplayNormalize: true,
       surface: opts?.surface ?? "paid_pro_document_boundary_freeze",
     });
     out = result.text;

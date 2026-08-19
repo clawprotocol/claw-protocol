@@ -35,6 +35,15 @@ const INTAKE_403030_RE =
 const NO_UPTIME_GUARANTEE_RE =
   /\bno\s+(?:guaranteed?|guarantee)\s+(?:uptime|availability|sla)\b|\b(?:do\s+not|don't|without)\s+(?:guarantee|guaranteeing)\s+.{0,40}(?:third[-\s]?party|ai\s+platform|platform)\b|\bthird[-\s]?party\s+ai\s+platforms?\s+.{0,40}(?:no|without)\s+guarantee/i;
 
+function intakeFeeAmountIsHedged(intake: string, feeToken: string): boolean {
+  const idx = intake.toLowerCase().indexOf(feeToken.toLowerCase());
+  if (idx < 0) return /\b(?:maybe|approximately|about|roughly|probably|TBD|\?\?\?)\b/i.test(intake);
+  const window = intake.slice(Math.max(0, idx - 48), Math.min(intake.length, idx + feeToken.length + 48));
+  return /\b(?:maybe|approximately|about|roughly|probably|estimated|TBD|\?\?\?|to be confirmed)\b/i.test(
+    window,
+  );
+}
+
 export function parseGuidedIntakeFacts(intakeRaw = ""): GuidedIntakeFacts {
   const intake = (intakeRaw || "").replace(/\s+/g, " ").trim();
   const milestoneSplit403030 = INTAKE_403030_RE.test(intake);
@@ -69,8 +78,13 @@ export function parseGuidedIntakeFacts(intakeRaw = ""): GuidedIntakeFacts {
           ? 15
           : null;
 
+  const rawTotalFee = totalMatch ? totalMatch[0].replace(/\s+/g, " ").trim() : null;
+  // "maybe $120,000" / TBD phase tables must not pre-answer fee confirmation.
+  const totalProjectFee =
+    rawTotalFee && !intakeFeeAmountIsHedged(intake, rawTotalFee) ? rawTotalFee : null;
+
   return {
-    totalProjectFee: totalMatch ? totalMatch[0].replace(/\s+/g, " ").trim() : null,
+    totalProjectFee,
     milestoneSplit403030,
     monthlySupportFee: monthlySupport ? monthlySupport[0].replace(/\s+/g, " ").trim() : null,
     paymentMode,
@@ -155,6 +169,7 @@ export function isGuidedVariableSatisfiedByIntake(variableId: string, intakeRaw 
     case "project_fee_phase_confirmation":
     case "total_fee_confirmation":
     case "amount_to_be_confirmed":
+      // Hedged amounts are cleared in parseGuidedIntakeFacts; require an unhedged fee.
       return Boolean(facts.totalProjectFee);
     case "renewal_notice":
     case "termination":

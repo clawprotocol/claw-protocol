@@ -186,7 +186,7 @@ describe("workspace signing status labels", () => {
   it("shows Signing in progress when packet prepared locally", () => {
     const { roles, handoff: h } = buildRolesAndHandoff();
     ensureSigningPacketStatusFromHandoff(h, roles[0]!.roleId);
-    expect(workspaceSigningStatusLabel(indexRow({ id: AG }))).toBe("Signing in progress");
+    expect(workspaceSigningStatusLabel(indexRow({ id: AG }))).toBe("Waiting for signatures");
   });
 
   it("shows Fully signed when local snapshot is complete", () => {
@@ -195,7 +195,7 @@ describe("workspace signing status labels", () => {
     for (const key of Object.keys(snap.bySignerKey)) {
       patchSignerPacketStatus(AG, key, "signed");
     }
-    expect(workspaceSigningStatusLabel(indexRow({ id: AG }))).toBe("Fully signed");
+    expect(workspaceSigningStatusLabel(indexRow({ id: AG }))).toBe("Fully executed");
   });
 });
 

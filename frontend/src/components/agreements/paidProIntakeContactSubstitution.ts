@@ -294,13 +294,15 @@ export function substitutePaidProIntakeContactPlaceholders(
   const out = text.replace(NUMBERED_EMAIL_BRACKET_RE, (match, offset) => {
     const idx = typeof offset === "number" ? offset : text.indexOf(match);
     if (idx < 0 || !isEmailNumberedToken(match)) return match;
+    // Operative notice/payment email slots must stay unresolved for fatal gating — never
+    // hydrate them from intake even when a contact email is available.
+    if (isOperativeSignatureContactMisuse(match, text, idx)) return match;
     const slot = parseSignatureContactSlot(match);
     const resolved = resolveAuthoritativeEmailForContactSlot(slot, intakeRaw, authorityParties);
     if (resolved) {
       replacedEmailCount += 1;
       return resolved;
     }
-    if (isOperativeSignatureContactMisuse(match, text, idx)) return match;
 
     if (isSignatureOrContactContext(text, idx) || isNumberedSignatureContactToken(match)) {
       if (!unresolvedEmailTokens.includes(match)) unresolvedEmailTokens.push(match);

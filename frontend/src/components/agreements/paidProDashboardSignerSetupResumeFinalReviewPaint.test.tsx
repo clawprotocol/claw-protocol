@@ -50,6 +50,12 @@ import {
   readPaidProReviewSessionAuthority,
   replacePaidProReviewSessionAuthorityAfterSignerFinalize,
 } from "./paidProReviewSessionAuthority";
+import {
+  fingerprintPaidReviewSessionCorpusBody,
+  latchPaidReviewSessionCanonicalSoTHash,
+  readPaidReviewSessionCorpusInvariant,
+  resetPaidReviewSessionCorpusInvariantForTests,
+} from "./paidProReviewSessionCorpusInvariantState";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const intakeSrc = readFileSync(join(here, "AgreementBuilderIntake.tsx"), "utf8");
@@ -141,6 +147,7 @@ describe("dashboard signer-setup resume → Continue paints finalized signer cor
     clearDisplayReviewSnapshotAuthority();
     clearFrozenSigningAuthoritySnapshotForSession();
     clearPaidProReviewSessionAuthorityForTests();
+    resetPaidReviewSessionCorpusInvariantForTests();
     resetPaidProVisibleDocumentShellLogsForTests();
     resetPaidProDocumentBodyRouterLogsForTests();
     vi.restoreAllMocks();
@@ -238,6 +245,10 @@ describe("dashboard signer-setup resume → Continue paints finalized signer cor
       agreementId: AGREEMENT_ID,
       reviewSessionId: AGREEMENT_ID,
     });
+    latchPaidReviewSessionCanonicalSoTHash({
+      reviewSessionId: AGREEMENT_ID,
+      canonicalPlain: establishedSoT,
+    });
     const priorHash = readPaidProReviewSessionAuthority()?.hash ?? "";
     expect(priorHash.length).toBeGreaterThan(0);
 
@@ -253,5 +264,10 @@ describe("dashboard signer-setup resume → Continue paints finalized signer cor
     expect(next?.source).toBe("paid_pro_signer_metadata_finalize");
     expect(next?.corpusPlain).toMatch(/Alice Resume/);
     expect(next?.corpusPlain).not.toMatch(/^Name:\s*$/m);
+    const invariant = readPaidReviewSessionCorpusInvariant(AGREEMENT_ID);
+    expect(invariant?.latchedCanonicalSoTHash).toBe(
+      fingerprintPaidReviewSessionCorpusBody(snap.corpus),
+    );
+    expect(invariant?.latchedReviewDisplayHash).toBeNull();
   });
 });

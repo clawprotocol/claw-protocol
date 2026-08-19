@@ -72,7 +72,7 @@ Master checklist for systematic pre–Genesis launch QA. **Status:** `pass` | `f
 | Upgrade CTA not blocking free value | | | | |
 | Post-pay: full Pro body visible (no starter flash) | n/a | | | |
 | Checkout metadata includes plan | n/a | | | |
-| Pricing page matches $39/mo Pro positioning | | | | |
+| Pricing page matches $49/mo Pro positioning | | | | |
 
 ---
 

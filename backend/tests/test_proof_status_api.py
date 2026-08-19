@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from backend.tests.entitlement_test_support import ensure_headers_entitled, ensure_org_pro_entitlement
+
 import os
 from pathlib import Path
 
@@ -100,7 +102,13 @@ def test_find_batch_context_for_receipt(anchor_tmp: AnchoringStore) -> None:
 
 def test_exports_flow(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     p = tmp_path / "pl.sqlite3"
-    os.environ["CLAW_PROOF_LAYER_DB_PATH"] = str(p)
+    monkeypatch.setenv("CLAW_PROOF_LAYER_DB_PATH", str(p))
+    monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
+    import backend.usage_economics.store as ue_store_mod
+
+    ue_store_mod._store = None  # noqa: SLF001
     app = FastAPI()
     app.include_router(proof_status_router)
     client = TestClient(app)

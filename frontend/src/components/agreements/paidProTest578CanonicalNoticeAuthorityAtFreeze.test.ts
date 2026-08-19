@@ -54,8 +54,10 @@ describe("TEST578 canonical notice authority at freeze", () => {
     });
     expect(gate.ok).toBe(true);
     expect(gate.rejectReason).toBeNull();
-    expect(gate.text).toMatch(/^If to Party 1:/im);
-    expect(gate.text).toMatch(/^If to Party 2:/im);
+    // Commercial no-invent: generic Party 1/Party 2 notice scaffolding is not synthesized
+    // when freeze has no authoritative legal entities (deferred to signer setup).
+    expect(gate.text).not.toMatch(/^If to Party 1:/im);
+    expect(gate.text).not.toMatch(/^If to Party 2:/im);
   });
 
   it("SoT establishment succeeds for PAID_BODY routing fixture", () => {

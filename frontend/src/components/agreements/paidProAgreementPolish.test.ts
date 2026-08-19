@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { finalizeUserVisibleAgreementPlainText } from "./agreementTemplatePlaceholderSafety";
 import { applyPaidProRenderPolish } from "./paidProRenderPolish";
 import {
@@ -9,6 +9,14 @@ import {
   normalizeOpeningRecital,
   polishPaidProAgreementText,
 } from "./paidProAgreementPolish";
+import {
+  resetUnauthorizedSemanticInsertsForTests,
+  setUnauthorizedSemanticInsertsForTests,
+} from "./unauthorizedSemanticInsertPolicy";
+
+afterEach(() => {
+  resetUnauthorizedSemanticInsertsForTests();
+});
 
 const IRONCLAD_INTAKE = `Need an agreement between Ironclad Systems Group LLC, Harborline Data Solutions Inc., Northwind Automation Partners LLC, Silver Mesa Analytics LP, and VertexGrid Technologies LLC for a joint AI software and infrastructure rollout project.
 
@@ -138,24 +146,20 @@ describe("polishPaidProAgreementText", () => {
 
     expect(out.agreementPolish.recital.applied).toBe(true);
     expect(out.agreementPolish.signature.replacedCount).toBeGreaterThanOrEqual(4);
-    expect(out.agreementPolish.enterprise.effectiveDateAdded).toBe(true);
-    expect(out.agreementPolish.enterprise.disputeWindowAdded).toBe(true);
-    expect(out.agreementPolish.enterprise.uptimeTargetAdded).toBe(true);
-    expect(out.agreementPolish.enterprise.survivalPolished).toBe(true);
-    expect(out.agreementPolish.enterprise.attorneysFeesAdded).toBe(true);
+    // P0: inventing enterprise floors disabled by default.
+    expect(out.agreementPolish.enterprise.effectiveDateAdded).toBe(false);
+    expect(out.agreementPolish.enterprise.disputeWindowAdded).toBe(false);
+    expect(out.agreementPolish.enterprise.uptimeTargetAdded).toBe(false);
+    expect(out.agreementPolish.enterprise.survivalPolished).toBe(false);
+    expect(out.agreementPolish.enterprise.attorneysFeesAdded).toBe(false);
 
-    for (const email of IRONCLAD_EMAILS) {
-      expect(out.text).toContain(email);
-    }
-    expect(out.text).not.toMatch(/\[\s*EMAIL_\d+\s*\]/i);
     expect(out.text).not.toMatch(/@Ironclad Systems Group LLC/i);
-    expect(out.text).toContain("target monthly uptime availability of 99.5%");
-    expect(out.text).toContain("fifteen (15) business days");
-    expect(out.text).toContain("survive expiration or termination");
+    expect(out.text).not.toContain("target monthly uptime availability of 99.5%");
+    expect(out.text).not.toContain("fifteen (15) business days");
+    expect(out.text).not.toMatch(/attorneys[’']\s+fees/i);
 
     const opening = out.text.slice(0, 1200);
     expect(opening).toContain("Ironclad Systems Group LLC");
-    expect(opening).toMatch(/\(.*Ironclad.*\)/);
 
     expect(out.text).toContain("Ironclad Systems Group LLC");
     const witnessIdx = out.text.search(/IN WITNESS WHEREOF/i);
@@ -189,7 +193,16 @@ describe("polishPaidProAgreementText", () => {
 });
 
 describe("applyEnterpriseClausePolish", () => {
-  it("adds explicit survival topics when only implied survival exists", () => {
+  it("does not invent survival topics by default (P0)", () => {
+    const snippet =
+      "TERMINATION. Provisions that by their nature should survive termination remain in effect.\n";
+    const { log, text } = applyEnterpriseClausePolish(snippet);
+    expect(log.survivalPolished).toBe(false);
+    expect(text).not.toContain("payment obligations accrued before termination");
+  });
+
+  it("legacy inventing floors still work when test opt-in enabled", () => {
+    setUnauthorizedSemanticInsertsForTests(true);
     const snippet =
       "TERMINATION. Provisions that by their nature should survive termination remain in effect.\n";
     const { log, text } = applyEnterpriseClausePolish(snippet);
@@ -198,6 +211,7 @@ describe("applyEnterpriseClausePolish", () => {
   });
 
   it("does not add uptime target for non-software agreements", () => {
+    setUnauthorizedSemanticInsertsForTests(true);
     const body =
       "Consulting services only. Provider will use commercially reasonable efforts to deliver reports.";
     const { log } = applyEnterpriseClausePolish(body);
@@ -205,6 +219,7 @@ describe("applyEnterpriseClausePolish", () => {
   });
 
   it("does not duplicate effective date, survival, or attorneys fees when present", () => {
+    setUnauthorizedSemanticInsertsForTests(true);
     const body = [
       'Effective Date means the date of the last signature below (the "Effective Date").',
       "Disputes: fifteen (15) business days of negotiation before court.",

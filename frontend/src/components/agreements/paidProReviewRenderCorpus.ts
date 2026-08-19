@@ -30,7 +30,10 @@ import {
   setConsumedPaidProSignerMetadataAuthority,
   type PaidProSignerMetadataAuthority,
 } from "./paidProSignerMetadataAuthority";
-import { resolvePaidProUnifiedSurfaceCorpus } from "./paidProAgreementAuthorityChain";
+import {
+  isPaidProExecutionCorpusSource,
+  resolvePaidProUnifiedSurfaceCorpus,
+} from "./paidProAgreementAuthorityChain";
 import {
   resolvePaidProFinalHydratedCorpusForSurface,
   type PaidProFinalHydratedCorpusSource,
@@ -50,7 +53,10 @@ import { normalizePaidProOrphanSubsections } from "./normalizePaidProOrphanSubse
 import { repairPaidProOrphanSectionNumbers } from "./paidProOrphanSectionNumberRepair";
 import { applySectionStructureIntegrity } from "./sectionStructureAuthority";
 import { applyContactAuthorityExecutionBlockIntegrity } from "./contactAuthorityExecutionBlockIntegrity";
-import { applyPaidProUserVisibleDisplayPrep } from "./paidProDisplayPlainAuthority";
+import {
+  applyPaidProUserVisibleDisplayPrep,
+  projectPaidProFrozenSoTDisplayPlain,
+} from "./paidProDisplayPlainAuthority";
 import { enforceUserVisibleRenderTokenAuthority } from "./userVisibleRenderTokenAuthority";
 import { applyPaidProSignerMetadataMergeGate } from "./paidProSignerMetadataMergeGate";
 import { enforcePaidProSingleExecutionBlock } from "./paidProExecutionBlockNormalization";
@@ -102,6 +108,7 @@ import {
   repairExecutionBlockEntityHeadingLines,
 } from "./paidProExecutionBlockEntityHeading";
 import { applyPaidProSoTSignerExecutionOverlay } from "./paidProSoTSignerExecutionOverlay";
+import { projectPaidProVisibleTitleDisplayPlain } from "./paidProDocumentTitleOpeningRepair";
 import { sanitizePaidProDomainScopeContamination } from "./paidProDomainScopeGuard";
 
 const LABELED_SIGNATURE_BLOCK_START =
@@ -579,13 +586,30 @@ export function repairFusedPartyLegalNamesForReviewDisplay(
     repaired = true;
   }
 
-  // Include signature-region lines — fused headings often appear after IN WITNESS WHEREOF.
-  const fusedLine = text.split("\n").find((line) => isFusedOrConcatenatedPartyLegalName(line.trim()));
-  if (fusedLine && authParties.length >= 2) {
-    const client = authorityPartiesToCanonicalPartyIdentities(authParties)[0]?.partyDisplayName.trim();
-    if (client) text = text.split(fusedLine.trim()).join(client);
-    repaired = true;
-    if (authParties.length >= 2) {
+  // Signature-region only — opening recitals legitimately name both parties and must never be
+  // rewritten to a single client label (that destroyed TEST435 SoT review display).
+  const signatureIdx = signaturePatchStartIndex(text);
+  if (signatureIdx >= 0 && authParties.length >= 2) {
+    const head = text.slice(0, signatureIdx);
+    const tail = text.slice(signatureIdx);
+    const fusedLine = tail
+      .split("\n")
+      .find((line) => {
+        const trimmed = line.trim();
+        if (!trimmed || !isFusedOrConcatenatedPartyLegalName(trimmed)) return false;
+        // Operative prose / entered-into lines can appear if the patch index is early; skip them.
+        if (/\bentered into\b/i.test(trimmed)) return false;
+        if (/\bby and between\b/i.test(trimmed)) return false;
+        if (/^If to\s+/i.test(trimmed)) return false;
+        return true;
+      });
+    if (fusedLine) {
+      const client = authorityPartiesToCanonicalPartyIdentities(authParties)[0]?.partyDisplayName.trim();
+      if (client) {
+        const repairedTail = tail.split(fusedLine.trim()).join(client);
+        text = `${head}${repairedTail}`;
+        repaired = true;
+      }
       const dedupeAfter = stripDuplicateLegacySignatureBlocksAfterAuthoritative(text, authParties);
       text = dedupeAfter.text;
       repaired = dedupeAfter.removed > 0 || repaired;
@@ -758,14 +782,18 @@ function finalizePaidProReviewRenderPlain(
   text: string,
   args?: ResolvePaidProReviewRenderPlainArgs,
 ): string {
+  const trimmed = (text || "").trim();
+  // Never synthesize title/opening from intake party records without a substantive corpus —
+  // pipeline validation alone must not mount review text (TEST423).
+  if (trimmed.length < PAID_PRO_AUTHORITY_MIN_LEN) return trimmed;
   const parties = resolvePartiesForReviewRender(args);
-  if (parties.length < 2) return text.trim();
+  if (parties.length < 2) return trimmed;
   const roleContext = paidProPartyRoleContextFromArgs(args);
   const records = canonicalPartyRecordsFromSignerIdentities(
     authorityPartiesToCanonicalPartyIdentities(parties, roleContext),
   );
-  if (records.length < 2) return text.trim();
-  let out = text;
+  if (records.length < 2) return trimmed;
+  let out = trimmed;
   if (parties.length >= 2) {
     out = stripTrailingLegacyEntitySignatureLines(out).text;
   }
@@ -828,7 +856,16 @@ export function resolvePaidProReviewRenderPlain(
   const finishUserVisiblePlain = (plain: string): string => {
     let body = (plain || "").trim();
     if (body.length < PAID_PRO_AUTHORITY_MIN_LEN) return body;
-    // Frozen SoT display-only skips the full sanitizer; still separate fused legal-name lines.
+    // Frozen SoT display-only: presentation projection only. Fused-name signing repairs strip
+    // Party Notice Details and can rewrite openings — never run them on accepted SoT display.
+    if (shouldUsePaidProSourceOfTruthDisplayOnly()) {
+      if (args?.skipUserVisibleDisplayPrep) return body;
+      const titled = projectPaidProVisibleTitleDisplayPlain(body, {
+        intakeText: args?.intakeText ?? null,
+        fallbackTitle: args?.draft?.title ?? null,
+      });
+      return projectPaidProFrozenSoTDisplayPlain(titled);
+    }
     if (corpusContainsFusedPartyLegalName(body)) {
       const parties = resolvePartiesForReviewRender(args);
       body = repairFusedPartyLegalNamesForReviewDisplay(body, parties).text.trim();
@@ -850,6 +887,18 @@ export function resolvePaidProReviewRenderPlain(
       return visible;
     }
   }
+  // Pinned / snapshot execution corpus is the shared review+copy authority — do not invent
+  // Notices or re-polish away from the finalized bytes (surface parity / clipboard path).
+  const executionUnified = resolvePaidProUnifiedSurfaceCorpus();
+  if (
+    executionUnified &&
+    isPaidProExecutionCorpusSource(executionUnified.source) &&
+    executionUnified.text.length >= PAID_PRO_AUTHORITY_MIN_LEN
+  ) {
+    const visible = executionUnified.text.trim();
+    auditPaidProReviewRenderCorpus(visible);
+    return visible;
+  }
   const partiesForRender = resolvePartiesForReviewRender(args);
   const needsSignerOverlay = paidProReviewRenderNeedsSignerExecutionOverlay({
     deferSignerMetadataRepair: args?.deferSignerMetadataRepair,
@@ -868,25 +917,34 @@ export function resolvePaidProReviewRenderPlain(
   const memoKey = buildPaidProReviewPlainMemoKey(seedForMemo, surface);
   const memoHit = readMemoizedPaidProReviewPlain(memoKey);
   if (memoHit != null && !needsSignerOverlay && !isPaidProPostFinalizeHydratedCorpusLocked()) {
+    if (shouldUsePaidProSourceOfTruthDisplayOnly()) {
+      return (memoHit || "").trim();
+    }
     return finishUserVisiblePlain(
-      shouldUsePaidProSourceOfTruthDisplayOnly()
-        ? memoHit
-        : normalizePaidProOrphanSubsections(memoHit, { source: `${surface}:memo` }).text,
+      normalizePaidProOrphanSubsections(memoHit, { source: `${surface}:memo` }).text,
     );
   }
 
   let rendered: string;
   if (shouldUsePaidProSourceOfTruthDisplayOnly()) {
+    // No signer overlay: authoritative review/copy bytes are the frozen SoT itself.
+    // Presentation projection belongs in HTML helpers, not document-surface plain.
     rendered = tracePaidProQaPassText(
       "resolvePaidProReviewRenderPlain",
       `${surface}:display_only_sot`,
       seedForMemo,
-      () => resolvePaidProAuthoritativeDisplayPlain(args),
+      () =>
+        needsSignerOverlay
+          ? resolvePaidProAuthoritativeDisplayPlain(args)
+          : projectPaidProVisibleTitleDisplayPlain(getPaidProSourceOfTruthText().trim(), {
+              intakeText: args?.intakeText ?? null,
+              fallbackTitle: args?.draft?.title ?? null,
+            }),
     );
     logPostFreezeCorpusDrift({
       surface: "paid_pro_review_render",
       renderedText: rendered,
-      mutationSource: "signer_identity_apply",
+      mutationSource: needsSignerOverlay ? "signer_identity_apply" : "unknown",
     });
     logExecutionBlockLocation(rendered, "paid_pro_review_render");
     logExecutionBlockCount(rendered, "paid_pro_review_render");
@@ -919,6 +977,7 @@ export function resolvePaidProReviewRenderPlain(
   if (!needsSignerOverlay) {
     writeMemoizedPaidProReviewPlain(memoKey, rendered);
   }
+  // Apply display-only prep (title opening repair, etc.) while keeping SoT bytes immutable in store.
   const visible = finishUserVisiblePlain(rendered);
   if (visible.length >= 200 && hasPaidProSourceOfTruth()) {
     auditPaidProReviewRenderCorpus(visible);

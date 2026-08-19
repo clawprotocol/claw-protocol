@@ -255,7 +255,7 @@ describe("post-generation signer setup party guard", () => {
       PAID_PRO_SIGNER_DETAILS_INCOMPLETE_CTA,
     );
     expect(gated.complete).toBe(false);
-    expect(gated.blockerMessage).toContain("signature blocks, signer roles, and signing invitations");
+    expect(gated.blockerMessage).toContain("reviewer only");
     expect(gated.ctaLabel).toBe(PAID_PRO_SIGNER_DETAILS_INCOMPLETE_CTA);
   });
 
@@ -335,10 +335,10 @@ describe("post-generation signer setup party guard", () => {
       "This agreement was drafted for 4 legal parties.",
     );
     expect(formatSignerSetupBeyondGeneratedWarningBody()).toContain(
-      "regenerate the agreement so the agreement text",
+      "contracting party",
     );
     expect(formatSignerSetupBeyondGeneratedWarning(2)).toContain(
-      "review flow, signature blocks, signer roles, and signing invitations",
+      "reviewer only",
     );
   });
 });

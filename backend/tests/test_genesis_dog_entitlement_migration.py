@@ -1,4 +1,4 @@
-"""Migration/backfill safety for genesis_dog_entitlements dual-read transition."""
+"""Migration inventory for retired Genesis create grants (dry-run only; no irreversible writes)."""
 
 from __future__ import annotations
 
@@ -8,11 +8,15 @@ import pytest
 
 from backend.affiliates.genesis_referral_service import create_genesis_affiliate
 from backend.economics.store import get_economics_store, reset_economics_store_for_tests
-from backend.usage_economics.commercial_entitlement import resolve_commercial_entitlement
+from backend.usage_economics.commercial_entitlement import (
+    AFFILIATE_STATUS_GENESIS,
+    STATE_NONE,
+    resolve_commercial_entitlement,
+)
 from backend.usage_economics.genesis_dog_entitlement import (
     GRANT_SOURCE_ADMIN,
-    GRANT_SOURCE_LEGACY_AFFILIATE,
     GRANT_SOURCE_LEGACY_MIGRATION,
+    GenesisCreateGrantIssuanceRetired,
     backfill_legacy_affiliate_grants,
     get_entitlement,
     grant_entitlement,
@@ -57,7 +61,6 @@ def _aff(eco, uid: str, *, status: str = "active") -> None:
 
 def test_migrations_are_additive_via_init_schema(isolated_mig):
     _eco, usage = isolated_mig
-    # Tables/columns from 005/006 must exist after init_schema.
     with usage._conn() as con:  # noqa: SLF001
         tables = {
             r[0]
@@ -71,11 +74,15 @@ def test_migrations_are_additive_via_init_schema(isolated_mig):
         assert "guest_temp" in cols
 
 
-def test_dry_run_backfill_precise_counts_no_writes(isolated_mig):
+def test_dry_run_backfill_precise_counts_no_writes(isolated_mig, monkeypatch):
     eco, _usage = isolated_mig
     _aff(eco, "mig-a")
     _aff(eco, "mig-b")
+    # Seed an existing legacy row without product grant issuance.
+    monkeypatch.setenv("CLAW_ALLOW_GENESIS_CREATE_GRANT_ISSUANCE", "1")
     grant_entitlement(user_id="mig-b", granted_by="ops", grant_source=GRANT_SOURCE_ADMIN)
+    monkeypatch.delenv("CLAW_ALLOW_GENESIS_CREATE_GRANT_ISSUANCE", raising=False)
+
     preview = preview_legacy_affiliate_backfill()
     assert preview["dry_run"] is True
     assert preview["active_affiliates"] == 2
@@ -84,43 +91,66 @@ def test_dry_run_backfill_precise_counts_no_writes(isolated_mig):
     assert preview["skipped"] == 1
     assert preview["inserted"] == 0
     assert get_entitlement("mig-a") is None
+
     dry = backfill_legacy_affiliate_grants(dry_run=True)
     assert dry["inserted"] == 0
+    assert dry["dry_run"] is True
     assert get_entitlement("mig-a") is None
 
 
-def test_backfill_idempotent_and_preserves_access(isolated_mig):
+def test_apply_backfill_retired_reports_inventory_without_create_grants(isolated_mig):
     eco, _usage = isolated_mig
-    _aff(eco, "mig-keep")
-    # Pre-backfill dual-read keeps access.
-    active, src, _ = resolve_genesis_dog_access("mig-keep")
-    assert active is True
-    assert src == GRANT_SOURCE_LEGACY_AFFILIATE
-    first = backfill_legacy_affiliate_grants(granted_by="script")
-    assert first["inserted"] == 1
-    row = get_entitlement("mig-keep")
-    assert row is not None
-    assert row["grant_source"] == GRANT_SOURCE_LEGACY_MIGRATION
-    assert resolve_commercial_entitlement("org:user-mig-keep")["state"] == "genesis"
-    second = backfill_legacy_affiliate_grants(granted_by="script")
-    assert second["inserted"] == 0
-    assert second["skipped"] >= 1
+    uid = "mig-keep"
+    _aff(eco, uid)
+
+    # Affiliate commission status remains; create access stays False.
+    active, src, row = resolve_genesis_dog_access(uid)
+    assert active is False
+    assert src == "none"
+    assert row is None
+
+    preview = preview_legacy_affiliate_backfill()
+    assert uid in preview["would_insert_user_ids"]
+
+    applied = backfill_legacy_affiliate_grants(granted_by="script", dry_run=False)
+    assert applied.get("issuance_retired") is True
+    assert applied["inserted"] == 0
+    assert get_entitlement(uid) is None
+
+    decision = resolve_commercial_entitlement(f"org:user-{uid}")
+    assert decision["state"] == STATE_NONE
+    assert decision["affiliate_status"] == AFFILIATE_STATUS_GENESIS
+    assert decision["can_create_persisted_agreement"] is False
+    assert decision.get("legacy_genesis_create_grant") is None
+
+    with pytest.raises(GenesisCreateGrantIssuanceRetired):
+        grant_entitlement(
+            user_id=uid, granted_by="script", grant_source=GRANT_SOURCE_LEGACY_MIGRATION
+        )
 
 
-def test_revoked_entitlement_overrides_active_affiliate_and_skips_backfill(isolated_mig):
+def test_revoked_entitlement_overrides_active_affiliate_and_skips_backfill(
+    isolated_mig, monkeypatch
+):
     eco, _usage = isolated_mig
     uid = "mig-revoked"
     _aff(eco, uid)
+    monkeypatch.setenv("CLAW_ALLOW_GENESIS_CREATE_GRANT_ISSUANCE", "1")
+    grant_entitlement(user_id=uid, granted_by="ops", grant_source=GRANT_SOURCE_ADMIN)
+    monkeypatch.delenv("CLAW_ALLOW_GENESIS_CREATE_GRANT_ISSUANCE", raising=False)
     revoke_entitlement(user_id=uid, revoked_by="ops", reason="deny_customer")
+
     active, src, row = resolve_genesis_dog_access(uid)
     assert active is False
     assert src == "none"
     assert row is not None
+    assert row["status"] == "revoked"
+
     preview = preview_legacy_affiliate_backfill()
     assert uid not in preview["would_insert_user_ids"]
     assert preview["skipped_revoked_or_expired"] >= 1
-    applied = backfill_legacy_affiliate_grants(granted_by="script")
+
+    applied = backfill_legacy_affiliate_grants(granted_by="script", dry_run=False)
     assert get_entitlement(uid)["status"] == "revoked"
-    assert applied["inserted"] == 0 or uid not in (
-        preview_legacy_affiliate_backfill().get("would_insert_user_ids") or []
-    )
+    assert applied["inserted"] == 0
+    assert applied.get("issuance_retired") is True

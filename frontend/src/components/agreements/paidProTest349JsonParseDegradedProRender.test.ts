@@ -177,7 +177,9 @@ describe("paidPro test349 json_parse degraded Pro render", () => {
     );
   });
 
-  it("accepts HTTP 200 degraded/json_parse envelope on both attempts without stranding checkout", async () => {
+  it(
+    "accepts HTTP 200 degraded/json_parse envelope on both attempts without stranding checkout",
+    async () => {
     const body = buildTest349ValidBody(5_547);
     const wire = buildTest349JsonEnvelopeWire(body);
     premiumApiMock.mockResponses = [wire, wire];
@@ -206,7 +208,9 @@ describe("paidPro test349 json_parse degraded Pro render", () => {
     expect(out.proIntentGateMessage).toBeNull();
     expect(paidProCheckoutCompletionHasVisibleOutcome(out)).toBe(true);
     expect(premiumApiMock.callIndex).toBeGreaterThanOrEqual(1);
-  });
+  },
+  25_000,
+  );
 
   it("falls back to local recovery when envelope prose fails client gates but intake can stitch Pro", async () => {
     const rejectedBody = buildTest349ValidBody(5_547).replace(

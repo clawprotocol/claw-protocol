@@ -174,7 +174,9 @@ describe("TEST429 — four-party North Star foundational recital, notice, tail, 
     const opening = openingRecitalSlice(sot);
     if (opening.length >= 80) {
       expect(opening).toMatch(/\bamong\b/i);
-      expect((opening.match(/CONSULTING AND IMPLEMENTATION AGREEMENT/gi) ?? []).length).toBe(1);
+      // Title line + "This … Agreement" recital both name the instrument — count only
+      // standalone title lines, not every phrase occurrence in the opening sentence.
+      expect((opening.match(/^\s*CONSULTING AND IMPLEMENTATION AGREEMENT\s*$/gim) ?? []).length).toBe(1);
     }
     expect(countMiscellaneousSections(sot)).toBe(1);
     expect(countSignaturesFollowMarkers(sot)).toBeLessThanOrEqual(1);

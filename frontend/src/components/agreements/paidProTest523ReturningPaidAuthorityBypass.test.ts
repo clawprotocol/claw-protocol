@@ -228,6 +228,8 @@ describe("TEST523 — returning paid create bypasses removed after validation re
     });
     expect(authority!.contentReady).toBe(true);
     expect(authority!.renderAllowed).toBe(true);
-    expect(authority!.shellTitle).toBe("Agreement ready");
+    // Product copy contract: paid Pro review shell uses "Agreement draft ready"
+    // (see PAID_PRO_REVIEW_SHELL_TITLE / paidProReviewUxCopy).
+    expect(authority!.shellTitle).toBe("Draft created—review recommended");
   });
 });

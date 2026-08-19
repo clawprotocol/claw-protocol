@@ -66,13 +66,26 @@ const TOP_LEVEL_HEADING_RE = /^(\d{1,2})\.\s+(?!\d+\.\d)(.+)$/;
 const MAX_REPAIRABLE_MISSING_PARENTS = 2;
 const MAX_REPAIRABLE_MISSING_INTERMEDIATES = 4;
 
+/**
+ * Count true same-line heading/body glue ("1. Scope. White-label deployment…").
+ * Do not treat a normal multi-line section block (heading line + body lines) as a collapse —
+ * that historically disabled substantive warn-only freeze and false-rejected long Pro corpora.
+ */
 function countRemainingHeadingBodyCollapses(text: string): number {
   return classifyPaidProDocumentBlocks(text).filter((block) => {
     if (block.kind !== "main_section_heading") return false;
-    const remainder = block.block.slice(block.firstLine.length).trim();
-    return Boolean(
-      remainder && !isPaidProNumberedSectionHeadingLine(remainder.split("\n")[0]?.trim() ?? ""),
-    );
+    const first = block.firstLine.trim();
+    // Period-glue: short title then body sentence on the same line.
+    if (/^\d+\.\s+(?!\d+\.\d)[^.\n]{2,80}?\.\s+[A-Z][\s\S]{8,}$/.test(first)) return true;
+    // Space-glue with a clear body sentence starter still on the heading line.
+    if (
+      /^\d+\.\s+(?!\d+\.\d).{3,80}?\s+(?:The|This|Each|Either|Client|Provider|Service\s+Provider|Upon|Unless|If|When|During|Within)\b/.test(
+        first,
+      )
+    ) {
+      return true;
+    }
+    return false;
   }).length;
 }
 

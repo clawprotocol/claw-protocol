@@ -97,13 +97,19 @@ export function isDegradedJsonParseWithoutSubstantiveServerFull(args: {
   const outcome = (args.generationOutcome || "").trim().toLowerCase();
   if (outcome !== "degraded") return false;
   if (!isNonfatalGenerationFailureCode(args.failureCode)) return false;
+  // json_parse degrades structured intelligence metadata only — a long document_text alias
+  // promoted client-side into server_full must not masquerade as substantive server_full
+  // when the original wire had no server_full (TEST434/437).
+  if ((args.failureCode || "").trim() === "json_parse") return true;
   const serverFullLen = (args.wireServerFullDocumentText || "").trim().length;
   if (serverFullLen >= PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN) return false;
   const wireLen =
     args.wireAuthoritativeBodyLen ??
     Math.max(serverFullLen, (args.wireDocumentText || "").trim().length);
   if (wireLen >= PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN) return false;
-  return serverFullLen === 0 && wireLen === 0;
+  // Short contaminated aliases still count as "no substantive server full" — only
+  // bodies at/above PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN are substantive.
+  return true;
 }
 
 /** A paid body has the required commercial sections (services/IP/term/governing-law/signature). */

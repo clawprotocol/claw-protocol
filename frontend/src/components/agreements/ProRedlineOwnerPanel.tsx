@@ -196,7 +196,7 @@ export function ProRedlineOwnerPanel(props: {
         <h2 id="pro-redline-heading" className="text-sm font-semibold tracking-tight text-slate-100">
           Review changes
         </h2>
-        <span className="text-[10px] font-medium uppercase tracking-wide text-slate-500">Change comparison</span>
+        <span className="text-[10px] font-medium uppercase tracking-wide text-slate-500">Redline comparison</span>
       </div>
       <p className="mt-1 text-xs leading-relaxed text-slate-500 sm:text-sm">
         LawDog shows only what changed from your uploaded file or import. No AI legal review is applied.
@@ -286,33 +286,48 @@ export function ProRedlineOwnerPanel(props: {
         </button>
       </div>
 
-      {pending && pendingSourceText.length >= 200 && pendingRevisedText.length >= 200 ? (
+      {pending ? (
         <div className="mt-5 border-t border-slate-800/80 pt-4">
-          <SourceComparisonReviewPanel
-            agreementId={agreementId}
-            sourceText={pendingSourceText}
-            revisedText={pendingRevisedText}
-            extractionState={{ ok: true }}
-            onAcceptChanges={async () => {
-              setBusy("accept");
-              setMsg(null);
-              try {
-                const r = await postProRedlineAcceptImport(agreementId);
-                if (!r.ok || !r.draft) setMsg(r.error || "Could not accept.");
-                else {
-                  onDraftReplaced(r.draft);
-                  const vn = r.version_number;
-                  setMsg(
-                    typeof vn === "number" ? `Imported version accepted (version ${vn}).` : "Imported version accepted.",
-                  );
-                }
-              } finally {
-                setBusy(null);
-              }
-            }}
-            disabled={busy !== null}
-          />
+          {pendingSourceText.length >= 200 && pendingRevisedText.length >= 200 ? (
+            <SourceComparisonReviewPanel
+              agreementId={agreementId}
+              sourceText={pendingSourceText}
+              revisedText={pendingRevisedText}
+              extractionState={{ ok: true }}
+              disabled={busy !== null}
+            />
+          ) : (
+            <p className="text-xs text-amber-200/90">
+              Import pending — compare snapshots are still loading. You can accept or reject the imported version now.
+            </p>
+          )}
           <div className="mt-3 flex flex-wrap gap-2">
+            <button
+              type="button"
+              className="rounded-lg bg-emerald-600/90 px-3 py-2 text-xs font-semibold text-emerald-950 hover:bg-emerald-500 disabled:opacity-50 sm:text-sm"
+              disabled={busy !== null}
+              onClick={async () => {
+                setBusy("accept");
+                setMsg(null);
+                try {
+                  const r = await postProRedlineAcceptImport(agreementId);
+                  if (!r.ok || !r.draft) setMsg(r.error || "Could not accept.");
+                  else {
+                    onDraftReplaced(r.draft);
+                    const vn = r.version_number;
+                    setMsg(
+                      typeof vn === "number"
+                        ? `Imported version accepted (version ${vn}).`
+                        : "Imported version accepted.",
+                    );
+                  }
+                } finally {
+                  setBusy(null);
+                }
+              }}
+            >
+              Accept imported version
+            </button>
             <button
               type="button"
               className="rounded-lg border border-slate-600 px-3 py-2 text-xs font-semibold text-slate-200 hover:bg-slate-900 disabled:opacity-50 sm:text-sm"
@@ -336,8 +351,6 @@ export function ProRedlineOwnerPanel(props: {
             </button>
           </div>
         </div>
-      ) : pending ? (
-        <p className="mt-4 text-xs text-amber-200/90">Import pending — waiting for readable source text snapshots.</p>
       ) : (uploadedSource?.text ?? "").trim().length >= 200 && currentDraftText.length >= 200 ? (
         <div className="mt-5 border-t border-slate-800/80 pt-4">
           <SourceComparisonReviewPanel

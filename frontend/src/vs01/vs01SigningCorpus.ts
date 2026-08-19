@@ -6,7 +6,6 @@ import type { AgreementDraft } from "../agreement/agreementTypes";
 import type { AgreementVs01BridgeSession } from "../launch/simpleProduct/agreementToVs01SigningBridge";
 import { SEND_HANDOFF_AUTHORITATIVE_MIN_LEN } from "../components/agreements/paidProAuthorityConstants";
 import { pickAuthoritativePlainForSendHandoff } from "../components/agreements/sendHandoffAuthoritativeCorpus";
-import { GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN } from "../components/agreements/simpleProFinalReviewCorpus";
 import { stripStaleExecutionPlacementCorpusCopy } from "../components/agreements/guidedDealCompletion/guidedCorpusLineRepairs";
 import {
   corpusHasWitnessBlock,
@@ -50,7 +49,12 @@ import {
   type PaidProVs01CheckPhase,
 } from "../components/agreements/paidProVs01PhaseGuard";
 
-export const VS01_SIGNING_CORPUS_MIN_LEN = GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN;
+/**
+ * Keep in sync with GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN (1500).
+ * Literal avoids circular-init leaving this export undefined (which made
+ * guidedSigningHandoffTrusted always fail and prefer generic handoff_corpus).
+ */
+export const VS01_SIGNING_CORPUS_MIN_LEN = 1500;
 /** Preferred final guided Pro corpus length (test59 / full premium snapshot). */
 export const VS01_CORPUS_PREFERRED_MIN_LEN = 2500;
 /** Short preview / starter bodies must never drive guided Pro VS01 seeding. */
@@ -420,14 +424,20 @@ function resolveExplicitVs01AgreementCorpus(
     (witnessRequirement.requiresWitness && !hasWitnessBlock) ||
     !hasBySignatureLines
   ) {
+    // Not a clean allow — let the full resolver emit precise block/rebuild outcomes.
     return null;
   }
 
   const hash = fingerprintAgreementBody(corpus);
   const allowed = !premiumInProgress;
+  const handoffSource = args.guidedSigningHandoff?.source;
+  const mappedSource =
+    handoffSource && GUIDED_VS01_HANDOFF_ALLOWED_SOURCES.has(handoffSource)
+      ? mapHandoffSourceToFinalSource(handoffSource)
+      : "handoff_corpus";
   return {
     corpus,
-    source: "handoff_corpus",
+    source: mappedSource,
     len: corpus.length,
     hash,
     matchesFreeHash: false,
@@ -492,18 +502,37 @@ export function resolveFinalVs01CorpusOrBlock(
       premiumCorpusInProgress: premiumInProgress,
       paidProAuthoritative: guidedPro && Boolean(args.premiumAccepted || args.acceptedAuthoritativePlain?.trim()),
       hasAuthoritativeSigningSnapshot: Boolean(signingSnapshot?.corpus?.trim()),
-      guidedSigningHandoffActive: handoffCorpusLen >= GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN,
+      guidedSigningHandoffActive: handoffCorpusLen >= VS01_SIGNING_CORPUS_MIN_LEN,
       signaturePreparationRequested: args.signaturePreparationRequested,
       prepareSignatureLinksRequested: args.prepareSignatureLinksRequested,
     });
   if (!shouldRunPaidProVs01CorpusChecks(vs01Phase)) {
+    const agreementLen = (args.agreementCorpusText ?? "").trim().length;
+    const acceptedLen = (args.acceptedAuthoritativePlain ?? "").trim().length;
+    // When a concrete corpus (or accepted Pro latch) is already in hand, evaluate it —
+    // do not strand guided/VS01 gates on starter_preview deferral. Defer only while
+    // waiting with no evaluable body (premium_wait / empty first-review).
+    const shouldEvaluateNow =
+      handoffCorpusLen >= VS01_SIGNING_CORPUS_MIN_LEN ||
+      agreementLen > 0 ||
+      acceptedLen >= VS01_SIGNING_CORPUS_MIN_LEN ||
+      Boolean(args.premiumAccepted) ||
+      Boolean(getAcceptedPremiumCanonicalCorpus());
+    if (!shouldEvaluateNow) {
+      return buildDeferredVs01Resolution({
+        premiumInProgress,
+        premiumComplete,
+        signerCount,
+        blockReason: `vs01_checks_deferred:${vs01Phase}`,
+      });
+    }
     const explicit = resolveExplicitVs01AgreementCorpus(
       args,
       signerCount,
       premiumInProgress,
       premiumComplete,
     );
-    if (explicit) {
+    if (explicit?.allowed) {
       logVs01CorpusGateSelectedFinal({
         source: explicit.source,
         len: explicit.len,
@@ -514,12 +543,8 @@ export function resolveFinalVs01CorpusOrBlock(
       });
       return explicit;
     }
-    return buildDeferredVs01Resolution({
-      premiumInProgress,
-      premiumComplete,
-      signerCount,
-      blockReason: `vs01_checks_deferred:${vs01Phase}`,
-    });
+    // Fall through to the full resolver for short/free-hash blocks, witness rebuild,
+    // paidPro SoT preference, and missing-execution diagnostics.
   }
   const snapshotCorpus = signingSnapshot?.corpus?.trim() ?? "";
   if (guidedPro && snapshotCorpus.length >= VS01_SIGNING_CORPUS_MIN_LEN) {

@@ -161,6 +161,7 @@ import {
   PREMIUM_NETWORK_LOCAL_RECOVERY_RENDER_SOURCE,
 } from "./premiumNetworkRecoveryLocalDraft";
 import { previewPostCheckoutRecoverySotCommit } from "./paidProPostCheckoutRecoveryAuthority";
+import { countOperativeIfToNoticeStanzas } from "./paidProPartyNoticeDetails";
 import {
   DETERMINISTIC_PRO_FALLBACK_REASON,
   logDeterministicProFallbackDecision,
@@ -221,6 +222,16 @@ import {
   resolveCanonicalPartyIdentitiesFromSources,
 } from "./canonicalPartyIdentityResolver";
 import { applyAcceptedProCorpusSafeDisplay } from "./acceptedProCorpusSafeDisplay";
+import {
+  draftQualityClientTraceEnabled,
+  logDraftQualityClientTrace,
+  newDraftQualityClientTrace,
+  recordDraftQualityClientStage,
+} from "./draftQualityStageTrace";
+import {
+  evaluatePreSoTSemanticInsertGate,
+  logPreSoTSemanticInsertResult,
+} from "./preSoTSemanticInsertValidation";
 import {
   brandLicensingFreezeAuthorityPasses,
 } from "./paidProBrandLicensingFreezeAuthority";
@@ -357,6 +368,8 @@ export type PremiumCompletionResult = {
     staleOrFingerprintMismatch: boolean;
     premiumPipelineSource: PremiumRenderSource;
   };
+  /** Wire generation_outcome echo for authoritative-commit gating (ok|degraded|…). */
+  generationOutcome?: string | null;
   /** When the API returned 200 with a non-model structured fallback (checkout still valid). */
   serverGenerationDegraded?: { code: string; message: string } | null;
   /** Transient browser/network failure during premium-full-draft — free draft must stay visible; retry in modal. */
@@ -1907,6 +1920,30 @@ async function runPremiumCompletionInner(
     const premiumServerModelMs = Math.round(
       (typeof performance !== "undefined" ? performance.now() : Date.now()) - premiumRequestStartedAt,
     );
+    const dqClientTrace = draftQualityClientTraceEnabled()
+      ? newDraftQualityClientTrace(
+          String(
+            (fullResp.ok &&
+              (fullResp.result as PremiumFullDraftResult & { draft_quality_trace?: { trace_id?: string } })
+                .draft_quality_trace?.trace_id) ||
+              input.agreementGenerationId ||
+              "",
+          ),
+        )
+      : null;
+    if (dqClientTrace && fullResp.ok) {
+      const serverTrace = (fullResp.result as PremiumFullDraftResult).draft_quality_trace;
+      void recordDraftQualityClientStage(
+        dqClientTrace,
+        "post_server_wire",
+        (fullResp.result.server_full_document_text || fullResp.result.document_text || "").trim(),
+        {
+          generationOutcome: (fullResp.result.generation_outcome || "").trim(),
+          repairLen: (fullResp.result.server_repair_document_text || "").trim().length,
+          hasServerTrace: Boolean(serverTrace),
+        },
+      );
+    }
     const wireMeta = fullResp.ok
       ? {
           responseBodyLen: JSON.stringify(fullResp.result).length,
@@ -2142,6 +2179,10 @@ async function runPremiumCompletionInner(
         }
       }
       let doc = (effectiveFull.document_text || "").trim();
+      // Prefer the pre-promotion authoritative resolution when polish/alias paths leave a shorter doc.
+      if (pipelineNormalizedAuthoritativeText.trim().length > doc.length) {
+        doc = pipelineNormalizedAuthoritativeText.trim();
+      }
       if (premiumWireBodyRejectedForDevContextLeak) {
         doc = "";
       }
@@ -2250,8 +2291,17 @@ async function runPremiumCompletionInner(
         }
         const structureStartedAt =
           typeof performance !== "undefined" ? performance.now() : Date.now();
+        // Thin-services expansion must not promote short json_parse/degraded wire past the
+        // paid authoritative floor — gate on wire length, not post-expansion doc length.
+        const thinExpandWireLen = Math.max(
+          lastWireAuthoritativeBodyLen,
+          wireServerFullDocumentText.length,
+          wireDocumentText.length,
+          pipelineNormalizedAuthoritativeText.trim().length,
+        );
         if (
           isCommercialServicesIntake(preGateIntake) &&
+          thinExpandWireLen >= PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN &&
           doc.length < PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN &&
           (doc.length < 2_500 ||
             countNumberedAgreementSections(doc) <= MUTUAL_CONSULTING_LIGHTWEIGHT_SECTION_CEILING)
@@ -2323,6 +2373,15 @@ async function runPremiumCompletionInner(
               ? wireGenerationOutcomeOnWire
               : legacyGenerationOutcomeFromClassification(classified),
         };
+        // Restore normalized authoritative prose when local polish/domain guards catastrophically
+        // shrink a substantive json_parse / alternate-field wire body.
+        const normalizedAuthoritative = pipelineNormalizedAuthoritativeText.trim();
+        if (
+          normalizedAuthoritative.length >= PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN &&
+          doc.length < Math.floor(normalizedAuthoritative.length * 0.55)
+        ) {
+          doc = normalizedAuthoritative;
+        }
         if (
           wireFailureCodeOnWire === "json_parse" &&
           doc.length >= PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN
@@ -2333,7 +2392,10 @@ async function runPremiumCompletionInner(
             server_generation_failure_code: wireFailureCodeOnWire,
             generation_outcome: (wireGenerationOutcomeOnWire || "degraded") as PremiumFullDraftResult["generation_outcome"],
           }).wire as PremiumFullDraftResult;
-          pipelineNormalizedAuthoritativeText = doc;
+          // Never let a shorter polished doc clobber a longer wire-normalized authority.
+          if (doc.length >= Math.floor(normalizedAuthoritative.length * 0.85)) {
+            pipelineNormalizedAuthoritativeText = doc;
+          }
           syncPremiumWireMetadataFromEffective(effectiveFull);
         }
       }
@@ -2577,11 +2639,14 @@ async function runPremiumCompletionInner(
             failureCode: effectiveFull.server_generation_failure_code,
             accRejected: true,
           });
+        // Use the *original* wire server_full, not the post-promotion alias. Promoting a
+        // mid-length json_parse `document_text` into `server_full_document_text` must not
+        // suppress brand-licensing structural retry (TEST448: 8.5k degraded → 28k retry).
         const brandLicensingDegradedJsonParseRetry =
           intakeDescribesBrandLicensingDistributionManufacturingStack(rawForSoT || rawIntake) &&
           String(effectiveFull.generation_outcome || "").trim() === "degraded" &&
           String(effectiveFull.server_generation_failure_code || "").trim() === "json_parse" &&
-          !(wireServerFullDocumentText || "").trim() &&
+          originalWireServerFullDocumentText.length < SUBSTANTIVE_SERVER_DRAFT_MIN_LEN &&
           (doc || "").trim().length < SUBSTANTIVE_SERVER_DRAFT_MIN_LEN;
         if (skipStructuralRetry) {
           paidProPerfRecordInstant("json_parse_degraded_handling", 0, {
@@ -2605,11 +2670,15 @@ async function runPremiumCompletionInner(
             wireAuthoritativeBodyLen,
             (wireDocumentText || "").trim().length,
           ) >= SUBSTANTIVE_SERVER_DRAFT_MIN_LEN;
+        const degradedJsonParseClientRejected =
+          !acc0.ok &&
+          (effectiveFull.generation_outcome || "").trim() === "degraded" &&
+          (effectiveFull.server_generation_failure_code || "").trim() === "json_parse";
         if (
           (brandLicensingDegradedJsonParseRetry || !acc0.ok) &&
           structuralRetryEnabled &&
           !isLongCommerciallyUsablePremiumBody(doc.length) &&
-          !hasSubstantiveAuthoritativeWireBody &&
+          (!hasSubstantiveAuthoritativeWireBody || degradedJsonParseClientRejected) &&
           (!skipStructuralRetry || brandLicensingDegradedJsonParseRetry)
         ) {
           const preStructuralRetryDoc = doc;
@@ -2994,16 +3063,18 @@ async function runPremiumCompletionInner(
         (pipelineNormalizedAuthoritativeText.length >= SEND_HANDOFF_AUTHORITATIVE_MIN_LEN
           ? pipelineNormalizedAuthoritativeText
           : "");
+      // Gate on original wire lengths only — never include post-expansion `doc` length,
+      // which would let thin-services prep promote a short degraded body past the floor.
       const degradedJsonParseWithoutSubstantiveServerFull =
         isDegradedJsonParseWithoutSubstantiveServerFull({
           generationOutcome: wireGenerationOutcomeOnWire,
           failureCode: wireFailureCodeOnWire,
-          wireServerFullDocumentText: wireServerFullDocumentText,
+          wireServerFullDocumentText: originalWireServerFullDocumentText,
           wireDocumentText: wireDocumentText,
           wireAuthoritativeBodyLen: Math.max(
             wireAuthoritativeBodyLen,
+            originalWireServerFullDocumentText.length,
             pipelineNormalizedAuthoritativeText.length,
-            (doc || "").trim().length,
           ),
         });
       const serverFullDoc =
@@ -3012,6 +3083,7 @@ async function runPremiumCompletionInner(
       const serverHardFailureForWin =
         serverFailureCodeForWin === "airlock_blocked" || serverFailureCodeForWin === "dev_context_leak";
       const serverFullDocumentAuthoritative =
+        !degradedJsonParseWithoutSubstantiveServerFull &&
         authoritativeServerFullOnWire.length >= SERVER_FULL_DOCUMENT_AUTHORITATIVE_MIN_LEN &&
         serverFullDocumentWinsOverClientGates({
           serverFullDocumentLen: authoritativeServerFullOnWire.length,
@@ -3316,13 +3388,22 @@ async function runPremiumCompletionInner(
           agreement_family: familyDecision.family,
         });
         winningPremiumBodyText = doc;
-        const freezeSource =
-          degradedJsonParseWithoutSubstantiveServerFull && authoritativeServerFullOnWire.length === 0
+        // json_parse with empty server_full_document_text is a degraded wire even when
+        // document_text is long — do not mislabel it as authoritative server_full_draft
+        // (pipelineNormalizedAuthoritativeText can still populate authoritativeServerFullOnWire).
+        const jsonParseDegradedWireWithoutServerFull =
+          String(wireFailureCodeOnWire || "").trim() === "json_parse" &&
+          originalWireServerFullDocumentText.length < PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN;
+        const freezeSource = jsonParseDegradedWireWithoutServerFull
+          ? "server_full_draft_degraded"
+          : degradedJsonParseWithoutSubstantiveServerFull &&
+              originalWireServerFullDocumentText.length < PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN
             ? "server_full_draft_degraded"
             : usedClientRetry
               ? "server_full_draft_retry"
               : "server_full_draft";
         const wireCorpusForFreeze = (
+          pipelineNormalizedAuthoritativeText ||
           wireServerFullDocumentText ||
           wireDocumentText ||
           (doc || "").trim()
@@ -3381,12 +3462,7 @@ async function runPremiumCompletionInner(
           }
         }
         doc = preparedForFreeze.text;
-        let freezeAcceptedSource: PremiumRenderSource =
-          degradedJsonParseWithoutSubstantiveServerFull && authoritativeServerFullOnWire.length === 0
-            ? "server_full_draft_degraded"
-            : usedClientRetry
-              ? "server_full_draft_retry"
-              : "server_full_draft";
+        let freezeAcceptedSource: PremiumRenderSource = freezeSource;
         let freezeCommit = resolvePaidProFreezeCommitText({
           text: doc,
           source: freezeSource,
@@ -3496,7 +3572,12 @@ async function runPremiumCompletionInner(
             if (vpaidWireFreeze.ok && vpaidWireFreeze.text.length >= SUBSTANTIVE_SERVER_DRAFT_MIN_LEN) {
               doc = vpaidWireDisplay;
               freezeCommit = vpaidWireFreeze;
-              freezeAcceptedSource = usedClientRetry ? "server_full_draft_retry" : "server_full_draft";
+              freezeAcceptedSource =
+                freezeSource === "server_full_draft_degraded" || freezeSource === "server_full_draft_retry"
+                  ? freezeSource
+                  : usedClientRetry
+                    ? "server_full_draft_retry"
+                    : "server_full_draft";
             }
           }
         }
@@ -3505,7 +3586,13 @@ async function runPremiumCompletionInner(
             wireHasSubstantiveServerFullCorpus ||
             wireCorpusForFreeze.length >= SUBSTANTIVE_SERVER_DRAFT_MIN_LEN ||
             originalWireServerFullDocumentText.length >= SUBSTANTIVE_SERVER_DRAFT_MIN_LEN;
-          if (!skipDeterministicRecoveryForSubstantiveWire) {
+          // Known-party placeholder repair already produced an authoritative server body —
+          // keep server_full_draft provenance; do not replace with deterministic recovery.
+          const skipDeterministicRecoveryForPartyPlaceholderRepair = partyPlaceholderRepairAccept;
+          if (
+            !skipDeterministicRecoveryForSubstantiveWire &&
+            !skipDeterministicRecoveryForPartyPlaceholderRepair
+          ) {
             const recovery = previewRecoverPaidProFreezeCandidate({
               draft: mergedForApi,
               intakeText: rawForSoT || rawIntake,
@@ -3567,9 +3654,32 @@ async function runPremiumCompletionInner(
             ) {
               doc = substantiveFreeze.text;
               freezeCommit = substantiveFreeze;
-              freezeAcceptedSource = usedClientRetry ? "server_full_draft_retry" : "server_full_draft";
+              freezeAcceptedSource =
+                freezeSource === "server_full_draft_degraded" || freezeSource === "server_full_draft_retry"
+                  ? freezeSource
+                  : usedClientRetry
+                    ? "server_full_draft_retry"
+                    : "server_full_draft";
             }
           }
+        }
+        if (!freezeCommit.ok && partyPlaceholderRepairAccept) {
+          // Known-party placeholder repair already produced the authoritative server body —
+          // keep server_full_draft provenance instead of structural_recovery replacement.
+          freezeCommit = {
+            ok: true,
+            text: doc,
+            hash: hashPaidProCorpus(doc),
+            rejectReason: null,
+            reviewParties: freezeCommit.reviewParties,
+            parties: freezeCommit.parties,
+          };
+          freezeAcceptedSource =
+            freezeSource === "server_full_draft_degraded" || freezeSource === "server_full_draft_retry"
+              ? freezeSource
+              : usedClientRetry
+                ? "server_full_draft_retry"
+                : "server_full_draft";
         }
         if (!freezeCommit.ok) {
           if (!vPaidAuthoritativeSubstantive && !wireHasSubstantiveServerFullCorpus) {
@@ -3630,39 +3740,76 @@ async function runPremiumCompletionInner(
             !vPaidAuthoritativeSubstantive &&
             intakeDescribesBrandLicensingDistributionManufacturingStack(rawForSoT || rawIntake)
           ) {
-            const structural = buildPaidProStructuralRecoveryBody({
-              intakeText: rawForSoT || rawIntake,
-              draft: mergedForApi,
-            });
-            if (structural.ok) {
-              const structuralPrep = preparePaidProServerDocumentForAcceptance(
-                structural.body,
-                mergedForApi,
-                rawForSoT || rawIntake,
-                { surface: "premium_completion_pipeline:mislabeled_brand_structural_recovery" },
-              );
-              const structuralGate = buildPaidProFreezeCandidate({
-                text: structuralPrep.text,
-                source: "structural_recovery",
+            if (degradedJsonParseWithoutSubstantiveServerFull) {
+              const brandLocal = buildPremiumPostCheckoutLocalRecoveryProDraft({
                 draft: mergedForApi,
-                intakeText: rawForSoT || rawIntake,
-                agreementGenerationId: input.agreementGenerationId ?? null,
-                generationOutcome: (effectiveFull.generation_outcome || "").trim(),
-                surface: "premium_completion_pipeline:mislabeled_brand_structural_recovery",
+                rawIntake: rawForSoT || rawIntake,
+                intakeLower: intakeLowerGlobal,
+                recoverySurface: PREMIUM_DEGRADED_SERVER_LOCAL_RECOVERY_RENDER_SOURCE,
               });
               if (
-                structuralGate.ok &&
-                structuralGate.text.length >= PAID_PRO_RECOVERY_MIN_DISPLAY_LEN &&
-                brandLicensingFreezeAuthorityPasses(
-                  structuralGate.text,
-                  rawForSoT || rawIntake,
-                  mergedForApi,
-                )
+                brandLocal.ok &&
+                brandLocal.body.trim().length >= PAID_PRO_RECOVERY_MIN_DISPLAY_LEN &&
+                countOperativeIfToNoticeStanzas(brandLocal.body) >= 4
               ) {
-                doc = structuralGate.text;
-                freezeCommit = structuralGate;
-                freezeAcceptedSource = "structural_recovery";
-                structuralRecovered = true;
+                const localPrep = preparePaidProServerDocumentForAcceptance(
+                  brandLocal.body,
+                  mergedForApi,
+                  rawForSoT || rawIntake,
+                  { surface: "premium_completion_pipeline:mislabeled_brand_local_recovery" },
+                );
+                const localGate = buildPaidProFreezeCandidate({
+                  text: localPrep.text,
+                  source: PREMIUM_DEGRADED_SERVER_LOCAL_RECOVERY_RENDER_SOURCE,
+                  draft: mergedForApi,
+                  intakeText: rawForSoT || rawIntake,
+                  agreementGenerationId: input.agreementGenerationId ?? null,
+                  generationOutcome: (effectiveFull.generation_outcome || "").trim(),
+                  surface: "premium_completion_pipeline:mislabeled_brand_local_recovery",
+                });
+                if (localGate.ok && localGate.text.length >= PAID_PRO_RECOVERY_MIN_DISPLAY_LEN) {
+                  doc = localGate.text;
+                  freezeCommit = localGate;
+                  freezeAcceptedSource = PREMIUM_DEGRADED_SERVER_LOCAL_RECOVERY_RENDER_SOURCE;
+                  structuralRecovered = true;
+                }
+              }
+            }
+            if (!structuralRecovered && !degradedJsonParseWithoutSubstantiveServerFull) {
+              const structural = buildPaidProStructuralRecoveryBody({
+                intakeText: rawForSoT || rawIntake,
+                draft: mergedForApi,
+              });
+              if (structural.ok) {
+                const structuralPrep = preparePaidProServerDocumentForAcceptance(
+                  structural.body,
+                  mergedForApi,
+                  rawForSoT || rawIntake,
+                  { surface: "premium_completion_pipeline:mislabeled_brand_structural_recovery" },
+                );
+                const structuralGate = buildPaidProFreezeCandidate({
+                  text: structuralPrep.text,
+                  source: "structural_recovery",
+                  draft: mergedForApi,
+                  intakeText: rawForSoT || rawIntake,
+                  agreementGenerationId: input.agreementGenerationId ?? null,
+                  generationOutcome: (effectiveFull.generation_outcome || "").trim(),
+                  surface: "premium_completion_pipeline:mislabeled_brand_structural_recovery",
+                });
+                if (
+                  structuralGate.ok &&
+                  structuralGate.text.length >= PAID_PRO_RECOVERY_MIN_DISPLAY_LEN &&
+                  brandLicensingFreezeAuthorityPasses(
+                    structuralGate.text,
+                    rawForSoT || rawIntake,
+                    mergedForApi,
+                  )
+                ) {
+                  doc = structuralGate.text;
+                  freezeCommit = structuralGate;
+                  freezeAcceptedSource = "structural_recovery";
+                  structuralRecovered = true;
+                }
               }
             }
           }
@@ -3739,9 +3886,14 @@ async function runPremiumCompletionInner(
             renderSource: freezeSource,
           });
           const freezeReject = (freezeCommit.rejectReason || "").trim();
+          const mislabeledJsonParseWithoutWireServerFull =
+            freezeReject === "mislabeled_server_full_without_wire_server_full" ||
+            (degradedJsonParseWithoutSubstantiveServerFull &&
+              originalWireServerFullDocumentText.length < PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN);
           // Simple 2-party services drafts are routinely 4k–10k. Soft freeze rejects must not
           // wipe a finished witness-bearing corpus into empty Retry Pro draft.
           const keepUsableWireDespiteSoftFreezeReject =
+            !mislabeledJsonParseWithoutWireServerFull &&
             doc.trim().length >= PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN &&
             /\bIN WITNESS WHEREOF\b/i.test(doc) &&
             (/duplicate_provision_family/i.test(freezeReject) ||
@@ -3836,7 +3988,12 @@ async function runPremiumCompletionInner(
                 parties: freezeCommit.parties,
               };
             }
-            freezeAcceptedSource = usedClientRetry ? "server_full_draft_retry" : "server_full_draft";
+            freezeAcceptedSource =
+              freezeSource === "server_full_draft_degraded" || freezeSource === "server_full_draft_retry"
+                ? freezeSource
+                : usedClientRetry
+                  ? "server_full_draft_retry"
+                  : "server_full_draft";
             outMerged = stripClientPremiumArtifactBlocksFromDraft({
               ...outMerged,
               premium_full_document_text: doc,
@@ -3869,7 +4026,12 @@ async function runPremiumCompletionInner(
               ) {
                 doc = wireWinFreeze.text;
                 freezeCommit = wireWinFreeze;
-                freezeAcceptedSource = usedClientRetry ? "server_full_draft_retry" : "server_full_draft";
+                freezeAcceptedSource =
+                  freezeSource === "server_full_draft_degraded" || freezeSource === "server_full_draft_retry"
+                    ? freezeSource
+                    : usedClientRetry
+                      ? "server_full_draft_retry"
+                      : "server_full_draft";
               } else {
                 doc = wireDisplayed;
               }
@@ -3894,6 +4056,14 @@ async function runPremiumCompletionInner(
           if (postWitnessCommit.repairs.length > 0) {
             doc = postWitnessCommit.text;
           }
+          // Terminal heading-authority pass — wire restore / freeze retry must not leave
+          // split titles like "Revenue Allocation Among" / "Service Providers" (TEST431).
+          if (detectPaidProSectionHeadingTitleAnomalies(doc).length > 0) {
+            const terminalHeading = applyPaidProSectionHeadingTitleAuthority(doc);
+            if (terminalHeading.repairs.length > 0) {
+              doc = terminalHeading.text;
+            }
+          }
           winningPremiumBodyText = doc;
           if (
             wireHasSubstantiveServerFullCorpus &&
@@ -3910,12 +4080,22 @@ async function runPremiumCompletionInner(
             rawIntake: rawForSoT || rawIntake,
             draft: mergedForApi,
           });
+          // Original wire json_parse/degraded must keep degraded provenance even when a long
+          // document_text was promoted into server_full aliases (serverGenDegraded clears once
+          // the body is usable — freezeAcceptedSource can also be overwritten by wire wins).
+          const originalWireJsonParseDegraded =
+            ((full.generation_outcome || "").trim() === "degraded" &&
+              (full.server_generation_failure_code || "").trim() === "json_parse" &&
+              originalWireServerFullDocumentText.length < PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN) ||
+            (premiumJsonParseDegradedAttemptCount > 0 &&
+              originalWireServerFullDocumentText.length < PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN);
           if (
             freezeAcceptedSource === "structural_recovery" ||
-            freezeAcceptedSource === "deterministic_recovery_freeze_candidate"
+            freezeAcceptedSource === "deterministic_recovery_freeze_candidate" ||
+            freezeAcceptedSource === PREMIUM_DEGRADED_SERVER_LOCAL_RECOVERY_RENDER_SOURCE
           ) {
             premiumRenderSource = freezeAcceptedSource;
-          } else if (serverGenDegraded) {
+          } else if (serverGenDegraded || originalWireJsonParseDegraded) {
             const fc = (effectiveFull.server_generation_failure_code || "").trim();
             if (fc !== "airlock_blocked" && fc !== "dev_context_leak") {
               premiumRenderSource = "server_full_draft_degraded";
@@ -3926,12 +4106,63 @@ async function runPremiumCompletionInner(
             premiumRenderSource = freezeAcceptedSource;
           }
           outMerged = applyAuthoritativeFamilyToDraft(outMerged, familyDecision);
+          // Terminal provenance correction: json_parse degraded must not report as plain
+          // server_full_draft (API normalize may already alias document_text into server_full).
+          if (
+            premiumRenderSource === "server_full_draft" &&
+            ((full.server_generation_failure_code || "").trim() === "json_parse" ||
+              premiumJsonParseDegradedAttemptCount > 0)
+          ) {
+            premiumRenderSource = "server_full_draft_degraded";
+            freezeAcceptedSource = "server_full_draft_degraded";
+          }
+          // Brand-licensing json_parse wires often lack If-to notice stanzas — prefer the
+          // deterministic local recovery corpus (TEST439 / TEST440 professional floor).
+          if (
+            (premiumRenderSource === "server_full_draft_degraded" ||
+              premiumJsonParseDegradedAttemptCount > 0) &&
+            intakeDescribesBrandLicensingDistributionManufacturingStack(rawForSoT || rawIntake) &&
+            countOperativeIfToNoticeStanzas(doc) < 4
+          ) {
+            const brandLocal = buildPremiumPostCheckoutLocalRecoveryProDraft({
+              draft: mergedForApi,
+              rawIntake: rawForSoT || rawIntake,
+              intakeLower: intakeLowerGlobal,
+              recoverySurface: PREMIUM_DEGRADED_SERVER_LOCAL_RECOVERY_RENDER_SOURCE,
+            });
+            if (
+              brandLocal.ok &&
+              brandLocal.body.trim().length >= PAID_PRO_RECOVERY_MIN_DISPLAY_LEN &&
+              countOperativeIfToNoticeStanzas(brandLocal.body) >= 4
+            ) {
+              doc = brandLocal.body.trim();
+              winningPremiumBodyText = doc;
+              premiumRenderSource = PREMIUM_DEGRADED_SERVER_LOCAL_RECOVERY_RENDER_SOURCE;
+              freezeAcceptedSource = PREMIUM_DEGRADED_SERVER_LOCAL_RECOVERY_RENDER_SOURCE;
+            }
+          }
+          if (
+            originalWireJsonParseDegraded &&
+            originalWireServerFullDocumentText.length < PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN &&
+            premiumRenderSource !== PREMIUM_DEGRADED_SERVER_LOCAL_RECOVERY_RENDER_SOURCE &&
+            (premiumRenderSource === "server_full_draft_degraded" ||
+              premiumRenderSource === "server_full_draft" ||
+              premiumRenderSource === "server_full_draft_retry")
+          ) {
+            winningPremiumBodyText = "";
+            premiumRenderSource = "rejected_paid_corpus";
+            rejectedPaidCorpusDueToClientGates = true;
+            doc = "";
+          }
           if (import.meta.env.DEV) {
             console.info("[premium-render-source]", {
               premiumRenderSource,
               doc_len: doc.length,
               client_retry: usedClientRetry,
               server_gen_degraded: serverGenDegraded,
+              json_parse_attempts: premiumJsonParseDegradedAttemptCount,
+              original_wire_server_full_len: originalWireServerFullDocumentText.length,
+              wire_failure_code: (full.server_generation_failure_code || "").trim(),
             });
           }
           if (import.meta.env.MODE !== "test" && !serverGenDegraded) {
@@ -3982,6 +4213,35 @@ async function runPremiumCompletionInner(
               acceptedFreezeHash: freezeCommit.hash ?? paidProPipelineAcceptedCorpusHash(doc) ?? undefined,
             });
           }
+          // Pre-SoT semantic-insert validation: detect client floors not on server wire / intake.
+          // Observe-by-default (P0); enforce when VITE_PRE_SOT_SEMANTIC_INSERT_GATE=1.
+          const preSoTInsertGate = evaluatePreSoTSemanticInsertGate({
+            serverWireText: originalWireServerFullDocumentText || wireServerFullDocumentText || "",
+            finalFreezeCandidateText: doc,
+            intakeText: rawForSoT || rawIntake,
+          });
+          logPreSoTSemanticInsertResult(preSoTInsertGate);
+          if (preSoTInsertGate.blocked) {
+            logPremiumAcceptanceDecision({
+              accepted: false,
+              reason: "pre_sot_semantic_insert_gate_blocked",
+              bodyLen: doc.length,
+              fatalPlaceholderCount: 0,
+              structuralFatalCount: preSoTInsertGate.findings.length,
+              generationOutcome: (effectiveFull.generation_outcome || "").trim() || "ok",
+              renderSource: premiumRenderSource,
+            });
+            logPremiumCompletionDebug({
+              stage: "pre_sot_semantic_insert_gate_blocked",
+              accepted: false,
+              rejectedReason: preSoTInsertGate.findings.map((f) => f.id).join(","),
+              bodyLen: doc.length,
+            });
+            winningPremiumBodyText = "";
+            premiumRenderSource = "rejected_paid_corpus";
+            proIntentGateMessage =
+              "LawDog blocked freezing this draft because client polish inserted substantive terms not present in the server draft or intake. Tap **Retry Pro draft**, or disable inventing floors in eval mode.";
+          } else {
           paidProPerfSpanStart("post_accept_commit_render");
           freezeAcceptedPremiumBodyForSession(
             input.agreementGenerationId,
@@ -4050,6 +4310,7 @@ async function runPremiumCompletionInner(
             substantiveValidatedLen,
             vPaidAuthoritativeSubstantive,
           });
+          } // end pre-SoT insert gate else (freeze allowed)
         }
       } else {
         const intakeSForGate = (rawForSoT || rawIntake) || "";
@@ -4174,7 +4435,8 @@ async function runPremiumCompletionInner(
           shouldAttemptPreserve &&
           !preserveBlockedByStructuralFatals &&
           brandLicensingPreserveIntake &&
-          !substantiveServerFullNoticeScaffoldingOnlyReject
+          !substantiveServerFullNoticeScaffoldingOnlyReject &&
+          !degradedJsonParseWithoutSubstantiveServerFull
         ) {
           const structural = buildPaidProStructuralRecoveryBody({
             intakeText: intakeSForPreserve,
@@ -4466,7 +4728,7 @@ async function runPremiumCompletionInner(
           source: recoverySource,
         });
         logPremiumCompletionDebug({
-          stage: "premium_degraded_server_local_recovery",
+          stage: "premium_degraded_thin_wire_local_recovery",
           recoveryCandidateEligible: true,
           premiumRenderSource: recoverySource,
           bodyLen: thinLocalRecovery.body.length,
@@ -4646,16 +4908,25 @@ async function runPremiumCompletionInner(
           premiumRenderSource: PREMIUM_NETWORK_LOCAL_RECOVERY_RENDER_SOURCE,
         })
       : null;
-    if (localRecovery.ok && networkRecoveryPreview?.eligible) {
+    // Network path: return a displayable local recovery body even when SoT preview is
+    // ineligible (e.g. duplicate_notice_stanza from generic Client/Developer draft labels).
+    // Checkout can still retry the network call; users must not see an empty Pro surface.
+    if (
+      localRecovery.ok &&
+      localRecovery.body.trim().length >= PAID_PRO_RECOVERY_MIN_DISPLAY_LEN &&
+      (networkRecoveryPreview?.eligible ||
+        !networkRecoveryPreview ||
+        networkRecoveryPreview.blockReason === "duplicate_notice_stanza")
+    ) {
       const recoverySource = PREMIUM_NETWORK_LOCAL_RECOVERY_RENDER_SOURCE;
       if (tierAEnabled) tierADiag.premiumPipelineSource = recoverySource;
       logPremiumCompletionDebug({
         stage: "premium_network_local_recovery",
-        recoveryCandidateEligible: true,
-        rejectedReason: undefined,
+        recoveryCandidateEligible: Boolean(networkRecoveryPreview?.eligible),
+        rejectedReason: networkRecoveryPreview?.blockReason ?? undefined,
         premiumRenderSource: recoverySource,
         bodyLen: localRecovery.body.length,
-        displayPlainLen: networkRecoveryPreview.displayPlainLen,
+        displayPlainLen: networkRecoveryPreview?.displayPlainLen ?? localRecovery.body.length,
       });
       outMerged = stripClientPremiumArtifactBlocksFromDraft({
         ...outMerged,
@@ -4904,6 +5175,63 @@ async function runPremiumCompletionInner(
             lastWireServerFullDocumentLen > 0 ? "present" : "",
         }));
     if (brandLicensingRejectedRecoveryEligible) {
+      const jsonParseDegradedNoWireServerFull = isDegradedJsonParseWithoutSubstantiveServerFull({
+        generationOutcome: lastWireGenerationOutcome,
+        failureCode: serverDegradedHttpMetaForRecovery?.code ?? serverGenerationDegraded?.code ?? null,
+        wireServerFullDocumentText: lastWireServerFullDocumentLen > 0 ? "present" : "",
+      });
+      if (jsonParseDegradedNoWireServerFull) {
+        const intakeLocalRecovery = buildPremiumPostCheckoutLocalRecoveryProDraft({
+          draft: outMerged,
+          rawIntake: intakeForRecovery,
+          intakeLower: intakeLowerGlobal,
+          recoverySurface: PREMIUM_DEGRADED_SERVER_LOCAL_RECOVERY_RENDER_SOURCE,
+        });
+        const intakeRecoveryPreview = intakeLocalRecovery.ok
+          ? previewPostCheckoutRecoverySotCommit({
+              body: intakeLocalRecovery.body,
+              draft: outMerged,
+              intakeText: intakeForRecovery,
+              premiumRenderSource: PREMIUM_DEGRADED_SERVER_LOCAL_RECOVERY_RENDER_SOURCE,
+            })
+          : null;
+        if (intakeLocalRecovery.ok && intakeRecoveryPreview?.eligible) {
+          const recoverySource = PREMIUM_DEGRADED_SERVER_LOCAL_RECOVERY_RENDER_SOURCE;
+          if (tierAEnabled) tierADiag.premiumPipelineSource = recoverySource;
+          logPremiumCompletionDebug({
+            stage: "premium_degraded_server_local_recovery",
+            recoveryCandidateEligible: true,
+            rejectedReason: undefined,
+            premiumRenderSource: recoverySource,
+            bodyLen: intakeLocalRecovery.body.length,
+            displayPlainLen: intakeRecoveryPreview.displayPlainLen,
+            lastClientGate: lastClientGateTrace,
+            note: "brand_json_parse_rejected_local_recovery",
+          });
+          outMerged = stripClientPremiumArtifactBlocksFromDraft({
+            ...outMerged,
+            premium_full_document_text: intakeLocalRecovery.body,
+          });
+          return {
+            premiumDraft: outMerged,
+            premiumParties,
+            recipientCandidates,
+            winningPremiumBodyText: intakeLocalRecovery.body,
+            premiumRenderSource: recoverySource,
+            premiumReview,
+            premiumFinalizeAudit,
+            premiumReviewRoute,
+            staleIntakeOrGeneration: false,
+            agreementGenerationId: input.agreementGenerationId,
+            premiumRequestIntakeFingerprint: input.premiumRequestIntakeFingerprint,
+            founderDetailsGateMessage: null,
+            proIntentGateMessage: null,
+            serverGenerationDegraded: serverGenerationDegraded ?? serverDegradedHttpMetaForRecovery,
+            premiumDegradedServerLocalRecovery: true,
+            tierADiagnostic: tierADiag,
+          };
+        }
+      }
       const brandStructural = buildPaidProStructuralRecoveryBody({
         intakeText: intakeForRecovery,
         draft: outMerged,
@@ -5046,7 +5374,7 @@ async function runPremiumCompletionInner(
       (serverDegradedHttpMetaForRecovery?.code === "json_parse" ||
         serverGenerationDegraded?.code === "json_parse" ||
         premiumJsonParseDegradedAttemptCount >= 1);
-    if (rejectedPaidCorpusDueToClientGates && substantiveServerFullOnWire) {
+    if (rejectedPaidCorpusDueToClientGates && substantiveServerFullOnWire && !jsonParseClientRejected) {
       if (tierAEnabled) tierADiag.premiumPipelineSource = premiumRenderSource;
       logDeterministicProFallbackDecision(
         DETERMINISTIC_PRO_FALLBACK_REASON.noCanonicalFreezeAfterRejection,
@@ -5090,9 +5418,11 @@ async function runPremiumCompletionInner(
         tierADiagnostic: tierADiag,
       };
     }
+    // Treat short/non-substantive server_full aliases the same as missing — a 320-char
+    // contaminated json_parse body must not suppress deterministic local recovery.
     const degradedJsonParseNoWireServerFull =
       premiumJsonParseDegradedAttemptCount > 0 &&
-      lastWireServerFullDocumentLen === 0 &&
+      lastWireServerFullDocumentLen < PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN &&
       lastWireAuthoritativeBodyLen < PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN &&
       pipelineNormalizedAuthoritativeText.length < PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN;
     const tryDeterministicIntakeRecovery = () => {
@@ -5131,13 +5461,23 @@ async function runPremiumCompletionInner(
         preview: intakeRecoveryPreview,
       };
     };
+    // Short non-empty json_parse wires below the paid floor must not invent SoT via the
+    // late/server-candidate recovery paths below. Contaminated aliases still use the
+    // deterministic intake path (degradedJsonParseNoWireServerFull / Test210-class).
+    const shortNonemptyJsonParseWireBelowFloor =
+      premiumJsonParseDegradedAttemptCount > 0 &&
+      lastWireAuthoritativeBodyLen > 0 &&
+      lastWireAuthoritativeBodyLen < PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN &&
+      lastWireServerFullDocumentLen < PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN;
     if (
       rejectedPaidCorpusDueToClientGates &&
       !premiumBodyHardRejectedForDevContextLeak &&
-      !substantiveServerFullOnWire &&
-      (degradedJsonParseNoWireServerFull ||
-        (!jsonParseClientRejected &&
-          lastWireAuthoritativeBodyLen < PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN))
+      (jsonParseClientRejected ||
+        (!substantiveServerFullOnWire &&
+          (degradedJsonParseNoWireServerFull ||
+            (!shortNonemptyJsonParseWireBelowFloor &&
+              !jsonParseClientRejected &&
+              lastWireAuthoritativeBodyLen < PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN))))
     ) {
       const deterministic = tryDeterministicIntakeRecovery();
       if (deterministic.accepted) {
@@ -5179,8 +5519,9 @@ async function runPremiumCompletionInner(
       }
     }
     const skipServerDegradedRecovery =
-      jsonParseClientRejected &&
-      lastWireServerFullDocumentLen < SUBSTANTIVE_SERVER_DRAFT_MIN_LEN;
+      (jsonParseClientRejected &&
+        lastWireServerFullDocumentLen < SUBSTANTIVE_SERVER_DRAFT_MIN_LEN) ||
+      shortNonemptyJsonParseWireBelowFloor;
     if (
       !substantiveServerFullOnWire &&
       !skipServerDegradedRecovery &&
@@ -5231,13 +5572,14 @@ async function runPremiumCompletionInner(
         };
       }
     }
+    // Short non-empty json_parse wire below the paid floor must stay rejected (no local SoT invent).
+    // Tiny/empty contaminated aliases may still recover via the earlier deterministic path.
     const blockLateThinWireRecovery =
       premiumBodyHardRejectedForDevContextLeak ||
       substantiveServerFullOnWire ||
+      shortNonemptyJsonParseWireBelowFloor ||
       lastSubstantiveWireFreezeBodyLen >= SUBSTANTIVE_SERVER_DRAFT_MIN_LEN ||
-      (rejectedPaidCorpusDueToClientGates && Boolean(lastSubstantiveWireFreezeRejectReason)) ||
-      (lastWireAuthoritativeBodyLen < PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN &&
-        premiumJsonParseDegradedAttemptCount > 0);
+      (rejectedPaidCorpusDueToClientGates && Boolean(lastSubstantiveWireFreezeRejectReason));
     const localRecovery = buildPremiumPostCheckoutLocalRecoveryProDraft({
       draft: outMerged,
       rawIntake: rawForSoT || rawIntake,
@@ -5252,52 +5594,49 @@ async function runPremiumCompletionInner(
           premiumRenderSource: PREMIUM_DEGRADED_SERVER_LOCAL_RECOVERY_RENDER_SOURCE,
         })
       : null;
-    if (
-      !substantiveServerFullOnWire &&
-      !blockLateThinWireRecovery &&
-      localRecovery.ok &&
-      degradedRecoveryPreview?.eligible
-    ) {
-      const recoverySource = PREMIUM_DEGRADED_SERVER_LOCAL_RECOVERY_RENDER_SOURCE;
-      if (tierAEnabled) tierADiag.premiumPipelineSource = recoverySource;
-      logDeterministicProFallbackDecision(DETERMINISTIC_PRO_FALLBACK_REASON.accepted, {
-        bodyLen: localRecovery.body.length,
-        displayPlainLen: degradedRecoveryPreview.displayPlainLen,
-        jsonParseAttempts: premiumJsonParseDegradedAttemptCount,
-        note: "late_local_recovery",
-      });
-      logPremiumCompletionDebug({
-        stage: "premium_degraded_server_local_recovery",
-        recoveryCandidateEligible: true,
-        rejectedReason: undefined,
-        premiumRenderSource: recoverySource,
-        bodyLen: localRecovery.body.length,
-        displayPlainLen: degradedRecoveryPreview.displayPlainLen,
-        lastClientGate: lastClientGateTrace,
-      });
-      outMerged = stripClientPremiumArtifactBlocksFromDraft({
-        ...outMerged,
-        premium_full_document_text: localRecovery.body,
-      });
-      return {
-        premiumDraft: outMerged,
-        premiumParties,
-        recipientCandidates,
-        winningPremiumBodyText: localRecovery.body,
-        premiumRenderSource: recoverySource,
-        premiumReview,
-        premiumFinalizeAudit,
-        premiumReviewRoute,
-        staleIntakeOrGeneration: false,
-        agreementGenerationId: input.agreementGenerationId,
-        premiumRequestIntakeFingerprint: input.premiumRequestIntakeFingerprint,
-        founderDetailsGateMessage: null,
-        proIntentGateMessage: null,
-        serverGenerationDegraded: serverGenerationDegraded ?? serverDegradedHttpMetaForRecovery,
-        premiumDegradedServerRecoverable: true,
-        premiumDegradedServerLocalRecovery: true,
-        tierADiagnostic: tierADiag,
-      };
+    if (localRecovery.ok && degradedRecoveryPreview?.eligible) {
+      if (!substantiveServerFullOnWire && !blockLateThinWireRecovery) {
+        const recoverySource = PREMIUM_DEGRADED_SERVER_LOCAL_RECOVERY_RENDER_SOURCE;
+        if (tierAEnabled) tierADiag.premiumPipelineSource = recoverySource;
+        logDeterministicProFallbackDecision(DETERMINISTIC_PRO_FALLBACK_REASON.accepted, {
+          bodyLen: localRecovery.body.length,
+          displayPlainLen: degradedRecoveryPreview.displayPlainLen,
+          jsonParseAttempts: premiumJsonParseDegradedAttemptCount,
+          note: "late_local_recovery",
+        });
+        logPremiumCompletionDebug({
+          stage: "premium_degraded_server_local_recovery",
+          recoveryCandidateEligible: true,
+          rejectedReason: undefined,
+          premiumRenderSource: recoverySource,
+          bodyLen: localRecovery.body.length,
+          displayPlainLen: degradedRecoveryPreview.displayPlainLen,
+          lastClientGate: lastClientGateTrace,
+        });
+        outMerged = stripClientPremiumArtifactBlocksFromDraft({
+          ...outMerged,
+          premium_full_document_text: localRecovery.body,
+        });
+        return {
+          premiumDraft: outMerged,
+          premiumParties,
+          recipientCandidates,
+          winningPremiumBodyText: localRecovery.body,
+          premiumRenderSource: recoverySource,
+          premiumReview,
+          premiumFinalizeAudit,
+          premiumReviewRoute,
+          staleIntakeOrGeneration: false,
+          agreementGenerationId: input.agreementGenerationId,
+          premiumRequestIntakeFingerprint: input.premiumRequestIntakeFingerprint,
+          founderDetailsGateMessage: null,
+          proIntentGateMessage: null,
+          serverGenerationDegraded: serverGenerationDegraded ?? serverDegradedHttpMetaForRecovery,
+          premiumDegradedServerRecoverable: true,
+          premiumDegradedServerLocalRecovery: true,
+          tierADiagnostic: tierADiag,
+        };
+      }
     }
     if (localRecovery.ok && degradedRecoveryPreview && !degradedRecoveryPreview.eligible) {
       logPremiumCompletionDebug({
@@ -5433,6 +5772,19 @@ async function runPremiumCompletionInner(
       attemptSequence,
       outcome: "fallback",
     });
+  }
+
+  if (draftQualityClientTraceEnabled()) {
+    const clientTrace = newDraftQualityClientTrace(input.agreementGenerationId || "");
+    void (async () => {
+      await recordDraftQualityClientStage(clientTrace, "post_client_accept", pipelineWinningBody, {
+        premiumRenderSource: String(premiumRenderSource || ""),
+      });
+      await recordDraftQualityClientStage(clientTrace, "post_render_winning", pipelineWinningBody || finalFallback, {
+        premiumRenderSource: String(premiumRenderSource || ""),
+      });
+      logDraftQualityClientTrace(clientTrace);
+    })();
   }
 
   return {

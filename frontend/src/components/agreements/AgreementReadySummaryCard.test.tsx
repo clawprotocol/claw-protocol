@@ -37,7 +37,7 @@ describe("buildAgreementReadySummaryModel", () => {
     expect(model.term).toBe("12 months");
     expect(model.payment).toMatch(/\$96,000/);
     expect(model.governingLaw).toMatch(/Delaware/i);
-    expect(model.statusLabel).toBe("Ready for review");
+    expect(model.statusLabel).toBe("Draft created—review recommended");
   });
 });
 
@@ -51,7 +51,7 @@ describe("AgreementReadySummaryCard", () => {
       />,
     );
     expect(screen.getByTestId("agreement-ready-summary-card")).toBeTruthy();
-    expect(screen.getByText(/Your Professional Services Agreement is ready/i)).toBeTruthy();
+    expect(screen.getByText(/Your Professional Services Agreement/i)).toBeTruthy();
     expect(screen.getByRole("button", { name: "Review agreement" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "Edit details" })).toBeTruthy();
     expect(screen.queryByText("Edit field")).toBeNull();

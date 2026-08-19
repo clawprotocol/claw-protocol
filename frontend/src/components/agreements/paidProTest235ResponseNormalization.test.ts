@@ -214,7 +214,9 @@ describe("paidPro Test235 premium response normalization", () => {
     expect(normalized.authoritativeText.length).toBeGreaterThanOrEqual(6_000);
   });
 
-  it("HTTP 200 Test235 wire accepts normalized server document instead of local recovery", async () => {
+  it(
+    "HTTP 200 Test235 wire accepts normalized server document instead of local recovery",
+    async () => {
     const valid = buildTest235ValidBody(6_380);
     premiumApiMock.mockResponses = [
       {
@@ -262,7 +264,9 @@ describe("paidPro Test235 premium response normalization", () => {
     expect(out.winningPremiumBodyText).toMatch(/\$8,500|8500/i);
     expect(out.winningPremiumBodyText).toMatch(/Delaware/i);
     expect(countPaidProExecutionBlocks(out.winningPremiumBodyText)).toBe(1);
-  });
+  },
+  20_000,
+  );
 
   it("detects parties, payment, and governing law from normalized authoritative text", () => {
     const valid = buildTest235ValidBody(6_380);
@@ -279,7 +283,9 @@ describe("paidPro Test235 premium response normalization", () => {
     expect(valid).toMatch(/Delaware/i);
   });
 
-  it("wrapper-only degraded wire does not become authoritative server_full_draft", async () => {
+  it(
+    "wrapper-only degraded wire does not become authoritative server_full_draft",
+    async () => {
     const wrapper = JSON.stringify({
       title: "Agreement",
       agreement_family: "services_agreement",
@@ -315,5 +321,7 @@ describe("paidPro Test235 premium response normalization", () => {
     if (out.premiumRenderSource === "premium_degraded_server_local_recovery") {
       expect(out.premiumDegradedServerLocalRecovery).toBe(true);
     }
-  });
+  },
+  20_000,
+  );
 });

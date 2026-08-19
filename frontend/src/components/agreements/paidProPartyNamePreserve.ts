@@ -41,8 +41,14 @@ function isLikelyDuplicatedEntityLine(line: string, fullNames: readonly string[]
   const t = line.trim().replace(/:$/, "").trim();
   if (!t || /\b(?:shall|will|must|may|agrees?)\b/i.test(t)) return false;
   return fullNames.some((full) => {
-    const doubled = `${full} ${full}`;
-    return partyLegalNamesMatch(t, doubled) || t.toLowerCase() === doubled.toLowerCase();
+    const entity = full.trim();
+    if (!entity) return false;
+    const doubled = `${entity} ${entity}`;
+    if (t.toLowerCase() === doubled.toLowerCase()) return true;
+    // partyLegalNamesMatch is intentionally fuzzy and can equate a single entity line with a
+    // doubled phrase — require extra length before treating a standalone heading as a duplicate.
+    if (t.length < entity.length + 3) return false;
+    return partyLegalNamesMatch(t, doubled);
   });
 }
 
@@ -59,14 +65,19 @@ export function collapseDuplicatedLegalEntityPhrase(
   if (!out) return out;
   const names = (fullNames ?? []).filter((n) => n.trim().length >= 2);
   for (const full of names) {
-    const escaped = escapeRe(full.trim());
+    const entity = full.trim();
+    if (!entity) continue;
+    const escaped = escapeRe(entity);
     const re = new RegExp(`(${escaped})\\s+\\1`, "gi");
     if (re.test(out)) {
       re.lastIndex = 0;
       out = out.replace(re, "$1");
     }
-    if (partyLegalNamesMatch(out, `${full} ${full}`)) {
-      out = full.trim();
+    const doubled = `${entity} ${entity}`;
+    // Only normalize true duplicates to the canonical casing — never rewrite a single
+    // uppercase execution-block heading ("RED MESA LOGISTICS LLC") to title case.
+    if (out.length >= entity.length + 3 && partyLegalNamesMatch(out, doubled)) {
+      out = entity;
     }
   }
   return out.trim();
@@ -329,7 +340,7 @@ function normPartyLabel(s: string): string {
  * in as a phantom party while the real Party 1 (Client) drops out.
  */
 const PARTY_METADATA_FIELD_LABEL_PREFIX_RE =
-  /^(?:address|physical\s+address|mailing\s+address|party\s+address|authorized\s+signer|signer\s+name|signer\s+title|signer\s+email|representative(?:\s+name|\s+title)?|represented\s+by|human\s+signer|e-?mail|email(?:\s+for\s+notice)?|attn|attention|phone|tel|telephone|fax|contact|title|name)\s*[:\-]/i;
+  /^(?:address|physical\s+address|mailing\s+address|party\s+address|authorized\s+signer|signer\s+name|signer\s+title|signer\s+email|representative(?:\s*\([^)]*\)|\s+name|\s+title)?|represented\s+by|human\s+signer|legal\s+entity(?:\s*\/\s*party\s+name)?|party\s+name|e-?mail|email(?:\s+for\s+notice)?|attn|attention|phone|tel|telephone|fax|contact|title|name)\s*[:\-]/i;
 
 /** True when the raw line is a per-party metadata field ("Address: …", "Email: …"), not an entity. */
 export function isPartyMetadataFieldLabelValue(name: string): boolean {
@@ -343,7 +354,7 @@ export function isPartyMetadataFieldLabelValue(name: string): boolean {
  * (no trailing colon) captured by the colon-role parser.
  */
 const PARTY_METADATA_ROLE_LABEL_RE =
-  /^(?:address|physical\s+address|mailing\s+address|party\s+address|registered\s+address|principal\s+address|authorized\s+signer|signatory|signer(?:\s+name|\s+title|\s+email)?|representative(?:\s+name|\s+title)?|represented\s+by|human\s+signer|e-?mail|email(?:\s+for\s+notice)?|notice\s+email|contact\s+email|attn|attention|phone|tel|telephone|mobile|fax|contact|title|name|role|by)$/i;
+  /^(?:address|physical\s+address|mailing\s+address|party\s+address|registered\s+address|principal\s+address|authorized\s+signer|signatory|signer(?:\s+name|\s+title|\s+email)?|representative(?:\s*\([^)]*\)|\s+name|\s+title)?|represented\s+by|human\s+signer|legal\s+entity(?:\s*\/\s*party\s+name)?|party\s+name|e-?mail|email(?:\s+for\s+notice)?|notice\s+email|contact\s+email|attn|attention|phone|tel|telephone|mobile|fax|contact|title|name|role|by)$/i;
 
 export function isPartyMetadataRoleLabel(roleLabel: string): boolean {
   return PARTY_METADATA_ROLE_LABEL_RE.test((roleLabel || "").replace(/\s+/g, " ").trim().replace(/:$/, ""));
@@ -385,15 +396,21 @@ export function stripTrailingPartyMetadataLabel(name: string): string {
 /**
  * Job-title / occupational phrases from intake appositives
  * ("Alex Rivera, freelance product designer") must never become a third party slot.
+ * TEST536 — bare signer titles ("Chief Executive Officer", "Managing Partner", "VP Engineering")
+ * also leak from stacked `Signer Title:` blocks via the capitalized-words heuristic.
  */
 const OCCUPATIONAL_OR_JOB_TITLE_PARTY_RE =
   /^(?:(?:a|an|the)\s+)?(?:freelance|independent)?\s*(?:product\s+|ui\s+|ux\s+|graphic\s+|web\s+|software\s+|mobile\s+)?(?:designer|developer|engineer|consultant|contractor|freelancer|attorney|lawyer|accountant|ceo|cto|cfo|coo|founder|president|manager|director|officer|analyst|specialist|architect)(?:\s+(?:and|&)\s+[a-z]+)?$/i;
+
+const EXECUTIVE_OR_SIGNER_TITLE_PARTY_RE =
+  /^(?:chief\s+(?:executive|operating|financial|technology|marketing|security|product|legal|information|revenue|people|compliance)\s+officer|managing\s+partner|general\s+partner|vice\s+president(?:\s+(?:of\s+)?[\w&/-]+)?|vp(?:\s+(?:of\s+)?[\w&/-]+)?|authorized\s+signatory|signatory)$/i;
 
 export function isOccupationalOrJobTitlePartyName(name: string): boolean {
   const t = (name || "").replace(/\s+/g, " ").trim();
   if (!t || t.length < 3) return false;
   if (ENTITY_SUFFIX.test(t)) return false;
   if (OCCUPATIONAL_OR_JOB_TITLE_PARTY_RE.test(t)) return true;
+  if (EXECUTIVE_OR_SIGNER_TITLE_PARTY_RE.test(t)) return true;
   // Bare title tokens that leak as party rows.
   return /^(?:ceo|cto|cfo|coo|founder|president|director|manager|officer)$/i.test(t);
 }
@@ -406,13 +423,41 @@ export function isDisallowedPartyPhrase(name: string): boolean {
   return DISALLOWED_PARTY_PHRASE_RE.some((re) => re.test(t));
 }
 
+/**
+ * TEST536/537 — bare postal lines ("710 Discovery Parkway, Raleigh, NC 27609") satisfy the
+ * capitalized-words heuristic below and must never become legal-entity party slots.
+ */
+function looksLikeUsPostalAddressLine(name: string): boolean {
+  const t = (name || "").replace(/\s+/g, " ").trim();
+  if (!t) return false;
+  // Street-number lead + city, ST ZIP tail (with or without street-type token).
+  if (/^\d{1,6}\s+\S/.test(t) && /,\s*[A-Z]{2}\s+\d{5}(?:-\d{4})?\.?$/i.test(t)) return true;
+  // Street-type + ZIP without requiring leading number (continuation / PO lines).
+  if (
+    /\b(?:Street|St\.?|Avenue|Ave\.?|Road|Rd\.?|Boulevard|Blvd\.?|Drive|Dr\.?|Lane|Ln\.?|Way|Court|Ct\.?|Parkway|Pkwy\.?|Place|Pl\.?|Circle|Cir\.?|Highway|Hwy\.?)\b/i.test(
+      t,
+    ) &&
+    /\b\d{5}(?:-\d{4})?\b/.test(t) &&
+    !ENTITY_SUFFIX.test(t)
+  ) {
+    return true;
+  }
+  return false;
+}
+
 /** True when the label looks like a full legal entity (intake-authoritative), not body prose or titles. */
 export function isAuthoritativeLegalEntityName(name: string): boolean {
   const raw = (name || "").replace(/\s+/g, " ").trim();
   if (looksLikeAuthorizedSignersBulletLine(raw)) return false;
+  // Human signer + title lines must never qualify as legal entities
+  // (e.g. "Ethan Cole, Authorized Signatory." from "Acme LLC signer: …" intake).
+  if (/,\s*(?:authorized\s+signatory|ceo|cfo|coo|cto|president|director|partner|manager)\b/i.test(raw)) {
+    return false;
+  }
   if (hasPartyMetadataLabelContamination(raw)) return false;
   if (isOccupationalOrJobTitlePartyName(raw)) return false;
   if (isPartyMetadataFieldLabelValue(raw)) return false;
+  if (looksLikeUsPostalAddressLine(raw)) return false;
   if (isStateLegalFormOnlyName(raw)) return false;
   const t = isolateLegalEntityFromContaminatedName(raw);
   if (t.length < 3 || isDisallowedPartyPhrase(t)) return false;
@@ -420,6 +465,7 @@ export function isAuthoritativeLegalEntityName(name: string): boolean {
   if (isOccupationalOrJobTitlePartyName(t)) return false;
   if (isStateLegalFormOnlyName(t)) return false;
   if (isPartyMetadataFieldLabelValue(t)) return false;
+  if (looksLikeUsPostalAddressLine(t)) return false;
   if (/^(?:my|our|the|your|their|each|both|either)\s+company$/i.test(t)) return false;
   if (/^(?:client|customer|vendor|contractor|service\s+provider|provider|party\s*[ab])$/i.test(t)) {
     return false;
@@ -560,6 +606,13 @@ function expandShortPartyLabelsToFullLegal(text: string, fullNames: readonly str
 }
 
 function preserveInSlice(slice: string, fullNames: readonly string[]): string {
+  // Outer polish may already have installed [[LDG_EMAIL_N]] / [[LDG_URL_N]] tokens.
+  // Remasking then unmasking with an empty local table previously wiped those tokens
+  // (Email: lines became empty), breaking intake-email preservation.
+  if (/\[\[LDG_(?:EMAIL|URL)_\d+\]\]/i.test(slice)) {
+    const expanded = expandShortPartyLabelsToFullLegal(slice, fullNames);
+    return collapseDuplicateNoticeEntityLines(expanded, fullNames);
+  }
   const { text: masked, emails } = maskEmailAddresses(slice);
   const expanded = expandShortPartyLabelsToFullLegal(masked, fullNames);
   const deduped = collapseDuplicateNoticeEntityLines(expanded, fullNames);

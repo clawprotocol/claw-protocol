@@ -5,19 +5,13 @@ import { validatePaidProOutput } from "./paidProCorpusAcceptance";
 import { hasLatchedLongAcceptedServerFullDraft } from "./paidProAcceptedServerFullDraftCommitGuard";
 import { preparePaidProServerDocumentForAcceptance } from "./paidProConciseServicesQuality";
 import {
-  clearCurrentSessionProEntitlementMarkers,
   markCurrentSessionProEntitlementComplete,
   markCurrentSessionProIntent,
 } from "./paidProSessionEligibility";
 import {
-  clearPremiumPartyNamesHandoff,
-  resetPremiumRecipientHandoffDedupForTests,
-} from "./premiumPartyNamesHandoff";
-import {
   applyPaidProSectionStructureCompletenessAuthority,
 } from "./paidProSectionStructureCompletenessAuthority";
 import {
-  clearPaidProSourceOfTruth,
   establishPaidProSourceOfTruth,
   getPaidProSourceOfTruthText,
   hasPaidProSourceOfTruth,
@@ -30,6 +24,7 @@ import {
   freezeSessionPremiumBodyForGeneration,
   latchAcceptedServerFullDraftAuthority,
 } from "./premiumAcceptancePolicy";
+import { resetPaidProPipelineTestIsolation } from "./paidProPipelineTestIsolation";
 import {
   buildTest435ServerFullDraftWithRepairableStructureBreaks,
   TEST435_HARBOR_PEAK,
@@ -46,21 +41,20 @@ describe("TEST435 — Red Mesa / Harbor Peak post-checkout freeze after valid 17
   const storage = new Map<string, string>();
 
   beforeEach(() => {
+    storage.clear();
     vi.stubGlobal("sessionStorage", {
       getItem: (k: string) => storage.get(k) ?? null,
       setItem: (k: string, v: string) => storage.set(k, v),
       removeItem: (k: string) => storage.delete(k),
     });
+    resetPaidProPipelineTestIsolation();
     markCurrentSessionProIntent();
     markCurrentSessionProEntitlementComplete();
     getOrInitSessionAgreementGenerationId();
   });
 
   afterEach(() => {
-    clearPaidProSourceOfTruth();
-    clearPremiumPartyNamesHandoff();
-    clearCurrentSessionProEntitlementMarkers();
-    resetPremiumRecipientHandoffDedupForTests();
+    resetPaidProPipelineTestIsolation();
     storage.clear();
     vi.unstubAllGlobals();
   });
@@ -164,6 +158,8 @@ describe("TEST435 — Red Mesa / Harbor Peak post-checkout freeze after valid 17
       surface: "test435_sot_freeze",
     });
     expect(freezeCommit.ok, freezeCommit.rejectReason ?? "freeze_failed").toBe(true);
+    expect(freezeCommit.text).toMatch(/\n10\.\s+NOTICES\b/i);
+    expect(freezeCommit.text).not.toMatch(/\n10\.1\s+NOTICES\s*$/im);
 
     latchAcceptedServerFullDraftAuthority(freezeCommit.text, "server_full_draft", {
       freezeEstablished: true,

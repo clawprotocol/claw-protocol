@@ -57,15 +57,20 @@ def resolve_workspace_identity(request: Request) -> WorkspaceIdentity:
         )
 
     if org_id.startswith("user-"):
-        if extract_anonymous_session_token(request):
-            raise HTTPException(
-                status_code=403,
-                detail={
-                    "code": "anonymous_credential_on_user_workspace",
-                    "message": "Anonymous session credential cannot authorize a user workspace.",
-                },
-            )
-        user_id = require_supabase_user_id(request)
+        # JWT is the user-workspace authority. A leftover anonymous cookie/header from
+        # the pre-auth journey must not fail-close a matching signed-in session.
+        try:
+            user_id = require_supabase_user_id(request)
+        except HTTPException:
+            if extract_anonymous_session_token(request):
+                raise HTTPException(
+                    status_code=403,
+                    detail={
+                        "code": "anonymous_credential_on_user_workspace",
+                        "message": "Anonymous session credential cannot authorize a user workspace.",
+                    },
+                )
+            raise
         canonical = f"user-{user_id}"
         if org_id != canonical:
             raise HTTPException(

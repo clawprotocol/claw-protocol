@@ -165,6 +165,12 @@ export function sortIdentitiesForExecutionBlockOrder(
   return ordered.length ? ordered : [...identities];
 }
 
+/** Local copy — avoid circular import with signerPartyIdentity.signatureNameForIdentity. */
+function reconcileSignatureName(id: CanonicalPartyIdentity): string {
+  if (id.isIndividual) return id.partyDisplayName.trim();
+  return (id.representativeName || "").trim();
+}
+
 /** Replace execution block party sections so CLIENT / SERVICE PROVIDER match corpus roles. */
 export function reconcileExecutionBlockToRoleIdentities(
   corpus: string,
@@ -188,29 +194,37 @@ export function reconcileExecutionBlockToRoleIdentities(
     const heading = id.blockHeading.trim().replace(/:$/, "");
     const legal = id.partyDisplayName.trim();
     const entityHeading = heading.toLowerCase() === legal.toLowerCase();
-    // Entity-heading blocks use the legal name as the heading only (no duplicate name line).
-    const lines = entityHeading ? [`${heading}:`] : [`${heading}:`, legal];
+    // Entity-heading blocks: uppercase legal name + blank line (no ROLE-style colon), matching
+    // buildMultiPartyEntityNameExecutionSection / acceptance invariant shape.
+    const lines = entityHeading ? [heading.toUpperCase(), ""] : [`${heading}:`, legal];
     const headingRe = new RegExp(
-      `^\\s*${heading.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*:`,
+      `^\\s*${heading.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\s*:?`,
       "im",
     );
     const headingIdx = tail.search(headingRe);
     const tailChunk = headingIdx >= 0 ? tail.slice(headingIdx) : "";
     const chunkLines = tailChunk.split("\n").slice(0, 40);
+    let skippedOwnHeading = false;
+    let existingName = "";
+    let existingTitle = "";
     for (const cl of chunkLines) {
       const t = cl.trim();
-      if (/^by\s*:/i.test(t)) lines.push(cl);
-      else if (/^name\s*:/i.test(t) && id.representativeName?.trim()) {
-        lines.push(`Name: ${id.representativeName.trim()}`);
-      } else if (/^name\s*:/i.test(t)) lines.push(cl);
-      else if (/^title\s*:/i.test(t)) lines.push(id.title?.trim() ? `Title: ${id.title.trim()}` : cl);
-      else if (/^email\s+for\s+notice/i.test(t)) {
+      // First line is this block's own heading — skip it; do not treat as next-party break.
+      if (!skippedOwnHeading && headingRe.test(t)) {
+        skippedOwnHeading = true;
+        continue;
+      }
+      if (/^name\s*:/i.test(t)) {
+        const v = t.replace(/^name\s*:\s*/i, "").trim();
+        if (v && !/^_{2,}$/.test(v)) existingName = v;
+      } else if (/^title\s*:/i.test(t)) {
+        const v = t.replace(/^title\s*:\s*/i, "").trim();
+        if (v && !/^_{2,}$/.test(v)) existingTitle = v;
+      } else if (/^email\s+for\s+notice/i.test(t) || /^address\s+for\s+notice/i.test(t)) {
         /* contact authority: strip legacy notice lines */
-      } else if (/^address\s+for\s+notice/i.test(t)) {
-        /* contact authority: strip legacy notice lines */
-      } else if (/^date\s*:/i.test(t)) lines.push(cl);
-      else if (/^(?:CLIENT|SERVICE\s+PROVIDER|ANALYTICS\s+PROVIDER|PARTY\s+\d+)\s*:/i.test(t)) break;
-      else if (
+      } else if (/^(?:CLIENT|SERVICE\s+PROVIDER|ANALYTICS\s+PROVIDER|PARTY\s+\d+)\s*:/i.test(t)) {
+        break;
+      } else if (
         ordered.some(
           (other) =>
             other !== id &&
@@ -224,16 +238,15 @@ export function reconcileExecutionBlockToRoleIdentities(
         break;
       }
     }
-    if (!lines.some((l) => /^by\s*:/i.test(l.trim()))) {
-      lines.push("By: __________________________");
-      lines.push(
-        id.representativeName?.trim()
-          ? `Name: ${id.representativeName.trim()}`
-          : "Name: __________________________",
-      );
-      lines.push(`Title: ${id.title?.trim() || "_________________________"}`);
-      lines.push("Date: _____________________________");
+    // Canonical order: By → Name → Title? → Date (matches buildSignatureBlocks).
+    lines.push("By: __________________________");
+    const signName = reconcileSignatureName(id) || existingName;
+    lines.push(signName ? `Name: ${signName}` : "Name: __________________________");
+    const title = id.title?.trim() || existingTitle;
+    if (!id.isIndividual || title) {
+      lines.push(`Title: ${title || "_________________________"}`);
     }
+    lines.push("Date: _____________________________");
     blocks.push(lines.join("\n"));
   }
 

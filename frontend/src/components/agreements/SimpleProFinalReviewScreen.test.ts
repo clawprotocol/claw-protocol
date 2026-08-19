@@ -5,10 +5,13 @@ import { describe, expect, it } from "vitest";
 const REVIEW_FIRST_SIMPLE_PRO_SOURCE = "simple_pro_send_for_review";
 
 describe("SimpleProFinalReviewScreen review-first routing (static)", () => {
-  it("AgreementBuilderIntake handleProSendForReview calls completeGuidedPaidProReviewFirstHandoff not enterFinalReviewRecipientSetup", () => {
+  it("AgreementBuilderIntake handleProSendForReview selects review-only recipient setup for accepted paid authority", () => {
     const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
     const handleIdx = intake.indexOf("const handleProSendForReview = React.useCallback");
-    const block = intake.slice(handleIdx, handleIdx + 1800);
+    const handleEnd = intake.indexOf("const handleFinalizeRoutePrimaryAction", handleIdx);
+    const block = intake.slice(handleIdx, handleEnd);
+    expect(block).toContain("if (acceptedPaidProAuthorityActive || paidProAuthoritative)");
+    expect(block).toContain('enterFinalReviewRecipientSetup("review_only")');
     expect(block).toContain('void completeGuidedPaidProReviewFirstHandoff("simple_pro_send_for_review")');
     expect(block).toContain(REVIEW_FIRST_SIMPLE_PRO_SOURCE);
     expect(block).toContain('selectedTrack: "review"');
@@ -31,7 +34,8 @@ describe("SimpleProFinalReviewScreen review-first routing (static)", () => {
   it("mint 422 uses reviewFirstHandoffError only — not setHardError on mint failure", () => {
     const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
     const handoffIdx = intake.indexOf("const completeGuidedPaidProReviewFirstHandoff = React.useCallback");
-    const block = intake.slice(handoffIdx, handoffIdx + 12000);
+    const handoffEnd = intake.indexOf("const enterGuidedSignatureTrackRoute = React.useCallback", handoffIdx);
+    const block = intake.slice(handoffIdx, handoffEnd > handoffIdx ? handoffEnd : handoffIdx + 20000);
     expect(block).toContain("const failReviewFirstMint = (");
     expect(block).toContain("setHardError(null);");
     expect(block).toContain("setReviewFirstHandoffError(message);");

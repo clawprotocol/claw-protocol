@@ -8,6 +8,11 @@ import {
 } from "../auth/stagingAuthMagicLink";
 import { logProductEvent } from "../lib/experimentation/productEvents";
 import { resolveSignInNextDestination } from "./genesisReferral/genesisReferralColdCreateGate";
+import {
+  CHECKOUT_SIGN_IN_BODY,
+  CHECKOUT_SIGN_IN_HEADING,
+  isSecureCheckoutPath,
+} from "../auth/safeRedirectResolver";
 import { getGenesisReferralCode } from "./genesisReferral/genesisReferralCapture";
 
 /** Returning-user sign-in — lands on dashboard, or `?next=` (e.g. referral create return). */
@@ -19,6 +24,7 @@ export function SignInPage() {
   const [status, setStatus] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const destinationPath = useMemo(() => resolveSignInNextDestination(search, "/app"), [search]);
+  const checkoutContinuation = isSecureCheckoutPath(destinationPath);
   const referralCode = useMemo(() => getGenesisReferralCode(), []);
   const signInOpts = useMemo(
     () => ({ returningSignIn: true as const, destinationPath }),
@@ -44,11 +50,15 @@ export function SignInPage() {
 
   return (
     <div className="mx-auto max-w-md px-4 py-12">
-      <h1 className="text-xl font-semibold text-white">Sign in to LawDog</h1>
+      <h1 className="text-xl font-semibold text-white">
+        {checkoutContinuation ? CHECKOUT_SIGN_IN_HEADING : "Sign in to LawDog"}
+      </h1>
       <p className="mt-2 text-sm text-slate-400">
-        {referralCode
-          ? "Sign in to continue with your referral invite and open create."
-          : "Access your agreements and workspace."}
+        {checkoutContinuation
+          ? CHECKOUT_SIGN_IN_BODY
+          : referralCode
+            ? "Sign in to continue with your referral invite and open create."
+            : "Access your agreements and workspace."}
       </p>
       {isGoogleAuthConfigured() ? (
         <button

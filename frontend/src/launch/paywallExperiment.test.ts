@@ -30,6 +30,22 @@ describe("paywallExperiment", () => {
     expect(c.showSecondaryUrgency).toBe(false);
   });
 
+  it("historical continue_plus / plusBlurb keys never surface buyer-facing Plus copy", () => {
+    for (const variant of ["control", "v1"] as const) {
+      const c = resolveSendPaywallCopy(variant);
+      const dims = paywallDimensionsForVariant(variant);
+      expect(c.plusBlurb).toBe("");
+      expect(c.ctaLabel).not.toMatch(/\bPlus\b/i);
+      expect(c.valueCompressionLine).not.toMatch(/\bPlus\b/i);
+      expect(c.premiumPitchAboveCta).not.toMatch(/\bPlus\b/i);
+      expect(JSON.stringify(c)).not.toMatch(/\bPlus\b/);
+      // Experiment dimension id may remain historical; resolved buyer copy must not.
+      if (dims.cta_copy === "continue_plus") {
+        expect(c.ctaLabel).toMatch(/Pro/i);
+      }
+    }
+  });
+
   it("getSendConversionPaywallVariantId returns deterministic variant for session", () => {
     const a = getSendConversionPaywallVariantId();
     const b = getSendConversionPaywallVariantId();

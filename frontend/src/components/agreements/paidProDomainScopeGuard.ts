@@ -184,6 +184,10 @@ function stripDomainSections(text: string, intake: string): { text: string; remo
 
   for (const line of lines) {
     const trimmed = line.trim();
+    // Never strip the execution/signature tail — domain sections end at IN WITNESS.
+    if (/\bIN WITNESS WHEREOF\b/i.test(trimmed)) {
+      skipping = false;
+    }
     if (isNumberedSectionHeading(trimmed)) {
       const isDomainSection = DOMAIN_SECTION_HEADING_RES.some((re) => re.test(trimmed));
       const isPreservedLegal = PRESERVED_LEGAL_HEADING_RES.test(trimmed);
@@ -344,6 +348,28 @@ export function sanitizePaidProDomainScopeContamination(
   }
 
   const after = detectUnsupportedDomainContamination(text, intakeText);
+  const cleaned = text.replace(/\n{3,}/g, "\n\n").trim();
+  // Never let domain-scope cleanup catastrophically shrink a substantive server corpus
+  // (e.g. stripping AI-workflow wording that the draft purpose already authorized).
+  const originalLen = (corpus || "").trim().length;
+  if (
+    originalLen >= 4_000 &&
+    cleaned.length < Math.floor(originalLen * 0.55) &&
+    cleaned.length < 4_000
+  ) {
+    if (import.meta.env.DEV) {
+      // eslint-disable-next-line no-console
+      console.info(LOG_PREFIX, {
+        surface: opts?.logSurface ?? "unknown",
+        beforeRules: before.ruleIds,
+        afterRules: after.ruleIds,
+        repairs: [...repairs, "skipped_catastrophic_domain_shrink"],
+        originalLen,
+        cleanedLen: cleaned.length,
+      });
+    }
+    return { text: (corpus || "").replace(/\r\n/g, "\n").trim(), repairs: [] };
+  }
   if (repairs.length > 0 && import.meta.env.DEV) {
     // eslint-disable-next-line no-console
     console.info(LOG_PREFIX, {
@@ -354,7 +380,7 @@ export function sanitizePaidProDomainScopeContamination(
     });
   }
 
-  return { text: text.replace(/\n{3,}/g, "\n\n").trim(), repairs };
+  return { text: cleaned, repairs };
 }
 
 /** Convenience wrapper for render/acceptance pipelines. */

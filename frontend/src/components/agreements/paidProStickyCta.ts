@@ -82,7 +82,7 @@ export function paidProStickyCtaShowsStickyBar(phase: PaidProStickyCtaPhase): bo
 }
 
 export const PAID_PRO_SIGNER_SETUP_STICKY_HELPER =
-  "Add signer name and email for each party before creating signature links.";
+  "Add an authorized signer name and email for each party before creating signature links.";
 
 export const PAID_PRO_SIGNER_COMPLETE_STICKY_HELPER = "Nothing is sent until you confirm.";
 

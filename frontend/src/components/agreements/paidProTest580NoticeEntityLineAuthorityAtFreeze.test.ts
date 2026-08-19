@@ -33,8 +33,11 @@ const CORPUS_WITH_ENTITIES = [
   "",
   `This Agreement is between ${BLUE_CANYON} and ${IRON_VALE}.`,
   "",
-  ...Array.from({ length: 40 }, (_, i) => `${i + 1}. Clause ${i + 1}.`),
-  "",
+  ...Array.from({ length: 40 }, (_, i) => [
+    `${i + 1}. Clause ${i + 1}.`,
+    `The parties agree to operative clause ${i + 1} under this Agreement.`,
+    "",
+  ]).flat(),
   "IN WITNESS WHEREOF, the Parties execute this Agreement.",
   "",
   `CLIENT: ${BLUE_CANYON}`,
@@ -100,8 +103,8 @@ describe("TEST580 — notice entity-line authority at freeze", () => {
     });
     expect(gate.ok).toBe(true);
     expect(gate.rejectReason).toBeNull();
-    expect(gate.text).toMatch(/^If to Party 1:/im);
-    expect((gate.text.match(/^If to\s+/gim) || []).length).toBeGreaterThanOrEqual(2);
+    // Commercial no-invent: generic Party N notice scaffolding is not required at freeze.
+    expect(gate.text).not.toMatch(/^If to Party 1:/im);
     expect((gate.text.match(/\bIN WITNESS WHEREOF\b/gi) || []).length).toBe(1);
   });
 

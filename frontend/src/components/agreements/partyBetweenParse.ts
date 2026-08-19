@@ -11,6 +11,7 @@ import { normalizePartyNameFragment } from "./partyIntakeNormalize";
 import {
   collapsePartySlotCandidates,
   isInvalidPartySlotLegalEntity,
+  mergeSplitEntitySuffixFragments,
   normalizeAgreementPartyName,
   splitCommaSeparatedPartyNames,
 } from "./partySlotIdentityNormalize";
@@ -74,10 +75,32 @@ const SENTENCE_BOUNDARY_FIELD_STOP =
   /\.\s+(?:\$|Fee\b|Payment\b|Compensation\b|Price\b|Term\b|Scope\b|Purpose\b|Effective\b|Closing\b|Property\b|Premises\b|Rent\b|Deposit\b|Governing\b|Jurisdiction\b|Venue\b|Confidential|Termination\b|Notice\b|Services?\b|Deliverables?\b)/i;
 
 /** Truncate after the first complete party clause when the next sentence starts a new thought. */
-const GENERAL_BETWEEN_SENTENCE_END_RE = /\.\s+(?=[A-Z])/;
+const GENERAL_BETWEEN_SENTENCE_END_RE = /\.\s+(?=[A-Z])/g;
+
+/**
+ * Periods inside multi-token entity suffixes (e.g. "Summit Supply Co. Inc.") are not
+ * sentence boundaries — only truncate when the next capital token is not a suffix word.
+ */
+const ENTITY_SUFFIX_AFTER_PERIOD_RE =
+  /^(?:Inc\.?|Corp\.?|Ltd\.?|LLC|L\.L\.C\.?|LLP|PLC|P\.C\.?|Co\.?)\b/i;
 
 function isOxfordCommaPartyList(tail: string): boolean {
-  return /,/.test(tail) && /\s+and\s+\S/i.test(tail);
+  // Ignore entity-suffix commas ("Name, LLC") so bilateral between-clauses are not
+  // misclassified as Oxford party lists.
+  const structural = normalizeAgreementPartyName(tail);
+  return /,/.test(structural) && /\s+and\s+\S/i.test(structural);
+}
+
+function findGeneralBetweenSentenceEnd(tail: string): number {
+  GENERAL_BETWEEN_SENTENCE_END_RE.lastIndex = 0;
+  let m: RegExpExecArray | null;
+  while ((m = GENERAL_BETWEEN_SENTENCE_END_RE.exec(tail)) !== null) {
+    if (m.index <= 0) continue;
+    const rest = tail.slice(m.index + 1).replace(/^\s+/, "");
+    if (ENTITY_SUFFIX_AFTER_PERIOD_RE.test(rest)) continue;
+    return m.index;
+  }
+  return -1;
 }
 
 function truncateBetweenTailAtSentenceBoundary(tail: string): string {
@@ -86,9 +109,9 @@ function truncateBetweenTailAtSentenceBoundary(tail: string): string {
   if (sentStop && sentStop.index !== undefined && sentStop.index > 0) {
     out = out.slice(0, sentStop.index);
   }
-  const genStop = GENERAL_BETWEEN_SENTENCE_END_RE.exec(out);
-  if (genStop && genStop.index !== undefined && genStop.index > 0) {
-    out = out.slice(0, genStop.index);
+  const genStop = findGeneralBetweenSentenceEnd(out);
+  if (genStop > 0) {
+    out = out.slice(0, genStop);
   }
   return out.trim();
 }
@@ -136,9 +159,30 @@ export function sliceRawBetweenPartyClauseTailForRoleHints(raw: string): string 
   return tail.length >= 3 ? tail : null;
 }
 
+/**
+ * Oxford / comma-list segmentation aligned with {@link splitMultiPartyCommaListInternal}:
+ *   - Comma + optional "and" is the structural separator (case-insensitive after the comma).
+ *   - Standalone " and " is lowercase-only so mid-name capital "And"
+ *     (e.g. "Beacon Operations And Logistics Group LLC") stays inside one party.
+ */
+const COMMA_OXFORD_PARTY_SPLIT = /\s*,\s*(?:and\s+)?/i;
+const STANDALONE_LOWERCASE_AND_SPLIT = /\s+and\s+/;
+
+function splitBetweenPartyListSegments(tail: string): string[] {
+  // Detach ", LLC" / ", Inc." before structural splits so entity-suffix commas never
+  // become Oxford separators (TEST330: "Red Mesa Logistics, LLC and Harbor…").
+  const prepared = normalizeAgreementPartyName(tail);
+  const rough = prepared
+    .split(COMMA_OXFORD_PARTY_SPLIT)
+    .flatMap((s) => s.split(STANDALONE_LOWERCASE_AND_SPLIT))
+    .map((s) => s.trim())
+    .filter(Boolean);
+  return mergeSplitEntitySuffixFragments(rough.map(normalizeAgreementPartyName));
+}
+
 function extractBetweenPartyNameListFromOxfordTail(tail: string, useAuthorityCandidates: boolean): string[] {
   const truncated = truncateBetweenTailAtSentenceBoundary(tail);
-  const rawSegments = truncated.split(/\s+and\s+/i).map((s) => s.trim()).filter(Boolean);
+  const rawSegments = splitBetweenPartyListSegments(truncated);
   if (rawSegments.length < 2) return [];
 
   const names: string[] = [];
@@ -165,8 +209,17 @@ function filterBetweenClausePartyCandidates(names: string[]): string[] {
   return names.filter((n) => isBetweenClausePartyCandidate(n));
 }
 
+function trimTrailingListPunctuationPreservingEntitySuffix(segment: string): string {
+  let s = segment.trim();
+  // Keep terminal periods that are part of Inc. / Corp. / Ltd. entity suffixes.
+  if (/\b(?:Inc|Corp|Ltd|Co|L\.L\.C)\.$/i.test(s)) return s;
+  return s.replace(/[.,;:]+$/g, "").trim();
+}
+
 function expandSegmentIntoPartyCandidates(segment: string): string[] {
-  const inner = truncateBetweenTailAtSentenceBoundary(segment.replace(/[.,;:]+$/g, "").trim());
+  const inner = truncateBetweenTailAtSentenceBoundary(
+    trimTrailingListPunctuationPreservingEntitySuffix(segment),
+  );
   if (!inner) return [];
   const commaParts = splitCommaSeparatedPartyNames(inner)
     .map(trimBetweenPartyFragment)
@@ -176,8 +229,9 @@ function expandSegmentIntoPartyCandidates(segment: string): string[] {
     const valid = commaParts.filter((n) => isBetweenClausePartyCandidate(n));
     if (valid.length >= 2) return valid;
   }
+  // Lowercase-only " and " — do not split mid-name capital "And".
   const chained = inner
-    .split(/\s+and\s+/i)
+    .split(STANDALONE_LOWERCASE_AND_SPLIT)
     .map((s) => trimBetweenPartyFragment(s.trim()))
     .map(normalizeAgreementPartyName)
     .filter((n) => n.length >= 2);
@@ -191,7 +245,7 @@ function expandSegmentIntoPartyCandidates(segment: string): string[] {
 /** N-party between clause: chained " and " segments and comma lists (no two-party cap). */
 function extractBetweenPartyNameListFromChainedAndSplit(tail: string): string[] {
   const truncated = truncateBetweenTailAtSentenceBoundary(tail);
-  const segments = truncated.split(/\s+and\s+/i).map((s) => s.trim()).filter(Boolean);
+  const segments = splitBetweenPartyListSegments(truncated);
   if (segments.length < 2) return [];
 
   const names: string[] = [];
@@ -206,15 +260,16 @@ function extractBetweenPartyNameListFromChainedAndSplit(tail: string): string[] 
 }
 
 /**
- * Bilateral-only between extraction — first " and " pair for legacy two-party call sites.
+ * Bilateral-only between extraction — first lowercase " and " pair for legacy two-party call sites.
  * Do not use for canonical N-party authority; prefer {@link extractBetweenPartyNameList}.
+ * Capital mid-name "And" is intentionally not treated as a separator.
  */
 export function extractBetweenPartyNameListBilateralOnly(tail: string): string[] {
   const truncated = truncateBetweenTailAtSentenceBoundary(tail);
-  const andIdx = truncated.search(/\s+and\s+/i);
+  const andIdx = truncated.search(STANDALONE_LOWERCASE_AND_SPLIT);
   if (andIdx < 0) return [];
   const leftRaw = truncated.slice(0, andIdx);
-  const rightRaw = truncated.slice(andIdx).replace(/^\s+and\s+/i, "");
+  const rightRaw = truncated.slice(andIdx).replace(/^\s+and\s+/, "");
   const leftNames = splitCommaSeparatedPartyNames(leftRaw)
     .map(trimBetweenPartyFragment)
     .map(normalizeAgreementPartyName)

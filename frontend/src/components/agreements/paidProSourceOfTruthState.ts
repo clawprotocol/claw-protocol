@@ -3,6 +3,7 @@
  */
 
 import { fingerprintAgreementBody } from "./guidedDealCompletion/guidedSigningPacketVersion";
+import { PAID_PRO_AUTHORITY_MIN_LEN } from "./paidProAuthorityConstants";
 
 export type PaidProSourceOfTruth = {
   text: string;
@@ -36,7 +37,11 @@ export function getPaidProSourceOfTruthText(): string {
 }
 
 export function hasPaidProSourceOfTruth(): boolean {
-  return Boolean(paidProSourceOfTruth?.text && paidProSourceOfTruth.text.length >= 500);
+  const text = paidProSourceOfTruth?.text?.trim() ?? "";
+  if (!text) return false;
+  if (text.length >= PAID_PRO_AUTHORITY_MIN_LEN) return true;
+  // Freeze-validated short corpora still count as latched SoT once established.
+  return text.length >= 40;
 }
 
 /** CI-safe live SoT markers on <html> — hashes/lens only, never corpus bytes. */

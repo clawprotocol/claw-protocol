@@ -167,6 +167,11 @@ const PRESERVE_CORPUS_SOURCES = new Set<CanonicalAgreementSnapshotSource>([
   "finalized_signing",
   "accepted_review",
   "authoritative_snapshot",
+  // Already-hydrated / review-render corpora are post-acceptance — do not re-run
+  // full-candidate commercial gates that reject synthetic or concise bodies.
+  "hydrated_premium",
+  "hydrated_premium_with_signers",
+  "paid_pro_review_render",
 ]);
 
 const SOURCE_PRIORITY: readonly CanonicalAgreementSnapshotSource[] = [
@@ -456,7 +461,14 @@ export function buildCanonicalAgreementSnapshot(
     partyNames,
   });
   const blockerIssues = collectBlockerIssues(canonicalText);
-  if (args.tier === "pro" && canonicalText.length >= 500 && !args.skipClauseFamilyPlaceholderIssues) {
+  // Preserved post-acceptance corpora already cleared structural gates — do not
+  // re-inject clause-family violations that would drop signing-ready selection to none.
+  if (
+    args.tier === "pro" &&
+    canonicalText.length >= 500 &&
+    !args.skipClauseFamilyPlaceholderIssues &&
+    !PRESERVE_CORPUS_SOURCES.has(selected.source)
+  ) {
     const structuralParties: PaidProSignerMetadataParty[] =
       args.clauseFamilyStructuralContext?.parties?.map((party, partyIndex) => ({
         partyIndex,

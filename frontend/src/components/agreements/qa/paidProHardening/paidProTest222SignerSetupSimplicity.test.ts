@@ -30,8 +30,13 @@ describe("paidPro Test222 signer setup policy and intake wiring", () => {
     expect(INTAKE_SRC).toMatch(
       /showPersistedRefineBelowDocument[\s\S]{0,400}hideAgreementChangeRequestDuringPaidProSignerSetup/,
     );
-    expect(INTAKE_SRC).toContain("suppressPostReviewEditUx={paidProCanonicalReviewSignerSetupActive}");
+    // Post-review edit chrome stays available; refine suppression is owned by
+    // hideAgreementChangeRequestDuringPaidProSignerSetup (not suppressPostReviewEditUx).
+    expect(INTAKE_SRC).toContain("suppressPostReviewEditUx={false}");
     expect(INTAKE_SRC).not.toMatch(/suppressPostReviewEditUx=\{paidProSignatureDetailsReady\}/);
+    expect(INTAKE_SRC).not.toMatch(
+      /suppressPostReviewEditUx=\{paidProCanonicalReviewSignerSetupActive\}/,
+    );
     expect(REFINE_FIELD_HEADING_PRO).toMatch(/Request changes to your Pro agreement/i);
     expect(INTAKE_SRC).toContain("claw-refine-this-draft");
     expect(INTAKE_SRC).toMatch(

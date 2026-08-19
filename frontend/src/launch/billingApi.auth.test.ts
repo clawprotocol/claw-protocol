@@ -83,6 +83,27 @@ describe("billingApi authenticated probes", () => {
     expect(snap?.orgId).toBe("user-user-1");
   });
 
+  it("handles anonymous subscription 401 as an expected unsigned state", async () => {
+    vi.mocked(getAuthSession).mockResolvedValue(null as never);
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => undefined);
+    vi.mocked(fetch).mockResolvedValue(
+      jsonResponse(401, { detail: { code: "invalid_auth_token", message: "Unauthorized" } }),
+    );
+
+    const result = await fetchSubscription("local-org");
+    expect(result.anonymousExpected).toBe(true);
+    expect(result.error).toBeNull();
+    expect(result.authFailure).toBeFalsy();
+    expect(result.noSubscription).toBe(false);
+    expect(fetch).not.toHaveBeenCalled();
+    expect(warn).not.toHaveBeenCalled();
+
+    const snap = await refreshSubscriptionEntitlement("local-org");
+    expect(snap).toBeNull();
+    expect(readCachedSubscriptionEntitlement()).toBeNull();
+    warn.mockRestore();
+  });
+
   it("does not treat 401 as a free entitlement", async () => {
     vi.mocked(fetch).mockResolvedValue(
       jsonResponse(401, { detail: { code: "invalid_auth_token", message: "Unauthorized" } }),

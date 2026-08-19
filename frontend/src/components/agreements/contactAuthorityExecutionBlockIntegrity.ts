@@ -8,7 +8,6 @@
  * Display-only — never mutates source-of-truth, signer-count, party, or section authority.
  */
 
-import { signaturePatchStartIndex } from "./guidedDealCompletion/signatureRegion";
 import {
   extractOperativeIfToNoticeStanzas,
   resolveOperativeNoticesFamilyEnd,
@@ -96,8 +95,42 @@ export function resolveExecutionBlockRegionStart(text: string): number {
   const normalized = (text || "").replace(/\r\n/g, "\n");
   const witnessIdx = normalized.search(WITNESS_RE);
   if (witnessIdx >= 0) return witnessIdx;
-  const patchIdx = signaturePatchStartIndex(normalized);
-  return patchIdx >= 0 ? patchIdx : normalized.length;
+  // Only trust an explicit signature-region anchor. Never fall back to the
+  // mid-document heuristic from signaturePatchStartIndex — that can land inside
+  // KEY CONTACTS and strip authoritative Email: lines as "execution contamination".
+  const marker = findSafeExecutionBlockAnchor(normalized);
+  return marker >= 0 ? marker : normalized.length;
+}
+
+/** Explicit signature anchors only (no length-fraction fallback). */
+function findSafeExecutionBlockAnchor(text: string): number {
+  const sigHeading = [...text.matchAll(/\n\s*SIGNATURES?\s*:?\s*(?:\n|$)/gi)];
+  for (let i = sigHeading.length - 1; i >= 0; i--) {
+    const idx = sigHeading[i]!.index ?? -1;
+    if (idx >= 0) return idx;
+  }
+  const clientBlock = text.search(/\n\s*CLIENT\s*:\s*(?:\n|$)/i);
+  if (clientBlock >= 0) {
+    // Only treat CLIENT: as execution when a By:/Name: field follows nearby.
+    const window = text.slice(clientBlock, clientBlock + 400);
+    if (/\n\s*(?:By|Name|Title|Date)\s*:/i.test(window)) return clientBlock;
+  }
+  return -1;
+}
+
+const KEY_CONTACTS_SECTION_RE = /(?:^|\n)\s*KEY\s+CONTACTS\s*(?:\n|$)/i;
+
+/** True when offset falls inside a KEY CONTACTS roster (not an execution block). */
+export function offsetInKeyContactsRoster(text: string, offset: number): boolean {
+  const normalized = (text || "").replace(/\r\n/g, "\n");
+  const kc = normalized.search(KEY_CONTACTS_SECTION_RE);
+  if (kc < 0 || offset < kc) return false;
+  const after = normalized.slice(kc + 1);
+  const endRel = after.search(
+    /\n\s*(?:IN WITNESS WHEREOF\b|SIGNATURES?\b|\d+\.\s+[A-Z][A-Za-z]{2,40}\b)/i,
+  );
+  const end = endRel >= 0 ? kc + 1 + endRel : normalized.length;
+  return offset < end;
 }
 
 function classifyContactLine(trimmed: string): ContactAuthorityContaminationCode | null {
@@ -132,12 +165,15 @@ export function analyzeContactAuthorityExecutionBlockIntegrity(text: string): Co
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i] ?? "";
-    if (offset < executionBlockStart) {
+    if (offset < executionBlockStart || offsetInKeyContactsRoster(normalized, offset)) {
       offset += line.length + 1;
       continue;
     }
     const trimmed = line.trim();
-    if (!trimmed) continue;
+    if (!trimmed) {
+      offset += line.length + 1;
+      continue;
+    }
     const code = classifyContactLine(trimmed);
     if (code) {
       diagnostics.push({
@@ -253,7 +289,7 @@ export function stripExecutionBlockContactContamination(text: string): {
 
   for (let i = 0; i < lines.length; ) {
     const line = lines[i] ?? "";
-    if (offset < executionBlockStart) {
+    if (offset < executionBlockStart || offsetInKeyContactsRoster(normalized, offset)) {
       offset += line.length + 1;
       i += 1;
       continue;

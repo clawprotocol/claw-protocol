@@ -192,7 +192,7 @@ describe("SimpleProFinalReviewScreen", () => {
     expect(documentShell.contains(actions)).toBe(false);
     expect(actions.textContent).toContain("Add signer details");
     expect(screen.getByTestId("paid-pro-review-status-panel").textContent).toContain(
-      "Signer details needed",
+      "Add signer details",
     );
     expect(screen.queryByTestId("simple-pro-send-for-review")).toBeNull();
     expect(screen.queryByTestId("simple-pro-change-signing-order")).toBeNull();
@@ -243,7 +243,7 @@ describe("SimpleProFinalReviewScreen", () => {
     const statusPanel = screen.getByTestId("paid-pro-review-status-panel");
     expect(statusPanel.textContent).toContain("Agreement generated");
     expect(statusPanel.textContent).toContain("Signer details added");
-    expect(statusPanel.textContent).toContain("Ready for signing");
+    expect(statusPanel.textContent).toContain("Ready to create signing links");
     expect(screen.getByTestId("paid-pro-final-version-indicator").textContent).toContain("Next step");
     const banner = screen.getByTestId("paid-pro-signer-saved-confirmation");
     expect(banner.textContent).toContain("Signer details saved");
@@ -268,7 +268,7 @@ describe("SimpleProFinalReviewScreen", () => {
       />,
     );
     const statusPanel = screen.getByTestId("paid-pro-review-status-panel");
-    expect(statusPanel.textContent).toContain("Signer details needed");
+    expect(statusPanel.textContent).toContain("Add signer details");
     expect(statusPanel.textContent).toMatch(/signer name/i);
     expect(screen.getByTestId("paid-pro-final-version-indicator").textContent).toMatch(
       /signature links/i,
@@ -353,7 +353,7 @@ describe("SimpleProFinalReviewScreen", () => {
     expect(screen.queryByTestId("simple-pro-suggest-changes-toggle")).toBeNull();
     expect(screen.queryByTestId("simple-pro-continue-to-signing")).toBeNull();
     expect(screen.getByTestId("simple-pro-edit-agreement-text-toggle").textContent).toContain(
-      "Edit agreement text",
+      "Edit agreement directly",
     );
     fireEvent.click(screen.getByTestId("simple-pro-edit-agreement-text-toggle"));
     expect(screen.getByTestId("simple-pro-edit-agreement-text-card")).toBeTruthy();

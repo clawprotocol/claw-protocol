@@ -25,8 +25,8 @@ export function GuidedSigningTrustStrip({
         role="alert"
         data-testid="guided-packet-stale-banner"
       >
-        <span className="font-semibold">Refresh signing packet.</span> The agreement changed after the packet
-        was prepared. Re-prepare before you send for signature.
+        <span className="font-semibold">Create new links.</span> The agreement changed after links were created.
+        Those links are no longer valid for this version.
       </p>
     );
   }

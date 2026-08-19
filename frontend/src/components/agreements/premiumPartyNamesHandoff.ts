@@ -373,6 +373,7 @@ function writePremiumRecipientHandoffDirectLinear(
   slots: PremiumRecipientHandoffSlot[],
   partyCount: number,
 ): void {
+  if (typeof sessionStorage === "undefined") return;
   const n = Math.min(Math.max(partyCount, 2), MAX_PREMIUM_RECIPIENT_PARTY_HANDOFF_ROWS);
   const trimmed = slots.slice(0, n);
   const payload: PremiumRecipientHandoffV2 = {
@@ -382,8 +383,12 @@ function writePremiumRecipientHandoffDirectLinear(
     savedAt: Date.now(),
     ...(n > 2 ? { partyIndexSlots: trimmed.slice(2, n) } : {}),
   };
-  sessionStorage.setItem(KEY_V2, JSON.stringify(payload));
-  sessionStorage.removeItem(LEGACY_KEY);
+  try {
+    sessionStorage.setItem(KEY_V2, JSON.stringify(payload));
+    sessionStorage.removeItem(LEGACY_KEY);
+  } catch {
+    /* ignore — non-browser / blocked storage */
+  }
   invalidatePremiumRecipientHandoffReadCache();
   logReviewLinkSignerMetadataHandoffWrite(payload);
   latchSignerMetadataEffectiveMax(countSignerMetadataSlots(payload, n));

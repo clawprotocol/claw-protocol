@@ -7,6 +7,10 @@ import { PAID_PRO_AUTHORITY_MIN_LEN } from "./paidProAgreementAuthority";
 import { isAuthoritativePremiumPipelineRenderSource } from "./premiumRenderSourceResolver";
 import { readAuthoritativeSigningCorpus } from "./authoritativeSigningSnapshot";
 import { repairMalformedPaidProAgreementRecital } from "./paidProAgreementRecitalRepair";
+import {
+  repairDuplicateAgreementOpening,
+  resolveCommercialPartyRecordsForOpeningRepair,
+} from "./canonicalPartyIdentityResolver";
 import { stripPremiumIntelligenceCalloutsFromCorpus } from "./premiumDocumentIntelligenceStrip";
 import {
   PAID_PRO_FINAL_HYDRATED_CORPUS_MIN_LEN,
@@ -31,16 +35,14 @@ import {
   hasPaidProSourceOfTruth,
 } from "./paidProSourceOfTruth";
 import { PAID_PRO_REVIEW_SIGNER_DETAILS_NEEDED_STATUS } from "./paidProReviewTrustUx";
+import { CUSTOMER_JOURNEY_STATE } from "./customerJourneyReadiness";
 import { isPaidProPostFinalizeHydratedCorpusLocked } from "./paidProSignerMetadataCommitPolicy";
-import {
-  resolvePaidProDisplayPlainForSurface,
-  resolvePaidProPostFinalizeUserVisiblePlain,
-} from "./paidProDisplayPlainAuthority";
+import { resolvePaidProDisplayPlainForSurface } from "./paidProDisplayPlainAuthority";
 import { resolvePaidProPostFinalizeReviewPlain } from "./paidProPostFinalizeReviewSurface";
 
 export { PAID_PRO_REVIEW_SIGNER_DETAILS_NEEDED_STATUS };
 
-export const PAID_PRO_REVIEW_SHELL_TITLE = "Agreement draft ready";
+export const PAID_PRO_REVIEW_SHELL_TITLE = "Draft created—review recommended";
 export const PAID_PRO_REVIEW_SHELL_SUBTITLE =
   "Review the agreement draft below. Next, add signer details to create signature links.";
 export const PAID_PRO_REVIEW_SHELL_SAFETY_LINE =
@@ -49,12 +51,13 @@ export const PAID_PRO_REVIEW_SHELL_SAFETY_LINE =
 export const PAID_PRO_REVIEW_BADGE = "Agreement draft";
 export const PAID_PRO_REVIEW_CHIP_VERSION = "Agreement draft";
 /** @deprecated Prefer {@link resolvePaidProReviewChipState} for stage-accurate copy. */
-export const PAID_PRO_REVIEW_CHIP_STATE = "Ready for signature";
+export const PAID_PRO_REVIEW_CHIP_STATE = CUSTOMER_JOURNEY_STATE.readyToCreateSigningLinks;
 
 /** Same label as trust-rail signer step — status, not an action. */
 export const PAID_PRO_REVIEW_CHIP_READY_FOR_SIGNER_SETUP = PAID_PRO_REVIEW_SIGNER_DETAILS_NEEDED_STATUS;
-export const PAID_PRO_REVIEW_CHIP_READY_TO_PREPARE_SIGNING_LINKS = "Ready to prepare signing links";
-export const PAID_PRO_REVIEW_CHIP_READY_FOR_SIGNING = "Ready for signing";
+export const PAID_PRO_REVIEW_CHIP_READY_TO_PREPARE_SIGNING_LINKS =
+  CUSTOMER_JOURNEY_STATE.readyToCreateSigningLinks;
+export const PAID_PRO_REVIEW_CHIP_READY_FOR_SIGNING = CUSTOMER_JOURNEY_STATE.linksCreatedShareWhenReady;
 
 /** Display-only review status chip — does not change workflow state machine. */
 export function resolvePaidProReviewChipState(args: {
@@ -91,14 +94,23 @@ function finalizeAuthoritativePaidProReviewPlain(text: string): string {
   if (isPaidProPostFinalizeHydratedCorpusLocked()) {
     const locked = resolvePaidProPostFinalizeReviewPlain();
     if (locked.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
-      return resolvePaidProPostFinalizeUserVisiblePlain(locked);
+      return locked;
     }
   }
   const trimmed = text.trim();
   if (trimmed.length < PAID_PRO_AUTHORITY_MIN_LEN) return trimmed;
   const parties = readConsumedPaidProSignerMetadataAuthority()?.parties;
   const repaired = repairMalformedPaidProAgreementRecital(trimmed, parties).text.trim();
-  const stripped = stripPremiumIntelligenceCalloutsFromCorpus(repaired);
+  const openingRecords = resolveCommercialPartyRecordsForOpeningRepair(
+    "",
+    (parties ?? []).map((p) => p.partyLegalName),
+    (parties ?? []).map((p) => p.roleLabel ?? ""),
+  );
+  const openingRepaired = repairDuplicateAgreementOpening(
+    repaired,
+    openingRecords.length >= 2 ? openingRecords : undefined,
+  ).text.trim();
+  const stripped = stripPremiumIntelligenceCalloutsFromCorpus(openingRepaired);
   return resolvePaidProDisplayPlainForSurface({
     surface: "review",
     sourcePlain: stripped,
@@ -110,16 +122,18 @@ export function resolveAuthoritativePaidProReviewPlain(
   args?: AuthoritativePaidProReviewInput,
 ): string {
   if (isPaidProPostFinalizeHydratedCorpusLocked()) {
-    const locked = resolvePaidProPostFinalizeReviewPlain();
+    const locked = resolvePaidProPostFinalizeReviewPlain(args?.draft ?? null);
     if (locked.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
-      return resolvePaidProPostFinalizeUserVisiblePlain(locked, args?.draft ?? null);
+      return locked;
     }
   }
   if (shouldUsePaidProSourceOfTruthDisplayOnly()) {
-    return resolvePaidProAuthoritativeDisplayPlain({
-      draft: args?.draft ?? null,
-      intakeText: args?.intakeText ?? null,
-    });
+    return finalizeAuthoritativePaidProReviewPlain(
+      resolvePaidProAuthoritativeDisplayPlain({
+        draft: args?.draft ?? null,
+        intakeText: args?.intakeText ?? null,
+      }),
+    );
   }
   const pinnedPlain = readPaidProPinnedSignerAppliedCorpus().trim();
   if (pinnedPlain.length >= PAID_PRO_FINAL_HYDRATED_CORPUS_MIN_LEN) {
@@ -244,10 +258,12 @@ export function resolvePaidProFinalReviewVisiblePlain(args: {
   displayCandidatePlain?: string | null;
 }): string {
   if (shouldUsePaidProSourceOfTruthDisplayOnly()) {
-    return resolvePaidProAuthoritativeDisplayPlain({
-      draft: args?.draft ?? null,
-      intakeText: args?.intakeText ?? null,
-    });
+    return finalizeAuthoritativePaidProReviewPlain(
+      resolvePaidProAuthoritativeDisplayPlain({
+        draft: args?.draft ?? null,
+        intakeText: args?.intakeText ?? null,
+      }),
+    );
   }
   const renderPlain = resolvePaidProReviewRenderPlain({
     draft: args.draft ?? null,

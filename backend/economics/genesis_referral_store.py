@@ -304,6 +304,24 @@ def get_active_attribution_for_org(con: sqlite3.Connection, org_id: str) -> Opti
     return _row_to_dict(row) if row else None
 
 
+def count_non_voided_commissions_for_referred_org(
+    con: sqlite3.Connection, referred_org_id: str
+) -> int:
+    """Non-voided commissions for a referred org — used to enforce first-invoice-only."""
+    oid = (referred_org_id or "").strip()
+    if not oid:
+        return 0
+    row = con.execute(
+        """
+        SELECT COUNT(*) FROM affiliate_commissions
+        WHERE referred_org_id = ?
+          AND COALESCE(status, '') NOT IN ('voided', 'refunded', 'canceled', 'cancelled')
+        """,
+        (oid,),
+    ).fetchone()
+    return int(row[0]) if row else 0
+
+
 def insert_affiliate_commission(
     con: sqlite3.Connection,
     *,

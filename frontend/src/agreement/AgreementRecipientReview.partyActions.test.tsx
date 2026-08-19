@@ -218,8 +218,9 @@ describe("AgreementRecipientReview review-first actions", () => {
 
     await userEvent.click(screen.getByTestId("recipient-review-propose-updated-draft"));
     const paste = await screen.findByTestId("recipient-edit-draft-textarea");
-    await userEvent.clear(paste);
-    await userEvent.type(paste, `AI Automation Services Agreement\n\n${UPDATED_SCHEDULE_A}`);
+    fireEvent.change(paste, {
+      target: { value: `AI Automation Services Agreement\n\n${UPDATED_SCHEDULE_A}` },
+    });
     const livePreview = await screen.findByTestId("recipient-review-proposed-update-preview");
     expect(within(livePreview).getByText(/Updated agreement pasted/i)).toBeTruthy();
     expect(within(livePreview).getByText(/Review changes to continue/i)).toBeTruthy();
@@ -276,12 +277,13 @@ describe("AgreementRecipientReview review-first actions", () => {
 
     await userEvent.click(screen.getByTestId("recipient-review-propose-updated-draft"));
     expect(screen.queryByTestId("recipient-review-personal-link-required")).toBeNull();
-    expect((await screen.findByTestId("recipient-review-personal-link-optional-notice")).textContent).toContain(
-      "You can still review wording changes here",
-    );
+    // Sole non-owner party is inferred from the tokenized review entry (Test280) — optional
+    // "missing attribution" chrome is not shown, and submit remains available after preview.
+    expect(screen.queryByTestId("recipient-review-personal-link-optional-notice")).toBeNull();
     const paste = await screen.findByTestId("recipient-edit-draft-textarea");
-    await userEvent.clear(paste);
-    await userEvent.type(paste, `AI Automation Services Agreement\n\n${UPDATED_SCHEDULE_A}`);
+    fireEvent.change(paste, {
+      target: { value: `AI Automation Services Agreement\n\n${UPDATED_SCHEDULE_A}` },
+    });
     expect((await screen.findByTestId("recipient-review-proposed-update-state")).textContent).toContain(
       "Ready to review",
     );
@@ -291,10 +293,8 @@ describe("AgreementRecipientReview review-first actions", () => {
 
     expect((await screen.findByTestId("recipient-preview-summary-heading")).textContent).toBe("Changes detected");
     expect(screen.getByTestId("recipient-review-proposed-update-before-after")).toBeTruthy();
-    expect(screen.getByTestId("recipient-open-send-suggested-edits-modal")).toHaveProperty("disabled", true);
-    expect((await screen.findByTestId("recipient-review-submit-attribution-hint")).textContent).toContain(
-      "You can still review the changes here",
-    );
+    expect(screen.getByTestId("recipient-open-send-suggested-edits-modal")).toHaveProperty("disabled", false);
+    expect(screen.queryByTestId("recipient-review-submit-attribution-hint")).toBeNull();
   });
 
   it("with participant id: material paste enables review changes and submit after preview", async () => {
@@ -333,8 +333,9 @@ describe("AgreementRecipientReview review-first actions", () => {
 
     await userEvent.click(screen.getByTestId("recipient-review-propose-updated-draft"));
     const paste = await screen.findByTestId("recipient-edit-draft-textarea");
-    await userEvent.clear(paste);
-    await userEvent.type(paste, `AI Automation Services Agreement\n\n${UPDATED_SCHEDULE_A}`);
+    fireEvent.change(paste, {
+      target: { value: `AI Automation Services Agreement\n\n${UPDATED_SCHEDULE_A}` },
+    });
     expect(screen.getByTestId("recipient-compare-versions-button")).toHaveProperty("disabled", false);
     await userEvent.click(screen.getByTestId("recipient-compare-versions-button"));
     expect((await screen.findByTestId("recipient-preview-summary-heading")).textContent).toBe("Changes detected");

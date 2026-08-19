@@ -75,6 +75,16 @@ export function stripIntakeBulletPrefix(line: string): string {
 function looksLikeUnlabeledSignerTitleLine(line: string): boolean {
   const t = stripIntakeBulletPrefix(line);
   if (!t || isPartyMetadataFieldLabelLine(t)) return false;
+  // Next-party headers must never become the prior block's title
+  // (e.g. "Party 2 (Lead Consultant):" after Party 1's entity line).
+  if (
+    PARTY_BLOCK_HEADER_RE.test(t) ||
+    PARTY_BLOCK_WITH_ROLE_HEADER_RE.test(t) ||
+    PARTY_BLOCK_WITH_ROLE_INLINE_RE.test(t) ||
+    COORDINATOR_BLOCK_HEADER_RE.test(t)
+  ) {
+    return false;
+  }
   if (looksLikeStackedPartyEmailLine(t)) return false;
   if (looksLikeStackedPartyLegalEntityLine(t) && !t.includes(":")) return false;
   if (looksLikeStackedPartyPersonNameLine(t)) return false;
@@ -95,7 +105,14 @@ function isPositionalSignerTitleCandidate(line: string): boolean {
   if (matchLabeledPartyField(t)) return false;
   if (looksLikeStackedPartyEmailLine(t)) return false;
   if (looksLikeStackedPartyLegalEntityLine(t) && !t.includes(":")) return false;
-  if (PARTY_BLOCK_HEADER_RE.test(t) || COORDINATOR_BLOCK_HEADER_RE.test(t)) return false;
+  if (
+    PARTY_BLOCK_HEADER_RE.test(t) ||
+    PARTY_BLOCK_WITH_ROLE_HEADER_RE.test(t) ||
+    PARTY_BLOCK_WITH_ROLE_INLINE_RE.test(t) ||
+    COORDINATOR_BLOCK_HEADER_RE.test(t)
+  ) {
+    return false;
+  }
   return true;
 }
 
@@ -263,9 +280,9 @@ function matchLabeledPartyField(line: string): { key: keyof Omit<LabeledPartyBlo
   for (const { key, re } of LABELED_FIELD_RES) {
     const m = normalized.match(re);
     if (!m?.[1]) continue;
-    const value = cleanFieldValue(m[1]);
-    if (!value) continue;
-    return { key, value };
+    // Keep Unknown/TBD matches as labeled fields with empty values so they do not
+    // fall through to stacked address capture (TEST367).
+    return { key, value: cleanFieldValue(m[1]) };
   }
   return null;
 }
@@ -286,6 +303,8 @@ function applyLabeledFieldToBlock(
     return lineIndex;
   }
   if (labeled.key === "address") {
+    // Empty/Unknown address labels must not start multiline capture into Purpose/prose.
+    if (!labeled.value) return lineIndex;
     return appendMultilineAddress(block, labeled.value, lines, lineIndex);
   }
   block[labeled.key] = labeled.value;
@@ -346,6 +365,14 @@ function applyStackedPartyLine(block: LabeledPartyBlock, line: string): void {
   }
   if (block.address && isAddressContinuationLine(t)) {
     block.address = mergeCanonicalPartyAddresses(block.address, cleanFieldValue(t));
+    return;
+  }
+  if (
+    PARTY_BLOCK_HEADER_RE.test(t) ||
+    PARTY_BLOCK_WITH_ROLE_HEADER_RE.test(t) ||
+    PARTY_BLOCK_WITH_ROLE_INLINE_RE.test(t) ||
+    COORDINATOR_BLOCK_HEADER_RE.test(t)
+  ) {
     return;
   }
   if (
@@ -524,7 +551,12 @@ export function parseEntityHeaderContactBlocks(raw: string): LabeledPartyBlock[]
       flushCurrent();
       continue;
     }
-    if (PARTY_BLOCK_HEADER_RE.test(line) || COORDINATOR_BLOCK_HEADER_RE.test(line)) {
+    if (
+      PARTY_BLOCK_HEADER_RE.test(line) ||
+      PARTY_BLOCK_WITH_ROLE_HEADER_RE.test(line) ||
+      PARTY_BLOCK_WITH_ROLE_INLINE_RE.test(line) ||
+      COORDINATOR_BLOCK_HEADER_RE.test(line)
+    ) {
       flushCurrent();
       continue;
     }

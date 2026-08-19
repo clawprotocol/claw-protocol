@@ -18,6 +18,7 @@ from backend.affiliates import service as affiliate_service
 from backend.billing import pricing
 from backend.billing.subscription_authority import (
     apply_invoice_paid_subscription_renewal,
+    _subscription_id_from_invoice,
     apply_stripe_subscription_object,
 )
 from backend.economics import config as econ_config
@@ -63,18 +64,19 @@ def handle_invoice_paid(economics: EconomicsStore, invoice: Dict[str, Any]) -> D
         org_id = economics.get_org_for_stripe_customer(customer_id)
     if not org_id:
         _log.info("invoice.paid skip: no org_id invoice=%s", inv_id)
-        return {**subscription_sync, "ok": True, "ignored": True, "reason": "no_org_mapping"}
+        return {
+            **subscription_sync,
+            "ok": False,
+            "ignored": True,
+            "retryable": True,
+            "reason": "no_org_mapping",
+        }
 
     amount_cents = int(invoice.get("amount_paid") or 0)
     if amount_cents <= 0:
         return {**subscription_sync, "ok": True, "ignored": True, "reason": "zero_amount"}
 
-    sub_sid = invoice.get("subscription")
-    stripe_sub_id: Optional[str] = None
-    if isinstance(sub_sid, str) and sub_sid.strip():
-        stripe_sub_id = sub_sid.strip()
-    elif isinstance(sub_sid, dict):
-        stripe_sub_id = str(sub_sid.get("id") or "").strip() or None
+    stripe_sub_id = _subscription_id_from_invoice(invoice)
 
     if stripe_sub_id and not economics.subscription_qualifies_for_affiliate_earning(stripe_sub_id):
         _log.info("invoice.paid skip: subscription not qualifying sub=%s", stripe_sub_id)
@@ -84,6 +86,21 @@ def handle_invoice_paid(economics: EconomicsStore, invoice: Dict[str, Any]) -> D
             "ignored": True,
             "reason": "subscription_inactive",
         }
+
+    # Genesis affiliate_commissions ledger is commercial SoT — do not double-pay via legacy earnings.
+    try:
+        from backend.affiliates.genesis_referral_service import resolve_genesis_commission_context
+
+        md = invoice.get("metadata") if isinstance(invoice.get("metadata"), dict) else {}
+        if resolve_genesis_commission_context(economics, org_id=org_id, invoice_metadata=md):
+            return {
+                **subscription_sync,
+                "ok": True,
+                "ignored": True,
+                "reason": "genesis_ledger_authoritative",
+            }
+    except Exception:
+        _log.exception("genesis attribution probe failed org=%s", org_id)
 
     active = affiliate_service.get_active_affiliate_for_org(org_id, economics=economics)
     if not active or not active.get("affiliate"):
@@ -100,13 +117,69 @@ def handle_invoice_paid(economics: EconomicsStore, invoice: Dict[str, Any]) -> D
         return {**subscription_sync, "ok": True, "ignored": True, "reason": "attribution_excluded"}
 
     sub_row = economics.get_subscription_by_org(org_id)
-    plan_code = str(sub_row.get("plan_code") or "starter") if sub_row else "starter"
+    plan_code = str(sub_row.get("plan_code") or "pro") if sub_row else "pro"
     link = economics.get_stripe_subscription_org(stripe_sub_id) if stripe_sub_id else None
     if link and link.get("plan_code"):
         plan_code = str(link["plan_code"])
 
     if not pricing.affiliate_eligible_for_plan(plan_code):
         return {**subscription_sync, "ok": True, "ignored": True, "reason": "plan_not_eligible"}
+
+    # Idempotent retry of the same invoice before first-invoice gate.
+    try:
+        with economics._conn() as con:
+            existing = con.execute(
+                """
+                SELECT id FROM affiliate_earnings
+                WHERE idempotency_key = ? OR invoice_id = ?
+                LIMIT 1
+                """,
+                (idem, inv_id),
+            ).fetchone()
+            if existing:
+                return {
+                    **subscription_sync,
+                    "ok": True,
+                    "duplicate": True,
+                    "earning_id": str(existing[0]),
+                    "invoice_id": inv_id,
+                }
+    except Exception:
+        _log.exception("duplicate earning probe failed invoice=%s", inv_id)
+
+    # Canonical: first successfully settled Pro invoice only (not recurring cycles).
+    billing_reason = str(invoice.get("billing_reason") or "")
+    if billing_reason == "subscription_cycle":
+        return {
+            **subscription_sync,
+            "ok": True,
+            "ignored": True,
+            "reason": "first_invoice_only",
+        }
+    prior_earnings = 0
+    try:
+        with economics._conn() as con:
+            prior_earnings = int(
+                con.execute(
+                    """
+                    SELECT COUNT(*) FROM affiliate_earnings
+                    WHERE referred_org_id = ?
+                      AND COALESCE(status, '') NOT IN (
+                        'voided', 'reversed', 'refunded', 'cancelled', 'canceled'
+                      )
+                    """,
+                    (org_id,),
+                ).fetchone()[0]
+            )
+    except Exception:
+        _log.exception("prior earning count failed org=%s", org_id)
+    if prior_earnings > 0:
+        return {
+            **subscription_sync,
+            "ok": True,
+            "ignored": True,
+            "reason": "first_invoice_only",
+        }
 
     bps = pricing.affiliate_bps_for_plan(plan_code)
     if bps <= 0:
@@ -119,8 +192,7 @@ def handle_invoice_paid(economics: EconomicsStore, invoice: Dict[str, Any]) -> D
     if payout_amt <= 0:
         return {**subscription_sync, "ok": True, "ignored": True, "reason": "zero_payout"}
 
-    billing_reason = str(invoice.get("billing_reason") or "")
-    earning_type = "recurring" if billing_reason == "subscription_cycle" else "initial"
+    earning_type = "initial"
 
     ch = invoice.get("charge")
     charge_id = ch.strip() if isinstance(ch, str) and ch.strip() else None

@@ -1,9 +1,23 @@
 import { resolveCurrentUser, readStoredDisplayName } from "./currentUser";
 
-export const AFFILIATE_MONTHLY_PLAN_USD = 39;
+/** Pro list prices used for Genesis first-payment commission *display* examples. */
+export const AFFILIATE_MONTHLY_PLAN_USD = 49;
+export const AFFILIATE_ANNUAL_PLAN_USD = 490;
 export const AFFILIATE_COMMISSION_RATE = 0.3;
-export const AFFILIATE_MONTHLY_COMMISSION_USD =
+/**
+ * Illustrative commissions at standard Pro list prices (30% of eligible net).
+ * Live ledger amounts are calculated from eligible net payment (after discounts, excluding tax)
+ * — never hardcoded in payment handlers.
+ */
+export const AFFILIATE_FIRST_INVOICE_COMMISSION_USD =
   Math.round(AFFILIATE_MONTHLY_PLAN_USD * AFFILIATE_COMMISSION_RATE * 100) / 100;
+export const AFFILIATE_FIRST_ANNUAL_COMMISSION_USD =
+  Math.round(AFFILIATE_ANNUAL_PLAN_USD * AFFILIATE_COMMISSION_RATE * 100) / 100;
+/** @deprecated Use AFFILIATE_FIRST_INVOICE_COMMISSION_USD — commission is not recurring monthly. */
+export const AFFILIATE_MONTHLY_COMMISSION_USD = AFFILIATE_FIRST_INVOICE_COMMISSION_USD;
+
+export const AFFILIATE_FIRST_PAYMENT_OFFER_COPY =
+  "Earn 30% of the first eligible net LawDog Pro payment after discounts, excluding tax, payable after the refund window. At standard pricing, that is $14.70 for a monthly signup or $147.00 for an annual signup. Renewals do not earn another commission.";
 
 export type AffiliateReferralRow = {
   id: string;

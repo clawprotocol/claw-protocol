@@ -4,6 +4,7 @@
 
 import { resolveAuthoritativeWitnessIndex } from "./paidProExecutionBlockNormalization";
 import { isPaidProNumberedSectionHeadingLine } from "./paidProNumberedSectionHeading";
+import { isCompletePaidProShortHeadingTitle } from "./repairSplitPaidProHeadingFragments";
 
 export type PaidProSyntheticMalformedSectionHeading = {
   lineIndex: number;
@@ -28,10 +29,14 @@ const SUBSECTION_HEADING_RE = /^(\d+)\.(\d+)(?:\.(\d+))?\s+(.+)$/;
 /** Real clause titles (e.g. "Initial Payment.") — not empty synthetic subsection shells. */
 function isSubstantiveSubsectionTitle(title: string): boolean {
   const t = title.trim();
-  if (t.length < 5) return false;
+  if (t.length < 3) return false;
   if (/^Section\s*$/i.test(t)) return false;
   if (/^General Provisions\s*$/i.test(t)) return false;
   if (/^Provisions\s+\d+\.\d+/i.test(t)) return false;
+  // Canonical short titles (Coordination, Termination, Notices, …) are substantive
+  // even as single tokens — do not false-reject empty-body subsection shells.
+  if (isCompletePaidProShortHeadingTitle(t)) return true;
+  if (t.length < 5) return false;
   return /[a-z]/i.test(t) && (/\s/.test(t) || t.endsWith("."));
 }
 

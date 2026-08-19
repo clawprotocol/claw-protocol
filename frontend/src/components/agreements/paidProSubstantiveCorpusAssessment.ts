@@ -61,8 +61,29 @@ export function qualifiesAsConciseAuthoritativePaidServerDraft(text: string): bo
     return false;
   }
   if (!CONCISE_AUTHORITATIVE_PAID_ENTITY_RE.test(t)) return false;
-  if (!/IN WITNESS WHEREOF|executed this Agreement/i.test(t)) return false;
-  if (!/^\s*\d+\.\s+[A-Za-z]/m.test(t) && !/^\s*[A-Z][A-Z0-9\s,&-]{4,}\s*$/m.test(t)) return false;
+  const sectionCount = countNumberedSections(t);
+  const hasWitnessClose = /IN WITNESS WHEREOF|executed this Agreement/i.test(t);
+  const hasEsignClose = /\belectronic\s+signatures?\b|\be-?sign\b|\bcounterparts?\b/i.test(t);
+  const hasAgreementTitle = /^\s*[A-Z][A-Z0-9\s,&'/()-]{4,}\s*$/m.test(t);
+  const hasOpeningRecital =
+    /\b(?:this\s+agreement\s+is\s+between|this\s+agreement\s+is\s+entered\s+into|entered\s+into\s+as\s+of)\b/i.test(
+      t,
+    );
+  // Concise commercial Pro drafts may close with an Electronic Signatures section before
+  // signer-setup adds witness/execution blocks — still authoritative when structure is strong.
+  // Naked-head repair may yield opening + operative body without an ALL-CAPS title line yet.
+  const strongOpeningWithoutClose =
+    hasOpeningRecital &&
+    (hasAgreementTitle || t.length >= 800) &&
+    (sectionCount >= 1 || t.length >= 800);
+  if (
+    !hasWitnessClose &&
+    !(hasEsignClose && sectionCount >= 3) &&
+    !strongOpeningWithoutClose
+  ) {
+    return false;
+  }
+  if (sectionCount < 1 && !hasAgreementTitle && t.length < 800) return false;
   if (/\b(?:starter preview|live preview|preview only|fallback preview|retry pro draft)\b/i.test(t)) {
     return false;
   }
@@ -82,7 +103,10 @@ export function isPaidProServerFullDraftSource(source: string | null | undefined
 }
 
 function countNumberedSections(text: string): number {
-  return (text.match(/^\s*\d+\.\s+[A-Za-z]/gm) ?? []).length;
+  const numbered = (text.match(/^\s*\d+\.\s+[A-Za-z]/gm) ?? []).length;
+  // Markdown ATX headings (## Scope) count as structural sections for concise Pro drafts.
+  const markdown = (text.match(/^\s{0,3}#{1,3}\s+\S+/gm) ?? []).length;
+  return Math.max(numbered, markdown);
 }
 
 function appearsPreviewOrRecoveryStub(text: string): boolean {
@@ -97,7 +121,8 @@ function appearsThinRepetitiveCorpus(text: string): boolean {
   const lines = t.split(/\n+/).map((l) => l.trim()).filter(Boolean);
   if (lines.length <= 3) {
     const unique = new Set(lines);
-    if (unique.size <= 2) return true;
+    // Long single-paragraph bodies are not stubs — only short 1–2 line repeats.
+    if (unique.size <= 2 && t.length < 2_500) return true;
   }
   const words = t.split(/\s+/).filter(Boolean);
   if (words.length >= 40) {
@@ -115,7 +140,14 @@ export function detectPaidProCorpusAbruptTruncation(text: string): boolean {
   if (!t) return true;
   if (/\[(?:truncated|TBD|TODO)\]/i.test(t)) return true;
   if (/\.\.\.\s*$/.test(t)) return true;
-  if (t.length >= 1_500 && !/IN WITNESS WHEREOF|executed this Agreement/i.test(t)) {
+  // Complete prose ending in a sentence does not require an execution block to avoid
+  // false "truncated" on concise authoritative / guided-final corpora.
+  const endsWithSentence = /[.!?]"?\s*$/.test(t.slice(-80).trim());
+  if (
+    t.length >= 1_500 &&
+    !endsWithSentence &&
+    !/IN WITNESS WHEREOF|executed this Agreement/i.test(t)
+  ) {
     return true;
   }
   const tail = t.slice(-120).trim();
@@ -132,13 +164,19 @@ export function assessGenericOperativeStructureCompleteness(text: string): {
   const blockers: string[] = [];
   const t = text.trim();
   const bodyLow = t.toLowerCase();
-  if (t.length < 800) blockers.push("below_generic_operative_min_len");
+  // Align with runtime authority floor (500). Prior 800 false-rejected complete ~741-char Pro drafts.
+  if (t.length < 500) {
+    blockers.push("below_generic_operative_min_len");
+  }
   if (!CONCISE_AUTHORITATIVE_PAID_ENTITY_RE.test(t)) {
     blockers.push("missing_legal_entity_parties");
   }
   const executionBlockCount = countPaidProExecutionBlocks(t);
-  if (executionBlockCount < 1) blockers.push("missing_execution_block");
   const sectionCount = countNumberedSections(t);
+  const hasEsignClose = /\belectronic\s+signatures?\b|\be-?sign\b|\bcounterparts?\b/i.test(bodyLow);
+  if (executionBlockCount < 1 && !(hasEsignClose && sectionCount >= 6)) {
+    blockers.push("missing_execution_block");
+  }
   if (sectionCount < 3) blockers.push("insufficient_numbered_sections");
   let operativeHits = 0;
   if (/\b(?:payment|compensation|fee|consideration)\b/i.test(bodyLow)) operativeHits++;
@@ -193,9 +231,6 @@ export function assessPaidProSubstantiveServerDraftCorpus(args: {
   if (!raw) blockers.push("empty_corpus");
   if (appearsPreviewOrRecoveryStub(raw)) blockers.push("preview_or_recovery_stub");
   if (appearsThinRepetitiveCorpus(raw)) blockers.push("thin_repetitive_corpus");
-  if (RECOVERY_NOTICE_SCAFFOLDING_RE.test(raw) && rawLength < SUBSTANTIVE_SERVER_DRAFT_MIN_LEN) {
-    blockers.push("recovery_notice_scaffolding");
-  }
   if (placeholderCount > 0) blockers.push("unresolved_placeholders");
   const appearsTruncated = detectPaidProCorpusAbruptTruncation(raw);
   if (appearsTruncated) blockers.push("truncated");
@@ -212,11 +247,27 @@ export function assessPaidProSubstantiveServerDraftCorpus(args: {
   const professional = assessProfessionalProClauseCoverage({ text: raw, intake: intakeText });
   const conciseHeuristic = qualifiesAsConciseAuthoritativePaidServerDraft(raw);
   const genericStructure = assessGenericOperativeStructureCompleteness(raw);
-
-  const professionalMaterialSatisfied =
+  const professionalMaterialSatisfiedEarly =
     professional.applies &&
     professional.materialClausesMissing.length === 0 &&
     (professional.ok || professional.conciseComplete);
+  const otherwiseStructurallyComplete =
+    hasRequiredSections ||
+    professionalMaterialSatisfiedEarly ||
+    conciseHeuristic ||
+    genericStructure.ok;
+  // Pre-signer notices ("provided during signer setup") are not recovery stubs when the
+  // agreement is otherwise structurally complete. Only treat the phrase as scaffolding on
+  // thin/incomplete bodies below the strong length floor.
+  if (
+    RECOVERY_NOTICE_SCAFFOLDING_RE.test(raw) &&
+    rawLength < SUBSTANTIVE_SERVER_DRAFT_MIN_LEN &&
+    !otherwiseStructurallyComplete
+  ) {
+    blockers.push("recovery_notice_scaffolding");
+  }
+
+  const professionalMaterialSatisfied = professionalMaterialSatisfiedEarly;
 
   const structurallyComplete =
     blockers.length === 0 &&
@@ -245,7 +296,14 @@ export function assessPaidProSubstantiveServerDraftCorpus(args: {
   } else if (structurallyComplete) {
     classification = "structurally_complete_concise";
   } else if (rawLength > 0 && rawLength < SUBSTANTIVE_SERVER_DRAFT_MIN_LEN) {
-    classification = "mislabeled";
+    // Long-but-incomplete bodies are "partial", not mislabeled stubs. Reserve mislabeled
+    // for short/stub corpora so establish/guided handoff can still latch ≥4k candidates.
+    classification =
+      rawLength >= 4_000 &&
+      !blockers.includes("preview_or_recovery_stub") &&
+      !blockers.includes("thin_repetitive_corpus")
+        ? "partial"
+        : "mislabeled";
   } else {
     classification = "partial";
   }
@@ -283,5 +341,12 @@ export function paidProServerFullDraftBelowSubstantiveMin(args: {
   const trimmed = (args.text || "").trim();
   if (!trimmed || trimmed.length >= SUBSTANTIVE_SERVER_DRAFT_MIN_LEN) return false;
   const assessment = assessPaidProSubstantiveServerDraftCorpus(args);
-  return !assessment.qualifiesForServerFullDraftAcceptance;
+  if (assessment.qualifiesForServerFullDraftAcceptance) return false;
+  // Hard-block only clear stub/mislabel/truncation cases. Partial ≥4k bodies may still
+  // establish when freeze prep / pipeline acceptance validates substance.
+  return (
+    assessment.classification === "mislabeled" ||
+    assessment.classification === "truncated" ||
+    assessment.blockers.includes("preview_or_recovery_stub")
+  );
 }

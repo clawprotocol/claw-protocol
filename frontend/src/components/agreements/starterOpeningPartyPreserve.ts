@@ -117,6 +117,26 @@ function normalizeCompare(s: string): string {
   return s.replace(/\s+/g, " ").trim().toLowerCase();
 }
 
+function countUppercaseLetters(s: string): number {
+  return (s.match(/[A-Z]/g) || []).length;
+}
+
+/** Prefer draft/display casing when intake extraction is a weaker or truncated match. */
+function preferStarterPreviewPartyDisplayName(draftName: string, candidate: string): string {
+  const draft = String(draftName || "").replace(/\s+/g, " ").trim();
+  const cand = String(candidate || "").replace(/\s+/g, " ").trim();
+  if (!draft) return cand;
+  if (!cand) return draft;
+  const draftNorm = normalizeCompare(draft);
+  const candNorm = normalizeCompare(cand);
+  if (draftNorm === candNorm) {
+    return countUppercaseLetters(draft) >= countUppercaseLetters(cand) ? draft : cand;
+  }
+  if (draftNorm.includes(candNorm) && draft.length > cand.length) return draft;
+  if (candNorm.includes(draftNorm) && cand.length > draft.length) return cand;
+  return cand;
+}
+
 function partyNameIsShortFormOf(fullLegal: string, displayName: string): boolean {
   const full = normalizeCompare(fullLegal);
   const display = normalizeCompare(displayName);
@@ -150,7 +170,7 @@ export function enrichStarterPreviewPartiesFromIntake(
         fullNames.find((full) => partyLegalNamesMatch(full, current)) ||
         fullNames.find((full) => partyNameIsShortFormOf(full, current)) ||
         null;
-      const resolvedName = matchedFull || current;
+      const resolvedName = preferStarterPreviewPartyDisplayName(rawCurrent, matchedFull || current);
       if (!resolvedName || resolvedName === rawCurrent) return party;
       return { ...party, name: resolvedName };
     });
@@ -176,14 +196,20 @@ export function enrichStarterPreviewPartiesFromIntake(
   const withRoles = inferStarterCommercialPartyRoles({ ...draft, parties: baseParties }, intakeText);
   const roleParties = Array.isArray(withRoles.parties) ? withRoles.parties : baseParties;
 
-  const enriched = roleParties.map((party) => {
+  const enriched = roleParties.map((party, index) => {
     const rawCurrent = String(party?.name ?? "").replace(/\s+/g, " ").trim();
+    const originalDraftName = String(parties[index]?.name ?? "").replace(/\s+/g, " ").trim();
     const current = isolateLegalEntityFromContaminatedName(rawCurrent);
     const matchedFull =
       fullNames.find((full) => partyLegalNamesMatch(full, current)) ||
+      fullNames.find((full) => partyLegalNamesMatch(full, originalDraftName)) ||
       fullNames.find((full) => partyNameIsShortFormOf(full, current)) ||
+      fullNames.find((full) => partyNameIsShortFormOf(full, originalDraftName)) ||
       null;
-    const resolvedName = matchedFull || current;
+    const resolvedName = preferStarterPreviewPartyDisplayName(
+      originalDraftName || rawCurrent,
+      matchedFull || current,
+    );
     if (!resolvedName || resolvedName === rawCurrent) return party;
     return { ...party, name: resolvedName };
   });

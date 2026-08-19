@@ -69,7 +69,10 @@ export function resolveLegalEntitiesForCanonicalMetadata(args: {
 
   const manifestAuthoritative =
     fromManifest.length >= 2 &&
-    (declaredPartyCount == null || fromManifest.length >= declaredPartyCount);
+    (declaredPartyCount == null || fromManifest.length >= declaredPartyCount) &&
+    // Explicit caller-supplied legal entities win when the manifest is shorter or equal —
+    // never let a 4-party Party-N bullet manifest truncate a 6-entity canonical bundle.
+    !(explicit.length > fromManifest.length);
   const seedEntities = manifestAuthoritative
     ? fromManifest
     : explicit.length

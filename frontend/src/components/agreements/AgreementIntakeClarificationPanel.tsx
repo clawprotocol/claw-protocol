@@ -74,7 +74,7 @@ export function AgreementIntakeClarificationPanel(props: {
             {clarification.suggestedRewrite}
           </p>
           <p className="mt-2 text-xs leading-relaxed text-slate-500">
-            Bracketed names are placeholders — replace them with real legal entity names, then Create draft.
+            Bracketed names are placeholders — replace them with real legal entity names, then Create agreement.
             One clear draft request is enough; we will not invent extra signing parties.
           </p>
         </div>

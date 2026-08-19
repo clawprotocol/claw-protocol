@@ -381,7 +381,7 @@ export function AdvancedWorkProductPage() {
           </p>
           <ul className="mt-5 space-y-2 text-sm text-slate-500">
             <li>· Outcome: readable issue analyses, exec summaries, research memos, white papers — grounded in your pick list</li>
-            <li>· Plus unlocks a curated slice; Pro and Enterprise unlock the full studio</li>
+            <li>· LawDog Pro and Enterprise unlock the full studio</li>
             <li>· Thin sources get honest hedging — useful drafts without fake certainty</li>
           </ul>
           <button

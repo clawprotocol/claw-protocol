@@ -297,9 +297,6 @@ function buildTermAndScheduleSection(
   const starter = Boolean(opts?.starterPreview);
   const partyCount = (draft.parties || []).length;
   let durationLabel = labels.durationLabel;
-  if (starter && durationLabel === "Services Term") {
-    durationLabel = "Term";
-  }
   const parts: string[] = [];
   const durRaw = (draft.duration || "").trim();
   let dur =
@@ -324,7 +321,12 @@ function buildTermAndScheduleSection(
   if (dur) parts.push(`${durationLabel}: ${dur}`);
   if (eff) parts.push(`${labels.effectiveLabel}: ${formatScheduleFragment(eff)}`);
   if (due) parts.push(`${labels.keyDateLabel}: ${formatScheduleFragment(due)}`);
-  if (!parts.length) return MISSING;
+  if (!parts.length) {
+    if (!starter) {
+      return "The services begin on the effective date and continue until completed or terminated under this Agreement.";
+    }
+    return MISSING;
+  }
   return parts.join("\n");
 }
 
@@ -722,7 +724,7 @@ export function buildAgreementPreviewTextCore(
   draft: ParsedDraftShape,
   options?: AgreementPreviewBuildOptions,
 ): string {
-  if (!options?.freeStarterReviewPreview) {
+  if (!options?.freeStarterReviewPreview && !options?.starterPreview) {
     const frozenCore = tryReadPaidProFrozenPreviewPlain({
       surface: options?.starterPreview ? "preview_starter" : "preview_structured",
       builder: "buildAgreementPreviewTextCore",

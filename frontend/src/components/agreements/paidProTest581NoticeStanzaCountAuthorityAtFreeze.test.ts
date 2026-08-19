@@ -234,7 +234,9 @@ describe("TEST581 — operative notice stanza count authority at freeze", () => 
     ).toBe(true);
   });
 
-  it("H. frozen corpus and validation region both contain all required stanzas", () => {
+  it("H. Notices prose without contact authority does not invent If-to stanzas at freeze", () => {
+    // Commercial no-invent: SHARED_ACCEPTED_PAID_BODY has §11 NOTICES prose but no
+    // If-to stanzas and no email/address authority — freeze must not scaffold placeholders.
     const prep = preparePaidProFreezeCandidateText({
       text: PAID_BODY,
       source: "server_full_draft",
@@ -245,11 +247,13 @@ describe("TEST581 — operative notice stanza count authority at freeze", () => 
       source: "server_full_draft",
       surface: "test581_region",
     });
+    expect(gate.ok).toBe(true);
     const frozenCount = (gate.text.match(/^If to\s+/gim) || []).length;
-    const regionCount = (resolveAuthoritativeNoticesRegionForFreeze(gate.text).match(/^If to\s+/gim) || [])
-      .length;
-    expect(frozenCount).toBeGreaterThanOrEqual(2);
-    expect(regionCount).toBe(frozenCount);
+    const region = resolveAuthoritativeNoticesRegionForFreeze(gate.text);
+    const regionCount = (region.match(/^If to\s+/gim) || []).length;
+    expect(frozenCount).toBe(0);
+    expect(regionCount).toBe(0);
+    expect(region).toMatch(/\bNOTICES\b/i);
   });
 
   it("I. entity lines inside If-to stanzas survive normalization (execution pollution guardrail)", () => {

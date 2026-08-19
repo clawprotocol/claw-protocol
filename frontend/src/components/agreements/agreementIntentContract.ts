@@ -109,6 +109,7 @@ export function mapDeterministicIntentIdToAgreementIntentId(
         logo_brand: "design_creative",
         graphic_design: "design_creative",
         web_presence: "software_web_dev",
+        saas_subscription: "software_web_dev",
         loan: "loan_repayment",
         founder_equity: "founder_equity_vesting",
         growth_advisor: "consulting_services",
@@ -160,6 +161,25 @@ function fromDeterministic(
       ],
       minSec: "Build scope, acceptance, change orders, IP, warranty/support, fees.",
       forbid: ["at-will", "estate bequest", "vesting for equity holders"],
+    },
+    saas_subscription: {
+      intent: "software_web_dev",
+      extraTerms: [
+        "saas",
+        "subscription",
+        "software",
+        "platform",
+        "api",
+        "reseller",
+        "white-label",
+        "workflow",
+        "services",
+        "fees",
+        "renewal",
+      ],
+      minSec:
+        "SaaS/reseller access scope, fees and renewal, data/security, IP, support/SLA, and termination — not estate or founder-equity framing.",
+      forbid: ["at-will employment", "estate bequest", "vesting for equity holders"],
     },
     loan: {
       intent: "loan_repayment",
@@ -615,7 +635,15 @@ function countNeedles(hay: string, terms: string[]): number {
       if (t === "ip" && /\bip\b/.test(hay)) n += 1;
       continue;
     }
-    if (hay.includes(t)) n += 1;
+    // Prefer stem match so "fees" hits "fee", "deliverables" hits "deliverable", etc.
+    if (hay.includes(t)) {
+      n += 1;
+      continue;
+    }
+    if (t.length >= 4 && t.endsWith("s")) {
+      const singular = t.slice(0, -1);
+      if (hay.includes(singular)) n += 1;
+    }
   }
   return n;
 }
@@ -635,7 +663,12 @@ function hasOperativeProDepth(hay: string, docLen: number, minDocLen: number = 1
   if (/\b(notice|notices|notif|email|electronic\s+mail)\b/i.test(hay)) score += 1;
   if (/\b(revision|change\s+order|scope|acceptance|warrant)\b/i.test(hay)) score += 1;
   if (/\b(confidential|indemn|limitation\s+of\s+liabilit|liability)\b/i.test(hay)) score += 1;
-  if (/\b(execution|signatur|counterpart|electronic)\b/i.test(hay)) score += 1;
+  if (
+    /\b(execution|signatur|counterpart|electronic)\b/i.test(hay) ||
+    /\bin\s+witness\s+whereof\b/i.test(hay)
+  ) {
+    score += 1;
+  }
   return score >= 6;
 }
 

@@ -42,9 +42,9 @@ def client(monkeypatch, tmp_path):
 
 
 def _grant_genesis(user_id: str) -> None:
-    from backend.usage_economics.genesis_dog_entitlement import GRANT_SOURCE_ADMIN, grant_entitlement
+    from backend.tests.entitlement_test_support import ensure_org_pro_entitlement
 
-    grant_entitlement(user_id=user_id, granted_by="test", grant_source=GRANT_SOURCE_ADMIN)
+    ensure_org_pro_entitlement(f"user-{user_id}", user_id=user_id)
 
 
 def _create_owned_draft(client: TestClient, *, user: str) -> str:

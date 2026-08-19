@@ -1,5 +1,6 @@
 """Read-scope boundaries for full agreement drafts (owner org vs recipient token vs public verify)."""
 
+from backend.tests.entitlement_test_support import ensure_headers_entitled, ensure_org_pro_entitlement
 import pytest
 from fastapi.testclient import TestClient
 
@@ -7,6 +8,28 @@ from backend.main import app
 from backend.usage_economics import store as usage_economics_store_mod
 
 pytestmark = pytest.mark.unit
+
+_ORG_A = {"X-Claw-Org-Id": "read-scope-org-a", "X-Claw-Test-Auth-User-Id": "owner-a"}
+_ORG_B = {"X-Claw-Org-Id": "read-scope-org-b", "X-Claw-Test-Auth-User-Id": "owner-b"}
+
+
+@pytest.fixture(autouse=True)
+def _entitle_owner_org_after_env(tmp_path, monkeypatch):
+    """Grant Pro for primary owner headers once tmp_path-backed DBs are configured."""
+    monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
+    monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ONRAMP_DB_PATH", str(tmp_path / "onramp.sqlite3"))
+    monkeypatch.setenv("CLAW_TREASURY_DB_PATH", str(tmp_path / "treasury.sqlite3"))
+    from backend.economics.store import reset_economics_store_for_tests
+    reset_economics_store_for_tests()
+    for _name in ("_ORG_H", "_OWNER_H", "OWNER_HEADERS", "_HEADERS", "ORG_HEADERS", "_OWNER", "_ORG_A"):
+        h = globals().get(_name)
+        if isinstance(h, dict) and h.get("X-Claw-Org-Id"):
+            ensure_headers_entitled(h)
+    yield
+    reset_economics_store_for_tests()
+
 
 
 @pytest.fixture(autouse=True)
@@ -16,8 +39,6 @@ def _reset_usage_economics_singleton():
     yield
     usage_economics_store_mod._store = None  # noqa: SLF001
 
-_ORG_A = {"X-Claw-Org-Id": "read-scope-org-a", "X-Claw-Test-Auth-User-Id": "owner-a"}
-_ORG_B = {"X-Claw-Org-Id": "read-scope-org-b", "X-Claw-Test-Auth-User-Id": "owner-b"}
 
 
 def test_no_credentials_returns_401_not_403(monkeypatch, tmp_path):
@@ -25,6 +46,7 @@ def test_no_credentials_returns_401_not_403(monkeypatch, tmp_path):
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_ENABLED", "1")
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     client = TestClient(app)
     c = client.post(
         "/api/agreements/draft",
@@ -52,7 +74,9 @@ def test_wrong_org_returns_403_ownership_denied(monkeypatch, tmp_path):
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_ENABLED", "1")
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     client = TestClient(app)
+    ensure_headers_entitled(_ORG_A)
     c = client.post(
         "/api/agreements/draft",
         headers=_ORG_A,
@@ -78,6 +102,7 @@ def test_full_draft_get_requires_owner_org_when_economics_on(monkeypatch, tmp_pa
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_ENABLED", "1")
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     client = TestClient(app)
     c = client.post(
         "/api/agreements/draft",
@@ -113,9 +138,11 @@ def test_full_draft_get_with_recipient_token(monkeypatch, tmp_path):
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_ENABLED", "1")
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     monkeypatch.setenv("CLAW_AGREEMENT_SIGNING_TOKEN_SECRET", "unit-test-read-scope-secret")
     client = TestClient(app)
 
+    ensure_headers_entitled(_ORG_A)
     c = client.post(
         "/api/agreements/draft",
         headers=_ORG_A,
@@ -171,8 +198,10 @@ def test_public_verify_unauthenticated_unchanged(monkeypatch, tmp_path):
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_ENABLED", "1")
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     monkeypatch.setenv("CLAW_PUBLIC_AGREEMENT_VERIFY", "1")
     client = TestClient(app)
+    ensure_headers_entitled(_ORG_A)
     c = client.post(
         "/api/agreements/draft",
         headers=_ORG_A,
@@ -224,6 +253,7 @@ def test_recipient_writes_require_token_when_strict(monkeypatch, tmp_path):
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_ENABLED", "1")
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     monkeypatch.setenv("CLAW_AGREEMENT_SIGNING_TOKEN_SECRET", "unit-test-recipient-write-secret")
     client = TestClient(app)
     aid, draft = _draft_with_two_signers(client, _ORG_A)
@@ -282,6 +312,7 @@ def test_recipient_writes_accept_review_token_and_reject_wrong_party(monkeypatch
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_ENABLED", "1")
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     monkeypatch.setenv("CLAW_AGREEMENT_SIGNING_TOKEN_SECRET", "unit-test-recipient-write-secret-b")
     client = TestClient(app)
     aid, draft = _draft_with_two_signers(client, _ORG_A)
@@ -335,6 +366,7 @@ def test_recipient_revise_rejects_sign_mode_token(monkeypatch, tmp_path):
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_ENABLED", "1")
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
     monkeypatch.setenv("CLAW_AGREEMENT_SIGNING_TOKEN_SECRET", "unit-test-recipient-write-secret-c")
     client = TestClient(app)
     aid, _draft = _draft_with_two_signers(client, _ORG_A)

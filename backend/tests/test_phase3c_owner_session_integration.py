@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from backend.tests.entitlement_test_support import ensure_headers_entitled, ensure_org_pro_entitlement
+
 import pytest
 from fastapi.testclient import TestClient
 
@@ -11,6 +13,22 @@ from backend.tests.auth_fixtures import persist_and_accept_review_snapshot
 pytestmark = pytest.mark.unit
 
 _ORG_H = {"X-Claw-Org-Id": "test-org-phase3c-integration", "X-Claw-Test-Auth-User-Id": "test-owner"}
+
+
+@pytest.fixture(autouse=True)
+def _entitle_owner_org_after_env(tmp_path, monkeypatch):
+    """Grant Pro for module owner headers once tmp_path-backed DBs are configured."""
+    monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
+    monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ONRAMP_DB_PATH", str(tmp_path / "onramp.sqlite3"))
+    monkeypatch.setenv("CLAW_TREASURY_DB_PATH", str(tmp_path / "treasury.sqlite3"))
+    from backend.economics.store import reset_economics_store_for_tests
+    reset_economics_store_for_tests()
+    ensure_headers_entitled(_ORG_H)
+    yield
+    reset_economics_store_for_tests()
+
 
 
 @pytest.fixture(autouse=True)
@@ -25,6 +43,7 @@ def _reset_usage_economics_singleton():
 def _env_common(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
 
 
 def _frozen_snapshot(aid: str, corpus_hash: str = "abc123") -> dict:
@@ -112,6 +131,7 @@ def test_phase3c_owner_session_independence_full_api_lifecycle(
     """Create → persist frozen → activate → read without any browser state."""
     _env_common(monkeypatch, tmp_path)
     client = TestClient(app)
+    ensure_headers_entitled(_ORG_H)
     create = client.post(
         "/api/agreements/draft",
         headers=_ORG_H,

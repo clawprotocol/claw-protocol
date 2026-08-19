@@ -10,18 +10,22 @@ import {
   ensureOperativeIfToNoticeDelivery,
   ensureOperativeNoticeStanzaCountAuthorityAtFreeze,
   ensureOperativeNoticeStanzaEntityLinesAtFreeze,
+  findNoticesSectionStart,
   repairDuplicateOperativeNoticeStanzas,
   repairFusedNoticesHeadingToPriorClause,
+  repairIncompleteIfToNoticeStanzas,
   resolveNoticeStructuralValidationParties,
   trimOperativeNoticeStanzasToPartyCount,
 } from "./paidProPartyNoticeDetails";
+import { resolveAuthoritativeWitnessIndex } from "./paidProExecutionBlockNormalization";
 import { repairProfessionalCorpusContamination } from "./paidProProfessionalCorpusContamination";
 import type { PaidProPartyRoleContext, PaidProSignerMetadataParty } from "./paidProSignerMetadataAuthority";
 import { isAuthoritativeLegalEntityName } from "./paidProPartyNamePreserve";
 import { mergeLabeledPartyAuthorityIntoParties, mergeDraftSignerContactFieldsOntoParties } from "./paidProSignerMetadataAuthority";
-import { manifestRecordsForPaidProAcceptance, isGenericPaidProAcceptanceManifestFallback } from "./paidProAcceptanceExecutionBlockInvariant";
+import { manifestRecordsForPaidProAcceptance } from "./paidProAcceptanceExecutionBlockInvariant";
 import { resolveCanonicalPartyIdentitiesFromSources } from "./canonicalPartyIdentityResolver";
 import { resolvePartiesForReviewRender } from "./paidProReviewRenderParties";
+import { intakePartyManifestIsAuthoritative } from "./intakePartyManifestAuthority";
 import { resolveAuthoritativeSignerCount } from "./signerCountAuthority";
 import {
   containsUnresolvedRenderTokens,
@@ -110,26 +114,8 @@ export function resolvePaidProNoticeAuthorityPartiesForFreeze(args: {
       }
     }
   }
-  const authoritativePartyCountAfterCorpus = parties.filter((p) =>
-    isAuthoritativeLegalEntityName(p.partyLegalName.trim()),
-  ).length;
-  if (
-    authoritativePartyCountAfterCorpus < 2 &&
-    manifestRecords.length >= 2 &&
-    isGenericPaidProAcceptanceManifestFallback(manifestRecords)
-  ) {
-    parties = mergeDraftSignerContactFieldsOntoParties(
-      manifestRecords.slice(0, PAID_PRO_SIGNER_SETUP_MAX_UI_PARTIES).map((record, partyIndex) => ({
-        partyIndex,
-        partyLegalName: record.fullLegalName,
-        signerEmail: "",
-        signerName: (record.signerName?.trim() || "").trim(),
-        signerTitle: (record.signerTitle?.trim() || "").trim(),
-        partyAddress: (record.partyAddress?.trim() || "").trim(),
-      })),
-      args.draft ?? null,
-    );
-  }
+  // Generic Party 1 / Party 2 fallback must NOT invent notice stanzas or contact placeholders.
+  // Notices require authoritative legal entities (or omit the section until signer setup).
   const seed =
     args.reviewParties && args.reviewParties.length >= 2 ? [...args.reviewParties] : parties;
   return [...resolveNoticeStructuralValidationParties(seed, roleContext)];
@@ -192,13 +178,59 @@ export function applyPaidProNoticeContactAuthority(
     acceptedCorpus: opts?.acceptedCorpus ?? out,
   };
 
-  const headingRepair = ensureCanonicalNoticesSectionHeadingForFreeze(out);
-  if (headingRepair.repairs.length > 0) {
-    out = headingRepair.text;
-    repairs.push(...headingRepair.repairs);
+  const hasAuthoritativeNoticeParties = parties.some((p) => {
+    const name = String(p.partyLegalName || "").trim();
+    if (name.length < 3 || /^Party\s+\d+$/i.test(name)) return false;
+    // Positional / metadata placeholders are not notice-contact authority.
+    return !/^party\s*\d+$/i.test(name);
+  });
+  // Commercial no-invent: legal names alone must not invent placeholder emails/addresses
+  // ("provided during signer setup"). Entity-only Notices scaffolding is allowed only on
+  // freeze/establish surfaces when an execution witness already exists (TEST579).
+  const hasRealNoticeContacts = parties.some((p) => {
+    const email = String(p.signerEmail || "").trim();
+    const address = String(p.partyAddress || "").trim();
+    if (!email && !address) return false;
+    if (/provided during signer setup/i.test(email) || /provided during signer setup/i.test(address)) {
+      return false;
+    }
+    return true;
+  });
+  const freezeOrEstablishSurface =
+    /(?:freeze|establish|prep_notice|canonical_notice)/i.test(surface) &&
+    !/(?:compat|compatibility_preview|validation_preview)/i.test(surface);
+  const witnessPresent = resolveAuthoritativeWitnessIndex(out) >= 0;
+  const allowEntityOnlyNoticesAtFreeze = freezeOrEstablishSurface && witnessPresent;
+  const mayMutateNoticeScaffolding =
+    hasAuthoritativeNoticeParties &&
+    (hasRealNoticeContacts ||
+      findNoticesSectionStart(out) >= 0 ||
+      allowEntityOnlyNoticesAtFreeze);
+
+  // When Notices already exists (or freeze/entity authority authorizes scaffolding), reconcile
+  // heading + If-to stanza coverage. buildIfToNoticeStanza stays entity-only when
+  // email/address authority is absent — no "provided during signer setup" invention.
+  if (mayMutateNoticeScaffolding) {
+    if (allowEntityOnlyNoticesAtFreeze && findNoticesSectionStart(out) < 0) {
+      const inserted = repairIncompleteIfToNoticeStanzas(
+        out,
+        parties,
+        { ...roleContext, acceptedCorpus: out },
+        { allowEntityOnlyNoticesAtFreeze: true },
+      );
+      if (inserted.repairs.length > 0) {
+        out = inserted.text;
+        repairs.push(...inserted.repairs);
+      }
+    }
+    const headingRepair = ensureCanonicalNoticesSectionHeadingForFreeze(out);
+    if (headingRepair.repairs.length > 0) {
+      out = headingRepair.text;
+      repairs.push(...headingRepair.repairs);
+    }
   }
 
-  if (parties.length >= 2) {
+  if (parties.length >= 2 && mayMutateNoticeScaffolding) {
     const canonicalPartyCount = resolveAuthoritativeSignerCount({
       intakeText: intakeRaw,
       draftPartyNames: roleContext.draftPartyNames ?? undefined,
@@ -213,10 +245,15 @@ export function applyPaidProNoticeContactAuthority(
       out = contaminationRepair.text;
       repairs.push(...contaminationRepair.repairs);
     }
-    const noticeDelivery = ensureOperativeIfToNoticeDelivery(out, parties, {
-      ...roleContext,
-      acceptedCorpus: out,
-    });
+    const noticeDelivery = ensureOperativeIfToNoticeDelivery(
+      out,
+      parties,
+      {
+        ...roleContext,
+        acceptedCorpus: out,
+      },
+      { allowEntityOnlyNoticesAtFreeze },
+    );
     if (noticeDelivery.repairs.length > 0) {
       out = noticeDelivery.text;
       repairs.push(...noticeDelivery.repairs.map((r) => `notice:${r}`));
@@ -259,6 +296,11 @@ export function applyPaidProNoticeContactAuthority(
     partyNames: parties.map((p) => p.partyLegalName),
     surface,
     blockOnUnresolved: opts?.blockOnUnresolved ?? true,
+    // Token-gate notice repair would otherwise synthesize Party 1/Party 2 scaffolding
+    // or "provided during signer setup" emails when no real contact authority exists.
+    skipNoticeRepair:
+      !hasRealNoticeContacts ||
+      (!hasAuthoritativeNoticeParties && !intakePartyManifestIsAuthoritative(intakeRaw)),
   });
   out = tokenGate.text;
   repairs.push(...tokenGate.repairs);

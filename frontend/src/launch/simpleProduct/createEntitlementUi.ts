@@ -34,15 +34,13 @@ export function guestMayCreateWithoutPaywall(args: {
   return args.canSaveGuestDraft;
 }
 
-export function formatGenesisAllowanceStatusCopy(args: {
+/** @deprecated Genesis buyer allowance retired — never render status copy. */
+export function formatGenesisAllowanceStatusCopy(_args: {
   agreementsRemaining: number | null | undefined;
   agreementAllowance: number | null | undefined;
   periodEndsAt: string | null | undefined;
 }): string | null {
-  if (typeof args.agreementsRemaining !== "number" || typeof args.agreementAllowance !== "number") {
-    return null;
-  }
-  return `Genesis Dog access: ${args.agreementsRemaining} of ${args.agreementAllowance} new agreements remaining this month. Resets ${formatPeriodEndsLabel(args.periodEndsAt)}.`;
+  return null;
 }
 
 export function formatProAllowanceStatusCopy(args: {
@@ -53,10 +51,10 @@ export function formatProAllowanceStatusCopy(args: {
   if (typeof args.agreementsRemaining !== "number" || typeof args.agreementAllowance !== "number") {
     return null;
   }
-  return `Pro access: ${args.agreementsRemaining} of ${args.agreementAllowance} new agreements remaining this billing period. Renews ${formatPeriodEndsLabel(args.periodEndsAt)}.`;
+  return `Pro access: ${args.agreementsRemaining} of ${args.agreementAllowance} successfully finalized premium agreements remaining this month. Resets ${formatPeriodEndsLabel(args.periodEndsAt)}.`;
 }
 
 export const CREATE_ACCESS_CHOICE_HEADING = "Continue with LawDog";
 
 export const CREATE_ACCESS_CHOICE_BODY =
-  "Genesis Dog access is administrator-granted and lets you save a limited number of agreements each month. Pro enables saved agreement workflows — invite review, prepare signatures, and keep a proof record.";
+  "LawDog Pro ($49/month) unlocks saved agreement workflows — premium drafting, invite review, prepare signatures, and keep a proof record. Guest drafts are temporary samples only. Genesis is an affiliate program, not a buyer plan.";

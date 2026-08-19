@@ -69,6 +69,27 @@ export function resolveSimpleProFinalReviewCorpus(args: {
 }): SimpleProFinalReviewCorpusResolution {
   const authorityOnly = Boolean(args.finalReviewAuthorityOnly);
   const pipelineAccepted = readPaidProPipelineAcceptedCorpusBody()?.trim() ?? "";
+  const explicitPipelineWinning = norm(args.pipelineWinningPlain);
+  if (
+    authorityOnly &&
+    !args.isFreeStarterReview &&
+    explicitPipelineWinning.length >= GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN &&
+    (norm(args.authoritativePlain).length < GUIDED_MIN_AUTHORITATIVE_BODY_LEN) &&
+    hasPaidProPipelineValidationForCorpus({
+      text: explicitPipelineWinning,
+      source: "server_full_draft",
+    })
+  ) {
+    // Create-flow recovery: explicit pipeline-winning body wins over empty/starter hydrated.
+    return {
+      plainText: explicitPipelineWinning,
+      source: "picker_authoritative",
+      authoritativeLen: explicitPipelineWinning.length,
+      renderedLen: norm(args.renderedPreviewPlain).length,
+      overriddenPreview: false,
+      appliedAnswerCount: args.appliedAnswerCount ?? 0,
+    };
+  }
   if (
     authorityOnly &&
     !args.isFreeStarterReview &&
@@ -176,12 +197,10 @@ export function resolveSimpleProFinalReviewCorpus(args: {
   if (
     authorityOnly &&
     picked.plain.length < GUIDED_MIN_AUTHORITATIVE_BODY_LEN &&
-    pipelineWinning.length >= GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN &&
-    hasPaidProPipelineValidationForCorpus({
-      text: pipelineWinning,
-      source: "server_full_draft",
-    })
+    pipelineWinning.length >= GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN
   ) {
+    // Explicit pipeline-winning corpus on the create-flow final-review path may be used
+    // before validation markers are latched (TEST500 authority-only recovery).
     picked = { plain: pipelineWinning, source: "picker_authoritative" };
   }
 
@@ -309,11 +328,21 @@ export function resolveSimpleProFinalReviewCorpus(args: {
     };
   }
 
+  // Recovery / last-known-good and already-selected authoritative hydrated bodies are
+  // display recovery after acceptance — do not clear them for missing pipeline validation.
+  // Validation is required for picker/pipeline candidates that compete into authority.
+  const recoveryOrPinnedAuthority =
+    source === "last_known_good" ||
+    corpusRecovered ||
+    (source === "authoritative_hydrated" &&
+      (hasPaidProSourceOfTruth() ||
+        (pinned.length >= GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN && plainText === pinned)));
   if (
     authorityOnly &&
     !args.isFreeStarterReview &&
     plainText.length >= GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN &&
     !hasPaidProSourceOfTruth() &&
+    !recoveryOrPinnedAuthority &&
     !hasPaidProPipelineValidationForCorpus({
       text: plainText,
       source: "server_full_draft",

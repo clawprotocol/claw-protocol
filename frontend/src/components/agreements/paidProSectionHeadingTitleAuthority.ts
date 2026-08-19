@@ -12,6 +12,7 @@ import { isPaidProNumberedSectionHeadingLine } from "./paidProNumberedSectionHea
 import {
   isDanglingPaidProMainHeadingPrefix,
   isPaidProHeadingContinuationFragment,
+  isCompletePaidProShortHeadingTitle,
   repairSplitPaidProHeadingFragments,
 } from "./repairSplitPaidProHeadingFragments";
 import {
@@ -26,6 +27,8 @@ import {
 } from "./paidProDocumentOpeningAuthority";
 
 const MAIN_SECTION_PREFIX_RE = /^(\d+)\.\s+(?!\d+\.\d)(.+)$/;
+/** Pseudo-headings like `Section 3. Clause 3.` — not canonical `N. Title` operative form. */
+const SECTION_WORD_PREFIX_RE = /^Section\s+(\d+)\.\s+(.+)$/i;
 const SUBSECTION_PREFIX_RE = /^(\d+\.\d+)\s+(.+)$/;
 const ALL_CAPS_SECTION_HEADING_RE = /^\d+\.\s+[A-Z][A-Z\s,&'\-]+$/;
 const EXECUTION_LINE_RE =
@@ -97,10 +100,17 @@ export function isIncompletePaidProHeadingTitle(title: string): boolean {
   if (!title || title.length < 2) return false;
   if (/\.\s+[A-Za-z]/.test(title)) return false;
   if (BODY_VERB_RE.test(title)) return false;
+  // Canonical short titles (Termination, Notices, Term, …) are complete — do not
+  // flag continuation-split anomalies that repair cannot/should not merge.
+  if (isCompletePaidProShortHeadingTitle(title)) return false;
   if (isDanglingPaidProMainHeadingPrefix(title)) return true;
   if (/,\s*$/.test(title)) return true;
   const words = title.split(/\s+/).filter(Boolean);
-  if (words.length <= 2 && !/[.!?]$/.test(title)) return true;
+  // Two-word titles are incomplete only when they dangle mid-phrase (… and / … of).
+  if (words.length === 1) return true;
+  if (words.length === 2 && /\b(and|or|&|of|for|the|to|with|upon|under|by|among)\s*$/i.test(title)) {
+    return true;
+  }
   return false;
 }
 
@@ -263,6 +273,24 @@ export function detectPaidProSectionHeadingTitleAnomalies(text: string): PaidPro
     const inOpeningRegion = isBeforeFirstOperativeSectionLineIndex(i, openingAuthority);
     if (inOpeningRegion && isAuthoritativePaidProAgreementDocumentTitleLine(trimmed)) continue;
     if (isPaidProDocumentOpeningMaterialLineIndex(i, openingAuthority)) continue;
+
+    const sectionWord = trimmed.match(SECTION_WORD_PREFIX_RE);
+    if (sectionWord?.[1] && sectionWord[2]) {
+      const sectionTitle = sectionWord[2].trim();
+      // Weak/polluted RAW uses `Section N. Clause N.` pseudo-headings — hard-reject those.
+      // Real operative prose under `Section N. …` (e.g. staging resume corpora) is allowed.
+      if (
+        isFalseFragmentSectionTitle(sectionTitle) ||
+        /^Clause(?:\s+\d+)?\.?$/i.test(sectionTitle)
+      ) {
+        findings.push({
+          lineIndex: i,
+          line: trimmed,
+          code: "false_fragment_section_heading",
+        });
+      }
+      continue;
+    }
 
     const prefix = parseMainSectionPrefixLine(trimmed);
     if (prefix) {

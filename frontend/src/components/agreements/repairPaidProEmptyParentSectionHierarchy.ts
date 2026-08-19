@@ -30,12 +30,17 @@ type HeadingBlock =
 
 const PARENT_CHILD_AFFINITY: Array<{ parent: RegExp; child: RegExp }> = [
   {
-    parent: /\bservices?\b|\baccess\b/i,
-    child: /\bsubscription\b|\bservices?\b|\baccess\b|\bdeliver/i,
+    parent: /\bscope\b|\bservices?\b|\baccess\b/i,
+    child: /\bsubscription\b|\bservices?\b|\baccess\b|\bdeliver|\bproject\b|\boverview\b/i,
   },
   {
-    parent: /\bfees?\b|\bpayment\b|\bcompensation\b|\bconsideration\b/i,
-    child: /\bsubscription\b|\binvoic|\btax|\bdisputed\b|\bfee\b|\bpayment\b/i,
+    parent: /\bcommercial\b|\bfees?\b|\bpayment\b|\bcompensation\b|\bconsideration\b/i,
+    child:
+      /\bsubscription\b|\binvoic|\btax|\bdisputed\b|\bfee\b|\bpayment\b|\brevenue\b|\ballocation\b/i,
+  },
+  {
+    parent: /\bgovernance\b|\bcoordination\b/i,
+    child: /\bgovernance\b|\bcoordination\b|\blead\b|\bstakeholder\b/i,
   },
   {
     parent: /\bterm\b|\bcancell|\bterminat/i,
@@ -167,6 +172,12 @@ function topBlockHasBody(block: Extract<HeadingBlock, { kind: "top" }>): boolean
   return block.bodyLines.some((l) => clean(l).length > 0);
 }
 
+/** True when parent body is only a short shell, not a full operative clause (TEST345). */
+function topBlockBodyIsShell(block: Extract<HeadingBlock, { kind: "top" }>): boolean {
+  const body = block.bodyLines.map(clean).filter(Boolean).join(" ");
+  return body.length < 120;
+}
+
 /**
  * Category shells that still splice a sibling child heading even when they already
  * have a short body ("Services", "Fees and Payment", "Term and Cancellation",
@@ -189,14 +200,27 @@ function isHardFailProvisionFamilyTitle(title: string): boolean {
   return /\bterm\b(?!\w)|cancellation|\bnotices?\b/i.test(title);
 }
 
+/** Bare duration "Term" must not swallow peer "Termination…" sections (TEST344). */
+function isBareTermDurationTitle(title: string): boolean {
+  return /^(?:term|term of(?: this)? agreement|agreement term)$/i.test(clean(title));
+}
+
+function isTerminationFamilyTitle(title: string): boolean {
+  return /\btermination\b|\bcancell/i.test(title);
+}
+
 function shouldAttemptParentChildFold(
   parent: Extract<HeadingBlock, { kind: "top" }>,
   child: Extract<HeadingBlock, { kind: "top" }>,
 ): boolean {
   if (!titlesAffinity(parent.title, child.title)) return false;
+  // Duration Term ≠ Termination — keep both as top-level peers.
+  if (isBareTermDurationTitle(parent.title) && isTerminationFamilyTitle(child.title)) return false;
   if (!topBlockHasBody(parent)) return true;
-  // Parent already has body but remains an incomplete category title with a spliced sibling.
-  if (isIncompleteCategoryParentTitle(parent.title)) return true;
+  // Incomplete category shells may fold a spliced sibling only when the parent body is
+  // still a short shell. Peer sections with full operative bodies stay top-level (TEST345:
+  // "1. Services" + body must not demote "2. Deliverables and Acceptance" to 1.1).
+  if (isIncompleteCategoryParentTitle(parent.title) && topBlockBodyIsShell(parent)) return true;
   // Non-empty Term/Cancellation/Notices siblings still hard-fail reviewed-document integrity.
   return (
     isHardFailProvisionFamilyTitle(parent.title) && isHardFailProvisionFamilyTitle(child.title)

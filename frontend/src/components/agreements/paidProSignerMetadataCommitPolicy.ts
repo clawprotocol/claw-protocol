@@ -71,14 +71,6 @@ export function shouldApplyExecutionBlockSignerOverlay(args: {
   intakeText?: string | null;
   corpusText?: string | null;
 }): boolean {
-  if (shouldUsePaidProSourceOfTruthDisplayOnly()) {
-    const parties = args.parties ?? [];
-    const withLegal = parties.filter((p) => p.partyLegalName.trim().length >= 2);
-    if (withLegal.length >= 3 && hasSignerMetadataForExecutionOverlay(parties)) {
-      return true;
-    }
-    return false;
-  }
   if (
     args.corpusText?.trim() &&
     executionBlockSignerMetadataAppearsHydrated(args.corpusText, args.parties)
@@ -86,8 +78,17 @@ export function shouldApplyExecutionBlockSignerOverlay(args: {
     return false;
   }
   if (shouldApplyLabeledPartyPartialExecutionHydration(args)) return true;
+  const hasNames = hasSignerMetadataForExecutionOverlay(args.parties);
+  if (shouldUsePaidProSourceOfTruthDisplayOnly()) {
+    // Frozen SoT display-only must still paint live/consumed signer Name/Title into
+    // execution blocks whenever authority has hydratable signer names.
+    if (hasNames) return true;
+    if (shouldHydratePaidProReviewSurfacesFromConsumedAuthority(args.parties)) return true;
+    if (shouldApplyLabeledPartyPartialExecutionHydration(args)) return true;
+    return false;
+  }
   return (
-    hasSignerMetadataForExecutionOverlay(args.parties) ||
+    hasNames ||
     shouldHydratePaidProReviewSurfacesFromConsumedAuthority(args.parties)
   );
 }

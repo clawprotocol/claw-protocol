@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import type { AgreementReadySummaryDraftSource } from "./agreementReadySummaryModel";
 import { buildAgreementReadySummaryModel } from "./agreementReadySummaryModel";
+import { feedbackAfterGeneration } from "./journeyActionFeedback";
 
 type Props = {
   draft: AgreementReadySummaryDraftSource;
@@ -36,12 +37,22 @@ export function AgreementReadySummaryCard(props: Props) {
           ✓
         </span>
         <div className="min-w-0 flex-1">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-emerald-300/90">Draft ready</p>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.14em] text-emerald-300/90">
+            {model.statusLabel}
+          </p>
           <h3 className="mt-1 text-xl font-semibold tracking-tight text-slate-50 sm:text-2xl">
-            Your {model.title} is ready
+            Your {model.title}
           </h3>
           <p className="mt-2 text-sm leading-relaxed text-slate-400">
-            We structured your intake into agreement details. Review the summary below, then continue when you are ready.
+            {feedbackAfterGeneration({
+              captured: [
+                model.parties.length ? "parties" : "",
+                model.purpose ? "scope" : "",
+                model.payment ? "price" : "",
+                model.term ? "term" : "",
+              ].filter(Boolean),
+              confirmBeforeSignature: model.effectiveDate ? null : "Confirm the effective date",
+            })}
           </p>
         </div>
       </div>

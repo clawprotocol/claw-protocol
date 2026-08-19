@@ -522,10 +522,12 @@ function isolateExecutionBlocks(
 
   let nextTail = tail;
   const canonicalTail = canonicalExecutionTail(context.signerIdentities ?? []);
+  const signatureHeadingCount = (tail.match(/(?:^|\n)\s*(?:CLIENT|SERVICE\s+PROVIDER|PARTY\s+\d+)\s*:/gim) || [])
+    .length;
+  const byLineCount = (tail.match(/(?:^|\n)\s*(?:By|Signature)\s*:/gim) || []).length;
+  // Require a By/Signature line per signature heading — one shared By must not count as complete.
   const tailHasCompleteSignatureBlocks =
-    /(?:^|\n)\s*CLIENT\s*:\s*\n/i.test(tail) &&
-    /(?:^|\n)\s*SERVICE PROVIDER\s*:\s*\n/i.test(tail) &&
-    /(?:^|\n)\s*(?:By|Signature)\s*:/im.test(tail);
+    signatureHeadingCount >= 2 && byLineCount >= signatureHeadingCount;
   const tailHasBusinessPayload = normalizeLines(tail)
     .slice(1)
     .some((line) => {

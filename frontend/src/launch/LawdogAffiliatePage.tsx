@@ -3,7 +3,6 @@ import { AppShell } from "./AppShell";
 import { LawdogDashboardLayout } from "./LawdogProductNav";
 import {
   AFFILIATE_MONTHLY_COMMISSION_USD,
-  AFFILIATE_COMMISSION_RATE,
   affiliateShareEmailHref,
   affiliateShareXHref,
   formatAffiliateUsd,
@@ -42,8 +41,8 @@ export function LawdogAffiliatePage() {
       subtitle={
         <>
           <span className="block text-sm text-slate-400">
-            Share LawDog Pro and earn {Math.round(AFFILIATE_COMMISSION_RATE * 100)}% recurring commission (
-            {formatAffiliateUsd(AFFILIATE_MONTHLY_COMMISSION_USD)}/month per $39 subscriber).
+            Genesis affiliates earn {formatAffiliateUsd(AFFILIATE_MONTHLY_COMMISSION_USD)} on the first
+            successfully settled Pro invoice (30% of eligible net after discounts, excluding tax; $14.70 at the standard $49 price), payable after the refund window.
           </span>
         </>
       }

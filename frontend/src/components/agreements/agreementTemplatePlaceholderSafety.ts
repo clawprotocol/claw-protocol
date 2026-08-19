@@ -836,6 +836,12 @@ export function classifyTemplateFragment(
   const anchorsOk = corpusHasResolvedPartyAnchors(text, partyNames, intakeRaw);
   const base = decisionBase(token, text, index, inExec, isTail);
 
+  // Entity-metadata brackets ([State]/[Address]/…) are non-fatal and neutralized later.
+  // Must win over signature-allowlist / operative-material fatality (ADDRESS is allowlisted).
+  if (isHarmlessEntityMetadataBracketToken(token)) {
+    return { ...base, category: "soft_field_label", fatal: false };
+  }
+
   if (isNumberedSignatureContactToken(token)) {
     if (isOperativeSignatureContactMisuse(token, text, index)) {
       return { ...base, category: "internal_slot", fatal: true };
@@ -1001,6 +1007,7 @@ function repairNumberedSignatureContactPlaceholders(
   const out = text.replace(NUMBERED_SIGNATURE_CONTACT_BRACKET_RE, (match, offset) => {
     const idx = typeof offset === "number" ? offset : text.indexOf(match);
     if (idx < 0) return match;
+    // Keep operative notice/payment email tokens fatal — never hydrate from intake here.
     if (isOperativeSignatureContactMisuse(match, text, idx)) return match;
     if (!isExecutionSignatureContext(text, idx) && !isTailSignatureSection(text, idx)) {
       return match;
@@ -1219,10 +1226,16 @@ function omitOptionalUnresolvedContactPlaceholderLines(text: string): { text: st
 /** Final freeze-path expansion repair (run after repairAgreementTemplatePlaceholders). */
 export function repairPaidProFreezePlaceholderAuthority(
   text: string,
-  _ctx: Pick<PlaceholderSafetyContext, "intakeRaw" | "partyNames">,
+  ctx: Pick<PlaceholderSafetyContext, "intakeRaw" | "partyNames">,
 ): { text: string; repaired: string[] } {
   let out = text;
   const repaired: string[] = [];
+
+  // Signature-region [NAME]/[TITLE]/[DATE]/[PARTY_NAME]/[EMAIL_n] must clear before
+  // document-boundary freeze gates — otherwise long Ironclad bodies false-reject.
+  const sigRepair = repairSignatureLinePlaceholders(out, ctx.intakeRaw);
+  out = sigRepair.text;
+  repaired.push(...sigRepair.repaired);
 
   const expandedSoft = repairSoftFieldBracketPlaceholdersExpanded(out);
   out = expandedSoft.text;
@@ -1519,6 +1532,25 @@ function finalizeUserVisibleAgreementPlainTextCore(
     { ...ctx, intakeRaw },
     prepared,
   );
+  // Capture hard unresolved identity slots before polish/notice rebuild can silently drop them.
+  const hardUnresolvedFromInput = [
+    ...String(text).matchAll(/\[\s*PARTY_(\d+)\s*\]/gi),
+  ]
+    .filter((m) => {
+      const n = Number(m[1]);
+      return Number.isFinite(n) && n > Math.max(partyResolution.names.length, 2);
+    })
+    .map((m) => m[0]);
+  for (const m of String(text).matchAll(/\[\s*INSERT\b[^\]]*\]/gi)) {
+    hardUnresolvedFromInput.push(m[0]);
+  }
+
+  // Signature bracket stubs must be repaired (and tagged) before polish/notice rebuild, which can
+  // rewrite the witness tail and otherwise leave no `sig_line:` evidence of the repair.
+  const earlySigRepair = repairSignatureLinePlaceholders(prepared, intakeRaw);
+  prepared = earlySigRepair.text;
+  const earlyRepaired = [...earlySigRepair.repaired];
+
   if (isCanonicalCommittedText(prepared)) {
     prepared = stripCanonicalCommitMarker(prepared);
   } else if (
@@ -1546,7 +1578,11 @@ function finalizeUserVisibleAgreementPlainTextCore(
   });
   prepared = tokenAuthority.text;
   const scanCtx = { intakeRaw, partyNames: partyResolution.names };
-  const { text: repairedText, repaired } = repairAgreementTemplatePlaceholders(prepared, scanCtx);
+  const { text: repairedText, repaired: lateRepaired } = repairAgreementTemplatePlaceholders(
+    prepared,
+    scanCtx,
+  );
+  const repaired = [...earlyRepaired, ...lateRepaired];
   const signatureFinal = normalizeSignatureBlockHeadings(
     repairedText,
     buildPartyEntries(partyResolution.names),
@@ -1562,7 +1598,6 @@ function finalizeUserVisibleAgreementPlainTextCore(
   const noticeDemotion = demoteNoticeSignerSetupDraftingFatals(remainingDetail);
   remainingDetail = noticeDemotion.decisions;
   const remainingFatal = remainingDetail.filter((d) => d.fatal).map((d) => d.token);
-  const remaining = [...new Set(remainingDetail.map((d) => d.token))].slice(0, 40);
 
   const postTokenAuthority = enforceUserVisibleRenderTokenAuthority(postRepairText, {
     intakeRaw,
@@ -1575,6 +1610,15 @@ function finalizeUserVisibleAgreementPlainTextCore(
   const survivorTokens = scanUnresolvedRenderTokens(finalText).map((m) => m.token);
   const fatalFromSurvivors = survivorTokens.filter((t) => !remainingFatal.includes(t));
   const remainingFatalAll = [...remainingFatal, ...fatalFromSurvivors];
+  // Fail closed when polish/notice rebuild silently drops hard unresolved identity slots.
+  for (const tok of hardUnresolvedFromInput) {
+    const norm = tok.replace(/\s+/g, "").toUpperCase();
+    const already = remainingFatalAll.some((t) => t.replace(/\s+/g, "").toUpperCase() === norm);
+    if (!already) remainingFatalAll.push(tok);
+  }
+  const remaining = [
+    ...new Set([...remainingDetail.map((d) => d.token), ...remainingFatalAll]),
+  ].slice(0, 40);
   const ok = remainingFatalAll.length === 0;
 
   logPaidProPlaceholderGateDecision({
