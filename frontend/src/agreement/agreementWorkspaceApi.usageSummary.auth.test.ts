@@ -62,4 +62,23 @@ describe("fetchAgreementUsageSummary auth", () => {
     const headers = (init?.headers ?? {}) as Record<string, string>;
     expect(headers.Authorization).toBe("Bearer refreshed-but-uncached");
   });
+
+  it("includes auth token even when org ID is not user-* (stale org during bind settle)", async () => {
+    // Scenario: authenticated user's org ID is still local-org or anon-* while
+    // workspace binding is in progress. Auth token should still be sent so
+    // backend can identify the user and return correct Pro entitlement.
+    vi.mocked(getOrgId).mockReturnValue("local-org");
+    vi.mocked(refreshCachedAccessToken).mockResolvedValueOnce("pro-user-token");
+    vi.mocked(fetch).mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ commercial: { state: "pro" } }),
+    } as Response);
+
+    await fetchAgreementUsageSummary();
+
+    const [, init] = vi.mocked(fetch).mock.calls[0] ?? [];
+    const headers = (init?.headers ?? {}) as Record<string, string>;
+    expect(headers.Authorization).toBe("Bearer pro-user-token");
+  });
 });
