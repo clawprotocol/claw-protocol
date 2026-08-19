@@ -1151,6 +1151,12 @@ import { resolveAgreementIntentContract, resolvePaidProIntentContract } from "./
 import { stripClientPremiumArtifactBlocksFromDraft } from "./premiumFullDraftClientAcceptance";
 import { postPremiumMissingFactsWithRetry } from "./premiumMissingFactsApi";
 import {
+  evaluatePostCheckoutMissingFactsGate,
+  shouldProceedToDraft,
+  shouldShowGapQuestions,
+  isFailClosedDecision,
+} from "./postCheckoutMissingFactsGate";
+import {
   effectivePremiumRefineApplyLogRevisionIntent,
   pickAuthoritativeProCorpusForRefine,
   formatProRefineRejectedShortInline,
@@ -11354,14 +11360,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         };
 
         runPremiumModelPassRef.current = runModelPass;
+        premiumGapBaseIntakeRef.current = mergedIntake;
 
         if (import.meta.env.DEV) {
           // eslint-disable-next-line no-console
           console.info("[post_checkout_generation_started]", { runGen, guidedFlowId, mergedLen: mergedIntake.length });
-          // eslint-disable-next-line no-console
-          console.info("[missing_facts_non_blocking]", { note: "fetch_in_background_does_not_gate_pro_full_draft" });
-          // eslint-disable-next-line no-console
-          console.info("[missing_facts_skipped_for_critical_path]", { reason: "immediate_ensure_premium" });
           // eslint-disable-next-line no-console
           console.info("[premium_generation_intake_fingerprint]", { fp: getPremiumGenerationIntakeFingerprint(mergedIntake) });
           // eslint-disable-next-line no-console
@@ -11371,28 +11374,86 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           });
         }
 
-        void (async () => {
-          if (!runIsCurrent()) return;
-          try {
-            const gl = await postPremiumMissingFactsWithRetry({
-              intakeText: mergedIntake,
-              context: buildPremiumFullDraftContextWithIntentMapping(mergedIntake, prior!),
+        let missingFactsApiResult: { questions: string[] } | null = null;
+        let missingFactsApiError: Error | null = null;
+        try {
+          missingFactsApiResult = await postPremiumMissingFactsWithRetry({
+            intakeText: mergedIntake,
+            context: buildPremiumFullDraftContextWithIntentMapping(mergedIntake, prior!),
+          });
+          if (import.meta.env.DEV) {
+            // eslint-disable-next-line no-console
+            console.info("[post_checkout] missing_facts_blocking_result", {
+              questionCount: missingFactsApiResult.questions.length,
+              runGen,
+              ok: true,
             });
-            if (import.meta.env.DEV) {
-              // eslint-disable-next-line no-console
-              console.info("[post_checkout] missing_facts_background_result", { questionCount: gl.questions.length, runGen, ok: true });
-            }
-            if (runIsCurrent() && gl.questions.length > 0) {
-              setPostCheckoutAdvisoryGaps(gl.questions);
-            }
-          } catch (ge) {
-            if (import.meta.env.DEV) {
-              // eslint-disable-next-line no-console
-              console.info("[post_checkout] missing_facts_background_result", { questionCount: 0, runGen, ok: false, err: ge });
-            }
-            console.warn("[premium-gap] missing-facts request failed, continuing (non-blocking)", ge);
           }
-        })();
+        } catch (mfErr) {
+          missingFactsApiError = mfErr instanceof Error ? mfErr : new Error(String(mfErr));
+          if (import.meta.env.DEV) {
+            // eslint-disable-next-line no-console
+            console.info("[post_checkout] missing_facts_blocking_result", {
+              questionCount: 0,
+              runGen,
+              ok: false,
+              err: missingFactsApiError.message,
+            });
+          }
+          console.warn("[premium-gap] missing-facts request failed", missingFactsApiError);
+        }
+
+        if (!runIsCurrent()) return;
+
+        const gateDecision = evaluatePostCheckoutMissingFactsGate({
+          apiResult: missingFactsApiResult,
+          apiError: missingFactsApiError,
+        });
+
+        if (import.meta.env.DEV) {
+          // eslint-disable-next-line no-console
+          console.info("[post_checkout] missing_facts_gate_decision", {
+            action: gateDecision.action,
+            runGen,
+          });
+        }
+
+        if (shouldShowGapQuestions(gateDecision)) {
+          // Block on clarifying questions before generating the premium draft
+          if (import.meta.env.DEV) {
+            // eslint-disable-next-line no-console
+            console.info("[post_checkout] awaiting_gaps_before_draft", {
+              questionCount: gateDecision.questions.length,
+              questions: gateDecision.questions,
+              runGen,
+            });
+          }
+          setPremiumGapQuestions(gateDecision.questions);
+          setPremiumPostCheckoutPhase("awaiting_gaps");
+          setPremiumPipelineUserMessage(null);
+          return;
+        }
+
+        if (isFailClosedDecision(gateDecision)) {
+          // Fail closed: do not draft on missing-facts API failure
+          console.warn("[premium-gap] missing-facts gate fail_closed", {
+            reason: gateDecision.reason,
+            runGen,
+          });
+          setPremiumPostCheckoutPhase("network_retry");
+          setPremiumPipelineUserMessage(
+            "We couldn't check your agreement details — tap Retry to continue.",
+          );
+          return;
+        }
+
+        if (!shouldProceedToDraft(gateDecision)) {
+          // Defensive: unknown gate decision, do not proceed
+          console.error("[premium-gap] unexpected gate decision", gateDecision);
+          setPremiumPostCheckoutPhase("network_retry");
+          setPremiumPipelineUserMessage("Something went wrong — tap Retry to continue.");
+          return;
+        }
 
         console.info("[premium-flow] premium_rewrite_request_start", {
           mergedLen: mergedIntake.length,
