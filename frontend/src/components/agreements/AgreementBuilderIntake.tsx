@@ -11354,14 +11354,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         };
 
         runPremiumModelPassRef.current = runModelPass;
+        premiumGapBaseIntakeRef.current = mergedIntake;
 
         if (import.meta.env.DEV) {
           // eslint-disable-next-line no-console
           console.info("[post_checkout_generation_started]", { runGen, guidedFlowId, mergedLen: mergedIntake.length });
-          // eslint-disable-next-line no-console
-          console.info("[missing_facts_non_blocking]", { note: "fetch_in_background_does_not_gate_pro_full_draft" });
-          // eslint-disable-next-line no-console
-          console.info("[missing_facts_skipped_for_critical_path]", { reason: "immediate_ensure_premium" });
           // eslint-disable-next-line no-console
           console.info("[premium_generation_intake_fingerprint]", { fp: getPremiumGenerationIntakeFingerprint(mergedIntake) });
           // eslint-disable-next-line no-console
@@ -11371,28 +11368,42 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           });
         }
 
-        void (async () => {
-          if (!runIsCurrent()) return;
-          try {
-            const gl = await postPremiumMissingFactsWithRetry({
-              intakeText: mergedIntake,
-              context: buildPremiumFullDraftContextWithIntentMapping(mergedIntake, prior!),
-            });
-            if (import.meta.env.DEV) {
-              // eslint-disable-next-line no-console
-              console.info("[post_checkout] missing_facts_background_result", { questionCount: gl.questions.length, runGen, ok: true });
-            }
-            if (runIsCurrent() && gl.questions.length > 0) {
-              setPostCheckoutAdvisoryGaps(gl.questions);
-            }
-          } catch (ge) {
-            if (import.meta.env.DEV) {
-              // eslint-disable-next-line no-console
-              console.info("[post_checkout] missing_facts_background_result", { questionCount: 0, runGen, ok: false, err: ge });
-            }
-            console.warn("[premium-gap] missing-facts request failed, continuing (non-blocking)", ge);
+        let missingFactsQuestions: string[] = [];
+        try {
+          const gl = await postPremiumMissingFactsWithRetry({
+            intakeText: mergedIntake,
+            context: buildPremiumFullDraftContextWithIntentMapping(mergedIntake, prior!),
+          });
+          if (import.meta.env.DEV) {
+            // eslint-disable-next-line no-console
+            console.info("[post_checkout] missing_facts_blocking_result", { questionCount: gl.questions.length, runGen, ok: true });
           }
-        })();
+          missingFactsQuestions = gl.questions;
+        } catch (mfErr) {
+          if (import.meta.env.DEV) {
+            // eslint-disable-next-line no-console
+            console.info("[post_checkout] missing_facts_blocking_result", { questionCount: 0, runGen, ok: false, err: mfErr });
+          }
+          console.warn("[premium-gap] missing-facts request failed, proceeding without questions", mfErr);
+        }
+
+        if (!runIsCurrent()) return;
+
+        if (missingFactsQuestions.length > 0) {
+          // Block on clarifying questions before generating the premium draft
+          if (import.meta.env.DEV) {
+            // eslint-disable-next-line no-console
+            console.info("[post_checkout] awaiting_gaps_before_draft", {
+              questionCount: missingFactsQuestions.length,
+              questions: missingFactsQuestions,
+              runGen,
+            });
+          }
+          setPremiumGapQuestions(missingFactsQuestions);
+          setPremiumPostCheckoutPhase("awaiting_gaps");
+          setPremiumPipelineUserMessage(null);
+          return;
+        }
 
         console.info("[premium-flow] premium_rewrite_request_start", {
           mergedLen: mergedIntake.length,
