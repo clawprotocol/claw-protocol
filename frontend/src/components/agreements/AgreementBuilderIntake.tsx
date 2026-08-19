@@ -1151,6 +1151,12 @@ import { resolveAgreementIntentContract, resolvePaidProIntentContract } from "./
 import { stripClientPremiumArtifactBlocksFromDraft } from "./premiumFullDraftClientAcceptance";
 import { postPremiumMissingFactsWithRetry } from "./premiumMissingFactsApi";
 import {
+  evaluatePostCheckoutMissingFactsGate,
+  shouldProceedToDraft,
+  shouldShowGapQuestions,
+  isFailClosedDecision,
+} from "./postCheckoutMissingFactsGate";
+import {
   effectivePremiumRefineApplyLogRevisionIntent,
   pickAuthoritativeProCorpusForRefine,
   formatProRefineRejectedShortInline,
@@ -11368,40 +11374,84 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           });
         }
 
-        let missingFactsQuestions: string[] = [];
+        let missingFactsApiResult: { questions: string[] } | null = null;
+        let missingFactsApiError: Error | null = null;
         try {
-          const gl = await postPremiumMissingFactsWithRetry({
+          missingFactsApiResult = await postPremiumMissingFactsWithRetry({
             intakeText: mergedIntake,
             context: buildPremiumFullDraftContextWithIntentMapping(mergedIntake, prior!),
           });
           if (import.meta.env.DEV) {
             // eslint-disable-next-line no-console
-            console.info("[post_checkout] missing_facts_blocking_result", { questionCount: gl.questions.length, runGen, ok: true });
+            console.info("[post_checkout] missing_facts_blocking_result", {
+              questionCount: missingFactsApiResult.questions.length,
+              runGen,
+              ok: true,
+            });
           }
-          missingFactsQuestions = gl.questions;
         } catch (mfErr) {
+          missingFactsApiError = mfErr instanceof Error ? mfErr : new Error(String(mfErr));
           if (import.meta.env.DEV) {
             // eslint-disable-next-line no-console
-            console.info("[post_checkout] missing_facts_blocking_result", { questionCount: 0, runGen, ok: false, err: mfErr });
+            console.info("[post_checkout] missing_facts_blocking_result", {
+              questionCount: 0,
+              runGen,
+              ok: false,
+              err: missingFactsApiError.message,
+            });
           }
-          console.warn("[premium-gap] missing-facts request failed, proceeding without questions", mfErr);
+          console.warn("[premium-gap] missing-facts request failed", missingFactsApiError);
         }
 
         if (!runIsCurrent()) return;
 
-        if (missingFactsQuestions.length > 0) {
+        const gateDecision = evaluatePostCheckoutMissingFactsGate({
+          apiResult: missingFactsApiResult,
+          apiError: missingFactsApiError,
+        });
+
+        if (import.meta.env.DEV) {
+          // eslint-disable-next-line no-console
+          console.info("[post_checkout] missing_facts_gate_decision", {
+            action: gateDecision.action,
+            runGen,
+          });
+        }
+
+        if (shouldShowGapQuestions(gateDecision)) {
           // Block on clarifying questions before generating the premium draft
           if (import.meta.env.DEV) {
             // eslint-disable-next-line no-console
             console.info("[post_checkout] awaiting_gaps_before_draft", {
-              questionCount: missingFactsQuestions.length,
-              questions: missingFactsQuestions,
+              questionCount: gateDecision.questions.length,
+              questions: gateDecision.questions,
               runGen,
             });
           }
-          setPremiumGapQuestions(missingFactsQuestions);
+          setPremiumGapQuestions(gateDecision.questions);
           setPremiumPostCheckoutPhase("awaiting_gaps");
           setPremiumPipelineUserMessage(null);
+          return;
+        }
+
+        if (isFailClosedDecision(gateDecision)) {
+          // Fail closed: do not draft on missing-facts API failure
+          console.warn("[premium-gap] missing-facts gate fail_closed", {
+            reason: gateDecision.reason,
+            runGen,
+          });
+          setPremiumPostCheckoutPhase("network_retry");
+          setPremiumPipelineUserMessage(
+            "We couldn't check your agreement details — tap Retry to continue.",
+          );
+          return;
+        }
+
+        if (!shouldProceedToDraft(gateDecision)) {
+          // Defensive: unknown gate decision, do not proceed
+          console.error("[premium-gap] unexpected gate decision", gateDecision);
+          setPremiumPostCheckoutPhase("network_retry");
+          setPremiumPipelineUserMessage("Something went wrong — tap Retry to continue.");
           return;
         }
 
