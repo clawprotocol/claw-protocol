@@ -23,6 +23,8 @@ CLAW does NOT:
 from __future__ import annotations
 
 import hashlib
+import json
+import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
@@ -36,6 +38,10 @@ from backend.services.vs01_fully_executed_snapshot import (
     parse_signature_completed_events,
     read_fully_executed_snapshot_from_draft,
 )
+
+_log = logging.getLogger(__name__)
+
+COMPLETION_EVIDENCE_PACKAGE_EVENT = "completion_evidence_package_created"
 
 
 @dataclass(frozen=True)
@@ -362,3 +368,80 @@ def validate_four_party_completion(
         "missing_signatures": missing,
         "errors": errors,
     }
+
+
+def persist_completion_evidence_package(
+    draft: Dict[str, Any],
+    *,
+    agreement_id: str,
+    origin: str = "",
+) -> Dict[str, Any]:
+    """
+    Build and persist the completion evidence package to the draft.
+
+    Returns the updated draft dict with:
+    - completion_evidence_v1: the serialized package
+    - audit_log: updated with the creation event
+
+    Returns the original draft unchanged if package cannot be built.
+    """
+    aid = (agreement_id or str(draft.get("id") or "")).strip()
+    package = build_completion_evidence_package(draft, agreement_id=aid, origin=origin)
+
+    if not package:
+        _log.warning(
+            "[completion-evidence] package_not_built agreement_id=%s reason=not_fully_executed_or_snapshot_missing",
+            aid,
+        )
+        return draft
+
+    package_dict = completion_evidence_to_dict(package)
+    now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+    audit_log = list(draft.get("audit_log") or [])
+
+    already_created = any(
+        isinstance(e, dict) and str(e.get("event_type") or "") == COMPLETION_EVIDENCE_PACKAGE_EVENT
+        for e in audit_log
+    )
+
+    if not already_created:
+        audit_log.append({
+            "event_type": COMPLETION_EVIDENCE_PACKAGE_EVENT,
+            "at": now,
+            "field": "completion_evidence",
+            "value": {
+                "package_hash": package.package_hash_sha256,
+                "signer_count": package.signer_count,
+                "corpus_hash_prefix": package.corpus_hash_sha256[:16],
+            },
+        })
+
+    updated_draft = {
+        **draft,
+        "completion_evidence_v1": package_dict,
+        "audit_log": audit_log,
+        "updated_at": now,
+    }
+
+    _log.info(
+        "[completion-evidence] package_created agreement_id=%s signer_count=%s package_hash=%s",
+        aid,
+        package.signer_count,
+        package.package_hash_sha256[:16],
+    )
+
+    return updated_draft
+
+
+def read_completion_evidence_from_draft(draft: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Read persisted completion evidence package from draft."""
+    evidence = draft.get("completion_evidence_v1")
+    if isinstance(evidence, dict) and evidence.get("schema") == "claw.completion_evidence.v1":
+        return evidence
+    return None
+
+
+def completion_evidence_package_ready(draft: Dict[str, Any]) -> bool:
+    """Check if completion evidence package exists on draft."""
+    return read_completion_evidence_from_draft(draft) is not None

@@ -777,6 +777,8 @@ class AgreementDraft(AgreementDraftCreate):
     pro_redline_v1: Optional[Dict[str, Any]] = None
     """Server-established explicit acceptance binding for inventing-floor bypass (never a client Boolean)."""
     explicit_acceptance_v1: Optional[Dict[str, Any]] = None
+    """Completion evidence package for fully executed agreements (who signed, when, corpus hash, retrieval)."""
+    completion_evidence_v1: Optional[Dict[str, Any]] = None
 
 
 def _merge_agreement_draft(base: AgreementDraft, **updates: Any) -> AgreementDraft:
@@ -8376,6 +8378,32 @@ def post_vs01_signer_complete(
                 )
                 _save_draft_sync(snap_draft.model_dump(), request)
 
+        completion_evidence_created = False
+        if outcome.fully_executed:
+            from backend.services.completion_evidence_package import (
+                completion_evidence_package_ready,
+                persist_completion_evidence_package,
+            )
+            from backend.config.email_config import app_public_origin
+
+            reloaded_for_evidence = _load_or_404(aid)
+            if not completion_evidence_package_ready(reloaded_for_evidence.model_dump()):
+                origin = (app_public_origin() or "").rstrip("/")
+                evidence_draft = persist_completion_evidence_package(
+                    reloaded_for_evidence.model_dump(),
+                    agreement_id=aid,
+                    origin=origin,
+                )
+                if evidence_draft.get("completion_evidence_v1"):
+                    evidence_merged = _merge_agreement_draft(
+                        reloaded_for_evidence,
+                        updated_at=now,
+                        completion_evidence_v1=evidence_draft.get("completion_evidence_v1"),
+                        audit_log=evidence_draft.get("audit_log"),
+                    )
+                    _save_draft_sync(evidence_merged.model_dump(), request)
+                    completion_evidence_created = True
+
         if outcome.fully_executed:
             from backend.services.vs01_signer_completion import vs01_completion_email_lock
 
@@ -8420,6 +8448,7 @@ def post_vs01_signer_complete(
             "ok": True,
             "already_signed": outcome.already_signed,
             "fully_executed": outcome.fully_executed,
+            "completion_evidence_created": completion_evidence_created,
             "completion_emails_sent": completion_emails_sent,
             "auth_mode": auth_mode,
         }
@@ -9557,6 +9586,103 @@ def get_public_completed_signed_export_pdf(agreement_id: str) -> Response:
     if not _agreement_draft_fully_executed(draft):
         raise HTTPException(status_code=403, detail="agreement_not_fully_executed")
     return build_completed_signed_pdf_response(agreement_id=aid, draft=draft)
+
+
+@router.get("/{agreement_id}/completion-evidence")
+def get_completion_evidence(agreement_id: str, request: Request) -> Dict[str, Any]:
+    """
+    Retrieve completion evidence package for a fully-executed agreement.
+
+    Returns the tamper-evident evidence package containing:
+    - Signer attribution (who signed, when, party identity)
+    - Corpus hash (what record was signed)
+    - Retrieval paths for each party
+
+    Accessible by:
+    - Agreement owner
+    - Recipients with valid token bound to the agreement
+
+    Evidence is informational only. CLAW does not adjudicate disputes or
+    determine enforceability.
+    """
+    from backend.services.completion_evidence_package import (
+        completion_evidence_package_ready,
+        persist_completion_evidence_package,
+        read_completion_evidence_from_draft,
+    )
+    from backend.config.email_config import app_public_origin
+
+    aid = (agreement_id or "").strip()
+    if not aid:
+        raise HTTPException(status_code=400, detail="missing_agreement_id")
+
+    auth_mode: Optional[str] = None
+    if _agreements_write_allowed():
+        try:
+            _owner_mutation_guards(request, aid, surface="completion_evidence")
+            auth_mode = "owner"
+        except HTTPException:
+            pass
+
+    if not auth_mode:
+        try:
+            assert_agreement_full_draft_read_allowed(request, aid)
+            auth_mode = "recipient"
+        except HTTPException:
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "code": "access_denied",
+                    "message": "Access to completion evidence requires owner or recipient authorization.",
+                },
+            )
+
+    draft = _load_or_404(aid)
+    if not _agreement_draft_fully_executed(draft):
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "agreement_not_fully_executed",
+                "message": "Completion evidence is only available for fully executed agreements.",
+            },
+        )
+
+    evidence = read_completion_evidence_from_draft(draft.model_dump())
+    if not evidence:
+        origin = (app_public_origin() or "").rstrip("/")
+        updated_draft = persist_completion_evidence_package(
+            draft.model_dump(),
+            agreement_id=aid,
+            origin=origin,
+        )
+        if updated_draft.get("completion_evidence_v1"):
+            now = _utc_now_iso()
+            merged = _merge_agreement_draft(
+                draft,
+                updated_at=now,
+                completion_evidence_v1=updated_draft.get("completion_evidence_v1"),
+                audit_log=updated_draft.get("audit_log"),
+            )
+            _save_draft_sync(merged.model_dump(), request)
+            evidence = updated_draft.get("completion_evidence_v1")
+
+    if not evidence:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "code": "evidence_unavailable",
+                "message": (
+                    "Completion evidence package could not be built. "
+                    "The fully executed snapshot may not be available yet."
+                ),
+            },
+        )
+
+    return {
+        "ok": True,
+        "evidence": evidence,
+        "auth_mode": auth_mode,
+    }
 
 
 def _draft_placeholder_intake_corpus(draft: AgreementDraft) -> str:
