@@ -67,6 +67,47 @@ describe("homeAnonymousCreateOrigin", () => {
   });
 });
 
+describe("homepage Draft free click handoff contract", () => {
+  it("empty submit via openCleanCreateIntake must mark authority and navigate with heroFromHome", () => {
+    const launchHomeSrc = require("fs").readFileSync(
+      require("path").join(__dirname, "LaunchHomePage.tsx"),
+      "utf8",
+    );
+    const cleanIntakeBlock = launchHomeSrc.slice(
+      launchHomeSrc.indexOf("openCleanCreateIntake = useCallback"),
+      launchHomeSrc.indexOf("openCleanCreateIntake = useCallback") + 700,
+    );
+    expect(cleanIntakeBlock).toContain("markHomeAnonymousCreateOrigin()");
+    expect(cleanIntakeBlock).toContain('navigate("/app/create", { heroFromHome: true })');
+    expect(cleanIntakeBlock).not.toContain("heroAutoGenerate");
+  });
+
+  it("text submit via startDrafting must mark authority and navigate with heroFromHome", () => {
+    const launchHomeSrc = require("fs").readFileSync(
+      require("path").join(__dirname, "LaunchHomePage.tsx"),
+      "utf8",
+    );
+    const startDraftingBlock = launchHomeSrc.slice(
+      launchHomeSrc.indexOf("async function startDrafting()"),
+      launchHomeSrc.indexOf("async function startDrafting()") + 1800,
+    );
+    expect(startDraftingBlock).toContain("markHomeAnonymousCreateOrigin()");
+    expect(startDraftingBlock).toContain("heroFromHome: true");
+  });
+
+  it("typed /app/create URL without fresh homepage click must be blocked (no clawHeroFromHome in history)", () => {
+    markHomeAnonymousCreateOrigin();
+    window.history.replaceState(null, "", "/app/create");
+    expect(isHomeAnonymousStarterAuthorityActive()).toBe(false);
+  });
+
+  it("fresh homepage click sets up complete authority (both session + history)", () => {
+    markHomeAnonymousCreateOrigin();
+    window.history.replaceState({ clawHeroFromHome: true }, "", "/app/create");
+    expect(isHomeAnonymousStarterAuthorityActive()).toBe(true);
+  });
+});
+
 describe("fallbackOrgPaidEntitlementGuard", () => {
   it("always blocks local-org", () => {
     expect(classifyFallbackOrgId("local-org")).toBe("local");

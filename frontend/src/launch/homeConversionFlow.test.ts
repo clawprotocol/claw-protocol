@@ -69,7 +69,13 @@ describe("LaunchHomePage routing (static)", () => {
 
   it("routes empty submit to clean create without autoGenerate", () => {
     expect(page).toContain("openCleanCreateIntake");
-    expect(page).toContain('navigate("/app/create")');
+    expect(page).toContain('navigate("/app/create", { heroFromHome: true })');
+    expect(page).toContain("markHomeAnonymousCreateOrigin");
+    const cleanIntakeBlock = page.slice(
+      page.indexOf("openCleanCreateIntake = useCallback"),
+      page.indexOf("openCleanCreateIntake = useCallback") + 600,
+    );
+    expect(cleanIntakeBlock).not.toContain("heroAutoGenerate");
   });
 
   it("uses responsive grid for hero CTAs without flex-row width collapse", () => {
