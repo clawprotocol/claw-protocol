@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
-import { describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { RequireAuthenticatedDashboard } from "./RequireAuthenticatedDashboard";
 import {
   CHECKOUT_SIGN_IN_BODY,
@@ -13,6 +13,8 @@ const navState = {
   search: "",
   navigate: vi.fn(),
 };
+
+const mockState = { homeAnonymousStarterAuthority: false };
 
 vi.mock("./AuthProvider", () => ({
   useAuth: () => ({ enabled: true, loading: false, user: null }),
@@ -36,7 +38,21 @@ vi.mock("../account/currentUser", async () => {
   };
 });
 
+vi.mock("../launch/homeAnonymousCreateOrigin", () => ({
+  isHomeAnonymousStarterAuthorityActive: () => mockState.homeAnonymousStarterAuthority,
+}));
+
 describe("RequireAuthenticatedDashboard", () => {
+  beforeEach(() => {
+    mockState.homeAnonymousStarterAuthority = false;
+    cleanup();
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+    cleanup();
+  });
+
   it("blocks anonymous /app access", () => {
     navState.pathname = "/app";
     navState.search = "";
@@ -48,6 +64,34 @@ describe("RequireAuthenticatedDashboard", () => {
     );
     expect(screen.getByTestId("auth-dashboard-required")).toBeTruthy();
     expect(screen.queryByTestId("secret-dashboard")).toBeNull();
+  });
+
+  it("blocks anonymous /app/create access (direct URL without homepage handoff)", () => {
+    navState.pathname = "/app/create";
+    navState.search = "";
+    navState.navigate = vi.fn();
+    mockState.homeAnonymousStarterAuthority = false;
+    render(
+      <RequireAuthenticatedDashboard>
+        <div data-testid="create-intake">intake</div>
+      </RequireAuthenticatedDashboard>,
+    );
+    expect(screen.getByTestId("auth-dashboard-required")).toBeTruthy();
+    expect(screen.queryByTestId("create-intake")).toBeNull();
+  });
+
+  it("allows anonymous /app/create access when homepage handoff marker is active", () => {
+    navState.pathname = "/app/create";
+    navState.search = "";
+    navState.navigate = vi.fn();
+    mockState.homeAnonymousStarterAuthority = true;
+    render(
+      <RequireAuthenticatedDashboard>
+        <div data-testid="create-intake">intake</div>
+      </RequireAuthenticatedDashboard>,
+    );
+    expect(screen.queryByTestId("auth-dashboard-required")).toBeNull();
+    expect(screen.getByTestId("create-intake")).toBeTruthy();
   });
 
   it("preserves the complete signed-out checkout destination through sign-in", () => {

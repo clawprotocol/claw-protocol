@@ -622,8 +622,8 @@ export function ClawProductApp() {
     let surface: ReactNode = null;
     switch (appMatch.kind) {
       case "simpleCreate":
-        // Anonymous starter create remains reachable without a login wall.
-        return <SimpleCreatePage />;
+        surface = <SimpleCreatePage />;
+        break;
       case "signIn":
         return <SignInPage />;
       case "authCallback":
