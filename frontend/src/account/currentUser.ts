@@ -118,6 +118,7 @@ export function resolveCurrentUser(args?: {
 export function isAuthenticatedDashboardSurface(pathname: string): boolean {
   const p = (pathname || "").replace(/\/$/, "") || "/";
   if (p === "/app" || p === "/dashboard") return true;
+  if (p === "/app/create") return true;
   if (p === "/app/billing" || p === "/app/settings" || p === "/app/signatures") return true;
   if (p === "/app/affiliate" || p === "/app/opportunity" || p === "/app/agreement-memory") return true;
   if (p === "/app/integrations" || p === "/app/work-product") return true;
@@ -133,7 +134,7 @@ export function isAuthenticatedDashboardSurface(pathname: string): boolean {
 
 /** @deprecated Use isAuthenticatedDashboardSurface — kept for older call sites. */
 export function isDashboardAccountSurface(pathname: string): boolean {
-  return isAuthenticatedDashboardSurface(pathname) || pathname.replace(/\/$/, "") === "/app/create";
+  return isAuthenticatedDashboardSurface(pathname);
 }
 
 /** Reviewer and signer links stay public — no login redirect. */

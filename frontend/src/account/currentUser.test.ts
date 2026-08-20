@@ -39,7 +39,7 @@ describe("currentUser adapter", () => {
   it("identifies authenticated dashboard surfaces", () => {
     expect(isAuthenticatedDashboardSurface("/app")).toBe(true);
     expect(isAuthenticatedDashboardSurface("/dashboard")).toBe(true);
-    expect(isAuthenticatedDashboardSurface("/app/create")).toBe(false);
+    expect(isAuthenticatedDashboardSurface("/app/create")).toBe(true);
     expect(isDashboardAccountSurface("/app/create")).toBe(true);
   });
 
