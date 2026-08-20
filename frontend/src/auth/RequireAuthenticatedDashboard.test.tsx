@@ -15,6 +15,7 @@ const navState = {
 };
 
 const mockState = { homeAnonymousStarterAuthority: false };
+const mockConsumeAuthority = vi.fn();
 
 vi.mock("./AuthProvider", () => ({
   useAuth: () => ({ enabled: true, loading: false, user: null }),
@@ -40,11 +41,13 @@ vi.mock("../account/currentUser", async () => {
 
 vi.mock("../launch/homeAnonymousCreateOrigin", () => ({
   isHomeAnonymousStarterAuthorityActive: () => mockState.homeAnonymousStarterAuthority,
+  consumeHomeAnonymousCreateAuthority: () => mockConsumeAuthority(),
 }));
 
 describe("RequireAuthenticatedDashboard", () => {
   beforeEach(() => {
     mockState.homeAnonymousStarterAuthority = false;
+    mockConsumeAuthority.mockClear();
     cleanup();
   });
 
@@ -80,7 +83,7 @@ describe("RequireAuthenticatedDashboard", () => {
     expect(screen.queryByTestId("create-intake")).toBeNull();
   });
 
-  it("allows anonymous /app/create access when homepage handoff marker is active", () => {
+  it("allows anonymous /app/create access when homepage handoff marker is active and consumes authority", () => {
     navState.pathname = "/app/create";
     navState.search = "";
     navState.navigate = vi.fn();
@@ -92,6 +95,21 @@ describe("RequireAuthenticatedDashboard", () => {
     );
     expect(screen.queryByTestId("auth-dashboard-required")).toBeNull();
     expect(screen.getByTestId("create-intake")).toBeTruthy();
+    expect(mockConsumeAuthority).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not consume authority when blocked (no handoff)", () => {
+    navState.pathname = "/app/create";
+    navState.search = "";
+    navState.navigate = vi.fn();
+    mockState.homeAnonymousStarterAuthority = false;
+    render(
+      <RequireAuthenticatedDashboard>
+        <div data-testid="create-intake">intake</div>
+      </RequireAuthenticatedDashboard>,
+    );
+    expect(screen.getByTestId("auth-dashboard-required")).toBeTruthy();
+    expect(mockConsumeAuthority).not.toHaveBeenCalled();
   });
 
   it("preserves the complete signed-out checkout destination through sign-in", () => {

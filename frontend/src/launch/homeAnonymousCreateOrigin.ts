@@ -69,15 +69,38 @@ export function hasHomeAnonymousCreateOrigin(): boolean {
   return readHomeAnonymousCreateOrigin() !== null;
 }
 
+/**
+ * Returns true if authority should be granted for anonymous create.
+ *
+ * Authority requires BOTH:
+ * 1. The sessionStorage marker exists (survives refresh within the SPA navigation)
+ * 2. The fresh homepage handoff flag (history.state.clawHeroFromHome) is present
+ *
+ * A typed URL, bookmark, or hard refresh clears history.state, so even if a
+ * stale sessionStorage marker exists from an earlier test/click, authority
+ * is denied. This makes homepage guest authority one-shot per navigation.
+ */
 export function isHomeAnonymousStarterAuthorityActive(): boolean {
-  if (hasHomeAnonymousCreateOrigin()) return true;
   if (typeof window === "undefined") return false;
   try {
     const state = window.history.state as Record<string, unknown> | null;
-    return state?.clawHeroFromHome === true;
+    const freshHandoff = state?.clawHeroFromHome === true;
+    if (freshHandoff && hasHomeAnonymousCreateOrigin()) {
+      return true;
+    }
+    return false;
   } catch {
     return false;
   }
+}
+
+/**
+ * Consume the anonymous create authority after the handoff is complete.
+ * Call this after the create page has loaded and used the authority.
+ * This ensures subsequent navigations to /app/create require a fresh homepage click.
+ */
+export function consumeHomeAnonymousCreateAuthority(): void {
+  clearHomeAnonymousCreateOrigin("authority_consumed");
 }
 
 export function logHomeAnonymousCreateOrigin(args?: {
