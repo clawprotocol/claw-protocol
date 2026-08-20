@@ -128,9 +128,10 @@ export function LaunchHomePage() {
     setLawdogEntryContext("new");
     clearCreateComplexityResume();
     clearPaidDashboardCreateContext();
+    markHomeAnonymousCreateOrigin();
     setLawdogFocusCreateIntakeAfterNavigation();
     logProductEvent("homepage_cta_open_create_fresh", { surface: "seo_home" });
-    navigate("/app/create");
+    navigate("/app/create", { heroFromHome: true });
   }, [navigate]);
 
   const scrollToHowItWorks = useCallback(() => {
