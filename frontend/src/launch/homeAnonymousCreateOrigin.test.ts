@@ -2,6 +2,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import {
   clearHomeAnonymousCreateOrigin,
+  consumeHomeAnonymousCreateAuthority,
   hasHomeAnonymousCreateOrigin,
   HOME_ANONYMOUS_CREATE_ORIGIN,
   HOME_ANONYMOUS_INTENDED_SURFACE,
@@ -32,12 +33,37 @@ describe("homeAnonymousCreateOrigin", () => {
         intendedSurface: HOME_ANONYMOUS_INTENDED_SURFACE,
       }),
     );
+  });
+
+  it("grants authority when BOTH session marker AND history.state.clawHeroFromHome are present", () => {
+    markHomeAnonymousCreateOrigin();
+    window.history.replaceState({ clawHeroFromHome: true }, "", "/app/create");
     expect(isHomeAnonymousStarterAuthorityActive()).toBe(true);
   });
 
-  it("falls back to history clawHeroFromHome when session marker absent", () => {
+  it("denies authority when only session marker exists (stale marker from earlier click)", () => {
+    markHomeAnonymousCreateOrigin();
+    expect(isHomeAnonymousStarterAuthorityActive()).toBe(false);
+  });
+
+  it("denies authority when only history.state.clawHeroFromHome exists (no session marker)", () => {
+    window.history.replaceState({ clawHeroFromHome: true }, "", "/app/create");
+    expect(isHomeAnonymousStarterAuthorityActive()).toBe(false);
+  });
+
+  it("consumeHomeAnonymousCreateAuthority clears the session marker", () => {
+    markHomeAnonymousCreateOrigin();
     window.history.replaceState({ clawHeroFromHome: true }, "", "/app/create");
     expect(isHomeAnonymousStarterAuthorityActive()).toBe(true);
+    consumeHomeAnonymousCreateAuthority();
+    expect(hasHomeAnonymousCreateOrigin()).toBe(false);
+    expect(isHomeAnonymousStarterAuthorityActive()).toBe(false);
+  });
+
+  it("typed URL / hard refresh without fresh homepage navigation denies authority", () => {
+    markHomeAnonymousCreateOrigin();
+    window.history.replaceState(null, "", "/app/create");
+    expect(isHomeAnonymousStarterAuthorityActive()).toBe(false);
   });
 });
 
