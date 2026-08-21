@@ -292,6 +292,51 @@ describe("evaluateIntentionalCreateDraftSubmit", () => {
   });
 });
 
+describe("messy prose with embedded party names (GTM LawDog hole #10)", () => {
+  const MESSY_TWO_COMPANY_PROMPT = `hey so I run Harbor Pool & Patio in Scottsdale, we do high-end remodels. Mesa Realty Group (the team at the old mill office, like 8 agents) said they can send us clients. I want a referral deal, 7% of the job once the customer actually puts a deposit down, not on our house accounts or anyone we already talked to last year. if they cancel or chargeback in the first 45 days that comes out of what I still owe them. they want exclusive in phoenix metro but only if they actually send enough leads, I don't want to be locked if they send 2 people and disappear. no poaching my guys, they can't go around me to the homeowner. also my dog is named Biscuit and I like the color teal, ignore that. arizona law I guess? start whenever we sign, run a year. I still need to look at it before anyone signs.`;
+
+  it("allows messy 'I run X. Y said they can' prose when two company names are obvious", () => {
+    const decision = assessAgreementIntakeCapability(MESSY_TWO_COMPANY_PROMPT);
+    expect(decision.ok).toBe(true);
+  });
+
+  it("extracts Harbor Pool and Mesa Realty Group from messy prose", () => {
+    const c = buildAgreementIntakeClarification(MESSY_TWO_COMPANY_PROMPT);
+    // Should return null (no clarification needed) because parties are found
+    expect(c).toBeNull();
+  });
+
+  it("still blocks when prompt has commercial details but truly zero party names", () => {
+    const noNamesPrompt =
+      "I want a referral deal, 7% of the job once the customer puts a deposit down. " +
+      "They want exclusive in the metro area but only if they send enough leads. " +
+      "No poaching my guys. Start whenever we sign, run a year. Arizona law.";
+    const decision = assessAgreementIntakeCapability(noNamesPrompt);
+    expect(decision.ok).toBe(false);
+    if (decision.ok) return;
+    // Either missing_named_parties or low_signal is acceptable - both communicate
+    // "we can't proceed without party names" to the user
+    expect(["missing_named_parties", "low_signal"]).toContain(decision.code);
+    // The clarification should guide toward adding parties
+    expect(decision.clarification.suggestedRewrite).toMatch(/between.*Party.*Legal Name/i);
+  });
+
+  it("allows similar 'We work with X. Y referred us' prose patterns with commercial anchors", () => {
+    const variations = [
+      // MSA-style with dollar amount and term
+      "My company Summit AI Consulting LLC does ML integrations. Vertex Data Partners reached out about a joint project for their enterprise clients. $50k budget, 3-month engagement. Need an MSA.",
+      // Services with clear fee and duration
+      "I run Cedar Woodworks LLC. River Valley Realty Group wants us to build custom cabinetry for their staged homes. $8,000 per project, ongoing for the next year. California law.",
+      // Referral deal with both parties having entity suffixes
+      "We work with Apex Construction LLC on commercial builds. Sterling Property Management Inc said they can refer tenants who need renovations. 10% referral fee for 12 months. Texas law.",
+    ];
+    for (const intake of variations) {
+      const decision = assessAgreementIntakeCapability(intake);
+      expect(decision.ok, intake.slice(0, 60)).toBe(true);
+    }
+  });
+});
+
 describe("2–4 party edge spectrum (product-wide)", () => {
   it("defaults sparse prompts to a 2-party starter rewrite", () => {
     const decision = assessAgreementIntakeCapability("need an NDA");

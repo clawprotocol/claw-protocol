@@ -15,6 +15,10 @@ import { extractBetweenPartyNameList } from "./partyBetweenParse";
 import { resolveDeclaredExplicitPartyCount } from "./partySlotIdentityNormalize";
 import { PAID_PRO_GTM_MAX_SIGNING_PARTIES } from "./paidProAuthorityLimits";
 import { isAuthoritativeLegalEntityName } from "./paidProPartyNamePreserve";
+import {
+  extractAgreementEntityCandidates,
+  dedupeEntityCandidatesToLegalParties,
+} from "../../agreement/partyPlaceholderDisplay";
 
 export type AgreementIntakeClarificationKind =
   | "counsel_prep"
@@ -157,6 +161,16 @@ export function extractListedSigningPartyNames(raw: string): string[] {
     const name = (m[1] || "").replace(/\s+/g, " ").trim().replace(/[.;,]+$/, "");
     if (looksLikeUsablePartyLabel(name)) labeled.push(name);
   }
+  if (labeled.length >= 2) return labeled;
+
+  // Fallback: extract entity names from prose when structured patterns fail.
+  // Common in messy "I run X. Y said they can send us clients." prompts where
+  // party names are embedded in natural language rather than "between A and B".
+  const proseCandidates = dedupeEntityCandidatesToLegalParties(
+    extractAgreementEntityCandidates(raw),
+  ).filter(looksLikeUsablePartyLabel);
+  if (proseCandidates.length >= 2) return proseCandidates;
+
   return labeled;
 }
 
@@ -460,6 +474,14 @@ function looksLowSignalOrNonsensical(raw: string): boolean {
 
   const score = commercialSignalScore(raw);
   if (score >= 3) return false;
+
+  // If we can extract two distinct party-like names from the prose, this is not low-signal.
+  // This covers "I run X. Y said they can send us clients" messy prompts that have
+  // embedded company names but no structured "between A and B" clause.
+  const proseCandidates = dedupeEntityCandidatesToLegalParties(
+    extractAgreementEntityCandidates(raw),
+  ).filter(looksLikeUsablePartyLabel);
+  if (proseCandidates.length >= 2) return false;
 
   const words = compact
     .toLowerCase()
