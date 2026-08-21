@@ -19,6 +19,7 @@ import {
   PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN,
   partyPlaceholderRepairYieldsAuthoritativePaidBody,
   premiumBodyHasRequiredPaidSections,
+  TRUNCATED_KEEP_SOT_MIN_LEN,
 } from "./premiumAcceptancePolicy";
 import { repairKnownPartyPlaceholders } from "../../agreement/partyPlaceholderDisplay";
 import type { PremiumFullDraftResult } from "./premiumFullDraftApi";
@@ -1615,4 +1616,225 @@ describe("TEST432 premiumCompletionPipeline authoritative wire freeze", () => {
     },
     30_000,
   );
+});
+
+describe("runPremiumCompletion PR #41 truncated-keep unconditional SoT (output_truncated)", () => {
+  const TRUNCATED_KEEP_INTAKE = `
+I run Harbor Pool & Patio LLC. I need a real estate referral agreement with Mesa Realty Group LLC.
+We're in Arizona. I'll pay them 7% commission after deposit clears. 12-month exclusive deal.
+Include a 45-day clawback if buyer backs out.
+  `.trim();
+
+  function truncatedKeepStructuredDraft(): ParsedDraftShape {
+    return {
+      title: "Real Estate Referral Agreement",
+      jurisdiction: "Arizona",
+      agreement_family: "referral_agreement",
+      parties: [
+        { name: "Harbor Pool & Patio LLC", role: "Referrer" },
+        { name: "Mesa Realty Group LLC", role: "Recipient" },
+      ],
+      purpose: "Real estate client referrals for commission.",
+      payment_terms: "7% commission after deposit clears",
+      duration: "12 months",
+      due_date: null,
+      effective_date: "Upon signing",
+      payment: { amount: null, cadence: null, valid: false },
+    };
+  }
+
+  function buildTruncatedKeepBody(len: number): string {
+    const core = `
+REAL ESTATE REFERRAL AGREEMENT
+
+Between Harbor Pool & Patio LLC ("Referrer") and Mesa Realty Group LLC ("Recipient").
+
+1. REFERRAL SCOPE
+Referrer agrees to refer qualified real estate clients to Recipient for a period of twelve (12) months
+on an exclusive basis within the Phoenix metropolitan area.
+
+2. COMMISSION
+Recipient shall pay Referrer seven percent (7%) of the gross commission received on any closed
+transaction originating from a Referrer referral, payable within 30 days after deposit clears escrow.
+
+3. CLAWBACK PROVISION
+In the event a referred buyer terminates the transaction within forty-five (45) days after closing,
+the commission paid to Referrer shall be refunded to Recipient on a prorated basis.
+
+4. TERRITORY
+This Agreement covers the Phoenix metro area exclusively. Referrer shall not refer clients to
+competing real estate agencies within this territory during the term.
+
+5. NON-SOLICITATION
+Neither party shall directly solicit the other party's employees for a period of twelve (12) months
+following termination of this Agreement.
+
+6. GOVERNING LAW
+This Agreement shall be governed by the laws of the State of Arizona.
+
+IN WITNESS WHEREOF, the parties have executed this Agreement as of the date set forth below.
+    `.trim();
+    let text = core;
+    const clause = " The parties shall perform in good faith and deal fairly with one another. ";
+    while (text.length < len) text += clause;
+    return text;
+  }
+
+  it("accepts a 200-keep response with output_truncated + 1800 chars as unconditional SoT", async () => {
+    const body = buildTruncatedKeepBody(1800);
+    premiumApiMock.mockResponses = [
+      {
+        title: "Real Estate Referral Agreement",
+        agreement_family: "referral_agreement",
+        document_text: body,
+        server_full_document_text: body,
+        key_terms_found: ["commission", "governing_law"],
+        missing_material_info: [],
+        generation_outcome: "degraded",
+        generation_ok: true,
+        retryable: false,
+        server_generation_failure_code: "output_truncated",
+        schema_validation_reasons: [],
+      },
+    ];
+
+    const out = await runPremiumCompletion({
+      intakeText: TRUNCATED_KEEP_INTAKE,
+      originalUserIntakeRawForMerge: TRUNCATED_KEEP_INTAKE,
+      structuredDraft: truncatedKeepStructuredDraft(),
+      simpleProductFlow: true,
+      partyRoleLabels: defaultIntakePartyRoleLabels(),
+      userGapAnswers: null,
+      agreementGenerationId: "gen-truncated-keep-1800",
+      premiumRequestIntakeFingerprint: "fp-truncated-keep-1800",
+      isPremiumRequestStillValid: () => true,
+      parseDraft: async () => truncatedKeepStructuredDraft(),
+    });
+
+    expect(out.premiumRenderSource).not.toBe("rejected_paid_corpus");
+    expect(out.winningPremiumBodyText.length).toBeGreaterThanOrEqual(TRUNCATED_KEEP_SOT_MIN_LEN);
+    expect(out.winningPremiumBodyText).toContain("Harbor Pool & Patio LLC");
+    expect(out.winningPremiumBodyText).toContain("Mesa Realty Group LLC");
+    expect(out.winningPremiumBodyText).toContain("7%");
+    expect(out.premiumCompletionOutcome).toBe(
+      "authoritative_draft_complete_with_recommended_clarifications",
+    );
+  });
+
+  it("accepts premium_generation_insufficient with 2000 chars as unconditional SoT", async () => {
+    const body = buildTruncatedKeepBody(2000);
+    premiumApiMock.mockResponses = [
+      {
+        title: "Real Estate Referral Agreement",
+        agreement_family: "referral_agreement",
+        document_text: body,
+        server_full_document_text: body,
+        key_terms_found: ["commission", "governing_law"],
+        missing_material_info: ["Additional insurance terms recommended"],
+        generation_outcome: "degraded",
+        generation_ok: true,
+        retryable: false,
+        server_generation_failure_code: "premium_generation_insufficient",
+        schema_validation_reasons: [],
+      },
+    ];
+
+    const out = await runPremiumCompletion({
+      intakeText: TRUNCATED_KEEP_INTAKE,
+      originalUserIntakeRawForMerge: TRUNCATED_KEEP_INTAKE,
+      structuredDraft: truncatedKeepStructuredDraft(),
+      simpleProductFlow: true,
+      partyRoleLabels: defaultIntakePartyRoleLabels(),
+      userGapAnswers: null,
+      agreementGenerationId: "gen-truncated-keep-insufficient",
+      premiumRequestIntakeFingerprint: "fp-truncated-keep-insufficient",
+      isPremiumRequestStillValid: () => true,
+      parseDraft: async () => truncatedKeepStructuredDraft(),
+    });
+
+    expect(out.premiumRenderSource).not.toBe("rejected_paid_corpus");
+    expect(out.winningPremiumBodyText.length).toBeGreaterThanOrEqual(TRUNCATED_KEEP_SOT_MIN_LEN);
+    expect(out.winningPremiumBodyText).toContain("Harbor Pool & Patio LLC");
+    expect(out.premiumCompletionOutcome).toBe(
+      "authoritative_draft_complete_with_recommended_clarifications",
+    );
+  });
+
+  it("does NOT use unconditional SoT when body < 1600 chars (falls through to normal paths)", async () => {
+    const shortBody = buildTruncatedKeepBody(1200);
+    premiumApiMock.mockResponses = [
+      {
+        title: "Real Estate Referral Agreement",
+        agreement_family: "referral_agreement",
+        document_text: shortBody,
+        server_full_document_text: shortBody,
+        key_terms_found: ["commission"],
+        missing_material_info: [],
+        generation_outcome: "degraded",
+        generation_ok: true,
+        retryable: false,
+        server_generation_failure_code: "output_truncated",
+        schema_validation_reasons: [],
+      },
+    ];
+
+    const out = await runPremiumCompletion({
+      intakeText: TRUNCATED_KEEP_INTAKE,
+      originalUserIntakeRawForMerge: TRUNCATED_KEEP_INTAKE,
+      structuredDraft: truncatedKeepStructuredDraft(),
+      simpleProductFlow: true,
+      partyRoleLabels: defaultIntakePartyRoleLabels(),
+      userGapAnswers: null,
+      agreementGenerationId: "gen-truncated-keep-short",
+      premiumRequestIntakeFingerprint: "fp-truncated-keep-short",
+      isPremiumRequestStillValid: () => true,
+      parseDraft: async () => truncatedKeepStructuredDraft(),
+    });
+
+    // When body is < 1600 chars, the unconditional SoT path does NOT fire.
+    // The pipeline falls through to normal paths; the exact outcome depends on those paths,
+    // but the premiumCompletionOutcome should NOT be the unconditional SoT outcome.
+    // The winning body is either from fallback/recovery or empty if gates reject.
+    expect(out.premiumCompletionOutcome).not.toBe(
+      "authoritative_draft_complete_with_recommended_clarifications",
+    );
+  });
+
+  it("bypasses acc.ok and placeholderClientOk gates for truncated-keep SoT", async () => {
+    const body = buildTruncatedKeepBody(2500);
+    premiumApiMock.mockResponses = [
+      {
+        title: "Real Estate Referral Agreement",
+        agreement_family: "referral_agreement",
+        document_text: body,
+        server_full_document_text: body,
+        key_terms_found: [],
+        missing_material_info: ["Missing insurance terms", "Missing arbitration clause"],
+        generation_outcome: "degraded",
+        generation_ok: true,
+        retryable: false,
+        server_generation_failure_code: "output_truncated",
+        schema_validation_reasons: ["Professional clauses incomplete"],
+        agreement_validation: { valid: false } as never,
+      },
+    ];
+    premiumApiMock.forceValidateFail = true;
+
+    const out = await runPremiumCompletion({
+      intakeText: TRUNCATED_KEEP_INTAKE,
+      originalUserIntakeRawForMerge: TRUNCATED_KEEP_INTAKE,
+      structuredDraft: truncatedKeepStructuredDraft(),
+      simpleProductFlow: true,
+      partyRoleLabels: defaultIntakePartyRoleLabels(),
+      userGapAnswers: null,
+      agreementGenerationId: "gen-truncated-keep-bypass-gates",
+      premiumRequestIntakeFingerprint: "fp-truncated-keep-bypass-gates",
+      isPremiumRequestStillValid: () => true,
+      parseDraft: async () => truncatedKeepStructuredDraft(),
+    });
+
+    expect(out.premiumRenderSource).not.toBe("rejected_paid_corpus");
+    expect(out.winningPremiumBodyText.length).toBeGreaterThanOrEqual(TRUNCATED_KEEP_SOT_MIN_LEN);
+    expect(out.winningPremiumBodyText).toContain("Harbor Pool & Patio LLC");
+  });
 });
