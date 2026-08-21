@@ -22,7 +22,7 @@ export type FiveTenetScore = {
 };
 
 const PARTY_NAME_PATTERNS = [
-  /\b(?:LLC|L\.L\.C\.|Inc\.?|Incorporated|Corp\.?|Corporation|Ltd\.?|Limited|LP|L\.P\.|LLP|PLLC|GmbH|PLC)\b/i,
+  /\b(?:LLC|L\.L\.C\.|Inc\.?|Incorporated|Corp\.?|Corporation|Ltd\.?|Limited|LP|L\.P\.|LLP|PLLC|GmbH|PLC|SA|S\.A\.|AG|KG)\b/i,
   /\b[A-Z][a-z]+\s+(?:and\s+)?[A-Z][a-z]+\b/,
   /\b(?:Party\s*[AB12]|Contractor|Consultant|Provider|Client|Vendor|Customer|Licensor|Licensee|Lender|Borrower)\s*:\s*\w/i,
 ];
@@ -60,14 +60,16 @@ const PAYMENT_PATTERNS = [
   /£[\d,]+(?:\.\d+)?/,
   /\b\d+(?:,\d{3})*(?:\.\d+)?\s*(?:dollars?|usd|eur|gbp)\b/i,
   /\b(?:payment|fee|compensation|salary|hourly|monthly|annual|retainer|commission|royalty)\b/i,
-  /\b(?:free|no\s+(?:charge|cost|payment)|gratis|pro\s+bono)\b/i,
+  /\b(?:free|no\s+(?:charge|cost|payment|fee)|gratis|pro\s+bono)\b/i,
+  /\b(?:mutual\s+benefit|in-?kind|barter|trade)\b/i,
   /\bper\s+(?:hour|day|week|month|year|project|milestone|share)\b/i,
   /\b\d+k\b/i,
   /\b(?:paying|paid|pay)\s+\d/i,
-  /\b(?:rev(?:enue)?\s+share|split|50\/50)\b/i,
+  /\b(?:rev(?:enue)?\s+share|split|50\/50|equal\s+(?:profit|split))\b/i,
   /\b\d+\s*%/,
   /\b\d+\s*percent\b/i,
   /\b(?:contributes?\s+equally|split\s+\d+)\b/i,
+  /\$[\d,]+\s*\/\s*(?:mo|month|week|wk|hr|hour|day|yr|year)\b/i,
 ];
 
 const TERM_PATTERNS = [
@@ -96,7 +98,7 @@ function hasParties(text: string): boolean {
   
   const roleOnlyOpening = /^(?:Service\s+Provider|The\s+Developer|The\s+Consultant|The\s+Contractor|The\s+Client|The\s+Company)\s+(?:will|agrees?|shall|provides?|is\s+to|are\s+to)\b/i;
   if (roleOnlyOpening.test(trimmed)) {
-    const hasLlcOrInc = /\b(?:LLC|L\.L\.C\.|Inc\.?|Incorporated|Corp\.?|Corporation|Ltd\.?|Limited|LP|L\.P\.|LLP|PLLC|GmbH|PLC)\b/i.test(text);
+    const hasLlcOrInc = /\b(?:LLC|L\.L\.C\.|Inc\.?|Incorporated|Corp\.?|Corporation|Ltd\.?|Limited|LP|L\.P\.|LLP|PLLC|GmbH|PLC|SA|S\.A\.|AG|KG)\b/i.test(text);
     const hasLabeledParty = /\b(?:Provider|Client|Consultant|Contractor|Developer|Company):\s*[A-Z][a-z]+/i.test(text);
     const hasBetweenClause = /\b(?:between|among)\s+[A-Z][a-z]+/i.test(text);
     if (!hasLlcOrInc && !hasLabeledParty && !hasBetweenClause) {
@@ -105,7 +107,7 @@ function hasParties(text: string): boolean {
   }
   
   if (ROLE_TOKEN_ONLY_RE.test(trimmed)) {
-    const hasLlcOrInc = /\b(?:LLC|L\.L\.C\.|Inc\.?|Incorporated|Corp\.?|Corporation|Ltd\.?|Limited|LP|L\.P\.|LLP|PLLC|GmbH|PLC)\b/i.test(text);
+    const hasLlcOrInc = /\b(?:LLC|L\.L\.C\.|Inc\.?|Incorporated|Corp\.?|Corporation|Ltd\.?|Limited|LP|L\.P\.|LLP|PLLC|GmbH|PLC|SA|S\.A\.|AG|KG)\b/i.test(text);
     const hasLabeledParty = /\b(?:Provider|Client|Consultant|Contractor|Developer|Company):\s*[A-Z][a-z]+/i.test(text);
     const hasBetweenClause = /\b(?:between|among)\s+[A-Z][a-z]+/i.test(text);
     if (!hasLlcOrInc && !hasLabeledParty && !hasBetweenClause) {
@@ -115,7 +117,7 @@ function hasParties(text: string): boolean {
   
   for (const token of GENERIC_ROLE_TOKENS) {
     if (lower.includes(token)) {
-      const hasLlcOrInc = /\b(?:LLC|L\.L\.C\.|Inc\.?|Incorporated|Corp\.?|Corporation|Ltd\.?|Limited|LP|L\.P\.|LLP|PLLC|GmbH|PLC)\b/i.test(text);
+      const hasLlcOrInc = /\b(?:LLC|L\.L\.C\.|Inc\.?|Incorporated|Corp\.?|Corporation|Ltd\.?|Limited|LP|L\.P\.|LLP|PLLC|GmbH|PLC|SA|S\.A\.|AG|KG)\b/i.test(text);
       const hasBetweenClause = /\b(?:between|among)\s+[A-Z][a-z]+/.test(text);
       const hasLabeledParty = /\b(?:Provider|Client|Consultant|Contractor|Party\s*[AB12]):\s*[A-Z][a-z]+/i.test(text);
       if (!hasLlcOrInc && !hasBetweenClause && !hasLabeledParty) {
@@ -194,11 +196,72 @@ export function scoreFiveTenets(intakeText: string): FiveTenetScore {
   };
 }
 
+export type ContradictionResult = {
+  hasContradiction: boolean;
+  contradictionTypes: string[];
+  details: string[];
+};
+
+/**
+ * Detect contradictions in the intake that require clarification.
+ * We should never invent parties or governing law when there are contradictions.
+ */
+export function detectContradictions(intakeText: string): ContradictionResult {
+  const text = (intakeText || "").trim();
+  const contradictionTypes: string[] = [];
+  const details: string[] = [];
+
+  // Detect same party twice (duplicate party names)
+  const betweenMatch = text.match(/between\s+([A-Z][A-Za-z\s&.]+?)\s+and\s+([A-Z][A-Za-z\s&.]+?)(?:\.|,|$)/i);
+  if (betweenMatch) {
+    const party1 = betweenMatch[1].trim().toLowerCase().replace(/[.,]$/, "");
+    const party2 = betweenMatch[2].trim().toLowerCase().replace(/[.,]$/, "");
+    if (party1 && party2 && party1 === party2) {
+      contradictionTypes.push("same_party_twice");
+      details.push(`Same party listed twice: "${betweenMatch[1].trim()}"`);
+    }
+  }
+
+  // Detect conflicting governing law (multiple states/countries)
+  const lawMatches: string[] = [];
+  const lawPatterns = [
+    /\b(california|texas|new\s+york|delaware|florida|illinois|nevada|arizona|washington|oregon|colorado|georgia|north\s+carolina|virginia|massachusetts|pennsylvania|ohio|michigan|new\s+jersey|tennessee|wyoming)\s+law\b/gi,
+    /\b(french|german|uk|british|english|canadian|australian|chinese|japanese|indian|mexican|brazilian|spanish|italian)\s+law\b/gi,
+  ];
+  for (const pattern of lawPatterns) {
+    const matches = text.match(pattern);
+    if (matches) {
+      lawMatches.push(...matches.map((m) => m.toLowerCase()));
+    }
+  }
+  if (lawMatches.length > 1) {
+    const uniqueLaws = [...new Set(lawMatches)];
+    if (uniqueLaws.length > 1) {
+      contradictionTypes.push("conflicting_law");
+      details.push(`Conflicting governing laws: ${uniqueLaws.join(", ")}`);
+    }
+  }
+
+  // Detect "the client is also the provider" type contradictions
+  if (/\b(?:client|provider|contractor|service provider)\s+is\s+(?:also|the same as)\s+(?:the\s+)?(?:client|provider|contractor|service provider)\b/i.test(text)) {
+    contradictionTypes.push("role_contradiction");
+    details.push("Same entity assigned conflicting roles");
+  }
+
+  return {
+    hasContradiction: contradictionTypes.length > 0,
+    contradictionTypes,
+    details,
+  };
+}
+
 /**
  * Determine if we should skip ask-before-draft and render immediately.
- * Skip if all five tenets are present in the intake.
+ * Skip if all five tenets are present in the intake AND no contradictions.
  */
 export function shouldSkipAskAndRenderImmediately(intakeText: string): boolean {
+  const contradictions = detectContradictions(intakeText);
+  if (contradictions.hasContradiction) return false;
   const score = scoreFiveTenets(intakeText);
   return score.isComplete;
 }
@@ -251,6 +314,16 @@ export function intakeRequiresClarification(intakeText: string): boolean {
   if (score.score === 0) return true;
   if (!score.parties && !score.scope) return true;
   return false;
+}
+
+/**
+ * Enhanced check that includes contradiction detection.
+ * Returns true if we should ask questions (contradictions or missing tenets).
+ */
+export function shouldAskDueToContradictionsOrMissing(intakeText: string): boolean {
+  const contradictions = detectContradictions(intakeText);
+  if (contradictions.hasContradiction) return true;
+  return intakeRequiresClarification(intakeText);
 }
 
 const NOISE_PATTERNS = [

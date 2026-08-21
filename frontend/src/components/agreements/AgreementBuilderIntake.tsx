@@ -14151,7 +14151,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       setCreateUiStage(CreateUiStage.INPUT);
       setPreviewPaneRevealed(true);
       const focusParty = decision.clarification.kind === "missing_named_parties" || decision.clarification.kind === "too_sparse";
-      const focusSelector = focusParty ? '[data-testid="intake-party-1-name"]' : "textarea";
+      const focusTextarea = decision.clarification.kind === "too_short";
+      const focusSelector = focusTextarea ? "textarea" : focusParty ? '[data-testid="intake-party-1-name"]' : "textarea";
       setJourneyActionFeedback({
         kind: "blocked",
         actionId: "create_agreement",
@@ -31862,7 +31863,6 @@ const AgreementBuilderIntake: React.FC<Props> = ({
               await finalizeIntakeCapture();
               const rawSubmitted = prepareFreshStarterCreateSubmit();
               if (createProductionTwoPane) {
-                if (rawSubmitted.length < 6) return;
                 await resolvePaidCreateSubmitEntitlement();
                 if (commitStarterMultiPartyProGate(rawSubmitted)) {
                   await finalizeIntakeCapture();
@@ -32077,7 +32077,6 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         await finalizeIntakeCapture();
         const rawSubmitted = prepareFreshStarterCreateSubmit();
         if (createProductionTwoPane) {
-          if (rawSubmitted.length < 6) return;
           await resolvePaidCreateSubmitEntitlement();
           if (commitStarterMultiPartyProGate(rawSubmitted)) {
             return;
@@ -32087,7 +32086,6 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             applyIntakeCapabilityBlock(intakeCapability);
             return;
           }
-          if (intakeCapability.action === "noop") return;
           writeOriginalUserIntakeRawAtDraftCommit(rawSubmitted);
           setIntakeClarification(null);
           const live = buildLiveDraftPreview(rawSubmitted);

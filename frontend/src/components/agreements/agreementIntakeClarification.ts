@@ -29,7 +29,9 @@ export type AgreementIntakeClarificationKind =
   /** Keyboard mash, spam, or long noise with almost no draftable commercial signal. */
   | "low_signal"
   /** 5+ signing entities / affiliates — GTM supports 2–4 only. */
-  | "party_count_cap";
+  | "party_count_cap"
+  /** Prompt under minimum character threshold - need more detail. */
+  | "too_short";
 
 export type AgreementIntakeClarification = {
   kind: AgreementIntakeClarificationKind;
@@ -1104,7 +1106,27 @@ export type IntentionalCreateDraftSubmitDecision =
 
 export function evaluateIntentionalCreateDraftSubmit(rawIntake: string): IntentionalCreateDraftSubmitDecision {
   const text = (rawIntake || "").replace(/\r\n/g, "\n").trim();
-  if (text.length < 6) return { action: "noop" };
+  if (text.length < 6) {
+    return {
+      action: "block_capability",
+      text,
+      message: "Please describe the agreement in more detail.",
+      clarification: {
+        kind: "too_short",
+        title: "Need more detail",
+        why: "Please describe the parties and the deal so we can draft an agreement.",
+        whatWeHeard: text ? [`"${text}"`] : [],
+        guidedSteps: [
+          "Name the parties to the agreement (e.g., Acme Corp and Beta LLC)",
+          "Describe the purpose or scope (e.g., services, NDA, partnership)",
+          "Include payment terms if applicable",
+        ],
+        suggestedRewrite: null,
+        primaryCtaLabel: "Continue",
+        secondaryCtaLabel: "Cancel",
+      },
+    };
+  }
   const capability = assessAgreementIntakeCapability(text);
   if (!capability.ok) {
     return {
