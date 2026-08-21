@@ -25183,13 +25183,16 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       paidProFirstReviewDisplayActive ||
       premiumCheckoutCompleted ||
       premiumPaidDocumentSurface;
-    // Patch 5B: no local SoT / signer / picker paint before verified server GET.
+    // Patch 5B: prefer verified GET. If the ask-then-generate path never wrote one,
+    // paint local winning body / starter instead of a blank AGREEMENT DRAFT.
     if (commercialDisplayLocked) {
       const firstReviewAuthority = resolvePaidProFirstReviewVisibleDisplayPlain(
         paidProFirstReviewDisplayContext,
       );
       const raw = (firstReviewAuthority.plain || "").trim();
-      if (!raw || raw.length < 200) return raw;
+      if (!raw || raw.length < 200) {
+        /* fall through to local SoT / starter below */
+      } else {
       const polished = polishProAgreementDisplayLayer(raw, {
         draft: draft ?? null,
         intakeText: intakeForPolish,
@@ -25218,6 +25221,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         draft: draft ?? null,
         paidProReviewSurface: premiumPaidDocumentSurface,
       }).plain;
+      }
     }
     const paidProDisplay = getPaidProDocumentForSurface("display", {
       ...paidProReviewSurfaceOpts,
@@ -25230,7 +25234,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       paidProSignerHydratedPreviewPlain.trim() ||
       (signingSnapshotActive ? readAuthoritativeSigningCorpus() : "") ||
       paidProDisplay?.text ||
-      (premiumPaidReadonlyPick.plainText || "").trim()
+      (premiumPaidReadonlyPick.plainText || "").trim() ||
+      (agreementDocumentText || "").trim() ||
+      (lastKnownGoodAuthoritativeDraftRef.current || "").trim()
     ).trim();
     if (!raw || raw.length < 200) return raw;
     const polished = polishProAgreementDisplayLayer(raw, {
@@ -25278,6 +25284,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     paidProSignerHydratedPreviewPlain,
     paidProFirstReviewDisplayActive,
     paidProFirstReviewDisplayContext,
+    agreementDocumentText,
   ]);
 
   const simpleProFinalReviewDisplayPlain = useMemo(() => {
@@ -25300,8 +25307,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         readCreateReviewAgreementResumeId() ||
         ""
       ).trim();
-      if (!hasVerifiedCommercialDisplayCorpus(agreementIdForDisplay)) return "";
-      return (displayPolishedPaidProPlain || "").trim();
+      if (hasVerifiedCommercialDisplayCorpus(agreementIdForDisplay)) {
+        return (displayPolishedPaidProPlain || "").trim();
+      }
+      // Ask-then-generate never writes GET. Fall through to local SoT / starter.
     }
     if (isPaidProPostFinalizeHydratedCorpusLocked()) {
       const locked = resolvePaidProPostFinalizeReviewPlain();
@@ -25337,6 +25346,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       paidProReview?.text ||
       paidReviewAuthorityPlain ||
       simpleProFinalReviewCorpus.plainText ||
+      (agreementDocumentText || "").trim() ||
+      (lastKnownGoodAuthoritativeDraftRef.current || "").trim() ||
       ""
     ).trim();
     if (!raw) return "";
@@ -25385,6 +25396,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     paidProPostCheckoutRecoveryPlain,
     paidProSignerHydratedPreviewPlain,
     deferPaidProReviewRenderSignerRepair,
+    agreementDocumentText,
   ]);
 
   useEffect(() => {
