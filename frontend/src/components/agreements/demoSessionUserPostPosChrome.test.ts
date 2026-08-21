@@ -7,6 +7,13 @@ import {
 } from "../../launch/guestCheckoutAuthority";
 import { shouldShowPaidProReviewDecisionChrome } from "./paidProReviewDecisionModel";
 import type { PaidProReviewDecisionPhase } from "./paidProReviewDecisionModel";
+import {
+  hasPaidPremiumCompletionSession,
+  hasStoredPaidPremiumCompletionSession,
+  markPaidPremiumCompletionSession,
+  clearPaidPremiumCompletionSession,
+  stripPremiumCompletionQueryParam,
+} from "./premiumCompletionStorage";
 
 describe("demoSessionUserPostPosChrome", () => {
   beforeEach(() => {
@@ -95,6 +102,151 @@ describe("demoSessionUserPostPosChrome", () => {
 
       const showForDemoUser = hasDemoSessionUser() ? false : shouldShowPaidProReviewDecisionChrome(phase);
       expect(showForDemoUser).toBe(false);
+    });
+  });
+
+  describe("guest 4242 return mounts inline signer setup", () => {
+    it("demo session user with premium completion session qualifies for inline signer setup", () => {
+      createDemoSessionUser({
+        displayName: "Guest Buyer",
+        email: "guest@example.com",
+        settlementReceiptId: "rcpt_4242_demo",
+      });
+      markPaidPremiumCompletionSession({ source: "settled_checkout" });
+
+      expect(hasDemoSessionUser()).toBe(true);
+      expect(hasPaidPremiumCompletionSession()).toBe(true);
+
+      const shouldArmInlineSignerSetup =
+        hasDemoSessionUser() && hasPaidPremiumCompletionSession();
+      expect(shouldArmInlineSignerSetup).toBe(true);
+    });
+
+    it("demo session user without premium completion does not arm inline signer setup", () => {
+      createDemoSessionUser({
+        displayName: "Guest Buyer",
+        settlementReceiptId: "rcpt_no_premium",
+      });
+      clearPaidPremiumCompletionSession();
+
+      expect(hasDemoSessionUser()).toBe(true);
+      expect(hasPaidPremiumCompletionSession()).toBe(false);
+
+      const shouldArmInlineSignerSetup =
+        hasDemoSessionUser() && hasPaidPremiumCompletionSession();
+      expect(shouldArmInlineSignerSetup).toBe(false);
+    });
+
+    it("non-demo user with premium completion does not arm demo-specific signer setup", () => {
+      clearDemoSessionUser();
+      markPaidPremiumCompletionSession({ source: "settled_checkout" });
+
+      expect(hasDemoSessionUser()).toBe(false);
+      expect(hasPaidPremiumCompletionSession()).toBe(true);
+
+      const shouldArmDemoSignerSetup =
+        hasDemoSessionUser() && hasPaidPremiumCompletionSession();
+      expect(shouldArmDemoSignerSetup).toBe(false);
+    });
+  });
+
+  describe("restore leftover does not win over premiumCompletion", () => {
+    it("stripPremiumCompletionQueryParam removes both premiumCompletion and restore=starterReview", () => {
+      const testUrl = "http://localhost/app/create?premiumCompletion=1&restore=starterReview";
+      const originalLocation = window.location;
+
+      delete (window as { location?: Location }).location;
+      (window as { location: Partial<Location> }).location = new URL(testUrl) as unknown as Location;
+      Object.defineProperty(window.location, "href", {
+        value: testUrl,
+        writable: true,
+        configurable: true,
+      });
+
+      let replaceStateUrl: string | null = null;
+      const replaceStateMock = vi.fn((_state, _title, url) => {
+        replaceStateUrl = url as string;
+      });
+      const originalReplaceState = window.history.replaceState;
+      window.history.replaceState = replaceStateMock;
+
+      try {
+        stripPremiumCompletionQueryParam();
+
+        expect(replaceStateMock).toHaveBeenCalled();
+        expect(replaceStateUrl).not.toContain("premiumCompletion");
+        expect(replaceStateUrl).not.toContain("restore=starterReview");
+      } finally {
+        window.history.replaceState = originalReplaceState;
+        (window as { location: Location }).location = originalLocation;
+      }
+    });
+
+    it("premium completion session marker persists even when URL params are stripped", () => {
+      markPaidPremiumCompletionSession({ source: "settled_checkout" });
+
+      expect(hasStoredPaidPremiumCompletionSession()).toBe(true);
+      expect(hasPaidPremiumCompletionSession()).toBe(true);
+    });
+
+    it("demo session user remains valid after clearing premium completion", () => {
+      createDemoSessionUser({
+        displayName: "Harbor Pool Buyer",
+        email: "buyer@harborpool.com",
+        settlementReceiptId: "rcpt_harbor_4242",
+      });
+      markPaidPremiumCompletionSession({ source: "settled_checkout" });
+
+      expect(hasDemoSessionUser()).toBe(true);
+      expect(hasStoredPaidPremiumCompletionSession()).toBe(true);
+
+      clearPaidPremiumCompletionSession();
+
+      expect(hasDemoSessionUser()).toBe(true);
+      expect(hasStoredPaidPremiumCompletionSession()).toBe(false);
+    });
+  });
+
+  describe("Continue persist works with demo session", () => {
+    it("demo session user has source=demo_checkout for backend auth", () => {
+      const user = createDemoSessionUser({
+        displayName: "Signer Setup User",
+        email: "signer@example.com",
+        settlementReceiptId: "rcpt_continue_4242",
+      });
+
+      expect(user.source).toBe("demo_checkout");
+      expect(hasDemoSessionUser()).toBe(true);
+    });
+
+    it("demo session user with premium completion can proceed to signer finalization", () => {
+      createDemoSessionUser({
+        displayName: "Pro Signer",
+        email: "pro@example.com",
+        settlementReceiptId: "rcpt_finalize_4242",
+      });
+      markPaidPremiumCompletionSession({ source: "settled_checkout" });
+
+      const canFinalizeSigner =
+        hasDemoSessionUser() && hasPaidPremiumCompletionSession();
+      expect(canFinalizeSigner).toBe(true);
+    });
+
+    it("clearing demo session blocks signer finalization path", () => {
+      createDemoSessionUser({
+        displayName: "Temp User",
+        settlementReceiptId: "rcpt_temp",
+      });
+      markPaidPremiumCompletionSession({ source: "settled_checkout" });
+
+      expect(hasDemoSessionUser()).toBe(true);
+
+      clearDemoSessionUser();
+
+      expect(hasDemoSessionUser()).toBe(false);
+      const canFinalizeSigner =
+        hasDemoSessionUser() && hasPaidPremiumCompletionSession();
+      expect(canFinalizeSigner).toBe(false);
     });
   });
 });

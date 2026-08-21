@@ -336,14 +336,23 @@ export function clearPremiumCompletionStateAfterSend(): void {
 
 /**
  * Removes `premiumCompletion=1` from the URL so the post-checkout effect does not re-enter on dependency churn
- * after an abort, dismiss, or successful completion.
+ * after an abort, dismiss, or successful completion. Also removes `restore=starterReview` since guest checkout
+ * landing with premiumCompletion should not use the checkout-back restore path.
  */
 export function stripPremiumCompletionQueryParam(): void {
   if (typeof window === "undefined") return;
   try {
     const u = new URL(window.location.href);
-    if (u.searchParams.get("premiumCompletion") !== "1") return;
-    u.searchParams.delete("premiumCompletion");
+    let changed = false;
+    if (u.searchParams.get("premiumCompletion") === "1") {
+      u.searchParams.delete("premiumCompletion");
+      changed = true;
+    }
+    if (u.searchParams.get("restore") === "starterReview") {
+      u.searchParams.delete("restore");
+      changed = true;
+    }
+    if (!changed) return;
     const qs = u.searchParams.toString();
     window.history.replaceState(window.history.state, "", qs ? `${u.pathname}?${qs}` : u.pathname);
   } catch {

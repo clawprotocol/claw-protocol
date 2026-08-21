@@ -7996,8 +7996,16 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           if (!ok) return;
           paidCheckoutCompletedRef.current = true;
           try {
+            let changed = false;
             if (u.searchParams.get("premiumCompletion") === "1") {
               u.searchParams.delete("premiumCompletion");
+              changed = true;
+            }
+            if (u.searchParams.get("restore") === "starterReview") {
+              u.searchParams.delete("restore");
+              changed = true;
+            }
+            if (changed) {
               const qs = u.searchParams.toString();
               window.history.replaceState(window.history.state, "", qs ? `${u.pathname}?${qs}` : u.pathname);
             }
@@ -8200,8 +8208,16 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           // fall through: re-run premium completion
         } else {
           try {
+            let changed = false;
             if (url.searchParams.get("premiumCompletion") === "1") {
               url.searchParams.delete("premiumCompletion");
+              changed = true;
+            }
+            if (url.searchParams.get("restore") === "starterReview") {
+              url.searchParams.delete("restore");
+              changed = true;
+            }
+            if (changed) {
               const qs = url.searchParams.toString();
               window.history.replaceState(window.history.state, "", qs ? `${url.pathname}?${qs}` : url.pathname);
             }
@@ -10319,9 +10335,19 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         );
         try {
           if (url) {
-            url.searchParams.delete("premiumCompletion");
-            const qs = url.searchParams.toString();
-            window.history.replaceState(window.history.state, "", qs ? `${url.pathname}?${qs}` : url.pathname);
+            let changed = false;
+            if (url.searchParams.get("premiumCompletion") === "1") {
+              url.searchParams.delete("premiumCompletion");
+              changed = true;
+            }
+            if (url.searchParams.get("restore") === "starterReview") {
+              url.searchParams.delete("restore");
+              changed = true;
+            }
+            if (changed) {
+              const qs = url.searchParams.toString();
+              window.history.replaceState(window.history.state, "", qs ? `${url.pathname}?${qs}` : url.pathname);
+            }
           }
         } catch {
           /* ignore */
@@ -10639,9 +10665,19 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         );
         try {
           if (url) {
-            url.searchParams.delete("premiumCompletion");
-            const qs = url.searchParams.toString();
-            window.history.replaceState(window.history.state, "", qs ? `${url.pathname}?${qs}` : url.pathname);
+            let changed = false;
+            if (url.searchParams.get("premiumCompletion") === "1") {
+              url.searchParams.delete("premiumCompletion");
+              changed = true;
+            }
+            if (url.searchParams.get("restore") === "starterReview") {
+              url.searchParams.delete("restore");
+              changed = true;
+            }
+            if (changed) {
+              const qs = url.searchParams.toString();
+              window.history.replaceState(window.history.state, "", qs ? `${url.pathname}?${qs}` : url.pathname);
+            }
           }
         } catch {
           /* ignore */
@@ -19978,23 +20014,33 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   ]);
 
   // Demo session user post-checkout: auto-arm inline signer setup (skip old relic chrome).
-  // This effect runs once when a demo session user arrives from checkout with Pro copy rendered.
+  // This effect runs once when a demo session user arrives from checkout with premium completion session active.
+  // We need to arm before premiumPaidDocumentSurface is stable, since the premium pipeline may still be running.
   useEffect(() => {
     if (demoSignerSetupLatchArmedRef.current) return;
     if (!demoSessionUserActive) return;
     if (!hasPaidPremiumCompletionSession()) return;
-    if (!premiumPaidDocumentSurface) return;
     if (paidProSignerMetadataFinalized) return;
     if (paidProInlineSignerSetupLatched) return;
+    // For demo session users with premium completion, arm immediately.
+    // The premium pipeline will eventually render Pro copy; we pre-arm signer setup to skip the relic chrome.
     demoSignerSetupLatchArmedRef.current = true;
     setPaidProInlineSignerSetupLatched(true);
     setCreateFlowSendRecipientEditorOpen(true);
+    // Ensure createUiStage is DRAFT and createFlowPhase is review-ready for the inline signer setup to render.
+    if (createUiStage !== CreateUiStage.DRAFT) {
+      setCreateUiStage(CreateUiStage.DRAFT);
+    }
+    if (createFlowPhase === "capturing_input" || createFlowPhase === "none") {
+      setCreateFlowPhase("draft_ready_for_review");
+    }
     console.info("[demo-session-user] auto_arm_signer_setup_post_checkout");
   }, [
     demoSessionUserActive,
-    premiumPaidDocumentSurface,
     paidProSignerMetadataFinalized,
     paidProInlineSignerSetupLatched,
+    createUiStage,
+    createFlowPhase,
   ]);
 
   const paidProCanonicalStickyCta = useMemo(() => {
