@@ -4,6 +4,8 @@ import {
   shouldSkipAskAndRenderImmediately,
   getMissingTenetTopics,
   filterNoiseFromIntake,
+  looksLikeCasualProseNotParties,
+  intakeRequiresClarification,
 } from "./proAgreementFiveTenets";
 import type { FiveTenetScore } from "./proAgreementFiveTenets";
 
@@ -280,5 +282,128 @@ describe("Question limit validation", () => {
     const score = scoreFiveTenets("NDA");
     const missing = getMissingTenetTopics("NDA");
     expect(missing.length).toBeLessThanOrEqual(5);
+  });
+});
+
+describe("Live failure regression tests", () => {
+  describe("TOO LITTLE - must ask LLM questions not static bullets", () => {
+    it("detects 'contract' as requiring clarification", () => {
+      expect(intakeRequiresClarification("contract")).toBe(true);
+      expect(looksLikeCasualProseNotParties("contract")).toBe(true);
+    });
+
+    it("detects 'something about a deal' as requiring clarification", () => {
+      expect(intakeRequiresClarification("something about a deal")).toBe(true);
+      expect(looksLikeCasualProseNotParties("something about a deal")).toBe(true);
+    });
+  });
+
+  describe("IRRELEVANT/TBD - must not fabricate law or parties", () => {
+    it("detects 'tbd let me think about it' as casual prose", () => {
+      expect(looksLikeCasualProseNotParties("tbd let me think about it")).toBe(true);
+      expect(intakeRequiresClarification("tbd let me think about it")).toBe(true);
+    });
+
+    it("must ask not draft for TBD input", () => {
+      const score = scoreFiveTenets("tbd let me think about it");
+      expect(score.isComplete).toBe(false);
+      expect(score.parties).toBe(false);
+      expect(score.governingLaw).toBe(false);
+    });
+  });
+
+  describe("MONEY/VIBE - must not fabricate party names from casual words", () => {
+    it("detects 'we agreed on 10 percent, keep it simple, you know who' as casual prose", () => {
+      expect(looksLikeCasualProseNotParties("we agreed on 10 percent, keep it simple, you know who")).toBe(true);
+    });
+
+    it("should NOT have parties detected from casual prose", () => {
+      const score = scoreFiveTenets("we agreed on 10 percent, keep it simple, you know who");
+      expect(score.parties).toBe(false);
+      expect(score.payment).toBe(true);
+    });
+
+    it("requires clarification for vibe-only input", () => {
+      expect(intakeRequiresClarification("we agreed on 10 percent, keep it simple, you know who")).toBe(true);
+    });
+  });
+
+  describe("RELEVANT with signers/emails - roles must not invert", () => {
+    it("correctly identifies parties with explicit roles", () => {
+      const text = "Professional services agreement between Northline Analytics LLC (Client) and Riverbend Consulting Group (Service Provider). Riverbend will provide data analytics consulting. Jordan Hale (jordan@northline.com) signs for Northline. Priya Shah (priya@riverbend.io) signs for Riverbend. $15,000/month for 6 months. Delaware law.";
+      const score = scoreFiveTenets(text);
+      expect(score.parties).toBe(true);
+      expect(score.scope).toBe(true);
+      expect(score.payment).toBe(true);
+      expect(score.term).toBe(true);
+      expect(score.governingLaw).toBe(true);
+      expect(score.isComplete).toBe(true);
+    });
+
+    it("should not require clarification for complete intake with signers", () => {
+      const text = "Professional services agreement between Northline Analytics LLC (Client) and Riverbend Consulting Group (Service Provider). Riverbend will provide data analytics consulting. $15,000/month for 6 months. Delaware law.";
+      expect(intakeRequiresClarification(text)).toBe(false);
+    });
+  });
+
+  describe("Harbor TOO MUCH - ampersand and material terms", () => {
+    it("preserves ampersand in Harbor Pool & Patio LLC", () => {
+      const text = "hey so I run Harbor Pool & Patio LLC in Scottsdale";
+      const score = scoreFiveTenets(text);
+      expect(score.parties).toBe(true);
+      expect(text).toContain("Harbor Pool & Patio LLC");
+    });
+
+    it("detects material commercial terms", () => {
+      const text = "7% of the job, clawback in first 45 days, exclusive in phoenix metro, no poaching, arizona law, run a year";
+      const score = scoreFiveTenets(text);
+      expect(score.payment).toBe(true);
+      expect(score.term).toBe(true);
+      expect(score.governingLaw).toBe(true);
+    });
+
+    it("filters noise but keeps material terms", () => {
+      const text = "also my dog is named Biscuit and I like the color teal, ignore that. 7% commission. arizona law.";
+      const result = filterNoiseFromIntake(text);
+      expect(result.droppedNoise.some(n => n.toLowerCase().includes("biscuit"))).toBe(true);
+      expect(result.cleanedText).toContain("7%");
+      expect(result.cleanedText).toContain("arizona");
+    });
+  });
+
+  describe("Clean two-party - must not mark parties as Still needed", () => {
+    it("correctly identifies two LLC parties", () => {
+      const text = "Services agreement between Lark Creative Studio LLC and Oak & Iron Fabrication Inc. Lark will provide brand identity design services. $25,000 total project fee. 8 week timeline. Colorado law.";
+      const score = scoreFiveTenets(text);
+      expect(score.parties).toBe(true);
+      expect(score.scope).toBe(true);
+      expect(score.payment).toBe(true);
+      expect(score.term).toBe(true);
+      expect(score.governingLaw).toBe(true);
+      expect(score.isComplete).toBe(true);
+    });
+
+    it("should not require clarification", () => {
+      const text = "Services agreement between Lark Creative Studio LLC and Oak & Iron Fabrication Inc. Lark will provide brand identity design services. $25,000 total project fee. 8 week timeline. Colorado law.";
+      expect(intakeRequiresClarification(text)).toBe(false);
+    });
+  });
+
+  describe("Four party with precise dollar amounts", () => {
+    it("correctly identifies four parties", () => {
+      const text = "Revenue share agreement between Alpha Ventures LLC, Beta Capital Inc, Gamma Holdings LP, and Delta Partners Corp. Joint investment in commercial real estate. Each party contributes equally. Management fee $2.10 per share. 5 year term. New York law.";
+      const score = scoreFiveTenets(text);
+      expect(score.parties).toBe(true);
+      expect(score.scope).toBe(true);
+      expect(score.payment).toBe(true);
+      expect(score.term).toBe(true);
+      expect(score.governingLaw).toBe(true);
+    });
+
+    it("detects $2.10 as payment", () => {
+      const text = "Management fee $2.10 per share";
+      const score = scoreFiveTenets(text);
+      expect(score.payment).toBe(true);
+    });
   });
 });

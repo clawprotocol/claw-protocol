@@ -1,5 +1,5 @@
 import type { PremiumMissingFactsResult } from "./premiumMissingFactsApi";
-import { shouldSkipAskAndRenderImmediately } from "./proAgreementFiveTenets";
+import { shouldSkipAskAndRenderImmediately, intakeRequiresClarification, getMissingTenetTopics } from "./proAgreementFiveTenets";
 
 /**
  * Decision outcome for the post-checkout missing-facts gate.
@@ -80,12 +80,27 @@ export function shouldProceedToDraft(
  * 3. Payment / consideration
  * 4. Term / duration
  * 5. Governing law
+ *
+ * For sparse/casual intakes that clearly need clarification, we return a signal
+ * to force the LLM ask even if the API returns no questions.
  */
 export function evaluateFiveTenetsPreflight(intakeText: string): PostCheckoutMissingFactsGateDecision {
   if (shouldSkipAskAndRenderImmediately(intakeText)) {
     return { action: "proceed_to_draft_five_tenets_complete" };
   }
   return { action: "await_gaps", questions: [] };
+}
+
+/**
+ * Check if the intake is too sparse/casual and MUST ask LLM questions.
+ * This blocks silent drafting for inputs like "tbd", "contract", "something about a deal".
+ * Returns a list of topics to ask about if the intake needs clarification.
+ */
+export function getRequiredClarificationTopics(intakeText: string): string[] {
+  if (!intakeRequiresClarification(intakeText)) {
+    return [];
+  }
+  return getMissingTenetTopics(intakeText);
 }
 
 /**

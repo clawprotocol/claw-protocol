@@ -1155,6 +1155,7 @@ import {
   shouldProceedToDraft,
   shouldShowGapQuestions,
   isFailClosedDecision,
+  getRequiredClarificationTopics,
 } from "./postCheckoutMissingFactsGate";
 import {
   effectivePremiumRefineApplyLogRevisionIntent,
@@ -11421,6 +11422,30 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             apiResult: missingFactsApiResult,
             apiError: missingFactsApiError,
           });
+
+          if (gateDecision.action === "proceed_to_draft" && missingFactsApiResult?.questions?.length === 0) {
+            const forcedTopics = getRequiredClarificationTopics(mergedIntake);
+            if (forcedTopics.length > 0) {
+              if (import.meta.env.DEV) {
+                // eslint-disable-next-line no-console
+                console.info("[post_checkout] sparse_intake_forcing_clarification", {
+                  forcedTopics,
+                  runGen,
+                });
+              }
+              const fallbackQuestions = forcedTopics.slice(0, 5).map((topic) => {
+                switch (topic) {
+                  case "parties": return "Who are the parties to this agreement? Please provide full legal names.";
+                  case "scope": return "What is the purpose or scope of this agreement? What services or work will be performed?";
+                  case "payment": return "What are the payment terms? Include amounts, timing, and any conditions.";
+                  case "term": return "What is the duration of this agreement? When does it start and end?";
+                  case "governing_law": return "Which state's law should govern this agreement?";
+                  default: return `Please clarify: ${topic}`;
+                }
+              });
+              gateDecision = { action: "await_gaps", questions: fallbackQuestions };
+            }
+          }
         }
 
         if (import.meta.env.DEV) {

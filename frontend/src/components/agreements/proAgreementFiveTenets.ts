@@ -50,20 +50,24 @@ const SCOPE_PATTERNS = [
   /\b(?:creator|influencer|sponsorship|brand|content|posts?|stories)\b/i,
   /\b(?:promissory|lender|borrower|principal|interest|repay)\b/i,
   /\b(?:exclusive|exclusivity|non-?solicit|no-?poach|clawback)\b/i,
+  /\b(?:investment|real\s+estate|commercial|revenue\s+share)\b/i,
+  /\b(?:job|of\s+the\s+job)\b/i,
 ];
 
 const PAYMENT_PATTERNS = [
-  /\$[\d,]+(?:\.\d{2})?/,
-  /€[\d,]+(?:\.\d{2})?/,
-  /£[\d,]+(?:\.\d{2})?/,
-  /\b\d+(?:,\d{3})*(?:\.\d{2})?\s*(?:dollars?|usd|eur|gbp)\b/i,
+  /\$[\d,]+(?:\.\d+)?/,
+  /€[\d,]+(?:\.\d+)?/,
+  /£[\d,]+(?:\.\d+)?/,
+  /\b\d+(?:,\d{3})*(?:\.\d+)?\s*(?:dollars?|usd|eur|gbp)\b/i,
   /\b(?:payment|fee|compensation|salary|hourly|monthly|annual|retainer|commission|royalty)\b/i,
   /\b(?:free|no\s+(?:charge|cost|payment)|gratis|pro\s+bono)\b/i,
-  /\bper\s+(?:hour|day|week|month|year|project|milestone)\b/i,
+  /\bper\s+(?:hour|day|week|month|year|project|milestone|share)\b/i,
   /\b\d+k\b/i,
   /\b(?:paying|paid|pay)\s+\d/i,
   /\b(?:rev(?:enue)?\s+share|split|50\/50)\b/i,
-  /\b\d+%\b/,
+  /\b\d+\s*%/,
+  /\b\d+\s*percent\b/i,
+  /\b(?:contributes?\s+equally|split\s+\d+)\b/i,
 ];
 
 const TERM_PATTERNS = [
@@ -213,14 +217,53 @@ export type NoiseFilterResult = {
   keptMaterial: string[];
 };
 
+const FABRICATED_PARTY_PATTERNS = [
+  /\bwe\s+agreed\s+on\b/i,
+  /\bkeep\s+it\s+simple\b/i,
+  /\byou\s+know\s+who\b/i,
+  /\btbd\b/i,
+  /\blet\s+me\s+think\b/i,
+  /\bsomething\s+about\b/i,
+];
+
+/**
+ * Detect if text contains casual prose that should NOT be parsed as party names.
+ * Returns true if the text looks like conversational filler rather than party identification.
+ */
+export function looksLikeCasualProseNotParties(text: string): boolean {
+  const lower = (text || "").toLowerCase().trim();
+  if (!lower) return true;
+  if (lower.length < 10) return true;
+  if (FABRICATED_PARTY_PATTERNS.some((p) => p.test(lower))) return true;
+  if (/^(?:contract|deal|agreement|nda|tbd|idk|hmm|uh|um)\s*$/.test(lower)) return true;
+  return false;
+}
+
+/**
+ * Check if the intake is too sparse to draft - must ask questions instead.
+ * Returns true if the intake is insufficient and needs clarification.
+ */
+export function intakeRequiresClarification(intakeText: string): boolean {
+  const text = (intakeText || "").trim();
+  if (!text || text.length < 15) return true;
+  if (looksLikeCasualProseNotParties(text)) return true;
+  const score = scoreFiveTenets(text);
+  if (score.score === 0) return true;
+  if (!score.parties && !score.scope) return true;
+  return false;
+}
+
 const NOISE_PATTERNS = [
-  /\b(?:my\s+)?(?:dog|cat|pet)(?:'s)?\s+(?:name\s+is\s+)?[A-Z][a-z]+/gi,
+  /\b(?:my\s+)?(?:dog|cat|pet)(?:'s)?\s+(?:name\s+is\s+|is\s+named\s+)?[A-Z][a-z]+/gi,
+  /\b(?:also\s+)?my\s+(?:dog|cat|pet)\s+is\s+named\s+\w+/gi,
   /\b(?:it's|it\s+is)\s+(?:raining|sunny|cloudy|snowing|hot|cold)\s+(?:today|outside)?\b/gi,
   /\b(?:the\s+)?weather\s+(?:is|in)\s+[^.]+?(?:\d+\s*degrees?)?/gi,
   /\bmy\s+(?:truck|car|vehicle)\s+is\s+\w+/gi,
   /\bmy\s+(?:cousin|friend|neighbor)\s+(?:recommended|told|said)\b[^.]*\./gi,
   /\bhad\s+coffee\s+this\s+morning\b/gi,
   /\babout\s+\d+\s*degrees?\b/gi,
+  /\bi\s+like\s+the\s+color\s+\w+/gi,
+  /\bignore\s+that\b/gi,
 ];
 
 /**
@@ -244,11 +287,13 @@ export function filterNoiseFromIntake(intakeText: string): NoiseFilterResult {
 
   const keptMaterial: string[] = [];
   const materialPatterns = [
-    /\$[\d,]+(?:\.\d{2})?/g,
+    /\$[\d,]+(?:\.\d+)?/g,
+    /\b\d+\s*%/g,
     /\b\d+\s*(?:day|week|month|year)s?\b/gi,
     /\b(?:exclusive|non-?exclusive)\b/gi,
     /\b(?:clawback|claw\s+back)\b/gi,
     /\b(?:commission|royalty|fee|payment)\b/gi,
+    /\b(?:no-?poach|non-?solicit)\b/gi,
   ];
 
   for (const pattern of materialPatterns) {

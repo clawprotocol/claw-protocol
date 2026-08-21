@@ -774,5 +774,155 @@
     },
     "should_ask": false,
     "party_names_must_survive": ["García & Sons Landscaping", "The Château HOA"]
+  },
+  {
+    "id": "live-fail-too-little-001",
+    "title": "LIVE FAIL: Too little - must ask LLM questions not static bullets",
+    "prompt": "contract",
+    "category": "live_failure_too_little",
+    "expected_tenets": {
+      "parties": false,
+      "scope": false,
+      "payment": false,
+      "term": false,
+      "governing_law": false
+    },
+    "should_ask": true,
+    "must_use_llm_questions": true,
+    "must_not_use_static_bullets": true,
+    "expected_ask_topics": ["parties", "scope", "payment", "term", "governing_law"],
+    "live_defect": "showed static 4-bullet revise list instead of 2-5 LLM-generated questions from the dump"
+  },
+  {
+    "id": "live-fail-relevant-001",
+    "title": "LIVE FAIL: Relevant with signers/emails - roles inverted, signers dropped",
+    "prompt": "Professional services agreement between Northline Analytics LLC (Client) and Riverbend Consulting Group (Service Provider). Riverbend will provide data analytics consulting. Jordan Hale (jordan@northline.com) signs for Northline. Priya Shah (priya@riverbend.io) signs for Riverbend. $15,000/month for 6 months. Delaware law.",
+    "category": "live_failure_relevant",
+    "expected_tenets": {
+      "parties": true,
+      "scope": true,
+      "payment": true,
+      "term": true,
+      "governing_law": true
+    },
+    "should_ask": false,
+    "party_names_must_survive": ["Northline Analytics LLC", "Riverbend Consulting Group"],
+    "signer_names_must_survive": ["Jordan Hale", "Priya Shah"],
+    "emails_must_survive": ["jordan@northline.com", "priya@riverbend.io"],
+    "role_must_match": {
+      "Northline Analytics LLC": "Client",
+      "Riverbend Consulting Group": "Service Provider"
+    },
+    "live_defect": "roles inverted (Client/Service Provider swapped), scope sentence ate fee/law/term, Jordan Hale/Priya Shah and both emails DROPPED"
+  },
+  {
+    "id": "live-fail-harbor-001",
+    "title": "LIVE FAIL: Harbor TOO MUCH - ampersand chop, material terms dropped",
+    "prompt": "hey so I run Harbor Pool & Patio LLC in Scottsdale, we do high-end remodels. Mesa Realty Group (the team at the old mill office, like 8 agents) said they can send us clients. I want a referral deal, 7% of the job once the customer actually puts a deposit down, not on our house accounts or anyone we already talked to last year. if they cancel or chargeback in the first 45 days that comes out of what I still owe them. they want exclusive in phoenix metro but only if they actually send enough leads, I don't want to be locked if they send 2 people and disappear. no poaching my guys, they can't go around me to the homeowner. also my dog is named Biscuit and I like the color teal, ignore that. arizona law I guess? start whenever we sign, run a year. I still need to look at it before anyone signs.",
+    "category": "live_failure_harbor",
+    "expected_tenets": {
+      "parties": true,
+      "scope": true,
+      "payment": true,
+      "term": true,
+      "governing_law": true
+    },
+    "should_ask": false,
+    "party_names_must_survive": ["Harbor Pool & Patio LLC", "Mesa Realty Group"],
+    "material_terms_to_keep": ["7%", "45 days", "exclusive"],
+    "noise_to_drop": ["Biscuit", "teal"],
+    "live_defect": "Patio LLC (ampersand chop), clawback/exclusivity/no-poach dropped, noise correctly ignored"
+  },
+  {
+    "id": "live-fail-irrelevant-001",
+    "title": "LIVE FAIL: Irrelevant/TBD - invented Delaware law instead of asking",
+    "prompt": "tbd let me think about it",
+    "category": "live_failure_irrelevant",
+    "expected_tenets": {
+      "parties": false,
+      "scope": false,
+      "payment": false,
+      "term": false,
+      "governing_law": false
+    },
+    "should_ask": true,
+    "must_not_fabricate_law": true,
+    "must_not_fabricate_parties": true,
+    "expected_ask_topics": ["parties", "scope", "payment", "term", "governing_law"],
+    "live_defect": "silently drafted a confident empty contract and INVENTED Delaware law - must ASK not fabricate"
+  },
+  {
+    "id": "live-fail-moneyvibe-001",
+    "title": "LIVE FAIL: Money/vibe prose - fabricated party names from casual words",
+    "prompt": "we agreed on 10 percent, keep it simple, you know who",
+    "category": "live_failure_moneyvibe",
+    "expected_tenets": {
+      "parties": false,
+      "scope": false,
+      "payment": true,
+      "term": false,
+      "governing_law": false
+    },
+    "should_ask": true,
+    "must_not_fabricate_parties": true,
+    "fabricated_party_names_to_reject": ["We Agreed On 10 Percent", "Keep It Simple", "You Know Who"],
+    "material_terms_to_keep": ["10 percent"],
+    "expected_ask_topics": ["parties", "scope", "term", "governing_law"],
+    "live_defect": "fabricated three parties named 'We Agreed On 10 Percent', 'Keep It Simple', 'You Know Who'"
+  },
+  {
+    "id": "live-fail-clean-001",
+    "title": "LIVE FAIL: Clean two-party Lark/Oak & Iron - parties marked Still needed",
+    "prompt": "Services agreement between Lark Creative Studio LLC and Oak & Iron Fabrication Inc. Lark will provide brand identity design services. $25,000 total project fee. 8 week timeline. Colorado law.",
+    "category": "live_failure_clean",
+    "expected_tenets": {
+      "parties": true,
+      "scope": true,
+      "payment": true,
+      "term": true,
+      "governing_law": true
+    },
+    "should_ask": false,
+    "party_names_must_survive": ["Lark Creative Studio LLC", "Oak & Iron Fabrication Inc"],
+    "parties_must_not_show_still_needed": true,
+    "live_defect": "parties marked 'Still needed' despite two LLC names present, then auth error"
+  },
+  {
+    "id": "live-fail-fourparty-001",
+    "title": "LIVE FAIL: Four party - $2.10 parsed as $2",
+    "prompt": "Revenue share agreement between Alpha Ventures LLC, Beta Capital Inc, Gamma Holdings LP, and Delta Partners Corp. Joint investment in commercial real estate. Each party contributes equally. Returns split: Alpha 30%, Beta 25%, Gamma 25%, Delta 20%. Management fee $2.10 per share. 5 year term. New York law.",
+    "category": "live_failure_fourparty",
+    "expected_tenets": {
+      "parties": true,
+      "scope": true,
+      "payment": true,
+      "term": true,
+      "governing_law": true
+    },
+    "should_ask": false,
+    "party_count": 4,
+    "party_names_must_survive": ["Alpha Ventures LLC", "Beta Capital Inc", "Gamma Holdings LP", "Delta Partners Corp"],
+    "material_terms_to_keep": ["30%", "25%", "20%", "$2.10", "5 year"],
+    "dollar_amount_precision": "$2.10",
+    "live_defect": "$2.10 parsed as $2"
+  },
+  {
+    "id": "live-fail-noask-001",
+    "title": "LIVE FAIL: Never showed real 2-5 specific LLM ask",
+    "prompt": "something about a deal",
+    "category": "live_failure_noask",
+    "expected_tenets": {
+      "parties": false,
+      "scope": false,
+      "payment": false,
+      "term": false,
+      "governing_law": false
+    },
+    "should_ask": true,
+    "must_use_llm_questions": true,
+    "must_not_use_static_bullets": true,
+    "questions_must_be_specific_to_dump": true,
+    "expected_ask_topics": ["parties", "scope", "payment", "term", "governing_law"],
+    "live_defect": "never showed a real 2-5 specific LLM ask - either static checklist or silent draft"
   }
 ]
