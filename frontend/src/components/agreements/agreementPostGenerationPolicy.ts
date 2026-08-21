@@ -63,6 +63,24 @@ export function resolveIntakeCreateReviewPostGenerationContext(input: {
     return null;
   }
   if (input.createFlowPhase !== "draft_ready_for_review") return null;
+  // EVERY agreement-creation entry on LawDog.me must use the simple starter shell:
+  // - Homepage Draft free / homepage hero (new visitor) -> isFreeStreamlineDraftReview
+  // - Signed-in dashboard Create (existing user) -> productionDraftPrimaryReviewSurface
+  //
+  // The relic AgreementPostGenerationFlow (Your Agreement, DRAFT CREATED—REVIEW RECOMMENDED,
+  // Review agreement + Edit details) must NOT appear on any product create path.
+  // Only paid Pro after opt-in unlocks the party review and signing surfaces (post-create).
+  //
+  // Suppress the canonical post-generation flow for all simpleProductFlow create entries
+  // when no paid Pro flags are active.
+  if (
+    (input.isFreeStreamlineDraftReview || input.productionDraftPrimaryReviewSurface) &&
+    !input.paidProAuthoritative &&
+    !input.premiumPaidDocumentSurface &&
+    !input.premiumPersistedFlowActive
+  ) {
+    return null;
+  }
   if (input.isFreeStreamlineDraftReview || input.productionDraftPrimaryReviewSurface) {
     return "intake_create_review";
   }

@@ -1,3 +1,5 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   resolveIntakeCreateReviewPostGenerationContext,
@@ -46,7 +48,7 @@ describe("agreementPostGenerationPolicy", () => {
     ).toBe(false);
   });
 
-  it("enables intake create review for free streamline drafts", () => {
+  it("suppresses canonical post-generation flow for homepage guest free starter (simple starter shell only)", () => {
     expect(
       resolveIntakeCreateReviewPostGenerationContext({
         isFreeStreamlineDraftReview: true,
@@ -59,10 +61,58 @@ describe("agreementPostGenerationPolicy", () => {
         premiumPersistedFlowActive: false,
         showPrimaryGuidedCompletion: false,
       }),
-    ).toBe("intake_create_review");
+    ).toBeNull();
   });
 
-  it("skips intake create review for paid pro surfaces", () => {
+  it("suppresses canonical post-generation flow for signed-in dashboard Create (simple starter shell only)", () => {
+    expect(
+      resolveIntakeCreateReviewPostGenerationContext({
+        isFreeStreamlineDraftReview: false,
+        productionDraftPrimaryReviewSurface: true,
+        createUiStage: "DRAFT",
+        createFlowPhase: "draft_ready_for_review",
+        hasDraft: true,
+        paidProAuthoritative: false,
+        premiumPaidDocumentSurface: false,
+        premiumPersistedFlowActive: false,
+        showPrimaryGuidedCompletion: false,
+      }),
+    ).toBeNull();
+  });
+
+  it("allows intake create review only for paid Pro after opt-in (paidProAuthoritative)", () => {
+    expect(
+      resolveIntakeCreateReviewPostGenerationContext({
+        isFreeStreamlineDraftReview: false,
+        productionDraftPrimaryReviewSurface: true,
+        createUiStage: "DRAFT",
+        createFlowPhase: "draft_ready_for_review",
+        hasDraft: true,
+        paidProAuthoritative: true,
+        premiumPaidDocumentSurface: false,
+        premiumPersistedFlowActive: false,
+        showPrimaryGuidedCompletion: false,
+      }),
+    ).toBeNull();
+  });
+
+  it("allows intake create review only for paid Pro after opt-in (premiumPaidDocumentSurface)", () => {
+    expect(
+      resolveIntakeCreateReviewPostGenerationContext({
+        isFreeStreamlineDraftReview: false,
+        productionDraftPrimaryReviewSurface: true,
+        createUiStage: "DRAFT",
+        createFlowPhase: "draft_ready_for_review",
+        hasDraft: true,
+        paidProAuthoritative: false,
+        premiumPaidDocumentSurface: true,
+        premiumPersistedFlowActive: false,
+        showPrimaryGuidedCompletion: false,
+      }),
+    ).toBeNull();
+  });
+
+  it("paid pro authoritative suppresses via shouldSuppressIntakeCanonicalPostGeneration", () => {
     expect(
       resolveIntakeCreateReviewPostGenerationContext({
         isFreeStreamlineDraftReview: true,
@@ -91,5 +141,58 @@ describe("agreementPostGenerationPolicy", () => {
         shellInput: { workspaceProEntitled: true, tier: "free" },
       }),
     ).toBeNull();
+  });
+});
+
+describe("simple starter shell locks out relic UI on ALL create entries", () => {
+  it("homepage guest (isFreeStreamlineDraftReview) does not mount the relic DRAFT CREATED / Review agreement", () => {
+    const context = resolveIntakeCreateReviewPostGenerationContext({
+      isFreeStreamlineDraftReview: true,
+      productionDraftPrimaryReviewSurface: true,
+      createUiStage: "DRAFT",
+      createFlowPhase: "draft_ready_for_review",
+      hasDraft: true,
+      paidProAuthoritative: false,
+      premiumPaidDocumentSurface: false,
+      premiumPersistedFlowActive: false,
+      showPrimaryGuidedCompletion: false,
+    });
+    expect(context).toBeNull();
+    expect(
+      shouldUseCanonicalPostGenerationFlow({
+        context,
+        hasDraft: true,
+        isReviewPhase: true,
+      }),
+    ).toBe(false);
+  });
+
+  it("signed-in dashboard Create (productionDraftPrimaryReviewSurface) does not mount the relic", () => {
+    const context = resolveIntakeCreateReviewPostGenerationContext({
+      isFreeStreamlineDraftReview: false,
+      productionDraftPrimaryReviewSurface: true,
+      createUiStage: "DRAFT",
+      createFlowPhase: "draft_ready_for_review",
+      hasDraft: true,
+      paidProAuthoritative: false,
+      premiumPaidDocumentSurface: false,
+      premiumPersistedFlowActive: false,
+      showPrimaryGuidedCompletion: false,
+    });
+    expect(context).toBeNull();
+    expect(
+      shouldUseCanonicalPostGenerationFlow({
+        context,
+        hasDraft: true,
+        isReviewPhase: true,
+      }),
+    ).toBe(false);
+  });
+
+  it("AgreementBuilderIntake renders StarterDraftDocumentSurface for free starter review", () => {
+    const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
+    expect(intake).toContain("StarterDraftDocumentSurface");
+    expect(intake).toContain("freeStarterReviewShellActive");
+    expect(intake).toContain("useStarterDocumentPaperSurface");
   });
 });
