@@ -1096,6 +1096,14 @@ def _classify_premium_full_draft_failure(exc: BaseException) -> tuple[str, str]:
     return "unknown", f"{et}"
 
 
+PREMIUM_TRUNCATED_KEEP_MIN_LEN = 1_600
+"""
+Minimum length to keep truncated/insufficient model text. Lower than the full substance floor
+because a truncated draft that the model actually wrote is more useful to the user than an
+empty skeleton with Retry.
+"""
+
+
 def _premium_full_draft_degraded_response(
     *,
     intake_s: str,
@@ -1103,6 +1111,7 @@ def _premium_full_draft_degraded_response(
     failure_code: str,
     failure_message: str,
     preserved_substantive_body: str = "",
+    use_truncated_keep_floor: bool = False,
 ) -> PremiumFullDraftResponse:
     """
     Explicit premium-generation failure. The backend NEVER synthesizes a deterministic
@@ -1114,14 +1123,31 @@ def _premium_full_draft_degraded_response(
         and mark the generation OK (degraded metadata only), or
       * there is no substantive body — return an EMPTY body with ``generation_ok=False`` +
         ``retryable=True`` so the client shows an explicit retry, not local text.
+
+    When ``use_truncated_keep_floor=True`` (for output_truncated / premium_generation_insufficient),
+    the body is kept if it is >= PREMIUM_TRUNCATED_KEEP_MIN_LEN (1600 chars), bypassing the full
+    substance floor check. This ensures that truncated model output the user paid for is not
+    discarded in favor of an empty paid shell.
     """
     preserved = (preserved_substantive_body or "").strip()
     keep_body = False
     if preserved:
-        floor_ok, _floor_reasons = premium_full_draft_body_meets_substance_floor(
-            preserved, intake=intake_s, context=ctx_dict
-        )
-        keep_body = floor_ok
+        if use_truncated_keep_floor:
+            # For truncated/insufficient cases: keep if >= 1600 chars (lower floor).
+            # The model wrote real text; discarding it and showing an empty skeleton is worse.
+            keep_body = len(preserved) >= PREMIUM_TRUNCATED_KEEP_MIN_LEN
+            if keep_body:
+                log.info(
+                    "[premium-full-draft] event=truncated_keep_floor_passed doc_len=%s min=%s failure_code=%s",
+                    len(preserved),
+                    PREMIUM_TRUNCATED_KEEP_MIN_LEN,
+                    failure_code,
+                )
+        else:
+            floor_ok, _floor_reasons = premium_full_draft_body_meets_substance_floor(
+                preserved, intake=intake_s, context=ctx_dict
+            )
+            keep_body = floor_ok
     doc = preserved if keep_body else ""
     fam = ""
     if ctx_dict:
@@ -4976,11 +5002,13 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Respo
         )
         _primary_finish = str((dq_usage_primary[-1] if dq_usage_primary else {}).get("finish_reason") or "")
         if _primary_finish.strip().lower() == "length":
+            truncated_text = (llm_text or "").strip()
             log.error(
                 "[premium-full-draft] event=truncated_output finish_reason=length "
-                "session_hint=%s completion_tokens=%s",
+                "session_hint=%s completion_tokens=%s truncated_text_len=%s",
                 session_hint,
                 (dq_usage_primary[-1] if dq_usage_primary else {}).get("completion_tokens"),
+                len(truncated_text),
             )
             dm = _premium_full_draft_degraded_response(
                 intake_s=intake_s,
@@ -4990,6 +5018,8 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Respo
                     "The draft was truncated before completion. No partial agreement was frozen. "
                     "Tap Retry Pro draft."
                 ),
+                preserved_substantive_body=truncated_text,
+                use_truncated_keep_floor=True,
             )
             return _premium_full_draft_finalize_http_response(
                 dm,
@@ -5530,11 +5560,17 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Respo
                     qualityOk=bool(ok_final),
                     substanceOk=False,
                 )
+            # Pass the model's doc with use_truncated_keep_floor=True so that if the doc
+            # is >= 1600 chars, we return 200 with that text instead of 503 with empty body.
+            # A truncated/insufficient draft the model actually wrote is more useful to the
+            # user than an empty paid shell with Retry.
             dm = _premium_full_draft_degraded_response(
                 intake_s=intake_s,
                 ctx_dict=ctx_dict,
                 failure_code="premium_generation_insufficient",
                 failure_message=_degraded_user_message_for_code("premium_generation_insufficient"),
+                preserved_substantive_body=doc,
+                use_truncated_keep_floor=True,
             )
             return _premium_full_draft_finalize_http_response(
                 dm,

@@ -250,18 +250,22 @@ def test_success_returns_substantive_server_full_above_min_len(monkeypatch, tmp_
 
 
 def test_short_model_output_returns_retry_not_server_full(monkeypatch, tmp_path):
+    """
+    A body below the truncated keep floor (1600 chars) should return 503 with empty body.
+    Bodies >= 1600 chars are now kept (see truncated keep floor tests).
+    """
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
     monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
 
-    # ~2353-char body for a complex four-party agreement: below the complex substance floor.
+    # A body below 1600 chars - this should still return 503 empty.
     short_doc = (
         "MASTER AGREEMENT\n\n"
         "1. SCOPE. The parties will work together on services.\n"
         "2. FEES. Client pays fees as discussed.\n"
         "3. CONFIDENTIALITY. Keep information private.\n"
-    ) + ("Some operative filler that does not add real clauses. " * 40)
-    assert 2_000 <= len(short_doc) <= 3_000  # matches the reported ~2353-char symptom band
+    )
+    assert len(short_doc) < 1600  # Must be below the truncated keep floor
     short_json = {
         "title": "Master Agreement",
         "agreement_family": "generic",
@@ -520,31 +524,37 @@ def test_thin_primary_repaired_to_substantive_returns_full_server_full(monkeypat
     assert server_full == doc
 
 
-def test_persistently_thin_returns_retryable_not_thin_server_full(monkeypatch, tmp_path):
+def test_persistently_thin_keeps_body_above_truncated_floor(monkeypatch, tmp_path):
     """
-    The core TEST562 regression: a body between the legacy floor and the frontend freeze floor must
-    NEVER be returned as a successful server_full_draft. After the regeneration retry still yields a
-    thin body, the backend surfaces an explicit retryable failure with an empty body.
+    Updated from TEST562: a body between the legacy floor and the frontend freeze floor (6k-10k)
+    is NOW kept when >= 1600 chars. The truncated keep floor takes precedence over the full
+    substance floor because a truncated/insufficient draft the user paid for is more useful
+    than an empty paid shell with Retry.
+
+    The original TEST562 concern (mislabeled_server_full_draft_below_substantive_min) is now
+    handled differently: the body is returned with generation_outcome=degraded and
+    server_generation_failure_code=premium_generation_insufficient, so the frontend knows
+    it's not a "full" corpus but can still display it.
     """
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
     monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
 
     thin_body = _mid_length_four_party_body()
+    assert len(thin_body) >= 1600  # Must pass truncated keep floor
     monkeypatch.setattr(av2, "call_legal_llm", lambda *a, **k: json.dumps(_mid_length_corpus_json()))
     client = TestClient(app)
     res = _post(client, intake=FOUR_PARTY_INTAKE, context=_four_party_context())
 
-    assert res.status_code == 503
+    # Now returns 200 with the body preserved, not 503 with empty
+    assert res.status_code == 200
     body = res.json()
     assert body.get("generation_outcome") == "degraded"
     assert body.get("server_generation_failure_code") == "premium_generation_insufficient"
-    assert (body.get("document_text") or "").strip() == ""
-    assert (body.get("server_full_document_text") or "").strip() == ""
-    assert body.get("generation_ok") is False
-    assert body.get("retryable") is True
-    # No 6k–10k body leaks onto the wire as a full draft.
-    assert thin_body[:60] not in json.dumps(body)
+    assert body.get("generation_ok") is True
+    assert body.get("retryable") is False
+    doc = (body.get("document_text") or "").strip()
+    assert len(doc) >= 1600
 
 
 def test_json_parse_thin_regenerates_then_recovers_substantive(monkeypatch, tmp_path):
@@ -600,18 +610,164 @@ def test_diagnostics_log_emits_required_fields_on_success(monkeypatch, tmp_path,
 
 
 def test_diagnostics_log_emits_required_fields_on_degraded(monkeypatch, tmp_path, caplog):
-    """Diagnostics must also be emitted on the degraded/retry path."""
+    """Diagnostics must also be emitted on the degraded path (with body kept via truncated floor)."""
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
     monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
 
+    # With the truncated keep floor, a body >= 1600 chars is now kept (returns 200),
+    # but still with generation_outcome=degraded and the failure code logged.
     monkeypatch.setattr(av2, "call_legal_llm", lambda *a, **k: json.dumps(_mid_length_corpus_json()))
     client = TestClient(app)
     with caplog.at_level("INFO"):
         res = _post(client, intake=FOUR_PARTY_INTAKE, context=_four_party_context())
 
-    assert res.status_code == 503
+    assert res.status_code == 200  # Now 200 because body >= 1600 chars
     diag = [r.getMessage() for r in caplog.records if "[premium-full-draft-diagnostics]" in r.getMessage()]
     assert diag, "expected a [premium-full-draft-diagnostics] log line"
     assert any("outcome=degraded" in line for line in diag)
     assert any("degraded_reason=premium_generation_insufficient" in line for line in diag)
+
+
+# --- truncated keep floor contract -------------------------------------------------------------
+
+
+def _truncated_usable_body() -> str:
+    """
+    A body >= 1600 chars that would pass the truncated keep floor but might fail the full
+    substance floor for a complex agreement. This simulates a truncated output that the user
+    paid for and should see, rather than an empty paid shell.
+    """
+    sections = [
+        "SERVICES AGREEMENT",
+        "This Agreement is entered into by Harbor Pool & Patio LLC (\"Provider\") and "
+        "Mesa Realty Group LLC (\"Client\").",
+        "1. SERVICES. Provider will deliver pool maintenance and landscaping services.",
+        "2. COMPENSATION. Client pays 7% of deal value after earnest money deposit.",
+        "3. TERM. This agreement has a 12-month exclusive term in the Phoenix metro area.",
+        "4. CLAWBACK. Provider has a 45-day clawback period for commission recovery.",
+        "5. CONFIDENTIALITY. Both parties shall protect confidential information.",
+        "IN WITNESS WHEREOF, the parties execute this Agreement.",
+        "Provider: Harbor Pool & Patio LLC   By: ____  Date: ____",
+        "Client: Mesa Realty Group LLC   By: ____  Date: ____",
+    ]
+    body = "\n\n".join(sections)
+    # Ensure we clear 1600 chars but stay below complex substance floor
+    body += "\n\n" + ("Additional terms and conditions apply. " * 30)
+    return body
+
+
+def _truncated_usable_corpus_json() -> dict:
+    return {
+        "title": "Services Agreement",
+        "agreement_family": "services_agreement",
+        "document_text": _truncated_usable_body(),
+        "key_terms_found": ["7% commission", "12-month term", "45-day clawback"],
+        "missing_material_info": [],
+    }
+
+
+def test_output_truncated_keeps_body_above_1600_chars(monkeypatch, tmp_path):
+    """
+    When finish_reason=length (truncated), if the model returned >= 1600 chars, keep that body
+    and return HTTP 200 instead of 503-empty. A truncated draft is more useful than an empty shell.
+    """
+    monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
+
+    truncated_body = _truncated_usable_body()
+    assert len(truncated_body) >= 1600  # Must pass truncated keep floor
+
+    # Simulate truncated output by returning JSON and having finish_reason=length in usage
+    usage_sink_capture: list = []
+
+    def fake_llm(*args, usage_sink=None, **kwargs):
+        if usage_sink is not None:
+            usage_sink.append({"finish_reason": "length", "completion_tokens": 2000})
+        return json.dumps(_truncated_usable_corpus_json())
+
+    monkeypatch.setattr(av2, "call_legal_llm", fake_llm)
+    client = TestClient(app)
+    res = _post(client, intake="Simple two-party Harbor services agreement.", context=None)
+
+    # Should get 200 with the body, not 503 with empty
+    assert res.status_code == 200
+    body = res.json()
+    assert body.get("generation_outcome") == "degraded"
+    assert body.get("server_generation_failure_code") == "output_truncated"
+    assert body.get("generation_ok") is True
+    assert body.get("retryable") is False
+    doc = (body.get("document_text") or "").strip()
+    assert len(doc) >= 1600
+    assert "Harbor Pool & Patio" in doc or "Services Agreement" in doc
+
+
+def test_output_truncated_with_short_body_returns_503_empty(monkeypatch, tmp_path):
+    """
+    When finish_reason=length but the truncated output is < 1600 chars, return 503 with empty body.
+    A very short truncated output is not useful to the user.
+    """
+    monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
+
+    short_truncated = "SERVICES AGREEMENT\n\nThis Agreement is between..."  # ~50 chars
+    assert len(short_truncated) < 1600
+
+    def fake_llm(*args, usage_sink=None, **kwargs):
+        if usage_sink is not None:
+            usage_sink.append({"finish_reason": "length", "completion_tokens": 100})
+        return short_truncated
+
+    monkeypatch.setattr(av2, "call_legal_llm", fake_llm)
+    client = TestClient(app)
+    res = _post(client, intake="Simple Harbor agreement.", context=None)
+
+    # Should get 503 with empty body
+    assert res.status_code == 503
+    body = res.json()
+    assert body.get("generation_outcome") == "degraded"
+    assert body.get("server_generation_failure_code") == "output_truncated"
+    assert body.get("generation_ok") is False
+    assert body.get("retryable") is True
+    doc = (body.get("document_text") or "").strip()
+    assert doc == ""
+
+
+def test_insufficient_substance_keeps_body_above_1600_chars(monkeypatch, tmp_path):
+    """
+    When the model output fails the full substance floor (missing clause families, etc.) but is
+    >= 1600 chars, keep that body and return HTTP 200 instead of 503-empty.
+    """
+    monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
+
+    # For this test, we use FOUR_PARTY_INTAKE with a simple two-party body that lacks
+    # the required clause families for a four-party agreement (so it fails substance floor)
+    # but is >= 1600 chars (so it passes the truncated keep floor).
+    simple_body = _truncated_usable_body()
+    assert len(simple_body) >= 1600
+    simple_json = {
+        "title": "Simple Services Agreement",
+        "agreement_family": "services_agreement",
+        "document_text": simple_body,
+        "key_terms_found": [],
+        "missing_material_info": [],
+    }
+
+    monkeypatch.setattr(av2, "call_legal_llm", lambda *a, **k: json.dumps(simple_json))
+    client = TestClient(app)
+    # Use four-party intake to trigger substance floor failure (needs more clause families)
+    res = _post(client, intake=FOUR_PARTY_INTAKE, context=_four_party_context())
+
+    # Should get 200 with the body preserved, not 503 with empty
+    assert res.status_code == 200
+    body = res.json()
+    assert body.get("generation_outcome") == "degraded"
+    assert body.get("server_generation_failure_code") == "premium_generation_insufficient"
+    assert body.get("generation_ok") is True
+    assert body.get("retryable") is False
+    doc = (body.get("document_text") or "").strip()
+    assert len(doc) >= 1600
