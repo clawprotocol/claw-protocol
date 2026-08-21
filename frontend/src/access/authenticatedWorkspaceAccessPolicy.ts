@@ -110,7 +110,23 @@ export function resolveWorkspaceCreateAccess(args: {
   workspaceProEntitledProbe?: boolean;
   /** Server commercial entitlement — sole Create authority when present. */
   commercialEntitlement?: CommercialCreateEntitlementProbe | null;
+  /**
+   * True when user has a paid demo premium completion session (4242 POS settled).
+   * Treat as already-Pro: skip guest_ready upsell so the checkout-return generate path can run.
+   */
+  hasPaidDemoPremiumSession?: boolean;
 }): WorkspaceCreateAccessVerdict {
+  // Demo 4242 settle creates hasPaidPremiumCompletionSession — treat as already-Pro.
+  // Skip upsell so the checkout-return generate effect can run immediately.
+  if (args.hasPaidDemoPremiumSession) {
+    return baseVerdict({
+      allowed: true,
+      reason: "checkout_pending",
+      showUpgradeModal: false,
+      showResubscribeCta: false,
+    });
+  }
+
   if (args.isResumingOwnedAgreement) {
     return baseVerdict({
       allowed: true,

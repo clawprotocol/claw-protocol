@@ -46,6 +46,7 @@ import {
 } from "../../access/commercialEntitlement";
 import { fetchWorkspaceIndex } from "../../agreement/agreementWorkspaceApi";
 import { hasCurrentSessionFreeStarterIntent } from "../../components/agreements/paidProSessionEligibility";
+import { hasPaidPremiumCompletionSession } from "../../components/agreements/premiumCompletionStorage";
 import { getLawdogTrustNudges } from "../../tracking/lawdogSession";
 import { UpgradeToProModal } from "../../monetization/UpgradeToProModal";
 import { useAuth } from "../../auth/AuthProvider";
@@ -297,6 +298,9 @@ export function SimpleCreatePage() {
   const [commercialEntitlement, setCommercialEntitlement] =
     useState<CommercialEntitlementDecision | null>(null);
   const [commercialEntitlementReady, setCommercialEntitlementReady] = useState(false);
+  // Demo 4242 settle creates hasPaidPremiumCompletionSession — treat as already-Pro.
+  // Skip upsell so the checkout-return generate effect can run immediately.
+  const paidDemoPremiumSession = hasPaidPremiumCompletionSession();
   const createAccessVerdict = useMemo(
     () =>
       resolveWorkspaceCreateAccess({
@@ -323,8 +327,9 @@ export function SimpleCreatePage() {
               reason: commercialEntitlement.reason,
             }
           : null,
+        hasPaidDemoPremiumSession: paidDemoPremiumSession,
       }),
-    [access.tier, createAuthAuthenticated, workspaceProEntitled, commercialEntitlement],
+    [access.tier, createAuthAuthenticated, workspaceProEntitled, commercialEntitlement, paidDemoPremiumSession],
   );
   const isResumingOwnedAgreement = Boolean(readCreateReviewAgreementResumeId());
   const hasCheckoutPendingMarker = Boolean(readCreateComplexityResume()?.awaitingProCheckout);
