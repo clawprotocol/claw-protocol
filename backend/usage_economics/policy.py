@@ -671,14 +671,27 @@ def usage_summary_for_subject(subject_ref: str) -> Dict[str, Any]:
     }
 
 
-def assert_guest_workflow_denied(*, subject_ref: str, surface: str) -> None:
-    """Block guest subjects from save/share/sign/proof/history workflows."""
+def assert_guest_workflow_denied(
+    *, subject_ref: str, surface: str, request: "Request | None" = None
+) -> None:
+    """Block guest subjects from save/share/sign/proof/history workflows.
+
+    Demo checkout sessions (simulated POS) are allowed through even though they are
+    technically guest subjects (anon-* orgs). This enables the post-payment flow.
+    """
     from fastapi import HTTPException
 
     from backend.usage_economics.commercial_entitlement import subject_is_guest
 
     if not subject_is_guest(subject_ref):
         return
+
+    if request is not None:
+        from backend.security.commercial_auth import _is_demo_checkout_session
+
+        if _is_demo_checkout_session(request):
+            return
+
     raise HTTPException(
         status_code=403,
         detail={

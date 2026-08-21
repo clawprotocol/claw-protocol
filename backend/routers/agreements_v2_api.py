@@ -419,6 +419,7 @@ def _owner_mutation_guards(request: Request, agreement_id: str, *, surface: str)
     assert_guest_workflow_denied(
         subject_ref=resolve_subject_from_request(request),
         surface=surface,
+        request=request,
     )
     assert_registered_owner_matches(request, agreement_id)
     assert_free_incomplete_draft_not_expired(agreement_id, surface=surface)
