@@ -5738,7 +5738,38 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     if (cached) return cached;
     if (reviewAgreementEnsurePromiseRef.current) return reviewAgreementEnsurePromiseRef.current;
     const session = reviewWorkspaceSessionRef.current;
-    const snapshot = draft;
+    let snapshot = draft;
+    // Demo session post-POS: allow persist even without a draft if we have a valid Pro corpus.
+    // Build a minimal draft from the pipeline output so the POST /draft can succeed.
+    if (!snapshot && hasDemoSessionUser() && hasPaidPremiumCompletionSession()) {
+      const pipelineCorpus = (
+        lastPremiumWinningCorpusRef.current ||
+        premiumPipelineOutputBodyRef.current ||
+        hydratedPremiumBodyRef.current ||
+        ""
+      ).trim();
+      if (pipelineCorpus.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
+        snapshot = {
+          title: "Services Agreement",
+          jurisdiction: "",
+          parties: [
+            { name: recipient1Name || "Party 1", role: "Party", email: recipient1Email || "" },
+            { name: recipient2Name || "Party 2", role: "Party", email: recipient2Email || "" },
+          ],
+          purpose: pipelineCorpus,
+          payment_terms: "",
+          duration: null,
+          due_date: null,
+          effective_date: null,
+          payment: { amount: null, cadence: null, valid: true },
+          premium_full_document_text: pipelineCorpus,
+          premium_server_full_document_text: pipelineCorpus,
+        };
+        console.info("[demo-session-user] built_minimal_draft_for_persist", {
+          corpusLen: pipelineCorpus.length,
+        });
+      }
+    }
     if (!snapshot) return null;
     const { n1: handoffParty1 } = getRecipientHandoffNamesFromDraft(snapshot);
     const party = pickRecipientNameForHandoff(recipient1Name, handoffParty1).trim() || "Party";
@@ -22750,6 +22781,23 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         reason: "unified_cta_inactive",
       };
     }
+    // Demo session user post-POS: use "Continue" CTA, not dashboard resume labels.
+    // This check must come BEFORE dashboardSignerSetupResumeUiActive since demo sessions
+    // also set paidProInlineSignerSetupLatched which triggers dashboard resume detection.
+    if (
+      demoSessionUserActive &&
+      hasPaidPremiumCompletionSession() &&
+      paidProCanonicalReviewSignerSetupActive
+    ) {
+      return {
+        label: paidProSignerDetailsGate.complete ? "Continue" : "Complete signer details",
+        action: paidProSignerDetailsGate.complete ? "guided_continue" : "complete_recipient_details",
+        disabled: false,
+        reason: paidProSignerDetailsGate.complete
+          ? "demo_session_signer_details_complete"
+          : "demo_session_signer_details_incomplete",
+      };
+    }
     // Dashboard signer-setup resume owns the sticky CTA — never Retry Pro draft / Describe agreement.
     if (dashboardSignerSetupResumeUiActive && paidProCanonicalReviewSignerSetupActive) {
       const resumeCta = resolveDashboardSignerSetupResumePrimaryCta({
@@ -31851,6 +31899,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             return;
           }
           case "guided_continue": {
+            // Demo session post-POS: finalize signer metadata and open SimpleProFinalReviewScreen.
+            // Do NOT call handlePaidProPrepareSignaturesFromFirstReview (that creates signature links).
+            if (cta.reason === "demo_session_signer_details_complete") {
+              void finalizePaidProSignerMetadataAndOpenReviewDecision();
+              return;
+            }
             if (cta.reason === "dashboard_signer_setup_resume_complete") {
               void (async () => {
                 const ok = await finalizePaidProSignerMetadataAndOpenReviewDecision();

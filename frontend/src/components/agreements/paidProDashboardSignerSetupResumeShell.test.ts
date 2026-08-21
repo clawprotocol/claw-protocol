@@ -100,4 +100,41 @@ describe("dashboard signer-setup resume dedicated shell", () => {
     );
     expect(intakeSrc).toContain("!dashboardSignerSetupResumeUiActive");
   });
+
+  it("demo session post-POS uses 'Continue' CTA, not dashboard resume labels (#23 regression)", () => {
+    // The unified CTA resolver must check for demo session BEFORE dashboard resume
+    expect(intakeSrc).toContain("Demo session user post-POS: use");
+    expect(intakeSrc).toContain("demo_session_signer_details_complete");
+    expect(intakeSrc).toContain("demo_session_signer_details_incomplete");
+    // The demo check must appear BEFORE the dashboard resume check
+    const demoCheckIdx = intakeSrc.indexOf("Demo session user post-POS: use");
+    const dashboardResumeIdx = intakeSrc.indexOf(
+      "Dashboard signer-setup resume owns the sticky CTA",
+    );
+    expect(demoCheckIdx).toBeGreaterThan(-1);
+    expect(dashboardResumeIdx).toBeGreaterThan(-1);
+    expect(demoCheckIdx).toBeLessThan(dashboardResumeIdx);
+  });
+
+  it("demo session CTA routes to SimpleProFinalReviewScreen without prepare signatures (#23 regression)", () => {
+    // Click handler for demo_session_signer_details_complete should NOT call
+    // handlePaidProPrepareSignaturesFromFirstReview. The demo case must return BEFORE
+    // the dashboard_signer_setup_resume_complete case which does call prepare signatures.
+    const demoCtaIdx = intakeSrc.indexOf('cta.reason === "demo_session_signer_details_complete"');
+    const dashboardCtaIdx = intakeSrc.indexOf('cta.reason === "dashboard_signer_setup_resume_complete"');
+    expect(demoCtaIdx).toBeGreaterThan(-1);
+    expect(dashboardCtaIdx).toBeGreaterThan(-1);
+    // Demo case must come BEFORE dashboard resume case
+    expect(demoCtaIdx).toBeLessThan(dashboardCtaIdx);
+    // Demo case block (up to the dashboard case) should NOT call prepare signatures
+    const demoBlock = intakeSrc.slice(demoCtaIdx, dashboardCtaIdx);
+    expect(demoBlock).toContain("finalizePaidProSignerMetadataAndOpenReviewDecision");
+    expect(demoBlock).not.toContain("handlePaidProPrepareSignaturesFromFirstReview");
+    // The comment above the demo case documents that it does not create signature links
+    const commentIdx = intakeSrc.indexOf("Demo session post-POS: finalize signer metadata");
+    expect(commentIdx).toBeGreaterThan(-1);
+    expect(commentIdx).toBeLessThan(demoCtaIdx);
+    const commentBlock = intakeSrc.slice(commentIdx, demoCtaIdx);
+    expect(commentBlock).toContain("Do NOT call handlePaidProPrepareSignaturesFromFirstReview");
+  });
 });
