@@ -10,10 +10,13 @@ function collapseBlankRuns(text: string): string {
 /**
  * Meta / header lines that leak from intake carry-forward blocks.
  * Live leak example: "Commercial detail carried forward from user notes (edit freely before send):"
+ * Live leak example: "Signal persistence safeguards:"
  */
 const LEAKED_META_LINE_PATTERNS = [
   /^\s*Commercial\s+detail\s+carried\s+forward\s+from\s+user\s+notes\s*\([^)]*\)\s*:\s*$/gim,
   /^\s*Commercial\s+detail\s+carried\s+forward[^\n]*$/gim,
+  // Signal persistence safeguards meta header leaked into §10
+  /^\s*Signal\s+persistence\s+safeguards\s*:\s*$/gim,
 ];
 
 /**
@@ -40,10 +43,53 @@ const LEAKED_PROMPT_SECTION_PATTERNS = [
   /^(?:1[1-9]|[2-9]\d)\.\s+\d+\s+(?:month|year|day|week)\s+deal[^\n]*/gim,
 ];
 
+/**
+ * Orphan body fragments left behind after numbered heading stripping.
+ * Live leak: "count" then "our house accounts or anyone we already did a job for last year."
+ * These are body text left when "12. Don't" was stripped but follow-on prose remained.
+ */
+const ORPHAN_BODY_FRAGMENT_PATTERNS = [
+  // "count" as standalone line followed by "our house accounts..."
+  /^\s*count\s*$/gim,
+  /^\s*our\s+house\s+accounts\s+or\s+anyone\s+we\s+already\s+did\s+a\s+job\s+for[^\n]*$/gim,
+];
+
+/**
+ * User-dump personal details that should never appear in the document.
+ * Live leak: "no teal/or logos and dog Biscuit" - personal pet name and truck color from user dump.
+ */
+const PERSONAL_DETAIL_LEAK_PATTERNS = [
+  // Biscuit (user's dog name) or teal (truck color) in any context
+  /^[^.]*\b(?:dog\s+)?Biscuit\b[^.]*$/gim,
+  /^[^.]*\bteal\b[^.]*(?:truck|logo|vehicle|color)[^.]*$/gim,
+  /^[^.]*(?:truck|logo|vehicle|color)[^.]*\bteal\b[^.]*$/gim,
+  // Explicit patterns for "no teal/or logos and dog Biscuit" style leaks
+  /^\s*(?:no\s+)?teal\s*(?:\/\s*or)?[^.]*Biscuit[^\n]*$/gim,
+  /^[^.]*Biscuit[^.]*teal[^\n]*$/gim,
+];
+
 /** Strip meta lines (e.g. carry-forward headers) that leak from intake processing. */
 function stripLeakedMetaLines(text: string): string {
   let t = text;
   for (const pattern of LEAKED_META_LINE_PATTERNS) {
+    t = t.replace(pattern, "");
+  }
+  return t;
+}
+
+/** Strip orphan body fragments left after numbered heading removal. */
+function stripOrphanBodyFragments(text: string): string {
+  let t = text;
+  for (const pattern of ORPHAN_BODY_FRAGMENT_PATTERNS) {
+    t = t.replace(pattern, "");
+  }
+  return t;
+}
+
+/** Strip personal detail leaks (pet names, colors from user dump). */
+function stripPersonalDetailLeaks(text: string): string {
+  let t = text;
+  for (const pattern of PERSONAL_DETAIL_LEAK_PATTERNS) {
     t = t.replace(pattern, "");
   }
   return t;
@@ -82,6 +128,12 @@ export function stripPremiumInstructionNoiseForDocument(text: string): string {
 
   // Strip leaked prompt prose that appears as numbered sections
   t = stripLeakedPromptAsSections(t);
+
+  // Strip orphan body fragments left after heading removal
+  t = stripOrphanBodyFragments(t);
+
+  // Strip personal detail leaks (pet names, colors from user dump)
+  t = stripPersonalDetailLeaks(t);
 
   return collapseBlankRuns(t);
 }

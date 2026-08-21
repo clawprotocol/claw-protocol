@@ -18,6 +18,30 @@ const HARBOR_LEAK_FIXTURE_LINES = [
   `Commercial detail carried forward from user notes (edit freely before send):`,
 ];
 
+/**
+ * Additional Harbor leak fixture lines from PR #30 live retest (2026-08-21).
+ * These appear AFTER the numbered heading strip removed the "12. Don't" heading
+ * but left orphan body text behind.
+ */
+const HARBOR_ORPHAN_BODY_LINES = [
+  `count`,
+  `our house accounts or anyone we already did a job for last year.`,
+];
+
+/**
+ * Meta headers that leak into section bodies.
+ */
+const HARBOR_META_HEADER_LINES = [
+  `Signal persistence safeguards:`,
+];
+
+/**
+ * Personal detail leaks from user dump (pet names, truck colors).
+ */
+const HARBOR_PERSONAL_DETAIL_LINES = [
+  `no teal/or logos and dog Biscuit`,
+];
+
 describe("stripPremiumInstructionNoiseForDocument", () => {
   it("removes standalone instruction lines", () => {
     const raw = `1. SCOPE\n\nWe need this rewritten so it reflects our deal.\n\nParty A shall perform services.`;
@@ -149,5 +173,161 @@ This Agreement shall be governed by Arizona law.`;
       expect(out).toContain("10. ENTIRE AGREEMENT");
       expect(out).toContain("14. NOTICES");
     }
+  });
+
+  it("strips orphan body fragments left after heading removal (PR #30 regression)", () => {
+    // Live leak: after "12. Don't" was stripped, "count" and "our house accounts..." remained
+    const corpus = `9. CONFIDENTIALITY
+
+All proprietary information shall remain confidential.
+
+10. ENTIRE AGREEMENT
+
+This Agreement constitutes the entire agreement.
+
+count
+
+our house accounts or anyone we already did a job for last year.
+
+14. NOTICES
+
+All notices shall be sent.`;
+
+    const out = stripPremiumInstructionNoiseForDocument(corpus);
+
+    // Orphan body fragments must be stripped
+    expect(out).not.toMatch(/^\s*count\s*$/m);
+    expect(out).not.toMatch(/our house accounts or anyone we already did a job for/i);
+
+    // Legitimate sections preserved
+    expect(out).toContain("9. CONFIDENTIALITY");
+    expect(out).toContain("10. ENTIRE AGREEMENT");
+    expect(out).toContain("14. NOTICES");
+  });
+
+  it("strips Signal persistence safeguards meta header (PR #30 regression)", () => {
+    const corpus = `9. CONFIDENTIALITY
+
+All proprietary information shall remain confidential.
+
+10. ENTIRE AGREEMENT
+
+Signal persistence safeguards:
+
+This Agreement constitutes the entire agreement.
+
+14. NOTICES
+
+All notices shall be sent.`;
+
+    const out = stripPremiumInstructionNoiseForDocument(corpus);
+
+    // Meta header must be stripped
+    expect(out).not.toMatch(/Signal persistence safeguards/i);
+
+    // Legitimate sections preserved
+    expect(out).toContain("9. CONFIDENTIALITY");
+    expect(out).toContain("10. ENTIRE AGREEMENT");
+    expect(out).toContain("14. NOTICES");
+  });
+
+  it("strips personal detail leaks - Biscuit/teal (PR #30 regression)", () => {
+    const corpus = `1. SERVICES
+
+The Service Provider shall provide lead generation services.
+
+2. SCOPE OF WORK
+
+no teal/or logos and dog Biscuit
+
+3. COMPENSATION
+
+Client shall pay 7% of deposit.`;
+
+    const out = stripPremiumInstructionNoiseForDocument(corpus);
+
+    // Personal detail leak must be stripped
+    expect(out).not.toMatch(/Biscuit/i);
+    expect(out).not.toMatch(/teal/i);
+
+    // Legitimate sections preserved
+    expect(out).toContain("1. SERVICES");
+    expect(out).toContain("3. COMPENSATION");
+    expect(out).toContain("7%");
+  });
+
+  it("removes all Harbor PR #30 regression leak lines from comprehensive fixture", () => {
+    // Build a corpus with ALL the leak patterns from PR #30 regression
+    const corpus = `SERVICES AGREEMENT
+
+This Agreement is entered into by and between Harbor Pool & Patio LLC ("Client") and Mesa Realty Group LLC ("Service Provider").
+
+1. SERVICES
+The Service Provider shall provide lead generation services.
+
+2. COMPENSATION
+Client shall pay Service Provider 7% of the deposit amount.
+
+3. EXCLUSIVITY
+This arrangement is exclusive in the Phoenix metro area.
+
+4. CLAWBACK
+If the job falls through in 45 days, refund applies.
+
+9. CONFIDENTIALITY
+All proprietary information shall remain confidential.
+
+10. ENTIRE AGREEMENT
+
+Signal persistence safeguards:
+
+This Agreement constitutes the entire agreement.
+
+${HARBOR_LEAK_FIXTURE_LINES[0]}
+
+${HARBOR_LEAK_FIXTURE_LINES[1]}
+
+${HARBOR_LEAK_FIXTURE_LINES[2]}
+
+${HARBOR_LEAK_FIXTURE_LINES[3]}
+
+count
+
+our house accounts or anyone we already did a job for last year.
+
+no teal/or logos and dog Biscuit
+
+14. NOTICES
+All notices shall be sent to the addresses listed below.
+
+13. GOVERNING LAW
+This Agreement shall be governed by Arizona law.`;
+
+    const out = stripPremiumInstructionNoiseForDocument(corpus);
+
+    // MUST NOT appear in output (all leaked content)
+    expect(out).not.toMatch(/11\.\s*Mesa Realty Group LLC.*said/i);
+    expect(out).not.toMatch(/12\.\s*Don't.*count.*house accounts/i);
+    expect(out).not.toMatch(/13\.\s*12 month deal/i);
+    expect(out).not.toMatch(/Commercial detail carried forward from user notes/i);
+    expect(out).not.toMatch(/Signal persistence safeguards/i);
+    expect(out).not.toMatch(/^\s*count\s*$/m);
+    expect(out).not.toMatch(/our house accounts or anyone we already did a job for/i);
+    expect(out).not.toMatch(/Biscuit/i);
+    expect(out).not.toMatch(/teal/i);
+
+    // MUST still appear (legitimate agreement content)
+    expect(out).toContain("SERVICES AGREEMENT");
+    expect(out).toContain("Harbor Pool & Patio LLC");
+    expect(out).toContain("Mesa Realty Group LLC");
+    expect(out).toContain("7%");
+    expect(out).toContain("Arizona law");
+    expect(out).toContain("45 days");
+    expect(out).toContain("exclusive");
+    expect(out).toContain("1. SERVICES");
+    expect(out).toContain("2. COMPENSATION");
+    expect(out).toContain("10. ENTIRE AGREEMENT");
+    expect(out).toContain("14. NOTICES");
+    expect(out).toContain("13. GOVERNING LAW");
   });
 });
