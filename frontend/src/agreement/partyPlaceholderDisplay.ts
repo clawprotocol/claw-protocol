@@ -157,7 +157,7 @@ export function extractAgreementEntityCandidates(context: string): string[] {
   }
 
   for (const m of text.matchAll(
-    /\b([A-Z][\w&'’\-]+(?:\s+[A-Z][\w&'’\-]+)*,?\s+(?:LLC|L\.L\.C\.|Inc\.?|Corp\.?|Corporation|Ltd\.?|Limited|LP|L\.P\.|LLP|PLLC|Co\.?|Company))\b/g,
+    /\b([A-Z][\w&'’\-]+(?:(?:\s+&\s+|\s+)[A-Z][\w&'’\-]+)*,?\s+(?:LLC|L\.L\.C\.|Inc\.?|Corp\.?|Corporation|Ltd\.?|Limited|LP|L\.P\.|LLP|PLLC|Co\.?|Company))\b/g,
   )) {
     pushUnique(out, seen, m[1]);
   }

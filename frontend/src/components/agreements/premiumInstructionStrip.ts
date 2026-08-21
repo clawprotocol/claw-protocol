@@ -10,10 +10,15 @@ function collapseBlankRuns(text: string): string {
 /**
  * Numbered section patterns that look like leaked user prompt prose, not agreement headings.
  * Match: "11. I run", "12. hey so", "13. Don't", etc.
+ *
+ * Also detects out-of-sequence high-numbered sections (11+) that contain informal prose
+ * fragments clearly from user input rather than structured agreement sections.
  */
 const LEAKED_PROMPT_SECTION_PATTERNS = [
   /^\d+\.\s+(?:I\s+run|hey\s+so|Don'?t|my\s+dog|I\s+need|please|we\s+need|also\s+my|ignore\s+that|I\s+guess)\b[^\n]*$/gim,
   /^\d+\.\s+(?:Create|Draft|Make|Write)\s+(?:a|an|the)\s+(?:agreement|contract|document|deal)\b[^\n]*/gim,
+  /^(?:1[1-9]|[2-9]\d)\.\s+[A-Z][a-z]+(?:\s+[A-Z]?[a-z]+)*\s+(?:LLC|Inc|Corp|Ltd)\.?\s+(?:said|told|mentioned|wants?|will|can|agreed)[^\n]*/gim,
+  /^(?:1[1-9]|[2-9]\d)\.\s+(?:Don'?t|If\s+the|They\s+(?:want|can|said)|We\s+(?:need|want)|My\s+|Our\s+|\d+\s+(?:month|year|day|week))[^\n]*/gim,
 ];
 
 /** Strip numbered "section" lines that are clearly leaked user prompt, not real sections. */
