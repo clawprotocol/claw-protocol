@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
-import { render, fireEvent, within, cleanup } from "@testing-library/react";
+import { render, fireEvent, cleanup } from "@testing-library/react";
 import { PaidProPostPosSignerChrome } from "./PaidProPostPosSignerChrome";
 
 describe("PaidProPostPosSignerChrome", () => {

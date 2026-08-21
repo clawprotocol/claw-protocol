@@ -246,7 +246,7 @@ describe("canonicalPartyIdentityResolver", () => {
     expect(records[0]?.fullLegalName).toBe("Red Mesa Logistics LLC");
     expect(records[1]?.fullLegalName).toBe("Mesa Consulting Inc");
     const body = "Red Mesa Logistics LLC will work with Mesa Consulting Inc on the project.";
-    const { text, repairs } = replaceTruncatedPartyRefsWithRoleLabels(body, records);
+    const { text } = replaceTruncatedPartyRefsWithRoleLabels(body, records);
     expect(text).not.toMatch(/Red Service Provider Logistics/i);
     expect(text).not.toMatch(/Service Provider Logistics/i);
     expect(text).toContain("Red Mesa Logistics");

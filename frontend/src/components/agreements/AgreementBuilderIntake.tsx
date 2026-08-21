@@ -684,7 +684,6 @@ import {
   readAcceptedPipelineReviewCorpusPlain,
 } from "./paidProAcceptedPipelineReviewCorpus";
 import { PaidProForcedFirstReviewChrome } from "./paidProForcedFirstReviewChrome";
-import { PaidProPostPosSignerChrome, type PartySignerSlot } from "./PaidProPostPosSignerChrome";
 import { PaidProReviewRenderInvariantProbe } from "./PaidProReviewRenderInvariantProbe";
 import { hasDemoSessionUser } from "../../launch/guestCheckoutAuthority";
 import {
@@ -20077,7 +20076,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     if (createUiStage !== CreateUiStage.DRAFT) {
       setCreateUiStage(CreateUiStage.DRAFT);
     }
-    if (createFlowPhase === "capturing_input" || createFlowPhase === "none") {
+    if (createFlowPhase === "capturing_input") {
       setCreateFlowPhase("draft_ready_for_review");
     }
     console.info("[demo-session-user] auto_arm_signer_setup_post_checkout");
