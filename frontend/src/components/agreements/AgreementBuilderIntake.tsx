@@ -33091,11 +33091,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                           });
                         }
                         const base = premiumGapBaseIntakeRef.current;
-                        const intake = t
-                          ? `${base}\n\n— Finish your agreement (user details):\n${t}`
-                          : base;
                         void r({
-                          intakeText: intake,
+                          intakeText: base,
                           userGapAnswers: t || null,
                           gapResolverSkippedWithDefaults: false,
                         });
@@ -33248,9 +33245,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                               setPremiumPipelineUserMessage(CLAW_PREMIUM_PREPARING_AGREEMENT_COPY);
                               try {
                                 await m({
-                                  intakeText: ga
-                                    ? `${base}\n\n— Finish your agreement (user details):\n${ga}`
-                                    : it,
+                                  intakeText: it,
                                   userGapAnswers: ga || null,
                                   gapResolverSkippedWithDefaults: !ga,
                                 });
