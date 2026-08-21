@@ -189,14 +189,40 @@ function stripCardDigits(raw: string): string {
 }
 
 /**
- * Reads card field value from React state first, falling back to DOM ref value.
- * This handles autofill/autocomplete scenarios where the browser fills the DOM
- * but React state is not updated (e.g., programmatic fill, some autofill modes).
+ * Reads the best card field value from multiple sources: the submitted form,
+ * a ref, and React state. This handles autofill/autocomplete scenarios where
+ * the browser fills the DOM but React state is stale or incomplete.
+ *
+ * For card number fields, picks the candidate with the most digits.
+ * For other fields, picks the first non-empty candidate (form > ref > state).
  */
-function readCardFieldValue(stateValue: string, ref: React.RefObject<HTMLInputElement | null>): string {
+function readCardFieldFromForm(
+  form: HTMLFormElement,
+  inputId: string,
+  stateValue: string,
+  ref: React.RefObject<HTMLInputElement | null>,
+  isCardNumber: boolean = false,
+): string {
+  const formInput = form.querySelector<HTMLInputElement>(`#${inputId}`);
+  const fromForm = formInput?.value?.trim() ?? "";
+  const fromRef = ref.current?.value?.trim() ?? "";
   const fromState = stateValue.trim();
-  if (fromState) return fromState;
-  return ref.current?.value?.trim() ?? "";
+
+  if (isCardNumber) {
+    const candidates = [fromForm, fromRef, fromState];
+    let best = "";
+    let bestDigits = 0;
+    for (const c of candidates) {
+      const digits = stripCardDigits(c);
+      if (digits.length > bestDigits) {
+        best = c;
+        bestDigits = digits.length;
+      }
+    }
+    return best;
+  }
+
+  return fromForm || fromRef || fromState;
 }
 
 export function SimpleCheckoutPage(props: { agreementId: string }) {
@@ -441,19 +467,24 @@ export function SimpleCheckoutPage(props: { agreementId: string }) {
     }
   }
 
-  async function onCardPay(e: FormEvent): Promise<void> {
+  async function onCardPay(e: FormEvent<HTMLFormElement>): Promise<void> {
     e.preventDefault();
     if (finishedRef.current || processing || amountUsd == null) return;
+
+    const form = e.currentTarget;
+    const isCreateFlowForm = form.querySelector("#cf-cc-name") !== null;
+    const idPrefix = isCreateFlowForm ? "cf-cc" : "std-cc";
+
+    const liveCardName = readCardFieldFromForm(form, `${idPrefix}-name`, cardName, cardNameRef);
+    const liveCardNumber = readCardFieldFromForm(form, `${idPrefix}-num`, cardNumber, cardNumberRef, true);
+    const liveCardExp = readCardFieldFromForm(form, `${idPrefix}-exp`, cardExp, cardExpRef);
+    const liveCardCvc = readCardFieldFromForm(form, `${idPrefix}-cvc`, cardCvc, cardCvcRef);
+    const digits = stripCardDigits(liveCardNumber);
 
     // Guest checkout MUST use demo/4242 settlement, never live Stripe.
     // This is the GTM flywheel: guest Continue with Pro uses simulated POS.
     if (isGuestCheckout) {
       console.info("[GUEST CHECKOUT] using demo settlement — never live Stripe for guest flywheel");
-      const liveCardName = readCardFieldValue(cardName, cardNameRef);
-      const liveCardNumber = readCardFieldValue(cardNumber, cardNumberRef);
-      const liveCardExp = readCardFieldValue(cardExp, cardExpRef);
-      const liveCardCvc = readCardFieldValue(cardCvc, cardCvcRef);
-      const digits = stripCardDigits(liveCardNumber);
       if (!liveCardName || digits.length < 15 || !liveCardExp || liveCardCvc.length < 3) {
         fail("Please complete all card fields.");
         return;
@@ -513,11 +544,6 @@ export function SimpleCheckoutPage(props: { agreementId: string }) {
     if (import.meta.env.DEV && genesisHandoff.metadata.referral_code) {
       console.info("[genesis-referral] checkout metadata", genesisHandoff.metadata);
     }
-    const liveCardName = readCardFieldValue(cardName, cardNameRef);
-    const liveCardNumber = readCardFieldValue(cardNumber, cardNumberRef);
-    const liveCardExp = readCardFieldValue(cardExp, cardExpRef);
-    const liveCardCvc = readCardFieldValue(cardCvc, cardCvcRef);
-    const digits = stripCardDigits(liveCardNumber);
     if (!liveCardName || digits.length < 15 || !liveCardExp || liveCardCvc.length < 3) {
       fail("Please complete all card fields.");
       return;
