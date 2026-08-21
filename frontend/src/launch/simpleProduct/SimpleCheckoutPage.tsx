@@ -77,6 +77,7 @@ import {
   isStripeCheckoutApiConfigured,
 } from "../billingCheckoutApi";
 import { syncDemoSubscriptionEntitlementIfApplicable } from "../billingCheckoutDemoSync";
+import { createDemoSessionUser, hasDemoSessionUser } from "../guestCheckoutAuthority";
 import { resetCheckoutEntryScroll } from "./checkoutEntryScroll";
 import { SimpleFlowShell } from "./SimpleFlowShell";
 import { SpaLink } from "../SpaLink";
@@ -272,7 +273,11 @@ export function SimpleCheckoutPage(props: { agreementId: string }) {
   }
 
   const applyConfirmedSettlement = useCallback(
-    async (conf: SettlementConfirmation, paymentMode: CheckoutPaymentMode = "demo_card") => {
+    async (
+      conf: SettlementConfirmation,
+      paymentMode: CheckoutPaymentMode = "demo_card",
+      paymentInfo?: { cardholderName?: string },
+    ) => {
       if (!conf.ok) {
         fail(conf.error);
         return;
@@ -282,6 +287,24 @@ export function SimpleCheckoutPage(props: { agreementId: string }) {
       setProcessing(true);
       setPaymentError(null);
       await new Promise((r) => window.setTimeout(r, 250));
+
+      // Create demo session user for guest checkout (no Supabase session, simulated POS).
+      // This makes them a basic account user so they can continue to premium completion.
+      const isGuestCheckout = !user && !hasDemoSessionUser();
+      if (isGuestCheckout && agreementId === CREATE_FLOW_CHECKOUT_AGREEMENT_ID) {
+        const displayName = paymentInfo?.cardholderName?.trim() || "Pro User";
+        createDemoSessionUser({
+          displayName,
+          email: null,
+          settlementReceiptId: conf.receipt.receiptId,
+        });
+        console.info("[guest-checkout] demo_session_user_created", {
+          agreementId,
+          paymentMode,
+          displayName,
+        });
+      }
+
       const attr = checkoutPayloadFromPaywallAttribution(agreementId);
       const revenueUsd = amountUsd ?? 0;
       if (isSingleAgreementCheckout) {
@@ -346,7 +369,7 @@ export function SimpleCheckoutPage(props: { agreementId: string }) {
       inFlightRef.current = false;
       setProcessing(false);
     },
-    [navigate, returnTo, agreementId, isSingleAgreementCheckout, amountUsd, tier, user?.id],
+    [navigate, returnTo, agreementId, isSingleAgreementCheckout, amountUsd, tier, user],
   );
 
   async function startStripeCheckout(): Promise<void> {
@@ -418,7 +441,7 @@ export function SimpleCheckoutPage(props: { agreementId: string }) {
         intent,
         cardNumberDigits: "4242424242424242",
       });
-      await applyConfirmedSettlement(conf, "dev_bypass");
+      await applyConfirmedSettlement(conf, "dev_bypass", { cardholderName: cardName || "Dev Bypass User" });
       return;
     }
     const affiliateCode = getAffiliateCodeForAttribution();
@@ -449,7 +472,7 @@ export function SimpleCheckoutPage(props: { agreementId: string }) {
       amountUsd,
     });
     const conf = await demoConfirmFiatToCryptoOnrampFromCard({ intent, cardNumberDigits: digits });
-    await applyConfirmedSettlement(conf, "demo_card");
+    await applyConfirmedSettlement(conf, "demo_card", { cardholderName: cardName });
   }
 
   async function onQaPaymentBypass(): Promise<void> {
@@ -468,7 +491,7 @@ export function SimpleCheckoutPage(props: { agreementId: string }) {
       intent,
       cardNumberDigits: "4242424242424242",
     });
-    await applyConfirmedSettlement(conf, "qa_bypass");
+    await applyConfirmedSettlement(conf, "qa_bypass", { cardholderName: cardName || "QA Bypass User" });
   }
 
   const priceLine =

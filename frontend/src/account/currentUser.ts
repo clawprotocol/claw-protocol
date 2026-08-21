@@ -2,14 +2,16 @@
  * Current-user adapter for dashboard / workspace surfaces.
  *
  * Org headers, localStorage, and workspace slugs are NEVER proof of authentication.
- * Authenticated state requires a validated Supabase session (or explicit e2e/dev test bridge).
+ * Authenticated state requires a validated Supabase session (or explicit e2e/dev test bridge),
+ * OR a demo session user created after simulated POS checkout.
  */
 
 import { getOrgId } from "../launch/orgContext";
 import { readE2eAuthSessionForDev } from "../auth/e2eAuthSessionBridge";
 import { isPublicProductionHostname } from "../launch/devPaymentBypass";
+import { readDemoSessionUser } from "../launch/guestCheckoutAuthority";
 
-export type CurrentUserSource = "supabase_session" | "e2e_test_bridge" | "anonymous";
+export type CurrentUserSource = "supabase_session" | "e2e_test_bridge" | "demo_checkout" | "anonymous";
 
 export type CurrentUser = {
   id: string;
@@ -101,6 +103,18 @@ export function resolveCurrentUser(args?: {
         source: "e2e_test_bridge",
       };
     }
+  }
+
+  // Demo session user: created after simulated POS checkout, acts as authenticated for the session.
+  const demoUser = readDemoSessionUser();
+  if (demoUser) {
+    return {
+      id: demoUser.id,
+      displayName: displayName || demoUser.displayName,
+      email: demoUser.email,
+      isAuthenticated: true,
+      source: "demo_checkout",
+    };
   }
 
   // Org header / local-org is workspace context only — never authentication.

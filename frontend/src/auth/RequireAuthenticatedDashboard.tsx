@@ -20,6 +20,10 @@ import {
   consumeHomeAnonymousCreateAuthority,
   isHomeAnonymousStarterAuthorityActive,
 } from "../launch/homeAnonymousCreateOrigin";
+import {
+  hasDemoSessionUser,
+  isGuestCheckoutAuthorityActiveForPath,
+} from "../launch/guestCheckoutAuthority";
 
 export function RequireAuthenticatedDashboard({
   children,
@@ -39,6 +43,17 @@ export function RequireAuthenticatedDashboard({
   }
   if (path === "/app/create" && isHomeAnonymousStarterAuthorityActive()) {
     consumeHomeAnonymousCreateAuthority();
+    return <>{children}</>;
+  }
+
+  // Guest checkout authority: allow guest to reach checkout page from Continue with Pro handoff.
+  if (checkoutContinuation && isGuestCheckoutAuthorityActiveForPath(path)) {
+    return <>{children}</>;
+  }
+
+  // Demo session user: created after simulated POS succeeds, acts as authenticated for the session.
+  // Allows post-checkout return to /app/create for premium completion without login gate.
+  if (hasDemoSessionUser()) {
     return <>{children}</>;
   }
 

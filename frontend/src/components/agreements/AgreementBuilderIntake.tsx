@@ -3755,7 +3755,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   /** User chose simplified path on an advanced-family gate — show a subtle review label. */
   const [reviewShowsSimplifiedAdvancedDraft, setReviewShowsSimplifiedAdvancedDraft] = useState(false);
   const { tier, refreshUsage } = useAccess();
-  const { loading: authLoading } = useAuth();
+  const { loading: authLoading, user: authUser } = useAuth();
   const { navigate } = useLaunchNav();
   const [workspaceProEntitled, setWorkspaceProEntitled] = useState(() =>
     resolveCreateFlowWorkspaceProEntitled() || resolveProvisionalWorkspaceProEntitledForCreate(),
@@ -12874,16 +12874,16 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     const cadence = "annual";
     const returnTo = encodeURIComponent(buildCreateReturnToWithStarterReviewRestore());
     emitPaidFunnelEvent("premium_checkout_opened", { extra: { checkout_surface: "create_flow_checkout" } });
-    navigate(
-      `/app/checkout/${encodeURIComponent(CREATE_FLOW_CHECKOUT_AGREEMENT_ID)}?tier=pro&cadence=${encodeURIComponent(
-        cadence,
-      )}&returnTo=${returnTo}`,
-    );
+    const checkoutPath = `/app/checkout/${encodeURIComponent(CREATE_FLOW_CHECKOUT_AGREEMENT_ID)}?tier=pro&cadence=${encodeURIComponent(
+      cadence,
+    )}&returnTo=${returnTo}`;
+    navigate(checkoutPath, { guestCheckout: !authUser });
   },
   [
     navigate,
     draft,
     tier,
+    authUser,
     premiumSendPathUnlocked,
     premiumPersistedFlowActive,
     upgradeContextReasons,
@@ -13046,16 +13046,16 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     setAdvancedFullDraftPaywallOpen(false);
     const cadence = "annual";
     const returnTo = encodeURIComponent(buildCreateReturnToWithStarterReviewRestore());
-    navigate(
-      `/app/checkout/${encodeURIComponent(CREATE_FLOW_CHECKOUT_AGREEMENT_ID)}?tier=pro&cadence=${encodeURIComponent(
-        cadence,
-      )}&returnTo=${returnTo}`,
-    );
+    const checkoutPath = `/app/checkout/${encodeURIComponent(CREATE_FLOW_CHECKOUT_AGREEMENT_ID)}?tier=pro&cadence=${encodeURIComponent(
+      cadence,
+    )}&returnTo=${returnTo}`;
+    navigate(checkoutPath, { guestCheckout: !authUser });
   }, [
     createProductionTwoPane,
     premiumOriginalWordingBuffer,
     draft,
     navigate,
+    authUser,
     upgradeContextReasons,
     agreementDocumentText,
     syncUpgradeIntentRefs,
