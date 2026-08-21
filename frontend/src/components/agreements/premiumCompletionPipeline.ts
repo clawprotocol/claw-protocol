@@ -274,9 +274,11 @@ import {
   isDegradedJsonParseWithoutSubstantiveServerFull,
   isNonfatalGenerationFailureCode,
   isNonfatalParseDegradedPaidAccept,
+  isTruncatedKeepSoTResponse,
   PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN,
   SERVER_FULL_DOCUMENT_AUTHORITATIVE_MIN_LEN,
   SUBSTANTIVE_SERVER_DRAFT_MIN_LEN,
+  TRUNCATED_KEEP_SOT_MIN_LEN,
   logPremiumAcceptanceDecision,
   partyPlaceholderRepairYieldsAuthoritativePaidBody,
   premiumBodyHasRequiredPaidSections,
@@ -2178,6 +2180,23 @@ async function runPremiumCompletionInner(
           }
         }
       }
+      // PR #41 truncated-keep detection: backend kept model text >= 1600 chars on truncate/insufficient
+      // and returned HTTP 200 with generation_ok=true, retryable=false. Treat as authoritative SoT.
+      const truncatedKeepSoTResponse = isTruncatedKeepSoTResponse({
+        generationOk: full.generation_ok,
+        retryable: full.retryable,
+        generationOutcome: full.generation_outcome,
+        failureCode: full.server_generation_failure_code,
+        documentTextLen: wireAuthoritativeBodyLen,
+      });
+      if (truncatedKeepSoTResponse && import.meta.env.MODE !== "test") {
+        // eslint-disable-next-line no-console
+        console.info("[CLAW] truncated-keep SoT accepted", {
+          generation_ok: full.generation_ok,
+          failure_code: (full.server_generation_failure_code || "").trim(),
+          document_text_len: wireAuthoritativeBodyLen,
+        });
+      }
       let doc = (effectiveFull.document_text || "").trim();
       // Prefer the pre-promotion authoritative resolution when polish/alias paths leave a shorter doc.
       if (pipelineNormalizedAuthoritativeText.trim().length > doc.length) {
@@ -3325,6 +3344,15 @@ async function runPremiumCompletionInner(
             draft: mergedForApi,
           }),
         });
+      // PR #41 truncated-keep: accept as authoritative SoT if backend returned 200 with
+      // generation_ok=true, document_text >= 1600 chars, and failure code is output_truncated
+      // or premium_generation_insufficient. These bodies bypass the 10k/15k floors.
+      const truncatedKeepAccept =
+        truncatedKeepSoTResponse &&
+        (doc || "").trim().length >= TRUNCATED_KEEP_SOT_MIN_LEN &&
+        !premiumBodyHardRejectedForDevContextLeak &&
+        acc.ok &&
+        placeholderClientOk;
       const advisoryAccept =
         !blockAdvisoryForPartyIdentity &&
         !blockDegradedProfessionalClauseAccept &&
@@ -3332,13 +3360,15 @@ async function runPremiumCompletionInner(
           jsonParseNonfatalAccept ||
           jsonParseDisplayRecoverableAccept ||
           serverFullDocumentWins ||
-          partyPlaceholderRepairAccept);
+          partyPlaceholderRepairAccept ||
+          truncatedKeepAccept);
       if (advisoryAccept && (!vPaid.ok || !placeholderClientOk)) {
         if (
           jsonParseNonfatalAccept ||
           jsonParseDisplayRecoverableAccept ||
           serverFullDocumentWins ||
-          partyPlaceholderRepairAccept
+          partyPlaceholderRepairAccept ||
+          truncatedKeepAccept
         ) {
           // The body is authoritative; only the intelligence metadata / soft gate failed. Override any
           // earlier "degraded" classification so the surface treats this as a complete paid draft.
@@ -3900,7 +3930,13 @@ async function runPremiumCompletionInner(
               /orphan_address_line/i.test(freezeReject) ||
               /empty_required_section/i.test(freezeReject) ||
               lastSubstantiveWireFreezeBodyLen >= PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN);
-          if (keepUsableWireDespiteSoftFreezeReject) {
+          // PR #41 truncated-keep: backend kept model text >= 1600 chars. Accept as SoT even if
+          // freeze-commit fails — the truncated draft is more useful than an empty paid shell.
+          const truncatedKeepBypassFreezeReject =
+            truncatedKeepSoTResponse &&
+            doc.trim().length >= TRUNCATED_KEEP_SOT_MIN_LEN &&
+            !premiumBodyHardRejectedForDevContextLeak;
+          if (keepUsableWireDespiteSoftFreezeReject || truncatedKeepBypassFreezeReject) {
             // Heart of the chronic create illness: OpenAI returned a usable draft; the
             // client family gate must not wipe the corpus into empty Retry Pro draft.
             winningPremiumBodyText = doc;

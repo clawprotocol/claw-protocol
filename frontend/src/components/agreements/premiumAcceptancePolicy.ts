@@ -57,6 +57,49 @@ export function isNonfatalGenerationFailureCode(code: string | null | undefined)
 }
 
 /**
+ * Server failure codes from PR #41 backend truncated-keep path: the backend kept the model text
+ * (>= 1600 chars) and returned HTTP 200 with `generation_ok=true`, `retryable=false`,
+ * `generation_outcome=degraded`, and one of these failure codes. These bodies are authoritative
+ * SoT — do NOT reject them via the 10k/15k floors or freeze-commit wipes.
+ */
+export const TRUNCATED_KEEP_SOT_FAILURE_CODES: ReadonlySet<string> = new Set([
+  "output_truncated",
+  "premium_generation_insufficient",
+]);
+
+/**
+ * Minimum body length for a truncated-keep response to be accepted as SoT. Matches the backend
+ * `PREMIUM_TRUNCATED_KEEP_MIN_LEN` constant from PR #41.
+ */
+export const TRUNCATED_KEEP_SOT_MIN_LEN = 1_600;
+
+/**
+ * A PR #41 backend 200-keep response: the model text was truncated or failed the full substance
+ * floor, but the backend kept it because it was >= 1600 chars. These bodies are authoritative SoT
+ * and must NOT be rejected by the 10k/15k floors or freeze-commit wipes.
+ *
+ * Wire shape: `generation_ok=true`, `retryable=false`, `generation_outcome=degraded`,
+ * `server_generation_failure_code` in {output_truncated, premium_generation_insufficient},
+ * `document_text` >= 1600 chars.
+ */
+export function isTruncatedKeepSoTResponse(args: {
+  generationOk?: boolean | null;
+  retryable?: boolean | null;
+  generationOutcome?: string | null;
+  failureCode?: string | null;
+  documentTextLen: number;
+}): boolean {
+  if (args.generationOk !== true) return false;
+  if (args.retryable === true) return false;
+  const outcome = (args.generationOutcome || "").trim().toLowerCase();
+  if (outcome !== "degraded") return false;
+  const code = (args.failureCode || "").trim().toLowerCase();
+  if (!TRUNCATED_KEEP_SOT_FAILURE_CODES.has(code)) return false;
+  if (args.documentTextLen < TRUNCATED_KEEP_SOT_MIN_LEN) return false;
+  return true;
+}
+
+/**
  * Minimum body length a parse-degraded paid body must clear (in addition to placeholder/section
  * checks) to remain authoritative. Well below {@link LONG_PREMIUM_AUTHORITATIVE_MIN_LEN}: a complete
  * commercial services agreement is routinely 4k–12k chars, far longer than any stitched fallback.
