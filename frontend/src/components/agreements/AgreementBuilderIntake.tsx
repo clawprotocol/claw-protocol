@@ -8720,9 +8720,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           }
         };
         try {
-        if (resumeSnap?.resume_kind === "optional_full_upgrade") {
-          setProReplacedStarterAfterUpgrade(true);
-        }
+        // NOTE: setProReplacedStarterAfterUpgrade is now set only AFTER successful generation
+        // with actual Pro content, not at the start of applySuccess. This prevents showing
+        // "replaced starter preview" when generation returns empty/degraded.
         if (result.staleIntakeOrGeneration) {
           setPremiumServerGenerationDegraded(null);
           setHardError("Your details changed while we were finishing. Retry Pro draft when you are ready.");
@@ -9329,7 +9329,20 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           setPremiumPersistedFlowActive(false);
           setPremiumSendPathUnlocked(false);
           agreementDocumentDirtyRef.current = false;
-          setAgreementDocumentText("");
+          // Preserve starter text on generation failure instead of wiping to empty.
+          // This keeps the user's starter visible so they can continue from where they were.
+          {
+            const starterFallback = buildAgreementPreviewText(mergedF.draft, {
+              starterPreview: true,
+              intakeText: mergedIntake,
+            });
+            if (starterFallback.trim()) {
+              setAgreementDocumentText(starterFallback);
+              setProUpgradeUseStarterView(true);
+            } else {
+              setAgreementDocumentText("");
+            }
+          }
           setReviewDocRefreshTick((n) => n + 1);
           logPaidProGenerationTerminalTransition({
             reason: "founder_intent_gate",
@@ -9548,7 +9561,20 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             setDisplayPhase("review");
           }
           agreementDocumentDirtyRef.current = false;
-          setAgreementDocumentText("");
+          // Preserve starter text on generation failure instead of wiping to empty.
+          // This keeps the user's starter visible so they can continue from where they were.
+          {
+            const starterFallback = buildAgreementPreviewText(merged.draft, {
+              starterPreview: true,
+              intakeText: mergedIntake,
+            });
+            if (starterFallback.trim()) {
+              setAgreementDocumentText(starterFallback);
+              setProUpgradeUseStarterView(true);
+            } else {
+              setAgreementDocumentText("");
+            }
+          }
           setReviewDocRefreshTick((n) => n + 1);
           logPaidProGenerationTerminalTransition({
             reason: "no_server_authority",
@@ -9710,7 +9736,20 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             setPremiumPersistedFlowActive(false);
             setPremiumSendPathUnlocked(false);
             agreementDocumentDirtyRef.current = false;
-            setAgreementDocumentText("");
+            // Preserve starter text on generation failure instead of wiping to empty.
+            // This keeps the user's starter visible so they can continue from where they were.
+            {
+              const starterFallback = buildAgreementPreviewText(merged.draft, {
+                starterPreview: true,
+                intakeText: mergedIntake,
+              });
+              if (starterFallback.trim()) {
+                setAgreementDocumentText(starterFallback);
+                setProUpgradeUseStarterView(true);
+              } else {
+                setAgreementDocumentText("");
+              }
+            }
             setReviewDocRefreshTick((n) => n + 1);
             logPaidProGenerationTerminalTransition({
               reason: "paid_pro_gate_failed",
@@ -9743,6 +9782,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           }
         }
         setProFullDraftQualityRetry(false);
+        // Only set "replaced starter" flag when generation succeeded with actual Pro content.
+        // This prevents showing "replaced starter preview" when generation returned empty/degraded.
+        if (resumeSnap?.resume_kind === "optional_full_upgrade" && snapshotPlain.length >= 500) {
+          setProReplacedStarterAfterUpgrade(true);
+        }
         if (import.meta.env.DEV) {
           // eslint-disable-next-line no-console
           console.info("[premium-success-hydrate]", {
@@ -17117,7 +17161,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           productionDraftPrimaryReviewSurface &&
           premiumPaidDocumentSurface &&
           !showUpgradeToFullDraftOnReview &&
-          draft,
+          draft &&
+          // Only show "replaced starter" if there's actual Pro content visible (>= 500 chars).
+          // Do not show this message when Pro generation returned empty/skeleton.
+          !proFullDraftQualityRetry &&
+          agreementDocumentText.trim().length >= 500,
       ),
     [
       proReplacedStarterAfterUpgrade,
@@ -17127,6 +17175,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       premiumPaidDocumentSurface,
       showUpgradeToFullDraftOnReview,
       draft,
+      proFullDraftQualityRetry,
+      agreementDocumentText,
     ],
   );
 
