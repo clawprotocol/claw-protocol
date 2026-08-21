@@ -16375,6 +16375,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           signaturePreparationRequested,
           signerMetadataFinalized:
             hasAuthoritativeSigningSnapshot() || paidProSignerMetadataFinalizedLatch,
+          demoSessionUserPremiumCompletionActive:
+            hasDemoSessionUser() && hasPaidPremiumCompletionSession(),
         }),
         paidProRecipientSetupOnDraft: Boolean(
           paidProAuthoritative &&
@@ -18823,6 +18825,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         signerMetadataFinalized:
           hasAuthoritativeSigningSnapshot() || paidProSignerMetadataFinalizedLatch,
         forceDashboardSignerSetupResume: dashboardSignerSetupResumeUiActive,
+        // Demo session user post-checkout: mount signer setup before SoT is fully ready.
+        demoSessionUserPremiumCompletionActive:
+          hasDemoSessionUser() && hasPaidPremiumCompletionSession(),
       }),
     [
       draft,

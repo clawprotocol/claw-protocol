@@ -207,6 +207,62 @@ describe("demoSessionUserPostPosChrome", () => {
     });
   });
 
+  describe("inline signer setup mounts for demo session user before SoT ready", () => {
+    it("resolvePaidProInlineSignerSetupMounted returns true for demo user with premium completion even without SoT", async () => {
+      const { resolvePaidProInlineSignerSetupMounted } = await import("./signerSetupPartyIdentity");
+
+      const result = resolvePaidProInlineSignerSetupMounted({
+        hasAcceptedPaidProAuthority: false,
+        hasProfessionallyValidatedReviewCorpus: false,
+        premiumPaidDocumentSurface: true,
+        premiumRecipientUxActive: false,
+        createUiStageIsDraft: true,
+        signerSetupLatched: true,
+        signaturePreparationRequested: false,
+        signerMetadataFinalized: false,
+        demoSessionUserPremiumCompletionActive: true,
+      });
+
+      expect(result).toBe(true);
+    });
+
+    it("resolvePaidProInlineSignerSetupMounted returns false for demo user without latched setup", async () => {
+      const { resolvePaidProInlineSignerSetupMounted } = await import("./signerSetupPartyIdentity");
+
+      const result = resolvePaidProInlineSignerSetupMounted({
+        hasAcceptedPaidProAuthority: false,
+        hasProfessionallyValidatedReviewCorpus: false,
+        premiumPaidDocumentSurface: true,
+        premiumRecipientUxActive: false,
+        createUiStageIsDraft: true,
+        signerSetupLatched: false,
+        signaturePreparationRequested: false,
+        signerMetadataFinalized: false,
+        demoSessionUserPremiumCompletionActive: true,
+      });
+
+      expect(result).toBe(false);
+    });
+
+    it("resolvePaidProInlineSignerSetupMounted returns false for demo user with finalized metadata", async () => {
+      const { resolvePaidProInlineSignerSetupMounted } = await import("./signerSetupPartyIdentity");
+
+      const result = resolvePaidProInlineSignerSetupMounted({
+        hasAcceptedPaidProAuthority: false,
+        hasProfessionallyValidatedReviewCorpus: false,
+        premiumPaidDocumentSurface: true,
+        premiumRecipientUxActive: false,
+        createUiStageIsDraft: true,
+        signerSetupLatched: true,
+        signaturePreparationRequested: false,
+        signerMetadataFinalized: true,
+        demoSessionUserPremiumCompletionActive: true,
+      });
+
+      expect(result).toBe(false);
+    });
+  });
+
   describe("Continue persist works with demo session", () => {
     it("demo session user has source=demo_checkout for backend auth", () => {
       const user = createDemoSessionUser({
