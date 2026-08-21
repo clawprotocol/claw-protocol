@@ -149,13 +149,19 @@ def review_first_paid_pro_persist_bypass(*, request: Request, purpose: str) -> b
     return len((purpose or "").strip()) >= PAID_PRO_REVIEW_FIRST_MIN_PURPOSE_LEN
 
 
-def assert_can_create_draft(*, subject_ref: str, request_ip: str) -> None:
+def assert_can_create_draft(
+    *, subject_ref: str, request_ip: str, request: "Request | None" = None
+) -> None:
     """
     Raises HTTPException 403 with detail dict when blocked.
 
     Authority: ``resolve_commercial_entitlement`` (guest / pro / none).
     Guest may create one temporary draft; persisted creates require Pro.
     Genesis affiliate status never grants create.
+
+    Demo checkout sessions (simulated POS) are allowed through even when
+    they've already used their guest draft allowance. This enables the
+    post-payment flow where the demo user's Pro agreement is persisted.
     """
     from fastapi import HTTPException
 
@@ -192,7 +198,17 @@ def assert_can_create_draft(*, subject_ref: str, request_ip: str) -> None:
     state = str(decision.get("state") or "")
 
     if state == STATE_GUEST:
+        # Demo checkout sessions (simulated POS) are allowed to create additional
+        # drafts even when they've exhausted their guest draft allowance. This
+        # enables the post-payment flow where the demo user saves their Pro agreement.
         if not decision.get("can_save_guest_draft"):
+            if request is not None:
+                from backend.security.commercial_auth import _is_demo_checkout_session
+
+                if _is_demo_checkout_session(request):
+                    _maybe_flag_abuse(subject_ref=subject_ref, ip=request_ip, store=store)
+                    return
+
             store.emit_event(
                 subject_ref=subject_ref,
                 event_type="paywall_triggered",

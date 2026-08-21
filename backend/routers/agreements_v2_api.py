@@ -5891,7 +5891,7 @@ def create_agreement_draft(body: AgreementDraftCreate, request: Request) -> Dict
     idempotency_key = (request.headers.get("x-claw-draft-idempotency-key") or "").strip()[:128] or None
     if not review_first_paid_pro_persist_bypass(request=request, purpose=body.purpose or ""):
         maybe_repair_workspace_entitlement_from_request(request)
-        assert_can_create_draft(subject_ref=subject, request_ip=request_ip or "unknown")
+        assert_can_create_draft(subject_ref=subject, request_ip=request_ip or "unknown", request=request)
 
     # Retries with the same client key must not mint a new id or burn another credit.
     if idempotency_key:
