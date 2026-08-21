@@ -27,7 +27,7 @@ import {
 import { clawAgreementHeaders } from "../../agreement/agreementOrgHeaders";
 import { fetchWorkspaceProEntitlement, readCachedWorkspaceProEntitlement } from "../../agreement/agreementProFunnelGate";
 import { fetchAgreementDraft, fetchAgreementDraftWithSigningLock } from "../../agreement/agreementWorkspaceApi";
-import { apiUrl, resolveApiBase } from "../../lib/clawApi";
+import { apiUrl, resolveApiBase, fetchWithProxyFallback } from "../../lib/clawApi";
 import { PREMIUM_COMPLETION_ATTEMPT_MAX_MS } from "../../lib/premiumCompletionAttemptTimeout";
 import { resolvePremiumAgreementParseTimeoutMs } from "../../lib/premiumAgreementParseTimeout";
 import { defaultPostCheckoutRunModelPassInput, getPremiumGenerationIntakeFingerprint } from "../../lib/postCheckoutProFlow";
@@ -5653,11 +5653,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       });
     }
     console.log("[AgreementIntake] generate: draft API request");
-    const res = await fetch(draftUrl, {
-      method: "POST",
-      headers: draftHeaders,
-      body: draftBody,
-    });
+    const res = await fetchWithProxyFallback(
+      draftUrl,
+      {
+        method: "POST",
+        headers: draftHeaders,
+        body: draftBody,
+      },
+      { logContext: "postNewDraft" }
+    );
     const payload = await res.json().catch(() => ({}));
     let apiHost = "";
     try {
