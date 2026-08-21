@@ -6880,7 +6880,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     setCreateFlowPhase("draft_ready_for_review");
     setCreateUiStage(CreateUiStage.DRAFT);
     setSignaturePreparationRequested(false);
-    setPaidProInlineSignerSetupLatched(false);
+    // Demo session user with premium completion: preserve signer setup latch so CTA stays
+    // "Complete signer details" / "Continue" instead of falling through to empty/disabled.
+    // The latch was pre-armed by the auto-arm effect; clearing it here breaks the sticky CTA.
+    const demoSessionPreserveLatch =
+      hasDemoSessionUser() && hasPaidPremiumCompletionSession() && paidProInlineSignerSetupLatched;
+    if (!demoSessionPreserveLatch) {
+      setPaidProInlineSignerSetupLatched(false);
+    }
     setPaidProSignaturePrepIntentLatched(false);
     if (persistedPremiumBody.length >= GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN) {
       commitAcceptedPaidProCorpusHandoffSync({
@@ -7042,7 +7049,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       setDisplayPhase(plan.ui.displayPhase);
       setCreateUiStage(plan.ui.createUiStage);
       setSignaturePreparationRequested(false);
-      setPaidProInlineSignerSetupLatched(false);
+      // Demo session user with premium completion: preserve signer setup latch so CTA stays
+      // "Complete signer details" / "Continue" instead of falling through to empty/disabled.
+      const demoSessionPreserveLatchOnHandoff =
+        hasDemoSessionUser() && hasPaidPremiumCompletionSession() && paidProInlineSignerSetupLatched;
+      if (!demoSessionPreserveLatchOnHandoff) {
+        setPaidProInlineSignerSetupLatched(false);
+      }
       setPaidProSignaturePrepIntentLatched(false);
       setMobileWorkspacePane(plan.ui.mobileWorkspacePane);
       setPreviewPaneRevealed(plan.ui.previewPaneRevealed);
