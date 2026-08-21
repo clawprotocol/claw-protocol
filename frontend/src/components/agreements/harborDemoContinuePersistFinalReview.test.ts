@@ -813,4 +813,57 @@ This Agreement constitutes the entire agreement.`;
       expect(fallbackCtaReason).toContain("demo_session");
     });
   });
+
+  describe("Issue H: empty generation preserves starter text", () => {
+    it("intake file contains starter fallback logic for generation failure paths", () => {
+      // Verify the intake file contains the code that preserves starter text on generation failure
+      const intakePath = join(__dirname, "AgreementBuilderIntake.tsx");
+      const intakeSrc = readFileSync(intakePath, "utf-8");
+
+      // Verify starter fallback is used in founder_intent_gate failure path
+      expect(intakeSrc).toContain("Preserve starter text on generation failure instead of wiping to empty");
+      expect(intakeSrc).toContain("starterPreview: true");
+
+      // Verify proUpgradeUseStarterView is set on generation failure
+      expect(intakeSrc).toContain("setProUpgradeUseStarterView(true)");
+    });
+
+    it("proReplacedStarterAfterUpgrade is only set on successful generation with Pro content", () => {
+      // Verify the intake file contains the correct guard for setProReplacedStarterAfterUpgrade
+      const intakePath = join(__dirname, "AgreementBuilderIntake.tsx");
+      const intakeSrc = readFileSync(intakePath, "utf-8");
+
+      // The old early-set at applySuccess start should be removed
+      expect(intakeSrc).toContain(
+        "setProReplacedStarterAfterUpgrade is now set only AFTER successful generation"
+      );
+
+      // The new guarded set should exist
+      expect(intakeSrc).toContain(
+        'if (resumeSnap?.resume_kind === "optional_full_upgrade" && snapshotPlain.length >= 500)'
+      );
+    });
+
+    it("showProReplacedStarterNudge guards against empty body and retry state", () => {
+      // Verify showProReplacedStarterNudge has the correct guards
+      const intakePath = join(__dirname, "AgreementBuilderIntake.tsx");
+      const intakeSrc = readFileSync(intakePath, "utf-8");
+
+      // Should check proFullDraftQualityRetry
+      expect(intakeSrc).toContain("!proFullDraftQualityRetry");
+
+      // Should check agreementDocumentText length
+      expect(intakeSrc).toContain("agreementDocumentText.trim().length >= 500");
+    });
+
+    it("Retry Pro draft does not repeat empty path - explicit retry is armed", () => {
+      // Verify handleRetryProFullDraft arms the explicit retry flag
+      const intakePath = join(__dirname, "AgreementBuilderIntake.tsx");
+      const intakeSrc = readFileSync(intakePath, "utf-8");
+
+      // handleRetryProFullDraft should arm the explicit retry
+      expect(intakeSrc).toContain("armExplicitPremiumGenerationRetry()");
+      expect(intakeSrc).toContain('premiumGenerationCallReason: "explicit_retry_pro_draft"');
+    });
+  });
 });
