@@ -188,6 +188,17 @@ function stripCardDigits(raw: string): string {
   return raw.replace(/\D/g, "");
 }
 
+/**
+ * Reads card field value from React state first, falling back to DOM ref value.
+ * This handles autofill/autocomplete scenarios where the browser fills the DOM
+ * but React state is not updated (e.g., programmatic fill, some autofill modes).
+ */
+function readCardFieldValue(stateValue: string, ref: React.RefObject<HTMLInputElement | null>): string {
+  const fromState = stateValue.trim();
+  if (fromState) return fromState;
+  return ref.current?.value?.trim() ?? "";
+}
+
 export function SimpleCheckoutPage(props: { agreementId: string }) {
   const { agreementId } = props;
   const { navigate, search } = useLaunchNav();
@@ -218,6 +229,11 @@ export function SimpleCheckoutPage(props: { agreementId: string }) {
   const [cardExp, setCardExp] = useState("");
   const [cardCvc, setCardCvc] = useState("");
   const [cardEmail, setCardEmail] = useState("");
+
+  const cardNameRef = useRef<HTMLInputElement>(null);
+  const cardNumberRef = useRef<HTMLInputElement>(null);
+  const cardExpRef = useRef<HTMLInputElement>(null);
+  const cardCvcRef = useRef<HTMLInputElement>(null);
 
   /** One-time arrival motion per checkout mount (see useLayoutEffect below). */
   const [checkoutArrivalOn, setCheckoutArrivalOn] = useState(false);
@@ -433,8 +449,12 @@ export function SimpleCheckoutPage(props: { agreementId: string }) {
     // This is the GTM flywheel: guest Continue with Pro uses simulated POS.
     if (isGuestCheckout) {
       console.info("[GUEST CHECKOUT] using demo settlement — never live Stripe for guest flywheel");
-      const digits = stripCardDigits(cardNumber);
-      if (!cardName.trim() || digits.length < 15 || !cardExp.trim() || cardCvc.trim().length < 3) {
+      const liveCardName = readCardFieldValue(cardName, cardNameRef);
+      const liveCardNumber = readCardFieldValue(cardNumber, cardNumberRef);
+      const liveCardExp = readCardFieldValue(cardExp, cardExpRef);
+      const liveCardCvc = readCardFieldValue(cardCvc, cardCvcRef);
+      const digits = stripCardDigits(liveCardNumber);
+      if (!liveCardName || digits.length < 15 || !liveCardExp || liveCardCvc.length < 3) {
         fail("Please complete all card fields.");
         return;
       }
@@ -448,7 +468,7 @@ export function SimpleCheckoutPage(props: { agreementId: string }) {
         amountUsd,
       });
       const conf = await demoConfirmFiatToCryptoOnrampFromCard({ intent, cardNumberDigits: digits });
-      await applyConfirmedSettlement(conf, "demo_card", { cardholderName: cardName, email: cardEmail });
+      await applyConfirmedSettlement(conf, "demo_card", { cardholderName: liveCardName, email: cardEmail });
       return;
     }
 
@@ -493,8 +513,12 @@ export function SimpleCheckoutPage(props: { agreementId: string }) {
     if (import.meta.env.DEV && genesisHandoff.metadata.referral_code) {
       console.info("[genesis-referral] checkout metadata", genesisHandoff.metadata);
     }
-    const digits = stripCardDigits(cardNumber);
-    if (!cardName.trim() || digits.length < 15 || !cardExp.trim() || cardCvc.trim().length < 3) {
+    const liveCardName = readCardFieldValue(cardName, cardNameRef);
+    const liveCardNumber = readCardFieldValue(cardNumber, cardNumberRef);
+    const liveCardExp = readCardFieldValue(cardExp, cardExpRef);
+    const liveCardCvc = readCardFieldValue(cardCvc, cardCvcRef);
+    const digits = stripCardDigits(liveCardNumber);
+    if (!liveCardName || digits.length < 15 || !liveCardExp || liveCardCvc.length < 3) {
       fail("Please complete all card fields.");
       return;
     }
@@ -505,7 +529,7 @@ export function SimpleCheckoutPage(props: { agreementId: string }) {
       amountUsd,
     });
     const conf = await demoConfirmFiatToCryptoOnrampFromCard({ intent, cardNumberDigits: digits });
-    await applyConfirmedSettlement(conf, "demo_card", { cardholderName: cardName, email: cardEmail });
+    await applyConfirmedSettlement(conf, "demo_card", { cardholderName: liveCardName, email: cardEmail });
   }
 
   async function onQaPaymentBypass(): Promise<void> {
@@ -767,45 +791,50 @@ export function SimpleCheckoutPage(props: { agreementId: string }) {
                 {wrappedDisclosure}
                 <form className="space-y-3 pt-1" onSubmit={(e) => void onCardPay(e)}>
               <div>
-                <label htmlFor="cc-name" className="text-sm font-medium text-slate-300">
+                <label htmlFor="cf-cc-name" className="text-sm font-medium text-slate-300">
                   Name on card
                 </label>
                 <input
-                  id="cc-name"
+                  id="cf-cc-name"
+                  ref={cardNameRef}
                   autoComplete="cc-name"
                   className="mt-1 w-full rounded-lg border border-slate-600 bg-slate-950/70 px-3 py-2 text-[15px] text-slate-100 outline-none placeholder:text-slate-400 focus:border-emerald-500/50 sm:text-base"
                   value={cardName}
                   onChange={(e) => setCardName(e.target.value)}
+                  onInput={(e) => setCardName((e.target as HTMLInputElement).value)}
                 />
               </div>
               {isGuestCheckout ? (
                 <div>
-                  <label htmlFor="cc-email" className="text-sm font-medium text-slate-300">
+                  <label htmlFor="cf-cc-email" className="text-sm font-medium text-slate-300">
                     Email <span className="text-slate-500">(optional)</span>
                   </label>
                   <input
-                    id="cc-email"
+                    id="cf-cc-email"
                     type="email"
                     autoComplete="email"
                     placeholder="you@example.com"
                     className="mt-1 w-full rounded-lg border border-slate-600 bg-slate-950/70 px-3 py-2 text-[15px] text-slate-100 outline-none placeholder:text-slate-400 focus:border-emerald-500/50 sm:text-base"
                     value={cardEmail}
                     onChange={(e) => setCardEmail(e.target.value)}
+                    onInput={(e) => setCardEmail((e.target as HTMLInputElement).value)}
                   />
                 </div>
               ) : null}
               <div>
-                <label htmlFor="cc-num" className="text-sm font-medium text-slate-300">
+                <label htmlFor="cf-cc-num" className="text-sm font-medium text-slate-300">
                   Card number
                 </label>
                 <input
-                  id="cc-num"
+                  id="cf-cc-num"
+                  ref={cardNumberRef}
                   inputMode="numeric"
                   autoComplete="cc-number"
                   placeholder="4242 4242 4242 4242"
                   className="mt-1 w-full rounded-lg border border-slate-600 bg-slate-950/70 px-3 py-2 text-[15px] text-slate-100 outline-none placeholder:text-slate-400 focus:border-emerald-500/50 sm:text-base"
                   value={cardNumber}
                   onChange={(e) => setCardNumber(e.target.value)}
+                  onInput={(e) => setCardNumber((e.target as HTMLInputElement).value)}
                 />
                 <p className="mt-1 text-sm leading-snug text-slate-400">
                   {CHECKOUT_CARD_PROCESSING_LINE} {CHECKOUT_CARD_ACTIVATION_LINE}
@@ -813,29 +842,33 @@ export function SimpleCheckoutPage(props: { agreementId: string }) {
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label htmlFor="cc-exp" className="text-sm font-medium text-slate-300">
+                  <label htmlFor="cf-cc-exp" className="text-sm font-medium text-slate-300">
                     Expires
                   </label>
                   <input
-                    id="cc-exp"
+                    id="cf-cc-exp"
+                    ref={cardExpRef}
                     autoComplete="cc-exp"
                     placeholder="MM / YY"
                     className="mt-1 w-full rounded-lg border border-slate-600 bg-slate-950/70 px-3 py-2 text-[15px] text-slate-100 outline-none placeholder:text-slate-400 focus:border-emerald-500/50 sm:text-base"
                     value={cardExp}
                     onChange={(e) => setCardExp(e.target.value)}
+                    onInput={(e) => setCardExp((e.target as HTMLInputElement).value)}
                   />
                 </div>
                 <div>
-                  <label htmlFor="cc-cvc" className="text-sm font-medium text-slate-300">
+                  <label htmlFor="cf-cc-cvc" className="text-sm font-medium text-slate-300">
                     CVC
                   </label>
                   <input
-                    id="cc-cvc"
+                    id="cf-cc-cvc"
+                    ref={cardCvcRef}
                     inputMode="numeric"
                     autoComplete="cc-csc"
                     className="mt-1 w-full rounded-lg border border-slate-600 bg-slate-950/70 px-3 py-2 text-[15px] text-slate-100 outline-none placeholder:text-slate-400 focus:border-emerald-500/50 sm:text-base"
                     value={cardCvc}
                     onChange={(e) => setCardCvc(e.target.value)}
+                    onInput={(e) => setCardCvc((e.target as HTMLInputElement).value)}
                   />
                 </div>
               </div>
@@ -949,29 +982,33 @@ export function SimpleCheckoutPage(props: { agreementId: string }) {
                 {wrappedDisclosure}
                 <form className="space-y-3" onSubmit={(e) => void onCardPay(e)}>
                   <div>
-                    <label htmlFor="cc-name" className="text-sm font-medium text-slate-300">
+                    <label htmlFor="std-cc-name" className="text-sm font-medium text-slate-300">
                       Name on card
                     </label>
                     <input
-                      id="cc-name"
+                      id="std-cc-name"
+                      ref={cardNameRef}
                       autoComplete="cc-name"
                       className="mt-1 w-full rounded-lg border border-slate-600 bg-slate-950/70 px-3 py-2 text-[15px] text-slate-100 outline-none placeholder:text-slate-400 focus:border-emerald-500/50 sm:text-base"
                       value={cardName}
                       onChange={(e) => setCardName(e.target.value)}
+                      onInput={(e) => setCardName((e.target as HTMLInputElement).value)}
                     />
                   </div>
                   <div>
-                    <label htmlFor="cc-num" className="text-sm font-medium text-slate-300">
+                    <label htmlFor="std-cc-num" className="text-sm font-medium text-slate-300">
                       Card number
                     </label>
                     <input
-                      id="cc-num"
+                      id="std-cc-num"
+                      ref={cardNumberRef}
                       inputMode="numeric"
                       autoComplete="cc-number"
                       placeholder="4242 4242 4242 4242"
                       className="mt-1 w-full rounded-lg border border-slate-600 bg-slate-950/70 px-3 py-2 text-[15px] text-slate-100 outline-none placeholder:text-slate-400 focus:border-emerald-500/50 sm:text-base"
                       value={cardNumber}
                       onChange={(e) => setCardNumber(e.target.value)}
+                      onInput={(e) => setCardNumber((e.target as HTMLInputElement).value)}
                     />
                     <p className="mt-1 text-sm leading-snug text-slate-400">
                       {CHECKOUT_CARD_PROCESSING_LINE} {CHECKOUT_CARD_ACTIVATION_LINE}
@@ -979,29 +1016,33 @@ export function SimpleCheckoutPage(props: { agreementId: string }) {
                   </div>
                   <div className="grid grid-cols-2 gap-3">
                     <div>
-                      <label htmlFor="cc-exp" className="text-sm font-medium text-slate-300">
+                      <label htmlFor="std-cc-exp" className="text-sm font-medium text-slate-300">
                         Expires
                       </label>
                       <input
-                        id="cc-exp"
+                        id="std-cc-exp"
+                        ref={cardExpRef}
                         autoComplete="cc-exp"
                         placeholder="MM / YY"
                         className="mt-1 w-full rounded-lg border border-slate-600 bg-slate-950/70 px-3 py-2 text-[15px] text-slate-100 outline-none placeholder:text-slate-400 focus:border-emerald-500/50 sm:text-base"
                         value={cardExp}
                         onChange={(e) => setCardExp(e.target.value)}
+                        onInput={(e) => setCardExp((e.target as HTMLInputElement).value)}
                       />
                     </div>
                     <div>
-                      <label htmlFor="cc-cvc" className="text-sm font-medium text-slate-300">
+                      <label htmlFor="std-cc-cvc" className="text-sm font-medium text-slate-300">
                         CVC
                       </label>
                       <input
-                        id="cc-cvc"
+                        id="std-cc-cvc"
+                        ref={cardCvcRef}
                         inputMode="numeric"
                         autoComplete="cc-csc"
                         className="mt-1 w-full rounded-lg border border-slate-600 bg-slate-950/70 px-3 py-2 text-[15px] text-slate-100 outline-none placeholder:text-slate-400 focus:border-emerald-500/50 sm:text-base"
                         value={cardCvc}
                         onChange={(e) => setCardCvc(e.target.value)}
+                        onInput={(e) => setCardCvc((e.target as HTMLInputElement).value)}
                       />
                     </div>
                   </div>
