@@ -174,4 +174,50 @@ describe("authenticatedWorkspaceAccessPolicy", () => {
     expect(verdict.showGenesisAllowanceExhausted).toBe(false);
     expect(verdict.showEntitlementProbeError).toBe(false);
   });
+
+  it("allows demo paid premium session even when guest canSaveGuestDraft=false", () => {
+    // After demo 4242 settle, server commercial probe returns canSaveGuestDraft=false
+    // because the starter was already used. But hasPaidPremiumCompletionSession() is true,
+    // so we skip the upsell and let the checkout-return generate path run.
+    const verdict = resolveWorkspaceCreateAccess({
+      authentication: "unauthenticated",
+      entitlement: "none",
+      isStarterAnonymousSession: true,
+      isResumingOwnedAgreement: false,
+      hasCheckoutPendingMarker: false,
+      commercialEntitlement: {
+        state: "guest",
+        entitlement: "guest",
+        createAllowed: false,
+        canSaveGuestDraft: false,
+      },
+      hasPaidDemoPremiumSession: true,
+    });
+    expect(verdict.allowed).toBe(true);
+    expect(verdict.reason).toBe("checkout_pending");
+    expect(verdict.showUpgradeModal).toBe(false);
+    expect(verdict.showGenesisAllowanceExhausted).toBe(false);
+    expect(verdict.showEntitlementProbeError).toBe(false);
+  });
+
+  it("blocks guest when canSaveGuestDraft=false and no demo session", () => {
+    // Without hasPaidDemoPremiumSession, the guest is blocked and sees the upsell
+    const verdict = resolveWorkspaceCreateAccess({
+      authentication: "unauthenticated",
+      entitlement: "none",
+      isStarterAnonymousSession: true,
+      isResumingOwnedAgreement: false,
+      hasCheckoutPendingMarker: false,
+      commercialEntitlement: {
+        state: "guest",
+        entitlement: "guest",
+        createAllowed: false,
+        canSaveGuestDraft: false,
+      },
+      hasPaidDemoPremiumSession: false,
+    });
+    expect(verdict.allowed).toBe(false);
+    expect(verdict.reason).toBe("guest_draft");
+    expect(verdict.showUpgradeModal).toBe(true);
+  });
 });
