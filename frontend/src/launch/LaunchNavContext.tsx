@@ -37,6 +37,7 @@ import {
   normalizeDashboardPaidCreateSource,
 } from "./paidDashboardCreateContext";
 import { markHomeAnonymousCreateOrigin } from "./homeAnonymousCreateOrigin";
+import { markGuestCheckoutAuthority } from "./guestCheckoutAuthority";
 import { logDashboardPaidCreateScreenTransition } from "./paidDashboardCreateFunnel";
 import {
   DASHBOARD_SIGNER_SETUP_RESUME_SOURCE,
@@ -66,6 +67,8 @@ export type LaunchNavigateOptions = {
    * (that path races review-refresh-restore / Retry Pro draft recovery).
    */
   resumeSignerSetupAgreementId?: string;
+  /** Guest checkout handoff from Continue with Pro — marks guest checkout authority. */
+  guestCheckout?: boolean;
 };
 
 type LaunchNav = {
@@ -210,6 +213,9 @@ export function LaunchNavProvider({ children }: { children: React.ReactNode }) {
         clawReviewPrimedDraft: options.reviewPrimedDraft,
         ...(options.streamlinedSimpleFlow ? { clawStreamlinedSimpleFlow: true } : {}),
       };
+    } else if (/^\/app\/checkout\//.test(pathOnly) && options?.guestCheckout) {
+      markGuestCheckoutAuthority(pathOnly);
+      state = { clawGuestCheckout: true };
     }
     window.history.pushState(state, "", p);
     if (shouldMarkWorkspaceSessionForPath(pathOnly)) {

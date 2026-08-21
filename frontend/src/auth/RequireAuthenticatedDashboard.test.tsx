@@ -14,7 +14,11 @@ const navState = {
   navigate: vi.fn(),
 };
 
-const mockState = { homeAnonymousStarterAuthority: false };
+const mockState = {
+  homeAnonymousStarterAuthority: false,
+  guestCheckoutAuthorityActive: false,
+  hasDemoSessionUser: false,
+};
 const mockConsumeAuthority = vi.fn();
 
 vi.mock("./AuthProvider", () => ({
@@ -44,9 +48,16 @@ vi.mock("../launch/homeAnonymousCreateOrigin", () => ({
   consumeHomeAnonymousCreateAuthority: () => mockConsumeAuthority(),
 }));
 
+vi.mock("../launch/guestCheckoutAuthority", () => ({
+  isGuestCheckoutAuthorityActiveForPath: () => mockState.guestCheckoutAuthorityActive,
+  hasDemoSessionUser: () => mockState.hasDemoSessionUser,
+}));
+
 describe("RequireAuthenticatedDashboard", () => {
   beforeEach(() => {
     mockState.homeAnonymousStarterAuthority = false;
+    mockState.guestCheckoutAuthorityActive = false;
+    mockState.hasDemoSessionUser = false;
     mockConsumeAuthority.mockClear();
     cleanup();
   });
@@ -128,5 +139,62 @@ describe("RequireAuthenticatedDashboard", () => {
       "/app/sign-in?next=%2Fapp%2Fcheckout%2F__claw_create_checkout__%3Ftier%3Dpro%26cadence%3Dmonthly%26returnTo%3D%252Fapp%252Fcreate%253Frestore%253DstarterReview",
     );
     expect(screen.queryByTestId("secret-checkout")).toBeNull();
+  });
+
+  it("allows guest checkout when guest checkout authority is active", () => {
+    navState.pathname = "/app/checkout/__claw_create_checkout__";
+    navState.search = "?tier=pro&cadence=annual&returnTo=%2Fapp%2Fcreate%3Frestore%3DstarterReview";
+    navState.navigate = vi.fn();
+    mockState.guestCheckoutAuthorityActive = true;
+    render(
+      <RequireAuthenticatedDashboard>
+        <div data-testid="checkout-page">checkout</div>
+      </RequireAuthenticatedDashboard>,
+    );
+    expect(screen.queryByTestId("auth-dashboard-required")).toBeNull();
+    expect(screen.getByTestId("checkout-page")).toBeTruthy();
+  });
+
+  it("blocks direct checkout URL without guest checkout authority", () => {
+    navState.pathname = "/app/checkout/__claw_create_checkout__";
+    navState.search = "?tier=pro&cadence=annual&returnTo=%2Fapp%2Fcreate%3Frestore%3DstarterReview";
+    navState.navigate = vi.fn();
+    mockState.guestCheckoutAuthorityActive = false;
+    render(
+      <RequireAuthenticatedDashboard>
+        <div data-testid="checkout-page">checkout</div>
+      </RequireAuthenticatedDashboard>,
+    );
+    expect(screen.getByTestId("auth-dashboard-required")).toBeTruthy();
+    expect(screen.queryByTestId("checkout-page")).toBeNull();
+  });
+
+  it("allows demo session user to access /app/create after checkout", () => {
+    navState.pathname = "/app/create";
+    navState.search = "?restore=starterReview&premiumCompletion=1";
+    navState.navigate = vi.fn();
+    mockState.hasDemoSessionUser = true;
+    render(
+      <RequireAuthenticatedDashboard>
+        <div data-testid="create-page">create</div>
+      </RequireAuthenticatedDashboard>,
+    );
+    expect(screen.queryByTestId("auth-dashboard-required")).toBeNull();
+    expect(screen.getByTestId("create-page")).toBeTruthy();
+  });
+
+  it("blocks typed /app/create without any handoff or demo session", () => {
+    navState.pathname = "/app/create";
+    navState.search = "";
+    navState.navigate = vi.fn();
+    mockState.homeAnonymousStarterAuthority = false;
+    mockState.hasDemoSessionUser = false;
+    render(
+      <RequireAuthenticatedDashboard>
+        <div data-testid="create-page">create</div>
+      </RequireAuthenticatedDashboard>,
+    );
+    expect(screen.getByTestId("auth-dashboard-required")).toBeTruthy();
+    expect(screen.queryByTestId("create-page")).toBeNull();
   });
 });
