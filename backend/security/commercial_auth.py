@@ -125,13 +125,46 @@ def require_workspace_principal(request: Request) -> "WorkspaceIdentity":
     return identity
 
 
+def _is_demo_checkout_session(request: Request) -> bool:
+    """
+    Check if the request is from a demo checkout session (simulated POS).
+
+    Demo checkout sessions are anonymous sessions that have completed the simulated
+    payment flow on the frontend. They send X-Claw-Demo-Checkout-Receipt header with
+    a receipt ID matching the format rcpt_<timestamp>_<random> (from buildSettlementReceipt).
+
+    This allows demo/guest users to access Pro features after simulated payment.
+    """
+    receipt_id = (request.headers.get("X-Claw-Demo-Checkout-Receipt") or "").strip()
+    if not receipt_id:
+        return False
+    if not receipt_id.startswith("rcpt_") or len(receipt_id) < 12:
+        return False
+    from backend.security.request_identity import resolve_workspace_identity
+    from backend.usage_economics.policy import require_claw_org_id_header
+
+    try:
+        require_claw_org_id_header(request)
+        identity = resolve_workspace_identity(request)
+        return identity.kind == "anonymous"
+    except HTTPException:
+        return False
+
+
 def require_paid_pro_principal(request: Request) -> str:
     """
     Authenticated commercial owner with active Pro entitlement.
 
     Paid-beta contract: Genesis and authenticated-none must not invoke Pro
     premium-drafting routes (e.g. ``/premium-full-draft``).
+
+    Demo checkout sessions (simulated POS) are granted temporary Pro access.
     """
+    if _is_demo_checkout_session(request):
+        from backend.security.request_identity import resolve_workspace_identity
+        identity = resolve_workspace_identity(request)
+        return identity.subject_ref
+
     user_id = require_commercial_owner_principal(request)
     from backend.usage_economics.commercial_entitlement import STATE_PRO, resolve_commercial_entitlement
     from backend.utils.enforce import resolve_subject_from_request

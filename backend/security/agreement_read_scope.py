@@ -332,6 +332,7 @@ def assert_agreement_full_draft_read_allowed(request: Request, agreement_id: str
     Require recipient token or owner principal before returning a full draft / render.
 
     Commercial mode never returns early without auth when economics/token-required are off.
+    Demo checkout sessions (simulated POS) are allowed for their own agreements.
     """
     aid = (agreement_id or "").strip()
     if not aid:
@@ -364,10 +365,16 @@ def assert_agreement_full_draft_read_allowed(request: Request, agreement_id: str
     if not strict:
         return
 
-    from backend.security.commercial_auth import require_commercial_owner_principal
-    from backend.security.request_identity import resolve_verified_subject_from_request
+    from backend.security.commercial_auth import _is_demo_checkout_session, require_commercial_owner_principal
+    from backend.security.request_identity import resolve_verified_subject_from_request, resolve_workspace_identity
 
     if commercial:
+        if _is_demo_checkout_session(request):
+            identity = resolve_workspace_identity(request)
+            subject = identity.subject_ref
+            if not _agreement_owned_by_subject(aid, subject):
+                _deny_agreement_read()
+            return
         require_commercial_owner_principal(request)
         subject = resolve_verified_subject_from_request(request)
         if not _agreement_owned_by_subject(aid, subject):

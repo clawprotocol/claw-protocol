@@ -3,6 +3,7 @@ import { getAffiliateCodeForAttribution } from "../launch/affiliate/affiliateAtt
 import { resolvePrimaryEntitlementRepairOrg } from "../launch/paidCheckoutOrgContext";
 import { anonymousSessionHeaders } from "../auth/anonymousSessionHeaders";
 import { getCachedAccessToken } from "../auth/authAccessTokenCache";
+import { readDemoSessionUser } from "../launch/guestCheckoutAuthority";
 
 /** @alias use {@link clawAgreementHeaders} — same stable workspace identity for all agreement APIs. */
 export function getClawApiHeaders(extra?: HeadersInit): HeadersInit {
@@ -31,6 +32,12 @@ export function clawAgreementHeaders(extra?: HeadersInit): HeadersInit {
   const repairOrg = resolvePrimaryEntitlementRepairOrg();
   if (repairOrg) {
     base["X-Claw-Entitlement-Repair-Org"] = repairOrg;
+  }
+  // Include demo checkout receipt ID for demo session users (simulated POS).
+  // This allows the backend to grant temporary Pro access to demo checkout sessions.
+  const demoUser = readDemoSessionUser();
+  if (demoUser?.settlementReceiptId) {
+    base["X-Claw-Demo-Checkout-Receipt"] = demoUser.settlementReceiptId;
   }
   if (!extra) return base;
   if (extra instanceof Headers) {

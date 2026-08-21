@@ -557,6 +557,11 @@ export type ResolvePaidProInlineSignerSetupMountedArgs = {
    * subscription probes are transiently false. Latched setup is the task — not Pro draft recovery.
    */
   forceDashboardSignerSetupResume?: boolean;
+  /**
+   * Demo session user with premium completion session: mount signer setup even before SoT/pipeline is
+   * fully ready. The Pro copy is being loaded; we arm setup preemptively to skip the relic 5-button row.
+   */
+  demoSessionUserPremiumCompletionActive?: boolean;
 };
 
 /**
@@ -572,6 +577,18 @@ export function resolvePaidProInlineSignerSetupMounted(
     args.forceDashboardSignerSetupResume &&
     args.signerSetupLatched &&
     args.createUiStageIsDraft &&
+    !args.signaturePreparationRequested &&
+    !args.premiumRecipientUxActive
+  ) {
+    return true;
+  }
+  // Demo session user with premium completion: mount signer setup even before SoT/pipeline is ready.
+  // The Pro copy will render once the async pipeline completes; we mount signer fields preemptively.
+  if (
+    args.demoSessionUserPremiumCompletionActive &&
+    args.signerSetupLatched &&
+    args.createUiStageIsDraft &&
+    args.premiumPaidDocumentSurface &&
     !args.signaturePreparationRequested &&
     !args.premiumRecipientUxActive
   ) {
