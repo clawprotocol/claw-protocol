@@ -2273,6 +2273,7 @@ const AgreementReview: React.FC<Props> = ({
     simpleFlowPhase,
     canonicalUnpaidSendShell,
     sendShellTierGatePending,
+    simpleFlowUpsellSuppressed,
   });
   const simpleHomeCanonicalReview = shouldUseCanonicalPostGenerationFlow({
     context: simpleHomePostGenerationContext,

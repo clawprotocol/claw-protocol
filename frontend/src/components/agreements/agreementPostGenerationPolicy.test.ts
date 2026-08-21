@@ -19,15 +19,27 @@ describe("agreementPostGenerationPolicy", () => {
     ).toBe("wizard_details");
   });
 
-  it("enables simple home review context during review phase", () => {
+  it("enables simple home review context during review phase for paid Pro users only", () => {
+    // Paid Pro (simpleFlowUpsellSuppressed=true) gets the context
     expect(
       resolveSimpleHomeReviewPostGenerationContext({
         section: "simpleHomeReview",
         simpleFlowPhase: "review",
         canonicalUnpaidSendShell: false,
         sendShellTierGatePending: false,
+        simpleFlowUpsellSuppressed: true,
       }),
     ).toBe("simple_home_review");
+    // Free/guest (simpleFlowUpsellSuppressed=false) does NOT get the relic context
+    expect(
+      resolveSimpleHomeReviewPostGenerationContext({
+        section: "simpleHomeReview",
+        simpleFlowPhase: "review",
+        canonicalUnpaidSendShell: false,
+        sendShellTierGatePending: false,
+        simpleFlowUpsellSuppressed: false,
+      }),
+    ).toBeNull();
   });
 
   it("requires review phase for simple home canonical flow", () => {
@@ -194,5 +206,61 @@ describe("simple starter shell locks out relic UI on ALL create entries", () => 
     expect(intake).toContain("StarterDraftDocumentSurface");
     expect(intake).toContain("freeStarterReviewShellActive");
     expect(intake).toContain("useStarterDocumentPaperSurface");
+  });
+});
+
+describe("simple starter shell locks out relic UI on simpleHomeReview (send page)", () => {
+  it("homepage guest on /app/send does not mount the relic DRAFT CREATED / Review agreement", () => {
+    const context = resolveSimpleHomeReviewPostGenerationContext({
+      section: "simpleHomeReview",
+      simpleFlowPhase: "review",
+      canonicalUnpaidSendShell: false,
+      sendShellTierGatePending: false,
+      simpleFlowUpsellSuppressed: false,
+    });
+    expect(context).toBeNull();
+    expect(
+      shouldUseCanonicalPostGenerationFlow({
+        context,
+        hasDraft: true,
+        isReviewPhase: true,
+      }),
+    ).toBe(false);
+  });
+
+  it("signed-in free user on /app/send does not mount the relic DRAFT CREATED / Review agreement", () => {
+    const context = resolveSimpleHomeReviewPostGenerationContext({
+      section: "simpleHomeReview",
+      simpleFlowPhase: "review",
+      canonicalUnpaidSendShell: false,
+      sendShellTierGatePending: false,
+      simpleFlowUpsellSuppressed: false,
+    });
+    expect(context).toBeNull();
+    expect(
+      shouldUseCanonicalPostGenerationFlow({
+        context,
+        hasDraft: true,
+        isReviewPhase: true,
+      }),
+    ).toBe(false);
+  });
+
+  it("paid Pro user on /app/send may use the canonical review flow", () => {
+    const context = resolveSimpleHomeReviewPostGenerationContext({
+      section: "simpleHomeReview",
+      simpleFlowPhase: "review",
+      canonicalUnpaidSendShell: false,
+      sendShellTierGatePending: false,
+      simpleFlowUpsellSuppressed: true,
+    });
+    expect(context).toBe("simple_home_review");
+    expect(
+      shouldUseCanonicalPostGenerationFlow({
+        context,
+        hasDraft: true,
+        isReviewPhase: true,
+      }),
+    ).toBe(true);
   });
 });

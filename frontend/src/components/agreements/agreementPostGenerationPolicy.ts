@@ -26,10 +26,16 @@ export function resolveSimpleHomeReviewPostGenerationContext(input: {
   simpleFlowPhase: string;
   canonicalUnpaidSendShell: boolean;
   sendShellTierGatePending: boolean;
+  simpleFlowUpsellSuppressed?: boolean;
 }): PostGenerationFlowContext | null {
   if (input.section !== "simpleHomeReview") return null;
   if (input.simpleFlowPhase !== "review") return null;
   if (input.canonicalUnpaidSendShell || input.sendShellTierGatePending) return null;
+  // The relic AgreementPostGenerationFlow (Your Agreement, DRAFT CREATED—REVIEW RECOMMENDED,
+  // Review agreement + Edit details) must NOT appear on any product create path for free/guest users.
+  // Only paid Pro after opt-in unlocks the party review and signing surfaces (post-create).
+  // Suppress for all simpleHomeReview when no paid Pro flags are active.
+  if (!input.simpleFlowUpsellSuppressed) return null;
   return "simple_home_review";
 }
 
