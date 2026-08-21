@@ -8,6 +8,15 @@ function collapseBlankRuns(text: string): string {
 }
 
 /**
+ * Meta / header lines that leak from intake carry-forward blocks.
+ * Live leak example: "Commercial detail carried forward from user notes (edit freely before send):"
+ */
+const LEAKED_META_LINE_PATTERNS = [
+  /^\s*Commercial\s+detail\s+carried\s+forward\s+from\s+user\s+notes\s*\([^)]*\)\s*:\s*$/gim,
+  /^\s*Commercial\s+detail\s+carried\s+forward[^\n]*$/gim,
+];
+
+/**
  * Numbered section patterns that look like leaked user prompt prose, not agreement headings.
  * Match: "11. I run", "12. hey so", "13. Don't", etc.
  *
@@ -30,6 +39,15 @@ const LEAKED_PROMPT_SECTION_PATTERNS = [
   // Catch deal term leaks: "13. 12 month deal, exclusive…"
   /^(?:1[1-9]|[2-9]\d)\.\s+\d+\s+(?:month|year|day|week)\s+deal[^\n]*/gim,
 ];
+
+/** Strip meta lines (e.g. carry-forward headers) that leak from intake processing. */
+function stripLeakedMetaLines(text: string): string {
+  let t = text;
+  for (const pattern of LEAKED_META_LINE_PATTERNS) {
+    t = t.replace(pattern, "");
+  }
+  return t;
+}
 
 /** Strip numbered "section" lines that are clearly leaked user prompt, not real sections. */
 function stripLeakedPromptAsSections(text: string): string {
@@ -58,6 +76,9 @@ export function stripPremiumInstructionNoiseForDocument(text: string): string {
   );
   t = t.replace(/\bthis is not generic consulting[^.]{0,120}\.\s*/gi, "");
   t = t.replace(/\bnote:\s*this is not generic[^.]{0,160}\.\s*/gi, "");
+
+  // Strip leaked meta lines (carry-forward headers)
+  t = stripLeakedMetaLines(t);
 
   // Strip leaked prompt prose that appears as numbered sections
   t = stripLeakedPromptAsSections(t);

@@ -43,6 +43,7 @@ import {
   shouldRenderPaidProFirstReviewDiagnostics,
   shouldSynchronouslyRenderCanonicalPlainFirstReview,
 } from "./paidProFirstReviewRenderGuard";
+import { stripPremiumInstructionNoiseForDocument } from "./premiumInstructionStrip";
 import {
   SIMPLE_PRO_FINAL_REVIEW_HEADLINE,
   SIMPLE_PRO_FINAL_REVIEW_SUBCOPY,
@@ -463,7 +464,7 @@ export function SimpleProFinalReviewScreen({
     emergencyFallbackActive,
   ]);
 
-  const canonicalPlainForRender = (
+  const canonicalPlainForRender = stripPremiumInstructionNoiseForDocument(
     emergencyFallbackActive && emergencyPlain.length >= PAID_PRO_REVIEW_VISIBLE_TEXT_MIN
       ? emergencyPlain
       : effectivePaidReviewPlain
