@@ -82,6 +82,8 @@ const CLAWBACK_PATTERNS = [
   /\b(?:cancel(?:lation)?|refund|chargeback)s?\s+(?:come|comes|offset|deduct)s?\s+(?:out|from)\s+(?:un)?paid\s+commission/i,
   /\brecoup\s+commission\b[^.!?]{0,80}/i,
   /\boffset(?:ting)?\s+(?:against\s+)?(?:un)?paid\s+commission/i,
+  /\b(?:falls?\s+through|cancel(?:led|s)?|refund(?:ed|s)?)\s+(?:in|within)\s+\d{1,3}\s*[-\s]?days?\b[^.!?]{0,100}/i,
+  /\b(?:if|when)\s+(?:the\s+)?(?:job|deal|project|transaction)\s+(?:falls?\s+through|cancel(?:led|s)?)[^.!?]{0,60}(?:give|return|refund|pay\s+back)[^.!?]{0,60}/i,
 ];
 
 const PROTECTED_ACCOUNTS_PATTERNS = [
