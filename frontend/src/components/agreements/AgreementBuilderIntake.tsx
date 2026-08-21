@@ -5725,7 +5725,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       return canonical;
     }
     const cached = reviewAgreementIdRef.current?.trim();
-    if (cached && isSupersededAgreementId(cached)) {
+    // Demo+premiumCompletion sessions bypass superseded-cache and ownership-transition gates
+    // because they are fresh sessions that should never be blocked by stale state.
+    const demoSessionBypassCacheGates = hasDemoSessionUser() && hasPaidPremiumCompletionSession();
+    if (cached && isSupersededAgreementId(cached) && !demoSessionBypassCacheGates) {
       const resume = readCreateReviewAgreementResumeId();
       if (resume) {
         reviewAgreementIdRef.current = resume;
@@ -5734,20 +5737,48 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       }
       return null;
     }
-    if (shouldBlockDraftWriteForOwnershipTransition(cached)) return null;
+    if (shouldBlockDraftWriteForOwnershipTransition(cached) && !demoSessionBypassCacheGates) return null;
     if (cached) return cached;
     if (reviewAgreementEnsurePromiseRef.current) return reviewAgreementEnsurePromiseRef.current;
     const session = reviewWorkspaceSessionRef.current;
     let snapshot = draft;
     // Demo session post-POS: allow persist even without a draft if we have a valid Pro corpus.
-    // Build a minimal draft from the pipeline output so the POST /draft can succeed.
+    // Build a minimal draft from the VISIBLE Pro corpus so the POST /draft can succeed.
+    // Try multiple sources: pipeline refs, Source of Truth, and visible display surface.
     if (!snapshot && hasDemoSessionUser() && hasPaidPremiumCompletionSession()) {
-      const pipelineCorpus = (
+      // Priority order: pipeline refs -> SoT -> visible display surface
+      let pipelineCorpus = (
         lastPremiumWinningCorpusRef.current ||
         premiumPipelineOutputBodyRef.current ||
         hydratedPremiumBodyRef.current ||
         ""
       ).trim();
+      // If pipeline refs are empty, try the Source of Truth (frozen corpus)
+      if (pipelineCorpus.length < PAID_PRO_AUTHORITY_MIN_LEN && hasPaidProSourceOfTruth()) {
+        const sotText = getPaidProSourceOfTruthText().trim();
+        if (sotText.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
+          pipelineCorpus = sotText;
+          console.info("[demo-session-user] using_sot_for_persist", { corpusLen: sotText.length });
+        }
+      }
+      // If SoT is empty, try the visible display surface (what the user actually sees)
+      if (pipelineCorpus.length < PAID_PRO_AUTHORITY_MIN_LEN) {
+        const displayDoc = getPaidProDocumentForSurface("display");
+        const displayCorpus = displayDoc?.text?.trim() || "";
+        if (displayCorpus.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
+          pipelineCorpus = displayCorpus;
+          console.info("[demo-session-user] using_visible_display_for_persist", { corpusLen: displayCorpus.length });
+        }
+      }
+      // Final fallback: try review surface
+      if (pipelineCorpus.length < PAID_PRO_AUTHORITY_MIN_LEN) {
+        const reviewDoc = getPaidProDocumentForSurface("review");
+        const reviewCorpus = reviewDoc?.text?.trim() || "";
+        if (reviewCorpus.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
+          pipelineCorpus = reviewCorpus;
+          console.info("[demo-session-user] using_visible_review_for_persist", { corpusLen: reviewCorpus.length });
+        }
+      }
       if (pipelineCorpus.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
         snapshot = {
           title: "Services Agreement",
@@ -5767,6 +5798,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         };
         console.info("[demo-session-user] built_minimal_draft_for_persist", {
           corpusLen: pipelineCorpus.length,
+        });
+      } else {
+        console.warn("[demo-session-user] no_valid_corpus_for_persist", {
+          pipelineLen: (lastPremiumWinningCorpusRef.current || "").length,
+          outputLen: (premiumPipelineOutputBodyRef.current || "").length,
+          hydratedLen: (hydratedPremiumBodyRef.current || "").length,
+          sotLen: hasPaidProSourceOfTruth() ? getPaidProSourceOfTruthText().length : 0,
+          displayLen: getPaidProDocumentForSurface("display")?.text?.length || 0,
+          reviewLen: getPaidProDocumentForSurface("review")?.text?.length || 0,
         });
       }
     }
@@ -5874,6 +5914,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
               : persistMsg;
           });
           setProFullDraftQualityRetry(true);
+        }
+        // Demo sessions: rethrow the error so finalize can show http status + detail.
+        // Non-demo review-first sessions with recovery corpus can swallow and continue.
+        if (demoSessionBypassPaintReadyGate) {
+          console.error("[demo-session-user] postNewDraft_failed_rethrowing", {
+            message: e instanceof Error ? e.message : String(e),
+            httpStatus: (e as { httpStatus?: number })?.httpStatus,
+          });
+          throw e;
         }
         if (
           useReviewFirstPersist &&
