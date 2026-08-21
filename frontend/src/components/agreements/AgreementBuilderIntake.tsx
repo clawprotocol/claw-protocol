@@ -34914,12 +34914,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                               premiumPrimarySendLabelOverride={
                                                 paidProReviewRecipientSetupActive
                                                   ? "Create review links"
+                                                  : demoSessionUserActive
+                                                  ? "Continue"
                                                   : dashboardSignerSetupResumeUiActive
                                                   ? paidProSignerDetailsGate.complete
                                                     ? DASHBOARD_SIGNER_SETUP_RESUME_COMPLETE_CTA
                                                     : DASHBOARD_SIGNER_SETUP_RESUME_INCOMPLETE_CTA
-                                                  : demoSessionUserActive
-                                                  ? "Continue"
                                                   : "Create signing links"
                                               }
                                               primaryCtaHelperText={
