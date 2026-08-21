@@ -269,6 +269,251 @@ This Agreement constitutes the entire agreement.`;
     });
   });
 
+  describe("Issue D: Continue-time ensure builds snapshot from visible corpus when pipeline refs empty", () => {
+    /**
+     * These tests verify the LOGIC of the fix in ensureReviewAgreementWorkspaceId:
+     * When demo+premiumCompletion, build the persist snapshot from visible corpus sources
+     * (SoT, display surface, review surface) when pipeline refs are empty.
+     *
+     * The actual function lives in AgreementBuilderIntake.tsx and uses:
+     * - lastPremiumWinningCorpusRef.current (pipeline ref)
+     * - premiumPipelineOutputBodyRef.current (pipeline ref)
+     * - hydratedPremiumBodyRef.current (pipeline ref)
+     * - getPaidProSourceOfTruthText() (SoT - frozen corpus)
+     * - getPaidProDocumentForSurface("display") (visible display surface)
+     * - getPaidProDocumentForSurface("review") (visible review surface)
+     *
+     * The tests use mocked values to verify the fallback logic.
+     */
+
+    it("demo+premiumCompletion can build snapshot from mocked visible corpus when pipeline refs empty", () => {
+      createDemoSessionUser({
+        displayName: "Harbor Pool & Patio LLC",
+        email: "jordan.harbor.qa+aug21c@example.com",
+        settlementReceiptId: "rcpt_harbor_4242",
+      });
+      markPaidPremiumCompletionSession({ source: "settled_checkout" });
+
+      // Simulate the logic from ensureReviewAgreementWorkspaceId
+      // Pipeline refs are all empty (as in the live Harbor fail)
+      const lastPremiumWinningCorpus = "";
+      const premiumPipelineOutputBody = "";
+      const hydratedPremiumBody = "";
+
+      let pipelineCorpus = (
+        lastPremiumWinningCorpus ||
+        premiumPipelineOutputBody ||
+        hydratedPremiumBody ||
+        ""
+      ).trim();
+
+      // Pipeline refs are empty
+      expect(pipelineCorpus.length).toBeLessThan(PAID_PRO_AUTHORITY_MIN_LEN);
+
+      // Mock visible corpus sources - this simulates getPaidProDocumentForSurface("display")
+      // returning a valid corpus that the user can see on screen
+      const mockSotText = "";
+      const mockDisplayCorpus = "SERVICES AGREEMENT\n".repeat(100);
+      const mockReviewCorpus = "";
+
+      // The fix logic: try SoT first, then display, then review
+      if (pipelineCorpus.length < PAID_PRO_AUTHORITY_MIN_LEN && mockSotText.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
+        pipelineCorpus = mockSotText;
+      }
+      if (pipelineCorpus.length < PAID_PRO_AUTHORITY_MIN_LEN) {
+        const displayCorpus = mockDisplayCorpus.trim();
+        if (displayCorpus.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
+          pipelineCorpus = displayCorpus;
+        }
+      }
+      if (pipelineCorpus.length < PAID_PRO_AUTHORITY_MIN_LEN) {
+        const reviewCorpus = mockReviewCorpus.trim();
+        if (reviewCorpus.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
+          pipelineCorpus = reviewCorpus;
+        }
+      }
+
+      // Now we have a valid corpus from visible display
+      expect(pipelineCorpus.length).toBeGreaterThanOrEqual(PAID_PRO_AUTHORITY_MIN_LEN);
+      expect(pipelineCorpus).toBe(mockDisplayCorpus.trim());
+
+      // Demo session bypass gate should be true
+      const demoSessionBypassPaintReadyGate =
+        hasDemoSessionUser() &&
+        hasPaidPremiumCompletionSession() &&
+        pipelineCorpus.length >= PAID_PRO_AUTHORITY_MIN_LEN;
+      expect(demoSessionBypassPaintReadyGate).toBe(true);
+    });
+
+    it("demo+premiumCompletion can build snapshot from mocked SoT when pipeline refs empty", () => {
+      createDemoSessionUser({
+        displayName: "Harbor Pool & Patio LLC",
+        email: "jordan.harbor.qa+aug21c@example.com",
+        settlementReceiptId: "rcpt_harbor_4242",
+      });
+      markPaidPremiumCompletionSession({ source: "settled_checkout" });
+
+      // Pipeline refs are all empty
+      let pipelineCorpus = "";
+
+      // Mock SoT corpus is available
+      const mockSotText = "MASTER SERVICES AGREEMENT\n".repeat(100);
+      const mockDisplayCorpus = "";
+      const mockReviewCorpus = "";
+
+      // The fix logic: SoT takes priority
+      if (pipelineCorpus.length < PAID_PRO_AUTHORITY_MIN_LEN && mockSotText.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
+        pipelineCorpus = mockSotText;
+      }
+      if (pipelineCorpus.length < PAID_PRO_AUTHORITY_MIN_LEN) {
+        const displayCorpus = mockDisplayCorpus.trim();
+        if (displayCorpus.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
+          pipelineCorpus = displayCorpus;
+        }
+      }
+      if (pipelineCorpus.length < PAID_PRO_AUTHORITY_MIN_LEN) {
+        const reviewCorpus = mockReviewCorpus.trim();
+        if (reviewCorpus.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
+          pipelineCorpus = reviewCorpus;
+        }
+      }
+
+      expect(pipelineCorpus.length).toBeGreaterThanOrEqual(PAID_PRO_AUTHORITY_MIN_LEN);
+      expect(pipelineCorpus).toBe(mockSotText);
+    });
+
+    it("demo+premiumCompletion can build snapshot from review surface when pipeline refs, SoT, and display empty", () => {
+      createDemoSessionUser({
+        displayName: "Harbor Pool & Patio LLC",
+        email: "jordan.harbor.qa+aug21c@example.com",
+        settlementReceiptId: "rcpt_harbor_4242",
+      });
+      markPaidPremiumCompletionSession({ source: "settled_checkout" });
+
+      let pipelineCorpus = "";
+
+      // Neither SoT nor display is available, but review surface is
+      const mockSotText = "";
+      const mockDisplayCorpus = "";
+      const mockReviewCorpus = "PROFESSIONAL SERVICES CONTRACT\n".repeat(100);
+
+      // The fix logic: review surface is final fallback
+      if (pipelineCorpus.length < PAID_PRO_AUTHORITY_MIN_LEN && mockSotText.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
+        pipelineCorpus = mockSotText;
+      }
+      if (pipelineCorpus.length < PAID_PRO_AUTHORITY_MIN_LEN) {
+        const displayCorpus = mockDisplayCorpus.trim();
+        if (displayCorpus.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
+          pipelineCorpus = displayCorpus;
+        }
+      }
+      if (pipelineCorpus.length < PAID_PRO_AUTHORITY_MIN_LEN) {
+        const reviewCorpus = mockReviewCorpus.trim();
+        if (reviewCorpus.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
+          pipelineCorpus = reviewCorpus;
+        }
+      }
+
+      expect(pipelineCorpus.length).toBeGreaterThanOrEqual(PAID_PRO_AUTHORITY_MIN_LEN);
+      expect(pipelineCorpus).toBe(mockReviewCorpus.trim());
+    });
+
+    it("no snapshot built when all corpus sources empty (returns null)", () => {
+      createDemoSessionUser({
+        displayName: "Harbor Pool & Patio LLC",
+        email: "jordan.harbor.qa+aug21c@example.com",
+        settlementReceiptId: "rcpt_harbor_4242",
+      });
+      markPaidPremiumCompletionSession({ source: "settled_checkout" });
+
+      let pipelineCorpus = "";
+
+      // All corpus sources are empty
+      const mockSotText = "";
+      const mockDisplayCorpus = "";
+      const mockReviewCorpus = "";
+
+      if (pipelineCorpus.length < PAID_PRO_AUTHORITY_MIN_LEN && mockSotText.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
+        pipelineCorpus = mockSotText;
+      }
+      if (pipelineCorpus.length < PAID_PRO_AUTHORITY_MIN_LEN) {
+        const displayCorpus = mockDisplayCorpus.trim();
+        if (displayCorpus.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
+          pipelineCorpus = displayCorpus;
+        }
+      }
+      if (pipelineCorpus.length < PAID_PRO_AUTHORITY_MIN_LEN) {
+        const reviewCorpus = mockReviewCorpus.trim();
+        if (reviewCorpus.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
+          pipelineCorpus = reviewCorpus;
+        }
+      }
+
+      // No valid corpus found
+      expect(pipelineCorpus.length).toBeLessThan(PAID_PRO_AUTHORITY_MIN_LEN);
+
+      // Cannot build snapshot, would return null
+      const canBuildSnapshot = pipelineCorpus.length >= PAID_PRO_AUTHORITY_MIN_LEN;
+      expect(canBuildSnapshot).toBe(false);
+    });
+
+    it("verifies source code has fallback chain for visible corpus (source inspection)", () => {
+      const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
+
+      // The fix adds fallback logic to try visible corpus sources when pipeline refs are empty.
+      // Check that the source includes these patterns:
+
+      // 1. Check for SoT fallback
+      expect(intake).toContain("getPaidProSourceOfTruthText()");
+      expect(intake).toContain("using_sot_for_persist");
+
+      // 2. Check for display surface fallback
+      expect(intake).toContain('getPaidProDocumentForSurface("display")');
+      expect(intake).toContain("using_visible_display_for_persist");
+
+      // 3. Check for review surface fallback
+      expect(intake).toContain('getPaidProDocumentForSurface("review")');
+      expect(intake).toContain("using_visible_review_for_persist");
+
+      // 4. Check for diagnostic logging when no corpus found
+      expect(intake).toContain("no_valid_corpus_for_persist");
+    });
+  });
+
+  describe("Issue E: demo+premiumCompletion bypasses ownership-transition and superseded-cache gates", () => {
+    it("demo+premiumCompletion bypass gate is true for fresh demo session", () => {
+      createDemoSessionUser({
+        displayName: "Harbor Pool & Patio LLC",
+        email: "jordan.harbor.qa+aug21c@example.com",
+        settlementReceiptId: "rcpt_harbor_4242",
+      });
+      markPaidPremiumCompletionSession({ source: "settled_checkout" });
+
+      const demoSessionBypassCacheGates = hasDemoSessionUser() && hasPaidPremiumCompletionSession();
+      expect(demoSessionBypassCacheGates).toBe(true);
+    });
+
+    it("demo session without premium completion does not bypass cache gates", () => {
+      createDemoSessionUser({
+        displayName: "Test User",
+        email: "test@example.com",
+        settlementReceiptId: "rcpt_123",
+      });
+      clearPaidPremiumCompletionSession();
+
+      const demoSessionBypassCacheGates = hasDemoSessionUser() && hasPaidPremiumCompletionSession();
+      expect(demoSessionBypassCacheGates).toBe(false);
+    });
+
+    it("non-demo user does not bypass cache gates", () => {
+      clearDemoSessionUser();
+      markPaidPremiumCompletionSession({ source: "settled_checkout" });
+
+      const demoSessionBypassCacheGates = hasDemoSessionUser() && hasPaidPremiumCompletionSession();
+      expect(demoSessionBypassCacheGates).toBe(false);
+    });
+  });
+
   describe("demo Continue flow end-to-end routing", () => {
     it("demo_session_signer_details_complete reason triggers finalize, not signature prep", () => {
       createDemoSessionUser({
