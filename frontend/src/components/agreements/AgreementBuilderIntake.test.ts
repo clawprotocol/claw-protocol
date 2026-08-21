@@ -342,6 +342,16 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     expect(intake).toMatch(/setJourneyActionFeedback\(null\)/);
   });
 
+  it("clears creating agreement banner in commitFreeDraftForReview (homepage guest local parse path)", () => {
+    const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
+    const commitFreeDraftIdx = intake.indexOf("const commitFreeDraftForReview = React.useCallback(");
+    expect(commitFreeDraftIdx).toBeGreaterThan(0);
+    const commitFreeDraftBlock = intake.slice(commitFreeDraftIdx, commitFreeDraftIdx + 1500);
+    expect(commitFreeDraftBlock).toContain('setCreateFlowPhase("draft_ready_for_review")');
+    expect(commitFreeDraftBlock).toContain("setJourneyActionFeedback(null)");
+    expect(commitFreeDraftBlock).toContain("logFreeReviewSurfaceResolved");
+  });
+
   it("paid authoritative Pro hides top adjust card and legacy finalize panel on canonical review", () => {
     const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
     expect(intake).toContain("showTopProAdjustCard");

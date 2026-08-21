@@ -11886,6 +11886,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       setMobileWorkspacePane("preview");
       setPreviewPaneRevealed(true);
       setFollowUpDetailTotal(0);
+      setJourneyActionFeedback(null);
       logFreeReviewSurfaceResolved({
         source: opts.source,
         displayPhase: "review",
