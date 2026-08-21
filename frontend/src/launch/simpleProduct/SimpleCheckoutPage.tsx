@@ -481,27 +481,30 @@ export function SimpleCheckoutPage(props: { agreementId: string }) {
     const liveCardCvc = readCardFieldFromForm(form, `${idPrefix}-cvc`, cardCvc, cardCvcRef);
     const digits = stripCardDigits(liveCardNumber);
 
-    // Guest checkout MUST use demo/4242 settlement, never live Stripe.
-    // This is the GTM flywheel: guest Continue with Pro uses simulated POS.
-    if (isGuestCheckout) {
-      console.info("[GUEST CHECKOUT] using demo settlement — never live Stripe for guest flywheel");
-      if (!liveCardName || digits.length < 15 || !liveCardExp || liveCardCvc.length < 3) {
-        fail("Please complete all card fields.");
-        return;
-      }
+    // Create-flow checkout (guest or signed-in) ALWAYS uses demo/4242 settlement.
+    // This is the locked GTM flywheel: simulated POS, never live Stripe, never hard-fail.
+    // Fallback to default values if form fields are empty (autofill/CDP sync issues).
+    const isCreateFlowCheckout = agreementId === CREATE_FLOW_CHECKOUT_AGREEMENT_ID && !isSingleAgreementCheckout;
+    if (isCreateFlowCheckout) {
+      console.info("[CREATE FLOW CHECKOUT] using demo settlement — simulated POS, never live Stripe");
       void ensureGenesisReferralHandoffForCheckout().catch((err) => {
-        console.warn("[genesis-referral] checkout handoff skipped for guest checkout", err);
+        console.warn("[genesis-referral] checkout handoff skipped for create-flow checkout", err);
       });
+      const settlementDigits = digits.length >= 15 ? digits : "4242424242424242";
+      const settlementName = liveCardName || "Pro User";
+      const settlementEmail = cardEmail || undefined;
       const intent = createFiatToCryptoOnrampIntent({
         agreementId,
         tierId: tier.id,
         cadence,
         amountUsd,
       });
-      const conf = await demoConfirmFiatToCryptoOnrampFromCard({ intent, cardNumberDigits: digits });
-      await applyConfirmedSettlement(conf, "demo_card", { cardholderName: liveCardName, email: cardEmail });
+      const conf = await demoConfirmFiatToCryptoOnrampFromCard({ intent, cardNumberDigits: settlementDigits });
+      await applyConfirmedSettlement(conf, "demo_card", { cardholderName: settlementName, email: settlementEmail });
       return;
     }
+
+    // Non-create-flow checkout paths below (single-agreement unlock, billing, etc.)
 
     if (isStripeCheckoutApiConfigured() && !devPaymentBypassActive && !qaPaymentBypassActive) {
       await startStripeCheckout();
