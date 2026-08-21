@@ -9,7 +9,6 @@ import {
   detectContradictions,
   shouldAskDueToContradictionsOrMissing,
 } from "./proAgreementFiveTenets";
-import type { FiveTenetScore, ContradictionResult } from "./proAgreementFiveTenets";
 
 import proQaFixtures from "../../../../qa/fixtures/pro-agreement-qa-prompts.json";
 
@@ -31,6 +30,7 @@ type QaFixture = {
   noise_to_drop?: string[];
   material_terms_to_keep?: string[];
   contradictory?: boolean;
+  must_detect_contradiction?: boolean;
   party_count?: number;
   harbor_defect_test?: boolean;
   should_not_render_as_name?: string[];
@@ -281,7 +281,7 @@ describe("Role token leak prevention", () => {
 
 describe("Question limit validation", () => {
   it("missing facts API returns at most 5 questions", () => {
-    const score = scoreFiveTenets("NDA");
+    scoreFiveTenets("NDA");
     const missing = getMissingTenetTopics("NDA");
     expect(missing.length).toBeLessThanOrEqual(5);
   });

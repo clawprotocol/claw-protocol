@@ -9,7 +9,7 @@
  */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import {
   clearAuthoritativeSigningSnapshot,
   createAuthoritativeSigningSnapshot,
@@ -35,7 +35,6 @@ import {
 } from "./paidProFinalHydratedCorpus";
 import {
   writePremiumRecipientHandoffFromAuthorityParties,
-  readPremiumRecipientHandoff,
   clearPremiumPartyNamesHandoff,
 } from "./premiumPartyNamesHandoff";
 import { beginPaidProPostFinalizeSignerDetailsReopen } from "./paidProPostFinalizeEditSignerDetails";
@@ -232,9 +231,10 @@ describe("firstScreenToFinalReviewCarryover", () => {
 
       const seed = resolvePaidProPostFinalizeSignerDetailsEditSeed();
       const ui = authorityPartiesToLiveSignerMetadataUi(seed!);
-      ui.partySignerNames[0] = "John Harbor Jr.";
+      const updatedSignerNames = [...ui.partySignerNames];
+      updatedSignerNames[0] = "John Harbor Jr.";
 
-      const correctedAuthority = buildLivePaidProSignerMetadataAuthority(ui);
+      const correctedAuthority = buildLivePaidProSignerMetadataAuthority({ ...ui, partySignerNames: updatedSignerNames });
       setConsumedPaidProSignerMetadataAuthority(correctedAuthority);
 
       const consumed = readConsumedPaidProSignerMetadataAuthority();
@@ -271,9 +271,10 @@ describe("firstScreenToFinalReviewCarryover", () => {
 
       const seed = resolvePaidProPostFinalizeSignerDetailsEditSeed();
       const ui = authorityPartiesToLiveSignerMetadataUi(seed!);
-      ui.partySignerNames[0] = "John Harbor Corrected";
+      const updatedSignerNames = [...ui.partySignerNames];
+      updatedSignerNames[0] = "John Harbor Corrected";
 
-      const correctedAuthority = buildLivePaidProSignerMetadataAuthority(ui);
+      const correctedAuthority = buildLivePaidProSignerMetadataAuthority({ ...ui, partySignerNames: updatedSignerNames });
       setConsumedPaidProSignerMetadataAuthority(correctedAuthority);
 
       const consumed = readConsumedPaidProSignerMetadataAuthority();
@@ -331,9 +332,10 @@ describe("firstScreenToFinalReviewCarryover", () => {
       expect(seed).not.toBeNull();
 
       const ui = authorityPartiesToLiveSignerMetadataUi(seed!);
-      ui.partySignerNames[0] = "John Harbor Corrected";
+      const updatedSignerNames = [...ui.partySignerNames];
+      updatedSignerNames[0] = "John Harbor Corrected";
 
-      const correctedAuthority = buildLivePaidProSignerMetadataAuthority(ui);
+      const correctedAuthority = buildLivePaidProSignerMetadataAuthority({ ...ui, partySignerNames: updatedSignerNames });
       setConsumedPaidProSignerMetadataAuthority(correctedAuthority);
 
       createAuthoritativeSigningSnapshot({
