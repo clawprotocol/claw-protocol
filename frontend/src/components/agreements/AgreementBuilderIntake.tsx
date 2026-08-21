@@ -9331,6 +9331,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           agreementDocumentDirtyRef.current = false;
           // Preserve starter text on generation failure instead of wiping to empty.
           // This keeps the user's starter visible so they can continue from where they were.
+          // Also update lastKnownGoodAuthoritativeDraftRef to prevent useLayoutEffect from wiping
+          // the starter text when draft is null and premiumPersistedFlowActive is false.
           {
             const starterFallback = buildAgreementPreviewText(mergedF.draft, {
               starterPreview: true,
@@ -9339,6 +9341,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             if (starterFallback.trim()) {
               setAgreementDocumentText(starterFallback);
               setProUpgradeUseStarterView(true);
+              // Protect starter from useLayoutEffect wipe when proFullDraftQualityRetry is true.
+              lastKnownGoodAuthoritativeDraftRef.current = starterFallback;
             } else {
               setAgreementDocumentText("");
             }
@@ -9563,6 +9567,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           agreementDocumentDirtyRef.current = false;
           // Preserve starter text on generation failure instead of wiping to empty.
           // This keeps the user's starter visible so they can continue from where they were.
+          // Also update lastKnownGoodAuthoritativeDraftRef to prevent useLayoutEffect from wiping
+          // the starter text when draft is null and premiumPersistedFlowActive is false.
           {
             const starterFallback = buildAgreementPreviewText(merged.draft, {
               starterPreview: true,
@@ -9571,6 +9577,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             if (starterFallback.trim()) {
               setAgreementDocumentText(starterFallback);
               setProUpgradeUseStarterView(true);
+              // Protect starter from useLayoutEffect wipe when proFullDraftQualityRetry is true.
+              lastKnownGoodAuthoritativeDraftRef.current = starterFallback;
             } else {
               setAgreementDocumentText("");
             }
@@ -9738,6 +9746,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             agreementDocumentDirtyRef.current = false;
             // Preserve starter text on generation failure instead of wiping to empty.
             // This keeps the user's starter visible so they can continue from where they were.
+            // Also update lastKnownGoodAuthoritativeDraftRef to prevent useLayoutEffect from wiping
+            // the starter text when draft is null and premiumPersistedFlowActive is false.
             {
               const starterFallback = buildAgreementPreviewText(merged.draft, {
                 starterPreview: true,
@@ -9746,6 +9756,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
               if (starterFallback.trim()) {
                 setAgreementDocumentText(starterFallback);
                 setProUpgradeUseStarterView(true);
+                // Protect starter from useLayoutEffect wipe when proFullDraftQualityRetry is true.
+                lastKnownGoodAuthoritativeDraftRef.current = starterFallback;
               } else {
                 setAgreementDocumentText("");
               }
@@ -15035,7 +15047,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   useLayoutEffect(() => {
     if (!productionDraftPrimaryReviewSurface) return;
     if (!draft) {
+      // Preserve existing text when:
+      // 1. We have a good authoritative draft and persisted flow is active, OR
+      // 2. We're in Pro retry/recovery state with existing starter text (proFullDraftQualityRetry + text >= 500)
+      // This prevents wiping starter text when generation fails and returns to retry state.
       if (lastKnownGoodAuthoritativeDraftRef.current.trim().length >= 500 && premiumPersistedFlowActive) {
+        return;
+      }
+      if (proFullDraftQualityRetryRef.current && agreementDocumentTextRef.current.trim().length >= 500) {
         return;
       }
       setAgreementDocumentText("");
@@ -15112,7 +15131,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       }
       setAgreementDocumentText(stripPlaceholderBlockerFromPersistPlain(nextPreview));
     } catch {
-      setAgreementDocumentText("");
+      // Only wipe to empty if we're not in Pro retry/recovery state with existing starter text.
+      // This prevents losing the preserved starter during async effect churn.
+      if (!(proFullDraftQualityRetryRef.current && agreementDocumentTextRef.current.trim().length >= 500)) {
+        setAgreementDocumentText("");
+      }
     }
   }, [
     draft,

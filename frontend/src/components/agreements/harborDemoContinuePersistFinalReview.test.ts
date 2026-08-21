@@ -865,5 +865,55 @@ This Agreement constitutes the entire agreement.`;
       expect(intakeSrc).toContain("armExplicitPremiumGenerationRetry()");
       expect(intakeSrc).toContain('premiumGenerationCallReason: "explicit_retry_pro_draft"');
     });
+
+    it("starter fallback updates lastKnownGoodAuthoritativeDraftRef to prevent useLayoutEffect wipe", () => {
+      // Verify that when starter fallback is set, lastKnownGoodAuthoritativeDraftRef is also updated.
+      // This prevents the useLayoutEffect from wiping the starter text when draft is null and
+      // premiumPersistedFlowActive is false (which happens in failure paths).
+      const intakePath = join(__dirname, "AgreementBuilderIntake.tsx");
+      const intakeSrc = readFileSync(intakePath, "utf-8");
+
+      // Verify lastKnownGoodAuthoritativeDraftRef is updated in all three failure paths
+      expect(intakeSrc).toContain(
+        "Protect starter from useLayoutEffect wipe when proFullDraftQualityRetry is true"
+      );
+      expect(intakeSrc).toContain(
+        "lastKnownGoodAuthoritativeDraftRef.current = starterFallback"
+      );
+
+      // Count the occurrences to ensure all three failure paths have this fix
+      const matches = intakeSrc.match(
+        /lastKnownGoodAuthoritativeDraftRef\.current = starterFallback/g
+      );
+      expect(matches?.length).toBeGreaterThanOrEqual(3);
+    });
+
+    it("useLayoutEffect preserves existing text when in Pro retry state with starter text", () => {
+      // Verify the useLayoutEffect at productionDraftPrimaryReviewSurface has the correct guard
+      // to preserve existing starter text when proFullDraftQualityRetry is true.
+      const intakePath = join(__dirname, "AgreementBuilderIntake.tsx");
+      const intakeSrc = readFileSync(intakePath, "utf-8");
+
+      // The guard should check proFullDraftQualityRetryRef and agreementDocumentTextRef.current
+      expect(intakeSrc).toContain(
+        "proFullDraftQualityRetryRef.current && agreementDocumentTextRef.current.trim().length >= 500"
+      );
+
+      // The guard should be in the !draft block of the useLayoutEffect
+      expect(intakeSrc).toContain(
+        "We're in Pro retry/recovery state with existing starter text"
+      );
+    });
+
+    it("catch block in useLayoutEffect preserves text when in Pro retry state", () => {
+      // Verify the catch block in the useLayoutEffect doesn't wipe text during Pro retry.
+      const intakePath = join(__dirname, "AgreementBuilderIntake.tsx");
+      const intakeSrc = readFileSync(intakePath, "utf-8");
+
+      // The catch block should have a guard for proFullDraftQualityRetryRef
+      expect(intakeSrc).toContain(
+        "Only wipe to empty if we're not in Pro retry/recovery state with existing starter text"
+      );
+    });
   });
 });
