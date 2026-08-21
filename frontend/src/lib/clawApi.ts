@@ -256,3 +256,109 @@ export function logClawClientWarning(scope: string, detail: Record<string, unkno
     /* ignore */
   }
 }
+
+/**
+ * Known production backend URL for fallback when same-origin proxy fails.
+ * This is used when:
+ * 1. No explicit API base is configured (same-origin mode)
+ * 2. The same-origin proxy returns "Failed to fetch" (connection/proxy error)
+ * 3. The request is retried directly to the backend with CORS
+ */
+const PRODUCTION_BACKEND_FALLBACK_URL = "https://claw-protocol-production.up.railway.app";
+
+/**
+ * Get the fallback backend URL for retry attempts when the same-origin proxy fails.
+ * Returns null if already using an explicit API base (no fallback needed).
+ */
+export function getProductionBackendFallbackUrl(): string | null {
+  if (typeof window === "undefined") return null;
+  const explicit = getLawDogApiBase();
+  if (explicit) return null;
+  if (!readRuntimeEnvProd()) return null;
+  try {
+    const origin = window.location.origin.toLowerCase();
+    if (origin.includes("lawdog.me") || origin.includes("railway.app")) {
+      return PRODUCTION_BACKEND_FALLBACK_URL;
+    }
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
+
+/**
+ * Build an API URL using the fallback backend directly (bypasses same-origin proxy).
+ */
+export function apiUrlWithFallback(path: string): string | null {
+  const fallbackBase = getProductionBackendFallbackUrl();
+  if (!fallbackBase) return null;
+  const p = path.startsWith("/") ? path : `/${path}`;
+  return `${fallbackBase}${p}`;
+}
+
+/**
+ * Check if an error is a "Failed to fetch" network error that could be retried
+ * with the fallback backend URL.
+ */
+export function isFailedToFetchError(error: unknown): boolean {
+  if (!(error instanceof Error)) return false;
+  const msg = error.message.toLowerCase();
+  return msg.includes("failed to fetch") || msg.includes("network request failed");
+}
+
+let fallbackUsedLogged = false;
+
+/**
+ * Fetch with automatic fallback to direct backend URL when same-origin proxy fails.
+ * Use this for critical API calls (like draft creation) that must succeed when the
+ * same-origin proxy is broken but the backend is working.
+ */
+export async function fetchWithProxyFallback(
+  url: string,
+  init?: RequestInit,
+  options?: { logContext?: string }
+): Promise<Response> {
+  try {
+    const res = await fetch(url, init);
+    return res;
+  } catch (firstError: unknown) {
+    if (!isFailedToFetchError(firstError)) {
+      throw firstError;
+    }
+
+    const fallbackBase = getProductionBackendFallbackUrl();
+    if (!fallbackBase) {
+      throw firstError;
+    }
+
+    try {
+      const urlObj = new URL(url, window.location.origin);
+      const fallbackUrl = `${fallbackBase}${urlObj.pathname}${urlObj.search}`;
+
+      if (!fallbackUsedLogged) {
+        fallbackUsedLogged = true;
+        console.info("[lawdog-api] using_backend_fallback", {
+          originalUrl: url,
+          fallbackUrl,
+          context: options?.logContext ?? "unknown",
+        });
+      }
+
+      const fallbackInit: RequestInit = {
+        ...init,
+        mode: "cors",
+        credentials: "omit",
+      };
+
+      const res = await fetch(fallbackUrl, fallbackInit);
+      return res;
+    } catch (fallbackError: unknown) {
+      console.warn("[lawdog-api] backend_fallback_failed", {
+        originalError: firstError instanceof Error ? firstError.message : String(firstError),
+        fallbackError: fallbackError instanceof Error ? fallbackError.message : String(fallbackError),
+        context: options?.logContext ?? "unknown",
+      });
+      throw firstError;
+    }
+  }
+}
