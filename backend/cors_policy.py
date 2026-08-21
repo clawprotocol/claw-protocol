@@ -38,6 +38,10 @@ CORS_ALLOW_REQUEST_HEADERS: List[str] = [
     "X-Claw-Admin-User-Id",
     "X-Claw-Admin-Email",
     "X-Claw-User-Id",
+    # Demo session headers (Harbor checkout flow, simulated POS without login).
+    "X-Claw-Demo-Checkout-Receipt",
+    # Entitlement repair for transitional org states (checkout → workspace binding).
+    "X-Claw-Entitlement-Repair-Org",
 ]
 
 CORS_ALLOW_METHODS = "GET, POST, PUT, PATCH, DELETE, OPTIONS"
