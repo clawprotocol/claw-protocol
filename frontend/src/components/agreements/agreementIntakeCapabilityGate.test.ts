@@ -439,3 +439,97 @@ describe("2–4 party edge spectrum (product-wide)", () => {
     expect(blob).not.toMatch(/Anthem|Blanchard|047b01af|Genesis Dog|orgId|userId/i);
   });
 });
+
+describe("thin dump fail-open to starter (broad draftable signals)", () => {
+  it("allows thin dump with hired-to pattern to fail-open to starter", () => {
+    // This exact input was blocking with "I can draft this once I know who is agreeing"
+    const decision = assessAgreementIntakeCapability(
+      "I hired Mike to paint my office. We shook on it.",
+    );
+    // Should proceed (return ok: true) - fail-open to starter with targeted questions
+    expect(decision.ok).toBe(true);
+  });
+
+  it("allows thin dump without hired/contracted verbs - deal with name", () => {
+    // Must pass without requiring specific transaction verbs
+    const decision = assessAgreementIntakeCapability(
+      "need a painting deal with Mike for my office",
+    );
+    expect(decision.ok).toBe(true);
+  });
+
+  it("allows thin dump without hired/contracted verbs - agreed with name", () => {
+    // Must pass without requiring specific transaction verbs
+    const decision = assessAgreementIntakeCapability("Mike is painting my office, we agreed");
+    expect(decision.ok).toBe(true);
+  });
+
+  it("allows dump with just a name and scope", () => {
+    const decision = assessAgreementIntakeCapability("Sarah will design my website");
+    expect(decision.ok).toBe(true);
+  });
+
+  it("allows dump with just scope/work fragment", () => {
+    const decision = assessAgreementIntakeCapability(
+      "need someone to fix the broken fence in my yard",
+    );
+    expect(decision.ok).toBe(true);
+  });
+
+  it("allows dump with exchange indicator", () => {
+    const decision = assessAgreementIntakeCapability(
+      "we have a deal for some consulting work",
+    );
+    expect(decision.ok).toBe(true);
+  });
+
+  it("allows contracted-for pattern to fail-open", () => {
+    const decision = assessAgreementIntakeCapability(
+      "I contracted someone to do landscaping for my yard.",
+    );
+    expect(decision.ok).toBe(true);
+  });
+
+  it("allows engaged-to pattern to fail-open", () => {
+    const decision = assessAgreementIntakeCapability(
+      "We engaged a consultant to review our marketing strategy.",
+    );
+    expect(decision.ok).toBe(true);
+  });
+
+  it("allows retained-to pattern to fail-open", () => {
+    const decision = assessAgreementIntakeCapability("I retained Sarah to handle my bookkeeping.");
+    expect(decision.ok).toBe(true);
+  });
+
+  it("allows commissioned-to pattern to fail-open", () => {
+    const decision = assessAgreementIntakeCapability(
+      "I commissioned an artist to create a mural for our lobby.",
+    );
+    expect(decision.ok).toBe(true);
+  });
+
+  it("allows paying-for pattern to fail-open", () => {
+    const decision = assessAgreementIntakeCapability(
+      "I'm paying someone to fix my website issues.",
+    );
+    expect(decision.ok).toBe(true);
+  });
+
+  it("still blocks actual gibberish even if short", () => {
+    // Pure gibberish should still be blocked
+    const decision = assessAgreementIntakeCapability("asdfghjkl qwerty test");
+    expect(decision.ok).toBe(false);
+  });
+
+  it("still blocks very short prompts without any draftable signal", () => {
+    const decision = assessAgreementIntakeCapability("need help");
+    expect(decision.ok).toBe(false);
+  });
+
+  it("still blocks empty-ish prompts via evaluateIntentionalCreateDraftSubmit", () => {
+    // Very short prompts are blocked by the < 6 char check in evaluateIntentionalCreateDraftSubmit
+    const decision = evaluateIntentionalCreateDraftSubmit("hello");
+    expect(decision.action).toBe("block_capability");
+  });
+});
