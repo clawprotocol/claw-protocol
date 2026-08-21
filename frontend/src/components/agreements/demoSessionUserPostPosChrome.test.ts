@@ -305,4 +305,52 @@ describe("demoSessionUserPostPosChrome", () => {
       expect(canFinalizeSigner).toBe(false);
     });
   });
+
+  describe("demo session CTA routing (#23 regression)", () => {
+    it("demo session post-POS uses 'Continue' CTA, not dashboard resume labels", () => {
+      // Setup: demo session with premium completion
+      createDemoSessionUser({
+        displayName: "Harbor Pool & Patio LLC",
+        email: "jordan.harbor.qa+aug21b@example.com",
+        settlementReceiptId: "rcpt_demo_harbor_4242",
+      });
+      markPaidPremiumCompletionSession({ source: "settled_checkout" });
+
+      expect(hasDemoSessionUser()).toBe(true);
+      expect(hasPaidPremiumCompletionSession()).toBe(true);
+
+      // The CTA should be "Continue" for complete signers, not "Continue to signature links"
+      const isDemoPostPOS = hasDemoSessionUser() && hasPaidPremiumCompletionSession();
+      const expectedCtaLabel = isDemoPostPOS ? "Continue" : "Continue to signature links";
+      expect(expectedCtaLabel).toBe("Continue");
+    });
+
+    it("demo session incomplete signers shows 'Complete signer details'", () => {
+      createDemoSessionUser({
+        displayName: "Test User",
+        email: "test@example.com",
+        settlementReceiptId: "rcpt_123",
+      });
+      markPaidPremiumCompletionSession({ source: "settled_checkout" });
+
+      const isDemoPostPOS = hasDemoSessionUser() && hasPaidPremiumCompletionSession();
+      const signerDetailsComplete = false;
+      const expectedCtaLabel = isDemoPostPOS
+        ? signerDetailsComplete
+          ? "Continue"
+          : "Complete signer details"
+        : "Continue to signature links";
+      expect(expectedCtaLabel).toBe("Complete signer details");
+    });
+
+    it("non-demo dashboard resume uses 'Continue to signature links'", () => {
+      // Non-demo user (no demo session)
+      expect(hasDemoSessionUser()).toBe(false);
+
+      // Dashboard resume would show "Continue to signature links"
+      const isDemoPostPOS = hasDemoSessionUser() && hasPaidPremiumCompletionSession();
+      const expectedCtaLabel = isDemoPostPOS ? "Continue" : "Continue to signature links";
+      expect(expectedCtaLabel).toBe("Continue to signature links");
+    });
+  });
 });

@@ -13,12 +13,22 @@ function collapseBlankRuns(text: string): string {
  *
  * Also detects out-of-sequence high-numbered sections (11+) that contain informal prose
  * fragments clearly from user input rather than structured agreement sections.
+ *
+ * Live leak examples (Harbor retest 2026-08-21):
+ * - "11. Mesa Realty Group LLC / said they'll send us…" (slash between entity and verb)
+ * - "12. Don't / count / our house accounts…" (slashes between tokens)
+ * Patterns must tolerate `/`, `\n`, or whitespace between tokens.
  */
 const LEAKED_PROMPT_SECTION_PATTERNS = [
   /^\d+\.\s+(?:I\s+run|hey\s+so|Don'?t|my\s+dog|I\s+need|please|we\s+need|also\s+my|ignore\s+that|I\s+guess)\b[^\n]*$/gim,
   /^\d+\.\s+(?:Create|Draft|Make|Write)\s+(?:a|an|the)\s+(?:agreement|contract|document|deal)\b[^\n]*/gim,
-  /^(?:1[1-9]|[2-9]\d)\.\s+[A-Z][a-z]+(?:\s+[A-Z]?[a-z]+)*\s+(?:LLC|Inc|Corp|Ltd)\.?\s+(?:said|told|mentioned|wants?|will|can|agreed)[^\n]*/gim,
+  // Company name + verb with possible slash/newline break: "11. Mesa Realty Group LLC / said"
+  /^(?:1[1-9]|[2-9]\d)\.\s+[A-Z][a-z]+(?:\s+[A-Z]?[a-z]+)*\s+(?:LLC|Inc|Corp|Ltd)\.?[\s\/\n]+(?:said|told|mentioned|wants?|will|can|agreed)[^\n]*/gim,
   /^(?:1[1-9]|[2-9]\d)\.\s+(?:Don'?t|If\s+the|They\s+(?:want|can|said)|We\s+(?:need|want)|My\s+|Our\s+|\d+\s+(?:month|year|day|week))[^\n]*/gim,
+  // Catch multi-line leaked sections with slashes: "12. Don't / count / our house accounts"
+  /^(?:1[1-9]|[2-9]\d)\.\s+Don'?t[\s\/]+count[\s\/]+our\s+house\s+accounts[^\n]*/gim,
+  // Catch deal term leaks: "13. 12 month deal, exclusive…"
+  /^(?:1[1-9]|[2-9]\d)\.\s+\d+\s+(?:month|year|day|week)\s+deal[^\n]*/gim,
 ];
 
 /** Strip numbered "section" lines that are clearly leaked user prompt, not real sections. */
@@ -33,6 +43,11 @@ function stripLeakedPromptAsSections(text: string): string {
 /** Strip standalone instruction paragraphs and soften common "not generic consulting" meta. */
 export function stripPremiumInstructionNoiseForDocument(text: string): string {
   let t = (text || "").replace(/\r\n/g, "\n");
+
+  // Normalize slash-separated tokens back to spaces for pattern matching.
+  // Live leak: "11. Mesa Realty Group LLC / said" → "11. Mesa Realty Group LLC said"
+  // But preserve legitimate uses like "and/or" by only collapsing " / ".
+  t = t.replace(/\s+\/\s+/g, " ");
 
   const killLine = /^\s*(?:[>*•\-–—]\s*)?(?:we need this rewritten[^.!?]*[.!?]?|this is not generic consulting[^.!?]*[.!?]?|this is not generic[^.!?]*[.!?]?|i need this rewritten[^.!?]*[.!?]?|please rewrite (?:this|the) agreement[^.!?]*[.!?]?|describe what you need rewritten[^.!?]*[.!?]?)\s*$/gim;
   t = t.replace(killLine, "");
