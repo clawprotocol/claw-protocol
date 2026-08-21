@@ -17,7 +17,6 @@ import {
 } from "./partyBetweenParse";
 import {
   projectLegalPartyAuthorityToStarterDraftParties,
-  readLegalPartyCountFromAuthority,
 } from "./legalPartyAuthority";
 import {
   resolveLegalPartyAuthorityForIntake,
