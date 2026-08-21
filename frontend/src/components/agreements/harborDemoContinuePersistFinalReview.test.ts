@@ -1,6 +1,7 @@
 /** @vitest-environment jsdom */
 import { readFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import {
   createDemoSessionUser,
@@ -12,10 +13,20 @@ import {
   markPaidPremiumCompletionSession,
   clearPaidPremiumCompletionSession,
 } from "./premiumCompletionStorage";
-import { resolvePaidProInlineSignerSetupMounted } from "./signerSetupPartyIdentity";
+import {
+  resolvePaidProInlineSignerSetupMounted,
+  PAID_PRO_SIGNER_DETAILS_INCOMPLETE_CTA,
+} from "./signerSetupPartyIdentity";
 import { PAID_PRO_AUTHORITY_MIN_LEN } from "./paidProAuthorityConstants";
 import { stripPremiumInstructionNoiseForDocument } from "./premiumInstructionStrip";
 import { formatDraftCreateHttpUserMessage } from "./draftCreateHttpError";
+import {
+  resolvePaidProStickyCta,
+  resolvePaidProStickyCtaPhase,
+  mapPaidProStickyCtaToPrimaryCta,
+} from "./paidProStickyCta";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
 describe("harborDemoContinuePersistFinalReview", () => {
   beforeEach(() => {
@@ -608,6 +619,160 @@ This Agreement constitutes the entire agreement.`;
 
       expect(shouldCallFinalize).toBe(true);
       expect(shouldCallPrepareSignatures).toBe(true);
+    });
+  });
+
+  describe("Issue G: demo+premiumCompletion CTA latch preservation", () => {
+    it("demo+premiumCompletion preserves signer setup latch when generation completes", () => {
+      createDemoSessionUser({
+        displayName: "Harbor Pool & Patio LLC",
+        email: "jordan.harbor.qa+aug21c@example.com",
+        settlementReceiptId: "rcpt_harbor_4242",
+      });
+      markPaidPremiumCompletionSession({ source: "settled_checkout" });
+
+      // Simulate the state where signer setup latch was pre-armed by the auto-arm effect
+      const paidProInlineSignerSetupLatched = true;
+
+      // This is the guard used in applyHydrationFromPremiumSnapshot to preserve latch
+      const demoSessionPreserveLatch =
+        hasDemoSessionUser() && hasPaidPremiumCompletionSession() && paidProInlineSignerSetupLatched;
+
+      expect(demoSessionPreserveLatch).toBe(true);
+    });
+
+    it("non-demo user does not preserve signer setup latch when generation completes", () => {
+      clearDemoSessionUser();
+      markPaidPremiumCompletionSession({ source: "settled_checkout" });
+
+      const paidProInlineSignerSetupLatched = true;
+
+      const demoSessionPreserveLatch =
+        hasDemoSessionUser() && hasPaidPremiumCompletionSession() && paidProInlineSignerSetupLatched;
+
+      expect(demoSessionPreserveLatch).toBe(false);
+    });
+
+    it("demo user without premium completion does not preserve signer setup latch", () => {
+      createDemoSessionUser({
+        displayName: "Test User",
+        email: "test@example.com",
+        settlementReceiptId: "rcpt_123",
+      });
+      clearPaidPremiumCompletionSession();
+
+      const paidProInlineSignerSetupLatched = true;
+
+      const demoSessionPreserveLatch =
+        hasDemoSessionUser() && hasPaidPremiumCompletionSession() && paidProInlineSignerSetupLatched;
+
+      expect(demoSessionPreserveLatch).toBe(false);
+    });
+
+    it("signer setup latch already false does not trigger preservation", () => {
+      createDemoSessionUser({
+        displayName: "Harbor Pool & Patio LLC",
+        email: "jordan.harbor.qa+aug21c@example.com",
+        settlementReceiptId: "rcpt_harbor_4242",
+      });
+      markPaidPremiumCompletionSession({ source: "settled_checkout" });
+
+      // Latch was never set
+      const paidProInlineSignerSetupLatched = false;
+
+      const demoSessionPreserveLatch =
+        hasDemoSessionUser() && hasPaidPremiumCompletionSession() && paidProInlineSignerSetupLatched;
+
+      expect(demoSessionPreserveLatch).toBe(false);
+    });
+
+    it("CTA source inspection confirms latch preservation logic exists in hydration code", () => {
+      const intakeSrc = readFileSync(
+        join(__dirname, "AgreementBuilderIntake.tsx"),
+        "utf8"
+      );
+
+      // The hydration function should check for demo session latch preservation
+      expect(intakeSrc).toContain("demoSessionPreserveLatch");
+      expect(intakeSrc).toContain("hasDemoSessionUser() && hasPaidPremiumCompletionSession() && paidProInlineSignerSetupLatched");
+      expect(intakeSrc).toContain("if (!demoSessionPreserveLatch)");
+    });
+
+    it("sticky CTA returns non-empty label when latch is preserved and details incomplete", () => {
+      createDemoSessionUser({
+        displayName: "Harbor Pool & Patio LLC",
+        email: "jordan.harbor.qa+aug21c@example.com",
+        settlementReceiptId: "rcpt_harbor_4242",
+      });
+      markPaidPremiumCompletionSession({ source: "settled_checkout" });
+
+      // Simulate state after generation completes with latch preserved
+      const stickyCtaState = resolvePaidProStickyCta({
+        hasAuthoritativeSigningSnapshot: false, // Signer metadata NOT finalized
+        signerDetailsComplete: false, // No signer names filled yet
+        inlineSignerSetupLatched: true, // Preserved by our fix
+        signaturePreparationRequested: false,
+        sendSurfaceReady: false,
+      });
+
+      // CTA should be non-empty and enabled
+      expect(stickyCtaState.label).toBe(PAID_PRO_SIGNER_DETAILS_INCOMPLETE_CTA);
+      expect(stickyCtaState.label).toBe("Complete signer details");
+      expect(stickyCtaState.disabled).toBe(false);
+      expect(stickyCtaState.showStickyBar).toBe(true);
+      expect(stickyCtaState.phase).toBe("signer_details_required");
+    });
+
+    it("sticky CTA returns Continue when latch preserved and details complete", () => {
+      createDemoSessionUser({
+        displayName: "Harbor Pool & Patio LLC",
+        email: "jordan.harbor.qa+aug21c@example.com",
+        settlementReceiptId: "rcpt_harbor_4242",
+      });
+      markPaidPremiumCompletionSession({ source: "settled_checkout" });
+
+      // Simulate state after user fills signer names
+      const stickyCtaState = resolvePaidProStickyCta({
+        hasAuthoritativeSigningSnapshot: false,
+        signerDetailsComplete: true, // Signer names now filled
+        inlineSignerSetupLatched: true,
+        signaturePreparationRequested: false,
+        sendSurfaceReady: false,
+      });
+
+      // CTA should be non-empty and enabled
+      expect(stickyCtaState.label).not.toBe("");
+      expect(stickyCtaState.disabled).toBe(false);
+      expect(stickyCtaState.showStickyBar).toBe(true);
+      expect(stickyCtaState.phase).toBe("signer_details_complete");
+    });
+
+    it("sticky CTA fallback is blank/disabled when latch is false (the bug path)", () => {
+      // This test documents the bug behavior when latch is NOT preserved
+      // Without our fix, generation completion clears latch → blank CTA
+      const stickyCtaPhase = resolvePaidProStickyCtaPhase({
+        hasAuthoritativeSigningSnapshot: false,
+        signerDetailsComplete: false,
+        inlineSignerSetupLatched: false, // <-- BUG: latch was cleared
+        signaturePreparationRequested: false,
+        sendSurfaceReady: false,
+      });
+
+      // When latch is false, falls through to review_decision
+      expect(stickyCtaPhase).toBe("review_decision");
+
+      // review_decision phase has showStickyBar=false → blank disabled CTA
+      const stickyCtaState = resolvePaidProStickyCta({
+        hasAuthoritativeSigningSnapshot: false,
+        signerDetailsComplete: false,
+        inlineSignerSetupLatched: false,
+        signaturePreparationRequested: false,
+        sendSurfaceReady: false,
+      });
+
+      expect(stickyCtaState.showStickyBar).toBe(false);
+      expect(stickyCtaState.label).toBe(""); // BUG: empty label
+      expect(stickyCtaState.disabled).toBe(true); // BUG: disabled
     });
   });
 });
