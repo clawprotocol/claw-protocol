@@ -5,6 +5,7 @@ import { describe, expect, it } from "vitest";
 describe("SimpleCheckoutPage dev payment bypass (static)", () => {
   const checkout = readFileSync(join(__dirname, "SimpleCheckoutPage.tsx"), "utf8");
   const bypass = readFileSync(join(__dirname, "../devPaymentBypass.ts"), "utf8");
+  const guestAuthority = readFileSync(join(__dirname, "../guestCheckoutAuthority.ts"), "utf8");
 
   it("resolves bypass from local origin, not only import.meta.env.DEV", () => {
     expect(bypass).toContain("isLocalBrowserOrigin");
@@ -64,5 +65,36 @@ describe("SimpleCheckoutPage dev payment bypass (static)", () => {
   it("uses gated demo subscription sync instead of unconditional workspace demo-activate POST", () => {
     expect(checkout).toContain("syncDemoSubscriptionEntitlementIfApplicable");
     expect(checkout).not.toContain("demoActivateSubscription");
+  });
+
+  it("guest checkout uses demo settlement, not live Stripe", () => {
+    // Guest checkout is detected by: no user + create-flow checkout
+    expect(checkout).toContain("isGuestCheckout");
+    expect(checkout).toContain("!user && agreementId === CREATE_FLOW_CHECKOUT_AGREEMENT_ID");
+
+    // Guest checkout path uses demo settlement
+    expect(checkout).toContain("[GUEST CHECKOUT] using demo settlement — never live Stripe for guest flywheel");
+    expect(checkout).toContain("demoConfirmFiatToCryptoOnrampFromCard");
+
+    // Guest checkout path runs BEFORE the Stripe check
+    const onCardPay = checkout.match(/async function onCardPay[\s\S]*?(?=\n  const priceLine)/);
+    expect(onCardPay).toBeTruthy();
+    const body = onCardPay![0];
+    const guestCheckIndex = body.indexOf("if (isGuestCheckout)");
+    const stripeCheckIndex = body.indexOf("isStripeCheckoutApiConfigured()");
+    expect(guestCheckIndex).toBeGreaterThan(0);
+    expect(stripeCheckIndex).toBeGreaterThan(guestCheckIndex);
+  });
+
+  it("guest checkout creates demo session user with email from form", () => {
+    // Email field exists for guest checkout
+    expect(checkout).toContain("cardEmail");
+    expect(checkout).toContain('id="cc-email"');
+    expect(checkout).toContain("isGuestCheckout ?");
+
+    // Demo session user receives email
+    expect(checkout).toContain('email: cardEmail');
+    expect(guestAuthority).toContain('email: string | null');
+    expect(guestAuthority).toContain("createDemoSessionUser");
   });
 });

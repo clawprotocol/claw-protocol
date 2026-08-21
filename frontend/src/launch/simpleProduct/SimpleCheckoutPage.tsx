@@ -217,9 +217,16 @@ export function SimpleCheckoutPage(props: { agreementId: string }) {
   const [cardNumber, setCardNumber] = useState("");
   const [cardExp, setCardExp] = useState("");
   const [cardCvc, setCardCvc] = useState("");
+  const [cardEmail, setCardEmail] = useState("");
 
   /** One-time arrival motion per checkout mount (see useLayoutEffect below). */
   const [checkoutArrivalOn, setCheckoutArrivalOn] = useState(false);
+
+  /**
+   * Guest checkout: no Supabase user on create-flow checkout.
+   * Guest checkout MUST use demo/4242 settlement, never live Stripe.
+   */
+  const isGuestCheckout = !user && agreementId === CREATE_FLOW_CHECKOUT_AGREEMENT_ID && !isSingleAgreementCheckout;
 
   const amountUsd = useMemo(() => {
     if (isSingleAgreementCheckout) return CONTEXTUAL_ONE_TIME_UNLOCK_USD;
@@ -276,7 +283,7 @@ export function SimpleCheckoutPage(props: { agreementId: string }) {
     async (
       conf: SettlementConfirmation,
       paymentMode: CheckoutPaymentMode = "demo_card",
-      paymentInfo?: { cardholderName?: string },
+      paymentInfo?: { cardholderName?: string; email?: string },
     ) => {
       if (!conf.ok) {
         fail(conf.error);
@@ -290,18 +297,20 @@ export function SimpleCheckoutPage(props: { agreementId: string }) {
 
       // Create demo session user for guest checkout (no Supabase session, simulated POS).
       // This makes them a basic account user so they can continue to premium completion.
-      const isGuestCheckout = !user && !hasDemoSessionUser();
-      if (isGuestCheckout && agreementId === CREATE_FLOW_CHECKOUT_AGREEMENT_ID) {
+      const isGuestCheckoutSettlement = !user && !hasDemoSessionUser();
+      if (isGuestCheckoutSettlement && agreementId === CREATE_FLOW_CHECKOUT_AGREEMENT_ID) {
         const displayName = paymentInfo?.cardholderName?.trim() || "Pro User";
+        const email = paymentInfo?.email?.trim() || null;
         createDemoSessionUser({
           displayName,
-          email: null,
+          email,
           settlementReceiptId: conf.receipt.receiptId,
         });
         console.info("[guest-checkout] demo_session_user_created", {
           agreementId,
           paymentMode,
           displayName,
+          hasEmail: Boolean(email),
         });
       }
 
@@ -419,6 +428,30 @@ export function SimpleCheckoutPage(props: { agreementId: string }) {
   async function onCardPay(e: FormEvent): Promise<void> {
     e.preventDefault();
     if (finishedRef.current || processing || amountUsd == null) return;
+
+    // Guest checkout MUST use demo/4242 settlement, never live Stripe.
+    // This is the GTM flywheel: guest Continue with Pro uses simulated POS.
+    if (isGuestCheckout) {
+      console.info("[GUEST CHECKOUT] using demo settlement — never live Stripe for guest flywheel");
+      const digits = stripCardDigits(cardNumber);
+      if (!cardName.trim() || digits.length < 15 || !cardExp.trim() || cardCvc.trim().length < 3) {
+        fail("Please complete all card fields.");
+        return;
+      }
+      void ensureGenesisReferralHandoffForCheckout().catch((err) => {
+        console.warn("[genesis-referral] checkout handoff skipped for guest checkout", err);
+      });
+      const intent = createFiatToCryptoOnrampIntent({
+        agreementId,
+        tierId: tier.id,
+        cadence,
+        amountUsd,
+      });
+      const conf = await demoConfirmFiatToCryptoOnrampFromCard({ intent, cardNumberDigits: digits });
+      await applyConfirmedSettlement(conf, "demo_card", { cardholderName: cardName, email: cardEmail });
+      return;
+    }
+
     if (isStripeCheckoutApiConfigured() && !devPaymentBypassActive && !qaPaymentBypassActive) {
       await startStripeCheckout();
       return;
@@ -441,7 +474,7 @@ export function SimpleCheckoutPage(props: { agreementId: string }) {
         intent,
         cardNumberDigits: "4242424242424242",
       });
-      await applyConfirmedSettlement(conf, "dev_bypass", { cardholderName: cardName || "Dev Bypass User" });
+      await applyConfirmedSettlement(conf, "dev_bypass", { cardholderName: cardName || "Dev Bypass User", email: cardEmail });
       return;
     }
     const affiliateCode = getAffiliateCodeForAttribution();
@@ -472,7 +505,7 @@ export function SimpleCheckoutPage(props: { agreementId: string }) {
       amountUsd,
     });
     const conf = await demoConfirmFiatToCryptoOnrampFromCard({ intent, cardNumberDigits: digits });
-    await applyConfirmedSettlement(conf, "demo_card", { cardholderName: cardName });
+    await applyConfirmedSettlement(conf, "demo_card", { cardholderName: cardName, email: cardEmail });
   }
 
   async function onQaPaymentBypass(): Promise<void> {
@@ -491,7 +524,7 @@ export function SimpleCheckoutPage(props: { agreementId: string }) {
       intent,
       cardNumberDigits: "4242424242424242",
     });
-    await applyConfirmedSettlement(conf, "qa_bypass", { cardholderName: cardName || "QA Bypass User" });
+    await applyConfirmedSettlement(conf, "qa_bypass", { cardholderName: cardName || "QA Bypass User", email: cardEmail });
   }
 
   const priceLine =
@@ -745,6 +778,22 @@ export function SimpleCheckoutPage(props: { agreementId: string }) {
                   onChange={(e) => setCardName(e.target.value)}
                 />
               </div>
+              {isGuestCheckout ? (
+                <div>
+                  <label htmlFor="cc-email" className="text-sm font-medium text-slate-300">
+                    Email <span className="text-slate-500">(optional)</span>
+                  </label>
+                  <input
+                    id="cc-email"
+                    type="email"
+                    autoComplete="email"
+                    placeholder="you@example.com"
+                    className="mt-1 w-full rounded-lg border border-slate-600 bg-slate-950/70 px-3 py-2 text-[15px] text-slate-100 outline-none placeholder:text-slate-400 focus:border-emerald-500/50 sm:text-base"
+                    value={cardEmail}
+                    onChange={(e) => setCardEmail(e.target.value)}
+                  />
+                </div>
+              ) : null}
               <div>
                 <label htmlFor="cc-num" className="text-sm font-medium text-slate-300">
                   Card number
