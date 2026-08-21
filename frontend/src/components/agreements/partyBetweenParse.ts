@@ -47,7 +47,7 @@ export function isBetweenClausePartyCandidate(name: string): boolean {
   ) {
     return true;
   }
-  if (/\bd\/b\/a\b/i.test(t) && /(?:LLC|Inc|Corp|Ltd|LLP)/i.test(t)) return true;
+  if (/\bd\/b\/a\b/i.test(t) && /(?:LLC|Inc|Corp|Ltd|LLP|SA|GmbH|AG|KG)/i.test(t)) return true;
   if (words.length >= 2 && words.length <= 8) {
     const nameLike = words.every((w) => /^[A-Z][A-Za-z'.-]*$/.test(w) || /^[A-Z]\.$/.test(w));
     if (nameLike) return true;
@@ -82,7 +82,7 @@ const GENERAL_BETWEEN_SENTENCE_END_RE = /\.\s+(?=[A-Z])/g;
  * sentence boundaries — only truncate when the next capital token is not a suffix word.
  */
 const ENTITY_SUFFIX_AFTER_PERIOD_RE =
-  /^(?:Inc\.?|Corp\.?|Ltd\.?|LLC|L\.L\.C\.?|LLP|PLC|P\.C\.?|Co\.?)\b/i;
+  /^(?:Inc\.?|Corp\.?|Ltd\.?|LLC|L\.L\.C\.?|LLP|PLC|P\.C\.?|Co\.?|SA|S\.A\.?|GmbH|AG|KG)\b/i;
 
 function isOxfordCommaPartyList(tail: string): boolean {
   // Ignore entity-suffix commas ("Name, LLC") so bilateral between-clauses are not
@@ -211,8 +211,8 @@ function filterBetweenClausePartyCandidates(names: string[]): string[] {
 
 function trimTrailingListPunctuationPreservingEntitySuffix(segment: string): string {
   let s = segment.trim();
-  // Keep terminal periods that are part of Inc. / Corp. / Ltd. entity suffixes.
-  if (/\b(?:Inc|Corp|Ltd|Co|L\.L\.C)\.$/i.test(s)) return s;
+  // Keep terminal periods that are part of Inc. / Corp. / Ltd. / S.A. entity suffixes.
+  if (/\b(?:Inc|Corp|Ltd|Co|L\.L\.C|S\.A)\.$/i.test(s)) return s;
   return s.replace(/[.,;:]+$/g, "").trim();
 }
 

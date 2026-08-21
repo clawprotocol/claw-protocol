@@ -238,4 +238,17 @@ describe("canonicalPartyIdentityResolver", () => {
     expect(text).not.toMatch(/monthly in arrears/i);
     expect(text).toContain("$5,000");
   });
+
+  it("does not replace short forms that appear in other party names (Harbor defect)", () => {
+    const intake = "Services agreement between Red Mesa Logistics LLC and Mesa Consulting Inc for pool services.";
+    const records = resolveCanonicalPartyIdentitiesFromIntake(intake);
+    expect(records).toHaveLength(2);
+    expect(records[0]?.fullLegalName).toBe("Red Mesa Logistics LLC");
+    expect(records[1]?.fullLegalName).toBe("Mesa Consulting Inc");
+    const body = "Red Mesa Logistics LLC will work with Mesa Consulting Inc on the project.";
+    const { text, repairs } = replaceTruncatedPartyRefsWithRoleLabels(body, records);
+    expect(text).not.toMatch(/Red Service Provider Logistics/i);
+    expect(text).not.toMatch(/Service Provider Logistics/i);
+    expect(text).toContain("Red Mesa Logistics");
+  });
 });

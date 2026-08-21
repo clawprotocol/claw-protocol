@@ -1153,9 +1153,11 @@ import { stripClientPremiumArtifactBlocksFromDraft } from "./premiumFullDraftCli
 import { postPremiumMissingFactsWithRetry } from "./premiumMissingFactsApi";
 import {
   evaluatePostCheckoutMissingFactsGate,
+  evaluateFiveTenetsPreflight,
   shouldProceedToDraft,
   shouldShowGapQuestions,
   isFailClosedDecision,
+  getRequiredClarificationTopics,
 } from "./postCheckoutMissingFactsGate";
 import {
   effectivePremiumRefineApplyLogRevisionIntent,
@@ -11413,41 +11415,78 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           });
         }
 
-        let missingFactsApiResult: { questions: string[] } | null = null;
-        let missingFactsApiError: Error | null = null;
-        try {
-          missingFactsApiResult = await postPremiumMissingFactsWithRetry({
-            intakeText: mergedIntake,
-            context: buildPremiumFullDraftContextWithIntentMapping(mergedIntake, prior!),
+        const fiveTenetsPreflight = evaluateFiveTenetsPreflight(mergedIntake);
+        if (import.meta.env.DEV) {
+          // eslint-disable-next-line no-console
+          console.info("[post_checkout] five_tenets_preflight", {
+            action: fiveTenetsPreflight.action,
+            runGen,
           });
-          if (import.meta.env.DEV) {
-            // eslint-disable-next-line no-console
-            console.info("[post_checkout] missing_facts_blocking_result", {
-              questionCount: missingFactsApiResult.questions.length,
-              runGen,
-              ok: true,
-            });
-          }
-        } catch (mfErr) {
-          missingFactsApiError = mfErr instanceof Error ? mfErr : new Error(String(mfErr));
-          if (import.meta.env.DEV) {
-            // eslint-disable-next-line no-console
-            console.info("[post_checkout] missing_facts_blocking_result", {
-              questionCount: 0,
-              runGen,
-              ok: false,
-              err: missingFactsApiError.message,
-            });
-          }
-          console.warn("[premium-gap] missing-facts request failed", missingFactsApiError);
         }
 
-        if (!runIsCurrent()) return;
+        let gateDecision = fiveTenetsPreflight;
 
-        const gateDecision = evaluatePostCheckoutMissingFactsGate({
-          apiResult: missingFactsApiResult,
-          apiError: missingFactsApiError,
-        });
+        if (fiveTenetsPreflight.action !== "proceed_to_draft_five_tenets_complete") {
+          let missingFactsApiResult: { questions: string[] } | null = null;
+          let missingFactsApiError: Error | null = null;
+          try {
+            missingFactsApiResult = await postPremiumMissingFactsWithRetry({
+              intakeText: mergedIntake,
+              context: buildPremiumFullDraftContextWithIntentMapping(mergedIntake, prior!),
+            });
+            if (import.meta.env.DEV) {
+              // eslint-disable-next-line no-console
+              console.info("[post_checkout] missing_facts_blocking_result", {
+                questionCount: missingFactsApiResult.questions.length,
+                runGen,
+                ok: true,
+              });
+            }
+          } catch (mfErr) {
+            missingFactsApiError = mfErr instanceof Error ? mfErr : new Error(String(mfErr));
+            if (import.meta.env.DEV) {
+              // eslint-disable-next-line no-console
+              console.info("[post_checkout] missing_facts_blocking_result", {
+                questionCount: 0,
+                runGen,
+                ok: false,
+                err: missingFactsApiError.message,
+              });
+            }
+            console.warn("[premium-gap] missing-facts request failed", missingFactsApiError);
+          }
+
+          if (!runIsCurrent()) return;
+
+          gateDecision = evaluatePostCheckoutMissingFactsGate({
+            apiResult: missingFactsApiResult,
+            apiError: missingFactsApiError,
+          });
+
+          if (gateDecision.action === "proceed_to_draft" && missingFactsApiResult?.questions?.length === 0) {
+            const forcedTopics = getRequiredClarificationTopics(mergedIntake);
+            if (forcedTopics.length > 0) {
+              if (import.meta.env.DEV) {
+                // eslint-disable-next-line no-console
+                console.info("[post_checkout] sparse_intake_forcing_clarification", {
+                  forcedTopics,
+                  runGen,
+                });
+              }
+              const fallbackQuestions = forcedTopics.slice(0, 5).map((topic) => {
+                switch (topic) {
+                  case "parties": return "Who are the parties to this agreement? Please provide full legal names.";
+                  case "scope": return "What is the purpose or scope of this agreement? What services or work will be performed?";
+                  case "payment": return "What are the payment terms? Include amounts, timing, and any conditions.";
+                  case "term": return "What is the duration of this agreement? When does it start and end?";
+                  case "governing_law": return "Which state's law should govern this agreement?";
+                  default: return `Please clarify: ${topic}`;
+                }
+              });
+              gateDecision = { action: "await_gaps", questions: fallbackQuestions };
+            }
+          }
+        }
 
         if (import.meta.env.DEV) {
           // eslint-disable-next-line no-console
@@ -14152,7 +14191,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       setCreateUiStage(CreateUiStage.INPUT);
       setPreviewPaneRevealed(true);
       const focusParty = decision.clarification.kind === "missing_named_parties" || decision.clarification.kind === "too_sparse";
-      const focusSelector = focusParty ? '[data-testid="intake-party-1-name"]' : "textarea";
+      const focusTextarea = decision.clarification.kind === "too_short";
+      const focusSelector = focusTextarea ? "textarea" : focusParty ? '[data-testid="intake-party-1-name"]' : "textarea";
       setJourneyActionFeedback({
         kind: "blocked",
         actionId: "create_agreement",
@@ -31903,7 +31943,6 @@ const AgreementBuilderIntake: React.FC<Props> = ({
               await finalizeIntakeCapture();
               const rawSubmitted = prepareFreshStarterCreateSubmit();
               if (createProductionTwoPane) {
-                if (rawSubmitted.length < 6) return;
                 await resolvePaidCreateSubmitEntitlement();
                 if (commitStarterMultiPartyProGate(rawSubmitted)) {
                   await finalizeIntakeCapture();
@@ -32118,7 +32157,6 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         await finalizeIntakeCapture();
         const rawSubmitted = prepareFreshStarterCreateSubmit();
         if (createProductionTwoPane) {
-          if (rawSubmitted.length < 6) return;
           await resolvePaidCreateSubmitEntitlement();
           if (commitStarterMultiPartyProGate(rawSubmitted)) {
             return;
@@ -32128,7 +32166,6 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             applyIntakeCapabilityBlock(intakeCapability);
             return;
           }
-          if (intakeCapability.action === "noop") return;
           writeOriginalUserIntakeRawAtDraftCommit(rawSubmitted);
           setIntakeClarification(null);
           const live = buildLiveDraftPreview(rawSubmitted);

@@ -26,7 +26,9 @@ export const BORROWER_PRINCIPAL_INSTALLMENTS_SCHEDULE_A =
 export function normalizeCurrency(input: string): number | null {
   if (!input) return null;
 
-  const cleaned = input.toLowerCase().replace(/[, ]/g, "");
+  // Strip trailing cadence suffixes (/mo, /month, etc.) before parsing
+  const withoutCadence = input.replace(/\s*\/\s*(?:mo(?:nth)?|week|wk|day|yr|year)$/i, "");
+  const cleaned = withoutCadence.toLowerCase().replace(/[, ]/g, "");
 
   const matchK = cleaned.match(/\$?(\d+(\.\d+)?)k\b/);
   if (matchK) {
@@ -97,6 +99,22 @@ function inferCadence(text: string): string | null {
 const PAYMENT_SIGNAL =
   /\$|payment|compensation|fee|fees|salary|retainer|invoice|rate|k\/|\/month|\/week|\/year|\d\s*k\b|\dk\/month/i;
 
+/** Check if a number looks like a year (e.g., 2025, 2026, 2027) in date context. */
+function looksLikeYear(numStr: string, fullText: string): boolean {
+  const num = parseInt(numStr.replace(/,/g, ""), 10);
+  if (num < 2000 || num > 2099) return false;
+  const pattern = new RegExp(
+    `(?:` +
+      `(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\\s*\\d{1,2}[,\\s]+${num}|` +
+      `\\d{1,2}[/-]\\d{1,2}[/-]${num}|` +
+      `(?:starting|beginning|commencing|effective)\\s+(?:on\\s+)?\\w+\\s+\\d{1,2}[,\\s]+${num}|` +
+      `\\d{1,2}\\s+(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:t(?:ember)?)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\\s+${num}` +
+    `)`,
+    "i"
+  );
+  return pattern.test(fullText);
+}
+
 function extractAmountFromText(t: string): number | null {
   const tokenPatterns = [
     /\$?\d[\d,]*(?:\.\d+)?k(?:\/(?:month|week|year|mo|yr))?/gi,
@@ -117,7 +135,9 @@ function extractAmountFromText(t: string): number | null {
   if (/\b(payment|fee|fees|compensation|salary|retainer)\b/i.test(t)) {
     const m = t.match(/\b(\d{1,3}(?:,\d{3})+|\d{4,})(?:\.\d{1,2})?\b/);
     if (m) {
-      const n = normalizeCurrency(m[1]);
+      const numStr = m[1];
+      if (looksLikeYear(numStr, t)) return null;
+      const n = normalizeCurrency(numStr);
       if (n != null) return n;
     }
   }
