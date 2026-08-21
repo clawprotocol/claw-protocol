@@ -31,7 +31,32 @@ const HARBOR_LEAK_FIXTURE_LINES = [
 ];
 
 /**
+ * Additional Harbor leak fixture lines from PR #30 live retest (2026-08-21).
+ * These appear AFTER the numbered heading strip removed the "12. Don't" heading
+ * but left orphan body text behind.
+ */
+const HARBOR_ORPHAN_BODY_LINES = [
+  `count`,
+  `our house accounts or anyone we already did a job for last year.`,
+];
+
+/**
+ * Meta headers that leak into section bodies.
+ */
+const HARBOR_META_HEADER_LINES = [
+  `Signal persistence safeguards:`,
+];
+
+/**
+ * Personal detail leaks from user dump (pet names, truck colors).
+ */
+const HARBOR_PERSONAL_DETAIL_LINES = [
+  `no teal/or logos and dog Biscuit`,
+];
+
+/**
  * Build a corpus with leaked lines embedded, meeting minimum length requirements.
+ * Includes all leak patterns: numbered headings, meta lines, orphan body, personal details.
  */
 function buildCorpusWithLeaks(): string {
   const substantive = `SERVICES AGREEMENT
@@ -66,6 +91,9 @@ All proprietary information shall remain confidential.
 Each party shall indemnify the other against third-party claims.
 
 10. ENTIRE AGREEMENT
+
+${HARBOR_META_HEADER_LINES[0]}
+
 This Agreement constitutes the entire agreement between the parties.
 
 ${HARBOR_LEAK_FIXTURE_LINES[0]}
@@ -75,6 +103,12 @@ ${HARBOR_LEAK_FIXTURE_LINES[1]}
 ${HARBOR_LEAK_FIXTURE_LINES[2]}
 
 ${HARBOR_LEAK_FIXTURE_LINES[3]}
+
+${HARBOR_ORPHAN_BODY_LINES[0]}
+
+${HARBOR_ORPHAN_BODY_LINES[1]}
+
+${HARBOR_PERSONAL_DETAIL_LINES[0]}
 
 1. We need fast turnaround.
 
@@ -111,11 +145,18 @@ describe("resolveCanonicalPlainForVisibleShell", () => {
       premiumCheckoutCompleted: true,
     });
 
-    // MUST NOT appear in output (leaked dump lines)
+    // MUST NOT appear in output (leaked dump lines - numbered headings)
     expect(result.plain).not.toMatch(/11\.\s*Mesa Realty Group LLC.*said/i);
     expect(result.plain).not.toMatch(/12\.\s*Don't.*count.*house accounts/i);
     expect(result.plain).not.toMatch(/13\.\s*12 month deal/i);
     expect(result.plain).not.toMatch(/Commercial detail carried forward from user notes/i);
+
+    // MUST NOT appear in output (PR #30 regression leaks)
+    expect(result.plain).not.toMatch(/Signal persistence safeguards/i);
+    expect(result.plain).not.toMatch(/^\s*count\s*$/m);
+    expect(result.plain).not.toMatch(/our house accounts or anyone we already did a job for/i);
+    expect(result.plain).not.toMatch(/Biscuit/i);
+    expect(result.plain).not.toMatch(/\bteal\b/i);
 
     // MUST still appear (legitimate agreement content)
     expect(result.plain).toContain("SERVICES AGREEMENT");
@@ -128,6 +169,8 @@ describe("resolveCanonicalPlainForVisibleShell", () => {
     expect(result.plain).toContain("10. ENTIRE AGREEMENT");
     expect(result.plain).toContain("14. NOTICES");
     expect(result.plain).toContain("13. GOVERNING LAW");
+    expect(result.plain).toContain("45 days");
+    expect(result.plain).toContain("exclusive");
   });
 
   it("strips heading-then-body leak blocks where heading is on separate line from body", () => {
@@ -275,6 +318,137 @@ ${"Substantive clause for length padding. ".repeat(30)}`;
     // Legitimate sections preserved
     expect(result.plain).toContain("1. SCOPE");
     expect(result.plain).toContain("10. ENTIRE AGREEMENT");
+    expect(result.plain).toContain("14. NOTICES");
+  });
+
+  it("strips orphan count/house accounts body fragments (PR #30 regression)", () => {
+    const corpusWithOrphans = `SERVICES AGREEMENT
+
+1. SCOPE
+Services to be provided.
+
+10. ENTIRE AGREEMENT
+This Agreement constitutes the entire agreement.
+
+count
+
+our house accounts or anyone we already did a job for last year.
+
+14. NOTICES
+All notices shall be sent.
+
+IN WITNESS WHEREOF.
+
+${"Substantive clause for length padding. ".repeat(30)}`;
+
+    vi.mocked(resolvePaidProFirstReviewVisibleDisplayPlain).mockReturnValue({
+      plain: corpusWithOrphans,
+      source: "paid_pro_accepted_canonical_source_of_truth",
+      fallbackReason: null,
+      hasSoT: true,
+      hasServerFullDoc: true,
+      paidProActive: true,
+    });
+
+    const result = resolveCanonicalPlainForVisibleShell({
+      paidProActive: true,
+      premiumCheckoutCompleted: true,
+    });
+
+    // Orphan body fragments must be stripped
+    expect(result.plain).not.toMatch(/^\s*count\s*$/m);
+    expect(result.plain).not.toMatch(/our house accounts or anyone we already did a job for/i);
+
+    // Legitimate sections preserved
+    expect(result.plain).toContain("1. SCOPE");
+    expect(result.plain).toContain("10. ENTIRE AGREEMENT");
+    expect(result.plain).toContain("14. NOTICES");
+  });
+
+  it("strips Signal persistence safeguards meta header (PR #30 regression)", () => {
+    const corpusWithSignal = `SERVICES AGREEMENT
+
+1. SCOPE
+Services to be provided.
+
+10. ENTIRE AGREEMENT
+
+Signal persistence safeguards:
+
+This Agreement constitutes the entire agreement.
+
+14. NOTICES
+All notices shall be sent.
+
+IN WITNESS WHEREOF.
+
+${"Substantive clause for length padding. ".repeat(30)}`;
+
+    vi.mocked(resolvePaidProFirstReviewVisibleDisplayPlain).mockReturnValue({
+      plain: corpusWithSignal,
+      source: "paid_pro_accepted_canonical_source_of_truth",
+      fallbackReason: null,
+      hasSoT: true,
+      hasServerFullDoc: true,
+      paidProActive: true,
+    });
+
+    const result = resolveCanonicalPlainForVisibleShell({
+      paidProActive: true,
+      premiumCheckoutCompleted: true,
+    });
+
+    // Signal meta header must be stripped
+    expect(result.plain).not.toMatch(/Signal persistence safeguards/i);
+
+    // Legitimate sections preserved
+    expect(result.plain).toContain("1. SCOPE");
+    expect(result.plain).toContain("10. ENTIRE AGREEMENT");
+    expect(result.plain).toContain("14. NOTICES");
+  });
+
+  it("strips Biscuit/teal personal detail leaks (PR #30 regression)", () => {
+    const corpusWithPersonalDetails = `SERVICES AGREEMENT
+
+1. SERVICES
+The Service Provider shall provide lead generation services.
+
+2. SCOPE OF WORK
+
+no teal/or logos and dog Biscuit
+
+3. COMPENSATION
+Client shall pay 7% of deposit.
+
+14. NOTICES
+All notices shall be sent.
+
+IN WITNESS WHEREOF.
+
+${"Substantive clause for length padding. ".repeat(30)}`;
+
+    vi.mocked(resolvePaidProFirstReviewVisibleDisplayPlain).mockReturnValue({
+      plain: corpusWithPersonalDetails,
+      source: "paid_pro_accepted_canonical_source_of_truth",
+      fallbackReason: null,
+      hasSoT: true,
+      hasServerFullDoc: true,
+      paidProActive: true,
+    });
+
+    const result = resolveCanonicalPlainForVisibleShell({
+      paidProActive: true,
+      premiumCheckoutCompleted: true,
+    });
+
+    // Personal detail leaks must be stripped
+    expect(result.plain).not.toMatch(/Biscuit/i);
+    expect(result.plain).not.toMatch(/\bteal\b/i);
+
+    // Legitimate sections preserved
+    expect(result.plain).toContain("1. SERVICES");
+    expect(result.plain).toContain("3. COMPENSATION");
+    expect(result.plain).toContain("7%");
     expect(result.plain).toContain("14. NOTICES");
   });
 });
