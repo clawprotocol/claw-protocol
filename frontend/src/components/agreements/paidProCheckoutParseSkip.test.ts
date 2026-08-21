@@ -41,6 +41,26 @@ describe("paidProCheckoutParseSkip", () => {
     ).toBe(true);
   });
 
+  it("skips checkout parse for a thin Mike starter that used to fail placeholder gates", () => {
+    expect(
+      shouldSkipCheckoutPremiumParseBeforeFullDraft({
+        premiumGenerationCallReason: "checkout_completion",
+        structuredDraft: {
+          ...richStructured,
+          parties: [
+            { name: "Client", role: "Client" },
+            { name: "Mike", role: "Service Provider" },
+          ],
+          purpose: "Mike will paint the office.",
+          payment_terms: "Not specified",
+          jurisdiction: "",
+          duration: "",
+        },
+        rawIntake: "I hired Mike to paint my office. We shook on it.",
+      }),
+    ).toBe(true);
+  });
+
   it("does not skip when call reason is not checkout_completion", () => {
     expect(
       shouldSkipCheckoutPremiumParseBeforeFullDraft({

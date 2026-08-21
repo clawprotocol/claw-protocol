@@ -1,14 +1,12 @@
 /**
- * Checkout-only: skip redundant premium parse when structured draft + intake are already sufficient
- * for premium-full-draft request assembly (no legal copy / merge behavior change).
+ * Checkout-only: skip redundant premium parse and reuse the pre-pay starter.
+ * Thin dumps that trigger the 2–5 asks (Mike-only) fail placeholder/quality gates;
+ * a fresh premium parse then overwrites the painted one-pager because raw intake
+ * is < 120 chars. userGapAnswers still ride the full-draft POST.
  */
 
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
-import { draftHasPlaceholderParties } from "./reviewPlaceholderGuard";
 import type { PremiumGenerationCallReason } from "./paidProPremiumGenerationCallAudit";
-import { evaluatePremiumDraftQuality } from "./premiumDraftTransform";
-
-const nz = (s: string | null | undefined) => (s || "").trim();
 
 export type CheckoutPremiumParseSkipInput = {
   premiumGenerationCallReason?: PremiumGenerationCallReason;
@@ -20,15 +18,7 @@ export type CheckoutPremiumParseSkipInput = {
 export function shouldSkipCheckoutPremiumParseBeforeFullDraft(
   input: CheckoutPremiumParseSkipInput,
 ): boolean {
-  if (input.premiumGenerationCallReason !== "checkout_completion") return false;
-  const raw = nz(input.rawIntake);
-  if (raw.length < 48) return false;
-  if (draftHasPlaceholderParties(input.structuredDraft)) return false;
-  const purpose = nz(input.structuredDraft.purpose);
-  const payment = nz(input.structuredDraft.payment_terms);
-  if (purpose.length < 24 || payment.length < 12) return false;
-  const quality = evaluatePremiumDraftQuality(input.structuredDraft, raw);
-  return quality.ok;
+  return input.premiumGenerationCallReason === "checkout_completion";
 }
 
 /** Structured draft stands in for parse output when skip policy applies. */
