@@ -79,6 +79,45 @@ const LOAN_RE = /\b(?:promissory\s+note|loan\s+agreement|principal|interest\s+ra
 const LEASE_RE = /\b(?:lease\s+agreement|landlord|tenant|rent\s+commencement|premises)\b/i;
 
 /**
+ * Broad scope/work patterns for fail-open detection. Includes common service verbs
+ * and activity nouns that indicate draftable commercial intent.
+ */
+const BROAD_SCOPE_RE =
+  /\b(?:paint(?:ing)?|clean(?:ing)?|fix(?:ing)?|repair(?:ing)?|build(?:ing)?|design(?:ing)?|develop(?:ing)?|creat(?:e|ing)|writ(?:e|ing)|mak(?:e|ing)|consult(?:ing)?|advis(?:e|ing)|manag(?:e|ing)|market(?:ing)?|sell(?:ing)?|buy(?:ing)?|rent(?:ing)?|leas(?:e|ing)?|deliver(?:y|ing)?|install(?:ing)?|maintain(?:ing)?|support(?:ing)?|train(?:ing)?|coach(?:ing)?|teach(?:ing)?|photograph(?:y|ing)?|video(?:graphy)?|edit(?:ing)?|review(?:ing)?|audit(?:ing)?|account(?:ing)?|bookkeep(?:ing)?|legal|services?|work|project|deal|agreement|contract|job|task|gig|assignment|engagement)(?:s)?\b/i;
+
+/**
+ * Exchange/agreement indicators - words that suggest a commercial arrangement.
+ */
+const EXCHANGE_INDICATOR_RE =
+  /\b(?:agreed|agree|deal|agreement|contract|shook|handshake|settle(?:d|ment)?|pay(?:ing|ment)?|paid|hire[ds]?|for|with|commission(?:ed)?|retain(?:ed)?|engag(?:e|ed)|employ(?:ed)?|partner(?:ship|ed)?|collaborat(?:e|ion)|arrang(?:e|ement)|understanding|terms?)(?:s)?\b/i;
+
+/**
+ * Person/name pattern - capitalized word that could be a name (first name or entity).
+ * Excludes common sentence starters like "I", "We", "The", etc.
+ */
+const PERSON_NAME_RE = /\b(?!(?:I|We|The|A|An|It|This|That|My|Our|Your|His|Her|Their)\b)[A-Z][a-z]{2,}\b/;
+
+/**
+ * Check if thin dump has ANY draftable commercial signal:
+ * - A person/name
+ * - A scope/work fragment
+ * - An exchange indicator
+ *
+ * Used to FAIL-OPEN thin dumps to the starter one-pager instead of blocking.
+ * Block only empty / gibberish / counsel-memo.
+ */
+function hasDraftableCommercialSignal(raw: string): boolean {
+  const text = (raw || "").trim();
+  if (text.length < 10) return false;
+
+  const hasName = PERSON_NAME_RE.test(text);
+  const hasScope = BROAD_SCOPE_RE.test(text);
+  const hasExchange = EXCHANGE_INDICATOR_RE.test(text);
+
+  return hasName || hasScope || hasExchange;
+}
+
+/**
  * Universal commercial / risk topic detectors — broad spectrum, display-priority order.
  * Keep labels draftable (what to put in the agreement), not negotiation strategy.
  */
@@ -932,7 +971,13 @@ export function buildAgreementIntakeClarification(rawIntake: string): AgreementI
     };
   }
 
-  if ((raw.length < 40 && !hasBetweenParties) || (signal === 0 && raw.length < 80 && !hasBetweenParties)) {
+  // Thin dumps with ANY draftable signal (name, scope/work, exchange) should
+  // FAIL-OPEN to the starter one-pager instead of blocking. The five-tenet system will
+  // show targeted questions for missing tenets (parties, payment, term, governing law).
+  // Block only empty / gibberish / counsel-memo.
+  const hasDraftableSignal = hasDraftableCommercialSignal(raw);
+
+  if (!hasDraftableSignal && ((raw.length < 40 && !hasBetweenParties) || (signal === 0 && raw.length < 80 && !hasBetweenParties))) {
     return {
       kind: "too_sparse",
       title: "I can draft this once I know who is agreeing and what they are agreeing to",
@@ -963,7 +1008,11 @@ export function buildAgreementIntakeClarification(rawIntake: string): AgreementI
     LEASE_RE.test(raw) ||
     signal >= 3;
 
-  if (looksCommercial && !hasBetweenParties) {
+  // Skip the missing_named_parties block for thin dumps with draftable signal,
+  // UNLESS they explicitly mention multiple parties (e.g., "3 parties", "three-party").
+  // Let them fail-open to the starter; the five-tenet system will ask targeted questions.
+  const explicitMultiPartyRequest = (partySignals.declared != null && partySignals.declared >= 3) || /\b(?:three|four|3|4)[-\s]?part(?:y|ies)\b/i.test(raw);
+  if (looksCommercial && !hasBetweenParties && !(hasDraftableSignal && raw.length < 100 && !explicitMultiPartyRequest)) {
     const suggested = buildGenericSuggestedRewrite(raw);
     const heard: string[] = [];
     if (hasMoney) heard.push(`Fee / economics mentioned: ${extractMoneyPhrases(raw).join(", ") || "yes"}.`);
@@ -1058,8 +1107,8 @@ export function buildAgreementIntakeClarification(rawIntake: string): AgreementI
     };
   }
 
-  // Medium-length prompts with no commercial anchors.
-  if (signal === 0 && raw.length >= 40) {
+  // Medium-length prompts with no commercial anchors — but allow draftable signals.
+  if (signal === 0 && raw.length >= 40 && !hasDraftableSignal) {
     return lowSignalClarification(raw);
   }
 
