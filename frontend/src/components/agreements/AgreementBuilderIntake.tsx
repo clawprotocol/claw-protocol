@@ -5704,7 +5704,16 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       fallbackAgreementId: id,
       partyNameContext,
     });
-    if (!id) throw new Error("missing_id");
+    if (!id) {
+      // Create a proper ReviewFirstPersistHttpError with a synthetic 200 status
+      // to indicate the response was ok but the payload was malformed (no id).
+      // This allows formatDraftCreateHttpUserMessage to show a specific error.
+      const missingIdErr = new Error("missing_id") as ReviewFirstPersistHttpError;
+      missingIdErr.httpStatus = 200;
+      missingIdErr.httpDetail = "Server returned 200 OK but response did not contain an agreement id.";
+      missingIdErr.responseBody = payload;
+      throw missingIdErr;
+    }
     if (payload?.draft != null) {
       markStarterReviewServerDraftReady();
     }
@@ -5770,13 +5779,36 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           console.info("[demo-session-user] using_visible_display_for_persist", { corpusLen: displayCorpus.length });
         }
       }
-      // Final fallback: try review surface
+      // Fallback: try review surface
       if (pipelineCorpus.length < PAID_PRO_AUTHORITY_MIN_LEN) {
         const reviewDoc = getPaidProDocumentForSurface("review");
         const reviewCorpus = reviewDoc?.text?.trim() || "";
         if (reviewCorpus.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
           pipelineCorpus = reviewCorpus;
           console.info("[demo-session-user] using_visible_review_for_persist", { corpusLen: reviewCorpus.length });
+        }
+      }
+      // Final fallback: try the premium completion snapshot (sessionStorage)
+      // This is where the visible corpus is stored for demo checkout sessions
+      // when SoT is not yet established.
+      if (pipelineCorpus.length < PAID_PRO_AUTHORITY_MIN_LEN) {
+        const completionSnap = readPremiumCompletionSnapshot();
+        const snapCorpus = (
+          completionSnap?.premiumWinningBodyText ||
+          completionSnap?.premiumReadonlyPlainText ||
+          completionSnap?.paidProSourceOfTruthText ||
+          completionSnap?.acceptedPremiumCanonicalText ||
+          ""
+        ).trim();
+        if (snapCorpus.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
+          pipelineCorpus = snapCorpus;
+          console.info("[demo-session-user] using_completion_snapshot_for_persist", {
+            corpusLen: snapCorpus.length,
+            source: completionSnap?.premiumWinningBodyText ? "premiumWinningBodyText" :
+                    completionSnap?.premiumReadonlyPlainText ? "premiumReadonlyPlainText" :
+                    completionSnap?.paidProSourceOfTruthText ? "paidProSourceOfTruthText" :
+                    "acceptedPremiumCanonicalText",
+          });
         }
       }
       if (pipelineCorpus.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
@@ -5800,6 +5832,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           corpusLen: pipelineCorpus.length,
         });
       } else {
+        const snapForDiag = readPremiumCompletionSnapshot();
         console.warn("[demo-session-user] no_valid_corpus_for_persist", {
           pipelineLen: (lastPremiumWinningCorpusRef.current || "").length,
           outputLen: (premiumPipelineOutputBodyRef.current || "").length,
@@ -5807,6 +5840,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           sotLen: hasPaidProSourceOfTruth() ? getPaidProSourceOfTruthText().length : 0,
           displayLen: getPaidProDocumentForSurface("display")?.text?.length || 0,
           reviewLen: getPaidProDocumentForSurface("review")?.text?.length || 0,
+          snapWinningLen: snapForDiag?.premiumWinningBodyText?.length || 0,
+          snapReadonlyLen: snapForDiag?.premiumReadonlyPlainText?.length || 0,
+          snapSotLen: snapForDiag?.paidProSourceOfTruthText?.length || 0,
+          snapAcceptedLen: snapForDiag?.acceptedPremiumCanonicalText?.length || 0,
         });
       }
     }

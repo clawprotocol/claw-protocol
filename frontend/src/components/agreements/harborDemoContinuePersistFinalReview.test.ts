@@ -15,6 +15,7 @@ import {
 import { resolvePaidProInlineSignerSetupMounted } from "./signerSetupPartyIdentity";
 import { PAID_PRO_AUTHORITY_MIN_LEN } from "./paidProAuthorityConstants";
 import { stripPremiumInstructionNoiseForDocument } from "./premiumInstructionStrip";
+import { formatDraftCreateHttpUserMessage } from "./draftCreateHttpError";
 
 describe("harborDemoContinuePersistFinalReview", () => {
   beforeEach(() => {
@@ -475,8 +476,75 @@ This Agreement constitutes the entire agreement.`;
       expect(intake).toContain('getPaidProDocumentForSurface("review")');
       expect(intake).toContain("using_visible_review_for_persist");
 
-      // 4. Check for diagnostic logging when no corpus found
+      // 4. Check for completion snapshot fallback (new in this PR)
+      expect(intake).toContain("readPremiumCompletionSnapshot()");
+      expect(intake).toContain("using_completion_snapshot_for_persist");
+
+      // 5. Check for diagnostic logging when no corpus found
       expect(intake).toContain("no_valid_corpus_for_persist");
+    });
+  });
+
+  describe("Issue F: error formatting surfaces http status and detail", () => {
+    it("formatDraftCreateHttpUserMessage handles missing_id error with httpDetail", () => {
+      // Simulate a missing_id error with httpDetail
+      const missingIdError = new Error("missing_id") as {
+        httpStatus?: number;
+        httpDetail?: string;
+        responseBody?: unknown;
+        message: string;
+      };
+      missingIdError.httpStatus = 200;
+      missingIdError.httpDetail = "Server returned 200 OK but response did not contain an agreement id.";
+      missingIdError.responseBody = { draft: {} };
+
+      const result = formatDraftCreateHttpUserMessage(missingIdError);
+      expect(result).toBe("Server returned 200 OK but response did not contain an agreement id.");
+    });
+
+    it("formatDraftCreateHttpUserMessage handles missing_id error without httpDetail", () => {
+      const missingIdError = new Error("missing_id") as {
+        httpStatus?: number;
+        httpDetail?: string;
+        message: string;
+      };
+      // No httpDetail set
+
+      const result = formatDraftCreateHttpUserMessage(missingIdError);
+      expect(result).toBe("LawDog received a response but no agreement id was returned. Please try again.");
+    });
+
+    it("formatDraftCreateHttpUserMessage handles create_failed_http_N error without httpStatus", () => {
+      const httpError = new Error("create_failed_http_403") as {
+        httpStatus?: number;
+        httpDetail?: string;
+        message: string;
+      };
+      // Simulating an error where httpStatus wasn't set but the message has the status
+
+      const result = formatDraftCreateHttpUserMessage(httpError);
+      expect(result).toBe("LawDog could not save this draft (HTTP 403).");
+    });
+
+    it("formatDraftCreateHttpUserMessage surfaces network errors", () => {
+      const networkError = new Error("Failed to fetch") as {
+        httpStatus?: number;
+        message: string;
+      };
+
+      const result = formatDraftCreateHttpUserMessage(networkError);
+      expect(result).toBe("LawDog could not save this draft: Failed to fetch");
+    });
+
+    it("formatDraftCreateHttpUserMessage returns null for success responses", () => {
+      const successResponse = {
+        httpStatus: 200,
+        message: "success",
+      };
+
+      // For a 200 response that ISN'T missing_id, should return null
+      const result = formatDraftCreateHttpUserMessage(successResponse);
+      expect(result).toBeNull();
     });
   });
 
