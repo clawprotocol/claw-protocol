@@ -14364,6 +14364,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         starterMultiPartyProGate,
         emptyAuthorityPrepFailSafe,
         hardError,
+        intakeClarification,
       })
     ) {
       onHomeGuidedTransitionPhase("review_ready");
@@ -14382,6 +14383,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     starterMultiPartyProGate,
     emptyAuthorityPrepFailSafe,
     hardError,
+    intakeClarification,
   ]);
 
   /**

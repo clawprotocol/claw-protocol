@@ -219,4 +219,34 @@ Red Mesa will provide updates. Harbor Peak will deliver milestones.`;
       }),
     ).toBe(false);
   });
+
+  it("dismisses home transition overlay on intake clarification (missing_named_parties)", () => {
+    expect(
+      shouldResolveStarterHomeTransitionToReviewReady({
+        draft: null,
+        createUiStage: "INPUT",
+        createFlowPhase: "capturing_input",
+        isGenerating: false,
+        intakeClarification: {
+          kind: "missing_named_parties",
+          title: "Name the parties to continue",
+          why: "We can see commercial details, but not clear legal names.",
+          whatWeHeard: [],
+          guidedSteps: [],
+          suggestedRewrite: null,
+          primaryCtaLabel: "Use suggested draft request",
+          secondaryCtaLabel: "I'll add parties myself",
+        },
+      }),
+    ).toBe(true);
+    expect(
+      shouldResolveStarterHomeTransitionToReviewReady({
+        draft: null,
+        createUiStage: "INPUT",
+        createFlowPhase: "capturing_input",
+        isGenerating: true,
+        intakeClarification: { kind: "missing_named_parties" },
+      }),
+    ).toBe(false);
+  });
 });

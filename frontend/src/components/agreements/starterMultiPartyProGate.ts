@@ -482,11 +482,15 @@ export function shouldResolveStarterHomeTransitionToReviewReady(input: {
   starterMultiPartyProGate?: unknown;
   emptyAuthorityPrepFailSafe?: boolean;
   hardError?: string | null;
+  intakeClarification?: unknown;
 }): boolean {
   if (input.emptyAuthorityPrepFailSafe) {
     return true;
   }
   if (input.hardError && !input.isGenerating) {
+    return true;
+  }
+  if (input.intakeClarification && !input.isGenerating) {
     return true;
   }
   if (
