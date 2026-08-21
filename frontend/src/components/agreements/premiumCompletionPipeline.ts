@@ -1817,6 +1817,9 @@ async function runPremiumCompletionInner(
         : null,
   };
   let premiumRenderSource: PremiumRenderSource = "fallback_preview";
+  // PR #41 truncated-keep unconditional SoT win: tracks whether a 200-keep response was accepted
+  // early in the pipeline, bypassing all client gates. When true, do not wipe winningPremiumBodyText.
+  let truncatedKeepUnconditionalSoTApplied = false;
   let founderDetailsGateMessage: string | null = null;
   let proIntentGateMessage: string | null = null;
   let serverGenerationDegraded: { code: string; message: string } | null = null;
@@ -2205,6 +2208,33 @@ async function runPremiumCompletionInner(
       if (premiumWireBodyRejectedForDevContextLeak) {
         doc = "";
       }
+      // PR #41 truncated-keep UNCONDITIONAL SoT win: when backend returned 200-keep with
+      // generation_ok=true and document_text >= 1600 chars, set winningPremiumBodyText NOW.
+      // Do NOT require acc.ok, placeholderClientOk, or !blockDegradedProfessionalClauseAccept.
+      // Keep airlock/leak/empty-scrap rejection (premiumWireBodyRejectedForDevContextLeak already wiped doc).
+      if (
+        truncatedKeepSoTResponse &&
+        doc.trim().length >= TRUNCATED_KEEP_SOT_MIN_LEN &&
+        !premiumBodyHardRejectedForDevContextLeak
+      ) {
+        winningPremiumBodyText = doc;
+        premiumRenderSource = "server_full_draft_degraded";
+        truncatedKeepUnconditionalSoTApplied = true;
+        premiumCompletionOutcome = "authoritative_draft_complete_with_recommended_clarifications";
+        if (import.meta.env.MODE !== "test") {
+          // eslint-disable-next-line no-console
+          console.info("[CLAW] truncated-keep unconditional SoT applied", {
+            doc_len: doc.length,
+            failure_code: (full.server_generation_failure_code || "").trim(),
+          });
+        }
+        logPremiumCompletionDebug({
+          stage: "truncated_keep_unconditional_sot_applied",
+          accepted: true,
+          docLen: doc.length,
+          failureCode: (full.server_generation_failure_code || "").trim(),
+        });
+      }
       const canonicalPartyNamesForAttribution = (merged.parties || [])
         .map((p) => String(p?.name ?? "").trim())
         .filter(Boolean);
@@ -2372,7 +2402,10 @@ async function runPremiumCompletionInner(
           fatalPlaceholderCount: 0,
           httpOk: fullResp.ok,
         });
-        premiumCompletionOutcome = classified;
+        // Don't overwrite premiumCompletionOutcome if truncated-keep unconditional SoT was already applied
+        if (!truncatedKeepUnconditionalSoTApplied) {
+          premiumCompletionOutcome = classified;
+        }
         const clarificationLines = [
           ...materialMissingItems.map((i) => i.question),
           ...(effectiveFull.missing_material_info ?? []),
@@ -3949,7 +3982,8 @@ async function runPremiumCompletionInner(
               currentDocLen: doc.length,
               premiumRenderSource,
             });
-          } else {
+          } else if (!truncatedKeepUnconditionalSoTApplied) {
+            // Do not wipe if truncated-keep unconditional SoT was already applied
             winningPremiumBodyText = "";
             premiumRenderSource = "rejected_paid_corpus";
             rejectedPaidCorpusDueToClientGates = true;
@@ -4183,8 +4217,10 @@ async function runPremiumCompletionInner(
             premiumRenderSource !== PREMIUM_DEGRADED_SERVER_LOCAL_RECOVERY_RENDER_SOURCE &&
             (premiumRenderSource === "server_full_draft_degraded" ||
               premiumRenderSource === "server_full_draft" ||
-              premiumRenderSource === "server_full_draft_retry")
+              premiumRenderSource === "server_full_draft_retry") &&
+            !truncatedKeepUnconditionalSoTApplied
           ) {
+            // Do not wipe if truncated-keep unconditional SoT was already applied
             winningPremiumBodyText = "";
             premiumRenderSource = "rejected_paid_corpus";
             rejectedPaidCorpusDueToClientGates = true;
@@ -4273,10 +4309,13 @@ async function runPremiumCompletionInner(
               rejectedReason: preSoTInsertGate.findings.map((f) => f.id).join(","),
               bodyLen: doc.length,
             });
-            winningPremiumBodyText = "";
-            premiumRenderSource = "rejected_paid_corpus";
-            proIntentGateMessage =
-              "LawDog blocked freezing this draft because client polish inserted substantive terms not present in the server draft or intake. Tap **Retry Pro draft**, or disable inventing floors in eval mode.";
+            if (!truncatedKeepUnconditionalSoTApplied) {
+              // Do not wipe if truncated-keep unconditional SoT was already applied
+              winningPremiumBodyText = "";
+              premiumRenderSource = "rejected_paid_corpus";
+              proIntentGateMessage =
+                "LawDog blocked freezing this draft because client polish inserted substantive terms not present in the server draft or intake. Tap **Retry Pro draft**, or disable inventing floors in eval mode.";
+            }
           } else {
           paidProPerfSpanStart("post_accept_commit_render");
           freezeAcceptedPremiumBodyForSession(
@@ -4832,13 +4871,16 @@ async function runPremiumCompletionInner(
         (lastWireAuthoritativeBodyLen > 0 &&
           lastWireAuthoritativeBodyLen < PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN)
       ) {
-        winningPremiumBodyText = "";
-        premiumRenderSource = "rejected_paid_corpus";
+        if (!truncatedKeepUnconditionalSoTApplied) {
+          winningPremiumBodyText = "";
+          premiumRenderSource = "rejected_paid_corpus";
+        }
       } else {
         winningPremiumBodyText = fb;
         premiumRenderSource = "fallback_preview";
       }
-    } else {
+    } else if (!truncatedKeepUnconditionalSoTApplied) {
+      // Do not wipe if truncated-keep unconditional SoT was already applied
       winningPremiumBodyText = "";
       premiumRenderSource = "rejected_paid_corpus";
       if (!proIntentGateMessage) {
