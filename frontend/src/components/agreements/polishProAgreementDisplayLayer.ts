@@ -56,6 +56,7 @@ import {
   shouldSkipPostFreezeDriftForReadonlyHtmlStrip,
 } from "./paidProPostFreezeCorpusInvariant";
 import { applyIntakeDraftPlaceholders } from "./applyIntakeDraftPlaceholders";
+import { stripPremiumInstructionNoiseForDocument } from "./premiumInstructionStrip";
 
 export { detectProReviewDisplaySanityViolations } from "./paidProReviewDisplaySanity";
 export type { PaidProDisplaySanityExecutionContext } from "./paidProReviewDisplaySanity";
@@ -638,6 +639,9 @@ export function polishProAgreementDisplayLayer(
     logPostFreezeCorpusDrift({ surface: "polishProAgreementDisplayLayer", renderedText: out });
     logExecutionBlockLocation(out, "polishProAgreementDisplayLayer:passthrough_fact_fill");
     logExecutionBlockCount(out, "polishProAgreementDisplayLayer:passthrough_fact_fill");
+    // Strip leaked user prompt lines that appear as numbered sections (e.g. "11. Mesa Realty
+    // Group LLC / said", "12. Don't / count", "13. 12 month deal"). Live leak from Harbor retest.
+    out = stripPremiumInstructionNoiseForDocument(out);
     return { text: out, repairs };
   }
   const repairs: string[] = [];
@@ -900,6 +904,10 @@ export function polishProAgreementDisplayLayer(
       }
     }
   }
+
+  // Strip leaked user prompt lines that appear as numbered sections (e.g. "11. Mesa Realty
+  // Group LLC / said", "12. Don't / count", "13. 12 month deal"). Live leak from Harbor retest.
+  out = stripPremiumInstructionNoiseForDocument(out);
 
   return { text: out, repairs: [...new Set(repairs)] };
 }
