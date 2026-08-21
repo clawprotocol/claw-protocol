@@ -61,6 +61,7 @@ import {
   isUserWorkspaceOrgId,
   resolveCreateWorkspaceProbeReadiness,
 } from "./createWorkspaceProbeReadiness";
+import { hasDemoSessionUser } from "../guestCheckoutAuthority";
 import {
   NO_ATTORNEY_CLIENT,
   PRODUCT_NOT_LAW_FIRM,
@@ -366,7 +367,7 @@ export function SimpleCreatePage() {
     createAccessVerdict.allowed &&
     (createAccessVerdict.reason === "guest_draft" ||
       createAccessVerdict.reason === "anonymous_starter");
-  const freeAllowanceAvailable = guestDraftAvailable;
+  const freeAllowanceAvailable = guestDraftAvailable && !hasDemoSessionUser();
   const genesisAllowanceCopy =
     genesisWithinAllowance && commercialEntitlement
       ? formatGenesisAllowanceStatusCopy({

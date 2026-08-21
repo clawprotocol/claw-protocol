@@ -684,7 +684,9 @@ import {
   readAcceptedPipelineReviewCorpusPlain,
 } from "./paidProAcceptedPipelineReviewCorpus";
 import { PaidProForcedFirstReviewChrome } from "./paidProForcedFirstReviewChrome";
+import { PaidProPostPosSignerChrome, type PartySignerSlot } from "./PaidProPostPosSignerChrome";
 import { PaidProReviewRenderInvariantProbe } from "./PaidProReviewRenderInvariantProbe";
+import { hasDemoSessionUser } from "../../launch/guestCheckoutAuthority";
 import {
   logPaidProReviewBranch,
   resolvePaidProReviewBranchPath,
@@ -4292,6 +4294,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   // Inline signer setup latch: once the user is on Add signer details, stay mounted across metadata
   // edits — including when the gate becomes complete — until Prepare signature links is clicked.
   const [paidProInlineSignerSetupLatched, setPaidProInlineSignerSetupLatched] = useState(false);
+  // Demo session user: auto-arm signer setup after checkout so they skip the old relic chrome.
+  const demoSignerSetupLatchArmedRef = React.useRef(false);
   /** Dashboard Complete signer details → create: one-shot arm consumed after server hydrate. */
   const dashboardSignerSetupResumeConsumedRef = React.useRef(false);
   // Sticky "signer metadata finalized" latch. The authoritative signing snapshot is module-level
@@ -19696,9 +19700,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     ],
   );
 
+  const demoSessionUserActive = hasDemoSessionUser();
+
   const showPaidProForcedFirstReviewTrackChooser = useMemo(
-    () => shouldShowPaidProReviewDecisionChrome(paidProReviewDecisionPhase),
-    [paidProReviewDecisionPhase],
+    () => {
+      if (demoSessionUserActive) return false;
+      return shouldShowPaidProReviewDecisionChrome(paidProReviewDecisionPhase);
+    },
+    [paidProReviewDecisionPhase, demoSessionUserActive],
   );
 
   const paidProPostFinalizeCorpusHash = useMemo(
@@ -19966,6 +19975,26 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     extraPartyLegalNames,
     partyAddresses,
     ensureReviewAgreementWorkspaceId,
+  ]);
+
+  // Demo session user post-checkout: auto-arm inline signer setup (skip old relic chrome).
+  // This effect runs once when a demo session user arrives from checkout with Pro copy rendered.
+  useEffect(() => {
+    if (demoSignerSetupLatchArmedRef.current) return;
+    if (!demoSessionUserActive) return;
+    if (!hasPaidPremiumCompletionSession()) return;
+    if (!premiumPaidDocumentSurface) return;
+    if (paidProSignerMetadataFinalized) return;
+    if (paidProInlineSignerSetupLatched) return;
+    demoSignerSetupLatchArmedRef.current = true;
+    setPaidProInlineSignerSetupLatched(true);
+    setCreateFlowSendRecipientEditorOpen(true);
+    console.info("[demo-session-user] auto_arm_signer_setup_post_checkout");
+  }, [
+    demoSessionUserActive,
+    premiumPaidDocumentSurface,
+    paidProSignerMetadataFinalized,
+    paidProInlineSignerSetupLatched,
   ]);
 
   const paidProCanonicalStickyCta = useMemo(() => {
