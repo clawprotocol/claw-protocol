@@ -34736,7 +34736,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                     </div>
                                   ) : null}
                                   <div className="w-full max-w-[850px] rounded-sm border border-stone-200/90 bg-[#faf7f0] text-left text-stone-900 shadow-[0_1px_2px_rgba(0,0,0,0.05),0_22px_48px_-8px_rgba(15,23,42,0.28)] ring-1 ring-black/[0.07]">
-                                    {paidProForcedFirstReviewActive ||
+                                    {(paidProForcedFirstReviewActive &&
+                                      !(
+                                        demoSessionUserActive &&
+                                        hasPaidPremiumCompletionSession() &&
+                                        paidProSignerMetadataFinalized
+                                      )) ||
                                     paidProCanonicalReviewSignerSetupActive ||
                                     paidProReviewRecipientSetupActive ? (
                                       <div className="px-[clamp(1.35rem,4.5vw,2.65rem)] py-3.5 sm:py-4">
