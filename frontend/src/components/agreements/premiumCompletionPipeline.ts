@@ -41,6 +41,10 @@ import {
   resolveCheckoutPremiumParseSubstitute,
   shouldSkipCheckoutPremiumParseBeforeFullDraft,
 } from "./paidProCheckoutParseSkip";
+import {
+  isNoticeRoleSoftVpaidReasons,
+  shouldKeepWireDespiteNoticeRoleFreezeReject,
+} from "./paidProNoticeRoleSoftKeep";
 import { ensureMaterialAsksInAdditional } from "./materialAsksMerge";
 import { setPaidFunnelLastPremiumProContext } from "../../lib/experimentation/paidFunnelIntentAttribution";
 import { getOrCreateLawdogSessionId } from "../../tracking/lawdogSession";
@@ -3386,21 +3390,17 @@ async function runPremiumCompletionInner(
         !premiumBodyHardRejectedForDevContextLeak &&
         acc.ok &&
         placeholderClientOk;
-      // Casual 2-party services (Mike + Client) emit "If to Client:" notices.
-      // That is notice_stanza_role_corruption. Mid-band 4k–10k bodies then miss
-      // serverFullDocumentWins (10k) and get wiped to Retry Pro draft.
-      const onlyNoticeStanzaRoleCorruption =
-        !vPaid.ok &&
-        vPaid.reasons.length > 0 &&
-        vPaid.reasons.every((r) => /notice_stanza_role_corruption/i.test(r));
+      // Live Mike-paint 2026-08-21: 12k ok body, notices "If to Service Provider"
+      // / "If to Mike", no IN WITNESS WHEREOF. vPaid also adds
+      // substantive_server_draft_recovery_blocked. Keep that class at ≥4k.
       const midBandNoticeRoleSoftAccept =
         !blockAdvisoryForPartyIdentity &&
         !blockDegradedProfessionalClauseAccept &&
         !hardAccRejection &&
         placeholderClientOk &&
         (doc || "").trim().length >= PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN &&
-        /\bIN WITNESS WHEREOF\b/i.test(doc) &&
-        onlyNoticeStanzaRoleCorruption;
+        !vPaid.ok &&
+        isNoticeRoleSoftVpaidReasons(vPaid.reasons);
       const advisoryAccept =
         !blockAdvisoryForPartyIdentity &&
         !blockDegradedProfessionalClauseAccept &&
@@ -3970,17 +3970,22 @@ async function runPremiumCompletionInner(
             freezeReject === "mislabeled_server_full_without_wire_server_full" ||
             (degradedJsonParseWithoutSubstantiveServerFull &&
               originalWireServerFullDocumentText.length < PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN);
-          // Simple 2-party services drafts are routinely 4k–10k. Soft freeze rejects must not
-          // wipe a finished witness-bearing corpus into empty Retry Pro draft.
+          // Live Mike-paint: freeze reject is notice_stanza_role_corruption and
+          // the 12k body has no IN WITNESS WHEREOF. Keep that body at ≥4k.
+          const noticeRoleSoftFreezeKeep = shouldKeepWireDespiteNoticeRoleFreezeReject({
+            freezeReject,
+            docLen: doc.trim().length,
+            minLen: PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN,
+          });
           const keepUsableWireDespiteSoftFreezeReject =
             !mislabeledJsonParseWithoutWireServerFull &&
             doc.trim().length >= PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN &&
-            /\bIN WITNESS WHEREOF\b/i.test(doc) &&
-            (/duplicate_provision_family/i.test(freezeReject) ||
-              /orphan_address_line/i.test(freezeReject) ||
-              /empty_required_section/i.test(freezeReject) ||
-              /notice_stanza_role_corruption/i.test(freezeReject) ||
-              lastSubstantiveWireFreezeBodyLen >= PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN);
+            (noticeRoleSoftFreezeKeep ||
+              (/\bIN WITNESS WHEREOF\b/i.test(doc) &&
+                (/duplicate_provision_family/i.test(freezeReject) ||
+                  /orphan_address_line/i.test(freezeReject) ||
+                  /empty_required_section/i.test(freezeReject) ||
+                  lastSubstantiveWireFreezeBodyLen >= PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN)));
           // PR #41 truncated-keep: backend kept model text >= 1600 chars. Accept as SoT even if
           // freeze-commit fails — the truncated draft is more useful than an empty paid shell.
           const truncatedKeepBypassFreezeReject =
