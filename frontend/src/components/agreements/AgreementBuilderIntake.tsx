@@ -5814,7 +5814,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         ? mergeDraftForPaidCreateFlowPersist(snapshot, corpusPlain)
         : snapshot;
     // Paid/Genesis: never POST /draft until review body paints from the same authority hash.
-    if (useReviewFirstPersist) {
+    // EXCEPTION: demo session users post-POS bypass this gate when they already have a valid
+    // Pro corpus — their visible paint authority may not yet be latched, but we have a durable
+    // pipeline corpus from checkout that is authoritative enough to persist.
+    const demoSessionBypassPaintReadyGate =
+      hasDemoSessionUser() &&
+      hasPaidPremiumCompletionSession() &&
+      corpusPlain.trim().length >= PAID_PRO_AUTHORITY_MIN_LEN;
+    if (useReviewFirstPersist && !demoSessionBypassPaintReadyGate) {
       const paintReady = isPaidProReviewBodyVisiblyPaintReady({
         persistCorpusPlain: corpusPlain,
       });
@@ -5829,6 +5836,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         }
         return null;
       }
+    }
+    if (demoSessionBypassPaintReadyGate) {
+      console.info("[demo-session-user] bypassing_paint_ready_gate_for_persist", {
+        corpusLen: corpusPlain.trim().length,
+      });
     }
     const p = (async (): Promise<string | null> => {
       reviewWorkspaceBootstrapDepthRef.current += 1;
@@ -26265,19 +26277,24 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   ]);
 
   const simpleProFinalReviewHtmlSourcePlain = useMemo(() => {
+    let corpus: string;
     if (simpleProFinalReviewActive) {
-      return visibleProPaperRenderPlainForDiagnostics;
+      corpus = visibleProPaperRenderPlainForDiagnostics;
+    } else {
+      const intakeForHtml = (currentPremiumMergedIntakeKey || intakeCombined || "").trim();
+      corpus = (
+        resolvePaidProReviewRenderPlain({
+          draft: draft ?? null,
+          intakeText: intakeForHtml,
+          deferSignerMetadataRepair: deferPaidProReviewRenderSignerRepair,
+        }).trim() ||
+        simpleProFinalReviewDisplayPlain.trim() ||
+        (acceptedPaidProAuthorityActive ? authoritativePaidProReviewPlain : "")
+      );
     }
-    const intakeForHtml = (currentPremiumMergedIntakeKey || intakeCombined || "").trim();
-    return (
-      resolvePaidProReviewRenderPlain({
-        draft: draft ?? null,
-        intakeText: intakeForHtml,
-        deferSignerMetadataRepair: deferPaidProReviewRenderSignerRepair,
-      }).trim() ||
-      simpleProFinalReviewDisplayPlain.trim() ||
-      (acceptedPaidProAuthorityActive ? authoritativePaidProReviewPlain : "")
-    );
+    // Strip leaked user prompt noise from the first-Pro display corpus (e.g. numbered sections
+    // with informal prose like "11. Mesa Realty Group LLC / said" or "12. Don't / count").
+    return stripPremiumInstructionNoiseForDocument(corpus);
   }, [
     simpleProFinalReviewActive,
     visibleProPaperRenderPlainForDiagnostics,
