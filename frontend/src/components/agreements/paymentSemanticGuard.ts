@@ -26,8 +26,13 @@ export function isPaymentSemanticallySafe(candidate: string | null | undefined):
 }
 
 /**
- * Neutral fallback used when payment extraction is empty AND no candidate text
- * is semantically safe — preferred over silently reusing unrelated extracted text.
+ * FREE starter: never invent payment. Empty is honest when the visitor said nothing about fees.
  */
-export const NO_PAYMENT_NEUTRAL_FALLBACK =
-  "No fees unless the parties document compensation in a separate writing or amendment.";
+export const NO_PAYMENT_NEUTRAL_FALLBACK = "";
+
+/** True when payment_terms is the invented "no fees unless…" default, not visitor words. */
+export function isInventedNoFeePayment(raw: string | null | undefined): boolean {
+  const t = (raw || "").trim();
+  if (!t) return false;
+  return /no\s+fees\s+unless\s+the\s+parties\s+document\s+compensation/i.test(t);
+}

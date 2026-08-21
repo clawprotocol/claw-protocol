@@ -68,7 +68,7 @@ describe("buildAgreementPreviewText starter opening (Red Mesa)", () => {
     expect(preview).toMatch(/ai workflow|workflow setup/i);
     expect(preview).toMatch(/\$?\s*5,?000|five thousand/i);
     expect(preview).toMatch(/texas/i);
-    expect(preview).toMatch(/electronic signatures?|executed electronically/i);
+    expect(preview).not.toMatch(/executed electronically via LawDog/i);
   });
 });
 

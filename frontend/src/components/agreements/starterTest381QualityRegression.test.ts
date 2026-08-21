@@ -82,18 +82,14 @@ describe("Test381 short-name consulting quality", () => {
     expect(preview).toMatch(/2\.\s+Payment Terms/i);
   });
 
-  it("starter preview has clean termination and separate electronic signature notice", () => {
+  it("starter preview has clean termination and no LawDog e-sign footer", () => {
     const preview = buildStarterPreview(TEST381_SHORT_NAME_CONSULTING_INTAKE);
     expect(preview).not.toMatch(/\.\s*;/);
     expect(preview).toMatch(/5\.\s+Termination/i);
     expect(preview).toMatch(/15\s+calendar\s+day/i);
-    expect(preview).toMatch(new RegExp(AGREEMENT_PREVIEW_ESIGN_NOTICE.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i"));
-    const terminationIdx = preview.search(/5\.\s+Termination/i);
-    const esignIdx = preview.search(/executed electronically via LawDog/i);
-    expect(terminationIdx).toBeGreaterThanOrEqual(0);
-    expect(esignIdx).toBeGreaterThan(terminationIdx);
-    const terminationSlice = preview.slice(terminationIdx, esignIdx);
-    expect(terminationSlice).not.toMatch(/executed electronically via LawDog/i);
+    expect(preview).not.toContain(AGREEMENT_PREVIEW_ESIGN_NOTICE);
+    expect(preview).not.toMatch(/executed electronically via LawDog/i);
+    expect(preview.search(/5\.\s+Termination/i)).toBeGreaterThanOrEqual(0);
   });
 
   it("signer authority remains two for Test381", () => {

@@ -88,6 +88,28 @@ describe("canonical title resolution", () => {
     expect(isGenericOrEmptyTitle("Operating Agreement")).toBe(false);
   });
 
+  it("casual dump echoed as title falls back to family heading", () => {
+    const r = resolveCanonicalAgreementTitle({
+      currentTitle: "deal with Sam",
+      liveDocTitle: "deal with Sam",
+      family: "generic_business_agreement",
+      intakeText: "deal with Sam",
+    });
+    expect(r.title).toBe("Business Agreement");
+    expect(r.source).toBe("family");
+  });
+
+  it("dump that is already a document heading is preserved", () => {
+    const r = resolveCanonicalAgreementTitle({
+      currentTitle: "Apollo Data LLC Operating Agreement",
+      liveDocTitle: "",
+      family: "operating_agreement",
+      intakeText: "Apollo Data LLC Operating Agreement",
+    });
+    expect(r.title).toBe("Apollo Data LLC Operating Agreement");
+    expect(r.source).toBe("preserved");
+  });
+
   it("every AgreementFamily has a canonical title (no missing entries)", () => {
     for (const v of Object.values(CANONICAL_TITLE_FOR_FAMILY)) {
       expect(typeof v).toBe("string");

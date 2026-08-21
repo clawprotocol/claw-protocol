@@ -22,7 +22,7 @@ describe("Pro conversion comparison copy", () => {
   it("exports draft-to-deal heading and free vs pro framing", () => {
     expect(PRO_UPGRADE_CARD_HEADING).toBe("Ready to move this from draft to deal?");
     expect(PRO_UPGRADE_CARD_BODY).toMatch(/Free gives you the draft\. Pro unlocks/i);
-    expect(PRO_UPGRADE_BRIDGE_LINE).toMatch(/another person needs to review/i);
+    expect(PRO_UPGRADE_BRIDGE_LINE).toMatch(/review with the other party, sign, and save/i);
     expect(PRO_UPGRADE_REASSURANCE).toBe("You review everything before anything is shared.");
   });
 

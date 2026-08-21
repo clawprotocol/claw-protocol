@@ -1,3 +1,5 @@
+import { isInventedNoFeePayment, isPaymentSemanticallySafe } from "./paymentSemanticGuard";
+
 /**
  * Five Tenets of a Complete Pro Agreement.
  *
@@ -20,6 +22,23 @@ export type FiveTenetScore = {
   isComplete: boolean;
   missingTenets: string[];
 };
+
+/** Parsed free/paid draft fields used to score tenets (not dump regex alone). */
+export type FiveTenetDraftInput = {
+  title?: string | null;
+  parties?: Array<{ name?: string | null } | string> | null;
+  purpose?: string | null;
+  payment_terms?: string | null;
+  duration?: string | null;
+  due_date?: string | null;
+  effective_date?: string | null;
+  jurisdiction?: string | null;
+  payment?: { amount?: number | string | null; valid?: boolean } | null;
+};
+
+const PLACEHOLDER_DURATION_RE = /^(as stated in the agreement body\.?|tbd|n\/?a|to be determined|—|-)$/i;
+const DEFAULT_EFFECTIVE_RE = /upon full execution/i;
+const PLACEHOLDER_JURISDICTION_RE = /^(tbd|n\/?a|to be determined|unknown|\(empty\)|—|-)$/i;
 
 const PARTY_NAME_PATTERNS = [
   /\b(?:LLC|L\.L\.C\.|Inc\.?|Incorporated|Corp\.?|Corporation|Ltd\.?|Limited|LP|L\.P\.|LLP|PLLC|GmbH|PLC|SA|S\.A\.|AG|KG)\b/i,
@@ -162,38 +181,105 @@ function hasGoverningLaw(text: string): boolean {
   return GOVERNING_LAW_PATTERNS.some((p) => p.test(text));
 }
 
-/**
- * Score intake text against the five tenets of a complete Pro agreement.
- */
-export function scoreFiveTenets(intakeText: string): FiveTenetScore {
-  const text = (intakeText || "").trim();
-  const parties = hasParties(text);
-  const scope = hasScope(text);
-  const payment = hasPayment(text);
-  const term = hasTerm(text);
-  const governingLaw = hasGoverningLaw(text);
+function namedPartiesFromDraft(draft: FiveTenetDraftInput | null | undefined): string[] {
+  return (draft?.parties || [])
+    .map((p) => (typeof p === "string" ? p : String(p?.name || "")).trim())
+    .filter((n) => n && !/^party\s*[ab12]$/i.test(n));
+}
 
+function isPlaceholderDuration(raw: string | null | undefined): boolean {
+  const t = (raw || "").trim();
+  if (!t) return true;
+  return PLACEHOLDER_DURATION_RE.test(t);
+}
+
+function isRealPaymentTerms(
+  raw: string | null | undefined,
+  payment?: { amount?: number | string | null } | null,
+): boolean {
+  const amt = payment?.amount;
+  if (amt != null && String(amt).trim() !== "" && Number(amt) > 0) return true;
+  const t = (raw || "").trim();
+  if (!t) return false;
+  if (isInventedNoFeePayment(t)) return false;
+  if (!isPaymentSemanticallySafe(t)) return false;
+  return t.length >= 2;
+}
+
+function isRealTermFromDraft(draft: FiveTenetDraftInput): boolean {
+  const duration = (draft.duration || "").trim();
+  if (duration && !isPlaceholderDuration(duration) && !DEFAULT_EFFECTIVE_RE.test(duration)) return true;
+  if ((draft.due_date || "").trim()) return true;
+  return false;
+}
+
+function isRealJurisdiction(raw: string | null | undefined): boolean {
+  const t = (raw || "").trim();
+  if (!t || PLACEHOLDER_JURISDICTION_RE.test(t)) return false;
+  return true;
+}
+
+function assembleFiveTenetScore(
+  parties: boolean,
+  scope: boolean,
+  payment: boolean,
+  term: boolean,
+  governingLaw: boolean,
+): FiveTenetScore {
   const presentCount = [parties, scope, payment, term, governingLaw].filter(Boolean).length;
-  const score = Math.round((presentCount / 5) * 100);
-  const isComplete = parties && scope && payment && term && governingLaw;
-
   const missingTenets: string[] = [];
   if (!parties) missingTenets.push("parties");
   if (!scope) missingTenets.push("scope");
   if (!payment) missingTenets.push("payment");
   if (!term) missingTenets.push("term");
   if (!governingLaw) missingTenets.push("governing_law");
-
   return {
     parties,
     scope,
     payment,
     term,
     governingLaw,
-    score,
-    isComplete,
+    score: Math.round((presentCount / 5) * 100),
+    isComplete: parties && scope && payment && term && governingLaw,
     missingTenets,
   };
+}
+
+/**
+ * Score a parsed free/paid draft. Empty payment_terms, duration, or jurisdiction
+ * are missing tenets even when title/parties/purpose are filled. Does not treat
+ * "Mutual NDA" title or placeholder duration as payment/term.
+ */
+export function scoreFiveTenetsFromDraft(
+  draft: FiveTenetDraftInput,
+  intakeText = "",
+): FiveTenetScore {
+  const dump = (intakeText || "").trim();
+  const named = namedPartiesFromDraft(draft);
+  const purpose = (draft.purpose || "").trim();
+  const title = (draft.title || "").trim();
+  const parties = named.length >= 2 || hasParties(dump);
+  const scope = purpose.length >= 8 || hasScope(purpose) || hasScope(title) || hasScope(dump);
+  const payment = isRealPaymentTerms(draft.payment_terms, draft.payment);
+  const term = isRealTermFromDraft(draft);
+  const governingLaw = isRealJurisdiction(draft.jurisdiction);
+  return assembleFiveTenetScore(parties, scope, payment, term, governingLaw);
+}
+
+/**
+ * Score intake text against the five tenets of a complete Pro agreement.
+ * When a parsed draft is provided, score those fields — not dump regex alone.
+ */
+export function scoreFiveTenets(intakeText: string, draft?: FiveTenetDraftInput | null): FiveTenetScore {
+  if (draft) return scoreFiveTenetsFromDraft(draft, intakeText);
+  const text = (intakeText || "").trim();
+  return assembleFiveTenetScore(
+    hasParties(text),
+    hasScope(text),
+    hasPayment(text),
+    hasTerm(text),
+    hasGoverningLaw(text),
+  );
 }
 
 export type ContradictionResult = {
@@ -259,19 +345,25 @@ export function detectContradictions(intakeText: string): ContradictionResult {
  * Determine if we should skip ask-before-draft and render immediately.
  * Skip if all five tenets are present in the intake AND no contradictions.
  */
-export function shouldSkipAskAndRenderImmediately(intakeText: string): boolean {
+export function shouldSkipAskAndRenderImmediately(
+  intakeText: string,
+  draft?: FiveTenetDraftInput | null,
+): boolean {
   const contradictions = detectContradictions(intakeText);
   if (contradictions.hasContradiction) return false;
-  const score = scoreFiveTenets(intakeText);
+  const score = scoreFiveTenets(intakeText, draft);
   return score.isComplete;
 }
 
 /**
  * Extract which topics to ask about based on missing tenets.
  */
-export function getMissingTenetTopics(intakeText: string): string[] {
-  const score = scoreFiveTenets(intakeText);
-  return score.missingTenets;
+export function getMissingTenetTopics(
+  intakeText: string,
+  draft?: FiveTenetDraftInput | null,
+): string[] {
+  const score = scoreFiveTenets(intakeText, draft);
+  return score.missingTenets.slice(0, 5);
 }
 
 export type NoiseFilterResult = {
@@ -306,24 +398,120 @@ export function looksLikeCasualProseNotParties(text: string): boolean {
  * Check if the intake is too sparse to draft - must ask questions instead.
  * Returns true if the intake is insufficient and needs clarification.
  */
-export function intakeRequiresClarification(intakeText: string): boolean {
+export function intakeRequiresClarification(
+  intakeText: string,
+  draft?: FiveTenetDraftInput | null,
+): boolean {
   const text = (intakeText || "").trim();
   if (!text || text.length < 15) return true;
-  if (looksLikeCasualProseNotParties(text)) return true;
-  const score = scoreFiveTenets(text);
+  if (!draft && looksLikeCasualProseNotParties(text)) return true;
+  const score = scoreFiveTenets(text, draft);
+  if (score.isComplete) return false;
   if (score.score === 0) return true;
-  if (!score.parties && !score.scope) return true;
+  // Empty payment, term, or governing law always force a 2–5 ask — even when parties+scope exist.
+  if (!score.payment || !score.term || !score.governingLaw) return true;
+  if (!score.parties || !score.scope) return true;
   return false;
+}
+
+/**
+ * Missing tenets to ask before paid generate. Scores the parsed draft when given.
+ * Never re-asks parties/scope if those fields are already present. Cap 5.
+ */
+export function getRequiredClarificationTopics(
+  intakeText: string,
+  draft?: FiveTenetDraftInput | null,
+): string[] {
+  const score = scoreFiveTenets(intakeText, draft);
+  if (score.isComplete) return [];
+  return score.missingTenets.slice(0, 5);
+}
+
+function counterpartyHint(draft?: FiveTenetDraftInput | null): string {
+  const names = namedPartiesFromDraft(draft);
+  return names.find((n) => !/^client$/i.test(n)) || names[0] || "";
+}
+
+function looksLikeNda(intakeText: string, draft?: FiveTenetDraftInput | null): boolean {
+  const blob = `${draft?.title || ""} ${draft?.purpose || ""} ${intakeText || ""}`;
+  return /\b(?:nda|non-?disclosure|confidentiality)\b/i.test(blob);
+}
+
+function shortPurpose(draft?: FiveTenetDraftInput | null, intakeText = ""): string {
+  const purpose = (draft?.purpose || "").trim().replace(/\.+$/, "");
+  if (purpose) return purpose;
+  const dump = (intakeText || "").trim().replace(/\.+$/, "");
+  return dump.length > 90 ? `${dump.slice(0, 87)}…` : dump;
+}
+
+/**
+ * 2–5 questions specific to what the visitor already typed. Never suggests Delaware or no-fees.
+ */
+export function buildLocalMissingTenetQuestions(
+  intakeText: string,
+  draft?: FiveTenetDraftInput | null,
+): string[] {
+  const topics = getRequiredClarificationTopics(intakeText, draft);
+  const who = counterpartyHint(draft);
+  const purpose = shortPurpose(draft, intakeText);
+  const nda = looksLikeNda(intakeText, draft);
+  const paymentKnown = isRealPaymentTerms(draft?.payment_terms, draft?.payment);
+
+  return topics.slice(0, 5).map((topic) => {
+    switch (topic) {
+      case "parties":
+        return "Who are the parties to this agreement? Please provide full legal names.";
+      case "scope":
+        return "What is the purpose or scope of this agreement? What services or work will be performed?";
+      case "payment":
+        if (nda) {
+          return who
+            ? `This NDA with ${who}${purpose ? ` (${purpose})` : ""} does not list any payment. Is there a fee or other consideration?`
+            : `This NDA${purpose ? ` (${purpose})` : ""} does not list any payment. Is there a fee or other consideration?`;
+        }
+        if (who && purpose) {
+          return `${who} is already named for this work (${purpose}), but no payment amount is listed. What are the payment terms?`;
+        }
+        if (who) {
+          return `No payment amount is listed for the agreement with ${who}. What are the payment terms?`;
+        }
+        return "What are the payment terms? Include amounts, timing, and any conditions.";
+      case "term":
+        if (who) {
+          return `How long does this agreement with ${who} last? When does it start and end?`;
+        }
+        return "What is the duration of this agreement? When does it start and end?";
+      case "governing_law":
+        if (nda && who) {
+          return `This NDA with ${who}${purpose ? ` (${purpose})` : ""} does not say which state's law governs. Which state's law should apply?`;
+        }
+        if (paymentKnown && who) {
+          const pay = (draft?.payment_terms || "").trim();
+          return pay
+            ? `${who} is already named and payment is ${pay}, but no governing law was given. Which state's law should govern this agreement?`
+            : `${who} is already named, but no governing law was given. Which state's law should govern this agreement?`;
+        }
+        if (who) {
+          return `${who} is already named, but no governing law was given. Which state's law should govern this agreement?`;
+        }
+        return "Which state's law should govern this agreement?";
+      default:
+        return `Please clarify: ${topic}`;
+    }
+  });
 }
 
 /**
  * Enhanced check that includes contradiction detection.
  * Returns true if we should ask questions (contradictions or missing tenets).
  */
-export function shouldAskDueToContradictionsOrMissing(intakeText: string): boolean {
+export function shouldAskDueToContradictionsOrMissing(
+  intakeText: string,
+  draft?: FiveTenetDraftInput | null,
+): boolean {
   const contradictions = detectContradictions(intakeText);
   if (contradictions.hasContradiction) return true;
-  return intakeRequiresClarification(intakeText);
+  return intakeRequiresClarification(intakeText, draft);
 }
 
 const NOISE_PATTERNS = [

@@ -296,6 +296,17 @@ export function apiUrlWithFallback(path: string): string | null {
   return `${fallbackBase}${p}`;
 }
 
+const PAID_CONTINUE_PERSIST_DRAFT_PATH = "/api/agreements/draft";
+
+/**
+ * Paid Continue persist URL. Prefer the production backend host when a
+ * fallback base is configured so the first attempt does not depend on the
+ * lawdog.me same-origin `/api` proxy (currently HTTP 500 empty body).
+ */
+export function resolvePaidContinuePersistDraftUrl(): string {
+  return apiUrlWithFallback(PAID_CONTINUE_PERSIST_DRAFT_PATH) ?? apiUrl(PAID_CONTINUE_PERSIST_DRAFT_PATH);
+}
+
 /**
  * Check if an error is a "Failed to fetch" network error that could be retried
  * with the fallback backend URL.

@@ -235,9 +235,9 @@ describe("§4 Confidentiality tokens never leak into Payment Terms", () => {
     expect(r.payment_terms.toLowerCase()).not.toContain("non-disclosure");
   });
 
-  it("provides a neutral no-fee fallback constant (public-facing copy)", () => {
-    expect(NO_PAYMENT_NEUTRAL_FALLBACK).toMatch(/no\s+fees|no\s+payment/i);
-    expect(NO_PAYMENT_NEUTRAL_FALLBACK).not.toMatch(/in\s+review/i);
+  it("provides an empty payment fallback (visitor words only — no invented no-fees)", () => {
+    expect(NO_PAYMENT_NEUTRAL_FALLBACK).toBe("");
+    expect(NO_PAYMENT_NEUTRAL_FALLBACK).not.toMatch(/no\s+fees|in\s+review/i);
   });
 });
 

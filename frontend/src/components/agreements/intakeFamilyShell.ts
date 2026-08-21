@@ -2,9 +2,11 @@
  * Family-aware deterministic shells so non–service-contract intakes still produce a reviewable draft.
  * No extra API calls.
  */
-import { applyNamedPartyFallbackFromIntake, tryInferNamedPartiesFromIntake } from "./intakeNamedPartyFallback";
+import { applyNamedPartyFallbackFromIntake, composeCasualPurposeSentence, inferCasualScopeFromDump, looksLikeMoneyTermOrClausePartyName, looksLikePurposeFragment, tryInferNamedPartiesFromIntake } from "./intakeNamedPartyFallback";
+import { applyVisitorHirerUnnamedRoleOrderGuard } from "./visitorHirerRoleOrder";
 import {
   detectAgreementFamily,
+  isHireToDoWorkNotEmployment,
   needsServiceBilateralSmartDefaults,
   type AgreementFamily,
 } from "./agreementFamilyRouter";
@@ -24,8 +26,9 @@ import {
 import { applyIntakePartyRoleOverlay, type IntakePartyRoleLabels } from "./partyRoleIntake";
 import { applySimpleFlowSmartDefaults, type ParsedDraftShape } from "./intakeSmartDefaults";
 import { preserveExtractedFacts } from "./draftFactPreservation";
-import { normalizeAgreementDisplayTitle, resolveCanonicalAgreementTitle } from "./canonicalAgreementTitle";
-import { isPaymentSemanticallySafe } from "./paymentSemanticGuard";
+import { isGenericOrEmptyTitle, normalizeAgreementDisplayTitle, resolveCanonicalAgreementTitle } from "./canonicalAgreementTitle";
+import { resolveAgreementTitleFromIntakeScope } from "./paidProAgreementTitleScope";
+import { isInventedNoFeePayment, isPaymentSemanticallySafe, NO_PAYMENT_NEUTRAL_FALLBACK } from "./paymentSemanticGuard";
 import { applyPartyNameCasingPassToDraft } from "../../agreement/partyNameDisplayCasing";
 import { isPreservableIntakeRole } from "./canonicalPartyRoleAuthority";
 
@@ -33,6 +36,12 @@ const MAX_PARTY_NAME_LEN = 280;
 
 function nz(s: string | null | undefined): string {
   return (s || "").trim();
+}
+
+function usableAuthorityParties(
+  parties: { id?: string; name: string; role: string; email?: string }[],
+): { id?: string; name: string; role: string; email?: string }[] {
+  return parties.filter((p) => !looksLikeMoneyTermOrClausePartyName(p.name));
 }
 
 /**
@@ -375,8 +384,10 @@ export function applyAgreementFamilyIntakeShell(
       title = isMutual ? "Mutual Non-Disclosure Agreement" : "Non-Disclosure Agreement";
     }
     let jurisdiction = nz(parsed.jurisdiction);
-    if (!jurisdiction || jurisdiction.toLowerCase() === "tbd") {
-      jurisdiction = nz(structured.governing_law) || "Delaware";
+    if (!jurisdiction || jurisdiction.toLowerCase() === "tbd" || jurisdiction.toLowerCase() === "delaware") {
+      const stated = nz(structured.governing_law);
+      const intakeStatesLaw = /\b(?:delaware|california|arizona|texas|florida|nevada|washington|illinois|new york|governing law)\b/i.test(intakeText);
+      jurisdiction = stated || (intakeStatesLaw && jurisdiction.toLowerCase() === "delaware" ? "Delaware" : "");
     }
     let parties = [...(parsed.parties || [])];
     if (parties.length < 2) {
@@ -409,9 +420,8 @@ export function applyAgreementFamilyIntakeShell(
       (isMutual
         ? "Mutual protection of confidential and proprietary information exchanged between the parties for the relationship described in this agreement."
         : "Protection of confidential and proprietary information disclosed between the parties for the relationship described in this agreement.");
-    const payment_terms =
-      nz(parsed.payment_terms) ||
-      "No fees unless the parties document compensation in a separate writing or amendment.";
+    const existingPay = nz(parsed.payment_terms);
+    const payment_terms = existingPay && !isInventedNoFeePayment(existingPay) ? existingPay : NO_PAYMENT_NEUTRAL_FALLBACK;
     const duration = nz(parsed.duration) || nz(structured.term) || live.termLine || "As stated in the agreement body.";
     const effective_date =
       nz(parsed.effective_date) || "Upon full execution by the parties.";
@@ -479,12 +489,18 @@ export function applyAgreementFamilyIntakeShell(
           ],
         };
       } else {
+        const scoped = inferCasualScopeFromDump(intakeText);
         next = {
           ...next,
-          parties: [
-            { name: "Party A", role: "party" },
-            { name: "Party B", role: "party" },
-          ],
+          parties: scoped
+            ? [
+                { name: "Client", role: "client" },
+                { name: "Service Provider", role: "service_provider" },
+              ]
+            : [
+                { name: "Party A", role: "party" },
+                { name: "Party B", role: "party" },
+              ],
         };
       }
     }
@@ -499,21 +515,23 @@ export function applyAgreementFamilyIntakeShell(
     });
     next = { ...next, title: resolved.title };
   }
-  if (!nz(next.jurisdiction) || nz(next.jurisdiction).toLowerCase() === "tbd") {
-    next = { ...next, jurisdiction: nz(structured.governing_law) || "Delaware" };
+  if (!nz(next.jurisdiction) || nz(next.jurisdiction).toLowerCase() === "tbd" || nz(next.jurisdiction).toLowerCase() === "delaware") {
+    const stated = nz(structured.governing_law);
+    const intakeStatesLaw = /\b(?:delaware|california|arizona|texas|florida|nevada|washington|illinois|new york|governing law)\b/i.test(intakeText);
+    next = { ...next, jurisdiction: stated || (intakeStatesLaw ? nz(next.jurisdiction) : "") };
   }
   if (!nz(next.purpose)) {
     next = {
       ...next,
-      purpose: nz(structured.scope) || nz(live.scopeLine) || "Commercial arrangement to be agreed between the parties.",
+      purpose: nz(structured.scope) || nz(live.scopeLine) || inferCasualScopeFromDump(intakeText) || "Commercial arrangement to be agreed between the parties.",
     };
   }
-  if (!nz(next.payment_terms)) {
+  if (!nz(next.payment_terms) || isInventedNoFeePayment(next.payment_terms)) {
     const structuredPayment = isPaymentSemanticallySafe(structured.payment) ? nz(structured.payment) : "";
     const liveComp = isPaymentSemanticallySafe(live.compensationLine) ? nz(live.compensationLine) : "";
     next = {
       ...next,
-      payment_terms: structuredPayment || liveComp || "No fees unless the parties document compensation in a separate writing or amendment.",
+      payment_terms: structuredPayment || liveComp || NO_PAYMENT_NEUTRAL_FALLBACK,
     };
   }
   if (!nz(next.duration) && !nz(next.due_date)) {
@@ -566,7 +584,9 @@ export function preserveLargestPartyListFromIntake(
 ): ParsedDraftShape {
   const structured = parseIntakeToStructuredAgreement(intakeText);
   if (structured.partiesUncertain) return draft;
-  const structuredNames = structured.parties.map((n) => (n || "").trim()).filter((n) => n.length > 1);
+  const structuredNames = structured.parties
+    .map((n) => (n || "").trim())
+    .filter((n) => n.length > 1 && !looksLikeMoneyTermOrClausePartyName(n));
   if (structuredNames.length < 3) return draft;
 
   const currentNames = (draft.parties || [])
@@ -605,6 +625,51 @@ export function clearAgreementFamilyRouteLogDedupe(): void {
   loggedFamilyRouteKeys.clear();
 }
 
+
+function namedProviderFromDraft(draft: ParsedDraftShape): string {
+  const named = (draft.parties || []).find((p) => {
+    const n = (p.name || "").trim();
+    return n && !/^(client|service provider|party [ab])$/i.test(n);
+  });
+  return (named?.name || "").trim();
+}
+
+/**
+ * Free one-pager title + purpose: use title-from-scope when the heading is still
+ * generic / Employment-from-hire, and write a one-line purpose from their words.
+ */
+function applyCasualDumpTitleAndPurpose(draft: ParsedDraftShape, intakeText: string): ParsedDraftShape {
+  const intake = (intakeText || "").trim();
+  const scoped = resolveAgreementTitleFromIntakeScope(intake);
+  const current = (draft.title || "").trim();
+  const family = draft.agreement_family;
+  const hireToWork = isHireToDoWorkNotEmployment(intake);
+  const casual =
+    hireToWork ||
+    Boolean(inferCasualScopeFromDump(intake)) ||
+    /\b(?:nda|non[\s-]?disclosure)\b/i.test(intake);
+  const replaceable =
+    !current ||
+    isGenericOrEmptyTitle(current, family) ||
+    /^business\s+agreement$/i.test(current) ||
+    /^services?\s+agreement$/i.test(current) ||
+    (/^employment\s+agreement$/i.test(current) && hireToWork);
+  const specific = scoped.source !== "generic-services";
+  let title = current;
+  if (replaceable && scoped.recitalPhrase && (specific || casual || hireToWork)) {
+    title = scoped.recitalPhrase;
+  }
+
+  const existingPurpose = (draft.purpose || "").trim();
+  const sentence = composeCasualPurposeSentence(intake, namedProviderFromDraft(draft));
+  const purpose =
+    sentence && (looksLikePurposeFragment(existingPurpose) || existingPurpose === inferCasualScopeFromDump(intake))
+      ? sentence
+      : existingPurpose;
+
+  return { ...draft, title, purpose: purpose || existingPurpose };
+}
+
 export function runIntakeDefaultsAndRoles(
   parsed: ParsedDraftShape,
   rawIntake: string,
@@ -616,10 +681,13 @@ export function runIntakeDefaultsAndRoles(
   writeLegalPartyAuthorityToSession(legalAuthority);
 
   let next: ParsedDraftShape = { ...parsed, agreement_family: family };
-  if (readLegalPartyCountFromAuthority(legalAuthority.parties) >= 2) {
+  const authorityParties = usableAuthorityParties(
+    projectLegalPartyAuthorityToStarterDraftParties(legalAuthority.parties),
+  );
+  if (authorityParties.length >= 2) {
     next = {
       ...next,
-      parties: projectLegalPartyAuthorityToStarterDraftParties(legalAuthority.parties),
+      parties: authorityParties,
     };
   }
   const routeKey = `${family}:${rawIntake.slice(0, 120)}`;
@@ -650,10 +718,13 @@ export function runIntakeDefaultsAndRoles(
   next = applyIntakePartyRoleOverlay(next, roles);
   // Final P0 cardinality guard — when legal-party authority is established, it wins over
   // legacy structured/between downsizing. Otherwise preserve largest structured list.
-  if (readLegalPartyCountFromAuthority(legalAuthority.parties) >= 2) {
+  const closingAuthority = usableAuthorityParties(
+    projectLegalPartyAuthorityToStarterDraftParties(legalAuthority.parties),
+  );
+  if (closingAuthority.length >= 2) {
     next = {
       ...next,
-      parties: projectLegalPartyAuthorityToStarterDraftParties(legalAuthority.parties).map((p) => {
+      parties: closingAuthority.map((p) => {
         const overlay = (next.parties ?? []).find(
           (row) =>
             row.id === p.id ||
@@ -671,6 +742,11 @@ export function runIntakeDefaultsAndRoles(
   } else {
     next = preserveLargestPartyListFromIntake(next, rawIntake);
   }
+  next = applyNamedPartyFallbackFromIntake(next, rawIntake);
   next = applyPartyNameCasingPassToDraft(next, rawIntake);
+  if (simpleProductFlow) {
+    next = applyCasualDumpTitleAndPurpose(next, rawIntake);
+    next = applyVisitorHirerUnnamedRoleOrderGuard(next, rawIntake);
+  }
   return { ...next, title: normalizeAgreementDisplayTitle(next.title) };
 }

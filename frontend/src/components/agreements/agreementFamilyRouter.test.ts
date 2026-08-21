@@ -30,6 +30,23 @@ describe("detectAgreementFamily", () => {
     ).toBe("independent_contractor_agreement");
   });
 
+  it("routes hire-to-do-work as services, not generic business", () => {
+    expect(detectAgreementFamily("Hire Alex to build our shopify theme, $3k, two weeks")).toBe(
+      "services_agreement",
+    );
+    expect(detectAgreementFamily("I hired Mike to paint my office. We shook on it.")).toBe(
+      "services_agreement",
+    );
+  });
+
+  it("still routes explicit employment agreement as generic so Employment title can stand", () => {
+    expect(
+      detectAgreementFamily(
+        "Create an employment agreement for John Smith in Acme LLC for $20 an hour.",
+      ),
+    ).toBe("generic_business_agreement");
+  });
+
   it("defaults generic business", () => {
     expect(detectAgreementFamily("Simple agreement between two companies to share leads.")).toBe(
       "generic_business_agreement",

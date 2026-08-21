@@ -14,6 +14,7 @@ import {
 } from "./intakeStructuredAgreementModel";
 import { splitTwoPartiesFromJoinedLine, type StructuredTwoParties } from "./partyIntakeNormalize";
 import { normalizeAgreementDisplayTitle } from "./canonicalAgreementTitle";
+import { isHireToDoWorkNotEmployment } from "./agreementFamilyRouter";
 
 export type LivePreviewModel = {
   docTitle: string;
@@ -117,7 +118,13 @@ function inferDocTitle(lower: string, firstLine: string): string {
   ) {
     return "Lease Agreement";
   }
-  if (/\b(employ|hire|salary|w-2|w2|onboarding)\b/.test(lower)) return "Employment Agreement";
+  // "hire X to paint/build" is a services job — not an employee / W-2 hire.
+  if (
+    /\b(?:employment|employee|salary|w-2|w2|onboarding)\b/.test(lower) &&
+    !isHireToDoWorkNotEmployment(lower)
+  ) {
+    return "Employment Agreement";
+  }
   if (/\b(mow|lawn|landscap|clean(ing)?|maintain|plumb|electric|hvac)\b/.test(lower)) return "Service Agreement";
   if (/\b(saas|software|license|subscription)\b/.test(lower)) return "Software / Services Agreement";
   if (/\b(purchase|sale|buy|sell)\b/.test(lower)) return "Purchase Agreement";

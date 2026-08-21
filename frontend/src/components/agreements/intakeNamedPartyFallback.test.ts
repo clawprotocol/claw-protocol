@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { applyNamedPartyFallbackFromIntake, tryInferNamedPartiesFromIntake } from "./intakeNamedPartyFallback";
+import { applyNamedPartyFallbackFromIntake, inferCasualScopeFromDump, inferCasualTwoPartyFromDump, looksLikeMoneyTermOrClausePartyName, tryInferNamedPartiesFromIntake } from "./intakeNamedPartyFallback";
+import { assessStarterComplexityGate } from "./starterMultiPartyProGate";
 import { draftHasPlaceholderParties, draftHasPlaceholderFieldsForRecipients } from "./reviewPlaceholderGuard";
 import { runIntakeDefaultsAndRoles } from "./intakeFamilyShell";
 import { canonicalizeStarterDraftForReview } from "./starterRecipientDraftMerge";
+import { buildAgreementPreviewText } from "./agreementPreviewFromDraft";
 import { defaultIntakePartyRoleLabels } from "./partyRoleIntake";
 import { detectAgreementFamily } from "./agreementFamilyRouter";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
@@ -94,6 +96,28 @@ describe("tryInferNamedPartiesFromIntake", () => {
     expect(out).not.toBeNull();
     expect(out![0].name).toBe("Alpha Corp");
     expect(out![1].name).toBe("Beta Ltd");
+  });
+
+  it("grounds a casual hire dump to the named person", () => {
+    const raw = "I hired Mike to paint my office. We shook on it.";
+    const out = tryInferNamedPartiesFromIntake(raw);
+    expect(out).not.toBeNull();
+    expect(out!.map((p) => p.name)).toContain("Mike");
+    expect(out!.some((p) => /party\s*[ab]/i.test(p.name))).toBe(false);
+  });
+
+  it("grounds a deal-with-name dump that has no hire verb", () => {
+    const raw = "need a painting deal with Mike for my office";
+    const out = tryInferNamedPartiesFromIntake(raw);
+    expect(out).not.toBeNull();
+    expect(out!.map((p) => p.name)).toContain("Mike");
+  });
+
+  it("grounds a will-do dump", () => {
+    const raw = "Sarah will design my website";
+    const out = tryInferNamedPartiesFromIntake(raw);
+    expect(out).not.toBeNull();
+    expect(out!.map((p) => p.name)).toContain("Sarah");
   });
 });
 
@@ -214,6 +238,63 @@ describe("full pipeline: multi-party intake → draft (QA scenario)", () => {
     expect(result.parties[0].name).toMatch(/Acme Corp/i);
     expect(result.parties[1].name).toMatch(/Widget LLC/i);
     expect(draftHasPlaceholderParties(result)).toBe(false);
+  });
+
+  it("Mike-paint dump keeps Mike, the work, and does not invent payment or Delaware", () => {
+    const raw = "I hired Mike to paint my office. We shook on it.";
+    const result = runIntakeDefaultsAndRoles(emptyDraft(), raw, true, defaultIntakePartyRoleLabels());
+    const names = result.parties.map((p) => p.name).join(" ");
+    expect(names).toMatch(/Mike/);
+    expect(names).toMatch(/Client/i);
+    expect(names).not.toMatch(/Party\s*A/i);
+    expect(result.purpose).toMatch(/paint/i);
+    expect(result.payment_terms || "").not.toMatch(/no\s+fees|unpaid|\$0\b/i);
+    expect(result.jurisdiction || "").not.toMatch(/delaware/i);
+    expect((result.jurisdiction || "").trim()).toBe("");
+    const canonical = canonicalizeStarterDraftForReview(result);
+    expect(canonical.parties.some((p) => /Mike/i.test(p.name))).toBe(true);
+    expect(canonical.parties.some((p) => /Client/i.test(p.name))).toBe(true);
+    expect(canonical.jurisdiction || "").not.toMatch(/delaware/i);
+    expect((canonical.jurisdiction || "").trim()).toBe("");
+    expect(canonical.payment_terms || "").not.toMatch(/no\s+fees|unpaid|\$0\b/i);
+    expect(canonical.parties.some((p) => /Party\s*A/i.test(p.name))).toBe(false);
+    expect(canonical.title).toMatch(/painting agreement|services agreement/i);
+    expect(canonical.title).not.toMatch(/^business agreement$/i);
+    expect(canonical.purpose).toMatch(/paint/i);
+    expect(canonical.purpose).toMatch(/office/i);
+    expect(canonical.purpose).toMatch(/\./);
+    expect(canonical.purpose).not.toMatch(/^paint my office$/i);
+    expect(canonical.purpose).not.toMatch(/\$|no\s+fees|delaware/i);
+  });
+
+  it("Jordan NDA dump keeps Jordan and does not invent Delaware", () => {
+    const raw = "nda between me and Jordan about the app idea";
+    const result = runIntakeDefaultsAndRoles(emptyDraft(), raw, true, defaultIntakePartyRoleLabels());
+    const names = result.parties.map((p) => p.name).join(" ");
+    expect(names).toMatch(/Jordan/i);
+    expect(names).toMatch(/Client/i);
+    expect(result.jurisdiction || "").not.toMatch(/delaware/i);
+    expect((result.jurisdiction || "").trim()).toBe("");
+    expect(result.payment_terms || "").not.toMatch(/no\s+fees|unpaid|\$0\b/i);
+    const canonical = canonicalizeStarterDraftForReview(result);
+    expect(canonical.parties.some((p) => /Jordan/i.test(p.name))).toBe(true);
+    expect(canonical.parties.some((p) => /Client/i.test(p.name))).toBe(true);
+    expect((canonical.jurisdiction || "").trim()).toBe("");
+    expect(canonical.jurisdiction || "").not.toMatch(/delaware/i);
+    expect(canonical.payment_terms || "").not.toMatch(/no\s+fees|unpaid|\$0\b/i);
+    expect(canonical.title).toMatch(/non-disclosure agreement/i);
+    expect(canonical.purpose).toMatch(/app idea/i);
+    expect(canonical.jurisdiction || "").not.toMatch(/delaware/i);
+  });
+
+  it("Sarah wedding dump keeps $1800", () => {
+    const raw = "Sarah will photograph our wedding on June 12. We agreed $1800 cash.";
+    const result = runIntakeDefaultsAndRoles(emptyDraft(), raw, true, defaultIntakePartyRoleLabels());
+    expect(result.parties.map((p) => p.name).join(" ")).toMatch(/Sarah/i);
+    expect(result.payment_terms || "").toMatch(/1[,.]?800/);
+    const canonical = canonicalizeStarterDraftForReview(result);
+    expect(canonical.payment_terms || "").toMatch(/1[,.]?800/);
+    expect(canonical.jurisdiction || "").not.toMatch(/delaware/i);
   });
 });
 
@@ -339,5 +420,185 @@ describe("agreement family routing: service/web/dev agreements with confidential
     const intake = "Confidentiality agreement for a real estate transaction";
     const family = detectAgreementFamily(intake);
     expect(family).toBe("nda");
+  });
+});
+
+describe("casual two-party dump widening", () => {
+  const NAMED: Array<[string, string]> = [
+    ["Sarah will photograph our wedding on June 12. We agreed $1800 cash.", "Sarah"],
+    ["nda between me and Jordan about the app idea", "Jordan"],
+    ["can you write something for my lawn guy Luis, he starts monday", "Luis"],
+    ["me and Priya are splitting the etsy shop 50/50", "Priya"],
+    ["I sold my bike to Taylor for $200 cash", "Taylor"],
+    ["pay Riley $40 a week to walk the dog", "Riley"],
+    ["I hired Mike to paint my office. We shook on it.", "Mike"],
+    ["deal with Sam", "Sam"],
+    ["Hire Alex to build our shopify theme, $3k, two weeks", "Alex"],
+  ];
+
+  it.each(NAMED)("infers Client + %s", (dump, name) => {
+    const out = inferCasualTwoPartyFromDump(dump);
+    expect(out).not.toBeNull();
+    expect(out!.map((p) => p.name)).toEqual(expect.arrayContaining(["Client", name]));
+    expect(out!.some((p) => /party\s*[ab]/i.test(p.name))).toBe(false);
+    expect(tryInferNamedPartiesFromIntake(dump)?.map((p) => p.name)).toEqual(
+      expect.arrayContaining([name]),
+    );
+  });
+
+  it("fence dump has scope only and does not invent parties", () => {
+    const dump = "need someone to fix the broken fence";
+    expect(inferCasualTwoPartyFromDump(dump)).toBeNull();
+    expect(inferCasualScopeFromDump(dump)).toMatch(/fence/i);
+  });
+
+  it.each([
+    "my dog is named Biscuit and the trucks are teal",
+    "lol just testing this, pizza is great",
+    "I need a contract",
+    "I just want an nda",
+  ])("does not treat junk or counterparty-less intake as a two-party deal: %s", (dump) => {
+    expect(inferCasualTwoPartyFromDump(dump)).toBeNull();
+    expect(inferCasualScopeFromDump(dump)).toBe("");
+  });
+});
+
+describe("full pipeline: money/term/clause fragments never become party names", () => {
+  it("Hire Alex dump keeps Alex through the full pipeline, not Party A or $3k", () => {
+    const raw = "Hire Alex to build our shopify theme, $3k, two weeks";
+    const before = inferCasualTwoPartyFromDump(raw);
+    expect(before?.map((p) => p.name)).toEqual(expect.arrayContaining(["Client", "Alex"]));
+    const result = runIntakeDefaultsAndRoles(emptyDraft(), raw, true, defaultIntakePartyRoleLabels());
+    const names = result.parties.map((p) => p.name);
+    expect(names).toContain("Alex");
+    expect(names.some((n) => /party\s*[ab]/i.test(n))).toBe(false);
+    expect(names.some((n) => /\$|3k|two\s+weeks/i.test(n))).toBe(false);
+    expect(result.purpose).toMatch(/shopify/i);
+    const canonical = canonicalizeStarterDraftForReview(result);
+    const canonNames = canonical.parties.map((p) => p.name);
+    expect(canonNames).toContain("Alex");
+    expect(canonNames.some((n) => /party\s*[ab]/i.test(n))).toBe(false);
+    expect(canonNames.some((n) => /\$|3k|two\s+weeks/i.test(n))).toBe(false);
+    expect(canonical.purpose).toMatch(/shopify/i);
+    expect(canonical.purpose).toMatch(/theme/i);
+    expect(canonical.title).toMatch(/services agreement/i);
+    expect(canonical.title).not.toMatch(/employment/i);
+    expect(result.agreement_family).toBe("services_agreement");
+    expect(canonical.payment_terms || "").toMatch(/3[,.]?000|3k|\$3/i);
+    expect(assessStarterComplexityGate(raw).required).toBe(false);
+  });
+
+  it("Red Mesa dump keeps Anthem + Red Mesa LLC, not They Pay Monthly", () => {
+    const raw = "Consulting for Red Mesa LLC, I am Anthem, they pay monthly";
+    const inferred = inferCasualTwoPartyFromDump(raw);
+    expect(inferred).not.toBeNull();
+    expect(inferred!.map((p) => p.name)).toEqual(expect.arrayContaining(["Anthem", "Red Mesa LLC"]));
+    const result = runIntakeDefaultsAndRoles(emptyDraft(), raw, true, defaultIntakePartyRoleLabels());
+    const names = result.parties.map((p) => p.name);
+    expect(names.some((n) => /Anthem/i.test(n))).toBe(true);
+    expect(names.some((n) => /Red Mesa/i.test(n))).toBe(true);
+    expect(names.some((n) => /they\s+pay/i.test(n))).toBe(false);
+    const canonical = canonicalizeStarterDraftForReview(result);
+    const canonNames = canonical.parties.map((p) => p.name);
+    expect(canonNames.some((n) => /Anthem/i.test(n))).toBe(true);
+    expect(canonNames.some((n) => /Red Mesa/i.test(n))).toBe(true);
+    expect(canonNames.some((n) => /they\s+pay/i.test(n))).toBe(false);
+    expect(assessStarterComplexityGate(raw).required).toBe(false);
+  });
+
+  it.each([
+    "my dog is named Biscuit and the trucks are teal",
+    "lol just testing this, pizza is great",
+    "I need a contract",
+  ])("keeps junk gated: %s", (dump) => {
+    expect(assessStarterComplexityGate(dump).required).toBe(true);
+    expect(inferCasualTwoPartyFromDump(dump)).toBeNull();
+  });
+
+  it("rejects money, term, and they-pay fragments as party names", () => {
+    expect(looksLikeMoneyTermOrClausePartyName("$3k, Two Weeks")).toBe(true);
+    expect(looksLikeMoneyTermOrClausePartyName("They Pay Monthly")).toBe(true);
+    expect(looksLikeMoneyTermOrClausePartyName("two weeks")).toBe(true);
+    expect(looksLikeMoneyTermOrClausePartyName("3k/month")).toBe(true);
+    expect(looksLikeMoneyTermOrClausePartyName("Alex")).toBe(false);
+    expect(looksLikeMoneyTermOrClausePartyName("Red Mesa LLC")).toBe(false);
+    expect(looksLikeMoneyTermOrClausePartyName("Anthem")).toBe(false);
+  });
+});
+
+describe("free starter dump title, purpose, and preview footer", () => {
+  function run(raw: string) {
+    const result = runIntakeDefaultsAndRoles(emptyDraft(), raw, true, defaultIntakePartyRoleLabels());
+    return { result, canonical: canonicalizeStarterDraftForReview(result) };
+  }
+
+  it("Mike title is a real heading and purpose is a sentence from his words", () => {
+    const { result, canonical } = run("I hired Mike to paint my office. We shook on it.");
+    expect(canonical.title).toMatch(/painting agreement|services agreement/i);
+    expect(canonical.title).not.toMatch(/^business agreement$/i);
+    expect(canonical.purpose).toMatch(/Mike will paint/i);
+    expect(canonical.purpose).toMatch(/office/i);
+    expect(canonical.purpose).not.toMatch(/^paint my office$/i);
+    expect(canonical.parties.map((p) => ({ name: p.name, role: p.role }))).toEqual([
+      { name: "Client", role: "client" },
+      { name: "Mike", role: "service_provider" },
+    ]);
+    expect(canonical.payment_terms || "").not.toMatch(/no\s+fees|unpaid|\$0\b/i);
+    expect((canonical.jurisdiction || "").trim()).toBe("");
+    expect(result.agreement_family).toBe("services_agreement");
+  });
+
+  it("Hire Alex is Services Agreement, not Employment", () => {
+    const { result, canonical } = run("Hire Alex to build our shopify theme, $3k, two weeks");
+    expect(canonical.title).toMatch(/services agreement/i);
+    expect(canonical.title).not.toMatch(/employment/i);
+    expect(canonical.purpose).toMatch(/shopify/i);
+    expect(canonical.purpose).toMatch(/theme/i);
+    expect(canonical.parties.map((p) => p.name)).toEqual(expect.arrayContaining(["Client", "Alex"]));
+    expect(result.agreement_family).toBe("services_agreement");
+  });
+
+  it("Jordan NDA title is a non-disclosure heading and purpose mentions the app idea", () => {
+    const { canonical } = run("nda between me and Jordan about the app idea");
+    expect(canonical.title).toMatch(/non-disclosure agreement/i);
+    expect(canonical.purpose).toMatch(/app idea/i);
+    expect((canonical.jurisdiction || "").trim()).toBe("");
+    expect(canonical.jurisdiction || "").not.toMatch(/delaware/i);
+  });
+
+  it("fence dump visitor-is-hirer keeps Client then unnamed Service Provider", () => {
+    const dump = "need someone to fix the broken fence";
+    const { result, canonical } = run(dump);
+    expect(canonical.title).toMatch(/repair agreement/i);
+    expect(canonical.purpose).toMatch(/fence/i);
+    expect(result.parties.map((p) => ({ name: p.name, role: p.role }))).toEqual([
+      { name: "Client", role: "client" },
+      { name: "Service Provider", role: "service_provider" },
+    ]);
+    expect(canonical.parties.map((p) => ({ name: p.name, role: p.role }))).toEqual([
+      { name: "Client", role: "client" },
+      { name: "Service Provider", role: "service_provider" },
+    ]);
+    const preview = buildAgreementPreviewText(canonical, {
+      starterPreview: true,
+      freeStarterReviewPreview: true,
+      intakeText: dump,
+    });
+    expect(preview).not.toMatch(/Service Provider\s*\(\s*[“"]Client[”"]\)/);
+    expect(preview).toMatch(/Client\s*\(\s*[“"]Client[”"]\)/);
+    expect(preview).toMatch(/Service Provider\s*\(\s*[“"]Service Provider[”"]\)/);
+    expect(assessStarterComplexityGate("lol just testing this, pizza is great").required).toBe(true);
+  });
+
+  it("free starter preview does not claim the agreement will be executed electronically via LawDog", () => {
+    const raw = "I hired Mike to paint my office. We shook on it.";
+    const { canonical } = run(raw);
+    const preview = buildAgreementPreviewText(canonical, {
+      starterPreview: true,
+      freeStarterReviewPreview: true,
+      intakeText: raw,
+    });
+    expect(preview).not.toMatch(/executed electronically via LawDog/i);
+    expect(preview).not.toMatch(/will be executed electronically/i);
   });
 });

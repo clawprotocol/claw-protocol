@@ -303,3 +303,49 @@ describe("starterComplexityGate two-party regression", () => {
     expect(draft.parties.length).toBeLessThanOrEqual(2);
   });
 });
+
+describe("casual dump starter complexity gate", () => {
+  const FREE: string[] = [
+    "Sarah will photograph our wedding on June 12. We agreed $1800 cash.",
+    "nda between me and Jordan about the app idea",
+    "can you write something for my lawn guy Luis, he starts monday",
+    "me and Priya are splitting the etsy shop 50/50",
+    "I sold my bike to Taylor for $200 cash",
+    "pay Riley $40 a week to walk the dog",
+    "I hired Mike to paint my office. We shook on it.",
+    "deal with Sam",
+    "need someone to fix the broken fence",
+    "Hire Alex to build our shopify theme, $3k, two weeks",
+    "Consulting for Red Mesa LLC, I am Anthem, they pay monthly",
+  ];
+
+  it.each(FREE)("required is false for casual two-party / scoped dump: %s", (dump) => {
+    const gate = assessStarterComplexityGate(dump);
+    expect(gate.required).toBe(false);
+    expect(gate.reasons).not.toContain("not_simple_two_party_deal");
+  });
+
+  it.each([
+    "my dog is named Biscuit and the trucks are teal",
+    "lol just testing this, pizza is great",
+    "I need a contract",
+    "I just want an nda",
+  ])("stays gated as not a simple two-party deal: %s", (dump) => {
+    const gate = assessStarterComplexityGate(dump);
+    expect(gate.required).toBe(true);
+    expect(gate.reasons).toContain("not_simple_two_party_deal");
+  });
+
+  it("joint venture with four named entities stays multi-party gated", () => {
+    const dump =
+      "Joint venture between Acme LLC, Beta Inc, Gamma Partners, and Delta Holdings. Pool $2 million, 5 year term, New York law.";
+    const gate = assessStarterComplexityGate(dump);
+    expect(gate.required).toBe(true);
+    expect(
+      gate.reasons.some((r) =>
+        r === "three_plus_legal_parties" || r === "joint_venture_or_multi_vendor_structure",
+      ),
+    ).toBe(true);
+    expect(gate.reasons).not.toContain("not_simple_two_party_deal");
+  });
+});

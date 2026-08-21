@@ -77,7 +77,7 @@ describe("Test274 review-link persist blocker", () => {
   });
 
   it("review persist uses same apiUrl draft contract as postNewDraft", () => {
-    expect(intake).toContain('apiUrl("/api/agreements/draft")');
+    expect(intake).toContain("resolvePaidContinuePersistDraftUrl");
     expect(intake).toContain("reviewLinkPersistFailureRef");
     const premiumApi = readFileSync(join(__dirname, "premiumFullDraftApi.ts"), "utf8");
     expect(premiumApi).toContain("apiUrl(");

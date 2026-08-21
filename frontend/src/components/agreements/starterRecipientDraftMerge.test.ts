@@ -99,7 +99,7 @@ describe("applyStarterRecipientUiToDraftParties", () => {
       ],
     };
     const next = canonicalizeStarterDraftForReview(d);
-    expect(next.jurisdiction).toBe("Delaware");
+    expect(next.jurisdiction).toBe("");
     expect(next.parties[0]?.name).toBe("Party A");
     expect(next.parties[0]?.role).toBe("party");
     expect(next.parties[1]?.name).toBe("Beta");

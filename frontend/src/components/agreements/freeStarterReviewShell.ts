@@ -30,7 +30,7 @@ import {
 
 export const FREE_STARTER_REVIEW_TITLE = "Review your draft";
 export const FREE_STARTER_REVIEW_SUBTITLE =
-  "Your starter draft is ready. Review it, then continue when you're ready.";
+  "Your two-party draft is ready. Continue with Pro to review it with them, sign, and save it.";
 export const FREE_STARTER_REVIEW_BADGE = "Starter draft";
 
 export const PAID_PRO_REVIEW_RECOVERING_TITLE = "Review your agreement draft";
