@@ -1,4 +1,6 @@
 /** @vitest-environment jsdom */
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import {
   createDemoSessionUser,
@@ -151,6 +153,48 @@ describe("harborDemoContinuePersistFinalReview", () => {
         paidProCanonicalReviewSignerSetupActive || showPaidProForcedFirstReviewTrackChooser;
 
       expect(suppressFinalReviewActions).toBe(false);
+    });
+
+    it("render ternary excludes demo+premiumCompletion+signerMetadataFinalized from forced first review arm (source inspection)", () => {
+      const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
+
+      // The render gate for SimpleProFinalReviewScreen vs forced first review arm.
+      // After the fix, demo users with premium completion who have finalized signer metadata
+      // should NOT stay on the forced first review arm — they should fall through to
+      // SimpleProFinalReviewScreen.
+      //
+      // The ternary must include the exception:
+      //   (paidProForcedFirstReviewActive &&
+      //     !(demoSessionUserActive && hasPaidPremiumCompletionSession() && paidProSignerMetadataFinalized))
+      //
+      // This test reads the actual source to verify the condition is present.
+
+      // Find the render ternary that gates SimpleProFinalReviewScreen vs forced first review.
+      // The pattern is: the div with the review card, then the ternary condition.
+      const reviewCardDivPattern =
+        /rounded-sm border border-stone-200\/90 bg-\[#faf7f0\].*?ring-1 ring-black\/\[0\.07\]/s;
+      const reviewCardMatch = intake.match(reviewCardDivPattern);
+      expect(reviewCardMatch).not.toBeNull();
+
+      // After the review card div, find the ternary condition.
+      const reviewCardIndex = intake.indexOf(reviewCardMatch![0]);
+      expect(reviewCardIndex).toBeGreaterThan(0);
+
+      // Extract a window of ~1500 chars after the review card div to capture the ternary.
+      const ternaryWindow = intake.slice(reviewCardIndex, reviewCardIndex + 1500);
+
+      // The fix adds an exception for demo+premiumCompletion+signerMetadataFinalized.
+      // Check that the exception is present in the ternary.
+      expect(ternaryWindow).toContain("paidProForcedFirstReviewActive");
+      expect(ternaryWindow).toContain("demoSessionUserActive");
+      expect(ternaryWindow).toContain("hasPaidPremiumCompletionSession()");
+      expect(ternaryWindow).toContain("paidProSignerMetadataFinalized");
+
+      // Verify the structure: paidProForcedFirstReviewActive is AND'd with a negated condition.
+      // The pattern should be: (paidProForcedFirstReviewActive && !(demo && premium && finalized))
+      const demoBypassPattern =
+        /\(paidProForcedFirstReviewActive\s*&&\s*!\s*\(\s*demoSessionUserActive\s*&&\s*hasPaidPremiumCompletionSession\(\)\s*&&\s*paidProSignerMetadataFinalized\s*\)\)/s;
+      expect(ternaryWindow).toMatch(demoBypassPattern);
     });
   });
 
