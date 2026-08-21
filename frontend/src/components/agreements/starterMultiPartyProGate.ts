@@ -480,7 +480,15 @@ export function shouldResolveStarterHomeTransitionToReviewReady(input: {
   createFlowPhase: string;
   isGenerating: boolean;
   starterMultiPartyProGate?: unknown;
+  emptyAuthorityPrepFailSafe?: boolean;
+  hardError?: string | null;
 }): boolean {
+  if (input.emptyAuthorityPrepFailSafe) {
+    return true;
+  }
+  if (input.hardError && !input.isGenerating) {
+    return true;
+  }
   if (
     input.createFlowPhase === "multi_party_pro_required" &&
     Boolean(input.starterMultiPartyProGate)

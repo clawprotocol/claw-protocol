@@ -154,4 +154,69 @@ Red Mesa will provide updates. Harbor Peak will deliver milestones.`;
       }),
     ).toBe(true);
   });
+
+  it("dismisses home transition overlay on failsafe timeout (emptyAuthorityPrepFailSafe)", () => {
+    expect(
+      shouldResolveStarterHomeTransitionToReviewReady({
+        draft: null,
+        createUiStage: "INPUT",
+        createFlowPhase: "capturing_input",
+        isGenerating: false,
+        emptyAuthorityPrepFailSafe: true,
+      }),
+    ).toBe(true);
+    expect(
+      shouldResolveStarterHomeTransitionToReviewReady({
+        draft: null,
+        createUiStage: "INPUT",
+        createFlowPhase: "generating_draft",
+        isGenerating: true,
+        emptyAuthorityPrepFailSafe: true,
+      }),
+    ).toBe(true);
+  });
+
+  it("dismisses home transition overlay on hard error", () => {
+    expect(
+      shouldResolveStarterHomeTransitionToReviewReady({
+        draft: null,
+        createUiStage: "INPUT",
+        createFlowPhase: "capturing_input",
+        isGenerating: false,
+        hardError: "LawDog could not save this draft. Try again in a moment.",
+      }),
+    ).toBe(true);
+    expect(
+      shouldResolveStarterHomeTransitionToReviewReady({
+        draft: null,
+        createUiStage: "INPUT",
+        createFlowPhase: "capturing_input",
+        isGenerating: true,
+        hardError: "Network error — try again in a moment.",
+      }),
+    ).toBe(false);
+  });
+
+  it("does not dismiss overlay when no failure conditions and no draft", () => {
+    expect(
+      shouldResolveStarterHomeTransitionToReviewReady({
+        draft: null,
+        createUiStage: "INPUT",
+        createFlowPhase: "capturing_input",
+        isGenerating: false,
+        emptyAuthorityPrepFailSafe: false,
+        hardError: null,
+      }),
+    ).toBe(false);
+    expect(
+      shouldResolveStarterHomeTransitionToReviewReady({
+        draft: null,
+        createUiStage: "INPUT",
+        createFlowPhase: "generating_draft",
+        isGenerating: true,
+        emptyAuthorityPrepFailSafe: false,
+        hardError: null,
+      }),
+    ).toBe(false);
+  });
 });

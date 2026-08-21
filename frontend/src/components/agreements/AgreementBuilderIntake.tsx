@@ -14362,6 +14362,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         createFlowPhase,
         isGenerating,
         starterMultiPartyProGate,
+        emptyAuthorityPrepFailSafe,
+        hardError,
       })
     ) {
       onHomeGuidedTransitionPhase("review_ready");
@@ -14378,6 +14380,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     createFlowPhase,
     isGenerating,
     starterMultiPartyProGate,
+    emptyAuthorityPrepFailSafe,
+    hardError,
   ]);
 
   /**
