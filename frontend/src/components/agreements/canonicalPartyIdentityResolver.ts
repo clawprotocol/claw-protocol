@@ -849,6 +849,27 @@ function suffixContinuationWords(fullLegalName: string): string[] {
   return words.slice(1);
 }
 
+/**
+ * True when the short form should NOT be used for role-label replacement.
+ *
+ * Single-word short forms (e.g. "Mesa" from "Mesa Realty Group LLC") are too generic
+ * and should not be replaced with role labels because:
+ * 1. They can appear in many contexts (geographic references, other entities)
+ * 2. Replacing them causes confusing output like "The Service Provider team"
+ * 3. The full legal name or at least two-word trade name is more precise
+ */
+function shouldSkipShortFormForRoleReplacement(
+  short: string,
+  _full: string,
+  _allFullNames: readonly string[],
+): boolean {
+  const words = short.split(/\s+/).filter(Boolean);
+  if (words.length === 1) {
+    return true;
+  }
+  return false;
+}
+
 /** Replace truncated trade names in operative body with role labels (Client / Service Provider). */
 export function replaceTruncatedPartyRefsWithRoleLabels(
   text: string,
@@ -861,7 +882,7 @@ export function replaceTruncatedPartyRefsWithRoleLabels(
   const tail = text.slice(bodyEnd);
   const repairs: string[] = [];
 
-  const allFullNames = records.map((r) => r.fullLegalName.trim().toLowerCase());
+  const allFullNames = records.map((r) => r.fullLegalName.trim()).filter(Boolean);
   const pairs: { short: string; role: string; full: string }[] = [];
   for (const rec of records) {
     const full = rec.fullLegalName.trim();
@@ -873,11 +894,7 @@ export function replaceTruncatedPartyRefsWithRoleLabels(
     ]);
     for (const short of candidates) {
       if (!short || short.length < 3 || norm(short) === norm(full) || norm(short) === norm(role)) continue;
-      const shortLower = short.toLowerCase();
-      const shortIsPartOfOtherPartyName = allFullNames.some(
-        (otherFull) => otherFull !== full.toLowerCase() && otherFull.includes(shortLower),
-      );
-      if (shortIsPartOfOtherPartyName) continue;
+      if (shouldSkipShortFormForRoleReplacement(short, full, allFullNames)) continue;
       pairs.push({ short, role, full });
     }
   }

@@ -1,15 +1,36 @@
+import { useState, useCallback, useId } from "react";
+
 type Props = {
+  /** LLM-generated questions specific to THIS user's prompt (from missing-facts API). */
   questions: string[];
+  /** Combined answers string passed to parent. */
   oneField: string;
+  /** Callback when answers change. */
   onOneField: (s: string) => void;
+  /** Submit answers and proceed to generation. */
   onContinue: () => void;
+  /** Skip questions and use defaults. */
   onUseDefaults: () => void;
+  /** Dismiss panel without action. */
   onDismiss: () => void;
+  /** Disable all inputs (e.g., during API call). */
   continueDisabled: boolean;
 };
 
 /**
- * Pre–full-draft: compact gap resolver — one free-text field for all answers.
+ * Pre–full-draft: LLM-generated clarification questions for missing tenets.
+ *
+ * RULES:
+ * - Questions come from the LLM API (ask-before-draft / missing-facts)
+ * - Questions are SPECIFIC to THIS dump (e.g. "Who is paying the 7% — Harbor or Mesa?")
+ * - NOT a canned generic list
+ * - NOT a second free-form dump box
+ * - One targeted input field per LLM-generated question
+ * - Only asks for missing tenets (parties, scope, payment, term, governing law)
+ *   that are actually absent or contradictory in the prompt
+ *
+ * This panel appears BEFORE the Pro agreement copy renders when the existing
+ * missing-facts / NEEDS_CLARIFICATION LLM path determines clarification is needed.
  */
 export function PremiumFinishAgreementGapsPanel({
   questions,
@@ -20,40 +41,93 @@ export function PremiumFinishAgreementGapsPanel({
   onDismiss,
   continueDisabled,
 }: Props) {
+  const baseId = useId();
+  
+  // Track individual answer for each LLM-generated question
+  const [answers, setAnswers] = useState<string[]>(() => {
+    // Try to parse existing oneField if resuming
+    if (oneField && questions.length > 0) {
+      // If oneField has numbered answers, parse them
+      const parsed: string[] = [];
+      for (let i = 0; i < questions.length; i++) {
+        const pattern = new RegExp(`(?:^|\\n)\\s*${i + 1}[.):]+\\s*([^\\n]+)`, "i");
+        const match = oneField.match(pattern);
+        parsed.push(match?.[1]?.trim() || "");
+      }
+      if (parsed.some((a) => a.length > 0)) {
+        return parsed;
+      }
+    }
+    return questions.map(() => "");
+  });
+
+  // Update answer for a specific question and sync to parent
+  const handleAnswerChange = useCallback((index: number, value: string) => {
+    setAnswers((prev) => {
+      const next = [...prev];
+      next[index] = value;
+      // Serialize answers to oneField format for parent
+      // Format: "1. answer one\n2. answer two" - preserves question ordering
+      const serialized = next
+        .map((a, i) => (a.trim() ? `${i + 1}. ${a.trim()}` : ""))
+        .filter(Boolean)
+        .join("\n");
+      onOneField(serialized);
+      return next;
+    });
+  }, [onOneField]);
+
+  const questionCount = questions.length;
+  const headingText = questionCount === 1
+    ? "One quick question"
+    : `${questionCount} quick questions`;
+
+  // Enable continue if at least one answer is provided
+  const hasAnyAnswer = answers.some((a) => a.trim().length > 0);
+
+  // If no questions, don't render anything
+  if (questionCount === 0) {
+    return null;
+  }
+
   return (
-    <div className="w-full text-left" role="region" aria-label="Finish your agreement">
+    <div className="w-full text-left" role="region" aria-label="Answer clarification questions">
       <h2
         id="claw-premium-finish-facts-title"
         className="text-center text-xl font-semibold tracking-tight text-slate-50 sm:text-2xl"
       >
-        Finish your agreement
+        {headingText}
       </h2>
       <p className="mt-3 text-center text-sm leading-relaxed text-slate-400 sm:text-base">
-        A few details will help your complete agreement match your deal. Answer in the box — bullets or short sentences
-        are fine. Or use defaults to continue.
+        Help us understand your agreement better.
       </p>
-      <ol className="mt-5 space-y-2.5 rounded-xl border border-amber-500/25 bg-amber-950/20 p-4 text-left text-sm leading-relaxed text-amber-50/95 sm:text-[15px]">
-        {questions.map((q, i) => (
-          <li key={q} className="flex gap-2">
-            <span className="shrink-0 font-semibold text-amber-300/90">{i + 1}.</span>
-            <span>{q}</span>
-          </li>
-        ))}
-      </ol>
-      <label htmlFor="claw-premium-finish-facts-textarea" className="mt-5 block text-sm font-medium text-slate-300">
-        Your details (one field is enough)
-      </label>
-      <textarea
-        id="claw-premium-finish-facts-textarea"
-        value={oneField}
-        onChange={(e) => onOneField(e.target.value)}
-        rows={5}
-        className="mt-2 w-full rounded-xl border border-slate-600/70 bg-slate-900/60 px-3 py-2.5 text-sm text-slate-100 shadow-inner shadow-black/20 placeholder:text-slate-500 focus:border-emerald-500/50 focus:outline-none focus:ring-2 focus:ring-emerald-500/20 sm:min-h-[6rem] sm:px-4 sm:text-base"
-        placeholder="e.g. Governing law: New York. Commission: 8% of net, paid 15th monthly. Exclusivity: 6 months US only."
-        autoComplete="on"
-        autoCapitalize="sentences"
-        disabled={continueDisabled}
-      />
+
+      <div className="mt-5 space-y-5">
+        {questions.map((question, index) => {
+          const inputId = `${baseId}-q-${index}`;
+          return (
+            <div key={inputId}>
+              <label
+                htmlFor={inputId}
+                className="block text-sm font-medium leading-relaxed text-slate-200"
+              >
+                {question}
+              </label>
+              <input
+                id={inputId}
+                type="text"
+                value={answers[index] || ""}
+                onChange={(e) => handleAnswerChange(index, e.target.value)}
+                disabled={continueDisabled}
+                className="mt-2 w-full rounded-lg border border-slate-600/70 bg-slate-900/60 px-3 py-2.5 text-sm text-slate-100 placeholder:text-slate-500 focus:border-emerald-500/50 focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
+                placeholder="Your answer"
+                autoComplete="off"
+              />
+            </div>
+          );
+        })}
+      </div>
+
       <div className="mt-6 flex flex-col gap-2.5 sm:flex-row sm:justify-end sm:gap-3">
         <button
           type="button"
@@ -67,9 +141,9 @@ export function PremiumFinishAgreementGapsPanel({
           type="button"
           className="order-1 w-full rounded-xl bg-emerald-500 py-2.5 text-sm font-semibold text-black shadow-lg transition hover:bg-emerald-400 sm:order-2 sm:w-auto sm:min-w-[10rem]"
           onClick={onContinue}
-          disabled={continueDisabled}
+          disabled={continueDisabled || !hasAnyAnswer}
         >
-          Build my agreement
+          Continue
         </button>
       </div>
       <p className="mt-4 text-center">

@@ -13,6 +13,10 @@ import {
   mergeSignerMetadataIntoDraftParties,
   resolveUniversalSignerMetadataBySlot,
 } from "./universalSignerMetadataAuthority";
+import {
+  buildCommercialProtectiveTermsBlock,
+  intakeContainsCommercialProtectiveTerms,
+} from "./commercialProtectiveTermsExtract";
 
 function roleHintForPartyName(name: string, hints: Record<string, string>): string {
   const key = name.toLowerCase().trim();
@@ -256,6 +260,15 @@ export function applySimpleFlowSmartDefaults(parsed: ParsedDraftShape, intakeTex
       .filter((n) => n.length >= 2);
     const resolved = resolveUniversalSignerMetadataBySlot({ legalEntities, intakeText });
     next = mergeSignerMetadataIntoDraftParties(next, resolved) as ParsedDraftShape;
+  }
+
+  // Extract commercial protective terms (exclusivity, no-poach, clawback, etc.)
+  // and inject into additional_terms if not already present
+  if (!(next.additional_terms || "").trim() && intakeContainsCommercialProtectiveTerms(intakeText)) {
+    const protectiveBlock = buildCommercialProtectiveTermsBlock(intakeText);
+    if (protectiveBlock) {
+      next.additional_terms = protectiveBlock;
+    }
   }
 
   return next;
