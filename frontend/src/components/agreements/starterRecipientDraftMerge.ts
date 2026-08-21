@@ -10,6 +10,8 @@ import {
 } from "./partyNameConfidence";
 import { normalizePartyNameFragment, sanitizePartiesInput } from "./partyIntakeNormalize";
 import { normalizeJurisdictionDisplay } from "../../agreement/jurisdictionNormalize";
+import { isInventedNoFeePayment } from "./paymentSemanticGuard";
+import { orderUnnamedClientThenServiceProvider } from "./visitorHirerRoleOrder";
 
 const PROMPT_POLLUTION_HINT =
   /\b(make|include|need|want|please|for\s+\d+\s+(?:day|days|week|weeks|month|months|year|years))\b/i;
@@ -39,7 +41,8 @@ export type StarterRecipientHandoffOpts = {
 function cleanStarterPartyName(raw: string, slot: 0 | 1, agreementFamily?: string | null): string {
   const normalized = normalizePartyNameFragment((raw || "").trim()).slice(0, 280);
   const polluted = PROMPT_POLLUTION_HINT.test(normalized) && normalized.length > 24;
-  if (isHighConfidencePartyNameForAutoPopulation(normalized) && !polluted) {
+  const groundedRoleOrGivenName = /^(Client|Service Provider)$/i.test(normalized) || /^[A-Z][a-z]{2,}$/.test(normalized);
+  if ((groundedRoleOrGivenName || isHighConfidencePartyNameForAutoPopulation(normalized)) && !polluted) {
     return normalized;
   }
   return coercePartyNameForRecipientAutoFill("", slot, agreementFamily);
@@ -52,9 +55,9 @@ function cleanRole(raw: unknown): string {
 
 function cleanStarterJurisdiction(raw: unknown): string {
   const t = String(raw ?? "").replace(/\s+/g, " ").trim();
-  if (!t || t.toLowerCase() === "tbd" || t.length <= 1) return "Delaware";
+  if (!t || t.toLowerCase() === "tbd" || t.length <= 1) return "";
   const normalized = normalizeJurisdictionDisplay(t).trim();
-  if (!normalized || normalized.length <= 1) return "Delaware";
+  if (!normalized || normalized.length <= 1) return "";
   return normalized.slice(0, 64);
 }
 
@@ -88,13 +91,13 @@ export function canonicalizeStarterDraftForReview(parsed: ParsedDraftShape): Par
     name: cleanStarterPartyName(String(p?.name || ""), idx <= 1 ? (idx as 0 | 1) : 1, parsed.agreement_family ?? null),
     role: cleanRole(p?.role),
   }));
+  const ordered = orderUnnamedClientThenServiceProvider({ ...parsed, parties: out });
   return {
-    ...parsed,
+    ...ordered,
     title: cleanStarterText(parsed.title, 180),
     purpose: cleanStarterText(parsed.purpose, 1200),
-    payment_terms: cleanStarterText(parsed.payment_terms, 1200),
+    payment_terms: isInventedNoFeePayment(parsed.payment_terms) ? "" : cleanStarterText(parsed.payment_terms, 1200),
     jurisdiction: cleanStarterJurisdiction(parsed.jurisdiction),
-    parties: out,
   };
 }
 

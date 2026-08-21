@@ -1,5 +1,13 @@
 import type { PremiumMissingFactsResult } from "./premiumMissingFactsApi";
-import { shouldSkipAskAndRenderImmediately, intakeRequiresClarification, getMissingTenetTopics } from "./proAgreementFiveTenets";
+import {
+  shouldSkipAskAndRenderImmediately,
+  getRequiredClarificationTopics,
+  buildLocalMissingTenetQuestions,
+  type FiveTenetDraftInput,
+} from "./proAgreementFiveTenets";
+
+export { getRequiredClarificationTopics, buildLocalMissingTenetQuestions } from "./proAgreementFiveTenets";
+export type { FiveTenetDraftInput } from "./proAgreementFiveTenets";
 
 /**
  * Decision outcome for the post-checkout missing-facts gate.
@@ -15,7 +23,8 @@ export type PostCheckoutMissingFactsGateDecision =
  *
  * Rules:
  * - If the API call succeeded and returned 1+ questions → block on awaiting_gaps
- * - If the API call succeeded and returned 0 questions → proceed to draft
+ * - If the API call succeeded and returned 0 questions, but local missing tenets remain → await_gaps
+ * - If the API call succeeded and returned 0 questions and no local missing tenets → proceed to draft
  * - If the API call failed (error) → fail closed, do not draft
  *
  * This gate ensures incomplete intake (NEEDS_CLARIFICATION) does not proceed
@@ -24,6 +33,10 @@ export type PostCheckoutMissingFactsGateDecision =
 export function evaluatePostCheckoutMissingFactsGate(input: {
   apiResult: PremiumMissingFactsResult | null;
   apiError: Error | null;
+  localTopics?: string[];
+  localQuestions?: string[];
+  intakeText?: string;
+  draft?: FiveTenetDraftInput | null;
 }): PostCheckoutMissingFactsGateDecision {
   const { apiResult, apiError } = input;
 
@@ -57,6 +70,24 @@ export function evaluatePostCheckoutMissingFactsGate(input: {
     };
   }
 
+  const localTopics =
+    (input.localTopics && input.localTopics.length
+      ? input.localTopics
+      : input.intakeText != null
+        ? getRequiredClarificationTopics(input.intakeText, input.draft)
+        : []) || [];
+  if (localTopics.length > 0) {
+    const localQuestions = (
+      input.localQuestions && input.localQuestions.length
+        ? input.localQuestions
+        : buildLocalMissingTenetQuestions(input.intakeText || "", input.draft)
+    ).slice(0, 5);
+    return {
+      action: "await_gaps",
+      questions: localQuestions.length ? localQuestions : localTopics.slice(0, 5),
+    };
+  }
+
   return { action: "proceed_to_draft" };
 }
 
@@ -84,23 +115,15 @@ export function shouldProceedToDraft(
  * For sparse/casual intakes that clearly need clarification, we return a signal
  * to force the LLM ask even if the API returns no questions.
  */
-export function evaluateFiveTenetsPreflight(intakeText: string): PostCheckoutMissingFactsGateDecision {
-  if (shouldSkipAskAndRenderImmediately(intakeText)) {
+export function evaluateFiveTenetsPreflight(
+  intakeText: string,
+  draft?: FiveTenetDraftInput | null,
+): PostCheckoutMissingFactsGateDecision {
+  if (shouldSkipAskAndRenderImmediately(intakeText, draft)) {
     return { action: "proceed_to_draft_five_tenets_complete" };
   }
-  return { action: "await_gaps", questions: [] };
-}
-
-/**
- * Check if the intake is too sparse/casual and MUST ask LLM questions.
- * This blocks silent drafting for inputs like "tbd", "contract", "something about a deal".
- * Returns a list of topics to ask about if the intake needs clarification.
- */
-export function getRequiredClarificationTopics(intakeText: string): string[] {
-  if (!intakeRequiresClarification(intakeText)) {
-    return [];
-  }
-  return getMissingTenetTopics(intakeText);
+  const questions = buildLocalMissingTenetQuestions(intakeText, draft).slice(0, 5);
+  return { action: "await_gaps", questions };
 }
 
 /**

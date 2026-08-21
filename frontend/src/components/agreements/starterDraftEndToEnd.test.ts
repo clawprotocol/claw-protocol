@@ -227,10 +227,11 @@ Governing law: New York.`;
     expect(preview).toMatch(/new york/i);
   });
 
-  it("when no jurisdiction provided, falls back to Delaware default (existing behavior)", () => {
+  it("when no jurisdiction provided, leaves governing law empty (visitor words only)", () => {
     const intake = `Consulting agreement between Foo Co and Bar LLC. Fee: $3,000/month.`;
     const result = runPipeline(intake);
-    expect(result.jurisdiction).toMatch(/delaware/i);
+    expect((result.jurisdiction || "").trim()).toBe("");
+    expect(result.jurisdiction || "").not.toMatch(/delaware/i);
   });
 });
 

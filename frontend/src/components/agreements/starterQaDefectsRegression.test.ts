@@ -112,14 +112,14 @@ describe("P0 acceptance — advisor fixture full surface (P3 title polish)", () 
 });
 
 describe("P1 — Confidentiality NEVER leaks into Payment Terms (NDA fixture)", () => {
-  it("3-party NDA: payment is neutral no-fee language, not confidentiality wording", () => {
+  it("3-party NDA: payment stays empty, not confidentiality wording or invented no-fees", () => {
     const r = pipe(NDA_3P);
     expect(r.payment_terms).not.toMatch(/confidential/i);
     expect(r.payment_terms).not.toMatch(/non[-\s]?disclosure/i);
     expect(r.payment_terms).not.toMatch(/proprietary/i);
     expect(r.payment_terms).not.toMatch(/return\/destroy/i);
-    // Neutral fallback contains "no fees" or equivalent.
-    expect(r.payment_terms).toMatch(/no\s+fees|no\s+payment/i);
+    expect(r.payment_terms || "").not.toMatch(/no\s+fees|unpaid|\$0\b/i);
+    expect((r.payment_terms || "").trim()).toBe("");
   });
 
   it("NDA fixture: title is canonical NDA, not legacy Confidentiality Agreement", () => {

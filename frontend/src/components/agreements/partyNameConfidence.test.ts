@@ -4,6 +4,8 @@ import {
   getSafeFallbackPartyLabels,
   isHighConfidencePartyNameForAutoPopulation,
   isProsePollutedPartyName,
+  isRoleOnlyPlaceholderSignerName,
+  isSeedableSignerNameFromDraftParty,
 } from "./partyNameConfidence";
 
 describe("isProsePollutedPartyName", () => {
@@ -73,5 +75,31 @@ describe("coercePartyNameForRecipientAutoFill", () => {
       "Client",
     );
     expect(coercePartyNameForRecipientAutoFill("I need an agreement with a client", 1, null)).toBe("Party B");
+  });
+});
+
+describe("isSeedableSignerNameFromDraftParty", () => {
+  it("accepts real people and entities", () => {
+    expect(isSeedableSignerNameFromDraftParty("Mike")).toBe(true);
+    expect(isSeedableSignerNameFromDraftParty("Sarah")).toBe(true);
+    expect(isSeedableSignerNameFromDraftParty("Jordan")).toBe(true);
+    expect(isSeedableSignerNameFromDraftParty("Anthem")).toBe(true);
+    expect(isSeedableSignerNameFromDraftParty("Red Mesa LLC")).toBe(true);
+  });
+
+  it("rejects role-only placeholders the visitor would have to delete", () => {
+    expect(isRoleOnlyPlaceholderSignerName("Client")).toBe(true);
+    expect(isRoleOnlyPlaceholderSignerName("Service Provider")).toBe(true);
+    expect(isRoleOnlyPlaceholderSignerName("Party A")).toBe(true);
+    expect(isRoleOnlyPlaceholderSignerName("Party 1")).toBe(true);
+    expect(isSeedableSignerNameFromDraftParty("Client")).toBe(false);
+    expect(isSeedableSignerNameFromDraftParty("Service Provider")).toBe(false);
+    expect(isSeedableSignerNameFromDraftParty("Party A")).toBe(false);
+  });
+
+  it("rejects dump sentences and money or term fragments", () => {
+    expect(isSeedableSignerNameFromDraftParty("I hired Mike to paint my office. We shook on it.")).toBe(false);
+    expect(isSeedableSignerNameFromDraftParty("They Pay Monthly")).toBe(false);
+    expect(isSeedableSignerNameFromDraftParty("$3k, Two Weeks")).toBe(false);
   });
 });

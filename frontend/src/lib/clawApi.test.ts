@@ -335,6 +335,47 @@ describe("apiUrlWithFallback", () => {
   });
 });
 
+describe("resolvePaidContinuePersistDraftUrl", () => {
+  beforeEach(() => {
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+    vi.resetModules();
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+  });
+
+  it("uses Railway/production API host, not bare /api/agreements/draft, when production fallback is configured", async () => {
+    vi.stubGlobal("window", {
+      location: { origin: "https://lawdog.me", hostname: "lawdog.me" },
+    });
+    vi.stubEnv("VITE_CLAW_API_BASE", "");
+    vi.stubEnv("VITE_API_BASE", "");
+    vi.stubEnv("MODE", "production");
+    vi.stubEnv("NODE_ENV", "production");
+
+    vi.doMock("../config/runtimeEnvironment", () => ({
+      readRuntimeEnvProd: () => true,
+      readRuntimeEnvDev: () => false,
+      readRuntimeEnvMode: () => "production",
+      readRuntimeEnvString: (key: string) => {
+        if (key === "VITE_CLAW_API_BASE" || key === "VITE_API_BASE") return "";
+        return "";
+      },
+      readRuntimeEnvironment: () => ({ apiBaseUrl: "", appBaseUrl: "", isDevelopment: false, isTest: false, paymentBypassEnabled: false }),
+    }));
+
+    const { resolvePaidContinuePersistDraftUrl, apiUrl } = await import("./clawApi");
+    const persistUrl = resolvePaidContinuePersistDraftUrl();
+    expect(persistUrl).toBe("https://claw-protocol-production.up.railway.app/api/agreements/draft");
+    expect(persistUrl).not.toBe("/api/agreements/draft");
+    expect(persistUrl).not.toBe(apiUrl("/api/agreements/draft"));
+    expect(new URL(persistUrl).host).toBe("claw-protocol-production.up.railway.app");
+  });
+});
+
 describe("fetchWithProxyFallback 5xx retry", () => {
   beforeEach(() => {
     vi.unstubAllGlobals();

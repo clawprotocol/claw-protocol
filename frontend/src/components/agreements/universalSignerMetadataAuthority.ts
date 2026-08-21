@@ -31,6 +31,7 @@ import {
   matchSignerForEntityIsClauses,
   sanitizePartyLegalNameFromIntakeFragment,
 } from "./intakeSignerInstructionParse";
+import { isSeedableSignerNameFromDraftParty } from "./partyNameConfidence";
 
 export type SignerMetadataAuthoritySource =
   | "user_edited_ui"
@@ -497,6 +498,24 @@ function candidatesFromDraftParties(
   return out;
 }
 
+/** Last-resort first-Pro name: draft party display name when it looks like a person or entity. */
+function seedableDraftPartyDisplayName(
+  parties: UniversalSignerMetadataSources["draftParties"],
+  legalEntities: readonly string[],
+  slotIndex: number,
+): string {
+  if (!parties?.length) return "";
+  const byIndex = String(parties[slotIndex]?.name ?? "").trim();
+  const entity = (legalEntities[slotIndex] ?? "").trim();
+  const matched = parties.find((p) => {
+    const n = String(p?.name ?? "").trim();
+    return n && entity && entitiesMatchForSignerMetadata(n, entity);
+  });
+  const raw = byIndex || String(matched?.name ?? "").trim();
+  if (!raw || !isSeedableSignerNameFromDraftParty(raw)) return "";
+  return cleanSignerField(raw, "signerName");
+}
+
 function mergeCandidatesByEntity(
   candidates: readonly EntitySignerMetadataCandidate[],
 ): Map<string, ResolvedEntitySignerMetadata> {
@@ -639,6 +658,16 @@ function resolveUniversalSignerMetadataBySlotInternal(
     }
     if (!hit) {
       hit = { entity, signerName: "", signerTitle: "", source: "draft_party", authorityRank: 99 };
+    }
+    if (!(hit.signerName || "").trim()) {
+      const fallbackName = seedableDraftPartyDisplayName(sources.draftParties, legalEntities, i);
+      if (fallbackName) {
+        hit = {
+          ...hit,
+          signerName: fallbackName,
+          source: hit.authorityRank === 99 ? "draft_party" : hit.source,
+        };
+      }
     }
     resolved.push({
       entity,

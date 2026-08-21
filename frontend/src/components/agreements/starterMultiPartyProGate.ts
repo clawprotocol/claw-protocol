@@ -13,6 +13,7 @@ import {
   readLegalPartyNamesFromAuthority,
 } from "./legalPartyAuthority";
 import { resolveLegalPartyAuthorityForIntake } from "./legalPartyAuthoritySession";
+import { inferCasualScopeFromDump, inferCasualTwoPartyFromDump } from "./intakeNamedPartyFallback";
 
 const COORDINATOR_BLOCK_HEADER_RE = /^\s*coordinator\s*[:\-]?\s*$/i;
 const PARTY_BLOCK_HEADER_RE = /^\s*party\s*(\d+)\s*[:\-]?\s*$/i;
@@ -24,7 +25,8 @@ export type StarterComplexityGateReason =
   | "multi_signer_workflow"
   | "review_approval_workflow"
   | "joint_venture_or_multi_vendor_structure"
-  | "multi_provider_payment";
+  | "multi_provider_payment"
+  | "not_simple_two_party_deal";
 
 /** @deprecated Use StarterComplexityGateReason */
 export type StarterMultiPartyProGateReason = StarterComplexityGateReason;
@@ -339,6 +341,18 @@ export function assessStarterComplexityGate(raw: string): StarterComplexityGateA
   }
 
   const uniqueReasons = [...new Set(reasons)];
+  const casualTwoParty = inferCasualTwoPartyFromDump(intake);
+  const casualScope = inferCasualScopeFromDump(intake);
+  // Junk extracts like "Lol Just Testing This" / "Pizza Is Great" can look like 2 parties.
+  const junkNonDeal =
+    extractedEntityCount >= 2 &&
+    !casualTwoParty &&
+    !casualScope &&
+    /\b(?:lol|lmao|just testing)\b/i.test(intake);
+  if (uniqueReasons.length === 0 && ((extractedEntityCount < 2 && !casualTwoParty && !casualScope) || junkNonDeal)) {
+    uniqueReasons.push("not_simple_two_party_deal");
+  }
+
 
   const assessment: StarterComplexityGateAssessment = {
     required: uniqueReasons.length > 0,
@@ -436,7 +450,10 @@ export function buildMultiPartyProGateTitle(assessment: StarterComplexityGateAss
 }
 
 export const MULTI_PARTY_PRO_GATE_BODY =
-  "Starter drafts support simple 1–2 party agreements. Pro supports multi-party agreements, custom roles, review, signing, and proof records.";
+  "Free is a simple two-party one-pager. Pro is how every party reviews, e-signs, and keeps a proof record.";
+export const NOT_SIMPLE_TWO_PARTY_PRO_GATE_TITLE = "This is not a two-party agreement we can draft free.";
+export const NOT_SIMPLE_TWO_PARTY_PRO_GATE_BODY =
+  "Free turns a simple two-party deal into a one-pager from what you typed. Pro is how you get a commercial draft, party review, e-sign, and a saved record.";
 
 export const MULTI_PARTY_PRO_GATE_PRIMARY_CTA = "Continue with Pro";
 
@@ -455,6 +472,15 @@ export function resolveStarterMultiPartyProGatePresentation(assessment: StarterC
     return {
       title: buildMultiPartyProGateTitle(assessment),
       body: MULTI_PARTY_PRO_GATE_BODY,
+      primaryCtaLabel: MULTI_PARTY_PRO_GATE_PRIMARY_CTA,
+      showSimplifiedStarterOption: false,
+      hideStarterReviewCta: true,
+    };
+  }
+  if (assessment.reasons.includes("not_simple_two_party_deal")) {
+    return {
+      title: NOT_SIMPLE_TWO_PARTY_PRO_GATE_TITLE,
+      body: NOT_SIMPLE_TWO_PARTY_PRO_GATE_BODY,
       primaryCtaLabel: MULTI_PARTY_PRO_GATE_PRIMARY_CTA,
       showSimplifiedStarterOption: false,
       hideStarterReviewCta: true,

@@ -24,7 +24,7 @@ export const PRO_CTA_EDIT_THIS_DRAFT = PRO_CTA_EDIT_FREE_DRAFT;
 
 export const PRO_UPGRADE_CARD_HEADING = "Ready to move this from draft to deal?";
 export const PRO_UPGRADE_CARD_BODY =
-  "Free gives you the draft. Pro unlocks review, signatures, and proof records — you approve every step before anything goes out.";
+  "Free gives you the draft. Pro unlocks review, signing, and saving this same agreement — you approve every step before anything goes out.";
 
 export const PRO_UPGRADE_FREE_COLUMN_LABEL = "Free";
 export const PRO_UPGRADE_FREE_BULLETS: readonly string[] = [
@@ -38,7 +38,7 @@ export const PRO_UPGRADE_FREE_COLUMN_HELPER = "Free is for simple 1–2 party dr
 
 export const FREE_PRO_TIER_FREE_SUMMARY = PRO_UPGRADE_FREE_COLUMN_HELPER;
 export const FREE_PRO_TIER_PRO_SUMMARY =
-  "Pro is for agreements with multiple parties, revenue sharing, review workflows, signer routing, or proof records.";
+  "Pro is review, signing, and saving this agreement. Multi-party and advanced deals also need Pro.";
 
 export const FREE_DRAFT_COPY_TEXT_LABEL = "Copy text";
 export const FREE_DRAFT_COPY_TEXT_COPIED = "Copied";
@@ -53,7 +53,7 @@ export const PRO_UPGRADE_PRO_BULLETS: readonly string[] = [
 ] as const;
 
 export const PRO_UPGRADE_BRIDGE_LINE =
-  "Use Pro when another person needs to review, approve, or sign.";
+  "Continue with Pro to review with the other party, sign, and save the record.";
 
 /** @deprecated Use {@link PRO_UPGRADE_PRO_BULLETS} */
 export const PRO_UPGRADE_CAN_HELP_BULLETS = PRO_UPGRADE_PRO_BULLETS;

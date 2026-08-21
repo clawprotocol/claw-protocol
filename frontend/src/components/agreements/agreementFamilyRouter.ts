@@ -30,6 +30,35 @@ export function isAiSoftwareInfrastructureRolloutPrompt(intakeText: string): boo
   );
 }
 
+const EMPLOYEE_JOB_RE =
+  /\b(?:employment\s+(?:agreement|contract)|employee\s+(?:agreement|contract)|w-?2|salary|payroll|onboarding|full[\s-]?time\s+employee|part[\s-]?time\s+employee)\b/i;
+
+const HIRE_TO_DO_WORK_RE =
+  /\b(?:hire|hired|hiring|engage[ds]?|engaged)\b[\s\S]{0,48}\bto\s+(?:build|paint|photograph|photo|fix|repair|design|walk|mow|redo|create|install|write|edit|clean|mow|develop|handle|do)\b/i;
+
+/**
+ * Casual "hire X to do Y" is a services job, not an employee / W-2 hire.
+ * Used to stop "Hire Alex to build a theme" from landing as Employment.
+ */
+export function isHireToDoWorkNotEmployment(intakeText: string): boolean {
+  const t = (intakeText || "").replace(/\s+/g, " ").trim();
+  if (!t) return false;
+  if (EMPLOYEE_JOB_RE.test(t)) return false;
+  return HIRE_TO_DO_WORK_RE.test(t) || /\b(?:I|we)(?:'ve)?\s+(?:hired|engaged|contracted)\b/i.test(t);
+}
+
+/** Everyday work dump that should route Services, not generic Business. */
+export function isCasualServicesWorkDump(intakeText: string): boolean {
+  const low = (intakeText || "").toLowerCase();
+  if (!low) return false;
+  if (EMPLOYEE_JOB_RE.test(low)) return false;
+  if (isHireToDoWorkNotEmployment(low)) return true;
+  return (
+    /\b(?:paint(?:ing)?|photograph(?:ing|y)?|lawn|walk(?:ing)?\s+(?:the\s+)?dog|shopify|fence|mow)\b/.test(low) ||
+    /\bneed\s+someone\s+to\s+(?:fix|repair|paint|build)\b/.test(low)
+  );
+}
+
 export function detectAgreementFamily(intakeText: string): AgreementFamily {
   const t = intakeText.replace(/\s+/g, " ").trim();
   const low = t.toLowerCase();
@@ -324,6 +353,12 @@ export function detectAgreementFamily(intakeText: string): AgreementFamily {
     /\bservices?\s+agreement\b/i.test(low) ||
     /\bscope\s+of\s+work\b/i.test(low)
   ) {
+    return "services_agreement";
+  }
+
+  // Hire-to-do-work and everyday jobs (paint, photo, lawn, fence) are Services,
+  // not Employment and not a flat Business Agreement.
+  if (isCasualServicesWorkDump(t) || isHireToDoWorkNotEmployment(t)) {
     return "services_agreement";
   }
 

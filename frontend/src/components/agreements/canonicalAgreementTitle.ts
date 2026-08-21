@@ -11,7 +11,7 @@
  * NEVER overwrite a substantive title (anything else) — this preserves canonical headings
  * already set by upstream parsing or family shells (e.g. "Mutual Non-Disclosure Agreement").
  */
-import type { AgreementFamily } from "./agreementFamilyRouter";
+import { isHireToDoWorkNotEmployment, type AgreementFamily } from "./agreementFamilyRouter";
 
 export const CANONICAL_TITLE_FOR_FAMILY: Record<AgreementFamily, string> = {
   operating_agreement: "Operating Agreement",
@@ -288,6 +288,14 @@ function intakeSaysMutualNda(rawIntake: string | null | undefined): boolean {
   return /\bmutual\b/.test(low) || /\bbetween\s+\w/.test(low);
 }
 
+function titleEchoesCasualDump(title: string, intake: string | null | undefined): boolean {
+  const t = title.replace(/\s+/g, " ").trim().toLowerCase();
+  const d = (intake || "").replace(/\s+/g, " ").trim().toLowerCase();
+  if (!t || !d || t !== d) return false;
+  if (/\b(?:agreement|contract|nda|addendum|amendment|sow|statement of work)\b/.test(d)) return false;
+  return true;
+}
+
 function resolveCanonicalAgreementTitleCore(opts: {
   currentTitle: string | null | undefined;
   liveDocTitle: string | null | undefined;
@@ -295,8 +303,11 @@ function resolveCanonicalAgreementTitleCore(opts: {
   /** Optional raw intake — enables advisor + mutual-NDA canonical overrides. */
   intakeText?: string | null;
 }): CanonicalTitleResolution {
-  const current = (opts.currentTitle || "").trim();
+  const rawCurrent = (opts.currentTitle || "").trim();
   const intake = opts.intakeText ?? null;
+  const hireToDoWork = isHireToDoWorkNotEmployment(intake || "");
+  let current = titleEchoesCasualDump(rawCurrent, intake) ? "" : rawCurrent;
+  if (hireToDoWork && /^employment\s+agreement$/i.test(current)) current = "";
 
   // Advisor override: when intake clearly says "advisor", canonical title is "Advisor Agreement"
   // even if family routes through consulting_agreement (P3).
@@ -363,7 +374,9 @@ function resolveCanonicalAgreementTitleCore(opts: {
   if (current && !isGenericOrEmptyTitle(current, opts.family)) {
     return { title: current, source: "preserved" };
   }
-  const live = (opts.liveDocTitle || "").trim();
+  const rawLive = (opts.liveDocTitle || "").trim();
+  let live = titleEchoesCasualDump(rawLive, intake) ? "" : rawLive;
+  if (hireToDoWork && /^employment\s+agreement$/i.test(live)) live = "";
   if (live && !isGenericOrEmptyTitle(live, opts.family)) {
     return { title: live, source: "live" };
   }

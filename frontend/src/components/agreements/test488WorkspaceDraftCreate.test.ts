@@ -53,7 +53,7 @@ describe("TEST488 — workspace bind sends checkout org for subscription repair"
       "utf8",
     );
     expect(intake).toContain("clawAgreementHeaders");
-    expect(intake).toContain('apiUrl("/api/agreements/draft")');
+    expect(intake).toContain("resolvePaidContinuePersistDraftUrl");
     expect(simpleCreate).toContain("AgreementBuilderIntake");
     expect(intake).toContain("formatDraftCreateHttpUserMessage");
     expect(intake).toContain("isDraftCreateHttpForbidden");

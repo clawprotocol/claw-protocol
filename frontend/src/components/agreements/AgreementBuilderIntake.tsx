@@ -27,7 +27,7 @@ import {
 import { clawAgreementHeaders } from "../../agreement/agreementOrgHeaders";
 import { fetchWorkspaceProEntitlement, readCachedWorkspaceProEntitlement } from "../../agreement/agreementProFunnelGate";
 import { fetchAgreementDraft, fetchAgreementDraftWithSigningLock } from "../../agreement/agreementWorkspaceApi";
-import { apiUrl, resolveApiBase, fetchWithProxyFallback } from "../../lib/clawApi";
+import { apiUrl, resolveApiBase, fetchWithProxyFallback, resolvePaidContinuePersistDraftUrl } from "../../lib/clawApi";
 import { PREMIUM_COMPLETION_ATTEMPT_MAX_MS } from "../../lib/premiumCompletionAttemptTimeout";
 import { resolvePremiumAgreementParseTimeoutMs } from "../../lib/premiumAgreementParseTimeout";
 import { defaultPostCheckoutRunModelPassInput, getPremiumGenerationIntakeFingerprint } from "../../lib/postCheckoutProFlow";
@@ -1157,6 +1157,7 @@ import {
   shouldShowGapQuestions,
   isFailClosedDecision,
   getRequiredClarificationTopics,
+  buildLocalMissingTenetQuestions,
 } from "./postCheckoutMissingFactsGate";
 import {
   effectivePremiumRefineApplyLogRevisionIntent,
@@ -5628,7 +5629,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       due_date: rest.due_date ?? null,
       effective_date: rest.effective_date ?? null,
     };
-    const draftUrl = apiUrl("/api/agreements/draft");
+    const draftUrl = resolvePaidContinuePersistDraftUrl();
     const draftHeaders = clawAgreementHeaders({
       "Content-Type": "application/json",
       ...(reviewFirstHandoffPersist
@@ -11624,7 +11625,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           });
         }
 
-        const fiveTenetsPreflight = evaluateFiveTenetsPreflight(mergedIntake);
+        const fiveTenetsPreflight = evaluateFiveTenetsPreflight(mergedIntake, prior);
         if (import.meta.env.DEV) {
           // eslint-disable-next-line no-console
           console.info("[post_checkout] five_tenets_preflight", {
@@ -11670,10 +11671,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           gateDecision = evaluatePostCheckoutMissingFactsGate({
             apiResult: missingFactsApiResult,
             apiError: missingFactsApiError,
+            intakeText: mergedIntake,
+            draft: prior,
+            localTopics: getRequiredClarificationTopics(mergedIntake, prior),
+            localQuestions: buildLocalMissingTenetQuestions(mergedIntake, prior),
           });
 
-          if (gateDecision.action === "proceed_to_draft" && missingFactsApiResult?.questions?.length === 0) {
-            const forcedTopics = getRequiredClarificationTopics(mergedIntake);
+          if (gateDecision.action === "proceed_to_draft") {
+            const forcedTopics = getRequiredClarificationTopics(mergedIntake, prior);
             if (forcedTopics.length > 0) {
               if (import.meta.env.DEV) {
                 // eslint-disable-next-line no-console
@@ -11682,17 +11687,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                   runGen,
                 });
               }
-              const fallbackQuestions = forcedTopics.slice(0, 5).map((topic) => {
-                switch (topic) {
-                  case "parties": return "Who are the parties to this agreement? Please provide full legal names.";
-                  case "scope": return "What is the purpose or scope of this agreement? What services or work will be performed?";
-                  case "payment": return "What are the payment terms? Include amounts, timing, and any conditions.";
-                  case "term": return "What is the duration of this agreement? When does it start and end?";
-                  case "governing_law": return "Which state's law should govern this agreement?";
-                  default: return `Please clarify: ${topic}`;
-                }
-              });
-              gateDecision = { action: "await_gaps", questions: fallbackQuestions };
+              gateDecision = {
+                action: "await_gaps",
+                questions: buildLocalMissingTenetQuestions(mergedIntake, prior).slice(0, 5),
+              };
             }
           }
         }
@@ -34010,7 +34008,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                     keyboard overlay, or hydration timing. Mirrors the sticky-bar fallback above
                     the bottom CTA. The presentational component renders nothing for "normal".
                   */}
-                  {createUiStage === CreateUiStage.DRAFT &&
+                  {!multiPartyProGateActive &&
+                  createUiStage === CreateUiStage.DRAFT &&
                   draft &&
                   !premiumPersistedFlowActive &&
                   !premiumSendPathUnlocked ? (
@@ -34019,7 +34018,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                       surface="inline"
                     />
                   ) : null}
-                  {((productionDraftPrimaryReviewSurface &&
+                  {!multiPartyProGateActive && ((productionDraftPrimaryReviewSurface &&
                     createUiStage === CreateUiStage.DRAFT &&
                     (draft !== null ||
                       createFlowPhase === "generating_draft" ||
@@ -34289,8 +34288,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                   Review your starter draft below.
                                 </p>
                                 <p className="mt-1 text-xs leading-snug text-slate-500 sm:text-sm">
-                                  Copy it now, or upgrade to strengthen it before you share for review or prepare for
-                                  signing. Nothing moves forward until you choose the next step.
+                                  Copy it now. Continue with Pro to review it with the other party, sign, and save it. Nothing moves forward until you choose the next step.
                                 </p>
                                 <div className="mt-2 flex flex-wrap items-center gap-2">
                                   <button

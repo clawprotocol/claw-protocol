@@ -157,12 +157,21 @@ export function collapseDuplicateEsignNoticesInFullPreview(text: string): string
   return `${without}\n\n${line}\n`;
 }
 
-function stripManualExecutionBlockPreservePreviewNotice(text: string): string {
+function omitStarterEsignFooter(text: string): string {
+  return `${stripPreviewEsignNoticeLines(text).replace(/\n{3,}/g, "\n\n").trimEnd()}\n`;
+}
+
+function finalizePreviewEsignFooter(text: string, starterPreview: boolean): string {
+  return starterPreview ? omitStarterEsignFooter(text) : collapseDuplicateEsignNoticesInFullPreview(text);
+}
+
+function stripManualExecutionBlockPreservePreviewNotice(text: string, starterPreview = false): string {
   const raw = (text || "").replace(/\r\n/g, "\n").trimEnd();
   const start = raw.search(/\n\s*IN WITNESS WHEREOF\b/i);
+  const body = start < 0 ? raw : raw.slice(0, start).trimEnd();
+  if (starterPreview) return omitStarterEsignFooter(body);
   if (start < 0) return raw;
-  const head = raw.slice(0, start).trimEnd();
-  return collapseDuplicateEsignNoticesInFullPreview(`${head}\n\n${AGREEMENT_PREVIEW_ESIGN_NOTICE}\n`);
+  return collapseDuplicateEsignNoticesInFullPreview(`${body}\n\n${AGREEMENT_PREVIEW_ESIGN_NOTICE}\n`);
 }
 
 /** Remove internal expansion marker and duplicate e-sign line from free-text blocks. */
@@ -711,10 +720,12 @@ function buildOperatingAgreementPreviewText(draft: ParsedDraftShape, options?: A
       "",
     );
   }
-  lines.push(AGREEMENT_PREVIEW_ESIGN_NOTICE, "");
-  const collapsed = collapseDuplicateEsignNoticesInFullPreview(lines.join("\n"));
+  if (!starterPreview) {
+    lines.push(AGREEMENT_PREVIEW_ESIGN_NOTICE, "");
+  }
+  const collapsed = finalizePreviewEsignFooter(lines.join("\n"), starterPreview);
   // Starter preview path also runs through the operating-agreement builder.
-  return starterPreview ? sanitizeStarterPreviewProse(collapsed) : collapsed;
+  return starterPreview ? sanitizeStarterPreviewProse(collapsed) : collapsed
 }
 
 /**
@@ -745,7 +756,7 @@ export function buildAgreementPreviewTextCore(
   const premiumDeliverable = Boolean(options?.premiumDeliverablePreview) && !starterPreview;
   const route = selectAgreementPreviewRoute(draft, options);
   if (route === "operating") {
-    return collapseDuplicateEsignNoticesInFullPreview(buildOperatingAgreementPreviewText(draft, options));
+    return finalizePreviewEsignFooter(buildOperatingAgreementPreviewText(draft, options), starterPreview);
   }
 
   const draftForBuild =
@@ -785,12 +796,13 @@ export function buildAgreementPreviewTextCore(
   const draftPaySkewedByApi =
     Boolean(installmentPay) &&
     draftPaymentTermsLoseIntakeInstallmentCadence(draftForBuild.payment_terms, buildOptions?.intakeText);
+  const draftPayGrounded = (draftForBuild.payment_terms || "").trim();
   const pay = starterPreview
     ? milestonePay ||
       installmentPay ||
-      (!draftPaySkewedByApi ? normalizeStarterPaymentTermsForDisplay(draftForBuild.payment_terms) : null) ||
-      (!draftPaySkewedByApi ? (draftForBuild.payment_terms || "").trim() : null) ||
-      MISSING
+      (!draftPaySkewedByApi && draftPayGrounded ? normalizeStarterPaymentTermsForDisplay(draftPayGrounded) : null) ||
+      (!draftPaySkewedByApi && draftPayGrounded ? draftPayGrounded : null) ||
+      ""
     : premiumDeliverable
       ? payPrepared.trim() ||
         payStructuredLine ||
@@ -901,7 +913,9 @@ export function buildAgreementPreviewTextCore(
     }
   }
   const lawLineStarter =
-    starterPreview && isJurisdictionDisplayLowConfidence(lawRaw)
+    starterPreview && !lawRaw
+      ? ""
+      : starterPreview && isJurisdictionDisplayLowConfidence(lawRaw)
       ? `Governing law: ${STARTER_GOVERNING_LAW_DISPLAY_FALLBACK}.`
       : starterPreview
         ? `This Agreement shall be governed by the laws of ${sanitizeJurisdictionForStarterGoverningLaw(draft.jurisdiction)}, without regard to conflict-of-law principles.`
@@ -937,11 +951,14 @@ export function buildAgreementPreviewTextCore(
       "",
     );
   }
-  lines.push(AGREEMENT_PREVIEW_ESIGN_NOTICE, "");
-  let collapsed = collapseDuplicateEsignNoticesInFullPreview(lines.join("\n"));
+  if (!starterPreview) {
+    lines.push(AGREEMENT_PREVIEW_ESIGN_NOTICE, "");
+  }
+  let collapsed = finalizePreviewEsignFooter(lines.join("\n"), starterPreview);
   if (starterPreview) {
     collapsed = sanitizeStarterPreviewProse(collapsed);
     collapsed = formatStarterPreviewForDisplay(collapsed);
+    collapsed = omitStarterEsignFooter(collapsed);
   }
   return collapsed;
 }
@@ -1059,10 +1076,10 @@ function applyAgreementPreviewPlaceholderGate(
   if (!gate.ok) return PLACEHOLDER_SAFETY_PREVIEW_BLOCKED;
   const signatureStripped =
     surface === "preview_structured" || surface === "preview_starter"
-      ? stripManualExecutionBlockPreservePreviewNotice(gate.text)
+      ? stripManualExecutionBlockPreservePreviewNotice(gate.text, surface === "preview_starter")
       : gate.text;
   if (tier === "starter") {
-    const formatted = formatStarterPreviewForDisplay(signatureStripped);
+    const formatted = formatStarterPreviewForDisplay(omitStarterEsignFooter(signatureStripped));
     return applyDocumentQualityFloor(formatted).text;
   }
   return signatureStripped;

@@ -18,8 +18,38 @@ function cleanFallbackName(raw: string): string {
   return name.replace(/\s+/g, " ").trim();
 }
 
+/**
+ * Money, term, and clause fragments must never occupy a party slot
+ * ("$3k, Two Weeks", "They Pay Monthly", "two weeks", "3k/month").
+ */
+export function looksLikeMoneyTermOrClausePartyName(raw: string): boolean {
+  const t = (raw || "").replace(/\s+/g, " ").trim();
+  if (!t) return false;
+  if (/\b(?:LLC|L\.L\.C\.|Inc\.?|Corp\.?|Corporation|Ltd\.?|Limited|LLP|PLLC)\b/i.test(t)) return false;
+  if (/\$/.test(t)) return true;
+  if (/\b\d+(?:\.\d+)?\s*k\b/i.test(t)) return true;
+  if (/\/\s*(?:mo(?:nth)?|wk|week|yr|year|hr|hour)\b/i.test(t)) return true;
+  if (/\bthey\s+pay\b/i.test(t)) return true;
+  if (/^(?:pay|paid|pays)\s+(?:monthly|weekly|daily|annually|hourly)\b/i.test(t)) return true;
+  if (/^(?:daily|weekly|monthly|yearly|annually|hourly)$/i.test(t)) return true;
+  if (/^(?:(?:a|an|one|two|three|four|five|six|seven|eight|nine|ten|\d+)\s+)?(?:days?|weeks?|months?|years?)$/i.test(t)) return true;
+  if (
+    /\b(?:one|two|three|four|five|six|seven|eight|nine|ten|\d+)\s+(?:days?|weeks?|months?|years?)\b/i.test(t) &&
+    !/\b(?:LLC|Inc\.?|Corp\.?|Ltd\.?)\b/i.test(t)
+  ) {
+    const leftover = t
+      .replace(/\b(?:one|two|three|four|five|six|seven|eight|nine|ten|\d+)\s+(?:days?|weeks?|months?|years?)\b/gi, " ")
+      .replace(/[$,]/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (!leftover || leftover.length < 3) return true;
+  }
+  return false;
+}
+
 function looksLikeGenericPartyRow(parties: { name: string; role: string }[]): boolean {
   if (parties.length < 2) return true;
+  if (parties.some((p) => looksLikeMoneyTermOrClausePartyName(p.name))) return true;
   const blob = parties.map((p) => p.name).join(" ").toLowerCase();
   return (
     /\bparty\s*a\b|\bparty\s*b\b|edit\s+in\s+review|placeholder/i.test(blob) ||
@@ -119,7 +149,255 @@ export function tryInferNamedPartiesFromIntake(raw: string): { name: string; rol
     }
   }
 
+  const casual = inferCasualTwoPartyFromDump(raw);
+  if (casual) return casual;
+
   return null;
+}
+
+const CASUAL_NAME_STOP = new Set([
+  "i", "we", "the", "a", "an", "this", "that", "my", "our", "your",
+  "draft", "create", "make", "need", "want", "please", "agreement",
+  "contract", "deal", "simple", "for", "and",
+  "lol", "pizza", "biscuit", "teal", "testing",
+]);
+
+const PERSON_NAME_CAPTURE = "([A-Z][a-z]{2,}(?:\\s+[A-Z][a-z]{2,})?)";
+
+/** Verbs a named person will/is doing in a casual dump. */
+const CASUAL_DO_VERBS =
+  "paint|design|fix|repair|build|clean|consult|write|create|install|photograph|photo|shoot|film|mow|walk|tutor|coach|edit|deliver|cater|sell|buy|split|share|handle";
+
+const CASUAL_WORK_STEM =
+  "(?:paint(?:ing)?|design(?:ing)?|fix(?:ing)?|repair(?:ing)?|build(?:ing)?|clean(?:ing)?|consult(?:ing)?|writ(?:e|ing)|creat(?:e|ing)|install(?:ing)?|photograph(?:ing)?|photo(?:graphing)?|shoot(?:ing)?|film(?:ing)?|mow(?:ing)?|walk(?:ing)?|tutor(?:ing)?|coach(?:ing)?|edit(?:ing)?|deliver(?:ing)?|cater(?:ing)?|sell(?:ing)?|buy(?:ing)?|split(?:ting)?|shar(?:e|ing)|handl(?:e|ing))";
+
+function looksLikePersonName(raw: string): boolean {
+  const name = (raw || "").trim();
+  if (looksLikeMoneyTermOrClausePartyName(name)) return false;
+  if (!/^[A-Z][a-z]{2,}(?:\s+[A-Z][a-z]{2,})?$/.test(name)) return false;
+  return !CASUAL_NAME_STOP.has(name.split(/\s+/)[0].toLowerCase());
+}
+
+function clientAndNamedPerson(name: string): { name: string; role: string }[] {
+  return [
+    { name: "Client", role: "client" },
+    { name: name.trim().slice(0, MAX_NAME), role: "service_provider" },
+  ];
+}
+
+/** Money, hire/pay/sold, NDA/deal words, or a named counterparty — not pizza/lol. */
+function hasCasualDealShape(t: string): boolean {
+  return (
+    /\$\s*[\d,]/.test(t) ||
+    /\b(?:\d+\s*\/\s*\d+|cash|agreed|hire[ds]?|engage[ds]?|sold|pay(?:ing)?|splitt?ing|starts?|starting)\b/i.test(t) ||
+    /\b(?:nda|n\.?d\.?a\.?|agreement|contract|deal|job)\b/i.test(t) ||
+    /\b(?:me and|i and|between me and)\s+[A-Z]/i.test(t) ||
+    /\b(?:lawn|paint|photo(?:graphy)?)?\s*guy\s+[A-Z]/i.test(t)
+  );
+}
+
+function cleanScope(raw: string): string {
+  return raw.trim().replace(/[.,;:]+$/, "").replace(/\s+/g, " ").trim();
+}
+
+/** Scope fragment from a casual two-party dump (paint my office, consulting work). */
+export function inferCasualScopeFromDump(raw: string): string {
+  const t = (raw || "").replace(/\s+/g, " ").trim();
+  const hiredTo = t.match(
+    new RegExp(`\\b(?:hired|engaged|contracted|retained|brought in)\\s+${PERSON_NAME_CAPTURE}\\s+to\\s+(.{3,80}?)(?:\\.|$)`),
+  );
+  if (hiredTo?.[2]) return cleanScope(hiredTo[2]);
+  const hireTo = t.match(
+    new RegExp(`\\b(?:[Hh]ire|[Ee]ngage)\\s+${PERSON_NAME_CAPTURE}\\s+to\\s+(.{3,80}?)(?:\\.|$)`),
+  );
+  if (hireTo?.[2]) return cleanScope(hireTo[2]);
+  const needDeal = t.match(
+    /\b(?:need|want)\s+(?:a|an)\s+(.{3,40}?)\s+(?:deal|agreement|contract|job)\b/i,
+  );
+  if (needDeal?.[1]) return needDeal[1].trim();
+  const willWork = t.match(new RegExp(`\\b(?:will|is)\\s+(${CASUAL_WORK_STEM}[^.\\n]{0,60})`, "i"));
+  if (willWork?.[1]) return cleanScope(willWork[1]);
+  const forWork = t.match(/\bfor\s+(?:some\s+)?(.{3,40}?\b(?:work|services?|painting|consulting|design))\b/i);
+  if (forWork?.[1]) return forWork[1].trim();
+  const someoneTo = t.match(/\b(?:need|want)\s+someone\s+to\s+(.{3,80}?)(?:\.|$)/i);
+  if (someoneTo?.[1]) return cleanScope(someoneTo[1]);
+  const payTo = t.match(
+    new RegExp(`\\bpay(?:ing)?\\s+${PERSON_NAME_CAPTURE}\\b[^.\\n]{0,48}\\bto\\s+(.{3,60}?)(?:\\.|$)`),
+  );
+  if (payTo?.[2]) return cleanScope(payTo[2]);
+  const soldThing = t.match(/\bsold\s+(?:my|our|the)\s+(.{2,40}?)\s+to\s+[A-Z]/i);
+  if (soldThing?.[1]) return cleanScope(soldThing[1]);
+  const splitThing = t.match(/\bsplitt?(?:ing|s)?\s+(?:the\s+)?(.{3,40}?)(?:\s+\d+\s*\/\s*\d+|[.,;]|$)/i);
+  if (splitThing?.[1]) return cleanScope(splitThing[1]);
+  const labeledScope = t.match(/\bscope\s*[:\-]\s*(.{3,80}?)(?:\.|$)/i);
+  if (labeledScope?.[1]) return cleanScope(labeledScope[1]);
+  if (hasCasualDealShape(t)) {
+    const keyword = t.match(
+      /\b(photograph(?:ing|y)?(?:\s+our\s+wedding)?|wedding|lawn(?:\s+(?:care|guy))?|walk(?:ing)?(?:\s+the)?\s+dog|etsy(?:\s+shop)?|shopify(?:\s+theme)?|app\s+idea|bike)\b/i,
+    );
+    if (keyword?.[1]) return cleanScope(keyword[1]);
+  }
+  const bareWork = t.match(/\b((?:fix|repair|paint|design|build|clean|install)(?:ing)?(?:\s+the)?\s+(?:broken\s+)?[a-z][a-z\s]{1,40})\b/i);
+  if (bareWork?.[1]) return bareWork[1].trim();
+  return "";
+}
+
+/**
+ * First-person / named-person dumps the between-regex misses:
+ * "I hired Mike to paint my office", "need a painting deal with Mike",
+ * "Sarah will photograph our wedding", "lawn guy Luis", "pay Riley".
+ */
+export function inferCasualTwoPartyFromDump(raw: string): { name: string; role: string }[] | null {
+  const t = (raw || "").replace(/\s+/g, " ").trim();
+  if (t.length < 10) return null;
+
+  const hired = t.match(
+    new RegExp(`\\b(?:I|We|I've|We've)\\s+(?:hired|engaged|contracted|retained|brought in)\\s+${PERSON_NAME_CAPTURE}\\b`),
+  );
+  if (hired?.[1] && looksLikePersonName(hired[1])) return clientAndNamedPerson(hired[1]);
+
+  const withName = t.match(
+    new RegExp(`\\b(?:deal|agreement|contract|job)\\s+with\\s+${PERSON_NAME_CAPTURE}\\b`),
+  );
+  if (withName?.[1] && looksLikePersonName(withName[1])) return clientAndNamedPerson(withName[1]);
+
+  const nameWill = t.match(
+    new RegExp(`\\b${PERSON_NAME_CAPTURE}\\s+(?:will|is)\\s+(?:${CASUAL_DO_VERBS})`),
+  );
+  if (nameWill?.[1] && looksLikePersonName(nameWill[1])) return clientAndNamedPerson(nameWill[1]);
+
+  const meAnd = t.match(
+    new RegExp(`\\b(?:(?:me|I)\\s+and|between\\s+me\\s+and)\\s+${PERSON_NAME_CAPTURE}\\b`),
+  );
+  if (meAnd?.[1] && looksLikePersonName(meAnd[1])) return clientAndNamedPerson(meAnd[1]);
+
+  const ndaAnd = t.match(
+    new RegExp(`\\b(?:nda|n\\.?d\\.?a\\.?|non[- ]disclosure)\\b[\\s\\S]{0,48}\\band\\s+${PERSON_NAME_CAPTURE}\\b`, "i"),
+  );
+  if (ndaAnd?.[1] && looksLikePersonName(ndaAnd[1])) return clientAndNamedPerson(ndaAnd[1]);
+
+  const guy = t.match(
+    new RegExp(`\\b(?:(?:lawn|paint|photo(?:graphy)?)\\s+)?guy\\s+${PERSON_NAME_CAPTURE}\\b`),
+  );
+  if (guy?.[1] && looksLikePersonName(guy[1])) return clientAndNamedPerson(guy[1]);
+
+  const soldTo = t.match(new RegExp(`\\bsold\\b[\\s\\S]{0,48}\\bto\\s+${PERSON_NAME_CAPTURE}\\b`));
+  if (soldTo?.[1] && looksLikePersonName(soldTo[1])) return clientAndNamedPerson(soldTo[1]);
+
+  const payName = t.match(new RegExp(`\\bpay(?:ing)?\\s+${PERSON_NAME_CAPTURE}\\b`));
+  if (payName?.[1] && looksLikePersonName(payName[1])) return clientAndNamedPerson(payName[1]);
+
+  const hireImperative = t.match(new RegExp(`\\b(?:[Hh]ire|[Ee]ngage)\\s+${PERSON_NAME_CAPTURE}\\b`));
+  if (hireImperative?.[1] && looksLikePersonName(hireImperative[1])) return clientAndNamedPerson(hireImperative[1]);
+
+  const iAm = t.match(new RegExp(`\\bI(?:\\s+am|'m)\\s+${PERSON_NAME_CAPTURE}\\b`));
+  const forEntity = t.match(
+    /\bfor\s+([A-Z][A-Za-z0-9&'\-\s]{1,80}?(?:LLC|L\.L\.C\.|Inc\.?|Corp\.?|Corporation|Ltd\.?|Limited|Company|LLP|PLLC))\b/,
+  );
+  if (iAm?.[1] && looksLikePersonName(iAm[1]) && forEntity?.[1]) {
+    return [
+      { name: iAm[1].trim().slice(0, MAX_NAME), role: "party" },
+      { name: forEntity[1].trim().replace(/\s+/g, " ").slice(0, MAX_NAME), role: "party" },
+    ];
+  }
+  if (forEntity?.[1] && /\b(?:consulting|services?)\b/i.test(t)) {
+    return [
+      { name: "Client", role: "client" },
+      { name: forEntity[1].trim().replace(/\s+/g, " ").slice(0, MAX_NAME), role: "party" },
+    ];
+  }
+
+  return null;
+}
+
+
+function looksLikeRoleOrPlaceholderName(name: string): boolean {
+  return /^(client|service provider|party [ab])$/i.test((name || "").trim());
+}
+
+/** Short / boilerplate purpose that should be upgraded to a one-line sentence. */
+export function looksLikePurposeFragment(purpose: string): boolean {
+  const t = (purpose || "").replace(/\s+/g, " ").trim();
+  if (!t) return true;
+  if (t.length <= 48 && !/[.!?]$/.test(t) && !/\bwill\b/i.test(t)) return true;
+  if (/^commercial arrangement to be agreed/i.test(t)) return true;
+  if (/^scope and deliverables to be agreed/i.test(t)) return true;
+  if (/protection of confidential/i.test(t)) return true;
+  return false;
+}
+
+function coveringPhraseFromScope(scope: string): string {
+  const s = scope.replace(/\bmy\b/gi, "the").replace(/\bour\b/gi, "the").trim();
+  return s
+    .replace(/^fix\b/i, "fixing")
+    .replace(/^repair\b/i, "repairing")
+    .replace(/^paint\b/i, "painting")
+    .replace(/^build\b/i, "building")
+    .replace(/^walk\b/i, "walking")
+    .replace(/^photograph\b/i, "photographing");
+}
+
+/**
+ * One short sentence from the dump's own words. Does not add money, law, or term.
+ * "paint my office" + Mike → "Mike will paint the office."
+ */
+export function composeCasualPurposeSentence(
+  raw: string,
+  providerName?: string | null,
+): string {
+  const t = (raw || "").replace(/\s+/g, " ").trim();
+  if (!t) return "";
+  let scope = inferCasualScopeFromDump(t);
+  if (!scope) return "";
+  scope = scope
+    .replace(/\$\s*[\d,]+(?:\.\d+)?(?:\s*k)?\b/gi, " ")
+    .replace(/\b\d+(?:\.\d+)?\s*k\b/gi, " ")
+    .replace(/\b(?:one|two|three|four|five|\d+)\s+(?:days?|weeks?|months?|years?)\b/gi, " ")
+    .replace(/\b(?:on|starting)\s+[A-Za-z]+(?:\s+\d{1,2})?\b/gi, " ")
+    .replace(/\blawn\s+guy\b/gi, "lawn")
+    .replace(/\s*,\s*/g, " ")
+    .replace(/\s+/g, " ")
+    .replace(/[.,;:]+$/g, "")
+    .trim();
+  if (!scope) return "";
+
+  const actor = (providerName || "").trim();
+  const actorOk = Boolean(actor) && !looksLikeRoleOrPlaceholderName(actor);
+
+  const verbLead = scope.match(
+    /^(paint(?:ing)?|photograph(?:ing)?|photo|build|fix|repair|walk(?:ing)?|mow|design|install|create|shoot|film|split(?:ting)?|shar(?:e|ing)|sell(?:ing)?|buy(?:ing)?|handle|redo)\b([\s\S]*)$/i,
+  );
+  if (verbLead && actorOk) {
+    let rest = `${verbLead[1]}${verbLead[2] || ""}`.trim();
+    rest = rest.replace(/\bmy\b/gi, "the").replace(/\bour\b/gi, "the");
+    rest = rest
+      .replace(/^painting\b/i, "paint")
+      .replace(/^photographing\b/i, "photograph")
+      .replace(/^walking\b/i, "walk")
+      .replace(/^building\b/i, "build")
+      .replace(/^fixing\b/i, "fix")
+      .replace(/^repairing\b/i, "repair")
+      .replace(/^splitting\b/i, "split");
+    return `${actor} will ${rest}.`;
+  }
+
+  if (/\b(?:nda|non[-\s]?disclosure|confidential)\b/i.test(t)) {
+    const about = /^(?:the|an?|this)\b/i.test(scope) ? scope : `the ${scope}`;
+    return `This agreement covers confidentiality about ${about}.`;
+  }
+  if (/\bsold\b|\bsale\b/i.test(t)) {
+    return `This agreement covers the sale of the ${scope.replace(/^the\s+/i, "")}.`;
+  }
+  if (/\b50\s*\/\s*50\b/.test(t) && /\betsy\b/i.test(t)) {
+    return `The parties will split the ${scope} 50/50.`;
+  }
+  if (actorOk && verbLead) {
+    return `${actor} will ${scope.replace(/\bmy\b/gi, "the").replace(/\bour\b/gi, "the")}.`;
+  }
+  if (actorOk && /^(lawn|fence|etsy|shopify|bike|dog)\b/i.test(scope)) {
+    return `This agreement covers the ${scope}.`;
+  }
+  return `This agreement covers ${coveringPhraseFromScope(scope)}.`;
 }
 
 /** Merge inferred names only when current parties are clearly generic placeholders. */

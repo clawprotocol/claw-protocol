@@ -84,6 +84,27 @@ describe("evaluatePostCheckoutMissingFactsGate", () => {
       expect(shouldShowGapQuestions(decision)).toBe(false);
       expect(isFailClosedDecision(decision)).toBe(false);
     });
+
+    it("does not fail-open when local missing tenets remain after API []", () => {
+      const decision = evaluatePostCheckoutMissingFactsGate({
+        apiResult: { questions: [] },
+        apiError: null,
+        localTopics: ["payment", "governing_law"],
+        localQuestions: [
+          "Mike is already named for this work (Mike will paint the office), but no payment amount is listed. What are the payment terms?",
+          "Mike is already named, but no governing law was given. Which state's law should govern this agreement?",
+        ],
+      });
+
+      expect(decision.action).toBe("await_gaps");
+      expect(shouldProceedToDraft(decision)).toBe(false);
+      if (decision.action === "await_gaps") {
+        expect(decision.questions.length).toBeGreaterThanOrEqual(2);
+        expect(decision.questions.length).toBeLessThanOrEqual(5);
+        expect(decision.questions.join(" ")).toMatch(/Mike/);
+        expect(decision.questions.join(" ")).not.toMatch(/delaware/i);
+      }
+    });
   });
 
   describe("when missing-facts API fails (error path)", () => {

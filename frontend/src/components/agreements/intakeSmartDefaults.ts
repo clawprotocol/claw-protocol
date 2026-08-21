@@ -1,14 +1,15 @@
-import { detectAgreementFamily, type AgreementFamily } from "./agreementFamilyRouter";
+import { detectAgreementFamily, isHireToDoWorkNotEmployment, type AgreementFamily } from "./agreementFamilyRouter";
 import { formatPaymentTermsLine, type IntakePaymentField } from "./intakeCurrencyParse";
 import { buildLiveDraftPreview } from "./liveDraftHeuristics";
 import { parseIntakeToStructuredAgreement } from "./intakeStructuredAgreementModel";
-import { tryInferNamedPartiesFromIntake } from "./intakeNamedPartyFallback";
+import { inferCasualScopeFromDump, inferCasualTwoPartyFromDump, looksLikeMoneyTermOrClausePartyName, tryInferNamedPartiesFromIntake } from "./intakeNamedPartyFallback";
+import { isVisitorHirerNeedSomeoneDump } from "./visitorHirerRoleOrder";
 import { extractBetweenPartyNameList, extractBetweenPartyPair } from "./partyBetweenParse";
 import { isAuthoritativeLegalEntityName } from "./paidProPartyNamePreserve";
 import { repairDraftPartiesFromIntakeAuthority } from "./partySlotIdentityNormalize";
 import { stripSignerInstructionClausesFromIntake } from "./intakeSignerInstructionParse";
 import { resolveCanonicalAgreementTitle } from "./canonicalAgreementTitle";
-import { isPaymentSemanticallySafe } from "./paymentSemanticGuard";
+import { isInventedNoFeePayment, isPaymentSemanticallySafe, NO_PAYMENT_NEUTRAL_FALLBACK } from "./paymentSemanticGuard";
 import {
   mergeSignerMetadataIntoDraftParties,
   resolveUniversalSignerMetadataBySlot,
@@ -142,17 +143,22 @@ export function applySimpleFlowSmartDefaults(parsed: ParsedDraftShape, intakeTex
   }
 
   const j = (next.jurisdiction || "").trim().toLowerCase();
-  if (!j || j === "tbd") {
+  if (!j || j === "tbd" || j === "delaware") {
     const gl = structured.governing_law.trim();
-    next.jurisdiction = gl || "Delaware";
+    const intakeStatesLaw = /\b(?:delaware|california|arizona|texas|florida|nevada|washington|illinois|new york|governing law)\b/i.test(intakeText);
+    next.jurisdiction = gl || (intakeStatesLaw && j === "delaware" ? "Delaware" : "");
   }
 
   const betweenLegalEntities = extractBetweenPartyNameList(
     stripSignerInstructionClausesFromIntake(intakeText),
   );
   const authoritativeBetween = betweenLegalEntities.filter(isAuthoritativeLegalEntityName);
-  const partySeed =
-    authoritativeBetween.length >= 2 ? authoritativeBetween : betweenLegalEntities;
+  const partySeed = (
+    authoritativeBetween.length >= 2 ? authoritativeBetween : betweenLegalEntities
+  ).filter((name) => !looksLikeMoneyTermOrClausePartyName(name));
+  const currentPartyRowsLookUsable =
+    (next.parties || []).length >= 2 &&
+    !(next.parties || []).some((p) => looksLikeMoneyTermOrClausePartyName(p.name));
   if (partySeed.length >= 2) {
     next.parties = partySeed.slice(0, 12).map((name) => {
       const roleHint = roleHintForPartyName(name, structured.partyRoleHints);
@@ -161,7 +167,7 @@ export function applySimpleFlowSmartDefaults(parsed: ParsedDraftShape, intakeTex
         role: roleHint,
       };
     });
-  } else if ((next.parties || []).length < 2) {
+  } else if (!currentPartyRowsLookUsable) {
     const explicitSigners = tryInferNamedPartiesFromIntake(intakeText);
     if (explicitSigners && explicitSigners.length >= 2) {
       next.parties = explicitSigners;
@@ -169,13 +175,29 @@ export function applySimpleFlowSmartDefaults(parsed: ParsedDraftShape, intakeTex
       // Honor the multi-party output of the structured extractor (Parties: A, B, C, D).
       // Apply per-name role hints (P2): "Jamie Chen as guarantor" → role "guarantor",
       // canonical name stays "Jamie Chen".
-      next.parties = structured.parties.map((name) => {
-        const roleHint = roleHintForPartyName(name, structured.partyRoleHints);
-        return {
-          name: name.slice(0, MAX_PARTY_NAME_LEN),
-          role: roleHint,
-        };
-      });
+      const structuredUsable = structured.parties.filter((name) => !looksLikeMoneyTermOrClausePartyName(name));
+      if (structuredUsable.length >= 2) {
+        next.parties = structuredUsable.map((name) => {
+          const roleHint = roleHintForPartyName(name, structured.partyRoleHints);
+          return {
+            name: name.slice(0, MAX_PARTY_NAME_LEN),
+            role: roleHint,
+          };
+        });
+      } else {
+        const casual = inferCasualTwoPartyFromDump(intakeText);
+        const unnamedHirer =
+          Boolean(inferCasualScopeFromDump(intakeText)) || isVisitorHirerNeedSomeoneDump(intakeText);
+        next.parties = casual || (unnamedHirer
+          ? [
+              { name: "Client", role: "client" },
+              { name: "Service Provider", role: "service_provider" },
+            ]
+          : [
+              { name: "Party A", role: "party" },
+              { name: "Party B", role: "party" },
+            ]);
+      }
     } else {
       const fromBetween = extractBetweenPartyPair(intakeText);
       const fromLive =
@@ -185,13 +207,22 @@ export function applySimpleFlowSmartDefaults(parsed: ParsedDraftShape, intakeTex
               { name: fromBetween.right.trim().slice(0, MAX_PARTY_NAME_LEN), role: "party" as const },
             ]
           : splitPartiesFromLiveLine(live.partiesLine);
-      if (fromLive) {
-        next.parties = fromLive;
+      const fromLiveUsable = (fromLive || []).filter((p) => !looksLikeMoneyTermOrClausePartyName(p.name));
+      if (fromLiveUsable.length >= 2) {
+        next.parties = fromLiveUsable;
       } else {
-        next.parties = [
-          { name: "Party A", role: "party" },
-          { name: "Party B", role: "party" },
-        ];
+        const casual = inferCasualTwoPartyFromDump(intakeText);
+        const unnamedHirer =
+          Boolean(inferCasualScopeFromDump(intakeText)) || isVisitorHirerNeedSomeoneDump(intakeText);
+        next.parties = casual || (unnamedHirer
+          ? [
+              { name: "Client", role: "client" },
+              { name: "Service Provider", role: "service_provider" },
+            ]
+          : [
+              { name: "Party A", role: "party" },
+              { name: "Party B", role: "party" },
+            ]);
       }
     }
   }
@@ -199,16 +230,16 @@ export function applySimpleFlowSmartDefaults(parsed: ParsedDraftShape, intakeTex
   if (!(next.purpose || "").trim()) {
     const structuredScope = structured.scope.trim();
     const scopeOnly = (live.scopeLine || "").trim();
-    next.purpose = structuredScope || scopeOnly || "Scope and deliverables to be agreed between the parties.";
+    next.purpose = structuredScope || scopeOnly || inferCasualScopeFromDump(intakeText) || "Scope and deliverables to be agreed between the parties.";
   }
 
-  if (!(next.payment_terms || "").trim()) {
+  if (!(next.payment_terms || "").trim() || isInventedNoFeePayment(next.payment_terms)) {
     const fromStructured = formatPaymentTermsLine(payment, intakeText);
     const structuredPayment = structured.payment.trim();
     /**
      * Semantic suppression: never let confidentiality / NDA tokens leak into Payment Terms
      * via the live compensation heuristic. If structured + live are both empty/contaminated,
-     * fall through to a neutral no-payment line (public-facing copy only — no "in review").
+     * leave payment empty — never invent no-fees / unpaid / $0 on FREE starter.
      */
     const safeStructuredPayment = isPaymentSemanticallySafe(structuredPayment) ? structuredPayment : "";
     const liveComp = (live.compensationLine || "").trim();
@@ -221,15 +252,17 @@ export function applySimpleFlowSmartDefaults(parsed: ParsedDraftShape, intakeTex
       safeStructuredPayment ||
       fromCurrencyParse ||
       safeLiveComp ||
-      "No fees unless the parties document compensation in a separate writing or amendment.";
+      NO_PAYMENT_NEUTRAL_FALLBACK;
   }
 
   if (!(next.duration || "").trim() && !(next.due_date || "").trim()) {
     const structuredTerm = structured.term.trim();
-    next.duration =
-      structuredTerm || live.termLine ||
-      live.scheduleLine ||
-      "12 months unless terminated earlier as agreed in writing.";
+    const extracted = structuredTerm || live.termLine || live.scheduleLine || "";
+    if (extracted) {
+      next.duration = extracted;
+    } else if (!inferCasualScopeFromDump(intakeText) && !isHireToDoWorkNotEmployment(intakeText)) {
+      next.duration = "12 months unless terminated earlier as agreed in writing.";
+    }
   }
 
   if (!(next.effective_date || "").trim()) {

@@ -210,6 +210,70 @@ export function intakeTitleIncludesUnsupportedSpecializedWord(
   return false;
 }
 
+
+function packCasualTitle(recitalPhrase: string, source: string): AgreementTitleScopeDecision {
+  return { titleUpper: recitalPhrase.toUpperCase(), recitalPhrase, source };
+}
+
+/**
+ * Short first-person / hire / sold dumps. Formal "Scope:" / signer-row intakes stay on
+ * the generic services fallback so paid Pro titles do not flip.
+ */
+function intakeLooksLikeCasualWorkDump(intake: string): boolean {
+  const t = (intake || "").replace(/\s+/g, " ").trim();
+  if (t.length < 8 || t.length > 220) return false;
+  if (/\b(?:signer\s*\d|parties\s*:|governing law|scope\s*:)\b/i.test(t)) return false;
+  return (
+    /\b(?:I|we|me|my|our)\b/i.test(t) ||
+    /\b(?:hire|hired|sold|pay(?:ing)?|splitt?ing|nda|deal with|need someone)\b/i.test(t) ||
+    /\b[A-Z][a-z]+\s+will\s+/.test(intake)
+  );
+}
+
+function resolveCasualDumpTitleFromIntakeScope(
+  intake: string,
+  scope: string,
+): AgreementTitleScopeDecision | null {
+  if (!intakeLooksLikeCasualWorkDump(intake)) return null;
+  const blob = `${intake} ${scope}`.toLowerCase();
+
+  if (/\b(?:nda|non[\s-]?disclosure)\b/.test(blob) && !/\b(?:employment|employee)\s+agreement\b/.test(blob)) {
+    const ndaMutual = /\bmutual\b/.test(blob) || /\bbetween\s+\w/.test(blob);
+    return packCasualTitle(
+      ndaMutual ? "Mutual Non-Disclosure Agreement" : "Non-Disclosure Agreement",
+      "casual-nda",
+    );
+  }
+  if (/\bphotograph|\bphoto(?:graphing)?\b/.test(blob) && /\bwedding\b/.test(blob)) {
+    return packCasualTitle("Wedding Photography Agreement", "casual-photography");
+  }
+  if (/\bphotograph|\bphoto(?:graphy|graphing)?\b/.test(blob)) {
+    return packCasualTitle("Photography Agreement", "casual-photography");
+  }
+  if (/\bpaint(?:ing)?\b/.test(blob)) {
+    return packCasualTitle("Painting Agreement", "casual-painting");
+  }
+  if ((/\bsold\b|\bsale\b/.test(blob)) && /\bbike\b/.test(blob)) {
+    return packCasualTitle("Bike Sale Agreement", "casual-sale");
+  }
+  if (/\bsold\b|\bsale of\b/.test(blob)) {
+    return packCasualTitle("Sale Agreement", "casual-sale");
+  }
+  if (/\b(?:partnership|collaboration)\b/.test(blob)) {
+    return packCasualTitle(
+      /\bcollaboration\b/.test(blob) ? "Business Collaboration Agreement" : "Partnership Agreement",
+      "casual-collab",
+    );
+  }
+  if (/\betsy(?:\s+shop)?\b/.test(blob)) {
+    return packCasualTitle("Etsy Shop Agreement", "casual-shop");
+  }
+  if (/\bfence\b/.test(blob) && /\b(?:fix|repair|broken)\b/.test(blob)) {
+    return packCasualTitle("Repair Agreement", "casual-repair");
+  }
+  return null;
+}
+
 export function resolveAgreementTitleFromIntakeScope(
   intakeText?: string | null,
 ): AgreementTitleScopeDecision {
@@ -327,6 +391,12 @@ export function resolveAgreementTitleFromIntakeScope(
           };
     logAgreementTitleScopeDecision(decision, intake);
     return decision;
+  }
+
+  const casual = resolveCasualDumpTitleFromIntakeScope(intake, scope);
+  if (casual) {
+    logAgreementTitleScopeDecision(casual, intake);
+    return casual;
   }
 
   const decision = {

@@ -39,6 +39,12 @@ describe("buildAgreementPreviewText", () => {
     expect(t).not.toMatch(/SIGNATURES\s*\(PLACEHOLDER\)/i);
   });
 
+  it("does not claim LawDog e-sign on a free starter preview", () => {
+    const t = buildAgreementPreviewText(minimal, { starterPreview: true, freeStarterReviewPreview: true });
+    expect(t).not.toContain(AGREEMENT_PREVIEW_ESIGN_NOTICE);
+    expect(t).not.toMatch(/executed electronically via LawDog/i);
+  });
+
   it("omits additional-terms section when empty and uses neutral termination placeholder", () => {
     const sparse: ParsedDraftShape = {
       ...minimal,
