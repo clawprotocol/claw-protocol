@@ -4552,10 +4552,21 @@ def _parse_intake_system_prompt_premium() -> str:
 
 @router.post("/parse", response_model=AgreementParseResponse)
 def parse_agreement_intake(request: Request, body: AgreementParseRequest) -> AgreementParseResponse:
-    from backend.security.commercial_auth import require_commercial_owner_principal
-    require_commercial_owner_principal(request)
+    from backend.security.commercial_auth import require_commercial_owner_principal, require_workspace_principal
+
+    is_premium = body.ai_model_class == "premium"
+    if is_premium:
+        require_commercial_owner_principal(request)
+    else:
+        identity = require_workspace_principal(request)
+        if identity.kind not in ("anonymous", "authenticated", "legacy"):
+            raise HTTPException(
+                status_code=401,
+                detail={"code": "workspace_principal_required", "message": "Valid workspace session required."},
+            )
+
     parse_debug_client = os.getenv("CLAW_AGREEMENT_PARSE_CLIENT_DEBUG", "").strip() == "1"
-    if body.ai_model_class == "premium":
+    if is_premium:
         system_prompt = _parse_intake_system_prompt_premium()
         parse_max_tokens = 1200
         prompt_label = "premium_v1"

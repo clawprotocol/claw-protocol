@@ -99,6 +99,32 @@ def require_commercial_owner_principal(request: Request) -> str:
     return require_authenticated_dashboard_principal(request)
 
 
+def require_workspace_principal(request: Request) -> "WorkspaceIdentity":
+    """
+    Verified workspace principal: authenticated user OR valid anonymous session.
+
+    Unlike require_commercial_owner_principal, this accepts anonymous sessions for
+    guest flows (e.g. homepage→create parse). The caller must still verify the
+    identity kind for feature gating (e.g. premium parse requires authenticated).
+
+    Returns the WorkspaceIdentity for kind-aware downstream decisions.
+    """
+    from backend.security.request_identity import WorkspaceIdentity, resolve_workspace_identity
+    from backend.usage_economics.policy import require_claw_org_id_header
+
+    require_claw_org_id_header(request)
+    identity = resolve_workspace_identity(request)
+    if identity.kind == "legacy" and commercial_mode_enforced():
+        raise HTTPException(
+            status_code=401,
+            detail={
+                "code": "authenticated_session_required",
+                "message": "Legacy org headers are not accepted in commercial mode.",
+            },
+        )
+    return identity
+
+
 def require_paid_pro_principal(request: Request) -> str:
     """
     Authenticated commercial owner with active Pro entitlement.
