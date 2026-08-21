@@ -6880,12 +6880,16 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     setCreateFlowPhase("draft_ready_for_review");
     setCreateUiStage(CreateUiStage.DRAFT);
     setSignaturePreparationRequested(false);
-    // Demo session user with premium completion: preserve signer setup latch so CTA stays
+    // Demo session user with premium completion: FORCE-ARM signer setup latch so CTA stays
     // "Complete signer details" / "Continue" instead of falling through to empty/disabled.
-    // The latch was pre-armed by the auto-arm effect; clearing it here breaks the sticky CTA.
-    const demoSessionPreserveLatch =
-      hasDemoSessionUser() && hasPaidPremiumCompletionSession() && paidProInlineSignerSetupLatched;
-    if (!demoSessionPreserveLatch) {
+    // Skip-if-already-true is a race; the latch may read false at check time even if it was true earlier.
+    // Force-arming after Pro corpus is visible guarantees the sticky CTA has a non-empty label.
+    const demoSessionForceArmLatch =
+      hasDemoSessionUser() && hasPaidPremiumCompletionSession() && persistedPremiumBody.length >= PAID_PRO_AUTHORITY_MIN_LEN;
+    if (demoSessionForceArmLatch) {
+      setPaidProInlineSignerSetupLatched(true);
+      setCreateFlowSendRecipientEditorOpen(true);
+    } else {
       setPaidProInlineSignerSetupLatched(false);
     }
     setPaidProSignaturePrepIntentLatched(false);
@@ -7049,11 +7053,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       setDisplayPhase(plan.ui.displayPhase);
       setCreateUiStage(plan.ui.createUiStage);
       setSignaturePreparationRequested(false);
-      // Demo session user with premium completion: preserve signer setup latch so CTA stays
+      // Demo session user with premium completion: FORCE-ARM signer setup latch so CTA stays
       // "Complete signer details" / "Continue" instead of falling through to empty/disabled.
-      const demoSessionPreserveLatchOnHandoff =
-        hasDemoSessionUser() && hasPaidPremiumCompletionSession() && paidProInlineSignerSetupLatched;
-      if (!demoSessionPreserveLatchOnHandoff) {
+      // Skip-if-already-true is a race; force-arm guarantees non-empty CTA after Pro corpus visible.
+      const demoSessionForceArmLatchOnHandoff =
+        hasDemoSessionUser() && hasPaidPremiumCompletionSession() && finalPlain.length >= PAID_PRO_AUTHORITY_MIN_LEN;
+      if (demoSessionForceArmLatchOnHandoff) {
+        setPaidProInlineSignerSetupLatched(true);
+        setCreateFlowSendRecipientEditorOpen(true);
+      } else {
         setPaidProInlineSignerSetupLatched(false);
       }
       setPaidProSignaturePrepIntentLatched(false);
@@ -22899,11 +22907,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     // Demo session user post-POS: use "Continue" CTA, not dashboard resume labels.
     // This check must come BEFORE dashboardSignerSetupResumeUiActive since demo sessions
     // also set paidProInlineSignerSetupLatched which triggers dashboard resume detection.
-    if (
+    // CRITICAL: Also handle the case where paidProCanonicalReviewSignerSetupActive is transiently false
+    // due to React state batching / memo timing. If we have a visible Pro corpus, force the CTA.
+    const demoSessionHasVisibleProCorpus =
       demoSessionUserActive &&
       hasPaidPremiumCompletionSession() &&
-      paidProCanonicalReviewSignerSetupActive
-    ) {
+      maxPaidAuthoritativeCorpusLen >= PAID_PRO_AUTHORITY_MIN_LEN;
+    if (demoSessionHasVisibleProCorpus && paidProCanonicalReviewSignerSetupActive) {
       return {
         label: paidProSignerDetailsGate.complete ? "Continue" : "Complete signer details",
         action: paidProSignerDetailsGate.complete ? "guided_continue" : "complete_recipient_details",
@@ -22911,6 +22921,18 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         reason: paidProSignerDetailsGate.complete
           ? "demo_session_signer_details_complete"
           : "demo_session_signer_details_incomplete",
+      };
+    }
+    // Fallback: demo session with visible Pro corpus but paidProCanonicalReviewSignerSetupActive is false
+    // (transient state during hydration). Still show "Complete signer details" to avoid blank CTA.
+    if (demoSessionHasVisibleProCorpus && !paidProCanonicalReviewSignerSetupActive) {
+      return {
+        label: paidProSignerDetailsGate.complete ? "Continue" : "Complete signer details",
+        action: paidProSignerDetailsGate.complete ? "guided_continue" : "complete_recipient_details",
+        disabled: false,
+        reason: paidProSignerDetailsGate.complete
+          ? "demo_session_signer_details_complete_fallback"
+          : "demo_session_signer_details_incomplete_fallback",
       };
     }
     // Dashboard signer-setup resume owns the sticky CTA — never Retry Pro draft / Describe agreement.
