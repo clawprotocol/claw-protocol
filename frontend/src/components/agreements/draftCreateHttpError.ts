@@ -26,10 +26,34 @@ export function readDraftCreateHttpErrorDetail(error: unknown): DraftCreateHttpE
 export function formatDraftCreateHttpUserMessage(error: unknown): string | null {
   const err = error as ReviewFirstPersistHttpError;
   const status = err?.httpStatus ?? null;
+  const httpDetail = err?.httpDetail ?? extractHttpDetailFromDraftResponseBody(err?.responseBody);
+  const errMessage = err instanceof Error ? err.message : null;
+
+  // Handle missing_id case: server returned 200 but no agreement id in response.
+  // This is a malformed response that should surface a specific error.
+  if (errMessage === "missing_id") {
+    if (httpDetail?.trim()) return httpDetail.trim();
+    return "LawDog received a response but no agreement id was returned. Please try again.";
+  }
+
+  // Handle generic JS errors (network failures, etc.) that have no httpStatus.
+  // Surface the error message if it looks like a create_failed_http_* error.
+  if (status == null && errMessage) {
+    const httpMatch = errMessage.match(/create_failed_http_(\d+)/);
+    if (httpMatch) {
+      const extractedStatus = parseInt(httpMatch[1], 10);
+      if (httpDetail?.trim()) return httpDetail.trim();
+      return `LawDog could not save this draft (HTTP ${extractedStatus}).`;
+    }
+    // Network or other JS error - surface the message
+    if (errMessage !== "missing_id" && !errMessage.startsWith("create_failed_http_")) {
+      return `LawDog could not save this draft: ${errMessage}`;
+    }
+  }
+
   if (status == null || status < 400) return null;
 
   const detail = readDraftCreateHttpErrorDetail(error);
-  const httpDetail = err?.httpDetail ?? extractHttpDetailFromDraftResponseBody(err?.responseBody);
 
   if (detail?.message?.trim()) return detail.message.trim();
 
