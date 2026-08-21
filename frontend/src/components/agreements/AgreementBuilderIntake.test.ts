@@ -334,6 +334,14 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     );
   });
 
+  it("clears creating agreement banner when free starter draft becomes ready", () => {
+    const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
+    expect(intake).toMatch(
+      /journeyActionFeedback\?\.actionId\s*===\s*"create_agreement"[\s\S]{0,100}journeyActionFeedback\.kind\s*===\s*"working"[\s\S]{0,150}starterReviewServerDraftReadyRef\.current/,
+    );
+    expect(intake).toMatch(/setJourneyActionFeedback\(null\)/);
+  });
+
   it("paid authoritative Pro hides top adjust card and legacy finalize panel on canonical review", () => {
     const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
     expect(intake).toContain("showTopProAdjustCard");

@@ -281,7 +281,6 @@ import {
   feedbackAfterDirectSave,
   feedbackAfterDirectSaveFailed,
   feedbackAfterFailedCreate,
-  feedbackAfterGeneration,
   feedbackAfterLinkFailure,
   feedbackAfterModelFailure,
   feedbackAfterReviewLinksAlreadyReady,
@@ -21538,17 +21537,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       journeyActionFeedback?.actionId === "create_agreement" &&
       journeyActionFeedback.kind === "working" &&
       !hardError &&
-      (hasPaidProSourceOfTruth() || (agreementDocumentTextRef.current || "").trim().length >= 500)
+      (hasPaidProSourceOfTruth() ||
+        starterReviewServerDraftReadyRef.current ||
+        (agreementDocumentTextRef.current || "").trim().length >= 500)
     ) {
-      setJourneyActionFeedback(
-        feedbackSucceeded(
-          "create_agreement",
-          "Agreement created",
-          feedbackAfterGeneration({ captured: ["parties", "scope"] }),
-        ),
-      );
+      setJourneyActionFeedback(null);
     }
-  }, [createFlowPhase, draft, journeyActionFeedback, hardError]);
+  }, [createFlowPhase, draft, journeyActionFeedback, hardError, starterReviewServerDraftReadyTick]);
   React.useEffect(() => {
     if (
       hardError &&
