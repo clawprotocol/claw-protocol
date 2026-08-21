@@ -145,7 +145,19 @@ export function splitPartyLineForHandoffFirstTwo(line: string): StructuredTwoPar
   const byComma = splitCommaSeparatedPartyNames(s);
   if (byComma.length >= 2) return { party_1: byComma[0], party_2: byComma[1] };
   const byAmp = s.split(/\s*&\s*/).map((x) => x.trim()).filter(Boolean);
-  if (byAmp.length >= 2) return { party_1: byAmp[0], party_2: byAmp[1] };
+  if (byAmp.length >= 2) {
+    const p1 = byAmp[0];
+    const p2 = byAmp[1];
+    const hasEntitySuffixRe = /\b(?:LLC|L\.L\.C\.|Inc\.?|Incorporated|Corp\.?|Corporation|Ltd\.?|Limited|LP|L\.P\.|LLP|PLLC|GmbH|PLC|Co\.?|Company)\b/i;
+    const p1HasSuffix = hasEntitySuffixRe.test(p1);
+    const p2HasSuffix = hasEntitySuffixRe.test(p2);
+    if (p1HasSuffix && p2HasSuffix) {
+      return { party_1: p1, party_2: p2 };
+    }
+    if (!p1HasSuffix && !p2HasSuffix) {
+      return { party_1: p1, party_2: p2 };
+    }
+  }
   const byNl = s.split(/\r?\n/).map((x) => x.trim()).filter(Boolean);
   if (byNl.length >= 2) return { party_1: byNl[0], party_2: byNl[1] };
   const tw = splitTwoPartiesFromJoinedLine(s);

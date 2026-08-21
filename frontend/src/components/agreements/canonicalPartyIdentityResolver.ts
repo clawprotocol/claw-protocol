@@ -861,6 +861,7 @@ export function replaceTruncatedPartyRefsWithRoleLabels(
   const tail = text.slice(bodyEnd);
   const repairs: string[] = [];
 
+  const allFullNames = records.map((r) => r.fullLegalName.trim().toLowerCase());
   const pairs: { short: string; role: string; full: string }[] = [];
   for (const rec of records) {
     const full = rec.fullLegalName.trim();
@@ -872,6 +873,11 @@ export function replaceTruncatedPartyRefsWithRoleLabels(
     ]);
     for (const short of candidates) {
       if (!short || short.length < 3 || norm(short) === norm(full) || norm(short) === norm(role)) continue;
+      const shortLower = short.toLowerCase();
+      const shortIsPartOfOtherPartyName = allFullNames.some(
+        (otherFull) => otherFull !== full.toLowerCase() && otherFull.includes(shortLower),
+      );
+      if (shortIsPartOfOtherPartyName) continue;
       pairs.push({ short, role, full });
     }
   }

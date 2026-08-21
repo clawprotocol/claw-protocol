@@ -1,4 +1,5 @@
 import type { PremiumMissingFactsResult } from "./premiumMissingFactsApi";
+import { shouldSkipAskAndRenderImmediately } from "./proAgreementFiveTenets";
 
 /**
  * Decision outcome for the post-checkout missing-facts gate.
@@ -6,6 +7,7 @@ import type { PremiumMissingFactsResult } from "./premiumMissingFactsApi";
 export type PostCheckoutMissingFactsGateDecision =
   | { action: "await_gaps"; questions: string[] }
   | { action: "proceed_to_draft" }
+  | { action: "proceed_to_draft_five_tenets_complete" }
   | { action: "fail_closed"; reason: string };
 
 /**
@@ -64,7 +66,26 @@ export function evaluatePostCheckoutMissingFactsGate(input: {
 export function shouldProceedToDraft(
   decision: PostCheckoutMissingFactsGateDecision,
 ): boolean {
-  return decision.action === "proceed_to_draft";
+  return decision.action === "proceed_to_draft" || decision.action === "proceed_to_draft_five_tenets_complete";
+}
+
+/**
+ * Evaluate if all five tenets are present in the intake text.
+ * When all five tenets (parties, scope, payment, term, governing law) are present,
+ * we can skip the missing-facts API call and proceed directly to rendering.
+ *
+ * Five Tenets of a Complete Pro Agreement:
+ * 1. Parties (2–4 named)
+ * 2. Scope / what the deal is
+ * 3. Payment / consideration
+ * 4. Term / duration
+ * 5. Governing law
+ */
+export function evaluateFiveTenetsPreflight(intakeText: string): PostCheckoutMissingFactsGateDecision {
+  if (shouldSkipAskAndRenderImmediately(intakeText)) {
+    return { action: "proceed_to_draft_five_tenets_complete" };
+  }
+  return { action: "await_gaps", questions: [] };
 }
 
 /**

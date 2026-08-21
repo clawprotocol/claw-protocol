@@ -1151,6 +1151,7 @@ import { stripClientPremiumArtifactBlocksFromDraft } from "./premiumFullDraftCli
 import { postPremiumMissingFactsWithRetry } from "./premiumMissingFactsApi";
 import {
   evaluatePostCheckoutMissingFactsGate,
+  evaluateFiveTenetsPreflight,
   shouldProceedToDraft,
   shouldShowGapQuestions,
   isFailClosedDecision,
@@ -11373,41 +11374,54 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           });
         }
 
-        let missingFactsApiResult: { questions: string[] } | null = null;
-        let missingFactsApiError: Error | null = null;
-        try {
-          missingFactsApiResult = await postPremiumMissingFactsWithRetry({
-            intakeText: mergedIntake,
-            context: buildPremiumFullDraftContextWithIntentMapping(mergedIntake, prior!),
+        const fiveTenetsPreflight = evaluateFiveTenetsPreflight(mergedIntake);
+        if (import.meta.env.DEV) {
+          // eslint-disable-next-line no-console
+          console.info("[post_checkout] five_tenets_preflight", {
+            action: fiveTenetsPreflight.action,
+            runGen,
           });
-          if (import.meta.env.DEV) {
-            // eslint-disable-next-line no-console
-            console.info("[post_checkout] missing_facts_blocking_result", {
-              questionCount: missingFactsApiResult.questions.length,
-              runGen,
-              ok: true,
-            });
-          }
-        } catch (mfErr) {
-          missingFactsApiError = mfErr instanceof Error ? mfErr : new Error(String(mfErr));
-          if (import.meta.env.DEV) {
-            // eslint-disable-next-line no-console
-            console.info("[post_checkout] missing_facts_blocking_result", {
-              questionCount: 0,
-              runGen,
-              ok: false,
-              err: missingFactsApiError.message,
-            });
-          }
-          console.warn("[premium-gap] missing-facts request failed", missingFactsApiError);
         }
 
-        if (!runIsCurrent()) return;
+        let gateDecision = fiveTenetsPreflight;
 
-        const gateDecision = evaluatePostCheckoutMissingFactsGate({
-          apiResult: missingFactsApiResult,
-          apiError: missingFactsApiError,
-        });
+        if (fiveTenetsPreflight.action !== "proceed_to_draft_five_tenets_complete") {
+          let missingFactsApiResult: { questions: string[] } | null = null;
+          let missingFactsApiError: Error | null = null;
+          try {
+            missingFactsApiResult = await postPremiumMissingFactsWithRetry({
+              intakeText: mergedIntake,
+              context: buildPremiumFullDraftContextWithIntentMapping(mergedIntake, prior!),
+            });
+            if (import.meta.env.DEV) {
+              // eslint-disable-next-line no-console
+              console.info("[post_checkout] missing_facts_blocking_result", {
+                questionCount: missingFactsApiResult.questions.length,
+                runGen,
+                ok: true,
+              });
+            }
+          } catch (mfErr) {
+            missingFactsApiError = mfErr instanceof Error ? mfErr : new Error(String(mfErr));
+            if (import.meta.env.DEV) {
+              // eslint-disable-next-line no-console
+              console.info("[post_checkout] missing_facts_blocking_result", {
+                questionCount: 0,
+                runGen,
+                ok: false,
+                err: missingFactsApiError.message,
+              });
+            }
+            console.warn("[premium-gap] missing-facts request failed", missingFactsApiError);
+          }
+
+          if (!runIsCurrent()) return;
+
+          gateDecision = evaluatePostCheckoutMissingFactsGate({
+            apiResult: missingFactsApiResult,
+            apiError: missingFactsApiError,
+          });
+        }
 
         if (import.meta.env.DEV) {
           // eslint-disable-next-line no-console
