@@ -107,6 +107,24 @@ export function isTruncatedKeepSoTResponse(args: {
 export const PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN = 4_000;
 
 /**
+ * Live Mike-paint 2026-08-21: premium-full-draft returned HTTP 200,
+ * generation_outcome=ok, 12,182 chars. Client freeze then wiped it for
+ * notice_stanza_role_corruption (no IN WITNESS WHEREOF). The truncated-keep
+ * latch only accepts generation_outcome=degraded. A finished ok body at ≥4k
+ * is already the paid SoT and must paint.
+ */
+export function isOkPaidGenerationSoTResponse(args: {
+  generationOutcome?: string | null;
+  documentTextLen: number;
+  hardRejected?: boolean;
+}): boolean {
+  if (args.hardRejected) return false;
+  const outcome = (args.generationOutcome || "").trim().toLowerCase();
+  if (outcome !== "ok") return false;
+  return args.documentTextLen >= PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN;
+}
+
+/**
  * A server `server_full_document_text` at/above this length (after a successful HTTP 200) is the
  * authoritative paid corpus and MUST win over client structural soft gates. Client heuristics
  * (similarity, anchor, length-shape) may not reject a validated full server document — doing so

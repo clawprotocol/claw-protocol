@@ -279,6 +279,7 @@ import {
   isNonfatalGenerationFailureCode,
   isNonfatalParseDegradedPaidAccept,
   isTruncatedKeepSoTResponse,
+  isOkPaidGenerationSoTResponse,
   PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN,
   SERVER_FULL_DOCUMENT_AUTHORITATIVE_MIN_LEN,
   SUBSTANTIVE_SERVER_DRAFT_MIN_LEN,
@@ -2237,6 +2238,36 @@ async function runPremiumCompletionInner(
           accepted: true,
           docLen: doc.length,
           failureCode: (full.server_generation_failure_code || "").trim(),
+        });
+      }
+      // Live Mike-paint: generation_outcome=ok, 12k body. Truncated-keep only
+      // latches degraded. Latch this finished ok body so freeze/notice-role
+      // cannot wipe it to Retry Pro draft.
+      if (
+        !truncatedKeepUnconditionalSoTApplied &&
+        isOkPaidGenerationSoTResponse({
+          generationOutcome: full.generation_outcome,
+          documentTextLen: doc.trim().length,
+          hardRejected:
+            premiumBodyHardRejectedForDevContextLeak || premiumWireBodyRejectedForDevContextLeak,
+        })
+      ) {
+        winningPremiumBodyText = doc;
+        premiumRenderSource = "server_full_draft";
+        truncatedKeepUnconditionalSoTApplied = true;
+        premiumCompletionOutcome = "authoritative_draft_complete_with_recommended_clarifications";
+        if (import.meta.env.MODE !== "test") {
+          // eslint-disable-next-line no-console
+          console.info("[CLAW] ok-generation unconditional SoT applied", {
+            doc_len: doc.length,
+            generation_outcome: (full.generation_outcome || "").trim(),
+          });
+        }
+        logPremiumCompletionDebug({
+          stage: "ok_generation_unconditional_sot_applied",
+          accepted: true,
+          docLen: doc.length,
+          generationOutcome: (full.generation_outcome || "").trim(),
         });
       }
       const canonicalPartyNamesForAttribution = (merged.parties || [])
