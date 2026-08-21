@@ -309,56 +309,98 @@ export function isFailedToFetchError(error: unknown): boolean {
 let fallbackUsedLogged = false;
 
 /**
+ * Check if a response should trigger fallback retry.
+ * Returns true for:
+ * - 5xx server errors (proxy failures, backend unreachable via proxy)
+ * - Empty body with error status (broken proxy returning empty 500)
+ */
+export function shouldRetryWithFallback(response: Response): boolean {
+  if (response.status >= 500 && response.status < 600) {
+    return true;
+  }
+  return false;
+}
+
+/**
  * Fetch with automatic fallback to direct backend URL when same-origin proxy fails.
  * Use this for critical API calls (like draft creation) that must succeed when the
  * same-origin proxy is broken but the backend is working.
+ *
+ * Triggers fallback on:
+ * 1. "Failed to fetch" errors (network/CORS/connection failures)
+ * 2. HTTP 5xx responses (proxy errors, backend unreachable via proxy)
  */
 export async function fetchWithProxyFallback(
   url: string,
   init?: RequestInit,
   options?: { logContext?: string }
 ): Promise<Response> {
+  const fallbackBase = getProductionBackendFallbackUrl();
+  let firstResponse: Response | null = null;
+  let firstError: unknown = null;
+
   try {
-    const res = await fetch(url, init);
-    return res;
-  } catch (firstError: unknown) {
-    if (!isFailedToFetchError(firstError)) {
-      throw firstError;
+    firstResponse = await fetch(url, init);
+
+    // If we got a successful response or a 4xx client error, return it directly.
+    // Only retry on 5xx server errors (proxy failures).
+    if (!shouldRetryWithFallback(firstResponse)) {
+      return firstResponse;
     }
 
-    const fallbackBase = getProductionBackendFallbackUrl();
+    // 5xx response - try fallback if available
     if (!fallbackBase) {
-      throw firstError;
+      return firstResponse;
+    }
+  } catch (err: unknown) {
+    firstError = err;
+
+    // Only retry on "Failed to fetch" type errors
+    if (!isFailedToFetchError(err)) {
+      throw err;
     }
 
-    try {
-      const urlObj = new URL(url, window.location.origin);
-      const fallbackUrl = `${fallbackBase}${urlObj.pathname}${urlObj.search}`;
+    // No fallback available, rethrow
+    if (!fallbackBase) {
+      throw err;
+    }
+  }
 
-      if (!fallbackUsedLogged) {
-        fallbackUsedLogged = true;
-        console.info("[lawdog-api] using_backend_fallback", {
-          originalUrl: url,
-          fallbackUrl,
-          context: options?.logContext ?? "unknown",
-        });
-      }
+  // At this point, we either have a 5xx response or a network error,
+  // and we have a fallback URL to try.
+  try {
+    const urlObj = new URL(url, window.location.origin);
+    const fallbackUrl = `${fallbackBase}${urlObj.pathname}${urlObj.search}`;
 
-      const fallbackInit: RequestInit = {
-        ...init,
-        mode: "cors",
-        credentials: "omit",
-      };
-
-      const res = await fetch(fallbackUrl, fallbackInit);
-      return res;
-    } catch (fallbackError: unknown) {
-      console.warn("[lawdog-api] backend_fallback_failed", {
-        originalError: firstError instanceof Error ? firstError.message : String(firstError),
-        fallbackError: fallbackError instanceof Error ? fallbackError.message : String(fallbackError),
+    if (!fallbackUsedLogged) {
+      fallbackUsedLogged = true;
+      console.info("[lawdog-api] using_backend_fallback", {
+        originalUrl: url,
+        fallbackUrl,
+        reason: firstError ? "network_error" : `http_${firstResponse?.status}`,
         context: options?.logContext ?? "unknown",
       });
-      throw firstError;
     }
+
+    const fallbackInit: RequestInit = {
+      ...init,
+      mode: "cors",
+      credentials: "omit",
+    };
+
+    const res = await fetch(fallbackUrl, fallbackInit);
+    return res;
+  } catch (fallbackError: unknown) {
+    console.warn("[lawdog-api] backend_fallback_failed", {
+      originalError: firstError instanceof Error ? (firstError as Error).message : firstResponse ? `http_${firstResponse.status}` : "unknown",
+      fallbackError: fallbackError instanceof Error ? fallbackError.message : String(fallbackError),
+      context: options?.logContext ?? "unknown",
+    });
+
+    // If we had a response (5xx), return it. If we had an error, rethrow it.
+    if (firstResponse) {
+      return firstResponse;
+    }
+    throw firstError;
   }
 }

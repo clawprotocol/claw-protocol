@@ -37,6 +37,16 @@ def test_cors_allow_request_headers_includes_paid_pro_perf_trace_case_insensitiv
     assert not cors_allow_request_header_allowed("x-claw-unknown-header")
 
 
+def test_cors_allow_request_headers_includes_demo_checkout_and_entitlement_repair() -> None:
+    """Harbor demo persist sends X-Claw-Demo-Checkout-Receipt; cross-origin fallback needs CORS."""
+    assert "X-Claw-Demo-Checkout-Receipt" in CORS_ALLOW_REQUEST_HEADERS
+    assert "X-Claw-Entitlement-Repair-Org" in CORS_ALLOW_REQUEST_HEADERS
+    assert cors_allow_request_header_allowed("x-claw-demo-checkout-receipt")
+    assert cors_allow_request_header_allowed("X-Claw-Demo-Checkout-Receipt")
+    assert cors_allow_request_header_allowed("x-claw-entitlement-repair-org")
+    assert cors_allow_request_header_allowed("X-Claw-Entitlement-Repair-Org")
+
+
 @pytest.mark.parametrize("env", ["staging", "production", "prod", None, "   ", "unknown"])
 def test_non_relaxed_cors_does_not_default_to_wildcard_when_origins_unset(
     monkeypatch: pytest.MonkeyPatch, env: str | None
@@ -390,3 +400,71 @@ def test_options_agreements_draft_preflight_allows_draft_idempotency_header(
     assert "x-claw-draft-idempotency-key" in allow_headers
     assert "x-claw-review-first-persist" in allow_headers
     assert "content-type" in allow_headers
+
+
+def test_options_agreements_draft_preflight_allows_demo_checkout_receipt_header(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Any, caplog: pytest.LogCaptureFixture
+) -> None:
+    """
+    Harbor demo flow: cross-origin fallback from lawdog.me → claw-protocol-production.up.railway.app
+    needs CORS preflight to allow X-Claw-Demo-Checkout-Receipt header.
+    Without this, browser rejects the preflight and frontend gets "Failed to fetch".
+    """
+    monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ENVIRONMENT", "production")
+    monkeypatch.setenv("CLAW_CORS_ALLOW_ORIGINS", "https://lawdog.me")
+    from backend.main import app
+
+    caplog.set_level(logging.INFO, logger="claw.cors")
+    client = TestClient(app)
+    origin = "https://lawdog.me"
+    res = client.options(
+        "/api/agreements/draft",
+        headers={
+            "Origin": origin,
+            "Access-Control-Request-Method": "POST",
+            "Access-Control-Request-Headers": (
+                "content-type, x-claw-org-id, x-claw-anon-session, "
+                "x-claw-review-first-persist, x-claw-draft-idempotency-key, "
+                "x-claw-demo-checkout-receipt"
+            ),
+        },
+    )
+    assert res.status_code in (200, 204)
+    assert res.headers.get("access-control-allow-origin") == origin
+    allow_headers = (res.headers.get("access-control-allow-headers") or "").lower()
+    assert "x-claw-demo-checkout-receipt" in allow_headers
+    assert "x-claw-draft-idempotency-key" in allow_headers
+    assert "x-claw-review-first-persist" in allow_headers
+    assert "x-claw-anon-session" in allow_headers
+    assert "content-type" in allow_headers
+
+
+def test_options_agreements_draft_preflight_allows_entitlement_repair_org_header(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Any, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Cross-origin draft persist may include X-Claw-Entitlement-Repair-Org for transitional org binding."""
+    monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ENVIRONMENT", "production")
+    monkeypatch.setenv("CLAW_CORS_ALLOW_ORIGINS", "https://lawdog.me")
+    from backend.main import app
+
+    caplog.set_level(logging.INFO, logger="claw.cors")
+    client = TestClient(app)
+    origin = "https://lawdog.me"
+    res = client.options(
+        "/api/agreements/draft",
+        headers={
+            "Origin": origin,
+            "Access-Control-Request-Method": "POST",
+            "Access-Control-Request-Headers": (
+                "content-type, x-claw-org-id, x-claw-entitlement-repair-org"
+            ),
+        },
+    )
+    assert res.status_code in (200, 204)
+    assert res.headers.get("access-control-allow-origin") == origin
+    allow_headers = (res.headers.get("access-control-allow-headers") or "").lower()
+    assert "x-claw-entitlement-repair-org" in allow_headers

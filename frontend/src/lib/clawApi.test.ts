@@ -5,6 +5,7 @@ import {
   isFailedToFetchError,
   getProductionBackendFallbackUrl,
   apiUrlWithFallback,
+  shouldRetryWithFallback,
 } from "./clawApi";
 
 function stubLocalPreviewOrigin() {
@@ -73,6 +74,58 @@ describe("getLawDogApiBase", () => {
     vi.stubEnv("VITE_CLAW_API_BASE", "");
     const { getLawDogApiBase } = await import("./clawApi");
     expect(getLawDogApiBase()).toBe("http://127.0.0.1:8000");
+  });
+});
+
+describe("shouldRetryWithFallback", () => {
+  it("returns true for 500 response", () => {
+    const response = { status: 500 } as Response;
+    expect(shouldRetryWithFallback(response)).toBe(true);
+  });
+
+  it("returns true for 502 Bad Gateway", () => {
+    const response = { status: 502 } as Response;
+    expect(shouldRetryWithFallback(response)).toBe(true);
+  });
+
+  it("returns true for 503 Service Unavailable", () => {
+    const response = { status: 503 } as Response;
+    expect(shouldRetryWithFallback(response)).toBe(true);
+  });
+
+  it("returns true for 504 Gateway Timeout", () => {
+    const response = { status: 504 } as Response;
+    expect(shouldRetryWithFallback(response)).toBe(true);
+  });
+
+  it("returns false for 200 OK", () => {
+    const response = { status: 200 } as Response;
+    expect(shouldRetryWithFallback(response)).toBe(false);
+  });
+
+  it("returns false for 201 Created", () => {
+    const response = { status: 201 } as Response;
+    expect(shouldRetryWithFallback(response)).toBe(false);
+  });
+
+  it("returns false for 400 Bad Request", () => {
+    const response = { status: 400 } as Response;
+    expect(shouldRetryWithFallback(response)).toBe(false);
+  });
+
+  it("returns false for 401 Unauthorized", () => {
+    const response = { status: 401 } as Response;
+    expect(shouldRetryWithFallback(response)).toBe(false);
+  });
+
+  it("returns false for 403 Forbidden", () => {
+    const response = { status: 403 } as Response;
+    expect(shouldRetryWithFallback(response)).toBe(false);
+  });
+
+  it("returns false for 404 Not Found", () => {
+    const response = { status: 404 } as Response;
+    expect(shouldRetryWithFallback(response)).toBe(false);
   });
 });
 
@@ -279,6 +332,225 @@ describe("apiUrlWithFallback", () => {
 
     const { apiUrlWithFallback } = await import("./clawApi");
     expect(apiUrlWithFallback("/api/agreements/draft")).toBeNull();
+  });
+});
+
+describe("fetchWithProxyFallback 5xx retry", () => {
+  beforeEach(() => {
+    vi.unstubAllGlobals();
+    vi.unstubAllEnvs();
+    vi.resetModules();
+  });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it("retries with fallback URL when same-origin returns 500", async () => {
+    vi.stubGlobal("window", {
+      location: { origin: "https://lawdog.me", hostname: "lawdog.me" },
+    });
+    vi.stubEnv("VITE_CLAW_API_BASE", "");
+    vi.stubEnv("MODE", "production");
+    vi.stubEnv("NODE_ENV", "production");
+
+    vi.doMock("../config/runtimeEnvironment", () => ({
+      readRuntimeEnvProd: () => true,
+      readRuntimeEnvDev: () => false,
+      readRuntimeEnvMode: () => "production",
+      readRuntimeEnvString: (key: string) => "",
+      readRuntimeEnvironment: () => ({ apiBaseUrl: "", appBaseUrl: "", isDevelopment: false, isTest: false, paymentBypassEnabled: false }),
+    }));
+
+    const mockFetch = vi.fn();
+    // First call: same-origin proxy returns 500
+    mockFetch.mockResolvedValueOnce({ status: 500, ok: false, text: async () => "" } as Response);
+    // Second call: direct backend returns success
+    mockFetch.mockResolvedValueOnce({ status: 201, ok: true, json: async () => ({ id: "draft-123" }) } as Response);
+    vi.stubGlobal("fetch", mockFetch);
+
+    const { fetchWithProxyFallback } = await import("./clawApi");
+    const result = await fetchWithProxyFallback(
+      "https://lawdog.me/api/agreements/draft",
+      { method: "POST", body: JSON.stringify({ text: "test" }) },
+      { logContext: "test" }
+    );
+
+    expect(result.status).toBe(201);
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+    expect(mockFetch.mock.calls[0][0]).toBe("https://lawdog.me/api/agreements/draft");
+    expect(mockFetch.mock.calls[1][0]).toBe("https://claw-protocol-production.up.railway.app/api/agreements/draft");
+    const fallbackInit = mockFetch.mock.calls[1][1] as RequestInit;
+    expect(fallbackInit.mode).toBe("cors");
+    expect(fallbackInit.credentials).toBe("omit");
+  });
+
+  it("retries with fallback URL when same-origin returns 502", async () => {
+    vi.stubGlobal("window", {
+      location: { origin: "https://lawdog.me", hostname: "lawdog.me" },
+    });
+    vi.stubEnv("VITE_CLAW_API_BASE", "");
+    vi.stubEnv("MODE", "production");
+    vi.stubEnv("NODE_ENV", "production");
+
+    vi.doMock("../config/runtimeEnvironment", () => ({
+      readRuntimeEnvProd: () => true,
+      readRuntimeEnvDev: () => false,
+      readRuntimeEnvMode: () => "production",
+      readRuntimeEnvString: (key: string) => "",
+      readRuntimeEnvironment: () => ({ apiBaseUrl: "", appBaseUrl: "", isDevelopment: false, isTest: false, paymentBypassEnabled: false }),
+    }));
+
+    const mockFetch = vi.fn();
+    mockFetch.mockResolvedValueOnce({ status: 502, ok: false } as Response);
+    mockFetch.mockResolvedValueOnce({ status: 200, ok: true } as Response);
+    vi.stubGlobal("fetch", mockFetch);
+
+    const { fetchWithProxyFallback } = await import("./clawApi");
+    const result = await fetchWithProxyFallback("https://lawdog.me/api/test", {});
+
+    expect(result.status).toBe(200);
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not retry on 4xx client errors", async () => {
+    vi.stubGlobal("window", {
+      location: { origin: "https://lawdog.me", hostname: "lawdog.me" },
+    });
+    vi.stubEnv("VITE_CLAW_API_BASE", "");
+    vi.stubEnv("MODE", "production");
+    vi.stubEnv("NODE_ENV", "production");
+
+    vi.doMock("../config/runtimeEnvironment", () => ({
+      readRuntimeEnvProd: () => true,
+      readRuntimeEnvDev: () => false,
+      readRuntimeEnvMode: () => "production",
+      readRuntimeEnvString: (key: string) => "",
+      readRuntimeEnvironment: () => ({ apiBaseUrl: "", appBaseUrl: "", isDevelopment: false, isTest: false, paymentBypassEnabled: false }),
+    }));
+
+    const mockFetch = vi.fn();
+    mockFetch.mockResolvedValueOnce({ status: 401, ok: false } as Response);
+    vi.stubGlobal("fetch", mockFetch);
+
+    const { fetchWithProxyFallback } = await import("./clawApi");
+    const result = await fetchWithProxyFallback("https://lawdog.me/api/test", {});
+
+    expect(result.status).toBe(401);
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not retry on 2xx success", async () => {
+    vi.stubGlobal("window", {
+      location: { origin: "https://lawdog.me", hostname: "lawdog.me" },
+    });
+    vi.stubEnv("VITE_CLAW_API_BASE", "");
+    vi.stubEnv("MODE", "production");
+    vi.stubEnv("NODE_ENV", "production");
+
+    vi.doMock("../config/runtimeEnvironment", () => ({
+      readRuntimeEnvProd: () => true,
+      readRuntimeEnvDev: () => false,
+      readRuntimeEnvMode: () => "production",
+      readRuntimeEnvString: (key: string) => "",
+      readRuntimeEnvironment: () => ({ apiBaseUrl: "", appBaseUrl: "", isDevelopment: false, isTest: false, paymentBypassEnabled: false }),
+    }));
+
+    const mockFetch = vi.fn();
+    mockFetch.mockResolvedValueOnce({ status: 201, ok: true } as Response);
+    vi.stubGlobal("fetch", mockFetch);
+
+    const { fetchWithProxyFallback } = await import("./clawApi");
+    const result = await fetchWithProxyFallback("https://lawdog.me/api/test", {});
+
+    expect(result.status).toBe(201);
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns original 5xx response when fallback URL not available", async () => {
+    vi.stubGlobal("window", {
+      location: { origin: "https://other-app.example.com", hostname: "other-app.example.com" },
+    });
+    vi.stubEnv("VITE_CLAW_API_BASE", "");
+    vi.stubEnv("MODE", "production");
+    vi.stubEnv("NODE_ENV", "production");
+
+    vi.doMock("../config/runtimeEnvironment", () => ({
+      readRuntimeEnvProd: () => true,
+      readRuntimeEnvDev: () => false,
+      readRuntimeEnvMode: () => "production",
+      readRuntimeEnvString: (key: string) => "",
+      readRuntimeEnvironment: () => ({ apiBaseUrl: "", appBaseUrl: "", isDevelopment: false, isTest: false, paymentBypassEnabled: false }),
+    }));
+
+    const mockFetch = vi.fn();
+    mockFetch.mockResolvedValueOnce({ status: 500, ok: false } as Response);
+    vi.stubGlobal("fetch", mockFetch);
+
+    const { fetchWithProxyFallback } = await import("./clawApi");
+    const result = await fetchWithProxyFallback("https://other-app.example.com/api/test", {});
+
+    expect(result.status).toBe(500);
+    expect(mockFetch).toHaveBeenCalledTimes(1);
+  });
+
+  it("returns original 5xx response when fallback also fails", async () => {
+    vi.stubGlobal("window", {
+      location: { origin: "https://lawdog.me", hostname: "lawdog.me" },
+    });
+    vi.stubEnv("VITE_CLAW_API_BASE", "");
+    vi.stubEnv("MODE", "production");
+    vi.stubEnv("NODE_ENV", "production");
+
+    vi.doMock("../config/runtimeEnvironment", () => ({
+      readRuntimeEnvProd: () => true,
+      readRuntimeEnvDev: () => false,
+      readRuntimeEnvMode: () => "production",
+      readRuntimeEnvString: (key: string) => "",
+      readRuntimeEnvironment: () => ({ apiBaseUrl: "", appBaseUrl: "", isDevelopment: false, isTest: false, paymentBypassEnabled: false }),
+    }));
+
+    const mockFetch = vi.fn();
+    const original500 = { status: 500, ok: false } as Response;
+    mockFetch.mockResolvedValueOnce(original500);
+    mockFetch.mockRejectedValueOnce(new TypeError("Failed to fetch"));
+    vi.stubGlobal("fetch", mockFetch);
+
+    const { fetchWithProxyFallback } = await import("./clawApi");
+    const result = await fetchWithProxyFallback("https://lawdog.me/api/test", {});
+
+    expect(result.status).toBe(500);
+    expect(mockFetch).toHaveBeenCalledTimes(2);
+  });
+
+  it("still retries on network error (Failed to fetch)", async () => {
+    vi.stubGlobal("window", {
+      location: { origin: "https://lawdog.me", hostname: "lawdog.me" },
+    });
+    vi.stubEnv("VITE_CLAW_API_BASE", "");
+    vi.stubEnv("MODE", "production");
+    vi.stubEnv("NODE_ENV", "production");
+
+    vi.doMock("../config/runtimeEnvironment", () => ({
+      readRuntimeEnvProd: () => true,
+      readRuntimeEnvDev: () => false,
+      readRuntimeEnvMode: () => "production",
+      readRuntimeEnvString: (key: string) => "",
+      readRuntimeEnvironment: () => ({ apiBaseUrl: "", appBaseUrl: "", isDevelopment: false, isTest: false, paymentBypassEnabled: false }),
+    }));
+
+    const mockFetch = vi.fn();
+    mockFetch.mockRejectedValueOnce(new TypeError("Failed to fetch"));
+    mockFetch.mockResolvedValueOnce({ status: 201, ok: true } as Response);
+    vi.stubGlobal("fetch", mockFetch);
+
+    const { fetchWithProxyFallback } = await import("./clawApi");
+    const result = await fetchWithProxyFallback("https://lawdog.me/api/test", {});
+
+    expect(result.status).toBe(201);
+    expect(mockFetch).toHaveBeenCalledTimes(2);
   });
 });
 
