@@ -32,6 +32,7 @@ import {
   hasPaidProSourceOfTruth,
   hashPaidProCorpus,
 } from "./paidProSourceOfTruth";
+import { stripPremiumInstructionNoiseForDocument } from "./premiumInstructionStrip";
 
 export const PAID_PRO_VISIBLE_SHELL_COMPONENT_NAME = "PaidProVisibleDocumentShell";
 /** SoT length threshold for synchronous canonical plain forced render (Test292). */
@@ -63,22 +64,26 @@ export function resolveCanonicalPlainForVisibleShell(
           family: args.draft?.agreement_family,
         })
       : resolution.plain;
-  if (projectedPlain.length >= PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN) {
-    if (projectedPlain.length >= 80) {
-      logTest310BlockClassification(projectedPlain);
+  // Strip leaked user prompt prose that appears as numbered sections (e.g. "11. Mesa Realty
+  // Group LLC / said", "12. Don't / count", "13. 12 month deal") and meta lines like
+  // "Commercial detail carried forward from user notes". Live leak from Harbor retest.
+  const strippedPlain = stripPremiumInstructionNoiseForDocument(projectedPlain);
+  if (strippedPlain.length >= PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN) {
+    if (strippedPlain.length >= 80) {
+      logTest310BlockClassification(strippedPlain);
     }
     logTest313HeadingRenderSource({
       source: resolution.source,
-      plain: projectedPlain,
+      plain: strippedPlain,
       paidProActive: resolution.paidProActive,
       forbiddenSourceBlocked: resolution.forbiddenSourceBlocked,
     });
     logTest314HeadingInvariant({
       source: resolution.source,
       renderer: "resolver",
-      plain: projectedPlain,
+      plain: strippedPlain,
     });
-    return { plain: projectedPlain, source: resolution.source };
+    return { plain: strippedPlain, source: resolution.source };
   }
   return { plain: "", source: resolution.source || "none" };
 }
