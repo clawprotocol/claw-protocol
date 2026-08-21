@@ -31,6 +31,7 @@ import { enrichPaidProPostFinalizeDisplayCorpus } from "./paidProPostFinalizeRev
 import { isPaidProPostFinalizeHydratedCorpusLocked } from "./paidProSignerMetadataCommitPolicy";
 import { hashPaidProCorpus, type PaidProDocumentSurface } from "./paidProSourceOfTruthState";
 import { repairJoinedTopLevelSectionHeadings } from "./sectionStructureAuthority";
+import { stripPremiumInstructionNoiseForDocument } from "./premiumInstructionStrip";
 
 export type PaidProUserVisibleDisplaySurface =
   | PaidProDocumentSurface
@@ -104,10 +105,15 @@ export function projectPaidProFrozenSoTDisplayPlain(text: string): string {
 export function applyPaidProUserVisibleDisplayPrep(plain: string): string {
   const body = (plain || "").trim();
   if (body.length < 80) return body;
+  let out: string;
   if (isPaidProPostFinalizeHydratedCorpusLocked() || shouldUsePaidProSourceOfTruthDisplayOnly()) {
-    return projectPaidProFrozenSoTDisplayPlain(body);
+    out = projectPaidProFrozenSoTDisplayPlain(body);
+  } else {
+    out = preparePaidProReviewDisplayPlain(body).text.trimEnd();
   }
-  return preparePaidProReviewDisplayPlain(body).text.trimEnd();
+  // Strip leaked user prompt lines that appear as numbered sections (e.g. "11. Mesa Realty
+  // Group LLC / said", "12. Don't / count", "13. 12 month deal"). Live leak from Harbor retest.
+  return stripPremiumInstructionNoiseForDocument(out);
 }
 
 /** Frozen SoT review plain after authorized display prep and user-visible finishing. */

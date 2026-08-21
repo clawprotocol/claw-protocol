@@ -30424,12 +30424,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       productionSendBarAgreementIdRef.current ||
       ""
     ).trim();
+    let ensurePersistError: unknown = null;
     if (!durableAgreementId) {
-      setCreateFlowDraftPersistError(null);
       setProFullDraftQualityRetry(false);
       try {
         durableAgreementId = (await ensureReviewAgreementWorkspaceId())?.trim() || "";
-      } catch {
+      } catch (e: unknown) {
+        ensurePersistError = e;
         durableAgreementId = "";
       }
       durableAgreementId = (
@@ -30441,7 +30442,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       ).trim();
     }
     if (!durableAgreementId) {
-      const msg =
+      // Surface the real failure if ensureReviewAgreementWorkspaceId threw or returned null.
+      // formatPaidCreateFlowDraftPersistFailureMessage extracts http status + detail from the error.
+      const specificError = ensurePersistError
+        ? formatPaidCreateFlowDraftPersistFailureMessage(ensurePersistError)
+        : null;
+      const msg = specificError?.trim() ||
         "LawDog could not save this agreement before finalizing signers. Tap Retry to save, then continue — nothing was finalized.";
       setCreateFlowDraftPersistError(msg);
       rollbackFinalizeFailure(msg);

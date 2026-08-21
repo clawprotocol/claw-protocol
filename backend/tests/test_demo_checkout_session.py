@@ -8,7 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 from unittest.mock import patch
 
-from backend.app import app
+from backend.main import app
 from backend.security.commercial_auth import _is_demo_checkout_session
 
 
@@ -200,3 +200,143 @@ class TestDemoCheckoutDraftSave:
             )
         except HTTPException:
             pass  # Expected - guests are rate-limited
+
+
+@pytest.fixture()
+def isolated_harbor_db(tmp_path, monkeypatch: pytest.MonkeyPatch):
+    """Full store isolation for Harbor E2E tests."""
+    from backend.usage_economics.store import UsageEconomicsStore
+    import backend.usage_economics.store as ue_store
+    
+    path = str(tmp_path / "usage_eco.sqlite3")
+    monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", path)
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
+    monkeypatch.setenv("CLAW_ONRAMP_DB_PATH", str(tmp_path / "onramp.sqlite3"))
+    monkeypatch.setenv("CLAW_TREASURY_DB_PATH", str(tmp_path / "treasury.sqlite3"))
+    monkeypatch.setenv("CLAW_ARTIFACTS_CACHE_DIR", str(tmp_path / "artifacts_cache"))
+    monkeypatch.setenv("CLAW_ENVIRONMENT", "test")
+    monkeypatch.setenv("CLAW_USAGE_ECONOMICS_ENABLED", "1")
+    monkeypatch.setenv("CLAW_ANON_SESSION_SECRET", "test-anon-session-secret")
+    
+    ue_store._store = None
+    st = UsageEconomicsStore(path)
+    st.init_schema()
+    
+    from backend.security.anonymous_session_store import reset_anonymous_session_store_for_tests
+    reset_anonymous_session_store_for_tests()
+    
+    yield path
+    ue_store._store = None
+
+
+class TestHarborReviewFirstPersistE2E:
+    """E2E tests for Harbor unsigned Continue flow - POST /api/agreements/draft.
+    
+    Regression test for Harbor Continue failing on live lawdog.me (index-CawQJV-a.js).
+    The error was: "LawDog could not save this agreement before finalizing signers."
+    
+    The live header set Harbor sends is:
+    - X-Claw-Demo-Checkout-Receipt: rcpt_<timestamp>_<random> (from buildSettlementReceipt)
+    - X-Claw-Org-Id: anon-<uuid>
+    - X-Claw-Anon-Session: <token>
+    - X-Claw-Review-First-Persist: 1
+    - Content-Type: application/json
+    
+    The POST body includes a purpose field with >= 500 chars (Pro corpus).
+    """
+
+    def test_harbor_live_header_set_returns_2xx_with_id(self, isolated_harbor_db, monkeypatch):
+        """POST /api/agreements/draft with Harbor's live header set succeeds with id.
+        
+        This is the exact header combination Harbor sends in the Continue flow:
+        1. X-Claw-Demo-Checkout-Receipt (demo user post-simulated-POS)
+        2. X-Claw-Org-Id (anon-* org for guest)
+        3. X-Claw-Anon-Session (anonymous session token)
+        4. X-Claw-Review-First-Persist: 1 (review-first persist mode)
+        
+        The purpose field must be >= 500 chars for review_first_paid_pro_persist_bypass.
+        """
+        client = TestClient(app)
+        
+        # Get a real anonymous session
+        r_sess = client.post("/v1/workspace/anonymous-session")
+        assert r_sess.status_code == 200, r_sess.text
+        sess = r_sess.json()
+        
+        # Build the exact header set Harbor sends
+        headers = {
+            "X-Claw-Demo-Checkout-Receipt": "rcpt_harbor_42424242_abcd",
+            "X-Claw-Org-Id": sess["org_id"],  # anon-* org
+            "X-Claw-Anon-Session": sess["token"],
+            "X-Claw-Review-First-Persist": "1",
+            "Content-Type": "application/json",
+        }
+        
+        # Build a purpose field >= 500 chars (like a real Pro corpus)
+        pro_corpus = """SERVICES AGREEMENT
+
+This Services Agreement ("Agreement") is entered into as of the date last signed below ("Effective Date") by and between Harbor Pool & Patio LLC, a limited liability company ("Provider"), and Mesa Realty Group LLC, a limited liability company ("Client").
+
+1. SERVICES; DELIVERABLES
+The Provider shall perform the professional services, milestones, and deliverables described in the materials referenced. This Agreement is between Harbor Pool & Patio LLC ("Client") and Mesa Realty Group LLC ("Service Provider").
+
+2. FEES; PAYMENT SCHEDULE
+Fees, deposits, and recurring or milestone payments are as set forth here or in a signed statement of work."""
+
+        body = {
+            "title": "Services Agreement",
+            "jurisdiction": "Arizona",
+            "parties": [
+                {"name": "Harbor Pool & Patio LLC", "role": "Provider", "email": "jordan.harbor.qa+aug21e@example.com"},
+                {"name": "Mesa Realty Group LLC", "role": "Client", "email": ""},
+            ],
+            "purpose": pro_corpus,
+            "payment_terms": "$2,500 monthly",
+            "duration": None,
+            "due_date": None,
+            "effective_date": None,
+        }
+        
+        assert len(pro_corpus) >= 500, f"purpose must be >= 500 chars, got {len(pro_corpus)}"
+        
+        resp = client.post("/api/agreements/draft", json=body, headers=headers)
+        
+        # Must succeed with 2xx and return an id
+        assert resp.status_code in (200, 201), (
+            f"Harbor live header set failed: {resp.status_code} - {resp.json()}"
+        )
+        data = resp.json()
+        assert "id" in data, f"Response missing 'id': {data}"
+        assert data["id"], f"Empty id in response: {data}"
+        assert isinstance(data["id"], str), f"id must be string: {data}"
+
+    def test_review_first_persist_bypass_requires_purpose_length(self, isolated_stores, monkeypatch):
+        """review_first_paid_pro_persist_bypass returns False for short purpose."""
+        from backend.usage_economics.policy import review_first_paid_pro_persist_bypass
+        from unittest.mock import MagicMock
+        
+        monkeypatch.setenv("CLAW_ENVIRONMENT", "test")
+        
+        mock_request = MagicMock()
+        mock_request.headers.get.return_value = "1"  # X-Claw-Review-First-Persist: 1
+        
+        # Short purpose - should NOT bypass
+        assert review_first_paid_pro_persist_bypass(request=mock_request, purpose="short") is False
+        
+        # Long purpose (>= 500 chars) - should bypass
+        long_purpose = "A" * 500
+        assert review_first_paid_pro_persist_bypass(request=mock_request, purpose=long_purpose) is True
+
+    def test_review_first_persist_bypass_requires_header(self, isolated_stores, monkeypatch):
+        """review_first_paid_pro_persist_bypass returns False without header."""
+        from backend.usage_economics.policy import review_first_paid_pro_persist_bypass
+        from unittest.mock import MagicMock
+        
+        monkeypatch.setenv("CLAW_ENVIRONMENT", "test")
+        
+        mock_request = MagicMock()
+        mock_request.headers.get.return_value = ""  # No header
+        
+        long_purpose = "A" * 500
+        assert review_first_paid_pro_persist_bypass(request=mock_request, purpose=long_purpose) is False
