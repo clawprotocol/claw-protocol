@@ -3386,6 +3386,21 @@ async function runPremiumCompletionInner(
         !premiumBodyHardRejectedForDevContextLeak &&
         acc.ok &&
         placeholderClientOk;
+      // Casual 2-party services (Mike + Client) emit "If to Client:" notices.
+      // That is notice_stanza_role_corruption. Mid-band 4k–10k bodies then miss
+      // serverFullDocumentWins (10k) and get wiped to Retry Pro draft.
+      const onlyNoticeStanzaRoleCorruption =
+        !vPaid.ok &&
+        vPaid.reasons.length > 0 &&
+        vPaid.reasons.every((r) => /notice_stanza_role_corruption/i.test(r));
+      const midBandNoticeRoleSoftAccept =
+        !blockAdvisoryForPartyIdentity &&
+        !blockDegradedProfessionalClauseAccept &&
+        !hardAccRejection &&
+        placeholderClientOk &&
+        (doc || "").trim().length >= PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN &&
+        /\bIN WITNESS WHEREOF\b/i.test(doc) &&
+        onlyNoticeStanzaRoleCorruption;
       const advisoryAccept =
         !blockAdvisoryForPartyIdentity &&
         !blockDegradedProfessionalClauseAccept &&
@@ -3394,14 +3409,16 @@ async function runPremiumCompletionInner(
           jsonParseDisplayRecoverableAccept ||
           serverFullDocumentWins ||
           partyPlaceholderRepairAccept ||
-          truncatedKeepAccept);
+          truncatedKeepAccept ||
+          midBandNoticeRoleSoftAccept);
       if (advisoryAccept && (!vPaid.ok || !placeholderClientOk)) {
         if (
           jsonParseNonfatalAccept ||
           jsonParseDisplayRecoverableAccept ||
           serverFullDocumentWins ||
           partyPlaceholderRepairAccept ||
-          truncatedKeepAccept
+          truncatedKeepAccept ||
+          midBandNoticeRoleSoftAccept
         ) {
           // The body is authoritative; only the intelligence metadata / soft gate failed. Override any
           // earlier "degraded" classification so the surface treats this as a complete paid draft.
@@ -3962,6 +3979,7 @@ async function runPremiumCompletionInner(
             (/duplicate_provision_family/i.test(freezeReject) ||
               /orphan_address_line/i.test(freezeReject) ||
               /empty_required_section/i.test(freezeReject) ||
+              /notice_stanza_role_corruption/i.test(freezeReject) ||
               lastSubstantiveWireFreezeBodyLen >= PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN);
           // PR #41 truncated-keep: backend kept model text >= 1600 chars. Accept as SoT even if
           // freeze-commit fails — the truncated draft is more useful than an empty paid shell.
