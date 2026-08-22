@@ -11042,8 +11042,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         }): Promise<void> => {
           if (!runIsCurrent()) return;
           premiumProRunInFlightRef.current = true;
-          try {
           let holdModelPassForPostGenerateGaps = false;
+          try {
           const requestResolved = resolvePremiumRequestIntakeText({
             mergedOrRetryIntake: args.intakeText,
             structuredDraft: prior,
