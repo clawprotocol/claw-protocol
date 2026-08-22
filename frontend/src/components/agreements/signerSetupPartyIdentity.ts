@@ -27,6 +27,7 @@ import {
   hasPartyMetadataLabelContamination,
   isAuthoritativeLegalEntityName,
   isDisallowedPartyPhrase,
+  isOccupationalOrJobTitlePartyName,
   isPartyMetadataRoleLabel,
   isPartyMetadataToken,
 } from "./paidProPartyNamePreserve";
@@ -482,6 +483,20 @@ export type ResolvePaidProSignerDetailsGateArgs = {
  * Paid Pro signature prep requires human signer metadata; legal entity names are prefilled
  * from canonical party identity and do not count as signer names.
  */
+
+function personNameUsableAsPartyLegal(name: string): boolean {
+  const t = norm(name);
+  if (t.length < 2) return false;
+  if (hasLegalEntitySuffix(t)) return false;
+  if (isOccupationalOrJobTitlePartyName(t)) return false;
+  if (isPartyMetadataRoleLabel(t) || isPartyMetadataToken(t)) return false;
+  if (isDisallowedPartyPhrase(t)) return false;
+  if (/^(?:client|customer|service\s+provider|provider|contractor|vendor|company)$/i.test(t)) {
+    return false;
+  }
+  return true;
+}
+
 export function resolvePaidProSignerDetailsGate(
   args: ResolvePaidProSignerDetailsGateArgs,
 ): PaidProSignerDetailsGate {
@@ -495,9 +510,15 @@ export function resolvePaidProSignerDetailsGate(
   const blockers: PaidProSignerDetailsBlocker[] = [];
 
   for (let i = 0; i < requiredCount; i++) {
-    const legal = paidProLegalEntityForIndex(args, i);
-    legalEntityNames.push(legal);
+    let legal = paidProLegalEntityForIndex(args, i);
     const signerName = norm(args.partySignerNames[i] ?? "");
+    // Casual two-party deals often have a role-only slot (Contractor) and a
+    // typed person name (Mike). Use that person name as the party legal name
+    // so Save can reach final review.
+    if (!legal && personNameUsableAsPartyLegal(signerName)) {
+      legal = signerName;
+    }
+    legalEntityNames.push(legal);
     const email = paidProEmailForIndex(args, i);
     if (!legal) blockers.push({ partyIndex: i, field: "legal_entity", reason: "missing" });
     const companyNameUsedAsSigner =
