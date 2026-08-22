@@ -16,6 +16,7 @@ import {
   collapsePartySlotCandidates,
   isInvalidPartySlotLegalEntity,
   normalizeAgreementPartyName,
+  resolveHirerVersusHiredCompanySlots,
 } from "./partySlotIdentityNormalize";
 import { extractAgreementEntityCandidates, dedupeEntityCandidatesToLegalParties } from "../../agreement/partyPlaceholderDisplay";
 import { logPaidProEntityMap } from "./paidProPlaceholderAttributionLog";
@@ -318,6 +319,23 @@ export function intakeHasFullLegalEntityParties(
   return entityCount >= 2;
 }
 
+
+/** Collapse COMPANY + "COMPANY" short form so they cannot occupy opposite slots. */
+function collapseAliasedPartySlotNames(names: readonly string[]): string[] {
+  const out: string[] = [];
+  for (const raw of names) {
+    const n = normalizeAgreementPartyName(raw);
+    if (!n) continue;
+    const idx = out.findIndex((existing) => partyLegalNamesMatch(existing, n));
+    if (idx >= 0) {
+      if (n.length > out[idx]!.length) out[idx] = n;
+      continue;
+    }
+    out.push(n);
+  }
+  return out;
+}
+
 export function resolveCanonicalPartyIdentitiesFromSources(args: {
   rawIntake?: string | null;
   generatedBody?: string | null;
@@ -339,6 +357,29 @@ export function resolveCanonicalPartyIdentitiesFromSources(args: {
     entityPoolCount >= 3 ||
     collapsedStarterNames.length >= 3 ||
     (args.roleLabels?.length ?? 0) >= 3;
+  const hireSlots = resolveHirerVersusHiredCompanySlots(args.rawIntake ?? "");
+  if (hireSlots && !likelyMultiParty) {
+    const manifestNames = [hireSlots.clientName, hireSlots.providerName];
+    const hireRoleLabels = ["Client", "Service Provider"];
+    const signerBySlot = resolveUniversalSignerMetadataBySlot({
+      legalEntities: manifestNames,
+      intakeText: args.rawIntake,
+      corpusText: args.generatedBody,
+      draftParties: manifestNames.map((name) => ({ name })),
+    });
+    return manifestNames.map((fullLegalName, index) => {
+      const full = cleanManifestLegalName(fullLegalName);
+      const signer = signerBySlot[index];
+      return {
+        fullLegalName: full,
+        roleLabel: roleLabelForIndex(index, hireRoleLabels[index], args.rawIntake),
+        displayAlias: definedShortNameFromLegalEntity(full),
+        signerName: signer?.signerName?.trim() || null,
+        signerTitle: signer?.signerTitle?.trim() || null,
+        partyAddress: null,
+      };
+    });
+  }
   if (lineSeparatedParties.length === 2 && !likelyMultiParty) {
     const manifestNames = lineSeparatedParties.slice(0, 12);
     let lineSeparatedRoleLabels = [...(args.roleLabels ?? [])];
@@ -454,11 +495,13 @@ export function resolveCanonicalPartyIdentitiesFromSources(args: {
           ? starterAuthoritative
           : upgradeShortNamesToFullLegal(starterNames, fullCandidates).filter(hasLegalEntitySuffix);
   const trustedPartyTokens = [...rawIntakeNames, ...starterAuthoritative];
-  selected = selected.filter(
-    (n) =>
-      n.length >= 3 &&
-      !/^(?:party|parties)$/i.test(n) &&
-      !isInvalidCanonicalPartyName(n, trustedPartyTokens),
+  selected = collapseAliasedPartySlotNames(
+    selected.filter(
+      (n) =>
+        n.length >= 3 &&
+        !/^(?:party|parties)$/i.test(n) &&
+        !isInvalidCanonicalPartyName(n, trustedPartyTokens),
+    ),
   );
   logCanonicalPartySourceCandidates({
     rawIntakeNames,

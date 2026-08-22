@@ -4,7 +4,7 @@ import { assessStarterComplexityGate } from "./starterMultiPartyProGate";
 import { draftHasPlaceholderParties, draftHasPlaceholderFieldsForRecipients } from "./reviewPlaceholderGuard";
 import { runIntakeDefaultsAndRoles } from "./intakeFamilyShell";
 import { canonicalizeStarterDraftForReview } from "./starterRecipientDraftMerge";
-import { buildAgreementPreviewText } from "./agreementPreviewFromDraft";
+import { buildAgreementPreviewText, buildStarterAgreementPreviewForReview } from "./agreementPreviewFromDraft";
 import { defaultIntakePartyRoleLabels } from "./partyRoleIntake";
 import { detectAgreementFamily } from "./agreementFamilyRouter";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
@@ -650,5 +650,59 @@ describe("visitor plus one named party is a free two-party deal", () => {
 
   it("junk still has no named two-party deal", () => {
     expect(inferCasualTwoPartyFromDump("lol just testing this, pizza is great")).toBeNull();
+  });
+});
+
+describe("hire-company preamble keeps hirer opposite the company", () => {
+  it("Jordan Hale hiring Pine Street paints hirer vs company, not company vs company", () => {
+    const dump = "Jordan Hale hiring Pine Street Media LLC to run ads for The Daily Grind";
+    const result = runIntakeDefaultsAndRoles(emptyDraft(), dump, true, defaultIntakePartyRoleLabels());
+    const canonical = canonicalizeStarterDraftForReview(result);
+    expect(canonical.parties.map((p) => p.name)).toEqual(["Jordan Hale", "Pine Street Media LLC"]);
+    expect(canonical.parties[0]?.role).toMatch(/client/i);
+    expect(canonical.parties[1]?.role).toMatch(/service_provider|service provider/i);
+    const preview = buildStarterAgreementPreviewForReview(canonical, { intakeText: dump });
+    expect(preview).toMatch(/Jordan Hale/);
+    expect(preview).toMatch(/Pine Street Media LLC/);
+    expect(preview).not.toMatch(
+      /Pine Street Media LLC\s*\(["“']Client["”']\)\s+and\s+Pine Street Media\s*\(["“']Service Provider["”']\)/,
+    );
+    expect(preview).not.toMatch(/Daily Grind\s*\(["“'](?:Client|Service Provider)["”']\)/);
+  });
+
+  it("Alex and Mike slots stay Client vs Service Provider", () => {
+    const alex = runIntakeDefaultsAndRoles(
+      emptyDraft(),
+      "Hire Alex to build our shopify theme, $3k, two weeks",
+      true,
+      defaultIntakePartyRoleLabels(),
+    );
+    const alexCanon = canonicalizeStarterDraftForReview(alex);
+    expect(alexCanon.parties.map((p) => ({ name: p.name, role: p.role }))).toEqual([
+      { name: "Client", role: "client" },
+      { name: "Alex", role: "service_provider" },
+    ]);
+    const alexPreview = buildStarterAgreementPreviewForReview(alexCanon, {
+      intakeText: "Hire Alex to build our shopify theme, $3k, two weeks",
+    });
+    expect(alexPreview).toMatch(/Client\s*\(["“']Client["”']\)/);
+    expect(alexPreview).toMatch(/Alex\s*\(["“']Service Provider["”']\)/);
+
+    const mike = runIntakeDefaultsAndRoles(
+      emptyDraft(),
+      "I hired Mike to paint my office. We shook on it.",
+      true,
+      defaultIntakePartyRoleLabels(),
+    );
+    const mikeCanon = canonicalizeStarterDraftForReview(mike);
+    expect(mikeCanon.parties.map((p) => ({ name: p.name, role: p.role }))).toEqual([
+      { name: "Client", role: "client" },
+      { name: "Mike", role: "service_provider" },
+    ]);
+    const mikePreview = buildStarterAgreementPreviewForReview(mikeCanon, {
+      intakeText: "I hired Mike to paint my office. We shook on it.",
+    });
+    expect(mikePreview).toMatch(/Client\s*\(["“']Client["”']\)/);
+    expect(mikePreview).toMatch(/Mike\s*\(["“']Service Provider["”']\)/);
   });
 });
