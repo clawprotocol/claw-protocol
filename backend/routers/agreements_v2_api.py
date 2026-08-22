@@ -4562,10 +4562,118 @@ def _free_one_pager_system_prompt() -> str:
     )
 
 
+def _is_hollow_party_name(name: str) -> bool:
+    """
+    Returns True if name is a role-only placeholder or scraped first word, not a real legal entity.
+    
+    Hollow parties include:
+    - Role placeholders: Client, Service_provider, Service Provider, Contractor, Vendor, etc.
+    - Scraped question words: Can, Need, Looking, Please, Someone, Anyone, Help, etc.
+    - Generic labels: Party, Parties, Person, Company, Business, etc.
+    """
+    if not name:
+        return True
+    
+    normalized = name.strip().lower().replace("_", " ").replace("-", " ")
+    
+    role_placeholders = {
+        "client", "service provider", "serviceprovider", "service_provider",
+        "contractor", "vendor", "provider", "consultant", "freelancer",
+        "buyer", "seller", "lessor", "lessee", "landlord", "tenant",
+        "employer", "employee", "hirer", "worker", "agency", "agent",
+        "licensor", "licensee", "franchisor", "franchisee",
+        "party", "parties", "party a", "party b", "party 1", "party 2",
+        "first party", "second party", "the party", "the parties",
+        "person", "company", "business", "entity", "organization", "org",
+        "individual", "corporation", "firm",
+    }
+    
+    if normalized in role_placeholders:
+        return True
+    
+    question_scrape_words = {
+        "can", "need", "looking", "please", "someone", "anyone", "help",
+        "want", "would", "could", "should", "will", "does", "has", "have",
+        "who", "what", "where", "when", "how", "why", "which",
+        "hi", "hello", "hey", "thanks", "thank", "i", "we", "my", "our",
+        "the", "a", "an", "this", "that", "it", "is", "are", "was", "were",
+    }
+    
+    if normalized in question_scrape_words:
+        return True
+    
+    if len(normalized) <= 3 and normalized.isalpha():
+        return True
+    
+    return False
+
+
+def _has_hollow_section_content(document: str, section_name: str) -> bool:
+    """
+    Returns True if a section heading exists but has no meaningful content after it.
+    
+    Detects patterns like:
+    - "2. Payment Terms\n3. Term" (empty section)
+    - "Payment Terms\n\n" followed by another section or nothing
+    - "Governing Law\n" with no state/jurisdiction content
+    """
+    doc_lines = document.split('\n')
+    section_patterns = [
+        rf'^\s*\d+\.\s*{re.escape(section_name)}\s*$',
+        rf'^\s*{re.escape(section_name)}\s*$',
+        rf'^\s*\d+\.\s*{re.escape(section_name)}[:\s]*$',
+        rf'^\s*{re.escape(section_name)}[:\s]*$',
+    ]
+    
+    for i, line in enumerate(doc_lines):
+        for pattern in section_patterns:
+            if re.match(pattern, line, re.IGNORECASE):
+                content_lines = []
+                for j in range(i + 1, min(i + 5, len(doc_lines))):
+                    next_line = doc_lines[j].strip()
+                    if not next_line:
+                        continue
+                    if re.match(r'^\d+\.\s*\w', next_line):
+                        break
+                    if re.match(r'^[A-Z][a-z]+(?:\s+[A-Z][a-z]+)*\s*$', next_line):
+                        if any(next_line.lower().startswith(s) for s in ['term', 'payment', 'governing', 'scope', 'purpose', 'effective', 'termination']):
+                            break
+                    content_lines.append(next_line)
+                
+                content = ' '.join(content_lines).strip()
+                if not content:
+                    return True
+                
+                placeholder_content = [
+                    r'^to be agreed',
+                    r'^as stated in the agreement',
+                    r'^as agreed',
+                    r'^tbd',
+                    r'^n/a',
+                    r'^none',
+                    r'^commercial arrangement to be agreed',
+                    r'^terms to be agreed',
+                    r'^termination terms to be agreed',
+                ]
+                for placeholder in placeholder_content:
+                    if re.match(placeholder, content, re.IGNORECASE):
+                        return True
+                
+    return False
+
+
 def _validate_free_one_pager(document: str, intake: str) -> str:
     """
     Validate the free one-pager against visitor's original dump.
-    Returns: "ok" | "missing_parties" | "missing_tenets" | "incomplete_sentences"
+    Returns: "ok" | "missing_parties" | "missing_tenets" | "incomplete_sentences" | "hollow_body"
+    
+    A hollow body is a document that:
+    - Uses role-only party names (Client, Service_provider) instead of real names
+    - Scraped a question word as a party name (Can, Need, Looking, etc.)
+    - Has empty Payment/Law/Term sections (just headings with no content)
+    
+    Hollow bodies must not paint on the free page. The user should be asked
+    missing tenet questions or redirected to Pro.
     """
     doc_lower = document.lower()
     intake_lower = intake.lower()
@@ -4586,6 +4694,71 @@ def _validate_free_one_pager(document: str, intake: str) -> str:
     # Check for Party A/B placeholders (should never appear in free one-pager)
     if re.search(r'\bParty\s*A\b', document, re.IGNORECASE) or re.search(r'\bParty\s*B\b', document, re.IGNORECASE):
         return "missing_parties"
+    
+    # HOLLOW BODY CHECK 1: Detect role-only or scraped-word party names in the opening
+    # Pattern: "entered into by and between X and Y" or "between X ("Role") and Y ("Role")"
+    opening_party_patterns = [
+        r'entered into by and between[:\s]*([^()\n]+?)\s*(?:\([^)]*\))?\s*and\s*([^()\n]+?)(?:\s*\([^)]*\))?(?:\s*\(collectively|\.|\n)',
+        r'between[:\s]*([^()\n]+?)\s*(?:\([^)]*\))?\s*and\s*([^()\n]+?)(?:\s*\([^)]*\))?(?:\s*\(collectively|\.|\n)',
+    ]
+    
+    found_parties = []
+    for pattern in opening_party_patterns:
+        match = re.search(pattern, document, re.IGNORECASE | re.DOTALL)
+        if match:
+            p1 = match.group(1).strip().strip('"\'').strip()
+            p2 = match.group(2).strip().strip('"\'').strip()
+            if p1:
+                found_parties.append(p1)
+            if p2:
+                found_parties.append(p2)
+            break
+    
+    hollow_party_count = sum(1 for p in found_parties if _is_hollow_party_name(p))
+    if hollow_party_count >= 2 or (len(found_parties) == 1 and _is_hollow_party_name(found_parties[0])):
+        log.info("hollow_body_detected reason=role_only_parties found_parties=%s", found_parties)
+        return "hollow_body"
+    
+    # HOLLOW BODY CHECK 2: Detect hollow sections (Payment Terms, Governing Law with no content)
+    critical_sections = ['Payment Terms', 'Governing Law']
+    for section in critical_sections:
+        if _has_hollow_section_content(document, section):
+            log.info("hollow_body_detected reason=empty_section section=%s", section)
+            return "hollow_body"
+    
+    # HOLLOW BODY CHECK 3: Combined weak signal — if BOTH Payment and Law sections
+    # have only generic/placeholder content, fail
+    payment_section_match = re.search(
+        r'(?:^|\n)\s*(?:\d+\.\s*)?Payment Terms?\s*\n([^\n]+(?:\n(?!\d+\.)[^\n]*)*)',
+        document, re.IGNORECASE
+    )
+    law_section_match = re.search(
+        r'(?:^|\n)\s*(?:\d+\.\s*)?Governing Law\s*\n([^\n]+(?:\n(?!\d+\.)[^\n]*)*)',
+        document, re.IGNORECASE
+    )
+    
+    payment_content = (payment_section_match.group(1).strip() if payment_section_match else "").lower()
+    law_content = (law_section_match.group(1).strip() if law_section_match else "").lower()
+    
+    payment_is_weak = (
+        not payment_content or
+        not re.search(r'\$[\d,]+', payment_content) and
+        not re.search(r'\d+(?:,\d{3})*(?:\.\d{2})?\s*(?:dollars?|usd|per|hour|month|week|day|year|flat|total)', payment_content, re.IGNORECASE)
+    )
+    
+    known_states = ['texas', 'california', 'new york', 'delaware', 'florida', 'arizona', 
+                    'nevada', 'washington', 'illinois', 'colorado', 'georgia', 'north carolina',
+                    'virginia', 'pennsylvania', 'ohio', 'michigan', 'massachusetts', 'tennessee']
+    law_is_weak = (
+        not law_content or
+        not any(state in law_content for state in known_states)
+    )
+    
+    if payment_is_weak and law_is_weak and not re.search(r'\$[\d,]+', document):
+        log.info("hollow_body_detected reason=missing_payment_and_law payment_content=%s law_content=%s", 
+                 payment_content[:50] if payment_content else "(empty)", 
+                 law_content[:50] if law_content else "(empty)")
+        return "hollow_body"
     
     # Extract named parties from intake using common patterns
     # Pattern: "Name of Company hires Name of Company/Person"
