@@ -62,7 +62,7 @@ describe("post-generate tenet recall", () => {
     expect(decision.missingTenets).not.toContain("scope");
     expect(decision.questions.length).toBeGreaterThanOrEqual(2);
     expect(decision.questions.length).toBeLessThanOrEqual(5);
-    expect(decision.questions.some((q) => /payment/i.test(q))).toBe(true);
+    expect(decision.questions.some((q) => /paid|payment/i.test(q))).toBe(true);
     expect(decision.questions.some((q) => /law/i.test(q))).toBe(true);
     expect(decision.questions.some((q) => /parties to this agreement/i.test(q))).toBe(false);
     expect(decision.questions.some((q) => /purpose or scope/i.test(q))).toBe(false);
@@ -90,6 +90,7 @@ describe("post-generate tenet recall", () => {
       expect(q).not.toMatch(/1\.\s+Parties/);
       expect(q).not.toMatch(/include all rooms and hallway/i);
       expect(q).not.toMatch(/outline filler/i);
+      expect(q).not.toMatch(/3\.\s+Services Term/i);
     }
 
     const localQs = buildLocalMissingTenetQuestions(OUTLINE_DUMP, {
