@@ -80,6 +80,17 @@ export type ParsedDraftShape = {
   dissolution_summary?: string | null;
   /** Creator/admin is coordinating only — not a legal party or signer (client-side). */
   creator_coordinator_only?: boolean;
+  /**
+   * Free one-pager document text from OpenAI (basic parse response).
+   * When present, paint this body directly instead of building from structured fields.
+   * Client-side only; omitted from POST /api/agreements/draft body.
+   */
+  free_document_text?: string | null;
+  /**
+   * Validation outcome for free_document_text: "ok" | "missing_parties" | "missing_tenets" | "incomplete_sentences" | "generation_failed"
+   * Client can redirect to Pro when validation != "ok".
+   */
+  free_document_validation?: string | null;
 };
 
 const MAX_PARTY_NAME_LEN = 280;
