@@ -13,7 +13,12 @@ import {
   readLegalPartyNamesFromAuthority,
 } from "./legalPartyAuthority";
 import { resolveLegalPartyAuthorityForIntake } from "./legalPartyAuthoritySession";
-import { inferCasualScopeFromDump, inferCasualTwoPartyFromDump } from "./intakeNamedPartyFallback";
+import {
+  extractCasualNamedCounterparties,
+  hasFirstPersonVisitor,
+  inferCasualScopeFromDump,
+  inferCasualTwoPartyFromDump,
+} from "./intakeNamedPartyFallback";
 
 const COORDINATOR_BLOCK_HEADER_RE = /^\s*coordinator\s*[:\-]?\s*$/i;
 const PARTY_BLOCK_HEADER_RE = /^\s*party\s*(\d+)\s*[:\-]?\s*$/i;
@@ -343,24 +348,45 @@ export function assessStarterComplexityGate(raw: string): StarterComplexityGateA
   const uniqueReasons = [...new Set(reasons)];
   const casualTwoParty = inferCasualTwoPartyFromDump(intake);
   const casualScope = inferCasualScopeFromDump(intake);
+  const casualNames = (casualTwoParty ?? []).map((p) => p.name.trim()).filter(Boolean);
+  // I / my / me + one named person or company is a free two-party deal, even if
+  // legal-entity extraction only kept the LLC and dropped the visitor or person.
+  const visitorPlusNamed =
+    casualNames.length >= 2 ||
+    (hasFirstPersonVisitor(intake) && extractCasualNamedCounterparties(intake).length === 1);
   // Junk extracts like "Lol Just Testing This" / "Pizza Is Great" can look like 2 parties.
   const junkNonDeal =
     extractedEntityCount >= 2 &&
     !casualTwoParty &&
     !casualScope &&
     /\b(?:lol|lmao|just testing)\b/i.test(intake);
-  if (uniqueReasons.length === 0 && ((extractedEntityCount < 2 && !casualTwoParty && !casualScope) || junkNonDeal)) {
+  if (
+    uniqueReasons.length === 0 &&
+    ((extractedEntityCount < 2 && !casualTwoParty && !casualScope && !visitorPlusNamed) || junkNonDeal)
+  ) {
     uniqueReasons.push("not_simple_two_party_deal");
   }
 
+  const declaredMultiParty =
+    extractedEntityCount >= 3 || indexedPartyMax >= 3 || numberedPartyMax >= 3 || declaredPartyCount >= 3;
+  const displayParties =
+    declaredMultiParty || uniqueReasons.includes("three_plus_legal_parties")
+      ? parties
+      : casualNames.length > parties.length
+        ? casualNames
+        : parties;
+  const resolvedPartyCount = Math.max(
+    partyCount,
+    declaredMultiParty ? partyCount : displayParties.length <= 2 ? displayParties.length : partyCount,
+  );
 
   const assessment: StarterComplexityGateAssessment = {
     required: uniqueReasons.length > 0,
     reasons: uniqueReasons,
-    parties,
+    parties: displayParties,
     coordinatorName: parseCoordinatorNameFromIntake(intake),
     keyTerms: extractKeyTermsSummary(intake, { hasRevenueShare, hasReviewWorkflow, hasMultiProviderPayment }),
-    partyCount,
+    partyCount: resolvedPartyCount,
     hasRevenueShare,
     hasCoordinator,
     hasReviewWorkflow,
