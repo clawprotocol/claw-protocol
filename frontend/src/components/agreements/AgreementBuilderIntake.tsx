@@ -1630,7 +1630,10 @@ import {
   resolveIsFreeStreamlineDraftReview,
   type FreeReviewSurfaceSource,
 } from "./freeStreamlineDraftReview";
-import { resolveFreeStarterReviewBody } from "./freeStarterReviewBodyResolver";
+import {
+  resolveFreeStarterReviewBody,
+  shouldRedirectFreeToProForValidation,
+} from "./freeStarterReviewBodyResolver";
 import {
   FREE_STARTER_REVIEW_BADGE,
   FREE_STARTER_REVIEW_SUBTITLE,
@@ -4044,6 +4047,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           placeholderGate,
           hasDraftPayload: starterReviewServerDraftReadyRef.current,
           currentPreview: agreementDocumentTextRef.current,
+          freeDocumentText: d.free_document_text,
+          freeDocumentValidation: d.free_document_validation,
         }).body;
         const draftParties = ((d as { parties?: Array<{ name?: string; role?: string; email?: string }> }).parties ?? [])
           .map((p) => ({ name: p.name || "", role: p.role ?? null, email: p.email ?? null }))
@@ -5568,10 +5573,25 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           text: draftText,
         });
       }
-      const payloadFull = payload as { extract?: import("./intakePremiumParseApply").ApiAgreementParseExtract | null };
+      const payloadFull = payload as {
+        extract?: import("./intakePremiumParseApply").ApiAgreementParseExtract | null;
+        free_document_text?: string | null;
+        free_document_validation?: string | null;
+      };
       let out = coerceDraftFromApiPayload(draft, intakeFallback, payment);
       if (isPremium) {
         out = applyPremiumParseExtract(out, intakeFallback, payloadFull.extract);
+      }
+      // Capture free one-pager from API response
+      if (!isPremium && payloadFull.free_document_text) {
+        out.free_document_text = payloadFull.free_document_text;
+        out.free_document_validation = payloadFull.free_document_validation ?? null;
+        if (import.meta.env.DEV) {
+          console.info("[free-one-pager] api_response", {
+            validation: payloadFull.free_document_validation,
+            docLen: payloadFull.free_document_text.length,
+          });
+        }
       }
       return out;
     } catch (e: unknown) {
@@ -12211,6 +12231,29 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       ) {
         return;
       }
+      
+      // Check if free one-pager validation failed — redirect to Pro instead of showing broken free page
+      const currentDraft = draftRef.current;
+      const freeValidation = currentDraft?.free_document_validation;
+      if (shouldRedirectFreeToProForValidation(freeValidation)) {
+        // eslint-disable-next-line no-console
+        console.info("[free-one-pager-validation-failed] redirecting to Pro", {
+          validation: freeValidation,
+          source: opts.source,
+        });
+        // Set state to show Pro upgrade flow instead of broken free page
+        setCreateFlowPhase("draft_ready_for_review");
+        setCreateUiStage(CreateUiStage.DRAFT);
+        setDisplayPhase("review");
+        setDraftNowCommitted(true);
+        setMobileWorkspacePane("preview");
+        setPreviewPaneRevealed(true);
+        // Mark that we need to show Pro upgrade due to validation failure
+        setUpgradeIntentDetected(true);
+        syncUpgradeIntentRefs(true);
+        return;
+      }
+      
       resetStalePaidReviewShellForFreeStarter(opts.source);
       lastKnownGoodAuthoritativeDraftRef.current = "";
       hydratedPremiumBodyRef.current = "";

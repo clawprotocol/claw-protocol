@@ -819,6 +819,10 @@ class AgreementParseResponse(BaseModel):
     parse_meta: Optional[Dict[str, Any]] = None
     # Premium-only structured extract; null for basic parse.
     extract: Optional[AgreementParseExtract] = None
+    # Free tier: direct one-pager body from OpenAI (bypass local template). Null if generation failed.
+    free_document_text: Optional[str] = None
+    # Validation outcome for free_document_text: "ok" | "missing_parties" | "missing_tenets" | "incomplete_sentences"
+    free_document_validation: Optional[str] = None
 
 
 class PremiumFullDraftContext(BaseModel):
@@ -4534,6 +4538,173 @@ def _parse_intake_system_prompt_basic() -> str:
     )
 
 
+def _free_one_pager_system_prompt() -> str:
+    """Generate a readable one-page agreement from visitor's words. No placeholders, no invented terms."""
+    return (
+        "You are an agreement writer for CLAW. Generate a readable one-page business agreement from the user's description.\n\n"
+        "CRITICAL RULES — follow exactly:\n"
+        "1. Use the EXACT names from the user's input. Never replace with 'Party A', 'Party B', 'Client', or 'Service Provider'.\n"
+        "2. Use the EXACT payment amount stated. Never change $2,400 to $2,000 or any other amount.\n"
+        "3. Use the EXACT term/duration stated. Never invent dates like 'February 2026' if the user said 'August 2026'.\n"
+        "4. Use the EXACT governing law/state mentioned. If they said 'Texas', put Texas.\n"
+        "5. Write complete sentences. Never truncate like 'This agreement covers due. Work.' — that is WRONG.\n"
+        "6. Do not invent terms, dates, prices, or laws not in the user's input.\n\n"
+        "FORMAT:\n"
+        "Return a plain text one-page agreement with these sections:\n"
+        "- Title (e.g., 'SERVICES AGREEMENT' or specific to their deal)\n"
+        "- Opening: 'This Agreement is entered into by and between [name1] and [name2].'\n"
+        "- 1. Scope of Services / Purpose: What the deal covers in their words.\n"
+        "- 2. Payment Terms: The exact amount and schedule they mentioned.\n"
+        "- 3. Term: The exact duration they stated.\n"
+        "- 4. Governing Law: The state/jurisdiction they specified.\n\n"
+        "Keep it concise. Use their vocabulary. No legal jargon unless they used it.\n"
+        "Output ONLY the agreement text, no JSON, no code fences, no commentary."
+    )
+
+
+def _validate_free_one_pager(document: str, intake: str) -> str:
+    """
+    Validate the free one-pager against visitor's original dump.
+    Returns: "ok" | "missing_parties" | "missing_tenets" | "incomplete_sentences"
+    """
+    doc_lower = document.lower()
+    intake_lower = intake.lower()
+    
+    # Check for incomplete/truncated sentences (the "covers due. Work." bug)
+    bad_patterns = [
+        r'\bcovers\s+due\.',
+        r'\.\s+Work\.\s',
+        r'\bdue\.\s+Work\b',
+        r'\bThis agreement covers\s*\.\s',
+        r'\bScope:\s*\.\s',
+        r'\bPurpose:\s*\.\s',
+    ]
+    for pattern in bad_patterns:
+        if re.search(pattern, document, re.IGNORECASE):
+            return "incomplete_sentences"
+    
+    # Check for Party A/B placeholders (should never appear in free one-pager)
+    if re.search(r'\bParty\s*A\b', document, re.IGNORECASE) or re.search(r'\bParty\s*B\b', document, re.IGNORECASE):
+        return "missing_parties"
+    
+    # Extract named parties from intake using common patterns
+    # Pattern: "Name of Company hires Name of Company/Person"
+    hires_match = re.search(
+        r'([A-Z][a-zA-Z\s]+(?:LLC|Inc\.?|Corp\.?|Studio|Company|Co\.?)?)\s+(?:of\s+[A-Za-z\s]+)?\s*hires\s+([A-Z][a-zA-Z\s]+(?:LLC|Inc\.?|Corp\.?|Studio|Company|Co\.?)?)',
+        intake, re.IGNORECASE
+    )
+    # Pattern: "between A and B"
+    between_match = re.search(
+        r'between\s+([A-Z][a-zA-Z\s]+(?:LLC|Inc\.?|Corp\.?|Studio|Company|Co\.?)?)\s+and\s+([A-Z][a-zA-Z\s]+(?:LLC|Inc\.?|Corp\.?|Studio|Company|Co\.?)?)',
+        intake, re.IGNORECASE
+    )
+    
+    named_parties = []
+    if hires_match:
+        # Extract first name from "Name of Company" pattern
+        p1 = hires_match.group(1).strip()
+        p2 = hires_match.group(2).strip()
+        # Clean up "of Company" suffix
+        p1_clean = re.sub(r'\s+of\s*$', '', p1, flags=re.IGNORECASE).strip()
+        named_parties = [p1_clean, p2]
+    elif between_match:
+        named_parties = [between_match.group(1).strip(), between_match.group(2).strip()]
+    else:
+        # Try to find capitalized names (first + last name or company names)
+        name_pattern = r'\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)\b'
+        potential_names = re.findall(name_pattern, intake)
+        # Filter out common words
+        stop_words = {'This Agreement', 'Party', 'Service Provider', 'The Client', 'Governing Law'}
+        named_parties = [n for n in potential_names if n not in stop_words][:2]
+    
+    # Check if named parties appear in document (at least first names)
+    for party in named_parties[:2]:
+        first_word = party.split()[0].lower() if party else ""
+        if first_word and len(first_word) >= 3 and first_word not in doc_lower:
+            # Check if full name is missing
+            if party.lower() not in doc_lower:
+                return "missing_parties"
+    
+    # Check for payment amount preservation
+    amount_match = re.search(r'\$[\d,]+(?:\.\d{2})?', intake)
+    if amount_match:
+        intake_amount = amount_match.group(0)
+        # Normalize amounts for comparison (remove commas)
+        intake_amt_normalized = intake_amount.replace(',', '')
+        if intake_amt_normalized not in document.replace(',', ''):
+            return "missing_tenets"
+    
+    # Check for governing law preservation
+    states = ['Texas', 'California', 'New York', 'Delaware', 'Florida', 'Arizona', 'Nevada', 'Washington', 'Illinois']
+    for state in states:
+        if state.lower() in intake_lower:
+            if state.lower() not in doc_lower:
+                return "missing_tenets"
+            break
+    
+    return "ok"
+
+
+def _generate_free_one_pager(intake_text: str, llm_model: str, max_retries: int = 2) -> Tuple[Optional[str], str]:
+    """
+    Generate a free one-pager agreement from OpenAI.
+    Returns: (document_text or None, validation_status)
+    """
+    system_prompt = _free_one_pager_system_prompt()
+    
+    for attempt in range(max_retries):
+        try:
+            llm_text = call_legal_llm(
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": intake_text},
+                ],
+                model=llm_model,
+                max_tokens=1200,
+                temperature=0.2 if attempt == 0 else 0.4,  # Slightly higher temp on retry
+                airlock_profile="agreement_outbound",
+                call_purpose="free_one_pager",
+            )
+            
+            # Clean up the response
+            document = llm_text.strip()
+            # Remove any markdown code fences if present
+            if document.startswith("```"):
+                lines = document.split('\n')
+                lines = [l for l in lines if not l.strip().startswith("```")]
+                document = '\n'.join(lines).strip()
+            
+            # Validate the document
+            validation = _validate_free_one_pager(document, intake_text)
+            
+            if validation == "ok":
+                return document, "ok"
+            
+            # Log validation failure for debugging
+            log.info(
+                "free_one_pager_validation_failed attempt=%d validation=%s doc_len=%d",
+                attempt + 1, validation, len(document)
+            )
+            
+            # If not the last retry, try again
+            if attempt < max_retries - 1:
+                continue
+            
+            # On final failure, return the document anyway with validation status
+            # Client can decide to redirect to Pro
+            return document if len(document) > 100 else None, validation
+            
+        except Exception as exc:
+            log.warning(
+                "free_one_pager_generation_failed attempt=%d error=%s",
+                attempt + 1, type(exc).__name__
+            )
+            if attempt >= max_retries - 1:
+                return None, "generation_failed"
+    
+    return None, "generation_failed"
+
+
 def _parse_intake_system_prompt_premium() -> str:
     """Premium completion re-parse: same schema, higher judgment (basic prompt unchanged)."""
     return (
@@ -4652,7 +4823,30 @@ def parse_agreement_intake(request: Request, body: AgreementParseRequest) -> Agr
                 "intake_text_char_len": len(intake_txt),
                 "has_exact_word_upgrade_marker": "--- Complete Version: exact wording / notes to apply ---" in intake_txt,
             }
-        return AgreementParseResponse(draft=draft_out, parse_meta=parse_meta_out, extract=extract_out)
+        
+        # Generate free one-pager for basic (non-premium) requests
+        free_document_text: Optional[str] = None
+        free_document_validation: Optional[str] = None
+        if body.ai_model_class != "premium":
+            free_document_text, free_document_validation = _generate_free_one_pager(
+                body.intake_text, llm_model, max_retries=2
+            )
+            log.info(
+                "free_one_pager_result validation=%s doc_len=%d",
+                free_document_validation,
+                len(free_document_text) if free_document_text else 0,
+            )
+            # Record the second AI call for the free one-pager
+            if free_document_text:
+                record_ai_call(subject_ref=resolve_subject_from_request(request), request_ip=ip or "unknown")
+        
+        return AgreementParseResponse(
+            draft=draft_out,
+            parse_meta=parse_meta_out,
+            extract=extract_out,
+            free_document_text=free_document_text,
+            free_document_validation=free_document_validation,
+        )
     except Exception as exc:
         log.warning(
             "agreement_parse failed ai_model_class=%s resolved_model=%s fallback=%s err=%s",

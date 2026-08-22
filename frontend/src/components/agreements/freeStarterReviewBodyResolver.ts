@@ -33,7 +33,28 @@ export type FreeStarterRenderSource =
   | "repaired_starter_preview"
   | "authoritative_hydrated_repaired"
   | "api_payload_repaired"
-  | "current_preview_repaired";
+  | "current_preview_repaired"
+  | "free_openai_direct";
+
+/**
+ * Returns true if the free document validation indicates we should redirect to Pro
+ * instead of showing a broken free page.
+ */
+export function shouldRedirectFreeToProForValidation(validation: string | null | undefined): boolean {
+  const v = (validation ?? "").trim();
+  if (!v || v === "ok") return false;
+  // Redirect for all failure cases: missing_parties, missing_tenets, incomplete_sentences, generation_failed
+  return true;
+}
+
+/**
+ * Returns true if the free one-pager from OpenAI is valid and usable.
+ */
+export function isFreeOnePagerValid(text: string | null | undefined, validation: string | null | undefined): boolean {
+  const t = (text ?? "").trim();
+  const v = (validation ?? "").trim();
+  return t.length >= 200 && v === "ok";
+}
 
 export type ProtectedFactKind = "payment_cadence" | "party_identity" | "term" | "governing_law";
 
@@ -52,6 +73,12 @@ export type ResolveFreeStarterReviewBodyArgs = {
   hasDraftPayload?: boolean;
   /** When true, allow a longer alternate body (only when intake is unavailable). */
   preferAlternate?: boolean;
+  /**
+   * Direct one-pager from OpenAI free parse. When validation is "ok",
+   * paint this body directly instead of building from structured fields.
+   */
+  freeDocumentText?: string | null;
+  freeDocumentValidation?: string | null;
 };
 
 export type ResolveFreeStarterReviewBodyResult = {
@@ -292,7 +319,10 @@ function buildRepairedStarterPreview(
 
 /**
  * Single canonical resolver for visible Free Starter review body text.
- * When raw intake is available, the repaired starter preview wins over authoritative/API bodies.
+ * Priority order:
+ * 1. Direct OpenAI free_document_text (when validation is "ok")
+ * 2. Repaired starter preview (when intake is available)
+ * 3. Authoritative/API alternates
  */
 export function resolveFreeStarterReviewBody(
   args: ResolveFreeStarterReviewBodyArgs,
@@ -305,6 +335,44 @@ export function resolveFreeStarterReviewBody(
 
   const apiPaymentTerms = String(args.apiPayload?.payment_terms ?? draft?.payment_terms ?? "").trim();
   const repairedPaymentTerms = extractFreeStarterPaymentTermsLine(repairedPreview);
+
+  // Check for direct OpenAI one-pager (highest priority when validation is "ok")
+  const freeDocText = String(args.freeDocumentText ?? draft?.free_document_text ?? "").trim();
+  const freeDocValidation = String(args.freeDocumentValidation ?? draft?.free_document_validation ?? "").trim();
+  
+  // If we have a valid free document from OpenAI, use it directly
+  if (freeDocText && freeDocText.length >= 200 && freeDocValidation === "ok") {
+    if (typeof import.meta !== "undefined" && import.meta.env?.MODE !== "test") {
+      console.info("[free-starter-render-source]", {
+        source: "free_openai_direct",
+        rawIntakeResolved: rawIntakeResolved.length,
+        usedOriginalRaw: intakeMeta.usedOriginalRaw,
+        usedStorageRaw: intakeMeta.usedStorageRaw,
+        apiPaymentTerms,
+        repairedPaymentTerms,
+        finalPaymentTerms: extractFreeStarterPaymentTermsLine(freeDocText),
+        protectedFactRepairCount: 0,
+        freeDocValidation,
+      });
+    }
+    
+    const normalized = normalizeFreeStarterSectionRender(freeDocText, {
+      intake: rawIntakeResolved,
+      draft,
+    });
+    
+    return {
+      body: normalized.text.trim(),
+      source: "free_openai_direct",
+      rawIntakeResolved,
+      usedOriginalRaw: intakeMeta.usedOriginalRaw,
+      usedStorageRaw: intakeMeta.usedStorageRaw,
+      apiPaymentTerms,
+      repairedPaymentTerms,
+      finalPaymentTerms: extractFreeStarterPaymentTermsLine(normalized.text),
+      protectedFactRepairCount: 0,
+    };
+  }
 
   const authoritative = String(args.authoritativeBody ?? "").trim();
   const apiDoc = String(
