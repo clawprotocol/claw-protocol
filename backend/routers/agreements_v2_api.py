@@ -411,11 +411,16 @@ def _agreements_write_allowed() -> bool:
 
 
 def _owner_mutation_guards(request: Request, agreement_id: str, *, surface: str) -> None:
-    from backend.security.commercial_auth import require_commercial_owner_principal
+    from backend.security.commercial_auth import (
+        _is_demo_checkout_session,
+        require_commercial_owner_principal,
+    )
     from backend.usage_economics.policy import assert_guest_workflow_denied
 
-    # Org headers alone are never authentication — require a validated principal.
-    require_commercial_owner_principal(request)
+    # Simulated POS already granted Pro on this anonymous session. Generate
+    # accepts X-Claw-Demo-Checkout-Receipt; signer-snapshot persist must too.
+    if not _is_demo_checkout_session(request):
+        require_commercial_owner_principal(request)
     assert_guest_workflow_denied(
         subject_ref=resolve_subject_from_request(request),
         surface=surface,

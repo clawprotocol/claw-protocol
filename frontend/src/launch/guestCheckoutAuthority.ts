@@ -169,6 +169,12 @@ export function hasDemoSessionUser(): boolean {
   return readDemoSessionUser() !== null;
 }
 
+/** Demo POS already painted Pro. Snapshot persist still 401s without a JWT — Save may continue to final review. */
+export function demoSessionMayContinueWithoutServerSnapshot(code: string): boolean {
+  if (!hasDemoSessionUser()) return false;
+  return code === "auth_required" || code === "authenticated_session_required";
+}
+
 export function clearDemoSessionUser(): void {
   if (typeof sessionStorage === "undefined") return;
   try {
