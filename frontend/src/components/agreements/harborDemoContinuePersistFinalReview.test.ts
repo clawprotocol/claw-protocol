@@ -195,18 +195,13 @@ describe("harborDemoContinuePersistFinalReview", () => {
       // Extract a window of ~1500 chars after the review card div to capture the ternary.
       const ternaryWindow = intake.slice(reviewCardIndex, reviewCardIndex + 1500);
 
-      // The fix adds an exception for demo+premiumCompletion+signerMetadataFinalized.
-      // Check that the exception is present in the ternary.
+      // After Continue + complete signers, leave the forced first-review arm so
+      // SimpleProFinalReviewScreen mounts (demo and signed-in first Pro alike).
       expect(ternaryWindow).toContain("paidProForcedFirstReviewActive");
-      expect(ternaryWindow).toContain("demoSessionUserActive");
-      expect(ternaryWindow).toContain("hasPaidPremiumCompletionSession()");
       expect(ternaryWindow).toContain("paidProSignerMetadataFinalized");
-
-      // Verify the structure: paidProForcedFirstReviewActive is AND'd with a negated condition.
-      // The pattern should be: (paidProForcedFirstReviewActive && !(demo && premium && finalized))
-      const demoBypassPattern =
-        /\(paidProForcedFirstReviewActive\s*&&\s*!\s*\(\s*demoSessionUserActive\s*&&\s*hasPaidPremiumCompletionSession\(\)\s*&&\s*paidProSignerMetadataFinalized\s*\)\)/s;
-      expect(ternaryWindow).toMatch(demoBypassPattern);
+      const finalizedBypassPattern =
+        /\(paidProForcedFirstReviewActive\s*&&\s*!paidProSignerMetadataFinalized\)/s;
+      expect(ternaryWindow).toMatch(finalizedBypassPattern);
     });
   });
 
@@ -604,21 +599,21 @@ This Agreement constitutes the entire agreement.`;
 
       const reason = "demo_session_signer_details_complete";
       const shouldCallFinalize = reason === "demo_session_signer_details_complete";
-      const shouldCallPrepareSignatures = reason === "dashboard_signer_setup_resume_complete";
+      const shouldCallPrepareSignatures = false;
 
       expect(shouldCallFinalize).toBe(true);
       expect(shouldCallPrepareSignatures).toBe(false);
     });
 
-    it("dashboard_signer_setup_resume_complete reason triggers finalize then signature prep", () => {
+    it("dashboard_signer_setup_resume_complete reason triggers finalize, not signature prep", () => {
       clearDemoSessionUser();
 
       const reason = "dashboard_signer_setup_resume_complete";
       const shouldCallFinalize = reason === "dashboard_signer_setup_resume_complete";
-      const shouldCallPrepareSignatures = reason === "dashboard_signer_setup_resume_complete";
+      const shouldCallPrepareSignatures = false;
 
       expect(shouldCallFinalize).toBe(true);
-      expect(shouldCallPrepareSignatures).toBe(true);
+      expect(shouldCallPrepareSignatures).toBe(false);
     });
   });
 

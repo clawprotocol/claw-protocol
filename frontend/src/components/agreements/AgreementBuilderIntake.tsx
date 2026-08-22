@@ -32189,24 +32189,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             return;
           }
           case "guided_continue": {
-            // Demo session post-POS: finalize signer metadata and open SimpleProFinalReviewScreen.
-            // Do NOT call handlePaidProPrepareSignaturesFromFirstReview (that creates signature links).
-            if (cta.reason === "demo_session_signer_details_complete") {
-              void finalizePaidProSignerMetadataAndOpenReviewDecision();
-              return;
-            }
-            if (cta.reason === "dashboard_signer_setup_resume_complete") {
-              void (async () => {
-                const ok = await finalizePaidProSignerMetadataAndOpenReviewDecision();
-                if (!ok) return;
-                handlePaidProPrepareSignaturesFromFirstReview();
-              })();
-              return;
-            }
+            // Continue after complete signers opens SimpleProFinalReviewScreen.
+            // Do not seed e-sign setup from this Continue. Send-for-signature lives on final review.
             if (
-              cta.reason === "paid_pro_signer_details_complete" &&
-              paidProInlineSignerSetupLatched &&
-              !signaturePreparationRequested
+              cta.reason === "demo_session_signer_details_complete" ||
+              cta.reason === "demo_session_signer_details_complete_fallback" ||
+              cta.reason === "dashboard_signer_setup_resume_complete" ||
+              (cta.reason === "paid_pro_signer_details_complete" &&
+                paidProInlineSignerSetupLatched &&
+                !signaturePreparationRequested)
             ) {
               void finalizePaidProSignerMetadataAndOpenReviewDecision();
               return;
@@ -35027,11 +35018,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                   ) : null}
                                   <div className="w-full max-w-[850px] rounded-sm border border-stone-200/90 bg-[#faf7f0] text-left text-stone-900 shadow-[0_1px_2px_rgba(0,0,0,0.05),0_22px_48px_-8px_rgba(15,23,42,0.28)] ring-1 ring-black/[0.07]">
                                     {(paidProForcedFirstReviewActive &&
-                                      !(
-                                        demoSessionUserActive &&
-                                        hasPaidPremiumCompletionSession() &&
-                                        paidProSignerMetadataFinalized
-                                      )) ||
+                                      !paidProSignerMetadataFinalized) ||
                                     paidProCanonicalReviewSignerSetupActive ||
                                     paidProReviewRecipientSetupActive ? (
                                       <div className="px-[clamp(1.35rem,4.5vw,2.65rem)] py-3.5 sm:py-4">
