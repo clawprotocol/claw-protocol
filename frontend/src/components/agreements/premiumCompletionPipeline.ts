@@ -280,6 +280,7 @@ import {
   isNonfatalParseDegradedPaidAccept,
   isTruncatedKeepSoTResponse,
   isOkPaidGenerationSoTResponse,
+  isSubstantivePaidModelBodySoT,
   PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN,
   SERVER_FULL_DOCUMENT_AUTHORITATIVE_MIN_LEN,
   SUBSTANTIVE_SERVER_DRAFT_MIN_LEN,
@@ -2265,6 +2266,32 @@ async function runPremiumCompletionInner(
         }
         logPremiumCompletionDebug({
           stage: "ok_generation_unconditional_sot_applied",
+          accepted: true,
+          docLen: doc.length,
+          generationOutcome: (full.generation_outcome || "").trim(),
+        });
+      }
+      if (
+        !truncatedKeepUnconditionalSoTApplied &&
+        isSubstantivePaidModelBodySoT({
+          documentTextLen: doc.trim().length,
+          hardRejected:
+            premiumBodyHardRejectedForDevContextLeak || premiumWireBodyRejectedForDevContextLeak,
+        })
+      ) {
+        winningPremiumBodyText = doc;
+        premiumRenderSource = "server_full_draft";
+        truncatedKeepUnconditionalSoTApplied = true;
+        premiumCompletionOutcome = "authoritative_draft_complete_with_recommended_clarifications";
+        if (import.meta.env.MODE !== "test") {
+          // eslint-disable-next-line no-console
+          console.info("[CLAW] substantive model body unconditional SoT applied", {
+            doc_len: doc.length,
+            generation_outcome: (full.generation_outcome || "").trim(),
+          });
+        }
+        logPremiumCompletionDebug({
+          stage: "substantive_model_body_unconditional_sot_applied",
           accepted: true,
           docLen: doc.length,
           generationOutcome: (full.generation_outcome || "").trim(),

@@ -125,6 +125,19 @@ export function isOkPaidGenerationSoTResponse(args: {
 }
 
 /**
+ * Any HTTP-200 model draft at the backend keep floor is the paid SoT.
+ * Do not require generation_outcome=ok or the 4k/10k/15k floors. Freeze and
+ * notice-role heuristics must not wipe this to Retry Pro draft.
+ */
+export function isSubstantivePaidModelBodySoT(args: {
+  documentTextLen: number;
+  hardRejected?: boolean;
+}): boolean {
+  if (args.hardRejected) return false;
+  return args.documentTextLen >= TRUNCATED_KEEP_SOT_MIN_LEN;
+}
+
+/**
  * A server `server_full_document_text` at/above this length (after a successful HTTP 200) is the
  * authoritative paid corpus and MUST win over client structural soft gates. Client heuristics
  * (similarity, anchor, length-shape) may not reject a validated full server document — doing so
