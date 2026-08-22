@@ -1634,6 +1634,9 @@ import {
   getFreeOnePagerFallbackForProFailure,
   resolveFreeStarterReviewBody,
   shouldRedirectFreeToProForValidation,
+  evaluateHollowBodyGate,
+  logHollowBodyGate,
+  type HollowBodyGateResult,
 } from "./freeStarterReviewBodyResolver";
 import {
   FREE_STARTER_REVIEW_BADGE,
@@ -16457,6 +16460,92 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     displayPhase,
     starterPreviewBodyForShell,
   ]);
+
+  const hollowBodyGateResult = useMemo((): HollowBodyGateResult | null => {
+    if (suppressFreeStarterCreateFlowConversionUi) return null;
+    if (!isFreeStreamlineDraftReview) return null;
+    if (!draft) return null;
+    if (displayPhase !== "review" && displayPhase !== "preparing_review") return null;
+    const rawIntake = resolveStarterPreviewIntakeText(
+      currentPremiumMergedIntakeKey || debouncedStepBuffer || intakeCombined,
+    );
+    const resolved = resolveFreeStarterReviewBody({
+      draft,
+      rawIntake,
+      currentPreview: agreementDocumentText,
+      apiPayload: {
+        payment_terms: draft.payment_terms,
+        server_full_document_text: (draft as { server_full_document_text?: string | null })
+          .server_full_document_text,
+      },
+      placeholderGate: starterPreviewTransientGate,
+      hasDraftPayload: starterPreviewTransientGate.hasDraftPayload,
+    });
+    const gate = evaluateHollowBodyGate(resolved);
+    if (gate.isHollow) {
+      logHollowBodyGate({
+        isHollow: gate.isHollow,
+        missingTenets: gate.missingTenets,
+        shouldAskQuestions: gate.shouldAskQuestions,
+        shouldRedirectToPro: gate.shouldRedirectToPro,
+        reasons: gate.reasons,
+        bodyLen: resolved.body.length,
+        intakeLen: rawIntake.length,
+      });
+    }
+    return gate;
+  }, [
+    suppressFreeStarterCreateFlowConversionUi,
+    isFreeStreamlineDraftReview,
+    draft,
+    displayPhase,
+    currentPremiumMergedIntakeKey,
+    debouncedStepBuffer,
+    intakeCombined,
+    agreementDocumentText,
+    starterPreviewTransientGate,
+  ]);
+
+  const hollowBodyGateTriggeredRef = useRef(false);
+  useEffect(() => {
+    if (!hollowBodyGateResult?.isHollow) {
+      hollowBodyGateTriggeredRef.current = false;
+      return;
+    }
+    if (hollowBodyGateTriggeredRef.current) return;
+    if (hollowBodyGateResult.shouldRedirectToPro) {
+      hollowBodyGateTriggeredRef.current = true;
+      return;
+    }
+    if (hollowBodyGateResult.shouldAskQuestions && hollowBodyGateResult.missingTenets.length > 0) {
+      hollowBodyGateTriggeredRef.current = true;
+      const tenetToMissingKey = (tenet: string): MissingKey | null => {
+        switch (tenet) {
+          case "parties":
+            return "parties";
+          case "payment":
+            return "payment_terms";
+          case "term":
+            return "duration";
+          case "governing_law":
+            return "jurisdiction";
+          default:
+            return null;
+        }
+      };
+      const missingKeys = hollowBodyGateResult.missingTenets
+        .map(tenetToMissingKey)
+        .filter((k): k is MissingKey => k !== null)
+        .slice(0, 5);
+      if (missingKeys.length > 0) {
+        setMissing(missingKeys);
+        setFollowUpDetailTotal(missingKeys.length);
+        setDisplayPhase("followup_required");
+        setCreateFlowPhase("capturing_input");
+        setCreateUiStage(CreateUiStage.DRAFT);
+      }
+    }
+  }, [hollowBodyGateResult]);
 
   useEffect(() => {
     if (!starterPreviewLoadingReleaseReason) return;

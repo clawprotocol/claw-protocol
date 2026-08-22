@@ -25,6 +25,10 @@ import { normalizeFreeStarterSectionRender } from "./freeStarterSectionRenderNor
 import { SHORT_STALE_PREMIUM_INTAKE_THRESHOLD } from "./premiumCheckoutIntakeCorpus";
 import { buildReviewCoercionRawIntakeFromDraft } from "./premiumCheckoutRawIntake";
 import {
+  validateFreeStarterGeneratedBody,
+  logFreeStarterBodyValidation,
+} from "./freeStarterBodyValidation";
+import {
   starterPreviewHasGluedSectionHeadings,
   starterPreviewHasParagraphSectionBreaks,
 } from "./starterPreviewFormatting";
@@ -73,6 +77,16 @@ export function getFreeOnePagerFallbackForProFailure(
   return "";
 }
 
+export type HollowBodyTenet = "parties" | "payment" | "term" | "governing_law";
+
+export type HollowBodyGateResult = {
+  isHollow: boolean;
+  missingTenets: HollowBodyTenet[];
+  shouldAskQuestions: boolean;
+  shouldRedirectToPro: boolean;
+  reasons: string[];
+};
+
 export type ProtectedFactKind = "payment_cadence" | "party_identity" | "term" | "governing_law";
 
 export type ResolveFreeStarterReviewBodyArgs = {
@@ -108,6 +122,8 @@ export type ResolveFreeStarterReviewBodyResult = {
   repairedPaymentTerms: string;
   finalPaymentTerms: string;
   protectedFactRepairCount: number;
+  /** Validation result — when bodyValidation.valid is false, the body is hollow and should not be displayed. */
+  bodyValidation: import("./freeStarterBodyValidation").FreeStarterBodyValidationResult | null;
 };
 
 function isTestMode(): boolean {
@@ -377,6 +393,25 @@ export function resolveFreeStarterReviewBody(
       intake: rawIntakeResolved,
       draft,
     });
+
+    const draftInputForDirectValidation = draft
+      ? {
+          title: draft.title,
+          parties: (draft.parties || []).map((p) => ({ name: p.name })),
+          purpose: draft.purpose,
+          payment_terms: draft.payment_terms,
+          duration: draft.duration,
+          due_date: draft.due_date,
+          effective_date: draft.effective_date,
+          jurisdiction: draft.jurisdiction,
+          payment: draft.payment ? { amount: draft.payment.amount } : null,
+        }
+      : null;
+    const directValidation = validateFreeStarterGeneratedBody(
+      normalized.text,
+      rawIntakeResolved,
+      draftInputForDirectValidation,
+    );
     
     return {
       body: normalized.text.trim(),
@@ -388,6 +423,7 @@ export function resolveFreeStarterReviewBody(
       repairedPaymentTerms,
       finalPaymentTerms: extractFreeStarterPaymentTermsLine(normalized.text),
       protectedFactRepairCount: 0,
+      bodyValidation: directValidation,
     };
   }
 
@@ -461,6 +497,7 @@ export function resolveFreeStarterReviewBody(
     repairedPaymentTerms,
     finalPaymentTerms: extractFreeStarterPaymentTermsLine(body),
     protectedFactRepairCount,
+    bodyValidation: null,
   };
 
   const normalized = normalizeFreeStarterSectionRender(result.body, {
@@ -469,6 +506,30 @@ export function resolveFreeStarterReviewBody(
   });
   result.body = normalized.text;
   result.finalPaymentTerms = extractFreeStarterPaymentTermsLine(result.body);
+
+  const draftInput = draft
+    ? {
+        title: draft.title,
+        parties: (draft.parties || []).map((p) => ({ name: p.name })),
+        purpose: draft.purpose,
+        payment_terms: draft.payment_terms,
+        duration: draft.duration,
+        due_date: draft.due_date,
+        effective_date: draft.effective_date,
+        jurisdiction: draft.jurisdiction,
+        payment: draft.payment ? { amount: draft.payment.amount } : null,
+      }
+    : null;
+  const validation = validateFreeStarterGeneratedBody(result.body, rawIntakeResolved, draftInput);
+  result.bodyValidation = validation;
+
+  logFreeStarterBodyValidation({
+    stage: "resolve_free_starter_body",
+    valid: validation.valid,
+    reasons: validation.reasons,
+    intakeTenets: validation.intakeScore,
+    bodyLen: result.body.length,
+  });
 
   logFreeStarterRenderSource({
     source: result.source,
@@ -482,4 +543,93 @@ export function resolveFreeStarterReviewBody(
   });
 
   return result;
+}
+
+/**
+ * Evaluate whether a resolved free starter body is too hollow to display.
+ *
+ * When isHollow is true:
+ * - shouldAskQuestions: show 2-5 simple missing-tenet questions (parties, payment, term, law)
+ * - shouldRedirectToPro: when too many issues, redirect to Pro instead of questions
+ *
+ * A thin dump (like "Need someone to paint my fence") should never show an empty
+ * Payment Terms or Governing Law section. It should ask for those details or redirect.
+ */
+export function evaluateHollowBodyGate(
+  resolveResult: ResolveFreeStarterReviewBodyResult,
+): HollowBodyGateResult {
+  const validation = resolveResult.bodyValidation;
+
+  if (!validation || validation.valid) {
+    return {
+      isHollow: false,
+      missingTenets: [],
+      shouldAskQuestions: false,
+      shouldRedirectToPro: false,
+      reasons: [],
+    };
+  }
+
+  const missingTenets: HollowBodyTenet[] = [];
+
+  if (validation.rolePlaceholderParties || validation.missingNamedParties.length > 0) {
+    missingTenets.push("parties");
+  }
+
+  for (const hollow of validation.hollowSections) {
+    if (hollow.includes("payment") && !missingTenets.includes("payment")) {
+      missingTenets.push("payment");
+    }
+    if (hollow.includes("term") && !missingTenets.includes("term")) {
+      missingTenets.push("term");
+    }
+    if (hollow.includes("governing_law") && !missingTenets.includes("governing_law")) {
+      missingTenets.push("governing_law");
+    }
+  }
+
+  if (!validation.intakeScore.parties && !missingTenets.includes("parties")) {
+    missingTenets.push("parties");
+  }
+  if (!validation.intakeScore.payment && !missingTenets.includes("payment")) {
+    if (validation.hollowSections.some((h) => h.includes("payment"))) {
+      missingTenets.push("payment");
+    }
+  }
+  if (!validation.intakeScore.term && !missingTenets.includes("term")) {
+    if (validation.hollowSections.some((h) => h.includes("term"))) {
+      missingTenets.push("term");
+    }
+  }
+  if (!validation.intakeScore.governingLaw && !missingTenets.includes("governing_law")) {
+    if (validation.hollowSections.some((h) => h.includes("governing_law"))) {
+      missingTenets.push("governing_law");
+    }
+  }
+
+  const issueCount = missingTenets.length;
+  const shouldRedirectToPro = issueCount >= 4;
+  const shouldAskQuestions = !shouldRedirectToPro && issueCount > 0;
+
+  return {
+    isHollow: true,
+    missingTenets,
+    shouldAskQuestions,
+    shouldRedirectToPro,
+    reasons: validation.reasons,
+  };
+}
+
+export function logHollowBodyGate(payload: {
+  isHollow: boolean;
+  missingTenets: HollowBodyTenet[];
+  shouldAskQuestions: boolean;
+  shouldRedirectToPro: boolean;
+  reasons: string[];
+  bodyLen: number;
+  intakeLen: number;
+}): void {
+  if (isTestMode()) return;
+  // eslint-disable-next-line no-console
+  console.info("[free-starter-hollow-body-gate]", payload);
 }
