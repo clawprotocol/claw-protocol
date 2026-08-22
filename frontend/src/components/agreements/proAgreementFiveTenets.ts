@@ -39,6 +39,48 @@ export type FiveTenetDraftInput = {
 const PLACEHOLDER_DURATION_RE = /^(as stated in the agreement body\.?|tbd|n\/?a|to be determined|—|-)$/i;
 const DEFAULT_EFFECTIVE_RE = /upon full execution/i;
 const PLACEHOLDER_JURISDICTION_RE = /^(tbd|n\/?a|to be determined|unknown|\(empty\)|—|-)$/i;
+const PLACEHOLDER_PAYMENT_FIELD_RE =
+  /^(?:(?:payment|compensation|consideration)(?:\s+terms?)?\s*(?::|-|is|are)?\s*)?(?:\[?not\s+(?:yet\s+)?specified\]?|not\s+yet\s+(?:agreed|specified)|tbd|n\/?a|to\s+be\s+(?:determined|agreed|specified)|unknown|—|-)$/i;
+const PAYMENT_PLACEHOLDER_IN_TEXT_RE =
+  /\b(?:not\s+(?:yet\s+)?specified|not\s+yet\s+agreed)\b/i;
+const PAYMENT_LABEL_PLACEHOLDER_RE =
+  /\b(?:payment|fee|compensation|consideration)(?:\s+terms?)?\b[^.!?\n]{0,48}\b(?:tbd|n\/?a|to\s+be\s+(?:determined|agreed|specified)|unknown)\b/i;
+
+const CONCRETE_PAYMENT_PATTERNS = [
+  /\$[\d,]+(?:\.\d+)?/,
+  /€[\d,]+(?:\.\d+)?/,
+  /£[\d,]+(?:\.\d+)?/,
+  /\b\d+(?:,\d{3})*(?:\.\d+)?\s*(?:dollars?|usd|eur|gbp)\b/i,
+  /\b(?:free|no\s+(?:charge|cost|payment|fee)|gratis|pro\s+bono)\b/i,
+  /\b(?:mutual\s+benefit|in-?kind|barter|trade)\b/i,
+  /\bper\s+(?:hour|day|week|month|year|project|milestone|share)\b/i,
+  /\b\d+k\b/i,
+  /\b(?:paying|paid|pay)\s+\d/i,
+  /\b(?:rev(?:enue)?\s+share|split|50\/50|equal\s+(?:profit|split))\b/i,
+  /\b\d+\s*%/,
+  /\b\d+\s*percent\b/i,
+  /\b(?:contributes?\s+equally|split\s+\d+)\b/i,
+  /\$[\d,]+\s*\/\s*(?:mo|month|week|wk|hr|hour|day|yr|year)\b/i,
+];
+
+function hasConcretePaymentSignal(text: string): boolean {
+  if (CONCRETE_PAYMENT_PATTERNS.some((p) => p.test(text))) return true;
+  const lower = text.toLowerCase();
+  if (lower.includes("no payment") || lower.includes("no compensation") || lower.includes("no fee")) {
+    return true;
+  }
+  if (/\bmutual\s+(?:NDA|non-?disclosure|confidentiality)\b/i.test(text)) return true;
+  return false;
+}
+
+function isPlaceholderPaymentTerms(raw: string | null | undefined): boolean {
+  const t = (raw || "").trim();
+  if (!t) return true;
+  if (PLACEHOLDER_PAYMENT_FIELD_RE.test(t)) return true;
+  if (PAYMENT_PLACEHOLDER_IN_TEXT_RE.test(t) && !hasConcretePaymentSignal(t)) return true;
+  if (PAYMENT_LABEL_PLACEHOLDER_RE.test(t) && !hasConcretePaymentSignal(t)) return true;
+  return false;
+}
 
 const PARTY_NAME_PATTERNS = [
   /\b(?:LLC|L\.L\.C\.|Inc\.?|Incorporated|Corp\.?|Corporation|Ltd\.?|Limited|LP|L\.P\.|LLP|PLLC|GmbH|PLC|SA|S\.A\.|AG|KG)\b/i,
@@ -161,16 +203,14 @@ function hasScope(text: string): boolean {
 }
 
 function hasPayment(text: string): boolean {
-  const hasMoneyPattern = PAYMENT_PATTERNS.some((p) => p.test(text));
+  const t = (text || "").trim();
+  if (!t) return false;
+  if (isPlaceholderPaymentTerms(t) && !hasConcretePaymentSignal(t)) return false;
+  if (PAYMENT_PLACEHOLDER_IN_TEXT_RE.test(t) && !hasConcretePaymentSignal(t)) return false;
+  if (PAYMENT_LABEL_PLACEHOLDER_RE.test(t) && !hasConcretePaymentSignal(t)) return false;
+  const hasMoneyPattern = PAYMENT_PATTERNS.some((p) => p.test(t));
   if (hasMoneyPattern) return true;
-  const lower = text.toLowerCase();
-  if (lower.includes("no payment") || lower.includes("no compensation") || lower.includes("no fee")) {
-    return true;
-  }
-  if (/\bmutual\s+(?:NDA|non-?disclosure|confidentiality)\b/i.test(text)) {
-    return true;
-  }
-  return false;
+  return hasConcretePaymentSignal(t);
 }
 
 function hasTerm(text: string): boolean {
@@ -201,6 +241,7 @@ function isRealPaymentTerms(
   if (amt != null && String(amt).trim() !== "" && Number(amt) > 0) return true;
   const t = (raw || "").trim();
   if (!t) return false;
+  if (isPlaceholderPaymentTerms(t)) return false;
   if (isInventedNoFeePayment(t)) return false;
   if (!isPaymentSemanticallySafe(t)) return false;
   return t.length >= 2;
@@ -432,11 +473,6 @@ function counterpartyHint(draft?: FiveTenetDraftInput | null): string {
   return names.find((n) => !/^client$/i.test(n)) || names[0] || "";
 }
 
-function looksLikeNda(intakeText: string, draft?: FiveTenetDraftInput | null): boolean {
-  const blob = `${draft?.title || ""} ${draft?.purpose || ""} ${intakeText || ""}`;
-  return /\b(?:nda|non-?disclosure|confidentiality)\b/i.test(blob);
-}
-
 const TENET_HINT_OUTLINE_RE =
   /\b(?:article|section)\s+\d|\b(?:whereas|now therefore|in witness whereof)\b|\bdraft\s+outline\b/i;
 
@@ -447,71 +483,43 @@ export function isPollutedTenetQuestionHint(text: string): boolean {
   if (/[\n\r]/.test(t)) return true;
   if (t.length > 90) return true;
   if (TENET_HINT_OUTLINE_RE.test(t)) return true;
-  if (/(?:^|\s)\d+\.\s+[A-Z][a-z]+/.test(t) && t.length > 40) return true;
+  if (/(?:^|\s)\d+\.\s+[A-Z]/.test(t)) return true;
+  if (/\b\d+\.\s+services\s+term\b/i.test(t)) return true;
   return false;
 }
 
-function shortPurpose(draft?: FiveTenetDraftInput | null, intakeText = ""): string {
-  const purpose = (draft?.purpose || "").trim().replace(/\.+$/, "");
-  if (purpose && !isPollutedTenetQuestionHint(purpose)) {
-    return purpose.length > 80 ? `${purpose.slice(0, 77)}…` : purpose;
-  }
-  const dump = (intakeText || "").trim().replace(/\.+$/, "");
-  if (!dump || isPollutedTenetQuestionHint(dump)) return "";
-  return dump.length > 80 ? `${dump.slice(0, 77)}…` : dump;
+function cleanPartyHint(draft?: FiveTenetDraftInput | null): string {
+  const who = counterpartyHint(draft);
+  if (!who || who.length > 40 || isPollutedTenetQuestionHint(who)) return "";
+  return who;
 }
 
 /**
- * 2–5 questions specific to what the visitor already typed. Never suggests Delaware or no-fees.
+ * 2–5 clean one-liner questions. Never pastes outline / payment-placeholder text.
  */
 export function buildLocalMissingTenetQuestions(
   intakeText: string,
   draft?: FiveTenetDraftInput | null,
 ): string[] {
   const topics = getRequiredClarificationTopics(intakeText, draft);
-  const who = counterpartyHint(draft);
-  const purpose = shortPurpose(draft, intakeText);
-  const nda = looksLikeNda(intakeText, draft);
-  const paymentKnown = isRealPaymentTerms(draft?.payment_terms, draft?.payment);
+  const who = cleanPartyHint(draft);
 
   return topics.slice(0, 5).map((topic) => {
     switch (topic) {
       case "parties":
         return "Who are the parties to this agreement? Please provide full legal names.";
       case "scope":
-        return "What is the purpose or scope of this agreement? What services or work will be performed?";
+        return "What is the purpose or scope of this agreement?";
       case "payment":
-        if (nda) {
-          return who
-            ? `This NDA with ${who}${purpose ? ` (${purpose})` : ""} does not list any payment. Is there a fee or other consideration?`
-            : `This NDA${purpose ? ` (${purpose})` : ""} does not list any payment. Is there a fee or other consideration?`;
-        }
-        if (who && purpose) {
-          return `${who} is already named for this work (${purpose}), but no payment amount is listed. What are the payment terms?`;
-        }
-        if (who) {
-          return `No payment amount is listed for the agreement with ${who}. What are the payment terms?`;
-        }
-        return "What are the payment terms? Include amounts, timing, and any conditions.";
+        return "How much is paid, and when?";
       case "term":
-        if (who) {
-          return `How long does this agreement with ${who} last? When does it start and end?`;
-        }
-        return "What is the duration of this agreement? When does it start and end?";
+        return who
+          ? `How long does this agreement with ${who} last?`
+          : "How long does this agreement last?";
       case "governing_law":
-        if (nda && who) {
-          return `This NDA with ${who}${purpose ? ` (${purpose})` : ""} does not say which state's law governs. Which state's law should apply?`;
-        }
-        if (paymentKnown && who) {
-          const pay = (draft?.payment_terms || "").trim();
-          return pay
-            ? `${who} is already named and payment is ${pay}, but no governing law was given. Which state's law should govern this agreement?`
-            : `${who} is already named, but no governing law was given. Which state's law should govern this agreement?`;
-        }
-        if (who) {
-          return `${who} is already named, but no governing law was given. Which state's law should govern this agreement?`;
-        }
-        return "Which state's law should govern this agreement?";
+        return who
+          ? `Which state's law should govern this agreement with ${who}?`
+          : "Which state's law should govern this agreement?";
       default:
         return `Please clarify: ${topic}`;
     }

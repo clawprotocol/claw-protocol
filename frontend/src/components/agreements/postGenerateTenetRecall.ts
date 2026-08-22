@@ -35,13 +35,11 @@ function oneLinerForMissingTenet(topic: string, who: string): string {
     case "scope":
       return "What is the purpose or scope of this agreement?";
     case "payment":
-      return who
-        ? `This draft with ${who} does not include payment terms. What should the payment be?`
-        : "What are the payment terms? Include amount, timing, and any conditions.";
+      return "How much is paid, and when?";
     case "term":
       return who
         ? `How long does this agreement with ${who} last?`
-        : "What is the duration of this agreement? When does it start and end?";
+        : "How long does this agreement last?";
     case "governing_law":
       return who
         ? `Which state's law should govern this agreement with ${who}?`

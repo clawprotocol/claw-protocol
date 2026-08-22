@@ -8,7 +8,9 @@ import {
 import {
   buildLocalMissingTenetQuestions,
   intakeRequiresClarification,
+  scoreFiveTenets,
   scoreFiveTenetsFromDraft,
+  isPollutedTenetQuestionHint,
   type FiveTenetDraftInput,
 } from "./proAgreementFiveTenets";
 
@@ -160,5 +162,75 @@ describe("paid Pro missing-tenet ask (parsed draft)", () => {
         expect(preflight.questions.length).toBeLessThanOrEqual(5);
       }
     }
+  });
+});
+
+describe("placeholder payment is missing and questions stay clean", () => {
+  const notSpecifiedDraft: FiveTenetDraftInput = {
+    title: "Painting Agreement",
+    parties: [{ name: "Alex" }, { name: "Mike" }],
+    purpose: "3. Services Term and Effective Date",
+    payment_terms: "Not specified",
+    duration: "2 weeks",
+    due_date: null,
+    effective_date: "Upon full execution by all parties",
+    jurisdiction: "",
+    payment: { amount: null, valid: true },
+  };
+
+  const logoDraft: FiveTenetDraftInput = {
+    title: "Logo Design Agreement",
+    parties: [{ name: "Client" }, { name: "Sarah" }],
+    purpose: "Sarah will design a logo.",
+    payment_terms: "$800",
+    duration: "2 weeks",
+    due_date: null,
+    effective_date: "Upon full execution by all parties",
+    jurisdiction: "Texas",
+    payment: { amount: 800, valid: true },
+  };
+
+  it("payment \"Not specified\" / not yet agreed → asks payment", () => {
+    const dump = "I hired Mike to paint for Alex. Payment: Not specified.";
+    const score = scoreFiveTenetsFromDraft(notSpecifiedDraft, dump);
+    expect(score.payment).toBe(false);
+    expect(scoreFiveTenets("Mike paints for Alex. Payment not yet agreed.").payment).toBe(false);
+    expect(scoreFiveTenetsFromDraft({ ...notSpecifiedDraft, payment_terms: "not yet agreed" }, dump).payment).toBe(false);
+    expect(scoreFiveTenetsFromDraft({ ...notSpecifiedDraft, payment_terms: "not yet specified" }, dump).payment).toBe(false);
+    expect(scoreFiveTenetsFromDraft({ ...notSpecifiedDraft, payment_terms: "TBD" }, dump).payment).toBe(false);
+    expect(scoreFiveTenetsFromDraft({ ...notSpecifiedDraft, payment_terms: "" }, dump).payment).toBe(false);
+
+    const topics = getRequiredClarificationTopics(dump, notSpecifiedDraft);
+    expect(topics).toContain("payment");
+    const qs = buildLocalMissingTenetQuestions(dump, notSpecifiedDraft);
+    expect(qs).toContain("How much is paid, and when?");
+  });
+
+  it("$800 present → does not ask payment", () => {
+    const dump = "Sarah will design a logo for $800. Texas law. 2 weeks.";
+    const score = scoreFiveTenetsFromDraft(logoDraft, dump);
+    expect(score.payment).toBe(true);
+    expect(scoreFiveTenets(dump).payment).toBe(true);
+    const topics = getRequiredClarificationTopics(dump, logoDraft);
+    expect(topics).not.toContain("payment");
+    const qs = buildLocalMissingTenetQuestions(dump, logoDraft);
+    expect(qs).not.toContain("How much is paid, and when?");
+    expect(qs.some((q) => /how much is paid/i.test(q))).toBe(false);
+  });
+
+  it("questions are one clean sentence (no 3. Services Term dump)", () => {
+    const dump = "DRAFT OUTLINE\n1. Parties\n2. Scope\n3. Services Term and Effective Date\n4. Governing Law";
+    const qs = buildLocalMissingTenetQuestions(dump, notSpecifiedDraft);
+    expect(qs.length).toBeGreaterThanOrEqual(1);
+    expect(qs.length).toBeLessThanOrEqual(5);
+    expect(qs.join(" ")).not.toMatch(/3\.\s+Services Term/i);
+    expect(qs.join(" ")).not.toMatch(/DRAFT OUTLINE/i);
+    expect(qs.join(" ")).not.toMatch(/not specified/i);
+    for (const q of qs) {
+      expect(q.includes("\n")).toBe(false);
+      expect(q.split(/[.?!]/).filter((s) => s.trim()).length).toBeLessThanOrEqual(2);
+      expect(isPollutedTenetQuestionHint(q)).toBe(false);
+    }
+    expect(qs).toContain("How much is paid, and when?");
   });
 });
