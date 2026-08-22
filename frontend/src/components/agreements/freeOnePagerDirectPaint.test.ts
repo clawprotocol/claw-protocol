@@ -9,9 +9,10 @@
  */
 import { describe, expect, it } from "vitest";
 import {
+  getFreeOnePagerFallbackForProFailure,
+  isFreeOnePagerValid,
   resolveFreeStarterReviewBody,
   shouldRedirectFreeToProForValidation,
-  isFreeOnePagerValid,
 } from "./freeStarterReviewBodyResolver";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 
@@ -254,5 +255,64 @@ describe("Maya/Diego regression test", () => {
     expect(result.body).not.toMatch(/covers due\. Work\./i);
     expect(result.body).not.toMatch(/Party A/i);
     expect(result.body).not.toMatch(/Party B/i);
+  });
+});
+
+describe("getFreeOnePagerFallbackForProFailure", () => {
+  it("returns valid free document text when validation is ok", () => {
+    const draft = {
+      free_document_text: MAYA_DIEGO_VALID_FREE_DOC,
+      free_document_validation: "ok",
+    };
+    const result = getFreeOnePagerFallbackForProFailure(draft);
+    expect(result).toBe(MAYA_DIEGO_VALID_FREE_DOC.trim());
+  });
+
+  it("returns empty string when validation fails", () => {
+    const draft = {
+      free_document_text: "Some text but validation failed",
+      free_document_validation: "missing_parties",
+    };
+    const result = getFreeOnePagerFallbackForProFailure(draft);
+    expect(result).toBe("");
+  });
+
+  it("returns empty string when text is too short", () => {
+    const draft = {
+      free_document_text: "Too short",
+      free_document_validation: "ok",
+    };
+    const result = getFreeOnePagerFallbackForProFailure(draft);
+    expect(result).toBe("");
+  });
+
+  it("returns empty string when draft is null", () => {
+    expect(getFreeOnePagerFallbackForProFailure(null)).toBe("");
+    expect(getFreeOnePagerFallbackForProFailure(undefined)).toBe("");
+  });
+
+  it("returns empty string when free_document_text is missing", () => {
+    const draft = {
+      free_document_validation: "ok",
+    };
+    expect(getFreeOnePagerFallbackForProFailure(draft)).toBe("");
+  });
+
+  it("provides fallback for Pro failure when free one-pager was valid", () => {
+    // Simulates the Maya/Diego scenario where:
+    // 1. Free tier generated a valid one-pager
+    // 2. User upgraded to Pro
+    // 3. Pro generation failed
+    // 4. System should fall back to the valid free one-pager
+    const draftWithValidFree = {
+      free_document_text: MAYA_DIEGO_VALID_FREE_DOC,
+      free_document_validation: "ok",
+    };
+    const fallback = getFreeOnePagerFallbackForProFailure(draftWithValidFree);
+    expect(fallback.length).toBeGreaterThan(200);
+    expect(fallback).toContain("Maya Chen");
+    expect(fallback).toContain("Diego Alvarez");
+    expect(fallback).toContain("$2,400");
+    expect(fallback).toContain("Texas");
   });
 });

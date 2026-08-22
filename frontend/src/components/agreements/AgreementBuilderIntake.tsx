@@ -1631,6 +1631,7 @@ import {
   type FreeReviewSurfaceSource,
 } from "./freeStreamlineDraftReview";
 import {
+  getFreeOnePagerFallbackForProFailure,
   resolveFreeStarterReviewBody,
   shouldRedirectFreeToProForValidation,
 } from "./freeStarterReviewBodyResolver";
@@ -9363,11 +9364,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
               starterPreview: true,
               intakeText: mergedIntake,
             });
-            if (starterFallback.trim()) {
-              setAgreementDocumentText(starterFallback);
+            // If starterFallback is empty, try the validated free one-pager
+            const freeOnePagerFallback = getFreeOnePagerFallbackForProFailure(mergedF.draft);
+            const fallbackText = starterFallback.trim() || freeOnePagerFallback.trim();
+            if (fallbackText) {
+              setAgreementDocumentText(fallbackText);
               setProUpgradeUseStarterView(true);
-              // Protect starter from useLayoutEffect wipe when proFullDraftQualityRetry is true.
-              lastKnownGoodAuthoritativeDraftRef.current = starterFallback;
+              // Protect from useLayoutEffect wipe when proFullDraftQualityRetry is true.
+              lastKnownGoodAuthoritativeDraftRef.current = fallbackText;
             } else {
               setAgreementDocumentText("");
             }
@@ -9599,11 +9603,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
               starterPreview: true,
               intakeText: mergedIntake,
             });
-            if (starterFallback.trim()) {
-              setAgreementDocumentText(starterFallback);
+            // If starterFallback is empty, try the validated free one-pager
+            const freeOnePagerFallback = getFreeOnePagerFallbackForProFailure(merged.draft);
+            const fallbackText = starterFallback.trim() || freeOnePagerFallback.trim();
+            if (fallbackText) {
+              setAgreementDocumentText(fallbackText);
               setProUpgradeUseStarterView(true);
-              // Protect starter from useLayoutEffect wipe when proFullDraftQualityRetry is true.
-              lastKnownGoodAuthoritativeDraftRef.current = starterFallback;
+              // Protect from useLayoutEffect wipe when proFullDraftQualityRetry is true.
+              lastKnownGoodAuthoritativeDraftRef.current = fallbackText;
             } else {
               setAgreementDocumentText("");
             }
@@ -9778,11 +9785,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                 starterPreview: true,
                 intakeText: mergedIntake,
               });
-              if (starterFallback.trim()) {
-                setAgreementDocumentText(starterFallback);
+              // If starterFallback is empty, try the validated free one-pager
+              const freeOnePagerFallback = getFreeOnePagerFallbackForProFailure(merged.draft);
+              const fallbackText = starterFallback.trim() || freeOnePagerFallback.trim();
+              if (fallbackText) {
+                setAgreementDocumentText(fallbackText);
                 setProUpgradeUseStarterView(true);
-                // Protect starter from useLayoutEffect wipe when proFullDraftQualityRetry is true.
-                lastKnownGoodAuthoritativeDraftRef.current = starterFallback;
+                // Protect from useLayoutEffect wipe when proFullDraftQualityRetry is true.
+                lastKnownGoodAuthoritativeDraftRef.current = fallbackText;
               } else {
                 setAgreementDocumentText("");
               }

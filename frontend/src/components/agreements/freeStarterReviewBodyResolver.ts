@@ -56,6 +56,23 @@ export function isFreeOnePagerValid(text: string | null | undefined, validation:
   return t.length >= 200 && v === "ok";
 }
 
+/**
+ * When Pro generation fails, use the validated free one-pager as a fallback body.
+ * Returns the free document text if it's valid, otherwise returns empty string.
+ * This prevents empty Pro review pages when we have a valid free document.
+ */
+export function getFreeOnePagerFallbackForProFailure(
+  draft: { free_document_text?: string | null; free_document_validation?: string | null } | null | undefined,
+): string {
+  if (!draft) return "";
+  const text = (draft.free_document_text ?? "").trim();
+  const validation = (draft.free_document_validation ?? "").trim();
+  if (isFreeOnePagerValid(text, validation)) {
+    return text;
+  }
+  return "";
+}
+
 export type ProtectedFactKind = "payment_cadence" | "party_identity" | "term" | "governing_law";
 
 export type ResolveFreeStarterReviewBodyArgs = {
