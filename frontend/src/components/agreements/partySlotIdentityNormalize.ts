@@ -271,6 +271,61 @@ export function isInvalidPartySlotLegalEntity(name: string): boolean {
   return false;
 }
 
+
+const HIRED_COMPANY_SUFFIX_RE =
+  /(?:LLC|L\.L\.C\.|Inc\.?|Incorporated|Corp\.?|Corporation|Ltd\.?|Limited|Company|LLP|PLLC)\.?$/i;
+
+const HIRED_COMPANY_CAPTURE =
+  "([A-Z][A-Za-z0-9&'.-]+(?:\\s+[A-Z][A-Za-z0-9&'.-]+){0,4}\\s+(?:LLC|L\\.L\\.C\\.|Inc\\.?|Corp\\.?|Corporation|Ltd\\.?|Limited|Company|LLP|PLLC))";
+
+const NAMED_PERSON_CAPTURE = "([A-Z][a-z]{2,}(?:\\s+[A-Z][a-z]{2,})?)";
+
+export type HirerVersusHiredCompanySlots = {
+  clientName: string;
+  providerName: string;
+};
+
+/**
+ * "I/name hire COMPANY" — keep the named hirer and the hired company on opposite
+ * slots. Entity-pool extraction otherwise promotes COMPANY and its short form
+ * (Pine Street Media LLC / Pine Street Media) as Client and Service Provider.
+ */
+export function resolveHirerVersusHiredCompanySlots(
+  intakeContext?: string | null,
+): HirerVersusHiredCompanySlots | null {
+  const intake = String(intakeContext || "").replace(/\s+/g, " ").trim();
+  if (!intake || !/\b(?:hir(?:e|ing|ed)|I(?:'m|\s+am)\s+hiring)\b/i.test(intake)) return null;
+
+  const iAmName = intake.match(
+    new RegExp(`\\bI(?:\\s+am|'m)\\s+${NAMED_PERSON_CAPTURE}\\s+hiring\\s+${HIRED_COMPANY_CAPTURE}`, "i"),
+  );
+  const namedHiring = intake.match(
+    new RegExp(`\\b${NAMED_PERSON_CAPTURE}\\s+(?:is\\s+)?hiring\\s+${HIRED_COMPANY_CAPTURE}`),
+  );
+  const imHiring = intake.match(new RegExp(`\\bI(?:'m|\\s+am)\\s+hiring\\s+${HIRED_COMPANY_CAPTURE}`, "i"));
+
+  let clientName = "";
+  let providerName = "";
+  if (iAmName?.[1] && iAmName?.[2]) {
+    clientName = normalizeAgreementPartyName(iAmName[1]);
+    providerName = normalizeAgreementPartyName(iAmName[2]);
+  } else if (namedHiring?.[1] && namedHiring?.[2]) {
+    clientName = normalizeAgreementPartyName(namedHiring[1]);
+    providerName = normalizeAgreementPartyName(namedHiring[2]);
+  } else if (imHiring?.[1]) {
+    clientName = "Client";
+    providerName = normalizeAgreementPartyName(imHiring[1]);
+  } else {
+    return null;
+  }
+
+  if (!clientName || !providerName || partyLegalNamesMatch(clientName, providerName)) return null;
+  if (!HIRED_COMPANY_SUFFIX_RE.test(providerName)) return null;
+  if (!/^client$/i.test(clientName) && !isBetweenClausePartyCandidate(clientName)) return null;
+  if (HIRED_COMPANY_SUFFIX_RE.test(clientName)) return null;
+  return { clientName, providerName };
+}
+
 export function resolveAuthoritativeIntakePartyNames(intakeContext?: string | null): string[] {
   const intake = String(intakeContext || "").trim();
   if (!intake) return [];
@@ -307,6 +362,8 @@ export function resolveAuthoritativeIntakePartyNames(intakeContext?: string | nu
   if (numbered.length >= 2 && numbered.length >= entityPool.length) return numbered;
   if (fromBetween.length >= 2 && fromBetween.length >= lineSeparated.length) return fromBetween;
   if (lineSeparated.length >= 2) return lineSeparated;
+  const hireSlots = resolveHirerVersusHiredCompanySlots(intake);
+  if (hireSlots) return [hireSlots.clientName, hireSlots.providerName];
   if (entityPool.length >= 2) return orderPartyNamesByIntakeAppearance(entityPool, intake);
   if (labeled.length >= 2) return labeled;
   const quoted = quotedRolePartyLegalEntities(intake)
@@ -377,6 +434,21 @@ export function repairDraftPartiesFromIntakeAuthority<T extends DraftPartyRowLik
   if (!parties.length) return [];
   const intake = String(intakeContext || "").trim();
   if (!intake) return [...parties];
+
+  const hireSlots = resolveHirerVersusHiredCompanySlots(intake);
+  if (hireSlots) {
+    const hireNames = [hireSlots.clientName, hireSlots.providerName];
+    const authority = resolveStarterTwoPartyCommercialAuthority(intake, hireNames);
+    if (authority) {
+      return authority.parties.map((slot) => {
+        const prev =
+          parties.find((p) => partyLegalNamesMatch(p.name, slot.name)) ??
+          parties[hireNames.findIndex((n) => partyLegalNamesMatch(n, slot.name))] ??
+          parties[0];
+        return { ...prev, name: slot.name, role: slot.role } as T;
+      });
+    }
+  }
 
   const intakeNames = resolveAuthoritativeIntakePartyNames(intake).filter(isAuthoritativeLegalEntityName);
   if (intakeNames.length < 2) return [...parties];

@@ -7,6 +7,7 @@ import {
   intakeHasFullLegalEntityParties,
   intakeSpecifiesSimpleFixedFee,
   repairCanonicalPartyIdentityInCorpus,
+  repairFullAgreementPartyIdentity,
   replaceTruncatedPartyRefsWithRoleLabels,
   resolveCanonicalPartyIdentitiesFromSources,
   resolveCanonicalPartyIdentitiesFromIntake,
@@ -250,5 +251,43 @@ describe("canonicalPartyIdentityResolver", () => {
     expect(text).not.toMatch(/Red Service Provider Logistics/i);
     expect(text).not.toMatch(/Service Provider Logistics/i);
     expect(text).toContain("Red Mesa Logistics");
+  });
+});
+
+describe("hirer versus hired company preamble slots", () => {
+  const dump = "Jordan Hale hiring Pine Street Media LLC to run ads for The Daily Grind";
+
+  it("canonical records are Jordan Hale Client vs Pine Street Media LLC Service Provider", () => {
+    const records = resolveCanonicalPartyIdentitiesFromSources({ rawIntake: dump });
+    expect(records).toHaveLength(2);
+    expect(records[0]?.fullLegalName).toBe("Jordan Hale");
+    expect(records[0]?.roleLabel).toMatch(/client/i);
+    expect(records[1]?.fullLegalName).toBe("Pine Street Media LLC");
+    expect(records[1]?.roleLabel).toMatch(/service provider/i);
+    expect(records.filter((r) => /pine street/i.test(r.fullLegalName))).toHaveLength(1);
+  });
+
+  it("rewrites a company-vs-company painted preamble to hirer vs company", () => {
+    const painted = [
+      "SERVICES AGREEMENT",
+      "",
+      'This Services Agreement (the "Agreement") is entered into by and between Pine Street Media LLC ("Client") and Pine Street Media ("Service Provider").',
+      "",
+      "1. Scope. Pine Street Media will run ads for The Daily Grind.",
+    ].join("\n");
+    const { text } = repairFullAgreementPartyIdentity({
+      text: painted,
+      intakeRaw: dump,
+    });
+    const opening = definedOpeningLine(
+      resolveCanonicalPartyIdentitiesFromSources({ rawIntake: dump })[0]!,
+      resolveCanonicalPartyIdentitiesFromSources({ rawIntake: dump })[1]!,
+    );
+    expect(text).toContain("Jordan Hale");
+    expect(text).toMatch(/Pine Street Media LLC/);
+    expect(text).not.toMatch(/Pine Street Media LLC\s*\(["“']Client["”']\)\s+and\s+Pine Street Media\s*\(["“']Service Provider["”']\)/);
+    expect(opening).toMatch(/Jordan Hale/);
+    expect(opening).toMatch(/Pine Street Media LLC/);
+    expect(opening).not.toMatch(/Pine Street Media LLC[\s\S]+Pine Street Media \(/);
   });
 });

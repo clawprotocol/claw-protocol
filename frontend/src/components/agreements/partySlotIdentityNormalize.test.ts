@@ -6,8 +6,10 @@ import {
   isInvalidPartySlotLegalEntity,
   isStandaloneLegalEntitySuffix,
   normalizeAgreementPartyName,
+  repairDraftPartiesFromIntakeAuthority,
   resolveAuthoritativeIntakePartyNames,
   resolveDeclaredExplicitPartyCount,
+  resolveHirerVersusHiredCompanySlots,
   splitCommaSeparatedPartyNames,
 } from "./partySlotIdentityNormalize";
 
@@ -129,5 +131,65 @@ describe("partySlotIdentityNormalize", () => {
     expect(resolveDeclaredExplicitPartyCount("Need a four-party brand license")).toBe(4);
     expect(resolveDeclaredExplicitPartyCount("Need a 4-party joint venture")).toBe(4);
     expect(resolveDeclaredExplicitPartyCount("Consulting agreement between Acme LLC and Beta Corp.")).toBeNull();
+  });
+});
+
+const JORDAN_HIRE_DUMP =
+  "Jordan Hale hiring Pine Street Media LLC to run ads for The Daily Grind";
+
+describe("hirer versus hired company party slots", () => {
+  it("Jordan Hale hiring Pine Street keeps hirer and company on opposite slots", () => {
+    const slots = resolveHirerVersusHiredCompanySlots(JORDAN_HIRE_DUMP);
+    expect(slots).toEqual({
+      clientName: "Jordan Hale",
+      providerName: "Pine Street Media LLC",
+    });
+    expect(resolveAuthoritativeIntakePartyNames(JORDAN_HIRE_DUMP)).toEqual([
+      "Jordan Hale",
+      "Pine Street Media LLC",
+    ]);
+  });
+
+  it("does not assign both slots to Pine Street Media variants", () => {
+    const names = resolveAuthoritativeIntakePartyNames(JORDAN_HIRE_DUMP);
+    expect(names.filter((n) => /pine street/i.test(n))).toHaveLength(1);
+    expect(names.some((n) => /jordan hale/i.test(n))).toBe(true);
+    expect(names.some((n) => /daily grind/i.test(n))).toBe(false);
+  });
+
+  it("repairs a collapsed company-vs-company draft back to hirer vs company", () => {
+    const repaired = repairDraftPartiesFromIntakeAuthority(
+      [
+        { name: "Pine Street Media LLC", role: "Client" },
+        { name: "Pine Street Media", role: "Service Provider" },
+      ],
+      JORDAN_HIRE_DUMP,
+    );
+    expect(repaired).toHaveLength(2);
+    expect(repaired[0]?.name).toBe("Jordan Hale");
+    expect(repaired[0]?.role).toMatch(/client/i);
+    expect(repaired[1]?.name).toBe("Pine Street Media LLC");
+    expect(repaired[1]?.role).toMatch(/service provider/i);
+  });
+
+  it("first-person hiring of a company keeps Client opposite the company", () => {
+    const dump = "I'm hiring Pine Street Media LLC to run ads";
+    const slots = resolveHirerVersusHiredCompanySlots(dump);
+    expect(slots).toEqual({
+      clientName: "Client",
+      providerName: "Pine Street Media LLC",
+    });
+  });
+
+  it("Alex Rivera / PixelForge between-clause slots stay person vs company", () => {
+    const intake =
+      "I need a simple services agreement between me (Alex Rivera, freelance product designer) " +
+      "and a small startup called PixelForge Labs. I'm going to design their new mobile app UI " +
+      "for the next 6 weeks. Flat fee of $4,500.";
+    expect(resolveHirerVersusHiredCompanySlots(intake)).toBeNull();
+    expect(resolveAuthoritativeIntakePartyNames(intake)).toEqual([
+      "Alex Rivera",
+      "PixelForge Labs",
+    ]);
   });
 });
