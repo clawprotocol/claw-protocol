@@ -84,7 +84,7 @@ function markPremiumGenerationWhenAuthoritative(
 export async function ensurePremiumCompletion(input: PremiumCompletionInput): Promise<PremiumCompletionResult> {
   const reviewSessionId = input.agreementGenerationId ?? getOrInitSessionAgreementGenerationId();
   const snap = readPremiumCompletionSnapshot();
-  if (snap && snapshotMatchesCurrentRequest(snap, input)) {
+  if (snap && snapshotMatchesCurrentRequest(snap, input) && !input.postGenerateTenetRecall) {
     if (import.meta.env.MODE !== "test") {
       // eslint-disable-next-line no-console
       console.info("[CLAW] premium hydration start", { source: "session_snapshot" });

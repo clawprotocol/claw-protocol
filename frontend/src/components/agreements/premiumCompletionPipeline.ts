@@ -208,6 +208,7 @@ import {
 import { markPaidProPipelineValidationPassed } from "./paidProPostAcceptanceValidatorCache";
 import { assessPaidProSubstantiveServerDraftCorpus } from "./paidProSubstantiveCorpusAssessment";
 import type { PremiumNetworkCallReason } from "./paidProPremiumGenerationCallAudit";
+import { evaluatePostGenerateTenetRecall } from "./postGenerateTenetRecall";
 import { logPremiumSessionConsistency } from "./premiumSessionDiagnostics";
 import { logPremiumGenerationRetryableFailure } from "./premiumGenerationRetryable";
 import { resolvePremiumIntentPreflightPolicy, shouldEarlyNeedsDetailsForTierB } from "./premiumIntentPreflightPolicy";
@@ -307,6 +308,11 @@ export type PremiumCompletionInput = {
   parseDraft: (raw: string) => Promise<ParsedDraftShape>;
   /** One-field user completion from the pre-finalization “Finish your agreement” step; sent to premium full-draft. */
   userGapAnswers?: string | null;
+  /**
+   * Second paid full-draft after a post-paint missing-tenet ask.
+   * Skips snapshot short-circuit and session freeze so the new body can paint.
+   */
+  postGenerateTenetRecall?: boolean;
   /** True if the user skipped the gap step and accepted neutral defaults for open items. */
   gapResolverSkippedWithDefaults?: boolean;
   agreementGenerationId?: string;
@@ -394,6 +400,8 @@ export type PremiumCompletionResult = {
   premiumFullDraftCorsBlocked?: boolean;
   /** Client classification after output-quality pipeline (authoritative vs advisory clarifications). */
   premiumCompletionOutcome?: PremiumCompletionOutcome | null;
+  /** After first painted body: ask only tenets still missing. Absent on early/error returns. */
+  postGenerateTenetRecall?: import("./postGenerateTenetRecall").PostGenerateTenetRecallDecision;
   /** Non-authoritative clarifications surfaced outside agreement body. */
   recommendedClarifications?: RecommendedClarifications | null;
   /** True only for malformed/empty/corrupt bodies — not material Ask LawDog items alone. */
@@ -1361,6 +1369,9 @@ async function runPremiumCompletionInner(
     premiumRequestIntakeFingerprint:
       input.premiumRequestIntakeFingerprint ?? traceCtx.intakeFingerprintEarly,
   });
+  if (input.postGenerateTenetRecall) {
+    clearAcceptedServerFullDraftLatchAndSessionFrozenBodies();
+  }
   const attemptSequence = attemptContext.attemptSequence;
   const rawIntake = input.intakeText.trim();
   logPremiumSessionConsistency({
@@ -5946,6 +5957,11 @@ async function runPremiumCompletionInner(
     })();
   }
 
+  const postGenerateTenetRecall = evaluatePostGenerateTenetRecall({
+    paintedBody: pipelineWinningBody || finalFallback,
+    alreadyAsked: Boolean(input.postGenerateTenetRecall),
+  });
+
   return {
     premiumDraft: outMerged,
     premiumParties,
@@ -5963,6 +5979,7 @@ async function runPremiumCompletionInner(
     serverGenerationDegraded,
     tierADiagnostic: tierADiag,
     premiumCompletionOutcome,
+    postGenerateTenetRecall,
     recommendedClarifications,
     structuralCatastrophic,
     materialMissingItems: materialMissingItems.length ? materialMissingItems : undefined,

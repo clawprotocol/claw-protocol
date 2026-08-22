@@ -1159,6 +1159,7 @@ import {
   getRequiredClarificationTopics,
   buildLocalMissingTenetQuestions,
 } from "./postCheckoutMissingFactsGate";
+import { evaluatePostGenerateTenetRecall } from "./postGenerateTenetRecall";
 import {
   effectivePremiumRefineApplyLogRevisionIntent,
   pickAuthoritativeProCorpusForRefine,
@@ -3857,11 +3858,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           userGapAnswers: string | null;
           gapResolverSkippedWithDefaults: boolean;
           premiumGenerationCallReason?: PremiumGenerationCallReason;
+          postGenerateTenetRecall?: boolean;
         },
       ) => Promise<void>)
     | null
   >(null);
   const premiumLastGapAnswersRef = useRef<string>("");
+  const premiumPostGenerateTenetAskedRef = useRef(false);
+  const premiumPostGenerateGapsActiveRef = useRef(false);
   const premiumGapBaseIntakeRef = useRef<string>("");
   const premiumModalEscapeHandlerRef = useRef<null | (() => void)>(null);
   const premiumModalPrevPhaseRef = useRef<PremiumPostCheckoutPhase>(null);
@@ -11034,10 +11038,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           userGapAnswers: string | null;
           gapResolverSkippedWithDefaults: boolean;
           premiumGenerationCallReason?: PremiumGenerationCallReason;
+          postGenerateTenetRecall?: boolean;
         }): Promise<void> => {
           if (!runIsCurrent()) return;
           premiumProRunInFlightRef.current = true;
           try {
+          let holdModelPassForPostGenerateGaps = false;
           const requestResolved = resolvePremiumRequestIntakeText({
             mergedOrRetryIntake: args.intakeText,
             structuredDraft: prior,
@@ -11055,6 +11061,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           }
           const intakeFpGuard = shortIntakeFingerprint(intakeForPipeline);
           if (
+            !args.postGenerateTenetRecall &&
             shouldSkipPremiumEnsureBecauseSnapshotAlreadyAuthoritative({
               intakeFingerprint: intakeFpGuard,
               snapshot: readPremiumCompletionSnapshot(),
@@ -11224,13 +11231,17 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                         parseDraft(raw, { aiModelClass: "premium", checkoutCompletion: true }),
                       userGapAnswers: args.userGapAnswers,
                       gapResolverSkippedWithDefaults: args.gapResolverSkippedWithDefaults,
+                      postGenerateTenetRecall: Boolean(args.postGenerateTenetRecall),
                       agreementGenerationId: sessionGenForPass,
                       agreementId:
                         (reviewAgreementIdRef.current || readCreateReviewAgreementResumeId() || "").trim() || null,
                       premiumRequestIntakeFingerprint: sessionFpForPass,
                       isPremiumRequestStillValid: () => getOrInitSessionAgreementGenerationId() === sessionGenForPass,
                       premiumGenerationCallReason:
-                        args.premiumGenerationCallReason ?? "checkout_completion",
+                        args.premiumGenerationCallReason ??
+                        (args.postGenerateTenetRecall
+                          ? "post_generate_tenet_recall"
+                          : "checkout_completion"),
                       deferWaterfallFinish: true,
                     }),
                     premiumCompletionAttemptTimeoutMs,
@@ -11500,6 +11511,34 @@ const AgreementBuilderIntake: React.FC<Props> = ({
               intakeChosenSource: requestResolved.resolved.chosenSource,
             });
             await applySuccess(result);
+            const paintedBody = (
+              result.winningPremiumBodyText ||
+              agreementDocumentTextRef.current ||
+              ""
+            ).trim();
+            const postGenerateRecall = evaluatePostGenerateTenetRecall({
+              paintedBody,
+              alreadyAsked:
+                Boolean(args.postGenerateTenetRecall) ||
+                premiumPostGenerateTenetAskedRef.current,
+            });
+            if (postGenerateRecall.action === "await_gaps") {
+              holdModelPassForPostGenerateGaps = true;
+              premiumPostGenerateTenetAskedRef.current = true;
+              premiumPostGenerateGapsActiveRef.current = true;
+              setPremiumGapQuestions(postGenerateRecall.questions);
+              setPremiumGapOneField("");
+              setPremiumPostCheckoutPhase("awaiting_gaps");
+              premiumPostCheckoutPhaseRef.current = "awaiting_gaps";
+              setPremiumPipelineUserMessage(null);
+              if (import.meta.env.DEV) {
+                // eslint-disable-next-line no-console
+                console.info("[post_generate] awaiting_gaps_after_paint", {
+                  questionCount: postGenerateRecall.questions.length,
+                  missingTenets: postGenerateRecall.missingTenets,
+                });
+              }
+            }
           } else {
             if (import.meta.env.DEV) {
               // eslint-disable-next-line no-console
@@ -11519,7 +11558,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
               // eslint-disable-next-line no-console
               console.info("[CLAW] premium hydration failed", { reason: "model_path_exhausted" });
             }
-            if (hasPaidPremiumCompletionSession()) {
+            if (args.postGenerateTenetRecall) {
+              setPremiumPostCheckoutPhase(null);
+              setPremiumPipelineUserMessage(null);
+              setPremiumGapQuestions([]);
+            } else if (hasPaidPremiumCompletionSession()) {
               console.warn("[premium-flow] premium_rewrite_request_exhausted", {
                 fallback: "paid_checkout_recovery",
                 note: "Premium-full-draft failed after checkout — paid recovery state (no unpaid upsell).",
@@ -11531,6 +11574,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                 "We had a connection issue while finishing your Pro agreement. Your payment was detected. Try again to finish Pro generation.",
               );
               applyFailureFallback(undefined, { paidCheckoutRecovery: true });
+              setPremiumPostCheckoutPhase(null);
             } else {
               console.warn("[premium-flow] premium_rewrite_request_exhausted", {
                 fallback: "party_extract_only",
@@ -11540,19 +11584,26 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                 "We could not run the premium agreement rewrite (model path). Your previous draft is shown — you can edit it, or try again shortly.",
               );
               applyFailureFallback();
+              setPremiumPostCheckoutPhase(null);
             }
-            setPremiumPostCheckoutPhase(null);
           }
           setPremiumPipelineUserMessage(null);
           const retryableResult = result != null && isPremiumRetryablePipelineResult(result);
-          if (!retryableResult && (result != null || !hasPaidPremiumCompletionSession())) {
+          if (
+            !holdModelPassForPostGenerateGaps &&
+            !retryableResult &&
+            (result != null || !hasPaidPremiumCompletionSession())
+          ) {
             runPremiumModelPassRef.current = null;
           }
         } finally {
             premiumProRunInFlightRef.current = false;
             setPremiumNetworkRetryInFlight(false);
             setPremiumNetworkStillReconnecting(false);
-            if (premiumPostCheckoutPhaseRef.current === "processing") {
+            if (
+              !holdModelPassForPostGenerateGaps &&
+              premiumPostCheckoutPhaseRef.current === "processing"
+            ) {
               if (
                 shouldRunModelPassFinallyDismissProcessing({
                   currentPhase: premiumPostCheckoutPhaseRef.current,
@@ -11612,6 +11663,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
         runPremiumModelPassRef.current = runModelPass;
         premiumGapBaseIntakeRef.current = mergedIntake;
+        premiumPostGenerateTenetAskedRef.current = false;
+        premiumPostGenerateGapsActiveRef.current = false;
 
         if (import.meta.env.DEV) {
           // eslint-disable-next-line no-console
@@ -33109,10 +33162,16 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                           });
                         }
                         const base = premiumGapBaseIntakeRef.current;
+                        const postGenerate = premiumPostGenerateGapsActiveRef.current;
+                        premiumPostGenerateGapsActiveRef.current = false;
                         void r({
                           intakeText: base,
                           userGapAnswers: t || null,
                           gapResolverSkippedWithDefaults: false,
+                          premiumGenerationCallReason: postGenerate
+                            ? "post_generate_tenet_recall"
+                            : undefined,
+                          postGenerateTenetRecall: postGenerate,
                         });
                       }}
                       onUseDefaults={() => {
@@ -33123,6 +33182,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                               reason: "critical_path_already_running",
                             });
                           }
+                          return;
+                        }
+                        if (premiumPostGenerateGapsActiveRef.current) {
+                          premiumPostGenerateGapsActiveRef.current = false;
+                          setPremiumPostCheckoutPhase(null);
+                          setPremiumGapQuestions([]);
+                          setPremiumGapOneField("");
+                          setPremiumPipelineUserMessage(null);
                           return;
                         }
                         const r = runPremiumModelPassRef.current;
@@ -33144,6 +33211,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                         });
                       }}
                       onDismiss={() => {
+                        if (premiumPostGenerateGapsActiveRef.current) {
+                          premiumPostGenerateGapsActiveRef.current = false;
+                          setPremiumPostCheckoutPhase(null);
+                          setPremiumGapQuestions([]);
+                          setPremiumGapOneField("");
+                          setPremiumPipelineUserMessage(null);
+                          return;
+                        }
                         stripPremiumCompletionQueryParam();
                         setHardError(
                           "The post-checkout form was closed before your full agreement was generated. Your draft on screen is unchanged — use “Use defaults” or “Build my agreement” if this step appears again.",

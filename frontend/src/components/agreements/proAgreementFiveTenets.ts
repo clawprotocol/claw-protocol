@@ -437,11 +437,28 @@ function looksLikeNda(intakeText: string, draft?: FiveTenetDraftInput | null): b
   return /\b(?:nda|non-?disclosure|confidentiality)\b/i.test(blob);
 }
 
+const TENET_HINT_OUTLINE_RE =
+  /\b(?:article|section)\s+\d|\b(?:whereas|now therefore|in witness whereof)\b|\bdraft\s+outline\b/i;
+
+/** Reject outline/dump text so gap labels stay one clean sentence (walk8 Q2). */
+export function isPollutedTenetQuestionHint(text: string): boolean {
+  const t = (text || "").trim();
+  if (!t) return true;
+  if (/[\n\r]/.test(t)) return true;
+  if (t.length > 90) return true;
+  if (TENET_HINT_OUTLINE_RE.test(t)) return true;
+  if (/(?:^|\s)\d+\.\s+[A-Z][a-z]+/.test(t) && t.length > 40) return true;
+  return false;
+}
+
 function shortPurpose(draft?: FiveTenetDraftInput | null, intakeText = ""): string {
   const purpose = (draft?.purpose || "").trim().replace(/\.+$/, "");
-  if (purpose) return purpose;
+  if (purpose && !isPollutedTenetQuestionHint(purpose)) {
+    return purpose.length > 80 ? `${purpose.slice(0, 77)}…` : purpose;
+  }
   const dump = (intakeText || "").trim().replace(/\.+$/, "");
-  return dump.length > 90 ? `${dump.slice(0, 87)}…` : dump;
+  if (!dump || isPollutedTenetQuestionHint(dump)) return "";
+  return dump.length > 80 ? `${dump.slice(0, 77)}…` : dump;
 }
 
 /**
