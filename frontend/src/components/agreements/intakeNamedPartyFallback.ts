@@ -160,22 +160,126 @@ const CASUAL_NAME_STOP = new Set([
   "draft", "create", "make", "need", "want", "please", "agreement",
   "contract", "deal", "simple", "for", "and",
   "lol", "pizza", "biscuit", "teal", "testing",
+  "provide", "using", "statutory", "proprietary", "parties", "party",
 ]);
 
 const PERSON_NAME_CAPTURE = "([A-Z][a-z]{2,}(?:\\s+[A-Z][a-z]{2,})?)";
 
-/** Verbs a named person will/is doing in a casual dump. */
+/** Verbs a named person/company will/is doing in a casual dump. */
 const CASUAL_DO_VERBS =
-  "paint|design|fix|repair|build|clean|consult|write|create|install|photograph|photo|shoot|film|mow|walk|tutor|coach|edit|deliver|cater|sell|buy|split|share|handle";
+  "paint|design|fix|repair|build|clean|consult|write|create|install|photograph|photo|shoot|film|mow|walk|tutor|coach|edit|deliver|cater|sell|buy|split|share|handle|redo|remodel|renovate|dogsit|dogsitting|babysit|housesit";
 
 const CASUAL_WORK_STEM =
-  "(?:paint(?:ing)?|design(?:ing)?|fix(?:ing)?|repair(?:ing)?|build(?:ing)?|clean(?:ing)?|consult(?:ing)?|writ(?:e|ing)|creat(?:e|ing)|install(?:ing)?|photograph(?:ing)?|photo(?:graphing)?|shoot(?:ing)?|film(?:ing)?|mow(?:ing)?|walk(?:ing)?|tutor(?:ing)?|coach(?:ing)?|edit(?:ing)?|deliver(?:ing)?|cater(?:ing)?|sell(?:ing)?|buy(?:ing)?|split(?:ting)?|shar(?:e|ing)|handl(?:e|ing))";
+  "(?:paint(?:ing)?|design(?:ing)?|fix(?:ing)?|repair(?:ing)?|build(?:ing)?|clean(?:ing)?|consult(?:ing)?|writ(?:e|ing)|creat(?:e|ing)|install(?:ing)?|photograph(?:ing)?|photo(?:graphing)?|shoot(?:ing)?|film(?:ing)?|mow(?:ing)?|walk(?:ing)?|tutor(?:ing)?|coach(?:ing)?|edit(?:ing)?|deliver(?:ing)?|cater(?:ing)?|sell(?:ing)?|buy(?:ing)?|split(?:ting)?|shar(?:e|ing)|handl(?:e|ing)|redo(?:ing)?|remodel(?:ing)?|renovat(?:e|ing)|dogsit(?:ting)?|babysit(?:ting)?|housesit(?:ting)?)";
+
+const CASUAL_WILL_CONNECTOR = "(?:will|is going to|are going to|is|are)";
+
+const COMPANY_CAPTURE =
+  "([A-Z][A-Za-z0-9&'.-]+(?:\\s+[A-Z][A-Za-z0-9&'.-]+){0,4}\\s+(?:LLC|L\\.L\\.C\\.|Inc\\.?|Corp\\.?|Corporation|Ltd\\.?|Limited|Company|LLP|PLLC))";
+
+const CASUAL_CALENDAR_STOP = new Set([
+  "january", "february", "march", "april", "may", "june", "july", "august",
+  "september", "october", "november", "december",
+  "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday",
+]);
 
 function looksLikePersonName(raw: string): boolean {
   const name = (raw || "").trim();
   if (looksLikeMoneyTermOrClausePartyName(name)) return false;
   if (!/^[A-Z][a-z]{2,}(?:\s+[A-Z][a-z]{2,})?$/.test(name)) return false;
-  return !CASUAL_NAME_STOP.has(name.split(/\s+/)[0].toLowerCase());
+  const first = name.split(/\s+/)[0].toLowerCase();
+  if (CASUAL_NAME_STOP.has(first) || CASUAL_CALENDAR_STOP.has(first) || CASUAL_CALENDAR_STOP.has(name.toLowerCase())) {
+    return false;
+  }
+  return true;
+}
+
+function looksLikeCompanyName(raw: string): boolean {
+  return /(?:LLC|L\.L\.C\.|Inc\.?|Corp\.?|Corporation|Ltd\.?|Limited|Company|LLP|PLLC)\s*$/i.test(
+    (raw || "").trim(),
+  );
+}
+
+/** Visitor speaking in first person — Party 1 even when they never name themselves. */
+export function hasFirstPersonVisitor(raw: string): boolean {
+  return /\b(?:I(?:'m|'ve|'d)?|me|my)\b/.test(String(raw || ""));
+}
+
+function addUniqueCasualName(out: string[], seen: Set<string>, raw: string): void {
+  const name = (raw || "").replace(/\s+/g, " ").trim();
+  if (name.length < 2 || name.length > MAX_NAME) return;
+  const key = name.toLowerCase();
+  if (seen.has(key)) return;
+  const overlap = out.findIndex(
+    (existing) => existing.toLowerCase().includes(key) || key.includes(existing.toLowerCase()),
+  );
+  if (overlap >= 0) {
+    if (name.length > out[overlap].length) {
+      seen.delete(out[overlap].toLowerCase());
+      out[overlap] = name;
+      seen.add(key);
+    }
+    return;
+  }
+  seen.add(key);
+  out.push(name);
+}
+
+/** Named person or company counterparties — not months, junk, or money fragments. */
+export function extractCasualNamedCounterparties(raw: string): string[] {
+  const t = String(raw || "");
+  const out: string[] = [];
+  const seen = new Set<string>();
+
+  const companyRe = new RegExp(COMPANY_CAPTURE, "g");
+  for (const match of t.matchAll(companyRe)) {
+    if (match[1]) addUniqueCasualName(out, seen, match[1]);
+  }
+
+  const personRe = new RegExp(`\\b${PERSON_NAME_CAPTURE}\\b`, "g");
+  for (const match of t.matchAll(personRe)) {
+    const name = (match[1] || "").trim();
+    if (!looksLikePersonName(name)) continue;
+    const after = t.slice((match.index ?? 0) + match[0].length);
+    if (/^\s+law\b/i.test(after)) continue;
+    if (out.some((existing) => existing.toLowerCase().includes(name.toLowerCase()))) continue;
+    addUniqueCasualName(out, seen, name);
+  }
+  return out;
+}
+
+function namedHirerAndCompany(
+  person: string,
+  company: string,
+): { name: string; role: string }[] {
+  return [
+    { name: person.trim().slice(0, MAX_NAME), role: "client" },
+    { name: company.trim().replace(/\s+/g, " ").slice(0, MAX_NAME), role: "service_provider" },
+  ];
+}
+
+/**
+ * Visitor + one named other person/company is a free two-party deal.
+ * Person + company (Jordan Hale hiring Pine Street Media LLC) is two parties.
+ * Three-plus named counterparties stay out so Pro can take the multi-party path.
+ */
+function inferVisitorPlusNamedTwoParty(raw: string): { name: string; role: string }[] | null {
+  const named = extractCasualNamedCounterparties(raw);
+  if (named.length === 0 || named.length >= 3) return null;
+  const firstPerson = hasFirstPersonVisitor(raw);
+
+  // I / my / me + exactly one named person or company.
+  if (named.length === 1) {
+    return firstPerson ? clientAndNamedPerson(named[0]) : null;
+  }
+
+  // Person + company (Jordan Hale hiring Pine Street Media LLC). Do not invent
+  // a two-party deal from two random title-case words ("Provide" + "Texas").
+  const company = named.find(looksLikeCompanyName);
+  if (!company) return null;
+  const person = named.find((n) => n !== company);
+  if (person) return namedHirerAndCompany(person, company);
+  return firstPerson ? clientAndNamedPerson(company) : null;
 }
 
 function clientAndNamedPerson(name: string): { name: string; role: string }[] {
@@ -215,7 +319,7 @@ export function inferCasualScopeFromDump(raw: string): string {
     /\b(?:need|want)\s+(?:a|an)\s+(.{3,40}?)\s+(?:deal|agreement|contract|job)\b/i,
   );
   if (needDeal?.[1]) return needDeal[1].trim();
-  const willWork = t.match(new RegExp(`\\b(?:will|is)\\s+(${CASUAL_WORK_STEM}[^.\\n]{0,60})`, "i"));
+  const willWork = t.match(new RegExp(`\\b(?:will|is going to|are going to|is|are)\\s+(${CASUAL_WORK_STEM}[^.\\n]{0,60})`, "i"));
   if (willWork?.[1]) return cleanScope(willWork[1]);
   const forWork = t.match(/\bfor\s+(?:some\s+)?(.{3,40}?\b(?:work|services?|painting|consulting|design))\b/i);
   if (forWork?.[1]) return forWork[1].trim();
@@ -233,7 +337,7 @@ export function inferCasualScopeFromDump(raw: string): string {
   if (labeledScope?.[1]) return cleanScope(labeledScope[1]);
   if (hasCasualDealShape(t)) {
     const keyword = t.match(
-      /\b(photograph(?:ing|y)?(?:\s+our\s+wedding)?|wedding|lawn(?:\s+(?:care|guy))?|walk(?:ing)?(?:\s+the)?\s+dog|etsy(?:\s+shop)?|shopify(?:\s+theme)?|app\s+idea|bike)\b/i,
+      /\b(photograph(?:ing|y)?(?:\s+our\s+wedding)?|wedding|lawn(?:\s+(?:care|guy))?|walk(?:ing)?(?:\s+the)?\s+dog|etsy(?:\s+shop)?|shopify(?:\s+theme)?|app\s+idea|bike|kitchen cabinets|dogsit(?:ting)?)\b/i,
     );
     if (keyword?.[1]) return cleanScope(keyword[1]);
   }
@@ -262,9 +366,28 @@ export function inferCasualTwoPartyFromDump(raw: string): { name: string; role: 
   if (withName?.[1] && looksLikePersonName(withName[1])) return clientAndNamedPerson(withName[1]);
 
   const nameWill = t.match(
-    new RegExp(`\\b${PERSON_NAME_CAPTURE}\\s+(?:will|is)\\s+(?:${CASUAL_DO_VERBS})`),
+    new RegExp(`\\b${PERSON_NAME_CAPTURE}\\s+${CASUAL_WILL_CONNECTOR}\\s+(?:${CASUAL_DO_VERBS})`),
   );
   if (nameWill?.[1] && looksLikePersonName(nameWill[1])) return clientAndNamedPerson(nameWill[1]);
+
+  const neighbor = t.match(
+    new RegExp(`\\b(?:my|our)\\s+neighbor\\s+${PERSON_NAME_CAPTURE}\\b`),
+  );
+  if (neighbor?.[1] && looksLikePersonName(neighbor[1])) return clientAndNamedPerson(neighbor[1]);
+
+  const nameHiringCompany = t.match(
+    new RegExp(`\\b${PERSON_NAME_CAPTURE}\\s+(?:is\\s+)?hiring\\s+${COMPANY_CAPTURE}`),
+  );
+  if (nameHiringCompany?.[1] && nameHiringCompany?.[2] && looksLikePersonName(nameHiringCompany[1])) {
+    return namedHirerAndCompany(nameHiringCompany[1], nameHiringCompany[2]);
+  }
+
+  const imHiring = t.match(
+    new RegExp(`\\bI(?:'m|\\s+am)\\s+hiring\\s+(?:${COMPANY_CAPTURE}|${PERSON_NAME_CAPTURE})`),
+  );
+  if (imHiring?.[1] && (looksLikeCompanyName(imHiring[1]) || looksLikePersonName(imHiring[1]))) {
+    return clientAndNamedPerson(imHiring[1].replace(/\s+/g, " "));
+  }
 
   const meAnd = t.match(
     new RegExp(`\\b(?:(?:me|I)\\s+and|between\\s+me\\s+and)\\s+${PERSON_NAME_CAPTURE}\\b`),
@@ -291,9 +414,13 @@ export function inferCasualTwoPartyFromDump(raw: string): { name: string; role: 
   if (hireImperative?.[1] && looksLikePersonName(hireImperative[1])) return clientAndNamedPerson(hireImperative[1]);
 
   const iAm = t.match(new RegExp(`\\bI(?:\\s+am|'m)\\s+${PERSON_NAME_CAPTURE}\\b`));
+  const hiringEntity = t.match(new RegExp(`\\bhiring\\s+${COMPANY_CAPTURE}`));
   const forEntity = t.match(
     /\bfor\s+([A-Z][A-Za-z0-9&'\-\s]{1,80}?(?:LLC|L\.L\.C\.|Inc\.?|Corp\.?|Corporation|Ltd\.?|Limited|Company|LLP|PLLC))\b/,
   );
+  if (iAm?.[1] && looksLikePersonName(iAm[1]) && hiringEntity?.[1]) {
+    return namedHirerAndCompany(iAm[1], hiringEntity[1]);
+  }
   if (iAm?.[1] && looksLikePersonName(iAm[1]) && forEntity?.[1]) {
     return [
       { name: iAm[1].trim().slice(0, MAX_NAME), role: "party" },
@@ -307,7 +434,7 @@ export function inferCasualTwoPartyFromDump(raw: string): { name: string; role: 
     ];
   }
 
-  return null;
+  return inferVisitorPlusNamedTwoParty(t);
 }
 
 

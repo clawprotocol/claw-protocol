@@ -11,6 +11,8 @@ import {
   CREATE_FLOW_PREPARATION_FAILSAFE_MESSAGE,
   detectRevenueShareLanguage,
   isThreePlusLegalPartyGate,
+  formatStarterMultiPartyGatePartyLines,
+  NOT_SIMPLE_TWO_PARTY_PRO_GATE_TITLE,
   resolveStarterMultiPartyProGatePresentation,
   shouldFailSafeEmptyAuthorityPreparation,
 } from "./starterMultiPartyProGate";
@@ -347,5 +349,50 @@ describe("casual dump starter complexity gate", () => {
       ),
     ).toBe(true);
     expect(gate.reasons).not.toContain("not_simple_two_party_deal");
+  });
+});
+
+describe("visitor plus one named party free gate", () => {
+  const FREE: Array<[string, string[]]> = [
+    [
+      "Red Mesa will redo my kitchen cabinets next month. We haven't talked money.",
+      ["Red Mesa"],
+    ],
+    [
+      "Jordan Hale hiring Pine Street Media LLC",
+      ["Jordan Hale", "Pine Street Media LLC"],
+    ],
+    [
+      "I'm Jordan Hale hiring Pine Street Media LLC",
+      ["Jordan Hale", "Pine Street Media LLC"],
+    ],
+    ["my neighbor Priya is going to dogsit", ["Priya"]],
+    ["Alex will mow my lawn", ["Alex"]],
+  ];
+
+  it.each(FREE)("does not gate visitor + named counterparty: %s", (dump, names) => {
+    const gate = assessStarterComplexityGate(dump);
+    expect(gate.required).toBe(false);
+    expect(gate.reasons).not.toContain("not_simple_two_party_deal");
+    expect(gate.reasons).not.toContain("three_plus_legal_parties");
+    for (const name of names) {
+      expect(gate.parties.join(" ")).toMatch(new RegExp(name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "i"));
+    }
+    const lines = formatStarterMultiPartyGatePartyLines(gate.parties);
+    expect(lines.length).toBeGreaterThan(0);
+    expect(lines.join(" ")).not.toMatch(/Multiple parties detected/i);
+    expect(resolveStarterMultiPartyProGatePresentation(gate).title).not.toBe(
+      NOT_SIMPLE_TWO_PARTY_PRO_GATE_TITLE,
+    );
+  });
+
+  it("junk control still gates as not a free two-party deal", () => {
+    const dump = "lol just testing this, pizza is great";
+    const gate = assessStarterComplexityGate(dump);
+    expect(gate.required).toBe(true);
+    expect(gate.reasons).toContain("not_simple_two_party_deal");
+    expect(resolveStarterMultiPartyProGatePresentation(gate).title).toBe(
+      NOT_SIMPLE_TWO_PARTY_PRO_GATE_TITLE,
+    );
   });
 });

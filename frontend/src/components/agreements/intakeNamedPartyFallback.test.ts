@@ -602,3 +602,53 @@ describe("free starter dump title, purpose, and preview footer", () => {
     expect(preview).not.toMatch(/will be executed electronically/i);
   });
 });
+
+describe("visitor plus one named party is a free two-party deal", () => {
+  it("Red Mesa cabinets dump keeps visitor + Red Mesa", () => {
+    const dump = "Red Mesa will redo my kitchen cabinets next month. We haven't talked money.";
+    const out = inferCasualTwoPartyFromDump(dump);
+    expect(out).not.toBeNull();
+    expect(out!.map((p) => p.name)).toEqual(expect.arrayContaining(["Client", "Red Mesa"]));
+    expect(out!.some((p) => /party\s*[ab]/i.test(p.name))).toBe(false);
+    expect(inferCasualScopeFromDump(dump)).toMatch(/kitchen cabinets|redo/i);
+  });
+
+  it("Jordan Hale hiring Pine Street keeps both names and does not drop Jordan", () => {
+    const dump = "Jordan Hale hiring Pine Street Media LLC";
+    const out = inferCasualTwoPartyFromDump(dump);
+    expect(out).not.toBeNull();
+    expect(out!.map((p) => p.name)).toEqual(
+      expect.arrayContaining(["Jordan Hale", "Pine Street Media LLC"]),
+    );
+    expect(out!.some((p) => /jordan/i.test(p.name))).toBe(true);
+    expect(out!.filter((p) => /pine street/i.test(p.name))).toHaveLength(1);
+  });
+
+  it("first-person hiring of Pine Street still counts the visitor", () => {
+    const dump = "I'm Jordan Hale hiring Pine Street Media LLC";
+    const out = inferCasualTwoPartyFromDump(dump);
+    expect(out).not.toBeNull();
+    expect(out!.map((p) => p.name)).toEqual(
+      expect.arrayContaining(["Jordan Hale", "Pine Street Media LLC"]),
+    );
+  });
+
+  it("neighbor Priya dogsitting dump keeps visitor + Priya", () => {
+    const dump = "my neighbor Priya is going to dogsit";
+    const out = inferCasualTwoPartyFromDump(dump);
+    expect(out).not.toBeNull();
+    expect(out!.map((p) => p.name)).toEqual(expect.arrayContaining(["Client", "Priya"]));
+    expect(out!.some((p) => /priya/i.test(p.name))).toBe(true);
+    expect(inferCasualScopeFromDump(dump)).toMatch(/dogsit/i);
+  });
+
+  it("Alex lawn dump still grounds Client + Alex", () => {
+    const dump = "Alex will mow my lawn";
+    const out = inferCasualTwoPartyFromDump(dump);
+    expect(out!.map((p) => p.name)).toEqual(expect.arrayContaining(["Client", "Alex"]));
+  });
+
+  it("junk still has no named two-party deal", () => {
+    expect(inferCasualTwoPartyFromDump("lol just testing this, pizza is great")).toBeNull();
+  });
+});
