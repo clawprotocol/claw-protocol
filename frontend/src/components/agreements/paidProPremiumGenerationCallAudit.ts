@@ -9,6 +9,7 @@ export type PremiumGenerationCallReason =
   | "checkout_completion"
   | "entitled_rewrite"
   | "explicit_retry_pro_draft"
+  | "post_generate_tenet_recall"
   | "hydration_snapshot_miss"
   | "unknown";
 
@@ -18,6 +19,7 @@ export type PremiumNetworkCallReason =
   | "similarity_regeneration"
   | "dev_context_regen"
   | "founder_title_retry"
+  | "post_generate_tenet_recall"
   | "explicit_retry_pro_draft"
   | "unknown";
 
@@ -107,6 +109,7 @@ export function assertTest225PremiumNetworkCallBudget(): void {
       "degraded_structural_retry",
       "similarity_regeneration",
       "dev_context_regen",
+      "post_generate_tenet_recall",
       "founder_title_retry",
       "explicit_retry_pro_draft",
     ];
