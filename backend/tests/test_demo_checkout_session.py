@@ -340,3 +340,46 @@ Fees, deposits, and recurring or milestone payments are as set forth here or in 
         
         long_purpose = "A" * 500
         assert review_first_paid_pro_persist_bypass(request=mock_request, purpose=long_purpose) is False
+
+
+class TestDemoCheckoutOwnerMutationGuards:
+    """Signer snapshot persist must not demand a JWT after simulated POS."""
+
+    def test_demo_checkout_skips_jwt_for_snapshot_persist(self, isolated_stores, monkeypatch):
+        from backend.routers.agreements_v2_api import _owner_mutation_guards
+
+        def _boom(request):
+            raise AssertionError("require_commercial_owner_principal should not run for demo POS")
+
+        monkeypatch.setattr(
+            "backend.security.commercial_auth._is_demo_checkout_session",
+            lambda request: True,
+        )
+        monkeypatch.setattr(
+            "backend.security.commercial_auth.require_commercial_owner_principal",
+            _boom,
+        )
+        monkeypatch.setattr(
+            "backend.routers.agreements_v2_api.resolve_subject_from_request",
+            lambda request: "org:anon-test-123",
+        )
+        monkeypatch.setattr(
+            "backend.usage_economics.policy.assert_guest_workflow_denied",
+            lambda **kwargs: None,
+        )
+        monkeypatch.setattr(
+            "backend.routers.agreements_v2_api.assert_registered_owner_matches",
+            lambda request, agreement_id: "org:anon-test-123",
+        )
+        monkeypatch.setattr(
+            "backend.routers.agreements_v2_api.assert_free_incomplete_draft_not_expired",
+            lambda agreement_id, surface: None,
+        )
+
+        class _Req:
+            headers = {
+                "X-Claw-Org-Id": "anon-test-123",
+                "X-Claw-Demo-Checkout-Receipt": "rcpt_lakjsd12_a8fu3",
+            }
+
+        _owner_mutation_guards(_Req(), "agr_demo_persist", surface="canonical_review_snapshot_create")

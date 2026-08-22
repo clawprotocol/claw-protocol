@@ -685,7 +685,7 @@ import {
 } from "./paidProAcceptedPipelineReviewCorpus";
 import { PaidProForcedFirstReviewChrome } from "./paidProForcedFirstReviewChrome";
 import { PaidProReviewRenderInvariantProbe } from "./PaidProReviewRenderInvariantProbe";
-import { hasDemoSessionUser } from "../../launch/guestCheckoutAuthority";
+import { demoSessionMayContinueWithoutServerSnapshot, hasDemoSessionUser } from "../../launch/guestCheckoutAuthority";
 import {
   logPaidProReviewBranch,
   resolvePaidProReviewBranchPath,
@@ -30693,10 +30693,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       generationSessionId: signerFinalizeReviewSessionId,
     });
     if (!prepared.ok) {
-      rollbackFinalizeFailure(
-        `Could not persist the finalized agreement snapshot (${prepared.code}). Stay in signer setup and try again.`,
-      );
-      return false;
+      if (!demoSessionMayContinueWithoutServerSnapshot(prepared.code)) {
+        rollbackFinalizeFailure(
+          `Could not persist the finalized agreement snapshot (${prepared.code}). Stay in signer setup and try again.`,
+        );
+        return false;
+      }
     }
     const frozenLocal = readFrozenSigningAuthoritySnapshot();
     if (!frozenLocal || frozenLocal.agreementId !== durableAgreementId) {
@@ -30705,15 +30707,19 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       );
       return false;
     }
-    const freezePersist = await persistFrozenSigningAuthorityToBackendDetailed(
-      durableAgreementId,
-      frozenLocal,
-    );
-    if (!freezePersist.ok) {
-      rollbackFinalizeFailure(
-        `Could not persist frozen signing authority (${freezePersist.code}). Stay in signer setup and try again.`,
+    if (prepared.ok) {
+      const freezePersist = await persistFrozenSigningAuthorityToBackendDetailed(
+        durableAgreementId,
+        frozenLocal,
       );
-      return false;
+      if (!freezePersist.ok) {
+        if (!demoSessionMayContinueWithoutServerSnapshot(freezePersist.code)) {
+          rollbackFinalizeFailure(
+            `Could not persist frozen signing authority (${freezePersist.code}). Stay in signer setup and try again.`,
+          );
+          return false;
+        }
+      }
     }
     try {
       replacePaidProReviewSessionAuthorityAfterSignerFinalize({
