@@ -12243,7 +12243,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       }
       
       // Check if free one-pager validation failed — redirect to Pro instead of showing broken free page
-      const currentDraft = draftRef.current;
+      const currentDraft = draftSnapshotRef.current;
       const freeValidation = currentDraft?.free_document_validation;
       if (shouldRedirectFreeToProForValidation(freeValidation)) {
         // eslint-disable-next-line no-console
