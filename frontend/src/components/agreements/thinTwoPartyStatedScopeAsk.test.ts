@@ -442,12 +442,13 @@ Effective Date: upon full execution by both parties
     expect(src).toContain("starterPreviewBodyForShell");
     expect(src).toContain("stickyReviewIntakeText");
     expect(src).toContain("readOriginalUserIntakeRaw()");
-    const ctaStart = src.indexOf("const unifiedPrimaryCta = useMemo");
-    const ctaBlock = src.slice(ctaStart, ctaStart + 18000);
-    expect(ctaBlock).toContain("resolveFreeStarterStickyReviewCta");
-    expect(ctaBlock).toContain("stickyReviewCta.dumpStatedPartiesPainted");
-    expect(ctaBlock).toContain("stickyReviewCta.continueLabel");
-    expect(ctaBlock).toContain("launch_pro_checkout");
+    const stickyStart = src.indexOf("const visitorVisibleReviewPlain = starterPreviewBodyForShell");
+    expect(stickyStart).toBeGreaterThan(0);
+    const stickyBlock = src.slice(stickyStart, stickyStart + 4000);
+    expect(stickyBlock).toContain("resolveFreeStarterStickyReviewCta");
+    expect(stickyBlock).toContain("stickyReviewCta.dumpStatedPartiesPainted");
+    expect(stickyBlock).toContain("stickyReviewCta.continueLabel");
+    expect(stickyBlock).toContain("launch_pro_checkout");
   });
 
   it.each(THIN_TWO_PARTY_STATED_SCOPE)(
