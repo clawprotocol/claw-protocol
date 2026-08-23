@@ -205,24 +205,27 @@ function detectHollowSections(bodyText: string, intakeScore: FiveTenetScore): st
   return hollow;
 }
 
+function bodyUsesPartyAbOrRolePlaceholders(bodyText: string): boolean {
+  if (/\bParty\s+A\b/i.test(bodyText) && /\bParty\s+B\b/i.test(bodyText)) return true;
+  const bodyParties = extractPartyNamesFromBody(bodyText);
+  if (bodyParties.length >= 2 && bodyParties.every(isRolePlaceholderName)) return true;
+  if (/\bbetween\s+(?:Client|Service Provider|Party\s*A)\s+(?:\([^)]+\)\s+)?and\s+(?:Service Provider|Client|Party\s*B)/i.test(bodyText)) {
+    return true;
+  }
+  if (/\bby\s+and\s+between[:\s]*\n?\s*(?:Client|Party\s*A)\s+\([^)]+\)\s+and\s+(?:Service Provider|Party\s*B)\b/i.test(bodyText)) {
+    return true;
+  }
+  if (/\bbetween[:\s]*\n?\s*(?:Client|Party\s*A)\s+\([^)]+\)\s+and\s+(?:Service Provider|Party\s*B)\b/i.test(bodyText)) {
+    return true;
+  }
+  return false;
+}
+
 function detectRolePlaceholderParties(bodyText: string, intakeScore: FiveTenetScore): boolean {
+  // Dump named people → Party A/B / Client+Service Provider is never a valid landing.
+  if (intakeScore.parties && bodyUsesPartyAbOrRolePlaceholders(bodyText)) return true;
   if (!intakeScore.parties) {
-    const bodyParties = extractPartyNamesFromBody(bodyText);
-    if (bodyParties.length >= 2) {
-      const allRolePlaceholders = bodyParties.every(isRolePlaceholderName);
-      if (allRolePlaceholders) {
-        return true;
-      }
-    }
-    if (/\bbetween\s+(?:Client|Service Provider|Party\s*A)\s+(?:\([^)]+\)\s+)?and\s+(?:Service Provider|Client|Party\s*B)/i.test(bodyText)) {
-      return true;
-    }
-    if (/\bby\s+and\s+between[:\s]*\n?\s*Client\s+\([^)]+\)\s+and\s+Service Provider\b/i.test(bodyText)) {
-      return true;
-    }
-    if (/\bbetween[:\s]*\n?\s*Client\s+\([^)]+\)\s+and\s+Service Provider\b/i.test(bodyText)) {
-      return true;
-    }
+    return bodyUsesPartyAbOrRolePlaceholders(bodyText);
   }
   return false;
 }
@@ -284,7 +287,11 @@ export function validateFreeStarterGeneratedBody(
     reasons.push(...hollowSections.map((h) => `hollow:${h}`));
   }
   if (rolePlaceholderParties) {
-    reasons.push("role_placeholder_parties_no_intake_names");
+    reasons.push(
+      intakeScore.parties
+        ? "role_placeholder_parties_despite_intake_names"
+        : "role_placeholder_parties_no_intake_names",
+    );
   }
   if (missingNamedParties.length > 0) {
     reasons.push(`missing_intake_parties:${missingNamedParties.join(",")}`);

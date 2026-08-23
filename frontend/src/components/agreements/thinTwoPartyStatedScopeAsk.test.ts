@@ -1,6 +1,7 @@
 /**
- * Live #89 hole: a thin two-party dump that already states parties + scope
- * must take the missing-tenet ask path — not the too-thin suggested-draft dead-end.
+ * Live #90 keep + new hole: a thin two-party dump that already states parties + scope
+ * must skip the too-thin suggested-draft dead-end, then ASK missing tenets
+ * before any free starter paint (never a hollow Party A/B landing).
  *
  * Universal rule: two human parties + a concrete work description
  * (e.g. "design a logo and brand kit") is not too-thin. Ask only missing
@@ -14,6 +15,8 @@ import {
   evaluateIntentionalCreateDraftSubmit,
   hasSubstantiveDealPurpose,
 } from "./agreementIntakeClarification";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { parseIntakeToStructuredAgreement } from "./intakeStructuredAgreementModel";
 import { buildLiveDraftPreview } from "./liveDraftHeuristics";
 import { buildWeCapturedSummaryBullets } from "./intakeWhatWeUnderstood";
@@ -22,7 +25,15 @@ import {
   getRequiredClarificationTopics,
   scoreFiveTenets,
 } from "./proAgreementFiveTenets";
-import { assessStarterComplexityGate } from "./starterMultiPartyProGate";
+import { assessStarterComplexityGate, emptyStarterCheckoutPendingShell } from "./starterMultiPartyProGate";
+import {
+  evaluateFreeStarterMissingTenetAsk,
+  extractStatedTwoPartyHiringPair,
+  isValidFreeStarterLanding,
+  mergeNumberedTenetAnswersIntoIntake,
+  seedStatedTwoPartyNamesOnHollowDraft,
+  shouldAskMissingTenetsBeforeFreePaint,
+} from "./freeStarterMissingTenetAsk";
 
 const PRIYA_DIEGO_LOGO_BRAND =
   "Priya Shah of Northline Studio is hiring Diego Alvarez of Harbor Marks LLC to design a logo and brand kit.";
@@ -142,5 +153,98 @@ describe("thin two-party dump with stated scope (live #89)", () => {
     expect(decision.ok).toBe(false);
     if (decision.ok) return;
     expect(decision.code).toBe("needs_commercial_basics");
+  });
+
+  it.each(THIN_TWO_PARTY_STATED_SCOPE)(
+    "%s must ask missing payment/term/law BEFORE free paint",
+    (_label, dump) => {
+      expect(shouldAskMissingTenetsBeforeFreePaint(dump)).toBe(true);
+      const ask = evaluateFreeStarterMissingTenetAsk(dump);
+      expect(ask.action).toBe("ask");
+      if (ask.action !== "ask") return;
+      expect(ask.topics).toEqual(["payment", "term", "governing_law"]);
+      expect(ask.topics.length).toBeGreaterThanOrEqual(2);
+      expect(ask.topics.length).toBeLessThanOrEqual(5);
+      expect(ask.questions.join(" ")).toMatch(/how much is paid/i);
+      expect(ask.questions.join(" ")).toMatch(/how long does this agreement/i);
+      expect(ask.questions.join(" ")).toMatch(/which state's law/i);
+      expect(ask.questions.join(" ")).not.toMatch(/purpose or scope/i);
+      expect(ask.questions.join(" ")).not.toMatch(/who are the parties/i);
+      assertNoInventedTermOrFourPartyAmong(ask.questions.join(" "));
+    },
+  );
+
+  it.each(THIN_TWO_PARTY_STATED_SCOPE)(
+    "%s hollow Party A/B + empty payment/law is not a valid free landing",
+    (_label, dump) => {
+      const hollow = `SERVICES AGREEMENT
+
+This Agreement (“Agreement”) is entered into by and between: Party A ("Client") and Party B ("Service Provider") (collectively, the “Parties”).
+
+1. Scope of Services / Purpose
+This agreement covers design a logo and brand kit.
+
+2. Payment Terms
+
+3. Services Term and Effective Date
+Effective Date: upon full execution by both parties
+
+4. Governing Law
+`;
+      expect(isValidFreeStarterLanding(hollow, dump)).toBe(false);
+      expect(isValidFreeStarterLanding("", dump)).toBe(false);
+      expect(hollow).toMatch(/\bParty A\b/);
+      expect(hollow).toMatch(/\bParty B\b/);
+    },
+  );
+
+  it.each(THIN_TWO_PARTY_STATED_SCOPE)(
+    "%s after answers skips ask and uses stated names (not Party A/B or 60-day)",
+    (_label, dump) => {
+      const ask = evaluateFreeStarterMissingTenetAsk(dump);
+      expect(ask.action).toBe("ask");
+      if (ask.action !== "ask") return;
+      const answered = mergeNumberedTenetAnswersIntoIntake(
+        dump,
+        ask.topics,
+        "1. $4,500 flat on delivery\n2. 6 weeks\n3. Texas",
+      );
+      expect(shouldAskMissingTenetsBeforeFreePaint(answered)).toBe(false);
+      expect(evaluateFreeStarterMissingTenetAsk(answered).action).toBe("paint");
+      const score = scoreFiveTenets(answered);
+      expect(score.payment).toBe(true);
+      expect(score.term).toBe(true);
+      expect(score.governingLaw).toBe(true);
+      expect(score.isComplete).toBe(true);
+      expect(answered).not.toMatch(/\b60[-\s]?day\b/i);
+      const pair = extractStatedTwoPartyHiringPair(dump);
+      expect(pair).not.toBeNull();
+      expect(pair?.map((p) => p.name).join(" ")).toMatch(/Priya Shah|Marcus Thompson/);
+      expect(pair?.map((p) => p.name).join(" ")).toMatch(/Diego Alvarez|Elena Rodriguez/);
+      expect(pair).toHaveLength(2);
+      const hollowDraft = {
+        ...emptyStarterCheckoutPendingShell(),
+        parties: [
+          { name: "Party A", role: "Client" },
+          { name: "Party B", role: "Service Provider" },
+        ],
+      };
+      const seeded = seedStatedTwoPartyNamesOnHollowDraft(hollowDraft, dump);
+      expect(seeded.parties.map((p) => p.name).join(" ")).not.toMatch(/\bParty A\b/i);
+      expect(seeded.parties.map((p) => p.name).join(" ")).not.toMatch(/\bParty B\b/i);
+      assertNoInventedTermOrFourPartyAmong(seeded.parties.map((p) => p.name).join(", "));
+    },
+  );
+
+  it("create path evaluates the missing-tenet ask before free paint", () => {
+    const src = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
+    expect(src).toContain("evaluateFreeStarterMissingTenetAsk");
+    expect(src).toContain("beginFreeMissingTenetAsk");
+    const parseStart = src.indexOf("const runProductionLocalDraftParse");
+    expect(parseStart).toBeGreaterThan(0);
+    const askAt = src.indexOf("beginFreeMissingTenetAsk", parseStart);
+    const beginGen = src.indexOf("beginStarterDraftGeneration();", parseStart);
+    expect(askAt).toBeGreaterThan(parseStart);
+    expect(beginGen).toBeGreaterThan(askAt);
   });
 });

@@ -15,6 +15,8 @@ type Props = {
   onDismiss: () => void;
   /** Disable all inputs (e.g., during API call). */
   continueDisabled: boolean;
+  /** Free missing-tenet ask never invents payment/term/law. */
+  hideUseDefaults?: boolean;
 };
 
 /**
@@ -40,6 +42,7 @@ export function PremiumFinishAgreementGapsPanel({
   onUseDefaults,
   onDismiss,
   continueDisabled,
+  hideUseDefaults = false,
 }: Props) {
   const baseId = useId();
   
@@ -129,6 +132,7 @@ export function PremiumFinishAgreementGapsPanel({
       </div>
 
       <div className="mt-6 flex flex-col gap-2.5 sm:flex-row sm:justify-end sm:gap-3">
+        {hideUseDefaults ? null : (
         <button
           type="button"
           className="order-2 w-full rounded-xl border border-slate-500/60 bg-slate-900/70 py-2.5 text-sm font-semibold text-slate-200 transition hover:border-slate-400 sm:order-1 sm:w-auto sm:min-w-[8.5rem]"
@@ -137,6 +141,7 @@ export function PremiumFinishAgreementGapsPanel({
         >
           Use defaults
         </button>
+        )}
         <button
           type="button"
           className="order-1 w-full rounded-xl bg-emerald-500 py-2.5 text-sm font-semibold text-black shadow-lg transition hover:bg-emerald-400 sm:order-2 sm:w-auto sm:min-w-[10rem]"
