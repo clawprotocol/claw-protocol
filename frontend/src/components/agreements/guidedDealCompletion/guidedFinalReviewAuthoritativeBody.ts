@@ -268,9 +268,13 @@ export function resolveGuidedFinalReviewAuthoritativeBody(args: {
     return resolution;
   }
 
+  const hasValidFallbackBody = args.candidates.some(
+    (c) => norm(c.body).length >= 200 && !isRejectedGuidedFinalReviewSource(c.source),
+  );
   if (
     shouldSuppressPaidProCorpusRenderForRejectedPipeline({
       pipelineSource: args.pipelineRenderSource,
+      hasValidFallbackBody,
     })
   ) {
     const empty: GuidedFinalReviewAuthoritativeBodyResolution = {

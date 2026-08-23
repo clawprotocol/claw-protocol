@@ -239,7 +239,12 @@ export function pickAuthoritativePlainForSendHandoff(draft: CorpusDraftLike | nu
     return { field: "premium_server_full_document_text", text: acceptedCanonical };
   }
   if (!draft) return null;
-  if (shouldSuppressPaidProCorpusRenderForRejectedPipeline({ draft })) {
+  const hasValidFallbackBody =
+    String(draft.premium_full_document_text ?? "").trim().length >= 200 ||
+    String(draft.premium_server_full_document_text ?? "").trim().length >= 200 ||
+    String(draft.server_full_document_text ?? "").trim().length >= 200 ||
+    String(draft.document_text ?? "").trim().length >= 200;
+  if (shouldSuppressPaidProCorpusRenderForRejectedPipeline({ draft, hasValidFallbackBody })) {
     return null;
   }
   const premiumish =
