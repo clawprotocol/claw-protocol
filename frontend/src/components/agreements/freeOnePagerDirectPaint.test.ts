@@ -299,10 +299,11 @@ describe("Priya/Diego #66 regression test", () => {
       rawIntake: PRIYA_DIEGO_INTAKE,
     });
 
-    // Local template produces Party A ("Client") and Party B ("Service Provider")
-    // This should be blocked because intake has real names
-    expect(result.hollowBodyBlocked).toBe(true);
-    expect(result.hollowBodyReason).toBeTruthy();
+    // Stated hiring-pair names must paint into the visitor-visible body — never Party A/B.
+    expect(result.body).toMatch(/Priya Shah/);
+    expect(result.body).toMatch(/Diego Alvarez/);
+    expect(result.body).not.toMatch(/\bParty A\b/i);
+    expect(result.body).not.toMatch(/\bParty B\b/i);
   });
 
   it("blocks body with 'covers due. Work.' truncation", () => {

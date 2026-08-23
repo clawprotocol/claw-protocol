@@ -18,6 +18,9 @@ import { parseIntakeToStructuredAgreement } from "./intakeStructuredAgreementMod
 import { emptyStarterCheckoutPendingShell } from "./starterMultiPartyProGate";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import type { IntakeBlockingField } from "./intakeClarificationPolicy";
+import { extractStatedTwoPartyHiringPair } from "./intakeNamedPartyFallback";
+
+export { extractStatedTwoPartyHiringPair } from "./intakeNamedPartyFallback";
 
 export type FreeStarterMissingTenetAskDecision =
   | {
@@ -39,10 +42,6 @@ const TOPIC_TO_KEY: Record<string, IntakeBlockingField> = {
 };
 
 const HOLLOW_PARTY_NAME_RE = /^(?:party\s*[ab12]|client|service provider|the client|the service provider)$/i;
-
-/** "Ada Lopez of Studio is hiring Beau Ortiz of Agency LLC to …" → two stated parties, not four. */
-const HIRING_PERSON_OF_ENTITY_RE =
-  /\b([A-Z][A-Za-z.'-]+(?:\s+[A-Z][A-Za-z.'-]+)+)\s+of\s+([A-Z][A-Za-z0-9&.'’\-\s]{1,72}?)\s+is\s+(?:hiring|engaging|retaining|commissioning)\s+([A-Z][A-Za-z.'-]+(?:\s+[A-Z][A-Za-z.'-]+)+)\s+of\s+([A-Z][A-Za-z0-9&.'’\-\s]{1,80}?)(?=\s+to\s+|\s*[.,;]|$)/i;
 
 export function tenetTopicsToMissingKeys(topics: string[]): IntakeBlockingField[] {
   const keys: IntakeBlockingField[] = [];
@@ -95,24 +94,6 @@ export function shouldAskMissingTenetsBeforeFreePaint(
   return evaluateFreeStarterMissingTenetAsk(intakeText, draft).action === "ask";
 }
 
-/**
- * Two-party "A of Org is hiring B of Org" — person+entity stay one party each.
- * Never expands into four contracting parties.
- */
-export function extractStatedTwoPartyHiringPair(
-  raw: string,
-): { name: string; role: string }[] | null {
-  const m = HIRING_PERSON_OF_ENTITY_RE.exec(String(raw || "").replace(/\s+/g, " ").trim());
-  if (!m?.[1] || !m[2] || !m[3] || !m[4]) return null;
-  const leftOrg = m[2].replace(/[.,;:]+$/g, "").replace(/\s+/g, " ").trim();
-  const rightOrg = m[4].replace(/[.,;:]+$/g, "").replace(/\s+/g, " ").trim();
-  if (!leftOrg || !rightOrg) return null;
-  return [
-    { name: `${m[1].trim()} of ${leftOrg}`, role: "client" },
-    { name: `${m[3].trim()} of ${rightOrg}`, role: "service_provider" },
-  ];
-}
-
 export function buildSilentDraftForFreeMissingTenetAsk(intakeText: string): ParsedDraftShape {
   const structured = parseIntakeToStructuredAgreement(intakeText);
   const stated = extractStatedTwoPartyHiringPair(intakeText);
@@ -144,16 +125,71 @@ function draftPartiesAreHollow(draft: ParsedDraftShape | null | undefined): bool
   return names.filter((n) => HOLLOW_PARTY_NAME_RE.test(n)).length >= 2;
 }
 
-/** If parse emitted Party A/B but the dump named people, keep the dump names (two parties). */
+function partyListIncludesStatedHiringPeople(
+  parties: { name?: string }[] | null | undefined,
+  stated: { name: string }[],
+): boolean {
+  const blob = (parties || []).map((p) => (p?.name || "").trim().toLowerCase()).join(" | ");
+  if (!blob) return false;
+  return stated.every((p) => {
+    const person = p.name.replace(/\s+of\s+.+$/i, "").trim().toLowerCase();
+    return person.length >= 3 && blob.includes(person);
+  });
+}
+
+function partyListLooksLikeOrgOnlyOfHiringPair(
+  currentNames: string[],
+  stated: { name: string }[],
+): boolean {
+  if (currentNames.length !== 2 || stated.length !== 2) return false;
+  const orgs = stated
+    .map((p) => (p.name.match(/\s+of\s+(.+)$/i)?.[1] || "").trim().toLowerCase())
+    .filter((o) => o.length >= 3);
+  if (orgs.length !== 2) return false;
+  const cur = currentNames.map((n) => n.toLowerCase());
+  return orgs.every((org) => cur.some((c) => c.includes(org) || org.includes(c)));
+}
+
+/** If parse emitted Party A/B (or org-only slots) but the dump named people, keep the dump names (two parties). */
 export function seedStatedTwoPartyNamesOnHollowDraft(
   draft: ParsedDraftShape,
   intakeText: string,
 ): ParsedDraftShape {
-  if (!draftPartiesAreHollow(draft)) return draft;
   const silent = buildSilentDraftForFreeMissingTenetAsk(intakeText);
-  if (silent.parties.length < 2) return draft;
+  if (silent.parties.length !== 2) return draft;
   if (silent.parties.some((p) => HOLLOW_PARTY_NAME_RE.test(p.name))) return draft;
-  return { ...draft, parties: silent.parties };
+  const current = (draft?.parties || []).map((p) => (p?.name || "").trim()).filter(Boolean);
+  if (current.length > 2) return draft;
+  if (draftPartiesAreHollow(draft) || partyListLooksLikeOrgOnlyOfHiringPair(current, silent.parties)) {
+    return { ...draft, parties: silent.parties };
+  }
+  if (partyListIncludesStatedHiringPeople(draft.parties, silent.parties)) return draft;
+  return draft;
+}
+
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * Visitor-visible body must carry the dump names, not just party metadata.
+ * Expands person-only slots and Party A/B to the stated two-party hiring pair.
+ */
+export function ensureStatedTwoPartyHiringNamesInBody(body: string, intakeText: string): string {
+  const pair = extractStatedTwoPartyHiringPair(intakeText);
+  if (!pair || pair.length !== 2) return body;
+  let out = String(body || "");
+  if (!out.trim()) return out;
+  out = out.replace(/\bParty A\b/g, pair[0].name);
+  out = out.replace(/\bParty B\b/g, pair[1].name);
+  for (const party of pair) {
+    const person = party.name.replace(/\s+of\s+.+$/i, "").trim();
+    if (person.length < 3 || person.toLowerCase() === party.name.toLowerCase()) continue;
+    if (!out.includes(party.name)) {
+      out = out.replace(new RegExp(`\\b${escapeRegExp(person)}\\b(?!\\s+of\\s+)`, "g"), party.name);
+    }
+  }
+  return out;
 }
 
 export function mergeNumberedTenetAnswersIntoIntake(

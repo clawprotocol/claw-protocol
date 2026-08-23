@@ -13010,6 +13010,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       parsed = normalizeParsedDraftLegalConcepts(parsed, rawIntake);
       parsed = applyIntakePreGenerationDefaults(parsed, rawIntake);
       parsed = preserveInstallmentPaymentTermsOnDraft(parsed, rawIntake);
+      if (!skipFreeStarterCreateSubmit) {
+        // Defaults / legal-party fallback can restore Party A/B after the early seed.
+        parsed = seedStatedTwoPartyNamesOnHollowDraft(parsed, rawIntake);
+      }
       const nextMissing = computeMissing(parsed, rawIntake);
       setMissing(nextMissing);
       setMissingAnswer("");

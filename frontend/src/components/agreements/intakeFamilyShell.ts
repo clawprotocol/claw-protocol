@@ -30,6 +30,7 @@ import { resolveAgreementTitleFromIntakeScope } from "./paidProAgreementTitleSco
 import { isInventedNoFeePayment, isPaymentSemanticallySafe, NO_PAYMENT_NEUTRAL_FALLBACK } from "./paymentSemanticGuard";
 import { applyPartyNameCasingPassToDraft } from "../../agreement/partyNameDisplayCasing";
 import { isPreservableIntakeRole } from "./canonicalPartyRoleAuthority";
+import { isPlaceholderPartyName } from "./starterPartyLimits";
 
 const MAX_PARTY_NAME_LEN = 280;
 
@@ -40,7 +41,9 @@ function nz(s: string | null | undefined): string {
 function usableAuthorityParties(
   parties: { id?: string; name: string; role: string; email?: string }[],
 ): { id?: string; name: string; role: string; email?: string }[] {
-  return parties.filter((p) => !looksLikeMoneyTermOrClausePartyName(p.name));
+  return parties.filter(
+    (p) => !looksLikeMoneyTermOrClausePartyName(p.name) && !isPlaceholderPartyName(p.name),
+  );
 }
 
 /**

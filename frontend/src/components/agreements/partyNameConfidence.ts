@@ -37,7 +37,12 @@ export function isProsePollutedPartyName(name: string): boolean {
   const words = t.split(/\s+/).filter(Boolean);
   if (words.length === 1 && GENERIC_ROLE_AS_SOLE_NAME.test(t)) return true;
 
-  if (words.length > 4 && !COMPANY_ENTITY_SUFFIX.test(t)) return true;
+  // Person-of-entity is one party ("Priya Shah of Northline Studio"), not dump prose.
+  const personOfEntity =
+    /^[A-Z][A-Za-z.'’-]+(?:\s+[A-Z][A-Za-z.'’-]+)+\s+of\s+[A-Z][A-Za-z0-9&.'’\-]{1,40}(?:\s+[A-Z][A-Za-z0-9&.'’\-]{1,40}){0,5}$/.test(
+      t,
+    );
+  if (words.length > 4 && !COMPANY_ENTITY_SUFFIX.test(t) && !personOfEntity) return true;
 
   const punct = (t.match(/[.,;:!?'"()[\]{}_\-/\\]/g) || []).length;
   const letters = (t.match(/[A-Za-z]/g) || []).length;
