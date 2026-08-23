@@ -63,4 +63,32 @@ describe("SimpleProFinalReviewScreen action enablement rule", () => {
     const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
     expect(intake).toContain("signersReady={paidProReviewSignerStatusReady}");
   });
+
+  it("completed paid session + finalized signer metadata bypasses loading blocker", () => {
+    const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
+    expect(intake).toContain(
+      "(loading && !(paidProSignerMetadataFinalized && paidProReviewSignerStatusReady))",
+    );
+  });
+
+  it("finalizePaidProSignerMetadataAndOpenReviewDecision clears loading state", () => {
+    const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
+    const fnStart = intake.indexOf("const finalizePaidProSignerMetadataAndOpenReviewDecision = React.useCallback");
+    const fnEnd = intake.indexOf("finalizePaidProSignerMetadataAndOpenReviewDecisionRef.current =");
+    expect(fnStart).toBeGreaterThan(-1);
+    expect(fnEnd).toBeGreaterThan(fnStart);
+    const finalizeBlock = intake.slice(fnStart, fnEnd);
+    expect(finalizeBlock).toContain("setPaidProSignerMetadataFinalizedLatch(true)");
+    expect(finalizeBlock).toContain("setLoading(false)");
+  });
+
+  it("sendDisabled bypasses loading for finalized signer metadata + ready signers", () => {
+    const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
+    const sendDisabledBlock = intake.slice(
+      intake.indexOf("<SimpleProFinalReviewScreen"),
+      intake.indexOf("</SimpleProFinalReviewScreen") || intake.indexOf("/>", intake.indexOf("<SimpleProFinalReviewScreen") + 100),
+    );
+    expect(sendDisabledBlock).toContain("sendDisabled={");
+    expect(sendDisabledBlock).toContain("paidProSignerMetadataFinalized && paidProReviewSignerStatusReady");
+  });
 });

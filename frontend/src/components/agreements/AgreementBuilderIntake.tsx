@@ -31039,6 +31039,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     setDisplayPhase("review");
     setHardError(null);
     setGuidedSigningConfirmationBlockMessage(null);
+    setLoading(false);
     bumpPremiumSurfaceGateTick();
     scrollPaidProReviewDecisionIntoView();
     return true;
@@ -35953,7 +35954,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                             simpleProFinalReviewCorpus.corpusBlocked ||
                                             (isGenerating && !draft) ||
                                             upgradeLockActive ||
-                                            loading ||
+                                            (loading && !(paidProSignerMetadataFinalized && paidProReviewSignerStatusReady)) ||
                                             guidedPacketSendBlocked ||
                                             reviewFirstHandoffBusy
                                           }
@@ -35966,7 +35967,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                                   ? "Agreement is still generating…"
                                                   : upgradeLockActive
                                                     ? "Agreement upgrade in progress…"
-                                                    : loading
+                                                    : (loading && !(paidProSignerMetadataFinalized && paidProReviewSignerStatusReady))
                                                       ? "Saving agreement…"
                                                       : guidedPacketSendBlocked
                                                         ? "Agreement changed after links were created. Create new links for this version."
