@@ -273,6 +273,52 @@ export function extractCasualNamedCounterparties(raw: string): string[] {
   return out;
 }
 
+const PERSON_OF_ENTITY_UNIT_RE =
+  /\b([A-Z][A-Za-z.'-]+(?:\s+[A-Z][A-Za-z.'-]+)+)\s+(?:of|from)\s+([A-Z][A-Za-z0-9&.'’\-][A-Za-z0-9&.'’\-\s]{0,70}?)(?=\s*,|\s+and\s+|\s+is\s+|\s+will\s+|\s+agree\b|\s+reviews?\b|\s+to\s+|\s*[.;]|$)/g;
+
+function looksLikeNamedDumpPartyUnit(raw: string): boolean {
+  const t = (raw || "").replace(/\s+/g, " ").trim();
+  if (t.length < 2 || t.length > 80) return false;
+  if (looksLikeMoneyTermOrClausePartyName(t)) return false;
+  if (!/^[A-Z]/.test(t)) return false;
+  if (/\b(?:agree|that|design|logo|brand|kit|signing)\b/i.test(t) && !/\b(?:of|from|LLC|Inc)\b/i.test(t)) {
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Distinct people/orgs named as parties in a homepage dump.
+ * "A of Org" is one party (never person + org = two). 3+ units must funnel to Pro.
+ * Only person-of-entity mentions and "A, B, and C agree that…" lists — not every
+ * title-case pair in a labeled intake (signers, coordinators, role words).
+ */
+export function extractNamedDumpPartyUnits(raw: string): string[] {
+  const t = String(raw || "").replace(/\s+/g, " ").trim();
+  if (t.length < 10) return [];
+  const out: string[] = [];
+  const seen = new Set<string>();
+
+  PERSON_OF_ENTITY_UNIT_RE.lastIndex = 0;
+  for (const match of t.matchAll(PERSON_OF_ENTITY_UNIT_RE)) {
+    const person = (match[1] || "").trim();
+    const org = (match[2] || "").replace(/[.,;:]+$/g, "").replace(/\s+/g, " ").trim();
+    if (!person || org.length < 2) continue;
+    addUniqueCasualName(out, seen, `${person} of ${org}`);
+  }
+
+  const agreeHead = t.match(/^(.{10,420}?)\s+agree(?:s|d)?\s+that\b/i)?.[1];
+  if (agreeHead) {
+    for (const segment of agreeHead.split(/\s*,\s*|\s+and\s+/i)) {
+      const cleaned = segment.replace(/^and\s+/i, "").trim();
+      if (!looksLikeNamedDumpPartyUnit(cleaned)) continue;
+      addUniqueCasualName(out, seen, cleaned);
+    }
+  }
+
+  return out;
+}
+
 function namedHirerAndCompany(
   person: string,
   company: string,
