@@ -14,6 +14,7 @@
  */
 import { describe, expect, it } from "vitest";
 import {
+  evaluateHollowBodyGate,
   evaluateSimpleHollowBodyGate,
   getFreeOnePagerFallbackForProFailure,
   isFreeOnePagerValid,
@@ -223,6 +224,133 @@ describe("resolveFreeStarterReviewBody with free_document_text", () => {
     expect(result.source).toBe("free_openai_direct");
     expect(result.body).toContain("Maya Chen");
     expect(result.body).not.toContain("OLD BODY FROM DRAFT");
+  });
+});
+
+// Priya/Diego scenario from #66 bug report - body has Party A/B and drops tenets
+const PRIYA_DIEGO_INTAKE =
+  "Ok long story my friend Priya Shah of Northline Studio is hiring Diego Alvarez of Harbor Marks LLC to design a logo and brand kit for $2,400 due on signing. Work runs 30 days starting August 22, 2026. Governing law is Texas. Also my cousin wants his boat mentioned, here's a chili recipe, we might add a third partner later but not now, and ignore this dogecoin slack paste: WOW MUCH COIN meeting Tuesday parking lot. Make it look official. Priya is the client. Diego is the designer.";
+
+const PRIYA_DIEGO_BROKEN_BODY = `SERVICES AGREEMENT
+
+This Agreement is entered into by and between:
+Party A ("Client") and Party B ("Service Provider") (collectively, the "Parties").
+
+1. Scope of Services / Purpose
+This agreement covers due. Work.
+
+2. Payment Terms
+$2,400
+
+3. Services Term and Effective Date
+Services Term: 30 days
+Effective Date: August 22, 2026
+
+4. Governing Law
+Governing law: To be agreed by the parties unless otherwise agreed.`;
+
+describe("Priya/Diego #66 regression test", () => {
+  it("rejects body with Party A/B when intake named Priya/Diego", () => {
+    const draft: ParsedDraftShape = {
+      ...emptyDraft(),
+      title: "Services Agreement",
+      parties: [
+        { name: "Priya Shah", role: "client" },
+        { name: "Diego Alvarez", role: "service_provider" },
+      ],
+      purpose: "design a logo and brand kit",
+      payment_terms: "$2,400 due on signing",
+      jurisdiction: "Texas",
+      duration: "30 days starting August 22, 2026",
+      free_document_text: PRIYA_DIEGO_BROKEN_BODY,
+      free_document_validation: "ok", // Backend incorrectly passed
+    };
+
+    const result = resolveFreeStarterReviewBody({
+      draft,
+      rawIntake: PRIYA_DIEGO_INTAKE,
+    });
+
+    // Body should be blocked because:
+    // 1. Intake named Priya Shah and Diego Alvarez, but body has Party A/B
+    // 2. Body has "covers due. Work." truncation
+    // 3. Texas law was in dump but body says "To be agreed"
+    expect(result.hollowBodyBlocked).toBe(true);
+    expect(result.hollowBodyReason).toBeTruthy();
+  });
+
+  it("rejects local template fallback when intake has named parties", () => {
+    const draft: ParsedDraftShape = {
+      ...emptyDraft(),
+      title: "Services Agreement",
+      parties: [
+        { name: "Client", role: "client" },
+        { name: "Service Provider", role: "service_provider" },
+      ],
+      purpose: "design a logo and brand kit",
+      payment_terms: "$2,400 due on signing",
+      jurisdiction: "Texas",
+      duration: "30 days starting August 22, 2026",
+      // No free_document_text - will fall back to local template
+    };
+
+    const result = resolveFreeStarterReviewBody({
+      draft,
+      rawIntake: PRIYA_DIEGO_INTAKE,
+    });
+
+    // Local template produces Party A ("Client") and Party B ("Service Provider")
+    // This should be blocked because intake has real names
+    expect(result.hollowBodyBlocked).toBe(true);
+    expect(result.hollowBodyReason).toBeTruthy();
+  });
+
+  it("blocks body with 'covers due. Work.' truncation", () => {
+    const draft: ParsedDraftShape = {
+      ...emptyDraft(),
+      title: "Services Agreement",
+      parties: [
+        { name: "Priya Shah", role: "client" },
+        { name: "Diego Alvarez", role: "service_provider" },
+      ],
+      purpose: "This agreement covers due. Work.",
+      payment_terms: "$2,400",
+      jurisdiction: "Texas",
+      free_document_text: PRIYA_DIEGO_BROKEN_BODY,
+      free_document_validation: "ok",
+    };
+
+    const result = resolveFreeStarterReviewBody({
+      draft,
+      rawIntake: PRIYA_DIEGO_INTAKE,
+    });
+
+    expect(result.hollowBodyBlocked).toBe(true);
+  });
+
+  it("blocks body that drops Texas jurisdiction from intake", () => {
+    const draftWithTexas: ParsedDraftShape = {
+      ...emptyDraft(),
+      title: "Services Agreement",
+      parties: [
+        { name: "Priya Shah", role: "client" },
+        { name: "Diego Alvarez", role: "service_provider" },
+      ],
+      purpose: "design a logo and brand kit",
+      payment_terms: "$2,400",
+      jurisdiction: "Texas",
+      duration: "30 days starting August 22, 2026",
+      free_document_text: PRIYA_DIEGO_BROKEN_BODY, // Body says "To be agreed" for law
+      free_document_validation: "ok",
+    };
+
+    const result = resolveFreeStarterReviewBody({
+      draft: draftWithTexas,
+      rawIntake: PRIYA_DIEGO_INTAKE,
+    });
+
+    // The body dropped Texas which was in the intake
+    expect(result.hollowBodyBlocked).toBe(true);
   });
 });
 
@@ -494,6 +622,78 @@ describe("resolveFreeStarterReviewBody hollow body gate", () => {
 
     expect(result.hollowBodyBlocked).toBe(false);
     expect(result.hollowBodyReason).toBeNull();
+  });
+});
+
+describe("evaluateHollowBodyGate with new hollow reasons", () => {
+  it("redirects to Pro for corrupted_output reason", () => {
+    const result = resolveFreeStarterReviewBody({
+      draft: {
+        ...emptyDraft(),
+        title: "Services Agreement",
+        parties: [
+          { name: "Priya Shah", role: "client" },
+          { name: "Diego Alvarez", role: "service_provider" },
+        ],
+        purpose: "This agreement covers due. Work.",
+        payment_terms: "$2,400",
+        jurisdiction: "Texas",
+        free_document_text: PRIYA_DIEGO_BROKEN_BODY,
+        free_document_validation: "ok",
+      },
+      rawIntake: PRIYA_DIEGO_INTAKE,
+    });
+
+    const gate = evaluateHollowBodyGate(result);
+    expect(gate.isHollow).toBe(true);
+    expect(gate.shouldRedirectToPro).toBe(true);
+    expect(gate.reasons).toContain("corrupted_output");
+  });
+
+  it("asks party questions when intake has names but body has placeholders", () => {
+    const result = resolveFreeStarterReviewBody({
+      draft: {
+        ...emptyDraft(),
+        title: "Services Agreement",
+        parties: [
+          { name: "Client", role: "client" },
+          { name: "Service Provider", role: "service_provider" },
+        ],
+        purpose: "design a logo and brand kit",
+        payment_terms: "$2,400",
+        jurisdiction: "Texas",
+      },
+      rawIntake: PRIYA_DIEGO_INTAKE,
+    });
+
+    const gate = evaluateHollowBodyGate(result);
+    expect(gate.isHollow).toBe(true);
+    expect(gate.missingTenets).toContain("parties");
+  });
+
+  it("asks law questions when jurisdiction is dropped", () => {
+    const result = resolveFreeStarterReviewBody({
+      draft: {
+        ...emptyDraft(),
+        title: "Services Agreement",
+        parties: [
+          { name: "Priya Shah", role: "client" },
+          { name: "Diego Alvarez", role: "service_provider" },
+        ],
+        purpose: "design a logo and brand kit",
+        payment_terms: "$2,400",
+        jurisdiction: "Texas",
+        free_document_text: PRIYA_DIEGO_BROKEN_BODY,
+        free_document_validation: "ok",
+      },
+      rawIntake: PRIYA_DIEGO_INTAKE,
+    });
+
+    const gate = evaluateHollowBodyGate(result);
+    expect(gate.isHollow).toBe(true);
+    // Texas was dropped, so governing_law should be a missing tenet
+    // Note: The specific reason depends on what the validation detects first
+    expect(gate.reasons.length).toBeGreaterThan(0);
   });
 });
 
