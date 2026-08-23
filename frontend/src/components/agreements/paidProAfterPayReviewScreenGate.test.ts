@@ -9,11 +9,13 @@ import {
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import {
   canOpenPaidSessionFinalReviewAfterSigners,
+  isVisibleMissingTenetAskLanding,
   resolvePaidSessionTwoSignerNamesEmailsComplete,
   resolvePaidSessionVisibleDealBody,
   shouldShowPaidSessionFinalReviewActions,
   shouldShowPaidSessionGeneratingOverlay,
   shouldSkipPaidSessionReviewHydrateWait,
+  shouldSuppressFreeMissingTenetAskAfterPay,
   shouldTeardownPaidProSignerMetadataFinalizedLatch,
 } from "./paidProPaidSessionLanding";
 import { hasPaidProSourceOfTruth } from "./paidProSourceOfTruth";
@@ -413,5 +415,41 @@ describe("after-pay review-screen gate — intake wiring", () => {
     expect(intakeSrc).not.toMatch(
       /if \(paidProSignerMetadataFinalizedLatch && !hasPaidProSourceOfTruth\(\)\) \{\s*setPaidProSignerMetadataFinalizedLatch\(false\);/,
     );
+  });
+
+  it("after-pay leftover free missing-tenet ask is cleared and not shown", () => {
+    expect(intakeSrc).toContain("shouldSuppressFreeMissingTenetAskAfterPay");
+    expect(intakeSrc).toContain("freeMissingTenetAskVisible");
+    expect(intakeSrc).toContain("suppressFreeMissingTenetAskAfterPay");
+    const beginAsk = intakeSrc.indexOf("const beginFreeMissingTenetAsk");
+    expect(beginAsk).toBeGreaterThan(-1);
+    const beginAskEnd = intakeSrc.indexOf("const resolvePaidCreateGateBypassContext", beginAsk);
+    const beginAskBody = intakeSrc.slice(beginAsk, beginAskEnd);
+    expect(beginAskBody).toContain("shouldSuppressFreeMissingTenetAskAfterPay");
+    expect(beginAskBody).toContain("setFreeMissingTenetAsk(null)");
+    expect(beginAskBody.indexOf("setFreeMissingTenetAsk(null)")).toBeLessThan(
+      beginAskBody.indexOf("evaluateFreeStarterMissingTenetAsk"),
+    );
+
+    const leftoverStart = intakeSrc.indexOf("{freeMissingTenetAskVisible &&");
+    expect(leftoverStart).toBeGreaterThan(-1);
+    expect(intakeSrc).not.toMatch(
+      /\{freeMissingTenetAsk &&\s*\n\s*!\(createProductionTwoPane && createUiStage === CreateUiStage\.INPUT/,
+    );
+
+    expect(
+      shouldSuppressFreeMissingTenetAskAfterPay({
+        paidSessionActive: true,
+        premiumCompletionReturn: true,
+      }),
+    ).toBe(true);
+    expect(
+      isVisibleMissingTenetAskLanding({
+        phase: null,
+        freeStarterAskQuestionCount: 3,
+        paidSessionActive: true,
+        premiumCompletionReturn: true,
+      }),
+    ).toBe(false);
   });
 });

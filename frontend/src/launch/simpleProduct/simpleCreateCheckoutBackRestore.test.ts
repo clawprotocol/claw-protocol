@@ -14,6 +14,17 @@ describe("checkout back → starter review restore (static)", () => {
     expect(createPage).not.toMatch(/homeHeroAutoGenerate\s*=\s*\n?\s*heroHandoff\?\.autoGenerate[\s\S]*!hasStoredCreateReviewState/);
   });
 
+  it("SimpleCreatePage disables homeHeroAutoGenerate after pay so leftover free ask cannot remount", () => {
+    expect(createPage).toContain("!premiumCompletionReturn");
+    expect(createPage).toContain("!hasPaidPremiumCompletionSession()");
+    const homeAuto = createPage.indexOf("const homeHeroAutoGenerate =");
+    expect(homeAuto).toBeGreaterThan(-1);
+    const homeAutoBlock = createPage.slice(homeAuto, homeAuto + 520);
+    expect(homeAutoBlock).toContain("!checkoutBackRestoreActive");
+    expect(homeAutoBlock).toContain("!premiumCompletionReturn");
+    expect(homeAutoBlock).toContain("!hasPaidPremiumCompletionSession()");
+  });
+
   it("starter review Continue with Pro uses launch_pro_checkout (not continue_basic_draft)", () => {
     expect(intake).toContain('action: "launch_pro_checkout"');
     expect(intake).toContain("restored_starter_review_cta");
