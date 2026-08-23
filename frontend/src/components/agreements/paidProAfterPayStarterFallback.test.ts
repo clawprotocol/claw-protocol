@@ -533,7 +533,7 @@ Includes logo design, business cards, and letterhead.
     expect(rebuilt).toContain("California");
   });
 
-  it("rebuildBodyFromIntakeForProFailure falls back to Party A/B when no real names available", () => {
+  it("rebuildBodyFromIntakeForProFailure uses intake sentences when no real names available (never Party A/B)", () => {
     const intakeWithoutNames = `
 General consulting services for $3,000.
 Work starts next week.
@@ -557,8 +557,14 @@ Work starts next week.
     const rebuilt = rebuildBodyFromIntakeForProFailure(intakeWithoutNames, fullyHollowDraft);
     
     expect(rebuilt.length).toBeGreaterThanOrEqual(200);
-    // With no real names available, falls back to Party A/B but payment is extracted
+    // UNIVERSAL RULE: NEVER emit Party A/B or Client/Service_provider as the paid landing
+    // When no real names available, uses intake sentences directly instead
+    expect(rebuilt).not.toMatch(/\bParty A\b/i);
+    expect(rebuilt).not.toMatch(/\bParty B\b/i);
+    // Payment should still be extracted
     expect(rebuilt).toContain("$3,000");
+    // Intake sentences should be preserved
+    expect(rebuilt).toContain("consulting services");
   });
 
   it("isNonHollowBody detects role-only party names in body", () => {
@@ -604,5 +610,27 @@ Client shall pay $2,400 total for services rendered.
 This Agreement shall be governed by the laws of the State of Texas.
 `;
     expect(isNonHollowBody(bodyWithRealNames, PRIYA_INTAKE)).toBe(true);
+  });
+
+  it("rebuildBodyFromIntakeForProFailure NEVER emits Party A/B regardless of input", () => {
+    // Test multiple intake scenarios - none should ever emit Party A/B
+    const testCases = [
+      // No names at all
+      "General work for $5,000. California law.",
+      // Only partial context
+      "Design project. Payment $2,000.",
+      // Very minimal
+      "Services agreement for software development project lasting three months.",
+    ];
+
+    for (const intake of testCases) {
+      const rebuilt = rebuildBodyFromIntakeForProFailure(intake, HOLLOW_DRAFT);
+      if (rebuilt) { // Only check if we got a result
+        // UNIVERSAL RULE: NEVER emit Party A/B or Client/Service_provider
+        expect(rebuilt).not.toMatch(/\bParty A\b/i);
+        expect(rebuilt).not.toMatch(/\bParty B\b/i);
+        expect(rebuilt).not.toMatch(/\bClient\/Service_provider\b/i);
+      }
+    }
   });
 });

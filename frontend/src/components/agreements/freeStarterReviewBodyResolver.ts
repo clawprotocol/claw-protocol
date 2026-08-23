@@ -439,7 +439,8 @@ function isCorruptedPurpose(purpose: string | null | undefined): boolean {
  * Rebuild a valid ≥200 character body from intake when all other fallbacks are hollow.
  * This is the last resort before showing an empty card after paid checkout.
  * 
- * Never returns: empty card, "covers due. Work.", Party A/B, or role-only placeholders.
+ * UNIVERSAL RULE: Never returns Party A/B, Client/Service_provider, or role-only placeholders
+ * as the paid landing. If names cannot be parsed, use the visitor's intake sentences as the body.
  */
 export function rebuildBodyFromIntakeForProFailure(
   intake: string,
@@ -451,12 +452,17 @@ export function rebuildBodyFromIntakeForProFailure(
   const namedParties = extractNamedPartiesFromIntake(intakeText);
   const draftParties = draft?.parties ?? [];
   
+  // Resolve party names - prefer extracted names, then draft parties, but NEVER hollow/generic names
   const party1 = namedParties[0] 
-    || (draftParties[0]?.name && !isHollowPartyName(draftParties[0].name) ? draftParties[0].name : null)
-    || "Party A";
+    || (draftParties[0]?.name && !isHollowPartyName(draftParties[0].name) ? draftParties[0].name : null);
   const party2 = namedParties[1]
-    || (draftParties[1]?.name && !isHollowPartyName(draftParties[1].name) ? draftParties[1].name : null)
-    || "Party B";
+    || (draftParties[1]?.name && !isHollowPartyName(draftParties[1].name) ? draftParties[1].name : null);
+  
+  // If we couldn't extract or find any real party names, use intake-sentence-based body instead
+  // NEVER emit Party A/B or Client/Service_provider as the paid landing
+  if (!party1 && !party2) {
+    return buildIntakeSentencesBody(intakeText, draft);
+  }
   
   const role1 = draftParties[0]?.role || "Client";
   const role2 = draftParties[1]?.role || "Service Provider";
@@ -471,14 +477,18 @@ export function rebuildBodyFromIntakeForProFailure(
   
   const title = draft?.title || "SERVICES AGREEMENT";
   
+  // Use "the first party" / "the second party" as fallback if only one name is available
+  const party1Display = party1 || "the first party";
+  const party2Display = party2 || "the second party";
+  
   const lines: string[] = [
     title.toUpperCase(),
     "",
     `This Agreement ("Agreement") is entered into by and between:`,
     "",
-    `${party1} ("${role1}")`,
+    `${party1Display}${party1 ? ` ("${role1}")` : ""}`,
     "and",
-    `${party2} ("${role2}")`,
+    `${party2Display}${party2 ? ` ("${role2}")` : ""}`,
     "",
     `(collectively, the "Parties").`,
     "",
@@ -486,17 +496,17 @@ export function rebuildBodyFromIntakeForProFailure(
   ];
   
   if (purpose) {
-    lines.push(`${role2} agrees to provide ${purpose} to ${role1}.`);
+    lines.push(`The service provider agrees to provide ${purpose}.`);
   } else {
-    lines.push(`${role2} agrees to provide services to ${role1} as described in the parties' communications.`);
+    lines.push("The service provider agrees to provide services as described in the parties' communications.");
   }
   lines.push("");
   
   lines.push("2. PAYMENT TERMS");
   if (payment) {
-    lines.push(`${role1} shall pay ${role2} ${payment} for services rendered under this Agreement.`);
+    lines.push(`Payment of ${payment} for services rendered under this Agreement.`);
   } else {
-    lines.push(`${role1} shall pay ${role2} as agreed by the Parties for services rendered under this Agreement.`);
+    lines.push("Payment as agreed by the Parties for services rendered under this Agreement.");
   }
   lines.push("");
   
@@ -524,10 +534,61 @@ export function rebuildBodyFromIntakeForProFailure(
   lines.push("IN WITNESS WHEREOF, the Parties have executed this Agreement.");
   lines.push("");
   lines.push("___________________________");
-  lines.push(party1);
+  lines.push(party1Display);
   lines.push("");
   lines.push("___________________________");
-  lines.push(party2);
+  lines.push(party2Display);
+  
+  const body = lines.join("\n");
+  
+  if (body.length < MIN_REBUILT_BODY_LEN) {
+    return "";
+  }
+  
+  return body;
+}
+
+/**
+ * Build a body directly from intake sentences when we can't extract party names.
+ * This uses the visitor's own words as the agreement body rather than placeholder names.
+ */
+function buildIntakeSentencesBody(intakeText: string, draft: ParsedDraftShape | null): string {
+  const title = draft?.title || "SERVICES AGREEMENT";
+  const jurisdiction = extractJurisdictionFromIntake(intakeText) || draft?.jurisdiction || null;
+  const payment = extractPaymentFromIntake(intakeText) || draft?.payment_terms || null;
+  
+  // Clean up intake text - split into sentences and preserve meaningful content
+  const cleanedIntake = intakeText
+    .replace(/\n+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  
+  const lines: string[] = [
+    title.toUpperCase(),
+    "",
+    "AGREEMENT SUMMARY",
+    "",
+    "Based on the parties' communications:",
+    "",
+    cleanedIntake,
+    "",
+  ];
+  
+  if (payment) {
+    lines.push("PAYMENT TERMS");
+    lines.push(`Payment: ${payment}`);
+    lines.push("");
+  }
+  
+  if (jurisdiction) {
+    lines.push("GOVERNING LAW");
+    const formattedJurisdiction = jurisdiction.split(" ").map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
+    lines.push(`This Agreement shall be governed by the laws of ${formattedJurisdiction}.`);
+    lines.push("");
+  }
+  
+  lines.push("---");
+  lines.push("This document summarizes the agreement between the parties. Please review and confirm the details are accurate before signing.");
   
   const body = lines.join("\n");
   
