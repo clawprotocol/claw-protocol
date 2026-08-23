@@ -9364,22 +9364,72 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           // This keeps the user's starter visible so they can continue from where they were.
           // Also update lastKnownGoodAuthoritativeDraftRef to prevent useLayoutEffect from wiping
           // the starter text when draft is null and premiumPersistedFlowActive is false.
+          // Universal path rule: never show hollow skeleton + Retry as the paid landing.
+          // After pay, the path is: painted deal → signers → final review, not Retry loop.
           {
-            const starterFallback = buildAgreementPreviewText(mergedF.draft, {
-              starterPreview: true,
-              intakeText: mergedIntake,
-            });
-            // If starterFallback is empty, try the validated free one-pager
-            const freeOnePagerFallback = getFreeOnePagerFallbackForProFailure(mergedF.draft);
-            // Also try the checkout back restore snapshot's previewText as a last resort
-            const checkoutBackSnap = readCheckoutBackRestoreSnapshot();
-            const checkoutBackPreview = (checkoutBackSnap?.previewText ?? "").trim();
-            // Final fallback: preserve existing agreementDocumentText if it has content
-            const existingText = agreementDocumentTextRef.current.trim();
-            const fallbackText = starterFallback.trim() || freeOnePagerFallback.trim() || checkoutBackPreview || (existingText.length >= 200 ? existingText : "");
+            // Helper to check if a body is a valid non-hollow fallback
+            const isValidNonHollowBody = (body: string): boolean => {
+              const trimmed = body.trim();
+              if (trimmed.length < 200) return false;
+              const hollowCheck = evaluateSimpleHollowBodyGate(trimmed, mergedF.draft.parties ?? null, {
+                intake: mergedIntake,
+              });
+              return !hollowCheck.isHollow;
+            };
+            
+            let fallbackText = "";
+            
+            // FIRST: Try existing agreementDocumentText (the painted starter before checkout)
+            const existingDocText = agreementDocumentTextRef.current.trim();
+            if (existingDocText.length >= 200 && isValidNonHollowBody(existingDocText)) {
+              fallbackText = existingDocText;
+            }
+            
+            // SECOND: Try lastKnownGoodAuthoritativeDraft
+            if (!fallbackText) {
+              const lastKnownGood = lastKnownGoodAuthoritativeDraftRef.current.trim();
+              if (lastKnownGood.length >= 200 && isValidNonHollowBody(lastKnownGood)) {
+                fallbackText = lastKnownGood;
+              }
+            }
+            
+            // THIRD: Try building preview from draft (but only if not hollow)
+            if (!fallbackText) {
+              try {
+                const starterFallback = buildAgreementPreviewText(mergedF.draft, {
+                  starterPreview: true,
+                  intakeText: mergedIntake,
+                });
+                if (starterFallback.trim().length >= 200 && isValidNonHollowBody(starterFallback)) {
+                  fallbackText = starterFallback;
+                }
+              } catch {
+                // ignore
+              }
+            }
+            
+            // FOURTH: Try free one-pager if draft preview is hollow
+            if (!fallbackText) {
+              const freeOnePagerFallback = getFreeOnePagerFallbackForProFailure(mergedF.draft);
+              if (freeOnePagerFallback.trim().length >= 200 && isValidNonHollowBody(freeOnePagerFallback)) {
+                fallbackText = freeOnePagerFallback;
+              }
+            }
+            
+            // FIFTH: Try checkout back restore snapshot's previewText
+            if (!fallbackText) {
+              const checkoutBackSnap = readCheckoutBackRestoreSnapshot();
+              const checkoutBackPreview = (checkoutBackSnap?.previewText ?? "").trim();
+              if (checkoutBackPreview.length >= 200 && isValidNonHollowBody(checkoutBackPreview)) {
+                fallbackText = checkoutBackPreview;
+              }
+            }
+            
             if (fallbackText) {
+              // Valid fallback body found - show it and enable signer setup path.
+              // Do NOT set proUpgradeUseStarterView(true) which leaves user in Retry-only mode.
               setAgreementDocumentText(fallbackText);
-              setProUpgradeUseStarterView(true);
+              setProUpgradeUseStarterView(false);
               // Protect from useLayoutEffect wipe when proFullDraftQualityRetry is true.
               lastKnownGoodAuthoritativeDraftRef.current = fallbackText;
               // Enable signer fields so user can continue to signing from the fallback body.
@@ -9608,22 +9658,72 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           // This keeps the user's starter visible so they can continue from where they were.
           // Also update lastKnownGoodAuthoritativeDraftRef to prevent useLayoutEffect from wiping
           // the starter text when draft is null and premiumPersistedFlowActive is false.
+          // Universal path rule: never show hollow skeleton + Retry as the paid landing.
+          // After pay, the path is: painted deal → signers → final review, not Retry loop.
           {
-            const starterFallback = buildAgreementPreviewText(merged.draft, {
-              starterPreview: true,
-              intakeText: mergedIntake,
-            });
-            // If starterFallback is empty, try the validated free one-pager
-            const freeOnePagerFallback = getFreeOnePagerFallbackForProFailure(merged.draft);
-            // Also try the checkout back restore snapshot's previewText as a last resort
-            const checkoutBackSnap = readCheckoutBackRestoreSnapshot();
-            const checkoutBackPreview = (checkoutBackSnap?.previewText ?? "").trim();
-            // Final fallback: preserve existing agreementDocumentText if it has content
-            const existingText = agreementDocumentTextRef.current.trim();
-            const fallbackText = starterFallback.trim() || freeOnePagerFallback.trim() || checkoutBackPreview || (existingText.length >= 200 ? existingText : "");
+            // Helper to check if a body is a valid non-hollow fallback
+            const isValidNonHollowBody = (body: string): boolean => {
+              const trimmed = body.trim();
+              if (trimmed.length < 200) return false;
+              const hollowCheck = evaluateSimpleHollowBodyGate(trimmed, merged.draft.parties ?? null, {
+                intake: mergedIntake,
+              });
+              return !hollowCheck.isHollow;
+            };
+            
+            let fallbackText = "";
+            
+            // FIRST: Try existing agreementDocumentText (the painted starter before checkout)
+            const existingDocText = agreementDocumentTextRef.current.trim();
+            if (existingDocText.length >= 200 && isValidNonHollowBody(existingDocText)) {
+              fallbackText = existingDocText;
+            }
+            
+            // SECOND: Try lastKnownGoodAuthoritativeDraft
+            if (!fallbackText) {
+              const lastKnownGood = lastKnownGoodAuthoritativeDraftRef.current.trim();
+              if (lastKnownGood.length >= 200 && isValidNonHollowBody(lastKnownGood)) {
+                fallbackText = lastKnownGood;
+              }
+            }
+            
+            // THIRD: Try building preview from draft (but only if not hollow)
+            if (!fallbackText) {
+              try {
+                const starterFallback = buildAgreementPreviewText(merged.draft, {
+                  starterPreview: true,
+                  intakeText: mergedIntake,
+                });
+                if (starterFallback.trim().length >= 200 && isValidNonHollowBody(starterFallback)) {
+                  fallbackText = starterFallback;
+                }
+              } catch {
+                // ignore
+              }
+            }
+            
+            // FOURTH: Try free one-pager if draft preview is hollow
+            if (!fallbackText) {
+              const freeOnePagerFallback = getFreeOnePagerFallbackForProFailure(merged.draft);
+              if (freeOnePagerFallback.trim().length >= 200 && isValidNonHollowBody(freeOnePagerFallback)) {
+                fallbackText = freeOnePagerFallback;
+              }
+            }
+            
+            // FIFTH: Try checkout back restore snapshot's previewText
+            if (!fallbackText) {
+              const checkoutBackSnap = readCheckoutBackRestoreSnapshot();
+              const checkoutBackPreview = (checkoutBackSnap?.previewText ?? "").trim();
+              if (checkoutBackPreview.length >= 200 && isValidNonHollowBody(checkoutBackPreview)) {
+                fallbackText = checkoutBackPreview;
+              }
+            }
+            
             if (fallbackText) {
+              // Valid fallback body found - show it and enable signer setup path.
+              // Do NOT set proUpgradeUseStarterView(true) which leaves user in Retry-only mode.
               setAgreementDocumentText(fallbackText);
-              setProUpgradeUseStarterView(true);
+              setProUpgradeUseStarterView(false);
               // Protect from useLayoutEffect wipe when proFullDraftQualityRetry is true.
               lastKnownGoodAuthoritativeDraftRef.current = fallbackText;
               // Enable signer fields so user can continue to signing from the fallback body.
@@ -9794,22 +9894,72 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             // This keeps the user's starter visible so they can continue from where they were.
             // Also update lastKnownGoodAuthoritativeDraftRef to prevent useLayoutEffect from wiping
             // the starter text when draft is null and premiumPersistedFlowActive is false.
+            // Universal path rule: never show hollow skeleton + Retry as the paid landing.
+            // After pay, the path is: painted deal → signers → final review, not Retry loop.
             {
-              const starterFallback = buildAgreementPreviewText(merged.draft, {
-                starterPreview: true,
-                intakeText: mergedIntake,
-              });
-              // If starterFallback is empty, try the validated free one-pager
-              const freeOnePagerFallback = getFreeOnePagerFallbackForProFailure(merged.draft);
-              // Also try the checkout back restore snapshot's previewText as a last resort
-              const checkoutBackSnap = readCheckoutBackRestoreSnapshot();
-              const checkoutBackPreview = (checkoutBackSnap?.previewText ?? "").trim();
-              // Final fallback: preserve existing agreementDocumentText if it has content
-              const existingText = agreementDocumentTextRef.current.trim();
-              const fallbackText = starterFallback.trim() || freeOnePagerFallback.trim() || checkoutBackPreview || (existingText.length >= 200 ? existingText : "");
+              // Helper to check if a body is a valid non-hollow fallback
+              const isValidNonHollowBody = (body: string): boolean => {
+                const trimmed = body.trim();
+                if (trimmed.length < 200) return false;
+                const hollowCheck = evaluateSimpleHollowBodyGate(trimmed, merged.draft.parties ?? null, {
+                  intake: mergedIntake,
+                });
+                return !hollowCheck.isHollow;
+              };
+              
+              let fallbackText = "";
+              
+              // FIRST: Try existing agreementDocumentText (the painted starter before checkout)
+              const existingDocText = agreementDocumentTextRef.current.trim();
+              if (existingDocText.length >= 200 && isValidNonHollowBody(existingDocText)) {
+                fallbackText = existingDocText;
+              }
+              
+              // SECOND: Try lastKnownGoodAuthoritativeDraft
+              if (!fallbackText) {
+                const lastKnownGood = lastKnownGoodAuthoritativeDraftRef.current.trim();
+                if (lastKnownGood.length >= 200 && isValidNonHollowBody(lastKnownGood)) {
+                  fallbackText = lastKnownGood;
+                }
+              }
+              
+              // THIRD: Try building preview from draft (but only if not hollow)
+              if (!fallbackText) {
+                try {
+                  const starterFallback = buildAgreementPreviewText(merged.draft, {
+                    starterPreview: true,
+                    intakeText: mergedIntake,
+                  });
+                  if (starterFallback.trim().length >= 200 && isValidNonHollowBody(starterFallback)) {
+                    fallbackText = starterFallback;
+                  }
+                } catch {
+                  // ignore
+                }
+              }
+              
+              // FOURTH: Try free one-pager if draft preview is hollow
+              if (!fallbackText) {
+                const freeOnePagerFallback = getFreeOnePagerFallbackForProFailure(merged.draft);
+                if (freeOnePagerFallback.trim().length >= 200 && isValidNonHollowBody(freeOnePagerFallback)) {
+                  fallbackText = freeOnePagerFallback;
+                }
+              }
+              
+              // FIFTH: Try checkout back restore snapshot's previewText
+              if (!fallbackText) {
+                const checkoutBackSnap = readCheckoutBackRestoreSnapshot();
+                const checkoutBackPreview = (checkoutBackSnap?.previewText ?? "").trim();
+                if (checkoutBackPreview.length >= 200 && isValidNonHollowBody(checkoutBackPreview)) {
+                  fallbackText = checkoutBackPreview;
+                }
+              }
+              
               if (fallbackText) {
+                // Valid fallback body found - show it and enable signer setup path.
+                // Do NOT set proUpgradeUseStarterView(true) which leaves user in Retry-only mode.
                 setAgreementDocumentText(fallbackText);
-                setProUpgradeUseStarterView(true);
+                setProUpgradeUseStarterView(false);
                 // Protect from useLayoutEffect wipe when proFullDraftQualityRetry is true.
                 lastKnownGoodAuthoritativeDraftRef.current = fallbackText;
                 // Enable signer fields so user can continue to signing from the fallback body.
@@ -10879,32 +11029,74 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         } else {
           // Paid recovery: fallback to valid starter body so user can continue with signer fields.
           // Universal path rule: never show empty skeleton + Retry as the paid landing.
-          let paidFallbackBody = "";
-          try {
-            paidFallbackBody = buildAgreementPreviewText(merged.draft, {
-              starterPreview: true,
-              intakeText: mergedIntake,
+          // After a successful paid session, the visitor must see a real Pro body of THAT deal
+          // (visitor names, price, law) — or the last painted ≥200-char body of that deal.
+          // NEVER show hollow "covers due. Work." / Party A-B / Client-Service_provider skeleton.
+          
+          // Helper to check if a body is a valid non-hollow fallback
+          const isValidNonHollowBody = (body: string): boolean => {
+            const trimmed = body.trim();
+            if (trimmed.length < 200) return false;
+            const hollowCheck = evaluateSimpleHollowBodyGate(trimmed, merged.draft.parties ?? null, {
+              intake: mergedIntake,
             });
-          } catch {
-            paidFallbackBody = "";
+            return !hollowCheck.isHollow;
+          };
+          
+          let paidFallbackBody = "";
+          
+          // FIRST: Try existing agreementDocumentText if it's valid (the painted starter before checkout)
+          const existingDocText = agreementDocumentTextRef.current.trim();
+          if (existingDocText.length >= 200 && isValidNonHollowBody(existingDocText)) {
+            paidFallbackBody = existingDocText;
           }
-          // Try free one-pager if draft preview is empty
-          if (!paidFallbackBody.trim()) {
-            paidFallbackBody = getFreeOnePagerFallbackForProFailure(merged.draft);
+          
+          // SECOND: Try lastKnownGoodAuthoritativeDraft (may have been captured before checkout)
+          if (!paidFallbackBody) {
+            const lastKnownGood = lastKnownGoodAuthoritativeDraftRef.current.trim();
+            if (lastKnownGood.length >= 200 && isValidNonHollowBody(lastKnownGood)) {
+              paidFallbackBody = lastKnownGood;
+            }
           }
-          // Try checkout back restore snapshot's previewText as last resort
-          if (!paidFallbackBody.trim()) {
+          
+          // THIRD: Try building preview from draft (but only if not hollow)
+          if (!paidFallbackBody) {
+            try {
+              const draftPreview = buildAgreementPreviewText(merged.draft, {
+                starterPreview: true,
+                intakeText: mergedIntake,
+              });
+              if (draftPreview.trim().length >= 200 && isValidNonHollowBody(draftPreview)) {
+                paidFallbackBody = draftPreview;
+              }
+            } catch {
+              // ignore
+            }
+          }
+          
+          // FOURTH: Try free one-pager if draft preview is hollow or empty
+          if (!paidFallbackBody) {
+            const freeOnePager = getFreeOnePagerFallbackForProFailure(merged.draft);
+            if (freeOnePager.trim().length >= 200 && isValidNonHollowBody(freeOnePager)) {
+              paidFallbackBody = freeOnePager;
+            }
+          }
+          
+          // FIFTH: Try checkout back restore snapshot's previewText as last resort
+          if (!paidFallbackBody) {
             const checkoutBackSnap = readCheckoutBackRestoreSnapshot();
-            paidFallbackBody = (checkoutBackSnap?.previewText ?? "").trim();
+            const checkoutBackPreview = (checkoutBackSnap?.previewText ?? "").trim();
+            if (checkoutBackPreview.length >= 200 && isValidNonHollowBody(checkoutBackPreview)) {
+              paidFallbackBody = checkoutBackPreview;
+            }
           }
-          // Final fallback: preserve existing agreementDocumentText if it has content
-          if (!paidFallbackBody.trim() && agreementDocumentTextRef.current.trim().length >= 200) {
-            paidFallbackBody = agreementDocumentTextRef.current.trim();
-          }
+          
           if (paidFallbackBody.trim()) {
-            // Valid fallback body found - show it with signer fields enabled
+            // Valid fallback body found - show it and enable signer setup path.
+            // Do NOT set proUpgradeUseStarterView(true) which leaves user in Retry-only mode.
+            // After pay, the path is: painted deal → signers → final review, not Retry loop.
             setAgreementDocumentText(paidFallbackBody);
-            setProUpgradeUseStarterView(true);
+            setProUpgradeUseStarterView(false);
             lastKnownGoodAuthoritativeDraftRef.current = paidFallbackBody;
             setPremiumSendPathUnlocked(true);
             setPremiumPostCheckoutPhase(null);
