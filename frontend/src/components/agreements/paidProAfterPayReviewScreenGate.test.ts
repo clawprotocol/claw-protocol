@@ -321,8 +321,8 @@ describe("after-pay review-screen gate — intake wiring", () => {
     expect(intakeSrc).toContain('reason: "paid_pro_review_decision_on_card"');
 
     const afterPayFinalizeCta = intakeSrc.slice(
-      intakeSrc.indexOf("After-pay visitor + finalized two signers"),
-      intakeSrc.indexOf("After-pay visitor + finalized two signers") + 700,
+      intakeSrc.indexOf("After-pay visitor + finalized two signers: existing final-review decision"),
+      intakeSrc.indexOf("After-pay visitor + finalized two signers: existing final-review decision") + 700,
     );
     expect(afterPayFinalizeCta).toContain("paidSessionFinalReviewDecisionReady");
     expect(afterPayFinalizeCta).toContain("paid_pro_review_decision_on_card");
@@ -331,7 +331,7 @@ describe("after-pay review-screen gate — intake wiring", () => {
 
     const suppressStart = intakeSrc.indexOf("suppressFinalReviewActions={");
     expect(suppressStart).toBeGreaterThan(-1);
-    const suppressBlock = intakeSrc.slice(suppressStart, suppressStart + 280);
+    const suppressBlock = intakeSrc.slice(suppressStart, suppressStart + 420);
     expect(suppressBlock).toContain("paidProCanonicalReviewSignerSetupActive");
     expect(suppressBlock).toContain("!paidSessionFinalReviewDecisionReady");
 
