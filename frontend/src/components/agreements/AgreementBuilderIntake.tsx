@@ -668,7 +668,8 @@ import {
   resolveProReviewDocumentPanelHeading,
 } from "./premiumSituationIntelligence";
 import { PremiumAgreementReadonlyView } from "./PremiumAgreementReadonlyView";
-import { PaidProVisibleDocumentShell, PAID_PRO_FALLBACK_REBUILD_MIN_LEN } from "./paidProVisibleDocumentShell";
+import { PaidProVisibleDocumentShell } from "./paidProVisibleDocumentShell";
+import { meetsPaidSessionFallbackPaintFloor } from "./paidProFirstReviewDisplayAuthority";
 import {
   hasCanonicalReviewCorpusForRender,
   PAID_PRO_DOCUMENT_BODY_SOT_MIN_LEN,
@@ -29787,8 +29788,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           "Your intake is still available. Add or clarify details, retry a full Pro draft, or work from your starter version.";
   // Never overlay Retry on a locked / force-mounted Pro review corpus (pipeline-accepted
   // or SoT). That was the errant "Retry Pro draft" button over a successful Review.
-  // Also lock out Retry when a valid fallback rebuild from intake exists (≥200 chars).
+  // Also lock out Retry when a valid fallback rebuild from intake exists (≥200 chars non-hollow).
   // After pay, if the card is showing the visitor's deal, Retry must not own the footer.
+  // Issue #83: Retry lockout uses the SAME predicate as shell paint — meetsPaidSessionFallbackPaintFloor.
   // Check both #82 rebuild (acceptedCanonicalPlain) and lastKnownGood as fallback.
   const paidProReviewCorpusLocksOutRetry = Boolean(
     hasPaidProSourceOfTruth() ||
@@ -29796,8 +29798,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       acceptedPaidProAuthorityActive ||
       hasAcceptedPipelineReviewCorpusForRender() ||
       (hasPaidPremiumCompletionSession() &&
-        ((paidProFirstReviewDisplayContext.acceptedCanonicalPlain || "").trim().length >= PAID_PRO_FALLBACK_REBUILD_MIN_LEN ||
-          lastKnownGoodAuthoritativeDraftRef.current.trim().length >= PAID_PRO_FALLBACK_REBUILD_MIN_LEN)),
+        (meetsPaidSessionFallbackPaintFloor(
+          (paidProFirstReviewDisplayContext.acceptedCanonicalPlain || "").trim(),
+          paidProFirstReviewDisplayContext.intakeText,
+        ) ||
+          meetsPaidSessionFallbackPaintFloor(
+            lastKnownGoodAuthoritativeDraftRef.current.trim(),
+            paidProFirstReviewDisplayContext.intakeText,
+          ))),
   );
   const showRetryAsPrimaryCta = Boolean(
     !dashboardSignerSetupResumeUiActive &&

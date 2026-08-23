@@ -12,6 +12,12 @@ vi.mock("./paidProFirstReviewDisplayAuthority", () => ({
   logTest310BlockClassification: vi.fn(),
   logTest313HeadingRenderSource: vi.fn(),
   logTest314HeadingInvariant: vi.fn(),
+  meetsPaidSessionFallbackPaintFloor: vi.fn((body: string) => body.trim().length >= 200),
+  PAID_PRO_PAID_SESSION_FALLBACK_MIN_LEN: 200,
+}));
+
+vi.mock("./premiumCompletionStorage", () => ({
+  hasPaidPremiumCompletionSession: vi.fn(() => false),
 }));
 
 vi.mock("./paidProSignerMetadataCommitPolicy", () => ({
@@ -23,6 +29,7 @@ vi.mock("./paidProDocumentTitleOpeningRepair", () => ({
 }));
 
 const { resolvePaidProFirstReviewVisibleDisplayPlain } = await import("./paidProFirstReviewDisplayAuthority");
+const { hasPaidPremiumCompletionSession } = await import("./premiumCompletionStorage");
 
 /**
  * Canonical Harbor dump fixture for leak regression tests.
@@ -546,7 +553,7 @@ Elena Rodriguez Digital Agency`;
 }
 
 describe("resolvePaidProVisibleShellRenderBranch - fallback rebuild 200-999 chars", () => {
-  it("returns canonical_plain_forced (not empty) for Priya/Diego rebuild 200-999 chars during paid first-review", () => {
+  it("returns canonical_plain_forced (not empty) for Priya/Diego rebuild 200-999 chars during paid session fallback", () => {
     const fallbackBody = buildPriyaDiegoFallbackBody();
     expect(fallbackBody.length).toBeGreaterThanOrEqual(PAID_PRO_FALLBACK_REBUILD_MIN_LEN);
     expect(fallbackBody.length).toBeLessThan(PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN);
@@ -556,16 +563,17 @@ describe("resolvePaidProVisibleShellRenderBranch - fallback rebuild 200-999 char
       sotLen: 0,
       htmlLen: 0,
       canonicalPlainLen: fallbackBody.length,
-      canonicalPlainSource: "paid_pro_fallback_rebuild",
+      canonicalPlainSource: "paid_session_intake_rebuild",
       paidProFirstReviewActive: true,
+      paidSessionFallbackActive: true,
     });
 
     expect(branch).toBe("canonical_plain_forced");
-    expect(reason).toBe("paid_pro_fallback_rebuild_from_intake");
+    expect(reason).toBe("paid_session_intake_rebuild");
     expect(branch).not.toBe("empty");
   });
 
-  it("returns canonical_plain_forced (not empty) for Marcus/Elena rebuild 200-999 chars during paid first-review", () => {
+  it("returns canonical_plain_forced (not empty) for Marcus/Elena rebuild 200-999 chars during paid session fallback", () => {
     const fallbackBody = buildMarcusElenaFallbackBody();
     expect(fallbackBody.length).toBeGreaterThanOrEqual(PAID_PRO_FALLBACK_REBUILD_MIN_LEN);
     expect(fallbackBody.length).toBeLessThan(PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN);
@@ -575,16 +583,17 @@ describe("resolvePaidProVisibleShellRenderBranch - fallback rebuild 200-999 char
       sotLen: 0,
       htmlLen: 0,
       canonicalPlainLen: fallbackBody.length,
-      canonicalPlainSource: "paid_pro_fallback_rebuild",
+      canonicalPlainSource: "paid_session_intake_rebuild",
       paidProFirstReviewActive: true,
+      paidSessionFallbackActive: true,
     });
 
     expect(branch).toBe("canonical_plain_forced");
-    expect(reason).toBe("paid_pro_fallback_rebuild_from_intake");
+    expect(reason).toBe("paid_session_intake_rebuild");
     expect(branch).not.toBe("empty");
   });
 
-  it("still returns empty when canonicalPlainLen < 200 during paid first-review", () => {
+  it("still returns empty when canonicalPlainLen < 200 during paid first-review without fallback", () => {
     const { branch, reason } = resolvePaidProVisibleShellRenderBranch({
       hasSoT: false,
       sotLen: 0,
@@ -592,13 +601,14 @@ describe("resolvePaidProVisibleShellRenderBranch - fallback rebuild 200-999 char
       canonicalPlainLen: 150,
       canonicalPlainSource: "none",
       paidProFirstReviewActive: true,
+      paidSessionFallbackActive: false,
     });
 
     expect(branch).toBe("empty");
     expect(reason).toBe("paid_pro_awaiting_display_authority");
   });
 
-  it("still returns empty when paidProFirstReviewActive is false and canonicalPlainLen < 1001", () => {
+  it("still returns empty when paidProFirstReviewActive is false and no paidSessionFallbackActive and canonicalPlainLen < 1001", () => {
     const fallbackBody = buildPriyaDiegoFallbackBody();
     expect(fallbackBody.length).toBeLessThan(PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN);
 
@@ -609,6 +619,7 @@ describe("resolvePaidProVisibleShellRenderBranch - fallback rebuild 200-999 char
       canonicalPlainLen: fallbackBody.length,
       canonicalPlainSource: "none",
       paidProFirstReviewActive: false,
+      paidSessionFallbackActive: false,
     });
 
     expect(branch).toBe("empty");
@@ -626,6 +637,7 @@ describe("resolvePaidProVisibleShellRenderBranch - fallback rebuild 200-999 char
       canonicalPlainLen: longSoT.length,
       canonicalPlainSource: "paid_pro_accepted_canonical_source_of_truth",
       paidProFirstReviewActive: true,
+      paidSessionFallbackActive: true,
     });
 
     expect(branch).toBe("canonical_plain_forced");
@@ -638,14 +650,15 @@ describe("resolveCanonicalPlainForVisibleShell - fallback rebuild 200-999 chars"
     vi.clearAllMocks();
   });
 
-  it("paints Priya/Diego fallback body (200-999 chars) during paidProActive", () => {
+  it("paints Priya/Diego fallback body (200-999 chars) during paid session", () => {
     const fallbackBody = buildPriyaDiegoFallbackBody();
     expect(fallbackBody.length).toBeGreaterThanOrEqual(PAID_PRO_FALLBACK_REBUILD_MIN_LEN);
     expect(fallbackBody.length).toBeLessThan(PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN);
 
+    vi.mocked(hasPaidPremiumCompletionSession).mockReturnValue(true);
     vi.mocked(resolvePaidProFirstReviewVisibleDisplayPlain).mockReturnValue({
       plain: fallbackBody,
-      source: "paid_pro_fallback_rebuild",
+      source: "paid_session_intake_rebuild",
       fallbackReason: null,
       hasSoT: false,
       hasServerFullDoc: false,
@@ -655,6 +668,7 @@ describe("resolveCanonicalPlainForVisibleShell - fallback rebuild 200-999 chars"
     const result = resolveCanonicalPlainForVisibleShell({
       paidProActive: true,
       premiumCheckoutCompleted: true,
+      intakeText: "Priya Sharma Consulting LLC and Diego Martinez",
     });
 
     expect(result.plain.length).toBeGreaterThanOrEqual(PAID_PRO_FALLBACK_REBUILD_MIN_LEN);
@@ -664,14 +678,15 @@ describe("resolveCanonicalPlainForVisibleShell - fallback rebuild 200-999 chars"
     expect(result.plain).toContain("Texas");
   });
 
-  it("paints Marcus/Elena fallback body (200-999 chars) during paidProActive", () => {
+  it("paints Marcus/Elena fallback body (200-999 chars) during paid session", () => {
     const fallbackBody = buildMarcusElenaFallbackBody();
     expect(fallbackBody.length).toBeGreaterThanOrEqual(PAID_PRO_FALLBACK_REBUILD_MIN_LEN);
     expect(fallbackBody.length).toBeLessThan(PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN);
 
+    vi.mocked(hasPaidPremiumCompletionSession).mockReturnValue(true);
     vi.mocked(resolvePaidProFirstReviewVisibleDisplayPlain).mockReturnValue({
       plain: fallbackBody,
-      source: "paid_pro_fallback_rebuild",
+      source: "paid_session_intake_rebuild",
       fallbackReason: null,
       hasSoT: false,
       hasServerFullDoc: false,
@@ -681,6 +696,7 @@ describe("resolveCanonicalPlainForVisibleShell - fallback rebuild 200-999 chars"
     const result = resolveCanonicalPlainForVisibleShell({
       paidProActive: true,
       premiumCheckoutCompleted: true,
+      intakeText: "Marcus Chen Technology Solutions and Elena Rodriguez",
     });
 
     expect(result.plain.length).toBeGreaterThanOrEqual(PAID_PRO_FALLBACK_REBUILD_MIN_LEN);
@@ -690,9 +706,10 @@ describe("resolveCanonicalPlainForVisibleShell - fallback rebuild 200-999 chars"
     expect(result.plain).toContain("California");
   });
 
-  it("does NOT paint fallback body when paidProActive is false", () => {
+  it("does NOT paint fallback body when no paid session", () => {
     const fallbackBody = buildPriyaDiegoFallbackBody();
 
+    vi.mocked(hasPaidPremiumCompletionSession).mockReturnValue(false);
     vi.mocked(resolvePaidProFirstReviewVisibleDisplayPlain).mockReturnValue({
       plain: fallbackBody,
       source: "none",
