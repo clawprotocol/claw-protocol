@@ -139,16 +139,127 @@ function hasHollowSections(body: string): boolean {
 }
 
 /**
+ * Known truncation/corruption patterns that indicate broken AI output.
+ * These should NEVER appear in a valid free document.
+ */
+const CORRUPTED_OUTPUT_PATTERNS = [
+  /\bcovers\s+due\.\s*Work/i,
+  /\bdue\.\s+Work\b/i,
+  /\bThis agreement covers\s*\.\s/i,
+  /\bScope:\s*\.\s/i,
+  /\bPurpose:\s*\.\s/i,
+];
+
+/**
+ * Check if body contains corrupted/truncated AI output patterns.
+ */
+function hasCorruptedOutput(body: string): boolean {
+  return CORRUPTED_OUTPUT_PATTERNS.some(p => p.test(body));
+}
+
+/**
+ * Extract named parties from intake text (common patterns).
+ */
+function extractNamedPartiesFromIntake(intake: string): string[] {
+  const names: string[] = [];
+  
+  // Pattern: "Name of Company hires/hiring Name"
+  const hiresMatch = intake.match(
+    /\b([A-Z][a-zA-Z\s]+(?:\s+(?:LLC|Inc\.?|Corp\.?|Studio|Company|Co\.?))?)\s+(?:of\s+[A-Za-z\s]+?)?\s*(?:is\s+)?(?:hires?|hiring)\s+([A-Z][a-zA-Z\s]+)/i
+  );
+  if (hiresMatch) {
+    const p1 = hiresMatch[1].trim().replace(/\s+of\s*$/i, "");
+    const p2 = hiresMatch[2].trim();
+    if (p1 && !isHollowPartyName(p1)) names.push(p1);
+    if (p2 && !isHollowPartyName(p2)) names.push(p2);
+  }
+  
+  // Pattern: "between A and B"
+  const betweenMatch = intake.match(
+    /\bbetween\s+([A-Z][a-zA-Z\s]+(?:\s+(?:LLC|Inc\.?|Corp\.?|Studio|Company|Co\.?))?)\s+and\s+([A-Z][a-zA-Z\s]+)/i
+  );
+  if (betweenMatch && names.length === 0) {
+    const p1 = betweenMatch[1].trim();
+    const p2 = betweenMatch[2].trim();
+    if (p1 && !isHollowPartyName(p1)) names.push(p1);
+    if (p2 && !isHollowPartyName(p2)) names.push(p2);
+  }
+  
+  // Pattern: "my friend/colleague Name"
+  const friendMatch = intake.match(
+    /\bmy\s+(?:friend|colleague|neighbor|partner|associate)\s+([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)*)/i
+  );
+  if (friendMatch) {
+    const name = friendMatch[1].trim();
+    if (name && !isHollowPartyName(name) && !names.includes(name)) {
+      names.push(name);
+    }
+  }
+  
+  // Pattern: "Name is the client/designer/provider"
+  const roleMatch = intake.matchAll(
+    /\b([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)*)\s+is\s+the\s+(?:client|designer|provider|contractor|consultant)/gi
+  );
+  for (const match of roleMatch) {
+    const name = match[1].trim();
+    if (name && !isHollowPartyName(name) && !names.includes(name)) {
+      names.push(name);
+    }
+  }
+  
+  return names.slice(0, 4);
+}
+
+/**
+ * Extract jurisdiction/state from intake text.
+ */
+function extractJurisdictionFromIntake(intake: string): string | null {
+  const intakeLower = intake.toLowerCase();
+  const states = [
+    "texas", "california", "new york", "delaware", "florida", "arizona",
+    "nevada", "washington", "illinois", "colorado", "georgia", "north carolina",
+    "virginia", "pennsylvania", "ohio", "michigan", "massachusetts", "tennessee",
+    "oregon", "new jersey", "maryland", "minnesota", "wisconsin", "indiana",
+    "missouri", "connecticut", "kentucky", "alabama", "south carolina", "louisiana",
+    "oklahoma", "iowa", "utah", "kansas", "arkansas", "nebraska", "mississippi",
+    "new mexico", "west virginia", "idaho", "hawaii", "maine", "new hampshire",
+    "rhode island", "montana", "vermont", "alaska", "south dakota", "north dakota",
+    "wyoming"
+  ];
+  
+  const lawMatch = intake.match(/\bgoverning\s+law\s+(?:is|:)?\s*([a-zA-Z\s]+)/i);
+  if (lawMatch) {
+    const candidate = lawMatch[1].trim().toLowerCase();
+    if (states.includes(candidate)) return candidate;
+  }
+  
+  for (const state of states) {
+    if (intakeLower.includes(state)) return state;
+  }
+  
+  return null;
+}
+
+/**
  * Simple frontend-side hollow body check for direct body/parties input.
  * Used as belt-and-suspenders check in case backend validation passes but body is still hollow.
  */
 export function evaluateSimpleHollowBodyGate(
   body: string | null | undefined,
   parties: { name: string; role: string }[] | null | undefined,
+  options?: {
+    intake?: string | null;
+    jurisdiction?: string | null;
+  },
 ): { isHollow: boolean; reason: string | null } {
   const text = (body ?? "").trim();
   if (!text || text.length < 200) {
     return { isHollow: true, reason: "body_too_short" };
+  }
+  
+  // Check for corrupted/truncated output patterns (e.g., "covers due. Work.")
+  if (hasCorruptedOutput(text)) {
+    return { isHollow: true, reason: "corrupted_output" };
   }
   
   // Check for role-only party names in the opening
@@ -160,6 +271,18 @@ export function evaluateSimpleHollowBodyGate(
     const p2 = openingMatch[2].trim().replace(/^["']|["']$/g, "");
     if (isHollowPartyName(p1) && isHollowPartyName(p2)) {
       return { isHollow: true, reason: "role_only_parties_in_body" };
+    }
+    
+    // If intake has named parties, body must have real names (not role placeholders)
+    const intake = options?.intake ?? "";
+    if (intake.length >= 20) {
+      const intakeNames = extractNamedPartiesFromIntake(intake);
+      if (intakeNames.length >= 2) {
+        // Intake has named parties - body should not have hollow party names
+        if (isHollowPartyName(p1) || isHollowPartyName(p2)) {
+          return { isHollow: true, reason: "intake_named_parties_but_body_has_placeholders" };
+        }
+      }
     }
   }
   
@@ -178,10 +301,24 @@ export function evaluateSimpleHollowBodyGate(
   
   // Check for missing payment amount AND missing governing law
   const hasPaymentAmount = /\$[\d,]+/.test(text);
-  const hasGoverningLaw = /(texas|california|new york|delaware|florida|arizona|nevada|washington|illinois|colorado|georgia|north carolina|virginia|pennsylvania|ohio|michigan|massachusetts|tennessee)/i.test(text);
+  const knownStates = /(texas|california|new york|delaware|florida|arizona|nevada|washington|illinois|colorado|georgia|north carolina|virginia|pennsylvania|ohio|michigan|massachusetts|tennessee)/i;
+  const hasGoverningLaw = knownStates.test(text);
   
   if (!hasPaymentAmount && !hasGoverningLaw) {
     return { isHollow: true, reason: "missing_payment_and_law" };
+  }
+  
+  // Check if intake specified a jurisdiction but body doesn't have it
+  const intakeJurisdiction = options?.jurisdiction || (options?.intake ? extractJurisdictionFromIntake(options.intake) : null);
+  if (intakeJurisdiction) {
+    const bodyLower = text.toLowerCase();
+    if (!bodyLower.includes(intakeJurisdiction.toLowerCase())) {
+      // Body is missing the jurisdiction from intake
+      // Check if body has "to be agreed" or similar placeholder for governing law
+      if (/governing law[:\s]*\n?\s*(?:to be agreed|tbd|n\/a)/i.test(text)) {
+        return { isHollow: true, reason: "intake_jurisdiction_dropped" };
+      }
+    }
   }
   
   return { isHollow: false, reason: null };
@@ -569,7 +706,10 @@ export function resolveFreeStarterReviewBody(
     );
     
     // Simple hollow body gate (belt and suspenders) - catches role-only parties and empty sections
-    const simpleHollowGate = evaluateSimpleHollowBodyGate(normalized.text, draft?.parties ?? null);
+    const simpleHollowGate = evaluateSimpleHollowBodyGate(normalized.text, draft?.parties ?? null, {
+      intake: rawIntakeResolved,
+      jurisdiction: draft?.jurisdiction ?? null,
+    });
     
     return {
       body: normalized.text.trim(),
@@ -676,7 +816,10 @@ export function resolveFreeStarterReviewBody(
   });
 
   // Simple hollow body gate (belt and suspenders) - catches role-only parties and empty sections
-  const simpleHollowGate = evaluateSimpleHollowBodyGate(normalized.text, draft?.parties ?? null);
+  const simpleHollowGate = evaluateSimpleHollowBodyGate(normalized.text, draft?.parties ?? null, {
+    intake: rawIntakeResolved,
+    jurisdiction: draft?.jurisdiction ?? null,
+  });
 
   const result: ResolveFreeStarterReviewBodyResult = {
     body: normalized.text,
