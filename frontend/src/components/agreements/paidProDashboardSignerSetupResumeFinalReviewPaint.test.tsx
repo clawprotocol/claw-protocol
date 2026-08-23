@@ -1,8 +1,8 @@
 /** @vitest-environment jsdom */
 /**
- * Dashboard signer-setup resume → Continue to signature links must paint the finalized
- * signer-hydrated corpus (names/titles/emails), not blank Name/Title lines from a longer
- * pre-signer SoT, even when GET /canonical-review-snapshot 404s.
+ * Dashboard signer-setup resume → Continue must paint the finalized signer-hydrated
+ * corpus (names/titles/emails), not blank Name/Title lines from a longer pre-signer SoT,
+ * even when GET /canonical-review-snapshot 404s.
  */
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";

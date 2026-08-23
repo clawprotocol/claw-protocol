@@ -2,6 +2,10 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
+import {
+  DASHBOARD_SIGNER_SETUP_RESUME_COMPLETE_CTA,
+  resolveDashboardSignerSetupResumePrimaryCta,
+} from "./signerSetupPartyIdentity";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const intakeSrc = readFileSync(join(here, "AgreementBuilderIntake.tsx"), "utf8");
@@ -40,5 +44,13 @@ describe("Continue after complete signers opens SimpleProFinalReviewScreen", () 
     expect(finalizeFn).toContain("setGuidedFinalReviewExplicitlyOpened(true)");
     expect(finalizeFn).toContain("setPaidProInlineSignerSetupLatched(false)");
     expect(finalizeFn).not.toContain("/app/esign");
+  });
+
+  it("dashboard signer-setup resume CTA is 'Continue', not 'Continue to signature links'", () => {
+    expect(DASHBOARD_SIGNER_SETUP_RESUME_COMPLETE_CTA).toBe("Continue");
+    const cta = resolveDashboardSignerSetupResumePrimaryCta({ signerDetailsComplete: true });
+    expect(cta.label).toBe("Continue");
+    expect(cta.action).toBe("guided_continue");
+    expect(cta.reason).toBe("dashboard_signer_setup_resume_complete");
   });
 });

@@ -441,7 +441,7 @@ for (const vp of VIEWPORTS) {
       await fillRecipientField(page, "party-3-email", "luis@example.test");
 
       const finalizeSignerDetails = page.getByRole("button", {
-        name: /Save signer details|Complete signer details|Finalize signer details and continue to review decision|Continue to signature links|Create signing links/i,
+        name: /Save signer details|Complete signer details|Finalize signer details and continue to review decision|Continue|Create signing links/i,
       }).first();
       await expect(finalizeSignerDetails).toBeVisible({ timeout: 20_000 });
       await finalizeSignerDetails.click();

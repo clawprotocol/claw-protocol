@@ -45,7 +45,7 @@ describe("dashboard signer-setup resume dedicated shell", () => {
     expect(createPageSrc).toContain("dashboardSignerSetupResumeShell");
   });
 
-  it("sticky CTA is Save signer details / Continue to signature links — never Retry Pro draft", () => {
+  it("sticky CTA is Save signer details / Continue — never Retry Pro draft", () => {
     expect(resolveDashboardSignerSetupResumePrimaryCta({ signerDetailsComplete: false })).toEqual({
       label: DASHBOARD_SIGNER_SETUP_RESUME_INCOMPLETE_CTA,
       action: "complete_recipient_details",
@@ -57,7 +57,7 @@ describe("dashboard signer-setup resume dedicated shell", () => {
       reason: "dashboard_signer_setup_resume_complete",
     });
     expect(DASHBOARD_SIGNER_SETUP_RESUME_INCOMPLETE_CTA).toBe("Save signer details");
-    expect(DASHBOARD_SIGNER_SETUP_RESUME_COMPLETE_CTA).toBe("Continue to signature links");
+    expect(DASHBOARD_SIGNER_SETUP_RESUME_COMPLETE_CTA).toBe("Continue");
     expect(intakeSrc).toContain("resolveDashboardSignerSetupResumePrimaryCta");
     expect(intakeSrc).toContain("dashboard_signer_setup_resume_complete");
     const completeIdx = intakeSrc.indexOf('cta.reason === "dashboard_signer_setup_resume_complete"');

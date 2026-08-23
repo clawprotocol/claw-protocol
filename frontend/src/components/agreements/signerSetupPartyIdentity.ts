@@ -122,7 +122,7 @@ export const PAID_PRO_PREPARE_ESIGN_DECISION_CTA = "Prepare for signing";
 /** Dashboard Complete signer details resume — sticky footer while metadata is incomplete. */
 export const DASHBOARD_SIGNER_SETUP_RESUME_INCOMPLETE_CTA = "Save signer details";
 /** Dashboard Complete signer details resume — sticky footer once name/title/email are complete. */
-export const DASHBOARD_SIGNER_SETUP_RESUME_COMPLETE_CTA = "Continue to signature links";
+export const DASHBOARD_SIGNER_SETUP_RESUME_COMPLETE_CTA = "Continue";
 
 export function resolveDashboardSignerSetupResumePrimaryCta(args: {
   signerDetailsComplete: boolean;
