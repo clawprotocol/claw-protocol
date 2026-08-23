@@ -19,17 +19,30 @@ import {
 } from "./partySlotIdentityNormalize";
 import { readPremiumPartyNamesHandoff } from "./premiumPartyNamesHandoff";
 import { resolveSignerSetupPartyIdentity } from "./signerSetupPartyIdentity";
-import { textContainsUnresolvedIdentityPlaceholders } from "../../agreement/partyPlaceholderDisplay";
+import {
+  stripInternalPartyRefFragments,
+  textContainsUnresolvedIdentityPlaceholders,
+} from "../../agreement/partyPlaceholderDisplay";
 import { sanitizePartiesInput, splitTwoPartiesFromJoinedLine, type StructuredTwoParties } from "./partyIntakeNormalize";
 
 const PLACEHOLDER_PARTY_NAME_RE =
   /\bparty\s*a\b|\bparty\s*b\b|edit\s+in\s+review|placeholder|to\s+be\s+(?:listed|finalized|added)|\(name\s+in\s+review\)/i;
 
 /**
+ * Trailing prepositions left after stripping identity tokens like [ORG_1].
+ * "Jordan Lee of [ORG_1]" → "Jordan Lee of" → "Jordan Lee"
+ */
+const TRAILING_ORG_PREPOSITION_RE = /\s+(?:of|at|for|from|on\s+behalf\s+of|representing|as\s+representative\s+of)\s*$/i;
+
+/**
  * Extract party names from common agreement opening patterns like:
  * - "This Agreement is entered into by and between [Party 1] and [Party 2]"
  * - "between [Party 1], and [Party 2]"
  * Returns null if no match or if extracted names look like placeholders.
+ *
+ * When validating party names, strips leftover identity tokens like [ORG_1] so
+ * "Jordan Lee of [ORG_1]" is recognized as the real name "Jordan Lee" for
+ * confidence checks. The returned names have tokens stripped.
  */
 export function extractRealPartyNamesFromPreview(preview: string): { party1: string; party2: string } | null {
   if (!preview || preview.length < 50) return null;
@@ -37,14 +50,17 @@ export function extractRealPartyNamesFromPreview(preview: string): { party1: str
   const betweenAndPattern = /\b(?:entered\s+into\s+)?(?:by\s+and\s+)?between\s+([^,\n]+?)\s+and\s+([^.,\n]+)/i;
   const match = firstChunk.match(betweenAndPattern);
   if (!match) return null;
-  const p1 = sanitizePartiesInput((match[1] || "").trim());
-  const p2 = sanitizePartiesInput((match[2] || "").trim());
-  if (!p1 || !p2 || p1.length < 2 || p2.length < 2) return null;
-  if (PLACEHOLDER_PARTY_NAME_RE.test(p1) || PLACEHOLDER_PARTY_NAME_RE.test(p2)) return null;
-  if (!isHighConfidencePartyNameForAutoPopulation(p1) || !isHighConfidencePartyNameForAutoPopulation(p2)) {
+  const p1Raw = sanitizePartiesInput((match[1] || "").trim());
+  const p2Raw = sanitizePartiesInput((match[2] || "").trim());
+  if (!p1Raw || !p2Raw || p1Raw.length < 2 || p2Raw.length < 2) return null;
+  if (PLACEHOLDER_PARTY_NAME_RE.test(p1Raw) || PLACEHOLDER_PARTY_NAME_RE.test(p2Raw)) return null;
+  const p1Stripped = stripInternalPartyRefFragments(p1Raw).replace(TRAILING_ORG_PREPOSITION_RE, "").trim();
+  const p2Stripped = stripInternalPartyRefFragments(p2Raw).replace(TRAILING_ORG_PREPOSITION_RE, "").trim();
+  if (!p1Stripped || !p2Stripped || p1Stripped.length < 2 || p2Stripped.length < 2) return null;
+  if (!isHighConfidencePartyNameForAutoPopulation(p1Stripped) || !isHighConfidencePartyNameForAutoPopulation(p2Stripped)) {
     return null;
   }
-  return { party1: p1, party2: p2 };
+  return { party1: p1Stripped, party2: p2Stripped };
 }
 
 /**
@@ -375,8 +391,9 @@ export function getDraftFirstReviewBlocker(
 ): DraftReviewFirstBlocker | null {
   if (!draft) return null;
   const plain = (opts?.userVisibleFullDocumentPlain || "").trim();
+  const partyNamesResolvedViaPreview = plain.length >= 50 && partyNamesResolvedViaRenderedPreview(draft, plain);
   if (draftHasPlaceholderParties(draft)) {
-    if (plain.length >= 50 && partyNamesResolvedViaRenderedPreview(draft, plain)) {
+    if (partyNamesResolvedViaPreview) {
       // Party names exist in the rendered preview but draft.parties has placeholders.
       // Don't block on party_placeholder — the user-visible names are real.
     } else {
@@ -385,6 +402,7 @@ export function getDraftFirstReviewBlocker(
   }
   if (
     plain.length >= 400 &&
+    !partyNamesResolvedViaPreview &&
     hydratedFullDocumentStillContainsUnresolvedIdentityPlaceholders(plain, draft, opts?.intakeText ?? null)
   ) {
     return "identity_placeholder_in_corpus";
