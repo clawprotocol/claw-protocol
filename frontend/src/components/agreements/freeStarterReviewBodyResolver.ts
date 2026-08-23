@@ -32,7 +32,10 @@ import {
   starterPreviewHasGluedSectionHeadings,
   starterPreviewHasParagraphSectionBreaks,
 } from "./starterPreviewFormatting";
-import { seedStatedTwoPartyNamesOnHollowDraft } from "./freeStarterMissingTenetAsk";
+import {
+  ensureStatedTwoPartyHiringNamesInBody,
+  seedStatedTwoPartyNamesOnHollowDraft,
+} from "./freeStarterMissingTenetAsk";
 
 export type FreeStarterRenderSource =
   | "repaired_starter_preview"
@@ -898,10 +901,11 @@ function buildRepairedStarterPreview(
 ): string {
   const seeded = intake.length > 0 ? seedStatedTwoPartyNamesOnHollowDraft(draft, intake) : draft;
   const draftForBuild = intake.length > 0 ? enrichStarterPreviewPartiesFromIntake(seeded, intake) : seeded;
-  return buildStarterAgreementPreviewForReview(draftForBuild, {
+  const painted = buildStarterAgreementPreviewForReview(draftForBuild, {
     intakeText: intake,
     placeholderGate,
   }).trim();
+  return ensureStatedTwoPartyHiringNamesInBody(painted, intake);
 }
 
 /**
@@ -985,7 +989,7 @@ export function resolveFreeStarterReviewBody(
       // continue to repaired preview below
     } else {
       return {
-        body: normalized.text.trim(),
+        body: ensureStatedTwoPartyHiringNamesInBody(normalized.text.trim(), rawIntakeResolved),
         source: "free_openai_direct",
         rawIntakeResolved,
         usedOriginalRaw: intakeMeta.usedOriginalRaw,
@@ -1096,7 +1100,7 @@ export function resolveFreeStarterReviewBody(
   });
 
   const result: ResolveFreeStarterReviewBodyResult = {
-    body: normalized.text,
+    body: ensureStatedTwoPartyHiringNamesInBody(normalized.text, rawIntakeResolved),
     source,
     rawIntakeResolved,
     usedOriginalRaw: intakeMeta.usedOriginalRaw,

@@ -167,6 +167,31 @@ export function seedStatedTwoPartyNamesOnHollowDraft(
   return draft;
 }
 
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * Visitor-visible body must carry the dump names, not just party metadata.
+ * Expands person-only slots and Party A/B to the stated two-party hiring pair.
+ */
+export function ensureStatedTwoPartyHiringNamesInBody(body: string, intakeText: string): string {
+  const pair = extractStatedTwoPartyHiringPair(intakeText);
+  if (!pair || pair.length !== 2) return body;
+  let out = String(body || "");
+  if (!out.trim()) return out;
+  out = out.replace(/\bParty A\b/g, pair[0].name);
+  out = out.replace(/\bParty B\b/g, pair[1].name);
+  for (const party of pair) {
+    const person = party.name.replace(/\s+of\s+.+$/i, "").trim();
+    if (person.length < 3 || person.toLowerCase() === party.name.toLowerCase()) continue;
+    if (!out.includes(party.name)) {
+      out = out.replace(new RegExp(`\\b${escapeRegExp(person)}\\b(?!\\s+of\\s+)`, "g"), party.name);
+    }
+  }
+  return out;
+}
+
 export function mergeNumberedTenetAnswersIntoIntake(
   intake: string,
   topics: string[],

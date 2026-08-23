@@ -37,6 +37,7 @@ import {
   mergeNumberedTenetAnswersIntoIntake,
   seedStatedTwoPartyNamesOnHollowDraft,
   shouldAskMissingTenetsBeforeFreePaint,
+  ensureStatedTwoPartyHiringNamesInBody,
 } from "./freeStarterMissingTenetAsk";
 import {
   isVisibleMissingTenetAskLanding,
@@ -300,9 +301,13 @@ Effective Date: upon full execution by both parties
       expect(partyBlob).not.toMatch(/\bParty B\b/i);
       assertNoInventedTermOrFourPartyAmong(partyBlob);
 
-      const body = buildStarterAgreementPreviewForReview(paintedDraft, { intakeText: answered });
+      const body = ensureStatedTwoPartyHiringNamesInBody(
+        buildStarterAgreementPreviewForReview(paintedDraft, { intakeText: answered }),
+        answered,
+      );
       expect(body).toMatch(/Priya Shah|Marcus Thompson/);
       expect(body).toMatch(/Diego Alvarez|Elena Rodriguez/);
+      expect(body).toMatch(/Northline Studio|Apex Consulting|Harbor Marks|Brightwave/);
       expect(partyBlob).toMatch(/Northline Studio|Apex Consulting|Harbor Marks|Brightwave/);
       expect(body).not.toMatch(/\bParty A\b/i);
       expect(body).not.toMatch(/\bParty B\b/i);
@@ -325,6 +330,7 @@ Effective Date: upon full execution by both parties
       });
       expect(resolved.body).toMatch(/Priya Shah|Marcus Thompson/);
       expect(resolved.body).toMatch(/Diego Alvarez|Elena Rodriguez/);
+      expect(resolved.body).toMatch(/Northline Studio|Apex Consulting|Harbor Marks|Brightwave/);
       expect(resolved.body).not.toMatch(/\bParty A\b/i);
       expect(resolved.body).not.toMatch(/\bParty B\b/i);
     },
