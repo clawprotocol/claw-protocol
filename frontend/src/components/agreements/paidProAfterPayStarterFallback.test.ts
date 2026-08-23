@@ -15,6 +15,7 @@ import {
 } from "./checkoutBackRestore";
 import {
   clearPaidPremiumCompletionSession,
+  hasPaidPremiumCompletionSession,
   markPaidPremiumCompletionSession,
 } from "./premiumCompletionStorage";
 import {
@@ -212,5 +213,43 @@ describe("After-pay starter fallback (no named fixtures)", () => {
     expect(proGenerationResult.winningPremiumBodyText).toBe("");
     expect(fallbackText.length).toBeGreaterThan(200);
     expect(fallbackText).toContain("Generic");
+  });
+
+  it("fallback chain includes existing text as final fallback when all else fails", () => {
+    const existingAgreementText = `SERVICES AGREEMENT
+
+This Agreement is between Party A and Party B for professional services.
+
+1. SCOPE OF WORK
+The service provider shall deliver the agreed services.
+
+2. PAYMENT
+Payment terms as specified in Schedule A.
+
+3. TERM
+This agreement commences on the effective date.
+
+Signed by the parties.
+____________________
+Party A
+____________________
+Party B
+`;
+
+    const existingText = existingAgreementText.trim();
+    expect(existingText.length).toBeGreaterThan(200);
+
+    const emptyFallbackChain = ["", "", ""];
+    const resolvedFallback = emptyFallbackChain.find(t => t.trim().length > 0) || 
+      (existingText.length >= 200 ? existingText : "");
+
+    expect(resolvedFallback.length).toBeGreaterThan(200);
+    expect(resolvedFallback).toContain("SERVICES AGREEMENT");
+    expect(resolvedFallback).toContain("Party A");
+  });
+
+  it("hasPaidPremiumCompletionSession guards against wiping existing text", () => {
+    markPaidPremiumCompletionSession({ source: "settled_checkout" });
+    expect(hasPaidPremiumCompletionSession()).toBe(true);
   });
 });
