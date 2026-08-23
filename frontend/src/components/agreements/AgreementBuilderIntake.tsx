@@ -9371,12 +9371,17 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             });
             // If starterFallback is empty, try the validated free one-pager
             const freeOnePagerFallback = getFreeOnePagerFallbackForProFailure(mergedF.draft);
-            const fallbackText = starterFallback.trim() || freeOnePagerFallback.trim();
+            // Also try the checkout back restore snapshot's previewText as a last resort
+            const checkoutBackSnap = readCheckoutBackRestoreSnapshot();
+            const checkoutBackPreview = (checkoutBackSnap?.previewText ?? "").trim();
+            const fallbackText = starterFallback.trim() || freeOnePagerFallback.trim() || checkoutBackPreview;
             if (fallbackText) {
               setAgreementDocumentText(fallbackText);
               setProUpgradeUseStarterView(true);
               // Protect from useLayoutEffect wipe when proFullDraftQualityRetry is true.
               lastKnownGoodAuthoritativeDraftRef.current = fallbackText;
+              // Enable signer fields so user can continue to signing from the fallback body.
+              setPremiumSendPathUnlocked(true);
             } else {
               setAgreementDocumentText("");
             }
@@ -9610,12 +9615,17 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             });
             // If starterFallback is empty, try the validated free one-pager
             const freeOnePagerFallback = getFreeOnePagerFallbackForProFailure(merged.draft);
-            const fallbackText = starterFallback.trim() || freeOnePagerFallback.trim();
+            // Also try the checkout back restore snapshot's previewText as a last resort
+            const checkoutBackSnap = readCheckoutBackRestoreSnapshot();
+            const checkoutBackPreview = (checkoutBackSnap?.previewText ?? "").trim();
+            const fallbackText = starterFallback.trim() || freeOnePagerFallback.trim() || checkoutBackPreview;
             if (fallbackText) {
               setAgreementDocumentText(fallbackText);
               setProUpgradeUseStarterView(true);
               // Protect from useLayoutEffect wipe when proFullDraftQualityRetry is true.
               lastKnownGoodAuthoritativeDraftRef.current = fallbackText;
+              // Enable signer fields so user can continue to signing from the fallback body.
+              setPremiumSendPathUnlocked(true);
             } else {
               setAgreementDocumentText("");
             }
@@ -9779,7 +9789,6 @@ const AgreementBuilderIntake: React.FC<Props> = ({
               setDisplayPhase("review");
             }
             setPremiumPersistedFlowActive(false);
-            setPremiumSendPathUnlocked(false);
             agreementDocumentDirtyRef.current = false;
             // Preserve starter text on generation failure instead of wiping to empty.
             // This keeps the user's starter visible so they can continue from where they were.
@@ -9792,14 +9801,20 @@ const AgreementBuilderIntake: React.FC<Props> = ({
               });
               // If starterFallback is empty, try the validated free one-pager
               const freeOnePagerFallback = getFreeOnePagerFallbackForProFailure(merged.draft);
-              const fallbackText = starterFallback.trim() || freeOnePagerFallback.trim();
+              // Also try the checkout back restore snapshot's previewText as a last resort
+              const checkoutBackSnap = readCheckoutBackRestoreSnapshot();
+              const checkoutBackPreview = (checkoutBackSnap?.previewText ?? "").trim();
+              const fallbackText = starterFallback.trim() || freeOnePagerFallback.trim() || checkoutBackPreview;
               if (fallbackText) {
                 setAgreementDocumentText(fallbackText);
                 setProUpgradeUseStarterView(true);
                 // Protect from useLayoutEffect wipe when proFullDraftQualityRetry is true.
                 lastKnownGoodAuthoritativeDraftRef.current = fallbackText;
+                // Enable signer fields so user can continue to signing from the fallback body.
+                setPremiumSendPathUnlocked(true);
               } else {
                 setAgreementDocumentText("");
+                setPremiumSendPathUnlocked(false);
               }
             }
             setReviewDocRefreshTick((n) => n + 1);
@@ -10861,22 +10876,43 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             setAgreementDocumentText("");
           }
         } else {
-          // Paid recovery must not paint/unlock from local completion snap without server GET.
-          setPremiumSendPathUnlocked(false);
-          setPremiumPostCheckoutPhase("processing");
-          setPremiumPipelineUserMessage("Confirming your server-locked agreement…");
-          setProFullDraftCustomGateMessage(
-            "Could not confirm the server review snapshot. Retry or contact support@lawdog.me.",
-          );
+          // Paid recovery: fallback to valid starter body so user can continue with signer fields.
+          // Universal path rule: never show empty skeleton + Retry as the paid landing.
+          let paidFallbackBody = "";
           try {
-            setAgreementDocumentText(
-              buildAgreementPreviewText(merged.draft, {
-                starterPreview: true,
-                intakeText: mergedIntake,
-              }),
-            );
+            paidFallbackBody = buildAgreementPreviewText(merged.draft, {
+              starterPreview: true,
+              intakeText: mergedIntake,
+            });
           } catch {
-            /* keep existing starter document text */
+            paidFallbackBody = "";
+          }
+          // Try free one-pager if draft preview is empty
+          if (!paidFallbackBody.trim()) {
+            paidFallbackBody = getFreeOnePagerFallbackForProFailure(merged.draft);
+          }
+          // Try checkout back restore snapshot's previewText as last resort
+          if (!paidFallbackBody.trim()) {
+            const checkoutBackSnap = readCheckoutBackRestoreSnapshot();
+            paidFallbackBody = (checkoutBackSnap?.previewText ?? "").trim();
+          }
+          if (paidFallbackBody.trim()) {
+            // Valid fallback body found - show it with signer fields enabled
+            setAgreementDocumentText(paidFallbackBody);
+            setProUpgradeUseStarterView(true);
+            lastKnownGoodAuthoritativeDraftRef.current = paidFallbackBody;
+            setPremiumSendPathUnlocked(true);
+            setPremiumPostCheckoutPhase(null);
+            setPremiumPipelineUserMessage(null);
+            setProFullDraftCustomGateMessage(null);
+          } else {
+            // No valid fallback body - show retry message but don't leave empty
+            setPremiumSendPathUnlocked(false);
+            setPremiumPostCheckoutPhase("processing");
+            setPremiumPipelineUserMessage("Confirming your server-locked agreement…");
+            setProFullDraftCustomGateMessage(
+              "Could not confirm the server review snapshot. Retry or contact support@lawdog.me.",
+            );
           }
         }
         setReviewDocRefreshTick((n) => n + 1);
