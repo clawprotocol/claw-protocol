@@ -90,3 +90,26 @@ export function shouldSkipPaidSessionReviewHydrateWait(args: {
 }): boolean {
   return Boolean(args.paidSessionActive && args.visibleDealBody);
 }
+
+/**
+ * After-pay visitor with two signers finalized: existing SimpleProFinalReviewScreen
+ * owns Send for review / Prepare for signing. Do not sit on another Continue,
+ * require the inline signer-setup latch, or suppress those on-card actions.
+ */
+export function shouldShowPaidSessionFinalReviewActions(args: {
+  paidSessionActive: boolean;
+  visibleDealBody: boolean;
+  twoSignerNamesAndEmailsComplete: boolean;
+  signerMetadataFinalized: boolean;
+  signaturePreparationRequested?: boolean;
+}): boolean {
+  return (
+    canOpenPaidSessionFinalReviewAfterSigners({
+      paidSessionActive: args.paidSessionActive,
+      visibleDealBody: args.visibleDealBody,
+      twoSignerNamesAndEmailsComplete: args.twoSignerNamesAndEmailsComplete,
+    }) &&
+    Boolean(args.signerMetadataFinalized) &&
+    !args.signaturePreparationRequested
+  );
+}

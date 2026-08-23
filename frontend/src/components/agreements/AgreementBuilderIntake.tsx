@@ -1168,6 +1168,7 @@ import {
   canOpenPaidSessionFinalReviewAfterSigners,
   resolvePaidSessionTwoSignerNamesEmailsComplete,
   resolvePaidSessionVisibleDealBody,
+  shouldShowPaidSessionFinalReviewActions,
   shouldShowPaidSessionGeneratingOverlay,
   shouldSkipPaidSessionReviewHydrateWait,
 } from "./paidProPaidSessionLanding";
@@ -20660,6 +20661,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
   const paidProSignerMetadataFinalized =
     hasAuthoritativeSigningSnapshot() || paidProSignerMetadataFinalizedLatch;
+  /** After-pay visitor + two signers finalized: on-card Send for review / Prepare for signing. */
+  const paidSessionFinalReviewDecisionReady = shouldShowPaidSessionFinalReviewActions({
+    paidSessionActive: hasPaidPremiumCompletionSession(),
+    visibleDealBody: paidSessionVisibleDealBody,
+    twoSignerNamesAndEmailsComplete:
+      paidSessionTwoSignersReady || paidProSignerDetailsGate.complete,
+    signerMetadataFinalized: paidProSignerMetadataFinalized,
+    signaturePreparationRequested,
+  });
   /** Trust rail + status chip only — finalized snapshot must not show "Signer details needed". */
   const paidProReviewSignerStatusReady = resolvePaidProReviewSignerStatusReady({
     signerDetailsGateComplete: paidProSignatureDetailsReady,
@@ -20805,9 +20815,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const showPaidProForcedFirstReviewTrackChooser = useMemo(
     () => {
       if (demoSessionUserActive) return false;
+      // After-pay visitor + finalized two signers: SimpleProFinalReviewScreen owns
+      // Send for review / Prepare for signing. Do not suppress those actions under chrome.
+      if (paidSessionFinalReviewDecisionReady) return false;
       return shouldShowPaidProReviewDecisionChrome(paidProReviewDecisionPhase);
     },
-    [paidProReviewDecisionPhase, demoSessionUserActive],
+    [paidProReviewDecisionPhase, demoSessionUserActive, paidSessionFinalReviewDecisionReady],
   );
 
   const paidProPostFinalizeCorpusHash = useMemo(
@@ -21859,6 +21872,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     !hideStickyForPaidProFinalizeDeliveryChoiceBase &&
     !hideStickyForStarterProContinuation &&
     !multiPartyProGateActive &&
+    !paidSessionFinalReviewDecisionReady &&
     (!guidedFinalReviewActive || paidProCanonicalStickyBarVisible);
 
 
@@ -23824,6 +23838,16 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             : "paid_session_signer_details_incomplete",
       };
     }
+    // After-pay visitor + finalized two signers: existing final-review decision
+    // (Send for review / Prepare for signing) owns the next step — not another Continue.
+    if (paidSessionFinalReviewDecisionReady && !dashboardSignerSetupResumeUiActive) {
+      return {
+        label: "",
+        action: "guided_continue",
+        disabled: true,
+        reason: "paid_pro_review_decision_on_card",
+      };
+    }
     // Dashboard signer-setup resume owns the sticky CTA — never Retry Pro draft / Describe agreement.
     if (dashboardSignerSetupResumeUiActive && paidProCanonicalReviewSignerSetupActive) {
       const resumeCta = resolveDashboardSignerSetupResumePrimaryCta({
@@ -24586,6 +24610,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     paidProSignerDetailsGate.complete,
     paidSessionVisibleDealBody,
     paidSessionTwoSignersReady,
+    paidSessionFinalReviewDecisionReady,
     paidProSignerMetadataFinalizedLatch,
     canonicalPaidCreateFlowFirstReviewActive,
     authoritativeCreateFlowReviewShellInput,
@@ -33033,13 +33058,17 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           case "guided_continue": {
             // Continue after complete signers opens SimpleProFinalReviewScreen.
             // Do not seed e-sign setup from this Continue. Send-for-signature lives on final review.
+            // After-pay visitor signers can be complete without paidProInlineSignerSetupLatched.
             if (
               cta.reason === "demo_session_signer_details_complete" ||
               cta.reason === "demo_session_signer_details_complete_fallback" ||
               cta.reason === "dashboard_signer_setup_resume_complete" ||
               (cta.reason === "paid_pro_signer_details_complete" &&
-                paidProInlineSignerSetupLatched &&
-                !signaturePreparationRequested)
+                !signaturePreparationRequested &&
+                (paidProInlineSignerSetupLatched ||
+                  paidSessionSkipReviewHydrateWait ||
+                  paidSessionFinalReviewAfterSignersReady ||
+                  paidSessionTwoSignersReady))
             ) {
               void finalizePaidProSignerMetadataAndOpenReviewDecision();
               return;
@@ -33250,8 +33279,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         unifiedPrimaryCta.action === "guided_continue" &&
         !unifiedPrimaryCta.disabled &&
         unifiedPrimaryCta.reason === "paid_pro_signer_details_complete" &&
-        paidProInlineSignerSetupLatched &&
-        !signaturePreparationRequested
+        !signaturePreparationRequested &&
+        (paidProInlineSignerSetupLatched ||
+          paidSessionSkipReviewHydrateWait ||
+          paidSessionFinalReviewAfterSignersReady ||
+          paidSessionTwoSignersReady)
       ) {
         void finalizePaidProSignerMetadataAndOpenReviewDecision();
         return;
@@ -36440,16 +36472,21 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                           suppressShellDuplicatedChrome={paidProReviewCompactChrome}
                                           suppressFinalReviewActions={
                                             paidProCanonicalReviewSignerSetupActive ||
-                                            showPaidProForcedFirstReviewTrackChooser
+                                            (showPaidProForcedFirstReviewTrackChooser &&
+                                              !paidSessionFinalReviewDecisionReady)
                                           }
                                           suppressPostDocumentScrollSpacer={
                                             paidProCanonicalReviewSignerSetupActive ||
-                                            showPaidProForcedFirstReviewTrackChooser
+                                            (showPaidProForcedFirstReviewTrackChooser &&
+                                              !paidSessionFinalReviewDecisionReady)
                                           }
                                           stickyBottomScrollInsetPx={
                                             simpleCreateStickyBottomBarVisible &&
                                             !paidProCanonicalReviewSignerSetupActive &&
-                                            !showPaidProForcedFirstReviewTrackChooser
+                                            !(
+                                              showPaidProForcedFirstReviewTrackChooser &&
+                                              !paidSessionFinalReviewDecisionReady
+                                            )
                                               ? stickyBottomScrollInsetPx
                                               : 0
                                           }
