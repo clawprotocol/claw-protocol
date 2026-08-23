@@ -35337,20 +35337,36 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                   ) : (
                                     <div className="mx-auto w-full max-w-[850px] px-0 sm:px-1">
                                       <div
-                                        className="rounded-lg border border-amber-500/45 bg-amber-950/25 px-4 py-5 sm:px-6 sm:py-6"
+                                        className={`rounded-lg px-4 py-5 sm:px-6 sm:py-6 ${
+                                          hasPaidPremiumCompletionSession()
+                                            ? "border border-amber-400/50 bg-amber-50/95"
+                                            : "border border-amber-500/45 bg-amber-950/25"
+                                        }`}
                                         role="status"
                                         aria-live="polite"
                                       >
-                                        <p className="text-sm font-medium leading-relaxed text-amber-100/95 sm:text-[0.9375rem]">
+                                        <p className={`text-sm font-medium leading-relaxed sm:text-[0.9375rem] ${
+                                          hasPaidPremiumCompletionSession()
+                                            ? "text-amber-900"
+                                            : "text-amber-100/95"
+                                        }`}>
                                           {proAmberRecoveryHeadline}
                                         </p>
-                                        <p className="mt-2 text-xs leading-relaxed text-amber-200/90 sm:text-sm">
+                                        <p className={`mt-2 text-xs leading-relaxed sm:text-sm ${
+                                          hasPaidPremiumCompletionSession()
+                                            ? "text-amber-800/90"
+                                            : "text-amber-200/90"
+                                        }`}>
                                           {proAmberRecoveryBody}
                                         </p>
                                         <div className="mt-4 flex flex-col gap-2 sm:mt-5 sm:flex-row sm:flex-wrap sm:items-stretch sm:gap-2">
                                           <button
                                             type="button"
-                                            className="inline-flex min-h-[2.75rem] w-full items-center justify-center rounded-lg border border-amber-500/50 bg-amber-500/15 px-4 py-2.5 text-sm font-semibold text-amber-50 transition hover:bg-amber-500/25 sm:w-auto"
+                                            className={`inline-flex min-h-[2.75rem] w-full items-center justify-center rounded-lg px-4 py-2.5 text-sm font-semibold transition sm:w-auto ${
+                                              hasPaidPremiumCompletionSession()
+                                                ? "border border-amber-600/70 bg-amber-600 text-white hover:bg-amber-700"
+                                                : "border border-amber-500/50 bg-amber-500/15 text-amber-50 hover:bg-amber-500/25"
+                                            }`}
                                             onClick={handleRetryProFullDraft}
                                           >
                                             {hasPaidPremiumCompletionSession()
@@ -35368,7 +35384,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                           ) : null}
                                           <button
                                             type="button"
-                                            className="inline-flex min-h-[2.75rem] w-full items-center justify-center rounded-lg border border-slate-500/50 bg-slate-900/50 px-4 py-2.5 text-sm font-medium text-slate-200 transition hover:bg-slate-800/60 sm:w-auto"
+                                            className={`inline-flex min-h-[2.75rem] w-full items-center justify-center rounded-lg px-4 py-2.5 text-sm font-medium transition sm:w-auto ${
+                                              hasPaidPremiumCompletionSession()
+                                                ? "border border-stone-300/90 bg-white text-stone-700 hover:bg-stone-50"
+                                                : "border border-slate-500/50 bg-slate-900/50 text-slate-200 hover:bg-slate-800/60"
+                                            }`}
                                             onClick={handleProUpgradeUseStarterInstead}
                                           >
                                             {hasPaidPremiumCompletionSession()
@@ -35381,22 +35401,41 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                   )
                                 ) : null}
                                 {proUpgradeUseStarterView ? (
-                                  <div className="mx-auto w-full max-w-[min(100%,58rem)] px-0 sm:px-1">
-                                    <p className="mb-3 text-sm leading-relaxed text-slate-400">
+                                  <div className={`mx-auto w-full px-0 sm:px-1 ${
+                                    hasPaidPremiumCompletionSession()
+                                      ? "max-w-[850px]"
+                                      : "max-w-[min(100%,58rem)]"
+                                  }`}>
+                                    <p className={`mb-3 text-sm leading-relaxed ${
+                                      hasPaidPremiumCompletionSession()
+                                        ? "text-stone-600"
+                                        : "text-slate-400"
+                                    }`}>
                                       You are on your starter draft. Refine the instructions above, or retry LawDog Pro
                                       when you are ready. Nothing is sent from this page.
                                     </p>
                                     <div
                                       className={`rounded-lg transition-[box-shadow,ring-color] duration-500 ${
-                                        !hasFullDraftAccess
-                                          ? "rounded-xl border border-slate-800/45 bg-slate-950/15 p-0.5"
-                                          : ""
+                                        hasPaidPremiumCompletionSession()
+                                          ? "rounded-sm border border-stone-200/90 bg-[#faf7f0] shadow-[0_1px_2px_rgba(0,0,0,0.05),0_22px_48px_-8px_rgba(15,23,42,0.28)] ring-1 ring-black/[0.07]"
+                                          : !hasFullDraftAccess
+                                            ? "rounded-xl border border-slate-800/45 bg-slate-950/15 p-0.5"
+                                            : ""
                                       }`}
                                     >
                                       <textarea
                                         ref={agreementPreviewEditorRef}
                                         id="claw-agreement-preview-editor"
-                                        className="min-h-[clamp(18rem,52vh,32rem)] max-h-[min(56rem,84vh)] w-full max-w-[min(100%,58rem)] resize-y overflow-y-auto whitespace-pre-wrap rounded-xl border border-slate-600/50 bg-[#101c30] px-7 py-8 font-serif text-[16px] leading-[1.92] text-slate-100/95 antialiased outline-none [text-wrap:pretty] shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] focus:border-emerald-500/55 focus:ring-2 focus:ring-emerald-400/30 sm:px-9 sm:py-9 sm:text-[17px] sm:leading-[1.95] md:max-w-[60rem]"
+                                        style={
+                                          simpleCreateStickyBottomBarVisible && stickyBottomScrollInsetPx > 0
+                                            ? { paddingBottom: `${stickyBottomScrollInsetPx}px` }
+                                            : undefined
+                                        }
+                                        className={
+                                          hasPaidPremiumCompletionSession()
+                                            ? "min-h-[clamp(18rem,52vh,32rem)] max-h-[min(56rem,84vh)] w-full resize-y overflow-y-auto whitespace-pre-wrap rounded-sm border-0 bg-transparent px-7 py-8 font-serif text-[16px] leading-[1.92] text-stone-900 antialiased outline-none [text-wrap:pretty] focus:ring-2 focus:ring-emerald-500/30 sm:px-9 sm:py-9 sm:text-[17px] sm:leading-[1.95]"
+                                            : "min-h-[clamp(18rem,52vh,32rem)] max-h-[min(56rem,84vh)] w-full max-w-[min(100%,58rem)] resize-y overflow-y-auto whitespace-pre-wrap rounded-xl border border-slate-600/50 bg-[#101c30] px-7 py-8 font-serif text-[16px] leading-[1.92] text-slate-100/95 antialiased outline-none [text-wrap:pretty] shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] focus:border-emerald-500/55 focus:ring-2 focus:ring-emerald-400/30 sm:px-9 sm:py-9 sm:text-[17px] sm:leading-[1.95] md:max-w-[60rem]"
+                                        }
                                         value={agreementDocumentText}
                                         onChange={(e) => {
                                           agreementDocumentDirtyRef.current = true;
