@@ -904,10 +904,27 @@ export function evaluateHollowBodyGate(
   // Also add reasons from simple hollow gate if present
   if (resolveResult.hollowBodyReason && !reasons.includes(resolveResult.hollowBodyReason)) {
     reasons.push(resolveResult.hollowBodyReason);
+    
+    // Map hollow body reasons to missing tenets for question prompts
+    const hollowReason = resolveResult.hollowBodyReason;
+    if (
+      (hollowReason === "role_only_parties_in_body" ||
+       hollowReason === "role_only_parties_in_draft" ||
+       hollowReason === "intake_named_parties_but_body_has_placeholders") &&
+      !missingTenets.includes("parties")
+    ) {
+      missingTenets.push("parties");
+    }
+    if (hollowReason === "intake_jurisdiction_dropped" && !missingTenets.includes("governing_law")) {
+      missingTenets.push("governing_law");
+    }
   }
 
-  const shouldAskQuestions = missingTenets.length >= 1 && missingTenets.length <= 3;
-  const shouldRedirectToPro = missingTenets.length >= 4 || reasons.length >= 4;
+  // Corrupted output (e.g., "covers due. Work.") should redirect to Pro
+  const hasCorruptedOutput = reasons.includes("corrupted_output");
+  
+  const shouldAskQuestions = missingTenets.length >= 1 && missingTenets.length <= 3 && !hasCorruptedOutput;
+  const shouldRedirectToPro = missingTenets.length >= 4 || reasons.length >= 4 || hasCorruptedOutput;
 
   return {
     isHollow: true,

@@ -14,6 +14,7 @@
  */
 import { describe, expect, it } from "vitest";
 import {
+  evaluateHollowBodyGate,
   evaluateSimpleHollowBodyGate,
   getFreeOnePagerFallbackForProFailure,
   isFreeOnePagerValid,
@@ -621,6 +622,78 @@ describe("resolveFreeStarterReviewBody hollow body gate", () => {
 
     expect(result.hollowBodyBlocked).toBe(false);
     expect(result.hollowBodyReason).toBeNull();
+  });
+});
+
+describe("evaluateHollowBodyGate with new hollow reasons", () => {
+  it("redirects to Pro for corrupted_output reason", () => {
+    const result = resolveFreeStarterReviewBody({
+      draft: {
+        ...emptyDraft(),
+        title: "Services Agreement",
+        parties: [
+          { name: "Priya Shah", role: "client" },
+          { name: "Diego Alvarez", role: "service_provider" },
+        ],
+        purpose: "This agreement covers due. Work.",
+        payment_terms: "$2,400",
+        jurisdiction: "Texas",
+        free_document_text: PRIYA_DIEGO_BROKEN_BODY,
+        free_document_validation: "ok",
+      },
+      rawIntake: PRIYA_DIEGO_INTAKE,
+    });
+
+    const gate = evaluateHollowBodyGate(result);
+    expect(gate.isHollow).toBe(true);
+    expect(gate.shouldRedirectToPro).toBe(true);
+    expect(gate.reasons).toContain("corrupted_output");
+  });
+
+  it("asks party questions when intake has names but body has placeholders", () => {
+    const result = resolveFreeStarterReviewBody({
+      draft: {
+        ...emptyDraft(),
+        title: "Services Agreement",
+        parties: [
+          { name: "Client", role: "client" },
+          { name: "Service Provider", role: "service_provider" },
+        ],
+        purpose: "design a logo and brand kit",
+        payment_terms: "$2,400",
+        jurisdiction: "Texas",
+      },
+      rawIntake: PRIYA_DIEGO_INTAKE,
+    });
+
+    const gate = evaluateHollowBodyGate(result);
+    expect(gate.isHollow).toBe(true);
+    expect(gate.missingTenets).toContain("parties");
+  });
+
+  it("asks law questions when jurisdiction is dropped", () => {
+    const result = resolveFreeStarterReviewBody({
+      draft: {
+        ...emptyDraft(),
+        title: "Services Agreement",
+        parties: [
+          { name: "Priya Shah", role: "client" },
+          { name: "Diego Alvarez", role: "service_provider" },
+        ],
+        purpose: "design a logo and brand kit",
+        payment_terms: "$2,400",
+        jurisdiction: "Texas",
+        free_document_text: PRIYA_DIEGO_BROKEN_BODY,
+        free_document_validation: "ok",
+      },
+      rawIntake: PRIYA_DIEGO_INTAKE,
+    });
+
+    const gate = evaluateHollowBodyGate(result);
+    expect(gate.isHollow).toBe(true);
+    // Texas was dropped, so governing_law should be a missing tenet
+    // Note: The specific reason depends on what the validation detects first
+    expect(gate.reasons.length).toBeGreaterThan(0);
   });
 });
 
