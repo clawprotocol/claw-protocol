@@ -310,6 +310,7 @@ import {
   getDraftFirstReviewBlocker,
   getPrimaryStructuredFixReviewField,
   mergePremiumDraftPartiesWithRecipientPriority,
+  partyNamesResolvedViaRenderedPreview,
   pickRecipientNameForHandoff,
   pickRecipientSignerLabelsForHandoff,
 } from "./reviewPlaceholderGuard";
@@ -23735,12 +23736,16 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             !premiumPersistedFlowActive &&
             draftPartyPlaceholdersOkViaLivePreview(draft, displayLivePreviewModel.partiesLine, displayLivePreviewModel.partiesStructured ?? null),
         );
+        /** Party names are in the rendered agreement preview even if draft.parties has placeholders. */
+        const partyNamesResolvedViaRenderedDoc = Boolean(
+          draft && partyNamesResolvedViaRenderedPreview(draft, renderedAgreementPreview),
+        );
         const partyNamesIncompleteForProgress = Boolean(
-          draft && draftHasPlaceholderParties(draft) && !basicPartyNamesResolvedViaLivePreview,
+          draft && draftHasPlaceholderParties(draft) && !basicPartyNamesResolvedViaLivePreview && !partyNamesResolvedViaRenderedDoc,
         );
         const draftPartiesOkForLimitedReview = Boolean(
           draft &&
-            (!draftHasPlaceholderParties(draft) || basicPartyNamesResolvedViaLivePreview),
+            (!draftHasPlaceholderParties(draft) || basicPartyNamesResolvedViaLivePreview || partyNamesResolvedViaRenderedDoc),
         );
         const limitedReviewIgnoresGenericTitleOnly = Boolean(
           showUpgradeToFullDraftOnReview &&
@@ -37645,6 +37650,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                           runPrimaryIntakeAction();
                         } catch (e) {
                           if (import.meta.env.DEV) console.error("[AgreementIntake:send-cta] sticky onClick", e);
+                          setHardError("Something went wrong. Your draft is still here — try again in a moment.");
                         }
                       }}
                       disabled={stickyPrimaryButtonNativeDisabled}
@@ -37752,6 +37758,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                         runPrimaryIntakeAction();
                       } catch (e) {
                         if (import.meta.env.DEV) console.error("[AgreementIntake:send-cta] inline primary onClick", e);
+                        setHardError("Something went wrong. Your draft is still here — try again in a moment.");
                       }
                     }}
                     disabled={stickyPrimaryButtonNativeDisabled}

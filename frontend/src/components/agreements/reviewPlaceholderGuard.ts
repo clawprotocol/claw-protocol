@@ -25,6 +25,43 @@ import { sanitizePartiesInput, splitTwoPartiesFromJoinedLine, type StructuredTwo
 const PLACEHOLDER_PARTY_NAME_RE =
   /\bparty\s*a\b|\bparty\s*b\b|edit\s+in\s+review|placeholder|to\s+be\s+(?:listed|finalized|added)|\(name\s+in\s+review\)/i;
 
+/**
+ * Extract party names from common agreement opening patterns like:
+ * - "This Agreement is entered into by and between [Party 1] and [Party 2]"
+ * - "between [Party 1], and [Party 2]"
+ * Returns null if no match or if extracted names look like placeholders.
+ */
+export function extractRealPartyNamesFromPreview(preview: string): { party1: string; party2: string } | null {
+  if (!preview || preview.length < 50) return null;
+  const firstChunk = preview.slice(0, 800);
+  const betweenAndPattern = /\b(?:entered\s+into\s+)?(?:by\s+and\s+)?between\s+([^,\n]+?)\s+and\s+([^.,\n]+)/i;
+  const match = firstChunk.match(betweenAndPattern);
+  if (!match) return null;
+  const p1 = sanitizePartiesInput((match[1] || "").trim());
+  const p2 = sanitizePartiesInput((match[2] || "").trim());
+  if (!p1 || !p2 || p1.length < 2 || p2.length < 2) return null;
+  if (PLACEHOLDER_PARTY_NAME_RE.test(p1) || PLACEHOLDER_PARTY_NAME_RE.test(p2)) return null;
+  if (!isHighConfidencePartyNameForAutoPopulation(p1) || !isHighConfidencePartyNameForAutoPopulation(p2)) {
+    return null;
+  }
+  return { party1: p1, party2: p2 };
+}
+
+/**
+ * True when party names look like placeholders in draft.parties BUT the rendered preview
+ * already contains real, high-confidence party names. This handles the case where names
+ * appear in the document body (e.g. "Priya Shah and Diego Alvarez") but draft.parties
+ * still has generic placeholders.
+ */
+export function partyNamesResolvedViaRenderedPreview(
+  draft: ParsedDraftShape | null | undefined,
+  renderedPreview: string | null | undefined,
+): boolean {
+  if (!draft || !draftHasPlaceholderParties(draft)) return false;
+  const extracted = extractRealPartyNamesFromPreview(renderedPreview || "");
+  return extracted !== null;
+}
+
 /** After sanitization, the joined parties line parses as two substantive non-placeholder names. */
 export function hasRealPartiesJoinedLine(joins: string): boolean {
   const s = sanitizePartiesInput(joins);
@@ -337,8 +374,15 @@ export function getDraftFirstReviewBlocker(
   },
 ): DraftReviewFirstBlocker | null {
   if (!draft) return null;
-  if (draftHasPlaceholderParties(draft)) return "party_placeholder";
   const plain = (opts?.userVisibleFullDocumentPlain || "").trim();
+  if (draftHasPlaceholderParties(draft)) {
+    if (plain.length >= 50 && partyNamesResolvedViaRenderedPreview(draft, plain)) {
+      // Party names exist in the rendered preview but draft.parties has placeholders.
+      // Don't block on party_placeholder — the user-visible names are real.
+    } else {
+      return "party_placeholder";
+    }
+  }
   if (
     plain.length >= 400 &&
     hydratedFullDocumentStillContainsUnresolvedIdentityPlaceholders(plain, draft, opts?.intakeText ?? null)
