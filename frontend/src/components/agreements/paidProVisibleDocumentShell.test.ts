@@ -1,5 +1,10 @@
 import { describe, expect, it, beforeEach, vi } from "vitest";
-import { resolveCanonicalPlainForVisibleShell, PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN } from "./paidProVisibleDocumentShell";
+import {
+  resolveCanonicalPlainForVisibleShell,
+  resolvePaidProVisibleShellRenderBranch,
+  PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN,
+  PAID_PRO_FALLBACK_REBUILD_MIN_LEN,
+} from "./paidProVisibleDocumentShell";
 
 vi.mock("./paidProFirstReviewDisplayAuthority", () => ({
   resolvePaidProFirstReviewVisibleDisplayPlain: vi.fn(),
@@ -450,5 +455,268 @@ ${"Substantive clause for length padding. ".repeat(30)}`;
     expect(result.plain).toContain("3. COMPENSATION");
     expect(result.plain).toContain("7%");
     expect(result.plain).toContain("14. NOTICES");
+  });
+});
+
+/**
+ * Test fixtures for paid pro fallback rebuild validation.
+ * Verifies that rebuild bodies 200-999 chars paint correctly during paid first-review.
+ */
+
+const PRIYA_DIEGO_DUMP = `
+Commercial consulting engagement between Priya Sharma Consulting LLC (Consultant) and Diego Martinez Enterprises (Client).
+Consultant will provide marketing strategy services for $2,400 monthly.
+Governing law: Texas.
+Term: 6 months starting March 1, 2025.
+`;
+
+const MARCUS_ELENA_DUMP = `
+Software development services agreement between Marcus Chen Technology Solutions (Provider) and Elena Rodriguez Digital Agency (Client).
+Provider will develop custom web applications for $5,500 per milestone.
+Governing law: California.
+Term: 9 months with two milestone payments.
+Confidentiality and IP assignment clauses required.
+`;
+
+function buildPriyaDiegoFallbackBody(): string {
+  return `SERVICES AGREEMENT
+
+This Agreement ("Agreement") is entered into by and between:
+
+Priya Sharma Consulting LLC ("Consultant")
+and
+Diego Martinez Enterprises ("Client")
+
+(collectively, the "Parties").
+
+1. SERVICES
+The service provider agrees to provide marketing strategy services.
+
+2. PAYMENT TERMS
+Payment of $2,400 monthly for services rendered under this Agreement.
+
+3. TERM
+This Agreement shall continue for 6 months unless earlier terminated by either Party with written notice.
+
+4. GOVERNING LAW
+This Agreement shall be governed by the laws of the State of Texas.
+
+IN WITNESS WHEREOF, the parties have executed this Agreement.
+
+___________________________
+Priya Sharma Consulting LLC
+
+___________________________
+Diego Martinez Enterprises`;
+}
+
+function buildMarcusElenaFallbackBody(): string {
+  return `SERVICES AGREEMENT
+
+This Agreement ("Agreement") is entered into by and between:
+
+Marcus Chen Technology Solutions ("Provider")
+and
+Elena Rodriguez Digital Agency ("Client")
+
+(collectively, the "Parties").
+
+1. SERVICES
+The service provider agrees to develop custom web applications.
+
+2. PAYMENT TERMS
+Payment of $5,500 per milestone for services rendered under this Agreement.
+
+3. TERM
+This Agreement shall continue for 9 months with two milestone payments.
+
+4. CONFIDENTIALITY
+All proprietary information shall remain confidential.
+
+5. GOVERNING LAW
+This Agreement shall be governed by the laws of the State of California.
+
+IN WITNESS WHEREOF, the parties have executed this Agreement.
+
+___________________________
+Marcus Chen Technology Solutions
+
+___________________________
+Elena Rodriguez Digital Agency`;
+}
+
+describe("resolvePaidProVisibleShellRenderBranch - fallback rebuild 200-999 chars", () => {
+  it("returns canonical_plain_forced (not empty) for Priya/Diego rebuild 200-999 chars during paid first-review", () => {
+    const fallbackBody = buildPriyaDiegoFallbackBody();
+    expect(fallbackBody.length).toBeGreaterThanOrEqual(PAID_PRO_FALLBACK_REBUILD_MIN_LEN);
+    expect(fallbackBody.length).toBeLessThan(PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN);
+
+    const { branch, reason } = resolvePaidProVisibleShellRenderBranch({
+      hasSoT: false,
+      sotLen: 0,
+      htmlLen: 0,
+      canonicalPlainLen: fallbackBody.length,
+      canonicalPlainSource: "paid_pro_fallback_rebuild",
+      paidProFirstReviewActive: true,
+    });
+
+    expect(branch).toBe("canonical_plain_forced");
+    expect(reason).toBe("paid_pro_fallback_rebuild_from_intake");
+    expect(branch).not.toBe("empty");
+  });
+
+  it("returns canonical_plain_forced (not empty) for Marcus/Elena rebuild 200-999 chars during paid first-review", () => {
+    const fallbackBody = buildMarcusElenaFallbackBody();
+    expect(fallbackBody.length).toBeGreaterThanOrEqual(PAID_PRO_FALLBACK_REBUILD_MIN_LEN);
+    expect(fallbackBody.length).toBeLessThan(PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN);
+
+    const { branch, reason } = resolvePaidProVisibleShellRenderBranch({
+      hasSoT: false,
+      sotLen: 0,
+      htmlLen: 0,
+      canonicalPlainLen: fallbackBody.length,
+      canonicalPlainSource: "paid_pro_fallback_rebuild",
+      paidProFirstReviewActive: true,
+    });
+
+    expect(branch).toBe("canonical_plain_forced");
+    expect(reason).toBe("paid_pro_fallback_rebuild_from_intake");
+    expect(branch).not.toBe("empty");
+  });
+
+  it("still returns empty when canonicalPlainLen < 200 during paid first-review", () => {
+    const { branch, reason } = resolvePaidProVisibleShellRenderBranch({
+      hasSoT: false,
+      sotLen: 0,
+      htmlLen: 0,
+      canonicalPlainLen: 150,
+      canonicalPlainSource: "none",
+      paidProFirstReviewActive: true,
+    });
+
+    expect(branch).toBe("empty");
+    expect(reason).toBe("paid_pro_awaiting_display_authority");
+  });
+
+  it("still returns empty when paidProFirstReviewActive is false and canonicalPlainLen < 1001", () => {
+    const fallbackBody = buildPriyaDiegoFallbackBody();
+    expect(fallbackBody.length).toBeLessThan(PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN);
+
+    const { branch, reason } = resolvePaidProVisibleShellRenderBranch({
+      hasSoT: false,
+      sotLen: 0,
+      htmlLen: 0,
+      canonicalPlainLen: fallbackBody.length,
+      canonicalPlainSource: "none",
+      paidProFirstReviewActive: false,
+    });
+
+    expect(branch).toBe("empty");
+    expect(reason).toBe("no_sot_and_no_html");
+  });
+
+  it("prefers 1001+ SoT over fallback rebuild when both exist", () => {
+    const longSoT = "A".repeat(1100);
+    const fallbackBody = buildPriyaDiegoFallbackBody();
+
+    const { branch, reason } = resolvePaidProVisibleShellRenderBranch({
+      hasSoT: true,
+      sotLen: longSoT.length,
+      htmlLen: 0,
+      canonicalPlainLen: longSoT.length,
+      canonicalPlainSource: "paid_pro_accepted_canonical_source_of_truth",
+      paidProFirstReviewActive: true,
+    });
+
+    expect(branch).toBe("canonical_plain_forced");
+    expect(reason).toBe("paid_pro_accepted_canonical_source_of_truth");
+  });
+});
+
+describe("resolveCanonicalPlainForVisibleShell - fallback rebuild 200-999 chars", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it("paints Priya/Diego fallback body (200-999 chars) during paidProActive", () => {
+    const fallbackBody = buildPriyaDiegoFallbackBody();
+    expect(fallbackBody.length).toBeGreaterThanOrEqual(PAID_PRO_FALLBACK_REBUILD_MIN_LEN);
+    expect(fallbackBody.length).toBeLessThan(PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN);
+
+    vi.mocked(resolvePaidProFirstReviewVisibleDisplayPlain).mockReturnValue({
+      plain: fallbackBody,
+      source: "paid_pro_fallback_rebuild",
+      fallbackReason: null,
+      hasSoT: false,
+      hasServerFullDoc: false,
+      paidProActive: true,
+    });
+
+    const result = resolveCanonicalPlainForVisibleShell({
+      paidProActive: true,
+      premiumCheckoutCompleted: true,
+    });
+
+    expect(result.plain.length).toBeGreaterThanOrEqual(PAID_PRO_FALLBACK_REBUILD_MIN_LEN);
+    expect(result.plain).toContain("Priya Sharma Consulting LLC");
+    expect(result.plain).toContain("Diego Martinez Enterprises");
+    expect(result.plain).toContain("$2,400");
+    expect(result.plain).toContain("Texas");
+  });
+
+  it("paints Marcus/Elena fallback body (200-999 chars) during paidProActive", () => {
+    const fallbackBody = buildMarcusElenaFallbackBody();
+    expect(fallbackBody.length).toBeGreaterThanOrEqual(PAID_PRO_FALLBACK_REBUILD_MIN_LEN);
+    expect(fallbackBody.length).toBeLessThan(PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN);
+
+    vi.mocked(resolvePaidProFirstReviewVisibleDisplayPlain).mockReturnValue({
+      plain: fallbackBody,
+      source: "paid_pro_fallback_rebuild",
+      fallbackReason: null,
+      hasSoT: false,
+      hasServerFullDoc: false,
+      paidProActive: true,
+    });
+
+    const result = resolveCanonicalPlainForVisibleShell({
+      paidProActive: true,
+      premiumCheckoutCompleted: true,
+    });
+
+    expect(result.plain.length).toBeGreaterThanOrEqual(PAID_PRO_FALLBACK_REBUILD_MIN_LEN);
+    expect(result.plain).toContain("Marcus Chen Technology Solutions");
+    expect(result.plain).toContain("Elena Rodriguez Digital Agency");
+    expect(result.plain).toContain("$5,500");
+    expect(result.plain).toContain("California");
+  });
+
+  it("does NOT paint fallback body when paidProActive is false", () => {
+    const fallbackBody = buildPriyaDiegoFallbackBody();
+
+    vi.mocked(resolvePaidProFirstReviewVisibleDisplayPlain).mockReturnValue({
+      plain: fallbackBody,
+      source: "none",
+      fallbackReason: null,
+      hasSoT: false,
+      hasServerFullDoc: false,
+      paidProActive: false,
+    });
+
+    const result = resolveCanonicalPlainForVisibleShell({
+      paidProActive: false,
+    });
+
+    expect(result.plain).toBe("");
+  });
+
+  it("both Priya/Diego and Marcus/Elena fallback bodies meet minimum length for display", () => {
+    const priyaBody = buildPriyaDiegoFallbackBody();
+    const marcusBody = buildMarcusElenaFallbackBody();
+
+    expect(priyaBody.length).toBeGreaterThanOrEqual(PAID_PRO_FALLBACK_REBUILD_MIN_LEN);
+    expect(marcusBody.length).toBeGreaterThanOrEqual(PAID_PRO_FALLBACK_REBUILD_MIN_LEN);
+
+    expect(priyaBody.length).toBeLessThan(PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN);
+    expect(marcusBody.length).toBeLessThan(PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN);
   });
 });

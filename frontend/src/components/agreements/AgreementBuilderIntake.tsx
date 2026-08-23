@@ -668,7 +668,7 @@ import {
   resolveProReviewDocumentPanelHeading,
 } from "./premiumSituationIntelligence";
 import { PremiumAgreementReadonlyView } from "./PremiumAgreementReadonlyView";
-import { PaidProVisibleDocumentShell } from "./paidProVisibleDocumentShell";
+import { PaidProVisibleDocumentShell, PAID_PRO_FALLBACK_REBUILD_MIN_LEN } from "./paidProVisibleDocumentShell";
 import {
   hasCanonicalReviewCorpusForRender,
   PAID_PRO_DOCUMENT_BODY_SOT_MIN_LEN,
@@ -20351,6 +20351,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         checkoutBackSnap?.intakeText ||
         ""
       ).trim();
+      // Priority for acceptedCanonicalPlain:
+      // 1. Frozen SoT (established from successful generate)
+      // 2. Rebuild from checkout snapshot intake (#82 wire)
+      // 3. lastKnownGoodAuthoritativeDraftRef (last fallback when rebuild is empty)
       let resolvedAcceptedPlain = "";
       if (hasPaidProSourceOfTruth()) {
         resolvedAcceptedPlain = getPaidProSourceOfTruthText().trim();
@@ -20362,6 +20366,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         const rebuiltBody = rebuildBodyFromIntakeForProFailure(resolvedIntakeText, draftForRebuild);
         if (rebuiltBody.trim().length >= 200 && isNonHollowBody(rebuiltBody, resolvedIntakeText)) {
           resolvedAcceptedPlain = rebuiltBody;
+        }
+      }
+      // Last fallback: lastKnownGoodAuthoritativeDraftRef when rebuild is empty
+      if (!resolvedAcceptedPlain && hasPaidPremiumCompletionSession()) {
+        const lastKnownGood = (lastKnownGoodAuthoritativeDraftRef.current || "").trim();
+        if (lastKnownGood.length >= 200) {
+          resolvedAcceptedPlain = lastKnownGood;
         }
       }
       return {
@@ -29776,11 +29787,17 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           "Your intake is still available. Add or clarify details, retry a full Pro draft, or work from your starter version.";
   // Never overlay Retry on a locked / force-mounted Pro review corpus (pipeline-accepted
   // or SoT). That was the errant "Retry Pro draft" button over a successful Review.
+  // Also lock out Retry when a valid fallback rebuild from intake exists (≥200 chars).
+  // After pay, if the card is showing the visitor's deal, Retry must not own the footer.
+  // Check both #82 rebuild (acceptedCanonicalPlain) and lastKnownGood as fallback.
   const paidProReviewCorpusLocksOutRetry = Boolean(
     hasPaidProSourceOfTruth() ||
       shouldForcePaidProReviewDocumentRender() ||
       acceptedPaidProAuthorityActive ||
-      hasAcceptedPipelineReviewCorpusForRender(),
+      hasAcceptedPipelineReviewCorpusForRender() ||
+      (hasPaidPremiumCompletionSession() &&
+        ((paidProFirstReviewDisplayContext.acceptedCanonicalPlain || "").trim().length >= PAID_PRO_FALLBACK_REBUILD_MIN_LEN ||
+          lastKnownGoodAuthoritativeDraftRef.current.trim().length >= PAID_PRO_FALLBACK_REBUILD_MIN_LEN)),
   );
   const showRetryAsPrimaryCta = Boolean(
     !dashboardSignerSetupResumeUiActive &&

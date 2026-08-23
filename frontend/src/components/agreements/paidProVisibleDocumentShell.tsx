@@ -37,6 +37,12 @@ import { stripPremiumInstructionNoiseForDocument } from "./premiumInstructionStr
 export const PAID_PRO_VISIBLE_SHELL_COMPONENT_NAME = "PaidProVisibleDocumentShell";
 /** SoT length threshold for synchronous canonical plain forced render (Test292). */
 export const PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN = 1001;
+/**
+ * Minimum length for a valid paid pro fallback rebuild from intake.
+ * When generate fails after pay, a rebuild of 200+ non-hollow chars is valid display authority.
+ * Do NOT use the 1001 SoT floor to hide a valid rebuild — that floor is for frozen generate SoT.
+ */
+export const PAID_PRO_FALLBACK_REBUILD_MIN_LEN = 200;
 
 export type PaidProVisibleShellRenderBranch = "canonical_plain_forced" | "html" | "empty";
 
@@ -85,6 +91,15 @@ export function resolveCanonicalPlainForVisibleShell(
     });
     return { plain: strippedPlain, source: resolution.source };
   }
+  // After pay, a valid non-hollow rebuilt body ≥200 chars MUST paint — do not blank it for
+  // being under 1001. The 1001 floor is for frozen generate SoT / title projection, not for
+  // hiding a valid rebuild when generation failed.
+  if (
+    resolution.paidProActive &&
+    strippedPlain.length >= PAID_PRO_FALLBACK_REBUILD_MIN_LEN
+  ) {
+    return { plain: strippedPlain, source: resolution.source || "paid_pro_fallback_rebuild" };
+  }
   return { plain: "", source: resolution.source || "none" };
 }
 
@@ -117,6 +132,14 @@ export function resolvePaidProVisibleShellRenderBranch(args: {
       return {
         branch: "canonical_plain_forced",
         reason: "paid_pro_accepted_canonical_source_of_truth",
+      };
+    }
+    // After pay, a valid rebuilt body ≥200 chars MUST paint — do not blank it for being under 1001.
+    // The 1001 floor is for frozen generate SoT / title projection, not for hiding a valid rebuild.
+    if (canonicalPlainLen >= PAID_PRO_FALLBACK_REBUILD_MIN_LEN) {
+      return {
+        branch: "canonical_plain_forced",
+        reason: "paid_pro_fallback_rebuild_from_intake",
       };
     }
     return { branch: "empty", reason: "paid_pro_awaiting_display_authority" };
@@ -211,23 +234,32 @@ export function PaidProVisibleDocumentShell({
     paidProActive: paidProFirstReviewActive || Boolean(displayContext?.paidProActive),
   };
   const canonicalPlain = resolveCanonicalPlainForVisibleShell(displayContextWithCanonical);
+  // After pay, a valid non-hollow rebuild ≥200 chars MUST paint — do not blank it for being
+  // under 1001. The 1001 floor is for frozen generate SoT / title projection.
   const paintPlain =
     canonicalPlain.plain.length >= PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN
       ? canonicalPlain.plain
       : authoritativePlain.length >= PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN
         ? authoritativePlain
-        : "";
+        : paidProFirstReviewActive && canonicalPlain.plain.length >= PAID_PRO_FALLBACK_REBUILD_MIN_LEN
+          ? canonicalPlain.plain
+          : "";
   const paintSource =
     canonicalPlain.plain.length >= PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN
       ? canonicalPlain.source
-      : paintPlain
+      : authoritativePlain.length >= PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN && paintPlain === authoritativePlain
         ? hasSoT
           ? "paid_pro_accepted_canonical_source_of_truth"
           : "pipeline_accepted_corpus"
-        : authoritativeSource;
+        : paidProFirstReviewActive && canonicalPlain.plain.length >= PAID_PRO_FALLBACK_REBUILD_MIN_LEN
+          ? canonicalPlain.source || "paid_pro_fallback_rebuild"
+          : authoritativeSource;
   // Pipeline-accepted corpus is display authority even when SoT latch has not frozen yet.
+  // Also, for paid first-review, accept fallback rebuild ≥200 chars as display authority.
   const displayAuthorityReady =
-    hasSoT || authoritativePlain.length >= PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN;
+    hasSoT ||
+    authoritativePlain.length >= PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN ||
+    (paidProFirstReviewActive && canonicalPlain.plain.length >= PAID_PRO_FALLBACK_REBUILD_MIN_LEN);
   const { branch, reason } = resolvePaidProVisibleShellRenderBranch({
     hasSoT: displayAuthorityReady,
     sotLen,
