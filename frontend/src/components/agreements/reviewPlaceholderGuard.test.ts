@@ -3,12 +3,10 @@ import { clearPremiumPartyNamesHandoff, writePremiumPartyNamesHandoff } from "./
 import {
   draftHasPlaceholderParties,
   draftPartyPlaceholdersOkViaLivePreview,
-  dumpStatedPartiesPaintedInBody,
   extractRealPartyNamesFromPreview,
   formatRecipientSignerLabelsLine,
   getDraftFirstReviewBlocker,
   hasRealPartiesJoinedLine,
-  isPartyFixDetailsReviewBlocker,
   mergePremiumDraftPartiesWithRecipientPriority,
   mergePremiumRecipientDisplayName,
   partyNamesResolvedViaRenderedPreview,
@@ -88,36 +86,6 @@ describe("getDraftFirstReviewBlocker", () => {
       }),
     ).toBe("other_placeholder");
   });
-
-  it("does not Fix-details-for-parties when dump names are painted and slots are empty", () => {
-    const preview =
-      'SERVICES AGREEMENT\n\nThis Agreement ("Agreement") is entered into by and between: Priya Shah of Northline Studio ("Client") and Diego Alvarez of Harbor Marks LLC ("Service Provider") (collectively, the "Parties").\n\n1. Scope of Services / Purpose: design a logo and brand kit.\n';
-    const intake =
-      "Priya Shah of Northline Studio is hiring Diego Alvarez of Harbor Marks LLC to design a logo and brand kit.";
-    const emptySlots = base([
-      { name: "", role: "client" },
-      { name: "", role: "service_provider" },
-    ]);
-    expect(dumpStatedPartiesPaintedInBody(intake, preview)).toBe(true);
-    expect(
-      getDraftFirstReviewBlocker(emptySlots, {
-        userVisibleFullDocumentPlain: preview,
-        intakeText: intake,
-      }),
-    ).not.toBe("party_placeholder");
-    expect(
-      getDraftFirstReviewBlocker(emptySlots, {
-        userVisibleFullDocumentPlain: preview,
-        intakeText: intake,
-      }),
-    ).not.toBe("other_placeholder");
-    expect(
-      isPartyFixDetailsReviewBlocker(emptySlots, {
-        userVisibleFullDocumentPlain: preview,
-        intakeText: intake,
-      }),
-    ).toBe(false);
-  });
 });
 
 describe("extractRealPartyNamesFromPreview", () => {
@@ -131,14 +99,6 @@ describe("extractRealPartyNamesFromPreview", () => {
     const preview = "This is a contract between Jane Smith and Acme LLC for services.";
     const result = extractRealPartyNamesFromPreview(preview);
     expect(result).toEqual({ party1: "Jane Smith", party2: "Acme LLC" });
-  });
-
-  it("extracts person-of-entity names after between: with role parens", () => {
-    const preview =
-      'SERVICES AGREEMENT\n\nThis Agreement ("Agreement") is entered into by and between: Priya Shah of Northline Studio ("Client") and Diego Alvarez of Harbor Marks LLC ("Service Provider") (collectively, the "Parties").\n\n1. Scope';
-    const result = extractRealPartyNamesFromPreview(preview);
-    expect(result?.party1).toMatch(/Priya Shah of Northline Studio/i);
-    expect(result?.party2).toMatch(/Diego Alvarez of Harbor Marks LLC/i);
   });
 
   it("returns null when party names are placeholders", () => {

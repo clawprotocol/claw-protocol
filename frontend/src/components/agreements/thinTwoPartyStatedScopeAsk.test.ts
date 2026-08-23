@@ -49,6 +49,7 @@ import { defaultIntakePartyRoleLabels } from "./partyRoleIntake";
 import { buildStarterAgreementPreviewForReview } from "./agreementPreviewFromDraft";
 import {
   draftHasPlaceholderParties,
+  extractRealPartyNamesFromPreview,
   getDraftFirstReviewBlocker,
   isPartyFixDetailsReviewBlocker,
 } from "./reviewPlaceholderGuard";
@@ -371,6 +372,29 @@ Effective Date: upon full execution by both parties
       expect(resolved.body).not.toMatch(/\bParty B\b/i);
     },
   );
+
+  it("between: painted dump names with empty slots are not a Fix-details party blocker", () => {
+    const dump = PRIYA_DIEGO_LOGO_BRAND;
+    const colonPreview =
+      'SERVICES AGREEMENT\n\nThis Agreement ("Agreement") is entered into by and between: Priya Shah of Northline Studio ("Client") and Diego Alvarez of Harbor Marks LLC ("Service Provider") (collectively, the "Parties").\n\n1. Scope of Services';
+    const extracted = extractRealPartyNamesFromPreview(colonPreview);
+    expect(extracted?.party1).toMatch(/Priya Shah of Northline Studio/i);
+    expect(extracted?.party2).toMatch(/Diego Alvarez of Harbor Marks LLC/i);
+    const emptySlotsDraft = {
+      ...emptyStarterCheckoutPendingShell(),
+      title: "Services Agreement",
+      parties: [
+        { name: "", role: "client" },
+        { name: "", role: "service_provider" },
+      ],
+    };
+    expect(
+      isPartyFixDetailsReviewBlocker(emptySlotsDraft, {
+        userVisibleFullDocumentPlain: colonPreview,
+        intakeText: dump,
+      }),
+    ).toBe(false);
+  });
 
   it("create path evaluates the missing-tenet ask before free paint", () => {
     const src = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");

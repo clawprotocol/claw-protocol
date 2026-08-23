@@ -24,7 +24,6 @@ import {
   textContainsUnresolvedIdentityPlaceholders,
 } from "../../agreement/partyPlaceholderDisplay";
 import { sanitizePartiesInput, splitTwoPartiesFromJoinedLine, type StructuredTwoParties } from "./partyIntakeNormalize";
-import { extractStatedTwoPartyHiringPair } from "./intakeNamedPartyFallback";
 
 const PLACEHOLDER_PARTY_NAME_RE =
   /\bparty\s*a\b|\bparty\s*b\b|edit\s+in\s+review|placeholder|to\s+be\s+(?:listed|finalized|added)|\(name\s+in\s+review\)/i;
@@ -79,18 +78,25 @@ export function extractRealPartyNamesFromPreview(preview: string): { party1: str
  * appear in the document body (e.g. "Priya Shah and Diego Alvarez") but draft.parties
  * still has generic placeholders.
  */
-/** Dump already named two parties and those names appear in the painted body. */
+/**
+ * Dump already named two parties (person-of-entity hiring pair) and those
+ * people appear in the painted body. Kept local to avoid import cycles.
+ */
 export function dumpStatedPartiesPaintedInBody(
   intakeText: string | null | undefined,
   renderedPreview: string | null | undefined,
 ): boolean {
-  const pair = extractStatedTwoPartyHiringPair(intakeText || "");
+  const intake = String(intakeText || "").replace(/\s+/g, " ").trim();
   const body = String(renderedPreview || "");
-  if (!pair || pair.length !== 2 || body.length < 50) return false;
+  if (intake.length < 20 || body.length < 50) return false;
+  const m =
+    /\b([A-Z][A-Za-z.'-]+(?:\s+[A-Z][A-Za-z.'-]+)+)\s+of\s+[A-Z][\s\S]{0,80}?\s+is\s+(?:hiring|engaging|retaining|commissioning)\s+([A-Z][A-Za-z.'-]+(?:\s+[A-Z][A-Za-z.'-]+)+)\s+of\s+/i.exec(
+      intake,
+    );
+  if (!m?.[1] || !m[2]) return false;
   const lower = body.toLowerCase();
-  return pair.every((p) => {
-    const person = p.name.replace(/\s+of\s+.+$/i, "").trim().toLowerCase();
-    return person.length >= 3 && lower.includes(person);
+  return [m[1].trim(), m[2].trim()].every((person) => {
+    return person.length >= 3 && lower.includes(person.toLowerCase());
   });
 }
 
