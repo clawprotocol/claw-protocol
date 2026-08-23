@@ -15,6 +15,7 @@ import {
 import { resolveLegalPartyAuthorityForIntake } from "./legalPartyAuthoritySession";
 import {
   extractCasualNamedCounterparties,
+  extractNamedDumpPartyUnits,
   hasFirstPersonVisitor,
   inferCasualScopeFromDump,
   inferCasualTwoPartyFromDump,
@@ -305,9 +306,17 @@ export function assessStarterComplexityGate(raw: string): StarterComplexityGateA
         ? authorityPartyNames
         : starterGateParties;
   const extractedEntityCount = parties.length;
+  const namedDumpParties = extractNamedDumpPartyUnits(intake);
+  const namedDumpPartyCount = namedDumpParties.length;
   const signerSlots = countSignerDetailSlots(intake);
   const declaredPartyCount = resolveDeclaredExplicitPartyCount(intake) ?? 0;
-  const partyCount = Math.max(extractedEntityCount, indexedPartyMax, numberedPartyMax, declaredPartyCount);
+  const partyCount = Math.max(
+    extractedEntityCount,
+    indexedPartyMax,
+    numberedPartyMax,
+    declaredPartyCount,
+    namedDumpPartyCount,
+  );
   const revenuePctCount = countRevenueSharePercentages(intake);
   const hasRevenueShare = detectRevenueShareLanguage(intake);
   const hasCoordinator = detectCoordinatorOrNonPartyActor(intake);
@@ -317,7 +326,13 @@ export function assessStarterComplexityGate(raw: string): StarterComplexityGateA
   const hasSignerOverflow = detectSignerCandidateOverflow(intake);
   const reasons: StarterComplexityGateReason[] = [];
 
-  if (extractedEntityCount > 2 || indexedPartyMax >= 3 || numberedPartyMax >= 3 || declaredPartyCount >= 3) {
+  if (
+    extractedEntityCount > 2 ||
+    namedDumpPartyCount >= 3 ||
+    indexedPartyMax >= 3 ||
+    numberedPartyMax >= 3 ||
+    declaredPartyCount >= 3
+  ) {
     reasons.push("three_plus_legal_parties");
   }
   if (hasRevenueShare && (partyCount >= 2 || revenuePctCount >= 3)) {
@@ -368,10 +383,18 @@ export function assessStarterComplexityGate(raw: string): StarterComplexityGateA
   }
 
   const declaredMultiParty =
-    extractedEntityCount >= 3 || indexedPartyMax >= 3 || numberedPartyMax >= 3 || declaredPartyCount >= 3;
+    extractedEntityCount >= 3 ||
+    namedDumpPartyCount >= 3 ||
+    indexedPartyMax >= 3 ||
+    numberedPartyMax >= 3 ||
+    declaredPartyCount >= 3;
+  const multiPartyDisplay =
+    namedDumpParties.length >= 3 && namedDumpParties.length >= parties.length
+      ? namedDumpParties
+      : parties;
   const displayParties =
     declaredMultiParty || uniqueReasons.includes("three_plus_legal_parties")
-      ? parties
+      ? multiPartyDisplay
       : casualNames.length > parties.length
         ? casualNames
         : parties;

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyNamedPartyFallbackFromIntake, inferCasualScopeFromDump, inferCasualTwoPartyFromDump, looksLikeMoneyTermOrClausePartyName, tryInferNamedPartiesFromIntake } from "./intakeNamedPartyFallback";
+import { applyNamedPartyFallbackFromIntake, extractNamedDumpPartyUnits, inferCasualScopeFromDump, inferCasualTwoPartyFromDump, looksLikeMoneyTermOrClausePartyName, tryInferNamedPartiesFromIntake } from "./intakeNamedPartyFallback";
 import { assessStarterComplexityGate } from "./starterMultiPartyProGate";
 import { draftHasPlaceholderParties, draftHasPlaceholderFieldsForRecipients } from "./reviewPlaceholderGuard";
 import { runIntakeDefaultsAndRoles } from "./intakeFamilyShell";
@@ -704,5 +704,26 @@ describe("hire-company preamble keeps hirer opposite the company", () => {
     });
     expect(mikePreview).toMatch(/Client\s*\(["“']Client["”']\)/);
     expect(mikePreview).toMatch(/Mike\s*\(["“']Service Provider["”']\)/);
+  });
+});
+
+describe("extractNamedDumpPartyUnits", () => {
+  it("counts three person-of-entity parties in an A, B, and C agree dump", () => {
+    const dump =
+      "Priya Shah of Northline Studio, Diego Alvarez of Harbor Marks LLC, and Maya Chen of Westfield Counsel agree that Harbor Marks will design a logo and brand kit for Northline for $2,400 due on signing, 30 days starting August 22, 2026, Texas law. Maya reviews as counsel.";
+    const units = extractNamedDumpPartyUnits(dump);
+    expect(units.length).toBe(3);
+    expect(units.some((u) => /Priya Shah of Northline Studio/i.test(u))).toBe(true);
+    expect(units.some((u) => /Diego Alvarez of Harbor Marks LLC/i.test(u))).toBe(true);
+    expect(units.some((u) => /Maya Chen of Westfield Counsel/i.test(u))).toBe(true);
+  });
+
+  it("does not inflate a stated two-party hiring pair into three or four parties", () => {
+    const dump =
+      "Priya Shah of Northline Studio is hiring Diego Alvarez of Harbor Marks LLC to design a logo and brand kit.";
+    const units = extractNamedDumpPartyUnits(dump);
+    expect(units.length).toBe(2);
+    expect(units.some((u) => /Priya Shah of Northline Studio/i.test(u))).toBe(true);
+    expect(units.some((u) => /Diego Alvarez of Harbor Marks LLC/i.test(u))).toBe(true);
   });
 });

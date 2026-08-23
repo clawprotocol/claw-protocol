@@ -273,6 +273,93 @@ export function extractCasualNamedCounterparties(raw: string): string[] {
   return out;
 }
 
+const PERSON_OF_ENTITY_UNIT_RE =
+  /\b([A-Z][A-Za-z.'-]+(?:\s+[A-Z][A-Za-z.'-]+)+)\s+(?:of|from)\s+([A-Z][A-Za-z0-9&.'’\-][A-Za-z0-9&.'’\-\s]{0,70}?)(?=\s*,|\s+and\s+|\s+is\s+|\s+will\s+|\s+agree\b|\s+reviews?\b|\s+to\s+|\s*[.;]|$)/g;
+
+const FULL_PERSON_NAME_RE = /\b([A-Z][a-z]{2,}\s+[A-Z][a-z]{2,})\b/g;
+
+const NAMED_DUMP_PARTY_STOP = new Set([
+  ...CASUAL_NAME_STOP,
+  ...CASUAL_CALENDAR_STOP,
+  "governing",
+  "service",
+  "provider",
+  "texas",
+  "california",
+  "delaware",
+  "oklahoma",
+  "new",
+]);
+
+function unitCoversName(units: readonly string[], raw: string): boolean {
+  const key = (raw || "").replace(/\s+/g, " ").trim().toLowerCase();
+  if (!key) return false;
+  return units.some((unit) => {
+    const u = unit.toLowerCase();
+    return u.includes(key) || key.includes(u);
+  });
+}
+
+function looksLikeNamedDumpPartyUnit(raw: string): boolean {
+  const t = (raw || "").replace(/\s+/g, " ").trim();
+  if (t.length < 2 || t.length > 80) return false;
+  if (looksLikeMoneyTermOrClausePartyName(t)) return false;
+  if (!/^[A-Z]/.test(t)) return false;
+  if (/\b(?:agree|that|design|logo|brand|kit|signing)\b/i.test(t) && !/\b(?:of|from|LLC|Inc)\b/i.test(t)) {
+    return false;
+  }
+  return true;
+}
+
+/**
+ * Distinct people/orgs named as parties in a homepage dump.
+ * "A of Org" is one party (never person + org = two). 3+ units must funnel to Pro.
+ */
+export function extractNamedDumpPartyUnits(raw: string): string[] {
+  const t = String(raw || "").replace(/\s+/g, " ").trim();
+  if (t.length < 10) return [];
+  const out: string[] = [];
+  const seen = new Set<string>();
+
+  PERSON_OF_ENTITY_UNIT_RE.lastIndex = 0;
+  for (const match of t.matchAll(PERSON_OF_ENTITY_UNIT_RE)) {
+    const person = (match[1] || "").trim();
+    const org = (match[2] || "").replace(/[.,;:]+$/g, "").replace(/\s+/g, " ").trim();
+    if (!person || org.length < 2) continue;
+    addUniqueCasualName(out, seen, `${person} of ${org}`);
+  }
+
+  const agreeHead = t.match(/^(.{10,420}?)\s+agree(?:s|d)?\s+that\b/i)?.[1];
+  if (agreeHead) {
+    for (const segment of agreeHead.split(/\s*,\s*|\s+and\s+/i)) {
+      const cleaned = segment.replace(/^and\s+/i, "").trim();
+      if (!looksLikeNamedDumpPartyUnit(cleaned)) continue;
+      addUniqueCasualName(out, seen, cleaned);
+    }
+  }
+
+  const companyRe = new RegExp(COMPANY_CAPTURE, "g");
+  for (const match of t.matchAll(companyRe)) {
+    const company = (match[1] || "").replace(/\s+/g, " ").trim();
+    if (!company || unitCoversName(out, company)) continue;
+    addUniqueCasualName(out, seen, company);
+  }
+
+  FULL_PERSON_NAME_RE.lastIndex = 0;
+  for (const match of t.matchAll(FULL_PERSON_NAME_RE)) {
+    const name = (match[1] || "").trim();
+    if (!looksLikePersonName(name)) continue;
+    const first = name.split(/\s+/)[0]?.toLowerCase() ?? "";
+    if (NAMED_DUMP_PARTY_STOP.has(first)) continue;
+    const after = t.slice((match.index ?? 0) + match[0].length);
+    if (/^\s+law\b/i.test(after)) continue;
+    if (unitCoversName(out, name)) continue;
+    addUniqueCasualName(out, seen, name);
+  }
+
+  return out;
+}
+
 function namedHirerAndCompany(
   person: string,
   company: string,
