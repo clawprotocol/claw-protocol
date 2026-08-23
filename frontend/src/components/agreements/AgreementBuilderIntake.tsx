@@ -1166,6 +1166,7 @@ import {
 import { evaluatePostGenerateTenetRecall } from "./postGenerateTenetRecall";
 import {
   canOpenPaidSessionFinalReviewAfterSigners,
+  isVisibleMissingTenetAskLanding,
   resolvePaidSessionTwoSignerNamesEmailsComplete,
   resolvePaidSessionVisibleDealBody,
   shouldShowPaidSessionFinalReviewActions,
@@ -12634,8 +12635,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     setMissing(decision.missingKeys);
     setFollowUpDetailTotal(decision.missingKeys.length);
     setJourneyActionFeedback(null);
+    // Ask is the landing. Dismiss Preparing immediately — do not wait for generate/SoT.
+    onHomeGuidedTransitionPhase?.("review_ready");
     return true;
-  }, []);
+  }, [onHomeGuidedTransitionPhase]);
 
   const resolvePaidCreateGateBypassContext = React.useCallback(
     (partyCount?: number | null) =>
@@ -15369,6 +15372,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         emptyAuthorityPrepFailSafe,
         hardError,
         intakeClarification,
+        missingTenetAskVisible: Boolean(
+          freeMissingTenetAsk ||
+            (premiumPostCheckoutPhase === "awaiting_gaps" && premiumGapQuestions.length > 0),
+        ),
       })
     ) {
       onHomeGuidedTransitionPhase("review_ready");
@@ -15388,6 +15395,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     emptyAuthorityPrepFailSafe,
     hardError,
     intakeClarification,
+    freeMissingTenetAsk,
+    premiumPostCheckoutPhase,
+    premiumGapQuestions.length,
   ]);
 
   /**
@@ -20574,8 +20584,22 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     // Do not re-open "Preparing your review screen" while generate/hydrate runs.
     if (paidSessionVisibleDealBody) {
       onHomeGuidedTransitionPhase("review_ready");
+      return;
     }
-  }, [onHomeGuidedTransitionPhase, paidSessionVisibleDealBody]);
+    // Missing-tenet ask (free or paid) is the landing. Overlay must not cover inputs.
+    if (
+      freeMissingTenetAsk ||
+      (premiumPostCheckoutPhase === "awaiting_gaps" && premiumGapQuestions.length > 0)
+    ) {
+      onHomeGuidedTransitionPhase("review_ready");
+    }
+  }, [
+    onHomeGuidedTransitionPhase,
+    paidSessionVisibleDealBody,
+    freeMissingTenetAsk,
+    premiumPostCheckoutPhase,
+    premiumGapQuestions.length,
+  ]);
 
   const paidProStarterBaselinePlain = useMemo(
     () => buildFreeStarterBaselinePlain(draft),
@@ -23749,8 +23773,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   // Declared ahead of unifiedPrimaryCta (and every other render-time consumer) so the paid Pro
   // review state machine and its inputs are initialized before use — prevents the post-checkout
   // "cannot access X before initialization" temporal-dead-zone crash in the CTA useMemo.
+  const missingTenetAskLandingVisible = isVisibleMissingTenetAskLanding({
+    phase: premiumPostCheckoutPhase,
+    freeStarterAskQuestionCount: freeMissingTenetAsk?.questions.length ?? 0,
+    paidGapQuestionCount: premiumGapQuestions.length,
+  });
   const premiumReturnWaitActive = Boolean(
     !paidSessionVisibleDealBody &&
+      !missingTenetAskLandingVisible &&
       ((premiumPostCheckoutPhase &&
         premiumPostCheckoutPhase !== "premium_network_recoverable" &&
         premiumPostCheckoutPhase !== "premium_cors_blocked") ||
@@ -34129,10 +34159,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             ) : null}
             {simpleProductFlow &&
             createProductionTwoPane &&
-            shouldShowPaidSessionGeneratingOverlay({
-              phase: premiumPostCheckoutPhase,
-              hasVisibleDealBody: paidSessionVisibleDealBody,
-            }) ? (
+            ((premiumPostCheckoutPhase === "awaiting_gaps" && premiumGapQuestions.length > 0) ||
+              shouldShowPaidSessionGeneratingOverlay({
+                phase: premiumPostCheckoutPhase,
+                hasVisibleDealBody: paidSessionVisibleDealBody,
+                hasVisibleAskLanding: missingTenetAskLandingVisible,
+              })) ? (
               <div
                 className="fixed inset-0 z-[220] flex items-center justify-center bg-[#0a0e18]/92 px-4 backdrop-blur-sm"
                 role="dialog"

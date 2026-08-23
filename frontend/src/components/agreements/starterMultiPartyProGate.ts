@@ -535,7 +535,12 @@ export function shouldResolveStarterHomeTransitionToReviewReady(input: {
   emptyAuthorityPrepFailSafe?: boolean;
   hardError?: string | null;
   intakeClarification?: unknown;
+  /** 2–5 question missing-tenet ask is already the landing — never keep Preparing over it. */
+  missingTenetAskVisible?: boolean;
 }): boolean {
+  if (input.missingTenetAskVisible) {
+    return true;
+  }
   if (input.emptyAuthorityPrepFailSafe) {
     return true;
   }

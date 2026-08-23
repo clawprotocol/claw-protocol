@@ -220,6 +220,27 @@ Red Mesa will provide updates. Harbor Peak will deliver milestones.`;
     ).toBe(false);
   });
 
+  it("dismisses home transition overlay when a missing-tenet ask is already the landing", () => {
+    expect(
+      shouldResolveStarterHomeTransitionToReviewReady({
+        draft: null,
+        createUiStage: "INPUT",
+        createFlowPhase: "capturing_input",
+        isGenerating: true,
+        missingTenetAskVisible: true,
+      }),
+    ).toBe(true);
+    expect(
+      shouldResolveStarterHomeTransitionToReviewReady({
+        draft: null,
+        createUiStage: "INPUT",
+        createFlowPhase: "generating_draft",
+        isGenerating: true,
+        missingTenetAskVisible: false,
+      }),
+    ).toBe(false);
+  });
+
   it("dismisses home transition overlay on intake clarification (missing_named_parties)", () => {
     expect(
       shouldResolveStarterHomeTransitionToReviewReady({
