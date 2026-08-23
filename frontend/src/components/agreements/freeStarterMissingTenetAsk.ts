@@ -156,15 +156,29 @@ export function seedStatedTwoPartyNamesOnHollowDraft(
   intakeText: string,
 ): ParsedDraftShape {
   const silent = buildSilentDraftForFreeMissingTenetAsk(intakeText);
-  if (silent.parties.length !== 2) return draft;
-  if (silent.parties.some((p) => HOLLOW_PARTY_NAME_RE.test(p.name))) return draft;
-  const current = (draft?.parties || []).map((p) => (p?.name || "").trim()).filter(Boolean);
-  if (current.length > 2) return draft;
-  if (draftPartiesAreHollow(draft) || partyListLooksLikeOrgOnlyOfHiringPair(current, silent.parties)) {
-    return { ...draft, parties: silent.parties };
+  let next = draft;
+  if (silent.parties.length === 2 && !silent.parties.some((p) => HOLLOW_PARTY_NAME_RE.test(p.name))) {
+    const current = (draft?.parties || []).map((p) => (p?.name || "").trim()).filter(Boolean);
+    if (current.length <= 2) {
+      if (draftPartiesAreHollow(draft) || partyListLooksLikeOrgOnlyOfHiringPair(current, silent.parties)) {
+        next = { ...next, parties: silent.parties };
+      }
+    }
   }
-  if (partyListIncludesStatedHiringPeople(draft.parties, silent.parties)) return draft;
-  return draft;
+  const title = (next.title || "").trim();
+  if ((!title || /^agreement$/i.test(title)) && (silent.title || "").trim() && !/^agreement$/i.test(silent.title.trim())) {
+    next = { ...next, title: silent.title.trim() };
+  }
+  if (!(next.payment_terms || "").trim() && (silent.payment_terms || "").trim()) {
+    next = { ...next, payment_terms: silent.payment_terms };
+  }
+  if (!(next.duration || "").trim() && (silent.duration || "").trim()) {
+    next = { ...next, duration: silent.duration };
+  }
+  if (!(next.jurisdiction || "").trim() && (silent.jurisdiction || "").trim()) {
+    next = { ...next, jurisdiction: silent.jurisdiction };
+  }
+  return next;
 }
 
 function escapeRegExp(s: string): string {

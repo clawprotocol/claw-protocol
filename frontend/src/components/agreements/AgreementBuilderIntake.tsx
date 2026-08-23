@@ -314,6 +314,7 @@ import {
   pickRecipientNameForHandoff,
   pickRecipientSignerLabelsForHandoff,
 } from "./reviewPlaceholderGuard";
+import { resolveFreeStarterStickyReviewCta } from "./freeStarterStickyReviewCta";
 import { fetchPremiumAdvisoryEnrichmentAfterAccept } from "./premiumAdvisoryPostAccept";
 import { textContainsUnresolvedIdentityPlaceholders } from "../../agreement/partyPlaceholderDisplay";
 import {
@@ -5129,11 +5130,26 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   useEffect(() => {
     if (intakePartyEditorTouchedRef.current) return;
     const extracted = parseIntakeToStructuredAgreement(intakeGuidanceCombined.trim()).parties;
+    const snap = draftSnapshotRef.current ?? draft;
+    const dumpIntake = pickLongestPremiumIntakeCorpus(
+      20,
+      intakeGuidanceCombined,
+      intakeCombined,
+      readOriginalUserIntakeRaw(),
+    );
+    const seeded = snap && dumpIntake ? seedStatedTwoPartyNamesOnHollowDraft(snap, dumpIntake) : snap;
     const rows = extracted.length >= 2
       ? extracted
-      : (draft?.parties || []).map((p) => (p?.name || "").trim()).filter((n) => n.length >= 2);
+      : (seeded?.parties || []).map((p) => (p?.name || "").trim()).filter((n) => n.length >= 2);
     setIntakePartyEditorRows(normalizeIntakePartyEditorRows(rows));
-  }, [intakeGuidanceCombined, draft]);
+    if (!snap || !seeded) return;
+    const beforeNames = (snap.parties || []).map((p) => (p?.name || "").trim()).join("|");
+    const afterNames = (seeded.parties || []).map((p) => (p?.name || "").trim()).join("|");
+    if (beforeNames === afterNames && (snap.title || "") === (seeded.title || "")) return;
+    if ((seeded.parties || []).length > 2) return;
+    draftSnapshotRef.current = seeded;
+    setDraft(seeded);
+  }, [intakeGuidanceCombined, intakeCombined, draft]);
 
   useEffect(() => {
     setPreviewFieldOverrides((prev) => {
@@ -24485,10 +24501,18 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             reason: !draft ? "no_draft" : undefined,
           };
         }
+        const visitorVisibleReviewPlain = starterPreviewBodyForShell || renderedAgreementPreview;
+        const stickyReviewIntakeText = pickLongestPremiumIntakeCorpus(
+          20,
+          intakeCombined,
+          intakeGuidanceCombined,
+          readOriginalUserIntakeRaw(),
+          debouncedStepBuffer,
+        );
         const firstBlocker = draft
           ? getDraftFirstReviewBlocker(draft, {
-              userVisibleFullDocumentPlain: renderedAgreementPreview,
-              intakeText: debouncedStepBuffer,
+              userVisibleFullDocumentPlain: visitorVisibleReviewPlain,
+              intakeText: stickyReviewIntakeText || debouncedStepBuffer,
             })
           : null;
         const softPartyRecipientsPath = Boolean(
@@ -24514,10 +24538,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         );
         /** Party names are in the rendered agreement preview even if draft.parties has placeholders. */
         const partyNamesResolvedViaRenderedDoc = Boolean(
-          draft && partyNamesResolvedViaRenderedPreview(draft, renderedAgreementPreview, debouncedStepBuffer),
-        );
-        const partyNamesIncompleteForProgress = Boolean(
-          draft && draftHasPlaceholderParties(draft) && !basicPartyNamesResolvedViaLivePreview && !partyNamesResolvedViaRenderedDoc,
+          draft &&
+            partyNamesResolvedViaRenderedPreview(
+              draft,
+              visitorVisibleReviewPlain,
+              stickyReviewIntakeText || debouncedStepBuffer,
+            ),
         );
         const draftPartiesOkForLimitedReview = Boolean(
           draft &&
@@ -24529,23 +24555,32 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             (missing.length === 0 || createProductionTwoPane) &&
             draftPartiesOkForLimitedReview,
         );
-        const reviewIncomplete = Boolean(
-          draft &&
-            (partyNamesIncompleteForProgress ||
-              firstBlocker === "identity_placeholder_in_corpus" ||
-              (!limitedReviewIgnoresGenericTitleOnly && firstBlocker === "other_placeholder")),
-        );
+        const stickyReviewCta = resolveFreeStarterStickyReviewCta({
+          draft,
+          userVisibleFullDocumentPlain: visitorVisibleReviewPlain,
+          intakeText: stickyReviewIntakeText || debouncedStepBuffer,
+          limitedReviewIgnoresGenericTitleOnly,
+          basicPartyNamesResolvedViaLivePreview,
+        });
+        const reviewIncomplete = stickyReviewCta.reviewIncomplete;
+        if (
+          stickyReviewCta.dumpStatedPartiesPainted &&
+          !stickyReviewCta.reviewIncomplete &&
+          isFreeStarterReviewSurface
+        ) {
+          return {
+            label: stickyReviewCta.continueLabel,
+            action: "launch_pro_checkout",
+            disabled: !draft,
+            reason: !draft ? "no_draft" : undefined,
+          };
+        }
         if (
           reviewIncomplete &&
           !softPartyRecipientsPath &&
           (!premiumOverridesReviewFriction || firstBlocker === "identity_placeholder_in_corpus")
         ) {
-          const fixLabel =
-            firstBlocker === "party_placeholder"
-              ? "Add party names"
-              : firstBlocker === "identity_placeholder_in_corpus"
-                ? "Fix document"
-                : "Fix details";
+          const fixLabel = stickyReviewCta.fixLabel || "Fix details";
           return {
             label: fixLabel,
             action: "fix_review",
@@ -24743,6 +24778,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     freeTrackBlocksRecipientAdvance,
     showStarterProRefineUpsell,
     renderedAgreementPreview,
+    starterPreviewBodyForShell,
+    intakeGuidanceCombined,
     debouncedStepBuffer,
     guidedPacketSendBlocked,
     guidedProUxState,

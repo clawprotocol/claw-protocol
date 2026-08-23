@@ -73,10 +73,10 @@ export function extractRealPartyNamesFromPreview(preview: string): { party1: str
 }
 
 /**
- * True when party names look like placeholders in draft.parties BUT the rendered preview
- * already contains real, high-confidence party names. This handles the case where names
- * appear in the document body (e.g. "Priya Shah and Diego Alvarez") but draft.parties
- * still has generic placeholders.
+ * True when the rendered preview already contains real, high-confidence party names
+ * (dump-stated hiring pair or a between: preamble). Used even when draft.parties
+ * still has empty/placeholder slots — and also when slots are already real so a
+ * generic title cannot become Fix details.
  */
 /**
  * Dump already named two parties (person-of-entity hiring pair) and those
@@ -105,9 +105,10 @@ export function partyNamesResolvedViaRenderedPreview(
   renderedPreview: string | null | undefined,
   intakeText?: string | null,
 ): boolean {
-  if (!draft || !draftHasPlaceholderParties(draft)) return false;
+  if (!draft) return false;
   if (extractRealPartyNamesFromPreview(renderedPreview || "") !== null) return true;
-  return dumpStatedPartiesPaintedInBody(intakeText, renderedPreview);
+  if (dumpStatedPartiesPaintedInBody(intakeText, renderedPreview)) return true;
+  return false;
 }
 
 /** After sanitization, the joined parties line parses as two substantive non-placeholder names. */
@@ -442,8 +443,11 @@ export function getDraftFirstReviewBlocker(
     return "identity_placeholder_in_corpus";
   }
   if (draftHasPlaceholderFieldsForRecipients(draft)) {
-    // Empty form slots must not become "Fix details" when the dump names are already painted.
+    // Empty form slots / generic title must not become "Fix details"
+    // when the dump names are already painted (including seeded real slots).
     if (partyNamesResolvedViaPreview) return null;
+    if (dumpStatedPartiesPaintedInBody(opts?.intakeText, plain)) return null;
+    if (extractRealPartyNamesFromPreview(plain) !== null) return null;
     return "other_placeholder";
   }
   return null;

@@ -53,6 +53,12 @@ import {
   getDraftFirstReviewBlocker,
   isPartyFixDetailsReviewBlocker,
 } from "./reviewPlaceholderGuard";
+import {
+  FREE_STARTER_ADD_PARTY_NAMES_LABEL,
+  FREE_STARTER_FIX_DETAILS_LABEL,
+  resolveFreeStarterStickyReviewCta,
+} from "./freeStarterStickyReviewCta";
+import { PRO_CTA_CONTINUE } from "../../launch/simpleProduct/proConversionCopy";
 import { resolveFreeStarterReviewBody } from "./freeStarterReviewBodyResolver";
 import { tryInferNamedPartiesFromIntake } from "./intakeNamedPartyFallback";
 
@@ -427,15 +433,22 @@ Effective Date: upon full execution by both parties
     expect(preAt).toBeGreaterThan(defaultsAt);
     expect(reseedAt).toBeGreaterThan(preAt);
     expect(src).toContain("setIntakePartyEditorRows(normalizeIntakePartyEditorRows(seededNames))");
-    // Live #93 painted dump names but sticky CTA still said Fix details because
-    // reviewIncomplete used empty slots (draftHasPlaceholderFieldsForRecipients)
-    // even after getDraftFirstReviewBlocker returned null.
-    expect(src).toContain(
-      '(!limitedReviewIgnoresGenericTitleOnly && firstBlocker === "other_placeholder")',
-    );
-    expect(src).toContain(
-      "partyNamesResolvedViaRenderedPreview(draft, renderedAgreementPreview, debouncedStepBuffer)",
-    );
+    // Live #94: tests that only called getDraftFirstReviewBlocker missed the
+    // sticky reviewIncomplete + Fix details label. The live CTA must call the
+    // shared helper with the visitor-visible body and a dump that survives a
+    // cleared step buffer.
+    expect(src).toContain("resolveFreeStarterStickyReviewCta");
+    expect(src).toContain("visitorVisibleReviewPlain");
+    expect(src).toContain("starterPreviewBodyForShell");
+    expect(src).toContain("stickyReviewIntakeText");
+    expect(src).toContain("readOriginalUserIntakeRaw()");
+    const stickyStart = src.indexOf("const visitorVisibleReviewPlain = starterPreviewBodyForShell");
+    expect(stickyStart).toBeGreaterThan(0);
+    const stickyBlock = src.slice(stickyStart, stickyStart + 4000);
+    expect(stickyBlock).toContain("resolveFreeStarterStickyReviewCta");
+    expect(stickyBlock).toContain("stickyReviewCta.dumpStatedPartiesPainted");
+    expect(stickyBlock).toContain("stickyReviewCta.continueLabel");
+    expect(stickyBlock).toContain("launch_pro_checkout");
   });
 
   it.each(THIN_TWO_PARTY_STATED_SCOPE)(
@@ -514,5 +527,130 @@ Effective Date: upon full execution by both parties
     const beginAskEnd = src.indexOf("const resolvePaidCreateGateBypassContext", beginAsk);
     const beginAskBody = src.slice(beginAsk, beginAskEnd);
     expect(beginAskBody).toContain('onHomeGuidedTransitionPhase?.("review_ready")');
+  });
+});
+
+const LIVE_PRIYA_DIEGO_BODY = `SERVICES AGREEMENT
+
+This Agreement (“Agreement”) is entered into by and between: Priya Shah of Northline Studio (“Client”) and Diego Alvarez of Harbor Marks LLC (“Service Provider”) (collectively, the “Parties”).
+
+1. Scope of Services / Purpose
+Priya Shah of Northline Studio will design a logo and brand kit.
+
+2. Payment Terms
+$2,400 due on signing.
+
+3. Services Term and Effective Date
+30 days starting August 22, 2026.
+
+4. Governing Law
+Texas.`;
+
+describe("live sticky CTA expression after painted dump names (live #94 hole)", () => {
+  const dump = PRIYA_DIEGO_LOGO_BRAND;
+  const ask = evaluateFreeStarterMissingTenetAsk(dump);
+  const answered =
+    ask.action === "ask"
+      ? mergeNumberedTenetAnswersIntoIntake(
+          dump,
+          ask.topics,
+          "1. $2,400 due on signing\n2. 30 days starting August 22, 2026\n3. Texas",
+        )
+      : dump;
+
+  function liveCta(draft: Parameters<typeof resolveFreeStarterStickyReviewCta>[0]["draft"], body = LIVE_PRIYA_DIEGO_BODY, intake = answered) {
+    return resolveFreeStarterStickyReviewCta({
+      draft,
+      userVisibleFullDocumentPlain: body,
+      intakeText: intake,
+      limitedReviewIgnoresGenericTitleOnly: false,
+      basicPartyNamesResolvedViaLivePreview: false,
+    });
+  }
+
+  it("empty slots + empty title + painted Priya/Diego body is Continue with Pro, not Fix details", () => {
+    const emptySlotsDraft = {
+      ...emptyStarterCheckoutPendingShell(),
+      parties: [
+        { name: "", role: "client" },
+        { name: "", role: "service_provider" },
+      ],
+    };
+    const cta = liveCta(emptySlotsDraft);
+    expect(cta.reviewIncomplete).toBe(false);
+    expect(cta.fixLabel).toBeNull();
+    expect(cta.fixLabel).not.toBe(FREE_STARTER_FIX_DETAILS_LABEL);
+    expect(cta.fixLabel).not.toBe(FREE_STARTER_ADD_PARTY_NAMES_LABEL);
+    expect(cta.continueLabel).toBe(PRO_CTA_CONTINUE);
+    expect(cta.dumpStatedPartiesPainted).toBe(true);
+  });
+
+  it("seeded parties + empty structured title still Continue with Pro (the live #94 CTA fail)", () => {
+    const seeded = seedStatedTwoPartyNamesOnHollowDraft(
+      {
+        ...emptyStarterCheckoutPendingShell(),
+        title: "",
+        parties: [
+          { name: "", role: "client" },
+          { name: "", role: "service_provider" },
+        ],
+      },
+      answered,
+    );
+    expect(seeded.parties.map((p) => p.name).join(" ")).toMatch(/Priya Shah/);
+    expect(seeded.parties.map((p) => p.name).join(" ")).toMatch(/Diego Alvarez/);
+    expect(seeded.parties).toHaveLength(2);
+    const cta = liveCta({ ...seeded, title: "" });
+    expect(cta.reviewIncomplete).toBe(false);
+    expect(cta.fixLabel).not.toBe(FREE_STARTER_FIX_DETAILS_LABEL);
+    expect(cta.continueLabel).toBe(PRO_CTA_CONTINUE);
+  });
+
+  it("cleared step buffer still Continue with Pro when the visitor-visible body has dump names", () => {
+    const emptySlotsDraft = {
+      ...emptyStarterCheckoutPendingShell(),
+      parties: [
+        { name: "", role: "client" },
+        { name: "", role: "service_provider" },
+      ],
+    };
+    const cta = resolveFreeStarterStickyReviewCta({
+      draft: emptySlotsDraft,
+      userVisibleFullDocumentPlain: LIVE_PRIYA_DIEGO_BODY,
+      intakeText: "",
+      limitedReviewIgnoresGenericTitleOnly: false,
+    });
+    expect(cta.reviewIncomplete).toBe(false);
+    expect(cta.fixLabel).not.toBe(FREE_STARTER_FIX_DETAILS_LABEL);
+    expect(cta.continueLabel).toBe(PRO_CTA_CONTINUE);
+  });
+
+  it("payment/term/law in the painted body do not keep Fix details when structured fields are empty", () => {
+    const draft = {
+      ...emptyStarterCheckoutPendingShell(),
+      title: "Agreement",
+      parties: [
+        { name: "Priya Shah of Northline Studio", role: "client" },
+        { name: "Diego Alvarez of Harbor Marks LLC", role: "service_provider" },
+      ],
+      payment_terms: "",
+      duration: null,
+      jurisdiction: "",
+    };
+    const cta = liveCta(draft);
+    expect(cta.reviewIncomplete).toBe(false);
+    expect(cta.fixLabel).not.toBe(FREE_STARTER_FIX_DETAILS_LABEL);
+    expect(cta.continueLabel).toBe(PRO_CTA_CONTINUE);
+  });
+
+  it("live CTA source still evaluates reviewIncomplete + fixLabel through the shared helper", () => {
+    const src = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
+    const ctaStart = src.indexOf("const unifiedPrimaryCta = useMemo");
+    const reviewIncompleteAssign = src.indexOf("const reviewIncomplete = stickyReviewCta.reviewIncomplete", ctaStart);
+    const fixLabelAssign = src.indexOf("stickyReviewCta.fixLabel", reviewIncompleteAssign);
+    expect(ctaStart).toBeGreaterThan(0);
+    expect(reviewIncompleteAssign).toBeGreaterThan(ctaStart);
+    expect(fixLabelAssign).toBeGreaterThan(reviewIncompleteAssign);
+    expect(src.slice(ctaStart, fixLabelAssign + 80)).toContain("Fix details");
   });
 });
