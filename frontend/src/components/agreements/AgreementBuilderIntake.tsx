@@ -668,7 +668,10 @@ import {
   resolveProReviewDocumentPanelHeading,
 } from "./premiumSituationIntelligence";
 import { PremiumAgreementReadonlyView } from "./PremiumAgreementReadonlyView";
-import { PaidProVisibleDocumentShell } from "./paidProVisibleDocumentShell";
+import {
+  PaidProVisibleDocumentShell,
+  PAID_PRO_FALLBACK_REBUILD_MIN_LEN,
+} from "./paidProVisibleDocumentShell";
 import {
   hasCanonicalReviewCorpusForRender,
   PAID_PRO_DOCUMENT_BODY_SOT_MIN_LEN,
