@@ -1,15 +1,18 @@
+/** @vitest-environment jsdom */
 /**
  * Live #100: after premiumCompletion=1 / restore=starterReview, a 3- or 4-named
  * dump must keep those parties on the card and mount that many signer emails.
  * Restore must not collapse to the free 2-party starter (Client / "the first party").
  */
-/** @vitest-environment jsdom */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import React, { useState } from "react";
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { clearCanonicalPartyMetadata } from "./canonicalPartyMetadataAuthority";
+import { clearConsumedPaidProSignerMetadataAuthority } from "./paidProSignerMetadataAuthority";
+import { resetSignerCountAuthorityDiagnosticsForTests } from "./signerCountAuthority";
 import {
   applyNamedDumpPartiesToPaidRestoreDraft,
   extractNamedDumpPartyUnits,
@@ -105,8 +108,17 @@ function AfterPayNamedDumpEmails({ count }: { count: number }) {
 }
 
 describe("named dump parties survive paid restore (live 2026-08-23 hole)", () => {
+  beforeEach(() => {
+    clearCanonicalPartyMetadata();
+    clearConsumedPaidProSignerMetadataAuthority();
+    resetSignerCountAuthorityDiagnosticsForTests();
+    clearCheckoutBackRestoreSnapshot();
+  });
   afterEach(() => {
     cleanup();
+    clearCanonicalPartyMetadata();
+    clearConsumedPaidProSignerMetadataAuthority();
+    resetSignerCountAuthorityDiagnosticsForTests();
     clearCheckoutBackRestoreSnapshot();
   });
 
