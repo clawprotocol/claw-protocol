@@ -8542,6 +8542,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       // Immediately rebuild a fallback body from intake before generation starts.
       // This ensures useLayoutEffect guards work, preventing empty body between restore and generation.
       // Universal path rule: paid session must paint ≥200 body before review shell renders.
+      // Do NOT wait for generate to fail — paint immediately if body is hollow/empty/<200.
+      // Keep this body on screen while generate runs. If generate succeeds with non-hollow Pro body, replace it.
+      // If generate fails, keep the rebuilt body.
       {
         const checkoutBackSnap = readCheckoutBackRestoreSnapshot();
         const earlyIntake = mergedIntake || checkoutBackSnap?.intakeText || "";
@@ -8549,13 +8552,17 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         const currentBodyIsHollow = currentBodyLen < 200 || !isNonHollowBody(agreementDocumentTextRef.current, earlyIntake);
         const needsEarlyFallback = earlyIntake.length >= 20 && currentBodyIsHollow;
         
-        if (needsEarlyFallback && prior) {
-          const earlyFallbackBody = rebuildBodyFromIntakeForProFailure(earlyIntake, prior);
+        // Run early fallback regardless of whether prior is null - use checkoutBackSnap.draft as fallback
+        if (needsEarlyFallback) {
+          const draftForRebuild = prior ?? checkoutBackSnap?.draft ?? null;
+          const earlyFallbackBody = rebuildBodyFromIntakeForProFailure(earlyIntake, draftForRebuild);
           if (earlyFallbackBody.trim().length >= 200 && isNonHollowBody(earlyFallbackBody, earlyIntake)) {
             lastKnownGoodAuthoritativeDraftRef.current = earlyFallbackBody;
             setAgreementDocumentText(earlyFallbackBody);
             setProUpgradeUseStarterView(false);
             setProFullDraftQualityRetry(false);
+            setProFullDraftCustomGateMessage(null);
+            setPremiumSendPathUnlocked(true);
             console.info("[paid-pro-early-fallback-body]", {
               intakeLen: earlyIntake.length,
               bodyLen: earlyFallbackBody.length,
@@ -8563,6 +8570,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
               trigger: "post_checkout_early_restore",
               previousBodyLen: currentBodyLen,
               previousBodyHollow: currentBodyIsHollow,
+              priorIsNull: prior === null,
+              usedCheckoutBackDraft: draftForRebuild === checkoutBackSnap?.draft,
             });
           }
         }
@@ -15603,6 +15612,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     }
     if (agreementDocumentDirtyRef.current) return;
     if (hasPaidProSourceOfTruth()) return;
+    // UNIVERSAL PAID SESSION GUARD: Never overwrite a ≥200 non-hollow body during paid session
+    // with a potentially hollow preview. The early fallback body must be preserved while generate runs.
+    if (hasPaidPremiumCompletionSession() && lastKnownGoodAuthoritativeDraftRef.current.trim().length >= 200) {
+      return;
+    }
     const placeholderGate = {
       isGenerating: previewPlaceholderGateIsGeneratingRef.current,
       hasDraftPayload: starterReviewServerDraftReadyRef.current,

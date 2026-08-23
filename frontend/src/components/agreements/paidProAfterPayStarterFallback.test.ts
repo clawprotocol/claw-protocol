@@ -797,4 +797,85 @@ Governing law: Oregon.
     expect(rebuilt.length).toBeGreaterThanOrEqual(200);
     expect(isNonHollowBody(rebuilt, intake)).toBe(true);
   });
+
+  it("paid restore + hollow prior + intake present → painted ≥200 body before generate, retry false", () => {
+    markPaidPremiumCompletionSession({ source: "settled_checkout" });
+
+    const PRIYA_INTAKE = `
+Priya Shah of Northline Studio is hiring Diego Alvarez from Harbor Marks LLC for a branding project.
+Payment: $2,400 total.
+Governing law: Texas.
+The project involves logo design and brand guidelines delivery within 6 weeks.
+`;
+
+    const HOLLOW_PRIOR: ParsedDraftShape = {
+      title: "Services Agreement",
+      jurisdiction: "",
+      parties: [
+        { name: "Party A", role: "Client" },
+        { name: "Party B", role: "Service Provider" },
+      ],
+      purpose: "covers due. Work.",
+      payment_terms: "",
+      payment: null,
+      duration: null,
+      due_date: null,
+      effective_date: null,
+      additional_terms: null,
+    };
+
+    persistStarterReviewBeforeCheckout({
+      intakeText: PRIYA_INTAKE,
+      draft: HOLLOW_PRIOR,
+      previewText: `SERVICES AGREEMENT
+
+This Agreement is entered into by and between:
+
+Party A ("Client")
+and
+Party B ("Service Provider")
+
+1. SERVICES
+Service Provider agrees to provide covers due. Work.
+
+2. PAYMENT TERMS
+To be agreed.
+
+3. GOVERNING LAW
+To be determined.
+`,
+    });
+
+    Object.defineProperty(window, "location", {
+      value: {
+        href: "https://lawdog.me/app/create?premiumCompletion=1&restore=starterReview",
+        origin: "https://lawdog.me",
+        search: "?premiumCompletion=1&restore=starterReview",
+      },
+      writable: true,
+      configurable: true,
+    });
+
+    const currentBodyLen = 0;
+    const currentBodyIsHollow = true;
+    const needsEarlyFallback = PRIYA_INTAKE.length >= 20 && currentBodyIsHollow;
+
+    expect(needsEarlyFallback).toBe(true);
+    expect(HOLLOW_PRIOR).not.toBeNull();
+
+    const draftForRebuild = HOLLOW_PRIOR;
+    const earlyFallbackBody = rebuildBodyFromIntakeForProFailure(PRIYA_INTAKE, draftForRebuild);
+
+    expect(earlyFallbackBody.trim().length).toBeGreaterThanOrEqual(200);
+    expect(isNonHollowBody(earlyFallbackBody, PRIYA_INTAKE)).toBe(true);
+
+    expect(earlyFallbackBody).toContain("Priya Shah");
+    expect(earlyFallbackBody).toContain("Northline Studio");
+    expect(earlyFallbackBody).toContain("$2,400");
+    expect(earlyFallbackBody).toContain("Texas");
+
+    expect(earlyFallbackBody).not.toMatch(/\bParty A\b/i);
+    expect(earlyFallbackBody).not.toMatch(/\bParty B\b/i);
+    expect(earlyFallbackBody).not.toContain("covers due. Work.");
+  });
 });
