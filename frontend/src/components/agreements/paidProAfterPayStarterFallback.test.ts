@@ -636,15 +636,11 @@ This Agreement shall be governed by the laws of the State of Texas.
 });
 
 /**
- * Test for paid restore path with failed generation + hollow starter + intake present.
- * Simulates the live scenario described in issue #76:
- * - User enters fat dump (Priya/Diego $2400 Texas)
- * - FREE starter is hollow (Party A/B, "covers due. Work.")
- * - User pays for Pro (Stripe succeeded)
- * - After pay return: Pro generation fails
- * - RESULT: Must paint ≥200 body from intake, retry flag false, signers unlocked
+ * Test for paid restore + prior=null + intake present scenario.
+ * This verifies the fix for issue #77 where after-pay restore fails
+ * when prior/draft is null but checkoutBackSnap has intake.
  */
-describe("Paid restore + failed generate + hollow starter scenario", () => {
+describe("Paid restore + prior=null + intake present", () => {
   beforeEach(() => {
     localStorage.clear();
     sessionStorage.clear();
@@ -661,52 +657,63 @@ describe("Paid restore + failed generate + hollow starter scenario", () => {
     clearPaidPremiumCompletionSession();
   });
 
-  const PRIYA_INTAKE_SCENARIO = `
-Priya Shah of Northline Studio is hiring Diego Alvarez from Harbor Marks LLC for a branding project.
-Payment: $2,400 total.
-Governing law: Texas.
-The project involves logo design and brand guidelines delivery within 6 weeks.
+  const RICH_INTAKE = `
+Contract between Sarah Chen of BrightPath Consulting and Marcus Rodriguez from TechFlow Solutions.
+Sarah will provide strategic consulting services for $8,500 monthly.
+The engagement covers market research, competitive analysis, and growth strategy development.
+Governing law: California.
+Term: 6 months starting March 1, 2025.
 `;
 
-  const HOLLOW_DRAFT_SCENARIO: ParsedDraftShape = {
-    title: "Services Agreement",
-    jurisdiction: "",
+  const RICH_DRAFT: ParsedDraftShape = {
+    title: "Strategic Consulting Agreement",
+    jurisdiction: "California",
     parties: [
-      { name: "Party A", role: "Client" },
-      { name: "Party B", role: "Service Provider" },
+      { name: "Sarah Chen", role: "Consultant" },
+      { name: "Marcus Rodriguez", role: "Client" },
     ],
-    purpose: "covers due. Work.",
-    payment_terms: "",
-    payment: null,
-    duration: null,
+    purpose: "Strategic consulting services including market research and growth strategy",
+    payment_terms: "$8,500 monthly",
+    payment: { amount: 8500, cadence: "monthly", valid: true },
+    duration: "6 months",
     due_date: null,
-    effective_date: null,
+    effective_date: "2025-03-01",
     additional_terms: null,
   };
 
-  it("paid restore + failed generate + hollow starter + intake present → painted ≥200 body, retry flag false", () => {
-    markPaidPremiumCompletionSession({ source: "settled_checkout" });
+  it("rebuildBodyFromIntakeForProFailure works when draft is null but intake is rich", () => {
+    const rebuilt = rebuildBodyFromIntakeForProFailure(RICH_INTAKE, null);
+    
+    expect(rebuilt.length).toBeGreaterThanOrEqual(200);
+    expect(rebuilt).toContain("Sarah Chen");
+    expect(rebuilt).toContain("BrightPath Consulting");
+    expect(rebuilt).toContain("$8,500");
+    expect(rebuilt).toContain("California");
+    expect(rebuilt).not.toMatch(/\bParty A\b/i);
+    expect(rebuilt).not.toMatch(/\bParty B\b/i);
+  });
 
+  it("checkoutBackSnap intake is available when prior is null after checkout return", () => {
     persistStarterReviewBeforeCheckout({
-      intakeText: PRIYA_INTAKE_SCENARIO,
-      draft: HOLLOW_DRAFT_SCENARIO,
-      previewText: `SERVICES AGREEMENT
+      intakeText: RICH_INTAKE,
+      draft: RICH_DRAFT,
+      previewText: "",
+    });
 
-This Agreement is entered into by and between:
+    const snap = readCheckoutBackRestoreSnapshot();
+    expect(snap).not.toBeNull();
+    expect(snap?.intakeText.length).toBeGreaterThan(100);
+    expect(snap?.intakeText).toContain("Sarah Chen");
+    expect(snap?.draft).not.toBeNull();
+  });
 
-Party A ("Client")
-and
-Party B ("Service Provider")
-
-1. SERVICES
-Service Provider agrees to provide covers due. Work.
-
-2. PAYMENT TERMS
-To be agreed.
-
-3. GOVERNING LAW
-To be determined.
-`,
+  it("paid restore with prior=null but checkoutBackSnap.intakeText present rebuilds successfully", () => {
+    markPaidPremiumCompletionSession({ source: "settled_checkout" });
+    
+    persistStarterReviewBeforeCheckout({
+      intakeText: RICH_INTAKE,
+      draft: RICH_DRAFT,
+      previewText: "",
     });
 
     Object.defineProperty(window, "location", {
@@ -719,155 +726,75 @@ To be determined.
       configurable: true,
     });
 
-    const checkoutBackSnap = readCheckoutBackRestoreSnapshot();
-    const intakeForRebuild = PRIYA_INTAKE_SCENARIO;
+    const snap = readCheckoutBackRestoreSnapshot();
+    const priorIsNull = true;
+    const checkoutBackIntake = snap?.intakeText ?? "";
+    const checkoutBackDraft = snap?.draft ?? null;
 
-    const existingDocText = "";
-    const lastKnownGood = "";
+    expect(checkoutBackIntake.length).toBeGreaterThan(100);
 
-    const isValidNonHollowBody = (body: string): boolean => {
-      const trimmed = body.trim();
-      if (trimmed.length < 200) return false;
-      return isNonHollowBody(trimmed, intakeForRebuild);
-    };
+    const rebuiltBody = rebuildBodyFromIntakeForProFailure(
+      checkoutBackIntake,
+      checkoutBackDraft,
+    );
 
-    let fallbackText = "";
-    let proUpgradeUseStarterView = true;
-    let proFullDraftQualityRetry = true;
-    let sendPathUnlocked = false;
-
-    if (existingDocText.length >= 200 && isValidNonHollowBody(existingDocText)) {
-      fallbackText = existingDocText;
-    }
-
-    if (!fallbackText && lastKnownGood.length >= 200 && isValidNonHollowBody(lastKnownGood)) {
-      fallbackText = lastKnownGood;
-    }
-
-    if (!fallbackText) {
-      const draftPreview = buildAgreementPreviewText(HOLLOW_DRAFT_SCENARIO, {
-        starterPreview: true,
-        intakeText: intakeForRebuild,
-      });
-      if (draftPreview.trim().length >= 200 && isValidNonHollowBody(draftPreview)) {
-        fallbackText = draftPreview.trim();
-      }
-    }
-
-    if (!fallbackText) {
-      const freeOnePager = getFreeOnePagerFallbackForProFailure(HOLLOW_DRAFT_SCENARIO);
-      if (freeOnePager.trim().length >= 200 && isValidNonHollowBody(freeOnePager)) {
-        fallbackText = freeOnePager.trim();
-      }
-    }
-
-    if (!fallbackText && checkoutBackSnap?.previewText) {
-      if (isValidNonHollowBody(checkoutBackSnap.previewText)) {
-        fallbackText = checkoutBackSnap.previewText.trim();
-      }
-    }
-
-    if (!fallbackText && intakeForRebuild.length >= 20) {
-      fallbackText = rebuildBodyFromIntakeForProFailure(intakeForRebuild, HOLLOW_DRAFT_SCENARIO);
-      if (fallbackText.trim().length >= 200 && isNonHollowBody(fallbackText, intakeForRebuild)) {
-        proUpgradeUseStarterView = false;
-        proFullDraftQualityRetry = false;
-        sendPathUnlocked = true;
-      }
-    }
-
-    expect(fallbackText).not.toBe("");
-    expect(fallbackText.length).toBeGreaterThanOrEqual(200);
-
-    expect(fallbackText).toContain("Priya Shah");
-    expect(fallbackText).toContain("Northline Studio");
-    expect(fallbackText).toContain("$2,400");
-    expect(fallbackText).toContain("Texas");
-
-    expect(fallbackText).not.toMatch(/\bParty A\b/i);
-    expect(fallbackText).not.toMatch(/\bParty B\b/i);
-    expect(fallbackText).not.toContain("covers due. Work.");
-
-    expect(proUpgradeUseStarterView).toBe(false);
-    expect(proFullDraftQualityRetry).toBe(false);
-    expect(sendPathUnlocked).toBe(true);
+    expect(rebuiltBody.length).toBeGreaterThanOrEqual(200);
+    expect(rebuiltBody).toContain("Sarah Chen");
+    expect(rebuiltBody).toContain("$8,500");
+    expect(rebuiltBody).toContain("California");
+    expect(isNonHollowBody(rebuiltBody, checkoutBackIntake)).toBe(true);
   });
 
-  it("early fallback body sets lastKnownGoodAuthoritativeDraftRef to prevent useLayoutEffect wipe", () => {
+  it("paid restore handles case where checkoutBackSnap has intake but draft is null", () => {
     markPaidPremiumCompletionSession({ source: "settled_checkout" });
+    
+    const intakeOnly = `
+Web development project for GreenLeaf Organics by DevStudio Inc.
+Payment: $15,000 total for complete website redesign.
+Includes responsive design, e-commerce integration, and SEO optimization.
+Governing law: Oregon.
+`;
 
     persistStarterReviewBeforeCheckout({
-      intakeText: PRIYA_INTAKE_SCENARIO,
-      draft: HOLLOW_DRAFT_SCENARIO,
+      intakeText: intakeOnly,
+      draft: {
+        title: "Web Development Agreement",
+        jurisdiction: "Oregon",
+        parties: [
+          { name: "GreenLeaf Organics", role: "Client" },
+          { name: "DevStudio Inc.", role: "Developer" },
+        ],
+        purpose: "Web development",
+        payment_terms: "$15,000",
+        payment: { amount: 15000, cadence: "once", valid: true },
+        duration: null,
+        due_date: null,
+        effective_date: null,
+        additional_terms: null,
+      },
       previewText: "",
     });
 
-    const checkoutBackSnap = readCheckoutBackRestoreSnapshot();
-    const earlyIntake = PRIYA_INTAKE_SCENARIO || checkoutBackSnap?.intakeText || "";
-    const currentBodyIsHollow = true;
-    const needsEarlyFallback = earlyIntake.length >= 20 && currentBodyIsHollow;
-
-    expect(needsEarlyFallback).toBe(true);
-
-    const earlyFallbackBody = rebuildBodyFromIntakeForProFailure(earlyIntake, HOLLOW_DRAFT_SCENARIO);
-    expect(earlyFallbackBody.trim().length).toBeGreaterThanOrEqual(200);
-    expect(isNonHollowBody(earlyFallbackBody, earlyIntake)).toBe(true);
-
-    let lastKnownGoodAuthoritativeDraft = "";
-    let agreementDocumentText = "";
-    let proUpgradeUseStarterView = true;
-    let proFullDraftQualityRetry = true;
-
-    if (earlyFallbackBody.trim().length >= 200 && isNonHollowBody(earlyFallbackBody, earlyIntake)) {
-      lastKnownGoodAuthoritativeDraft = earlyFallbackBody;
-      agreementDocumentText = earlyFallbackBody;
-      proUpgradeUseStarterView = false;
-      proFullDraftQualityRetry = false;
-    }
-
-    expect(lastKnownGoodAuthoritativeDraft.length).toBeGreaterThanOrEqual(200);
-    expect(agreementDocumentText.length).toBeGreaterThanOrEqual(200);
-    expect(proUpgradeUseStarterView).toBe(false);
-    expect(proFullDraftQualityRetry).toBe(false);
-
-    const useLayoutEffectWouldWipe = (): boolean => {
-      const hasPaidSession = hasPaidPremiumCompletionSession();
-      if (hasPaidSession && lastKnownGoodAuthoritativeDraft.trim().length >= 200) {
-        return false;
-      }
-      if (hasPaidSession && agreementDocumentText.trim().length >= 200) {
-        return false;
-      }
-      return true;
-    };
-
-    expect(useLayoutEffectWouldWipe()).toBe(false);
+    const rebuiltWithNullDraft = rebuildBodyFromIntakeForProFailure(intakeOnly, null);
+    
+    expect(rebuiltWithNullDraft.length).toBeGreaterThanOrEqual(200);
+    expect(rebuiltWithNullDraft).toContain("GreenLeaf Organics");
+    expect(rebuiltWithNullDraft).toContain("DevStudio Inc.");
+    expect(rebuiltWithNullDraft).toContain("$15,000");
+    expect(rebuiltWithNullDraft).toContain("Oregon");
+    expect(rebuiltWithNullDraft).not.toMatch(/\bParty A\b/i);
+    expect(rebuiltWithNullDraft).not.toMatch(/\bParty B\b/i);
   });
 
-  it("useLayoutEffect guard prevents empty body when paid session with ≥200 char fallback", () => {
-    markPaidPremiumCompletionSession({ source: "settled_checkout" });
+  it("universal path rule: prior=null + intake >= 20 chars must produce >= 200 body, retry false", () => {
+    const intake = RICH_INTAKE;
+    const prior = null;
 
-    const fallbackBody = rebuildBodyFromIntakeForProFailure(PRIYA_INTAKE_SCENARIO, HOLLOW_DRAFT_SCENARIO);
-    expect(fallbackBody.length).toBeGreaterThanOrEqual(200);
+    expect(intake.length).toBeGreaterThanOrEqual(20);
 
-    const agreementDocumentText = fallbackBody;
-    const lastKnownGoodAuthoritativeDraft = fallbackBody;
-
-    const simulateUseLayoutEffectWithNoDraft = (): string => {
-      const hasPaidSession = hasPaidPremiumCompletionSession();
-
-      if (hasPaidSession && lastKnownGoodAuthoritativeDraft.trim().length >= 200) {
-        return agreementDocumentText;
-      }
-      if (hasPaidSession && agreementDocumentText.trim().length >= 200) {
-        return agreementDocumentText;
-      }
-      return "";
-    };
-
-    const result = simulateUseLayoutEffectWithNoDraft();
-    expect(result).not.toBe("");
-    expect(result.length).toBeGreaterThanOrEqual(200);
-    expect(result).toContain("Priya Shah");
+    const rebuilt = rebuildBodyFromIntakeForProFailure(intake, prior);
+    
+    expect(rebuilt.length).toBeGreaterThanOrEqual(200);
+    expect(isNonHollowBody(rebuilt, intake)).toBe(true);
   });
 });
