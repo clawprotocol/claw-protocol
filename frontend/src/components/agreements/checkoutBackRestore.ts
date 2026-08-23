@@ -4,6 +4,7 @@
  */
 
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
+import { applyNamedDumpPartiesToPaidRestoreDraft } from "./intakeNamedPartyFallback";
 import {
   writeCreateReviewDraftReadyMarker,
   writeCreateReviewDraftSnapshot,
@@ -55,7 +56,8 @@ export function readCheckoutBackRestoreSnapshot(): CheckoutBackStarterReviewSnap
       return null;
     }
     if (!parsed.draft || typeof parsed.intakeText !== "string") return null;
-    return parsed;
+    const draft = applyNamedDumpPartiesToPaidRestoreDraft(parsed.draft, parsed.intakeText) ?? parsed.draft;
+    return { ...parsed, draft };
   } catch {
     return null;
   }
@@ -68,12 +70,13 @@ export function persistStarterReviewBeforeCheckout(args: {
 }): void {
   const intakeText = (args.intakeText || "").trim();
   if (!intakeText || !args.draft) return;
+  const draft = applyNamedDumpPartiesToPaidRestoreDraft(args.draft, intakeText) ?? args.draft;
   const body: CheckoutBackStarterReviewSnapshotV1 = {
     version: 1,
     savedAt: Date.now(),
     source: "checkout_back_restore",
     intakeText,
-    draft: args.draft,
+    draft,
     previewText: args.previewText?.trim() || undefined,
     createFlowPhase: "draft_ready_for_review",
     displayPhase: "review",
@@ -84,7 +87,7 @@ export function persistStarterReviewBeforeCheckout(args: {
     /* ignore */
   }
   writeCreateReviewDraftReadyMarker();
-  writeCreateReviewDraftSnapshot(args.draft);
+  writeCreateReviewDraftSnapshot(draft);
   try {
     localStorage.setItem("claw_agreement_creator_intake_v1", intakeText);
   } catch {

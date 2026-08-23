@@ -11,6 +11,7 @@ import { partyLegalNamesMatch } from "./paidProSignerMetadataAuthority";
 import { resolveAuthoritativeSignerCount } from "./signerCountAuthority";
 import { intakePartyManifestLegalEntities } from "./intakePartyManifestAuthority";
 import { resolveDeclaredExplicitPartyCount } from "./partySlotIdentityNormalize";
+import { namedDumpPartiesForPaidRestore } from "./intakeNamedPartyFallback";
 
 const UI_MAX_PARTY_SLOTS = 4;
 
@@ -27,6 +28,8 @@ export function resolveLegalEntitiesForCanonicalMetadata(args: {
   draft?: ParsedDraftShape | null;
 }): string[] {
   const intake = String(args.intakeText ?? "").trim();
+  const namedDump = namedDumpPartiesForPaidRestore(intake);
+  if (namedDump.length >= 3) return namedDump;
   const explicit = (args.legalEntities ?? [])
     .map((e) => String(e).replace(/\s+/g, " ").trim())
     .filter((e) => e.length >= 2 && isAuthoritativeLegalEntityName(e));

@@ -19,6 +19,7 @@ import { labeledPartyLegalEntities } from "./labeledPartyBlockParse";
 import { starterCorpusContainsRawIntakeInstruction } from "./canonicalPartyRoleAuthority";
 import { readOriginalUserIntakeRaw } from "./originalUserIntakeRawStorage";
 import { enrichStarterPreviewPartiesFromIntake } from "./starterOpeningPartyPreserve";
+import { extractNamedDumpPartyUnits } from "./intakeNamedPartyFallback";
 import { isolateLegalEntityFromContaminatedName } from "./starterPartyIdentityIsolation";
 import { sanitizeStarterPartyNameForDisplay } from "./starterPreviewProseSanitize";
 import { normalizeFreeStarterSectionRender } from "./freeStarterSectionRenderNormalize";
@@ -430,6 +431,97 @@ function extractPurposeFromIntake(intake: string): string {
 
 const MIN_REBUILT_BODY_LEN = 200;
 
+/** After pay, 3+ named dump units stay on the card — never Client / "the first party". */
+function paidRestoreNamedDumpPartyNames(
+  intake: string,
+  draft: ParsedDraftShape | null,
+): string[] {
+  const fromDump = extractNamedDumpPartyUnits(intake);
+  if (fromDump.length >= 3) return fromDump.slice(0, 4);
+  const fromDraft = (draft?.parties ?? [])
+    .map((p) => String(p?.name ?? "").trim())
+    .filter((n) => n.length >= 2 && !isHollowPartyName(n));
+  if (fromDraft.length >= 3) return fromDraft.slice(0, 4);
+  return [];
+}
+
+function buildNamedDumpPaidRestoreBody(
+  intakeText: string,
+  draft: ParsedDraftShape | null,
+  partyNames: string[],
+): string {
+  const jurisdiction = extractJurisdictionFromIntake(intakeText) || draft?.jurisdiction || null;
+  const payment = extractPaymentFromIntake(intakeText) || draft?.payment_terms || null;
+  const term = extractTermFromIntake(intakeText) || draft?.duration || null;
+  const draftPurpose = draft?.purpose && !isCorruptedPurpose(draft.purpose) ? draft.purpose : null;
+  const purpose = draftPurpose || extractPurposeFromIntake(intakeText);
+  const title = draft?.title || "SERVICES AGREEMENT";
+
+  const partyBlock: string[] = [];
+  partyNames.forEach((name, i) => {
+    if (i > 0) partyBlock.push("and");
+    partyBlock.push(name);
+  });
+
+  const lines: string[] = [
+    title.toUpperCase(),
+    "",
+    `This Agreement ("Agreement") is entered into by and between:`,
+    "",
+    ...partyBlock,
+    "",
+    `(collectively, the "Parties").`,
+    "",
+    "1. SERVICES",
+  ];
+
+  if (purpose) {
+    lines.push(`The service provider agrees to provide ${purpose}.`);
+  } else {
+    lines.push("The service provider agrees to provide services as described in the parties' communications.");
+  }
+  lines.push("");
+
+  lines.push("2. PAYMENT TERMS");
+  if (payment) {
+    lines.push(`Payment of ${payment} for services rendered under this Agreement.`);
+  } else {
+    lines.push("Payment as agreed by the Parties for services rendered under this Agreement.");
+  }
+  lines.push("");
+
+  lines.push("3. TERM");
+  if (term) {
+    lines.push(`This Agreement shall continue for ${term} unless earlier terminated by either Party with written notice.`);
+  } else {
+    lines.push("This Agreement shall continue until the services are completed or terminated by either Party with written notice.");
+  }
+  lines.push("");
+
+  lines.push("4. GOVERNING LAW");
+  if (jurisdiction) {
+    const formattedJurisdiction = jurisdiction.split(" ").map((w) => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
+    lines.push(`This Agreement shall be governed by and construed in accordance with the laws of the State of ${formattedJurisdiction}.`);
+  } else {
+    lines.push("This Agreement shall be governed by the laws of the state where the services are primarily performed.");
+  }
+  lines.push("");
+
+  lines.push("5. ENTIRE AGREEMENT");
+  lines.push("This Agreement constitutes the entire agreement between the Parties and supersedes all prior negotiations, representations, or agreements relating to this subject matter.");
+  lines.push("");
+
+  lines.push("IN WITNESS WHEREOF, the Parties have executed this Agreement.");
+  for (const name of partyNames) {
+    lines.push("");
+    lines.push("___________________________");
+    lines.push(name);
+  }
+
+  const body = lines.join("\n");
+  return body.length < MIN_REBUILT_BODY_LEN ? "" : body;
+}
+
 /**
  * Check if a purpose/text is corrupted (contains known bad AI output patterns).
  */
@@ -452,6 +544,11 @@ export function rebuildBodyFromIntakeForProFailure(
 ): string {
   const intakeText = (intake || "").trim();
   if (intakeText.length < 20) return "";
+
+  const paidRestoreParties = paidRestoreNamedDumpPartyNames(intakeText, draft);
+  if (paidRestoreParties.length >= 3) {
+    return buildNamedDumpPaidRestoreBody(intakeText, draft, paidRestoreParties);
+  }
   
   const namedParties = extractNamedPartiesFromIntake(intakeText);
   const draftParties = draft?.parties ?? [];

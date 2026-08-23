@@ -534,6 +534,10 @@ import {
   persistStarterReviewBeforeCheckout,
   readCheckoutBackRestoreSnapshot,
 } from "./checkoutBackRestore";
+import {
+  applyNamedDumpPartiesToPaidRestoreDraft,
+  namedDumpPartiesForPaidRestore,
+} from "./intakeNamedPartyFallback";
 import type { PremiumSendIntent } from "../../launch/simpleProduct/premiumSendIntent";
 import {
   clearPaidProEditReturnHandoff,
@@ -3037,7 +3041,7 @@ function CreateFlowSendRecipientsPanel({
                 disabled={false}
                 readOnly={false}
                 tabIndex={0}
-                data-claw-recipient-field={idx <= 1 ? (idx === 0 ? "r1-email" : "r2-email") : `party-${idx}-email`}
+                data-claw-recipient-field={idx <= 1 ? (idx === 0 ? "r1-email" : "r2-email") : idx === 2 ? "r3-email" : idx === 3 ? "r4-email" : `party-${idx}-email`}
                 aria-label={
                   idx === 0
                     ? signaturePrepMode ? "Signer 1 email" : "Reviewer 1 email"
@@ -8556,6 +8560,26 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       if (origFromResume) writeOriginalUserIntakeRawIfRicher(origFromResume);
       const checkoutBackSnapForPrior = readCheckoutBackRestoreSnapshot();
       let prior = draftSnapshotRef.current ?? resumeSnap?.pending ?? checkoutBackSnapForPrior?.draft ?? null;
+      {
+        const namedPriorIntake =
+          (intakeCombinedRef.current || "").trim() ||
+          (checkoutBackSnapForPrior?.intakeText ?? "").trim() ||
+          (resumeSnap?.originalUserIntakeRaw ?? "").trim() ||
+          (resumeSnap?.rawIntake ?? "").trim();
+        const namedPrior = applyNamedDumpPartiesToPaidRestoreDraft(prior, namedPriorIntake);
+        if (namedPrior && namedPrior !== prior) {
+          prior = namedPrior;
+          draftSnapshotRef.current = namedPrior;
+          setDraft(namedPrior);
+          const namedRestoreParties = namedDumpPartiesForPaidRestore(namedPriorIntake);
+          if (namedRestoreParties.length >= 3) {
+            setRecipient1Name(namedRestoreParties[0]!);
+            setRecipient2Name(namedRestoreParties[1]!);
+            setExtraPartyLegalNames(namedRestoreParties.slice(2));
+            setSignerSetupUiPartyCount(namedRestoreParties.length);
+          }
+        }
+      }
       const docSnapEarly = agreementDocumentTextRef.current.trim();
       if (docSnapEarly && prior) {
         try {
@@ -13293,7 +13317,21 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     freeReviewSnapshotHydratedRef.current = true;
     homeAutoGenerateConsumedRef.current = true;
     logCheckoutBackRegenerationSkipped("saved_starter_review");
-    setDraft(snap.draft);
+    const restoredDraft = applyNamedDumpPartiesToPaidRestoreDraft(snap.draft, snap.intakeText) ?? snap.draft;
+    draftSnapshotRef.current = restoredDraft;
+    setDraft(restoredDraft);
+    const namedRestoreParties = namedDumpPartiesForPaidRestore(snap.intakeText);
+    if (namedRestoreParties.length >= 3) {
+      setRecipient1Name(namedRestoreParties[0]!);
+      setRecipient2Name(namedRestoreParties[1]!);
+      setExtraPartyLegalNames(namedRestoreParties.slice(2));
+      setSignerSetupUiPartyCount(namedRestoreParties.length);
+      setExtraPartyReviewEmails((prev) => {
+        const next = prev.slice();
+        while (next.length < namedRestoreParties.length - 2) next.push("");
+        return next;
+      });
+    }
     setMissing([]);
     setFollowUpDetailTotal(0);
     setCreateUiStage(CreateUiStage.DRAFT);
@@ -13310,7 +13348,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       finalTranscriptRef.current = snap.intakeText;
       stashCreateComplexityResume({
         rawIntake: snap.intakeText,
-        pending: snap.draft,
+        pending: restoredDraft,
         awaitingProCheckout: false,
         resume_kind: "optional_full_upgrade",
         originalUserIntakeRaw: readOriginalUserIntakeRaw() || snap.intakeText,
@@ -13321,10 +13359,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       hasPreview: Boolean(snap.previewText?.trim()),
       inputLen: snap.intakeText.length,
     });
-    if (snap.intakeText.trim() && snap.draft) {
+    if (snap.intakeText.trim() && restoredDraft) {
       const restored = hydrateCanonicalPartyMetadataAfterCheckoutRestore({
         intakeText: snap.intakeText,
-        draft: snap.draft,
+        draft: restoredDraft,
       });
       if (restored.seed?.uiChanged) {
         setPartySignerNames(restored.seed.names);
@@ -13368,6 +13406,29 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     simpleProductFlow,
     draft,
   ]);
+
+  useLayoutEffect(() => {
+    if (!checkoutBackRestoreActive && !suppressFreeMissingTenetAskAfterPay) return;
+    const snap = readCheckoutBackRestoreSnapshot();
+    const intake =
+      (snap?.intakeText ?? "").trim() ||
+      intakeCombinedRef.current.trim() ||
+      (readOriginalUserIntakeRaw() || "").trim();
+    const names = namedDumpPartiesForPaidRestore(intake);
+    if (names.length < 3) return;
+    const current = draftSnapshotRef.current ?? draft;
+    const next = applyNamedDumpPartiesToPaidRestoreDraft(current, intake);
+    if (!next) return;
+    const before = (current?.parties ?? []).map((p) => String(p.name ?? "").trim()).join("|");
+    const after = (next.parties ?? []).map((p) => String(p.name ?? "").trim()).join("|");
+    if (before === after && (current?.parties?.length ?? 0) >= names.length) return;
+    draftSnapshotRef.current = next;
+    setDraft(next);
+    setRecipient1Name(names[0]!);
+    setRecipient2Name(names[1]!);
+    setExtraPartyLegalNames(names.slice(2));
+    setSignerSetupUiPartyCount(names.length);
+  }, [checkoutBackRestoreActive, suppressFreeMissingTenetAskAfterPay, draft]);
 
   useLayoutEffect(() => {
     if (!homeHeroAutoGenerate || checkoutBackRestoreActive || homeAutoGenerateStartedRef.current) return;
