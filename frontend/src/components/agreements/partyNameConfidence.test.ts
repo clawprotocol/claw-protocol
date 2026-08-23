@@ -34,6 +34,13 @@ describe("isProsePollutedPartyName", () => {
     expect(isProsePollutedPartyName("Jane Q. Public")).toBe(false);
     expect(isProsePollutedPartyName("Peaceful Journey LLC")).toBe(false);
   });
+
+  it("allows person-of-entity as one party, not dump prose", () => {
+    expect(isProsePollutedPartyName("Priya Shah of Northline Studio")).toBe(false);
+    expect(isProsePollutedPartyName("Diego Alvarez of Harbor Marks LLC")).toBe(false);
+    expect(isHighConfidencePartyNameForAutoPopulation("Priya Shah of Northline Studio")).toBe(true);
+    expect(isHighConfidencePartyNameForAutoPopulation("Diego Alvarez of Harbor Marks LLC")).toBe(true);
+  });
 });
 
 describe("isHighConfidencePartyNameForAutoPopulation", () => {

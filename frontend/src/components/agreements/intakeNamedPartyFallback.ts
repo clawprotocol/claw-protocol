@@ -107,10 +107,35 @@ function extractExplicitSignerRows(raw: string): { name: string; role: string; e
   return results.length >= 2 ? results : null;
 }
 
+/** "Ada Lopez of Studio is hiring Beau Ortiz of Agency LLC to …" → two stated parties, not four. */
+const HIRING_PERSON_OF_ENTITY_RE =
+  /\b([A-Z][A-Za-z.'-]+(?:\s+[A-Z][A-Za-z.'-]+)+)\s+of\s+([A-Z][A-Za-z0-9&.'’\-\s]{1,72}?)\s+is\s+(?:hiring|engaging|retaining|commissioning)\s+([A-Z][A-Za-z.'-]+(?:\s+[A-Z][A-Za-z.'-]+)+)\s+of\s+([A-Z][A-Za-z0-9&.'’\-\s]{1,80}?)(?=\s+to\s+|\s*[.,;]|$)/i;
+
+/**
+ * Two-party "A of Org is hiring B of Org" — person+entity stay one party each.
+ * Never expands into four contracting parties.
+ */
+export function extractStatedTwoPartyHiringPair(
+  raw: string,
+): { name: string; role: string }[] | null {
+  const m = HIRING_PERSON_OF_ENTITY_RE.exec(String(raw || "").replace(/\s+/g, " ").trim());
+  if (!m?.[1] || !m[2] || !m[3] || !m[4]) return null;
+  const leftOrg = m[2].replace(/[.,;:]+$/g, "").replace(/\s+/g, " ").trim();
+  const rightOrg = m[4].replace(/[.,;:]+$/g, "").replace(/\s+/g, " ").trim();
+  if (!leftOrg || !rightOrg) return null;
+  return [
+    { name: `${m[1].trim()} of ${leftOrg}`, role: "client" },
+    { name: `${m[3].trim()} of ${rightOrg}`, role: "service_provider" },
+  ];
+}
+
 /**
  * e.g. "employment agreement for John Smith at Acme LLC" / "for Jane Doe in Widget Inc."
  */
 export function tryInferNamedPartiesFromIntake(raw: string): { name: string; role: string; email?: string }[] | null {
+  const hiringPair = extractStatedTwoPartyHiringPair(raw);
+  if (hiringPair && hiringPair.length === 2) return hiringPair;
+
   const explicit = extractExplicitSignerRows(raw);
   if (explicit && explicit.length >= 2) return explicit;
 

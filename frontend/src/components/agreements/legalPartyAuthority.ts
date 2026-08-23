@@ -21,6 +21,7 @@ import {
   quotedRolePartyLegalEntities,
 } from "./labeledPartyBlockParse";
 import { parseIntakeToStructuredAgreement } from "./intakeStructuredAgreementModel";
+import { extractStatedTwoPartyHiringPair } from "./intakeNamedPartyFallback";
 import {
   extractBetweenPartyNameList,
   extractBetweenPartyNameListForAuthority,
@@ -304,6 +305,22 @@ function collectEvidence(intakeText: string): EvidenceRow[] {
         provenance: "explicit_user_field",
         entityConfidence: "high",
         roleConfidence: "unknown",
+      });
+    }
+    return applyRoleHintsToRows(rows, roleHints);
+  }
+
+  rows.length = 0;
+  mentionIndex = 0;
+  const hiringPair = extractStatedTwoPartyHiringPair(intake);
+  if (hiringPair && hiringPair.length === 2) {
+    for (const party of hiringPair) {
+      pushRow({
+        name: party.name,
+        provenance: "structured_intake",
+        entityConfidence: "high",
+        roleHint: party.role,
+        roleConfidence: "high",
       });
     }
     return applyRoleHintsToRows(rows, roleHints);

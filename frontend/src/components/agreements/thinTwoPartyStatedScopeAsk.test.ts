@@ -42,6 +42,16 @@ import {
   isVisibleMissingTenetAskLanding,
   shouldShowPaidSessionGeneratingOverlay,
 } from "./paidProPaidSessionLanding";
+import { applyPreGenerationIntakeDefaults } from "./intakeClarificationPolicy";
+import { runIntakeDefaultsAndRoles } from "./intakeFamilyShell";
+import { defaultIntakePartyRoleLabels } from "./partyRoleIntake";
+import { buildStarterAgreementPreviewForReview } from "./agreementPreviewFromDraft";
+import {
+  draftHasPlaceholderParties,
+  getDraftFirstReviewBlocker,
+} from "./reviewPlaceholderGuard";
+import { resolveFreeStarterReviewBody } from "./freeStarterReviewBodyResolver";
+import { tryInferNamedPartiesFromIntake } from "./intakeNamedPartyFallback";
 
 const PRIYA_DIEGO_LOGO_BRAND =
   "Priya Shah of Northline Studio is hiring Diego Alvarez of Harbor Marks LLC to design a logo and brand kit.";
@@ -241,6 +251,82 @@ Effective Date: upon full execution by both parties
       expect(seeded.parties.map((p) => p.name).join(" ")).not.toMatch(/\bParty A\b/i);
       expect(seeded.parties.map((p) => p.name).join(" ")).not.toMatch(/\bParty B\b/i);
       assertNoInventedTermOrFourPartyAmong(seeded.parties.map((p) => p.name).join(", "));
+
+      const inferred = tryInferNamedPartiesFromIntake(answered);
+      expect(inferred).not.toBeNull();
+      expect(inferred).toHaveLength(2);
+      expect(extractStatedTwoPartyHiringPair(answered)).toEqual(extractStatedTwoPartyHiringPair(dump));
+    },
+  );
+
+  it.each(THIN_TWO_PARTY_STATED_SCOPE)(
+    "%s after answers paints stated names (not Party A/B) and CTA is not Add party names",
+    (_label, dump) => {
+      const ask = evaluateFreeStarterMissingTenetAsk(dump);
+      expect(ask.action).toBe("ask");
+      if (ask.action !== "ask") return;
+      const answered = mergeNumberedTenetAnswersIntoIntake(
+        dump,
+        ask.topics,
+        "1. $2,400 due on signing\n2. 30 days starting August 22, 2026\n3. Texas",
+      );
+      expect(extractStatedTwoPartyHiringPair(answered)).not.toBeNull();
+      expect(extractStatedTwoPartyHiringPair(answered)).toHaveLength(2);
+
+      const hollowDraft = {
+        ...emptyStarterCheckoutPendingShell(),
+        title: "Services Agreement",
+        parties: [
+          { name: "Party A", role: "Client" },
+          { name: "Party B", role: "Service Provider" },
+        ],
+        purpose: "design a logo and brand kit",
+      };
+      const seeded = seedStatedTwoPartyNamesOnHollowDraft(hollowDraft, answered);
+      const afterDefaults = runIntakeDefaultsAndRoles(
+        seeded,
+        answered,
+        true,
+        defaultIntakePartyRoleLabels(),
+      );
+      const afterPre = applyPreGenerationIntakeDefaults(afterDefaults, answered);
+      const paintedDraft = seedStatedTwoPartyNamesOnHollowDraft(afterPre, answered);
+
+      const partyBlob = paintedDraft.parties.map((p) => p.name).join(" ");
+      expect(paintedDraft.parties).toHaveLength(2);
+      expect(partyBlob).toMatch(/Priya Shah|Marcus Thompson/);
+      expect(partyBlob).toMatch(/Diego Alvarez|Elena Rodriguez/);
+      expect(partyBlob).not.toMatch(/\bParty A\b/i);
+      expect(partyBlob).not.toMatch(/\bParty B\b/i);
+      assertNoInventedTermOrFourPartyAmong(partyBlob);
+
+      const body = buildStarterAgreementPreviewForReview(paintedDraft, { intakeText: answered });
+      expect(body).toMatch(/Priya Shah|Marcus Thompson/);
+      expect(body).toMatch(/Diego Alvarez|Elena Rodriguez/);
+      expect(partyBlob).toMatch(/Northline Studio|Apex Consulting|Harbor Marks|Brightwave/);
+      expect(body).not.toMatch(/\bParty A\b/i);
+      expect(body).not.toMatch(/\bParty B\b/i);
+      expect(body).toMatch(/\$2,400|2,400/);
+      expect(body).toMatch(/30 days|August 22/);
+      expect(body).toMatch(/Texas/i);
+      assertNoInventedTermOrFourPartyAmong(body);
+
+      expect(draftHasPlaceholderParties(paintedDraft)).toBe(false);
+      expect(
+        getDraftFirstReviewBlocker(paintedDraft, {
+          userVisibleFullDocumentPlain: body,
+          intakeText: answered,
+        }),
+      ).not.toBe("party_placeholder");
+
+      const resolved = resolveFreeStarterReviewBody({
+        draft: paintedDraft,
+        rawIntake: answered,
+      });
+      expect(resolved.body).toMatch(/Priya Shah|Marcus Thompson/);
+      expect(resolved.body).toMatch(/Diego Alvarez|Elena Rodriguez/);
+      expect(resolved.body).not.toMatch(/\bParty A\b/i);
+      expect(resolved.body).not.toMatch(/\bParty B\b/i);
     },
   );
 
@@ -254,6 +340,14 @@ Effective Date: upon full execution by both parties
     const beginGen = src.indexOf("beginStarterDraftGeneration();", parseStart);
     expect(askAt).toBeGreaterThan(parseStart);
     expect(beginGen).toBeGreaterThan(askAt);
+    const firstSeed = src.indexOf("seedStatedTwoPartyNamesOnHollowDraft", parseStart);
+    const defaultsAt = src.indexOf("runIntakeDefaultsAndRoles", parseStart);
+    const preAt = src.indexOf("applyIntakePreGenerationDefaults", parseStart);
+    const reseedAt = src.indexOf("seedStatedTwoPartyNamesOnHollowDraft", defaultsAt);
+    expect(firstSeed).toBeGreaterThan(parseStart);
+    expect(defaultsAt).toBeGreaterThan(firstSeed);
+    expect(preAt).toBeGreaterThan(defaultsAt);
+    expect(reseedAt).toBeGreaterThan(preAt);
   });
 
   it.each(THIN_TWO_PARTY_STATED_SCOPE)(

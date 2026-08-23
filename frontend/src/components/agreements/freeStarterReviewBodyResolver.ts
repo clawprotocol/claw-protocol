@@ -32,6 +32,7 @@ import {
   starterPreviewHasGluedSectionHeadings,
   starterPreviewHasParagraphSectionBreaks,
 } from "./starterPreviewFormatting";
+import { seedStatedTwoPartyNamesOnHollowDraft } from "./freeStarterMissingTenetAsk";
 
 export type FreeStarterRenderSource =
   | "repaired_starter_preview"
@@ -895,7 +896,8 @@ function buildRepairedStarterPreview(
   intake: string,
   placeholderGate?: AgreementPreviewBuildOptions["placeholderGate"],
 ): string {
-  const draftForBuild = intake.length > 0 ? enrichStarterPreviewPartiesFromIntake(draft, intake) : draft;
+  const seeded = intake.length > 0 ? seedStatedTwoPartyNamesOnHollowDraft(draft, intake) : draft;
+  const draftForBuild = intake.length > 0 ? enrichStarterPreviewPartiesFromIntake(seeded, intake) : seeded;
   return buildStarterAgreementPreviewForReview(draftForBuild, {
     intakeText: intake,
     placeholderGate,
@@ -971,21 +973,32 @@ export function resolveFreeStarterReviewBody(
       intake: rawIntakeResolved,
       jurisdiction: draft?.jurisdiction ?? null,
     });
-    
-    return {
-      body: normalized.text.trim(),
-      source: "free_openai_direct",
-      rawIntakeResolved,
-      usedOriginalRaw: intakeMeta.usedOriginalRaw,
-      usedStorageRaw: intakeMeta.usedStorageRaw,
-      apiPaymentTerms,
-      repairedPaymentTerms,
-      finalPaymentTerms: extractFreeStarterPaymentTermsLine(normalized.text),
-      protectedFactRepairCount: 0,
-      bodyValidation: directValidation,
-      hollowBodyBlocked: simpleHollowGate.isHollow,
-      hollowBodyReason: simpleHollowGate.reason,
-    };
+
+    // Stated dump names must win over a Party A/B one-pager. Fall through to repaired preview.
+    if (
+      simpleHollowGate.isHollow &&
+      (simpleHollowGate.reason === "role_only_parties_in_body" ||
+        simpleHollowGate.reason === "intake_named_parties_but_body_has_placeholders") &&
+      draft &&
+      repairedPreview.trim()
+    ) {
+      // continue to repaired preview below
+    } else {
+      return {
+        body: normalized.text.trim(),
+        source: "free_openai_direct",
+        rawIntakeResolved,
+        usedOriginalRaw: intakeMeta.usedOriginalRaw,
+        usedStorageRaw: intakeMeta.usedStorageRaw,
+        apiPaymentTerms,
+        repairedPaymentTerms,
+        finalPaymentTerms: extractFreeStarterPaymentTermsLine(normalized.text),
+        protectedFactRepairCount: 0,
+        bodyValidation: directValidation,
+        hollowBodyBlocked: simpleHollowGate.isHollow,
+        hollowBodyReason: simpleHollowGate.reason,
+      };
+    }
   }
 
   const authoritative = String(args.authoritativeBody ?? "").trim();
