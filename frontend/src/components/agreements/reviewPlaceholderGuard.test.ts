@@ -3,11 +3,13 @@ import { clearPremiumPartyNamesHandoff, writePremiumPartyNamesHandoff } from "./
 import {
   draftHasPlaceholderParties,
   draftPartyPlaceholdersOkViaLivePreview,
+  extractRealPartyNamesFromPreview,
   formatRecipientSignerLabelsLine,
   getDraftFirstReviewBlocker,
   hasRealPartiesJoinedLine,
   mergePremiumDraftPartiesWithRecipientPriority,
   mergePremiumRecipientDisplayName,
+  partyNamesResolvedViaRenderedPreview,
   pickRecipientSignerLabelsForHandoff,
 } from "./reviewPlaceholderGuard";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
@@ -36,13 +38,39 @@ describe("getDraftFirstReviewBlocker", () => {
     ).toBe(null);
   });
 
-  it("returns party_placeholder for Party A / Party B", () => {
+  it("returns party_placeholder for Party A / Party B when no preview available", () => {
     expect(
       getDraftFirstReviewBlocker(
         base([
           { name: "Party A (edit in review)", role: "party" },
           { name: "Party B (edit in review)", role: "party" },
         ]),
+      ),
+    ).toBe("party_placeholder");
+  });
+
+  it("returns null when draft.parties has placeholders but rendered preview has real names", () => {
+    const preview = "SERVICES AGREEMENT\n\nThis Agreement is entered into by and between Priya Shah and Diego Alvarez.\n\n1. Scope of Services...";
+    expect(
+      getDraftFirstReviewBlocker(
+        base([
+          { name: "Party A (edit in review)", role: "party" },
+          { name: "Party B (edit in review)", role: "party" },
+        ]),
+        { userVisibleFullDocumentPlain: preview },
+      ),
+    ).toBe(null);
+  });
+
+  it("returns party_placeholder when rendered preview also has placeholder names", () => {
+    const preview = "SERVICES AGREEMENT\n\nThis Agreement is entered into by and between Party A and Party B.\n\n1. Scope of Services...";
+    expect(
+      getDraftFirstReviewBlocker(
+        base([
+          { name: "Party A (edit in review)", role: "party" },
+          { name: "Party B (edit in review)", role: "party" },
+        ]),
+        { userVisibleFullDocumentPlain: preview },
       ),
     ).toBe("party_placeholder");
   });
@@ -57,6 +85,74 @@ describe("getDraftFirstReviewBlocker", () => {
         title: "Agreement",
       }),
     ).toBe("other_placeholder");
+  });
+});
+
+describe("extractRealPartyNamesFromPreview", () => {
+  it("extracts party names from standard agreement opening", () => {
+    const preview = "SERVICES AGREEMENT\n\nThis Agreement is entered into by and between Priya Shah and Diego Alvarez.\n\n1. Scope";
+    const result = extractRealPartyNamesFromPreview(preview);
+    expect(result).toEqual({ party1: "Priya Shah", party2: "Diego Alvarez" });
+  });
+
+  it("extracts names from between ... and pattern", () => {
+    const preview = "This is a contract between Jane Smith and Acme LLC for services.";
+    const result = extractRealPartyNamesFromPreview(preview);
+    expect(result).toEqual({ party1: "Jane Smith", party2: "Acme LLC" });
+  });
+
+  it("returns null when party names are placeholders", () => {
+    const preview = "Agreement between Party A and Party B.";
+    expect(extractRealPartyNamesFromPreview(preview)).toBe(null);
+  });
+
+  it("returns null for short previews", () => {
+    expect(extractRealPartyNamesFromPreview("short")).toBe(null);
+    expect(extractRealPartyNamesFromPreview("")).toBe(null);
+  });
+
+  it("returns null when pattern not found", () => {
+    const preview = "This is a long document without the standard pattern. It goes on and on.";
+    expect(extractRealPartyNamesFromPreview(preview)).toBe(null);
+  });
+});
+
+describe("partyNamesResolvedViaRenderedPreview", () => {
+  it("returns true when draft has placeholder parties but rendered preview has real names", () => {
+    const draft = base([
+      { name: "Party A (edit in review)", role: "party" },
+      { name: "Party B (edit in review)", role: "party" },
+    ]);
+    const preview = "Agreement entered into by and between Mike Green and Sarah Chen.";
+    expect(partyNamesResolvedViaRenderedPreview(draft, preview)).toBe(true);
+  });
+
+  it("returns false when draft already has real parties", () => {
+    const draft = base([
+      { name: "Jane Smith", role: "party" },
+      { name: "Acme LLC", role: "party" },
+    ]);
+    const preview = "Agreement between Jane Smith and Acme LLC.";
+    expect(partyNamesResolvedViaRenderedPreview(draft, preview)).toBe(false);
+  });
+
+  it("returns false when rendered preview also has placeholders", () => {
+    const draft = base([
+      { name: "Party A (edit in review)", role: "party" },
+      { name: "Party B (edit in review)", role: "party" },
+    ]);
+    const preview = "Agreement between Party A and Party B.";
+    expect(partyNamesResolvedViaRenderedPreview(draft, preview)).toBe(false);
+  });
+
+  it("returns false for null/empty inputs", () => {
+    const draft = base([
+      { name: "Party A (edit in review)", role: "party" },
+      { name: "Party B (edit in review)", role: "party" },
+    ]);
+    expect(partyNamesResolvedViaRenderedPreview(null, "some preview")).toBe(false);
+    expect(partyNamesResolvedViaRenderedPreview(draft, null)).toBe(false);
+    expect(partyNamesResolvedViaRenderedPreview(draft, "")).toBe(false);
   });
 });
 
