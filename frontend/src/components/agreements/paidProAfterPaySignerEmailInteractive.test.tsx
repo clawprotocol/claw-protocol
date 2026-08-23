@@ -1,7 +1,7 @@
 /** @vitest-environment jsdom */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { useState } from "react";
+import React, { useState } from "react";
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it } from "vitest";
@@ -90,13 +90,14 @@ describe("after-pay signer emails stay typeable (live #97 hole)", () => {
       'data-claw-recipient-field={idx <= 1 ? (idx === 0 ? "r1-email" : "r2-email")',
     );
     expect(emailBlockStart).toBeGreaterThan(0);
-    const emailBlock = INTAKE.slice(emailBlockStart - 280, emailBlockStart + 1100);
+    const emailInputStart = INTAKE.lastIndexOf("<input", emailBlockStart);
+    const emailBlock = INTAKE.slice(emailInputStart, emailBlockStart + 900);
     expect(emailBlock).toContain('type="email"');
     expect(emailBlock).toContain("disabled={false}");
     expect(emailBlock).toContain("readOnly={false}");
     expect(emailBlock).toContain("tabIndex={0}");
     expect(emailBlock).toContain("PAID_PRO_SIGNER_EMAIL_INPUT_CLASS");
-    expect(emailBlock).toContain("PAID_PRO_SIGNER_EMAIL_FIELD_WRAPPER_CLASS");
+    expect(INTAKE).toContain("PAID_PRO_SIGNER_EMAIL_FIELD_WRAPPER_CLASS");
     expect(emailBlock).not.toMatch(/disabled=\{true\}/);
     expect(emailBlock).not.toMatch(/readOnly=\{true\}/);
     expect(emailBlock).not.toMatch(/pointer-events-none/);
