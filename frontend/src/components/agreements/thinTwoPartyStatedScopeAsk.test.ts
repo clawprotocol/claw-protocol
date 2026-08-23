@@ -533,6 +533,7 @@ Effective Date: upon full execution by both parties
     expect(beginAskBody).toContain('onHomeGuidedTransitionPhase?.("review_ready")');
     expect(beginAskBody).toContain("shouldSuppressFreeMissingTenetAskAfterPay");
     expect(beginAskBody).toContain("setFreeMissingTenetAsk(null)");
+    expect(beginAskBody).toContain("return true");
   });
 });
 
@@ -577,13 +578,23 @@ describe("after-pay paid restore does not remount leftover free ask (live #96 ho
     const src = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
     const emailBlockStart = src.indexOf('data-claw-recipient-field={idx <= 1 ? (idx === 0 ? "r1-email" : "r2-email")');
     expect(emailBlockStart).toBeGreaterThan(0);
-    const emailBlock = src.slice(emailBlockStart, emailBlockStart + 900);
+    const emailInputStart = src.lastIndexOf("<input", emailBlockStart);
+    const emailBlock = src.slice(emailInputStart, emailBlockStart + 900);
     expect(emailBlock).toContain('data-claw-recipient-field={idx <= 1 ? (idx === 0 ? "r1-email" : "r2-email")');
-    expect(emailBlock).not.toMatch(/\bdisabled\b/);
-    expect(emailBlock).not.toMatch(/\breadOnly\b/);
+    expect(emailBlock).toContain('type="email"');
+    expect(emailBlock).toContain("disabled={false}");
+    expect(emailBlock).toContain("readOnly={false}");
+    expect(emailBlock).not.toMatch(/disabled=\{true\}/);
+    expect(emailBlock).not.toMatch(/readOnly=\{true\}/);
     expect(emailBlock).not.toMatch(/pointer-events-none/);
+    expect(emailBlock).toContain("PAID_PRO_SIGNER_EMAIL_INPUT_CLASS");
+    expect(src).toContain("PAID_PRO_SIGNER_EMAIL_FIELD_WRAPPER_CLASS");
     expect(src).toContain("freeMissingTenetAskVisible");
     expect(src).toContain("shouldSuppressFreeMissingTenetAskAfterPay");
+    expect(src).toContain("paidSessionSignerEmailsInteractive");
+    const beginAsk = src.indexOf("const beginFreeMissingTenetAsk");
+    const beginAskBody = src.slice(beginAsk, src.indexOf("const resolvePaidCreateGateBypassContext", beginAsk));
+    expect(beginAskBody).toContain("return true");
   });
 
   it("two complete signers after paid restore open existing final review", () => {

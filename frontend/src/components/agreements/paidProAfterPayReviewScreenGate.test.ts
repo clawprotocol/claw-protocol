@@ -421,6 +421,8 @@ describe("after-pay review-screen gate — intake wiring", () => {
     expect(intakeSrc).toContain("shouldSuppressFreeMissingTenetAskAfterPay");
     expect(intakeSrc).toContain("freeMissingTenetAskVisible");
     expect(intakeSrc).toContain("suppressFreeMissingTenetAskAfterPay");
+    expect(intakeSrc).toContain("paidSessionSignerEmailsInteractive");
+    expect(intakeSrc).toContain("shouldKeepPaidSessionSignerEmailsInteractive");
     const beginAsk = intakeSrc.indexOf("const beginFreeMissingTenetAsk");
     expect(beginAsk).toBeGreaterThan(-1);
     const beginAskEnd = intakeSrc.indexOf("const resolvePaidCreateGateBypassContext", beginAsk);
@@ -429,6 +431,13 @@ describe("after-pay review-screen gate — intake wiring", () => {
     expect(beginAskBody).toContain("setFreeMissingTenetAsk(null)");
     expect(beginAskBody.indexOf("setFreeMissingTenetAsk(null)")).toBeLessThan(
       beginAskBody.indexOf("evaluateFreeStarterMissingTenetAsk"),
+    );
+    expect(beginAskBody.indexOf("return true")).toBeGreaterThan(-1);
+    expect(beginAskBody.indexOf("return true")).toBeLessThan(
+      beginAskBody.indexOf("evaluateFreeStarterMissingTenetAsk"),
+    );
+    expect(beginAskBody.indexOf("return true")).toBeGreaterThan(
+      beginAskBody.indexOf("setFreeMissingTenetAsk(null)"),
     );
 
     const leftoverStart = intakeSrc.indexOf("{freeMissingTenetAskVisible &&");

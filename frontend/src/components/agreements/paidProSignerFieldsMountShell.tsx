@@ -15,6 +15,7 @@ type Props = {
   gateComplete: boolean;
   requiredCount: number;
   children: ReactNode;
+  className?: string;
 };
 
 export function PaidProSignerFieldsMountShell({
@@ -24,6 +25,7 @@ export function PaidProSignerFieldsMountShell({
   gateComplete,
   requiredCount,
   children,
+  className,
 }: Props) {
   useEffect(() => {
     logPaidProSignerFieldsMounted({
@@ -43,7 +45,11 @@ export function PaidProSignerFieldsMountShell({
 
   return (
     <div
-      className="mt-4 w-full sm:pr-0 md:max-w-3xl"
+      className={
+        className
+          ? `mt-4 w-full sm:pr-0 md:max-w-3xl ${className}`
+          : "mt-4 w-full sm:pr-0 md:max-w-3xl"
+      }
       id="claw-paid-pro-inline-signer-setup"
       data-testid="paid-pro-inline-signer-setup"
     >

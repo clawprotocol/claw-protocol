@@ -42,6 +42,26 @@ export function shouldSuppressFreeMissingTenetAskAfterPay(args: {
   return Boolean(args.paidSessionActive || args.premiumCompletionReturn);
 }
 
+/**
+ * After pay, leftover-ask suppress is "handled": do not remount the free ask
+ * and do not fall through to starter generate (that lock/overlay path blocks
+ * r1-email / r2-email). Same predicate as leftover-ask suppress.
+ */
+export function shouldKeepPaidSessionSignerEmailsInteractive(args: {
+  paidSessionActive?: boolean;
+  premiumCompletionReturn?: boolean;
+}): boolean {
+  return shouldSuppressFreeMissingTenetAskAfterPay(args);
+}
+
+/** Shared class for after-pay reviewer/signer email inputs — never pointer-events-none. */
+export const PAID_PRO_SIGNER_EMAIL_INPUT_CLASS =
+  "mt-1 w-full rounded-md border border-slate-600/70 bg-[#141d32] px-3 py-2 text-sm text-slate-100 outline-none focus:border-emerald-500/60 pointer-events-auto relative z-10";
+
+/** Immediate wrapper around r1-email / r2-email — clicks must reach the input. */
+export const PAID_PRO_SIGNER_EMAIL_FIELD_WRAPPER_CLASS =
+  "mt-3 block text-xs font-medium text-slate-400 sm:text-sm pointer-events-auto relative z-10";
+
 export function readPremiumCompletionReturnFromHref(href?: string | null): boolean {
   const raw = (href || "").trim();
   if (!raw) return false;
@@ -87,7 +107,9 @@ export function shouldShowPaidSessionGeneratingOverlay(args: {
   phase: string | null | undefined;
   hasVisibleDealBody: boolean;
   hasVisibleAskLanding?: boolean;
+  signerEmailsMustStayInteractive?: boolean;
 }): boolean {
+  if (args.signerEmailsMustStayInteractive) return false;
   if (args.hasVisibleAskLanding) return false;
   const phase = (args.phase || "").trim();
   if (!phase || phase === "premium_network_recoverable") return false;

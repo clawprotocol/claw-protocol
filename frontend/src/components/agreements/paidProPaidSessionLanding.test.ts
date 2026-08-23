@@ -9,6 +9,7 @@ import {
   isVisibleMissingTenetAskLanding,
   readPremiumCompletionReturnFromHref,
   resolvePaidSessionVisibleDealBody,
+  shouldKeepPaidSessionSignerEmailsInteractive,
   shouldShowPaidSessionGeneratingOverlay,
   shouldSuppressFreeMissingTenetAskAfterPay,
 } from "./paidProPaidSessionLanding";
@@ -198,6 +199,19 @@ describe("paid session landing — overlay vs deal (two faces)", () => {
       shouldShowPaidSessionGeneratingOverlay({
         phase: "processing",
         hasVisibleDealBody: false,
+      }),
+    ).toBe(true);
+    expect(
+      shouldShowPaidSessionGeneratingOverlay({
+        phase: "processing",
+        hasVisibleDealBody: false,
+        signerEmailsMustStayInteractive: true,
+      }),
+    ).toBe(false);
+    expect(
+      shouldKeepPaidSessionSignerEmailsInteractive({
+        paidSessionActive: true,
+        premiumCompletionReturn: true,
       }),
     ).toBe(true);
   });
