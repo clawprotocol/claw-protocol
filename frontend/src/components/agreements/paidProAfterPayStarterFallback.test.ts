@@ -1381,3 +1381,204 @@ Deliverables include schematic design, design development, and construction docu
     }
   });
 });
+
+/**
+ * Test case: paidProFirstReviewDisplayContext wires checkout back snapshot intake
+ * into display context fallback when React intakeCombined is empty after Stripe nav.
+ *
+ * Two sample dumps:
+ * 1. Priya/Diego/$2400/Texas (original issue repro)
+ * 2. Marcus/Elena/$5500/California (additional coverage)
+ */
+describe("paidProFirstReviewDisplayContext checkout back intake fallback (issue #81 fix)", () => {
+  const SAMPLE_DUMP_1 = `
+Branding project between Priya Sharma Design Studio and Diego Martinez Photography.
+Payment: $2,400 total, half upfront and half on delivery.
+Governing law: Texas.
+Timeline: 6 weeks for logo and brand guide.
+`;
+
+  const SAMPLE_DUMP_2 = `
+Software development contract.
+Marcus Chen at TechFlow Solutions will build a mobile app for Elena Rodriguez Consulting.
+Total fee: $5,500 payable in three installments.
+Jurisdiction: California.
+Project duration: 3 months.
+`;
+
+  const HOLLOW_STARTER_DRAFT: ParsedDraftShape = {
+    title: "Service Agreement",
+    jurisdiction: null,
+    parties: [
+      { name: "Party A", role: "Service Provider" },
+      { name: "Party B", role: "Client" },
+    ],
+    purpose: "Work.",
+    payment_terms: "covers due.",
+    payment: { amount: 0, cadence: "one_time", valid: false },
+    duration: null,
+    due_date: null,
+    effective_date: null,
+    additional_terms: null,
+  };
+
+  beforeEach(() => {
+    localStorage.clear();
+    sessionStorage.clear();
+    clearCheckoutBackRestoreSnapshot();
+    clearPaidPremiumCompletionSession();
+    clearPaidProSourceOfTruth();
+    vi.spyOn(console, "info").mockImplementation(() => {});
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    clearCheckoutBackRestoreSnapshot();
+    clearPaidPremiumCompletionSession();
+  });
+
+  it("sample dump 1 (Priya/Diego/$2400/Texas): checkout back intake restores after payment", () => {
+    persistStarterReviewBeforeCheckout({
+      intakeText: SAMPLE_DUMP_1,
+      draft: HOLLOW_STARTER_DRAFT,
+      previewText: "Party A / Party B. Work. covers due.",
+    });
+    markPaidPremiumCompletionSession({ source: "settled_checkout" });
+
+    expect(hasPaidPremiumCompletionSession()).toBe(true);
+    const checkoutBackSnap = readCheckoutBackRestoreSnapshot();
+    expect(checkoutBackSnap).not.toBeNull();
+    expect(checkoutBackSnap!.intakeText).toContain("Priya");
+    expect(checkoutBackSnap!.intakeText).toContain("Diego");
+    expect(checkoutBackSnap!.intakeText).toContain("2,400");
+    expect(checkoutBackSnap!.intakeText).toContain("Texas");
+
+    const intakeCombined = "";
+    const currentPremiumMergedIntakeKey = "";
+    const resolvedIntakeText = (
+      intakeCombined ||
+      currentPremiumMergedIntakeKey ||
+      checkoutBackSnap?.intakeText ||
+      ""
+    ).trim();
+    expect(resolvedIntakeText.length).toBeGreaterThanOrEqual(20);
+
+    const rebuiltBody = rebuildBodyFromIntakeForProFailure(resolvedIntakeText, HOLLOW_STARTER_DRAFT);
+    expect(rebuiltBody.length).toBeGreaterThanOrEqual(200);
+    expect(isNonHollowBody(rebuiltBody, resolvedIntakeText)).toBe(true);
+
+    expect(rebuiltBody).toContain("Priya");
+    expect(rebuiltBody).toContain("Diego");
+    expect(rebuiltBody.toLowerCase()).toContain("texas");
+    expect(rebuiltBody).not.toMatch(/\bParty A\b/i);
+    expect(rebuiltBody).not.toMatch(/\bParty B\b/i);
+  });
+
+  it("sample dump 2 (Marcus/Elena/$5500/California): checkout back intake restores after payment", () => {
+    persistStarterReviewBeforeCheckout({
+      intakeText: SAMPLE_DUMP_2,
+      draft: HOLLOW_STARTER_DRAFT,
+      previewText: "Party A / Party B. Work. covers due.",
+    });
+    markPaidPremiumCompletionSession({ source: "settled_checkout" });
+
+    expect(hasPaidPremiumCompletionSession()).toBe(true);
+    const checkoutBackSnap = readCheckoutBackRestoreSnapshot();
+    expect(checkoutBackSnap).not.toBeNull();
+    expect(checkoutBackSnap!.intakeText).toContain("Marcus");
+    expect(checkoutBackSnap!.intakeText).toContain("Elena");
+    expect(checkoutBackSnap!.intakeText).toContain("5,500");
+    expect(checkoutBackSnap!.intakeText).toContain("California");
+
+    const intakeCombined = "";
+    const currentPremiumMergedIntakeKey = "";
+    const resolvedIntakeText = (
+      intakeCombined ||
+      currentPremiumMergedIntakeKey ||
+      checkoutBackSnap?.intakeText ||
+      ""
+    ).trim();
+    expect(resolvedIntakeText.length).toBeGreaterThanOrEqual(20);
+
+    const rebuiltBody = rebuildBodyFromIntakeForProFailure(resolvedIntakeText, HOLLOW_STARTER_DRAFT);
+    expect(rebuiltBody.length).toBeGreaterThanOrEqual(200);
+    expect(isNonHollowBody(rebuiltBody, resolvedIntakeText)).toBe(true);
+
+    expect(rebuiltBody).toContain("Marcus");
+    expect(rebuiltBody).toContain("Elena");
+    expect(rebuiltBody.toLowerCase()).toContain("california");
+    expect(rebuiltBody).not.toMatch(/\bParty A\b/i);
+    expect(rebuiltBody).not.toMatch(/\bParty B\b/i);
+  });
+
+  it("sample dump 1: acceptedCanonicalPlain fallback rebuilds from checkout back intake", () => {
+    persistStarterReviewBeforeCheckout({
+      intakeText: SAMPLE_DUMP_1,
+      draft: HOLLOW_STARTER_DRAFT,
+      previewText: "",
+    });
+    markPaidPremiumCompletionSession({ source: "settled_checkout" });
+
+    const checkoutBackSnap = readCheckoutBackRestoreSnapshot();
+    const intakeCombined = "";
+    const currentPremiumMergedIntakeKey = "";
+    const resolvedIntakeText = (
+      intakeCombined ||
+      currentPremiumMergedIntakeKey ||
+      checkoutBackSnap?.intakeText ||
+      ""
+    ).trim();
+
+    let resolvedAcceptedPlain = "";
+    const hasSoT = false;
+    if (!hasSoT && hasPaidPremiumCompletionSession() && resolvedIntakeText.length >= 20) {
+      const draftForRebuild = HOLLOW_STARTER_DRAFT;
+      const rebuiltBody = rebuildBodyFromIntakeForProFailure(resolvedIntakeText, draftForRebuild);
+      if (rebuiltBody.trim().length >= 200 && isNonHollowBody(rebuiltBody, resolvedIntakeText)) {
+        resolvedAcceptedPlain = rebuiltBody;
+      }
+    }
+
+    expect(resolvedAcceptedPlain.length).toBeGreaterThanOrEqual(200);
+    expect(resolvedAcceptedPlain).toContain("Priya");
+    expect(resolvedAcceptedPlain).toContain("Diego");
+    expect(resolvedAcceptedPlain).not.toMatch(/\bParty A\b/i);
+    expect(resolvedAcceptedPlain).not.toMatch(/\bParty B\b/i);
+  });
+
+  it("sample dump 2: acceptedCanonicalPlain fallback rebuilds from checkout back intake", () => {
+    persistStarterReviewBeforeCheckout({
+      intakeText: SAMPLE_DUMP_2,
+      draft: HOLLOW_STARTER_DRAFT,
+      previewText: "",
+    });
+    markPaidPremiumCompletionSession({ source: "settled_checkout" });
+
+    const checkoutBackSnap = readCheckoutBackRestoreSnapshot();
+    const intakeCombined = "";
+    const currentPremiumMergedIntakeKey = "";
+    const resolvedIntakeText = (
+      intakeCombined ||
+      currentPremiumMergedIntakeKey ||
+      checkoutBackSnap?.intakeText ||
+      ""
+    ).trim();
+
+    let resolvedAcceptedPlain = "";
+    const hasSoT = false;
+    if (!hasSoT && hasPaidPremiumCompletionSession() && resolvedIntakeText.length >= 20) {
+      const draftForRebuild = HOLLOW_STARTER_DRAFT;
+      const rebuiltBody = rebuildBodyFromIntakeForProFailure(resolvedIntakeText, draftForRebuild);
+      if (rebuiltBody.trim().length >= 200 && isNonHollowBody(rebuiltBody, resolvedIntakeText)) {
+        resolvedAcceptedPlain = rebuiltBody;
+      }
+    }
+
+    expect(resolvedAcceptedPlain.length).toBeGreaterThanOrEqual(200);
+    expect(resolvedAcceptedPlain).toContain("Marcus");
+    expect(resolvedAcceptedPlain).toContain("Elena");
+    expect(resolvedAcceptedPlain).not.toMatch(/\bParty A\b/i);
+    expect(resolvedAcceptedPlain).not.toMatch(/\bParty B\b/i);
+  });
+});

@@ -20343,35 +20343,47 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   ]);
 
   const paidProFirstReviewDisplayContext = useMemo(
-    () => ({
-      draft: (reviewDraft ?? draft) ?? null,
-      // Prefer live create intake over longest-wins session corpus. Otherwise a
-      // prior longer counsel-prep dump can false-trigger contamination wipe after
-      // the user revises and generates a matching Acme/ZYX (etc.) body.
-      intakeText: (intakeCombined || currentPremiumMergedIntakeKey || "").trim(),
-      premiumRenderSource:
-        premiumTruthPipelineSource ?? lastPremiumPipelineRenderSourceRef.current,
-      premiumCheckoutCompleted,
-      premiumPaidDocumentSurface,
-      pickerPlain: premiumPaidReadonlyPick.plainText,
-      pickerSource: premiumPaidReadonlyPick.sourceUsed,
-      paidProActive: paidProFirstReviewDisplayActive,
-      // Prefer React state — refs/resume alone can leave paint blank after verified GET
-      // while SoT markers are already live (stale useMemo / effect ordering).
-      // Also recover from verified display authority when state/resume lag one tick.
-      agreementId: (
-        reviewAgreementId ||
-        reviewAgreementIdRef.current ||
-        readCreateReviewAgreementResumeId() ||
-        readDisplayReviewSnapshotAuthority()?.agreementId ||
+    () => {
+      const checkoutBackSnap = readCheckoutBackRestoreSnapshot();
+      const resolvedIntakeText = (
+        intakeCombined ||
+        currentPremiumMergedIntakeKey ||
+        checkoutBackSnap?.intakeText ||
         ""
-      ).trim(),
-      // Wire accepted frozen SoT into shell displayContext so first-review paint
-      // does not wait on draft persist / verified GET session keys.
-      acceptedCanonicalPlain: hasPaidProSourceOfTruth()
-        ? getPaidProSourceOfTruthText().trim()
-        : "",
-    }),
+      ).trim();
+      let resolvedAcceptedPlain = "";
+      if (hasPaidProSourceOfTruth()) {
+        resolvedAcceptedPlain = getPaidProSourceOfTruthText().trim();
+      } else if (
+        hasPaidPremiumCompletionSession() &&
+        resolvedIntakeText.length >= 20
+      ) {
+        const draftForRebuild = (reviewDraft ?? draft) ?? checkoutBackSnap?.draft ?? null;
+        const rebuiltBody = rebuildBodyFromIntakeForProFailure(resolvedIntakeText, draftForRebuild);
+        if (rebuiltBody.trim().length >= 200 && isNonHollowBody(rebuiltBody, resolvedIntakeText)) {
+          resolvedAcceptedPlain = rebuiltBody;
+        }
+      }
+      return {
+        draft: (reviewDraft ?? draft) ?? null,
+        intakeText: resolvedIntakeText,
+        premiumRenderSource:
+          premiumTruthPipelineSource ?? lastPremiumPipelineRenderSourceRef.current,
+        premiumCheckoutCompleted,
+        premiumPaidDocumentSurface,
+        pickerPlain: premiumPaidReadonlyPick.plainText,
+        pickerSource: premiumPaidReadonlyPick.sourceUsed,
+        paidProActive: paidProFirstReviewDisplayActive,
+        agreementId: (
+          reviewAgreementId ||
+          reviewAgreementIdRef.current ||
+          readCreateReviewAgreementResumeId() ||
+          readDisplayReviewSnapshotAuthority()?.agreementId ||
+          ""
+        ).trim(),
+        acceptedCanonicalPlain: resolvedAcceptedPlain,
+      };
+    },
     [
       reviewDraft,
       draft,
