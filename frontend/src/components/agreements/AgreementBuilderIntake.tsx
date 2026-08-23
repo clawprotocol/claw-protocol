@@ -8947,19 +8947,22 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           premiumPostCheckoutModalHardFailopenRef.current = false;
           setPremiumAuthoritativeRequestInFlight(false);
           premiumPipelineOutputBodyRef.current = "";
-          applyFailureFallback(undefined, { paidCheckoutRecovery: true });
-          setPremiumPostCheckoutPhase("premium_cors_blocked");
+          // FOUNDATIONAL FIX: Only set failure phase if applyFailureFallback did NOT paint a valid body.
+          const paintedValidBody = applyFailureFallback(undefined, { paidCheckoutRecovery: true });
+          if (!paintedValidBody) {
+            setPremiumPostCheckoutPhase("premium_cors_blocked");
+          }
           setPremiumPipelineUserMessage(null);
           logPaidProApiFailureNoCanonicalFreeze({
             corpusLen: (agreementDocumentTextRef.current || "").trim().length,
             pipelineSource: result.premiumRenderSource,
-            phase: "premium_cors_blocked",
+            phase: paintedValidBody ? "recovered_with_valid_body" : "premium_cors_blocked",
             corpusSource: "canonical_working_draft",
           });
           logPaidProAuthorityBlockedAfterApiFailure({
             corpusLen: (agreementDocumentTextRef.current || "").trim().length,
             pipelineSource: result.premiumRenderSource,
-            phase: "premium_cors_blocked",
+            phase: paintedValidBody ? "recovered_with_valid_body" : "premium_cors_blocked",
             surface: "premium_cors_blocked_handler",
           });
           logPremiumModalInfo("[premium-modal-stage]", {
@@ -9084,11 +9087,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
               }
               paidCheckoutCompletedRef.current = false;
               premiumPipelineOutputBodyRef.current = "";
-              applyFailureFallback(undefined, { paidCheckoutRecovery: true });
-              setPremiumPostCheckoutPhase("premium_network_recoverable");
+              // FOUNDATIONAL FIX: Only set failure phase if applyFailureFallback did NOT paint a valid body.
+              const paintedValidBody = applyFailureFallback(undefined, { paidCheckoutRecovery: true });
+              if (!paintedValidBody) {
+                setPremiumPostCheckoutPhase("premium_network_recoverable");
+              }
               setPremiumPipelineUserMessage(null);
               logPremiumModalInfo("[premium-modal-stage]", {
-                to: "premium_network_recoverable",
+                to: paintedValidBody ? "recovered_with_valid_body" : "premium_network_recoverable",
                 recoverySotBlocked: sotCommit.reason,
                 ts: new Date().toISOString(),
               });
@@ -9157,10 +9163,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             return;
           }
           premiumPipelineOutputBodyRef.current = "";
-          applyFailureFallback(undefined, { paidCheckoutRecovery: true });
-          setPremiumPostCheckoutPhase("premium_network_recoverable");
+          // FOUNDATIONAL FIX: Only set failure phase if applyFailureFallback did NOT paint a valid body.
+          const paintedValidBody = applyFailureFallback(undefined, { paidCheckoutRecovery: true });
+          if (!paintedValidBody) {
+            setPremiumPostCheckoutPhase("premium_network_recoverable");
+          }
           setPremiumPipelineUserMessage(null);
-          logPremiumModalInfo("[premium-modal-stage]", { to: "premium_network_recoverable", ts: new Date().toISOString() });
+          logPremiumModalInfo("[premium-modal-stage]", { to: paintedValidBody ? "recovered_with_valid_body" : "premium_network_recoverable", ts: new Date().toISOString() });
           return;
         }
         if (isPremiumDegradedServerRetryablePipelineResult(result)) {
@@ -9270,11 +9279,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
               }
               paidCheckoutCompletedRef.current = false;
               premiumPipelineOutputBodyRef.current = "";
-              applyFailureFallback(undefined, { paidCheckoutRecovery: true });
-              setPremiumPostCheckoutPhase("premium_degraded_server_recoverable");
+              // FOUNDATIONAL FIX: Only set failure phase if applyFailureFallback did NOT paint a valid body.
+              const paintedValidBody = applyFailureFallback(undefined, { paidCheckoutRecovery: true });
+              if (!paintedValidBody) {
+                setPremiumPostCheckoutPhase("premium_degraded_server_recoverable");
+              }
               setPremiumPipelineUserMessage(null);
               logPremiumModalInfo("[premium-modal-stage]", {
-                to: "premium_degraded_server_recoverable",
+                to: paintedValidBody ? "recovered_with_valid_body" : "premium_degraded_server_recoverable",
                 recoverySotBlocked: sotCommit.reason,
                 ts: new Date().toISOString(),
               });
@@ -9343,11 +9355,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             return;
           }
           premiumPipelineOutputBodyRef.current = "";
-          applyFailureFallback(undefined, { paidCheckoutRecovery: true });
-          setPremiumPostCheckoutPhase("generation_retry");
+          // FOUNDATIONAL FIX: Only set failure phase if applyFailureFallback did NOT paint a valid body.
+          const paintedValidBody = applyFailureFallback(undefined, { paidCheckoutRecovery: true });
+          if (!paintedValidBody) {
+            setPremiumPostCheckoutPhase("generation_retry");
+          }
           setPremiumPipelineUserMessage(null);
           logPremiumModalInfo("[premium-modal-stage]", {
-            to: "generation_retry",
+            to: paintedValidBody ? "recovered_with_valid_body" : "generation_retry",
             degradedRecoverable: true,
             ts: new Date().toISOString(),
           });
@@ -11013,11 +11028,17 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         }
       };
 
+      /**
+       * Apply failure fallback — paints best available body after generation failure.
+       * Returns true if a valid ≥200 non-hollow body was successfully painted (caller should NOT set terminal failure state).
+       * Returns false if no valid body could be painted (caller may set retry/terminal state).
+       */
       const applyFailureFallback = (
         winningBodyText?: string,
         opts?: { paidCheckoutRecovery?: boolean },
-      ) => {
+      ): boolean => {
         const paidRecovery = Boolean(opts?.paidCheckoutRecovery);
+        let paintedValidBody = false;
         setPremiumRefineReview(null);
         setPremiumFinalizeAudit(null);
         setPremiumReviewRoute(null);
@@ -11272,6 +11293,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             setPremiumPipelineUserMessage(null);
             setProFullDraftCustomGateMessage(null);
             setProFullDraftQualityRetry(false);
+            paintedValidBody = true;
           } else {
             // No valid fallback body - show retry message but don't leave empty
             setPremiumSendPathUnlocked(false);
@@ -11336,6 +11358,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         } catch {
           /* ignore */
         }
+        return paintedValidBody;
       };
 
       let modalSoftProgressTimerId = 0;
@@ -11411,20 +11434,30 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           setPremiumAuthoritativeRequestInFlight(false);
           if (hasPaidPremiumCompletionSession()) {
             setHardError(null);
-            setProFullDraftQualityRetry(true);
             setProUpgradeUseStarterView(false);
-            setProFullDraftCustomGateMessage(
-              "We had a connection issue while finishing your Pro agreement. Your payment was detected. Try again to finish Pro generation.",
-            );
-            applyFailureFallback(undefined, { paidCheckoutRecovery: true });
+            // FOUNDATIONAL FIX: Call applyFailureFallback FIRST, then check if it painted a valid body.
+            // If it did, do NOT set terminal failure states — the visitor has a usable agreement.
+            const paintedValidBody = applyFailureFallback(undefined, { paidCheckoutRecovery: true });
+            if (!paintedValidBody) {
+              // Only set retry/terminal failure state if no valid body was painted
+              setProFullDraftQualityRetry(true);
+              setProFullDraftCustomGateMessage(
+                "We had a connection issue while finishing your Pro agreement. Your payment was detected. Try again to finish Pro generation.",
+              );
+              setPremiumPostCheckoutPhase("terminal_failure");
+            }
+            // If paintedValidBody is true, applyFailureFallback already set:
+            // - setProFullDraftQualityRetry(false)
+            // - setPremiumPostCheckoutPhase(null)
+            // - setPremiumSendPathUnlocked(true)
           } else {
             setHardError(
               "Premium finalization is taking longer than expected — showing your best available draft. We will still load the full Pro agreement when the server response arrives.",
             );
             runPremiumModelPassRef.current = null;
             applyFailureFallback();
+            setPremiumPostCheckoutPhase("terminal_failure");
           }
-          setPremiumPostCheckoutPhase("terminal_failure");
           setPremiumGapQuestions([]);
           setPremiumGapOneField("");
         };
@@ -11579,12 +11612,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             setPremiumPipelineUserMessage(null);
             if (hasPaidPremiumCompletionSession()) {
               setHardError(null);
-              setProFullDraftQualityRetry(true);
               setProUpgradeUseStarterView(false);
-              setProFullDraftCustomGateMessage(
-                "We had a connection issue while finishing your Pro agreement. Your payment was detected. Try again to finish Pro generation.",
-              );
-              applyFailureFallback(undefined, { paidCheckoutRecovery: true });
+              // FOUNDATIONAL FIX: Call applyFailureFallback FIRST, then check if it painted a valid body.
+              const paintedValidBody = applyFailureFallback(undefined, { paidCheckoutRecovery: true });
+              if (!paintedValidBody) {
+                setProFullDraftQualityRetry(true);
+                setProFullDraftCustomGateMessage(
+                  "We had a connection issue while finishing your Pro agreement. Your payment was detected. Try again to finish Pro generation.",
+                );
+              }
             } else {
               applyFailureFallback();
             }
@@ -12006,12 +12042,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                 note: "Premium-full-draft failed after checkout — paid recovery state (no unpaid upsell).",
               });
               setHardError(null);
-              setProFullDraftQualityRetry(true);
               setProUpgradeUseStarterView(false);
-              setProFullDraftCustomGateMessage(
-                "We had a connection issue while finishing your Pro agreement. Your payment was detected. Try again to finish Pro generation.",
-              );
-              applyFailureFallback(undefined, { paidCheckoutRecovery: true });
+              // FOUNDATIONAL FIX: Call applyFailureFallback FIRST, then check if it painted a valid body.
+              const paintedValidBody = applyFailureFallback(undefined, { paidCheckoutRecovery: true });
+              if (!paintedValidBody) {
+                setProFullDraftQualityRetry(true);
+                setProFullDraftCustomGateMessage(
+                  "We had a connection issue while finishing your Pro agreement. Your payment was detected. Try again to finish Pro generation.",
+                );
+              }
               setPremiumPostCheckoutPhase(null);
             } else {
               console.warn("[premium-flow] premium_rewrite_request_exhausted", {
@@ -12249,12 +12288,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         }
         if (hasPaidPremiumCompletionSession()) {
           setHardError(null);
-          setProFullDraftQualityRetry(true);
           setProUpgradeUseStarterView(false);
-          setProFullDraftCustomGateMessage(
-            "We had a connection issue while finishing your Pro agreement. Your payment was detected. Try again to finish Pro generation.",
-          );
-          applyFailureFallback(undefined, { paidCheckoutRecovery: true });
+          // FOUNDATIONAL FIX: Call applyFailureFallback FIRST, then check if it painted a valid body.
+          const paintedValidBody = applyFailureFallback(undefined, { paidCheckoutRecovery: true });
+          if (!paintedValidBody) {
+            setProFullDraftQualityRetry(true);
+            setProFullDraftCustomGateMessage(
+              "We had a connection issue while finishing your Pro agreement. Your payment was detected. Try again to finish Pro generation.",
+            );
+          }
         } else {
           setHardError(
             "Premium completion hit an unexpected error. Your previous draft is shown — you can still edit and continue.",

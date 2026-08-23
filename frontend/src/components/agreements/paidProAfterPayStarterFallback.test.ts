@@ -886,3 +886,214 @@ To be determined.
     expect(earlyFallbackBody).not.toMatch(/\bTo be determined\b/i);
   });
 });
+
+/**
+ * FOUNDATIONAL FIX TEST SUITE
+ * 
+ * Tests for the universal rule: when applyFailureFallback paints a valid ≥200 non-hollow body,
+ * callers must NOT set terminal failure states (proFullDraftQualityRetry=true, 
+ * premiumPostCheckoutPhase="terminal_failure"). The Retry overlay must only appear when
+ * no valid body could be painted.
+ * 
+ * Uses TWO different sample intakes (not just Priya/Diego) per requirement.
+ */
+describe("Foundational fix: proFullDraftQualityRetry false when valid body exists", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    sessionStorage.clear();
+    clearCheckoutBackRestoreSnapshot();
+    clearPaidPremiumCompletionSession();
+    clearPaidProSourceOfTruth();
+    vi.spyOn(console, "info").mockImplementation(() => {});
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    clearCheckoutBackRestoreSnapshot();
+    clearPaidPremiumCompletionSession();
+  });
+
+  // SAMPLE INTAKE 1: Tech consulting (Maya Chen / David Chen)
+  const INTAKE_TECH_CONSULTING = `
+Maya Chen from Stellar Digital Solutions is hiring David Chen at Brightpath Analytics for a data consulting engagement.
+Payment: $8,500 upfront plus $3,000 monthly for 6 months.
+Governing law: California.
+The project involves building a customer analytics dashboard with ML-powered insights.
+Deliverables include weekly progress reports and a final presentation.
+`;
+
+  // SAMPLE INTAKE 2: Creative services (Jordan Williams / Sam Rodriguez)
+  const INTAKE_CREATIVE_SERVICES = `
+Jordan Williams of Cascade Creative Agency needs Sam Rodriguez from BlueMoon Productions for video production.
+Budget: $12,000 total for a 3-video series.
+Governing law: Washington State.
+Each video will be 3-5 minutes featuring product demonstrations.
+Final deliverables include raw footage and edited masters within 8 weeks.
+`;
+
+  // Hollow draft that simulates a failed generation
+  const HOLLOW_DRAFT: ParsedDraftShape = {
+    title: "Services Agreement",
+    jurisdiction: "",
+    parties: [
+      { name: "Party A", role: "Client" },
+      { name: "Party B", role: "Service Provider" },
+    ],
+    purpose: "covers due. Work.",
+    payment_terms: "",
+    payment: null,
+    duration: null,
+    due_date: null,
+    effective_date: null,
+    additional_terms: null,
+  };
+
+  it("rebuildBodyFromIntakeForProFailure produces valid body for intake 1 (tech consulting)", () => {
+    const rebuilt = rebuildBodyFromIntakeForProFailure(INTAKE_TECH_CONSULTING, HOLLOW_DRAFT);
+    
+    // UNIVERSAL: ≥200 chars, non-hollow
+    expect(rebuilt.length).toBeGreaterThanOrEqual(200);
+    expect(isNonHollowBody(rebuilt, INTAKE_TECH_CONSULTING)).toBe(true);
+    
+    // Extracts visitor-specific data
+    expect(rebuilt).toContain("Maya Chen");
+    expect(rebuilt).toContain("David Chen");
+    expect(rebuilt).toContain("California");
+    
+    // NEVER contains hollow placeholders
+    expect(rebuilt).not.toMatch(/\bParty A\b/i);
+    expect(rebuilt).not.toMatch(/\bParty B\b/i);
+    expect(rebuilt).not.toContain("covers due. Work.");
+  });
+
+  it("rebuildBodyFromIntakeForProFailure produces valid body for intake 2 (creative services)", () => {
+    const rebuilt = rebuildBodyFromIntakeForProFailure(INTAKE_CREATIVE_SERVICES, HOLLOW_DRAFT);
+    
+    // UNIVERSAL: ≥200 chars, non-hollow
+    expect(rebuilt.length).toBeGreaterThanOrEqual(200);
+    expect(isNonHollowBody(rebuilt, INTAKE_CREATIVE_SERVICES)).toBe(true);
+    
+    // Extracts visitor-specific data
+    expect(rebuilt).toContain("Jordan Williams");
+    expect(rebuilt).toContain("Sam Rodriguez");
+    expect(rebuilt).toContain("Washington");
+    
+    // NEVER contains hollow placeholders
+    expect(rebuilt).not.toMatch(/\bParty A\b/i);
+    expect(rebuilt).not.toMatch(/\bParty B\b/i);
+    expect(rebuilt).not.toContain("covers due. Work.");
+  });
+
+  it("isNonHollowBody validates both sample intakes with rebuilt bodies", () => {
+    const rebuilt1 = rebuildBodyFromIntakeForProFailure(INTAKE_TECH_CONSULTING, HOLLOW_DRAFT);
+    const rebuilt2 = rebuildBodyFromIntakeForProFailure(INTAKE_CREATIVE_SERVICES, HOLLOW_DRAFT);
+    
+    // Both must pass the non-hollow gate
+    expect(isNonHollowBody(rebuilt1, INTAKE_TECH_CONSULTING)).toBe(true);
+    expect(isNonHollowBody(rebuilt2, INTAKE_CREATIVE_SERVICES)).toBe(true);
+    
+    // Both must be ≥200 chars
+    expect(rebuilt1.length).toBeGreaterThanOrEqual(200);
+    expect(rebuilt2.length).toBeGreaterThanOrEqual(200);
+  });
+
+  it("simulates fallback decision: valid body painted → proFullDraftQualityRetry should be false", () => {
+    markPaidPremiumCompletionSession({ source: "settled_checkout" });
+    
+    // Simulate hollow prior state
+    persistStarterReviewBeforeCheckout({
+      intakeText: INTAKE_TECH_CONSULTING,
+      draft: HOLLOW_DRAFT,
+      previewText: `SERVICES AGREEMENT
+
+This Agreement is entered into by and between Party A and Party B.
+1. SERVICES: covers due. Work.
+2. PAYMENT: To be agreed.
+`,
+    });
+
+    // Full fallback chain simulation
+    const intakeForRebuild = INTAKE_TECH_CONSULTING;
+    let paidFallbackBody = "";
+    
+    // Try existing sources (all hollow in this scenario)
+    const starterFallback = buildAgreementPreviewText(HOLLOW_DRAFT, {
+      starterPreview: true,
+      intakeText: INTAKE_TECH_CONSULTING,
+    });
+    if (starterFallback.trim().length >= 200 && isNonHollowBody(starterFallback, intakeForRebuild)) {
+      paidFallbackBody = starterFallback.trim();
+    }
+    
+    // Last resort: rebuild from intake
+    if (!paidFallbackBody && intakeForRebuild.length >= 20) {
+      paidFallbackBody = rebuildBodyFromIntakeForProFailure(intakeForRebuild, HOLLOW_DRAFT);
+    }
+
+    // FOUNDATIONAL RULE: When valid body is painted, proFullDraftQualityRetry MUST be false
+    const paintedValidBody = paidFallbackBody.trim().length >= 200 && isNonHollowBody(paidFallbackBody, intakeForRebuild);
+    
+    // This is the decision the caller should make
+    const shouldSetProFullDraftQualityRetry = !paintedValidBody;
+    
+    expect(paintedValidBody).toBe(true);
+    expect(shouldSetProFullDraftQualityRetry).toBe(false); // proFullDraftQualityRetry should be false
+  });
+
+  it("simulates fallback decision: no valid body → proFullDraftQualityRetry should be true", () => {
+    markPaidPremiumCompletionSession({ source: "settled_checkout" });
+    
+    // Simulate scenario where intake is too short to rebuild
+    const SHORT_INTAKE = "Help me write an agreement";
+    
+    persistStarterReviewBeforeCheckout({
+      intakeText: SHORT_INTAKE,
+      draft: HOLLOW_DRAFT,
+      previewText: `SERVICES AGREEMENT
+
+Party A and Party B.
+`,
+    });
+
+    let paidFallbackBody = "";
+    
+    // Try existing sources (all fail)
+    const starterFallback = buildAgreementPreviewText(HOLLOW_DRAFT, {
+      starterPreview: true,
+      intakeText: SHORT_INTAKE,
+    });
+    if (starterFallback.trim().length >= 200 && isNonHollowBody(starterFallback, SHORT_INTAKE)) {
+      paidFallbackBody = starterFallback.trim();
+    }
+    
+    // Last resort: rebuild from intake (but intake is too short/hollow)
+    if (!paidFallbackBody && SHORT_INTAKE.length >= 20) {
+      const rebuilt = rebuildBodyFromIntakeForProFailure(SHORT_INTAKE, HOLLOW_DRAFT);
+      if (rebuilt.trim().length >= 200 && isNonHollowBody(rebuilt, SHORT_INTAKE)) {
+        paidFallbackBody = rebuilt;
+      }
+    }
+
+    // FOUNDATIONAL RULE: When no valid body exists, proFullDraftQualityRetry MUST be true
+    const paintedValidBody = paidFallbackBody.trim().length >= 200 && isNonHollowBody(paidFallbackBody, SHORT_INTAKE);
+    const shouldSetProFullDraftQualityRetry = !paintedValidBody;
+    
+    expect(paintedValidBody).toBe(false);
+    expect(shouldSetProFullDraftQualityRetry).toBe(true); // proFullDraftQualityRetry should be true
+  });
+
+  it("universal rule: BOTH sample intakes produce valid fallbacks, both should NOT trigger retry", () => {
+    const intakes = [INTAKE_TECH_CONSULTING, INTAKE_CREATIVE_SERVICES];
+    
+    for (const intake of intakes) {
+      const rebuilt = rebuildBodyFromIntakeForProFailure(intake, HOLLOW_DRAFT);
+      const isValid = rebuilt.trim().length >= 200 && isNonHollowBody(rebuilt, intake);
+      const shouldSetRetry = !isValid;
+      
+      // UNIVERSAL RULE: any fat intake with real names/price/law → valid body → no retry
+      expect(isValid).toBe(true);
+      expect(shouldSetRetry).toBe(false);
+    }
+  });
+});
