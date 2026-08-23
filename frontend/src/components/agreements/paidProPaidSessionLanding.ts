@@ -9,6 +9,7 @@
  * Generate may continue in the background.
  */
 
+import { looksLikeEmail } from "./recipientEmailValidation";
 import { meetsPaidSessionFallbackPaintFloor } from "./paidProFirstReviewDisplayAuthority";
 
 /**
@@ -42,4 +43,50 @@ export function shouldShowPaidSessionGeneratingOverlay(args: {
   if (phase === "awaiting_gaps") return true;
   if (args.hasVisibleDealBody) return false;
   return true;
+}
+
+function trimSigner(s: string | null | undefined): string {
+  return (s || "").replace(/\s+/g, " ").trim();
+}
+
+/**
+ * Visitor after-pay Continue needs two human names + emails.
+ * Title, address, 1001-char generate SoT, and a new agreement GET are not required.
+ */
+export function resolvePaidSessionTwoSignerNamesEmailsComplete(args: {
+  signer1Name?: string | null;
+  signer1Email?: string | null;
+  signer2Name?: string | null;
+  signer2Email?: string | null;
+}): boolean {
+  const n1 = trimSigner(args.signer1Name);
+  const n2 = trimSigner(args.signer2Name);
+  const e1 = trimSigner(args.signer1Email);
+  const e2 = trimSigner(args.signer2Email);
+  return Boolean(n1.length >= 2 && n2.length >= 2 && looksLikeEmail(e1) && looksLikeEmail(e2));
+}
+
+/**
+ * After pay, a visible deal on the card + two signer names/emails is enough
+ * to open existing SimpleProFinalReviewScreen. Do not sit on Preparing.
+ */
+export function canOpenPaidSessionFinalReviewAfterSigners(args: {
+  paidSessionActive: boolean;
+  visibleDealBody: boolean;
+  twoSignerNamesAndEmailsComplete: boolean;
+}): boolean {
+  return Boolean(
+    args.paidSessionActive && args.visibleDealBody && args.twoSignerNamesAndEmailsComplete,
+  );
+}
+
+/**
+ * Visible after-pay rebuild is already the deal. Review-screen hydrate must not
+ * wait for 1001-char generate SoT or a verified agreement GET.
+ */
+export function shouldSkipPaidSessionReviewHydrateWait(args: {
+  paidSessionActive: boolean;
+  visibleDealBody: boolean;
+}): boolean {
+  return Boolean(args.paidSessionActive && args.visibleDealBody);
 }
