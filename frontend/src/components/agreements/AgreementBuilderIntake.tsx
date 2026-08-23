@@ -1655,6 +1655,11 @@ import {
   type HollowBodyGateResult,
 } from "./freeStarterReviewBodyResolver";
 import {
+  evaluateFreeStarterMissingTenetAsk,
+  mergeNumberedTenetAnswersIntoIntake,
+  seedStatedTwoPartyNamesOnHollowDraft,
+} from "./freeStarterMissingTenetAsk";
+import {
   FREE_STARTER_REVIEW_BADGE,
   FREE_STARTER_REVIEW_SUBTITLE,
   FREE_STARTER_REVIEW_TITLE,
@@ -3564,6 +3569,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const [intakeClarification, setIntakeClarification] = useState<AgreementIntakeClarification | null>(
     null,
   );
+  /** Free two-party dump: ask missing payment/term/law before painting a starter. */
+  const [freeMissingTenetAsk, setFreeMissingTenetAsk] = useState<{
+    intake: string;
+    topics: string[];
+    questions: string[];
+  } | null>(null);
+  const [freeMissingTenetAskField, setFreeMissingTenetAskField] = useState("");
+  const freeMissingTenetAskRef = useRef(freeMissingTenetAsk);
+  freeMissingTenetAskRef.current = freeMissingTenetAsk;
   /** Calm inline copy when POST /refine fails; do not clear the step buffer. */
   const [reviewRefineUserMessage, setReviewRefineUserMessage] = useState<string | null>(null);
   const [missing, setMissing] = useState<MissingKey[]>([]);
@@ -12601,6 +12615,28 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     setJourneyActionFeedback(feedbackCreatingAgreement());
   }, [draft, currentPremiumMergedIntakeKey, intakeCombined]);
 
+  const beginFreeMissingTenetAsk = React.useCallback((rawIntake: string): boolean => {
+    const decision = evaluateFreeStarterMissingTenetAsk(rawIntake);
+    if (decision.action !== "ask") return false;
+    setFreeMissingTenetAsk({
+      intake: rawIntake,
+      topics: decision.topics,
+      questions: decision.questions,
+    });
+    setFreeMissingTenetAskField("");
+    setIntakeClarification(null);
+    setHardError(null);
+    setLoading(false);
+    setCreateFlowPhase("capturing_input");
+    setDisplayPhase("intake");
+    setCreateUiStage(CreateUiStage.INPUT);
+    setPreviewPaneRevealed(false);
+    setMissing(decision.missingKeys);
+    setFollowUpDetailTotal(decision.missingKeys.length);
+    setJourneyActionFeedback(null);
+    return true;
+  }, []);
+
   const resolvePaidCreateGateBypassContext = React.useCallback(
     (partyCount?: number | null) =>
       resolvePaidCreateGateBypassDecision({
@@ -12944,12 +12980,21 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         });
     if (returningPaidBootstrap) {
       beginReturningPaidProCreateGeneration();
+    } else if (
+      !skipFreeStarterCreateSubmit &&
+      handoffSource !== "missing_tenet_answers" &&
+      beginFreeMissingTenetAsk(rawIntake)
+    ) {
+      return false;
     } else {
       beginStarterDraftGeneration();
     }
     await finalizeIntakeCapture();
     try {
       let parsed = await parseDraft(rawIntake);
+      if (!skipFreeStarterCreateSubmit) {
+        parsed = seedStatedTwoPartyNamesOnHollowDraft(parsed, rawIntake);
+      }
       writeOriginalUserIntakeRawAtDraftCommit(rawIntake);
       writeOriginalUserIntakeRawIfRicher(rawIntake);
       if (!paidMultiPartyGateBypass && rejectIneligibleStarterDraftAfterParse(rawIntake, parsed)) {
@@ -13100,6 +13145,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     commitFreeDraftForReview,
     commitStarterMultiPartyProGate,
     beginStarterDraftGeneration,
+    beginFreeMissingTenetAsk,
     beginReturningPaidProCreateGeneration,
     resolvePaidCreateSubmitEntitlement,
     currentPremiumMergedIntakeKey,
@@ -13108,6 +13154,52 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     premiumSendPathUnlocked,
     premiumPersistedFlowActive,
   ]);
+
+  const submitFreeMissingTenetAnswers = React.useCallback(() => {
+    const ask = freeMissingTenetAskRef.current;
+    if (!ask) return;
+    const enriched = mergeNumberedTenetAnswersIntoIntake(
+      ask.intake,
+      ask.topics,
+      freeMissingTenetAskField,
+    );
+    const next = evaluateFreeStarterMissingTenetAsk(enriched);
+    if (next.action === "ask") {
+      setFreeMissingTenetAsk({
+        intake: enriched,
+        topics: next.topics,
+        questions: next.questions,
+      });
+      setFreeMissingTenetAskField("");
+      setMissing(next.missingKeys);
+      setFollowUpDetailTotal(next.missingKeys.length);
+      return;
+    }
+    setFreeMissingTenetAsk(null);
+    setFreeMissingTenetAskField("");
+    setMissing([]);
+    setFollowUpDetailTotal(0);
+    setIntakeStepBuffer(enriched);
+    setDebouncedStepBuffer(enriched);
+    writeOriginalUserIntakeRawAtDraftCommit(enriched);
+    homeAutoGenerateConsumedRef.current = false;
+    void runProductionLocalDraftParse({
+      rawOverride: enriched,
+      handoffSource: "missing_tenet_answers",
+    });
+  }, [freeMissingTenetAskField, runProductionLocalDraftParse]);
+
+  const dismissFreeMissingTenetAsk = React.useCallback(() => {
+    setFreeMissingTenetAsk(null);
+    setFreeMissingTenetAskField("");
+    setMissing([]);
+    setFollowUpDetailTotal(0);
+    setDisplayPhase("intake");
+    setCreateFlowPhase("capturing_input");
+    setCreateUiStage(CreateUiStage.INPUT);
+    setPreviewPaneRevealed(false);
+    setLoading(false);
+  }, []);
 
   useLayoutEffect(() => {
     if (!checkoutBackRestoreActive || !createProductionTwoPane || !simpleProductFlow) return;
@@ -13259,6 +13351,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     writeOriginalUserIntakeRawAtDraftCommit(homeDecision.text);
     homeAutoGenerateStartedRef.current = true;
     logHomeCreateSubmit(homeDecision.text);
+    if (beginFreeMissingTenetAsk(homeDecision.text)) {
+      return;
+    }
     beginStarterDraftGeneration();
     void (async () => {
       await runProductionLocalDraftParse({
@@ -13275,6 +13370,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     draft,
     createFlowPhase,
     beginStarterDraftGeneration,
+    beginFreeMissingTenetAsk,
     commitStarterMultiPartyProGate,
   ]);
 
@@ -23290,7 +23386,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       stageAInputFirst &&
       createUiStage === CreateUiStage.INPUT &&
       !isGenerating &&
-      !draftPreCommitFreeze,
+      !draftPreCommitFreeze &&
+      !freeMissingTenetAsk,
   );
 
   const showUnifiedClauseSuggestions = Boolean(
@@ -29166,7 +29263,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const hideStickyForPaidProFinalizeDeliveryChoice =
     hideStickyForPaidProFinalizeDeliveryChoiceBase || hideStickyForGuidedInProgress;
   const simpleCreateStickyBottomBarVisible =
-    simpleCreateStickyBottomBarVisibleBaseGated && !hideStickyForGuidedInProgress;
+    simpleCreateStickyBottomBarVisibleBaseGated &&
+    !hideStickyForGuidedInProgress &&
+    !freeMissingTenetAsk;
 
   const [stickyBottomScrollInsetPx, attachPaidProStickyBar] = usePaidProStickyBottomInset(
     simpleCreateStickyBottomBarVisible,
@@ -33200,6 +33299,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                 });
                 if (returningPaidBootstrap) {
                   beginReturningPaidProCreateGeneration();
+                } else if (beginFreeMissingTenetAsk(rawSubmitted)) {
+                  return;
                 } else {
                   beginStarterDraftGeneration();
                 }
@@ -33413,6 +33514,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           });
           if (returningPaidBootstrap) {
             beginReturningPaidProCreateGeneration();
+          } else if (beginFreeMissingTenetAsk(rawSubmitted)) {
+            return;
           } else {
             beginStarterDraftGeneration();
           }
@@ -33459,6 +33562,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           });
           setHardError(null);
           setIntakeClarification(null);
+          if (beginFreeMissingTenetAsk(guidedPrep.text)) {
+            return;
+          }
           setCreateFlowPhase("generating_draft");
           setDisplayPhase("generating_draft");
           setCreateUiStage(CreateUiStage.DRAFT);
@@ -33657,6 +33763,30 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     const el = document.querySelector(sel) as HTMLElement | null;
     el?.focus();
   };
+
+  function renderFreeMissingTenetAskPanel(): React.ReactNode {
+    if (!freeMissingTenetAsk || freeMissingTenetAsk.questions.length === 0) return null;
+    return (
+      <div
+        className="rounded-2xl border border-emerald-500/25 bg-slate-950/95 p-6 shadow-xl shadow-black/40 sm:p-8"
+        role="region"
+        aria-label="Missing agreement details"
+      >
+        <PremiumFinishAgreementGapsPanel
+          questions={freeMissingTenetAsk.questions}
+          oneField={freeMissingTenetAskField}
+          onOneField={setFreeMissingTenetAskField}
+          onContinue={submitFreeMissingTenetAnswers}
+          onUseDefaults={() => {
+            /* Never invent payment, term, or governing law on the free ask. */
+          }}
+          onDismiss={dismissFreeMissingTenetAsk}
+          continueDisabled={loading}
+          hideUseDefaults
+        />
+      </div>
+    );
+  }
 
   function renderProductionStagedLeft(): React.ReactNode {
     if (!createProductionTwoPane) return null;
@@ -34692,6 +34822,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                         </div>
                       </div>
                     ) : null}
+                    {freeMissingTenetAsk ? (
+                      renderFreeMissingTenetAskPanel()
+                    ) : (
                     <VoiceAugmentedTextArea
                       ref={textareaRef}
                       value={intakeStepBuffer}
@@ -34709,6 +34842,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                       className={`min-h-[18rem] w-full rounded-lg border border-slate-600/65 bg-[#141d32] px-5 py-5 pb-14 pr-14 text-lg leading-7 text-gray-100 caret-emerald-300 outline-none ring-offset-2 ring-offset-[#0a0e18] transition-[box-shadow,border-color,ring] duration-150 placeholder:text-gray-500 focus:border-emerald-400/95 focus:shadow-[0_0_0_1px_rgba(52,211,153,0.35),0_0_28px_-6px_rgba(52,211,153,0.55)] focus:ring-2 focus:ring-emerald-400/55 disabled:opacity-60 sm:min-h-[20.5rem] sm:text-lg sm:leading-7 md:text-[1.125rem] md:leading-[1.85] lg:text-xl lg:leading-[2rem] lg:placeholder:text-gray-500 ${stageAInputFirst ? "min-h-[21.5rem] sm:min-h-[24rem]" : ""} ${simpleCreateDraftInputLocked || draftPreCommitFreeze ? "cursor-default opacity-95" : ""}`}
                       placeholder={guidedQuestionPlaceholder}
                     />
+                    )}
                   </div>
                   {showStarterQuickAdds ? (
                     <StarterQuickAddsRow
@@ -39310,6 +39444,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             </div>
           </div>
         </div>
+      ) : null}
+
+      {freeMissingTenetAsk &&
+      !(createProductionTwoPane && createUiStage === CreateUiStage.INPUT && shouldShowProductionInputShell) ? (
+        <div className="mt-4">{renderFreeMissingTenetAskPanel()}</div>
       ) : null}
 
       {intakeClarification &&
