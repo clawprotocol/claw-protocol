@@ -22,7 +22,11 @@ import {
   clearPaidProSourceOfTruth,
 } from "./paidProSourceOfTruth";
 import { buildAgreementPreviewText } from "./agreementPreviewFromDraft";
-import { getFreeOnePagerFallbackForProFailure } from "./freeStarterReviewBodyResolver";
+import {
+  getFreeOnePagerFallbackForProFailure,
+  isNonHollowBody,
+  rebuildBodyFromIntakeForProFailure,
+} from "./freeStarterReviewBodyResolver";
 
 const GENERIC_INTAKE = `
 Commercial consulting engagement between Generic Services Inc. (Consultant) and Generic Client Corp. (Client).
@@ -251,5 +255,354 @@ Party B
   it("hasPaidPremiumCompletionSession guards against wiping existing text", () => {
     markPaidPremiumCompletionSession({ source: "settled_checkout" });
     expect(hasPaidPremiumCompletionSession()).toBe(true);
+  });
+});
+
+/**
+ * Tests for paid restore + generate fail + hollow starter scenario.
+ * 
+ * This covers the critical user journey:
+ * 1. User enters a fat dump (Priya Shah / Northline Studio hiring Diego Alvarez / Harbor Marks LLC, $2,400, Texas)
+ * 2. FREE starter already painted HOLLOW: Party A/B, "covers due. Work."
+ * 3. User pays for Pro (Stripe 4242 succeeded)
+ * 4. After pay (restore=starterReview&premiumCompletion=1): Pro generation fails
+ * 5. All previous fallbacks (lastKnownGood, draft preview, free one-pager, checkout back) are hollow
+ * 6. RESULT: rebuildBodyFromIntakeForProFailure MUST produce ≥200 non-hollow body from intake
+ */
+describe("Paid restore + generate fail + hollow starter → rebuild from intake", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    sessionStorage.clear();
+    clearCheckoutBackRestoreSnapshot();
+    clearPaidPremiumCompletionSession();
+    clearPaidProSourceOfTruth();
+    vi.spyOn(console, "info").mockImplementation(() => {});
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    clearCheckoutBackRestoreSnapshot();
+    clearPaidPremiumCompletionSession();
+  });
+
+  // Realistic intake mimicking the failing scenario: Priya Shah / Northline Studio hiring Diego Alvarez
+  const PRIYA_INTAKE = `
+Priya Shah of Northline Studio is hiring Diego Alvarez from Harbor Marks LLC for a branding project.
+Payment: $2,400 total.
+Governing law: Texas.
+The project involves logo design and brand guidelines delivery within 6 weeks.
+`;
+
+  // Hollow draft that mirrors what the bug produces: Party A/B with corrupted output
+  const HOLLOW_DRAFT: ParsedDraftShape = {
+    title: "Services Agreement",
+    jurisdiction: "", // Missing!
+    parties: [
+      { name: "Party A", role: "Client" }, // Hollow - role placeholder
+      { name: "Party B", role: "Service Provider" }, // Hollow - role placeholder
+    ],
+    purpose: "covers due. Work.", // Corrupted output pattern
+    payment_terms: "",
+    payment: null,
+    duration: null,
+    due_date: null,
+    effective_date: null,
+    additional_terms: null,
+  };
+
+  // Hollow preview text that would be painted (the bug scenario)
+  const HOLLOW_PREVIEW_TEXT = `SERVICES AGREEMENT
+
+This Agreement is entered into by and between:
+
+Party A ("Client")
+and
+Party B ("Service Provider")
+
+1. SERVICES
+Service Provider agrees to provide covers due. Work.
+
+2. PAYMENT TERMS
+To be agreed.
+
+3. GOVERNING LAW
+To be determined.
+`;
+
+  it("rebuildBodyFromIntakeForProFailure extracts real parties from intake", () => {
+    const rebuilt = rebuildBodyFromIntakeForProFailure(PRIYA_INTAKE, HOLLOW_DRAFT);
+    
+    expect(rebuilt.length).toBeGreaterThanOrEqual(200);
+    // Must extract real names from intake
+    expect(rebuilt).toContain("Priya Shah");
+    expect(rebuilt).toContain("Northline Studio");
+    // Should NOT contain hollow placeholders
+    expect(rebuilt).not.toMatch(/\bParty A\b/i);
+    expect(rebuilt).not.toMatch(/\bParty B\b/i);
+    expect(rebuilt).not.toContain("Client/Service_provider");
+  });
+
+  it("rebuildBodyFromIntakeForProFailure extracts payment from intake", () => {
+    const rebuilt = rebuildBodyFromIntakeForProFailure(PRIYA_INTAKE, HOLLOW_DRAFT);
+    
+    expect(rebuilt.length).toBeGreaterThanOrEqual(200);
+    // Must extract payment amount
+    expect(rebuilt).toContain("$2,400");
+    // Should NOT contain hollow payment placeholders
+    expect(rebuilt).not.toContain("To be agreed");
+    expect(rebuilt).not.toContain("To be determined");
+  });
+
+  it("rebuildBodyFromIntakeForProFailure extracts governing law from intake", () => {
+    const rebuilt = rebuildBodyFromIntakeForProFailure(PRIYA_INTAKE, HOLLOW_DRAFT);
+    
+    expect(rebuilt.length).toBeGreaterThanOrEqual(200);
+    // Must extract Texas jurisdiction
+    expect(rebuilt).toContain("Texas");
+    // Should have a proper governing law section
+    expect(rebuilt).toMatch(/governed by.*Texas/i);
+  });
+
+  it("rebuildBodyFromIntakeForProFailure never returns corrupted output patterns", () => {
+    const rebuilt = rebuildBodyFromIntakeForProFailure(PRIYA_INTAKE, HOLLOW_DRAFT);
+    
+    // Must NOT contain corrupted patterns like "covers due. Work."
+    expect(rebuilt).not.toContain("covers due. Work.");
+    expect(rebuilt).not.toMatch(/\bdue\.\s+Work\b/i);
+  });
+
+  it("isNonHollowBody rejects hollow preview text", () => {
+    // The hollow preview that caused the bug should be rejected
+    expect(isNonHollowBody(HOLLOW_PREVIEW_TEXT, PRIYA_INTAKE)).toBe(false);
+  });
+
+  it("isNonHollowBody accepts rebuilt body from intake", () => {
+    const rebuilt = rebuildBodyFromIntakeForProFailure(PRIYA_INTAKE, HOLLOW_DRAFT);
+    
+    expect(rebuilt.length).toBeGreaterThanOrEqual(200);
+    expect(isNonHollowBody(rebuilt, PRIYA_INTAKE)).toBe(true);
+  });
+
+  it("full fallback chain: hollow draft preview → hollow one-pager → hollow checkout back → rebuild from intake", () => {
+    // Simulate the bug scenario: all prior fallbacks are hollow
+    persistStarterReviewBeforeCheckout({
+      intakeText: PRIYA_INTAKE,
+      draft: HOLLOW_DRAFT,
+      previewText: HOLLOW_PREVIEW_TEXT, // Hollow!
+    });
+
+    const checkoutBackSnap = readCheckoutBackRestoreSnapshot();
+    const intakeForRebuild = PRIYA_INTAKE;
+
+    // 1. Try draft-based starter preview - will be hollow
+    const starterFallback = buildAgreementPreviewText(HOLLOW_DRAFT, {
+      starterPreview: true,
+      intakeText: PRIYA_INTAKE,
+    });
+    let fallbackText = "";
+    if (starterFallback.trim() && isNonHollowBody(starterFallback, intakeForRebuild)) {
+      fallbackText = starterFallback.trim();
+    }
+
+    // 2. Try free one-pager - not available in hollow draft
+    if (!fallbackText) {
+      const freeOnePagerFallback = getFreeOnePagerFallbackForProFailure(HOLLOW_DRAFT);
+      if (freeOnePagerFallback && isNonHollowBody(freeOnePagerFallback, intakeForRebuild)) {
+        fallbackText = freeOnePagerFallback.trim();
+      }
+    }
+
+    // 3. Try checkout back restore snapshot's previewText - hollow!
+    if (!fallbackText && checkoutBackSnap?.previewText) {
+      const checkoutBackPreview = checkoutBackSnap.previewText.trim();
+      if (checkoutBackPreview && isNonHollowBody(checkoutBackPreview, intakeForRebuild)) {
+        fallbackText = checkoutBackPreview;
+      }
+    }
+
+    // At this point, all fallbacks should have failed (hollow bodies rejected)
+    expect(fallbackText).toBe("");
+
+    // 4. LAST RESORT: Rebuild ≥200 body from intake - this MUST succeed!
+    fallbackText = rebuildBodyFromIntakeForProFailure(intakeForRebuild, HOLLOW_DRAFT);
+
+    // Final result MUST be non-empty, non-hollow, ≥200 chars
+    expect(fallbackText.length).toBeGreaterThanOrEqual(200);
+    expect(fallbackText).toContain("Priya Shah");
+    expect(fallbackText).toContain("$2,400");
+    expect(fallbackText).toContain("Texas");
+    expect(isNonHollowBody(fallbackText, intakeForRebuild)).toBe(true);
+  });
+
+  it("paid restore never shows empty card when intake has real data", () => {
+    markPaidPremiumCompletionSession({ source: "settled_checkout" });
+
+    // Simulate the hollow starter scenario
+    persistStarterReviewBeforeCheckout({
+      intakeText: PRIYA_INTAKE,
+      draft: HOLLOW_DRAFT,
+      previewText: HOLLOW_PREVIEW_TEXT,
+    });
+
+    // Simulate the after-pay restore URL
+    Object.defineProperty(window, "location", {
+      value: {
+        href: "https://lawdog.me/app/create?premiumCompletion=1&restore=starterReview",
+        origin: "https://lawdog.me",
+        search: "?premiumCompletion=1&restore=starterReview",
+      },
+      writable: true,
+      configurable: true,
+    });
+
+    const snap = readCheckoutBackRestoreSnapshot();
+    const intakeForRebuild = PRIYA_INTAKE;
+
+    // Full fallback chain
+    let fallbackText = "";
+    
+    // 1. Draft preview
+    const starterFallback = buildAgreementPreviewText(HOLLOW_DRAFT, {
+      starterPreview: true,
+      intakeText: PRIYA_INTAKE,
+    });
+    if (starterFallback.trim() && isNonHollowBody(starterFallback, intakeForRebuild)) {
+      fallbackText = starterFallback.trim();
+    }
+
+    // 2. Free one-pager
+    if (!fallbackText) {
+      const freeOnePager = getFreeOnePagerFallbackForProFailure(HOLLOW_DRAFT);
+      if (freeOnePager && isNonHollowBody(freeOnePager, intakeForRebuild)) {
+        fallbackText = freeOnePager.trim();
+      }
+    }
+
+    // 3. Checkout back preview
+    if (!fallbackText && snap?.previewText) {
+      if (isNonHollowBody(snap.previewText, intakeForRebuild)) {
+        fallbackText = snap.previewText.trim();
+      }
+    }
+
+    // 4. Rebuild from intake (last resort)
+    if (!fallbackText) {
+      fallbackText = rebuildBodyFromIntakeForProFailure(intakeForRebuild, HOLLOW_DRAFT);
+    }
+
+    // Universal path rule: NEVER empty card after paid checkout
+    expect(fallbackText).not.toBe("");
+    expect(fallbackText.length).toBeGreaterThanOrEqual(200);
+  });
+
+  it("rebuildBodyFromIntakeForProFailure returns empty for intake < 20 chars", () => {
+    const rebuilt = rebuildBodyFromIntakeForProFailure("short", HOLLOW_DRAFT);
+    expect(rebuilt).toBe("");
+  });
+
+  it("rebuildBodyFromIntakeForProFailure uses draft parties when intake has no names", () => {
+    const intakeWithoutNames = `
+Branding project for $5,000 total.
+Governing law: California.
+Includes logo design, business cards, and letterhead.
+`;
+    const draftWithRealParties: ParsedDraftShape = {
+      title: "Design Services Agreement",
+      jurisdiction: "California",
+      parties: [
+        { name: "Acme Design Studio", role: "Designer" },
+        { name: "TechCorp Inc.", role: "Client" },
+      ],
+      purpose: "Branding and design services",
+      payment_terms: "$5,000",
+      payment: { amount: 5000, cadence: "once", valid: true },
+      duration: null,
+      due_date: null,
+      effective_date: null,
+      additional_terms: null,
+    };
+
+    const rebuilt = rebuildBodyFromIntakeForProFailure(intakeWithoutNames, draftWithRealParties);
+    
+    expect(rebuilt.length).toBeGreaterThanOrEqual(200);
+    // Should use the draft's real party names
+    expect(rebuilt).toContain("Acme Design Studio");
+    expect(rebuilt).toContain("TechCorp Inc.");
+    expect(rebuilt).toContain("$5,000");
+    expect(rebuilt).toContain("California");
+  });
+
+  it("rebuildBodyFromIntakeForProFailure falls back to Party A/B when no real names available", () => {
+    const intakeWithoutNames = `
+General consulting services for $3,000.
+Work starts next week.
+`;
+    const fullyHollowDraft: ParsedDraftShape = {
+      title: "Agreement",
+      jurisdiction: null,
+      parties: [
+        { name: "Client", role: "Client" }, // Hollow
+        { name: "Service Provider", role: "Service Provider" }, // Hollow
+      ],
+      purpose: null,
+      payment_terms: null,
+      payment: null,
+      duration: null,
+      due_date: null,
+      effective_date: null,
+      additional_terms: null,
+    };
+
+    const rebuilt = rebuildBodyFromIntakeForProFailure(intakeWithoutNames, fullyHollowDraft);
+    
+    expect(rebuilt.length).toBeGreaterThanOrEqual(200);
+    // With no real names available, falls back to Party A/B but payment is extracted
+    expect(rebuilt).toContain("$3,000");
+  });
+
+  it("isNonHollowBody detects role-only party names in body", () => {
+    const bodyWithRolePlaceholders = `
+SERVICES AGREEMENT
+
+This Agreement is entered into by and between:
+
+Client ("Client")
+and
+Service Provider ("Service Provider")
+
+1. SERVICES
+Service Provider agrees to provide consulting services.
+
+2. PAYMENT TERMS
+$5,000 total.
+
+3. GOVERNING LAW
+This Agreement shall be governed by the laws of New York.
+`;
+    // Should be considered hollow because parties are role placeholders
+    expect(isNonHollowBody(bodyWithRolePlaceholders, PRIYA_INTAKE)).toBe(false);
+  });
+
+  it("isNonHollowBody accepts body with real party names", () => {
+    const bodyWithRealNames = `
+SERVICES AGREEMENT
+
+This Agreement is entered into by and between:
+
+Priya Shah of Northline Studio ("Client")
+and
+Diego Alvarez of Harbor Marks LLC ("Service Provider")
+
+1. SERVICES
+Service Provider agrees to provide branding and logo design services.
+
+2. PAYMENT TERMS
+Client shall pay $2,400 total for services rendered.
+
+3. GOVERNING LAW
+This Agreement shall be governed by the laws of the State of Texas.
+`;
+    expect(isNonHollowBody(bodyWithRealNames, PRIYA_INTAKE)).toBe(true);
   });
 });

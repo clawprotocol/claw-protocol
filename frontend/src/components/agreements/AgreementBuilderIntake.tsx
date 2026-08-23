@@ -1635,7 +1635,9 @@ import {
   evaluateHollowBodyGate,
   evaluateSimpleHollowBodyGate,
   getFreeOnePagerFallbackForProFailure,
+  isNonHollowBody,
   logHollowBodyGate,
+  rebuildBodyFromIntakeForProFailure,
   resolveFreeStarterReviewBody,
   shouldRedirectFreeToProForValidation,
   type HollowBodyGateResult,
@@ -9367,14 +9369,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           // Universal path rule: never show hollow skeleton + Retry as the paid landing.
           // After pay, the path is: painted deal → signers → final review, not Retry loop.
           {
+            const checkoutBackSnap = readCheckoutBackRestoreSnapshot();
+            const intakeForRebuild = mergedIntake || checkoutBackSnap?.intakeText || "";
+            
             // Helper to check if a body is a valid non-hollow fallback
             const isValidNonHollowBody = (body: string): boolean => {
               const trimmed = body.trim();
               if (trimmed.length < 200) return false;
-              const hollowCheck = evaluateSimpleHollowBodyGate(trimmed, mergedF.draft.parties ?? null, {
-                intake: mergedIntake,
-              });
-              return !hollowCheck.isHollow;
+              return isNonHollowBody(trimmed, intakeForRebuild);
             };
             
             let fallbackText = "";
@@ -9418,10 +9420,22 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             
             // FIFTH: Try checkout back restore snapshot's previewText
             if (!fallbackText) {
-              const checkoutBackSnap = readCheckoutBackRestoreSnapshot();
               const checkoutBackPreview = (checkoutBackSnap?.previewText ?? "").trim();
               if (checkoutBackPreview.length >= 200 && isValidNonHollowBody(checkoutBackPreview)) {
                 fallbackText = checkoutBackPreview;
+              }
+            }
+            
+            // SIXTH (LAST RESORT): Rebuild ≥200 body from intake when all other fallbacks are hollow/empty
+            if (!fallbackText && intakeForRebuild.length >= 20) {
+              fallbackText = rebuildBodyFromIntakeForProFailure(intakeForRebuild, mergedF.draft);
+              if (fallbackText) {
+                console.info("[paid-pro-fallback-rebuilt]", {
+                  intakeLen: intakeForRebuild.length,
+                  bodyLen: fallbackText.length,
+                  source: "rebuildBodyFromIntakeForProFailure",
+                  trigger: "founder_intent_gate",
+                });
               }
             }
             
@@ -9434,19 +9448,24 @@ const AgreementBuilderIntake: React.FC<Props> = ({
               lastKnownGoodAuthoritativeDraftRef.current = fallbackText;
               // Enable signer fields so user can continue to signing from the fallback body.
               setPremiumSendPathUnlocked(true);
+              // UNIVERSAL RULE: Valid fallback = user can continue, not retry-only.
+              setProFullDraftQualityRetry(false);
+              setProFullDraftCustomGateMessage(null);
             }
           }
           setReviewDocRefreshTick((n) => n + 1);
           logPaidProGenerationTerminalTransition({
             reason: "founder_intent_gate",
-            outcome: "retry_recoverable",
+            outcome: lastKnownGoodAuthoritativeDraftRef.current ? "fallback_recovered" : "retry_recoverable",
           });
           setPremiumPostCheckoutPhase(resolvePaidProGenerationFailurePostCheckoutPhase());
           setPremiumPipelineUserMessage(null);
           premiumModalExtendedWaitActiveRef.current = false;
           setPremiumCheckoutModalExtendedWait(false);
           setPremiumAuthoritativeRequestInFlight(false);
-          setProFullDraftQualityRetry(true);
+          if (!lastKnownGoodAuthoritativeDraftRef.current) {
+            setProFullDraftQualityRetry(true);
+          }
           if (import.meta.env.DEV) {
             // eslint-disable-next-line no-console
             console.info("[founder_intent] UI gate; custom message", { message: result.founderDetailsGateMessage });
@@ -9661,14 +9680,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           // Universal path rule: never show hollow skeleton + Retry as the paid landing.
           // After pay, the path is: painted deal → signers → final review, not Retry loop.
           {
+            const checkoutBackSnap = readCheckoutBackRestoreSnapshot();
+            const intakeForRebuild = mergedIntake || checkoutBackSnap?.intakeText || "";
+            
             // Helper to check if a body is a valid non-hollow fallback
             const isValidNonHollowBody = (body: string): boolean => {
               const trimmed = body.trim();
               if (trimmed.length < 200) return false;
-              const hollowCheck = evaluateSimpleHollowBodyGate(trimmed, merged.draft.parties ?? null, {
-                intake: mergedIntake,
-              });
-              return !hollowCheck.isHollow;
+              return isNonHollowBody(trimmed, intakeForRebuild);
             };
             
             let fallbackText = "";
@@ -9712,10 +9731,22 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             
             // FIFTH: Try checkout back restore snapshot's previewText
             if (!fallbackText) {
-              const checkoutBackSnap = readCheckoutBackRestoreSnapshot();
               const checkoutBackPreview = (checkoutBackSnap?.previewText ?? "").trim();
               if (checkoutBackPreview.length >= 200 && isValidNonHollowBody(checkoutBackPreview)) {
                 fallbackText = checkoutBackPreview;
+              }
+            }
+            
+            // SIXTH (LAST RESORT): Rebuild ≥200 body from intake when all other fallbacks are hollow/empty
+            if (!fallbackText && intakeForRebuild.length >= 20) {
+              fallbackText = rebuildBodyFromIntakeForProFailure(intakeForRebuild, merged.draft);
+              if (fallbackText) {
+                console.info("[paid-pro-fallback-rebuilt]", {
+                  intakeLen: intakeForRebuild.length,
+                  bodyLen: fallbackText.length,
+                  source: "rebuildBodyFromIntakeForProFailure",
+                  trigger: "no_server_authority",
+                });
               }
             }
             
@@ -9728,12 +9759,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
               lastKnownGoodAuthoritativeDraftRef.current = fallbackText;
               // Enable signer fields so user can continue to signing from the fallback body.
               setPremiumSendPathUnlocked(true);
+              // UNIVERSAL RULE: Valid fallback = user can continue, not retry-only.
+              setProFullDraftQualityRetry(false);
+              setProFullDraftCustomGateMessage(null);
             }
           }
           setReviewDocRefreshTick((n) => n + 1);
           logPaidProGenerationTerminalTransition({
             reason: "no_server_authority",
-            outcome: "retry_recoverable",
+            outcome: lastKnownGoodAuthoritativeDraftRef.current ? "fallback_recovered" : "retry_recoverable",
           });
           setPremiumPostCheckoutPhase(resolvePaidProGenerationFailurePostCheckoutPhase());
           setPremiumPipelineUserMessage(null);
@@ -9897,14 +9931,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             // Universal path rule: never show hollow skeleton + Retry as the paid landing.
             // After pay, the path is: painted deal → signers → final review, not Retry loop.
             {
+              const checkoutBackSnap = readCheckoutBackRestoreSnapshot();
+              const intakeForRebuild = mergedIntake || checkoutBackSnap?.intakeText || "";
+              
               // Helper to check if a body is a valid non-hollow fallback
               const isValidNonHollowBody = (body: string): boolean => {
                 const trimmed = body.trim();
                 if (trimmed.length < 200) return false;
-                const hollowCheck = evaluateSimpleHollowBodyGate(trimmed, merged.draft.parties ?? null, {
-                  intake: mergedIntake,
-                });
-                return !hollowCheck.isHollow;
+                return isNonHollowBody(trimmed, intakeForRebuild);
               };
               
               let fallbackText = "";
@@ -9948,10 +9982,22 @@ const AgreementBuilderIntake: React.FC<Props> = ({
               
               // FIFTH: Try checkout back restore snapshot's previewText
               if (!fallbackText) {
-                const checkoutBackSnap = readCheckoutBackRestoreSnapshot();
                 const checkoutBackPreview = (checkoutBackSnap?.previewText ?? "").trim();
                 if (checkoutBackPreview.length >= 200 && isValidNonHollowBody(checkoutBackPreview)) {
                   fallbackText = checkoutBackPreview;
+                }
+              }
+              
+              // SIXTH (LAST RESORT): Rebuild ≥200 body from intake when all other fallbacks are hollow/empty
+              if (!fallbackText && intakeForRebuild.length >= 20) {
+                fallbackText = rebuildBodyFromIntakeForProFailure(intakeForRebuild, merged.draft);
+                if (fallbackText) {
+                  console.info("[paid-pro-fallback-rebuilt]", {
+                    intakeLen: intakeForRebuild.length,
+                    bodyLen: fallbackText.length,
+                    source: "rebuildBodyFromIntakeForProFailure",
+                    trigger: "paid_pro_gate_failed",
+                  });
                 }
               }
               
@@ -9964,6 +10010,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                 lastKnownGoodAuthoritativeDraftRef.current = fallbackText;
                 // Enable signer fields so user can continue to signing from the fallback body.
                 setPremiumSendPathUnlocked(true);
+                // UNIVERSAL RULE: Valid fallback = user can continue, not retry-only.
+                setProFullDraftQualityRetry(false);
+                setProFullDraftCustomGateMessage(null);
               } else {
                 setPremiumSendPathUnlocked(false);
               }
@@ -9971,7 +10020,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             setReviewDocRefreshTick((n) => n + 1);
             logPaidProGenerationTerminalTransition({
               reason: "paid_pro_gate_failed",
-              outcome: "retry_recoverable",
+              outcome: lastKnownGoodAuthoritativeDraftRef.current ? "fallback_recovered" : "retry_recoverable",
             });
             setPremiumPostCheckoutPhase(resolvePaidProGenerationFailurePostCheckoutPhase());
             setPremiumPipelineUserMessage(null);
@@ -11032,15 +11081,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           // After a successful paid session, the visitor must see a real Pro body of THAT deal
           // (visitor names, price, law) — or the last painted ≥200-char body of that deal.
           // NEVER show hollow "covers due. Work." / Party A-B / Client-Service_provider skeleton.
+          const checkoutBackSnap = readCheckoutBackRestoreSnapshot();
+          const intakeForRebuild = mergedIntake || checkoutBackSnap?.intakeText || "";
           
           // Helper to check if a body is a valid non-hollow fallback
           const isValidNonHollowBody = (body: string): boolean => {
             const trimmed = body.trim();
             if (trimmed.length < 200) return false;
-            const hollowCheck = evaluateSimpleHollowBodyGate(trimmed, merged.draft.parties ?? null, {
-              intake: mergedIntake,
-            });
-            return !hollowCheck.isHollow;
+            return isNonHollowBody(trimmed, intakeForRebuild);
           };
           
           let paidFallbackBody = "";
@@ -11084,10 +11132,23 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           
           // FIFTH: Try checkout back restore snapshot's previewText as last resort
           if (!paidFallbackBody) {
-            const checkoutBackSnap = readCheckoutBackRestoreSnapshot();
             const checkoutBackPreview = (checkoutBackSnap?.previewText ?? "").trim();
             if (checkoutBackPreview.length >= 200 && isValidNonHollowBody(checkoutBackPreview)) {
               paidFallbackBody = checkoutBackPreview;
+            }
+          }
+          
+          // SIXTH (LAST RESORT): Rebuild ≥200 body from intake (names/price/law from the visitor dump)
+          // This ensures we never show an empty card after paid checkout
+          if (!paidFallbackBody && intakeForRebuild.length >= 20) {
+            paidFallbackBody = rebuildBodyFromIntakeForProFailure(intakeForRebuild, merged.draft);
+            if (paidFallbackBody.trim()) {
+              console.info("[paid-pro-fallback-rebuilt]", {
+                intakeLen: intakeForRebuild.length,
+                bodyLen: paidFallbackBody.length,
+                source: "rebuildBodyFromIntakeForProFailure",
+                trigger: "apply_failure_fallback",
+              });
             }
           }
           
@@ -11102,6 +11163,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             setPremiumPostCheckoutPhase(null);
             setPremiumPipelineUserMessage(null);
             setProFullDraftCustomGateMessage(null);
+            setProFullDraftQualityRetry(false);
           } else {
             // No valid fallback body - show retry message but don't leave empty
             setPremiumSendPathUnlocked(false);
