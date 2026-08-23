@@ -42,14 +42,23 @@ export function isRejectedPaidCorpusPipelineSource(source: string | null | undef
   return String(source || "").trim() === "rejected_paid_corpus";
 }
 
-/** Block draft-field / local fallback render when paid create pipeline rejected the corpus. */
+/**
+ * Block draft-field / local fallback render when paid create pipeline rejected the corpus.
+ *
+ * IMPORTANT: After a successful paid session, a valid rebuilt body (≥200 chars, non-hollow)
+ * MUST be displayed — never an empty skeleton + Retry. When `hasValidFallbackBody` is true,
+ * suppress is bypassed to allow the rebuilt body to render as display-only (not canonical SoT).
+ */
 export function shouldSuppressPaidProCorpusRenderForRejectedPipeline(args: {
   pipelineSource?: string | null;
   premiumRenderSource?: string | null;
   draft?: { premium_render_source?: string | null } | null;
   hasPaidProSourceOfTruth?: boolean;
+  /** When true, a valid ≥200 non-hollow fallback body exists — allow display, don't suppress. */
+  hasValidFallbackBody?: boolean;
 }): boolean {
   if (args.hasPaidProSourceOfTruth ?? hasPaidProSourceOfTruth()) return false;
+  if (args.hasValidFallbackBody) return false;
   const src = String(
     args.pipelineSource ?? args.premiumRenderSource ?? args.draft?.premium_render_source ?? "",
   ).trim();

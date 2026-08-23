@@ -1097,3 +1097,126 @@ Party A and Party B.
     }
   });
 });
+
+/**
+ * Tests for the display suppression bypass with hasValidFallbackBody.
+ * 
+ * Verifies that shouldSuppressPaidProCorpusRenderForRejectedPipeline returns false
+ * when hasValidFallbackBody is true, allowing the rebuilt body to be displayed.
+ * 
+ * Uses TWO different sample intakes per requirement.
+ */
+import { shouldSuppressPaidProCorpusRenderForRejectedPipeline } from "./paidProApiFailureAuthorityGuard";
+
+describe("Display suppression bypass: hasValidFallbackBody=true allows display", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    sessionStorage.clear();
+    clearCheckoutBackRestoreSnapshot();
+    clearPaidPremiumCompletionSession();
+    clearPaidProSourceOfTruth();
+  });
+
+  afterEach(() => {
+    clearCheckoutBackRestoreSnapshot();
+    clearPaidPremiumCompletionSession();
+  });
+
+  // SAMPLE INTAKE 1: Real estate consulting
+  const INTAKE_REAL_ESTATE = `
+Commercial real estate consulting engagement between Apex Property Solutions LLC (Consultant)
+and Meridian Development Corp (Client).
+The project involves site selection, market analysis, and due diligence support for
+commercial property acquisitions valued at $50,000 per engagement.
+Governing law: Texas.
+Term: 6 months starting April 1, 2026.
+`;
+
+  // SAMPLE INTAKE 2: Marketing services
+  const INTAKE_MARKETING = `
+Digital marketing services agreement between BrightWave Marketing Agency (Agency) and
+TechVenture Innovations Inc. (Client).
+Services include SEO optimization, content strategy, and paid advertising campaigns.
+Monthly retainer: $12,500.
+Governing law: California.
+Initial term: 12 months with automatic renewal.
+`;
+
+  it("shouldSuppressPaidProCorpusRenderForRejectedPipeline returns false when hasValidFallbackBody is true (intake 1)", () => {
+    const rebuilt = rebuildBodyFromIntakeForProFailure(INTAKE_REAL_ESTATE, null);
+    expect(rebuilt.length).toBeGreaterThanOrEqual(200);
+    expect(isNonHollowBody(rebuilt, INTAKE_REAL_ESTATE)).toBe(true);
+
+    const shouldSuppress = shouldSuppressPaidProCorpusRenderForRejectedPipeline({
+      pipelineSource: "rejected_paid_corpus",
+      hasValidFallbackBody: true,
+    });
+
+    expect(shouldSuppress).toBe(false);
+  });
+
+  it("shouldSuppressPaidProCorpusRenderForRejectedPipeline returns false when hasValidFallbackBody is true (intake 2)", () => {
+    const rebuilt = rebuildBodyFromIntakeForProFailure(INTAKE_MARKETING, null);
+    expect(rebuilt.length).toBeGreaterThanOrEqual(200);
+    expect(isNonHollowBody(rebuilt, INTAKE_MARKETING)).toBe(true);
+
+    const shouldSuppress = shouldSuppressPaidProCorpusRenderForRejectedPipeline({
+      pipelineSource: "rejected_paid_corpus",
+      hasValidFallbackBody: true,
+    });
+
+    expect(shouldSuppress).toBe(false);
+  });
+
+  it("shouldSuppressPaidProCorpusRenderForRejectedPipeline returns true when hasValidFallbackBody is false/undefined", () => {
+    const shouldSuppressWithoutFlag = shouldSuppressPaidProCorpusRenderForRejectedPipeline({
+      pipelineSource: "rejected_paid_corpus",
+    });
+
+    const shouldSuppressWithFalse = shouldSuppressPaidProCorpusRenderForRejectedPipeline({
+      pipelineSource: "rejected_paid_corpus",
+      hasValidFallbackBody: false,
+    });
+
+    expect(shouldSuppressWithoutFlag).toBe(true);
+    expect(shouldSuppressWithFalse).toBe(true);
+  });
+
+  it("both sample intakes produce ≥200 non-hollow rebuilt bodies that bypass suppression", () => {
+    const intakes = [INTAKE_REAL_ESTATE, INTAKE_MARKETING];
+
+    for (const intake of intakes) {
+      const rebuilt = rebuildBodyFromIntakeForProFailure(intake, null);
+      const isValid = rebuilt.trim().length >= 200 && isNonHollowBody(rebuilt, intake);
+
+      expect(isValid).toBe(true);
+
+      const shouldSuppress = shouldSuppressPaidProCorpusRenderForRejectedPipeline({
+        pipelineSource: "rejected_paid_corpus",
+        hasValidFallbackBody: isValid,
+      });
+
+      expect(shouldSuppress).toBe(false);
+    }
+  });
+
+  it("universal rule: rejected_paid_corpus with valid rebuilt body -> display allowed, retry false", () => {
+    const intakes = [INTAKE_REAL_ESTATE, INTAKE_MARKETING];
+
+    for (const intake of intakes) {
+      const rebuilt = rebuildBodyFromIntakeForProFailure(intake, null);
+      const paintedValidBody = rebuilt.trim().length >= 200 && isNonHollowBody(rebuilt, intake);
+
+      const shouldSuppress = shouldSuppressPaidProCorpusRenderForRejectedPipeline({
+        pipelineSource: "rejected_paid_corpus",
+        hasValidFallbackBody: paintedValidBody,
+      });
+
+      expect(paintedValidBody).toBe(true);
+      expect(shouldSuppress).toBe(false);
+
+      const shouldSetProFullDraftQualityRetry = !paintedValidBody;
+      expect(shouldSetProFullDraftQualityRetry).toBe(false);
+    }
+  });
+});

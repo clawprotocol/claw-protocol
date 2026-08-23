@@ -396,10 +396,17 @@ export function pickPremiumPaidReadonlyPlainText(args: {
     (args.paidAuthoritativeProBody || "").trim().length >= 500 ||
     (args.premiumWinningBodyText || "").trim().length >= MIN_PAID_PRO_AUTHORITY_LEN ||
     latchedPipelineBody.length >= MIN_PAID_PRO_AUTHORITY_LEN;
+  const hasValidFallbackBody =
+    authHydr.length >= 200 ||
+    (args.stickyAuthoritativePlainText || "").trim().length >= 200 ||
+    (args.paidAuthoritativeProBody || "").trim().length >= 200 ||
+    (args.premiumWinningBodyText || "").trim().length >= 200 ||
+    latchedPipelineBody.length >= 200;
   if (
     shouldSuppressPaidProCorpusRenderForRejectedPipeline({
       pipelineSource: pipeSrc,
       draft: args.draft ?? null,
+      hasValidFallbackBody,
     })
   ) {
     return {

@@ -25645,12 +25645,16 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       if (validated.length >= GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN) return validated;
       return "";
     }
+    const hasValidFallbackBody =
+      lastKnownGoodAuthoritativeDraftRef.current.trim().length >= 200 ||
+      agreementDocumentText.trim().length >= 200;
     if (
       shouldSuppressPaidProCorpusRenderForRejectedPipeline({
         pipelineSource:
           lastPremiumPipelineRenderSourceRef.current ||
           String(draft?.premium_render_source ?? "").trim() ||
           null,
+        hasValidFallbackBody,
       })
     ) {
       return "";

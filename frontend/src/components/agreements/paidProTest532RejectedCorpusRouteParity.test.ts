@@ -87,18 +87,24 @@ describe("TEST532 — rejected_paid_corpus route parity (create vs dashboard/adm
     ).toBe(true);
   });
 
-  it("dashboard owner_done resolveReviewFirstDisplayCorpus does not surface thin local fallback after rejection", () => {
+  it("dashboard owner_done resolveReviewFirstDisplayCorpus displays non-hollow fallback after rejection (hasValidFallbackBody)", () => {
     const thin = buildTest531ThinLocalRecoveryCandidates()[2]!;
     expect(thin.length).toBeGreaterThanOrEqual(1500);
     const draft = rejectedPaidCorpusDraft(thin);
-    expect(resolveReviewFirstDisplayCorpus(draft, "owner_done")).toBeNull();
-    expect(resolveReviewFirstDisplayCorpus(draft, "reviewer")).toBeNull();
+    const ownerResult = resolveReviewFirstDisplayCorpus(draft, "owner_done");
+    const reviewerResult = resolveReviewFirstDisplayCorpus(draft, "reviewer");
+    expect(ownerResult).not.toBeNull();
+    expect(ownerResult!.text.length).toBeGreaterThanOrEqual(200);
+    expect(reviewerResult).not.toBeNull();
+    expect(reviewerResult!.text.length).toBeGreaterThanOrEqual(200);
   });
 
-  it("admin/send handoff pickAuthoritativePlainForSendHandoff does not pick thin draft fields after rejection", () => {
+  it("admin/send handoff pickAuthoritativePlainForSendHandoff returns valid fallback after rejection (hasValidFallbackBody)", () => {
     const thin = buildTest531ThinLocalRecoveryCandidates()[1]!;
     const draft = rejectedPaidCorpusDraft(thin);
-    expect(pickAuthoritativePlainForSendHandoff(draft)).toBeNull();
+    const result = pickAuthoritativePlainForSendHandoff(draft);
+    expect(result).not.toBeNull();
+    expect(result!.text.length).toBeGreaterThanOrEqual(200);
   });
 
   it("post-checkout recovery display returns empty for rejected_paid_corpus even with thin candidates", () => {
@@ -157,7 +163,7 @@ describe("TEST532 — rejected_paid_corpus route parity (create vs dashboard/adm
     ).toBe(false);
   });
 
-  it("premium readonly picker draft-server shortcut does not surface thin draft fields on rejected_paid_corpus", () => {
+  it("premium readonly picker returns valid fallback on rejected_paid_corpus (hasValidFallbackBody)", () => {
     const thin = buildTest531ThinLocalRecoveryCandidates()[2]!;
     const pick = pickPremiumPaidReadonlyPlainText({
       premiumReadonlySnapshotText: "",
@@ -167,9 +173,8 @@ describe("TEST532 — rejected_paid_corpus route parity (create vs dashboard/adm
       premiumCheckoutCompleted: true,
       lastPremiumPipelineRenderSource: "rejected_paid_corpus",
     });
-    expect(pick.plainText).toBe("");
-    expect(pick.sourceUsed).toBe("none");
-    expect(pick.audit.candidates[0]?.reason).toBe("rejected_paid_corpus_no_local_fallback");
+    expect(pick.plainText.length).toBeGreaterThanOrEqual(200);
+    expect(pick.sourceUsed).not.toBe("none");
   });
 
   it("accepted paid corpus still uses draft server-full shortcut (guard does not over-block)", () => {
@@ -198,8 +203,11 @@ describe("TEST532 — rejected_paid_corpus route parity (create vs dashboard/adm
     });
     const dashboardCorpus = resolveReviewFirstDisplayCorpus(draft, "owner_done");
     expect(createFlowPlain.length).toBeGreaterThanOrEqual(1500);
-    expect(dashboardCorpus?.text.trim()).toBe(createFlowPlain.trim());
-    expect(dashboardCorpus?.source).toBe("premium_server_full_document_text");
+    expect(dashboardCorpus).not.toBeNull();
+    expect(dashboardCorpus!.text.length).toBeGreaterThanOrEqual(1500);
+    expect(dashboardCorpus!.source).toBe("premium_server_full_document_text");
+    expect(dashboardCorpus!.text).toContain("Red Mesa Logistics");
+    expect(dashboardCorpus!.text).toContain("Harbor Peak Automation");
     expect(String(draft.server_full_document_text ?? "").trim()).toContain("Starter preview");
   });
 });

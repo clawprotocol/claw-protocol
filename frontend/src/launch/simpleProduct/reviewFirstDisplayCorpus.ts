@@ -214,7 +214,13 @@ export function resolveReviewFirstDisplayCorpus(
     }
   }
 
-  if (shouldSuppressPaidProCorpusRenderForRejectedPipeline({ draft })) {
+  const hasValidFallbackBody =
+    stringField(draft, "server_full_document_text").length >= 200 ||
+    stringField(draft, "premium_server_full_document_text").length >= 200 ||
+    stringField(draft, "premium_full_document_text").length >= 200 ||
+    stringField(draft, "document_text").length >= 200 ||
+    stringField(draft, "rendered_document_text").length >= 200;
+  if (shouldSuppressPaidProCorpusRenderForRejectedPipeline({ draft, hasValidFallbackBody })) {
     return null;
   }
 

@@ -244,9 +244,6 @@ export function resolvePaidProPostCheckoutRecoveryDisplayPlain(args?: {
       snap?.premiumRenderResolveSource ??
       "",
   ).trim();
-  if (shouldSuppressPaidProCorpusRenderForRejectedPipeline({ pipelineSource: pipeline, draft: args?.draft ?? null })) {
-    return "";
-  }
   const candidates = [
     args?.winningPremiumBodyText,
     args?.hydratedPremiumBody,
@@ -256,6 +253,10 @@ export function resolvePaidProPostCheckoutRecoveryDisplayPlain(args?: {
   ]
     .map((s) => String(s || "").trim())
     .filter(Boolean);
+  const hasValidFallbackBody = candidates.some((body) => body.length >= 200);
+  if (shouldSuppressPaidProCorpusRenderForRejectedPipeline({ pipelineSource: pipeline, draft: args?.draft ?? null, hasValidFallbackBody })) {
+    return "";
+  }
   const intake = args?.intakeText ?? null;
   for (const body of candidates) {
     if (

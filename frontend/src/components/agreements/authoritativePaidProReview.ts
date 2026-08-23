@@ -139,10 +139,14 @@ export function resolveAuthoritativePaidProReviewPlain(
   if (pinnedPlain.length >= PAID_PRO_FINAL_HYDRATED_CORPUS_MIN_LEN) {
     return finalizeAuthoritativePaidProReviewPlain(pinnedPlain);
   }
+  const hasValidFallbackBody =
+    String(args?.draft?.premium_full_document_text ?? "").trim().length >= 200 ||
+    String(args?.draft?.premium_server_full_document_text ?? "").trim().length >= 200;
   if (
     shouldSuppressPaidProCorpusRenderForRejectedPipeline({
       pipelineSource: args?.premiumRenderSource,
       draft: args?.draft ?? null,
+      hasValidFallbackBody,
     })
   ) {
     return "";
@@ -278,14 +282,16 @@ export function resolvePaidProFinalReviewVisiblePlain(args: {
     premiumRenderSource: args.draft?.premium_render_source ?? null,
   });
   if (authoritative.length < PAID_PRO_AUTHORITY_MIN_LEN) {
+    const fallbackCandidate = (args.boundaryPlain || args.displayCandidatePlain || "").trim();
     if (
       shouldSuppressPaidProCorpusRenderForRejectedPipeline({
         draft: args.draft ?? null,
+        hasValidFallbackBody: fallbackCandidate.length >= 200,
       })
     ) {
       return "";
     }
-    return (args.boundaryPlain || args.displayCandidatePlain || "").trim();
+    return fallbackCandidate;
   }
   const boundary = (args.boundaryPlain || "").trim();
   if (
