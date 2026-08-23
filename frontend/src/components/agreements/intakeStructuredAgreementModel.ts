@@ -651,6 +651,33 @@ function extractScopeAndMeta(lower: string, text: string): FieldMeta {
     }
   }
 
+  // "hiring / engaging X to design a logo and brand kit" — stated work, not just "to provide".
+  const hiringToWork = text.match(
+    /\b(?:is\s+)?(?:hiring|engaging|retaining|commissioning)\s+[^.!\n]{0,140}?\s+to\s+((?:design|build|create|develop|provide|perform|deliver|run|paint|photograph|write|install|fix|repair|market|consult|manage|handle|produce|film|edit)\s+[^.!\n]{6,200})/i,
+  );
+  if (hiringToWork?.[1]) {
+    const t = normalizeIntakeFieldText(
+      hiringToWork[1].replace(/\s+for\s+(?:three|four|five|six|\d+)\s+months?\b.*$/i, "").trim(),
+      220,
+    );
+    if (t.length >= 8 && !/\b(?:pay|pays|paid|payment|fee|\$\s?\d)\b/i.test(t)) {
+      return { text: t, confidence: 0.9, signal: true, inferred: false };
+    }
+  }
+
+  const toWork = text.match(
+    /\bto\s+((?:design|build|create|develop|perform|deliver|run|paint|photograph|write|install|fix|repair|market|consult|manage|handle|produce|film|edit)\s+[^.!\n]{6,200})/i,
+  );
+  if (toWork?.[1]) {
+    const t = normalizeIntakeFieldText(
+      toWork[1].replace(/\s+for\s+(?:three|four|five|six|\d+)\s+months?\b.*$/i, "").trim(),
+      220,
+    );
+    if (t.length >= 8 && !/\b(?:pay|pays|paid|payment|fee|\$\s?\d)\b/i.test(t)) {
+      return { text: t, confidence: 0.88, signal: true, inferred: false };
+    }
+  }
+
   const toProvide = text.match(/\bto\s+provide\s+([^.!\n]{8,200})/i);
   if (toProvide?.[1]) {
     const t = normalizeIntakeFieldText(

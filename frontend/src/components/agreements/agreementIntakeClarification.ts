@@ -19,6 +19,7 @@ import {
   extractAgreementEntityCandidates,
   dedupeEntityCandidatesToLegalParties,
 } from "../../agreement/partyPlaceholderDisplay";
+import { inferCasualScopeFromDump } from "./intakeNamedPartyFallback";
 
 export type AgreementIntakeClarificationKind =
   | "counsel_prep"
@@ -283,6 +284,10 @@ function extractTermPhrase(raw: string): string | null {
 const PURPOSE_CONNECTOR_RE =
   /\b(?:for|about|regarding|concerning|covering|whereby|under\s+which|to\s+(?:document|memorialize|confirm|establish|set\s+forth)|understanding\s+that|so\s+that|such\s+that)\b\s+/i;
 
+/** Concrete work infinitive — "to design a logo and brand kit", "to run a marketing campaign". */
+const WORK_INFINITIVE_RE =
+  /\bto\s+(?=(?:design(?:ing)?|build(?:ing)?|creat(?:e|ing)|develop(?:ing)?|provid(?:e|ing)|perform(?:ing)?|deliver(?:ing)?|run(?:ning)?|paint(?:ing)?|photograph(?:ing)?|writ(?:e|ing)|install(?:ing)?|fix(?:ing)?|repair(?:ing)?|market(?:ing)?|consult(?:ing)?|manag(?:e|ing)|handl(?:e|ing)|produc(?:e|ing)|film(?:ing)?|edit(?:ing)?|coach(?:ing)?|train(?:ing)?|maintain(?:ing)?|support(?:ing)?)\b)/i;
+
 const THIN_PURPOSE_ONLY_RE =
   /^(?:stuff|things|business|it|work|services?|a\s+deal|the\s+deal|something|whatever|misc(?:ellaneous)?)\b/i;
 
@@ -326,9 +331,39 @@ const PURPOSE_STOPWORDS = new Set([
  * even when the ask is not a memorized deal family (NDA / SaaS / services / etc.).
  * Bare “draft … between A and B about stuff” stays blocked.
  */
+function purposeContentWordCount(body: string): number {
+  return body
+    .split(/\s+/)
+    .filter(Boolean)
+    .filter((w) => {
+      const t = w.toLowerCase().replace(/[^a-z0-9']/g, "");
+      return t.length > 2 && !PURPOSE_STOPWORDS.has(t);
+    }).length;
+}
+
 export function hasSubstantiveDealPurpose(raw: string): boolean {
   const text = String(raw || "").replace(/\s+/g, " ").trim();
   if (text.length < 40) return false;
+
+  // "hiring X to design a logo and brand kit" is stated work — not a thin-scope shell.
+  const workInf = WORK_INFINITIVE_RE.exec(text);
+  if (workInf && workInf.index != null) {
+    const body = text.slice(workInf.index).replace(/\s+/g, " ").trim();
+    const afterTo = body.replace(/^to\s+/i, "");
+    if (!THIN_PURPOSE_ONLY_RE.test(afterTo) && purposeContentWordCount(afterTo) >= 2) {
+      return true;
+    }
+  }
+
+  const casualScope = inferCasualScopeFromDump(text);
+  if (
+    casualScope &&
+    casualScope.split(/\s+/).length >= 2 &&
+    !THIN_PURPOSE_ONLY_RE.test(casualScope)
+  ) {
+    return true;
+  }
+
   const connector = PURPOSE_CONNECTOR_RE.exec(text);
   if (!connector || connector.index == null) {
     if (
@@ -1046,6 +1081,12 @@ export function buildAgreementIntakeClarification(rawIntake: string): AgreementI
       primaryCtaLabel: "Use suggested draft request",
       secondaryCtaLabel: "I’ll add parties myself",
     };
+  }
+
+  // Two named parties + a concrete work description is never a too-thin
+  // suggested-draft dead-end — missing payment/term/law go to the five-tenet ask.
+  if (hasBetweenParties && hasPurpose) {
+    return null;
   }
 
   if (
