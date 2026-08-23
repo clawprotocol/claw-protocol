@@ -24514,7 +24514,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         );
         /** Party names are in the rendered agreement preview even if draft.parties has placeholders. */
         const partyNamesResolvedViaRenderedDoc = Boolean(
-          draft && partyNamesResolvedViaRenderedPreview(draft, renderedAgreementPreview),
+          draft && partyNamesResolvedViaRenderedPreview(draft, renderedAgreementPreview, debouncedStepBuffer),
         );
         const partyNamesIncompleteForProgress = Boolean(
           draft && draftHasPlaceholderParties(draft) && !basicPartyNamesResolvedViaLivePreview && !partyNamesResolvedViaRenderedDoc,
@@ -24533,7 +24533,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           draft &&
             (partyNamesIncompleteForProgress ||
               firstBlocker === "identity_placeholder_in_corpus" ||
-              (!limitedReviewIgnoresGenericTitleOnly && draftHasPlaceholderFieldsForRecipients(draft))),
+              (!limitedReviewIgnoresGenericTitleOnly && firstBlocker === "other_placeholder")),
         );
         if (
           reviewIncomplete &&

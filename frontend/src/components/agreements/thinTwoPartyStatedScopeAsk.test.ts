@@ -355,6 +355,12 @@ Effective Date: upon full execution by both parties
         ],
       };
       expect(
+        getDraftFirstReviewBlocker(emptySlotsDraft, {
+          userVisibleFullDocumentPlain: body,
+          intakeText: answered,
+        }),
+      ).toBeNull();
+      expect(
         isPartyFixDetailsReviewBlocker(emptySlotsDraft, {
           userVisibleFullDocumentPlain: body,
           intakeText: answered,
@@ -389,6 +395,12 @@ Effective Date: upon full execution by both parties
       ],
     };
     expect(
+      getDraftFirstReviewBlocker(emptySlotsDraft, {
+        userVisibleFullDocumentPlain: colonPreview,
+        intakeText: dump,
+      }),
+    ).toBeNull();
+    expect(
       isPartyFixDetailsReviewBlocker(emptySlotsDraft, {
         userVisibleFullDocumentPlain: colonPreview,
         intakeText: dump,
@@ -415,6 +427,15 @@ Effective Date: upon full execution by both parties
     expect(preAt).toBeGreaterThan(defaultsAt);
     expect(reseedAt).toBeGreaterThan(preAt);
     expect(src).toContain("setIntakePartyEditorRows(normalizeIntakePartyEditorRows(seededNames))");
+    // Live #93 painted dump names but sticky CTA still said Fix details because
+    // reviewIncomplete used empty slots (draftHasPlaceholderFieldsForRecipients)
+    // even after getDraftFirstReviewBlocker returned null.
+    expect(src).toContain(
+      '(!limitedReviewIgnoresGenericTitleOnly && firstBlocker === "other_placeholder")',
+    );
+    expect(src).toContain(
+      "partyNamesResolvedViaRenderedPreview(draft, renderedAgreementPreview, debouncedStepBuffer)",
+    );
   });
 
   it.each(THIN_TWO_PARTY_STATED_SCOPE)(
