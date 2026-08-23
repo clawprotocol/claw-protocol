@@ -7667,7 +7667,25 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           setPremiumPersistedFlowActive(false);
           setPremiumSendPathUnlocked(false);
           agreementDocumentDirtyRef.current = false;
-          setAgreementDocumentText("");
+          if (hasPaidPremiumCompletionSession()) {
+            const checkoutBackSnap = readCheckoutBackRestoreSnapshot();
+            const intakeForRebuild = (mergedIntake || checkoutBackSnap?.intakeText || "").trim();
+            if (intakeForRebuild.length >= 20) {
+              const rebuiltBody = rebuildBodyFromIntakeForProFailure(intakeForRebuild, merged.draft);
+              if (rebuiltBody.trim().length >= 200 && isNonHollowBody(rebuiltBody, intakeForRebuild)) {
+                setAgreementDocumentText(rebuiltBody);
+                lastKnownGoodAuthoritativeDraftRef.current = rebuiltBody;
+                setProFullDraftQualityRetry(false);
+                setPremiumSendPathUnlocked(true);
+              } else {
+                setAgreementDocumentText("");
+              }
+            } else {
+              setAgreementDocumentText("");
+            }
+          } else {
+            setAgreementDocumentText("");
+          }
           setReviewDocRefreshTick((n) => n + 1);
           setPremiumPostCheckoutPhase(resolvePaidProGenerationFailurePostCheckoutPhase());
           setPremiumPipelineUserMessage(null);
@@ -25643,6 +25661,20 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     if (createFlowPaidAcceptedOrAuthoritativeActive) {
       const validated = validatedPaidProReviewCorpus.plain.trim();
       if (validated.length >= GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN) return validated;
+      if (hasPaidPremiumCompletionSession()) {
+        const checkoutBackSnap = readCheckoutBackRestoreSnapshot();
+        const intakeForRebuild = (currentPremiumMergedIntakeKey || intakeCombined || checkoutBackSnap?.intakeText || "").trim();
+        if (intakeForRebuild.length >= 20) {
+          const draftForRebuild = draft ?? checkoutBackSnap?.draft ?? null;
+          const rebuiltBody = rebuildBodyFromIntakeForProFailure(intakeForRebuild, draftForRebuild);
+          if (rebuiltBody.trim().length >= 200 && isNonHollowBody(rebuiltBody, intakeForRebuild)) {
+            if (lastKnownGoodAuthoritativeDraftRef.current.trim().length < 200) {
+              lastKnownGoodAuthoritativeDraftRef.current = rebuiltBody;
+            }
+            return rebuiltBody;
+          }
+        }
+      }
       return "";
     }
     const hasValidFallbackBody =
@@ -25683,6 +25715,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     premiumSurfaceGateTick,
     createFlowPaidAcceptedOrAuthoritativeActive,
     validatedPaidProReviewCorpus.plain,
+    currentPremiumMergedIntakeKey,
+    intakeCombined,
+    draft,
   ]);
 
   const guidedAuthoritativeBodyHash = useMemo(

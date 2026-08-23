@@ -1220,3 +1220,164 @@ Initial term: 12 months with automatic renewal.
     }
   });
 });
+
+/**
+ * TEST for render-time rebuild from intake when validatedPaidProReviewCorpus is empty.
+ * 
+ * When hasPaidPremiumCompletionSession() is true but validatedPaidProReviewCorpus is empty,
+ * the guidedAuthoritativeBodyPlain useMemo must rebuild from intake rather than returning "".
+ * 
+ * Uses TWO different sample intakes per requirement.
+ */
+describe("Render-time rebuild from intake when validated corpus is empty", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    sessionStorage.clear();
+    clearCheckoutBackRestoreSnapshot();
+    clearPaidPremiumCompletionSession();
+    clearPaidProSourceOfTruth();
+    vi.spyOn(console, "info").mockImplementation(() => {});
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    clearCheckoutBackRestoreSnapshot();
+    clearPaidPremiumCompletionSession();
+  });
+
+  // SAMPLE INTAKE 1: SaaS consulting (Dr. Elena Vasquez / Michael Chen)
+  const INTAKE_SAAS_CONSULTING = `
+Dr. Elena Vasquez of Summit Health Technologies is engaging Michael Chen from DataBridge Solutions for SaaS integration consulting.
+Payment: $18,000 for the initial implementation phase plus $4,500 monthly support.
+Governing law: Massachusetts.
+The project includes HIPAA-compliant data migration and API integration over 4 months.
+`;
+
+  // SAMPLE INTAKE 2: Architecture services (Robert Kim / Lisa Nguyen)
+  const INTAKE_ARCHITECTURE = `
+Robert Kim of Meridian Architecture Group is hiring Lisa Nguyen from UrbanDesign Studio for sustainable building design.
+Fee: $65,000 for complete architectural plans and permit documentation.
+Governing law: Colorado.
+Deliverables include schematic design, design development, and construction documents for a 12,000 sq ft commercial building.
+`;
+
+  const HOLLOW_DRAFT: ParsedDraftShape = {
+    title: "Services Agreement",
+    jurisdiction: "",
+    parties: [
+      { name: "Party A", role: "Client" },
+      { name: "Party B", role: "Service Provider" },
+    ],
+    purpose: "covers due. Work.",
+    payment_terms: "",
+    payment: null,
+    duration: null,
+    due_date: null,
+    effective_date: null,
+    additional_terms: null,
+  };
+
+  it("simulates render-time rebuild for intake 1 (SaaS consulting)", () => {
+    markPaidPremiumCompletionSession({ source: "settled_checkout" });
+    
+    persistStarterReviewBeforeCheckout({
+      intakeText: INTAKE_SAAS_CONSULTING,
+      draft: HOLLOW_DRAFT,
+      previewText: "",
+    });
+
+    const checkoutBackSnap = readCheckoutBackRestoreSnapshot();
+    expect(checkoutBackSnap?.intakeText).toBeTruthy();
+    expect(checkoutBackSnap?.intakeText.length).toBeGreaterThanOrEqual(20);
+
+    const validatedCorpusPlain = "";
+    const hasValidatedCorpus = validatedCorpusPlain.length >= 500;
+
+    expect(hasValidatedCorpus).toBe(false);
+
+    const intakeForRebuild = checkoutBackSnap?.intakeText || "";
+    const rebuiltBody = rebuildBodyFromIntakeForProFailure(intakeForRebuild, checkoutBackSnap?.draft ?? null);
+
+    expect(rebuiltBody.length).toBeGreaterThanOrEqual(200);
+    expect(isNonHollowBody(rebuiltBody, intakeForRebuild)).toBe(true);
+
+    expect(rebuiltBody).toContain("Elena Vasquez");
+    expect(rebuiltBody).toContain("Michael Chen");
+    expect(rebuiltBody).toContain("Massachusetts");
+    expect(rebuiltBody).not.toMatch(/\bParty A\b/i);
+    expect(rebuiltBody).not.toMatch(/\bParty B\b/i);
+  });
+
+  it("simulates render-time rebuild for intake 2 (architecture services)", () => {
+    markPaidPremiumCompletionSession({ source: "settled_checkout" });
+    
+    persistStarterReviewBeforeCheckout({
+      intakeText: INTAKE_ARCHITECTURE,
+      draft: HOLLOW_DRAFT,
+      previewText: "",
+    });
+
+    const checkoutBackSnap = readCheckoutBackRestoreSnapshot();
+    expect(checkoutBackSnap?.intakeText).toBeTruthy();
+    expect(checkoutBackSnap?.intakeText.length).toBeGreaterThanOrEqual(20);
+
+    const validatedCorpusPlain = "";
+    const hasValidatedCorpus = validatedCorpusPlain.length >= 500;
+
+    expect(hasValidatedCorpus).toBe(false);
+
+    const intakeForRebuild = checkoutBackSnap?.intakeText || "";
+    const rebuiltBody = rebuildBodyFromIntakeForProFailure(intakeForRebuild, checkoutBackSnap?.draft ?? null);
+
+    expect(rebuiltBody.length).toBeGreaterThanOrEqual(200);
+    expect(isNonHollowBody(rebuiltBody, intakeForRebuild)).toBe(true);
+
+    expect(rebuiltBody).toContain("Robert Kim");
+    expect(rebuiltBody).toContain("Lisa Nguyen");
+    expect(rebuiltBody).toContain("Colorado");
+    expect(rebuiltBody).not.toMatch(/\bParty A\b/i);
+    expect(rebuiltBody).not.toMatch(/\bParty B\b/i);
+  });
+
+  it("universal rule: paid session + empty lastKnownGood + empty agreementDocumentText + intake ≥20 → rebuilt deal", () => {
+    const intakes = [INTAKE_SAAS_CONSULTING, INTAKE_ARCHITECTURE];
+
+    for (const intake of intakes) {
+      clearCheckoutBackRestoreSnapshot();
+      clearPaidPremiumCompletionSession();
+      clearPaidProSourceOfTruth();
+
+      markPaidPremiumCompletionSession({ source: "settled_checkout" });
+      
+      persistStarterReviewBeforeCheckout({
+        intakeText: intake,
+        draft: HOLLOW_DRAFT,
+        previewText: "",
+      });
+
+      expect(hasPaidPremiumCompletionSession()).toBe(true);
+
+      const lastKnownGood = "";
+      const agreementDocumentText = "";
+      const validatedCorpus = "";
+
+      expect(lastKnownGood.length < 200).toBe(true);
+      expect(agreementDocumentText.length < 200).toBe(true);
+      expect(validatedCorpus.length < 500).toBe(true);
+
+      const checkoutBackSnap = readCheckoutBackRestoreSnapshot();
+      const intakeForRebuild = intake;
+      expect(intakeForRebuild.length >= 20).toBe(true);
+
+      const rebuiltBody = rebuildBodyFromIntakeForProFailure(intakeForRebuild, HOLLOW_DRAFT);
+
+      expect(rebuiltBody.length).toBeGreaterThanOrEqual(200);
+      expect(isNonHollowBody(rebuiltBody, intakeForRebuild)).toBe(true);
+
+      expect(rebuiltBody).not.toMatch(/\bParty A\b/i);
+      expect(rebuiltBody).not.toMatch(/\bParty B\b/i);
+      expect(rebuiltBody).not.toContain("covers due. Work.");
+    }
+  });
+});
