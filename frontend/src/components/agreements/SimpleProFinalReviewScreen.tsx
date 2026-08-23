@@ -66,6 +66,8 @@ export type SimpleProFinalReviewScreenProps = {
   exportBusy?: boolean;
   exportError?: string | null;
   sendDisabled?: boolean;
+  /** When signersReady but sendDisabled, show this reason next to the action buttons. */
+  sendDisabledReason?: string | null;
   reviewFirstHandoffBusy?: boolean;
   reviewFirstHandoffError?: string | null;
   /** Agreement save service unreachable — dedicated persist blocker (not mint failure). */
@@ -147,6 +149,7 @@ export function SimpleProFinalReviewScreen({
   exportBusy = false,
   exportError = null,
   sendDisabled = false,
+  sendDisabledReason = null,
   reviewFirstHandoffBusy = false,
   reviewFirstHandoffError = null,
   reviewLinkPersistFailureActive = false,
@@ -851,6 +854,15 @@ export function SimpleProFinalReviewScreen({
                 data-testid="simple-pro-signer-details-required-note"
               >
                 Add signer details before continuing.
+              </p>
+            ) : null}
+            {!signerSetupRequired && signersReady && sendDisabled && sendDisabledReason ? (
+              <p
+                className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] font-medium text-amber-950"
+                role="alert"
+                data-testid="simple-pro-send-disabled-reason"
+              >
+                {sendDisabledReason}
               </p>
             ) : null}
             <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">

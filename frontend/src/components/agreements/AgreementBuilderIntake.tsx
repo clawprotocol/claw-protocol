@@ -31039,6 +31039,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     setDisplayPhase("review");
     setHardError(null);
     setGuidedSigningConfirmationBlockMessage(null);
+    setLoading(false);
     bumpPremiumSurfaceGateTick();
     scrollPaidProReviewDecisionIntoView();
     return true;
@@ -35953,9 +35954,26 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                             simpleProFinalReviewCorpus.corpusBlocked ||
                                             (isGenerating && !draft) ||
                                             upgradeLockActive ||
-                                            loading ||
+                                            (loading && !(paidProSignerMetadataFinalized && paidProReviewSignerStatusReady)) ||
                                             guidedPacketSendBlocked ||
                                             reviewFirstHandoffBusy
+                                          }
+                                          sendDisabledReason={
+                                            guidedFinalizeModalActive
+                                              ? "Finalizing agreement…"
+                                              : simpleProFinalReviewCorpus.corpusBlocked
+                                                ? "Agreement corpus unavailable. Go back and restore the agreement."
+                                                : (isGenerating && !draft)
+                                                  ? "Agreement is still generating…"
+                                                  : upgradeLockActive
+                                                    ? "Agreement upgrade in progress…"
+                                                    : (loading && !(paidProSignerMetadataFinalized && paidProReviewSignerStatusReady))
+                                                      ? "Saving agreement…"
+                                                      : guidedPacketSendBlocked
+                                                        ? "Agreement changed after links were created. Create new links for this version."
+                                                        : reviewFirstHandoffBusy
+                                                          ? "Creating review links…"
+                                                          : null
                                           }
                                         />
                                         {showPaidProForcedFirstReviewTrackChooser && !premiumReviewDocEditorOpen ? (
