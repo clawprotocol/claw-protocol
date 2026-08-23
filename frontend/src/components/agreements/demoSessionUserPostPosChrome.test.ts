@@ -319,9 +319,9 @@ describe("demoSessionUserPostPosChrome", () => {
       expect(hasDemoSessionUser()).toBe(true);
       expect(hasPaidPremiumCompletionSession()).toBe(true);
 
-      // The CTA should be "Continue" for complete signers, not "Continue to signature links"
+      // The CTA should be "Continue" for complete signers
       const isDemoPostPOS = hasDemoSessionUser() && hasPaidPremiumCompletionSession();
-      const expectedCtaLabel = isDemoPostPOS ? "Continue" : "Continue to signature links";
+      const expectedCtaLabel = isDemoPostPOS ? "Continue" : "Continue";
       expect(expectedCtaLabel).toBe("Continue");
     });
 
@@ -339,18 +339,18 @@ describe("demoSessionUserPostPosChrome", () => {
         ? signerDetailsComplete
           ? "Continue"
           : "Complete signer details"
-        : "Continue to signature links";
+        : "Continue";
       expect(expectedCtaLabel).toBe("Complete signer details");
     });
 
-    it("non-demo dashboard resume uses 'Continue to signature links'", () => {
+    it("non-demo dashboard resume uses 'Continue'", () => {
       // Non-demo user (no demo session)
       expect(hasDemoSessionUser()).toBe(false);
 
-      // Dashboard resume would show "Continue to signature links"
+      // Dashboard resume would show "Continue"
       const isDemoPostPOS = hasDemoSessionUser() && hasPaidPremiumCompletionSession();
-      const expectedCtaLabel = isDemoPostPOS ? "Continue" : "Continue to signature links";
-      expect(expectedCtaLabel).toBe("Continue to signature links");
+      const expectedCtaLabel = isDemoPostPOS ? "Continue" : "Continue";
+      expect(expectedCtaLabel).toBe("Continue");
     });
   });
 });

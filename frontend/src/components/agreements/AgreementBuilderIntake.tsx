@@ -25634,7 +25634,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       ""
     ).trim();
     // Patch 5B: never treat local SoT alone as review-rendered authority — but post-finalize
-    // signing snapshot (Continue to signature links) is authoritative without GET.
+    // signing snapshot (Continue) is authoritative without GET.
     if (
       (premiumCheckoutCompleted || paidProFirstReviewDisplayActive || premiumPaidDocumentSurface) &&
       !hasVerifiedCommercialDisplayCorpus(agreementIdForDisplay) &&
@@ -26824,7 +26824,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       : 0;
     logSimpleProFinalReviewMounted({
       // Prefer finalized signer display length — never let a longer pre-signer SoT
-      // inflate bodyLen after Continue to signature links.
+      // inflate bodyLen after Continue.
       bodyLen:
         postFinalizeDisplayLen >= PAID_PRO_AUTHORITY_MIN_LEN
           ? postFinalizeDisplayLen
