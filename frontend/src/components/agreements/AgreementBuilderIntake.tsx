@@ -35957,6 +35957,23 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                             guidedPacketSendBlocked ||
                                             reviewFirstHandoffBusy
                                           }
+                                          sendDisabledReason={
+                                            guidedFinalizeModalActive
+                                              ? "Finalizing agreement…"
+                                              : simpleProFinalReviewCorpus.corpusBlocked
+                                                ? "Agreement corpus unavailable. Go back and restore the agreement."
+                                                : (isGenerating && !draft)
+                                                  ? "Agreement is still generating…"
+                                                  : upgradeLockActive
+                                                    ? "Agreement upgrade in progress…"
+                                                    : loading
+                                                      ? "Saving agreement…"
+                                                      : guidedPacketSendBlocked
+                                                        ? "Agreement changed after links were created. Create new links for this version."
+                                                        : reviewFirstHandoffBusy
+                                                          ? "Creating review links…"
+                                                          : null
+                                          }
                                         />
                                         {showPaidProForcedFirstReviewTrackChooser && !premiumReviewDocEditorOpen ? (
                                           <PaidProForcedFirstReviewChrome

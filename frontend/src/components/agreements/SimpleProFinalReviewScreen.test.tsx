@@ -1,4 +1,5 @@
 /** @vitest-environment jsdom */
+import React from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { REVIEW_FIRST_SIGNING_TOKEN_SECRET_USER_MESSAGE } from "../../launch/simpleProduct/reviewFirstSendSurface";
@@ -449,6 +450,92 @@ describe("SimpleProFinalReviewScreen", () => {
     );
     fireEvent.click(screen.getByTestId("simple-pro-review-first-retry"));
     expect(onRetry).toHaveBeenCalledTimes(1);
+    cleanup();
+  });
+
+  it("shows sendDisabledReason when signers are ready but buttons are disabled", () => {
+    render(
+      <SimpleProFinalReviewScreen
+        agreementHtml="<p>Body</p>"
+        canonicalPaidProReview
+        paidReviewPlain={`PRO AGREEMENT body. ${"Substantive clause. ".repeat(600)}`}
+        signersReady
+        signerMetadataFinalized
+        sendDisabled
+        sendDisabledReason="Saving agreement…"
+        onSendForSignature={vi.fn()}
+        onSendForReview={vi.fn()}
+        onCopyAgreement={vi.fn()}
+        onExportAgreement={vi.fn()}
+      />,
+    );
+    const reasonNote = screen.getByTestId("simple-pro-send-disabled-reason");
+    expect(reasonNote.textContent).toBe("Saving agreement…");
+    const signBtn = screen.getByTestId("simple-pro-send-for-signature") as HTMLButtonElement;
+    expect(signBtn.disabled).toBe(true);
+    cleanup();
+  });
+
+  it("does not show sendDisabledReason when buttons are enabled", () => {
+    render(
+      <SimpleProFinalReviewScreen
+        agreementHtml="<p>Body</p>"
+        canonicalPaidProReview
+        paidReviewPlain={`PRO AGREEMENT body. ${"Substantive clause. ".repeat(600)}`}
+        signersReady
+        signerMetadataFinalized
+        sendDisabled={false}
+        sendDisabledReason="Saving agreement…"
+        onSendForSignature={vi.fn()}
+        onSendForReview={vi.fn()}
+        onCopyAgreement={vi.fn()}
+        onExportAgreement={vi.fn()}
+      />,
+    );
+    expect(screen.queryByTestId("simple-pro-send-disabled-reason")).toBeNull();
+    const signBtn = screen.getByTestId("simple-pro-send-for-signature") as HTMLButtonElement;
+    expect(signBtn.disabled).toBe(false);
+    cleanup();
+  });
+
+  it("does not show sendDisabledReason when signers are not ready", () => {
+    render(
+      <SimpleProFinalReviewScreen
+        agreementHtml="<p>Body</p>"
+        canonicalPaidProReview
+        paidReviewPlain={`PRO AGREEMENT body. ${"Substantive clause. ".repeat(600)}`}
+        signersReady={false}
+        sendDisabled
+        sendDisabledReason="Saving agreement…"
+        onSendForSignature={vi.fn()}
+        onSendForReview={vi.fn()}
+        onCopyAgreement={vi.fn()}
+        onExportAgreement={vi.fn()}
+      />,
+    );
+    expect(screen.queryByTestId("simple-pro-send-disabled-reason")).toBeNull();
+    cleanup();
+  });
+
+  it("enables both send buttons when signers are ready and sendDisabled is false", () => {
+    render(
+      <SimpleProFinalReviewScreen
+        agreementHtml="<p>Body</p>"
+        canonicalPaidProReview
+        paidReviewPlain={`PRO AGREEMENT body. ${"Substantive clause. ".repeat(600)}`}
+        signersReady
+        signerMetadataFinalized
+        sendDisabled={false}
+        onSendForSignature={vi.fn()}
+        onSendForReview={vi.fn()}
+        onCopyAgreement={vi.fn()}
+        onExportAgreement={vi.fn()}
+      />,
+    );
+    const signBtn = screen.getByTestId("simple-pro-send-for-signature") as HTMLButtonElement;
+    const reviewBtn = screen.getByTestId("simple-pro-send-for-review") as HTMLButtonElement;
+    expect(signBtn.disabled).toBe(false);
+    expect(reviewBtn.disabled).toBe(false);
     cleanup();
   });
 });
