@@ -158,31 +158,63 @@ function hasCorruptedOutput(body: string): boolean {
 }
 
 /**
+ * Clean up a party name by removing trailing filler words and context.
+ */
+function cleanPartyName(name: string): string {
+  let cleaned = name.trim();
+  // Remove trailing filler words
+  cleaned = cleaned.replace(/\s+(?:is|are|will|shall|has|have|was|were|for|from|to|at|in|on|by|of)\s*$/i, "");
+  // Remove trailing context phrases
+  cleaned = cleaned.replace(/\s+(?:for\s+(?:a|an|the)\s+.*)$/i, "");
+  cleaned = cleaned.replace(/\s+(?:from\s+.*)$/i, "");
+  return cleaned.trim();
+}
+
+/**
  * Extract named parties from intake text (common patterns).
  */
 function extractNamedPartiesFromIntake(intake: string): string[] {
   const names: string[] = [];
   
-  // Pattern: "Name of Company hires/hiring Name"
-  const hiresMatch = intake.match(
-    /\b([A-Z][a-zA-Z\s]+(?:\s+(?:LLC|Inc\.?|Corp\.?|Studio|Company|Co\.?))?)\s+(?:of\s+[A-Za-z\s]+?)?\s*(?:is\s+)?(?:hires?|hiring)\s+([A-Z][a-zA-Z\s]+)/i
+  // Pattern: "Name of Company is hiring Name from Company"
+  // Capture: "Priya Shah of Northline Studio" + "Diego Alvarez" (stop at "from")
+  const hiresWithFromMatch = intake.match(
+    /\b([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)*(?:\s+of\s+[A-Z][a-zA-Z\s]+(?:LLC|Inc\.?|Corp\.?|Studio|Company|Co\.?))?)\s+(?:is\s+)?(?:hires?|hiring)\s+([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)*)\s+(?:from|of)\s+([A-Z][a-zA-Z\s]+(?:LLC|Inc\.?|Corp\.?|Studio|Company|Co\.?)?)/i
   );
-  if (hiresMatch) {
-    const p1 = hiresMatch[1].trim().replace(/\s+of\s*$/i, "");
-    const p2 = hiresMatch[2].trim();
+  if (hiresWithFromMatch) {
+    const p1 = cleanPartyName(hiresWithFromMatch[1]);
+    const personName = cleanPartyName(hiresWithFromMatch[2]);
+    const companyName = cleanPartyName(hiresWithFromMatch[3]);
+    // Combine person + company for party 2
+    const p2 = companyName ? `${personName} of ${companyName}` : personName;
     if (p1 && !isHollowPartyName(p1)) names.push(p1);
     if (p2 && !isHollowPartyName(p2)) names.push(p2);
   }
   
+  // Pattern: "Name of Company hires/hiring Name" (simpler, no "from")
+  if (names.length === 0) {
+    const hiresMatch = intake.match(
+      /\b([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)*(?:\s+of\s+[A-Z][a-zA-Z\s]+(?:LLC|Inc\.?|Corp\.?|Studio|Company|Co\.?))?)\s+(?:is\s+)?(?:hires?|hiring)\s+([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)*)/i
+    );
+    if (hiresMatch) {
+      const p1 = cleanPartyName(hiresMatch[1]);
+      const p2 = cleanPartyName(hiresMatch[2]);
+      if (p1 && !isHollowPartyName(p1)) names.push(p1);
+      if (p2 && !isHollowPartyName(p2)) names.push(p2);
+    }
+  }
+  
   // Pattern: "between A and B"
-  const betweenMatch = intake.match(
-    /\bbetween\s+([A-Z][a-zA-Z\s]+(?:\s+(?:LLC|Inc\.?|Corp\.?|Studio|Company|Co\.?))?)\s+and\s+([A-Z][a-zA-Z\s]+)/i
-  );
-  if (betweenMatch && names.length === 0) {
-    const p1 = betweenMatch[1].trim();
-    const p2 = betweenMatch[2].trim();
-    if (p1 && !isHollowPartyName(p1)) names.push(p1);
-    if (p2 && !isHollowPartyName(p2)) names.push(p2);
+  if (names.length === 0) {
+    const betweenMatch = intake.match(
+      /\bbetween\s+([A-Z][a-zA-Z\s]+(?:LLC|Inc\.?|Corp\.?|Studio|Company|Co\.?)?)\s+and\s+([A-Z][a-zA-Z\s]+(?:LLC|Inc\.?|Corp\.?|Studio|Company|Co\.?)?)/i
+    );
+    if (betweenMatch) {
+      const p1 = cleanPartyName(betweenMatch[1]);
+      const p2 = cleanPartyName(betweenMatch[2]);
+      if (p1 && !isHollowPartyName(p1)) names.push(p1);
+      if (p2 && !isHollowPartyName(p2)) names.push(p2);
+    }
   }
   
   // Pattern: "my friend/colleague Name"
@@ -190,7 +222,7 @@ function extractNamedPartiesFromIntake(intake: string): string[] {
     /\bmy\s+(?:friend|colleague|neighbor|partner|associate)\s+([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)*)/i
   );
   if (friendMatch) {
-    const name = friendMatch[1].trim();
+    const name = cleanPartyName(friendMatch[1]);
     if (name && !isHollowPartyName(name) && !names.includes(name)) {
       names.push(name);
     }
@@ -201,7 +233,7 @@ function extractNamedPartiesFromIntake(intake: string): string[] {
     /\b([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)*)\s+is\s+the\s+(?:client|designer|provider|contractor|consultant)/gi
   );
   for (const match of roleMatch) {
-    const name = match[1].trim();
+    const name = cleanPartyName(match[1]);
     if (name && !isHollowPartyName(name) && !names.includes(name)) {
       names.push(name);
     }
@@ -348,6 +380,235 @@ export function getFreeOnePagerFallbackForProFailure(
     return text;
   }
   return "";
+}
+
+/**
+ * Extract payment amount from intake text.
+ */
+function extractPaymentFromIntake(intake: string): string | null {
+  const dollarMatch = intake.match(/\$[\d,]+(?:\.\d{2})?(?:\s*(?:\/|\s+per\s+)?\s*(?:month|year|week|day|hour|project|milestone))?/i);
+  if (dollarMatch) return dollarMatch[0].trim();
+  
+  const numericMatch = intake.match(/(\d{1,3}(?:,\d{3})*(?:\.\d{2})?)\s*(?:dollars?|usd)/i);
+  if (numericMatch) return `$${numericMatch[1]}`;
+  
+  return null;
+}
+
+/**
+ * Extract duration/term from intake text.
+ */
+function extractTermFromIntake(intake: string): string | null {
+  const termMatch = intake.match(/\b(\d+)\s*(day|week|month|year)s?\b/i);
+  if (termMatch) return `${termMatch[1]} ${termMatch[2]}${parseInt(termMatch[1]) !== 1 ? 's' : ''}`;
+  
+  const dateMatch = intake.match(/(?:starting|beginning|from|through|until)\s+([A-Za-z]+\s+\d{1,2},?\s*\d{4})/i);
+  if (dateMatch) return `Starting ${dateMatch[1]}`;
+  
+  return null;
+}
+
+/**
+ * Extract service description/purpose from intake text.
+ */
+function extractPurposeFromIntake(intake: string): string {
+  const forMatch = intake.match(/\bfor\s+(.{10,100}?)(?:\.|,\s+(?:at|for|with|in)|$)/i);
+  if (forMatch) return forMatch[1].trim();
+  
+  const willMatch = intake.match(/\bwill\s+(?:provide|perform|deliver|create|build|design|develop)\s+(.{10,80}?)(?:\.|,|$)/i);
+  if (willMatch) return willMatch[1].trim();
+  
+  const needMatch = intake.match(/\bneed(?:s?|ing)?\s+(.{10,80}?)(?:\.|,|$)/i);
+  if (needMatch) return needMatch[1].trim();
+  
+  return "services as described in the parties' communications";
+}
+
+const MIN_REBUILT_BODY_LEN = 200;
+
+/**
+ * Check if a purpose/text is corrupted (contains known bad AI output patterns).
+ */
+function isCorruptedPurpose(purpose: string | null | undefined): boolean {
+  if (!purpose) return false;
+  const text = purpose.trim();
+  return CORRUPTED_OUTPUT_PATTERNS.some(p => p.test(text));
+}
+
+/**
+ * Rebuild a valid ≥200 character body from intake when all other fallbacks are hollow.
+ * This is the last resort before showing an empty card after paid checkout.
+ * 
+ * UNIVERSAL RULE: Never returns Party A/B, Client/Service_provider, or role-only placeholders
+ * as the paid landing. If names cannot be parsed, use the visitor's intake sentences as the body.
+ */
+export function rebuildBodyFromIntakeForProFailure(
+  intake: string,
+  draft: ParsedDraftShape | null,
+): string {
+  const intakeText = (intake || "").trim();
+  if (intakeText.length < 20) return "";
+  
+  const namedParties = extractNamedPartiesFromIntake(intakeText);
+  const draftParties = draft?.parties ?? [];
+  
+  // Resolve party names - prefer extracted names, then draft parties, but NEVER hollow/generic names
+  const party1 = namedParties[0] 
+    || (draftParties[0]?.name && !isHollowPartyName(draftParties[0].name) ? draftParties[0].name : null);
+  const party2 = namedParties[1]
+    || (draftParties[1]?.name && !isHollowPartyName(draftParties[1].name) ? draftParties[1].name : null);
+  
+  // If we couldn't extract or find any real party names, use intake-sentence-based body instead
+  // NEVER emit Party A/B or Client/Service_provider as the paid landing
+  if (!party1 && !party2) {
+    return buildIntakeSentencesBody(intakeText, draft);
+  }
+  
+  const role1 = draftParties[0]?.role || "Client";
+  const role2 = draftParties[1]?.role || "Service Provider";
+  
+  const jurisdiction = extractJurisdictionFromIntake(intakeText) || draft?.jurisdiction || null;
+  const payment = extractPaymentFromIntake(intakeText) || draft?.payment_terms || null;
+  const term = extractTermFromIntake(intakeText) || draft?.duration || null;
+  
+  // Use draft purpose ONLY if it's not corrupted; otherwise extract from intake
+  const draftPurpose = draft?.purpose && !isCorruptedPurpose(draft.purpose) ? draft.purpose : null;
+  const purpose = draftPurpose || extractPurposeFromIntake(intakeText);
+  
+  const title = draft?.title || "SERVICES AGREEMENT";
+  
+  // Use "the first party" / "the second party" as fallback if only one name is available
+  const party1Display = party1 || "the first party";
+  const party2Display = party2 || "the second party";
+  
+  const lines: string[] = [
+    title.toUpperCase(),
+    "",
+    `This Agreement ("Agreement") is entered into by and between:`,
+    "",
+    `${party1Display}${party1 ? ` ("${role1}")` : ""}`,
+    "and",
+    `${party2Display}${party2 ? ` ("${role2}")` : ""}`,
+    "",
+    `(collectively, the "Parties").`,
+    "",
+    "1. SERVICES",
+  ];
+  
+  if (purpose) {
+    lines.push(`The service provider agrees to provide ${purpose}.`);
+  } else {
+    lines.push("The service provider agrees to provide services as described in the parties' communications.");
+  }
+  lines.push("");
+  
+  lines.push("2. PAYMENT TERMS");
+  if (payment) {
+    lines.push(`Payment of ${payment} for services rendered under this Agreement.`);
+  } else {
+    lines.push("Payment as agreed by the Parties for services rendered under this Agreement.");
+  }
+  lines.push("");
+  
+  lines.push("3. TERM");
+  if (term) {
+    lines.push(`This Agreement shall continue for ${term} unless earlier terminated by either Party with written notice.`);
+  } else {
+    lines.push("This Agreement shall continue until the services are completed or terminated by either Party with written notice.");
+  }
+  lines.push("");
+  
+  lines.push("4. GOVERNING LAW");
+  if (jurisdiction) {
+    const formattedJurisdiction = jurisdiction.split(" ").map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
+    lines.push(`This Agreement shall be governed by and construed in accordance with the laws of the State of ${formattedJurisdiction}.`);
+  } else {
+    lines.push("This Agreement shall be governed by the laws of the state where the services are primarily performed.");
+  }
+  lines.push("");
+  
+  lines.push("5. ENTIRE AGREEMENT");
+  lines.push("This Agreement constitutes the entire agreement between the Parties and supersedes all prior negotiations, representations, or agreements relating to this subject matter.");
+  lines.push("");
+  
+  lines.push("IN WITNESS WHEREOF, the Parties have executed this Agreement.");
+  lines.push("");
+  lines.push("___________________________");
+  lines.push(party1Display);
+  lines.push("");
+  lines.push("___________________________");
+  lines.push(party2Display);
+  
+  const body = lines.join("\n");
+  
+  if (body.length < MIN_REBUILT_BODY_LEN) {
+    return "";
+  }
+  
+  return body;
+}
+
+/**
+ * Build a body directly from intake sentences when we can't extract party names.
+ * This uses the visitor's own words as the agreement body rather than placeholder names.
+ */
+function buildIntakeSentencesBody(intakeText: string, draft: ParsedDraftShape | null): string {
+  const title = draft?.title || "SERVICES AGREEMENT";
+  const jurisdiction = extractJurisdictionFromIntake(intakeText) || draft?.jurisdiction || null;
+  const payment = extractPaymentFromIntake(intakeText) || draft?.payment_terms || null;
+  
+  // Clean up intake text - split into sentences and preserve meaningful content
+  const cleanedIntake = intakeText
+    .replace(/\n+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  
+  const lines: string[] = [
+    title.toUpperCase(),
+    "",
+    "AGREEMENT SUMMARY",
+    "",
+    "Based on the parties' communications:",
+    "",
+    cleanedIntake,
+    "",
+  ];
+  
+  if (payment) {
+    lines.push("PAYMENT TERMS");
+    lines.push(`Payment: ${payment}`);
+    lines.push("");
+  }
+  
+  if (jurisdiction) {
+    lines.push("GOVERNING LAW");
+    const formattedJurisdiction = jurisdiction.split(" ").map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
+    lines.push(`This Agreement shall be governed by the laws of ${formattedJurisdiction}.`);
+    lines.push("");
+  }
+  
+  lines.push("---");
+  lines.push("This document summarizes the agreement between the parties. Please review and confirm the details are accurate before signing.");
+  
+  const body = lines.join("\n");
+  
+  if (body.length < MIN_REBUILT_BODY_LEN) {
+    return "";
+  }
+  
+  return body;
+}
+
+/**
+ * Check if a body is non-hollow and ≥200 characters.
+ * Used to validate fallback bodies before displaying after paid checkout.
+ */
+export function isNonHollowBody(body: string, intake?: string | null): boolean {
+  const text = (body || "").trim();
+  if (text.length < MIN_REBUILT_BODY_LEN) return false;
+  
+  const hollowGate = evaluateSimpleHollowBodyGate(text, null, { intake: intake || null });
+  return !hollowGate.isHollow;
 }
 
 export type HollowBodyTenet = "parties" | "payment" | "term" | "governing_law";
