@@ -1631,11 +1631,12 @@ import {
   type FreeReviewSurfaceSource,
 } from "./freeStreamlineDraftReview";
 import {
+  evaluateHollowBodyGate,
+  evaluateSimpleHollowBodyGate,
   getFreeOnePagerFallbackForProFailure,
+  logHollowBodyGate,
   resolveFreeStarterReviewBody,
   shouldRedirectFreeToProForValidation,
-  evaluateHollowBodyGate,
-  logHollowBodyGate,
   type HollowBodyGateResult,
 } from "./freeStarterReviewBodyResolver";
 import {
@@ -12265,6 +12266,32 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         setUpgradeIntentDetected(true);
         syncUpgradeIntentRefs(true);
         return;
+      }
+      
+      // Frontend hollow body gate — even if backend validation passed, check if body is hollow
+      // This catches edge cases like "Can" scraped as party name from "Can someone watch my dog?"
+      if (currentDraft) {
+        const hollowGate = evaluateSimpleHollowBodyGate(
+          currentDraft.free_document_text ?? "",
+          currentDraft.parties ?? null,
+        );
+        if (hollowGate.isHollow) {
+          // eslint-disable-next-line no-console
+          console.info("[hollow-body-gate-blocked] redirecting to Pro", {
+            reason: hollowGate.reason,
+            source: opts.source,
+            freeDocLen: (currentDraft.free_document_text ?? "").length,
+          });
+          setCreateFlowPhase("draft_ready_for_review");
+          setCreateUiStage(CreateUiStage.DRAFT);
+          setDisplayPhase("review");
+          setDraftNowCommitted(true);
+          setMobileWorkspacePane("preview");
+          setPreviewPaneRevealed(true);
+          setUpgradeIntentDetected(true);
+          syncUpgradeIntentRefs(true);
+          return;
+        }
       }
       
       resetStalePaidReviewShellForFreeStarter(opts.source);

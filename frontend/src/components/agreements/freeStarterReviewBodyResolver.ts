@@ -47,8 +47,144 @@ export type FreeStarterRenderSource =
 export function shouldRedirectFreeToProForValidation(validation: string | null | undefined): boolean {
   const v = (validation ?? "").trim();
   if (!v || v === "ok") return false;
-  // Redirect for all failure cases: missing_parties, missing_tenets, incomplete_sentences, generation_failed
+  // Redirect for all failure cases: missing_parties, missing_tenets, incomplete_sentences, generation_failed, hollow_body
   return true;
+}
+
+/**
+ * Role-only placeholder names that are NOT real legal parties.
+ * These should never appear as the actual party name in a painted free page.
+ */
+const HOLLOW_PARTY_NAMES = new Set([
+  "client", "service provider", "serviceprovider", "service_provider",
+  "contractor", "vendor", "provider", "consultant", "freelancer",
+  "buyer", "seller", "lessor", "lessee", "landlord", "tenant",
+  "employer", "employee", "hirer", "worker", "agency", "agent",
+  "licensor", "licensee", "franchisor", "franchisee",
+  "party", "parties", "party a", "party b", "party 1", "party 2",
+  "first party", "second party", "the party", "the parties",
+  "person", "company", "business", "entity", "organization", "org",
+  "individual", "corporation", "firm",
+]);
+
+/**
+ * Question-opener words that get scraped as party names from thin dumps like
+ * "Can someone watch my dog?" -> "Can" becomes the party name.
+ */
+const SCRAPED_QUESTION_WORDS = new Set([
+  "can", "need", "looking", "please", "someone", "anyone", "help",
+  "want", "would", "could", "should", "will", "does", "has", "have",
+  "who", "what", "where", "when", "how", "why", "which",
+  "hi", "hello", "hey", "thanks", "thank", "i", "we", "my", "our",
+  "the", "a", "an", "this", "that", "it", "is", "are", "was", "were",
+]);
+
+/**
+ * Returns true if a party name is hollow (role placeholder or scraped question word).
+ */
+export function isHollowPartyName(name: string | null | undefined): boolean {
+  if (!name) return true;
+  const normalized = name.trim().toLowerCase().replace(/_/g, " ").replace(/-/g, " ");
+  if (!normalized) return true;
+  if (HOLLOW_PARTY_NAMES.has(normalized)) return true;
+  if (SCRAPED_QUESTION_WORDS.has(normalized)) return true;
+  // Single short word is suspicious
+  if (normalized.length <= 3 && /^[a-z]+$/i.test(normalized)) return true;
+  return false;
+}
+
+/**
+ * Detects hollow/empty section patterns in free document body.
+ * Returns true if Payment Terms or Governing Law sections exist but have no content.
+ */
+function hasHollowSections(body: string): boolean {
+  const lines = body.split("\n");
+  const sectionHeadings = ["payment terms", "governing law"];
+  
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim().toLowerCase();
+    const isSection = sectionHeadings.some(
+      h => line === h || line.match(new RegExp(`^\\d+\\.\\s*${h}\\s*$`))
+    );
+    
+    if (isSection) {
+      // Look at next few lines for content
+      let hasContent = false;
+      for (let j = i + 1; j < Math.min(i + 4, lines.length); j++) {
+        const nextLine = lines[j].trim();
+        if (!nextLine) continue;
+        // If next non-empty line is another section heading, this section is empty
+        if (/^\d+\.\s*\w/.test(nextLine)) break;
+        if (sectionHeadings.some(h => nextLine.toLowerCase().startsWith(h))) break;
+        // Check for placeholder content
+        const placeholders = [
+          /^to be agreed/i,
+          /^as stated in the agreement/i,
+          /^as agreed/i,
+          /^tbd/i,
+          /^n\/a/i,
+          /^none/i,
+          /^commercial arrangement to be agreed/i,
+          /^terms to be agreed/i,
+          /^termination terms to be agreed/i,
+        ];
+        if (placeholders.some(p => p.test(nextLine))) continue;
+        hasContent = true;
+        break;
+      }
+      if (!hasContent) return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * Simple frontend-side hollow body check for direct body/parties input.
+ * Used as belt-and-suspenders check in case backend validation passes but body is still hollow.
+ */
+export function evaluateSimpleHollowBodyGate(
+  body: string | null | undefined,
+  parties: { name: string; role: string }[] | null | undefined,
+): { isHollow: boolean; reason: string | null } {
+  const text = (body ?? "").trim();
+  if (!text || text.length < 200) {
+    return { isHollow: true, reason: "body_too_short" };
+  }
+  
+  // Check for role-only party names in the opening
+  const openingMatch = text.match(
+    /entered into by and between[:\s]*([^()\n]+?)\s*(?:\([^)]*\))?\s*and\s*([^()\n]+?)(?:\s*\([^)]*\))?(?:\s*\(collectively|\.|\n)/i
+  );
+  if (openingMatch) {
+    const p1 = openingMatch[1].trim().replace(/^["']|["']$/g, "");
+    const p2 = openingMatch[2].trim().replace(/^["']|["']$/g, "");
+    if (isHollowPartyName(p1) && isHollowPartyName(p2)) {
+      return { isHollow: true, reason: "role_only_parties_in_body" };
+    }
+  }
+  
+  // Check parties array from draft
+  if (parties && parties.length >= 2) {
+    const hollowCount = parties.filter(p => isHollowPartyName(p.name)).length;
+    if (hollowCount >= 2) {
+      return { isHollow: true, reason: "role_only_parties_in_draft" };
+    }
+  }
+  
+  // Check for hollow Payment/Law sections
+  if (hasHollowSections(text)) {
+    return { isHollow: true, reason: "hollow_sections" };
+  }
+  
+  // Check for missing payment amount AND missing governing law
+  const hasPaymentAmount = /\$[\d,]+/.test(text);
+  const hasGoverningLaw = /(texas|california|new york|delaware|florida|arizona|nevada|washington|illinois|colorado|georgia|north carolina|virginia|pennsylvania|ohio|michigan|massachusetts|tennessee)/i.test(text);
+  
+  if (!hasPaymentAmount && !hasGoverningLaw) {
+    return { isHollow: true, reason: "missing_payment_and_law" };
+  }
+  
+  return { isHollow: false, reason: null };
 }
 
 /**
@@ -124,6 +260,10 @@ export type ResolveFreeStarterReviewBodyResult = {
   protectedFactRepairCount: number;
   /** Validation result — when bodyValidation.valid is false, the body is hollow and should not be displayed. */
   bodyValidation: import("./freeStarterBodyValidation").FreeStarterBodyValidationResult | null;
+  /** When true, the body is hollow and should NOT paint on the free page. */
+  hollowBodyBlocked: boolean;
+  /** Reason why the hollow body gate blocked, or null if not blocked. */
+  hollowBodyReason: string | null;
 };
 
 function isTestMode(): boolean {
@@ -143,6 +283,20 @@ export function logFreeStarterRenderSource(payload: {
   if (isTestMode()) return;
   // eslint-disable-next-line no-console
   console.info("[free-starter-render-source]", payload);
+}
+
+export function logHollowBodyGate(payload: {
+  isHollow: boolean;
+  missingTenets: HollowBodyTenet[];
+  shouldAskQuestions: boolean;
+  shouldRedirectToPro: boolean;
+  reasons: string[];
+  bodyLen: number;
+  intakeLen: number;
+}): void {
+  if (isTestMode()) return;
+  // eslint-disable-next-line no-console
+  console.info("[hollow-body-gate]", payload);
 }
 
 export function logFreeStarterProtectedFactRepair(payload: {
@@ -393,7 +547,8 @@ export function resolveFreeStarterReviewBody(
       intake: rawIntakeResolved,
       draft,
     });
-
+    
+    // Run validation on the direct free document
     const draftInputForDirectValidation = draft
       ? {
           title: draft.title,
@@ -413,6 +568,9 @@ export function resolveFreeStarterReviewBody(
       draftInputForDirectValidation,
     );
     
+    // Simple hollow body gate (belt and suspenders) - catches role-only parties and empty sections
+    const simpleHollowGate = evaluateSimpleHollowBodyGate(normalized.text, draft?.parties ?? null);
+    
     return {
       body: normalized.text.trim(),
       source: "free_openai_direct",
@@ -424,6 +582,8 @@ export function resolveFreeStarterReviewBody(
       finalPaymentTerms: extractFreeStarterPaymentTermsLine(normalized.text),
       protectedFactRepairCount: 0,
       bodyValidation: directValidation,
+      hollowBodyBlocked: simpleHollowGate.isHollow,
+      hollowBodyReason: simpleHollowGate.reason,
     };
   }
 
@@ -487,25 +647,10 @@ export function resolveFreeStarterReviewBody(
     }
   }
 
-  const result: ResolveFreeStarterReviewBodyResult = {
-    body: body.trim(),
-    source,
-    rawIntakeResolved,
-    usedOriginalRaw: intakeMeta.usedOriginalRaw,
-    usedStorageRaw: intakeMeta.usedStorageRaw,
-    apiPaymentTerms,
-    repairedPaymentTerms,
-    finalPaymentTerms: extractFreeStarterPaymentTermsLine(body),
-    protectedFactRepairCount,
-    bodyValidation: null,
-  };
-
-  const normalized = normalizeFreeStarterSectionRender(result.body, {
+  const normalized = normalizeFreeStarterSectionRender(body.trim(), {
     intake: rawIntakeResolved,
     draft,
   });
-  result.body = normalized.text;
-  result.finalPaymentTerms = extractFreeStarterPaymentTermsLine(result.body);
 
   const draftInput = draft
     ? {
@@ -520,16 +665,33 @@ export function resolveFreeStarterReviewBody(
         payment: draft.payment ? { amount: draft.payment.amount } : null,
       }
     : null;
-  const validation = validateFreeStarterGeneratedBody(result.body, rawIntakeResolved, draftInput);
-  result.bodyValidation = validation;
+  const validation = validateFreeStarterGeneratedBody(normalized.text, rawIntakeResolved, draftInput);
 
   logFreeStarterBodyValidation({
     stage: "resolve_free_starter_body",
     valid: validation.valid,
     reasons: validation.reasons,
     intakeTenets: validation.intakeScore,
-    bodyLen: result.body.length,
+    bodyLen: normalized.text.length,
   });
+
+  // Simple hollow body gate (belt and suspenders) - catches role-only parties and empty sections
+  const simpleHollowGate = evaluateSimpleHollowBodyGate(normalized.text, draft?.parties ?? null);
+
+  const result: ResolveFreeStarterReviewBodyResult = {
+    body: normalized.text,
+    source,
+    rawIntakeResolved,
+    usedOriginalRaw: intakeMeta.usedOriginalRaw,
+    usedStorageRaw: intakeMeta.usedStorageRaw,
+    apiPaymentTerms,
+    repairedPaymentTerms,
+    finalPaymentTerms: extractFreeStarterPaymentTermsLine(normalized.text),
+    protectedFactRepairCount,
+    bodyValidation: validation,
+    hollowBodyBlocked: simpleHollowGate.isHollow,
+    hollowBodyReason: simpleHollowGate.reason,
+  };
 
   logFreeStarterRenderSource({
     source: result.source,
@@ -561,75 +723,54 @@ export function evaluateHollowBodyGate(
   const validation = resolveResult.bodyValidation;
 
   if (!validation || validation.valid) {
-    return {
-      isHollow: false,
-      missingTenets: [],
-      shouldAskQuestions: false,
-      shouldRedirectToPro: false,
-      reasons: [],
-    };
+    // Also check simple hollow gate
+    if (!resolveResult.hollowBodyBlocked) {
+      return {
+        isHollow: false,
+        missingTenets: [],
+        shouldAskQuestions: false,
+        shouldRedirectToPro: false,
+        reasons: [],
+      };
+    }
   }
 
   const missingTenets: HollowBodyTenet[] = [];
+  const reasons: string[] = [];
 
-  if (validation.rolePlaceholderParties || validation.missingNamedParties.length > 0) {
-    missingTenets.push("parties");
-  }
+  if (validation) {
+    if (validation.rolePlaceholderParties || validation.missingNamedParties.length > 0) {
+      missingTenets.push("parties");
+    }
 
-  for (const hollow of validation.hollowSections) {
-    if (hollow.includes("payment") && !missingTenets.includes("payment")) {
-      missingTenets.push("payment");
+    for (const hollow of validation.hollowSections) {
+      if (hollow.includes("payment") && !missingTenets.includes("payment")) {
+        missingTenets.push("payment");
+      }
+      if (hollow.includes("term") && !missingTenets.includes("term")) {
+        missingTenets.push("term");
+      }
+      if (hollow.includes("governing") && !missingTenets.includes("governing_law")) {
+        missingTenets.push("governing_law");
+      }
     }
-    if (hollow.includes("term") && !missingTenets.includes("term")) {
-      missingTenets.push("term");
-    }
-    if (hollow.includes("governing_law") && !missingTenets.includes("governing_law")) {
-      missingTenets.push("governing_law");
-    }
-  }
 
-  if (!validation.intakeScore.parties && !missingTenets.includes("parties")) {
-    missingTenets.push("parties");
-  }
-  if (!validation.intakeScore.payment && !missingTenets.includes("payment")) {
-    if (validation.hollowSections.some((h) => h.includes("payment"))) {
-      missingTenets.push("payment");
-    }
-  }
-  if (!validation.intakeScore.term && !missingTenets.includes("term")) {
-    if (validation.hollowSections.some((h) => h.includes("term"))) {
-      missingTenets.push("term");
-    }
-  }
-  if (!validation.intakeScore.governingLaw && !missingTenets.includes("governing_law")) {
-    if (validation.hollowSections.some((h) => h.includes("governing_law"))) {
-      missingTenets.push("governing_law");
-    }
+    reasons.push(...validation.reasons);
   }
 
-  const issueCount = missingTenets.length;
-  const shouldRedirectToPro = issueCount >= 4;
-  const shouldAskQuestions = !shouldRedirectToPro && issueCount > 0;
+  // Also add reasons from simple hollow gate if present
+  if (resolveResult.hollowBodyReason && !reasons.includes(resolveResult.hollowBodyReason)) {
+    reasons.push(resolveResult.hollowBodyReason);
+  }
+
+  const shouldAskQuestions = missingTenets.length >= 1 && missingTenets.length <= 3;
+  const shouldRedirectToPro = missingTenets.length >= 4 || reasons.length >= 4;
 
   return {
     isHollow: true,
     missingTenets,
     shouldAskQuestions,
     shouldRedirectToPro,
-    reasons: validation.reasons,
+    reasons,
   };
-}
-
-export function logHollowBodyGate(payload: {
-  isHollow: boolean;
-  missingTenets: HollowBodyTenet[];
-  shouldAskQuestions: boolean;
-  shouldRedirectToPro: boolean;
-  reasons: string[];
-  bodyLen: number;
-  intakeLen: number;
-}): void {
-  if (isTestMode()) return;
-  // eslint-disable-next-line no-console
-  console.info("[free-starter-hollow-body-gate]", payload);
 }

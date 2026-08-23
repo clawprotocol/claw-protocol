@@ -6,11 +6,18 @@
  *   the resolver paints that body directly instead of building from structured fields.
  * - Verifies validation failure detection and Pro redirect recommendation.
  * - Verifies that visitor words (names, price, term, law) are preserved.
+ * 
+ * Also includes hollow body gate tests for thin dumps like:
+ * - "Can someone watch my dog Saturday?" (scraped "Can" as party name)
+ * - Role-only parties (Client + Service_provider)
+ * - Empty Payment/Law sections
  */
 import { describe, expect, it } from "vitest";
 import {
+  evaluateSimpleHollowBodyGate,
   getFreeOnePagerFallbackForProFailure,
   isFreeOnePagerValid,
+  isHollowPartyName,
   resolveFreeStarterReviewBody,
   shouldRedirectFreeToProForValidation,
 } from "./freeStarterReviewBodyResolver";
@@ -92,6 +99,10 @@ describe("free one-pager validation", () => {
     expect(shouldRedirectFreeToProForValidation(null)).toBe(false);
     expect(shouldRedirectFreeToProForValidation(undefined)).toBe(false);
     expect(shouldRedirectFreeToProForValidation("")).toBe(false);
+  });
+
+  it("shouldRedirectFreeToProForValidation returns true for 'hollow_body'", () => {
+    expect(shouldRedirectFreeToProForValidation("hollow_body")).toBe(true);
   });
 
   it("isFreeOnePagerValid returns true for valid doc + ok validation", () => {
@@ -255,6 +266,234 @@ describe("Maya/Diego regression test", () => {
     expect(result.body).not.toMatch(/covers due\. Work\./i);
     expect(result.body).not.toMatch(/Party A/i);
     expect(result.body).not.toMatch(/Party B/i);
+  });
+});
+
+describe("isHollowPartyName", () => {
+  it("returns true for role placeholders", () => {
+    expect(isHollowPartyName("Client")).toBe(true);
+    expect(isHollowPartyName("Service_provider")).toBe(true);
+    expect(isHollowPartyName("Service Provider")).toBe(true);
+    expect(isHollowPartyName("Contractor")).toBe(true);
+    expect(isHollowPartyName("Vendor")).toBe(true);
+    expect(isHollowPartyName("Party")).toBe(true);
+    expect(isHollowPartyName("Party A")).toBe(true);
+    expect(isHollowPartyName("Party B")).toBe(true);
+  });
+
+  it("returns true for scraped question words", () => {
+    expect(isHollowPartyName("Can")).toBe(true);
+    expect(isHollowPartyName("Need")).toBe(true);
+    expect(isHollowPartyName("Looking")).toBe(true);
+    expect(isHollowPartyName("Please")).toBe(true);
+    expect(isHollowPartyName("Someone")).toBe(true);
+    expect(isHollowPartyName("Anyone")).toBe(true);
+    expect(isHollowPartyName("Help")).toBe(true);
+  });
+
+  it("returns true for very short words", () => {
+    expect(isHollowPartyName("Jo")).toBe(true);
+    expect(isHollowPartyName("Me")).toBe(true);
+    expect(isHollowPartyName("A")).toBe(true);
+  });
+
+  it("returns false for real names", () => {
+    expect(isHollowPartyName("Maya Chen")).toBe(false);
+    expect(isHollowPartyName("Diego Alvarez")).toBe(false);
+    expect(isHollowPartyName("Harbor Marks LLC")).toBe(false);
+    expect(isHollowPartyName("Northline Studio")).toBe(false);
+    expect(isHollowPartyName("Acme Corp")).toBe(false);
+    expect(isHollowPartyName("John Smith")).toBe(false);
+  });
+
+  it("returns false for company names", () => {
+    expect(isHollowPartyName("Apple Inc")).toBe(false);
+    expect(isHollowPartyName("Google LLC")).toBe(false);
+    expect(isHollowPartyName("Smith & Associates")).toBe(false);
+  });
+});
+
+// The hollow body from the dog dump: "Can someone watch my dog Saturday?"
+const DOG_DUMP_HOLLOW_BODY = `BUSINESS AGREEMENT
+
+This Agreement ("Agreement") is entered into by and between:
+Client ("Client") and Can ("Service_provider") (collectively, the "Parties").
+
+1. Scope of Services / Purpose
+Commercial arrangement to be agreed between the parties.
+
+2. Payment Terms
+
+3. Term and Effective Date
+Term: As stated in the agreement.
+Effective Date: Upon full execution by the parties unless otherwise specified.
+
+4. Governing Law
+
+5. Termination
+Termination terms to be agreed by the Parties.`;
+
+describe("evaluateSimpleHollowBodyGate", () => {
+  it("blocks the dog dump hollow body (Client + Can, empty Payment/Law)", () => {
+    const result = evaluateSimpleHollowBodyGate(DOG_DUMP_HOLLOW_BODY, [
+      { name: "Client", role: "client" },
+      { name: "Can", role: "service_provider" },
+    ]);
+    expect(result.isHollow).toBe(true);
+    expect(result.reason).toBeTruthy();
+  });
+
+  it("blocks bodies with role-only parties in draft", () => {
+    const body = `SERVICES AGREEMENT
+
+This Agreement ("Agreement") is entered into by and between Client ("Client") and Service Provider ("Provider") (collectively, the "Parties").
+
+1. Scope of Services / Purpose
+The Service Provider agrees to provide professional consulting services to the Client as described herein. The scope includes general business consulting and advisory services.
+
+2. Payment Terms
+$500 upon completion of all services described in this Agreement.
+
+3. Term and Effective Date
+This Agreement shall be effective for 30 days from the date of execution.
+
+4. Governing Law
+This Agreement shall be governed by and construed in accordance with the laws of the State of Texas.`;
+
+    const result = evaluateSimpleHollowBodyGate(body, [
+      { name: "Client", role: "client" },
+      { name: "Service Provider", role: "service_provider" },
+    ]);
+    expect(result.isHollow).toBe(true);
+    // Either body or draft check can catch this - both are role-only parties
+    expect(["role_only_parties_in_body", "role_only_parties_in_draft"]).toContain(result.reason);
+  });
+
+  it("blocks bodies with hollow sections", () => {
+    const bodyWithHollowPayment = `SERVICES AGREEMENT
+
+This Agreement ("Agreement") is entered into by and between Maya Chen ("Client") and Diego Alvarez ("Provider") (collectively, the "Parties").
+
+1. Scope of Services / Purpose
+Diego Alvarez agrees to design a professional logo and brand identity kit for Maya Chen's business. The scope includes primary logo, color palette, and typography guidelines.
+
+2. Payment Terms
+
+3. Term and Effective Date
+This Agreement shall be effective for 30 days from the date of execution by both parties.
+
+4. Governing Law
+This Agreement shall be governed by and construed in accordance with the laws of the State of Texas.`;
+
+    const result = evaluateSimpleHollowBodyGate(bodyWithHollowPayment, null);
+    expect(result.isHollow).toBe(true);
+    expect(result.reason).toBe("hollow_sections");
+  });
+
+  it("blocks bodies missing both payment and law", () => {
+    const bodyMissingBoth = `SERVICES AGREEMENT
+
+This Agreement is entered into by and between Maya Chen and Diego Alvarez.
+
+1. Scope
+Design a logo and brand kit.
+
+2. Payment Terms
+To be agreed.
+
+3. Term
+30 days.
+
+4. Governing Law
+TBD`;
+
+    const result = evaluateSimpleHollowBodyGate(bodyMissingBoth, null);
+    expect(result.isHollow).toBe(true);
+  });
+
+  it("passes complete Maya/Diego body", () => {
+    const result = evaluateSimpleHollowBodyGate(MAYA_DIEGO_VALID_FREE_DOC, [
+      { name: "Maya Chen", role: "client" },
+      { name: "Diego Alvarez", role: "service_provider" },
+    ]);
+    expect(result.isHollow).toBe(false);
+    expect(result.reason).toBeNull();
+  });
+
+  it("passes body with real names and tenets", () => {
+    const validBody = `CONSULTING AGREEMENT
+
+This Agreement is entered into by and between John Smith and Acme Corp.
+
+1. Scope
+Software development consulting services.
+
+2. Payment Terms
+$5,000 per month, payable on the 1st.
+
+3. Term
+12 months starting January 1, 2026.
+
+4. Governing Law
+This Agreement is governed by the laws of California.`;
+
+    const result = evaluateSimpleHollowBodyGate(validBody, [
+      { name: "John Smith", role: "consultant" },
+      { name: "Acme Corp", role: "client" },
+    ]);
+    expect(result.isHollow).toBe(false);
+    expect(result.reason).toBeNull();
+  });
+});
+
+describe("resolveFreeStarterReviewBody hollow body gate", () => {
+  it("sets hollowBodyBlocked=true for dog dump style hollow body", () => {
+    const draft: ParsedDraftShape = {
+      ...emptyDraft(),
+      title: "Business Agreement",
+      parties: [
+        { name: "Client", role: "client" },
+        { name: "Can", role: "service_provider" },
+      ],
+      purpose: "Commercial arrangement to be agreed",
+      payment_terms: "",
+      jurisdiction: "",
+      free_document_text: DOG_DUMP_HOLLOW_BODY,
+      free_document_validation: "ok", // Backend passed but body is still hollow
+    };
+
+    const result = resolveFreeStarterReviewBody({
+      draft,
+      rawIntake: "Can someone watch my dog Saturday?",
+    });
+
+    expect(result.hollowBodyBlocked).toBe(true);
+    expect(result.hollowBodyReason).toBeTruthy();
+  });
+
+  it("sets hollowBodyBlocked=false for complete Maya/Diego body", () => {
+    const draft: ParsedDraftShape = {
+      ...emptyDraft(),
+      title: "Services Agreement",
+      parties: [
+        { name: "Maya Chen", role: "client" },
+        { name: "Diego Alvarez", role: "service_provider" },
+      ],
+      purpose: "design a logo and brand kit",
+      payment_terms: "$2,400 due on signing",
+      jurisdiction: "Texas",
+      duration: "30 days starting August 22, 2026",
+      free_document_text: MAYA_DIEGO_VALID_FREE_DOC,
+      free_document_validation: "ok",
+    };
+
+    const result = resolveFreeStarterReviewBody({
+      draft,
+      rawIntake: MAYA_DIEGO_INTAKE,
+    });
+
+    expect(result.hollowBodyBlocked).toBe(false);
+    expect(result.hollowBodyReason).toBeNull();
   });
 });
 
