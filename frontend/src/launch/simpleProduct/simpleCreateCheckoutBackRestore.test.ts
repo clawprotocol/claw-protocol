@@ -25,6 +25,14 @@ describe("checkout back → starter review restore (static)", () => {
     expect(homeAutoBlock).toContain("!hasPaidPremiumCompletionSession()");
   });
 
+  it("after pay, SimpleCreatePage does not pointer-events-none the signer email intake", () => {
+    const blocked = createPage.indexOf("const intakeInteractionBlocked =");
+    expect(blocked).toBeGreaterThan(-1);
+    const blockedBlock = createPage.slice(blocked, blocked + 280);
+    expect(blockedBlock).toContain("!premiumCompletionReturn");
+    expect(blockedBlock).toContain("!paidDemoPremiumSession");
+  });
+
   it("starter review Continue with Pro uses launch_pro_checkout (not continue_basic_draft)", () => {
     expect(intake).toContain('action: "launch_pro_checkout"');
     expect(intake).toContain("restored_starter_review_cta");

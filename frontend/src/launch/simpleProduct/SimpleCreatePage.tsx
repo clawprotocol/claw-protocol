@@ -359,7 +359,9 @@ export function SimpleCreatePage() {
     entitlementProbeBlocked ||
     awaitingAuthWorkspace;
   const intakeInteractionBlocked =
-    creationBlockedForUi || entitlementProbeBlocked || awaitingAuthWorkspace;
+    !premiumCompletionReturn &&
+    !paidDemoPremiumSession &&
+    (creationBlockedForUi || entitlementProbeBlocked || awaitingAuthWorkspace);
   const genesisWithinAllowance =
     commercialEntitlementReady &&
     createAccessVerdict.allowed &&

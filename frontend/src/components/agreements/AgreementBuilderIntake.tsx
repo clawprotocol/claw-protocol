@@ -1174,8 +1174,11 @@ import {
   shouldShowPaidSessionFinalReviewActions,
   shouldShowPaidSessionGeneratingOverlay,
   shouldSkipPaidSessionReviewHydrateWait,
+  shouldKeepPaidSessionSignerEmailsInteractive,
   shouldSuppressFreeMissingTenetAskAfterPay,
   shouldTeardownPaidProSignerMetadataFinalizedLatch,
+  PAID_PRO_SIGNER_EMAIL_FIELD_WRAPPER_CLASS,
+  PAID_PRO_SIGNER_EMAIL_INPUT_CLASS,
 } from "./paidProPaidSessionLanding";
 import {
   effectivePremiumRefineApplyLogRevisionIntent,
@@ -3010,7 +3013,7 @@ function CreateFlowSendRecipientsPanel({
                 />
               </label>
             )}
-            <label className="mt-3 block text-xs font-medium text-slate-400 sm:text-sm">
+            <label className={PAID_PRO_SIGNER_EMAIL_FIELD_WRAPPER_CLASS}>
               <span className="block">
                 {signaturePrepMode
                   ? idx === 0
@@ -3031,6 +3034,9 @@ function CreateFlowSendRecipientsPanel({
               </span>
               <input
                 type="email"
+                disabled={false}
+                readOnly={false}
+                tabIndex={0}
                 data-claw-recipient-field={idx <= 1 ? (idx === 0 ? "r1-email" : "r2-email") : `party-${idx}-email`}
                 aria-label={
                   idx === 0
@@ -3044,7 +3050,7 @@ function CreateFlowSendRecipientsPanel({
                 onBlur={() => {
                   setRecipientEmailTouched((prev) => ({ ...prev, [idx]: true }));
                 }}
-                className="mt-1 w-full rounded-md border border-slate-600/70 bg-[#141d32] px-3 py-2 text-sm text-slate-100 outline-none focus:border-emerald-500/60"
+                className={PAID_PRO_SIGNER_EMAIL_INPUT_CLASS}
                 autoComplete={idx === 0 ? "email" : "off"}
               />
             </label>
@@ -3587,6 +3593,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     premiumCompletionReturn: readPremiumCompletionReturnFromHref(
       typeof window !== "undefined" ? window.location.href : "",
     ),
+  });
+  const paidSessionSignerEmailsInteractive = shouldKeepPaidSessionSignerEmailsInteractive({
+    paidSessionActive: hasPaidPremiumCompletionSession(),
+    premiumCompletionReturn: suppressFreeMissingTenetAskAfterPay,
   });
   const freeMissingTenetAskVisible = suppressFreeMissingTenetAskAfterPay ? null : freeMissingTenetAsk;
   /** Calm inline copy when POST /refine fails; do not clear the step buffer. */
@@ -12655,7 +12665,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     ) {
       setFreeMissingTenetAsk(null);
       setFreeMissingTenetAskField("");
-      return false;
+      // Handled: leftover ask stays down AND callers must not start starter generate.
+      return true;
     }
     const decision = evaluateFreeStarterMissingTenetAsk(rawIntake);
     if (decision.action !== "ask") return false;
@@ -13261,7 +13272,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     if (!freeMissingTenetAskRef.current && !freeMissingTenetAskField) return;
     setFreeMissingTenetAsk(null);
     setFreeMissingTenetAskField("");
-    setMissing([]);
+    setMissing((prev) => (prev.length === 0 ? prev : []));
     setFollowUpDetailTotal(0);
   }, [suppressFreeMissingTenetAskAfterPay, freeMissingTenetAskField]);
 
@@ -34251,6 +34262,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                 phase: premiumPostCheckoutPhase,
                 hasVisibleDealBody: paidSessionVisibleDealBody,
                 hasVisibleAskLanding: missingTenetAskLandingVisible,
+                signerEmailsMustStayInteractive: paidSessionSignerEmailsInteractive,
               })) ? (
               <div
                 className="fixed inset-0 z-[220] flex items-center justify-center bg-[#0a0e18]/92 px-4 backdrop-blur-sm"
@@ -34943,7 +34955,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                     ) : null}
                     {freeMissingTenetAskVisible ? (
                       renderFreeMissingTenetAskPanel()
-                    ) : (
+                    ) : suppressFreeMissingTenetAskAfterPay ? null : (
                     <VoiceAugmentedTextArea
                       ref={textareaRef}
                       value={intakeStepBuffer}
@@ -36380,6 +36392,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                             slotsWithSignerTitle={partySignerTitles.filter((t) => t.trim()).length}
                                             gateComplete={paidProSignerDetailsGate.complete}
                                             requiredCount={paidProSignerDetailsGate.requiredCount}
+                                            className={
+                                              paidSessionSignerEmailsInteractive
+                                                ? "pointer-events-auto relative z-[230]"
+                                                : undefined
+                                            }
                                           >
                                             <CreateFlowSendRecipientsPanel
                                               variant="workspace"
@@ -39362,7 +39379,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         </div>
       ) : null}
 
-      {displayPhase === "preparing_review" && !emptyAuthorityPrepFailSafe ? (
+      {displayPhase === "preparing_review" &&
+      !emptyAuthorityPrepFailSafe &&
+      !paidSessionSignerEmailsInteractive ? (
         <div
           className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/45 px-4"
           role="status"
