@@ -14,7 +14,9 @@ import {
   shouldShowPaidSessionFinalReviewActions,
   shouldShowPaidSessionGeneratingOverlay,
   shouldSkipPaidSessionReviewHydrateWait,
+  shouldTeardownPaidProSignerMetadataFinalizedLatch,
 } from "./paidProPaidSessionLanding";
+import { hasPaidProSourceOfTruth } from "./paidProSourceOfTruth";
 import { PAID_PRO_DELIVERY_TRACK_REVIEW_CTA } from "./paidProDeliveryTrackGtmCopy";
 import { PAID_PRO_PREPARE_ESIGN_DECISION_CTA } from "./signerSetupPartyIdentity";
 import {
@@ -121,6 +123,31 @@ function dumpCase(intake: string, names: [string, string]) {
       signaturePreparationRequested: true,
     }),
   ).toBe(false);
+  // After-pay finalize path: ≥200 rebuild is never 1001 SoT. Teardown must
+  // keep paidProSignerMetadataFinalizedLatch so final-review actions stay up.
+  expect(hasPaidProSourceOfTruth()).toBe(false);
+  const skipHydrateWait = shouldSkipPaidSessionReviewHydrateWait({
+    paidSessionActive: true,
+    visibleDealBody: visible,
+  });
+  expect(skipHydrateWait).toBe(true);
+  expect(
+    shouldTeardownPaidProSignerMetadataFinalizedLatch({
+      latch: true,
+      hasPaidProSourceOfTruth: false,
+      paidSessionVisibleDealBody: visible,
+      shouldSkipPaidSessionReviewHydrateWait: skipHydrateWait,
+    }),
+  ).toBe(false);
+  expect(
+    shouldShowPaidSessionFinalReviewActions({
+      paidSessionActive: true,
+      visibleDealBody: visible,
+      twoSignerNamesAndEmailsComplete: twoSigners,
+      signerMetadataFinalized: true,
+      signaturePreparationRequested: false,
+    }),
+  ).toBe(true);
   return rebuilt;
 }
 
@@ -200,6 +227,34 @@ describe("after-pay review-screen gate — Continue after signers", () => {
         visibleDealBody: true,
         twoSignerNamesAndEmailsComplete: false,
         signerMetadataFinalized: true,
+      }),
+    ).toBe(false);
+  });
+
+  it("teardown still clears the finalize latch on a true session reset (no visible deal, no SoT)", () => {
+    expect(hasPaidProSourceOfTruth()).toBe(false);
+    expect(
+      shouldTeardownPaidProSignerMetadataFinalizedLatch({
+        latch: true,
+        hasPaidProSourceOfTruth: false,
+        paidSessionVisibleDealBody: false,
+        shouldSkipPaidSessionReviewHydrateWait: false,
+      }),
+    ).toBe(true);
+    expect(
+      shouldTeardownPaidProSignerMetadataFinalizedLatch({
+        latch: true,
+        hasPaidProSourceOfTruth: true,
+        paidSessionVisibleDealBody: false,
+        shouldSkipPaidSessionReviewHydrateWait: false,
+      }),
+    ).toBe(false);
+    expect(
+      shouldShowPaidSessionFinalReviewActions({
+        paidSessionActive: true,
+        visibleDealBody: false,
+        twoSignerNamesAndEmailsComplete: true,
+        signerMetadataFinalized: false,
       }),
     ).toBe(false);
   });
@@ -340,5 +395,23 @@ describe("after-pay review-screen gate — intake wiring", () => {
     expect(chooser).toContain("if (paidSessionFinalReviewDecisionReady) return false");
 
     expect(intakeSrc).toContain("!paidSessionFinalReviewDecisionReady &&");
+  });
+
+  it("teardown effect keeps the finalize latch on a paid session with a visible deal", () => {
+    expect(intakeSrc).toContain("shouldTeardownPaidProSignerMetadataFinalizedLatch");
+    const teardownStart = intakeSrc.indexOf(
+      "shouldTeardownPaidProSignerMetadataFinalizedLatch({",
+    );
+    expect(teardownStart).toBeGreaterThan(-1);
+    const teardown = intakeSrc.slice(teardownStart, teardownStart + 520);
+    expect(teardown).toContain("paidSessionVisibleDealBody");
+    expect(teardown).toContain(
+      "shouldSkipPaidSessionReviewHydrateWait: paidSessionSkipReviewHydrateWait",
+    );
+    expect(teardown).toContain("hasPaidProSourceOfTruth: hasPaidProSourceOfTruth()");
+    expect(teardown).toContain("setPaidProSignerMetadataFinalizedLatch(false)");
+    expect(intakeSrc).not.toMatch(
+      /if \(paidProSignerMetadataFinalizedLatch && !hasPaidProSourceOfTruth\(\)\) \{\s*setPaidProSignerMetadataFinalizedLatch\(false\);/,
+    );
   });
 });

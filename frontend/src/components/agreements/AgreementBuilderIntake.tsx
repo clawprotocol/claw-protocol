@@ -1171,6 +1171,7 @@ import {
   shouldShowPaidSessionFinalReviewActions,
   shouldShowPaidSessionGeneratingOverlay,
   shouldSkipPaidSessionReviewHydrateWait,
+  shouldTeardownPaidProSignerMetadataFinalizedLatch,
 } from "./paidProPaidSessionLanding";
 import {
   effectivePremiumRefineApplyLogRevisionIntent,
@@ -19556,14 +19557,6 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     liveSignerMetadataUiState,
   ]);
 
-  // Tear down the sticky finalize latch when the paid Pro source of truth is gone (new session /
-  // reset). Editing signer details clears the latch explicitly; this only covers full teardown.
-  useEffect(() => {
-    if (paidProSignerMetadataFinalizedLatch && !hasPaidProSourceOfTruth()) {
-      setPaidProSignerMetadataFinalizedLatch(false);
-    }
-  }, [paidProSignerMetadataFinalizedLatch, premiumSurfaceGateTick, reviewDocRefreshTick]);
-
   // TEST577: tear down the sticky signature-track latch when the paid Pro source of truth is gone
   // (new session / reset) so a fresh review starts review-first-neutral, not pre-latched to signature.
   useEffect(() => {
@@ -20456,6 +20449,28 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     paidSessionActive: hasPaidPremiumCompletionSession(),
     visibleDealBody: paidSessionVisibleDealBody,
   });
+
+  // Tear down the sticky finalize latch only on a true session reset.
+  // After-pay ≥200 rebuilds are never 1001-char SoT; missing SoT must not
+  // clear the latch when a paid session already has a visible deal.
+  useEffect(() => {
+    if (
+      shouldTeardownPaidProSignerMetadataFinalizedLatch({
+        latch: paidProSignerMetadataFinalizedLatch,
+        hasPaidProSourceOfTruth: hasPaidProSourceOfTruth(),
+        paidSessionVisibleDealBody,
+        shouldSkipPaidSessionReviewHydrateWait: paidSessionSkipReviewHydrateWait,
+      })
+    ) {
+      setPaidProSignerMetadataFinalizedLatch(false);
+    }
+  }, [
+    paidProSignerMetadataFinalizedLatch,
+    paidSessionVisibleDealBody,
+    paidSessionSkipReviewHydrateWait,
+    premiumSurfaceGateTick,
+    reviewDocRefreshTick,
+  ]);
 
   useEffect(() => {
     if (!onHomeGuidedTransitionPhase) return;

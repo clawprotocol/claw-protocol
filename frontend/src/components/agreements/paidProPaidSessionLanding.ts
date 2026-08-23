@@ -113,3 +113,22 @@ export function shouldShowPaidSessionFinalReviewActions(args: {
     !args.signaturePreparationRequested
   );
 }
+
+/**
+ * Tear down paidProSignerMetadataFinalizedLatch only on a true session reset.
+ * After-pay ≥200 rebuilds are never 1001-char SoT; missing SoT must not clear
+ * the latch when a paid session already has a visible deal.
+ */
+export function shouldTeardownPaidProSignerMetadataFinalizedLatch(args: {
+  latch: boolean;
+  hasPaidProSourceOfTruth: boolean;
+  paidSessionVisibleDealBody: boolean;
+  shouldSkipPaidSessionReviewHydrateWait: boolean;
+}): boolean {
+  if (!args.latch) return false;
+  if (args.hasPaidProSourceOfTruth) return false;
+  if (args.paidSessionVisibleDealBody || args.shouldSkipPaidSessionReviewHydrateWait) {
+    return false;
+  }
+  return true;
+}
