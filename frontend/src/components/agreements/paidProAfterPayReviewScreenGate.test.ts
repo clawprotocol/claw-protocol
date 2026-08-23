@@ -11,9 +11,12 @@ import {
   canOpenPaidSessionFinalReviewAfterSigners,
   resolvePaidSessionTwoSignerNamesEmailsComplete,
   resolvePaidSessionVisibleDealBody,
+  shouldShowPaidSessionFinalReviewActions,
   shouldShowPaidSessionGeneratingOverlay,
   shouldSkipPaidSessionReviewHydrateWait,
 } from "./paidProPaidSessionLanding";
+import { PAID_PRO_DELIVERY_TRACK_REVIEW_CTA } from "./paidProDeliveryTrackGtmCopy";
+import { PAID_PRO_PREPARE_ESIGN_DECISION_CTA } from "./signerSetupPartyIdentity";
 import {
   clearPaidPremiumCompletionSession,
   hasPaidPremiumCompletionSession,
@@ -91,6 +94,33 @@ function dumpCase(intake: string, names: [string, string]) {
       hasVisibleDealBody: visible,
     }),
   ).toBe(false);
+  expect(
+    shouldShowPaidSessionFinalReviewActions({
+      paidSessionActive: true,
+      visibleDealBody: visible,
+      twoSignerNamesAndEmailsComplete: twoSigners,
+      signerMetadataFinalized: false,
+      signaturePreparationRequested: false,
+    }),
+  ).toBe(false);
+  expect(
+    shouldShowPaidSessionFinalReviewActions({
+      paidSessionActive: true,
+      visibleDealBody: visible,
+      twoSignerNamesAndEmailsComplete: twoSigners,
+      signerMetadataFinalized: true,
+      signaturePreparationRequested: false,
+    }),
+  ).toBe(true);
+  expect(
+    shouldShowPaidSessionFinalReviewActions({
+      paidSessionActive: true,
+      visibleDealBody: visible,
+      twoSignerNamesAndEmailsComplete: twoSigners,
+      signerMetadataFinalized: true,
+      signaturePreparationRequested: true,
+    }),
+  ).toBe(false);
   return rebuilt;
 }
 
@@ -162,6 +192,14 @@ describe("after-pay review-screen gate — Continue after signers", () => {
         paidSessionActive: true,
         visibleDealBody: true,
         twoSignerNamesAndEmailsComplete: false,
+      }),
+    ).toBe(false);
+    expect(
+      shouldShowPaidSessionFinalReviewActions({
+        paidSessionActive: true,
+        visibleDealBody: true,
+        twoSignerNamesAndEmailsComplete: false,
+        signerMetadataFinalized: true,
       }),
     ).toBe(false);
   });
@@ -237,5 +275,70 @@ describe("after-pay review-screen gate — intake wiring", () => {
     expect(intakeSrc).toContain("nameEmailOnlySignerFields");
     expect(intakeSrc).toContain("paidSessionTwoSignersReady");
     expect(intakeSrc).toMatch(/nameEmailOnlySignerFields\s*\n\s*\?\s*false/);
+  });
+
+  it("guided_continue with paid_pro_signer_details_complete finalizes even when inline latch is false", () => {
+    const continueStart = intakeSrc.indexOf(
+      "Continue after complete signers opens SimpleProFinalReviewScreen",
+    );
+    expect(continueStart).toBeGreaterThan(-1);
+    const continueBlock = intakeSrc.slice(
+      continueStart,
+      intakeSrc.indexOf("isPaidProReviewDecisionScrollReason", continueStart),
+    );
+    expect(continueBlock).toContain('cta.reason === "paid_pro_signer_details_complete"');
+    expect(continueBlock).toContain("finalizePaidProSignerMetadataAndOpenReviewDecision");
+    expect(continueBlock).toContain("paidSessionSkipReviewHydrateWait");
+    expect(continueBlock).toContain("paidSessionFinalReviewAfterSignersReady");
+    expect(continueBlock).toContain("paidSessionTwoSignersReady");
+    expect(continueBlock).toMatch(/paidProInlineSignerSetupLatched\s*\|\|/);
+    expect(continueBlock).not.toMatch(
+      /paid_pro_signer_details_complete" &&\s*paidProInlineSignerSetupLatched &&/,
+    );
+    expect(continueBlock).not.toContain("void onGenerate()");
+    expect(continueBlock).not.toContain("enterGuidedSignatureTrackRoute");
+
+    const runPrimaryStart = intakeSrc.indexOf("console.log(\"[CTA CLICK]\", unifiedPrimaryCta)");
+    expect(runPrimaryStart).toBeGreaterThan(-1);
+    const runPrimaryBlock = intakeSrc.slice(runPrimaryStart, runPrimaryStart + 900);
+    expect(runPrimaryBlock).toContain('unifiedPrimaryCta.reason === "paid_pro_signer_details_complete"');
+    expect(runPrimaryBlock).toContain("finalizePaidProSignerMetadataAndOpenReviewDecision");
+    expect(runPrimaryBlock).toContain("paidSessionSkipReviewHydrateWait");
+    expect(runPrimaryBlock).toMatch(/paidProInlineSignerSetupLatched\s*\|\|/);
+    expect(runPrimaryBlock).not.toMatch(
+      /paid_pro_signer_details_complete" &&\s*paidProInlineSignerSetupLatched &&/,
+    );
+  });
+
+  it("after two names+emails, Continue opens final-review actions — not a second Continue", () => {
+    expect(PAID_PRO_DELIVERY_TRACK_REVIEW_CTA).toBe("Send for review");
+    expect(PAID_PRO_PREPARE_ESIGN_DECISION_CTA).toBe("Prepare for signing");
+    expect(intakeSrc).toContain("shouldShowPaidSessionFinalReviewActions");
+    expect(intakeSrc).toContain("paidSessionFinalReviewDecisionReady");
+    expect(intakeSrc).toContain("PAID_PRO_DELIVERY_TRACK_REVIEW_CTA");
+    expect(intakeSrc).toContain("PAID_PRO_PREPARE_ESIGN_DECISION_CTA");
+    expect(intakeSrc).toContain("onSendForReview={() => void handleProSendForReview()}");
+    expect(intakeSrc).toContain('reason: "paid_pro_review_decision_on_card"');
+
+    const afterPayFinalizeCta = intakeSrc.slice(
+      intakeSrc.indexOf("After-pay visitor + finalized two signers: existing final-review decision"),
+      intakeSrc.indexOf("After-pay visitor + finalized two signers: existing final-review decision") + 700,
+    );
+    expect(afterPayFinalizeCta).toContain("paidSessionFinalReviewDecisionReady");
+    expect(afterPayFinalizeCta).toContain("paid_pro_review_decision_on_card");
+    expect(afterPayFinalizeCta).not.toContain('"Continue"');
+    expect(afterPayFinalizeCta).not.toContain("Links created");
+
+    const suppressStart = intakeSrc.indexOf("suppressFinalReviewActions={");
+    expect(suppressStart).toBeGreaterThan(-1);
+    const suppressBlock = intakeSrc.slice(suppressStart, suppressStart + 420);
+    expect(suppressBlock).toContain("paidProCanonicalReviewSignerSetupActive");
+    expect(suppressBlock).toContain("!paidSessionFinalReviewDecisionReady");
+
+    const chooserStart = intakeSrc.indexOf("const showPaidProForcedFirstReviewTrackChooser");
+    const chooser = intakeSrc.slice(chooserStart, chooserStart + 700);
+    expect(chooser).toContain("if (paidSessionFinalReviewDecisionReady) return false");
+
+    expect(intakeSrc).toContain("!paidSessionFinalReviewDecisionReady &&");
   });
 });
