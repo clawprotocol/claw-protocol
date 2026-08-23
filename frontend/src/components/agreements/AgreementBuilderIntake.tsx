@@ -9458,7 +9458,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             reason: "founder_intent_gate",
             outcome: lastKnownGoodAuthoritativeDraftRef.current ? "fallback_recovered" : "retry_recoverable",
           });
-          setPremiumPostCheckoutPhase(resolvePaidProGenerationFailurePostCheckoutPhase());
+          if (!hasValidFallbackBody) {
+            setPremiumPostCheckoutPhase(resolvePaidProGenerationFailurePostCheckoutPhase());
+          }
           setPremiumPipelineUserMessage(null);
           premiumModalExtendedWaitActiveRef.current = false;
           setPremiumCheckoutModalExtendedWait(false);
@@ -9769,7 +9771,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             reason: "no_server_authority",
             outcome: lastKnownGoodAuthoritativeDraftRef.current ? "fallback_recovered" : "retry_recoverable",
           });
-          setPremiumPostCheckoutPhase(resolvePaidProGenerationFailurePostCheckoutPhase());
+          if (!lastKnownGoodAuthoritativeDraftRef.current) {
+            setPremiumPostCheckoutPhase(resolvePaidProGenerationFailurePostCheckoutPhase());
+          }
           setPremiumPipelineUserMessage(null);
           premiumModalExtendedWaitActiveRef.current = false;
           setPremiumCheckoutModalExtendedWait(false);
@@ -10022,7 +10026,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
               reason: "paid_pro_gate_failed",
               outcome: lastKnownGoodAuthoritativeDraftRef.current ? "fallback_recovered" : "retry_recoverable",
             });
-            setPremiumPostCheckoutPhase(resolvePaidProGenerationFailurePostCheckoutPhase());
+            if (!lastKnownGoodAuthoritativeDraftRef.current) {
+              setPremiumPostCheckoutPhase(resolvePaidProGenerationFailurePostCheckoutPhase());
+            }
             setPremiumPipelineUserMessage(null);
             premiumModalExtendedWaitActiveRef.current = false;
             setPremiumCheckoutModalExtendedWait(false);
