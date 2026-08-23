@@ -125,18 +125,6 @@ function draftPartiesAreHollow(draft: ParsedDraftShape | null | undefined): bool
   return names.filter((n) => HOLLOW_PARTY_NAME_RE.test(n)).length >= 2;
 }
 
-function partyListIncludesStatedHiringPeople(
-  parties: { name?: string }[] | null | undefined,
-  stated: { name: string }[],
-): boolean {
-  const blob = (parties || []).map((p) => (p?.name || "").trim().toLowerCase()).join(" | ");
-  if (!blob) return false;
-  return stated.every((p) => {
-    const person = p.name.replace(/\s+of\s+.+$/i, "").trim().toLowerCase();
-    return person.length >= 3 && blob.includes(person);
-  });
-}
-
 function partyListLooksLikeOrgOnlyOfHiringPair(
   currentNames: string[],
   stated: { name: string }[],
