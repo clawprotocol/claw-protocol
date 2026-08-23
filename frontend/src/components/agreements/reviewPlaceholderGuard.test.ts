@@ -127,13 +127,14 @@ describe("partyNamesResolvedViaRenderedPreview", () => {
     expect(partyNamesResolvedViaRenderedPreview(draft, preview)).toBe(true);
   });
 
-  it("returns false when draft already has real parties", () => {
+  it("returns true when draft already has real parties and the preview still shows them", () => {
     const draft = base([
       { name: "Jane Smith", role: "party" },
       { name: "Acme LLC", role: "party" },
     ]);
-    const preview = "Agreement between Jane Smith and Acme LLC.";
-    expect(partyNamesResolvedViaRenderedPreview(draft, preview)).toBe(false);
+    const preview =
+      "SERVICES AGREEMENT\n\nThis Agreement is entered into by and between Jane Smith and Acme LLC for professional services.";
+    expect(partyNamesResolvedViaRenderedPreview(draft, preview)).toBe(true);
   });
 
   it("returns false when rendered preview also has placeholders", () => {
