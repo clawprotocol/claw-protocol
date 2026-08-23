@@ -377,6 +377,26 @@ export function resolvePaidProFirstReviewVisibleDisplayPlain(
     };
   }
 
+  // ForcedRoute sets paidProActive true. A ≥200 paid-session rebuild must still
+  // paint — do not drop it for missing the 500 authority floor or agreementId.
+  if (
+    hasPaidPremiumCompletionSession() &&
+    meetsPaidSessionFallbackPaintFloor(
+      acceptedCanonical.plain || trim(args.acceptedCanonicalPlain),
+      args.intakeText,
+    )
+  ) {
+    const fallbackPlain = acceptedCanonical.plain || trim(args.acceptedCanonicalPlain);
+    return {
+      plain: fallbackPlain,
+      source: "paid_session_intake_rebuild",
+      fallbackReason: null,
+      hasSoT,
+      hasServerFullDoc,
+      paidProActive: true,
+    };
+  }
+
   if (agreementId && hasVerifiedCommercialDisplayCorpus(agreementId)) {
     const verified = readVerifiedCommercialDisplayCorpus(agreementId);
     const verifiedPlain = trim(verified?.corpusPlain);

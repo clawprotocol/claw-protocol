@@ -67,6 +67,8 @@ export function evaluatePostGenerateTenetRecall(args: {
   paintedBody: string;
   alreadyAsked: boolean;
   minBodyLen?: number;
+  /** Original checkout / visitor dump — never re-ask a tenet already stated there. */
+  originalIntake?: string | null;
 }): PostGenerateTenetRecallDecision {
   const empty = { action: "proceed" as const, questions: [] as string[], missingTenets: [] as string[] };
   if (args.alreadyAsked) return empty;
@@ -74,15 +76,26 @@ export function evaluatePostGenerateTenetRecall(args: {
   const minLen = args.minBodyLen ?? POST_GENERATE_SUBSTANTIVE_MIN_LEN;
   if (painted.length < minLen) return empty;
   const score = scoreFiveTenets(painted);
-  if (score.isComplete || score.missingTenets.length === 0) return empty;
-  const questions = buildPostGenerateMissingTenetQuestions(painted)
-    .map((q) => q.replace(/\s+/g, " ").trim())
+  const intakeScore = args.originalIntake ? scoreFiveTenets(args.originalIntake) : null;
+  const missingTenets = score.missingTenets.filter((topic) => {
+    if (!intakeScore) return true;
+    if (topic === "governing_law") return !intakeScore.governingLaw;
+    if (topic === "payment") return !intakeScore.payment;
+    if (topic === "parties") return !intakeScore.parties;
+    if (topic === "scope") return !intakeScore.scope;
+    if (topic === "term") return !intakeScore.term;
+    return true;
+  });
+  if (missingTenets.length === 0) return empty;
+  const who = cleanPartyHintFromPaintedBody(painted);
+  const questions = missingTenets
+    .slice(0, 5)
+    .map((topic) => oneLinerForMissingTenet(topic, who).replace(/\s+/g, " ").trim())
     .filter((q) => q.length > 0 && q.length <= 160 && !/[\n\r]/.test(q));
-  const missingTenets = score.missingTenets.slice(0, 5);
   if (questions.length === 0) return empty;
   return {
     action: "await_gaps",
     questions: questions.slice(0, 5),
-    missingTenets,
+    missingTenets: missingTenets.slice(0, 5),
   };
 }

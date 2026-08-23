@@ -3,10 +3,15 @@ import {
   shouldSkipAskAndRenderImmediately,
   getRequiredClarificationTopics,
   buildLocalMissingTenetQuestions,
+  filterAskedTenetQuestionsAgainstOriginalIntake,
   type FiveTenetDraftInput,
 } from "./proAgreementFiveTenets";
 
-export { getRequiredClarificationTopics, buildLocalMissingTenetQuestions } from "./proAgreementFiveTenets";
+export {
+  getRequiredClarificationTopics,
+  buildLocalMissingTenetQuestions,
+  filterAskedTenetQuestionsAgainstOriginalIntake,
+} from "./proAgreementFiveTenets";
 export type { FiveTenetDraftInput } from "./proAgreementFiveTenets";
 
 /**
@@ -64,9 +69,17 @@ export function evaluatePostCheckoutMissingFactsGate(input: {
   }
 
   if (questions.length > 0) {
+    const filtered = filterAskedTenetQuestionsAgainstOriginalIntake(
+      questions,
+      input.intakeText || "",
+      input.draft,
+    );
+    if (filtered.length === 0) {
+      return { action: "proceed_to_draft" };
+    }
     return {
       action: "await_gaps",
-      questions: questions.slice(0, 5),
+      questions: filtered.slice(0, 5),
     };
   }
 

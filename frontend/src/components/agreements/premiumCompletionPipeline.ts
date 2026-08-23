@@ -5960,6 +5960,7 @@ async function runPremiumCompletionInner(
   const postGenerateTenetRecall = evaluatePostGenerateTenetRecall({
     paintedBody: pipelineWinningBody || finalFallback,
     alreadyAsked: Boolean(input.postGenerateTenetRecall),
+    originalIntake: input.intakeText || input.originalUserIntakeRawForMerge || "",
   });
 
   return {

@@ -149,6 +149,28 @@ describe("paid Pro missing-tenet ask (parsed draft)", () => {
     }
   });
 
+  it("hollow starter To-be-agreed does not re-ask Texas already in the dump", () => {
+    const dump =
+      "Priya Shah of Northline Studio is hiring Diego Alvarez from Harbor Marks LLC for a branding project. Payment: $2,400. 30 days. Governing law: Texas.";
+    const hollow: FiveTenetDraftInput = {
+      title: "Services Agreement",
+      parties: [{ name: "Party A" }, { name: "Party B" }],
+      purpose: "Services as described.",
+      payment_terms: "To be agreed",
+      duration: "To be determined",
+      jurisdiction: "To be agreed by the parties unless otherwise agreed",
+      payment: { amount: null, valid: true },
+    };
+    const score = scoreFiveTenetsFromDraft(hollow, dump);
+    expect(score.governingLaw).toBe(true);
+    expect(score.payment).toBe(true);
+    const topics = getRequiredClarificationTopics(dump, hollow);
+    expect(topics).not.toContain("governing_law");
+    expect(topics).not.toContain("payment");
+    const preflight = evaluateFiveTenetsPreflight(dump, hollow);
+    expect(preflight.action).toBe("proceed_to_draft_five_tenets_complete");
+  });
+
   it("preflight does not proceed to generate when payment or law is empty", () => {
     for (const [dump, draft] of [
       [JORDAN_DUMP, jordanDraft],
