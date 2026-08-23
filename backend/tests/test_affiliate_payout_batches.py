@@ -575,6 +575,7 @@ def test_mark_paid_requires_tx_when_configured(tmp_path: Path, monkeypatch: pyte
 
 
 def test_safe_json_export(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    pytest.importorskip("eth_abi")
     monkeypatch.setenv("CLAW_AFFILIATE_FIRST_PAYOUT_DELAY_DAYS", "0")
     monkeypatch.setenv("CLAW_AFFILIATE_PAYOUT_THRESHOLD_USD", "1")
     o, t, e = _stores(tmp_path, monkeypatch)

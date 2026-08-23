@@ -49,7 +49,9 @@ import { defaultIntakePartyRoleLabels } from "./partyRoleIntake";
 import { buildStarterAgreementPreviewForReview } from "./agreementPreviewFromDraft";
 import {
   draftHasPlaceholderParties,
+  extractRealPartyNamesFromPreview,
   getDraftFirstReviewBlocker,
+  isPartyFixDetailsReviewBlocker,
 } from "./reviewPlaceholderGuard";
 import { resolveFreeStarterReviewBody } from "./freeStarterReviewBodyResolver";
 import { tryInferNamedPartiesFromIntake } from "./intakeNamedPartyFallback";
@@ -323,6 +325,47 @@ Effective Date: upon full execution by both parties
           intakeText: answered,
         }),
       ).not.toBe("party_placeholder");
+      expect(
+        isPartyFixDetailsReviewBlocker(paintedDraft, {
+          userVisibleFullDocumentPlain: body,
+          intakeText: answered,
+        }),
+      ).toBe(false);
+
+      const structured = parseIntakeToStructuredAgreement(answered);
+      expect(structured.parties).toHaveLength(2);
+      expect(structured.parties.join(" ")).toMatch(/Priya Shah|Marcus Thompson/);
+      expect(structured.parties.join(" ")).toMatch(/Diego Alvarez|Elena Rodriguez/);
+      expect(structured.parties).toHaveLength(2);
+
+      const live = buildLiveDraftPreview(answered);
+      const bullets = buildWeCapturedSummaryBullets(answered, live);
+      const partiesBullet = bullets.find((b) => b.kind === "parties");
+      expect(partiesBullet?.displayValue).not.toMatch(/still needed/i);
+      expect(partiesBullet?.provenance).not.toBe("still_needed");
+      expect(partiesBullet?.displayValue).toMatch(/Priya Shah|Marcus Thompson/);
+      expect(partiesBullet?.displayValue).toMatch(/Diego Alvarez|Elena Rodriguez/);
+
+      // Empty form slots + painted dump names must not become Fix details.
+      const emptySlotsDraft = {
+        ...paintedDraft,
+        parties: [
+          { name: "", role: "client" },
+          { name: "", role: "service_provider" },
+        ],
+      };
+      expect(
+        getDraftFirstReviewBlocker(emptySlotsDraft, {
+          userVisibleFullDocumentPlain: body,
+          intakeText: answered,
+        }),
+      ).toBeNull();
+      expect(
+        isPartyFixDetailsReviewBlocker(emptySlotsDraft, {
+          userVisibleFullDocumentPlain: body,
+          intakeText: answered,
+        }),
+      ).toBe(false);
 
       const resolved = resolveFreeStarterReviewBody({
         draft: paintedDraft,
@@ -335,6 +378,35 @@ Effective Date: upon full execution by both parties
       expect(resolved.body).not.toMatch(/\bParty B\b/i);
     },
   );
+
+  it("between: painted dump names with empty slots are not a Fix-details party blocker", () => {
+    const dump = PRIYA_DIEGO_LOGO_BRAND;
+    const colonPreview =
+      'SERVICES AGREEMENT\n\nThis Agreement ("Agreement") is entered into by and between: Priya Shah of Northline Studio ("Client") and Diego Alvarez of Harbor Marks LLC ("Service Provider") (collectively, the "Parties").\n\n1. Scope of Services';
+    const extracted = extractRealPartyNamesFromPreview(colonPreview);
+    expect(extracted?.party1).toMatch(/Priya Shah of Northline Studio/i);
+    expect(extracted?.party2).toMatch(/Diego Alvarez of Harbor Marks LLC/i);
+    const emptySlotsDraft = {
+      ...emptyStarterCheckoutPendingShell(),
+      title: "Services Agreement",
+      parties: [
+        { name: "", role: "client" },
+        { name: "", role: "service_provider" },
+      ],
+    };
+    expect(
+      getDraftFirstReviewBlocker(emptySlotsDraft, {
+        userVisibleFullDocumentPlain: colonPreview,
+        intakeText: dump,
+      }),
+    ).toBeNull();
+    expect(
+      isPartyFixDetailsReviewBlocker(emptySlotsDraft, {
+        userVisibleFullDocumentPlain: colonPreview,
+        intakeText: dump,
+      }),
+    ).toBe(false);
+  });
 
   it("create path evaluates the missing-tenet ask before free paint", () => {
     const src = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
@@ -354,6 +426,16 @@ Effective Date: upon full execution by both parties
     expect(defaultsAt).toBeGreaterThan(firstSeed);
     expect(preAt).toBeGreaterThan(defaultsAt);
     expect(reseedAt).toBeGreaterThan(preAt);
+    expect(src).toContain("setIntakePartyEditorRows(normalizeIntakePartyEditorRows(seededNames))");
+    // Live #93 painted dump names but sticky CTA still said Fix details because
+    // reviewIncomplete used empty slots (draftHasPlaceholderFieldsForRecipients)
+    // even after getDraftFirstReviewBlocker returned null.
+    expect(src).toContain(
+      '(!limitedReviewIgnoresGenericTitleOnly && firstBlocker === "other_placeholder")',
+    );
+    expect(src).toContain(
+      "partyNamesResolvedViaRenderedPreview(draft, renderedAgreementPreview, debouncedStepBuffer)",
+    );
   });
 
   it.each(THIN_TWO_PARTY_STATED_SCOPE)(

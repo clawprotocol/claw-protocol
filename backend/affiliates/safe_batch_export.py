@@ -7,8 +7,6 @@ from collections import defaultdict
 from decimal import Decimal
 from typing import Any, Dict, List, Optional, Tuple
 
-from eth_abi import encode as eth_abi_encode
-
 from backend.affiliates.evm_wallet import validate_evm_wallet_address
 from backend.economics import config as econ_config
 from backend.economics.store import EconomicsStore, get_economics_store
@@ -28,6 +26,10 @@ def _norm_addr(addr: str) -> str:
 
 def erc20_transfer_data(recipient: str, amount_base_units: int) -> str:
     """ABI-encoded transfer(address,uint256) call data (0x-prefixed hex)."""
+    try:
+        from eth_abi import encode as eth_abi_encode
+    except ImportError as exc:
+        raise RuntimeError("eth_abi is required for Safe batch export") from exc
     if amount_base_units < 0:
         raise ValueError("negative_amount")
     selector = _ERC20_TRANSFER_SELECTOR

@@ -23,6 +23,7 @@ import {
   extractLineSeparatedLegalEntityParties,
   normalizeAgreementPartyName,
 } from "./partySlotIdentityNormalize";
+import { extractStatedTwoPartyHiringPair } from "./intakeNamedPartyFallback";
 
 export type IntakeStructuredAgreement = {
   parties: string[];
@@ -577,6 +578,20 @@ function extractStructuredParties(text: string, lower: string, rawIntake?: strin
       roleHints: {},
       uncertain: false,
       structured: { party_1: lineSeparated[0]!, party_2: lineSeparated[1]! },
+    };
+  }
+
+  // Person-of-entity hiring pair: two parties, never four (person + org on each side).
+  const hiringPair = extractStatedTwoPartyHiringPair(rawIntake || text);
+  if (hiringPair && hiringPair.length === 2) {
+    const roleHints: Record<string, string> = {};
+    if (hiringPair[0].role) roleHints[hiringPair[0].name.toLowerCase()] = hiringPair[0].role;
+    if (hiringPair[1].role) roleHints[hiringPair[1].name.toLowerCase()] = hiringPair[1].role;
+    return {
+      parties: [hiringPair[0].name, hiringPair[1].name],
+      roleHints,
+      uncertain: false,
+      structured: { party_1: hiringPair[0].name, party_2: hiringPair[1].name },
     };
   }
 

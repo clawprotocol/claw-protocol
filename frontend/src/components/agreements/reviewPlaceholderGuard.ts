@@ -44,14 +44,23 @@ const TRAILING_ORG_PREPOSITION_RE = /\s+(?:of|at|for|from|on\s+behalf\s+of|repre
  * "Jordan Lee of [ORG_1]" is recognized as the real name "Jordan Lee" for
  * confidence checks. The returned names have tokens stripped.
  */
+function stripPreviewPartyDecorators(raw: string): string {
+  return sanitizePartiesInput(raw)
+    .replace(/\s*\(collectively\b[\s\S]*$/i, "")
+    .replace(/\s*\([^)]*\)\s*/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 export function extractRealPartyNamesFromPreview(preview: string): { party1: string; party2: string } | null {
   if (!preview || preview.length < 50) return null;
   const firstChunk = preview.slice(0, 800);
-  const betweenAndPattern = /\b(?:entered\s+into\s+)?(?:by\s+and\s+)?between\s+([^,\n]+?)\s+and\s+([^.,\n]+)/i;
+  const betweenAndPattern =
+    /\b(?:entered\s+into\s+)?(?:by\s+and\s+)?between:?\s+([^,\n]+?)\s+and\s+([^.,\n]+)/i;
   const match = firstChunk.match(betweenAndPattern);
   if (!match) return null;
-  const p1Raw = sanitizePartiesInput((match[1] || "").trim());
-  const p2Raw = sanitizePartiesInput((match[2] || "").trim());
+  const p1Raw = stripPreviewPartyDecorators(match[1] || "");
+  const p2Raw = stripPreviewPartyDecorators(match[2] || "");
   if (!p1Raw || !p2Raw || p1Raw.length < 2 || p2Raw.length < 2) return null;
   if (PLACEHOLDER_PARTY_NAME_RE.test(p1Raw) || PLACEHOLDER_PARTY_NAME_RE.test(p2Raw)) return null;
   const p1Stripped = stripInternalPartyRefFragments(p1Raw).replace(TRAILING_ORG_PREPOSITION_RE, "").trim();
@@ -69,13 +78,36 @@ export function extractRealPartyNamesFromPreview(preview: string): { party1: str
  * appear in the document body (e.g. "Priya Shah and Diego Alvarez") but draft.parties
  * still has generic placeholders.
  */
+/**
+ * Dump already named two parties (person-of-entity hiring pair) and those
+ * people appear in the painted body. Kept local to avoid import cycles.
+ */
+export function dumpStatedPartiesPaintedInBody(
+  intakeText: string | null | undefined,
+  renderedPreview: string | null | undefined,
+): boolean {
+  const intake = String(intakeText || "").replace(/\s+/g, " ").trim();
+  const body = String(renderedPreview || "");
+  if (intake.length < 20 || body.length < 50) return false;
+  const m =
+    /\b([A-Z][A-Za-z.'-]+(?:\s+[A-Z][A-Za-z.'-]+)+)\s+of\s+[A-Z][\s\S]{0,80}?\s+is\s+(?:hiring|engaging|retaining|commissioning)\s+([A-Z][A-Za-z.'-]+(?:\s+[A-Z][A-Za-z.'-]+)+)\s+of\s+/i.exec(
+      intake,
+    );
+  if (!m?.[1] || !m[2]) return false;
+  const lower = body.toLowerCase();
+  return [m[1].trim(), m[2].trim()].every((person) => {
+    return person.length >= 3 && lower.includes(person.toLowerCase());
+  });
+}
+
 export function partyNamesResolvedViaRenderedPreview(
   draft: ParsedDraftShape | null | undefined,
   renderedPreview: string | null | undefined,
+  intakeText?: string | null,
 ): boolean {
   if (!draft || !draftHasPlaceholderParties(draft)) return false;
-  const extracted = extractRealPartyNamesFromPreview(renderedPreview || "");
-  return extracted !== null;
+  if (extractRealPartyNamesFromPreview(renderedPreview || "") !== null) return true;
+  return dumpStatedPartiesPaintedInBody(intakeText, renderedPreview);
 }
 
 /** After sanitization, the joined parties line parses as two substantive non-placeholder names. */
@@ -391,7 +423,9 @@ export function getDraftFirstReviewBlocker(
 ): DraftReviewFirstBlocker | null {
   if (!draft) return null;
   const plain = (opts?.userVisibleFullDocumentPlain || "").trim();
-  const partyNamesResolvedViaPreview = plain.length >= 50 && partyNamesResolvedViaRenderedPreview(draft, plain);
+  const partyNamesResolvedViaPreview =
+    plain.length >= 50 &&
+    partyNamesResolvedViaRenderedPreview(draft, plain, opts?.intakeText);
   if (draftHasPlaceholderParties(draft)) {
     if (partyNamesResolvedViaPreview) {
       // Party names exist in the rendered preview but draft.parties has placeholders.
@@ -407,8 +441,29 @@ export function getDraftFirstReviewBlocker(
   ) {
     return "identity_placeholder_in_corpus";
   }
-  if (draftHasPlaceholderFieldsForRecipients(draft)) return "other_placeholder";
+  if (draftHasPlaceholderFieldsForRecipients(draft)) {
+    // Empty form slots must not become "Fix details" when the dump names are already painted.
+    if (partyNamesResolvedViaPreview) return null;
+    return "other_placeholder";
+  }
   return null;
+}
+
+/**
+ * Sticky CTA "Fix details" / "Add party names" caused only by missing party slots
+ * even though the dump already named the parties and the body painted them.
+ */
+export function isPartyFixDetailsReviewBlocker(
+  draft: ParsedDraftShape | null | undefined,
+  opts?: {
+    userVisibleFullDocumentPlain?: string | null;
+    intakeText?: string | null;
+  },
+): boolean {
+  const blocker = getDraftFirstReviewBlocker(draft, opts);
+  if (blocker === "party_placeholder") return true;
+  if (blocker === "other_placeholder" && draftHasPlaceholderParties(draft)) return true;
+  return false;
 }
 
 /** First structured row to open for “Fix review details” (parties handled separately). */

@@ -5129,8 +5129,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   useEffect(() => {
     if (intakePartyEditorTouchedRef.current) return;
     const extracted = parseIntakeToStructuredAgreement(intakeGuidanceCombined.trim()).parties;
-    setIntakePartyEditorRows(normalizeIntakePartyEditorRows(extracted));
-  }, [intakeGuidanceCombined]);
+    const rows = extracted.length >= 2
+      ? extracted
+      : (draft?.parties || []).map((p) => (p?.name || "").trim()).filter((n) => n.length >= 2);
+    setIntakePartyEditorRows(normalizeIntakePartyEditorRows(rows));
+  }, [intakeGuidanceCombined, draft]);
 
   useEffect(() => {
     setPreviewFieldOverrides((prev) => {
@@ -13013,6 +13016,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       if (!skipFreeStarterCreateSubmit) {
         // Defaults / legal-party fallback can restore Party A/B after the early seed.
         parsed = seedStatedTwoPartyNamesOnHollowDraft(parsed, rawIntake);
+        if (!intakePartyEditorTouchedRef.current) {
+          const seededNames = (parsed.parties || [])
+            .map((p) => (p?.name || "").trim())
+            .filter((n) => n.length >= 2);
+          if (seededNames.length >= 2) {
+            setIntakePartyEditorRows(normalizeIntakePartyEditorRows(seededNames));
+          }
+        }
       }
       const nextMissing = computeMissing(parsed, rawIntake);
       setMissing(nextMissing);
@@ -24503,7 +24514,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         );
         /** Party names are in the rendered agreement preview even if draft.parties has placeholders. */
         const partyNamesResolvedViaRenderedDoc = Boolean(
-          draft && partyNamesResolvedViaRenderedPreview(draft, renderedAgreementPreview),
+          draft && partyNamesResolvedViaRenderedPreview(draft, renderedAgreementPreview, debouncedStepBuffer),
         );
         const partyNamesIncompleteForProgress = Boolean(
           draft && draftHasPlaceholderParties(draft) && !basicPartyNamesResolvedViaLivePreview && !partyNamesResolvedViaRenderedDoc,
@@ -24522,7 +24533,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           draft &&
             (partyNamesIncompleteForProgress ||
               firstBlocker === "identity_placeholder_in_corpus" ||
-              (!limitedReviewIgnoresGenericTitleOnly && draftHasPlaceholderFieldsForRecipients(draft))),
+              (!limitedReviewIgnoresGenericTitleOnly && firstBlocker === "other_placeholder")),
         );
         if (
           reviewIncomplete &&
