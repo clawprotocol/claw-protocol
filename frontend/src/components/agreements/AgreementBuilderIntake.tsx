@@ -8463,7 +8463,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       const resumeSnap = readCreateComplexityResume();
       const origFromResume = resumeSnap?.originalUserIntakeRaw?.trim();
       if (origFromResume) writeOriginalUserIntakeRawIfRicher(origFromResume);
-      let prior = draftSnapshotRef.current ?? resumeSnap?.pending ?? null;
+      const checkoutBackSnapForPrior = readCheckoutBackRestoreSnapshot();
+      let prior = draftSnapshotRef.current ?? resumeSnap?.pending ?? checkoutBackSnapForPrior?.draft ?? null;
       const docSnapEarly = agreementDocumentTextRef.current.trim();
       if (docSnapEarly && prior) {
         try {
@@ -8484,15 +8485,17 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       if (rawIntakeBase.trim()) {
         ensurePremiumCheckoutIntakePreserved(rawIntakeBase);
       }
-      if (!rawIntakeBase.trim() || !prior) {
+      const checkoutBackIntakeForRestore = (checkoutBackSnapForPrior?.intakeText ?? "").trim();
+      const hasRestorabenIntake = rawIntakeBase.trim().length >= 20 || checkoutBackIntakeForRestore.length >= 20;
+      if (!rawIntakeBase.trim() && !hasRestorabenIntake) {
         if (import.meta.env.MODE !== "test") {
           // eslint-disable-next-line no-console
           console.info("[CLAW] premium hydration failed", {
-            reason: !prior ? "no_prior_draft" : "empty_raw_intake_after_resolve",
+            reason: "empty_raw_intake_after_resolve",
           });
         }
         console.warn("[premium-flow] premium_rewrite_aborted", {
-          reason: !prior ? "no_prior_draft" : "empty_raw_intake_after_resolve",
+          reason: "empty_raw_intake_after_resolve",
           hasPrior: Boolean(prior),
         });
         stripPremiumCompletionQueryParam();
@@ -8503,6 +8506,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         setPremiumPipelineUserMessage(null);
         return;
       }
+      const effectiveIntakeBase = rawIntakeBase.trim() || checkoutBackIntakeForRestore;
       const pendCaptured =
         (resumeSnap?.premiumUpgradeNotes ?? "").trim() || pendingUpgradePromptRef.current.trim();
       if (import.meta.env.MODE !== "test") {
@@ -8511,19 +8515,21 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       }
       console.info("[premium-flow] payment_return_detected", {
         premiumCompletion: true,
-        rawBaseLen: rawIntakeBase.length,
+        rawBaseLen: effectiveIntakeBase.length,
         pendingUpgradeLen: pendingUpgradePromptRef.current.trim().length,
         premiumResumeNotesLen: (resumeSnap?.premiumUpgradeNotes ?? "").trim().length,
         pendCapturedLen: pendCaptured.length,
         docSnapLen: docSnapEarly.length,
+        priorIsNull: prior === null,
+        checkoutBackIntakeLen: checkoutBackIntakeForRestore.length,
       });
       beginPaidProPaymentToReviewTrace({
         traceId: getOrInitSessionAgreementGenerationId(),
         sessionGenerationId: getOrInitSessionAgreementGenerationId(),
-        intakeText: rawIntakeBase,
+        intakeText: effectiveIntakeBase,
       });
 
-      const mergedIntake = buildPremiumMergedIntakeWithUserNotes(rawIntakeBase, pendCaptured);
+      const mergedIntake = buildPremiumMergedIntakeWithUserNotes(effectiveIntakeBase, pendCaptured);
       premiumGapBaseIntakeRef.current = mergedIntake;
       logPremiumSessionConsistency({
         context: "post_checkout_premium_intake_preserved",
@@ -8536,6 +8542,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       // Immediately rebuild a fallback body from intake before generation starts.
       // This ensures useLayoutEffect guards work, preventing empty body between restore and generation.
       // Universal path rule: paid session must paint ≥200 body before review shell renders.
+      // Do NOT wait for generate to fail — paint immediately if body is hollow/empty/<200.
+      // Keep this body on screen while generate runs. If generate succeeds with non-hollow Pro body, replace it.
+      // If generate fails, keep the rebuilt body.
       {
         const checkoutBackSnap = readCheckoutBackRestoreSnapshot();
         const earlyIntake = mergedIntake || checkoutBackSnap?.intakeText || "";
@@ -8543,13 +8552,17 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         const currentBodyIsHollow = currentBodyLen < 200 || !isNonHollowBody(agreementDocumentTextRef.current, earlyIntake);
         const needsEarlyFallback = earlyIntake.length >= 20 && currentBodyIsHollow;
         
-        if (needsEarlyFallback && prior) {
-          const earlyFallbackBody = rebuildBodyFromIntakeForProFailure(earlyIntake, prior);
+        // Run early fallback regardless of whether prior is null - use checkoutBackSnap.draft as fallback
+        if (needsEarlyFallback) {
+          const draftForRebuild = prior ?? checkoutBackSnap?.draft ?? null;
+          const earlyFallbackBody = rebuildBodyFromIntakeForProFailure(earlyIntake, draftForRebuild);
           if (earlyFallbackBody.trim().length >= 200 && isNonHollowBody(earlyFallbackBody, earlyIntake)) {
             lastKnownGoodAuthoritativeDraftRef.current = earlyFallbackBody;
             setAgreementDocumentText(earlyFallbackBody);
             setProUpgradeUseStarterView(false);
             setProFullDraftQualityRetry(false);
+            setProFullDraftCustomGateMessage(null);
+            setPremiumSendPathUnlocked(true);
             console.info("[paid-pro-early-fallback-body]", {
               intakeLen: earlyIntake.length,
               bodyLen: earlyFallbackBody.length,
@@ -8557,6 +8570,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
               trigger: "post_checkout_early_restore",
               previousBodyLen: currentBodyLen,
               previousBodyHollow: currentBodyIsHollow,
+              priorIsNull: prior === null,
+              usedCheckoutBackDraft: draftForRebuild === checkoutBackSnap?.draft,
             });
           }
         }
@@ -8568,12 +8583,56 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           originalSessionLen: readOriginalUserIntakeRaw().length,
           resumeOrigLen: (resumeSnap?.originalUserIntakeRaw ?? "").trim().length,
           resumeRawIntakeLen: (resumeSnap?.rawIntake ?? "").trim().length,
-          rawIntakeBaseLen: rawIntakeBase.length,
+          rawIntakeBaseLen: effectiveIntakeBase.length,
           mergedIntakeLen: mergedIntake.length,
           hasPriorDraft: Boolean(prior),
+          priorFromCheckoutBackSnap: prior === checkoutBackSnapForPrior?.draft,
           generationId: getOrInitSessionAgreementGenerationId(),
         });
       }
+
+      if (!prior) {
+        console.info("[paid-pro-fallback-prior-null]", {
+          intakeLen: mergedIntake.length,
+          checkoutBackDraftPresent: Boolean(checkoutBackSnapForPrior?.draft),
+          checkoutBackIntakeLen: checkoutBackIntakeForRestore.length,
+        });
+        const rebuiltBody = rebuildBodyFromIntakeForProFailure(
+          mergedIntake || checkoutBackSnapForPrior?.intakeText || "",
+          checkoutBackSnapForPrior?.draft ?? null,
+        );
+        if (rebuiltBody && rebuiltBody.trim().length >= 200) {
+          setAgreementDocumentText(rebuiltBody);
+          lastKnownGoodAuthoritativeDraftRef.current = rebuiltBody;
+          setProUpgradeUseStarterView(false);
+          setProFullDraftQualityRetry(false);
+          setProFullDraftCustomGateMessage(null);
+          setPremiumSendPathUnlocked(true);
+          setHardError(null);
+          setPremiumPostCheckoutPhase(null);
+          setPremiumPipelineUserMessage(null);
+          setCreateFlowPhase("draft_ready_for_review");
+          setDisplayPhase("review");
+          setCreateUiStage(CreateUiStage.DRAFT);
+          setMobileWorkspacePane("preview");
+          setPreviewPaneRevealed(true);
+          bumpPremiumSurfaceGateTick();
+          stripPremiumCompletionQueryParam();
+          console.info("[paid-pro-fallback-prior-null-success]", {
+            bodyLen: rebuiltBody.length,
+            source: "rebuildBodyFromIntakeForProFailure",
+          });
+          return;
+        }
+        stripPremiumCompletionQueryParam();
+        setHardError(
+          "We could not restore your agreement draft. Your payment has been recorded. Please contact support@lawdog.me for assistance.",
+        );
+        setPremiumPostCheckoutPhase(null);
+        setPremiumPipelineUserMessage(null);
+        return;
+      }
+
       const minMs = 1500 + Math.floor(Math.random() * 1001);
       const started = Date.now();
 
@@ -10972,9 +11031,21 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         clearPremiumSendIntent();
         setPremiumSendModeUserChoice(null);
         setPremiumSendModeTouched(false);
-        const parties = extractCleanPremiumParties(mergedIntake, prior!);
+        const effectivePrior: ParsedDraftShape = prior ?? checkoutBackSnapForPrior?.draft ?? {
+          title: "Services Agreement",
+          jurisdiction: null,
+          parties: [],
+          purpose: null,
+          payment_terms: null,
+          payment: null,
+          duration: null,
+          due_date: null,
+          effective_date: null,
+          additional_terms: null,
+        };
+        const parties = extractCleanPremiumParties(mergedIntake, effectivePrior);
         const recipientCandidates = parties.map((p) => ({ name: p.name, email: "", role: "Party" }));
-        const patched: ParsedDraftShape = { ...prior!, parties };
+        const patched: ParsedDraftShape = { ...effectivePrior, parties };
         const priorForMergeFb =
           draftSnapshotRef.current ?? readCreateComplexityResume()?.pending ?? prior ?? null;
         const merged = mergePremiumDraftPartiesWithRecipientPriority(
@@ -11033,7 +11104,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             lastPremiumWinningCorpusRef.current = recoveryBody;
             premiumPipelineOutputBodyRef.current = recoveryBody;
             if ((winningBodyText || "").trim().length >= 500) {
-              const parties = extractCleanPremiumParties(mergedIntake, prior!);
+              const parties = extractCleanPremiumParties(mergedIntake, effectivePrior);
               const recipientCandidates = parties.map((p) => ({ name: p.name, email: "", role: "Party" }));
               persistPremiumCompletionSnapshot({
                 premiumDraft: merged.draft,
@@ -15541,6 +15612,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     }
     if (agreementDocumentDirtyRef.current) return;
     if (hasPaidProSourceOfTruth()) return;
+    // UNIVERSAL PAID SESSION GUARD: Never overwrite a ≥200 non-hollow body during paid session
+    // with a potentially hollow preview. The early fallback body must be preserved while generate runs.
+    if (hasPaidPremiumCompletionSession() && lastKnownGoodAuthoritativeDraftRef.current.trim().length >= 200) {
+      return;
+    }
     const placeholderGate = {
       isGenerating: previewPlaceholderGateIsGeneratingRef.current,
       hasDraftPayload: starterReviewServerDraftReadyRef.current,
