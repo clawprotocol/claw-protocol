@@ -1162,8 +1162,11 @@ import {
 } from "./postCheckoutMissingFactsGate";
 import { evaluatePostGenerateTenetRecall } from "./postGenerateTenetRecall";
 import {
+  canOpenPaidSessionFinalReviewAfterSigners,
+  resolvePaidSessionTwoSignerNamesEmailsComplete,
   resolvePaidSessionVisibleDealBody,
   shouldShowPaidSessionGeneratingOverlay,
+  shouldSkipPaidSessionReviewHydrateWait,
 } from "./paidProPaidSessionLanding";
 import {
   effectivePremiumRefineApplyLogRevisionIntent,
@@ -2395,6 +2398,11 @@ type CreateFlowSendRecipientsPanelProps = {
   sendRequiresConfirmStep: boolean;
   /** Paid Pro delivery on review column — avoid legacy “Share this agreement” hero. */
   paidProInlineRecipientShell?: boolean;
+  /**
+   * After-pay visitor first review: collect two signer names + emails only.
+   * Hide extra Signer name / title / address fields until Prepare for signing.
+   */
+  nameEmailOnlySignerFields?: boolean;
   /** Paid Pro: keep recipient inputs mounted while emails are missing/invalid (no collapsed dead-end). */
   recipientBlockForceExpanded?: boolean;
   /** Override green primary label (e.g. “Add recipient emails” before gate clears). */
@@ -2488,6 +2496,7 @@ function CreateFlowSendRecipientsPanel({
   sendDisabled,
   sendRequiresConfirmStep,
   paidProInlineRecipientShell = false,
+  nameEmailOnlySignerFields = false,
   recipientBlockForceExpanded = false,
   premiumPrimarySendLabelOverride = null,
   primaryCtaHelperText,
@@ -2526,9 +2535,11 @@ function CreateFlowSendRecipientsPanel({
         ? "signature"
         : effectivePremiumSendMode;
   const signaturePrepMode =
-    resolvedSendMode === "review"
+    nameEmailOnlySignerFields
       ? false
-      : paidProInlineRecipientShell || resolvedSendMode === "signature";
+      : resolvedSendMode === "review"
+        ? false
+        : paidProInlineRecipientShell || resolvedSendMode === "signature";
   const notifySignerMetadataFieldEdit = (args: {
     partyIndex: number;
     field: PaidProSignerMetadataField;
@@ -20425,6 +20436,31 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     lastKnownGoodPlain: lastKnownGoodAuthoritativeDraftRef.current,
     intakeText: paidProFirstReviewDisplayContext.intakeText,
   });
+  const paidSessionTwoSignersReady = resolvePaidSessionTwoSignerNamesEmailsComplete({
+    signer1Name: (partySignerNames[0] || recipient1Name || "").trim(),
+    signer1Email: recipient1Email,
+    signer2Name: (partySignerNames[1] || recipient2Name || "").trim(),
+    signer2Email: recipient2Email,
+  });
+  const paidSessionFinalReviewAfterSignersReady = canOpenPaidSessionFinalReviewAfterSigners({
+    paidSessionActive: hasPaidPremiumCompletionSession(),
+    visibleDealBody: paidSessionVisibleDealBody,
+    twoSignerNamesAndEmailsComplete:
+      paidSessionTwoSignersReady || paidProSignerDetailsGate.complete,
+  });
+  const paidSessionSkipReviewHydrateWait = shouldSkipPaidSessionReviewHydrateWait({
+    paidSessionActive: hasPaidPremiumCompletionSession(),
+    visibleDealBody: paidSessionVisibleDealBody,
+  });
+
+  useEffect(() => {
+    if (!onHomeGuidedTransitionPhase) return;
+    // After pay, a visible deal on the card is already the review surface.
+    // Do not re-open "Preparing your review screen" while generate/hydrate runs.
+    if (paidSessionVisibleDealBody) {
+      onHomeGuidedTransitionPhase("review_ready");
+    }
+  }, [onHomeGuidedTransitionPhase, paidSessionVisibleDealBody]);
 
   const paidProStarterBaselinePlain = useMemo(
     () => buildFreeStarterBaselinePlain(draft),
@@ -20541,7 +20577,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const paidProAwaitingRuntimeAuthority =
     premiumPaidDocumentSurface &&
     paidProRuntimeAuthority.showFinalizingOnly &&
-    !(hasPaidPremiumCompletionSession() && paidProFirstReviewCorpusReady);
+    !(hasPaidPremiumCompletionSession() && paidProFirstReviewCorpusReady) &&
+    !paidSessionVisibleDealBody;
 
   const blockPaidProReviewShellWithoutCorpus = useMemo(
     () =>
@@ -20573,6 +20610,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const simpleProFinalReviewShellActive = useMemo(() => {
     if (blockPaidProReviewShellWithoutCorpus && !canonicalPaidCreateFlowFirstReviewActive) return false;
     if (
+      paidSessionVisibleDealBody &&
+      (hasAuthoritativeSigningSnapshot() || paidProSignerMetadataFinalizedLatch) &&
+      !premiumRecipientUxActive &&
+      createUiStage === CreateUiStage.DRAFT
+    ) {
+      return true;
+    }
+    if (
       (acceptedPaidProAuthorityActive ||
         paidProPostCheckoutFirstReviewActive ||
         canonicalPaidCreateFlowFirstReviewActive) &&
@@ -20595,6 +20640,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     createUiStage,
     simpleProFinalReviewActive,
     paidProRuntimeAuthority.canRenderProReviewShell,
+    paidSessionVisibleDealBody,
+    paidProSignerMetadataFinalizedLatch,
   ]);
 
   const paidProForcedFirstReviewActive =
@@ -23751,6 +23798,29 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           : "demo_session_signer_details_incomplete_fallback",
       };
     }
+    // After-pay visitor: visible ≥200 rebuild + two names/emails is enough.
+    // Do not wait for 1001-char SoT before Continue / Complete signer details.
+    if (
+      paidSessionVisibleDealBody &&
+      !dashboardSignerSetupResumeUiActive &&
+      !paidProSignerMetadataFinalizedLatch &&
+      !hasAuthoritativeSigningSnapshot()
+    ) {
+      return {
+        label: paidProSignerDetailsGate.complete || paidSessionTwoSignersReady
+          ? "Continue"
+          : "Complete signer details",
+        action:
+          paidProSignerDetailsGate.complete || paidSessionTwoSignersReady
+            ? "guided_continue"
+            : "complete_recipient_details",
+        disabled: false,
+        reason:
+          paidProSignerDetailsGate.complete || paidSessionTwoSignersReady
+            ? "paid_pro_signer_details_complete"
+            : "paid_session_signer_details_incomplete",
+      };
+    }
     // Dashboard signer-setup resume owns the sticky CTA — never Retry Pro draft / Describe agreement.
     if (dashboardSignerSetupResumeUiActive && paidProCanonicalReviewSignerSetupActive) {
       const resumeCta = resolveDashboardSignerSetupResumePrimaryCta({
@@ -24511,6 +24581,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     paidProSignerSetupStickyCtaSurfaceActive,
     dashboardSignerSetupResumeUiActive,
     paidProSignerDetailsGate.complete,
+    paidSessionVisibleDealBody,
+    paidSessionTwoSignersReady,
+    paidProSignerMetadataFinalizedLatch,
     canonicalPaidCreateFlowFirstReviewActive,
     authoritativeCreateFlowReviewShellInput,
     paidProFirstReviewCorpusReady,
@@ -31341,7 +31414,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   );
 
   const finalizePaidProSignerMetadataAndOpenReviewDecision = React.useCallback(async (): Promise<boolean> => {
-    if (!paidProSignerDetailsGate.complete) {
+    if (!paidProSignerDetailsGate.complete && !paidSessionFinalReviewAfterSignersReady) {
       scrollGuidedSignerSetupIntoView();
       return false;
     }
@@ -31365,10 +31438,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       intakeText: intakeForHydration,
       draftPartyNames: (draft?.parties ?? []).map((p) => String((p as { name?: string }).name ?? "").trim()),
     });
+    const paidSessionVisibleRebuild = (
+      paidProFirstReviewDisplayContext.acceptedCanonicalPlain ||
+      lastKnownGoodAuthoritativeDraftRef.current ||
+      ""
+    ).trim();
     const rawCorpusResolution = resolvePaidProSignerFinalizeRawCorpus({
-      authoritativePaidProReviewPlain,
+      authoritativePaidProReviewPlain: authoritativePaidProReviewPlain || paidSessionVisibleRebuild,
       simpleProFinalReviewPlain: simpleProFinalReviewCorpus.plainText,
-      immutableSourceOfTruthOnly: true,
+      immutableSourceOfTruthOnly: !paidSessionSkipReviewHydrateWait,
     });
     const rawCorpus = rawCorpusResolution.corpus;
     const hydrated = buildHydratedAuthoritativeSigningCorpusFromAuthority({
@@ -31399,6 +31477,27 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       bumpPremiumSurfaceGateTick();
       scrollGuidedSignerSetupIntoView();
     };
+    // After pay, a visible ≥200 rebuild on the card is enough to open existing
+    // SimpleProFinalReviewScreen. Do not wait for 1001-char SoT or a new agreement GET.
+    if (paidSessionSkipReviewHydrateWait) {
+      const visibleCorpus = (hydrated.corpus || rawCorpus || paidSessionVisibleRebuild).trim();
+      if (visibleCorpus.length >= PAID_PRO_FALLBACK_REBUILD_MIN_LEN) {
+        pinFinalizedSignerAppliedCorpus(visibleCorpus, "paid_pro_signer_metadata_finalize");
+      }
+      setPaidProInlineSignerSetupLatched(false);
+      setPaidProSignerMetadataFinalizedLatch(true);
+      setGuidedFinalReviewExplicitlyOpened(true);
+      guidedFinalReviewExplicitlyUnlockedRef.current = true;
+      setCreateFlowPhase("draft_ready_for_review");
+      setDisplayPhase("review");
+      setHardError(null);
+      setGuidedSigningConfirmationBlockMessage(null);
+      setLoading(false);
+      onHomeGuidedTransitionPhase?.("review_ready");
+      bumpPremiumSurfaceGateTick();
+      scrollPaidProReviewDecisionIntoView();
+      return true;
+    }
     // Paid create can paint a full review corpus before a workspace row exists. Mint/bind the
     // durable agreement id here so signer finalize does not dead-end on "reload from dashboard".
     let durableAgreementId = (
@@ -31546,6 +31645,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     return true;
   }, [
     paidProSignerDetailsGate.complete,
+    paidSessionFinalReviewAfterSignersReady,
+    paidSessionSkipReviewHydrateWait,
+    paidProFirstReviewDisplayContext.acceptedCanonicalPlain,
+    onHomeGuidedTransitionPhase,
     scrollGuidedSignerSetupIntoView,
     flushGuidedSignerMetadataBeforeFinalReview,
     currentPremiumMergedIntakeKey,
@@ -32717,7 +32820,20 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             return;
           }
           case "complete_recipient_details": {
-            if (cta.reason === "dashboard_signer_setup_resume_incomplete") {
+            if (
+              paidSessionSkipReviewHydrateWait &&
+              (paidSessionFinalReviewAfterSignersReady ||
+                paidProSignerDetailsGate.complete ||
+                paidSessionTwoSignersReady)
+            ) {
+              void finalizePaidProSignerMetadataAndOpenReviewDecision();
+              return;
+            }
+            if (
+              paidSessionSkipReviewHydrateWait ||
+              cta.reason === "paid_session_signer_details_incomplete" ||
+              cta.reason === "dashboard_signer_setup_resume_incomplete"
+            ) {
               const focusKey = paidProSignerDetailsGate.firstIncompleteFieldKey;
               if (focusKey && focusVisibleRecipientInput(focusKey)) return;
               scrollGuidedSignerSetupIntoView();
@@ -35967,6 +36083,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                               agreementId={reviewAgreementId}
                                               {...nPartySignerSetupPanelProps}
                                               paidProInlineRecipientShell={paidProCanonicalReviewSignerSetupActive}
+                                              nameEmailOnlySignerFields={
+                                                paidSessionVisibleDealBody && !signaturePreparationRequested
+                                              }
                                               hidePrimarySendCta={Boolean(
                                                 paidProCanonicalReviewSignerSetupActive &&
                                                   (paidProCanonicalStickyCta?.showStickyBar ||

@@ -511,12 +511,28 @@ export function resolvePaidProSignerDetailsGate(
 
   for (let i = 0; i < requiredCount; i++) {
     let legal = paidProLegalEntityForIndex(args, i);
-    const signerName = norm(args.partySignerNames[i] ?? "");
+    let signerName = norm(args.partySignerNames[i] ?? "");
+    const rawRecipientName = norm(
+      i === 0
+        ? args.recipient1Name ?? ""
+        : i === 1
+          ? args.recipient2Name ?? ""
+          : args.extraPartyLegalNames?.[i - 2] ?? "",
+    );
     // Casual two-party deals often have a role-only slot (Contractor) and a
     // typed person name (Mike). Use that person name as the party legal name
     // so Save can reach final review.
     if (!legal && personNameUsableAsPartyLegal(signerName)) {
       legal = signerName;
+    }
+    // After-pay visitor path: the typed person name (party slot or recipient
+    // field) IS the signer. Canonical company identities from intake must not
+    // demand a second Signer name / title / address field to Continue.
+    if (!signerName && personNameUsableAsPartyLegal(rawRecipientName)) {
+      signerName = rawRecipientName;
+    }
+    if (!signerName && personNameUsableAsPartyLegal(legal)) {
+      signerName = legal;
     }
     legalEntityNames.push(legal);
     const email = paidProEmailForIndex(args, i);
