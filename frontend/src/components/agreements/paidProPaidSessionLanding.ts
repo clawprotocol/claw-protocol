@@ -31,16 +31,38 @@ export function resolvePaidSessionVisibleDealBody(args: {
 }
 
 /**
+ * Visitor-visible 1–5 question missing-tenet ask is already the landing.
+ * Free (`freeStarterMissingTenetAsk`) and paid (`awaiting_gaps`) share this.
+ */
+export function isVisibleMissingTenetAskLanding(args: {
+  phase?: string | null;
+  freeStarterAskQuestionCount?: number;
+  paidGapQuestionCount?: number;
+}): boolean {
+  const freeCount = args.freeStarterAskQuestionCount ?? 0;
+  if (freeCount >= 1 && freeCount <= 5) return true;
+  const paidCount = args.paidGapQuestionCount ?? 0;
+  if ((args.phase || "").trim() === "awaiting_gaps" && paidCount >= 1 && paidCount <= 5) {
+    return true;
+  }
+  return false;
+}
+
+/**
  * Full-screen generating overlay / wait shimmer may show only when there is no
- * visitor-visible deal yet. A real missing-tenet ask (`awaiting_gaps`) is landing (B).
+ * visitor-visible deal and no missing-tenet ask landing. A real ask
+ * (`awaiting_gaps` / freeStarterMissingTenetAsk) is landing (B) — overlay must
+ * not cover clickable inputs. Generate may continue in the background.
  */
 export function shouldShowPaidSessionGeneratingOverlay(args: {
   phase: string | null | undefined;
   hasVisibleDealBody: boolean;
+  hasVisibleAskLanding?: boolean;
 }): boolean {
+  if (args.hasVisibleAskLanding) return false;
   const phase = (args.phase || "").trim();
   if (!phase || phase === "premium_network_recoverable") return false;
-  if (phase === "awaiting_gaps") return true;
+  if (phase === "awaiting_gaps") return false;
   if (args.hasVisibleDealBody) return false;
   return true;
 }

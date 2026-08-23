@@ -25,7 +25,11 @@ import {
   getRequiredClarificationTopics,
   scoreFiveTenets,
 } from "./proAgreementFiveTenets";
-import { assessStarterComplexityGate, emptyStarterCheckoutPendingShell } from "./starterMultiPartyProGate";
+import {
+  assessStarterComplexityGate,
+  emptyStarterCheckoutPendingShell,
+  shouldResolveStarterHomeTransitionToReviewReady,
+} from "./starterMultiPartyProGate";
 import {
   evaluateFreeStarterMissingTenetAsk,
   extractStatedTwoPartyHiringPair,
@@ -34,6 +38,10 @@ import {
   seedStatedTwoPartyNamesOnHollowDraft,
   shouldAskMissingTenetsBeforeFreePaint,
 } from "./freeStarterMissingTenetAsk";
+import {
+  isVisibleMissingTenetAskLanding,
+  shouldShowPaidSessionGeneratingOverlay,
+} from "./paidProPaidSessionLanding";
 
 const PRIYA_DIEGO_LOGO_BRAND =
   "Priya Shah of Northline Studio is hiring Diego Alvarez of Harbor Marks LLC to design a logo and brand kit.";
@@ -246,5 +254,83 @@ Effective Date: upon full execution by both parties
     const beginGen = src.indexOf("beginStarterDraftGeneration();", parseStart);
     expect(askAt).toBeGreaterThan(parseStart);
     expect(beginGen).toBeGreaterThan(askAt);
+  });
+
+  it.each(THIN_TWO_PARTY_STATED_SCOPE)(
+    "%s ask landing hides Preparing/Building overlay (inputs stay clickable)",
+    (_label, dump) => {
+      const ask = evaluateFreeStarterMissingTenetAsk(dump);
+      expect(ask.action).toBe("ask");
+      if (ask.action !== "ask") return;
+      expect(ask.questions.length).toBeGreaterThanOrEqual(2);
+      expect(ask.questions.length).toBeLessThanOrEqual(5);
+
+      const askVisible = isVisibleMissingTenetAskLanding({
+        phase: null,
+        freeStarterAskQuestionCount: ask.questions.length,
+      });
+      expect(askVisible).toBe(true);
+      expect(
+        shouldShowPaidSessionGeneratingOverlay({
+          phase: "processing",
+          hasVisibleDealBody: false,
+          hasVisibleAskLanding: askVisible,
+        }),
+      ).toBe(false);
+      expect(
+        shouldShowPaidSessionGeneratingOverlay({
+          phase: "awaiting_gaps",
+          hasVisibleDealBody: false,
+          hasVisibleAskLanding: askVisible,
+        }),
+      ).toBe(false);
+      expect(
+        shouldResolveStarterHomeTransitionToReviewReady({
+          draft: null,
+          createUiStage: "INPUT",
+          createFlowPhase: "capturing_input",
+          isGenerating: true,
+          missingTenetAskVisible: askVisible,
+        }),
+      ).toBe(true);
+    },
+  );
+
+  it("still shows generating overlay when there is no ask and no painted deal", () => {
+    expect(
+      isVisibleMissingTenetAskLanding({
+        phase: "processing",
+        freeStarterAskQuestionCount: 0,
+        paidGapQuestionCount: 0,
+      }),
+    ).toBe(false);
+    expect(
+      shouldShowPaidSessionGeneratingOverlay({
+        phase: "processing",
+        hasVisibleDealBody: false,
+        hasVisibleAskLanding: false,
+      }),
+    ).toBe(true);
+    expect(
+      shouldResolveStarterHomeTransitionToReviewReady({
+        draft: null,
+        createUiStage: "INPUT",
+        createFlowPhase: "generating_draft",
+        isGenerating: true,
+        missingTenetAskVisible: false,
+      }),
+    ).toBe(false);
+  });
+
+  it("create path dismisses Preparing when beginFreeMissingTenetAsk lands the ask", () => {
+    const src = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
+    expect(src).toContain("missingTenetAskVisible");
+    expect(src).toContain("hasVisibleAskLanding");
+    expect(src).toContain("isVisibleMissingTenetAskLanding");
+    const beginAsk = src.indexOf("const beginFreeMissingTenetAsk");
+    expect(beginAsk).toBeGreaterThan(0);
+    const beginAskEnd = src.indexOf("const resolvePaidCreateGateBypassContext", beginAsk);
+    const beginAskBody = src.slice(beginAsk, beginAskEnd);
+    expect(beginAskBody).toContain('onHomeGuidedTransitionPhase?.("review_ready")');
   });
 });

@@ -6,6 +6,7 @@ import {
   isNonHollowBody,
 } from "./freeStarterReviewBodyResolver";
 import {
+  isVisibleMissingTenetAskLanding,
   resolvePaidSessionVisibleDealBody,
   shouldShowPaidSessionGeneratingOverlay,
 } from "./paidProPaidSessionLanding";
@@ -95,13 +96,42 @@ describe("paid session landing — overlay vs deal (two faces)", () => {
     ).toBe(true);
   });
 
-  it("keeps a real missing-tenet ask (awaiting_gaps) even when a rebuild exists", () => {
+  it("hides Building overlay when a real missing-tenet ask is the landing", () => {
     expect(
       shouldShowPaidSessionGeneratingOverlay({
         phase: "awaiting_gaps",
         hasVisibleDealBody: true,
       }),
+    ).toBe(false);
+    expect(
+      shouldShowPaidSessionGeneratingOverlay({
+        phase: "processing",
+        hasVisibleDealBody: false,
+        hasVisibleAskLanding: true,
+      }),
+    ).toBe(false);
+  });
+
+  it("recognizes free and paid 2–5 question asks as visible landings", () => {
+    expect(
+      isVisibleMissingTenetAskLanding({
+        phase: null,
+        freeStarterAskQuestionCount: 3,
+      }),
     ).toBe(true);
+    expect(
+      isVisibleMissingTenetAskLanding({
+        phase: "awaiting_gaps",
+        paidGapQuestionCount: 3,
+      }),
+    ).toBe(true);
+    expect(
+      isVisibleMissingTenetAskLanding({
+        phase: "processing",
+        freeStarterAskQuestionCount: 0,
+        paidGapQuestionCount: 0,
+      }),
+    ).toBe(false);
   });
 
   it("still shows Building overlay when paid session has no deal body yet", () => {
@@ -124,6 +154,9 @@ describe("paid session landing — overlay vs deal (two faces)", () => {
   it("AgreementBuilderIntake wires overlay hide + wait card to the same landing predicate", () => {
     const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
     expect(intake).toContain("shouldShowPaidSessionGeneratingOverlay");
+    expect(intake).toContain("isVisibleMissingTenetAskLanding");
+    expect(intake).toContain("hasVisibleAskLanding");
+    expect(intake).toContain("missingTenetAskLandingVisible");
     expect(intake).toContain("resolvePaidSessionVisibleDealBody");
     expect(intake).toContain("paidSessionVisibleDealBody");
     expect(intake).toContain("PremiumProWaitContinuityCard");
@@ -232,7 +265,7 @@ describe("paid session landing — dump 2 missing only governing law", () => {
         phase: "awaiting_gaps",
         hasVisibleDealBody,
       }),
-    ).toBe(true);
+    ).toBe(false);
   });
 
   it("after the law answer, a complete dump skips further asks and paints", () => {
