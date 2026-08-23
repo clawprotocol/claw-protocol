@@ -40,8 +40,12 @@ import {
   ensureStatedTwoPartyHiringNamesInBody,
 } from "./freeStarterMissingTenetAsk";
 import {
+  canOpenPaidSessionFinalReviewAfterSigners,
   isVisibleMissingTenetAskLanding,
+  readPremiumCompletionReturnFromHref,
+  resolvePaidSessionTwoSignerNamesEmailsComplete,
   shouldShowPaidSessionGeneratingOverlay,
+  shouldSuppressFreeMissingTenetAskAfterPay,
 } from "./paidProPaidSessionLanding";
 import { applyPreGenerationIntakeDefaults } from "./intakeClarificationPolicy";
 import { runIntakeDefaultsAndRoles } from "./intakeFamilyShell";
@@ -527,6 +531,77 @@ Effective Date: upon full execution by both parties
     const beginAskEnd = src.indexOf("const resolvePaidCreateGateBypassContext", beginAsk);
     const beginAskBody = src.slice(beginAsk, beginAskEnd);
     expect(beginAskBody).toContain('onHomeGuidedTransitionPhase?.("review_ready")');
+    expect(beginAskBody).toContain("shouldSuppressFreeMissingTenetAskAfterPay");
+    expect(beginAskBody).toContain("setFreeMissingTenetAsk(null)");
+  });
+});
+
+describe("after-pay paid restore does not remount leftover free ask (live #96 hole)", () => {
+  const dump = PRIYA_DIEGO_LOGO_BRAND;
+  const ask = evaluateFreeStarterMissingTenetAsk(dump);
+  const answered =
+    ask.action === "ask"
+      ? mergeNumberedTenetAnswersIntoIntake(
+          dump,
+          ask.topics,
+          "1. $2,400 due on signing\n2. 30 days starting August 22, 2026\n3. Texas",
+        )
+      : dump;
+
+  it("answered thin dump is paint, not leftover ask", () => {
+    expect(evaluateFreeStarterMissingTenetAsk(answered).action).toBe("paint");
+    expect(shouldAskMissingTenetsBeforeFreePaint(answered)).toBe(false);
+    expect(scoreFiveTenets(answered).isComplete).toBe(true);
+  });
+
+  it("premiumCompletion + restore=starterReview suppresses leftover free ask", () => {
+    const href = "https://lawdog.me/app/create?restore=starterReview&premiumCompletion=1";
+    expect(readPremiumCompletionReturnFromHref(href)).toBe(true);
+    expect(
+      shouldSuppressFreeMissingTenetAskAfterPay({
+        paidSessionActive: true,
+        premiumCompletionReturn: true,
+      }),
+    ).toBe(true);
+    expect(
+      isVisibleMissingTenetAskLanding({
+        phase: null,
+        freeStarterAskQuestionCount: ask.action === "ask" ? ask.questions.length : 3,
+        paidSessionActive: true,
+        premiumCompletionReturn: true,
+      }),
+    ).toBe(false);
+  });
+
+  it("both party emails stay enabled after paid restore (no leftover ask covering Party 2)", () => {
+    const src = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
+    const emailBlockStart = src.indexOf('data-claw-recipient-field={idx <= 1 ? (idx === 0 ? "r1-email" : "r2-email")');
+    expect(emailBlockStart).toBeGreaterThan(0);
+    const emailBlock = src.slice(emailBlockStart, emailBlockStart + 900);
+    expect(emailBlock).toContain('data-claw-recipient-field={idx <= 1 ? (idx === 0 ? "r1-email" : "r2-email")');
+    expect(emailBlock).not.toMatch(/\bdisabled\b/);
+    expect(emailBlock).not.toMatch(/\breadOnly\b/);
+    expect(emailBlock).not.toMatch(/pointer-events-none/);
+    expect(src).toContain("freeMissingTenetAskVisible");
+    expect(src).toContain("shouldSuppressFreeMissingTenetAskAfterPay");
+  });
+
+  it("two complete signers after paid restore open existing final review", () => {
+    const twoSigners = resolvePaidSessionTwoSignerNamesEmailsComplete({
+      signer1Name: "Priya Shah of Northline Studio",
+      signer1Email: "priya.shah.qa@example.com",
+      signer2Name: "Diego Alvarez of Harbor Marks LLC",
+      signer2Email: "diego.alvarez.qa@example.com",
+    });
+    expect(twoSigners).toBe(true);
+    expect(
+      canOpenPaidSessionFinalReviewAfterSigners({
+        paidSessionActive: true,
+        visibleDealBody: true,
+        twoSignerNamesAndEmailsComplete: twoSigners,
+      }),
+    ).toBe(true);
+    expect(extractStatedTwoPartyHiringPair(answered)).toHaveLength(2);
   });
 });
 

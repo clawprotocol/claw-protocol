@@ -252,7 +252,9 @@ export function SimpleCreatePage() {
     heroHandoff?.autoGenerate === true &&
     Boolean((heroHandoff?.text || "").trim()) &&
     !shouldSkipHomeAutoGenerateForStoredReview({ freshHomeHeroHandoff: handoffFromHome }) &&
-    !checkoutBackRestoreActive;
+    !checkoutBackRestoreActive &&
+    !premiumCompletionReturn &&
+    !hasPaidPremiumCompletionSession();
   const quickSendTypedArrival =
     heroHandoff?.quickSendTypedHandoff === true && Boolean((heroHandoff?.text || "").trim());
   const hadBrowserPromptDraft = useMemo(() => {

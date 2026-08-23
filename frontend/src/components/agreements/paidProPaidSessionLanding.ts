@@ -31,15 +31,44 @@ export function resolvePaidSessionVisibleDealBody(args: {
 }
 
 /**
+ * After pay (`premiumCompletion=1` or a paid session), the leftover free
+ * missing-tenet ask is never the landing. That dump is already the deal;
+ * signer-setup emails must stay typeable.
+ */
+export function shouldSuppressFreeMissingTenetAskAfterPay(args: {
+  paidSessionActive?: boolean;
+  premiumCompletionReturn?: boolean;
+}): boolean {
+  return Boolean(args.paidSessionActive || args.premiumCompletionReturn);
+}
+
+export function readPremiumCompletionReturnFromHref(href?: string | null): boolean {
+  const raw = (href || "").trim();
+  if (!raw) return false;
+  try {
+    return new URL(raw, "https://lawdog.local").searchParams.get("premiumCompletion") === "1";
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Visitor-visible 1–5 question missing-tenet ask is already the landing.
  * Free (`freeStarterMissingTenetAsk`) and paid (`awaiting_gaps`) share this.
+ * After pay, leftover free-ask state is not a landing — ignore it.
  */
 export function isVisibleMissingTenetAskLanding(args: {
   phase?: string | null;
   freeStarterAskQuestionCount?: number;
   paidGapQuestionCount?: number;
+  paidSessionActive?: boolean;
+  premiumCompletionReturn?: boolean;
 }): boolean {
-  const freeCount = args.freeStarterAskQuestionCount ?? 0;
+  const suppressFree = shouldSuppressFreeMissingTenetAskAfterPay({
+    paidSessionActive: args.paidSessionActive,
+    premiumCompletionReturn: args.premiumCompletionReturn,
+  });
+  const freeCount = suppressFree ? 0 : (args.freeStarterAskQuestionCount ?? 0);
   if (freeCount >= 1 && freeCount <= 5) return true;
   const paidCount = args.paidGapQuestionCount ?? 0;
   if ((args.phase || "").trim() === "awaiting_gaps" && paidCount >= 1 && paidCount <= 5) {

@@ -1168,11 +1168,13 @@ import { evaluatePostGenerateTenetRecall } from "./postGenerateTenetRecall";
 import {
   canOpenPaidSessionFinalReviewAfterSigners,
   isVisibleMissingTenetAskLanding,
+  readPremiumCompletionReturnFromHref,
   resolvePaidSessionTwoSignerNamesEmailsComplete,
   resolvePaidSessionVisibleDealBody,
   shouldShowPaidSessionFinalReviewActions,
   shouldShowPaidSessionGeneratingOverlay,
   shouldSkipPaidSessionReviewHydrateWait,
+  shouldSuppressFreeMissingTenetAskAfterPay,
   shouldTeardownPaidProSignerMetadataFinalizedLatch,
 } from "./paidProPaidSessionLanding";
 import {
@@ -3580,6 +3582,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const [freeMissingTenetAskField, setFreeMissingTenetAskField] = useState("");
   const freeMissingTenetAskRef = useRef(freeMissingTenetAsk);
   freeMissingTenetAskRef.current = freeMissingTenetAsk;
+  const suppressFreeMissingTenetAskAfterPay = shouldSuppressFreeMissingTenetAskAfterPay({
+    paidSessionActive: hasPaidPremiumCompletionSession(),
+    premiumCompletionReturn: readPremiumCompletionReturnFromHref(
+      typeof window !== "undefined" ? window.location.href : "",
+    ),
+  });
+  const freeMissingTenetAskVisible = suppressFreeMissingTenetAskAfterPay ? null : freeMissingTenetAsk;
   /** Calm inline copy when POST /refine fails; do not clear the step buffer. */
   const [reviewRefineUserMessage, setReviewRefineUserMessage] = useState<string | null>(null);
   const [missing, setMissing] = useState<MissingKey[]>([]);
@@ -12636,6 +12645,18 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   }, [draft, currentPremiumMergedIntakeKey, intakeCombined]);
 
   const beginFreeMissingTenetAsk = React.useCallback((rawIntake: string): boolean => {
+    if (
+      shouldSuppressFreeMissingTenetAskAfterPay({
+        paidSessionActive: hasPaidPremiumCompletionSession(),
+        premiumCompletionReturn: readPremiumCompletionReturnFromHref(
+          typeof window !== "undefined" ? window.location.href : "",
+        ),
+      })
+    ) {
+      setFreeMissingTenetAsk(null);
+      setFreeMissingTenetAskField("");
+      return false;
+    }
     const decision = evaluateFreeStarterMissingTenetAsk(rawIntake);
     if (decision.action !== "ask") return false;
     setFreeMissingTenetAsk({
@@ -13236,6 +13257,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   }, []);
 
   useLayoutEffect(() => {
+    if (!suppressFreeMissingTenetAskAfterPay) return;
+    if (!freeMissingTenetAskRef.current && !freeMissingTenetAskField) return;
+    setFreeMissingTenetAsk(null);
+    setFreeMissingTenetAskField("");
+    setMissing([]);
+    setFollowUpDetailTotal(0);
+  }, [suppressFreeMissingTenetAskAfterPay, freeMissingTenetAskField]);
+
+  useLayoutEffect(() => {
     if (!checkoutBackRestoreActive || !createProductionTwoPane || !simpleProductFlow) return;
     if (checkoutBackRestoreHydratedRef.current) return;
     if (draft != null) {
@@ -13331,15 +13361,17 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   useLayoutEffect(() => {
     if (!homeHeroAutoGenerate || checkoutBackRestoreActive || homeAutoGenerateStartedRef.current) return;
     if (paidProEditReturnResumeActive) return;
+    if (suppressFreeMissingTenetAskAfterPay) return;
     resetStalePaidReviewShellForFreeStarter("home_create_submit", {
       skipFreeStarterLatch:
         tierAllowsAdvancedFullDraftReveal(tier) && !isHeroFromHomeCreateEntry(),
     });
-  }, [homeHeroAutoGenerate, checkoutBackRestoreActive, paidProEditReturnResumeActive, tier]);
+  }, [homeHeroAutoGenerate, checkoutBackRestoreActive, paidProEditReturnResumeActive, suppressFreeMissingTenetAskAfterPay, tier]);
 
   useLayoutEffect(() => {
     if (!homeHeroAutoGenerate || checkoutBackRestoreActive || homeAutoGenerateStartedRef.current) return;
     if (paidProEditReturnResumeActive) return;
+    if (suppressFreeMissingTenetAskAfterPay) return;
     if (shouldSkipHomeAutoGenerateForStoredReview({ freshHomeHeroHandoff: true })) {
       homeAutoGenerateConsumedRef.current = true;
       return;
@@ -13406,6 +13438,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     beginStarterDraftGeneration,
     beginFreeMissingTenetAsk,
     commitStarterMultiPartyProGate,
+    suppressFreeMissingTenetAskAfterPay,
   ]);
 
   const runPersistedRefineFromStepBuffer = React.useCallback(
@@ -15404,7 +15437,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         hardError,
         intakeClarification,
         missingTenetAskVisible: Boolean(
-          freeMissingTenetAsk ||
+          freeMissingTenetAskVisible ||
             (premiumPostCheckoutPhase === "awaiting_gaps" && premiumGapQuestions.length > 0),
         ),
       })
@@ -15426,7 +15459,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     emptyAuthorityPrepFailSafe,
     hardError,
     intakeClarification,
-    freeMissingTenetAsk,
+    freeMissingTenetAskVisible,
     premiumPostCheckoutPhase,
     premiumGapQuestions.length,
   ]);
@@ -20619,7 +20652,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     }
     // Missing-tenet ask (free or paid) is the landing. Overlay must not cover inputs.
     if (
-      freeMissingTenetAsk ||
+      freeMissingTenetAskVisible ||
       (premiumPostCheckoutPhase === "awaiting_gaps" && premiumGapQuestions.length > 0)
     ) {
       onHomeGuidedTransitionPhase("review_ready");
@@ -20627,7 +20660,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   }, [
     onHomeGuidedTransitionPhase,
     paidSessionVisibleDealBody,
-    freeMissingTenetAsk,
+    freeMissingTenetAskVisible,
     premiumPostCheckoutPhase,
     premiumGapQuestions.length,
   ]);
@@ -23442,7 +23475,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       createUiStage === CreateUiStage.INPUT &&
       !isGenerating &&
       !draftPreCommitFreeze &&
-      !freeMissingTenetAsk,
+      !freeMissingTenetAskVisible,
   );
 
   const showUnifiedClauseSuggestions = Boolean(
@@ -23806,8 +23839,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   // "cannot access X before initialization" temporal-dead-zone crash in the CTA useMemo.
   const missingTenetAskLandingVisible = isVisibleMissingTenetAskLanding({
     phase: premiumPostCheckoutPhase,
-    freeStarterAskQuestionCount: freeMissingTenetAsk?.questions.length ?? 0,
+    freeStarterAskQuestionCount: freeMissingTenetAskVisible?.questions.length ?? 0,
     paidGapQuestionCount: premiumGapQuestions.length,
+    paidSessionActive: hasPaidPremiumCompletionSession(),
+    premiumCompletionReturn: suppressFreeMissingTenetAskAfterPay,
   });
   const premiumReturnWaitActive = Boolean(
     !paidSessionVisibleDealBody &&
@@ -29347,7 +29382,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const simpleCreateStickyBottomBarVisible =
     simpleCreateStickyBottomBarVisibleBaseGated &&
     !hideStickyForGuidedInProgress &&
-    !freeMissingTenetAsk;
+    !freeMissingTenetAskVisible;
 
   const [stickyBottomScrollInsetPx, attachPaidProStickyBar] = usePaidProStickyBottomInset(
     simpleCreateStickyBottomBarVisible,
@@ -33847,7 +33882,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   };
 
   function renderFreeMissingTenetAskPanel(): React.ReactNode {
-    if (!freeMissingTenetAsk || freeMissingTenetAsk.questions.length === 0) return null;
+    if (!freeMissingTenetAskVisible || freeMissingTenetAskVisible.questions.length === 0) return null;
     return (
       <div
         className="rounded-2xl border border-emerald-500/25 bg-slate-950/95 p-6 shadow-xl shadow-black/40 sm:p-8"
@@ -33855,7 +33890,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         aria-label="Missing agreement details"
       >
         <PremiumFinishAgreementGapsPanel
-          questions={freeMissingTenetAsk.questions}
+          questions={freeMissingTenetAskVisible.questions}
           oneField={freeMissingTenetAskField}
           onOneField={setFreeMissingTenetAskField}
           onContinue={submitFreeMissingTenetAnswers}
@@ -34906,7 +34941,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                         </div>
                       </div>
                     ) : null}
-                    {freeMissingTenetAsk ? (
+                    {freeMissingTenetAskVisible ? (
                       renderFreeMissingTenetAskPanel()
                     ) : (
                     <VoiceAugmentedTextArea
@@ -39530,7 +39565,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         </div>
       ) : null}
 
-      {freeMissingTenetAsk &&
+      {freeMissingTenetAskVisible &&
       !(createProductionTwoPane && createUiStage === CreateUiStage.INPUT && shouldShowProductionInputShell) ? (
         <div className="mt-4">{renderFreeMissingTenetAskPanel()}</div>
       ) : null}

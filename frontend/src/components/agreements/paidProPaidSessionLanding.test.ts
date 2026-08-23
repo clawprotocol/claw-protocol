@@ -7,8 +7,10 @@ import {
 } from "./freeStarterReviewBodyResolver";
 import {
   isVisibleMissingTenetAskLanding,
+  readPremiumCompletionReturnFromHref,
   resolvePaidSessionVisibleDealBody,
   shouldShowPaidSessionGeneratingOverlay,
+  shouldSuppressFreeMissingTenetAskAfterPay,
 } from "./paidProPaidSessionLanding";
 import { resolveShowPaidProReviewDocumentCard } from "./paidProDocumentBodyRouter";
 import {
@@ -134,6 +136,55 @@ describe("paid session landing — overlay vs deal (two faces)", () => {
     ).toBe(false);
   });
 
+  it("after pay, leftover free missing-tenet ask is not a landing", () => {
+    expect(
+      shouldSuppressFreeMissingTenetAskAfterPay({
+        paidSessionActive: true,
+        premiumCompletionReturn: false,
+      }),
+    ).toBe(true);
+    expect(
+      shouldSuppressFreeMissingTenetAskAfterPay({
+        paidSessionActive: false,
+        premiumCompletionReturn: true,
+      }),
+    ).toBe(true);
+    expect(
+      shouldSuppressFreeMissingTenetAskAfterPay({
+        paidSessionActive: false,
+        premiumCompletionReturn: false,
+      }),
+    ).toBe(false);
+    expect(
+      readPremiumCompletionReturnFromHref(
+        "https://lawdog.me/app/create?restore=starterReview&premiumCompletion=1",
+      ),
+    ).toBe(true);
+    expect(
+      readPremiumCompletionReturnFromHref("https://lawdog.me/app/create?restore=starterReview"),
+    ).toBe(false);
+    expect(
+      isVisibleMissingTenetAskLanding({
+        phase: null,
+        freeStarterAskQuestionCount: 3,
+        paidSessionActive: true,
+      }),
+    ).toBe(false);
+    expect(
+      isVisibleMissingTenetAskLanding({
+        phase: null,
+        freeStarterAskQuestionCount: 3,
+        premiumCompletionReturn: true,
+      }),
+    ).toBe(false);
+    expect(
+      isVisibleMissingTenetAskLanding({
+        phase: null,
+        freeStarterAskQuestionCount: 3,
+      }),
+    ).toBe(true);
+  });
+
   it("still shows Building overlay when paid session has no deal body yet", () => {
     expect(
       resolvePaidSessionVisibleDealBody({
@@ -161,6 +212,9 @@ describe("paid session landing — overlay vs deal (two faces)", () => {
     expect(intake).toContain("paidSessionVisibleDealBody");
     expect(intake).toContain("PremiumProWaitContinuityCard");
     expect(intake).toMatch(/premiumReturnWaitActive = Boolean\(\s*!paidSessionVisibleDealBody/);
+    expect(intake).toContain("shouldSuppressFreeMissingTenetAskAfterPay");
+    expect(intake).toContain("freeMissingTenetAskVisible");
+    expect(intake).toContain("suppressFreeMissingTenetAskAfterPay");
   });
 });
 
