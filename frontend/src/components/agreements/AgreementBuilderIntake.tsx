@@ -9374,7 +9374,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             // Also try the checkout back restore snapshot's previewText as a last resort
             const checkoutBackSnap = readCheckoutBackRestoreSnapshot();
             const checkoutBackPreview = (checkoutBackSnap?.previewText ?? "").trim();
-            const fallbackText = starterFallback.trim() || freeOnePagerFallback.trim() || checkoutBackPreview;
+            // Final fallback: preserve existing agreementDocumentText if it has content
+            const existingText = agreementDocumentTextRef.current.trim();
+            const fallbackText = starterFallback.trim() || freeOnePagerFallback.trim() || checkoutBackPreview || (existingText.length >= 200 ? existingText : "");
             if (fallbackText) {
               setAgreementDocumentText(fallbackText);
               setProUpgradeUseStarterView(true);
@@ -9382,8 +9384,6 @@ const AgreementBuilderIntake: React.FC<Props> = ({
               lastKnownGoodAuthoritativeDraftRef.current = fallbackText;
               // Enable signer fields so user can continue to signing from the fallback body.
               setPremiumSendPathUnlocked(true);
-            } else {
-              setAgreementDocumentText("");
             }
           }
           setReviewDocRefreshTick((n) => n + 1);
@@ -9618,7 +9618,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             // Also try the checkout back restore snapshot's previewText as a last resort
             const checkoutBackSnap = readCheckoutBackRestoreSnapshot();
             const checkoutBackPreview = (checkoutBackSnap?.previewText ?? "").trim();
-            const fallbackText = starterFallback.trim() || freeOnePagerFallback.trim() || checkoutBackPreview;
+            // Final fallback: preserve existing agreementDocumentText if it has content
+            const existingText = agreementDocumentTextRef.current.trim();
+            const fallbackText = starterFallback.trim() || freeOnePagerFallback.trim() || checkoutBackPreview || (existingText.length >= 200 ? existingText : "");
             if (fallbackText) {
               setAgreementDocumentText(fallbackText);
               setProUpgradeUseStarterView(true);
@@ -9626,8 +9628,6 @@ const AgreementBuilderIntake: React.FC<Props> = ({
               lastKnownGoodAuthoritativeDraftRef.current = fallbackText;
               // Enable signer fields so user can continue to signing from the fallback body.
               setPremiumSendPathUnlocked(true);
-            } else {
-              setAgreementDocumentText("");
             }
           }
           setReviewDocRefreshTick((n) => n + 1);
@@ -9804,7 +9804,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
               // Also try the checkout back restore snapshot's previewText as a last resort
               const checkoutBackSnap = readCheckoutBackRestoreSnapshot();
               const checkoutBackPreview = (checkoutBackSnap?.previewText ?? "").trim();
-              const fallbackText = starterFallback.trim() || freeOnePagerFallback.trim() || checkoutBackPreview;
+              // Final fallback: preserve existing agreementDocumentText if it has content
+              const existingText = agreementDocumentTextRef.current.trim();
+              const fallbackText = starterFallback.trim() || freeOnePagerFallback.trim() || checkoutBackPreview || (existingText.length >= 200 ? existingText : "");
               if (fallbackText) {
                 setAgreementDocumentText(fallbackText);
                 setProUpgradeUseStarterView(true);
@@ -9813,7 +9815,6 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                 // Enable signer fields so user can continue to signing from the fallback body.
                 setPremiumSendPathUnlocked(true);
               } else {
-                setAgreementDocumentText("");
                 setPremiumSendPathUnlocked(false);
               }
             }
@@ -10895,6 +10896,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           if (!paidFallbackBody.trim()) {
             const checkoutBackSnap = readCheckoutBackRestoreSnapshot();
             paidFallbackBody = (checkoutBackSnap?.previewText ?? "").trim();
+          }
+          // Final fallback: preserve existing agreementDocumentText if it has content
+          if (!paidFallbackBody.trim() && agreementDocumentTextRef.current.trim().length >= 200) {
+            paidFallbackBody = agreementDocumentTextRef.current.trim();
           }
           if (paidFallbackBody.trim()) {
             // Valid fallback body found - show it with signer fields enabled
@@ -15221,11 +15226,17 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       // Preserve existing text when:
       // 1. We have a good authoritative draft and persisted flow is active, OR
       // 2. We're in Pro retry/recovery state with existing starter text (proFullDraftQualityRetry + text >= 500)
+      // 3. We're in a paid premium completion session with existing text (after-pay restore)
       // This prevents wiping starter text when generation fails and returns to retry state.
       if (lastKnownGoodAuthoritativeDraftRef.current.trim().length >= 500 && premiumPersistedFlowActive) {
         return;
       }
       if (proFullDraftQualityRetryRef.current && agreementDocumentTextRef.current.trim().length >= 500) {
+        return;
+      }
+      // After-pay restore: never wipe existing body when we're in a paid checkout return session.
+      // The fallback code sets lastKnownGoodAuthoritativeDraftRef independently of premiumPersistedFlowActive.
+      if (hasPaidPremiumCompletionSession() && lastKnownGoodAuthoritativeDraftRef.current.trim().length >= 500) {
         return;
       }
       setAgreementDocumentText("");
