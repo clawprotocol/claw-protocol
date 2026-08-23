@@ -389,9 +389,11 @@ export function assessStarterComplexityGate(raw: string): StarterComplexityGateA
     numberedPartyMax >= 3 ||
     declaredPartyCount >= 3;
   const multiPartyDisplay =
-    namedDumpParties.length >= 3 && namedDumpParties.length >= parties.length
-      ? namedDumpParties
-      : parties;
+    parties.length >= 3
+      ? parties
+      : namedDumpParties.length >= 3
+        ? namedDumpParties
+        : parties;
   const displayParties =
     declaredMultiParty || uniqueReasons.includes("three_plus_legal_parties")
       ? multiPartyDisplay
