@@ -20,7 +20,7 @@ export type PaidProGenerationTerminalReason =
   | "review_ready_workspace_persist_failed"
   | "review_ready_paint_blocked_persist";
 
-export type PaidProGenerationTerminalOutcome = "review_ready" | "retry_recoverable" | "failed_recoverable";
+export type PaidProGenerationTerminalOutcome = "review_ready" | "retry_recoverable" | "failed_recoverable" | "fallback_recovered";
 
 /** Dismiss the processing modal and surface retry on the review shell. */
 export function resolvePaidProGenerationFailurePostCheckoutPhase(): null {

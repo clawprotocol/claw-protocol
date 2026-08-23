@@ -9458,7 +9458,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             reason: "founder_intent_gate",
             outcome: lastKnownGoodAuthoritativeDraftRef.current ? "fallback_recovered" : "retry_recoverable",
           });
-          if (!hasValidFallbackBody) {
+          if (!lastKnownGoodAuthoritativeDraftRef.current) {
             setPremiumPostCheckoutPhase(resolvePaidProGenerationFailurePostCheckoutPhase());
           }
           setPremiumPipelineUserMessage(null);
