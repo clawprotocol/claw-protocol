@@ -92,10 +92,13 @@ export function shouldForcePaidProReviewDocumentRender(): boolean {
 export function resolveShowPaidProReviewDocumentCard(args: {
   dashboardSignerSetupResumeUiActive?: boolean;
   canDisplayPaidProAgreementDocument: boolean;
+  /** Paid session already has a ≥200 non-hollow dump/rebuild — show the card, not the wait shimmer. */
+  paidSessionVisibleDealBody?: boolean;
 }): boolean {
   return Boolean(
     args.dashboardSignerSetupResumeUiActive ||
       args.canDisplayPaidProAgreementDocument ||
+      args.paidSessionVisibleDealBody ||
       shouldForcePaidProReviewDocumentRender(),
   );
 }

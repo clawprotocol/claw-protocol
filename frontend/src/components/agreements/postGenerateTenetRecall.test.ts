@@ -109,6 +109,17 @@ describe("post-generate tenet recall", () => {
     }
   });
 
+  it("does not re-ask governing law when original dump already stated Texas", () => {
+    const decision = evaluatePostGenerateTenetRecall({
+      paintedBody: INCOMPLETE_PAINTED,
+      alreadyAsked: false,
+      originalIntake:
+        "Priya Shah hires Diego Alvarez for a logo and brand kit for $2,400. Work runs 30 days. Texas governing law.",
+    });
+    expect(decision.missingTenets).not.toContain("governing_law");
+    expect(decision.questions.join(" ")).not.toMatch(/Which state's law/i);
+  });
+
   it("one-cycle cap: second paint does not re-ask", () => {
     const first = evaluatePostGenerateTenetRecall({
       paintedBody: INCOMPLETE_PAINTED,

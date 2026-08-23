@@ -669,7 +669,6 @@ import {
 } from "./premiumSituationIntelligence";
 import { PremiumAgreementReadonlyView } from "./PremiumAgreementReadonlyView";
 import { PaidProVisibleDocumentShell } from "./paidProVisibleDocumentShell";
-import { meetsPaidSessionFallbackPaintFloor } from "./paidProFirstReviewDisplayAuthority";
 import {
   hasCanonicalReviewCorpusForRender,
   PAID_PRO_DOCUMENT_BODY_SOT_MIN_LEN,
@@ -1162,6 +1161,10 @@ import {
   buildLocalMissingTenetQuestions,
 } from "./postCheckoutMissingFactsGate";
 import { evaluatePostGenerateTenetRecall } from "./postGenerateTenetRecall";
+import {
+  resolvePaidSessionVisibleDealBody,
+  shouldShowPaidSessionGeneratingOverlay,
+} from "./paidProPaidSessionLanding";
 import {
   effectivePremiumRefineApplyLogRevisionIntent,
   pickAuthoritativeProCorpusForRefine,
@@ -12014,6 +12017,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
               alreadyAsked:
                 Boolean(args.postGenerateTenetRecall) ||
                 premiumPostGenerateTenetAskedRef.current,
+              originalIntake: args.intakeText || premiumGapBaseIntakeRef.current || mergedIntake,
             });
             if (postGenerateRecall.action === "await_gaps") {
               holdModelPassForPostGenerateGaps = true;
@@ -20413,6 +20417,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     ],
   );
 
+  // After pay, a ≥200 non-hollow rebuild/deal on the card is landing (A). Overlay, wait
+  // shimmer, and Retry lockout all read this same predicate.
+  const paidSessionVisibleDealBody = resolvePaidSessionVisibleDealBody({
+    paidSessionActive: hasPaidPremiumCompletionSession(),
+    acceptedCanonicalPlain: paidProFirstReviewDisplayContext.acceptedCanonicalPlain,
+    lastKnownGoodPlain: lastKnownGoodAuthoritativeDraftRef.current,
+    intakeText: paidProFirstReviewDisplayContext.intakeText,
+  });
+
   const paidProStarterBaselinePlain = useMemo(
     () => buildFreeStarterBaselinePlain(draft),
     [draft, reviewDocRefreshTick, premiumSurfaceGateTick],
@@ -20584,7 +20597,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     paidProRuntimeAuthority.canRenderProReviewShell,
   ]);
 
-  const paidProForcedFirstReviewActive = paidProDocumentBodyRouter.branch === "paid_pro_visible_shell_forced";
+  const paidProForcedFirstReviewActive =
+    paidProDocumentBodyRouter.branch === "paid_pro_visible_shell_forced" ||
+    paidSessionVisibleDealBody;
   const paidProSignerSetupStickyCtaSurfaceActive = Boolean(
     acceptedPaidProAuthorityActive &&
       paidProFirstReviewCorpusReady &&
@@ -23559,11 +23574,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   // review state machine and its inputs are initialized before use — prevents the post-checkout
   // "cannot access X before initialization" temporal-dead-zone crash in the CTA useMemo.
   const premiumReturnWaitActive = Boolean(
-    (premiumPostCheckoutPhase &&
-      premiumPostCheckoutPhase !== "premium_network_recoverable" &&
-      premiumPostCheckoutPhase !== "premium_cors_blocked") ||
-      premiumAuthoritativeRequestInFlightUi ||
-      premiumReturnPatienceExtended,
+    !paidSessionVisibleDealBody &&
+      ((premiumPostCheckoutPhase &&
+        premiumPostCheckoutPhase !== "premium_network_recoverable" &&
+        premiumPostCheckoutPhase !== "premium_cors_blocked") ||
+        premiumAuthoritativeRequestInFlightUi ||
+        premiumReturnPatienceExtended),
   );
   const showPremiumCorsBlockedPanel = Boolean(
     !dashboardSignerSetupResumeUiActive &&
@@ -29110,6 +29126,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const showPaidProReviewDocumentCard = resolveShowPaidProReviewDocumentCard({
     dashboardSignerSetupResumeUiActive,
     canDisplayPaidProAgreementDocument,
+    paidSessionVisibleDealBody,
   });
   const paidProReviewBranchPath = useMemo(
     () =>
@@ -29790,22 +29807,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   // or SoT). That was the errant "Retry Pro draft" button over a successful Review.
   // Also lock out Retry when a valid fallback rebuild from intake exists (≥200 chars non-hollow).
   // After pay, if the card is showing the visitor's deal, Retry must not own the footer.
-  // Issue #83: Retry lockout uses the SAME predicate as shell paint — meetsPaidSessionFallbackPaintFloor.
-  // Check both #82 rebuild (acceptedCanonicalPlain) and lastKnownGood as fallback.
+  // Issue #83: Retry lockout uses the SAME predicate as shell paint / overlay hide.
   const paidProReviewCorpusLocksOutRetry = Boolean(
     hasPaidProSourceOfTruth() ||
       shouldForcePaidProReviewDocumentRender() ||
       acceptedPaidProAuthorityActive ||
       hasAcceptedPipelineReviewCorpusForRender() ||
-      (hasPaidPremiumCompletionSession() &&
-        (meetsPaidSessionFallbackPaintFloor(
-          (paidProFirstReviewDisplayContext.acceptedCanonicalPlain || "").trim(),
-          paidProFirstReviewDisplayContext.intakeText,
-        ) ||
-          meetsPaidSessionFallbackPaintFloor(
-            lastKnownGoodAuthoritativeDraftRef.current.trim(),
-            paidProFirstReviewDisplayContext.intakeText,
-          ))),
+      paidSessionVisibleDealBody,
   );
   const showRetryAsPrimaryCta = Boolean(
     !dashboardSignerSetupResumeUiActive &&
@@ -33823,7 +33831,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                 }}
               />
             ) : null}
-            {simpleProductFlow && createProductionTwoPane && premiumPostCheckoutPhase && premiumPostCheckoutPhase !== "premium_network_recoverable" ? (
+            {simpleProductFlow &&
+            createProductionTwoPane &&
+            shouldShowPaidSessionGeneratingOverlay({
+              phase: premiumPostCheckoutPhase,
+              hasVisibleDealBody: paidSessionVisibleDealBody,
+            }) ? (
               <div
                 className="fixed inset-0 z-[220] flex items-center justify-center bg-[#0a0e18]/92 px-4 backdrop-blur-sm"
                 role="dialog"

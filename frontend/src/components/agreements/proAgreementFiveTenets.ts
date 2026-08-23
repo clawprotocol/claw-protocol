@@ -38,7 +38,9 @@ export type FiveTenetDraftInput = {
 
 const PLACEHOLDER_DURATION_RE = /^(as stated in the agreement body\.?|tbd|n\/?a|to be determined|—|-)$/i;
 const DEFAULT_EFFECTIVE_RE = /upon full execution/i;
-const PLACEHOLDER_JURISDICTION_RE = /^(tbd|n\/?a|to be determined|unknown|\(empty\)|—|-)$/i;
+const PLACEHOLDER_JURISDICTION_RE =
+  /^(tbd|n\/?a|to be determined|to be agreed\b.*|unknown|\(empty\)|—|-)$/i;
+const HOLLOW_LAW_PLACEHOLDER_RE = /\bto be agreed\b/i;
 const PLACEHOLDER_PAYMENT_FIELD_RE =
   /^(?:(?:payment|compensation|consideration)(?:\s+terms?)?\s*(?::|-|is|are)?\s*)?(?:\[?not\s+(?:yet\s+)?specified\]?|not\s+yet\s+(?:agreed|specified)|tbd|n\/?a|to\s+be\s+(?:determined|agreed|specified)|unknown|—|-)$/i;
 const PAYMENT_PLACEHOLDER_IN_TEXT_RE =
@@ -217,8 +219,36 @@ function hasTerm(text: string): boolean {
   return TERM_PATTERNS.some((p) => p.test(text));
 }
 
+function textStatesConcreteJurisdiction(text: string): boolean {
+  return (
+    /\b(?:california|texas|new\s+york|delaware|florida|illinois|pennsylvania|ohio|georgia|north\s+carolina|michigan|arizona|washington|colorado|massachusetts|virginia|new\s+jersey|tennessee|oregon|nevada|minnesota|wisconsin|maryland|indiana|missouri|wyoming|new\s+mexico|utah|idaho|kansas|nebraska|south\s+dakota|north\s+dakota|montana|louisiana|arkansas|mississippi|alabama|kentucky|maine|vermont|new\s+hampshire|rhode\s+island|connecticut|iowa|west\s+virginia|hawaii|alaska|south\s+carolina|oklahoma)\s+law\b/i.test(
+      text,
+    ) ||
+    /\b(?:CA|TX|NY|DE|FL|IL|PA|OH|GA|NC|MI|AZ|WA|CO|MA|VA|NJ|TN|OR|NV|MN|WI|MD|IN|MO|WY|NM|UT|ID|KS|NE|SD|ND|MT|LA|AR|MS|AL|KY|ME|VT|NH|RI|CT|IA|WV|HI|AK|SC|OK)\s+law\b/.test(
+      text,
+    ) ||
+    /\bstate\s+of\s+[A-Z][a-z]+\b/.test(text) ||
+    /\blaw:\s*(?:california|texas|new\s+york|delaware|florida|illinois|wyoming|new\s+mexico|oklahoma)/i.test(
+      text,
+    ) ||
+    /\btexass?\s+law\b/i.test(text) ||
+    /\bgoverning\s+law\b[^.\n]{0,80}\b(?:california|texas|new\s+york|delaware|florida|illinois|oklahoma)\b/i.test(
+      text,
+    ) ||
+    /\b(?:california|texas|new\s+york|delaware|florida|illinois|oklahoma)\b[^.\n]{0,40}\bgoverning\s+law\b/i.test(
+      text,
+    )
+  );
+}
+
 function hasGoverningLaw(text: string): boolean {
-  return GOVERNING_LAW_PATTERNS.some((p) => p.test(text));
+  const t = (text || "").trim();
+  if (!t) return false;
+  // Hollow starter "Governing law: To be agreed" is not a stated jurisdiction.
+  if (HOLLOW_LAW_PLACEHOLDER_RE.test(t) && !textStatesConcreteJurisdiction(t)) {
+    return false;
+  }
+  return GOVERNING_LAW_PATTERNS.some((p) => p.test(t));
 }
 
 function namedPartiesFromDraft(draft: FiveTenetDraftInput | null | undefined): string[] {
@@ -301,9 +331,11 @@ export function scoreFiveTenetsFromDraft(
   const title = (draft.title || "").trim();
   const parties = named.length >= 2 || hasParties(dump);
   const scope = purpose.length >= 8 || hasScope(purpose) || hasScope(title) || hasScope(dump);
-  const payment = isRealPaymentTerms(draft.payment_terms, draft.payment);
-  const term = isRealTermFromDraft(draft);
-  const governingLaw = isRealJurisdiction(draft.jurisdiction);
+  // Hollow free-starter fields ("To be agreed", empty jurisdiction) must not hide
+  // tenets the original dump already stated. Dump wins over placeholder draft.
+  const payment = isRealPaymentTerms(draft.payment_terms, draft.payment) || hasPayment(dump);
+  const term = isRealTermFromDraft(draft) || hasTerm(dump);
+  const governingLaw = isRealJurisdiction(draft.jurisdiction) || hasGoverningLaw(dump);
   return assembleFiveTenetScore(parties, scope, payment, term, governingLaw);
 }
 
@@ -497,6 +529,42 @@ function cleanPartyHint(draft?: FiveTenetDraftInput | null): string {
 /**
  * 2–5 clean one-liner questions. Never pastes outline / payment-placeholder text.
  */
+/**
+ * Drop gap questions that re-ask a tenet already stated in the original dump
+ * (or a real parsed draft field). Hollow starter "To be agreed" does not count.
+ */
+export function filterAskedTenetQuestionsAgainstOriginalIntake(
+  questions: string[],
+  intakeText: string,
+  draft?: FiveTenetDraftInput | null,
+): string[] {
+  const score = scoreFiveTenets(intakeText, draft);
+  return (questions || [])
+    .map((q) => (q || "").replace(/\s+/g, " ").trim())
+    .filter((q) => {
+      if (!q) return false;
+      if (
+        score.governingLaw &&
+        /state'?s?\s+law|governing\s+law|which\s+state|govern this agreement/i.test(q)
+      ) {
+        return false;
+      }
+      if (score.payment && /how much is paid|payment (amount|terms)|exact payment amount/i.test(q)) {
+        return false;
+      }
+      if (score.parties && /who are the parties/i.test(q)) {
+        return false;
+      }
+      if (score.scope && /purpose or scope/i.test(q)) {
+        return false;
+      }
+      if (score.term && /how long does this agreement/i.test(q)) {
+        return false;
+      }
+      return true;
+    });
+}
+
 export function buildLocalMissingTenetQuestions(
   intakeText: string,
   draft?: FiveTenetDraftInput | null,

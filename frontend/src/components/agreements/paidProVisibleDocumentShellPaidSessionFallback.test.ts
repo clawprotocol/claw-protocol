@@ -251,6 +251,40 @@ To be determined.`;
   });
 
   describe("resolvePaidProFirstReviewVisibleDisplayPlain with paid session", () => {
+    it("returns 200-499 char body when paidProActive is true (ForcedRoute / overlay path)", () => {
+      markPaidPremiumCompletionSession({ source: "settled_checkout" });
+      expect(hasPaidPremiumCompletionSession()).toBe(true);
+
+      const shortRebuilt = `SERVICES AGREEMENT
+
+This Agreement is entered into by Priya Shah of Northline Studio and Diego Alvarez of Harbor Marks LLC.
+
+1. PAYMENT: $2,400 total for branding project.
+
+2. GOVERNING LAW: Texas.
+
+3. SCOPE: Logo design and brand guidelines.
+
+IN WITNESS WHEREOF, the parties have executed this Agreement.`;
+
+      expect(shortRebuilt.length).toBeGreaterThanOrEqual(200);
+      expect(shortRebuilt.length).toBeLessThan(500);
+
+      const result = resolvePaidProFirstReviewVisibleDisplayPlain({
+        acceptedCanonicalPlain: shortRebuilt,
+        intakeText: PRIYA_DIEGO_INTAKE,
+        paidProActive: true,
+        premiumCheckoutCompleted: true,
+        premiumPaidDocumentSurface: true,
+        agreementId: "",
+      });
+
+      expect(result.plain.length).toBeGreaterThanOrEqual(200);
+      expect(result.plain).toContain("Priya Shah");
+      expect(result.plain).toContain("Texas");
+      expect(result.source).toBe("paid_session_intake_rebuild");
+    });
+
     it("returns 200-499 char body when paid session is active (below 500 authority floor)", () => {
       markPaidPremiumCompletionSession({ source: "settled_checkout" });
       expect(hasPaidPremiumCompletionSession()).toBe(true);

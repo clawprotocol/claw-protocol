@@ -104,6 +104,13 @@ export function resolveCanonicalPlainForVisibleShell(
   ) {
     return { plain: strippedPlain, source: resolution.source || "paid_session_intake_rebuild" };
   }
+  const parentRebuild = trimOrEmpty(args.acceptedCanonicalPlain);
+  if (
+    hasPaidPremiumCompletionSession() &&
+    meetsPaidSessionFallbackPaintFloor(parentRebuild, args.intakeText)
+  ) {
+    return { plain: parentRebuild, source: "paid_session_intake_rebuild" };
+  }
   return { plain: "", source: resolution.source || "none" };
 }
 
