@@ -8531,6 +8531,37 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         agreementGenerationId: getOrInitSessionAgreementGenerationId(),
         intakeFingerprint: shortIntakeFingerprint(mergedIntake),
       });
+
+      // EARLY FALLBACK BODY REBUILD FOR PAID RESTORE
+      // Immediately rebuild a fallback body from intake before generation starts.
+      // This ensures useLayoutEffect guards work, preventing empty body between restore and generation.
+      // Universal path rule: paid session must paint ≥200 body before review shell renders.
+      {
+        const checkoutBackSnap = readCheckoutBackRestoreSnapshot();
+        const earlyIntake = mergedIntake || checkoutBackSnap?.intakeText || "";
+        const currentBodyLen = agreementDocumentTextRef.current.trim().length;
+        const currentBodyIsHollow = currentBodyLen < 200 || !isNonHollowBody(agreementDocumentTextRef.current, earlyIntake);
+        const needsEarlyFallback = earlyIntake.length >= 20 && currentBodyIsHollow;
+        
+        if (needsEarlyFallback && prior) {
+          const earlyFallbackBody = rebuildBodyFromIntakeForProFailure(earlyIntake, prior);
+          if (earlyFallbackBody.trim().length >= 200 && isNonHollowBody(earlyFallbackBody, earlyIntake)) {
+            lastKnownGoodAuthoritativeDraftRef.current = earlyFallbackBody;
+            setAgreementDocumentText(earlyFallbackBody);
+            setProUpgradeUseStarterView(false);
+            setProFullDraftQualityRetry(false);
+            console.info("[paid-pro-early-fallback-body]", {
+              intakeLen: earlyIntake.length,
+              bodyLen: earlyFallbackBody.length,
+              source: "rebuildBodyFromIntakeForProFailure",
+              trigger: "post_checkout_early_restore",
+              previousBodyLen: currentBodyLen,
+              previousBodyHollow: currentBodyIsHollow,
+            });
+          }
+        }
+      }
+
       if (import.meta.env.DEV) {
         // eslint-disable-next-line no-console
         console.info("[premium-upgrade-source] post_checkout", {
@@ -15496,7 +15527,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       }
       // After-pay restore: never wipe existing body when we're in a paid checkout return session.
       // The fallback code sets lastKnownGoodAuthoritativeDraftRef independently of premiumPersistedFlowActive.
-      if (hasPaidPremiumCompletionSession() && lastKnownGoodAuthoritativeDraftRef.current.trim().length >= 500) {
+      // Use ≥200 threshold (not 500) to protect early fallback bodies from rebuildBodyFromIntakeForProFailure.
+      if (hasPaidPremiumCompletionSession() && lastKnownGoodAuthoritativeDraftRef.current.trim().length >= 200) {
+        return;
+      }
+      // UNIVERSAL PAID SESSION GUARD: Never wipe to empty when agreementDocumentText is already ≥200 and non-hollow.
+      // This prevents race conditions where useLayoutEffect fires before async generation completes.
+      if (hasPaidPremiumCompletionSession() && agreementDocumentTextRef.current.trim().length >= 200) {
         return;
       }
       setAgreementDocumentText("");
@@ -15575,7 +15612,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     } catch {
       // Only wipe to empty if we're not in Pro retry/recovery state with existing starter text.
       // This prevents losing the preserved starter during async effect churn.
-      if (!(proFullDraftQualityRetryRef.current && agreementDocumentTextRef.current.trim().length >= 500)) {
+      // UNIVERSAL PAID SESSION GUARD: Never wipe to empty during paid session when body ≥200.
+      const isPaidSessionWithExistingBody = hasPaidPremiumCompletionSession() && agreementDocumentTextRef.current.trim().length >= 200;
+      if (!(proFullDraftQualityRetryRef.current && agreementDocumentTextRef.current.trim().length >= 500) && !isPaidSessionWithExistingBody) {
         setAgreementDocumentText("");
       }
     }

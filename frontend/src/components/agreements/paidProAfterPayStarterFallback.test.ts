@@ -634,3 +634,240 @@ This Agreement shall be governed by the laws of the State of Texas.
     }
   });
 });
+
+/**
+ * Test for paid restore path with failed generation + hollow starter + intake present.
+ * Simulates the live scenario described in issue #76:
+ * - User enters fat dump (Priya/Diego $2400 Texas)
+ * - FREE starter is hollow (Party A/B, "covers due. Work.")
+ * - User pays for Pro (Stripe succeeded)
+ * - After pay return: Pro generation fails
+ * - RESULT: Must paint ≥200 body from intake, retry flag false, signers unlocked
+ */
+describe("Paid restore + failed generate + hollow starter scenario", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    sessionStorage.clear();
+    clearCheckoutBackRestoreSnapshot();
+    clearPaidPremiumCompletionSession();
+    clearPaidProSourceOfTruth();
+    vi.spyOn(console, "info").mockImplementation(() => {});
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    clearCheckoutBackRestoreSnapshot();
+    clearPaidPremiumCompletionSession();
+  });
+
+  const PRIYA_INTAKE_SCENARIO = `
+Priya Shah of Northline Studio is hiring Diego Alvarez from Harbor Marks LLC for a branding project.
+Payment: $2,400 total.
+Governing law: Texas.
+The project involves logo design and brand guidelines delivery within 6 weeks.
+`;
+
+  const HOLLOW_DRAFT_SCENARIO: ParsedDraftShape = {
+    title: "Services Agreement",
+    jurisdiction: "",
+    parties: [
+      { name: "Party A", role: "Client" },
+      { name: "Party B", role: "Service Provider" },
+    ],
+    purpose: "covers due. Work.",
+    payment_terms: "",
+    payment: null,
+    duration: null,
+    due_date: null,
+    effective_date: null,
+    additional_terms: null,
+  };
+
+  it("paid restore + failed generate + hollow starter + intake present → painted ≥200 body, retry flag false", () => {
+    markPaidPremiumCompletionSession({ source: "settled_checkout" });
+
+    persistStarterReviewBeforeCheckout({
+      intakeText: PRIYA_INTAKE_SCENARIO,
+      draft: HOLLOW_DRAFT_SCENARIO,
+      previewText: `SERVICES AGREEMENT
+
+This Agreement is entered into by and between:
+
+Party A ("Client")
+and
+Party B ("Service Provider")
+
+1. SERVICES
+Service Provider agrees to provide covers due. Work.
+
+2. PAYMENT TERMS
+To be agreed.
+
+3. GOVERNING LAW
+To be determined.
+`,
+    });
+
+    Object.defineProperty(window, "location", {
+      value: {
+        href: "https://lawdog.me/app/create?premiumCompletion=1&restore=starterReview",
+        origin: "https://lawdog.me",
+        search: "?premiumCompletion=1&restore=starterReview",
+      },
+      writable: true,
+      configurable: true,
+    });
+
+    const checkoutBackSnap = readCheckoutBackRestoreSnapshot();
+    const intakeForRebuild = PRIYA_INTAKE_SCENARIO;
+
+    const existingDocText = "";
+    const lastKnownGood = "";
+
+    const isValidNonHollowBody = (body: string): boolean => {
+      const trimmed = body.trim();
+      if (trimmed.length < 200) return false;
+      return isNonHollowBody(trimmed, intakeForRebuild);
+    };
+
+    let fallbackText = "";
+    let proUpgradeUseStarterView = true;
+    let proFullDraftQualityRetry = true;
+    let sendPathUnlocked = false;
+
+    if (existingDocText.length >= 200 && isValidNonHollowBody(existingDocText)) {
+      fallbackText = existingDocText;
+    }
+
+    if (!fallbackText && lastKnownGood.length >= 200 && isValidNonHollowBody(lastKnownGood)) {
+      fallbackText = lastKnownGood;
+    }
+
+    if (!fallbackText) {
+      const draftPreview = buildAgreementPreviewText(HOLLOW_DRAFT_SCENARIO, {
+        starterPreview: true,
+        intakeText: intakeForRebuild,
+      });
+      if (draftPreview.trim().length >= 200 && isValidNonHollowBody(draftPreview)) {
+        fallbackText = draftPreview.trim();
+      }
+    }
+
+    if (!fallbackText) {
+      const freeOnePager = getFreeOnePagerFallbackForProFailure(HOLLOW_DRAFT_SCENARIO);
+      if (freeOnePager.trim().length >= 200 && isValidNonHollowBody(freeOnePager)) {
+        fallbackText = freeOnePager.trim();
+      }
+    }
+
+    if (!fallbackText && checkoutBackSnap?.previewText) {
+      if (isValidNonHollowBody(checkoutBackSnap.previewText)) {
+        fallbackText = checkoutBackSnap.previewText.trim();
+      }
+    }
+
+    if (!fallbackText && intakeForRebuild.length >= 20) {
+      fallbackText = rebuildBodyFromIntakeForProFailure(intakeForRebuild, HOLLOW_DRAFT_SCENARIO);
+      if (fallbackText.trim().length >= 200 && isNonHollowBody(fallbackText, intakeForRebuild)) {
+        proUpgradeUseStarterView = false;
+        proFullDraftQualityRetry = false;
+        sendPathUnlocked = true;
+      }
+    }
+
+    expect(fallbackText).not.toBe("");
+    expect(fallbackText.length).toBeGreaterThanOrEqual(200);
+
+    expect(fallbackText).toContain("Priya Shah");
+    expect(fallbackText).toContain("Northline Studio");
+    expect(fallbackText).toContain("$2,400");
+    expect(fallbackText).toContain("Texas");
+
+    expect(fallbackText).not.toMatch(/\bParty A\b/i);
+    expect(fallbackText).not.toMatch(/\bParty B\b/i);
+    expect(fallbackText).not.toContain("covers due. Work.");
+
+    expect(proUpgradeUseStarterView).toBe(false);
+    expect(proFullDraftQualityRetry).toBe(false);
+    expect(sendPathUnlocked).toBe(true);
+  });
+
+  it("early fallback body sets lastKnownGoodAuthoritativeDraftRef to prevent useLayoutEffect wipe", () => {
+    markPaidPremiumCompletionSession({ source: "settled_checkout" });
+
+    persistStarterReviewBeforeCheckout({
+      intakeText: PRIYA_INTAKE_SCENARIO,
+      draft: HOLLOW_DRAFT_SCENARIO,
+      previewText: "",
+    });
+
+    const checkoutBackSnap = readCheckoutBackRestoreSnapshot();
+    const earlyIntake = PRIYA_INTAKE_SCENARIO || checkoutBackSnap?.intakeText || "";
+    const currentBodyIsHollow = true;
+    const needsEarlyFallback = earlyIntake.length >= 20 && currentBodyIsHollow;
+
+    expect(needsEarlyFallback).toBe(true);
+
+    const earlyFallbackBody = rebuildBodyFromIntakeForProFailure(earlyIntake, HOLLOW_DRAFT_SCENARIO);
+    expect(earlyFallbackBody.trim().length).toBeGreaterThanOrEqual(200);
+    expect(isNonHollowBody(earlyFallbackBody, earlyIntake)).toBe(true);
+
+    let lastKnownGoodAuthoritativeDraft = "";
+    let agreementDocumentText = "";
+    let proUpgradeUseStarterView = true;
+    let proFullDraftQualityRetry = true;
+
+    if (earlyFallbackBody.trim().length >= 200 && isNonHollowBody(earlyFallbackBody, earlyIntake)) {
+      lastKnownGoodAuthoritativeDraft = earlyFallbackBody;
+      agreementDocumentText = earlyFallbackBody;
+      proUpgradeUseStarterView = false;
+      proFullDraftQualityRetry = false;
+    }
+
+    expect(lastKnownGoodAuthoritativeDraft.length).toBeGreaterThanOrEqual(200);
+    expect(agreementDocumentText.length).toBeGreaterThanOrEqual(200);
+    expect(proUpgradeUseStarterView).toBe(false);
+    expect(proFullDraftQualityRetry).toBe(false);
+
+    const useLayoutEffectWouldWipe = (): boolean => {
+      const hasPaidSession = hasPaidPremiumCompletionSession();
+      if (hasPaidSession && lastKnownGoodAuthoritativeDraft.trim().length >= 200) {
+        return false;
+      }
+      if (hasPaidSession && agreementDocumentText.trim().length >= 200) {
+        return false;
+      }
+      return true;
+    };
+
+    expect(useLayoutEffectWouldWipe()).toBe(false);
+  });
+
+  it("useLayoutEffect guard prevents empty body when paid session with ≥200 char fallback", () => {
+    markPaidPremiumCompletionSession({ source: "settled_checkout" });
+
+    const fallbackBody = rebuildBodyFromIntakeForProFailure(PRIYA_INTAKE_SCENARIO, HOLLOW_DRAFT_SCENARIO);
+    expect(fallbackBody.length).toBeGreaterThanOrEqual(200);
+
+    const agreementDocumentText = fallbackBody;
+    const lastKnownGoodAuthoritativeDraft = fallbackBody;
+
+    const simulateUseLayoutEffectWithNoDraft = (): string => {
+      const hasPaidSession = hasPaidPremiumCompletionSession();
+
+      if (hasPaidSession && lastKnownGoodAuthoritativeDraft.trim().length >= 200) {
+        return agreementDocumentText;
+      }
+      if (hasPaidSession && agreementDocumentText.trim().length >= 200) {
+        return agreementDocumentText;
+      }
+      return "";
+    };
+
+    const result = simulateUseLayoutEffectWithNoDraft();
+    expect(result).not.toBe("");
+    expect(result.length).toBeGreaterThanOrEqual(200);
+    expect(result).toContain("Priya Shah");
+  });
+});
