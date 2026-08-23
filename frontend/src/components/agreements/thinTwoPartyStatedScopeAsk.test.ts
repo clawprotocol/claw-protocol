@@ -50,6 +50,7 @@ import { buildStarterAgreementPreviewForReview } from "./agreementPreviewFromDra
 import {
   draftHasPlaceholderParties,
   getDraftFirstReviewBlocker,
+  isPartyFixDetailsReviewBlocker,
 } from "./reviewPlaceholderGuard";
 import { resolveFreeStarterReviewBody } from "./freeStarterReviewBodyResolver";
 import { tryInferNamedPartiesFromIntake } from "./intakeNamedPartyFallback";
@@ -323,6 +324,41 @@ Effective Date: upon full execution by both parties
           intakeText: answered,
         }),
       ).not.toBe("party_placeholder");
+      expect(
+        isPartyFixDetailsReviewBlocker(paintedDraft, {
+          userVisibleFullDocumentPlain: body,
+          intakeText: answered,
+        }),
+      ).toBe(false);
+
+      const structured = parseIntakeToStructuredAgreement(answered);
+      expect(structured.parties).toHaveLength(2);
+      expect(structured.parties.join(" ")).toMatch(/Priya Shah|Marcus Thompson/);
+      expect(structured.parties.join(" ")).toMatch(/Diego Alvarez|Elena Rodriguez/);
+      expect(structured.parties).toHaveLength(2);
+
+      const live = buildLiveDraftPreview(answered);
+      const bullets = buildWeCapturedSummaryBullets(answered, live);
+      const partiesBullet = bullets.find((b) => b.kind === "parties");
+      expect(partiesBullet?.displayValue).not.toMatch(/still needed/i);
+      expect(partiesBullet?.provenance).not.toBe("still_needed");
+      expect(partiesBullet?.displayValue).toMatch(/Priya Shah|Marcus Thompson/);
+      expect(partiesBullet?.displayValue).toMatch(/Diego Alvarez|Elena Rodriguez/);
+
+      // Empty form slots + painted dump names must not become Fix details.
+      const emptySlotsDraft = {
+        ...paintedDraft,
+        parties: [
+          { name: "", role: "client" },
+          { name: "", role: "service_provider" },
+        ],
+      };
+      expect(
+        isPartyFixDetailsReviewBlocker(emptySlotsDraft, {
+          userVisibleFullDocumentPlain: body,
+          intakeText: answered,
+        }),
+      ).toBe(false);
 
       const resolved = resolveFreeStarterReviewBody({
         draft: paintedDraft,
@@ -354,6 +390,7 @@ Effective Date: upon full execution by both parties
     expect(defaultsAt).toBeGreaterThan(firstSeed);
     expect(preAt).toBeGreaterThan(defaultsAt);
     expect(reseedAt).toBeGreaterThan(preAt);
+    expect(src).toContain("setIntakePartyEditorRows(normalizeIntakePartyEditorRows(seededNames))");
   });
 
   it.each(THIN_TWO_PARTY_STATED_SCOPE)(
