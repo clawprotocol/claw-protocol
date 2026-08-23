@@ -17,12 +17,33 @@ import {
 } from "../../agreement/canonicalReviewSnapshotApi";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import { PAID_PRO_AUTHORITY_MIN_LEN } from "./paidProAgreementAuthority";
+import { isNonHollowBody } from "./freeStarterReviewBodyResolver";
 
 const PAID_PRO_FREEZE_TRUSTED_SOT_MIN_LEN = 40;
+
+/**
+ * Minimum length for paid-session fallback rebuild to paint.
+ * After pay, a ≥200 non-hollow rebuild from intake MUST paint even when
+ * paidProActive / agreementId / 500 floors are not met. Issue #83.
+ */
+export const PAID_PRO_PAID_SESSION_FALLBACK_MIN_LEN = 200;
 
 function meetsFirstReviewPaintFloor(len: number, trustedShortSoT = false): boolean {
   if (len >= PAID_PRO_AUTHORITY_MIN_LEN) return true;
   return trustedShortSoT && len >= PAID_PRO_FREEZE_TRUSTED_SOT_MIN_LEN;
+}
+
+/**
+ * Check if a body meets the paid-session fallback paint floor (≥200 non-hollow).
+ * This is the same predicate used for Retry lockout — issue #83 unification.
+ */
+export function meetsPaidSessionFallbackPaintFloor(
+  body: string,
+  intakeText?: string | null,
+): boolean {
+  const trimmed = (body || "").trim();
+  if (trimmed.length < PAID_PRO_PAID_SESSION_FALLBACK_MIN_LEN) return false;
+  return isNonHollowBody(trimmed, intakeText || "");
 }
 import {
   classifyPaidProDocumentBlocks,
@@ -209,6 +230,14 @@ function resolveAcceptedCanonicalPaintPlain(
   if (fromAuthoritativeDoc.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
     return { plain: fromAuthoritativeDoc, source: "authoritativeAgreementDocument" };
   }
+  // Issue #83: After pay, a ≥200 non-hollow rebuild from intake MUST paint.
+  // This uses the same predicate as Retry lockout — meetsPaidSessionFallbackPaintFloor.
+  if (
+    hasPaidPremiumCompletionSession() &&
+    meetsPaidSessionFallbackPaintFloor(fromParent, args.intakeText)
+  ) {
+    return { plain: fromParent, source: "paid_session_intake_rebuild" };
+  }
   return { plain: "", source: "none" };
 }
 
@@ -238,6 +267,21 @@ export function resolvePaidProFirstReviewVisibleDisplayPlain(
           authorityPaint.source === "authoritativeAgreementDocument"
             ? authorityPaint.source
             : PAID_PRO_ACCEPTED_CANONICAL_SOT_DISPLAY_SOURCE,
+        fallbackReason: null,
+        hasSoT,
+        hasServerFullDoc,
+        paidProActive: true,
+      };
+    }
+    // Issue #83: After pay, a ≥200 non-hollow rebuild from intake MUST paint
+    // even when paidProActive is false.
+    if (
+      authorityPaint.source === "paid_session_intake_rebuild" &&
+      meetsPaidSessionFallbackPaintFloor(authorityPaint.plain, args.intakeText)
+    ) {
+      return {
+        plain: authorityPaint.plain,
+        source: "paid_session_intake_rebuild",
         fallbackReason: null,
         hasSoT,
         hasServerFullDoc,
