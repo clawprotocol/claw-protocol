@@ -13,9 +13,12 @@ import {
   logTest310DisplaySource,
   logTest313HeadingRenderSource,
   logTest314HeadingInvariant,
+  meetsPaidSessionFallbackPaintFloor,
+  PAID_PRO_PAID_SESSION_FALLBACK_MIN_LEN,
   resolvePaidProFirstReviewVisibleDisplayPlain,
   type PaidProFirstReviewVisibleDisplayArgs,
 } from "./paidProFirstReviewDisplayAuthority";
+import { hasPaidPremiumCompletionSession } from "./premiumCompletionStorage";
 import { projectPaidProVisibleTitleDisplayPlain } from "./paidProDocumentTitleOpeningRepair";
 import {
   auditPaidProPostFinalizeVisibleSurface,
@@ -41,6 +44,7 @@ export const PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN = 1001;
  * Minimum length for a valid paid pro fallback rebuild from intake.
  * When generate fails after pay, a rebuild of 200+ non-hollow chars is valid display authority.
  * Do NOT use the 1001 SoT floor to hide a valid rebuild — that floor is for frozen generate SoT.
+ * @deprecated Use PAID_PRO_PAID_SESSION_FALLBACK_MIN_LEN from paidProFirstReviewDisplayAuthority.ts
  */
 export const PAID_PRO_FALLBACK_REBUILD_MIN_LEN = 200;
 
@@ -91,14 +95,14 @@ export function resolveCanonicalPlainForVisibleShell(
     });
     return { plain: strippedPlain, source: resolution.source };
   }
-  // After pay, a valid non-hollow rebuilt body ≥200 chars MUST paint — do not blank it for
-  // being under 1001. The 1001 floor is for frozen generate SoT / title projection, not for
-  // hiding a valid rebuild when generation failed.
+  // Issue #83: After pay, a ≥200 non-hollow rebuild MUST paint even when < 1001.
+  // This uses the same predicate as Retry lockout — meetsPaidSessionFallbackPaintFloor.
+  // Works whether paidProActive is true or false — hasPaidPremiumCompletionSession() is the gate.
   if (
-    resolution.paidProActive &&
-    strippedPlain.length >= PAID_PRO_FALLBACK_REBUILD_MIN_LEN
+    hasPaidPremiumCompletionSession() &&
+    meetsPaidSessionFallbackPaintFloor(strippedPlain, args.intakeText)
   ) {
-    return { plain: strippedPlain, source: resolution.source || "paid_pro_fallback_rebuild" };
+    return { plain: strippedPlain, source: resolution.source || "paid_session_intake_rebuild" };
   }
   return { plain: "", source: resolution.source || "none" };
 }
@@ -110,6 +114,8 @@ export function resolvePaidProVisibleShellRenderBranch(args: {
   canonicalPlainLen?: number;
   canonicalPlainSource?: string;
   paidProFirstReviewActive?: boolean;
+  /** Issue #83: paid-session fallback at ≥200 non-hollow. */
+  paidSessionFallbackActive?: boolean;
 }): { branch: PaidProVisibleShellRenderBranch; reason: string } {
   const canonicalPlainLen = args.canonicalPlainLen ?? 0;
   if (args.paidProFirstReviewActive) {
@@ -134,12 +140,11 @@ export function resolvePaidProVisibleShellRenderBranch(args: {
         reason: "paid_pro_accepted_canonical_source_of_truth",
       };
     }
-    // After pay, a valid rebuilt body ≥200 chars MUST paint — do not blank it for being under 1001.
-    // The 1001 floor is for frozen generate SoT / title projection, not for hiding a valid rebuild.
-    if (canonicalPlainLen >= PAID_PRO_FALLBACK_REBUILD_MIN_LEN) {
+    // Issue #83: paid-session fallback at ≥200 non-hollow paints.
+    if (args.paidSessionFallbackActive && canonicalPlainLen >= PAID_PRO_PAID_SESSION_FALLBACK_MIN_LEN) {
       return {
         branch: "canonical_plain_forced",
-        reason: "paid_pro_fallback_rebuild_from_intake",
+        reason: "paid_session_intake_rebuild",
       };
     }
     return { branch: "empty", reason: "paid_pro_awaiting_display_authority" };
@@ -163,6 +168,13 @@ export function resolvePaidProVisibleShellRenderBranch(args: {
         args.hasSoT && args.sotLen >= PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN
           ? "frozen_sot_len_above_threshold"
           : "authoritative_or_frozen_corpus_above_threshold",
+    };
+  }
+  // Issue #83: paid-session fallback at ≥200 non-hollow paints even when paidProFirstReviewActive is false.
+  if (args.paidSessionFallbackActive && canonicalPlainLen >= PAID_PRO_PAID_SESSION_FALLBACK_MIN_LEN) {
+    return {
+      branch: "canonical_plain_forced",
+      reason: "paid_session_intake_rebuild",
     };
   }
   if (args.htmlLen > 0) {
@@ -234,14 +246,17 @@ export function PaidProVisibleDocumentShell({
     paidProActive: paidProFirstReviewActive || Boolean(displayContext?.paidProActive),
   };
   const canonicalPlain = resolveCanonicalPlainForVisibleShell(displayContextWithCanonical);
-  // After pay, a valid non-hollow rebuild ≥200 chars MUST paint — do not blank it for being
-  // under 1001. The 1001 floor is for frozen generate SoT / title projection.
+  // Issue #83: paid-session fallback at ≥200 non-hollow.
+  // Uses the SAME predicate as Retry lockout — meetsPaidSessionFallbackPaintFloor.
+  const paidSessionFallbackActive =
+    hasPaidPremiumCompletionSession() &&
+    meetsPaidSessionFallbackPaintFloor(canonicalPlain.plain, displayContext?.intakeText);
   const paintPlain =
     canonicalPlain.plain.length >= PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN
       ? canonicalPlain.plain
       : authoritativePlain.length >= PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN
         ? authoritativePlain
-        : paidProFirstReviewActive && canonicalPlain.plain.length >= PAID_PRO_FALLBACK_REBUILD_MIN_LEN
+        : paidSessionFallbackActive
           ? canonicalPlain.plain
           : "";
   const paintSource =
@@ -251,15 +266,13 @@ export function PaidProVisibleDocumentShell({
         ? hasSoT
           ? "paid_pro_accepted_canonical_source_of_truth"
           : "pipeline_accepted_corpus"
-        : paidProFirstReviewActive && canonicalPlain.plain.length >= PAID_PRO_FALLBACK_REBUILD_MIN_LEN
-          ? canonicalPlain.source || "paid_pro_fallback_rebuild"
+        : paidSessionFallbackActive
+          ? canonicalPlain.source || "paid_session_intake_rebuild"
           : authoritativeSource;
   // Pipeline-accepted corpus is display authority even when SoT latch has not frozen yet.
   // Also, for paid first-review, accept fallback rebuild ≥200 chars as display authority.
   const displayAuthorityReady =
-    hasSoT ||
-    authoritativePlain.length >= PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN ||
-    (paidProFirstReviewActive && canonicalPlain.plain.length >= PAID_PRO_FALLBACK_REBUILD_MIN_LEN);
+    hasSoT || authoritativePlain.length >= PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN || paidSessionFallbackActive;
   const { branch, reason } = resolvePaidProVisibleShellRenderBranch({
     hasSoT: displayAuthorityReady,
     sotLen,
@@ -267,6 +280,7 @@ export function PaidProVisibleDocumentShell({
     canonicalPlainLen: paintPlain.length,
     canonicalPlainSource: paintSource,
     paidProFirstReviewActive,
+    paidSessionFallbackActive,
   });
   const renderPlain = branch === "canonical_plain_forced" ? paintPlain : "";
   const renderSource = branch === "canonical_plain_forced" ? paintSource : authoritativeSource;
