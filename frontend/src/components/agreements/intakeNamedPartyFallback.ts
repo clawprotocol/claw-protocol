@@ -3,7 +3,7 @@
  * but the intake names a person + entity (e.g. employment-style phrasing).
  */
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
-import { extractBetweenPartyPair } from "./partyBetweenParse";
+import { extractBetweenPartyPair, isBetweenClausePartyCandidate } from "./partyBetweenParse";
 import { stripPartyRoleAnnotations } from "./partyRoleAnnotations";
 
 const MAX_NAME = 280;
@@ -70,7 +70,7 @@ const SIGNER_LINE_RE =
 
 const EMAIL_AFTER_NAME_RE = /[,\s(]+([^\s,()@]+@[^\s,()]+)/;
 
-function extractExplicitSignerRows(raw: string): { name: string; role: string; email?: string }[] | null {
+export function extractExplicitSignerRowsFromIntake(raw: string): { name: string; role: string; email?: string }[] | null {
   const lines = raw.split(/[\n\r]+/).map((l) => l.trim()).filter(Boolean);
   const results: { name: string; role: string; email?: string }[] = [];
   const seenNames = new Set<string>();
@@ -107,6 +107,27 @@ function extractExplicitSignerRows(raw: string): { name: string; role: string; e
   return results.length >= 2 ? results : null;
 }
 
+const NUMBERED_SIGNER_LABEL_LINE_RE =
+  /^(?:sender\s*[/&]?\s*)?(?:signer|party)\s*\d+\s*[:\-]\s*(.+)$/i;
+
+/**
+ * Numbered signer/party rows only ("Signer 1:", "Party 2 -"). Excludes labeled-block metadata
+ * fields like "Signer Name:" so legal-party authority can still prefer structured Party blocks.
+ */
+export function extractNumberedSignerLabelPartyNamesFromIntake(raw: string): string[] {
+  const lines = String(raw || "").replace(/\r\n/g, "\n").split("\n");
+  const names: string[] = [];
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    const match = line.match(NUMBERED_SIGNER_LABEL_LINE_RE);
+    if (!match?.[1]) continue;
+    const name = match[1].replace(/\s+/g, " ").trim().slice(0, MAX_NAME);
+    if (name.length < 2 || !isBetweenClausePartyCandidate(name)) continue;
+    names.push(name);
+  }
+  return names;
+}
+
 /** "Ada Lopez of Studio is hiring Beau Ortiz of Agency LLC to …" → two stated parties, not four. */
 const HIRING_PERSON_OF_ENTITY_RE =
   /\b([A-Z][A-Za-z.'-]+(?:\s+[A-Z][A-Za-z.'-]+)+)\s+of\s+([A-Z][A-Za-z0-9&.'’\-\s]{1,72}?)\s+is\s+(?:hiring|engaging|retaining|commissioning)\s+([A-Z][A-Za-z.'-]+(?:\s+[A-Z][A-Za-z.'-]+)+)\s+of\s+([A-Z][A-Za-z0-9&.'’\-\s]{1,80}?)(?=\s+to\s+|\s*[.,;]|$)/i;
@@ -136,7 +157,7 @@ export function tryInferNamedPartiesFromIntake(raw: string): { name: string; rol
   const hiringPair = extractStatedTwoPartyHiringPair(raw);
   if (hiringPair && hiringPair.length === 2) return hiringPair;
 
-  const explicit = extractExplicitSignerRows(raw);
+  const explicit = extractExplicitSignerRowsFromIntake(raw);
   if (explicit && explicit.length >= 2) return explicit;
 
   const t = raw.replace(/\s+/g, " ").trim();

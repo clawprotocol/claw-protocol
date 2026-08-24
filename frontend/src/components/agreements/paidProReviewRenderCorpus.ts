@@ -374,8 +374,25 @@ export function applyPaidProReviewRenderSanitizer(
   let text = (corpus || "").replace(/\r\n/g, "\n").trimEnd();
   let repaired = false;
 
-  const partyRecords =
-    identities.length >= 2 ? canonicalPartyRecordsFromSignerIdentities(identities) : [];
+  // Legal entity labels come directly from the ordered authority slots. Canonical signer identity
+  // parsing may enrich representative metadata, but it must not shorten or reinterpret the legal
+  // party name used to repair the recital and execution block.
+  const partyRecords = parties
+    .map((party, index) => {
+      const fullLegalName = party.partyLegalName.replace(/\s+/g, " ").trim();
+      if (fullLegalName.length < 2) return null;
+      const identity = identities[index];
+      return {
+        fullLegalName,
+        roleLabel:
+          identity?.blockHeading?.trim() || (index === 0 ? "Client" : "Service Provider"),
+        displayAlias: fullLegalName,
+        signerName: party.signerName?.trim() || null,
+        signerTitle: party.signerTitle?.trim() || null,
+        partyAddress: party.partyAddress?.trim() || null,
+      };
+    })
+    .filter((record): record is NonNullable<typeof record> => record != null);
 
   if (legalNames.length >= 2) {
     const stray = stripStrayStandalonePartyEntityLinesBeforeRecital(text, legalNames);
@@ -530,6 +547,20 @@ export function applyPaidProReviewRenderSanitizer(
   if (outputIntegrity.repairs.length > 0) {
     out = outputIntegrity.text;
     repaired = true;
+  }
+
+  // Seal the opening after every lower-authority formatter/hydrator has run. No later display
+  // transform may reintroduce a stale, shortened, or scope-contaminated legal party label.
+  if (parties.length >= 2 && partyRecords.length >= 2) {
+    const sealedOpening = ensurePaidProServicesAgreementOpening(
+      out,
+      partyRecords,
+      ctx?.intakeText ?? null,
+    );
+    if (sealedOpening.text !== out) {
+      out = sealedOpening.text;
+      repaired = true;
+    }
   }
 
   return {

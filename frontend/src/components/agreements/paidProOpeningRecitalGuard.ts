@@ -125,6 +125,29 @@ function openingSliceBeforeSection1(text: string): string {
   return match >= 0 ? text.slice(0, match) : text.slice(0, 2_500);
 }
 
+function escapeOpeningRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/** A role label is valid only when it is bound directly to the authority name for that slot. */
+function openingHasExactAuthorityRoleBindings(
+  opening: string,
+  client: string,
+  provider: string,
+): boolean {
+  if (!client || !provider) return false;
+  const quote = `["'“”‘’]?`;
+  const clientBinding = new RegExp(
+    `${escapeOpeningRegex(client)}\\s*\\(\\s*${quote}Client${quote}\\s*\\)`,
+    "i",
+  );
+  const providerBinding = new RegExp(
+    `${escapeOpeningRegex(provider)}\\s*\\(\\s*${quote}(?:Service\\s+Provider|Provider)${quote}\\s*\\)`,
+    "i",
+  );
+  return clientBinding.test(opening) && providerBinding.test(opening);
+}
+
 /**
  * Preserve substantive numbered sections that appear before the first Section 1 anchor.
  * Wire malformations may insert commercial sections (e.g. Revenue Allocation) ahead of Section 1.
@@ -250,6 +273,9 @@ export function detectPaidProMalformedServicesOpening(
   const preSec1 = openingSliceBeforeSection1(body);
   const sec1Idx = findOpeningSectionOneIndex(body);
   const openingScanRegion = sec1Idx >= 0 ? preSec1 : body.slice(0, 4_000);
+  if (needsPaidProServicesOpeningTitleRepair(body)) {
+    return true;
+  }
   const titleCount = (openingScanRegion.match(PAID_PRO_CANONICAL_TITLE_RE) ?? []).length;
   const enteredCount = (openingScanRegion.match(/\bentered\s+into\b/gi) ?? []).length;
   const betweenCount = (openingScanRegion.match(/\bis\s+between\b/gi) ?? []).length;
@@ -281,6 +307,9 @@ export function detectPaidProMalformedServicesOpening(
     return true;
   }
   if (provider && !preSec1.includes(provider)) {
+    return true;
+  }
+  if (client && provider && !openingHasExactAuthorityRoleBindings(preSec1, client, provider)) {
     return true;
   }
   if (!/\(\s*["']?Client["']?\s*\)/i.test(preSec1)) {
@@ -324,6 +353,9 @@ export function isPaidProOpeningStructurallyValid(
     return false;
   }
   if (!head.includes(client) || !head.includes(provider)) {
+    return false;
+  }
+  if (!openingHasExactAuthorityRoleBindings(head, client, provider)) {
     return false;
   }
   if (!/\(\s*["']?Client["']?\s*\)/i.test(head) || !/\(\s*["']?Service Provider["']?\s*\)/i.test(head)) {
@@ -587,7 +619,13 @@ export function ensurePaidProServicesAgreementOpening(
   const head = working.slice(0, 4_000);
   const hasCanonicalEnteredInto =
     /entered\s+into\s+as\s+of\s+the\s+Effective\s+Date\s+by\s+and\s+between/i.test(head);
-  if (!needsPaidProServicesOpeningTitleRepair(working) && hasCanonicalEnteredInto) {
+  const client = records[0]?.fullLegalName.trim() ?? "";
+  const provider = records[1]?.fullLegalName.trim() ?? "";
+  if (
+    !needsPaidProServicesOpeningTitleRepair(working) &&
+    hasCanonicalEnteredInto &&
+    openingHasExactAuthorityRoleBindings(head, client, provider)
+  ) {
     return { text: working, repairs };
   }
   const repaired = repairPaidProServicesAgreementOpening(working, records, intakeText);

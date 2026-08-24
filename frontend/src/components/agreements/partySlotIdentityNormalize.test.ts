@@ -150,6 +150,19 @@ describe("hirer versus hired company party slots", () => {
     ]);
   });
 
+  it("keeps each person-of-organization hiring unit as one ordered legal party", () => {
+    const intake =
+      "Priya Shah of Northline Studio is hiring Diego Alvarez of Harbor Marks LLC to design a logo and brand kit.";
+    expect(resolveHirerVersusHiredCompanySlots(intake)).toEqual({
+      clientName: "Priya Shah of Northline Studio",
+      providerName: "Diego Alvarez of Harbor Marks LLC",
+    });
+    expect(resolveAuthoritativeIntakePartyNames(intake)).toEqual([
+      "Priya Shah of Northline Studio",
+      "Diego Alvarez of Harbor Marks LLC",
+    ]);
+  });
+
   it("does not assign both slots to Pine Street Media variants", () => {
     const names = resolveAuthoritativeIntakePartyNames(JORDAN_HIRE_DUMP);
     expect(names.filter((n) => /pine street/i.test(n))).toHaveLength(1);

@@ -21,7 +21,10 @@ import {
   quotedRolePartyLegalEntities,
 } from "./labeledPartyBlockParse";
 import { parseIntakeToStructuredAgreement } from "./intakeStructuredAgreementModel";
-import { extractStatedTwoPartyHiringPair } from "./intakeNamedPartyFallback";
+import {
+  extractNumberedSignerLabelPartyNamesFromIntake,
+  extractStatedTwoPartyHiringPair,
+} from "./intakeNamedPartyFallback";
 import {
   extractBetweenPartyNameList,
   extractBetweenPartyNameListForAuthority,
@@ -209,16 +212,7 @@ function parseWithClauseAdditionalParties(intake: string): Array<{ name: string;
 }
 
 function parseSignerLabelPartyNames(intake: string): string[] {
-  const lines = String(intake || "").replace(/\r\n/g, "\n").split("\n");
-  const names: string[] = [];
-  for (const rawLine of lines) {
-    const line = rawLine.trim();
-    const m = line.match(/^signer\s*\d+\s*[:\-]\s*(.+)$/i);
-    if (!m?.[1]) continue;
-    const name = m[1].replace(/\s+/g, " ").trim();
-    if (isBetweenClausePartyCandidate(name)) names.push(name);
-  }
-  return names;
+  return extractNumberedSignerLabelPartyNamesFromIntake(intake);
 }
 
 function collectEvidence(intakeText: string): EvidenceRow[] {

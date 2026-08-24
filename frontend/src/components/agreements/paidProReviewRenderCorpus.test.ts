@@ -4,6 +4,7 @@ import { resetPaidProReviewSignerMetadataSessionActiveForTests } from "./paidPro
 import { buildPremiumAgreementReadonlyHtml } from "./premiumAgreementDocumentHtml";
 import {
   clearPaidProReviewRenderFusedRepairCache,
+  applyPaidProReviewRenderSanitizer,
   guardPaidProReviewRenderCorpus,
   repairFusedPartyLegalNamesForReviewDisplay,
   repairSignatureNameLinesUsingLegalEntity,
@@ -34,6 +35,8 @@ import { polishProAgreementDisplayLayer } from "./polishProAgreementDisplayLayer
 import { resolvePaidProFinalReviewVisiblePlain } from "./authoritativePaidProReview";
 import { applyAcceptedProCorpusSafeDisplay } from "./acceptedProCorpusSafeDisplay";
 import { resetPaidProPipelineTestIsolation } from "./paidProPipelineTestIsolation";
+import { ensurePaidProServicesAgreementOpening } from "./paidProOpeningRecitalGuard";
+import { latchAcceptedServerFullDraftAuthority } from "./premiumAcceptancePolicy";
 
 /** Substantive clean two-party corpus for SoT establishment (no fused third-party stub). */
 const CLEAN_TWO_PARTY = [
@@ -146,6 +149,159 @@ describe("paidProReviewRenderCorpus", () => {
     expect(html).not.toContain(QA_FUSED_PARTY_LEGAL_NAME_EXAMPLE);
     expect(html).toContain("Blue Canyon Analytics LLC");
     expect(html).toContain("Iron Vale Systems Inc");
+  });
+
+  it("repairs scope-contaminated party labels before commercial review and signing", () => {
+    const intake =
+      "Priya Shah of Northline Studio is hiring Diego Alvarez of Harbor Marks LLC to design a logo and brand kit.";
+    const auth = buildLivePaidProSignerMetadataAuthority({
+      partyCount: 2,
+      recipient1Name: "Priya Shah of Northline Studio",
+      recipient2Name: "Diego Alvarez of Harbor Marks LLC",
+      recipient1Email: "priya.shah.qa@example.com",
+      recipient2Email: "diego.alvarez.qa@example.com",
+      extraPartyReviewEmails: [],
+      partySignerNames: ["Priya Shah", "Diego Alvarez"],
+      partySignerTitles: ["", ""],
+      partyAddresses: ["", ""],
+    });
+    const contaminated = [
+      "SERVICES AGREEMENT",
+      "",
+      'This Agreement is between Priya Shah of Northline Studio ("Client") and Diego Alvarez of Harbor Marks LLC to design a logo and brand kit ("Service Provider").',
+      "",
+      "1. SERVICES",
+      "The Service Provider will design a logo and brand kit for the Client.",
+      "",
+      ...Array.from(
+        { length: 24 },
+        (_, index) =>
+          `${index + 2}. Commercial clause ${index + 2}. The Parties will perform the stated obligations in good faith under Texas law.`,
+      ),
+      "",
+      "IN WITNESS WHEREOF, the Parties execute this Agreement.",
+      "",
+      "CLIENT:",
+      "Priya Shah of Northline Studio",
+      "By: __________________________",
+      "Name: Priya Shah",
+      "Date: ________________________",
+      "",
+      "SERVICE PROVIDER:",
+      "Diego Alvarez of Harbor Marks LLC to design a logo and brand kit",
+      "By: __________________________",
+      "Name: Diego Alvarez",
+      "Date: ________________________",
+    ].join("\n");
+
+    expect(auth.parties.map((party) => party.partyLegalName)).toEqual([
+      "Priya Shah of Northline Studio",
+      "Diego Alvarez of Harbor Marks LLC",
+    ]);
+    const directOpeningRepair = ensurePaidProServicesAgreementOpening(
+      contaminated,
+      auth.parties.map((party, index) => ({
+        fullLegalName: party.partyLegalName,
+        roleLabel: index === 0 ? "Client" : "Service Provider",
+        displayAlias: party.partyLegalName,
+        signerName: party.signerName || null,
+        signerTitle: party.signerTitle || null,
+        partyAddress: party.partyAddress || null,
+      })),
+      intake,
+    ).text;
+    expect(directOpeningRepair).toContain(
+      'Priya Shah of Northline Studio ("Client") and Diego Alvarez of Harbor Marks LLC ("Service Provider")',
+    );
+
+    const repaired = applyPaidProReviewRenderSanitizer(contaminated, auth.parties, {
+      intakeText: intake,
+      draftPartyNames: [
+        "Priya Shah of Northline Studio",
+        "Diego Alvarez of Harbor Marks LLC",
+      ],
+    }).text;
+
+    expect(repaired).toContain(
+      'Priya Shah of Northline Studio ("Client") and Diego Alvarez of Harbor Marks LLC ("Service Provider")',
+    );
+    expect(repaired).toMatch(/SERVICE PROVIDER:\s*\nDiego Alvarez of Harbor Marks LLC\s*\nBy:/i);
+    expect(repaired).not.toContain(
+      'Diego Alvarez of Harbor Marks LLC to design a logo and brand kit ("Service Provider")',
+    );
+    expect(repaired).not.toMatch(
+      /SERVICE PROVIDER:\s*\nDiego Alvarez of Harbor Marks LLC to design a logo and brand kit/i,
+    );
+  });
+
+  it("repairs authority names and role slots before a latched paid corpus freezes", () => {
+    const intake =
+      "Priya Shah of Northline Studio is hiring Diego Alvarez of Harbor Marks LLC to design a logo and brand kit.";
+    const draft = {
+      title: "Services Agreement",
+      jurisdiction: "Texas",
+      parties: [
+        { name: "Priya Shah of Northline Studio", role: "client" },
+        {
+          name: "Diego Alvarez of Harbor Marks LLC to design a logo and brand kit",
+          role: "service_provider",
+        },
+      ],
+      purpose: "design a logo and brand kit",
+      payment_terms: "$2,400 due on signing",
+      duration: "30 days starting August 22, 2026",
+    } as ParsedDraftShape;
+    const contaminated = [
+      "SERVICES AGREEMENT",
+      "",
+      'This Agreement is between Priya Shah of Northline Studio ("Client") and Diego Alvarez of Harbor Marks LLC to design a logo and brand kit ("Service Provider").',
+      "",
+      ...Array.from(
+        { length: 150 },
+        (_, index) =>
+          `${index + 1}. Commercial clause ${index + 1}. The Service Provider will perform the logo and brand-kit obligations for the Client with commercially reasonable care, preserve confidential information, and comply with Texas law.`,
+      ),
+      "",
+      "IN WITNESS WHEREOF, the Parties execute this Agreement.",
+      "",
+      "CLIENT:",
+      "Diego Alvarez of Harbor Marks LLC",
+      "By: __________________________",
+      "Name: Diego Alvarez",
+      "Date: ________________________",
+      "",
+      "SERVICE PROVIDER:",
+      "Harbor Marks",
+      "By: __________________________",
+      "Name: Priya Shah",
+      "Date: ________________________",
+    ].join("\n");
+    expect(contaminated.length).toBeGreaterThanOrEqual(15_000);
+    latchAcceptedServerFullDraftAuthority(contaminated, "server_full_draft");
+
+    const prepared = preparePaidProFreezeCandidateText({
+      text: contaminated,
+      source: "server_full_draft",
+      surface: "priya_diego_identity_continuity",
+      intakeText: intake,
+      draft,
+    });
+
+    expect(prepared.repairs).toContain("freeze_prep_repaired_latched_identity_continuity");
+    expect(prepared.reviewParties.map((party) => party.partyLegalName)).toEqual([
+      "Priya Shah of Northline Studio",
+      "Diego Alvarez of Harbor Marks LLC",
+    ]);
+    expect(prepared.reviewParties.map((party) => party.signerName).join(" ")).not.toMatch(
+      /to design a logo/i,
+    );
+    expect(prepared.text).toContain(
+      'Priya Shah of Northline Studio ("Client") and Diego Alvarez of Harbor Marks LLC ("Service Provider")',
+    );
+    expect(prepared.text).toMatch(/CLIENT:\s*\nPriya Shah of Northline Studio\s*\nBy:/i);
+    expect(prepared.text).toMatch(/SERVICE PROVIDER:\s*\nDiego Alvarez of Harbor Marks LLC\s*\nBy:/i);
+    expect(prepared.text).not.toContain("Harbor Marks LLC to design a logo and brand kit");
+    expect(prepared.text).not.toMatch(/CLIENT:\s*\nDiego Alvarez of Harbor Marks LLC/i);
   });
 
   it("review render plain hydrates signer metadata from consumed authority without losing entity blocks", () => {

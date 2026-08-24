@@ -280,6 +280,9 @@ const HIRED_COMPANY_CAPTURE =
 
 const NAMED_PERSON_CAPTURE = "([A-Z][a-z]{2,}(?:\\s+[A-Z][a-z]{2,})?)";
 
+const NAMED_PERSON_OF_ENTITY_HIRING_RE =
+  /\b([A-Z][A-Za-z.'-]+(?:\s+[A-Z][A-Za-z.'-]+)+)\s+(?:of|from)\s+([A-Z][A-Za-z0-9&.'’\-\s]{1,72}?)\s+is\s+(?:hiring|engaging|retaining|commissioning)\s+([A-Z][A-Za-z.'-]+(?:\s+[A-Z][A-Za-z.'-]+)+)\s+(?:of|from)\s+([A-Z][A-Za-z0-9&.'’\-\s]{1,80}?)(?=\s+to\s+|\s+for\s+|\s*[.,;]|$)/i;
+
 export type HirerVersusHiredCompanySlots = {
   clientName: string;
   providerName: string;
@@ -295,6 +298,25 @@ export function resolveHirerVersusHiredCompanySlots(
 ): HirerVersusHiredCompanySlots | null {
   const intake = String(intakeContext || "").replace(/\s+/g, " ").trim();
   if (!intake || !/\b(?:hir(?:e|ing|ed)|I(?:'m|\s+am)\s+hiring)\b/i.test(intake)) return null;
+
+  const personOfEntityPair = intake.match(NAMED_PERSON_OF_ENTITY_HIRING_RE);
+  if (personOfEntityPair?.[1] && personOfEntityPair[2] && personOfEntityPair[3] && personOfEntityPair[4]) {
+    const clientName = normalizeAgreementPartyName(
+      `${personOfEntityPair[1].trim()} of ${personOfEntityPair[2].trim()}`,
+    );
+    const providerName = normalizeAgreementPartyName(
+      `${personOfEntityPair[3].trim()} of ${personOfEntityPair[4].trim()}`,
+    );
+    if (
+      !partyLegalNamesMatch(clientName, providerName) &&
+      !isInvalidPartySlotLegalEntity(clientName) &&
+      !isInvalidPartySlotLegalEntity(providerName) &&
+      isAuthoritativeLegalEntityName(clientName) &&
+      isAuthoritativeLegalEntityName(providerName)
+    ) {
+      return { clientName, providerName };
+    }
+  }
 
   const iAmName = intake.match(
     new RegExp(`\\bI(?:\\s+am|'m)\\s+${NAMED_PERSON_CAPTURE}\\s+hiring\\s+${HIRED_COMPANY_CAPTURE}`, "i"),

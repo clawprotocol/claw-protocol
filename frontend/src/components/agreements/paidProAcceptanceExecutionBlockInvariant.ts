@@ -671,9 +671,15 @@ function executionBlockCoversManifestPartyNames(
  * Repair or normalize execution block before SoT freeze / acceptance.
  * Appends canonical tail when witness/execution count is not exactly one.
  */
+export type EnsurePaidProAcceptanceExecutionBlockInvariantOptions = {
+  /** When true, rebuild execution headings that bind the wrong legal entity to a role slot. */
+  repairLegalIdentityContinuity?: boolean;
+};
+
 export function ensurePaidProAcceptanceExecutionBlockInvariant(
   text: string,
   records: readonly CanonicalPartyIdentityRecord[],
+  options?: EnsurePaidProAcceptanceExecutionBlockInvariantOptions,
 ): { text: string; repairs: string[] } {
   const repairs: string[] = [];
   let out = String(text || "").replace(/\r\n/g, "\n").trim();
@@ -696,12 +702,15 @@ export function ensurePaidProAcceptanceExecutionBlockInvariant(
 
   const authorityParties = records.map((rec) => ({ partyLegalName: rec.fullLegalName }));
 
+  const repairLegalIdentityContinuity = options?.repairLegalIdentityContinuity === true;
+
   if (
     witnessCount === 1 &&
     executionBlockCount === 1 &&
     invariant.ok &&
     !shapeAudit.malformed &&
     executionBlockCoversManifestPartyNames(out, records) &&
+    (!repairLegalIdentityContinuity || executionBlockMatchesManifestRecords(out, records)) &&
     !executionHeadingsContainIntakeInstructionLeakage(out)
   ) {
     return { text: out, repairs: [...new Set(repairs)] };
@@ -717,6 +726,9 @@ export function ensurePaidProAcceptanceExecutionBlockInvariant(
         ? `acceptance_execution_block:multi_party_shape_repair:${shapeAudit.reasons.join(";")}`
         : "acceptance_execution_block:appended_canonical_tail",
     );
+  } else if (repairLegalIdentityContinuity && !executionBlockMatchesManifestRecords(out, records)) {
+    out = rebuildCanonicalExecutionTailFromPrefix(out, records);
+    repairs.push("acceptance_execution_block:legal_identity_continuity_repair");
   } else {
     const normalized = enforcePaidProSingleExecutionBlock(out, { authorityParties });
     if (normalized.text !== out) {

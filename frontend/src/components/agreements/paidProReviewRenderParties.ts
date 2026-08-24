@@ -31,10 +31,9 @@ import {
 import { resolveAuthoritativeSignerCount } from "./signerCountAuthority";
 import { isAuthoritativeLegalEntityName } from "./paidProPartyNamePreserve";
 import { isPaidProReviewSignerMetadataSessionActive } from "./paidProReviewRenderSessionGate";
-import {
-  buildSignerMetadataPartiesFromIntakeManifest,
-  intakePartyManifestIsAuthoritative,
-} from "./intakePartyManifestAuthority";
+import { resolveAuthoritativeLegalPartyIdentities } from "./legalPartyIdentityAuthority";
+import { partyLegalNamesMatch } from "./paidProAcceptedCorpusPartyRoles";
+import { isContaminatedLegalIdentityLabel } from "./legalIdentityResolution";
 
 export type ResolvePaidProReviewRenderPartiesArgs = {
   draft?: ParsedDraftShape | null;
@@ -129,32 +128,64 @@ function mergeFrozenManifestParties(
 }
 
 /**
- * TEST539 — restore canonical party identity onto any slot whose resolved legal name was dropped or
- * degraded to a placeholder (empty / "Party N") by a prior generation attempt's contaminated
- * consumed authority. Once the intake manifest authoritatively resolves the real legal entity for a
- * slot, that identity is the authority and must survive into review/notice/signer surfaces. Only
- * non-authoritative slots are rewritten; count and all other slots/signer fields are preserved, so
- * genuine 5-party intakes and real party identities are untouched.
+ * Restore the ordered Legal Party Identity Authority onto every review/signer slot when a lower
+ * authority substituted, reordered, or scope-contaminated a legal name. Signer/contact fields may
+ * enrich a slot, but they may never redefine who that slot legally represents.
  */
 function overlayIntakeManifestIdentityOntoContaminatedSlots(
   parties: readonly PaidProSignerMetadataParty[],
   intakeRaw: string,
+  draft?: ParsedDraftShape | null,
+  liveSignerMetadataUi?: LiveSignerMetadataUiState | null,
 ): PaidProSignerMetadataParty[] {
-  if (!intakeRaw || !intakePartyManifestIsAuthoritative(intakeRaw)) return [...parties];
-  const manifest = buildSignerMetadataPartiesFromIntakeManifest(intakeRaw);
-  if (manifest.length < 2) return [...parties];
-  return parties.map((party, index) => {
-    const name = party.partyLegalName.trim();
-    if (name.length >= 2 && isAuthoritativeLegalEntityName(name)) return party;
-    const manifestName = manifest[index]?.partyLegalName?.trim() ?? "";
-    if (manifestName.length >= 2 && isAuthoritativeLegalEntityName(manifestName)) {
-      return {
-        ...party,
-        partyLegalName: manifestName,
-        partyAddress: party.partyAddress?.trim() || manifest[index]?.partyAddress?.trim() || "",
-      };
-    }
-    return party;
+  const draftPartyNames =
+    draft?.parties?.map((party) => String((party as { name?: string }).name ?? "").trim()) ?? [];
+  const authority = resolveAuthoritativeLegalPartyIdentities({
+    intakeText: intakeRaw || null,
+    draftPartyNames,
+    draftParties: draft?.parties,
+    consumerPartyCount: parties.length,
+    surface: "paid_pro_review_render_parties",
+  });
+  if (authority.length < 2) return [...parties];
+  // N-party slots are established in core via labeled-party authority; a bilateral identity overlay
+  // must not rewrite them from intake noise such as drafting instructions misread as party names.
+  if (parties.length >= 3) return [...parties];
+
+  const consumedParties = readConsumedPaidProSignerMetadataAuthority()?.parties ?? null;
+  const preferLiveMetadata = isPaidProReviewSignerMetadataSessionActive();
+  const liveLegalNameForSlot = (partyIndex: number): string => {
+    if (!liveSignerMetadataUi) return "";
+    if (partyIndex === 0) return liveSignerMetadataUi.recipient1Name.trim();
+    if (partyIndex === 1) return liveSignerMetadataUi.recipient2Name.trim();
+    return liveSignerMetadataUi.extraPartyLegalNames?.[partyIndex - 2]?.trim() || "";
+  };
+
+  return authority.map((identity, partyIndex) => {
+    const party = parties[partyIndex];
+    const liveLegalName = liveLegalNameForSlot(partyIndex);
+    const consumedLegalName = consumedParties?.[partyIndex]?.partyLegalName?.trim() || "";
+    const metadataSourceLegalName =
+      preferLiveMetadata && liveLegalName
+        ? liveLegalName
+        : consumedLegalName || liveLegalName || party?.partyLegalName || "";
+    const metadataBelongsToAuthoritySlot = Boolean(
+      party &&
+        !isContaminatedLegalIdentityLabel(party.partyLegalName, identity.legalEntityName) &&
+        partyLegalNamesMatch(identity.legalEntityName, metadataSourceLegalName),
+    );
+    const signerName = metadataBelongsToAuthoritySlot ? party?.signerName?.trim() || "" : "";
+    return {
+      partyIndex,
+      partyLegalName: identity.legalEntityName,
+      signerEmail: metadataBelongsToAuthoritySlot ? party?.signerEmail?.trim() || "" : "",
+      signerName:
+        signerName && !isContaminatedLegalIdentityLabel(signerName, identity.legalEntityName)
+          ? signerName
+          : "",
+      signerTitle: metadataBelongsToAuthoritySlot ? party?.signerTitle?.trim() || "" : "",
+      partyAddress: metadataBelongsToAuthoritySlot ? party?.partyAddress?.trim() || "" : "",
+    };
   });
 }
 
@@ -162,7 +193,12 @@ export function resolvePartiesForReviewRender(
   args?: ResolvePaidProReviewRenderPartiesArgs,
 ): PaidProSignerMetadataParty[] {
   const resolved = resolvePartiesForReviewRenderCore(args);
-  return overlayIntakeManifestIdentityOntoContaminatedSlots(resolved, (args?.intakeText ?? "").trim());
+  return overlayIntakeManifestIdentityOntoContaminatedSlots(
+    resolved,
+    (args?.intakeText ?? "").trim(),
+    args?.draft ?? null,
+    args?.liveSignerMetadataUi ?? null,
+  );
 }
 
 function resolvePartiesForReviewRenderCore(

@@ -355,8 +355,9 @@ export function preparePaidProFreezeCandidateText(
   const surface = args.surface ?? "paid_pro_freeze_candidate";
   const repairs: string[] = [];
   const inputTrimmed = trim(args.text);
-  // Latched accepted server_full_draft must freeze as-is — opening/quality floors must not
-  // invent or rewrite operative prose after the authority latch (Test245).
+  // Latched accepted server_full_draft preserves operative prose byte-for-byte (Test245), but a
+  // confirmed Legal Party Identity Authority violation must be repaired before SoT freeze. A
+  // latched corpus is not allowed to bind a signer slot to a different or scope-contaminated party.
   const latchedAccepted = getLatchedAcceptedServerFullDraftAuthority();
   if (
     latchedAccepted &&
@@ -365,6 +366,50 @@ export function preparePaidProFreezeCandidateText(
       requestedSource === "server_full_document_text" ||
       requestedSource === latchedAccepted.source)
   ) {
+    let latchedText = inputTrimmed;
+    const latchedRepairs: string[] = [];
+    if (!intakeDescribesBrandLicensingDistributionManufacturingStack(args.intakeText ?? "")) {
+      const partyNameList = (args.draft?.parties ?? [])
+        .map((party) => String(party?.name ?? "").trim())
+        .filter((name) => name.length >= 2);
+      const roleLabels = (args.draft?.parties ?? [])
+        .map((party) => String(party?.role ?? "").trim())
+        .filter((role) => role.length >= 2);
+      const identityRecords = resolveCommercialPartyRecordsForOpeningRepair(
+        args.intakeText ?? "",
+        partyNameList,
+        roleLabels.length >= 2 ? roleLabels : undefined,
+      );
+      if (identityRecords.length >= 2) {
+        const opening = ensurePaidProServicesAgreementOpening(
+          latchedText,
+          identityRecords,
+          args.intakeText ?? null,
+        );
+        latchedText = opening.text;
+        latchedRepairs.push(...opening.repairs);
+        // Use the same ordered identity records for execution that repaired the opening. A second
+        // resolver here can reproduce the very split-brain identity drift this boundary prevents.
+        if (
+          /\bIN WITNESS WHEREOF\b/i.test(latchedText) &&
+          !isGenericPaidProAcceptanceManifestFallback(identityRecords) &&
+          (executionHeadingsContainIntakeInstructionLeakage(latchedText) ||
+            !executionBlockMatchesManifestRecords(latchedText, identityRecords))
+        ) {
+          const execution = ensurePaidProAcceptanceExecutionBlockInvariant(
+            latchedText,
+            identityRecords,
+            { repairLegalIdentityContinuity: true },
+          );
+          latchedText = execution.text;
+          latchedRepairs.push(...execution.repairs);
+          assertPaidProSingleExecutionBlock(latchedText, `${surface}_latched_identity_repair`, {
+            expectedParties: identityRecords.length,
+          });
+        }
+      }
+    }
+
     const reviewParties = resolvePartiesForReviewRender({
       draft: args.draft ?? null,
       intakeText: args.intakeText ?? null,
@@ -378,11 +423,14 @@ export function preparePaidProFreezeCandidateText(
       }))
       .filter((p) => p.name.length >= 2);
     return {
-      text: inputTrimmed,
-      hash: hashPaidProCorpus(inputTrimmed),
+      text: latchedText,
+      hash: hashPaidProCorpus(latchedText),
       reviewParties,
       parties,
-      repairs: ["freeze_prep_preserved_latched_server_full_draft"],
+      repairs:
+        latchedText === inputTrimmed
+          ? ["freeze_prep_preserved_latched_server_full_draft"]
+          : ["freeze_prep_repaired_latched_identity_continuity", ...latchedRepairs],
     };
   }
   const inputPipelineHash = paidProPipelineAcceptedCorpusHash(inputTrimmed);
@@ -1190,6 +1238,7 @@ export function assertPaidProFreezeCandidateGates(
     const preFreezeExecution = ensurePaidProAcceptanceExecutionBlockInvariant(
       safeForCommit,
       preFreezeExecutionManifest,
+      { repairLegalIdentityContinuity: true },
     );
     safeForCommit = preFreezeExecution.text;
     assertPaidProSingleExecutionBlock(

@@ -171,6 +171,9 @@ export function resolveAuthorityPartyLegalNameField(
   if (looksLikeAuthorizedSignersBulletLine(t)) {
     return parseAuthorizedSignersBulletLine(t)?.legalEntity ?? fallback;
   }
+  // Ordered person-of-organization authority ("Priya Shah of Northline Studio") is one legal
+  // party label. Do not misclassify its 4+ words as a concatenated list of human signers.
+  if (isAuthoritativeLegalEntityName(t)) return t;
   if (looksLikeConcatenatedSignerNames(t)) return fallback;
   if (hasPartyMetadataLabelContamination(t)) {
     const stripped = stripTrailingPartyMetadataLabel(t);

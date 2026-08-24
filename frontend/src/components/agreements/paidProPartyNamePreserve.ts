@@ -472,6 +472,16 @@ export function isAuthoritativeLegalEntityName(name: string): boolean {
   }
   if (ENTITY_SUFFIX.test(t)) return true;
   if (/\bagreement\b/i.test(t) && !ENTITY_SUFFIX.test(t)) return false;
+  // A person identified together with their organization is one legal-party label, not two
+  // entities and not signer metadata (for example, "Priya Shah of Northline Studio").
+  if (
+    /^[A-Z][A-Za-z.'’\-]+(?:\s+[A-Z][A-Za-z.'’\-]+)+\s+(?:of|from)\s+[A-Z][A-Za-z0-9&.'’()\-]*(?:\s+[A-Z0-9&][A-Za-z0-9&.'’()\-]*){0,7}$/.test(
+      t,
+    ) &&
+    !/\b(?:hire|hiring|engage|engaging|retain|retaining|design|build|create|provide|perform)\b/i.test(t)
+  ) {
+    return true;
+  }
   if (
     /\b(?:revenue|licensing|confidential|governed|platform|implementation)\b/i.test(t) &&
     !ENTITY_SUFFIX.test(t)
