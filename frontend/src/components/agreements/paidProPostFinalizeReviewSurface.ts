@@ -35,10 +35,24 @@ import {
 } from "./paidProFinalHydratedCorpus";
 import { isPaidProPostFinalizeHydratedCorpusLocked } from "./paidProSignerMetadataCommitPolicy";
 import { hashPaidProCorpus } from "./paidProSourceOfTruth";
-import {
-  applyReviewReadyMetadataBackfill,
-  collectReviewReadyCorpusHints,
-} from "../../launch/simpleProduct/reviewReadyHydratedDisplayCorpus";
+import { sanitizePaidProReviewPlainForIntakeAuthority } from "./paidProReviewRenderCorpus";
+import { readCheckoutBackRestoreSnapshot } from "./checkoutBackRestore";
+
+const CREATOR_INTAKE_STORAGE_KEY = "claw_agreement_creator_intake_v1";
+
+function resolvePostFinalizeIntakeTextForReseal(): string {
+  const checkoutIntake = readCheckoutBackRestoreSnapshot()?.intakeText?.trim() ?? "";
+  if (checkoutIntake.length >= 20) return checkoutIntake;
+  if (typeof localStorage !== "undefined") {
+    try {
+      const stored = localStorage.getItem(CREATOR_INTAKE_STORAGE_KEY)?.trim() ?? "";
+      if (stored.length >= 20) return stored;
+    } catch {
+      /* ignore */
+    }
+  }
+  return "";
+}
 
 /**
  * TEST560 — notice stanzas still carrying the pre-signer-setup placeholder
@@ -82,8 +96,9 @@ export function resolvePaidProSignerFinalizeSigningReadyPlain(args: {
 /** Render-time enrichment — does not mutate the frozen signing snapshot store. */
 export function enrichPaidProPostFinalizeDisplayCorpus(
   plain: string,
-  draft?: AgreementDraft | ParsedDraftShape | null,
+  _draft?: AgreementDraft | ParsedDraftShape | null,
 ): string {
+  void _draft;
   let body = (plain || "").trim();
   if (body.length < PAID_PRO_FINAL_HYDRATED_CORPUS_MIN_LEN) return body;
 
@@ -153,13 +168,6 @@ export function enrichPaidProPostFinalizeDisplayCorpus(
     if (retry.applied) body = retry.corpus.trim();
   }
 
-  const corpusHints = collectReviewReadyCorpusHints(body, (draft as AgreementDraft | null) ?? null);
-  body = applyReviewReadyMetadataBackfill(body, (draft as AgreementDraft | null) ?? null, {
-    corpusHints,
-    surface: "owner_done",
-    selectedSource: "authoritative_signing_snapshot",
-  });
-
   if (body.length >= 80 && authorityParties.length >= 2 && detectExecutionHeadingMetadataLeak(body).leak) {
     body = repairExecutionBlockEntityHeadingLines(body, authorityParties).text.trim();
   }
@@ -176,7 +184,17 @@ function finalizePostFinalizeReviewPlain(
   // canonical corpus (byte-identical to SoT), which can still carry pre-signer-setup notice
   // placeholders and blank execution Name/Title lines; enrichment hydrates those signer-only fields
   // for display. Enrichment is idempotent, so an already-hydrated snapshot passes through unchanged.
-  return enrichPaidProPostFinalizeDisplayCorpus(body, draft);
+  let enriched = enrichPaidProPostFinalizeDisplayCorpus(body, draft);
+  const intakeText = resolvePostFinalizeIntakeTextForReseal();
+  if (intakeText.length >= 20 && enriched.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
+    enriched = sanitizePaidProReviewPlainForIntakeAuthority({
+      text: enriched,
+      draft: (draft as ParsedDraftShape | null) ?? null,
+      intakeText,
+      postFinalizeIntakeReseal: true,
+    });
+  }
+  return enriched;
 }
 
 export function resolvePaidProPostFinalizeReviewPlain(

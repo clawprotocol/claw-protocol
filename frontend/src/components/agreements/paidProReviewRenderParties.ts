@@ -39,6 +39,8 @@ export type ResolvePaidProReviewRenderPartiesArgs = {
   draft?: ParsedDraftShape | null;
   intakeText?: string | null;
   liveSignerMetadataUi?: LiveSignerMetadataUiState | null;
+  /** When true, run intake-authority sanitizer on post-finalize locked paint candidates. */
+  postFinalizeIntakeReseal?: boolean;
 };
 
 function mergeCanonicalBundleWhenSignerMetadataPresent(

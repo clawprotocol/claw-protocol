@@ -402,10 +402,17 @@ export function sanitizePaidProReviewPlainForIntakeAuthority(
     args.draft?.parties
       ?.map((p) => String((p as { name?: string }).name ?? "").trim())
       .filter(Boolean) ?? [];
-  let sanitized = applyPaidProReviewRenderSanitizer(text, parties, {
-    intakeText: intake,
-    draftPartyNames,
-  }).text.trim();
+  let sanitized: string;
+  if (args.postFinalizeIntakeReseal) {
+    // Post-finalize paint must re-seal opening/scope only. Full review render sanitizer
+    // re-runs recital repair on the frozen snapshot and re-appends duplicate party blocks.
+    sanitized = text;
+  } else {
+    sanitized = applyPaidProReviewRenderSanitizer(text, parties, {
+      intakeText: intake,
+      draftPartyNames,
+    }).text.trim();
+  }
   const partyNames = parties.map((p) => p.partyLegalName).filter(Boolean);
   const scopeFromIntake = (() => {
     const toVerb = intake.match(
