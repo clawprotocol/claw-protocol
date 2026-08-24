@@ -174,7 +174,7 @@ describe("Test271 review track routing (static intake wiring)", () => {
     expect(intake).toContain('enterFinalReviewRecipientSetup("signature")');
     expect(intake).toContain("handleProSendForSignature");
     const sigIdx = intake.indexOf("const handleProSendForSignature = React.useCallback");
-    const sigBlock = intake.slice(sigIdx, sigIdx + 1200);
+    const sigBlock = intake.slice(sigIdx, sigIdx + 2800);
     expect(sigBlock).toContain('enterFinalReviewRecipientSetup("signature")');
     expect(sigBlock).not.toContain('enterFinalReviewRecipientSetup("review_only")');
   });
