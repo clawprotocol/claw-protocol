@@ -5,6 +5,7 @@
 
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import { applyNamedDumpPartiesToPaidRestoreDraft } from "./intakeNamedPartyFallback";
+import { repairDraftPartiesFromIntakeAuthority } from "./partySlotIdentityNormalize";
 import {
   writeCreateReviewDraftReadyMarker,
   writeCreateReviewDraftSnapshot,
@@ -44,6 +45,21 @@ export function hasCheckoutBackRestoreSnapshot(): boolean {
   return readCheckoutBackRestoreSnapshot() != null;
 }
 
+/** Named-dump restore plus intake-authoritative bilateral repair for post-checkout paths. */
+export function repairCheckoutBackRestoreDraftParties(
+  draft: ParsedDraftShape,
+  intakeText: string,
+): ParsedDraftShape {
+  const intake = (intakeText || "").trim();
+  if (!intake || !draft) return draft;
+  const withNamedDump = applyNamedDumpPartiesToPaidRestoreDraft(draft, intake) ?? draft;
+  const repairedParties = repairDraftPartiesFromIntakeAuthority(withNamedDump.parties ?? [], intake);
+  const before = (withNamedDump.parties ?? []).map((p) => String(p.name ?? "").trim()).join("|");
+  const after = repairedParties.map((p) => String(p.name ?? "").trim()).join("|");
+  if (before === after) return withNamedDump;
+  return { ...withNamedDump, parties: repairedParties };
+}
+
 export function readCheckoutBackRestoreSnapshot(): CheckoutBackStarterReviewSnapshotV1 | null {
   if (typeof sessionStorage === "undefined") return null;
   try {
@@ -56,7 +72,7 @@ export function readCheckoutBackRestoreSnapshot(): CheckoutBackStarterReviewSnap
       return null;
     }
     if (!parsed.draft || typeof parsed.intakeText !== "string") return null;
-    const draft = applyNamedDumpPartiesToPaidRestoreDraft(parsed.draft, parsed.intakeText) ?? parsed.draft;
+    const draft = repairCheckoutBackRestoreDraftParties(parsed.draft, parsed.intakeText);
     return { ...parsed, draft };
   } catch {
     return null;
@@ -70,7 +86,7 @@ export function persistStarterReviewBeforeCheckout(args: {
 }): void {
   const intakeText = (args.intakeText || "").trim();
   if (!intakeText || !args.draft) return;
-  const draft = applyNamedDumpPartiesToPaidRestoreDraft(args.draft, intakeText) ?? args.draft;
+  const draft = repairCheckoutBackRestoreDraftParties(args.draft, intakeText);
   const body: CheckoutBackStarterReviewSnapshotV1 = {
     version: 1,
     savedAt: Date.now(),

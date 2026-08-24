@@ -533,6 +533,7 @@ import {
   logCheckoutBackRestoreStart,
   persistStarterReviewBeforeCheckout,
   readCheckoutBackRestoreSnapshot,
+  repairCheckoutBackRestoreDraftParties,
 } from "./checkoutBackRestore";
 import { buildCreateFlowProCheckoutPath } from "../../launch/checkoutParams";
 import {
@@ -8572,17 +8573,27 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           (checkoutBackSnapForPrior?.intakeText ?? "").trim() ||
           (resumeSnap?.originalUserIntakeRaw ?? "").trim() ||
           (resumeSnap?.rawIntake ?? "").trim();
-        const namedPrior = applyNamedDumpPartiesToPaidRestoreDraft(prior, namedPriorIntake);
-        if (namedPrior && namedPrior !== prior) {
-          prior = namedPrior;
-          draftSnapshotRef.current = namedPrior;
-          setDraft(namedPrior);
-          const namedRestoreParties = namedDumpPartiesForPaidRestore(namedPriorIntake);
-          if (namedRestoreParties.length >= 3) {
-            setRecipient1Name(namedRestoreParties[0]!);
-            setRecipient2Name(namedRestoreParties[1]!);
-            setExtraPartyLegalNames(namedRestoreParties.slice(2));
-            setSignerSetupUiPartyCount(namedRestoreParties.length);
+        if (prior && namedPriorIntake) {
+          const repairedPrior = repairCheckoutBackRestoreDraftParties(prior, namedPriorIntake);
+          if (repairedPrior !== prior) {
+            prior = repairedPrior;
+            draftSnapshotRef.current = repairedPrior;
+            setDraft(repairedPrior);
+          }
+        }
+        const namedRestoreParties = namedDumpPartiesForPaidRestore(namedPriorIntake);
+        if (namedRestoreParties.length >= 3) {
+          setRecipient1Name(namedRestoreParties[0]!);
+          setRecipient2Name(namedRestoreParties[1]!);
+          setExtraPartyLegalNames(namedRestoreParties.slice(2));
+          setSignerSetupUiPartyCount(namedRestoreParties.length);
+        } else if (prior && namedPriorIntake) {
+          const bilateralParties = (prior.parties ?? [])
+            .map((p) => String((p as { name?: string }).name ?? "").trim())
+            .filter(Boolean);
+          if (bilateralParties.length >= 2) {
+            setRecipient1Name(bilateralParties[0]!);
+            setRecipient2Name(bilateralParties[1]!);
           }
         }
       }
@@ -13323,7 +13334,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     freeReviewSnapshotHydratedRef.current = true;
     homeAutoGenerateConsumedRef.current = true;
     logCheckoutBackRegenerationSkipped("saved_starter_review");
-    const restoredDraft = applyNamedDumpPartiesToPaidRestoreDraft(snap.draft, snap.intakeText) ?? snap.draft;
+    const restoredDraft = snap.draft;
     draftSnapshotRef.current = restoredDraft;
     setDraft(restoredDraft);
     const namedRestoreParties = namedDumpPartiesForPaidRestore(snap.intakeText);
@@ -13421,19 +13432,46 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       intakeCombinedRef.current.trim() ||
       (readOriginalUserIntakeRaw() || "").trim();
     const names = namedDumpPartiesForPaidRestore(intake);
-    if (names.length < 3) return;
-    const current = draftSnapshotRef.current ?? draft;
-    const next = applyNamedDumpPartiesToPaidRestoreDraft(current, intake);
-    if (!next) return;
+    const current = draftSnapshotRef.current ?? draft ?? snap?.draft ?? null;
+    if (names.length >= 3) {
+      if (!current) return;
+      const next = applyNamedDumpPartiesToPaidRestoreDraft(current, intake);
+      if (!next) return;
+      const before = (current?.parties ?? []).map((p) => String(p.name ?? "").trim()).join("|");
+      const after = (next.parties ?? []).map((p) => String(p.name ?? "").trim()).join("|");
+      if (before === after && (current?.parties?.length ?? 0) >= names.length) return;
+      draftSnapshotRef.current = next;
+      setDraft(next);
+      setRecipient1Name(names[0]!);
+      setRecipient2Name(names[1]!);
+      setExtraPartyLegalNames(names.slice(2));
+      setSignerSetupUiPartyCount(names.length);
+      return;
+    }
+    if (!intake || !current) return;
+    const next = repairCheckoutBackRestoreDraftParties(current, intake);
     const before = (current?.parties ?? []).map((p) => String(p.name ?? "").trim()).join("|");
     const after = (next.parties ?? []).map((p) => String(p.name ?? "").trim()).join("|");
-    if (before === after && (current?.parties?.length ?? 0) >= names.length) return;
+    if (before === after) return;
     draftSnapshotRef.current = next;
     setDraft(next);
-    setRecipient1Name(names[0]!);
-    setRecipient2Name(names[1]!);
-    setExtraPartyLegalNames(names.slice(2));
-    setSignerSetupUiPartyCount(names.length);
+    const bilateralParties = (next.parties ?? [])
+      .map((p) => String((p as { name?: string }).name ?? "").trim())
+      .filter(Boolean);
+    if (bilateralParties.length >= 2) {
+      setRecipient1Name(bilateralParties[0]!);
+      setRecipient2Name(bilateralParties[1]!);
+    }
+    if (intake && next) {
+      const restored = hydrateCanonicalPartyMetadataAfterCheckoutRestore({
+        intakeText: intake,
+        draft: next,
+      });
+      if (restored.seed?.uiChanged) {
+        setPartySignerNames(restored.seed.names);
+        setPartySignerTitles(restored.seed.titles);
+      }
+    }
   }, [checkoutBackRestoreActive, suppressFreeMissingTenetAskAfterPay, draft]);
 
   useLayoutEffect(() => {

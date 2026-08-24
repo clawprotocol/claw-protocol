@@ -10,7 +10,10 @@ import { isAuthoritativeLegalEntityName } from "./paidProPartyNamePreserve";
 import { partyLegalNamesMatch } from "./paidProSignerMetadataAuthority";
 import { resolveAuthoritativeSignerCount } from "./signerCountAuthority";
 import { intakePartyManifestLegalEntities } from "./intakePartyManifestAuthority";
-import { resolveDeclaredExplicitPartyCount } from "./partySlotIdentityNormalize";
+import {
+  repairDraftPartiesFromIntakeAuthority,
+  resolveDeclaredExplicitPartyCount,
+} from "./partySlotIdentityNormalize";
 import { namedDumpPartiesForPaidRestore } from "./intakeNamedPartyFallback";
 
 const UI_MAX_PARTY_SLOTS = 4;
@@ -30,11 +33,18 @@ export function resolveLegalEntitiesForCanonicalMetadata(args: {
   const intake = String(args.intakeText ?? "").trim();
   const namedDump = namedDumpPartiesForPaidRestore(intake);
   if (namedDump.length >= 3) return namedDump;
+  const draftForAuthority =
+    args.draft && intake
+      ? {
+          ...args.draft,
+          parties: repairDraftPartiesFromIntakeAuthority(args.draft.parties ?? [], intake),
+        }
+      : args.draft;
   const explicit = (args.legalEntities ?? [])
     .map((e) => String(e).replace(/\s+/g, " ").trim())
     .filter((e) => e.length >= 2 && isAuthoritativeLegalEntityName(e));
 
-  const fromDraft = (args.draft?.parties ?? [])
+  const fromDraft = (draftForAuthority?.parties ?? [])
     .map((p) => String((p as { name?: string }).name ?? "").replace(/\s+/g, " ").trim())
     .filter((e) => isAuthoritativeLegalEntityName(e));
 
@@ -48,7 +58,7 @@ export function resolveLegalEntitiesForCanonicalMetadata(args: {
   const authoritativeCount = Math.min(
     resolveAuthoritativeSignerCount({
       intakeText: intake || null,
-      draftParties: args.draft?.parties,
+      draftParties: draftForAuthority?.parties,
       draftPartyNames: fromDraft.length ? fromDraft : explicit,
       manifestPartyCount: Math.max(fromDraft.length, explicit.length, fromLabeled.length, fromManifest.length),
     }).count,

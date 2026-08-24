@@ -15,7 +15,7 @@ import {
   type PaidProSignerMetadataSeedResult,
 } from "./paidProSignerMetadataSeed";
 import { resolveAuthoritativeSignerCount } from "./signerCountAuthority";
-import { applyNamedDumpPartiesToPaidRestoreDraft } from "./intakeNamedPartyFallback";
+import { repairCheckoutBackRestoreDraftParties } from "./checkoutBackRestore";
 
 export type CheckoutRestoreMetadataHydrateResult = {
   seed: PaidProSignerMetadataSeedResult | null;
@@ -34,7 +34,7 @@ export function hydrateCanonicalPartyMetadataAfterCheckoutRestore(args: {
     };
   }
 
-  const draft = applyNamedDumpPartiesToPaidRestoreDraft(args.draft, intakeText) ?? args.draft;
+  const draft = repairCheckoutBackRestoreDraftParties(args.draft, intakeText);
   const legalEntities = resolveLegalEntitiesForCanonicalMetadata({
     legalEntities: (draft.parties ?? [])
       .map((p) => String((p as { name?: string }).name ?? "").trim())
