@@ -346,7 +346,7 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
     const commitFreeDraftIdx = intake.indexOf("const commitFreeDraftForReview = React.useCallback(");
     expect(commitFreeDraftIdx).toBeGreaterThan(0);
-    const commitFreeDraftBlock = intake.slice(commitFreeDraftIdx, commitFreeDraftIdx + 1500);
+    const commitFreeDraftBlock = intake.slice(commitFreeDraftIdx, commitFreeDraftIdx + 4000);
     expect(commitFreeDraftBlock).toContain('setCreateFlowPhase("draft_ready_for_review")');
     expect(commitFreeDraftBlock).toContain("setJourneyActionFeedback(null)");
     expect(commitFreeDraftBlock).toContain("logFreeReviewSurfaceResolved");
@@ -897,7 +897,7 @@ describe("AgreementBuilderIntake paid-pro resume + hydrate contract", () => {
     expect(intake).toContain("adding_signature_fields");
     expect(intake).toContain("signing_packet_ready");
     const sendIdx = intake.indexOf("const handleProSendForSignature = React.useCallback");
-    const sendBlock = intake.slice(sendIdx, sendIdx + 2800);
+    const sendBlock = intake.slice(sendIdx, sendIdx + 5500);
     expect(sendBlock).toContain('continueGuidedFinalReviewToSigning({ intent: "signature" })');
     expect(sendBlock).toContain("canProceedGuidedFinalReviewToSigning");
     expect(sendBlock).toContain("finalizePaidProSignerMetadataAndOpenReviewDecision");

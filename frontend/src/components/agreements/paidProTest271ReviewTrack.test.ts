@@ -146,7 +146,7 @@ describe("Test271 review track routing (static intake wiring)", () => {
 
   it("completeGuidedPaidProReviewFirstHandoff audits review link generation corpus", () => {
     const handoffIdx = intake.indexOf("const completeGuidedPaidProReviewFirstHandoff = React.useCallback");
-    const handoffBlock = intake.slice(handoffIdx, handoffIdx + 14000);
+    const handoffBlock = intake.slice(handoffIdx, handoffIdx + 16000);
     expect(handoffBlock).toContain("auditPaidProReviewLinkGenerationCorpus(bodyPlain)");
     expect(handoffBlock).toContain('logPaidProReviewTrackLifecycle("review_link_generated"');
     expect(handoffBlock).toContain("logReviewLinkCreated(");
@@ -174,7 +174,7 @@ describe("Test271 review track routing (static intake wiring)", () => {
     expect(intake).toContain('enterFinalReviewRecipientSetup("signature")');
     expect(intake).toContain("handleProSendForSignature");
     const sigIdx = intake.indexOf("const handleProSendForSignature = React.useCallback");
-    const sigBlock = intake.slice(sigIdx, sigIdx + 1200);
+    const sigBlock = intake.slice(sigIdx, sigIdx + 2800);
     expect(sigBlock).toContain('enterFinalReviewRecipientSetup("signature")');
     expect(sigBlock).not.toContain('enterFinalReviewRecipientSetup("review_only")');
   });

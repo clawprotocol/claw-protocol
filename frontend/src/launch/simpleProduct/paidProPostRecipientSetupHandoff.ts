@@ -319,6 +319,8 @@ export async function executePaidProPostRecipientSetupHandoff(options: {
   /** Corpus source label for review-link mint (e.g. authoritative_signing_snapshot). */
   agreementCorpusSource?: string | null;
   guidedSigningHandoff?: GuidedVs01SigningHandoff | null;
+  /** After-pay visible deal + complete names+emails: do not swallow VS01 on 1500-char / By-line asserts. */
+  relaxPaidSessionCorpusAssert?: boolean;
 }): Promise<PaidProPostRecipientSetupResult> {
   const id = String(options.agreementId || "").trim();
   if (!id) {
@@ -456,7 +458,7 @@ export async function executePaidProPostRecipientSetupHandoff(options: {
   const draftForBridge = mergeAgreementDraftWithGuidedSigningHandoff(options.draft, handoff);
   const signingCorpusPlain = (handoff?.corpusText ?? options.agreementCorpusText ?? "").trim();
 
-  if (options.premiumSendIntent === "signature" && handoff) {
+  if (options.premiumSendIntent === "signature" && handoff && !options.relaxPaidSessionCorpusAssert) {
     const corpusAssert = assertGuidedProVs01BridgeCorpusReady(handoff);
     if (!corpusAssert.ok) {
       logGuidedProVs01BridgeCorpusBlocked({

@@ -201,6 +201,45 @@ export function shouldShowPaidSessionFinalReviewActions(args: {
 }
 
 /**
+ * After-pay names+emails (2–4) are enough to start the existing signing track
+ * from SimpleProFinalReviewScreen. Do not require authorized-signer-name,
+ * title, address, or a second dump.
+ */
+export function canStartPaidSessionSignatureTrackFromFinalReview(args: {
+  namesAndEmailsComplete: boolean;
+}): boolean {
+  return Boolean(args.namesAndEmailsComplete);
+}
+
+/**
+ * After-pay visible deal + complete names+emails: signing track uses the
+ * painted deal body (same floor as review-link mint). Do not require
+ * 1001/2000-char SoT or signature-block asserts that swallow the click.
+ */
+export function shouldRelaxPaidSessionSignatureTrackGates(args: {
+  paidSessionActive: boolean;
+  visibleDealBody: boolean;
+  namesAndEmailsComplete: boolean;
+}): boolean {
+  return Boolean(
+    args.paidSessionActive && args.visibleDealBody && args.namesAndEmailsComplete,
+  );
+}
+
+/**
+ * Disabled-without-reason is illegal once names+emails are complete.
+ */
+export function isIllegalSilentSendDisabled(args: {
+  namesAndEmailsComplete: boolean;
+  sendDisabled: boolean;
+  sendDisabledReason?: string | null;
+}): boolean {
+  return Boolean(
+    args.namesAndEmailsComplete && args.sendDisabled && !(args.sendDisabledReason || "").trim(),
+  );
+}
+
+/**
  * Tear down paidProSignerMetadataFinalizedLatch only on a true session reset.
  * After-pay ≥200 rebuilds are never 1001-char SoT; missing SoT must not clear
  * the latch when a paid session already has a visible deal.
