@@ -191,7 +191,11 @@ describe("SimpleProFinalReviewScreen", () => {
     expect(article.className).not.toContain("overflow-y-auto");
     const actions = screen.getByTestId("simple-pro-final-review-actions");
     expect(documentShell.contains(actions)).toBe(false);
-    expect(actions.textContent).toContain("Add signer details");
+    const fewestBar = screen.getByTestId("simple-pro-fewest-action-bar");
+    expect(fewestBar.textContent).toContain("Add signer details");
+    expect(screen.getByTestId("simple-pro-send-for-signature").textContent).toContain(
+      "Add signer details",
+    );
     expect(screen.getByTestId("paid-pro-review-status-panel").textContent).toContain(
       "Add signer details",
     );
@@ -566,6 +570,34 @@ describe("SimpleProFinalReviewScreen", () => {
     fireEvent.click(signBtn);
     expect(onSendForSignature).toHaveBeenCalledTimes(1);
     expect(onSendForReview).not.toHaveBeenCalled();
+    cleanup();
+  });
+
+  it("does not swallow Send for signature when sendDisabled has no reason", () => {
+    const onSendForSignature = vi.fn();
+    render(
+      <SimpleProFinalReviewScreen
+        agreementHtml="<p>Body</p>"
+        canonicalPaidProReview
+        paidReviewPlain={`PRO AGREEMENT body. ${"Substantive clause. ".repeat(600)}`}
+        signersReady
+        signerMetadataFinalized
+        sendDisabled
+        sendDisabledReason={null}
+        packetStale
+        signaturePrimaryLabel="Send for signature"
+        reviewSecondaryLabel="Send for review"
+        onSendForSignature={onSendForSignature}
+        onSendForReview={vi.fn()}
+        onCopyAgreement={vi.fn()}
+        onExportAgreement={vi.fn()}
+      />,
+    );
+    const signBtn = screen.getByTestId("simple-pro-send-for-signature") as HTMLButtonElement;
+    expect(signBtn.disabled).toBe(false);
+    expect(screen.queryByTestId("simple-pro-send-disabled-reason")).toBeNull();
+    fireEvent.click(signBtn);
+    expect(onSendForSignature).toHaveBeenCalledTimes(1);
     cleanup();
   });
 });

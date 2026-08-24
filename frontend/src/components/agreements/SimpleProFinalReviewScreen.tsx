@@ -51,6 +51,7 @@ import {
 import type { GuidedAppliedChecklistLabel } from "./guidedDealCompletion/guidedAppliedSummaryChecklist";
 import type { UploadedSourceDocumentRecord } from "./uploadedSourceDocumentStorage";
 import { REVIEW_FIRST_SIGNING_TOKEN_SECRET_OPERATOR_HINT } from "../../launch/simpleProduct/reviewFirstSendSurface";
+import { isPaidSessionSendClickArmed } from "./paidProPaidSessionLanding";
 
 export type SimpleProFinalReviewScreenProps = {
   agreementHtml: string;
@@ -103,6 +104,8 @@ export type SimpleProFinalReviewScreenProps = {
   onChangeSigningOrder?: () => void;
   onSendForSignature: () => void;
   onSendForReview: () => void;
+  /** Same fewest-action bar as the paid draft card — optional so existing hosts stay valid. */
+  onEditWording?: () => void;
   onCopyAgreement: () => void;
   onExportAgreement: () => void;
   suggestEditsDraft?: string;
@@ -173,6 +176,7 @@ export function SimpleProFinalReviewScreen({
   onChangeSigningOrder,
   onSendForSignature,
   onSendForReview,
+  onEditWording,
   onCopyAgreement,
   onExportAgreement,
   suggestEditsDraft = "",
@@ -215,6 +219,13 @@ export function SimpleProFinalReviewScreen({
     !suppressPostReviewEditUx &&
     Boolean(onApplySuggestEdits && onSuggestEditsDraftChange && onUploadFile);
   const signerSetupRequired = canonicalPaidProReview && !signersReady;
+  const namesAndEmailsComplete = Boolean(signersReady || signerMetadataFinalized);
+  const sendClickArmed = isPaidSessionSendClickArmed({
+    namesAndEmailsComplete,
+    sendDisabled,
+    sendDisabledReason,
+  });
+  const sendSignatureBlocked = !sendClickArmed || bulkApplyBusy;
   const canEditAgreementText =
     canDirectEditPlainText || (!signerSetupRequired && !suppressPostReviewEditUx && canSuggestEdits);
   const effectivePaidReviewPlain = resolveEffectivePaidProReviewPlain({
@@ -674,6 +685,43 @@ export function SimpleProFinalReviewScreen({
             {reviewSubcopy}
           </p>
         )}
+        {suppressFinalReviewActions || reviewFirstActionsBlocked ? null : (
+          <div
+            className="relative z-20 mt-3 flex flex-wrap items-center gap-2.5 pointer-events-auto"
+            data-testid="simple-pro-fewest-action-bar"
+          >
+            {onEditWording ? (
+              <button
+                type="button"
+                className="rounded-lg border border-stone-300/90 bg-white/80 px-3 py-1.5 text-xs font-semibold text-stone-800 shadow-sm transition hover:bg-white sm:text-[13px]"
+                onClick={onEditWording}
+                data-testid="simple-pro-edit-wording"
+              >
+                Edit wording
+              </button>
+            ) : null}
+            {!signerSetupRequired ? (
+              <button
+                type="button"
+                className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm transition hover:bg-emerald-500 disabled:opacity-45 sm:text-[13px]"
+                disabled={reviewFirstHandoffBusy}
+                onClick={onSendForReview}
+                data-testid="simple-pro-send-for-review"
+              >
+                {reviewFirstHandoffBusy ? "Creating review links…" : reviewSecondaryLabel}
+              </button>
+            ) : null}
+            <button
+              type="button"
+              className="relative z-20 rounded-lg border border-stone-400/90 bg-white/70 px-3 py-1.5 text-xs font-semibold text-stone-800 shadow-sm transition hover:bg-white disabled:opacity-45 pointer-events-auto sm:text-[13px]"
+              disabled={sendSignatureBlocked}
+              onClick={onSendForSignature}
+              data-testid="simple-pro-send-for-signature"
+            >
+              {signaturePrimaryLabel}
+            </button>
+          </div>
+        )}
         {onBackToSignerDetails ? (
           <button
             type="button"
@@ -838,15 +886,6 @@ export function SimpleProFinalReviewScreen({
           </div>
         ) : (
           <>
-            <button
-              type="button"
-              className="w-full rounded-lg bg-emerald-800 px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-emerald-700 disabled:opacity-45"
-              disabled={sendDisabled || packetStale || bulkApplyBusy}
-              onClick={onSendForSignature}
-              data-testid="simple-pro-send-for-signature"
-            >
-              {signaturePrimaryLabel}
-            </button>
             {signerSetupRequired ? (
               <p
                 className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] font-medium text-amber-950"
@@ -856,7 +895,7 @@ export function SimpleProFinalReviewScreen({
                 Add signer details before continuing.
               </p>
             ) : null}
-            {!signerSetupRequired && signersReady && sendDisabled && sendDisabledReason ? (
+            {!signerSetupRequired && namesAndEmailsComplete && sendDisabled && sendDisabledReason ? (
               <p
                 className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] font-medium text-amber-950"
                 role="alert"
@@ -870,22 +909,11 @@ export function SimpleProFinalReviewScreen({
                 <button
                   type="button"
                   className="w-full rounded-lg border border-stone-300/90 bg-white px-3 py-2 text-xs font-semibold text-stone-800 sm:w-auto"
-                  disabled={sendDisabled || packetStale || bulkApplyBusy}
+                  disabled={sendSignatureBlocked}
                   onClick={onChangeSigningOrder}
                   data-testid="simple-pro-change-signing-order"
                 >
                   {signatureSecondaryLabel}
-                </button>
-              ) : null}
-              {!signerSetupRequired ? (
-                <button
-                  type="button"
-                  className="w-full rounded-lg border border-stone-300/90 bg-white px-3 py-2 text-xs font-semibold text-stone-800 sm:w-auto"
-                  disabled={sendDisabled || packetStale || bulkApplyBusy || reviewFirstHandoffBusy}
-                  onClick={onSendForReview}
-                  data-testid="simple-pro-send-for-review"
-                >
-                  {reviewFirstHandoffBusy ? "Creating review links…" : reviewSecondaryLabel}
                 </button>
               ) : null}
               <button

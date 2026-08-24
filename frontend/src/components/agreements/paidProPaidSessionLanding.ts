@@ -143,10 +143,13 @@ export function resolvePaidSessionTwoSignerNamesEmailsComplete(args: {
   signer2Email?: string | null;
   extraSigners?: readonly PaidSessionSignerNameEmail[];
 }): boolean {
+  const extras = (args.extraSigners ?? []).filter(
+    (slot) => trimSigner(slot.name).length > 0 || trimSigner(slot.email).length > 0,
+  );
   const slots: PaidSessionSignerNameEmail[] = [
     { name: args.signer1Name, email: args.signer1Email },
     { name: args.signer2Name, email: args.signer2Email },
-    ...(args.extraSigners ?? []),
+    ...extras,
   ];
   if (slots.length < 2 || slots.length > 4) return false;
   return slots.every(signerNameAndEmailComplete);
@@ -237,6 +240,27 @@ export function isIllegalSilentSendDisabled(args: {
   return Boolean(
     args.namesAndEmailsComplete && args.sendDisabled && !(args.sendDisabledReason || "").trim(),
   );
+}
+
+/**
+ * Visible Send for signature stays clickable once names+emails are complete.
+ * A silent disable (no reason) must not swallow the click.
+ */
+export function isPaidSessionSendClickArmed(args: {
+  namesAndEmailsComplete: boolean;
+  sendDisabled: boolean;
+  sendDisabledReason?: string | null;
+}): boolean {
+  if (
+    isIllegalSilentSendDisabled({
+      namesAndEmailsComplete: args.namesAndEmailsComplete,
+      sendDisabled: args.sendDisabled,
+      sendDisabledReason: args.sendDisabledReason,
+    })
+  ) {
+    return true;
+  }
+  return !args.sendDisabled;
 }
 
 /**

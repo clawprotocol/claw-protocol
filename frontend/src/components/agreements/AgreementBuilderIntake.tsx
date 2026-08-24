@@ -20897,7 +20897,6 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     if (
       paidSessionVisibleDealBody &&
       (hasAuthoritativeSigningSnapshot() || paidProSignerMetadataFinalizedLatch) &&
-      !premiumRecipientUxActive &&
       createUiStage === CreateUiStage.DRAFT
     ) {
       return true;
@@ -32581,16 +32580,21 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
   const handleProSendForSignature = React.useCallback(() => {
     traceSigningAdvance("handleProSendForSignature:enter");
+    // Visible click must never be silent. Toast first so a later gate cannot
+    // look like a dead button (live #102 miss: no Creating signing links…).
+    setJourneyActionFeedback(feedbackCreatingLinks("signing"));
     const stickySigningFinalized =
       hasAuthoritativeSigningSnapshot() || paidProSignerMetadataFinalizedLatch;
     const postFinalizeSigningReady =
       paidProSignerMetadataFinalized || stickySigningFinalized;
-    // After-pay names+emails (2–4) already complete: start the existing signing
-    // track. Extra signer title or address is not required, and the click must
-    // not be swallowed as an incomplete finalize or a dead signer-setup remount.
+    // After-pay names+emails (2–4) or an already-finalized Continue latch:
+    // start the existing signing track. Extra signer title or address is not
+    // required, and the click must not be swallowed as an incomplete finalize
+    // or a dead signer-setup remount.
     if (
       canStartPaidSessionSignatureTrackFromFinalReview({
-        namesAndEmailsComplete: paidSessionTwoSignersReady,
+        namesAndEmailsComplete:
+          paidSessionTwoSignersReady || paidProSignerMetadataFinalizedLatch,
       })
     ) {
       traceSigningAdvance("handleProSendForSignature:names_emails_complete");
@@ -32635,6 +32639,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       const signingReadyNow = postFinalizeSigningReady || stickySigningFinalized;
       if (!signingReadyNow) {
         traceSigningAdvance("handleProSendForSignature:finalize_incomplete");
+        void enterGuidedSignatureTrackRoute();
         return;
       }
       traceSigningAdvance("handleProSendForSignature:post_finalize_advance");
@@ -37013,23 +37018,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                                   devPremiumSendChoice("signature", next);
                                                 }
                                           }
-                                          onSendForSignature={() => {
-                                            if (
-                                              canStartPaidSessionSignatureTrackFromFinalReview({
-                                                namesAndEmailsComplete: paidSessionTwoSignersReady,
-                                              })
-                                            ) {
-                                              void handleProSendForSignature();
-                                              return;
-                                            }
-                                            const handler = resolvePaidProPrepareSignaturesHandler({
-                                              phase: paidProReviewDecisionPhase,
-                                              onDecision1: () => void handlePaidProPrepareSignaturesFromFirstReview(),
-                                              onDecision2: () => void handleProSendForSignature(),
-                                              onFallback: () => void handleProSendForSignature(),
-                                            });
-                                            handler();
-                                          }}
+                                          onSendForSignature={() => void handleProSendForSignature()}
+                                          onEditWording={() => void openPaidProDraftCardEditor()}
                                           onSendForReview={() => void handleProSendForReview()}
                                           reviewFirstHandoffBusy={reviewFirstHandoffBusy}
                                           reviewFirstHandoffError={reviewFirstHandoffError}
@@ -37427,8 +37417,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                               </button>
                                               <button
                                                 type="button"
-                                                className="rounded-lg border border-stone-400/90 bg-white/70 px-3 py-1.5 text-xs font-semibold text-stone-800 shadow-sm transition hover:bg-white sm:text-[13px]"
+                                                className="relative z-20 rounded-lg border border-stone-400/90 bg-white/70 px-3 py-1.5 text-xs font-semibold text-stone-800 shadow-sm transition hover:bg-white pointer-events-auto sm:text-[13px]"
                                                 onClick={() => void handleProSendForSignature()}
+                                                data-testid="simple-pro-send-for-signature"
                                               >
                                                 Send for signature
                                               </button>
