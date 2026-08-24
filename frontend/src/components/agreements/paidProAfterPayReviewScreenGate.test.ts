@@ -207,6 +207,97 @@ describe("after-pay review-screen gate — Continue after signers", () => {
     expect(gate.blockers.some((b) => b.field === "signer_name")).toBe(false);
   });
 
+  it("3 complete names+emails (Priya/Diego/Maya) opens the same final-review gate", () => {
+    const intake = `
+Priya Shah of Northline Studio, Diego Alvarez of Harbor Marks LLC, and Maya Chen of Westfield Counsel
+agree that Harbor Marks will design a logo and brand kit for Northline for $2,400 due on signing,
+30 days starting August 22, 2026, Texas law. Maya reviews as counsel.
+`;
+    const rebuilt = rebuildBodyFromIntakeForProFailure(intake, HOLLOW_DRAFT);
+    expect(rebuilt.length).toBeGreaterThanOrEqual(200);
+    expect(isNonHollowBody(rebuilt, intake)).toBe(true);
+    markPaidPremiumCompletionSession({ source: "settled_checkout" });
+    const visible = resolvePaidSessionVisibleDealBody({
+      paidSessionActive: hasPaidPremiumCompletionSession(),
+      acceptedCanonicalPlain: rebuilt,
+      intakeText: intake,
+    });
+    expect(visible).toBe(true);
+    const threeSigners = resolvePaidSessionTwoSignerNamesEmailsComplete({
+      signer1Name: "Priya Shah of Northline Studio",
+      signer1Email: "priya.shah.qa@example.com",
+      signer2Name: "Diego Alvarez of Harbor Marks LLC",
+      signer2Email: "diego.alvarez.qa@example.com",
+      extraSigners: [{ name: "Maya Chen of Westfield Counsel", email: "maya.chen.qa@example.com" }],
+    });
+    expect(threeSigners).toBe(true);
+    expect(
+      resolvePaidSessionTwoSignerNamesEmailsComplete({
+        signer1Name: "Priya Shah of Northline Studio",
+        signer1Email: "priya.shah.qa@example.com",
+        signer2Name: "Diego Alvarez of Harbor Marks LLC",
+        signer2Email: "diego.alvarez.qa@example.com",
+        extraSigners: [{ name: "Maya Chen of Westfield Counsel", email: "" }],
+      }),
+    ).toBe(false);
+    expect(
+      canOpenPaidSessionFinalReviewAfterSigners({
+        paidSessionActive: true,
+        visibleDealBody: visible,
+        twoSignerNamesAndEmailsComplete: threeSigners,
+      }),
+    ).toBe(true);
+    expect(
+      shouldShowPaidSessionFinalReviewActions({
+        paidSessionActive: true,
+        visibleDealBody: visible,
+        twoSignerNamesAndEmailsComplete: threeSigners,
+        signerMetadataFinalized: true,
+        signaturePreparationRequested: false,
+      }),
+    ).toBe(true);
+    expect(
+      shouldTeardownPaidProSignerMetadataFinalizedLatch({
+        latch: true,
+        hasPaidProSourceOfTruth: false,
+        paidSessionVisibleDealBody: visible,
+        shouldSkipPaidSessionReviewHydrateWait: shouldSkipPaidSessionReviewHydrateWait({
+          paidSessionActive: true,
+          visibleDealBody: visible,
+        }),
+      }),
+    ).toBe(false);
+  });
+
+  it("4 complete names+emails opens the same final-review gate", () => {
+    const fourSigners = resolvePaidSessionTwoSignerNamesEmailsComplete({
+      signer1Name: "Priya Shah of Northline Studio",
+      signer1Email: "priya.shah.qa@example.com",
+      signer2Name: "Diego Alvarez of Harbor Marks LLC",
+      signer2Email: "diego.alvarez.qa@example.com",
+      extraSigners: [
+        { name: "Maya Chen of Westfield Counsel", email: "maya.chen.qa@example.com" },
+        { name: "Jordan Hale of Pine Street Media LLC", email: "jordan.hale.qa@example.com" },
+      ],
+    });
+    expect(fourSigners).toBe(true);
+    expect(
+      canOpenPaidSessionFinalReviewAfterSigners({
+        paidSessionActive: true,
+        visibleDealBody: true,
+        twoSignerNamesAndEmailsComplete: fourSigners,
+      }),
+    ).toBe(true);
+    expect(
+      shouldShowPaidSessionFinalReviewActions({
+        paidSessionActive: true,
+        visibleDealBody: true,
+        twoSignerNamesAndEmailsComplete: fourSigners,
+        signerMetadataFinalized: true,
+      }),
+    ).toBe(true);
+  });
+
   it("does not open review when only one signer name+email is filled", () => {
     expect(
       resolvePaidSessionTwoSignerNamesEmailsComplete({
@@ -319,10 +410,16 @@ describe("after-pay review-screen gate — intake wiring", () => {
     expect(finalize).not.toContain("/app/esign");
 
     const completeStart = intakeSrc.indexOf('case "complete_recipient_details"');
-    const complete = intakeSrc.slice(completeStart, completeStart + 1800);
+    const completeEnd = intakeSrc.indexOf('case "premium_continue_to_signers"', completeStart);
+    const complete = intakeSrc.slice(completeStart, completeEnd);
     expect(complete).toContain("paidSessionSkipReviewHydrateWait");
     expect(complete.indexOf("finalizePaidProSignerMetadataAndOpenReviewDecision")).toBeGreaterThan(-1);
-    expect(complete.indexOf("void onGenerate()")).toBe(-1);
+    expect(complete.indexOf("finalizePaidProSignerMetadataAndOpenReviewDecision")).toBeLessThan(
+      complete.indexOf("void onGenerate()"),
+    );
+    expect(complete.indexOf("demo_session_signer_details_incomplete")).toBeLessThan(
+      complete.indexOf("void onGenerate()"),
+    );
 
     expect(intakeSrc).toContain("if (paidSessionVisibleDealBody)");
     expect(intakeSrc).toContain('onHomeGuidedTransitionPhase("review_ready")');
@@ -331,7 +428,46 @@ describe("after-pay review-screen gate — intake wiring", () => {
   it("does not require extra address/title to Continue after two names+emails", () => {
     expect(intakeSrc).toContain("nameEmailOnlySignerFields");
     expect(intakeSrc).toContain("paidSessionTwoSignersReady");
+    expect(intakeSrc).toContain("extraSigners: paidSessionExtraSigners");
     expect(intakeSrc).toMatch(/nameEmailOnlySignerFields\s*\n\s*\?\s*false/);
+  });
+
+  it("N complete names+emails (2–4) + Complete signer details opens final review without remount or email wipe", () => {
+    expect(intakeSrc).toContain("extraSigners: paidSessionExtraSigners");
+    expect(intakeSrc).toContain("paidProSignerDetailsGate.complete || paidSessionTwoSignersReady");
+
+    const completeStart = intakeSrc.indexOf('case "complete_recipient_details"');
+    const complete = intakeSrc.slice(completeStart, completeStart + 2400);
+    expect(complete).toContain("paidSessionTwoSignersReady");
+    expect(complete).toContain("finalizePaidProSignerMetadataAndOpenReviewDecision");
+    expect(complete).toContain("demo_session_signer_details_incomplete");
+    expect(complete).toContain("demo_session_signer_details_incomplete_fallback");
+    expect(complete.indexOf("void onGenerate()")).toBeGreaterThan(complete.indexOf("demo_session_signer_details_incomplete"));
+    expect(complete).not.toContain("stripPremiumCompletionQueryParam");
+    expect(complete).not.toContain('navigate("/app/create")');
+
+    const runPrimaryStart = intakeSrc.indexOf("console.log(\"[CTA CLICK]\", unifiedPrimaryCta)");
+    expect(runPrimaryStart).toBeGreaterThan(-1);
+    const runPrimaryBlock = intakeSrc.slice(runPrimaryStart, runPrimaryStart + 1400);
+    expect(runPrimaryBlock).toContain('unifiedPrimaryCta.action === "complete_recipient_details"');
+    expect(runPrimaryBlock).toContain("paidSessionTwoSignersReady");
+    expect(runPrimaryBlock).toContain("finalizePaidProSignerMetadataAndOpenReviewDecision");
+    expect(runPrimaryBlock).not.toContain("stripPremiumCompletionQueryParam");
+    expect(runPrimaryBlock).not.toContain("void onGenerate()");
+
+    const finalizeStart = intakeSrc.indexOf(
+      "const finalizePaidProSignerMetadataAndOpenReviewDecision = React.useCallback",
+    );
+    const finalize = intakeSrc.slice(
+      finalizeStart,
+      intakeSrc.indexOf("finalizePaidProSignerMetadataAndOpenReviewDecisionRef.current", finalizeStart),
+    );
+    expect(finalize).toContain("!paidSessionTwoSignersReady");
+    expect(finalize).not.toContain("stripPremiumCompletionQueryParam");
+    expect(finalize).not.toContain("setRecipient1Email(\"\")");
+    expect(finalize).not.toContain("setRecipient2Email(\"\")");
+    expect(finalize).not.toContain("setExtraPartyReviewEmails([])");
+    expect(finalize).not.toContain("setExtraPartyReviewEmails([");
   });
 
   it("guided_continue with paid_pro_signer_details_complete finalizes even when inline latch is false", () => {
@@ -357,7 +493,7 @@ describe("after-pay review-screen gate — intake wiring", () => {
 
     const runPrimaryStart = intakeSrc.indexOf("console.log(\"[CTA CLICK]\", unifiedPrimaryCta)");
     expect(runPrimaryStart).toBeGreaterThan(-1);
-    const runPrimaryBlock = intakeSrc.slice(runPrimaryStart, runPrimaryStart + 900);
+    const runPrimaryBlock = intakeSrc.slice(runPrimaryStart, runPrimaryStart + 1400);
     expect(runPrimaryBlock).toContain('unifiedPrimaryCta.reason === "paid_pro_signer_details_complete"');
     expect(runPrimaryBlock).toContain("finalizePaidProSignerMetadataAndOpenReviewDecision");
     expect(runPrimaryBlock).toContain("paidSessionSkipReviewHydrateWait");
@@ -378,8 +514,8 @@ describe("after-pay review-screen gate — intake wiring", () => {
     expect(intakeSrc).toContain('reason: "paid_pro_review_decision_on_card"');
 
     const afterPayFinalizeCta = intakeSrc.slice(
-      intakeSrc.indexOf("After-pay visitor + finalized two signers: existing final-review decision"),
-      intakeSrc.indexOf("After-pay visitor + finalized two signers: existing final-review decision") + 700,
+      intakeSrc.indexOf("After-pay visitor + finalized N signers (2–4): existing final-review decision"),
+      intakeSrc.indexOf("After-pay visitor + finalized N signers (2–4): existing final-review decision") + 700,
     );
     expect(afterPayFinalizeCta).toContain("paidSessionFinalReviewDecisionReady");
     expect(afterPayFinalizeCta).toContain("paid_pro_review_decision_on_card");

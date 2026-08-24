@@ -20675,11 +20675,19 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     lastKnownGoodPlain: lastKnownGoodAuthoritativeDraftRef.current,
     intakeText: paidProFirstReviewDisplayContext.intakeText,
   });
+  const paidSessionExtraSigners = Array.from(
+    { length: Math.max(0, Math.min(authoritativeSignerSetupPartyCount, 4) - 2) },
+    (_, extraIdx) => ({
+      name: (partySignerNames[extraIdx + 2] || extraPartyLegalNames[extraIdx] || "").trim(),
+      email: extraPartyReviewEmails[extraIdx] || "",
+    }),
+  );
   const paidSessionTwoSignersReady = resolvePaidSessionTwoSignerNamesEmailsComplete({
     signer1Name: (partySignerNames[0] || recipient1Name || "").trim(),
     signer1Email: recipient1Email,
     signer2Name: (partySignerNames[1] || recipient2Name || "").trim(),
     signer2Email: recipient2Email,
+    extraSigners: paidSessionExtraSigners,
   });
   const paidSessionFinalReviewAfterSignersReady = canOpenPaidSessionFinalReviewAfterSigners({
     paidSessionActive: hasPaidPremiumCompletionSession(),
@@ -21086,7 +21094,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const showPaidProForcedFirstReviewTrackChooser = useMemo(
     () => {
       if (demoSessionUserActive) return false;
-      // After-pay visitor + finalized two signers: SimpleProFinalReviewScreen owns
+      // After-pay visitor + finalized N signers (2–4): SimpleProFinalReviewScreen owns
       // Send for review / Prepare for signing. Do not suppress those actions under chrome.
       if (paidSessionFinalReviewDecisionReady) return false;
       return shouldShowPaidProReviewDecisionChrome(paidProReviewDecisionPhase);
@@ -24075,27 +24083,41 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       maxPaidAuthoritativeCorpusLen >= PAID_PRO_AUTHORITY_MIN_LEN;
     if (demoSessionHasVisibleProCorpus && paidProCanonicalReviewSignerSetupActive) {
       return {
-        label: paidProSignerDetailsGate.complete ? "Continue" : "Complete signer details",
-        action: paidProSignerDetailsGate.complete ? "guided_continue" : "complete_recipient_details",
+        label:
+          paidProSignerDetailsGate.complete || paidSessionTwoSignersReady
+            ? "Continue"
+            : "Complete signer details",
+        action:
+          paidProSignerDetailsGate.complete || paidSessionTwoSignersReady
+            ? "guided_continue"
+            : "complete_recipient_details",
         disabled: false,
-        reason: paidProSignerDetailsGate.complete
-          ? "demo_session_signer_details_complete"
-          : "demo_session_signer_details_incomplete",
+        reason:
+          paidProSignerDetailsGate.complete || paidSessionTwoSignersReady
+            ? "demo_session_signer_details_complete"
+            : "demo_session_signer_details_incomplete",
       };
     }
     // Fallback: demo session with visible Pro corpus but paidProCanonicalReviewSignerSetupActive is false
     // (transient state during hydration). Still show "Complete signer details" to avoid blank CTA.
     if (demoSessionHasVisibleProCorpus && !paidProCanonicalReviewSignerSetupActive) {
       return {
-        label: paidProSignerDetailsGate.complete ? "Continue" : "Complete signer details",
-        action: paidProSignerDetailsGate.complete ? "guided_continue" : "complete_recipient_details",
+        label:
+          paidProSignerDetailsGate.complete || paidSessionTwoSignersReady
+            ? "Continue"
+            : "Complete signer details",
+        action:
+          paidProSignerDetailsGate.complete || paidSessionTwoSignersReady
+            ? "guided_continue"
+            : "complete_recipient_details",
         disabled: false,
-        reason: paidProSignerDetailsGate.complete
-          ? "demo_session_signer_details_complete_fallback"
-          : "demo_session_signer_details_incomplete_fallback",
+        reason:
+          paidProSignerDetailsGate.complete || paidSessionTwoSignersReady
+            ? "demo_session_signer_details_complete_fallback"
+            : "demo_session_signer_details_incomplete_fallback",
       };
     }
-    // After-pay visitor: visible ≥200 rebuild + two names/emails is enough.
+    // After-pay visitor: visible ≥200 rebuild + N names/emails (2–4) is enough.
     // Do not wait for 1001-char SoT before Continue / Complete signer details.
     if (
       paidSessionVisibleDealBody &&
@@ -24118,7 +24140,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             : "paid_session_signer_details_incomplete",
       };
     }
-    // After-pay visitor + finalized two signers: existing final-review decision
+    // After-pay visitor + finalized N signers (2–4): existing final-review decision
     // (Send for review / Prepare for signing) owns the next step — not another Continue.
     if (paidSessionFinalReviewDecisionReady && !dashboardSignerSetupResumeUiActive) {
       return {
@@ -31745,7 +31767,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   );
 
   const finalizePaidProSignerMetadataAndOpenReviewDecision = React.useCallback(async (): Promise<boolean> => {
-    if (!paidProSignerDetailsGate.complete && !paidSessionFinalReviewAfterSignersReady) {
+    if (
+      !paidProSignerDetailsGate.complete &&
+      !paidSessionFinalReviewAfterSignersReady &&
+      !paidSessionTwoSignersReady
+    ) {
       scrollGuidedSignerSetupIntoView();
       return false;
     }
@@ -31977,6 +32003,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   }, [
     paidProSignerDetailsGate.complete,
     paidSessionFinalReviewAfterSignersReady,
+    paidSessionTwoSignersReady,
     paidSessionSkipReviewHydrateWait,
     paidProFirstReviewDisplayContext.acceptedCanonicalPlain,
     onHomeGuidedTransitionPhase,
@@ -33152,10 +33179,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           }
           case "complete_recipient_details": {
             if (
-              paidSessionSkipReviewHydrateWait &&
-              (paidSessionFinalReviewAfterSignersReady ||
-                paidProSignerDetailsGate.complete ||
-                paidSessionTwoSignersReady)
+              paidSessionFinalReviewAfterSignersReady ||
+              paidSessionTwoSignersReady ||
+              (paidSessionSkipReviewHydrateWait && paidProSignerDetailsGate.complete)
             ) {
               void finalizePaidProSignerMetadataAndOpenReviewDecision();
               return;
@@ -33163,6 +33189,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             if (
               paidSessionSkipReviewHydrateWait ||
               cta.reason === "paid_session_signer_details_incomplete" ||
+              cta.reason === "demo_session_signer_details_incomplete" ||
+              cta.reason === "demo_session_signer_details_incomplete_fallback" ||
               cta.reason === "dashboard_signer_setup_resume_incomplete"
             ) {
               const focusKey = paidProSignerDetailsGate.firstIncompleteFieldKey;
@@ -33581,9 +33609,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     if (simpleCreateUnifiedBottomCta) {
       console.log("[CTA CLICK]", unifiedPrimaryCta);
       if (
-        unifiedPrimaryCta.action === "guided_continue" &&
+        (unifiedPrimaryCta.action === "guided_continue" ||
+          unifiedPrimaryCta.action === "complete_recipient_details") &&
         !unifiedPrimaryCta.disabled &&
-        unifiedPrimaryCta.reason === "paid_pro_signer_details_complete" &&
+        (unifiedPrimaryCta.reason === "paid_pro_signer_details_complete" ||
+          unifiedPrimaryCta.reason === "demo_session_signer_details_complete" ||
+          unifiedPrimaryCta.reason === "demo_session_signer_details_complete_fallback" ||
+          paidSessionTwoSignersReady ||
+          paidSessionFinalReviewAfterSignersReady) &&
         !signaturePreparationRequested &&
         (paidProInlineSignerSetupLatched ||
           paidSessionSkipReviewHydrateWait ||
