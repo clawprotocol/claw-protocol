@@ -146,7 +146,7 @@ describe("Test271 review track routing (static intake wiring)", () => {
 
   it("completeGuidedPaidProReviewFirstHandoff audits review link generation corpus", () => {
     const handoffIdx = intake.indexOf("const completeGuidedPaidProReviewFirstHandoff = React.useCallback");
-    const handoffBlock = intake.slice(handoffIdx, handoffIdx + 14000);
+    const handoffBlock = intake.slice(handoffIdx, handoffIdx + 16000);
     expect(handoffBlock).toContain("auditPaidProReviewLinkGenerationCorpus(bodyPlain)");
     expect(handoffBlock).toContain('logPaidProReviewTrackLifecycle("review_link_generated"');
     expect(handoffBlock).toContain("logReviewLinkCreated(");
