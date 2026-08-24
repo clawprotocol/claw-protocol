@@ -11,10 +11,12 @@ import {
   canOpenPaidSessionFinalReviewAfterSigners,
   canStartPaidSessionSignatureTrackFromFinalReview,
   isIllegalSilentSendDisabled,
+  isLeftoverReviewPacketSendDisableReason,
   isPaidSessionSendClickArmed,
   isVisibleMissingTenetAskLanding,
   resolvePaidSessionTwoSignerNamesEmailsComplete,
   resolvePaidSessionVisibleDealBody,
+  shouldBypassPaidProReviewShellWithoutCorpus,
   shouldRelaxPaidSessionSignatureTrackGates,
   shouldShowPaidSessionFinalReviewActions,
   shouldShowPaidSessionGeneratingOverlay,
@@ -717,6 +719,44 @@ describe("after-pay Send for signature — names+emails start the existing signi
         sendDisabledReason: "Saving agreement…",
       }),
     ).toBe(false);
+    expect(
+      isLeftoverReviewPacketSendDisableReason(
+        "Agreement changed after links were created. Create new links for this version.",
+      ),
+    ).toBe(true);
+    expect(
+      isPaidSessionSendClickArmed({
+        namesAndEmailsComplete: true,
+        sendDisabled: true,
+        sendDisabledReason:
+          "Agreement changed after links were created. Create new links for this version.",
+      }),
+    ).toBe(true);
+    expect(
+      shouldBypassPaidProReviewShellWithoutCorpus({
+        blockWithoutCanonicalCorpus: true,
+        canonicalFirstReviewActive: false,
+        paidSessionVisibleDealBody: true,
+      }),
+    ).toBe(false);
+    expect(
+      shouldBypassPaidProReviewShellWithoutCorpus({
+        blockWithoutCanonicalCorpus: true,
+        canonicalFirstReviewActive: false,
+        paidSessionVisibleDealBody: false,
+      }),
+    ).toBe(true);
+    expect(intakeSrc).toContain("shouldBypassPaidProReviewShellWithoutCorpus");
+    expect(intakeSrc).toContain("paidSessionTwoSignersReady");
+    const shellStart = intakeSrc.indexOf("const simpleProFinalReviewShellActive = useMemo");
+    expect(shellStart).toBeGreaterThan(-1);
+    const shell = intakeSrc.slice(shellStart, shellStart + 1800);
+    expect(shell).toContain("shouldBypassPaidProReviewShellWithoutCorpus");
+    expect(shell).toContain("paidSessionVisibleDealBody");
+    expect(shell).toContain("paidSessionTwoSignersReady");
+    expect(shell).not.toMatch(
+      /blockPaidProReviewShellWithoutCorpus && !canonicalPaidCreateFlowFirstReviewActive\) return false/,
+    );
   });
 
   it("click path is wired to handleProSendForSignature / enterGuidedSignatureTrackRoute", () => {
@@ -728,6 +768,7 @@ describe("after-pay Send for signature — names+emails start the existing signi
     expect(sendBlock).toContain("paidSessionTwoSignersReady");
     expect(sendBlock).toContain('traceSigningAdvance("handleProSendForSignature:names_emails_complete")');
     expect(sendBlock).toContain("feedbackCreatingLinks(\"signing\")");
+    expect(sendBlock).toContain("publishJourneyActionFlash(creatingSigningLinks)");
     expect(sendBlock).toContain("enterGuidedSignatureTrackRoute");
     expect(sendBlock).not.toContain("authorized-signer-name");
     const namesAt = sendBlock.indexOf("handleProSendForSignature:names_emails_complete");
@@ -746,6 +787,7 @@ describe("after-pay Send for signature — names+emails start the existing signi
     const trackStart = intakeSrc.indexOf("const enterGuidedSignatureTrackRoute = React.useCallback");
     const track = intakeSrc.slice(trackStart, trackStart + 25000);
     expect(track).toContain("shouldRelaxPaidSessionSignatureTrackGates");
+    expect(track).toContain("paidProSignerMetadataFinalizedLatch");
     expect(track).toContain("relaxPaidSessionSignatureGates");
     expect(track).toContain("PAID_PRO_FALLBACK_REBUILD_MIN_LEN");
     expect(track).toContain("draftSnapshotRef.current");

@@ -243,8 +243,36 @@ export function isIllegalSilentSendDisabled(args: {
 }
 
 /**
+ * Leftover review-packet / "Links created" copy must not disable e-sign.
+ * After-pay Continue releases the recipients surface, so the chip can say
+ * "Links created—share when ready" even when Send for review was never clicked.
+ */
+export function isLeftoverReviewPacketSendDisableReason(reason?: string | null): boolean {
+  const r = (reason || "").trim().toLowerCase();
+  if (!r) return false;
+  return r.includes("links were created") || r.includes("create new links for this version");
+}
+
+/**
+ * After-pay ≥200 painted deal must still mount existing SimpleProFinalReviewScreen.
+ * Blocking on 1001-char SoT leaves the draft-card fallback — that card's
+ * Send for signature is the live silent no-op (#103 miss).
+ */
+export function shouldBypassPaidProReviewShellWithoutCorpus(args: {
+  blockWithoutCanonicalCorpus: boolean;
+  canonicalFirstReviewActive: boolean;
+  paidSessionVisibleDealBody: boolean;
+}): boolean {
+  if (!args.blockWithoutCanonicalCorpus) return false;
+  if (args.canonicalFirstReviewActive) return false;
+  if (args.paidSessionVisibleDealBody) return false;
+  return true;
+}
+
+/**
  * Visible Send for signature stays clickable once names+emails are complete.
- * A silent disable (no reason) must not swallow the click.
+ * A silent disable (no reason) must not swallow the click. Leftover
+ * review-packet / "Links created" state is not a busy gate.
  */
 export function isPaidSessionSendClickArmed(args: {
   namesAndEmailsComplete: boolean;
@@ -257,6 +285,13 @@ export function isPaidSessionSendClickArmed(args: {
       sendDisabled: args.sendDisabled,
       sendDisabledReason: args.sendDisabledReason,
     })
+  ) {
+    return true;
+  }
+  if (
+    args.namesAndEmailsComplete &&
+    args.sendDisabled &&
+    isLeftoverReviewPacketSendDisableReason(args.sendDisabledReason)
   ) {
     return true;
   }

@@ -573,6 +573,32 @@ describe("SimpleProFinalReviewScreen", () => {
     cleanup();
   });
 
+  it("does not swallow Send for signature when leftover Links created packet disables send", () => {
+    const onSendForSignature = vi.fn();
+    render(
+      <SimpleProFinalReviewScreen
+        agreementHtml="<p>Body</p>"
+        canonicalPaidProReview
+        paidReviewPlain={`PRO AGREEMENT body. ${"Substantive clause. ".repeat(600)}`}
+        signersReady
+        signerMetadataFinalized
+        sendDisabled
+        sendDisabledReason="Agreement changed after links were created. Create new links for this version."
+        signaturePrimaryLabel="Send for signature"
+        reviewSecondaryLabel="Send for review"
+        onSendForSignature={onSendForSignature}
+        onSendForReview={vi.fn()}
+        onCopyAgreement={vi.fn()}
+        onExportAgreement={vi.fn()}
+      />,
+    );
+    const signBtn = screen.getByTestId("simple-pro-send-for-signature") as HTMLButtonElement;
+    expect(signBtn.disabled).toBe(false);
+    fireEvent.click(signBtn);
+    expect(onSendForSignature).toHaveBeenCalledTimes(1);
+    cleanup();
+  });
+
   it("does not swallow Send for signature when sendDisabled has no reason", () => {
     const onSendForSignature = vi.fn();
     render(
