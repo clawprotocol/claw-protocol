@@ -122,25 +122,38 @@ function trimSigner(s: string | null | undefined): string {
   return (s || "").replace(/\s+/g, " ").trim();
 }
 
+export type PaidSessionSignerNameEmail = {
+  name?: string | null;
+  email?: string | null;
+};
+
+function signerNameAndEmailComplete(args: PaidSessionSignerNameEmail): boolean {
+  return trimSigner(args.name).length >= 2 && looksLikeEmail(trimSigner(args.email));
+}
+
 /**
- * Visitor after-pay Continue needs two human names + emails.
- * Title, address, 1001-char generate SoT, and a new agreement GET are not required.
+ * After-pay Continue / Complete signer details: N complete names+emails (2, 3, or 4).
+ * Extra slots (party 3/4) must also be complete when present. Title, address,
+ * authorized-signer-name, 1001-char SoT, and a new agreement GET are not required.
  */
 export function resolvePaidSessionTwoSignerNamesEmailsComplete(args: {
   signer1Name?: string | null;
   signer1Email?: string | null;
   signer2Name?: string | null;
   signer2Email?: string | null;
+  extraSigners?: readonly PaidSessionSignerNameEmail[];
 }): boolean {
-  const n1 = trimSigner(args.signer1Name);
-  const n2 = trimSigner(args.signer2Name);
-  const e1 = trimSigner(args.signer1Email);
-  const e2 = trimSigner(args.signer2Email);
-  return Boolean(n1.length >= 2 && n2.length >= 2 && looksLikeEmail(e1) && looksLikeEmail(e2));
+  const slots: PaidSessionSignerNameEmail[] = [
+    { name: args.signer1Name, email: args.signer1Email },
+    { name: args.signer2Name, email: args.signer2Email },
+    ...(args.extraSigners ?? []),
+  ];
+  if (slots.length < 2 || slots.length > 4) return false;
+  return slots.every(signerNameAndEmailComplete);
 }
 
 /**
- * After pay, a visible deal on the card + two signer names/emails is enough
+ * After pay, a visible deal on the card + N signer names/emails (2–4) is enough
  * to open existing SimpleProFinalReviewScreen. Do not sit on Preparing.
  */
 export function canOpenPaidSessionFinalReviewAfterSigners(args: {
@@ -165,7 +178,7 @@ export function shouldSkipPaidSessionReviewHydrateWait(args: {
 }
 
 /**
- * After-pay visitor with two signers finalized: existing SimpleProFinalReviewScreen
+ * After-pay visitor with N signers (2–4) finalized: existing SimpleProFinalReviewScreen
  * owns Send for review / Prepare for signing. Do not sit on another Continue,
  * require the inline signer-setup latch, or suppress those on-card actions.
  */
