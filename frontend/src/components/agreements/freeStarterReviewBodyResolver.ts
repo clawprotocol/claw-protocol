@@ -21,7 +21,10 @@ import {
   resolveStarterPreviewIntakeText,
 } from "./intakeCurrencyParse";
 import { labeledPartyLegalEntities } from "./labeledPartyBlockParse";
-import { starterCorpusContainsRawIntakeInstruction } from "./canonicalPartyRoleAuthority";
+import {
+  resolveStarterTwoPartyCommercialAuthority,
+  starterCorpusContainsRawIntakeInstruction,
+} from "./canonicalPartyRoleAuthority";
 import { readOriginalUserIntakeRaw } from "./originalUserIntakeRawStorage";
 import { enrichStarterPreviewPartiesFromIntake } from "./starterOpeningPartyPreserve";
 import { extractNamedDumpPartyUnits } from "./intakeNamedPartyFallback";
@@ -397,6 +400,64 @@ function repairMisplacedAddressTokenInDateContext(body: string, intake: string):
     return body.replace(misplacedRe, `${month} ${day}, ${year}`);
   }
   return body.replace(/\[\s*ADDRESS_\d+\s*\](?=\s*\d{1,2}\s*,\s*\d{4})/gi, month);
+}
+
+function escapeRegExpForScopeRepair(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/** Work phrase from hiring intake ("to design a logo and brand kit"). */
+function extractScopeWorkFromHiringIntake(intake: string): string {
+  const text = intake.trim();
+  if (!text) return "";
+  const hiringToWork = text.match(
+    /\b(?:is\s+)?(?:hiring|engaging|retaining|commissioning)\s+[^.!?;]{0,140}?\s+to\s+((?:design|build|create|develop|provide|perform|deliver|run|paint|photograph|write|install|fix|repair|market|consult|manage|handle|produce|film|edit)\s+[^.!?;]{6,200})/i,
+  );
+  if (hiringToWork?.[1]) {
+    return hiringToWork[1].replace(/\s+for\s+(?:three|four|five|six|\d+)\s+months?\b.*$/i, "").trim();
+  }
+  const toWork = text.match(
+    /\bto\s+(design|build|create|develop|perform|deliver|run|paint|photograph|write|install|fix|repair|market|consult|manage|handle|produce|film|edit)\s+([^.!?;]{6,200})/i,
+  );
+  if (toWork?.[1] && toWork[2]) {
+    return `${toWork[1]} ${toWork[2]}`.replace(/\s+for\s+(?:three|four|five|six|\d+)\s+months?\b.*$/i, "").trim();
+  }
+  const toProvide = text.match(/\bto\s+provide\s+([^.!?;]{8,200})/i);
+  if (toProvide?.[1]) {
+    return toProvide[1].replace(/\s+for\s+(?:three|four|five|six|\d+)\s+months?\b.*$/i, "").trim();
+  }
+  return "";
+}
+
+/**
+ * When intake names a hiring client and hired provider, visible Scope must never assign
+ * the work obligation to the client (e.g. "Priya … will design" on a Diego-hiring dump).
+ */
+export function repairFreeStarterScopeObligationFromIntakeAuthority(
+  body: string,
+  intake: string,
+  draft: ParsedDraftShape | null,
+): string {
+  const text = (body || "").trim();
+  const intakeText = (intake || "").trim();
+  if (!text || intakeText.length < 20 || !draft) return body;
+
+  const parties = repairDraftPartiesFromIntakeAuthority(draft.parties ?? [], intakeText);
+  const partyNames = parties.map((p) => String(p?.name ?? "").trim()).filter(Boolean);
+  const authority = resolveStarterTwoPartyCommercialAuthority(intakeText, partyNames);
+  const client = (authority?.clientName || partyNames[0] || "").trim();
+  const provider = (authority?.providerName || partyNames[1] || "").trim();
+  const scopeWork = extractScopeWorkFromHiringIntake(intakeText);
+  if (!client || !provider || !scopeWork) return body;
+
+  const clientPerformerRe = new RegExp(
+    `${escapeRegExpForScopeRepair(client)}\\s+will\\s+(?:design|develop|create|build|provide|perform|deliver|run|paint|photograph|write|install|fix|repair|market|consult|manage|handle|produce|film|edit)[^\\n.]*`,
+    "i",
+  );
+  if (!clientPerformerRe.test(text)) return body;
+
+  const authoritativeLine = `${provider} will ${scopeWork} for ${client}.`;
+  return text.replace(clientPerformerRe, authoritativeLine);
 }
 
 /**
@@ -1197,8 +1258,11 @@ export function resolveFreeStarterReviewBody(
     ) {
       // continue to repaired preview below
     } else {
+      const scopeRepaired = draft
+        ? repairFreeStarterScopeObligationFromIntakeAuthority(hydratedDirect.trim(), rawIntakeResolved, draft)
+        : hydratedDirect.trim();
       return {
-        body: ensureStatedTwoPartyHiringNamesInBody(hydratedDirect.trim(), rawIntakeResolved),
+        body: ensureStatedTwoPartyHiringNamesInBody(scopeRepaired, rawIntakeResolved),
         source: "free_openai_direct",
         rawIntakeResolved,
         usedOriginalRaw: intakeMeta.usedOriginalRaw,
@@ -1320,8 +1384,12 @@ export function resolveFreeStarterReviewBody(
     jurisdiction: draft?.jurisdiction ?? null,
   });
 
+  const scopeRepairedDisplay = draft
+    ? repairFreeStarterScopeObligationFromIntakeAuthority(displayBody, rawIntakeResolved, draft)
+    : displayBody;
+
   const result: ResolveFreeStarterReviewBodyResult = {
-    body: ensureStatedTwoPartyHiringNamesInBody(displayBody, rawIntakeResolved),
+    body: ensureStatedTwoPartyHiringNamesInBody(scopeRepairedDisplay, rawIntakeResolved),
     source,
     rawIntakeResolved,
     usedOriginalRaw: intakeMeta.usedOriginalRaw,

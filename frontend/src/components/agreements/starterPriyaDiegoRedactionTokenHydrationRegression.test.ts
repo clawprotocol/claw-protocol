@@ -10,6 +10,7 @@ import { defaultIntakePartyRoleLabels } from "./partyRoleIntake";
 import {
   evaluateSimpleHollowBodyGate,
   hydrateFreeStarterVisibleBody,
+  repairFreeStarterScopeObligationFromIntakeAuthority,
   resolveFreeStarterReviewBody,
   starterBodyHasUnresolvedRedactionTokens,
 } from "./freeStarterReviewBodyResolver";
@@ -29,6 +30,23 @@ $2,400 due on signing.
 
 3. Term
 Term: The term of this Agreement shall last until [ADDRESS_1] 24, 2026.
+
+4. Governing Law
+This Agreement is governed by the laws of the State of Texas.`;
+
+/** Post-hydration production one-pager: recital roles correct, scope obligation flipped to client. */
+const PRODUCTION_SCOPE_FLIP_FREE_DOC = `SERVICES AGREEMENT
+
+This Agreement ("Agreement") is entered into by and between: Priya Shah of Northline Studio ("Client") and Diego Alvarez of Harbor Marks LLC ("Service Provider") (collectively, the "Parties").
+
+1. Scope of Services
+Priya Shah of Northline Studio will design a logo and brand kit.
+
+2. Payment Terms
+$2,400 due on signing.
+
+3. Term
+30 days starting August 24, 2026.
 
 4. Governing Law
 This Agreement is governed by the laws of the State of Texas.`;
@@ -98,6 +116,35 @@ describe("Priya/Diego starter redaction token hydration (production acceptance)"
     expect(result.body).toMatch(/August 24, 2026/);
     expect(result.body).not.toMatch(/\[ADDRESS_1\]/i);
     expect(result.body).toMatch(/\$2,400/);
+    expect(result.body).toMatch(/Texas/i);
+  });
+
+  it("repairs scope obligation flip: Diego performs design work, Priya never assigned design duty", () => {
+    const draft = priyaDiegoDraft();
+    draft.free_document_text = PRODUCTION_SCOPE_FLIP_FREE_DOC;
+    const repaired = repairFreeStarterScopeObligationFromIntakeAuthority(
+      PRODUCTION_SCOPE_FLIP_FREE_DOC,
+      EXACT_PRODUCTION_INTAKE,
+      draft,
+    );
+    expect(repaired).toMatch(
+      /Diego Alvarez of Harbor Marks LLC will design a logo and brand kit for Priya Shah of Northline Studio/i,
+    );
+    expect(repaired).not.toMatch(/Priya Shah of Northline Studio will design/i);
+
+    const result = resolveFreeStarterReviewBody({
+      draft,
+      rawIntake: EXACT_PRODUCTION_INTAKE,
+    });
+    expect(result.source).toBe("free_openai_direct");
+    expect(result.body).toMatch(
+      /Diego Alvarez of Harbor Marks LLC will design a logo and brand kit for Priya Shah of Northline Studio/i,
+    );
+    expect(result.body).not.toMatch(/Priya Shah of Northline Studio will design/i);
+    expect(result.body).toMatch(/Priya Shah of Northline Studio\s*\("Client"\)/i);
+    expect(result.body).toMatch(/Diego Alvarez of Harbor Marks LLC\s*\("Service Provider"\)/i);
+    expect(result.body).toMatch(/\$2,400/);
+    expect(result.body).toMatch(/August 24, 2026/);
     expect(result.body).toMatch(/Texas/i);
   });
 });

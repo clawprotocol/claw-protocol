@@ -355,6 +355,26 @@ function extractServiceDescriptionFromIntake(intakeText: string | null | undefin
       .trim();
     if (candidate.length >= 8) return candidate;
   }
+  const hiringToWork = intake.match(
+    /\b(?:is\s+)?(?:hiring|engaging|retaining|commissioning)\s+[^.!?;]{0,140}?\s+to\s+((?:design|build|create|develop|provide|perform|deliver|run|paint|photograph|write|install|fix|repair|market|consult|manage|handle|produce|film|edit)\s+[^.!?;]{6,200})/i,
+  );
+  if (hiringToWork?.[1]) {
+    const candidate = hiringToWork[1]
+      .replace(/\s+for\s+(?:three|four|five|six|\d+)\s+months?\b.*$/i, "")
+      .replace(/\s+services?\s*$/i, "")
+      .trim();
+    if (candidate.length >= 8 && !looksLikePaymentOnlyScope(candidate)) return candidate;
+  }
+  const toWork = intake.match(
+    /\bto\s+(design|build|create|develop|perform|deliver|run|paint|photograph|write|install|fix|repair|market|consult|manage|handle|produce|film|edit)\s+([^.!?;]{6,200})/i,
+  );
+  if (toWork?.[1] && toWork[2]) {
+    const candidate = `${toWork[1]} ${toWork[2]}`
+      .replace(/\s+for\s+(?:three|four|five|six|\d+)\s+months?\b.*$/i, "")
+      .replace(/\s+services?\s*$/i, "")
+      .trim();
+    if (candidate.length >= 8 && !looksLikePaymentOnlyScope(candidate)) return candidate;
+  }
   const toProvide = intake.match(/\bto\s+provide\s+([^.!?;]{8,200})/i);
   if (toProvide?.[1]) {
     const candidate = toProvide[1]
