@@ -2,6 +2,20 @@ import type { PricingCadence } from "./pricingCadenceStorage";
 import type { LaunchPricingTier } from "./pricingTiersData";
 import { LAUNCH_PRICING_TIERS } from "./pricingTiersData";
 
+/** Paid-beta default for create-flow starter upgrade checkout (annual remains explicit opt-in). */
+export const CREATE_FLOW_CHECKOUT_DEFAULT_CADENCE: PricingCadence = "monthly";
+
+export function buildCreateFlowProCheckoutPath(args: {
+  agreementId: string;
+  returnTo: string;
+  cadence?: PricingCadence;
+}): string {
+  const cadence = args.cadence ?? CREATE_FLOW_CHECKOUT_DEFAULT_CADENCE;
+  return `/app/checkout/${encodeURIComponent(args.agreementId)}?tier=pro&cadence=${encodeURIComponent(
+    cadence,
+  )}&returnTo=${encodeURIComponent(args.returnTo)}`;
+}
+
 export function extractAgreementIdFromSendReturnUrl(returnTo: string): string | null {
   const path = (returnTo || "").trim().split("?")[0] || "";
   const m = /^\/app\/send\/([^/]+)/.exec(path);

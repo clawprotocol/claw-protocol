@@ -534,6 +534,7 @@ import {
   persistStarterReviewBeforeCheckout,
   readCheckoutBackRestoreSnapshot,
 } from "./checkoutBackRestore";
+import { buildCreateFlowProCheckoutPath } from "../../launch/checkoutParams";
 import {
   applyNamedDumpPartiesToPaidRestoreDraft,
   namedDumpPartiesForPaidRestore,
@@ -14018,12 +14019,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       previewText: agreementDocumentText,
     });
     setAdvancedFullDraftPaywallOpen(false);
-    const cadence = "annual";
-    const returnTo = encodeURIComponent(buildCreateReturnToWithStarterReviewRestore());
+    const checkoutPath = buildCreateFlowProCheckoutPath({
+      agreementId: CREATE_FLOW_CHECKOUT_AGREEMENT_ID,
+      returnTo: buildCreateReturnToWithStarterReviewRestore(),
+    });
     emitPaidFunnelEvent("premium_checkout_opened", { extra: { checkout_surface: "create_flow_checkout" } });
-    const checkoutPath = `/app/checkout/${encodeURIComponent(CREATE_FLOW_CHECKOUT_AGREEMENT_ID)}?tier=pro&cadence=${encodeURIComponent(
-      cadence,
-    )}&returnTo=${returnTo}`;
     navigate(checkoutPath, { guestCheckout: !authUser });
   },
   [
@@ -14191,11 +14191,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       previewText: agreementDocumentText,
     });
     setAdvancedFullDraftPaywallOpen(false);
-    const cadence = "annual";
-    const returnTo = encodeURIComponent(buildCreateReturnToWithStarterReviewRestore());
-    const checkoutPath = `/app/checkout/${encodeURIComponent(CREATE_FLOW_CHECKOUT_AGREEMENT_ID)}?tier=pro&cadence=${encodeURIComponent(
-      cadence,
-    )}&returnTo=${returnTo}`;
+    const checkoutPath = buildCreateFlowProCheckoutPath({
+      agreementId: CREATE_FLOW_CHECKOUT_AGREEMENT_ID,
+      returnTo: buildCreateReturnToWithStarterReviewRestore(),
+    });
     navigate(checkoutPath, { guestCheckout: !authUser });
   }, [
     createProductionTwoPane,

@@ -59,4 +59,10 @@ describe("checkout back → starter review restore (static)", () => {
     expect(nav).toContain('get("restore") === "starterReview"');
     expect(nav).toContain("hasCheckoutBackRestoreSnapshot");
   });
+
+  it("starter upgrade checkout launches monthly cadence by default (not annual)", () => {
+    expect(intake).toContain("buildCreateFlowProCheckoutPath");
+    expect(intake).not.toMatch(/beginAdvancedFullDraftCheckout[\s\S]*?const cadence = "annual"/);
+    expect(intake).not.toMatch(/beginAdvancedFullDraftBilling[\s\S]*?const cadence = "annual"/);
+  });
 });
