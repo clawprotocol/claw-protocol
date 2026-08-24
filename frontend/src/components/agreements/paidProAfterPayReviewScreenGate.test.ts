@@ -8,6 +8,7 @@ import {
 } from "./freeStarterReviewBodyResolver";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import {
+  canMountPaidSessionFinalReviewShell,
   canOpenPaidSessionFinalReviewAfterSigners,
   canStartPaidSessionSignatureTrackFromFinalReview,
   isIllegalSilentSendDisabled,
@@ -733,10 +734,52 @@ describe("after-pay Send for signature — names+emails start the existing signi
       }),
     ).toBe(true);
     expect(
+      canMountPaidSessionFinalReviewShell({
+        paidSessionVisibleDealBody: true,
+        namesAndEmailsComplete: false,
+        finalReviewOpened: false,
+      }),
+    ).toBe(false);
+    expect(
+      canMountPaidSessionFinalReviewShell({
+        paidSessionVisibleDealBody: true,
+        namesAndEmailsComplete: true,
+        finalReviewOpened: false,
+      }),
+    ).toBe(false);
+    expect(
+      canMountPaidSessionFinalReviewShell({
+        paidSessionVisibleDealBody: true,
+        namesAndEmailsComplete: true,
+        finalReviewOpened: true,
+      }),
+    ).toBe(true);
+    // Painted deal alone must keep the 1001-char block so Reviewer 2 stays typeable.
+    expect(
       shouldBypassPaidProReviewShellWithoutCorpus({
         blockWithoutCanonicalCorpus: true,
         canonicalFirstReviewActive: false,
         paidSessionVisibleDealBody: true,
+        namesAndEmailsComplete: false,
+        finalReviewOpened: false,
+      }),
+    ).toBe(true);
+    expect(
+      shouldBypassPaidProReviewShellWithoutCorpus({
+        blockWithoutCanonicalCorpus: true,
+        canonicalFirstReviewActive: false,
+        paidSessionVisibleDealBody: true,
+        namesAndEmailsComplete: true,
+        finalReviewOpened: false,
+      }),
+    ).toBe(true);
+    expect(
+      shouldBypassPaidProReviewShellWithoutCorpus({
+        blockWithoutCanonicalCorpus: true,
+        canonicalFirstReviewActive: false,
+        paidSessionVisibleDealBody: true,
+        namesAndEmailsComplete: true,
+        finalReviewOpened: true,
       }),
     ).toBe(false);
     expect(
@@ -744,18 +787,27 @@ describe("after-pay Send for signature — names+emails start the existing signi
         blockWithoutCanonicalCorpus: true,
         canonicalFirstReviewActive: false,
         paidSessionVisibleDealBody: false,
+        namesAndEmailsComplete: false,
+        finalReviewOpened: false,
       }),
     ).toBe(true);
     expect(intakeSrc).toContain("shouldBypassPaidProReviewShellWithoutCorpus");
+    expect(intakeSrc).toContain("canMountPaidSessionFinalReviewShell");
     expect(intakeSrc).toContain("paidSessionTwoSignersReady");
     const shellStart = intakeSrc.indexOf("const simpleProFinalReviewShellActive = useMemo");
     expect(shellStart).toBeGreaterThan(-1);
-    const shell = intakeSrc.slice(shellStart, shellStart + 1800);
+    const shell = intakeSrc.slice(shellStart, shellStart + 2200);
     expect(shell).toContain("shouldBypassPaidProReviewShellWithoutCorpus");
+    expect(shell).toContain("canMountPaidSessionFinalReviewShell");
     expect(shell).toContain("paidSessionVisibleDealBody");
     expect(shell).toContain("paidSessionTwoSignersReady");
+    expect(shell).toContain("guidedFinalReviewExplicitlyOpened");
+    expect(shell).toContain("namesAndEmailsComplete: paidSessionTwoSignersReady");
     expect(shell).not.toMatch(
       /blockPaidProReviewShellWithoutCorpus && !canonicalPaidCreateFlowFirstReviewActive\) return false/,
+    );
+    expect(shell).not.toMatch(
+      /paidSessionVisibleDealBody &&\s*\(hasAuthoritativeSigningSnapshot\(\) \|\|\s*paidProSignerMetadataFinalizedLatch \|\|\s*paidSessionTwoSignersReady\)/,
     );
   });
 

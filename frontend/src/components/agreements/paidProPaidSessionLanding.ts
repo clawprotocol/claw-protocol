@@ -254,18 +254,37 @@ export function isLeftoverReviewPacketSendDisableReason(reason?: string | null):
 }
 
 /**
- * After-pay ≥200 painted deal must still mount existing SimpleProFinalReviewScreen.
- * Blocking on 1001-char SoT leaves the draft-card fallback — that card's
- * Send for signature is the live silent no-op (#103 miss).
+ * After-pay ≥200 painted deal may mount existing SimpleProFinalReviewScreen
+ * only after Continue with complete names+emails. A painted deal alone must
+ * not lift the 1001-char block — that mounts the review shell over signer
+ * details and steals Reviewer 2 (#104 live miss).
+ */
+export function canMountPaidSessionFinalReviewShell(args: {
+  paidSessionVisibleDealBody: boolean;
+  namesAndEmailsComplete: boolean;
+  finalReviewOpened: boolean;
+}): boolean {
+  return Boolean(
+    args.paidSessionVisibleDealBody &&
+      args.namesAndEmailsComplete &&
+      args.finalReviewOpened,
+  );
+}
+
+/**
+ * Keep the 1001-char SoT block unless canonical first review is already
+ * active, or Continue has opened final review on a painted after-pay deal.
  */
 export function shouldBypassPaidProReviewShellWithoutCorpus(args: {
   blockWithoutCanonicalCorpus: boolean;
   canonicalFirstReviewActive: boolean;
   paidSessionVisibleDealBody: boolean;
+  namesAndEmailsComplete: boolean;
+  finalReviewOpened: boolean;
 }): boolean {
   if (!args.blockWithoutCanonicalCorpus) return false;
   if (args.canonicalFirstReviewActive) return false;
-  if (args.paidSessionVisibleDealBody) return false;
+  if (canMountPaidSessionFinalReviewShell(args)) return false;
   return true;
 }
 

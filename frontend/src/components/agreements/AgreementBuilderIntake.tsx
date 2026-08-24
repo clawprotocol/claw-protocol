@@ -1176,6 +1176,7 @@ import {
   readPremiumCompletionReturnFromHref,
   resolvePaidSessionTwoSignerNamesEmailsComplete,
   resolvePaidSessionVisibleDealBody,
+  canMountPaidSessionFinalReviewShell,
   shouldBypassPaidProReviewShellWithoutCorpus,
   shouldRelaxPaidSessionSignatureTrackGates,
   shouldShowPaidSessionFinalReviewActions,
@@ -20894,20 +20895,27 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   );
 
   const simpleProFinalReviewShellActive = useMemo(() => {
+    const paidSessionFinalReviewOpened =
+      hasAuthoritativeSigningSnapshot() ||
+      paidProSignerMetadataFinalizedLatch ||
+      guidedFinalReviewExplicitlyOpened;
     if (
       shouldBypassPaidProReviewShellWithoutCorpus({
         blockWithoutCanonicalCorpus: blockPaidProReviewShellWithoutCorpus,
         canonicalFirstReviewActive: canonicalPaidCreateFlowFirstReviewActive,
         paidSessionVisibleDealBody,
+        namesAndEmailsComplete: paidSessionTwoSignersReady,
+        finalReviewOpened: paidSessionFinalReviewOpened,
       })
     ) {
       return false;
     }
     if (
-      paidSessionVisibleDealBody &&
-      (hasAuthoritativeSigningSnapshot() ||
-        paidProSignerMetadataFinalizedLatch ||
-        paidSessionTwoSignersReady) &&
+      canMountPaidSessionFinalReviewShell({
+        paidSessionVisibleDealBody,
+        namesAndEmailsComplete: paidSessionTwoSignersReady,
+        finalReviewOpened: paidSessionFinalReviewOpened,
+      }) &&
       createUiStage === CreateUiStage.DRAFT
     ) {
       return true;
@@ -20938,6 +20946,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     paidSessionVisibleDealBody,
     paidProSignerMetadataFinalizedLatch,
     paidSessionTwoSignersReady,
+    guidedFinalReviewExplicitlyOpened,
   ]);
 
   const paidProForcedFirstReviewActive =
