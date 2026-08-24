@@ -11,6 +11,7 @@ import {
   canOpenPaidSessionFinalReviewAfterSigners,
   canStartPaidSessionSignatureTrackFromFinalReview,
   isIllegalSilentSendDisabled,
+  isPaidSessionSendClickArmed,
   isVisibleMissingTenetAskLanding,
   resolvePaidSessionTwoSignerNamesEmailsComplete,
   resolvePaidSessionVisibleDealBody,
@@ -651,6 +652,21 @@ describe("after-pay Send for signature — names+emails start the existing signi
     );
   });
 
+  it("blank leftover extra slots do not block two complete names+emails", () => {
+    expect(
+      resolvePaidSessionTwoSignerNamesEmailsComplete({
+        signer1Name: "Priya Shah",
+        signer1Email: "priya.shah.qa@example.com",
+        signer2Name: "Diego Alvarez",
+        signer2Email: "diego.alvarez.qa@example.com",
+        extraSigners: [
+          { name: "", email: "" },
+          { name: "  ", email: "" },
+        ],
+      }),
+    ).toBe(true);
+  });
+
   it("incomplete extra party email cannot start the signing track", () => {
     const incompleteThird = resolvePaidSessionTwoSignerNamesEmailsComplete({
       signer1Name: "Priya Shah",
@@ -687,6 +703,20 @@ describe("after-pay Send for signature — names+emails start the existing signi
         sendDisabledReason: null,
       }),
     ).toBe(false);
+    expect(
+      isPaidSessionSendClickArmed({
+        namesAndEmailsComplete: true,
+        sendDisabled: true,
+        sendDisabledReason: null,
+      }),
+    ).toBe(true);
+    expect(
+      isPaidSessionSendClickArmed({
+        namesAndEmailsComplete: true,
+        sendDisabled: true,
+        sendDisabledReason: "Saving agreement…",
+      }),
+    ).toBe(false);
   });
 
   it("click path is wired to handleProSendForSignature / enterGuidedSignatureTrackRoute", () => {
@@ -709,8 +739,9 @@ describe("after-pay Send for signature — names+emails start the existing signi
       intakeSrc.indexOf("<SimpleProFinalReviewScreen"),
       intakeSrc.indexOf("onSendForReview={() => void handleProSendForReview()}"),
     );
-    expect(screenMount).toContain("canStartPaidSessionSignatureTrackFromFinalReview");
-    expect(screenMount).toContain("void handleProSendForSignature()");
+    expect(screenMount).toContain("onSendForSignature={() => void handleProSendForSignature()}");
+    expect(screenMount).not.toContain("resolvePaidProPrepareSignaturesHandler");
+    expect(sendBlock).toContain("paidProSignerMetadataFinalizedLatch");
 
     const trackStart = intakeSrc.indexOf("const enterGuidedSignatureTrackRoute = React.useCallback");
     const track = intakeSrc.slice(trackStart, trackStart + 25000);
