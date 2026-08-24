@@ -8,6 +8,7 @@ import { buildHydratedAuthoritativeSigningCorpusFromAuthority } from "./authorit
 import {
   clearAuthoritativeSigningSnapshot,
   createAuthoritativeSigningSnapshot,
+  getAuthoritativeSigningSnapshot,
 } from "./authoritativeSigningSnapshot";
 import { buildCanonicalSignerManifest } from "./guidedDealCompletion/guidedReviewSigningContinuity";
 import { clearCanonicalPartyMetadata } from "./canonicalPartyMetadataAuthority";
@@ -48,6 +49,8 @@ import {
 } from "./simpleProFinalReviewDisplayPlain";
 import { polishProAgreementDisplayLayer } from "./polishProAgreementDisplayLayer";
 import { isPaidProPostFinalizeHydratedCorpusLocked } from "./paidProSignerMetadataCommitPolicy";
+import { resolveFinalVs01CorpusOrBlock } from "../../vs01/vs01SigningCorpus";
+import { buildGuidedVs01SigningHandoff } from "./guidedDealCompletion/guidedVs01SigningHandoff";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 
 const INTAKE =
@@ -273,6 +276,25 @@ describe("Priya/Diego to-design pre-Continue → post-finalize body drift regres
 
     expect(postFinalize).toMatch(/Name:\s*Priya Shah/i);
     expect(postFinalize).toMatch(/Name:\s*Diego Alvarez/i);
+
+    const postFinalizePlain = resolvePaidProPostFinalizeReviewPlain(displayContext.draft ?? null);
+    const snapshotCorpus = getAuthoritativeSigningSnapshot()?.corpus?.trim() ?? "";
+    const handoff = buildGuidedVs01SigningHandoff({
+      corpusText: postFinalizePlain,
+      source: "finalized_signer_applied_guided_corpus",
+      recipientEmails: ["priya.shah@example.com", "diego.alvarez@example.com"],
+    });
+    const vs01Gate = resolveFinalVs01CorpusOrBlock({
+      agreementCorpusText: postFinalizePlain,
+      guidedSigningHandoff: handoff,
+      draft: displayContext.draft as never,
+      guidedPro: true,
+      premiumComplete: true,
+      intakeText: displayContext.intakeText,
+      signatureRebuilt: true,
+    });
+    expect(vs01Gate.allowed, vs01Gate.blockReason ?? "unknown").toBe(true);
+    expect(snapshotCorpus.length).toBeGreaterThan(0);
 
     const legacyBypass = resolvePaidProReviewRenderPlain({
       draft: displayContext.draft,

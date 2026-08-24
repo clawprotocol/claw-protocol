@@ -40,6 +40,7 @@ import {
 } from "../components/agreements/acceptedPremiumCanonicalCorpus";
 import { readCanonicalAgreementCorpusForSurface } from "../components/agreements/canonicalAgreementSnapshot";
 import { getAuthoritativeSigningSnapshot } from "../components/agreements/authoritativeSigningSnapshot";
+import { isPaidProSigningReadyHydratedCorpus } from "../components/agreements/paidProPostFinalizeReviewSurface";
 import { getPaidProDocumentForSurface } from "../components/agreements/paidProSourceOfTruth";
 import { requireAuthoritativeCorpusForSurface } from "../components/agreements/authoritativeAgreementDocument";
 import { logLawdogOutputPathMap } from "../components/agreements/lawdogOutputPathMap";
@@ -562,26 +563,29 @@ export function resolveFinalVs01CorpusOrBlock(
       hasSignatureBlock &&
       (!witnessRequirement.requiresWitness || hasWitnessBlock) &&
       hasBySignatureLines;
-    return {
-      corpus: snapshotCorpus,
-      source: "finalized_signing",
-      len: snapshotCorpus.length,
-      hash,
-      matchesFreeHash: false,
-      isFreeHashMatch: false,
-      hasWitnessBlock,
-      requiresSignatureBlock: true,
-      requiresWitness: witnessRequirement.requiresWitness,
-      witnessReason: witnessRequirement.witnessReason,
-      hasBySignatureLines,
-      hasByOrSignatureLines: hasBySignatureLines,
-      signerCount,
-      allowed,
-      blockReason: allowed ? undefined : "authoritative_signing_snapshot_not_ready",
-      premiumInProgress,
-      premiumComplete,
-      userMessage: allowed ? undefined : VS01_CORPUS_GATE_USER_MESSAGE,
-    };
+    const snapshotSigningReady = isPaidProSigningReadyHydratedCorpus(snapshotCorpus);
+    if (allowed && snapshotSigningReady) {
+      return {
+        corpus: snapshotCorpus,
+        source: "finalized_signing",
+        len: snapshotCorpus.length,
+        hash,
+        matchesFreeHash: false,
+        isFreeHashMatch: false,
+        hasWitnessBlock,
+        requiresSignatureBlock: true,
+        requiresWitness: witnessRequirement.requiresWitness,
+        witnessReason: witnessRequirement.witnessReason,
+        hasBySignatureLines,
+        hasByOrSignatureLines: hasBySignatureLines,
+        signerCount,
+        allowed: true,
+        premiumInProgress,
+        premiumComplete,
+      };
+    }
+    // Frozen snapshot can lag post-finalize display enrichment (notice hydration,
+    // execution metadata, intake reseal). Fall through to guided handoff / post-finalize plain.
   }
 
   const canonical = guidedPro
