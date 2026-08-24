@@ -812,6 +812,7 @@ import {
   shouldBlockPaidProReviewShellWithoutCanonicalCorpus,
 } from "./paidProPostCheckoutRenderGate";
 import { resolvePaidProFirstReviewVisibleDisplayPlain } from "./paidProFirstReviewDisplayAuthority";
+import { resolveCommercialLockedSimpleProFinalReviewPlain, resealPaidProReviewPlainAfterDisplayPolish } from "./simpleProFinalReviewDisplayPlain";
 import {
   logPaidProApiFailureNoCanonicalFreeze,
   logPaidProAuthorityBlockedAfterApiFailure,
@@ -26453,9 +26454,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         reviewDisplayMode: signingSnapshotActive ? true : suppressProDocumentEmbeddedSignatures,
         retainSignatureExecutionBlock: signingSnapshotActive,
       }).text;
+      const resealed = resealPaidProReviewPlainAfterDisplayPolish({
+        polishedPlain: polished,
+        draft: paidProFirstReviewDisplayContext.draft ?? draft ?? null,
+        intakeText: intakeForPolish,
+      });
       if (!suppressProDocumentEmbeddedSignatures) {
         return resolveVisibleProPaperBoundary({
-          visiblePlain: polished,
+          visiblePlain: resealed,
           declaredSource: firstReviewAuthority.source,
           candidates: proVisiblePaperCandidates,
           intakeText: intakeForPolish,
@@ -26463,7 +26469,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           paidProReviewSurface: premiumPaidDocumentSurface,
         }).plain;
       }
-      const sanitized = sanitizeProReviewDisplayText(polished, {
+      const sanitized = sanitizeProReviewDisplayText(resealed, {
         source: "verified_server_canonical_review_snapshot",
         retainSignatureExecutionBlock: signingSnapshotActive,
       }).text;
@@ -26563,6 +26569,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       ).trim();
       if (hasVerifiedCommercialDisplayCorpus(agreementIdForDisplay)) {
         return (displayPolishedPaidProPlain || "").trim();
+      }
+      const commercialLockedPlain = resolveCommercialLockedSimpleProFinalReviewPlain({
+        displayPolishedPaidProPlain,
+      });
+      if (commercialLockedPlain) {
+        return commercialLockedPlain;
       }
       // Ask-then-generate never writes GET. Fall through to local SoT / starter.
     }

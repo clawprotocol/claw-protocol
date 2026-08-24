@@ -1,7 +1,8 @@
 /** @vitest-environment jsdom */
 /**
  * Post-payment integration: premiumCompletion restore must keep bilateral identity on
- * signer headings, editable inputs, and visible review plain — not helper-only sanitizer calls.
+ * signer headings, editable inputs, and visible review plain — exercising the exact
+ * AgreementBuilderIntake commercial-locked selector order (not helper-only sanitizer calls).
  */
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { clearCanonicalPartyMetadata } from "./canonicalPartyMetadataAuthority";
@@ -20,9 +21,14 @@ import {
 import {
   clearPaidProSourceOfTruth,
   establishPaidProSourceOfTruth,
+  getPaidProSourceOfTruthText,
+  hasPaidProSourceOfTruth,
 } from "./paidProSourceOfTruth";
 import { rebuildBodyFromIntakeForProFailure } from "./freeStarterReviewBodyResolver";
 import { resolvePaidProFirstReviewVisibleDisplayPlain } from "./paidProFirstReviewDisplayAuthority";
+import { resolvePaidProReviewRenderPlain } from "./paidProReviewRenderCorpus";
+import { resolveCommercialLockedSimpleProFinalReviewPlain, resealPaidProReviewPlainAfterDisplayPolish } from "./simpleProFinalReviewDisplayPlain";
+import { polishProAgreementDisplayLayer } from "./polishProAgreementDisplayLayer";
 import {
   resolveSignerSetupPartyIdentities,
   resolveSignerSetupRenderSlot,
@@ -80,7 +86,7 @@ const CONTAMINATED_GENERATED_CORPUS = [
   "Name: Diego Alvarez",
 ].join("\n");
 
-/** Mirrors AgreementBuilderIntake paidProFirstReviewDisplayContext + signer setup render wiring. */
+/** Mirrors AgreementBuilderIntake paidProFirstReviewDisplayContext wiring. */
 function resolvePostPaymentReviewDisplayContext(args: {
   intakeCombined: string;
   draft: ParsedDraftShape;
@@ -89,7 +95,9 @@ function resolvePostPaymentReviewDisplayContext(args: {
   const resolvedIntakeText = (args.intakeCombined || args.checkoutSnapIntake || "").trim();
   const repairedDraft = repairCheckoutBackRestoreDraftParties(args.draft, resolvedIntakeText);
   let resolvedAcceptedPlain = "";
-  if (resolvedIntakeText.length >= 20) {
+  if (hasPaidProSourceOfTruth()) {
+    resolvedAcceptedPlain = getPaidProSourceOfTruthText().trim();
+  } else if (resolvedIntakeText.length >= 20) {
     const rebuiltBody = rebuildBodyFromIntakeForProFailure(resolvedIntakeText, repairedDraft);
     if (rebuiltBody.trim().length >= 200) {
       resolvedAcceptedPlain = rebuiltBody;
@@ -103,6 +111,55 @@ function resolvePostPaymentReviewDisplayContext(args: {
     premiumPaidDocumentSurface: true,
     paidProActive: true,
   };
+}
+
+/**
+ * Mirrors AgreementBuilderIntake displayPolishedPaidProPlain commercial-locked branch:
+ * resolvePaidProFirstReviewVisibleDisplayPlain → polishProAgreementDisplayLayer.
+ */
+function resolveDisplayPolishedPaidProPlainProductionMirror(
+  displayContext: ReturnType<typeof resolvePostPaymentReviewDisplayContext>,
+) {
+  const firstReviewAuthority = resolvePaidProFirstReviewVisibleDisplayPlain(displayContext);
+  const raw = (firstReviewAuthority.plain || "").trim();
+  if (!raw || raw.length < 200) return "";
+  const polished = polishProAgreementDisplayLayer(raw, {
+    draft: displayContext.draft ?? null,
+    intakeText: displayContext.intakeText,
+    reviewDisplayMode: true,
+    retainSignatureExecutionBlock: false,
+  }).text.trim();
+  return resealPaidProReviewPlainAfterDisplayPolish({
+    polishedPlain: polished,
+    draft: displayContext.draft ?? null,
+    intakeText: displayContext.intakeText,
+  });
+}
+
+/**
+ * Mirrors AgreementBuilderIntake simpleProFinalReviewDisplayPlain commercial-locked
+ * selector order: verified GET absent → intake-authority polished plain → legacy bypass.
+ */
+function resolveSimpleProFinalReviewDisplayPlainProductionMirror(args: {
+  displayContext: ReturnType<typeof resolvePostPaymentReviewDisplayContext>;
+  hasVerifiedCommercialDisplayCorpus: boolean;
+}) {
+  const displayPolishedPaidProPlain = resolveDisplayPolishedPaidProPlainProductionMirror(
+    args.displayContext,
+  );
+  if (args.hasVerifiedCommercialDisplayCorpus) {
+    return displayPolishedPaidProPlain;
+  }
+  const commercialLockedPlain = resolveCommercialLockedSimpleProFinalReviewPlain({
+    displayPolishedPaidProPlain,
+  });
+  if (commercialLockedPlain) {
+    return commercialLockedPlain;
+  }
+  return resolvePaidProReviewRenderPlain({
+    draft: args.displayContext.draft ?? null,
+    intakeText: args.displayContext.intakeText,
+  }).plain.trim();
 }
 
 function resolvePostPaymentSignerHeadings(args: {
@@ -185,17 +242,18 @@ describe("paidPro bilateral premiumCompletion restore integration", () => {
     expect(party1Heading).not.toMatch(/Harbor Marks LLC/i);
     expect(party2Heading).not.toBe("Diego Alvarez of");
 
-    const visible = resolvePaidProFirstReviewVisibleDisplayPlain({
-      draft: displayContext.draft,
-      intakeText: displayContext.intakeText,
-      acceptedCanonicalPlain: displayContext.acceptedCanonicalPlain,
-      premiumCheckoutCompleted: true,
-      premiumPaidDocumentSurface: true,
-      paidProActive: true,
-    }).plain;
+    const visible = resolveSimpleProFinalReviewDisplayPlainProductionMirror({
+      displayContext,
+      hasVerifiedCommercialDisplayCorpus: false,
+    });
 
-    expect(visible).toContain(
-      'Priya Shah of Northline Studio ("Client") and Diego Alvarez of Harbor Marks LLC ("Service Provider")',
+    const openingRegion = visible.split(/1\.\s+SERVICES/i)[0] ?? visible;
+    expect(openingRegion).toContain('Priya Shah of Northline Studio ("Client")');
+    expect(openingRegion).toContain('Diego Alvarez of Harbor Marks LLC ("Service Provider")');
+    expect((openingRegion.match(/Priya Shah of Northline Studio/gi) ?? []).length).toBe(1);
+    expect((openingRegion.match(/Diego Alvarez of Harbor Marks LLC/gi) ?? []).length).toBe(1);
+    expect(visible).not.toMatch(
+      /\(collectively,\s+the\s+"Parties"\)[\s\S]{0,120}\(collectively,\s+the\s+"Parties"\)/i,
     );
     expect(visible).not.toMatch(
       /Diego Alvarez of Harbor Marks LLC to design a logo and brand kit \("Service Provider"\)/,
@@ -203,10 +261,18 @@ describe("paidPro bilateral premiumCompletion restore integration", () => {
     expect(visible).not.toMatch(
       /agrees to provide Priya Shah of Northline Studio will design a logo and brand kit/i,
     );
+    expect(visible).not.toMatch(/agrees to provide services as described in the parties'? communications/i);
+    expect(visible).toMatch(/design a logo and brand kit/i);
     expect(visible).not.toMatch(/CLIENT:\s*\nDiego Alvarez of Harbor Marks LLC/i);
     expect(visible).not.toMatch(
       /SERVICE PROVIDER:\s*\nDiego Alvarez of Harbor Marks LLC to design a logo and brand kit/i,
     );
     expect(visible).toMatch(/The Service Provider shall design a logo and brand kit/i);
+
+    const legacyBypass = resolvePaidProReviewRenderPlain({
+      draft: displayContext.draft,
+      intakeText: displayContext.intakeText,
+    });
+    expect(legacyBypass).not.toMatch(/The Service Provider shall design a logo and brand kit/i);
   });
 });
