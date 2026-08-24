@@ -374,6 +374,8 @@ import {
   resolveSignerSetupPartyHeadingLine,
   resolveSignerSetupRenderSlot,
   resolveSignerSetupPartyIdentities,
+  resolveConfidentAuthorizedSignerPersonName,
+  resolveSignerNameForInlineSetupReadiness,
   shouldArmPaidProFirstReviewSignerSetupLatch,
   logPaidProSignerSetupAutofinalizeDecision,
   resolvePaidProIntakeLegalEntityAddressPrefillComplete,
@@ -2429,8 +2431,8 @@ type CreateFlowSendRecipientsPanelProps = {
   /** Paid Pro delivery on review column — avoid legacy “Share this agreement” hero. */
   paidProInlineRecipientShell?: boolean;
   /**
-   * After-pay visitor first review: collect two signer names + emails only.
-   * Hide extra Signer name / title / address fields until Prepare for signing.
+   * After-pay visitor first review: collect signer names + emails; hide optional title/address only.
+   * Authorized signer name inputs stay visible in inline shell — never suppressed.
    */
   nameEmailOnlySignerFields?: boolean;
   /** Paid Pro: keep recipient inputs mounted while emails are missing/invalid (no collapsed dead-end). */
@@ -2565,11 +2567,10 @@ function CreateFlowSendRecipientsPanel({
         ? "signature"
         : effectivePremiumSendMode;
   const signaturePrepMode =
-    nameEmailOnlySignerFields
+    resolvedSendMode === "review"
       ? false
-      : resolvedSendMode === "review"
-        ? false
-        : paidProInlineRecipientShell || resolvedSendMode === "signature";
+      : paidProInlineRecipientShell || resolvedSendMode === "signature";
+  const showOptionalSignerMetadataFields = signaturePrepMode && !nameEmailOnlySignerFields;
   const notifySignerMetadataFieldEdit = (args: {
     partyIndex: number;
     field: PaidProSignerMetadataField;
@@ -3078,29 +3079,33 @@ function CreateFlowSendRecipientsPanel({
                     autoComplete="name"
                   />
                 </label>
-                <label className="mt-3 block text-xs font-medium text-slate-400 sm:text-sm">
-                  Signer title (optional)
-                  <input
-                    type="text"
-                    data-claw-recipient-field={idx <= 1 ? (idx === 0 ? "r1-signer-title" : "r2-signer-title") : `party-${idx}-signer-title`}
-                    value={signerTitleVal}
-                    onChange={(e) => onSignerTitleChange(e.target.value)}
-                    onBlur={onSignerTitleBlur}
-                    className="mt-1 w-full rounded-md border border-slate-600/70 bg-[#141d32] px-3 py-2 text-sm text-slate-100 outline-none focus:border-emerald-500/60"
-                    autoComplete="organization-title"
-                  />
-                </label>
-                <label className="mt-3 block text-xs font-medium text-slate-400 sm:text-sm">
-                  Party address (optional)
-                  <input
-                    type="text"
-                    data-claw-recipient-field={idx <= 1 ? (idx === 0 ? "r1-party-address" : "r2-party-address") : `party-${idx}-address`}
-                    value={partyAddressVal}
-                    onChange={(e) => onPartyAddressChange(e.target.value)}
-                    className="mt-1 w-full rounded-md border border-slate-600/70 bg-[#141d32] px-3 py-2 text-sm text-slate-100 outline-none focus:border-emerald-500/60"
-                    autoComplete="street-address"
-                  />
-                </label>
+                {showOptionalSignerMetadataFields ? (
+                  <>
+                    <label className="mt-3 block text-xs font-medium text-slate-400 sm:text-sm">
+                      Signer title (optional)
+                      <input
+                        type="text"
+                        data-claw-recipient-field={idx <= 1 ? (idx === 0 ? "r1-signer-title" : "r2-signer-title") : `party-${idx}-signer-title`}
+                        value={signerTitleVal}
+                        onChange={(e) => onSignerTitleChange(e.target.value)}
+                        onBlur={onSignerTitleBlur}
+                        className="mt-1 w-full rounded-md border border-slate-600/70 bg-[#141d32] px-3 py-2 text-sm text-slate-100 outline-none focus:border-emerald-500/60"
+                        autoComplete="organization-title"
+                      />
+                    </label>
+                    <label className="mt-3 block text-xs font-medium text-slate-400 sm:text-sm">
+                      Party address (optional)
+                      <input
+                        type="text"
+                        data-claw-recipient-field={idx <= 1 ? (idx === 0 ? "r1-party-address" : "r2-party-address") : `party-${idx}-address`}
+                        value={partyAddressVal}
+                        onChange={(e) => onPartyAddressChange(e.target.value)}
+                        className="mt-1 w-full rounded-md border border-slate-600/70 bg-[#141d32] px-3 py-2 text-sm text-slate-100 outline-none focus:border-emerald-500/60"
+                        autoComplete="street-address"
+                      />
+                    </label>
+                  </>
+                ) : null}
               </>
             ) : null}
           </div>
@@ -20724,9 +20729,17 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     }),
   );
   const paidSessionTwoSignersReady = resolvePaidSessionTwoSignerNamesEmailsComplete({
-    signer1Name: (partySignerNames[0] || recipient1Name || "").trim(),
+    signer1Name: resolveSignerNameForInlineSetupReadiness({
+      partyIndex: 0,
+      partySignerNames,
+      recipientLegalEntityName: recipient1Name,
+    }),
     signer1Email: recipient1Email,
-    signer2Name: (partySignerNames[1] || recipient2Name || "").trim(),
+    signer2Name: resolveSignerNameForInlineSetupReadiness({
+      partyIndex: 1,
+      partySignerNames,
+      recipientLegalEntityName: recipient2Name,
+    }),
     signer2Email: recipient2Email,
     extraSigners: paidSessionExtraSigners,
   });
@@ -23709,6 +23722,48 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       if (target1) setRecipient2Name(target1);
     }
   }, [signerSetupPartyIdentities, recipient1Name, recipient2Name]);
+
+  useEffect(() => {
+    if (!paidProCanonicalReviewSignerSetupActive && !paidProRecipientSetupOnDraft) return;
+    if (paidProSignerMetadataFinalized) return;
+    const slotCount = Math.max(
+      2,
+      Math.min(
+        authoritativeSignerSetupPartyCount,
+        signerSetupPartyIdentities.length || 2,
+      ),
+    );
+    setPartySignerNames((prev) => {
+      let changed = false;
+      const next = prev.slice();
+      while (next.length < slotCount) next.push("");
+      for (let i = 0; i < slotCount; i++) {
+        if ((next[i] ?? "").trim()) continue;
+        const legal =
+          (i === 0
+            ? recipient1Name
+            : i === 1
+              ? recipient2Name
+              : extraPartyLegalNames[i - 2] ?? ""
+          ).trim() || signerSetupPartyIdentities[i]?.legalEntityName?.trim() || "";
+        const prefill = resolveConfidentAuthorizedSignerPersonName(legal);
+        if (prefill) {
+          next[i] = prefill;
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [
+    paidProCanonicalReviewSignerSetupActive,
+    paidProRecipientSetupOnDraft,
+    paidProSignerMetadataFinalized,
+    recipient1Name,
+    recipient2Name,
+    extraPartyLegalNames,
+    signerSetupPartyIdentities,
+    authoritativeSignerSetupPartyCount,
+  ]);
 
   const resolvedPartyDisplaySlots = useMemo(() => {
     if (!draft?.parties?.length) return [];

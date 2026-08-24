@@ -484,6 +484,51 @@ export type ResolvePaidProSignerDetailsGateArgs = {
  * from canonical party identity and do not count as signer names.
  */
 
+const PERSON_OF_ENTITY_AUTHORIZED_SIGNER_RE =
+  /^([A-Z][A-Za-z.''-]+(?:\s+[A-Z][A-Za-z.''-]+)?)\s+(?:of|from)\s+.+/;
+
+/**
+ * When a legal entity is confidently "Person of Organization" (e.g. Priya Shah of Northline Studio),
+ * return the human signer name for prefill — never the full entity label.
+ */
+export function resolveConfidentAuthorizedSignerPersonName(
+  legalEntityName: string,
+): string {
+  const t = norm(legalEntityName);
+  if (!t || !isAuthoritativeLegalEntityName(t)) return "";
+  const match = t.match(PERSON_OF_ENTITY_AUTHORIZED_SIGNER_RE);
+  if (!match?.[1]) return "";
+  const person = norm(match[1]);
+  if (!personNameUsableAsPartyLegal(person) || hasLegalEntitySuffix(person)) return "";
+  return person;
+}
+
+/** Readiness for inline setup / Continue — requires UI signer name (or pure-person legal entity). */
+export function resolveSignerNameForInlineSetupReadiness(args: {
+  partyIndex: number;
+  partySignerNames: readonly string[];
+  recipientLegalEntityName: string;
+}): string {
+  const fromUi = norm(args.partySignerNames[args.partyIndex] ?? "");
+  if (fromUi) return fromUi;
+  const rawRecipient = norm(args.recipientLegalEntityName ?? "");
+  if (personNameUsableAsPartyLegal(rawRecipient)) return rawRecipient;
+  return "";
+}
+
+/** Effective authorized signer for display hints — UI value first, then confident person-of-entity prefill. */
+export function resolveEffectiveAuthorizedSignerNameForParty(args: {
+  partyIndex: number;
+  partySignerNames: readonly string[];
+  recipientLegalEntityName: string;
+}): string {
+  const fromUi = norm(args.partySignerNames[args.partyIndex] ?? "");
+  if (fromUi) return fromUi;
+  const rawRecipient = norm(args.recipientLegalEntityName ?? "");
+  if (personNameUsableAsPartyLegal(rawRecipient)) return rawRecipient;
+  return resolveConfidentAuthorizedSignerPersonName(rawRecipient);
+}
+
 function personNameUsableAsPartyLegal(name: string): boolean {
   const t = norm(name);
   if (t.length < 2) return false;

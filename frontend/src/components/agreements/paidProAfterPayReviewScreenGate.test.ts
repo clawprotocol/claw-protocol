@@ -437,7 +437,8 @@ describe("after-pay review-screen gate — intake wiring", () => {
     expect(intakeSrc).toContain("nameEmailOnlySignerFields");
     expect(intakeSrc).toContain("paidSessionTwoSignersReady");
     expect(intakeSrc).toContain("extraSigners: paidSessionExtraSigners");
-    expect(intakeSrc).toMatch(/nameEmailOnlySignerFields\s*\n\s*\?\s*false/);
+    expect(intakeSrc).toContain("showOptionalSignerMetadataFields");
+    expect(intakeSrc).toMatch(/showOptionalSignerMetadataFields\s*=\s*signaturePrepMode && !nameEmailOnlySignerFields/);
   });
 
   it("N complete names+emails (2–4) + Complete signer details opens final review without remount or email wipe", () => {

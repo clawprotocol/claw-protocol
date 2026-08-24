@@ -22,6 +22,8 @@ import {
   PAID_PRO_SIGNER_DETAILS_INCOMPLETE_CTA,
   resolveEditableSignerLegalEntityForSlot,
   resolvePaidProSignerDetailsGate,
+  resolveConfidentAuthorizedSignerPersonName,
+  resolveSignerNameForInlineSetupReadiness,
   resolvePaidProInlineSignerSetupMounted,
   shouldArmPaidProInlineSignerSetupLatch,
   resolveLegalEntityNameForHandoffSlot,
@@ -691,6 +693,39 @@ describe("signerSetupPartyIdentity", () => {
     expect(signerDetailsFieldKey(1, "signer_name")).toBe("r2-signer-name");
     expect(signerDetailsFieldKey(0, "legal_entity")).toBe("r1-name");
     expect(signerDetailsFieldKey(2, "email")).toBe("party-2-email");
+  });
+
+  it("resolveConfidentAuthorizedSignerPersonName extracts Priya/Diego from person-of-entity labels", () => {
+    expect(resolveConfidentAuthorizedSignerPersonName("Priya Shah of Northline Studio")).toBe("Priya Shah");
+    expect(resolveConfidentAuthorizedSignerPersonName("Diego Alvarez of Harbor Marks LLC")).toBe(
+      "Diego Alvarez",
+    );
+    expect(resolveConfidentAuthorizedSignerPersonName("Harbor Marks LLC")).toBe("");
+    expect(resolveConfidentAuthorizedSignerPersonName("Red Mesa Logistics LLC")).toBe("");
+  });
+
+  it("resolveSignerNameForInlineSetupReadiness never substitutes full legal entity as signer", () => {
+    expect(
+      resolveSignerNameForInlineSetupReadiness({
+        partyIndex: 1,
+        partySignerNames: ["Priya Shah", ""],
+        recipientLegalEntityName: "Diego Alvarez of Harbor Marks LLC",
+      }),
+    ).toBe("");
+    expect(
+      resolveSignerNameForInlineSetupReadiness({
+        partyIndex: 1,
+        partySignerNames: ["Priya Shah", "Diego Alvarez"],
+        recipientLegalEntityName: "Diego Alvarez of Harbor Marks LLC",
+      }),
+    ).toBe("Diego Alvarez");
+    expect(
+      resolveSignerNameForInlineSetupReadiness({
+        partyIndex: 1,
+        partySignerNames: [""],
+        recipientLegalEntityName: "Mike",
+      }),
+    ).toBe("Mike");
   });
 
   it("resolved party display model keeps full legal names for both parties (no truncation)", () => {
