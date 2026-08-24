@@ -4,8 +4,13 @@
 
 import {
   buildStarterAgreementPreviewForReview,
+  hydrateIdentityPlaceholdersInAgreementPreviewPlain,
   type AgreementPreviewBuildOptions,
 } from "./agreementPreviewFromDraft";
+import { textContainsUnresolvedIdentityPlaceholders } from "../../agreement/partyPlaceholderDisplay";
+import { repairAgreementTemplatePlaceholders } from "./agreementTemplatePlaceholderSafety";
+import { extractEffectiveDateFromRawIntake } from "./intakeDraftLegalNormalize";
+import { containsUnresolvedRenderTokens, enforceUserVisibleRenderTokenAuthority } from "./userVisibleRenderTokenAuthority";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import { readAgreementCreatorIntakeStorage } from "./agreementIntakeStorage";
 import {
@@ -363,7 +368,63 @@ export function evaluateSimpleHollowBodyGate(
     }
   }
   
+  if (starterBodyHasUnresolvedRedactionTokens(text)) {
+    return { isHollow: true, reason: "unresolved_redaction_tokens" };
+  }
+
   return { isHollow: false, reason: null };
+}
+
+/** True when internal redaction slots ([ORG_1], [ADDRESS_1], …) remain in visitor-visible starter text. */
+export function starterBodyHasUnresolvedRedactionTokens(body: string | null | undefined): boolean {
+  const t = String(body ?? "").trim();
+  if (!t) return false;
+  return textContainsUnresolvedIdentityPlaceholders(t) || containsUnresolvedRenderTokens(t);
+}
+
+/** When a model mis-tags a calendar month as [ADDRESS_N], rehydrate from intake start/effective date. */
+function repairMisplacedAddressTokenInDateContext(body: string, intake: string): string {
+  if (!/\[\s*ADDRESS_\d+\s*\]/i.test(body)) return body;
+  const effectiveDate = extractEffectiveDateFromRawIntake(intake);
+  if (!effectiveDate) return body;
+  const dateMatch = effectiveDate.match(/^(\w+)\s+(\d{1,2}),\s*(\d{4})$/);
+  if (!dateMatch) return body;
+  const [, month, day, year] = dateMatch;
+  const dayEsc = day.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const yearEsc = year.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const misplacedRe = new RegExp(`\\[\\s*ADDRESS_\\d+\\s*\\]\\s*${dayEsc}\\s*,\\s*${yearEsc}`, "gi");
+  if (misplacedRe.test(body)) {
+    return body.replace(misplacedRe, `${month} ${day}, ${year}`);
+  }
+  return body.replace(/\[\s*ADDRESS_\d+\s*\](?=\s*\d{1,2}\s*,\s*\d{4})/gi, month);
+}
+
+/**
+ * Deterministic rehydration for visible Free Starter review bodies — maps intake identity and dates
+ * onto server one-pagers that still carry internal redaction tokens.
+ */
+export function hydrateFreeStarterVisibleBody(
+  body: string,
+  draft: ParsedDraftShape | null,
+  intake: string,
+): string {
+  if (!body.trim() || !draft) return body;
+  if (!starterBodyHasUnresolvedRedactionTokens(body)) return body.trim();
+  const draftForHydrate = intake.length > 0 ? enrichStarterPreviewPartiesFromIntake(draft, intake) : draft;
+  let out = hydrateIdentityPlaceholdersInAgreementPreviewPlain(body, draftForHydrate, intake);
+  const partyNames = (draftForHydrate.parties ?? [])
+    .map((p) => String(p.name ?? "").trim())
+    .filter((n) => n.length > 0);
+  out = repairAgreementTemplatePlaceholders(out, { intakeRaw: intake, partyNames }).text;
+  out = repairMisplacedAddressTokenInDateContext(out, intake);
+  out = enforceUserVisibleRenderTokenAuthority(out, {
+    intakeRaw: intake,
+    partyNames,
+    surface: "free_starter_visible_hydration",
+    blockOnUnresolved: false,
+    skipNoticeRepair: true,
+  }).text;
+  return out.trim();
 }
 
 /**
@@ -1095,7 +1156,10 @@ export function resolveFreeStarterReviewBody(
       intake: rawIntakeResolved,
       draft,
     });
-    
+    const hydratedDirect = draft
+      ? hydrateFreeStarterVisibleBody(normalized.text, draft, rawIntakeResolved)
+      : normalized.text;
+
     // Run validation on the direct free document
     const draftInputForDirectValidation = draft
       ? {
@@ -1111,13 +1175,13 @@ export function resolveFreeStarterReviewBody(
         }
       : null;
     const directValidation = validateFreeStarterGeneratedBody(
-      normalized.text,
+      hydratedDirect,
       rawIntakeResolved,
       draftInputForDirectValidation,
     );
-    
+
     // Simple hollow body gate (belt and suspenders) - catches role-only parties and empty sections
-    const simpleHollowGate = evaluateSimpleHollowBodyGate(normalized.text, draft?.parties ?? null, {
+    const simpleHollowGate = evaluateSimpleHollowBodyGate(hydratedDirect, draft?.parties ?? null, {
       intake: rawIntakeResolved,
       jurisdiction: draft?.jurisdiction ?? null,
     });
@@ -1126,22 +1190,23 @@ export function resolveFreeStarterReviewBody(
     if (
       simpleHollowGate.isHollow &&
       (simpleHollowGate.reason === "role_only_parties_in_body" ||
-        simpleHollowGate.reason === "intake_named_parties_but_body_has_placeholders") &&
+        simpleHollowGate.reason === "intake_named_parties_but_body_has_placeholders" ||
+        simpleHollowGate.reason === "unresolved_redaction_tokens") &&
       draft &&
       repairedPreview.trim()
     ) {
       // continue to repaired preview below
     } else {
       return {
-        body: ensureStatedTwoPartyHiringNamesInBody(normalized.text.trim(), rawIntakeResolved),
+        body: ensureStatedTwoPartyHiringNamesInBody(hydratedDirect.trim(), rawIntakeResolved),
         source: "free_openai_direct",
         rawIntakeResolved,
         usedOriginalRaw: intakeMeta.usedOriginalRaw,
         usedStorageRaw: intakeMeta.usedStorageRaw,
         apiPaymentTerms,
         repairedPaymentTerms,
-        finalPaymentTerms: extractFreeStarterPaymentTermsLine(normalized.text),
-        protectedFactRepairCount: 0,
+        finalPaymentTerms: extractFreeStarterPaymentTermsLine(hydratedDirect),
+        protectedFactRepairCount: hydratedDirect !== normalized.text ? 1 : 0,
         bodyValidation: directValidation,
         hollowBodyBlocked: simpleHollowGate.isHollow,
         hollowBodyReason: simpleHollowGate.reason,
@@ -1213,6 +1278,18 @@ export function resolveFreeStarterReviewBody(
     intake: rawIntakeResolved,
     draft,
   });
+  let displayBody = draft
+    ? hydrateFreeStarterVisibleBody(normalized.text, draft, rawIntakeResolved)
+    : normalized.text;
+  if (
+    starterBodyHasUnresolvedRedactionTokens(displayBody) &&
+    repairedPreview.trim() &&
+    source !== "repaired_starter_preview"
+  ) {
+    displayBody = repairedPreview;
+    source = "repaired_starter_preview";
+    protectedFactRepairCount += 1;
+  }
 
   const draftInput = draft
     ? {
@@ -1227,31 +1304,31 @@ export function resolveFreeStarterReviewBody(
         payment: draft.payment ? { amount: draft.payment.amount } : null,
       }
     : null;
-  const validation = validateFreeStarterGeneratedBody(normalized.text, rawIntakeResolved, draftInput);
+  const validation = validateFreeStarterGeneratedBody(displayBody, rawIntakeResolved, draftInput);
 
   logFreeStarterBodyValidation({
     stage: "resolve_free_starter_body",
     valid: validation.valid,
     reasons: validation.reasons,
     intakeTenets: validation.intakeScore,
-    bodyLen: normalized.text.length,
+    bodyLen: displayBody.length,
   });
 
   // Simple hollow body gate (belt and suspenders) - catches role-only parties and empty sections
-  const simpleHollowGate = evaluateSimpleHollowBodyGate(normalized.text, draft?.parties ?? null, {
+  const simpleHollowGate = evaluateSimpleHollowBodyGate(displayBody, draft?.parties ?? null, {
     intake: rawIntakeResolved,
     jurisdiction: draft?.jurisdiction ?? null,
   });
 
   const result: ResolveFreeStarterReviewBodyResult = {
-    body: ensureStatedTwoPartyHiringNamesInBody(normalized.text, rawIntakeResolved),
+    body: ensureStatedTwoPartyHiringNamesInBody(displayBody, rawIntakeResolved),
     source,
     rawIntakeResolved,
     usedOriginalRaw: intakeMeta.usedOriginalRaw,
     usedStorageRaw: intakeMeta.usedStorageRaw,
     apiPaymentTerms,
     repairedPaymentTerms,
-    finalPaymentTerms: extractFreeStarterPaymentTermsLine(normalized.text),
+    finalPaymentTerms: extractFreeStarterPaymentTermsLine(displayBody),
     protectedFactRepairCount,
     bodyValidation: validation,
     hollowBodyBlocked: simpleHollowGate.isHollow,
@@ -1332,7 +1409,8 @@ export function evaluateHollowBodyGate(
     if (
       (hollowReason === "role_only_parties_in_body" ||
        hollowReason === "role_only_parties_in_draft" ||
-       hollowReason === "intake_named_parties_but_body_has_placeholders") &&
+       hollowReason === "intake_named_parties_but_body_has_placeholders" ||
+       hollowReason === "unresolved_redaction_tokens") &&
       !missingTenets.includes("parties")
     ) {
       missingTenets.push("parties");
