@@ -353,14 +353,23 @@ export {
 /** Shared intake-authority sanitizer for post-payment visible review plain (ForcedRoute / display authority). */
 function stripRedundantRebuildPartyDeclarationAfterCanonicalOpening(text: string): string {
   if (!/\bentered\s+into\s+as\s+of\b/i.test(text)) return text;
+  if (!/collectively as the\s+["']Parties\.["']/i.test(text)) return text;
   return text
     .replace(
       /\nThis Agreement\s*\(\s*["']Agreement["']\s*\)\s+is entered into by and between:\s*\n[\s\S]*?\(collectively,\s+the\s+["']Parties["']\)\.\s*(?=\n)/gi,
       "\n",
     )
     .replace(
+      /(collectively as the\s+["']Parties\.["']\s*)[^\n]+\("Client"\)\s+and\s+[^\n]+\("Service Provider"\),?\s*(?=\n|$)/gi,
+      "$1",
+    )
+    .replace(
       /\n[^\n]+\("Client"\)\s*\n[^\n]+\("Service Provider"\)\s*(?:\n\s*\(collectively,\s+the\s+["']Parties["']\)\.\s*)?(?=\n)/gi,
       "\n",
+    )
+    .replace(
+      /(collectively as the\s+["']Parties\.["']\s*\n\s*)\(collectively,\s+the\s+["']Parties["']\)\.\s*(?=\n)/gi,
+      "$1",
     )
     .replace(/\n{3,}/g, "\n\n");
 }

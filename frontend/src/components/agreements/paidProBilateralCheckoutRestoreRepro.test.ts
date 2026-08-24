@@ -62,10 +62,7 @@ const POST_GENERATION_CORRUPTED_DRAFT: ParsedDraftShape = {
 const CONTAMINATED_GENERATED_CORPUS = [
   "SERVICES AGREEMENT",
   "",
-  'This Services Agreement (this "Agreement") is entered into as of the Effective Date by and between Priya Shah of Northline Studio ("Client") and Diego Alvarez of Harbor Marks LLC ("Service Provider"). Client and Service Provider may be referred to individually as a "Party" and collectively as the "Parties."',
-  "",
-  'Priya Shah of Northline Studio ("Client")',
-  'Diego Alvarez of Harbor Marks LLC ("Service Provider")',
+  'This Services Agreement (this "Agreement") is entered into as of the Effective Date by and between Priya Shah of Northline Studio ("Client") and Diego Alvarez of Harbor Marks LLC ("Service Provider"). Client and Service Provider may be referred to individually as a "Party" and collectively as the "Parties." Priya Shah of Northline Studio ("Client") and Diego Alvarez of Harbor Marks LLC ("Service Provider"),',
   "",
   '(collectively, the "Parties").',
   "",
@@ -257,6 +254,14 @@ describe("paidPro bilateral premiumCompletion restore integration", () => {
     expect(openingRegion).toContain('Diego Alvarez of Harbor Marks LLC ("Service Provider")');
     expect((openingRegion.match(/Priya Shah of Northline Studio/gi) ?? []).length).toBe(1);
     expect((openingRegion.match(/Diego Alvarez of Harbor Marks LLC/gi) ?? []).length).toBe(1);
+    expect(
+      (openingRegion.match(/Priya Shah of Northline Studio\s*\("Client"\)/gi) ?? []).length,
+    ).toBe(1);
+    expect(
+      (openingRegion.match(/Diego Alvarez of Harbor Marks LLC\s*\("Service Provider"\)/gi) ?? [])
+        .length,
+    ).toBe(1);
+    expect(openingRegion).not.toMatch(/\n\s*\(collectively,\s+the\s+"Parties"\)\.\s*\n/i);
     expect(visible).not.toMatch(
       /\(collectively,\s+the\s+"Parties"\)[\s\S]{0,120}\(collectively,\s+the\s+"Parties"\)/i,
     );
