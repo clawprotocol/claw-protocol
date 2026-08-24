@@ -358,6 +358,10 @@ function stripRedundantRebuildPartyDeclarationAfterCanonicalOpening(text: string
       /\nThis Agreement\s*\(\s*["']Agreement["']\s*\)\s+is entered into by and between:\s*\n[\s\S]*?\(collectively,\s+the\s+["']Parties["']\)\.\s*(?=\n)/gi,
       "\n",
     )
+    .replace(
+      /\n[^\n]+\("Client"\)\s*\n[^\n]+\("Service Provider"\)\s*(?:\n\s*\(collectively,\s+the\s+["']Parties["']\)\.\s*)?(?=\n)/gi,
+      "\n",
+    )
     .replace(/\n{3,}/g, "\n\n");
 }
 
@@ -395,6 +399,12 @@ export function sanitizePaidProReviewPlainForIntakeAuthority(
   }).text.trim();
   const partyNames = parties.map((p) => p.partyLegalName).filter(Boolean);
   const scopeFromIntake = (() => {
+    const toVerb = intake.match(
+      /\bto\s+(design|develop|create|build|provide|perform|deliver)\s+([^.,]+)/i,
+    );
+    if (toVerb) {
+      return `${toVerb[1]} ${toVerb[2].replace(/\s+/g, " ").trim()}`;
+    }
     const withArticle = intake.match(/\bfor\s+((?:a|an|the)\s+[^.,]+)/i);
     if (withArticle) return withArticle[1].replace(/\s+/g, " ").trim();
     const bare = intake.match(/\bfor\s+([^.,]+)/i);

@@ -36,7 +36,7 @@ import {
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 
 const INTAKE =
-  "Priya Shah of Northline Studio is hiring Diego Alvarez of Harbor Marks LLC for a logo and brand kit, 2400 dollars due on signing, 30 days starting August 24 2026, Texas law.";
+  "Priya Shah of Northline Studio is hiring Diego Alvarez of Harbor Marks LLC to design a logo and brand kit. Payment: $2,400 due on signing. Term: 30 days starting August 24, 2026. Governing law: Texas.";
 
 const PRE_CHECKOUT_DRAFT: ParsedDraftShape = {
   title: "SERVICES AGREEMENT",
@@ -62,10 +62,15 @@ const POST_GENERATION_CORRUPTED_DRAFT: ParsedDraftShape = {
 const CONTAMINATED_GENERATED_CORPUS = [
   "SERVICES AGREEMENT",
   "",
-  'This Agreement is between Priya Shah of Northline Studio ("Client") and Diego Alvarez of Harbor Marks LLC to design a logo and brand kit ("Service Provider").',
+  'This Services Agreement (this "Agreement") is entered into as of the Effective Date by and between Priya Shah of Northline Studio ("Client") and Diego Alvarez of Harbor Marks LLC ("Service Provider"). Client and Service Provider may be referred to individually as a "Party" and collectively as the "Parties."',
+  "",
+  'Priya Shah of Northline Studio ("Client")',
+  'Diego Alvarez of Harbor Marks LLC ("Service Provider")',
+  "",
+  '(collectively, the "Parties").',
   "",
   "1. SERVICES",
-  "The service provider agrees to provide Priya Shah of Northline Studio will design a logo and brand kit.",
+  "The service provider agrees to provide services as described in the parties' communications.",
   "",
   ...Array.from(
     { length: 24 },
