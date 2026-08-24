@@ -22,7 +22,7 @@ describe("SimpleProFinalReviewScreen action enablement rule", () => {
     const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
     expect(intake).toContain("sendDisabledReason={");
     expect(intake).toContain("guidedFinalizeModalActive");
-    expect(intake).toContain("simpleProFinalReviewCorpus.corpusBlocked");
+    expect(intake).toContain("paidSessionFinalReviewSendCorpusBlocked");
     expect(intake).toContain("guidedPacketSendBlocked");
   });
 
@@ -33,6 +33,7 @@ describe("SimpleProFinalReviewScreen action enablement rule", () => {
       intake.indexOf("sendDisabledReason={") + 2500,
     );
     expect(sendDisabledReasonBlock).toContain("Finalizing agreement");
+    expect(sendDisabledReasonBlock).toContain("paidSessionFinalReviewSendCorpusBlocked");
     expect(sendDisabledReasonBlock).toContain("Agreement corpus unavailable");
     expect(sendDisabledReasonBlock).toContain("Agreement is still generating");
     expect(sendDisabledReasonBlock).toContain("Agreement upgrade in progress");

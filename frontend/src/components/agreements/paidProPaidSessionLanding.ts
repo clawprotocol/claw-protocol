@@ -230,6 +230,26 @@ export function shouldRelaxPaidSessionSignatureTrackGates(args: {
 }
 
 /**
+ * Final review may display a short, signer-pinned after-pay rebuild even when
+ * the stricter canonical-corpus resolver reports it unavailable. Match the
+ * button gate to the existing signing-track fallback: only the completed
+ * after-pay decision screen with a real visible deal may release this block.
+ */
+export function shouldBlockPaidSessionFinalReviewSendForCorpus(args: {
+  corpusBlocked: boolean;
+  paidSessionFinalReviewDecisionReady: boolean;
+  visibleFinalReviewCorpusLen: number;
+  minimumVisibleCorpusLen?: number;
+}): boolean {
+  if (!args.corpusBlocked) return false;
+  const minimumVisibleCorpusLen = Math.max(1, args.minimumVisibleCorpusLen ?? 200);
+  return !(
+    args.paidSessionFinalReviewDecisionReady &&
+    args.visibleFinalReviewCorpusLen >= minimumVisibleCorpusLen
+  );
+}
+
+/**
  * Disabled-without-reason is illegal once names+emails are complete.
  */
 export function isIllegalSilentSendDisabled(args: {

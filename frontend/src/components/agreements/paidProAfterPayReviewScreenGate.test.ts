@@ -18,6 +18,7 @@ import {
   resolvePaidSessionTwoSignerNamesEmailsComplete,
   resolvePaidSessionVisibleDealBody,
   shouldBypassPaidProReviewShellWithoutCorpus,
+  shouldBlockPaidSessionFinalReviewSendForCorpus,
   shouldRelaxPaidSessionSignatureTrackGates,
   shouldShowPaidSessionFinalReviewActions,
   shouldShowPaidSessionGeneratingOverlay,
@@ -734,6 +735,34 @@ describe("after-pay Send for signature — names+emails start the existing signi
       }),
     ).toBe(true);
     expect(
+      shouldBlockPaidSessionFinalReviewSendForCorpus({
+        corpusBlocked: true,
+        paidSessionFinalReviewDecisionReady: false,
+        visibleFinalReviewCorpusLen: 900,
+      }),
+    ).toBe(true);
+    expect(
+      shouldBlockPaidSessionFinalReviewSendForCorpus({
+        corpusBlocked: true,
+        paidSessionFinalReviewDecisionReady: true,
+        visibleFinalReviewCorpusLen: 199,
+      }),
+    ).toBe(true);
+    expect(
+      shouldBlockPaidSessionFinalReviewSendForCorpus({
+        corpusBlocked: true,
+        paidSessionFinalReviewDecisionReady: true,
+        visibleFinalReviewCorpusLen: 900,
+      }),
+    ).toBe(false);
+    expect(
+      shouldBlockPaidSessionFinalReviewSendForCorpus({
+        corpusBlocked: false,
+        paidSessionFinalReviewDecisionReady: false,
+        visibleFinalReviewCorpusLen: 0,
+      }),
+    ).toBe(false);
+    expect(
       canMountPaidSessionFinalReviewShell({
         paidSessionVisibleDealBody: true,
         namesAndEmailsComplete: false,
@@ -833,6 +862,8 @@ describe("after-pay Send for signature — names+emails start the existing signi
       intakeSrc.indexOf("onSendForReview={() => void handleProSendForReview()}"),
     );
     expect(screenMount).toContain("onSendForSignature={() => void handleProSendForSignature()}");
+    expect(intakeSrc).toContain("shouldBlockPaidSessionFinalReviewSendForCorpus");
+    expect(intakeSrc).toContain("paidSessionFinalReviewSendCorpusBlocked");
     expect(screenMount).not.toContain("resolvePaidProPrepareSignaturesHandler");
     expect(sendBlock).toContain("paidProSignerMetadataFinalizedLatch");
 

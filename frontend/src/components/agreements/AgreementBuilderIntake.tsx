@@ -1178,6 +1178,7 @@ import {
   resolvePaidSessionVisibleDealBody,
   canMountPaidSessionFinalReviewShell,
   shouldBypassPaidProReviewShellWithoutCorpus,
+  shouldBlockPaidSessionFinalReviewSendForCorpus,
   shouldRelaxPaidSessionSignatureTrackGates,
   shouldShowPaidSessionFinalReviewActions,
   shouldShowPaidSessionGeneratingOverlay,
@@ -26615,6 +26616,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     agreementDocumentText,
   ]);
 
+  const paidSessionFinalReviewSendCorpusBlocked =
+    shouldBlockPaidSessionFinalReviewSendForCorpus({
+      corpusBlocked: Boolean(simpleProFinalReviewCorpus.corpusBlocked),
+      paidSessionFinalReviewDecisionReady,
+      visibleFinalReviewCorpusLen: simpleProFinalReviewDisplayPlain.trim().length,
+      minimumVisibleCorpusLen: PAID_PRO_FALLBACK_REBUILD_MIN_LEN,
+    });
+
   useEffect(() => {
     if (!hasPaidProSourceOfTruth() && !isPaidProPostFinalizeHydratedCorpusLocked()) return;
     const agreementIdForDisplay = (
@@ -37122,7 +37131,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                           enableSectionJump={false}
                                           sendDisabled={
                                             guidedFinalizeModalActive ||
-                                            simpleProFinalReviewCorpus.corpusBlocked ||
+                                            paidSessionFinalReviewSendCorpusBlocked ||
                                             (isGenerating && !draft) ||
                                             upgradeLockActive ||
                                             (loading && !(paidProSignerMetadataFinalized && paidProReviewSignerStatusReady)) ||
@@ -37132,7 +37141,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                           sendDisabledReason={
                                             guidedFinalizeModalActive
                                               ? "Finalizing agreement…"
-                                              : simpleProFinalReviewCorpus.corpusBlocked
+                                              : paidSessionFinalReviewSendCorpusBlocked
                                                 ? "Agreement corpus unavailable. Go back and restore the agreement."
                                                 : (isGenerating && !draft)
                                                   ? "Agreement is still generating…"
