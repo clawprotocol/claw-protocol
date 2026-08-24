@@ -700,8 +700,8 @@ describe("after-pay Send for signature — names+emails start the existing signi
     expect(sendBlock).toContain("feedbackCreatingLinks(\"signing\")");
     expect(sendBlock).toContain("enterGuidedSignatureTrackRoute");
     expect(sendBlock).not.toContain("authorized-signer-name");
-    const namesAt = sendBlock.indexOf("names_emails_complete");
-    const incompleteAt = sendBlock.indexOf("finalize_incomplete");
+    const namesAt = sendBlock.indexOf("handleProSendForSignature:names_emails_complete");
+    const incompleteAt = sendBlock.indexOf("handleProSendForSignature:finalize_incomplete");
     expect(namesAt).toBeGreaterThan(-1);
     expect(incompleteAt).toBeGreaterThan(namesAt);
 
