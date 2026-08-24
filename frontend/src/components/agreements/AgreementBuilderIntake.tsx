@@ -1176,6 +1176,7 @@ import {
   readPremiumCompletionReturnFromHref,
   resolvePaidSessionTwoSignerNamesEmailsComplete,
   resolvePaidSessionVisibleDealBody,
+  shouldBypassPaidProReviewShellWithoutCorpus,
   shouldRelaxPaidSessionSignatureTrackGates,
   shouldShowPaidSessionFinalReviewActions,
   shouldShowPaidSessionGeneratingOverlay,
@@ -20893,10 +20894,20 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   );
 
   const simpleProFinalReviewShellActive = useMemo(() => {
-    if (blockPaidProReviewShellWithoutCorpus && !canonicalPaidCreateFlowFirstReviewActive) return false;
+    if (
+      shouldBypassPaidProReviewShellWithoutCorpus({
+        blockWithoutCanonicalCorpus: blockPaidProReviewShellWithoutCorpus,
+        canonicalFirstReviewActive: canonicalPaidCreateFlowFirstReviewActive,
+        paidSessionVisibleDealBody,
+      })
+    ) {
+      return false;
+    }
     if (
       paidSessionVisibleDealBody &&
-      (hasAuthoritativeSigningSnapshot() || paidProSignerMetadataFinalizedLatch) &&
+      (hasAuthoritativeSigningSnapshot() ||
+        paidProSignerMetadataFinalizedLatch ||
+        paidSessionTwoSignersReady) &&
       createUiStage === CreateUiStage.DRAFT
     ) {
       return true;
@@ -20926,6 +20937,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     paidProRuntimeAuthority.canRenderProReviewShell,
     paidSessionVisibleDealBody,
     paidProSignerMetadataFinalizedLatch,
+    paidSessionTwoSignersReady,
   ]);
 
   const paidProForcedFirstReviewActive =
@@ -31269,7 +31281,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     const relaxPaidSessionSignatureGates = shouldRelaxPaidSessionSignatureTrackGates({
       paidSessionActive: hasPaidPremiumCompletionSession(),
       visibleDealBody: paidSessionVisibleDealBody,
-      namesAndEmailsComplete: paidSessionTwoSignersReady,
+      namesAndEmailsComplete:
+        paidSessionTwoSignersReady || paidProSignerMetadataFinalizedLatch,
     });
     setJourneyActionFeedback(feedbackCreatingLinks("signing"));
     const failSignatureTrackVisible = (message: string) => {
@@ -31730,6 +31743,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     currentPremiumMergedIntakeKey,
     paidSessionVisibleDealBody,
     paidSessionTwoSignersReady,
+    paidProSignerMetadataFinalizedLatch,
     pinFinalizedSignerAppliedCorpus,
     simpleProFinalReviewDisplayPlain,
     simpleProFinalReviewCorpus.plainText,
@@ -32582,7 +32596,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     traceSigningAdvance("handleProSendForSignature:enter");
     // Visible click must never be silent. Toast first so a later gate cannot
     // look like a dead button (live #102 miss: no Creating signing links…).
-    setJourneyActionFeedback(feedbackCreatingLinks("signing"));
+    // Publish flash so AppShell still shows it if this tree remounts.
+    const creatingSigningLinks = feedbackCreatingLinks("signing");
+    setJourneyActionFeedback(creatingSigningLinks);
+    publishJourneyActionFlash(creatingSigningLinks);
     const stickySigningFinalized =
       hasAuthoritativeSigningSnapshot() || paidProSignerMetadataFinalizedLatch;
     const postFinalizeSigningReady =

@@ -14,7 +14,7 @@ describe("SimpleProFinalReviewScreen action enablement rule", () => {
 
   it("shows sendDisabledReason when signersReady and sendDisabled", () => {
     const screen = readFileSync(join(__dirname, "SimpleProFinalReviewScreen.tsx"), "utf8");
-    expect(screen).toContain("!signerSetupRequired && signersReady && sendDisabled && sendDisabledReason");
+    expect(screen).toContain("!signerSetupRequired && namesAndEmailsComplete && sendDisabled && sendDisabledReason");
     expect(screen).toContain('data-testid="simple-pro-send-disabled-reason"');
   });
 
@@ -59,7 +59,8 @@ describe("SimpleProFinalReviewScreen action enablement rule", () => {
 
   it("rule: buttons enabled when signersReady and no blockers active", () => {
     const screen = readFileSync(join(__dirname, "SimpleProFinalReviewScreen.tsx"), "utf8");
-    expect(screen).toContain("disabled={sendDisabled || packetStale || bulkApplyBusy}");
+    expect(screen).toContain("disabled={sendSignatureBlocked}");
+    expect(screen).toContain("isPaidSessionSendClickArmed");
     const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
     expect(intake).toContain("signersReady={paidProReviewSignerStatusReady}");
   });
