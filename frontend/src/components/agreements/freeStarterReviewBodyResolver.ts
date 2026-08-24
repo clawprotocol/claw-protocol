@@ -20,6 +20,11 @@ import { starterCorpusContainsRawIntakeInstruction } from "./canonicalPartyRoleA
 import { readOriginalUserIntakeRaw } from "./originalUserIntakeRawStorage";
 import { enrichStarterPreviewPartiesFromIntake } from "./starterOpeningPartyPreserve";
 import { extractNamedDumpPartyUnits } from "./intakeNamedPartyFallback";
+import { repairCheckoutBackRestoreDraftParties } from "./checkoutBackRestore";
+import {
+  repairDraftPartiesFromIntakeAuthority,
+  resolveAuthoritativeIntakePartyNames,
+} from "./partySlotIdentityNormalize";
 import { isolateLegalEntityFromContaminatedName } from "./starterPartyIdentityIsolation";
 import { sanitizeStarterPartyNameForDisplay } from "./starterPreviewProseSanitize";
 import { normalizeFreeStarterSectionRender } from "./freeStarterSectionRenderNormalize";
@@ -527,8 +532,63 @@ function buildNamedDumpPaidRestoreBody(
  */
 function isCorruptedPurpose(purpose: string | null | undefined): boolean {
   if (!purpose) return false;
-  const text = purpose.trim();
-  return CORRUPTED_OUTPUT_PATTERNS.some(p => p.test(text));
+  const text = purpose.replace(/\s+/g, " ").trim();
+  if (CORRUPTED_OUTPUT_PATTERNS.some((p) => p.test(text))) return true;
+  if (/\bwill\s+(?:design|develop|create|build|provide|perform|deliver)\b/i.test(text)) return true;
+  if (/\b(?:of|from)\s+[A-Z].+\s+(?:LLC|Inc|Studio|Company)\b/i.test(text)) return true;
+  return false;
+}
+
+function resolveRebuildBilateralPartyNames(
+  intakeText: string,
+  draft: ParsedDraftShape | null,
+): [string | null, string | null] {
+  const intake = intakeText.trim();
+  const repairedDraft =
+    draft && intake ? repairCheckoutBackRestoreDraftParties(draft, intake) : draft;
+  const fromRepair = (repairedDraft?.parties ?? [])
+    .map((p) => String(p?.name ?? "").trim())
+    .filter((n) => n.length >= 2 && !isHollowPartyName(n));
+  if (fromRepair.length >= 2) return [fromRepair[0]!, fromRepair[1]!];
+  const fromAuthority = resolveAuthoritativeIntakePartyNames(intake).filter(
+    (n) => n.length >= 2 && !isHollowPartyName(n),
+  );
+  if (fromAuthority.length >= 2) return [fromAuthority[0]!, fromAuthority[1]!];
+  const namedParties = extractNamedPartiesFromIntake(intake);
+  return [namedParties[0] ?? null, namedParties[1] ?? null];
+}
+
+function resolveRebuildPurposeClause(intakeText: string, draft: ParsedDraftShape | null): string {
+  const intake = intakeText.trim();
+  const draftPurpose =
+    draft?.purpose && !isCorruptedPurpose(draft.purpose) ? String(draft.purpose).trim() : "";
+  let purpose = draftPurpose || extractPurposeFromIntake(intake);
+  purpose = purpose.replace(/\s+/g, " ").trim();
+  if (isCorruptedPurpose(purpose)) {
+    purpose = extractPurposeFromIntake(intake);
+  }
+  purpose = purpose.replace(/^[A-Z][^.]+?\s+will\s+/i, "").trim();
+  if (!purpose || isCorruptedPurpose(purpose)) {
+    return "services as described in the parties' communications";
+  }
+  purpose = purpose.replace(/\.$/, "");
+  if (!/^(?:design|develop|create|build|provide|perform|deliver)\b/i.test(purpose)) {
+    if (/\b(?:logo|brand kit|branding|website|app|software)\b/i.test(purpose)) {
+      purpose = `design ${purpose}`;
+    }
+  }
+  return purpose;
+}
+
+function formatServicesSectionLine(purpose: string): string {
+  const p = purpose.trim();
+  if (!p) {
+    return "The Service Provider agrees to provide services as described in the parties' communications.";
+  }
+  if (/^(?:design|develop|create|build|provide|perform|deliver)\b/i.test(p)) {
+    return `The Service Provider shall ${p}.`;
+  }
+  return `The Service Provider agrees to provide ${p}.`;
 }
 
 /**
@@ -549,39 +609,30 @@ export function rebuildBodyFromIntakeForProFailure(
   if (paidRestoreParties.length >= 3) {
     return buildNamedDumpPaidRestoreBody(intakeText, draft, paidRestoreParties);
   }
-  
-  const namedParties = extractNamedPartiesFromIntake(intakeText);
-  const draftParties = draft?.parties ?? [];
-  
-  // Resolve party names - prefer extracted names, then draft parties, but NEVER hollow/generic names
-  const party1 = namedParties[0] 
-    || (draftParties[0]?.name && !isHollowPartyName(draftParties[0].name) ? draftParties[0].name : null);
-  const party2 = namedParties[1]
-    || (draftParties[1]?.name && !isHollowPartyName(draftParties[1].name) ? draftParties[1].name : null);
-  
+
+  const [party1, party2] = resolveRebuildBilateralPartyNames(intakeText, draft);
+
   // If we couldn't extract or find any real party names, use intake-sentence-based body instead
   // NEVER emit Party A/B or Client/Service_provider as the paid landing
   if (!party1 && !party2) {
     return buildIntakeSentencesBody(intakeText, draft);
   }
-  
+
+  const draftParties = repairDraftPartiesFromIntakeAuthority(draft?.parties ?? [], intakeText);
   const role1 = draftParties[0]?.role || "Client";
   const role2 = draftParties[1]?.role || "Service Provider";
-  
+
   const jurisdiction = extractJurisdictionFromIntake(intakeText) || draft?.jurisdiction || null;
   const payment = extractPaymentFromIntake(intakeText) || draft?.payment_terms || null;
   const term = extractTermFromIntake(intakeText) || draft?.duration || null;
-  
-  // Use draft purpose ONLY if it's not corrupted; otherwise extract from intake
-  const draftPurpose = draft?.purpose && !isCorruptedPurpose(draft.purpose) ? draft.purpose : null;
-  const purpose = draftPurpose || extractPurposeFromIntake(intakeText);
-  
+  const purpose = resolveRebuildPurposeClause(intakeText, draft);
+
   const title = draft?.title || "SERVICES AGREEMENT";
-  
+
   // Use "the first party" / "the second party" as fallback if only one name is available
   const party1Display = party1 || "the first party";
   const party2Display = party2 || "the second party";
-  
+
   const lines: string[] = [
     title.toUpperCase(),
     "",
@@ -595,12 +646,8 @@ export function rebuildBodyFromIntakeForProFailure(
     "",
     "1. SERVICES",
   ];
-  
-  if (purpose) {
-    lines.push(`The service provider agrees to provide ${purpose}.`);
-  } else {
-    lines.push("The service provider agrees to provide services as described in the parties' communications.");
-  }
+
+  lines.push(formatServicesSectionLine(purpose));
   lines.push("");
   
   lines.push("2. PAYMENT TERMS");

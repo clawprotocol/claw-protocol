@@ -77,6 +77,8 @@ import {
 } from "./paidProReviewSessionAuthority";
 import { getAuthoritativeAgreementDocument } from "./authoritativeAgreementDocument";
 import { detectPaidProCorpusIntakeContamination } from "./paidProIntakeCorpusFidelity";
+import { sanitizePaidProReviewPlainForIntakeAuthority } from "./paidProReviewRenderCorpus";
+import { repairCheckoutBackRestoreDraftParties } from "./checkoutBackRestore";
 
 export const PAID_PRO_ACCEPTED_CANONICAL_SOT_DISPLAY_SOURCE =
   "paid_pro_accepted_canonical_source_of_truth";
@@ -113,6 +115,25 @@ export type PaidProFirstReviewVisibleDisplayArgs = {
 
 function trim(s: string | null | undefined): string {
   return (s || "").trim();
+}
+
+function withIntakeAuthorityVisiblePlainSanitizer(
+  resolution: PaidProFirstReviewVisibleDisplayResolution,
+  args: PaidProFirstReviewVisibleDisplayArgs,
+): PaidProFirstReviewVisibleDisplayResolution {
+  const plain = trim(resolution.plain);
+  if (plain.length < 80 || !trim(args.intakeText)) return resolution;
+  const draft =
+    args.draft && trim(args.intakeText)
+      ? repairCheckoutBackRestoreDraftParties(args.draft, trim(args.intakeText))
+      : args.draft ?? null;
+  const sanitized = sanitizePaidProReviewPlainForIntakeAuthority({
+    text: plain,
+    draft,
+    intakeText: args.intakeText,
+  });
+  if (sanitized === plain) return resolution;
+  return { ...resolution, plain: sanitized };
 }
 
 function rejectContaminatedFirstReviewPlain(
@@ -247,6 +268,15 @@ function resolveAcceptedCanonicalPaintPlain(
  * canonical immediately so first-review never blanks while draft persist races.
  */
 export function resolvePaidProFirstReviewVisibleDisplayPlain(
+  args: PaidProFirstReviewVisibleDisplayArgs = {},
+): PaidProFirstReviewVisibleDisplayResolution {
+  return withIntakeAuthorityVisiblePlainSanitizer(
+    resolvePaidProFirstReviewVisibleDisplayPlainCore(args),
+    args,
+  );
+}
+
+function resolvePaidProFirstReviewVisibleDisplayPlainCore(
   args: PaidProFirstReviewVisibleDisplayArgs = {},
 ): PaidProFirstReviewVisibleDisplayResolution {
   const draft = args.draft ?? null;

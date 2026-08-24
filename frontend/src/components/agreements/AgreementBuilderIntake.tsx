@@ -20648,6 +20648,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         checkoutBackSnap?.intakeText ||
         ""
       ).trim();
+      const draftBase = (reviewDraft ?? draft) ?? checkoutBackSnap?.draft ?? null;
+      const repairedDraft =
+        draftBase && resolvedIntakeText.length >= 20
+          ? repairCheckoutBackRestoreDraftParties(draftBase, resolvedIntakeText)
+          : draftBase;
       // Priority for acceptedCanonicalPlain:
       // 1. Frozen SoT (established from successful generate)
       // 2. Rebuild from checkout snapshot intake (#82 wire)
@@ -20659,8 +20664,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         hasPaidPremiumCompletionSession() &&
         resolvedIntakeText.length >= 20
       ) {
-        const draftForRebuild = (reviewDraft ?? draft) ?? checkoutBackSnap?.draft ?? null;
-        const rebuiltBody = rebuildBodyFromIntakeForProFailure(resolvedIntakeText, draftForRebuild);
+        const rebuiltBody = rebuildBodyFromIntakeForProFailure(resolvedIntakeText, repairedDraft);
         if (rebuiltBody.trim().length >= 200 && isNonHollowBody(rebuiltBody, resolvedIntakeText)) {
           resolvedAcceptedPlain = rebuiltBody;
         }
@@ -20673,7 +20677,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         }
       }
       return {
-        draft: (reviewDraft ?? draft) ?? null,
+        draft: repairedDraft,
         intakeText: resolvedIntakeText,
         premiumRenderSource:
           premiumTruthPipelineSource ?? lastPremiumPipelineRenderSourceRef.current,
@@ -23673,20 +23677,22 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const signerSetupPartyIdentities = useMemo((): SignerSetupPartyIdentity[] => {
     if (!draft?.parties?.length) return [];
     const intakeText = currentPremiumMergedIntakeKey || intakeCombined;
+    const repairedDraft =
+      intakeText.trim().length >= 20 ? repairCheckoutBackRestoreDraftParties(draft, intakeText) : draft;
     const agreementBodyText =
       getAuthoritativeAgreementText() ||
       paidProCardEditDraft ||
       agreementDocumentTextRef.current ||
       "";
     const handoff = readPremiumRecipientHandoffMemo();
-    const ho = handoff ? linearPremiumRecipientSlots(handoff, draft.parties.length) : [];
+    const ho = handoff ? linearPremiumRecipientSlots(handoff, repairedDraft.parties.length) : [];
     return resolveSignerSetupPartyIdentities({
-      parties: draft.parties,
+      parties: repairedDraft.parties,
       intakeText,
       agreementBodyText,
       handoffSlots: ho,
     });
-  }, [draft?.parties, currentPremiumMergedIntakeKey, intakeCombined, paidProCardEditDraft]);
+  }, [draft, currentPremiumMergedIntakeKey, intakeCombined, paidProCardEditDraft]);
 
   useEffect(() => {
     if (signerSetupPartyIdentities.length < 1) return;

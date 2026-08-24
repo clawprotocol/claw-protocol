@@ -350,6 +350,67 @@ export {
   type ResolvePaidProReviewRenderPartiesArgs,
 } from "./paidProReviewRenderParties";
 
+/** Shared intake-authority sanitizer for post-payment visible review plain (ForcedRoute / display authority). */
+export function sanitizePaidProReviewPlainForIntakeAuthority(
+  args: ResolvePaidProReviewRenderPartiesArgs & { text: string },
+): string {
+  const text = (args.text || "").trim();
+  const intake = (args.intakeText ?? "").trim();
+  if (text.length < 80 || intake.length < 20) return text;
+  const parties = resolvePartiesForReviewRender({
+    draft: args.draft ?? null,
+    intakeText: intake,
+    liveSignerMetadataUi: args.liveSignerMetadataUi ?? null,
+  });
+  if (parties.length < 2) return text;
+  const draftPartyNames =
+    args.draft?.parties
+      ?.map((p) => String((p as { name?: string }).name ?? "").trim())
+      .filter(Boolean) ?? [];
+  let sanitized = applyPaidProReviewRenderSanitizer(text, parties, {
+    intakeText: intake,
+    draftPartyNames,
+  }).text.trim();
+  const partyNames = parties.map((p) => p.partyLegalName).filter(Boolean);
+  const scopeFromIntake = (() => {
+    const withArticle = intake.match(/\bfor\s+((?:a|an|the)\s+[^.,]+)/i);
+    if (withArticle) return withArticle[1].replace(/\s+/g, " ").trim();
+    const bare = intake.match(/\bfor\s+([^.,]+)/i);
+    return bare ? bare[1].replace(/\s+/g, " ").trim() : "";
+  })();
+  const servicesLineBroken =
+    /\bagrees to provide\b[^\n]*\bwill\s+(?:design|develop|create|build|provide|perform|deliver)\b/i.test(
+      sanitized,
+    ) ||
+    (/\bagrees to provide\b/i.test(sanitized) &&
+      partyNames.some((name) => sanitized.toLowerCase().includes(name.toLowerCase()))) ||
+    (scopeFromIntake.length > 5 &&
+      !sanitized.toLowerCase().includes(scopeFromIntake.toLowerCase()));
+  if (servicesLineBroken) {
+    let scope =
+      scopeFromIntake || "services as described in the parties' communications";
+    if (scope && !/^(?:design|develop|create|build|provide|perform|deliver)\b/i.test(scope)) {
+      if (/\b(?:logo|brand kit|branding|website|app|software)\b/i.test(scope)) {
+        scope = `design ${scope}`;
+      }
+    }
+    const replacement = /^(?:design|develop|create|build|provide|perform|deliver)\b/i.test(scope)
+      ? `The Service Provider shall ${scope}.`
+      : `The Service Provider agrees to provide ${scope}.`;
+    sanitized = sanitized.replace(
+      /The service provider agrees to provide[^\n]+/i,
+      replacement,
+    );
+    if (!sanitized.includes(replacement)) {
+      sanitized = sanitized.replace(
+        /The Service Provider shall[^\n]+/i,
+        replacement,
+      );
+    }
+  }
+  return sanitized;
+}
+
 export function applyPaidProReviewRenderSanitizer(
   corpus: string,
   parties: readonly PaidProSignerMetadataParty[],
