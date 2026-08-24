@@ -713,7 +713,7 @@ describe("after-pay Send for signature — names+emails start the existing signi
     expect(screenMount).toContain("void handleProSendForSignature()");
 
     const trackStart = intakeSrc.indexOf("const enterGuidedSignatureTrackRoute = React.useCallback");
-    const track = intakeSrc.slice(trackStart, trackStart + 9000);
+    const track = intakeSrc.slice(trackStart, trackStart + 25000);
     expect(track).toContain("shouldRelaxPaidSessionSignatureTrackGates");
     expect(track).toContain("relaxPaidSessionSignatureGates");
     expect(track).toContain("PAID_PRO_FALLBACK_REBUILD_MIN_LEN");

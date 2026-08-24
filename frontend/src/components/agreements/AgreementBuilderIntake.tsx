@@ -32586,8 +32586,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     const postFinalizeSigningReady =
       paidProSignerMetadataFinalized || stickySigningFinalized;
     // After-pay names+emails (2–4) already complete: start the existing signing
-    // track. Do not require authorized-signer-name / title / address, and do not
-    // swallow the click as finalize_incomplete or a dead signer-setup remount.
+    // track. Extra signer title or address is not required, and the click must
+    // not be swallowed as finalize_incomplete or a dead signer-setup remount.
     if (
       canStartPaidSessionSignatureTrackFromFinalReview({
         namesAndEmailsComplete: paidSessionTwoSignersReady,
