@@ -538,4 +538,34 @@ describe("SimpleProFinalReviewScreen", () => {
     expect(reviewBtn.disabled).toBe(false);
     cleanup();
   });
+
+  it("Send for signature click is wired when names+emails are complete — not a silent no-op", () => {
+    const onSendForSignature = vi.fn();
+    const onSendForReview = vi.fn();
+    render(
+      <SimpleProFinalReviewScreen
+        agreementHtml="<p>Body</p>"
+        canonicalPaidProReview
+        paidReviewPlain={`PRO AGREEMENT body. ${"Substantive clause. ".repeat(600)}`}
+        signersReady
+        signerMetadataFinalized
+        sendDisabled={false}
+        signaturePrimaryLabel="Send for signature"
+        reviewSecondaryLabel="Send for review"
+        onSendForSignature={onSendForSignature}
+        onSendForReview={onSendForReview}
+        onCopyAgreement={vi.fn()}
+        onExportAgreement={vi.fn()}
+      />,
+    );
+    const signBtn = screen.getByTestId("simple-pro-send-for-signature") as HTMLButtonElement;
+    const reviewBtn = screen.getByTestId("simple-pro-send-for-review") as HTMLButtonElement;
+    expect(signBtn.disabled).toBe(false);
+    expect(reviewBtn.disabled).toBe(false);
+    expect(screen.queryByTestId("simple-pro-send-disabled-reason")).toBeNull();
+    fireEvent.click(signBtn);
+    expect(onSendForSignature).toHaveBeenCalledTimes(1);
+    expect(onSendForReview).not.toHaveBeenCalled();
+    cleanup();
+  });
 });

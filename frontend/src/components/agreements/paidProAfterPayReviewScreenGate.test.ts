@@ -9,9 +9,12 @@ import {
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import {
   canOpenPaidSessionFinalReviewAfterSigners,
+  canStartPaidSessionSignatureTrackFromFinalReview,
+  isIllegalSilentSendDisabled,
   isVisibleMissingTenetAskLanding,
   resolvePaidSessionTwoSignerNamesEmailsComplete,
   resolvePaidSessionVisibleDealBody,
+  shouldRelaxPaidSessionSignatureTrackGates,
   shouldShowPaidSessionFinalReviewActions,
   shouldShowPaidSessionGeneratingOverlay,
   shouldSkipPaidSessionReviewHydrateWait,
@@ -596,5 +599,137 @@ describe("after-pay review-screen gate — intake wiring", () => {
         premiumCompletionReturn: true,
       }),
     ).toBe(false);
+  });
+});
+
+describe("after-pay Send for signature — names+emails start the existing signing track", () => {
+  it("2, 3, and 4 complete name+email slots may start the signing track", () => {
+    const two = resolvePaidSessionTwoSignerNamesEmailsComplete({
+      signer1Name: "Priya Shah",
+      signer1Email: "priya.shah.qa@example.com",
+      signer2Name: "Diego Alvarez",
+      signer2Email: "diego.alvarez.qa@example.com",
+    });
+    const three = resolvePaidSessionTwoSignerNamesEmailsComplete({
+      signer1Name: "Priya Shah",
+      signer1Email: "priya.shah.qa@example.com",
+      signer2Name: "Diego Alvarez",
+      signer2Email: "diego.alvarez.qa@example.com",
+      extraSigners: [{ name: "Sam Rivera", email: "sam.rivera.qa@example.com" }],
+    });
+    const four = resolvePaidSessionTwoSignerNamesEmailsComplete({
+      signer1Name: "Priya Shah",
+      signer1Email: "priya.shah.qa@example.com",
+      signer2Name: "Diego Alvarez",
+      signer2Email: "diego.alvarez.qa@example.com",
+      extraSigners: [
+        { name: "Sam Rivera", email: "sam.rivera.qa@example.com" },
+        { name: "Jordan Lee", email: "jordan.lee.qa@example.com" },
+      ],
+    });
+    expect(two).toBe(true);
+    expect(three).toBe(true);
+    expect(four).toBe(true);
+    expect(canStartPaidSessionSignatureTrackFromFinalReview({ namesAndEmailsComplete: two })).toBe(true);
+    expect(canStartPaidSessionSignatureTrackFromFinalReview({ namesAndEmailsComplete: three })).toBe(true);
+    expect(canStartPaidSessionSignatureTrackFromFinalReview({ namesAndEmailsComplete: four })).toBe(true);
+  });
+
+  it("does not require authorized-signer-name / title / address once names+emails are complete", () => {
+    expect(
+      canStartPaidSessionSignatureTrackFromFinalReview({ namesAndEmailsComplete: true }),
+    ).toBe(true);
+    expect(
+      shouldRelaxPaidSessionSignatureTrackGates({
+        paidSessionActive: true,
+        visibleDealBody: true,
+        namesAndEmailsComplete: true,
+      }),
+    ).toBe(true);
+    expect(intakeSrc).not.toMatch(
+      /canStartPaidSessionSignatureTrackFromFinalReview[\s\S]{0,400}authorized.?signer.?name/,
+    );
+  });
+
+  it("incomplete extra party email cannot start the signing track", () => {
+    const incompleteThird = resolvePaidSessionTwoSignerNamesEmailsComplete({
+      signer1Name: "Priya Shah",
+      signer1Email: "priya.shah.qa@example.com",
+      signer2Name: "Diego Alvarez",
+      signer2Email: "diego.alvarez.qa@example.com",
+      extraSigners: [{ name: "Sam Rivera", email: "" }],
+    });
+    expect(incompleteThird).toBe(false);
+    expect(
+      canStartPaidSessionSignatureTrackFromFinalReview({ namesAndEmailsComplete: incompleteThird }),
+    ).toBe(false);
+  });
+
+  it("disabled-without-reason is illegal when names+emails are complete", () => {
+    expect(
+      isIllegalSilentSendDisabled({
+        namesAndEmailsComplete: true,
+        sendDisabled: true,
+        sendDisabledReason: null,
+      }),
+    ).toBe(true);
+    expect(
+      isIllegalSilentSendDisabled({
+        namesAndEmailsComplete: true,
+        sendDisabled: true,
+        sendDisabledReason: "Saving agreement…",
+      }),
+    ).toBe(false);
+    expect(
+      isIllegalSilentSendDisabled({
+        namesAndEmailsComplete: true,
+        sendDisabled: false,
+        sendDisabledReason: null,
+      }),
+    ).toBe(false);
+  });
+
+  it("click path is wired to handleProSendForSignature / enterGuidedSignatureTrackRoute", () => {
+    const sendStart = intakeSrc.indexOf("const handleProSendForSignature = React.useCallback");
+    expect(sendStart).toBeGreaterThan(-1);
+    const sendEnd = intakeSrc.indexOf("const handlePaidProPrepareSignaturesFromFirstReview", sendStart);
+    const sendBlock = intakeSrc.slice(sendStart, sendEnd > sendStart ? sendEnd : sendStart + 4500);
+    expect(sendBlock).toContain("canStartPaidSessionSignatureTrackFromFinalReview");
+    expect(sendBlock).toContain("paidSessionTwoSignersReady");
+    expect(sendBlock).toContain('traceSigningAdvance("handleProSendForSignature:names_emails_complete")');
+    expect(sendBlock).toContain("feedbackCreatingLinks(\"signing\")");
+    expect(sendBlock).toContain("enterGuidedSignatureTrackRoute");
+    expect(sendBlock).not.toContain("authorized-signer-name");
+    const namesAt = sendBlock.indexOf("names_emails_complete");
+    const incompleteAt = sendBlock.indexOf("finalize_incomplete");
+    expect(namesAt).toBeGreaterThan(-1);
+    expect(incompleteAt).toBeGreaterThan(namesAt);
+
+    const screenMount = intakeSrc.slice(
+      intakeSrc.indexOf("<SimpleProFinalReviewScreen"),
+      intakeSrc.indexOf("onSendForReview={() => void handleProSendForReview()}"),
+    );
+    expect(screenMount).toContain("canStartPaidSessionSignatureTrackFromFinalReview");
+    expect(screenMount).toContain("void handleProSendForSignature()");
+
+    const trackStart = intakeSrc.indexOf("const enterGuidedSignatureTrackRoute = React.useCallback");
+    const track = intakeSrc.slice(trackStart, trackStart + 9000);
+    expect(track).toContain("shouldRelaxPaidSessionSignatureTrackGates");
+    expect(track).toContain("relaxPaidSessionSignatureGates");
+    expect(track).toContain("PAID_PRO_FALLBACK_REBUILD_MIN_LEN");
+    expect(track).toContain("draftSnapshotRef.current");
+    expect(track).not.toMatch(/\bdraftRef\b/);
+    expect(track).toContain("relaxPaidSessionCorpusAssert: relaxPaidSessionSignatureGates");
+    expect(track).toContain("failSignatureTrackVisible");
+  });
+
+  it("Send for review path is unchanged", () => {
+    const reviewStart = intakeSrc.indexOf("const handleProSendForReview = React.useCallback");
+    const reviewEnd = intakeSrc.indexOf("const handleFinalizeRoutePrimaryAction", reviewStart);
+    const review = intakeSrc.slice(reviewStart, reviewEnd > reviewStart ? reviewEnd : reviewStart + 4000);
+    expect(review).toContain("completeGuidedPaidProReviewFirstHandoff(\"simple_pro_send_for_review\")");
+    expect(review).toContain("enterFinalReviewRecipientSetup(\"review_only\")");
+    expect(review).not.toContain("enterGuidedSignatureTrackRoute");
+    expect(intakeSrc).toContain("onSendForReview={() => void handleProSendForReview()}");
   });
 });

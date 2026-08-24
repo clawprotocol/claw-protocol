@@ -1171,10 +1171,12 @@ import {
 import { evaluatePostGenerateTenetRecall } from "./postGenerateTenetRecall";
 import {
   canOpenPaidSessionFinalReviewAfterSigners,
+  canStartPaidSessionSignatureTrackFromFinalReview,
   isVisibleMissingTenetAskLanding,
   readPremiumCompletionReturnFromHref,
   resolvePaidSessionTwoSignerNamesEmailsComplete,
   resolvePaidSessionVisibleDealBody,
+  shouldRelaxPaidSessionSignatureTrackGates,
   shouldShowPaidSessionFinalReviewActions,
   shouldShowPaidSessionGeneratingOverlay,
   shouldSkipPaidSessionReviewHydrateWait,
@@ -31265,6 +31267,24 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     markSigningPreparationRequested();
     setSignaturePreparationRequested(true);
     setPaidProInlineSignerSetupLatched(false);
+    const relaxPaidSessionSignatureGates = shouldRelaxPaidSessionSignatureTrackGates({
+      paidSessionActive: hasPaidPremiumCompletionSession(),
+      visibleDealBody: paidSessionVisibleDealBody,
+      namesAndEmailsComplete: paidSessionTwoSignersReady,
+    });
+    setJourneyActionFeedback(feedbackCreatingLinks("signing"));
+    const failSignatureTrackVisible = (message: string) => {
+      setGuidedFinalizeModalBlockedMessage(message);
+      setHardError(message);
+      setJourneyActionFeedback(
+        feedbackFailed(
+          "create_links",
+          "Links were not created",
+          message,
+          { remedyLabel: "Try again" },
+        ),
+      );
+    };
     const trackStartedAt = Date.now();
     let modalVisible = false;
     const modalRevealTimer = window.setTimeout(() => {
@@ -31296,21 +31316,40 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       }
 
       const transition = assertGuidedTransitionReady("signing_confirm");
-      if (!transition.ok) {
+      if (!transition.ok && !relaxPaidSessionSignatureGates) {
         traceSigningAdvance(`enterGuidedSignatureTrackRoute:blocked:${transition.reason ?? "transition_not_ready"}`);
         logGuidedSignatureTrackFailed({ reason: transition.reason ?? "transition_not_ready" });
         showModalIfSlow("blocked");
-        setGuidedFinalizeModalBlockedMessage(
+        failSignatureTrackVisible(
           "The final agreement snapshot is not ready. Return to final review before continuing.",
         );
         return;
       }
+      if (!transition.ok) {
+        traceSigningAdvance(
+          `enterGuidedSignatureTrackRoute:relax_transition:${transition.reason ?? "transition_not_ready"}`,
+        );
+      }
 
-      const corpusText = ensureGuidedSigningCorpusReady();
+      let corpusText = ensureGuidedSigningCorpusReady();
+      if (!corpusText && relaxPaidSessionSignatureGates) {
+        const visibleDealCorpus = (
+          finalizedSigningCorpusRef.current ||
+          acceptedReviewCorpusRef.current ||
+          resolvePaidProPostFinalizeReviewPlain() ||
+          simpleProFinalReviewDisplayPlain ||
+          simpleProFinalReviewCorpus.plainText ||
+          ""
+        ).trim();
+        if (visibleDealCorpus.length >= PAID_PRO_FALLBACK_REBUILD_MIN_LEN) {
+          pinFinalizedSignerAppliedCorpus(visibleDealCorpus, "continue_to_signing");
+          corpusText = visibleDealCorpus;
+        }
+      }
       if (!corpusText) {
         logGuidedSignatureTrackFailed({ reason: "corpus_not_ready" });
         showModalIfSlow("blocked");
-        setGuidedFinalizeModalBlockedMessage(GUIDED_VS01_HANDOFF_BLOCKED_USER_MESSAGE);
+        failSignatureTrackVisible(GUIDED_VS01_HANDOFF_BLOCKED_USER_MESSAGE);
         return;
       }
 
@@ -31318,11 +31357,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         finalizedSignerApplied: finalizedSigningCorpusRef.current,
         finalizedSigning: finalizedSigningCorpusRef.current,
         acceptedReview: acceptedReviewCorpusRef.current,
+        minLen: relaxPaidSessionSignatureGates ? PAID_PRO_FALLBACK_REBUILD_MIN_LEN : undefined,
       });
       if (selected.source === "none") {
         logGuidedSignatureTrackFailed({ reason: "corpus_not_selected" });
         showModalIfSlow("blocked");
-        setGuidedFinalizeModalBlockedMessage(
+        failSignatureTrackVisible(
           "The finalized agreement is not ready for signing. Return to final review and try again.",
         );
         return;
@@ -31339,10 +31379,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         corpusBody: selected.body,
         intakeText: currentPremiumMergedIntakeKey || intakeCombined,
       });
-      if (!handoffAssert.ok) {
+      if (!handoffAssert.ok && !relaxPaidSessionSignatureGates) {
         logGuidedSignatureTrackFailed({ reason: handoffAssert.reason ?? "handoff_assert_failed" });
         showModalIfSlow("blocked");
-        setGuidedFinalizeModalBlockedMessage(
+        failSignatureTrackVisible(
           "Signer details or the final agreement are not ready for signing. Return to final review and try again.",
         );
         return;
@@ -31396,7 +31436,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       if (!mergedDraft) {
         traceSigningAdvance("enterGuidedSignatureTrackRoute:draft_missing");
         logGuidedSignatureTrackFailed({ reason: "draft_missing" });
-        setHardError("Your agreement draft is not ready yet. Return to final review and try again.");
+        failSignatureTrackVisible("Your agreement draft is not ready yet. Return to final review and try again.");
         return;
       }
       if (persistedAgreementId) {
@@ -31614,6 +31654,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           logSource: "guided_signature_track",
           agreementCorpusText: corpusText,
           guidedSigningHandoff: vs01Handoff,
+          relaxPaidSessionCorpusAssert: relaxPaidSessionSignatureGates,
         }),
       );
       if (!timedHandoff.ok) {
@@ -31623,10 +31664,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           durationMs: Date.now() - signingPrepareStartedAt,
         });
         showModalIfSlow("blocked");
-        setGuidedFinalizeModalBlockedMessage(
-          "Signing preparation is taking longer than expected. You can retry from final review or continue editing the agreement.",
-        );
-        setHardError(
+        failSignatureTrackVisible(
           "Signing preparation timed out. Retry from final review when your connection is stable.",
         );
         return;
@@ -31657,8 +31695,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           message: result.failure.userMessage,
         });
         showModalIfSlow("blocked");
-        setGuidedFinalizeModalBlockedMessage(result.failure.userMessage);
-        setHardError(result.failure.userMessage);
+        failSignatureTrackVisible(result.failure.userMessage);
       }
     } finally {
       window.clearTimeout(modalRevealTimer);
@@ -31692,6 +31729,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     navigate,
     premiumSigningRecipientCount,
     currentPremiumMergedIntakeKey,
+    paidSessionVisibleDealBody,
+    paidSessionTwoSignersReady,
+    pinFinalizedSignerAppliedCorpus,
+    simpleProFinalReviewDisplayPlain,
+    simpleProFinalReviewCorpus.plainText,
   ]);
 
   const completeGuidedSigningHandoff = React.useCallback(
@@ -32543,6 +32585,27 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       hasAuthoritativeSigningSnapshot() || paidProSignerMetadataFinalizedLatch;
     const postFinalizeSigningReady =
       paidProSignerMetadataFinalized || stickySigningFinalized;
+    // After-pay names+emails (2–4) already complete: start the existing signing
+    // track. Do not require authorized-signer-name / title / address, and do not
+    // swallow the click as finalize_incomplete or a dead signer-setup remount.
+    if (
+      canStartPaidSessionSignatureTrackFromFinalReview({
+        namesAndEmailsComplete: paidSessionTwoSignersReady,
+      })
+    ) {
+      traceSigningAdvance("handleProSendForSignature:names_emails_complete");
+      if (!hasAuthoritativeSigningSnapshot() && !paidProSignerMetadataFinalizedLatch) {
+        void finalizePaidProSignerMetadataAndOpenReviewDecision();
+      }
+      markSigningPreparationRequested();
+      setSignaturePreparationRequested(true);
+      setPaidProInlineSignerSetupLatched(false);
+      finalReviewSendIntentRef.current = "signature";
+      handlePremiumSendModePick("signature");
+      setJourneyActionFeedback(feedbackCreatingLinks("signing"));
+      void enterGuidedSignatureTrackRoute();
+      return;
+    }
     if (
       (acceptedPaidProAuthorityActive || paidProReviewDecisionPhase === "decision_2") &&
       !postFinalizeSigningReady &&
@@ -32615,6 +32678,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     acceptedPaidProAuthorityActive,
     paidProReviewDecisionPhase,
     paidProSignatureDetailsReady,
+    paidSessionTwoSignersReady,
     paidProSignerMetadataFinalized,
     paidProSignerMetadataFinalizedLatch,
     finalizePaidProSignerMetadataAndOpenReviewDecision,
@@ -36950,6 +37014,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                                 }
                                           }
                                           onSendForSignature={() => {
+                                            if (
+                                              canStartPaidSessionSignatureTrackFromFinalReview({
+                                                namesAndEmailsComplete: paidSessionTwoSignersReady,
+                                              })
+                                            ) {
+                                              void handleProSendForSignature();
+                                              return;
+                                            }
                                             const handler = resolvePaidProPrepareSignaturesHandler({
                                               phase: paidProReviewDecisionPhase,
                                               onDecision1: () => void handlePaidProPrepareSignaturesFromFirstReview(),
