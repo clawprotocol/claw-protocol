@@ -34,6 +34,7 @@ import { countRealParties } from "./starterPartyLimits";
 import { readLegalPartyCountFromTypedHandoff } from "./starterToPaidPartyHandoff";
 import { intakeDescribesBrandLicensingDistributionManufacturingStack } from "./paidProAgreementTitleScope";
 import { resolveDeterministicQuadPartyNames } from "./deterministicQuadPartyProFallback";
+import { extractNamedDumpPartyUnits } from "./intakeNamedPartyFallback";
 
 const LOG_PREFIX = "[signer-count-authority]";
 
@@ -226,6 +227,7 @@ export function resolveIntakeManifestAuthorityCount(intakeText: string | null | 
 
 function resolveAuthoritativeSignerCountCore(args: SignerCountAuthorityArgs): SignerCountAuthorityResolution {
   const intake = String(args.intakeText ?? "").trim();
+  const namedDumpPartyCount = extractNamedDumpPartyUnits(intake).length;
   const draftNames =
     args.draftPartyNames ??
     (args.draftParties ?? []).map((p) => String(p?.name ?? "").trim()).filter(Boolean);
@@ -337,7 +339,8 @@ function resolveAuthoritativeSignerCountCore(args: SignerCountAuthorityArgs): Si
     entityPool.length >= 3 ||
     manifestPartyCount >= 3 ||
     (partySlotCount >= 3 && draftCount >= 3) ||
-    authoritativeDraftEntities.length >= 3;
+    authoritativeDraftEntities.length >= 3 ||
+    namedDumpPartyCount >= 3;
   // Clear two-party "between A and B" intakes must not flash 3/4 during preview repair when
   // transient party_slot_count inflates from notice/OCR noise. Only promote above 2 when intake
   // itself (labels/quotes/entity pool/frozen SoT) authoritatively describes 3+ parties.
@@ -363,6 +366,7 @@ function resolveAuthoritativeSignerCountCore(args: SignerCountAuthorityArgs): Si
     betweenDeduped.length <= 2 &&
     authoritativeDraftEntities.length <= 2;
   if (
+    namedDumpPartyCount < 3 &&
     (intakeClearlyTwoParty || draftClearlyTwoPartyCommercial) &&
     count > 2 &&
     explicitManifestPartyCount < 3
@@ -370,6 +374,7 @@ function resolveAuthoritativeSignerCountCore(args: SignerCountAuthorityArgs): Si
     count = 2;
     source = "party_slot_count";
   } else if (
+    namedDumpPartyCount < 3 &&
     betweenDeduped.length === 2 &&
     !explicitMultiParty &&
     count > 2 &&
@@ -398,6 +403,11 @@ function resolveAuthoritativeSignerCountCore(args: SignerCountAuthorityArgs): Si
   if (paidProSoTActive && frozenManifestCount >= 3 && count < frozenManifestCount) {
     count = frozenManifestCount;
     source = labeledCount >= frozenManifestCount ? "labeled_parties" : "party_slot_count";
+  }
+
+  if (namedDumpPartyCount >= 3 && count < namedDumpPartyCount) {
+    count = namedDumpPartyCount;
+    source = "party_slot_count";
   }
 
   let finalCount = Math.max(2, Math.min(count, PAID_PRO_AUTHORITY_MAX_PARTIES));

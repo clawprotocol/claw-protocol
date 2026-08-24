@@ -319,6 +319,59 @@ export function extractNamedDumpPartyUnits(raw: string): string[] {
   return out;
 }
 
+const PAID_RESTORE_NAMED_DUMP_MIN = 3;
+const PAID_RESTORE_NAMED_DUMP_MAX = 4;
+
+/**
+ * After pay, 3+ named dump units are the deal. Empty when the dump is a true
+ * 2-party hiring pair — callers must leave that path alone.
+ */
+export function namedDumpPartiesForPaidRestore(raw: string): string[] {
+  const units = extractNamedDumpPartyUnits(raw);
+  if (units.length < PAID_RESTORE_NAMED_DUMP_MIN) return [];
+  return units.slice(0, PAID_RESTORE_NAMED_DUMP_MAX);
+}
+
+function genericPaidRestoreRole(role: string | undefined): boolean {
+  return /^(client|service_provider|service provider)$/i.test((role || "").trim());
+}
+
+/**
+ * Restore / checkout pending drafts must keep Priya / Diego / Maya (or 4 named
+ * units). Never collapse back to Client + Harbor Marks.
+ */
+export function applyNamedDumpPartiesToPaidRestoreDraft(
+  draft: ParsedDraftShape | null,
+  intake: string,
+): ParsedDraftShape | null {
+  const names = namedDumpPartiesForPaidRestore(intake);
+  if (names.length < PAID_RESTORE_NAMED_DUMP_MIN) return draft;
+  const parties = names.map((name, i) => {
+    const prev = draft?.parties?.[i];
+    const role = (prev?.role || "").trim();
+    return {
+      name,
+      role: role && !genericPaidRestoreRole(role) ? role : "party",
+      ...(prev?.id ? { id: prev.id } : {}),
+      ...(prev?.email ? { email: prev.email } : {}),
+    };
+  });
+  if (!draft) {
+    return {
+      title: "SERVICES AGREEMENT",
+      jurisdiction: "",
+      parties,
+      purpose: "",
+      payment_terms: "",
+      duration: null,
+      due_date: null,
+      effective_date: null,
+      payment: { amount: null, cadence: null, valid: false },
+    };
+  }
+  return { ...draft, parties };
+}
+
 function namedHirerAndCompany(
   person: string,
   company: string,

@@ -15,6 +15,7 @@ import {
   type PaidProSignerMetadataSeedResult,
 } from "./paidProSignerMetadataSeed";
 import { resolveAuthoritativeSignerCount } from "./signerCountAuthority";
+import { applyNamedDumpPartiesToPaidRestoreDraft } from "./intakeNamedPartyFallback";
 
 export type CheckoutRestoreMetadataHydrateResult = {
   seed: PaidProSignerMetadataSeedResult | null;
@@ -33,18 +34,19 @@ export function hydrateCanonicalPartyMetadataAfterCheckoutRestore(args: {
     };
   }
 
+  const draft = applyNamedDumpPartiesToPaidRestoreDraft(args.draft, intakeText) ?? args.draft;
   const legalEntities = resolveLegalEntitiesForCanonicalMetadata({
-    legalEntities: (args.draft.parties ?? [])
+    legalEntities: (draft.parties ?? [])
       .map((p) => String((p as { name?: string }).name ?? "").trim())
       .filter(Boolean),
     intakeText,
-    draft: args.draft,
+    draft,
   });
 
   const authoritativePartyCount = Math.min(
     resolveAuthoritativeSignerCount({
       intakeText,
-      draftParties: args.draft.parties,
+      draftParties: draft.parties,
       manifestPartyCount: legalEntities.length,
     }).count,
     4,
@@ -63,7 +65,7 @@ export function hydrateCanonicalPartyMetadataAfterCheckoutRestore(args: {
           stage: "checkout_back_restore_signer_setup",
           legalEntities,
           intakeText,
-          draft: args.draft,
+          draft,
           uiSignerNames: Array.from({ length: authoritativePartyCount }, () => ""),
           uiSignerTitles: Array.from({ length: authoritativePartyCount }, () => ""),
           uiSignerEmails: Array.from({ length: authoritativePartyCount }, () => ""),

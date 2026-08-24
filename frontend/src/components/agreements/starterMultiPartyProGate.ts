@@ -14,6 +14,7 @@ import {
 } from "./legalPartyAuthority";
 import { resolveLegalPartyAuthorityForIntake } from "./legalPartyAuthoritySession";
 import {
+  applyNamedDumpPartiesToPaidRestoreDraft,
   extractCasualNamedCounterparties,
   extractNamedDumpPartyUnits,
   hasFirstPersonVisitor,
@@ -639,10 +640,11 @@ export function logStarterComplexityGateApplied(): void {
 export function buildStarterProCheckoutPendingDraft(rawIntake: string): ParsedDraftShape {
   const intake = rawIntake.trim();
   const gate = assessStarterComplexityGate(intake);
-  if (isThreePlusLegalPartyGate(gate) && gate.parties.length < 3) {
-    return emptyStarterCheckoutPendingShell();
-  }
-  return runIntakeDefaultsAndRoles(emptyStarterCheckoutPendingShell(), intake, true, defaultIntakePartyRoleLabels());
+  const pending =
+    isThreePlusLegalPartyGate(gate) && gate.parties.length < 3
+      ? emptyStarterCheckoutPendingShell()
+      : runIntakeDefaultsAndRoles(emptyStarterCheckoutPendingShell(), intake, true, defaultIntakePartyRoleLabels());
+  return applyNamedDumpPartiesToPaidRestoreDraft(pending, intake) ?? pending;
 }
 
 /** Party lines for the gate summary UI. */
