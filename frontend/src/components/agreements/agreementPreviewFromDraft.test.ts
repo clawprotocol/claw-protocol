@@ -45,15 +45,15 @@ describe("buildAgreementPreviewText", () => {
     expect(t).not.toMatch(/executed electronically via LawDog/i);
   });
 
-  it("omits additional-terms section when empty and uses neutral termination placeholder", () => {
+  it("omits additional-terms section when empty and uses concrete default termination", () => {
     const sparse: ParsedDraftShape = {
       ...minimal,
       termination_summary: "",
       additional_terms: "",
     };
     const t = buildAgreementPreviewText(sparse);
-    // Neutral termination note must be ABOUT termination, not about compensation/payment.
-    expect(t).toContain("Termination terms to be agreed");
+    expect(t).toMatch(/material breach/i);
+    expect(t).not.toContain("Termination terms to be agreed");
     expect(t).not.toContain("Compensation and payment terms shall be defined as agreed");
     expect(t).not.toContain("6. Additional Terms");
   });

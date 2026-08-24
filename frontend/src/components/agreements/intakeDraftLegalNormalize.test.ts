@@ -77,4 +77,12 @@ describe("normalizeParsedDraftLegalConcepts", () => {
     expect(out.duration?.toLowerCase()).toContain("ongoing");
     expect(out.termination_summary?.toLowerCase()).toMatch(/either party|notice/);
   });
+
+  it("fills concrete default termination when intake omits explicit notice terms", () => {
+    const raw =
+      "Priya Shah of Northline Studio is hiring Diego Alvarez of Harbor Marks LLC for a logo and brand kit, 2400 dollars due on signing, 30 days starting August 24 2026, Texas law.";
+    const out = normalizeParsedDraftLegalConcepts(baseDraft(), raw);
+    expect(out.termination_summary).toMatch(/material breach/i);
+    expect(out.termination_summary).not.toMatch(/to be agreed/i);
+  });
 });

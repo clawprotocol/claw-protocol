@@ -340,11 +340,11 @@ describe("internal-review wording sanitizer", () => {
     expect(out).not.toMatch(/Party B \(edit in review\)/);
   });
 
-  it("starter preview: NEUTRAL_TERMINATION_NOTE no longer contains 'in review' wording", () => {
+  it("starter preview: empty termination uses concrete default, not 'in review' or 'to be agreed' wording", () => {
     const result = runStarter("Quick deal between Foo and Bar.");
     const out = preview(result);
-    // Termination section is rendered when the field is empty.
-    expect(out).toMatch(/Termination terms to be agreed by the Parties/i);
+    expect(out).toMatch(/material breach/i);
+    expect(out).not.toMatch(/Termination terms to be agreed by the Parties/i);
     expect(out).not.toMatch(/Termination[^.]*in review/i);
   });
 

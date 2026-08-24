@@ -38,6 +38,8 @@ import {
   compressTerminationSummaryForStarter,
   isJurisdictionDisplayLowConfidence,
   sanitizeJurisdictionForStarterGoverningLaw,
+  STARTER_DEFAULT_TERMINATION_SUMMARY,
+  terminationSummaryIsUnset,
 } from "./starterAgreementPreviewNormalize";
 import {
   sanitizeStarterPartyNameForDisplay,
@@ -97,11 +99,6 @@ import { tryReadPaidProFrozenPreviewPlain } from "./paidProPostAcceptancePreview
 import { logLawdogOutputPathMap } from "./lawdogOutputPathMap";
 
 const MISSING = "[Not yet specified]";
-/**
- * Neutral placeholder for termination when intake had no explicit termination/notice signal.
- * Keep this strictly about TERMINATION (not compensation) to avoid cross-section contamination.
- */
-const NEUTRAL_TERMINATION_NOTE = "Termination terms to be agreed by the Parties.";
 
 function nz(s: string | null | undefined): string {
   const t = (s || "").trim();
@@ -818,11 +815,11 @@ export function buildAgreementPreviewTextCore(
   const termNoticePrepared = premiumDeliverable
     ? applyPremiumDeliverableWeakPhraseReplacements(stripPreviewEsignNoticeLines(termNoticeRaw))
     : termNoticeRaw;
-  const termNotice = termNoticePrepared
-    ? starterPreview
-      ? compressTerminationSummaryForStarter(termNoticePrepared) || NEUTRAL_TERMINATION_NOTE
-      : nz(termNoticePrepared)
-    : NEUTRAL_TERMINATION_NOTE;
+  const termNotice = terminationSummaryIsUnset(termNoticeRaw)
+    ? STARTER_DEFAULT_TERMINATION_SUMMARY
+    : starterPreview
+      ? compressTerminationSummaryForStarter(termNoticePrepared) || STARTER_DEFAULT_TERMINATION_SUMMARY
+      : nz(termNoticePrepared);
   const more = sanitizeUserAdditionalTerms(draftForBuild.additional_terms, premiumDeliverable);
 
   const introGeneral = starterPreview

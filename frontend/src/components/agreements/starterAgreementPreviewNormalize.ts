@@ -6,6 +6,36 @@
 /** Shown when governing-law inference is weak or malformed — calm copy, not legal advice. */
 export const STARTER_GOVERNING_LAW_DISPLAY_FALLBACK = "To be agreed by the parties unless otherwise agreed";
 
+/**
+ * Deterministic starter termination when intake omits explicit notice/breach terms.
+ * Neutral commercial default — not legal advice; avoids "to be agreed" send-ready contradiction.
+ */
+export const STARTER_DEFAULT_TERMINATION_SUMMARY =
+  "Either party may terminate this Agreement for material breach not cured within thirty (30) days after written notice, or for convenience upon thirty (30) days prior written notice to the other party.";
+
+export function terminationSummaryIsUnset(raw: string | null | undefined): boolean {
+  const t = (raw || "").trim();
+  if (!t) return true;
+  if (/^not\s+set\b/i.test(t)) return true;
+  if (/^\[not/i.test(t)) return true;
+  if (/^tbd$/i.test(t)) return true;
+  if (/^terms to be agreed/i.test(t)) return true;
+  if (/^termination terms to be agreed/i.test(t)) return true;
+  return false;
+}
+
+/** True when the rendered starter preview still carries unresolved termination placeholder language. */
+export function starterPreviewHasUnresolvedTerminationPlaceholder(text: string): boolean {
+  const t = (text || "").trim();
+  if (!t) return false;
+  const section =
+    t.match(/\b\d+\.\s*Termination\b[\s\S]*?(?=\n\s*\d+\.\s|\n*$)/i)?.[0] ||
+    t.match(/\bTermination\b[\s\S]{0,400}/i)?.[0] ||
+    "";
+  const probe = section || t;
+  return /\b(?:termination\s+terms\s+)?to be agreed\b/i.test(probe);
+}
+
 const US_STATE_LOWER = new Set([
   "alabama",
   "alaska",

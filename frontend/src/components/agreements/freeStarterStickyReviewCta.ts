@@ -16,6 +16,7 @@ import {
   partyNamesResolvedViaRenderedPreview,
   type DraftReviewFirstBlocker,
 } from "./reviewPlaceholderGuard";
+import { starterPreviewHasUnresolvedTerminationPlaceholder } from "./starterAgreementPreviewNormalize";
 
 export const FREE_STARTER_FIX_DETAILS_LABEL = "Fix details";
 export const FREE_STARTER_ADD_PARTY_NAMES_LABEL = "Add party names";
@@ -71,6 +72,7 @@ export function resolveFreeStarterStickyReviewCta(args: {
     draft && bodyHasDumpStatedTwoPartyNames(intakeText, visible),
   );
   const askedTenetsInBody = bodyHasAskedCommercialTenets(visible);
+  const unresolvedTerminationPlaceholder = starterPreviewHasUnresolvedTerminationPlaceholder(visible || "");
 
   const firstBlocker = draft
     ? getDraftFirstReviewBlocker(draft, {
@@ -93,7 +95,11 @@ export function resolveFreeStarterStickyReviewCta(args: {
   // Universal: dump-stated names already on the visitor-visible page.
   // Empty Party 1/2 slots, generic title, or payment/term/law that landed in
   // the body must not keep the sticky button on Fix details / Add party names.
-  if (dumpStatedPartiesPainted && firstBlocker !== "identity_placeholder_in_corpus") {
+  if (
+    dumpStatedPartiesPainted &&
+    firstBlocker !== "identity_placeholder_in_corpus" &&
+    !unresolvedTerminationPlaceholder
+  ) {
     return {
       reviewIncomplete: false,
       firstBlocker: askedTenetsInBody || firstBlocker === "other_placeholder" ? null : firstBlocker,
@@ -107,6 +113,7 @@ export function resolveFreeStarterStickyReviewCta(args: {
     draft &&
       (partyNamesIncompleteForProgress ||
         firstBlocker === "identity_placeholder_in_corpus" ||
+        unresolvedTerminationPlaceholder ||
         (!args.limitedReviewIgnoresGenericTitleOnly && firstBlocker === "other_placeholder")),
   );
 

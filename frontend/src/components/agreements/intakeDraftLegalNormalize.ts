@@ -5,6 +5,10 @@
 import { extractIntakePayment, formatPaymentTermsLine } from "./intakeCurrencyParse";
 import { parseIntakeToStructuredAgreement } from "./intakeStructuredAgreementModel";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
+import {
+  STARTER_DEFAULT_TERMINATION_SUMMARY,
+  terminationSummaryIsUnset,
+} from "./starterAgreementPreviewNormalize";
 
 const MONTH_MAP: Record<string, number> = {
   january: 1,
@@ -134,13 +138,8 @@ function rawHasAtWill(raw: string): boolean {
   return /\bat[\s-]?will\b/.test(t) || /\bat\s+will\s+agreement\b/.test(t) || /\bat-will\b/.test(t);
 }
 
-function terminationSummaryIsUnset(parsed: ParsedDraftShape): boolean {
-  const t = (parsed.termination_summary || "").trim();
-  if (!t) return true;
-  if (/^not\s+set\b/i.test(t)) return true;
-  if (/^\[not/i.test(t)) return true;
-  if (/^tbd$/i.test(t)) return true;
-  return false;
+function draftTerminationSummaryIsUnset(parsed: ParsedDraftShape): boolean {
+  return terminationSummaryIsUnset(parsed.termination_summary);
 }
 
 /** When intake clearly describes termination notice but duration still looks like a notice period. */
@@ -161,7 +160,7 @@ function reconcileTerminationNoticeMisroute(parsed: ParsedDraftShape, rawIntake:
 
   let next: ParsedDraftShape = { ...parsed };
   const dur = (next.duration || "").trim();
-  const tsWeak = terminationSummaryIsUnset(next);
+  const tsWeak = draftTerminationSummaryIsUnset(next);
 
   const dayUnitOnly = /^\d+\s*days?$/i.test(dur);
   const dayPlusExec =
@@ -195,7 +194,7 @@ function backfillTerminationSummaryFromIntake(parsed: ParsedDraftShape, rawIntak
   if (parsed.agreement_family === "operating_agreement") return parsed;
   const raw = collapseWs(rawIntake);
   if (!raw) return parsed;
-  if (!terminationSummaryIsUnset(parsed)) return parsed;
+  if (!draftTerminationSummaryIsUnset(parsed)) return parsed;
   const syn = parseIntakeToStructuredAgreement(raw).termination.trim();
   if (!syn) return parsed;
   return { ...parsed, termination_summary: syn };
@@ -285,6 +284,9 @@ export function normalizeParsedDraftLegalConcepts(parsed: ParsedDraftShape, rawI
   next = backfillTerminationSummaryFromIntake(next, raw);
   next = softenGenericDurationWhenTerminationRich(next, raw);
   next = applyPersonalLoanInstallmentWordingFromIntake(next, raw);
+  if (draftTerminationSummaryIsUnset(next)) {
+    next = { ...next, termination_summary: STARTER_DEFAULT_TERMINATION_SUMMARY };
+  }
 
   return next;
 }
