@@ -1411,6 +1411,33 @@ export function resolveEditableSignerLegalEntityForSlot(args: {
   return canonical;
 }
 
+/** Visible party heading must match the editable legal-entity input for bilateral slots. */
+export function resolveSignerSetupPartyHeadingLine(args: {
+  slotIndex: number;
+  legalEntityValue: string;
+  signerRenderSlot?: SignerSetupRenderSlot | null;
+  slotIdentities: readonly SignerSetupPartyIdentity[];
+  fallbackDisplayName?: string;
+  fallbackPartyName?: string;
+}): string {
+  const input = norm(args.legalEntityValue);
+  if ((args.slotIndex === 0 || args.slotIndex === 1) && input) {
+    return input;
+  }
+  return (
+    args.signerRenderSlot?.canonicalLegalEntity?.trim() ||
+    resolveSignerPartyLegalEntityDisplayValue({
+      slotIndex: args.slotIndex,
+      currentInputValue: args.legalEntityValue,
+      slotIdentities: args.slotIdentities,
+      source: "signer_setup_party_line",
+    }) ||
+    args.fallbackDisplayName?.trim() ||
+    args.fallbackPartyName?.trim() ||
+    `Party ${args.slotIndex + 1}`
+  );
+}
+
 export function resolveSignerSetupRenderSlot(args: {
   slotIndex: number;
   slotIdentities: readonly SignerSetupPartyIdentity[];

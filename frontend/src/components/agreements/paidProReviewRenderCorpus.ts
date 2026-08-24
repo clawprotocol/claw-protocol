@@ -351,6 +351,28 @@ export {
 } from "./paidProReviewRenderParties";
 
 /** Shared intake-authority sanitizer for post-payment visible review plain (ForcedRoute / display authority). */
+function stripRedundantRebuildPartyDeclarationAfterCanonicalOpening(text: string): string {
+  if (!/\bentered\s+into\s+as\s+of\b/i.test(text)) return text;
+  return text
+    .replace(
+      /\nThis Agreement\s*\(\s*["']Agreement["']\s*\)\s+is entered into by and between:\s*\n[\s\S]*?\(collectively,\s+the\s+["']Parties["']\)\.\s*(?=\n)/gi,
+      "\n",
+    )
+    .replace(/\n{3,}/g, "\n\n");
+}
+
+function buildIntakeScopeServicesLine(scopeFromIntake: string): string {
+  let scope = scopeFromIntake || "services as described in the parties' communications";
+  if (scope && !/^(?:design|develop|create|build|provide|perform|deliver)\b/i.test(scope)) {
+    if (/\b(?:logo|brand kit|branding|website|app|software)\b/i.test(scope)) {
+      scope = `design ${scope}`;
+    }
+  }
+  return /^(?:design|develop|create|build|provide|perform|deliver)\b/i.test(scope)
+    ? `The Service Provider shall ${scope}.`
+    : `The Service Provider agrees to provide ${scope}.`;
+}
+
 export function sanitizePaidProReviewPlainForIntakeAuthority(
   args: ResolvePaidProReviewRenderPartiesArgs & { text: string },
 ): string {
@@ -385,22 +407,21 @@ export function sanitizePaidProReviewPlainForIntakeAuthority(
     (/\bagrees to provide\b/i.test(sanitized) &&
       partyNames.some((name) => sanitized.toLowerCase().includes(name.toLowerCase()))) ||
     (scopeFromIntake.length > 5 &&
-      !sanitized.toLowerCase().includes(scopeFromIntake.toLowerCase()));
+      !sanitized.toLowerCase().includes(scopeFromIntake.toLowerCase())) ||
+    (scopeFromIntake.length > 5 &&
+      /\bagrees to provide services as described in the parties'? communications\b/i.test(sanitized));
   if (servicesLineBroken) {
-    let scope =
-      scopeFromIntake || "services as described in the parties' communications";
-    if (scope && !/^(?:design|develop|create|build|provide|perform|deliver)\b/i.test(scope)) {
-      if (/\b(?:logo|brand kit|branding|website|app|software)\b/i.test(scope)) {
-        scope = `design ${scope}`;
-      }
-    }
-    const replacement = /^(?:design|develop|create|build|provide|perform|deliver)\b/i.test(scope)
-      ? `The Service Provider shall ${scope}.`
-      : `The Service Provider agrees to provide ${scope}.`;
+    const replacement = buildIntakeScopeServicesLine(scopeFromIntake);
     sanitized = sanitized.replace(
       /The service provider agrees to provide[^\n]+/i,
       replacement,
     );
+    if (!sanitized.includes(replacement)) {
+      sanitized = sanitized.replace(
+        /The Service Provider agrees to provide[^\n]+/i,
+        replacement,
+      );
+    }
     if (!sanitized.includes(replacement)) {
       sanitized = sanitized.replace(
         /The Service Provider shall[^\n]+/i,
@@ -408,6 +429,16 @@ export function sanitizePaidProReviewPlainForIntakeAuthority(
       );
     }
   }
+
+  const partyRecords = canonicalPartyRecordsFromSignerIdentities(
+    authorityPartiesToCanonicalPartyIdentities(parties, { intakeText: intake, draftPartyNames }),
+  );
+  if (partyRecords.length >= 2) {
+    sanitized = stripRedundantRebuildPartyDeclarationAfterCanonicalOpening(sanitized);
+    const dupOpening = repairDuplicateAgreementOpening(sanitized, partyRecords);
+    sanitized = dupOpening.text;
+  }
+
   return sanitized;
 }
 

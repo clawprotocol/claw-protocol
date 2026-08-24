@@ -371,6 +371,7 @@ import {
   PAID_PRO_PREPARE_ESIGN_DECISION_CTA,
   resolveSignerSetupAutoCorrectTarget,
   resolveSignerPartyLegalEntityDisplayValue,
+  resolveSignerSetupPartyHeadingLine,
   resolveSignerSetupRenderSlot,
   resolveSignerSetupPartyIdentities,
   shouldArmPaidProFirstReviewSignerSetupLatch,
@@ -2754,21 +2755,14 @@ function CreateFlowSendRecipientsPanel({
                 partyAddress: partyAddresses[idx],
                 source: "signer_setup_extra_party_render",
               });
-        // Summary line uses sanitized canonical; inputs bind to live user state so edits are not snapped back.
-        const partyLine =
-          (signerRenderSlot?.canonicalLegalEntity ?? "") ||
-          (idx === 0 || idx === 1
-            ? resolveSignerPartyLegalEntityDisplayValue({
-                slotIndex: idx,
-                currentInputValue: legalEntityValue,
-                slotIdentities: signerSetupPartyIdentities,
-                source: "signer_setup_party_line",
-              })
-            : legalEntityValue) ||
-          resolvedLine ||
-          String((party as { name?: string }).name ?? "").trim() ||
-          identity?.displayName?.trim() ||
-          `Party ${idx + 1}`;
+        const partyLine = resolveSignerSetupPartyHeadingLine({
+          slotIndex: idx,
+          legalEntityValue,
+          signerRenderSlot,
+          slotIdentities: signerSetupPartyIdentities,
+          fallbackDisplayName: resolvedLine || identity?.displayName?.trim(),
+          fallbackPartyName: String((party as { name?: string }).name ?? "").trim(),
+        });
         const onEmailChange =
           idx === 0
             ? (v: string) => {
