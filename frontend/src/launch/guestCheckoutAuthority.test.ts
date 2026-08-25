@@ -16,10 +16,12 @@ import {
 describe("guestCheckoutAuthority", () => {
   beforeEach(() => {
     sessionStorage.clear();
+    localStorage.clear();
   });
 
   afterEach(() => {
     sessionStorage.clear();
+    localStorage.clear();
     vi.restoreAllMocks();
   });
 
@@ -107,6 +109,21 @@ describe("guestCheckoutAuthority", () => {
       expect(hasDemoSessionUser()).toBe(true);
       clearDemoSessionUser();
       expect(hasDemoSessionUser()).toBe(false);
+    });
+
+    it("keeps the checkout-created LawDog user across a fresh tab (sessionStorage empty)", () => {
+      const user = createDemoSessionUser({
+        displayName: "Paid LawDog",
+        email: "payer@example.com",
+        settlementReceiptId: "rcpt_dashboard_4242_abcd",
+      });
+      expect(localStorage.getItem("claw_demo_session_user_v1")).toContain("rcpt_dashboard_4242_abcd");
+      sessionStorage.clear();
+      expect(hasDemoSessionUser()).toBe(true);
+      const readUser = readDemoSessionUser();
+      expect(readUser?.id).toBe(user.id);
+      expect(readUser?.settlementReceiptId).toBe("rcpt_dashboard_4242_abcd");
+      expect(readUser?.email).toBe("payer@example.com");
     });
   });
 

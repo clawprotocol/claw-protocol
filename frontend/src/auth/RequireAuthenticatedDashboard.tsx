@@ -51,8 +51,9 @@ export function RequireAuthenticatedDashboard({
     return <>{children}</>;
   }
 
-  // Demo session user: created after simulated POS succeeds, acts as authenticated for the session.
-  // Allows post-checkout return to /app/create for premium completion without login gate.
+  // Checkout-created LawDog user (demo POS + receipt). Same principal persist
+  // already trusts. Existing /app and /app/signatures must list the paid
+  // agreement without a second Sign in. JWT is not required.
   if (hasDemoSessionUser()) {
     return <>{children}</>;
   }
