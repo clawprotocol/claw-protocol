@@ -11,6 +11,10 @@ describe("paidProPostRecipientSetupHandoff", () => {
     expect(s).toContain("[send-flow-vs01-bridge-success]");
     expect(s).toContain("[send-flow-vs01-bridge-failed]");
     expect(s).toContain("tryNavigatePaidProAgreementSenderFirstVs01Esign");
+    expect(s).toContain("tryNavigateGuidedSignatureTrackLocalVs01Esign");
+    expect(s).toContain("resolvePaidSessionSignatureTrackHandoff");
+    expect(s).toContain("mergePaidSessionSignatureTrackDraft");
+    expect(s).toContain("relaxPaidSessionCorpusAssert: options.relaxPaidSessionCorpusAssert");
     expect(s).toContain("assertGuidedProVs01BridgeCorpusReady");
     expect(s).toContain("resolveGuidedVs01SigningHandoffForBridge");
     expect(s).toContain("mergeAgreementDraftWithGuidedSigningHandoff");

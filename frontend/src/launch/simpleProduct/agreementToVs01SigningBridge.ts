@@ -635,6 +635,8 @@ export function buildAgreementVs01BridgeSession(params: {
   reviewerApprovedCleanHandoff?: boolean;
   /** Live recipient setup overlay (N-party + coordinator). */
   recipientSetup?: RecipientSetupEmailInput | null;
+  /** After-pay painted deal may be under the 1500-char VS01 floor. */
+  allowShortAgreementCorpus?: boolean;
 }): AgreementVs01BridgeSession {
   const parties = (params.draft?.parties ?? []) as AgreementParty[];
   const participants = bridgeParticipantsFromDraft(params.draft);
@@ -704,7 +706,9 @@ export function buildAgreementVs01BridgeSession(params: {
         } as const)
       : {}),
     ...(reviewerApproved ? { reviewerApprovedCleanHandoff: true as const } : {}),
-    ...(agreementCorpusText.length >= VS01_SIGNING_CORPUS_MIN_LEN ? { agreementCorpusText } : {}),
+    ...(agreementCorpusText.length >= VS01_SIGNING_CORPUS_MIN_LEN || params.allowShortAgreementCorpus
+      ? { agreementCorpusText }
+      : {}),
     creatorIsParty,
     ...(legalParties.length > 0 ? { legalParties } : {}),
   };
@@ -858,11 +862,15 @@ export async function fetchAgreementVs01SigningSeed(
   draft?: AgreementDraft | null,
   signingCorpusPlain?: string | null,
   signingCorpusSource?: string | null,
+  options?: { includeShortSigningCorpus?: boolean },
 ): Promise<AgreementVs01SigningSeedResult> {
   const id = agreementId.trim();
   if (!id) return { ok: false, reason: "missing_agreement_id" };
   logVs01SigningSeedPreflight(id, draft ?? null, signingCorpusPlain, signingCorpusSource);
   const corpusPayload = (signingCorpusPlain ?? "").trim();
+  const includeCorpus =
+    corpusPayload.length >= VS01_SIGNING_CORPUS_MIN_LEN ||
+    (Boolean(options?.includeShortSigningCorpus) && corpusPayload.length > 0);
   try {
     const res = await fetch(
       `${resolveApiBase().replace(/\/$/, "")}/api/agreements/${encodeURIComponent(id)}/vs01-signing-seed`,
@@ -870,9 +878,7 @@ export async function fetchAgreementVs01SigningSeed(
         method: "POST",
         headers: clawAgreementHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({
-          ...(corpusPayload.length >= VS01_SIGNING_CORPUS_MIN_LEN
-            ? { signing_corpus_plain: corpusPayload }
-            : {}),
+          ...(includeCorpus ? { signing_corpus_plain: corpusPayload } : {}),
         }),
       },
     );
@@ -928,26 +934,41 @@ export async function tryNavigatePaidProAgreementSenderFirstVs01Esign(options: {
   /** Final agreement plain text for VS01 signature-block anchor placement. */
   agreementCorpusText?: string | null;
   guidedSigningHandoff?: GuidedVs01SigningHandoff | null;
+  /** After-pay painted deal: keep short corpus; do not fail-closed on leftover snapshot. */
+  relaxPaidSessionCorpusAssert?: boolean;
 }): Promise<boolean> {
   const id = String(options.agreementId || "").trim();
   if (!id) return false;
+  const relax = Boolean(options.relaxPaidSessionCorpusAssert);
   const resolvedSetup = resolveRecipientSetupForVs01Bridge(
     options.draft,
     options.recipientSetup ?? null,
   );
   const merged = mergeLiveDraftWithRecipientSetupForVs01Bridge(options.draft, resolvedSetup);
   const handoff = options.guidedSigningHandoff ?? null;
-  const mergedWithCorpus = mergeAgreementDraftWithGuidedSigningHandoff(merged ?? ({} as AgreementDraft), handoff);
+  const explicitCorpus = (handoff?.corpusText ?? options.agreementCorpusText ?? "").trim();
+  const mergedWithCorpus =
+    relax && explicitCorpus
+      ? {
+          ...(merged ?? ({} as AgreementDraft)),
+          server_full_document_text: explicitCorpus,
+          premium_full_document_text: explicitCorpus,
+          document_text: explicitCorpus,
+        }
+      : mergeAgreementDraftWithGuidedSigningHandoff(merged ?? ({} as AgreementDraft), handoff);
   const freeBaselinePlain = mergedWithCorpus
     ? buildAgreementPreviewText(merged as unknown as Parameters<typeof buildAgreementPreviewText>[0], {
         starterPreview: true,
       })
     : "";
-  const handoffText = resolveAgreementCorpusForPrepareHandoff({
-    agreementId: id,
-    draft: mergedWithCorpus,
-    bridgeCorpusText: (handoff?.corpusText ?? options.agreementCorpusText ?? "").trim() || null,
-  });
+  const handoffText =
+    relax && explicitCorpus
+      ? explicitCorpus
+      : resolveAgreementCorpusForPrepareHandoff({
+          agreementId: id,
+          draft: mergedWithCorpus,
+          bridgeCorpusText: (handoff?.corpusText ?? options.agreementCorpusText ?? "").trim() || null,
+        });
   const bridgeDraft = buildAgreementVs01BridgeSession({
     agreementId: id,
     vs01DocumentId: "pending",
@@ -956,6 +977,7 @@ export async function tryNavigatePaidProAgreementSenderFirstVs01Esign(options: {
     reviewerApprovedCleanHandoff: Boolean(options.reviewerApprovedCleanHandoff),
     agreementCorpusText: handoffText,
     recipientSetup: resolvedSetup,
+    allowShortAgreementCorpus: relax,
   });
   const corpusResolution = resolveFinalVs01CorpusOrBlock({
     agreementCorpusText: handoffText,
@@ -969,13 +991,20 @@ export async function tryNavigatePaidProAgreementSenderFirstVs01Esign(options: {
     guidedSigningHandoff: handoff,
     signatureRebuilt: handoff?.signatureRebuilt,
   });
-  if (!corpusResolution.allowed) return false;
+  const corpusForSeed =
+    corpusResolution.allowed
+      ? corpusResolution.corpus
+      : relax && handoffText
+        ? handoffText
+        : "";
+  if (!corpusForSeed) return false;
 
   const vs01Seed = await fetchAgreementVs01SigningSeed(
     id,
     mergedWithCorpus,
-    corpusResolution.corpus,
+    corpusForSeed,
     handoff?.source ?? corpusResolution.source,
+    { includeShortSigningCorpus: relax },
   );
   if (!vs01Seed.ok) return false;
   logSignerMetadataBeforeVs01Bridge(merged, resolvedSetup);
@@ -986,8 +1015,9 @@ export async function tryNavigatePaidProAgreementSenderFirstVs01Esign(options: {
     draft: mergedWithCorpus,
     senderFirstLawdogHandoff: true,
     reviewerApprovedCleanHandoff: Boolean(options.reviewerApprovedCleanHandoff),
-    agreementCorpusText: corpusResolution.corpus,
+    agreementCorpusText: corpusForSeed,
     recipientSetup: resolvedSetup,
+    allowShortAgreementCorpus: relax,
   });
   logAgreementVs01BridgePreflight(bridge);
   logVs01BridgeSignerMetadata(bridge);
@@ -1036,28 +1066,41 @@ export function tryNavigateGuidedSignatureTrackLocalVs01Esign(options: {
   recipientSetup?: RecipientSetupEmailInput | null;
   agreementCorpusText?: string | null;
   guidedSigningHandoff?: GuidedVs01SigningHandoff | null;
+  relaxPaidSessionCorpusAssert?: boolean;
 }): GuidedSignatureTrackLocalVs01BridgeResult {
   const id = String(options.localAgreementId || "").trim();
   if (!id) return { ok: false, reason: "missing_local_agreement_id" };
 
   const handoff = options.guidedSigningHandoff ?? null;
   if (!handoff) return { ok: false, reason: "missing_handoff" };
+  const relax = Boolean(options.relaxPaidSessionCorpusAssert);
 
-  const corpusAssert = assertGuidedProVs01BridgeCorpusReady(handoff);
-  if (!corpusAssert.ok) {
-    logGuidedProVs01BridgeCorpusBlocked({
-      agreementId: id,
-      source: options.logReason,
-      reason: corpusAssert.reason,
-      ...corpusAssert.diagnostics,
-    });
-    return { ok: false, reason: corpusAssert.reason ?? "corpus_not_ready" };
+  if (!relax) {
+    const corpusAssert = assertGuidedProVs01BridgeCorpusReady(handoff);
+    if (!corpusAssert.ok) {
+      logGuidedProVs01BridgeCorpusBlocked({
+        agreementId: id,
+        source: options.logReason,
+        reason: corpusAssert.reason,
+        ...corpusAssert.diagnostics,
+      });
+      return { ok: false, reason: corpusAssert.reason ?? "corpus_not_ready" };
+    }
   }
 
   const resolvedSetup = resolveRecipientSetupForVs01Bridge(options.draft, options.recipientSetup ?? null);
   const merged = mergeLiveDraftWithRecipientSetupForVs01Bridge(options.draft, resolvedSetup);
-  const mergedWithCorpus = mergeAgreementDraftWithGuidedSigningHandoff(merged ?? ({} as AgreementDraft), handoff);
-  const handoffText = (handoff.corpusText ?? options.agreementCorpusText ?? "").trim();
+  const explicitCorpus = (handoff.corpusText ?? options.agreementCorpusText ?? "").trim();
+  const mergedWithCorpus =
+    relax && explicitCorpus
+      ? {
+          ...(merged ?? ({} as AgreementDraft)),
+          server_full_document_text: explicitCorpus,
+          premium_full_document_text: explicitCorpus,
+          document_text: explicitCorpus,
+        }
+      : mergeAgreementDraftWithGuidedSigningHandoff(merged ?? ({} as AgreementDraft), handoff);
+  const handoffText = explicitCorpus;
   const corpusResolution = resolveFinalVs01CorpusOrBlock({
     agreementCorpusText: handoffText,
     guidedSigningHandoff: handoff,
@@ -1066,7 +1109,13 @@ export function tryNavigateGuidedSignatureTrackLocalVs01Esign(options: {
     premiumComplete: handoffText.length >= VS01_SIGNING_CORPUS_MIN_LEN,
     signatureRebuilt: handoff.signatureRebuilt,
   });
-  if (!corpusResolution.allowed) return { ok: false, reason: "corpus_gate_blocked" };
+  const corpusForBridge =
+    corpusResolution.allowed
+      ? corpusResolution.corpus
+      : relax && handoffText
+        ? handoffText
+        : "";
+  if (!corpusForBridge) return { ok: false, reason: "corpus_gate_blocked" };
 
   writeGuidedVs01SigningHandoffSession(handoff);
 
@@ -1080,8 +1129,9 @@ export function tryNavigateGuidedSignatureTrackLocalVs01Esign(options: {
     vs01DocumentId: documentId,
     draft: mergedWithCorpus,
     senderFirstLawdogHandoff: true,
-    agreementCorpusText: corpusResolution.corpus,
+    agreementCorpusText: corpusForBridge,
     recipientSetup: resolvedSetup,
+    allowShortAgreementCorpus: relax,
   });
   logAgreementVs01BridgePreflight(bridge);
   logVs01BridgeSignerMetadata(bridge);

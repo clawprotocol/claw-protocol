@@ -31690,7 +31690,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             persistOk: ok,
             agreementId: id,
             corpusText,
-            handoffReady: handoffAssert.ok,
+            handoffReady: handoffAssert.ok || relaxPaidSessionSignatureGates,
+            minCorpusLen: relaxPaidSessionSignatureGates
+              ? PAID_PRO_FALLBACK_REBUILD_MIN_LEN
+              : undefined,
           }) &&
           isGuidedSignatureDraftPersistLocallyContinuable(
             signaturePersistFailure?.httpStatus,
@@ -31730,6 +31733,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             logReason: "guided_signature_track_local_bridge",
             agreementCorpusText: corpusText,
             guidedSigningHandoff: vs01Handoff,
+            relaxPaidSessionCorpusAssert: relaxPaidSessionSignatureGates,
           });
           if (localBridge.ok) {
             logGuidedSignatureTrackLocalBridgeSuccess({

@@ -229,6 +229,44 @@ export function shouldRelaxPaidSessionSignatureTrackGates(args: {
   );
 }
 
+/** Same floor as after-pay painted deal / review-link mint. */
+export const PAID_SESSION_SIGNATURE_TRACK_MIN_CORPUS_LEN = 200;
+
+/**
+ * After-pay Send for signature must keep the painted-deal handoff.
+ * The 1500-char session reader drops short rebuilds and can revive a leftover
+ * "Links created" packet. Do not fall through to that leftover when relax is on.
+ */
+export function resolvePaidSessionSignatureTrackHandoff<T extends { corpusText?: string | null }>(args: {
+  relaxPaidSessionCorpusAssert: boolean;
+  explicitHandoff: T | null | undefined;
+  leftoverSessionHandoff?: T | null;
+  minLen?: number;
+}): T | null {
+  const explicit = args.explicitHandoff?.corpusText?.trim() ?? "";
+  const minLen = Math.max(1, args.minLen ?? PAID_SESSION_SIGNATURE_TRACK_MIN_CORPUS_LEN);
+  if (args.relaxPaidSessionCorpusAssert) {
+    return explicit.length >= minLen ? (args.explicitHandoff ?? null) : null;
+  }
+  if (explicit.length >= 1500) return args.explicitHandoff ?? null;
+  return args.leftoverSessionHandoff ?? null;
+}
+
+/** Pin the painted deal onto the draft so VS01 seed does not require a 1500-char snapshot. */
+export function mergePaidSessionSignatureTrackDraft<T extends Record<string, unknown>>(
+  draft: T,
+  corpusText: string,
+): T {
+  const corpus = corpusText.trim();
+  if (corpus.length < PAID_SESSION_SIGNATURE_TRACK_MIN_CORPUS_LEN) return draft;
+  return {
+    ...draft,
+    server_full_document_text: corpus,
+    premium_full_document_text: corpus,
+    document_text: corpus,
+  };
+}
+
 /**
  * Final review may display a short, signer-pinned after-pay rebuild even when
  * the stricter canonical-corpus resolver reports it unavailable. Match the

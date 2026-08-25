@@ -1,0 +1,232 @@
+/** @vitest-environment jsdom */
+/**
+ * After-pay Send for signature: painted deal is <1500 chars. The existing
+ * 1500-char session reader / VS01 corpus gate dropped it, revived a leftover
+ * "Links created" packet, and fail-closed with "We could not open the e-sign workspace."
+ */
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { buildGuidedVs01SigningHandoff } from "../../components/agreements/guidedDealCompletion/guidedVs01SigningHandoff";
+import {
+  writeGuidedVs01SigningHandoffSession,
+  clearGuidedVs01SigningHandoffSession,
+} from "../../components/agreements/guidedDealCompletion/guidedVs01SigningHandoffSession";
+import { executePaidProPostRecipientSetupHandoff } from "./paidProPostRecipientSetupHandoff";
+import {
+  clearAgreementVs01BridgeSession,
+  readAgreementVs01BridgeSession,
+} from "./agreementToVs01SigningBridge";
+import type { AgreementDraft } from "../../agreement/agreementTypes";
+
+const PAINTED =
+  "SERVICES AGREEMENT\n\nThis Agreement is entered into by Priya Shah of Northline Studio and Diego Alvarez of Harbor Marks LLC to design a logo and brand kit. Payment $2,400 due on signing. Term 30 days. Governing law: Texas.";
+
+const LEFTOVER =
+  `${"LEFTOVER LINKS CREATED PACKET — stale review snapshot. ".repeat(40)}\nBy: ________________\nBy: ________________`;
+
+function paintedDraft(): AgreementDraft {
+  return {
+    id: "ag_after_pay_priya_diego",
+    title: "SERVICES AGREEMENT",
+    jurisdiction: "Texas",
+    parties: [
+      {
+        name: "Priya Shah of Northline Studio",
+        role: "owner",
+        email: "priya.shah.qa@example.com",
+        signerName: "Priya Shah",
+      },
+      {
+        name: "Diego Alvarez of Harbor Marks LLC",
+        role: "signer",
+        email: "diego.alvarez.qa@example.com",
+        signerName: "Diego Alvarez",
+      },
+    ],
+  } as AgreementDraft;
+}
+
+describe("after-pay Send for signature opens existing e-sign workspace", () => {
+  beforeEach(() => {
+    sessionStorage.clear();
+    clearGuidedVs01SigningHandoffSession();
+    clearAgreementVs01BridgeSession();
+    vi.unstubAllGlobals();
+  });
+
+  afterEach(() => {
+    clearGuidedVs01SigningHandoffSession();
+    clearAgreementVs01BridgeSession();
+    vi.unstubAllGlobals();
+  });
+
+  it("keeps the painted deal and opens /app/esign when leftover packet + seed fail", async () => {
+    expect(PAINTED.length).toBeGreaterThanOrEqual(200);
+    expect(PAINTED.length).toBeLessThan(1500);
+    expect(LEFTOVER.length).toBeGreaterThanOrEqual(1500);
+
+    writeGuidedVs01SigningHandoffSession(
+      buildGuidedVs01SigningHandoff({
+        corpusText: LEFTOVER,
+        source: "finalized_signer_applied_guided_corpus",
+        recipientEmails: ["stale@example.com"],
+      }),
+    );
+
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 404,
+        json: async () => ({ detail: { code: "agreement_not_found" } }),
+      }),
+    );
+
+    const routes: string[] = [];
+    const paintedHandoff = buildGuidedVs01SigningHandoff({
+      corpusText: PAINTED,
+      source: "finalized_signer_applied_guided_corpus",
+      recipientEmails: ["priya.shah.qa@example.com", "diego.alvarez.qa@example.com"],
+    });
+
+    const result = await executePaidProPostRecipientSetupHandoff({
+      navigate: (to) => {
+        routes.push(to);
+      },
+      agreementId: "ag_after_pay_priya_diego",
+      draft: paintedDraft(),
+      premiumSendIntent: "signature",
+      logSource: "test_after_pay_send_for_signature",
+      agreementCorpusText: PAINTED,
+      guidedSigningHandoff: paintedHandoff,
+      relaxPaidSessionCorpusAssert: true,
+    });
+
+    expect(result.ok, result.ok ? "" : result.failure.userMessage).toBe(true);
+    if (result.ok) expect(result.destination).toBe("vs01");
+    expect(routes.length).toBe(1);
+    expect(routes[0]).toMatch(/^\/app\/esign\/[^?]+\?agreement_bridge=1$/);
+    const bridge = readAgreementVs01BridgeSession();
+    expect(bridge?.agreementCorpusText).toBe(PAINTED);
+    expect(bridge?.agreementCorpusText).not.toContain("LEFTOVER LINKS CREATED");
+    expect(bridge?.senderFirstLawdogHandoff).toBe(true);
+  });
+
+  it("opens /app/esign from painted corpus alone on a second dump (no leftover / no explicit handoff)", async () => {
+    const secondDump =
+      "SERVICES AGREEMENT\n\nMarcus Thompson of Apex Consulting Group engages Elena Rodriguez of Brightwave Marketing Agency for a strategic marketing campaign. Payment $5,500. Term 8 weeks. Governing law: California.";
+    expect(secondDump.length).toBeGreaterThanOrEqual(200);
+    expect(secondDump.length).toBeLessThan(1500);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 404,
+        json: async () => ({ detail: { code: "agreement_not_found" } }),
+      }),
+    );
+    const routes: string[] = [];
+    const result = await executePaidProPostRecipientSetupHandoff({
+      navigate: (to) => {
+        routes.push(to);
+      },
+      agreementId: "ag_after_pay_marcus_elena",
+      draft: {
+        id: "ag_after_pay_marcus_elena",
+        title: "SERVICES AGREEMENT",
+        jurisdiction: "California",
+        parties: [
+          {
+            name: "Marcus Thompson of Apex Consulting Group",
+            role: "owner",
+            email: "marcus.thompson.qa@example.com",
+            signerName: "Marcus Thompson",
+          },
+          {
+            name: "Elena Rodriguez of Brightwave Marketing Agency",
+            role: "signer",
+            email: "elena.rodriguez.qa@example.com",
+            signerName: "Elena Rodriguez",
+          },
+        ],
+      } as AgreementDraft,
+      premiumSendIntent: "signature",
+      logSource: "test_after_pay_send_for_signature_second_dump",
+      agreementCorpusText: secondDump,
+      relaxPaidSessionCorpusAssert: true,
+    });
+    expect(result.ok, result.ok ? "" : result.failure.userMessage).toBe(true);
+    expect(routes[0]).toMatch(/^\/app\/esign\/[^?]+\?agreement_bridge=1$/);
+    expect(readAgreementVs01BridgeSession()?.agreementCorpusText).toBe(secondDump);
+  });
+
+  it.each([
+    {
+      count: 3,
+      id: "ag_after_pay_three_party",
+      corpus:
+        "SERVICES AGREEMENT\n\nThis Agreement is entered into by Priya Shah, Diego Alvarez, and Maya Chen for a three-party brand collaboration. Payment $3,000. Term 45 days. Governing law: Texas. Each party will sign. The Service Provider delivers a logo and brand kit.",
+      parties: [
+        { name: "Priya Shah", role: "owner", email: "priya.shah.qa@example.com", signerName: "Priya Shah" },
+        { name: "Diego Alvarez", role: "signer", email: "diego.alvarez.qa@example.com", signerName: "Diego Alvarez" },
+        { name: "Maya Chen", role: "signer", email: "maya.chen.qa@example.com", signerName: "Maya Chen" },
+      ],
+    },
+    {
+      count: 4,
+      id: "ag_after_pay_four_party",
+      corpus:
+        "SERVICES AGREEMENT\n\nThis Agreement is entered into by Priya Shah, Diego Alvarez, Maya Chen, and Jordan Lee for a four-party brand kit. Payment $4,200. Term 60 days. Governing law: Texas. Each party will sign. The Service Provider delivers marks and guidelines.",
+      parties: [
+        { name: "Priya Shah", role: "owner", email: "priya.shah.qa@example.com", signerName: "Priya Shah" },
+        { name: "Diego Alvarez", role: "signer", email: "diego.alvarez.qa@example.com", signerName: "Diego Alvarez" },
+        { name: "Maya Chen", role: "signer", email: "maya.chen.qa@example.com", signerName: "Maya Chen" },
+        { name: "Jordan Lee", role: "signer", email: "jordan.lee.qa@example.com", signerName: "Jordan Lee" },
+      ],
+    },
+  ] as const)("opens /app/esign for $count complete names+emails without leftover packet", async (fixture) => {
+    expect(fixture.corpus.length).toBeGreaterThanOrEqual(200);
+    expect(fixture.corpus.length).toBeLessThan(1500);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 404,
+        json: async () => ({ detail: { code: "agreement_not_found" } }),
+      }),
+    );
+    const routes: string[] = [];
+    const result = await executePaidProPostRecipientSetupHandoff({
+      navigate: (to) => {
+        routes.push(to);
+      },
+      agreementId: fixture.id,
+      draft: {
+        id: fixture.id,
+        title: "SERVICES AGREEMENT",
+        jurisdiction: "Texas",
+        parties: [...fixture.parties],
+      } as AgreementDraft,
+      premiumSendIntent: "signature",
+      logSource: `test_after_pay_${fixture.count}_party`,
+      agreementCorpusText: fixture.corpus,
+      relaxPaidSessionCorpusAssert: true,
+    });
+    expect(result.ok, result.ok ? "" : result.failure.userMessage).toBe(true);
+    expect(routes[0]).toMatch(/^\/app\/esign\/[^?]+\?agreement_bridge=1$/);
+    expect(readAgreementVs01BridgeSession()?.agreementCorpusText).toBe(fixture.corpus);
+  });
+
+  it("Send for review path is unchanged (does not take the local signature bridge)", async () => {
+    const { readFileSync } = await import("node:fs");
+    const { join } = await import("node:path");
+    const s = readFileSync(join(__dirname, "paidProPostRecipientSetupHandoff.ts"), "utf8");
+    const reviewStart = s.indexOf('if (options.premiumSendIntent === "review")');
+    const signatureStart = s.indexOf("const resolvedHandoff = resolvePaidSessionSignatureTrackHandoff");
+    expect(reviewStart).toBeGreaterThan(-1);
+    expect(signatureStart).toBeGreaterThan(reviewStart);
+    const reviewBlock = s.slice(reviewStart, signatureStart);
+    expect(reviewBlock).toContain("mintAndPersistReviewLinksForHandoff");
+    expect(reviewBlock).not.toContain("tryNavigateGuidedSignatureTrackLocalVs01Esign");
+    expect(reviewBlock).not.toContain("relaxPaidSessionCorpusAssert");
+  });
+});

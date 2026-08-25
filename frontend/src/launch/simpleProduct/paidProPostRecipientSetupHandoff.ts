@@ -2,6 +2,7 @@ import type { AgreementDraft } from "../../agreement/agreementTypes";
 import { fetchAgreementDraft, postReviewSentServer } from "../../agreement/agreementWorkspaceApi";
 import {
   assertGuidedProVs01BridgeCorpusReady,
+  buildGuidedVs01SigningHandoff,
   logGuidedProVs01BridgeCorpusBlocked,
   type GuidedVs01SigningHandoff,
 } from "../../components/agreements/guidedDealCompletion/guidedVs01SigningHandoff";
@@ -16,9 +17,14 @@ import { emitActionCompleted } from "../../joy/joyTelemetry";
 import { markSimpleFlowSent } from "../simpleFlowSent";
 import { writeCreateReviewAgreementResumeId } from "../../components/agreements/agreementIntakeStorage";
 import {
+  tryNavigateGuidedSignatureTrackLocalVs01Esign,
   tryNavigatePaidProAgreementSenderFirstVs01Esign,
   type RecipientSetupEmailInput,
 } from "./agreementToVs01SigningBridge";
+import {
+  mergePaidSessionSignatureTrackDraft,
+  resolvePaidSessionSignatureTrackHandoff,
+} from "../../components/agreements/paidProPaidSessionLanding";
 import {
   peekPaidProStarterSignatureSendFromCreateFlow,
   peekPremiumSenderSignFirst,
@@ -454,9 +460,27 @@ export async function executePaidProPostRecipientSetupHandoff(options: {
     }
   }
 
-  const handoff = resolveGuidedVs01SigningHandoffForBridge(options.guidedSigningHandoff);
-  const draftForBridge = mergeAgreementDraftWithGuidedSigningHandoff(options.draft, handoff);
-  const signingCorpusPlain = (handoff?.corpusText ?? options.agreementCorpusText ?? "").trim();
+  const resolvedHandoff = resolvePaidSessionSignatureTrackHandoff({
+    relaxPaidSessionCorpusAssert: Boolean(options.relaxPaidSessionCorpusAssert),
+    explicitHandoff: options.guidedSigningHandoff,
+    leftoverSessionHandoff: resolveGuidedVs01SigningHandoffForBridge(null),
+  });
+  const signingCorpusPlain = (
+    resolvedHandoff?.corpusText ??
+    options.agreementCorpusText ??
+    ""
+  ).trim();
+  const handoff =
+    resolvedHandoff ??
+    (options.relaxPaidSessionCorpusAssert && signingCorpusPlain
+      ? buildGuidedVs01SigningHandoff({
+          corpusText: signingCorpusPlain,
+          source: "finalized_signer_applied_guided_corpus",
+        })
+      : null);
+  const draftForBridge = options.relaxPaidSessionCorpusAssert
+    ? mergePaidSessionSignatureTrackDraft(options.draft, signingCorpusPlain)
+    : mergeAgreementDraftWithGuidedSigningHandoff(options.draft, handoff);
 
   if (options.premiumSendIntent === "signature" && handoff && !options.relaxPaidSessionCorpusAssert) {
     const corpusAssert = assertGuidedProVs01BridgeCorpusReady(handoff);
@@ -478,6 +502,9 @@ export async function executePaidProPostRecipientSetupHandoff(options: {
         },
       };
     }
+    writeGuidedVs01SigningHandoffSession(handoff);
+  }
+  if (options.relaxPaidSessionCorpusAssert && handoff) {
     writeGuidedVs01SigningHandoffSession(handoff);
   }
 
@@ -502,12 +529,35 @@ export async function executePaidProPostRecipientSetupHandoff(options: {
     recipientSetup: options.recipientSetup ?? null,
     agreementCorpusText: signingCorpusPlain || options.agreementCorpusText,
     guidedSigningHandoff: handoff,
+    relaxPaidSessionCorpusAssert: options.relaxPaidSessionCorpusAssert,
   });
 
   if (vs01Ok) {
     // eslint-disable-next-line no-console
     console.info("[send-flow-vs01-bridge-success]", { agreementId: id, source: options.logSource });
     return { ok: true, destination: "vs01", ownerRoutePath: "" };
+  }
+
+  if (options.relaxPaidSessionCorpusAssert && signingCorpusPlain && handoff) {
+    const localBridge = tryNavigateGuidedSignatureTrackLocalVs01Esign({
+      navigate: options.navigate,
+      localAgreementId: id,
+      draft: draftForBridge,
+      logReason: `${options.logSource}_paid_session_local_bridge`,
+      recipientSetup: options.recipientSetup ?? null,
+      agreementCorpusText: signingCorpusPlain,
+      guidedSigningHandoff: handoff,
+      relaxPaidSessionCorpusAssert: true,
+    });
+    if (localBridge.ok) {
+      // eslint-disable-next-line no-console
+      console.info("[send-flow-vs01-bridge-success]", {
+        agreementId: id,
+        source: options.logSource,
+        localBridge: true,
+      });
+      return { ok: true, destination: "vs01", ownerRoutePath: "" };
+    }
   }
 
   // eslint-disable-next-line no-console

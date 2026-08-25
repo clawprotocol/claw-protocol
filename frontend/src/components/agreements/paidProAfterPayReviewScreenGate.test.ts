@@ -877,7 +877,16 @@ describe("after-pay Send for signature — names+emails start the existing signi
     expect(track).toContain("draftSnapshotRef.current");
     expect(track).not.toMatch(/\bdraftRef\b/);
     expect(track).toContain("relaxPaidSessionCorpusAssert: relaxPaidSessionSignatureGates");
+    expect(track).toContain("handoffReady: handoffAssert.ok || relaxPaidSessionSignatureGates");
     expect(track).toContain("failSignatureTrackVisible");
+
+    const handoffSrc = readFileSync(
+      join(__dirname, "../../launch/simpleProduct/paidProPostRecipientSetupHandoff.ts"),
+      "utf8",
+    );
+    expect(handoffSrc).toContain("resolvePaidSessionSignatureTrackHandoff");
+    expect(handoffSrc).toContain("relaxPaidSessionCorpusAssert: options.relaxPaidSessionCorpusAssert");
+    expect(handoffSrc).toContain("tryNavigateGuidedSignatureTrackLocalVs01Esign");
   });
 
   it("Send for review path is unchanged", () => {

@@ -673,4 +673,23 @@ describe("fetchAgreementVs01SigningSeed", () => {
       expect(r.contentSha256).toHaveLength(64);
     }
   });
+
+  it("includes short painted-deal corpus when includeShortSigningCorpus is set", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ ok: true, document_id: "doc_short", content_sha256: "b".repeat(64) }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const short = "SERVICES AGREEMENT\n\nPriya Shah hires Diego Alvarez to design a logo and brand kit.";
+    expect(short.length).toBeLessThan(1500);
+    const r = await fetchAgreementVs01SigningSeed("ag_short", null, short, "painted", {
+      includeShortSigningCorpus: true,
+    });
+    expect(r.ok).toBe(true);
+    const body = JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body ?? "{}")) as {
+      signing_corpus_plain?: string;
+    };
+    expect(body.signing_corpus_plain).toBe(short);
+  });
 });
