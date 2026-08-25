@@ -350,7 +350,7 @@ describe("paid session landing — dump 2 missing only governing law", () => {
 describe("paid session signature-track handoff — leftover packet vs painted deal", () => {
   const painted = {
     corpusText:
-      "SERVICES AGREEMENT\n\nPriya Shah of Northline Studio hires Diego Alvarez of Harbor Marks LLC to design a logo and brand kit. Payment $2,400. Texas law.",
+      "SERVICES AGREEMENT\n\nThis Agreement is entered into by Priya Shah of Northline Studio and Diego Alvarez of Harbor Marks LLC to design a logo and brand kit. Payment $2,400 due on signing. Term 30 days. Governing law: Texas. The Service Provider will deliver logo marks and a brand kit.",
     source: "painted",
   };
   const leftover = {

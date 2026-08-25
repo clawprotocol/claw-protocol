@@ -116,7 +116,7 @@ describe("after-pay Send for signature opens existing e-sign workspace", () => {
     const { join } = await import("node:path");
     const s = readFileSync(join(__dirname, "paidProPostRecipientSetupHandoff.ts"), "utf8");
     const reviewStart = s.indexOf('if (options.premiumSendIntent === "review")');
-    const signatureStart = s.indexOf("resolvePaidSessionSignatureTrackHandoff");
+    const signatureStart = s.indexOf("const handoff = resolvePaidSessionSignatureTrackHandoff");
     expect(reviewStart).toBeGreaterThan(-1);
     expect(signatureStart).toBeGreaterThan(reviewStart);
     const reviewBlock = s.slice(reviewStart, signatureStart);
