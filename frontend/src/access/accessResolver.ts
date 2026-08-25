@@ -2,6 +2,8 @@ import type { AccessTier, EntitlementSource } from "./types";
 import { TIER_CONFIG } from "./tierConfig";
 import { featureFlags } from "../config/featureFlags";
 import { subscriptionTierForAccess } from "./subscriptionEntitlementCache";
+import { hasDemoSessionUser } from "../launch/guestCheckoutAuthority";
+import { hasPaidPremiumCompletionSession } from "../components/agreements/premiumCompletionStorage";
 
 const VALID_TIERS = new Set(Object.keys(TIER_CONFIG) as AccessTier[]);
 
@@ -57,15 +59,32 @@ export type ResolvedAccess = {
   sourcesTried: EntitlementSource[];
 };
 
+function checkoutCreatedLawdogProTier(): AccessTier | null {
+  try {
+    if (hasDemoSessionUser() || hasPaidPremiumCompletionSession()) {
+      return "premium";
+    }
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
+
 /**
- * Ordered resolver: dev query → dev localStorage → build env → default free.
- * Later: prepend backend session, subscription, wallet, credits (return first hit).
+ * Ordered resolver: checkout-created Pro → server subscription → dev overrides → default free.
+ * TEST after-pay / demo checkout uses the existing Pro entitlements (no new SKU).
  */
 export function resolveAccess(): ResolvedAccess {
   const sourcesTried: EntitlementSource[] = [
     { id: "future_backend", tier: null },
     { id: "future_wallet", tier: null },
   ];
+
+  const checkoutPro = checkoutCreatedLawdogProTier();
+  if (checkoutPro) {
+    sourcesTried.unshift({ id: "checkout_created_lawdog", tier: checkoutPro });
+    return { tier: checkoutPro, sourcesTried };
+  }
 
   if (featureFlags.serverBilling) {
     const subTier = subscriptionTierForAccess();

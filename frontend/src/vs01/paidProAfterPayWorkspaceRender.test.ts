@@ -278,6 +278,13 @@ describe("after-pay workspace renders painted agreement (not load-error)", () =>
     expect(wizard).toContain("fetchDocumentEsignHandoff");
     expect(wizard).toContain("paidSessionDurablePacket");
     expect(wizard).toContain("completeBridgePreparePacket()");
+    const dispatchAt = wizard.indexOf("const delivery = await dispatchSigningInvitesFromHandoff");
+    expect(dispatchAt).toBeGreaterThan(0);
+    const failAt = wizard.indexOf("if (!delivery.ok)", dispatchAt);
+    const markAt = wizard.indexOf("markAgreementPacketPrepared(linkedAgreementId);", dispatchAt);
+    expect(failAt).toBeGreaterThan(0);
+    expect(markAt).toBeGreaterThan(failAt);
+    expect(wizard.slice(failAt, failAt + 280)).toContain("Signing links could not be persisted");
     const prepareSrc = readFileSync(join(__dirname, "StepPrepareSignature.tsx"), "utf8");
     expect(prepareSrc).toContain("shouldAutoDispatchPaidProPrepareContinue");
     expect(wizard).not.toMatch(

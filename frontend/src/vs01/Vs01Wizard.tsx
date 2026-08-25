@@ -682,6 +682,10 @@ export function Vs01Wizard({
           return;
         }
       }
+      if (!portablePacket) {
+        setError("The signing packet could not be built. Signing links were not sent.");
+        return;
+      }
       const delivery = await dispatchSigningInvitesFromHandoff(result.handoff, roles, {
         portablePacket,
         documentId: did,
@@ -697,6 +701,14 @@ export function Vs01Wizard({
         acceptedSoTDigestShort:
           portablePacket?.envelopeProvenance?.acceptedSoTDigest?.slice(0, 16) ?? null,
       });
+      if (!delivery.ok) {
+        setError(
+          delivery.skipReason
+            ? `Signing links could not be persisted (${delivery.skipReason}).`
+            : "Signing links could not be persisted.",
+        );
+        return;
+      }
       markAgreementPacketPrepared(linkedAgreementId);
       clearAgreementVs01BridgeSession();
       clearPaidProAgreementBridgeSkipMarker();

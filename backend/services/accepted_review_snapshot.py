@@ -182,13 +182,41 @@ def _document_has_after_pay_esign_handoff(document_id: Optional[str]) -> bool:
     return isinstance(handoff, dict) and bool(handoff)
 
 
+def _packet_authority_mode(draft: Any) -> str:
+    if isinstance(draft, dict):
+        packet = draft.get("vs01_signing_packet_v1")
+    else:
+        packet = getattr(draft, "vs01_signing_packet_v1", None)
+    if not isinstance(packet, dict):
+        return ""
+    return _clean(packet.get("authority_mode") or packet.get("authorityMode"))
+
+
+def _draft_has_after_pay_ceremony_stamp(draft: Any) -> bool:
+    """vs01-signing-seed stamps the draft so persist does not depend on document-meta reads."""
+    if isinstance(draft, dict):
+        raw = draft.get("after_pay_ceremony_v1")
+    else:
+        raw = getattr(draft, "after_pay_ceremony_v1", None)
+    if not isinstance(raw, dict):
+        return False
+    return bool(_clean(raw.get("document_id")) or raw.get("v"))
+
+
 def is_pure_legacy_pre_cutover(draft: Any) -> bool:
     """
-    True only for sealed packets that never entered the snapshot authority system.
+    True for sealed packets that are not bound to an accepted review snapshot.
 
-    Post-cutover commercial drafts (flag set or any registry snapshots) are never legacy.
-    After the first after-pay persist, the stored packet is this continuation path.
+    After-pay first persist stores ``legacy_packet_pre_snapshot`` even when first-review
+    paint created a pending (never-accepted) snapshot. That stored mode is the
+    continuation path for private-link Finish signing.
+
+    Post-cutover commercial packets without that mode still require accept.
     """
+    if get_accepted_snapshot_record(draft):
+        return False
+    if _packet_authority_mode(draft) == AUTHORITY_MODE_LEGACY_PACKET:
+        return True
     if not _no_snapshot_authority_registry(draft):
         return False
     return _packet_portable(draft) is not None
@@ -198,16 +226,18 @@ def allows_first_ceremony_packet_without_accepted_snapshot(
     draft: Any, *, document_id: Optional[str] = None
 ) -> bool:
     """
-    After-pay painted deals never enter review-accept. The first Send signing links
-    persist must still store the existing ceremony packet so a private signing link
-    can hydrate fields.
+    After-pay painted deals never accept a review snapshot. Send signing links
+    must still persist the existing ceremony packet so a private signing link
+    can hydrate fields and Finish signing.
 
-    Commercial drafts without a snapshot stay fail-closed unless the document is an
-    after-pay esign handoff (or a packet was already sealed on this path).
+    A pending snapshot (first-review paint ≥500 chars) must not block that persist.
+    Commercial review-then-sign without after-pay seed/handoff stays fail-closed.
     """
-    if not _no_snapshot_authority_registry(draft):
+    if get_accepted_snapshot_record(draft):
         return False
     if _packet_portable(draft) is not None:
+        return True
+    if _draft_has_after_pay_ceremony_stamp(draft):
         return True
     return _document_has_after_pay_esign_handoff(document_id)
 
@@ -558,6 +588,7 @@ def bind_portable_to_accepted_snapshot(
     draft: Any,
     portable: Dict[str, Any],
     require_accepted: bool = True,
+    document_id: Optional[str] = None,
 ) -> Tuple[bool, Optional[str], Optional[Dict[str, Any]], Optional[str]]:
     """
     Enforce accepted-snapshot authority on a portable packet.
@@ -636,10 +667,10 @@ def bind_portable_to_accepted_snapshot(
             return False, "legacy_packet_requires_reattestation", None, AUTHORITY_MODE_LEGACY_PACKET
         return False, "accepted_review_snapshot_required", None, AUTHORITY_MODE_ACCEPTED_SNAPSHOT
 
-    # Continuation-only legacy path, or first after-pay packet persist (no snapshot registry).
+    # Continuation-only legacy path, or first after-pay packet persist.
     if not (
         is_pure_legacy_pre_cutover(draft)
-        or allows_first_ceremony_packet_without_accepted_snapshot(draft)
+        or allows_first_ceremony_packet_without_accepted_snapshot(draft, document_id=document_id)
     ):
         return False, "accepted_review_snapshot_required", None, AUTHORITY_MODE_ACCEPTED_SNAPSHOT
     return True, None, portable, AUTHORITY_MODE_LEGACY_PACKET

@@ -1,5 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resolveAccess } from "./accessResolver";
+import { canUseFeature } from "./accessHelpers";
+
+const EMPTY_USAGE = {
+  agreements_created: 0,
+  revision_previews: 0,
+  recipient_invitations: 0,
+  signature_requests: 0,
+  verification_packets: 0,
+};
 
 function stubRemoteWindow(search = "") {
   const storage = new Map<string, string>();
@@ -61,5 +70,39 @@ describe("accessResolver production safety", () => {
       tier: "premium",
       sourcesTried: expect.arrayContaining([expect.objectContaining({ id: "env", tier: "premium" })]),
     });
+  });
+
+  it("treats checkout-created LawDog user as existing Pro for e-sign (no new SKU)", () => {
+    const storage = stubRemoteWindow();
+    storage.set(
+      "claw_demo_session_user_v1",
+      JSON.stringify({
+        v: 1,
+        id: "demo_priya",
+        displayName: "Priya Shah",
+        email: "priya.shah.qa@example.com",
+        createdAt: Date.now(),
+        source: "demo_checkout",
+        settlementReceiptId: "rcpt_lakjsd12_a8fu3",
+      }),
+    );
+    vi.stubGlobal("sessionStorage", {
+      getItem: (key: string) => storage.get(key) ?? null,
+      setItem: (key: string, value: string) => void storage.set(key, value),
+      removeItem: (key: string) => void storage.delete(key),
+      clear: () => storage.clear(),
+    } as Storage);
+
+    const resolved = resolveAccess();
+    expect(resolved).toMatchObject({
+      tier: "premium",
+      sourcesTried: expect.arrayContaining([
+        expect.objectContaining({ id: "checkout_created_lawdog", tier: "premium" }),
+      ]),
+    });
+    expect(canUseFeature(resolved.tier, EMPTY_USAGE, "esign_flow").allowed).toBe(true);
+    expect(canUseFeature(resolved.tier, EMPTY_USAGE, "signature_request").allowed).toBe(true);
+    expect(canUseFeature("free", EMPTY_USAGE, "esign_flow").allowed).toBe(false);
+    expect(canUseFeature("free", EMPTY_USAGE, "signature_request").allowed).toBe(false);
   });
 });
