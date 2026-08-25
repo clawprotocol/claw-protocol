@@ -5,11 +5,15 @@
  * dashboard / signatures list. Do not invent a new dashboard. Outside
  * signers still only get the private link + ceremony.
  */
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { clawAgreementHeaders } from "../agreement/agreementOrgHeaders";
-import { createDemoSessionUser, clearDemoSessionUser } from "./guestCheckoutAuthority";
+import {
+  createDemoSessionUser,
+  clearDemoSessionUser,
+  hasDemoSessionUser,
+} from "./guestCheckoutAuthority";
 import { deriveCreatorDashboardStatus } from "./creatorDashboardPresentation";
 import { markAgreementPacketPrepared } from "../vs01/vs01WorkspaceSigningStatus";
 import type { WorkspaceIndexAgreement } from "../agreement/agreementWorkspaceApi";
@@ -47,6 +51,15 @@ afterEach(() => {
   }
 });
 
+beforeEach(() => {
+  try {
+    sessionStorage.clear();
+    localStorage.clear();
+  } catch {
+    /* ignore */
+  }
+});
+
 describe("after-pay LawDog dashboard visibility (existing list, not a new page)", () => {
   it("dashboard and signatures load the existing workspace-index, not a new route", () => {
     const dashboard = src("launch/AppDashboard.tsx");
@@ -68,6 +81,29 @@ describe("after-pay LawDog dashboard visibility (existing list, not a new page)"
       email: "payer@example.com",
       settlementReceiptId: "rcpt_dashboard_4242_abcd",
     });
+    const headers = clawAgreementHeaders() as Record<string, string>;
+    expect(headers["X-Claw-Demo-Checkout-Receipt"]).toBe("rcpt_dashboard_4242_abcd");
+  });
+
+  it("existing dashboard gate treats the checkout-created user as signed-in on /app and /app/signatures", () => {
+    const gate = src("auth/RequireAuthenticatedDashboard.tsx");
+    const current = src("account/currentUser.ts");
+    expect(gate).toContain("hasDemoSessionUser");
+    expect(gate).toContain("/app and /app/signatures");
+    expect(current).toContain('source: "demo_checkout"');
+    expect(current).toContain("isAuthenticated: true");
+    expect(current).toContain('p === "/app"');
+    expect(current).toContain('p === "/app/billing" || p === "/app/settings" || p === "/app/signatures"');
+  });
+
+  it("fresh tab still carries the receipt after sessionStorage is empty (same durability as persist)", () => {
+    createDemoSessionUser({
+      displayName: "Paid LawDog",
+      email: "payer@example.com",
+      settlementReceiptId: "rcpt_dashboard_4242_abcd",
+    });
+    sessionStorage.clear();
+    expect(hasDemoSessionUser()).toBe(true);
     const headers = clawAgreementHeaders() as Record<string, string>;
     expect(headers["X-Claw-Demo-Checkout-Receipt"]).toBe("rcpt_dashboard_4242_abcd");
   });

@@ -1,9 +1,9 @@
 /**
  * Current-user adapter for dashboard / workspace surfaces.
  *
- * Org headers, localStorage, and workspace slugs are NEVER proof of authentication.
+ * Org headers and workspace slugs are NEVER proof of authentication.
  * Authenticated state requires a validated Supabase session (or explicit e2e/dev test bridge),
- * OR a demo session user created after simulated POS checkout.
+ * OR the checkout-created demo session user (receipt persist already trusts).
  */
 
 import { getOrgId } from "../launch/orgContext";

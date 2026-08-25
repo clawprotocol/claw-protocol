@@ -183,6 +183,34 @@ describe("RequireAuthenticatedDashboard", () => {
     expect(screen.getByTestId("create-page")).toBeTruthy();
   });
 
+  it("allows checkout-created LawDog user onto existing /app without a second Sign in", () => {
+    navState.pathname = "/app";
+    navState.search = "";
+    navState.navigate = vi.fn();
+    mockState.hasDemoSessionUser = true;
+    render(
+      <RequireAuthenticatedDashboard>
+        <div data-testid="secret-dashboard">secret</div>
+      </RequireAuthenticatedDashboard>,
+    );
+    expect(screen.queryByTestId("auth-dashboard-required")).toBeNull();
+    expect(screen.getByTestId("secret-dashboard")).toBeTruthy();
+  });
+
+  it("allows checkout-created LawDog user onto existing /app/signatures without a second Sign in", () => {
+    navState.pathname = "/app/signatures";
+    navState.search = "";
+    navState.navigate = vi.fn();
+    mockState.hasDemoSessionUser = true;
+    render(
+      <RequireAuthenticatedDashboard>
+        <div data-testid="signatures-page">signatures</div>
+      </RequireAuthenticatedDashboard>,
+    );
+    expect(screen.queryByTestId("auth-dashboard-required")).toBeNull();
+    expect(screen.getByTestId("signatures-page")).toBeTruthy();
+  });
+
   it("blocks typed /app/create without any handoff or demo session", () => {
     navState.pathname = "/app/create";
     navState.search = "";

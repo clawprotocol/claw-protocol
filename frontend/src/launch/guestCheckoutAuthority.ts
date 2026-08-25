@@ -7,7 +7,8 @@
  * 3. Guest reaches /app/checkout/__claw_create_checkout__ (allowed by authority)
  * 4. Simulated POS completes, createDemoSessionUser() creates a basic account from payment info
  * 5. Guest (now demo session user) returns to /app/create?restore=starterReview&premiumCompletion=1
- * 6. Demo session user is recognized as authenticated for the session
+ * 6. Demo session user is the LawDog account on existing /app and /app/signatures
+ *    (same receipt persist trusts; no second Sign in)
  *
  * Direct navigation to /app/checkout without the handoff marker is still blocked.
  */
@@ -25,7 +26,10 @@ export type GuestCheckoutAuthorityMarker = {
 
 /**
  * Demo session user created after simulated POS succeeds.
- * Acts as an authenticated user for the session without requiring Supabase login.
+ * This is the checkout-created LawDog account — not a Supabase JWT.
+ * Persist already trusts the receipt; /app and /app/signatures must too.
+ * Stored with persist-class durability (localStorage + sessionStorage) so a
+ * reload or fresh tab still sees the payer, matching /app/esign packet persist.
  */
 export type DemoSessionUser = {
   v: 1;
@@ -37,6 +41,53 @@ export type DemoSessionUser = {
   /** Receipt ID from the settlement that created this user. */
   settlementReceiptId: string;
 };
+
+function writeDemoSessionUserRecord(user: DemoSessionUser): void {
+  const json = JSON.stringify(user);
+  try {
+    if (typeof sessionStorage !== "undefined") {
+      sessionStorage.setItem(DEMO_SESSION_USER_KEY, json);
+    }
+  } catch {
+    /* ignore */
+  }
+  try {
+    if (typeof localStorage !== "undefined") {
+      localStorage.setItem(DEMO_SESSION_USER_KEY, json);
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
+function parseDemoSessionUser(raw: string | null): DemoSessionUser | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as Partial<DemoSessionUser>;
+    if (
+      parsed?.v !== 1 ||
+      typeof parsed.id !== "string" ||
+      typeof parsed.displayName !== "string" ||
+      typeof parsed.createdAt !== "number" ||
+      parsed.source !== "demo_checkout" ||
+      typeof parsed.settlementReceiptId !== "string"
+    ) {
+      return null;
+    }
+    return parsed as DemoSessionUser;
+  } catch {
+    return null;
+  }
+}
+
+function readDemoSessionUserFromStore(store: Storage | undefined): DemoSessionUser | null {
+  if (!store) return null;
+  try {
+    return parseDemoSessionUser(store.getItem(DEMO_SESSION_USER_KEY));
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Mark guest checkout authority when a guest clicks "Continue with Pro" from starter flow.
@@ -132,37 +183,28 @@ export function createDemoSessionUser(args: {
     source: "demo_checkout",
     settlementReceiptId: args.settlementReceiptId,
   };
-  if (typeof sessionStorage !== "undefined") {
-    try {
-      sessionStorage.setItem(DEMO_SESSION_USER_KEY, JSON.stringify(user));
-    } catch {
-      /* ignore */
-    }
-  }
+  writeDemoSessionUserRecord(user);
   clearGuestCheckoutAuthority();
   return user;
 }
 
 export function readDemoSessionUser(): DemoSessionUser | null {
-  if (typeof sessionStorage === "undefined") return null;
-  try {
-    const raw = sessionStorage.getItem(DEMO_SESSION_USER_KEY);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as Partial<DemoSessionUser>;
-    if (
-      parsed?.v !== 1 ||
-      typeof parsed.id !== "string" ||
-      typeof parsed.displayName !== "string" ||
-      typeof parsed.createdAt !== "number" ||
-      parsed.source !== "demo_checkout" ||
-      typeof parsed.settlementReceiptId !== "string"
-    ) {
-      return null;
+  const sessionStore = typeof sessionStorage === "undefined" ? undefined : sessionStorage;
+  const localStore = typeof localStorage === "undefined" ? undefined : localStorage;
+  const fromSession = readDemoSessionUserFromStore(sessionStore);
+  if (fromSession) return fromSession;
+  // Fresh tab: persist already survives via localStorage. The checkout-created
+  // LawDog user must too, or /app walls as unsigned-in while /app/esign paints.
+  const fromLocal = readDemoSessionUserFromStore(localStore);
+  if (fromLocal) {
+    try {
+      sessionStore?.setItem(DEMO_SESSION_USER_KEY, JSON.stringify(fromLocal));
+    } catch {
+      /* ignore */
     }
-    return parsed as DemoSessionUser;
-  } catch {
-    return null;
+    return fromLocal;
   }
+  return null;
 }
 
 export function hasDemoSessionUser(): boolean {
@@ -176,9 +218,13 @@ export function demoSessionMayContinueWithoutServerSnapshot(code: string): boole
 }
 
 export function clearDemoSessionUser(): void {
-  if (typeof sessionStorage === "undefined") return;
   try {
-    sessionStorage.removeItem(DEMO_SESSION_USER_KEY);
+    if (typeof sessionStorage !== "undefined") sessionStorage.removeItem(DEMO_SESSION_USER_KEY);
+  } catch {
+    /* ignore */
+  }
+  try {
+    if (typeof localStorage !== "undefined") localStorage.removeItem(DEMO_SESSION_USER_KEY);
   } catch {
     /* ignore */
   }

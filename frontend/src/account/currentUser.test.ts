@@ -13,6 +13,11 @@ describe("currentUser adapter", () => {
       setItem: () => undefined,
       removeItem: () => undefined,
     });
+    vi.stubGlobal("localStorage", {
+      getItem: () => null,
+      setItem: () => undefined,
+      removeItem: () => undefined,
+    });
   });
   afterEach(() => {
     vi.unstubAllGlobals();
@@ -40,6 +45,7 @@ describe("currentUser adapter", () => {
     expect(isAuthenticatedDashboardSurface("/app")).toBe(true);
     expect(isAuthenticatedDashboardSurface("/dashboard")).toBe(true);
     expect(isAuthenticatedDashboardSurface("/app/create")).toBe(true);
+    expect(isAuthenticatedDashboardSurface("/app/signatures")).toBe(true);
     expect(isDashboardAccountSurface("/app/create")).toBe(true);
   });
 
