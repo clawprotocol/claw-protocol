@@ -767,6 +767,8 @@ class AgreementDraft(AgreementDraftCreate):
     canonical_review_snapshots_v1: Optional[Dict[str, Any]] = None
     """Denormalized currently-accepted review snapshot (corpus + SHA-256 + metadata)."""
     accepted_review_snapshot_v1: Optional[Dict[str, Any]] = None
+    """After-pay /app/esign seed stamp — first ceremony persist without review-accept."""
+    after_pay_ceremony_v1: Optional[Dict[str, Any]] = None
     """Per-recipient invite delivery registry (JTIs, timestamps, resend counts)."""
     recipient_delivery_v1: Optional[Dict[str, Any]] = None
     workspace_archived_at: Optional[str] = None
@@ -7530,6 +7532,7 @@ def _attest_portable_envelope_or_400(
     stored_portable: Optional[Dict[str, Any]] = None,
     surface: str = "signing_links_sent",
     require_accepted_snapshot: bool = True,
+    document_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Trusted boundary:
@@ -7560,6 +7563,7 @@ def _attest_portable_envelope_or_400(
         draft=draft_obj,
         portable=portable,
         require_accepted=require_accepted_snapshot,
+        document_id=document_id,
     )
     if not bound_ok or not isinstance(bound_portable, dict):
         raise HTTPException(
@@ -8046,6 +8050,7 @@ def post_agreement_signing_links_sent(
                 draft=draft,
                 surface="signing_links_sent",
                 require_accepted_snapshot=True,
+                document_id=document_id,
             )
         from backend.services.frozen_signing_authority import (
             PACKET_STATE_ACTIVE,
@@ -8742,6 +8747,7 @@ def post_vs01_signer_complete(
                 stored_portable=stored_portable,
                 surface="vs01_signer_complete",
                 require_accepted_snapshot=True,
+                document_id=(body.document_id or "").strip() or None,
             )
         elif isinstance(portable_packet, dict):
             portable_packet = _attest_portable_envelope_or_400(
@@ -8751,6 +8757,7 @@ def post_vs01_signer_complete(
                 stored_portable=stored_portable,
                 surface="vs01_signer_complete",
                 require_accepted_snapshot=False,
+                document_id=(body.document_id or "").strip() or None,
             )
 
         pending = orchestrate_vs01_signer_complete(
@@ -10567,7 +10574,13 @@ def post_agreement_vs01_signing_seed(
             client_handoff=body.esign_handoff if isinstance(body.esign_handoff, dict) else None,
         )
         corpus_len = len(str(handoff.get("agreement_corpus_text") or "").strip())
-        if corpus_len >= _VS01_ESIGN_HANDOFF_MIN_CORPUS_LEN:
+        client_sent_handoff = isinstance(body.esign_handoff, dict) and bool(body.esign_handoff)
+        # After-pay client handoff: persist even at the ~200-char painted floor.
+        # Commercial seed without a client handoff must not open content anonymously.
+        persist_handoff = corpus_len > 0 and (
+            client_sent_handoff or corpus_len >= _VS01_ESIGN_HANDOFF_MIN_CORPUS_LEN
+        )
+        if persist_handoff:
             document_service.merge_document_meta(doc_id, {"esign_handoff_v1": handoff})
             log.info(
                 "[agreement-vs01-seed] event=esign_handoff_persisted agreement_id=%s document_id=%s corpus_len=%s",
@@ -10575,6 +10588,18 @@ def post_agreement_vs01_signing_seed(
                 doc_id,
                 corpus_len,
             )
+            if client_sent_handoff:
+                draft = _merge_agreement_draft(
+                    draft,
+                    after_pay_ceremony_v1={
+                        "v": 1,
+                        "document_id": doc_id,
+                        "seeded_at": _utc_now_iso(),
+                        "corpus_len": corpus_len,
+                    },
+                    updated_at=_utc_now_iso(),
+                )
+                _save_draft_sync(draft.model_dump(), request)
     except Exception:
         log.exception(
             "[agreement-vs01-seed] event=warning agreement_id=%s document_id=%s stage=esign_handoff_persist",

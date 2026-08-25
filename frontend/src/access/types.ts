@@ -64,4 +64,5 @@ export type EntitlementSource =
   | { id: "future_backend"; tier: AccessTier | null }
   | { id: "future_wallet"; tier: AccessTier | null }
   | { id: "future_subscription"; tier: AccessTier | null }
-  | { id: "server_subscription"; tier: AccessTier | null };
+  | { id: "server_subscription"; tier: AccessTier | null }
+  | { id: "checkout_created_lawdog"; tier: AccessTier };
