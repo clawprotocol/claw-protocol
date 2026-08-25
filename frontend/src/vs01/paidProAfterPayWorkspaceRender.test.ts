@@ -280,7 +280,7 @@ describe("after-pay workspace renders painted agreement (not load-error)", () =>
     expect(wizard).toContain("completeBridgePreparePacket()");
     const dispatchAt = wizard.indexOf("const delivery = await dispatchSigningInvitesFromHandoff");
     expect(dispatchAt).toBeGreaterThan(0);
-    const failAt = wizard.indexOf("if (delivery.attempted && !delivery.ok)", dispatchAt);
+    const failAt = wizard.indexOf("if (!delivery.ok || !delivery.packetPersisted)", dispatchAt);
     const markAt = wizard.indexOf("markAgreementPacketPrepared(linkedAgreementId);", dispatchAt);
     expect(failAt).toBeGreaterThan(0);
     expect(markAt).toBeGreaterThan(failAt);

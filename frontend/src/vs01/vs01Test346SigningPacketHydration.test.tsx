@@ -125,6 +125,7 @@ describe("vs01 test346 signing packet hydration (Red Mesa / Harbor Peak)", () =>
       ok: true,
       sent_count: 2,
       skip_reason: null,
+      packet_persisted: true,
     });
     await dispatchSigningInvitesFromHandoff(result.handoff, r, {
       portablePacket: result.portablePacket,

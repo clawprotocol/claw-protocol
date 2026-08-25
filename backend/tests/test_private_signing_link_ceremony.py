@@ -589,6 +589,7 @@ def test_after_pay_send_flag_persists_without_stamp_or_handoff(
             },
         )
     assert sent.status_code == 200, sent.text
+    assert sent.json().get("packet_persisted") is True
     stored = load_draft(aid).get("vs01_signing_packet_v1")
     assert isinstance(stored, dict), "after-pay Send must persist a durable packet"
     assert stored.get("document_id") == document_id
@@ -656,3 +657,92 @@ def test_after_pay_send_without_packet_fails_closed(
     )
     assert sent.status_code == 400, sent.text
     assert sent.json()["detail"]["code"] == "after_pay_packet_required"
+
+
+def test_after_pay_send_ignores_leftover_frozen_and_persists(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    monkeypatch.setenv("CLAW_COMMERCIAL_MODE", "1")
+    monkeypatch.setenv("CLAW_DOCUMENTS_DIR", str(tmp_path / "documents"))
+    monkeypatch.setenv("CLAW_STORAGE_BACKEND", "local")
+    from backend.services import document_service
+    from backend.services.agreement_draft_store import load_draft
+
+    client = TestClient(app, raise_server_exceptions=False)
+    create_res = client.post(
+        "/api/agreements/draft",
+        headers=_ORG_H,
+        json={
+            "title": "Services Agreement",
+            "jurisdiction": "TX",
+            "parties": [
+                {"id": "p_priya", "name": "Priya Shah", "role": "owner", "email": "priya.shah.qa@example.com"},
+                {"id": "p_diego", "name": "Diego Alvarez", "role": "party", "email": "diego.alvarez.qa@example.com"},
+            ],
+            "purpose": "Brand kit",
+            "payment_terms": "Due on signing",
+            "duration": "30 days",
+            "due_date": None,
+            "effective_date": None,
+        },
+    )
+    assert create_res.status_code == 200, create_res.text
+    aid = create_res.json()["id"]
+    meta = document_service.finalize_document(
+        b"%PDF-1.4 leftover-frozen-after-pay",
+        content_type="application/pdf",
+        agreement_id=aid,
+        owner_org_id=f"user-{_OWNER_USER}",
+    )
+    document_id = meta["document_id"]
+    leftover_frozen = {
+        "version": 1,
+        "agreementId": "ag_other_leftover_deal",
+        "agreementSessionId": "sess_leftover",
+        "frozenCorpusHash": "not-this-deal",
+        "frozenAt": "2026-08-24T00:00:00Z",
+        "parties": [{"agreementPartyId": "p_old", "legalEntityName": "Old Co", "canonicalOrder": 0}],
+        "signers": [
+            {
+                "signerRecordId": "role_old",
+                "agreementPartyId": "p_old",
+                "signerEmail": "old@example.com",
+                "signingOrder": 0,
+                "requiresSignature": True,
+                "requiresInitials": False,
+            }
+        ],
+        "recipients": [],
+        "execution": {"partyOrder": ["p_old"], "signerOrder": ["role_old"], "executionBlockHash": "x"},
+    }
+    with patch(
+        "backend.services.email.signing_delivery.maybe_send_signing_invites_after_packet_prepared",
+        return_value=None,
+    ):
+        sent = client.post(
+            f"/api/agreements/{aid}/signing-links-sent",
+            headers=_ORG_H,
+            json={
+                "packet_revision": "leftover_frozen_rev",
+                "document_id": document_id,
+                "portable_packet": _portable(aid, document_id),
+                "frozen_signing_authority": leftover_frozen,
+                "after_pay_ceremony": True,
+                "targets": [],
+            },
+        )
+    assert sent.status_code == 200, sent.text
+    assert sent.json().get("packet_persisted") is True
+    stored = load_draft(aid).get("vs01_signing_packet_v1")
+    assert isinstance(stored, dict), "leftover frozen must not leave no_durable_packet"
+    assert stored.get("portable", {}).get("fields")
+    frozen = load_draft(aid).get("frozen_signing_authority_v1")
+    assert isinstance(frozen, dict)
+    assert frozen.get("agreementId") == aid
+
+    public = client.get(
+        f"/api/agreements/public/{aid}/vs01-signing-packet",
+        params={"document_id": document_id, "packet_revision": "leftover_frozen_rev"},
+    )
+    assert public.status_code == 200, public.text
+    assert public.json()["portable"]["fields"][0]["id"] == "priya_sig"

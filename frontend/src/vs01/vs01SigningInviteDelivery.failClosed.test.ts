@@ -56,6 +56,24 @@ function twoPartyHandoff() {
   return { roles, handoff: result.handoff };
 }
 
+const afterPayPortable = {
+  v: 1 as const,
+  seed: {
+    v: 1 as const,
+    documentId: "doc_fail_closed",
+    agreementId: AG,
+    corpusPlain: "SERVICES AGREEMENT\n\nPriya and Diego painted deal for a logo.",
+    corpusHash: "hash",
+    savedAt: "2026-08-25T00:00:00Z",
+  },
+  fields: [],
+  roles: [],
+  pageCount: 1,
+  witnessPageIndex: 0,
+  initialsPolicy: { enabled: false, bodyPagesOnly: true },
+  fieldCount: 0,
+};
+
 describe("signing invite delivery fail-closed", () => {
   beforeEach(() => {
     localStorage.clear();
@@ -94,26 +112,10 @@ describe("signing invite delivery fail-closed", () => {
       ok: true,
       sent_count: 2,
       skip_reason: null,
+      packet_persisted: true,
     });
-    const portable = {
-      v: 1 as const,
-      seed: {
-        v: 1 as const,
-        documentId: "doc_fail_closed",
-        agreementId: AG,
-        corpusPlain: "SERVICES AGREEMENT\n\nPriya and Diego painted deal for a logo.",
-        corpusHash: "hash",
-        savedAt: "2026-08-25T00:00:00Z",
-      },
-      fields: [],
-      roles: [],
-      pageCount: 1,
-      witnessPageIndex: 0,
-      initialsPolicy: { enabled: false, bodyPagesOnly: true },
-      fieldCount: 0,
-    };
     await dispatchSigningInvitesFromHandoff(handoff, roles, {
-      portablePacket: portable,
+      portablePacket: afterPayPortable,
       documentId: "doc_fail_closed",
       afterPayCeremony: true,
     });
@@ -122,9 +124,87 @@ describe("signing invite delivery fail-closed", () => {
       expect.objectContaining({
         document_id: "doc_fail_closed",
         after_pay_ceremony: true,
+        frozen_signing_authority: null,
         portable_packet: expect.objectContaining({ v: 1 }),
       }),
     );
+  });
+
+  it("after-pay persist runs even when invite targets are empty", async () => {
+    const { roles, handoff } = twoPartyHandoff();
+    const emptyHandoff = {
+      ...handoff,
+      ownerSigningUrl: "",
+      signers: handoff.signers.map((s) => ({ ...s, email: "", signingUrl: "" })),
+    };
+    const emptyRoles = roles.map((r) => ({ ...r, signerEmail: "", reviewEmail: "" }));
+    const spy = vi.spyOn(agreementWorkspaceApi, "postSigningLinksSent").mockResolvedValue({
+      ok: true,
+      sent_count: 0,
+      skip_reason: "not_sent",
+      packet_persisted: true,
+    });
+    const result = await dispatchSigningInvitesFromHandoff(emptyHandoff, emptyRoles, {
+      portablePacket: afterPayPortable,
+      documentId: "doc_fail_closed",
+      afterPayCeremony: true,
+    });
+    expect(result.ok).toBe(true);
+    expect(result.packetPersisted).toBe(true);
+    expect(spy).toHaveBeenCalled();
+  });
+
+  it("after-pay persist is posted before token mint so a missing lock cannot skip the packet", async () => {
+    const { roles, handoff } = twoPartyHandoff();
+    const order: string[] = [];
+    vi.spyOn(recipientAccessApi, "fetchRecipientAccessPolicy").mockImplementation(async () => {
+      order.push("mint_policy");
+      return {
+        recipient_link_token_required: true,
+        mint_key_configured: true,
+        signing_token_configured: true,
+      };
+    });
+    vi.spyOn(recipientAccessApi, "mintRecipientAccessTokenResult").mockImplementation(async () => {
+      order.push("mint");
+      return {
+        ok: false,
+        status: 409,
+        code: "signing_not_finalized_server_side",
+        message: "not locked",
+      };
+    });
+    const spy = vi.spyOn(agreementWorkspaceApi, "postSigningLinksSent").mockImplementation(async () => {
+      order.push("persist");
+      return { ok: true, sent_count: 0, skip_reason: "not_sent", packet_persisted: true };
+    });
+    const result = await dispatchSigningInvitesFromHandoff(handoff, roles, {
+      portablePacket: afterPayPortable,
+      documentId: "doc_fail_closed",
+      afterPayCeremony: true,
+    });
+    expect(result.ok).toBe(true);
+    expect(result.packetPersisted).toBe(true);
+    expect(order[0]).toBe("persist");
+    expect(spy).toHaveBeenCalled();
+  });
+
+  it("after-pay 200 without packet_persisted does not claim success", async () => {
+    const { roles, handoff } = twoPartyHandoff();
+    vi.spyOn(agreementWorkspaceApi, "postSigningLinksSent").mockResolvedValue({
+      ok: true,
+      sent_count: 2,
+      skip_reason: null,
+      packet_persisted: false,
+    });
+    const result = await dispatchSigningInvitesFromHandoff(handoff, roles, {
+      portablePacket: afterPayPortable,
+      documentId: "doc_fail_closed",
+      afterPayCeremony: true,
+    });
+    expect(result.ok).toBe(false);
+    expect(result.packetPersisted).toBe(false);
+    expect(result.skipReason).toBe("packet_not_persisted");
   });
 
   it("buildSigningInviteTargetsFromHandoff does not attach recipient access tokens", () => {
