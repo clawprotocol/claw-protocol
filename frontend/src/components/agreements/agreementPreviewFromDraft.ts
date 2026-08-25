@@ -389,6 +389,25 @@ function extractServiceDescriptionFromIntake(intakeText: string | null | undefin
   return candidate.replace(/\bservices?\s*$/i, "").trim();
 }
 
+const VERB_LED_SCOPE_VERBS =
+  "design|build|create|develop|perform|deliver|run|paint|photograph|write|install|fix|repair|market|consult|manage|handle|produce|film|edit";
+
+/** True when intake scope is verb-led ("design a logo") vs noun-led ("workflow automation consulting"). */
+export function isVerbLedWorkScopePhrase(phrase: string): boolean {
+  const t = (phrase || "").trim();
+  if (!t) return false;
+  return new RegExp(`^(${VERB_LED_SCOPE_VERBS})\\b`, "i").test(t);
+}
+
+/** Canonical starter Scope obligation: verb-led work uses "will {verb phrase}"; noun-led keeps "will provide … services". */
+export function formatStarterScopeObligationLine(provider: string, scopeWork: string, client: string): string {
+  const work = scopeWork.trim();
+  if (isVerbLedWorkScopePhrase(work)) {
+    return `${provider} will ${work} for ${client}.`;
+  }
+  return `${provider} will provide ${work} services for ${client}.`;
+}
+
 function isServicesAgreementLikeDraft(
   draft: ParsedDraftShape,
   intakeText: string | null | undefined,
@@ -419,7 +438,7 @@ function buildStarterServicesScopeFromIntake(
   );
   const serviceDescription = extractServiceDescriptionFromIntake(intakeText);
   if (!client || !provider || !serviceDescription) return "";
-  return `${provider} will provide ${serviceDescription} services for ${client}.`;
+  return formatStarterScopeObligationLine(provider, serviceDescription, client);
 }
 
 function isAiWorkflowServicesAgreement(

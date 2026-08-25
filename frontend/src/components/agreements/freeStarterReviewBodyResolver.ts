@@ -4,7 +4,9 @@
 
 import {
   buildStarterAgreementPreviewForReview,
+  formatStarterScopeObligationLine,
   hydrateIdentityPlaceholdersInAgreementPreviewPlain,
+  isVerbLedWorkScopePhrase,
   type AgreementPreviewBuildOptions,
 } from "./agreementPreviewFromDraft";
 import { textContainsUnresolvedIdentityPlaceholders } from "../../agreement/partyPlaceholderDisplay";
@@ -450,13 +452,24 @@ export function repairFreeStarterScopeObligationFromIntakeAuthority(
   const scopeWork = extractScopeWorkFromHiringIntake(intakeText);
   if (!client || !provider || !scopeWork) return body;
 
+  const authoritativeLine = formatStarterScopeObligationLine(provider, scopeWork, client);
+
+  if (isVerbLedWorkScopePhrase(scopeWork)) {
+    const malformedProviderRe = new RegExp(
+      `${escapeRegExpForScopeRepair(provider)}\\s+will\\s+provide\\s+${escapeRegExpForScopeRepair(scopeWork)}\\s+services\\s+for\\s+${escapeRegExpForScopeRepair(client)}\\.?`,
+      "i",
+    );
+    if (malformedProviderRe.test(text)) {
+      return text.replace(malformedProviderRe, authoritativeLine);
+    }
+  }
+
   const clientPerformerRe = new RegExp(
     `${escapeRegExpForScopeRepair(client)}\\s+will\\s+(?:design|develop|create|build|provide|perform|deliver|run|paint|photograph|write|install|fix|repair|market|consult|manage|handle|produce|film|edit)[^\\n.]*`,
     "i",
   );
   if (!clientPerformerRe.test(text)) return body;
 
-  const authoritativeLine = `${provider} will ${scopeWork} for ${client}.`;
   return text.replace(clientPerformerRe, authoritativeLine);
 }
 
