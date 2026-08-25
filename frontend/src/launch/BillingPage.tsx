@@ -19,7 +19,14 @@ import { ConsentAcknowledgement } from "../compliance/ConsentAcknowledgement";
 import { DOWNGRADE_ACCESS_SHORT, NOT_LEGAL_ADVICE, PRODUCT_NOT_LAW_FIRM } from "../compliance/disclosureCopy";
 import { PricingCadenceToggle } from "./PricingCadenceToggle";
 import { getPricingCadencePreference, setPricingCadencePreference, type PricingCadence } from "./pricingCadenceStorage";
-import { extractAgreementIdFromSendReturnUrl } from "./checkoutParams";
+import {
+  buildCreateFlowProCheckoutPath,
+  extractAgreementIdFromSendReturnUrl,
+  isCreateFlowUpgradeReturnTo,
+} from "./checkoutParams";
+import { CREATE_FLOW_CHECKOUT_AGREEMENT_ID } from "../components/agreements/agreementAdvancedDraftAccess";
+import { paintedFreeDumpOpensExistingCheckout } from "../components/agreements/paidProSessionEligibility";
+import { buildCreateReturnToWithStarterReviewRestore } from "../components/agreements/checkoutBackRestore";
 import { applySimpleSendUnlockFromReturnPath } from "./simpleFlowSendUnlock";
 import { ConversionPricingTriad } from "./ConversionPricingTriad";
 import { logProductEvent } from "../lib/experimentation/productEvents";
@@ -107,8 +114,30 @@ export function BillingPage() {
         );
         return;
       }
+      if (isCreateFlowUpgradeReturnTo(returnToSimpleSend)) {
+        navigate(
+          buildCreateFlowProCheckoutPath({
+            agreementId: CREATE_FLOW_CHECKOUT_AGREEMENT_ID,
+            returnTo: returnToSimpleSend,
+            cadence,
+          }),
+          { guestCheckout: true },
+        );
+        return;
+      }
       applySimpleSendUnlockFromReturnPath(returnToSimpleSend);
       navigate(returnToSimpleSend);
+      return;
+    }
+    if (paintedFreeDumpOpensExistingCheckout() || returnToCreateFlow) {
+      navigate(
+        buildCreateFlowProCheckoutPath({
+          agreementId: CREATE_FLOW_CHECKOUT_AGREEMENT_ID,
+          returnTo: buildCreateReturnToWithStarterReviewRestore(),
+          cadence,
+        }),
+        { guestCheckout: true },
+      );
       return;
     }
     navigate("/app/create");

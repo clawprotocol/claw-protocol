@@ -17,6 +17,7 @@ import {
 } from "../creatorDashboardReviewLinkRouting";
 import { readCreateComplexityResume } from "../../components/agreements/agreementCreateComplexityResume";
 import {
+  buildCreateReturnToWithStarterReviewRestore,
   hasCheckoutBackRestoreSnapshot,
   isCheckoutBackRestoreRequested,
   readCheckoutBackRestoreSnapshot,
@@ -45,7 +46,12 @@ import {
   type CommercialEntitlementDecision,
 } from "../../access/commercialEntitlement";
 import { fetchWorkspaceIndex } from "../../agreement/agreementWorkspaceApi";
-import { hasCurrentSessionFreeStarterIntent } from "../../components/agreements/paidProSessionEligibility";
+import {
+  hasCurrentSessionFreeStarterIntent,
+  paintedFreeDumpOpensExistingCheckout,
+} from "../../components/agreements/paidProSessionEligibility";
+import { CREATE_FLOW_CHECKOUT_AGREEMENT_ID } from "../../components/agreements/agreementAdvancedDraftAccess";
+import { buildCreateFlowProCheckoutPath } from "../checkoutParams";
 import { hasPaidPremiumCompletionSession } from "../../components/agreements/premiumCompletionStorage";
 import { getLawdogTrustNudges } from "../../tracking/lawdogSession";
 import { UpgradeToProModal } from "../../monetization/UpgradeToProModal";
@@ -342,11 +348,17 @@ export function SimpleCreatePage() {
     hasCheckoutPendingMarker,
   });
   const showAccessChoiceScreen =
-    commercialEntitlementReady && shouldShowCreateAccessChoiceScreen(createAccessVerdict);
+    commercialEntitlementReady &&
+    !paintedFreeDumpOpensExistingCheckout() &&
+    shouldShowCreateAccessChoiceScreen(createAccessVerdict);
   // Modal only for post-value conversion (guest ready) or allowance exhaustion — not for unentitled signed-in.
+  // Leftover guest quota must not cover a painted dump’s Continue with Pro.
+  const leftoverQuotaMustNotCoverPaintedDump =
+    paintedFreeDumpOpensExistingCheckout() && createAccessVerdict.reason === "guest_draft";
   const creationBlockedForUi =
     commercialEntitlementReady &&
     !showAccessChoiceScreen &&
+    !leftoverQuotaMustNotCoverPaintedDump &&
     ((!createAccessVerdict.allowed && createAccessVerdict.showUpgradeModal) ||
       createAccessVerdict.showGenesisAllowanceExhausted);
   const entitlementProbeBlocked =
@@ -770,7 +782,13 @@ export function SimpleCreatePage() {
                 variant: "access_choice_screen",
                 cta: "choose_pro",
               });
-              navigate("/app/billing");
+              navigate(
+                buildCreateFlowProCheckoutPath({
+                  agreementId: CREATE_FLOW_CHECKOUT_AGREEMENT_ID,
+                  returnTo: buildCreateReturnToWithStarterReviewRestore(),
+                }),
+                { guestCheckout: !createAuthAuthenticated },
+              );
             }}
             onViewAgreement={() => {
               logProductEvent("paywall_clicked_view_existing", {
@@ -1080,7 +1098,13 @@ export function SimpleCreatePage() {
                     surface: "simple_create",
                     variant: "genesis_allowance_exhausted_inline",
                   });
-                  navigate("/app/billing");
+                  navigate(
+                    buildCreateFlowProCheckoutPath({
+                      agreementId: CREATE_FLOW_CHECKOUT_AGREEMENT_ID,
+                      returnTo: buildCreateReturnToWithStarterReviewRestore(),
+                    }),
+                    { guestCheckout: !createAuthAuthenticated },
+                  );
                 }}
               >
                 Choose Pro
@@ -1240,6 +1264,15 @@ export function SimpleCreatePage() {
               cta: "request_genesis",
             });
             requestGenesisAccess();
+          }}
+          onChoosePro={() => {
+            navigate(
+              buildCreateFlowProCheckoutPath({
+                agreementId: CREATE_FLOW_CHECKOUT_AGREEMENT_ID,
+                returnTo: buildCreateReturnToWithStarterReviewRestore(),
+              }),
+              { guestCheckout: !createAuthAuthenticated },
+            );
           }}
         />
 

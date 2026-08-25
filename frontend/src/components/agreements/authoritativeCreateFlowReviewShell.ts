@@ -22,7 +22,11 @@ import {
   isPaidProPostCheckoutRecoveryReviewActive,
 } from "./paidProPostCheckoutRenderGate";
 import { hasPaidProPipelineSessionAcceptance } from "./paidProPostAcceptanceValidatorCache";
-import { hasCurrentSessionProEntitlement, hasCurrentSessionFreeStarterIntent } from "./paidProSessionEligibility";
+import {
+  hasCurrentSessionProEntitlement,
+  hasCurrentSessionFreeStarterIntent,
+  paintedFreeDumpOpensExistingCheckout,
+} from "./paidProSessionEligibility";
 import type { GuidedCompletionPhase } from "./guidedDealCompletion/guidedCompletionPhase";
 import { resolveProvisionalWorkspaceProEntitledForCreate } from "./paidCreateFlowEntitlementProbe";
 import { resolveCreateFlowWorkspaceProEntitled } from "./paidCreateFlowWorkspaceEntitlementProbe";
@@ -76,6 +80,8 @@ export function isCreateFlowPaidAcceptedOrAuthoritativeActive(
   input: ResolveAuthoritativeCreateFlowReviewShellInput = {},
 ): boolean {
   if (resolveAuthoritativeCreateFlowReviewShell(input) === "paid_pro") return true;
+  // Leftover snapshot / checkout identity must not no-op Continue with Pro on this dump.
+  if (paintedFreeDumpOpensExistingCheckout()) return false;
   const latched = getLatchedAcceptedServerFullDraftAuthority();
   const latchedBody = latched?.body.trim() ?? "";
   if (latchedBody.length >= PAID_PRO_AUTHORITY_MIN_LEN) {

@@ -9,6 +9,7 @@ import {
   markCurrentSessionFreeStarterIntent,
   markCurrentSessionProEntitlementComplete,
   markCurrentSessionProIntent,
+  paintedFreeDumpOpensExistingCheckout,
 } from "./paidProSessionEligibility";
 import {
   clearPaidProSourceOfTruth,
@@ -65,6 +66,17 @@ describe("paidProSessionEligibility", () => {
     const decision = evaluatePaidProSourceOfTruthEstablishment({ source: "server_full_draft" });
     expect(decision.allowed).toBe(false);
     expect(decision.reason).toBe("free_starter_session_without_pro_entitlement");
+  });
+
+  it("painted free dump still owes existing checkout until this session pays", () => {
+    expect(paintedFreeDumpOpensExistingCheckout()).toBe(false);
+    markCurrentSessionFreeStarterIntent();
+    expect(paintedFreeDumpOpensExistingCheckout()).toBe(true);
+    markCurrentSessionProIntent();
+    expect(paintedFreeDumpOpensExistingCheckout()).toBe(false);
+    markCurrentSessionFreeStarterIntent();
+    markCurrentSessionProEntitlementComplete({ source: "settled_checkout" });
+    expect(paintedFreeDumpOpensExistingCheckout()).toBe(false);
   });
 
   it("free starter wins over stale pro intent markers", () => {
