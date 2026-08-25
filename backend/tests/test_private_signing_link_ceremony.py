@@ -9,14 +9,13 @@ from fastapi.testclient import TestClient
 
 from backend.main import app
 from backend.services.agreement_draft_store import load_draft
+from backend.tests.conftest_auth_security import make_authenticated_user_headers
 from backend.tests.entitlement_test_support import ensure_headers_entitled
 
 pytestmark = pytest.mark.unit
 
-_ORG_H = {
-    "X-Claw-Org-Id": "test-org-private-ceremony",
-    "X-Claw-Test-Auth-User-Id": "owner-private-ceremony",
-}
+_OWNER_USER = "owner-private-ceremony"
+_ORG_H = make_authenticated_user_headers(_OWNER_USER)
 
 _PAINTED = (
     "SERVICES AGREEMENT\n\nThis Agreement is entered into by Priya Shah of Northline Studio "
@@ -154,7 +153,7 @@ def test_after_pay_send_links_persists_packet_and_private_link_completes(
         b"%PDF-1.4 private-ceremony-packet",
         content_type="application/pdf",
         agreement_id=aid,
-        owner_org_id="test-org-private-ceremony",
+        owner_org_id=f"user-{_OWNER_USER}",
     )
     document_id = meta["document_id"]
     document_service.merge_document_meta(
@@ -269,7 +268,7 @@ def test_document_content_accepts_recipient_token_without_workspace_session(
         b"%PDF-1.4 private-ceremony",
         content_type="application/pdf",
         agreement_id=aid,
-        owner_org_id="test-org-private-ceremony",
+        owner_org_id=f"user-{_OWNER_USER}",
     )
     doc_id = meta["document_id"]
     document_service.merge_document_meta(
