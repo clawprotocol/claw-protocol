@@ -38,7 +38,6 @@ import {
   type AgreementVs01BridgeSession,
 } from "../launch/simpleProduct/agreementToVs01SigningBridge";
 import { resolvePrepareBridgeSigningCorpus } from "./vs01PrepareBridgeCorpus";
-import { VS01_SIGNING_CORPUS_MIN_LEN } from "./vs01SigningCorpus";
 import { vs01PaidSessionWorkspaceHydrateMinCorpusLen } from "../components/agreements/paidProPaidSessionLanding";
 import { fingerprintAgreementBody } from "../components/agreements/guidedDealCompletion/guidedSigningPacketVersion";
 import { buildVs01CanonicalPacketSeed, hasVs01CanonicalPacketCached, storeVs01CanonicalPacketSeed } from "./vs01CanonicalPacketSeed";
