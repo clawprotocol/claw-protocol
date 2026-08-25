@@ -2,6 +2,7 @@ import type { AgreementDraft } from "../../agreement/agreementTypes";
 import { fetchAgreementDraft, postReviewSentServer } from "../../agreement/agreementWorkspaceApi";
 import {
   assertGuidedProVs01BridgeCorpusReady,
+  buildGuidedVs01SigningHandoff,
   logGuidedProVs01BridgeCorpusBlocked,
   type GuidedVs01SigningHandoff,
 } from "../../components/agreements/guidedDealCompletion/guidedVs01SigningHandoff";
@@ -459,16 +460,24 @@ export async function executePaidProPostRecipientSetupHandoff(options: {
     }
   }
 
-  const handoff = resolvePaidSessionSignatureTrackHandoff({
+  const resolvedHandoff = resolvePaidSessionSignatureTrackHandoff({
     relaxPaidSessionCorpusAssert: Boolean(options.relaxPaidSessionCorpusAssert),
     explicitHandoff: options.guidedSigningHandoff,
     leftoverSessionHandoff: resolveGuidedVs01SigningHandoffForBridge(null),
   });
   const signingCorpusPlain = (
-    handoff?.corpusText ??
+    resolvedHandoff?.corpusText ??
     options.agreementCorpusText ??
     ""
   ).trim();
+  const handoff =
+    resolvedHandoff ??
+    (options.relaxPaidSessionCorpusAssert && signingCorpusPlain
+      ? buildGuidedVs01SigningHandoff({
+          corpusText: signingCorpusPlain,
+          source: "finalized_signer_applied_guided_corpus",
+        })
+      : null);
   const draftForBridge = options.relaxPaidSessionCorpusAssert
     ? mergePaidSessionSignatureTrackDraft(options.draft, signingCorpusPlain)
     : mergeAgreementDraftWithGuidedSigningHandoff(options.draft, handoff);

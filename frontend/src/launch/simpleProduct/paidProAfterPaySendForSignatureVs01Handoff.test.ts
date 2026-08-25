@@ -111,12 +111,60 @@ describe("after-pay Send for signature opens existing e-sign workspace", () => {
     expect(bridge?.senderFirstLawdogHandoff).toBe(true);
   });
 
+  it("opens /app/esign from painted corpus alone on a second dump (no leftover / no explicit handoff)", async () => {
+    const secondDump =
+      "SERVICES AGREEMENT\n\nMarcus Thompson of Apex Consulting Group engages Elena Rodriguez of Brightwave Marketing Agency for a strategic marketing campaign. Payment $5,500. Term 8 weeks. Governing law: California.";
+    expect(secondDump.length).toBeGreaterThanOrEqual(200);
+    expect(secondDump.length).toBeLessThan(1500);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 404,
+        json: async () => ({ detail: { code: "agreement_not_found" } }),
+      }),
+    );
+    const routes: string[] = [];
+    const result = await executePaidProPostRecipientSetupHandoff({
+      navigate: (to) => {
+        routes.push(to);
+      },
+      agreementId: "ag_after_pay_marcus_elena",
+      draft: {
+        id: "ag_after_pay_marcus_elena",
+        title: "SERVICES AGREEMENT",
+        jurisdiction: "California",
+        parties: [
+          {
+            name: "Marcus Thompson of Apex Consulting Group",
+            role: "owner",
+            email: "marcus.thompson.qa@example.com",
+            signerName: "Marcus Thompson",
+          },
+          {
+            name: "Elena Rodriguez of Brightwave Marketing Agency",
+            role: "signer",
+            email: "elena.rodriguez.qa@example.com",
+            signerName: "Elena Rodriguez",
+          },
+        ],
+      } as AgreementDraft,
+      premiumSendIntent: "signature",
+      logSource: "test_after_pay_send_for_signature_second_dump",
+      agreementCorpusText: secondDump,
+      relaxPaidSessionCorpusAssert: true,
+    });
+    expect(result.ok, result.ok ? "" : result.failure.userMessage).toBe(true);
+    expect(routes[0]).toMatch(/^\/app\/esign\/[^?]+\?agreement_bridge=1$/);
+    expect(readAgreementVs01BridgeSession()?.agreementCorpusText).toBe(secondDump);
+  });
+
   it("Send for review path is unchanged (does not take the local signature bridge)", async () => {
     const { readFileSync } = await import("node:fs");
     const { join } = await import("node:path");
     const s = readFileSync(join(__dirname, "paidProPostRecipientSetupHandoff.ts"), "utf8");
     const reviewStart = s.indexOf('if (options.premiumSendIntent === "review")');
-    const signatureStart = s.indexOf("const handoff = resolvePaidSessionSignatureTrackHandoff");
+    const signatureStart = s.indexOf("const resolvedHandoff = resolvePaidSessionSignatureTrackHandoff");
     expect(reviewStart).toBeGreaterThan(-1);
     expect(signatureStart).toBeGreaterThan(reviewStart);
     const reviewBlock = s.slice(reviewStart, signatureStart);
