@@ -701,7 +701,7 @@ export function Vs01Wizard({
         acceptedSoTDigestShort:
           portablePacket?.envelopeProvenance?.acceptedSoTDigest?.slice(0, 16) ?? null,
       });
-      if (!delivery.ok) {
+      if (delivery.attempted && !delivery.ok) {
         setError(
           delivery.skipReason
             ? `Signing links could not be persisted (${delivery.skipReason}).`
