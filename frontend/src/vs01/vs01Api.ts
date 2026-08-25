@@ -118,6 +118,28 @@ export async function createSignSession(
 }
 
 /**
+ * GET /v1/documents/{document_id}/esign-handoff — durable after-pay packet (capability URL).
+ * No owner principal required; document ids are unguessable.
+ */
+export async function fetchDocumentEsignHandoff(
+  documentId: string,
+): Promise<Record<string, unknown> | null> {
+  const enc = encodeURIComponent(documentId.trim());
+  if (!enc) return null;
+  try {
+    const res = await fetch(apiUrl(`/v1/documents/${enc}/esign-handoff`), {
+      method: "GET",
+      headers: { Accept: "application/json" },
+    });
+    if (!res.ok) return null;
+    const j = (await res.json().catch(() => ({}))) as { handoff?: unknown };
+    return j.handoff && typeof j.handoff === "object" ? (j.handoff as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * GET /v1/documents/{document_id}/content — raw document bytes (e.g. PDF for preview).
  */
 export async function fetchDocumentContent(documentId: string): Promise<Blob> {

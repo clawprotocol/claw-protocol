@@ -142,7 +142,10 @@ import {
   readPreparePreviewViewportGeometry,
   resetPrepareCanonicalPreviewScroll,
 } from "./vs01PreparePreviewViewport";
-import { readAgreementVs01BridgeSession } from "../launch/simpleProduct/agreementToVs01SigningBridge";
+import {
+  readAgreementVs01BridgeSession,
+  readDurableAgreementVs01Bridge,
+} from "../launch/simpleProduct/agreementToVs01SigningBridge";
 import { buildPrepareBridgeCorpusGateArgs } from "./vs01PrepareBridgeCorpus";
 import { resolveFinalVs01CorpusOrBlock, VS01_CORPUS_GATE_USER_MESSAGE } from "./vs01SigningCorpus";
 import {
@@ -580,7 +583,7 @@ export function StepPrepareSignature({
           guidedPro: true,
           ...buildPrepareBridgeCorpusGateArgs({
             agreementCorpusText: corpus,
-            bridge: readAgreementVs01BridgeSession(),
+            bridge: readDurableAgreementVs01Bridge(documentId) ?? readAgreementVs01BridgeSession(),
           }),
         });
         setPdfUrl(null);
@@ -664,8 +667,11 @@ export function StepPrepareSignature({
   }, [numPages]);
 
   const bridgeSession = useMemo(
-    () => (agreementBridgePlacementCopy ? readAgreementVs01BridgeSession() : null),
-    [agreementBridgePlacementCopy],
+    () =>
+      agreementBridgePlacementCopy
+        ? readDurableAgreementVs01Bridge(documentId) ?? readAgreementVs01BridgeSession()
+        : null,
+    [agreementBridgePlacementCopy, documentId],
   );
 
   const signingPacketModel = useMemo(() => {

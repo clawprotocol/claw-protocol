@@ -244,6 +244,50 @@ def finalize_document(
     return meta
 
 
+def merge_document_meta(document_id: str, extra: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Merge fields onto stored VS01 document meta (legacy + unified artifact)."""
+    did = (document_id or "").strip()
+    if not did or "/" in did or ".." in did:
+        return None
+    meta = get_document_meta(did)
+    if not meta:
+        return None
+    merged = dict(meta)
+    for key, value in extra.items():
+        if value is not None:
+            merged[key] = value
+    meta_json = json.dumps(merged, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
+    if unified_artifact_store_enabled():
+        try:
+            from backend.storage.artifact_repository import get_artifact_repository
+
+            repo = get_artifact_repository()
+            repo.init_schema()
+            repo.put_artifact(
+                artifact_type="vs01_document_meta",
+                logical_ref=did,
+                data=meta_json.encode("utf-8"),
+                content_type="application/json",
+                visibility="private",
+                metadata={"role": "signed_document_meta"},
+            )
+        except Exception as exc:
+            log.warning(
+                "merge_document_meta unified write failed document_id=%s err_type=%s",
+                did,
+                type(exc).__name__,
+            )
+    for base in _legacy_storage_bases():
+        meta_path = base / did / "meta.json"
+        if not meta_path.parent.is_dir():
+            continue
+        try:
+            meta_path.write_text(meta_json, encoding="utf-8")
+        except OSError:
+            continue
+    return merged
+
+
 def get_document_meta(document_id: str) -> Optional[Dict[str, Any]]:
     if unified_artifact_store_enabled():
         from backend.storage.artifact_repository import get_artifact_repository

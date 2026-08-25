@@ -10126,9 +10126,94 @@ class Vs01SigningSeedBody(BaseModel):
     """Optional authoritative signing corpus for paid Pro VS01 seed (must exceed stored draft preview)."""
 
     signing_corpus_plain: Optional[str] = Field(default=None, max_length=1_200_000)
+    esign_handoff: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Painted-deal packet so /app/esign/doc_* reloads after session death.",
+    )
 
 
 _VS01_SIGNING_CORPUS_OVERRIDE_MIN_LEN = 1500
+_VS01_ESIGN_HANDOFF_MIN_CORPUS_LEN = 200
+
+
+def _sanitize_esign_handoff_payload(
+    *,
+    document_id: str,
+    agreement_id: str,
+    draft: Any,
+    signing_plain: str,
+    client_handoff: Optional[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """Persist painted corpus + identities on the document — not first-SPA session only."""
+    title = ""
+    creator_name = ""
+    creator_email = ""
+    creator_signer_name = ""
+    creator_signer_title = ""
+    counterparties: List[Any] = []
+    legal_parties: List[Any] = []
+    corpus = (signing_plain or "").strip()
+    raw = client_handoff if isinstance(client_handoff, dict) else {}
+    if raw:
+        title = str(raw.get("agreement_title") or "").strip()
+        creator_name = str(raw.get("creator_name") or "").strip()
+        creator_email = str(raw.get("creator_email") or "").strip()
+        creator_signer_name = str(raw.get("creator_signer_name") or "").strip()
+        creator_signer_title = str(raw.get("creator_signer_title") or "").strip()
+        if isinstance(raw.get("counterparties"), list):
+            counterparties = raw.get("counterparties") or []
+        if isinstance(raw.get("legal_parties"), list):
+            legal_parties = raw.get("legal_parties") or []
+        client_corpus = str(raw.get("agreement_corpus_text") or "").strip()
+        if len(client_corpus) > len(corpus):
+            corpus = client_corpus
+    if not title:
+        title = str(getattr(draft, "title", "") or "").strip() or "Agreement"
+    parties = list(getattr(draft, "parties", None) or [])
+    if not creator_name and parties:
+        creator_name = str(getattr(parties[0], "name", "") or "").strip()
+        creator_email = str(getattr(parties[0], "email", "") or "").strip()
+    if not counterparties and len(parties) > 1:
+        for p in parties[1:]:
+            counterparties.append(
+                {
+                    "id": str(getattr(p, "id", "") or ""),
+                    "name": str(getattr(p, "name", "") or ""),
+                    "email": str(getattr(p, "email", "") or ""),
+                    "phone": str(getattr(p, "phone", "") or ""),
+                }
+            )
+    if not legal_parties and parties:
+        legal_parties = [
+            {
+                "name": str(getattr(p, "name", "") or ""),
+                "role": str(getattr(p, "role", "") or ""),
+                "email": str(getattr(p, "email", "") or ""),
+            }
+            for p in parties
+        ]
+    if not corpus:
+        _field_key, corpus_vs = primary_agreement_plain_field_and_value(draft)
+        corpus = (corpus_vs or "").strip()
+    return {
+        "v": 1,
+        "vs01_document_id": document_id,
+        "agreement_id": agreement_id,
+        "agreement_title": title,
+        "agreement_corpus_text": corpus,
+        "creator_name": creator_name,
+        "creator_email": creator_email,
+        "creator_signer_name": creator_signer_name,
+        "creator_signer_title": creator_signer_title,
+        "counterparties": counterparties,
+        "legal_parties": legal_parties,
+        "source": "paid_pro_sender_first",
+        "sender_first_lawdog_handoff": True,
+        "owner_is_preparing_packet": True,
+        "agreement_bridge_mode": "prepare_signing_packet",
+        "creator_is_party": raw.get("creator_is_party") if raw else True,
+        "reviewer_approved_clean_handoff": bool(raw.get("reviewer_approved_clean_handoff")) if raw else False,
+    }
 
 
 def _vs01_signing_seed_error_detail(
@@ -10408,6 +10493,29 @@ def post_agreement_vs01_signing_seed(
         )
 
     hsh = meta.get("content_sha256") if isinstance(meta, dict) else None
+    try:
+        handoff = _sanitize_esign_handoff_payload(
+            document_id=doc_id,
+            agreement_id=aid,
+            draft=draft,
+            signing_plain=signing_plain,
+            client_handoff=body.esign_handoff if isinstance(body.esign_handoff, dict) else None,
+        )
+        corpus_len = len(str(handoff.get("agreement_corpus_text") or "").strip())
+        if corpus_len >= _VS01_ESIGN_HANDOFF_MIN_CORPUS_LEN:
+            document_service.merge_document_meta(doc_id, {"esign_handoff_v1": handoff})
+            log.info(
+                "[agreement-vs01-seed] event=esign_handoff_persisted agreement_id=%s document_id=%s corpus_len=%s",
+                aid,
+                doc_id,
+                corpus_len,
+            )
+    except Exception:
+        log.exception(
+            "[agreement-vs01-seed] event=warning agreement_id=%s document_id=%s stage=esign_handoff_persist",
+            aid,
+            doc_id,
+        )
     log.info(
         "[agreement-vs01-seed] event=success agreement_id=%s stage=complete status=200 html_len=%s pdf_len=%s "
         "render_mode=%s document_id=%s content_sha256=%s",

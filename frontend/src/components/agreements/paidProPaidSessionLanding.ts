@@ -249,14 +249,16 @@ export function isPaidSessionSignatureTrackBridge(
 }
 
 /**
- * After-pay `/app/esign/:id?agreement_bridge=1` must hydrate the painted deal
- * at the 200-char floor. The 1500-char VS01 gate is for long Pro snapshots only.
+ * After-pay `/app/esign/:id` must hydrate the painted deal at the 200-char floor
+ * from a durable packet (not first-SPA `agreement_bridge=1` alone).
+ * The 1500-char VS01 gate is for long Pro snapshots only.
  */
 export function vs01PaidSessionWorkspaceHydrateMinCorpusLen(args: {
   agreementBridge: boolean;
   paidProHandoff: boolean;
+  paidSessionDurablePacket?: boolean;
 }): number {
-  if (args.agreementBridge && args.paidProHandoff) {
+  if (args.paidProHandoff && (args.agreementBridge || args.paidSessionDurablePacket)) {
     return PAID_SESSION_SIGNATURE_TRACK_MIN_CORPUS_LEN;
   }
   return 1500;

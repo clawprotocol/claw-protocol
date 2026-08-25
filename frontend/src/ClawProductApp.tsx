@@ -74,7 +74,10 @@ import { logRecipientReviewTokenResolved } from "./components/agreements/reviewF
 import { Vs01Layout, type Vs01LayoutHero } from "./vs01/Vs01Layout";
 import { Vs01Wizard } from "./vs01/Vs01Wizard";
 import { getVs01UrlBootstrap } from "./vs01/vs01UrlBootstrap";
-import { readAgreementVs01BridgeSession } from "./launch/simpleProduct/agreementToVs01SigningBridge";
+import {
+  readAgreementVs01BridgeSession,
+  readDurableAgreementVs01Bridge,
+} from "./launch/simpleProduct/agreementToVs01SigningBridge";
 import { logVs01CopyContext, resolveVs01EsignShellCopy } from "./vs01/vs01EsignShellCopy";
 import { isRecipientSigningPublicSurface } from "./launch/completedAgreementViewContext";
 import { ClawPublicFeedView } from "./feed/ClawPublicFeedView";
@@ -393,7 +396,10 @@ function AgreementReviewGate(props: {
 function AppEsignDocumentShell(props: { seed: string; search: string; pathname: string }) {
   const { seed, search, pathname } = props;
   const [vs01Step, setVs01Step] = useState(0);
-  const bridge = typeof window !== "undefined" ? readAgreementVs01BridgeSession() : null;
+  const bridge =
+    typeof window !== "undefined"
+      ? readDurableAgreementVs01Bridge(seed) ?? readAgreementVs01BridgeSession()
+      : null;
   const shellCopy = resolveVs01EsignShellCopy({ search, seedDocumentId: seed, bridge, vs01Step });
   const recipientPublicSigning = isRecipientSigningPublicSurface(pathname, search);
   const navMode = recipientPublicSigning
@@ -403,7 +409,10 @@ function AppEsignDocumentShell(props: { seed: string; search: string; pathname: 
       : "default";
 
   useEffect(() => {
-    const b = typeof window !== "undefined" ? readAgreementVs01BridgeSession() : null;
+    const b =
+      typeof window !== "undefined"
+        ? readDurableAgreementVs01Bridge(seed) ?? readAgreementVs01BridgeSession()
+        : null;
     const sc = resolveVs01EsignShellCopy({ search, seedDocumentId: seed, bridge: b, vs01Step });
     logVs01CopyContext({
       documentId: seed,

@@ -7,6 +7,7 @@ import { fingerprintAgreementBody } from "../components/agreements/guidedDealCom
 import type { Vs01FullyExecutedSignedSnapshotV1 } from "./vs01FullyExecutedSignedSnapshot";
 import type { Vs01RecipientPlacedField } from "./types";
 import type { Vs01PrepareSigningRole } from "./vs01SignerFieldAssignment";
+import { PAID_SESSION_SIGNATURE_TRACK_MIN_CORPUS_LEN } from "../components/agreements/paidProPaidSessionLanding";
 import { VS01_SIGNING_CORPUS_MIN_LEN } from "./vs01SigningCorpus";
 import type { Vs01SigningEnvelopeProvenanceV1 } from "./vs01SigningEnvelopeProvenance";
 
@@ -103,7 +104,9 @@ function isValidSeed(o: unknown): o is Vs01CanonicalPacketSeedV1 {
     s.documentId.trim().length > 0 &&
     typeof s.agreementId === "string" &&
     typeof s.corpusPlain === "string" &&
-    s.corpusPlain.trim().length >= VS01_SIGNING_CORPUS_MIN_LEN &&
+    // Persisted after-pay packets are often 200–1500 chars. Rejecting them at 1500
+    // made private links unloadable after the first SPA session.
+    s.corpusPlain.trim().length >= PAID_SESSION_SIGNATURE_TRACK_MIN_CORPUS_LEN &&
     typeof s.corpusHash === "string" &&
     s.corpusHash === fingerprintAgreementBody(s.corpusPlain)
   );
@@ -113,11 +116,14 @@ export function buildVs01CanonicalPacketSeed(args: {
   documentId: string;
   agreementId: string;
   corpusPlain: string;
+  /** After-pay painted deal: 200. Generic guided Pro: 1500 (default). */
+  minCorpusLen?: number;
 }): Vs01CanonicalPacketSeedV1 | null {
   const documentId = args.documentId.trim();
   const agreementId = args.agreementId.trim();
   const corpusPlain = args.corpusPlain.trim();
-  if (!documentId || !agreementId || corpusPlain.length < VS01_SIGNING_CORPUS_MIN_LEN) return null;
+  const minLen = args.minCorpusLen ?? VS01_SIGNING_CORPUS_MIN_LEN;
+  if (!documentId || !agreementId || corpusPlain.length < minLen) return null;
   return {
     v: 1,
     documentId,

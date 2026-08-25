@@ -54,8 +54,11 @@ import type { Vs01Counterparty } from "../../vs01/types";
 import { resolveApiBase } from "../../lib/clawApi";
 
 const BRIDGE_SESSION_KEY = "claw_agreement_vs01_bridge_handoff_v1";
+/** Per-document durable copy — survives sessionStorage death, new tab, later visit. */
+const BRIDGE_DURABLE_KEY_PREFIX = "claw_agreement_vs01_bridge_handoff_v1:";
 /** Survives Strict Mode / URL strip so Vs01Wizard still knows to skip details (value = document id). */
 const PAID_PRO_AGREEMENT_SKIP_MARKER_KEY = "claw_vs01_paid_pro_agreement_skip_v1";
+const PAID_PRO_AGREEMENT_SKIP_MARKER_DURABLE_PREFIX = "claw_vs01_paid_pro_agreement_skip_v1:";
 
 export type AgreementVs01BridgeSession = {
   vs01DocumentId: string;
@@ -106,15 +109,38 @@ export function setPaidProAgreementBridgeSkipMarker(documentId: string): void {
   } catch {
     /* ignore */
   }
+  try {
+    localStorage.setItem(`${PAID_PRO_AGREEMENT_SKIP_MARKER_DURABLE_PREFIX}${id}`, id);
+  } catch {
+    /* ignore */
+  }
 }
 
 export function readPaidProAgreementBridgeSkipMarker(documentId: string | null | undefined): boolean {
   const id = (documentId || "").trim();
   if (!id) return false;
   try {
-    return sessionStorage.getItem(PAID_PRO_AGREEMENT_SKIP_MARKER_KEY) === id;
+    if (sessionStorage.getItem(PAID_PRO_AGREEMENT_SKIP_MARKER_KEY) === id) return true;
+  } catch {
+    /* ignore */
+  }
+  try {
+    return localStorage.getItem(`${PAID_PRO_AGREEMENT_SKIP_MARKER_DURABLE_PREFIX}${id}`) === id;
   } catch {
     return false;
+  }
+}
+
+function removeLocalStorageKeysWithPrefix(prefix: string): void {
+  try {
+    const keys: string[] = [];
+    for (let i = 0; i < localStorage.length; i += 1) {
+      const key = localStorage.key(i);
+      if (key?.startsWith(prefix)) keys.push(key);
+    }
+    for (const key of keys) localStorage.removeItem(key);
+  } catch {
+    /* ignore */
   }
 }
 
@@ -124,11 +150,12 @@ export function clearPaidProAgreementBridgeSkipMarker(): void {
   } catch {
     /* ignore */
   }
+  removeLocalStorageKeysWithPrefix(PAID_PRO_AGREEMENT_SKIP_MARKER_DURABLE_PREFIX);
 }
 
 /**
- * Paid Pro `/app/esign/:doc?agreement_bridge=1` — skip VS01 “Who needs to sign?” (LawDog already collected signers).
- * Uses persisted marker and/or live URL + bridge session (document ids must match).
+ * Paid Pro `/app/esign/:doc` — skip VS01 “Who needs to sign?” (LawDog already collected signers).
+ * Uses durable packet / skip marker, not first-SPA sessionStorage alone.
  */
 export function computePaidProAgreementBridgeSkip(
   seedDocumentId: string | null | undefined,
@@ -138,6 +165,8 @@ export function computePaidProAgreementBridgeSkip(
   const sid = (seedDocumentId || "").trim();
   if (readPaidProAgreementBridgeSkipMarker(sid)) return true;
   if (typeof window === "undefined") return false;
+  const durable = readDurableAgreementVs01Bridge(sid);
+  if (durable && durable.vs01DocumentId.trim() === sid) return true;
   const b = readAgreementVs01BridgeSession();
   if (b && b.vs01DocumentId.trim() === sid) return true;
   const q = new URLSearchParams(window.location.search);
@@ -731,18 +760,9 @@ export function logVs01BridgeSignerMetadata(bridge: AgreementVs01BridgeSession):
   });
 }
 
-export function writeAgreementVs01BridgeSession(payload: AgreementVs01BridgeSession): void {
+function parseAgreementVs01BridgeSession(raw: string | null): AgreementVs01BridgeSession | null {
+  if (!raw) return null;
   try {
-    sessionStorage.setItem(BRIDGE_SESSION_KEY, JSON.stringify(payload));
-  } catch {
-    /* ignore */
-  }
-}
-
-export function readAgreementVs01BridgeSession(): AgreementVs01BridgeSession | null {
-  try {
-    const raw = sessionStorage.getItem(BRIDGE_SESSION_KEY);
-    if (!raw) return null;
     const o = JSON.parse(raw) as AgreementVs01BridgeSession;
     if (!o?.vs01DocumentId?.trim() || !o.agreementId?.trim()) return null;
     if (!Array.isArray(o.counterparties)) return null;
@@ -752,12 +772,58 @@ export function readAgreementVs01BridgeSession(): AgreementVs01BridgeSession | n
   }
 }
 
+export function durableAgreementVs01BridgeStorageKey(documentId: string): string {
+  return `${BRIDGE_DURABLE_KEY_PREFIX}${documentId.trim()}`;
+}
+
+export function writeAgreementVs01BridgeSession(payload: AgreementVs01BridgeSession): void {
+  const json = JSON.stringify(payload);
+  try {
+    sessionStorage.setItem(BRIDGE_SESSION_KEY, json);
+  } catch {
+    /* ignore */
+  }
+  const did = payload.vs01DocumentId.trim();
+  if (!did) return;
+  try {
+    localStorage.setItem(durableAgreementVs01BridgeStorageKey(did), json);
+  } catch {
+    /* ignore */
+  }
+}
+
+export function readAgreementVs01BridgeSession(): AgreementVs01BridgeSession | null {
+  try {
+    return parseAgreementVs01BridgeSession(sessionStorage.getItem(BRIDGE_SESSION_KEY));
+  } catch {
+    return null;
+  }
+}
+
+/** Session first, then per-document localStorage — survives session death / new tab / later visit. */
+export function readDurableAgreementVs01Bridge(documentId: string | null | undefined): AgreementVs01BridgeSession | null {
+  const sid = (documentId || "").trim();
+  if (!sid) return null;
+  const session = readAgreementVs01BridgeSession();
+  if (session && session.vs01DocumentId.trim() === sid) return session;
+  try {
+    const durable = parseAgreementVs01BridgeSession(
+      localStorage.getItem(durableAgreementVs01BridgeStorageKey(sid)),
+    );
+    if (durable && durable.vs01DocumentId.trim() === sid) return durable;
+  } catch {
+    /* ignore */
+  }
+  return null;
+}
+
 export function clearAgreementVs01BridgeSession(): void {
   try {
     sessionStorage.removeItem(BRIDGE_SESSION_KEY);
   } catch {
     /* ignore */
   }
+  removeLocalStorageKeysWithPrefix(BRIDGE_DURABLE_KEY_PREFIX);
 }
 
 export type AgreementVs01SigningSeedResult =
@@ -857,12 +923,69 @@ function logVs01SigningSeed422(detail: unknown, status: number): void {
   console.warn("[vs01-signing-seed-422]", { status, code: code ?? null, message: message ?? null, stage: stage ?? null });
 }
 
+export function agreementVs01BridgeToEsignHandoffPayload(
+  bridge: AgreementVs01BridgeSession,
+): Record<string, unknown> {
+  return {
+    v: 1,
+    agreement_id: bridge.agreementId,
+    agreement_title: bridge.agreementTitle,
+    agreement_corpus_text: bridge.agreementCorpusText ?? "",
+    creator_name: bridge.creatorName,
+    creator_email: bridge.creatorEmail,
+    creator_signer_name: bridge.creatorSignerName ?? "",
+    creator_signer_title: bridge.creatorSignerTitle ?? "",
+    counterparties: bridge.counterparties,
+    legal_parties: bridge.legalParties ?? [],
+    source: bridge.source ?? "paid_pro_sender_first",
+    sender_first_lawdog_handoff: Boolean(bridge.senderFirstLawdogHandoff),
+    owner_is_preparing_packet: Boolean(bridge.ownerIsPreparingPacket),
+    agreement_bridge_mode: bridge.agreementBridgeMode ?? "prepare_signing_packet",
+    creator_is_party: bridge.creatorIsParty,
+    reviewer_approved_clean_handoff: Boolean(bridge.reviewerApprovedCleanHandoff),
+  };
+}
+
+export function esignHandoffPayloadToAgreementVs01Bridge(
+  documentId: string,
+  raw: Record<string, unknown>,
+): AgreementVs01BridgeSession | null {
+  const did = documentId.trim();
+  const aid = typeof raw.agreement_id === "string" ? raw.agreement_id.trim() : "";
+  const corpus = typeof raw.agreement_corpus_text === "string" ? raw.agreement_corpus_text : "";
+  if (!did || !aid || !Array.isArray(raw.counterparties)) return null;
+  return {
+    vs01DocumentId: did,
+    agreementId: aid,
+    agreementTitle: typeof raw.agreement_title === "string" ? raw.agreement_title : "Agreement",
+    creatorName: typeof raw.creator_name === "string" ? raw.creator_name : "",
+    creatorEmail: typeof raw.creator_email === "string" ? raw.creator_email : "",
+    ...(typeof raw.creator_signer_name === "string" && raw.creator_signer_name.trim()
+      ? { creatorSignerName: raw.creator_signer_name }
+      : {}),
+    ...(typeof raw.creator_signer_title === "string" && raw.creator_signer_title.trim()
+      ? { creatorSignerTitle: raw.creator_signer_title }
+      : {}),
+    counterparties: raw.counterparties as AgreementVs01BridgeSession["counterparties"],
+    targetStep: 2,
+    senderFirstLawdogHandoff: raw.sender_first_lawdog_handoff !== false,
+    source: raw.source === "paid_pro_sender_first" ? "paid_pro_sender_first" : "paid_pro_sender_first",
+    signerFirst: true,
+    ownerIsPreparingPacket: raw.owner_is_preparing_packet !== false,
+    agreementBridgeMode: "prepare_signing_packet",
+    ...(corpus.trim() ? { agreementCorpusText: corpus } : {}),
+    reviewerApprovedCleanHandoff: raw.reviewer_approved_clean_handoff === true,
+    creatorIsParty: raw.creator_is_party !== false,
+    ...(Array.isArray(raw.legal_parties) ? { legalParties: raw.legal_parties as AgreementVs01BridgeSession["legalParties"] } : {}),
+  };
+}
+
 export async function fetchAgreementVs01SigningSeed(
   agreementId: string,
   draft?: AgreementDraft | null,
   signingCorpusPlain?: string | null,
   signingCorpusSource?: string | null,
-  options?: { includeShortSigningCorpus?: boolean },
+  options?: { includeShortSigningCorpus?: boolean; esignHandoff?: Record<string, unknown> | null },
 ): Promise<AgreementVs01SigningSeedResult> {
   const id = agreementId.trim();
   if (!id) return { ok: false, reason: "missing_agreement_id" };
@@ -879,6 +1002,7 @@ export async function fetchAgreementVs01SigningSeed(
         headers: clawAgreementHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({
           ...(includeCorpus ? { signing_corpus_plain: corpusPayload } : {}),
+          ...(options?.esignHandoff ? { esign_handoff: options.esignHandoff } : {}),
         }),
       },
     );
@@ -1004,7 +1128,10 @@ export async function tryNavigatePaidProAgreementSenderFirstVs01Esign(options: {
     mergedWithCorpus,
     corpusForSeed,
     handoff?.source ?? corpusResolution.source,
-    { includeShortSigningCorpus: relax },
+    {
+      includeShortSigningCorpus: relax,
+      esignHandoff: agreementVs01BridgeToEsignHandoffPayload(bridgeDraft),
+    },
   );
   if (!vs01Seed.ok) return false;
   logSignerMetadataBeforeVs01Bridge(merged, resolvedSetup);

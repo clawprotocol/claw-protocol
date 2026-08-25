@@ -161,6 +161,87 @@ def test_vs01_seed_content_ok_under_commercial_mode(monkeypatch: pytest.MonkeyPa
     assert content.content.startswith(b"%PDF")
 
 
+def test_vs01_seed_persists_esign_handoff_readable_without_owner_session(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """After-pay /app/esign/doc_* must reload the painted deal when sessionStorage is gone."""
+    pytest.importorskip("fitz")
+    _env_common(monkeypatch, tmp_path)
+    client = TestClient(app, raise_server_exceptions=False)
+    painted = (
+        "SERVICES AGREEMENT\n\nThis Agreement is entered into by Alex Rivera of Northline Studio "
+        "and Jordan Kim of Harbor Marks LLC to design a logo and brand kit. Payment $2,400 due "
+        "on signing. Term 30 days. Governing law: Texas."
+    )
+    assert len(painted) >= 200
+    create_res = client.post(
+        "/api/agreements/draft",
+        headers=_ORG_H,
+        json={
+            "title": "Services Agreement",
+            "jurisdiction": "TX",
+            "parties": [
+                {"name": "Alex Rivera of Northline Studio", "role": "client", "email": "alex.rivera.qa@example.com"},
+                {"name": "Jordan Kim of Harbor Marks LLC", "role": "service_provider", "email": "jordan.kim.qa@example.com"},
+            ],
+            "purpose": "Consulting services for automation implementation and support.",
+            "payment_terms": "Net 30",
+            "duration": "1 year",
+            "due_date": None,
+            "effective_date": None,
+        },
+    )
+    assert create_res.status_code == 200, create_res.text
+    agreement_id = create_res.json()["id"]
+
+    seed = client.post(
+        f"/api/agreements/{agreement_id}/vs01-signing-seed",
+        headers=_ORG_H,
+        json={
+            "signing_corpus_plain": painted,
+            "esign_handoff": {
+                "agreement_title": "Services Agreement",
+                "agreement_corpus_text": painted,
+                "creator_name": "Alex Rivera of Northline Studio",
+                "creator_email": "alex.rivera.qa@example.com",
+                "counterparties": [
+                    {
+                        "id": "cp1",
+                        "name": "Jordan Kim of Harbor Marks LLC",
+                        "email": "jordan.kim.qa@example.com",
+                        "phone": "",
+                    }
+                ],
+                "source": "paid_pro_sender_first",
+                "sender_first_lawdog_handoff": True,
+                "owner_is_preparing_packet": True,
+                "agreement_bridge_mode": "prepare_signing_packet",
+            },
+        },
+    )
+    assert seed.status_code == 200, seed.text
+    doc_id = seed.json()["document_id"]
+    assert doc_id.startswith("doc_")
+
+    meta = document_service.get_document_meta(doc_id) or {}
+    stored = meta.get("esign_handoff_v1")
+    assert isinstance(stored, dict)
+    assert stored.get("agreement_corpus_text") == painted
+    assert stored.get("agreement_id") == agreement_id
+    assert stored.get("creator_email") == "alex.rivera.qa@example.com"
+
+    anon = client.get(f"/v1/documents/{doc_id}/esign-handoff")
+    assert anon.status_code == 200, anon.text
+    body = anon.json()
+    assert body.get("ok") is True
+    assert body.get("document_id") == doc_id
+    assert body["handoff"]["agreement_corpus_text"] == painted
+    assert body["handoff"]["counterparties"][0]["email"] == "jordan.kim.qa@example.com"
+
+    missing = client.get("/v1/documents/doc_nonexistent0000000000000000/esign-handoff")
+    assert missing.status_code == 404
+
+
 def test_document_content_survives_malformed_meta(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
     _env_common(monkeypatch, tmp_path)
     raw = b"%PDF-1.4 test354"

@@ -406,6 +406,13 @@ describe("paid session signature-track handoff — leftover packet vs painted de
       }),
     ).toBe(1500);
     expect(
+      vs01PaidSessionWorkspaceHydrateMinCorpusLen({
+        agreementBridge: false,
+        paidProHandoff: true,
+        paidSessionDurablePacket: true,
+      }),
+    ).toBe(200);
+    expect(
       shouldRelaxPaidSessionWorkspaceCorpus({
         bridge: { senderFirstLawdogHandoff: true, source: "paid_pro_sender_first" },
         corpusText: painted.corpusText,
