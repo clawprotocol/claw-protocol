@@ -44,6 +44,7 @@ import { isPaidProSigningReadyHydratedCorpus } from "../components/agreements/pa
 import { getPaidProDocumentForSurface } from "../components/agreements/paidProSourceOfTruth";
 import { requireAuthoritativeCorpusForSurface } from "../components/agreements/authoritativeAgreementDocument";
 import { logLawdogOutputPathMap } from "../components/agreements/lawdogOutputPathMap";
+import { PAID_SESSION_SIGNATURE_TRACK_MIN_CORPUS_LEN } from "../components/agreements/paidProPaidSessionLanding";
 import {
   resolvePaidProVs01CheckPhase,
   shouldRunPaidProVs01CorpusChecks,
@@ -258,6 +259,11 @@ export type ResolveFinalVs01CorpusOrBlockArgs = {
   prepareSignatureLinksRequested?: boolean;
   /** VS01 portable / prepare role count — authoritative on recipient signing when >= 3. */
   manifestPartyCount?: number;
+  /**
+   * After-pay Send for signature: keep the painted deal (≥200) on the existing
+   * prepare workspace. Packet layout adds signature/witness anchors.
+   */
+  relaxPaidSessionCorpusAssert?: boolean;
 };
 
 export type Vs01WitnessRequirement = {
@@ -495,6 +501,37 @@ export function resolveFinalVs01CorpusOrBlock(
     args,
     args.finalizedSigningPlain ?? args.acceptedReviewPlain ?? args.agreementCorpusText,
   );
+  if (args.relaxPaidSessionCorpusAssert) {
+    const painted = (args.agreementCorpusText ?? "").replace(/\r\n/g, "\n").trim();
+    if (painted.length >= PAID_SESSION_SIGNATURE_TRACK_MIN_CORPUS_LEN) {
+      const hash = fingerprintAgreementBody(painted);
+      const witnessRequirement = resolveVs01WitnessRequirement({
+        corpusText: painted,
+        intakeText: args.intakeText,
+        draft: args.draft ?? null,
+      });
+      return {
+        corpus: painted,
+        source: "handoff_corpus",
+        len: painted.length,
+        hash,
+        matchesFreeHash: false,
+        isFreeHashMatch: false,
+        hasWitnessBlock: corpusHasWitnessBlock(painted),
+        requiresSignatureBlock: true,
+        requiresWitness: witnessRequirement.requiresWitness,
+        witnessReason: witnessRequirement.witnessReason,
+        hasBySignatureLines: corpusSignatureBlocksHaveRequiredByLines(painted, signerCount),
+        hasByOrSignatureLines: corpusSignatureBlocksHaveRequiredByLines(painted, signerCount),
+        signerCount,
+        allowed: !premiumInProgress,
+        blockReason: premiumInProgress ? "premium_corpus_in_progress" : undefined,
+        premiumInProgress,
+        premiumComplete: premiumComplete || painted.length >= PAID_SESSION_SIGNATURE_TRACK_MIN_CORPUS_LEN,
+        userMessage: premiumInProgress ? VS01_CORPUS_GATE_USER_MESSAGE : undefined,
+      };
+    }
+  }
   const signingSnapshot = getAuthoritativeSigningSnapshot();
   const handoffCorpusLen = (args.guidedSigningHandoff?.corpusText ?? "").trim().length;
   const vs01Phase =

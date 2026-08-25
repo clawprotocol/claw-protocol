@@ -12,8 +12,10 @@ import {
   resolvePaidSessionSignatureTrackHandoff,
   resolvePaidSessionVisibleDealBody,
   shouldKeepPaidSessionSignerEmailsInteractive,
+  shouldRelaxPaidSessionWorkspaceCorpus,
   shouldShowPaidSessionGeneratingOverlay,
   shouldSuppressFreeMissingTenetAskAfterPay,
+  vs01PaidSessionWorkspaceHydrateMinCorpusLen,
 } from "./paidProPaidSessionLanding";
 import { resolveShowPaidProReviewDocumentCard } from "./paidProDocumentBodyRouter";
 import {
@@ -388,5 +390,32 @@ describe("paid session signature-track handoff — leftover packet vs painted de
     expect(merged.document_text).toBe(painted.corpusText);
     expect(merged.server_full_document_text).toBe(painted.corpusText);
     expect(merged.premium_full_document_text).toBe(painted.corpusText);
+  });
+
+  it("hydrates the after-pay workspace at 200 chars when agreement_bridge + paid Pro handoff", () => {
+    expect(
+      vs01PaidSessionWorkspaceHydrateMinCorpusLen({
+        agreementBridge: true,
+        paidProHandoff: true,
+      }),
+    ).toBe(200);
+    expect(
+      vs01PaidSessionWorkspaceHydrateMinCorpusLen({
+        agreementBridge: false,
+        paidProHandoff: true,
+      }),
+    ).toBe(1500);
+    expect(
+      shouldRelaxPaidSessionWorkspaceCorpus({
+        bridge: { senderFirstLawdogHandoff: true, source: "paid_pro_sender_first" },
+        corpusText: painted.corpusText,
+      }),
+    ).toBe(true);
+    expect(
+      shouldRelaxPaidSessionWorkspaceCorpus({
+        bridge: { senderFirstLawdogHandoff: true },
+        corpusText: "too short",
+      }),
+    ).toBe(false);
   });
 });

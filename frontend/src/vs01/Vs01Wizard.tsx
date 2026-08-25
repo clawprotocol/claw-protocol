@@ -39,6 +39,7 @@ import {
 } from "../launch/simpleProduct/agreementToVs01SigningBridge";
 import { resolvePrepareBridgeSigningCorpus } from "./vs01PrepareBridgeCorpus";
 import { VS01_SIGNING_CORPUS_MIN_LEN } from "./vs01SigningCorpus";
+import { vs01PaidSessionWorkspaceHydrateMinCorpusLen } from "../components/agreements/paidProPaidSessionLanding";
 import { fingerprintAgreementBody } from "../components/agreements/guidedDealCompletion/guidedSigningPacketVersion";
 import { buildVs01CanonicalPacketSeed, hasVs01CanonicalPacketCached, storeVs01CanonicalPacketSeed } from "./vs01CanonicalPacketSeed";
 import { buildVs01RecipientSigningUrl } from "./StepReceipt";
@@ -757,7 +758,11 @@ export function Vs01Wizard({
               bridge.vs01DocumentId.trim() === sid));
         if (!paidProAgreementHandoff || !bridge || bridge.vs01DocumentId.trim() !== sid) return false;
         const corpus = (bridge.agreementCorpusText ?? "").trim();
-        if (corpus.length < VS01_SIGNING_CORPUS_MIN_LEN) return false;
+        const hydrateMinLen = vs01PaidSessionWorkspaceHydrateMinCorpusLen({
+          agreementBridge: allowBridgeCorpusHydrate,
+          paidProHandoff: paidProAgreementHandoff,
+        });
+        if (corpus.length < hydrateMinLen) return false;
         if (cancelled) return false;
         setDocumentId(sid);
         setContentSha256(`corpus:${fingerprintAgreementBody(corpus)}`);
@@ -792,7 +797,7 @@ export function Vs01Wizard({
             draft: null,
             bridge,
           });
-          setPrepareCorpusText(signingCorpus.corpus.trim() || null);
+          setPrepareCorpusText(signingCorpus.corpus.trim() || corpus || null);
           setAgreementTitle(titleForUi);
           setCreatorName(cn);
           setCreatorEmail(ce);
@@ -927,7 +932,9 @@ export function Vs01Wizard({
               draft: null,
               bridge,
             });
-            setPrepareCorpusText(signingCorpus.corpus.trim() || null);
+            setPrepareCorpusText(
+              signingCorpus.corpus.trim() || (bridge.agreementCorpusText ?? "").trim() || null,
+            );
             setAgreementTitle(titleForUi);
             setCreatorName(cn);
             setCreatorEmail(ce);
