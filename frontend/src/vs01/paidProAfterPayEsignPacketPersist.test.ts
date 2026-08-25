@@ -134,7 +134,9 @@ describe("after-pay e-sign packet is durable (not first-SPA only)", () => {
     );
     expect(readPaidProAgreementBridgeSkipMarker(fixture.docId)).toBe(true);
     expect(computePaidProAgreementBridgeSkip(fixture.docId, true)).toBe(true);
-    expect(localStorage.getItem(durableAgreementVs01BridgeStorageKey(fixture.docId))).toContain(fixture.corpus);
+    expect(localStorage.getItem(durableAgreementVs01BridgeStorageKey(fixture.docId))).toContain(
+      JSON.stringify(fixture.corpus).slice(1, -1),
+    );
   });
 
   it("maps seed handoff payload back to a workspace bridge without agreement_bridge=1", () => {
