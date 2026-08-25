@@ -10205,8 +10205,7 @@ class Vs01SigningSeedBody(BaseModel):
 
 
 _VS01_SIGNING_CORPUS_OVERRIDE_MIN_LEN = 1500
-# Painted after-pay deals can sit at the ~200-char hydrate floor. Persist any painted corpus.
-_VS01_ESIGN_HANDOFF_MIN_CORPUS_LEN = 1
+_VS01_ESIGN_HANDOFF_MIN_CORPUS_LEN = 200
 
 
 def _sanitize_esign_handoff_payload(
@@ -10575,7 +10574,13 @@ def post_agreement_vs01_signing_seed(
             client_handoff=body.esign_handoff if isinstance(body.esign_handoff, dict) else None,
         )
         corpus_len = len(str(handoff.get("agreement_corpus_text") or "").strip())
-        if corpus_len >= _VS01_ESIGN_HANDOFF_MIN_CORPUS_LEN:
+        client_sent_handoff = isinstance(body.esign_handoff, dict) and bool(body.esign_handoff)
+        # After-pay client handoff: persist even at the ~200-char painted floor.
+        # Commercial seed without a client handoff must not open content anonymously.
+        persist_handoff = corpus_len > 0 and (
+            client_sent_handoff or corpus_len >= _VS01_ESIGN_HANDOFF_MIN_CORPUS_LEN
+        )
+        if persist_handoff:
             document_service.merge_document_meta(doc_id, {"esign_handoff_v1": handoff})
             log.info(
                 "[agreement-vs01-seed] event=esign_handoff_persisted agreement_id=%s document_id=%s corpus_len=%s",
@@ -10583,17 +10588,18 @@ def post_agreement_vs01_signing_seed(
                 doc_id,
                 corpus_len,
             )
-            draft = _merge_agreement_draft(
-                draft,
-                after_pay_ceremony_v1={
-                    "v": 1,
-                    "document_id": doc_id,
-                    "seeded_at": _utc_now_iso(),
-                    "corpus_len": corpus_len,
-                },
-                updated_at=_utc_now_iso(),
-            )
-            _save_draft_sync(draft.model_dump(), request)
+            if client_sent_handoff:
+                draft = _merge_agreement_draft(
+                    draft,
+                    after_pay_ceremony_v1={
+                        "v": 1,
+                        "document_id": doc_id,
+                        "seeded_at": _utc_now_iso(),
+                        "corpus_len": corpus_len,
+                    },
+                    updated_at=_utc_now_iso(),
+                )
+                _save_draft_sync(draft.model_dump(), request)
     except Exception:
         log.exception(
             "[agreement-vs01-seed] event=warning agreement_id=%s document_id=%s stage=esign_handoff_persist",
