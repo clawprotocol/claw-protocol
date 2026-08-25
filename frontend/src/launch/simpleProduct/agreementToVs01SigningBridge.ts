@@ -131,21 +131,26 @@ export function readPaidProAgreementBridgeSkipMarker(documentId: string | null |
   }
 }
 
-export function clearPaidProAgreementBridgeSkipMarker(): void {
-  let sessionId = "";
+function removeLocalStorageKeysWithPrefix(prefix: string): void {
   try {
-    sessionId = sessionStorage.getItem(PAID_PRO_AGREEMENT_SKIP_MARKER_KEY) || "";
+    const keys: string[] = [];
+    for (let i = 0; i < localStorage.length; i += 1) {
+      const key = localStorage.key(i);
+      if (key?.startsWith(prefix)) keys.push(key);
+    }
+    for (const key of keys) localStorage.removeItem(key);
+  } catch {
+    /* ignore */
+  }
+}
+
+export function clearPaidProAgreementBridgeSkipMarker(): void {
+  try {
     sessionStorage.removeItem(PAID_PRO_AGREEMENT_SKIP_MARKER_KEY);
   } catch {
     /* ignore */
   }
-  if (sessionId) {
-    try {
-      localStorage.removeItem(`${PAID_PRO_AGREEMENT_SKIP_MARKER_DURABLE_PREFIX}${sessionId}`);
-    } catch {
-      /* ignore */
-    }
-  }
+  removeLocalStorageKeysWithPrefix(PAID_PRO_AGREEMENT_SKIP_MARKER_DURABLE_PREFIX);
 }
 
 /**
@@ -813,21 +818,12 @@ export function readDurableAgreementVs01Bridge(documentId: string | null | undef
 }
 
 export function clearAgreementVs01BridgeSession(): void {
-  let sessionDoc = "";
   try {
-    const current = readAgreementVs01BridgeSession();
-    sessionDoc = current?.vs01DocumentId.trim() || "";
     sessionStorage.removeItem(BRIDGE_SESSION_KEY);
   } catch {
     /* ignore */
   }
-  if (sessionDoc) {
-    try {
-      localStorage.removeItem(durableAgreementVs01BridgeStorageKey(sessionDoc));
-    } catch {
-      /* ignore */
-    }
-  }
+  removeLocalStorageKeysWithPrefix(BRIDGE_DURABLE_KEY_PREFIX);
 }
 
 export type AgreementVs01SigningSeedResult =
