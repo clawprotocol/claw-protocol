@@ -22120,6 +22120,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     const intakeText = currentPremiumMergedIntakeKey || intakeCombined;
     const agreementBodyText =
       getAuthoritativeAgreementText() ||
+      getPaidProSourceOfTruthText() ||
       paidProCardEditDraft ||
       agreementDocumentTextRef.current ||
       "";
@@ -22131,7 +22132,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       agreementBodyText,
       handoffSlots: ho,
     });
-  }, [draft?.parties, currentPremiumMergedIntakeKey, intakeCombined, paidProCardEditDraft]);
+  }, [
+    draft?.parties,
+    currentPremiumMergedIntakeKey,
+    intakeCombined,
+    paidProCardEditDraft,
+    reviewDocRefreshTick,
+    premiumSurfaceGateTick,
+  ]);
 
   useEffect(() => {
     if (signerSetupPartyIdentities.length < 1) return;
@@ -22151,6 +22159,27 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         corpusHash,
       });
       if (target1) setRecipient2Name(target1);
+    }
+    if (signerSetupPartyIdentities.length > 2) {
+      setExtraPartyLegalNames((prev) => {
+        const next = prev.slice();
+        let changed = false;
+        for (let i = 2; i < signerSetupPartyIdentities.length; i += 1) {
+          const extraIdx = i - 2;
+          const target = resolveSignerSetupAutoCorrectTarget({
+            slotIndex: i,
+            currentRecipientName: next[extraIdx] ?? "",
+            slotIdentities: signerSetupPartyIdentities,
+            corpusHash,
+          });
+          if (!target) continue;
+          while (next.length <= extraIdx) next.push("");
+          if (next[extraIdx] === target) continue;
+          next[extraIdx] = target;
+          changed = true;
+        }
+        return changed ? next : prev;
+      });
     }
   }, [signerSetupPartyIdentities, recipient1Name, recipient2Name]);
 

@@ -57,6 +57,25 @@ describe("partySlotIdentityNormalize", () => {
     ]);
   });
 
+  it("four-party bullet intake does not promote list markers or drop Blue Harbor", () => {
+    const intake = [
+      "Draft a four-party Professional Services Agreement among:",
+      "* Redwood Biologics, Inc. (Client)",
+      "* Summit AI Consulting LLC (Lead Provider)",
+      "* Blue Harbor Systems LLC (Implementation Partner)",
+      "* Iron Gate Security LLC (Cybersecurity Auditor)",
+    ].join("\n");
+    const names = resolveAuthoritativeIntakePartyNames(intake);
+    expect(names.some((n) => /^\s*[-*•]/.test(n))).toBe(false);
+    expect(names.map((n) => n.toLowerCase().replace(/[.,]/g, "").replace(/\s+/g, " ").trim())).toEqual([
+      "redwood biologics inc",
+      "summit ai consulting llc",
+      "blue harbor systems llc",
+      "iron gate security llc",
+    ]);
+    expect(normalizeAgreementPartyName("* Summit AI Consulting LLC")).toBe("Summit AI Consulting LLC");
+  });
+
   it("four-party oxford comma between list", () => {
     const intake =
       "Services agreement between Acme LLC, Beta Inc, Gamma Studios, and Delta Holdings. Fee $7,500/month. Term 12 months.";

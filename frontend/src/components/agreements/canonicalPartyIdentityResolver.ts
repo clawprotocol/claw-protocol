@@ -22,6 +22,7 @@ import { logPaidProEntityMap } from "./paidProPlaceholderAttributionLog";
 import { partyLegalNamesMatch } from "./paidProAcceptedCorpusPartyRoles";
 import { repairOpeningRecitalRoleLabelsFromManifest } from "./paidProOpeningRoleLabelConsistency";
 import {
+  isAgreementSectionHeadingPartyName,
   isAuthoritativeLegalEntityName,
   preserveFullLegalPartyNamesInOpeningAndSignatures,
   shortFormsFromLegalName,
@@ -45,9 +46,6 @@ export const PARTY_ENTITY_SUFFIX_RE =
 
 const INVALID_CANONICAL_PARTY_PHRASE_RE =
   /\b(?:effective\s+date|services?\s+term|governing\s+law|this\s+agreement|agreement|payment\s+terms?|electronic\s+signatures?|confidentiality|miscellaneous|termination|scope|purpose|ownership|notices?|dispute|venue|jurisdiction|signature|execution)\b/i;
-
-const SECTION_HEADING_PARTY_PREFIX_RE =
-  /^(?:INDEPENDENT CONTRACTOR AND ACCESS|SCOPE OF SERVICES|WARRANTIES AND COMPLIANCE|LIMITATION OF LIABILITY|INTELLECTUAL PROPERTY|CONFIDENTIALITY|GOVERNING LAW|NOTICES|TERMINATION|ELECTRONIC SIGNATURES|ENTIRE AGREEMENT|MISCELLANEOUS|FEES AND PAYMENT|TERM\b|CLIENT\.)/i;
 
 const ADDRESS_PLACEHOLDER_LINE_RE =
   /(?:,\s*)?(?:a\s+\[[^\]]+\]\s+)?(?:with\s+(?:its\s+)?(?:principal\s+place\s+of\s+business|principal\s+office|mailing\s+address|notice\s+address)|(?:principal\s+place\s+of\s+business|principal\s+office|mailing\s+address|notice\s+address)\s*(?:at|:)?|located\s+at)\s+\[?(?:client\s+address|service\s+provider\s+address|address|principal\s+place\s+of\s+business|principal\s+office|mailing\s+address|notice\s+address)[^\]\n.,;]*\]?/gi;
@@ -223,7 +221,7 @@ function isInvalidCanonicalPartyName(name: string, knownPartyTokens?: readonly s
   if (isInvalidPartySlotLegalEntity(t)) return true;
   if (/^(?:party|parties|client|service provider|provider|contractor|company)$/i.test(t)) return true;
   if (INVALID_CANONICAL_PARTY_PHRASE_RE.test(t)) return true;
-  if (SECTION_HEADING_PARTY_PREFIX_RE.test(t)) return true;
+  if (isAgreementSectionHeadingPartyName(t)) return true;
   if (/^(?:this\s+(?:mutual\s+[\w\s]+?\s+)?agreement|agreement|entered\s+into|between)\b/i.test(t)) {
     return true;
   }

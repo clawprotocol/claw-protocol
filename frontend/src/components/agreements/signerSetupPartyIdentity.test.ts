@@ -79,6 +79,110 @@ afterEach(() => {
 });
 
 describe("signerSetupPartyIdentity", () => {
+  it("does not adopt generated section headings when contractual parties already exist", () => {
+    const intake = [
+      "Draft a four-party Professional Services Agreement among:",
+      "* Redwood Biologics, Inc. (Client)",
+      "* Summit AI Consulting LLC (Lead Provider)",
+      "* Blue Harbor Systems LLC (Implementation Partner)",
+      "* Iron Gate Security LLC (Cybersecurity Auditor)",
+    ].join("\n");
+    const body = [
+      'This Agreement is between Redwood Biologics, Inc. ("Client") and Summit AI Consulting LLC, Blue Harbor Systems LLC, and Iron Gate Security LLC.',
+      "2. SCOPE OF SERVICES. Service Provider shall perform consulting services.",
+      "IN WITNESS WHEREOF, the parties execute this Agreement.",
+      "CLIENT:",
+      "Redwood Biologics, Inc.",
+      "SERVICE PROVIDER:",
+      "Summit AI Consulting LLC",
+    ].join("\n");
+    const draftParties = [
+      { name: "Redwood Biologics, Inc." },
+      { name: "Summit AI Consulting LLC" },
+      { name: "Blue Harbor Systems LLC" },
+      { name: "Iron Gate Security LLC" },
+    ];
+    const fromIntake = resolveSignerSetupPartyIdentities({
+      parties: draftParties,
+      intakeText: intake,
+      agreementBodyText: body,
+    });
+    const normalizeEntity = (name: string) => name.toLowerCase().replace(/[.,]/g, "").replace(/\s+/g, " ").trim();
+    expect(fromIntake.map((p) => normalizeEntity(p.legalEntityName))).toEqual([
+      "redwood biologics inc",
+      "summit ai consulting llc",
+      "blue harbor systems llc",
+      "iron gate security llc",
+    ]);
+    const fromCorpusAsIntake = resolveSignerSetupPartyIdentities({
+      parties: draftParties,
+      intakeText: body,
+      agreementBodyText: body,
+    });
+    expect(fromCorpusAsIntake.some((p) => /scope of services/i.test(p.legalEntityName))).toBe(false);
+    expect(fromCorpusAsIntake.map((p) => normalizeEntity(p.legalEntityName))).toEqual(
+      fromIntake.map((p) => normalizeEntity(p.legalEntityName)),
+    );
+    expect(shouldUpgradeRecipientNameToLegalEntity("SCOPE OF SERVICES", "Summit AI Consulting LLC")).toBe(
+      true,
+    );
+    const fromEmptyIntake = resolveSignerSetupPartyIdentities({
+      parties: [{ name: "Red Mesa Logistics LLC" }, { name: "Harbor Peak Automation LLC" }],
+      intakeText: "",
+      agreementBodyText: body,
+    });
+    expect(fromEmptyIntake.map((p) => normalizeEntity(p.legalEntityName))).toEqual([
+      "redwood biologics inc",
+      "summit ai consulting llc",
+      "blue harbor systems llc",
+      "iron gate security llc",
+    ]);
+    expect(fromEmptyIntake.some((p) => /scope of services/i.test(p.legalEntityName))).toBe(false);
+  });
+
+  it("does not let a 2-row intake manifest or asterisk-split draft rows replace Blue Harbor", () => {
+    const twoRowColonManifest = [
+      "Client: Redwood Biologics, Inc.",
+      "Service Provider: Summit AI Consulting LLC",
+    ].join("\n");
+    const body = [
+      'This Agreement is between Redwood Biologics, Inc. ("Client") and Summit AI Consulting LLC, Blue Harbor Systems LLC, and Iron Gate Security LLC.',
+      "2. SCOPE OF SERVICES. Service Provider shall perform consulting services.",
+      "IN WITNESS WHEREOF, the parties execute this Agreement.",
+      "CLIENT:",
+      "Redwood Biologics, Inc.",
+      "SERVICE PROVIDER:",
+      "Summit AI Consulting LLC",
+    ].join("\n");
+    const asteriskSplitDraft = [
+      { name: "* Redwood Biologics Inc." },
+      { name: "Redwood Biologics Inc" },
+      { name: "* Summit AI Consulting LLC" },
+      { name: "Summit AI Consulting LLC" },
+    ];
+    const identities = resolveSignerSetupPartyIdentities({
+      parties: asteriskSplitDraft,
+      intakeText: twoRowColonManifest,
+      agreementBodyText: body,
+    });
+    const normalizeEntity = (name: string) => name.toLowerCase().replace(/[.,]/g, "").replace(/\s+/g, " ").trim();
+    expect(identities.map((p) => normalizeEntity(p.legalEntityName))).toEqual([
+      "redwood biologics inc",
+      "summit ai consulting llc",
+      "blue harbor systems llc",
+      "iron gate security llc",
+    ]);
+    expect(
+      resolveSignerPartyLegalEntityDisplayValue({
+        slotIndex: 2,
+        currentInputValue: "* Summit AI Consulting LLC",
+        slotIdentities: identities,
+        source: "signer_setup_extra_party_input",
+      }),
+    ).toMatch(/blue harbor/i);
+    expect(identities.some((p) => /scope of services/i.test(p.legalEntityName))).toBe(false);
+  });
+
   it("pre-fills Red Mesa Logistics LLC and Harbor Peak Automation LLC from authoritative manifest", () => {
     establishAuthoritativeAgreementDocument({
       fullCorpusText: BODY,

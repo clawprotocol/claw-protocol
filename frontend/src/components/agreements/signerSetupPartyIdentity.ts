@@ -25,6 +25,7 @@ import {
 import { extractBetweenPartyNameList } from "./partyBetweenParse";
 import {
   hasPartyMetadataLabelContamination,
+  isAgreementSectionHeadingPartyName,
   isAuthoritativeLegalEntityName,
   isDisallowedPartyPhrase,
   isPartyMetadataRoleLabel,
@@ -231,6 +232,7 @@ export function isRecitalSentenceFragmentPartyName(name: string): boolean {
   if (RECITAL_PARTY_NAME_PREFIX_RE.test(t)) return true;
   if (/^this agreement is between\b/i.test(t)) return true;
   if (isDisallowedPartyPhrase(t)) return true;
+  if (isAgreementSectionHeadingPartyName(t)) return true;
   if (/\bwill\s+(?:sign|provide)\b/i.test(t)) return true;
   if (/\bengagement\s+term\b/i.test(t)) return true;
   return false;
@@ -1011,29 +1013,115 @@ export function extractSignerEntitiesFromSignatureBlock(
 }
 
 /** Isolated resolver batch — never feeds editable UI state back into canonical resolution. */
+function isListMarkerPartyIdentityName(name: string): boolean {
+  return /^\s*[-*•]/.test(String(name ?? ""));
+}
+
+function headingSafeCanonicalPartyNames(args: {
+  intakeText?: string | null;
+  agreementBodyText?: string | null;
+  starterNames: readonly string[];
+}): string[] {
+  return resolveCanonicalPartyIdentitiesFromSources({
+    rawIntake: args.intakeText || null,
+    generatedBody: args.agreementBodyText || null,
+    starterNames: args.starterNames,
+    source: "signer_setup",
+    surface: "signerSetupPartyIdentities",
+  })
+    .map((record) => norm(record.fullLegalName))
+    .filter(
+      (name) =>
+        name.length >= 2 &&
+        !isListMarkerPartyIdentityName(name) &&
+        !isAgreementSectionHeadingPartyName(name) &&
+        isAuthoritativeLegalEntityName(name),
+    );
+}
+
 export function resolveSignerSetupPartyIdentities(args: {
   parties: readonly { name?: string | null }[];
   intakeText?: string | null;
   agreementBodyText?: string | null;
   handoffSlots?: readonly { name?: string | null }[];
 }): SignerSetupPartyIdentity[] {
+  const intakeText = String(args.intakeText ?? "").trim();
   const rowNames = args.parties.map((p) => String(p?.name ?? "").trim()).filter(Boolean);
+  let canonicalNames = headingSafeCanonicalPartyNames({
+    intakeText: args.intakeText,
+    agreementBodyText: args.agreementBodyText,
+    starterNames: rowNames,
+  });
+  // A 2-line intake extract (colon-role / signature-block) can short-circuit the
+  // canonical resolver before generatedBody is considered. Recover via the existing
+  // body-only path — do not treat corpus as an intake manifest.
+  if (canonicalNames.length < 3 && String(args.agreementBodyText ?? "").trim()) {
+    const bodyOnlyCanonical = headingSafeCanonicalPartyNames({
+      intakeText: "",
+      agreementBodyText: args.agreementBodyText,
+      starterNames: rowNames,
+    });
+    if (bodyOnlyCanonical.length >= 3 && bodyOnlyCanonical.length > canonicalNames.length) {
+      canonicalNames = bodyOnlyCanonical;
+    }
+  }
+  if (intakePartyManifestIsAuthoritative(intakeText)) {
+    const manifestRows = extractIntakePartyManifestRows(intakeText).filter(
+      (row) =>
+        row.partyLegalName &&
+        !isListMarkerPartyIdentityName(row.partyLegalName) &&
+        !isAgreementSectionHeadingPartyName(row.partyLegalName) &&
+        isAuthoritativeLegalEntityName(row.partyLegalName),
+    );
+    // A 2-row signature-block / colon-role extract must not outrank already-known
+    // heading-safe canonical N-party identities (Blue Harbor cannot disappear here).
+    const manifestCompleteEnough =
+      manifestRows.length >= 2 &&
+      !(canonicalNames.length >= 3 && canonicalNames.length > manifestRows.length);
+    if (manifestCompleteEnough) {
+      return manifestRows.map((row, i) =>
+        resolveSignerSetupPartyIdentity({
+          partyIndex: i,
+          draftPartyName: row.partyLegalName,
+          handoffName: args.handoffSlots?.[i]?.name,
+          intakeText,
+          agreementBodyText: args.agreementBodyText,
+          draftPartyNames: manifestRows.map((r) => r.partyLegalName),
+          recipientDisplayName: "",
+          log: false,
+        }),
+      );
+    }
+  }
   const authorityIdentities = resolveAuthoritativeLegalPartyIdentities({
     intakeText: args.intakeText,
     draftParties: args.parties.map((p) => ({ name: String(p?.name ?? "") })),
     consumerPartyCount: rowNames.length,
     surface: "signer_setup_party_identities",
   });
-  if (authorityIdentities.length >= 2) {
-    const draftPartyNames = authorityIdentities.map((a) => a.legalEntityName);
-    return authorityIdentities.map((identity, i) =>
+  const authorityNames = authorityIdentities.map((identity) => identity.legalEntityName);
+  const authorityHasListMarkers = authorityNames.some(isListMarkerPartyIdentityName);
+  const slotNames =
+    canonicalNames.length >= 3 &&
+    (canonicalNames.length > authorityNames.length || authorityHasListMarkers)
+      ? canonicalNames
+      : authorityIdentities.length >= 2
+        ? authorityNames.filter(
+            (name) =>
+              !isListMarkerPartyIdentityName(name) &&
+              !isAgreementSectionHeadingPartyName(name) &&
+              isAuthoritativeLegalEntityName(name),
+          )
+        : null;
+  if (slotNames && slotNames.length >= 2) {
+    return slotNames.map((name, i) =>
       resolveSignerSetupPartyIdentity({
         partyIndex: i,
-        draftPartyName: identity.legalEntityName,
+        draftPartyName: name,
         handoffName: args.handoffSlots?.[i]?.name,
         intakeText: args.intakeText,
         agreementBodyText: args.agreementBodyText,
-        draftPartyNames,
+        draftPartyNames: slotNames,
         recipientDisplayName: "",
         log: false,
       }),
@@ -1119,7 +1207,10 @@ export function resolveSignerSetupPartyIdentity(
   if (intakePartyManifestIsAuthoritative(intakeText)) {
     const manifestRows = extractIntakePartyManifestRows(intakeText);
     const manifestRow = findIntakePartyManifestRowForEntity(manifestRows, "", index);
-    if (manifestRow?.partyLegalName) {
+    if (
+      manifestRow?.partyLegalName &&
+      !isAgreementSectionHeadingPartyName(manifestRow.partyLegalName)
+    ) {
       const legalEntityName = sanitizeSlotLegalEntityDisplay(
         manifestRow.partyLegalName,
         index,
@@ -1469,6 +1560,7 @@ export function shouldUpgradeRecipientNameToLegalEntity(
   const legal = norm(legalEntityName);
   if (!legal || isRecitalSentenceFragmentPartyName(legal)) return false;
   if (!current) return true;
+  if (isAgreementSectionHeadingPartyName(current)) return true;
   if (hasSignerPartyLegalEntityDisplayPollution(current)) return true;
   if (isRecitalSentenceFragmentPartyName(current)) return true;
   if (isRecipientHandoffSeedDisposable(current)) return true;

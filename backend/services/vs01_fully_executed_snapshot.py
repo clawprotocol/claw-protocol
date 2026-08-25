@@ -522,6 +522,19 @@ def ensure_fully_executed_snapshot_on_draft(
     agreement_id: str = "",
 ) -> EnsureFullyExecutedSnapshotResult:
     aid = (agreement_id or str(draft.get("id") or "")).strip()
+    audit = draft.get("audit_log") or []
+    if fully_executed_snapshot_ready(draft) and not all_signers_signed_from_audit(draft, audit):
+        _log.warning(
+            "[vs01-final-signed-snapshot] agreement_id=%s source=existing_before_all_signers — dropping",
+            aid,
+        )
+        draft = {
+            **draft,
+            "vs01_signing_packet_v1": {
+                **(draft.get("vs01_signing_packet_v1") or {}),
+                "fully_executed_snapshot": None,
+            },
+        }
     if fully_executed_snapshot_ready(draft):
         existing = read_fully_executed_snapshot_from_draft(draft)
         corpus = str((existing or {}).get("corpus_plain") or "")
@@ -551,6 +564,12 @@ def ensure_fully_executed_snapshot_on_draft(
     portable = stored.get("portable") if isinstance(stored.get("portable"), dict) else {}
 
     snap = extract_fully_executed_snapshot_from_portable(portable) if portable else None
+    if snap and not all_signers_signed_from_audit(draft, draft.get("audit_log") or []):
+        _log.warning(
+            "[vs01-final-signed-snapshot] agreement_id=%s source=portable_snapshot_before_all_signers — ignoring",
+            aid,
+        )
+        snap = None
     if snap:
         snap_corpus = str(snap.get("corpus_plain") or "")
         snap_violations = completed_execution_by_name_violations(snap_corpus)

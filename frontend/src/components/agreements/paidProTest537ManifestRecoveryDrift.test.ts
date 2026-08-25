@@ -109,6 +109,24 @@ describe("TEST537 — manifest recovery drift (metadata lines as phantom parties
     }
   });
 
+  it("rejects numbered section headings and keeps numbered legal-party lines", () => {
+    const headingBody = [
+      'This Agreement is between Redwood Biologics, Inc. ("Client") and Summit AI Consulting LLC.',
+      "2. SCOPE OF SERVICES. Service Provider shall perform consulting services.",
+      "4. TERM AND TERMINATION. The term is twelve months.",
+    ].join("\n");
+    const headingRows = extractIntakePartyManifestRows(headingBody);
+    expect(headingRows.some((row) => /scope of services/i.test(row.partyLegalName))).toBe(false);
+    expect(headingRows.some((row) => /term and termination/i.test(row.partyLegalName))).toBe(false);
+    expect(intakePartyManifestIsAuthoritative(headingBody)).toBe(false);
+
+    const numberedParty = "2. Summit AI Consulting LLC (Lead Provider)";
+    const partyRows = extractIntakePartyManifestRows(numberedParty);
+    expect(partyRows).toHaveLength(1);
+    expect(partyEquals(partyRows[0]!.partyLegalName, TEST518_SUMMIT)).toBe(true);
+    expect(partyRows[0]!.roleLabel).toMatch(/lead provider/i);
+  });
+
   // B. Manifest is authoritative and yields the 4 real entities (with roles), not 5/6 metadata rows.
   it("B. intake manifest is authoritative with the 4 real entities and their roles", () => {
     expect(intakePartyManifestIsAuthoritative(TEST536_SIGNER_BLOCK_INTAKE)).toBe(true);

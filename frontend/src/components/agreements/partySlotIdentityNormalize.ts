@@ -16,6 +16,7 @@ import { partyLegalNamesMatch } from "./paidProAcceptedCorpusPartyRoles";
 import { PAID_PRO_AUTHORITY_MAX_PARTIES } from "./paidProAuthorityLimits";
 import {
   hasPartyMetadataLabelContamination,
+  isAgreementSectionHeadingPartyName,
   isAuthoritativeLegalEntityName,
   isDisallowedPartyPhrase,
   isOccupationalOrJobTitlePartyName,
@@ -256,7 +257,7 @@ export function normalizeCommaSeparatedEntitySuffix(raw: string): string {
 }
 
 export function normalizeAgreementPartyName(raw: string): string {
-  return normalizeCommaSeparatedEntitySuffix(raw);
+  return normalizeCommaSeparatedEntitySuffix(String(raw ?? "").replace(/^\s*[-*•]\s*/, ""));
 }
 
 export function isInvalidPartySlotLegalEntity(name: string): boolean {
@@ -266,6 +267,7 @@ export function isInvalidPartySlotLegalEntity(name: string): boolean {
   if (isInternalPartyAliasToken(t)) return true;
   if (isStateLegalFormOnlyName(t)) return true;
   if (isDisallowedPartyPhrase(t)) return true;
+  if (isAgreementSectionHeadingPartyName(t)) return true;
   if (hasPartyMetadataLabelContamination(t)) return true;
   if (isOccupationalOrJobTitlePartyName(t)) return true;
   return false;

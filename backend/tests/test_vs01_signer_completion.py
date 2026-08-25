@@ -198,7 +198,7 @@ def test_completion_email_marked_only_after_all_targets_sent() -> None:
     assert event["value"]["sent_count"] == 2
 
 
-def test_merge_portable_packet_persists_fully_executed_snapshot() -> None:
+def test_merge_portable_packet_extracts_client_snapshot_shape() -> None:
     corpus = "x" * 200 + "\nBy: Owner\nDate: June 15, 2026\nBy: Counterparty\nDate: June 16, 2026"
     portable = {
         "v": 1,
@@ -214,11 +214,196 @@ def test_merge_portable_packet_persists_fully_executed_snapshot() -> None:
     assert snap is not None
     assert snap["corpus_plain"] == corpus
 
-    draft = _draft_with_packet()
+
+def _four_role_draft() -> dict:
+    roles = [
+        {"roleId": f"role_{i}", "partyId": f"party_{i}", "requiresSignature": True}
+        for i in range(4)
+    ]
+    return {
+        "id": "ag_gtm_four_party",
+        "parties": [{"id": f"party_{i}", "role": "signer", "name": f"S{i}"} for i in range(4)],
+        "audit_log": [],
+        "vs01_signing_packet_v1": {
+            "v": 1,
+            "portable": {"roles": roles, "fields": [], "seed": {"agreementId": "ag_gtm_four_party"}},
+        },
+    }
+
+
+def _client_final_snapshot() -> dict:
+    return {
+        "v": 1,
+        "corpusPlain": ("PREMATURE CLIENT SNAPSHOT. " * 20) + "\nBy: Maya Brooks\nBy: Maya Brooks",
+        "corpusHash": "11133:f81e03ff",
+        "savedAt": "2026-08-25T17:09:35.547Z",
+        "signerRoleIds": ["role_0", "role_1", "role_2", "role_3"],
+    }
+
+
+def test_merge_ignores_client_fully_executed_snapshot_when_signing_incomplete() -> None:
+    draft = _four_role_draft()
+    draft["audit_log"] = [
+        build_signature_completed_event(
+            signer_role_id="role_1",
+            participant_id="party_1",
+            display_name="Noah",
+            document_id="doc_ag_gtm_four_party",
+            signed_at="2026-08-25T17:09:32Z",
+            signed_date_iso="2026-08-25",
+            signed_date_display="August 25, 2026",
+            locked_version_id=None,
+            agreement_version_hash=None,
+        ),
+        build_signature_completed_event(
+            signer_role_id="role_2",
+            participant_id="party_2",
+            display_name="Maya",
+            document_id="doc_ag_gtm_four_party",
+            signed_at="2026-08-25T17:09:29Z",
+            signed_date_iso="2026-08-25",
+            signed_date_display="August 25, 2026",
+            locked_version_id=None,
+            agreement_version_hash=None,
+        ),
+        build_signature_completed_event(
+            signer_role_id="role_0",
+            participant_id="party_0",
+            display_name="Ava",
+            document_id="doc_ag_gtm_four_party",
+            signed_at="2026-08-25T17:09:35Z",
+            signed_date_iso="2026-08-25",
+            signed_date_display="August 25, 2026",
+            locked_version_id=None,
+            agreement_version_hash=None,
+        ),
+    ]
+    portable = {
+        "v": 1,
+        "roles": draft["vs01_signing_packet_v1"]["portable"]["roles"],
+        "seed": {"agreementId": "ag_gtm_four_party", "documentId": "doc_ag_gtm_four_party"},
+        "fullyExecutedSnapshot": _client_final_snapshot(),
+    }
     merged = merge_portable_packet_corpus(draft, portable)
     stored = merged["vs01_signing_packet_v1"]
-    assert stored["fully_executed_snapshot"]["corpus_plain"] == corpus
-    assert fully_executed_snapshot_ready(merged) is True
+    assert "fullyExecutedSnapshot" not in (stored.get("portable") or {})
+    assert stored.get("fully_executed_snapshot") in (None, {})
+    assert fully_executed_snapshot_ready(merged) is False
+    assert stored["portable"]["seed"]["agreementId"] == "ag_gtm_four_party"
+    assert stored["portable"]["roles"][0]["roleId"] == "role_0"
+
+
+def test_orchestrate_three_of_four_ignores_client_snapshot_and_does_not_finalize() -> None:
+    draft = _four_role_draft()
+    for rid, pid, name, at in (
+        ("role_2", "party_2", "Maya", "2026-08-25T17:09:29Z"),
+        ("role_1", "party_1", "Noah", "2026-08-25T17:09:32Z"),
+    ):
+        draft["audit_log"].append(
+            build_signature_completed_event(
+                signer_role_id=rid,
+                participant_id=pid,
+                display_name=name,
+                document_id="doc_ag_gtm_four_party",
+                signed_at=at,
+                signed_date_iso="2026-08-25",
+                signed_date_display="August 25, 2026",
+                locked_version_id=None,
+                agreement_version_hash=None,
+            )
+        )
+    portable = {
+        "v": 1,
+        "roles": draft["vs01_signing_packet_v1"]["portable"]["roles"],
+        "fullyExecutedSnapshot": _client_final_snapshot(),
+    }
+    outcome = orchestrate_vs01_signer_complete(
+        draft,
+        signer_role_id="role_0",
+        participant_id="party_0",
+        display_name="Ava Chen",
+        document_id="doc_ag_gtm_four_party",
+        signed_at="2026-08-25T17:09:35Z",
+        signed_date_iso="2026-08-25",
+        signed_date_display="August 25, 2026",
+        locked_version_id=None,
+        agreement_version_hash=None,
+        portable_packet=portable,
+    )
+    assert outcome.fully_executed is False
+    assert outcome.newly_finalized is False
+    assert fully_executed_signed_already_recorded(outcome.audit) is False
+    assert completed_vs01_signer_role_ids(outcome.audit) == {"role_0", "role_1", "role_2"}
+    assert fully_executed_snapshot_ready(outcome.draft_dict) is False
+    assert not outcome.draft_dict["vs01_signing_packet_v1"].get("fully_executed_snapshot")
+
+
+def test_orchestrate_four_of_four_finalizes_without_adopting_client_snapshot() -> None:
+    from backend.services.vs01_fully_executed_snapshot import ensure_fully_executed_snapshot_on_draft
+
+    draft = _four_role_draft()
+    witness = (
+        "CONSULTING SERVICES AGREEMENT. " * 40
+        + "\nIN WITNESS WHEREOF, the Parties execute this Agreement.\n"
+        + "REDWOOD BIOLOGICS INC.\nBy: Ava Chen\nName: Ava Chen\nDate: August 25, 2026\n"
+        + "SUMMIT AI CONSULTING LLC\nBy: Noah Patel\nName: Noah Patel\nDate: August 25, 2026\n"
+        + "BLUE HARBOR SYSTEMS LLC\nBy: Maya Brooks\nName: Maya Brooks\nDate: August 25, 2026\n"
+        + "IRON GATE SECURITY LLC\nBy: Luis Ortega\nName: Luis Ortega\nDate: August 25, 2026\n"
+    )
+    draft["vs01_signing_packet_v1"]["portable"]["seed"] = {
+        "agreementId": "ag_gtm_four_party",
+        "documentId": "doc_ag_gtm_four_party",
+        "corpusPlain": witness,
+    }
+    for rid, pid, name, at in (
+        ("role_2", "party_2", "Maya Brooks", "2026-08-25T17:09:29Z"),
+        ("role_1", "party_1", "Noah Patel", "2026-08-25T17:09:32Z"),
+        ("role_0", "party_0", "Ava Chen", "2026-08-25T17:09:35Z"),
+    ):
+        draft["audit_log"].append(
+            build_signature_completed_event(
+                signer_role_id=rid,
+                participant_id=pid,
+                display_name=name,
+                document_id="doc_ag_gtm_four_party",
+                signed_at=at,
+                signed_date_iso="2026-08-25",
+                signed_date_display="August 25, 2026",
+                locked_version_id=None,
+                agreement_version_hash=None,
+            )
+        )
+    portable = {
+        "v": 1,
+        "roles": draft["vs01_signing_packet_v1"]["portable"]["roles"],
+        "seed": draft["vs01_signing_packet_v1"]["portable"]["seed"],
+        "fullyExecutedSnapshot": _client_final_snapshot(),
+    }
+    outcome = orchestrate_vs01_signer_complete(
+        draft,
+        signer_role_id="role_3",
+        participant_id="party_3",
+        display_name="Luis Ortega",
+        document_id="doc_ag_gtm_four_party",
+        signed_at="2026-08-25T17:10:00Z",
+        signed_date_iso="2026-08-25",
+        signed_date_display="August 25, 2026",
+        locked_version_id=None,
+        agreement_version_hash="hash-final",
+        portable_packet=portable,
+    )
+    assert outcome.fully_executed is True
+    assert outcome.newly_finalized is True
+    assert fully_executed_signed_already_recorded(outcome.audit) is True
+    assert completed_vs01_signer_role_ids(outcome.audit) == {"role_0", "role_1", "role_2", "role_3"}
+    assert fully_executed_snapshot_ready(outcome.draft_dict) is False
+    ensured = ensure_fully_executed_snapshot_on_draft(outcome.draft_dict, agreement_id="ag_gtm_four_party")
+    assert ensured.snapshot_ready is True
+    assert ensured.source in {"portable_corpus", "reconstructed"}
+    snap = ensured.draft_dict["vs01_signing_packet_v1"]["fully_executed_snapshot"]
+    assert "PREMATURE CLIENT SNAPSHOT" not in snap["corpus_plain"]
+    assert "By: Luis Ortega" in snap["corpus_plain"]
+    assert snap["corpus_plain"].count("By: Maya Brooks") == 1
 
 
 def test_completion_email_skipped_without_signed_snapshot() -> None:

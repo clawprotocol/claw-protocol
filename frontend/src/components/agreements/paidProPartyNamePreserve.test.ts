@@ -5,10 +5,22 @@ import {
   preserveFullLegalPartyNames,
   collapseDuplicateNoticeEntityLines,
   isOccupationalOrJobTitlePartyName,
+  isAgreementSectionHeadingPartyName,
   isAuthoritativeLegalEntityName,
 } from "./paidProPartyNamePreserve";
 
 describe("paidProPartyNamePreserve", () => {
+  it("rejects operative section headings as legal-entity authority", () => {
+    expect(isAgreementSectionHeadingPartyName("SCOPE OF SERVICES")).toBe(true);
+    expect(isAgreementSectionHeadingPartyName("2. SCOPE OF SERVICES.")).toBe(true);
+    expect(isAgreementSectionHeadingPartyName("LIMITATION OF LIABILITY")).toBe(true);
+    expect(isAuthoritativeLegalEntityName("SCOPE OF SERVICES")).toBe(false);
+    expect(isAuthoritativeLegalEntityName("2. SCOPE OF SERVICES.")).toBe(false);
+    expect(isAgreementSectionHeadingPartyName("Summit AI Consulting LLC")).toBe(false);
+    expect(isAgreementSectionHeadingPartyName("2. Summit AI Consulting LLC (Lead Provider)")).toBe(false);
+    expect(isAuthoritativeLegalEntityName("Summit AI Consulting LLC")).toBe(true);
+  });
+
   it("rejects occupational appositives as party legal entities", () => {
     expect(isOccupationalOrJobTitlePartyName("Freelance Product Designer")).toBe(true);
     expect(isAuthoritativeLegalEntityName("Freelance Product Designer")).toBe(false);
