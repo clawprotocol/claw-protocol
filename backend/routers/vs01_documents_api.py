@@ -128,6 +128,26 @@ def api_get_document(document_id: str, request: Request) -> Dict[str, Any]:
     return {"ok": True, "document": meta}
 
 
+@router.get("/{document_id}/esign-handoff")
+def api_get_document_esign_handoff(document_id: str) -> Dict[str, Any]:
+    """
+    Durable after-pay signing packet for `/app/esign/doc_*` reload / later visit.
+
+    Document ids are unguessable capability tokens. No owner principal — guests
+    after TEST pay have no commercial session on a fresh navigation.
+    """
+    did = (document_id or "").strip()
+    if not did:
+        raise HTTPException(status_code=404, detail="document_not_found")
+    meta = document_service.get_document_meta(did)
+    if not meta:
+        raise HTTPException(status_code=404, detail="document_not_found")
+    handoff = meta.get("esign_handoff_v1")
+    if not isinstance(handoff, dict) or not handoff:
+        raise HTTPException(status_code=404, detail="esign_handoff_not_found")
+    return {"ok": True, "document_id": did, "handoff": handoff}
+
+
 @router.get("/{document_id}/content")
 def api_get_document_content(document_id: str, request: Request) -> Response:
     did = (document_id or "").strip()

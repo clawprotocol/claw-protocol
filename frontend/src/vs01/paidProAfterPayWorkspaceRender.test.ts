@@ -274,6 +274,9 @@ describe("after-pay workspace renders painted agreement (not load-error)", () =>
     expect(wizard).toContain("vs01PaidSessionWorkspaceHydrateMinCorpusLen");
     expect(wizard).toContain("hydrateMinLen");
     expect(wizard).toContain("signingCorpus.corpus.trim() || corpus || null");
+    expect(wizard).toContain("readDurableAgreementVs01Bridge");
+    expect(wizard).toContain("fetchDocumentEsignHandoff");
+    expect(wizard).toContain("paidSessionDurablePacket");
     expect(wizard).not.toMatch(
       /if \(corpus\.length < VS01_SIGNING_CORPUS_MIN_LEN\) return false;/,
     );

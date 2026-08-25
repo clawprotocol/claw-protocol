@@ -26,11 +26,14 @@ describe("Vs01Wizard agreement bridge (static)", () => {
     expect(s).toContain("onStepChange");
   });
 
-  it("hydrates agreement_bridge=1 for server doc_* from session corpus (resume finalize)", () => {
+  it("hydrates /app/esign/doc_* from a durable packet, not first-SPA agreement_bridge=1 only", () => {
     const s = readFileSync(join(__dirname, "Vs01Wizard.tsx"), "utf8");
     expect(s).toContain("allowBridgeCorpusHydrate");
     expect(s).toContain('sid.startsWith("doc_")');
-    expect(s).toContain("agreementBridgeQuery && sid.startsWith(\"doc_\")");
+    expect(s).toContain("readDurableAgreementVs01Bridge");
+    expect(s).toContain("fetchDocumentEsignHandoff");
+    expect(s).toContain("paidSessionDurablePacket");
+    expect(s).not.toContain("agreementBridgeQuery && sid.startsWith(\"doc_\")");
     expect(s).toContain("Could not load this document");
     expect(s).toContain("vs01PaidSessionWorkspaceHydrateMinCorpusLen");
     expect(s).toContain("hydrateMinLen");

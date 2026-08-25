@@ -17,7 +17,7 @@ import type { PlacedSigningField } from "./signingFields";
 import { getVs01UrlBootstrap } from "./vs01UrlBootstrap";
 import { resolveReviewerEffectiveAccessToken } from "../agreement/reviewerTokenPersistence";
 import { markAgreementFieldsPlacedCount, markAgreementPacketPrepared, isAgreementPacketPrepared } from "./vs01WorkspaceSigningStatus";
-import { fetchDocumentContent, getReceipt } from "./vs01Api";
+import { fetchDocumentContent, fetchDocumentEsignHandoff, getReceipt } from "./vs01Api";
 import { useAuth } from "../auth/AuthProvider";
 import { shouldDeferVs01SeedDocumentLoad } from "./vs01SeedDocumentAuthGate";
 import { useLaunchNav } from "../launch/LaunchNavContext";
@@ -33,8 +33,11 @@ import {
   clearAgreementVs01BridgeSession,
   clearPaidProAgreementBridgeSkipMarker,
   computePaidProAgreementBridgeSkip,
+  esignHandoffPayloadToAgreementVs01Bridge,
   readAgreementVs01BridgeSession,
+  readDurableAgreementVs01Bridge,
   readPaidProAgreementBridgeSkipMarker,
+  writeAgreementVs01BridgeSession,
   type AgreementVs01BridgeSession,
 } from "../launch/simpleProduct/agreementToVs01SigningBridge";
 import { resolvePrepareBridgeSigningCorpus } from "./vs01PrepareBridgeCorpus";
@@ -436,7 +439,9 @@ export function Vs01Wizard({
   const prepareSignerRoles = useMemo(() => {
     const aid = (vs01LinkedAgreementId ?? "").trim();
     if (!paidProAgreementBridgeSkip || !aid) return null;
-    const bridge = readAgreementVs01BridgeSession();
+    const bridge =
+      readDurableAgreementVs01Bridge((documentId || seedDocumentId || "").trim()) ??
+      readAgreementVs01BridgeSession();
     return buildVs01PrepareSigningRolesForBridge({
       agreementId: aid,
       creatorName,
@@ -480,7 +485,10 @@ export function Vs01Wizard({
             ownerSignerName: nextOwnerSigner,
             ownerSignerTitle: nextOwnerTitle,
             counterparties,
-            bridge: bridgeHandoffSnapshotRef.current ?? readAgreementVs01BridgeSession(),
+            bridge:
+              bridgeHandoffSnapshotRef.current ??
+              readDurableAgreementVs01Bridge((documentId || seedDocumentId || "").trim()) ??
+              readAgreementVs01BridgeSession(),
           });
           const rebuiltRole = rebuilt.find((r) => r.roleId === args.roleId);
           if (rebuiltRole) {
@@ -512,7 +520,10 @@ export function Vs01Wizard({
               ownerSignerName: creatorSignerName,
               ownerSignerTitle: creatorSignerTitle,
               counterparties: nextCps,
-              bridge: bridgeHandoffSnapshotRef.current ?? readAgreementVs01BridgeSession(),
+              bridge:
+              bridgeHandoffSnapshotRef.current ??
+              readDurableAgreementVs01Bridge((documentId || seedDocumentId || "").trim()) ??
+              readAgreementVs01BridgeSession(),
             });
             const rebuiltRole = rebuilt.find((r) => r.roleId === args.roleId);
             if (rebuiltRole) {
@@ -597,7 +608,10 @@ export function Vs01Wizard({
       navigate(paidProPacketReadyDashboardPath());
       return;
     }
-    const bridge = bridgeHandoffSnapshotRef.current ?? readAgreementVs01BridgeSession();
+    const bridge =
+      bridgeHandoffSnapshotRef.current ??
+      readDurableAgreementVs01Bridge(did) ??
+      readAgreementVs01BridgeSession();
     const result = handlePreparePacketContinue({
       agreementId: linkedAgreementId,
       agreementTitle,
@@ -736,11 +750,11 @@ export function Vs01Wizard({
         if (bridgeHydratedSeedSid.current === sid) return true;
         const bridgeParams = new URLSearchParams(window.location.search);
         const agreementBridgeQuery = bridgeParams.get("agreement_bridge") === "1";
-        // local_doc_* always; server doc_* when agreement_bridge=1 (session already has corpus).
+        // Durable packet (localStorage / session / in-memory) — not first-SPA agreement_bridge=1 only.
         const allowBridgeCorpusHydrate =
-          sid.startsWith("local_doc_") || (agreementBridgeQuery && sid.startsWith("doc_"));
+          sid.startsWith("local_doc_") || sid.startsWith("doc_");
         if (!allowBridgeCorpusHydrate) return false;
-        const rawBridge = readAgreementVs01BridgeSession();
+        const rawBridge = readDurableAgreementVs01Bridge(sid);
         const bridge: AgreementVs01BridgeSession | null =
           rawBridge && rawBridge.vs01DocumentId.trim() === sid
             ? rawBridge
@@ -752,14 +766,16 @@ export function Vs01Wizard({
           hideStepper &&
           Boolean(sid) &&
           (readPaidProAgreementBridgeSkipMarker(sid) ||
+            (bridge !== null && bridge.vs01DocumentId.trim() === sid) ||
             (agreementBridgeQuery &&
               bridge !== null &&
               bridge.vs01DocumentId.trim() === sid));
         if (!paidProAgreementHandoff || !bridge || bridge.vs01DocumentId.trim() !== sid) return false;
         const corpus = (bridge.agreementCorpusText ?? "").trim();
         const hydrateMinLen = vs01PaidSessionWorkspaceHydrateMinCorpusLen({
-          agreementBridge: allowBridgeCorpusHydrate,
+          agreementBridge: allowBridgeCorpusHydrate || agreementBridgeQuery,
           paidProHandoff: paidProAgreementHandoff,
+          paidSessionDurablePacket: true,
         });
         if (corpus.length < hydrateMinLen) return false;
         if (cancelled) return false;
@@ -851,6 +867,20 @@ export function Vs01Wizard({
       if (hydrateLocalPaidProBridge()) return;
 
       try {
+        const remote = await fetchDocumentEsignHandoff(sid);
+        if (remote && !cancelled) {
+          const mapped = esignHandoffPayloadToAgreementVs01Bridge(sid, remote);
+          if (mapped) {
+            writeAgreementVs01BridgeSession(mapped);
+            if (hydrateLocalPaidProBridge()) return;
+          }
+        }
+      } catch {
+        /* fall through to document GET */
+      }
+      if (cancelled) return;
+
+      try {
         const blob = await fetchDocumentContent(sid);
         const buf = await blob.arrayBuffer();
         const hex = (await sha256Bytes(buf)).toLowerCase();
@@ -865,7 +895,7 @@ export function Vs01Wizard({
 
         const bridgeParams = new URLSearchParams(window.location.search);
         const agreementBridgeQuery = bridgeParams.get("agreement_bridge") === "1";
-        const rawBridge = readAgreementVs01BridgeSession();
+        const rawBridge = readDurableAgreementVs01Bridge(sid);
         const bridge: AgreementVs01BridgeSession | null =
           rawBridge && rawBridge.vs01DocumentId.trim() === sid
             ? rawBridge
@@ -878,6 +908,7 @@ export function Vs01Wizard({
           hideStepper &&
           Boolean(sid) &&
           (readPaidProAgreementBridgeSkipMarker(sid) ||
+            (bridge !== null && bridge.vs01DocumentId.trim() === sid) ||
             (agreementBridgeQuery &&
               bridge !== null &&
               bridge.vs01DocumentId.trim() === sid));
@@ -1587,7 +1618,10 @@ export function Vs01Wizard({
                 ownerSignerName: creatorSignerName,
                 ownerSignerTitle: creatorSignerTitle,
                 counterparties,
-                bridge: bridgeHandoffSnapshotRef.current ?? readAgreementVs01BridgeSession(),
+                bridge:
+              bridgeHandoffSnapshotRef.current ??
+              readDurableAgreementVs01Bridge((documentId || seedDocumentId || "").trim()) ??
+              readAgreementVs01BridgeSession(),
               });
               const ownerRole = roles.find((r) => r.kind === "owner") ?? roles[0]!;
 
