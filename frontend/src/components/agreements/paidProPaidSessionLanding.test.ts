@@ -7,7 +7,9 @@ import {
 } from "./freeStarterReviewBodyResolver";
 import {
   isVisibleMissingTenetAskLanding,
+  mergePaidSessionSignatureTrackDraft,
   readPremiumCompletionReturnFromHref,
+  resolvePaidSessionSignatureTrackHandoff,
   resolvePaidSessionVisibleDealBody,
   shouldKeepPaidSessionSignerEmailsInteractive,
   shouldShowPaidSessionGeneratingOverlay,
@@ -342,5 +344,49 @@ describe("paid session landing — dump 2 missing only governing law", () => {
     expect(shouldSkipAskAndRenderImmediately(answered)).toBe(true);
     const preflight = evaluateFiveTenetsPreflight(answered, HOLLOW_STARTER_DRAFT);
     expect(preflight.action).toBe("proceed_to_draft_five_tenets_complete");
+  });
+});
+
+describe("paid session signature-track handoff — leftover packet vs painted deal", () => {
+  const painted = {
+    corpusText:
+      "SERVICES AGREEMENT\n\nPriya Shah of Northline Studio hires Diego Alvarez of Harbor Marks LLC to design a logo and brand kit. Payment $2,400. Texas law.",
+    source: "painted",
+  };
+  const leftover = {
+    corpusText: `${"LEFTOVER LINKS CREATED PACKET. ".repeat(80)}\nBy: ________________`,
+    source: "leftover",
+  };
+
+  it("keeps the short painted-deal handoff when relax is on", () => {
+    expect(painted.corpusText.length).toBeGreaterThanOrEqual(200);
+    expect(painted.corpusText.length).toBeLessThan(1500);
+    expect(leftover.corpusText.length).toBeGreaterThanOrEqual(1500);
+    const kept = resolvePaidSessionSignatureTrackHandoff({
+      relaxPaidSessionCorpusAssert: true,
+      explicitHandoff: painted,
+      leftoverSessionHandoff: leftover,
+    });
+    expect(kept).toEqual(painted);
+    expect(kept?.source).not.toBe("leftover");
+  });
+
+  it("falls through to leftover session packet only when relax is off and explicit is short", () => {
+    const leftoverUsed = resolvePaidSessionSignatureTrackHandoff({
+      relaxPaidSessionCorpusAssert: false,
+      explicitHandoff: painted,
+      leftoverSessionHandoff: leftover,
+    });
+    expect(leftoverUsed).toEqual(leftover);
+  });
+
+  it("pins the painted deal onto the draft so seed is not snapshot-empty", () => {
+    const merged = mergePaidSessionSignatureTrackDraft(
+      { title: "SERVICES AGREEMENT", parties: [] },
+      painted.corpusText,
+    );
+    expect(merged.document_text).toBe(painted.corpusText);
+    expect(merged.server_full_document_text).toBe(painted.corpusText);
+    expect(merged.premium_full_document_text).toBe(painted.corpusText);
   });
 });
