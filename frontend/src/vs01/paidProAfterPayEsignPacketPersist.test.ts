@@ -211,6 +211,12 @@ describe("after-pay e-sign packet is durable (not first-SPA only)", () => {
     );
     expect(landing).toContain("isPaidSessionSignatureTrackBridge(args.bridge)");
     expect(landing).toContain("shouldAutoDispatchPaidProPrepareContinue");
+
+    const invite = readFileSync(join(__dirname, "vs01SigningInviteDelivery.ts"), "utf8");
+    expect(invite).toContain("after_pay_ceremony: afterPayCeremony");
+    expect(wizard).toContain("afterPayCeremony:");
+    const apiWs = readFileSync(join(__dirname, "../agreement/agreementWorkspaceApi.ts"), "utf8");
+    expect(apiWs).toContain("after_pay_ceremony: Boolean(body.after_pay_ceremony)");
   });
 
   it.each([
