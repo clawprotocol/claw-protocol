@@ -172,6 +172,7 @@ describe("VS01 parallel signing default", () => {
       ok: true,
       sent_count: 2,
       skip_reason: null,
+      packet_persisted: true,
     });
     const result = await dispatchSigningInvitesFromHandoff(handoff, roles);
     expect(result.attempted).toBe(true);

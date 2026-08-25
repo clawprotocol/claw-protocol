@@ -20,6 +20,7 @@ export type SigningInviteDispatchResult = {
   ok: boolean;
   sentCount: number;
   skipReason: string | null;
+  packetPersisted: boolean;
 };
 
 export function buildSigningInviteTargetsFromHandoff(
@@ -137,6 +138,20 @@ async function enrichSigningTargetsWithRecipientTokens(
   return { ok: true, targets: out };
 }
 
+function signingInviteFail(
+  skipReason: string,
+  extra?: Partial<SigningInviteDispatchResult>,
+): SigningInviteDispatchResult {
+  return {
+    attempted: true,
+    ok: false,
+    sentCount: 0,
+    skipReason,
+    packetPersisted: false,
+    ...extra,
+  };
+}
+
 /** Fire-and-forget signing invite delivery after packet prepare (parallel flow only). */
 export async function dispatchSigningInvitesFromHandoff(
   handoff: PaidProVs01PostSignHandoffV1,
@@ -148,8 +163,64 @@ export async function dispatchSigningInvitesFromHandoff(
   },
 ): Promise<SigningInviteDispatchResult> {
   const senderMustSignFirst = resolveVs01SenderMustSignFirst(handoff.senderMustSignFirst);
+  const documentId = (opts?.documentId ?? handoff.vs01DocumentId ?? "").trim() || null;
+  const afterPayCeremony =
+    Boolean(opts?.afterPayCeremony) ||
+    isPaidSessionSignatureTrackBridge(
+      (documentId ? readDurableAgreementVs01Bridge(documentId) : null) ??
+        readAgreementVs01BridgeSession(),
+    );
+
   if (senderMustSignFirst) {
-    return { attempted: false, ok: false, sentCount: 0, skipReason: "sender_first_explicit" };
+    return {
+      attempted: false,
+      ok: false,
+      sentCount: 0,
+      skipReason: "sender_first_explicit",
+      packetPersisted: false,
+    };
+  }
+
+  // After-pay Send is the ceremony: persist the packet first, even with no
+  // invite targets. Leftover session frozen must not 400 this path. Tokens
+  // mint after persist so the signing lock exists.
+  if (afterPayCeremony) {
+    if (!opts?.portablePacket || !documentId) {
+      return signingInviteFail("after_pay_packet_required");
+    }
+    try {
+      const acceptedRef = readAcceptedReviewSnapshotRef(handoff.agreementId);
+      const persist = await postSigningLinksSent(handoff.agreementId, {
+        packet_revision: handoff.packetRevision ?? null,
+        document_id: documentId,
+        portable_packet: opts.portablePacket as unknown as Record<string, unknown>,
+        frozen_signing_authority: null,
+        targets: buildSigningInviteTargetsFromHandoff(handoff, roles),
+        accepted_review_snapshot_id: acceptedRef?.snapshotId ?? null,
+        accepted_review_snapshot_digest: acceptedRef?.corpusSha256 ?? null,
+        after_pay_ceremony: true,
+      });
+      if (!persist.ok || !persist.packet_persisted) {
+        return signingInviteFail(persist.skip_reason ?? "packet_not_persisted", {
+          sentCount: persist.sent_count ?? 0,
+          packetPersisted: Boolean(persist.packet_persisted),
+        });
+      }
+      await enrichSigningTargetsWithRecipientTokens(
+        handoff.agreementId,
+        buildSigningInviteTargetsFromHandoff(handoff, roles),
+        roles,
+      );
+      return {
+        attempted: true,
+        ok: true,
+        sentCount: persist.sent_count ?? 0,
+        skipReason: null,
+        packetPersisted: true,
+      };
+    } catch {
+      return signingInviteFail("request_failed");
+    }
   }
 
   const enriched = await enrichSigningTargetsWithRecipientTokens(
@@ -158,16 +229,17 @@ export async function dispatchSigningInvitesFromHandoff(
     roles,
   );
   if (!enriched.ok) {
-    return {
-      attempted: true,
-      ok: false,
-      sentCount: 0,
-      skipReason: enriched.skipReason,
-    };
+    return signingInviteFail(enriched.skipReason);
   }
   const targets = enriched.targets;
   if (!targets.length) {
-    return { attempted: false, ok: false, sentCount: 0, skipReason: "no_targets" };
+    return {
+      attempted: false,
+      ok: false,
+      sentCount: 0,
+      skipReason: "no_targets",
+      packetPersisted: false,
+    };
   }
 
   try {
@@ -179,13 +251,6 @@ export async function dispatchSigningInvitesFromHandoff(
         expectedVersion: 1,
       }));
     const acceptedRef = readAcceptedReviewSnapshotRef(handoff.agreementId);
-    const documentId = (opts?.documentId ?? handoff.vs01DocumentId ?? "").trim() || null;
-    const afterPayCeremony =
-      Boolean(opts?.afterPayCeremony) ||
-      isPaidSessionSignatureTrackBridge(
-        (documentId ? readDurableAgreementVs01Bridge(documentId) : null) ??
-          readAgreementVs01BridgeSession(),
-      );
     const res = await postSigningLinksSent(handoff.agreementId, {
       packet_revision: handoff.packetRevision ?? null,
       document_id: documentId,
@@ -194,15 +259,16 @@ export async function dispatchSigningInvitesFromHandoff(
       targets,
       accepted_review_snapshot_id: acceptedRef?.snapshotId ?? null,
       accepted_review_snapshot_digest: acceptedRef?.corpusSha256 ?? null,
-      after_pay_ceremony: afterPayCeremony,
+      after_pay_ceremony: false,
     });
     return {
       attempted: true,
       ok: res.ok,
       sentCount: res.sent_count ?? 0,
       skipReason: res.skip_reason ?? null,
+      packetPersisted: Boolean(res.packet_persisted),
     };
   } catch {
-    return { attempted: true, ok: false, sentCount: 0, skipReason: "request_failed" };
+    return signingInviteFail("request_failed");
   }
 }

@@ -123,7 +123,8 @@ describe("after-pay LawDog dashboard visibility (existing list, not a new page)"
     const persist = src("vs01/paidProAfterPayEsignPacketPersist.test.ts");
     const wizard = src("vs01/Vs01Wizard.tsx");
     expect(persist).not.toContain("markAgreementPacketPrepared");
-    expect(wizard).toContain("if (isAgreementPacketPrepared(linkedAgreementId))");
+    expect(wizard).not.toContain("if (isAgreementPacketPrepared(linkedAgreementId))");
     expect(wizard).toContain("completeBridgePreparePacket()");
+    expect(wizard).toContain("!delivery.ok || !delivery.packetPersisted");
   });
 });

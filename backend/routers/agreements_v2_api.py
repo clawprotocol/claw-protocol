@@ -7969,6 +7969,13 @@ def get_canonical_review_snapshot(agreement_id: str, request: Request) -> Dict[s
     }
 
 
+def _draft_has_persisted_vs01_portable(draft: Any) -> bool:
+    stored = getattr(draft, "vs01_signing_packet_v1", None)
+    if not isinstance(stored, dict):
+        return False
+    return isinstance(stored.get("portable"), dict)
+
+
 @router.post("/{agreement_id}/signing-links-sent")
 def post_agreement_signing_links_sent(
     agreement_id: str,
@@ -8080,14 +8087,20 @@ def post_agreement_signing_links_sent(
                 expected_corpus_hash=corpus_hash or None,
             )
             if not ok:
-                raise HTTPException(
-                    status_code=400,
-                    detail={
-                        "code": err_code or "frozen_authority_invalid",
-                        "message": "Frozen signing authority validation failed.",
-                        "detail": err_detail,
-                    },
-                )
+                if first_after_pay_packet:
+                    # Leftover session frozen (other deal / stale hash) must not
+                    # block after-pay first persist — synthesize from portable.
+                    frozen_raw = None
+                else:
+                    raise HTTPException(
+                        status_code=400,
+                        detail={
+                            "code": err_code or "frozen_authority_invalid",
+                            "message": "Frozen signing authority validation failed.",
+                            "detail": err_detail,
+                        },
+                    )
+        if frozen_raw:
             actions = extract_required_signing_actions(frozen_raw)
             frozen_to_store = {
                 **frozen_raw,
@@ -8275,7 +8288,13 @@ def post_agreement_signing_links_sent(
                 _save_draft_registry_cas_sync(dump, request, expected_revision=base_rev)
             else:
                 _save_draft_sync(dump, request)
-            return {"ok": True, "sent_count": sent_count, "skip_reason": None, "draft": dump}
+            return {
+                "ok": True,
+                "sent_count": sent_count,
+                "skip_reason": None,
+                "packet_persisted": _draft_has_persisted_vs01_portable(next_draft),
+                "draft": dump,
+            }
         skip_reason = "not_sent"
     except HTTPException:
         raise
@@ -8289,6 +8308,7 @@ def post_agreement_signing_links_sent(
         "ok": True,
         "sent_count": sent_count,
         "skip_reason": skip_reason,
+        "packet_persisted": _draft_has_persisted_vs01_portable(draft),
         "draft": draft.model_dump(),
     }
 

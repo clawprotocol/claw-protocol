@@ -16,7 +16,7 @@ import { detailsStepIsValid } from "./detailsStepValidation";
 import type { PlacedSigningField } from "./signingFields";
 import { getVs01UrlBootstrap } from "./vs01UrlBootstrap";
 import { resolveReviewerEffectiveAccessToken } from "../agreement/reviewerTokenPersistence";
-import { markAgreementFieldsPlacedCount, markAgreementPacketPrepared, isAgreementPacketPrepared } from "./vs01WorkspaceSigningStatus";
+import { markAgreementFieldsPlacedCount, markAgreementPacketPrepared } from "./vs01WorkspaceSigningStatus";
 import { fetchDocumentContent, fetchDocumentEsignHandoff, getReceipt } from "./vs01Api";
 import { useAuth } from "../auth/AuthProvider";
 import { shouldDeferVs01SeedDocumentLoad } from "./vs01SeedDocumentAuthGate";
@@ -42,7 +42,6 @@ import {
 } from "../launch/simpleProduct/agreementToVs01SigningBridge";
 import { resolvePrepareBridgeSigningCorpus } from "./vs01PrepareBridgeCorpus";
 import {
-  isPaidSessionSignatureTrackBridge,
   vs01PaidSessionWorkspaceHydrateMinCorpusLen,
 } from "../components/agreements/paidProPaidSessionLanding";
 import { fingerprintAgreementBody } from "../components/agreements/guidedDealCompletion/guidedSigningPacketVersion";
@@ -616,12 +615,6 @@ export function Vs01Wizard({
       setError("Agreement or document is not ready yet.");
       return;
     }
-    if (isAgreementPacketPrepared(linkedAgreementId)) {
-      // eslint-disable-next-line no-console
-      console.info("[vs01-packet-prepare-idempotent-skip]", { agreementId: linkedAgreementId });
-      navigate(paidProPacketReadyDashboardPath());
-      return;
-    }
     const bridge =
       bridgeHandoffSnapshotRef.current ??
       readDurableAgreementVs01Bridge(did) ??
@@ -692,14 +685,7 @@ export function Vs01Wizard({
       const delivery = await dispatchSigningInvitesFromHandoff(result.handoff, roles, {
         portablePacket,
         documentId: did,
-        afterPayCeremony: Boolean(
-          paidProAgreementBridgeSkip ||
-            isPaidSessionSignatureTrackBridge(
-              bridgeHandoffSnapshotRef.current ??
-                readDurableAgreementVs01Bridge(did) ??
-                readAgreementVs01BridgeSession(),
-            ),
-        ),
+        afterPayCeremony: true,
       });
       // eslint-disable-next-line no-console
       console.info("[vs01-signing-invites-dispatched]", {
@@ -708,11 +694,12 @@ export function Vs01Wizard({
         ok: delivery.ok,
         sentCount: delivery.sentCount,
         skipReason: delivery.skipReason,
+        packetPersisted: delivery.packetPersisted,
         packetDigestShort: portablePacket?.envelopeProvenance?.packetDigest?.slice(0, 16) ?? null,
         acceptedSoTDigestShort:
           portablePacket?.envelopeProvenance?.acceptedSoTDigest?.slice(0, 16) ?? null,
       });
-      if (delivery.attempted && !delivery.ok) {
+      if (!delivery.ok || !delivery.packetPersisted) {
         setError(
           delivery.skipReason
             ? `Signing links could not be persisted (${delivery.skipReason}).`

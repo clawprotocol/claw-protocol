@@ -101,6 +101,7 @@ export type PostSigningLinksSentResult = {
   ok: boolean;
   sent_count: number;
   skip_reason: string | null;
+  packet_persisted: boolean;
 };
 
 export type SigningInviteTargetPayload = {
@@ -125,7 +126,7 @@ export async function postSigningLinksSent(
   },
 ): Promise<PostSigningLinksSentResult> {
   const id = agreementId.trim();
-  if (!id) return { ok: false, sent_count: 0, skip_reason: "missing_agreement_id" };
+  if (!id) return { ok: false, sent_count: 0, skip_reason: "missing_agreement_id", packet_persisted: false };
   try {
     const res = await fetch(`${base()}/api/agreements/${encodeURIComponent(id)}/signing-links-sent`, {
       method: "POST",
@@ -147,19 +148,26 @@ export async function postSigningLinksSent(
         typeof j.detail === "object" && j.detail && "code" in j.detail
           ? String(j.detail.code)
           : `http_${res.status}`;
-      return { ok: false, sent_count: 0, skip_reason: code };
+      return { ok: false, sent_count: 0, skip_reason: code, packet_persisted: false };
     }
     const j = (await res.json().catch(() => ({}))) as {
       sent_count?: number;
       skip_reason?: string | null;
+      packet_persisted?: boolean;
+      draft?: { vs01_signing_packet_v1?: { portable?: unknown } | null };
     };
+    const stored = j.draft?.vs01_signing_packet_v1;
+    const packet_persisted = Boolean(j.packet_persisted) || Boolean(
+      stored && typeof stored === "object" && stored.portable,
+    );
     return {
       ok: true,
       sent_count: Number(j.sent_count ?? 0),
       skip_reason: j.skip_reason ?? null,
+      packet_persisted,
     };
   } catch {
-    return { ok: false, sent_count: 0, skip_reason: "network_error" };
+    return { ok: false, sent_count: 0, skip_reason: "network_error", packet_persisted: false };
   }
 }
 
