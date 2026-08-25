@@ -6860,13 +6860,19 @@ def _schedule_workspace_index_ownership_heal(subject_ref: str) -> None:
 @router.get("/workspace-index")
 def get_agreements_workspace_index(request: Request) -> Dict[str, Any]:
     """Lightweight list for Agreement Workspace landing (local / single-tenant style)."""
-    from backend.security.commercial_auth import require_commercial_owner_principal
+    from backend.security.commercial_auth import require_paid_session_or_commercial_owner
     from backend.usage_economics.policy import assert_guest_workflow_denied
     from backend.usage_economics.store import get_usage_economics_store
 
-    require_commercial_owner_principal(request)
+    # Same principal persist already trusts after TEST checkout. JWT-only here
+    # 401s the paying LawDog user and hides the agreement they just paid for.
+    require_paid_session_or_commercial_owner(request)
     subject = resolve_subject_from_request(request)
-    assert_guest_workflow_denied(subject_ref=subject, surface="workspace_history")
+    assert_guest_workflow_denied(
+        subject_ref=subject,
+        surface="workspace_history",
+        request=request,
+    )
     t0 = time.perf_counter()
     heal_ms = 0.0
     owned_ids: List[str] = []
