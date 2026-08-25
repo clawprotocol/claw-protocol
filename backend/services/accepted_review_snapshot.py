@@ -156,23 +156,60 @@ def classify_authority_mode(draft: Any) -> str:
     return AUTHORITY_MODE_ACCEPTED_SNAPSHOT  # new commercial — require snapshot
 
 
-def is_pure_legacy_pre_cutover(draft: Any) -> bool:
-    """
-    True only for sealed packets that never entered the snapshot authority system.
-
-    Post-cutover commercial drafts (flag set or any registry snapshots) are never legacy.
-    """
+def _no_snapshot_authority_registry(draft: Any) -> bool:
+    """True when this draft never entered commercial review-snapshot authority."""
     if get_accepted_snapshot_record(draft):
-        return False
-    if _packet_portable(draft) is None:
         return False
     reg = get_registry(draft)
     if bool(reg.get("commercialSnapshotAuthorityRequired")):
         return False
     snaps = reg.get("snapshots") or {}
-    if snaps:
+    return not bool(snaps)
+
+
+def _document_has_after_pay_esign_handoff(document_id: Optional[str]) -> bool:
+    """After-pay /app/esign/doc_* persist writes esign_handoff_v1 on the document."""
+    did = _clean(document_id)
+    if not did:
         return False
-    return True
+    try:
+        from backend.services import document_service
+
+        meta = document_service.get_document_meta(did) or {}
+    except Exception:
+        return False
+    handoff = meta.get("esign_handoff_v1")
+    return isinstance(handoff, dict) and bool(handoff)
+
+
+def is_pure_legacy_pre_cutover(draft: Any) -> bool:
+    """
+    True only for sealed packets that never entered the snapshot authority system.
+
+    Post-cutover commercial drafts (flag set or any registry snapshots) are never legacy.
+    After the first after-pay persist, the stored packet is this continuation path.
+    """
+    if not _no_snapshot_authority_registry(draft):
+        return False
+    return _packet_portable(draft) is not None
+
+
+def allows_first_ceremony_packet_without_accepted_snapshot(
+    draft: Any, *, document_id: Optional[str] = None
+) -> bool:
+    """
+    After-pay painted deals never enter review-accept. The first Send signing links
+    persist must still store the existing ceremony packet so a private signing link
+    can hydrate fields.
+
+    Commercial drafts without a snapshot stay fail-closed unless the document is an
+    after-pay esign handoff (or a packet was already sealed on this path).
+    """
+    if not _no_snapshot_authority_registry(draft):
+        return False
+    if _packet_portable(draft) is not None:
+        return True
+    return _document_has_after_pay_esign_handoff(document_id)
 
 
 def requires_accepted_snapshot_for_continuation(draft: Any) -> bool:
@@ -599,8 +636,11 @@ def bind_portable_to_accepted_snapshot(
             return False, "legacy_packet_requires_reattestation", None, AUTHORITY_MODE_LEGACY_PACKET
         return False, "accepted_review_snapshot_required", None, AUTHORITY_MODE_ACCEPTED_SNAPSHOT
 
-    # Continuation-only legacy path (explicit caller opt-in + pure pre-cutover only).
-    if not is_pure_legacy_pre_cutover(draft):
+    # Continuation-only legacy path, or first after-pay packet persist (no snapshot registry).
+    if not (
+        is_pure_legacy_pre_cutover(draft)
+        or allows_first_ceremony_packet_without_accepted_snapshot(draft)
+    ):
         return False, "accepted_review_snapshot_required", None, AUTHORITY_MODE_ACCEPTED_SNAPSHOT
     return True, None, portable, AUTHORITY_MODE_LEGACY_PACKET
 

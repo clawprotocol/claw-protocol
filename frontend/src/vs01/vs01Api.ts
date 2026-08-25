@@ -1,6 +1,8 @@
 import { clawAgreementHeaders } from "../agreement/agreementOrgHeaders";
+import { recipientAgreementReadHeaders } from "../agreement/recipientAccessApi";
 import { refreshCachedAccessToken } from "../auth/authAccessTokenCache";
 import { apiUrl, resolveApiBase } from "../lib/clawApi";
+import { getVs01UrlBootstrap } from "./vs01UrlBootstrap";
 
 function apiBase(): string {
   return resolveApiBase().replace(/\/$/, "");
@@ -139,21 +141,49 @@ export async function fetchDocumentEsignHandoff(
   }
 }
 
+export type FetchDocumentContentOptions = {
+  /** Private signing-link token. Sufficient for the existing ceremony — no workspace session. */
+  recipientAccessToken?: string | null;
+};
+
+function resolveRecipientCeremonyAccessToken(explicit?: string | null): string {
+  const fromArg = (explicit ?? "").trim();
+  if (fromArg) return fromArg;
+  try {
+    const fromBoot = (getVs01UrlBootstrap()?.recipientAccessToken ?? "").trim();
+    if (fromBoot) return fromBoot;
+  } catch {
+    /* bootstrap unavailable outside the recipient deep-link */
+  }
+  return "";
+}
+
 /**
  * GET /v1/documents/{document_id}/content — raw document bytes (e.g. PDF for preview).
+ *
+ * Path rule: a private signing link (`recipient_token`) is enough. Do not send
+ * leftover anon-* workspace headers that fail-close as anonymous_session_required.
  */
-export async function fetchDocumentContent(documentId: string): Promise<Blob> {
+export async function fetchDocumentContent(
+  documentId: string,
+  opts?: FetchDocumentContentOptions,
+): Promise<Blob> {
   const enc = encodeURIComponent(documentId.trim());
   const url = apiUrl(`/v1/documents/${enc}/content`);
+  const recipientToken = resolveRecipientCeremonyAccessToken(opts?.recipientAccessToken);
+  const accept = { Accept: "application/pdf, application/octet-stream, */*" };
+  let headers: HeadersInit;
+  if (recipientToken) {
+    headers = { ...recipientAgreementReadHeaders("", recipientToken), ...accept };
+  } else {
+    // Cold esign deep-links can mount before AuthProvider writes the in-memory token cache.
+    await refreshCachedAccessToken();
+    headers = clawAgreementHeaders(accept);
+  }
 
-  // Cold esign deep-links can mount before AuthProvider writes the in-memory token cache.
-  // Refresh from the Supabase session so commercial owner-bound GETs include Authorization.
-  await refreshCachedAccessToken();
-
-  // Commercial staging/prod require org + auth headers; seed docs are owner-bound.
   const res = await fetch(url, {
     method: "GET",
-    headers: clawAgreementHeaders({ Accept: "application/pdf, application/octet-stream, */*" }),
+    headers,
   });
 
   if (!res.ok) {

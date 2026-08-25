@@ -148,11 +148,35 @@ def api_get_document_esign_handoff(document_id: str) -> Dict[str, Any]:
     return {"ok": True, "document_id": did, "handoff": handoff}
 
 
+def _after_pay_content_capability_allows(document_id: str, exc: HTTPException) -> bool:
+    """
+    After-pay /app/esign/doc_* reload has no workspace session (sessionStorage is gone).
+    Document ids are unguessable capability tokens — same as GET /esign-handoff.
+    """
+    detail = exc.detail
+    code = detail.get("code") if isinstance(detail, dict) else ""
+    if code not in {
+        "anonymous_session_required",
+        "auth_required",
+        "authenticated_session_required",
+        "invalid_auth_token",
+        "org_header_required",
+    }:
+        return False
+    meta = document_service.get_document_meta(document_id) or {}
+    handoff = meta.get("esign_handoff_v1")
+    return isinstance(handoff, dict) and bool(handoff)
+
+
 @router.get("/{document_id}/content")
 def api_get_document_content(document_id: str, request: Request) -> Response:
     did = (document_id or "").strip()
     try:
-        require_vs01_document_access(request, did)
+        try:
+            require_vs01_document_access(request, did)
+        except HTTPException as exc:
+            if not _after_pay_content_capability_allows(did, exc):
+                raise
         raw, meta = load_document_content(did)
         if raw is None:
             raise HTTPException(status_code=404, detail="document_not_found")

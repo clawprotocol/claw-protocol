@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional, Tuple
 
 FROZEN_SIGNING_AUTHORITY_VERSION = 1
@@ -210,6 +211,87 @@ def build_recipient_signing_projection(
 def corpus_hash_from_portable(portable: Dict[str, Any]) -> str:
     seed = portable.get("seed") if isinstance(portable.get("seed"), dict) else {}
     return _clean_str(seed.get("corpusHash") or seed.get("corpus_hash"))
+
+
+def synthesize_frozen_from_portable(
+    *,
+    agreement_id: str,
+    portable: Dict[str, Any],
+    packet_revision: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    """Build a minimum frozen snapshot from an existing ceremony portable packet."""
+    if not isinstance(portable, dict):
+        return None
+    roles = portable.get("roles") if isinstance(portable.get("roles"), list) else []
+    parties: List[Dict[str, Any]] = []
+    signers: List[Dict[str, Any]] = []
+    seen_parties: set[str] = set()
+    for idx, role in enumerate(roles):
+        if not isinstance(role, dict):
+            continue
+        party_id = _clean_str(
+            role.get("partyId") or role.get("party_id") or role.get("vs01CounterpartyId")
+        )
+        if not party_id or party_id in seen_parties:
+            continue
+        seen_parties.add(party_id)
+        try:
+            order = int(role.get("partyIndex") if role.get("partyIndex") is not None else idx)
+        except (TypeError, ValueError):
+            order = idx
+        parties.append(
+            {
+                "agreementPartyId": party_id,
+                "legalEntityName": _clean_str(
+                    role.get("entityName") or role.get("entity_name") or role.get("partyName")
+                ),
+                "canonicalOrder": order,
+            }
+        )
+        email = _clean_str(role.get("signerEmail") or role.get("reviewEmail") or role.get("signer_email"))
+        if "@" not in email:
+            email = f"signer{order}@invalid.example"
+        requires = role.get("requiresSignature")
+        if requires is None:
+            requires = role.get("requires_signature")
+        signers.append(
+            {
+                "signerRecordId": _clean_str(role.get("roleId") or role.get("role_id"))
+                or f"signer:{party_id}:{order}",
+                "agreementPartyId": party_id,
+                "signerEmail": email,
+                "signerName": _clean_str(role.get("signerName") or role.get("signer_name")),
+                "signingOrder": order,
+                "requiresSignature": False if requires is False else True,
+                "requiresInitials": False,
+            }
+        )
+    if len(parties) < 1 or len(signers) < 1:
+        return None
+    corpus_hash = corpus_hash_from_portable(portable)
+    snapshot = {
+        "version": FROZEN_SIGNING_AUTHORITY_VERSION,
+        "agreementId": _clean_str(agreement_id),
+        "frozenCorpusHash": corpus_hash,
+        "frozenAt": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
+        "parties": parties,
+        "signers": signers,
+        "recipients": [],
+        "execution": {
+            "partyOrder": [p["agreementPartyId"] for p in parties],
+            "signerOrder": [s["signerRecordId"] for s in signers],
+        },
+        "packetState": PACKET_STATE_ACTIVE,
+        "activePacketRevision": _clean_str(packet_revision),
+        "requiredActions": [],
+    }
+    snapshot["requiredActions"] = extract_required_signing_actions(snapshot)
+    ok, _, _ = validate_frozen_signing_authority_snapshot(
+        snapshot,
+        expected_agreement_id=agreement_id,
+        expected_corpus_hash=corpus_hash or None,
+    )
+    return snapshot if ok else None
 
 
 def normalize_stored_frozen_authority(raw: Any) -> Optional[Dict[str, Any]]:

@@ -396,7 +396,8 @@ export function Vs01Wizard({
         );
         return;
       }
-      setRecipientAuthoritativeInitialsEnabled(null);
+      // Path rule: do not stay on “Loading signing fields…” after the packet miss.
+      setRecipientAuthoritativeInitialsEnabled(undefined);
       if (import.meta.env.DEV) {
         // eslint-disable-next-line no-console
         console.warn("[vs01-recipient-server-hydration-miss]", {

@@ -241,6 +241,11 @@ def test_vs01_seed_persists_esign_handoff_readable_without_owner_session(
     missing = client.get("/v1/documents/doc_nonexistent0000000000000000/esign-handoff")
     assert missing.status_code == 404
 
+    # Authoring Sign document after sessionStorage death: document id is enough.
+    content_anon = client.get(f"/v1/documents/{doc_id}/content")
+    assert content_anon.status_code == 200, content_anon.text
+    assert content_anon.content.startswith(b"%PDF")
+
 
 def test_document_content_survives_malformed_meta(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
     _env_common(monkeypatch, tmp_path)

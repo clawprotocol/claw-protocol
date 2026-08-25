@@ -7983,8 +7983,14 @@ def post_agreement_signing_links_sent(
 
     if portable and document_id:
         # Correlation fields from client — never authority; reject mismatch vs accepted snapshot.
-        from backend.services.accepted_review_snapshot import get_accepted_snapshot_record
+        from backend.services.accepted_review_snapshot import (
+            allows_first_ceremony_packet_without_accepted_snapshot,
+            get_accepted_snapshot_record,
+        )
 
+        first_after_pay_packet = allows_first_ceremony_packet_without_accepted_snapshot(
+            draft, document_id=document_id
+        )
         accepted_snap = get_accepted_snapshot_record(draft)
         if isinstance(accepted_snap, dict):
             corr_id = (body.accepted_review_snapshot_id or "").strip()
@@ -8012,13 +8018,35 @@ def post_agreement_signing_links_sent(
                     "acceptedReviewSnapshotDigest": accepted_snap.get("corpusSha256"),
                 }
 
-        portable = _attest_portable_envelope_or_400(
-            agreement_id=agreement_id,
-            portable=portable,
-            draft=draft,
-            surface="signing_links_sent",
-            require_accepted_snapshot=True,
-        )
+        if first_after_pay_packet:
+            from backend.config.agreement_signing_token import (
+                SigningTokenSecretMissingInProductionError,
+                resolve_signing_token_secret_raw,
+            )
+            from backend.services.vs01_signing_envelope_provenance import (
+                attest_portable_envelope_provenance,
+            )
+
+            try:
+                secret_raw = resolve_signing_token_secret_raw()
+                ok_env, _env_err, attested = attest_portable_envelope_provenance(
+                    agreement_id=agreement_id,
+                    portable=portable,
+                    secret_raw=secret_raw,
+                    require_client_match=False,
+                )
+                if ok_env and isinstance(attested, dict):
+                    portable = attested
+            except SigningTokenSecretMissingInProductionError:
+                pass
+        else:
+            portable = _attest_portable_envelope_or_400(
+                agreement_id=agreement_id,
+                portable=portable,
+                draft=draft,
+                surface="signing_links_sent",
+                require_accepted_snapshot=True,
+            )
         from backend.services.frozen_signing_authority import (
             PACKET_STATE_ACTIVE,
             corpus_hash_from_portable,
@@ -8056,13 +8084,40 @@ def post_agreement_signing_links_sent(
             )
             _save_draft_sync(draft.model_dump(), request)
         elif not isinstance(draft.frozen_signing_authority_v1, dict):
-            raise HTTPException(
-                status_code=400,
-                detail={
-                    "code": "frozen_signing_authority_required",
-                    "message": "Durable frozen signing authority is required before packet activation.",
-                },
-            )
+            if first_after_pay_packet:
+                from backend.services.frozen_signing_authority import (
+                    PACKET_STATE_ACTIVE,
+                    extract_required_signing_actions,
+                    synthesize_frozen_from_portable,
+                )
+
+                synthesized = synthesize_frozen_from_portable(
+                    agreement_id=agreement_id,
+                    portable=portable,
+                    packet_revision=packet_revision,
+                )
+                if synthesized:
+                    actions = extract_required_signing_actions(synthesized)
+                    frozen_to_store = {
+                        **synthesized,
+                        "packetState": PACKET_STATE_ACTIVE,
+                        "requiredActions": actions,
+                        "activePacketRevision": packet_revision,
+                    }
+                    draft = _merge_agreement_draft(
+                        draft,
+                        frozen_signing_authority_v1=frozen_to_store,
+                        updated_at=_utc_now_iso(),
+                    )
+                    _save_draft_sync(draft.model_dump(), request)
+            else:
+                raise HTTPException(
+                    status_code=400,
+                    detail={
+                        "code": "frozen_signing_authority_required",
+                        "message": "Durable frozen signing authority is required before packet activation.",
+                    },
+                )
         else:
             ok, err_code, err_detail = validate_frozen_signing_authority_snapshot(
                 draft.frozen_signing_authority_v1,
@@ -8097,7 +8152,11 @@ def post_agreement_signing_links_sent(
                 "accepted_review_snapshot_digest": (
                     (accepted_for_pkt or {}).get("corpusSha256") if isinstance(accepted_for_pkt, dict) else None
                 ),
-                "authority_mode": "accepted_review_snapshot",
+                "authority_mode": (
+                    "legacy_packet_pre_snapshot"
+                    if first_after_pay_packet
+                    else "accepted_review_snapshot"
+                ),
             }
             draft = _merge_agreement_draft(draft, vs01_signing_packet_v1=stored, updated_at=_utc_now_iso())
             _save_draft_sync(draft.model_dump(), request)
