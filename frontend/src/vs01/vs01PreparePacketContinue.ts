@@ -33,11 +33,30 @@ import { ensureSigningPacketStatusFromHandoff } from "./vs01SigningPacketStatusS
 import { resolveVs01SenderMustSignFirst } from "./vs01SigningOrderPolicy";
 import { buildVs01PrepareSigningRolesForBridge } from "../components/agreements/paidProNPartySignerSetup";
 import type { AgreementVs01BridgeSession } from "../launch/simpleProduct/agreementToVs01SigningBridge";
+import {
+  isPaidSessionSignatureTrackBridge,
+  PAID_SESSION_SIGNATURE_TRACK_MIN_CORPUS_LEN,
+} from "../components/agreements/paidProPaidSessionLanding";
+import { VS01_SIGNING_CORPUS_MIN_LEN } from "./vs01SigningCorpus";
 
 export type PreparePacketBridgeContext = Pick<
   AgreementVs01BridgeSession,
   "creatorIsParty" | "legalParties"
->;
+> &
+  Partial<
+    Pick<
+      AgreementVs01BridgeSession,
+      "senderFirstLawdogHandoff" | "source" | "agreementBridgeMode" | "creatorEmail" | "agreementId"
+    >
+  >;
+
+function preparePacketCanonicalMinCorpusLen(
+  bridge: PreparePacketBridgeContext | null | undefined,
+): number {
+  return isPaidSessionSignatureTrackBridge(bridge)
+    ? PAID_SESSION_SIGNATURE_TRACK_MIN_CORPUS_LEN
+    : VS01_SIGNING_CORPUS_MIN_LEN;
+}
 
 export type PreparePacketContinueInput = {
   agreementId: string;
@@ -107,13 +126,17 @@ export function handlePreparePacketContinue(
 ): PreparePacketContinueResult {
   const { gate, roles } = recomputePreparePacketGate(input);
   const corpusPlain = (input.prepareCorpusPlain ?? "").trim();
+  const canonicalMinLen = preparePacketCanonicalMinCorpusLen(input.bridge);
+  const paidSessionBridge = isPaidSessionSignatureTrackBridge(input.bridge);
   let finish = evaluatePrepareFinishClick(gate, roles);
-  if (!finish.allowed && input.bridge && corpusPlain.length >= 1500) {
+  if (!finish.allowed && input.bridge && corpusPlain.length >= canonicalMinLen) {
     const model = buildVs01SigningPacketModel({
       mode: "guided_pro",
       authoritativeCorpusPlain: corpusPlain,
       roles,
       initialsEnabled: input.initialsEnabled !== false,
+      bridge: input.bridge as AgreementVs01BridgeSession | null | undefined,
+      corpusGateArgs: paidSessionBridge ? { relaxPaidSessionCorpusAssert: true } : undefined,
     });
     const signatureFieldCount = model.fields.filter(
       (f) => f.type === "signature" && !f.autoInitials,
@@ -138,18 +161,21 @@ export function handlePreparePacketContinue(
   let canonicalPacketStored = false;
   let packetRevision: string | null = null;
   let portablePacket: Vs01CanonicalPacketPortableV1 | null = null;
-  if (corpusPlain.length >= 1500) {
+  if (corpusPlain.length >= canonicalMinLen) {
     const model = buildVs01SigningPacketModel({
       mode: "guided_pro",
       authoritativeCorpusPlain: corpusPlain,
       roles,
       initialsEnabled,
+      bridge: input.bridge as AgreementVs01BridgeSession | null | undefined,
+      corpusGateArgs: paidSessionBridge ? { relaxPaidSessionCorpusAssert: true } : undefined,
     });
     if (model.allowed) {
       const seed = buildVs01CanonicalPacketSeed({
         documentId: input.documentId,
         agreementId: input.agreementId,
         corpusPlain,
+        minCorpusLen: canonicalMinLen,
       });
       if (seed) storeVs01CanonicalPacketSeed(seed);
       const manifestFields = buildFullPacketManifestFromCanonicalModel({ model, roles });

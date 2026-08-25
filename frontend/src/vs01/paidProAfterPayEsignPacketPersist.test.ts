@@ -21,6 +21,15 @@ import {
   writeAgreementVs01BridgeSession,
 } from "../launch/simpleProduct/agreementToVs01SigningBridge";
 import { buildAgreementVs01BridgeSession } from "../launch/simpleProduct/agreementToVs01SigningBridge";
+import { handlePreparePacketContinue, resolvePreparePacketSigningRoles } from "./vs01PreparePacketContinue";
+import {
+  buildVs01CanonicalPacketSeed,
+  decodeVs01CanonicalPacketPortable,
+  encodeVs01CanonicalPacketPortable,
+  loadVs01CanonicalPacketPortable,
+} from "./vs01CanonicalPacketSeed";
+import { stampSenderFieldWithPrepareRole } from "./vs01SignerFieldAssignment";
+import type { PlacedSigningField } from "./signingFields";
 import { VS01_SIGNING_CORPUS_MIN_LEN } from "./vs01SigningCorpus";
 
 const TWO_PARTY =
@@ -188,5 +197,123 @@ describe("after-pay e-sign packet is durable (not first-SPA only)", () => {
     const api = readFileSync(join(__dirname, "vs01Api.ts"), "utf8");
     expect(api).toContain("/esign-handoff");
     expect(api).toContain("export async function fetchDocumentEsignHandoff");
+
+    const continueSrc = readFileSync(join(__dirname, "vs01PreparePacketContinue.ts"), "utf8");
+    expect(continueSrc).toContain("preparePacketCanonicalMinCorpusLen");
+    expect(continueSrc).toContain("relaxPaidSessionCorpusAssert: true");
+    expect(continueSrc).toContain("minCorpusLen: canonicalMinLen");
+  });
+
+  it.each([
+    {
+      count: 2,
+      id: "ag_sign_two",
+      docId: "doc_sign_two_aaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      corpus: TWO_PARTY,
+      parties: [
+        {
+          name: "Alex Rivera of Northline Studio",
+          role: "owner" as const,
+          email: "alex.rivera.qa@example.com",
+          signerName: "Alex Rivera",
+        },
+        {
+          name: "Jordan Kim of Harbor Marks LLC",
+          role: "signer" as const,
+          email: "jordan.kim.qa@example.com",
+          signerName: "Jordan Kim",
+        },
+      ],
+    },
+    {
+      count: 3,
+      id: "ag_sign_three",
+      docId: "doc_sign_three_aaaaaaaaaaaaaaaaaaaaaaaaa",
+      corpus: THREE_PARTY,
+      parties: [
+        { name: "Alex Rivera", role: "owner" as const, email: "alex.rivera.qa@example.com", signerName: "Alex Rivera" },
+        { name: "Jordan Kim", role: "signer" as const, email: "jordan.kim.qa@example.com", signerName: "Jordan Kim" },
+        { name: "Sam Patel", role: "signer" as const, email: "sam.patel.qa@example.com", signerName: "Sam Patel" },
+      ],
+    },
+    {
+      count: 4,
+      id: "ag_sign_four",
+      docId: "doc_sign_four_aaaaaaaaaaaaaaaaaaaaaaaaaa",
+      corpus: FOUR_PARTY,
+      parties: [
+        { name: "Alex Rivera", role: "owner" as const, email: "alex.rivera.qa@example.com", signerName: "Alex Rivera" },
+        { name: "Jordan Kim", role: "signer" as const, email: "jordan.kim.qa@example.com", signerName: "Jordan Kim" },
+        { name: "Sam Patel", role: "signer" as const, email: "sam.patel.qa@example.com", signerName: "Sam Patel" },
+        { name: "Casey Nguyen", role: "signer" as const, email: "casey.nguyen.qa@example.com", signerName: "Casey Nguyen" },
+      ],
+    },
+  ])("$count-party after-pay Send signing links persists a ceremony packet (not 1500-only)", (fixture) => {
+    expect(fixture.corpus.length).toBeGreaterThanOrEqual(PAID_SESSION_SIGNATURE_TRACK_MIN_CORPUS_LEN);
+    expect(fixture.corpus.length).toBeLessThan(VS01_SIGNING_CORPUS_MIN_LEN);
+    expect(
+      buildVs01CanonicalPacketSeed({
+        documentId: fixture.docId,
+        agreementId: fixture.id,
+        corpusPlain: fixture.corpus,
+      }),
+    ).toBeNull();
+    expect(
+      buildVs01CanonicalPacketSeed({
+        documentId: fixture.docId,
+        agreementId: fixture.id,
+        corpusPlain: fixture.corpus,
+        minCorpusLen: PAID_SESSION_SIGNATURE_TRACK_MIN_CORPUS_LEN,
+      }),
+    ).not.toBeNull();
+
+    const bridge = paidBridge(fixture);
+    const input = {
+      agreementId: fixture.id,
+      agreementTitle: "SERVICES AGREEMENT",
+      documentId: fixture.docId,
+      creatorName: bridge.creatorName,
+      creatorEmail: bridge.creatorEmail,
+      ownerSignerName: bridge.creatorSignerName,
+      ownerSignerTitle: bridge.creatorSignerTitle,
+      counterparties: bridge.counterparties,
+      senderPlacedFields: [] as PlacedSigningField[],
+      recipientPlacedFields: [],
+      prepareCorpusPlain: fixture.corpus,
+      initialsEnabled: false as const,
+      bridge,
+    };
+    const roles = resolvePreparePacketSigningRoles(input);
+    expect(roles.length).toBe(fixture.count);
+    const senderPlacedFields = roles.flatMap((role) => [
+      stampSenderFieldWithPrepareRole(
+        {
+          id: `sig_${role.roleId}`,
+          type: "signature",
+          page: 0,
+          x: 0.1,
+          y: 0.1 + role.partyIndex * 0.1,
+          width: 0.34,
+          height: 0.075,
+          assignedSignerRoleId: role.roleId,
+        },
+        role,
+      ),
+    ]);
+    const prepared = handlePreparePacketContinue({ ...input, senderPlacedFields });
+    expect(prepared.ok).toBe(true);
+    if (!prepared.ok) return;
+    expect(prepared.portablePacket).not.toBeNull();
+    expect(prepared.portablePacket?.seed.corpusPlain).toBe(fixture.corpus);
+    expect(prepared.portablePacket?.roles.length).toBe(fixture.count);
+    expect(prepared.handoff.signers.length).toBe(fixture.count - 1);
+    expect(prepared.handoff.signers.every((s) => s.signingUrl.includes("vs01_recipient_sign=1"))).toBe(true);
+
+    sessionStorage.clear();
+    const stored = loadVs01CanonicalPacketPortable(fixture.docId);
+    expect(stored?.seed.corpusPlain).toBe(fixture.corpus);
+    const decoded = decodeVs01CanonicalPacketPortable(encodeVs01CanonicalPacketPortable(prepared.portablePacket!));
+    expect(decoded?.seed.corpusPlain).toBe(fixture.corpus);
+    expect(decoded?.roles.length).toBe(fixture.count);
   });
 });

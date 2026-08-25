@@ -268,8 +268,18 @@ export function Vs01Wizard({
     const did = (documentId ?? "").trim();
     const aid = (vs01LinkedAgreementId ?? "").trim();
     const corpus = (prepareCorpusText ?? "").trim();
-    if (!paidProAgreementBridgeSkip || !did || !aid || corpus.length < 1500) return;
-    const seed = buildVs01CanonicalPacketSeed({ documentId: did, agreementId: aid, corpusPlain: corpus });
+    const seedMinLen = vs01PaidSessionWorkspaceHydrateMinCorpusLen({
+      agreementBridge: true,
+      paidProHandoff: paidProAgreementBridgeSkip,
+      paidSessionDurablePacket: true,
+    });
+    if (!paidProAgreementBridgeSkip || !did || !aid || corpus.length < seedMinLen) return;
+    const seed = buildVs01CanonicalPacketSeed({
+      documentId: did,
+      agreementId: aid,
+      corpusPlain: corpus,
+      minCorpusLen: seedMinLen,
+    });
     if (seed) storeVs01CanonicalPacketSeed(seed);
   }, [paidProAgreementBridgeSkip, documentId, vs01LinkedAgreementId, prepareCorpusText]);
 
