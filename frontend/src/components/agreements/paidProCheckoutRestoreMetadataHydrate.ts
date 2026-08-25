@@ -20,7 +20,27 @@ import { repairCheckoutBackRestoreDraftParties } from "./checkoutBackRestore";
 export type CheckoutRestoreMetadataHydrateResult = {
   seed: PaidProSignerMetadataSeedResult | null;
   fieldCounts: ReturnType<typeof computeCanonicalPartyMetadataFieldCounts>;
+  /** Intake-authoritative legal entities for signer-setup UI slots (never raw corrupted draft parties). */
+  legalEntities: string[];
+  repairedDraft: ParsedDraftShape | null;
 };
+
+/** Project intake + repaired draft to ordered legal-entity slots for post-payment signer setup UI. */
+export function resolvePaidProSignerSetupLegalEntitiesFromIntake(args: {
+  intakeText: string;
+  draft: ParsedDraftShape | null | undefined;
+}): string[] {
+  const intakeText = (args.intakeText || "").trim();
+  if (!intakeText || !args.draft) return [];
+  const draft = repairCheckoutBackRestoreDraftParties(args.draft, intakeText);
+  return resolveLegalEntitiesForCanonicalMetadata({
+    legalEntities: (draft.parties ?? [])
+      .map((p) => String((p as { name?: string }).name ?? "").trim())
+      .filter(Boolean),
+    intakeText,
+    draft,
+  });
+}
 
 export function hydrateCanonicalPartyMetadataAfterCheckoutRestore(args: {
   intakeText: string;
@@ -31,6 +51,8 @@ export function hydrateCanonicalPartyMetadataAfterCheckoutRestore(args: {
     return {
       seed: null,
       fieldCounts: computeCanonicalPartyMetadataFieldCounts(null),
+      legalEntities: [],
+      repairedDraft: null,
     };
   }
 
@@ -78,5 +100,5 @@ export function hydrateCanonicalPartyMetadataAfterCheckoutRestore(args: {
   const fieldCounts = computeCanonicalPartyMetadataFieldCounts(bundle);
   logCanonicalPartyMetadataDiagnostics("signer-setup", bundle, fieldCounts);
 
-  return { seed, fieldCounts };
+  return { seed, fieldCounts, legalEntities, repairedDraft: draft };
 }

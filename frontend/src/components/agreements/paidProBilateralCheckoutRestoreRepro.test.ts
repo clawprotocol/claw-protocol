@@ -9,6 +9,11 @@ import { clearCanonicalPartyMetadata } from "./canonicalPartyMetadataAuthority";
 import { clearConsumedPaidProSignerMetadataAuthority } from "./paidProSignerMetadataAuthority";
 import { resetSignerCountAuthorityDiagnosticsForTests } from "./signerCountAuthority";
 import {
+  hydrateCanonicalPartyMetadataAfterCheckoutRestore,
+  resolvePaidProSignerSetupLegalEntitiesFromIntake,
+} from "./paidProCheckoutRestoreMetadataHydrate";
+import { getRecipientHandoffNamesFromDraft } from "./partyIntakeNormalize";
+import {
   clearCheckoutBackRestoreSnapshot,
   persistStarterReviewBeforeCheckout,
   readCheckoutBackRestoreSnapshot,
@@ -284,5 +289,58 @@ describe("paidPro bilateral premiumCompletion restore integration", () => {
       intakeText: displayContext.intakeText,
     });
     expect(legacyBypass).not.toMatch(/The Service Provider shall design a logo and brand kit/i);
+  });
+
+  it("post-payment hydrate re-seeds signer panel legal entities from intake when draft parties corrupt", () => {
+    persistStarterReviewBeforeCheckout({
+      intakeText: INTAKE,
+      draft: PRE_CHECKOUT_DRAFT,
+    });
+    markPaidPremiumCompletionSession({ source: "settled_checkout" });
+    const snap = readCheckoutBackRestoreSnapshot();
+    expect(snap?.intakeText).toContain("Priya Shah of Northline Studio");
+
+    const corruptedHandoff = getRecipientHandoffNamesFromDraft(POST_GENERATION_CORRUPTED_DRAFT);
+    expect(corruptedHandoff.n1).toBe("Harbor Marks LLC");
+    expect(corruptedHandoff.n2).toBe("Diego Alvarez of");
+
+    const hydrated = hydrateCanonicalPartyMetadataAfterCheckoutRestore({
+      intakeText: snap!.intakeText,
+      draft: POST_GENERATION_CORRUPTED_DRAFT,
+    });
+    expect(hydrated.legalEntities).toEqual([
+      "Priya Shah of Northline Studio",
+      "Diego Alvarez of Harbor Marks LLC",
+    ]);
+
+    const intakeAuthority = resolvePaidProSignerSetupLegalEntitiesFromIntake({
+      intakeText: snap!.intakeText,
+      draft: POST_GENERATION_CORRUPTED_DRAFT,
+    });
+    expect(intakeAuthority).toEqual(hydrated.legalEntities);
+
+    establishPaidProSourceOfTruth({
+      text: CONTAMINATED_GENERATED_CORPUS,
+      source: "server_full_draft",
+    });
+
+    const displayContext = resolvePostPaymentReviewDisplayContext({
+      intakeCombined: "",
+      draft: POST_GENERATION_CORRUPTED_DRAFT,
+      checkoutSnapIntake: snap!.intakeText,
+    });
+
+    const { party1Heading, party2Heading } = resolvePostPaymentSignerHeadings({
+      draft: displayContext.draft,
+      intakeText: displayContext.intakeText,
+      recipient1Name: hydrated.legalEntities[0]!,
+      recipient2Name: hydrated.legalEntities[1]!,
+      agreementBodyText: CONTAMINATED_GENERATED_CORPUS,
+    });
+
+    expect(party1Heading).toBe("Priya Shah of Northline Studio");
+    expect(party2Heading).toBe("Diego Alvarez of Harbor Marks LLC");
+    expect(party1Heading).not.toBe(corruptedHandoff.n1);
+    expect(party2Heading).not.toBe(corruptedHandoff.n2);
   });
 });
