@@ -232,6 +232,52 @@ export function shouldRelaxPaidSessionSignatureTrackGates(args: {
 /** Same floor as after-pay painted deal / review-link mint. */
 export const PAID_SESSION_SIGNATURE_TRACK_MIN_CORPUS_LEN = 200;
 
+/** Paid-session Send for signature already wrote the VS01 bridge. */
+export function isPaidSessionSignatureTrackBridge(
+  bridge: {
+    senderFirstLawdogHandoff?: boolean | null;
+    source?: string | null;
+    agreementBridgeMode?: string | null;
+  } | null | undefined,
+): boolean {
+  if (!bridge) return false;
+  return Boolean(
+    bridge.senderFirstLawdogHandoff ||
+      bridge.source === "paid_pro_sender_first" ||
+      bridge.agreementBridgeMode === "prepare_signing_packet",
+  );
+}
+
+/**
+ * After-pay `/app/esign/:id?agreement_bridge=1` must hydrate the painted deal
+ * at the 200-char floor. The 1500-char VS01 gate is for long Pro snapshots only.
+ */
+export function vs01PaidSessionWorkspaceHydrateMinCorpusLen(args: {
+  agreementBridge: boolean;
+  paidProHandoff: boolean;
+}): number {
+  if (args.agreementBridge && args.paidProHandoff) {
+    return PAID_SESSION_SIGNATURE_TRACK_MIN_CORPUS_LEN;
+  }
+  return 1500;
+}
+
+/** Prepare/workspace gates keep the painted deal — do not revive a leftover 1500-char packet. */
+export function shouldRelaxPaidSessionWorkspaceCorpus(args: {
+  bridge?: {
+    senderFirstLawdogHandoff?: boolean | null;
+    source?: string | null;
+    agreementBridgeMode?: string | null;
+  } | null;
+  corpusText?: string | null;
+}): boolean {
+  const corpus = (args.corpusText ?? "").trim();
+  return (
+    isPaidSessionSignatureTrackBridge(args.bridge) &&
+    corpus.length >= PAID_SESSION_SIGNATURE_TRACK_MIN_CORPUS_LEN
+  );
+}
+
 /**
  * After-pay Send for signature must keep the painted-deal handoff.
  * The 1500-char session reader drops short rebuilds and can revive a leftover

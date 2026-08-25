@@ -32,6 +32,8 @@ describe("Vs01Wizard agreement bridge (static)", () => {
     expect(s).toContain('sid.startsWith("doc_")');
     expect(s).toContain("agreementBridgeQuery && sid.startsWith(\"doc_\")");
     expect(s).toContain("Could not load this document");
+    expect(s).toContain("vs01PaidSessionWorkspaceHydrateMinCorpusLen");
+    expect(s).toContain("hydrateMinLen");
   });
 
   it("defers cold-open seed document fetch until auth token cache can be hydrated", () => {

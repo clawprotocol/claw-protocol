@@ -574,10 +574,14 @@ export function StepPrepareSignature({
         return;
       }
       if (agreementBridgePlacementCopy) {
+        const corpus = (prepareCorpusText ?? "").trim();
         const gate = resolveFinalVs01CorpusOrBlock({
           agreementCorpusText: prepareCorpusText,
           guidedPro: true,
-          premiumComplete: (prepareCorpusText ?? "").trim().length >= 1500,
+          ...buildPrepareBridgeCorpusGateArgs({
+            agreementCorpusText: corpus,
+            bridge: readAgreementVs01BridgeSession(),
+          }),
         });
         setPdfUrl(null);
         setPreviewError(gate.allowed ? null : VS01_CORPUS_GATE_USER_MESSAGE);
