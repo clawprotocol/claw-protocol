@@ -1,6 +1,21 @@
 import { tierEntitlements } from "./tierConfig";
 import type { AccessFeature, AccessTier, GateContext, GateResult, UsageTotals } from "./types";
 import { loadUsageTotals } from "./usageMeter";
+import { hasDemoSessionUser } from "../launch/guestCheckoutAuthority";
+import { hasPaidPremiumCompletionSession } from "../components/agreements/premiumCompletionStorage";
+
+/**
+ * After-pay e-sign for a checkout-created LawDog user (demo receipt / paid
+ * session). Does not change the create-path access tier — guest homepage
+ * dump still paints without a Supabase JWT.
+ */
+export function checkoutCreatedLawdogEsignAllowed(): boolean {
+  try {
+    return hasDemoSessionUser() || hasPaidPremiumCompletionSession();
+  } catch {
+    return false;
+  }
+}
 
 const APPROACH_RATIO = 0.8;
 
@@ -93,6 +108,9 @@ export function canUseFeature(
       return { allowed: true };
 
     case "signature_request":
+      if (checkoutCreatedLawdogEsignAllowed()) {
+        return { allowed: true };
+      }
       if (atOrOverLimit(usage.signature_requests, e.max_signature_requests_per_month)) {
         return {
           allowed: false,
@@ -111,6 +129,9 @@ export function canUseFeature(
       return { allowed: true };
 
     case "esign_flow":
+      if (checkoutCreatedLawdogEsignAllowed()) {
+        return { allowed: true };
+      }
       if (!e.can_use_esign) {
         return {
           allowed: false,
