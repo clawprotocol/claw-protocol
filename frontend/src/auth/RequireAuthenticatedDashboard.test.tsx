@@ -1,5 +1,6 @@
 /** @vitest-environment jsdom */
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
+import React from "react";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { RequireAuthenticatedDashboard } from "./RequireAuthenticatedDashboard";
 import {
