@@ -460,6 +460,16 @@ describe("after-pay workspace stays open — persist must not auto-send", () => 
     ).toBe(true);
   });
 
+  it("does not auto-dispatch when the paid-session bridge has not hydrated yet", () => {
+    expect(
+      shouldAutoDispatchPaidProPrepareContinue({
+        agreementBridgePlacementCopy: true,
+        packetReady: true,
+        bridge: null,
+      }),
+    ).toBe(false);
+  });
+
   it("does not auto-dispatch when the packet is not ready", () => {
     expect(
       shouldAutoDispatchPaidProPrepareContinue({

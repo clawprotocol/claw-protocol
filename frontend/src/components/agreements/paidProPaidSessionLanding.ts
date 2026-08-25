@@ -267,7 +267,9 @@ export function shouldAutoDispatchPaidProPrepareContinue(args: {
   if (!args.agreementBridgePlacementCopy || !args.packetReady) return false;
   if ((args.receiptId || "").trim()) return false;
   if (args.busy) return false;
-  if (isPaidSessionSignatureTrackBridge(args.bridge)) return false;
+  // Missing bridge: stay on /app/esign. Auto-send only for an explicit
+  // non–paid-session prepare path.
+  if (!args.bridge || isPaidSessionSignatureTrackBridge(args.bridge)) return false;
   return true;
 }
 
