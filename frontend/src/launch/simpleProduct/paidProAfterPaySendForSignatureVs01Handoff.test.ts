@@ -159,6 +159,63 @@ describe("after-pay Send for signature opens existing e-sign workspace", () => {
     expect(readAgreementVs01BridgeSession()?.agreementCorpusText).toBe(secondDump);
   });
 
+  it.each([
+    {
+      count: 3,
+      id: "ag_after_pay_three_party",
+      corpus:
+        "SERVICES AGREEMENT\n\nThis Agreement is entered into by Priya Shah, Diego Alvarez, and Maya Chen for a three-party brand collaboration. Payment $3,000. Term 45 days. Governing law: Texas. Each party will sign. The Service Provider delivers a logo and brand kit.",
+      parties: [
+        { name: "Priya Shah", role: "owner", email: "priya.shah.qa@example.com", signerName: "Priya Shah" },
+        { name: "Diego Alvarez", role: "signer", email: "diego.alvarez.qa@example.com", signerName: "Diego Alvarez" },
+        { name: "Maya Chen", role: "signer", email: "maya.chen.qa@example.com", signerName: "Maya Chen" },
+      ],
+    },
+    {
+      count: 4,
+      id: "ag_after_pay_four_party",
+      corpus:
+        "SERVICES AGREEMENT\n\nThis Agreement is entered into by Priya Shah, Diego Alvarez, Maya Chen, and Jordan Lee for a four-party brand kit. Payment $4,200. Term 60 days. Governing law: Texas. Each party will sign. The Service Provider delivers marks and guidelines.",
+      parties: [
+        { name: "Priya Shah", role: "owner", email: "priya.shah.qa@example.com", signerName: "Priya Shah" },
+        { name: "Diego Alvarez", role: "signer", email: "diego.alvarez.qa@example.com", signerName: "Diego Alvarez" },
+        { name: "Maya Chen", role: "signer", email: "maya.chen.qa@example.com", signerName: "Maya Chen" },
+        { name: "Jordan Lee", role: "signer", email: "jordan.lee.qa@example.com", signerName: "Jordan Lee" },
+      ],
+    },
+  ] as const)("opens /app/esign for $count complete names+emails without leftover packet", async (fixture) => {
+    expect(fixture.corpus.length).toBeGreaterThanOrEqual(200);
+    expect(fixture.corpus.length).toBeLessThan(1500);
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: false,
+        status: 404,
+        json: async () => ({ detail: { code: "agreement_not_found" } }),
+      }),
+    );
+    const routes: string[] = [];
+    const result = await executePaidProPostRecipientSetupHandoff({
+      navigate: (to) => {
+        routes.push(to);
+      },
+      agreementId: fixture.id,
+      draft: {
+        id: fixture.id,
+        title: "SERVICES AGREEMENT",
+        jurisdiction: "Texas",
+        parties: [...fixture.parties],
+      } as AgreementDraft,
+      premiumSendIntent: "signature",
+      logSource: `test_after_pay_${fixture.count}_party`,
+      agreementCorpusText: fixture.corpus,
+      relaxPaidSessionCorpusAssert: true,
+    });
+    expect(result.ok, result.ok ? "" : result.failure.userMessage).toBe(true);
+    expect(routes[0]).toMatch(/^\/app\/esign\/[^?]+\?agreement_bridge=1$/);
+    expect(readAgreementVs01BridgeSession()?.agreementCorpusText).toBe(fixture.corpus);
+  });
+
   it("Send for review path is unchanged (does not take the local signature bridge)", async () => {
     const { readFileSync } = await import("node:fs");
     const { join } = await import("node:path");

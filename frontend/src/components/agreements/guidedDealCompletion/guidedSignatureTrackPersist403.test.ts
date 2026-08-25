@@ -142,6 +142,15 @@ describe("guided signature track persist 403 regression", () => {
         handoffReady: true,
       }),
     ).toBe(false);
+    expect(
+      canContinueGuidedSignatureTrackWithoutPersist({
+        persistOk: false,
+        agreementId: "",
+        corpusText: "SERVICES AGREEMENT\n\nPainted after-pay deal body for local VS01. ".repeat(4),
+        handoffReady: true,
+        minCorpusLen: 200,
+      }),
+    ).toBe(true);
   });
 
   it("direct signature track 403 opens local VS01 bridge without server seed", () => {
@@ -187,7 +196,7 @@ describe("guided signature track persist 403 regression", () => {
     expect(persistCatch).not.toContain('setDisplayPhase("review")');
     const trackBlock = intake.slice(
       intake.indexOf("const enterGuidedSignatureTrackRoute = React.useCallback"),
-      intake.indexOf("const enterGuidedSignatureTrackRoute = React.useCallback") + 14000,
+      intake.indexOf("const enterGuidedSignatureTrackRoute = React.useCallback") + 18000,
     );
     expect(trackBlock).toContain("tryNavigateGuidedSignatureTrackLocalVs01Esign");
     expect(trackBlock).toContain("logGuidedSignatureRouteEntered");
