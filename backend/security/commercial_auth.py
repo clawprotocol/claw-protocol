@@ -151,6 +151,22 @@ def _is_demo_checkout_session(request: Request) -> bool:
         return False
 
 
+def require_paid_session_or_commercial_owner(request: Request) -> str:
+    """
+    Dashboard / workspace-index principal for the paying LawDog user.
+
+    After TEST checkout the account is a demo session (anon org + receipt),
+    not a Supabase JWT. Persist already trusts that principal; listing the
+    same agreement on the existing dashboard must too. Anonymous-without-
+    receipt still fails closed.
+    """
+    if _is_demo_checkout_session(request):
+        from backend.security.request_identity import resolve_workspace_identity
+
+        return resolve_workspace_identity(request).subject_ref
+    return require_commercial_owner_principal(request)
+
+
 def require_paid_pro_principal(request: Request) -> str:
     """
     Authenticated commercial owner with active Pro entitlement.

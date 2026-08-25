@@ -202,6 +202,15 @@ describe("after-pay e-sign packet is durable (not first-SPA only)", () => {
     expect(continueSrc).toContain("preparePacketCanonicalMinCorpusLen");
     expect(continueSrc).toContain("relaxPaidSessionCorpusAssert: true");
     expect(continueSrc).toContain("minCorpusLen: canonicalMinLen");
+
+    const prepareSrc = readFileSync(join(__dirname, "StepPrepareSignature.tsx"), "utf8");
+    expect(prepareSrc).toContain("shouldAutoDispatchPaidProPrepareContinue");
+    const landing = readFileSync(
+      join(__dirname, "../components/agreements/paidProPaidSessionLanding.ts"),
+      "utf8",
+    );
+    expect(landing).toContain("isPaidSessionSignatureTrackBridge(args.bridge)");
+    expect(landing).toContain("shouldAutoDispatchPaidProPrepareContinue");
   });
 
   it.each([

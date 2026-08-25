@@ -4,6 +4,8 @@ Verifies that anonymous sessions with valid demo checkout receipt headers
 are granted temporary Pro access for the simulated POS flow.
 """
 
+from typing import Optional
+
 import pytest
 from fastapi.testclient import TestClient
 from unittest.mock import patch
@@ -383,3 +385,145 @@ class TestDemoCheckoutOwnerMutationGuards:
             }
 
         _owner_mutation_guards(_Req(), "agr_demo_persist", surface="canonical_review_snapshot_create")
+
+
+def _harbor_paid_session_headers(sess: dict, *, receipt_id: Optional[str]) -> dict:
+    headers = {
+        "X-Claw-Org-Id": sess["org_id"],
+        "X-Claw-Anon-Session": sess["token"],
+        "X-Claw-Review-First-Persist": "1",
+        "Content-Type": "application/json",
+    }
+    if receipt_id:
+        headers["X-Claw-Demo-Checkout-Receipt"] = receipt_id
+    return headers
+
+
+def _harbor_paid_session_draft_body() -> dict:
+    pro_corpus = """SERVICES AGREEMENT
+
+This Services Agreement ("Agreement") is entered into as of the date last signed below ("Effective Date") by and between Harbor Pool & Patio LLC, a limited liability company ("Provider"), and Mesa Realty Group LLC, a limited liability company ("Client").
+
+1. SERVICES; DELIVERABLES
+The Provider shall perform the professional services, milestones, and deliverables described in the materials referenced. This Agreement is between Harbor Pool & Patio LLC ("Client") and Mesa Realty Group LLC ("Service Provider").
+
+2. FEES; PAYMENT SCHEDULE
+Fees, deposits, and recurring or milestone payments are as set forth here or in a signed statement of work."""
+    return {
+        "title": "Services Agreement",
+        "jurisdiction": "Arizona",
+        "parties": [
+            {
+                "name": "Harbor Pool & Patio LLC",
+                "role": "Provider",
+                "email": "jordan.harbor.qa+aug21e@example.com",
+            },
+            {"name": "Mesa Realty Group LLC", "role": "Client", "email": ""},
+        ],
+        "purpose": pro_corpus,
+        "payment_terms": "$2,500 monthly",
+        "duration": None,
+        "due_date": None,
+        "effective_date": None,
+    }
+
+
+class TestDemoCheckoutWorkspaceIndex:
+    """Paying LawDog user must see the after-pay agreement on the existing dashboard list.
+
+    Live #109: persist succeeded, GET /api/agreements/workspace-index returned 401,
+    /app and /app/signatures showed empty. Persist that is invisible to the payer
+    is not persist. Outside signers still have no dashboard.
+    """
+
+    def test_paid_session_workspace_index_lists_persisted_draft(
+        self, isolated_harbor_db, monkeypatch
+    ):
+        client = TestClient(app)
+        r_sess = client.post("/v1/workspace/anonymous-session")
+        assert r_sess.status_code == 200, r_sess.text
+        sess = r_sess.json()
+        headers = _harbor_paid_session_headers(sess, receipt_id="rcpt_dashboard_4242_abcd")
+
+        create = client.post(
+            "/api/agreements/draft",
+            json=_harbor_paid_session_draft_body(),
+            headers=headers,
+        )
+        assert create.status_code in (200, 201), create.text
+        aid = create.json()["id"]
+        assert aid
+
+        listed = client.get("/api/agreements/workspace-index", headers=headers)
+        assert listed.status_code == 200, listed.text
+        ids = [row["id"] for row in listed.json().get("agreements") or []]
+        assert aid in ids
+
+    def test_anonymous_without_receipt_still_401_on_workspace_index(
+        self, isolated_harbor_db, monkeypatch
+    ):
+        client = TestClient(app)
+        r_sess = client.post("/v1/workspace/anonymous-session")
+        assert r_sess.status_code == 200, r_sess.text
+        sess = r_sess.json()
+        headers = _harbor_paid_session_headers(sess, receipt_id=None)
+
+        listed = client.get("/api/agreements/workspace-index", headers=headers)
+        assert listed.status_code == 401, listed.text
+
+    def test_other_paid_session_does_not_see_payer_agreement(
+        self, isolated_harbor_db, monkeypatch
+    ):
+        client = TestClient(app)
+        payer_sess = client.post("/v1/workspace/anonymous-session").json()
+        other_sess = client.post("/v1/workspace/anonymous-session").json()
+        payer_headers = _harbor_paid_session_headers(
+            payer_sess, receipt_id="rcpt_payer_4242_aaaa"
+        )
+        other_headers = _harbor_paid_session_headers(
+            other_sess, receipt_id="rcpt_other_4242_bbbb"
+        )
+
+        create = client.post(
+            "/api/agreements/draft",
+            json=_harbor_paid_session_draft_body(),
+            headers=payer_headers,
+        )
+        assert create.status_code in (200, 201), create.text
+        aid = create.json()["id"]
+
+        other_list = client.get("/api/agreements/workspace-index", headers=other_headers)
+        assert other_list.status_code == 200, other_list.text
+        other_ids = [row["id"] for row in other_list.json().get("agreements") or []]
+        assert aid not in other_ids
+
+    def test_paid_session_helper_skips_jwt(self, isolated_stores, monkeypatch):
+        from backend.security.commercial_auth import require_paid_session_or_commercial_owner
+
+        def _boom(request):
+            raise AssertionError("require_commercial_owner_principal should not run for demo POS")
+
+        monkeypatch.setattr(
+            "backend.security.commercial_auth._is_demo_checkout_session",
+            lambda request: True,
+        )
+        monkeypatch.setattr(
+            "backend.security.commercial_auth.require_commercial_owner_principal",
+            _boom,
+        )
+        monkeypatch.setattr(
+            "backend.security.request_identity.resolve_workspace_identity",
+            lambda request: type(
+                "Id",
+                (),
+                {"subject_ref": "org:anon-dashboard-123", "kind": "anonymous"},
+            )(),
+        )
+
+        class _Req:
+            headers = {
+                "X-Claw-Org-Id": "anon-dashboard-123",
+                "X-Claw-Demo-Checkout-Receipt": "rcpt_lakjsd12_a8fu3",
+            }
+
+        assert require_paid_session_or_commercial_owner(_Req()) == "org:anon-dashboard-123"

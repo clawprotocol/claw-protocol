@@ -12,6 +12,7 @@ import {
   resolvePaidSessionSignatureTrackHandoff,
   resolvePaidSessionVisibleDealBody,
   shouldKeepPaidSessionSignerEmailsInteractive,
+  shouldAutoDispatchPaidProPrepareContinue,
   shouldRelaxPaidSessionWorkspaceCorpus,
   shouldShowPaidSessionGeneratingOverlay,
   shouldSuppressFreeMissingTenetAskAfterPay,
@@ -424,5 +425,72 @@ describe("paid session signature-track handoff — leftover packet vs painted de
         corpusText: "too short",
       }),
     ).toBe(false);
+  });
+});
+
+describe("after-pay workspace stays open — persist must not auto-send", () => {
+  const paidSessionBridge = {
+    senderFirstLawdogHandoff: true,
+    source: "paid_pro_sender_first" as const,
+    agreementBridgeMode: "prepare_signing_packet" as const,
+  };
+
+  it.each([
+    { label: "sender-first handoff", bridge: { senderFirstLawdogHandoff: true } },
+    { label: "paid_pro_sender_first source", bridge: { source: "paid_pro_sender_first" } },
+    { label: "prepare_signing_packet mode", bridge: { agreementBridgeMode: "prepare_signing_packet" } },
+    { label: "full after-pay bridge", bridge: paidSessionBridge },
+  ])("does not auto-dispatch Send signing links for $label even when packetReady", ({ bridge }) => {
+    expect(
+      shouldAutoDispatchPaidProPrepareContinue({
+        agreementBridgePlacementCopy: true,
+        packetReady: true,
+        bridge,
+      }),
+    ).toBe(false);
+  });
+
+  it("still allows auto-dispatch for a non–paid-session bridge that is packet-ready", () => {
+    expect(
+      shouldAutoDispatchPaidProPrepareContinue({
+        agreementBridgePlacementCopy: true,
+        packetReady: true,
+        bridge: { source: "other_prepare" },
+      }),
+    ).toBe(true);
+  });
+
+  it("does not auto-dispatch when the paid-session bridge has not hydrated yet", () => {
+    expect(
+      shouldAutoDispatchPaidProPrepareContinue({
+        agreementBridgePlacementCopy: true,
+        packetReady: true,
+        bridge: null,
+      }),
+    ).toBe(false);
+  });
+
+  it("does not auto-dispatch when the packet is not ready", () => {
+    expect(
+      shouldAutoDispatchPaidProPrepareContinue({
+        agreementBridgePlacementCopy: true,
+        packetReady: false,
+        bridge: { source: "other_prepare" },
+      }),
+    ).toBe(false);
+  });
+
+  it("prepare surface uses the path rule so /app/esign/doc_* is not skipped", () => {
+    const src = readFileSync(join(__dirname, "../../vs01/StepPrepareSignature.tsx"), "utf8");
+    expect(src).toContain("shouldAutoDispatchPaidProPrepareContinue");
+    expect(src).toContain("bridge: bridgeSession");
+    expect(src).toContain("handlePrepareContinue()");
+    const wizard = readFileSync(join(__dirname, "../../vs01/Vs01Wizard.tsx"), "utf8");
+    expect(wizard).toContain("completeBridgePreparePacket()");
+    expect(wizard).toContain("paidProPacketReadyDashboardPath()");
+    const autoIdx = src.indexOf("shouldAutoDispatchPaidProPrepareContinue");
+    const clickIdx = src.indexOf("handlePrepareContinue()");
+    expect(autoIdx).toBeGreaterThan(-1);
+    expect(clickIdx).toBeGreaterThan(autoIdx);
   });
 });
