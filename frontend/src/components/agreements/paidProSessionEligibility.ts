@@ -101,6 +101,15 @@ export function hasCurrentSessionFreeStarterIntent(): boolean {
   return marker.generationId === getOrInitSessionAgreementGenerationId();
 }
 
+/**
+ * Path rule: a painted free dump’s Continue with Pro opens existing checkout.
+ * Leftover checkout identity / leftover guest quota must not treat this dump as
+ * already paid — that no-ops the CTA or already-pro-bypasses into billing↔create.
+ */
+export function paintedFreeDumpOpensExistingCheckout(): boolean {
+  return hasCurrentSessionFreeStarterIntent() && !hasCurrentSessionProEntitlement();
+}
+
 /** User clicked a Pro upgrade CTA in this create session. */
 export function markCurrentSessionProIntent(): void {
   const generationId = getOrInitSessionAgreementGenerationId();

@@ -1,4 +1,5 @@
 /** @vitest-environment jsdom */
+import React from "react";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { UpgradeToProModal } from "./UpgradeToProModal";
@@ -62,6 +63,24 @@ describe("UpgradeToProModal", () => {
     fireEvent.click(screen.getByRole("button", { name: /view your agreement/i }));
     expect(onClose).toHaveBeenCalled();
     expect(navigate).toHaveBeenCalledWith("/app/agreements/ag_done");
+  });
+
+  it("guest-ready Choose Pro uses onChoosePro so painted dump opens existing checkout", () => {
+    const onChoosePro = vi.fn();
+    const onClose = vi.fn();
+    render(
+      <UpgradeToProModal
+        open
+        surface="simple_create"
+        onClose={onClose}
+        variant="guest_ready"
+        onChoosePro={onChoosePro}
+      />,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /choose pro/i }));
+    expect(onClose).toHaveBeenCalled();
+    expect(onChoosePro).toHaveBeenCalled();
+    expect(navigate).not.toHaveBeenCalledWith("/app/billing");
   });
 
   it("shows guest-ready CTAs including request genesis", () => {

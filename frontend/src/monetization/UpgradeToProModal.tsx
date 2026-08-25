@@ -33,6 +33,11 @@ export type UpgradeToProModalProps = {
   periodEndsAt?: string | null;
   onRequestGenesis?: () => void;
   onStartNewGuestDraft?: () => void;
+  /**
+   * Painted free dump / create conversion — open existing TEST checkout.
+   * When omitted, Choose Pro goes to /app/billing.
+   */
+  onChoosePro?: () => void;
 };
 
 export function UpgradeToProModal({
@@ -48,6 +53,7 @@ export function UpgradeToProModal({
   periodEndsAt = null,
   onRequestGenesis,
   onStartNewGuestDraft,
+  onChoosePro,
 }: UpgradeToProModalProps) {
   const { navigate } = useLaunchNav();
   const analyticsVariant = variant;
@@ -136,6 +142,10 @@ export function UpgradeToProModal({
             onClick={() => {
               logProductEvent("paywall_clicked_upgrade", { surface, variant: analyticsVariant });
               onClose();
+              if (onChoosePro) {
+                onChoosePro();
+                return;
+              }
               navigate("/app/billing");
             }}
           >

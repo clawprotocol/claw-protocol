@@ -499,6 +499,7 @@ import {
   hasCurrentSessionProEntitlement,
   markCurrentSessionProEntitlementComplete,
   markCurrentSessionProIntent,
+  paintedFreeDumpOpensExistingCheckout,
 } from "./paidProSessionEligibility";
 import {
   hasAcceptedPaidProAuthority,
@@ -13990,6 +13991,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     },
   ) => {
     console.info("[premium-flow] button_click", { button: "unlock_premium_rewrite_checkout" });
+    // Latch before markCurrentSessionProIntent() — that call clears free-starter and would
+    // let leftover checkout identity look like already-Pro and skip existing checkout.
+    const paintedDumpOpensCheckout = paintedFreeDumpOpensExistingCheckout();
     markCurrentSessionProIntent();
     const gateDraft = draftOverride ?? draft;
     const resumeSnap = readCreateComplexityResume();
@@ -14013,6 +14017,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     }
     ensurePremiumCheckoutIntakePreserved(raw);
     if (
+      !paintedDumpOpensCheckout &&
       isProEntitledForAgreement({
         tier,
         draft: pending,

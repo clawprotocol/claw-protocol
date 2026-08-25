@@ -6,6 +6,7 @@ import {
   resolveCheckoutTier,
   CREATE_FLOW_CHECKOUT_DEFAULT_CADENCE,
   buildCreateFlowProCheckoutPath,
+  isCreateFlowUpgradeReturnTo,
 } from "./checkoutParams";
 import { CREATE_FLOW_CHECKOUT_AGREEMENT_ID } from "../components/agreements/agreementAdvancedDraftAccess";
 import { buildCreateReturnToWithStarterReviewRestore } from "../components/agreements/checkoutBackRestore";
@@ -47,6 +48,13 @@ describe("checkoutParams", () => {
     expect(path).not.toContain("cadence=annual");
     expect(checkoutInvoiceUsd(pro, CREATE_FLOW_CHECKOUT_DEFAULT_CADENCE)).toBe(49);
     expect(checkoutInvoiceUsd(pro, "annual")).toBe(490);
+  });
+
+  it("create-flow upgrade returnTo is /app/create, not a send URL", () => {
+    expect(isCreateFlowUpgradeReturnTo("/app/create")).toBe(true);
+    expect(isCreateFlowUpgradeReturnTo("/app/create?restore=starterReview")).toBe(true);
+    expect(isCreateFlowUpgradeReturnTo("/app/send/a-1?phase=send")).toBe(false);
+    expect(isCreateFlowUpgradeReturnTo(null)).toBe(false);
   });
 
   it("create-flow checkout path preserves explicit annual opt-in", () => {

@@ -22,6 +22,11 @@ export function extractAgreementIdFromSendReturnUrl(returnTo: string): string | 
   return m ? decodeURIComponent(m[1]) : null;
 }
 
+/** Create-flow return after a painted dump — Upgrade to Pro must open existing checkout, not bounce to /app/create. */
+export function isCreateFlowUpgradeReturnTo(returnTo: string | null | undefined): boolean {
+  return Boolean(returnTo && /^\/app\/create(\?|$)/.test(returnTo.trim()));
+}
+
 export function parseTierIdParam(raw: string | null): LaunchPricingTier["id"] | null {
   const id = (raw || "").trim().toLowerCase();
   // Paid-beta: self-serve checkout is Pro only. Legacy "starter"/Plus deep links → Pro.
