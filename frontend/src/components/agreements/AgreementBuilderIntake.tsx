@@ -4473,8 +4473,33 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   } | null>(null);
   const guidedAgreementToastTimerRef = useRef<number | null>(null);
   const [intakePartyRoleLabels, setIntakePartyRoleLabels] = useState<IntakePartyRoleLabels>(() => defaultIntakePartyRoleLabels());
+  // After-pay Signer details seed: draftSnapshotRef parties stay intake-authoritative.
   useLayoutEffect(() => {
-    draftSnapshotRef.current = draft;
+    if (!draft) {
+      draftSnapshotRef.current = null;
+      return;
+    }
+    const intake = (
+      readCheckoutBackRestoreSnapshot()?.intakeText ||
+      readOriginalUserIntakeRaw() ||
+      ""
+    ).trim();
+    const next =
+      intake.length >= 20 ? repairCheckoutBackRestoreDraftParties(draft, intake) : draft;
+    draftSnapshotRef.current = next;
+    const before = (draft.parties ?? []).map((p) => String(p.name ?? "").trim()).join("|");
+    const after = (next.parties ?? []).map((p) => String(p.name ?? "").trim()).join("|");
+    if (before === after) return;
+    setDraft(next);
+    const names = (next.parties ?? [])
+      .map((p) => String((p as { name?: string }).name ?? "").trim())
+      .filter(Boolean);
+    if (names[0]) setRecipient1Name(names[0]);
+    if (names[1]) setRecipient2Name(names[1]);
+    if (names.length >= 3) {
+      setExtraPartyLegalNames(names.slice(2));
+      setSignerSetupUiPartyCount(names.length);
+    }
   }, [draft]);
   useEffect(() => {
     const parties = draft?.parties ?? [];
@@ -5003,6 +5028,33 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
   const intakeCombinedRef = useRef(intakeCombined);
   intakeCombinedRef.current = intakeCombined;
+
+  useLayoutEffect(() => {
+    const current = draftSnapshotRef.current ?? draft;
+    if (!current) return;
+    const intake = (
+      intakeCombined ||
+      readCheckoutBackRestoreSnapshot()?.intakeText ||
+      readOriginalUserIntakeRaw() ||
+      ""
+    ).trim();
+    if (intake.length < 20) return;
+    const next = repairCheckoutBackRestoreDraftParties(current, intake);
+    draftSnapshotRef.current = next;
+    const before = (current.parties ?? []).map((p) => String(p.name ?? "").trim()).join("|");
+    const after = (next.parties ?? []).map((p) => String(p.name ?? "").trim()).join("|");
+    if (before === after) return;
+    setDraft(next);
+    const names = (next.parties ?? [])
+      .map((p) => String((p as { name?: string }).name ?? "").trim())
+      .filter(Boolean);
+    if (names[0]) setRecipient1Name(names[0]);
+    if (names[1]) setRecipient2Name(names[1]);
+    if (names.length >= 3) {
+      setExtraPartyLegalNames(names.slice(2));
+      setSignerSetupUiPartyCount(names.length);
+    }
+  }, [draft, intakeCombined]);
 
   /** Text snapshot used for heuristics, guided progression, and live preview (debounced + explicit flush only). */
   const intakeGuidanceCombined = useMemo(() => {
@@ -8849,7 +8901,18 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             premiumRenderResolveSource: opts.premiumRenderResolveSource,
           });
           if (committed?.mergedDraft) {
-            draftSnapshotRef.current = committed.mergedDraft;
+            const intake = (
+              intakeCombinedRef.current ||
+              readCheckoutBackRestoreSnapshot()?.intakeText ||
+              readOriginalUserIntakeRaw() ||
+              ""
+            ).trim();
+            const next =
+              intake.length >= 20
+                ? repairCheckoutBackRestoreDraftParties(committed.mergedDraft, intake)
+                : committed.mergedDraft;
+            draftSnapshotRef.current = next;
+            return next;
           }
           return committed?.mergedDraft ?? prev;
         });
@@ -18333,24 +18396,46 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   /** Prefill recipient names / signer labels from structured parties when fields are still empty. */
   useEffect(() => {
     if (!createProductionTwoPane || !draft?.parties?.length) return;
-    const { n1, n2 } = getRecipientHandoffNamesFromDraft(draft);
-    setRecipient1Name((prev) => pickRecipientNameForHandoff(prev, n1));
-    setRecipient2Name((prev) => pickRecipientNameForHandoff(prev, n2));
-    const p0 = draft.parties?.[0] as { email?: string } | undefined;
-    const p1 = draft.parties?.[1] as { email?: string } | undefined;
+    const intakeForCap = (
+      intakeCombinedRef.current ||
+      intakeCombined ||
+      readCheckoutBackRestoreSnapshot()?.intakeText ||
+      readOriginalUserIntakeRaw() ||
+      ""
+    ).trim();
+    const seedDraft =
+      intakeForCap.length >= 20
+        ? repairCheckoutBackRestoreDraftParties(draftSnapshotRef.current ?? draft, intakeForCap)
+        : (draftSnapshotRef.current ?? draft);
+    // Seed from draftSnapshotRef (repaired), not live draft.parties.
+    if (seedDraft) draftSnapshotRef.current = seedDraft;
+    const raw1 = String(draft.parties?.[0]?.name ?? "").trim();
+    const raw2 = String(draft.parties?.[1]?.name ?? "").trim();
+    const { n1, n2 } = getRecipientHandoffNamesFromDraft(seedDraft);
+    setRecipient1Name((prev) => {
+      const p = prev.trim();
+      if (n1 && (!p || p === raw1) && n1 !== p) return n1;
+      return pickRecipientNameForHandoff(prev, n1);
+    });
+    setRecipient2Name((prev) => {
+      const p = prev.trim();
+      if (n2 && (!p || p === raw2) && n2 !== p) return n2;
+      return pickRecipientNameForHandoff(prev, n2);
+    });
+    const p0 = seedDraft.parties?.[0] as { email?: string } | undefined;
+    const p1 = seedDraft.parties?.[1] as { email?: string } | undefined;
     const e1 = String(p0?.email ?? "").trim();
     const e2 = String(p1?.email ?? "").trim();
     if (e1) setRecipient1Email((prev) => (prev.trim() ? prev : e1));
     if (e2) setRecipient2Email((prev) => (prev.trim() ? prev : e2));
-    const parties = draft.parties ?? [];
-    const intakeForCap = intakeCombinedRef.current || intakeCombined;
+    const parties = seedDraft.parties ?? [];
     const resolvedEntities = resolveLegalEntitiesForCanonicalMetadata({
       legalEntities: parties
         .slice(0, MAX_PREMIUM_RECIPIENT_PARTY_HANDOFF_ROWS)
         .map((p) => String((p as { name?: string }).name ?? "").trim())
         .filter(Boolean),
       intakeText: intakeForCap,
-      draft,
+      draft: seedDraft,
     });
     const cap = Math.min(
       Math.max(
@@ -18371,7 +18456,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         legalEntities,
         intakeText: intakeCombinedRef.current || intakeCombined,
         corpusText: getAuthoritativeAgreementText() || agreementDocumentTextRef.current || "",
-        draft,
+        draft: seedDraft,
         uiSignerNames: partySignerNames,
         uiSignerTitles: partySignerTitles,
         authoritativePartyCount: cap,
@@ -18416,8 +18501,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     }
     setRecipientSignerLabels((prev) =>
       pickRecipientSignerLabelsForHandoff(prev, n1, n2, {
-        role1: draft.parties?.[0]?.role,
-        role2: draft.parties?.[1]?.role,
+        role1: seedDraft.parties?.[0]?.role,
+        role2: seedDraft.parties?.[1]?.role,
       }),
     );
   }, [createProductionTwoPane, draftPartiesPrefillKey, draft, intakeCombined]);
