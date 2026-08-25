@@ -277,6 +277,9 @@ describe("after-pay workspace renders painted agreement (not load-error)", () =>
     expect(wizard).toContain("readDurableAgreementVs01Bridge");
     expect(wizard).toContain("fetchDocumentEsignHandoff");
     expect(wizard).toContain("paidSessionDurablePacket");
+    expect(wizard).toContain("completeBridgePreparePacket()");
+    const prepareSrc = readFileSync(join(__dirname, "StepPrepareSignature.tsx"), "utf8");
+    expect(prepareSrc).toContain("shouldAutoDispatchPaidProPrepareContinue");
     expect(wizard).not.toMatch(
       /if \(corpus\.length < VS01_SIGNING_CORPUS_MIN_LEN\) return false;/,
     );

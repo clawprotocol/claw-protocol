@@ -249,6 +249,29 @@ export function isPaidSessionSignatureTrackBridge(
 }
 
 /**
+ * After-pay Send for signature must open and stay on `/app/esign/doc_*`.
+ * Persist writes the durable packet. Packet-ready must not auto-send links
+ * or land `/app?vs01_packet_ready=1`. Existing Send signing links is the send.
+ */
+export function shouldAutoDispatchPaidProPrepareContinue(args: {
+  agreementBridgePlacementCopy: boolean;
+  packetReady: boolean;
+  receiptId?: string | null;
+  busy?: boolean;
+  bridge?: {
+    senderFirstLawdogHandoff?: boolean | null;
+    source?: string | null;
+    agreementBridgeMode?: string | null;
+  } | null;
+}): boolean {
+  if (!args.agreementBridgePlacementCopy || !args.packetReady) return false;
+  if ((args.receiptId || "").trim()) return false;
+  if (args.busy) return false;
+  if (isPaidSessionSignatureTrackBridge(args.bridge)) return false;
+  return true;
+}
+
+/**
  * After-pay `/app/esign/:id` must hydrate the painted deal at the 200-char floor
  * from a durable packet (not first-SPA `agreement_bridge=1` alone).
  * The 1500-char VS01 gate is for long Pro snapshots only.

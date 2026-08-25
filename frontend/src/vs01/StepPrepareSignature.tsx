@@ -146,6 +146,7 @@ import {
   readAgreementVs01BridgeSession,
   readDurableAgreementVs01Bridge,
 } from "../launch/simpleProduct/agreementToVs01SigningBridge";
+import { shouldAutoDispatchPaidProPrepareContinue } from "../components/agreements/paidProPaidSessionLanding";
 import { buildPrepareBridgeCorpusGateArgs } from "./vs01PrepareBridgeCorpus";
 import { resolveFinalVs01CorpusOrBlock, VS01_CORPUS_GATE_USER_MESSAGE } from "./vs01SigningCorpus";
 import {
@@ -1431,11 +1432,28 @@ export function StepPrepareSignature({
 
   const bridgeAutoPrepareDispatchedRef = useRef(false);
   useEffect(() => {
-    if (!agreementBridgePlacementCopy || !packetReady || receiptId || busy) return;
+    if (
+      !shouldAutoDispatchPaidProPrepareContinue({
+        agreementBridgePlacementCopy,
+        packetReady,
+        receiptId,
+        busy,
+        bridge: bridgeSession,
+      })
+    ) {
+      return;
+    }
     if (bridgeAutoPrepareDispatchedRef.current) return;
     bridgeAutoPrepareDispatchedRef.current = true;
     handlePrepareContinue();
-  }, [agreementBridgePlacementCopy, packetReady, receiptId, busy, handlePrepareContinue]);
+  }, [
+    agreementBridgePlacementCopy,
+    packetReady,
+    receiptId,
+    busy,
+    handlePrepareContinue,
+    bridgeSession,
+  ]);
 
   const onBoxPointerDown = useCallback(
     (ev: PointerEvent<HTMLDivElement>, field: PlacedSigningField) => {
