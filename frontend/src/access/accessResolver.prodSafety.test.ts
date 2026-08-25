@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { resolveAccess } from "./accessResolver";
-import { canUseFeature } from "./accessHelpers";
+import { canUseFeature, checkoutCreatedLawdogEsignAllowed } from "./accessHelpers";
 
 const EMPTY_USAGE = {
   agreements_created: 0,
@@ -94,14 +94,39 @@ describe("accessResolver production safety", () => {
     } as Storage);
 
     const resolved = resolveAccess();
-    expect(resolved).toMatchObject({
-      tier: "premium",
-      sourcesTried: expect.arrayContaining([
-        expect.objectContaining({ id: "checkout_created_lawdog", tier: "premium" }),
-      ]),
-    });
+    expect(resolved.tier).toBe("free");
+    expect(checkoutCreatedLawdogEsignAllowed()).toBe(true);
     expect(canUseFeature(resolved.tier, EMPTY_USAGE, "esign_flow").allowed).toBe(true);
     expect(canUseFeature(resolved.tier, EMPTY_USAGE, "signature_request").allowed).toBe(true);
+    expect(resolved.tier === "premium" || resolved.tier === "admin").toBe(false);
+  });
+
+  it("leftover paid-completion marker does not raise the guest create tier", () => {
+    const storage = stubRemoteWindow();
+    storage.set(
+      "claw_paid_premium_completion_session_v1",
+      JSON.stringify({ v: 1, source: "settled_checkout", markedAt: Date.now() }),
+    );
+    vi.stubGlobal("sessionStorage", {
+      getItem: (key: string) => storage.get(key) ?? null,
+      setItem: (key: string, value: string) => void storage.set(key, value),
+      removeItem: (key: string) => void storage.delete(key),
+      clear: () => storage.clear(),
+    } as Storage);
+    expect(resolveAccess().tier).toBe("free");
+    expect(checkoutCreatedLawdogEsignAllowed()).toBe(true);
+    expect(canUseFeature("free", EMPTY_USAGE, "esign_flow").allowed).toBe(true);
+  });
+
+  it("does not grant e-sign on free when there is no checkout-created LawDog session", () => {
+    const storage = stubRemoteWindow();
+    vi.stubGlobal("sessionStorage", {
+      getItem: (key: string) => storage.get(key) ?? null,
+      setItem: (key: string, value: string) => void storage.set(key, value),
+      removeItem: (key: string) => void storage.delete(key),
+      clear: () => storage.clear(),
+    } as Storage);
+    expect(checkoutCreatedLawdogEsignAllowed()).toBe(false);
     expect(canUseFeature("free", EMPTY_USAGE, "esign_flow").allowed).toBe(false);
     expect(canUseFeature("free", EMPTY_USAGE, "signature_request").allowed).toBe(false);
   });
