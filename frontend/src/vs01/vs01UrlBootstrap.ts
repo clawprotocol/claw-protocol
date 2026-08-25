@@ -32,7 +32,12 @@ import { saveRecipientMagicLinkSession } from "../agreement/recipientMagicLinkSe
 import { resolveReviewerEffectiveAccessToken } from "../agreement/reviewerTokenPersistence";
 
 function readRecipientAccessTokenFromSearchParams(params: URLSearchParams): string {
-  return (params.get("t") || params.get("token") || "").trim();
+  return (
+    params.get("t") ||
+    params.get("token") ||
+    params.get("recipient_token") ||
+    ""
+  ).trim();
 }
 
 function newCpId(): string {
