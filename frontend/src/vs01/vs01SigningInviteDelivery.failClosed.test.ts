@@ -83,6 +83,50 @@ describe("signing invite delivery fail-closed", () => {
     expect(spy).not.toHaveBeenCalled();
   });
 
+  it("after-pay Send posts after_pay_ceremony so the server persists the packet", async () => {
+    const { roles, handoff } = twoPartyHandoff();
+    vi.spyOn(recipientAccessApi, "fetchRecipientAccessPolicy").mockResolvedValue({
+      recipient_link_token_required: false,
+      mint_key_configured: false,
+      signing_token_configured: false,
+    });
+    const spy = vi.spyOn(agreementWorkspaceApi, "postSigningLinksSent").mockResolvedValue({
+      ok: true,
+      sent_count: 2,
+      skip_reason: null,
+    });
+    const portable = {
+      v: 1 as const,
+      seed: {
+        v: 1 as const,
+        documentId: "doc_fail_closed",
+        agreementId: AG,
+        corpusPlain: "SERVICES AGREEMENT\n\nPriya and Diego painted deal for a logo.",
+        corpusHash: "hash",
+        savedAt: "2026-08-25T00:00:00Z",
+      },
+      fields: [],
+      roles: [],
+      pageCount: 1,
+      witnessPageIndex: 0,
+      initialsPolicy: { enabled: false, bodyPagesOnly: true },
+      fieldCount: 0,
+    };
+    await dispatchSigningInvitesFromHandoff(handoff, roles, {
+      portablePacket: portable,
+      documentId: "doc_fail_closed",
+      afterPayCeremony: true,
+    });
+    expect(spy).toHaveBeenCalledWith(
+      AG,
+      expect.objectContaining({
+        document_id: "doc_fail_closed",
+        after_pay_ceremony: true,
+        portable_packet: expect.objectContaining({ v: 1 }),
+      }),
+    );
+  });
+
   it("buildSigningInviteTargetsFromHandoff does not attach recipient access tokens", () => {
     const { roles, handoff } = twoPartyHandoff();
     const targets = buildSigningInviteTargetsFromHandoff(handoff, roles);

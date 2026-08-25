@@ -5,6 +5,11 @@ import {
   fetchRecipientAccessPolicy,
   mintRecipientAccessTokenResult,
 } from "../agreement/recipientAccessApi";
+import { isPaidSessionSignatureTrackBridge } from "../components/agreements/paidProPaidSessionLanding";
+import {
+  readAgreementVs01BridgeSession,
+  readDurableAgreementVs01Bridge,
+} from "../launch/simpleProduct/agreementToVs01SigningBridge";
 import type { PaidProVs01PostSignHandoffV1 } from "./vs01PaidProPostSignHandoff";
 import type { Vs01PrepareSigningRole } from "./vs01SignerFieldAssignment";
 import { resolveVs01SenderMustSignFirst } from "./vs01SigningOrderPolicy";
@@ -139,6 +144,7 @@ export async function dispatchSigningInvitesFromHandoff(
   opts?: {
     portablePacket?: Vs01CanonicalPacketPortableV1 | null;
     documentId?: string | null;
+    afterPayCeremony?: boolean;
   },
 ): Promise<SigningInviteDispatchResult> {
   const senderMustSignFirst = resolveVs01SenderMustSignFirst(handoff.senderMustSignFirst);
@@ -173,14 +179,22 @@ export async function dispatchSigningInvitesFromHandoff(
         expectedVersion: 1,
       }));
     const acceptedRef = readAcceptedReviewSnapshotRef(handoff.agreementId);
+    const documentId = (opts?.documentId ?? handoff.vs01DocumentId ?? "").trim() || null;
+    const afterPayCeremony =
+      Boolean(opts?.afterPayCeremony) ||
+      isPaidSessionSignatureTrackBridge(
+        (documentId ? readDurableAgreementVs01Bridge(documentId) : null) ??
+          readAgreementVs01BridgeSession(),
+      );
     const res = await postSigningLinksSent(handoff.agreementId, {
       packet_revision: handoff.packetRevision ?? null,
-      document_id: (opts?.documentId ?? handoff.vs01DocumentId ?? "").trim() || null,
+      document_id: documentId,
       portable_packet: opts?.portablePacket ? (opts.portablePacket as unknown as Record<string, unknown>) : null,
       frozen_signing_authority: frozen ? (frozen as unknown as Record<string, unknown>) : null,
       targets,
       accepted_review_snapshot_id: acceptedRef?.snapshotId ?? null,
       accepted_review_snapshot_digest: acceptedRef?.corpusSha256 ?? null,
+      after_pay_ceremony: afterPayCeremony,
     });
     return {
       attempted: true,

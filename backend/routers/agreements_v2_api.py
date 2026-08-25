@@ -3179,6 +3179,8 @@ class SigningLinksSentBody(BaseModel):
     """Correlation only — server loads authority from accepted snapshot, not client corpus."""
     accepted_review_snapshot_id: Optional[str] = None
     accepted_review_snapshot_digest: Optional[str] = None
+    """After-pay /app/esign Send: persist the ceremony packet without review-accept."""
+    after_pay_ceremony: bool = False
 
 
 class CanonicalReviewSnapshotCreateBody(BaseModel):
@@ -7984,6 +7986,17 @@ def post_agreement_signing_links_sent(
     document_id = (body.document_id or "").strip() or None
     packet_revision = (body.packet_revision or "").strip() or None
     frozen_raw = body.frozen_signing_authority if isinstance(body.frozen_signing_authority, dict) else None
+    from backend.security.commercial_auth import _is_demo_checkout_session
+
+    after_pay_send = bool(body.after_pay_ceremony) or _is_demo_checkout_session(request)
+    if after_pay_send and not (portable and document_id):
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "code": "after_pay_packet_required",
+                "message": "Send signing links must include the ceremony packet and document id.",
+            },
+        )
 
     if portable and document_id:
         # Correlation fields from client — never authority; reject mismatch vs accepted snapshot.
@@ -7993,7 +8006,7 @@ def post_agreement_signing_links_sent(
         )
 
         first_after_pay_packet = allows_first_ceremony_packet_without_accepted_snapshot(
-            draft, document_id=document_id
+            draft, document_id=document_id, after_pay_send=after_pay_send
         )
         accepted_snap = get_accepted_snapshot_record(draft)
         if isinstance(accepted_snap, dict):
@@ -8163,8 +8176,28 @@ def post_agreement_signing_links_sent(
                     else "accepted_review_snapshot"
                 ),
             }
-            draft = _merge_agreement_draft(draft, vs01_signing_packet_v1=stored, updated_at=_utc_now_iso())
+            merge_persist: Dict[str, Any] = {
+                "vs01_signing_packet_v1": stored,
+                "updated_at": _utc_now_iso(),
+            }
+            if first_after_pay_packet:
+                merge_persist["after_pay_ceremony_v1"] = {
+                    "v": 1,
+                    "document_id": document_id,
+                    "seeded_at": _utc_now_iso(),
+                    "source": "signing_links_sent",
+                }
+            draft = _merge_agreement_draft(draft, **merge_persist)
             _save_draft_sync(draft.model_dump(), request)
+            if first_after_pay_packet and not read_signing_lock(agreement_id):
+                write_signing_lock(
+                    agreement_id,
+                    {
+                        "locked_version_id": packet_revision or "afterpay_v1",
+                        "locked_at": _utc_now_iso(),
+                        "locked_by": "after_pay_ceremony",
+                    },
+                )
         except Exception:
             logging.getLogger(__name__).exception(
                 "vs01_signing_packet_persist_failed agreement_id=%s",

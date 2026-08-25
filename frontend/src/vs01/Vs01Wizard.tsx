@@ -41,7 +41,10 @@ import {
   type AgreementVs01BridgeSession,
 } from "../launch/simpleProduct/agreementToVs01SigningBridge";
 import { resolvePrepareBridgeSigningCorpus } from "./vs01PrepareBridgeCorpus";
-import { vs01PaidSessionWorkspaceHydrateMinCorpusLen } from "../components/agreements/paidProPaidSessionLanding";
+import {
+  isPaidSessionSignatureTrackBridge,
+  vs01PaidSessionWorkspaceHydrateMinCorpusLen,
+} from "../components/agreements/paidProPaidSessionLanding";
 import { fingerprintAgreementBody } from "../components/agreements/guidedDealCompletion/guidedSigningPacketVersion";
 import { buildVs01CanonicalPacketSeed, hasVs01CanonicalPacketCached, storeVs01CanonicalPacketSeed } from "./vs01CanonicalPacketSeed";
 import { buildVs01RecipientSigningUrl } from "./StepReceipt";
@@ -689,6 +692,14 @@ export function Vs01Wizard({
       const delivery = await dispatchSigningInvitesFromHandoff(result.handoff, roles, {
         portablePacket,
         documentId: did,
+        afterPayCeremony: Boolean(
+          paidProAgreementBridgeSkip ||
+            isPaidSessionSignatureTrackBridge(
+              bridgeHandoffSnapshotRef.current ??
+                readDurableAgreementVs01Bridge(did) ??
+                readAgreementVs01BridgeSession(),
+            ),
+        ),
       });
       // eslint-disable-next-line no-console
       console.info("[vs01-signing-invites-dispatched]", {

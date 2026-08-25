@@ -110,6 +110,31 @@ def _portable(aid: str, document_id: str) -> dict:
     }
 
 
+def test_after_pay_send_flag_is_the_ceremony_path_rule() -> None:
+    from backend.services.accepted_review_snapshot import (
+        allows_first_ceremony_packet_without_accepted_snapshot,
+        create_pending_snapshot,
+        empty_registry,
+    )
+
+    draft = {"canonical_review_snapshots_v1": empty_registry()}
+    assert allows_first_ceremony_packet_without_accepted_snapshot(draft) is False
+    assert (
+        allows_first_ceremony_packet_without_accepted_snapshot(draft, after_pay_send=True) is True
+    )
+    ok, err, _snap, reg = create_pending_snapshot(
+        agreement_id="ag_path_rule",
+        corpus_plain=_pending_snapshot_corpus(),
+        registry=empty_registry(),
+    )
+    assert ok and isinstance(reg, dict), err
+    pending = {"canonical_review_snapshots_v1": reg}
+    assert allows_first_ceremony_packet_without_accepted_snapshot(pending) is False
+    assert (
+        allows_first_ceremony_packet_without_accepted_snapshot(pending, after_pay_send=True) is True
+    )
+
+
 def test_after_pay_send_links_persists_packet_and_private_link_completes(
     monkeypatch: pytest.MonkeyPatch, tmp_path
 ) -> None:
@@ -483,3 +508,151 @@ def test_after_pay_draft_stamp_persists_packet_without_document_meta(
     stored = load_draft(aid).get("vs01_signing_packet_v1")
     assert isinstance(stored, dict)
     assert stored.get("portable", {}).get("fields")
+
+
+def test_after_pay_send_flag_persists_without_stamp_or_handoff(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """Live hole: guest→pay→esign Send has no stamp/handoff; tokens minted; packet never stored."""
+    monkeypatch.setenv("CLAW_COMMERCIAL_MODE", "1")
+    monkeypatch.setenv("CLAW_DOCUMENTS_DIR", str(tmp_path / "documents"))
+    monkeypatch.setenv("CLAW_STORAGE_BACKEND", "local")
+    from backend.services import document_service
+    from backend.services.agreement_draft_store import load_draft, save_draft
+    from backend.services.accepted_review_snapshot import create_pending_snapshot, get_registry
+
+    client = TestClient(app, raise_server_exceptions=False)
+    create_res = client.post(
+        "/api/agreements/draft",
+        headers=_ORG_H,
+        json={
+            "title": "Services Agreement",
+            "jurisdiction": "TX",
+            "parties": [
+                {"id": "p_priya", "name": "Priya Shah", "role": "owner", "email": "priya.shah.qa@example.com"},
+                {"id": "p_diego", "name": "Diego Alvarez", "role": "party", "email": "diego.alvarez.qa@example.com"},
+            ],
+            "purpose": "Brand kit",
+            "payment_terms": "Due on signing",
+            "duration": "30 days",
+            "due_date": None,
+            "effective_date": None,
+        },
+    )
+    assert create_res.status_code == 200, create_res.text
+    aid = create_res.json()["id"]
+    meta = document_service.finalize_document(
+        b"%PDF-1.4 live-after-pay-no-markers",
+        content_type="application/pdf",
+        agreement_id=aid,
+        owner_org_id=f"user-{_OWNER_USER}",
+    )
+    document_id = meta["document_id"]
+    draft = load_draft(aid)
+    ok, err, snap, reg = create_pending_snapshot(
+        agreement_id=aid,
+        corpus_plain=_pending_snapshot_corpus(),
+        registry=get_registry(draft),
+    )
+    assert ok and isinstance(reg, dict), err
+    save_draft({**draft, "id": aid, "canonical_review_snapshots_v1": reg})
+    assert load_draft(aid).get("vs01_signing_packet_v1") in (None, {})
+    assert load_draft(aid).get("after_pay_ceremony_v1") in (None, {})
+
+    blocked = client.post(
+        f"/api/agreements/{aid}/signing-links-sent",
+        headers=_ORG_H,
+        json={
+            "packet_revision": "live_no_markers_rev",
+            "document_id": document_id,
+            "portable_packet": _portable(aid, document_id),
+            "targets": [],
+        },
+    )
+    assert blocked.status_code == 400, blocked.text
+    assert blocked.json()["detail"]["code"] == "accepted_review_snapshot_required"
+    assert load_draft(aid).get("vs01_signing_packet_v1") in (None, {})
+
+    with patch(
+        "backend.services.email.signing_delivery.maybe_send_signing_invites_after_packet_prepared",
+        return_value=None,
+    ):
+        sent = client.post(
+            f"/api/agreements/{aid}/signing-links-sent",
+            headers=_ORG_H,
+            json={
+                "packet_revision": "live_afterpay_rev_1",
+                "document_id": document_id,
+                "portable_packet": _portable(aid, document_id),
+                "after_pay_ceremony": True,
+                "targets": [],
+            },
+        )
+    assert sent.status_code == 200, sent.text
+    stored = load_draft(aid).get("vs01_signing_packet_v1")
+    assert isinstance(stored, dict), "after-pay Send must persist a durable packet"
+    assert stored.get("document_id") == document_id
+    assert stored.get("authority_mode") == "legacy_packet_pre_snapshot"
+    assert stored.get("portable", {}).get("fields")
+    assert load_draft(aid).get("after_pay_ceremony_v1", {}).get("document_id") == document_id
+
+    public = client.get(
+        f"/api/agreements/public/{aid}/vs01-signing-packet",
+        params={"document_id": document_id, "packet_revision": "live_afterpay_rev_1"},
+    )
+    assert public.status_code == 200, public.text
+    assert public.json()["portable"]["fields"][0]["id"] == "priya_sig"
+
+    mint = client.post(
+        f"/api/agreements/{aid}/recipient-access-token",
+        headers=_ORG_H,
+        json={"mode": "sign", "role": "signer", "recipient_party_id": "p_priya"},
+    )
+    assert mint.status_code == 200, mint.text
+    complete = client.post(
+        f"/api/agreements/{aid}/vs01-signer-complete",
+        headers={"X-Claw-Recipient-Access-Token": mint.json()["token"]},
+        json={
+            "signer_role_id": "role_priya",
+            "participant_id": "p_priya",
+            "document_id": document_id,
+            "display_name": "Priya Shah",
+        },
+    )
+    assert complete.status_code == 200, complete.text
+    assert complete.json().get("ok") is True
+
+
+def test_after_pay_send_without_packet_fails_closed(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    monkeypatch.setenv("CLAW_COMMERCIAL_MODE", "1")
+    monkeypatch.setenv("CLAW_DOCUMENTS_DIR", str(tmp_path / "documents"))
+    monkeypatch.setenv("CLAW_STORAGE_BACKEND", "local")
+    client = TestClient(app, raise_server_exceptions=False)
+    create_res = client.post(
+        "/api/agreements/draft",
+        headers=_ORG_H,
+        json={
+            "title": "Services Agreement",
+            "jurisdiction": "TX",
+            "parties": [
+                {"id": "p_priya", "name": "Priya Shah", "role": "owner", "email": "priya.shah.qa@example.com"},
+                {"id": "p_diego", "name": "Diego Alvarez", "role": "party", "email": "diego.alvarez.qa@example.com"},
+            ],
+            "purpose": "Brand kit",
+            "payment_terms": "Due on signing",
+            "duration": "30 days",
+            "due_date": None,
+            "effective_date": None,
+        },
+    )
+    assert create_res.status_code == 200, create_res.text
+    aid = create_res.json()["id"]
+    sent = client.post(
+        f"/api/agreements/{aid}/signing-links-sent",
+        headers=_ORG_H,
+        json={"after_pay_ceremony": True, "targets": []},
+    )
+    assert sent.status_code == 400, sent.text
+    assert sent.json()["detail"]["code"] == "after_pay_packet_required"

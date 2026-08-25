@@ -223,18 +223,26 @@ def is_pure_legacy_pre_cutover(draft: Any) -> bool:
 
 
 def allows_first_ceremony_packet_without_accepted_snapshot(
-    draft: Any, *, document_id: Optional[str] = None
+    draft: Any,
+    *,
+    document_id: Optional[str] = None,
+    after_pay_send: bool = False,
 ) -> bool:
     """
     After-pay painted deals never accept a review snapshot. Send signing links
     must still persist the existing ceremony packet so a private signing link
     can hydrate fields and Finish signing.
 
-    A pending snapshot (first-review paint ≥500 chars) must not block that persist.
-    Commercial review-then-sign without after-pay seed/handoff stays fail-closed.
+    Universal path rule: the Send itself is the ceremony. Guest→pay→esign does
+    not write stamp/handoff markers; a pending snapshot from first-review paint
+    must not block persist when this is an after-pay send.
+
+    Commercial review-then-sign without after-pay send stays fail-closed.
     """
     if get_accepted_snapshot_record(draft):
         return False
+    if after_pay_send:
+        return True
     if _packet_portable(draft) is not None:
         return True
     if _draft_has_after_pay_ceremony_stamp(draft):

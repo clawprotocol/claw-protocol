@@ -121,6 +121,7 @@ export async function postSigningLinksSent(
     targets: SigningInviteTargetPayload[];
     accepted_review_snapshot_id?: string | null;
     accepted_review_snapshot_digest?: string | null;
+    after_pay_ceremony?: boolean;
   },
 ): Promise<PostSigningLinksSentResult> {
   const id = agreementId.trim();
@@ -137,6 +138,7 @@ export async function postSigningLinksSent(
         targets: body.targets,
         accepted_review_snapshot_id: body.accepted_review_snapshot_id ?? null,
         accepted_review_snapshot_digest: body.accepted_review_snapshot_digest ?? null,
+        after_pay_ceremony: Boolean(body.after_pay_ceremony),
       }),
     });
     if (!res.ok) {
