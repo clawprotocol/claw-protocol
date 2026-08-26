@@ -12826,8 +12826,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     const cadence = "annual";
     const returnTo = encodeURIComponent(buildCreateReturnToWithStarterReviewRestore());
     emitPaidFunnelEvent("premium_checkout_opened", { extra: { checkout_surface: "create_flow_checkout" } });
+    const checkoutAgreementId =
+      (reviewAgreementIdRef.current || readCreateReviewAgreementResumeId() || "").trim() ||
+      CREATE_FLOW_CHECKOUT_AGREEMENT_ID;
     navigate(
-      `/app/checkout/${encodeURIComponent(CREATE_FLOW_CHECKOUT_AGREEMENT_ID)}?tier=pro&cadence=${encodeURIComponent(
+      `/app/checkout/${encodeURIComponent(checkoutAgreementId)}?tier=pro&cadence=${encodeURIComponent(
         cadence,
       )}&returnTo=${returnTo}`,
     );
@@ -16632,6 +16635,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         premiumPaidDocumentSurface,
         suppressIntakePremiumUpsell,
       ),
+      draftPartiesAreComplete: Boolean(draft && !draftHasPlaceholderParties(draft)),
     });
   }, [
     proAgreementEntitled,
@@ -16645,6 +16649,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     authoritativePremiumUiCommitted,
     authoritativeCreateFlowReviewShellInput,
     createFlowAuthoritativeShellReactiveKey,
+    draft,
   ]);
 
   useEffect(() => {

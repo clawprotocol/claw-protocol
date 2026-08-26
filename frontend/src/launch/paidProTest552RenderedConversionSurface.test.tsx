@@ -85,12 +85,6 @@ function showUpgradeProCtaBlock(): string {
   return intakeSrc.slice(start - 400, start + 200);
 }
 
-function freeStreamlineDocumentRegion(): string {
-  const anchor = "useStarterDocumentPaperSurface && !multiPartyProGateActive";
-  const start = intakeSrc.indexOf(anchor);
-  expect(start).toBeGreaterThan(0);
-  return intakeSrc.slice(start - 400, start + 1200);
-}
 
 beforeEach(() => {
   sessionStorage.clear();
@@ -114,8 +108,10 @@ describe("TEST552 — rendered anonymous Free Starter conversion surface", () =>
     expect(screen.getByTestId("starter-draft-copy-text")).toBeTruthy();
   });
 
-  it("Case 9 proof — unified checkout CTA wiring, no comparison card on streamline path", () => {
+  it("Case 9 proof — unified checkout CTA wiring, comparison card shows when parties complete", () => {
     expect(resolveIsFreeStreamlineDraftReview(streamlineBase)).toBe(true);
+
+    // Incomplete parties: card does NOT show (Fix details should appear instead)
     expect(
       shouldShowCreateFlowStarterProRefineUpsell({
         shellInput: { tier: "free", workspaceProEntitled: false },
@@ -129,17 +125,31 @@ describe("TEST552 — rendered anonymous Free Starter conversion surface", () =>
         belowDocumentRefineSectionParentEligible: true,
         premiumPaidDocumentSurface: false,
         showStarterProRefineUpsellCardEligible: true,
+        draftPartiesAreComplete: false,
       }),
     ).toBe(false);
+
+    // Complete parties: card SHOWS with Pro conversion surface
+    expect(
+      shouldShowCreateFlowStarterProRefineUpsell({
+        shellInput: { tier: "free", workspaceProEntitled: false },
+        hasPaidPremiumCompletionSession,
+        authoritativePremiumUiCommitted: false,
+        paidProAuthoritative: false,
+        suppressIntakePremiumUpsell: false,
+        proAgreementEntitled: false,
+        isFreeStreamlineDraftReview: true,
+        isFreeStarterReviewSurface: true,
+        belowDocumentRefineSectionParentEligible: true,
+        premiumPaidDocumentSurface: false,
+        showStarterProRefineUpsellCardEligible: true,
+        draftPartiesAreComplete: true,
+      }),
+    ).toBe(true);
 
     const bottomCta = showUpgradeProCtaBlock();
     expect(bottomCta).toContain("PRO_CTA_CONTINUE");
     expect(bottomCta).toContain('action: "launch_pro_checkout"');
-    expect(bottomCta).not.toContain("ProConversionComparisonCard");
-
-    const docRegion = freeStreamlineDocumentRegion();
-    expect(docRegion).toContain("StarterDraftDocumentSurface");
-    expect(docRegion).not.toMatch(/isFreeStreamlineDraftReview[\s\S]{0,600}ProConversionComparisonCard/);
 
     expect(intakeSrc).toContain("hideStickyForStarterProContinuation");
     expect(intakeSrc).toContain("!hideStickyForStarterProContinuation");
@@ -188,5 +198,57 @@ describe("TEST552 — rendered anonymous Free Starter conversion surface", () =>
       }),
     );
     spy.mockRestore();
+  });
+
+  it("RENDERED conversion surface — ProConversionComparisonCard contains heading, body, bullets, price, CTA", async () => {
+    const { ProConversionComparisonCard } = await import("../components/agreements/ProConversionComparisonCard");
+    const { PRO_UPGRADE_CARD_BODY, PRO_UPGRADE_PRO_BULLETS, PRO_UPGRADE_FREE_BULLETS } = await import("./simpleProduct/proConversionCopy");
+
+    const clickHandler = vi.fn();
+    render(
+      <ProConversionComparisonCard
+        onPrimaryClick={clickHandler}
+        showSecondaryActions={true}
+        onKeepFreeClick={() => {}}
+      />
+    );
+
+    // 1. Card heading: "Ready to move this from draft to deal?"
+    expect(screen.getByRole("heading", { name: PRO_UPGRADE_CARD_HEADING })).toBeTruthy();
+
+    // 2. Card body explaining free vs pro
+    expect(screen.getByText(PRO_UPGRADE_CARD_BODY)).toBeTruthy();
+
+    // 3. Free column bullets
+    for (const bullet of PRO_UPGRADE_FREE_BULLETS) {
+      expect(screen.getByText(bullet)).toBeTruthy();
+    }
+
+    // 4. Pro column bullets
+    for (const bullet of PRO_UPGRADE_PRO_BULLETS) {
+      expect(screen.getByText(bullet)).toBeTruthy();
+    }
+
+    // 5. Price line: LawDog Pro: $49/month
+    expect(screen.getByText(/LawDog Pro.*\$49\/month/)).toBeTruthy();
+
+    // 6. Primary CTA: "Continue with Pro"
+    const ctaButton = screen.getByRole("button", { name: PRO_CTA_CONTINUE });
+    expect(ctaButton).toBeTruthy();
+    ctaButton.click();
+    expect(clickHandler).toHaveBeenCalledTimes(1);
+
+    // 7. Secondary action: "Keep free draft"
+    expect(screen.getByRole("button", { name: PRO_CTA_KEEP_FREE_DRAFT })).toBeTruthy();
+  });
+
+  it("RENDERED conversion surface — checkout uses real persisted agreement ID when available", () => {
+    // Must use reviewAgreementIdRef.current or readCreateReviewAgreementResumeId() first
+    expect(intakeSrc).toContain("reviewAgreementIdRef.current || readCreateReviewAgreementResumeId()");
+    
+    // The checkout URL must prefer real ID over CREATE_FLOW_CHECKOUT_AGREEMENT_ID
+    expect(intakeSrc).toContain("checkoutAgreementId");
+    expect(intakeSrc).toMatch(/const checkoutAgreementId[\s\S]*?reviewAgreementIdRef\.current/);
+    expect(intakeSrc).toMatch(/const checkoutAgreementId[\s\S]*?CREATE_FLOW_CHECKOUT_AGREEMENT_ID/);
   });
 });

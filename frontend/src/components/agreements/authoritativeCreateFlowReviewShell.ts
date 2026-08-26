@@ -291,6 +291,8 @@ export function shouldShowCreateFlowStarterProRefineUpsell(input: {
   belowDocumentRefineSectionParentEligible: boolean;
   premiumPaidDocumentSurface: boolean;
   showStarterProRefineUpsellCardEligible: boolean;
+  /** When true, draft has real party names (not placeholders) — enables Pro conversion card on free path. */
+  draftPartiesAreComplete?: boolean;
 }): boolean {
   if (shouldSuppressPaidAcceptedDegradedRecoveryUi({ shellInput: input.shellInput })) return false;
   if (shouldSuppressFreeStarterCreateFlowConversionUi(input.shellInput ?? {})) return false;
@@ -299,10 +301,11 @@ export function shouldShowCreateFlowStarterProRefineUpsell(input: {
   if (input.paidProAuthoritative) return false;
   if (input.suppressIntakePremiumUpsell) return false;
   if (input.proAgreementEntitled) return false;
-  // Free starter/streamline review uses the unified bottom checkout CTA (`launch_pro_checkout`),
-  // not the legacy side-by-side ProConversionComparisonCard below the document.
+  // Free starter/streamline review with COMPLETE parties shows the Pro conversion card
+  // so customers see the value proposition (what's free, what Pro adds, price, upgrade CTA).
+  // Incomplete drafts (placeholder parties) continue to show "Fix details" instead.
   if (input.isFreeStreamlineDraftReview || input.isFreeStarterReviewSurface) {
-    return false;
+    return Boolean(input.draftPartiesAreComplete);
   }
   return input.showStarterProRefineUpsellCardEligible;
 }
