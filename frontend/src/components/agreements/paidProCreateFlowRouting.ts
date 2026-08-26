@@ -21,6 +21,8 @@ import { hasPaidDashboardCreateContextActive } from "../../launch/paidDashboardC
 import { PAID_PRO_AUTHORITY_MIN_LEN } from "./paidProAuthorityConstants";
 import { resolveCreateFlowAcceptedPipelineCorpusPlain } from "./paidProAcceptanceRouting";
 import { shouldUsePaidCreateFlowReviewFirstPersist } from "./paidProCreateFlowReviewHandoff";
+import { isHomeAnonymousStarterAuthorityActive } from "../../launch/homeAnonymousCreateOrigin";
+import { getCachedAccessToken } from "../../auth/authAccessTokenCache";
 
 export type ResolveSkipFreeStarterCreateSubmitInput = {
   tier: AccessTier;
@@ -45,7 +47,20 @@ export function hasFreeStarterSessionWithoutProEntitlement(): boolean {
 }
 
 /**
- * Free Starter upsell must not auto-POST /api/agreements/draft — that row is created once after paid acceptance.
+ * Anonymous homepage Starter may persist one guest draft before auth.
+ * Authenticated non-Pro free-starter upsell still must not auto-POST a workspace row.
+ */
+export function shouldPersistAnonymousGuestStarterDraft(args?: {
+  canSaveGuestDraft?: boolean;
+}): boolean {
+  if (args?.canSaveGuestDraft === false) return false;
+  if (getCachedAccessToken()) return false;
+  return isHomeAnonymousStarterAuthorityActive();
+}
+
+/**
+ * Free Starter upsell must not auto-POST /api/agreements/draft as a paid workspace row.
+ * Exception: anonymous guest homepage Starter persists one guest draft (J7 claim identity).
  */
 export type ShouldAutoPersistReviewAgreementRowArgs = {
   hasReviewAgreementId: boolean;
@@ -56,6 +71,8 @@ export type ShouldAutoPersistReviewAgreementRowArgs = {
   agreementDocumentText?: string;
   pipelineWinningBody?: string | null;
   hydratedPremiumBody?: string | null;
+  /** Server guest slot. Undefined defers to backend assert_can_create_draft. */
+  canSaveGuestDraft?: boolean;
 };
 
 /** True when returning-paid / dashboard create has a validated pipeline corpus safe for review-first persist. */
@@ -90,7 +107,11 @@ export function shouldAutoPersistReviewAgreementRow(args: ShouldAutoPersistRevie
   if (args.skipFreeStarterCreateSubmit) {
     return hasPaidCreateFlowPersistableCorpus(args);
   }
-  if (hasFreeStarterSessionWithoutProEntitlement()) return false;
+  if (hasFreeStarterSessionWithoutProEntitlement()) {
+    return shouldPersistAnonymousGuestStarterDraft({
+      canSaveGuestDraft: args.canSaveGuestDraft,
+    });
+  }
   return true;
 }
 

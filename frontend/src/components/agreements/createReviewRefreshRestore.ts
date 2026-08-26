@@ -7,6 +7,7 @@ import {
 } from "./agreementIntakeStorage";
 import { hasCurrentSessionFreeStarterIntent } from "./paidProSessionEligibility";
 import { isCreatorDashboardSignerSetupResumeActive } from "../../launch/creatorDashboardReviewLinkRouting";
+import { isHomeAnonymousStarterAuthorityActive } from "../../launch/homeAnonymousCreateOrigin";
 
 export type ReviewRefreshRegenerationSkipReason =
   | "stored_agreement_resume_id"
@@ -35,6 +36,14 @@ export function logReviewRefreshRegenerationSkipped(reason: ReviewRefreshRegener
   console.info("[review-refresh-regeneration-skipped]", { reason });
 }
 
+/**
+ * Homepage anonymous Starter already persisted one guest draft.
+ * Reload must keep that resume ID (fresh homepage submit clears it first).
+ */
+export function shouldPreserveAnonymousGuestStarterResumeId(): boolean {
+  return isHomeAnonymousStarterAuthorityActive() && Boolean(readCreateReviewAgreementResumeId());
+}
+
 /** Do not hydrate stored free starter snapshot when paid SoT already exists. */
 export function shouldRestoreStoredCreateReviewDraftSnapshot(): boolean {
   if (isCreatorDashboardSignerSetupResumeActive()) {
@@ -51,6 +60,7 @@ export function shouldRestoreStoredCreateReviewDraftSnapshot(): boolean {
 }
 
 export function shouldHydrateStoredAgreementResumeId(opts?: SkipHomeAutoGenerateOptions): boolean {
+  if (shouldPreserveAnonymousGuestStarterResumeId()) return true;
   if (opts?.freshHomeHeroHandoff || hasCurrentSessionFreeStarterIntent()) return false;
   // Signer-setup resume always hydrates the agreement id from workspace GET.
   if (isCreatorDashboardSignerSetupResumeActive()) {
@@ -72,6 +82,10 @@ export function shouldSkipHomeAutoGenerateForStoredReview(opts?: SkipHomeAutoGen
   }
   if (hasCheckoutBackRestoreSnapshot()) {
     logReviewRefreshRegenerationSkipped("stored_draft_ready_marker");
+    return true;
+  }
+  if (shouldPreserveAnonymousGuestStarterResumeId()) {
+    logReviewRefreshRegenerationSkipped("stored_agreement_resume_id");
     return true;
   }
   if (opts?.freshHomeHeroHandoff || hasCurrentSessionFreeStarterIntent()) {

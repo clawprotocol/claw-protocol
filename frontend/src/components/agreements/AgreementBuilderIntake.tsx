@@ -487,6 +487,7 @@ import {
   logReviewRefreshRegenerationSkipped,
   logReviewRefreshRestore,
   shouldHydrateStoredAgreementResumeId,
+  shouldPreserveAnonymousGuestStarterResumeId,
   shouldRestoreStoredCreateReviewDraftSnapshot,
   shouldSkipHomeAutoGenerateForStoredReview,
 } from "./createReviewRefreshRestore";
@@ -5803,6 +5804,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           reviewAgreementIdRef.current = tid;
           writeCreateReviewAgreementResumeId(tid);
           setReviewAgreementId(tid);
+          setJourneyActionFeedback((prev) =>
+            prev?.actionId === "create_agreement" && prev.kind === "working"
+              ? feedbackSucceeded(
+                  "create_agreement",
+                  "Agreement created",
+                  feedbackAfterGeneration({ captured: ["parties", "scope"] }),
+                )
+              : prev,
+          );
           return tid;
         }
         return null;
@@ -5821,6 +5831,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
               : persistMsg;
           });
           setProFullDraftQualityRetry(true);
+        }
+        if (!useReviewFirstPersist) {
+          setJourneyActionFeedback(feedbackAfterFailedCreate(extractSafeFailedCreateReason(e)));
         }
         if (
           useReviewFirstPersist &&
@@ -17144,6 +17157,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       return;
     }
     if ((initialIntakeText ?? "").trim().length > 0) {
+      if (shouldPreserveAnonymousGuestStarterResumeId()) return;
       clearCreateReviewAgreementResumeIdOnly();
     }
   }, [initialIntakeText, checkoutBackRestoreActive, openSignerSetupOnResume]);

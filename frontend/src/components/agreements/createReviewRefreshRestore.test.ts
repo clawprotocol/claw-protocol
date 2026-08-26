@@ -13,11 +13,13 @@ import { SHARED_ACCEPTED_PAID_BODY } from "./paidProSharedFixtureSystem";
 import {
   logReviewRefreshRegenerationSkipped,
   shouldHydrateStoredAgreementResumeId,
+  shouldPreserveAnonymousGuestStarterResumeId,
   shouldRestoreStoredCreateReviewDraftSnapshot,
   shouldSkipHomeAutoGenerateForStoredReview,
 } from "./createReviewRefreshRestore";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import { markCurrentSessionFreeStarterIntent } from "./paidProSessionEligibility";
+import { markHomeAnonymousCreateOrigin } from "../../launch/homeAnonymousCreateOrigin";
 
 describe("createReviewRefreshRestore", () => {
   beforeEach(() => {
@@ -123,5 +125,14 @@ describe("createReviewRefreshRestore", () => {
     writeCreateReviewDraftReadyMarker();
     markCurrentSessionFreeStarterIntent();
     expect(shouldRestoreStoredCreateReviewDraftSnapshot()).toBe(false);
+  });
+
+  it("homepage anonymous guest resume survives reload even with hero handoff flags", () => {
+    markHomeAnonymousCreateOrigin();
+    markCurrentSessionFreeStarterIntent();
+    writeCreateReviewAgreementResumeId("agr-guest-persist-1");
+    expect(shouldPreserveAnonymousGuestStarterResumeId()).toBe(true);
+    expect(shouldHydrateStoredAgreementResumeId({ freshHomeHeroHandoff: true })).toBe(true);
+    expect(shouldSkipHomeAutoGenerateForStoredReview({ freshHomeHeroHandoff: true })).toBe(true);
   });
 });
