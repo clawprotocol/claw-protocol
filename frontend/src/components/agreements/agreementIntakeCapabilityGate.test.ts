@@ -394,3 +394,56 @@ describe("2–4 party edge spectrum (product-wide)", () => {
     expect(blob).not.toMatch(/Anthem|Blanchard|047b01af|Genesis Dog|orgId|userId/i);
   });
 });
+
+describe("named-human + organization hiring pattern", () => {
+  it("recognizes 'Person of Org is hiring Person of Org' as two-party intake", () => {
+    const decision = assessAgreementIntakeCapability(
+      "Priya Shah of Northline Studio is hiring Diego Alvarez of Harbor Marks LLC to design a logo and brand kit for $2,400, term 30 days, governing law Texas.",
+    );
+    expect(decision.ok).toBe(true);
+  });
+
+  it("extracts the legal entity names from Person of Org hiring pattern", async () => {
+    const { extractListedSigningPartyNames } = await import("./agreementIntakeClarification");
+    const names = extractListedSigningPartyNames(
+      "Priya Shah of Northline Studio is hiring Diego Alvarez of Harbor Marks LLC to design a logo and brand kit for $2,400, term 30 days, governing law Texas.",
+    );
+    expect(names).toHaveLength(2);
+    expect(names).toContain("Northline Studio");
+    expect(names).toContain("Harbor Marks LLC");
+  });
+
+  it("recognizes various org suffix forms in hiring pattern", async () => {
+    const { extractListedSigningPartyNames } = await import("./agreementIntakeClarification");
+    for (const [intake, orgs] of [
+      [
+        "Alex Rivera of PixelForge Labs is hiring Sam Chen of Summit Design Group for website development at $5,000.",
+        ["PixelForge Labs", "Summit Design Group"],
+      ],
+      [
+        "Jordan Lee of Apex Consulting is hiring Maria Garcia of Riverstone Partners for marketing strategy for $8,000 over 2 months.",
+        ["Apex Consulting", "Riverstone Partners"],
+      ],
+      [
+        "Michael Torres of Iron Vale Systems Inc. is hiring Sarah Mitchell of Blue Canyon Analytics LLC to implement AI workflow automation for $12,500.",
+        ["Iron Vale Systems Inc.", "Blue Canyon Analytics LLC"],
+      ],
+    ] as const) {
+      const decision = assessAgreementIntakeCapability(intake);
+      expect(decision.ok, intake.slice(0, 60)).toBe(true);
+      const names = extractListedSigningPartyNames(intake);
+      expect(names).toHaveLength(2);
+      expect(names[0]).toBe(orgs[0]);
+      expect(names[1]).toBe(orgs[1]);
+    }
+  });
+
+  it("ordinary two-party 'Entity is hiring Entity' should route via other mechanisms", () => {
+    // "Entity is hiring Entity" without "Person of Org" pattern doesn't match the new regex
+    // but should still be allowed if it has scope + money (through hasPurpose logic)
+    const decision = assessAgreementIntakeCapability(
+      "Create a consulting agreement between Red Mesa Logistics LLC and Harbor Peak Automation LLC. Red Mesa is hiring Harbor Peak for workflow automation consulting for $4,000/month over three months. Texas law applies.",
+    );
+    expect(decision.ok).toBe(true);
+  });
+});

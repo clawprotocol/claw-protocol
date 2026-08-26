@@ -146,10 +146,45 @@ function countLabeledPartySlots(raw: string): number {
   return max;
 }
 
+/**
+ * Named human + organization hiring pattern:
+ * "Person of Org is hiring Person of Org" → [Org1, Org2]
+ * Captures the legal entity names when a human representative's organization is named.
+ */
+const ORG_SUFFIX_PATTERN =
+  "(?:LLC|L\\.L\\.C\\.|Inc\\.?|Corp\\.?|Corporation|Ltd\\.?|Limited|LLP|LP|Company|Co\\.?|Studio|Studios|Group|Partners|Holdings|Consulting|Agency|Design|Labs?)";
+const HIRING_PATTERN_RE = new RegExp(
+  "\\b([A-Z][a-z]+(?:\\s+[A-Z][a-z]+)*)\\s+of\\s+" +
+    "([A-Z][A-Za-z0-9.&'\\- ]+?" + ORG_SUFFIX_PATTERN + ")" +
+    "\\s+is\\s+hiring\\s+" +
+    "([A-Z][a-z]+(?:\\s+[A-Z][a-z]+)*)\\s+of\\s+" +
+    "([A-Z][A-Za-z0-9.&'\\- ]+?" + ORG_SUFFIX_PATTERN + ")" +
+    "(?:\\s+(?:to|for)\\b|$)",
+  "i",
+);
+
+function extractHiringPatternPartyNames(raw: string): string[] {
+  const text = String(raw || "").replace(/\s+/g, " ").trim();
+  const match = text.match(HIRING_PATTERN_RE);
+  if (match?.[2] && match?.[4]) {
+    const org1 = match[2].replace(/\s+/g, " ").trim();
+    const org2 = match[4].replace(/\s+/g, " ").trim();
+    if (looksLikeUsablePartyLabel(org1) && looksLikeUsablePartyLabel(org2)) {
+      return [org1, org2];
+    }
+  }
+  return [];
+}
+
 /** Ordered legal-name candidates from between/among or Party N: lines (not capped). */
 export function extractListedSigningPartyNames(raw: string): string[] {
   const between = extractBetweenPartyNameList(raw).filter(looksLikeUsablePartyLabel);
   if (between.length >= 2) return between;
+
+  // Try "Person of Org is hiring Person of Org" pattern
+  const hiringPattern = extractHiringPatternPartyNames(raw);
+  if (hiringPattern.length >= 2) return hiringPattern;
+
   const labeled: string[] = [];
   const lineRe = /(?:^|\n)\s*Party\s*[1-9]\s*[:\-]\s*([^\n]{2,80})/gim;
   let m: RegExpExecArray | null;
