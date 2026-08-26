@@ -651,6 +651,26 @@ function extractScopeAndMeta(lower: string, text: string): FieldMeta {
     }
   }
 
+  // General "hiring X to <verb> <scope>" pattern: captures scope from hiring intakes
+  // that use verbs other than "provide" (design, create, build, develop, etc.).
+  // E.g. "hiring Diego to design a logo and brand kit" → scope = "design a logo and brand kit"
+  const hiringToVerb = text.match(
+    /\b(?:is\s+)?hiring\s+[^.!\n]{0,140}?\s+to\s+([a-z]+\s+[^.!\n]{4,200})/i,
+  );
+  if (hiringToVerb?.[1]) {
+    // Strip trailing price/term/law clauses (e.g. "for $2,400, term 30 days, governing law Texas")
+    let captured = hiringToVerb[1]
+      .replace(/\s+for\s+\$[\d,]+.*$/i, "")
+      .replace(/\s*,\s*term\b.*$/i, "")
+      .replace(/\s*,\s*governing\s+law\b.*$/i, "")
+      .replace(/\s+for\s+(?:three|four|five|six|\d+)\s+months?\b.*$/i, "")
+      .trim();
+    const t = normalizeIntakeFieldText(captured, 220);
+    if (t.length >= 8 && !/\b(?:pay|pays|paid|payment|fee|\$\s?\d)\b/i.test(t)) {
+      return { text: t, confidence: 0.88, signal: true, inferred: false };
+    }
+  }
+
   const toProvide = text.match(/\bto\s+provide\s+([^.!\n]{8,200})/i);
   if (toProvide?.[1]) {
     const t = normalizeIntakeFieldText(

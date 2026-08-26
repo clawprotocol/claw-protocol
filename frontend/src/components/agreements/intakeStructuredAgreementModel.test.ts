@@ -111,6 +111,39 @@ Revenue sharing: Red Mesa Logistics LLC 50%, Harbor Peak Automation LLC 30%, Blu
     expect(s.termination.toLowerCase()).toMatch(/30/);
     expect(s.termination.toLowerCase()).toMatch(/email/);
   });
+
+  it("extracts scope from 'hiring X to <verb>' pattern (GTM P0: logo and brand kit)", () => {
+    const raw =
+      "Priya Shah of Northline Studio is hiring Diego Alvarez of Harbor Marks LLC to design a logo and brand kit for $2,400, term 30 days, governing law Texas.";
+    const s = parseIntakeToStructuredAgreement(raw);
+    // Customer-entered scope "logo and brand kit" must survive extraction
+    expect(s.scope.toLowerCase()).toContain("logo");
+    expect(s.scope.toLowerCase()).toContain("brand kit");
+    // Must not contain generic fallback boilerplate
+    expect(s.scope.toLowerCase()).not.toContain("commercial arrangement");
+    expect(s.scope.toLowerCase()).not.toContain("to be agreed");
+    // Other fields preserved
+    expect(s.payment).toMatch(/\$2,400|2,400/);
+    expect(s.term).toMatch(/30\s*-?\s*day/i);
+    expect(s.governing_law.toLowerCase()).toContain("texas");
+  });
+
+  it("extracts scope from ordinary between X and Y two-party intake with specific scope", () => {
+    const raw =
+      "Agreement between Alpha Corp LLC and Beta Services Inc to provide quarterly financial auditing and compliance reporting. Payment: $8,000 quarterly. Term: 12 months.";
+    const s = parseIntakeToStructuredAgreement(raw);
+    expect(s.scope.toLowerCase()).toContain("financial auditing");
+    expect(s.scope.toLowerCase()).toContain("compliance reporting");
+    expect(s.scope.toLowerCase()).not.toContain("commercial arrangement");
+  });
+
+  it("returns empty scope when no usable customer scope exists (generic fallback allowed)", () => {
+    // Minimal intake with no scope signal at all
+    const raw = "Between Party A and Party B. $5000 monthly.";
+    const s = parseIntakeToStructuredAgreement(raw);
+    // Scope can be empty when no usable scope is present (generic fallback handled downstream)
+    expect(s.scope).toBe("");
+  });
 });
 
 describe("buildLiveDraftPreview uses structured model", () => {
