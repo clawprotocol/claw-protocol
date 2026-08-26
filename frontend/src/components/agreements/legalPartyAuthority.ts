@@ -33,6 +33,7 @@ import {
 import { shortIntakeFingerprint } from "../../lib/agreementGenerationId";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import { isPlaceholderPartyName } from "./starterPartyLimits";
+import { extractHiringPatternPartyNames } from "./agreementIntakeClarification";
 
 const COORDINATOR_BLOCK_HEADER_RE = /^\s*coordinator\s*[:\-]?\s*$/i;
 const PARTY_BLOCK_HEADER_RE = /^\s*party\s*(\d+)\s*[:\-]?\s*$/i;
@@ -289,6 +290,21 @@ function collectEvidence(intakeText: string): EvidenceRow[] {
         entityConfidence: "high",
         roleHint: withRole,
         roleConfidence: withRole ? "high" : "unknown",
+      });
+    }
+    return applyRoleHintsToRows(rows, roleHints);
+  }
+
+  // "Person of Org is hiring Person of Org" pattern — commercial two-party intake
+  // without a "between" clause but with explicit legal entity organizations.
+  const hiringPatternEntities = extractHiringPatternPartyNames(intake);
+  if (hiringPatternEntities.length >= 2) {
+    for (const name of hiringPatternEntities) {
+      pushRow({
+        name,
+        provenance: "structured_intake",
+        entityConfidence: "high",
+        roleConfidence: "unknown",
       });
     }
     return applyRoleHintsToRows(rows, roleHints);

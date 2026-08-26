@@ -244,7 +244,7 @@ export function collapseDuplicateNoticeEntityLines(text: string, fullNames: read
 }
 
 const ENTITY_SUFFIX =
-  /\s+(?:LLC|L\.L\.C\.|Inc\.?|Incorporated|Corp\.?|Corporation|Ltd\.?|Limited|LP|L\.P\.|LLP|PLLC|Co\.?|Company)\.?$/i;
+  /\s+(?:LLC|L\.L\.C\.|Inc\.?|Incorporated|Corp\.?|Corporation|Ltd\.?|Limited|LP|L\.P\.|LLP|PLLC|Co\.?|Company|Studio|Studios|Group|Partners|Holdings|Consulting|Agency|Design|Labs?)\.?$/i;
 
 const US_STATE_ALT = US_STATE_NAMES_ENGLISH.map((n) => n.replace(/\s+/g, "\\s+")).join("|");
 

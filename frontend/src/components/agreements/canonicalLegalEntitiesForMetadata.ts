@@ -3,6 +3,7 @@
  * Never cap to draft.parties.length when intake or signer-count authority reports more parties.
  */
 
+import { extractHiringPatternPartyNames } from "./agreementIntakeClarification";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import { parseAllStructuredPartyContactBlocks } from "./labeledPartyBlockParse";
 import { alignIntakeSignerMetadataToLegalEntities } from "./structuredIntakePartyContactParse";
@@ -40,6 +41,7 @@ export function resolveLegalEntitiesForCanonicalMetadata(args: {
     .filter(isAuthoritativeLegalEntityName);
 
   const fromManifest = intakePartyManifestLegalEntities(intake).filter(isAuthoritativeLegalEntityName);
+  const fromHiringPattern = extractHiringPatternPartyNames(intake).filter(isAuthoritativeLegalEntityName);
   const declaredPartyCount = resolveDeclaredExplicitPartyCount(intake);
 
   const authoritativeCount = Math.min(
@@ -47,7 +49,7 @@ export function resolveLegalEntitiesForCanonicalMetadata(args: {
       intakeText: intake || null,
       draftParties: args.draft?.parties,
       draftPartyNames: fromDraft.length ? fromDraft : explicit,
-      manifestPartyCount: Math.max(fromDraft.length, explicit.length, fromLabeled.length, fromManifest.length),
+      manifestPartyCount: Math.max(fromDraft.length, explicit.length, fromLabeled.length, fromManifest.length, fromHiringPattern.length),
     }).count,
     UI_MAX_PARTY_SLOTS,
   );
@@ -62,6 +64,7 @@ export function resolveLegalEntitiesForCanonicalMetadata(args: {
             fromLabeled.length,
             fromDraft.length,
             fromManifest.length,
+            fromHiringPattern.length,
             2,
           ),
           UI_MAX_PARTY_SLOTS,
@@ -73,13 +76,23 @@ export function resolveLegalEntitiesForCanonicalMetadata(args: {
     // Explicit caller-supplied legal entities win when the manifest is shorter or equal —
     // never let a 4-party Party-N bullet manifest truncate a 6-entity canonical bundle.
     !(explicit.length > fromManifest.length);
+  const hiringPatternAuthoritative =
+    !manifestAuthoritative &&
+    fromHiringPattern.length >= 2 &&
+    !explicit.length &&
+    !fromDraft.length &&
+    !fromLabeled.length;
   const seedEntities = manifestAuthoritative
     ? fromManifest
     : explicit.length
       ? explicit
       : fromDraft.length
         ? fromDraft
-        : fromLabeled;
+        : fromLabeled.length
+          ? fromLabeled
+          : hiringPatternAuthoritative
+            ? fromHiringPattern
+            : [];
   const aligned = alignIntakeSignerMetadataToLegalEntities(intake, seedEntities);
 
   const pool: string[] = [];
@@ -89,6 +102,9 @@ export function resolveLegalEntitiesForCanonicalMetadata(args: {
   for (const name of explicit) pushUniqueEntity(pool, name);
   for (const name of fromDraft) pushUniqueEntity(pool, name);
   for (const name of fromLabeled) pushUniqueEntity(pool, name);
+  if (hiringPatternAuthoritative) {
+    for (const name of fromHiringPattern) pushUniqueEntity(pool, name);
+  }
   for (const slot of aligned) pushUniqueEntity(pool, slot.partyLegalName);
 
   const targetCount = Math.max(maxSlots, pool.length >= 2 ? Math.min(pool.length, maxSlots) : 2);

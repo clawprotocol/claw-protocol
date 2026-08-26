@@ -38,6 +38,7 @@ import {
   clearPriorPaidAuthorityForFreshCreateSubmit,
   initializeNewAgreementSession,
 } from "../../launch/newAgreementSessionReset";
+import { establishLegalPartyAuthorityFromIntake } from "./legalPartyAuthority";
 
 type FamilyCase = {
   family: string;
@@ -520,5 +521,34 @@ describe("universal GTM party authority (all agreement families)", () => {
     expect(c?.kind).toBe("counsel_prep");
     expect(c?.suggestedRewrite).toMatch(/between /i);
     expect(c?.suggestedRewrite).not.toMatch(/among |Party 3/i);
+  });
+
+  it("'Person of Org is hiring Person of Org' intake extracts legal entities, not human names (GTM P0)", () => {
+    const intake =
+      "Priya Shah of Northline Studio is hiring Diego Alvarez of Harbor Marks LLC to design a logo and brand kit for $2,400, term 30 days, governing law Texas.";
+    const authority = establishLegalPartyAuthorityFromIntake(intake);
+
+    // Authority must recognize the two legal organizations, not generic placeholders
+    expect(authority.parties).toHaveLength(2);
+    expect(authority.fallbackCount).toBe(0);
+    expect(authority.parties[0].legalEntityName).toBe("Northline Studio");
+    expect(authority.parties[1].legalEntityName).toBe("Harbor Marks LLC");
+
+    // Ensure no Party A / Party B fallback
+    expect(authority.parties[0].provenance.extractedFrom).not.toBe("fallback");
+    expect(authority.parties[1].provenance.extractedFrom).not.toBe("fallback");
+    expect(authority.parties.some((p) => p.legalEntityName === "Party A")).toBe(false);
+    expect(authority.parties.some((p) => p.legalEntityName === "Party B")).toBe(false);
+
+    // Canonical metadata bundle should reflect the same entities
+    const metadata = buildCanonicalPartyMetadataBundle({
+      legalEntities: authority.parties.map((p) => p.legalEntityName),
+      intakeText: intake,
+      mutationSource: "structured_intake",
+    });
+    expect(metadata.parties).toHaveLength(2);
+    expect(metadata.parties[0].partyLegalName).toBe("Northline Studio");
+    expect(metadata.parties[1].partyLegalName).toBe("Harbor Marks LLC");
+    expect(metadata.source).not.toBe("generic_placeholder");
   });
 });

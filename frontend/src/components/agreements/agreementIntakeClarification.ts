@@ -163,7 +163,7 @@ const HIRING_PATTERN_RE = new RegExp(
   "i",
 );
 
-function extractHiringPatternPartyNames(raw: string): string[] {
+export function extractHiringPatternPartyNames(raw: string): string[] {
   const text = String(raw || "").replace(/\s+/g, " ").trim();
   const match = text.match(HIRING_PATTERN_RE);
   if (match?.[2] && match?.[4]) {

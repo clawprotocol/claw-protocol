@@ -5,6 +5,7 @@
  * when intake (or explicit party names) already resolve them. Supports ordered N = 2–4.
  */
 
+import { extractHiringPatternPartyNames } from "./agreementIntakeClarification";
 import { extractBetweenPartyNameList } from "./partyBetweenParse";
 import { PAID_PRO_GTM_MAX_SIGNING_PARTIES } from "./paidProAuthorityLimits";
 import { partyLegalNamesMatch } from "./paidProAcceptedCorpusPartyRoles";
@@ -106,6 +107,7 @@ export function resolveIntakeDraftPartyNames(
     .map(usablePartyName)
     .filter(Boolean);
   const labeled = extractLabeledPartyNames(String(intakeText || ""));
+  const hiringPattern = extractHiringPatternPartyNames(String(intakeText || ""));
   const ordered =
     fromExplicit.length >= 2
       ? fromExplicit
@@ -113,7 +115,9 @@ export function resolveIntakeDraftPartyNames(
         ? between
         : labeled.length >= 2
           ? labeled
-          : [];
+          : hiringPattern.length >= 2
+            ? hiringPattern
+            : [];
   if (ordered.length < 2) return null;
   return ordered.slice(0, PAID_PRO_GTM_MAX_SIGNING_PARTIES);
 }
