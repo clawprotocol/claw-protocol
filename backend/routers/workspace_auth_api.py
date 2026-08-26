@@ -183,17 +183,6 @@ def _attach_anon_session_cookie(*, response: Response, request: Request, token: 
     )
 
 
-def _target_can_import_guest_drafts(target_org_id: str) -> bool:
-    """Import guest drafts into a workspace only after Pro entitlement."""
-    from backend.usage_economics.commercial_entitlement import (
-        STATE_PRO,
-        resolve_commercial_entitlement,
-    )
-
-    decision = resolve_commercial_entitlement(f"org:{(target_org_id or '').strip()}")
-    return str(decision.get("state") or "") == STATE_PRO
-
-
 def _migrate_drafts_for_claim(
     *,
     prev_org_id: str,
@@ -207,23 +196,12 @@ def _migrate_drafts_for_claim(
     migrated_agreements = ustore.list_agreement_ids_for_subject(from_subject)
     if not migrated_agreements:
         return []
-    if not _target_can_import_guest_drafts(target_org_id):
-        _log.info(
-            "guest_draft_import_deferred prev=%s target=%s count=%s reason=entitlement_required",
-            prev_org_id,
-            target_org_id,
-            len(migrated_agreements),
-        )
-        ustore.emit_event(
-            subject_ref=to_subject,
-            event_type="guest_draft_import_deferred",
-            payload={
-                "claim_method": claim_method,
-                "previous_org_id": prev_org_id,
-                "pending_count": len(migrated_agreements),
-            },
-        )
-        return []
+    # Always claim ownership immediately upon authentication. Entitlement checks
+    # gate what the user can DO with agreements (send, advanced features, etc.),
+    # not whether they can read their own agreements. Deferring ownership transfer
+    # until Pro entitlement breaks the auth flow: authenticated users receive 403
+    # on GET when trying to read their own agreement because ownership stayed on
+    # the anonymous org.
     claimed = ustore.record_agreements_claimed(
         agreement_ids=migrated_agreements,
         to_subject_ref=to_subject,
@@ -487,15 +465,7 @@ async def finalize_auth(request: Request, body: FinalizeAuthIn) -> Dict[str, Any
     if cont_row.get("agreement_id"):
         owner = ustore.owner_subject_for_agreement(str(cont_row["agreement_id"]))
         if owner and owner != f"org:{org_id}":
-            # Guest import may be deferred until Genesis/Pro; ownership stays on prev org.
-            deferred_ok = (
-                bool(prev_org)
-                and not migrated
-                and owner == f"org:{prev_org}"
-                and not _target_can_import_guest_drafts(org_id)
-            )
-            if not deferred_ok:
-                raise HTTPException(status_code=403, detail={"code": "post_claim_agreement_mismatch"})
+            raise HTTPException(status_code=403, detail={"code": "post_claim_agreement_mismatch"})
 
     return {
         "ok": True,

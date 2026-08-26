@@ -52,12 +52,20 @@ def isolated_usage(tmp_path, monkeypatch: pytest.MonkeyPatch, auth_secrets):
     reset_anonymous_session_store_for_tests()
 
 
-def test_bind_user_org_defers_guest_import_without_entitlement(isolated_usage):
-    """Guest drafts stay on the anon org until Genesis Dog or Pro is granted."""
+def test_bind_user_org_claims_drafts_immediately_without_entitlement(isolated_usage):
+    """Guest drafts are claimed immediately upon authentication.
+
+    Ownership transfer must not be deferred until Pro entitlement. Deferring
+    ownership breaks the auth flow: authenticated users receive 403 on GET when
+    trying to read their own agreement because ownership stayed on anon org.
+    Entitlement checks gate what the user can DO with agreements (send, advanced
+    features, etc.), not whether they can read their own agreements.
+    """
     client = TestClient(app)
     anon_org, token, headers = mint_anonymous_session(client)
-    user_id = "supabase-user-anon-deferred"
-    aid = f"ag-anon-defer-{uuid.uuid4().hex[:8]}"
+    user_id = "supabase-user-anon-immediate"
+    stable_org = f"user-{user_id}"
+    aid = f"ag-anon-immed-{uuid.uuid4().hex[:8]}"
 
     isolated_usage.insert_agreement_owner(
         agreement_id=aid,
@@ -76,10 +84,14 @@ def test_bind_user_org_defers_guest_import_without_entitlement(isolated_usage):
     )
     assert res.status_code == 200, res.text
     body = res.json()
-    assert body["migrated_agreement_count"] == 0
+    assert body["org_id"] == stable_org
+    assert body["migrated_agreement_count"] == 1
+    assert aid in body["migrated_agreement_ids"]
     row = isolated_usage.get_agreement_owner_row(aid)
     assert row is not None
-    assert row["subject_ref"] == f"org:{anon_org}"
+    assert row["subject_ref"] == f"org:{stable_org}"
+    assert row.get("claim_method") == "google"
+    assert row.get("anonymous_source_org") == anon_org
 
 
 def test_bind_user_org_migrates_drafts_from_anon_org(isolated_usage):
