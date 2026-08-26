@@ -13,8 +13,8 @@ import { isAuthoritativeLegalEntityName } from "./paidProPartyNamePreserve";
 import { isPlaceholderPartyName } from "./starterPartyLimits";
 
 const GOV_LAW_RE =
-  /\b(?:Governing\s+law|governed\s+by(?:\s+the\s+laws?\s+of)?|laws?\s+of)\s*[:\-]?\s*([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)?|[A-Z]{2})\b/;
-const GOV_LAW_LABEL_RE = /\bGoverning\s+law\s*:\s*([A-Za-z][A-Za-z\s]{1,40})/i;
+  /\b(?:governing\s+law|governed\s+by(?:\s+the\s+laws?\s+of)?|laws?\s+of)\s*[:\-]?\s*([A-Za-z][a-zA-Z]+(?:\s+[A-Za-z][a-zA-Z]+)?|[A-Z]{2})\b/i;
+const GOV_LAW_LABEL_RE = /\bgoverning\s+law\s*:\s*([A-Za-z][A-Za-z\s]{1,40})/i;
 
 /** Role / legacy brackets mapped by ordered slot index (0-based). */
 const ROLE_BRACKET_RES_BY_INDEX: ReadonlyArray<readonly RegExp[]> = [

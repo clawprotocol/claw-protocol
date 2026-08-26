@@ -129,6 +129,16 @@ const FAMILY_CASES: FamilyCase[] = [
     feeNeedle: /\$18k|18k/i,
     termNeedle: /12\s*-?\s*month/i,
   },
+  {
+    family: "hiring_pattern",
+    intake:
+      "Priya Shah of Northline Studio is hiring Diego Alvarez of Harbor Marks LLC to design a logo and brand kit for $2,400, term 30 days, governing law Texas.",
+    party0: "Northline Studio",
+    party1: "Harbor Marks LLC",
+    law: "Texas",
+    feeNeedle: /\$2,400|2,400/,
+    termNeedle: /30\s*-?\s*day/i,
+  },
 ];
 
 function demoCorpusWithExtraNotices(_party0: string, _party1: string, law: string): string {
@@ -368,6 +378,8 @@ describe("universal GTM party authority (all agreement families)", () => {
     { law: "Delaware", intake: "Draft a mutual NDA between Cedar Ridge LLC and Maple Grove Inc for 2 years. Governing law: Delaware." },
     { law: "California", intake: "Draft a mutual NDA between Cedar Ridge LLC and Maple Grove Inc for 2 years. Governing law: California." },
     { law: "Texas", intake: "Draft a mutual NDA between Cedar Ridge LLC and Maple Grove Inc for 2 years. Governing law: Texas." },
+    { law: "Texas", intake: "Draft a mutual NDA between Cedar Ridge LLC and Maple Grove Inc for 2 years. governing law Texas." },
+    { law: "Texas", intake: "Draft a mutual NDA between Cedar Ridge LLC and Maple Grove Inc for 2 years, governing law: Texas." },
   ])("governing law $law fills [State] from intake", ({ law, intake }) => {
     expect(assessAgreementIntakeCapability(intake).ok).toBe(true);
     expect(extractGoverningLawFromIntake(intake)).toBe(law);
