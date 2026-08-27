@@ -25,6 +25,55 @@ export function shouldMintNewDraftForConversion(existingId: string | null | unde
   return !isRealCheckoutAgreementId(existingId);
 }
 
+/**
+ * After React/auth remount, Google, route transition, or checkout prep:
+ * reuse the canonical persist/resume ID. Never mint a replacement draft
+ * when that ID exists — even if a pending remint receipt points elsewhere.
+ */
+export function resolveAgreementIdAfterAuthRemount(args: {
+  reactRefId?: string | null;
+  resumeId?: string | null;
+  preAuthId?: string | null;
+  pendingReceiptCanonicalId?: string | null;
+}): { agreementId: string | null; mustMint: boolean } {
+  const persist = resolveExistingConversionAgreementId({
+    reviewAgreementId: args.reactRefId,
+    resumeId: args.resumeId,
+    preAuthId: args.preAuthId,
+  });
+  if (persist) {
+    return { agreementId: persist, mustMint: false };
+  }
+  const receipt = (args.pendingReceiptCanonicalId || "").trim();
+  if (isRealCheckoutAgreementId(receipt)) {
+    return { agreementId: receipt, mustMint: false };
+  }
+  return { agreementId: null, mustMint: true };
+}
+
+/** First persist is the only mint. Remount / Google / checkout prep must not increment. */
+export function countConversionDraftMintsAfterFirstPersist(
+  firstPersistId: string,
+  remounts: Array<{
+    reactRefId?: string | null;
+    resumeId?: string | null;
+    preAuthId?: string | null;
+    pendingReceiptCanonicalId?: string | null;
+  }>,
+): { mintCount: number; agreementId: string } {
+  let extra = 0;
+  for (const step of remounts) {
+    const decision = resolveAgreementIdAfterAuthRemount({
+      reactRefId: step.reactRefId,
+      resumeId: step.resumeId ?? firstPersistId,
+      preAuthId: step.preAuthId ?? firstPersistId,
+      pendingReceiptCanonicalId: step.pendingReceiptCanonicalId,
+    });
+    if (decision.mustMint || decision.agreementId !== firstPersistId) extra += 1;
+  }
+  return { mintCount: 1 + extra, agreementId: firstPersistId };
+}
+
 export function isRealCheckoutAgreementId(id: string | null | undefined): boolean {
   const aid = (id || "").trim();
   return Boolean(aid) && aid !== CREATE_FLOW_CHECKOUT_AGREEMENT_ID;

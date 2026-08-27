@@ -881,6 +881,7 @@ import {
   rememberPreAuthCheckoutAgreementId,
   readPreAuthCheckoutAgreementId,
   resolveExistingConversionAgreementId,
+  resolveAgreementIdAfterAuthRemount,
   shouldMintNewDraftForConversion,
 } from "../../auth/preAuthCheckoutAgreement";
 import {
@@ -5722,26 +5723,18 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
   /** Create (or reuse) the persisted agreement row for review refine / inline field updates. Dedupes concurrent callers. */
   const ensureReviewAgreementWorkspaceId = React.useCallback(async (): Promise<string | null> => {
-    const pendingReceipt = readOwnershipMigrationReceipt();
-    if (pendingReceipt) {
-      const canonical = pendingReceipt.canonicalAgreementId.trim();
-      reviewAgreementIdRef.current = canonical;
-      setReviewAgreementId(canonical);
-      writeCreateReviewAgreementResumeId(canonical);
-      rememberPreAuthCheckoutAgreementId(canonical);
-      return canonical;
-    }
-    const existingConversionId = resolveExistingConversionAgreementId({
-      reviewAgreementId: reviewAgreementIdRef.current,
+    const remount = resolveAgreementIdAfterAuthRemount({
+      reactRefId: reviewAgreementIdRef.current,
       resumeId: readCreateReviewAgreementResumeId(),
       preAuthId: readPreAuthCheckoutAgreementId(),
+      pendingReceiptCanonicalId: readOwnershipMigrationReceipt()?.canonicalAgreementId,
     });
-    if (existingConversionId && !isSupersededAgreementId(existingConversionId)) {
-      reviewAgreementIdRef.current = existingConversionId;
-      writeCreateReviewAgreementResumeId(existingConversionId);
-      rememberPreAuthCheckoutAgreementId(existingConversionId);
-      setReviewAgreementId(existingConversionId);
-      return existingConversionId;
+    if (remount.agreementId && !remount.mustMint) {
+      reviewAgreementIdRef.current = remount.agreementId;
+      writeCreateReviewAgreementResumeId(remount.agreementId);
+      rememberPreAuthCheckoutAgreementId(remount.agreementId);
+      setReviewAgreementId(remount.agreementId);
+      return remount.agreementId;
     }
     const cached = reviewAgreementIdRef.current?.trim();
     if (cached && isSupersededAgreementId(cached)) {

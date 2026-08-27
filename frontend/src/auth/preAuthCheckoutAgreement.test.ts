@@ -3,9 +3,11 @@ import { beforeEach, describe, expect, it } from "vitest";
 import {
   applyClaimedAgreementIdsToPreAuth,
   clearPreAuthCheckoutAgreementId,
+  countConversionDraftMintsAfterFirstPersist,
   pinCheckoutPathToPreAuthAgreement,
   readPreAuthCheckoutAgreementId,
   rememberPreAuthCheckoutAgreementId,
+  resolveAgreementIdAfterAuthRemount,
   resolveExistingConversionAgreementId,
   shouldMintNewDraftForConversion,
 } from "./preAuthCheckoutAgreement";
@@ -56,5 +58,37 @@ describe("preAuthCheckoutAgreement", () => {
     expect(applyClaimedAgreementIdsToPreAuth([GUEST])).toBe(GUEST);
     expect(readPreAuthCheckoutAgreementId()).toBe(GUEST);
     expect(applyClaimedAgreementIdsToPreAuth([STALE])).toBe(GUEST);
+  });
+
+  it("reuses persist/resume after remount even when a remint receipt exists", () => {
+    const remount = resolveAgreementIdAfterAuthRemount({
+      reactRefId: null,
+      resumeId: GUEST,
+      preAuthId: GUEST,
+      pendingReceiptCanonicalId: STALE,
+    });
+    expect(remount).toEqual({ agreementId: GUEST, mustMint: false });
+    expect(shouldMintNewDraftForConversion(remount.agreementId)).toBe(false);
+  });
+
+  it("does not mint a second UUID when only resume survives remount", () => {
+    const remount = resolveAgreementIdAfterAuthRemount({
+      reactRefId: null,
+      resumeId: GUEST,
+      preAuthId: null,
+      pendingReceiptCanonicalId: STALE,
+    });
+    expect(remount.mustMint).toBe(false);
+    expect(remount.agreementId).toBe(GUEST);
+  });
+
+  it("mints exactly once on persist then remount then Google then checkout prep", () => {
+    const journey = countConversionDraftMintsAfterFirstPersist(GUEST, [
+      { reactRefId: null, resumeId: GUEST, preAuthId: GUEST },
+      { reactRefId: null, resumeId: GUEST, preAuthId: GUEST, pendingReceiptCanonicalId: STALE },
+      { reactRefId: STALE, resumeId: GUEST, preAuthId: GUEST, pendingReceiptCanonicalId: STALE },
+    ]);
+    expect(journey.mintCount).toBe(1);
+    expect(journey.agreementId).toBe(GUEST);
   });
 });
