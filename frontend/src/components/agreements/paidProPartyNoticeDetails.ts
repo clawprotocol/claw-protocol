@@ -636,29 +636,38 @@ function authorityPartyLegalNames(parties: readonly PaidProSignerMetadataParty[]
   return parties.map((p) => p.partyLegalName.trim()).filter((n) => n.length >= 3);
 }
 
-/** True when an If-to heading concatenates another known legal party (live two-stanza regen). */
+/**
+ * True when an If-to heading concatenates another known legal party (live two-stanza regen).
+ * Must not treat a clean single-party heading as fused: checking residue against *every*
+ * authority name would see the heading's own party in the other-names list.
+ */
 function noticesRegionHasFusedPartyIfToHeading(
   region: string,
   authorityParties: readonly PaidProSignerMetadataParty[],
 ): boolean {
   const names = authorityPartyLegalNames(authorityParties);
   if (names.length < 2) return false;
+  const longestFirst = [...names].sort((a, b) => b.length - a.length);
   return (region || "")
     .split(/\n(?=If to\s+)/i)
     .slice(1)
     .some((stanza) => {
       const heading = noticeStanzaHeadingLegalEntity(stanza);
       if (!heading) return false;
-      return names.some((legal) => noticeHeadingContainsForeignPartyResidue(heading, legal, names));
+      let remainder = heading;
+      let hits = 0;
+      for (const legal of longestFirst) {
+        if (!remainder.toLowerCase().includes(legal.toLowerCase())) continue;
+        hits += 1;
+        remainder = remainder
+          .replace(new RegExp(escapeRegExp(legal), "ig"), " ")
+          .replace(/\s+/g, " ")
+          .trim();
+      }
+      return hits >= 2 || (hits === 1 && remainder.length >= 3);
     });
 }
 
-function noticesRegionHasAddressPollution(region: string): boolean {
-  return (region || "")
-    .split(/\n(?=If to\s+)/i)
-    .slice(1)
-    .some((stanza) => noticeStanzaHasAddressPollution(stanza));
-}
 
 function enrichNoticeAuthorityParties(
   parties: readonly PaidProSignerMetadataParty[],
@@ -2329,8 +2338,7 @@ export function repairIncompleteIfToNoticeStanzas(
       !NOTICE_PLACEHOLDER_TOKEN_RE.test(fullNoticesRegionEarly) &&
       !noticesRegionHasExecutionPollution(fullNoticesRegionEarly) &&
       !hasInlineMalformedNoticeStanzas(fullNoticesRegionEarly) &&
-      !noticesRegionHasFusedPartyIfToHeading(fullNoticesRegionEarly, authorityParties) &&
-      !noticesRegionHasAddressPollution(fullNoticesRegionEarly)
+      !noticesRegionHasFusedPartyIfToHeading(fullNoticesRegionEarly, authorityParties)
     ) {
       const addressRepair = repairNoticeStanzaAddressBoundariesInCorpus(text);
       if (addressRepair.repairs.length > 0) {
@@ -2780,7 +2788,6 @@ export function ensureOperativeIfToNoticeDelivery(
     ) {
       return true;
     }
-    if (noticeStanzaHasAddressPollution(stanza)) return true;
     const email = party.signerEmail.trim();
     if (email && !noticeStanzaComplete(stanza, party)) return true;
     const addr = party.partyAddress.trim();
@@ -2814,7 +2821,6 @@ export function ensureOperativeIfToNoticeDelivery(
   const operativeStanzaCount = countOperativeIfToStanzasInRegion(noticesRegion);
   const stanzaCountMismatch = operativeStanzaCount < authorityParties.length;
   const hasFusedIfToHeading = noticesRegionHasFusedPartyIfToHeading(noticesRegion, authorityParties);
-  const hasAddressPollution = noticesRegionHasAddressPollution(noticesRegion);
   if (
     !missing &&
     !stanzaCountMismatch &&
@@ -2822,8 +2828,7 @@ export function ensureOperativeIfToNoticeDelivery(
     !hasExecutionPollution &&
     !hasInlineMalformedNotices &&
     !hasBareNoticeStanzas &&
-    !hasFusedIfToHeading &&
-    !hasAddressPollution
+    !hasFusedIfToHeading
   ) {
     const addressRepair = repairNoticeStanzaAddressBoundariesInCorpus(corpus);
     const baseText = addressRepair.repairs.length > 0 ? addressRepair.text : corpus;

@@ -89,6 +89,21 @@ describe("TEST486 — final notice address stops at instructional prose", () => 
     expect(addresses[3]).toBe(TEST486_FOUR_PARTY[3]!.address);
   });
 
+  it("empty-address authority keeps independent If-to headings and sanitizes postal lines in place", () => {
+    const parties = test486Parties().map((party) => ({
+      ...party,
+      signerEmail: "",
+      partyAddress: "",
+    }));
+    const corpus = buildTest486CorruptedFinalNoticeCorpus();
+    const out = ensureOperativeIfToNoticeDelivery(corpus, parties);
+    const addresses = extractPartyAddressesFromOperativeNoticeStanzas(out.text);
+    expect(addresses[3]).toBe(TEST486_FOUR_PARTY[3]!.address);
+    expect(out.text).toMatch(new RegExp(`If to ${TEST486_VECTOR}\\s*:`, "i"));
+    expect(out.text).toMatch(new RegExp(`If to ${TEST486_FORTIS}\\s*:`, "i"));
+    expect(out.text).not.toMatch(/Address:\s[^\n]*Each party should/i);
+  });
+
   it("notice contact authority leaves only clean postal addresses in operative stanzas", () => {
     const corpus = buildTest486CorruptedFinalNoticeCorpus();
     const out = applyPaidProNoticeContactAuthority(corpus, {
