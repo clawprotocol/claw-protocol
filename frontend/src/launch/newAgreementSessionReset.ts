@@ -4,6 +4,7 @@
  */
 
 import { clearAgreementCreatorIntakeStorage, clearCreateReviewAgreementResumeId, clearCreateReviewDraftReadyMarker, readCreateReviewAgreementResumeId } from "../components/agreements/agreementIntakeStorage";
+import { clearPreAuthCheckoutAgreementId, PRE_AUTH_CHECKOUT_AGREEMENT_STORAGE_KEY } from "../auth/preAuthCheckoutAgreement";
 import { clearAuthoritativeSigningSnapshot } from "../components/agreements/authoritativeSigningSnapshot";
 import { clearFrozenCanonicalAgreementCorpus } from "../components/agreements/canonicalAgreementSnapshot";
 import { clearPaidProPinnedSignerAppliedCorpus } from "../components/agreements/paidProFinalHydratedCorpus";
@@ -78,6 +79,7 @@ const SESSION_PREFIXES_TO_CLEAR = [
   "lawdog_entry_context",
   "lawdog_focus_create_intake",
   REVIEW_DELIVERY_HANDOFF_NOTICE_KEY,
+  PRE_AUTH_CHECKOUT_AGREEMENT_STORAGE_KEY,
 ] as const;
 
 function clearMatchingSessionStoragePrefixes(prefixes: readonly string[]): string[] {
@@ -167,6 +169,7 @@ export function initializeNewAgreementSession(opts?: {
   const clearedSessionKeys = clearMatchingSessionStoragePrefixes(SESSION_PREFIXES_TO_CLEAR);
   clearAgreementCreatorIntakeStorage();
   clearCreateReviewAgreementResumeId();
+  clearPreAuthCheckoutAgreementId();
   clearCreateReviewDraftReadyMarker();
   // Prior "Complete signer details" arms this latch; Create new must never inherit it.
   clearCreatorDashboardSignerSetupResume();

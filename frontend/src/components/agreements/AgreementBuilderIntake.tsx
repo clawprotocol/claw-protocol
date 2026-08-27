@@ -877,7 +877,12 @@ import {
   readOwnershipMigrationReceipt,
   shouldBlockDraftWriteForOwnershipTransition,
 } from "../../auth/ownershipMigrationFinalize";
-import { rememberPreAuthCheckoutAgreementId, readPreAuthCheckoutAgreementId } from "../../auth/preAuthCheckoutAgreement";
+import {
+  rememberPreAuthCheckoutAgreementId,
+  readPreAuthCheckoutAgreementId,
+  resolveExistingConversionAgreementId,
+  shouldMintNewDraftForConversion,
+} from "../../auth/preAuthCheckoutAgreement";
 import {
   logPaidProReviewAuthorityResolved,
   resolvePaidProReviewAuthority,
@@ -5573,6 +5578,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     partyNameContext?: string,
     options?: { reviewFirstHandoffPersist?: boolean },
   ): Promise<{ id: string; postDraft: AgreementDraft | null }> {
+    const existingConversionId = resolveExistingConversionAgreementId({
+      reviewAgreementId: reviewAgreementIdRef.current,
+      resumeId: readCreateReviewAgreementResumeId(),
+      preAuthId: readPreAuthCheckoutAgreementId(),
+    });
+    if (!shouldMintNewDraftForConversion(existingConversionId) && existingConversionId) {
+      rememberPreAuthCheckoutAgreementId(existingConversionId);
+      return { id: existingConversionId, postDraft: null };
+    }
     const reviewFirstHandoffPersist = Boolean(options?.reviewFirstHandoffPersist);
     const merged = mergeParsedForApiPersist(parsed);
     const persistPurpose = longestPlainForAgreementPersist(merged, agreementDocumentTextRef.current).trim() || merged.purpose;
@@ -5714,7 +5728,20 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       reviewAgreementIdRef.current = canonical;
       setReviewAgreementId(canonical);
       writeCreateReviewAgreementResumeId(canonical);
+      rememberPreAuthCheckoutAgreementId(canonical);
       return canonical;
+    }
+    const existingConversionId = resolveExistingConversionAgreementId({
+      reviewAgreementId: reviewAgreementIdRef.current,
+      resumeId: readCreateReviewAgreementResumeId(),
+      preAuthId: readPreAuthCheckoutAgreementId(),
+    });
+    if (existingConversionId && !isSupersededAgreementId(existingConversionId)) {
+      reviewAgreementIdRef.current = existingConversionId;
+      writeCreateReviewAgreementResumeId(existingConversionId);
+      rememberPreAuthCheckoutAgreementId(existingConversionId);
+      setReviewAgreementId(existingConversionId);
+      return existingConversionId;
     }
     const cached = reviewAgreementIdRef.current?.trim();
     if (cached && isSupersededAgreementId(cached)) {
@@ -7115,8 +7142,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     const mergedIntake = buildPremiumMergedIntakeWithUserNotes(raw, pendingUpgradePromptRef.current.trim());
     premiumGapBaseIntakeRef.current = mergedIntake;
     const sessionGenForPass = getOrInitSessionAgreementGenerationId();
-    let agreementIdForPass =
-      (reviewAgreementIdRef.current || readCreateReviewAgreementResumeId() || "").trim() || null;
+    let agreementIdForPass = resolveExistingConversionAgreementId({
+      reviewAgreementId: reviewAgreementIdRef.current,
+      resumeId: readCreateReviewAgreementResumeId(),
+      preAuthId: readPreAuthCheckoutAgreementId(),
+    });
     // Genesis / entitled create often has no prior draft id. Without minting one here, freeze can
     // succeed with a full Pro corpus and still land on Retry Pro draft (documentMounted=false)
     // because prepareCommercialReviewSnapshotAuthority requires an agreement id.
@@ -9640,11 +9670,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           };
           // Commercial: await server GET authority before any review/send unlock or corpus paint.
           // Never fire-and-forget unlock from local pipeline bytes (that left SoT live with blank paint).
-          let agreementIdForSnapshot = (
-            reviewAgreementIdRef.current ||
-            readCreateReviewAgreementResumeId() ||
-            ""
-          ).trim();
+          let agreementIdForSnapshot = resolveExistingConversionAgreementId({
+            reviewAgreementId: reviewAgreementIdRef.current,
+            resumeId: readCreateReviewAgreementResumeId(),
+            preAuthId: readPreAuthCheckoutAgreementId(),
+          }) || "";
           if (!agreementIdForSnapshot && snapshotPlain.trim().length >= 500) {
             try {
               const minted = await postNewDraft(mergedDraftPersist, mergedIntake, {
@@ -13077,7 +13107,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     try {
       /** Clear stale save/hydrate errors before a new persist attempt (e.g. prior basic_parse_timeout then retry). */
       setHardError(null);
-      const existingId = reviewAgreementIdRef.current?.trim();
+      const existingId = resolveExistingConversionAgreementId({
+        reviewAgreementId: reviewAgreementIdRef.current,
+        resumeId: readCreateReviewAgreementResumeId(),
+        preAuthId: readPreAuthCheckoutAgreementId(),
+      });
       let id: string;
       let postDraft: AgreementDraft | null;
       if (existingId) {
@@ -17558,7 +17592,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     if (createFlowDraftPersistError) return;
     if (
       !shouldAutoPersistReviewAgreementRow({
-        hasReviewAgreementId: Boolean(reviewAgreementId?.trim()),
+        hasReviewAgreementId: Boolean(
+          reviewAgreementId?.trim() ||
+            readCreateReviewAgreementResumeId() ||
+            readPreAuthCheckoutAgreementId(),
+        ),
         skipFreeStarterCreateSubmit: skipFreeStarter,
         qualityRetryActive: proFullDraftQualityRetry,
         draft,

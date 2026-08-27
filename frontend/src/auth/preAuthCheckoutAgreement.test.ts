@@ -6,6 +6,8 @@ import {
   pinCheckoutPathToPreAuthAgreement,
   readPreAuthCheckoutAgreementId,
   rememberPreAuthCheckoutAgreementId,
+  resolveExistingConversionAgreementId,
+  shouldMintNewDraftForConversion,
 } from "./preAuthCheckoutAgreement";
 
 const GUEST = "5e79c874-91bd-4d43-95f1-80a827e8b26a";
@@ -28,6 +30,26 @@ describe("preAuthCheckoutAgreement", () => {
     expect(
       pinCheckoutPathToPreAuthAgreement(`/app/checkout/${STALE}?tier=pro&cadence=monthly`),
     ).toBe(`/app/checkout/${GUEST}?tier=pro&cadence=monthly`);
+  });
+
+  it("does not mint a second draft once the conversion persist exists", () => {
+    expect(
+      resolveExistingConversionAgreementId({
+        reviewAgreementId: null,
+        resumeId: GUEST,
+        preAuthId: null,
+      }),
+    ).toBe(GUEST);
+    expect(
+      resolveExistingConversionAgreementId({
+        reviewAgreementId: STALE,
+        resumeId: STALE,
+        preAuthId: GUEST,
+      }),
+    ).toBe(GUEST);
+    expect(shouldMintNewDraftForConversion(GUEST)).toBe(false);
+    expect(shouldMintNewDraftForConversion(null)).toBe(true);
+    expect(shouldMintNewDraftForConversion("__claw_create_checkout__")).toBe(true);
   });
 
   it("keeps claimed leftover persist when bind returns it after a stale dest", () => {

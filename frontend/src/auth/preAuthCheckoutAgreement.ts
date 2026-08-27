@@ -5,7 +5,25 @@
 
 import { CREATE_FLOW_CHECKOUT_AGREEMENT_ID } from "../components/agreements/agreementAdvancedDraftAccess";
 
-const STORAGE_KEY = "claw_pre_auth_checkout_agreement_id_v1";
+export const PRE_AUTH_CHECKOUT_AGREEMENT_STORAGE_KEY = "claw_pre_auth_checkout_agreement_id_v1";
+const STORAGE_KEY = PRE_AUTH_CHECKOUT_AGREEMENT_STORAGE_KEY;
+
+/** First persist on this conversion wins. Do not POST /draft again for a second UUID. */
+export function resolveExistingConversionAgreementId(args: {
+  reviewAgreementId?: string | null;
+  resumeId?: string | null;
+  preAuthId?: string | null;
+}): string | null {
+  for (const raw of [args.preAuthId, args.resumeId, args.reviewAgreementId]) {
+    const aid = (raw || "").trim();
+    if (isRealCheckoutAgreementId(aid)) return aid;
+  }
+  return null;
+}
+
+export function shouldMintNewDraftForConversion(existingId: string | null | undefined): boolean {
+  return !isRealCheckoutAgreementId(existingId);
+}
 
 export function isRealCheckoutAgreementId(id: string | null | undefined): boolean {
   const aid = (id || "").trim();
