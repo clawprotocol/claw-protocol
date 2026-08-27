@@ -1,10 +1,12 @@
 /** @vitest-environment jsdom */
-import { describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { cleanup, render, screen } from "@testing-library/react";
 import { CreateFlowAgreementCheckoutPricing } from "./CreateFlowAgreementCheckoutPricing";
 import { LAUNCH_PRICING_TIERS } from "../pricingTiersData";
 
 const pro = LAUNCH_PRICING_TIERS.find((t) => t.id === "pro")!;
+
+afterEach(() => cleanup());
 
 describe("CreateFlowAgreementCheckoutPricing", () => {
   it("states $490/year paid upfront and monthly finalized allowance", () => {
@@ -29,10 +31,12 @@ describe("CreateFlowAgreementCheckoutPricing", () => {
         onCadenceChange={vi.fn()}
       />,
     );
-    const monthlyTab = screen.getByRole("tab", { name: /monthly/i });
-    const annualTab = screen.getByRole("tab", { name: /annual/i });
-    expect(monthlyTab.getAttribute("aria-selected")).toBe("true");
-    expect(annualTab.getAttribute("aria-selected")).toBe("false");
+    const tabs = screen.getAllByRole("tab");
+    expect(tabs).toHaveLength(2);
+    expect(tabs[0].textContent).toMatch(/monthly/i);
+    expect(tabs[1].textContent).toMatch(/annual/i);
+    expect(tabs[0].getAttribute("aria-selected")).toBe("true");
+    expect(tabs[1].getAttribute("aria-selected")).toBe("false");
     expect(screen.getByText("$49")).toBeTruthy();
     expect(screen.getByText("/month")).toBeTruthy();
     expect(screen.getByText("$490")).toBeTruthy();

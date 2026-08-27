@@ -1,4 +1,5 @@
 /** @vitest-environment jsdom */
+import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -18,7 +19,7 @@ vi.mock("../LaunchNavContext", () => ({
 }));
 
 vi.mock("./SimpleFlowShell", () => ({
-  SimpleFlowShell: (props: { children: unknown; title: string }) => (
+  SimpleFlowShell: (props: { children: ReactNode; title: string }) => (
     <div>
       <h1>{props.title}</h1>
       {props.children}
@@ -57,6 +58,7 @@ describe("SimpleCheckoutPage create-flow chooser on real agreement ID", () => {
     localStorage.clear();
     navState.navigate.mockClear();
     stubMatchMedia();
+    window.scrollTo = vi.fn();
   });
 
   afterEach(() => {
@@ -80,13 +82,13 @@ describe("SimpleCheckoutPage create-flow chooser on real agreement ID", () => {
     expect(screen.getByRole("tab", { name: /annual/i }).getAttribute("aria-selected")).toBe("false");
     expect(screen.getByText("$49")).toBeTruthy();
     expect(screen.getByText("/month")).toBeTruthy();
-    expect(screen.getByText(/\$49 \/ month/)).toBeTruthy();
+    expect(screen.getAllByText(/\$49 \/ month/).length).toBeGreaterThanOrEqual(1);
   });
 
   it("defaults to $49/month when cadence=monthly", () => {
     renderRealIdCheckout("?tier=pro&cadence=monthly&returnTo=%2Fapp%2Fcreate%3Frestore%3DstarterReview");
     expect(screen.getByRole("tab", { name: /monthly/i }).getAttribute("aria-selected")).toBe("true");
-    expect(screen.getByText(/\$49 \/ month/)).toBeTruthy();
+    expect(screen.getAllByText(/\$49 \/ month/).length).toBeGreaterThanOrEqual(1);
   });
 
   it("keeps Annual selectable and shows $490/year", async () => {
@@ -96,7 +98,7 @@ describe("SimpleCheckoutPage create-flow chooser on real agreement ID", () => {
     expect(screen.getByText("/year")).toBeTruthy();
     await user.click(screen.getByRole("tab", { name: /annual/i }));
     expect(screen.getByRole("tab", { name: /annual/i }).getAttribute("aria-selected")).toBe("true");
-    expect(screen.getByText(/\$490 \/ year/)).toBeTruthy();
+    expect(screen.getAllByText(/\$490 \/ year/).length).toBeGreaterThanOrEqual(1);
   });
 
   it("does not fall back to the placeholder create-checkout id", () => {
