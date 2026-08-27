@@ -612,11 +612,18 @@ function resolveCanonicalNoticeAuthorityParties(
 function noticeHeadingContainsForeignPartyResidue(
   headingEntity: string,
   partyLegalName: string,
+  otherPartyNames: readonly string[] = [],
 ): boolean {
   const heading = headingEntity.replace(/\s+/g, " ").trim();
   const legal = partyLegalName.replace(/\s+/g, " ").trim();
   if (!heading || !legal || heading.length < 3) return false;
   if (heading.toLowerCase() === legal.toLowerCase()) return false;
+  const others = otherPartyNames
+    .map((n) => n.replace(/\s+/g, " ").trim())
+    .filter((n) => n.length >= 3 && n.toLowerCase() !== legal.toLowerCase());
+  if (others.some((other) => heading.toLowerCase().includes(other.toLowerCase()))) {
+    return true;
+  }
   if (!heading.toLowerCase().includes(legal.toLowerCase())) return false;
   const remainder = heading
     .replace(new RegExp(escapeRegExp(legal), "ig"), " ")
@@ -1988,7 +1995,13 @@ function findExistingNoticeStanzaForParty(
       const stanza = existingStanzas[j] ?? "";
       const headingEntity = noticeStanzaHeadingLegalEntity(stanza);
       if (headingEntity.length >= 2 && partyLegalNamesMatch(headingEntity, legal)) {
-        if (noticeHeadingContainsForeignPartyResidue(headingEntity, legal)) {
+        if (
+          noticeHeadingContainsForeignPartyResidue(
+            headingEntity,
+            legal,
+            authorityParties.map((p) => p.partyLegalName),
+          )
+        ) {
           continue;
         }
         consumedStanzaIndexes.add(j);

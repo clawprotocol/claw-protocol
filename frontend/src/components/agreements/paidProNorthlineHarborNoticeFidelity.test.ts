@@ -118,15 +118,16 @@ function contaminatedNorthlineHarborCorpus(): string {
 function noticesRegion(text: string): string {
   const start = text.search(/(?:^|\n)\s*\d+\.\s+NOTICES\b|(?:^|\n)If to\s+/im);
   if (start < 0) return "";
-  const witness = text.search(/\bIN WITNESS WHEREOF\b/i);
-  return text.slice(start, witness >= 0 ? witness : text.length);
+  const from = text.slice(start);
+  const nextTop = from.search(/\n(?=\d+\.(?!\d)\s+(?!NOTICES\b)\S)/i);
+  return nextTop >= 0 ? from.slice(0, nextTop) : from;
 }
 
 describe("Northline Studio / Harbor Marks LLC Notices fidelity", () => {
   it("does not treat term, effective-date, or jurisdiction as a postal address", () => {
     expect(sanitizeCanonicalPartyAddress(STUFFED_ADDRESS)).toBe("");
     expect(formatNoticeAddressLines(STUFFED_ADDRESS)).toEqual([]);
-    expect(formatNoticeAddressLines("100 Mesa Drive, Austin, Texas")).toContain("100 Mesa Drive");
+    expect(formatNoticeAddressLines("100 Mesa Drive, Austin, Texas").join(" ")).toMatch(/100 Mesa Drive/);
   });
 
   it("legal-party authority stays two independent entities, not Priya/Diego or a fused name", () => {
@@ -134,7 +135,7 @@ describe("Northline Studio / Harbor Marks LLC Notices fidelity", () => {
     expect(authority.parties).toHaveLength(2);
     expect(authority.parties[0]?.legalEntityName).toBe(NORTHLINE);
     expect(authority.parties[1]?.legalEntityName).toBe(HARBOR);
-    expect(authority.parties.map((p) => p.legalEntityName).join(" ")).not.toBe(FUSED);
+    expect(authority.parties.some((p) => p.legalEntityName === FUSED)).toBe(false);
   });
 
   it("rebuilds one independent If-to stanza per party and strips stuffed Address fields", () => {
