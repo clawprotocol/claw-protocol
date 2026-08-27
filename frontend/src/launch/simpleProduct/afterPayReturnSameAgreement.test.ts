@@ -29,7 +29,7 @@ describe("after-pay last-good handoff (static)", () => {
   it("intake still runs last-good Pro generation on premiumCompletion, same persist via resume", () => {
     const effectIdx = intake.indexOf("After create-flow checkout: premium completion");
     expect(effectIdx).toBeGreaterThan(-1);
-    const effect = intake.slice(effectIdx, effectIdx + 5200);
+    const effect = intake.slice(effectIdx, intake.indexOf("const upgradeContextReasons", effectIdx));
     expect(effect).toContain('url.searchParams.get("premiumCompletion") === "1"');
     expect(effect).toContain("readCreateReviewAgreementResumeId");
     expect(effect).toContain("isAfterPayPremiumCompletionReturn");

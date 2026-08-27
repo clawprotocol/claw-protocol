@@ -148,7 +148,7 @@ describe("after-pay intake wiring (static)", () => {
   it("post-checkout effect awaits verify and does not strip premiumCompletion for missing demo grant on Stripe return", () => {
     const effectIdx = intake.indexOf("After create-flow checkout: premium completion");
     expect(effectIdx).toBeGreaterThan(-1);
-    const effect = intake.slice(effectIdx, effectIdx + 5200);
+    const effect = intake.slice(effectIdx, intake.indexOf("const upgradeContextReasons", effectIdx));
     expect(effect).toContain("isAfterPayPremiumCompletionReturn");
     expect(effect).toContain("shouldRefuseAfterPayPremiumCompletionForMissingGrant");
     expect(effect).toContain("handleCheckoutReturnEntitlement");
