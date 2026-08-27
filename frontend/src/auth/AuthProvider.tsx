@@ -24,6 +24,8 @@ export type AuthSignInOpts = {
   stagingDirectOnly?: boolean;
   /** Allowlisted internal path (e.g. `/app/create?ref=CODE`). Overrides returning `/app` default. */
   destinationPath?: string;
+  /** Pre-auth checkout / persist agreement id — claimed on return, never reminted. */
+  agreementId?: string;
 };
 
 export type AuthContextValue = {
@@ -138,6 +140,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         returningSignIn: opts?.returningSignIn,
         workflowStage: opts?.returningSignIn ? "dashboard" : "claim",
         destinationPath: resolveSignInDestination(opts),
+        agreementId: opts?.agreementId,
         provider: "email",
       });
       return signInWithEmailMagicLink(email, buildAuthCallbackUrl(undefined, continuationId), {
@@ -153,6 +156,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         returningSignIn: opts?.returningSignIn,
         workflowStage: opts?.returningSignIn ? "dashboard" : "claim",
         destinationPath: resolveSignInDestination(opts),
+        agreementId: opts?.agreementId,
         provider: "google",
       });
       await signInWithGoogle(buildAuthCallbackUrl(undefined, continuationId));

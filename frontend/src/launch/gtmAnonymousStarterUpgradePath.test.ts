@@ -283,7 +283,7 @@ describe("GTM blocker — anonymous Starter → Upgrade → Pro", () => {
       expect(homePageSrc).toContain("stashHeroIntakePrefill(pending");
       expect(homePageSrc).toContain('{user ? "Dashboard" : "Sign in"}');
       expect(homePageSrc).toMatch(/user\s*\?\s*[\s\S]*navigate\("\/app"\)/);
-      expect(signInSrc).toContain("returningSignIn: true");
+      expect(signInSrc).toContain("resolveSignInContinuationOpts");
       expect(signInSrc).toContain("Sign in to LawDog");
     });
 

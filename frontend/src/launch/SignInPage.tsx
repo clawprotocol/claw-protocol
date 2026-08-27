@@ -12,10 +12,11 @@ import {
   CHECKOUT_SIGN_IN_BODY,
   CHECKOUT_SIGN_IN_HEADING,
   isSecureCheckoutPath,
+  resolveSignInContinuationOpts,
 } from "../auth/safeRedirectResolver";
 import { getGenesisReferralCode } from "./genesisReferral/genesisReferralCapture";
 
-/** Returning-user sign-in — lands on dashboard, or `?next=` (e.g. referral create return). */
+/** Sign-in — dashboard for returning users; checkout `?next=` claims the pre-auth agreement. */
 export function SignInPage() {
   const { navigate, search } = useLaunchNav();
   const { enabled, loading, user, signInEmail, signInGoogle } = useAuth();
@@ -26,10 +27,7 @@ export function SignInPage() {
   const destinationPath = useMemo(() => resolveSignInNextDestination(search, "/app"), [search]);
   const checkoutContinuation = isSecureCheckoutPath(destinationPath);
   const referralCode = useMemo(() => getGenesisReferralCode(), []);
-  const signInOpts = useMemo(
-    () => ({ returningSignIn: true as const, destinationPath }),
-    [destinationPath],
-  );
+  const signInOpts = useMemo(() => resolveSignInContinuationOpts(destinationPath), [destinationPath]);
 
   if (!enabled) {
     return (

@@ -32,7 +32,12 @@ from backend.security.supabase_jwt import (
     verify_supabase_access_token,
 )
 from backend.security.workspace_identity import verify_anonymous_session_from_request, extract_anonymous_session_token
-from backend.security.safe_redirect import build_destination_with_agreement, resolve_safe_redirect_path
+from backend.security.safe_redirect import (
+    CREATE_FLOW_CHECKOUT_AGREEMENT_ID,
+    build_destination_with_agreement,
+    extract_agreement_id_from_app_path,
+    resolve_safe_redirect_path,
+)
 from backend.config.deployment_runtime import claw_environment
 from backend.cors_policy import apply_cors_headers_to_response
 from backend.admin_console.store import get_admin_console_store
@@ -417,6 +422,10 @@ async def finalize_auth(request: Request, body: FinalizeAuthIn) -> Dict[str, Any
     is_returning = purpose in ("returning_sign_in", "dashboard") or str(cont_row.get("session_id") or "") == "returning"
 
     prev_org = str(cont_row.get("org_id") or "").strip()
+    # Same-tab returning Google after guest persist: claim the live anon workspace.
+    # returning_sign_in continuations store org_id="" / session_id="returning".
+    if is_returning and not prev_org and anon_row:
+        prev_org = str(anon_row.get("org_id") or "").strip()
     ensure_organization(org_id, name=user_id)
     _persist_workspace_user_identity(
         request,
@@ -428,23 +437,26 @@ async def finalize_auth(request: Request, body: FinalizeAuthIn) -> Dict[str, Any
     )
 
     migrated: list[str] = []
-    if not is_returning and prev_org and prev_org != org_id:
+    if prev_org and prev_org != org_id:
         if not anon_row:
-            raise HTTPException(status_code=401, detail={"code": "anonymous_session_required"})
-        if str(anon_row.get("session_id") or "") != str(cont_row.get("session_id") or ""):
-            raise HTTPException(status_code=403, detail={"code": "continuation_session_mismatch"})
-        _assert_claimable_previous_org(prev_org, org_id)
-        pending_before = get_usage_economics_store().list_agreement_ids_for_subject(f"org:{prev_org}")
-        migrated = _migrate_drafts_for_claim(
-            prev_org_id=prev_org,
-            target_org_id=org_id,
-            claim_method=claim_method,
-        )
-        # Keep the anon session claimable when import is deferred until Genesis/Pro.
-        if migrated or not pending_before:
-            store.mark_session_claimed(session_id=str(anon_row.get("session_id") or ""), user_id=user_id)
-    elif is_returning:
-        prev_org = ""
+            if is_returning:
+                prev_org = ""
+            else:
+                raise HTTPException(status_code=401, detail={"code": "anonymous_session_required"})
+        else:
+            if not is_returning:
+                if str(anon_row.get("session_id") or "") != str(cont_row.get("session_id") or ""):
+                    raise HTTPException(status_code=403, detail={"code": "continuation_session_mismatch"})
+            _assert_claimable_previous_org(prev_org, org_id)
+            pending_before = get_usage_economics_store().list_agreement_ids_for_subject(f"org:{prev_org}")
+            migrated = _migrate_drafts_for_claim(
+                prev_org_id=prev_org,
+                target_org_id=org_id,
+                claim_method=claim_method,
+            )
+            # Keep the anon session claimable when import is deferred until Genesis/Pro.
+            if migrated or not pending_before:
+                store.mark_session_claimed(session_id=str(anon_row.get("session_id") or ""), user_id=user_id)
 
     billing_migrated = _repair_billing_after_bind(
         user_id=user_id,
@@ -456,16 +468,35 @@ async def finalize_auth(request: Request, body: FinalizeAuthIn) -> Dict[str, Any
     )
     store.consume_continuation(continuation_id=body.continuation_id.strip(), user_id=user_id)
 
+    dest_path = str(cont_row.get("destination_path") or "/app")
+    cont_aid = str(cont_row.get("agreement_id") or "").strip()
+    if cont_aid == CREATE_FLOW_CHECKOUT_AGREEMENT_ID:
+        cont_aid = ""
+    dest_aid = extract_agreement_id_from_app_path(dest_path) or ""
+    pin_aid = ""
+    if cont_aid:
+        pin_aid = cont_aid
+    elif dest_aid and (not migrated or dest_aid in migrated):
+        pin_aid = dest_aid
+    elif migrated:
+        pin_aid = migrated[0]
+
     dest = build_destination_with_agreement(
-        destination_path=str(cont_row.get("destination_path") or "/app"),
-        agreement_id=str(cont_row.get("agreement_id") or "") or None,
+        destination_path=dest_path,
+        agreement_id=pin_aid or None,
     )
     ustore = get_usage_economics_store()
     ustore.init_schema()
-    if cont_row.get("agreement_id"):
-        owner = ustore.owner_subject_for_agreement(str(cont_row["agreement_id"]))
+    if cont_aid:
+        owner = ustore.owner_subject_for_agreement(cont_aid)
         if owner and owner != f"org:{org_id}":
-            raise HTTPException(status_code=403, detail={"code": "post_claim_agreement_mismatch"})
+            if migrated:
+                dest = build_destination_with_agreement(
+                    destination_path=dest_path,
+                    agreement_id=migrated[0],
+                )
+            else:
+                raise HTTPException(status_code=403, detail={"code": "post_claim_agreement_mismatch"})
 
     return {
         "ok": True,

@@ -2,6 +2,7 @@
  * Allowlisted internal destinations for post-auth redirect (no open redirects).
  */
 
+import { CREATE_FLOW_CHECKOUT_AGREEMENT_ID } from "../components/agreements/agreementAdvancedDraftAccess";
 import type { AuthContinuationContextV1 } from "./authContinuationContext";
 
 const ALLOWED_PREFIXES = [
@@ -40,7 +41,45 @@ export const CHECKOUT_SIGN_IN_CTA = "Sign in and continue";
 
 export function isSecureCheckoutPath(path: string): boolean {
   const p = (path || "").trim();
-  return p === "/app/checkout" || p.startsWith("/app/checkout/");
+  const noQuery = p.split("?")[0] || "";
+  return noQuery === "/app/checkout" || noQuery.startsWith("/app/checkout/");
+}
+
+/** Real checkout agreement id — never the create-flow sentinel. */
+export function extractAgreementIdFromCheckoutPath(path: string): string | null {
+  const raw = (path || "").trim();
+  const noQuery = raw.split("?")[0] || "";
+  const prefix = "/app/checkout/";
+  if (!noQuery.startsWith(prefix)) return null;
+  let id = noQuery.slice(prefix.length).split("/")[0] || "";
+  try {
+    id = decodeURIComponent(id).trim();
+  } catch {
+    id = id.trim();
+  }
+  if (!id || id === CREATE_FLOW_CHECKOUT_AGREEMENT_ID) return null;
+  return id;
+}
+
+export type SignInContinuationOpts = {
+  returningSignIn: boolean;
+  destinationPath: string;
+  agreementId?: string;
+};
+
+/**
+ * Homepage / dashboard sign-in stays returning.
+ * Checkout continuation is a claim: keep the pre-auth agreement through Google.
+ */
+export function resolveSignInContinuationOpts(destinationPath: string): SignInContinuationOpts {
+  const dest = (destinationPath || "/app").trim() || "/app";
+  const checkout = isSecureCheckoutPath(dest);
+  const agreementId = extractAgreementIdFromCheckoutPath(dest) ?? undefined;
+  return {
+    returningSignIn: !checkout,
+    destinationPath: dest,
+    ...(agreementId ? { agreementId } : {}),
+  };
 }
 
 export function buildSignInContinuationPath(pathname: string, search = ""): string {
@@ -63,9 +102,18 @@ export function resolveSignInContinuationDestination(search: string, fallback = 
 export function resolvePostAuthDestination(ctx: AuthContinuationContextV1 | null): string {
   if (!ctx) return "/app";
   const dest = resolveSafeRedirectPath(ctx.destinationPath, "/app");
-  if (ctx.agreementId && dest.startsWith("/app/create") && !dest.includes("agreementId=")) {
+  const aid = (ctx.agreementId || "").trim();
+  if (aid && dest.startsWith("/app/create") && !dest.includes("agreementId=")) {
     const sep = dest.includes("?") ? "&" : "?";
-    return `${dest}${sep}agreementId=${encodeURIComponent(ctx.agreementId)}`;
+    return `${dest}${sep}agreementId=${encodeURIComponent(aid)}`;
+  }
+  if (aid && aid !== CREATE_FLOW_CHECKOUT_AGREEMENT_ID && dest.startsWith("/app/checkout/")) {
+    const qIndex = dest.indexOf("?");
+    const query = qIndex >= 0 ? dest.slice(qIndex) : "";
+    const current = extractAgreementIdFromCheckoutPath(dest);
+    if (current !== aid) {
+      return `/app/checkout/${encodeURIComponent(aid)}${query}`;
+    }
   }
   return dest;
 }
