@@ -17,6 +17,8 @@ import {
   type PaidProFirstReviewVisibleDisplayArgs,
 } from "./paidProFirstReviewDisplayAuthority";
 import { projectPaidProVisibleTitleDisplayPlain } from "./paidProDocumentTitleOpeningRepair";
+import { resolvePaidProNoticeAuthorityPartiesForFreeze } from "./paidProNoticeContactAuthority";
+import { ensureOperativeIfToNoticeDelivery } from "./paidProPartyNoticeDetails";
 import {
   auditPaidProPostFinalizeVisibleSurface,
   logPaidProPostFinalizeVisibleSurfaceMismatch,
@@ -26,6 +28,7 @@ import { resolvePaidProPostFinalizeUserVisiblePlain } from "./paidProDisplayPlai
 import { isPaidProPostFinalizeHydratedCorpusLocked } from "./paidProSignerMetadataCommitPolicy";
 import type { VisibleProPaperDiagnosticsTrace } from "./visibleProPaperRenderBoundary";
 import { readAcceptedPipelineReviewCorpusPlain } from "./paidProAcceptedPipelineReviewCorpus";
+import { PAID_PRO_AUTHORITY_MIN_LEN } from "./paidProAuthorityConstants";
 import {
   getPaidProSourceOfTruth,
   getPaidProSourceOfTruthText,
@@ -45,6 +48,34 @@ function trimOrEmpty(s: string | null | undefined): string {
   return (s || "").trim();
 }
 
+/**
+ * Last-good address-boundary + entity-only If-to on the buyer-visible paint corpus.
+ * Persist / canonical-review-snapshot bytes do not go through
+ * projectPaidProFrozenSoTDisplayPlain (consumed-metadata-only) or
+ * resolvePaidProReviewRenderPlain. Display-only — does not rewrite SoT.
+ */
+function projectLastGoodIfToOnPaintPlain(
+  plain: string,
+  args?: PaidProFirstReviewVisibleDisplayArgs,
+): string {
+  const body = (plain || "").replace(/\r\n/g, "\n").trimEnd();
+  if (!body) return body;
+  const parties = resolvePaidProNoticeAuthorityPartiesForFreeze({
+    draft: args?.draft ?? null,
+    intakeText: args?.intakeText ?? null,
+    acceptedCorpus: body,
+  });
+  if (parties.length < 2) return body;
+  const noticed = ensureOperativeIfToNoticeDelivery(body, parties, {
+    intakeText: args?.intakeText ?? null,
+    draftPartyNames: (args?.draft?.parties ?? [])
+      .map((p) => String(p?.name ?? "").trim())
+      .filter(Boolean),
+    acceptedCorpus: body,
+  });
+  return noticed.repairs.length > 0 ? noticed.text : body;
+}
+
 export function resetPaidProVisibleDocumentShellLogsForTests(): void {
   mountedLogKeys.clear();
 }
@@ -55,7 +86,7 @@ export function resolveCanonicalPlainForVisibleShell(
   const resolution = resolvePaidProFirstReviewVisibleDisplayPlain(args);
   logTest310DisplaySource(resolution);
   const skipTitleProjection = isPaidProPostFinalizeHydratedCorpusLocked();
-  const projectedPlain =
+  const titledPlain =
     resolution.plain.length >= PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN && !skipTitleProjection
       ? projectPaidProVisibleTitleDisplayPlain(resolution.plain, {
           fallbackTitle: args.draft?.title,
@@ -63,7 +94,17 @@ export function resolveCanonicalPlainForVisibleShell(
           family: args.draft?.agreement_family,
         })
       : resolution.plain;
-  if (projectedPlain.length >= PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN) {
+  // First failing live-paint predicate: persist / canonical-review-snapshot corpus
+  // reached the preview without last-good If-to. Display-only; does not rewrite SoT.
+  const projectedPlain =
+    titledPlain.length >= PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN
+      ? projectLastGoodIfToOnPaintPlain(titledPlain, args)
+      : titledPlain;
+  const paintEligible =
+    projectedPlain.length >= PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN ||
+    (titledPlain.length >= PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN &&
+      projectedPlain.length >= PAID_PRO_AUTHORITY_MIN_LEN);
+  if (paintEligible) {
     if (projectedPlain.length >= 80) {
       logTest310BlockClassification(projectedPlain);
     }
@@ -210,7 +251,7 @@ export function PaidProVisibleDocumentShell({
     canonicalPlain.plain.length >= PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN
       ? canonicalPlain.plain
       : authoritativePlain.length >= PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN
-        ? authoritativePlain
+        ? projectLastGoodIfToOnPaintPlain(authoritativePlain, displayContextWithCanonical)
         : "";
   const paintSource =
     canonicalPlain.plain.length >= PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN
