@@ -4,7 +4,11 @@
 
 import { CREATE_FLOW_CHECKOUT_AGREEMENT_ID } from "../components/agreements/agreementAdvancedDraftAccess";
 import type { AuthContinuationContextV1 } from "./authContinuationContext";
-import { pinCheckoutPathToPreAuthAgreement, rememberPreAuthCheckoutAgreementId } from "./preAuthCheckoutAgreement";
+import {
+  pinCheckoutPathToPreAuthAgreement,
+  readPreAuthCheckoutAgreementId,
+  rememberPreAuthCheckoutAgreementId,
+} from "./preAuthCheckoutAgreement";
 
 const ALLOWED_PREFIXES = [
   "/app/create",
@@ -76,7 +80,8 @@ export function resolveSignInContinuationOpts(destinationPath: string): SignInCo
   const dest = (destinationPath || "/app").trim() || "/app";
   const checkout = isSecureCheckoutPath(dest);
   const fromPath = extractAgreementIdFromCheckoutPath(dest) ?? undefined;
-  const agreementId = rememberPreAuthCheckoutAgreementId(fromPath) ?? fromPath;
+  if (fromPath) rememberPreAuthCheckoutAgreementId(fromPath);
+  const agreementId = fromPath ? readPreAuthCheckoutAgreementId() || fromPath : undefined;
   const pinned = agreementId ? pinCheckoutPathToPreAuthAgreement(dest, agreementId) : dest;
   return {
     returningSignIn: !checkout,
