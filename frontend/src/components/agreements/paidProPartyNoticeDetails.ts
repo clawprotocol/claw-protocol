@@ -609,6 +609,22 @@ function resolveCanonicalNoticeAuthorityParties(
   return preserveSlotIndexedSignerMetadataParties(merged, base, maxParties).slice(0, maxParties);
 }
 
+function noticeHeadingContainsForeignPartyResidue(
+  headingEntity: string,
+  partyLegalName: string,
+): boolean {
+  const heading = headingEntity.replace(/\s+/g, " ").trim();
+  const legal = partyLegalName.replace(/\s+/g, " ").trim();
+  if (!heading || !legal || heading.length < 3) return false;
+  if (heading.toLowerCase() === legal.toLowerCase()) return false;
+  if (!heading.toLowerCase().includes(legal.toLowerCase())) return false;
+  const remainder = heading
+    .replace(new RegExp(escapeRegExp(legal), "ig"), " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  return remainder.length >= 3;
+}
+
 function enrichNoticeAuthorityParties(
   parties: readonly PaidProSignerMetadataParty[],
   roleContext?: PaidProPartyRoleContext | null,
@@ -618,7 +634,13 @@ function enrichNoticeAuthorityParties(
   const resolved = ensureNoticeAuthorityPartyLegalEntities(
     resolveCanonicalNoticeAuthorityParties(cappedSource, roleContext),
     roleContext,
-  );
+  ).map((party) => ({
+    ...party,
+    partyAddress: sanitizeCanonicalPartyAddress(party.partyAddress, {
+      slot: party.partyIndex,
+      source: "enrichNoticeAuthorityParties",
+    }),
+  }));
   if (intakePartyManifestIsAuthoritative(roleContext?.intakeText)) {
     return resolved.slice(0, cap);
   }
@@ -732,7 +754,8 @@ export function formatUsNoticeAddressForDisplay(address: string): string[] {
 
 /** Optional-contact display: omit missing email/address; never emit placeholder tokens. */
 export function formatNoticeAddressLines(address: string): string[] {
-  const trimmed = address.trim();
+  const sanitized = sanitizeCanonicalPartyAddress(address, { source: "formatNoticeAddressLines" });
+  const trimmed = sanitized.trim();
   if (!trimmed) return [];
   // Never re-emit pre-signer notice placeholders into finalized notice stanzas.
   if (/provided during signer setup/i.test(trimmed)) return [];
@@ -1088,7 +1111,18 @@ function resolveNoticeStanzaLegalEntity(
   roleContext?: PaidProPartyRoleContext | null,
 ): string {
   const direct = party.partyLegalName.trim();
-  if (direct.length >= 2 && isAuthoritativeLegalEntityName(direct)) return direct;
+  const otherAuthorityNames = authorityParties
+    .filter((p) => p.partyIndex !== party.partyIndex)
+    .map((p) => p.partyLegalName.trim())
+    .filter((n) => n.length >= 2);
+  const directIsConcatenated = otherAuthorityNames.some(
+    (other) =>
+      direct.toLowerCase().includes(other.toLowerCase()) &&
+      direct.toLowerCase() !== other.toLowerCase(),
+  );
+  if (direct.length >= 2 && isAuthoritativeLegalEntityName(direct) && !directIsConcatenated) {
+    return direct;
+  }
 
   // TEST539 — the immutable intake manifest is the authority for party identity. Once it resolves the
   // real legal entity for this slot, notice validation must use it and must NEVER degrade to a
@@ -1406,6 +1440,14 @@ function noticeStanzaComplete(stanza: string, party?: PaidProSignerMetadataParty
   if (noticeStanzaHasExecutionPollution(trimmed)) return false;
   if (noticeStanzaHasAddressPollution(trimmed)) return false;
   if (noticeStanzaHasRoleLabelCorruption(trimmed)) return false;
+  const headingEntity = noticeStanzaHeadingLegalEntity(trimmed);
+  if (
+    headingEntity &&
+    party?.partyLegalName &&
+    noticeHeadingContainsForeignPartyResidue(headingEntity, party.partyLegalName)
+  ) {
+    return false;
+  }
   if (DANGLING_IF_TO_RE.test(`\n${trimmed}`)) return false;
   if (/^If to\s*:\s*$/i.test(trimmed)) return false;
   // Attn/Email must be real field lines — not fused into the If-to header ("If to Alex Rivera Attn:").
@@ -1417,7 +1459,9 @@ function noticeStanzaComplete(stanza: string, party?: PaidProSignerMetadataParty
     if (!hasEmailLine) return false;
     if (!trimmed.toLowerCase().includes(requiredEmail.toLowerCase())) return false;
   }
-  const requiredAddress = party?.partyAddress?.trim() ?? "";
+  const requiredAddress = sanitizeCanonicalPartyAddress(party?.partyAddress, {
+    source: "noticeStanzaComplete",
+  });
   if (requiredAddress) {
     if (!/Address(?:\s+for\s+Notice)?\s*:/i.test(trimmed)) return false;
     if (!trimmed.toLowerCase().includes(requiredAddress.toLowerCase().slice(0, 12))) return false;
@@ -1944,6 +1988,9 @@ function findExistingNoticeStanzaForParty(
       const stanza = existingStanzas[j] ?? "";
       const headingEntity = noticeStanzaHeadingLegalEntity(stanza);
       if (headingEntity.length >= 2 && partyLegalNamesMatch(headingEntity, legal)) {
+        if (noticeHeadingContainsForeignPartyResidue(headingEntity, legal)) {
+          continue;
+        }
         consumedStanzaIndexes.add(j);
         if (noticeStanzaHasLegalEntityLine(stanza)) {
           return stanza.trim();

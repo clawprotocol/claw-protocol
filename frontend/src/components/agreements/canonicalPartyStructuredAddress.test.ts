@@ -71,4 +71,17 @@ describe("canonicalPartyStructuredAddress", () => {
       "100 Market Street, Chicago, IL 60601",
     );
   });
+
+  it("rejects term / effective-date / jurisdiction stuffed into Address (Northline/Harbor)", () => {
+    expect(
+      sanitizeCanonicalPartyAddress(
+        "30 days, Upon full execution by the parties unless otherwise specified., Texas",
+      ),
+    ).toBe("");
+    expect(sanitizeCanonicalPartyAddress("$2,400")).toBe("");
+    expect(sanitizeCanonicalPartyAddress("logo and brand kit")).toBe("");
+    expect(sanitizeCanonicalPartyAddress("100 Mesa Drive, Austin, Texas")).toBe(
+      "100 Mesa Drive, Austin, Texas",
+    );
+  });
 });

@@ -22,6 +22,16 @@ const INLINE_ADDRESS_BOUNDARY_RE =
 const NOTICE_INSTRUCTION_INLINE_BOUNDARY_RE =
   /,\s*(?:each party should\b|signature block\b|in witness whereof\b|parties (?:shall )?execute\b|parties (?:have|may) (?:signed|executed)\b)/i;
 
+/** Term / fee / effective-date / scope fields must never become a notice Address. */
+const AGREEMENT_FIELD_DURATION_ONLY_RE = /^\d+\s*(?:days?|months?|weeks?|years?)$/i;
+const AGREEMENT_FIELD_FEE_ONLY_RE = /^\$[\d,]+(?:\.\d{1,2})?$/;
+const AGREEMENT_FIELD_EFFECTIVE_DATE_PROSE_RE = /\bupon\s+full\s+execution\b/i;
+const AGREEMENT_FIELD_SCOPE_PHRASE_RE = /\b(?:logo|brand[-\s]?kit)\b/i;
+const BARE_GOVERNING_LAW_STATE_RE =
+  /^(?:Alabama|Alaska|Arizona|Arkansas|California|Colorado|Connecticut|Delaware|Florida|Georgia|Hawaii|Idaho|Illinois|Indiana|Iowa|Kansas|Kentucky|Louisiana|Maine|Maryland|Massachusetts|Michigan|Minnesota|Mississippi|Missouri|Montana|Nebraska|Nevada|New Hampshire|New Jersey|New Mexico|New York|North Carolina|North Dakota|Ohio|Oklahoma|Oregon|Pennsylvania|Rhode Island|South Carolina|South Dakota|Tennessee|Texas|Utah|Vermont|Virginia|Washington|West Virginia|Wisconsin|Wyoming|District of Columbia)$/i;
+const STREET_EVIDENCE_RE =
+  /\b(?:Street|St\.?|Avenue|Ave\.?|Road|Rd\.?|Boulevard|Blvd\.?|Drive|Dr\.?|Lane|Ln\.?|Way|Court|Ct\.?|Parkway|Pkwy\.?|Place|Pl\.?|Circle|Cir\.?|Highway|Hwy\.?|Suite|Ste\.?|PO\s*Box|P\.O\.\s*Box)\b/i;
+
 /**
  * Pre-signer notice placeholder copied from SoT into address fields on resume.
  * Must never be treated as a real postal address (finalize rejects corpora that still contain it).
@@ -93,9 +103,28 @@ export function isPartyAddressContaminationSegment(segment: string | null | unde
   if (/\bsignature block\b/i.test(t)) return true;
   if (/\bin witness whereof\b/i.test(t)) return true;
   if (/^(?:By|Name|Title|Date)\s*:/i.test(t)) return true;
+  if (AGREEMENT_FIELD_DURATION_ONLY_RE.test(t)) return true;
+  if (AGREEMENT_FIELD_FEE_ONLY_RE.test(t)) return true;
+  if (AGREEMENT_FIELD_EFFECTIVE_DATE_PROSE_RE.test(t)) return true;
+  if (AGREEMENT_FIELD_SCOPE_PHRASE_RE.test(t) && !STREET_EVIDENCE_RE.test(t) && !/^\d{1,6}\s+\S/.test(t)) {
+    return true;
+  }
   if (/\b(?:exclusive|regulatory|quality|distributor|manufacturer|licensor|consultant)\b/i.test(t) && /\bparty\s+\d+\b/i.test(t)) {
     return true;
   }
+  return false;
+}
+
+/** True when a stored "address" is actually term / fee / jurisdiction / scope, not a postal line. */
+function isNonAddressAgreementFieldBundle(raw: string): boolean {
+  const t = cleanAddressLine(raw);
+  if (!t) return false;
+  if (STREET_EVIDENCE_RE.test(t) || /^\d{1,6}\s+\S/.test(t)) return false;
+  if (AGREEMENT_FIELD_EFFECTIVE_DATE_PROSE_RE.test(t)) return true;
+  if (AGREEMENT_FIELD_SCOPE_PHRASE_RE.test(t)) return true;
+  if (/\$[\d,]+/.test(t)) return true;
+  if (/\b\d+\s*(?:days?|months?|weeks?|years?)\b/i.test(t)) return true;
+  if (BARE_GOVERNING_LAW_STATE_RE.test(t)) return true;
   return false;
 }
 
@@ -175,6 +204,14 @@ export function sanitizeCanonicalPartyAddress(
 ): string {
   const raw = String(value ?? "").trim();
   if (!raw) return "";
+  if (isNonAddressAgreementFieldBundle(raw)) {
+    logPartyAddressBoundaryTrimmed({
+      slot: opts?.slot,
+      removedSuffixPreview: raw.slice(0, 120),
+      source: opts?.source ?? "sanitizeCanonicalPartyAddress:agreement_field_bundle",
+    });
+    return "";
+  }
   // Entire field is (or is dominated by) the pre-signer notice placeholder — treat as empty.
   if (SIGNER_SETUP_ADDRESS_PLACEHOLDER_RE.test(raw)) {
     const withoutPlaceholder = raw

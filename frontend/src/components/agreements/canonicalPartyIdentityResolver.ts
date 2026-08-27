@@ -285,13 +285,29 @@ function startsWithSameLeadingTokens(shortName: string, fullName: string): boole
   return shortWords.every((word, index) => fullWords[index] === word);
 }
 
+function candidateContainsAnotherKnownParty(
+  candidate: string,
+  knownNames: readonly string[],
+): boolean {
+  const value = norm(candidate);
+  if (!value) return false;
+  let distinctHits = 0;
+  for (const raw of knownNames) {
+    const known = norm(raw);
+    if (known.length < 3 || known === value) continue;
+    if (value.includes(known)) distinctHits += 1;
+  }
+  return distinctHits >= 2 || (distinctHits >= 1 && value.split(/\s+/).length > 4);
+}
+
 function upgradeShortNamesToFullLegal(
   names: readonly string[],
   fullCandidates: readonly string[],
 ): string[] {
+  const known = [...names, ...fullCandidates];
   return names.map((name) => {
     const upgraded = fullCandidates.find((candidate) => startsWithSameLeadingTokens(name, candidate));
-    if (upgraded && upgraded !== name) {
+    if (upgraded && upgraded !== name && !candidateContainsAnotherKnownParty(upgraded, known)) {
       logCanonicalPartyIdentityUpgraded({
         from: name,
         to: upgraded,
