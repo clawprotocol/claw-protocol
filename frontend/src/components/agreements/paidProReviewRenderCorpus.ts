@@ -864,7 +864,20 @@ export function resolvePaidProReviewRenderPlain(
         intakeText: args?.intakeText ?? null,
         fallbackTitle: args?.draft?.title ?? null,
       });
-      return projectPaidProFrozenSoTDisplayPlain(titled);
+      let projected = projectPaidProFrozenSoTDisplayPlain(titled);
+      const parties = resolvePartiesForReviewRender(args);
+      if (parties.length >= 2) {
+        const roleContext = {
+          intakeText: args?.intakeText ?? null,
+          draftPartyNames: (args?.draft?.parties ?? [])
+            .map((p) => String(p?.name ?? "").trim())
+            .filter(Boolean),
+          acceptedCorpus: projected,
+        };
+        const noticed = ensureOperativeIfToNoticeDelivery(projected, parties, roleContext);
+        if (noticed.repairs.length > 0) projected = noticed.text;
+      }
+      return projected;
     }
     if (corpusContainsFusedPartyLegalName(body)) {
       const parties = resolvePartiesForReviewRender(args);

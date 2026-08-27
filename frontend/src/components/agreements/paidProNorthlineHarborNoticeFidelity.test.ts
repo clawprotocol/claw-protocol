@@ -1,5 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
+import { applyAcceptedProCorpusSafeDisplay } from "./acceptedProCorpusSafeDisplay";
 import { sanitizeCanonicalPartyAddress } from "./canonicalPartyStructuredAddress";
+import { projectPaidProFrozenSoTDisplayPlain } from "./paidProDisplayPlainAuthority";
 import { establishLegalPartyAuthorityFromIntake } from "./legalPartyAuthority";
 import { applyPaidProNoticeContactAuthority } from "./paidProNoticeContactAuthority";
 import {
@@ -8,6 +10,10 @@ import {
   extractPartyAddressesFromOperativeNoticeStanzas,
   formatNoticeAddressLines,
 } from "./paidProPartyNoticeDetails";
+import {
+  clearConsumedPaidProSignerMetadataAuthority,
+  setConsumedPaidProSignerMetadataAuthority,
+} from "./paidProSignerMetadataAuthority";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import type { PaidProSignerMetadataParty } from "./paidProSignerMetadataAuthority";
 
@@ -70,6 +76,73 @@ function northlineParties(address = ""): PaidProSignerMetadataParty[] {
       partyAddress: address,
     },
   ];
+}
+
+/** Live staging regen: two If-to stanzas, fused heading + term/law stuffed into Harbor Address. */
+function liveRegenerateTwoStanzaNorthlineHarborCorpus(): string {
+  return [
+    "SERVICES AGREEMENT",
+    "",
+    `This Agreement is between ${FUSED} ("Service Provider") and Service Provider ("Service Provider").`,
+    "",
+    "1. Scope of Services",
+    "Provider will design a logo and brand kit.",
+    "",
+    "2. Compensation",
+    "The total fee is $2,400.",
+    "",
+    "3. Term",
+    "The term is 30 days.",
+    "",
+    "10. Confidentiality",
+    "Each party shall keep confidential information confidential.",
+    "",
+    "12. NOTICES",
+    "Notices under this Agreement must be in writing and delivered as set forth below.",
+    "",
+    `If to ${FUSED}:`,
+    FUSED,
+    "",
+    `If to ${HARBOR}:`,
+    HARBOR,
+    `Address: ${STUFFED_ADDRESS}`,
+    "",
+    "13. Entire Agreement",
+    `This Agreement is the entire agreement This Agreement is between ${FUSED} ("Service Provider") and Service Provider ("Service Provider").`,
+    "",
+    "11. Governing Law",
+    "This Agreement is governed by the laws of Texas.",
+    "",
+    "IN WITNESS WHEREOF, the Parties execute this Agreement.",
+    "",
+    "CLIENT:",
+    NORTHLINE,
+    "By: ____________________",
+    "",
+    "SERVICE PROVIDER:",
+    HARBOR,
+    "By: ____________________",
+  ].join("\n");
+}
+
+function assertIndependentNorthlineHarborNotices(text: string): void {
+  const region = noticesRegion(text);
+  expect(countOperativeIfToNoticeStanzas(text)).toBe(2);
+  expect(region).toMatch(new RegExp(`If to ${NORTHLINE}\\s*:`, "i"));
+  expect(region).toMatch(new RegExp(`If to ${HARBOR}\\s*:`, "i"));
+  expect(region).not.toMatch(new RegExp(`If to ${FUSED}`, "i"));
+  expect(region).not.toMatch(/Party [AB]/i);
+  expect(region).not.toMatch(/generic_placeholder/i);
+  for (const marker of NOTICE_CONTAMINATION_MARKERS) {
+    expect(region).not.toContain(marker);
+  }
+  const addresses = extractPartyAddressesFromOperativeNoticeStanzas(text);
+  for (const addr of addresses) {
+    expect(addr).not.toMatch(/30\s*days/i);
+    expect(addr).not.toMatch(/Texas/i);
+    expect(addr).not.toMatch(/\$2,400/);
+    expect(addr).not.toMatch(/logo|brand kit/i);
+  }
 }
 
 function contaminatedNorthlineHarborCorpus(): string {
@@ -192,5 +265,55 @@ describe("Northline Studio / Harbor Marks LLC Notices fidelity", () => {
     expect(outside).toMatch(/Texas/);
     expect(outside).toMatch(/logo and brand kit/i);
     expect(outside).not.toMatch(/Party [AB]/i);
+  });
+
+  afterEach(() => {
+    clearConsumedPaidProSignerMetadataAuthority();
+  });
+
+  it("rebuilds the live two-stanza regen (fused heading + stuffed Harbor Address) with empty party addresses", () => {
+    const corpus = liveRegenerateTwoStanzaNorthlineHarborCorpus();
+    const parties = northlineParties("");
+    const repaired = ensureOperativeIfToNoticeDelivery(corpus, parties, {
+      intakeText: INTAKE,
+      draftPartyNames: [NORTHLINE, HARBOR],
+      acceptedCorpus: corpus,
+    });
+    assertIndependentNorthlineHarborNotices(repaired.text);
+    expect(repaired.repairs.length).toBeGreaterThan(0);
+  });
+
+  it("persist-rewrite (safe display) and frozen SoT display skip fused If-to and omit term/law Address", () => {
+    const corpus = liveRegenerateTwoStanzaNorthlineHarborCorpus();
+    const persist = applyAcceptedProCorpusSafeDisplay(corpus, {
+      draft: northlineDraft(),
+      intakeText: INTAKE,
+      surface: "premium_completion_pipeline",
+    });
+    assertIndependentNorthlineHarborNotices(persist.text);
+
+    setConsumedPaidProSignerMetadataAuthority({
+      parties: northlineParties(""),
+      source: "live_ui",
+      hash: "northline-harbor-live-regen",
+      updatedAt: 1,
+    });
+    const displayed = projectPaidProFrozenSoTDisplayPlain(corpus);
+    assertIndependentNorthlineHarborNotices(displayed);
+
+    const notice = applyPaidProNoticeContactAuthority(corpus, {
+      draft: northlineDraft(),
+      intakeText: INTAKE,
+      authorityParties: northlineParties(""),
+      acceptedCorpus: corpus,
+    });
+    assertIndependentNorthlineHarborNotices(notice.text);
+    const outside = notice.text.replace(noticesRegion(notice.text), "");
+    expect(outside).toContain(NORTHLINE);
+    expect(outside).toContain(HARBOR);
+    expect(outside).toMatch(/\$2,400/);
+    expect(outside).toMatch(/30 days/);
+    expect(outside).toMatch(/Texas/);
+    expect(outside).toMatch(/logo and brand kit/i);
   });
 });

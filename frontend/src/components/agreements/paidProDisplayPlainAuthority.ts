@@ -18,7 +18,7 @@ import { repairSplitPaidProHeadingFragments } from "./repairSplitPaidProHeadingF
 import { repairMalformedSectionAnyReference } from "./paidProFrozenManifestDisplayAuthority";
 import { repairPaidProDocumentTitleOpening, needsPaidProDocumentTitleOpeningRepair } from "./paidProDocumentTitleOpeningRepair";
 import { summarizePaidProDocumentBlockClassifications } from "./paidProDocumentBlockClassifier";
-import { repairCollapsedInlineNoticeStanzas } from "./paidProPartyNoticeDetails";
+import { ensureOperativeIfToNoticeDelivery, repairCollapsedInlineNoticeStanzas } from "./paidProPartyNoticeDetails";
 import { ensureBlankLineBeforeWitnessBlock } from "./paidProExecutionBlockNormalization";
 import {
   normalizeFlattenedPaidProDocumentBlocks,
@@ -96,6 +96,15 @@ export function projectPaidProFrozenSoTDisplayPlain(text: string): string {
 
   const collapsedNotices = repairCollapsedInlineNoticeStanzas(out);
   if (collapsedNotices.repairs.length > 0) out = collapsedNotices.text;
+
+  // Last-good address-boundary + entity-only If-to: persist-rewrite / frozen SoT can
+  // re-emit fused headings and term/law stuffed into Address. Display-only projection
+  // must still skip those headers and omit non-postal Address — no new Notices architecture.
+  const authorityParties = readConsumedPaidProSignerMetadataAuthority()?.parties ?? [];
+  if (authorityParties.length >= 2) {
+    const noticed = ensureOperativeIfToNoticeDelivery(out, authorityParties);
+    if (noticed.repairs.length > 0) out = noticed.text;
+  }
 
   return out.replace(/\n{3,}/g, "\n\n").trimEnd();
 }
