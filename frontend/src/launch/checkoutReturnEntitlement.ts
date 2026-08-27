@@ -8,6 +8,10 @@ import { markAdvancedFullDraftCheckoutGranted } from "../components/agreements/a
 import { markPaidPremiumCompletionSession } from "../components/agreements/premiumCompletionStorage";
 import { getOrgId } from "../launch/orgContext";
 import { writePaidCheckoutOrgId } from "../launch/paidCheckoutOrgContext";
+import {
+  bindAfterPayPersistAgreementId,
+  readVerifiedAfterPayAgreementId,
+} from "./afterPayPersistResume";
 
 export function readCheckoutSessionIdFromUrl(): string | null {
   if (typeof window === "undefined") return null;
@@ -75,6 +79,8 @@ export async function handleCheckoutReturnEntitlement(): Promise<boolean> {
     // Same-tab demo grant used to be set in applyConfirmedSettlement; Stripe return never set it.
     markAdvancedFullDraftCheckoutGranted();
     writePaidCheckoutOrgId(oid);
+    const paidPersistId = readVerifiedAfterPayAgreementId(verified);
+    if (paidPersistId) bindAfterPayPersistAgreementId(paidPersistId);
     return true;
   } catch {
     return false;

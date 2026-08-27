@@ -162,6 +162,7 @@ def test_after_pay_success_url_and_verify_restore_same_persist(
     assert verify.headers.get("access-control-allow-credentials") == "true"
     body = verify.json()
     assert body.get("ok") is True
+    assert body.get("agreement_id") == persist_id
     subscription = body.get("subscription") or {}
     assert str(subscription.get("plan_code") or "").lower() == "pro"
     assert str(subscription.get("status") or "").lower() == "active"

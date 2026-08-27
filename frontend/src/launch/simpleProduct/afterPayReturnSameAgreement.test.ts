@@ -34,6 +34,7 @@ describe("after-pay last-good handoff (static)", () => {
     expect(effect).toContain("readCreateReviewAgreementResumeId");
     expect(effect).toContain("isAfterPayPremiumCompletionReturn");
     expect(effect).toContain("handleCheckoutReturnEntitlement");
+    expect(effect).toContain("resumeAfterPayPersistForProGeneration");
     expect(effect).not.toContain("restoreAgreementId");
     expect(effect).not.toContain("Same persist through existing final review — do not remint");
   });

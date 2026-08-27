@@ -89,6 +89,7 @@ describe("after-pay verify → Pro generation handoff", () => {
             text: async () =>
               JSON.stringify({
                 ok: true,
+                agreement_id: "dd37f0e4-feba-42e5-bb37-713218aaf346",
                 subscription: { plan_code: "pro", status: "active" },
               }),
           };
@@ -101,6 +102,9 @@ describe("after-pay verify → Pro generation handoff", () => {
     expect(ok).toBe(true);
     expect(hasPaidPremiumCompletionSession()).toBe(true);
     expect(peekAdvancedFullDraftCheckoutGrant()).toBe(true);
+    expect(sessionStorage.getItem("claw_agreement_create_review_resume_v1")).toBe(
+      "dd37f0e4-feba-42e5-bb37-713218aaf346",
+    );
     expect(
       shouldRefuseAfterPayPremiumCompletionForMissingGrant({
         premiumCompletionInUrl: false,

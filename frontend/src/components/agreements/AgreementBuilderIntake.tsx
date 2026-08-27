@@ -183,6 +183,7 @@ import {
   isAfterPayPremiumCompletionReturn,
   shouldRefuseAfterPayPremiumCompletionForMissingGrant,
 } from "../../launch/checkoutReturnEntitlement";
+import { resumeAfterPayPersistForProGeneration } from "../../launch/afterPayPersistResume";
 import { logHomeCreateSubmit } from "../../launch/homeCreateSubmit";
 import {
   getStarterProRefineCtaExperiment,
@@ -8339,6 +8340,25 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       const origFromResume = resumeSnap?.originalUserIntakeRaw?.trim();
       if (origFromResume) writeOriginalUserIntakeRawIfRicher(origFromResume);
       let prior = draftSnapshotRef.current ?? resumeSnap?.pending ?? null;
+      // After verify 200, bind/GET Stripe metadata.agreement_id when session resume is missing.
+      const paidPersistId = (
+        reviewAgreementIdRef.current ||
+        readCreateReviewAgreementResumeId() ||
+        ""
+      ).trim();
+      if (paidPersistId) {
+        reviewAgreementIdRef.current = paidPersistId;
+        setReviewAgreementId(paidPersistId);
+        if (!prior || !readOriginalUserIntakeRaw().trim()) {
+          const resumed = await resumeAfterPayPersistForProGeneration(paidPersistId);
+          if (cancelled || runGen !== premiumCheckoutRunGenRef.current) return;
+          if (resumed) {
+            prior = prior ?? resumed.prior;
+            draftSnapshotRef.current = prior;
+            if (resumed.intake.trim()) writeOriginalUserIntakeRawIfRicher(resumed.intake, 8);
+          }
+        }
+      }
       const docSnapEarly = agreementDocumentTextRef.current.trim();
       if (docSnapEarly && prior) {
         try {
@@ -8370,12 +8390,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           reason: !prior ? "no_prior_draft" : "empty_raw_intake_after_resolve",
           hasPrior: Boolean(prior),
         });
-        stripPremiumCompletionQueryParam();
+        // Keep premiumCompletion until Pro review. Stripping here opened empty Starter + Retry.
         setHardError(
-          "We could not restore your draft after checkout (this tab had no saved intake). Use what is on screen or reopen your agreement from your workspace.",
+          "We could not restore your paid agreement after checkout. Refresh once — your Pro draft is on the same persist.",
         );
-        setPremiumPostCheckoutPhase(null);
-        setPremiumPipelineUserMessage(null);
+        setPremiumPipelineUserMessage(CLAW_PREMIUM_PREPARING_AGREEMENT_COPY);
         return;
       }
       const pendCaptured =

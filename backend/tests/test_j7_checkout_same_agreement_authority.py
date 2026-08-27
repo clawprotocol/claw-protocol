@@ -213,7 +213,7 @@ def test_owned_agreement_checkout_settlement_resumes_same_canonical_id(
     assert verify.status_code == 200, verify.text
     verify_body = verify.json()
     assert verify_body.get("ok") is True
-    assert "agreement_id" not in verify_body
+    assert verify_body.get("agreement_id") == pre_checkout_agreement_id
     subscription = verify_body.get("subscription") or {}
     assert str(subscription.get("plan_code") or "").lower() == "pro"
     assert str(subscription.get("status") or "").lower() == "active"
