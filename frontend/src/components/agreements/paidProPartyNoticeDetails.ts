@@ -2012,7 +2012,9 @@ export function resolveOperativeNoticesFamilyEnd(text: string, noticesStart: num
 
 function noticeStanzaHeadingLegalEntity(stanza: string): string {
   const header = stanza.trim().split("\n")[0]?.trim() ?? "";
-  const match = header.match(/^If to\s+(.+?)\s*:\s*$/i);
+  // Live regen can collapse Attn/Email/Address onto the If-to line. The legal
+  // name is still the token before the first colon — require that, not EOL.
+  const match = header.match(/^If to\s+(.+?)\s*:/i);
   return match?.[1]?.trim() ?? "";
 }
 

@@ -78,6 +78,46 @@ function northlineParties(address = ""): PaidProSignerMetadataParty[] {
   ];
 }
 
+/** Exact live Pro regenerate Notices (persist dd37f0e4 / index-CIa2-V_w.js). */
+function exactLiveRegenerateNorthlineHarborCorpus(): string {
+  return [
+    "SERVICES AGREEMENT",
+    "",
+    `This Agreement is between ${NORTHLINE} ("Client") and ${HARBOR} ("Service Provider").`,
+    "",
+    "1. Scope of Services",
+    "Provider will design a logo and brand kit.",
+    "",
+    "2. Term",
+    "The term is 30 days.",
+    "",
+    "4. Compensation",
+    "4.1 Fees. The total fee is $2,400.",
+    "",
+    "12. NOTICES",
+    "Any notice under this Agreement must be in writing and delivered as set forth below.",
+    "",
+    `If to ${FUSED}: ${FUSED} Attn: ______________, ______________ Email: ____________________ Address: ____________________ ____________________`,
+    `If to ${HARBOR}: ${HARBOR} Address: ${STUFFED_ADDRESS}`,
+    "",
+    "13. Miscellaneous",
+    `This Agreement is the entire agreement This Agreement is between ${FUSED} ("Service Provider") and Service Provider ("Service Provider").`,
+    "",
+    "11. Governing Law",
+    "This Agreement is governed by the laws of Texas.",
+    "",
+    "IN WITNESS WHEREOF, the Parties execute this Agreement.",
+    "",
+    "CLIENT:",
+    NORTHLINE,
+    "By: ____________________",
+    "",
+    "SERVICE PROVIDER:",
+    HARBOR,
+    "By: ____________________",
+  ].join("\n");
+}
+
 /** Live staging regen: two If-to stanzas, fused heading + term/law stuffed into Harbor Address. */
 function liveRegenerateTwoStanzaNorthlineHarborCorpus(): string {
   return [
@@ -271,6 +311,24 @@ describe("Northline Studio / Harbor Marks LLC Notices fidelity", () => {
     clearConsumedPaidProSignerMetadataAuthority();
   });
 
+  it("rebuilds the exact live collapsed If-to artifact (dd37f0e4) with empty party addresses", () => {
+    const corpus = exactLiveRegenerateNorthlineHarborCorpus();
+    const parties = northlineParties("");
+    const repaired = ensureOperativeIfToNoticeDelivery(corpus, parties, {
+      intakeText: INTAKE,
+      draftPartyNames: [NORTHLINE, HARBOR],
+      acceptedCorpus: corpus,
+    });
+    assertIndependentNorthlineHarborNotices(repaired.text);
+    expect(repaired.text).toContain(`${NORTHLINE} ("Client")`);
+    expect(repaired.text).toContain(`${HARBOR} ("Service Provider")`);
+    expect(repaired.text).toMatch(/logo and brand kit/i);
+    expect(repaired.text).toMatch(/30 days/);
+    expect(repaired.text).toMatch(/\$2,400/);
+    expect(repaired.text).toMatch(/laws of Texas/);
+    expect(repaired.repairs.length).toBeGreaterThan(0);
+  });
+
   it("rebuilds the live two-stanza regen (fused heading + stuffed Harbor Address) with empty party addresses", () => {
     const corpus = liveRegenerateTwoStanzaNorthlineHarborCorpus();
     const parties = northlineParties("");
@@ -315,5 +373,17 @@ describe("Northline Studio / Harbor Marks LLC Notices fidelity", () => {
     expect(outside).toMatch(/30 days/);
     expect(outside).toMatch(/Texas/);
     expect(outside).toMatch(/logo and brand kit/i);
+
+    const exact = exactLiveRegenerateNorthlineHarborCorpus();
+    const exactPersist = applyAcceptedProCorpusSafeDisplay(exact, {
+      draft: northlineDraft(),
+      intakeText: INTAKE,
+      surface: "premium_completion_pipeline",
+    });
+    assertIndependentNorthlineHarborNotices(exactPersist.text);
+    expect(exactPersist.text).toContain(`${NORTHLINE} ("Client")`);
+    expect(exactPersist.text).toContain(`${HARBOR} ("Service Provider")`);
+    const exactDisplayed = projectPaidProFrozenSoTDisplayPlain(exact);
+    assertIndependentNorthlineHarborNotices(exactDisplayed);
   });
 });
