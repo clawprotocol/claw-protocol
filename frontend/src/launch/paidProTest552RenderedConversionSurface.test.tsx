@@ -251,4 +251,14 @@ describe("TEST552 — rendered anonymous Free Starter conversion surface", () =>
     expect(intakeSrc).toMatch(/const checkoutAgreementId[\s\S]*?reviewAgreementIdRef\.current/);
     expect(intakeSrc).toMatch(/const checkoutAgreementId[\s\S]*?CREATE_FLOW_CHECKOUT_AGREEMENT_ID/);
   });
+
+  it("Continue with Pro defaults create-flow checkout cadence to monthly (chooser can pick annual)", () => {
+    const begin = intakeSrc.indexOf("const beginAdvancedFullDraftCheckout");
+    expect(begin).toBeGreaterThan(0);
+    const block = intakeSrc.slice(begin, begin + 9000);
+    expect(block).toContain('const cadence = "monthly"');
+    expect(block).not.toContain('const cadence = "annual"');
+    expect(block).toContain("checkoutAgreementId");
+    expect(block).toMatch(/\/app\/checkout\/\$\{encodeURIComponent\(checkoutAgreementId\)\}/);
+  });
 });

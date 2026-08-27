@@ -6,9 +6,44 @@ import {
   CHECKOUT_STARTER_UPGRADE_SUBTITLE,
   checkoutProgressStepIsComplete,
   checkoutProgressStepIsCurrent,
+  isCreateFlowAgreementCheckout,
   resolveCheckoutFlowProgress,
   STARTER_UPGRADE_CHECKOUT_PROGRESS_LABELS,
 } from "./checkoutFlowProgress";
+
+describe("isCreateFlowAgreementCheckout", () => {
+  const realId = "8f3a1c2e-4b5d-6789-abcd-ef0123456789";
+
+  it("is true for placeholder create-flow id", () => {
+    expect(
+      isCreateFlowAgreementCheckout({
+        agreementId: CREATE_FLOW_CHECKOUT_AGREEMENT_ID,
+        isSingleAgreementCheckout: false,
+        returnTo: "/app/create?restore=starterReview",
+      }),
+    ).toBe(true);
+  });
+
+  it("is true for a real persisted agreement id returning to create", () => {
+    expect(
+      isCreateFlowAgreementCheckout({
+        agreementId: realId,
+        isSingleAgreementCheckout: false,
+        returnTo: "/app/create?restore=starterReview",
+      }),
+    ).toBe(true);
+  });
+
+  it("is false for send-path checkout even with a real id", () => {
+    expect(
+      isCreateFlowAgreementCheckout({
+        agreementId: realId,
+        isSingleAgreementCheckout: false,
+        returnTo: `/app/send/${realId}?phase=send`,
+      }),
+    ).toBe(false);
+  });
+});
 
 describe("resolveCheckoutFlowProgress", () => {
   it("starter upgrade checkout: Review active, Draft complete, Proof not current", () => {
@@ -45,6 +80,17 @@ describe("resolveCheckoutFlowProgress", () => {
     expect(checkoutProgressStepIsCurrent(p, 2)).toBe(false);
     expect(p.labels[2]).toBe("Sign");
     expect(checkoutProgressStepIsComplete(p, 2)).toBe(false);
+  });
+
+  it("real persisted agreement ID + create returnTo is still starter upgrade checkout", () => {
+    const p = resolveCheckoutFlowProgress({
+      agreementId: "8f3a1c2e-4b5d-6789-abcd-ef0123456789",
+      isSingleAgreementCheckout: false,
+      returnTo: "/app/create?restore=starterReview",
+    });
+    expect(p.variant).toBe("starter_upgrade");
+    expect(p.step).toBe(2);
+    expect(p.labels).toEqual([...STARTER_UPGRADE_CHECKOUT_PROGRESS_LABELS]);
   });
 
   it("single-agreement unlock: Send active, Sign not highlighted", () => {

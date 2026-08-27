@@ -12823,7 +12823,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       previewText: agreementDocumentText,
     });
     setAdvancedFullDraftPaywallOpen(false);
-    const cadence = "annual";
+    const cadence = "monthly";
     const returnTo = encodeURIComponent(buildCreateReturnToWithStarterReviewRestore());
     emitPaidFunnelEvent("premium_checkout_opened", { extra: { checkout_surface: "create_flow_checkout" } });
     const checkoutAgreementId =

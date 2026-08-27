@@ -2,7 +2,11 @@ import { type FormEvent, useCallback, useEffect, useLayoutEffect, useMemo, useRe
 import { useDynamicConfig } from "../../config/dynamicConfig/useDynamicConfig";
 import { logProductEvent } from "../../lib/experimentation/productEvents";
 import { trackAgreementFunnelEvent } from "../../tracking/agreementFunnelAnalytics";
-import { CHECKOUT_STARTER_UPGRADE_SUBTITLE, resolveCheckoutFlowProgress } from "./checkoutFlowProgress";
+import {
+  CHECKOUT_STARTER_UPGRADE_SUBTITLE,
+  isCreateFlowAgreementCheckout,
+  resolveCheckoutFlowProgress,
+} from "./checkoutFlowProgress";
 import { CHECKOUT_LEGAL_DISCLAIMER } from "./checkoutTrustCopy";
 import { CheckoutTrustPanel } from "./CheckoutTrustPanel";
 import {
@@ -207,6 +211,12 @@ export function SimpleCheckoutPage(props: { agreementId: string }) {
     [agreementId, params],
   );
 
+  const isCreateAgreementCheckout = isCreateFlowAgreementCheckout({
+    agreementId,
+    isSingleAgreementCheckout,
+    returnTo,
+  });
+
   const [paymentError, setPaymentError] = useState<string | null>(null);
   const [processing, setProcessing] = useState(false);
   const finishedRef = useRef(false);
@@ -234,11 +244,11 @@ export function SimpleCheckoutPage(props: { agreementId: string }) {
 
   /** Create-flow checkout: monthly is the paid-beta default when URL omits cadence. */
   useEffect(() => {
-    if (agreementId !== CREATE_FLOW_CHECKOUT_AGREEMENT_ID || isSingleAgreementCheckout) return;
+    if (!isCreateAgreementCheckout) return;
     if (cadenceFromUrl) return;
     setCadence("monthly");
     setPricingCadencePreference("monthly");
-  }, [agreementId, isSingleAgreementCheckout, cadenceFromUrl]);
+  }, [isCreateAgreementCheckout, cadenceFromUrl]);
 
   useEffect(() => {
     if (checkoutLogged.current) return;
@@ -489,7 +499,6 @@ export function SimpleCheckoutPage(props: { agreementId: string }) {
 
   const returnParsed = extractAgreementIdFromSendReturnUrl(returnTo);
 
-  const isCreateAgreementCheckout = agreementId === CREATE_FLOW_CHECKOUT_AGREEMENT_ID && !isSingleAgreementCheckout;
   const [genesisBetaAuth, setGenesisBetaAuth] = useState<GenesisBetaPaymentBypassAuth | undefined>(undefined);
   const devPaymentBypassState = useMemo(() => resolveDevPaymentBypassState(), []);
   const devPaymentBypassActive = isCreateAgreementCheckout && devPaymentBypassState.enabled;
@@ -501,7 +510,7 @@ export function SimpleCheckoutPage(props: { agreementId: string }) {
   const localSmokeBypassBlocked =
     isCreateAgreementCheckout && isLocalBrowserOrigin() && !devPaymentBypassState.enabled;
   const [upgradeCheckoutSnap, setUpgradeCheckoutSnap] = useState<UpgradeCheckoutContextV1 | null>(() =>
-    agreementId === CREATE_FLOW_CHECKOUT_AGREEMENT_ID ? readUpgradeCheckoutContext() : null,
+    isCreateAgreementCheckout ? readUpgradeCheckoutContext() : null,
   );
 
   useEffect(() => {

@@ -20,4 +20,22 @@ describe("CreateFlowAgreementCheckoutPricing", () => {
     expect(screen.queryByText(/Most popular/i)).toBeNull();
     expect(screen.queryByText(/120/i)).toBeNull();
   });
+
+  it("shows both Monthly $49 and Annual $490 controls with monthly selected by default", () => {
+    render(
+      <CreateFlowAgreementCheckoutPricing
+        tier={pro}
+        cadence="monthly"
+        onCadenceChange={vi.fn()}
+      />,
+    );
+    const monthlyTab = screen.getByRole("tab", { name: /monthly/i });
+    const annualTab = screen.getByRole("tab", { name: /annual/i });
+    expect(monthlyTab.getAttribute("aria-selected")).toBe("true");
+    expect(annualTab.getAttribute("aria-selected")).toBe("false");
+    expect(screen.getByText("$49")).toBeTruthy();
+    expect(screen.getByText("/month")).toBeTruthy();
+    expect(screen.getByText("$490")).toBeTruthy();
+    expect(screen.getByText("/year")).toBeTruthy();
+  });
 });
