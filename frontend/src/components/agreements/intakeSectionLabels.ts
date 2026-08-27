@@ -8,11 +8,11 @@ const BODY_VERB_RE =
 
 /** Known intake section headers from structured prompts (TEST429 North Star, clinical 4-party, etc.). */
 const INTAKE_SECTION_LABEL_RE =
-  /^(?:background|purpose|initial\s+term|scope(?:\s+of\s+(?:services|work))?|commercial\s+terms|payment(?:\s+schedule)?|revenue\s+allocation|term(?:ination)?|governance|coordination|confidentiality|liability|limitation\s+of\s+liability|governing\s+law|relationship\s+of\s+parties|general\s+provisions|include\s+a\s+complete|deliverables?|services?\s+and\s+scope|notices?|miscellaneous|compensation|effective\s+date|signer|party\s+notice|signatures?|e[-\s]?signatures?)\s*:?\s*,?\s*$/i;
+  /^(?:background|purpose|initial\s+term|scope(?:\s+of\s+(?:services|work))?|commercial\s+(?:terms|safeguards?)|user-stated\s+material\s+terms|economics\s+preserved\s+from\s+intake|payment(?:\s+schedule)?|revenue\s+allocation|term(?:ination)?|governance|coordination|confidentiality|liability|limitation\s+of\s+liability|governing\s+law|relationship\s+of\s+parties|general\s+provisions|include\s+a\s+complete|deliverables?(?:\s+and\s+ip)?|services?\s+and\s+scope|notices?|miscellaneous|compensation|effective\s+date|signer|party\s+notice|signatures?|e[-\s]?signatures?)\s*:?\s*,?\s*$/i;
 
 /** Single-token / comma-only section labels ("Purpose", "Purpose,", "Initial Term"). */
 export const STRUCTURED_PROMPT_SECTION_LABEL_TOKEN_RE =
-  /^(?:background|purpose|initial\s+term|scope(?:\s+of\s+(?:services|work))?|commercial\s+terms|payment(?:\s+schedule)?|revenue\s+allocation|term(?:ination)?|governance|coordination|confidentiality|liability|limitation\s+of\s+liability|governing\s+law|relationship\s+of\s+parties|general\s+provisions|deliverables?|services?\s+and\s+scope|notices?|miscellaneous|compensation|effective\s+date|signatures?|e[-\s]?signatures?)$/i;
+  /^(?:background|purpose|initial\s+term|scope(?:\s+of\s+(?:services|work))?|commercial\s+(?:terms|safeguards?)|user-stated\s+material\s+terms|economics\s+preserved\s+from\s+intake|payment(?:\s+schedule)?|revenue\s+allocation|term(?:ination)?|governance|coordination|confidentiality|liability|limitation\s+of\s+liability|governing\s+law|relationship\s+of\s+parties|general\s+provisions|deliverables?(?:\s+and\s+ip)?|services?\s+and\s+scope|notices?|miscellaneous|compensation|effective\s+date|signatures?|e[-\s]?signatures?)$/i;
 
 /** Inline comma boundary before the next structured section label in fused prose. */
 export const STRUCTURED_PROMPT_SECTION_INLINE_BOUNDARY_RE =
@@ -38,7 +38,8 @@ const PARTY_METADATA_FIELD_LABEL_RE =
   /^(?:email|signer\s+email|address|mailing\s+address|physical\s+address|party\s+address|represented\s+by|representative(?:\s+name)?|signer\s+name|signer\s+title|title|legal\s+entity(?:\s*\/\s*party\s+name)?|party\s+name|rep\.?)\s*:?\s*$/i;
 
 /** Title-case intake label line ending with colon (e.g. "Background:"). */
-const GENERIC_INTAKE_LABEL_LINE_RE = /^[A-Z][A-Za-z]*(?:\s+[A-Za-z][A-Za-z'-]*){0,5}\s*:\s*$/;
+const GENERIC_INTAKE_LABEL_LINE_RE =
+  /^[A-Z][A-Za-z'-]*(?:\s+[A-Za-z][A-Za-z'-]*){0,6}\s*:\s*$/;
 
 export function isIntakeSectionLabelLine(line: string): boolean {
   const t = (line || "").trim();

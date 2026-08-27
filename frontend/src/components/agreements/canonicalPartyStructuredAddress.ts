@@ -14,7 +14,7 @@ const PARTY_BLOCK_WITH_ROLE_INLINE_RE =
 const PARTY_ROLE_PAREN_RE = /\bparty\s+\d+\s*\([^)]+\)/i;
 const HORIZONTAL_RULE_RE = /^[\s—–\-_=]+$/;
 const INTAKE_INSTRUCTION_LINE_RE =
-  /^\s*(?:draft\b|include\s+(?:provisions|a\b)|commercial\s+terms|require\b|requirement\b|governing\s+law|term(?:ination)?\b|payment\b|background\b|scope\b)/i;
+  /^\s*(?:draft\b|include\s+(?:provisions|a\b)|commercial\s+(?:terms|safeguards?)\b|user-stated\s+material\s+terms\b|economics\s+preserved\b|require\b|requirement\b|governing\s+law|term(?:ination)?\b|payment\b|background\b|scope\b)/i;
 const INLINE_ADDRESS_BOUNDARY_RE =
   /,\s*(?:party\s+\d+\b(?:\s*\([^)]*\))?|draft\b|include\b|require\b|commercial\s+terms\b)/i;
 
@@ -23,10 +23,19 @@ const NOTICE_INSTRUCTION_INLINE_BOUNDARY_RE =
   /,\s*(?:each party should\b|signature block\b|in witness whereof\b|parties (?:shall )?execute\b|parties (?:have|may) (?:signed|executed)\b)/i;
 
 /** Term / fee / effective-date / scope fields must never become a notice Address. */
-const AGREEMENT_FIELD_DURATION_ONLY_RE = /^\d+\s*(?:days?|months?|weeks?|years?)$/i;
+const AGREEMENT_FIELD_DURATION_ONLY_RE =
+  /^\d+[-\s]*(?:days?|months?|weeks?|years?)(?:\s+term)?$/i;
 const AGREEMENT_FIELD_FEE_ONLY_RE = /^\$[\d,]+(?:\.\d{1,2})?$/;
 const AGREEMENT_FIELD_EFFECTIVE_DATE_PROSE_RE = /\bupon\s+full\s+execution\b/i;
 const AGREEMENT_FIELD_SCOPE_PHRASE_RE = /\b(?:logo|brand[-\s]?kit)\b/i;
+const AGREEMENT_FIELD_GOVERNING_LAW_PHRASE_RE = /\bgoverning\s+law\b/i;
+const AGREEMENT_FIELD_MATERIAL_TERMS_RE = /\buser-stated\s+material\s+terms\b/i;
+const AGREEMENT_FIELD_COMMERCIAL_SAFEGUARD_RE = /\bcommercial\s+safeguards?\b/i;
+const AGREEMENT_FIELD_INTAKE_PRESERVATION_RE =
+  /\b(?:economics\s+preserved\s+from\s+intake|confirm\s+in\s+schedule\s+a)\b/i;
+const AGREEMENT_FIELD_DELIVERABLES_IP_RE = /\bdeliverables?\s+and\s+ip\b/i;
+const AGREEMENT_FIELD_DURATION_IN_PROSE_RE =
+  /\b\d+[-\s]*(?:days?|months?|weeks?|years?)\b/i;
 const BARE_GOVERNING_LAW_STATE_RE =
   /^(?:Alabama|Alaska|Arizona|Arkansas|California|Colorado|Connecticut|Delaware|Florida|Georgia|Hawaii|Idaho|Illinois|Indiana|Iowa|Kansas|Kentucky|Louisiana|Maine|Maryland|Massachusetts|Michigan|Minnesota|Mississippi|Missouri|Montana|Nebraska|Nevada|New Hampshire|New Jersey|New Mexico|New York|North Carolina|North Dakota|Ohio|Oklahoma|Oregon|Pennsylvania|Rhode Island|South Carolina|South Dakota|Tennessee|Texas|Utah|Vermont|Virginia|Washington|West Virginia|Wisconsin|Wyoming|District of Columbia)$/i;
 const STREET_EVIDENCE_RE =
@@ -106,6 +115,11 @@ export function isPartyAddressContaminationSegment(segment: string | null | unde
   if (AGREEMENT_FIELD_DURATION_ONLY_RE.test(t)) return true;
   if (AGREEMENT_FIELD_FEE_ONLY_RE.test(t)) return true;
   if (AGREEMENT_FIELD_EFFECTIVE_DATE_PROSE_RE.test(t)) return true;
+  if (AGREEMENT_FIELD_MATERIAL_TERMS_RE.test(t)) return true;
+  if (AGREEMENT_FIELD_COMMERCIAL_SAFEGUARD_RE.test(t)) return true;
+  if (AGREEMENT_FIELD_INTAKE_PRESERVATION_RE.test(t)) return true;
+  if (AGREEMENT_FIELD_DELIVERABLES_IP_RE.test(t)) return true;
+  if (AGREEMENT_FIELD_GOVERNING_LAW_PHRASE_RE.test(t) && !STREET_EVIDENCE_RE.test(t)) return true;
   if (AGREEMENT_FIELD_SCOPE_PHRASE_RE.test(t) && !STREET_EVIDENCE_RE.test(t) && !/^\d{1,6}\s+\S/.test(t)) {
     return true;
   }
@@ -122,8 +136,13 @@ function isNonAddressAgreementFieldBundle(raw: string): boolean {
   if (STREET_EVIDENCE_RE.test(t) || /^\d{1,6}\s+\S/.test(t)) return false;
   if (AGREEMENT_FIELD_EFFECTIVE_DATE_PROSE_RE.test(t)) return true;
   if (AGREEMENT_FIELD_SCOPE_PHRASE_RE.test(t)) return true;
+  if (AGREEMENT_FIELD_MATERIAL_TERMS_RE.test(t)) return true;
+  if (AGREEMENT_FIELD_COMMERCIAL_SAFEGUARD_RE.test(t)) return true;
+  if (AGREEMENT_FIELD_INTAKE_PRESERVATION_RE.test(t)) return true;
+  if (AGREEMENT_FIELD_DELIVERABLES_IP_RE.test(t)) return true;
+  if (AGREEMENT_FIELD_GOVERNING_LAW_PHRASE_RE.test(t)) return true;
   if (/\$[\d,]+/.test(t)) return true;
-  if (/\b\d+\s*(?:days?|months?|weeks?|years?)\b/i.test(t)) return true;
+  if (AGREEMENT_FIELD_DURATION_IN_PROSE_RE.test(t)) return true;
   if (BARE_GOVERNING_LAW_STATE_RE.test(t)) return true;
   return false;
 }

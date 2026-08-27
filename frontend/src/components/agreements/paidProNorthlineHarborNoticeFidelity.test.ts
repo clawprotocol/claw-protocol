@@ -24,15 +24,24 @@ const HARBOR = "Harbor Marks LLC";
 const FUSED = "Northline Studio Harbor Marks LLC";
 const STUFFED_ADDRESS =
   "30 days, Upon full execution by the parties unless otherwise specified., Texas";
+/** Exact live Harbor Address on persist dd37f0e4 / index-C9Nf20Qw.js after #132 heading paint. */
+const LIVE_HARBOR_ADDRESS_BLOB =
+  "User-stated material terms:, 30-day term, Texas governing law, Commercial safeguards (edit as needed), Deliverables and IP: Deliverables and ownership/license rights will follow the statement of work or specifications agreed by the Parties., Economics preserved from intake (confirm in Schedule A):";
 
 const NOTICE_CONTAMINATION_MARKERS = [
   "$2,400",
   "2,400",
   "30 days",
+  "30-day term",
   "Texas",
+  "Texas governing law",
   "logo",
   "brand kit",
   "Upon full execution",
+  "User-stated material terms",
+  "Commercial safeguards",
+  "Economics preserved from intake",
+  "Schedule A",
   FUSED,
   "Party A",
   "Party B",
@@ -178,10 +187,15 @@ function assertIndependentNorthlineHarborNotices(text: string): void {
   }
   const addresses = extractPartyAddressesFromOperativeNoticeStanzas(text);
   for (const addr of addresses) {
-    expect(addr).not.toMatch(/30\s*days/i);
+    expect(addr).not.toMatch(/30\s*-?\s*days?/i);
     expect(addr).not.toMatch(/Texas/i);
     expect(addr).not.toMatch(/\$2,400/);
     expect(addr).not.toMatch(/logo|brand kit/i);
+    expect(addr).not.toMatch(/User-stated material terms/i);
+    expect(addr).not.toMatch(/Commercial safeguards/i);
+    expect(addr).not.toMatch(/Economics preserved from intake/i);
+    expect(addr).not.toMatch(/Schedule A/i);
+    expect(addr).not.toMatch(/governing law/i);
   }
 }
 
@@ -243,6 +257,11 @@ describe("Northline Studio / Harbor Marks LLC Notices fidelity", () => {
     expect(formatNoticeAddressLines("100 Mesa Drive, Austin, Texas").join(" ")).toMatch(/100 Mesa Drive/);
   });
 
+  it("does not treat the live Harbor commercial-safeguard / Schedule A blob as a postal address", () => {
+    expect(sanitizeCanonicalPartyAddress(LIVE_HARBOR_ADDRESS_BLOB)).toBe("");
+    expect(formatNoticeAddressLines(LIVE_HARBOR_ADDRESS_BLOB)).toEqual([]);
+  });
+
   it("legal-party authority stays two independent entities, not Priya/Diego or a fused name", () => {
     const authority = establishLegalPartyAuthorityFromIntake(INTAKE);
     expect(authority.parties).toHaveLength(2);
@@ -274,10 +293,12 @@ describe("Northline Studio / Harbor Marks LLC Notices fidelity", () => {
 
     const addresses = extractPartyAddressesFromOperativeNoticeStanzas(repaired.text);
     for (const addr of addresses) {
-      expect(addr).not.toMatch(/30\s*days/i);
+      expect(addr).not.toMatch(/30\s*-?\s*days?/i);
       expect(addr).not.toMatch(/Texas/i);
       expect(addr).not.toMatch(/\$2,400/);
       expect(addr).not.toMatch(/logo|brand kit/i);
+      expect(addr).not.toMatch(/User-stated material terms/i);
+      expect(addr).not.toMatch(/Commercial safeguards/i);
     }
   });
 
@@ -385,5 +406,58 @@ describe("Northline Studio / Harbor Marks LLC Notices fidelity", () => {
     expect(exactPersist.text).toContain(`${HARBOR} ("Service Provider")`);
     const exactDisplayed = projectPaidProFrozenSoTDisplayPlain(exact);
     assertIndependentNorthlineHarborNotices(exactDisplayed);
+  });
+
+  it("rebuilds the exact live Harbor Address blob (dd37f0e4 / C9Nf20Qw) with empty party addresses", () => {
+    const corpus = [
+      "SERVICES AGREEMENT",
+      "",
+      `This Agreement is between ${NORTHLINE} ("Client") and ${HARBOR} ("Service Provider").`,
+      "",
+      "1. Scope of Services",
+      "Provider will design a logo and brand kit.",
+      "",
+      "2. Term",
+      "The term is 30 days.",
+      "",
+      "4. Compensation",
+      "4.1 Fees. The total fee is $2,400.",
+      "",
+      "10. Limitation of Liability",
+      "Provider's aggregate liability will not exceed the total amount payable under this Agreement12. NOTICES",
+      "Any notice under this Agreement must be in writing and delivered as set forth below.",
+      "",
+      `If to ${NORTHLINE}: ${NORTHLINE}`,
+      `If to ${HARBOR}: ${HARBOR} Address: ${LIVE_HARBOR_ADDRESS_BLOB}`,
+      "",
+      "13. Miscellaneous",
+      `This Agreement is the entire agreement This Agreement is between ${FUSED} ("Service Provider") and Service Provider ("Service Provider").`,
+      "",
+      "11. Governing Law",
+      "This Agreement is governed by the laws of Texas.",
+      "",
+      "IN WITNESS WHEREOF, the Parties execute this Agreement.",
+      "",
+      "CLIENT:",
+      NORTHLINE,
+      "By: ____________________",
+      "",
+      "SERVICE PROVIDER:",
+      HARBOR,
+      "By: ____________________",
+    ].join("\n");
+    const parties = northlineParties("");
+    const repaired = ensureOperativeIfToNoticeDelivery(corpus, parties, {
+      intakeText: INTAKE,
+      draftPartyNames: [NORTHLINE, HARBOR],
+      acceptedCorpus: corpus,
+    });
+    assertIndependentNorthlineHarborNotices(repaired.text);
+    expect(repaired.text).not.toMatch(/Address:\s*User-stated material terms/i);
+    expect(repaired.text).not.toMatch(/Agreement12\.\s+NOTICES/);
+    expect(repaired.text).toMatch(/this Agreement\n+12\.\s+NOTICES/i);
+    expect(repaired.text).toContain(`${NORTHLINE} ("Client")`);
+    expect(repaired.text).toContain(`${HARBOR} ("Service Provider")`);
+    expect(repaired.repairs.length).toBeGreaterThan(0);
   });
 });

@@ -812,6 +812,23 @@ export function formatNoticeAddressLines(address: string): string[] {
 }
 
 const NOTICE_ADDRESS_HEADER_RE = /^Address(?:\s+for\s+Notice)?\s*:\s*(.*)$/i;
+const NOTICE_INLINE_ADDRESS_ON_IF_TO_RE =
+  /^(If to\s+.+?)\s+Address(?:\s+for\s+Notice)?\s*:\s*(.*)$/i;
+
+function noticeAddressHeaderMatch(
+  line: string,
+): { headingPrefix: string | null; body: string } | null {
+  const trimmed = String(line ?? "").trim();
+  const headerMatch = trimmed.match(NOTICE_ADDRESS_HEADER_RE);
+  if (headerMatch) {
+    return { headingPrefix: null, body: (headerMatch[1] ?? "").trim() };
+  }
+  const inlineMatch = trimmed.match(NOTICE_INLINE_ADDRESS_ON_IF_TO_RE);
+  if (inlineMatch) {
+    return { headingPrefix: (inlineMatch[1] ?? "").trim(), body: (inlineMatch[2] ?? "").trim() };
+  }
+  return null;
+}
 
 const NOTICE_ADDRESS_EXECUTION_LINE_RE =
   /^(?:By|Name|Title|Date|CLIENT|SERVICE\s+PROVIDER)\s*:/i;
@@ -860,9 +877,9 @@ export function extractNoticeAddressFromStanza(stanza: string): string {
 
   for (const line of lines) {
     const trimmed = line.trim();
-    const headerMatch = trimmed.match(NOTICE_ADDRESS_HEADER_RE);
+    const headerMatch = noticeAddressHeaderMatch(trimmed);
     if (headerMatch) {
-      const inlineBody = (headerMatch[1] ?? "").trim();
+      const inlineBody = headerMatch.body;
       if (inlineBody) {
         const sanitizedInline = sanitizeNoticeStanzaAddress(inlineBody);
         if (sanitizedInline) captured.push(sanitizedInline);
@@ -904,9 +921,9 @@ export function noticeStanzaHasAddressPollution(stanza: string): boolean {
 
   for (const line of lines) {
     const trimmed = line.trim();
-    const headerMatch = trimmed.match(NOTICE_ADDRESS_HEADER_RE);
+    const headerMatch = noticeAddressHeaderMatch(trimmed);
     if (headerMatch) {
-      const inlineBody = (headerMatch[1] ?? "").trim();
+      const inlineBody = headerMatch.body;
       if (inlineBody) rawParts.push(inlineBody);
       else capturing = true;
       continue;
@@ -942,6 +959,29 @@ export function sanitizeNoticeStanzaAddressContent(stanza: string): { stanza: st
 
   for (const line of lines) {
     const trimmed = line.trim();
+    const inlineIfTo = noticeAddressHeaderMatch(trimmed);
+    if (inlineIfTo?.headingPrefix) {
+      // Collapsed `If to … Address:` — last-good boundary omits non-postal Address.
+      if (formatted.length === 0) {
+        if (trimmed !== inlineIfTo.headingPrefix) repaired = true;
+        out.push(inlineIfTo.headingPrefix);
+        inAddress = false;
+        continue;
+      }
+      const nextValue = formatted.length === 1 ? (formatted[0] ?? sanitized) : "";
+      out.push(inlineIfTo.headingPrefix);
+      if (formatted.length <= 1) {
+        out.push(`Address: ${nextValue}`);
+      } else {
+        out.push("Address:");
+        out.push(...formatted);
+      }
+      if (trimmed !== `${inlineIfTo.headingPrefix} Address: ${formatted.join(" ")}`) {
+        repaired = true;
+      }
+      inAddress = false;
+      continue;
+    }
     const headerMatch = trimmed.match(NOTICE_ADDRESS_HEADER_RE);
     if (headerMatch) {
       // Empty sanitize result covers bare `Address:` and placeholder-only bodies
@@ -2823,6 +2863,7 @@ export function ensureOperativeIfToNoticeDelivery(
   const operativeStanzaCount = countOperativeIfToStanzasInRegion(noticesRegion);
   const stanzaCountMismatch = operativeStanzaCount < authorityParties.length;
   const hasFusedIfToHeading = noticesRegionHasFusedPartyIfToHeading(noticesRegion, authorityParties);
+  const hasAddressPollution = stanzaBlocks.some((stanza) => noticeStanzaHasAddressPollution(stanza));
   if (
     !missing &&
     !stanzaCountMismatch &&
@@ -2830,7 +2871,8 @@ export function ensureOperativeIfToNoticeDelivery(
     !hasExecutionPollution &&
     !hasInlineMalformedNotices &&
     !hasBareNoticeStanzas &&
-    !hasFusedIfToHeading
+    !hasFusedIfToHeading &&
+    !hasAddressPollution
   ) {
     const addressRepair = repairNoticeStanzaAddressBoundariesInCorpus(corpus);
     const baseText = addressRepair.repairs.length > 0 ? addressRepair.text : corpus;
