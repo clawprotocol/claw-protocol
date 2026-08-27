@@ -1304,6 +1304,15 @@ function noticeIntroAlreadyHasDeliveryLanguage(intro: string): boolean {
   return /notices?\s+(?:under|for)\s+this\s+agreement\s+must\s+be\s+in\s+writing/i.test(intro);
 }
 
+/** Keep a section break when splicing Notices after a prior clause (`Agreement` + `12. NOTICES`). */
+function joinCorpusBeforeNoticesRegion(before: string, notices: string): string {
+  const head = (before || "").replace(/\s+$/g, "");
+  const body = (notices || "").replace(/^\s+/g, "");
+  if (!head) return body;
+  if (!body) return head;
+  return `${head}\n\n${body}`;
+}
+
 function expandFusedIfToNoticeStanza(stanza: string): string {
   const trimmed = stanza.trim();
   if (trimmed.includes("\n")) {
@@ -2315,6 +2324,11 @@ export function repairIncompleteIfToNoticeStanzas(
   const repairs: string[] = [];
   let text = repairGluedSectionHeadingsInText(corpus.replace(/\r\n/g, "\n"));
   if (text !== corpus) repairs.push("notice:split_glued_section_headings");
+  const fusedNoticesHeading = repairFusedNoticesHeadingToPriorClause(text);
+  if (fusedNoticesHeading.repairs.length > 0) {
+    text = fusedNoticesHeading.text;
+    repairs.push(...fusedNoticesHeading.repairs);
+  }
 
   const noticesIdxEarly = findNoticesSectionStart(text);
   if (noticesIdxEarly >= 0) {
@@ -2580,9 +2594,10 @@ export function repairIncompleteIfToNoticeStanzas(
     repairs.push("notice:preserve_notices_section_heading");
   }
   const afterNotices = [middleClean, after.trimStart()].filter(Boolean).join("\n\n");
+  const joinedNotices = joinCorpusBeforeNoticesRegion(before, mergedNotices);
   text = afterNotices
-    ? `${before}${mergedNotices}\n\n${afterNotices}`.replace(/\n{3,}/g, "\n\n").trimEnd()
-    : `${before}${mergedNotices}`.replace(/\n{3,}/g, "\n\n").trimEnd();
+    ? `${joinedNotices}\n\n${afterNotices}`.replace(/\n{3,}/g, "\n\n").trimEnd()
+    : joinedNotices.replace(/\n{3,}/g, "\n\n").trimEnd();
   logPaidProNoticeSectionIntegrity({ repairs, partyCount: authorityParties.length, stanzaCount });
   const dedupedHeadings = dedupeDuplicateStandaloneNoticesHeadings(text);
   if (dedupedHeadings.repairs.length > 0) {
@@ -2755,6 +2770,10 @@ export function ensureOperativeIfToNoticeDelivery(
   opts?: { allowEntityOnlyNoticesAtFreeze?: boolean },
 ): { text: string; repairs: string[] } {
   const allowEntityOnlyNoticesAtFreeze = Boolean(opts?.allowEntityOnlyNoticesAtFreeze);
+  const fusedNoticesHeading = repairFusedNoticesHeadingToPriorClause(corpus);
+  if (fusedNoticesHeading.repairs.length > 0) {
+    corpus = fusedNoticesHeading.text;
+  }
   if (
     allowEntityOnlyNoticesAtFreeze &&
     findNoticesSectionStart(corpus) < 0 &&
@@ -2863,7 +2882,11 @@ export function ensureOperativeIfToNoticeDelivery(
   const operativeStanzaCount = countOperativeIfToStanzasInRegion(noticesRegion);
   const stanzaCountMismatch = operativeStanzaCount < authorityParties.length;
   const hasFusedIfToHeading = noticesRegionHasFusedPartyIfToHeading(noticesRegion, authorityParties);
-  const hasAddressPollution = stanzaBlocks.some((stanza) => noticeStanzaHasAddressPollution(stanza));
+  // Rebuild only when Address is entirely non-postal (intake/commercial blob).
+  // Postal + instructional tail stays on the in-place boundary repair (TEST486).
+  const hasNonPostalAddressPollution = stanzaBlocks.some(
+    (stanza) => noticeStanzaHasAddressPollution(stanza) && !extractNoticeAddressFromStanza(stanza),
+  );
   if (
     !missing &&
     !stanzaCountMismatch &&
@@ -2872,7 +2895,7 @@ export function ensureOperativeIfToNoticeDelivery(
     !hasInlineMalformedNotices &&
     !hasBareNoticeStanzas &&
     !hasFusedIfToHeading &&
-    !hasAddressPollution
+    !hasNonPostalAddressPollution
   ) {
     const addressRepair = repairNoticeStanzaAddressBoundariesInCorpus(corpus);
     const baseText = addressRepair.repairs.length > 0 ? addressRepair.text : corpus;
