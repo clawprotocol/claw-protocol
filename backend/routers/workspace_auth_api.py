@@ -33,7 +33,6 @@ from backend.security.supabase_jwt import (
 )
 from backend.security.workspace_identity import verify_anonymous_session_from_request, extract_anonymous_session_token
 from backend.security.safe_redirect import (
-    CREATE_FLOW_CHECKOUT_AGREEMENT_ID,
     build_destination_with_agreement,
     extract_agreement_id_from_app_path,
     resolve_safe_redirect_path,
@@ -150,6 +149,49 @@ def _is_claimable_draft_source_org(org_id: str) -> bool:
     """Only server-minted anonymous workspaces may transfer draft ownership."""
     oid = (org_id or "").strip()
     return bool(oid.startswith("anon-"))
+
+
+def _live_leftover_anon_org(request: Request) -> str:
+    """Same-tab leftover anonymous org, if the session is still claimable."""
+    if not extract_anonymous_session_token(request):
+        return ""
+    try:
+        row = verify_anonymous_session_from_request(request)
+    except HTTPException:
+        return ""
+    org = str(row.get("org_id") or "").strip()
+    if org and _is_claimable_draft_source_org(org):
+        return org
+    return ""
+
+
+def _claim_source_org_for_unpaid_converter(
+    *,
+    request: Request,
+    dest_path: str,
+    continuation_org: str,
+    target_org_id: str,
+) -> str:
+    """Claim leftover-anon drafts for the unpaid converter — never a user-* workspace.
+
+    No Pro entitlement yet is not another workspace. Same-session leftover-anon
+    remints (including the agreement on the checkout URL) must move to the
+    signed-in owner_subject. A genuine foreign user-* owner is left untouched.
+    """
+    leftover = _live_leftover_anon_org(request)
+    dest_aid = extract_agreement_id_from_app_path(dest_path) or ""
+    if dest_aid and leftover:
+        ustore = get_usage_economics_store()
+        ustore.init_schema()
+        owner = (ustore.owner_subject_for_agreement(dest_aid) or "").strip()
+        if owner == f"org:{leftover}":
+            return leftover
+    prev = (continuation_org or "").strip()
+    if prev and prev != target_org_id and _is_claimable_draft_source_org(prev):
+        return prev
+    if leftover and leftover != target_org_id:
+        return leftover
+    return ""
 
 
 def _assert_claimable_previous_org(previous_org_id: str, target_org_id: str) -> None:
@@ -421,11 +463,13 @@ async def finalize_auth(request: Request, body: FinalizeAuthIn) -> Dict[str, Any
     purpose = str(cont_row.get("auth_purpose") or "").strip().lower()
     is_returning = purpose in ("returning_sign_in", "dashboard") or str(cont_row.get("session_id") or "") == "returning"
 
-    prev_org = str(cont_row.get("org_id") or "").strip()
-    # Same-tab returning Google after guest persist: claim the live anon workspace.
-    # returning_sign_in continuations store org_id="" / session_id="returning".
-    if is_returning and not prev_org and anon_row:
-        prev_org = str(anon_row.get("org_id") or "").strip()
+    dest_path = str(cont_row.get("destination_path") or "/app")
+    prev_org = _claim_source_org_for_unpaid_converter(
+        request=request,
+        dest_path=dest_path,
+        continuation_org=str(cont_row.get("org_id") or ""),
+        target_org_id=org_id,
+    )
     ensure_organization(org_id, name=user_id)
     _persist_workspace_user_identity(
         request,
@@ -468,35 +512,15 @@ async def finalize_auth(request: Request, body: FinalizeAuthIn) -> Dict[str, Any
     )
     store.consume_continuation(continuation_id=body.continuation_id.strip(), user_id=user_id)
 
-    dest_path = str(cont_row.get("destination_path") or "/app")
-    cont_aid = str(cont_row.get("agreement_id") or "").strip()
-    if cont_aid == CREATE_FLOW_CHECKOUT_AGREEMENT_ID:
-        cont_aid = ""
     dest_aid = extract_agreement_id_from_app_path(dest_path) or ""
-    pin_aid = ""
-    if cont_aid:
-        pin_aid = cont_aid
-    elif dest_aid and (not migrated or dest_aid in migrated):
-        pin_aid = dest_aid
-    elif migrated:
+    # Keep the checkout URL agreement. Only replace the create-flow sentinel.
+    pin_aid = dest_aid
+    if not pin_aid and migrated:
         pin_aid = migrated[0]
-
     dest = build_destination_with_agreement(
         destination_path=dest_path,
         agreement_id=pin_aid or None,
     )
-    ustore = get_usage_economics_store()
-    ustore.init_schema()
-    if cont_aid:
-        owner = ustore.owner_subject_for_agreement(cont_aid)
-        if owner and owner != f"org:{org_id}":
-            if migrated:
-                dest = build_destination_with_agreement(
-                    destination_path=dest_path,
-                    agreement_id=migrated[0],
-                )
-            else:
-                raise HTTPException(status_code=403, detail={"code": "post_claim_agreement_mismatch"})
 
     return {
         "ok": True,
@@ -586,6 +610,12 @@ async def bind_user_org(request: Request, body: BindUserOrgIn) -> Dict[str, Any]
 
     migrated_agreements: list[str] = []
     prev = (body.previous_org_id or "").strip()
+    # Org already bound (previous_org_id is user-*) still claims same-session
+    # leftover-anon remints. No Pro yet is not another workspace.
+    if not prev or prev == org_id:
+        leftover = _live_leftover_anon_org(request)
+        if leftover and leftover != org_id:
+            prev = leftover
     if prev and prev != org_id:
         if _is_claimable_draft_source_org(prev):
             ustore = get_usage_economics_store()

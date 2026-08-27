@@ -108,10 +108,11 @@ export function resolvePostAuthDestination(ctx: AuthContinuationContextV1 | null
     return `${dest}${sep}agreementId=${encodeURIComponent(aid)}`;
   }
   if (aid && aid !== CREATE_FLOW_CHECKOUT_AGREEMENT_ID && dest.startsWith("/app/checkout/")) {
-    const qIndex = dest.indexOf("?");
-    const query = qIndex >= 0 ? dest.slice(qIndex) : "";
     const current = extractAgreementIdFromCheckoutPath(dest);
-    if (current !== aid) {
+    // Real checkout UUID is the conversion agreement — do not invent another.
+    if (!current) {
+      const qIndex = dest.indexOf("?");
+      const query = qIndex >= 0 ? dest.slice(qIndex) : "";
       return `/app/checkout/${encodeURIComponent(aid)}${query}`;
     }
   }

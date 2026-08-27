@@ -72,16 +72,25 @@ describe("safeRedirectResolver", () => {
     });
   });
 
-  it("pins post-auth checkout destination to the claimed agreement id", () => {
+  it("keeps the checkout URL agreement id and only replaces the create-flow sentinel", () => {
     const claimed = "5e79c874-91bd-4d43-95f1-80a827e8b26a";
-    const stale = "36568b4c-1300-4d62-97eb-826bdf2dd6c0";
+    const checkoutId = "36568b4c-1300-4d62-97eb-826bdf2dd6c0";
     const ctx = createAuthContinuationContext({
       agreementId: claimed,
-      sourcePath: `/app/checkout/${stale}`,
-      destinationPath: `/app/checkout/${stale}?tier=pro&cadence=monthly`,
+      sourcePath: `/app/checkout/${checkoutId}`,
+      destinationPath: `/app/checkout/${checkoutId}?tier=pro&cadence=monthly`,
       workflowStage: "claim",
     });
     expect(resolvePostAuthDestination(ctx)).toBe(
+      `/app/checkout/${checkoutId}?tier=pro&cadence=monthly`,
+    );
+    const sentinelCtx = createAuthContinuationContext({
+      agreementId: claimed,
+      sourcePath: "/app/checkout/__claw_create_checkout__",
+      destinationPath: "/app/checkout/__claw_create_checkout__?tier=pro&cadence=monthly",
+      workflowStage: "claim",
+    });
+    expect(resolvePostAuthDestination(sentinelCtx)).toBe(
       `/app/checkout/${claimed}?tier=pro&cadence=monthly`,
     );
   });

@@ -24,15 +24,15 @@ def test_extract_ignores_create_flow_sentinel():
     )
 
 
-def test_pin_checkout_destination_to_claimed_id():
+def test_real_checkout_url_id_is_not_rewritten():
     claimed = "5e79c874-91bd-4d43-95f1-80a827e8b26a"
-    stale = "36568b4c-1300-4d62-97eb-826bdf2dd6c0"
+    checkout_id = "36568b4c-1300-4d62-97eb-826bdf2dd6c0"
     dest = build_destination_with_agreement(
-        destination_path=f"/app/checkout/{stale}?tier=pro&cadence=monthly",
+        destination_path=f"/app/checkout/{checkout_id}?tier=pro&cadence=monthly",
         agreement_id=claimed,
     )
-    assert dest == f"/app/checkout/{claimed}?tier=pro&cadence=monthly"
-    assert stale not in dest
+    assert dest == f"/app/checkout/{checkout_id}?tier=pro&cadence=monthly"
+    assert claimed not in dest
 
 
 def test_pin_replaces_sentinel_checkout_with_claimed_id():
