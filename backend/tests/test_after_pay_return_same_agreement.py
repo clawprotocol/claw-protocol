@@ -29,7 +29,6 @@ def isolated_usage(tmp_path, monkeypatch: pytest.MonkeyPatch, auth_secrets):
     monkeypatch.setenv("CLAW_TREASURY_DB_PATH", str(tmp_path / "treasury.sqlite3"))
     monkeypatch.setenv("STRIPE_SECRET_KEY", "sk_test_after_pay_return")
     monkeypatch.setenv("STRIPE_PRICE_PRO_MONTHLY", "price_test_monthly")
-    monkeypatch.setenv("CLAW_ENVIRONMENT", "staging")
     monkeypatch.setenv("CLAW_CORS_ALLOW_ORIGINS", STAGING_FRONTEND)
 
     import backend.economics.store as eco_store_mod
