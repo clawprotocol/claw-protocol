@@ -29,9 +29,11 @@ describe("after-pay last-good handoff (static)", () => {
   it("intake still runs last-good Pro generation on premiumCompletion, same persist via resume", () => {
     const effectIdx = intake.indexOf("After create-flow checkout: premium completion");
     expect(effectIdx).toBeGreaterThan(-1);
-    const effect = intake.slice(effectIdx, effectIdx + 1800);
+    const effect = intake.slice(effectIdx, effectIdx + 5200);
     expect(effect).toContain('url.searchParams.get("premiumCompletion") === "1"');
     expect(effect).toContain("readCreateReviewAgreementResumeId");
+    expect(effect).toContain("isAfterPayPremiumCompletionReturn");
+    expect(effect).toContain("handleCheckoutReturnEntitlement");
     expect(effect).not.toContain("restoreAgreementId");
     expect(effect).not.toContain("Same persist through existing final review — do not remint");
   });
@@ -39,6 +41,8 @@ describe("after-pay last-good handoff (static)", () => {
   it("verify return settles entitlement without a new URL scheme", () => {
     expect(returnUx).toContain("verifyBillingCheckoutSession");
     expect(returnUx).toContain("readCheckoutSessionIdFromUrl");
+    expect(returnUx).toContain("markAdvancedFullDraftCheckoutGranted");
+    expect(returnUx).toContain("shouldRefuseAfterPayPremiumCompletionForMissingGrant");
     expect(returnUx).not.toContain("restoreAgreementId");
     expect(returnUx).not.toContain("pinAfterPayRestoreAgreementIdFromWindow");
   });

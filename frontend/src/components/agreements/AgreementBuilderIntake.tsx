@@ -92,6 +92,7 @@ import { detectAgreementFamily } from "./agreementFamilyRouter";
 import {
   CREATE_FLOW_CHECKOUT_AGREEMENT_ID,
   consumeAdvancedFullDraftCheckoutGrant,
+  markAdvancedFullDraftCheckoutGranted,
   peekAdvancedFullDraftCheckoutGrant,
   tierAllowsAdvancedFullDraftReveal,
 } from "./agreementAdvancedDraftAccess";
@@ -177,6 +178,11 @@ import {
 import { logStarterUpgradeTransition } from "../../launch/simpleProduct/starterUpgradeTransition";
 import { readSignedInAuthenticatedWorkspaceSession } from "../../launch/completedAgreementViewContext";
 import { getOrgId } from "../../launch/orgContext";
+import {
+  handleCheckoutReturnEntitlement,
+  isAfterPayPremiumCompletionReturn,
+  shouldRefuseAfterPayPremiumCompletionForMissingGrant,
+} from "../../launch/checkoutReturnEntitlement";
 import { logHomeCreateSubmit } from "../../launch/homeCreateSubmit";
 import {
   getStarterProRefineCtaExperiment,
@@ -3459,8 +3465,18 @@ function readInitialPremiumReturnFromWindow(): {
     if (readPremiumCompletionSnapshot()) return { phase: null, pipelineMessage: null };
     const u = new URL(window.location.href);
     const urlReturn = u.searchParams.get("premiumCompletion") === "1";
+    const checkoutSessionId = u.searchParams.get("checkout_session_id")?.trim() || null;
     const grantPending = peekAdvancedFullDraftCheckoutGrant() && Boolean(readCreateComplexityResume()?.awaitingProCheckout);
-    if (urlReturn || grantPending) {
+    if (
+      isAfterPayPremiumCompletionReturn({
+        premiumCompletionInUrl: urlReturn,
+        checkoutSessionId,
+        hasPaidSession: false,
+        hasCheckoutGrant: peekAdvancedFullDraftCheckoutGrant(),
+        awaitingProCheckoutResume: Boolean(readCreateComplexityResume()?.awaitingProCheckout),
+      }) ||
+      grantPending
+    ) {
       return { phase: "processing", pipelineMessage: CLAW_PREMIUM_PREPARING_AGREEMENT_COPY };
     }
   } catch {
@@ -8038,8 +8054,19 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       }
     }
     const urlReturn = u.searchParams.get("premiumCompletion") === "1";
+    const checkoutSessionId = u.searchParams.get("checkout_session_id")?.trim() || null;
     const grantPending = peekAdvancedFullDraftCheckoutGrant() && Boolean(readCreateComplexityResume()?.awaitingProCheckout);
-    if (urlReturn || grantPending) {
+    if (
+      urlReturn ||
+      grantPending ||
+      isAfterPayPremiumCompletionReturn({
+        premiumCompletionInUrl: urlReturn,
+        checkoutSessionId,
+        hasPaidSession: false,
+        hasCheckoutGrant: peekAdvancedFullDraftCheckoutGrant(),
+        awaitingProCheckoutResume: Boolean(readCreateComplexityResume()?.awaitingProCheckout),
+      })
+    ) {
       clearPremiumCompletionDoneInLocalStorage();
       if (import.meta.env.MODE !== "test") {
         // eslint-disable-next-line no-console
@@ -8163,8 +8190,16 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       return;
     }
     const urlPc = url.searchParams.get("premiumCompletion") === "1";
+    const checkoutSessionId = url.searchParams.get("checkout_session_id")?.trim() || null;
     const grantPending = peekAdvancedFullDraftCheckoutGrant() && Boolean(readCreateComplexityResume()?.awaitingProCheckout);
-    if (!urlPc && !grantPending) return;
+    const afterPaySignals = {
+      premiumCompletionInUrl: urlPc,
+      checkoutSessionId,
+      hasPaidSession: hasPaidPremiumCompletionSession(),
+      hasCheckoutGrant: peekAdvancedFullDraftCheckoutGrant(),
+      awaitingProCheckoutResume: Boolean(readCreateComplexityResume()?.awaitingProCheckout),
+    };
+    if (!isAfterPayPremiumCompletionReturn(afterPaySignals) && !grantPending) return;
     // Already completed this tab's checkout→review handoff — do not re-enter generation/hydrate loops.
     if (paidCheckoutCompletedRef.current) return;
     // Bind seeded create-review resume into React state before generation/prepare races intake restore.
@@ -8263,7 +8298,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       clearPremiumCompletionSnapshot();
     }
 
-    if (!peekAdvancedFullDraftCheckoutGrant()) {
+    if (shouldRefuseAfterPayPremiumCompletionForMissingGrant(afterPaySignals)) {
       if (import.meta.env.MODE !== "test") {
         // eslint-disable-next-line no-console
         console.info("[CLAW] premium hydration failed", { reason: "no_checkout_grant" });
@@ -8277,7 +8312,22 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
     const runGen = ++premiumCheckoutRunGenRef.current;
     void (async () => {
+      if (checkoutSessionId) {
+        const verified = await handleCheckoutReturnEntitlement();
+        if (cancelled || runGen !== premiumCheckoutRunGenRef.current) return;
+        if (!verified && !hasPaidPremiumCompletionSession()) {
+          if (import.meta.env.MODE !== "test") {
+            // eslint-disable-next-line no-console
+            console.info("[CLAW] premium hydration failed", { reason: "verify_checkout_session_failed" });
+          }
+          setHardError(
+            "We could not verify your upgrade from this link. If you just finished checkout, refresh once or open your agreement from your workspace.",
+          );
+          return;
+        }
+      }
       markPaidPremiumCompletionSession();
+      markAdvancedFullDraftCheckoutGranted();
       bumpPremiumSurfaceGateTick();
       setPostCheckoutAdvisoryGaps([]);
       setPremiumPostCheckoutPhase("processing");

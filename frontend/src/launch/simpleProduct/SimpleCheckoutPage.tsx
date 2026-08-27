@@ -413,6 +413,8 @@ export function SimpleCheckoutPage(props: { agreementId: string }) {
         referralCode: genesisHandoff.metadata.referral_code ?? affiliateCode ?? null,
         visitorId: genesisHandoff.metadata.visitor_id ?? null,
       });
+      // Same-tab grant so return does not require demo applyConfirmedSettlement.
+      markAdvancedFullDraftCheckoutGranted();
       window.location.assign(session.checkout_url);
     } catch (err) {
       fail(err instanceof Error ? err.message : "Could not start Stripe checkout.");

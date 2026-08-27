@@ -21,6 +21,7 @@ import {
   hasPremiumCheckoutReturnInUrl,
 } from "../components/agreements/premiumCompletionStorage";
 import { hasPaidProSourceOfTruth } from "../components/agreements/paidProSourceOfTruthState";
+import { readCheckoutSessionIdFromUrl } from "./checkoutReturnEntitlement";
 import { readSignedInAuthenticatedWorkspaceSession } from "./completedAgreementViewContext";
 import {
   hasPaidDashboardCreateContextActive,
@@ -253,6 +254,7 @@ export function bootstrapDirectAuthenticatedCreateEntryIfNeeded(): DirectAuthent
   }
   // Never reset an in-progress / resumed / post-checkout flow.
   if (hasPremiumCheckoutReturnInUrl()) return { bootstrapped: false, reason: "checkout_return" };
+  if (readCheckoutSessionIdFromUrl()) return { bootstrapped: false, reason: "checkout_return" };
   if (hasPaidPremiumCompletionSession()) return { bootstrapped: false, reason: "premium_session_active" };
   if (hasPaidProSourceOfTruth()) return { bootstrapped: false, reason: "sot_active" };
   if (readCreateReviewAgreementResumeId()) return { bootstrapped: false, reason: "resume_active" };
