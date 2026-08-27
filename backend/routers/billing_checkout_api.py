@@ -68,10 +68,7 @@ async def post_checkout_session(request: Request, body: CheckoutSessionIn) -> Di
         org_id = require_verified_org_id(request)
     else:
         _, org_id = assert_agreement_accessible(request, agreement_id)
-    success_url = build_checkout_success_url(
-        return_to=body.return_to.strip() or "/app/create",
-        agreement_id=agreement_id,
-    )
+    success_url = build_checkout_success_url(return_to=body.return_to.strip() or "/app/create")
     cancel_url = build_checkout_cancel_url(agreement_id=agreement_id)
 
     metadata = lawdog_pro_checkout_metadata(

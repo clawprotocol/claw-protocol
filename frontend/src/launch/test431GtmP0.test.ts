@@ -7,8 +7,6 @@ import {
 } from "../access/subscriptionEntitlementCache";
 import { getOrgId, setOrgId } from "../launch/orgContext";
 import { LAWDOG_NAV_ITEMS } from "../launch/LawdogProductNav";
-import { readCreateReviewAgreementResumeId } from "../components/agreements/agreementIntakeStorage";
-import { clearPreAuthCheckoutAgreementId, readPreAuthCheckoutAgreementId } from "../auth/preAuthCheckoutAgreement";
 import {
   handleCheckoutReturnEntitlement,
   readCheckoutSessionIdFromUrl,
@@ -156,31 +154,5 @@ describe("TEST431 — P0 GTM auth, Stripe entitlement, affiliate nav", () => {
     expect(getOrgId()).toBe("org-test431");
     const access = resolveAccess();
     expect(access.tier).toBe("premium");
-  });
-
-  it("after-pay return pins restoreAgreementId before verify", async () => {
-    const persistId = "3405d65b-f4fc-4b33-81d8-84a0734b927b";
-    sessionStorage.clear();
-    clearPreAuthCheckoutAgreementId();
-    Object.defineProperty(window, "location", {
-      value: {
-        href: `https://lawdog.test/app/create?restoreAgreementId=${persistId}&premiumCompletion=1&checkout_session_id=cs_test_same_id`,
-        origin: "https://lawdog.test",
-        search: `?restoreAgreementId=${persistId}&premiumCompletion=1&checkout_session_id=cs_test_same_id`,
-      },
-      writable: true,
-      configurable: true,
-    });
-    vi.stubGlobal(
-      "fetch",
-      vi.fn(async () => ({
-        ok: true,
-        text: async () => JSON.stringify({ ok: true, subscription: { plan_code: "pro", status: "active" } }),
-      })),
-    );
-    const ok = await handleCheckoutReturnEntitlement();
-    expect(ok).toBe(true);
-    expect(readCreateReviewAgreementResumeId()).toBe(persistId);
-    expect(readPreAuthCheckoutAgreementId()).toBe(persistId);
   });
 });

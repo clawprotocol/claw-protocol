@@ -21,10 +21,6 @@ import {
   isCheckoutBackRestoreRequested,
   readCheckoutBackRestoreSnapshot,
 } from "../../components/agreements/checkoutBackRestore";
-import {
-  pinAfterPayRestoreAgreementId,
-  readAfterPayRestoreAgreementIdFromSearch,
-} from "../checkoutParams";
 import { shouldSkipHomeAutoGenerateForStoredReview } from "../../components/agreements/createReviewRefreshRestore";
 import { setJoyFlash, emitActionCompleted } from "../../joy/joyTelemetry";
 import {
@@ -224,11 +220,6 @@ export function SimpleCreatePage() {
       return false;
     }
   }, [search]);
-  const afterPayRestoreAgreementId = useMemo(
-    () => readAfterPayRestoreAgreementIdFromSearch(search),
-    [search],
-  );
-  useState(() => pinAfterPayRestoreAgreementId(afterPayRestoreAgreementId));
   // Sticky for this create-page mount: must survive URL strip after intake arms signer setup.
   // Only honor the session arm when URL explicitly requests resume_signer_setup — leftover
   // arms from a prior Complete-signer-details visit must not auto-open an old agreement on
@@ -252,9 +243,8 @@ export function SimpleCreatePage() {
   const checkoutBackRestoreActive = useMemo(
     () =>
       !premiumCompletionReturn &&
-      !afterPayRestoreAgreementId &&
       (isCheckoutBackRestoreRequested(search) || hasCheckoutBackRestoreSnapshot()),
-    [search, premiumCompletionReturn, afterPayRestoreAgreementId],
+    [search, premiumCompletionReturn],
   );
   const homeHeroAutoGenerate =
     heroHandoff?.autoGenerate === true &&
@@ -557,10 +547,9 @@ export function SimpleCreatePage() {
     }
     // Preserve create-review resume during paid checkout return (prepare/GET paint authority).
     try {
-      const params = typeof window !== "undefined" ? new URL(window.location.href).searchParams : null;
       if (
-        params?.get("premiumCompletion") === "1" ||
-        readAfterPayRestoreAgreementIdFromSearch(params ? `?${params.toString()}` : search)
+        typeof window !== "undefined" &&
+        new URL(window.location.href).searchParams.get("premiumCompletion") === "1"
       ) {
         prevIntakeKeyRef.current = intakeKey;
         return;

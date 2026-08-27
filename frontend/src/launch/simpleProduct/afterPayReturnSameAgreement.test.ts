@@ -2,45 +2,44 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
-describe("after-pay return same persist (static)", () => {
+describe("after-pay last-good handoff (static)", () => {
   const checkout = readFileSync(join(__dirname, "SimpleCheckoutPage.tsx"), "utf8");
   const createPage = readFileSync(join(__dirname, "SimpleCreatePage.tsx"), "utf8");
   const intake = readFileSync(join(__dirname, "../../components/agreements/AgreementBuilderIntake.tsx"), "utf8");
   const returnUx = readFileSync(join(__dirname, "../checkoutReturnEntitlement.ts"), "utf8");
+  const params = readFileSync(join(__dirname, "../checkoutParams.ts"), "utf8");
 
-  it("Stripe checkout sends restoreAgreementId, not starterReview remint, for a real persist", () => {
+  it("Stripe checkout uses last-good /app/create?premiumCompletion=1, not starterReview remint", () => {
     expect(checkout).toContain("buildAfterPayStripeReturnTo({ agreementId, returnTo })");
-    expect(checkout).toContain("createBillingCheckoutSession({");
+    expect(params).toContain('appendReturnToQueryParam(dest, "premiumCompletion", "1")');
+    expect(params).toContain("dropStarterReviewRestoreParam");
+    expect(params).not.toContain("restoreAgreementId");
     const startIdx = checkout.indexOf("async function startStripeCheckout");
     expect(startIdx).toBeGreaterThan(-1);
     const startBody = checkout.slice(startIdx, startIdx + 2200);
     expect(startBody).toContain("buildAfterPayStripeReturnTo");
-    expect(startBody).not.toMatch(/returnTo:\s*returnTarget[\s\S]*CREATE_FLOW_CHECKOUT_AGREEMENT_ID/);
   });
 
-  it("create page pins restoreAgreementId and does not treat after-pay as starterReview remint", () => {
-    expect(createPage).toContain("readAfterPayRestoreAgreementIdFromSearch");
-    expect(createPage).toContain("pinAfterPayRestoreAgreementId");
-    expect(createPage).toContain("!afterPayRestoreAgreementId");
+  it("create page treats premiumCompletion as after-pay, not unpaid starterReview Back", () => {
+    expect(createPage).toContain('searchParams.get("premiumCompletion") === "1"');
+    expect(createPage).toContain("!premiumCompletionReturn");
+    expect(createPage).not.toContain("restoreAgreementId");
   });
 
-  it("intake skips Retry Pro draft remint when restoreAgreementId is the paid persist", () => {
+  it("intake still runs last-good Pro generation on premiumCompletion, same persist via resume", () => {
     const effectIdx = intake.indexOf("After create-flow checkout: premium completion");
     expect(effectIdx).toBeGreaterThan(-1);
     const effect = intake.slice(effectIdx, effectIdx + 1800);
-    expect(effect).toContain("readAfterPayRestoreAgreementIdFromSearch");
-    expect(effect).toContain("pinAfterPayRestoreAgreementId");
-    expect(effect).toContain("paidCheckoutCompletedRef.current = true");
-    expect(effect).toContain("Same persist through existing final review");
+    expect(effect).toContain('url.searchParams.get("premiumCompletion") === "1"');
+    expect(effect).toContain("readCreateReviewAgreementResumeId");
+    expect(effect).not.toContain("restoreAgreementId");
+    expect(effect).not.toContain("Same persist through existing final review — do not remint");
   });
 
-  it("verify return pins restoreAgreementId before settlement", () => {
-    expect(returnUx).toContain("pinAfterPayRestoreAgreementIdFromWindow");
-    const handleIdx = returnUx.indexOf("export async function handleCheckoutReturnEntitlement");
-    expect(handleIdx).toBeGreaterThan(-1);
-    expect(returnUx.indexOf("pinAfterPayRestoreAgreementIdFromWindow()", handleIdx)).toBeGreaterThan(handleIdx);
-    expect(returnUx.indexOf("readCheckoutSessionIdFromUrl()", handleIdx)).toBeGreaterThan(
-      returnUx.indexOf("pinAfterPayRestoreAgreementIdFromWindow()", handleIdx),
-    );
+  it("verify return settles entitlement without a new URL scheme", () => {
+    expect(returnUx).toContain("verifyBillingCheckoutSession");
+    expect(returnUx).toContain("readCheckoutSessionIdFromUrl");
+    expect(returnUx).not.toContain("restoreAgreementId");
+    expect(returnUx).not.toContain("pinAfterPayRestoreAgreementIdFromWindow");
   });
 });

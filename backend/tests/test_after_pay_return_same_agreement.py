@@ -140,12 +140,12 @@ def test_after_pay_success_url_and_verify_restore_same_persist(
     parsed = urlparse(success_url)
     qs = parse_qs(parsed.query)
     assert parsed.path == "/app/create"
-    assert qs.get("restoreAgreementId") == [persist_id]
     assert "starterReview" not in (qs.get("restore") or [])
     assert qs.get("premiumCompletion") == ["1"]
     assert qs.get("checkout_session_id") == ["{CHECKOUT_SESSION_ID}"]
-    assert persist_id in success_url
+    assert "restoreAgreementId=" not in success_url
     assert "restore=starterReview" not in success_url
+    assert persist_id == created.json()["id"]
 
     origin_headers = {
         **headers,
