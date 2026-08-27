@@ -1,9 +1,8 @@
-"""Free→Pro checkout after Google: unpaid converter owns the checkout URL agreement.
+"""Free→Pro checkout after Google: pre-auth leftover-anon persist is payable.
 
-The customer has not paid yet. After Google they stay on the draft they are
-converting (36568b4c leftover-anon remint on this walk, or the same-session
-guest persist after claim). checkout-session must 200 without a prior Pro
-entitlement. A genuine foreign user-* owner stays 403 workspace_mismatch.
+Guest persist 5e79c874 is the conversion agreement. After Google, dest must
+not become a stale/foreign UUID (36568b4c). Unpaid checkout-session for the
+claimed leftover-anon persist is 200. Genuine other user-* stays 403.
 """
 
 from __future__ import annotations
@@ -199,10 +198,10 @@ def test_returning_sign_in_without_anon_session_does_not_claim_foreign_draft(iso
     assert isolated_usage.owner_subject_for_agreement(aid) == f"org:{victim_org}"
 
 
-def test_checkout_url_leftover_anon_remint_is_claimed_not_another_workspace(
+def test_stale_dest_does_not_replace_pre_auth_leftover_persist(
     isolated_usage, monkeypatch: pytest.MonkeyPatch
 ):
-    """36568b4c on this walk is leftover-anon remint, not a foreign paid owner."""
+    """Signed in from 5e79c874; dest_path 36568b4c must not become checkout dest."""
     monkeypatch.setattr(
         "backend.routers.billing_checkout_api.create_checkout_session",
         _fake_stripe_create,
@@ -210,26 +209,25 @@ def test_checkout_url_leftover_anon_remint_is_claimed_not_another_workspace(
     client = TestClient(app)
     anon_org, _token, headers = mint_anonymous_session(client)
     guest_id = "5e79c874-91bd-4d43-95f1-80a827e8b26a"
-    checkout_id = "36568b4c-1300-4d62-97eb-826bdf2dd6c0"
+    stale = "36568b4c-1300-4d62-97eb-826bdf2dd6c0"
     isolated_usage.insert_agreement_owner(
         agreement_id=guest_id,
         subject_ref=f"org:{anon_org}",
         internal_keys_draft=1,
     )
     isolated_usage.insert_agreement_owner(
-        agreement_id=checkout_id,
-        subject_ref=f"org:{anon_org}",
+        agreement_id=stale,
+        subject_ref="org:user-other-workspace",
         internal_keys_draft=1,
     )
-    user_id = "unpaid-converter-36568"
+    user_id = "pre-auth-wins-stale-dest"
     target_org = f"user-{user_id}"
-    dest_path = f"/app/checkout/{checkout_id}?tier=pro&cadence=monthly"
     cont = client.post(
         "/v1/workspace/auth-continuation",
         headers=headers,
         json={
-            "agreement_id": checkout_id,
-            "destination_path": dest_path,
+            "agreement_id": guest_id,
+            "destination_path": f"/app/checkout/{stale}?tier=pro&cadence=monthly",
             "workflow_stage": "dashboard",
             "auth_purpose": "returning_sign_in",
             "provider": "google",
@@ -243,23 +241,33 @@ def test_checkout_url_leftover_anon_remint_is_claimed_not_another_workspace(
     )
     assert fin.status_code == 200, fin.text
     dest = str(fin.json().get("destination_path") or "")
-    assert checkout_id in dest
-    assert guest_id not in dest
-    assert isolated_usage.owner_subject_for_agreement(checkout_id) == f"org:{target_org}"
+    assert guest_id in dest
+    assert stale not in dest
     assert isolated_usage.owner_subject_for_agreement(guest_id) == f"org:{target_org}"
+    assert isolated_usage.owner_subject_for_agreement(stale) == "org:user-other-workspace"
     assert resolve_commercial_entitlement(f"org:{target_org}").get("state") == STATE_NONE
 
     checkout = client.post(
         "/v1/billing/checkout-session",
         headers=make_authenticated_user_headers(user_id),
-        json={"agreement_id": checkout_id, "cadence": "monthly", "return_to": "/app/create"},
+        json={"agreement_id": guest_id, "cadence": "monthly", "return_to": "/app/create"},
     )
     assert checkout.status_code == 200, checkout.text
     assert checkout.json()["ok"] is True
-    assert checkout.json()["org_id"] == target_org
+
+    foreign = client.post(
+        "/v1/billing/checkout-session",
+        headers=make_authenticated_user_headers(user_id),
+        json={"agreement_id": stale, "cadence": "monthly", "return_to": "/app/create"},
+    )
+    assert foreign.status_code == 403, foreign.text
+    assert foreign.json()["detail"]["code"] == "workspace_mismatch"
 
 
-def test_genuine_foreign_checkout_url_stays_and_session_403(isolated_usage, monkeypatch: pytest.MonkeyPatch):
+def test_stale_continuation_id_does_not_become_dest_when_leftover_persist_claimed(
+    isolated_usage, monkeypatch: pytest.MonkeyPatch
+):
+    """Continuation/dest already 36568b4c after the jump — leftover persist still wins."""
     monkeypatch.setattr(
         "backend.routers.billing_checkout_api.create_checkout_session",
         _fake_stripe_create,
@@ -267,24 +275,24 @@ def test_genuine_foreign_checkout_url_stays_and_session_403(isolated_usage, monk
     client = TestClient(app)
     anon_org, _token, headers = mint_anonymous_session(client)
     guest_id = "5e79c874-91bd-4d43-95f1-80a827e8b26a"
-    foreign = "36568b4c-1300-4d62-97eb-826bdf2dd6c0"
+    stale = "36568b4c-1300-4d62-97eb-826bdf2dd6c0"
     isolated_usage.insert_agreement_owner(
         agreement_id=guest_id,
         subject_ref=f"org:{anon_org}",
         internal_keys_draft=1,
     )
     isolated_usage.insert_agreement_owner(
-        agreement_id=foreign,
+        agreement_id=stale,
         subject_ref="org:user-other-workspace",
         internal_keys_draft=1,
     )
-    user_id = "keep-foreign-url"
-    dest_path = f"/app/checkout/{foreign}?tier=pro&cadence=monthly"
+    user_id = "stale-cont-id-loses"
+    dest_path = f"/app/checkout/{stale}?tier=pro&cadence=monthly"
     cont = client.post(
         "/v1/workspace/auth-continuation",
         headers=headers,
         json={
-            "agreement_id": foreign,
+            "agreement_id": stale,
             "destination_path": dest_path,
             "workflow_stage": "dashboard",
             "auth_purpose": "returning_sign_in",
@@ -299,33 +307,25 @@ def test_genuine_foreign_checkout_url_stays_and_session_403(isolated_usage, monk
     )
     assert fin.status_code == 200, fin.text
     dest = str(fin.json().get("destination_path") or "")
-    assert foreign in dest
-    assert guest_id not in dest
+    assert guest_id in dest
+    assert stale not in dest
     assert isolated_usage.owner_subject_for_agreement(guest_id) == f"org:user-{user_id}"
-    assert isolated_usage.owner_subject_for_agreement(foreign) == "org:user-other-workspace"
-
-    res = client.post(
-        "/v1/billing/checkout-session",
-        headers=make_authenticated_user_headers(user_id),
-        json={"agreement_id": foreign, "cadence": "monthly", "return_to": "/app/create"},
-    )
-    assert res.status_code == 403, res.text
-    assert res.json()["detail"]["code"] == "workspace_mismatch"
+    assert isolated_usage.owner_subject_for_agreement(stale) == "org:user-other-workspace"
 
 
 def test_bind_user_org_claims_leftover_anon_when_previous_already_user(
     isolated_usage, monkeypatch: pytest.MonkeyPatch
 ):
-    """bind-user-org after org bind still claims same-session leftover remint."""
+    """Already-signed-in bind still claims leftover-anon persist. No leftover cookie → no steal."""
     monkeypatch.setattr(
         "backend.routers.billing_checkout_api.create_checkout_session",
         _fake_stripe_create,
     )
     client = TestClient(app)
     anon_org, _token, headers = mint_anonymous_session(client)
-    checkout_id = "36568b4c-1300-4d62-97eb-826bdf2dd6c0"
+    guest_id = "5e79c874-91bd-4d43-95f1-80a827e8b26a"
     isolated_usage.insert_agreement_owner(
-        agreement_id=checkout_id,
+        agreement_id=guest_id,
         subject_ref=f"org:{anon_org}",
         internal_keys_draft=1,
     )
@@ -342,14 +342,50 @@ def test_bind_user_org_claims_leftover_anon_when_previous_already_user(
     )
     assert res.status_code == 200, res.text
     assert res.json()["migrated_agreement_count"] == 1
-    assert checkout_id in res.json()["migrated_agreement_ids"]
-    assert isolated_usage.owner_subject_for_agreement(checkout_id) == f"org:{target_org}"
+    assert guest_id in res.json()["migrated_agreement_ids"]
+    assert isolated_usage.owner_subject_for_agreement(guest_id) == f"org:{target_org}"
     assert resolve_commercial_entitlement(f"org:{target_org}").get("state") == STATE_NONE
 
     checkout = client.post(
         "/v1/billing/checkout-session",
         headers=make_authenticated_user_headers(user_id),
-        json={"agreement_id": checkout_id, "cadence": "monthly", "return_to": "/app/create"},
+        json={"agreement_id": guest_id, "cadence": "monthly", "return_to": "/app/create"},
     )
     assert checkout.status_code == 200, checkout.text
     assert checkout.json()["ok"] is True
+
+
+def test_bind_without_leftover_cookie_does_not_steal_foreign_user_owner(
+    isolated_usage, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setattr(
+        "backend.routers.billing_checkout_api.create_checkout_session",
+        _fake_stripe_create,
+    )
+    foreign = "36568b4c-1300-4d62-97eb-826bdf2dd6c0"
+    isolated_usage.insert_agreement_owner(
+        agreement_id=foreign,
+        subject_ref="org:user-other-workspace",
+        internal_keys_draft=1,
+    )
+    user_id = "no-leftover-no-steal"
+    client = TestClient(app)
+    res = client.post(
+        "/v1/workspace/bind-user-org",
+        headers=make_test_auth_headers(user_id),
+        json={
+            "user_id": user_id,
+            "previous_org_id": f"user-{user_id}",
+            "claim_method": "google",
+        },
+    )
+    assert res.status_code == 200, res.text
+    assert res.json()["migrated_agreement_count"] == 0
+    assert isolated_usage.owner_subject_for_agreement(foreign) == "org:user-other-workspace"
+    checkout = client.post(
+        "/v1/billing/checkout-session",
+        headers=make_authenticated_user_headers(user_id),
+        json={"agreement_id": foreign, "cadence": "monthly", "return_to": "/app/create"},
+    )
+    assert checkout.status_code == 403, checkout.text
+    assert checkout.json()["detail"]["code"] == "workspace_mismatch"

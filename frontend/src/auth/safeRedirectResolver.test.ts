@@ -1,4 +1,6 @@
-import { describe, expect, it } from "vitest";
+/** @vitest-environment jsdom */
+import { beforeEach, describe, expect, it } from "vitest";
+import { clearPreAuthCheckoutAgreementId } from "./preAuthCheckoutAgreement";
 import {
   buildSignInContinuationPath,
   extractAgreementIdFromCheckoutPath,
@@ -12,6 +14,11 @@ import {
 import { createAuthContinuationContext } from "./authContinuationContext";
 
 describe("safeRedirectResolver", () => {
+  beforeEach(() => {
+    sessionStorage.clear();
+    clearPreAuthCheckoutAgreementId();
+  });
+
   it("rejects external redirects", () => {
     expect(isAllowlistedInternalPath("https://evil.example")).toBe(false);
     expect(resolveSafeRedirectPath("https://evil.example", "/app")).toBe("/app");
@@ -72,17 +79,17 @@ describe("safeRedirectResolver", () => {
     });
   });
 
-  it("keeps the checkout URL agreement id and only replaces the create-flow sentinel", () => {
+  it("pins a stale checkout UUID back to the pre-auth conversion id", () => {
     const claimed = "5e79c874-91bd-4d43-95f1-80a827e8b26a";
-    const checkoutId = "36568b4c-1300-4d62-97eb-826bdf2dd6c0";
+    const stale = "36568b4c-1300-4d62-97eb-826bdf2dd6c0";
     const ctx = createAuthContinuationContext({
       agreementId: claimed,
-      sourcePath: `/app/checkout/${checkoutId}`,
-      destinationPath: `/app/checkout/${checkoutId}?tier=pro&cadence=monthly`,
+      sourcePath: `/app/checkout/${claimed}`,
+      destinationPath: `/app/checkout/${stale}?tier=pro&cadence=monthly`,
       workflowStage: "claim",
     });
     expect(resolvePostAuthDestination(ctx)).toBe(
-      `/app/checkout/${checkoutId}?tier=pro&cadence=monthly`,
+      `/app/checkout/${claimed}?tier=pro&cadence=monthly`,
     );
     const sentinelCtx = createAuthContinuationContext({
       agreementId: claimed,

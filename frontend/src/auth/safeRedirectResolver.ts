@@ -4,6 +4,7 @@
 
 import { CREATE_FLOW_CHECKOUT_AGREEMENT_ID } from "../components/agreements/agreementAdvancedDraftAccess";
 import type { AuthContinuationContextV1 } from "./authContinuationContext";
+import { pinCheckoutPathToPreAuthAgreement, rememberPreAuthCheckoutAgreementId } from "./preAuthCheckoutAgreement";
 
 const ALLOWED_PREFIXES = [
   "/app/create",
@@ -74,10 +75,12 @@ export type SignInContinuationOpts = {
 export function resolveSignInContinuationOpts(destinationPath: string): SignInContinuationOpts {
   const dest = (destinationPath || "/app").trim() || "/app";
   const checkout = isSecureCheckoutPath(dest);
-  const agreementId = extractAgreementIdFromCheckoutPath(dest) ?? undefined;
+  const fromPath = extractAgreementIdFromCheckoutPath(dest) ?? undefined;
+  const agreementId = rememberPreAuthCheckoutAgreementId(fromPath) ?? fromPath;
+  const pinned = agreementId ? pinCheckoutPathToPreAuthAgreement(dest, agreementId) : dest;
   return {
     returningSignIn: !checkout,
-    destinationPath: dest,
+    destinationPath: pinned,
     ...(agreementId ? { agreementId } : {}),
   };
 }
@@ -108,13 +111,8 @@ export function resolvePostAuthDestination(ctx: AuthContinuationContextV1 | null
     return `${dest}${sep}agreementId=${encodeURIComponent(aid)}`;
   }
   if (aid && aid !== CREATE_FLOW_CHECKOUT_AGREEMENT_ID && dest.startsWith("/app/checkout/")) {
-    const current = extractAgreementIdFromCheckoutPath(dest);
-    // Real checkout UUID is the conversion agreement — do not invent another.
-    if (!current) {
-      const qIndex = dest.indexOf("?");
-      const query = qIndex >= 0 ? dest.slice(qIndex) : "";
-      return `/app/checkout/${encodeURIComponent(aid)}${query}`;
-    }
+    rememberPreAuthCheckoutAgreementId(aid);
+    return pinCheckoutPathToPreAuthAgreement(dest, aid);
   }
   return dest;
 }

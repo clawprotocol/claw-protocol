@@ -33,6 +33,7 @@ from backend.security.supabase_jwt import (
 )
 from backend.security.workspace_identity import verify_anonymous_session_from_request, extract_anonymous_session_token
 from backend.security.safe_redirect import (
+    CREATE_FLOW_CHECKOUT_AGREEMENT_ID,
     build_destination_with_agreement,
     extract_agreement_id_from_app_path,
     resolve_safe_redirect_path,
@@ -174,23 +175,15 @@ def _claim_source_org_for_unpaid_converter(
 ) -> str:
     """Claim leftover-anon drafts for the unpaid converter — never a user-* workspace.
 
-    No Pro entitlement yet is not another workspace. Same-session leftover-anon
-    remints (including the agreement on the checkout URL) must move to the
-    signed-in owner_subject. A genuine foreign user-* owner is left untouched.
+    dest_path is unused: a stale checkout UUID must not choose the claim source.
+    Leftover-anon of this tab is the only eligible source.
     """
     leftover = _live_leftover_anon_org(request)
-    dest_aid = extract_agreement_id_from_app_path(dest_path) or ""
-    if dest_aid and leftover:
-        ustore = get_usage_economics_store()
-        ustore.init_schema()
-        owner = (ustore.owner_subject_for_agreement(dest_aid) or "").strip()
-        if owner == f"org:{leftover}":
-            return leftover
     prev = (continuation_org or "").strip()
-    if prev and prev != target_org_id and _is_claimable_draft_source_org(prev):
-        return prev
     if leftover and leftover != target_org_id:
         return leftover
+    if prev and prev != target_org_id and _is_claimable_draft_source_org(prev):
+        return prev
     return ""
 
 
@@ -513,9 +506,21 @@ async def finalize_auth(request: Request, body: FinalizeAuthIn) -> Dict[str, Any
     store.consume_continuation(continuation_id=body.continuation_id.strip(), user_id=user_id)
 
     dest_aid = extract_agreement_id_from_app_path(dest_path) or ""
-    # Keep the checkout URL agreement. Only replace the create-flow sentinel.
-    pin_aid = dest_aid
-    if not pin_aid and migrated:
+    cont_aid = str(cont_row.get("agreement_id") or "").strip()
+    if cont_aid == CREATE_FLOW_CHECKOUT_AGREEMENT_ID:
+        cont_aid = ""
+    # Pre-auth continuation id is the conversion agreement. A dest_path remint
+    # (36568b4c-style stale/foreign UUID) must not become checkout dest.
+    pre_auth = cont_aid or dest_aid
+    pin_aid = pre_auth
+    if dest_aid and migrated and dest_aid not in migrated:
+        if pre_auth in migrated:
+            pin_aid = pre_auth
+        else:
+            pin_aid = migrated[0]
+    elif dest_aid and dest_aid != pre_auth and pre_auth:
+        pin_aid = pre_auth
+    elif not pin_aid and migrated:
         pin_aid = migrated[0]
     dest = build_destination_with_agreement(
         destination_path=dest_path,

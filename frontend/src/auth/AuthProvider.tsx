@@ -13,6 +13,8 @@ import { displayNameFromUser, finalizeAuthenticatedSession } from "./postAuthFin
 import { prepareAuthContinuation } from "./prepareAuthContinuation";
 import { setCachedAccessToken, clearCachedAccessToken } from "./authAccessTokenCache";
 import { bindAuthenticatedUserToWorkspace } from "./workspaceBindingApi";
+import { applyClaimedAgreementIdsToPreAuth } from "./preAuthCheckoutAgreement";
+import { commitPostAuthOwnershipMigration } from "./ownershipMigrationFinalize";
 import {
   GENESIS_DOG_ONBOARDING_DESTINATION,
   hasGenesisDogOnboardingIntent,
@@ -63,13 +65,19 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       // Idempotent identity upsert so Admin Console can find returning sessions by email.
       try {
         const s = await getAuthSession();
-        await bindAuthenticatedUserToWorkspace({
+        const bind = await bindAuthenticatedUserToWorkspace({
           userId: user.id,
           email: user.email,
           displayName: displayNameFromUser(user) || undefined,
           claimMethod: "session_restore",
           accessToken: s?.access_token,
         });
+        applyClaimedAgreementIdsToPreAuth(bind.migrated_agreement_ids);
+        if (bind.migrated_agreement_count > 0) {
+          commitPostAuthOwnershipMigration({
+            migratedAgreementIds: bind.migrated_agreement_ids ?? [],
+          });
+        }
       } catch {
         // Non-blocking — full finalize already succeeded for this session.
       }

@@ -74,9 +74,8 @@ def build_destination_with_agreement(*, destination_path: str, agreement_id: Opt
         rest = dest[len(checkout_prefix) :]
         path_id, _sep, query = rest.partition("?")
         current = unquote(path_id).strip()
-        # Only replace the create-flow sentinel. A real checkout UUID is the
-        # conversion agreement on the URL — never invent a different one.
-        if current == CREATE_FLOW_CHECKOUT_AGREEMENT_ID or not current:
+        # Restore the pre-auth conversion id. A later remint/stale UUID must not win.
+        if current != aid:
             suffix = f"?{query}" if query else ""
             return f"{checkout_prefix}{aid}{suffix}"
     return dest

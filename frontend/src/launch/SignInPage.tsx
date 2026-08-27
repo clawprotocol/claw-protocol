@@ -14,6 +14,7 @@ import {
   isSecureCheckoutPath,
   resolveSignInContinuationOpts,
 } from "../auth/safeRedirectResolver";
+import { pinCheckoutPathToPreAuthAgreement } from "../auth/preAuthCheckoutAgreement";
 import { getGenesisReferralCode } from "./genesisReferral/genesisReferralCapture";
 
 /** Sign-in — dashboard for returning users; checkout `?next=` claims the pre-auth agreement. */
@@ -42,7 +43,7 @@ export function SignInPage() {
   }
 
   if (user) {
-    navigate(destinationPath);
+    navigate(pinCheckoutPathToPreAuthAgreement(destinationPath));
     return null;
   }
 

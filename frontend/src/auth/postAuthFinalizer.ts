@@ -25,6 +25,7 @@ import {
 } from "../launch/paidCheckoutOrgContext";
 import { clearAnonymousSession, logAuthDiagnostic } from "./anonymousSessionApi";
 import { commitPostAuthOwnershipMigration } from "./ownershipMigrationFinalize";
+import { applyClaimedAgreementIdsToPreAuth } from "./preAuthCheckoutAgreement";
 import { readCreateReviewAgreementResumeId } from "../components/agreements/agreementIntakeStorage";
 
 export type PostAuthFinalizeResult = {
@@ -42,6 +43,7 @@ function applyOwnershipMigrationFromServer(args: {
 }): void {
   const ids = (args.migratedAgreementIds ?? []).map((id) => id.trim()).filter(Boolean);
   if (args.migratedAgreementCount <= 0 && ids.length === 0) return;
+  applyClaimedAgreementIdsToPreAuth(ids);
   commitPostAuthOwnershipMigration({
     migratedAgreementIds: ids,
     continuationAgreementId: args.continuationAgreementId,
@@ -84,7 +86,9 @@ export async function finalizeAuthenticatedSession(args: {
         entitlementRepairCandidates: resolveEntitlementRepairOrgCandidates(),
       });
       setOrgId(server.org_id);
-      clearAnonymousSession();
+      if (server.migrated_agreement_count > 0) {
+        clearAnonymousSession();
+      }
       await refreshSubscriptionEntitlement();
       clearAuthContinuationContext();
       clearContinuationId();
@@ -133,7 +137,9 @@ export async function finalizeAuthenticatedSession(args: {
     accessToken: accessToken || undefined,
   });
 
-  clearAnonymousSession();
+  if (bind.migrated_agreement_count > 0) {
+    clearAnonymousSession();
+  }
   await refreshSubscriptionEntitlement();
 
   const ctx = readAuthContinuationContext();

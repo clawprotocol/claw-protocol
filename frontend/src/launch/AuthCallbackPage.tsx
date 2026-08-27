@@ -66,7 +66,8 @@ export function AuthCallbackPage() {
           logProductEvent("continuation_restored", { surface: "auth_callback" });
         }
         const nextDest = resolveSafeRedirectPath(params.get("next"), "");
-        const destination = nextDest || result.destinationPath;
+        // Server dest is pre-auth conversion id. A stale next UUID must not win.
+        const destination = result.destinationPath || nextDest;
         if (!cancel) {
           if (!isUserWorkspaceOrgId(getOrgId())) {
             // Prefer dashboard over create when org bind did not settle — avoids anon-* probes.

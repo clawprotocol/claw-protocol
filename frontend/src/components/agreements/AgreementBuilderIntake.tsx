@@ -877,6 +877,7 @@ import {
   readOwnershipMigrationReceipt,
   shouldBlockDraftWriteForOwnershipTransition,
 } from "../../auth/ownershipMigrationFinalize";
+import { rememberPreAuthCheckoutAgreementId, readPreAuthCheckoutAgreementId } from "../../auth/preAuthCheckoutAgreement";
 import {
   logPaidProReviewAuthorityResolved,
   resolvePaidProReviewAuthority,
@@ -5803,6 +5804,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           // the next React effect flush (displayContext must see the id).
           reviewAgreementIdRef.current = tid;
           writeCreateReviewAgreementResumeId(tid);
+          rememberPreAuthCheckoutAgreementId(tid);
           setReviewAgreementId(tid);
           setJourneyActionFeedback((prev) =>
             prev?.actionId === "create_agreement" && prev.kind === "working"
@@ -12827,8 +12829,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     const returnTo = encodeURIComponent(buildCreateReturnToWithStarterReviewRestore());
     emitPaidFunnelEvent("premium_checkout_opened", { extra: { checkout_surface: "create_flow_checkout" } });
     const checkoutAgreementId =
+      readPreAuthCheckoutAgreementId() ||
       (reviewAgreementIdRef.current || readCreateReviewAgreementResumeId() || "").trim() ||
       CREATE_FLOW_CHECKOUT_AGREEMENT_ID;
+    rememberPreAuthCheckoutAgreementId(checkoutAgreementId);
     navigate(
       `/app/checkout/${encodeURIComponent(checkoutAgreementId)}?tier=pro&cadence=${encodeURIComponent(
         cadence,

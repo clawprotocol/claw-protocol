@@ -82,6 +82,16 @@ import {
 } from "../billingCheckoutApi";
 import { syncDemoSubscriptionEntitlementIfApplicable } from "../billingCheckoutDemoSync";
 import { resetCheckoutEntryScroll } from "./checkoutEntryScroll";
+import {
+  extractAgreementIdFromCheckoutPath,
+  isSecureCheckoutPath,
+} from "../../auth/safeRedirectResolver";
+import {
+  pinCheckoutPathToPreAuthAgreement,
+  readPreAuthCheckoutAgreementId,
+  rememberPreAuthCheckoutAgreementId,
+} from "../../auth/preAuthCheckoutAgreement";
+import { readCreateReviewAgreementResumeId } from "../../components/agreements/agreementIntakeStorage";
 import { SimpleFlowShell } from "./SimpleFlowShell";
 import { SpaLink } from "../SpaLink";
 import {
@@ -262,6 +272,17 @@ export function SimpleCheckoutPage(props: { agreementId: string }) {
   }, [agreementId, isSingleAgreementCheckout]);
 
   useLayoutEffect(() => {
+    const currentPath = `/app/checkout/${encodeURIComponent(agreementId)}${search || ""}`;
+    const pinned = pinCheckoutPathToPreAuthAgreement(
+      currentPath,
+      readPreAuthCheckoutAgreementId() || readCreateReviewAgreementResumeId(),
+    );
+    const pinnedId = extractAgreementIdFromCheckoutPath(pinned);
+    if (pinnedId && pinnedId !== agreementId) {
+      navigate(pinned);
+      return;
+    }
+    rememberPreAuthCheckoutAgreementId(agreementId);
     resetCheckoutEntryScroll();
     const reduce =
       typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
@@ -273,7 +294,7 @@ export function SimpleCheckoutPage(props: { agreementId: string }) {
       window.requestAnimationFrame(() => setCheckoutArrivalOn(true));
     });
     return () => window.cancelAnimationFrame(id);
-  }, [agreementId, search]);
+  }, [agreementId, search, navigate]);
 
   function fail(message: string): void {
     setPaymentError(message);
