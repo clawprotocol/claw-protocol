@@ -410,7 +410,8 @@ def test_bind_without_leftover_cookie_does_not_steal_foreign_user_owner(
 def test_assert_agreement_accessible_still_requires_owner_equals_subject():
     src = Path("backend/security/workspace_identity.py").read_text()
     start = src.index("def assert_agreement_accessible")
-    block = src[start : start + 900]
+    nxt = src.find("\ndef ", start + 1)
+    block = src[start : nxt if nxt > 0 else start + 2000]
     assert "if owner != subject:" in block
     assert '"workspace_mismatch"' in block
     assert '"ownership_not_registered"' in block
