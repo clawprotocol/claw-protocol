@@ -28,6 +28,7 @@ import {
 import { finalizeSettlementAndActivatePlan, finalizeSingleAgreementUnlock } from "../checkoutCompletion";
 import {
   appendReturnToQueryParam,
+  buildAfterPayStripeReturnTo,
   extractAgreementIdFromSendReturnUrl,
   parseCadenceParam,
   parseTierIdParam,
@@ -403,10 +404,7 @@ export function SimpleCheckoutPage(props: { agreementId: string }) {
         fail("This referral link cannot be used for your own account.");
         return;
       }
-      const returnTarget =
-        agreementId === CREATE_FLOW_CHECKOUT_AGREEMENT_ID
-          ? appendReturnToQueryParam(returnTo, "premiumCompletion", "1")
-          : returnTo;
+      const returnTarget = buildAfterPayStripeReturnTo({ agreementId, returnTo });
       const session = await createBillingCheckoutSession({
         agreementId,
         cadence,

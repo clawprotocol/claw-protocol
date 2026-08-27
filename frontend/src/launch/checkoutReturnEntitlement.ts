@@ -5,6 +5,10 @@
 import { refreshSubscriptionEntitlement, writeCachedSubscriptionEntitlement } from "../access/subscriptionEntitlementCache";
 import { verifyBillingCheckoutSession } from "../launch/billingCheckoutApi";
 import { markPaidPremiumCompletionSession } from "../components/agreements/premiumCompletionStorage";
+import {
+  pinAfterPayRestoreAgreementId,
+  readAfterPayRestoreAgreementIdFromSearch,
+} from "./checkoutParams";
 import { getOrgId } from "../launch/orgContext";
 import { writePaidCheckoutOrgId } from "../launch/paidCheckoutOrgContext";
 
@@ -18,7 +22,13 @@ export function readCheckoutSessionIdFromUrl(): string | null {
   }
 }
 
+export function pinAfterPayRestoreAgreementIdFromWindow(): string | null {
+  if (typeof window === "undefined") return null;
+  return pinAfterPayRestoreAgreementId(readAfterPayRestoreAgreementIdFromSearch(window.location.search));
+}
+
 export async function handleCheckoutReturnEntitlement(): Promise<boolean> {
+  pinAfterPayRestoreAgreementIdFromWindow();
   const sessionId = readCheckoutSessionIdFromUrl();
   if (!sessionId) return false;
   try {

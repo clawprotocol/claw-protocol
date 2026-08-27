@@ -1,6 +1,11 @@
+import { CREATE_FLOW_CHECKOUT_AGREEMENT_ID } from "../components/agreements/agreementAdvancedDraftAccess";
+import { writeCreateReviewAgreementResumeId } from "../components/agreements/agreementIntakeStorage";
+import { isRealCheckoutAgreementId, rememberPreAuthCheckoutAgreementId } from "../auth/preAuthCheckoutAgreement";
 import type { PricingCadence } from "./pricingCadenceStorage";
 import type { LaunchPricingTier } from "./pricingTiersData";
 import { LAUNCH_PRICING_TIERS } from "./pricingTiersData";
+
+export const AFTER_PAY_RESTORE_AGREEMENT_ID_PARAM = "restoreAgreementId";
 
 export function extractAgreementIdFromSendReturnUrl(returnTo: string): string | null {
   const path = (returnTo || "").trim().split("?")[0] || "";
@@ -55,4 +60,59 @@ export function appendReturnToQueryParam(returnTo: string, key: string, value: s
     if (!returnTo.includes("?")) return `${returnTo}?${key}=${enc}`;
     return `${returnTo}&${key}=${enc}`;
   }
+}
+
+/** Drop restore=starterReview so after-pay does not remint a hollow create. */
+export function dropStarterReviewRestoreParam(returnTo: string): string {
+  const base = "http://localhost";
+  try {
+    const u = new URL(returnTo, base);
+    if (u.searchParams.get("restore") === "starterReview") {
+      u.searchParams.delete("restore");
+    }
+    const out = `${u.pathname}${u.search}${u.hash}`;
+    return out || returnTo;
+  } catch {
+    return returnTo;
+  }
+}
+
+/**
+ * Stripe return_to for a real persist ID: same agreement through existing final review.
+ * Sentinel create-flow keeps the caller returnTo (often restore=starterReview).
+ */
+export function buildAfterPayStripeReturnTo(args: { agreementId: string; returnTo: string }): string {
+  const aid = (args.agreementId || "").trim();
+  let dest = (args.returnTo || "").trim() || "/app/create";
+  if (!dest.startsWith("/app/create")) return dest;
+  if (isRealCheckoutAgreementId(aid)) {
+    dest = dropStarterReviewRestoreParam(dest);
+    dest = appendReturnToQueryParam(dest, AFTER_PAY_RESTORE_AGREEMENT_ID_PARAM, aid);
+  }
+  if (aid === CREATE_FLOW_CHECKOUT_AGREEMENT_ID || dest.startsWith("/app/create")) {
+    dest = appendReturnToQueryParam(dest, "premiumCompletion", "1");
+  }
+  return dest;
+}
+
+export function readAfterPayRestoreAgreementIdFromSearch(search: string): string | null {
+  try {
+    const q = new URLSearchParams(search.startsWith("?") ? search.slice(1) : search);
+    for (const key of [AFTER_PAY_RESTORE_AGREEMENT_ID_PARAM, "agreementId"]) {
+      const aid = (q.get(key) || "").trim();
+      if (isRealCheckoutAgreementId(aid)) return aid;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/** Pin the paid persist so after-pay return does not POST a second /api/agreements/draft. */
+export function pinAfterPayRestoreAgreementId(agreementId: string | null | undefined): string | null {
+  const aid = (agreementId || "").trim();
+  if (!isRealCheckoutAgreementId(aid)) return null;
+  writeCreateReviewAgreementResumeId(aid);
+  rememberPreAuthCheckoutAgreementId(aid);
+  return aid;
 }

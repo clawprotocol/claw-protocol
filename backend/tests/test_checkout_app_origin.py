@@ -8,6 +8,7 @@ from backend.billing.checkout_app_origin import (
     STAGING_CANONICAL_ORIGIN,
     build_checkout_cancel_url,
     build_checkout_success_url,
+    inject_after_pay_restore_agreement_id,
     resolve_checkout_app_origin,
 )
 
@@ -87,6 +88,28 @@ def test_success_url_preserves_draft_recovery_and_session_placeholder():
     assert "premiumCompletion=1" in url
     assert "checkout_session_id={CHECKOUT_SESSION_ID}" in url
     assert url.count("premiumCompletion=1") == 1
+
+
+def test_success_url_real_persist_replaces_starter_review_with_restore_agreement_id():
+    persist_id = "3405d65b-f4fc-4b33-81d8-84a0734b927b"
+    url = build_checkout_success_url(
+        return_to="/app/create?restore=starterReview",
+        origin=STAGING_CANONICAL_ORIGIN,
+        agreement_id=persist_id,
+    )
+    assert url.startswith(f"{STAGING_CANONICAL_ORIGIN}/app/create?")
+    assert f"restoreAgreementId={persist_id}" in url
+    assert "restore=starterReview" not in url
+    assert "premiumCompletion=1" in url
+    assert "checkout_session_id={CHECKOUT_SESSION_ID}" in url
+
+
+def test_inject_after_pay_restore_preserves_sentinel_starter_review():
+    path = inject_after_pay_restore_agreement_id(
+        "/app/create?restore=starterReview",
+        "__claw_create_checkout__",
+    )
+    assert path == "/app/create?restore=starterReview"
 
 
 def test_success_url_rejects_external_return_path():

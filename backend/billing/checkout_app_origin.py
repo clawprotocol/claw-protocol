@@ -7,10 +7,16 @@ from __future__ import annotations
 
 import os
 from typing import Optional
-from urllib.parse import urlparse
+from urllib.parse import parse_qsl, urlencode, urlparse, urlsplit, urlunsplit
 
 from backend.config.deployment_runtime import claw_environment
-from backend.security.safe_redirect import is_allowlisted_internal_path, resolve_safe_redirect_path
+from backend.security.safe_redirect import (
+    CREATE_FLOW_CHECKOUT_AGREEMENT_ID,
+    is_allowlisted_internal_path,
+    resolve_safe_redirect_path,
+)
+
+AFTER_PAY_RESTORE_AGREEMENT_ID_PARAM = "restoreAgreementId"
 
 STAGING_CANONICAL_ORIGIN = "https://believable-gentleness-staging.up.railway.app"
 PRODUCTION_CANONICAL_ORIGIN = "https://lawdog.me"
@@ -69,11 +75,35 @@ def resolve_checkout_app_origin(
     return PRODUCTION_CANONICAL_ORIGIN
 
 
-def build_checkout_success_url(*, return_to: str, origin: Optional[str] = None) -> str:
+def inject_after_pay_restore_agreement_id(path: str, agreement_id: Optional[str]) -> str:
+    """Keep after-pay return on the paid persist. Drop restore=starterReview remint."""
+    aid = (agreement_id or "").strip()
+    if not aid or aid == CREATE_FLOW_CHECKOUT_AGREEMENT_ID:
+        return path
+    parts = urlsplit(path)
+    if parts.path != "/app/create" and not parts.path.startswith("/app/create/"):
+        return path
+    pairs = [
+        (k, v)
+        for k, v in parse_qsl(parts.query, keep_blank_values=True)
+        if not (k == "restore" and v == "starterReview")
+        and k != AFTER_PAY_RESTORE_AGREEMENT_ID_PARAM
+    ]
+    pairs.append((AFTER_PAY_RESTORE_AGREEMENT_ID_PARAM, aid))
+    return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(pairs), parts.fragment))
+
+
+def build_checkout_success_url(
+    *,
+    return_to: str,
+    origin: Optional[str] = None,
+    agreement_id: Optional[str] = None,
+) -> str:
     app_origin = _normalize_origin(origin or resolve_checkout_app_origin())
     path = resolve_safe_redirect_path(return_to, "/app/create")
     if not is_allowlisted_internal_path(path):
         path = "/app/create"
+    path = inject_after_pay_restore_agreement_id(path, agreement_id)
     extras = []
     if "premiumCompletion=" not in path:
         extras.append("premiumCompletion=1")

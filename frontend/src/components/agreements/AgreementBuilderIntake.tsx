@@ -885,6 +885,10 @@ import {
   shouldMintNewDraftForConversion,
 } from "../../auth/preAuthCheckoutAgreement";
 import {
+  pinAfterPayRestoreAgreementId,
+  readAfterPayRestoreAgreementIdFromSearch,
+} from "../../launch/checkoutParams";
+import {
   logPaidProReviewAuthorityResolved,
   resolvePaidProReviewAuthority,
   resolveValidatedPaidProReviewCorpus,
@@ -8163,8 +8167,22 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       return;
     }
     const urlPc = url.searchParams.get("premiumCompletion") === "1";
+    const afterPayRestoreId = readAfterPayRestoreAgreementIdFromSearch(url.search);
+    if (afterPayRestoreId) {
+      pinAfterPayRestoreAgreementId(afterPayRestoreId);
+      reviewAgreementIdRef.current = afterPayRestoreId;
+      setReviewAgreementId(afterPayRestoreId);
+    }
     const grantPending = peekAdvancedFullDraftCheckoutGrant() && Boolean(readCreateComplexityResume()?.awaitingProCheckout);
     if (!urlPc && !grantPending) return;
+    // Same persist through existing final review — do not remint or show Retry Pro draft.
+    if (afterPayRestoreId) {
+      paidCheckoutCompletedRef.current = true;
+      markPaidPremiumCompletionSession({ source: "settled_checkout" });
+      setPremiumPostCheckoutPhase(null);
+      setPremiumPipelineUserMessage(null);
+      return;
+    }
     // Already completed this tab's checkout→review handoff — do not re-enter generation/hydrate loops.
     if (paidCheckoutCompletedRef.current) return;
     // Bind seeded create-review resume into React state before generation/prepare races intake restore.
@@ -17170,11 +17188,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     // Checkout-return prepare/GET needs claw_agreement_create_review_resume_v1.
     // Restoring intake from complexity resume must not wipe that agreement id.
     try {
-      if (
-        typeof window !== "undefined" &&
-        new URL(window.location.href).searchParams.get("premiumCompletion") === "1"
-      ) {
-        return;
+      if (typeof window !== "undefined") {
+        const params = new URL(window.location.href).searchParams;
+        if (
+          params.get("premiumCompletion") === "1" ||
+          readAfterPayRestoreAgreementIdFromSearch(window.location.search)
+        ) {
+          return;
+        }
       }
     } catch {
       /* ignore */
