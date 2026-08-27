@@ -82,10 +82,7 @@ import {
 } from "../billingCheckoutApi";
 import { syncDemoSubscriptionEntitlementIfApplicable } from "../billingCheckoutDemoSync";
 import { resetCheckoutEntryScroll } from "./checkoutEntryScroll";
-import {
-  extractAgreementIdFromCheckoutPath,
-  isSecureCheckoutPath,
-} from "../../auth/safeRedirectResolver";
+import { extractAgreementIdFromCheckoutPath } from "../../auth/safeRedirectResolver";
 import {
   pinCheckoutPathToPreAuthAgreement,
   readPreAuthCheckoutAgreementId,
