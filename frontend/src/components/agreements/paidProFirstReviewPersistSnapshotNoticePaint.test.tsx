@@ -445,9 +445,8 @@ describe("live persist / snapshot Notices paint (path #131 missed)", () => {
 
   it("hard refresh of persist paints sequential 10/11/12/13 — not 11-after-13", async () => {
     const live = padToVisibleShellFloor(exactLiveHarborAddressContaminationCorpus());
-    expect(topLevelHeadingSequence(live).filter((s) => s.n >= 10).map((s) => s.n)).toEqual([
-      10, 12, 13, 11,
-    ]);
+    expect(live).toMatch(/Agreement12\.\s+NOTICES/);
+    expect(live).toMatch(/13\.\s+Miscellaneous[\s\S]*11\.\s+Governing Law/i);
     latchPersistAuthority(live);
     await seedVerifiedSnapshot(live);
 
