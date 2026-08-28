@@ -39,6 +39,38 @@ describe("paidProSignatureSectionOrdering", () => {
     expect(countPaidProExecutionBlocks(text)).toBe(1);
   });
 
+  it("keeps unnumbered operative body before sequential 10/11/12/13 SIGNATURES", () => {
+    const paint = [
+      "SERVICES AGREEMENT",
+      "",
+      "This Agreement is between Cedar Ridge Labs LLC and Iron Quill Partners Inc.",
+      "",
+      "The parties agree to the operative commercial terms set forth below.",
+      "",
+      "10. NOTICES",
+      "",
+      "If to Cedar Ridge Labs LLC:",
+      "Email: jordan@example.test",
+      "",
+      "11. GOVERNING LAW",
+      "",
+      "This Agreement is governed by the laws of the State of Texas.",
+      "",
+      "12. MISCELLANEOUS",
+      "",
+      "This Agreement constitutes the entire agreement of the parties.",
+      "",
+      "13. SIGNATURES",
+    ].join("\n");
+    const { text } = repairPaidProSignatureSectionOrdering(paint);
+    expect(text).toContain("This Agreement is between Cedar Ridge Labs LLC and Iron Quill Partners Inc.");
+    expect(text).toContain("The parties agree to the operative commercial terms set forth below.");
+    expect(text).toMatch(/10\.\s+NOTICES/);
+    expect(text).toMatch(/11\.\s+GOVERNING LAW/);
+    expect(text).toMatch(/13\.\s+SIGNATURES/);
+    expect(text.indexOf("This Agreement is between")).toBeLessThan(text.search(/10\.\s+NOTICES/));
+  });
+
   it("display polish preserves ordering invariants for test212", () => {
     const { text } = polishProAgreementDisplayLayer(TEST212_BROKEN, {
       intakeText: INTAKE,

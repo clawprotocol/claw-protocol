@@ -414,7 +414,11 @@ export function rebuildSignatureBlocksWithPartyIdentities(
   const { blocks, count } = buildSignatureBlocks(identities);
   if (!blocks.length) return { text, count: 0 };
   const ordered = repairPaidProSignatureSectionOrdering(text.trimEnd());
-  const trimmed = ordered.text.trimEnd();
+  const originalTrimmed = text.trimEnd();
+  const trimmed =
+    ordered.text.trim().length >= Math.min(1500, originalTrimmed.length * 0.6)
+      ? ordered.text.trimEnd()
+      : originalTrimmed;
   const marker = findSignatureRegionStart(trimmed);
   const witnessLine = "IN WITNESS WHEREOF, the Parties execute this Agreement.";
   const signatureTail = `${witnessLine}\n\n${blocks.join("\n\n")}\n`;

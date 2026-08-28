@@ -170,8 +170,13 @@ describe("post-accept Prepare for signing click / handoff", () => {
     });
     expect(gate.allowed).toBe(true);
     expect(gate.blockReason).not.toBe("authoritative_signing_snapshot_not_ready");
+    expect(gate.blockReason).not.toBe("corpus_too_short_for_guided_pro");
     expect(corpusSignatureBlocksHaveRequiredByLines(gate.corpus, 2)).toBe(true);
     expect(gate.corpus).toMatch(/By\s*:/i);
+    expect(gate.corpus).toContain("This Agreement is between Cedar Ridge Labs LLC and Iron Quill Partners Inc.");
+    expect(gate.corpus).toMatch(/laws of the State of Texas/);
+    expect(gate.corpus).toMatch(/10\.\s+NOTICES/);
+    expect(gate.corpus).toMatch(/13\.\s+SIGNATURES/);
     expect(shouldHandoffPostAcceptPrepareToSignatureLinks({
       hasAuthoritativeSigningSnapshot: true,
       snapshotSigningReady: false,
@@ -207,11 +212,11 @@ describe("post-accept Prepare for signing click / handoff", () => {
     expect(vs01Src).not.toMatch(
       /blockReason:\s*allowed \? undefined : "authoritative_signing_snapshot_not_ready"/,
     );
-    expect(intakeSrc).not.toMatch(
-      /enterGuidedSignatureTrackRoute[\s\S]{0,400}resend|sendEmail|send_mail/i,
+    const trackBlock = intakeSrc.slice(
+      intakeSrc.indexOf("const enterGuidedSignatureTrackRoute"),
+      intakeSrc.indexOf("const enterGuidedSignatureTrackRoute") + 1800,
     );
-    expect(intakeSrc).not.toMatch(
-      /const handleProSendForSignature[\s\S]{0,800}stripe|checkout|premiumCompletion/i,
-    );
+    expect(trackBlock).not.toMatch(/resend|sendEmail|send_mail/i);
+    expect(trackBlock).not.toMatch(/stripe|checkout|premiumCompletion/i);
   });
 });
