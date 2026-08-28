@@ -397,6 +397,96 @@ export function renumberTopLevelHeadingsAfterOrphanRemoval(text: string): {
   return { text: merged.replace(/\n{3,}/g, "\n\n"), repairs };
 }
 
+const STANDALONE_SIGNATURES_HEADING_RE = /^(?:\d+\.\s+)?SIGNATURES\s*\.?\s*$/i;
+
+function peelTrailingStandaloneSignatures(head: string): { operative: string; signatures: string } {
+  const lines = head.split("\n");
+  for (let i = 0; i < lines.length; i += 1) {
+    if (STANDALONE_SIGNATURES_HEADING_RE.test((lines[i] ?? "").trim())) {
+      return {
+        operative: lines.slice(0, i).join("\n").trimEnd(),
+        signatures: lines.slice(i).join("\n"),
+      };
+    }
+  }
+  return { operative: head, signatures: "" };
+}
+
+type SequentialSectionBlock = {
+  number: number;
+  origin: number;
+  lines: string[];
+};
+
+function parseTopLevelNumberedBlocks(head: string): {
+  preamble: string[];
+  blocks: SequentialSectionBlock[];
+} {
+  const lines = head.split("\n");
+  const preamble: string[] = [];
+  const blocks: SequentialSectionBlock[] = [];
+  let current: SequentialSectionBlock | null = null;
+
+  for (const line of lines) {
+    const parsed = isTopLevelHeadingLine(line);
+    if (parsed) {
+      if (current) blocks.push(current);
+      current = { number: parsed.number, origin: blocks.length, lines: [line] };
+      continue;
+    }
+    if (current) current.lines.push(line);
+    else preamble.push(line);
+  }
+  if (current) blocks.push(current);
+  return { preamble, blocks };
+}
+
+function joinPreambleAndBlocks(preamble: string[], blocks: readonly SequentialSectionBlock[]): string {
+  const out: string[] = [...preamble];
+  while (out.length && !(out[out.length - 1] ?? "").trim()) out.pop();
+  for (const block of blocks) {
+    const lines = [...block.lines];
+    while (lines.length && !(lines[0] ?? "").trim()) lines.shift();
+    while (lines.length && !(lines[lines.length - 1] ?? "").trim()) lines.pop();
+    if (!lines.length) continue;
+    if (out.length) out.push("");
+    out.push(...lines);
+  }
+  return out.join("\n").replace(/\n{3,}/g, "\n\n").trimEnd();
+}
+
+/**
+ * Restore last-good sequential top-level order when heading numbers go backward
+ * (e.g. 10, 12, 13, 11 → 10, 11, 12, 13). Keeps existing numbers — does not invent
+ * a new 1..N outline or fill earlier gaps.
+ */
+export function restoreSequentialTopLevelSectionOrder(text: string): {
+  text: string;
+  repairs: string[];
+} {
+  const repairs: string[] = [];
+  const raw = (text || "").replace(/\r\n/g, "\n");
+  if (!raw.trim()) return { text: raw, repairs };
+
+  const { head, tail } = splitBeforeWitness(raw);
+  const { operative, signatures } = peelTrailingStandaloneSignatures(head);
+  const { preamble, blocks } = parseTopLevelNumberedBlocks(operative);
+  if (blocks.length < 2) return { text, repairs };
+
+  const numbers = blocks.map((block) => block.number);
+  const hasDescent = numbers.some((num, idx) => idx > 0 && num < numbers[idx - 1]!);
+  if (!hasDescent) return { text, repairs };
+
+  const sorted = [...blocks].sort((a, b) => a.number - b.number || a.origin - b.origin);
+  const body = joinPreambleAndBlocks(preamble, sorted);
+  const parts = [body, signatures.trim(), tail.trim()].filter(Boolean);
+  repairs.push(`section_order_restore:${numbers.join(">")}`);
+  return {
+    text: parts.join("\n\n").replace(/\n{3,}/g, "\n\n").trimEnd(),
+    repairs,
+  };
+}
+
 /**
  * Deterministic repair for orphaned standalone section numbers and survival-clause strand breaks.
  */

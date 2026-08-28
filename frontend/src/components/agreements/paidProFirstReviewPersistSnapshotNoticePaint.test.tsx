@@ -192,6 +192,40 @@ function noticesRegion(text: string): string {
   return nextTop >= 0 ? from.slice(0, nextTop) : from;
 }
 
+function topLevelHeadingSequence(text: string): Array<{ n: number; title: string }> {
+  const witness = text.search(/\bIN WITNESS WHEREOF\b/i);
+  const head = witness >= 0 ? text.slice(0, witness) : text;
+  const seq: Array<{ n: number; title: string }> = [];
+  for (const line of head.split("\n")) {
+    const match = line.trim().match(/^(\d+)\.(?!\d)\s+(.+)$/);
+    if (!match?.[1] || !match[2]) continue;
+    seq.push({ n: Number(match[1]), title: match[2].trim() });
+  }
+  return seq;
+}
+
+/** Persist/snapshot paint must not emit 10→12→13→11 (11 after 13). */
+function assertSequentialTopLevelPaintOrder(text: string): void {
+  const seq = topLevelHeadingSequence(text);
+  const nums = seq.map((s) => s.n);
+  for (let i = 1; i < nums.length; i += 1) {
+    expect(nums[i]).toBeGreaterThan(nums[i - 1]!);
+  }
+  expect(text).not.toMatch(/13\.\s+\S[\s\S]*11\.\s+Governing Law/i);
+  expect(text).toMatch(/11\.\s+Governing Law[\s\S]*laws of Texas/i);
+}
+
+function assertLiveTailIs10Then11Then12Then13(text: string): void {
+  const from10 = topLevelHeadingSequence(text).filter((s) => s.n >= 10);
+  expect(from10.map((s) => s.n)).toEqual([10, 11, 12, 13]);
+  expect(from10[1]?.title).toMatch(/Governing Law/i);
+  expect(from10[2]?.title).toMatch(/NOTICES/i);
+  expect(from10[3]?.title).toMatch(/Miscellaneous/i);
+  expect(text).toMatch(
+    /10\.\s+[\s\S]*11\.\s+Governing Law[\s\S]*12\.\s+NOTICES[\s\S]*13\.\s+Miscellaneous/i,
+  );
+}
+
 function assertIndependentNorthlineHarborNotices(text: string): void {
   const region = noticesRegion(text);
   expect(countOperativeIfToNoticeStanzas(text)).toBe(2);
@@ -298,6 +332,7 @@ describe("live persist / snapshot Notices paint (path #131 missed)", () => {
     });
     assertIndependentNorthlineHarborNotices(painted.plain);
     assertCertifiedTermsStayOutsideNotices(painted.plain);
+    assertSequentialTopLevelPaintOrder(painted.plain);
   });
 
   it("refresh paint of persist + snapshot GET repairs fused If-to without consumed signer metadata", async () => {
@@ -309,6 +344,7 @@ describe("live persist / snapshot Notices paint (path #131 missed)", () => {
     expect(painted.plain.length).toBeGreaterThanOrEqual(PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN);
     assertIndependentNorthlineHarborNotices(painted.plain);
     assertCertifiedTermsStayOutsideNotices(painted.plain);
+    assertSequentialTopLevelPaintOrder(painted.plain);
 
     const { container } = render(
       <PaidProVisibleDocumentShell html="" displayContext={livePaintContext} />,
@@ -324,6 +360,7 @@ describe("live persist / snapshot Notices paint (path #131 missed)", () => {
     expect(visible).toMatch(/30 days/);
     expect(visible).toMatch(/Texas/);
     expect(visible).toMatch(/logo and brand kit/i);
+    expect(visible).not.toMatch(/13\.\s+Miscellaneous[\s\S]*11\.\s+Governing Law/i);
   });
 
   it("regenerate that re-emits the fused persist artifact still paints independent If-to", async () => {
@@ -339,6 +376,7 @@ describe("live persist / snapshot Notices paint (path #131 missed)", () => {
     const second = resolveCanonicalPlainForVisibleShell(livePaintContext);
     assertIndependentNorthlineHarborNotices(second.plain);
     assertCertifiedTermsStayOutsideNotices(second.plain);
+    assertSequentialTopLevelPaintOrder(second.plain);
   });
 
   it("verified snapshot GET alone (no consumed metadata) paints last-good If-to", async () => {
@@ -350,6 +388,7 @@ describe("live persist / snapshot Notices paint (path #131 missed)", () => {
     });
     assertIndependentNorthlineHarborNotices(painted.plain);
     assertCertifiedTermsStayOutsideNotices(painted.plain);
+    assertSequentialTopLevelPaintOrder(painted.plain);
   });
 
   it("persist-rewrite still repairs, but live paint does not depend on that rewrite", () => {
@@ -366,6 +405,7 @@ describe("live persist / snapshot Notices paint (path #131 missed)", () => {
       acceptedCanonicalPlain: padToVisibleShellFloor(fused),
     });
     assertIndependentNorthlineHarborNotices(paintedFromFusedPersist.plain);
+    assertSequentialTopLevelPaintOrder(paintedFromFusedPersist.plain);
   });
 
   it("hard refresh of persist paints blank Harbor Address — not the live commercial-safeguard blob", async () => {
@@ -381,7 +421,9 @@ describe("live persist / snapshot Notices paint (path #131 missed)", () => {
     assertCertifiedTermsStayOutsideNotices(painted.plain);
     expect(painted.plain).not.toMatch(/Address:\s*User-stated material terms/i);
     expect(painted.plain).not.toMatch(/Agreement12\.\s+NOTICES/);
-    expect(painted.plain).toMatch(/this Agreement\n+12\.\s+NOTICES/i);
+    expect(painted.plain).toMatch(/this Agreement\n+11\.\s+Governing Law/i);
+    assertSequentialTopLevelPaintOrder(painted.plain);
+    assertLiveTailIs10Then11Then12Then13(painted.plain);
 
     const { container } = render(
       <PaidProVisibleDocumentShell html="" displayContext={livePaintContext} />,
@@ -397,5 +439,29 @@ describe("live persist / snapshot Notices paint (path #131 missed)", () => {
     expect(visible).toMatch(/30 days/);
     expect(visible).toMatch(/Texas/);
     expect(visible).toMatch(/logo and brand kit/i);
+    expect(visible).toMatch(/10\.\s+[\s\S]*11\.\s+Governing Law[\s\S]*12\.\s+NOTICES[\s\S]*13\.\s+Miscellaneous/i);
+    expect(visible).not.toMatch(/13\.\s+Miscellaneous[\s\S]*11\.\s+Governing Law/i);
+  });
+
+  it("hard refresh of persist paints sequential 10/11/12/13 — not 11-after-13", async () => {
+    const live = padToVisibleShellFloor(exactLiveHarborAddressContaminationCorpus());
+    expect(topLevelHeadingSequence(live).filter((s) => s.n >= 10).map((s) => s.n)).toEqual([
+      10, 12, 13, 11,
+    ]);
+    latchPersistAuthority(live);
+    await seedVerifiedSnapshot(live);
+
+    const painted = resolveCanonicalPlainForVisibleShell(livePaintContext);
+    assertIndependentNorthlineHarborNotices(painted.plain);
+    assertCertifiedTermsStayOutsideNotices(painted.plain);
+    assertSequentialTopLevelPaintOrder(painted.plain);
+    assertLiveTailIs10Then11Then12Then13(painted.plain);
+    expect(painted.plain).toMatch(/11\.\s+Governing Law[\s\S]*laws of Texas/i);
+    expect(noticesRegion(painted.plain)).toMatch(new RegExp(`If to ${NORTHLINE}\\s*:`, "i"));
+    expect(noticesRegion(painted.plain)).toMatch(new RegExp(`If to ${HARBOR}\\s*:`, "i"));
+    const addresses = extractPartyAddressesFromOperativeNoticeStanzas(painted.plain);
+    for (const addr of addresses) {
+      expect(addr.trim()).toBe("");
+    }
   });
 });

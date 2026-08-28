@@ -7,6 +7,7 @@ import {
   repairPaidProOrphanSectionNumbers,
   repairStrandedThisSectionReference,
   renumberTopLevelHeadingsAfterOrphanRemoval,
+  restoreSequentialTopLevelSectionOrder,
 } from "./paidProOrphanSectionNumberRepair";
 import { validateAndRepairPremiumAgreementStructure } from "./premiumAgreementStructure";
 import { preparePaidProReviewDisplayPlain } from "./paidProFlattenedDocumentNormalize";
@@ -177,6 +178,64 @@ describe("Test364 paid Pro orphan section number repair", () => {
     expect(repairs).toContain("section_renumber:18->17");
     expect(text).toMatch(/17\.\s+ELECTRONIC SIGNATURES/i);
     expect(text).toContain("16. Miscellaneous");
+  });
+
+  it("restoreSequentialTopLevelSectionOrder puts 11 Governing Law back between 10 and 12", () => {
+    const input = [
+      "1. Scope of Services",
+      "Work.",
+      "",
+      "2. Term",
+      "30 days.",
+      "",
+      "4. Compensation",
+      "4.1 Fees. $2,400.",
+      "",
+      "10. Limitation of Liability",
+      "Cap under this Agreement.",
+      "",
+      "12. NOTICES",
+      "If to Northline Studio:",
+      "",
+      "13. Miscellaneous",
+      "Entire agreement.",
+      "",
+      "11. Governing Law",
+      "This Agreement is governed by the laws of Texas.",
+      "",
+      "IN WITNESS WHEREOF, the Parties execute this Agreement.",
+    ].join("\n");
+    const { text, repairs } = restoreSequentialTopLevelSectionOrder(input);
+    expect(repairs.some((r) => r.startsWith("section_order_restore:"))).toBe(true);
+    expect(text).toMatch(
+      /10\.\s+Limitation of Liability[\s\S]*11\.\s+Governing Law[\s\S]*12\.\s+NOTICES[\s\S]*13\.\s+Miscellaneous/i,
+    );
+    expect(text).not.toMatch(/13\.\s+Miscellaneous[\s\S]*11\.\s+Governing Law/i);
+    expect(text).toMatch(/11\.\s+Governing Law[\s\S]*laws of Texas/i);
+    expect(text).toMatch(/^1\.\s+Scope of Services/m);
+    expect(text).toMatch(/^2\.\s+Term/m);
+    expect(text).toMatch(/^4\.\s+Compensation/m);
+    expect(text).toContain("4.1 Fees. $2,400.");
+    expect(text).not.toMatch(/^3\.\s+/m);
+  });
+
+  it("restoreSequentialTopLevelSectionOrder is a no-op when numbers already increase", () => {
+    const input = [
+      "10. Limitation of Liability",
+      "Cap.",
+      "",
+      "11. Governing Law",
+      "Texas.",
+      "",
+      "12. NOTICES",
+      "If to A:",
+      "",
+      "13. Miscellaneous",
+      "Entire.",
+    ].join("\n");
+    const { text, repairs } = restoreSequentialTopLevelSectionOrder(input);
+    expect(repairs).toHaveLength(0);
+    expect(text).toBe(input);
   });
 });
 

@@ -18,6 +18,7 @@ import {
 } from "./paidProFirstReviewDisplayAuthority";
 import { projectPaidProVisibleTitleDisplayPlain } from "./paidProDocumentTitleOpeningRepair";
 import { resolvePaidProNoticeAuthorityPartiesForFreeze } from "./paidProNoticeContactAuthority";
+import { restoreSequentialTopLevelSectionOrder } from "./paidProOrphanSectionNumberRepair";
 import { ensureOperativeIfToNoticeDelivery } from "./paidProPartyNoticeDetails";
 import {
   auditPaidProPostFinalizeVisibleSurface,
@@ -65,15 +66,21 @@ function projectLastGoodIfToOnPaintPlain(
     intakeText: args?.intakeText ?? null,
     acceptedCorpus: body,
   });
-  if (parties.length < 2) return body;
-  const noticed = ensureOperativeIfToNoticeDelivery(body, parties, {
-    intakeText: args?.intakeText ?? null,
-    draftPartyNames: (args?.draft?.parties ?? [])
-      .map((p) => String(p?.name ?? "").trim())
-      .filter(Boolean),
-    acceptedCorpus: body,
-  });
-  return noticed.repairs.length > 0 ? noticed.text : body;
+  let afterIfTo = body;
+  if (parties.length >= 2) {
+    const noticed = ensureOperativeIfToNoticeDelivery(body, parties, {
+      intakeText: args?.intakeText ?? null,
+      draftPartyNames: (args?.draft?.parties ?? [])
+        .map((p) => String(p?.name ?? "").trim())
+        .filter(Boolean),
+      acceptedCorpus: body,
+    });
+    if (noticed.repairs.length > 0) afterIfTo = noticed.text;
+  }
+  // Notices splice / persist bytes can keep 12/13 ahead of the original 11. Governing Law.
+  // Restore last-good sequential identity order (10 then 11 then 12 then 13) on paint.
+  const ordered = restoreSequentialTopLevelSectionOrder(afterIfTo);
+  return ordered.repairs.length > 0 ? ordered.text : afterIfTo;
 }
 
 export function resetPaidProVisibleDocumentShellLogsForTests(): void {
@@ -94,8 +101,9 @@ export function resolveCanonicalPlainForVisibleShell(
           family: args.draft?.agreement_family,
         })
       : resolution.plain;
-  // First failing live-paint predicate: persist / canonical-review-snapshot corpus
-  // reached the preview without last-good If-to. Display-only; does not rewrite SoT.
+  // First failing live-paint predicates: persist / canonical-review-snapshot corpus
+  // reached the preview without last-good If-to or sequential 10/11/12/13 order.
+  // Display-only; does not rewrite SoT.
   const projectedPlain =
     titledPlain.length >= PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN
       ? projectLastGoodIfToOnPaintPlain(titledPlain, args)
