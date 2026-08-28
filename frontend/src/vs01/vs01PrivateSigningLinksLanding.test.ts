@@ -118,10 +118,11 @@ describe("remount Prepare → seed ok → stay on private signing-links", () => 
       join(__dirname, "../components/agreements/AgreementBuilderIntake.tsx"),
       "utf8",
     );
-    const track = intake.slice(
-      intake.indexOf("const enterGuidedSignatureTrackRoute"),
-      intake.indexOf("const enterGuidedSignatureTrackRoute") + 4200,
-    );
+    const trackStart = intake.indexOf("const enterGuidedSignatureTrackRoute");
+    const handoffAt = intake.indexOf("executePaidProPostRecipientSetupHandoff", trackStart);
+    expect(handoffAt).toBeGreaterThan(trackStart);
+    const trackEnd = intake.indexOf("\n  }, [", handoffAt);
+    const track = intake.slice(trackStart, trackEnd > handoffAt ? trackEnd : handoffAt + 80);
     expect(track).toContain("executePaidProPostRecipientSetupHandoff");
     expect(track).not.toContain("vs01_packet_ready");
     expect(track).not.toContain("paidProPacketReadyDashboardPath");

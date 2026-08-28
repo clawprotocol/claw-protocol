@@ -353,10 +353,11 @@ describe("post-accept Prepare for signing click / handoff", () => {
 
   it("remount Prepare seed success stays on private-links; vs01_packet_ready does not win", () => {
     const wizard = readFileSync(join(here, "../../vs01/Vs01Wizard.tsx"), "utf8");
-    const trackBlock = intakeSrc.slice(
-      intakeSrc.indexOf("const enterGuidedSignatureTrackRoute"),
-      intakeSrc.indexOf("const enterGuidedSignatureTrackRoute") + 4200,
-    );
+    const trackStart = intakeSrc.indexOf("const enterGuidedSignatureTrackRoute");
+    const handoffAt = intakeSrc.indexOf("executePaidProPostRecipientSetupHandoff", trackStart);
+    expect(handoffAt).toBeGreaterThan(trackStart);
+    const trackEnd = intakeSrc.indexOf("\n  }, [", handoffAt);
+    const trackBlock = intakeSrc.slice(trackStart, trackEnd > handoffAt ? trackEnd : handoffAt + 80);
     expect(trackBlock).toContain("executePaidProPostRecipientSetupHandoff");
     expect(trackBlock).not.toContain("vs01_packet_ready");
     expect(wizard).toContain("resolvePostPrepareBuyerSurface");
