@@ -29919,7 +29919,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       const selected = selectGuidedSignatureTrackCorpus({
         finalizedSignerApplied: finalizedSigningCorpusRef.current,
         finalizedSigning: finalizedSigningCorpusRef.current,
-        acceptedReview: acceptedReviewCorpusRef.current,
+        acceptedReview:
+          acceptedReviewCorpusRef.current || readAuthoritativeSigningCorpus(),
       });
       if (selected.source === "none") {
         logGuidedSignatureTrackFailed({ reason: "corpus_not_selected" });

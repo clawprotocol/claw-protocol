@@ -48,3 +48,19 @@ export function shouldSkipReFinalizeBeforePostAcceptPrepare(args: {
 }): boolean {
   return args.hasAuthoritativeSigningSnapshot || args.signerMetadataFinalizedLatch;
 }
+
+/**
+ * Remount Continue was green because skip-re-finalize is correct. The click
+ * still died when the paint snapshot lacked By/execution lines: Prepare flipped
+ * signaturePreparationRequested (hid Choose your next step + sticky Continue)
+ * and resolveFinalVs01CorpusOrBlock returned authoritative_signing_snapshot_not_ready
+ * without last-good witness rebuild. The empty emerald sticky is that leftover bar.
+ */
+export function shouldHandoffPostAcceptPrepareToSignatureLinks(args: {
+  hasAuthoritativeSigningSnapshot: boolean;
+  snapshotSigningReady: boolean;
+  prepareGateAllowed: boolean;
+}): boolean {
+  if (!args.hasAuthoritativeSigningSnapshot) return false;
+  return args.snapshotSigningReady || args.prepareGateAllowed;
+}

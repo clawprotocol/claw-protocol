@@ -32,7 +32,10 @@ import { resolvePremiumSignaturePreviewMode } from "../components/agreements/pre
 import { consumeAuthoritativeSignerCount, resolveAuthoritativeSignerCount } from "../components/agreements/signerCountAuthority";
 import { labeledPartyLegalEntities } from "../components/agreements/labeledPartyBlockParse";
 import { resolveAuthoritativePartySlotCount } from "../components/agreements/partySlotIdentityNormalize";
-import { readConsumedPaidProSignerMetadataAuthority } from "../components/agreements/paidProSignerMetadataAuthority";
+import {
+  authorityPartiesToCanonicalPartyIdentities,
+  readConsumedPaidProSignerMetadataAuthority,
+} from "../components/agreements/paidProSignerMetadataAuthority";
 import { readFrozenCanonicalManifestPartyCount } from "../components/agreements/frozenCanonicalManifestAuthority";
 import {
   getAcceptedPremiumCanonicalCorpus,
@@ -164,6 +167,36 @@ export function pickDraftSigningCorpusPlain(draft: AgreementDraft | null | undef
   return pickAuthoritativePlainForSendHandoff(draft)?.text ?? "";
 }
 
+/** Remount paint snapshot can exist without By/execution lines — last-good rebuild uses consumed signers. */
+export function resolveVs01WitnessRebuildIdentities(
+  bridge: AgreementVs01BridgeSession | null,
+): CanonicalPartyIdentity[] {
+  if (bridge) {
+    const fromBridge = identitiesFromBridgeSession(bridge);
+    if (fromBridge.length >= 2) return fromBridge;
+  }
+  const parties = readConsumedPaidProSignerMetadataAuthority()?.parties ?? [];
+  if (parties.length < 2) return [];
+  return authorityPartiesToCanonicalPartyIdentities(parties);
+}
+
+/**
+ * First failing predicate after remount Continue: snapshot exists (paint) but is not
+ * signing-ready. Prepare must rebuild By/execution lines, not fail closed.
+ */
+export function isAuthoritativeSigningSnapshotReadyForPrepare(
+  corpus: string,
+  signerCount: number,
+): boolean {
+  const body = (corpus || "").trim();
+  if (body.length < VS01_SIGNING_CORPUS_MIN_LEN) return false;
+  const count = Math.max(1, signerCount);
+  return (
+    corpusHasVisibleSignatureExecutionLines(body) &&
+    corpusSignatureBlocksHaveRequiredByLines(body, count)
+  );
+}
+
 export function identitiesFromBridgeSession(bridge: AgreementVs01BridgeSession): CanonicalPartyIdentity[] {
   const out: CanonicalPartyIdentity[] = [
     {
@@ -206,12 +239,8 @@ export function ensureVs01SigningCorpusWitnessBlock(args: {
   ) {
     return { corpus: out, rebuilt: false, beforeLen, afterLen: out.length };
   }
-  if (
-    args.bridge &&
-    signerCount >= 2 &&
-    !corpusSignatureBlocksHaveRequiredByLines(out, signerCount)
-  ) {
-    const identities = identitiesFromBridgeSession(args.bridge);
+  if (signerCount >= 2 && !corpusSignatureBlocksHaveRequiredByLines(out, signerCount)) {
+    const identities = resolveVs01WitnessRebuildIdentities(args.bridge);
     if (identities.length >= 2) {
       const rebuilt = rebuildSignatureBlocksWithPartyIdentities(out, identities);
       out = stripStaleExecutionPlacementCorpusCopy(rebuilt.text).text;
@@ -548,40 +577,79 @@ export function resolveFinalVs01CorpusOrBlock(
   }
   const snapshotCorpus = signingSnapshot?.corpus?.trim() ?? "";
   if (guidedPro && snapshotCorpus.length >= VS01_SIGNING_CORPUS_MIN_LEN) {
-    const hash = fingerprintAgreementBody(snapshotCorpus);
     const witnessRequirement = resolveVs01WitnessRequirement({
       corpusText: snapshotCorpus,
       intakeText: args.intakeText,
       draft: args.draft ?? null,
     });
-    const hasWitnessBlock = corpusHasWitnessBlock(snapshotCorpus);
-    const hasSignatureBlock = corpusHasVisibleSignatureExecutionLines(snapshotCorpus);
-    const hasBySignatureLines = corpusSignatureBlocksHaveRequiredByLines(snapshotCorpus, signerCount);
-    const allowed =
+    const snapshotReady = isAuthoritativeSigningSnapshotReadyForPrepare(snapshotCorpus, signerCount);
+    const snapshotAllowed =
       !premiumInProgress &&
-      hasSignatureBlock &&
-      (!witnessRequirement.requiresWitness || hasWitnessBlock) &&
-      hasBySignatureLines;
-    return {
-      corpus: snapshotCorpus,
-      source: "finalized_signing",
-      len: snapshotCorpus.length,
-      hash,
-      matchesFreeHash: false,
-      isFreeHashMatch: false,
-      hasWitnessBlock,
-      requiresSignatureBlock: true,
-      requiresWitness: witnessRequirement.requiresWitness,
-      witnessReason: witnessRequirement.witnessReason,
-      hasBySignatureLines,
-      hasByOrSignatureLines: hasBySignatureLines,
-      signerCount,
-      allowed,
-      blockReason: allowed ? undefined : "authoritative_signing_snapshot_not_ready",
-      premiumInProgress,
-      premiumComplete,
-      userMessage: allowed ? undefined : VS01_CORPUS_GATE_USER_MESSAGE,
-    };
+      snapshotReady &&
+      (!witnessRequirement.requiresWitness || corpusHasWitnessBlock(snapshotCorpus));
+    if (snapshotAllowed) {
+      return {
+        corpus: snapshotCorpus,
+        source: "finalized_signing",
+        len: snapshotCorpus.length,
+        hash: fingerprintAgreementBody(snapshotCorpus),
+        matchesFreeHash: false,
+        isFreeHashMatch: false,
+        hasWitnessBlock: corpusHasWitnessBlock(snapshotCorpus),
+        requiresSignatureBlock: true,
+        requiresWitness: witnessRequirement.requiresWitness,
+        witnessReason: witnessRequirement.witnessReason,
+        hasBySignatureLines: true,
+        hasByOrSignatureLines: true,
+        signerCount,
+        allowed: true,
+        premiumInProgress,
+        premiumComplete,
+      };
+    }
+    // Remount #136 installs a paint-ready snapshot that can end at SIGNATURES
+    // without By lines. Last-good rebuilds execution — do not hide Prepare.
+    if (!premiumInProgress) {
+      const repaired = ensureVs01SigningCorpusWitnessBlock({
+        corpus: snapshotCorpus,
+        bridge: args.bridge ?? null,
+        signerCount,
+      });
+      const repairedRequirement = resolveVs01WitnessRequirement({
+        corpusText: repaired.corpus,
+        intakeText: args.intakeText,
+        draft: args.draft ?? null,
+      });
+      const repairedReady = isAuthoritativeSigningSnapshotReadyForPrepare(
+        repaired.corpus,
+        signerCount,
+      );
+      const repairedAllowed =
+        repairedReady &&
+        (!repairedRequirement.requiresWitness || corpusHasWitnessBlock(repaired.corpus));
+      if (repairedAllowed) {
+        return {
+          corpus: repaired.corpus,
+          source: "rebuilt_witness_block",
+          len: repaired.corpus.length,
+          hash: fingerprintAgreementBody(repaired.corpus),
+          matchesFreeHash: false,
+          isFreeHashMatch: false,
+          hasWitnessBlock: corpusHasWitnessBlock(repaired.corpus),
+          requiresSignatureBlock: true,
+          requiresWitness: repairedRequirement.requiresWitness,
+          witnessReason: repairedRequirement.witnessReason,
+          hasBySignatureLines: true,
+          hasByOrSignatureLines: true,
+          signerCount,
+          allowed: true,
+          premiumInProgress,
+          premiumComplete,
+        };
+      }
+    }
+    // Fall through to the existing long-body rebuild — never fail closed on
+    // authoritative_signing_snapshot_not_ready after a remount paint snapshot.
   }
 
   const canonical = guidedPro
