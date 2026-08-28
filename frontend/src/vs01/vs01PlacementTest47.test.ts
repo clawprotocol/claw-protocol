@@ -158,14 +158,15 @@ describe("VS01 placement test47 signature-only hygiene", () => {
     expect(signingFieldGeometryHash(signingFields)).toBe(signingFieldGeometryHash(packet.fields));
   });
 
-  it("keeps guided bridge in automatic mode until explicit Edit field placement", () => {
+  it("keeps placement tools live on Prepare so the buyer can edit before links-ready", () => {
     const src = readFileSync(join(__dirname, "StepPrepareSignature.tsx"), "utf8");
-    expect(src).toContain("const showManualPlacementUi =\n    !agreementBridgePlacementCopy || manualPlacementOverride;");
+    expect(src).toContain("const showManualPlacementUi = true;");
     expect(src).toContain("onClick={() => setManualPlacementOverride(true)}");
     expect(src).toContain("data-testid=\"vs01-edit-field-placement\"");
     expect(src).toContain("setManualPlacementOverride(false);");
     expect(src).toContain("autoSignatureSeededRef.current = false;");
     expect(src).toContain("removeStaleSignatureOnlyAutoplaceFields(prev)");
+    expect(src).not.toContain("bridgeAutoPrepareDispatchedRef");
     expect(src).not.toContain("!agreementBridgePlacementCopy || manualPlacementOverride || !autoPlacementComplete");
   });
 

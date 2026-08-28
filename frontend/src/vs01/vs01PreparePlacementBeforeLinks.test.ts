@@ -203,9 +203,11 @@ describe("Prepare click reaches placement before links-ready", () => {
     );
     const start = bridge.indexOf("export async function tryNavigatePaidProAgreementSenderFirstVs01Esign");
     expect(start).toBeGreaterThanOrEqual(0);
-    const block = bridge.slice(start, start + 2800);
+    const seedAt = bridge.indexOf("const vs01Seed = await fetchAgreementVs01SigningSeed", start);
+    const block = bridge.slice(start, seedAt > start ? seedAt : start + 4500);
     expect(block).toContain("reuse_seeded_vs01_document");
     expect(block).toContain("existingDoc");
+    expect(block).toContain("readPaidProVs01PostSignHandoff");
     expect(block).not.toMatch(/resend|sendEmail|send_mail/i);
   });
 });
