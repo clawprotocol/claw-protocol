@@ -274,7 +274,7 @@ describe("post-accept Prepare for signing click / handoff", () => {
       acceptedReview: readAuthoritativeSigningCorpus(),
     });
     expect(selected.source).toBe("finalized_signer_applied_guided_corpus");
-    expect(selected.body).toBe(gate.corpus);
+    expect(selected.body).toBe(gate.corpus.trim());
     expect(corpusHasVisibleSignatureExecutionLines(selected.body)).toBe(true);
     expect(corpusSignatureBlocksHaveRequiredByLines(selected.body, 2)).toBe(true);
     expect(
