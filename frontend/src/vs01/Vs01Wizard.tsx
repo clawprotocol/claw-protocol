@@ -44,6 +44,7 @@ import { buildVs01CanonicalPacketSeed, hasVs01CanonicalPacketCached, storeVs01Ca
 import { buildVs01RecipientSigningUrl } from "./StepReceipt";
 import {
   clearPaidProVs01PostSignHandoff,
+  readPaidProVs01PostSignHandoff,
   writePaidProVs01PostSignHandoff,
   type PaidProVs01PostSignHandoffV1,
 } from "./vs01PaidProPostSignHandoff";
@@ -71,9 +72,11 @@ import {
   logVs01PrepareFinishBlocked,
 } from "./vs01PreparePacketCompletion";
 import { handlePreparePacketContinue } from "./vs01PreparePacketContinue";
-import { sealPortablePacketEnvelopeProvenance } from "./vs01SigningEnvelopeProvenance";
-import { dispatchSigningInvitesFromHandoff } from "./vs01SigningInviteDelivery";
-import { paidProPacketReadyDashboardPath } from "./vs01PaidProPacketReadyNavigation";
+import {
+  FIRST_FAILING_PREPARE_LANDING_PREDICATE,
+  isPaidProPacketReadyDashboardPath,
+  resolvePostPrepareBuyerSurface,
+} from "./vs01PrivateSigningLinksLanding";
 import { bootstrapVs01RecipientSigningAuthority } from "./vs01RecipientAuthorityBootstrap";
 import type { Vs01RecipientIdentityAuthority } from "./vs01RecipientIdentityAuthority";
 import { logVs01LifecycleEvent } from "./vs01LifecycleAudit";
@@ -591,12 +594,73 @@ export function Vs01Wizard({
       setError("Agreement or document is not ready yet.");
       return;
     }
-    if (isAgreementPacketPrepared(linkedAgreementId)) {
+
+    const stayOnPrivateSigningLinks = (
+      handoff: PaidProVs01PostSignHandoffV1,
+      extra?: { fieldsPlacedCount?: number; idempotent?: boolean },
+    ) => {
+      writePaidProVs01PostSignHandoff(handoff);
+      setPacketHandoff(handoff);
+      clearVs01DraftState(did, "packet_ready_in_wizard");
+      const currentPath =
+        typeof window !== "undefined"
+          ? `${window.location.pathname}${window.location.search}`
+          : `/app/esign/${did}`;
+      let packetReadyQuery = false;
+      try {
+        packetReadyQuery =
+          typeof window !== "undefined" &&
+          new URLSearchParams(window.location.search).get("vs01_packet_ready") === "1";
+      } catch {
+        packetReadyQuery = false;
+      }
+      const landing = resolvePostPrepareBuyerSurface({
+        seedOk: true,
+        documentId: did,
+        currentPath,
+        packetReadyQuery,
+      });
+      // eslint-disable-next-line no-console
+      console.info("[vs01-packet-prepared]", {
+        agreementId: linkedAgreementId,
+        documentIdShort: did.slice(0, 8),
+        counterpartySignerCount: handoff.signers.length,
+        totalParticipantCount: handoff.signers.length + 1,
+        senderMustSignFirst: handoff.senderMustSignFirst ?? false,
+        fieldsPlacedCount: extra?.fieldsPlacedCount ?? 0,
+      });
+      // eslint-disable-next-line no-console
+      console.info("[vs01-private-signing-links-stay]", {
+        agreementId: linkedAgreementId,
+        packetPrepareOnly: true,
+        signerCount: handoff.signers.length,
+        vs01DocumentId: did,
+        destination: landing.reason,
+        packetReadyMustNotWin: true,
+        firstFailingPredicateClosed: FIRST_FAILING_PREPARE_LANDING_PREDICATE,
+        idempotent: extra?.idempotent === true,
+      });
+      markAgreementPacketPrepared(linkedAgreementId);
+      goToStep(3);
+      if (
+        landing.navigateTo &&
+        !isPaidProPacketReadyDashboardPath(landing.navigateTo) &&
+        landing.navigateTo !== currentPath
+      ) {
+        navigate(landing.navigateTo);
+      }
+    };
+
+    const existingHandoff = isAgreementPacketPrepared(linkedAgreementId)
+      ? readPaidProVs01PostSignHandoff(linkedAgreementId)
+      : null;
+    if (existingHandoff && (existingHandoff.signers?.length ?? 0) > 0) {
       // eslint-disable-next-line no-console
       console.info("[vs01-packet-prepare-idempotent-skip]", { agreementId: linkedAgreementId });
-      navigate(paidProPacketReadyDashboardPath());
+      stayOnPrivateSigningLinks(existingHandoff, { idempotent: true });
       return;
     }
+
     const bridge = bridgeHandoffSnapshotRef.current ?? readAgreementVs01BridgeSession();
     const result = handlePreparePacketContinue({
       agreementId: linkedAgreementId,
@@ -622,69 +686,11 @@ export function Vs01Wizard({
       }
       return;
     }
-    writePaidProVs01PostSignHandoff(result.handoff);
-    setPacketHandoff(result.handoff);
-    clearVs01DraftState(did, "packet_ready_in_wizard");
     const placedCount = senderPlacedFields.length + recipientPlacedFields.length;
     if (placedCount > 0) {
       markAgreementFieldsPlacedCount(linkedAgreementId, placedCount);
     }
-    // eslint-disable-next-line no-console
-    console.info("[vs01-packet-prepared]", {
-      agreementId: linkedAgreementId,
-      documentIdShort: did.slice(0, 8),
-      counterpartySignerCount: result.handoff.signers.length,
-      totalParticipantCount: result.handoff.signers.length + 1,
-      senderMustSignFirst: result.handoff.senderMustSignFirst ?? false,
-      fieldsPlacedCount: placedCount,
-    });
-    const roles = result.roles;
-    void (async () => {
-      let portablePacket = result.portablePacket;
-      if (portablePacket) {
-        try {
-          portablePacket = await sealPortablePacketEnvelopeProvenance({
-            documentId: did,
-            portable: portablePacket,
-            roles,
-          });
-        } catch (err) {
-          setError(
-            err instanceof Error
-              ? err.message
-              : "Signing packet provenance could not be sealed against the accepted agreement.",
-          );
-          return;
-        }
-      }
-      const delivery = await dispatchSigningInvitesFromHandoff(result.handoff, roles, {
-        portablePacket,
-        documentId: did,
-      });
-      // eslint-disable-next-line no-console
-      console.info("[vs01-signing-invites-dispatched]", {
-        agreementIdShort: linkedAgreementId.slice(0, 16),
-        attempted: delivery.attempted,
-        ok: delivery.ok,
-        sentCount: delivery.sentCount,
-        skipReason: delivery.skipReason,
-        packetDigestShort: portablePacket?.envelopeProvenance?.packetDigest?.slice(0, 16) ?? null,
-        acceptedSoTDigestShort:
-          portablePacket?.envelopeProvenance?.acceptedSoTDigest?.slice(0, 16) ?? null,
-      });
-      markAgreementPacketPrepared(linkedAgreementId);
-      clearAgreementVs01BridgeSession();
-      clearPaidProAgreementBridgeSkipMarker();
-      // eslint-disable-next-line no-console
-      console.info("[vs01-paid-pro-workspace-navigate]", {
-        agreementId: linkedAgreementId,
-        packetPrepareOnly: true,
-        signerCount: result.handoff.signers.length,
-        vs01DocumentId: did,
-        destination: paidProPacketReadyDashboardPath(),
-      });
-      navigate(paidProPacketReadyDashboardPath());
-    })();
+    stayOnPrivateSigningLinks(result.handoff, { fieldsPlacedCount: placedCount });
   }, [
     vs01LinkedAgreementId,
     documentId,
@@ -700,6 +706,7 @@ export function Vs01Wizard({
     receiptHashSha256,
     navigate,
     prepareCorpusText,
+    goToStep,
   ]);
 
   useEffect(() => {

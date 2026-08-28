@@ -19,8 +19,8 @@ describe("Vs01Wizard agreement bridge (static)", () => {
     expect(s).toContain("writePaidProVs01PostSignHandoff");
     expect(s).toContain("vs01_packet_ready=1");
     expect(s).toContain("[vs01-packet-prepared]");
-    expect(s).toContain("[vs01-paid-pro-workspace-navigate]");
-    expect(s).toContain("paidProPacketReadyDashboardPath");
+    expect(s).toContain("[vs01-private-signing-links-stay]");
+    expect(s).toContain("resolvePostPrepareBuyerSurface");
     expect(s).toContain("vs01_saved=1");
     expect(s).toContain("[vs01-recipient-route-guard]");
     expect(s).toContain("onStepChange");

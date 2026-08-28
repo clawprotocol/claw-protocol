@@ -350,4 +350,23 @@ describe("post-accept Prepare for signing click / handoff", () => {
     expect(trackBlock).not.toMatch(/resend|sendEmail|send_mail/i);
     expect(trackBlock).not.toMatch(/stripe|checkout|premiumCompletion/i);
   });
+
+  it("remount Prepare seed success stays on private-links; vs01_packet_ready does not win", () => {
+    const wizard = readFileSync(join(here, "../../vs01/Vs01Wizard.tsx"), "utf8");
+    const trackBlock = intakeSrc.slice(
+      intakeSrc.indexOf("const enterGuidedSignatureTrackRoute"),
+      intakeSrc.indexOf("const enterGuidedSignatureTrackRoute") + 4200,
+    );
+    expect(trackBlock).toContain("executePaidProPostRecipientSetupHandoff");
+    expect(trackBlock).not.toContain("vs01_packet_ready");
+    expect(wizard).toContain("resolvePostPrepareBuyerSurface");
+    expect(wizard).toContain("[vs01-private-signing-links-stay]");
+    const prepareBlock = wizard.slice(
+      wizard.indexOf("const completeBridgePreparePacket = useCallback"),
+      wizard.indexOf("const completeBridgePreparePacket = useCallback") + 3800,
+    );
+    expect(prepareBlock).toContain("goToStep(3)");
+    expect(prepareBlock).not.toContain("paidProPacketReadyDashboardPath");
+    expect(prepareBlock).not.toMatch(/resend|sendEmail|postSigningLinksSent/i);
+  });
 });
