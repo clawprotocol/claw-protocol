@@ -875,6 +875,8 @@ import {
   shouldShowPaidProReviewDecisionChrome,
 } from "./paidProReviewDecisionModel";
 import {
+  resolvePostAcceptPrepareRequestedCta,
+  resolvePostAcceptPrepareTrackCorpus,
   resolvePostAcceptReviewHandoffCta,
   shouldSkipReFinalizeBeforePostAcceptPrepare,
 } from "./paidProPostAcceptReviewHandoff";
@@ -1520,7 +1522,6 @@ import {
   prepareGuidedSigningCorpusCleanup,
   resolveGuidedSigningAuthoritativePlain,
   resolveGuidedSigningPersistAgreementId,
-  selectGuidedSignatureTrackCorpus,
   shouldBypassGenericOnGenerateForGuidedSignature,
   shouldBypassGenericOnGenerateForGuidedReview,
   logGuidedReviewGenericSendBypassed,
@@ -22838,6 +22839,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           stickyPhase: paidProCanonicalStickyCta.phase,
         });
         if (restoredPostAcceptContinue) return restoredPostAcceptContinue;
+        const leftoverPrepareCta = resolvePostAcceptPrepareRequestedCta({
+          signaturePreparationRequested,
+          sendSurfaceReady: paidProCanonicalStickyCta.phase === "send_ready",
+          stickyPhase: paidProCanonicalStickyCta.phase,
+        });
+        if (leftoverPrepareCta) return leftoverPrepareCta;
         return {
           label: "",
           action: "guided_continue",
@@ -26036,7 +26043,17 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       allowDecorativeEsignCardMode: true,
     });
     if (!gate.allowed) return "";
-    return gate.corpus;
+    const ready = (gate.corpus || "").trim();
+    // Remount paint can be the SoT / ref body. Pin the rebuilt signing-ready
+    // corpus so the signature track cannot re-select an unrebuilt snapshot.
+    if (ready) {
+      acceptedReviewCorpusRef.current = ready;
+      authoritativeAgreementSnapshotRef.current = ready;
+      pinFinalizedSignerAppliedCorpus(ready, "continue_to_signing");
+      finalizedSigningCorpusRef.current = ready;
+      setAgreementDocumentText(ready);
+    }
+    return ready;
   }, [
     flushGuidedSignerMetadataBeforeFinalReview,
     finalizeAndFreezeGuidedFinalCorpus,
@@ -29867,6 +29884,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     markSigningPreparationRequested();
     setSignaturePreparationRequested(true);
     setPaidProInlineSignerSetupLatched(false);
+    let signingLinksSurfaceReached = false;
     const trackStartedAt = Date.now();
     let modalVisible = false;
     const modalRevealTimer = window.setTimeout(() => {
@@ -29916,7 +29934,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         return;
       }
 
-      const selected = selectGuidedSignatureTrackCorpus({
+      const selected = resolvePostAcceptPrepareTrackCorpus({
+        rebuiltSigningCorpus: corpusText,
+        rebuiltSignerCount: Math.max(2, premiumSigningRecipientCount),
         finalizedSignerApplied: finalizedSigningCorpusRef.current,
         finalizedSigning: finalizedSigningCorpusRef.current,
         acceptedReview:
@@ -30125,6 +30145,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             guidedSigningHandoff: vs01Handoff,
           });
           if (localBridge.ok) {
+            signingLinksSurfaceReached = true;
             logGuidedSignatureTrackLocalBridgeSuccess({
               localAgreementId,
               documentId: localBridge.documentId,
@@ -30237,6 +30258,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       const result = timedHandoff.value;
 
       if (result.ok) {
+        signingLinksSurfaceReached = true;
         traceSigningAdvance(`enterGuidedSignatureTrackRoute:handoff_ok:${result.destination}`);
         logPaymentFlowStage("signing_prepare_complete", {
           agreementId: id,
@@ -30270,6 +30292,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       }
       guidedSignatureTrackInFlightRef.current = false;
       setGuidedFinalReviewTransitionInFlight(false);
+      // Remount Prepare hid Choose your next step. If the private signing-links
+      // surface never opened, do not leave prepare_signing as label:"" disabled.
+      if (!signingLinksSurfaceReached && hasAuthoritativeSigningSnapshot()) {
+        setSignaturePreparationRequested(false);
+      }
     }
   }, [
     guidedSigningAuthoritativePlain.length,

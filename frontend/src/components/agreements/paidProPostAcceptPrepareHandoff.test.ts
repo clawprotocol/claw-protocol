@@ -7,11 +7,18 @@ import {
   restoreFinalizedSignerStateFromPaidReturnPersist,
 } from "./paidProPaidReturnSignerFinalizedRestore";
 import {
+  firstFailingPostAcceptPrepareTrackPredicate,
+  isSigningReadyPrepareTrackCorpus,
+  POST_ACCEPT_CONTINUE_TO_SIGNATURE_LINKS_REASON,
+  resolvePostAcceptPrepareRequestedCta,
+  resolvePostAcceptPrepareTrackCorpus,
   shouldHandoffPostAcceptPrepareToSignatureLinks,
   shouldSkipReFinalizeBeforePostAcceptPrepare,
 } from "./paidProPostAcceptReviewHandoff";
+import { resolvePaidProStickyCta } from "./paidProStickyCta";
 import {
   clearAuthoritativeSigningSnapshot,
+  getAuthoritativeSigningSnapshot,
   hasAuthoritativeSigningSnapshot,
   readAuthoritativeSigningCorpus,
 } from "./authoritativeSigningSnapshot";
@@ -25,8 +32,14 @@ import {
   isAuthoritativeSigningSnapshotReadyForPrepare,
   resolveFinalVs01CorpusOrBlock,
 } from "../../vs01/vs01SigningCorpus";
-import { corpusSignatureBlocksHaveRequiredByLines } from "./guidedDealCompletion/signatureRegion";
-import { selectGuidedSignatureTrackCorpus } from "./guidedDealCompletion/guidedFinalReviewToSigning";
+import {
+  corpusHasVisibleSignatureExecutionLines,
+  corpusSignatureBlocksHaveRequiredByLines,
+} from "./guidedDealCompletion/signatureRegion";
+import {
+  assertGuidedVs01SigningHandoffReady,
+  selectGuidedSignatureTrackCorpus,
+} from "./guidedDealCompletion/guidedFinalReviewToSigning";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const intakeSrc = readFileSync(join(here, "AgreementBuilderIntake.tsx"), "utf8");
@@ -187,6 +200,124 @@ describe("post-accept Prepare for signing click / handoff", () => {
       acceptedReview: readAuthoritativeSigningCorpus(),
     });
     expect(selected.source).not.toBe("none");
+    expect(corpusHasVisibleSignatureExecutionLines(selected.body)).toBe(false);
+  });
+
+  it("first failing predicate after #137 allow: track reselects paint → missing_signature_block", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ snapshot: twoAuthorizedFrozen() }), { status: 200 }),
+      ),
+    );
+    await restoreFinalizedSignerStateFromPaidReturnPersist({
+      agreementId: AGREEMENT_ID,
+      persistAccepted: true,
+      corpus: PAINT_ONLY_CORPUS,
+    });
+    const gate = resolveFinalVs01CorpusOrBlock({
+      agreementCorpusText: PAINT_ONLY_CORPUS,
+      guidedPro: true,
+      signaturePreparationRequested: true,
+      prepareSignatureLinksRequested: true,
+    });
+    expect(gate.allowed).toBe(true);
+    expect(isSigningReadyPrepareTrackCorpus(gate.corpus, 2)).toBe(true);
+
+    const paintReselect = selectGuidedSignatureTrackCorpus({
+      finalizedSignerApplied: PAINT_ONLY_CORPUS,
+      finalizedSigning: PAINT_ONLY_CORPUS,
+      acceptedReview: readAuthoritativeSigningCorpus(),
+    });
+    const paintAssert = assertGuidedVs01SigningHandoffReady({
+      manifest: getAuthoritativeSigningSnapshot()!.partyManifest,
+      corpusSource: paintReselect.source,
+      corpusBody: paintReselect.body,
+    });
+    expect(paintAssert.ok).toBe(false);
+    expect(paintAssert.reason).toBe("missing_signature_block");
+    expect(
+      firstFailingPostAcceptPrepareTrackPredicate({
+        paintCorpus: PAINT_ONLY_CORPUS,
+        rebuiltCorpus: gate.corpus,
+        signerCount: 2,
+        partyManifest: getAuthoritativeSigningSnapshot()!.partyManifest,
+      }),
+    ).toBe("missing_signature_block");
+  });
+
+  it("Prepare click uses rebuilt corpus so signing-links route is ready, not empty prepare_signing bar", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ snapshot: twoAuthorizedFrozen() }), { status: 200 }),
+      ),
+    );
+    await restoreFinalizedSignerStateFromPaidReturnPersist({
+      agreementId: AGREEMENT_ID,
+      persistAccepted: true,
+      corpus: PAINT_ONLY_CORPUS,
+    });
+    const gate = resolveFinalVs01CorpusOrBlock({
+      agreementCorpusText: PAINT_ONLY_CORPUS,
+      guidedPro: true,
+      signaturePreparationRequested: true,
+      prepareSignatureLinksRequested: true,
+    });
+    expect(gate.allowed).toBe(true);
+
+    const selected = resolvePostAcceptPrepareTrackCorpus({
+      rebuiltSigningCorpus: gate.corpus,
+      rebuiltSignerCount: 2,
+      finalizedSignerApplied: PAINT_ONLY_CORPUS,
+      finalizedSigning: PAINT_ONLY_CORPUS,
+      acceptedReview: readAuthoritativeSigningCorpus(),
+    });
+    expect(selected.source).toBe("finalized_signer_applied_guided_corpus");
+    expect(selected.body).toBe(gate.corpus);
+    expect(corpusHasVisibleSignatureExecutionLines(selected.body)).toBe(true);
+    expect(corpusSignatureBlocksHaveRequiredByLines(selected.body, 2)).toBe(true);
+    expect(
+      assertGuidedVs01SigningHandoffReady({
+        manifest: getAuthoritativeSigningSnapshot()!.partyManifest,
+        corpusSource: selected.source,
+        corpusBody: selected.body,
+      }).ok,
+    ).toBe(true);
+
+    const leftoverSticky = resolvePaidProStickyCta({
+      hasAuthoritativeSigningSnapshot: true,
+      signerDetailsComplete: true,
+      inlineSignerSetupLatched: false,
+      signaturePreparationRequested: true,
+      sendSurfaceReady: false,
+    });
+    expect(leftoverSticky.phase).toBe("prepare_signing");
+    expect(leftoverSticky.label).toBe("");
+    expect(leftoverSticky.disabled).toBe(true);
+    const leftoverCta = resolvePostAcceptPrepareRequestedCta({
+      signaturePreparationRequested: true,
+      sendSurfaceReady: false,
+      stickyPhase: leftoverSticky.phase,
+    });
+    expect(leftoverCta).not.toBeNull();
+    expect(leftoverCta?.disabled).toBe(false);
+    expect((leftoverCta?.label || "").trim().length).toBeGreaterThan(0);
+    expect(leftoverCta?.reason).toBe(POST_ACCEPT_CONTINUE_TO_SIGNATURE_LINKS_REASON);
+
+    expect(intakeSrc).toContain("resolvePostAcceptPrepareTrackCorpus");
+    expect(intakeSrc).toContain("resolvePostAcceptPrepareRequestedCta");
+    expect(intakeSrc).toContain("signingLinksSurfaceReached");
+    expect(intakeSrc).toMatch(
+      /if \(!signingLinksSurfaceReached && hasAuthoritativeSigningSnapshot\(\)\)/,
+    );
+    const trackBlock = intakeSrc.slice(
+      intakeSrc.indexOf("const enterGuidedSignatureTrackRoute"),
+      intakeSrc.indexOf("const enterGuidedSignatureTrackRoute") + 2800,
+    );
+    expect(trackBlock).toContain("resolvePostAcceptPrepareTrackCorpus");
+    expect(trackBlock).toContain("rebuiltSigningCorpus: corpusText");
+    expect(trackBlock).not.toMatch(/resend|sendEmail|send_mail/i);
   });
 
   it("decision_2 / Continue click still uses last-good Prepare → signature track", () => {

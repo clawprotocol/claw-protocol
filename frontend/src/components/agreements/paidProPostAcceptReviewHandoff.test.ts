@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
   POST_ACCEPT_CONTINUE_TO_SIGNATURE_LINKS_REASON,
+  resolvePostAcceptPrepareRequestedCta,
   resolvePostAcceptReviewHandoffCta,
   shouldSkipReFinalizeBeforePostAcceptPrepare,
 } from "./paidProPostAcceptReviewHandoff";
@@ -77,6 +78,32 @@ describe("post-accept review remount handoff", () => {
       reason: POST_ACCEPT_CONTINUE_TO_SIGNATURE_LINKS_REASON,
     });
     expect(restored?.label).toBe("Continue to signature links");
+  });
+
+  it("does not leave prepare_signing as label:\"\" disabled when signing-links are not reached", () => {
+    const leftover = resolvePostAcceptPrepareRequestedCta({
+      signaturePreparationRequested: true,
+      sendSurfaceReady: false,
+      stickyPhase: "prepare_signing",
+    });
+    expect(leftover).not.toBeNull();
+    expect(leftover?.disabled).toBe(false);
+    expect((leftover?.label || "").trim()).toBe(DASHBOARD_SIGNER_SETUP_RESUME_COMPLETE_CTA);
+    expect(
+      resolvePostAcceptPrepareRequestedCta({
+        signaturePreparationRequested: true,
+        sendSurfaceReady: true,
+        stickyPhase: "send_ready",
+      }),
+    ).toBeNull();
+    expect(
+      resolvePostAcceptPrepareRequestedCta({
+        signaturePreparationRequested: true,
+        sendSurfaceReady: false,
+        signingLinksSurfaceReached: true,
+        stickyPhase: "prepare_signing",
+      }),
+    ).toBeNull();
   });
 
   it("does not restore a second sticky Continue when on-card Prepare chrome is visible", () => {
