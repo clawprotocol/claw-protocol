@@ -8,17 +8,32 @@
  * list ("Waiting for signatures"), including when `recipient-access-token`
  * returned 409 (`signing_not_finalized_server_side`).
  *
+ * #139 closed the in-wizard navigate. Remount / hard refresh of an already
+ * packet-ready URL still boots the owner list — see
+ * `FIRST_FAILING_PACKET_READY_REMOUNT_PREDICATE`.
+ *
  * Last-good surface: `/app/esign/:documentId` StepSigningPacketStatus
- * (per-signer private links, nothing emailed).
+ * (per-signer private links, nothing emailed), or Review Prepare cards.
  */
 
+import { readCreateReviewAgreementResumeId, writeCreateReviewAgreementResumeId } from "../components/agreements/agreementIntakeStorage";
+import { readAgreementVs01BridgeSession } from "../launch/simpleProduct/agreementToVs01SigningBridge";
 import {
   PAID_PRO_VS01_PACKET_READY_DASHBOARD_PATH,
   paidProPacketReadyDashboardPath,
 } from "./vs01PaidProPacketReadyNavigation";
+import {
+  readActivePaidProVs01PostSignHandoff,
+  readLatestLocalPaidProVs01PostSignHandoff,
+  readPaidProVs01PostSignHandoff,
+} from "./vs01PaidProPostSignHandoff";
 
 export const FIRST_FAILING_PREPARE_LANDING_PREDICATE =
   "completeBridgePreparePacket_navigates_vs01_packet_ready_dashboard" as const;
+
+/** App boot of `/app?vs01_packet_ready=1` is still `matchAppPath` → owner dashboard list. */
+export const FIRST_FAILING_PACKET_READY_REMOUNT_PREDICATE =
+  "vs01_packet_ready_boot_lands_owner_dashboard" as const;
 
 export const PRIVATE_SIGNING_LINKS_STAY_REASON = "stay_on_private_signing_links" as const;
 export const PACKET_READY_MUST_NOT_WIN_REASON = "packet_ready_must_not_win_over_links_surface" as const;
@@ -133,4 +148,145 @@ export function resolvePostPrepareBuyerSurface(args: {
 /** Auto-success after Prepare must never choose the dashboard list. */
 export function shouldNavigateToPacketReadyDashboardAfterPrepare(): boolean {
   return false;
+}
+
+/** Boot / remount / hard refresh must never treat `vs01_packet_ready` as the list. */
+export function shouldHonorPacketReadyAsDashboardLanding(): boolean {
+  return false;
+}
+
+export const PAID_PRO_CREATE_REVIEW_PATH = "/app/create" as const;
+export const PACKET_READY_REMOUNT_REWRITE_REASON = "rewrite_packet_ready_dashboard_to_create_review" as const;
+export const PACKET_READY_REMOUNT_STAY_CREATE_REASON = "paid_return_create_stays_off_dashboard" as const;
+
+export type PacketReadyRemountLanding = {
+  stayOffDashboard: true;
+  /** Null means remain on the current create/review or esign route. */
+  navigateTo: string | null;
+  reason:
+    | typeof PACKET_READY_REMOUNT_REWRITE_REASON
+    | typeof PACKET_READY_REMOUNT_STAY_CREATE_REASON
+    | typeof PRIVATE_SIGNING_LINKS_STAY_REASON
+    | typeof RECIPIENT_ACCESS_TOKEN_409_STAY_REASON;
+};
+
+export function isPaidProCreateReviewPath(path: string): boolean {
+  const p = pathnameOf(path);
+  return p === "/app/create" || p.startsWith("/app/create/");
+}
+
+export function packetReadyQueryFromSearch(search: string): boolean {
+  try {
+    const raw = (search || "").trim();
+    const q = new URLSearchParams(raw.startsWith("?") ? raw.slice(1) : raw);
+    return q.get("vs01_packet_ready") === "1";
+  } catch {
+    return false;
+  }
+}
+
+export type PacketReadyRemountContext = {
+  agreementId: string;
+  documentId: string;
+};
+
+/**
+ * Active persist for a packet-ready remount. Session handoff, create-resume,
+ * VS01 bridge, then newest local handoff. Read-only — no draft POST.
+ */
+export function resolveActivePacketReadyRemountContext(): PacketReadyRemountContext | null {
+  const session = readActivePaidProVs01PostSignHandoff();
+  if (session?.agreementId?.trim()) {
+    return {
+      agreementId: session.agreementId.trim(),
+      documentId: (session.vs01DocumentId || "").trim(),
+    };
+  }
+  const resumeId = (readCreateReviewAgreementResumeId() || "").trim();
+  if (resumeId) {
+    const handoff = readPaidProVs01PostSignHandoff(resumeId);
+    if (handoff) {
+      return {
+        agreementId: resumeId,
+        documentId: (handoff.vs01DocumentId || "").trim(),
+      };
+    }
+    const bridge = readAgreementVs01BridgeSession();
+    if (bridge?.agreementId === resumeId) {
+      return {
+        agreementId: resumeId,
+        documentId: (bridge.vs01DocumentId || "").trim(),
+      };
+    }
+    return { agreementId: resumeId, documentId: "" };
+  }
+  const bridge = readAgreementVs01BridgeSession();
+  if (bridge?.agreementId?.trim()) {
+    return {
+      agreementId: bridge.agreementId.trim(),
+      documentId: (bridge.vs01DocumentId || "").trim(),
+    };
+  }
+  const local = readLatestLocalPaidProVs01PostSignHandoff();
+  if (local?.agreementId?.trim()) {
+    return {
+      agreementId: local.agreementId.trim(),
+      documentId: (local.vs01DocumentId || "").trim(),
+    };
+  }
+  return null;
+}
+
+/** Bind this persist so `/app/create` remount hydrates Review, not a blank create. */
+export function bindPacketReadyRemountResume(agreementId: string): void {
+  const id = agreementId.trim();
+  if (!id) return;
+  writeCreateReviewAgreementResumeId(id);
+}
+
+/**
+ * Hard refresh / remount of a signer-finalized or packet-prepared persist.
+ * Never land on `/app` or `/app?vs01_packet_ready=1`.
+ * Create/review and esign stay. Dashboard packet-ready rewrites to Review.
+ */
+export function resolvePacketReadyRemountLanding(args: {
+  currentPath: string;
+  documentId?: string;
+  packetPrepared?: boolean;
+  recipientAccessTokenStatus?: number | null;
+}): PacketReadyRemountLanding {
+  void args.packetPrepared;
+  const onPrivateLinks = isPrivateSigningLinksRoute(args.currentPath);
+  const onCreateReview = isCreateReviewLinksSurface(args.currentPath) || isPaidProCreateReviewPath(args.currentPath);
+  const did = (args.documentId || "").trim();
+
+  if (args.recipientAccessTokenStatus === 409) {
+    return {
+      stayOffDashboard: true,
+      navigateTo: onPrivateLinks || onCreateReview ? null : did ? privateSigningLinksRoute(did) : PAID_PRO_CREATE_REVIEW_PATH,
+      reason: RECIPIENT_ACCESS_TOKEN_409_STAY_REASON,
+    };
+  }
+
+  if (onPrivateLinks) {
+    return {
+      stayOffDashboard: true,
+      navigateTo: null,
+      reason: PRIVATE_SIGNING_LINKS_STAY_REASON,
+    };
+  }
+
+  if (onCreateReview) {
+    return {
+      stayOffDashboard: true,
+      navigateTo: null,
+      reason: PACKET_READY_REMOUNT_STAY_CREATE_REASON,
+    };
+  }
+
+  return {
+    stayOffDashboard: true,
+    navigateTo: PAID_PRO_CREATE_REVIEW_PATH,
+    reason: PACKET_READY_REMOUNT_REWRITE_REASON,
+  };
 }

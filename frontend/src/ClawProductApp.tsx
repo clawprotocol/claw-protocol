@@ -84,6 +84,12 @@ import { PrivacyPage } from "./launch/legal/PrivacyPage";
 import { AffiliateTermsPage } from "./launch/legal/AffiliateTermsPage";
 import { PaidProReviewUxVisualPage } from "./qa/PaidProReviewUxVisualPage";
 import { handleCheckoutReturnEntitlement } from "./launch/checkoutReturnEntitlement";
+import {
+  bindPacketReadyRemountResume,
+  isPaidProPacketReadyDashboardPath,
+  resolveActivePacketReadyRemountContext,
+  resolvePacketReadyRemountLanding,
+} from "./vs01/vs01PrivateSigningLinksLanding";
 
 const RECIPIENT_SIGNING_HERO: Vs01LayoutHero = {
   title: "Review and sign",
@@ -194,6 +200,37 @@ function AgreementSignGate(props: {
       recipientAccessToken={(token || "").trim()}
       onClose={onClose}
     />
+  );
+}
+
+/**
+ * `/app?vs01_packet_ready=1` is `matchAppPath` → owner dashboard list.
+ * Remount / hard refresh must rewrite to Review (or stay off the list).
+ */
+function RedirectPacketReadyDashboardAwayFromList() {
+  const { navigate } = useLaunchNav();
+  useEffect(() => {
+    const ctx = resolveActivePacketReadyRemountContext();
+    if (ctx?.agreementId) bindPacketReadyRemountResume(ctx.agreementId);
+    const currentPath =
+      typeof window !== "undefined"
+        ? `${window.location.pathname}${window.location.search}`
+        : "/app?vs01_packet_ready=1";
+    const landing = resolvePacketReadyRemountLanding({
+      currentPath,
+      documentId: ctx?.documentId ?? "",
+      packetPrepared: true,
+    });
+    const dest =
+      landing.navigateTo && !isPaidProPacketReadyDashboardPath(landing.navigateTo)
+        ? landing.navigateTo
+        : "/app/create";
+    navigate(dest);
+  }, [navigate]);
+  return (
+    <div className="px-4 py-16 text-center text-sm text-slate-400" role="status">
+      Opening agreement…
+    </div>
   );
 }
 
@@ -659,7 +696,11 @@ export function ClawProductApp() {
         surface = <QuickSendPage />;
         break;
       case "dashboard":
-        surface = <AppDashboard />;
+        if (isPaidProPacketReadyDashboardPath(`/app${search || ""}`)) {
+          surface = <RedirectPacketReadyDashboardAwayFromList />;
+        } else {
+          surface = <AppDashboard />;
+        }
         break;
       case "billing":
         surface = <BillingPage />;

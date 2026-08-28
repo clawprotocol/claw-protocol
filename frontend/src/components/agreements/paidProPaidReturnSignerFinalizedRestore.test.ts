@@ -252,11 +252,13 @@ describe("paid-return remount lost in-memory latch (path #135 missed)", () => {
     expect(snapSrc).toContain("paid_return_remount_restore");
     const restoreBlock = intakeSrc.slice(
       intakeSrc.indexOf("const restoreFinalizedSignersFromPersistIfNeeded"),
-      intakeSrc.indexOf("const restoreFinalizedSignersFromPersistIfNeeded") + 1800,
+      intakeSrc.indexOf("const restoreFinalizedSignersFromPersistIfNeeded") + 2600,
     );
     expect(restoreBlock).not.toMatch(/resend|sendEmail|send_mail/i);
     expect(restoreBlock).not.toMatch(/stripe|checkout|premiumCompletion/i);
     expect(restoreBlock).not.toMatch(/persistFrozenSigningAuthorityToBackend/);
+    expect(restoreBlock).toContain("resolvePacketReadyRemountLanding");
+    expect(restoreBlock).not.toContain("paidProPacketReadyDashboardPath");
     expect(intakeSrc).toContain("void restoreFinalizedSignersFromPersistIfNeeded(agreementId, serverCorpus)");
     expect(intakeSrc).toContain("shouldSkipReFinalizeBeforePostAcceptPrepare");
   });

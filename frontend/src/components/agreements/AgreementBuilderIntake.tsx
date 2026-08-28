@@ -1606,6 +1606,10 @@ import {
   isAgreementPacketPrepared,
   readAgreementFieldsPlacedCount,
 } from "../../vs01/vs01WorkspaceSigningStatus";
+import {
+  isPaidProPacketReadyDashboardPath,
+  resolvePacketReadyRemountLanding,
+} from "../../vs01/vs01PrivateSigningLinksLanding";
 import { Vs01SigningPackageInitialsPreference } from "../../vs01/Vs01SigningPackageInitialsPreference";
 import { logUxTrustEvent } from "../../lib/uxTrustAssertions";
 import { shouldShowBlockedDraftPreviewLabel, shouldShowRetryNeedsDetailsPanel } from "./premiumTruthGateUi";
@@ -4364,11 +4368,25 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         setSignerSetupUiPartyCount(Math.max(restored.ui.partyCount, 2));
         setCreateFlowPhase("draft_ready_for_review");
         bumpPremiumSurfaceGateTick();
+        const remountPath =
+          typeof window !== "undefined"
+            ? `${window.location.pathname}${window.location.search}`
+            : "/app/create";
+        const remountLanding = resolvePacketReadyRemountLanding({
+          currentPath: remountPath,
+          packetPrepared: isAgreementPacketPrepared(id),
+        });
+        if (
+          remountLanding.navigateTo &&
+          !isPaidProPacketReadyDashboardPath(remountLanding.navigateTo)
+        ) {
+          navigate(remountLanding.navigateTo);
+        }
       } finally {
         paidReturnSignerRestoreInFlightRef.current = false;
       }
     },
-    [paidProSignerMetadataFinalizedLatch, bumpPremiumSurfaceGateTick],
+    [paidProSignerMetadataFinalizedLatch, bumpPremiumSurfaceGateTick, navigate],
   );
   // TEST577: sticky "signature delivery track chosen" latch. When the user clicks "Prepare for
   // signing" on the accepted-Pro review decision they have explicitly chosen the signature track.

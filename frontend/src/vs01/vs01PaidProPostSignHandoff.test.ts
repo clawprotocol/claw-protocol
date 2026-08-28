@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   clearPaidProVs01PostSignHandoff,
   PAID_PRO_VS01_POST_SIGN_SESSION_KEY,
+  readActivePaidProVs01PostSignHandoff,
   readPaidProVs01PostSignHandoff,
   writePaidProVs01PostSignHandoff,
   type PaidProVs01PostSignHandoffV1,
@@ -56,5 +57,11 @@ describe("vs01PaidProPostSignHandoff", () => {
     writePaidProVs01PostSignHandoff(sample());
     clearPaidProVs01PostSignHandoff();
     expect(readPaidProVs01PostSignHandoff("ag_1")).toBeNull();
+  });
+
+  it("reads the active session handoff without an agreement id", () => {
+    writePaidProVs01PostSignHandoff(sample());
+    expect(readActivePaidProVs01PostSignHandoff()?.agreementId).toBe("ag_1");
+    expect(readActivePaidProVs01PostSignHandoff()?.vs01DocumentId).toBe("doc_1");
   });
 });
