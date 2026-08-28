@@ -871,8 +871,13 @@ import {
   resolvePaidProReviewDecisionPhase,
   resolvePostFinalizeReviewDecisionActive,
   resolvePaidProPrepareSignaturesHandler,
+  shouldHidePaidProReviewDecisionChromeForDashboardResume,
   shouldShowPaidProReviewDecisionChrome,
 } from "./paidProReviewDecisionModel";
+import {
+  resolvePostAcceptReviewHandoffCta,
+  shouldSkipReFinalizeBeforePostAcceptPrepare,
+} from "./paidProPostAcceptReviewHandoff";
 import {
   isJ5ReviewDecisionDiagnosticsEnabled,
   publishJ5ReviewDecisionDiagnostics,
@@ -18317,6 +18322,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       openSignerSetupOnResume,
       createFlowPhase,
       paidProInlineSignerSetupLatched,
+      signerMetadataFinalized:
+        hasAuthoritativeSigningSnapshot() || paidProSignerMetadataFinalizedLatch,
     });
     onSimpleCreateShellChrome({
       paidProReviewReady: paidProReviewReady || dashboardSignerSetupResumeActive,
@@ -18352,6 +18359,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     createFlowPhase,
     openSignerSetupOnResume,
     paidProInlineSignerSetupLatched,
+    paidProSignerMetadataFinalizedLatch,
+    premiumSurfaceGateTick,
   ]);
 
   const paidProDistinctValidRecipientEmailCount = useMemo(() => {
@@ -18822,6 +18831,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     openSignerSetupOnResume,
     createFlowPhase,
     paidProInlineSignerSetupLatched,
+    signerMetadataFinalized:
+      hasAuthoritativeSigningSnapshot() || paidProSignerMetadataFinalizedLatch,
   });
   const paidProCanonicalReviewSignerSetupActive = useMemo(
     () =>
@@ -22734,6 +22745,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     }
     if (paidProCanonicalStickyCta) {
       if (!paidProCanonicalStickyCta.showStickyBar) {
+        const restoredPostAcceptContinue = resolvePostAcceptReviewHandoffCta({
+          signerDetailsComplete: paidProSignerDetailsGate.complete,
+          signerMetadataFinalized: paidProSignerMetadataFinalized,
+          signaturePreparationRequested,
+          reviewDecisionChromeVisible: showPaidProForcedFirstReviewTrackChooser,
+          stickyPhase: paidProCanonicalStickyCta.phase,
+        });
+        if (restoredPostAcceptContinue) return restoredPostAcceptContinue;
         return {
           label: "",
           action: "guided_continue",
@@ -23476,6 +23495,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     paidProSignerSetupStickyCtaSurfaceActive,
     dashboardSignerSetupResumeUiActive,
     paidProSignerDetailsGate.complete,
+    paidProSignerMetadataFinalized,
+    showPaidProForcedFirstReviewTrackChooser,
     canonicalPaidCreateFlowFirstReviewActive,
     authoritativeCreateFlowReviewShellInput,
     paidProFirstReviewCorpusReady,
@@ -31823,8 +31844,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           case "guided_continue": {
             if (cta.reason === "dashboard_signer_setup_resume_complete") {
               void (async () => {
-                const ok = await finalizePaidProSignerMetadataAndOpenReviewDecision();
-                if (!ok) return;
+                if (
+                  !shouldSkipReFinalizeBeforePostAcceptPrepare({
+                    hasAuthoritativeSigningSnapshot: hasAuthoritativeSigningSnapshot(),
+                    signerMetadataFinalizedLatch: paidProSignerMetadataFinalizedLatch,
+                  })
+                ) {
+                  const ok = await finalizePaidProSignerMetadataAndOpenReviewDecision();
+                  if (!ok) return;
+                }
                 handlePaidProPrepareSignaturesFromFirstReview();
               })();
               return;
@@ -34730,7 +34758,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                         ) : null}
                                         {showPaidProForcedFirstReviewTrackChooser &&
                                         !premiumReviewDocEditorOpen &&
-                                        !dashboardSignerSetupResumeUiActive ? (
+                                        !shouldHidePaidProReviewDecisionChromeForDashboardResume({
+                                          dashboardSignerSetupResumeUiActive,
+                                          inlineSignerSetupMounted:
+                                            paidProCanonicalReviewSignerSetupActive,
+                                          signerMetadataFinalized: paidProSignerMetadataFinalized,
+                                        }) ? (
                                           <PaidProForcedFirstReviewChrome
                                             signersReady={paidProReviewSignerStatusReady}
                                             signerMetadataFinalized={paidProSignerMetadataFinalized}

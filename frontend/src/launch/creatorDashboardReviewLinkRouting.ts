@@ -88,13 +88,18 @@ export function isCreatorDashboardSignerSetupResumeActive(search?: string | null
 /**
  * Render/recovery authority for dashboard signer-setup resume.
  * True while URL/session resume is armed, or while intake has latched signer_setup_required.
+ * After authorized signers are finalized (accept + frozen-signing-authority), resume chrome
+ * must end so the review-decision Continue / Prepare signatures action can paint.
  */
 export function isDashboardSignerSetupResumeUiActive(args: {
   openSignerSetupOnResume?: boolean;
   createFlowPhase?: string | null;
   paidProInlineSignerSetupLatched?: boolean;
   search?: string | null;
+  /** Accept + frozen snapshot succeeded — resume form is no longer the primary surface. */
+  signerMetadataFinalized?: boolean;
 }): boolean {
+  if (args.signerMetadataFinalized) return false;
   if (args.openSignerSetupOnResume) return true;
   if (isCreatorDashboardSignerSetupResumeActive(args.search)) return true;
   return (

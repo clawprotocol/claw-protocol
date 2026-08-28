@@ -52,6 +52,22 @@ export function shouldShowPaidProReviewDecisionChrome(phase: PaidProReviewDecisi
   return phase === "decision_1" || phase === "decision_2";
 }
 
+/**
+ * Hide on-card Choose-your-next-step chrome only while the dashboard resume signer form
+ * is still the primary surface. After accept remounts review (signers finalized, form
+ * unmounted), this must be false — otherwise the chooser is suppressed and the sticky
+ * Continue is already hidden (`review_decision`).
+ */
+export function shouldHidePaidProReviewDecisionChromeForDashboardResume(args: {
+  dashboardSignerSetupResumeUiActive: boolean;
+  inlineSignerSetupMounted: boolean;
+  signerMetadataFinalized: boolean;
+}): boolean {
+  if (args.signerMetadataFinalized) return false;
+  if (!args.dashboardSignerSetupResumeUiActive) return false;
+  return args.inlineSignerSetupMounted;
+}
+
 export function resolvePaidProPrepareSignaturesHandler(args: {
   phase: PaidProReviewDecisionPhase;
   onDecision1: () => void;

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   resolvePaidProReviewDecisionPhase,
   resolvePostFinalizeReviewDecisionActive,
+  shouldHidePaidProReviewDecisionChromeForDashboardResume,
   shouldShowPaidProReviewDecisionChrome,
 } from "./paidProReviewDecisionModel";
 
@@ -53,5 +54,22 @@ describe("paidProReviewDecisionModel", () => {
     expect(shouldShowPaidProReviewDecisionChrome("decision_1")).toBe(true);
     expect(shouldShowPaidProReviewDecisionChrome("decision_2")).toBe(true);
     expect(shouldShowPaidProReviewDecisionChrome("signer_setup")).toBe(false);
+  });
+
+  it("does not hide review-decision chrome after accept remount finalizes signers", () => {
+    expect(
+      shouldHidePaidProReviewDecisionChromeForDashboardResume({
+        dashboardSignerSetupResumeUiActive: true,
+        inlineSignerSetupMounted: false,
+        signerMetadataFinalized: true,
+      }),
+    ).toBe(false);
+    expect(
+      shouldHidePaidProReviewDecisionChromeForDashboardResume({
+        dashboardSignerSetupResumeUiActive: true,
+        inlineSignerSetupMounted: true,
+        signerMetadataFinalized: false,
+      }),
+    ).toBe(true);
   });
 });
