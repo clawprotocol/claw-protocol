@@ -498,6 +498,22 @@ export function hasFrozenSigningAuthoritySnapshot(): boolean {
   return Boolean(readFrozenSigningAuthoritySnapshot());
 }
 
+/**
+ * Bind a backend-loaded frozen snapshot to this tab's session id so remount readers
+ * (`readFrozenSigningAuthoritySnapshot()` with no args) see it. Does not POST.
+ */
+export function adoptFrozenSigningAuthoritySnapshotForCurrentSession(
+  snapshot: FrozenSigningAuthoritySnapshotV1,
+): FrozenSigningAuthoritySnapshotV1 {
+  const sessionId = getOrInitSessionAgreementGenerationId();
+  const adopted: FrozenSigningAuthoritySnapshotV1 = {
+    ...snapshot,
+    agreementSessionId: sessionId,
+  };
+  persistSnapshot(adopted);
+  return adopted;
+}
+
 export function clearFrozenSigningAuthoritySnapshotForSession(agreementSessionId?: string): void {
   const sessionId = (agreementSessionId ?? getOrInitSessionAgreementGenerationId()).trim();
   inMemorySnapshotBySession.delete(sessionId);

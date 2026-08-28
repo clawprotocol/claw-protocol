@@ -878,6 +878,7 @@ import {
   resolvePostAcceptReviewHandoffCta,
   shouldSkipReFinalizeBeforePostAcceptPrepare,
 } from "./paidProPostAcceptReviewHandoff";
+import { restoreFinalizedSignerStateFromPaidReturnPersist } from "./paidProPaidReturnSignerFinalizedRestore";
 import {
   isJ5ReviewDecisionDiagnosticsEnabled,
   publishJ5ReviewDecisionDiagnostics,
@@ -4327,6 +4328,47 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   // cleared only when the user re-opens signer editing or the source of truth is torn down.
   const [paidProSignerMetadataFinalizedLatch, setPaidProSignerMetadataFinalizedLatch] =
     useState(false);
+  const paidReturnSignerRestoreInFlightRef = React.useRef(false);
+  const restoreFinalizedSignersFromPersistIfNeeded = React.useCallback(
+    async (agreementId: string, corpus: string) => {
+      const id = (agreementId || "").trim();
+      const body = (corpus || "").trim();
+      if (!id || body.length < PAID_PRO_AUTHORITY_MIN_LEN) return;
+      if (hasAuthoritativeSigningSnapshot() || paidProSignerMetadataFinalizedLatch) return;
+      if (paidReturnSignerRestoreInFlightRef.current) return;
+      const persistAccepted =
+        Boolean(readAcceptedReviewSnapshotRef(id)) ||
+        canEnableCommercialPrepareFromServerSnapshot(id);
+      if (!persistAccepted) return;
+      paidReturnSignerRestoreInFlightRef.current = true;
+      try {
+        const restored = await restoreFinalizedSignerStateFromPaidReturnPersist({
+          agreementId: id,
+          persistAccepted: true,
+          corpus: body,
+          signerMetadataFinalizedLatch: paidProSignerMetadataFinalizedLatch,
+        });
+        if (!restored.ok) return;
+        setPaidProSignerMetadataFinalizedLatch(true);
+        setPaidProInlineSignerSetupLatched(false);
+        setRecipient1Name(restored.ui.recipient1Name);
+        setRecipient2Name(restored.ui.recipient2Name);
+        setRecipient1Email(restored.ui.recipient1Email);
+        setRecipient2Email(restored.ui.recipient2Email);
+        setExtraPartyReviewEmails([...restored.ui.extraPartyReviewEmails]);
+        setExtraPartyLegalNames([...(restored.ui.extraPartyLegalNames ?? [])]);
+        setPartySignerNames([...restored.ui.partySignerNames]);
+        setPartySignerTitles([...restored.ui.partySignerTitles]);
+        setPartyAddresses([...restored.ui.partyAddresses]);
+        setSignerSetupUiPartyCount(Math.max(restored.ui.partyCount, 2));
+        setCreateFlowPhase("draft_ready_for_review");
+        bumpPremiumSurfaceGateTick();
+      } finally {
+        paidReturnSignerRestoreInFlightRef.current = false;
+      }
+    },
+    [paidProSignerMetadataFinalizedLatch, bumpPremiumSurfaceGateTick],
+  );
   // TEST577: sticky "signature delivery track chosen" latch. When the user clicks "Prepare for
   // signing" on the accepted-Pro review decision they have explicitly chosen the signature track.
   // The inline signer-setup phase deliberately holds `signaturePreparationRequested` false (so the
@@ -6674,6 +6716,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     bumpPremiumSurfaceGateTick();
     setPremiumPostCheckoutPhase(null);
     setPremiumPipelineUserMessage(null);
+    void restoreFinalizedSignersFromPersistIfNeeded(agreementId, serverCorpus);
     return true;
   }
 
@@ -17460,6 +17503,17 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           writeCreateReviewDraftSnapshot(next);
         }
         restorePinnedFinalizedSignerCorpus("production_resume_hydrate");
+        if (!signerSetupResume) {
+          const resumeCorpus = [
+            String((adForHydrate as { premium_full_document_text?: string }).premium_full_document_text ?? "").trim(),
+            String(
+              (adForHydrate as { premium_server_full_document_text?: string }).premium_server_full_document_text ?? "",
+            ).trim(),
+            String((adForHydrate as { server_full_document_text?: string }).server_full_document_text ?? "").trim(),
+            getPaidProSourceOfTruthText().trim(),
+          ].reduce((best, t) => (t.length > best.length ? t : best), "");
+          void restoreFinalizedSignersFromPersistIfNeeded(hid, resumeCorpus);
+        }
         if (signerSetupResume) {
           // Workspace GET hydrate is not local review-refresh-restore — never log restored:true.
           logReviewRefreshRestore({
@@ -17636,6 +17690,37 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     openSignerSetupOnResume,
     resumeSignerSetupAgreementId,
     bumpPremiumSurfaceGateTick,
+    restoreFinalizedSignersFromPersistIfNeeded,
+  ]);
+
+  /** Paid-return remount: persist already accepted + frozen with two authorized signers. */
+  useEffect(() => {
+    if (hasAuthoritativeSigningSnapshot() || paidProSignerMetadataFinalizedLatch) return;
+    const agreementId = (
+      reviewAgreementIdRef.current ||
+      reviewAgreementId ||
+      readCreateReviewAgreementResumeId() ||
+      ""
+    ).trim();
+    if (!agreementId) return;
+    const persistAccepted =
+      Boolean(readAcceptedReviewSnapshotRef(agreementId)) ||
+      canEnableCommercialPrepareFromServerSnapshot(agreementId);
+    if (!persistAccepted) return;
+    const corpus = (
+      getPaidProSourceOfTruthText() ||
+      hydratedPremiumBodyRef.current ||
+      lastPremiumWinningCorpusRef.current ||
+      ""
+    ).trim();
+    if (corpus.length < PAID_PRO_AUTHORITY_MIN_LEN) return;
+    void restoreFinalizedSignersFromPersistIfNeeded(agreementId, corpus);
+  }, [
+    reviewAgreementId,
+    paidProSignerMetadataFinalizedLatch,
+    premiumSurfaceGateTick,
+    reviewDocRefreshTick,
+    restoreFinalizedSignersFromPersistIfNeeded,
   ]);
 
   /** Best-effort: create persisted row early so Send can reuse the same id (deduped inside ensure). */
