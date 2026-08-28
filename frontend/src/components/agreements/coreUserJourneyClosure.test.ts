@@ -33,6 +33,7 @@ import {
   feedbackAfterReviewLinksAlreadyReady,
   feedbackAfterReviewLinksCreated,
   feedbackAfterSigningLinksCreated,
+  feedbackAfterPreparePlacementOpened,
 } from "./journeyActionFeedback";
 import { PAID_PRO_DELIVERY_TRACK_REVIEW_DESCRIPTION, PAID_PRO_DELIVERY_TRACK_SIGNATURE_DESCRIPTION } from "./paidProDeliveryTrackGtmCopy";
 import type { LivePreviewModel } from "./liveDraftHeuristics";
@@ -383,6 +384,7 @@ describe("core user journey closure — readiness and feedback", () => {
     expect(feedbackAfterReviewLinksCreated(3)).toMatch(/Nothing was emailed/);
     expect(feedbackAfterReviewLinksAlreadyReady()).toBe("Existing review links were kept. Nothing new was created.");
     expect(feedbackAfterSigningLinksCreated(3)).toMatch(/Each signer receives a different link/);
+    expect(feedbackAfterPreparePlacementOpened()).toMatch(/Private signing links appear after placement/);
     expect(
       feedbackAfterLinkFailure({ kind: "signing", saved: true, fieldRemedy: "Correct Party 2’s email" }),
     ).toMatch(/Signing links were not created/);

@@ -52,6 +52,7 @@ import {
 import { isPlausibleEmail } from "../../vs01/detailsStepValidation";
 import type { Vs01Counterparty } from "../../vs01/types";
 import { resolveApiBase } from "../../lib/clawApi";
+import { readPaidProVs01PostSignHandoff } from "../../vs01/vs01PaidProPostSignHandoff";
 
 const BRIDGE_SESSION_KEY = "claw_agreement_vs01_bridge_handoff_v1";
 /** Survives Strict Mode / URL strip so Vs01Wizard still knows to skip details (value = document id). */
@@ -970,6 +971,43 @@ export async function tryNavigatePaidProAgreementSenderFirstVs01Esign(options: {
     signatureRebuilt: handoff?.signatureRebuilt,
   });
   if (!corpusResolution.allowed) return false;
+
+  const existingBridge = readAgreementVs01BridgeSession();
+  const existingBridgeDoc =
+    existingBridge?.agreementId === id ? existingBridge.vs01DocumentId.trim() : "";
+  const existingHandoffDoc = (readPaidProVs01PostSignHandoff(id)?.vs01DocumentId || "").trim();
+  const existingDoc =
+    existingBridgeDoc && existingBridgeDoc !== "pending"
+      ? existingBridgeDoc
+      : existingHandoffDoc || "";
+  if (existingDoc) {
+    logSignerMetadataBeforeVs01Bridge(merged, resolvedSetup);
+    logAgreementVs01RecipientEmailMergeDiagnostics(merged, recipientSetupPlausibleInputFlags(resolvedSetup));
+    const reusedBridge = buildAgreementVs01BridgeSession({
+      agreementId: id,
+      vs01DocumentId: existingDoc,
+      draft: mergedWithCorpus,
+      senderFirstLawdogHandoff: true,
+      reviewerApprovedCleanHandoff: Boolean(options.reviewerApprovedCleanHandoff),
+      agreementCorpusText: corpusResolution.corpus,
+      recipientSetup: resolvedSetup,
+    });
+    logAgreementVs01BridgePreflight(reusedBridge);
+    logVs01BridgeSignerMetadata(reusedBridge);
+    writeAgreementVs01BridgeSession(reusedBridge);
+    setPaidProAgreementBridgeSkipMarker(existingDoc);
+    const route = `/app/esign/${encodeURIComponent(existingDoc)}?agreement_bridge=1`;
+    logAgreementToVs01EsignRoute({
+      agreementId: id,
+      seedDocumentId: existingDoc,
+      route,
+      reason: "reuse_seeded_vs01_document",
+      agreementBridgeMode: reusedBridge.agreementBridgeMode ?? null,
+      ownerIsPreparingPacket: reusedBridge.ownerIsPreparingPacket ?? null,
+    });
+    void options.navigate(route);
+    return true;
+  }
 
   const vs01Seed = await fetchAgreementVs01SigningSeed(
     id,

@@ -377,8 +377,7 @@ export function StepPrepareSignature({
   const [manualPlacementOverride, setManualPlacementOverride] = useState(false);
   const autoSignatureSeededRef = useRef(false);
   const autoPlacementComplete = Boolean(autoPrepBannerMessage);
-  const showManualPlacementUi =
-    !agreementBridgePlacementCopy || manualPlacementOverride;
+  const showManualPlacementUi = true;
 
   const fieldsRef = useRef(fields);
   fieldsRef.current = fields;
@@ -1211,6 +1210,40 @@ export function StepPrepareSignature({
     autoSignatureSeededRef.current = true;
   }, [agreementBridgePlacementCopy, prepareSignerRoles, numPages]);
 
+  /** Last-good auto-place: adopt canonical fields so the buyer can still edit before links-ready. */
+  useEffect(() => {
+    if (!agreementBridgePlacementCopy || !prepareSignerRoles?.length) return;
+    if (!signingPacketModel?.allowed) return;
+    const modelSigs = signingPacketModel.fields.filter((f) => f.type === "signature" && !f.autoInitials);
+    if (modelSigs.length < prepareSignerRoles.length) return;
+    const existingSigs = fields.filter((f) => f.type === "signature" && !f.autoInitials);
+    if (existingSigs.length > 0) return;
+    setFields(
+      signingPacketModel.fields.map((f) => ({
+        ...f,
+        assignmentSource: f.assignmentSource ?? "autoplace",
+      })),
+    );
+    setAutoPrepBannerMessage(
+      autoSignaturePacketStatusMessage(
+        {
+          fields: signingPacketModel.fields,
+          confidence: "high",
+          placedCount: modelSigs.length,
+          mode: "signature_only",
+          requiredSignatureCount: modelSigs.length,
+          optionalFieldCount: 0,
+        },
+      ),
+    );
+  }, [
+    agreementBridgePlacementCopy,
+    prepareSignerRoles,
+    signingPacketModel,
+    fields,
+    setFields,
+  ]);
+
   const onPagePlacementClick = useCallback(
     (pageIndex0: number, ev: React.MouseEvent<HTMLDivElement>) => {
       if (busy || armedTool == null) {
@@ -1418,14 +1451,6 @@ export function StepPrepareSignature({
       if (placementNoticeTimerRef.current) clearTimeout(placementNoticeTimerRef.current);
     };
   }, []);
-
-  const bridgeAutoPrepareDispatchedRef = useRef(false);
-  useEffect(() => {
-    if (!agreementBridgePlacementCopy || !packetReady || receiptId || busy) return;
-    if (bridgeAutoPrepareDispatchedRef.current) return;
-    bridgeAutoPrepareDispatchedRef.current = true;
-    handlePrepareContinue();
-  }, [agreementBridgePlacementCopy, packetReady, receiptId, busy, handlePrepareContinue]);
 
   const onBoxPointerDown = useCallback(
     (ev: PointerEvent<HTMLDivElement>, field: PlacedSigningField) => {
@@ -2446,7 +2471,7 @@ export function StepPrepareSignature({
         </div>
 
         <aside className="vs01-sign-rail" aria-label="Signing controls">
-          {agreementBridgePlacementCopy && prepareSignerRoles && prepareSignerRoles.length > 0 && manualPlacementOverride ? (
+          {agreementBridgePlacementCopy && prepareSignerRoles && prepareSignerRoles.length > 0 ? (
             <div className="vs01-prepare-role-picker mb-3" role="group" aria-label="Signer role for field placement">
               <p className="vs01-sign-rail-line text-xs font-medium text-slate-500 dark:text-slate-400">
                 Edit field placement for

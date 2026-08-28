@@ -293,7 +293,7 @@ import {
   feedbackAfterModelFailure,
   feedbackAfterReviewLinksAlreadyReady,
   feedbackAfterReviewLinksCreated,
-  feedbackAfterSigningLinksCreated,
+  feedbackAfterPreparePlacementOpened,
   feedbackCreatingAgreement,
   feedbackCreatingLinks,
   feedbackFailed,
@@ -30143,9 +30143,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           const localBridge = tryNavigateGuidedSignatureTrackLocalVs01Esign({
             navigate: (to) => {
               const feedback = feedbackSucceeded(
-                "create_links",
-                "Signing links created—share when ready",
-                feedbackAfterSigningLinksCreated(premiumSigningRecipientCount),
+                "prepare_placement",
+                "Place signature fields",
+                feedbackAfterPreparePlacementOpened(),
               );
               setJourneyActionFeedback(feedback);
               publishJourneyActionFlash(feedback);
@@ -30237,9 +30237,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         executePaidProPostRecipientSetupHandoff({
           navigate: (to) => {
             const feedback = feedbackSucceeded(
-              "create_links",
-              "Signing links created—share when ready",
-              feedbackAfterSigningLinksCreated(premiumSigningRecipientCount),
+              "prepare_placement",
+              "Place signature fields",
+              feedbackAfterPreparePlacementOpened(),
             );
             setJourneyActionFeedback(feedback);
             publishJourneyActionFlash(feedback);

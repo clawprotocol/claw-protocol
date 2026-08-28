@@ -16,7 +16,7 @@ import { detailsStepIsValid } from "./detailsStepValidation";
 import type { PlacedSigningField } from "./signingFields";
 import { getVs01UrlBootstrap } from "./vs01UrlBootstrap";
 import { resolveReviewerEffectiveAccessToken } from "../agreement/reviewerTokenPersistence";
-import { markAgreementFieldsPlacedCount, markAgreementPacketPrepared, isAgreementPacketPrepared } from "./vs01WorkspaceSigningStatus";
+import { markAgreementFieldsPlacedCount, markAgreementPacketPrepared, isAgreementPacketPrepared, readAgreementFieldsPlacedCount } from "./vs01WorkspaceSigningStatus";
 import { fetchDocumentContent, getReceipt } from "./vs01Api";
 import { useAuth } from "../auth/AuthProvider";
 import { shouldDeferVs01SeedDocumentLoad } from "./vs01SeedDocumentAuthGate";
@@ -77,6 +77,13 @@ import {
   isPaidProPacketReadyDashboardPath,
   resolvePostPrepareBuyerSurface,
 } from "./vs01PrivateSigningLinksLanding";
+import {
+  FIRST_FAILING_PLACEMENT_SKIP_PREDICATE,
+  canClaimPrivateSigningLinksReady,
+  countPlacedSigningFields,
+  resolvePrepareStepAfterSeed,
+  resolveRemountPrepareStep,
+} from "./vs01PreparePlacementBeforeLinks";
 import { bootstrapVs01RecipientSigningAuthority } from "./vs01RecipientAuthorityBootstrap";
 import type { Vs01RecipientIdentityAuthority } from "./vs01RecipientIdentityAuthority";
 import { logVs01LifecycleEvent } from "./vs01LifecycleAudit";
@@ -629,6 +636,18 @@ export function Vs01Wizard({
         senderMustSignFirst: handoff.senderMustSignFirst ?? false,
         fieldsPlacedCount: extra?.fieldsPlacedCount ?? 0,
       });
+      const placedForLinks = extra?.fieldsPlacedCount ?? 0;
+      if (!canClaimPrivateSigningLinksReady(placedForLinks)) {
+        // eslint-disable-next-line no-console
+        console.info("[vs01-placement-before-links]", {
+          agreementId: linkedAgreementId,
+          vs01DocumentId: did,
+          fieldsPlacedCount: placedForLinks,
+          firstFailingPredicate: FIRST_FAILING_PLACEMENT_SKIP_PREDICATE,
+          reason: resolvePrepareStepAfterSeed({ fieldsPlacedCount: placedForLinks }).reason,
+        });
+        return;
+      }
       // eslint-disable-next-line no-console
       console.info("[vs01-private-signing-links-stay]", {
         agreementId: linkedAgreementId,
@@ -638,7 +657,9 @@ export function Vs01Wizard({
         destination: landing.reason,
         packetReadyMustNotWin: true,
         firstFailingPredicateClosed: FIRST_FAILING_PREPARE_LANDING_PREDICATE,
+        placementSkipPredicateClosed: FIRST_FAILING_PLACEMENT_SKIP_PREDICATE,
         idempotent: extra?.idempotent === true,
+        fieldsPlacedCount: placedForLinks,
       });
       markAgreementPacketPrepared(linkedAgreementId);
       goToStep(3);
@@ -655,10 +676,31 @@ export function Vs01Wizard({
       ? readPaidProVs01PostSignHandoff(linkedAgreementId)
       : null;
     if (existingHandoff && (existingHandoff.signers?.length ?? 0) > 0) {
+      const remount = resolveRemountPrepareStep({
+        agreementId: linkedAgreementId,
+        senderPlacedCount: senderPlacedFields.length,
+        recipientPlacedCount: recipientPlacedFields.length,
+      });
+      if (remount.step === 3) {
+        // eslint-disable-next-line no-console
+        console.info("[vs01-packet-prepare-idempotent-skip]", {
+          agreementId: linkedAgreementId,
+          fieldsPlacedCount: remount.fieldsPlacedCount,
+        });
+        stayOnPrivateSigningLinks(existingHandoff, {
+          idempotent: true,
+          fieldsPlacedCount: remount.fieldsPlacedCount,
+        });
+        return;
+      }
       // eslint-disable-next-line no-console
-      console.info("[vs01-packet-prepare-idempotent-skip]", { agreementId: linkedAgreementId });
-      stayOnPrivateSigningLinks(existingHandoff, { idempotent: true });
-      return;
+      console.info("[vs01-placement-before-links]", {
+        agreementId: linkedAgreementId,
+        fieldsPlacedCount: remount.fieldsPlacedCount,
+        firstFailingPredicate: FIRST_FAILING_PLACEMENT_SKIP_PREDICATE,
+        reason: remount.reason,
+        idempotentSkipped: false,
+      });
     }
 
     const bridge = bridgeHandoffSnapshotRef.current ?? readAgreementVs01BridgeSession();
@@ -686,9 +728,26 @@ export function Vs01Wizard({
       }
       return;
     }
-    const placedCount = senderPlacedFields.length + recipientPlacedFields.length;
+    const placedCount = countPlacedSigningFields({
+      senderPlacedCount: senderPlacedFields.length,
+      recipientPlacedCount: recipientPlacedFields.length,
+      portableFieldCount: result.portablePacket?.fields?.length ?? 0,
+      storedFieldsPlacedCount: readAgreementFieldsPlacedCount(linkedAgreementId),
+    });
     if (placedCount > 0) {
       markAgreementFieldsPlacedCount(linkedAgreementId, placedCount);
+    }
+    const landingStep = resolvePrepareStepAfterSeed({ fieldsPlacedCount: placedCount });
+    if (landingStep.step !== 3) {
+      // eslint-disable-next-line no-console
+      console.info("[vs01-placement-before-links]", {
+        agreementId: linkedAgreementId,
+        vs01DocumentId: did,
+        fieldsPlacedCount: placedCount,
+        firstFailingPredicate: FIRST_FAILING_PLACEMENT_SKIP_PREDICATE,
+        reason: landingStep.reason,
+      });
+      return;
     }
     stayOnPrivateSigningLinks(result.handoff, { fieldsPlacedCount: placedCount });
   }, [
@@ -831,7 +890,14 @@ export function Vs01Wizard({
             ),
           );
         });
-        const nextStep: Vs01Step = saved ? saved.step : 2;
+        const savedFieldCount = saved
+          ? saved.senderPlacedFields.length + saved.recipientPlacedFields.length
+          : 0;
+        const nextStep: Vs01Step = saved && saved.step >= 3 && savedFieldCount <= 0
+          ? 2
+          : saved
+            ? saved.step
+            : 2;
         const fs = (saved ? Math.max(nextStep, saved.furthestStep) : nextStep) as Vs01Step;
         setFurthestStep((prev) => ((fs > prev ? fs : prev) as Vs01Step));
         goToStep(nextStep);
@@ -977,7 +1043,14 @@ export function Vs01Wizard({
               );
             }
           });
-          const nextStep: Vs01Step = saved ? saved.step : 2;
+          const savedFieldCount = saved
+            ? saved.senderPlacedFields.length + saved.recipientPlacedFields.length
+            : 0;
+          const nextStep: Vs01Step = saved && saved.step >= 3 && savedFieldCount <= 0
+            ? 2
+            : saved
+              ? saved.step
+              : 2;
           // eslint-disable-next-line no-console
           console.info("[vs01-paid-pro-skip-details]", {
             seedDocumentId: sid,

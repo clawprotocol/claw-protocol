@@ -181,6 +181,11 @@ export function feedbackAfterSigningLinksCreated(count: number): string {
   return `${formatCount(n)} ${noun} created. Nothing was emailed. Each signer receives a different link.`;
 }
 
+/** Prepare click opens field placement — do not claim links-ready with 0 placed fields. */
+export function feedbackAfterPreparePlacementOpened(): string {
+  return "Place Signature, Name, and Date for each authorized signer. Private signing links appear after placement. Nothing will be emailed.";
+}
+
 export function feedbackAfterLinkFailure(args: {
   kind: "review" | "signing";
   saved: boolean;
