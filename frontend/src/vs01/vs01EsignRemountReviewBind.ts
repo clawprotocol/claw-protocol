@@ -1,11 +1,11 @@
 /**
- * ANY entry to a persist's esign packet must not paint a template.
+ * ANY entry to a persist's esign packet must not paint a template
+ * or an older Review snapshot (11 after 13 / 10 jumping to 12).
  *
- * First failing predicate after #143: bindReviewCorpusOntoSeededVs01Document
- * ran only inside tryNavigate when existingDoc was set. Hard refresh of a
- * leftover `/app/esign/:id` (and leftover-route fallback) remounted the
- * wizard and painted GET /content without that bind, so vs01-signing-seed
- * never fired. Reuse the existing Review SoT + seed POST.
+ * After leftover-template bind: POST vs01-signing-seed 200 still wrote
+ * stale persist draft fields (premium/server_full_document_text) instead
+ * of the current accepted Review SoT. Prefer the accepted snapshot, then
+ * sequential 10/11/12/13 Review, same persist / same vs01 id.
  */
 
 import type { AgreementDraft } from "../agreement/agreementTypes";
@@ -26,8 +26,17 @@ import {
 } from "./vs01PaidProPostSignHandoff";
 import { fetchVs01DocumentMeta } from "./vs01Api";
 import {
-  isNonBindingDraftTemplateCorpus,
-} from "./vs01ReviewCorpusSeedRefresh";
+  hydrateCommercialReviewFromServerSnapshot,
+  readVerifiedCommercialDisplayCorpus,
+} from "../agreement/canonicalReviewSnapshotApi";
+import {
+  FIRST_FAILING_STALE_REVIEW_SNAPSHOT_SEED_PREDICATE,
+  pickCurrentReviewSotForSigningSeed,
+  readAcceptedReviewCorpusFromDraftLike,
+} from "./vs01CurrentReviewSotForSeed";
+
+export { FIRST_FAILING_STALE_REVIEW_SNAPSHOT_SEED_PREDICATE };
+import { isNonBindingDraftTemplateCorpus } from "./vs01ReviewCorpusSeedRefresh";
 import {
   bindReviewCorpusOntoSeededVs01Document,
   type BindReviewCorpusResult,
@@ -95,11 +104,23 @@ export function resolveEsignEntryReviewBindContext(
   return null;
 }
 
-function pickNonTemplateReviewCorpus(text: string | null | undefined): string {
-  const t = (text ?? "").trim();
-  if (t.length < VS01_SIGNING_CORPUS_MIN_LEN) return "";
-  if (isNonBindingDraftTemplateCorpus(t)) return "";
-  return t;
+async function defaultFetchAcceptedReviewCorpus(agreementId: string): Promise<string> {
+  const verified = (readVerifiedCommercialDisplayCorpus(agreementId)?.corpusPlain ?? "").trim();
+  if (verified.length >= VS01_SIGNING_CORPUS_MIN_LEN && !isNonBindingDraftTemplateCorpus(verified)) {
+    return verified;
+  }
+  try {
+    const hydrated = await hydrateCommercialReviewFromServerSnapshot({ agreementId });
+    if (hydrated.ok) {
+      const plain = (hydrated.snapshot.corpus_plain ?? "").trim();
+      if (plain.length >= VS01_SIGNING_CORPUS_MIN_LEN && !isNonBindingDraftTemplateCorpus(plain)) {
+        return plain;
+      }
+    }
+  } catch {
+    /* leftover remount still falls back to persist draft + sequential restore */
+  }
+  return "";
 }
 
 /**
@@ -107,6 +128,7 @@ function pickNonTemplateReviewCorpus(text: string | null | undefined): string {
  * corpus when the painted blob is not that SoT. Same persist; prefer same vs01 id.
  * Leftover remount with an empty Incognito session still resolves agreement_id
  * from GET /v1/documents/{id} and loads the persist draft — do not skip.
+ * Prefer accepted Review snapshot over older premium/server draft fields.
  */
 export async function ensureReviewCorpusOnEsignEntry(args: {
   documentId: string;
@@ -118,6 +140,7 @@ export async function ensureReviewCorpusOnEsignEntry(args: {
   fetchContent?: (id: string) => Promise<FetchedDocumentContent>;
   fetchDocumentMeta?: (id: string) => Promise<{ agreementId: string | null }>;
   fetchDraft?: (agreementId: string) => Promise<AgreementDraft | null>;
+  fetchAcceptedReviewCorpus?: (agreementId: string) => Promise<string | null>;
   signingCorpusSource?: string | null;
 }): Promise<
   | BindReviewCorpusResult
@@ -150,35 +173,38 @@ export async function ensureReviewCorpusOnEsignEntry(args: {
   const existingBridgeCorpus =
     (args.existingBridgeCorpus ?? "").trim() || resolved?.existingBridgeCorpus || null;
   let draft = args.draft ?? null;
-  let reviewCorpus = pickNonTemplateReviewCorpus(args.reviewCorpus);
-  if (!reviewCorpus) {
-    reviewCorpus = pickNonTemplateReviewCorpus(
-      resolveAgreementCorpusForPrepareHandoff({
-        agreementId,
-        draft,
-        bridgeCorpusText: existingBridgeCorpus,
-      }),
-    );
-  }
-  if (!reviewCorpus) {
+  if (!draft) {
     try {
-      const loaded = args.fetchDraft
+      draft = args.fetchDraft
         ? await args.fetchDraft(agreementId)
         : (await fetchAgreementDraftWithSigningLock(agreementId)).draft;
-      if (loaded) {
-        draft = loaded;
-        reviewCorpus = pickNonTemplateReviewCorpus(
-          resolveAgreementCorpusForPrepareHandoff({
-            agreementId,
-            draft: loaded,
-            bridgeCorpusText: existingBridgeCorpus,
-          }),
-        );
-      }
     } catch {
-      /* persist seed POST still runs when GET /content is the template */
+      draft = null;
     }
   }
+
+  let acceptedReviewCorpus = readAcceptedReviewCorpusFromDraftLike(draft);
+  if (!acceptedReviewCorpus) {
+    try {
+      acceptedReviewCorpus = (
+        (await (args.fetchAcceptedReviewCorpus ?? defaultFetchAcceptedReviewCorpus)(agreementId)) ?? ""
+      ).trim();
+    } catch {
+      acceptedReviewCorpus = "";
+    }
+  }
+
+  const handoffCorpus = resolveAgreementCorpusForPrepareHandoff({
+    agreementId,
+    draft,
+    bridgeCorpusText: existingBridgeCorpus,
+  });
+  const reviewCorpus = pickCurrentReviewSotForSigningSeed([
+    acceptedReviewCorpus,
+    args.reviewCorpus,
+    handoffCorpus,
+    existingBridgeCorpus,
+  ]);
 
   return bindReviewCorpusOntoSeededVs01Document({
     agreementId,

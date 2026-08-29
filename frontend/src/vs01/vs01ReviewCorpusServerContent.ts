@@ -13,6 +13,10 @@ import { fingerprintAgreementBody } from "../components/agreements/guidedDealCom
 import { sha256Bytes } from "../utils/agreements/hash";
 import { fetchDocumentContent } from "./vs01Api";
 import {
+  projectCurrentReviewSotCorpus,
+  reviewCorpusHasStaleTopLevelSectionOrder,
+} from "./vs01CurrentReviewSotForSeed";
+import {
   REFRESH_STALE_SEEDED_DOCUMENT_REASON,
   REUSE_MATCHING_SEEDED_DOCUMENT_REASON,
   isNonBindingDraftTemplateCorpus,
@@ -169,10 +173,9 @@ export function resolveServerContentReplaceDecision(args: {
       matching: false,
     };
   }
-  const matching = fetchedPlainPositivelyMatchesReviewCorpus(
-    args.fetchFailed ? null : args.fetchedPlain,
-    review,
-  );
+  const matching =
+    !reviewCorpusHasStaleTopLevelSectionOrder(args.fetchFailed ? null : args.fetchedPlain) &&
+    fetchedPlainPositivelyMatchesReviewCorpus(args.fetchFailed ? null : args.fetchedPlain, review);
   if (args.recordedMatch && !fetchedWasTemplate) {
     return {
       replace: false,
@@ -294,7 +297,7 @@ export async function bindReviewCorpusOntoSeededVs01Document(args: {
 }): Promise<BindReviewCorpusResult> {
   const agreementId = args.agreementId.trim();
   const existingDocumentId = args.existingDocumentId.trim();
-  const reviewCorpus = args.reviewCorpus.trim();
+  const reviewCorpus = projectCurrentReviewSotCorpus(args.reviewCorpus.trim());
   if (!agreementId || !existingDocumentId) {
     return { ok: false, reason: "missing_document_id" };
   }

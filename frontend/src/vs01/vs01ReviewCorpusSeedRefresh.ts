@@ -19,6 +19,9 @@ import {
   loadVs01CanonicalPacketSeed,
   storeVs01CanonicalPacketSeed,
 } from "./vs01CanonicalPacketSeed";
+import {
+  pickCurrentReviewSotForSigningSeed,
+} from "./vs01CurrentReviewSotForSeed";
 import { VS01_SIGNING_CORPUS_MIN_LEN } from "./vs01SigningCorpus";
 
 export const FIRST_FAILING_STALE_TEMPLATE_SEED_PREDICATE =
@@ -53,11 +56,7 @@ export function seededPacketMatchesReviewCorpus(
 export function pickAuthoritativePrepareHandoffCorpus(
   candidates: readonly (string | null | undefined)[],
 ): string {
-  const long = candidates
-    .map((c) => (c ?? "").trim())
-    .filter((c) => c.length >= VS01_SIGNING_CORPUS_MIN_LEN);
-  const review = long.find((c) => !isNonBindingDraftTemplateCorpus(c));
-  return review ?? long[0] ?? "";
+  return pickCurrentReviewSotForSigningSeed(candidates);
 }
 
 export type SeededDocumentReuseDecision = {

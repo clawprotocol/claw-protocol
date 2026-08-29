@@ -12,6 +12,11 @@ import {
 import type { AgreementVs01BridgeSession } from "../launch/simpleProduct/agreementToVs01SigningBridge";
 import { resolveBridgeAgreementCorpusFromDraft } from "../launch/simpleProduct/agreementToVs01SigningBridge";
 import { peekReviewFirstPinnedCorpus } from "../launch/simpleProduct/reviewFirstSendSurface";
+import { readVerifiedCommercialDisplayCorpus } from "../agreement/canonicalReviewSnapshotApi";
+import {
+  pickCurrentReviewSotForSigningSeed,
+  readAcceptedReviewCorpusFromDraftLike,
+} from "./vs01CurrentReviewSotForSeed";
 import {
   resolveFinalVs01CorpusOrBlock,
   VS01_SIGNING_CORPUS_MIN_LEN,
@@ -25,7 +30,9 @@ export function resolveAgreementCorpusForPrepareHandoff(args: {
   draft: AgreementDraft | null;
   bridgeCorpusText?: string | null;
 }): string {
-  // Review accepted/finalized/rebuild corpus wins over a stale starter/template SoT or seed.
+  // Accepted Review snapshot wins over older premium/server draft fields and stale client cache.
+  const accepted = readAcceptedReviewCorpusFromDraftLike(args.draft);
+  const verified = (readVerifiedCommercialDisplayCorpus(args.agreementId)?.corpusPlain ?? "").trim();
   const sot = hasPaidProSourceOfTruth() ? getPaidProSourceOfTruthText().trim() : "";
   const fromBridge = (args.bridgeCorpusText ?? "").trim();
   const handoff = resolveGuidedVs01SigningHandoffForBridge(undefined);
@@ -34,6 +41,8 @@ export function resolveAgreementCorpusForPrepareHandoff(args: {
   const fromPinned = (peekReviewFirstPinnedCorpus(args.agreementId) ?? "").trim();
   const fromDraft = resolveBridgeAgreementCorpusFromDraft(args.draft);
   const picked = pickAuthoritativePrepareHandoffCorpus([
+    accepted,
+    verified,
     sot,
     fromBridge,
     fromHandoff,
@@ -41,9 +50,9 @@ export function resolveAgreementCorpusForPrepareHandoff(args: {
     fromPinned,
     fromDraft,
   ]);
-  if (picked) return picked;
-  if (sot.length >= VS01_SIGNING_CORPUS_MIN_LEN) return sot;
-  return fromDraft;
+  if (picked) return pickCurrentReviewSotForSigningSeed([picked]);
+  if (sot.length >= VS01_SIGNING_CORPUS_MIN_LEN) return pickCurrentReviewSotForSigningSeed([sot]);
+  return pickCurrentReviewSotForSigningSeed([fromDraft]) || fromDraft;
 }
 
 export function buildPrepareBridgeCorpusGateArgs(args: {
