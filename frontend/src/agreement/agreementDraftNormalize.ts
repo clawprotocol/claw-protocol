@@ -248,6 +248,13 @@ export function normalizeAgreementDraftFromApi(
         ? (r.pro_redline_v1 as Record<string, unknown>)
         : null,
     ...(vs01SigningPacket ? { vs01_signing_packet_v1: vs01SigningPacket } : {}),
+    // Certified Review bytes — do not scrub or drop. Seed/remount bind reads these.
+    ...(r.accepted_review_snapshot_v1 != null && typeof r.accepted_review_snapshot_v1 === "object"
+      ? { accepted_review_snapshot_v1: { ...(r.accepted_review_snapshot_v1 as Record<string, unknown>) } }
+      : {}),
+    ...(r.canonical_review_snapshots_v1 != null && typeof r.canonical_review_snapshots_v1 === "object"
+      ? { canonical_review_snapshots_v1: { ...(r.canonical_review_snapshots_v1 as Record<string, unknown>) } }
+      : {}),
   };
 }
 

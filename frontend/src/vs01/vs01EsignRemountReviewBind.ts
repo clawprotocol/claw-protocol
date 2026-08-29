@@ -1,11 +1,8 @@
 /**
- * ANY entry to a persist's esign packet must not paint a template
- * or an older Review snapshot (11 after 13 / 10 jumping to 12).
- *
- * After leftover-template bind: POST vs01-signing-seed 200 still wrote
- * stale persist draft fields (premium/server_full_document_text) instead
- * of the current accepted Review SoT. Prefer the accepted snapshot, then
- * sequential 10/11/12/13 Review, same persist / same vs01 id.
+ * ANY entry to a persist's esign packet must not paint a leftover version
+ * when a certified Review exists (verified commercial display / accepted
+ * snapshot). Never seed premium/server_full_document_text or a
+ * reconstructed-from-stale-blob body in that case. Same persist / same vs01 id.
  */
 
 import type { AgreementDraft } from "../agreement/agreementTypes";
@@ -30,12 +27,15 @@ import {
   readVerifiedCommercialDisplayCorpus,
 } from "../agreement/canonicalReviewSnapshotApi";
 import {
-  FIRST_FAILING_STALE_REVIEW_SNAPSHOT_SEED_PREDICATE,
   pickCurrentReviewSotForSigningSeed,
   readAcceptedReviewCorpusFromDraftLike,
+  resolveCertifiedReviewCorpusForSigningSeed,
 } from "./vs01CurrentReviewSotForSeed";
 
-export { FIRST_FAILING_STALE_REVIEW_SNAPSHOT_SEED_PREDICATE };
+export {
+  FIRST_FAILING_NON_CERTIFIED_REVIEW_SEED_PREDICATE,
+  FIRST_FAILING_STALE_REVIEW_SNAPSHOT_SEED_PREDICATE,
+} from "./vs01CurrentReviewSotForSeed";
 import { isNonBindingDraftTemplateCorpus } from "./vs01ReviewCorpusSeedRefresh";
 import {
   bindReviewCorpusOntoSeededVs01Document,
@@ -118,7 +118,7 @@ async function defaultFetchAcceptedReviewCorpus(agreementId: string): Promise<st
       }
     }
   } catch {
-    /* leftover remount still falls back to persist draft + sequential restore */
+    /* leftover remount must not reconstruct a stale blob as certified Review */
   }
   return "";
 }
@@ -128,7 +128,7 @@ async function defaultFetchAcceptedReviewCorpus(agreementId: string): Promise<st
  * corpus when the painted blob is not that SoT. Same persist; prefer same vs01 id.
  * Leftover remount with an empty Incognito session still resolves agreement_id
  * from GET /v1/documents/{id} and loads the persist draft — do not skip.
- * Prefer accepted Review snapshot over older premium/server draft fields.
+ * When a certified Review exists, write only that corpus.
  */
 export async function ensureReviewCorpusOnEsignEntry(args: {
   documentId: string;
@@ -194,17 +194,22 @@ export async function ensureReviewCorpusOnEsignEntry(args: {
     }
   }
 
-  const handoffCorpus = resolveAgreementCorpusForPrepareHandoff({
-    agreementId,
-    draft,
-    bridgeCorpusText: existingBridgeCorpus,
-  });
-  const reviewCorpus = pickCurrentReviewSotForSigningSeed([
-    acceptedReviewCorpus,
-    args.reviewCorpus,
-    handoffCorpus,
-    existingBridgeCorpus,
-  ]);
+  const certifiedReviewCorpus = resolveCertifiedReviewCorpusForSigningSeed(acceptedReviewCorpus);
+  // Certified Review wins exclusively. Do not mix leftover draft/bridge blobs
+  // into a picker — #145's fallback-to-stale then project 10/11/12/13 is the miss.
+  let reviewCorpus = certifiedReviewCorpus;
+  if (!reviewCorpus) {
+    const handoffCorpus = resolveAgreementCorpusForPrepareHandoff({
+      agreementId,
+      draft,
+      bridgeCorpusText: existingBridgeCorpus,
+    });
+    reviewCorpus = pickCurrentReviewSotForSigningSeed([
+      args.reviewCorpus,
+      existingBridgeCorpus,
+      handoffCorpus,
+    ]);
+  }
 
   return bindReviewCorpusOntoSeededVs01Document({
     agreementId,

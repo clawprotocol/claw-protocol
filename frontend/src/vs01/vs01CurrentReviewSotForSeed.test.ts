@@ -2,13 +2,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { writeAgreementVs01BridgeSession } from "../launch/simpleProduct/agreementToVs01SigningBridge";
 import { clearPaidProSourceOfTruth } from "../components/agreements/paidProSourceOfTruth";
+import { normalizeAgreementDraftFromApi } from "../agreement/agreementDraftNormalize";
 import {
-  FIRST_FAILING_STALE_REVIEW_SNAPSHOT_SEED_PREDICATE,
+  FIRST_FAILING_NON_CERTIFIED_REVIEW_SEED_PREDICATE,
   pickCurrentReviewSotForSigningSeed,
-  projectCurrentReviewSotCorpus,
   readAcceptedReviewCorpusFromDraftLike,
-  reviewCorpusHasStaleTopLevelSectionOrder,
+  resolveCertifiedReviewCorpusForSigningSeed,
 } from "./vs01CurrentReviewSotForSeed";
+import { resolveAgreementCorpusForPrepareHandoff } from "./vs01PrepareBridgeCorpus";
 import { ensureReviewCorpusOnEsignEntry } from "./vs01EsignRemountReviewBind";
 import { REPLACE_STALE_SERVER_TEMPLATE_CONTENT_REASON } from "./vs01ReviewCorpusServerContent";
 
@@ -19,8 +20,8 @@ function padCorpus(body: string): string {
   return `${body}\n\n${"The parties agree to perform the stated obligations in good faith. ".repeat(40)}`.trim();
 }
 
-/** Current Review SoT — sequential 10/11/12/13. Generic parties, not live deal names. */
-function currentReviewSot(): string {
+/** Certified Review — sequential 10/11/12/13, independent Notices If-to. Generic parties. */
+function certifiedReview(): string {
   return padCorpus(
     [
       "SERVICES AGREEMENT",
@@ -48,8 +49,11 @@ function currentReviewSot(): string {
   );
 }
 
-/** Older persist/draft snapshot: 13 then 11; 10 jumps to 12. */
-function staleReviewSnapshot(): string {
+/**
+ * Leftover persist/draft blob after #145 order restore: already sequential
+ * 10/11/12/13, but fused Notices / Misc — not the certified Review.
+ */
+function leftoverFusedReview(): string {
   return padCorpus(
     [
       "SERVICES AGREEMENT",
@@ -59,20 +63,39 @@ function staleReviewSnapshot(): string {
       "10. LIABILITY",
       "Each party's aggregate liability is limited to fees paid under this Agreement.",
       "",
+      "11. GOVERNING LAW",
+      "This Agreement is governed by the laws of the applicable jurisdiction.",
+      "",
       "12. NOTICES",
       "If to Alpha Workshop Beta Counsel LLC:",
-      "Attn: ________",
+      "Alpha Workshop Beta Counsel LLC",
+      "Attn: ________, ________",
+      "Email: ________",
+      "",
+      "If to Beta Counsel LLC:",
+      "Beta Counsel LLC",
+      "Address: 30 days, Upon full execution by the parties unless otherwise specified.",
       "",
       "13. MISCELLANEOUS",
       "This Agreement is the entire agreement This Agreement is between Alpha Workshop Beta Counsel LLC ('Service Provider') and Service Provider ('Service Provider').",
-      "",
-      "11. GOVERNING LAW",
-      "This Agreement is governed by the laws of the applicable jurisdiction.",
     ].join("\n"),
   );
 }
 
-describe("esign seed writes current Review SoT, not a stale persist snapshot", () => {
+function expectCertifiedSeedBody(posted: string): void {
+  expect(posted).toBe(certifiedReview());
+  expect(posted).toMatch(
+    /10\.\s+LIABILITY[\s\S]*11\.\s+GOVERNING LAW[\s\S]*12\.\s+NOTICES[\s\S]*13\.\s+MISCELLANEOUS/i,
+  );
+  expect(posted).toMatch(/If to Alpha Workshop:\s*\n[\s\S]*If to Beta Counsel LLC:/i);
+  expect(posted).not.toMatch(/If to Alpha Workshop Beta Counsel LLC/i);
+  expect(posted).not.toMatch(/Alpha Workshop Beta Counsel LLC/i);
+  expect(posted).not.toMatch(
+    /This Agreement is the entire agreement This Agreement is between/i,
+  );
+}
+
+describe("esign seed writes certified Review, not a leftover fused version", () => {
   beforeEach(() => {
     sessionStorage.clear();
     localStorage.clear();
@@ -85,61 +108,80 @@ describe("esign seed writes current Review SoT, not a stale persist snapshot", (
     clearPaidProSourceOfTruth();
   });
 
-  it("names the first failing predicate: seed wrote a stale Review snapshot", () => {
-    expect(FIRST_FAILING_STALE_REVIEW_SNAPSHOT_SEED_PREDICATE).toBe(
-      "esign_seed_writes_stale_review_snapshot_not_current_sot",
+  it("names the first failing predicate: seed wrote a non-certified Review version", () => {
+    expect(FIRST_FAILING_NON_CERTIFIED_REVIEW_SEED_PREDICATE).toBe(
+      "esign_seed_writes_non_certified_review_version",
     );
-    expect(reviewCorpusHasStaleTopLevelSectionOrder(staleReviewSnapshot())).toBe(true);
-    expect(reviewCorpusHasStaleTopLevelSectionOrder(currentReviewSot())).toBe(false);
-    expect(staleReviewSnapshot()).toMatch(/13\.\s+MISCELLANEOUS[\s\S]*11\.\s+GOVERNING LAW/i);
-    expect(staleReviewSnapshot()).toMatch(/10\.\s+LIABILITY[\s\S]*12\.\s+NOTICES/i);
-    expect(currentReviewSot()).toMatch(
+    expect(certifiedReview()).toMatch(/If to Alpha Workshop:/);
+    expect(leftoverFusedReview()).toMatch(/If to Alpha Workshop Beta Counsel LLC/);
+    expect(leftoverFusedReview()).toMatch(
       /10\.\s+LIABILITY[\s\S]*11\.\s+GOVERNING LAW[\s\S]*12\.\s+NOTICES[\s\S]*13\.\s+MISCELLANEOUS/i,
     );
   });
 
-  it("prefers sequential Review over an older persist/draft blob", () => {
-    const current = currentReviewSot();
-    const stale = staleReviewSnapshot();
-    const picked = pickCurrentReviewSotForSigningSeed([stale, current]);
-    expect(picked).toBe(current);
-    expect(reviewCorpusHasStaleTopLevelSectionOrder(picked)).toBe(false);
-    expect(picked).toMatch(
-      /10\.\s+LIABILITY[\s\S]*11\.\s+GOVERNING LAW[\s\S]*12\.\s+NOTICES[\s\S]*13\.\s+MISCELLANEOUS/i,
+  it("uses certified Review as-is and does not project leftover into it", () => {
+    const certified = certifiedReview();
+    const leftover = leftoverFusedReview();
+    expect(resolveCertifiedReviewCorpusForSigningSeed(certified)).toBe(certified);
+    expect(pickCurrentReviewSotForSigningSeed([certified, leftover])).toBe(certified);
+    expect(resolveCertifiedReviewCorpusForSigningSeed(certified)).not.toMatch(
+      /If to Alpha Workshop Beta Counsel LLC/i,
     );
-    expect(picked).not.toMatch(/13\.\s+MISCELLANEOUS[\s\S]*11\.\s+GOVERNING LAW/i);
-    expect(picked).not.toMatch(/10\.\s+LIABILITY[\s\S]*12\.\s+NOTICES[\s\S]*11\.\s+GOVERNING LAW/i);
   });
 
-  it("projects sequential 10/11/12/13 when only the stale persist blob is present", () => {
-    const projected = projectCurrentReviewSotCorpus(staleReviewSnapshot());
-    expect(reviewCorpusHasStaleTopLevelSectionOrder(projected)).toBe(false);
-    expect(projected).toMatch(
-      /10\.\s+LIABILITY[\s\S]*11\.\s+GOVERNING LAW[\s\S]*12\.\s+NOTICES[\s\S]*13\.\s+MISCELLANEOUS/i,
-    );
-    expect(projected).not.toMatch(/13\.\s+MISCELLANEOUS[\s\S]*11\.\s+GOVERNING LAW/i);
+  it("prepare handoff prefers accepted Review over sequential leftover draft fields", () => {
+    const certified = certifiedReview();
+    const leftover = leftoverFusedReview();
+    const resolved = resolveAgreementCorpusForPrepareHandoff({
+      agreementId: AGREEMENT_ID,
+      draft: {
+        id: AGREEMENT_ID,
+        title: "Services Agreement",
+        premium_full_document_text: leftover,
+        server_full_document_text: leftover,
+        accepted_review_snapshot_v1: { status: "accepted", corpusPlain: certified },
+      } as never,
+      bridgeCorpusText: leftover,
+    });
+    expectCertifiedSeedBody(resolved);
   });
 
   it("reads accepted Review corpus from persist, not draft full-text fields", () => {
-    const current = currentReviewSot();
-    const stale = staleReviewSnapshot();
+    const certified = certifiedReview();
+    const leftover = leftoverFusedReview();
     expect(
       readAcceptedReviewCorpusFromDraftLike({
-        server_full_document_text: stale,
-        premium_full_document_text: stale,
-        accepted_review_snapshot_v1: { status: "accepted", corpusPlain: current },
+        server_full_document_text: leftover,
+        premium_full_document_text: leftover,
+        accepted_review_snapshot_v1: { status: "accepted", corpusPlain: certified },
       }),
-    ).toBe(current);
+    ).toBe(certified);
   });
 
-  it("leftover remount + seed POST sends sequential Review, not 11-after-13", async () => {
-    const current = currentReviewSot();
-    const stale = staleReviewSnapshot();
+  it("normalize keeps accepted Review snapshot corpus for leftover remount", () => {
+    const certified = certifiedReview();
+    const leftover = leftoverFusedReview();
+    const normalized = normalizeAgreementDraftFromApi(
+      {
+        id: AGREEMENT_ID,
+        title: "Services Agreement",
+        premium_full_document_text: leftover,
+        server_full_document_text: leftover,
+        accepted_review_snapshot_v1: { status: "accepted", corpusPlain: certified },
+      },
+      { fallbackAgreementId: AGREEMENT_ID },
+    );
+    expect(readAcceptedReviewCorpusFromDraftLike(normalized)).toBe(certified);
+  });
+
+  it("leftover remount + seed POST writes certified Review, not fused leftover", async () => {
+    const certified = certifiedReview();
+    const leftover = leftoverFusedReview();
     writeAgreementVs01BridgeSession({
       vs01DocumentId: SEEDED_DOC,
       agreementId: AGREEMENT_ID,
       agreementTitle: "Services Agreement",
-      agreementCorpusText: stale,
+      agreementCorpusText: leftover,
       creatorName: "Alpha Workshop",
       creatorEmail: "owner@example.test",
       counterparties: [],
@@ -155,17 +197,17 @@ describe("esign seed writes current Review SoT, not a stale persist snapshot", (
     const bound = await ensureReviewCorpusOnEsignEntry({
       documentId: SEEDED_DOC,
       agreementId: AGREEMENT_ID,
-      existingBridgeCorpus: stale,
+      existingBridgeCorpus: leftover,
       draft: {
         id: AGREEMENT_ID,
         title: "Services Agreement",
-        premium_full_document_text: stale,
-        server_full_document_text: stale,
-        accepted_review_snapshot_v1: { status: "accepted", corpusPlain: current },
+        premium_full_document_text: leftover,
+        server_full_document_text: leftover,
+        accepted_review_snapshot_v1: { status: "accepted", corpusPlain: certified },
       } as never,
       seed,
-      fetchContent: async () => stale,
-      fetchAcceptedReviewCorpus: async () => current,
+      fetchContent: async () => leftover,
+      fetchAcceptedReviewCorpus: async () => certified,
     });
 
     expect(bound.ok).toBe(true);
@@ -179,25 +221,49 @@ describe("esign seed writes current Review SoT, not a stale persist snapshot", (
     expect(seed).toHaveBeenCalledTimes(1);
     expect(seed.mock.calls[0][0]).toBe(AGREEMENT_ID);
     expect(seed.mock.calls[0][4]).toBe(SEEDED_DOC);
-    const posted = String(seed.mock.calls[0][2] ?? "");
-    expect(posted).toMatch(
-      /10\.\s+LIABILITY[\s\S]*11\.\s+GOVERNING LAW[\s\S]*12\.\s+NOTICES[\s\S]*13\.\s+MISCELLANEOUS/i,
-    );
-    expect(posted).not.toMatch(/13\.\s+MISCELLANEOUS[\s\S]*11\.\s+GOVERNING LAW/i);
-    expect(posted).not.toMatch(/10\.\s+LIABILITY[\s\S]*12\.\s+NOTICES[\s\S]*11\.\s+GOVERNING LAW/i);
-    expect(reviewCorpusHasStaleTopLevelSectionOrder(posted)).toBe(false);
+    expectCertifiedSeedBody(String(seed.mock.calls[0][2] ?? ""));
   });
 
-  it("matching current Review /content is not rewritten", async () => {
-    const current = currentReviewSot();
+  it("Incognito remount hydrates certified Review when draft fields are leftover", async () => {
+    const certified = certifiedReview();
+    const leftover = leftoverFusedReview();
+    const seed = vi.fn().mockResolvedValue({
+      ok: true,
+      documentId: SEEDED_DOC,
+      contentSha256: "b".repeat(64),
+    });
+    const bound = await ensureReviewCorpusOnEsignEntry({
+      documentId: SEEDED_DOC,
+      agreementId: AGREEMENT_ID,
+      seed,
+      fetchContent: async () => leftover,
+      fetchAcceptedReviewCorpus: async () => certified,
+      fetchDraft: async () =>
+        ({
+          id: AGREEMENT_ID,
+          title: "Services Agreement",
+          premium_full_document_text: leftover,
+          server_full_document_text: leftover,
+        }) as never,
+    });
+    expect(bound.ok).toBe(true);
+    if (!bound.ok || "skipped" in bound) return;
+    expect(bound.documentId).toBe(SEEDED_DOC);
+    expect(seed).toHaveBeenCalledTimes(1);
+    expectCertifiedSeedBody(String(seed.mock.calls[0][2] ?? ""));
+  });
+
+  it("matching certified Review /content is not rewritten", async () => {
+    const certified = certifiedReview();
+    const leftover = leftoverFusedReview();
     const seed = vi.fn();
     const bound = await ensureReviewCorpusOnEsignEntry({
       documentId: SEEDED_DOC,
       agreementId: AGREEMENT_ID,
-      reviewCorpus: current,
+      reviewCorpus: leftover,
       seed,
-      fetchContent: async () => current,
-      fetchAcceptedReviewCorpus: async () => current,
+      fetchContent: async () => certified,
+      fetchAcceptedReviewCorpus: async () => certified,
     });
     expect(bound.ok).toBe(true);
     if (!bound.ok || "skipped" in bound) return;
@@ -207,8 +273,8 @@ describe("esign seed writes current Review SoT, not a stale persist snapshot", (
   });
 
   it("keeps the same persist id and prefers the same vs01 id", async () => {
-    const current = currentReviewSot();
-    const stale = staleReviewSnapshot();
+    const certified = certifiedReview();
+    const leftover = leftoverFusedReview();
     const seed = vi.fn().mockResolvedValue({
       ok: true,
       documentId: SEEDED_DOC,
@@ -218,14 +284,14 @@ describe("esign seed writes current Review SoT, not a stale persist snapshot", (
       documentId: SEEDED_DOC,
       agreementId: AGREEMENT_ID,
       seed,
-      fetchContent: async () => stale,
-      fetchAcceptedReviewCorpus: async () => current,
+      fetchContent: async () => leftover,
+      fetchAcceptedReviewCorpus: async () => certified,
       fetchDraft: async () =>
         ({
           id: AGREEMENT_ID,
           title: "Services Agreement",
-          premium_full_document_text: stale,
-          server_full_document_text: stale,
+          premium_full_document_text: leftover,
+          server_full_document_text: leftover,
         }) as never,
     });
     expect(bound.ok).toBe(true);

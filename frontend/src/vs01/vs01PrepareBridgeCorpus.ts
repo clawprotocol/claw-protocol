@@ -40,9 +40,9 @@ export function resolveAgreementCorpusForPrepareHandoff(args: {
   const fromSnapshot = (getAuthoritativeSigningSnapshot()?.corpus ?? "").trim();
   const fromPinned = (peekReviewFirstPinnedCorpus(args.agreementId) ?? "").trim();
   const fromDraft = resolveBridgeAgreementCorpusFromDraft(args.draft);
+  const certified = pickCurrentReviewSotForSigningSeed([accepted, verified]);
+  if (certified) return certified;
   const picked = pickAuthoritativePrepareHandoffCorpus([
-    accepted,
-    verified,
     sot,
     fromBridge,
     fromHandoff,
@@ -50,8 +50,8 @@ export function resolveAgreementCorpusForPrepareHandoff(args: {
     fromPinned,
     fromDraft,
   ]);
-  if (picked) return pickCurrentReviewSotForSigningSeed([picked]);
-  if (sot.length >= VS01_SIGNING_CORPUS_MIN_LEN) return pickCurrentReviewSotForSigningSeed([sot]);
+  if (picked) return picked;
+  if (sot.length >= VS01_SIGNING_CORPUS_MIN_LEN) return sot;
   return pickCurrentReviewSotForSigningSeed([fromDraft]) || fromDraft;
 }
 

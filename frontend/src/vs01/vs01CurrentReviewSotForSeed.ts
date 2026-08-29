@@ -1,13 +1,13 @@
 /**
- * Seed / leftover remount must write the CURRENT Review SoT, not an older
- * persist draft blob (premium_full_document_text / server_full_document_text)
- * from before sequential 10/11/12/13 restore.
+ * Seed / leftover remount must write the certified Review display corpus,
+ * not an older persist/draft blob (premium_full_document_text /
+ * server_full_document_text) or a reconstruction projected from that blob.
  *
- * Matching current Review GET /content is not rewritten. Same persist.
- * Prefer the same vs01 document id. Do not remint the agreement.
+ * #145's sequential 10/11/12/13 picker fell back to a leftover that already
+ * had that order (fused Notices / Misc) and treated it as current SoT.
+ * When a certified Review exists, use only that corpus. Do not remint.
  */
 
-import { restoreSequentialTopLevelSectionOrder } from "../components/agreements/paidProOrphanSectionNumberRepair";
 import { VS01_SIGNING_CORPUS_MIN_LEN } from "./vs01SigningCorpus";
 
 const NON_BINDING_TEMPLATE_BANNER_RE =
@@ -17,8 +17,12 @@ function isTemplateCorpus(text: string): boolean {
   return NON_BINDING_TEMPLATE_BANNER_RE.test(text);
 }
 
+export const FIRST_FAILING_NON_CERTIFIED_REVIEW_SEED_PREDICATE =
+  "esign_seed_writes_non_certified_review_version" as const;
+
+/** @deprecated Closed #145 gate — do not reopen. Prefer {@link FIRST_FAILING_NON_CERTIFIED_REVIEW_SEED_PREDICATE}. */
 export const FIRST_FAILING_STALE_REVIEW_SNAPSHOT_SEED_PREDICATE =
-  "esign_seed_writes_stale_review_snapshot_not_current_sot" as const;
+  FIRST_FAILING_NON_CERTIFIED_REVIEW_SEED_PREDICATE;
 
 const TOP_LEVEL_HEADING_RE = /(?:^|\n)\s*(\d+)\.\s+[A-Za-z]/g;
 
@@ -34,7 +38,7 @@ export function topLevelSectionHeadingNumbers(text: string | null | undefined): 
 
 /**
  * Older persist/draft snapshots still have 11 after 13, or 10 jumping to 12
- * (11 missing in sequence). Current Review SoT is sequential 10/11/12/13.
+ * (11 missing in sequence). Certified Review is sequential 10/11/12/13.
  */
 export function reviewCorpusHasStaleTopLevelSectionOrder(text: string | null | undefined): boolean {
   const nums = topLevelSectionHeadingNumbers(text);
@@ -48,24 +52,36 @@ export function reviewCorpusHasStaleTopLevelSectionOrder(text: string | null | u
   return nums.some((n, i) => i > 0 && n < nums[i - 1]!);
 }
 
-/** Same last-good sequential restore Review paint already applies. */
-export function projectCurrentReviewSotCorpus(text: string | null | undefined): string {
+function longNonTemplateCorpus(text: string | null | undefined): string {
   const raw = (text ?? "").trim();
-  if (raw.length < VS01_SIGNING_CORPUS_MIN_LEN) return raw;
-  const restored = restoreSequentialTopLevelSectionOrder(raw);
-  return restored.repairs.length > 0 ? restored.text.trim() : raw;
+  if (raw.length < VS01_SIGNING_CORPUS_MIN_LEN) return "";
+  if (isTemplateCorpus(raw)) return "";
+  return raw;
 }
 
+/**
+ * Certified Review only. Never project / reconstruct from a leftover blob.
+ * Callers must pass the accepted snapshot or verified commercial display.
+ */
+export function resolveCertifiedReviewCorpusForSigningSeed(
+  certified: string | null | undefined,
+): string {
+  return longNonTemplateCorpus(certified);
+}
+
+/**
+ * First long non-template candidate, as-is. Does not fall back to a stale
+ * blob and project 10/11/12/13 onto it. When a certified Review is present,
+ * pass it as the only candidate.
+ */
 export function pickCurrentReviewSotForSigningSeed(
   candidates: readonly (string | null | undefined)[],
 ): string {
-  const long = candidates
-    .map((c) => (c ?? "").trim())
-    .filter((c) => c.length >= VS01_SIGNING_CORPUS_MIN_LEN);
-  const review = long.filter((c) => !isTemplateCorpus(c));
-  const sequential = review.find((c) => !reviewCorpusHasStaleTopLevelSectionOrder(c));
-  const picked = sequential ?? review[0] ?? long[0] ?? "";
-  return picked ? projectCurrentReviewSotCorpus(picked) : "";
+  for (const c of candidates) {
+    const picked = longNonTemplateCorpus(c);
+    if (picked) return picked;
+  }
+  return "";
 }
 
 /** Accepted Review snapshot on persist (camelCase or snake_case), never draft-field fallbacks. */
@@ -78,7 +94,7 @@ export function readAcceptedReviewCorpusFromDraftLike(draft: unknown): string {
   const registry = rec.canonical_review_snapshots_v1;
   if (!registry || typeof registry !== "object") return "";
   const reg = registry as Record<string, unknown>;
-  const acceptedId = String(reg.acceptedSnapshotId ?? "").trim();
+  const acceptedId = String(reg.acceptedSnapshotId ?? reg.accepted_snapshot_id ?? "").trim();
   const snaps = reg.snapshots;
   if (!acceptedId || !snaps || typeof snaps !== "object") return "";
   return corpusPlainFromSnapshotRecord((snaps as Record<string, unknown>)[acceptedId]);
@@ -90,5 +106,5 @@ function corpusPlainFromSnapshotRecord(raw: unknown): string {
   const status = String(rec.status ?? "").trim().toLowerCase();
   if (status && status !== "accepted") return "";
   const plain = String(rec.corpusPlain ?? rec.corpus_plain ?? "").trim();
-  return plain.length >= VS01_SIGNING_CORPUS_MIN_LEN ? plain : "";
+  return longNonTemplateCorpus(plain);
 }
