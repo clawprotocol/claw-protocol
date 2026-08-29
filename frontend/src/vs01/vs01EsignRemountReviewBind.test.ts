@@ -165,6 +165,44 @@ describe("esign remount binds Review corpus before paint", () => {
     expect(seed).not.toHaveBeenCalled();
   });
 
+  it("empty Incognito remount resolves persist from document meta and seeds Review", async () => {
+    const review = reviewServicesAgreement();
+    const template = nonBindingTemplatePacket();
+    expect(resolveEsignEntryReviewBindContext(SEEDED_DOC)).toBeNull();
+
+    const seed = vi.fn().mockResolvedValue({
+      ok: true,
+      documentId: SEEDED_DOC,
+      contentSha256: "c".repeat(64),
+    });
+    const bound = await ensureReviewCorpusOnEsignEntry({
+      documentId: SEEDED_DOC,
+      seed,
+      fetchContent: async () => template,
+      fetchDocumentMeta: async () => ({ agreementId: AGREEMENT_ID }),
+      fetchDraft: async () =>
+        ({
+          id: AGREEMENT_ID,
+          title: "Services Agreement",
+          premium_full_document_text: review,
+          server_full_document_text: review,
+        }) as never,
+    });
+    expect(bound.ok).toBe(true);
+    if (!bound.ok || "skipped" in bound) {
+      expect("skipped" in bound).toBe(false);
+      return;
+    }
+    expect(bound.replaced).toBe(true);
+    expect(bound.documentId).toBe(SEEDED_DOC);
+    expect(seed).toHaveBeenCalledTimes(1);
+    expect(seed.mock.calls[0][0]).toBe(AGREEMENT_ID);
+    expect(seed.mock.calls[0][2]).toMatch(/SERVICES AGREEMENT/);
+    expect(seed.mock.calls[0][2]).toMatch(/12\.\s+NOTICES/i);
+    expect(seed.mock.calls[0][2]).not.toMatch(/Draft Agreement \(non-binding template\)/i);
+    expect(seed.mock.calls[0][4]).toBe(SEEDED_DOC);
+  });
+
   it("409 still does not eject after remount bind", () => {
     const landing = resolvePostPrepareBuyerSurface({
       seedOk: true,

@@ -149,6 +149,32 @@ export async function fetchDocumentContent(documentId: string): Promise<Blob> {
   return res.blob();
 }
 
+export type Vs01DocumentMeta = {
+  agreementId: string | null;
+  contentSha256: string | null;
+};
+
+/** GET /v1/documents/{id} — owner remount uses agreement_id to seed Review onto leftover packets. */
+export async function fetchVs01DocumentMeta(documentId: string): Promise<Vs01DocumentMeta> {
+  const id = documentId.trim();
+  if (!id) return { agreementId: null, contentSha256: null };
+  await refreshCachedAccessToken();
+  const res = await fetch(apiUrl(`/v1/documents/${encodeURIComponent(id)}`), {
+    method: "GET",
+    headers: clawAgreementHeaders({ Accept: "application/json" }),
+  });
+  if (!res.ok) return { agreementId: null, contentSha256: null };
+  const j = (await res.json().catch(() => ({}))) as {
+    document?: { agreement_id?: unknown; content_sha256?: unknown };
+    agreement_id?: unknown;
+    content_sha256?: unknown;
+  };
+  const doc = j.document ?? j;
+  const agreementId = String(doc.agreement_id ?? "").trim() || null;
+  const contentSha256 = String(doc.content_sha256 ?? "").trim() || null;
+  return { agreementId, contentSha256 };
+}
+
 export type FieldManifestEntry = {
   field_id: string;
   page_index: number;

@@ -261,8 +261,49 @@ describe("Prepare writes Review corpus onto GET /content", () => {
       reviewCorpus: review,
       recordedMatch: true,
     });
-    expect(recordedUnreadable.replace).toBe(true);
-    expect(recordedUnreadable.matching).toBe(false);
+    expect(recordedUnreadable.replace).toBe(false);
+    expect(recordedUnreadable.matching).toBe(true);
+
+    const recordedTemplate = resolveServerContentReplaceDecision({
+      fetchedPlain: "Draft Agreement (non-binding template)\nTexas\nNorthline",
+      reviewCorpus: review,
+      recordedMatch: true,
+    });
+    expect(recordedTemplate.replace).toBe(true);
+    expect(recordedTemplate.fetchedWasTemplate).toBe(true);
+  });
+
+  it("template GET /content forces seed POST even without a client Review corpus", async () => {
+    const template = nonBindingTemplatePacket();
+    expect(
+      resolveServerContentReplaceDecision({
+        fetchedPlain: template,
+        reviewCorpus: "",
+      }).replace,
+    ).toBe(true);
+    const seed = vi.fn().mockResolvedValue({
+      ok: true,
+      documentId: SEEDED_DOC,
+      contentSha256: "9".repeat(64),
+    });
+    const bound = await bindReviewCorpusOntoSeededVs01Document({
+      agreementId: AGREEMENT_ID,
+      existingDocumentId: SEEDED_DOC,
+      reviewCorpus: "",
+      seed,
+      fetchContent: fetchContentOf(template),
+    });
+    expect(bound.ok).toBe(true);
+    if (!bound.ok) return;
+    expect(bound.replaced).toBe(true);
+    expect(seed).toHaveBeenCalledTimes(1);
+    expect(seed).toHaveBeenCalledWith(
+      AGREEMENT_ID,
+      null,
+      null,
+      expect.any(String),
+      SEEDED_DOC,
+    );
   });
 
   it("shared Texas/Northline tokens in a template extract must not skip replace", async () => {

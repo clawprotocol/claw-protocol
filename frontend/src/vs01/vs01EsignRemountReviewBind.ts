@@ -9,6 +9,7 @@
  */
 
 import type { AgreementDraft } from "../agreement/agreementTypes";
+import { fetchAgreementDraftWithSigningLock } from "../agreement/agreementWorkspaceApi";
 import {
   fetchAgreementVs01SigningSeed,
   readAgreementVs01BridgeSession,
@@ -23,6 +24,10 @@ import {
   readActivePaidProVs01PostSignHandoff,
   readLatestLocalPaidProVs01PostSignHandoff,
 } from "./vs01PaidProPostSignHandoff";
+import { fetchVs01DocumentMeta } from "./vs01Api";
+import {
+  isNonBindingDraftTemplateCorpus,
+} from "./vs01ReviewCorpusSeedRefresh";
 import {
   bindReviewCorpusOntoSeededVs01Document,
   type BindReviewCorpusResult,
@@ -90,9 +95,18 @@ export function resolveEsignEntryReviewBindContext(
   return null;
 }
 
+function pickNonTemplateReviewCorpus(text: string | null | undefined): string {
+  const t = (text ?? "").trim();
+  if (t.length < VS01_SIGNING_CORPUS_MIN_LEN) return "";
+  if (isNonBindingDraftTemplateCorpus(t)) return "";
+  return t;
+}
+
 /**
- * Inspect GET /content and POST vs01-signing-seed with the existing Review
+ * Inspect GET /content and POST vs01-signing-seed with the persist Review
  * corpus when the painted blob is not that SoT. Same persist; prefer same vs01 id.
+ * Leftover remount with an empty Incognito session still resolves agreement_id
+ * from GET /v1/documents/{id} and loads the persist draft — do not skip.
  */
 export async function ensureReviewCorpusOnEsignEntry(args: {
   documentId: string;
@@ -102,6 +116,8 @@ export async function ensureReviewCorpusOnEsignEntry(args: {
   draft?: AgreementDraft | null;
   seed?: Vs01SigningSeedFn;
   fetchContent?: (id: string) => Promise<FetchedDocumentContent>;
+  fetchDocumentMeta?: (id: string) => Promise<{ agreementId: string | null }>;
+  fetchDraft?: (agreementId: string) => Promise<AgreementDraft | null>;
   signingCorpusSource?: string | null;
 }): Promise<
   | BindReviewCorpusResult
@@ -118,22 +134,50 @@ export async function ensureReviewCorpusOnEsignEntry(args: {
         existingBridgeCorpus: (args.existingBridgeCorpus ?? "").trim() || null,
       }
     : resolveEsignEntryReviewBindContext(documentId);
-  const agreementId = resolved?.agreementId ?? "";
+  let agreementId = resolved?.agreementId ?? "";
+  if (!agreementId) {
+    try {
+      const meta = await (args.fetchDocumentMeta ?? fetchVs01DocumentMeta)(documentId);
+      agreementId = (meta.agreementId ?? "").trim();
+    } catch {
+      agreementId = "";
+    }
+  }
   if (!agreementId) {
     return { ok: true, skipped: true, reason: "missing_agreement_id", documentId };
   }
 
   const existingBridgeCorpus =
     (args.existingBridgeCorpus ?? "").trim() || resolved?.existingBridgeCorpus || null;
-  const reviewCorpus =
-    (args.reviewCorpus ?? "").trim() ||
-    resolveAgreementCorpusForPrepareHandoff({
-      agreementId,
-      draft: args.draft ?? null,
-      bridgeCorpusText: existingBridgeCorpus,
-    });
-  if (reviewCorpus.length < VS01_SIGNING_CORPUS_MIN_LEN) {
-    return { ok: true, skipped: true, reason: "review_corpus_unavailable", documentId };
+  let draft = args.draft ?? null;
+  let reviewCorpus = pickNonTemplateReviewCorpus(args.reviewCorpus);
+  if (!reviewCorpus) {
+    reviewCorpus = pickNonTemplateReviewCorpus(
+      resolveAgreementCorpusForPrepareHandoff({
+        agreementId,
+        draft,
+        bridgeCorpusText: existingBridgeCorpus,
+      }),
+    );
+  }
+  if (!reviewCorpus) {
+    try {
+      const loaded = args.fetchDraft
+        ? await args.fetchDraft(agreementId)
+        : (await fetchAgreementDraftWithSigningLock(agreementId)).draft;
+      if (loaded) {
+        draft = loaded;
+        reviewCorpus = pickNonTemplateReviewCorpus(
+          resolveAgreementCorpusForPrepareHandoff({
+            agreementId,
+            draft: loaded,
+            bridgeCorpusText: existingBridgeCorpus,
+          }),
+        );
+      }
+    } catch {
+      /* persist seed POST still runs when GET /content is the template */
+    }
   }
 
   return bindReviewCorpusOntoSeededVs01Document({
@@ -142,7 +186,7 @@ export async function ensureReviewCorpusOnEsignEntry(args: {
     reviewCorpus,
     existingBridgeCorpus,
     seed: args.seed ?? fetchAgreementVs01SigningSeed,
-    draft: args.draft ?? null,
+    draft,
     signingCorpusSource: args.signingCorpusSource ?? FIRST_FAILING_ESIGN_REMOUNT_PREDICATE,
     fetchContent: args.fetchContent,
   });

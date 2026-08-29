@@ -159,21 +159,21 @@ export function resolveServerContentReplaceDecision(args: {
   recordedMatch?: boolean;
 }): ServerContentReplaceDecision {
   const review = args.reviewCorpus.trim();
-  if (review.length < VS01_SIGNING_CORPUS_MIN_LEN) {
+  const fetched = (args.fetchedPlain ?? "").trim();
+  const fetchedWasTemplate = isNonBindingDraftTemplateCorpus(fetched);
+  if (fetchedWasTemplate) {
     return {
-      replace: false,
-      reason: REUSE_MATCHING_SEEDED_DOCUMENT_REASON,
-      fetchedWasTemplate: false,
+      replace: true,
+      reason: REPLACE_STALE_SERVER_TEMPLATE_CONTENT_REASON,
+      fetchedWasTemplate: true,
       matching: false,
     };
   }
-  const fetched = (args.fetchedPlain ?? "").trim();
-  const fetchedWasTemplate = isNonBindingDraftTemplateCorpus(fetched);
   const matching = fetchedPlainPositivelyMatchesReviewCorpus(
     args.fetchFailed ? null : args.fetchedPlain,
     review,
   );
-  if (args.recordedMatch && matching && !fetchedWasTemplate) {
+  if (args.recordedMatch && !fetchedWasTemplate) {
     return {
       replace: false,
       reason: REUSE_MATCHING_SERVER_CONTENT_REASON,
@@ -195,6 +195,22 @@ export function resolveServerContentReplaceDecision(args: {
       reason: REUSE_MATCHING_SERVER_CONTENT_REASON,
       fetchedWasTemplate: false,
       matching: true,
+    };
+  }
+  if (review.length < VS01_SIGNING_CORPUS_MIN_LEN) {
+    if (looksLikeUnreadableDocumentExtract(fetched)) {
+      return {
+        replace: true,
+        reason: REPLACE_STALE_SERVER_TEMPLATE_CONTENT_REASON,
+        fetchedWasTemplate: false,
+        matching: false,
+      };
+    }
+    return {
+      replace: false,
+      reason: REUSE_MATCHING_SEEDED_DOCUMENT_REASON,
+      fetchedWasTemplate: false,
+      matching: false,
     };
   }
   return {
@@ -347,10 +363,14 @@ export async function bindReviewCorpusOntoSeededVs01Document(args: {
   }
 
   const replaceId = existingDocumentId.startsWith("doc_") ? existingDocumentId : null;
+  const seedCorpus =
+    reviewCorpus.length >= VS01_SIGNING_CORPUS_MIN_LEN && !isNonBindingDraftTemplateCorpus(reviewCorpus)
+      ? reviewCorpus
+      : null;
   const seeded = await args.seed(
     agreementId,
     args.draft ?? null,
-    reviewCorpus,
+    seedCorpus,
     args.signingCorpusSource ?? REFRESH_STALE_SEEDED_DOCUMENT_REASON,
     replaceId,
   );
