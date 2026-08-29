@@ -33,7 +33,7 @@ const AGREEMENT_ID = "dd37f0e4-feba-42e5-bb37-713218aaf346";
 const SEEDED_DOC = "doc_e959491fdcef431c96052cbb74e0fdaf";
 
 function padCorpus(body: string): string {
-  return `${body}\n\n${"The parties agree to perform the stated obligations in good faith. ".repeat(40)}`;
+  return `${body}\n\n${"The parties agree to perform the stated obligations in good faith. ".repeat(40)}`.trim();
 }
 
 function reviewServicesAgreement(): string {
