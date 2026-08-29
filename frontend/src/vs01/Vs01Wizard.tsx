@@ -38,6 +38,7 @@ import {
   type AgreementVs01BridgeSession,
 } from "../launch/simpleProduct/agreementToVs01SigningBridge";
 import { resolvePrepareBridgeSigningCorpus } from "./vs01PrepareBridgeCorpus";
+import { ensureReviewCorpusOnEsignEntry } from "./vs01EsignRemountReviewBind";
 import { VS01_SIGNING_CORPUS_MIN_LEN } from "./vs01SigningCorpus";
 import { fingerprintAgreementBody } from "../components/agreements/guidedDealCompletion/guidedSigningPacketVersion";
 import { buildVs01CanonicalPacketSeed, hasVs01CanonicalPacketCached, storeVs01CanonicalPacketSeed } from "./vs01CanonicalPacketSeed";
@@ -798,6 +799,17 @@ export function Vs01Wizard({
     if (shouldDeferVs01SeedDocumentLoad({ authEnabled, authLoading })) return;
     let cancelled = false;
     void (async () => {
+      // Remount of leftover /app/esign/:id must replace template GET /content
+      // before paint. #143 only bound inside tryNavigate.
+      if (!sid.startsWith("local_doc_")) {
+        try {
+          await ensureReviewCorpusOnEsignEntry({ documentId: sid });
+        } catch {
+          /* stay on placement; do not eject */
+        }
+        if (cancelled) return;
+      }
+
       const hydrateLocalPaidProBridge = (): boolean => {
         if (bridgeHydratedSeedSid.current === sid) return true;
         const bridgeParams = new URLSearchParams(window.location.search);

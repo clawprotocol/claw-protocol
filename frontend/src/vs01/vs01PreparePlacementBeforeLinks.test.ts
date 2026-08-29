@@ -210,5 +210,14 @@ describe("Prepare click reaches placement before links-ready", () => {
     expect(block).toContain("readPaidProVs01PostSignHandoff");
     expect(block).toContain("fetchAgreementVs01SigningSeed");
     expect(block).not.toMatch(/resend|sendEmail|send_mail/i);
+
+    const wizard = readFileSync(join(__dirname, "Vs01Wizard.tsx"), "utf8");
+    expect(wizard).toContain("ensureReviewCorpusOnEsignEntry");
+    const leftover = readFileSync(
+      join(__dirname, "../launch/creatorDashboardPrepareSignatureLinks.ts"),
+      "utf8",
+    );
+    expect(leftover).toContain("ensureReviewCorpusOnEsignEntry");
+    expect(leftover).toContain("resolveExistingPreparedDocumentId");
   });
 });

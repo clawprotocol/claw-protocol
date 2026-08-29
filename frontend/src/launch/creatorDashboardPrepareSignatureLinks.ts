@@ -14,6 +14,8 @@ import {
   writeAgreementVs01BridgeSession,
 } from "./simpleProduct/agreementToVs01SigningBridge";
 import { resolveAgreementCorpusForPrepareHandoff } from "../vs01/vs01PrepareBridgeCorpus";
+import { ensureReviewCorpusOnEsignEntry } from "../vs01/vs01EsignRemountReviewBind";
+import { resolveExistingPreparedDocumentId } from "../vs01/vs01PreparePlacementBeforeLinks";
 import { mergeReviewLinkRecipientEmailsOntoHydratedDraft } from "./simpleProduct/reviewLinkRecipientEmailMerge";
 import {
   buildVs01OwnerPrepareEsignPath,
@@ -157,6 +159,15 @@ export async function navigateCreatorPrepareSignatureLinks(options: {
 
   const existingRoute = resolveVs01OwnerPrepareEsignRoute(id);
   if (existingRoute) {
+    const leftoverDoc = resolveExistingPreparedDocumentId(id);
+    if (leftoverDoc) {
+      await ensureReviewCorpusOnEsignEntry({
+        documentId: leftoverDoc,
+        agreementId: id,
+        draft: emailMergedDraft,
+        reviewCorpus: agreementCorpusText || null,
+      });
+    }
     void options.navigate(existingRoute);
     return {
       navigated: true,

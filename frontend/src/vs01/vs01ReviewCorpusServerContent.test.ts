@@ -11,6 +11,7 @@ import {
   bindReviewCorpusOntoSeededVs01Document,
   clearReviewServerContentBinding,
   extractPlainTextFromDocumentContent,
+  fetchedPlainPositivelyMatchesReviewCorpus,
   loadReviewServerContentBinding,
   resolveServerContentReplaceDecision,
   storeReviewServerContentBinding,
@@ -247,13 +248,60 @@ describe("Prepare writes Review corpus onto GET /content", () => {
       corpusHash: "already-recorded",
       contentSha256: hash,
     });
-    const recordedOnly = resolveServerContentReplaceDecision({
+    const recordedReview = resolveServerContentReplaceDecision({
+      fetchedPlain: review,
+      reviewCorpus: review,
+      recordedMatch: true,
+    });
+    expect(recordedReview.replace).toBe(false);
+    expect(recordedReview.matching).toBe(true);
+
+    const recordedUnreadable = resolveServerContentReplaceDecision({
       fetchedPlain: "unreadable-pdf-bytes",
       reviewCorpus: review,
       recordedMatch: true,
     });
-    expect(recordedOnly.replace).toBe(false);
-    expect(recordedOnly.matching).toBe(true);
+    expect(recordedUnreadable.replace).toBe(true);
+    expect(recordedUnreadable.matching).toBe(false);
+  });
+
+  it("shared Texas/Northline tokens in a template extract must not skip replace", async () => {
+    const review = reviewServicesAgreement();
+    const sharedTokenExtract = [
+      "%PDF-1.4",
+      "Northline Studio",
+      "Harbor Marks LLC",
+      "Texas",
+      "$2400",
+      "Draft Agreement (non-binding template)",
+      "1. SCOPE",
+      "8. SIGNATURES",
+    ].join("\n");
+    expect(fetchedPlainPositivelyMatchesReviewCorpus(sharedTokenExtract, review)).toBe(false);
+    expect(
+      resolveServerContentReplaceDecision({
+        fetchedPlain: sharedTokenExtract,
+        reviewCorpus: review,
+      }).replace,
+    ).toBe(true);
+
+    const seed = vi.fn().mockResolvedValue({
+      ok: true,
+      documentId: SEEDED_DOC,
+      contentSha256: "a".repeat(64),
+    });
+    const bound = await bindReviewCorpusOntoSeededVs01Document({
+      agreementId: AGREEMENT_ID,
+      existingDocumentId: SEEDED_DOC,
+      reviewCorpus: review,
+      seed,
+      fetchContent: fetchContentOf(sharedTokenExtract),
+    });
+    expect(bound.ok).toBe(true);
+    if (!bound.ok) return;
+    expect(bound.replaced).toBe(true);
+    expect(seed).toHaveBeenCalledTimes(1);
+    expect(seed.mock.calls[0][2]).toMatch(/SERVICES AGREEMENT/);
   });
 
   it("409 still does not eject to dashboard", () => {

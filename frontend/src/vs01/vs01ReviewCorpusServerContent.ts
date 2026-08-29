@@ -128,6 +128,30 @@ export function extractPlainTextFromDocumentContent(bytes: Uint8Array): string {
   return (strings.join("\n").trim() || utf8).trim();
 }
 
+/** Compressed / binary GET /content is not a Review identity. */
+export function looksLikeUnreadableDocumentExtract(text: string | null | undefined): boolean {
+  const t = (text ?? "").trim();
+  if (!t) return true;
+  if (t.startsWith("%PDF")) return true;
+  const letters = (t.match(/[A-Za-z]/g) ?? []).length;
+  return t.length >= 64 && letters / t.length < 0.2;
+}
+
+/**
+ * Positive Review identity only. Shared deal tokens (party names, venue,
+ * fee figures) are not a match. Unreadable PDF extract is not a match.
+ */
+export function fetchedPlainPositivelyMatchesReviewCorpus(
+  fetchedPlain: string | null | undefined,
+  reviewCorpus: string,
+): boolean {
+  const fetched = (fetchedPlain ?? "").trim();
+  const review = reviewCorpus.trim();
+  if (!fetched || review.length < VS01_SIGNING_CORPUS_MIN_LEN) return false;
+  if (looksLikeUnreadableDocumentExtract(fetched)) return false;
+  return seededPacketMatchesReviewCorpus(fetched, review);
+}
+
 export function resolveServerContentReplaceDecision(args: {
   fetchedPlain: string | null;
   reviewCorpus: string;
@@ -143,7 +167,13 @@ export function resolveServerContentReplaceDecision(args: {
       matching: false,
     };
   }
-  if (args.recordedMatch) {
+  const fetched = (args.fetchedPlain ?? "").trim();
+  const fetchedWasTemplate = isNonBindingDraftTemplateCorpus(fetched);
+  const matching = fetchedPlainPositivelyMatchesReviewCorpus(
+    args.fetchFailed ? null : args.fetchedPlain,
+    review,
+  );
+  if (args.recordedMatch && matching && !fetchedWasTemplate) {
     return {
       replace: false,
       reason: REUSE_MATCHING_SERVER_CONTENT_REASON,
@@ -159,9 +189,6 @@ export function resolveServerContentReplaceDecision(args: {
       matching: false,
     };
   }
-  const fetched = args.fetchedPlain.trim();
-  const fetchedWasTemplate = isNonBindingDraftTemplateCorpus(fetched);
-  const matching = seededPacketMatchesReviewCorpus(fetched, review);
   if (matching) {
     return {
       replace: false,
@@ -296,7 +323,12 @@ export async function bindReviewCorpusOntoSeededVs01Document(args: {
   });
 
   if (!decision.replace) {
-    if (inspect.ok && inspect.contentSha256 && reviewCorpus.length >= VS01_SIGNING_CORPUS_MIN_LEN) {
+    if (
+      inspect.ok &&
+      inspect.contentSha256 &&
+      reviewCorpus.length >= VS01_SIGNING_CORPUS_MIN_LEN &&
+      fetchedPlainPositivelyMatchesReviewCorpus(inspect.plain, reviewCorpus)
+    ) {
       storeReviewServerContentBinding({
         agreementId,
         documentId: existingDocumentId,

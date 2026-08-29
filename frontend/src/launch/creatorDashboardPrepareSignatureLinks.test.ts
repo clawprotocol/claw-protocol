@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { AgreementDraft } from "../agreement/agreementTypes";
 import * as agreementWorkspaceApi from "../agreement/agreementWorkspaceApi";
 import * as agreementToVs01SigningBridge from "./simpleProduct/agreementToVs01SigningBridge";
+import * as esignRemountReviewBind from "../vs01/vs01EsignRemountReviewBind";
 import { navigateCreatorPrepareSignatureLinks } from "./creatorDashboardPrepareSignatureLinks";
 
 const mockNavigate = vi.fn();
@@ -32,6 +33,8 @@ function baseDraft(): AgreementDraft {
 describe("navigateCreatorPrepareSignatureLinks", () => {
   beforeEach(() => {
     mockNavigate.mockClear();
+    sessionStorage.clear();
+    localStorage.clear();
   });
 
   it("seeds VS01 signature prep when draft is ready", async () => {
@@ -134,6 +137,14 @@ describe("navigateCreatorPrepareSignatureLinks", () => {
       ok: false,
       reason: "missing_corpus",
     });
+    const remountSpy = vi.spyOn(esignRemountReviewBind, "ensureReviewCorpusOnEsignEntry").mockResolvedValue({
+      ok: true,
+      documentId: "doc_resume",
+      replaced: true,
+      reason: "replace_stale_server_template_content_from_review_sot",
+      fetchedWasTemplate: true,
+      contentSha256: "a".repeat(64),
+    });
     agreementToVs01SigningBridge.writeAgreementVs01BridgeSession({
       vs01DocumentId: "doc_resume",
       agreementId: "ag_ready",
@@ -154,6 +165,12 @@ describe("navigateCreatorPrepareSignatureLinks", () => {
       navigateOnBridgeFailure: false,
     });
 
+    expect(remountSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        documentId: "doc_resume",
+        agreementId: "ag_ready",
+      }),
+    );
     expect(result.navigated).toBe(true);
     expect(result.destination).toBe("/app/esign/doc_resume?agreement_bridge=1");
     expect(mockNavigate).toHaveBeenCalledWith("/app/esign/doc_resume?agreement_bridge=1");
