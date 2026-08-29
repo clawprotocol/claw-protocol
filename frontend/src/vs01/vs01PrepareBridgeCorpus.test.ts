@@ -14,6 +14,8 @@ import {
 } from "./vs01PrepareBridgeCorpus";
 import { writeReviewFirstPinnedCorpus } from "../launch/simpleProduct/reviewFirstSendSurface";
 import type { AgreementVs01BridgeSession } from "../launch/simpleProduct/agreementToVs01SigningBridge";
+import { clearPaidProSourceOfTruth, hashPaidProCorpus } from "../components/agreements/paidProSourceOfTruth";
+import { replacePaidProSourceOfTruth } from "../components/agreements/paidProSourceOfTruthState";
 
 const AGREEMENT_ID = "ag_test369_prepare_bridge";
 
@@ -68,6 +70,25 @@ function minimalBridge(): AgreementVs01BridgeSession {
 describe("VS01 prepare bridge corpus (Test369)", () => {
   beforeEach(() => {
     sessionStorage.clear();
+    clearPaidProSourceOfTruth();
+  });
+
+  it("skips a stale non-binding template SoT when Review corpus is on the bridge", () => {
+    const template = `${"Draft Agreement (non-binding template)\n\n1. Scope. Starter clause. ".repeat(50)}\n8. Signatures.`;
+    const review = premiumCorpus();
+    replacePaidProSourceOfTruth({
+      text: template,
+      hash: hashPaidProCorpus(template),
+      accepted_at: Date.now(),
+      source: "server_full_draft",
+    });
+    const resolved = resolveAgreementCorpusForPrepareHandoff({
+      agreementId: AGREEMENT_ID,
+      draft: null,
+      bridgeCorpusText: review,
+    });
+    expect(resolved).toBe(review);
+    expect(resolved).not.toMatch(/Draft Agreement \(non-binding template\)/i);
   });
 
   it("falls back to pinned review corpus when bridge session omits agreementCorpusText", () => {

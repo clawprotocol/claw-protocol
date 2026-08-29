@@ -271,6 +271,22 @@ export function findVs01CanonicalPacketPortableByAgreementId(
   );
 }
 
+/** Drop a stale portable packet so a refreshed seed cannot keep template layout/fields. */
+export function clearVs01CanonicalPacketPortable(documentId: string): void {
+  if (typeof window === "undefined") return;
+  const key = storageKey(documentId);
+  try {
+    sessionStorage.removeItem(`${PORTABLE_SS_PREFIX}${key}`);
+  } catch {
+    /* ignore */
+  }
+  try {
+    localStorage.removeItem(`${PORTABLE_LS_PREFIX}${key}`);
+  } catch {
+    /* ignore */
+  }
+}
+
 export function loadVs01CanonicalPacketPortable(documentId: string): Vs01CanonicalPacketPortableV1 | null {
   if (typeof window === "undefined") return null;
   const key = storageKey(documentId);

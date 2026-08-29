@@ -37,6 +37,7 @@ import {
   buildPrepareBridgeCorpusGateArgs,
   resolveAgreementCorpusForPrepareHandoff,
 } from "../../vs01/vs01PrepareBridgeCorpus";
+import { resolveSeededDocumentReuseFromReviewCorpus } from "../../vs01/vs01ReviewCorpusSeedRefresh";
 import {
   resolveFinalVs01CorpusOrBlock,
   VS01_SIGNING_CORPUS_MIN_LEN,
@@ -981,11 +982,19 @@ export async function tryNavigatePaidProAgreementSenderFirstVs01Esign(options: {
       ? existingBridgeDoc
       : existingHandoffDoc || "";
   if (existingDoc) {
+    // First failing predicate after #141: reuse_seeded_vs01_document_keeps_stale_template_body.
+    // Keep the document id; refresh stored seed when it is a non-binding template / not Review SoT.
+    const reuse = resolveSeededDocumentReuseFromReviewCorpus({
+      agreementId: id,
+      existingDocumentId: existingDoc,
+      reviewCorpus: corpusResolution.corpus,
+      existingBridgeCorpus: existingBridge?.agreementCorpusText,
+    });
     logSignerMetadataBeforeVs01Bridge(merged, resolvedSetup);
     logAgreementVs01RecipientEmailMergeDiagnostics(merged, recipientSetupPlausibleInputFlags(resolvedSetup));
     const reusedBridge = buildAgreementVs01BridgeSession({
       agreementId: id,
-      vs01DocumentId: existingDoc,
+      vs01DocumentId: reuse.documentId,
       draft: mergedWithCorpus,
       senderFirstLawdogHandoff: true,
       reviewerApprovedCleanHandoff: Boolean(options.reviewerApprovedCleanHandoff),
@@ -995,13 +1004,15 @@ export async function tryNavigatePaidProAgreementSenderFirstVs01Esign(options: {
     logAgreementVs01BridgePreflight(reusedBridge);
     logVs01BridgeSignerMetadata(reusedBridge);
     writeAgreementVs01BridgeSession(reusedBridge);
-    setPaidProAgreementBridgeSkipMarker(existingDoc);
-    const route = `/app/esign/${encodeURIComponent(existingDoc)}?agreement_bridge=1`;
+    setPaidProAgreementBridgeSkipMarker(reuse.documentId);
+    const route = `/app/esign/${encodeURIComponent(reuse.documentId)}?agreement_bridge=1`;
     logAgreementToVs01EsignRoute({
       agreementId: id,
-      seedDocumentId: existingDoc,
+      seedDocumentId: reuse.documentId,
       route,
-      reason: "reuse_seeded_vs01_document",
+      reason: reuse.reason,
+      refreshedStaleTemplate: reuse.refreshed,
+      storedWasTemplate: reuse.storedWasTemplate,
       agreementBridgeMode: reusedBridge.agreementBridgeMode ?? null,
       ownerIsPreparingPacket: reusedBridge.ownerIsPreparingPacket ?? null,
     });

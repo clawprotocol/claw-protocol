@@ -17,6 +17,7 @@ import {
   VS01_SIGNING_CORPUS_MIN_LEN,
   type ResolveFinalVs01CorpusOrBlockArgs,
 } from "./vs01SigningCorpus";
+import { pickAuthoritativePrepareHandoffCorpus } from "./vs01ReviewCorpusSeedRefresh";
 
 /** Resolve signing corpus after review approval when bridge session may omit agreementCorpusText. */
 export function resolveAgreementCorpusForPrepareHandoff(args: {
@@ -24,26 +25,25 @@ export function resolveAgreementCorpusForPrepareHandoff(args: {
   draft: AgreementDraft | null;
   bridgeCorpusText?: string | null;
 }): string {
-  // Accepted SoT wins when present — VS01 must not invent a second freeze or prefer a divergent bridge body.
-  if (hasPaidProSourceOfTruth()) {
-    const sot = getPaidProSourceOfTruthText().trim();
-    if (sot.length >= VS01_SIGNING_CORPUS_MIN_LEN) return sot;
-  }
-
+  // Review accepted/finalized/rebuild corpus wins over a stale starter/template SoT or seed.
+  const sot = hasPaidProSourceOfTruth() ? getPaidProSourceOfTruthText().trim() : "";
   const fromBridge = (args.bridgeCorpusText ?? "").trim();
-  if (fromBridge.length >= VS01_SIGNING_CORPUS_MIN_LEN) return fromBridge;
-
   const handoff = resolveGuidedVs01SigningHandoffForBridge(undefined);
   const fromHandoff = (handoff?.corpusText ?? "").trim();
-  if (fromHandoff.length >= VS01_SIGNING_CORPUS_MIN_LEN) return fromHandoff;
-
   const fromSnapshot = (getAuthoritativeSigningSnapshot()?.corpus ?? "").trim();
-  if (fromSnapshot.length >= VS01_SIGNING_CORPUS_MIN_LEN) return fromSnapshot;
-
   const fromPinned = (peekReviewFirstPinnedCorpus(args.agreementId) ?? "").trim();
-  if (fromPinned.length >= VS01_SIGNING_CORPUS_MIN_LEN) return fromPinned;
-
-  return resolveBridgeAgreementCorpusFromDraft(args.draft);
+  const fromDraft = resolveBridgeAgreementCorpusFromDraft(args.draft);
+  const picked = pickAuthoritativePrepareHandoffCorpus([
+    sot,
+    fromBridge,
+    fromHandoff,
+    fromSnapshot,
+    fromPinned,
+    fromDraft,
+  ]);
+  if (picked) return picked;
+  if (sot.length >= VS01_SIGNING_CORPUS_MIN_LEN) return sot;
+  return fromDraft;
 }
 
 export function buildPrepareBridgeCorpusGateArgs(args: {

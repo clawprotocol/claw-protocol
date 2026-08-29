@@ -22,7 +22,11 @@ export const FIRST_FAILING_PLACEMENT_SKIP_PREDICATE =
 
 export const PLACEMENT_BEFORE_LINKS_STAY_REASON = "stay_on_placement_until_fields_placed" as const;
 export const LINKS_READY_REQUIRES_PLACED_FIELDS_REASON = "links_ready_requires_placed_fields" as const;
-export const REUSE_SEEDED_DOCUMENT_REASON = "reuse_seeded_vs01_document" as const;
+export { REUSE_MATCHING_SEEDED_DOCUMENT_REASON as REUSE_SEEDED_DOCUMENT_REASON } from "./vs01ReviewCorpusSeedRefresh";
+export {
+  FIRST_FAILING_STALE_TEMPLATE_SEED_PREDICATE,
+  REFRESH_STALE_SEEDED_DOCUMENT_REASON,
+} from "./vs01ReviewCorpusSeedRefresh";
 
 export type PrepareAfterSeedStep = 2 | 3;
 
