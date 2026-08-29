@@ -37,7 +37,7 @@ import {
   buildPrepareBridgeCorpusGateArgs,
   resolveAgreementCorpusForPrepareHandoff,
 } from "../../vs01/vs01PrepareBridgeCorpus";
-import { resolveSeededDocumentReuseFromReviewCorpus } from "../../vs01/vs01ReviewCorpusSeedRefresh";
+import { bindReviewCorpusOntoSeededVs01Document } from "../../vs01/vs01ReviewCorpusServerContent";
 import {
   resolveFinalVs01CorpusOrBlock,
   VS01_SIGNING_CORPUS_MIN_LEN,
@@ -53,7 +53,10 @@ import {
 import { isPlausibleEmail } from "../../vs01/detailsStepValidation";
 import type { Vs01Counterparty } from "../../vs01/types";
 import { resolveApiBase } from "../../lib/clawApi";
-import { readPaidProVs01PostSignHandoff } from "../../vs01/vs01PaidProPostSignHandoff";
+import {
+  readPaidProVs01PostSignHandoff,
+  writePaidProVs01PostSignHandoff,
+} from "../../vs01/vs01PaidProPostSignHandoff";
 
 const BRIDGE_SESSION_KEY = "claw_agreement_vs01_bridge_handoff_v1";
 /** Survives Strict Mode / URL strip so Vs01Wizard still knows to skip details (value = document id). */
@@ -860,11 +863,13 @@ export async function fetchAgreementVs01SigningSeed(
   draft?: AgreementDraft | null,
   signingCorpusPlain?: string | null,
   signingCorpusSource?: string | null,
+  replaceDocumentId?: string | null,
 ): Promise<AgreementVs01SigningSeedResult> {
   const id = agreementId.trim();
   if (!id) return { ok: false, reason: "missing_agreement_id" };
   logVs01SigningSeedPreflight(id, draft ?? null, signingCorpusPlain, signingCorpusSource);
   const corpusPayload = (signingCorpusPlain ?? "").trim();
+  const replaceId = (replaceDocumentId ?? "").trim();
   try {
     const res = await fetch(
       `${resolveApiBase().replace(/\/$/, "")}/api/agreements/${encodeURIComponent(id)}/vs01-signing-seed`,
@@ -875,6 +880,7 @@ export async function fetchAgreementVs01SigningSeed(
           ...(corpusPayload.length >= VS01_SIGNING_CORPUS_MIN_LEN
             ? { signing_corpus_plain: corpusPayload }
             : {}),
+          ...(replaceId.startsWith("doc_") ? { document_id: replaceId } : {}),
         }),
       },
     );
@@ -982,19 +988,41 @@ export async function tryNavigatePaidProAgreementSenderFirstVs01Esign(options: {
       ? existingBridgeDoc
       : existingHandoffDoc || "";
   if (existingDoc) {
-    // First failing predicate after #141: reuse_seeded_vs01_document_keeps_stale_template_body.
-    // Keep the document id; refresh stored seed when it is a non-binding template / not Review SoT.
-    const reuse = resolveSeededDocumentReuseFromReviewCorpus({
+    // First failing predicate after #142: esign_paints_get_content_not_client_seed.
+    // Client seed refresh stays as a helper; GET /content is the paint SoT.
+    // POST vs01-signing-seed with Review corpus (prefer same vs01 id).
+    const server = await bindReviewCorpusOntoSeededVs01Document({
       agreementId: id,
       existingDocumentId: existingDoc,
       reviewCorpus: corpusResolution.corpus,
       existingBridgeCorpus: existingBridge?.agreementCorpusText,
+      seed: fetchAgreementVs01SigningSeed,
+      draft: mergedWithCorpus,
+      signingCorpusSource: handoff?.source ?? corpusResolution.source,
     });
+    if (!server.ok) return false;
+    const boundDoc = server.documentId;
+    if (boundDoc !== existingDoc) {
+      const priorHandoff = readPaidProVs01PostSignHandoff(id);
+      if (priorHandoff) {
+        writePaidProVs01PostSignHandoff({
+          ...priorHandoff,
+          vs01DocumentId: boundDoc,
+          signers: priorHandoff.signers.map((row) => ({
+            ...row,
+            signingUrl: (row.signingUrl || "").replace(existingDoc, boundDoc),
+          })),
+          ownerSigningUrl: priorHandoff.ownerSigningUrl
+            ? priorHandoff.ownerSigningUrl.replace(existingDoc, boundDoc)
+            : priorHandoff.ownerSigningUrl,
+        });
+      }
+    }
     logSignerMetadataBeforeVs01Bridge(merged, resolvedSetup);
     logAgreementVs01RecipientEmailMergeDiagnostics(merged, recipientSetupPlausibleInputFlags(resolvedSetup));
     const reusedBridge = buildAgreementVs01BridgeSession({
       agreementId: id,
-      vs01DocumentId: reuse.documentId,
+      vs01DocumentId: boundDoc,
       draft: mergedWithCorpus,
       senderFirstLawdogHandoff: true,
       reviewerApprovedCleanHandoff: Boolean(options.reviewerApprovedCleanHandoff),
@@ -1004,15 +1032,15 @@ export async function tryNavigatePaidProAgreementSenderFirstVs01Esign(options: {
     logAgreementVs01BridgePreflight(reusedBridge);
     logVs01BridgeSignerMetadata(reusedBridge);
     writeAgreementVs01BridgeSession(reusedBridge);
-    setPaidProAgreementBridgeSkipMarker(reuse.documentId);
-    const route = `/app/esign/${encodeURIComponent(reuse.documentId)}?agreement_bridge=1`;
+    setPaidProAgreementBridgeSkipMarker(boundDoc);
+    const route = `/app/esign/${encodeURIComponent(boundDoc)}?agreement_bridge=1`;
     logAgreementToVs01EsignRoute({
       agreementId: id,
-      seedDocumentId: reuse.documentId,
+      seedDocumentId: boundDoc,
       route,
-      reason: reuse.reason,
-      refreshedStaleTemplate: reuse.refreshed,
-      storedWasTemplate: reuse.storedWasTemplate,
+      reason: server.reason,
+      replacedServerContent: server.replaced,
+      fetchedWasTemplate: server.fetchedWasTemplate,
       agreementBridgeMode: reusedBridge.agreementBridgeMode ?? null,
       ownerIsPreparingPacket: reusedBridge.ownerIsPreparingPacket ?? null,
     });

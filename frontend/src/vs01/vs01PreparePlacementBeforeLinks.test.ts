@@ -205,9 +205,10 @@ describe("Prepare click reaches placement before links-ready", () => {
     expect(start).toBeGreaterThanOrEqual(0);
     const seedAt = bridge.indexOf("const vs01Seed = await fetchAgreementVs01SigningSeed", start);
     const block = bridge.slice(start, seedAt > start ? seedAt : start + 4500);
-    expect(block).toContain("resolveSeededDocumentReuseFromReviewCorpus");
+    expect(block).toContain("bindReviewCorpusOntoSeededVs01Document");
     expect(block).toContain("existingDoc");
     expect(block).toContain("readPaidProVs01PostSignHandoff");
+    expect(block).toContain("fetchAgreementVs01SigningSeed");
     expect(block).not.toMatch(/resend|sendEmail|send_mail/i);
   });
 });

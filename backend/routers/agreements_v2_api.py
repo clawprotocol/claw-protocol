@@ -9580,6 +9580,11 @@ class Vs01SigningSeedBody(BaseModel):
     """Optional authoritative signing corpus for paid Pro VS01 seed (must exceed stored draft preview)."""
 
     signing_corpus_plain: Optional[str] = Field(default=None, max_length=1_200_000)
+    document_id: Optional[str] = Field(
+        default=None,
+        max_length=80,
+        description="Overwrite this vs01 document in place (same persist / same document id).",
+    )
 
 
 _VS01_SIGNING_CORPUS_OVERRIDE_MIN_LEN = 1500
@@ -9806,6 +9811,45 @@ def post_agreement_vs01_signing_seed(
         owner_org_id = require_claw_org_id_header(request).strip()
     except HTTPException:
         owner_org_id = ""
+    replace_doc_id = (body.document_id or "").strip()
+    if replace_doc_id:
+        try:
+            replace_doc_id = document_service.stable_vs01_document_id(replace_doc_id)
+        except ValueError:
+            raise HTTPException(
+                status_code=400,
+                detail=_vs01_signing_seed_error_detail(
+                    agreement_id=aid,
+                    stage="finalize_document",
+                    code="vs01_invalid_replace_document_id",
+                    message="document_id is not a replaceable vs01 document id",
+                ),
+            ) from None
+        existing_meta = document_service.get_document_meta(replace_doc_id) or {}
+        bound_aid = str(existing_meta.get("agreement_id") or "").strip()
+        if bound_aid and bound_aid != aid:
+            raise HTTPException(
+                status_code=409,
+                detail=_vs01_signing_seed_error_detail(
+                    agreement_id=aid,
+                    stage="finalize_document",
+                    code="vs01_replace_document_agreement_mismatch",
+                    message="Cannot replace a vs01 document bound to another agreement",
+                    extra={"document_id": replace_doc_id},
+                ),
+            )
+        bound_org = str(existing_meta.get("owner_org_id") or "").strip()
+        if bound_org and owner_org_id and bound_org != owner_org_id:
+            raise HTTPException(
+                status_code=403,
+                detail=_vs01_signing_seed_error_detail(
+                    agreement_id=aid,
+                    stage="finalize_document",
+                    code="vs01_replace_document_org_mismatch",
+                    message="Cannot replace a vs01 document owned by another org",
+                    extra={"document_id": replace_doc_id},
+                ),
+            )
     # --- finalize_document ---
     try:
         meta = document_service.finalize_document(
@@ -9813,6 +9857,7 @@ def post_agreement_vs01_signing_seed(
             content_type="application/pdf",
             agreement_id=aid,
             owner_org_id=owner_org_id or None,
+            document_id=replace_doc_id or None,
         )
     except Exception as exc:
         _seed_store_ctx = document_service.document_storage_seed_error_context()

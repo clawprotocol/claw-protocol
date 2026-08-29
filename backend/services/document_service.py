@@ -139,6 +139,22 @@ def _read_legacy_body(document_id: str) -> Optional[bytes]:
     return None
 
 
+def stable_vs01_document_id(document_id: Optional[str]) -> str:
+    """Mint a new vs01 id, or reuse a client-supplied ``doc_*`` id for in-place replace."""
+    requested = (document_id or "").strip()
+    if not requested:
+        return f"doc_{uuid.uuid4().hex}"
+    if (
+        not requested.startswith("doc_")
+        or "/" in requested
+        or ".." in requested
+        or len(requested) > 80
+        or not requested[4:].replace("_", "").replace("-", "").isalnum()
+    ):
+        raise ValueError("invalid_document_id")
+    return requested
+
+
 def finalize_document(
     content: bytes,
     *,
@@ -146,23 +162,34 @@ def finalize_document(
     agreement_id: Optional[str] = None,
     owner_org_id: Optional[str] = None,
     bound_party_id: Optional[str] = None,
+    document_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Write finalized bytes and return stable identifiers (``document_id``, ``content_sha256``, ...).
 
     ``owner_org_id`` / ``bound_party_id`` must be supplied by the authenticated API layer
     (never trusted from an unauthenticated client alone).
+
+    When ``document_id`` is supplied, overwrite that vs01 body in place (same id).
     """
     if not content:
         raise ValueError("empty_document")
 
     content_sha256 = hashlib.sha256(content).hexdigest()
-    document_id = f"doc_{uuid.uuid4().hex}"
+    document_id = stable_vs01_document_id(document_id)
+    prior: Optional[Dict[str, Any]] = None
+    try:
+        prior = get_document_meta(document_id)
+    except Exception:
+        prior = None
+    created_at = ""
+    if isinstance(prior, dict):
+        created_at = str(prior.get("created_at") or "").strip()
     ct = content_type or "application/octet-stream"
     meta: Dict[str, Any] = {
         "document_id": document_id,
         "content_sha256": content_sha256,
-        "created_at": _utc_now_iso(),
+        "created_at": created_at or _utc_now_iso(),
         "size_bytes": len(content),
         "content_type": ct,
     }

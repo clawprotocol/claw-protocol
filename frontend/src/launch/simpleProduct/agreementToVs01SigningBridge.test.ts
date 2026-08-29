@@ -673,4 +673,31 @@ describe("fetchAgreementVs01SigningSeed", () => {
       expect(r.contentSha256).toHaveLength(64);
     }
   });
+
+  it("POSTs document_id when replacing an existing vs01 body in place", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        ok: true,
+        document_id: "doc_e959491fdcef431c96052cbb74e0fdaf",
+        content_sha256: "b".repeat(64),
+      }),
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const corpus = `${"SERVICES AGREEMENT\n".repeat(80)}10. LIABILITY\n11. GOVERNING LAW`;
+    const r = await fetchAgreementVs01SigningSeed(
+      "dd37f0e4-feba-42e5-bb37-713218aaf346",
+      null,
+      corpus,
+      "review_sot",
+      "doc_e959491fdcef431c96052cbb74e0fdaf",
+    );
+    expect(r.ok).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const init = fetchMock.mock.calls[0][1] as { body?: string };
+    const body = JSON.parse(String(init.body || "{}")) as Record<string, unknown>;
+    expect(body.document_id).toBe("doc_e959491fdcef431c96052cbb74e0fdaf");
+    expect(String(body.signing_corpus_plain || "")).toContain("SERVICES AGREEMENT");
+  });
 });

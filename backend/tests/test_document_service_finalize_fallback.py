@@ -90,6 +90,28 @@ def test_finalize_document_unified_success_ignores_legacy_mirror_failure(monkeyp
     assert calls["n"] == 1
 
 
+def test_finalize_document_replaces_content_in_place_same_id(monkeypatch, tmp_path):
+    """Prepare reuse: overwrite GET /content for an existing vs01 document id."""
+    monkeypatch.setenv("CLAW_UNIFIED_ARTIFACT_STORE", "0")
+    first = document_service.finalize_document(
+        b"%PDF-1.4 template-body",
+        content_type="application/pdf",
+        agreement_id="dd37f0e4-feba-42e5-bb37-713218aaf346",
+    )
+    doc_id = first["document_id"]
+    replaced = document_service.finalize_document(
+        b"%PDF-1.4 review-services-agreement",
+        content_type="application/pdf",
+        agreement_id="dd37f0e4-feba-42e5-bb37-713218aaf346",
+        document_id=doc_id,
+    )
+    assert replaced["document_id"] == doc_id
+    assert replaced["content_sha256"] != first["content_sha256"]
+    assert document_service.get_document_bytes(doc_id) == b"%PDF-1.4 review-services-agreement"
+    meta = document_service.get_document_meta(doc_id) or {}
+    assert meta.get("agreement_id") == "dd37f0e4-feba-42e5-bb37-713218aaf346"
+
+
 def test_document_storage_seed_error_context_lists_candidates(monkeypatch, tmp_path):
     monkeypatch.setenv("CLAW_DOCUMENTS_DIR", str(tmp_path / "d1"))
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path / "data"))

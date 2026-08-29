@@ -98,6 +98,65 @@ def test_vs01_seed_then_content_returns_pdf_bytes(monkeypatch: pytest.MonkeyPatc
     assert meta.get("owner_org_id") == "test-org-vs01-content-test354"
 
 
+def test_vs01_seed_replaces_content_in_place_same_document_id(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """Prepare reuse: POST vs01-signing-seed with document_id overwrites GET /content."""
+    from backend.services.agreement_vs01_pdf_seed import AgreementVs01PdfBuild
+
+    pytest.importorskip("fitz")
+    _env_common(monkeypatch, tmp_path)
+    client = TestClient(app, raise_server_exceptions=False)
+    create_res = client.post(
+        "/api/agreements/draft",
+        headers=_ORG_H,
+        json={
+            "title": "VS01 Replace Content",
+            "jurisdiction": "TX",
+            "parties": [
+                {"name": "Red Mesa Logistics LLC", "role": "client", "email": "owner@example.com"},
+                {"name": "Harbor Peak Automation LLC", "role": "service_provider", "email": "cp@example.com"},
+            ],
+            "purpose": "Consulting services for automation implementation and support.",
+            "payment_terms": "Net 30",
+            "duration": "1 year",
+            "due_date": None,
+            "effective_date": None,
+        },
+    )
+    assert create_res.status_code == 200, create_res.text
+    agreement_id = create_res.json()["id"]
+
+    first = client.post(
+        f"/api/agreements/{agreement_id}/vs01-signing-seed",
+        headers=_ORG_H,
+        json={},
+    )
+    assert first.status_code == 200, first.text
+    doc_id = first.json()["document_id"]
+    first_bytes = client.get(f"/v1/documents/{doc_id}/content", headers=_ORIGIN_H)
+    assert first_bytes.status_code == 200
+    first_sha = first.json()["content_sha256"]
+
+    review_pdf = b"%PDF-1.4 review-services-agreement-body"
+    monkeypatch.setattr(
+        "backend.routers.agreements_v2_api.agreement_rendered_html_to_pdf_bytes",
+        lambda *_a, **_k: AgreementVs01PdfBuild(pdf_bytes=review_pdf, render_mode="test"),
+    )
+    review_plain = ("SERVICES AGREEMENT\n" + ("The parties agree. " * 80) + "\n10. LIABILITY\n")
+    replaced = client.post(
+        f"/api/agreements/{agreement_id}/vs01-signing-seed",
+        headers=_ORG_H,
+        json={"signing_corpus_plain": review_plain, "document_id": doc_id},
+    )
+    assert replaced.status_code == 200, replaced.text
+    assert replaced.json()["document_id"] == doc_id
+    assert replaced.json()["content_sha256"] != first_sha
+    content = client.get(f"/v1/documents/{doc_id}/content", headers=_ORIGIN_H)
+    assert content.status_code == 200
+    assert content.content == review_pdf
+
+
 def test_vs01_seed_content_ok_under_commercial_mode(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
     """Resume finalize → esign bridge: seed must stamp owner_org_id; content requires owner headers."""
     from backend.storage.artifact_repository import reset_artifact_repository_singleton
