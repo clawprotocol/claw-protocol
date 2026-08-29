@@ -118,6 +118,7 @@ describe("esign remount binds Review corpus before paint", () => {
       documentId: SEEDED_DOC,
       seed,
       fetchContent: async () => template,
+      fetchAcceptedReviewCorpus: async () => review,
     });
     expect(bound.ok).toBe(true);
     if (!bound.ok || "skipped" in bound) {
@@ -157,6 +158,7 @@ describe("esign remount binds Review corpus before paint", () => {
       documentId: SEEDED_DOC,
       seed,
       fetchContent: async () => review,
+      fetchAcceptedReviewCorpus: async () => review,
     });
     expect(bound.ok).toBe(true);
     if (!bound.ok || "skipped" in bound) return;
@@ -180,6 +182,7 @@ describe("esign remount binds Review corpus before paint", () => {
       seed,
       fetchContent: async () => template,
       fetchDocumentMeta: async () => ({ agreementId: AGREEMENT_ID }),
+      fetchAcceptedReviewCorpus: async () => review,
       fetchDraft: async () =>
         ({
           id: AGREEMENT_ID,

@@ -1,8 +1,9 @@
 /**
  * ANY entry to a persist's esign packet must not paint a leftover version
  * when a certified Review exists (verified commercial display / accepted
- * snapshot). Never seed premium/server_full_document_text or a
- * reconstructed-from-stale-blob body in that case. Same persist / same vs01 id.
+ * snapshot / persist Review GET). Never seed premium/server_full_document_text
+ * or a reconstructed-from-stale-blob body. If certified Review cannot be
+ * resolved, fail closed — do not seed leftover. Same persist / same vs01 id.
  */
 
 import type { AgreementDraft } from "../agreement/agreementTypes";
@@ -11,7 +12,6 @@ import {
   fetchAgreementVs01SigningSeed,
   readAgreementVs01BridgeSession,
 } from "../launch/simpleProduct/agreementToVs01SigningBridge";
-import { resolveAgreementCorpusForPrepareHandoff } from "./vs01PrepareBridgeCorpus";
 import { resolveExistingPreparedDocumentId } from "./vs01PreparePlacementBeforeLinks";
 import {
   loadVs01CanonicalPacketPortable,
@@ -23,16 +23,18 @@ import {
 } from "./vs01PaidProPostSignHandoff";
 import { fetchVs01DocumentMeta } from "./vs01Api";
 import {
+  fetchCanonicalReviewSnapshot,
   hydrateCommercialReviewFromServerSnapshot,
   readVerifiedCommercialDisplayCorpus,
 } from "../agreement/canonicalReviewSnapshotApi";
 import {
-  pickCurrentReviewSotForSigningSeed,
+  FIRST_FAILING_LEFTOVER_FUSED_FALLBACK_PREDICATE,
   readAcceptedReviewCorpusFromDraftLike,
   resolveCertifiedReviewCorpusForSigningSeed,
 } from "./vs01CurrentReviewSotForSeed";
 
 export {
+  FIRST_FAILING_LEFTOVER_FUSED_FALLBACK_PREDICATE,
   FIRST_FAILING_NON_CERTIFIED_REVIEW_SEED_PREDICATE,
   FIRST_FAILING_STALE_REVIEW_SNAPSHOT_SEED_PREDICATE,
 } from "./vs01CurrentReviewSotForSeed";
@@ -104,21 +106,41 @@ export function resolveEsignEntryReviewBindContext(
   return null;
 }
 
-async function defaultFetchAcceptedReviewCorpus(agreementId: string): Promise<string> {
-  const verified = (readVerifiedCommercialDisplayCorpus(agreementId)?.corpusPlain ?? "").trim();
-  if (verified.length >= VS01_SIGNING_CORPUS_MIN_LEN && !isNonBindingDraftTemplateCorpus(verified)) {
-    return verified;
+function certifiedPlainOrEmpty(text: string | null | undefined): string {
+  const plain = (text ?? "").trim();
+  if (plain.length < VS01_SIGNING_CORPUS_MIN_LEN || isNonBindingDraftTemplateCorpus(plain)) {
+    return "";
   }
+  return resolveCertifiedReviewCorpusForSigningSeed(plain);
+}
+
+async function defaultFetchAcceptedReviewCorpus(agreementId: string): Promise<string> {
+  // Keep resolving certified Review. First empty accepted snapshot is not leftover.
+  const verified = certifiedPlainOrEmpty(
+    readVerifiedCommercialDisplayCorpus(agreementId)?.corpusPlain,
+  );
+  if (verified) return verified;
   try {
     const hydrated = await hydrateCommercialReviewFromServerSnapshot({ agreementId });
     if (hydrated.ok) {
-      const plain = (hydrated.snapshot.corpus_plain ?? "").trim();
-      if (plain.length >= VS01_SIGNING_CORPUS_MIN_LEN && !isNonBindingDraftTemplateCorpus(plain)) {
-        return plain;
-      }
+      const fromHydrate = certifiedPlainOrEmpty(hydrated.snapshot.corpus_plain);
+      if (fromHydrate) return fromHydrate;
     }
   } catch {
     /* leftover remount must not reconstruct a stale blob as certified Review */
+  }
+  return certifiedPlainOrEmpty(readVerifiedCommercialDisplayCorpus(agreementId)?.corpusPlain);
+}
+
+/** Persist Review GET — same canonical snapshot bytes Review already painted. */
+async function defaultFetchPersistReviewGet(agreementId: string): Promise<string> {
+  try {
+    const fetched = await fetchCanonicalReviewSnapshot({ agreementId });
+    if (fetched.ok) {
+      return certifiedPlainOrEmpty(fetched.snapshot.corpus_plain);
+    }
+  } catch {
+    /* fail closed below — never seed leftover */
   }
   return "";
 }
@@ -128,7 +150,9 @@ async function defaultFetchAcceptedReviewCorpus(agreementId: string): Promise<st
  * corpus when the painted blob is not that SoT. Same persist; prefer same vs01 id.
  * Leftover remount with an empty Incognito session still resolves agreement_id
  * from GET /v1/documents/{id} and loads the persist draft — do not skip.
- * When a certified Review exists, write only that corpus.
+ * When a certified Review exists, write only that corpus. Empty first
+ * accepted-snapshot read is not leftover — keep resolving. Unresolved
+ * certified Review fails closed (no leftover seed).
  */
 export async function ensureReviewCorpusOnEsignEntry(args: {
   documentId: string;
@@ -141,6 +165,7 @@ export async function ensureReviewCorpusOnEsignEntry(args: {
   fetchDocumentMeta?: (id: string) => Promise<{ agreementId: string | null }>;
   fetchDraft?: (agreementId: string) => Promise<AgreementDraft | null>;
   fetchAcceptedReviewCorpus?: (agreementId: string) => Promise<string | null>;
+  fetchPersistReviewGet?: (agreementId: string) => Promise<string | null>;
   signingCorpusSource?: string | null;
 }): Promise<
   | BindReviewCorpusResult
@@ -183,38 +208,38 @@ export async function ensureReviewCorpusOnEsignEntry(args: {
     }
   }
 
-  let acceptedReviewCorpus = readAcceptedReviewCorpusFromDraftLike(draft);
-  if (!acceptedReviewCorpus) {
+  // First accepted-snapshot read may be empty on leftover Incognito remount.
+  // Keep resolving certified Review (hydrate / verified display / persist GET).
+  // Never fall back to premium/server/handoff leftover.
+  let certifiedReviewCorpus = resolveCertifiedReviewCorpusForSigningSeed(
+    readAcceptedReviewCorpusFromDraftLike(draft),
+  );
+  if (!certifiedReviewCorpus) {
     try {
-      acceptedReviewCorpus = (
-        (await (args.fetchAcceptedReviewCorpus ?? defaultFetchAcceptedReviewCorpus)(agreementId)) ?? ""
-      ).trim();
+      certifiedReviewCorpus = certifiedPlainOrEmpty(
+        await (args.fetchAcceptedReviewCorpus ?? defaultFetchAcceptedReviewCorpus)(agreementId),
+      );
     } catch {
-      acceptedReviewCorpus = "";
+      certifiedReviewCorpus = "";
     }
   }
-
-  const certifiedReviewCorpus = resolveCertifiedReviewCorpusForSigningSeed(acceptedReviewCorpus);
-  // Certified Review wins exclusively. Do not mix leftover draft/bridge blobs
-  // into a picker — #145's fallback-to-stale then project 10/11/12/13 is the miss.
-  let reviewCorpus = certifiedReviewCorpus;
-  if (!reviewCorpus) {
-    const handoffCorpus = resolveAgreementCorpusForPrepareHandoff({
-      agreementId,
-      draft,
-      bridgeCorpusText: existingBridgeCorpus,
-    });
-    reviewCorpus = pickCurrentReviewSotForSigningSeed([
-      args.reviewCorpus,
-      existingBridgeCorpus,
-      handoffCorpus,
-    ]);
+  if (!certifiedReviewCorpus) {
+    try {
+      certifiedReviewCorpus = certifiedPlainOrEmpty(
+        await (args.fetchPersistReviewGet ?? defaultFetchPersistReviewGet)(agreementId),
+      );
+    } catch {
+      certifiedReviewCorpus = "";
+    }
+  }
+  if (!certifiedReviewCorpus) {
+    return { ok: false, reason: FIRST_FAILING_LEFTOVER_FUSED_FALLBACK_PREDICATE };
   }
 
   return bindReviewCorpusOntoSeededVs01Document({
     agreementId,
     existingDocumentId: documentId,
-    reviewCorpus,
+    reviewCorpus: certifiedReviewCorpus,
     existingBridgeCorpus,
     seed: args.seed ?? fetchAgreementVs01SigningSeed,
     draft,

@@ -20,6 +20,14 @@ function isTemplateCorpus(text: string): boolean {
 export const FIRST_FAILING_NON_CERTIFIED_REVIEW_SEED_PREDICATE =
   "esign_seed_writes_non_certified_review_version" as const;
 
+/**
+ * #146 still seeded leftover when accepted/verified Review was empty on remount.
+ * Do not fall back to premium/server/handoff leftover — keep resolving certified
+ * Review, or fail closed.
+ */
+export const FIRST_FAILING_LEFTOVER_FUSED_FALLBACK_PREDICATE =
+  "esign_seed_falls_back_to_leftover_fused_draft_when_certified_unresolved" as const;
+
 /** @deprecated Closed #145 gate — do not reopen. Prefer {@link FIRST_FAILING_NON_CERTIFIED_REVIEW_SEED_PREDICATE}. */
 export const FIRST_FAILING_STALE_REVIEW_SNAPSHOT_SEED_PREDICATE =
   FIRST_FAILING_NON_CERTIFIED_REVIEW_SEED_PREDICATE;
