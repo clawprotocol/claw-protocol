@@ -199,9 +199,28 @@ function looksUnreadablePacketExtract(text: string): boolean {
   return t.length >= 64 && letters / t.length < 0.2;
 }
 
+const PERSIST_IDENTITY_SPAN = 200;
+const PERSIST_IDENTITY_SPAN_STEP = 40;
+
+/** Unique persist Review span in extract — seed Story PDFs truncate full containment. */
+function uniquePersistSpanPresent(persistNorm: string, candNorm: string): boolean {
+  if (persistNorm.length < PERSIST_IDENTITY_SPAN || candNorm.length < 80) return false;
+  let hits = 0;
+  for (let i = 0; i <= persistNorm.length - PERSIST_IDENTITY_SPAN; i += PERSIST_IDENTITY_SPAN_STEP) {
+    const window = persistNorm.slice(i, i + PERSIST_IDENTITY_SPAN);
+    if (persistNorm.split(window).length - 1 !== 1) continue;
+    if (candNorm.includes(window)) {
+      hits += 1;
+      if (hits >= 2) return true;
+    }
+  }
+  return false;
+}
+
 /**
  * GET /content packet identity vs persist Review. Digest / collapsed-whitespace
- * containment only — do not leftover-text-classify packet bytes.
+ * containment or a unique persist Review span. Do not leftover-text-classify
+ * packet bytes.
  */
 export function packetPlainMatchesPersistReviewCorpus(
   packetPlain: string | null | undefined,
@@ -218,7 +237,7 @@ export function packetPlainMatchesPersistReviewCorpus(
   if (packetNorm.length >= VS01_SIGNING_CORPUS_MIN_LEN && persistNorm.includes(packetNorm)) {
     return true;
   }
-  return false;
+  return uniquePersistSpanPresent(persistNorm, packetNorm);
 }
 
 /**

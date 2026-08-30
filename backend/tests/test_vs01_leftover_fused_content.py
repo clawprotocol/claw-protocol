@@ -106,6 +106,30 @@ def _leftover_packet_detector_misses() -> str:
     ).strip()
 
 
+def _persist_review_story_pdf_bytes() -> bytes | None:
+    """Seed-shaped Story PDF of persist Review (truncated extract, same renderer)."""
+    try:
+        from backend.services.agreement_vs01_pdf_seed import agreement_rendered_html_to_pdf_bytes
+    except Exception:
+        return None
+    from html import escape
+
+    certified = _certified_review()
+    html = (
+        "<article><p>Draft Agreement (non-binding template)</p><pre>"
+        + escape(certified)
+        + "</pre></article>"
+    )
+    try:
+        built = agreement_rendered_html_to_pdf_bytes(html, title="Services Agreement")
+    except Exception:
+        return None
+    raw = built.pdf_bytes
+    if not raw or not raw.startswith(b"%PDF"):
+        return None
+    return raw
+
+
 def _leftover_clean_story_pdf_bytes() -> bytes | None:
     """Story PDF of leftover packet bytes that leftover-text does not classify."""
     try:
@@ -258,6 +282,34 @@ def test_refuse_only_when_packet_is_not_persist_review(monkeypatch):
     assert leftover_story is not None
     assert leftover_story.startswith(b"%PDF")
     assert leftover_get_content_must_refuse(leftover_story, {"agreement_id": "ag_persist"}) is True
+    leftover_shared_10_11 = (
+        "\n".join(
+            [
+                "SERVICES AGREEMENT",
+                "",
+                "This Agreement is between Alpha Workshop (Client) and Beta Counsel LLC (Service Provider).",
+                "",
+                "10. LIABILITY",
+                "Each party's aggregate liability is limited to fees paid under this Agreement.",
+                "",
+                "11. GOVERNING LAW",
+                "This Agreement is governed by the laws of the applicable jurisdiction.",
+                "",
+                "12. NOTICES",
+                "If to Alpha Workshop Beta Counsel LLC:",
+                "Alpha Workshop Beta Counsel LLC",
+            ]
+        )
+        + "\n\n"
+        + _PAD
+    ).strip().encode("utf-8")
+    assert leftover_get_content_must_refuse(leftover_shared_10_11, {"agreement_id": "ag_persist"}) is True
+    assert packet_is_persist_review_corpus(leftover_shared_10_11, _certified_review()) is False
+    persist_story = _persist_review_story_pdf_bytes()
+    assert persist_story is not None
+    assert persist_story.startswith(b"%PDF")
+    assert packet_is_persist_review_corpus(persist_story, _certified_review()) is True
+    assert leftover_get_content_must_refuse(persist_story, {"agreement_id": "ag_persist"}) is False
     leftover_clean_story = _leftover_clean_story_pdf_bytes()
     assert leftover_clean_story is not None
     assert leftover_clean_story.startswith(b"%PDF")
@@ -436,3 +488,56 @@ def test_leftover_get_content_200_only_when_persist_review_missing(monkeypatch, 
     got = client.get(f"/v1/documents/{doc_id}/content", headers=_ORIGIN_H)
     assert got.status_code == 200, got.text
     assert got.content == leftover
+
+
+def test_leftover_remount_seed_then_get_content_is_persist_review_200(monkeypatch, tmp_path):
+    """Leftover GET 409 + seed persist Review → subsequent leftover-packet GET is persist Review 200."""
+    pytest.importorskip("openai")
+    pytest.importorskip("eth_abi")
+    pytest.importorskip("fitz")
+    from fastapi.testclient import TestClient
+    from backend.main import app
+    from backend.tests.entitlement_test_support import ensure_headers_entitled
+
+    _env(monkeypatch, tmp_path)
+    client = TestClient(app, raise_server_exceptions=False)
+    aid = _create_agreement(client)
+    certified = _certified_review()
+    leftover_clean = _leftover_packet_detector_misses().encode("utf-8")
+    leftover_story = _leftover_clean_story_pdf_bytes() or leftover_clean
+    assert review_corpus_looks_like_leftover_fused_notices(
+        extract_plain_from_document_bytes(leftover_clean)
+    ) is False
+    assert review_corpus_looks_like_leftover_fused_notices(
+        extract_plain_from_document_bytes(leftover_story)
+    ) is False
+    _persist_and_accept(client, aid, certified)
+
+    seed_headers = ensure_headers_entitled(dict(_ORG_H))
+    for raw, suffix in (
+        (leftover_clean, "cleanaaaaaaaaaaaaaaaaaaaaaaaa"),
+        (leftover_story, "storyaaaaaaaaaaaaaaaaaaaaaaa"),
+    ):
+        doc_id = f"doc_{suffix}"
+        _put_document(aid, doc_id, raw)
+        refused = client.get(f"/v1/documents/{doc_id}/content", headers=_ORIGIN_H)
+        assert refused.status_code == 409, refused.text
+        body = refused.json()
+        assert body["error"] == "leftover_fused_content"
+        assert body["code"] == FIRST_FAILING_LEFTOVER_GET_CONTENT_PAINTS_BEFORE_PERSIST_REVIEW_REPLACE
+        assert raw not in refused.content
+
+        seeded = client.post(
+            f"/api/agreements/{aid}/vs01-signing-seed",
+            headers=seed_headers,
+            json={"signing_corpus_plain": certified, "document_id": doc_id},
+        )
+        assert seeded.status_code == 200, seeded.text
+        assert seeded.json()["document_id"] == doc_id
+
+        subsequent = client.get(f"/v1/documents/{doc_id}/content", headers=_ORIGIN_H)
+        assert subsequent.status_code == 200, subsequent.text
+        assert b"leftover_fused_content" not in subsequent.content
+        assert FIRST_FAILING_LEFTOVER_GET_CONTENT_PAINTS_BEFORE_PERSIST_REVIEW_REPLACE.encode() not in subsequent.content
+        assert packet_is_persist_review_corpus(subsequent.content, certified) is True
+        assert leftover_get_content_must_refuse(subsequent.content, {"agreement_id": aid}) is False

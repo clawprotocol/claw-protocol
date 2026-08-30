@@ -242,11 +242,43 @@ def _sha256_text(text: str) -> str:
     return hashlib.sha256((text or "").encode("utf-8")).hexdigest()
 
 
+_PERSIST_IDENTITY_SPAN = 200
+_PERSIST_IDENTITY_SPAN_STEP = 40
+
+
+def _unique_persist_span_present(persist_norm: str, cand_norm: str) -> bool:
+    """True when a unique persist Review span is present in the packet extract.
+
+    Seed Story PDFs extract a truncated persist Review page (bottom-margin
+    clip / wrap cut). Full-string containment then misses, and leftover refuse
+    409s the persist Review PDF. Two spans that each occur once in persist
+    Review are identity, not leftover-text — leftover that only shares one
+    section must not pass.
+    """
+    persist = persist_norm or ""
+    cand = cand_norm or ""
+    span = _PERSIST_IDENTITY_SPAN
+    if len(persist) < span or len(cand) < 80:
+        return False
+    step = _PERSIST_IDENTITY_SPAN_STEP
+    hits = 0
+    for i in range(0, len(persist) - span + 1, step):
+        window = persist[i : i + span]
+        if persist.count(window) != 1:
+            continue
+        if window in cand:
+            hits += 1
+            if hits >= 2:
+                return True
+    return False
+
+
 def packet_is_persist_review_corpus(raw: bytes | None, persist_plain: str | None) -> bool:
     """True when GET /content packet bytes are this agreement's persist Review.
 
-    Identity only — digest or collapsed-whitespace containment. Do not decide
-    leftover by leftover-text classification of extract / raw UTF-8.
+    Identity only — digest, collapsed-whitespace containment, or a unique
+    persist Review span in the extract. Do not decide leftover by leftover-text
+    classification of extract / raw UTF-8.
     """
     persist = (persist_plain or "").strip()
     if len(persist) < _SIGNING_CORPUS_MIN_LEN:
@@ -272,6 +304,8 @@ def packet_is_persist_review_corpus(raw: bytes | None, persist_plain: str | None
             and len(cand_norm) >= _SIGNING_CORPUS_MIN_LEN
             and cand_norm in persist_norm
         ):
+            return True
+        if _unique_persist_span_present(persist_norm, cand_norm):
             return True
     return False
 

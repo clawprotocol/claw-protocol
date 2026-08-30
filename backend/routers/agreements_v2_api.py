@@ -9690,9 +9690,22 @@ def post_agreement_vs01_signing_seed(
 
     signing_plain = (body.signing_corpus_plain or "").strip()
     if len(signing_plain) >= _VS01_SIGNING_CORPUS_OVERRIDE_MIN_LEN:
+        from backend.services.vs01_leftover_fused_content import (
+            packet_is_persist_review_corpus,
+            persist_review_plain_for_agreement,
+        )
+
         field_key_override, corpus_before = primary_agreement_plain_field_and_value(draft)
-        if len(signing_plain) > len(corpus_before or ""):
-            merge_fields: Dict[str, str] = {field_key_override: signing_plain}
+        persist_plain = persist_review_plain_for_agreement(aid)
+        is_persist_review_seed = bool(
+            persist_plain
+            and packet_is_persist_review_corpus(signing_plain.encode("utf-8"), persist_plain)
+        )
+        # Persist Review GET is the seed body even when leftover draft fields are
+        # longer. Length-only override left leftover 8-section template on the
+        # packet; leftover refuse then 409'd GET /content as leftover JSON.
+        if is_persist_review_seed or len(signing_plain) > len(corpus_before or ""):
+            merge_fields: Dict[str, Any] = {field_key_override: signing_plain}
             for alt_key in (
                 "premium_full_document_text",
                 "server_full_document_text",
@@ -9700,13 +9713,25 @@ def post_agreement_vs01_signing_seed(
             ):
                 if alt_key != field_key_override:
                     merge_fields[alt_key] = signing_plain
+            if is_persist_review_seed:
+                pr = (
+                    dict(draft.pro_redline_v1)
+                    if isinstance(draft.pro_redline_v1, dict)
+                    else {}
+                )
+                pr["review_first_final_corpus"] = {
+                    "text": signing_plain,
+                    "source": "vs01_signing_seed_persist_review",
+                }
+                merge_fields["pro_redline_v1"] = pr
             draft = _merge_agreement_draft(draft, **merge_fields)
             log.info(
-                "[vs01-signing-seed-corpus-override] agreement_id=%s len=%s field=%s prev_len=%s",
+                "[vs01-signing-seed-corpus-override] agreement_id=%s len=%s field=%s prev_len=%s persist_review=%s",
                 aid,
                 len(signing_plain),
                 field_key_override,
                 len(corpus_before or ""),
+                is_persist_review_seed,
             )
 
     # --- placeholder_template_safety (pre-render) ---

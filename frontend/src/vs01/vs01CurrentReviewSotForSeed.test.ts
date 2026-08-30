@@ -231,9 +231,15 @@ describe("esign seed writes certified Review, not a leftover fused version", () 
     expect(packetPlainMatchesPersistReviewCorpus(leftoverPacketDetectorMisses(), persistReview)).toBe(
       false,
     );
+    expect(packetPlainMatchesPersistReviewCorpus(leftoverFusedReview(), persistReview)).toBe(false);
     expect(
       packetPlainMatchesPersistReviewCorpus(leftoverCompressedPdfDetectorMisses(), persistReview),
     ).toBe(false);
+    const persistStoryExtract = [
+      "Draft Agreement (non-binding template)",
+      persistReview.slice(0, 720),
+    ].join("\n");
+    expect(packetPlainMatchesPersistReviewCorpus(persistStoryExtract, persistReview)).toBe(true);
     expect(reviewCorpusLooksLikeLeftoverFusedNotices(leftoverPacketDetectorMisses())).toBe(false);
     expect(reviewCorpusLooksLikeLeftoverFusedNotices(leftoverCompressedPdfDetectorMisses())).toBe(
       false,
