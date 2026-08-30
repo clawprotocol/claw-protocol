@@ -12,6 +12,7 @@ import {
   FIRST_FAILING_LEFTOVER_GET_CONTENT_PAINTS_BEFORE_PERSIST_REVIEW_REPLACE,
   FIRST_FAILING_LEFTOVER_GET_CONTENT_STILL_PAINTS_PREDICATE,
   FIRST_FAILING_NON_CERTIFIED_REVIEW_SEED_PREDICATE,
+  persistReviewGetPlainForSigningSeed,
   pickCurrentReviewSotForSigningSeed,
   readAcceptedReviewCorpusFromDraftLike,
   resolveCertifiedReviewCorpusForSigningSeed,
@@ -36,6 +37,9 @@ function certifiedReview(): string {
       "",
       "This Agreement is between Alpha Workshop (Client) and Beta Counsel LLC (Service Provider).",
       "",
+      "2. TERM",
+      "This Agreement commences Upon full execution by the parties unless otherwise specified and continues for 30 days.",
+      "",
       "10. LIABILITY",
       "Each party's aggregate liability is limited to fees paid under this Agreement.",
       "",
@@ -46,13 +50,16 @@ function certifiedReview(): string {
       "If to Alpha Workshop:",
       "Attn: Owner One",
       "Email: owner@example.test",
+      "Address:",
+      "100 Workshop Lane",
       "",
       "If to Beta Counsel LLC:",
       "Attn: Signer Two",
       "Email: signer@example.test",
+      "Address:",
       "",
       "13. MISCELLANEOUS",
-      "This Agreement constitutes the entire agreement of the parties.",
+      "This Agreement constitutes the entire agreement of the parties. Notices are effective 30 days after delivery.",
     ].join("\n"),
   );
 }
@@ -157,8 +164,18 @@ describe("esign seed writes certified Review, not a leftover fused version", () 
       ),
     ).toBe(true);
     expect(reviewCorpusLooksLikeLeftoverFusedNotices(certifiedReview())).toBe(false);
+    expect(
+      reviewCorpusLooksLikeLeftoverFusedNotices(
+        [
+          "If to Beta Counsel LLC:",
+          "Address: User-stated material terms:, 30-day term, Texas governing law",
+        ].join("\n"),
+      ),
+    ).toBe(true);
     expect(resolveCertifiedReviewCorpusForSigningSeed(leftoverFusedReview())).toBe("");
     expect(resolveCertifiedReviewCorpusForSigningSeed(certifiedReview())).toBe(certifiedReview());
+    expect(persistReviewGetPlainForSigningSeed(certifiedReview())).toBe(certifiedReview());
+    expect(persistReviewGetPlainForSigningSeed(leftoverFusedReview())).toBe("");
   });
 
   it("uses certified Review as-is and does not project leftover into it", () => {
@@ -655,6 +672,50 @@ describe("esign seed writes certified Review, not a leftover fused version", () 
     expect(String(seed.mock.calls[0][2] ?? "")).not.toBe(leftover);
   });
 
+  it("leftover remount + leftover GET /content 200 + persist Review GET 200 seeds persist Review", async () => {
+    const certified = certifiedReview();
+    const leftover = leftoverFusedReview();
+    const seed = vi.fn().mockResolvedValue({
+      ok: true,
+      documentId: SEEDED_DOC,
+      contentSha256: "14".repeat(32),
+    });
+    const persistGet = vi.fn().mockResolvedValue(certified);
+    const bound = await ensureReviewCorpusOnEsignEntry({
+      documentId: SEEDED_DOC,
+      agreementId: AGREEMENT_ID,
+      reviewCorpus: leftover,
+      existingBridgeCorpus: leftover,
+      seed,
+      fetchContent: async () => leftover,
+      fetchAcceptedReviewCorpus: async () => "",
+      fetchPersistReviewGet: persistGet,
+      fetchReviewPaintSot: async () => "",
+      fetchDraft: async () =>
+        ({
+          id: AGREEMENT_ID,
+          title: "Services Agreement",
+          premium_full_document_text: leftover,
+          server_full_document_text: leftover,
+        }) as never,
+    });
+    expect(persistGet).toHaveBeenCalledWith(AGREEMENT_ID);
+    expect(bound.ok).toBe(true);
+    if (!bound.ok || "skipped" in bound) return;
+    expect(bound.replaced).toBe(true);
+    expect(bound.documentId).toBe(SEEDED_DOC);
+    expect(bound.reviewCorpus).toBe(certified);
+    expect(seed).toHaveBeenCalledTimes(1);
+    expect(seed.mock.calls[0][0]).toBe(AGREEMENT_ID);
+    expect(seed.mock.calls[0][4]).toBe(SEEDED_DOC);
+    expectCertifiedSeedBody(String(seed.mock.calls[0][2] ?? ""));
+    expect(String(seed.mock.calls[0][2] ?? "")).not.toBe(leftover);
+    expect(String(seed.mock.calls[0][2] ?? "")).not.toMatch(/If to Alpha Workshop Beta Counsel LLC/i);
+    expect(String(seed.mock.calls[0][2] ?? "")).not.toMatch(
+      /Address:\s*30 days, Upon full execution by the parties unless otherwise specified/i,
+    );
+  });
+
   it("leftover remount bind never picks leftover draft/bridge/handoff as seed SoT", () => {
     const remount = readFileSync(join(__dirname, "vs01EsignRemountReviewBind.ts"), "utf8");
     expect(remount).toContain("FIRST_FAILING_LEFTOVER_GET_CONTENT_PAINTS_BEFORE_PERSIST_REVIEW_REPLACE");
@@ -663,6 +724,7 @@ describe("esign seed writes certified Review, not a leftover fused version", () 
     expect(remount).toContain("resolvePaidProFirstReviewVisibleDisplayPlain");
     expect(remount).toContain("resolveCanonicalPlainForVisibleShell");
     expect(remount).toContain("fetchPersistReviewGet");
+    expect(remount).toContain("persistReviewGetPlainForSigningSeed");
     expect(remount).toContain("hydrateCommercialReviewFromServerSnapshot");
     expect(remount).toContain("fetchCanonicalReviewSnapshot");
     expect(remount).not.toContain("resolveAgreementCorpusForPrepareHandoff");

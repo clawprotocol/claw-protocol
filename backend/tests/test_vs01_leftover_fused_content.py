@@ -32,6 +32,10 @@ def _certified_review() -> str:
                 "",
                 "This Agreement is between Alpha Workshop (Client) and Beta Counsel LLC (Service Provider).",
                 "",
+                "2. TERM",
+                "This Agreement commences Upon full execution by the parties unless otherwise specified "
+                "and continues for 30 days.",
+                "",
                 "10. LIABILITY",
                 "Each party's aggregate liability is limited to fees paid under this Agreement.",
                 "",
@@ -42,13 +46,17 @@ def _certified_review() -> str:
                 "If to Alpha Workshop:",
                 "Attn: Owner One",
                 "Email: owner@example.test",
+                "Address:",
+                "100 Workshop Lane",
                 "",
                 "If to Beta Counsel LLC:",
                 "Attn: Signer Two",
                 "Email: signer@example.test",
+                "Address:",
                 "",
                 "13. MISCELLANEOUS",
-                "This Agreement constitutes the entire agreement of the parties.",
+                "This Agreement constitutes the entire agreement of the parties. "
+                "Notices are effective 30 days after delivery.",
             ]
         )
         + "\n\n"
@@ -123,6 +131,11 @@ def test_leftover_detector_is_generic_and_misses_certified_review():
     assert review_corpus_looks_like_leftover_fused_notices(leftover) is True
     assert review_corpus_looks_like_leftover_fused_notices(glued) is True
     assert review_corpus_looks_like_leftover_fused_notices(certified) is False
+    stuffed_blob = (
+        "If to Beta Counsel LLC:\n"
+        "Address: User-stated material terms:, 30-day term, Texas governing law"
+    )
+    assert review_corpus_looks_like_leftover_fused_notices(stuffed_blob) is True
     pdf = b"%PDF-1.4\n1 0 obj\n((If to Alpha Workshop Beta Counsel LLC: Address: 30 days, Upon full execution))\n"
     assert review_corpus_looks_like_leftover_fused_notices(extract_plain_from_document_bytes(pdf)) is True
 
@@ -137,7 +150,12 @@ def test_refuse_only_when_leftover_and_persist_review_exists(monkeypatch):
         "backend.services.vs01_leftover_fused_content.persist_review_exists_for_agreement",
         lambda _aid: True,
     )
+    leftover_pdf = (
+        b"%PDF-1.4\n1 0 obj\n((If to Alpha Workshop Beta Counsel LLC: Address: 30 days, "
+        b"Upon full execution by the parties unless otherwise specified))\n"
+    )
     assert leftover_get_content_must_refuse(leftover, {"agreement_id": "ag_persist"}) is True
+    assert leftover_get_content_must_refuse(leftover_pdf, {"agreement_id": "ag_persist"}) is True
     assert leftover_get_content_must_refuse(certified, {"agreement_id": "ag_persist"}) is False
     monkeypatch.setattr(
         "backend.services.vs01_leftover_fused_content.persist_review_exists_for_agreement",

@@ -40,6 +40,7 @@ import { resolveCanonicalPlainForVisibleShell } from "../components/agreements/p
 import {
   FIRST_FAILING_LEFTOVER_GET_CONTENT_PAINTS_BEFORE_PERSIST_REVIEW_REPLACE,
   FIRST_FAILING_LEFTOVER_GET_CONTENT_STILL_PAINTS_PREDICATE,
+  persistReviewGetPlainForSigningSeed,
   readAcceptedReviewCorpusFromDraftLike,
   resolveCertifiedReviewCorpusForSigningSeed,
   reviewCorpusLooksLikeLeftoverFusedNotices,
@@ -153,7 +154,7 @@ function persistReviewPlainFromSnapshot(snapshot: {
   corpusPlain?: string | null;
 } | null | undefined): string {
   if (!snapshot) return "";
-  return certifiedPlainOrEmpty(snapshot.corpus_plain || snapshot.corpusPlain);
+  return persistReviewGetPlainForSigningSeed(snapshot.corpus_plain || snapshot.corpusPlain);
 }
 
 /** Persist Review GET — same canonical snapshot bytes Review already painted. */
@@ -314,7 +315,7 @@ export async function ensureReviewCorpusOnEsignEntry(args: {
   }
   if (!certifiedReviewCorpus) {
     try {
-      certifiedReviewCorpus = certifiedPlainOrEmpty(
+      certifiedReviewCorpus = persistReviewGetPlainForSigningSeed(
         await (args.fetchPersistReviewGet ?? defaultFetchPersistReviewGet)(agreementId),
       );
     } catch {

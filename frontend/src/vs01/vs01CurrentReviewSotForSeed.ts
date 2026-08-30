@@ -63,10 +63,23 @@ export const FIRST_FAILING_STALE_REVIEW_SNAPSHOT_SEED_PREDICATE =
 const FUSED_MISC_OPENING_RE =
   /This Agreement is the entire agreement\s+This Agreement is between/i;
 
-/** Term / execution prose stuffed into a Notices Address field — leftover, not Review.
- * PDF /content extracts often glue Address: onto the next line. */
-const STUFFED_NOTICE_ADDRESS_RE =
-  /Address:\s*(?:[\s\S]{0,160}?(?:30\s*-?\s*days?|Upon full execution by the parties unless otherwise specified))/i;
+/** Leftover stuffed Address is the Address *field*, not a later Term/Misc clause. */
+const STUFFED_NOTICE_TERM_RE =
+  /(?:30\s*-?\s*days?|Upon full execution by the parties unless otherwise specified)/i;
+const ADDRESS_FIELD_CUT_RE = /(?:^\s*\d+\.\s+[A-Za-z]|\n\s*\d+\.\s+[A-Za-z]|If to\s+)/i;
+const ADDRESS_FIELD_WINDOW = 80;
+
+function addressFieldIsStuffedLeftover(body: string): boolean {
+  const re = /Address:/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(body)) !== null) {
+    const window = body.slice(m.index + m[0].length, m.index + m[0].length + ADDRESS_FIELD_WINDOW);
+    const cutIdx = window.search(ADDRESS_FIELD_CUT_RE);
+    const field = cutIdx >= 0 ? window.slice(0, cutIdx) : window;
+    if (STUFFED_NOTICE_TERM_RE.test(field)) return true;
+  }
+  return false;
+}
 
 const TOP_LEVEL_HEADING_RE = /(?:^|\n)\s*(\d+)\.\s+[A-Za-z]/g;
 
@@ -132,7 +145,7 @@ export function reviewCorpusLooksLikeLeftoverFusedNotices(
   const body = (text ?? "").replace(/\r\n/g, "\n");
   if (!body.trim()) return false;
   if (FUSED_MISC_OPENING_RE.test(body)) return true;
-  if (STUFFED_NOTICE_ADDRESS_RE.test(body)) return true;
+  if (addressFieldIsStuffedLeftover(body)) return true;
   const headings = ifToHeadingEntities(body);
   for (let i = 0; i < headings.length; i += 1) {
     for (let j = 0; j < headings.length; j += 1) {
@@ -162,6 +175,17 @@ export function resolveCertifiedReviewCorpusForSigningSeed(
   if (!picked) return "";
   if (reviewCorpusLooksLikeLeftoverFusedNotices(picked)) return "";
   return picked;
+}
+
+/**
+ * Persist Review GET (canonical-review-snapshot) is the Review-paint corpus.
+ * Do not leftover-filter it — #150 Address widen classified that snapshot as
+ * leftover and swallowed seed. Leftover fused GET /content is never this body.
+ */
+export function persistReviewGetPlainForSigningSeed(
+  persistReviewGet: string | null | undefined,
+): string {
+  return resolveCertifiedReviewCorpusForSigningSeed(persistReviewGet);
 }
 
 /**

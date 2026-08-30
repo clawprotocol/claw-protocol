@@ -27,29 +27,59 @@ _FUSED_MISC_OPENING_RE = re.compile(
     r"This Agreement is the entire agreement\s+This Agreement is between",
     re.IGNORECASE,
 )
-# PDF /content extracts often put Address: and the stuffed term on separate lines.
-_STUFFED_NOTICE_ADDRESS_RE = re.compile(
-    r"Address:\s*(?:[\s\S]{0,160}?(?:30\s*-?\s*days?|Upon full execution by the parties unless otherwise specified))",
+# Leftover stuffed Address is the Address *field* (term/execution prose), not a
+# later Term/Misc clause. Crossing a numbered heading or the next If-to is
+# persist Review, not leftover.
+_STUFFED_NOTICE_TERM_RE = re.compile(
+    r"(?:30\s*-?\s*days?|Upon full execution by the parties unless otherwise specified)",
+    re.IGNORECASE,
+)
+_ADDRESS_LABEL_RE = re.compile(r"Address:", re.IGNORECASE)
+_ADDRESS_FIELD_CUT_RE = re.compile(
+    r"(?:^\s*\d+\.\s+[A-Za-z]|\n\s*\d+\.\s+[A-Za-z]|If to\s+)",
     re.IGNORECASE,
 )
 _IF_TO_HEADING_RE = re.compile(r"If to\s+(.+?)\s*:", re.IGNORECASE)
 _PDF_LITERAL_RE = re.compile(r"\(((?:\\.|[^\\)])*)\)")
+_ADDRESS_FIELD_WINDOW = 80
+
+
+def _address_field_is_stuffed_leftover(body: str) -> bool:
+    """True only when leftover term/execution is inside the Address field."""
+    for match in _ADDRESS_LABEL_RE.finditer(body):
+        window = body[match.end() : match.end() + _ADDRESS_FIELD_WINDOW]
+        cut = _ADDRESS_FIELD_CUT_RE.search(window)
+        field = window[: cut.start()] if cut else window
+        if _STUFFED_NOTICE_TERM_RE.search(field):
+            return True
+    return False
 
 
 def extract_plain_from_document_bytes(raw: bytes | None) -> str:
-    """Plain extract from leftover GET /content: pypdf, PDF literals, or UTF-8."""
+    """Plain extract from leftover GET /content: fitz, pypdf, PDF literals, or UTF-8."""
     if not raw:
         return ""
     text = ""
     try:
-        from pypdf import PdfReader  # type: ignore[import-not-found]
-        import io
+        import fitz  # type: ignore[import-not-found,import-untyped]
 
-        reader = PdfReader(io.BytesIO(raw))
-        pages = [page.extract_text() or "" for page in reader.pages]
-        text = "\n".join(pages).strip()
+        doc = fitz.open(stream=raw, filetype="pdf")
+        try:
+            text = "\n".join((page.get_text() or "") for page in doc).strip()
+        finally:
+            doc.close()
     except Exception:
         text = ""
+    if not text or text.startswith("%PDF"):
+        try:
+            from pypdf import PdfReader  # type: ignore[import-not-found]
+            import io
+
+            reader = PdfReader(io.BytesIO(raw))
+            pages = [page.extract_text() or "" for page in reader.pages]
+            text = "\n".join(pages).strip()
+        except Exception:
+            text = text if text and not text.startswith("%PDF") else ""
     if not text or text.startswith("%PDF"):
         utf8 = raw.decode("utf-8", errors="ignore").replace("\x00", "")
         if utf8.startswith("%PDF"):
@@ -83,7 +113,7 @@ def review_corpus_looks_like_leftover_fused_notices(text: str | None) -> bool:
         return False
     if _FUSED_MISC_OPENING_RE.search(body):
         return True
-    if _STUFFED_NOTICE_ADDRESS_RE.search(body):
+    if _address_field_is_stuffed_leftover(body):
         return True
     headings: list[str] = []
     seen: set[str] = set()

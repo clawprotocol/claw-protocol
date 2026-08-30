@@ -816,6 +816,8 @@ export function Vs01Wizard({
           }
           if (bound && !bound.ok) {
             if (cancelled) return;
+            // Fail-closed only when persist Review truly does not exist.
+            // Leftover on the packet is not a load-error success path.
             setError("Could not load this document. Check the link or start a new packet.");
             return;
           }
@@ -956,6 +958,16 @@ export function Vs01Wizard({
         const buf = await blob.arrayBuffer();
         const painted = extractPlainTextFromDocumentContent(new Uint8Array(buf));
         if (reviewCorpusLooksLikeLeftoverFusedNotices(painted)) {
+          if (persistReviewCorpus) {
+            if (cancelled) return;
+            setError(null);
+            setDocumentId(sid);
+            setContentSha256(`corpus:${fingerprintAgreementBody(persistReviewCorpus)}`);
+            setPrepareCorpusText(persistReviewCorpus);
+            setFurthestStep((prev) => ((2 > prev ? 2 : prev) as Vs01Step));
+            goToStep(2);
+            return;
+          }
           if (!cancelled) {
             setError("Could not load this document. Check the link or start a new packet.");
           }
@@ -1176,6 +1188,16 @@ export function Vs01Wizard({
           goToStep(1);
         }
       } catch (e) {
+        if (leftoverGetContentRefuseFromError(e) && persistReviewCorpus) {
+          if (cancelled) return;
+          setError(null);
+          setDocumentId(sid);
+          setContentSha256(`corpus:${fingerprintAgreementBody(persistReviewCorpus)}`);
+          setPrepareCorpusText(persistReviewCorpus);
+          setFurthestStep((prev) => ((2 > prev ? 2 : prev) as Vs01Step));
+          goToStep(2);
+          return;
+        }
         if (!leftoverGetContentRefuseFromError(e) && hydrateLocalPaidProBridge()) return;
         console.error("[Vs01Wizard] seed document load failed", e);
         if (!cancelled) setError("Could not load this document. Check the link or start a new packet.");

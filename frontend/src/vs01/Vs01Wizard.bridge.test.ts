@@ -54,5 +54,7 @@ describe("Vs01Wizard agreement bridge (static)", () => {
     expect(s).toContain("reviewCorpusLooksLikeLeftoverFusedNotices");
     expect(s).toContain("leftoverGetContentRefuseFromError");
     expect(s).toContain("persistReviewCorpus");
+    expect(s).toContain("leftoverGetContentRefuseFromError(e) && persistReviewCorpus");
+    expect(s).toMatch(/if \(reviewCorpusLooksLikeLeftoverFusedNotices\(painted\)\)[\s\S]*if \(persistReviewCorpus\)/);
   });
 });
