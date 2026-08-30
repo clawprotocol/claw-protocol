@@ -4,7 +4,7 @@
  * display / verified commercial display / accepted snapshot / persist Review
  * GET). Never seed premium/server_full_document_text or leftover fused
  * Notices. Fail-closed-without-replace is not allowed while leftover fused
- * GET /content is on screen and Review-paint SoT exists. Same persist /
+ * GET /content is on screen and persist Review exists. Same persist /
  * same vs01 id.
  */
 
@@ -23,7 +23,7 @@ import {
   readActivePaidProVs01PostSignHandoff,
   readLatestLocalPaidProVs01PostSignHandoff,
 } from "./vs01PaidProPostSignHandoff";
-import { fetchVs01DocumentMeta } from "./vs01Api";
+import { fetchDocumentContent, fetchVs01DocumentMeta } from "./vs01Api";
 import {
   fetchCanonicalReviewSnapshot,
   hydrateCommercialReviewFromServerSnapshot,
@@ -38,20 +38,23 @@ import {
 } from "../components/agreements/paidProSourceOfTruth";
 import { resolveCanonicalPlainForVisibleShell } from "../components/agreements/paidProVisibleDocumentShell";
 import {
-  FIRST_FAILING_LEFTOVER_GET_CONTENT_PAINTED_PREDICATE,
+  FIRST_FAILING_LEFTOVER_GET_CONTENT_STILL_PAINTS_PREDICATE,
   readAcceptedReviewCorpusFromDraftLike,
   resolveCertifiedReviewCorpusForSigningSeed,
+  reviewCorpusLooksLikeLeftoverFusedNotices,
 } from "./vs01CurrentReviewSotForSeed";
 
 export {
   FIRST_FAILING_LEFTOVER_FUSED_FALLBACK_PREDICATE,
   FIRST_FAILING_LEFTOVER_GET_CONTENT_PAINTED_PREDICATE,
+  FIRST_FAILING_LEFTOVER_GET_CONTENT_STILL_PAINTS_PREDICATE,
   FIRST_FAILING_NON_CERTIFIED_REVIEW_SEED_PREDICATE,
   FIRST_FAILING_STALE_REVIEW_SNAPSHOT_SEED_PREDICATE,
 } from "./vs01CurrentReviewSotForSeed";
 import { isNonBindingDraftTemplateCorpus } from "./vs01ReviewCorpusSeedRefresh";
 import {
   bindReviewCorpusOntoSeededVs01Document,
+  inspectSeededDocumentServerContent,
   type BindReviewCorpusResult,
   type FetchedDocumentContent,
   type Vs01SigningSeedFn,
@@ -134,7 +137,7 @@ async function defaultFetchAcceptedReviewCorpus(agreementId: string): Promise<st
   try {
     const hydrated = await hydrateCommercialReviewFromServerSnapshot({ agreementId });
     if (hydrated.ok) {
-      const fromHydrate = certifiedPlainOrEmpty(hydrated.snapshot.corpus_plain);
+      const fromHydrate = persistReviewPlainFromSnapshot(hydrated.snapshot);
       if (fromHydrate) return fromHydrate;
     }
   } catch {
@@ -143,12 +146,20 @@ async function defaultFetchAcceptedReviewCorpus(agreementId: string): Promise<st
   return certifiedPlainOrEmpty(readVerifiedCommercialDisplayCorpus(agreementId)?.corpusPlain);
 }
 
+function persistReviewPlainFromSnapshot(snapshot: {
+  corpus_plain?: string | null;
+  corpusPlain?: string | null;
+} | null | undefined): string {
+  if (!snapshot) return "";
+  return certifiedPlainOrEmpty(snapshot.corpus_plain || snapshot.corpusPlain);
+}
+
 /** Persist Review GET — same canonical snapshot bytes Review already painted. */
 async function defaultFetchPersistReviewGet(agreementId: string): Promise<string> {
   try {
     const fetched = await fetchCanonicalReviewSnapshot({ agreementId });
     if (fetched.ok) {
-      return certifiedPlainOrEmpty(fetched.snapshot.corpus_plain);
+      return persistReviewPlainFromSnapshot(fetched.snapshot);
     }
   } catch {
     /* fail closed below — never seed leftover */
@@ -215,12 +226,11 @@ function defaultFetchReviewPaintSot(
 /**
  * Inspect GET /content and POST vs01-signing-seed with the persist Review
  * corpus when the painted blob is not that SoT. Same persist; prefer same vs01 id.
- * Leftover remount with an empty Incognito session still resolves agreement_id
- * from GET /v1/documents/{id} and loads the persist draft — do not skip.
- * When a certified Review exists, write only that corpus. Empty first
- * accepted-snapshot read is not leftover — keep resolving Review-paint SoT
- * until that corpus is in hand. Fail-closed only when Review-paint SoT
- * truly does not exist. Leftover fused blob is never the seed body.
+ * Leftover remount with an empty Incognito Review-paint session still
+ * resolves persist Review GET (canonical-review-snapshot) — do not skip.
+ * If GET /content is leftover fused, it does not match certified Review —
+ * replace it. Fail-closed only when persist Review truly does not exist.
+ * Leftover on screen is not a pass. Leftover fused blob is never the seed body.
  */
 export async function ensureReviewCorpusOnEsignEntry(args: {
   documentId: string;
@@ -277,9 +287,16 @@ export async function ensureReviewCorpusOnEsignEntry(args: {
     }
   }
 
+  const painted = await inspectSeededDocumentServerContent(
+    documentId,
+    args.fetchContent ?? fetchDocumentContent,
+  );
+  const leftoverFusedOnPacket = reviewCorpusLooksLikeLeftoverFusedNotices(painted.plain);
+
   // First accepted-snapshot read may be empty on leftover Incognito remount.
-  // Keep resolving Review-paint SoT (paid Pro accepted display / the text
-  // Review already showed). Never treat leftover fused as certified.
+  // Persist Review GET is the same path Review already painted. Empty
+  // Incognito Review-paint session is not leftover and is not fail-closed.
+  // Never treat leftover fused as certified.
   let certifiedReviewCorpus = resolveCertifiedReviewCorpusForSigningSeed(
     readAcceptedReviewCorpusFromDraftLike(draft),
   );
@@ -313,7 +330,12 @@ export async function ensureReviewCorpusOnEsignEntry(args: {
     }
   }
   if (!certifiedReviewCorpus) {
-    return { ok: false, reason: FIRST_FAILING_LEFTOVER_GET_CONTENT_PAINTED_PREDICATE };
+    // Leftover fused on screen is not a pass. Fail-closed only when persist
+    // Review truly does not exist (empty Incognito session is not that).
+    return { ok: false, reason: FIRST_FAILING_LEFTOVER_GET_CONTENT_STILL_PAINTS_PREDICATE };
+  }
+  if (leftoverFusedOnPacket && reviewCorpusLooksLikeLeftoverFusedNotices(certifiedReviewCorpus)) {
+    return { ok: false, reason: FIRST_FAILING_LEFTOVER_GET_CONTENT_STILL_PAINTS_PREDICATE };
   }
 
   return bindReviewCorpusOntoSeededVs01Document({

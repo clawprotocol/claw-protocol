@@ -36,6 +36,17 @@ export const FIRST_FAILING_LEFTOVER_FUSED_FALLBACK_PREDICATE =
 export const FIRST_FAILING_LEFTOVER_GET_CONTENT_PAINTED_PREDICATE =
   "esign_fail_closed_or_wrong_store_leaves_leftover_get_content_painted" as const;
 
+/**
+ * #148 kept resolving Review-paint session stores. Incognito remount emptied
+ * those stores, leftover persist was rejected as uncertified, and leftover
+ * fused GET /content stayed on screen even though persist Review GET already
+ * existed. Empty Review-paint session is not a reason to leave leftover
+ * painted when persist Review exists. Fail-closed only when persist Review
+ * truly does not exist.
+ */
+export const FIRST_FAILING_LEFTOVER_GET_CONTENT_STILL_PAINTS_PREDICATE =
+  "esign_leftover_get_content_still_paints_after_review_paint_sot_resolver" as const;
+
 /** @deprecated Closed #145 gate — do not reopen. Prefer {@link FIRST_FAILING_NON_CERTIFIED_REVIEW_SEED_PREDICATE}. */
 export const FIRST_FAILING_STALE_REVIEW_SNAPSHOT_SEED_PREDICATE =
   FIRST_FAILING_NON_CERTIFIED_REVIEW_SEED_PREDICATE;
@@ -84,11 +95,18 @@ function longNonTemplateCorpus(text: string | null | undefined): string {
 
 function ifToHeadingEntities(text: string): string[] {
   const out: string[] = [];
-  const re = /^If to\s+(.+?)\s*:\s*$/gim;
+  const seen = new Set<string>();
+  // Own-line headings plus PDF /content extracts that glue the If-to onto
+  // the following Attn/Address tokens on one line.
+  const re = /If to\s+(.+?)\s*:/gi;
   let m: RegExpExecArray | null;
   while ((m = re.exec(text)) !== null) {
     const entity = (m[1] ?? "").trim();
-    if (entity) out.push(entity);
+    if (!entity) continue;
+    const key = entity.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(entity);
   }
   return out;
 }

@@ -12,7 +12,10 @@ import type { AgreementDraft } from "../agreement/agreementTypes";
 import { fingerprintAgreementBody } from "../components/agreements/guidedDealCompletion/guidedSigningPacketVersion";
 import { sha256Bytes } from "../utils/agreements/hash";
 import { fetchDocumentContent } from "./vs01Api";
-import { reviewCorpusHasStaleTopLevelSectionOrder } from "./vs01CurrentReviewSotForSeed";
+import {
+  reviewCorpusHasStaleTopLevelSectionOrder,
+  reviewCorpusLooksLikeLeftoverFusedNotices,
+} from "./vs01CurrentReviewSotForSeed";
 import {
   REFRESH_STALE_SEEDED_DOCUMENT_REASON,
   REUSE_MATCHING_SEEDED_DOCUMENT_REASON,
@@ -150,6 +153,10 @@ export function fetchedPlainPositivelyMatchesReviewCorpus(
   const review = reviewCorpus.trim();
   if (!fetched || review.length < VS01_SIGNING_CORPUS_MIN_LEN) return false;
   if (looksLikeUnreadableDocumentExtract(fetched)) return false;
+  // Leftover fused GET /content is never certified Review, even when it
+  // shares party/venue tokens or a stale session binding hash.
+  if (reviewCorpusLooksLikeLeftoverFusedNotices(fetched)) return false;
+  if (reviewCorpusLooksLikeLeftoverFusedNotices(review)) return false;
   return seededPacketMatchesReviewCorpus(fetched, review);
 }
 
@@ -162,18 +169,19 @@ export function resolveServerContentReplaceDecision(args: {
   const review = args.reviewCorpus.trim();
   const fetched = (args.fetchedPlain ?? "").trim();
   const fetchedWasTemplate = isNonBindingDraftTemplateCorpus(fetched);
-  if (fetchedWasTemplate) {
+  const fetchedWasLeftoverFused = reviewCorpusLooksLikeLeftoverFusedNotices(fetched);
+  if (fetchedWasTemplate || fetchedWasLeftoverFused) {
     return {
       replace: true,
       reason: REPLACE_STALE_SERVER_TEMPLATE_CONTENT_REASON,
-      fetchedWasTemplate: true,
+      fetchedWasTemplate,
       matching: false,
     };
   }
   const matching =
     !reviewCorpusHasStaleTopLevelSectionOrder(args.fetchFailed ? null : args.fetchedPlain) &&
     fetchedPlainPositivelyMatchesReviewCorpus(args.fetchFailed ? null : args.fetchedPlain, review);
-  if (args.recordedMatch && !fetchedWasTemplate) {
+  if (args.recordedMatch && !fetchedWasTemplate && !fetchedWasLeftoverFused) {
     return {
       replace: false,
       reason: REUSE_MATCHING_SERVER_CONTENT_REASON,
@@ -364,7 +372,9 @@ export async function bindReviewCorpusOntoSeededVs01Document(args: {
 
   const replaceId = existingDocumentId.startsWith("doc_") ? existingDocumentId : null;
   const seedCorpus =
-    reviewCorpus.length >= VS01_SIGNING_CORPUS_MIN_LEN && !isNonBindingDraftTemplateCorpus(reviewCorpus)
+    reviewCorpus.length >= VS01_SIGNING_CORPUS_MIN_LEN &&
+    !isNonBindingDraftTemplateCorpus(reviewCorpus) &&
+    !reviewCorpusLooksLikeLeftoverFusedNotices(reviewCorpus)
       ? reviewCorpus
       : null;
   const seeded = await args.seed(

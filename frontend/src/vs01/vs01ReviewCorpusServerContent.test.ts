@@ -78,6 +78,49 @@ function reviewServicesAgreement(): string {
   );
 }
 
+function leftoverFusedReview(): string {
+  return padCorpus(
+    [
+      "SERVICES AGREEMENT",
+      "",
+      "This Agreement is between Alpha Workshop (Client) and Beta Counsel LLC (Service Provider).",
+      "",
+      "10. LIABILITY",
+      "Each party's aggregate liability is limited to fees paid under this Agreement.",
+      "",
+      "11. GOVERNING LAW",
+      "This Agreement is governed by the laws of the applicable jurisdiction.",
+      "",
+      "12. NOTICES",
+      "If to Alpha Workshop Beta Counsel LLC:",
+      "Alpha Workshop Beta Counsel LLC",
+      "Attn: ________, ________",
+      "Email: ________",
+      "",
+      "If to Beta Counsel LLC:",
+      "Beta Counsel LLC",
+      "Address: 30 days, Upon full execution by the parties unless otherwise specified.",
+      "",
+      "13. MISCELLANEOUS",
+      "This Agreement is the entire agreement This Agreement is between Alpha Workshop Beta Counsel LLC ('Service Provider') and Service Provider ('Service Provider').",
+    ].join("\n"),
+  );
+}
+
+function leftoverFusedPdfExtract(): string {
+  return padCorpus(
+    [
+      "SERVICES AGREEMENT",
+      "10. LIABILITY",
+      "12. NOTICES",
+      "If to Alpha Workshop Beta Counsel LLC: Alpha Workshop Beta Counsel LLC Attn: ________",
+      "If to Beta Counsel LLC: Beta Counsel LLC Address: 30 days, Upon full execution by the parties unless otherwise specified.",
+      "11. GOVERNING LAW",
+      "13. MISCELLANEOUS",
+    ].join("\n"),
+  );
+}
+
 function nonBindingTemplatePacket(): string {
   return padCorpus(
     [
@@ -303,6 +346,56 @@ describe("Prepare writes Review corpus onto GET /content", () => {
       null,
       expect.any(String),
       SEEDED_DOC,
+    );
+  });
+
+  it("leftover fused GET /content does not match certified Review and is replaced", async () => {
+    const review = reviewServicesAgreement();
+    const leftover = leftoverFusedReview();
+    const glued = leftoverFusedPdfExtract();
+    expect(fetchedPlainPositivelyMatchesReviewCorpus(leftover, review)).toBe(false);
+    expect(fetchedPlainPositivelyMatchesReviewCorpus(glued, review)).toBe(false);
+    expect(
+      resolveServerContentReplaceDecision({
+        fetchedPlain: leftover,
+        reviewCorpus: review,
+      }).replace,
+    ).toBe(true);
+    expect(
+      resolveServerContentReplaceDecision({
+        fetchedPlain: leftover,
+        reviewCorpus: review,
+        recordedMatch: true,
+      }).replace,
+    ).toBe(true);
+    expect(
+      resolveServerContentReplaceDecision({
+        fetchedPlain: glued,
+        reviewCorpus: review,
+      }).replace,
+    ).toBe(true);
+
+    const seed = vi.fn().mockResolvedValue({
+      ok: true,
+      documentId: SEEDED_DOC,
+      contentSha256: "7".repeat(64),
+    });
+    const bound = await bindReviewCorpusOntoSeededVs01Document({
+      agreementId: AGREEMENT_ID,
+      existingDocumentId: SEEDED_DOC,
+      reviewCorpus: review,
+      seed,
+      fetchContent: fetchContentOf(leftover),
+    });
+    expect(bound.ok).toBe(true);
+    if (!bound.ok) return;
+    expect(bound.replaced).toBe(true);
+    expect(bound.documentId).toBe(SEEDED_DOC);
+    expect(seed).toHaveBeenCalledTimes(1);
+    expect(seed.mock.calls[0][2]).toBe(review);
+    expect(String(seed.mock.calls[0][2] ?? "")).not.toMatch(/If to Alpha Workshop Beta Counsel LLC/i);
+    expect(String(seed.mock.calls[0][2] ?? "")).not.toMatch(
+      /Address:\s*30 days, Upon full execution by the parties unless otherwise specified/i,
     );
   });
 
