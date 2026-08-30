@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 import pytest
 
 from backend.services.vs01_leftover_fused_content import (
@@ -103,6 +105,50 @@ def _leftover_packet_detector_misses() -> str:
         )
         + "\n\n"
         + _PAD
+    ).strip()
+
+
+def _leftover_eight_section_designer() -> str:
+    """Leftover 8-section designer leftover purpose — leftover-text miss, longer than persist Review."""
+    return (
+        "\n".join(
+            [
+                "SERVICES AGREEMENT",
+                "",
+                "This consulting engagement is between Alpha Workshop and Beta Counsel LLC.",
+                "",
+                "1. Services and Deliverables",
+                "Designer will provide the deliverables in commercially reasonable digital file "
+                "formats suitable for normal brand use. If the parties later agree on additional "
+                "deliverables, expanded file packages, extra concepts, social media templates, "
+                "packaging, website assets, or other collateral, that additional work will be "
+                "treated as a change in scope under this Agreement.",
+                "",
+                "2. Project Term and Timeline",
+                "The engagement continues until the work is complete unless the parties agree "
+                "in writing to a different schedule.",
+                "",
+                "3. Fees",
+                "Fees are due as stated in the engagement letter.",
+                "",
+                "4. Revisions",
+                "Reasonable revisions are included in the stated fee.",
+                "",
+                "5. Ownership",
+                "Client owns the final deliverables upon full payment.",
+                "",
+                "6. Confidentiality",
+                "Each party keeps non-public information confidential.",
+                "",
+                "7. Termination",
+                "Either party may end the engagement on written notice.",
+                "",
+                "8. Signatures",
+                "The parties may execute this Agreement in counterparts.",
+            ]
+        )
+        + "\n\n"
+        + (_PAD * 3)
     ).strip()
 
 
@@ -490,21 +536,95 @@ def test_leftover_get_content_200_only_when_persist_review_missing(monkeypatch, 
     assert got.content == leftover
 
 
+def _assert_extract_is_persist_review_pro(extract: str, certified: str) -> None:
+    """Subsequent GET /content extract is persist Review Pro, not leftover 8-section / Story chrome."""
+    assert extract
+    assert "leftover_fused_content" not in extract
+    assert FIRST_FAILING_LEFTOVER_GET_CONTENT_PAINTS_BEFORE_PERSIST_REVIEW_REPLACE not in extract
+    assert "Draft Agreement (non-binding template)" not in extract
+    assert "Designer will provide the deliverables" not in extract
+    assert "Project Term and Timeline" not in extract
+    assert "1. Scope of Services" not in extract
+    assert "8. Signatures" not in extract
+    assert re.search(r"(?:^|\n)\s*10\.\s+LIABILITY", extract, re.I)
+    assert re.search(r"(?:^|\n)\s*11\.\s+GOVERNING LAW", extract, re.I)
+    assert re.search(r"(?:^|\n)\s*12\.\s+NOTICES", extract, re.I)
+    assert re.search(r"(?:^|\n)\s*13\.\s+MISCELLANEOUS", extract, re.I)
+    assert re.search(r"If to\s+Alpha Workshop\s*:", extract)
+    assert re.search(r"If to\s+Beta Counsel LLC\s*:", extract)
+    assert not re.search(r"If to\s+Alpha Workshop\s+Beta Counsel LLC\s*:", extract)
+    nums = [int(n) for n in re.findall(r"(?:^|\n)\s*(\d+)\.\s+[A-Za-z]", extract)]
+    i10, i11, i12, i13 = nums.index(10), nums.index(11), nums.index(12), nums.index(13)
+    assert i10 < i11 < i12 < i13
+
+
+def test_render_persist_review_seed_html_is_not_leftover_story_chrome():
+    from backend.routers.agreements_v2_api import (
+        AgreementDraft,
+        AgreementParty,
+        _render_html,
+        _render_persist_review_seed_html,
+    )
+
+    certified = _certified_review()
+    leftover = _leftover_eight_section_designer()
+    html = _render_persist_review_seed_html(certified)
+    assert "Draft Agreement (non-binding template)" not in html
+    assert "Designer will provide the deliverables" not in html
+    assert "1. Scope of Services" not in html
+    assert "ldg-persist-review-pro" in html
+    assert "10. LIABILITY" in html
+    assert "If to Alpha Workshop:" in html
+    assert "If to Beta Counsel LLC:" in html
+
+    leftover_draft = AgreementDraft(
+        id="ag-leftover-purpose",
+        created_at="c",
+        updated_at="u",
+        title="Services Agreement",
+        jurisdiction="DE",
+        parties=[
+            AgreementParty(name="Alpha Workshop", role="client"),
+            AgreementParty(name="Beta Counsel LLC", role="service_provider"),
+        ],
+        purpose=leftover,
+        payment_terms="Net 30",
+        duration="30 days",
+        due_date=None,
+        effective_date="2026-01-01",
+        versions=[],
+        audit_log=[],
+    )
+    leftover_html = _render_html(leftover_draft)
+    assert "Draft Agreement (non-binding template)" in leftover_html
+    assert "Designer will provide the deliverables" in leftover_html
+
+
 def test_leftover_remount_seed_then_get_content_is_persist_review_200(monkeypatch, tmp_path):
-    """Leftover GET 409 + seed persist Review → subsequent leftover-packet GET is persist Review 200."""
+    """Leftover GET 409 + seed persist Review → subsequent leftover-packet GET is persist Review Pro."""
     pytest.importorskip("openai")
     pytest.importorskip("eth_abi")
     pytest.importorskip("fitz")
     from fastapi.testclient import TestClient
     from backend.main import app
+    from backend.services.agreement_draft_store import load_draft, save_draft
     from backend.tests.entitlement_test_support import ensure_headers_entitled
 
     _env(monkeypatch, tmp_path)
     client = TestClient(app, raise_server_exceptions=False)
     aid = _create_agreement(client)
     certified = _certified_review()
+    leftover_designer = _leftover_eight_section_designer()
+    assert len(leftover_designer) > len(certified)
+    assert review_corpus_looks_like_leftover_fused_notices(leftover_designer) is False
+    stored = load_draft(aid)
+    stored["purpose"] = leftover_designer
+    stored["premium_full_document_text"] = leftover_designer
+    stored["server_full_document_text"] = leftover_designer
+    save_draft(stored)
     leftover_clean = _leftover_packet_detector_misses().encode("utf-8")
     leftover_story = _leftover_clean_story_pdf_bytes() or leftover_clean
+    leftover_designer_bytes = leftover_designer.encode("utf-8")
     assert review_corpus_looks_like_leftover_fused_notices(
         extract_plain_from_document_bytes(leftover_clean)
     ) is False
@@ -517,6 +637,7 @@ def test_leftover_remount_seed_then_get_content_is_persist_review_200(monkeypatc
     for raw, suffix in (
         (leftover_clean, "cleanaaaaaaaaaaaaaaaaaaaaaaaa"),
         (leftover_story, "storyaaaaaaaaaaaaaaaaaaaaaaa"),
+        (leftover_designer_bytes, "designeraaaaaaaaaaaaaaaaaaaaa"),
     ):
         doc_id = f"doc_{suffix}"
         _put_document(aid, doc_id, raw)
@@ -530,7 +651,7 @@ def test_leftover_remount_seed_then_get_content_is_persist_review_200(monkeypatc
         seeded = client.post(
             f"/api/agreements/{aid}/vs01-signing-seed",
             headers=seed_headers,
-            json={"signing_corpus_plain": certified, "document_id": doc_id},
+            json={"signing_corpus_plain": leftover_designer, "document_id": doc_id},
         )
         assert seeded.status_code == 200, seeded.text
         assert seeded.json()["document_id"] == doc_id
@@ -539,5 +660,13 @@ def test_leftover_remount_seed_then_get_content_is_persist_review_200(monkeypatc
         assert subsequent.status_code == 200, subsequent.text
         assert b"leftover_fused_content" not in subsequent.content
         assert FIRST_FAILING_LEFTOVER_GET_CONTENT_PAINTS_BEFORE_PERSIST_REVIEW_REPLACE.encode() not in subsequent.content
+        extract = extract_plain_from_document_bytes(subsequent.content)
+        _assert_extract_is_persist_review_pro(extract, certified)
         assert packet_is_persist_review_corpus(subsequent.content, certified) is True
         assert leftover_get_content_must_refuse(subsequent.content, {"agreement_id": aid}) is False
+
+    after = load_draft(aid)
+    pr = after.get("pro_redline_v1") if isinstance(after.get("pro_redline_v1"), dict) else {}
+    rf = pr.get("review_first_final_corpus") if isinstance(pr, dict) else None
+    if isinstance(rf, dict):
+        assert str(rf.get("source") or "") != "vs01_signing_seed_persist_review"

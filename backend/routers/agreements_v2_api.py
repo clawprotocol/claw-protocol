@@ -3719,6 +3719,27 @@ def _purpose_looks_like_full_client_agreement_text(purpose: str) -> bool:
     return False
 
 
+def _render_persist_review_seed_html(persist_plain: str, *, watermark: bool = False) -> str:
+    """In-memory persist Review Pro seed — no leftover Story chrome, no leftover 8-section."""
+    body_src = (persist_plain or "").strip()
+    if watermark:
+        body_src = _strip_watermark_label_from_body(
+            _collapse_duplicate_watermark_labels(body_src, WATERMARK_LABEL),
+            WATERMARK_LABEL,
+        )
+    body = html.escape(body_src)
+    article = (
+        "<article class='ldg-persist-review-pro' style='position:relative;max-width:720px;margin:0 auto'>"
+        "<pre style='white-space:pre-wrap;font-family:Georgia,serif;font-size:15px;line-height:1.65;"
+        "color:#0f172a;margin:0;padding:0;border:0;background:transparent'>"
+        f"{body}</pre>"
+        "</article>"
+    )
+    if not watermark:
+        return article
+    return f"{article}{_html_watermark_footer(html.escape(WATERMARK_LABEL))}"
+
+
 def _render_html(draft: AgreementDraft, *, watermark: bool = False) -> str:
     review_first_corpus, review_first_source = _review_first_final_corpus_from_draft(draft)
     if review_first_corpus:
@@ -9689,22 +9710,23 @@ def post_agreement_vs01_signing_seed(
         ) from exc
 
     signing_plain = (body.signing_corpus_plain or "").strip()
-    if len(signing_plain) >= _VS01_SIGNING_CORPUS_OVERRIDE_MIN_LEN:
-        from backend.services.vs01_leftover_fused_content import (
-            packet_is_persist_review_corpus,
-            persist_review_plain_for_agreement,
-        )
+    persist_review_seed_plain = ""
+    from backend.services.vs01_leftover_fused_content import persist_review_plain_for_agreement
 
-        field_key_override, corpus_before = primary_agreement_plain_field_and_value(draft)
-        persist_plain = persist_review_plain_for_agreement(aid)
-        is_persist_review_seed = bool(
-            persist_plain
-            and packet_is_persist_review_corpus(signing_plain.encode("utf-8"), persist_plain)
+    persist_plain = persist_review_plain_for_agreement(aid)
+    if persist_plain:
+        # Persist Review GET is the in-memory seed body. Leftover purpose
+        # (8-section designer, length-only full-client-agreement path) and
+        # leftover Story chrome must not win. Do not persist a new Review-paint SoT.
+        persist_review_seed_plain = persist_plain
+        log.info(
+            "[vs01-signing-seed-persist-review-render] agreement_id=%s len=%s",
+            aid,
+            len(persist_review_seed_plain),
         )
-        # Persist Review GET is the seed body even when leftover draft fields are
-        # longer. Length-only override left leftover 8-section template on the
-        # packet; leftover refuse then 409'd GET /content as leftover JSON.
-        if is_persist_review_seed or len(signing_plain) > len(corpus_before or ""):
+    elif len(signing_plain) >= _VS01_SIGNING_CORPUS_OVERRIDE_MIN_LEN:
+        field_key_override, corpus_before = primary_agreement_plain_field_and_value(draft)
+        if len(signing_plain) > len(corpus_before or ""):
             merge_fields: Dict[str, Any] = {field_key_override: signing_plain}
             for alt_key in (
                 "premium_full_document_text",
@@ -9713,17 +9735,6 @@ def post_agreement_vs01_signing_seed(
             ):
                 if alt_key != field_key_override:
                     merge_fields[alt_key] = signing_plain
-            if is_persist_review_seed:
-                pr = (
-                    dict(draft.pro_redline_v1)
-                    if isinstance(draft.pro_redline_v1, dict)
-                    else {}
-                )
-                pr["review_first_final_corpus"] = {
-                    "text": signing_plain,
-                    "source": "vs01_signing_seed_persist_review",
-                }
-                merge_fields["pro_redline_v1"] = pr
             draft = _merge_agreement_draft(draft, **merge_fields)
             log.info(
                 "[vs01-signing-seed-corpus-override] agreement_id=%s len=%s field=%s prev_len=%s persist_review=%s",
@@ -9731,12 +9742,15 @@ def post_agreement_vs01_signing_seed(
                 len(signing_plain),
                 field_key_override,
                 len(corpus_before or ""),
-                is_persist_review_seed,
+                False,
             )
 
     # --- placeholder_template_safety (pre-render) ---
     party_names_vs = [str(p.name or "").strip() for p in (draft.parties or []) if str(p.name or "").strip()]
-    field_key_vs, corpus_vs = primary_agreement_plain_field_and_value(draft)
+    if persist_review_seed_plain:
+        field_key_vs, corpus_vs = "", persist_review_seed_plain
+    else:
+        field_key_vs, corpus_vs = primary_agreement_plain_field_and_value(draft)
     intake_corpus_vs = _draft_placeholder_intake_corpus(draft)
     ok_ph_vs, fixed_corpus_vs, ph_diag_vs = validate_user_visible_agreement_text(
         corpus_vs,
@@ -9761,7 +9775,10 @@ def post_agreement_vs01_signing_seed(
             ),
         )
     if (corpus_vs or "").strip() and fixed_corpus_vs.strip() != corpus_vs.strip():
-        draft = _merge_agreement_draft(draft, **{field_key_vs: fixed_corpus_vs})
+        if persist_review_seed_plain:
+            persist_review_seed_plain = fixed_corpus_vs.strip()
+        else:
+            draft = _merge_agreement_draft(draft, **{field_key_vs: fixed_corpus_vs})
 
     # --- economics_watermark (fail-open: seed must not depend on usage-economics DB uptime) ---
     try:
@@ -9779,7 +9796,11 @@ def post_agreement_vs01_signing_seed(
 
     # --- render_html ---
     try:
-        html = _render_html(draft, watermark=wm)
+        html = (
+            _render_persist_review_seed_html(persist_review_seed_plain, watermark=wm)
+            if persist_review_seed_plain
+            else _render_html(draft, watermark=wm)
+        )
     except HTTPException:
         raise
     except Exception as exc:
