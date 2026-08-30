@@ -3,19 +3,13 @@
 from __future__ import annotations
 
 import pytest
-from fastapi.testclient import TestClient
 
-from backend.main import app
-from backend.services import document_service
-from backend.services.accepted_review_snapshot import sha256_hex_text
 from backend.services.vs01_leftover_fused_content import (
     FIRST_FAILING_LEFTOVER_GET_CONTENT_PAINTS_BEFORE_PERSIST_REVIEW_REPLACE,
     extract_plain_from_document_bytes,
     leftover_get_content_must_refuse,
     review_corpus_looks_like_leftover_fused_notices,
 )
-from backend.tests.entitlement_test_support import ensure_headers_entitled
-from backend.usage_economics import store as usage_economics_store_mod
 
 pytestmark = pytest.mark.unit
 
@@ -93,6 +87,11 @@ def _leftover_fused() -> str:
 
 @pytest.fixture(autouse=True)
 def _reset_usage_economics_singleton():
+    try:
+        from backend.usage_economics import store as usage_economics_store_mod
+    except Exception:
+        yield
+        return
     usage_economics_store_mod._store = None  # noqa: SLF001
     yield
     usage_economics_store_mod._store = None  # noqa: SLF001
@@ -128,14 +127,28 @@ def test_leftover_detector_is_generic_and_misses_certified_review():
     assert review_corpus_looks_like_leftover_fused_notices(extract_plain_from_document_bytes(pdf)) is True
 
 
-def test_refuse_only_when_leftover_and_persist_review_exists():
+def test_refuse_only_when_leftover_and_persist_review_exists(monkeypatch):
     leftover = _leftover_fused().encode("utf-8")
     certified = _certified_review().encode("utf-8")
     assert leftover_get_content_must_refuse(leftover, {"agreement_id": ""}) is False
     assert leftover_get_content_must_refuse(certified, {"agreement_id": "missing"}) is False
 
+    monkeypatch.setattr(
+        "backend.services.vs01_leftover_fused_content.persist_review_exists_for_agreement",
+        lambda _aid: True,
+    )
+    assert leftover_get_content_must_refuse(leftover, {"agreement_id": "ag_persist"}) is True
+    assert leftover_get_content_must_refuse(certified, {"agreement_id": "ag_persist"}) is False
+    monkeypatch.setattr(
+        "backend.services.vs01_leftover_fused_content.persist_review_exists_for_agreement",
+        lambda _aid: False,
+    )
+    assert leftover_get_content_must_refuse(leftover, {"agreement_id": "ag_empty"}) is False
 
-def _create_agreement(client: TestClient) -> str:
+
+def _create_agreement(client) -> str:
+    from backend.tests.entitlement_test_support import ensure_headers_entitled
+
     headers = ensure_headers_entitled(dict(_ORG_H))
     create_res = client.post(
         "/api/agreements/draft",
@@ -155,7 +168,10 @@ def _create_agreement(client: TestClient) -> str:
     return create_res.json()["id"]
 
 
-def _persist_and_accept(client: TestClient, aid: str, corpus: str) -> dict:
+def _persist_and_accept(client, aid: str, corpus: str) -> dict:
+    from backend.services.accepted_review_snapshot import sha256_hex_text
+    from backend.tests.entitlement_test_support import ensure_headers_entitled
+
     headers = ensure_headers_entitled(dict(_ORG_H))
     create = client.post(
         f"/api/agreements/{aid}/canonical-review-snapshot",
@@ -183,6 +199,8 @@ def _persist_and_accept(client: TestClient, aid: str, corpus: str) -> dict:
 
 
 def _put_document(aid: str, doc_id: str, body: bytes) -> None:
+    from backend.services import document_service
+
     document_service.finalize_document(
         body,
         content_type="application/pdf",
@@ -193,6 +211,11 @@ def _put_document(aid: str, doc_id: str, body: bytes) -> None:
 
 
 def test_leftover_get_content_409_when_persist_review_exists(monkeypatch, tmp_path):
+    pytest.importorskip("openai")
+    pytest.importorskip("eth_abi")
+    from fastapi.testclient import TestClient
+    from backend.main import app
+
     _env(monkeypatch, tmp_path)
     client = TestClient(app, raise_server_exceptions=False)
     aid = _create_agreement(client)
@@ -211,6 +234,11 @@ def test_leftover_get_content_409_when_persist_review_exists(monkeypatch, tmp_pa
 
 
 def test_matching_certified_get_content_is_not_rewritten(monkeypatch, tmp_path):
+    pytest.importorskip("openai")
+    pytest.importorskip("eth_abi")
+    from fastapi.testclient import TestClient
+    from backend.main import app
+
     _env(monkeypatch, tmp_path)
     client = TestClient(app, raise_server_exceptions=False)
     aid = _create_agreement(client)
@@ -226,6 +254,11 @@ def test_matching_certified_get_content_is_not_rewritten(monkeypatch, tmp_path):
 
 
 def test_leftover_get_content_200_only_when_persist_review_missing(monkeypatch, tmp_path):
+    pytest.importorskip("openai")
+    pytest.importorskip("eth_abi")
+    from fastapi.testclient import TestClient
+    from backend.main import app
+
     _env(monkeypatch, tmp_path)
     client = TestClient(app, raise_server_exceptions=False)
     aid = _create_agreement(client)
