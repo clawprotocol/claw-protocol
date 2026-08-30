@@ -245,6 +245,13 @@ async function bytesFromFetchedContent(content: FetchedDocumentContent): Promise
   throw new Error("blob_unreadable");
 }
 
+export function leftoverGetContentRefuseFromError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err ?? "");
+  return /leftover_fused_content|esign_leftover_get_content_paints_before_persist_review_replace/.test(
+    msg,
+  );
+}
+
 export async function inspectSeededDocumentServerContent(
   documentId: string,
   fetchContent: (id: string) => Promise<FetchedDocumentContent> = fetchDocumentContent,
@@ -252,10 +259,11 @@ export async function inspectSeededDocumentServerContent(
   ok: boolean;
   plain: string;
   contentSha256: string | null;
+  leftoverRefused: boolean;
 }> {
   const id = documentId.trim();
   if (!id || id.startsWith("local_doc_")) {
-    return { ok: false, plain: "", contentSha256: null };
+    return { ok: false, plain: "", contentSha256: null, leftoverRefused: false };
   }
   try {
     const fetched = await fetchContent(id);
@@ -268,9 +276,14 @@ export async function inspectSeededDocumentServerContent(
     } catch {
       contentSha256 = null;
     }
-    return { ok: true, plain, contentSha256 };
-  } catch {
-    return { ok: false, plain: "", contentSha256: null };
+    return { ok: true, plain, contentSha256, leftoverRefused: false };
+  } catch (err) {
+    return {
+      ok: false,
+      plain: "",
+      contentSha256: null,
+      leftoverRefused: leftoverGetContentRefuseFromError(err),
+    };
   }
 }
 
@@ -282,6 +295,7 @@ export type BindReviewCorpusResult =
       reason: string;
       fetchedWasTemplate: boolean;
       contentSha256: string | null;
+      reviewCorpus?: string;
     }
   | { ok: false; reason: string };
 

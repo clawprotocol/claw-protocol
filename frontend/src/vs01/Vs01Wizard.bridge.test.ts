@@ -51,5 +51,8 @@ describe("Vs01Wizard agreement bridge (static)", () => {
     expect(start).toBeGreaterThanOrEqual(0);
     expect(hydrateAt).toBeGreaterThan(start);
     expect(s.slice(start, hydrateAt)).toContain("ensureReviewCorpusOnEsignEntry");
+    expect(s).toContain("reviewCorpusLooksLikeLeftoverFusedNotices");
+    expect(s).toContain("leftoverGetContentRefuseFromError");
+    expect(s).toContain("persistReviewCorpus");
   });
 });

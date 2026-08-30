@@ -1,0 +1,177 @@
+"""Refuse leftover fused GET /content when persist Review exists.
+
+Leftover remount must not hand off stale fused packet bytes (concatenated
+If-to, stuffed Address, fused Misc) as a successful GET /content paint.
+When persist Review GET (accepted / pending canonical-review-snapshot) exists,
+leftover fused is never a 200.
+"""
+
+from __future__ import annotations
+
+import logging
+import re
+from typing import Any, Dict, Optional
+
+_log = logging.getLogger("claw.vs01_leftover_fused_content")
+
+FIRST_FAILING_LEFTOVER_GET_CONTENT_PAINTS_BEFORE_PERSIST_REVIEW_REPLACE = (
+    "esign_leftover_get_content_paints_before_persist_review_replace"
+)
+
+_SIGNING_CORPUS_MIN_LEN = 1500
+_NON_BINDING_TEMPLATE_BANNER_RE = re.compile(
+    r"Draft Agreement\s*\(\s*non[- ]binding template\s*\)",
+    re.IGNORECASE,
+)
+_FUSED_MISC_OPENING_RE = re.compile(
+    r"This Agreement is the entire agreement\s+This Agreement is between",
+    re.IGNORECASE,
+)
+# PDF /content extracts often put Address: and the stuffed term on separate lines.
+_STUFFED_NOTICE_ADDRESS_RE = re.compile(
+    r"Address:\s*(?:[\s\S]{0,160}?(?:30\s*-?\s*days?|Upon full execution by the parties unless otherwise specified))",
+    re.IGNORECASE,
+)
+_IF_TO_HEADING_RE = re.compile(r"If to\s+(.+?)\s*:", re.IGNORECASE)
+_PDF_LITERAL_RE = re.compile(r"\(((?:\\.|[^\\)])*)\)")
+
+
+def extract_plain_from_document_bytes(raw: bytes | None) -> str:
+    """Plain extract from leftover GET /content: pypdf, PDF literals, or UTF-8."""
+    if not raw:
+        return ""
+    text = ""
+    try:
+        from pypdf import PdfReader  # type: ignore[import-not-found]
+        import io
+
+        reader = PdfReader(io.BytesIO(raw))
+        pages = [page.extract_text() or "" for page in reader.pages]
+        text = "\n".join(pages).strip()
+    except Exception:
+        text = ""
+    if not text or text.startswith("%PDF"):
+        utf8 = raw.decode("utf-8", errors="ignore").replace("\x00", "")
+        if utf8.startswith("%PDF"):
+            strings: list[str] = []
+            for match in _PDF_LITERAL_RE.finditer(utf8):
+                lit = (
+                    match.group(1)
+                    .replace("\\n", "\n")
+                    .replace("\\r", "\n")
+                    .replace("\\t", "\t")
+                    .replace("\\(", "(")
+                    .replace("\\)", ")")
+                    .replace("\\\\", "\\")
+                )
+                if lit.strip():
+                    strings.append(lit)
+            glued = "\n".join(strings).strip()
+            if glued:
+                text = glued
+            elif not text:
+                text = utf8
+        elif not text:
+            text = utf8
+    return (text or "").replace("\r\n", "\n").strip()
+
+
+def review_corpus_looks_like_leftover_fused_notices(text: str | None) -> bool:
+    """Generic leftover fused Notices / Misc — no party or venue fixtures."""
+    body = (text or "").replace("\r\n", "\n")
+    if not body.strip():
+        return False
+    if _FUSED_MISC_OPENING_RE.search(body):
+        return True
+    if _STUFFED_NOTICE_ADDRESS_RE.search(body):
+        return True
+    headings: list[str] = []
+    seen: set[str] = set()
+    for match in _IF_TO_HEADING_RE.finditer(body):
+        entity = (match.group(1) or "").strip()
+        if not entity:
+            continue
+        key = entity.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        headings.append(entity)
+    for i, longer in enumerate(headings):
+        for j, shorter in enumerate(headings):
+            if i == j:
+                continue
+            if len(longer) > len(shorter) and shorter.lower() in longer.lower():
+                return True
+    return False
+
+
+def persist_review_corpus_from_draft(draft: Any) -> str:
+    """Same persist Review GET body Review already painted (accepted, else pending)."""
+    from backend.services.accepted_review_snapshot import (
+        get_accepted_snapshot_record,
+        get_registry,
+    )
+
+    accepted = get_accepted_snapshot_record(draft)
+    if isinstance(accepted, dict):
+        plain = str(accepted.get("corpusPlain") or accepted.get("corpus_plain") or "").strip()
+        if plain:
+            return plain
+    reg = get_registry(draft)
+    snaps = reg.get("snapshots") if isinstance(reg.get("snapshots"), dict) else {}
+    pending = [
+        s
+        for s in snaps.values()
+        if isinstance(s, dict) and str(s.get("status") or "").strip() == "pending"
+    ]
+    pending.sort(key=lambda s: str(s.get("createdAt") or ""), reverse=True)
+    latest = pending[0] if pending else None
+    if isinstance(latest, dict):
+        return str(latest.get("corpusPlain") or latest.get("corpus_plain") or "").strip()
+    return ""
+
+
+def persist_review_exists_for_agreement(agreement_id: str) -> bool:
+    aid = (agreement_id or "").strip()
+    if not aid:
+        return False
+    try:
+        from backend.services.agreement_draft_store import load_draft
+
+        draft = load_draft(aid)
+    except Exception:
+        return False
+    return bool(persist_review_corpus_from_draft(draft).strip())
+
+
+def certified_persist_review_plain(text: str | None) -> str:
+    plain = (text or "").strip()
+    if len(plain) < _SIGNING_CORPUS_MIN_LEN:
+        return ""
+    if _NON_BINDING_TEMPLATE_BANNER_RE.search(plain):
+        return ""
+    if review_corpus_looks_like_leftover_fused_notices(plain):
+        return ""
+    return plain
+
+
+def leftover_get_content_must_refuse(
+    raw: bytes | None,
+    meta: Optional[Dict[str, Any]] = None,
+) -> bool:
+    """True when leftover fused GET /content would paint and persist Review exists."""
+    extracted = extract_plain_from_document_bytes(raw)
+    if not review_corpus_looks_like_leftover_fused_notices(extracted):
+        return False
+    agreement_id = ""
+    if isinstance(meta, dict):
+        agreement_id = str(meta.get("agreement_id") or "").strip()
+    if not persist_review_exists_for_agreement(agreement_id):
+        return False
+    _log.info(
+        "[vs01-leftover-get-content-refuse] agreement_id=%s size_bytes=%s predicate=%s",
+        agreement_id,
+        len(raw or b""),
+        FIRST_FAILING_LEFTOVER_GET_CONTENT_PAINTS_BEFORE_PERSIST_REVIEW_REPLACE,
+    )
+    return True

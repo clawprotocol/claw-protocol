@@ -23,6 +23,10 @@ from backend.services.vs01_document_content import (
     content_type_for_meta,
     load_document_content,
 )
+from backend.services.vs01_leftover_fused_content import (
+    FIRST_FAILING_LEFTOVER_GET_CONTENT_PAINTS_BEFORE_PERSIST_REVIEW_REPLACE,
+    leftover_get_content_must_refuse,
+)
 
 router = APIRouter(prefix="/v1/documents", tags=["documents"])
 _log = logging.getLogger("claw.vs01_documents_api")
@@ -136,6 +140,20 @@ def api_get_document_content(document_id: str, request: Request) -> Response:
         raw, meta = load_document_content(did)
         if raw is None:
             raise HTTPException(status_code=404, detail="document_not_found")
+        if leftover_get_content_must_refuse(raw, meta):
+            return JSONResponse(
+                status_code=409,
+                content={
+                    "ok": False,
+                    "error": "leftover_fused_content",
+                    "code": FIRST_FAILING_LEFTOVER_GET_CONTENT_PAINTS_BEFORE_PERSIST_REVIEW_REPLACE,
+                    "detail": {
+                        "code": FIRST_FAILING_LEFTOVER_GET_CONTENT_PAINTS_BEFORE_PERSIST_REVIEW_REPLACE,
+                        "error": "leftover_fused_content",
+                    },
+                    "document_id": did,
+                },
+            )
         ct = content_type_for_meta(meta)
         return Response(content=raw, media_type=ct)
     except HTTPException:

@@ -39,6 +39,11 @@ import {
 } from "../launch/simpleProduct/agreementToVs01SigningBridge";
 import { resolvePrepareBridgeSigningCorpus } from "./vs01PrepareBridgeCorpus";
 import { ensureReviewCorpusOnEsignEntry } from "./vs01EsignRemountReviewBind";
+import {
+  extractPlainTextFromDocumentContent,
+  leftoverGetContentRefuseFromError,
+} from "./vs01ReviewCorpusServerContent";
+import { reviewCorpusLooksLikeLeftoverFusedNotices } from "./vs01CurrentReviewSotForSeed";
 import { VS01_SIGNING_CORPUS_MIN_LEN } from "./vs01SigningCorpus";
 import { fingerprintAgreementBody } from "../components/agreements/guidedDealCompletion/guidedSigningPacketVersion";
 import { buildVs01CanonicalPacketSeed, hasVs01CanonicalPacketCached, storeVs01CanonicalPacketSeed } from "./vs01CanonicalPacketSeed";
@@ -799,11 +804,21 @@ export function Vs01Wizard({
     if (shouldDeferVs01SeedDocumentLoad({ authEnabled, authLoading })) return;
     let cancelled = false;
     void (async () => {
-      // Remount of leftover /app/esign/:id must replace template GET /content
-      // before paint. #143 only bound inside tryNavigate.
+      // Remount of leftover /app/esign/:id must replace leftover GET /content
+      // before paint. Leftover fused 200 is never a successful handoff when
+      // persist Review exists.
+      let persistReviewCorpus = "";
       if (!sid.startsWith("local_doc_")) {
         try {
-          await ensureReviewCorpusOnEsignEntry({ documentId: sid });
+          const bound = await ensureReviewCorpusOnEsignEntry({ documentId: sid });
+          if (bound && bound.ok && !("skipped" in bound) && (bound.reviewCorpus ?? "").trim()) {
+            persistReviewCorpus = bound.reviewCorpus!.trim();
+          }
+          if (bound && !bound.ok) {
+            if (cancelled) return;
+            setError("Could not load this document. Check the link or start a new packet.");
+            return;
+          }
         } catch {
           /* stay on placement; do not eject */
         }
@@ -870,7 +885,12 @@ export function Vs01Wizard({
             draft: null,
             bridge,
           });
-          setPrepareCorpusText(signingCorpus.corpus.trim() || null);
+          const chosenCorpus = persistReviewCorpus || signingCorpus.corpus.trim() || "";
+          setPrepareCorpusText(
+            chosenCorpus && !reviewCorpusLooksLikeLeftoverFusedNotices(chosenCorpus)
+              ? chosenCorpus
+              : persistReviewCorpus || null,
+          );
           setAgreementTitle(titleForUi);
           setCreatorName(cn);
           setCreatorEmail(ce);
@@ -934,6 +954,13 @@ export function Vs01Wizard({
       try {
         const blob = await fetchDocumentContent(sid);
         const buf = await blob.arrayBuffer();
+        const painted = extractPlainTextFromDocumentContent(new Uint8Array(buf));
+        if (reviewCorpusLooksLikeLeftoverFusedNotices(painted)) {
+          if (!cancelled) {
+            setError("Could not load this document. Check the link or start a new packet.");
+          }
+          return;
+        }
         const hex = (await sha256Bytes(buf)).toLowerCase();
         if (cancelled) return;
         setError(null);
@@ -1012,7 +1039,12 @@ export function Vs01Wizard({
               draft: null,
               bridge,
             });
-            setPrepareCorpusText(signingCorpus.corpus.trim() || null);
+            const chosenCorpus = persistReviewCorpus || signingCorpus.corpus.trim() || "";
+          setPrepareCorpusText(
+            chosenCorpus && !reviewCorpusLooksLikeLeftoverFusedNotices(chosenCorpus)
+              ? chosenCorpus
+              : persistReviewCorpus || null,
+          );
             setAgreementTitle(titleForUi);
             setCreatorName(cn);
             setCreatorEmail(ce);
@@ -1144,7 +1176,7 @@ export function Vs01Wizard({
           goToStep(1);
         }
       } catch (e) {
-        if (hydrateLocalPaidProBridge()) return;
+        if (!leftoverGetContentRefuseFromError(e) && hydrateLocalPaidProBridge()) return;
         console.error("[Vs01Wizard] seed document load failed", e);
         if (!cancelled) setError("Could not load this document. Check the link or start a new packet.");
       }

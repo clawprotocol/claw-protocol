@@ -47,6 +47,15 @@ export const FIRST_FAILING_LEFTOVER_GET_CONTENT_PAINTED_PREDICATE =
 export const FIRST_FAILING_LEFTOVER_GET_CONTENT_STILL_PAINTS_PREDICATE =
   "esign_leftover_get_content_still_paints_after_review_paint_sot_resolver" as const;
 
+/**
+ * #149 still painted leftover GET /content on remount: bind fail-closed or
+ * leftover PDF extract was missed, then the wizard handed off leftover 200.
+ * Persist Review GET 200 must replace leftover before paint. Leftover fused
+ * is never a successful GET /content when persist Review exists.
+ */
+export const FIRST_FAILING_LEFTOVER_GET_CONTENT_PAINTS_BEFORE_PERSIST_REVIEW_REPLACE =
+  "esign_leftover_get_content_paints_before_persist_review_replace" as const;
+
 /** @deprecated Closed #145 gate — do not reopen. Prefer {@link FIRST_FAILING_NON_CERTIFIED_REVIEW_SEED_PREDICATE}. */
 export const FIRST_FAILING_STALE_REVIEW_SNAPSHOT_SEED_PREDICATE =
   FIRST_FAILING_NON_CERTIFIED_REVIEW_SEED_PREDICATE;
@@ -54,9 +63,10 @@ export const FIRST_FAILING_STALE_REVIEW_SNAPSHOT_SEED_PREDICATE =
 const FUSED_MISC_OPENING_RE =
   /This Agreement is the entire agreement\s+This Agreement is between/i;
 
-/** Term / execution prose stuffed into a Notices Address field — leftover, not Review. */
+/** Term / execution prose stuffed into a Notices Address field — leftover, not Review.
+ * PDF /content extracts often glue Address: onto the next line. */
 const STUFFED_NOTICE_ADDRESS_RE =
-  /Address:\s*(?:[^\n]{0,160}?(?:30\s*-?\s*days?|Upon full execution by the parties unless otherwise specified))/i;
+  /Address:\s*(?:[\s\S]{0,160}?(?:30\s*-?\s*days?|Upon full execution by the parties unless otherwise specified))/i;
 
 const TOP_LEVEL_HEADING_RE = /(?:^|\n)\s*(\d+)\.\s+[A-Za-z]/g;
 

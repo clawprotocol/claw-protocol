@@ -12,6 +12,8 @@ import {
   clearReviewServerContentBinding,
   extractPlainTextFromDocumentContent,
   fetchedPlainPositivelyMatchesReviewCorpus,
+  inspectSeededDocumentServerContent,
+  leftoverGetContentRefuseFromError,
   loadReviewServerContentBinding,
   resolveServerContentReplaceDecision,
   storeReviewServerContentBinding,
@@ -397,6 +399,47 @@ describe("Prepare writes Review corpus onto GET /content", () => {
     expect(String(seed.mock.calls[0][2] ?? "")).not.toMatch(
       /Address:\s*30 days, Upon full execution by the parties unless otherwise specified/i,
     );
+  });
+
+  it("leftover GET /content refuse is never a match and forces replace", async () => {
+    const review = reviewServicesAgreement();
+    expect(
+      leftoverGetContentRefuseFromError(
+        new Error(
+          JSON.stringify({
+            code: "esign_leftover_get_content_paints_before_persist_review_replace",
+            error: "leftover_fused_content",
+          }),
+        ),
+      ),
+    ).toBe(true);
+    const inspected = await inspectSeededDocumentServerContent("doc_e959491fdcef431c96052cbb74e0fdaf", async () => {
+      throw new Error("leftover_fused_content");
+    });
+    expect(inspected.ok).toBe(false);
+    expect(inspected.leftoverRefused).toBe(true);
+    expect(fetchedPlainPositivelyMatchesReviewCorpus(inspected.plain, review)).toBe(false);
+
+    const seed = vi.fn().mockResolvedValue({
+      ok: true,
+      documentId: SEEDED_DOC,
+      contentSha256: "8".repeat(64),
+    });
+    const bound = await bindReviewCorpusOntoSeededVs01Document({
+      agreementId: AGREEMENT_ID,
+      existingDocumentId: SEEDED_DOC,
+      reviewCorpus: review,
+      seed,
+      fetchContent: async () => {
+        throw new Error("leftover_fused_content");
+      },
+    });
+    expect(bound.ok).toBe(true);
+    if (!bound.ok) return;
+    expect(bound.replaced).toBe(true);
+    expect(seed).toHaveBeenCalledTimes(1);
+    expect(seed.mock.calls[0][2]).toBe(review);
+    expect(String(seed.mock.calls[0][2] ?? "")).not.toMatch(/If to Alpha Workshop Beta Counsel LLC/i);
   });
 
   it("shared Texas/Northline tokens in a template extract must not skip replace", async () => {

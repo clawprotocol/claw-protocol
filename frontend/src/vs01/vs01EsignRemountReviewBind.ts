@@ -38,6 +38,7 @@ import {
 } from "../components/agreements/paidProSourceOfTruth";
 import { resolveCanonicalPlainForVisibleShell } from "../components/agreements/paidProVisibleDocumentShell";
 import {
+  FIRST_FAILING_LEFTOVER_GET_CONTENT_PAINTS_BEFORE_PERSIST_REVIEW_REPLACE,
   FIRST_FAILING_LEFTOVER_GET_CONTENT_STILL_PAINTS_PREDICATE,
   readAcceptedReviewCorpusFromDraftLike,
   resolveCertifiedReviewCorpusForSigningSeed,
@@ -47,6 +48,7 @@ import {
 export {
   FIRST_FAILING_LEFTOVER_FUSED_FALLBACK_PREDICATE,
   FIRST_FAILING_LEFTOVER_GET_CONTENT_PAINTED_PREDICATE,
+  FIRST_FAILING_LEFTOVER_GET_CONTENT_PAINTS_BEFORE_PERSIST_REVIEW_REPLACE,
   FIRST_FAILING_LEFTOVER_GET_CONTENT_STILL_PAINTS_PREDICATE,
   FIRST_FAILING_NON_CERTIFIED_REVIEW_SEED_PREDICATE,
   FIRST_FAILING_STALE_REVIEW_SNAPSHOT_SEED_PREDICATE,
@@ -291,7 +293,8 @@ export async function ensureReviewCorpusOnEsignEntry(args: {
     documentId,
     args.fetchContent ?? fetchDocumentContent,
   );
-  const leftoverFusedOnPacket = reviewCorpusLooksLikeLeftoverFusedNotices(painted.plain);
+  const leftoverFusedOnPacket =
+    painted.leftoverRefused || reviewCorpusLooksLikeLeftoverFusedNotices(painted.plain);
 
   // First accepted-snapshot read may be empty on leftover Incognito remount.
   // Persist Review GET is the same path Review already painted. Empty
@@ -330,15 +333,21 @@ export async function ensureReviewCorpusOnEsignEntry(args: {
     }
   }
   if (!certifiedReviewCorpus) {
-    // Leftover fused on screen is not a pass. Fail-closed only when persist
-    // Review truly does not exist (empty Incognito session is not that).
-    return { ok: false, reason: FIRST_FAILING_LEFTOVER_GET_CONTENT_STILL_PAINTS_PREDICATE };
+    // Leftover on screen is not a pass. Fail-closed only when persist Review
+    // truly does not exist. Leftover refuse / unreadable leftover extract is
+    // not a reason to paint leftover GET /content.
+    return {
+      ok: false,
+      reason: leftoverFusedOnPacket
+        ? FIRST_FAILING_LEFTOVER_GET_CONTENT_PAINTS_BEFORE_PERSIST_REVIEW_REPLACE
+        : FIRST_FAILING_LEFTOVER_GET_CONTENT_STILL_PAINTS_PREDICATE,
+    };
   }
   if (leftoverFusedOnPacket && reviewCorpusLooksLikeLeftoverFusedNotices(certifiedReviewCorpus)) {
-    return { ok: false, reason: FIRST_FAILING_LEFTOVER_GET_CONTENT_STILL_PAINTS_PREDICATE };
+    return { ok: false, reason: FIRST_FAILING_LEFTOVER_GET_CONTENT_PAINTS_BEFORE_PERSIST_REVIEW_REPLACE };
   }
 
-  return bindReviewCorpusOntoSeededVs01Document({
+  const bound = await bindReviewCorpusOntoSeededVs01Document({
     agreementId,
     existingDocumentId: documentId,
     reviewCorpus: certifiedReviewCorpus,
@@ -348,4 +357,10 @@ export async function ensureReviewCorpusOnEsignEntry(args: {
     signingCorpusSource: args.signingCorpusSource ?? FIRST_FAILING_ESIGN_REMOUNT_PREDICATE,
     fetchContent: args.fetchContent,
   });
+  if (!bound.ok) {
+    return leftoverFusedOnPacket
+      ? { ok: false, reason: FIRST_FAILING_LEFTOVER_GET_CONTENT_PAINTS_BEFORE_PERSIST_REVIEW_REPLACE }
+      : bound;
+  }
+  return { ...bound, reviewCorpus: certifiedReviewCorpus };
 }
