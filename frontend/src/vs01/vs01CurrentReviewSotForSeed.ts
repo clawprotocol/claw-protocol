@@ -28,9 +28,24 @@ export const FIRST_FAILING_NON_CERTIFIED_REVIEW_SEED_PREDICATE =
 export const FIRST_FAILING_LEFTOVER_FUSED_FALLBACK_PREDICATE =
   "esign_seed_falls_back_to_leftover_fused_draft_when_certified_unresolved" as const;
 
+/**
+ * #147 fail-closed (or treating leftover hydrate/canonical as certified) left
+ * leftover GET /content painted. Fail-closed-without-replace is not a pass
+ * while leftover fused /content is on screen and Review-paint SoT exists.
+ */
+export const FIRST_FAILING_LEFTOVER_GET_CONTENT_PAINTED_PREDICATE =
+  "esign_fail_closed_or_wrong_store_leaves_leftover_get_content_painted" as const;
+
 /** @deprecated Closed #145 gate — do not reopen. Prefer {@link FIRST_FAILING_NON_CERTIFIED_REVIEW_SEED_PREDICATE}. */
 export const FIRST_FAILING_STALE_REVIEW_SNAPSHOT_SEED_PREDICATE =
   FIRST_FAILING_NON_CERTIFIED_REVIEW_SEED_PREDICATE;
+
+const FUSED_MISC_OPENING_RE =
+  /This Agreement is the entire agreement\s+This Agreement is between/i;
+
+/** Term / execution prose stuffed into a Notices Address field — leftover, not Review. */
+const STUFFED_NOTICE_ADDRESS_RE =
+  /Address:\s*(?:[^\n]{0,160}?(?:30\s*-?\s*days?|Upon full execution by the parties unless otherwise specified))/i;
 
 const TOP_LEVEL_HEADING_RE = /(?:^|\n)\s*(\d+)\.\s+[A-Za-z]/g;
 
@@ -67,14 +82,58 @@ function longNonTemplateCorpus(text: string | null | undefined): string {
   return raw;
 }
 
+function ifToHeadingEntities(text: string): string[] {
+  const out: string[] = [];
+  const re = /^If to\s+(.+?)\s*:\s*$/gim;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    const entity = (m[1] ?? "").trim();
+    if (entity) out.push(entity);
+  }
+  return out;
+}
+
+/**
+ * Leftover fused Notices / Misc — never the seed body.
+ * Generic: concatenated If-to headings, stuffed Address/term/execution, fused Misc.
+ * Does not hard-code party or venue names.
+ */
+export function reviewCorpusLooksLikeLeftoverFusedNotices(
+  text: string | null | undefined,
+): boolean {
+  const body = (text ?? "").replace(/\r\n/g, "\n");
+  if (!body.trim()) return false;
+  if (FUSED_MISC_OPENING_RE.test(body)) return true;
+  if (STUFFED_NOTICE_ADDRESS_RE.test(body)) return true;
+  const headings = ifToHeadingEntities(body);
+  for (let i = 0; i < headings.length; i += 1) {
+    for (let j = 0; j < headings.length; j += 1) {
+      if (i === j) continue;
+      const longer = headings[i]!;
+      const shorter = headings[j]!;
+      if (
+        longer.length > shorter.length &&
+        longer.toLowerCase().includes(shorter.toLowerCase())
+      ) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 /**
  * Certified Review only. Never project / reconstruct from a leftover blob.
- * Callers must pass the accepted snapshot or verified commercial display.
+ * Callers must pass the accepted snapshot, verified commercial display, or
+ * Review-paint SoT. Leftover fused Notices is never certified.
  */
 export function resolveCertifiedReviewCorpusForSigningSeed(
   certified: string | null | undefined,
 ): string {
-  return longNonTemplateCorpus(certified);
+  const picked = longNonTemplateCorpus(certified);
+  if (!picked) return "";
+  if (reviewCorpusLooksLikeLeftoverFusedNotices(picked)) return "";
+  return picked;
 }
 
 /**

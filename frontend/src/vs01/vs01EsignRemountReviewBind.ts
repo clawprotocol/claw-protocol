@@ -1,9 +1,11 @@
 /**
  * ANY entry to a persist's esign packet must not paint a leftover version
- * when a certified Review exists (verified commercial display / accepted
- * snapshot / persist Review GET). Never seed premium/server_full_document_text
- * or a reconstructed-from-stale-blob body. If certified Review cannot be
- * resolved, fail closed — do not seed leftover. Same persist / same vs01 id.
+ * when a certified Review exists (Review-paint SoT / paid Pro accepted
+ * display / verified commercial display / accepted snapshot / persist Review
+ * GET). Never seed premium/server_full_document_text or leftover fused
+ * Notices. Fail-closed-without-replace is not allowed while leftover fused
+ * GET /content is on screen and Review-paint SoT exists. Same persist /
+ * same vs01 id.
  */
 
 import type { AgreementDraft } from "../agreement/agreementTypes";
@@ -27,14 +29,23 @@ import {
   hydrateCommercialReviewFromServerSnapshot,
   readVerifiedCommercialDisplayCorpus,
 } from "../agreement/canonicalReviewSnapshotApi";
+import { getAcceptedPremiumDisplayText } from "../components/agreements/acceptedPremiumCanonicalCorpus";
+import { resolvePaidProFirstReviewVisibleDisplayPlain } from "../components/agreements/paidProFirstReviewDisplayAuthority";
+import { resolvePaidProReviewSessionAuthorityPaintPlain } from "../components/agreements/paidProReviewSessionAuthority";
 import {
-  FIRST_FAILING_LEFTOVER_FUSED_FALLBACK_PREDICATE,
+  getPaidProSourceOfTruthText,
+  hasPaidProSourceOfTruth,
+} from "../components/agreements/paidProSourceOfTruth";
+import { resolveCanonicalPlainForVisibleShell } from "../components/agreements/paidProVisibleDocumentShell";
+import {
+  FIRST_FAILING_LEFTOVER_GET_CONTENT_PAINTED_PREDICATE,
   readAcceptedReviewCorpusFromDraftLike,
   resolveCertifiedReviewCorpusForSigningSeed,
 } from "./vs01CurrentReviewSotForSeed";
 
 export {
   FIRST_FAILING_LEFTOVER_FUSED_FALLBACK_PREDICATE,
+  FIRST_FAILING_LEFTOVER_GET_CONTENT_PAINTED_PREDICATE,
   FIRST_FAILING_NON_CERTIFIED_REVIEW_SEED_PREDICATE,
   FIRST_FAILING_STALE_REVIEW_SNAPSHOT_SEED_PREDICATE,
 } from "./vs01CurrentReviewSotForSeed";
@@ -145,14 +156,71 @@ async function defaultFetchPersistReviewGet(agreementId: string): Promise<string
   return "";
 }
 
+/** Persist leftover is Review-paint input only — never the seed body. */
+function persistPlainForReviewPaintInput(draft: AgreementDraft | null | undefined): string {
+  if (!draft) return "";
+  const rec = draft as unknown as Record<string, unknown>;
+  for (const key of [
+    "premium_full_document_text",
+    "server_full_document_text",
+    "premium_server_full_document_text",
+    "document_text",
+  ] as const) {
+    const v = String(rec[key] ?? "").trim();
+    if (v.length >= VS01_SIGNING_CORPUS_MIN_LEN && !isNonBindingDraftTemplateCorpus(v)) {
+      return v;
+    }
+  }
+  return "";
+}
+
+/**
+ * Paid Pro accepted display / the text Review already showed.
+ * Leftover fused persist is paint input only; leftover is never returned as SoT.
+ */
+function defaultFetchReviewPaintSot(
+  agreementId: string,
+  draft?: AgreementDraft | null,
+): string {
+  const sot = hasPaidProSourceOfTruth() ? getPaidProSourceOfTruthText().trim() : "";
+  const display = getAcceptedPremiumDisplayText().trim();
+  const authority = resolvePaidProReviewSessionAuthorityPaintPlain()?.plain ?? "";
+  const verified = (readVerifiedCommercialDisplayCorpus(agreementId)?.corpusPlain ?? "").trim();
+  for (const candidate of [sot, display, authority, verified]) {
+    const certified = certifiedPlainOrEmpty(candidate);
+    if (certified) return certified;
+  }
+
+  const paintInput =
+    certifiedPlainOrEmpty(sot) ||
+    certifiedPlainOrEmpty(display) ||
+    certifiedPlainOrEmpty(authority) ||
+    certifiedPlainOrEmpty(verified) ||
+    persistPlainForReviewPaintInput(draft);
+
+  const paintArgs = {
+    agreementId,
+    draft: draft as never,
+    paidProActive: true,
+    premiumCheckoutCompleted: true,
+    acceptedCanonicalPlain: paintInput || undefined,
+  };
+  const painted = certifiedPlainOrEmpty(
+    resolvePaidProFirstReviewVisibleDisplayPlain(paintArgs).plain,
+  );
+  if (painted) return painted;
+  return certifiedPlainOrEmpty(resolveCanonicalPlainForVisibleShell(paintArgs).plain);
+}
+
 /**
  * Inspect GET /content and POST vs01-signing-seed with the persist Review
  * corpus when the painted blob is not that SoT. Same persist; prefer same vs01 id.
  * Leftover remount with an empty Incognito session still resolves agreement_id
  * from GET /v1/documents/{id} and loads the persist draft — do not skip.
  * When a certified Review exists, write only that corpus. Empty first
- * accepted-snapshot read is not leftover — keep resolving. Unresolved
- * certified Review fails closed (no leftover seed).
+ * accepted-snapshot read is not leftover — keep resolving Review-paint SoT
+ * until that corpus is in hand. Fail-closed only when Review-paint SoT
+ * truly does not exist. Leftover fused blob is never the seed body.
  */
 export async function ensureReviewCorpusOnEsignEntry(args: {
   documentId: string;
@@ -166,6 +234,7 @@ export async function ensureReviewCorpusOnEsignEntry(args: {
   fetchDraft?: (agreementId: string) => Promise<AgreementDraft | null>;
   fetchAcceptedReviewCorpus?: (agreementId: string) => Promise<string | null>;
   fetchPersistReviewGet?: (agreementId: string) => Promise<string | null>;
+  fetchReviewPaintSot?: (agreementId: string) => Promise<string | null>;
   signingCorpusSource?: string | null;
 }): Promise<
   | BindReviewCorpusResult
@@ -209,8 +278,8 @@ export async function ensureReviewCorpusOnEsignEntry(args: {
   }
 
   // First accepted-snapshot read may be empty on leftover Incognito remount.
-  // Keep resolving certified Review (hydrate / verified display / persist GET).
-  // Never fall back to premium/server/handoff leftover.
+  // Keep resolving Review-paint SoT (paid Pro accepted display / the text
+  // Review already showed). Never treat leftover fused as certified.
   let certifiedReviewCorpus = resolveCertifiedReviewCorpusForSigningSeed(
     readAcceptedReviewCorpusFromDraftLike(draft),
   );
@@ -233,7 +302,18 @@ export async function ensureReviewCorpusOnEsignEntry(args: {
     }
   }
   if (!certifiedReviewCorpus) {
-    return { ok: false, reason: FIRST_FAILING_LEFTOVER_FUSED_FALLBACK_PREDICATE };
+    try {
+      certifiedReviewCorpus = certifiedPlainOrEmpty(
+        args.fetchReviewPaintSot
+          ? await args.fetchReviewPaintSot(agreementId)
+          : defaultFetchReviewPaintSot(agreementId, draft),
+      );
+    } catch {
+      certifiedReviewCorpus = "";
+    }
+  }
+  if (!certifiedReviewCorpus) {
+    return { ok: false, reason: FIRST_FAILING_LEFTOVER_GET_CONTENT_PAINTED_PREDICATE };
   }
 
   return bindReviewCorpusOntoSeededVs01Document({
