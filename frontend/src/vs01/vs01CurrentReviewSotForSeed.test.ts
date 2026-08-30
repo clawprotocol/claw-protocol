@@ -175,7 +175,29 @@ describe("esign seed writes certified Review, not a leftover fused version", () 
     expect(resolveCertifiedReviewCorpusForSigningSeed(leftoverFusedReview())).toBe("");
     expect(resolveCertifiedReviewCorpusForSigningSeed(certifiedReview())).toBe(certifiedReview());
     expect(persistReviewGetPlainForSigningSeed(certifiedReview())).toBe(certifiedReview());
-    expect(persistReviewGetPlainForSigningSeed(leftoverFusedReview())).toBe("");
+    // Persist Review GET 200 is the replace body — do not leftover-filter it empty.
+    expect(persistReviewGetPlainForSigningSeed(leftoverFusedReview())).toBe(leftoverFusedReview());
+    expect(
+      reviewCorpusLooksLikeLeftoverFusedNotices(
+        [
+          "12. NOTICES",
+          "If to Alpha Workshop:",
+          "Address: 100 Workshop Lane 2. TERM This Agreement commences Upon full execution by the parties unless otherwise specified and continues for 30 days.",
+          "13. MISCELLANEOUS",
+          "Notices are effective 30 days after delivery.",
+        ].join("\n"),
+      ),
+    ).toBe(false);
+  });
+
+  it("persist Review snapshot with Notices Address plus later Term/Misc is not leftover-filtered empty", () => {
+    const persistReview = certifiedReview();
+    expect(persistReview).toMatch(/Address:/);
+    expect(persistReview).toMatch(/Upon full execution by the parties unless otherwise specified/);
+    expect(persistReview).toMatch(/30 days/);
+    expect(reviewCorpusLooksLikeLeftoverFusedNotices(persistReview)).toBe(false);
+    expect(persistReviewGetPlainForSigningSeed(persistReview)).toBe(persistReview);
+    expect(persistReviewGetPlainForSigningSeed(persistReview)).not.toBe("");
   });
 
   it("uses certified Review as-is and does not project leftover into it", () => {
@@ -672,7 +694,7 @@ describe("esign seed writes certified Review, not a leftover fused version", () 
     expect(String(seed.mock.calls[0][2] ?? "")).not.toBe(leftover);
   });
 
-  it("leftover remount + leftover GET /content 200 + persist Review GET 200 seeds persist Review", async () => {
+  it("leftover remount + leftover GET /content 200 + persist Review GET 200 seeds persist Review and leftover fused is never seed", async () => {
     const certified = certifiedReview();
     const leftover = leftoverFusedReview();
     const seed = vi.fn().mockResolvedValue({
@@ -714,6 +736,74 @@ describe("esign seed writes certified Review, not a leftover fused version", () 
     expect(String(seed.mock.calls[0][2] ?? "")).not.toMatch(
       /Address:\s*30 days, Upon full execution by the parties unless otherwise specified/i,
     );
+  });
+
+  it("leftover remount + leftover GET 200 + persist Review GET with Address plus later Term seeds persist Review", async () => {
+    const persistReview = certifiedReview();
+    const leftover = leftoverFusedReview();
+    const seed = vi.fn().mockResolvedValue({
+      ok: true,
+      documentId: SEEDED_DOC,
+      contentSha256: "15".repeat(32),
+    });
+    const persistGet = vi.fn().mockResolvedValue(persistReview);
+    const bound = await ensureReviewCorpusOnEsignEntry({
+      documentId: SEEDED_DOC,
+      agreementId: AGREEMENT_ID,
+      reviewCorpus: leftover,
+      existingBridgeCorpus: leftover,
+      seed,
+      fetchContent: async () => leftover,
+      fetchAcceptedReviewCorpus: async () => "",
+      fetchPersistReviewGet: persistGet,
+      fetchReviewPaintSot: async () => "",
+      fetchDraft: async () =>
+        ({
+          id: AGREEMENT_ID,
+          title: "Services Agreement",
+          premium_full_document_text: leftover,
+          server_full_document_text: leftover,
+        }) as never,
+    });
+    expect(persistGet).toHaveBeenCalledWith(AGREEMENT_ID);
+    expect(bound.ok).toBe(true);
+    if (!bound.ok || "skipped" in bound) return;
+    expect(bound.replaced).toBe(true);
+    expect(bound.documentId).toBe(SEEDED_DOC);
+    expect(bound.reviewCorpus).toBe(persistReview);
+    expect(seed).toHaveBeenCalledTimes(1);
+    expect(seed.mock.calls[0][0]).toBe(AGREEMENT_ID);
+    expect(seed.mock.calls[0][2]).toBe(persistReview);
+    expect(seed.mock.calls[0][4]).toBe(SEEDED_DOC);
+    expect(String(seed.mock.calls[0][2] ?? "")).not.toBe(leftover);
+    expect(String(seed.mock.calls[0][2] ?? "")).not.toMatch(/If to Alpha Workshop Beta Counsel LLC/i);
+  });
+
+  it("fail-closed only when persist Review GET is truly missing", async () => {
+    const leftover = leftoverFusedReview();
+    const seed = vi.fn();
+    const bound = await ensureReviewCorpusOnEsignEntry({
+      documentId: SEEDED_DOC,
+      agreementId: AGREEMENT_ID,
+      reviewCorpus: leftover,
+      existingBridgeCorpus: leftover,
+      seed,
+      fetchContent: async () => leftover,
+      fetchAcceptedReviewCorpus: async () => "",
+      fetchPersistReviewGet: async () => "",
+      fetchReviewPaintSot: async () => "",
+      fetchDraft: async () =>
+        ({
+          id: AGREEMENT_ID,
+          title: "Services Agreement",
+          premium_full_document_text: leftover,
+          server_full_document_text: leftover,
+        }) as never,
+    });
+    expect(bound.ok).toBe(false);
+    if (bound.ok) return;
+    expect(bound.reason).toBe(FIRST_FAILING_LEFTOVER_GET_CONTENT_PAINTS_BEFORE_PERSIST_REVIEW_REPLACE);
+    expect(seed).not.toHaveBeenCalled();
   });
 
   it("leftover remount bind never picks leftover draft/bridge/handoff as seed SoT", () => {

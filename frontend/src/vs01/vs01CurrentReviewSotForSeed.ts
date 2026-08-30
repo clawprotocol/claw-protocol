@@ -66,7 +66,8 @@ const FUSED_MISC_OPENING_RE =
 /** Leftover stuffed Address is the Address *field*, not a later Term/Misc clause. */
 const STUFFED_NOTICE_TERM_RE =
   /(?:30\s*-?\s*days?|Upon full execution by the parties unless otherwise specified)/i;
-const ADDRESS_FIELD_CUT_RE = /(?:^\s*\d+\.\s+[A-Za-z]|\n\s*\d+\.\s+[A-Za-z]|If to\s+)/i;
+const ADDRESS_FIELD_CUT_RE =
+  /(?:^\s*\d+\.\s+[A-Za-z]|\n\s*\d+\.\s+[A-Za-z]|\s+\d+\.\s+[A-Za-z]|If to\s+|This Agreement commences|Notices are effective)/i;
 const ADDRESS_FIELD_WINDOW = 80;
 
 function addressFieldIsStuffedLeftover(body: string): boolean {
@@ -179,13 +180,15 @@ export function resolveCertifiedReviewCorpusForSigningSeed(
 
 /**
  * Persist Review GET (canonical-review-snapshot) is the Review-paint corpus.
- * Do not leftover-filter it — #150 Address widen classified that snapshot as
- * leftover and swallowed seed. Leftover fused GET /content is never this body.
+ * Do not leftover-filter it into empty — leftover detector is for GET /content
+ * packet bytes. Notices Address: plus later Term/Misc "30 days" / "Upon full
+ * execution" is persist Review, not leftover. Leftover fused GET /content is
+ * never this body.
  */
 export function persistReviewGetPlainForSigningSeed(
   persistReviewGet: string | null | undefined,
 ): string {
-  return resolveCertifiedReviewCorpusForSigningSeed(persistReviewGet);
+  return longNonTemplateCorpus(persistReviewGet);
 }
 
 /**

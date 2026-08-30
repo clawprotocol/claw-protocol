@@ -140,7 +140,7 @@ def api_get_document_content(document_id: str, request: Request) -> Response:
         raw, meta = load_document_content(did)
         if raw is None:
             raise HTTPException(status_code=404, detail="document_not_found")
-        if leftover_get_content_must_refuse(raw, meta):
+        if leftover_get_content_must_refuse(raw, meta, document_id=did):
             return JSONResponse(
                 status_code=409,
                 content={

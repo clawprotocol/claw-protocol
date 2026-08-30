@@ -56,5 +56,7 @@ describe("Vs01Wizard agreement bridge (static)", () => {
     expect(s).toContain("persistReviewCorpus");
     expect(s).toContain("leftoverGetContentRefuseFromError(e) && persistReviewCorpus");
     expect(s).toMatch(/if \(reviewCorpusLooksLikeLeftoverFusedNotices\(painted\)\)[\s\S]*if \(persistReviewCorpus\)/);
+    expect(s).toMatch(/if \(bound && !bound\.ok\)[\s\S]*if \(persistReviewCorpus\)[\s\S]*setError\(null\)/);
+    expect(s).toContain("Fail-closed toast only when persist Review truly does not exist");
   });
 });

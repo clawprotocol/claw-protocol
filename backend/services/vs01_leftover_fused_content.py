@@ -36,7 +36,8 @@ _STUFFED_NOTICE_TERM_RE = re.compile(
 )
 _ADDRESS_LABEL_RE = re.compile(r"Address:", re.IGNORECASE)
 _ADDRESS_FIELD_CUT_RE = re.compile(
-    r"(?:^\s*\d+\.\s+[A-Za-z]|\n\s*\d+\.\s+[A-Za-z]|If to\s+)",
+    r"(?:^\s*\d+\.\s+[A-Za-z]|\n\s*\d+\.\s+[A-Za-z]|\s+\d+\.\s+[A-Za-z]"
+    r"|If to\s+|This Agreement commences|Notices are effective)",
     re.IGNORECASE,
 )
 _IF_TO_HEADING_RE = re.compile(r"If to\s+(.+?)\s*:", re.IGNORECASE)
@@ -185,17 +186,50 @@ def certified_persist_review_plain(text: str | None) -> str:
     return plain
 
 
+def _agreement_id_from_meta_or_artifact(
+    meta: Optional[Dict[str, Any]],
+    document_id: str | None = None,
+) -> str:
+    """Same agreement identity already bound to this vs01 document — never a second id."""
+    if isinstance(meta, dict):
+        aid = str(meta.get("agreement_id") or "").strip()
+        if aid:
+            return aid
+    did = (document_id or "").strip()
+    if not did:
+        return ""
+    try:
+        from backend.storage.artifact_repository import get_artifact_repository
+
+        rec = get_artifact_repository().get_latest_by_logical_ref(
+            artifact_type="vs01_document",
+            logical_ref=did,
+        )
+        if rec is not None and rec.agreement_id:
+            return str(rec.agreement_id).strip()
+    except Exception:
+        return ""
+    return ""
+
+
 def leftover_get_content_must_refuse(
     raw: bytes | None,
     meta: Optional[Dict[str, Any]] = None,
+    document_id: str | None = None,
 ) -> bool:
-    """True when leftover fused GET /content would paint and persist Review exists."""
+    """True when leftover fused GET /content would paint and persist Review exists.
+
+    Do not assume extract already classifies leftover. Search extract and raw
+    UTF-8. Matching certified Review GET /content stays a 200.
+    """
     extracted = extract_plain_from_document_bytes(raw)
-    if not review_corpus_looks_like_leftover_fused_notices(extracted):
+    raw_plain = (raw or b"").decode("utf-8", errors="ignore").replace("\x00", "")
+    leftover_looking = review_corpus_looks_like_leftover_fused_notices(
+        extracted
+    ) or review_corpus_looks_like_leftover_fused_notices(raw_plain)
+    if not leftover_looking:
         return False
-    agreement_id = ""
-    if isinstance(meta, dict):
-        agreement_id = str(meta.get("agreement_id") or "").strip()
+    agreement_id = _agreement_id_from_meta_or_artifact(meta, document_id)
     if not persist_review_exists_for_agreement(agreement_id):
         return False
     _log.info(

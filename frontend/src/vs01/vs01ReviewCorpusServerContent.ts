@@ -385,10 +385,11 @@ export async function bindReviewCorpusOntoSeededVs01Document(args: {
   }
 
   const replaceId = existingDocumentId.startsWith("doc_") ? existingDocumentId : null;
+  // Persist Review GET is the replace body. Do not leftover-filter it out of
+  // the seed POST — leftover fused GET /content is never this corpus.
   const seedCorpus =
     reviewCorpus.length >= VS01_SIGNING_CORPUS_MIN_LEN &&
-    !isNonBindingDraftTemplateCorpus(reviewCorpus) &&
-    !reviewCorpusLooksLikeLeftoverFusedNotices(reviewCorpus)
+    !isNonBindingDraftTemplateCorpus(reviewCorpus)
       ? reviewCorpus
       : null;
   const seeded = await args.seed(

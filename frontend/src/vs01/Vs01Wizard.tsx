@@ -816,10 +816,16 @@ export function Vs01Wizard({
           }
           if (bound && !bound.ok) {
             if (cancelled) return;
-            // Fail-closed only when persist Review truly does not exist.
-            // Leftover on the packet is not a load-error success path.
-            setError("Could not load this document. Check the link or start a new packet.");
-            return;
+            // Fail-closed toast only when persist Review truly does not exist.
+            // Leftover GET /content on the packet is not a load-error success
+            // path. persistReviewCorpus is set on bind.ok so the leftover-200
+            // / leftover-refuse paint path can replace before toast.
+            if (persistReviewCorpus) {
+              setError(null);
+            } else {
+              setError("Could not load this document. Check the link or start a new packet.");
+              return;
+            }
           }
         } catch {
           /* stay on placement; do not eject */

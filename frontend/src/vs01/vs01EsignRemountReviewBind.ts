@@ -315,9 +315,15 @@ export async function ensureReviewCorpusOnEsignEntry(args: {
   }
   if (!certifiedReviewCorpus) {
     try {
-      certifiedReviewCorpus = persistReviewGetPlainForSigningSeed(
+      const persistPlain = persistReviewGetPlainForSigningSeed(
         await (args.fetchPersistReviewGet ?? defaultFetchPersistReviewGet)(agreementId),
       );
+      // Persist Review GET 200 is the replace body. Leftover-filter only a
+      // leftover fused snapshot (concatenated If-to / stuffed Address field /
+      // fused Misc). Notices Address: plus later Term/Misc is persist Review.
+      certifiedReviewCorpus = reviewCorpusLooksLikeLeftoverFusedNotices(persistPlain)
+        ? ""
+        : persistPlain;
     } catch {
       certifiedReviewCorpus = "";
     }
@@ -344,9 +350,9 @@ export async function ensureReviewCorpusOnEsignEntry(args: {
         : FIRST_FAILING_LEFTOVER_GET_CONTENT_STILL_PAINTS_PREDICATE,
     };
   }
-  if (leftoverFusedOnPacket && reviewCorpusLooksLikeLeftoverFusedNotices(certifiedReviewCorpus)) {
-    return { ok: false, reason: FIRST_FAILING_LEFTOVER_GET_CONTENT_PAINTS_BEFORE_PERSIST_REVIEW_REPLACE };
-  }
+  // Persist Review GET 200 is the replace body. Do not leftover-filter that
+  // snapshot into empty / fail-closed — leftover fused GET /content is never
+  // this seed. Bind even when leftover detector false-positives persist Review.
 
   const bound = await bindReviewCorpusOntoSeededVs01Document({
     agreementId,

@@ -64,6 +64,23 @@ def _certified_review() -> str:
     ).strip()
 
 
+def _leftover_story_pdf_bytes() -> bytes | None:
+    """Production leftover packet: fitz Story render of leftover fused Notices."""
+    try:
+        from backend.services.agreement_vs01_pdf_seed import agreement_rendered_html_to_pdf_bytes
+    except Exception:
+        return None
+    html = "<pre>" + _leftover_fused().replace("&", "&amp;").replace("<", "&lt;") + "</pre>"
+    try:
+        built = agreement_rendered_html_to_pdf_bytes(html, title="Services Agreement")
+    except Exception:
+        return None
+    raw = built.pdf_bytes
+    if not raw or not raw.startswith(b"%PDF"):
+        return None
+    return raw
+
+
 def _leftover_fused() -> str:
     return (
         "\n".join(
@@ -131,6 +148,16 @@ def test_leftover_detector_is_generic_and_misses_certified_review():
     assert review_corpus_looks_like_leftover_fused_notices(leftover) is True
     assert review_corpus_looks_like_leftover_fused_notices(glued) is True
     assert review_corpus_looks_like_leftover_fused_notices(certified) is False
+    compact_persist_review = (
+        "12. NOTICES\n"
+        "If to Alpha Workshop:\n"
+        "Address: 100 Workshop Lane 2. TERM This Agreement commences "
+        "Upon full execution by the parties unless otherwise specified "
+        "and continues for 30 days.\n"
+        "13. MISCELLANEOUS\n"
+        "Notices are effective 30 days after delivery."
+    )
+    assert review_corpus_looks_like_leftover_fused_notices(compact_persist_review) is False
     stuffed_blob = (
         "If to Beta Counsel LLC:\n"
         "Address: User-stated material terms:, 30-day term, Texas governing law"
@@ -157,11 +184,17 @@ def test_refuse_only_when_leftover_and_persist_review_exists(monkeypatch):
     assert leftover_get_content_must_refuse(leftover, {"agreement_id": "ag_persist"}) is True
     assert leftover_get_content_must_refuse(leftover_pdf, {"agreement_id": "ag_persist"}) is True
     assert leftover_get_content_must_refuse(certified, {"agreement_id": "ag_persist"}) is False
+    leftover_story = _leftover_story_pdf_bytes()
+    assert leftover_story is not None
+    assert leftover_story.startswith(b"%PDF")
+    assert leftover_get_content_must_refuse(leftover_story, {"agreement_id": "ag_persist"}) is True
     monkeypatch.setattr(
         "backend.services.vs01_leftover_fused_content.persist_review_exists_for_agreement",
         lambda _aid: False,
     )
     assert leftover_get_content_must_refuse(leftover, {"agreement_id": "ag_empty"}) is False
+    assert leftover_get_content_must_refuse(leftover_story, {"agreement_id": "ag_empty"}) is False
+    assert leftover_get_content_must_refuse(leftover_story, {"agreement_id": ""}) is False
 
 
 def _create_agreement(client) -> str:
