@@ -191,6 +191,36 @@ export function persistReviewGetPlainForSigningSeed(
   return longNonTemplateCorpus(persistReviewGet);
 }
 
+function looksUnreadablePacketExtract(text: string): boolean {
+  const t = text.trim();
+  if (!t) return true;
+  if (t.startsWith("%PDF")) return true;
+  const letters = (t.match(/[A-Za-z]/g) ?? []).length;
+  return t.length >= 64 && letters / t.length < 0.2;
+}
+
+/**
+ * GET /content packet identity vs persist Review. Digest / collapsed-whitespace
+ * containment only — do not leftover-text-classify packet bytes.
+ */
+export function packetPlainMatchesPersistReviewCorpus(
+  packetPlain: string | null | undefined,
+  persistReview: string | null | undefined,
+): boolean {
+  const persist = persistReviewGetPlainForSigningSeed(persistReview);
+  const packet = (packetPlain ?? "").trim();
+  if (!persist || !packet) return false;
+  if (looksUnreadablePacketExtract(packet)) return false;
+  const persistNorm = persist.replace(/\s+/g, " ").toLowerCase();
+  const packetNorm = packet.replace(/\s+/g, " ").toLowerCase();
+  if (persistNorm === packetNorm) return true;
+  if (persistNorm.length >= 200 && packetNorm.includes(persistNorm)) return true;
+  if (packetNorm.length >= VS01_SIGNING_CORPUS_MIN_LEN && persistNorm.includes(packetNorm)) {
+    return true;
+  }
+  return false;
+}
+
 /**
  * First long non-template candidate, as-is. Does not fall back to a stale
  * blob and project 10/11/12/13 onto it. When a certified Review is present,

@@ -297,7 +297,7 @@ export type BindReviewCorpusResult =
       contentSha256: string | null;
       reviewCorpus?: string;
     }
-  | { ok: false; reason: string };
+  | { ok: false; reason: string; persistReviewCorpus?: string };
 
 /**
  * Inspect GET /content for the seeded vs01 id. When it is not the Review

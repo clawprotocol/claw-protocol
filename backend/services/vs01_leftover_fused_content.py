@@ -1,13 +1,15 @@
-"""Refuse leftover fused GET /content when persist Review exists.
+"""Refuse leftover GET /content when persist Review exists.
 
-Leftover remount must not hand off stale fused packet bytes (concatenated
-If-to, stuffed Address, fused Misc) as a successful GET /content paint.
-When persist Review GET (accepted / pending canonical-review-snapshot) exists,
-leftover fused is never a 200.
+Leftover remount must not hand off leftover packet bytes as a successful
+GET /content paint. Refuse because those bytes are not the persist Review
+corpus for this document's agreement_id (meta or artifact). Do not decide
+leftover by leftover-text classification of extract / raw UTF-8. Matching
+certified Review GET /content stays a 200.
 """
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import re
 from typing import Any, Dict, Optional
@@ -162,17 +164,27 @@ def persist_review_corpus_from_draft(draft: Any) -> str:
     return ""
 
 
-def persist_review_exists_for_agreement(agreement_id: str) -> bool:
+def persist_review_plain_for_agreement(agreement_id: str) -> str:
+    """Persist Review GET body for this agreement — never leftover-text filtered."""
     aid = (agreement_id or "").strip()
     if not aid:
-        return False
+        return ""
     try:
         from backend.services.agreement_draft_store import load_draft
 
         draft = load_draft(aid)
     except Exception:
-        return False
-    return bool(persist_review_corpus_from_draft(draft).strip())
+        return ""
+    plain = persist_review_corpus_from_draft(draft).strip()
+    if len(plain) < _SIGNING_CORPUS_MIN_LEN:
+        return ""
+    if _NON_BINDING_TEMPLATE_BANNER_RE.search(plain):
+        return ""
+    return plain
+
+
+def persist_review_exists_for_agreement(agreement_id: str) -> bool:
+    return bool(persist_review_plain_for_agreement(agreement_id))
 
 
 def certified_persist_review_plain(text: str | None) -> str:
@@ -212,25 +224,77 @@ def _agreement_id_from_meta_or_artifact(
     return ""
 
 
+def _ws_collapse(text: str) -> str:
+    return re.sub(r"\s+", " ", (text or "").strip()).lower()
+
+
+def _looks_unreadable_extract(text: str) -> bool:
+    t = (text or "").strip()
+    if not t:
+        return True
+    if t.startswith("%PDF"):
+        return True
+    letters = sum(1 for ch in t if ch.isalpha())
+    return len(t) >= 64 and letters / len(t) < 0.2
+
+
+def _sha256_text(text: str) -> str:
+    return hashlib.sha256((text or "").encode("utf-8")).hexdigest()
+
+
+def packet_is_persist_review_corpus(raw: bytes | None, persist_plain: str | None) -> bool:
+    """True when GET /content packet bytes are this agreement's persist Review.
+
+    Identity only — digest or collapsed-whitespace containment. Do not decide
+    leftover by leftover-text classification of extract / raw UTF-8.
+    """
+    persist = (persist_plain or "").strip()
+    if len(persist) < _SIGNING_CORPUS_MIN_LEN:
+        return False
+    persist_norm = _ws_collapse(persist)
+    persist_digest = _sha256_text(persist)
+    persist_norm_digest = _sha256_text(persist_norm)
+    extracted = extract_plain_from_document_bytes(raw)
+    raw_plain = (raw or b"").decode("utf-8", errors="ignore").replace("\x00", "")
+    for candidate in (extracted, raw_plain):
+        cand = (candidate or "").strip()
+        if not cand or _looks_unreadable_extract(cand):
+            continue
+        if _sha256_text(cand) == persist_digest:
+            return True
+        cand_norm = _ws_collapse(cand)
+        if _sha256_text(cand_norm) == persist_norm_digest:
+            return True
+        if persist_norm and persist_norm in cand_norm:
+            return True
+        if (
+            cand_norm
+            and len(cand_norm) >= _SIGNING_CORPUS_MIN_LEN
+            and cand_norm in persist_norm
+        ):
+            return True
+    return False
+
+
 def leftover_get_content_must_refuse(
     raw: bytes | None,
     meta: Optional[Dict[str, Any]] = None,
     document_id: str | None = None,
 ) -> bool:
-    """True when leftover fused GET /content would paint and persist Review exists.
+    """True when GET /content packet is not persist Review and persist Review exists.
 
-    Do not assume extract already classifies leftover. Search extract and raw
-    UTF-8. Matching certified Review GET /content stays a 200.
+    Refuse leftover packet bytes because they are not the persist Review corpus
+    for this document's agreement_id (meta or artifact). Do not decide leftover
+    by leftover-text classification of extract / raw UTF-8 — a compressed
+    leftover PDF can extract without leftover fused markers. Matching certified
+    Review GET /content stays a 200. Leftover 200 is FAIL when persist Review
+    exists.
     """
-    extracted = extract_plain_from_document_bytes(raw)
-    raw_plain = (raw or b"").decode("utf-8", errors="ignore").replace("\x00", "")
-    leftover_looking = review_corpus_looks_like_leftover_fused_notices(
-        extracted
-    ) or review_corpus_looks_like_leftover_fused_notices(raw_plain)
-    if not leftover_looking:
-        return False
     agreement_id = _agreement_id_from_meta_or_artifact(meta, document_id)
-    if not persist_review_exists_for_agreement(agreement_id):
+    persist_plain = persist_review_plain_for_agreement(agreement_id)
+    if not persist_plain:
+        return False
+    if packet_is_persist_review_corpus(raw, persist_plain):
         return False
     _log.info(
         "[vs01-leftover-get-content-refuse] agreement_id=%s size_bytes=%s predicate=%s",

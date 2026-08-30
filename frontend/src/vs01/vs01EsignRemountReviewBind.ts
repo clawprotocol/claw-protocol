@@ -46,6 +46,15 @@ import {
   reviewCorpusLooksLikeLeftoverFusedNotices,
 } from "./vs01CurrentReviewSotForSeed";
 
+export { persistReviewGetPlainForSigningSeed } from "./vs01CurrentReviewSotForSeed";
+
+/** Fail-closed toast only when persist Review truly does not exist. */
+export function leftoverRemountShouldFailClosedToast(
+  persistReviewCorpus: string | null | undefined,
+): boolean {
+  return !persistReviewGetPlainForSigningSeed(persistReviewCorpus);
+}
+
 export {
   FIRST_FAILING_LEFTOVER_FUSED_FALLBACK_PREDICATE,
   FIRST_FAILING_LEFTOVER_GET_CONTENT_PAINTED_PREDICATE,
@@ -290,17 +299,9 @@ export async function ensureReviewCorpusOnEsignEntry(args: {
     }
   }
 
-  const painted = await inspectSeededDocumentServerContent(
-    documentId,
-    args.fetchContent ?? fetchDocumentContent,
-  );
-  const leftoverFusedOnPacket =
-    painted.leftoverRefused || reviewCorpusLooksLikeLeftoverFusedNotices(painted.plain);
-
-  // First accepted-snapshot read may be empty on leftover Incognito remount.
-  // Persist Review GET is the same path Review already painted. Empty
-  // Incognito Review-paint session is not leftover and is not fail-closed.
-  // Never treat leftover fused as certified.
+  // Resolve persist Review before leftover GET /content. Do not inspect
+  // leftover GET as a success path while persist Review is still pending.
+  // Persist Review GET 200 is the replace body — do not leftover-filter it.
   let certifiedReviewCorpus = resolveCertifiedReviewCorpusForSigningSeed(
     readAcceptedReviewCorpusFromDraftLike(draft),
   );
@@ -315,15 +316,9 @@ export async function ensureReviewCorpusOnEsignEntry(args: {
   }
   if (!certifiedReviewCorpus) {
     try {
-      const persistPlain = persistReviewGetPlainForSigningSeed(
+      certifiedReviewCorpus = persistReviewGetPlainForSigningSeed(
         await (args.fetchPersistReviewGet ?? defaultFetchPersistReviewGet)(agreementId),
       );
-      // Persist Review GET 200 is the replace body. Leftover-filter only a
-      // leftover fused snapshot (concatenated If-to / stuffed Address field /
-      // fused Misc). Notices Address: plus later Term/Misc is persist Review.
-      certifiedReviewCorpus = reviewCorpusLooksLikeLeftoverFusedNotices(persistPlain)
-        ? ""
-        : persistPlain;
     } catch {
       certifiedReviewCorpus = "";
     }
@@ -339,15 +334,24 @@ export async function ensureReviewCorpusOnEsignEntry(args: {
       certifiedReviewCorpus = "";
     }
   }
+
+  const painted = await inspectSeededDocumentServerContent(
+    documentId,
+    args.fetchContent ?? fetchDocumentContent,
+  );
+  const leftoverFusedOnPacket =
+    painted.leftoverRefused || reviewCorpusLooksLikeLeftoverFusedNotices(painted.plain);
+
   if (!certifiedReviewCorpus) {
     // Leftover on screen is not a pass. Fail-closed only when persist Review
-    // truly does not exist. Leftover refuse / unreadable leftover extract is
-    // not a reason to paint leftover GET /content.
+    // truly does not exist. Leftover refuse / leftover packet that leftover-
+    // text misses is not a reason to paint leftover GET /content.
     return {
       ok: false,
       reason: leftoverFusedOnPacket
         ? FIRST_FAILING_LEFTOVER_GET_CONTENT_PAINTS_BEFORE_PERSIST_REVIEW_REPLACE
         : FIRST_FAILING_LEFTOVER_GET_CONTENT_STILL_PAINTS_PREDICATE,
+      persistReviewCorpus: "",
     };
   }
   // Persist Review GET 200 is the replace body. Do not leftover-filter that
@@ -366,8 +370,12 @@ export async function ensureReviewCorpusOnEsignEntry(args: {
   });
   if (!bound.ok) {
     return leftoverFusedOnPacket
-      ? { ok: false, reason: FIRST_FAILING_LEFTOVER_GET_CONTENT_PAINTS_BEFORE_PERSIST_REVIEW_REPLACE }
-      : bound;
+      ? {
+          ok: false,
+          reason: FIRST_FAILING_LEFTOVER_GET_CONTENT_PAINTS_BEFORE_PERSIST_REVIEW_REPLACE,
+          persistReviewCorpus: certifiedReviewCorpus,
+        }
+      : { ...bound, persistReviewCorpus: certifiedReviewCorpus };
   }
   return { ...bound, reviewCorpus: certifiedReviewCorpus };
 }

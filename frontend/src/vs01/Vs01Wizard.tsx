@@ -38,12 +38,18 @@ import {
   type AgreementVs01BridgeSession,
 } from "../launch/simpleProduct/agreementToVs01SigningBridge";
 import { resolvePrepareBridgeSigningCorpus } from "./vs01PrepareBridgeCorpus";
-import { ensureReviewCorpusOnEsignEntry } from "./vs01EsignRemountReviewBind";
+import {
+  ensureReviewCorpusOnEsignEntry,
+  leftoverRemountShouldFailClosedToast,
+} from "./vs01EsignRemountReviewBind";
 import {
   extractPlainTextFromDocumentContent,
   leftoverGetContentRefuseFromError,
 } from "./vs01ReviewCorpusServerContent";
-import { reviewCorpusLooksLikeLeftoverFusedNotices } from "./vs01CurrentReviewSotForSeed";
+import {
+  packetPlainMatchesPersistReviewCorpus,
+  reviewCorpusLooksLikeLeftoverFusedNotices,
+} from "./vs01CurrentReviewSotForSeed";
 import { VS01_SIGNING_CORPUS_MIN_LEN } from "./vs01SigningCorpus";
 import { fingerprintAgreementBody } from "../components/agreements/guidedDealCompletion/guidedSigningPacketVersion";
 import { buildVs01CanonicalPacketSeed, hasVs01CanonicalPacketCached, storeVs01CanonicalPacketSeed } from "./vs01CanonicalPacketSeed";
@@ -811,21 +817,22 @@ export function Vs01Wizard({
       if (!sid.startsWith("local_doc_")) {
         try {
           const bound = await ensureReviewCorpusOnEsignEntry({ documentId: sid });
-          if (bound && bound.ok && !("skipped" in bound) && (bound.reviewCorpus ?? "").trim()) {
-            persistReviewCorpus = bound.reviewCorpus!.trim();
+          if (bound && !("skipped" in bound)) {
+            if (bound.ok && (bound.reviewCorpus ?? "").trim()) {
+              persistReviewCorpus = bound.reviewCorpus!.trim();
+            } else if (!bound.ok) {
+              persistReviewCorpus = (bound.persistReviewCorpus ?? "").trim();
+            }
           }
           if (bound && !bound.ok) {
             if (cancelled) return;
-            // Fail-closed toast only when persist Review truly does not exist.
-            // Leftover GET /content on the packet is not a load-error success
-            // path. persistReviewCorpus is set on bind.ok so the leftover-200
-            // / leftover-refuse paint path can replace before toast.
-            if (persistReviewCorpus) {
-              setError(null);
-            } else {
+            // Fail-closed toast only when persist Review truly does not exist
+            // (404/empty). Bind {ok:false} on leftover packet is not a toast.
+            if (leftoverRemountShouldFailClosedToast(persistReviewCorpus)) {
               setError("Could not load this document. Check the link or start a new packet.");
               return;
             }
+            setError(null);
           }
         } catch {
           /* stay on placement; do not eject */
@@ -963,7 +970,10 @@ export function Vs01Wizard({
         const blob = await fetchDocumentContent(sid);
         const buf = await blob.arrayBuffer();
         const painted = extractPlainTextFromDocumentContent(new Uint8Array(buf));
-        if (reviewCorpusLooksLikeLeftoverFusedNotices(painted)) {
+        const leftoverPacketNotPersistReview =
+          Boolean(persistReviewCorpus) &&
+          !packetPlainMatchesPersistReviewCorpus(painted, persistReviewCorpus);
+        if (leftoverPacketNotPersistReview || reviewCorpusLooksLikeLeftoverFusedNotices(painted)) {
           if (persistReviewCorpus) {
             if (cancelled) return;
             setError(null);
@@ -1206,7 +1216,9 @@ export function Vs01Wizard({
         }
         if (!leftoverGetContentRefuseFromError(e) && hydrateLocalPaidProBridge()) return;
         console.error("[Vs01Wizard] seed document load failed", e);
-        if (!cancelled) setError("Could not load this document. Check the link or start a new packet.");
+        if (!cancelled && leftoverRemountShouldFailClosedToast(persistReviewCorpus)) {
+          setError("Could not load this document. Check the link or start a new packet.");
+        }
       }
     })();
     return () => {

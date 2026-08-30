@@ -12,6 +12,7 @@ import {
   FIRST_FAILING_LEFTOVER_GET_CONTENT_PAINTS_BEFORE_PERSIST_REVIEW_REPLACE,
   FIRST_FAILING_LEFTOVER_GET_CONTENT_STILL_PAINTS_PREDICATE,
   FIRST_FAILING_NON_CERTIFIED_REVIEW_SEED_PREDICATE,
+  packetPlainMatchesPersistReviewCorpus,
   persistReviewGetPlainForSigningSeed,
   pickCurrentReviewSotForSigningSeed,
   readAcceptedReviewCorpusFromDraftLike,
@@ -19,7 +20,10 @@ import {
   reviewCorpusLooksLikeLeftoverFusedNotices,
 } from "./vs01CurrentReviewSotForSeed";
 import { resolveAgreementCorpusForPrepareHandoff } from "./vs01PrepareBridgeCorpus";
-import { ensureReviewCorpusOnEsignEntry } from "./vs01EsignRemountReviewBind";
+import {
+  ensureReviewCorpusOnEsignEntry,
+  leftoverRemountShouldFailClosedToast,
+} from "./vs01EsignRemountReviewBind";
 import { REPLACE_STALE_SERVER_TEMPLATE_CONTENT_REASON } from "./vs01ReviewCorpusServerContent";
 
 const AGREEMENT_ID = "dd37f0e4-feba-42e5-bb37-713218aaf346";
@@ -68,6 +72,31 @@ function certifiedReview(): string {
  * Leftover persist/draft blob after #145 order restore: already sequential
  * 10/11/12/13, but fused Notices / Misc — not the certified Review.
  */
+function leftoverPacketDetectorMisses(): string {
+  return padCorpus(
+    [
+      "SERVICES AGREEMENT",
+      "",
+      "This consulting engagement is between Alpha Workshop and Beta Counsel LLC.",
+      "",
+      "1. SCOPE",
+      "Provider delivers the stated consulting services.",
+      "",
+      "2. FEES",
+      "Fees are due as stated in the engagement letter.",
+      "",
+      "3. TERM",
+      "The engagement continues until the work is complete.",
+    ].join("\n"),
+  );
+}
+
+function leftoverCompressedPdfDetectorMisses(): string {
+  return `%PDF-1.4\n1 0 obj\n<< /Filter /FlateDecode /Length 80 >>\nstream\n${String.fromCharCode(
+    ...Array.from({ length: 80 }, (_, i) => (i * 37 + 11) & 0xff),
+  )}\nendstream\nendobj\n`;
+}
+
 function leftoverFusedReview(): string {
   return padCorpus(
     [
@@ -198,6 +227,19 @@ describe("esign seed writes certified Review, not a leftover fused version", () 
     expect(reviewCorpusLooksLikeLeftoverFusedNotices(persistReview)).toBe(false);
     expect(persistReviewGetPlainForSigningSeed(persistReview)).toBe(persistReview);
     expect(persistReviewGetPlainForSigningSeed(persistReview)).not.toBe("");
+    expect(packetPlainMatchesPersistReviewCorpus(persistReview, persistReview)).toBe(true);
+    expect(packetPlainMatchesPersistReviewCorpus(leftoverPacketDetectorMisses(), persistReview)).toBe(
+      false,
+    );
+    expect(
+      packetPlainMatchesPersistReviewCorpus(leftoverCompressedPdfDetectorMisses(), persistReview),
+    ).toBe(false);
+    expect(reviewCorpusLooksLikeLeftoverFusedNotices(leftoverPacketDetectorMisses())).toBe(false);
+    expect(reviewCorpusLooksLikeLeftoverFusedNotices(leftoverCompressedPdfDetectorMisses())).toBe(
+      false,
+    );
+    expect(leftoverRemountShouldFailClosedToast(persistReview)).toBe(false);
+    expect(leftoverRemountShouldFailClosedToast("")).toBe(true);
   });
 
   it("uses certified Review as-is and does not project leftover into it", () => {
@@ -444,7 +486,7 @@ describe("esign seed writes certified Review, not a leftover fused version", () 
       seed,
       fetchContent: async () => leftover,
       fetchAcceptedReviewCorpus: async () => leftover,
-      fetchPersistReviewGet: async () => leftover,
+      fetchPersistReviewGet: async () => "",
       fetchDraft: async () =>
         ({
           id: AGREEMENT_ID,
@@ -522,7 +564,7 @@ describe("esign seed writes certified Review, not a leftover fused version", () 
       seed,
       fetchContent: async () => leftover,
       fetchAcceptedReviewCorpus: async () => leftover,
-      fetchPersistReviewGet: async () => leftover,
+      fetchPersistReviewGet: async () => "",
       fetchReviewPaintSot: async () => certified,
       fetchDraft: async () =>
         ({
@@ -630,7 +672,7 @@ describe("esign seed writes certified Review, not a leftover fused version", () 
       seed,
       fetchContent: async () => leftover,
       fetchAcceptedReviewCorpus: async () => leftover,
-      fetchPersistReviewGet: async () => leftover,
+      fetchPersistReviewGet: async () => "",
       fetchReviewPaintSot: async () => "",
       fetchDraft: async () =>
         ({
@@ -806,7 +848,60 @@ describe("esign seed writes certified Review, not a leftover fused version", () 
     expect(seed).not.toHaveBeenCalled();
   });
 
-  it("leftover remount bind never picks leftover draft/bridge/handoff as seed SoT", () => {
+  it("leftover remount + leftover GET bytes leftover-text misses + persist Review GET 200 seeds persist Review and does not toast", async () => {
+    const persistReview = certifiedReview();
+    const leftoverClean = leftoverPacketDetectorMisses();
+    const leftoverCompressed = leftoverCompressedPdfDetectorMisses();
+    expect(reviewCorpusLooksLikeLeftoverFusedNotices(leftoverClean)).toBe(false);
+    expect(reviewCorpusLooksLikeLeftoverFusedNotices(leftoverCompressed)).toBe(false);
+    expect(packetPlainMatchesPersistReviewCorpus(leftoverClean, persistReview)).toBe(false);
+    expect(packetPlainMatchesPersistReviewCorpus(leftoverCompressed, persistReview)).toBe(false);
+    expect(leftoverRemountShouldFailClosedToast(persistReview)).toBe(false);
+
+    for (const leftoverPacket of [leftoverClean, leftoverCompressed]) {
+      const seed = vi.fn().mockResolvedValue({
+        ok: true,
+        documentId: SEEDED_DOC,
+        contentSha256: "16".repeat(32),
+      });
+      const persistGet = vi.fn().mockResolvedValue(persistReview);
+      const bound = await ensureReviewCorpusOnEsignEntry({
+        documentId: SEEDED_DOC,
+        agreementId: AGREEMENT_ID,
+        reviewCorpus: leftoverPacket,
+        existingBridgeCorpus: leftoverPacket,
+        seed,
+        fetchContent: async () => leftoverPacket,
+        fetchAcceptedReviewCorpus: async () => "",
+        fetchPersistReviewGet: persistGet,
+        fetchReviewPaintSot: async () => "",
+        fetchDraft: async () =>
+          ({
+            id: AGREEMENT_ID,
+            title: "Services Agreement",
+            premium_full_document_text: leftoverPacket,
+            server_full_document_text: leftoverPacket,
+          }) as never,
+      });
+      expect(persistGet).toHaveBeenCalledWith(AGREEMENT_ID);
+      expect(bound.ok).toBe(true);
+      if (!bound.ok || "skipped" in bound) {
+        expect("skipped" in bound).toBe(false);
+        return;
+      }
+      expect(bound.replaced).toBe(true);
+      expect(bound.documentId).toBe(SEEDED_DOC);
+      expect(bound.reviewCorpus).toBe(persistReview);
+      expect(seed).toHaveBeenCalledTimes(1);
+      expect(seed.mock.calls[0][0]).toBe(AGREEMENT_ID);
+      expect(seed.mock.calls[0][2]).toBe(persistReview);
+      expect(seed.mock.calls[0][4]).toBe(SEEDED_DOC);
+      expect(String(seed.mock.calls[0][2] ?? "")).not.toBe(leftoverPacket);
+      expect(leftoverRemountShouldFailClosedToast(bound.reviewCorpus)).toBe(false);
+    }
+  });
+
+  it("leftover remount bind never leftover-filters persist Review GET or picks leftover as seed", () => {
     const remount = readFileSync(join(__dirname, "vs01EsignRemountReviewBind.ts"), "utf8");
     expect(remount).toContain("FIRST_FAILING_LEFTOVER_GET_CONTENT_PAINTS_BEFORE_PERSIST_REVIEW_REPLACE");
     expect(remount).toContain("FIRST_FAILING_LEFTOVER_GET_CONTENT_STILL_PAINTS_PREDICATE");
@@ -815,8 +910,10 @@ describe("esign seed writes certified Review, not a leftover fused version", () 
     expect(remount).toContain("resolveCanonicalPlainForVisibleShell");
     expect(remount).toContain("fetchPersistReviewGet");
     expect(remount).toContain("persistReviewGetPlainForSigningSeed");
+    expect(remount).toContain("leftoverRemountShouldFailClosedToast");
     expect(remount).toContain("hydrateCommercialReviewFromServerSnapshot");
     expect(remount).toContain("fetchCanonicalReviewSnapshot");
+    expect(remount).not.toMatch(/reviewCorpusLooksLikeLeftoverFusedNotices\(persistPlain\)/);
     expect(remount).not.toContain("resolveAgreementCorpusForPrepareHandoff");
     expect(remount).not.toContain("pickCurrentReviewSotForSigningSeed");
   });

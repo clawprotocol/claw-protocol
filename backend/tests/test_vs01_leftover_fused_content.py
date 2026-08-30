@@ -8,6 +8,7 @@ from backend.services.vs01_leftover_fused_content import (
     FIRST_FAILING_LEFTOVER_GET_CONTENT_PAINTS_BEFORE_PERSIST_REVIEW_REPLACE,
     extract_plain_from_document_bytes,
     leftover_get_content_must_refuse,
+    packet_is_persist_review_corpus,
     review_corpus_looks_like_leftover_fused_notices,
 )
 
@@ -79,6 +80,57 @@ def _leftover_story_pdf_bytes() -> bytes | None:
     if not raw or not raw.startswith(b"%PDF"):
         return None
     return raw
+
+
+def _leftover_packet_detector_misses() -> str:
+    """Leftover packet whose extract / raw UTF-8 do not match leftover-text."""
+    return (
+        "\n".join(
+            [
+                "SERVICES AGREEMENT",
+                "",
+                "This consulting engagement is between Alpha Workshop and Beta Counsel LLC.",
+                "",
+                "1. SCOPE",
+                "Provider delivers the stated consulting services.",
+                "",
+                "2. FEES",
+                "Fees are due as stated in the engagement letter.",
+                "",
+                "3. TERM",
+                "The engagement continues until the work is complete.",
+            ]
+        )
+        + "\n\n"
+        + _PAD
+    ).strip()
+
+
+def _leftover_clean_story_pdf_bytes() -> bytes | None:
+    """Story PDF of leftover packet bytes that leftover-text does not classify."""
+    try:
+        from backend.services.agreement_vs01_pdf_seed import agreement_rendered_html_to_pdf_bytes
+    except Exception:
+        return None
+    html = "<pre>" + _leftover_packet_detector_misses().replace("&", "&amp;").replace("<", "&lt;") + "</pre>"
+    try:
+        built = agreement_rendered_html_to_pdf_bytes(html, title="Services Agreement")
+    except Exception:
+        return None
+    raw = built.pdf_bytes
+    if not raw or not raw.startswith(b"%PDF"):
+        return None
+    return raw
+
+
+def _leftover_compressed_pdf_bytes() -> bytes:
+    """Compressed / Flate leftover packet: extract and raw UTF-8 do not look leftover."""
+    stream = bytes((i * 37 + 11) & 0xFF for i in range(96))
+    return (
+        b"%PDF-1.4\n1 0 obj\n<< /Filter /FlateDecode /Length 96 >>\nstream\n"
+        + stream
+        + b"\nendstream\nendobj\n"
+    )
 
 
 def _leftover_fused() -> str:
@@ -167,15 +219,29 @@ def test_leftover_detector_is_generic_and_misses_certified_review():
     assert review_corpus_looks_like_leftover_fused_notices(extract_plain_from_document_bytes(pdf)) is True
 
 
-def test_refuse_only_when_leftover_and_persist_review_exists(monkeypatch):
+def test_refuse_only_when_packet_is_not_persist_review(monkeypatch):
     leftover = _leftover_fused().encode("utf-8")
+    leftover_clean = _leftover_packet_detector_misses().encode("utf-8")
+    leftover_compressed = _leftover_compressed_pdf_bytes()
     certified = _certified_review().encode("utf-8")
     assert leftover_get_content_must_refuse(leftover, {"agreement_id": ""}) is False
     assert leftover_get_content_must_refuse(certified, {"agreement_id": "missing"}) is False
+    assert review_corpus_looks_like_leftover_fused_notices(
+        extract_plain_from_document_bytes(leftover_clean)
+    ) is False
+    assert review_corpus_looks_like_leftover_fused_notices(
+        leftover_clean.decode("utf-8")
+    ) is False
+    assert review_corpus_looks_like_leftover_fused_notices(
+        extract_plain_from_document_bytes(leftover_compressed)
+    ) is False
+    assert review_corpus_looks_like_leftover_fused_notices(
+        leftover_compressed.decode("utf-8", errors="ignore")
+    ) is False
 
     monkeypatch.setattr(
-        "backend.services.vs01_leftover_fused_content.persist_review_exists_for_agreement",
-        lambda _aid: True,
+        "backend.services.vs01_leftover_fused_content.persist_review_plain_for_agreement",
+        lambda aid: _certified_review() if aid == "ag_persist" else "",
     )
     leftover_pdf = (
         b"%PDF-1.4\n1 0 obj\n((If to Alpha Workshop Beta Counsel LLC: Address: 30 days, "
@@ -183,16 +249,29 @@ def test_refuse_only_when_leftover_and_persist_review_exists(monkeypatch):
     )
     assert leftover_get_content_must_refuse(leftover, {"agreement_id": "ag_persist"}) is True
     assert leftover_get_content_must_refuse(leftover_pdf, {"agreement_id": "ag_persist"}) is True
+    assert leftover_get_content_must_refuse(leftover_clean, {"agreement_id": "ag_persist"}) is True
+    assert leftover_get_content_must_refuse(leftover_compressed, {"agreement_id": "ag_persist"}) is True
     assert leftover_get_content_must_refuse(certified, {"agreement_id": "ag_persist"}) is False
+    assert packet_is_persist_review_corpus(certified, _certified_review()) is True
+    assert packet_is_persist_review_corpus(leftover_clean, _certified_review()) is False
     leftover_story = _leftover_story_pdf_bytes()
     assert leftover_story is not None
     assert leftover_story.startswith(b"%PDF")
     assert leftover_get_content_must_refuse(leftover_story, {"agreement_id": "ag_persist"}) is True
+    leftover_clean_story = _leftover_clean_story_pdf_bytes()
+    assert leftover_clean_story is not None
+    assert leftover_clean_story.startswith(b"%PDF")
+    assert review_corpus_looks_like_leftover_fused_notices(
+        extract_plain_from_document_bytes(leftover_clean_story)
+    ) is False
+    assert leftover_get_content_must_refuse(leftover_clean_story, {"agreement_id": "ag_persist"}) is True
     monkeypatch.setattr(
-        "backend.services.vs01_leftover_fused_content.persist_review_exists_for_agreement",
-        lambda _aid: False,
+        "backend.services.vs01_leftover_fused_content.persist_review_plain_for_agreement",
+        lambda _aid: "",
     )
     assert leftover_get_content_must_refuse(leftover, {"agreement_id": "ag_empty"}) is False
+    assert leftover_get_content_must_refuse(leftover_clean, {"agreement_id": "ag_empty"}) is False
+    assert leftover_get_content_must_refuse(leftover_compressed, {"agreement_id": "ag_empty"}) is False
     assert leftover_get_content_must_refuse(leftover_story, {"agreement_id": "ag_empty"}) is False
     assert leftover_get_content_must_refuse(leftover_story, {"agreement_id": ""}) is False
 
@@ -302,6 +381,43 @@ def test_matching_certified_get_content_is_not_rewritten(monkeypatch, tmp_path):
     got = client.get(f"/v1/documents/{doc_id}/content", headers=_ORIGIN_H)
     assert got.status_code == 200, got.text
     assert got.content == raw
+
+
+def test_leftover_packet_detector_misses_409_when_persist_review_exists(monkeypatch, tmp_path):
+    """Leftover GET /content 200 is FAIL even when leftover-text never fires."""
+    pytest.importorskip("openai")
+    pytest.importorskip("eth_abi")
+    from fastapi.testclient import TestClient
+    from backend.main import app
+
+    _env(monkeypatch, tmp_path)
+    client = TestClient(app, raise_server_exceptions=False)
+    aid = _create_agreement(client)
+    certified = _certified_review()
+    leftover_clean = _leftover_packet_detector_misses().encode("utf-8")
+    leftover_compressed = _leftover_compressed_pdf_bytes()
+    leftover_story = _leftover_clean_story_pdf_bytes() or leftover_compressed
+    assert review_corpus_looks_like_leftover_fused_notices(
+        extract_plain_from_document_bytes(leftover_clean)
+    ) is False
+    assert review_corpus_looks_like_leftover_fused_notices(
+        extract_plain_from_document_bytes(leftover_compressed)
+    ) is False
+    _persist_and_accept(client, aid, certified)
+
+    for raw, suffix in (
+        (leftover_clean, "cleanaaaaaaaaaaaaaaaaaaaaaaaa"),
+        (leftover_compressed, "binpdfaaaaaaaaaaaaaaaaaaaaaa"),
+        (leftover_story, "storyaaaaaaaaaaaaaaaaaaaaaaa"),
+    ):
+        doc_id = f"doc_{suffix}"
+        _put_document(aid, doc_id, raw)
+        refused = client.get(f"/v1/documents/{doc_id}/content", headers=_ORIGIN_H)
+        assert refused.status_code == 409, refused.text
+        body = refused.json()
+        assert body["error"] == "leftover_fused_content"
+        assert body["code"] == FIRST_FAILING_LEFTOVER_GET_CONTENT_PAINTS_BEFORE_PERSIST_REVIEW_REPLACE
+        assert raw not in refused.content
 
 
 def test_leftover_get_content_200_only_when_persist_review_missing(monkeypatch, tmp_path):
