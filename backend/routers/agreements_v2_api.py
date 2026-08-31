@@ -3728,10 +3728,14 @@ def _render_persist_review_seed_html(persist_plain: str, *, watermark: bool = Fa
             WATERMARK_LABEL,
         )
     body = html.escape(body_src)
+    # Persist Review Pro as US-letter commercial legal — no leftover Story
+    # chrome (max-width:720px;margin:0 auto). Page margins come from the
+    # persist_review Story profile, not leftover _render_html banner wrap.
     article = (
-        "<article class='ldg-persist-review-pro' style='position:relative;max-width:720px;margin:0 auto'>"
-        "<pre style='white-space:pre-wrap;font-family:Georgia,serif;font-size:15px;line-height:1.65;"
-        "color:#0f172a;margin:0;padding:0;border:0;background:transparent'>"
+        "<article class='ldg-persist-review-pro'>"
+        "<pre style='white-space:pre-wrap;font-family:Georgia,Times New Roman,Times,serif;"
+        "font-size:15px;line-height:1.58;color:#0f172a;margin:0;padding:0;border:0;"
+        "background:transparent'>"
         f"{body}</pre>"
         "</article>"
     )
@@ -9830,7 +9834,11 @@ def post_agreement_vs01_signing_seed(
     # --- html_to_pdf ---
     title = (draft.title or "").strip() or "Agreement"
     try:
-        built = agreement_rendered_html_to_pdf_bytes(html, title=title)
+        built = agreement_rendered_html_to_pdf_bytes(
+            html,
+            title=title,
+            story_css_profile="persist_review" if persist_review_seed_plain else "vs01",
+        )
     except Exception as exc:
         log.exception(
             "[agreement-vs01-seed] event=failure agreement_id=%s stage=html_to_pdf status=503 "

@@ -63,3 +63,35 @@ def test_agreement_rendered_html_recipient_profile_smoke() -> None:
     )
     assert built.pdf_bytes.startswith(b"%PDF")
     assert len(built.pdf_bytes) > 200
+
+
+def test_persist_review_profile_uses_commercial_letter_not_leftover_300pt_band() -> None:
+    pytest.importorskip("fitz")
+    import fitz  # type: ignore[import-not-found,import-untyped]
+
+    html = "<pre>" + ("Commercial letter body. " * 80) + "</pre>"
+    leftover = agreement_rendered_html_to_pdf_bytes(html, title="T", story_css_profile="vs01")
+    commercial = agreement_rendered_html_to_pdf_bytes(
+        html, title="T", story_css_profile="persist_review"
+    )
+    assert leftover.render_mode == "story_html"
+    assert commercial.render_mode == "story_html"
+
+    def _ymax(raw: bytes) -> float:
+        doc = fitz.open(stream=raw, filetype="pdf")
+        try:
+            ymax = 0.0
+            for page in doc:
+                for block in page.get_text("dict").get("blocks", []):
+                    if block.get("type") != 0:
+                        continue
+                    bbox = block.get("bbox") or (0, 0, 0, 0)
+                    ymax = max(ymax, float(bbox[3]))
+            return ymax
+        finally:
+            doc.close()
+
+    leftover_ymax = _ymax(leftover.pdf_bytes)
+    commercial_ymax = _ymax(commercial.pdf_bytes)
+    assert leftover_ymax <= 500
+    assert commercial_ymax > 500

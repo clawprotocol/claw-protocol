@@ -179,7 +179,7 @@ def _leftover_eight_section_designer() -> str:
 
 
 def _persist_review_seed_pdf_bytes() -> bytes | None:
-    """#155 persist Review seed PDF — no leftover Draft Agreement chrome."""
+    """Persist Review Pro seed PDF — US-letter commercial, not leftover vs01 300pt Story."""
     try:
         from backend.routers.agreements_v2_api import _render_persist_review_seed_html
         from backend.services.agreement_vs01_pdf_seed import agreement_rendered_html_to_pdf_bytes
@@ -188,6 +188,36 @@ def _persist_review_seed_pdf_bytes() -> bytes | None:
 
     html = _render_persist_review_seed_html(_certified_review())
     try:
+        built = agreement_rendered_html_to_pdf_bytes(
+            html,
+            title="Services Agreement",
+            story_css_profile="persist_review",
+        )
+    except Exception:
+        return None
+    raw = built.pdf_bytes
+    if not raw or not raw.startswith(b"%PDF"):
+        return None
+    return raw
+
+
+def _leftover_story_720px_15_page_10_then_12_bytes() -> bytes | None:
+    """Leftover Story chrome + leftover vs01 300pt band + leftover 10-then-12."""
+    try:
+        from backend.services.agreement_vs01_pdf_seed import agreement_rendered_html_to_pdf_bytes
+    except Exception:
+        return None
+    from html import escape
+
+    leftover = _leftover_fused() + ("\n\n" + _PAD * 8)
+    html = (
+        "<article style='position:relative;max-width:720px;margin:0 auto'>"
+        "<p>Draft Agreement (non-binding template)</p>"
+        "<pre style='white-space:pre-wrap;font-family:Georgia,serif;font-size:15px;line-height:1.65'>"
+        + escape(leftover)
+        + "</pre></article>"
+    )
+    try:
         built = agreement_rendered_html_to_pdf_bytes(html, title="Services Agreement")
     except Exception:
         return None
@@ -195,6 +225,28 @@ def _persist_review_seed_pdf_bytes() -> bytes | None:
     if not raw or not raw.startswith(b"%PDF"):
         return None
     return raw
+
+
+def _pdf_page_count_and_text_ymax(raw: bytes) -> tuple[int, float]:
+    """Leftover vs01 300pt Story clips text ymax at ~492pt (792-300)."""
+    import fitz  # type: ignore[import-not-found,import-untyped]
+
+    doc = fitz.open(stream=raw, filetype="pdf")
+    try:
+        ymax = 0.0
+        for page in doc:
+            for block in page.get_text("dict").get("blocks", []):
+                if block.get("type") != 0:
+                    continue
+                bbox = block.get("bbox") or (0, 0, 0, 0)
+                ymax = max(ymax, float(bbox[3]))
+        return int(doc.page_count), ymax
+    finally:
+        doc.close()
+
+
+_LEFTOVER_STORY_300PT_YMAX = 500.0
+_LEFTOVER_STORY_15_PAGE = 15
 
 
 def _leftover_story_banner_plus_persist_review_spans_packet_plain() -> str:
@@ -692,6 +744,8 @@ def test_render_persist_review_seed_html_is_not_leftover_story_chrome():
     assert "Designer will provide the deliverables" not in html
     assert "1. Scope of Services" not in html
     assert "ldg-persist-review-pro" in html
+    assert "max-width:720px" not in html
+    assert "margin:0 auto" not in html
     assert "10. LIABILITY" in html
     assert "If to Alpha Workshop:" in html
     assert "If to Beta Counsel LLC:" in html
@@ -717,6 +771,59 @@ def test_render_persist_review_seed_html_is_not_leftover_story_chrome():
     leftover_html = _render_html(leftover_draft)
     assert "Draft Agreement (non-binding template)" in leftover_html
     assert "Designer will provide the deliverables" in leftover_html
+    assert "max-width:720px" in leftover_html
+
+
+def test_persist_review_seed_pdf_is_us_letter_commercial_not_leftover_story():
+    """Leftover Story 720px 15-page + leftover 10-then-12 after seed is FAIL."""
+    pytest.importorskip("fitz")
+    from backend.routers.agreements_v2_api import _render_persist_review_seed_html
+    from backend.services.agreement_vs01_pdf_seed import agreement_rendered_html_to_pdf_bytes
+
+    leftover = _leftover_story_720px_15_page_10_then_12_bytes()
+    assert leftover is not None
+    leftover_pages, leftover_ymax = _pdf_page_count_and_text_ymax(leftover)
+    leftover_extract = extract_plain_from_document_bytes(leftover)
+    assert leftover_pages >= _LEFTOVER_STORY_15_PAGE
+    assert leftover_ymax <= _LEFTOVER_STORY_300PT_YMAX
+    assert "Draft Agreement (non-binding template)" in leftover_extract
+    assert re.search(r"(?:^|\n)\s*10\.\s+LIABILITY", leftover_extract, re.I)
+    assert re.search(r"(?:^|\n)\s*12\.\s+NOTICES", leftover_extract, re.I)
+    assert not re.search(r"(?:^|\n)\s*11\.\s+GOVERNING LAW", leftover_extract, re.I)
+    assert "If to Alpha Workshop Beta Counsel LLC" in leftover_extract
+
+    certified = _certified_review()
+    html = _render_persist_review_seed_html(certified)
+    assert "max-width:720px" not in html
+    built = agreement_rendered_html_to_pdf_bytes(
+        html,
+        title="Services Agreement",
+        story_css_profile="persist_review",
+    )
+    assert built.render_mode == "story_html"
+    pages, ymax = _pdf_page_count_and_text_ymax(built.pdf_bytes)
+    extract = extract_plain_from_document_bytes(built.pdf_bytes)
+    assert pages < leftover_pages
+    assert pages < _LEFTOVER_STORY_15_PAGE
+    assert ymax > _LEFTOVER_STORY_300PT_YMAX
+    _assert_extract_is_persist_review_pro(extract, certified)
+    assert "Draft Agreement (non-binding template)" not in extract
+    assert "If to Alpha Workshop Beta Counsel LLC" not in extract
+
+    leftover_chrome_of_review = agreement_rendered_html_to_pdf_bytes(
+        (
+            "<article class='ldg-persist-review-pro' "
+            "style='position:relative;max-width:720px;margin:0 auto'><pre>"
+            + certified.replace("&", "&amp;").replace("<", "&lt;")
+            + "</pre></article>"
+        ),
+        title="Services Agreement",
+    )
+    leftover_review_pages, leftover_review_ymax = _pdf_page_count_and_text_ymax(
+        leftover_chrome_of_review.pdf_bytes
+    )
+    assert leftover_review_ymax <= _LEFTOVER_STORY_300PT_YMAX
+    assert pages < leftover_review_pages or ymax > leftover_review_ymax
 
 
 def test_leftover_remount_seed_then_get_content_is_persist_review_200(monkeypatch, tmp_path):
@@ -783,6 +890,80 @@ def test_leftover_remount_seed_then_get_content_is_persist_review_200(monkeypatc
         _assert_extract_is_persist_review_pro(extract, certified)
         assert packet_is_persist_review_corpus(subsequent.content, certified) is True
         assert leftover_get_content_must_refuse(subsequent.content, {"agreement_id": aid}) is False
+
+    after = load_draft(aid)
+    pr = after.get("pro_redline_v1") if isinstance(after.get("pro_redline_v1"), dict) else {}
+    rf = pr.get("review_first_final_corpus") if isinstance(pr, dict) else None
+    if isinstance(rf, dict):
+        assert str(rf.get("source") or "") != "vs01_signing_seed_persist_review"
+
+
+def test_leftover_story_720px_15_page_10_then_12_after_seed_is_persist_review_commercial(
+    monkeypatch, tmp_path
+):
+    """Leftover GET 409 + seed 200 → subsequent GET is persist Review US-letter commercial.
+
+    Leftover Story 720px 15-page + leftover 10-then-12 after seed is FAIL.
+    """
+    pytest.importorskip("openai")
+    pytest.importorskip("eth_abi")
+    pytest.importorskip("fitz")
+    from fastapi.testclient import TestClient
+    from backend.main import app
+    from backend.services.agreement_draft_store import load_draft
+    from backend.tests.entitlement_test_support import ensure_headers_entitled
+
+    leftover = _leftover_story_720px_15_page_10_then_12_bytes()
+    assert leftover is not None
+    leftover_pages, leftover_ymax = _pdf_page_count_and_text_ymax(leftover)
+    leftover_extract = extract_plain_from_document_bytes(leftover)
+    assert leftover_pages >= _LEFTOVER_STORY_15_PAGE
+    assert leftover_ymax <= _LEFTOVER_STORY_300PT_YMAX
+    assert "Draft Agreement (non-binding template)" in leftover_extract
+    assert re.search(r"(?:^|\n)\s*10\.\s+LIABILITY", leftover_extract, re.I)
+    assert re.search(r"(?:^|\n)\s*12\.\s+NOTICES", leftover_extract, re.I)
+    assert not re.search(r"(?:^|\n)\s*11\.\s+GOVERNING LAW", leftover_extract, re.I)
+
+    _env(monkeypatch, tmp_path)
+    client = TestClient(app, raise_server_exceptions=False)
+    aid = _create_agreement(client)
+    certified = _certified_review()
+    leftover_designer = _leftover_eight_section_designer()
+    _persist_and_accept(client, aid, certified)
+    assert persist_review_plain_for_agreement(aid) == certified
+    assert "1. Services and Deliverables" not in persist_review_plain_for_agreement(aid)
+    assert persist_review_plain_for_agreement(aid) != leftover_designer
+
+    doc_id = "doc_story15aaaaaaaaaaaaaaaaaaaaaa"
+    _put_document(aid, doc_id, leftover)
+    refused = client.get(f"/v1/documents/{doc_id}/content", headers=_ORIGIN_H)
+    assert refused.status_code == 409, refused.text
+    body = refused.json()
+    assert body["error"] == "leftover_fused_content"
+    assert leftover not in refused.content
+
+    seed_headers = ensure_headers_entitled(dict(_ORG_H))
+    seeded = client.post(
+        f"/api/agreements/{aid}/vs01-signing-seed",
+        headers=seed_headers,
+        json={"signing_corpus_plain": leftover_designer, "document_id": doc_id},
+    )
+    assert seeded.status_code == 200, seeded.text
+    assert seeded.json()["document_id"] == doc_id
+
+    subsequent = client.get(f"/v1/documents/{doc_id}/content", headers=_ORIGIN_H)
+    assert subsequent.status_code == 200, subsequent.text
+    assert b"leftover_fused_content" not in subsequent.content
+    extract = extract_plain_from_document_bytes(subsequent.content)
+    _assert_extract_is_persist_review_pro(extract, certified)
+    assert "Draft Agreement (non-binding template)" not in extract
+    assert "If to Alpha Workshop Beta Counsel LLC" not in extract
+    pages, ymax = _pdf_page_count_and_text_ymax(subsequent.content)
+    assert pages < leftover_pages
+    assert pages < _LEFTOVER_STORY_15_PAGE
+    assert ymax > _LEFTOVER_STORY_300PT_YMAX
+    assert packet_is_persist_review_corpus(subsequent.content, certified) is True
+    assert leftover_get_content_must_refuse(subsequent.content, {"agreement_id": aid}) is False
 
     after = load_draft(aid)
     pr = after.get("pro_redline_v1") if isinstance(after.get("pro_redline_v1"), dict) else {}

@@ -106,7 +106,7 @@ def _strip_scripts_and_styles(html: str) -> str:
     return s[:_MAX_HTML_CHARS]
 
 
-StoryCssProfile = Literal["vs01", "recipient", "completed_signed"]
+StoryCssProfile = Literal["vs01", "recipient", "completed_signed", "persist_review"]
 
 
 def _vs01_signing_story_user_css() -> str:
@@ -153,7 +153,7 @@ def _story_placement_rect_for_profile(
 
 
 def _story_user_css_for_profile(profile: StoryCssProfile) -> str:
-    if profile == "recipient":
+    if profile in ("recipient", "persist_review"):
         return _recipient_preview_export_user_css()
     if profile == "completed_signed":
         return _completed_signed_export_user_css()
@@ -208,7 +208,12 @@ def _recipient_preview_export_user_css() -> str:
     )
 
 
-def _plaintext_pdf_bytes(fitz: object, body_inner: str) -> bytes:
+def _plaintext_pdf_bytes(
+    fitz: object,
+    body_inner: str,
+    *,
+    profile: StoryCssProfile = "vs01",
+) -> bytes:
     plain = re.sub(r"(?s)<[^>]+>", " ", body_inner)
     plain = " ".join(plain.split())
     if not plain.strip():
@@ -216,14 +221,19 @@ def _plaintext_pdf_bytes(fitz: object, body_inner: str) -> bytes:
     plain = plain[:80_000]
     doc = fitz.open()
     page = doc.new_page(width=612, height=792)
+    if profile == "vs01":
+        left = VS01_SIGNING_STORY_MARGIN_LEFT_PT
+        top = VS01_SIGNING_STORY_MARGIN_TOP_PT
+        right = 612 - VS01_SIGNING_STORY_MARGIN_RIGHT_PT
+        bottom = 792 - VS01_SIGNING_STORY_MARGIN_BOTTOM_PT
+    else:
+        left = RECIPIENT_STORY_MARGIN_LEFT_PT
+        top = RECIPIENT_STORY_MARGIN_TOP_PT
+        right = 612 - RECIPIENT_STORY_MARGIN_RIGHT_PT
+        bottom = 792 - RECIPIENT_STORY_MARGIN_BOTTOM_PT
     try:
         page.insert_textbox(
-            fitz.Rect(
-                VS01_SIGNING_STORY_MARGIN_LEFT_PT,
-                VS01_SIGNING_STORY_MARGIN_TOP_PT,
-                612 - VS01_SIGNING_STORY_MARGIN_RIGHT_PT,
-                792 - VS01_SIGNING_STORY_MARGIN_BOTTOM_PT,
-            ),
+            fitz.Rect(left, top, right, bottom),
             plain,
             fontsize=10,
             fontname="helv",
@@ -251,8 +261,9 @@ def agreement_rendered_html_to_pdf_bytes(
     blank Letter, then a stdlib-only minimal valid PDF so VS01 seed never fails solely on optional
     PDF libraries missing from the image.
 
-    ``story_css_profile``: ``vs01`` uses Helvetica + bottom margin reserve for signing seed footers;
-    ``recipient`` uses Georgia 15px/1.65 to align with agreement preview HTML.
+    ``story_css_profile``: ``vs01`` uses Helvetica + leftover 300pt bottom band for
+    signing-footer reserve; ``recipient`` / ``persist_review`` use US-letter
+    commercial legal margins (no leftover 720px column, no leftover 300pt band).
     """
     body_inner = _strip_scripts_and_styles(html)
     fitz = _import_fitz_module()
@@ -297,7 +308,7 @@ def agreement_rendered_html_to_pdf_bytes(
         except Exception:
             pass
 
-        pdf_bytes = _plaintext_pdf_bytes(fitz, body_inner)
+        pdf_bytes = _plaintext_pdf_bytes(fitz, body_inner, profile=story_css_profile)
         return AgreementVs01PdfBuild(
             pdf_bytes=pdf_bytes,
             render_mode="plaintext_after_story_error",
