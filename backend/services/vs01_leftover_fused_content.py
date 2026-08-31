@@ -238,26 +238,48 @@ def _agreement_id_from_meta_or_artifact(
     meta: Optional[Dict[str, Any]],
     document_id: str | None = None,
 ) -> str:
-    """Same agreement identity already bound to this vs01 document — never a second id."""
-    if isinstance(meta, dict):
-        aid = str(meta.get("agreement_id") or "").strip()
-        if aid:
-            return aid
-    did = (document_id or "").strip()
-    if not did:
-        return ""
-    try:
-        from backend.storage.artifact_repository import get_artifact_repository
+    """First leftover-packet agreement identity (meta, else artifact)."""
+    ids = _agreement_ids_for_leftover_refuse(meta, document_id)
+    return ids[0] if ids else ""
 
-        rec = get_artifact_repository().get_latest_by_logical_ref(
-            artifact_type="vs01_document",
-            logical_ref=did,
-        )
-        if rec is not None and rec.agreement_id:
-            return str(rec.agreement_id).strip()
-    except Exception:
-        return ""
-    return ""
+
+def _agreement_ids_for_leftover_refuse(
+    meta: Optional[Dict[str, Any]],
+    document_id: str | None = None,
+    remount_agreement_id: str | None = None,
+) -> list[str]:
+    """Leftover packet meta/artifact, then remount persist UUID if different or packet aid empty.
+
+    Empty persist_plain from the leftover-packet agreement_id alone is FAIL when
+    remount persist Review exists on the remount persist UUID.
+    """
+    ids: list[str] = []
+
+    def _add(raw: Any) -> None:
+        aid = str(raw or "").strip()
+        if aid and aid not in ids:
+            ids.append(aid)
+
+    if isinstance(meta, dict):
+        _add(meta.get("agreement_id"))
+        _add(meta.get("persist_agreement_id"))
+        _add(meta.get("persist_uuid"))
+        _add(meta.get("remount_agreement_id"))
+    did = (document_id or "").strip()
+    if did:
+        try:
+            from backend.storage.artifact_repository import get_artifact_repository
+
+            rec = get_artifact_repository().get_latest_by_logical_ref(
+                artifact_type="vs01_document",
+                logical_ref=did,
+            )
+            if rec is not None:
+                _add(rec.agreement_id)
+        except Exception:
+            pass
+    _add(remount_agreement_id)
+    return ids
 
 
 def _ws_collapse(text: str) -> str:
@@ -317,7 +339,7 @@ def packet_is_persist_review_corpus(raw: bytes | None, persist_plain: str | None
     classification of extract / raw UTF-8.
     """
     persist = (persist_plain or "").strip()
-    if len(persist) < _SIGNING_CORPUS_MIN_LEN:
+    if not persist:
         return False
     persist_norm = _ws_collapse(persist)
     persist_digest = _sha256_text(persist)
@@ -350,25 +372,33 @@ def leftover_get_content_must_refuse(
     raw: bytes | None,
     meta: Optional[Dict[str, Any]] = None,
     document_id: str | None = None,
+    remount_agreement_id: str | None = None,
 ) -> bool:
     """True when GET /content packet is not persist Review and persist Review exists.
 
-    Refuse leftover packet bytes because they are not the persist Review corpus
-    for this document's agreement_id (meta or artifact). Do not decide leftover
-    by leftover-text classification of extract / raw UTF-8 — a compressed
-    leftover PDF can extract without leftover fused markers. Matching certified
-    Review GET /content stays a 200. Leftover 200 is FAIL when persist Review
-    exists.
+    Resolve leftover-packet agreement_id from meta/artifact. If that is empty or
+    not the remount persist UUID, also use remount persist UUID. A 200
+    canonical-review-snapshot for that persist is persist Review exists — GET
+    is accepted-then-pending with no min-len 1500 and no leftover banner empty.
+    Do not leftover-text-classify packet bytes. Matching persist Review GET
+    /content stays a 200. Leftover 200 is FAIL when persist Review exists.
     """
-    agreement_id = _agreement_id_from_meta_or_artifact(meta, document_id)
-    persist_plain = persist_review_plain_for_agreement(agreement_id)
+    persist_plain = ""
+    used_aid = ""
+    for agreement_id in _agreement_ids_for_leftover_refuse(
+        meta, document_id, remount_agreement_id
+    ):
+        persist_plain = persist_review_plain_for_agreement(agreement_id)
+        if persist_plain:
+            used_aid = agreement_id
+            break
     if not persist_plain:
         return False
     if packet_is_persist_review_corpus(raw, persist_plain):
         return False
     _log.info(
         "[vs01-leftover-get-content-refuse] agreement_id=%s size_bytes=%s predicate=%s",
-        agreement_id,
+        used_aid,
         len(raw or b""),
         FIRST_FAILING_LEFTOVER_GET_CONTENT_PAINTS_BEFORE_PERSIST_REVIEW_REPLACE,
     )

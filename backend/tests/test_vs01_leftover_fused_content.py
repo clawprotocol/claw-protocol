@@ -335,9 +335,11 @@ def test_refuse_only_when_packet_is_not_persist_review(monkeypatch):
         leftover_compressed.decode("utf-8", errors="ignore")
     ) is False
 
+    remount_persist = "dd37f0e4-feba-42e5-bb37-713218aaf346"
+    leftover_create = "ag_leftover_create"
     monkeypatch.setattr(
         "backend.services.vs01_leftover_fused_content.persist_review_plain_for_agreement",
-        lambda aid: _certified_review() if aid == "ag_persist" else "",
+        lambda aid: _certified_review() if aid in {"ag_persist", remount_persist} else "",
     )
     leftover_pdf = (
         b"%PDF-1.4\n1 0 obj\n((If to Alpha Workshop Beta Counsel LLC: Address: 30 days, "
@@ -389,6 +391,15 @@ def test_refuse_only_when_packet_is_not_persist_review(monkeypatch):
         extract_plain_from_document_bytes(leftover_clean_story)
     ) is False
     assert leftover_get_content_must_refuse(leftover_clean_story, {"agreement_id": "ag_persist"}) is True
+    assert leftover_get_content_must_refuse(
+        leftover, {"agreement_id": leftover_create}, remount_agreement_id=remount_persist
+    ) is True
+    assert leftover_get_content_must_refuse(
+        leftover, {"agreement_id": ""}, remount_agreement_id=remount_persist
+    ) is True
+    assert leftover_get_content_must_refuse(
+        leftover, {"agreement_id": leftover_create, "persist_uuid": remount_persist}
+    ) is True
     monkeypatch.setattr(
         "backend.services.vs01_leftover_fused_content.persist_review_plain_for_agreement",
         lambda _aid: "",
@@ -844,6 +855,57 @@ def test_persist_review_plain_for_agreement_empty_denorm_uses_registry_sealed(
     assert leftover_get_content_must_refuse(
         leftover_banner.encode("utf-8"), {"agreement_id": "ag_persist_picker"}
     ) is True
+
+
+def test_leftover_get_409_uses_remount_persist_uuid_when_packet_aid_is_leftover_create(
+    monkeypatch, tmp_path
+):
+    """Leftover packet agreement_id leftover-create is empty persist_plain — also use remount persist UUID."""
+    pytest.importorskip("openai")
+    pytest.importorskip("eth_abi")
+    pytest.importorskip("fitz")
+    from fastapi.testclient import TestClient
+    from backend.main import app
+    from backend.services.agreement_draft_store import load_draft, save_draft
+
+    _env(monkeypatch, tmp_path)
+    client = TestClient(app, raise_server_exceptions=False)
+    remount_persist = "dd37f0e4-feba-42e5-bb37-713218aaf346"
+    leftover_create = _create_agreement(client)
+    persist_aid = _create_agreement(client)
+    certified = _certified_review()
+    leftover_designer = _leftover_eight_section_designer()
+    leftover_banner = (
+        "Draft Agreement (non-binding template)\n" + leftover_designer
+    ).encode("utf-8")
+    _persist_and_accept(client, persist_aid, certified)
+    persist_draft = load_draft(persist_aid)
+    persist_draft["id"] = remount_persist
+    save_draft(persist_draft)
+    assert persist_review_plain_for_agreement(remount_persist) == certified
+    assert persist_review_plain_for_agreement(leftover_create) == ""
+
+    doc_id = "doc_leftovercreateaaaaaaaaaaaaaaaa"
+    _put_document(leftover_create, doc_id, leftover_banner)
+    painted = client.get(f"/v1/documents/{doc_id}/content", headers=_ORIGIN_H)
+    assert painted.status_code == 200, painted.text
+    assert painted.content == leftover_banner
+
+    refused = client.get(
+        f"/v1/documents/{doc_id}/content",
+        headers=_ORIGIN_H,
+        params={"agreement_id": remount_persist},
+    )
+    assert refused.status_code == 409, refused.text
+    body = refused.json()
+    assert body["error"] == "leftover_fused_content"
+    assert leftover_banner not in refused.content
+    header_refused = client.get(
+        f"/v1/documents/{doc_id}/content",
+        headers={**_ORIGIN_H, "X-Claw-Agreement-Id": remount_persist},
+    )
+    assert header_refused.status_code == 409, header_refused.text
+    assert leftover_banner not in header_refused.content
 
 
 def test_leftover_story_banner_packet_seeds_persist_review_when_denorm_public_fragment(

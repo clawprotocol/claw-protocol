@@ -140,7 +140,13 @@ def api_get_document_content(document_id: str, request: Request) -> Response:
         raw, meta = load_document_content(did)
         if raw is None:
             raise HTTPException(status_code=404, detail="document_not_found")
-        if leftover_get_content_must_refuse(raw, meta, document_id=did):
+        remount_aid = (
+            str(request.query_params.get("agreement_id") or "").strip()
+            or str(request.headers.get("x-claw-agreement-id") or "").strip()
+        )
+        if leftover_get_content_must_refuse(
+            raw, meta, document_id=did, remount_agreement_id=remount_aid or None
+        ):
             return JSONResponse(
                 status_code=409,
                 content={
