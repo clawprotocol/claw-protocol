@@ -753,14 +753,39 @@ def test_persist_review_plain_reads_accepted_sealed_review_get_when_denorm_empty
         empty_denorm
     )
 
-    banner_denorm = dict(empty_denorm)
-    banner_denorm["accepted_review_snapshot_v1"] = {
-        **_public_fragment_denorm(
-            {"snapshotId": "crs_live", "corpusSha256": "x", "corpusLength": 12}
-        ),
-        "corpusPlain": leftover_banner,
+    short_review = (
+        "\n".join(
+            [
+                "SERVICES AGREEMENT",
+                "",
+                "10. LIABILITY",
+                "Each party's aggregate liability is limited to fees paid.",
+                "",
+                "11. GOVERNING LAW",
+                "This Agreement is governed by the applicable jurisdiction.",
+                "",
+                "12. NOTICES",
+                "If to Alpha Workshop:",
+                "If to Beta Counsel LLC:",
+                "",
+                "13. MISCELLANEOUS",
+                "This Agreement is the entire agreement of the parties.",
+            ]
+        )
+        + "\n\n"
+        + ("The parties agree to perform the stated obligations. " * 8)
+    ).strip()
+    assert 500 <= len(short_review) < 1500
+    short_draft = {
+        "id": "ag_short_get",
+        "accepted_review_snapshot_v1": {
+            "status": "accepted",
+            "snapshotId": "crs_short",
+            "corpusPlain": short_review,
+        },
+        "purpose": leftover_banner,
     }
-    assert persist_review_corpus_from_draft(banner_denorm) == certified
+    assert persist_review_corpus_from_draft(short_draft) == short_review
 
     sealed_only = {
         "id": "ag_sealed_only",

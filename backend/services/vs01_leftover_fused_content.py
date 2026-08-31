@@ -149,24 +149,15 @@ def _plain_from_snapshot_record(snap: Any) -> str:
     return ""
 
 
-def _usable_persist_review_plain(text: str | None) -> str:
-    """Persist Review body Review already painted — leftover Story banner is not persist Review."""
-    plain = (text or "").strip()
-    if len(plain) < _SIGNING_CORPUS_MIN_LEN:
-        return ""
-    if _NON_BINDING_TEMPLATE_BANNER_RE.search(plain):
-        return ""
-    return plain
-
-
 def persist_review_corpus_from_draft(draft: Any) -> str:
-    """Same persist Review GET / sealed / accepted snapshot body Review already painted.
+    """Same persist Review GET body Review already painted (accepted, else pending, else sealed).
 
-    Review hydrates from GET canonical-review-snapshot (accepted, else pending),
-    the accepted registry record, or the sealed portable seed. Denorm
-    accepted_review_snapshot_v1 may be the public fragment (ids/digest only) or
-    leftover Story banner — do not stop at an empty or banner-matching
-    corpusPlain field. Never pick leftover purpose / premium / server stores.
+    GET /canonical-review-snapshot is accepted-then-pending with no min-len 1500
+    and no leftover Draft Agreement banner regex. Denorm may be the public
+    fragment (ids/digest only, empty corpusPlain) — fall through to the
+    registry accepted record, then pending, then sealed portable seed.
+    Never pick leftover purpose / premium / server stores. Do not leftover-
+    text-classify this body.
     """
     from backend.services.accepted_review_snapshot import (
         get_accepted_snapshot_record,
@@ -174,9 +165,10 @@ def persist_review_corpus_from_draft(draft: Any) -> str:
         sealed_corpus_from_draft_packet,
     )
 
-    candidates: list[str] = []
     accepted = get_accepted_snapshot_record(draft)
-    candidates.append(_plain_from_snapshot_record(accepted))
+    plain = _plain_from_snapshot_record(accepted)
+    if plain:
+        return plain
 
     reg = get_registry(draft)
     snaps = reg.get("snapshots") if isinstance(reg.get("snapshots"), dict) else {}
@@ -186,12 +178,17 @@ def persist_review_corpus_from_draft(draft: Any) -> str:
     if not sid:
         sid = str(reg.get("acceptedSnapshotId") or "").strip()
     if sid and isinstance(snaps.get(sid), dict):
-        candidates.append(_plain_from_snapshot_record(snaps[sid]))
+        plain = _plain_from_snapshot_record(snaps[sid])
+        if plain:
+            return plain
     for snap in snaps.values():
         if not isinstance(snap, dict):
             continue
-        if str(snap.get("status") or "").strip() == "accepted":
-            candidates.append(_plain_from_snapshot_record(snap))
+        if str(snap.get("status") or "").strip() != "accepted":
+            continue
+        plain = _plain_from_snapshot_record(snap)
+        if plain:
+            return plain
 
     pending = [
         s
@@ -200,17 +197,12 @@ def persist_review_corpus_from_draft(draft: Any) -> str:
     ]
     pending.sort(key=lambda s: str(s.get("createdAt") or ""), reverse=True)
     latest = pending[0] if pending else None
-    candidates.append(_plain_from_snapshot_record(latest))
+    plain = _plain_from_snapshot_record(latest)
+    if plain:
+        return plain
 
     sealed = sealed_corpus_from_draft_packet(draft)
-    if sealed:
-        candidates.append(sealed.strip())
-
-    for cand in candidates:
-        usable = _usable_persist_review_plain(cand)
-        if usable:
-            return usable
-    return ""
+    return (sealed or "").strip()
 
 
 def persist_review_plain_for_agreement(agreement_id: str) -> str:
