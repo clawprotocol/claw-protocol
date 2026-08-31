@@ -11,6 +11,8 @@ from backend.services.vs01_leftover_fused_content import (
     extract_plain_from_document_bytes,
     leftover_get_content_must_refuse,
     packet_is_persist_review_corpus,
+    persist_review_corpus_from_draft,
+    persist_review_plain_for_agreement,
     review_corpus_looks_like_leftover_fused_notices,
 )
 
@@ -65,6 +67,30 @@ def _certified_review() -> str:
         + "\n\n"
         + _PAD
     ).strip()
+
+
+def _leftover_story_banner_packet_bytes() -> bytes | None:
+    """Leftover Story chrome + leftover 8-section designer — not persist Review."""
+    try:
+        from backend.services.agreement_vs01_pdf_seed import agreement_rendered_html_to_pdf_bytes
+    except Exception:
+        return None
+    from html import escape
+
+    leftover = _leftover_eight_section_designer()
+    html = (
+        "<article><p>Draft Agreement (non-binding template)</p><pre>"
+        + escape(leftover)
+        + "</pre></article>"
+    )
+    try:
+        built = agreement_rendered_html_to_pdf_bytes(html, title="Services Agreement")
+    except Exception:
+        return None
+    raw = built.pdf_bytes
+    if not raw or not raw.startswith(b"%PDF"):
+        return None
+    return raw
 
 
 def _leftover_story_pdf_bytes() -> bytes | None:
@@ -662,6 +688,211 @@ def test_leftover_remount_seed_then_get_content_is_persist_review_200(monkeypatc
         assert FIRST_FAILING_LEFTOVER_GET_CONTENT_PAINTS_BEFORE_PERSIST_REVIEW_REPLACE.encode() not in subsequent.content
         extract = extract_plain_from_document_bytes(subsequent.content)
         _assert_extract_is_persist_review_pro(extract, certified)
+        assert packet_is_persist_review_corpus(subsequent.content, certified) is True
+        assert leftover_get_content_must_refuse(subsequent.content, {"agreement_id": aid}) is False
+
+    after = load_draft(aid)
+    pr = after.get("pro_redline_v1") if isinstance(after.get("pro_redline_v1"), dict) else {}
+    rf = pr.get("review_first_final_corpus") if isinstance(pr, dict) else None
+    if isinstance(rf, dict):
+        assert str(rf.get("source") or "") != "vs01_signing_seed_persist_review"
+
+
+def _public_fragment_denorm(accepted: dict) -> dict:
+    """Live GET public-fragment shape — ids/digest only, no corpusPlain."""
+    return {
+        "status": "accepted",
+        "snapshotId": accepted.get("snapshotId") or accepted.get("snapshot_id"),
+        "corpusSha256": accepted.get("corpusSha256") or accepted.get("corpus_sha256"),
+        "corpusLength": accepted.get("corpusLength") or accepted.get("corpus_length") or 0,
+        "schemaVersion": accepted.get("schemaVersion") or accepted.get("schema_version"),
+        "acceptedAt": accepted.get("acceptedAt") or accepted.get("accepted_at"),
+    }
+
+
+def _attach_sealed_persist_review(draft: dict, corpus: str) -> None:
+    draft["vs01_signing_packet_v1"] = {
+        "portable": {
+            "seed": {
+                "corpusPlain": corpus,
+                "agreementId": str(draft.get("id") or ""),
+            }
+        }
+    }
+
+
+def test_persist_review_plain_reads_accepted_sealed_review_get_when_denorm_empty():
+    """Empty/banner denorm corpusPlain is not persist Review — use registry / sealed / GET body."""
+    certified = _certified_review()
+    leftover_banner = (
+        "Draft Agreement (non-binding template)\n" + _leftover_eight_section_designer()
+    )
+    registry = {
+        "acceptedSnapshotId": "crs_live",
+        "snapshots": {
+            "crs_live": {
+                "status": "accepted",
+                "snapshotId": "crs_live",
+                "corpusPlain": certified,
+            }
+        },
+    }
+    empty_denorm = {
+        "id": "ag_empty_denorm",
+        "accepted_review_snapshot_v1": _public_fragment_denorm(
+            {"snapshotId": "crs_live", "corpusSha256": "x", "corpusLength": 12}
+        ),
+        "canonical_review_snapshots_v1": registry,
+        "purpose": leftover_banner,
+        "premium_full_document_text": leftover_banner,
+        "server_full_document_text": leftover_banner,
+    }
+    _attach_sealed_persist_review(empty_denorm, certified)
+    assert persist_review_corpus_from_draft(empty_denorm) == certified
+    assert "Draft Agreement (non-binding template)" not in persist_review_corpus_from_draft(
+        empty_denorm
+    )
+
+    banner_denorm = dict(empty_denorm)
+    banner_denorm["accepted_review_snapshot_v1"] = {
+        **_public_fragment_denorm(
+            {"snapshotId": "crs_live", "corpusSha256": "x", "corpusLength": 12}
+        ),
+        "corpusPlain": leftover_banner,
+    }
+    assert persist_review_corpus_from_draft(banner_denorm) == certified
+
+    sealed_only = {
+        "id": "ag_sealed_only",
+        "accepted_review_snapshot_v1": _public_fragment_denorm(
+            {"snapshotId": "crs_missing", "corpusSha256": "x", "corpusLength": 12}
+        ),
+        "canonical_review_snapshots_v1": {
+            "acceptedSnapshotId": "crs_missing",
+            "snapshots": {
+                "crs_missing": {
+                    "status": "accepted",
+                    "snapshotId": "crs_missing",
+                }
+            },
+        },
+        "purpose": leftover_banner,
+    }
+    _attach_sealed_persist_review(sealed_only, certified)
+    assert persist_review_corpus_from_draft(sealed_only) == certified
+
+
+def test_persist_review_plain_for_agreement_empty_denorm_uses_registry_sealed(
+    monkeypatch, tmp_path
+):
+    _env(monkeypatch, tmp_path)
+    from backend.services.agreement_draft_store import save_draft
+
+    certified = _certified_review()
+    leftover_banner = (
+        "Draft Agreement (non-binding template)\n" + _leftover_eight_section_designer()
+    )
+    draft = {
+        "id": "ag_persist_picker",
+        "accepted_review_snapshot_v1": _public_fragment_denorm(
+            {"snapshotId": "crs_live", "corpusSha256": "x", "corpusLength": 12}
+        ),
+        "canonical_review_snapshots_v1": {
+            "acceptedSnapshotId": "crs_live",
+            "snapshots": {
+                "crs_live": {
+                    "status": "accepted",
+                    "snapshotId": "crs_live",
+                    "corpusPlain": certified,
+                }
+            },
+        },
+        "purpose": leftover_banner,
+        "premium_full_document_text": leftover_banner,
+        "server_full_document_text": leftover_banner,
+    }
+    _attach_sealed_persist_review(draft, certified)
+    save_draft(draft)
+    plain = persist_review_plain_for_agreement("ag_persist_picker")
+    assert plain == certified
+    assert "Draft Agreement (non-binding template)" not in plain
+    assert leftover_get_content_must_refuse(
+        leftover_banner.encode("utf-8"), {"agreement_id": "ag_persist_picker"}
+    ) is True
+
+
+def test_leftover_story_banner_packet_seeds_persist_review_when_denorm_public_fragment(
+    monkeypatch, tmp_path
+):
+    """Leftover 8-section + leftover Story banner packet, persist Review on accepted/sealed/GET."""
+    pytest.importorskip("openai")
+    pytest.importorskip("eth_abi")
+    pytest.importorskip("fitz")
+    from fastapi.testclient import TestClient
+    from backend.main import app
+    from backend.services.agreement_draft_store import load_draft, save_draft
+    from backend.tests.entitlement_test_support import ensure_headers_entitled
+
+    _env(monkeypatch, tmp_path)
+    client = TestClient(app, raise_server_exceptions=False)
+    aid = _create_agreement(client)
+    certified = _certified_review()
+    leftover_designer = _leftover_eight_section_designer()
+    leftover_banner_plain = (
+        "Draft Agreement (non-binding template)\n" + leftover_designer
+    ).encode("utf-8")
+    leftover_story_banner = _leftover_story_banner_packet_bytes() or leftover_banner_plain
+    assert "Draft Agreement (non-binding template)" in leftover_banner_plain.decode("utf-8")
+    assert review_corpus_looks_like_leftover_fused_notices(leftover_designer) is False
+
+    _persist_and_accept(client, aid, certified)
+    stored = load_draft(aid)
+    accepted = stored.get("accepted_review_snapshot_v1")
+    assert isinstance(accepted, dict)
+    registry = stored.get("canonical_review_snapshots_v1")
+    assert isinstance(registry, dict)
+    sid = str(accepted.get("snapshotId") or registry.get("acceptedSnapshotId") or "").strip()
+    snaps = registry.get("snapshots") if isinstance(registry.get("snapshots"), dict) else {}
+    assert sid and isinstance(snaps.get(sid), dict)
+    assert str(snaps[sid].get("corpusPlain") or "").strip() == certified
+    stored["accepted_review_snapshot_v1"] = _public_fragment_denorm(accepted)
+    assert not str(stored["accepted_review_snapshot_v1"].get("corpusPlain") or "").strip()
+    _attach_sealed_persist_review(stored, certified)
+    stored["purpose"] = leftover_designer
+    stored["premium_full_document_text"] = leftover_designer
+    stored["server_full_document_text"] = leftover_designer
+    save_draft(stored)
+    assert persist_review_plain_for_agreement(aid) == certified
+
+    seed_headers = ensure_headers_entitled(dict(_ORG_H))
+    for raw, suffix in (
+        (leftover_banner_plain, "bannerplainaaaaaaaaaaaaaaaaaaaa"),
+        (leftover_story_banner, "storybanneraaaaaaaaaaaaaaaaaaa"),
+    ):
+        doc_id = f"doc_{suffix}"
+        _put_document(aid, doc_id, raw)
+        refused = client.get(f"/v1/documents/{doc_id}/content", headers=_ORIGIN_H)
+        assert refused.status_code == 409, refused.text
+        body = refused.json()
+        assert body["error"] == "leftover_fused_content"
+        assert body["code"] == FIRST_FAILING_LEFTOVER_GET_CONTENT_PAINTS_BEFORE_PERSIST_REVIEW_REPLACE
+        assert raw not in refused.content
+        assert b"Draft Agreement (non-binding template)" not in refused.content
+
+        seeded = client.post(
+            f"/api/agreements/{aid}/vs01-signing-seed",
+            headers=seed_headers,
+            json={"signing_corpus_plain": leftover_designer, "document_id": doc_id},
+        )
+        assert seeded.status_code == 200, seeded.text
+        assert seeded.json()["document_id"] == doc_id
+
+        subsequent = client.get(f"/v1/documents/{doc_id}/content", headers=_ORIGIN_H)
+        assert subsequent.status_code == 200, subsequent.text
+        assert b"leftover_fused_content" not in subsequent.content
+        extract = extract_plain_from_document_bytes(subsequent.content)
+        _assert_extract_is_persist_review_pro(extract, certified)
+        assert "Draft Agreement (non-binding template)" not in extract
         assert packet_is_persist_review_corpus(subsequent.content, certified) is True
         assert leftover_get_content_must_refuse(subsequent.content, {"agreement_id": aid}) is False
 

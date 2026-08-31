@@ -138,20 +138,61 @@ def review_corpus_looks_like_leftover_fused_notices(text: str | None) -> bool:
     return False
 
 
+def _plain_from_snapshot_record(snap: Any) -> str:
+    """Review GET / accepted snapshot body — corpusPlain aliases only, not leftover stores."""
+    if not isinstance(snap, dict):
+        return ""
+    for key in ("corpusPlain", "corpus_plain"):
+        raw = snap.get(key)
+        if isinstance(raw, str) and raw.strip():
+            return raw.strip()
+    return ""
+
+
+def _usable_persist_review_plain(text: str | None) -> str:
+    """Persist Review body Review already painted — leftover Story banner is not persist Review."""
+    plain = (text or "").strip()
+    if len(plain) < _SIGNING_CORPUS_MIN_LEN:
+        return ""
+    if _NON_BINDING_TEMPLATE_BANNER_RE.search(plain):
+        return ""
+    return plain
+
+
 def persist_review_corpus_from_draft(draft: Any) -> str:
-    """Same persist Review GET body Review already painted (accepted, else pending)."""
+    """Same persist Review GET / sealed / accepted snapshot body Review already painted.
+
+    Review hydrates from GET canonical-review-snapshot (accepted, else pending),
+    the accepted registry record, or the sealed portable seed. Denorm
+    accepted_review_snapshot_v1 may be the public fragment (ids/digest only) or
+    leftover Story banner — do not stop at an empty or banner-matching
+    corpusPlain field. Never pick leftover purpose / premium / server stores.
+    """
     from backend.services.accepted_review_snapshot import (
         get_accepted_snapshot_record,
         get_registry,
+        sealed_corpus_from_draft_packet,
     )
 
+    candidates: list[str] = []
     accepted = get_accepted_snapshot_record(draft)
-    if isinstance(accepted, dict):
-        plain = str(accepted.get("corpusPlain") or accepted.get("corpus_plain") or "").strip()
-        if plain:
-            return plain
+    candidates.append(_plain_from_snapshot_record(accepted))
+
     reg = get_registry(draft)
     snaps = reg.get("snapshots") if isinstance(reg.get("snapshots"), dict) else {}
+    sid = ""
+    if isinstance(accepted, dict):
+        sid = str(accepted.get("snapshotId") or accepted.get("snapshot_id") or "").strip()
+    if not sid:
+        sid = str(reg.get("acceptedSnapshotId") or "").strip()
+    if sid and isinstance(snaps.get(sid), dict):
+        candidates.append(_plain_from_snapshot_record(snaps[sid]))
+    for snap in snaps.values():
+        if not isinstance(snap, dict):
+            continue
+        if str(snap.get("status") or "").strip() == "accepted":
+            candidates.append(_plain_from_snapshot_record(snap))
+
     pending = [
         s
         for s in snaps.values()
@@ -159,13 +200,21 @@ def persist_review_corpus_from_draft(draft: Any) -> str:
     ]
     pending.sort(key=lambda s: str(s.get("createdAt") or ""), reverse=True)
     latest = pending[0] if pending else None
-    if isinstance(latest, dict):
-        return str(latest.get("corpusPlain") or latest.get("corpus_plain") or "").strip()
+    candidates.append(_plain_from_snapshot_record(latest))
+
+    sealed = sealed_corpus_from_draft_packet(draft)
+    if sealed:
+        candidates.append(sealed.strip())
+
+    for cand in candidates:
+        usable = _usable_persist_review_plain(cand)
+        if usable:
+            return usable
     return ""
 
 
 def persist_review_plain_for_agreement(agreement_id: str) -> str:
-    """Persist Review GET body for this agreement — never leftover-text filtered."""
+    """Persist Review GET / sealed / accepted body for this agreement — never leftover-text filtered."""
     aid = (agreement_id or "").strip()
     if not aid:
         return ""
@@ -175,12 +224,7 @@ def persist_review_plain_for_agreement(agreement_id: str) -> str:
         draft = load_draft(aid)
     except Exception:
         return ""
-    plain = persist_review_corpus_from_draft(draft).strip()
-    if len(plain) < _SIGNING_CORPUS_MIN_LEN:
-        return ""
-    if _NON_BINDING_TEMPLATE_BANNER_RE.search(plain):
-        return ""
-    return plain
+    return persist_review_corpus_from_draft(draft)
 
 
 def persist_review_exists_for_agreement(agreement_id: str) -> bool:
