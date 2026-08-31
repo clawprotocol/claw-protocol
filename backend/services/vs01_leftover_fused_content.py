@@ -331,15 +331,33 @@ def _unique_persist_span_present(persist_norm: str, cand_norm: str) -> bool:
     return False
 
 
+def _packet_has_leftover_story_banner(raw: bytes | None) -> bool:
+    """Packet extract/raw with leftover Draft Agreement chrome is not persist Review.
+
+    Persist Review GET has no leftover banner. Unique-span must not 200 leftover
+    Story chrome + persist Review spans. Existing banner regex only — not
+    leftover-text of designer copy / Notices fusion / 8-section.
+    """
+    extracted = extract_plain_from_document_bytes(raw)
+    raw_plain = (raw or b"").decode("utf-8", errors="ignore").replace("\x00", "")
+    return bool(
+        _NON_BINDING_TEMPLATE_BANNER_RE.search(extracted or "")
+        or _NON_BINDING_TEMPLATE_BANNER_RE.search(raw_plain or "")
+    )
+
+
 def packet_is_persist_review_corpus(raw: bytes | None, persist_plain: str | None) -> bool:
     """True when GET /content packet bytes are this agreement's persist Review.
 
     Identity only — digest, collapsed-whitespace containment, or a unique
-    persist Review span in the extract. Do not decide leftover by leftover-text
-    classification of extract / raw UTF-8.
+    persist Review span in the extract. Packet with leftover Draft Agreement
+    banner is not persist Review. Do not leftover-text-classify designer copy /
+    Notices fusion / 8-section.
     """
     persist = (persist_plain or "").strip()
     if not persist:
+        return False
+    if _packet_has_leftover_story_banner(raw):
         return False
     persist_norm = _ws_collapse(persist)
     persist_digest = _sha256_text(persist)

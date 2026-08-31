@@ -178,8 +178,61 @@ def _leftover_eight_section_designer() -> str:
     ).strip()
 
 
+def _persist_review_seed_pdf_bytes() -> bytes | None:
+    """#155 persist Review seed PDF — no leftover Draft Agreement chrome."""
+    try:
+        from backend.routers.agreements_v2_api import _render_persist_review_seed_html
+        from backend.services.agreement_vs01_pdf_seed import agreement_rendered_html_to_pdf_bytes
+    except Exception:
+        return None
+
+    html = _render_persist_review_seed_html(_certified_review())
+    try:
+        built = agreement_rendered_html_to_pdf_bytes(html, title="Services Agreement")
+    except Exception:
+        return None
+    raw = built.pdf_bytes
+    if not raw or not raw.startswith(b"%PDF"):
+        return None
+    return raw
+
+
+def _leftover_story_banner_plus_persist_review_spans_packet_plain() -> str:
+    """Leftover Story chrome + leftover 8-section + persist Review unique windows."""
+    return (
+        "Draft Agreement (non-binding template)\n"
+        + _leftover_eight_section_designer()
+        + "\n\n"
+        + _certified_review()
+    )
+
+
+def _leftover_story_banner_plus_persist_review_spans_packet_bytes() -> bytes | None:
+    """Leftover Story chrome wrapping leftover 8-section + persist Review spans."""
+    try:
+        from backend.services.agreement_vs01_pdf_seed import agreement_rendered_html_to_pdf_bytes
+    except Exception:
+        return None
+    from html import escape
+
+    mix = _leftover_eight_section_designer() + "\n\n" + _certified_review()
+    html = (
+        "<article><p>Draft Agreement (non-binding template)</p><pre>"
+        + escape(mix)
+        + "</pre></article>"
+    )
+    try:
+        built = agreement_rendered_html_to_pdf_bytes(html, title="Services Agreement")
+    except Exception:
+        return None
+    raw = built.pdf_bytes
+    if not raw or not raw.startswith(b"%PDF"):
+        return None
+    return raw
+
+
 def _persist_review_story_pdf_bytes() -> bytes | None:
-    """Seed-shaped Story PDF of persist Review (truncated extract, same renderer)."""
+    """Leftover Story chrome wrapping persist Review spans — not persist Review."""
     try:
         from backend.services.agreement_vs01_pdf_seed import agreement_rendered_html_to_pdf_bytes
     except Exception:
@@ -379,11 +432,40 @@ def test_refuse_only_when_packet_is_not_persist_review(monkeypatch):
     ).strip().encode("utf-8")
     assert leftover_get_content_must_refuse(leftover_shared_10_11, {"agreement_id": "ag_persist"}) is True
     assert packet_is_persist_review_corpus(leftover_shared_10_11, _certified_review()) is False
+    leftover_mix_plain = _leftover_story_banner_plus_persist_review_spans_packet_plain().encode(
+        "utf-8"
+    )
+    leftover_mix_extract = extract_plain_from_document_bytes(leftover_mix_plain)
+    assert "Draft Agreement (non-binding template)" in leftover_mix_extract
+    assert "Designer will provide the deliverables" in leftover_mix_extract
+    assert "10. LIABILITY" in leftover_mix_extract
+    assert "11. GOVERNING LAW" in leftover_mix_extract
+    assert "12. NOTICES" in leftover_mix_extract
+    assert packet_is_persist_review_corpus(leftover_mix_plain, _certified_review()) is False
+    assert leftover_get_content_must_refuse(leftover_mix_plain, {"agreement_id": "ag_persist"}) is True
+    leftover_mix_story = _leftover_story_banner_plus_persist_review_spans_packet_bytes()
+    if leftover_mix_story is not None:
+        leftover_mix_story_extract = extract_plain_from_document_bytes(leftover_mix_story)
+        assert "Draft Agreement (non-binding template)" in leftover_mix_story_extract
+        assert "10. LIABILITY" in leftover_mix_story_extract
+        assert packet_is_persist_review_corpus(leftover_mix_story, _certified_review()) is False
+        assert leftover_get_content_must_refuse(
+            leftover_mix_story, {"agreement_id": "ag_persist"}
+        ) is True
     persist_story = _persist_review_story_pdf_bytes()
     assert persist_story is not None
     assert persist_story.startswith(b"%PDF")
-    assert packet_is_persist_review_corpus(persist_story, _certified_review()) is True
-    assert leftover_get_content_must_refuse(persist_story, {"agreement_id": "ag_persist"}) is False
+    persist_story_extract = extract_plain_from_document_bytes(persist_story)
+    assert "Draft Agreement (non-binding template)" in persist_story_extract
+    assert "10. LIABILITY" in persist_story_extract
+    assert packet_is_persist_review_corpus(persist_story, _certified_review()) is False
+    assert leftover_get_content_must_refuse(persist_story, {"agreement_id": "ag_persist"}) is True
+    persist_seed = _persist_review_seed_pdf_bytes()
+    if persist_seed is not None:
+        persist_seed_extract = extract_plain_from_document_bytes(persist_seed)
+        assert "Draft Agreement (non-binding template)" not in persist_seed_extract
+        assert packet_is_persist_review_corpus(persist_seed, _certified_review()) is True
+        assert leftover_get_content_must_refuse(persist_seed, {"agreement_id": "ag_persist"}) is False
     leftover_clean_story = _leftover_clean_story_pdf_bytes()
     assert leftover_clean_story is not None
     assert leftover_clean_story.startswith(b"%PDF")
@@ -973,6 +1055,88 @@ def test_leftover_story_banner_packet_seeds_persist_review_when_denorm_public_fr
         )
         assert seeded.status_code == 200, seeded.text
         assert seeded.json()["document_id"] == doc_id
+
+        subsequent = client.get(f"/v1/documents/{doc_id}/content", headers=_ORIGIN_H)
+        assert subsequent.status_code == 200, subsequent.text
+        assert b"leftover_fused_content" not in subsequent.content
+        extract = extract_plain_from_document_bytes(subsequent.content)
+        _assert_extract_is_persist_review_pro(extract, certified)
+        assert "Draft Agreement (non-binding template)" not in extract
+        assert packet_is_persist_review_corpus(subsequent.content, certified) is True
+        assert leftover_get_content_must_refuse(subsequent.content, {"agreement_id": aid}) is False
+
+    after = load_draft(aid)
+    pr = after.get("pro_redline_v1") if isinstance(after.get("pro_redline_v1"), dict) else {}
+    rf = pr.get("review_first_final_corpus") if isinstance(pr, dict) else None
+    if isinstance(rf, dict):
+        assert str(rf.get("source") or "") != "vs01_signing_seed_persist_review"
+
+
+def test_leftover_story_banner_plus_persist_review_spans_get_409_then_seed_200(
+    monkeypatch, tmp_path
+):
+    """Leftover Story chrome + leftover 8-section + persist Review spans is leftover GET 409."""
+    pytest.importorskip("openai")
+    pytest.importorskip("eth_abi")
+    pytest.importorskip("fitz")
+    from fastapi.testclient import TestClient
+    from backend.main import app
+    from backend.services.agreement_draft_store import load_draft
+    from backend.tests.entitlement_test_support import ensure_headers_entitled
+
+    _env(monkeypatch, tmp_path)
+    client = TestClient(app, raise_server_exceptions=False)
+    aid = _create_agreement(client)
+    certified = _certified_review()
+    leftover_designer = _leftover_eight_section_designer()
+    leftover_mix_plain = _leftover_story_banner_plus_persist_review_spans_packet_plain().encode(
+        "utf-8"
+    )
+    leftover_mix_story = (
+        _leftover_story_banner_plus_persist_review_spans_packet_bytes() or leftover_mix_plain
+    )
+    leftover_mix_extract = extract_plain_from_document_bytes(leftover_mix_plain)
+    leftover_mix_story_extract = extract_plain_from_document_bytes(leftover_mix_story)
+    assert "Draft Agreement (non-binding template)" in leftover_mix_extract
+    assert "Designer will provide the deliverables" in leftover_mix_extract
+    assert "10. LIABILITY" in leftover_mix_extract
+    assert "11. GOVERNING LAW" in leftover_mix_extract
+    assert "12. NOTICES" in leftover_mix_extract
+    assert "Draft Agreement (non-binding template)" in leftover_mix_story_extract
+    assert "10. LIABILITY" in leftover_mix_story_extract
+    assert packet_is_persist_review_corpus(leftover_mix_plain, certified) is False
+    assert leftover_get_content_must_refuse(leftover_mix_plain, {"agreement_id": aid}) is False
+    _persist_and_accept(client, aid, certified)
+    assert persist_review_plain_for_agreement(aid) == certified
+    assert leftover_get_content_must_refuse(leftover_mix_plain, {"agreement_id": aid}) is True
+    assert leftover_get_content_must_refuse(leftover_mix_story, {"agreement_id": aid}) is True
+    assert packet_is_persist_review_corpus(leftover_mix_story, certified) is False
+
+    seed_headers = ensure_headers_entitled(dict(_ORG_H))
+    for raw, suffix in (
+        (leftover_mix_plain, "mixplainaaaaaaaaaaaaaaaaaaaaaa"),
+        (leftover_mix_story, "mixstoryaaaaaaaaaaaaaaaaaaaaaa"),
+    ):
+        doc_id = f"doc_{suffix}"
+        _put_document(aid, doc_id, raw)
+        refused = client.get(f"/v1/documents/{doc_id}/content", headers=_ORIGIN_H)
+        assert refused.status_code == 409, refused.text
+        body = refused.json()
+        assert body["error"] == "leftover_fused_content"
+        assert body["code"] == FIRST_FAILING_LEFTOVER_GET_CONTENT_PAINTS_BEFORE_PERSIST_REVIEW_REPLACE
+        assert raw not in refused.content
+        assert b"Draft Agreement (non-binding template)" not in refused.content
+
+        seeded = client.post(
+            f"/api/agreements/{aid}/vs01-signing-seed",
+            headers=seed_headers,
+            json={"signing_corpus_plain": leftover_designer, "document_id": doc_id},
+        )
+        assert seeded.status_code == 200, seeded.text
+        assert seeded.json()["document_id"] == doc_id
+        seed_extract = extract_plain_from_document_bytes(seeded.content)
+        if seed_extract:
+            assert "Draft Agreement (non-binding template)" not in seed_extract
 
         subsequent = client.get(f"/v1/documents/{doc_id}/content", headers=_ORIGIN_H)
         assert subsequent.status_code == 200, subsequent.text
