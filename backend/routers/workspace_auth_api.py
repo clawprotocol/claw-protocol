@@ -463,7 +463,10 @@ async def finalize_auth(request: Request, body: FinalizeAuthIn) -> Dict[str, Any
         continuation_org=str(cont_row.get("org_id") or ""),
         target_org_id=org_id,
     )
-    ensure_organization(org_id, name=user_id)
+    try:
+        ensure_organization(org_id, name=user_id)
+    except Exception:
+        _log.warning("ensure_organization_fail_soft org_id=%s", org_id)
     _persist_workspace_user_identity(
         request,
         user_id=user_id,
@@ -601,7 +604,10 @@ async def bind_user_org(request: Request, body: BindUserOrgIn) -> Dict[str, Any]
         affiliate_candidate=body.affiliate_candidate,
     )
 
-    ensure_organization(org_id, name=display)
+    try:
+        ensure_organization(org_id, name=display)
+    except Exception:
+        _log.warning("ensure_organization_fail_soft org_id=%s", org_id)
     _persist_workspace_user_identity(
         request,
         user_id=user_id,
