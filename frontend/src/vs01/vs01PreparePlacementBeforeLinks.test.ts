@@ -209,6 +209,8 @@ describe("Prepare click reaches placement before links-ready", () => {
     expect(block).toContain("existingDoc");
     expect(block).toContain("readPaidProVs01PostSignHandoff");
     expect(block).toContain("fetchAgreementVs01SigningSeed");
+    expect(block).toContain("[agreement-vs01-existing-bind-failed]");
+    expect(block).not.toMatch(/if \(!server\.ok\) return false/);
     expect(block).not.toMatch(/resend|sendEmail|send_mail/i);
 
     const wizard = readFileSync(join(__dirname, "Vs01Wizard.tsx"), "utf8");

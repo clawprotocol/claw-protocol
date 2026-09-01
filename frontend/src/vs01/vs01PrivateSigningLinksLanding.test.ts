@@ -6,14 +6,19 @@ import {
   FIRST_FAILING_PACKET_READY_REMOUNT_PREDICATE,
   FIRST_FAILING_PREPARE_LANDING_PREDICATE,
   PACKET_READY_MUST_NOT_WIN_REASON,
+  PACKET_READY_MUST_OPEN_ESIGN_DOC_ROUTE,
+  PACKET_READY_REMOUNT_OPEN_ESIGN_DOC_REASON,
   PACKET_READY_REMOUNT_REWRITE_REASON,
   PACKET_READY_REMOUNT_STAY_CREATE_REASON,
   PAID_PRO_CREATE_REVIEW_PATH,
   RECIPIENT_ACCESS_TOKEN_409_STAY_REASON,
   bindPacketReadyRemountResume,
+  isPacketReadyDocRoute,
   isPaidProCreateReviewPath,
   isPaidProPacketReadyDashboardPath,
+  packetReadyDocRouteOrNull,
   packetReadyQueryFromSearch,
+  packetReadyWithoutDocRoute,
   privateSigningLinksRoute,
   resolveActivePacketReadyRemountContext,
   resolvePacketReadyRemountLanding,
@@ -65,7 +70,35 @@ describe("remount Prepare → seed ok → stay on private signing-links", () => 
     expect(isPaidProPacketReadyDashboardPath(recoverFromDashboard.navigateTo ?? "")).toBe(false);
   });
 
-  it("vs01_packet_ready must not win over the create/review links surface", () => {
+  it("FAILs packet-ready without a doc_* route — /app/create is not a substitute", () => {
+    expect(isPacketReadyDocRoute("/app/create")).toBe(false);
+    expect(isPacketReadyDocRoute("/app/esign")).toBe(false);
+    expect(isPacketReadyDocRoute(privateSigningLinksRoute(""))).toBe(false);
+    expect(isPacketReadyDocRoute(`/app/esign/${DOC_ID}`)).toBe(true);
+    expect(packetReadyDocRouteOrNull(DOC_ID)).toBe(`/app/esign/${DOC_ID}`);
+    expect(packetReadyWithoutDocRoute({
+      documentId: DOC_ID,
+      currentPath: "/app/create",
+      navigateTo: null,
+    })).toBe(true);
+
+    const fromCreate = resolvePostPrepareBuyerSurface({
+      seedOk: true,
+      documentId: DOC_ID,
+      currentPath: "/app/create",
+    });
+    expect(fromCreate.navigateTo).toBe(`/app/esign/${DOC_ID}`);
+    expect(fromCreate.reason).toBe(PACKET_READY_MUST_OPEN_ESIGN_DOC_ROUTE);
+    expect(isPacketReadyDocRoute(fromCreate.navigateTo ?? "")).toBe(true);
+    expect(packetReadyWithoutDocRoute({
+      documentId: DOC_ID,
+      currentPath: "/app/create",
+      navigateTo: fromCreate.navigateTo,
+    })).toBe(false);
+    expect(isPaidProPacketReadyDashboardPath(fromCreate.navigateTo ?? "")).toBe(false);
+  });
+
+  it("vs01_packet_ready must not win over an already-open esign doc_* route", () => {
     const createReview = resolvePostPrepareBuyerSurface({
       seedOk: true,
       documentId: DOC_ID,
@@ -74,8 +107,9 @@ describe("remount Prepare → seed ok → stay on private signing-links", () => 
       createReviewLinksSurfaceActive: true,
     });
     expect(createReview.stayOnPrivateLinks).toBe(true);
-    expect(createReview.navigateTo).toBeNull();
-    expect(createReview.reason).toBe(PACKET_READY_MUST_NOT_WIN_REASON);
+    expect(createReview.navigateTo).toBe(`/app/esign/${DOC_ID}`);
+    expect(createReview.reason).toBe(PACKET_READY_MUST_OPEN_ESIGN_DOC_ROUTE);
+    expect(isPacketReadyDocRoute(createReview.navigateTo ?? "")).toBe(true);
     expect(isPaidProPacketReadyDashboardPath("/app?vs01_packet_ready=1")).toBe(true);
 
     const esignWithQuery = resolvePostPrepareBuyerSurface({
@@ -87,6 +121,11 @@ describe("remount Prepare → seed ok → stay on private signing-links", () => 
     expect(esignWithQuery.stayOnPrivateLinks).toBe(true);
     expect(esignWithQuery.navigateTo).toBeNull();
     expect(esignWithQuery.reason).toBe(PACKET_READY_MUST_NOT_WIN_REASON);
+    expect(packetReadyWithoutDocRoute({
+      documentId: DOC_ID,
+      currentPath: `/app/esign/${DOC_ID}`,
+      navigateTo: esignWithQuery.navigateTo,
+    })).toBe(false);
   });
 
   it("recipient-access-token 409 does not navigate to the dashboard", () => {
@@ -165,29 +204,67 @@ describe("packet-ready remount / hard refresh stays off the owner dashboard", ()
     expect(isPaidProCreateReviewPath(`/app/create?checkout_session_id=cs_live`)).toBe(true);
   });
 
-  it("remount/refresh with packet-prepared + vs01_packet_ready=1 rewrites to Review, not the list", () => {
+  it("remount/refresh with packet-prepared + vs01_packet_ready=1 opens /app/esign/doc_*, not the list", () => {
     const landing = resolvePacketReadyRemountLanding({
       currentPath: "/app?vs01_packet_ready=1",
       documentId: DOC_ID,
       packetPrepared: true,
     });
     expect(landing.stayOffDashboard).toBe(true);
-    expect(landing.navigateTo).toBe(PAID_PRO_CREATE_REVIEW_PATH);
-    expect(landing.reason).toBe(PACKET_READY_REMOUNT_REWRITE_REASON);
+    expect(landing.navigateTo).toBe(`/app/esign/${DOC_ID}`);
+    expect(landing.reason).toBe(PACKET_READY_REMOUNT_OPEN_ESIGN_DOC_REASON);
+    expect(isPacketReadyDocRoute(landing.navigateTo ?? "")).toBe(true);
+    expect(packetReadyWithoutDocRoute({
+      documentId: DOC_ID,
+      currentPath: "/app?vs01_packet_ready=1",
+      navigateTo: landing.navigateTo,
+    })).toBe(false);
     expect(isPaidProPacketReadyDashboardPath(landing.navigateTo ?? "")).toBe(false);
     expect(landing.navigateTo).not.toBe("/app");
+    expect(landing.navigateTo).not.toBe(PAID_PRO_CREATE_REVIEW_PATH);
   });
 
-  it("paid-return create URL does not navigate to the dashboard when packet-prepared", () => {
+  it("packet-ready remount without a doc_* stays off the dashboard (does not invent leftover esign)", () => {
+    const landing = resolvePacketReadyRemountLanding({
+      currentPath: "/app?vs01_packet_ready=1",
+      documentId: "",
+      packetPrepared: true,
+    });
+    expect(landing.stayOffDashboard).toBe(true);
+    expect(landing.navigateTo).toBe(PAID_PRO_CREATE_REVIEW_PATH);
+    expect(landing.reason).toBe(PACKET_READY_REMOUNT_REWRITE_REASON);
+    expect(isPacketReadyDocRoute(landing.navigateTo ?? "")).toBe(false);
+    expect(isPaidProPacketReadyDashboardPath(landing.navigateTo ?? "")).toBe(false);
+  });
+
+  it("paid-return create URL opens /app/esign/doc_* when packet-prepared — not the quiz, not the dashboard", () => {
     const landing = resolvePacketReadyRemountLanding({
       currentPath: `/app/create?checkout_session_id=cs_dd37f0e4`,
       documentId: DOC_ID,
       packetPrepared: true,
     });
     expect(landing.stayOffDashboard).toBe(true);
+    expect(landing.navigateTo).toBe(`/app/esign/${DOC_ID}`);
+    expect(landing.reason).toBe(PACKET_READY_REMOUNT_OPEN_ESIGN_DOC_REASON);
+    expect(isPacketReadyDocRoute(landing.navigateTo ?? "")).toBe(true);
+    expect(packetReadyWithoutDocRoute({
+      documentId: DOC_ID,
+      currentPath: "/app/create?checkout_session_id=cs_dd37f0e4",
+      navigateTo: landing.navigateTo,
+    })).toBe(false);
+    expect(isPaidProPacketReadyDashboardPath(landing.navigateTo ?? "/app/create")).toBe(false);
+  });
+
+  it("paid-return create without a doc_* stays on create (no leftover esign)", () => {
+    const landing = resolvePacketReadyRemountLanding({
+      currentPath: `/app/create?checkout_session_id=cs_dd37f0e4`,
+      documentId: "",
+      packetPrepared: true,
+    });
+    expect(landing.stayOffDashboard).toBe(true);
     expect(landing.navigateTo).toBeNull();
     expect(landing.reason).toBe(PACKET_READY_REMOUNT_STAY_CREATE_REASON);
-    expect(isPaidProPacketReadyDashboardPath(landing.navigateTo ?? "/app/create")).toBe(false);
+    expect(isPacketReadyDocRoute(landing.navigateTo ?? "/app/create")).toBe(false);
   });
 
   it("esign remount stays on private-links step 3 and 409 does not eject to dashboard", () => {

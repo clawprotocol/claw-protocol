@@ -205,7 +205,8 @@ function AgreementSignGate(props: {
 
 /**
  * `/app?vs01_packet_ready=1` is `matchAppPath` → owner dashboard list.
- * Remount / hard refresh must rewrite to Review (or stay off the list).
+ * Remount / hard refresh must open `/app/esign/{doc_*}` when a packet exists,
+ * else Review — never the owner list.
  */
 function RedirectPacketReadyDashboardAwayFromList() {
   const { navigate } = useLaunchNav();

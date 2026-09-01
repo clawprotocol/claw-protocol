@@ -1000,52 +1000,62 @@ export async function tryNavigatePaidProAgreementSenderFirstVs01Esign(options: {
       draft: mergedWithCorpus,
       signingCorpusSource: handoff?.source ?? corpusResolution.source,
     });
-    if (!server.ok) return false;
-    const boundDoc = server.documentId;
-    if (boundDoc !== existingDoc) {
-      const priorHandoff = readPaidProVs01PostSignHandoff(id);
-      if (priorHandoff) {
-        writePaidProVs01PostSignHandoff({
-          ...priorHandoff,
-          vs01DocumentId: boundDoc,
-          signers: priorHandoff.signers.map((row) => ({
-            ...row,
-            signingUrl: (row.signingUrl || "").replace(existingDoc, boundDoc),
-          })),
-          ownerSigningUrl: priorHandoff.ownerSigningUrl
-            ? priorHandoff.ownerSigningUrl.replace(existingDoc, boundDoc)
-            : priorHandoff.ownerSigningUrl,
-        });
+    if (!server.ok) {
+      // Leftover / stale seed bind failed. Seed a new packet for this persist
+      // Review — do not open leftover esign or fail into the intake quiz.
+      // eslint-disable-next-line no-console
+      console.warn("[agreement-vs01-existing-bind-failed]", {
+        agreementId: id,
+        existingDocumentId: existingDoc,
+        reason: server.reason,
+      });
+    } else {
+      const boundDoc = server.documentId;
+      if (boundDoc !== existingDoc) {
+        const priorHandoff = readPaidProVs01PostSignHandoff(id);
+        if (priorHandoff) {
+          writePaidProVs01PostSignHandoff({
+            ...priorHandoff,
+            vs01DocumentId: boundDoc,
+            signers: priorHandoff.signers.map((row) => ({
+              ...row,
+              signingUrl: (row.signingUrl || "").replace(existingDoc, boundDoc),
+            })),
+            ownerSigningUrl: priorHandoff.ownerSigningUrl
+              ? priorHandoff.ownerSigningUrl.replace(existingDoc, boundDoc)
+              : priorHandoff.ownerSigningUrl,
+          });
+        }
       }
+      logSignerMetadataBeforeVs01Bridge(merged, resolvedSetup);
+      logAgreementVs01RecipientEmailMergeDiagnostics(merged, recipientSetupPlausibleInputFlags(resolvedSetup));
+      const reusedBridge = buildAgreementVs01BridgeSession({
+        agreementId: id,
+        vs01DocumentId: boundDoc,
+        draft: mergedWithCorpus,
+        senderFirstLawdogHandoff: true,
+        reviewerApprovedCleanHandoff: Boolean(options.reviewerApprovedCleanHandoff),
+        agreementCorpusText: corpusResolution.corpus,
+        recipientSetup: resolvedSetup,
+      });
+      logAgreementVs01BridgePreflight(reusedBridge);
+      logVs01BridgeSignerMetadata(reusedBridge);
+      writeAgreementVs01BridgeSession(reusedBridge);
+      setPaidProAgreementBridgeSkipMarker(boundDoc);
+      const route = `/app/esign/${encodeURIComponent(boundDoc)}?agreement_bridge=1`;
+      logAgreementToVs01EsignRoute({
+        agreementId: id,
+        seedDocumentId: boundDoc,
+        route,
+        reason: server.reason,
+        replacedServerContent: server.replaced,
+        fetchedWasTemplate: server.fetchedWasTemplate,
+        agreementBridgeMode: reusedBridge.agreementBridgeMode ?? null,
+        ownerIsPreparingPacket: reusedBridge.ownerIsPreparingPacket ?? null,
+      });
+      void options.navigate(route);
+      return true;
     }
-    logSignerMetadataBeforeVs01Bridge(merged, resolvedSetup);
-    logAgreementVs01RecipientEmailMergeDiagnostics(merged, recipientSetupPlausibleInputFlags(resolvedSetup));
-    const reusedBridge = buildAgreementVs01BridgeSession({
-      agreementId: id,
-      vs01DocumentId: boundDoc,
-      draft: mergedWithCorpus,
-      senderFirstLawdogHandoff: true,
-      reviewerApprovedCleanHandoff: Boolean(options.reviewerApprovedCleanHandoff),
-      agreementCorpusText: corpusResolution.corpus,
-      recipientSetup: resolvedSetup,
-    });
-    logAgreementVs01BridgePreflight(reusedBridge);
-    logVs01BridgeSignerMetadata(reusedBridge);
-    writeAgreementVs01BridgeSession(reusedBridge);
-    setPaidProAgreementBridgeSkipMarker(boundDoc);
-    const route = `/app/esign/${encodeURIComponent(boundDoc)}?agreement_bridge=1`;
-    logAgreementToVs01EsignRoute({
-      agreementId: id,
-      seedDocumentId: boundDoc,
-      route,
-      reason: server.reason,
-      replacedServerContent: server.replaced,
-      fetchedWasTemplate: server.fetchedWasTemplate,
-      agreementBridgeMode: reusedBridge.agreementBridgeMode ?? null,
-      ownerIsPreparingPacket: reusedBridge.ownerIsPreparingPacket ?? null,
-    });
-    void options.navigate(route);
-    return true;
   }
 
   const vs01Seed = await fetchAgreementVs01SigningSeed(

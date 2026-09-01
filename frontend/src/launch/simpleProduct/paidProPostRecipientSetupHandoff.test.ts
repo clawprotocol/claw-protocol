@@ -11,6 +11,7 @@ describe("paidProPostRecipientSetupHandoff", () => {
     expect(s).toContain("[send-flow-vs01-bridge-success]");
     expect(s).toContain("[send-flow-vs01-bridge-failed]");
     expect(s).toContain("tryNavigatePaidProAgreementSenderFirstVs01Esign");
+    expect(s).toContain('userMessage: "We could not open the e-sign workspace. Try again in a moment."');
     expect(s).toContain("assertGuidedProVs01BridgeCorpusReady");
     expect(s).toContain("resolveGuidedVs01SigningHandoffForBridge");
     expect(s).toContain("mergeAgreementDraftWithGuidedSigningHandoff");

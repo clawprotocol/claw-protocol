@@ -12,8 +12,9 @@
  * packet-ready URL still boots the owner list — see
  * `FIRST_FAILING_PACKET_READY_REMOUNT_PREDICATE`.
  *
- * Last-good surface: `/app/esign/:documentId` StepSigningPacketStatus
- * (per-signer private links, nothing emailed), or Review Prepare cards.
+ * Last-good surface after Prepare: `/app/esign/{doc_*}`
+ * (AppEsignDocumentShell / Vs01CanonicalSigningPage). `/app/create` plus
+ * Retry Pro draft / intake quiz is not a packet-ready substitute.
  */
 
 import { readCreateReviewAgreementResumeId, writeCreateReviewAgreementResumeId } from "../components/agreements/agreementIntakeStorage";
@@ -37,6 +38,8 @@ export const FIRST_FAILING_PACKET_READY_REMOUNT_PREDICATE =
 
 export const PRIVATE_SIGNING_LINKS_STAY_REASON = "stay_on_private_signing_links" as const;
 export const PACKET_READY_MUST_NOT_WIN_REASON = "packet_ready_must_not_win_over_links_surface" as const;
+export const PACKET_READY_MUST_OPEN_ESIGN_DOC_ROUTE =
+  "packet_ready_must_open_esign_doc_route" as const;
 export const RECIPIENT_ACCESS_TOKEN_409_STAY_REASON = "recipient_access_token_409_stay" as const;
 
 export type PostPrepareBuyerSurface = {
@@ -46,6 +49,7 @@ export type PostPrepareBuyerSurface = {
   reason:
     | typeof PRIVATE_SIGNING_LINKS_STAY_REASON
     | typeof PACKET_READY_MUST_NOT_WIN_REASON
+    | typeof PACKET_READY_MUST_OPEN_ESIGN_DOC_ROUTE
     | typeof RECIPIENT_ACCESS_TOKEN_409_STAY_REASON;
   step: 3;
 };
@@ -78,6 +82,32 @@ export function isPrivateSigningLinksRoute(path: string): boolean {
   return pathnameOf(path).includes("/app/esign/");
 }
 
+/** Packet-ready success is `/app/esign/doc_*` only — never `/app/create` or `/app/esign` without an id. */
+export function isPacketReadyDocRoute(path: string): boolean {
+  return /^\/app\/esign\/doc_[A-Za-z0-9._-]+$/.test(pathnameOf(path));
+}
+
+export function packetReadyDocRouteOrNull(documentId: string): string | null {
+  const did = documentId.trim();
+  if (!did.startsWith("doc_")) return null;
+  return `/app/esign/${encodeURIComponent(did)}`;
+}
+
+/**
+ * True when this landing claims packet-ready (has a `doc_*`) but does not open that route.
+ * Tests must fail this predicate.
+ */
+export function packetReadyWithoutDocRoute(args: {
+  documentId: string;
+  currentPath: string;
+  navigateTo: string | null;
+}): boolean {
+  const dest = packetReadyDocRouteOrNull(args.documentId);
+  if (!dest) return false;
+  const resolved = (args.navigateTo || "").trim() || args.currentPath;
+  return !isPacketReadyDocRoute(resolved);
+}
+
 export function isCreateReviewLinksSurface(path: string, createReviewLinksSurfaceActive?: boolean): boolean {
   if (createReviewLinksSurfaceActive) return true;
   const p = pathnameOf(path);
@@ -103,36 +133,43 @@ export function resolvePostPrepareBuyerSurface(args: {
   recipientAccessTokenStatus?: number | null;
   createReviewLinksSurfaceActive?: boolean;
 }): PostPrepareBuyerSurface {
+  void args.createReviewLinksSurfaceActive;
+  const docRoute = packetReadyDocRouteOrNull(args.documentId);
+  const alreadyOnThisDoc = Boolean(docRoute && pathnameOf(args.currentPath) === pathnameOf(docRoute));
   const onPrivateLinks = isPrivateSigningLinksRoute(args.currentPath);
-  const onCreateReview = isCreateReviewLinksSurface(
-    args.currentPath,
-    args.createReviewLinksSurfaceActive,
-  );
-  const linksSurfaceActive = onPrivateLinks || onCreateReview;
 
   if (args.recipientAccessTokenStatus === 409) {
+    if (alreadyOnThisDoc || (onPrivateLinks && !docRoute)) {
+      return {
+        stayOnPrivateLinks: true,
+        navigateTo: null,
+        reason: RECIPIENT_ACCESS_TOKEN_409_STAY_REASON,
+        step: 3,
+      };
+    }
     return {
       stayOnPrivateLinks: true,
-      navigateTo: onPrivateLinks || onCreateReview ? null : privateSigningLinksRoute(args.documentId),
+      navigateTo: docRoute,
       reason: RECIPIENT_ACCESS_TOKEN_409_STAY_REASON,
       step: 3,
     };
   }
 
-  if (args.packetReadyQuery && linksSurfaceActive) {
+  if (args.seedOk && docRoute) {
+    if (alreadyOnThisDoc) {
+      return {
+        stayOnPrivateLinks: true,
+        navigateTo: null,
+        reason: args.packetReadyQuery
+          ? PACKET_READY_MUST_NOT_WIN_REASON
+          : PRIVATE_SIGNING_LINKS_STAY_REASON,
+        step: 3,
+      };
+    }
     return {
       stayOnPrivateLinks: true,
-      navigateTo: null,
-      reason: PACKET_READY_MUST_NOT_WIN_REASON,
-      step: 3,
-    };
-  }
-
-  if (args.seedOk && !onPrivateLinks && !onCreateReview) {
-    return {
-      stayOnPrivateLinks: true,
-      navigateTo: privateSigningLinksRoute(args.documentId),
-      reason: PRIVATE_SIGNING_LINKS_STAY_REASON,
+      navigateTo: docRoute,
+      reason: PACKET_READY_MUST_OPEN_ESIGN_DOC_ROUTE,
       step: 3,
     };
   }
@@ -158,6 +195,8 @@ export function shouldHonorPacketReadyAsDashboardLanding(): boolean {
 export const PAID_PRO_CREATE_REVIEW_PATH = "/app/create" as const;
 export const PACKET_READY_REMOUNT_REWRITE_REASON = "rewrite_packet_ready_dashboard_to_create_review" as const;
 export const PACKET_READY_REMOUNT_STAY_CREATE_REASON = "paid_return_create_stays_off_dashboard" as const;
+export const PACKET_READY_REMOUNT_OPEN_ESIGN_DOC_REASON =
+  "packet_ready_remount_opens_esign_doc_route" as const;
 
 export type PacketReadyRemountLanding = {
   stayOffDashboard: true;
@@ -166,6 +205,7 @@ export type PacketReadyRemountLanding = {
   reason:
     | typeof PACKET_READY_REMOUNT_REWRITE_REASON
     | typeof PACKET_READY_REMOUNT_STAY_CREATE_REASON
+    | typeof PACKET_READY_REMOUNT_OPEN_ESIGN_DOC_REASON
     | typeof PRIVATE_SIGNING_LINKS_STAY_REASON
     | typeof RECIPIENT_ACCESS_TOKEN_409_STAY_REASON;
 };
@@ -247,7 +287,8 @@ export function bindPacketReadyRemountResume(agreementId: string): void {
 /**
  * Hard refresh / remount of a signer-finalized or packet-prepared persist.
  * Never land on `/app` or `/app?vs01_packet_ready=1`.
- * Create/review and esign stay. Dashboard packet-ready rewrites to Review.
+ * A `doc_*` packet opens `/app/esign/{doc_*}` — `/app/create` is not a substitute.
+ * Without a `doc_*`, create/review stays so leftover esign is not invented.
  */
 export function resolvePacketReadyRemountLanding(args: {
   currentPath: string;
@@ -256,15 +297,40 @@ export function resolvePacketReadyRemountLanding(args: {
   recipientAccessTokenStatus?: number | null;
 }): PacketReadyRemountLanding {
   void args.packetPrepared;
+  const docRoute = packetReadyDocRouteOrNull(args.documentId ?? "");
+  const alreadyOnThisDoc = Boolean(docRoute && pathnameOf(args.currentPath) === pathnameOf(docRoute));
   const onPrivateLinks = isPrivateSigningLinksRoute(args.currentPath);
-  const onCreateReview = isCreateReviewLinksSurface(args.currentPath) || isPaidProCreateReviewPath(args.currentPath);
-  const did = (args.documentId || "").trim();
+  const onCreateReview =
+    isCreateReviewLinksSurface(args.currentPath) || isPaidProCreateReviewPath(args.currentPath);
 
   if (args.recipientAccessTokenStatus === 409) {
+    if (alreadyOnThisDoc || onPrivateLinks) {
+      return {
+        stayOffDashboard: true,
+        navigateTo: null,
+        reason: RECIPIENT_ACCESS_TOKEN_409_STAY_REASON,
+      };
+    }
     return {
       stayOffDashboard: true,
-      navigateTo: onPrivateLinks || onCreateReview ? null : did ? privateSigningLinksRoute(did) : PAID_PRO_CREATE_REVIEW_PATH,
+      navigateTo: docRoute ?? (onCreateReview ? null : PAID_PRO_CREATE_REVIEW_PATH),
       reason: RECIPIENT_ACCESS_TOKEN_409_STAY_REASON,
+    };
+  }
+
+  if (alreadyOnThisDoc) {
+    return {
+      stayOffDashboard: true,
+      navigateTo: null,
+      reason: PRIVATE_SIGNING_LINKS_STAY_REASON,
+    };
+  }
+
+  if (docRoute) {
+    return {
+      stayOffDashboard: true,
+      navigateTo: docRoute,
+      reason: PACKET_READY_REMOUNT_OPEN_ESIGN_DOC_REASON,
     };
   }
 
