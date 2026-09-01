@@ -869,7 +869,7 @@ export function Vs01Wizard({
 
         // Always set prepareCorpusText from certified persist Review / restored
         // bridge after ensure and/or frozen restore. Do not wait on
-        // hydrateLocalPaidProBridge corpus-length gate or hung bind-user-org.
+        // hydrateLocalPaidProBridge corpus-length gate or a hung workspace bind.
         const remountCorpus = resolveRemountPrepareCorpusText({
           persistReviewCorpus,
           restoredBridgeCorpus,

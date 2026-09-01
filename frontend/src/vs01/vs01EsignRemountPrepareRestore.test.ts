@@ -339,7 +339,7 @@ describe("esign remount Prepare dual-party fields (not empty self-sign)", () => 
     expect(hydrateAt).toBeGreaterThan(remountCorpusAt);
     expect(wizard.slice(restoreAt, hydrateAt)).toContain("setPrepareCorpusText");
     expect(wizard.slice(restoreAt, hydrateAt)).not.toMatch(
-      /bind-user-org|bindUserOrg|bindAuthenticatedUserToWorkspace/,
+      /bindAuthenticatedUserToWorkspace|workspaceBindingApi/,
     );
     expect(wizard).not.toContain("doc_e959491fdcef431c96052cbb74e0fdaf");
     expect(wizard).not.toContain("8a1057ee-df0a-4c0a-9c15-2817401ff962");
@@ -552,9 +552,11 @@ describe("esign remount Prepare dual-party fields (not empty self-sign)", () => 
     ).toBe(true);
   });
 
-  it("remount Prepare corpus hydrate is sync and is not gated on bind-user-org", () => {
+  it("remount Prepare corpus hydrate is sync and is not gated on workspace bind", () => {
     const src = readFileSync(join(__dirname, "vs01EsignRemountPrepareRestore.ts"), "utf8");
-    expect(src).not.toMatch(/bind-user-org|bindUserOrg|bindAuthenticatedUserToWorkspace/);
+    expect(src).not.toMatch(/bindAuthenticatedUserToWorkspace|workspaceBindingApi/);
+    expect(src).toMatch(/export function resolveRemountPrepareCorpusText\(/);
+    expect(src).not.toMatch(/export async function resolveRemountPrepareCorpusText/);
     const persistReview = servicesAgreementCorpus();
     const started = Date.now();
     const remountCorpus = resolveRemountPrepareCorpusText({

@@ -106,7 +106,7 @@ export type RemountPrepareCorpusTextResult =
 /**
  * Certified persist Review / restored bridge corpus for remount Prepare.
  * Same SoT as leftover remount (#155–#157). Does not invent a second corpus.
- * Synchronous — must not wait on bind-user-org.
+ * Synchronous — must not wait on workspace bind completing.
  */
 export function resolveRemountPrepareCorpusText(args: {
   persistReviewCorpus?: string | null;
