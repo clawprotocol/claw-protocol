@@ -11,7 +11,7 @@ const mockUser = {
   id: "supabase-user-already-bound",
   email: "bound@example.com",
   user_metadata: { full_name: "Bound User" },
-} as User;
+} as unknown as User;
 
 const mockSession = {
   user: mockUser,
@@ -19,14 +19,14 @@ const mockSession = {
 } as Session;
 
 const getAuthSession = vi.fn(async () => mockSession);
-const finalizeAuthenticatedSession = vi.fn(async () => ({
+const finalizeAuthenticatedSession = vi.fn(async (_args?: unknown) => ({
   destinationPath: "/app",
   migratedAgreementCount: 0,
   migratedAgreementIds: [],
   usedContinuation: false,
   usedFallback: true,
 }));
-const bindAuthenticatedUserToWorkspace = vi.fn(async () => ({
+const bindAuthenticatedUserToWorkspace = vi.fn(async (_args?: unknown) => ({
   ok: true,
   org_id: "user-supabase-user-already-bound",
   user_id: "supabase-user-already-bound",
