@@ -18,6 +18,8 @@ from backend.agreements.review_plain_section_continuity import (
 from backend.main import app
 from backend.services.accepted_review_snapshot import (
     get_review_hydration_snapshot,
+    is_leftover_starter_accepted_row,
+    leftover_accepted_vs_new_pending_continue,
     sha256_hex_text,
 )
 from backend.services.vs01_signing_envelope_provenance import (
@@ -1085,6 +1087,176 @@ def test_get_after_persist_returns_written_snapshot_not_leftover_accepted(
     assert "LOGO DESIGN AGREEMENT" not in corpus
     assert "[ORG_1]" not in corpus
     assert retrieved["snapshot_id"] != leftover_accepted["snapshot_id"]
+
+
+def test_leftover_starter_row_classifier_is_logo_org1_not_painted_services():
+    leftover = {
+        "status": "accepted",
+        "corpusPlain": _leftover_logo_org1_starter(),
+    }
+    painted = {
+        "status": "pending",
+        "corpusPlain": _painted_sequential_services_northline_harbor(),
+    }
+    commercial = {
+        "status": "accepted",
+        "corpusPlain": _corpus("COMMERCIAL"),
+    }
+    assert is_leftover_starter_accepted_row(leftover) is True
+    assert is_leftover_starter_accepted_row(painted) is False
+    assert is_leftover_starter_accepted_row(commercial) is False
+    assert "[ORG_1]" in leftover["corpusPlain"]
+    assert leftover["corpusPlain"].startswith("LOGO DESIGN AGREEMENT")
+    assert painted["corpusPlain"].startswith("SERVICES AGREEMENT")
+    assert "[ORG_1]" not in painted["corpusPlain"]
+
+    leftover["snapshotId"] = "crs_leftover_logo"
+    painted["snapshotId"] = "crs_painted_services"
+    painted["createdAt"] = "2026-09-01T00:00:00Z"
+    leftover["createdAt"] = "2026-08-01T00:00:00Z"
+    reg = {
+        "acceptedSnapshotId": "crs_leftover_logo",
+        "snapshots": {
+            "crs_leftover_logo": leftover,
+            "crs_painted_services": painted,
+        },
+    }
+    assert leftover_accepted_vs_new_pending_continue(
+        registry=reg, accepting_snapshot=painted
+    ) is True
+    assert leftover_accepted_vs_new_pending_continue(
+        registry=reg, accepting_snapshot=leftover
+    ) is False
+    commercial["snapshotId"] = "crs_commercial"
+    commercial_reg = {
+        "acceptedSnapshotId": "crs_commercial",
+        "snapshots": {
+            "crs_commercial": commercial,
+            "crs_painted_services": painted,
+        },
+    }
+    assert leftover_accepted_vs_new_pending_continue(
+        registry=commercial_reg, accepting_snapshot=painted
+    ) is False
+
+
+def test_accept_pending_persist_succeeds_over_leftover_accepted_logo_org1(
+    monkeypatch, tmp_path
+):
+    """POST painted sequential Review, GET matches, accept 200 despite leftover accepted."""
+    _env(monkeypatch, tmp_path)
+    client = TestClient(app)
+    aid = _create_agreement(client)
+    leftover = _leftover_logo_org1_starter()
+    leftover_accepted = _persist_and_accept(client, aid, leftover)
+    assert leftover_accepted["snapshot_id"]
+    assert leftover.startswith("LOGO DESIGN AGREEMENT")
+    assert "[ORG_1]" in leftover
+
+    painted = _painted_sequential_services_northline_harbor()
+    assert painted.startswith("SERVICES AGREEMENT")
+    assert "Northline Studio" in painted and "Harbor Marks LLC" in painted
+    assert collect_review_plain_top_level_section_numbers(painted) == list(range(1, 13))
+    assert "LOGO DESIGN AGREEMENT" not in painted
+    assert "[ORG_1]" not in painted
+
+    posted = client.post(
+        f"/api/agreements/{aid}/canonical-review-snapshot",
+        headers=_ORG_H,
+        json={
+            "corpus_plain": painted,
+            "generation_session_id": "gen_leftover_accept_continue",
+            "claimed_digest": sha256_hex_text(painted),
+        },
+    )
+    assert posted.status_code == 200, posted.text
+    snap = posted.json()["snapshot"]
+    assert snap["snapshot_id"] != leftover_accepted["snapshot_id"]
+    assert (snap.get("corpus_plain") or "").strip() == painted
+
+    got_pending = client.get(f"/api/agreements/{aid}/canonical-review-snapshot", headers=_ORG_H)
+    assert got_pending.status_code == 200, got_pending.text
+    pending_body = got_pending.json()
+    pending = pending_body["snapshot"]
+    assert pending_body.get("status") == "pending"
+    assert pending["snapshot_id"] == snap["snapshot_id"]
+    assert (pending.get("corpus_plain") or "").strip() == painted
+
+    # Live Continue after persist+GET sends empty expected (leftover ref cleared).
+    accepted = client.post(
+        f"/api/agreements/{aid}/canonical-review-snapshot/accept",
+        headers=_ORG_H,
+        json={
+            "snapshot_id": snap["snapshot_id"],
+            "expected_digest": snap["corpus_sha256"],
+            "expected_accepted_snapshot_id": "",
+            "display_snapshot_id": snap["snapshot_id"],
+            "display_digest": snap["corpus_sha256"],
+            "display_length": snap["corpus_length"],
+        },
+    )
+    assert accepted.status_code == 200, accepted.text
+    accepted_snap = accepted.json()["accepted"]
+    assert accepted_snap["snapshot_id"] == snap["snapshot_id"]
+    assert accepted_snap["status"] == "accepted"
+    assert (accepted_snap.get("corpus_plain") or "").strip() == painted
+
+    got_accepted = client.get(f"/api/agreements/{aid}/canonical-review-snapshot", headers=_ORG_H)
+    assert got_accepted.status_code == 200, got_accepted.text
+    after = got_accepted.json()
+    after_snap = after["snapshot"]
+    after_corpus = (after_snap.get("corpus_plain") or "").strip()
+    assert after.get("status") == "accepted"
+    assert after_snap["snapshot_id"] == snap["snapshot_id"]
+    assert after_corpus == painted
+    assert after_corpus.startswith("SERVICES AGREEMENT")
+    assert "Northline Studio" in after_corpus and "Harbor Marks LLC" in after_corpus
+    assert "LOGO DESIGN AGREEMENT" not in after_corpus
+    assert "[ORG_1]" not in after_corpus
+    assert after_snap["snapshot_id"] != leftover_accepted["snapshot_id"]
+
+
+def test_real_commercial_accepted_still_blocks_empty_token_pending_accept(
+    monkeypatch, tmp_path
+):
+    """Non-leftover accepted commercial still owns accept; expected='' of a later pending 409s."""
+    _env(monkeypatch, tmp_path)
+    client = TestClient(app)
+    aid = _create_agreement(client)
+    first = _corpus("COMMERCIAL")
+    accepted = _persist_and_accept(client, aid, first)
+    later = _corpus("REVISION")
+    posted = client.post(
+        f"/api/agreements/{aid}/canonical-review-snapshot",
+        headers=_ORG_H,
+        json={"corpus_plain": later, "claimed_digest": sha256_hex_text(later)},
+    )
+    assert posted.status_code == 200, posted.text
+    later_snap = posted.json()["snapshot"]
+    blocked = client.post(
+        f"/api/agreements/{aid}/canonical-review-snapshot/accept",
+        headers=_ORG_H,
+        json={
+            "snapshot_id": later_snap["snapshot_id"],
+            "expected_digest": later_snap["corpus_sha256"],
+            "expected_accepted_snapshot_id": "",
+            "allow_revision": False,
+        },
+    )
+    assert blocked.status_code == 409, blocked.text
+    assert blocked.json()["detail"]["code"] in {
+        "accept_concurrency_conflict",
+        "different_snapshot_already_accepted",
+    }
+    got = client.get(f"/api/agreements/{aid}/canonical-review-snapshot", headers=_ORG_H)
+    assert got.status_code == 200
+    # Latest pending still hydrates; accepted commercial row is unchanged.
+    assert got.json()["snapshot"]["snapshot_id"] == later_snap["snapshot_id"]
+    from backend.services.agreement_draft_store import load_draft
+
+    draft = load_draft(aid)
+    assert draft["accepted_review_snapshot_v1"]["snapshotId"] == accepted["snapshot_id"]
+    assert draft["accepted_review_snapshot_v1"]["corpusPlain"] == first.strip()
 
 
 def test_persist_route_still_refuses_true_12_then_14(monkeypatch, tmp_path):

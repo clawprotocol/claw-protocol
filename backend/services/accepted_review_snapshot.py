@@ -101,9 +101,7 @@ def get_accepted_snapshot_record(draft: Any) -> Optional[Dict[str, Any]]:
     return None
 
 
-def latest_pending_snapshot(draft: Any) -> Optional[Dict[str, Any]]:
-    """Newest pending persist Review snapshot for this agreement, if any."""
-    reg = get_registry(draft)
+def _latest_pending_from_registry(reg: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     snaps = reg.get("snapshots") if isinstance(reg.get("snapshots"), dict) else {}
     pending = [
         s
@@ -112,6 +110,56 @@ def latest_pending_snapshot(draft: Any) -> Optional[Dict[str, Any]]:
     ]
     pending.sort(key=lambda s: str(s.get("createdAt") or ""), reverse=True)
     return pending[0] if pending else None
+
+
+def latest_pending_snapshot(draft: Any) -> Optional[Dict[str, Any]]:
+    """Newest pending persist Review snapshot for this agreement, if any."""
+    return _latest_pending_from_registry(get_registry(draft))
+
+
+def is_leftover_starter_accepted_row(snap: Optional[Dict[str, Any]]) -> bool:
+    """Leftover/starter accepted Logo/[ORG_1] row — not persist Review.
+
+    Structural identity/title markers only. Does not use leftover fused-Notices
+    text detectors.
+    """
+    if not isinstance(snap, dict):
+        return False
+    if _clean(snap.get("status")) != STATUS_ACCEPTED:
+        return False
+    corpus = snap.get("corpusPlain")
+    if not isinstance(corpus, str) or not corpus.strip():
+        return False
+    text = corpus.strip()
+    if "[ORG_1]" in text:
+        return True
+    return text[:64].upper().startswith("LOGO DESIGN AGREEMENT")
+
+
+def leftover_accepted_vs_new_pending_continue(
+    *,
+    registry: Dict[str, Any],
+    accepting_snapshot: Dict[str, Any],
+) -> bool:
+    """True when Continue accepts the latest pending persist Review over leftover accepted.
+
+    Bound: leftover/starter accepted Logo/[ORG_1] vs just-written pending persist.
+    True concurrent writers of two different pending edits stay fail-closed.
+    """
+    current_id = _clean(registry.get("acceptedSnapshotId"))
+    accepting_id = _clean(accepting_snapshot.get("snapshotId"))
+    if not current_id or not accepting_id or current_id == accepting_id:
+        return False
+    snaps = registry.get("snapshots") if isinstance(registry.get("snapshots"), dict) else {}
+    current = snaps.get(current_id)
+    if not is_leftover_starter_accepted_row(current):
+        return False
+    if _clean(accepting_snapshot.get("status")) != STATUS_PENDING:
+        return False
+    latest = _latest_pending_from_registry(registry)
+    if not latest:
+        return False
+    return _clean(latest.get("snapshotId")) == accepting_id
 
 
 def get_review_hydration_snapshot(draft: Any) -> Optional[Dict[str, Any]]:
@@ -356,6 +404,8 @@ def accept_snapshot(
 
     Acceptance references snapshot ID + digest only — no corpus body accepted.
     Concurrent accept of a different snapshot fails closed unless ``allow_revision``.
+    Leftover/starter accepted Logo/[ORG_1] does not block accept of the latest
+    pending persist Review (Continue after persist+GET).
     Idempotent when the identical snapshot is already accepted.
     Client ``allowShorterOverwrite`` / execution-append cannot mutate accepted bytes;
     a revision requires a new pending snapshot + explicit ``allow_revision`` accept.
@@ -392,10 +442,17 @@ def accept_snapshot(
         return False, "display_authority_mismatch", None, None
 
     current_accepted = _clean(reg.get("acceptedSnapshotId"))
+    leftover_continue = leftover_accepted_vs_new_pending_continue(
+        registry=reg,
+        accepting_snapshot=snap,
+    )
     if expected_accepted_snapshot_id is not None:
         expected_token = _clean(expected_accepted_snapshot_id)
         if current_accepted != expected_token:
-            return False, "accept_concurrency_conflict", None, None
+            # Persist+GET of sequential Review clears leftover accept locally and
+            # sends "". Leftover/starter accepted must not own that token.
+            if not (leftover_continue and expected_token == ""):
+                return False, "accept_concurrency_conflict", None, None
 
     # Idempotent identical accept (no version bump).
     if current_accepted == sid and _clean(snap.get("status")) == STATUS_ACCEPTED:
@@ -403,13 +460,15 @@ def accept_snapshot(
         return True, None, snap, reg
 
     # Concurrent / second accept of a different snapshot.
-    if current_accepted and current_accepted != sid and not allow_revision:
+    # Leftover/starter accepted vs just-written pending Continue may supersede.
+    effective_allow_revision = bool(allow_revision) or leftover_continue
+    if current_accepted and current_accepted != sid and not effective_allow_revision:
         return False, "different_snapshot_already_accepted", None, None
 
-    if _clean(snap.get("status")) == STATUS_SUPERSEDED and not allow_revision:
+    if _clean(snap.get("status")) == STATUS_SUPERSEDED and not effective_allow_revision:
         return False, "snapshot_superseded", None, None
     if _clean(snap.get("status")) not in {STATUS_PENDING, STATUS_ACCEPTED}:
-        if not (allow_revision and _clean(snap.get("status")) == STATUS_PENDING):
+        if not (effective_allow_revision and _clean(snap.get("status")) == STATUS_PENDING):
             if _clean(snap.get("status")) == STATUS_SUPERSEDED:
                 return False, "snapshot_superseded", None, None
 
@@ -418,8 +477,9 @@ def accept_snapshot(
         return False, ver_err, None, None
 
     now = _utc_now_iso()
-    # Explicit revision: mark prior accepted snapshot superseded (corpus remains immutable).
-    if allow_revision and current_accepted and current_accepted != sid:
+    # Explicit revision (or leftover-accepted vs new-pending Continue):
+    # mark prior accepted snapshot superseded (corpus remains immutable).
+    if effective_allow_revision and current_accepted and current_accepted != sid:
         prior = snaps.get(current_accepted)
         if isinstance(prior, dict):
             snaps[current_accepted] = {
@@ -463,7 +523,7 @@ def accept_snapshot(
             )
             if not imm_ok:
                 return False, imm_err, None, None
-        elif prior_accepted and not allow_revision:
+        elif prior_accepted and not effective_allow_revision:
             imm_ok, imm_err = assert_snapshot_immutable_post_accept(
                 draft=draft_for_immutability,
                 incoming_registry=reg,
