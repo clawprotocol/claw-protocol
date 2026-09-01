@@ -19,6 +19,7 @@ import {
   collectReviewPlainTopLevelSectionNumbers,
   extractSuppliedGoverningLaw,
   repairReviewPlainSectionContinuity,
+  reviewPlainHasLateSkippedSectionNumbers,
   reviewPlainHasOperativeGoverningLaw,
   reviewPlainHasSkippedSectionNumbers,
 } from "./reviewPlainSectionContinuity";
@@ -158,11 +159,13 @@ describe("Review/plain skipped section numbering", () => {
     const sequential = sequentialThrough(14, client, provider);
 
     expect(reviewPlainHasSkippedSectionNumbers(skipped1214)).toBe(true);
+    expect(reviewPlainHasLateSkippedSectionNumbers(skipped1214)).toBe(true);
     expect(collectReviewPlainTopLevelSectionNumbers(skipped1214)).toContain(12);
     expect(collectReviewPlainTopLevelSectionNumbers(skipped1214)).toContain(14);
     expect(collectReviewPlainTopLevelSectionNumbers(skipped1214)).not.toContain(13);
 
     expect(reviewPlainHasSkippedSectionNumbers(skipped1012)).toBe(true);
+    expect(reviewPlainHasLateSkippedSectionNumbers(skipped1012)).toBe(true);
     expect(collectReviewPlainTopLevelSectionNumbers(skipped1012)).toEqual(
       expect.arrayContaining([10, 12]),
     );

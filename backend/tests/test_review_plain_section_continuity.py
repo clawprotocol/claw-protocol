@@ -12,6 +12,7 @@ from backend.agreements.review_plain_section_continuity import (
     collect_review_plain_top_level_section_numbers,
     extract_supplied_governing_law,
     repair_review_plain_section_continuity,
+    review_plain_has_late_skipped_section_numbers,
     review_plain_has_operative_governing_law,
     review_plain_has_skipped_section_numbers,
 )
@@ -153,10 +154,12 @@ def test_detector_fails_12_then_14_and_10_then_12(law: str, client: str, provide
     sequential = _sequential_1_through(14, client=client, provider=provider)
 
     assert review_plain_has_skipped_section_numbers(skipped_12_14) is True
+    assert review_plain_has_late_skipped_section_numbers(skipped_12_14) is True
     assert 14 in collect_review_plain_top_level_section_numbers(skipped_12_14)
     assert 13 not in collect_review_plain_top_level_section_numbers(skipped_12_14)
 
     assert review_plain_has_skipped_section_numbers(skipped_10_12) is True
+    assert review_plain_has_late_skipped_section_numbers(skipped_10_12) is True
     nums = collect_review_plain_top_level_section_numbers(skipped_10_12)
     assert 10 in nums and 12 in nums and 11 not in nums
 

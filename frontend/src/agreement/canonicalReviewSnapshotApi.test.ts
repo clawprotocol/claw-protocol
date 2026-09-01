@@ -280,4 +280,107 @@ describe("canonicalReviewSnapshotApi", () => {
     });
     expect(canEnableCommercialPrepareFromServerSnapshot("ag_local_only")).toBe(true);
   });
+
+  it("persistCanonicalReviewSnapshot refuses 12-then-14 without repair-then-accept", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const skipped = [
+      "SERVICES AGREEMENT",
+      "",
+      "This Services Agreement is between Cedar Ridge LLC and Maple Grove Inc.",
+      "",
+      "1. Services and Deliverables",
+      "Designer will provide the deliverables.",
+      "",
+      "10. Miscellaneous",
+      "This is the entire agreement.",
+      "",
+      "11. Independent Contractor and Assignment",
+      "Designer is an independent contractor.",
+      "",
+      "12. Force Majeure",
+      "Neither party is liable for delay beyond its control.",
+      "",
+      "14. Notices",
+      "Any notice must be in writing.",
+      "",
+      "IN WITNESS WHEREOF, the parties have executed this Agreement.",
+      "",
+      "x".repeat(400),
+    ].join("\n");
+    const res = await persistCanonicalReviewSnapshot({
+      agreementId: "ag_skip",
+      corpusPlain: skipped,
+      intakeText: "Cedar Ridge LLC is hiring Maple Grove Inc, governing law Oklahoma.",
+    });
+    expect(res.ok).toBe(false);
+    if (!res.ok) expect(res.code).toBe("skipped_top_level_section_integers");
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("persistCanonicalReviewSnapshot accepts leftover 1..8 and does not remint to 10/11/12/13", async () => {
+    const leftover = [
+      "SERVICES AGREEMENT",
+      "",
+      "This consulting engagement is between Summit Craft Co and Harborline Design LLC.",
+      "",
+      "1. Services and Deliverables",
+      "Designer will provide the deliverables.",
+      "",
+      "2. Fees",
+      "Fees are due as stated.",
+      "",
+      "3. Term and Termination",
+      "The engagement continues until complete.",
+      "",
+      "4. Intellectual Property",
+      "Client owns final deliverables upon payment.",
+      "",
+      "5. Confidentiality",
+      "Each party keeps non-public information confidential.",
+      "",
+      "6. Limitation of Liability",
+      "Liability is limited to fees paid.",
+      "",
+      "7. Governing Law",
+      "This Agreement is governed by the laws of the jurisdiction named in the intake.",
+      "",
+      "8. Notices",
+      "Notices must be in writing.",
+      "",
+      "IN WITNESS WHEREOF, the parties have executed this Agreement.",
+      "",
+      "x".repeat(400),
+    ].join("\n");
+    const digest = await sha256CorpusDigest(leftover);
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        snapshot: {
+          snapshot_id: "crs_leftover",
+          agreement_id: "ag_leftover",
+          corpus_plain: leftover,
+          corpus_sha256: digest,
+          corpus_length: leftover.length,
+          status: "pending",
+        },
+      }),
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    const res = await persistCanonicalReviewSnapshot({
+      agreementId: "ag_leftover",
+      corpusPlain: leftover,
+    });
+    expect(res.ok).toBe(true);
+    expect(fetchMock).toHaveBeenCalled();
+    const firstCall = fetchMock.mock.calls[0] as unknown as [string, RequestInit?];
+    const body = JSON.parse(String(firstCall[1]?.body ?? "{}"));
+    expect(body.corpus_plain).toContain("1. Services and Deliverables");
+    expect(body.corpus_plain).toContain("8. Notices");
+    expect(body.corpus_plain).not.toMatch(/\n10\. /);
+    expect(body.corpus_plain).not.toMatch(/\n11\. /);
+    expect(body.corpus_plain).not.toMatch(/\n12\. /);
+    expect(body.corpus_plain).not.toMatch(/\n13\. /);
+  });
 });

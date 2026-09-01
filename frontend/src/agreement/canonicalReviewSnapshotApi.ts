@@ -10,7 +10,7 @@
  * Client SoT coordinates review display; server accepted snapshot is commercial authority.
  */
 
-import { repairReviewPlainSectionContinuity } from "../components/agreements/reviewPlainSectionContinuity";
+import { reviewPlainHasLateSkippedSectionNumbers } from "../components/agreements/reviewPlainSectionContinuity";
 import { apiUrl } from "../lib/clawApi";
 import { sha256Hex } from "../utils/agreements/hash";
 import { clawAgreementHeaders } from "./agreementOrgHeaders";
@@ -276,12 +276,12 @@ export async function persistCanonicalReviewSnapshot(args: {
   jurisdiction?: string | null;
 }): Promise<PersistCanonicalReviewSnapshotResult> {
   const id = args.agreementId.trim();
-  const repaired = repairReviewPlainSectionContinuity((args.corpusPlain || "").trim(), {
-    intakeText: args.intakeText,
-    jurisdiction: args.jurisdiction,
-  });
-  const corpus = repaired.text.trim();
+  const corpus = (args.corpusPlain || "").trim();
   if (!id || corpus.length < 500) return { ok: false, code: "invalid_snapshot_args" };
+  // Hard gate: persist Review must refuse skipped late integers. Repair-then-accept is not proof.
+  if (reviewPlainHasLateSkippedSectionNumbers(corpus)) {
+    return { ok: false, code: "skipped_top_level_section_integers" };
+  }
   const claimed = await sha256CorpusDigest(corpus);
   try {
     const res = await fetch(apiUrl(`/api/agreements/${encodeURIComponent(id)}/canonical-review-snapshot`), {
