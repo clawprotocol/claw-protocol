@@ -9,8 +9,17 @@ from unittest.mock import MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
+from backend.agreements.premium_full_draft_section_emit import (
+    SKIPPED_TOP_LEVEL_SECTION_INTEGERS,
+)
+from backend.agreements.review_plain_section_continuity import (
+    collect_review_plain_top_level_section_numbers,
+)
 from backend.main import app
-from backend.services.accepted_review_snapshot import sha256_hex_text
+from backend.services.accepted_review_snapshot import (
+    get_review_hydration_snapshot,
+    sha256_hex_text,
+)
 from backend.services.vs01_signing_envelope_provenance import (
     build_vs01_signing_envelope_provenance,
     fingerprint_agreement_body,
@@ -936,3 +945,193 @@ def test_immutability_assertion_wired_on_registry_write(monkeypatch, tmp_path):
     prior = reloaded["accepted_review_snapshot_v1"]
     assert prior["corpusPlain"] == corpus.strip()
     assert prior["corpusSha256"] == accepted["corpus_sha256"]
+
+
+def _pad_snapshot_corpus(plain: str) -> str:
+    body = (plain or "").strip()
+    if len(body) >= 500:
+        return body
+    pad = "Each party shall perform its obligations in good faith. "
+    extra = pad * ((500 - len(body)) // len(pad) + 2)
+    return f"{body}\n\n{extra.strip()}"
+
+
+def _leftover_logo_org1_starter() -> str:
+    """Leftover/starter Logo Design row with unresolved [ORG_1] — not persist Review."""
+    return _pad_snapshot_corpus(
+        "\n".join(
+            [
+                "LOGO DESIGN AGREEMENT",
+                "",
+                "This Logo Design Agreement is entered into by and between Northline Studio "
+                "(Northline) and [ORG_1] (Client).",
+                "",
+                "1. Scope. Designer will create a mark for the unresolved client slot.",
+                "2. Fees. Fees are due as stated on the starter template.",
+                "",
+                "IN WITNESS WHEREOF.",
+            ]
+        )
+    )
+
+
+def _painted_sequential_services_northline_harbor() -> str:
+    from backend.tests.test_review_plain_section_continuity import (
+        _sequential_1_through_12_wrapped_notices,
+    )
+
+    painted = _sequential_1_through_12_wrapped_notices(
+        client="Northline Studio",
+        provider="Harbor Marks LLC",
+        law="Texas",
+        attn_a="Priya Shah",
+        attn_b="Diego Alvarez",
+    ).replace(
+        "design services for a logo and brand kit.",
+        "design services for a logo and brand kit for a total fee of $2,400.",
+    )
+    return _pad_snapshot_corpus(painted)
+
+
+def test_hydration_picker_prefers_pending_persist_over_leftover_accepted():
+    leftover = {
+        "snapshotId": "crs_leftover_logo",
+        "status": "accepted",
+        "createdAt": "2026-08-01T00:00:00Z",
+        "corpusPlain": _leftover_logo_org1_starter(),
+    }
+    painted = {
+        "snapshotId": "crs_painted_services",
+        "status": "pending",
+        "createdAt": "2026-09-01T00:00:00Z",
+        "corpusPlain": _painted_sequential_services_northline_harbor(),
+    }
+    draft = {
+        "accepted_review_snapshot_v1": leftover,
+        "canonical_review_snapshots_v1": {
+            "snapshots": {
+                "crs_leftover_logo": leftover,
+                "crs_painted_services": painted,
+            },
+            "acceptedSnapshotId": "crs_leftover_logo",
+        },
+    }
+    picked = get_review_hydration_snapshot(draft)
+    assert picked is not None
+    assert picked["snapshotId"] == "crs_painted_services"
+    assert picked["corpusPlain"].startswith("SERVICES AGREEMENT")
+    assert "LOGO DESIGN AGREEMENT" not in picked["corpusPlain"]
+    assert "[ORG_1]" not in picked["corpusPlain"]
+
+    accepted_only = {
+        "accepted_review_snapshot_v1": leftover,
+        "canonical_review_snapshots_v1": {
+            "snapshots": {"crs_leftover_logo": leftover},
+            "acceptedSnapshotId": "crs_leftover_logo",
+        },
+    }
+    fallback = get_review_hydration_snapshot(accepted_only)
+    assert fallback is not None
+    assert fallback["snapshotId"] == "crs_leftover_logo"
+
+
+def test_get_after_persist_returns_written_snapshot_not_leftover_accepted(
+    monkeypatch, tmp_path
+):
+    """POST painted sequential persist Review; GET must return that same written row."""
+    _env(monkeypatch, tmp_path)
+    client = TestClient(app)
+    aid = _create_agreement(client)
+    leftover = _leftover_logo_org1_starter()
+    leftover_accepted = _persist_and_accept(client, aid, leftover)
+    assert leftover_accepted["snapshot_id"]
+    assert leftover.startswith("LOGO DESIGN AGREEMENT")
+    assert "[ORG_1]" in leftover
+
+    painted = _painted_sequential_services_northline_harbor()
+    assert painted.startswith("SERVICES AGREEMENT")
+    assert "Northline Studio" in painted and "Harbor Marks LLC" in painted
+    assert "Texas" in painted
+    assert "$2,400" in painted
+    assert collect_review_plain_top_level_section_numbers(painted) == list(range(1, 13))
+    assert "LOGO DESIGN AGREEMENT" not in painted
+    assert "[ORG_1]" not in painted
+
+    posted = client.post(
+        f"/api/agreements/{aid}/canonical-review-snapshot",
+        headers=_ORG_H,
+        json={
+            "corpus_plain": painted,
+            "generation_session_id": "gen_persist_get_written",
+            "claimed_digest": sha256_hex_text(painted),
+        },
+    )
+    assert posted.status_code == 200, posted.text
+    snap = posted.json()["snapshot"]
+    assert snap["snapshot_id"] != leftover_accepted["snapshot_id"]
+    assert (snap.get("corpus_plain") or "").strip() == painted
+
+    got = client.get(f"/api/agreements/{aid}/canonical-review-snapshot", headers=_ORG_H)
+    assert got.status_code == 200, got.text
+    body = got.json()
+    retrieved = body["snapshot"]
+    corpus = (retrieved.get("corpus_plain") or "").strip()
+    assert retrieved["snapshot_id"] == snap["snapshot_id"]
+    assert retrieved["corpus_sha256"] == snap["corpus_sha256"]
+    assert retrieved["corpus_length"] == snap["corpus_length"]
+    assert corpus == painted
+    assert corpus.startswith("SERVICES AGREEMENT")
+    assert "Northline Studio" in corpus and "Harbor Marks LLC" in corpus
+    assert "LOGO DESIGN AGREEMENT" not in corpus
+    assert "[ORG_1]" not in corpus
+    assert retrieved["snapshot_id"] != leftover_accepted["snapshot_id"]
+
+
+def test_persist_route_still_refuses_true_12_then_14(monkeypatch, tmp_path):
+    from backend.tests.test_review_plain_section_continuity import _twelve_then_fourteen
+
+    _env(monkeypatch, tmp_path)
+    client = TestClient(app)
+    aid = _create_agreement(client)
+    skipped = _pad_snapshot_corpus(
+        _twelve_then_fourteen(client="Cedar Ridge LLC", provider="Maple Grove Inc")
+    )
+    assert collect_review_plain_top_level_section_numbers(skipped) != list(
+        range(1, len(collect_review_plain_top_level_section_numbers(skipped)) + 1)
+    )
+    refused = client.post(
+        f"/api/agreements/{aid}/canonical-review-snapshot",
+        headers=_ORG_H,
+        json={"corpus_plain": skipped, "claimed_digest": sha256_hex_text(skipped)},
+    )
+    assert refused.status_code == 400, refused.text
+    assert refused.json()["detail"]["code"] == SKIPPED_TOP_LEVEL_SECTION_INTEGERS
+
+
+def test_leftover_1_through_8_persist_get_stays_1_through_8(monkeypatch, tmp_path):
+    from backend.tests.test_review_plain_section_continuity import _leftover_eight_section
+
+    _env(monkeypatch, tmp_path)
+    client = TestClient(app)
+    aid = _create_agreement(client)
+    leftover = _pad_snapshot_corpus(
+        _leftover_eight_section(client="Summit Craft Co", provider="Harborline Design LLC")
+    )
+    assert collect_review_plain_top_level_section_numbers(leftover) == list(range(1, 9))
+    posted = client.post(
+        f"/api/agreements/{aid}/canonical-review-snapshot",
+        headers=_ORG_H,
+        json={"corpus_plain": leftover, "claimed_digest": sha256_hex_text(leftover)},
+    )
+    assert posted.status_code == 200, posted.text
+    snap = posted.json()["snapshot"]
+    got = client.get(f"/api/agreements/{aid}/canonical-review-snapshot", headers=_ORG_H)
+    assert got.status_code == 200, got.text
+    corpus = (got.json()["snapshot"].get("corpus_plain") or "").strip()
+    assert got.json()["snapshot"]["snapshot_id"] == snap["snapshot_id"]
+    nums = collect_review_plain_top_level_section_numbers(corpus)
+    assert nums == list(range(1, 9))
+    assert 10 not in nums
+    assert 11 not in nums
+    assert 12 not in nums
+    assert 13 not in nums
