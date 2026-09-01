@@ -95,7 +95,15 @@ function reviewPaintCorpusWithoutExecution(): string {
     "",
     "This Agreement is between Northline Studio (Client) and Harbor Marks LLC (Service Provider).",
     "",
-    ...Array.from({ length: 36 }, (_, i) => `${i + 1}. Operative commercial clause with consideration and duties.`),
+    "1. SCOPE. Provider will perform the services described in this Agreement in a professional manner.",
+    "2. FEES. Client will pay the fees set forth in the applicable statement of work.",
+    "3. TERM. This Agreement commences on the Effective Date and continues until terminated.",
+    "4. CONFIDENTIALITY. Each party will protect the other party's confidential information.",
+    "5. INTELLECTUAL PROPERTY. Work product is assigned as set forth herein.",
+    "6. INDEMNIFICATION. Each party will indemnify the other for third-party claims arising from its breach.",
+    "7. INSURANCE. Provider will maintain commercially reasonable insurance coverage.",
+    "8. INDEPENDENT CONTRACTOR. Provider is an independent contractor and not an employee.",
+    "9. FORCE MAJEURE. Neither party is liable for delays caused by events beyond its reasonable control.",
     "",
     "10. LIABILITY",
     "Each party's aggregate liability is limited to fees paid under this Agreement.",
@@ -732,9 +740,11 @@ describe("esign remount Prepare dual-party fields (not empty self-sign)", () => 
     const crs = readFileSync(join(__dirname, "../agreement/canonicalReviewSnapshotApi.ts"), "utf8");
     const fnStart = crs.indexOf("export async function fetchCanonicalReviewSnapshot");
     expect(fnStart).toBeGreaterThanOrEqual(0);
-    const fnBody = crs.slice(fnStart, fnStart + 900);
-    expect(fnBody.indexOf("refreshCachedAccessToken")).toBeGreaterThanOrEqual(0);
-    expect(fnBody.indexOf("refreshCachedAccessToken")).toBeLessThan(fnBody.indexOf("clawAgreementHeaders"));
+    const fnBody = crs.slice(fnStart, fnStart + 1200);
+    const refreshAt = fnBody.indexOf("await refreshCachedAccessToken");
+    const headersAt = fnBody.indexOf("headers: clawAgreementHeaders");
+    expect(refreshAt).toBeGreaterThanOrEqual(0);
+    expect(headersAt).toBeGreaterThan(refreshAt);
     expect(fnBody).toMatch(/method:\s*"GET"/);
   });
 

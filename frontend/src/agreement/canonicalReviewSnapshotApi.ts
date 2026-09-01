@@ -334,7 +334,7 @@ export async function fetchCanonicalReviewSnapshot(args: {
   if (!id) return { ok: false, code: "invalid_snapshot_args" };
   try {
     // Same remount contract as content/meta GET: hydrate Bearer before
-    // clawAgreementHeaders so CORS preflight is followed by an actual GET
+    // building request headers so CORS preflight is followed by an actual GET
     // (inspect remount otherwise stays OPTIONS-only).
     await refreshCachedAccessToken();
     const res = await fetch(
