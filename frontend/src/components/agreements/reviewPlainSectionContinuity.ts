@@ -67,6 +67,23 @@ export function reviewPlainHasSkippedSectionNumbers(plain: string): boolean {
   return false;
 }
 
+/**
+ * Live skip class: 10 then 12, 12 then 14 (prev >= late floor).
+ * Persist Review seeds with an early hole (2 then 10) are a different fixture class.
+ */
+export function reviewPlainHasLateSkippedSectionNumbers(plain: string): boolean {
+  const nums = collectReviewPlainTopLevelSectionNumbers(plain);
+  if (nums.length < 2) return false;
+  for (let i = 1; i < nums.length; i += 1) {
+    const prev = nums[i - 1]!;
+    const curr = nums[i]!;
+    if (prev < REVIEW_PLAIN_LATE_SECTION_SKIP_FLOOR) continue;
+    if (curr <= prev) return true;
+    if (curr >= prev + 2) return true;
+  }
+  return false;
+}
+
 export function extractSuppliedGoverningLaw(
   intakeText?: string | null,
   jurisdiction?: string | null,

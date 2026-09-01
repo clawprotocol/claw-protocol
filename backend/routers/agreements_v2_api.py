@@ -60,6 +60,11 @@ from backend.agreements.premium_agreement_validation import (
     AgreementValidationResult,
     validatePremiumAgreementDraft,
 )
+from backend.agreements.premium_full_draft_section_emit import (
+    SKIPPED_TOP_LEVEL_SECTION_INTEGERS,
+    emit_sequential_premium_full_draft_sections,
+    refuse_skipped_top_level_section_integers,
+)
 from backend.agreements.review_plain_section_continuity import (
     repair_review_plain_section_continuity,
 )
@@ -1215,6 +1220,10 @@ def _degraded_user_message_for_code(code: str) -> str:
             "LawDog blocked freezing text that introduced material terms without authority. "
             "Your last valid draft was preserved. Please use **Retry Pro draft**."
         ),
+        "skipped_top_level_section_integers": (
+            "The full Pro draft numbered sections with a gap (for example 12 then 14). "
+            "That draft was not saved. Please use **Retry Pro draft**."
+        ),
         "dev_context_leak": "Your agreement is ready. You can refine any wording below, or use **Retry Pro draft** for a fresh pass.",
         "payload_limits": "Your agreement is ready. Try shortening the intake and using **Retry Pro draft**, or keep editing the text below.",
     }
@@ -1744,6 +1753,9 @@ def _premium_full_draft_system_prompt() -> str:
         "should render as a main heading followed by body paragraph text—not a lone N.1 label (e.g. use "
         "\"7. Governing Law\\n\\nThis Agreement shall be governed by…\" rather than \"7. Governing Law\\n\\n7.1 This Agreement…\"). "
         "Use subsection numbering only when multiple sibling subsections are present (e.g. 7.1, 7.2, 7.3). "
+        "Top-level section numbers MUST be sequential 1, 2, 3, … N with no skipped integers. "
+        "If you omit a planned section, renumber every later heading to the next integer — never emit 12 then 14 or 10 then 12. "
+        "A missing term is a missing section at the next integer, never a hole. "
         "This instruction applies to document structure only; do not change substantive legal content.\n"
         "- Use clear numbering (1., 1.1, (a)…) and professional headings consistent with the house style above.\n"
         "- **Contextual standard commercial terms:** Use the intake and any structured `agreement_family` / deal labels in the JSON `context` "
@@ -5591,6 +5603,38 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Respo
                 type(jsum_e).__name__,
             )
         primary_full = (out_primary.document_text or "").strip()
+        # Authoritative producer of top-level integers (not leftover esign): remint 1..N
+        # and emit a missing supplied governing-law SECTION at the next integer.
+        emitted = emit_sequential_premium_full_draft_sections(
+            doc,
+            original_intake=intake_s,
+            jurisdiction=str((ctx_dict or {}).get("jurisdiction") or ""),
+        )
+        if (emitted.get("text") or "").strip():
+            doc = emitted["text"]
+        # Hard gate on producer output BEFORE continuity repair. Repair-then-accept is not proof.
+        skip_code = refuse_skipped_top_level_section_integers(doc)
+        if skip_code:
+            log.error(
+                "[premium-full-draft] event=skipped_top_level_section_integers status=503 "
+                "session_hint=%s doc_len=%s",
+                session_hint,
+                len(doc),
+            )
+            dm = _premium_full_draft_degraded_response(
+                intake_s=intake_s,
+                ctx_dict=ctx_dict,
+                failure_code=SKIPPED_TOP_LEVEL_SECTION_INTEGERS,
+                failure_message=_degraded_user_message_for_code(SKIPPED_TOP_LEVEL_SECTION_INTEGERS),
+            )
+            return _premium_full_draft_finalize_http_response(
+                dm,
+                intake_len=len(intake_s),
+                session_hint=session_hint,
+                server_timing=server_timing,
+                request=request,
+            )
+        # Defense in depth only — producer must already be sequential.
         continuity = repair_review_plain_section_continuity(
             doc,
             original_intake=intake_s,

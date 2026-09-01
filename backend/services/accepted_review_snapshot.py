@@ -217,6 +217,16 @@ def create_pending_snapshot(
     if len(corpus) < MIN_CORPUS_LEN:
         return False, "snapshot_corpus_too_short", None, None
 
+    from backend.agreements.premium_full_draft_section_emit import (
+        refuse_skipped_top_level_section_integers,
+    )
+
+    # Late-skip refuse (10-then-12 / 12-then-14). Repair-then-accept is not proof.
+    # Early-hole persist Review seeds (2 then 10) are a different fixture class.
+    skip_code = refuse_skipped_top_level_section_integers(corpus, late_only=True)
+    if skip_code:
+        return False, skip_code, None, None
+
     digest = sha256_hex_text(corpus)
     claimed = _clean(claimed_digest).lower()
     if claimed and claimed != digest:

@@ -119,6 +119,27 @@ def review_plain_has_skipped_section_numbers(plain: str) -> bool:
     return False
 
 
+def review_plain_has_late_skipped_section_numbers(plain: str) -> bool:
+    """True for the live skip class: 10 then 12, 12 then 14 (prev >= late floor).
+
+    Persist Review seeds with an early hole (2 then 10) are a different fixture class
+    and must not be reminted or refused here.
+    """
+    nums = collect_review_plain_top_level_section_numbers(plain)
+    if len(nums) < 2:
+        return False
+    for i in range(1, len(nums)):
+        prev = nums[i - 1]
+        curr = nums[i]
+        if prev < LATE_SECTION_SKIP_FLOOR:
+            continue
+        if curr <= prev:
+            return True
+        if curr >= prev + 2:
+            return True
+    return False
+
+
 def extract_supplied_governing_law(intake: str, *, jurisdiction: str = "") -> str:
     """Extract a customer-supplied governing-law label. Never invents a default state."""
     hinted = (jurisdiction or "").strip()
