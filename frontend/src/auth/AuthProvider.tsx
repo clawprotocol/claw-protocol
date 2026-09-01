@@ -13,13 +13,21 @@ import { displayNameFromUser, finalizeAuthenticatedSession } from "./postAuthFin
 import { prepareAuthContinuation } from "./prepareAuthContinuation";
 import { setCachedAccessToken, clearCachedAccessToken } from "./authAccessTokenCache";
 import { bindAuthenticatedUserToWorkspace } from "./workspaceBindingApi";
-import { applyClaimedAgreementIdsToPreAuth } from "./preAuthCheckoutAgreement";
-import { commitPostAuthOwnershipMigration } from "./ownershipMigrationFinalize";
 import {
   GENESIS_DOG_ONBOARDING_DESTINATION,
   hasGenesisDogOnboardingIntent,
 } from "../launch/genesisReferral/genesisDogOnboardingCapture";
 import { readE2eAuthSessionForDev } from "./e2eAuthSessionBridge";
+
+/** Same-user auth events after a successful finalize must not POST bind-user-org again. */
+export function isAlreadyFinalizedWorkspaceUser(
+  finalizedUserId: string | null,
+  nextUserId: string | undefined | null,
+): boolean {
+  const finalized = (finalizedUserId || "").trim();
+  const next = (nextUserId || "").trim();
+  return Boolean(finalized && next && finalized === next);
+}
 
 export type AuthSignInOpts = {
   returningSignIn?: boolean;
@@ -59,32 +67,26 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [loading, setLoading] = useState(enabled);
   const [session, setSession] = useState<Session | null>(e2eSession);
   const finalizedUserRef = useRef<string | null>(null);
+  const finalizeInFlightRef = useRef<string | null>(null);
 
   const finalizeUser = useCallback(async (user: User, claimMethod: "magic_link" | "google" | "session_restore") => {
-    if (finalizedUserRef.current === user.id) {
-      // Idempotent identity upsert so Admin Console can find returning sessions by email.
-      try {
-        const s = await getAuthSession();
-        const bind = await bindAuthenticatedUserToWorkspace({
-          userId: user.id,
-          email: user.email,
-          displayName: displayNameFromUser(user) || undefined,
-          claimMethod: "session_restore",
-          accessToken: s?.access_token,
-        });
-        applyClaimedAgreementIdsToPreAuth(bind.migrated_agreement_ids);
-        if (bind.migrated_agreement_count > 0) {
-          commitPostAuthOwnershipMigration({
-            migratedAgreementIds: bind.migrated_agreement_ids ?? [],
-          });
-        }
-      } catch {
-        // Non-blocking — full finalize already succeeded for this session.
-      }
+    if (isAlreadyFinalizedWorkspaceUser(finalizedUserRef.current, user.id)) {
       return;
     }
-    finalizedUserRef.current = user.id;
-    await finalizeAuthenticatedSession({ user, claimMethod });
+    if (finalizeInFlightRef.current === user.id) {
+      return;
+    }
+    finalizeInFlightRef.current = user.id;
+    try {
+      await finalizeAuthenticatedSession({ user, claimMethod });
+      finalizedUserRef.current = user.id;
+    } catch {
+      // Allow a later auth event to retry the first bind / claim finalize.
+    } finally {
+      if (finalizeInFlightRef.current === user.id) {
+        finalizeInFlightRef.current = null;
+      }
+    }
   }, []);
 
   useEffect(() => {
@@ -176,6 +178,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await signOutAuth();
     setSession(null);
     finalizedUserRef.current = null;
+    finalizeInFlightRef.current = null;
     clearCachedAccessToken();
   }, []);
 

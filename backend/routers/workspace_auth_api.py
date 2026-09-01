@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import secrets
+import threading
+import time
 import uuid
 from typing import Any, Dict, Optional, Set
 
@@ -44,6 +47,13 @@ from backend.admin_console.store import get_admin_console_store
 
 router = APIRouter(prefix="/v1/workspace", tags=["workspace-auth"])
 _log = logging.getLogger("claw.workspace_auth")
+
+# Repeat AuthProvider polls must not re-run identity upsert / billing init_schema.
+# First successful already-bound bind is cached briefly; claim/repair signals bypass.
+_BIND_NOOP_TTL_SECONDS = 45.0
+_bind_noop_lock = threading.Lock()
+_bind_noop_until: Dict[str, float] = {}
+_bind_noop_payload: Dict[str, Dict[str, Any]] = {}
 
 
 def _safe_identity_from_request(
@@ -92,7 +102,6 @@ def _persist_workspace_user_identity(
     em, dn = _safe_identity_from_request(request, email=email, display_name=display_name)
     try:
         store = get_admin_console_store()
-        store.init_schema()
         store.upsert_workspace_user_identity(
             user_id=user_id,
             org_id=org_id,
@@ -144,6 +153,72 @@ def _stable_org_id_for_user(user_id: str) -> str:
     if not uid:
         raise ValueError("missing_user_id")
     return f"user-{uid}"
+
+
+def reset_bind_user_org_noop_cache_for_tests() -> None:
+    """Clear the already-bound bind TTL so unit tests see a fresh first bind."""
+    with _bind_noop_lock:
+        _bind_noop_until.clear()
+        _bind_noop_payload.clear()
+
+
+def _bind_noop_payload_for(user_id: str, org_id: str) -> Dict[str, Any]:
+    return {
+        "ok": True,
+        "org_id": org_id,
+        "user_id": user_id,
+        "migrated_agreement_count": 0,
+        "migrated_agreement_ids": [],
+        "billing_migrated": False,
+        "claim_method": None,
+    }
+
+
+def _peek_bind_noop_cache(user_id: str) -> Optional[Dict[str, Any]]:
+    uid = (user_id or "").strip()
+    if not uid:
+        return None
+    now = time.monotonic()
+    with _bind_noop_lock:
+        until = _bind_noop_until.get(uid, 0.0)
+        if until <= now:
+            _bind_noop_until.pop(uid, None)
+            _bind_noop_payload.pop(uid, None)
+            return None
+        cached = _bind_noop_payload.get(uid)
+        return dict(cached) if cached else None
+
+
+def _store_bind_noop_cache(user_id: str, org_id: str) -> None:
+    uid = (user_id or "").strip()
+    if not uid:
+        return
+    now = time.monotonic()
+    with _bind_noop_lock:
+        stale = [key for key, exp in _bind_noop_until.items() if exp <= now]
+        for key in stale:
+            _bind_noop_until.pop(key, None)
+            _bind_noop_payload.pop(key, None)
+        _bind_noop_until[uid] = now + _BIND_NOOP_TTL_SECONDS
+        _bind_noop_payload[uid] = _bind_noop_payload_for(uid, org_id)
+
+
+def _bind_claim_or_repair_requested(
+    *,
+    request: Request,
+    body: BindUserOrgIn,
+    org_id: str,
+) -> bool:
+    """True when leftover-anon / previous org / billing-repair signals require the full path."""
+    prev = (body.previous_org_id or "").strip()
+    if prev and prev != org_id:
+        return True
+    if (body.subscription_source_org_id or "").strip():
+        return True
+    for raw in body.entitlement_repair_candidates or []:
+        if str(raw or "").strip():
+            return True
+    return bool(_live_leftover_anon_org(request))
 
 
 def _is_claimable_draft_source_org(org_id: str) -> bool:
@@ -587,16 +662,15 @@ def _repair_billing_after_bind(
         return False
 
 
-@router.post("/bind-user-org")
-async def bind_user_org(request: Request, body: BindUserOrgIn) -> Dict[str, Any]:
-    user_id = require_supabase_user_id(request)
-    if body.user_id.strip() != user_id:
-        raise HTTPException(
-            status_code=403,
-            detail={"code": "user_id_mismatch", "message": "Authenticated user mismatch."},
-        )
-    org_id = _stable_org_id_for_user(user_id)
-    display = (body.display_name or body.email or "LawDog workspace").strip()[:200]
+def _bind_user_org_uncached(
+    request: Request,
+    body: BindUserOrgIn,
+    *,
+    user_id: str,
+    org_id: str,
+    display: str,
+    cache_noop_on_success: bool,
+) -> Dict[str, Any]:
     claim_method = (body.claim_method or "unknown").strip()[:64]
     slug, intent, candidate = _normalize_genesis_dog_onboarding(
         community_slug=body.community_slug,
@@ -671,6 +745,8 @@ async def bind_user_org(request: Request, body: BindUserOrgIn) -> Dict[str, Any]
         require_anon_source_match=True,
     )
 
+    if cache_noop_on_success:
+        _store_bind_noop_cache(user_id, org_id)
     return {
         "ok": True,
         "org_id": org_id,
@@ -680,6 +756,37 @@ async def bind_user_org(request: Request, body: BindUserOrgIn) -> Dict[str, Any]
         "billing_migrated": billing_migrated,
         "claim_method": claim_method if migrated_agreements else None,
     }
+
+
+@router.post("/bind-user-org")
+async def bind_user_org(request: Request, body: BindUserOrgIn) -> Dict[str, Any]:
+    user_id = require_supabase_user_id(request)
+    if body.user_id.strip() != user_id:
+        raise HTTPException(
+            status_code=403,
+            detail={"code": "user_id_mismatch", "message": "Authenticated user mismatch."},
+        )
+    org_id = _stable_org_id_for_user(user_id)
+    display = (body.display_name or body.email or "LawDog workspace").strip()[:200]
+    claim_or_repair = _bind_claim_or_repair_requested(request=request, body=body, org_id=org_id)
+    if not claim_or_repair:
+        cached = _peek_bind_noop_cache(user_id)
+        if cached is not None:
+            try:
+                ensure_organization(org_id, name=display)
+            except Exception:
+                _log.warning("ensure_organization_fail_soft org_id=%s", org_id)
+            return cached
+
+    return await asyncio.to_thread(
+        _bind_user_org_uncached,
+        request,
+        body,
+        user_id=user_id,
+        org_id=org_id,
+        display=display,
+        cache_noop_on_success=not claim_or_repair,
+    )
 
 
 @router.post("/demo-activate-subscription")
