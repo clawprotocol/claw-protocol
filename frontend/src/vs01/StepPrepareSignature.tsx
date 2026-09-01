@@ -660,7 +660,7 @@ export function StepPrepareSignature({
 
   const bridgeSession = useMemo(
     () => (agreementBridgePlacementCopy ? readAgreementVs01BridgeSession() : null),
-    [agreementBridgePlacementCopy],
+    [agreementBridgePlacementCopy, documentId, prepareCorpusText],
   );
 
   const signingPacketModel = useMemo(() => {
@@ -675,6 +675,7 @@ export function StepPrepareSignature({
       corpusGateArgs: buildPrepareBridgeCorpusGateArgs({
         agreementCorpusText: corpus,
         bridge: bridgeSession,
+        manifestPartyCount: prepareSignerRoles.length,
       }),
     });
   }, [

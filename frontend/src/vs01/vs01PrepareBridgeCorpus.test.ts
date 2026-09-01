@@ -163,6 +163,7 @@ describe("VS01 prepare bridge corpus (Test369)", () => {
     const src = readFileSync(join(__dirname, "StepPrepareSignature.tsx"), "utf8");
     expect(src).not.toMatch(/setAutoInitialsEveryPage\(true\)/);
     expect(src).toContain("buildPrepareBridgeCorpusGateArgs");
+    expect(src).toContain("manifestPartyCount");
   });
 
   it("rebuilds witness anchors when prepare roles exceed existing By-line count", () => {

@@ -790,14 +790,17 @@ export function buildVs01SigningPacketModel(args: {
   draft?: AgreementDraft | null;
 }): Vs01SigningPacketModel {
   const guidedPro = args.mode === "guided_pro";
+  const roleSignerCount = args.roles.filter((r) => (r.signerName ?? "").trim().length >= 2).length;
   // Gate against the accepted/handoff corpus first. resolveFinalVs01CorpusOrBlock prefers frozen
   // canonical/SoT and would discard a pre-gate witness rebuild — so role alignment must run after.
+  // Remount inspect has no draft/manifest: restored prepare roles are the signer count.
   const corpusGate = resolveFinalVs01CorpusOrBlock({
     ...(args.corpusGateArgs ?? {}),
     agreementCorpusText: args.authoritativeCorpusPlain ?? "",
     bridge: args.bridge ?? args.corpusGateArgs?.bridge ?? null,
     draft: args.draft ?? args.corpusGateArgs?.draft ?? null,
     guidedPro,
+    manifestPartyCount: Math.max(args.corpusGateArgs?.manifestPartyCount ?? 0, roleSignerCount),
   });
   const validationErrors: string[] = [];
   if (!corpusGate.allowed) validationErrors.push(corpusGate.blockReason ?? "corpus_gate_blocked");

@@ -59,9 +59,14 @@ export function buildPrepareBridgeCorpusGateArgs(args: {
   agreementCorpusText: string;
   bridge?: AgreementVs01BridgeSession | null;
   draft?: AgreementDraft | null;
+  /** Restored prepare roles / bridge parties — remount has no draft manifest. */
+  manifestPartyCount?: number;
 }): Omit<ResolveFinalVs01CorpusOrBlockArgs, "agreementCorpusText" | "guidedPro"> {
   const corpus = (args.agreementCorpusText ?? "").trim();
   const handoff = resolveGuidedVs01SigningHandoffForBridge(undefined);
+  const fromBridge = args.bridge
+    ? 1 + (Array.isArray(args.bridge.counterparties) ? args.bridge.counterparties.length : 0)
+    : 0;
   return {
     bridge: args.bridge ?? null,
     draft: args.draft ?? null,
@@ -70,6 +75,8 @@ export function buildPrepareBridgeCorpusGateArgs(args: {
     signaturePreparationRequested: true,
     premiumComplete: corpus.length >= VS01_SIGNING_CORPUS_MIN_LEN,
     signatureRebuilt: handoff?.signatureRebuilt,
+    acceptedReviewPlain: corpus || undefined,
+    manifestPartyCount: Math.max(args.manifestPartyCount ?? 0, fromBridge),
   };
 }
 

@@ -37,6 +37,10 @@ import {
 } from "./vs01CurrentReviewSotForSeed";
 import { fetchVs01DocumentMeta } from "./vs01Api";
 import { buildVs01PrepareSigningRolesForBridge } from "../components/agreements/paidProNPartySignerSetup";
+import type { Vs01PrepareSigningRole } from "./vs01SignerFieldAssignment";
+import { buildVs01SigningPacketModel, type Vs01SigningPacketModel } from "./buildVs01SigningPacketModel";
+import { signingPacketHasPaginatedCorpus } from "./vs01CanonicalPageRender";
+import { buildPrepareBridgeCorpusGateArgs } from "./vs01PrepareBridgeCorpus";
 import { VS01_SIGNING_CORPUS_MIN_LEN } from "./vs01SigningCorpus";
 
 export const FIRST_FAILING_REMOUNT_SELF_SIGN_SHELL_PREDICATE =
@@ -144,6 +148,47 @@ export function remountPrepareShouldFailClosedWithoutCertifiedCorpus(args: {
   if (!args.hideStepper || !args.seedDocumentId.startsWith("doc_")) return false;
   if (args.corpus.ok) return false;
   return args.remountPrepareRestored || args.corpus.reason === "leftover_fused";
+}
+
+export type RemountPrepareSigningPacketResult =
+  | { ok: true; corpus: string; model: Vs01SigningPacketModel }
+  | { ok: false; reason: "empty_or_short" | "leftover_fused" | "gate_blocked" | "not_paginated" };
+
+/**
+ * Remount packet model from certified Review + restored roles.
+ * Review-paint SoT may omit By/witness; packet-layer rebuild uses restored
+ * roles / bridge (same as first-land deriveVs01PacketLayoutCorpus).
+ */
+export function resolveRemountPrepareSigningPacket(args: {
+  persistReviewCorpus?: string | null;
+  restoredBridgeCorpus?: string | null;
+  roles: readonly Vs01PrepareSigningRole[];
+  bridge: AgreementVs01BridgeSession | null;
+}): RemountPrepareSigningPacketResult {
+  const remountCorpus = resolveRemountPrepareCorpusText({
+    persistReviewCorpus: args.persistReviewCorpus,
+    restoredBridgeCorpus: args.restoredBridgeCorpus,
+  });
+  if (!remountCorpus.ok) return remountCorpus;
+  const roleCount = args.roles.filter((r) => (r.signerName ?? "").trim().length >= 2).length;
+  const model = buildVs01SigningPacketModel({
+    mode: "guided_pro",
+    authoritativeCorpusPlain: remountCorpus.corpus,
+    roles: args.roles,
+    bridge: args.bridge,
+    corpusGateArgs: {
+      ...buildPrepareBridgeCorpusGateArgs({
+        agreementCorpusText: remountCorpus.corpus,
+        bridge: args.bridge,
+        manifestPartyCount: roleCount,
+      }),
+      acceptedReviewPlain: remountCorpus.corpus,
+      manifestPartyCount: roleCount,
+    },
+  });
+  if (!model.diagnostics.corpusGate.allowed) return { ok: false, reason: "gate_blocked" };
+  if (!signingPacketHasPaginatedCorpus(model)) return { ok: false, reason: "not_paginated" };
+  return { ok: true, corpus: remountCorpus.corpus, model };
 }
 
 export function remountHasDualPartySignatureFields(args: {

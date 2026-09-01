@@ -58,6 +58,7 @@ describe("Vs01Wizard agreement bridge (static)", () => {
     expect(s).toContain("persistReviewCorpus");
     expect(s).toContain("bound.persistReviewCorpus");
     expect(s).toContain("resolveRemountPrepareCorpusText");
+    expect(s).toContain("fetchRemountCertifiedReviewCorpus");
     expect(s).toContain("remountPrepareShouldFailClosedWithoutCertifiedCorpus");
     expect(s).toContain("leftoverGetContentRefuseFromError(e) && persistReviewCorpus");
     expect(s).toMatch(/leftoverPacketNotPersistReview[\s\S]*if \(persistReviewCorpus\)/);
