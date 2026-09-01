@@ -101,6 +101,31 @@ def get_accepted_snapshot_record(draft: Any) -> Optional[Dict[str, Any]]:
     return None
 
 
+def latest_pending_snapshot(draft: Any) -> Optional[Dict[str, Any]]:
+    """Newest pending persist Review snapshot for this agreement, if any."""
+    reg = get_registry(draft)
+    snaps = reg.get("snapshots") if isinstance(reg.get("snapshots"), dict) else {}
+    pending = [
+        s
+        for s in snaps.values()
+        if isinstance(s, dict) and _clean(s.get("status")) == STATUS_PENDING
+    ]
+    pending.sort(key=lambda s: str(s.get("createdAt") or ""), reverse=True)
+    return pending[0] if pending else None
+
+
+def get_review_hydration_snapshot(draft: Any) -> Optional[Dict[str, Any]]:
+    """GET /canonical-review-snapshot body: latest pending persist, else accepted.
+
+    Persist POST writes a pending snapshot. Immediate GET must return that written
+    row even when a leftover/starter accepted snapshot still exists on the draft.
+    """
+    pending = latest_pending_snapshot(draft)
+    if pending:
+        return pending
+    return get_accepted_snapshot_record(draft)
+
+
 def _packet_portable(draft: Any) -> Optional[Dict[str, Any]]:
     if isinstance(draft, dict):
         packet = draft.get("vs01_signing_packet_v1")
