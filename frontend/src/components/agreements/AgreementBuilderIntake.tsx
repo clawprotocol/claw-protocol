@@ -26780,7 +26780,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       !premiumReturnWaitActive &&
       preferGuidedCompletionOverRetry &&
       guidedSessionRenderable &&
-      !guidedPanelMountedOnDocumentEditor,
+      !guidedPanelMountedOnDocumentEditor &&
+      !paidProInlineSignersReady &&
+      !signaturePreparationRequested &&
+      !hasAuthoritativeSigningSnapshot() &&
+      !guidedSigningPacketPreparedCurrent,
   );
   const proReviewFooter = useMemo(
     () =>
@@ -28851,7 +28855,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       !premiumReturnWaitActive &&
       !showGuidedCompletionRecovery &&
       !showPremiumNetworkRecoverablePanel &&
-      !showPremiumCorsBlockedPanel,
+      !showPremiumCorsBlockedPanel &&
+      !paidProInlineSignersReady &&
+      !signaturePreparationRequested &&
+      !hasAuthoritativeSigningSnapshot() &&
+      !guidedSigningPacketPreparedCurrent,
   );
   const proAmberRecoveryHeadline = createFlowDraftPersistError
     ? createFlowDraftPersistError.includes(PAID_CREATE_FLOW_DRAFT_LIMIT_HEADLINE) ||
