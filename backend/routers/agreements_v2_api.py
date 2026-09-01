@@ -60,6 +60,9 @@ from backend.agreements.premium_agreement_validation import (
     AgreementValidationResult,
     validatePremiumAgreementDraft,
 )
+from backend.agreements.review_plain_section_continuity import (
+    repair_review_plain_section_continuity,
+)
 from backend.agreements.premium_agreement_finalization import (
     PremiumFinalizationResult,
     finalize_premium_agreement_if_needed,
@@ -5588,6 +5591,14 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Respo
                 type(jsum_e).__name__,
             )
         primary_full = (out_primary.document_text or "").strip()
+        continuity = repair_review_plain_section_continuity(
+            doc,
+            original_intake=intake_s,
+            jurisdiction=str((ctx_dict or {}).get("jurisdiction") or ""),
+            remint_all_top_level=True,
+        )
+        if (continuity.get("text") or "").strip():
+            doc = continuity["text"]
         agreement_validation = _validate_and_log_premium_agreement_draft(
             authoritative_draft=doc,
             agreement_intelligence=out.agreement_intelligence,

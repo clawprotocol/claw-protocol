@@ -20,6 +20,7 @@ import { projectPaidProVisibleTitleDisplayPlain } from "./paidProDocumentTitleOp
 import { resolvePaidProNoticeAuthorityPartiesForFreeze } from "./paidProNoticeContactAuthority";
 import { restoreSequentialTopLevelSectionOrder } from "./paidProOrphanSectionNumberRepair";
 import { ensureOperativeIfToNoticeDelivery } from "./paidProPartyNoticeDetails";
+import { repairReviewPlainSectionContinuity } from "./reviewPlainSectionContinuity";
 import {
   auditPaidProPostFinalizeVisibleSurface,
   logPaidProPostFinalizeVisibleSurfaceMismatch,
@@ -80,7 +81,14 @@ function projectLastGoodIfToOnPaintPlain(
   // Notices splice / persist bytes can keep 12/13 ahead of the original 11. Governing Law.
   // Restore last-good sequential identity order (10 then 11 then 12 then 13) on paint.
   const ordered = restoreSequentialTopLevelSectionOrder(afterIfTo);
-  return ordered.repairs.length > 0 ? ordered.text : afterIfTo;
+  const afterOrder = ordered.repairs.length > 0 ? ordered.text : afterIfTo;
+  // Fill unused late-section holes (12 then 14 / 10 then 12) and restore a supplied
+  // governing-law term. Does not remint leftover 1..8 into 10/11/12/13.
+  const continued = repairReviewPlainSectionContinuity(afterOrder, {
+    intakeText: args?.intakeText,
+    jurisdiction: args?.draft?.jurisdiction,
+  });
+  return continued.repairs.length > 0 ? continued.text : afterOrder;
 }
 
 export function resetPaidProVisibleDocumentShellLogsForTests(): void {
