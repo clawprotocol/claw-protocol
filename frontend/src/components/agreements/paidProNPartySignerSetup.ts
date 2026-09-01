@@ -67,6 +67,22 @@ export function formatSignerSetupBeyondGeneratedWarning(generatedPartyCount: num
   return `${formatSignerSetupBeyondGeneratedWarningTitle(generatedPartyCount)} ${formatSignerSetupBeyondGeneratedWarningBody()}`;
 }
 
+/**
+ * Whether Signer details must collect an authorized signer name (title optional).
+ *
+ * The paid-Pro review surface defaults send mode to `"review"` while
+ * `signaturePreparationRequested` is held false during inline setup. That default
+ * must not hide name fields or let email-only flip PARTY COMPLETE while the
+ * save gate still requires a human signer name.
+ */
+export function resolveSignerDetailsSignaturePrepMode(args: {
+  paidProInlineRecipientShell: boolean;
+  resolvedSendMode: "review" | "signature" | string;
+}): boolean {
+  if (args.paidProInlineRecipientShell) return true;
+  return args.resolvedSendMode === "signature";
+}
+
 /** Visible completion state for one 2–4 party setup row. */
 export function formatPartySetupRowStatus(args: {
   partyIndex: number;

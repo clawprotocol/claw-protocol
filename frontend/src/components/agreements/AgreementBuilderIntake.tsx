@@ -1483,6 +1483,7 @@ import {
   removeAddedSignerPartyState,
   resolveGeneratedAgreementPartyCount,
   resolveInitialSignerSetupPartyCount,
+  resolveSignerDetailsSignaturePrepMode,
   resolveSignerSetupUiPartyCount,
 } from "./paidProNPartySignerSetup";
 import { resolveAuthoritativeSignerCount } from "./signerCountAuthority";
@@ -2526,10 +2527,10 @@ function CreateFlowSendRecipientsPanel({
       : finalReviewSendIntent === "signature"
         ? "signature"
         : effectivePremiumSendMode;
-  const signaturePrepMode =
-    resolvedSendMode === "review"
-      ? false
-      : paidProInlineRecipientShell || resolvedSendMode === "signature";
+  const signaturePrepMode = resolveSignerDetailsSignaturePrepMode({
+    paidProInlineRecipientShell,
+    resolvedSendMode,
+  });
   const notifySignerMetadataFieldEdit = (args: {
     partyIndex: number;
     field: PaidProSignerMetadataField;
