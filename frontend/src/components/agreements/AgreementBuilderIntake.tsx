@@ -755,6 +755,7 @@ import {
   readDisplayReviewSnapshotAuthority,
   readVerifiedCommercialDisplayCorpus,
 } from "../../agreement/canonicalReviewSnapshotApi";
+import { readPaintedSequentialPersistReviewPlain } from "./paidProPaintedSequentialPersistReview";
 import {
   hasFrozenPaidProAuthoritativeSnapshot,
   isPaidProSoTEstablishmentFailure,
@@ -30545,6 +30546,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       agreementId: durableAgreementId,
       corpusPlain: signingReadyPlain,
       generationSessionId: signerFinalizeReviewSessionId,
+      paintedPersistPlain: readPaintedSequentialPersistReviewPlain() || undefined,
     });
     if (!prepared.ok) {
       rollbackFinalizeFailure(
@@ -31275,6 +31277,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                 agreementId: agreementIdForAccept,
                 corpusPlain: finalizedPlain,
                 generationSessionId: getOrInitSessionAgreementGenerationId(),
+                paintedPersistPlain: readPaintedSequentialPersistReviewPlain() || undefined,
               });
               if (!prepared.ok) {
                 setProFullDraftCustomGateMessage(

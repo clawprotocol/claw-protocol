@@ -1,9 +1,15 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   clearAcceptedReviewSnapshotRef,
   clearDisplayReviewSnapshotAuthority,
+  persistCanonicalReviewSnapshot,
+  sha256CorpusDigest,
 } from "../../agreement/canonicalReviewSnapshotApi";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
+import {
+  clearPaintedSequentialPersistReviewForTests,
+  latchPaintedSequentialPersistReview,
+} from "./paidProPaintedSequentialPersistReview";
 import {
   PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN,
   resetPaidProVisibleDocumentShellLogsForTests,
@@ -462,6 +468,8 @@ describe("persist Review paint sequentializes skipped integers", () => {
     clearDisplayReviewSnapshotAuthority();
     clearAcceptedReviewSnapshotRef();
     resetPaidProVisibleDocumentShellLogsForTests();
+    clearPaintedSequentialPersistReviewForTests();
+    vi.restoreAllMocks();
   });
 
   it("Screen 1 persist Review paint FAILs 12-then-14 until repaired, then PASSES sequential + supplied law", () => {
@@ -519,5 +527,84 @@ describe("persist Review paint sequentializes skipped integers", () => {
     expect(painted.plain).toMatch(/Oklahoma/i);
     expect(painted.plain).not.toMatch(/Texas/);
     expect(painted.plain).not.toMatch(/Northline|Harbor Marks|Priya|Diego/);
+  });
+
+  it("Continue-to-signature-links persist POSTs painted sequential 1..N when authority would skip", async () => {
+    const client = "Cedar Ridge LLC";
+    const provider = "Maple Grove Inc";
+    const law = "Oklahoma";
+    const intake = twoPartyIntake({ client, provider, law });
+    const raw = padToVisibleShellFloor(twelveThenFourteen(client, provider));
+    expect(reviewPlainHasLateSkippedSectionNumbers(raw)).toBe(true);
+
+    const draft: ParsedDraftShape = {
+      title: "Services Agreement",
+      jurisdiction: law,
+      agreement_family: "services_agreement",
+      parties: [
+        { name: client, role: "Client" },
+        { name: provider, role: "Service Provider" },
+      ],
+      purpose: "logo and brand kit",
+      payment_terms: "$2,400",
+      duration: "30 days",
+      due_date: null,
+      effective_date: null,
+      payment: { amount: 2400, cadence: "one_time", valid: true },
+    };
+    const painted = resolveCanonicalPlainForVisibleShell({
+      draft,
+      intakeText: intake,
+      agreementId: "agr_continue_paint_persist",
+      paidProActive: true,
+      premiumCheckoutCompleted: true,
+      premiumPaidDocumentSurface: true,
+      acceptedCanonicalPlain: raw,
+    });
+    expect(reviewPlainHasLateSkippedSectionNumbers(painted.plain)).toBe(false);
+    assertSequentialIntegers(painted.plain);
+
+    latchPaintedSequentialPersistReview({
+      paintedPlain: painted.plain,
+      authorityPlain: raw,
+    });
+    const digest = await sha256CorpusDigest(painted.plain);
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        snapshot: {
+          snapshot_id: "crs_continue_paint",
+          agreement_id: "agr_continue_paint_persist",
+          corpus_plain: painted.plain,
+          corpus_sha256: digest,
+          corpus_length: painted.plain.length,
+          status: "pending",
+        },
+      }),
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const refusedIfAuthority = await persistCanonicalReviewSnapshot({
+      agreementId: "agr_continue_paint_persist",
+      corpusPlain: raw,
+      paintedPersistPlain: raw,
+    });
+    expect(refusedIfAuthority.ok).toBe(false);
+    if (!refusedIfAuthority.ok) {
+      expect(refusedIfAuthority.code).toBe("skipped_top_level_section_integers");
+    }
+
+    const res = await persistCanonicalReviewSnapshot({
+      agreementId: "agr_continue_paint_persist",
+      corpusPlain: raw,
+    });
+    expect(res.ok).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    const firstCall = fetchMock.mock.calls[0] as unknown as [string, RequestInit?];
+    const body = JSON.parse(String(firstCall[1]?.body ?? "{}"));
+    expect(body.corpus_plain).toBe(painted.plain);
+    expect(collectReviewPlainTopLevelSectionNumbers(body.corpus_plain)[0]).toBe(1);
+    expect(reviewPlainHasLateSkippedSectionNumbers(body.corpus_plain)).toBe(false);
   });
 });

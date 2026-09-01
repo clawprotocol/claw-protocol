@@ -31,6 +31,7 @@ import { isPaidProPostFinalizeHydratedCorpusLocked } from "./paidProSignerMetada
 import type { VisibleProPaperDiagnosticsTrace } from "./visibleProPaperRenderBoundary";
 import { readAcceptedPipelineReviewCorpusPlain } from "./paidProAcceptedPipelineReviewCorpus";
 import { PAID_PRO_AUTHORITY_MIN_LEN } from "./paidProAuthorityConstants";
+import { latchPaintedSequentialPersistReview } from "./paidProPaintedSequentialPersistReview";
 import {
   getPaidProSourceOfTruth,
   getPaidProSourceOfTruthText,
@@ -330,6 +331,12 @@ export function PaidProVisibleDocumentShell({
     (authorityLen > 0 ? hashPaidProCorpus(liveSot!.text) : "");
   const paintPlainHash =
     renderPlain.trim().length > 0 ? hashPaidProCorpus(renderPlain.trim()) : "";
+  if (branch === "canonical_plain_forced" && renderPlain.trim().length >= 500) {
+    latchPaintedSequentialPersistReview({
+      paintedPlain: renderPlain,
+      authorityPlain: liveSot?.text || authoritativePlain,
+    });
+  }
 
   return (
     <div

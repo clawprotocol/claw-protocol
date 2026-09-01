@@ -10,6 +10,7 @@
  * Client SoT coordinates review display; server accepted snapshot is commercial authority.
  */
 
+import { resolvePersistReviewPlainForClientPreflight } from "../components/agreements/paidProPaintedSequentialPersistReview";
 import { reviewPlainHasLateSkippedSectionNumbers } from "../components/agreements/reviewPlainSectionContinuity";
 import { apiUrl } from "../lib/clawApi";
 import { sha256Hex } from "../utils/agreements/hash";
@@ -274,21 +275,33 @@ export async function persistCanonicalReviewSnapshot(args: {
   expectedRegistryVersion?: number | null;
   intakeText?: string | null;
   jurisdiction?: string | null;
+  /**
+   * Painted sequential persist Review (canonical_plain_forced / paint-plain class).
+   * Continue-to-signature-links preflight must scan this, not a shorter
+   * review_session_authority corpus that false-fires skip.
+   */
+  paintedPersistPlain?: string | null;
 }): Promise<PersistCanonicalReviewSnapshotResult> {
   const id = args.agreementId.trim();
   const corpus = (args.corpusPlain || "").trim();
   if (!id || corpus.length < 500) return { ok: false, code: "invalid_snapshot_args" };
+  // Scan the painted sequential persist Review when present. A shorter
+  // review_session_authority payload must not abort before POST if paint is 1..N.
+  const persistPlain = resolvePersistReviewPlainForClientPreflight({
+    corpusPlain: corpus,
+    paintedPersistPlain: args.paintedPersistPlain,
+  });
   // Hard gate: persist Review must refuse skipped late integers. Repair-then-accept is not proof.
-  if (reviewPlainHasLateSkippedSectionNumbers(corpus)) {
+  if (reviewPlainHasLateSkippedSectionNumbers(persistPlain)) {
     return { ok: false, code: "skipped_top_level_section_integers" };
   }
-  const claimed = await sha256CorpusDigest(corpus);
+  const claimed = await sha256CorpusDigest(persistPlain);
   try {
     const res = await fetch(apiUrl(`/api/agreements/${encodeURIComponent(id)}/canonical-review-snapshot`), {
       method: "POST",
       headers: clawAgreementHeaders({ "Content-Type": "application/json" }),
       body: JSON.stringify({
-        corpus_plain: corpus,
+        corpus_plain: persistPlain,
         generation_session_id: args.generationSessionId ?? null,
         claimed_digest: claimed,
         created_by_session: args.createdBySession ?? args.generationSessionId ?? null,
@@ -419,6 +432,7 @@ export async function prepareCommercialReviewSnapshotAuthority(args: {
   generationSessionId?: string | null;
   intakeText?: string | null;
   jurisdiction?: string | null;
+  paintedPersistPlain?: string | null;
 }): Promise<
   | {
       ok: true;
@@ -440,6 +454,7 @@ export async function prepareCommercialReviewSnapshotAuthority(args: {
     createdBySession: args.generationSessionId,
     intakeText: args.intakeText,
     jurisdiction: args.jurisdiction,
+    paintedPersistPlain: args.paintedPersistPlain,
   });
   if (!persisted.ok) return { ok: false, code: persisted.code };
 

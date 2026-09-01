@@ -167,6 +167,7 @@ describe("dashboard signer-setup resume → Continue paints finalized signer cor
     expect(postFinalizeIdx).toBeGreaterThan(commercialBlock);
     expect(verifiedGateIdx).toBeGreaterThan(postFinalizeIdx);
     expect(intakeSrc).toContain("prepareCommercialReviewSnapshotAuthority({");
+    expect(intakeSrc).toContain("paintedPersistPlain: readPaintedSequentialPersistReviewPlain()");
     expect(intakeSrc).toContain("persistFrozenSigningAuthorityToBackendDetailed");
     expect(intakeSrc).toContain("replacePaidProReviewSessionAuthorityAfterSignerFinalize");
     expect(intakeSrc).toContain("Could not persist the finalized agreement snapshot");
