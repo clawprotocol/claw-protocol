@@ -6,6 +6,8 @@ Does not hard-code Texas / Northline / Harbor / Priya / Diego.
 
 from __future__ import annotations
 
+import re
+
 import pytest
 
 from backend.agreements.review_plain_section_continuity import (
@@ -209,6 +211,60 @@ def _sequential_1_through_12_wrapped_notices(*, client: str, provider: str, law:
     )
 
 
+_PERSIST_HEADING_TITLE_MARKERS = (
+    "Services",
+    "Revisions",
+    "Fees",
+    "Term",
+    "Intellectual",
+    "Confidentiality",
+    "Representations",
+    "Indemnification",
+    "Liability",
+    "Independent",
+    "Governing",
+    "Notices",
+    "Force Majeure",
+    "Miscellaneous",
+    "Client Materials",
+)
+
+
+def _as_persist_review_html(plain: str) -> str:
+    """Live persist Review after signer names: painted h2 headings + paragraph body."""
+    out: list[str] = []
+    for line in (plain or "").split("\n"):
+        trimmed = line.strip()
+        if (
+            trimmed
+            and not re.match(r"^\d+\.\d+", trimmed)
+            and re.match(r"^\d{1,2}\.\s+", trimmed)
+            and any(marker in trimmed for marker in _PERSIST_HEADING_TITLE_MARKERS)
+        ):
+            out.append(f'<h2 class="premium-doc-section-heading">{trimmed}</h2>')
+        elif trimmed:
+            out.append(f"<p>{trimmed}</p>")
+        else:
+            out.append("")
+    return "\n".join(out)
+
+
+def _as_persist_review_markup(plain: str) -> str:
+    """Live persist Review: HTML heading 2 wrap + Notices markup + br delivery list."""
+    return (
+        (plain or "")
+        .replace(
+            "2. Revisions,",
+            '<h2 class="premium-doc-section-heading">2. Revisions,</h2>',
+        )
+        .replace("12. Notices", "<strong>12. Notices</strong>")
+        .replace(
+            "1. Email\n2. Personal delivery\n3. Overnight courier",
+            "1. Email<br />2. Personal delivery<br />3. Overnight courier",
+        )
+    )
+
+
 def _leftover_eight_section(*, client: str, provider: str) -> str:
     headings = [(i, t) for i, t in [
         (1, "Services and Deliverables"),
@@ -285,6 +341,46 @@ def test_sequential_wrapped_heading_1_through_12_is_not_a_skip(
     assert review_plain_has_late_skipped_section_numbers(skipped_12_14) is True
     assert 14 in collect_review_plain_top_level_section_numbers(skipped_12_14)
     assert 13 not in collect_review_plain_top_level_section_numbers(skipped_12_14)
+
+
+@pytest.mark.parametrize(
+    ("law", "client", "provider", "attn_a", "attn_b"),
+    [
+        ("Oklahoma", "Cedar Ridge LLC", "Maple Grove Inc", "Jordan Hale", "Morgan Ellis"),
+        ("Colorado", "Riverbend Studio", "Oak Point LLC", "Casey Quinn", "Riley Chen"),
+        ("New York", "Summit Craft Co", "Harborline Design LLC", "Avery Cole", "Sam Ortiz"),
+    ],
+)
+def test_persist_review_html_markup_1_through_12_is_not_a_skip(
+    law: str, client: str, provider: str, attn_a: str, attn_b: str
+) -> None:
+    """Signer-save persist Review (HTML headings / Notices markup / delivery 1-2-3) must collect 1..12."""
+    sequential = _sequential_1_through_12_wrapped_notices(
+        client=client, provider=provider, law=law, attn_a=attn_a, attn_b=attn_b
+    )
+    html_corpus = _as_persist_review_html(sequential)
+    markup_corpus = _as_persist_review_markup(sequential)
+    entity_corpus = sequential.replace("12. Notices", "12.&nbsp;Notices").replace(
+        "2. Revisions,",
+        '<h2 class="premium-doc-section-heading">2. Revisions,</h2>',
+    )
+    for corpus in (html_corpus, markup_corpus, entity_corpus):
+        nums = collect_review_plain_top_level_section_numbers(corpus)
+        assert nums == list(range(1, 13))
+        assert review_plain_has_skipped_section_numbers(corpus) is False
+        assert review_plain_has_late_skipped_section_numbers(corpus) is False
+        assert "Texas" not in corpus
+        assert "Northline" not in corpus
+        assert "Priya" not in corpus
+        assert "Diego" not in corpus
+
+    skipped_html = _as_persist_review_html(_twelve_then_fourteen(client=client, provider=provider))
+    skipped_10_html = _as_persist_review_html(_ten_then_twelve(client=client, provider=provider))
+    assert review_plain_has_late_skipped_section_numbers(skipped_html) is True
+    assert 14 in collect_review_plain_top_level_section_numbers(skipped_html)
+    assert 13 not in collect_review_plain_top_level_section_numbers(skipped_html)
+    assert review_plain_has_late_skipped_section_numbers(skipped_10_html) is True
+    assert 11 not in collect_review_plain_top_level_section_numbers(skipped_10_html)
 
 
 def test_repair_fills_12_then_14_and_keeps_supplied_governing_law() -> None:

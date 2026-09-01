@@ -15,8 +15,16 @@ const GOVERNING_HEADING_RE = /^\d{1,2}\.\s+GOVERNING LAW\b/i;
 const GOVERNED_BY_RE = /\bgoverned\s+by\s+(?:the\s+)?laws?\s+of\b/i;
 /** Notices If-to / Attn / address field lines are not top-level sections, even when numbered. */
 const NOTICE_FIELD_TITLE_RE = /^(?:If\s+to\b|Attn\s*:|Attention\s*:|Address\b|Email\b)/i;
+/** Numbered notice-delivery methods after Notices (1. Email / 2. Personal delivery / 3. Overnight courier). */
+const NOTICE_DELIVERY_TITLE_RE =
+  /^(?:Email|Personal\s+delivery|Overnight\s+courier|Hand\s+delivery|Certified\s+mail|Registered\s+mail|Fax|Mail|Courier|Postal\s+mail)\b/i;
 const STREET_ADDRESS_TITLE_RE =
   /\b(?:Street|St\.?|Avenue|Ave\.?|Road|Rd\.?|Boulevard|Blvd\.?|Lane|Ln\.?|Drive|Dr\.?|Suite|Ste\.?)\b/i;
+const HTML_HINT_RE = /<\/?(?:h[1-6]|p|div|br|strong|b|em|span|article|li)\b|&nbsp;|&#/i;
+const HTML_BLOCK_CLOSE_RE =
+  /<\/(?:p|div|section|article|h[1-6]|blockquote|li|tr|thead|tbody|table)\b[^>]*>/gi;
+const HTML_BR_RE = /<br\s*\/?>/gi;
+const HTML_TAG_RE = /<[^>]+>/g;
 
 /** Late-section holes (10 then 12, 12 then 14). Do not remint 1..8 leftovers. */
 export const REVIEW_PLAIN_LATE_SECTION_SKIP_FLOOR = 10;
@@ -40,8 +48,37 @@ function splitBeforeWitness(text: string): { head: string; tail: string } {
   return { head: raw.slice(0, idx), tail: raw.slice(idx) };
 }
 
+function decodeHeadingEntities(text: string): string {
+  return (text || "")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/g, "&")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&#(\d+);/g, (_m, n: string) => String.fromCharCode(Number(n)))
+    .replace(/&#x([0-9a-f]+);/gi, (_m, h: string) => String.fromCharCode(Number.parseInt(h, 16)))
+    .replace(/\u00a0/g, " ");
+}
+
+/** Persist Review may be HTML or markup. Scan line-oriented plain, keep true holes. */
+function normalizeReviewPlainForSectionScan(plain: string): string {
+  let text = (plain || "").replace(/\r\n/g, "\n");
+  if (HTML_HINT_RE.test(text)) {
+    HTML_BLOCK_CLOSE_RE.lastIndex = 0;
+    HTML_BR_RE.lastIndex = 0;
+    HTML_TAG_RE.lastIndex = 0;
+    text = text.replace(HTML_BLOCK_CLOSE_RE, "\n").replace(HTML_BR_RE, "\n").replace(HTML_TAG_RE, "");
+    text = decodeHeadingEntities(text);
+  }
+  return text.replace(/\u00a0/g, " ");
+}
+
 function stripHeadingMarkup(line: string): string {
-  return (line || "").trim().replace(/^(?:\*+|__)\s*|\s*(?:\*+|__)$/g, "").trim();
+  HTML_TAG_RE.lastIndex = 0;
+  let trimmed = (line || "").trim().replace(HTML_TAG_RE, "");
+  trimmed = decodeHeadingEntities(trimmed).trim();
+  trimmed = trimmed.replace(/^#{1,6}\s+/, "");
+  trimmed = trimmed.replace(/^(?:\*+|__)\s*|\s*(?:\*+|__)$/g, "").trim();
+  return trimmed.replace(/\*\*|__/g, "").trim();
 }
 
 function parseTopLevelHeading(line: string): { number: number; title: string } | null {
@@ -57,6 +94,7 @@ function parseCollectableTopLevelHeading(line: string): { number: number; title:
   const parsed = parseTopLevelHeading(line);
   if (!parsed) return null;
   if (NOTICE_FIELD_TITLE_RE.test(parsed.title)) return null;
+  if (NOTICE_DELIVERY_TITLE_RE.test(parsed.title)) return null;
   if (STREET_ADDRESS_TITLE_RE.test(parsed.title)) return null;
   return parsed;
 }
@@ -64,10 +102,11 @@ function parseCollectableTopLevelHeading(line: string): { number: number; title:
 /**
  * First-occurrence top-level integers through the Notices heading.
  * Wrapped title remnants (`2. Revisions,` after 12 Notices), If-to / Attn blocks,
- * and subsections 4.1 / 5.1 are not skipped integers.
+ * numbered notice-delivery lines (`1. Email` / `2. Personal delivery`), HTML/markup
+ * heading wrappers, and subsections 4.1 / 5.1 are not skipped integers.
  */
 export function collectReviewPlainTopLevelSectionNumbers(plain: string): number[] {
-  const { head } = splitBeforeWitness(plain || "");
+  const { head } = splitBeforeWitness(normalizeReviewPlainForSectionScan(plain || ""));
   const nums: number[] = [];
   const seen = new Set<number>();
   for (const line of head.split("\n")) {

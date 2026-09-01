@@ -8,6 +8,7 @@ Does not remint leftover 1..8 outlines into 10/11/12/13.
 
 from __future__ import annotations
 
+import html
 import re
 from typing import List, Optional, Sequence, Tuple
 
@@ -76,11 +77,25 @@ _NOTICE_FIELD_TITLE_RE = re.compile(
     r"^(?:If\s+to\b|Attn\s*:|Attention\s*:|Address\b|Email\b)",
     re.I,
 )
+# Numbered notice-delivery methods after Notices (1. Email / 2. Personal delivery / 3. Overnight courier).
+_NOTICE_DELIVERY_TITLE_RE = re.compile(
+    r"^(?:Email|Personal\s+delivery|Overnight\s+courier|Hand\s+delivery|"
+    r"Certified\s+mail|Registered\s+mail|Fax|Mail|Courier|Postal\s+mail)\b",
+    re.I,
+)
 _STREET_ADDRESS_TITLE_RE = re.compile(
     r"\b(?:Street|St\.?|Avenue|Ave\.?|Road|Rd\.?|Boulevard|Blvd\.?|Lane|Ln\.?|Drive|Dr\.?|Suite|Ste\.?)\b",
     re.I,
 )
 _HEADING_MARKUP_RE = re.compile(r"^(?:\*+|_{2,})\s*|\s*(?:\*+|_{2,})$")
+_HTML_HINT_RE = re.compile(r"</?(?:h[1-6]|p|div|br|strong|b|em|span|article|li)\b|&nbsp;|&#", re.I)
+_HTML_BLOCK_CLOSE_RE = re.compile(
+    r"</(?:p|div|section|article|h[1-6]|blockquote|li|tr|thead|tbody|table)\b[^>]*>",
+    re.I,
+)
+_HTML_BR_RE = re.compile(r"<br\s*/?>", re.I)
+_HTML_TAG_RE = re.compile(r"<[^>]+>")
+_MARKDOWN_HEADING_PREFIX_RE = re.compile(r"^#{1,6}\s+")
 GOVERNED_BY_RE = re.compile(r"\bgoverned\s+by\s+(?:the\s+)?laws?\s+of\b", re.I)
 # Customer dump form: "governing law Texas" / "governing law: Oklahoma"
 SUPPLIED_GOVERNING_LAW_RE = re.compile(
@@ -101,9 +116,31 @@ def _split_before_witness(text: str) -> Tuple[str, str]:
     return raw[: m.start()], raw[m.start() :]
 
 
+def _normalize_review_plain_for_section_scan(plain: str) -> str:
+    """Persist Review may be HTML or markup. Scan line-oriented plain, keep true holes.
+
+    Review paint wraps headings in ``<h2 class="premium-doc-section-heading">`` and may
+    join notice-delivery lines with ``<br />``. Signer-save persist can also wrap the
+    Notices title (``<strong>12. Notices</strong>`` / ``12.&nbsp;Notices``). Convert
+    those to plain lines before skip detection so sequential 1..12 is not 11-then-2.
+    """
+    text = (plain or "").replace("\r\n", "\n")
+    if _HTML_HINT_RE.search(text):
+        text = _HTML_BLOCK_CLOSE_RE.sub("\n", text)
+        text = _HTML_BR_RE.sub("\n", text)
+        text = _HTML_TAG_RE.sub("", text)
+        text = html.unescape(text)
+    return text.replace("\xa0", " ")
+
+
 def _strip_heading_markup(line: str) -> str:
-    """Drop markdown bold wrappers so a wrapped/bold heading still parses as N. Title."""
-    return _HEADING_MARKUP_RE.sub("", (line or "").strip()).strip()
+    """Drop HTML/markdown wrappers so a wrapped/bold heading still parses as N. Title."""
+    trimmed = _HTML_TAG_RE.sub("", (line or "").strip())
+    trimmed = html.unescape(trimmed).replace("\xa0", " ").strip()
+    trimmed = _MARKDOWN_HEADING_PREFIX_RE.sub("", trimmed)
+    trimmed = _HEADING_MARKUP_RE.sub("", trimmed).strip()
+    trimmed = trimmed.replace("**", "").replace("__", "").strip()
+    return trimmed
 
 
 def _parse_collectable_top_level_heading(line: str) -> Optional[Tuple[int, str]]:
@@ -117,6 +154,8 @@ def _parse_collectable_top_level_heading(line: str) -> Optional[Tuple[int, str]]
     title = m.group(2).strip()
     if _NOTICE_FIELD_TITLE_RE.match(title):
         return None
+    if _NOTICE_DELIVERY_TITLE_RE.match(title):
+        return None
     if _STREET_ADDRESS_TITLE_RE.search(title):
         return None
     return int(m.group(1)), title
@@ -126,11 +165,12 @@ def collect_review_plain_top_level_section_numbers(plain: str) -> List[int]:
     """Collect first-occurrence top-level integers through the Notices heading.
 
     Wrapped title remnants (``2. Revisions,`` after 12 Notices), If-to / Attn blocks,
-    and subsections ``4.1`` / ``5.1`` are not skipped integers. Stop at Notices so
-    signer-save notice body cannot restart the sequence. Real holes (12 then 14)
-    still collect 14 when 14 is the later heading.
+    numbered notice-delivery lines (``1. Email`` / ``2. Personal delivery``), HTML/markup
+    heading wrappers, and subsections ``4.1`` / ``5.1`` are not skipped integers. Stop
+    at Notices so signer-save notice body cannot restart the sequence. Real holes
+    (12 then 14) still collect 14 when 14 is the later heading.
     """
-    head, _ = _split_before_witness(plain or "")
+    head, _ = _split_before_witness(_normalize_review_plain_for_section_scan(plain or ""))
     nums: List[int] = []
     seen = set()
     for line in head.split("\n"):
