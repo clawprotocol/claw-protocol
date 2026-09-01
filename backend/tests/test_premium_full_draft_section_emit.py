@@ -26,6 +26,8 @@ from backend.agreements.review_plain_section_continuity import (
 )
 from backend.services.accepted_review_snapshot import MIN_CORPUS_LEN, create_pending_snapshot
 from backend.tests.test_review_plain_section_continuity import (
+    _as_persist_review_html,
+    _as_persist_review_markup,
     _leftover_eight_section,
     _sequential_1_through,
     _sequential_1_through_12_wrapped_notices,
@@ -160,6 +162,49 @@ def test_persist_accepts_sequential_wrapped_heading_1_through_12(
     assert "Diego" not in snap["corpusPlain"]
 
 
+@pytest.mark.parametrize(
+    ("law", "client", "provider", "attn_a", "attn_b"),
+    [
+        ("Oklahoma", "Cedar Ridge LLC", "Maple Grove Inc", "Jordan Hale", "Morgan Ellis"),
+        ("Colorado", "Riverbend Studio", "Oak Point LLC", "Casey Quinn", "Riley Chen"),
+        ("New York", "Summit Craft Co", "Harborline Design LLC", "Avery Cole", "Sam Ortiz"),
+    ],
+)
+def test_persist_accepts_sequential_html_markup_1_through_12(
+    law: str, client: str, provider: str, attn_a: str, attn_b: str
+) -> None:
+    sequential = _pad_to_persist_floor(
+        _sequential_1_through_12_wrapped_notices(
+            client=client, provider=provider, law=law, attn_a=attn_a, attn_b=attn_b
+        )
+    )
+    variants = (
+        _as_persist_review_html(sequential),
+        _as_persist_review_markup(sequential),
+        sequential.replace("12. Notices", "12.&nbsp;Notices").replace(
+            "2. Revisions,",
+            '<h2 class="premium-doc-section-heading">2. Revisions,</h2>',
+        ),
+    )
+    for idx, corpus in enumerate(variants):
+        assert collect_review_plain_top_level_section_numbers(corpus) == list(range(1, 13))
+        assert refuse_skipped_top_level_section_integers(corpus, late_only=True) is None
+        ok, err, snap, _reg = create_pending_snapshot(
+            agreement_id=f"agr_persist_html_{law.lower().replace(' ', '_')}_{idx}",
+            corpus_plain=_pad_to_persist_floor(corpus),
+        )
+        assert ok is True
+        assert err is None
+        assert snap is not None
+        assert collect_review_plain_top_level_section_numbers(snap["corpusPlain"]) == list(
+            range(1, 13)
+        )
+        assert "Texas" not in snap["corpusPlain"]
+        assert "Northline" not in snap["corpusPlain"]
+        assert "Priya" not in snap["corpusPlain"]
+        assert "Diego" not in snap["corpusPlain"]
+
+
 def test_persist_refuses_12_then_14_and_10_then_12_without_repair() -> None:
     skipped_12_14 = _pad_to_persist_floor(
         _twelve_then_fourteen(client="Cedar Ridge LLC", provider="Maple Grove Inc")
@@ -181,6 +226,23 @@ def test_persist_refuses_12_then_14_and_10_then_12_without_repair() -> None:
     ok, err, snap, _reg = create_pending_snapshot(
         agreement_id="agr_skip_10_12",
         corpus_plain=skipped_10_12,
+    )
+    assert ok is False
+    assert err == SKIPPED_TOP_LEVEL_SECTION_INTEGERS
+    assert snap is None
+
+    skipped_12_14_html = _pad_to_persist_floor(_as_persist_review_html(skipped_12_14))
+    skipped_10_12_html = _pad_to_persist_floor(_as_persist_review_html(skipped_10_12))
+    ok, err, snap, _reg = create_pending_snapshot(
+        agreement_id="agr_skip_12_14_html",
+        corpus_plain=skipped_12_14_html,
+    )
+    assert ok is False
+    assert err == SKIPPED_TOP_LEVEL_SECTION_INTEGERS
+    assert snap is None
+    ok, err, snap, _reg = create_pending_snapshot(
+        agreement_id="agr_skip_10_12_html",
+        corpus_plain=skipped_10_12_html,
     )
     assert ok is False
     assert err == SKIPPED_TOP_LEVEL_SECTION_INTEGERS

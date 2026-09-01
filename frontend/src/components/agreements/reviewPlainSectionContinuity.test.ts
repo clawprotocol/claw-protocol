@@ -203,6 +203,52 @@ function sequentialThrough12WrappedNotices(args: {
   ].join("\n");
 }
 
+const PERSIST_HEADING_TITLE_MARKERS = [
+  "Services",
+  "Revisions",
+  "Fees",
+  "Term",
+  "Intellectual",
+  "Confidentiality",
+  "Representations",
+  "Indemnification",
+  "Liability",
+  "Independent",
+  "Governing",
+  "Notices",
+  "Force Majeure",
+  "Miscellaneous",
+  "Client Materials",
+] as const;
+
+function asPersistReviewHtml(plain: string): string {
+  return plain
+    .split("\n")
+    .map((line) => {
+      const trimmed = line.trim();
+      if (
+        trimmed &&
+        !/^\d+\.\d+/.test(trimmed) &&
+        /^\d{1,2}\.\s+/.test(trimmed) &&
+        PERSIST_HEADING_TITLE_MARKERS.some((marker) => trimmed.includes(marker))
+      ) {
+        return `<h2 class="premium-doc-section-heading">${trimmed}</h2>`;
+      }
+      return trimmed ? `<p>${trimmed}</p>` : "";
+    })
+    .join("\n");
+}
+
+function asPersistReviewMarkup(plain: string): string {
+  return plain
+    .replace("2. Revisions,", '<h2 class="premium-doc-section-heading">2. Revisions,</h2>')
+    .replace("12. Notices", "<strong>12. Notices</strong>")
+    .replace(
+      "1. Email\n2. Personal delivery\n3. Overnight courier",
+      "1. Email<br />2. Personal delivery<br />3. Overnight courier",
+    );
+}
+
 function leftoverEightSection(client: string, provider: string): string {
   return servicesBody({
     client,
@@ -292,6 +338,47 @@ describe("Review/plain skipped section numbering", () => {
       expect(reviewPlainHasLateSkippedSectionNumbers(skipped1214)).toBe(true);
       expect(collectReviewPlainTopLevelSectionNumbers(skipped1214)).toContain(14);
       expect(collectReviewPlainTopLevelSectionNumbers(skipped1214)).not.toContain(13);
+    },
+  );
+
+  it.each(cases)(
+    "PASSES persist-time HTML/markup 1..12; still FAILs HTML 12-then-14 ($law)",
+    ({ law, client, provider }) => {
+      const attn =
+        law === "Oklahoma"
+          ? { attnA: "Jordan Hale", attnB: "Morgan Ellis" }
+          : law === "Colorado"
+            ? { attnA: "Casey Quinn", attnB: "Riley Chen" }
+            : { attnA: "Avery Cole", attnB: "Sam Ortiz" };
+      const sequential = sequentialThrough12WrappedNotices({
+        client,
+        provider,
+        law,
+        ...attn,
+      });
+      const htmlCorpus = asPersistReviewHtml(sequential);
+      const markupCorpus = asPersistReviewMarkup(sequential);
+      const entityCorpus = sequential
+        .replace("12. Notices", "12.&nbsp;Notices")
+        .replace("2. Revisions,", '<h2 class="premium-doc-section-heading">2. Revisions,</h2>');
+      for (const corpus of [htmlCorpus, markupCorpus, entityCorpus]) {
+        expect(collectReviewPlainTopLevelSectionNumbers(corpus)).toEqual([
+          1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12,
+        ]);
+        expect(reviewPlainHasSkippedSectionNumbers(corpus)).toBe(false);
+        expect(reviewPlainHasLateSkippedSectionNumbers(corpus)).toBe(false);
+        expect(corpus).not.toMatch(/Texas/);
+        expect(corpus).not.toMatch(/Northline/);
+        expect(corpus).not.toMatch(/Priya|Diego/);
+      }
+
+      const skippedHtml = asPersistReviewHtml(twelveThenFourteen(client, provider));
+      const skipped10Html = asPersistReviewHtml(tenThenTwelve(client, provider));
+      expect(reviewPlainHasLateSkippedSectionNumbers(skippedHtml)).toBe(true);
+      expect(collectReviewPlainTopLevelSectionNumbers(skippedHtml)).toContain(14);
+      expect(collectReviewPlainTopLevelSectionNumbers(skippedHtml)).not.toContain(13);
+      expect(reviewPlainHasLateSkippedSectionNumbers(skipped10Html)).toBe(true);
+      expect(collectReviewPlainTopLevelSectionNumbers(skipped10Html)).not.toContain(11);
     },
   );
 
