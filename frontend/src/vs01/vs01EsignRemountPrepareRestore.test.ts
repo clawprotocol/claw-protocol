@@ -22,16 +22,23 @@ import {
   readPaidProAgreementBridgeSkipMarker,
 } from "../launch/simpleProduct/agreementToVs01SigningBridge";
 import {
+  FIRST_FAILING_REMOUNT_PREPARE_CORPUS_UNSET_PREDICATE,
   FIRST_FAILING_REMOUNT_SELF_SIGN_SHELL_PREDICATE,
   PREPARE_RESTORED_FROM_FROZEN_SIGNING_AUTHORITY,
   matchingPrepareBridgeForDocument,
   overlayFrozenSigningAuthorityOntoDraft,
   recipientSetupFromFrozenSigningAuthority,
   remountHasDualPartySignatureFields,
+  remountPrepareHydrateWouldSkipUnsetCorpus,
+  remountPrepareShouldFailClosedWithoutCertifiedCorpus,
   remountSurfaceIsEmptySelfSignShell,
+  resolveRemountPrepareCorpusText,
   restorePrepareFromFrozenSigningAuthority,
   shouldRestorePrepareFromFrozenSigningAuthority,
 } from "./vs01EsignRemountPrepareRestore";
+import { resolveFinalVs01CorpusOrBlock } from "./vs01SigningCorpus";
+import { leftoverRemountShouldFailClosedToast } from "./vs01EsignRemountReviewBind";
+import { reviewCorpusLooksLikeLeftoverFusedNotices } from "./vs01CurrentReviewSotForSeed";
 
 const AGREEMENT_ID = "ag_prepare_dual_party_remount";
 const SEEDED_DOC = "doc_prepare_dual_party_seed";
@@ -67,6 +74,23 @@ function servicesAgreementCorpus(): string {
     "Name: Diego Alvarez",
     "Title: Authorized Signer",
     "Date: ____________________",
+  ].join("\n");
+}
+
+function leftoverFusedNoticesCorpus(): string {
+  return [
+    "SERVICES AGREEMENT",
+    "",
+    "This Agreement is between Alpha Workshop (Client) and Beta Counsel LLC (Service Provider).",
+    "",
+    "12. NOTICES",
+    "If to Alpha Workshop Beta Counsel LLC:",
+    "If to Beta Counsel LLC:",
+    "Address: 30 days, Upon full execution by the parties unless otherwise specified.",
+    "13. MISCELLANEOUS",
+    "This Agreement is the entire agreement This Agreement is between Alpha Workshop Beta Counsel LLC ('Service Provider') and Service Provider ('Service Provider').",
+    "",
+    ...Array.from({ length: 40 }, () => "Operative commercial clause with consideration and duties."),
   ].join("\n");
 }
 
@@ -303,18 +327,241 @@ describe("esign remount Prepare dual-party fields (not empty self-sign)", () => 
     expect(wizard).toContain("restorePrepareFromFrozenSigningAuthority");
     expect(wizard).toContain("setPaidProAgreementBridgeSkip");
     expect(wizard).toContain("ensureReviewCorpusOnEsignEntry");
+    expect(wizard).toContain("resolveRemountPrepareCorpusText");
     const start = wizard.indexOf("/** Deep link: /app/esign/:documentId");
     const leftoverAt = wizard.indexOf("ensureReviewCorpusOnEsignEntry", start);
     const restoreAt = wizard.indexOf("restorePrepareFromFrozenSigningAuthority", leftoverAt);
+    const remountCorpusAt = wizard.indexOf("resolveRemountPrepareCorpusText", restoreAt);
     const hydrateAt = wizard.indexOf("const hydrateLocalPaidProBridge", restoreAt);
     expect(leftoverAt).toBeGreaterThan(start);
     expect(restoreAt).toBeGreaterThan(leftoverAt);
-    expect(hydrateAt).toBeGreaterThan(restoreAt);
+    expect(remountCorpusAt).toBeGreaterThan(restoreAt);
+    expect(hydrateAt).toBeGreaterThan(remountCorpusAt);
+    expect(wizard.slice(restoreAt, hydrateAt)).toContain("setPrepareCorpusText");
+    expect(wizard.slice(restoreAt, hydrateAt)).not.toMatch(
+      /bind-user-org|bindUserOrg|bindAuthenticatedUserToWorkspace/,
+    );
     expect(wizard).not.toContain("doc_e959491fdcef431c96052cbb74e0fdaf");
     expect(wizard).not.toContain("8a1057ee-df0a-4c0a-9c15-2817401ff962");
     expect(wizard).not.toContain("doc_91038fe3");
     expect(wizard).toMatch(
       /leftoverPacketNotPersistReview[\s\S]*hydrateLocalPaidProBridge\(\)/,
     );
+  });
+
+  it("remount Prepare with frozen restore + persist Review sets prepareCorpusText and packet model", async () => {
+    expect(FIRST_FAILING_REMOUNT_PREPARE_CORPUS_UNSET_PREDICATE).toBe(
+      "esign_remount_prepare_chrome_without_prepare_corpus_text",
+    );
+    const persistReview = servicesAgreementCorpus();
+    expect(persistReview.length).toBeGreaterThanOrEqual(1500);
+    expect(persistReview).toMatch(/SERVICES AGREEMENT/);
+
+    // Live hole: restore paints chrome while hydrate skips unset/short corpus.
+    expect(
+      remountPrepareHydrateWouldSkipUnsetCorpus({
+        persistReviewCorpus: "",
+        bridgeAgreementCorpusText: "",
+      }),
+    ).toBe(true);
+    expect(
+      remountPrepareHydrateWouldSkipUnsetCorpus({
+        persistReviewCorpus: persistReview,
+        bridgeAgreementCorpusText: "",
+      }),
+    ).toBe(false);
+
+    const frozen = twoAuthorizedFrozen();
+    const restored = await restorePrepareFromFrozenSigningAuthority({
+      documentId: SEEDED_DOC,
+      hideStepper: true,
+      reviewCorpus: persistReview,
+      agreementId: AGREEMENT_ID,
+      draft: overlayFrozenSigningAuthorityOntoDraft(null, frozen, AGREEMENT_ID),
+      loadFrozen: async () => frozen,
+    });
+    expect(restored.ok).toBe(true);
+    if (!restored.ok) return;
+
+    const remountCorpus = resolveRemountPrepareCorpusText({
+      persistReviewCorpus: persistReview,
+      restoredBridgeCorpus: restored.bridge.agreementCorpusText,
+    });
+    expect(remountCorpus.ok).toBe(true);
+    if (!remountCorpus.ok) return;
+    const prepareCorpusText = remountCorpus.corpus;
+    expect(prepareCorpusText).toBe(persistReview);
+    expect(prepareCorpusText).toMatch(/SERVICES AGREEMENT/);
+    expect(reviewCorpusLooksLikeLeftoverFusedNotices(prepareCorpusText)).toBe(false);
+
+    const gate = resolveFinalVs01CorpusOrBlock({
+      agreementCorpusText: prepareCorpusText,
+      guidedPro: true,
+      prepareSignatureLinksRequested: true,
+      signaturePreparationRequested: true,
+      premiumComplete: true,
+    });
+    expect(gate.allowed).toBe(true);
+
+    const roles = buildVs01PrepareSigningRolesForBridge({
+      agreementId: AGREEMENT_ID,
+      creatorName: restored.bridge.creatorName,
+      creatorEmail: restored.bridge.creatorEmail,
+      ownerSignerName: restored.bridge.creatorSignerName,
+      ownerSignerTitle: restored.bridge.creatorSignerTitle,
+      counterparties: restored.bridge.counterparties,
+      bridge: restored.bridge,
+    });
+    const model = buildVs01SigningPacketModel({
+      mode: "guided_pro",
+      authoritativeCorpusPlain: prepareCorpusText,
+      roles,
+      bridge: restored.bridge,
+    });
+    expect(model.allowed).toBe(true);
+    expect(model.pages.length).toBeGreaterThan(0);
+    const signatureFields = model.fields.filter((f) => f.type === "signature" && !f.autoInitials);
+    expect(signatureFields.length).toBeGreaterThanOrEqual(2);
+    expect(
+      remountHasDualPartySignatureFields({
+        roles,
+        fields: model.fields,
+      }),
+    ).toBe(true);
+    expect(
+      remountPrepareShouldFailClosedWithoutCertifiedCorpus({
+        hideStepper: true,
+        seedDocumentId: SEEDED_DOC,
+        remountPrepareRestored: true,
+        corpus: remountCorpus,
+      }),
+    ).toBe(false);
+  });
+
+  it("remount Prepare prefers persist Review when hydrate would skip short restored bridge", async () => {
+    const persistReview = servicesAgreementCorpus();
+    const frozen = twoAuthorizedFrozen();
+    const restored = await restorePrepareFromFrozenSigningAuthority({
+      documentId: SEEDED_DOC,
+      hideStepper: true,
+      reviewCorpus: "",
+      agreementId: AGREEMENT_ID,
+      draft: overlayFrozenSigningAuthorityOntoDraft(null, frozen, AGREEMENT_ID),
+      loadFrozen: async () => frozen,
+    });
+    expect(restored.ok).toBe(true);
+    if (!restored.ok) return;
+    expect((restored.bridge.agreementCorpusText ?? "").trim().length).toBeLessThan(1500);
+    expect(
+      remountPrepareHydrateWouldSkipUnsetCorpus({
+        persistReviewCorpus: "",
+        bridgeAgreementCorpusText: restored.bridge.agreementCorpusText,
+      }),
+    ).toBe(true);
+
+    const remountCorpus = resolveRemountPrepareCorpusText({
+      persistReviewCorpus: persistReview,
+      restoredBridgeCorpus: restored.bridge.agreementCorpusText,
+    });
+    expect(remountCorpus.ok).toBe(true);
+    if (!remountCorpus.ok) return;
+    expect(remountCorpus.corpus).toBe(persistReview);
+
+    const roles = buildVs01PrepareSigningRolesForBridge({
+      agreementId: AGREEMENT_ID,
+      creatorName: restored.bridge.creatorName,
+      creatorEmail: restored.bridge.creatorEmail,
+      ownerSignerName: restored.bridge.creatorSignerName,
+      ownerSignerTitle: restored.bridge.creatorSignerTitle,
+      counterparties: restored.bridge.counterparties,
+      bridge: restored.bridge,
+    });
+    const model = buildVs01SigningPacketModel({
+      mode: "guided_pro",
+      authoritativeCorpusPlain: remountCorpus.corpus,
+      roles,
+      bridge: restored.bridge,
+    });
+    expect(model.allowed).toBe(true);
+    expect(model.fields.filter((f) => f.type === "signature" && !f.autoInitials).length).toBeGreaterThanOrEqual(
+      2,
+    );
+  });
+
+  it("short or empty remount corpus fail-closes after frozen restore", () => {
+    const empty = resolveRemountPrepareCorpusText({
+      persistReviewCorpus: "",
+      restoredBridgeCorpus: "",
+    });
+    expect(empty.ok).toBe(false);
+    if (empty.ok) return;
+    expect(empty.reason).toBe("empty_or_short");
+    expect(leftoverRemountShouldFailClosedToast("")).toBe(true);
+    expect(
+      remountPrepareShouldFailClosedWithoutCertifiedCorpus({
+        hideStepper: true,
+        seedDocumentId: SEEDED_DOC,
+        remountPrepareRestored: true,
+        corpus: empty,
+      }),
+    ).toBe(true);
+
+    const short = resolveRemountPrepareCorpusText({
+      persistReviewCorpus: "SERVICES AGREEMENT\n\nToo short to paginate.",
+      restoredBridgeCorpus: "x".repeat(200),
+    });
+    expect(short.ok).toBe(false);
+    if (short.ok) return;
+    expect(short.reason).toBe("empty_or_short");
+    expect(
+      remountPrepareShouldFailClosedWithoutCertifiedCorpus({
+        hideStepper: true,
+        seedDocumentId: SEEDED_DOC,
+        remountPrepareRestored: true,
+        corpus: short,
+      }),
+    ).toBe(true);
+  });
+
+  it("leftover fused Notices is refused as remount Prepare corpus", () => {
+    const leftover = leftoverFusedNoticesCorpus();
+    expect(leftover.length).toBeGreaterThanOrEqual(1500);
+    expect(reviewCorpusLooksLikeLeftoverFusedNotices(leftover)).toBe(true);
+    const refused = resolveRemountPrepareCorpusText({
+      persistReviewCorpus: leftover,
+      restoredBridgeCorpus: leftover,
+    });
+    expect(refused.ok).toBe(false);
+    if (refused.ok) return;
+    expect(refused.reason).toBe("leftover_fused");
+    expect(
+      remountPrepareShouldFailClosedWithoutCertifiedCorpus({
+        hideStepper: true,
+        seedDocumentId: SEEDED_DOC,
+        remountPrepareRestored: true,
+        corpus: refused,
+      }),
+    ).toBe(true);
+    expect(
+      remountPrepareShouldFailClosedWithoutCertifiedCorpus({
+        hideStepper: true,
+        seedDocumentId: SEEDED_DOC,
+        remountPrepareRestored: false,
+        corpus: refused,
+      }),
+    ).toBe(true);
+  });
+
+  it("remount Prepare corpus hydrate is sync and is not gated on bind-user-org", () => {
+    const src = readFileSync(join(__dirname, "vs01EsignRemountPrepareRestore.ts"), "utf8");
+    expect(src).not.toMatch(/bind-user-org|bindUserOrg|bindAuthenticatedUserToWorkspace/);
+    const persistReview = servicesAgreementCorpus();
+    const started = Date.now();
+    const remountCorpus = resolveRemountPrepareCorpusText({
+      persistReviewCorpus: persistReview,
+      restoredBridgeCorpus: "",
+    });
+    expect(Date.now() - started).toBeLessThan(50);
+    expect(remountCorpus.ok).toBe(true);
   });
 });

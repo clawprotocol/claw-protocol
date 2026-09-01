@@ -42,7 +42,11 @@ import {
   ensureReviewCorpusOnEsignEntry,
   leftoverRemountShouldFailClosedToast,
 } from "./vs01EsignRemountReviewBind";
-import { restorePrepareFromFrozenSigningAuthority } from "./vs01EsignRemountPrepareRestore";
+import {
+  remountPrepareShouldFailClosedWithoutCertifiedCorpus,
+  resolveRemountPrepareCorpusText,
+  restorePrepareFromFrozenSigningAuthority,
+} from "./vs01EsignRemountPrepareRestore";
 import {
   extractPlainTextFromDocumentContent,
   leftoverGetContentRefuseFromError,
@@ -844,6 +848,8 @@ export function Vs01Wizard({
       // Inspect / hard-refresh remount: leftover bind recovered Review body
       // but skip/bridge may be gone. Reconstruct Prepare from frozen
       // signing authority — do not land the empty self-sign Step-3 shell.
+      let remountPrepareRestored = false;
+      let restoredBridgeCorpus = "";
       if (hideStepper && sid.startsWith("doc_")) {
         try {
           const restored = await restorePrepareFromFrozenSigningAuthority({
@@ -852,13 +858,41 @@ export function Vs01Wizard({
             reviewCorpus: persistReviewCorpus,
           });
           if (restored.ok) {
-            setPaidProAgreementBridgeSkip(true);
-            persistReviewCorpus = persistReviewCorpus || (restored.bridge.agreementCorpusText ?? "").trim();
+            remountPrepareRestored = true;
+            restoredBridgeCorpus = (restored.bridge.agreementCorpusText ?? "").trim();
+            persistReviewCorpus = persistReviewCorpus || restoredBridgeCorpus;
           }
         } catch {
           /* stay on leftover body; do not eject */
         }
         if (cancelled) return;
+
+        // Always set prepareCorpusText from certified persist Review / restored
+        // bridge after ensure and/or frozen restore. Do not wait on
+        // hydrateLocalPaidProBridge corpus-length gate or hung bind-user-org.
+        const remountCorpus = resolveRemountPrepareCorpusText({
+          persistReviewCorpus,
+          restoredBridgeCorpus,
+        });
+        if (remountCorpus.ok) {
+          persistReviewCorpus = remountCorpus.corpus;
+          setPrepareCorpusText(remountCorpus.corpus);
+          setDocumentId(sid);
+          setContentSha256(`corpus:${fingerprintAgreementBody(remountCorpus.corpus)}`);
+          if (remountPrepareRestored) {
+            setPaidProAgreementBridgeSkip(true);
+          }
+        } else if (
+          remountPrepareShouldFailClosedWithoutCertifiedCorpus({
+            hideStepper,
+            seedDocumentId: sid,
+            remountPrepareRestored,
+            corpus: remountCorpus,
+          })
+        ) {
+          setError("Could not load this document. Check the link or start a new packet.");
+          return;
+        }
       }
 
       const hydrateLocalPaidProBridge = (): boolean => {

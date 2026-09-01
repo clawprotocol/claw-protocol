@@ -31,12 +31,25 @@ import {
   type RecipientSetupEmailInput,
 } from "../launch/simpleProduct/agreementToVs01SigningBridge";
 import { resolveEsignEntryReviewBindContext } from "./vs01EsignRemountReviewBind";
+import {
+  persistReviewGetPlainForSigningSeed,
+  reviewCorpusLooksLikeLeftoverFusedNotices,
+} from "./vs01CurrentReviewSotForSeed";
 import { fetchVs01DocumentMeta } from "./vs01Api";
 import { buildVs01PrepareSigningRolesForBridge } from "../components/agreements/paidProNPartySignerSetup";
 import { VS01_SIGNING_CORPUS_MIN_LEN } from "./vs01SigningCorpus";
 
 export const FIRST_FAILING_REMOUNT_SELF_SIGN_SHELL_PREDICATE =
   "esign_remount_lands_empty_self_sign_step3_not_prepare" as const;
+
+/**
+ * Restore can paint Prepare chrome while hydrateLocalPaidProBridge returns
+ * false when persist Review / bridge corpus is empty or under 1500 — canvas
+ * stays on Preparing forever. After ensure and/or frozen restore, always set
+ * prepareCorpusText from this certified SoT (same as #155–#157).
+ */
+export const FIRST_FAILING_REMOUNT_PREPARE_CORPUS_UNSET_PREDICATE =
+  "esign_remount_prepare_chrome_without_prepare_corpus_text" as const;
 
 export const PREPARE_RESTORED_FROM_FROZEN_SIGNING_AUTHORITY =
   "prepare_restored_from_frozen_signing_authority" as const;
@@ -84,6 +97,53 @@ export function shouldRestorePrepareFromFrozenSigningAuthority(args: {
   if (args.frozenAuthorizedSignerCount < 2) return false;
   if (args.paidProAgreementBridgeSkip && args.matchingBridge) return false;
   return true;
+}
+
+export type RemountPrepareCorpusTextResult =
+  | { ok: true; corpus: string }
+  | { ok: false; reason: "empty_or_short" | "leftover_fused" };
+
+/**
+ * Certified persist Review / restored bridge corpus for remount Prepare.
+ * Same SoT as leftover remount (#155–#157). Does not invent a second corpus.
+ * Synchronous — must not wait on bind-user-org.
+ */
+export function resolveRemountPrepareCorpusText(args: {
+  persistReviewCorpus?: string | null;
+  restoredBridgeCorpus?: string | null;
+}): RemountPrepareCorpusTextResult {
+  const persist = persistReviewGetPlainForSigningSeed(args.persistReviewCorpus);
+  const restored = persistReviewGetPlainForSigningSeed(args.restoredBridgeCorpus);
+  const candidate = persist || restored;
+  if (!candidate) return { ok: false, reason: "empty_or_short" };
+  if (reviewCorpusLooksLikeLeftoverFusedNotices(candidate)) {
+    return { ok: false, reason: "leftover_fused" };
+  }
+  return { ok: true, corpus: candidate };
+}
+
+/**
+ * hydrateLocalPaidProBridge returns false when neither persist Review nor
+ * bridge.agreementCorpusText is long enough — leaving prepareCorpusText unset.
+ */
+export function remountPrepareHydrateWouldSkipUnsetCorpus(args: {
+  persistReviewCorpus?: string | null;
+  bridgeAgreementCorpusText?: string | null;
+}): boolean {
+  const corpus = (args.persistReviewCorpus || args.bridgeAgreementCorpusText || "").trim();
+  return corpus.length < VS01_SIGNING_CORPUS_MIN_LEN;
+}
+
+/** Fail-closed toast: restored chrome with no certified corpus, or leftover fused. */
+export function remountPrepareShouldFailClosedWithoutCertifiedCorpus(args: {
+  hideStepper: boolean;
+  seedDocumentId: string;
+  remountPrepareRestored: boolean;
+  corpus: RemountPrepareCorpusTextResult;
+}): boolean {
+  if (!args.hideStepper || !args.seedDocumentId.startsWith("doc_")) return false;
+  if (args.corpus.ok) return false;
+  return args.remountPrepareRestored || args.corpus.reason === "leftover_fused";
 }
 
 export function remountHasDualPartySignatureFields(args: {
