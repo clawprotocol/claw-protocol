@@ -682,14 +682,14 @@ describe("esign remount Prepare dual-party fields (not empty self-sign)", () => 
     );
 
     const corpusGateAllowed = packet.model.diagnostics.corpusGate.allowed as unknown as boolean;
+    const canonicalBridgeTextRendered = resolveVs01CanonicalBridgeTextRendered({
+      bridgeMode: true,
+      signingPacketModel: packet.model,
+      corpusGateAllowed,
+      corpusTextLen: persistReview.trim().length,
+    });
     const showCanonicalFinalizeBlocked = Boolean(
-      corpusGateAllowed === false ||
-        !resolveVs01CanonicalBridgeTextRendered({
-          bridgeMode: true,
-          signingPacketModel: packet.model,
-          corpusGateAllowed: corpusGateAllowed !== false,
-          corpusTextLen: persistReview.trim().length,
-        }),
+      corpusGateAllowed === false || !canonicalBridgeTextRendered,
     ) as unknown as boolean;
     expect(showCanonicalFinalizeBlocked).toBe(false);
 
