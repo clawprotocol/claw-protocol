@@ -28,6 +28,7 @@ from backend.services.accepted_review_snapshot import MIN_CORPUS_LEN, create_pen
 from backend.tests.test_review_plain_section_continuity import (
     _leftover_eight_section,
     _sequential_1_through,
+    _sequential_1_through_12_wrapped_notices,
     _ten_then_twelve,
     _twelve_then_fourteen,
     _two_party_intake,
@@ -124,6 +125,39 @@ def test_leftover_eight_section_stays_1_through_8() -> None:
     assert 12 not in nums
     assert 13 not in nums
     assert refuse_skipped_top_level_section_integers(emitted["text"]) is None
+
+
+@pytest.mark.parametrize(
+    ("law", "client", "provider", "attn_a", "attn_b"),
+    [
+        ("Oklahoma", "Cedar Ridge LLC", "Maple Grove Inc", "Jordan Hale", "Morgan Ellis"),
+        ("Colorado", "Riverbend Studio", "Oak Point LLC", "Casey Quinn", "Riley Chen"),
+        ("New York", "Summit Craft Co", "Harborline Design LLC", "Avery Cole", "Sam Ortiz"),
+    ],
+)
+def test_persist_accepts_sequential_wrapped_heading_1_through_12(
+    law: str, client: str, provider: str, attn_a: str, attn_b: str
+) -> None:
+    sequential = _pad_to_persist_floor(
+        _sequential_1_through_12_wrapped_notices(
+            client=client, provider=provider, law=law, attn_a=attn_a, attn_b=attn_b
+        )
+    )
+    assert collect_review_plain_top_level_section_numbers(sequential) == list(range(1, 13))
+    assert refuse_skipped_top_level_section_integers(sequential, late_only=True) is None
+    ok, err, snap, _reg = create_pending_snapshot(
+        agreement_id=f"agr_wrap_1_12_{law.lower().replace(' ', '_')}",
+        corpus_plain=sequential,
+    )
+    assert ok is True
+    assert err is None
+    assert snap is not None
+    persisted_nums = collect_review_plain_top_level_section_numbers(snap["corpusPlain"])
+    assert persisted_nums == list(range(1, 13))
+    assert "Texas" not in snap["corpusPlain"]
+    assert "Northline" not in snap["corpusPlain"]
+    assert "Priya" not in snap["corpusPlain"]
+    assert "Diego" not in snap["corpusPlain"]
 
 
 def test_persist_refuses_12_then_14_and_10_then_12_without_repair() -> None:

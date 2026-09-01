@@ -71,6 +71,16 @@ TOP_LEVEL_HEADING_RE = re.compile(r"^(\d{1,2})\.\s+(?!\d)(\S.*)$")
 WITNESS_RE = re.compile(r"\bIN WITNESS WHEREOF\b", re.I)
 NOTICES_HEADING_RE = re.compile(r"^(?P<n>\d{1,2})\.\s+NOTICES\b", re.I)
 GOVERNING_HEADING_RE = re.compile(r"^\d{1,2}\.\s+GOVERNING LAW\b", re.I)
+# Notices If-to / Attn / address field lines are not top-level sections, even when numbered.
+_NOTICE_FIELD_TITLE_RE = re.compile(
+    r"^(?:If\s+to\b|Attn\s*:|Attention\s*:|Address\b|Email\b)",
+    re.I,
+)
+_STREET_ADDRESS_TITLE_RE = re.compile(
+    r"\b(?:Street|St\.?|Avenue|Ave\.?|Road|Rd\.?|Boulevard|Blvd\.?|Lane|Ln\.?|Drive|Dr\.?|Suite|Ste\.?)\b",
+    re.I,
+)
+_HEADING_MARKUP_RE = re.compile(r"^(?:\*+|_{2,})\s*|\s*(?:\*+|_{2,})$")
 GOVERNED_BY_RE = re.compile(r"\bgoverned\s+by\s+(?:the\s+)?laws?\s+of\b", re.I)
 # Customer dump form: "governing law Texas" / "governing law: Oklahoma"
 SUPPLIED_GOVERNING_LAW_RE = re.compile(
@@ -91,16 +101,49 @@ def _split_before_witness(text: str) -> Tuple[str, str]:
     return raw[: m.start()], raw[m.start() :]
 
 
+def _strip_heading_markup(line: str) -> str:
+    """Drop markdown bold wrappers so a wrapped/bold heading still parses as N. Title."""
+    return _HEADING_MARKUP_RE.sub("", (line or "").strip()).strip()
+
+
+def _parse_collectable_top_level_heading(line: str) -> Optional[Tuple[int, str]]:
+    """True top-level heading for skip detection. Not subsections, If-to/Attn, or street lines."""
+    trimmed = _strip_heading_markup(line)
+    if not trimmed or re.match(r"^\d+\.\d+", trimmed):
+        return None
+    m = TOP_LEVEL_HEADING_RE.match(trimmed)
+    if not m:
+        return None
+    title = m.group(2).strip()
+    if _NOTICE_FIELD_TITLE_RE.match(title):
+        return None
+    if _STREET_ADDRESS_TITLE_RE.search(title):
+        return None
+    return int(m.group(1)), title
+
+
 def collect_review_plain_top_level_section_numbers(plain: str) -> List[int]:
+    """Collect first-occurrence top-level integers through the Notices heading.
+
+    Wrapped title remnants (``2. Revisions,`` after 12 Notices), If-to / Attn blocks,
+    and subsections ``4.1`` / ``5.1`` are not skipped integers. Stop at Notices so
+    signer-save notice body cannot restart the sequence. Real holes (12 then 14)
+    still collect 14 when 14 is the later heading.
+    """
     head, _ = _split_before_witness(plain or "")
     nums: List[int] = []
+    seen = set()
     for line in head.split("\n"):
-        m = TOP_LEVEL_HEADING_RE.match(line.strip())
-        if not m:
+        parsed = _parse_collectable_top_level_heading(line)
+        if not parsed:
             continue
-        if re.match(r"^\d+\.\d+", line.strip()):
+        number, _title = parsed
+        if number in seen:
             continue
-        nums.append(int(m.group(1)))
+        nums.append(number)
+        seen.add(number)
+        if NOTICES_HEADING_RE.match(_strip_heading_markup(line)):
+            break
     return nums
 
 

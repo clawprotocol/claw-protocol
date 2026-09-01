@@ -13,6 +13,10 @@ const WITNESS_RE = /\bIN WITNESS WHEREOF\b/i;
 const NOTICES_HEADING_RE = /^(\d{1,2})\.\s+NOTICES\b/i;
 const GOVERNING_HEADING_RE = /^\d{1,2}\.\s+GOVERNING LAW\b/i;
 const GOVERNED_BY_RE = /\bgoverned\s+by\s+(?:the\s+)?laws?\s+of\b/i;
+/** Notices If-to / Attn / address field lines are not top-level sections, even when numbered. */
+const NOTICE_FIELD_TITLE_RE = /^(?:If\s+to\b|Attn\s*:|Attention\s*:|Address\b|Email\b)/i;
+const STREET_ADDRESS_TITLE_RE =
+  /\b(?:Street|St\.?|Avenue|Ave\.?|Road|Rd\.?|Boulevard|Blvd\.?|Lane|Ln\.?|Drive|Dr\.?|Suite|Ste\.?)\b/i;
 
 /** Late-section holes (10 then 12, 12 then 14). Do not remint 1..8 leftovers. */
 export const REVIEW_PLAIN_LATE_SECTION_SKIP_FLOOR = 10;
@@ -36,20 +40,43 @@ function splitBeforeWitness(text: string): { head: string; tail: string } {
   return { head: raw.slice(0, idx), tail: raw.slice(idx) };
 }
 
+function stripHeadingMarkup(line: string): string {
+  return (line || "").trim().replace(/^(?:\*+|__)\s*|\s*(?:\*+|__)$/g, "").trim();
+}
+
 function parseTopLevelHeading(line: string): { number: number; title: string } | null {
-  const trimmed = line.trim();
+  const trimmed = stripHeadingMarkup(line);
   if (/^\d+\.\d+/.test(trimmed)) return null;
   const match = trimmed.match(TOP_LEVEL_HEADING_RE);
   if (!match?.[1] || !match[2]) return null;
   return { number: Number(match[1]), title: match[2].trim() };
 }
 
+/** True top-level heading for skip detection. Not subsections, If-to/Attn, or street lines. */
+function parseCollectableTopLevelHeading(line: string): { number: number; title: string } | null {
+  const parsed = parseTopLevelHeading(line);
+  if (!parsed) return null;
+  if (NOTICE_FIELD_TITLE_RE.test(parsed.title)) return null;
+  if (STREET_ADDRESS_TITLE_RE.test(parsed.title)) return null;
+  return parsed;
+}
+
+/**
+ * First-occurrence top-level integers through the Notices heading.
+ * Wrapped title remnants (`2. Revisions,` after 12 Notices), If-to / Attn blocks,
+ * and subsections 4.1 / 5.1 are not skipped integers.
+ */
 export function collectReviewPlainTopLevelSectionNumbers(plain: string): number[] {
   const { head } = splitBeforeWitness(plain || "");
   const nums: number[] = [];
+  const seen = new Set<number>();
   for (const line of head.split("\n")) {
-    const parsed = parseTopLevelHeading(line);
-    if (parsed) nums.push(parsed.number);
+    const parsed = parseCollectableTopLevelHeading(line);
+    if (!parsed) continue;
+    if (seen.has(parsed.number)) continue;
+    nums.push(parsed.number);
+    seen.add(parsed.number);
+    if (NOTICES_HEADING_RE.test(stripHeadingMarkup(line))) break;
   }
   return nums;
 }
