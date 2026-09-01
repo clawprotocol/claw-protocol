@@ -919,6 +919,8 @@ describe("esign seed writes certified Review, not a leftover fused version", () 
     expect(remount).toContain("leftoverRemountShouldFailClosedToast");
     expect(remount).toContain("hydrateCommercialReviewFromServerSnapshot");
     expect(remount).toContain("fetchCanonicalReviewSnapshot");
+    expect(remount).toContain("fetchRemountCertifiedReviewCorpus");
+    expect(remount).toContain("fetchPersistReviewGetForRemount");
     expect(remount).not.toMatch(/reviewCorpusLooksLikeLeftoverFusedNotices\(persistPlain\)/);
     expect(remount).not.toContain("resolveAgreementCorpusForPrepareHandoff");
     expect(remount).not.toContain("pickCurrentReviewSotForSigningSeed");

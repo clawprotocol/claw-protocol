@@ -40,7 +40,9 @@ import {
 import { resolvePrepareBridgeSigningCorpus } from "./vs01PrepareBridgeCorpus";
 import {
   ensureReviewCorpusOnEsignEntry,
+  fetchRemountCertifiedReviewCorpus,
   leftoverRemountShouldFailClosedToast,
+  resolveEsignEntryReviewBindContext,
 } from "./vs01EsignRemountReviewBind";
 import {
   remountPrepareShouldFailClosedWithoutCertifiedCorpus,
@@ -850,6 +852,7 @@ export function Vs01Wizard({
       // signing authority — do not land the empty self-sign Step-3 shell.
       let remountPrepareRestored = false;
       let restoredBridgeCorpus = "";
+      let remountAgreementId = "";
       if (hideStepper && sid.startsWith("doc_")) {
         try {
           const restored = await restorePrepareFromFrozenSigningAuthority({
@@ -859,11 +862,31 @@ export function Vs01Wizard({
           });
           if (restored.ok) {
             remountPrepareRestored = true;
+            remountAgreementId = restored.agreementId.trim();
             restoredBridgeCorpus = (restored.bridge.agreementCorpusText ?? "").trim();
             persistReviewCorpus = persistReviewCorpus || restoredBridgeCorpus;
           }
         } catch {
           /* stay on leftover body; do not eject */
+        }
+        if (cancelled) return;
+
+        // Durable Review for the packet model: GET canonical-review-snapshot
+        // (token-refreshed). If GET is OPTIONS-only / fails, keep the same
+        // certified Review the seed already used. Do not invent a second SoT.
+        try {
+          const agreementIdForCrs =
+            remountAgreementId ||
+            (resolveEsignEntryReviewBindContext(sid)?.agreementId ?? "").trim();
+          if (agreementIdForCrs) {
+            const remountReview = await fetchRemountCertifiedReviewCorpus({
+              agreementId: agreementIdForCrs,
+              fallbackCertifiedReview: persistReviewCorpus || restoredBridgeCorpus,
+            });
+            if (remountReview.corpus) persistReviewCorpus = remountReview.corpus;
+          }
+        } catch {
+          /* hard-fallback is persistReviewCorpus / restored bridge already in hand */
         }
         if (cancelled) return;
 

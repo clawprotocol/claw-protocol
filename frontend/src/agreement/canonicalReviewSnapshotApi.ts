@@ -10,6 +10,7 @@
  * Client SoT coordinates review display; server accepted snapshot is commercial authority.
  */
 
+import { refreshCachedAccessToken } from "../auth/authAccessTokenCache";
 import { resolvePersistReviewPlainForClientPreflight } from "../components/agreements/paidProPaintedSequentialPersistReview";
 import { reviewPlainHasLateSkippedSectionNumbers } from "../components/agreements/reviewPlainSectionContinuity";
 import { apiUrl } from "../lib/clawApi";
@@ -332,6 +333,10 @@ export async function fetchCanonicalReviewSnapshot(args: {
   const id = args.agreementId.trim();
   if (!id) return { ok: false, code: "invalid_snapshot_args" };
   try {
+    // Same remount contract as content/meta GET: hydrate Bearer before
+    // building request headers so CORS preflight is followed by an actual GET
+    // (inspect remount otherwise stays OPTIONS-only).
+    await refreshCachedAccessToken();
     const res = await fetch(
       apiUrl(`/api/agreements/${encodeURIComponent(id)}/canonical-review-snapshot`),
       {

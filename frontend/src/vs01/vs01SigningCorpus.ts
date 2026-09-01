@@ -901,6 +901,57 @@ export function resolveFinalVs01CorpusOrBlock(
     bridge: handoffTrusted ? null : args.bridge ?? null,
     signerCount,
   });
+  // Remount Review-paint: rebuild already produced By/execution. Do not run
+  // applyProCorpusIntegrity — it can strip the rebuilt tail (bare-heading
+  // collapse on numbered Review clauses) and leave Preparing forever.
+  // Same contract as #136 snapshot remount repair.
+  if (
+    guidedPro &&
+    !handoffTrusted &&
+    !premiumInProgress &&
+    witness.rebuilt &&
+    witness.afterLen >= VS01_SIGNING_CORPUS_MIN_LEN
+  ) {
+    const remountRequirement = resolveVs01WitnessRequirement({
+      corpusText: witness.corpus,
+      intakeText: args.intakeText,
+      draft: args.draft ?? null,
+    });
+    const remountReady = isAuthoritativeSigningSnapshotReadyForPrepare(
+      witness.corpus,
+      signerCount,
+    );
+    if (
+      remountReady &&
+      (!remountRequirement.requiresWitness || corpusHasWitnessBlock(witness.corpus))
+    ) {
+      logVs01CorpusGateRebuiltWitness({
+        reason: "missing_witness_or_by_lines",
+        beforeLen: witness.beforeLen,
+        afterLen: witness.afterLen,
+        hasWitnessBlock: corpusHasVisibleSignatureExecutionLines(witness.corpus),
+        handoffTrusted,
+      });
+      return {
+        corpus: witness.corpus,
+        source: "rebuilt_witness_block",
+        len: witness.corpus.length,
+        hash: fingerprintAgreementBody(witness.corpus),
+        matchesFreeHash: false,
+        isFreeHashMatch: false,
+        hasWitnessBlock: corpusHasWitnessBlock(witness.corpus),
+        requiresSignatureBlock: true,
+        requiresWitness: remountRequirement.requiresWitness,
+        witnessReason: remountRequirement.witnessReason,
+        hasBySignatureLines: true,
+        hasByOrSignatureLines: true,
+        signerCount,
+        allowed: true,
+        premiumInProgress,
+        premiumComplete,
+      };
+    }
+  }
   const bestWitnessRequirement = resolveVs01WitnessRequirement({
     corpusText: best.text,
     intakeText: args.intakeText,

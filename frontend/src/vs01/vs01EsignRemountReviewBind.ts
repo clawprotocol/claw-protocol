@@ -167,7 +167,7 @@ function persistReviewPlainFromSnapshot(snapshot: {
 }
 
 /** Persist Review GET — same canonical snapshot bytes Review already painted. */
-async function defaultFetchPersistReviewGet(agreementId: string): Promise<string> {
+export async function fetchPersistReviewGetForRemount(agreementId: string): Promise<string> {
   try {
     const fetched = await fetchCanonicalReviewSnapshot({ agreementId });
     if (fetched.ok) {
@@ -177,6 +177,38 @@ async function defaultFetchPersistReviewGet(agreementId: string): Promise<string
     /* fail closed below — never seed leftover */
   }
   return "";
+}
+
+const defaultFetchPersistReviewGet = fetchPersistReviewGetForRemount;
+
+export const REMOUNT_CRS_GET_SOURCE = "canonical_review_snapshot" as const;
+export const REMOUNT_SEED_CERTIFIED_REVIEW_FALLBACK = "seed_certified_review" as const;
+
+/**
+ * Remount durable Review: GET canonical-review-snapshot (token-refreshed).
+ * If GET is absent/fails, hard-fallback to the same certified Review the
+ * vs01-signing-seed already used. Do not invent a second corpus SoT.
+ */
+export async function fetchRemountCertifiedReviewCorpus(args: {
+  agreementId: string;
+  fallbackCertifiedReview?: string | null;
+  fetchPersistReviewGet?: (agreementId: string) => Promise<string | null>;
+}): Promise<{
+  corpus: string;
+  source: typeof REMOUNT_CRS_GET_SOURCE | typeof REMOUNT_SEED_CERTIFIED_REVIEW_FALLBACK | "empty";
+}> {
+  const fallback = persistReviewGetPlainForSigningSeed(args.fallbackCertifiedReview);
+  let fromGet = "";
+  try {
+    fromGet = persistReviewGetPlainForSigningSeed(
+      await (args.fetchPersistReviewGet ?? fetchPersistReviewGetForRemount)(args.agreementId),
+    );
+  } catch {
+    fromGet = "";
+  }
+  if (fromGet) return { corpus: fromGet, source: REMOUNT_CRS_GET_SOURCE };
+  if (fallback) return { corpus: fallback, source: REMOUNT_SEED_CERTIFIED_REVIEW_FALLBACK };
+  return { corpus: "", source: "empty" };
 }
 
 /** Persist leftover is Review-paint input only — never the seed body. */
