@@ -122,6 +122,93 @@ def _ten_then_twelve(*, client: str, provider: str) -> str:
     return _services_body(client=client, provider=provider, headings=headings)
 
 
+def _sequential_1_through_12_wrapped_notices(*, client: str, provider: str, law: str, attn_a: str, attn_b: str) -> str:
+    """Live persist class: sequential 1..12, wrapped heading 2, subsections, Notices Attn/If-to.
+
+    After Notices, include wrap remnants / numbered If-to / street lines that must not
+    be read as skipped integers. Notices is last (no 13 Miscellaneous).
+    """
+    return "\n".join(
+        [
+            "SERVICES AGREEMENT",
+            "",
+            f'This Services Agreement (this "Agreement") is entered into as of the Effective Date '
+            f'by and between {client} ("Client") and {provider} ("Service Provider").',
+            "",
+            "1. Services and Deliverables",
+            f"{provider} will provide design services for a logo and brand kit.",
+            "(a) primary mark",
+            "(b) color system",
+            "(c) usage guide",
+            "",
+            "2. Revisions,",
+            "Client Input, and Changes",
+            "The flat fee in this Agreement includes up to two rounds of reasonable revisions.",
+            "",
+            "3. Fees and Payment",
+            "Fees are due as stated in this Agreement.",
+            "",
+            "4. Term and Termination",
+            "The engagement continues until the deliverables are complete.",
+            "4.1 Early Termination",
+            "Either party may terminate for material breach after written notice.",
+            "",
+            "5. Intellectual Property",
+            "Client owns final deliverables upon payment.",
+            "5.1 Portfolio License",
+            f"{provider} retains a limited portfolio license.",
+            "",
+            "6. Confidentiality",
+            "Each party keeps non-public information confidential.",
+            "",
+            "7. Representations and Warranties",
+            "Each party represents it has authority to enter this Agreement.",
+            "",
+            "8. Indemnification",
+            "Each party indemnifies the other for third-party claims arising from its breach.",
+            "",
+            "9. Liability Allocation",
+            "Mutual indemnification applies. Liability for indirect damages is excluded. Total liability is capped at fees paid.",
+            "",
+            "10. Independent Contractor and Assignment",
+            "This Agreement cannot be assigned without prior written consent, except for a merger or sale.",
+            "",
+            "11. Governing Law",
+            f"This Agreement is governed by the laws of {law}, without regard to conflict-of-laws principles.",
+            "",
+            "12. Notices",
+            "Any notice under this Agreement must be in writing and delivered via email, personal delivery, or overnight courier.",
+            "Notices may be delivered by:",
+            "1. Email",
+            "2. Personal delivery",
+            "3. Overnight courier",
+            "",
+            f"If to {client}:",
+            client,
+            f"Attn: {attn_a}",
+            f"Email: notices-{client.split()[0].lower()}@example.test",
+            "10. Main Street",
+            "",
+            f"If to {provider}:",
+            provider,
+            f"Attn: {attn_b}",
+            f"Email: notices-{provider.split()[0].lower()}@example.test",
+            "1. If to leftover wrap should not count",
+            "",
+            "2. Revisions,",
+            "Client Input, and Changes",
+            "",
+            "IN WITNESS WHEREOF, the parties have executed this Agreement as of the Effective Date.",
+            "",
+            f"CLIENT: {client}",
+            "By: ____________________",
+            "",
+            f"SERVICE PROVIDER: {provider}",
+            "By: ____________________",
+        ]
+    )
+
+
 def _leftover_eight_section(*, client: str, provider: str) -> str:
     headings = [(i, t) for i, t in [
         (1, "Services and Deliverables"),
@@ -166,6 +253,38 @@ def test_detector_fails_12_then_14_and_10_then_12(law: str, client: str, provide
     assert review_plain_has_skipped_section_numbers(sequential) is False
     assert collect_review_plain_top_level_section_numbers(sequential) == list(range(1, 15))
     assert law  # parametrize keeps the fixture ordinary two-party, not a single venue
+
+
+@pytest.mark.parametrize(
+    ("law", "client", "provider", "attn_a", "attn_b"),
+    [
+        ("Oklahoma", "Cedar Ridge LLC", "Maple Grove Inc", "Jordan Hale", "Morgan Ellis"),
+        ("Colorado", "Riverbend Studio", "Oak Point LLC", "Casey Quinn", "Riley Chen"),
+        ("New York", "Summit Craft Co", "Harborline Design LLC", "Avery Cole", "Sam Ortiz"),
+    ],
+)
+def test_sequential_wrapped_heading_1_through_12_is_not_a_skip(
+    law: str, client: str, provider: str, attn_a: str, attn_b: str
+) -> None:
+    """Persist Review 1..12 with wrapped heading 2 + Notices Attn must not false-refuse."""
+    sequential = _sequential_1_through_12_wrapped_notices(
+        client=client, provider=provider, law=law, attn_a=attn_a, attn_b=attn_b
+    )
+    nums = collect_review_plain_top_level_section_numbers(sequential)
+    assert nums == list(range(1, 13))
+    assert review_plain_has_skipped_section_numbers(sequential) is False
+    assert review_plain_has_late_skipped_section_numbers(sequential) is False
+    assert "13." not in [f"{n}." for n in nums]
+    assert law in sequential
+    assert "Texas" not in sequential
+    assert "Northline" not in sequential
+    assert "Priya" not in sequential
+    assert "Diego" not in sequential
+
+    skipped_12_14 = _twelve_then_fourteen(client=client, provider=provider)
+    assert review_plain_has_late_skipped_section_numbers(skipped_12_14) is True
+    assert 14 in collect_review_plain_top_level_section_numbers(skipped_12_14)
+    assert 13 not in collect_review_plain_top_level_section_numbers(skipped_12_14)
 
 
 def test_repair_fills_12_then_14_and_keeps_supplied_governing_law() -> None:

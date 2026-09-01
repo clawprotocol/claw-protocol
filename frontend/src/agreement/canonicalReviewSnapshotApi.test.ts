@@ -318,6 +318,99 @@ describe("canonicalReviewSnapshotApi", () => {
     expect(fetchMock).not.toHaveBeenCalled();
   });
 
+  it.each([
+    { law: "Oklahoma", client: "Cedar Ridge LLC", provider: "Maple Grove Inc", attnA: "Jordan Hale", attnB: "Morgan Ellis" },
+    { law: "Colorado", client: "Riverbend Studio", provider: "Oak Point LLC", attnA: "Casey Quinn", attnB: "Riley Chen" },
+    { law: "New York", client: "Summit Craft Co", provider: "Harborline Design LLC", attnA: "Avery Cole", attnB: "Sam Ortiz" },
+  ] as const)(
+    "persistCanonicalReviewSnapshot accepts sequential wrapped-heading 1..12 with Notices Attn ($law)",
+    async ({ law, client, provider, attnA, attnB }) => {
+      const sequential = [
+        "SERVICES AGREEMENT",
+        "",
+        `This Services Agreement is between ${client} and ${provider}.`,
+        "",
+        "1. Services and Deliverables",
+        "Designer will provide a logo and brand kit.",
+        "",
+        "2. Revisions,",
+        "Client Input, and Changes",
+        "The flat fee includes up to two rounds of reasonable revisions.",
+        "",
+        "3. Fees and Payment",
+        "Fees are due as stated.",
+        "",
+        "4. Term and Termination",
+        "The engagement continues until complete.",
+        "4.1 Early Termination",
+        "Either party may terminate for material breach.",
+        "",
+        "5. Intellectual Property",
+        "Client owns final deliverables upon payment.",
+        "5.1 Portfolio License",
+        "Designer retains a limited portfolio license.",
+        "",
+        "6. Confidentiality",
+        "Each party keeps non-public information confidential.",
+        "",
+        "7. Representations and Warranties",
+        "Each party represents it has authority to enter this Agreement.",
+        "",
+        "8. Indemnification",
+        "Each party indemnifies the other for third-party claims arising from its breach.",
+        "",
+        "9. Liability Allocation",
+        "Total liability is capped at fees paid.",
+        "",
+        "10. Independent Contractor and Assignment",
+        "This Agreement cannot be assigned without prior written consent.",
+        "",
+        "11. Governing Law",
+        `This Agreement is governed by the laws of ${law}, without regard to conflict-of-laws principles.`,
+        "",
+        "12. Notices",
+        "Any notice must be in writing.",
+        "1. Email",
+        "2. Personal delivery",
+        `If to ${client}:`,
+        `Attn: ${attnA}`,
+        "10. Main Street",
+        `If to ${provider}:`,
+        `Attn: ${attnB}`,
+        "2. Revisions,",
+        "Client Input, and Changes",
+        "",
+        "IN WITNESS WHEREOF, the parties have executed this Agreement.",
+        "",
+        "x".repeat(400),
+      ].join("\n");
+      const digest = await sha256CorpusDigest(sequential);
+      const fetchMock = vi.fn(async () => ({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          snapshot: {
+            snapshot_id: "crs_wrap_1_12",
+            agreement_id: "ag_wrap_1_12",
+            corpus_plain: sequential,
+            corpus_sha256: digest,
+            corpus_length: sequential.length,
+            status: "pending",
+          },
+        }),
+      }));
+      vi.stubGlobal("fetch", fetchMock);
+      const res = await persistCanonicalReviewSnapshot({
+        agreementId: "ag_wrap_1_12",
+        corpusPlain: sequential,
+        intakeText: `${client} is hiring ${provider}, governing law ${law}.`,
+      });
+      expect(res.ok).toBe(true);
+      expect(fetchMock).toHaveBeenCalled();
+      expect(sequential).not.toMatch(/Texas|Northline|Priya|Diego/);
+    },
+  );
+
   it("persistCanonicalReviewSnapshot accepts leftover 1..8 and does not remint to 10/11/12/13", async () => {
     const leftover = [
       "SERVICES AGREEMENT",

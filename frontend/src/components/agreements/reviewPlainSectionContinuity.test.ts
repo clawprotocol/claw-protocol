@@ -118,6 +118,91 @@ function tenThenTwelve(client: string, provider: string): string {
   return servicesBody({ client, provider, headings });
 }
 
+function sequentialThrough12WrappedNotices(args: {
+  client: string;
+  provider: string;
+  law: string;
+  attnA: string;
+  attnB: string;
+}): string {
+  return [
+    "SERVICES AGREEMENT",
+    "",
+    `This Services Agreement (this "Agreement") is entered into as of the Effective Date by and between ${args.client} ("Client") and ${args.provider} ("Service Provider").`,
+    "",
+    "1. Services and Deliverables",
+    `${args.provider} will provide design services for a logo and brand kit.`,
+    "(a) primary mark",
+    "(b) color system",
+    "(c) usage guide",
+    "",
+    "2. Revisions,",
+    "Client Input, and Changes",
+    "The flat fee in this Agreement includes up to two rounds of reasonable revisions.",
+    "",
+    "3. Fees and Payment",
+    "Fees are due as stated in this Agreement.",
+    "",
+    "4. Term and Termination",
+    "The engagement continues until the deliverables are complete.",
+    "4.1 Early Termination",
+    "Either party may terminate for material breach after written notice.",
+    "",
+    "5. Intellectual Property",
+    "Client owns final deliverables upon payment.",
+    "5.1 Portfolio License",
+    `${args.provider} retains a limited portfolio license.`,
+    "",
+    "6. Confidentiality",
+    "Each party keeps non-public information confidential.",
+    "",
+    "7. Representations and Warranties",
+    "Each party represents it has authority to enter this Agreement.",
+    "",
+    "8. Indemnification",
+    "Each party indemnifies the other for third-party claims arising from its breach.",
+    "",
+    "9. Liability Allocation",
+    "Mutual indemnification applies. Liability for indirect damages is excluded. Total liability is capped at fees paid.",
+    "",
+    "10. Independent Contractor and Assignment",
+    "This Agreement cannot be assigned without prior written consent, except for a merger or sale.",
+    "",
+    "11. Governing Law",
+    `This Agreement is governed by the laws of ${args.law}, without regard to conflict-of-laws principles.`,
+    "",
+    "12. Notices",
+    "Any notice under this Agreement must be in writing and delivered via email, personal delivery, or overnight courier.",
+    "Notices may be delivered by:",
+    "1. Email",
+    "2. Personal delivery",
+    "3. Overnight courier",
+    "",
+    `If to ${args.client}:`,
+    args.client,
+    `Attn: ${args.attnA}`,
+    `Email: notices-${args.client.split(" ")[0]!.toLowerCase()}@example.test`,
+    "10. Main Street",
+    "",
+    `If to ${args.provider}:`,
+    args.provider,
+    `Attn: ${args.attnB}`,
+    `Email: notices-${args.provider.split(" ")[0]!.toLowerCase()}@example.test`,
+    "1. If to leftover wrap should not count",
+    "",
+    "2. Revisions,",
+    "Client Input, and Changes",
+    "",
+    "IN WITNESS WHEREOF, the parties have executed this Agreement as of the Effective Date.",
+    "",
+    `CLIENT: ${args.client}`,
+    "By: ____________________",
+    "",
+    `SERVICE PROVIDER: ${args.provider}`,
+    "By: ____________________",
+  ].join("\n");
+}
+
 function leftoverEightSection(client: string, provider: string): string {
   return servicesBody({
     client,
@@ -177,6 +262,38 @@ describe("Review/plain skipped section numbering", () => {
     ]);
     expect(extractSuppliedGoverningLaw(twoPartyIntake({ client, provider, law }))).toBe(law);
   });
+
+  it.each(cases)(
+    "PASSES sequential wrapped-heading 1..12 with Notices Attn; still FAILs 12-then-14 ($law)",
+    ({ law, client, provider }) => {
+      const attn =
+        law === "Oklahoma"
+          ? { attnA: "Jordan Hale", attnB: "Morgan Ellis" }
+          : law === "Colorado"
+            ? { attnA: "Casey Quinn", attnB: "Riley Chen" }
+            : { attnA: "Avery Cole", attnB: "Sam Ortiz" };
+      const sequential = sequentialThrough12WrappedNotices({
+        client,
+        provider,
+        law,
+        ...attn,
+      });
+      expect(collectReviewPlainTopLevelSectionNumbers(sequential)).toEqual([
+        1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12,
+      ]);
+      expect(reviewPlainHasSkippedSectionNumbers(sequential)).toBe(false);
+      expect(reviewPlainHasLateSkippedSectionNumbers(sequential)).toBe(false);
+      expect(sequential).toMatch(new RegExp(law, "i"));
+      expect(sequential).not.toMatch(/Texas/);
+      expect(sequential).not.toMatch(/Northline/);
+      expect(sequential).not.toMatch(/Priya|Diego/);
+
+      const skipped1214 = twelveThenFourteen(client, provider);
+      expect(reviewPlainHasLateSkippedSectionNumbers(skipped1214)).toBe(true);
+      expect(collectReviewPlainTopLevelSectionNumbers(skipped1214)).toContain(14);
+      expect(collectReviewPlainTopLevelSectionNumbers(skipped1214)).not.toContain(13);
+    },
+  );
 
   it("repairs 12-then-14 and keeps intake governing law (not a hard-coded venue)", () => {
     const client = "Cedar Ridge LLC";
