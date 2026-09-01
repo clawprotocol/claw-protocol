@@ -14,6 +14,8 @@ from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field
 
+from backend.agreements.review_plain_section_continuity import extract_supplied_governing_law
+
 
 Severity = Literal["low", "medium", "high"]
 
@@ -128,13 +130,7 @@ def _governing_law_from_intelligence_or_intake(agreement_intelligence: Any, orig
     gov = _text(_model_or_dict_get(terms, "governing_law", ""))
     if gov:
         return gov
-    intake = original_intake or ""
-    for state in STATE_NAMES:
-        if re.search(rf"\b{re.escape(state)}\b\s+(?:governing\s+)?law\b", intake, re.I):
-            return state
-        if re.search(rf"\bgoverned\s+by\s+{re.escape(state)}\b", intake, re.I):
-            return state
-    return ""
+    return extract_supplied_governing_law(original_intake or "")
 
 
 def _has_named_parties(draft: str, original_intake: str, agreement_intelligence: Any) -> bool:

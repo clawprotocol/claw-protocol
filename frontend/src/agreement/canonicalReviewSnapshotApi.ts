@@ -10,6 +10,7 @@
  * Client SoT coordinates review display; server accepted snapshot is commercial authority.
  */
 
+import { repairReviewPlainSectionContinuity } from "../components/agreements/reviewPlainSectionContinuity";
 import { apiUrl } from "../lib/clawApi";
 import { sha256Hex } from "../utils/agreements/hash";
 import { clawAgreementHeaders } from "./agreementOrgHeaders";
@@ -271,9 +272,15 @@ export async function persistCanonicalReviewSnapshot(args: {
   generationSessionId?: string | null;
   createdBySession?: string | null;
   expectedRegistryVersion?: number | null;
+  intakeText?: string | null;
+  jurisdiction?: string | null;
 }): Promise<PersistCanonicalReviewSnapshotResult> {
   const id = args.agreementId.trim();
-  const corpus = (args.corpusPlain || "").trim();
+  const repaired = repairReviewPlainSectionContinuity((args.corpusPlain || "").trim(), {
+    intakeText: args.intakeText,
+    jurisdiction: args.jurisdiction,
+  });
+  const corpus = repaired.text.trim();
   if (!id || corpus.length < 500) return { ok: false, code: "invalid_snapshot_args" };
   const claimed = await sha256CorpusDigest(corpus);
   try {
@@ -410,6 +417,8 @@ export async function prepareCommercialReviewSnapshotAuthority(args: {
   agreementId: string;
   corpusPlain: string;
   generationSessionId?: string | null;
+  intakeText?: string | null;
+  jurisdiction?: string | null;
 }): Promise<
   | {
       ok: true;
@@ -429,6 +438,8 @@ export async function prepareCommercialReviewSnapshotAuthority(args: {
     corpusPlain: corpus,
     generationSessionId: args.generationSessionId,
     createdBySession: args.generationSessionId,
+    intakeText: args.intakeText,
+    jurisdiction: args.jurisdiction,
   });
   if (!persisted.ok) return { ok: false, code: persisted.code };
 

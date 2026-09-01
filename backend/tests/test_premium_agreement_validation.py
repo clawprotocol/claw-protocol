@@ -105,6 +105,22 @@ def test_empty_confidentiality_heading_fails() -> None:
     assert any(f.code == "empty_required_section" and f.section == "4. Confidentiality" for f in result.failures)
 
 
+def test_governing_law_customer_dump_order_is_not_silently_dropped() -> None:
+    """Intake form ``governing law Oklahoma`` must be treated as a supplied term."""
+    draft = _valid_minimal().replace("This Agreement is governed by Texas law.", "The parties will confirm venue later.")
+    intel = _intel()
+    intel["extracted_terms"]["governing_law"] = ""
+    result = validatePremiumAgreementDraft(
+        authoritativeDraft=draft,
+        agreementIntelligence=intel,
+        originalIntake=(
+            "Cedar Ridge LLC is hiring Maple Grove Inc to design a logo and brand kit "
+            "for $2,400, term 30 days, governing law Oklahoma."
+        ),
+    )
+    assert any(f.code == "governing_law_missing_or_mismatch" for f in result.failures)
+
+
 def test_governing_law_supplied_but_draft_to_be_agreed_fails() -> None:
     draft = _valid_minimal().replace("This Agreement is governed by Texas law.", "Governing law: to be agreed.")
     result = validatePremiumAgreementDraft(

@@ -7698,6 +7698,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           agreementId: agreementIdForPass,
           corpusPlain: entitledReviewCorpus,
           generationSessionId: result.agreementGenerationId ?? sessionGenForPass,
+          intakeText: mergedIntake,
+          jurisdiction: merged.draft?.jurisdiction,
         });
         if (!prepared.ok) {
           // Fail-open only when a prior accepted Pro corpus already exists.
