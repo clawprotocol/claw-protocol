@@ -42,6 +42,7 @@ import {
   ensureReviewCorpusOnEsignEntry,
   leftoverRemountShouldFailClosedToast,
 } from "./vs01EsignRemountReviewBind";
+import { restorePrepareFromFrozenSigningAuthority } from "./vs01EsignRemountPrepareRestore";
 import {
   extractPlainTextFromDocumentContent,
   leftoverGetContentRefuseFromError,
@@ -229,7 +230,7 @@ export function Vs01Wizard({
   const recipientAuthorityResolvedRef = useRef(false);
   const recipientAuthorityIdentityRef = useRef<Vs01RecipientIdentityAuthority | null>(null);
   /** Paid Pro `/app/esign/:id?agreement_bridge=1` — LawDog already collected signers; never show VS01 details step. */
-  const [paidProAgreementBridgeSkip] = useState(() =>
+  const [paidProAgreementBridgeSkip, setPaidProAgreementBridgeSkip] = useState(() =>
     computePaidProAgreementBridgeSkip(seedDocumentId, hideStepper),
   );
   const [vs01LinkedAgreementId, setVs01LinkedAgreementId] = useState<string | null>(() =>
@@ -840,13 +841,39 @@ export function Vs01Wizard({
         if (cancelled) return;
       }
 
+      // Inspect / hard-refresh remount: leftover bind recovered Review body
+      // but skip/bridge may be gone. Reconstruct Prepare from frozen
+      // signing authority — do not land the empty self-sign Step-3 shell.
+      if (hideStepper && sid.startsWith("doc_")) {
+        try {
+          const restored = await restorePrepareFromFrozenSigningAuthority({
+            documentId: sid,
+            hideStepper,
+            reviewCorpus: persistReviewCorpus,
+          });
+          if (restored.ok) {
+            setPaidProAgreementBridgeSkip(true);
+            persistReviewCorpus = persistReviewCorpus || (restored.bridge.agreementCorpusText ?? "").trim();
+          }
+        } catch {
+          /* stay on leftover body; do not eject */
+        }
+        if (cancelled) return;
+      }
+
       const hydrateLocalPaidProBridge = (): boolean => {
         if (bridgeHydratedSeedSid.current === sid) return true;
         const bridgeParams = new URLSearchParams(window.location.search);
         const agreementBridgeQuery = bridgeParams.get("agreement_bridge") === "1";
+        const remountSkipOrBridge =
+          sid.startsWith("doc_") &&
+          (readPaidProAgreementBridgeSkipMarker(sid) ||
+            readAgreementVs01BridgeSession()?.vs01DocumentId.trim() === sid);
         // local_doc_* always; server doc_* when agreement_bridge=1 (session already has corpus).
         const allowBridgeCorpusHydrate =
-          sid.startsWith("local_doc_") || (agreementBridgeQuery && sid.startsWith("doc_"));
+          sid.startsWith("local_doc_") ||
+          (agreementBridgeQuery && sid.startsWith("doc_")) ||
+          remountSkipOrBridge;
         if (!allowBridgeCorpusHydrate) return false;
         const rawBridge = readAgreementVs01BridgeSession();
         const bridge: AgreementVs01BridgeSession | null =
@@ -860,13 +887,15 @@ export function Vs01Wizard({
           hideStepper &&
           Boolean(sid) &&
           (readPaidProAgreementBridgeSkipMarker(sid) ||
+            remountSkipOrBridge ||
             (agreementBridgeQuery &&
               bridge !== null &&
               bridge.vs01DocumentId.trim() === sid));
         if (!paidProAgreementHandoff || !bridge || bridge.vs01DocumentId.trim() !== sid) return false;
-        const corpus = (bridge.agreementCorpusText ?? "").trim();
+        const corpus = persistReviewCorpus || (bridge.agreementCorpusText ?? "").trim();
         if (corpus.length < VS01_SIGNING_CORPUS_MIN_LEN) return false;
         if (cancelled) return false;
+        setPaidProAgreementBridgeSkip(true);
         setDocumentId(sid);
         setContentSha256(`corpus:${fingerprintAgreementBody(corpus)}`);
         bridgeHandoffSnapshotRef.current = bridge;
@@ -980,6 +1009,7 @@ export function Vs01Wizard({
             setDocumentId(sid);
             setContentSha256(`corpus:${fingerprintAgreementBody(persistReviewCorpus)}`);
             setPrepareCorpusText(persistReviewCorpus);
+            if (hydrateLocalPaidProBridge()) return;
             setFurthestStep((prev) => ((2 > prev ? 2 : prev) as Vs01Step));
             goToStep(2);
             return;
@@ -1014,11 +1044,13 @@ export function Vs01Wizard({
           hideStepper &&
           Boolean(sid) &&
           (readPaidProAgreementBridgeSkipMarker(sid) ||
+            (readAgreementVs01BridgeSession()?.vs01DocumentId.trim() === sid) ||
             (agreementBridgeQuery &&
               bridge !== null &&
               bridge.vs01DocumentId.trim() === sid));
 
         if (paidProAgreementHandoff && bridge && bridge.vs01DocumentId.trim() === sid) {
+          setPaidProAgreementBridgeSkip(true);
           bridgeHandoffSnapshotRef.current = bridge;
           bridgeHydratedSeedSid.current = sid;
           // eslint-disable-next-line no-console
@@ -1210,6 +1242,7 @@ export function Vs01Wizard({
           setDocumentId(sid);
           setContentSha256(`corpus:${fingerprintAgreementBody(persistReviewCorpus)}`);
           setPrepareCorpusText(persistReviewCorpus);
+          if (hydrateLocalPaidProBridge()) return;
           setFurthestStep((prev) => ((2 > prev ? 2 : prev) as Vs01Step));
           goToStep(2);
           return;
