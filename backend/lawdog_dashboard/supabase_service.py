@@ -18,15 +18,17 @@ from backend.lawdog_dashboard.supabase_config import (
 
 log = logging.getLogger("claw.lawdog_dashboard.supabase")
 
-# Dashboard org upsert is best-effort. A missing `public.organizations` table
-# (PGRST205 / 404) plus bind-user-org client polls must not block the asyncio
-# worker or starve GET /health. After the first failure, skip further POSTs.
+# Dashboard org upsert is best-effort. bind-user-org client polls must not
+# sync-POST on the asyncio loop (failure or success) or they starve GET /health.
+# Failure (PGRST205 / 404 / timeout): skip all probes for the window.
+# Success: skip further POSTs for that org_id for the same window.
 _ORGANIZATION_UPSERT_TIMEOUT_SECONDS = 1.5
 _ORGANIZATION_SYNC_SKIP_SECONDS = 60.0
 _org_sync_lock = threading.Lock()
 _org_sync_skip_until = 0.0
 _org_sync_probe_in_flight = False
 _org_sync_failure_logged = False
+_org_sync_ok_until: Dict[str, float] = {}
 
 
 def _utc_now_iso() -> str:
@@ -103,6 +105,22 @@ def reset_organization_sync_circuit_for_tests() -> None:
         _org_sync_skip_until = 0.0
         _org_sync_probe_in_flight = False
         _org_sync_failure_logged = False
+        _org_sync_ok_until.clear()
+
+
+def _organization_recently_synced(oid: str, now_mono: float) -> bool:
+    until = _org_sync_ok_until.get(oid, 0.0)
+    if until <= now_mono:
+        _org_sync_ok_until.pop(oid, None)
+        return False
+    return True
+
+
+def _mark_organization_synced(oid: str, now_mono: float) -> None:
+    stale = [key for key, exp in _org_sync_ok_until.items() if exp <= now_mono]
+    for key in stale:
+        _org_sync_ok_until.pop(key, None)
+    _org_sync_ok_until[oid] = now_mono + _ORGANIZATION_SYNC_SKIP_SECONDS
 
 
 def _open_organization_sync_circuit(*, detail: str) -> None:
@@ -130,6 +148,8 @@ def ensure_organization(org_id: str, *, name: str = "") -> None:
     with _org_sync_lock:
         if now_mono < _org_sync_skip_until:
             return
+        if _organization_recently_synced(oid, now_mono):
+            return
         if _org_sync_probe_in_flight:
             return
         _org_sync_probe_in_flight = True
@@ -153,6 +173,7 @@ def ensure_organization(org_id: str, *, name: str = "") -> None:
             with _org_sync_lock:
                 _org_sync_skip_until = 0.0
                 _org_sync_failure_logged = False
+                _mark_organization_synced(oid, time.monotonic())
             return
         _open_organization_sync_circuit(detail="organizations_upsert_failed")
     except Exception as exc:

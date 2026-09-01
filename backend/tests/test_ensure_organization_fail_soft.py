@@ -80,21 +80,23 @@ def _client_factory(fake: _FakeSupabaseClient):
     return _factory
 
 
-def test_ensure_organization_success_upserts_each_call(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_ensure_organization_success_skips_http_within_ttl(monkeypatch: pytest.MonkeyPatch) -> None:
     _enable_supabase(monkeypatch)
     fake = _FakeSupabaseClient(status_code=201)
 
     with patch("backend.lawdog_dashboard.supabase_service.httpx.Client", _client_factory(fake)):
         ensure_organization("org-success-1", name="Acme Workspace")
         ensure_organization("org-success-1", name="Acme Workspace")
+        ensure_organization("org-success-2", name="Other Workspace")
 
     org_posts = [c for c in fake.calls if "organizations" in c.get("url", "") and c.get("method") == "POST"]
     assert len(org_posts) == 2
-    body = org_posts[0].get("json") or {}
-    assert body["id"] == "org-success-1"
-    assert body["name"] == "Acme Workspace"
-    assert body.get("updated_at")
+    first = org_posts[0].get("json") or {}
+    assert first["id"] == "org-success-1"
+    assert first["name"] == "Acme Workspace"
+    assert first.get("updated_at")
     assert (org_posts[0].get("params") or {}).get("on_conflict") == "id"
+    assert (org_posts[1].get("json") or {}).get("id") == "org-success-2"
     assert fake.timeouts == [
         _ORGANIZATION_UPSERT_TIMEOUT_SECONDS,
         _ORGANIZATION_UPSERT_TIMEOUT_SECONDS,
@@ -220,7 +222,7 @@ def test_bind_user_org_200_when_organizations_table_missing(
     assert len(org_posts) == 1
 
 
-def test_bind_user_org_success_still_upserts_organization(
+def test_bind_user_org_success_upserts_once_then_skips_repeat_poll(
     monkeypatch: pytest.MonkeyPatch, tmp_path
 ) -> None:
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
@@ -245,10 +247,19 @@ def test_bind_user_org_success_still_upserts_organization(
             headers=make_test_auth_headers(user_id),
             json={"user_id": user_id, "display_name": "Healthy Workspace"},
         )
+        res2 = client.post(
+            "/v1/workspace/bind-user-org",
+            headers=make_test_auth_headers(user_id),
+            json={"user_id": user_id, "display_name": "Healthy Workspace"},
+        )
+        health = client.get("/health")
 
     reset_economics_store_for_tests()
 
     assert res.status_code == 200, res.text
+    assert res2.status_code == 200, res2.text
+    assert health.status_code == 200
+    assert health.json().get("ok") is True
     org_posts = [c for c in fake.calls if "organizations" in c.get("url", "") and c.get("method") == "POST"]
     assert len(org_posts) == 1
     body = org_posts[0].get("json") or {}
