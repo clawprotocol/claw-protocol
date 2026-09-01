@@ -1,6 +1,15 @@
 /** @vitest-environment jsdom */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  collectReviewPlainTopLevelSectionNumbers,
+  reviewPlainHasLateSkippedSectionNumbers,
+} from "../components/agreements/reviewPlainSectionContinuity";
+import {
+  clearPaintedSequentialPersistReviewForTests,
+  latchPaintedSequentialPersistReview,
+  resolvePersistReviewPlainForClientPreflight,
+} from "../components/agreements/paidProPaintedSequentialPersistReview";
+import {
   acceptCanonicalReviewSnapshot,
   acceptDisplayedCommercialReviewSnapshot,
   canEnableCommercialPrepareFromServerSnapshot,
@@ -18,6 +27,7 @@ describe("canonicalReviewSnapshotApi", () => {
   beforeEach(() => {
     sessionStorage.clear();
     vi.restoreAllMocks();
+    clearPaintedSequentialPersistReviewForTests();
   });
 
   it("stores and reads accepted snapshot ref scoped by agreement", () => {
@@ -628,6 +638,301 @@ describe("canonicalReviewSnapshotApi", () => {
     const body = JSON.parse(String(firstCall[1]?.body ?? "{}"));
     expect(body.corpus_plain).toContain("1. Services and Deliverables");
     expect(body.corpus_plain).toContain("8. Notices");
+    expect(body.corpus_plain).not.toMatch(/\n10\. /);
+    expect(body.corpus_plain).not.toMatch(/\n11\. /);
+    expect(body.corpus_plain).not.toMatch(/\n12\. /);
+    expect(body.corpus_plain).not.toMatch(/\n13\. /);
+  });
+
+  function sequentialPainted1to12(args: {
+    client: string;
+    provider: string;
+    law: string;
+    attnA: string;
+    attnB: string;
+  }): string {
+    return [
+      "SERVICES AGREEMENT",
+      "",
+      `This Services Agreement is between ${args.client} and ${args.provider}.`,
+      "",
+      "1. Services and Deliverables",
+      "Designer will provide a logo and brand kit.",
+      "",
+      "2. Revisions, Client Input, and Changes",
+      "The flat fee includes up to two rounds of reasonable revisions.",
+      "",
+      "3. Fees and Payment",
+      "Fees are due as stated.",
+      "",
+      "4. Term and Termination",
+      "The engagement continues until complete.",
+      "4.1 Early Termination",
+      "Either party may terminate for material breach.",
+      "",
+      "5. Intellectual Property",
+      "Client owns final deliverables upon payment.",
+      "5.1 Portfolio License",
+      "Designer retains a limited portfolio license.",
+      "",
+      "6. Confidentiality",
+      "Each party keeps non-public information confidential.",
+      "",
+      "7. Representations and Warranties",
+      "Each party represents it has authority to enter this Agreement.",
+      "",
+      "8. Indemnification",
+      "Each party indemnifies the other for third-party claims arising from its breach.",
+      "",
+      "9. Liability Allocation",
+      "Total liability is capped at fees paid.",
+      "",
+      "10. Independent Contractor and Assignment",
+      "This Agreement cannot be assigned without prior written consent.",
+      "",
+      "11. Governing Law",
+      `This Agreement is governed by the laws of ${args.law}, without regard to conflict-of-laws principles.`,
+      "",
+      "12. Notices",
+      "Any notice must be in writing.",
+      "1. Email",
+      "2. Personal delivery",
+      `If to ${args.client}:`,
+      `Attn: ${args.attnA}`,
+      "10. Main Street",
+      `If to ${args.provider}:`,
+      `Attn: ${args.attnB}`,
+      "",
+      "IN WITNESS WHEREOF, the parties have executed this Agreement.",
+      "",
+      "x".repeat(400),
+    ].join("\n");
+  }
+
+  function shorterAuthorityThatLateSkips(): string {
+    return [
+      "SERVICES AGREEMENT",
+      "",
+      "This Services Agreement is between Cedar Ridge LLC and Maple Grove Inc.",
+      "",
+      "1. Services and Deliverables",
+      "Designer will provide the deliverables.",
+      "",
+      "10. Miscellaneous",
+      "This is the entire agreement.",
+      "",
+      "12. Notices",
+      "Any notice must be in writing.",
+      "",
+      "IN WITNESS WHEREOF, the parties have executed this Agreement.",
+      "",
+      "x".repeat(400),
+    ].join("\n");
+  }
+
+  it("persistCanonicalReviewSnapshot POSTs painted sequential 1..12 when authority corpus would skip", async () => {
+    const authority = shorterAuthorityThatLateSkips();
+    const painted = sequentialPainted1to12({
+      client: "Cedar Ridge LLC",
+      provider: "Maple Grove Inc",
+      law: "Oklahoma",
+      attnA: "Jordan Hale",
+      attnB: "Morgan Ellis",
+    });
+    expect(reviewPlainHasLateSkippedSectionNumbers(authority)).toBe(true);
+    expect(collectReviewPlainTopLevelSectionNumbers(painted)).toEqual([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]);
+    expect(reviewPlainHasLateSkippedSectionNumbers(painted)).toBe(false);
+    expect(resolvePersistReviewPlainForClientPreflight({
+      corpusPlain: authority,
+      paintedPersistPlain: painted,
+    })).toBe(painted);
+    expect(painted.length).toBeGreaterThan(authority.length);
+
+    const digest = await sha256CorpusDigest(painted);
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        snapshot: {
+          snapshot_id: "crs_painted_1_12",
+          agreement_id: "ag_painted_1_12",
+          corpus_plain: painted,
+          corpus_sha256: digest,
+          corpus_length: painted.length,
+          status: "pending",
+        },
+      }),
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    const res = await persistCanonicalReviewSnapshot({
+      agreementId: "ag_painted_1_12",
+      corpusPlain: authority,
+      paintedPersistPlain: painted,
+      intakeText: "Cedar Ridge LLC is hiring Maple Grove Inc, governing law Oklahoma.",
+    });
+    expect(res.ok).toBe(true);
+    expect(fetchMock).toHaveBeenCalled();
+    const firstCall = fetchMock.mock.calls[0] as unknown as [string, RequestInit?];
+    const body = JSON.parse(String(firstCall[1]?.body ?? "{}"));
+    expect(body.corpus_plain).toBe(painted);
+    expect(collectReviewPlainTopLevelSectionNumbers(body.corpus_plain)).toEqual([
+      1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12,
+    ]);
+  });
+
+  it("persistCanonicalReviewSnapshot POSTs latched painted 1..12 when persist corpus is the shorter authority", async () => {
+    const authority = shorterAuthorityThatLateSkips();
+    const painted = sequentialPainted1to12({
+      client: "Riverbend Studio",
+      provider: "Oak Point LLC",
+      law: "Colorado",
+      attnA: "Casey Quinn",
+      attnB: "Riley Chen",
+    });
+    latchPaintedSequentialPersistReview({
+      paintedPlain: painted,
+      authorityPlain: authority,
+    });
+    expect(resolvePersistReviewPlainForClientPreflight({ corpusPlain: authority })).toBe(painted);
+    const digest = await sha256CorpusDigest(painted);
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        snapshot: {
+          snapshot_id: "crs_latched_paint",
+          agreement_id: "ag_latched_paint",
+          corpus_plain: painted,
+          corpus_sha256: digest,
+          corpus_length: painted.length,
+          status: "pending",
+        },
+      }),
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    const res = await persistCanonicalReviewSnapshot({
+      agreementId: "ag_latched_paint",
+      corpusPlain: authority,
+    });
+    expect(res.ok).toBe(true);
+    expect(fetchMock).toHaveBeenCalled();
+    const firstCall = fetchMock.mock.calls[0] as unknown as [string, RequestInit?];
+    const body = JSON.parse(String(firstCall[1]?.body ?? "{}"));
+    expect(body.corpus_plain).toBe(painted);
+  });
+
+  it("persistCanonicalReviewSnapshot still refuses painted 12-then-14 and 10-then-12", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    const skipped1214 = [
+      "SERVICES AGREEMENT",
+      "",
+      "1. Services and Deliverables",
+      "Designer will provide the deliverables.",
+      "",
+      "10. Miscellaneous",
+      "This is the entire agreement.",
+      "",
+      "11. Independent Contractor and Assignment",
+      "Designer is an independent contractor.",
+      "",
+      "12. Force Majeure",
+      "Neither party is liable for delay beyond its control.",
+      "",
+      "14. Notices",
+      "Any notice must be in writing.",
+      "",
+      "x".repeat(400),
+    ].join("\n");
+    const skipped1012 = [
+      "SERVICES AGREEMENT",
+      "",
+      "1. Services and Deliverables",
+      "Designer will provide the deliverables.",
+      "",
+      "10. Miscellaneous",
+      "This is the entire agreement.",
+      "",
+      "12. Notices",
+      "Any notice must be in writing.",
+      "",
+      "x".repeat(400),
+    ].join("\n");
+    for (const skipped of [skipped1214, skipped1012]) {
+      expect(reviewPlainHasLateSkippedSectionNumbers(skipped)).toBe(true);
+      const res = await persistCanonicalReviewSnapshot({
+        agreementId: "ag_painted_skip",
+        corpusPlain: skipped,
+        paintedPersistPlain: skipped,
+      });
+      expect(res.ok).toBe(false);
+      if (!res.ok) expect(res.code).toBe("skipped_top_level_section_integers");
+    }
+    expect(fetchMock).not.toHaveBeenCalled();
+  });
+
+  it("persistCanonicalReviewSnapshot leftover painted 1..8 stays 1..8", async () => {
+    const leftover = [
+      "SERVICES AGREEMENT",
+      "",
+      "This consulting engagement is between Summit Craft Co and Harborline Design LLC.",
+      "",
+      "1. Services and Deliverables",
+      "Designer will provide the deliverables.",
+      "",
+      "2. Fees",
+      "Fees are due as stated.",
+      "",
+      "3. Term and Termination",
+      "The engagement continues until complete.",
+      "",
+      "4. Intellectual Property",
+      "Client owns final deliverables upon payment.",
+      "",
+      "5. Confidentiality",
+      "Each party keeps non-public information confidential.",
+      "",
+      "6. Limitation of Liability",
+      "Liability is limited to fees paid.",
+      "",
+      "7. Governing Law",
+      "This Agreement is governed by the laws of the jurisdiction named in the intake.",
+      "",
+      "8. Notices",
+      "Notices must be in writing.",
+      "",
+      "IN WITNESS WHEREOF, the parties have executed this Agreement.",
+      "",
+      "x".repeat(400),
+    ].join("\n");
+    expect(collectReviewPlainTopLevelSectionNumbers(leftover)).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+    const digest = await sha256CorpusDigest(leftover);
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        snapshot: {
+          snapshot_id: "crs_leftover_paint",
+          agreement_id: "ag_leftover_paint",
+          corpus_plain: leftover,
+          corpus_sha256: digest,
+          corpus_length: leftover.length,
+          status: "pending",
+        },
+      }),
+    }));
+    vi.stubGlobal("fetch", fetchMock);
+    const res = await persistCanonicalReviewSnapshot({
+      agreementId: "ag_leftover_paint",
+      corpusPlain: leftover,
+      paintedPersistPlain: leftover,
+    });
+    expect(res.ok).toBe(true);
+    const firstCall = fetchMock.mock.calls[0] as unknown as [string, RequestInit?];
+    const body = JSON.parse(String(firstCall[1]?.body ?? "{}"));
+    expect(collectReviewPlainTopLevelSectionNumbers(body.corpus_plain)).toEqual([
+      1, 2, 3, 4, 5, 6, 7, 8,
+    ]);
     expect(body.corpus_plain).not.toMatch(/\n10\. /);
     expect(body.corpus_plain).not.toMatch(/\n11\. /);
     expect(body.corpus_plain).not.toMatch(/\n12\. /);
