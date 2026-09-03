@@ -124,6 +124,8 @@ describe("quoted-sentence surgical insert + apply outcome", () => {
     expect(surg.applied).toBe(true);
     expect(surg.reason).toBe("quoted_sentence_insert");
     expect(surg.text).toContain(CERT_MARKER);
+    expect(surg.text.indexOf("8. NOTICES")).toBeLessThan(surg.text.indexOf(CERT_MARKER));
+    expect(surg.text.indexOf(CERT_MARKER)).toBeLessThan(surg.text.indexOf("IN WITNESS WHEREOF"));
     expect(surg.text).toContain("Cedar Peak Advisors LLC");
     expect(surg.text).toContain("Blue Harbor Logistics LLC");
     expect(surg.text).not.toMatch(/\[ORG_[12]\]/);

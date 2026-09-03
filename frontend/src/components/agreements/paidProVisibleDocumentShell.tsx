@@ -57,6 +57,76 @@ function trimOrEmpty(s: string | null | undefined): string {
  * projectPaidProFrozenSoTDisplayPlain (consumed-metadata-only) or
  * resolvePaidProReviewRenderPlain. Display-only — does not rewrite SoT.
  */
+const WITNESS_LINE_RE = /^(IN WITNESS WHEREOF|EXECUTED AS OF|EXECUTION PAGE|SIGNATURES?)\b/im;
+const TOP_LEVEL_SECTION_HEADING_RE = /^(?:#{1,4}\s+)?\d{1,2}\.\s+(?!\d)[A-Z].+$/m;
+const NOTICES_SECTION_HEADING_RE =
+  /^(?:#{1,4}\s+)?(?:\d+\.)+\s+(?:NOTICES|Notices|Notice)\b[^\n]*$/im;
+
+function nextTopLevelSectionCut(tail: string): number | null {
+  const nxt = tail.match(TOP_LEVEL_SECTION_HEADING_RE);
+  const wit = tail.match(/^\s*(IN WITNESS WHEREOF|EXECUTED AS OF|EXECUTION PAGE|SIGNATURES?)\b/im);
+  const cuts = [nxt, wit]
+    .map((m) => (m && m.index !== undefined ? m.index : null))
+    .filter((n): n is number => n !== null);
+  return cuts.length ? Math.min(...cuts) : null;
+}
+
+function isPreservableCommittedPaintParagraph(paragraph: string): boolean {
+  const t = paragraph.trim();
+  if (t.length < 16 || t.length > 800) return false;
+  // Only standalone refine sentences — never re-hydrate a persist heading/If-to block
+  // that display projection already split or dropped (fused Agreement12. NOTICES).
+  if (/\n/.test(t)) return false;
+  if (/^(?:#{1,4}\s+)?\d{1,2}\.\s+(?!\d)/.test(t)) return false;
+  if (/\d+\.\s+NOTICES\b/i.test(t) || /Agreement\d+\.\s+NOTICES/i.test(t)) return false;
+  if (/^(IN WITNESS WHEREOF|CLIENT\s*:|SERVICE PROVIDER\s*:|PARTY\s+\d+|If to\s+)/i.test(t)) {
+    return false;
+  }
+  if (/^(By|Name|Title|Date|Address|Email)\s*:/i.test(t)) return false;
+  return /[A-Za-z]/.test(t);
+}
+
+/**
+ * Display projection (If-to / section-order) can drop a trailing refine paragraph
+ * that sits after the last numbered heading. Splice those committed sentences
+ * back into Notices (or the last rendered section body) so forced-route paint
+ * matches CRS / SoT.
+ */
+export function reattachMissingCommittedPaintParagraphs(source: string, projected: string): string {
+  const src = (source || "").replace(/\r\n/g, "\n");
+  const out = (projected || "").replace(/\r\n/g, "\n");
+  if (!src.trim() || !out.trim()) return projected;
+  const missing = src
+    .split(/\n\n+/)
+    .map((p) => p.trim())
+    .filter((p) => isPreservableCommittedPaintParagraph(p) && !out.includes(p));
+  if (!missing.length) return projected;
+
+  const block = `\n\n${missing.join("\n\n")}\n\n`;
+  const notices = NOTICES_SECTION_HEADING_RE.exec(out);
+  const spliceAtHeading = (headingIndex: number, headingLength: number): string => {
+    const after = headingIndex + headingLength;
+    const cut = nextTopLevelSectionCut(out.slice(after));
+    const insertAt = after + (cut !== null ? cut : out.slice(after).trimEnd().length);
+    return `${out.slice(0, insertAt).replace(/\s+$/, "")}${block}${out.slice(insertAt).replace(/^\n+/, "")}`;
+  };
+  if (notices && notices.index !== undefined) {
+    return spliceAtHeading(notices.index, notices[0].length);
+  }
+  const headingRe = /^(?:#{1,4}\s+)?\d{1,2}\.\s+(?!\d)[A-Z].+$/gm;
+  let last: RegExpExecArray | null = null;
+  let m: RegExpExecArray | null;
+  while ((m = headingRe.exec(out)) !== null) last = m;
+  if (last && last.index !== undefined) {
+    return spliceAtHeading(last.index, last[0].length);
+  }
+  const wit = WITNESS_LINE_RE.exec(out);
+  if (wit && wit.index !== undefined) {
+    return `${out.slice(0, wit.index).replace(/\s+$/, "")}${block}${out.slice(wit.index)}`;
+  }
+  return `${out.replace(/\s+$/, "")}${block}`;
+}
+
 function projectLastGoodIfToOnPaintPlain(
   plain: string,
   args?: PaidProFirstReviewVisibleDisplayArgs,
@@ -115,7 +185,10 @@ export function resolveCanonicalPlainForVisibleShell(
   // Display-only; does not rewrite SoT.
   const projectedPlain =
     titledPlain.length >= PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN
-      ? projectLastGoodIfToOnPaintPlain(titledPlain, args)
+      ? reattachMissingCommittedPaintParagraphs(
+          titledPlain,
+          projectLastGoodIfToOnPaintPlain(titledPlain, args),
+        )
       : titledPlain;
   const paintEligible =
     projectedPlain.length >= PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN ||
@@ -268,7 +341,10 @@ export function PaidProVisibleDocumentShell({
     canonicalPlain.plain.length >= PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN
       ? canonicalPlain.plain
       : authoritativePlain.length >= PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN
-        ? projectLastGoodIfToOnPaintPlain(authoritativePlain, displayContextWithCanonical)
+        ? reattachMissingCommittedPaintParagraphs(
+            authoritativePlain,
+            projectLastGoodIfToOnPaintPlain(authoritativePlain, displayContextWithCanonical),
+          )
         : "";
   const paintSource =
     canonicalPlain.plain.length >= PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN

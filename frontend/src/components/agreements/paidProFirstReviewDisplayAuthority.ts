@@ -187,17 +187,76 @@ function resolveCommercialPaintAgreementId(preferred?: string | null): string {
   return fromArg;
 }
 
+/**
+ * Surgical Ask LawDog refine can land in CRS / SoT while review-session authority
+ * stays on the first-accept hash (one_authority_violation ignored). Prefer the
+ * committed body when it adds a visible paragraph the stale authority lacks.
+ * Hollow-starter remints ([ORG_n]) never win over a resolved named authority.
+ */
+export function preferCommittedRefineDisplayPlain(args: {
+  sessionAuthorityPlain: string;
+  sotPlain: string;
+  crsPlain: string;
+}): { plain: string; source: string } | null {
+  const authority = trim(args.sessionAuthorityPlain);
+  const sot = trim(args.sotPlain);
+  const crs = trim(args.crsPlain);
+  if (!authority || !meetsFirstReviewPaintFloor(authority.length, true)) return null;
+  const authorityHasOrgs = /\[ORG_\d+\]/.test(authority);
+  const candidates: Array<{ plain: string; source: string }> = [];
+  if (meetsFirstReviewPaintFloor(crs.length, true)) {
+    candidates.push({ plain: crs, source: "verified_server_canonical_review_snapshot" });
+  }
+  if (meetsFirstReviewPaintFloor(sot.length, true)) {
+    candidates.push({ plain: sot, source: PAID_PRO_ACCEPTED_CANONICAL_SOT_DISPLAY_SOURCE });
+  }
+  for (const candidate of candidates) {
+    if (hashPaidProCorpus(candidate.plain) === hashPaidProCorpus(authority)) continue;
+    if (candidate.plain.length < Math.floor(authority.length * 0.9)) continue;
+    if (!authorityHasOrgs && /\[ORG_\d+\]/.test(candidate.plain)) continue;
+    if (committedRefineAddsVisibleParagraph(authority, candidate.plain)) {
+      return candidate;
+    }
+  }
+  return null;
+}
+
+function committedRefineAddsVisibleParagraph(prior: string, next: string): boolean {
+  const paras = next
+    .split(/\n\n+/)
+    .map((p) => p.trim())
+    .filter((p) => p.length >= 16);
+  return paras.some((p) => {
+    if (prior.includes(p)) return false;
+    if (/^(?:#{1,4}\s+)?\d{1,2}\.\s+(?!\d)\S/.test(p) && p.length < 80) return false;
+    if (/^(IN WITNESS WHEREOF|CLIENT\s*:|SERVICE PROVIDER\s*:|PARTY\s+\d+)/i.test(p)) return false;
+    return /[A-Za-z]/.test(p);
+  });
+}
+
 function resolveAcceptedCanonicalPaintPlain(
   args: PaidProFirstReviewVisibleDisplayArgs,
 ): { plain: string; source: string } {
   // Immutable review-session authority wins over live SoT / parent props so paint
   // cannot race on missing agreementId or a competing longer persist candidate.
+  // Exception: a committed refine (CRS / SoT) that added a visible paragraph.
   const fromAuthority = resolvePaidProReviewSessionAuthorityPaintPlain();
+  const fromSoT = hasPaidProSourceOfTruth() ? trim(getPaidProSourceOfTruthText()) : "";
+  const agreementId = resolveCommercialPaintAgreementId(args.agreementId);
+  const fromCrs =
+    agreementId && hasVerifiedCommercialDisplayCorpus(agreementId)
+      ? trim(readVerifiedCommercialDisplayCorpus(agreementId)?.corpusPlain)
+      : "";
   if (fromAuthority && meetsFirstReviewPaintFloor(fromAuthority.plain.length, true)) {
+    const committed = preferCommittedRefineDisplayPlain({
+      sessionAuthorityPlain: fromAuthority.plain,
+      sotPlain: fromSoT,
+      crsPlain: fromCrs,
+    });
+    if (committed) return committed;
     return { plain: fromAuthority.plain, source: fromAuthority.source };
   }
   const fromParent = trim(args.acceptedCanonicalPlain);
-  const fromSoT = hasPaidProSourceOfTruth() ? trim(getPaidProSourceOfTruthText()) : "";
   if (meetsFirstReviewPaintFloor(fromSoT.length, true)) {
     return { plain: fromSoT, source: PAID_PRO_ACCEPTED_CANONICAL_SOT_DISPLAY_SOURCE };
   }
