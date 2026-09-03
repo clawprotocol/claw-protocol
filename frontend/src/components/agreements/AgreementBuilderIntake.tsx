@@ -692,6 +692,10 @@ import {
   hasProfessionallyValidatedPipelineReviewCorpusForRender,
   readAcceptedPipelineReviewCorpusPlain,
 } from "./paidProAcceptedPipelineReviewCorpus";
+import {
+  PAID_PRO_ASK_LAWDOG_REFINE_REVISION_REASON,
+  shouldPersistPaidProRefineToDisplayAuthority,
+} from "./paidProAskLawDogForcedFirstReview";
 import { PaidProForcedFirstReviewChrome } from "./paidProForcedFirstReviewChrome";
 import { PaidProReviewRenderInvariantProbe } from "./PaidProReviewRenderInvariantProbe";
 import {
@@ -3691,6 +3695,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         },
       ) => void)
     | null
+  >(null);
+  const commitPaidProUserApprovedRevisionRef = useRef<
+    ((text: string, reason: string) => Promise<string>) | null
   >(null);
   const wasPremiumPaidDocumentSurfaceRef = useRef(false);
   const premiumPipelineOutputBodyRef = useRef("");
@@ -12720,6 +12727,26 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         }
         const scrollToReview =
           opts?.scrollToReview !== undefined ? opts.scrollToReview : !guidedBulkApplyingRef.current;
+        const agreementIdForDisplayPersist = (
+          reviewAgreementIdRef.current ||
+          readCreateReviewAgreementResumeId() ||
+          ""
+        ).trim();
+        if (
+          shouldPersistPaidProRefineToDisplayAuthority({
+            guidedBulkActive,
+            agreementId: agreementIdForDisplayPersist,
+          })
+        ) {
+          const committed = await commitPaidProUserApprovedRevisionRef.current?.(
+            bodyToCommit,
+            PAID_PRO_ASK_LAWDOG_REFINE_REVISION_REASON,
+          );
+          if (!committed) {
+            setReviewRefineUserMessage(REFINE_PERSISTED_UPDATE_FAIL_INLINE);
+            return false;
+          }
+        }
         applyProRefineOutputToProSurfaceRef.current?.(bodyToCommit, {
           clearStepBuffer: true,
           scrollToReview,
@@ -16601,6 +16628,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       agreementDocumentText,
     ],
   );
+  commitPaidProUserApprovedRevisionRef.current = commitPaidProUserApprovedRevision;
 
   const openPaidProDraftCardEditor = React.useCallback(() => {
     setPaidProCardAiInstruction("");
@@ -34982,6 +35010,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                               });
                                               handler();
                                             }}
+                                            suggestEditsDraft={proReviewSuggestEditsDraft}
+                                            suggestEditsBusy={proReviewSuggestEditsBusy}
+                                            suggestEditsError={proReviewSuggestEditsError}
+                                            suggestDisabled={
+                                              (isGenerating && !draft) || upgradeLockActive || loading
+                                            }
+                                            onSuggestEditsDraftChange={setProReviewSuggestEditsDraft}
+                                            onApplySuggestEdits={() => void handleProReviewApplySuggestEdits()}
                                           />
                                         ) : null}
                                         {paidProCanonicalReviewSignerSetupActive ||
@@ -35607,6 +35643,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                               });
                                               handler();
                                             }}
+                                            suggestEditsDraft={proReviewSuggestEditsDraft}
+                                            suggestEditsBusy={proReviewSuggestEditsBusy}
+                                            suggestEditsError={proReviewSuggestEditsError}
+                                            suggestDisabled={
+                                              (isGenerating && !draft) || upgradeLockActive || loading
+                                            }
+                                            onSuggestEditsDraftChange={setProReviewSuggestEditsDraft}
+                                            onApplySuggestEdits={() => void handleProReviewApplySuggestEdits()}
                                           />
                                         ) : null}
                                         {paidProCanonicalReviewSignerSetupActive ? (
