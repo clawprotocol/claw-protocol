@@ -246,17 +246,28 @@ def _assign_placeholders(
     return out, {k: counters[k] for k in categories_sorted}, categories_sorted
 
 
-def redact_text(raw: str) -> RedactionResult:
+def redact_text(
+    raw: str,
+    *,
+    skip_categories: tuple[str, ...] | None = None,
+) -> RedactionResult:
     """
     Redact sensitive-looking spans from raw text.
 
     Same normalized value within one call reuses the same placeholder index
     for that category. Mappings are not stored beyond this call.
+
+    ``skip_categories`` omits those detectors (e.g. org/name on an explicit
+    revision of an already-resolved commercial corpus). Email/phone/ssn/account
+    stay redacted unless explicitly skipped.
     """
     if raw == "":
         return RedactionResult(redacted_text="", redaction_counts={}, redaction_categories=[])
 
     spans = _find_spans(raw)
+    skip = {c for c in (skip_categories or ()) if c}
+    if skip:
+        spans = [s for s in spans if s.category not in skip]
     merged = _merge_spans(spans)
     redacted, counts, cats = _assign_placeholders(raw, merged)
     return RedactionResult(

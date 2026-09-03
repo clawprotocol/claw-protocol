@@ -208,6 +208,67 @@ function tryTerminationConvenienceNoticeFallback(
   return { text: doc, changedSections: [], matchedClausePreview: null, changed: false };
 }
 
+const QUOTED_INSERT_CUE_RE =
+  /\badd\s+this\s+exact\s+sentence\b|\badd\s+the\s+exact\s+sentence\b|\badd\s+this\s+exact\b|\badd\s+the\s+following\s+sentence\b|\badd\s+this\s+sentence\s+as\b/i;
+const QUOTED_SPAN_RE = /["“”]([\s\S]{16,800}?)["“”]/;
+const SECTION_IN_RE = /\bin\s+the\s+([A-Za-z][A-Za-z0-9\s]{1,40}?)\s+section\b/i;
+
+export function parseQuotedSentenceInsertInstruction(
+  instr: string,
+): { sentence: string; section: string | null } | null {
+  const raw = instr || "";
+  if (!QUOTED_INSERT_CUE_RE.test(raw)) return null;
+  const qm = raw.match(QUOTED_SPAN_RE);
+  if (!qm) return null;
+  const sentence = (qm[1] || "").replace(/\s+/g, " ").trim();
+  if (sentence.length < 16) return null;
+  const sm = raw.match(SECTION_IN_RE);
+  const section = sm?.[1] ? sm[1].replace(/\s+/g, " ").trim() : null;
+  return { sentence, section: section && section.length <= 48 ? section : null };
+}
+
+function nextSectionCut(tail: string): number | null {
+  const nxt = tail.match(/^(?:#{1,4}\s+|(?:\d+\.)+\s+)[A-Z].+$/m);
+  const wit = tail.match(/^\s*(IN WITNESS WHEREOF|EXECUTED AS OF|EXECUTION PAGE|SIGNATURES?)\b/im);
+  const cuts = [nxt, wit]
+    .map((m) => (m && m.index !== undefined ? m.index : null))
+    .filter((n): n is number => n !== null);
+  return cuts.length ? Math.min(...cuts) : null;
+}
+
+export function tryQuotedSentenceSurgicalInsert(
+  doc: string,
+  instr: string,
+): { text: string; section: string | null; changedSections: string[] } | null {
+  const parsed = parseQuotedSentenceInsertInstruction(instr);
+  if (!parsed || !doc.trim()) return null;
+  if (doc.includes(parsed.sentence)) return null;
+  const block = `\n\n${parsed.sentence}\n\n`;
+  if (parsed.section) {
+    const sec = parsed.section.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const heading = new RegExp(`^(?:#{1,4}\\s+|(?:\\d+\\.)+\\s*)?${sec}\\b[^\\n]*$`, "im");
+    const hm = heading.exec(doc);
+    if (hm && hm.index !== undefined) {
+      const after = hm.index + hm[0].length;
+      const tail = doc.slice(after);
+      const cut = nextSectionCut(tail);
+      const insertAt = after + (cut !== null ? cut : tail.trimEnd().length);
+      const text = `${doc.slice(0, insertAt).replace(/\s+$/, "")}${block}${doc.slice(insertAt).replace(/^\n+/, "")}`;
+      return { text, section: parsed.section, changedSections: [parsed.section.toLowerCase()] };
+    }
+  }
+  const wit = /^(IN WITNESS WHEREOF|EXECUTED AS OF|EXECUTION PAGE|SIGNATURES?)\b/im.exec(doc);
+  if (wit && wit.index !== undefined) {
+    const text = `${doc.slice(0, wit.index).replace(/\s+$/, "")}${block}${doc.slice(wit.index)}`;
+    return { text, section: parsed.section, changedSections: parsed.section ? [parsed.section.toLowerCase()] : ["end"] };
+  }
+  return {
+    text: `${doc.replace(/\s+$/, "")}${block}`,
+    section: parsed.section,
+    changedSections: parsed.section ? [parsed.section.toLowerCase()] : ["end"],
+  };
+}
+
 /**
  * Deterministic, clause-local edits when the model returns an unchanged full document.
  * Only high-confidence patterns; otherwise returns applied:false.
@@ -233,6 +294,22 @@ export function applyDeterministicSurgicalRevisionFallback(args: {
   }
   if (isAdvisoryNoteOrCommentIntent(instr)) {
     return baseFail("advisory_intent");
+  }
+
+  const quoted = tryQuotedSentenceSurgicalInsert(doc, instr);
+  if (quoted) {
+    return {
+      text: quoted.text,
+      applied: true,
+      reason: "quoted_sentence_insert",
+      changedSections: quoted.changedSections,
+      log: {
+        deterministicSurgicalFallbackAttempted: true,
+        deterministicSurgicalFallbackMatchedClause: quoted.section,
+        deterministicSurgicalFallbackApplied: true,
+        deterministicSurgicalFallbackReason: "quoted_sentence_insert",
+      },
+    };
   }
 
   if (!looksLikeTerminationConvenienceNoticeDaysInstruction(instr)) {

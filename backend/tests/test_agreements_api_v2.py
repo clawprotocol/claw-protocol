@@ -2012,6 +2012,165 @@ def test_premium_refine_late_fee_narrow_llm_anchor_when_no_payment_header(monkey
     assert len(text) >= int(len(doc) * 0.9)
 
 
+_CERT_MARKER_POST175 = (
+    "CERT_AI_REVISE_MARKER_POST175_0902T1958 — Notices for this agreement may also be "
+    "delivered by confirmed electronic mail to the addresses on file."
+)
+
+
+def _premium_refine_resolved_named_parties_doc() -> str:
+    parts = [
+        "# Agreement\n\n",
+        "## Parties\n\n",
+        'This Agreement is entered into by and between Cedar Peak Advisors LLC ("Client") '
+        'and Blue Harbor Logistics LLC ("Service Provider").\n\n',
+        "## Scope\n\n",
+    ]
+    parts.append("".join(f"Scope detail line {i} with mutual obligations.\n" for i in range(160)))
+    parts.append(
+        "\n## Notices\n\n"
+        "Notices shall be delivered as set forth herein.\n\n"
+        "## Confidentiality\n\n"
+        "Parties agree to mutual confidentiality obligations.\n\n"
+        "## Termination\n\n"
+        "Either party may terminate on thirty (30) days written notice.\n\n"
+        "IN WITNESS WHEREOF\n\n"
+        "CLIENT:\nCedar Peak Advisors LLC\n"
+        "SERVICE PROVIDER:\nBlue Harbor Logistics LLC\n"
+    )
+    return "".join(parts)
+
+
+def test_premium_refine_quoted_notices_insert_skips_llm_and_keeps_party_names(monkeypatch, tmp_path):
+    """Live Ask LawDog Notices marker: deterministic insert, no remint, no [ORG_n]."""
+    monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
+    import backend.routers.agreements_v2_api as av2
+
+    def boom(*_a, **_k):
+        raise RuntimeError("call_legal_llm_should_not_run_for_quoted_sentence_insert")
+
+    monkeypatch.setattr(av2, "call_legal_llm", boom)
+    client = TestClient(app)
+    doc = _premium_refine_resolved_named_parties_doc()
+    instr = (
+        "In the Notices section, add this exact sentence as its own short paragraph "
+        f'(do not remove existing text): "{_CERT_MARKER_POST175}" Keep all other sections unchanged.'
+    )
+    res = client.post(
+        "/api/agreements/premium-refine",
+        headers=_ORG_H,
+        json={
+            "current_document_text": doc,
+            "intake_text": "B2B services between Cedar Peak Advisors LLC and Blue Harbor Logistics LLC.",
+            "user_refinement_prompt": instr,
+            "action": "update",
+        },
+    )
+    assert res.status_code == 200
+    text = res.json()["updated_document_text"]
+    assert _CERT_MARKER_POST175 in text
+    assert "Cedar Peak Advisors LLC" in text
+    assert "Blue Harbor Logistics LLC" in text
+    assert "[ORG_1]" not in text
+    assert "[ORG_2]" not in text
+
+
+def test_premium_refine_full_llm_remint_org_tokens_restored_from_resolved_corpus(monkeypatch, tmp_path):
+    """Full refine that emits [ORG_n] against a named SoT must restore real names before 200."""
+    monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
+    import backend.routers.agreements_v2_api as av2
+
+    doc = _premium_refine_resolved_named_parties_doc()
+    remint = doc.replace("Cedar Peak Advisors LLC", "[ORG_1]").replace(
+        "Blue Harbor Logistics LLC", "[ORG_2]"
+    )
+    remint = remint + "\nAdded indemnity clarification.\n"
+
+    def no_narrow(**_k):
+        return None
+
+    def fake_llm(*_a, **_k):
+        return json.dumps(
+            {
+                "updated_document_text": remint,
+                "summary_changes": ["Clarified indemnity"],
+                "readiness_score": 70,
+                "suggested_next_step": "review",
+            }
+        )
+
+    monkeypatch.setattr(av2, "try_apply_narrow_amendment", no_narrow)
+    monkeypatch.setattr(av2, "call_legal_llm", fake_llm)
+    client = TestClient(app)
+    res = client.post(
+        "/api/agreements/premium-refine",
+        headers=_ORG_H,
+        json={
+            "current_document_text": doc,
+            "intake_text": "B2B services between Cedar Peak Advisors LLC and Blue Harbor Logistics LLC.",
+            "user_refinement_prompt": "Clarify the indemnity allocation in the existing clause.",
+            "action": "update",
+        },
+    )
+    assert res.status_code == 200
+    text = res.json()["updated_document_text"]
+    assert "Cedar Peak Advisors LLC" in text
+    assert "Blue Harbor Logistics LLC" in text
+    assert "[ORG_1]" not in text
+    assert "[ORG_2]" not in text
+    assert "Added indemnity clarification" in text
+
+
+def test_premium_refine_does_not_invent_names_for_hollow_placeholder_starter(monkeypatch, tmp_path):
+    """Hollow [ORG_1]/[ORG_2] starters stay placeholder-bearing (client gate still rejects)."""
+    monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
+    import backend.routers.agreements_v2_api as av2
+
+    hollow = (
+        "# Agreement\n\n"
+        'This Agreement is between [ORG_1] ("Client") and [ORG_2] ("Service Provider").\n'
+        + ("Scope line with obligations for the applicable parties.\n" * 80)
+        + "\n## Payment\n[ORG_1] shall pay [ORG_2].\n"
+    )
+
+    def no_narrow(**_k):
+        return None
+
+    def fake_llm(*_a, **_k):
+        return json.dumps(
+            {
+                "updated_document_text": hollow + "\nAdded a line.\n",
+                "summary_changes": ["Added a line"],
+                "readiness_score": 40,
+                "suggested_next_step": "edit",
+            }
+        )
+
+    monkeypatch.setattr(av2, "try_apply_narrow_amendment", no_narrow)
+    monkeypatch.setattr(av2, "call_legal_llm", fake_llm)
+    client = TestClient(app)
+    res = client.post(
+        "/api/agreements/premium-refine",
+        headers=_ORG_H,
+        json={
+            "current_document_text": hollow,
+            "intake_text": "Template services starter.",
+            "user_refinement_prompt": "Clarify the indemnity allocation in the existing clause.",
+            "action": "update",
+        },
+    )
+    assert res.status_code == 200
+    text = res.json()["updated_document_text"]
+    assert "[ORG_1]" in text
+    assert "[ORG_2]" in text
+
+
 def test_premium_finalize_audit_ok_deal_specific(monkeypatch, tmp_path):
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))

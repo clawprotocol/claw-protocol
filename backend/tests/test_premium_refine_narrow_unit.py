@@ -6,6 +6,7 @@ import pytest
 
 from backend.agreements.premium_refine_narrow import (
     classify_narrow_amendment_prompt,
+    parse_quoted_sentence_insert,
     try_apply_narrow_amendment,
 )
 
@@ -389,3 +390,68 @@ def test_payment_timing_pause_qa_phrase_narrow_insert_not_whole_clause_replace()
 
     assert len(text) <= int(len(doc) * 1.55)
     assert len(text) < len(doc) + 900
+
+
+_CERT_MARKER = (
+    "CERT_AI_REVISE_MARKER_POST175_0902T1958 — Notices for this agreement may also be "
+    "delivered by confirmed electronic mail to the addresses on file."
+)
+
+_CERT_INSTR = (
+    "In the Notices section, add this exact sentence as its own short paragraph "
+    f'(do not remove existing text): "{_CERT_MARKER}" Keep all other sections unchanged.'
+)
+
+
+def _long_named_parties_doc() -> str:
+    parts = [
+        "# Agreement\n\n",
+        "## Parties\n\n",
+        'This Agreement is entered into by and between Cedar Peak Advisors LLC ("Client") '
+        'and Blue Harbor Logistics LLC ("Service Provider").\n\n',
+        "## Scope\n\n",
+    ]
+    parts.append("".join(f"Scope detail line {i} with mutual obligations.\n" for i in range(160)))
+    parts.append(
+        "\n## Notices\n\n"
+        "Notices shall be delivered as set forth herein.\n\n"
+        "## Termination\n\n"
+        "Either party may terminate on thirty (30) days written notice.\n\n"
+        "IN WITNESS WHEREOF\n\n"
+        "CLIENT:\nCedar Peak Advisors LLC\n"
+        "SERVICE PROVIDER:\nBlue Harbor Logistics LLC\n"
+    )
+    return "".join(parts)
+
+
+def test_classify_quoted_sentence_insert_live_notices_marker():
+    assert classify_narrow_amendment_prompt(_CERT_INSTR) == "quoted_sentence_insert"
+    parsed = parse_quoted_sentence_insert(_CERT_INSTR)
+    assert parsed is not None
+    assert parsed[0] == _CERT_MARKER
+    assert parsed[1] and parsed[1].lower() == "notices"
+
+
+def test_quoted_sentence_insert_preserves_resolved_party_names_without_llm():
+    doc = _long_named_parties_doc()
+
+    def no_llm(*_a, **_k):
+        raise AssertionError("LLM must not run for deterministic quoted-sentence insert")
+
+    out = try_apply_narrow_amendment(
+        kind="quoted_sentence_insert",
+        current_document_text=doc,
+        user_refinement_prompt=_CERT_INSTR,
+        call_legal_llm_fn=no_llm,
+        llm_model=None,
+    )
+    assert out is not None
+    text = out["updated_document_text"]
+    assert _CERT_MARKER in text
+    assert "Cedar Peak Advisors LLC" in text
+    assert "Blue Harbor Logistics LLC" in text
+    assert "[ORG_1]" not in text
+    assert "[ORG_2]" not in text
+    assert text.index("## Notices") < text.index(_CERT_MARKER)
+    assert text.index(_CERT_MARKER) < text.index("IN WITNESS WHEREOF")
+    assert len(text) >= len(doc)

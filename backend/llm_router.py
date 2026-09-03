@@ -134,20 +134,33 @@ def _user_content_with_minimized(original: Any, minimized: str) -> Union[str, Li
     return minimized
 
 
+# premium-refine user JSON includes the full current_document_text + instruction.
+# The default 4k minimize cap truncates the corpus and drops the trailing prompt,
+# which forces a template remint ([ORG_n]) instead of a surgical edit.
+_EXPLICIT_REVISION_MAX_MINIMIZED_CHARS: int = 300_000
+_EXPLICIT_REVISION_SKIP_REDACTION: tuple[str, ...] = ("org", "name")
+
+
 def _messages_after_user_airlock(
     messages: List[Dict[str, Any]],
     *,
     airlock_profile: AirlockPolicyProfile = "default",
     airlock_log_context: Optional[str] = None,
+    call_purpose: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     out: List[Dict[str, Any]] = []
     user_idx = 0
+    purpose = (call_purpose or "").strip()
+    airlock_kwargs: Dict[str, Any] = {"policy_profile": airlock_profile}
+    if purpose == "explicit_revision":
+        airlock_kwargs["max_minimized_chars"] = _EXPLICIT_REVISION_MAX_MINIMIZED_CHARS
+        airlock_kwargs["skip_redaction_categories"] = _EXPLICIT_REVISION_SKIP_REDACTION
     for msg in messages:
         if (msg.get("role") or "") != "user":
             out.append(msg)
             continue
         raw = _user_content_text_for_airlock(msg.get("content"))
-        airlock_result = run_ai_airlock(raw, policy_profile=airlock_profile)
+        airlock_result = run_ai_airlock(raw, **airlock_kwargs)
         if airlock_result.blocked:
             codes = tuple(airlock_result.policy_decision.reason_codes)
             diag = first_privilege_airlock_block_diagnostic(raw, policy_profile=airlock_profile)
@@ -264,6 +277,7 @@ def call_legal_llm(
         messages,
         airlock_profile=profile,
         airlock_log_context=airlock_log_context,
+        call_purpose=call_purpose,
     )
     client = _get_client()
     requested_model = model or DEFAULT_MODEL
