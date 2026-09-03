@@ -231,6 +231,7 @@ describe("Ask LawDog on forced first-review chrome", () => {
 
     const refined = buildReviewCorpus(`## REVIEWER NOTE\n${CERT_MARKER}`);
     invalidatePaidProDisplayCachesAfterSuccessfulRefine();
+    expect(readAcceptedProCorpusSafeDisplayCacheSizeForTests()).toBe(0);
     await seedVerifiedDisplay(refined, "crs_after_refine");
     establishPaidProSourceOfTruth({
       text: refined,
@@ -238,7 +239,6 @@ describe("Ask LawDog on forced first-review chrome", () => {
       allowShorterOverwrite: true,
     });
 
-    expect(readAcceptedProCorpusSafeDisplayCacheSizeForTests()).toBe(0);
     expect(readPaidProReviewSessionAuthority()?.corpusPlain).toContain(
       "CERT_AI_REVISE_MARKER_CEDAR_NOTICES_0902",
     );
