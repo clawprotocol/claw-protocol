@@ -496,3 +496,45 @@ def test_quoted_sentence_insert_lands_inside_numbered_notices_not_after_governin
     assert text.index(_CERT_MARKER) < text.index("11. Governing Law")
     assert "Cedar Peak Design LLC" in text
     assert "Blue Harbor Media Inc" in text
+
+
+def test_quoted_sentence_insert_validates_when_insert_splits_mid_document_anchor_window():
+    """Live-shaped bodies put Notices mid-doc; a 52-char window must not fail-close the insert."""
+    pad = "The parties agree to cooperate in good faith on the engagement terms. " * 40
+    doc = "\n\n".join(
+        [
+            "SERVICES AGREEMENT",
+            'This Agreement is entered into as of the Effective Date by and between Cedar Peak Design LLC ("Client") and Blue Harbor Media Inc ("Service Provider").',
+            "1. Engagement and Scope of Services",
+            "1.1 Services. Provider shall deliver a brand website refresh, including homepage redesign, style guide, and CMS handoff.",
+            "5. Confidentiality",
+            "5.4 Required Disclosure. A Receiving Party may disclose Confidential Information if required by law.",
+            "6. Representations, Warranties, and Compliance",
+            "6.1 Mutual Authority. Each party has the full right and authority to enter into this Agreement.",
+            "10. Notices",
+            "Any notice under this Agreement must be in writing and delivered to the addresses specified by the parties.",
+            "11. Governing Law",
+            "This Agreement is governed by the laws of the State of Texas, without regard to conflict-of-laws principles.",
+            pad,
+            "IN WITNESS WHEREOF, the Parties execute this Agreement.",
+            "CLIENT:",
+            "Cedar Peak Design LLC",
+            "SERVICE PROVIDER:",
+            "Blue Harbor Media Inc",
+        ]
+    )
+
+    def no_llm(*_a, **_k):
+        raise AssertionError("LLM must not run for deterministic quoted-sentence insert")
+
+    out = try_apply_narrow_amendment(
+        kind="quoted_sentence_insert",
+        current_document_text=doc,
+        user_refinement_prompt=_CERT_INSTR,
+        call_legal_llm_fn=no_llm,
+        llm_model=None,
+    )
+    assert out is not None
+    text = out["updated_document_text"]
+    assert _CERT_MARKER in text
+    assert text.index("10. Notices") < text.index(_CERT_MARKER) < text.index("11. Governing Law")

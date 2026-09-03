@@ -368,7 +368,9 @@ def validate_narrow_refined_document(*, original: str, updated: str, kind: str) 
         return False
     if lu > int(lo * 1.35):
         return False
-    if not _anchors_preserved(original, updated):
+    # A mid-section insert can split a sampled 52-char window. Quoted-sentence
+    # inserts only add a paragraph, so require growth instead of window anchors.
+    if kind != "quoted_sentence_insert" and not _anchors_preserved(original, updated):
         return False
     low = updated.lower()
     if kind == "late_fee":
