@@ -78,10 +78,12 @@ export function PaidProCanonicalPlainReviewDocument({
             );
           }
           if (kind === "main_section_heading" || kind === "legacy_section_heading") {
+            const remainder = block.trim().slice(firstLine.length).trim();
             return (
-              <h2 key={`block-${blockIndex}`} className="premium-doc-section-heading">
-                {firstLine}
-              </h2>
+              <div key={`block-${blockIndex}`}>
+                <h2 className="premium-doc-section-heading">{firstLine}</h2>
+                {remainder ? <p className="whitespace-pre-wrap">{remainder}</p> : null}
+              </div>
             );
           }
           return (

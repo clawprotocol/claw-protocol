@@ -177,34 +177,67 @@ def parse_quoted_sentence_insert(prompt: str) -> Optional[Tuple[str, Optional[st
 
 
 def _next_section_cut(tail: str) -> Optional[int]:
-    nxt = re.search(r"(?m)^(?:#{1,4}\s+|(?:\d+\.)+\s+)[A-Z].+$", tail)
+    """Next top-level heading or witness — subsections stay inside the current section."""
+    nxt = re.search(r"(?m)^(?:#{1,4}\s+)?\d{1,2}\.\s+(?!\d)[A-Z].+$", tail)
+    md = re.search(r"(?m)^#{1,4}\s+(?!\d)[A-Z].+$", tail)
     wit = re.search(r"(?im)^\s*(IN WITNESS WHEREOF|EXECUTED AS OF|EXECUTION PAGE|SIGNATURES?)\b", tail)
-    cuts = [m.start() for m in (nxt, wit) if m]
+    cuts = [m.start() for m in (nxt, md, wit) if m]
     return min(cuts) if cuts else None
 
 
+def _find_named_section_heading(doc: str, section: str) -> Optional[re.Match[str]]:
+    sec = re.escape(section)
+    patterns = [
+        rf"(?im)^(?:#{{1,4}}\s+)?(?:\d+\.)+\s+{sec}\b[^\n]*$",
+        rf"(?im)^#{{1,4}}\s+{sec}\b[^\n]*$",
+        rf"(?im)^(?:#{{1,4}}\s+)?(?:\d+\.)+\s+[A-Z][^\n]{{0,60}}\b{sec}\b[^\n]*$",
+        rf"(?im)(?<=[a-z.])((?:\d+\.)+\s+{sec}\b[^\n]*)$",
+    ]
+    if section.lower() == "notices":
+        patterns.append(r"(?im)^(?:#{1,4}\s+)?(?:\d+\.)+\s+Notice\b(?!\s+shall)[^\n]*$")
+    for pat in patterns:
+        heading = re.search(pat, doc)
+        if heading:
+            return heading
+    return None
+
+
+def _last_top_level_section_body_end(doc: str) -> Optional[int]:
+    last = None
+    for m in re.finditer(r"(?m)^(?:#{1,4}\s+)?\d{1,2}\.\s+(?!\d)[A-Z].+$", doc):
+        last = m
+    if last is None:
+        return None
+    after = last.end()
+    cut = _next_section_cut(doc[after:])
+    return after + (cut if cut is not None else len(doc[after:].rstrip()))
+
+
 def _insert_quoted_sentence(doc: str, sentence: str, section: Optional[str]) -> Optional[str]:
-    """Insert ``sentence`` as its own paragraph; preserve all other text."""
+    """Insert ``sentence`` as its own paragraph inside the named section when possible."""
     if not doc or not sentence:
         return None
     if sentence in doc:
         return None
     block = "\n\n" + sentence + "\n\n"
+
+    def apply_at(insert_at: int) -> str:
+        return doc[:insert_at].rstrip() + block + doc[insert_at:].lstrip("\n")
+
     if section:
-        sec = re.escape(section)
-        heading = re.search(
-            rf"(?im)^(?:#{{1,4}}\s+|(?:\d+\.)+\s*)?{sec}\b[^\n]*$",
-            doc,
-        )
+        heading = _find_named_section_heading(doc, section)
         if heading:
             after = heading.end()
             tail = doc[after:]
             cut = _next_section_cut(tail)
             insert_at = after + (cut if cut is not None else len(tail.rstrip()))
-            return doc[:insert_at].rstrip() + block + doc[insert_at:].lstrip("\n")
+            return apply_at(insert_at)
+        last_body_end = _last_top_level_section_body_end(doc)
+        if last_body_end is not None:
+            return apply_at(last_body_end)
     wit = re.search(r"(?im)^\s*(IN WITNESS WHEREOF|EXECUTED AS OF|EXECUTION PAGE|SIGNATURES?)\b", doc)
     if wit:
-        return doc[: wit.start()].rstrip() + block + doc[wit.start() :]
+        return apply_at(wit.start())
     return doc.rstrip() + block
 
 

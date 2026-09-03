@@ -453,5 +453,46 @@ def test_quoted_sentence_insert_preserves_resolved_party_names_without_llm():
     assert "[ORG_1]" not in text
     assert "[ORG_2]" not in text
     assert text.index("## Notices") < text.index(_CERT_MARKER)
+    assert text.index(_CERT_MARKER) < text.index("## Termination")
     assert text.index(_CERT_MARKER) < text.index("IN WITNESS WHEREOF")
     assert len(text) >= len(doc)
+
+
+def _numbered_notices_before_governing_law() -> str:
+    pad = "The parties agree to cooperate in good faith on the engagement terms. " * 40
+    return "\n\n".join(
+        [
+            "SERVICES AGREEMENT",
+            'This Agreement is entered into by Cedar Peak Design LLC ("Client") and Blue Harbor Media Inc ("Service Provider").',
+            "1. Engagement and Scope of Services",
+            "1.1 Services. Provider shall deliver a brand website refresh.",
+            "10. Notices",
+            "Any notice under this Agreement must be in writing.",
+            "11. Governing Law",
+            "This Agreement is governed by the laws of the State of Texas.",
+            pad,
+            "IN WITNESS WHEREOF, the Parties execute this Agreement.",
+        ]
+    )
+
+
+def test_quoted_sentence_insert_lands_inside_numbered_notices_not_after_governing_law():
+    doc = _numbered_notices_before_governing_law()
+
+    def no_llm(*_a, **_k):
+        raise AssertionError("LLM must not run for deterministic quoted-sentence insert")
+
+    out = try_apply_narrow_amendment(
+        kind="quoted_sentence_insert",
+        current_document_text=doc,
+        user_refinement_prompt=_CERT_INSTR,
+        call_legal_llm_fn=no_llm,
+        llm_model=None,
+    )
+    assert out is not None
+    text = out["updated_document_text"]
+    assert _CERT_MARKER in text
+    assert text.index("10. Notices") < text.index(_CERT_MARKER)
+    assert text.index(_CERT_MARKER) < text.index("11. Governing Law")
+    assert "Cedar Peak Design LLC" in text
+    assert "Blue Harbor Media Inc" in text

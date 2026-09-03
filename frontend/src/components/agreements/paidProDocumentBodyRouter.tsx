@@ -228,13 +228,19 @@ export function PaidProDocumentBodyForcedRoute({
   const pipelinePlain = readAcceptedPipelineReviewCorpusPlain().trim();
   const parentPlain = (displayContext?.acceptedCanonicalPlain || "").trim();
   const authoritativeDocPlain = getAuthoritativeAgreementDocument()?.fullCorpusText?.trim() || "";
+  // Prefer live session authority / SoT over a longer stale pipeline or parent
+  // persist candidate so a just-committed refine is not painted from pre-refine bytes.
   const acceptedCanonicalPlain =
     postFinalizePlain.length >= PAID_PRO_DOCUMENT_BODY_SOT_MIN_LEN
       ? postFinalizePlain
-      : [authorityPlain, sotPlain, pipelinePlain, authoritativeDocPlain, parentPlain].reduce(
-          (best, t) => (t.length > best.length ? t : best),
-          "",
-        );
+      : authorityPlain.length >= PAID_PRO_DOCUMENT_BODY_SOT_MIN_LEN
+        ? authorityPlain
+        : sotPlain.length >= PAID_PRO_DOCUMENT_BODY_SOT_MIN_LEN
+          ? sotPlain
+          : [pipelinePlain, authoritativeDocPlain, parentPlain].reduce(
+              (best, t) => (t.length > best.length ? t : best),
+              "",
+            );
   const shellDisplayContext: PaidProFirstReviewVisibleDisplayArgs = {
     ...(displayContext ?? {}),
     paidProActive: true,
