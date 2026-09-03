@@ -694,7 +694,9 @@ import {
 } from "./paidProAcceptedPipelineReviewCorpus";
 import {
   PAID_PRO_ASK_LAWDOG_REFINE_REVISION_REASON,
+  invalidatePaidProDisplayCachesAfterSuccessfulRefine,
   shouldPersistPaidProRefineToDisplayAuthority,
+  shouldUsePaidProPremiumRefinePath,
 } from "./paidProAskLawDogForcedFirstReview";
 import { PaidProForcedFirstReviewChrome } from "./paidProForcedFirstReviewChrome";
 import { PaidProReviewRenderInvariantProbe } from "./PaidProReviewRenderInvariantProbe";
@@ -12535,7 +12537,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     }
     await finalizeIntakeCapture();
     try {
-      if (premiumPersistedFlowActive) {
+      if (
+        shouldUsePaidProPremiumRefinePath({
+          premiumPersistedFlowActive,
+          paidDocumentSurface: premiumPaidDocumentSurfaceRef.current,
+        })
+      ) {
         const snapForCorpus = readPremiumCompletionSnapshot();
         const docOv = (opts?.premiumRefineDocumentOverride ?? "").trim();
         const corpusPick = pickAuthoritativeProCorpusForRefine({
@@ -12746,6 +12753,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             setReviewRefineUserMessage(REFINE_PERSISTED_UPDATE_FAIL_INLINE);
             return false;
           }
+          invalidatePaidProDisplayCachesAfterSuccessfulRefine();
         }
         applyProRefineOutputToProSurfaceRef.current?.(bodyToCommit, {
           clearStepBuffer: true,
@@ -16613,6 +16621,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         sourceAfter: record.source,
       });
       scheduleAgreementDocSync(stable);
+      invalidatePaidProDisplayCachesAfterSuccessfulRefine();
       setGuidedAuthVersionNonce((n) => n + 1);
       bumpPremiumSurfaceGateTick();
       setReviewDocRefreshTick((n) => n + 1);
@@ -28648,6 +28657,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       return;
     }
     setProReviewSuggestEditsDraft("");
+    invalidatePaidProDisplayCachesAfterSuccessfulRefine();
     bumpPremiumSurfaceGateTick();
     setReviewDocRefreshTick((n) => n + 1);
   }, [proReviewSuggestEditsDraft, runPersistedRefineFromStepBuffer, bumpPremiumSurfaceGateTick]);

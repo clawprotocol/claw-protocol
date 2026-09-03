@@ -5,18 +5,30 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import {
   clearDisplayReviewSnapshotAuthority,
+  readDisplayReviewSnapshotAuthority,
   readVerifiedCommercialDisplayCorpus,
   sha256CorpusDigest,
   storeVerifiedCommercialDisplayCorpus,
 } from "../../agreement/canonicalReviewSnapshotApi";
+import { applyAcceptedProCorpusSafeDisplay } from "./acceptedProCorpusSafeDisplay";
 import {
+  clearAcceptedProCorpusSafeDisplayCacheForTests,
+  readAcceptedProCorpusSafeDisplayCacheSizeForTests,
+} from "./paidProAcceptedCorpusSafeDisplayCache";
+import {
+  invalidatePaidProDisplayCachesAfterSuccessfulRefine,
   PAID_PRO_ASK_LAWDOG_REFINE_REVISION_REASON,
   shouldMountPaidProForcedFirstReviewAskLawDog,
   shouldPersistPaidProRefineToDisplayAuthority,
+  shouldUsePaidProPremiumRefinePath,
 } from "./paidProAskLawDogForcedFirstReview";
 import { resolvePaidProFirstReviewVisibleDisplayPlain } from "./paidProFirstReviewDisplayAuthority";
 import { PaidProForcedFirstReviewChrome } from "./paidProForcedFirstReviewChrome";
-import { clearPaidProReviewSessionAuthorityForTests } from "./paidProReviewSessionAuthority";
+import {
+  clearPaidProReviewSessionAuthorityForTests,
+  establishPaidProReviewSessionAuthority,
+  readPaidProReviewSessionAuthority,
+} from "./paidProReviewSessionAuthority";
 import {
   clearPaidProSourceOfTruth,
   establishPaidProSourceOfTruth,
@@ -67,6 +79,7 @@ describe("Ask LawDog on forced first-review chrome", () => {
     clearPaidProSourceOfTruth();
     clearPaidProReviewSessionAuthorityForTests();
     clearDisplayReviewSnapshotAuthority();
+    clearAcceptedProCorpusSafeDisplayCacheForTests();
     vi.restoreAllMocks();
   });
 
@@ -114,6 +127,27 @@ describe("Ask LawDog on forced first-review chrome", () => {
       }),
     ).toBe(true);
     expect(shouldMountPaidProForcedFirstReviewAskLawDog({})).toBe(false);
+  });
+
+  it("uses premium-refine on paid first-review even when persist-flow flag is false", () => {
+    expect(
+      shouldUsePaidProPremiumRefinePath({
+        premiumPersistedFlowActive: false,
+        paidDocumentSurface: true,
+      }),
+    ).toBe(true);
+    expect(
+      shouldUsePaidProPremiumRefinePath({
+        premiumPersistedFlowActive: true,
+        paidDocumentSurface: false,
+      }),
+    ).toBe(true);
+    expect(
+      shouldUsePaidProPremiumRefinePath({
+        premiumPersistedFlowActive: false,
+        paidDocumentSurface: false,
+      }),
+    ).toBe(false);
   });
 
   it("persists non-bulk refine to display authority when agreement_id exists", () => {
@@ -177,6 +211,56 @@ describe("Ask LawDog on forced first-review chrome", () => {
     expect(displayCorpus?.snapshotId).toBe("crs_after_refine");
   });
 
+  it("successful refine replaces stale CRS and session authority used by the forced shell", async () => {
+    const original = buildReviewCorpus();
+    establishPaidProReviewSessionAuthority({
+      corpusPlain: original,
+      source: "server_full_document_text",
+      agreementId: AGREEMENT_ID,
+    });
+    establishPaidProSourceOfTruth({
+      text: original,
+      source: "server_full_draft",
+    });
+    await seedVerifiedDisplay(original, "crs_56c6f3109e51461092e0945cad8384f1");
+    applyAcceptedProCorpusSafeDisplay(original, { surface: "forced_review_pre_refine" });
+    expect(readAcceptedProCorpusSafeDisplayCacheSizeForTests()).toBeGreaterThan(0);
+    expect(readDisplayReviewSnapshotAuthority(AGREEMENT_ID)?.snapshotId).toBe(
+      "crs_56c6f3109e51461092e0945cad8384f1",
+    );
+
+    const refined = buildReviewCorpus(`## REVIEWER NOTE\n${CERT_MARKER}`);
+    invalidatePaidProDisplayCachesAfterSuccessfulRefine();
+    await seedVerifiedDisplay(refined, "crs_after_refine");
+    establishPaidProSourceOfTruth({
+      text: refined,
+      source: "server_full_draft",
+      allowShorterOverwrite: true,
+    });
+
+    expect(readAcceptedProCorpusSafeDisplayCacheSizeForTests()).toBe(0);
+    expect(readPaidProReviewSessionAuthority()?.corpusPlain).toContain(
+      "CERT_AI_REVISE_MARKER_CEDAR_NOTICES_0902",
+    );
+    expect(readDisplayReviewSnapshotAuthority(AGREEMENT_ID)?.snapshotId).toBe("crs_after_refine");
+    expect(readDisplayReviewSnapshotAuthority(AGREEMENT_ID)?.snapshotId).not.toBe(
+      "crs_56c6f3109e51461092e0945cad8384f1",
+    );
+
+    const after = resolvePaidProFirstReviewVisibleDisplayPlain({
+      agreementId: AGREEMENT_ID,
+      premiumCheckoutCompleted: true,
+      premiumPaidDocumentSurface: true,
+      paidProActive: true,
+      acceptedCanonicalPlain: refined,
+    });
+    expect(after.plain).toContain("CERT_AI_REVISE_MARKER_CEDAR_NOTICES_0902");
+    expect(after.plain).toContain("confirmed electronic mail");
+    const displayCorpus = readVerifiedCommercialDisplayCorpus(AGREEMENT_ID);
+    expect(displayCorpus?.snapshotId).toBe("crs_after_refine");
+    expect(displayCorpus?.corpusPlain).toContain("CERT_AI_REVISE_MARKER_CEDAR_NOTICES_0902");
+  });
+
   it("intake wires Ask LawDog on forced chrome and persists refine via Save-edits CRS commit", () => {
     const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
     const chrome = readFileSync(join(__dirname, "paidProForcedFirstReviewChrome.tsx"), "utf8");
@@ -187,6 +271,8 @@ describe("Ask LawDog on forced first-review chrome", () => {
     expect(intake).toContain("suggestEditsDraft={proReviewSuggestEditsDraft}");
     expect(intake).toContain("PAID_PRO_ASK_LAWDOG_REFINE_REVISION_REASON");
     expect(intake).toContain("shouldPersistPaidProRefineToDisplayAuthority");
+    expect(intake).toContain("shouldUsePaidProPremiumRefinePath");
+    expect(intake).toContain("invalidatePaidProDisplayCachesAfterSuccessfulRefine");
     expect(intake).toContain("commitPaidProUserApprovedRevisionRef.current");
 
     const refineStart = intake.indexOf("const runPersistedRefineFromStepBuffer =");
@@ -195,6 +281,9 @@ describe("Ask LawDog on forced first-review chrome", () => {
     expect(refineBlock).toContain("commitPaidProUserApprovedRevisionRef.current");
     expect(refineBlock).toContain("PAID_PRO_ASK_LAWDOG_REFINE_REVISION_REASON");
     expect(refineBlock).toContain("shouldPersistPaidProRefineToDisplayAuthority");
+    expect(refineBlock).toContain("shouldUsePaidProPremiumRefinePath");
+    expect(refineBlock).toContain("paidDocumentSurface: premiumPaidDocumentSurfaceRef.current");
+    expect(refineBlock).toContain("invalidatePaidProDisplayCachesAfterSuccessfulRefine");
     expect(refineBlock).not.toMatch(/\/api\/agreements["'`].*POST/);
 
     expect(intake).toContain('commitPaidProUserApprovedRevision(finalText, "paid_pro_card_edit_revision")');
