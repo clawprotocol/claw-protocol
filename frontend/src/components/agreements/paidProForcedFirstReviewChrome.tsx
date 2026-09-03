@@ -3,7 +3,7 @@
  * Practical GTM: equal Option A (signing) vs Option B (party review / redline).
  */
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { PremiumAgreementCopyButton } from "./PremiumAgreementCopyButton";
 import { PaidProSignerSavedConfirmationBanner } from "./PaidProSignerSavedConfirmationBanner";
 import { logPaidProReviewActionsVisible } from "./hydratePaidProExecutionBlockWithSignerMetadata";
@@ -52,6 +52,13 @@ type Props = {
   onExportAgreement: () => void;
   onShareForReview: () => void;
   onPrepareSignatures: () => void;
+  /** Ask LawDog to revise — available on decision_1 without signer finalize. */
+  suggestEditsDraft?: string;
+  suggestEditsBusy?: boolean;
+  suggestEditsError?: string | null;
+  suggestDisabled?: boolean;
+  onSuggestEditsDraftChange?: (value: string) => void;
+  onApplySuggestEdits?: () => void;
 };
 
 export function PaidProForcedFirstReviewChrome({
@@ -74,6 +81,12 @@ export function PaidProForcedFirstReviewChrome({
   onExportAgreement,
   onShareForReview,
   onPrepareSignatures,
+  suggestEditsDraft = "",
+  suggestEditsBusy = false,
+  suggestEditsError = null,
+  suggestDisabled = false,
+  onSuggestEditsDraftChange,
+  onApplySuggestEdits,
 }: Props) {
   useEffect(() => {
     logPaidProSignaturePrepCtaVisible({
@@ -90,10 +103,12 @@ export function PaidProForcedFirstReviewChrome({
     });
   }, []);
 
+  const [askLawDogOpen, setAskLawDogOpen] = useState(false);
   const showSignerSavedBanner =
     signerMetadataFinalized && signersReady && signerSavedMappings.length > 0;
   const primaryActionsDisabled = sendDisabled || hydrationBlocked;
   const signerDetailsActionLabel = resolvePaidProPostFinalizeSignerDetailsActionLabel(signersReady);
+  const canAskLawDogToRevise = Boolean(onApplySuggestEdits && onSuggestEditsDraftChange);
 
   const logPostFinalizeAction = (action: string) => {
     if (!signerMetadataFinalized || !postFinalizeCorpusHash) return;
@@ -285,7 +300,60 @@ export function PaidProForcedFirstReviewChrome({
           >
             <span data-testid="simple-pro-edit-agreement-text-toggle">Edit agreement text</span>
           </button>
+          {canAskLawDogToRevise ? (
+            <button
+              type="button"
+              className="w-full rounded-lg border border-stone-300/90 bg-white px-3 py-2 text-xs font-semibold text-stone-800 sm:w-auto"
+              aria-expanded={askLawDogOpen}
+              disabled={suggestDisabled}
+              onClick={() => setAskLawDogOpen((open) => !open)}
+              data-testid="paid-pro-forced-ask-lawdog-toggle"
+            >
+              {askLawDogOpen ? "Hide Ask LawDog" : "Ask LawDog to revise"}
+            </button>
+          ) : null}
         </div>
+        {canAskLawDogToRevise && askLawDogOpen ? (
+          <div
+            className="rounded-md border border-stone-200/95 bg-stone-50/95 px-2.5 py-2.5"
+            data-testid="paid-pro-forced-ask-lawdog-card"
+          >
+            <label
+              className="text-xs font-semibold text-stone-900"
+              htmlFor="paid-pro-forced-ask-lawdog-input"
+            >
+              Ask LawDog to revise
+            </label>
+            <textarea
+              id="paid-pro-forced-ask-lawdog-input"
+              className="mt-2 min-h-[4.5rem] w-full resize-y rounded-md border border-stone-300/90 bg-white px-2.5 py-2 text-xs leading-relaxed text-stone-900 placeholder:text-stone-400"
+              placeholder="Type requested changes…"
+              value={suggestEditsDraft}
+              disabled={suggestEditsBusy || suggestDisabled}
+              onChange={(e) => onSuggestEditsDraftChange?.(e.target.value)}
+              data-testid="simple-pro-suggest-edits-input"
+            />
+            {suggestEditsError ? (
+              <p className="mt-1.5 text-[11px] font-medium text-amber-800" role="alert">
+                {suggestEditsError}
+              </p>
+            ) : null}
+            <div className="mt-2 flex flex-col gap-1.5 sm:flex-row sm:flex-wrap">
+              <button
+                type="button"
+                className="rounded-md bg-stone-800 px-2.5 py-1.5 text-[11px] font-semibold text-white disabled:opacity-45"
+                disabled={suggestEditsBusy || suggestDisabled || !suggestEditsDraft.trim()}
+                onClick={() => onApplySuggestEdits?.()}
+                data-testid="simple-pro-apply-suggest-edits"
+              >
+                {suggestEditsBusy ? "Applying…" : "Apply changes"}
+              </button>
+            </div>
+            <p className="mt-1.5 text-[10px] leading-relaxed text-stone-500">
+              Applied revisions update the agreement you are reviewing. Nothing is sent or signed until you confirm.
+            </p>
+          </div>
+        ) : null}
         {exportError ? (
           <p className="text-[11px] font-medium text-amber-800" role="alert">
             {exportError}
