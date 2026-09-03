@@ -90,6 +90,15 @@ def test_org_suffix_redaction() -> None:
     assert "[ORG_1]" in r.redacted_text
 
 
+def test_skip_org_and_name_keeps_email_redaction() -> None:
+    text = "Acme Industrial LLC may email billing@acmecorp.example about the deal."
+    r = redact_text(text, skip_categories=("org", "name"))
+    assert "Acme Industrial LLC" in r.redacted_text
+    assert "[ORG_1]" not in r.redacted_text
+    assert "billing@acmecorp.example" not in r.redacted_text
+    assert "[EMAIL_1]" in r.redacted_text
+
+
 def test_text_redactor_wrapper() -> None:
     tr = TextRedactor()
     r = tr.redact("contact: x@y.co")

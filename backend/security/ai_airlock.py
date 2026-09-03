@@ -84,6 +84,7 @@ def run_ai_airlock(
     *,
     max_minimized_chars: int = _DEFAULT_MAX_MINIMIZED_CHARS,
     policy_profile: AirlockPolicyProfile = "default",
+    skip_redaction_categories: tuple[str, ...] | None = None,
 ) -> AIAirlockResult:
     """
     Evaluate privilege policy, then redact and minimize when allowed for external AI.
@@ -126,7 +127,7 @@ def run_ai_airlock(
                 minimized_length=0,
             )
 
-    redaction = redact_text(text)
+    redaction = redact_text(text, skip_categories=skip_redaction_categories)
     redacted_text = redaction.redacted_text
     minimized_text = minimize_for_airlock(redacted_text, max_chars=max_minimized_chars)
     _append_redaction_summary(summary, redaction)

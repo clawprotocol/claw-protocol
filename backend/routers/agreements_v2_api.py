@@ -118,6 +118,7 @@ from backend.agreements.premium_refine_narrow import (
     classify_narrow_amendment_prompt,
     try_apply_narrow_amendment,
 )
+from backend.agreements.premium_refine_party_restore import restore_refine_party_placeholders
 from backend.agreements.revision_surgical import (
     MINIMAL_REVISION_RETRY_SUFFIX,
     instruction_requests_material_rewrite,
@@ -1965,6 +1966,10 @@ def _normalize_premium_refine_result(
     new_doc = str(raw.get("updated_document_text") or "").strip()
     if not new_doc:
         new_doc = current_doc or ""
+    if action == "update" and (current_doc or "").strip():
+        restored, did = restore_refine_party_placeholders(original=current_doc, candidate=new_doc)
+        if did:
+            new_doc = restored
     return PremiumRefineResponse(
         updated_document_text=new_doc,
         summary_changes=changes,
@@ -2085,6 +2090,8 @@ def _premium_refine_update_system_prompt(
         "Task: **apply** `user_refinement_prompt` to `current_document_text` — change, clarify, add protections, "
         "or tighten language they asked for. Keep party names, key numbers, and business intent aligned with the intake.\n"
         "Rules: Do not invent new economics or parties. Do not strip entire sections unless the user asked. "
+        "When the current document already uses real party names, copy those names through unchanged — "
+        "never replace them with internal slots like [ORG_1], [ORG_2], ORG_1, or PARTY_1. "
         "When in doubt, make a minimal, targeted edit. Plain text only (no HTML).\n"
         + surgical_block
         + retry_block
