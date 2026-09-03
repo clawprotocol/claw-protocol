@@ -101,7 +101,7 @@ describe("Ask LawDog on forced first-review chrome", () => {
     expect(screen.getByTestId("simple-pro-suggest-edits-input")).toBeTruthy();
     const apply = screen.getByTestId("simple-pro-apply-suggest-edits");
     expect(apply.textContent).toMatch(/Apply changes/i);
-    expect(apply).not.toBeDisabled();
+    expect(apply).toHaveProperty("disabled", false);
     fireEvent.click(apply);
     expect(onApply).toHaveBeenCalledTimes(1);
   });
