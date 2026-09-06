@@ -153,6 +153,7 @@ export async function loadOwnerSignedAgreementPreview(
   const draft = res.draft as AgreementDraft;
 
   let renderBaseDraft = draft;
+  let snapshotReadyFromEnsure = false;
 
   let signed: { text: string; source: Exclude<OwnerSignedAgreementCorpusSource, "missing"> } | null =
     resolveSignedCorpusFromDraft(draft);
@@ -165,7 +166,8 @@ export async function loadOwnerSignedAgreementPreview(
     const fullyExecuted = Boolean(verify?.signature_status?.fully_executed) || draftLooksFullyExecuted(draft);
     if (fullyExecuted) {
       const ensured = await postVs01EnsureSignedSnapshot(id);
-      if (ensured.ok && ensured.snapshot_ready) {
+      snapshotReadyFromEnsure = Boolean(ensured.ok && ensured.snapshot_ready);
+      if (snapshotReadyFromEnsure) {
         const refreshed = await fetchAgreementDraft(id);
         if (refreshed.ok && refreshed.draft) {
           renderBaseDraft = refreshed.draft as AgreementDraft;
@@ -182,7 +184,7 @@ export async function loadOwnerSignedAgreementPreview(
         logOwnerSignedAgreementViewSource({
           agreementId: id,
           corpusSource: "missing",
-          snapshotReady: Boolean(ensured.snapshot_ready),
+          snapshotReady: snapshotReadyFromEnsure,
         });
         return null;
       }
@@ -196,10 +198,12 @@ export async function loadOwnerSignedAgreementPreview(
     }
   }
 
+  const pdfAvailable = isSignedSnapshotSource(signed.source) || snapshotReadyFromEnsure;
+
   logOwnerSignedAgreementViewSource({
     agreementId: id,
     corpusSource: signed.source,
-    snapshotReady: true,
+    snapshotReady: pdfAvailable,
   });
 
   logCompletedExecutionCorpusOverlaySources({
@@ -230,6 +234,6 @@ export async function loadOwnerSignedAgreementPreview(
     corpusText: signed.text,
     usesPremiumDocument: ownerAgreementReadOnlyUsesPremiumDocument(signed.text),
     corpusSource: signed.source,
-    pdfAvailable: isSignedSnapshotSource(signed.source),
+    pdfAvailable,
   };
 }

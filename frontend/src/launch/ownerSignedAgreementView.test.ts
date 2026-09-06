@@ -165,6 +165,41 @@ describe("loadOwnerSignedAgreementPreview (Test362)", () => {
     expect(loaded!.html).toContain("Northline Logistics LLC");
   });
 
+  it("marks PDF available when ensure repairs even if refresh still paints Review", async () => {
+    const agreementPublicVerify = await import("../agreement/agreementPublicVerify");
+    const reviewPlain = `${"Certified Review commercial agreement. ".repeat(80)}\n1. Services\n2. Payment`;
+    const draft = {
+      id: AG,
+      title: "Northline Services Agreement",
+      parties: [{ name: "Northline Studio" }, { name: "Harbor Marks LLC" }],
+      audit_log: [{ event_type: "signed", value: { fully_executed: true } }],
+      accepted_review_snapshot_v1: {
+        status: "accepted",
+        corpus_plain: reviewPlain,
+      },
+    } as unknown as AgreementDraft;
+
+    vi.spyOn(agreementWorkspaceApi, "fetchAgreementDraft").mockResolvedValue({
+      ok: true,
+      draft,
+    });
+    vi.spyOn(agreementPublicVerify, "fetchPublicAgreementVerify").mockResolvedValue({
+      signature_status: { fully_executed: true, signer_party_count: 2, signatures_recorded: 2 },
+    } as never);
+    vi.spyOn(agreementWorkspaceApi, "postVs01EnsureSignedSnapshot").mockResolvedValue({
+      ok: true,
+      snapshot_ready: true,
+      snapshot_source: "accepted_review",
+    });
+
+    const loaded = await loadOwnerSignedAgreementPreview(AG);
+    expect(agreementWorkspaceApi.postVs01EnsureSignedSnapshot).toHaveBeenCalledWith(AG);
+    expect(loaded).not.toBeNull();
+    expect(loaded!.corpusSource).toBe("accepted_review");
+    expect(loaded!.pdfAvailable).toBe(true);
+    expect(loaded!.corpusText).toContain("Certified Review commercial agreement");
+  });
+
   it("paints certified Review when fully_executed snapshot is missing after ensure", async () => {
     const agreementPublicVerify = await import("../agreement/agreementPublicVerify");
     const reviewPlain = `${"Certified Review commercial agreement. ".repeat(80)}\n1. Services\n2. Payment`;
