@@ -219,15 +219,23 @@ export function readFullyExecutedSnapshotFromDraft(
   const stored = (draft as { vs01_signing_packet_v1?: Record<string, unknown> }).vs01_signing_packet_v1;
   if (!stored || typeof stored !== "object") return null;
 
-  const serverSnap = stored.fully_executed_snapshot;
+  const serverSnap = stored.fully_executed_snapshot ?? stored.fullyExecutedSnapshot;
   if (serverSnap && typeof serverSnap === "object") {
-    const corpusPlain = String((serverSnap as { corpus_plain?: string }).corpus_plain ?? "").trim();
+    const snapRec = serverSnap as {
+      corpus_plain?: string;
+      corpusPlain?: string;
+      corpus_hash?: string;
+      corpusHash?: string;
+      saved_at?: string;
+      savedAt?: string;
+    };
+    const corpusPlain = String(snapRec.corpus_plain ?? snapRec.corpusPlain ?? "").trim();
     if (corpusPlain.length >= 80) {
       return {
         v: 1,
         corpusPlain,
-        corpusHash: String((serverSnap as { corpus_hash?: string }).corpus_hash ?? "").trim(),
-        savedAt: String((serverSnap as { saved_at?: string }).saved_at ?? "").trim(),
+        corpusHash: String(snapRec.corpus_hash ?? snapRec.corpusHash ?? "").trim(),
+        savedAt: String(snapRec.saved_at ?? snapRec.savedAt ?? "").trim(),
         signerRoleIds: [],
       };
     }

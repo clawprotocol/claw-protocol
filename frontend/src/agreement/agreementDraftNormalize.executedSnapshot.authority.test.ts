@@ -92,6 +92,57 @@ describe("normalizeAgreementDraftFromApi — executed snapshot authority", () =>
     expect(resolved?.text).toBe(CORPUS);
   });
 
+  it("promotes camelCase or portable fullyExecutedSnapshot without copying packet chrome", () => {
+    const fromCamel = normalizeAgreementDraftFromApi(
+      {
+        id: "ag_camel_snap",
+        title: "Consulting Services Agreement",
+        jurisdiction: "Delaware",
+        parties: [{ name: "Redwood Biologics Inc", role: "owner" }],
+        vs01_signing_packet_v1: {
+          fullyExecutedSnapshot: {
+            v: 1,
+            corpusPlain: CORPUS,
+            corpusHash: SNAPSHOT.corpus_hash,
+            savedAt: SNAPSHOT.saved_at,
+            signerRoleIds: SNAPSHOT.signer_role_ids,
+          },
+        },
+      },
+      { fallbackAgreementId: "ag_camel_snap" },
+    );
+    expect(fromCamel!.vs01_signing_packet_v1?.fully_executed_snapshot?.corpus_plain).toBe(CORPUS);
+    expect(
+      (fromCamel!.vs01_signing_packet_v1 as { portable?: unknown } | undefined)?.portable,
+    ).toBeUndefined();
+
+    const fromPortable = normalizeAgreementDraftFromApi(
+      {
+        id: "ag_portable_snap",
+        title: "Consulting Services Agreement",
+        jurisdiction: "Delaware",
+        parties: [{ name: "Redwood Biologics Inc", role: "owner" }],
+        vs01_signing_packet_v1: {
+          portable: {
+            v: 1,
+            ignored_chrome: true,
+            fullyExecutedSnapshot: {
+              corpusPlain: CORPUS,
+              corpusHash: SNAPSHOT.corpus_hash,
+              savedAt: SNAPSHOT.saved_at,
+            },
+          },
+        },
+      },
+      { fallbackAgreementId: "ag_portable_snap" },
+    );
+    expect(fromPortable!.vs01_signing_packet_v1?.fully_executed_snapshot?.corpus_plain).toBe(CORPUS);
+    expect(
+      (fromPortable!.vs01_signing_packet_v1 as { portable?: unknown } | undefined)?.portable,
+    ).toBeUndefined();
+    expect(resolveVs01FullyExecutedSignedCorpus(fromPortable)?.source).toBe("fully_executed_snapshot");
+  });
+
   it("normalizes an ordinary agreement without a signing packet", () => {
     const raw = {
       id: "ag_plain",

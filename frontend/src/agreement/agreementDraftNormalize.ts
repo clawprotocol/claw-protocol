@@ -58,6 +58,22 @@ function fallbackRoleForPartyIndex(idx: number): string {
   return "party";
 }
 
+function snapshotRecordFromSigningPacket(raw: unknown): Record<string, unknown> | undefined {
+  if (raw == null || typeof raw !== "object") return undefined;
+  const rec = raw as Record<string, unknown>;
+  const direct = rec.fully_executed_snapshot ?? rec.fullyExecutedSnapshot;
+  if (direct != null && typeof direct === "object") return direct as Record<string, unknown>;
+  const portable = rec.portable;
+  if (portable == null || typeof portable !== "object") return undefined;
+  const fromPortable =
+    (portable as Record<string, unknown>).fullyExecutedSnapshot ??
+    (portable as Record<string, unknown>).fully_executed_snapshot;
+  if (fromPortable != null && typeof fromPortable === "object") {
+    return fromPortable as Record<string, unknown>;
+  }
+  return undefined;
+}
+
 /**
  * Preserve only the server fully-executed snapshot authority needed by
  * owner view-signed retrieval. Does not copy portable/packet chrome and
@@ -66,22 +82,20 @@ function fallbackRoleForPartyIndex(idx: number): string {
 export function normalizeVs01SigningPacketFromApi(
   raw: unknown,
 ): Vs01SigningPacketDraftRecordV1 | undefined {
-  if (raw == null || typeof raw !== "object") return undefined;
-  const rec = raw as Record<string, unknown>;
-  const snapRaw = rec.fully_executed_snapshot;
-  if (snapRaw == null || typeof snapRaw !== "object") return undefined;
-  const snap = snapRaw as Record<string, unknown>;
-  const corpus_plain = coerceStr(snap.corpus_plain);
+  const snap = snapshotRecordFromSigningPacket(raw);
+  if (!snap) return undefined;
+  const corpus_plain = coerceStr(snap.corpus_plain) || coerceStr(snap.corpusPlain);
   if (!corpus_plain) return undefined;
-  const signer_role_ids = Array.isArray(snap.signer_role_ids)
-    ? snap.signer_role_ids.map((id) => String(id ?? "").trim()).filter(Boolean)
+  const signerRaw = Array.isArray(snap.signer_role_ids) ? snap.signer_role_ids : snap.signerRoleIds;
+  const signer_role_ids = Array.isArray(signerRaw)
+    ? signerRaw.map((id) => String(id ?? "").trim()).filter(Boolean)
     : [];
   return {
     fully_executed_snapshot: {
       v: typeof snap.v === "number" && Number.isFinite(snap.v) ? snap.v : 1,
       corpus_plain,
-      corpus_hash: coerceStr(snap.corpus_hash) || undefined,
-      saved_at: coerceStr(snap.saved_at) || undefined,
+      corpus_hash: coerceStr(snap.corpus_hash) || coerceStr(snap.corpusHash) || undefined,
+      saved_at: coerceStr(snap.saved_at) || coerceStr(snap.savedAt) || undefined,
       ...(signer_role_ids.length ? { signer_role_ids } : {}),
     },
   };
