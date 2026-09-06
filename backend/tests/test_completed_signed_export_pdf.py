@@ -314,7 +314,10 @@ def test_build_completed_signed_pdf_bytes_repairs_from_accepted_review(
             "title": "Services Agreement",
             "created_at": "2026-06-01T00:00:00Z",
             "updated_at": "2026-06-01T00:00:00Z",
-            "parties": [{"name": "Northline Studio"}, {"name": "Harbor Marks LLC"}],
+            "parties": [
+                {"name": "Northline Studio", "role": "client"},
+                {"name": "Harbor Marks LLC", "role": "service_provider"},
+            ],
             "audit_log": [
                 {
                     "event_type": "signed",
