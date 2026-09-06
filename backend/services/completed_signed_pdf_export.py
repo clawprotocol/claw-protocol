@@ -18,7 +18,10 @@ from backend.services.agreement_pdf_story_capability import (
     assess_agreement_pdf_story_capability,
 )
 from backend.services.agreement_vs01_pdf_seed import agreement_rendered_html_to_pdf_bytes
-from backend.services.vs01_signer_completion import read_fully_executed_snapshot_from_draft
+from backend.services.vs01_signer_completion import (
+    read_fully_executed_snapshot_from_draft,
+    snapshot_record_corpus_plain,
+)
 
 _RECIPIENT_PDF_EXPORT_UNAVAILABLE_USER = (
     "PDF export is temporarily unavailable. Please use Copy or Download text for now."
@@ -72,7 +75,7 @@ _GLUED_MAIN_AND_SUBSECTION_HEADING_RE = re.compile(r"^\d+\.\s+(?!\d+\.\d).+\s+\d
 def read_completed_signed_corpus_plain(draft: Dict[str, Any]) -> str:
     """Authoritative signed agreement text for completed PDF export."""
     snap = read_fully_executed_snapshot_from_draft(draft)
-    return str((snap or {}).get("corpus_plain") or "").strip()
+    return snapshot_record_corpus_plain(snap)
 
 
 def _find_signature_region_start(text: str) -> int:

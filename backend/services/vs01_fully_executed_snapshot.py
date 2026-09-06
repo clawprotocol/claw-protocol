@@ -17,8 +17,10 @@ from backend.services.vs01_execution_block_heading import (
 from backend.services.vs01_signer_completion import (
     all_signers_signed_from_audit,
     extract_fully_executed_snapshot_from_portable,
+    fully_executed_signed_already_recorded,
     fully_executed_snapshot_ready,
     read_fully_executed_snapshot_from_draft,
+    snapshot_record_corpus_plain,
 )
 
 _log = logging.getLogger(__name__)
@@ -399,7 +401,7 @@ def reconstruct_corpus_from_audit_and_portable(draft: Dict[str, Any]) -> Optiona
     seed = portable.get("seed")
     if not isinstance(seed, dict):
         return None
-    corpus = str(seed.get("corpusPlain") or "")
+    corpus = str(seed.get("corpusPlain") or seed.get("corpus_plain") or "")
     if len(corpus) < 80:
         return None
 
@@ -516,6 +518,110 @@ def completed_execution_by_name_violations(corpus_plain: str) -> List[str]:
     return violations
 
 
+def _plain_from_review_record(snap: Any) -> str:
+    if not isinstance(snap, dict):
+        return ""
+    for key in ("corpusPlain", "corpus_plain"):
+        raw = snap.get(key)
+        if isinstance(raw, str) and raw.strip():
+            return raw.strip()
+    return ""
+
+
+def read_certified_review_plain_for_completed_snapshot(draft: Dict[str, Any]) -> str:
+    """Certified Review corpus already painted on view-signed for completed deals."""
+    rec = draft.get("accepted_review_snapshot_v1")
+    if isinstance(rec, dict):
+        status = str(rec.get("status") or "").strip().lower()
+        if not status or status == "accepted":
+            plain = _plain_from_review_record(rec)
+            if len(plain) >= 80:
+                return plain
+
+    registry = draft.get("canonical_review_snapshots_v1")
+    if not isinstance(registry, dict):
+        return ""
+    accepted_id = str(
+        registry.get("acceptedSnapshotId") or registry.get("accepted_snapshot_id") or ""
+    ).strip()
+    snaps = registry.get("snapshots")
+    if accepted_id and isinstance(snaps, dict):
+        snap = snaps.get(accepted_id)
+        if isinstance(snap, dict):
+            status = str(snap.get("status") or "").strip().lower()
+            if not status or status == "accepted":
+                plain = _plain_from_review_record(snap)
+                if len(plain) >= 80:
+                    return plain
+    if isinstance(snaps, dict):
+        for snap in snaps.values():
+            if not isinstance(snap, dict):
+                continue
+            if str(snap.get("status") or "").strip().lower() != "accepted":
+                continue
+            plain = _plain_from_review_record(snap)
+            if len(plain) >= 80:
+                return plain
+    return ""
+
+
+def _seed_corpus_plain(seed: Any) -> str:
+    if not isinstance(seed, dict):
+        return ""
+    return str(seed.get("corpusPlain") or seed.get("corpus_plain") or "").strip()
+
+
+def _snapshot_record_from_corpus(corpus_plain: str, portable: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    """Persist a completed-deal snapshot from any paint-able corpus (≥80 chars).
+
+    Unlike ``build_snapshot_record``, this does not require stamped witness
+    blocks — already-executed deals may only have certified Review text.
+    """
+    corpus = (corpus_plain or "").strip()
+    if len(corpus) < 80:
+        return None
+    roles = portable.get("roles") if isinstance(portable.get("roles"), list) else []
+    signer_role_ids = [
+        str(r.get("roleId") or "").strip()
+        for r in roles
+        if isinstance(r, dict) and r.get("requiresSignature", True) is not False and str(r.get("roleId") or "").strip()
+    ]
+    now = datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+    return {
+        "v": 1,
+        "corpus_plain": corpus,
+        "corpus_hash": _fingerprint_corpus(corpus),
+        "saved_at": now,
+        "signer_role_ids": signer_role_ids,
+    }
+
+
+def _attach_fully_executed_snapshot(
+    draft: Dict[str, Any],
+    stored: Dict[str, Any],
+    snap: Dict[str, Any],
+    source: str,
+    *,
+    portable: Optional[Dict[str, Any]] = None,
+    overwrite_seed: bool = False,
+) -> EnsureFullyExecutedSnapshotResult:
+    next_stored = {**stored, "fully_executed_snapshot": snap}
+    if overwrite_seed and isinstance(portable, dict):
+        seed = portable.get("seed") if isinstance(portable.get("seed"), dict) else {}
+        next_seed = {
+            **seed,
+            "corpusPlain": str(snap.get("corpus_plain") or ""),
+            "corpusHash": str(snap.get("corpus_hash") or ""),
+        }
+        next_stored["portable"] = {**portable, "seed": next_seed}
+    return EnsureFullyExecutedSnapshotResult(
+        {**draft, "vs01_signing_packet_v1": next_stored},
+        True,
+        source,
+        True,
+    )
+
+
 def ensure_fully_executed_snapshot_on_draft(
     draft: Dict[str, Any],
     *,
@@ -523,6 +629,7 @@ def ensure_fully_executed_snapshot_on_draft(
 ) -> EnsureFullyExecutedSnapshotResult:
     aid = (agreement_id or str(draft.get("id") or "")).strip()
     audit = draft.get("audit_log") or []
+    dropped_existing: Optional[Dict[str, Any]] = None
     if fully_executed_snapshot_ready(draft) and not all_signers_signed_from_audit(draft, audit):
         _log.warning(
             "[vs01-final-signed-snapshot] agreement_id=%s source=existing_before_all_signers — dropping",
@@ -537,7 +644,7 @@ def ensure_fully_executed_snapshot_on_draft(
         }
     if fully_executed_snapshot_ready(draft):
         existing = read_fully_executed_snapshot_from_draft(draft)
-        corpus = str((existing or {}).get("corpus_plain") or "")
+        corpus = snapshot_record_corpus_plain(existing)
         violations = completed_execution_by_name_violations(corpus)
         if not violations:
             _log.info(
@@ -550,6 +657,7 @@ def ensure_fully_executed_snapshot_on_draft(
             aid,
             violations,
         )
+        dropped_existing = existing
         draft = {
             **draft,
             "vs01_signing_packet_v1": {
@@ -592,30 +700,29 @@ def ensure_fully_executed_snapshot_on_draft(
         )
 
     seed = portable.get("seed") if isinstance(portable.get("seed"), dict) else {}
-    corpus = str(seed.get("corpusPlain") or "")
+    corpus = _seed_corpus_plain(seed)
     built = build_snapshot_record(corpus, portable) if corpus else None
     if built:
         built_corpus = str(built.get("corpus_plain") or "")
         built_violations = completed_execution_by_name_violations(built_corpus)
         frozen_authority = draft.get("frozen_signing_authority_v1")
+        parity_ok = True
         if isinstance(frozen_authority, dict):
             from backend.services.completed_agreement_parity import validate_completed_agreement_authorized_delta
 
-            seed_corpus = corpus
             parity_ok, parity_code, parity_detail = validate_completed_agreement_authorized_delta(
-                frozen_corpus=seed_corpus,
+                frozen_corpus=corpus,
                 completed_corpus=built_corpus,
                 snapshot=frozen_authority,
             )
             if not parity_ok:
                 _log.warning(
-                    "[vs01-final-signed-snapshot] agreement_id=%s authorized_delta_failed code=%s detail=%s",
+                    "[vs01-final-signed-snapshot] agreement_id=%s authorized_delta_failed code=%s detail=%s — trying other sources",
                     aid,
                     parity_code,
                     parity_detail,
                 )
-                return EnsureFullyExecutedSnapshotResult(draft, False, f"parity_{parity_code}", False)
-        if not built_violations:
+        if parity_ok and not built_violations:
             next_stored = {**stored, "fully_executed_snapshot": built}
             _log.info(
                 "[vs01-final-signed-snapshot] agreement_id=%s source=portable_corpus snapshot_ready=true",
@@ -627,14 +734,18 @@ def ensure_fully_executed_snapshot_on_draft(
                 "portable_corpus",
                 True,
             )
-        _log.warning(
-            "[vs01-final-signed-snapshot] agreement_id=%s source=portable_corpus_invalid violations=%s — rebuilding",
-            aid,
-            built_violations,
-        )
+        if built_violations:
+            _log.warning(
+                "[vs01-final-signed-snapshot] agreement_id=%s source=portable_corpus_invalid violations=%s — rebuilding",
+                aid,
+                built_violations,
+            )
 
     audit = draft.get("audit_log") or []
-    if all_signers_signed_from_audit(draft, audit):
+    signers_done = all_signers_signed_from_audit(draft, audit)
+    completed_deal = signers_done or fully_executed_signed_already_recorded(audit)
+    review_plain = read_certified_review_plain_for_completed_snapshot(draft)
+    if signers_done:
         rebuilt = reconstruct_corpus_from_audit_and_portable(draft)
         if rebuilt:
             built = build_snapshot_record(rebuilt, portable)
@@ -660,6 +771,60 @@ def ensure_fully_executed_snapshot_on_draft(
                     "reconstructed",
                     True,
                 )
+
+        if review_plain and len(corpus) < 80:
+            review_draft = {
+                **draft,
+                "vs01_signing_packet_v1": {
+                    **stored,
+                    "portable": {
+                        **portable,
+                        "seed": {**seed, "corpusPlain": review_plain},
+                    },
+                },
+            }
+            rebuilt = reconstruct_corpus_from_audit_and_portable(review_draft)
+            if rebuilt:
+                built = build_snapshot_record(rebuilt, portable)
+                if built:
+                    _log.info(
+                        "[vs01-final-signed-snapshot] agreement_id=%s source=reconstructed snapshot_ready=true",
+                        aid,
+                    )
+                    return _attach_fully_executed_snapshot(
+                        draft,
+                        stored,
+                        built,
+                        "reconstructed",
+                        portable={**portable, "seed": {**seed, "corpusPlain": rebuilt}},
+                        overwrite_seed=True,
+                    )
+
+    if completed_deal:
+        if dropped_existing and snapshot_record_corpus_plain(dropped_existing):
+            _log.info(
+                "[vs01-final-signed-snapshot] agreement_id=%s source=existing_kept snapshot_ready=true",
+                aid,
+            )
+            return _attach_fully_executed_snapshot(draft, stored, dropped_existing, "existing_kept")
+
+        if review_plain:
+            record = _snapshot_record_from_corpus(review_plain, portable)
+            if record:
+                _log.info(
+                    "[vs01-final-signed-snapshot] agreement_id=%s source=accepted_review snapshot_ready=true",
+                    aid,
+                )
+                return _attach_fully_executed_snapshot(draft, stored, record, "accepted_review")
+
+        if corpus:
+            record = _snapshot_record_from_corpus(corpus, portable)
+            if record:
+                _log.info(
+                    "[vs01-final-signed-snapshot] agreement_id=%s source=portable_corpus snapshot_ready=true",
+                    aid,
+                )
+                return _attach_fully_executed_snapshot(draft, stored, record, "portable_corpus")
 
     _log.warning(
         "[vs01-final-signed-snapshot] agreement_id=%s source=missing snapshot_ready=false",

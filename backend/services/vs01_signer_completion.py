@@ -362,25 +362,42 @@ def resolve_participant_id_for_signer_role(
     return ""
 
 
+def snapshot_record_corpus_plain(snap: Any) -> str:
+    """Read snapshot corpus from snake_case or camelCase keys."""
+    if not isinstance(snap, dict):
+        return ""
+    return str(snap.get("corpus_plain") or snap.get("corpusPlain") or "").strip()
+
+
+def _normalize_fully_executed_snapshot_record(snap: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    corpus_plain = snapshot_record_corpus_plain(snap)
+    if len(corpus_plain) < 80:
+        return None
+    signer_raw = snap.get("signer_role_ids")
+    if not isinstance(signer_raw, list):
+        signer_raw = snap.get("signerRoleIds")
+    signer_role_ids = (
+        [str(r).strip() for r in signer_raw if str(r).strip()] if isinstance(signer_raw, list) else []
+    )
+    return {
+        **snap,
+        "v": snap.get("v") if isinstance(snap.get("v"), int) else 1,
+        "corpus_plain": corpus_plain,
+        "corpus_hash": str(snap.get("corpus_hash") or snap.get("corpusHash") or "").strip(),
+        "saved_at": str(snap.get("saved_at") or snap.get("savedAt") or "").strip(),
+        "signer_role_ids": signer_role_ids,
+    }
+
+
 def extract_fully_executed_snapshot_from_portable(
     portable_packet: Dict[str, Any],
 ) -> Optional[Dict[str, Any]]:
     snap = portable_packet.get("fullyExecutedSnapshot")
     if not isinstance(snap, dict):
+        snap = portable_packet.get("fully_executed_snapshot")
+    if not isinstance(snap, dict):
         return None
-    corpus_plain = str(snap.get("corpusPlain") or "").strip()
-    if len(corpus_plain) < 80:
-        return None
-    signer_role_ids = snap.get("signerRoleIds")
-    if not isinstance(signer_role_ids, list):
-        signer_role_ids = []
-    return {
-        "v": 1,
-        "corpus_plain": corpus_plain,
-        "corpus_hash": str(snap.get("corpusHash") or "").strip(),
-        "saved_at": str(snap.get("savedAt") or "").strip(),
-        "signer_role_ids": [str(r).strip() for r in signer_role_ids if str(r).strip()],
-    }
+    return _normalize_fully_executed_snapshot_record(snap)
 
 
 def read_fully_executed_snapshot_from_draft(draft: Dict[str, Any]) -> Optional[Dict[str, Any]]:
@@ -389,11 +406,10 @@ def read_fully_executed_snapshot_from_draft(draft: Dict[str, Any]) -> Optional[D
         return None
     snap = stored.get("fully_executed_snapshot")
     if not isinstance(snap, dict):
+        snap = stored.get("fullyExecutedSnapshot")
+    if not isinstance(snap, dict):
         return None
-    corpus_plain = str(snap.get("corpus_plain") or "").strip()
-    if len(corpus_plain) < 80:
-        return None
-    return snap
+    return _normalize_fully_executed_snapshot_record(snap)
 
 
 def fully_executed_snapshot_ready(draft: Dict[str, Any]) -> bool:

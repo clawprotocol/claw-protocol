@@ -317,3 +317,132 @@ def test_reconstruct_three_party_strips_corrupted_party2_by() -> None:
     assert completed_execution_by_name_violations(rebuilt) == []
     stripped = strip_witness_execution_overlays(corpus)
     assert "By: Caleb Price" not in stripped.split("ClearSpring Distribution LLC")[-1]
+
+
+def _completed_audit(role_ids: list[str] | None = None) -> list[dict]:
+    roles = role_ids or ["role_owner", "role_cp"]
+    events = [
+        build_signature_completed_event(
+            signer_role_id=rid,
+            participant_id=f"p{i}",
+            display_name=f"Signer {i}",
+            document_id="doc1",
+            signed_at=f"2026-06-1{i}T00:00:00Z",
+            signed_date_iso=f"2026-06-1{i}",
+            signed_date_display=f"June {15 + i}, 2026",
+            locked_version_id=None,
+            agreement_version_hash=None,
+        )
+        for i, rid in enumerate(roles)
+    ]
+    events.append(build_fully_executed_signed_event(signed_at="2026-06-16T00:00:00Z", agreement_version_hash="h"))
+    return events
+
+
+def test_ensure_repairs_from_accepted_review_when_portable_seed_missing() -> None:
+    review = ("SERVICES AGREEMENT. " * 40) + "\n1. Services\n2. Payment\n3. Delivery"
+    draft = {
+        "id": "ag_northline_repair",
+        "accepted_review_snapshot_v1": {
+            "status": "accepted",
+            "corpusPlain": review,
+        },
+        "vs01_signing_packet_v1": {
+            "v": 1,
+            "portable": {
+                "roles": [
+                    {"roleId": "role_owner", "partyIndex": 0, "requiresSignature": True},
+                    {"roleId": "role_cp", "partyIndex": 1, "requiresSignature": True},
+                ],
+            },
+        },
+        "audit_log": _completed_audit(),
+    }
+    assert fully_executed_snapshot_ready(draft) is False
+    result = ensure_fully_executed_snapshot_on_draft(draft, agreement_id="ag_northline_repair")
+    assert result.snapshot_ready is True
+    assert result.source == "accepted_review"
+    assert fully_executed_snapshot_ready(result.draft_dict) is True
+    snap = result.draft_dict["vs01_signing_packet_v1"]["fully_executed_snapshot"]
+    assert "SERVICES AGREEMENT" in snap["corpus_plain"]
+    assert len(snap["corpus_plain"]) >= 80
+
+
+def test_ensure_keeps_existing_snapshot_when_by_name_differs_and_rebuild_fails() -> None:
+    corpus = (
+        "x" * 1600
+        + "\nIN WITNESS WHEREOF, the Parties execute this Agreement.\n\n"
+        "CLIENT:\nNorthline Studio\nBy: Priya Shah\nName: Northline Studio\nDate: June 15, 2026\n\n"
+        "SERVICE PROVIDER:\nHarbor Marks LLC\nBy: Diego Alvarez\nName: Harbor Marks LLC\nDate: June 16, 2026"
+    )
+    assert completed_execution_by_name_violations(corpus)
+    draft = {
+        "id": "ag_keep_existing",
+        "vs01_signing_packet_v1": {
+            "v": 1,
+            "fully_executed_snapshot": {
+                "v": 1,
+                "corpus_plain": corpus,
+                "corpus_hash": "h",
+                "saved_at": "2026-06-16T00:00:00Z",
+            },
+            "portable": {
+                "roles": [
+                    {"roleId": "role_owner", "partyIndex": 0, "requiresSignature": True},
+                    {"roleId": "role_cp", "partyIndex": 1, "requiresSignature": True},
+                ],
+            },
+        },
+        "audit_log": _completed_audit(),
+    }
+    result = ensure_fully_executed_snapshot_on_draft(draft, agreement_id="ag_keep_existing")
+    assert result.snapshot_ready is True
+    assert result.source == "existing_kept"
+    snap = result.draft_dict["vs01_signing_packet_v1"]["fully_executed_snapshot"]
+    assert "By: Priya Shah" in snap["corpus_plain"]
+    assert "By: Diego Alvarez" in snap["corpus_plain"]
+
+
+def test_ensure_reads_camelcase_snapshot_keys() -> None:
+    corpus = (
+        "x" * 1600
+        + "\nIN WITNESS WHEREOF, the Parties execute this Agreement.\n\n"
+        "CLIENT:\nOwner LLC\nBy: Owner Signer\nName: Owner Signer\nDate: June 15, 2026\n\n"
+        "SERVICE PROVIDER:\nCounterparty LLC\nBy: Counterparty Signer\nName: Counterparty Signer\n"
+        "Date: June 16, 2026"
+    )
+    draft = {
+        "id": "ag_camel",
+        "vs01_signing_packet_v1": {
+            "v": 1,
+            "fullyExecutedSnapshot": {
+                "v": 1,
+                "corpusPlain": corpus,
+                "corpusHash": "h",
+                "savedAt": "2026-06-16T00:00:00Z",
+            },
+            "portable": {
+                "roles": [
+                    {"roleId": "role_owner", "partyIndex": 0, "requiresSignature": True},
+                    {"roleId": "role_cp", "partyIndex": 1, "requiresSignature": True},
+                ],
+            },
+        },
+        "audit_log": _completed_audit(),
+    }
+    assert fully_executed_snapshot_ready(draft) is True
+    result = ensure_fully_executed_snapshot_on_draft(draft, agreement_id="ag_camel")
+    assert result.snapshot_ready is True
+    assert result.source == "existing"
+
+
+def test_ensure_stays_missing_when_fully_executed_has_no_corpus() -> None:
+    draft = {
+        "id": "ag_empty",
+        "audit_log": [
+            build_fully_executed_signed_event(signed_at="2026-06-16T00:00:00Z", agreement_version_hash="h"),
+        ],
+    }
+    result = ensure_fully_executed_snapshot_on_draft(draft, agreement_id="ag_empty")
+    assert result.snapshot_ready is False
+    assert result.source == "missing"

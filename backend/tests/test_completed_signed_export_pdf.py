@@ -223,6 +223,124 @@ def test_build_completed_signed_pdf_bytes_uses_canonical_html_renderer(
     assert "dashboard-live-html" not in html_arg
 
 
+def test_completed_signed_export_pdf_409_when_fully_executed_has_no_corpus(
+    completed_pdf_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from backend.routers.agreements_v2_api import AgreementDraft
+
+    draft = AgreementDraft.model_validate(
+        {
+            "id": "ag-empty-corpus",
+            "title": "Services Agreement",
+            "created_at": "2026-06-01T00:00:00Z",
+            "updated_at": "2026-06-01T00:00:00Z",
+            "parties": [],
+            "audit_log": [
+                {
+                    "event_type": "signed",
+                    "at": "2026-06-01T00:00:00Z",
+                    "value": {"fully_executed": True},
+                }
+            ],
+        }
+    )
+    monkeypatch.setattr("backend.routers.agreements_v2_api._load_or_404", lambda _aid: draft)
+    monkeypatch.setattr("backend.routers.agreements_v2_api._agreement_draft_fully_executed", lambda _d: True)
+    r = completed_pdf_client.post("/api/agreements/ag-empty-corpus/completed-signed-export-pdf")
+    assert r.status_code == 409
+    assert r.json()["detail"] == "signed_snapshot_unavailable"
+
+
+def test_completed_signed_export_pdf_200_after_ensure_from_accepted_review(
+    completed_pdf_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from backend.routers.agreements_v2_api import AgreementDraft
+
+    review = ("SERVICES AGREEMENT. " * 40) + "\n1. Services\n2. Payment"
+    draft = AgreementDraft.model_validate(
+        {
+            "id": "ag-review-repair",
+            "title": "Services Agreement",
+            "created_at": "2026-06-01T00:00:00Z",
+            "updated_at": "2026-06-01T00:00:00Z",
+            "parties": [
+                {"name": "Northline Studio", "email": "a@example.com", "role": "client"},
+                {"name": "Harbor Marks LLC", "email": "b@example.com", "role": "service_provider"},
+            ],
+            "audit_log": [
+                {
+                    "event_type": "signed",
+                    "at": "2026-06-01T00:00:00Z",
+                    "value": {"fully_executed": True},
+                }
+            ],
+            "accepted_review_snapshot_v1": {
+                "status": "accepted",
+                "corpusPlain": review,
+            },
+        }
+    )
+    monkeypatch.setattr("backend.routers.agreements_v2_api._load_or_404", lambda _aid: draft)
+    monkeypatch.setattr("backend.routers.agreements_v2_api._agreement_draft_fully_executed", lambda _d: True)
+    monkeypatch.setattr("backend.routers.agreements_v2_api._save_draft_sync", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        "backend.services.completed_signed_pdf_export.assess_agreement_pdf_story_capability",
+        lambda: {"available": True, "engine": "pymupdf-story"},
+    )
+    monkeypatch.setattr(
+        "backend.services.completed_signed_pdf_export.agreement_rendered_html_to_pdf_bytes",
+        lambda *_a, **_k: AgreementVs01PdfBuild(
+            pdf_bytes=b"%PDF-1.4" + b"\n" * 120,
+            render_mode="story_html",
+        ),
+    )
+    r = completed_pdf_client.post("/api/agreements/ag-review-repair/completed-signed-export-pdf")
+    assert r.status_code == 200
+    assert r.headers.get("content-type", "").startswith("application/pdf")
+    assert r.content.startswith(b"%PDF")
+
+
+def test_build_completed_signed_pdf_bytes_repairs_from_accepted_review(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from backend.routers.agreements_v2_api import AgreementDraft
+
+    review = ("SERVICES AGREEMENT. " * 40) + "\n1. Services\n2. Payment"
+    draft = AgreementDraft.model_validate(
+        {
+            "id": "ag-review-bytes",
+            "title": "Services Agreement",
+            "created_at": "2026-06-01T00:00:00Z",
+            "updated_at": "2026-06-01T00:00:00Z",
+            "parties": [{"name": "Northline Studio"}, {"name": "Harbor Marks LLC"}],
+            "audit_log": [
+                {
+                    "event_type": "signed",
+                    "at": "2026-06-01T00:00:00Z",
+                    "value": {"fully_executed": True},
+                }
+            ],
+            "accepted_review_snapshot_v1": {
+                "status": "accepted",
+                "corpusPlain": review,
+            },
+        }
+    )
+    monkeypatch.setattr(
+        "backend.services.completed_signed_pdf_export.assess_agreement_pdf_story_capability",
+        lambda: {"available": True, "engine": "pymupdf-story"},
+    )
+    monkeypatch.setattr(
+        "backend.services.completed_signed_pdf_export.agreement_rendered_html_to_pdf_bytes",
+        lambda *_a, **_k: AgreementVs01PdfBuild(pdf_bytes=b"%PDF-1.4" + b"x" * 120, render_mode="story_html"),
+    )
+    pdf_bytes, filename = build_completed_signed_pdf_bytes(agreement_id="ag-review-bytes", draft=draft)
+    assert pdf_bytes.startswith(b"%PDF")
+    assert filename.endswith("-signed.pdf")
+
+
 def test_public_completed_signed_export_pdf_403_when_not_fully_executed(
     completed_pdf_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
