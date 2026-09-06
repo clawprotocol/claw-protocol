@@ -46,8 +46,14 @@ export function OwnerSignedAgreementPage(props: Props) {
   const [verify, setVerify] = useState<PublicVerifyPayload | null>(null);
   const [draft, setDraft] = useState<AgreementDraft | null>(null);
   const [corpusSource, setCorpusSource] = useState<
-    "fully_executed_snapshot" | "reconstructed" | "portable_packet" | "local_portable" | null
+    | "fully_executed_snapshot"
+    | "reconstructed"
+    | "portable_packet"
+    | "local_portable"
+    | "accepted_review"
+    | null
   >(null);
+  const [pdfAvailable, setPdfAvailable] = useState(false);
   const [pdfBusy, setPdfBusy] = useState(false);
   const [pdfError, setPdfError] = useState<string | null>(null);
 
@@ -76,6 +82,7 @@ export function OwnerSignedAgreementPage(props: Props) {
       setPreviewHtml("");
       setDraft(null);
       setCorpusSource(null);
+      setPdfAvailable(false);
       setVerify(publicVerify);
       setLoading(false);
       return;
@@ -85,6 +92,7 @@ export function OwnerSignedAgreementPage(props: Props) {
     setPreviewHtml(loaded.html);
     setUsesPremiumDocument(loaded.usesPremiumDocument);
     setCorpusSource(loaded.corpusSource);
+    setPdfAvailable(loaded.pdfAvailable);
     setVerify(publicVerify);
     setLoading(false);
   }, [agreementId]);
@@ -95,6 +103,8 @@ export function OwnerSignedAgreementPage(props: Props) {
 
   const signatureSummary = formatSignatureSummary(verify);
   const proofHash = verify?.verification?.agreement_hash?.trim() || null;
+  const hasDocument = Boolean(previewHtml.trim());
+  const canDownloadPdf = hasDocument && pdfAvailable;
 
   return (
     <AppShell
@@ -141,10 +151,11 @@ export function OwnerSignedAgreementPage(props: Props) {
           </div>
         ) : null}
 
-        {loadError ? (
+        {loadError && !hasDocument && !loading ? (
           <div
             className="rounded-xl border border-amber-800/40 bg-amber-950/25 px-4 py-3 text-sm text-amber-100"
             role="alert"
+            data-testid="owner-signed-agreement-load-error"
           >
             <p>{loadError}</p>
           </div>
@@ -154,57 +165,65 @@ export function OwnerSignedAgreementPage(props: Props) {
           <p className="text-sm text-slate-400" data-testid="owner-signed-agreement-loading">
             Loading signed agreement…
           </p>
-        ) : (
+        ) : hasDocument ? (
           <section
             className="rounded-2xl border border-slate-800/70 bg-white px-4 py-6 text-slate-900 shadow-inner sm:px-8 sm:py-8"
             data-testid="owner-signed-agreement-document"
             aria-label="Signed agreement document"
           >
-            {previewHtml.trim() ? (
-              usesPremiumDocument ? (
-                <PremiumAgreementReadonlyView
-                  html={previewHtml}
-                  fullDocumentFlow
-                  compactDocumentTopPadding
-                />
-              ) : (
-                <div
-                  className="mx-auto max-w-[48rem]"
-                  data-testid="owner-signed-agreement-fallback-html"
-                  dangerouslySetInnerHTML={{ __html: previewHtml }}
-                />
-              )
+            {usesPremiumDocument ? (
+              <PremiumAgreementReadonlyView
+                html={previewHtml}
+                fullDocumentFlow
+                compactDocumentTopPadding
+              />
             ) : (
-              <p className="text-sm text-slate-600">No signed agreement text is available yet.</p>
+              <div
+                className="mx-auto max-w-[48rem]"
+                data-testid="owner-signed-agreement-fallback-html"
+                dangerouslySetInnerHTML={{ __html: previewHtml }}
+              />
             )}
+          </section>
+        ) : loadError ? null : (
+          <section
+            className="rounded-2xl border border-slate-800/70 bg-white px-4 py-6 text-slate-900 shadow-inner sm:px-8 sm:py-8"
+            data-testid="owner-signed-agreement-document"
+            aria-label="Signed agreement document"
+          >
+            <p className="text-sm text-slate-600" data-testid="owner-signed-agreement-empty">
+              No signed agreement text is available yet.
+            </p>
           </section>
         )}
 
         <div className="flex flex-wrap gap-2 pt-2">
-          <button
-            type="button"
-            className="vs01-btn vs01-btn--primary vs01-btn--compact"
-            data-testid="owner-signed-agreement-download-pdf"
-            disabled={pdfBusy || loading || !previewHtml.trim()}
-            onClick={() => {
-              void (async () => {
-                setPdfBusy(true);
-                setPdfError(null);
-                try {
-                  await downloadCompletedSignedAgreementPdf({
-                    agreementId,
-                    title,
-                  });
-                } catch (e: unknown) {
-                  setPdfError(e instanceof Error ? e.message : "Could not download PDF.");
-                } finally {
-                  setPdfBusy(false);
-                }
-              })();
-            }}
-          >
-            {pdfBusy ? "Preparing PDF…" : CREATOR_DOWNLOAD_PDF_LABEL}
-          </button>
+          {canDownloadPdf ? (
+            <button
+              type="button"
+              className="vs01-btn vs01-btn--primary vs01-btn--compact"
+              data-testid="owner-signed-agreement-download-pdf"
+              disabled={pdfBusy || loading}
+              onClick={() => {
+                void (async () => {
+                  setPdfBusy(true);
+                  setPdfError(null);
+                  try {
+                    await downloadCompletedSignedAgreementPdf({
+                      agreementId,
+                      title,
+                    });
+                  } catch (e: unknown) {
+                    setPdfError(e instanceof Error ? e.message : "Could not download PDF.");
+                  } finally {
+                    setPdfBusy(false);
+                  }
+                })();
+              }}
+            >
+              {pdfBusy ? "Preparing PDF…" : CREATOR_DOWNLOAD_PDF_LABEL}
+            </button>
+          ) : null}
           {showBackToDashboard ? (
             <button
               type="button"
