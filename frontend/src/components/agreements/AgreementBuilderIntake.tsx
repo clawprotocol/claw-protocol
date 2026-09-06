@@ -889,6 +889,11 @@ import {
 } from "./paidProPostAcceptReviewHandoff";
 import { restoreFinalizedSignerStateFromPaidReturnPersist } from "./paidProPaidReturnSignerFinalizedRestore";
 import {
+  resolveDashboardSignerSetupResumeFinalizeRawCorpus,
+  resolveDashboardSignerSetupResumeSessionCorpus,
+  restoreDashboardSignerSetupResumeSignerFields,
+} from "./paidProDashboardSignerSetupResumeContinueGate";
+import {
   isJ5ReviewDecisionDiagnosticsEnabled,
   publishJ5ReviewDecisionDiagnostics,
   recordJ5ReviewDecisionTransition,
@@ -1053,7 +1058,6 @@ import {
   resolvePaidProDisplayPlainForSurface,
   resolvePaidProPostFinalizeUserVisiblePlain,
 } from "./paidProDisplayPlainAuthority";
-import { resolvePaidProSignerFinalizeRawCorpus } from "./paidProSignerFinalizeRawCorpus";
 import {
   evaluatePaidProSigningHandoffReadiness,
   resolvePaidProSigningHandoffPartyManifest,
@@ -17622,19 +17626,23 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           setPaidProInlineSignerSetupLatched(true);
           setPaidProSignerMetadataFinalizedLatch(false);
           // Seed locked agreement preview + display authority from accepted server corpus.
-          const resumeCorpusCandidates = [
-            String((adForHydrate as { premium_full_document_text?: string }).premium_full_document_text ?? "").trim(),
-            String(
-              (adForHydrate as { premium_server_full_document_text?: string }).premium_server_full_document_text ?? "",
-            ).trim(),
-            String((adForHydrate as { server_full_document_text?: string }).server_full_document_text ?? "").trim(),
-            readAcceptedPipelineReviewCorpusPlain(),
-            String((next as { purpose?: string }).purpose ?? "").trim(),
-          ];
-          const resumeCorpus = resumeCorpusCandidates.reduce(
-            (best, t) => (t.length > best.length ? t : best),
-            "",
-          );
+          const resumeCorpus = resolveDashboardSignerSetupResumeSessionCorpus({
+            premiumFullDocumentText: String(
+              (adForHydrate as { premium_full_document_text?: string }).premium_full_document_text ?? "",
+            ),
+            premiumServerFullDocumentText: String(
+              (adForHydrate as { premium_server_full_document_text?: string })
+                .premium_server_full_document_text ?? "",
+            ),
+            serverFullDocumentText: String(
+              (adForHydrate as { server_full_document_text?: string }).server_full_document_text ?? "",
+            ),
+            acceptedPipelineReviewPlain: readAcceptedPipelineReviewCorpusPlain(),
+            paintedSequentialPersistPlain: readPaintedSequentialPersistReviewPlain(),
+            verifiedCommercialDisplayPlain: readVerifiedCommercialDisplayCorpus(hid)?.corpusPlain,
+            paidProSourceOfTruthText: getPaidProSourceOfTruthText(),
+            purpose: String((next as { purpose?: string }).purpose ?? ""),
+          });
           if (resumeCorpus.length >= 80) {
             hydratedPremiumBodyRef.current = resumeCorpus;
             lastPremiumWinningCorpusRef.current = resumeCorpus;
@@ -17649,7 +17657,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             } catch {
               /* preview still paints from refs */
             }
-            if (!hasPaidProSourceOfTruth() && resumeCorpus.length >= 1000) {
+            if (!hasPaidProSourceOfTruth() && resumeCorpus.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
               try {
                 establishPaidProSourceOfTruth({
                   text: resumeCorpus,
@@ -17664,25 +17672,45 @@ const AgreementBuilderIntake: React.FC<Props> = ({
               }
             }
           }
-          // Hydrate live signer UI from persisted draft parties (same authority as signer setup).
+          // Restore authorized signer names from persist / frozen / corpus — empty
+          // draft.parties.signerName must not leave Screen 2 stuck on Save signer details.
           const parties = next.parties ?? [];
-          const names = parties.map((p) => String((p as { signerName?: string }).signerName ?? "").trim());
-          const titles = parties.map((p) => String((p as { signerTitle?: string }).signerTitle ?? "").trim());
-          const emails = parties.map((p) =>
-            String(
-              (p as { signerEmail?: string }).signerEmail ?? (p as { email?: string }).email ?? "",
-            ).trim(),
+          const restoredSigners = restoreDashboardSignerSetupResumeSignerFields({
+            persistParties: parties.map((p) => ({
+              name: String(p.name ?? "").trim(),
+              signerName: String((p as { signerName?: string }).signerName ?? "").trim(),
+              signerTitle: String((p as { signerTitle?: string }).signerTitle ?? "").trim(),
+              signerEmail: String((p as { signerEmail?: string }).signerEmail ?? "").trim(),
+              email: String((p as { email?: string }).email ?? "").trim(),
+            })),
+            frozen: readFrozenSigningAuthoritySnapshot(),
+            corpusText: resumeCorpus,
+            intakeText: rawIntake,
+            uiSignerNames: partySignerNamesRef.current,
+            uiSignerTitles: partySignerTitlesRef.current,
+            uiEmails: [
+              recipient1EmailRef.current,
+              recipient2EmailRef.current,
+              ...extraPartyReviewEmailsRef.current,
+            ],
+          });
+          if (restoredSigners.recipient1Name) setRecipient1Name(restoredSigners.recipient1Name);
+          if (restoredSigners.recipient2Name) setRecipient2Name(restoredSigners.recipient2Name);
+          if (restoredSigners.recipient1Email) setRecipient1Email(restoredSigners.recipient1Email);
+          if (restoredSigners.recipient2Email) setRecipient2Email(restoredSigners.recipient2Email);
+          if (restoredSigners.extraPartyLegalNames.length) {
+            setExtraPartyLegalNames(restoredSigners.extraPartyLegalNames);
+          }
+          if (restoredSigners.extraPartyReviewEmails.length) {
+            setExtraPartyReviewEmails(restoredSigners.extraPartyReviewEmails);
+          }
+          setPartySignerNames(
+            restoredSigners.partySignerNames.length ? restoredSigners.partySignerNames : ["", ""],
           );
-          const legal = parties.map((p) => String(p.name ?? "").trim());
-          if (legal[0]) setRecipient1Name(legal[0]!);
-          if (legal[1]) setRecipient2Name(legal[1]!);
-          if (emails[0]) setRecipient1Email(emails[0]!);
-          if (emails[1]) setRecipient2Email(emails[1]!);
-          if (legal.length > 2) setExtraPartyLegalNames(legal.slice(2));
-          if (emails.length > 2) setExtraPartyReviewEmails(emails.slice(2));
-          setPartySignerNames(names.length ? names : ["", ""]);
-          setPartySignerTitles(titles.length ? titles : ["", ""]);
-          setSignerSetupUiPartyCount(Math.max(parties.length, 2));
+          setPartySignerTitles(
+            restoredSigners.partySignerTitles.length ? restoredSigners.partySignerTitles : ["", ""],
+          );
+          setSignerSetupUiPartyCount(Math.max(parties.length, restoredSigners.partyCount, 2));
           // Keep session arm until signer metadata is complete — only strip the query param.
           stripResumeSignerSetupQueryFromCreateUrl();
           dashboardSignerSetupResumeConsumedRef.current = true;
@@ -19972,8 +20000,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       paidProFirstReviewSurfaceActive ||
       paidProCanonicalReviewSignerSetupActive ||
       checkoutBackRestoreActive ||
-      paidProPostCheckoutFirstReviewActive;
-    if (!acceptedPaidProAuthorityActive && !checkoutBackRestoreActive) return;
+      paidProPostCheckoutFirstReviewActive ||
+      dashboardSignerSetupResumeUiActive;
+    if (
+      !acceptedPaidProAuthorityActive &&
+      !checkoutBackRestoreActive &&
+      !dashboardSignerSetupResumeUiActive
+    ) {
+      return;
+    }
     if (!signerPrefillSurfaceActive) return;
     if (paidProSignerMetadataFinalized) return;
     if (premiumRecipientUxActive && !paidProCanonicalReviewSignerSetupActive) return;
@@ -20100,6 +20135,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     paidProCanonicalReviewSignerSetupActive,
     checkoutBackRestoreActive,
     paidProPostCheckoutFirstReviewActive,
+    dashboardSignerSetupResumeUiActive,
     paidProSignerMetadataFinalized,
     premiumRecipientUxActive,
     currentPremiumMergedIntakeKey,
@@ -30489,10 +30525,25 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       intakeText: intakeForHydration,
       draftPartyNames: (draft?.parties ?? []).map((p) => String((p as { name?: string }).name ?? "").trim()),
     });
-    const rawCorpusResolution = resolvePaidProSignerFinalizeRawCorpus({
+    const rawCorpusResolution = resolveDashboardSignerSetupResumeFinalizeRawCorpus({
       authoritativePaidProReviewPlain,
       simpleProFinalReviewPlain: simpleProFinalReviewCorpus.plainText,
-      immutableSourceOfTruthOnly: true,
+      resumeSessionCorpus: resolveDashboardSignerSetupResumeSessionCorpus({
+        agreementDocumentText,
+        hydratedPremiumBody: hydratedPremiumBodyRef.current,
+        lastPremiumWinningCorpus: lastPremiumWinningCorpusRef.current,
+        pipelineOutputBody: premiumPipelineOutputBodyRef.current,
+        acceptedPipelineReviewPlain: readAcceptedPipelineReviewCorpusPlain(),
+        paintedSequentialPersistPlain: readPaintedSequentialPersistReviewPlain(),
+        verifiedCommercialDisplayPlain: readVerifiedCommercialDisplayCorpus(
+          (
+            reviewAgreementIdRef.current ||
+            readCreateReviewAgreementResumeId() ||
+            ""
+          ).trim(),
+        )?.corpusPlain,
+        paidProSourceOfTruthText: getPaidProSourceOfTruthText(),
+      }),
     });
     const rawCorpus = rawCorpusResolution.corpus;
     const hydrated = buildHydratedAuthoritativeSigningCorpusFromAuthority({
@@ -30681,6 +30732,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     pinFinalizedSignerAppliedCorpus,
     createFlowPhase,
     ensureReviewAgreementWorkspaceId,
+    agreementDocumentText,
   ]);
 
   finalizePaidProSignerMetadataAndOpenReviewDecisionRef.current =
