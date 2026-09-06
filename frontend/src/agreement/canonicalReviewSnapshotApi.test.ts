@@ -938,4 +938,273 @@ describe("canonicalReviewSnapshotApi", () => {
     expect(body.corpus_plain).not.toMatch(/\n12\. /);
     expect(body.corpus_plain).not.toMatch(/\n13\. /);
   });
+
+  it("prepare stashes prior accepted id when persist+GET returns a new pending", async () => {
+    const { readAcceptConcurrencyToken } = await import("./canonicalReviewSnapshotApi");
+    const corpus = ("OPERATIVE\n\n" + "x".repeat(600)).trim();
+    const digest = await sha256CorpusDigest(corpus);
+    storeAcceptedReviewSnapshotRef({
+      agreementId: "ag_resume",
+      snapshotId: "crs_commercial",
+      corpusSha256: "f".repeat(64),
+      corpusLength: 1200,
+    });
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = String(init?.method || "GET").toUpperCase();
+      if (url.includes("/canonical-review-snapshot") && method === "POST") {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            snapshot: {
+              snapshot_id: "crs_pending",
+              agreement_id: "ag_resume",
+              corpus_plain: corpus,
+              corpus_sha256: digest,
+              corpus_length: corpus.length,
+              status: "pending",
+            },
+            accepted_snapshot_id: "crs_commercial",
+            registry_version: 2,
+          }),
+        } as Response;
+      }
+      if (url.includes("/canonical-review-snapshot") && method === "GET") {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            status: "pending",
+            snapshot: {
+              snapshot_id: "crs_pending",
+              agreement_id: "ag_resume",
+              corpus_plain: corpus,
+              corpus_sha256: digest,
+              corpus_length: corpus.length,
+              status: "pending",
+            },
+            accepted_snapshot_id: "crs_commercial",
+            registry_version: 2,
+          }),
+        } as Response;
+      }
+      throw new Error(`unexpected fetch ${method} ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const prepared = await prepareCommercialReviewSnapshotAuthority({
+      agreementId: "ag_resume",
+      corpusPlain: corpus,
+    });
+    expect(prepared.ok).toBe(true);
+    expect(readAcceptedReviewSnapshotRef("ag_resume")).toBeNull();
+    expect(readAcceptConcurrencyToken("ag_resume")?.snapshotId).toBe("crs_commercial");
+  });
+
+  it("acceptDisplayed recovers 409 pending GET with server token + allow_revision", async () => {
+    const corpus = ("OPERATIVE\n\n" + "y".repeat(600)).trim();
+    const digest = await sha256CorpusDigest(corpus);
+    storeDisplayReviewSnapshotAuthority({
+      agreementId: "4e18814c-c8fe-4eb9-85ae-a3e694cb596e",
+      snapshotId: "crs_pending",
+      corpusSha256: digest,
+      corpusLength: corpus.length,
+      status: "pending",
+    });
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = String(init?.method || "GET").toUpperCase();
+      if (url.includes("/accept") && method === "POST") {
+        const body = JSON.parse(String(init?.body ?? "{}")) as {
+          expected_accepted_snapshot_id?: string;
+          allow_revision?: boolean;
+        };
+        if (body.allow_revision && body.expected_accepted_snapshot_id === "crs_commercial") {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              accepted: {
+                snapshot_id: "crs_pending",
+                agreement_id: "4e18814c-c8fe-4eb9-85ae-a3e694cb596e",
+                corpus_plain: corpus,
+                corpus_sha256: digest,
+                corpus_length: corpus.length,
+                status: "accepted",
+              },
+            }),
+          } as Response;
+        }
+        return {
+          ok: false,
+          status: 409,
+          json: async () => ({
+            detail: { code: "accept_concurrency_conflict" },
+          }),
+        } as Response;
+      }
+      if (url.includes("/canonical-review-snapshot") && method === "GET") {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            status: "pending",
+            snapshot: {
+              snapshot_id: "crs_pending",
+              agreement_id: "4e18814c-c8fe-4eb9-85ae-a3e694cb596e",
+              corpus_plain: corpus,
+              corpus_sha256: digest,
+              corpus_length: corpus.length,
+              status: "pending",
+            },
+            accepted_snapshot_id: "crs_commercial",
+          }),
+        } as Response;
+      }
+      throw new Error(`unexpected fetch ${method} ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const result = await acceptDisplayedCommercialReviewSnapshot({
+      agreementId: "4e18814c-c8fe-4eb9-85ae-a3e694cb596e",
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error(result.code);
+    expect(result.accepted.snapshot_id).toBe("crs_pending");
+    expect(readAcceptedReviewSnapshotRef("4e18814c-c8fe-4eb9-85ae-a3e694cb596e")?.snapshotId).toBe(
+      "crs_pending",
+    );
+    const acceptBodies = fetchMock.mock.calls
+      .filter((c) => String(c[0]).includes("/accept"))
+      .map((c) => JSON.parse(String((c[1] as RequestInit | undefined)?.body ?? "{}")));
+    expect(acceptBodies.length).toBeGreaterThanOrEqual(1);
+    expect(acceptBodies.some((b) => b.allow_revision === true)).toBe(true);
+    expect(acceptBodies.some((b) => b.expected_accepted_snapshot_id === "crs_commercial")).toBe(true);
+    expect(acceptBodies.every((b) => b.corpus_plain === undefined)).toBe(true);
+  });
+
+  it("acceptDisplayed retries once after 409 when GET stays pending", async () => {
+    const corpus = ("OPERATIVE\n\n" + "w".repeat(600)).trim();
+    const digest = await sha256CorpusDigest(corpus);
+    storeDisplayReviewSnapshotAuthority({
+      agreementId: "ag_409",
+      snapshotId: "crs_pending",
+      corpusSha256: digest,
+      corpusLength: corpus.length,
+      status: "pending",
+    });
+    let getCount = 0;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = String(init?.method || "GET").toUpperCase();
+      if (url.includes("/accept") && method === "POST") {
+        const body = JSON.parse(String(init?.body ?? "{}")) as {
+          expected_accepted_snapshot_id?: string;
+          allow_revision?: boolean;
+        };
+        if (body.allow_revision === true && body.expected_accepted_snapshot_id === "crs_commercial") {
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              accepted: {
+                snapshot_id: "crs_pending",
+                agreement_id: "ag_409",
+                corpus_plain: corpus,
+                corpus_sha256: digest,
+                corpus_length: corpus.length,
+                status: "accepted",
+              },
+            }),
+          } as Response;
+        }
+        return {
+          ok: false,
+          status: 409,
+          json: async () => ({ detail: { code: "accept_concurrency_conflict" } }),
+        } as Response;
+      }
+      if (method === "GET") {
+        getCount += 1;
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            status: "pending",
+            snapshot: {
+              snapshot_id: "crs_pending",
+              agreement_id: "ag_409",
+              corpus_plain: corpus,
+              corpus_sha256: digest,
+              corpus_length: corpus.length,
+              status: "pending",
+            },
+            accepted_snapshot_id: getCount === 1 ? null : "crs_commercial",
+          }),
+        } as Response;
+      }
+      throw new Error(`unexpected fetch ${method} ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const result = await acceptDisplayedCommercialReviewSnapshot({ agreementId: "ag_409" });
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error(result.code);
+    expect(result.accepted.status).toBe("accepted");
+    expect(fetchMock.mock.calls.filter((c) => String(c[0]).includes("/accept")).length).toBe(2);
+  });
+
+  it("acceptDisplayed treats matching accepted GET as success without a second accept", async () => {
+    const corpus = ("OPERATIVE\n\n" + "z".repeat(600)).trim();
+    const digest = await sha256CorpusDigest(corpus);
+    storeDisplayReviewSnapshotAuthority({
+      agreementId: "ag_already",
+      snapshotId: "crs_done",
+      corpusSha256: digest,
+      corpusLength: corpus.length,
+      status: "pending",
+    });
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = String(init?.method || "GET").toUpperCase();
+      if (url.includes("/accept")) throw new Error("accept should not run");
+      if (method === "GET") {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            status: "accepted",
+            snapshot: {
+              snapshot_id: "crs_done",
+              agreement_id: "ag_already",
+              corpus_plain: corpus,
+              corpus_sha256: digest,
+              corpus_length: corpus.length,
+              status: "accepted",
+            },
+            accepted_snapshot_id: "crs_done",
+          }),
+        } as Response;
+      }
+      throw new Error(`unexpected fetch ${method} ${url}`);
+    });
+    vi.stubGlobal("fetch", fetchMock);
+    const result = await acceptDisplayedCommercialReviewSnapshot({ agreementId: "ag_already" });
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error(result.code);
+    expect(result.accepted.snapshot_id).toBe("crs_done");
+    expect(readAcceptedReviewSnapshotRef("ag_already")?.snapshotId).toBe("crs_done");
+  });
+
+  it("acceptDisplayed and ensure fail closed without display / agreement id", async () => {
+    const { ensureAcceptedCommercialReviewForEsignHandoff } = await import(
+      "./canonicalReviewSnapshotApi"
+    );
+    const missingDisplay = await acceptDisplayedCommercialReviewSnapshot({
+      agreementId: "ag_no_display",
+    });
+    expect(missingDisplay.ok).toBe(false);
+    if (!missingDisplay.ok) expect(missingDisplay.code).toBe("display_authority_missing");
+    const missingId = await ensureAcceptedCommercialReviewForEsignHandoff({ agreementId: "" });
+    expect(missingId.ok).toBe(false);
+    if (!missingId.ok) expect(missingId.code).toBe("invalid_accept_args");
+  });
 });

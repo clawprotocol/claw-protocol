@@ -751,9 +751,9 @@ import {
   hydratePaidProSourceOfTruth,
 } from "./paidProSourceOfTruth";
 import {
-  acceptDisplayedCommercialReviewSnapshot,
   canEnableCommercialPrepareFromServerSnapshot,
   clearAcceptedReviewSnapshotRef,
+  ensureAcceptedCommercialReviewForEsignHandoff,
   hasVerifiedCommercialDisplayCorpus,
   hydrateCommercialReviewFromServerSnapshot,
   prepareCommercialReviewSnapshotAuthority,
@@ -30301,6 +30301,22 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         return;
       }
 
+      if (!canEnableCommercialPrepareFromServerSnapshot(id)) {
+        const acceptResult = await ensureAcceptedCommercialReviewForEsignHandoff({
+          agreementId: id,
+          acceptingSession: getOrInitSessionAgreementGenerationId(),
+        });
+        if (!acceptResult.ok) {
+          traceSigningAdvance(`enterGuidedSignatureTrackRoute:accept_blocked:${acceptResult.code}`);
+          logGuidedSignatureTrackFailed({ reason: acceptResult.code || "accept_blocked" });
+          showModalIfSlow("blocked");
+          setGuidedFinalizeModalBlockedMessage(
+            "Server acceptance of the reviewed agreement is required before opening signing.",
+          );
+          return;
+        }
+      }
+
       setCreateFlowPhase("ready_to_send");
       markPremiumRecipientsSurfaceReleased();
       setPremiumRecipientUxActive(true);
@@ -31384,11 +31400,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           }
         }
         if (!canEnableCommercialPrepareFromServerSnapshot(agreementIdForAccept)) {
-          const prior = readAcceptedReviewSnapshotRef(agreementIdForAccept);
-          const acceptResult = await acceptDisplayedCommercialReviewSnapshot({
+          const acceptResult = await ensureAcceptedCommercialReviewForEsignHandoff({
             agreementId: agreementIdForAccept,
             acceptingSession: getOrInitSessionAgreementGenerationId(),
-            allowRevision: Boolean(prior?.snapshotId),
           });
           if (!acceptResult.ok) {
             setProFullDraftCustomGateMessage(

@@ -16,6 +16,11 @@ import { reviewPlainHasLateSkippedSectionNumbers } from "../components/agreement
 import { apiUrl } from "../lib/clawApi";
 import { sha256Hex } from "../utils/agreements/hash";
 import { clawAgreementHeaders } from "./agreementOrgHeaders";
+import {
+  decidePendingAcceptConcurrencyRecovery,
+  isAcceptConcurrencyConflictCode,
+  resolveResumeContinueAcceptConcurrency,
+} from "./canonicalReviewSnapshotAcceptRecovery";
 
 export type CanonicalReviewSnapshot = {
   snapshot_id: string;
@@ -44,6 +49,7 @@ export type FetchCanonicalReviewSnapshotResult =
       status: "pending" | "accepted" | string;
       snapshot: CanonicalReviewSnapshot;
       registryVersion?: number | null;
+      acceptedSnapshotId?: string | null;
     }
   | { ok: false; code: string };
 
@@ -51,6 +57,8 @@ const ACCEPTED_SESSION_KEY = "claw_accepted_review_snapshot_v1";
 const DISPLAY_SESSION_KEY = "claw_display_review_snapshot_v1";
 /** GET corpus bytes paired with display authority — only set after successful server GET. */
 const DISPLAY_CORPUS_SESSION_KEY = "claw_display_review_corpus_v1";
+/** Prior accepted id stashed when persist+GET clears the local accept ref. */
+const ACCEPT_CONCURRENCY_TOKEN_KEY = "claw_accept_concurrency_token_v1";
 
 export type StoredAcceptedReviewSnapshotRef = {
   agreementId: string;
@@ -74,6 +82,7 @@ export type StoredVerifiedDisplayReviewCorpus = StoredDisplayReviewSnapshotAutho
 export function storeAcceptedReviewSnapshotRef(ref: StoredAcceptedReviewSnapshotRef): void {
   try {
     sessionStorage.setItem(ACCEPTED_SESSION_KEY, JSON.stringify(ref));
+    sessionStorage.removeItem(ACCEPT_CONCURRENCY_TOKEN_KEY);
   } catch {
     /* ignore */
   }
@@ -97,6 +106,37 @@ export function readAcceptedReviewSnapshotRef(
 export function clearAcceptedReviewSnapshotRef(): void {
   try {
     sessionStorage.removeItem(ACCEPTED_SESSION_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
+export function stashAcceptConcurrencyToken(ref: StoredAcceptedReviewSnapshotRef): void {
+  try {
+    sessionStorage.setItem(ACCEPT_CONCURRENCY_TOKEN_KEY, JSON.stringify(ref));
+  } catch {
+    /* ignore */
+  }
+}
+
+export function readAcceptConcurrencyToken(
+  agreementId?: string | null,
+): StoredAcceptedReviewSnapshotRef | null {
+  try {
+    const raw = sessionStorage.getItem(ACCEPT_CONCURRENCY_TOKEN_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as StoredAcceptedReviewSnapshotRef;
+    if (!parsed?.snapshotId) return null;
+    if (agreementId && parsed.agreementId && parsed.agreementId !== agreementId.trim()) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+export function clearAcceptConcurrencyToken(): void {
+  try {
+    sessionStorage.removeItem(ACCEPT_CONCURRENCY_TOKEN_KEY);
   } catch {
     /* ignore */
   }
@@ -352,6 +392,7 @@ export async function fetchCanonicalReviewSnapshot(args: {
       status?: string;
       snapshot?: CanonicalReviewSnapshot;
       registry_version?: number | null;
+      accepted_snapshot_id?: string | null;
     };
     if (!j.snapshot?.snapshot_id) return { ok: false, code: "snapshot_missing" };
     return {
@@ -359,6 +400,7 @@ export async function fetchCanonicalReviewSnapshot(args: {
       status: j.status || j.snapshot.status || "pending",
       snapshot: j.snapshot,
       registryVersion: j.registry_version ?? null,
+      acceptedSnapshotId: String(j.accepted_snapshot_id || "").trim() || null,
     };
   } catch {
     return { ok: false, code: "network_error" };
@@ -499,7 +541,12 @@ export async function prepareCommercialReviewSnapshotAuthority(args: {
     corpusPlain: getCorpus,
   });
   // New pending review invalidates prior accept until explicit accept of display authority.
+  // Stash the cleared id so Continue can recover from accept_concurrency_conflict.
   if (display.status !== "accepted") {
+    const priorAccepted = readAcceptedReviewSnapshotRef(id);
+    if (priorAccepted?.snapshotId) {
+      stashAcceptConcurrencyToken(priorAccepted);
+    }
     clearAcceptedReviewSnapshotRef();
   } else {
     storeAcceptedReviewSnapshotRef({
@@ -571,6 +618,8 @@ export async function hydrateCommercialReviewFromServerSnapshot(args: {
 
 /**
  * Phase 2 — customer acceptance: re-GET, verify display match, accept by id+digest only.
+ * Resume Continue: recover pending GET + 409 accept_concurrency_conflict with the
+ * server accepted token and allow_revision (not leftover Logo/[ORG_1] detection).
  */
 export async function acceptDisplayedCommercialReviewSnapshot(args: {
   agreementId: string;
@@ -589,17 +638,109 @@ export async function acceptDisplayedCommercialReviewSnapshot(args: {
     return { ok: false, code: "display_authority_mismatch" };
   }
 
+  if (String(fetched.status || "").toLowerCase() === "accepted") {
+    storeAcceptedReviewSnapshotRef({
+      agreementId: id,
+      snapshotId: fetched.snapshot.snapshot_id,
+      corpusSha256: fetched.snapshot.corpus_sha256,
+      corpusLength: fetched.snapshot.corpus_length,
+    });
+    return { ok: true, accepted: fetched.snapshot, registryVersion: fetched.registryVersion ?? null };
+  }
+
   const prior = readAcceptedReviewSnapshotRef(id);
+  const stashed = readAcceptConcurrencyToken(id);
+  const concurrency = resolveResumeContinueAcceptConcurrency({
+    displaySnapshotId: display.snapshotId,
+    displayStatus: display.status,
+    localAcceptedSnapshotId: prior?.snapshotId ?? stashed?.snapshotId ?? null,
+    serverAcceptedSnapshotId: fetched.acceptedSnapshotId ?? null,
+  });
+
+  const first = await acceptCanonicalReviewSnapshot({
+    agreementId: id,
+    snapshotId: display.snapshotId,
+    expectedDigest: display.corpusSha256,
+    acceptingSession: args.acceptingSession,
+    expectedAcceptedSnapshotId: concurrency.expectedAcceptedSnapshotId,
+    allowRevision: Boolean(args.allowRevision) || concurrency.allowRevision,
+    displaySnapshotId: display.snapshotId,
+    displayDigest: display.corpusSha256,
+    displayLength: display.corpusLength,
+  });
+  if (first.ok || !isAcceptConcurrencyConflictCode(first.code)) {
+    return first;
+  }
+
+  const recoveredFetch = await fetchCanonicalReviewSnapshot({ agreementId: id });
+  if (!recoveredFetch.ok) return { ok: false, code: first.code };
+  const recovery = decidePendingAcceptConcurrencyRecovery({
+    displaySnapshotId: display.snapshotId,
+    displayDigest: display.corpusSha256,
+    displayLength: display.corpusLength,
+    fetchedStatus: recoveredFetch.status,
+    fetchedSnapshot: recoveredFetch.snapshot,
+    serverAcceptedSnapshotId: recoveredFetch.acceptedSnapshotId ?? null,
+  });
+  if (recovery.action === "already_accepted") {
+    storeAcceptedReviewSnapshotRef({
+      agreementId: id,
+      snapshotId: recoveredFetch.snapshot.snapshot_id,
+      corpusSha256: recoveredFetch.snapshot.corpus_sha256,
+      corpusLength: recoveredFetch.snapshot.corpus_length,
+    });
+    return {
+      ok: true,
+      accepted: recoveredFetch.snapshot,
+      registryVersion: recoveredFetch.registryVersion ?? null,
+    };
+  }
+  if (recovery.action === "fail") {
+    return { ok: false, code: first.code };
+  }
+
   return acceptCanonicalReviewSnapshot({
     agreementId: id,
     snapshotId: display.snapshotId,
     expectedDigest: display.corpusSha256,
     acceptingSession: args.acceptingSession,
-    expectedAcceptedSnapshotId: prior?.snapshotId ?? "",
-    allowRevision: Boolean(args.allowRevision),
+    expectedAcceptedSnapshotId: recovery.expectedAcceptedSnapshotId,
+    allowRevision: true,
     displaySnapshotId: display.snapshotId,
     displayDigest: display.corpusSha256,
     displayLength: display.corpusLength,
+  });
+}
+
+/**
+ * Continue / Prepare → esign: accept the displayed GET snapshot, recovering a
+ * pending row after persist+GET cleared the local concurrency token.
+ * Missing server snapshot is skipped so local-only persist bridges still work.
+ */
+export async function ensureAcceptedCommercialReviewForEsignHandoff(args: {
+  agreementId: string;
+  acceptingSession?: string | null;
+}): Promise<AcceptCanonicalReviewSnapshotResult | { ok: true; skipped?: boolean }> {
+  const id = args.agreementId.trim();
+  if (!id) return { ok: false, code: "invalid_accept_args" };
+  if (canEnableCommercialPrepareFromServerSnapshot(id)) return { ok: true };
+  if (!readDisplayReviewSnapshotAuthority(id)) {
+    const hydrated = await hydrateCommercialReviewFromServerSnapshot({ agreementId: id });
+    if (!hydrated.ok) {
+      if (
+        hydrated.code === "snapshot_missing" ||
+        hydrated.code === "invalid_snapshot_args" ||
+        hydrated.code === "canonical_review_snapshot_not_found"
+      ) {
+        return { ok: true, skipped: true };
+      }
+      return { ok: false, code: hydrated.code };
+    }
+  }
+  if (canEnableCommercialPrepareFromServerSnapshot(id)) return { ok: true };
+  return acceptDisplayedCommercialReviewSnapshot({
+    agreementId: id,
+    acceptingSession: args.acceptingSession,
   });
 }
 
