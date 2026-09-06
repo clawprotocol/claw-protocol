@@ -317,10 +317,11 @@ describe("resume_signer_setup Continue gate (4e18814c Screen 2)", () => {
     expect(prepareFrag).toContain("ensureAcceptedCommercialReviewForEsignHandoff");
     expect(prepareFrag).toContain("canEnableCommercialPrepareFromServerSnapshot(agreementIdForAccept)");
     const trackStart = intakeSrc.indexOf("const enterGuidedSignatureTrackRoute = React.useCallback");
-    const trackFrag = intakeSrc.slice(trackStart, trackStart + 16000);
+    const trackEnd = intakeSrc.indexOf("const completeGuidedSigningHandoff = React.useCallback", trackStart);
+    const trackFrag = intakeSrc.slice(trackStart, trackEnd > trackStart ? trackEnd : trackStart + 24000);
     expect(trackFrag).toContain("ensureAcceptedCommercialReviewForEsignHandoff");
     expect(trackFrag).toContain("enterGuidedSignatureTrackRoute:accept_blocked");
-    expect(trackFrag).toContain("handoff_ok");
+    expect(trackFrag).toContain("enterGuidedSignatureTrackRoute:handoff_ok");
     expect(continueBlock).not.toMatch(/resend|sendEmail|send_mail/i);
     expect(continueBlock).not.toMatch(/stripe|checkout|premiumCompletion/i);
     expect(trackFrag).not.toMatch(/Ask LawDog to revise[\s\S]{0,80}Apply/);

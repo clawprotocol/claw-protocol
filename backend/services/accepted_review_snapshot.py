@@ -104,12 +104,13 @@ def get_accepted_snapshot_record(draft: Any) -> Optional[Dict[str, Any]]:
 def _latest_pending_from_registry(reg: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     snaps = reg.get("snapshots") if isinstance(reg.get("snapshots"), dict) else {}
     pending = [
-        s
-        for s in snaps.values()
+        (i, s)
+        for i, s in enumerate(snaps.values())
         if isinstance(s, dict) and _clean(s.get("status")) == STATUS_PENDING
     ]
-    pending.sort(key=lambda s: str(s.get("createdAt") or ""), reverse=True)
-    return pending[0] if pending else None
+    # createdAt first; same-second persist uses insertion order so the last write wins.
+    pending.sort(key=lambda item: (str(item[1].get("createdAt") or ""), item[0]), reverse=True)
+    return pending[0][1] if pending else None
 
 
 def latest_pending_snapshot(draft: Any) -> Optional[Dict[str, Any]]:
