@@ -1128,7 +1128,7 @@ describe("paid Pro runtime authority establishment (intake wiring)", () => {
     expect(frag).toContain("canEnableCommercialPrepareFromServerSnapshot(agreementIdForAccept)");
     // Empty id must return before accept/prepare progress — no silent bypass.
     const emptyIdx = frag.indexOf("if (!agreementIdForAccept)");
-    const acceptIdx = frag.indexOf("acceptDisplayedCommercialReviewSnapshot");
+    const acceptIdx = frag.indexOf("ensureAcceptedCommercialReviewForEsignHandoff");
     expect(emptyIdx).toBeGreaterThanOrEqual(0);
     expect(acceptIdx).toBeGreaterThan(emptyIdx);
   });

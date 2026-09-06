@@ -7364,6 +7364,7 @@ def post_canonical_review_snapshot(
             "status": snap.get("status"),
         },
         "registry_version": reg.get("registryVersion"),
+        "accepted_snapshot_id": str(reg.get("acceptedSnapshotId") or "").strip() or None,
         "accepted": public_accepted_snapshot_fragment(accepted),
         "draft": next_draft.model_dump(),
     }
@@ -7578,6 +7579,7 @@ def get_canonical_review_snapshot(agreement_id: str, request: Request) -> Dict[s
                 ),
             },
         )
+    accepted_id = str(reg.get("acceptedSnapshotId") or "").strip() or None
     return {
         "ok": True,
         "status": status,
@@ -7594,6 +7596,7 @@ def get_canonical_review_snapshot(agreement_id: str, request: Request) -> Dict[s
             "status": latest.get("status"),
         },
         "registry_version": reg.get("registryVersion"),
+        "accepted_snapshot_id": accepted_id,
         "public": public_accepted_snapshot_fragment(latest) if status == "accepted" else None,
     }
 

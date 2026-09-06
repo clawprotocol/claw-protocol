@@ -301,4 +301,48 @@ describe("resume_signer_setup Continue gate (4e18814c Screen 2)", () => {
     expect(finalizeSlice).toContain("Signer details could not be applied");
     expect(finalizeSlice).toContain("prepareCommercialReviewSnapshotAuthority");
   });
+
+  it("Continue → Prepare → esign recovers pending accept instead of silent-stall", () => {
+    expect(intakeSrc).toContain("ensureAcceptedCommercialReviewForEsignHandoff");
+    const continueBlock = intakeSrc.slice(
+      intakeSrc.indexOf('if (cta.reason === "dashboard_signer_setup_resume_complete")'),
+      intakeSrc.indexOf('if (cta.reason === "dashboard_signer_setup_resume_complete")') + 900,
+    );
+    expect(continueBlock).toContain("finalizePaidProSignerMetadataAndOpenReviewDecision");
+    expect(continueBlock).toContain("handlePaidProPrepareSignaturesFromFirstReview()");
+    const prepareFrag = intakeSrc.slice(
+      intakeSrc.indexOf("const handlePaidProPrepareSignaturesFromFirstReview = React.useCallback"),
+      intakeSrc.indexOf("const handlePaidProPrepareSignaturesFromFirstReview = React.useCallback") + 4500,
+    );
+    expect(prepareFrag).toContain("ensureAcceptedCommercialReviewForEsignHandoff");
+    expect(prepareFrag).toContain("canEnableCommercialPrepareFromServerSnapshot(agreementIdForAccept)");
+    const trackStart = intakeSrc.indexOf("const enterGuidedSignatureTrackRoute = React.useCallback");
+    const trackEnd = intakeSrc.indexOf("const completeGuidedSigningHandoff = React.useCallback", trackStart);
+    const trackFrag = intakeSrc.slice(trackStart, trackEnd > trackStart ? trackEnd : trackStart + 24000);
+    expect(trackFrag).toContain("ensureAcceptedCommercialReviewForEsignHandoff");
+    expect(trackFrag).toContain("enterGuidedSignatureTrackRoute:accept_blocked");
+    expect(trackFrag).toContain("enterGuidedSignatureTrackRoute:handoff_ok");
+    expect(continueBlock).not.toMatch(/resend|sendEmail|send_mail/i);
+    expect(continueBlock).not.toMatch(/stripe|checkout|premiumCompletion/i);
+    expect(trackFrag).not.toMatch(/Ask LawDog to revise[\s\S]{0,80}Apply/);
+  });
+
+  it("keeps the #180 resume Continue client gate (empty/invalid signers fail closed)", () => {
+    const empty = evaluateDashboardSignerSetupResumeContinueGate({
+      partySignerNames: ["", ""],
+      recipient1Name: CEDAR,
+      recipient2Name: BLUE,
+      recipient1Email: "",
+      recipient2Email: "",
+      rawCorpus: askLawDogResumeCorpus({ names: false }),
+    });
+    expect(empty.detailsComplete).toBe(false);
+    expect(empty.wouldBlockContinueWithoutNetwork).toBe(true);
+    const finalizeSlice = intakeSrc.slice(
+      intakeSrc.indexOf("const finalizePaidProSignerMetadataAndOpenReviewDecision = React.useCallback"),
+      intakeSrc.indexOf("const finalizePaidProSignerMetadataAndOpenReviewDecision = React.useCallback") + 9000,
+    );
+    expect(finalizeSlice).toContain("Signer details could not be applied");
+    expect(finalizeSlice).toContain("if (!paidProSignerDetailsGate.complete)");
+  });
 });

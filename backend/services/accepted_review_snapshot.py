@@ -104,12 +104,13 @@ def get_accepted_snapshot_record(draft: Any) -> Optional[Dict[str, Any]]:
 def _latest_pending_from_registry(reg: Dict[str, Any]) -> Optional[Dict[str, Any]]:
     snaps = reg.get("snapshots") if isinstance(reg.get("snapshots"), dict) else {}
     pending = [
-        s
-        for s in snaps.values()
+        (i, s)
+        for i, s in enumerate(snaps.values())
         if isinstance(s, dict) and _clean(s.get("status")) == STATUS_PENDING
     ]
-    pending.sort(key=lambda s: str(s.get("createdAt") or ""), reverse=True)
-    return pending[0] if pending else None
+    # createdAt first; same-second persist uses insertion order so the last write wins.
+    pending.sort(key=lambda item: (str(item[1].get("createdAt") or ""), item[0]), reverse=True)
+    return pending[0][1] if pending else None
 
 
 def latest_pending_snapshot(draft: Any) -> Optional[Dict[str, Any]]:
@@ -153,6 +154,33 @@ def leftover_accepted_vs_new_pending_continue(
     snaps = registry.get("snapshots") if isinstance(registry.get("snapshots"), dict) else {}
     current = snaps.get(current_id)
     if not is_leftover_starter_accepted_row(current):
+        return False
+    if _clean(accepting_snapshot.get("status")) != STATUS_PENDING:
+        return False
+    latest = _latest_pending_from_registry(registry)
+    if not latest:
+        return False
+    return _clean(latest.get("snapshotId")) == accepting_id
+
+
+def owner_revision_empty_token_latest_pending(
+    *,
+    registry: Dict[str, Any],
+    accepting_snapshot: Dict[str, Any],
+    allow_revision: bool,
+    expected_token: str,
+) -> bool:
+    """True when owner Continue accepts the latest pending after persist+GET cleared the token.
+
+    Bound: explicit ``allow_revision`` + latest pending persist + empty expected token.
+    Does not use leftover Logo/[ORG_1] detection. Empty-token accept without
+    ``allow_revision`` stays fail-closed for a real commercial accepted row.
+    """
+    if not allow_revision or expected_token != "":
+        return False
+    current_id = _clean(registry.get("acceptedSnapshotId"))
+    accepting_id = _clean(accepting_snapshot.get("snapshotId"))
+    if not current_id or not accepting_id or current_id == accepting_id:
         return False
     if _clean(accepting_snapshot.get("status")) != STATUS_PENDING:
         return False
@@ -451,7 +479,16 @@ def accept_snapshot(
         if current_accepted != expected_token:
             # Persist+GET of sequential Review clears leftover accept locally and
             # sends "". Leftover/starter accepted must not own that token.
-            if not (leftover_continue and expected_token == ""):
+            # Resume Screen 2 Continue does the same clear against a real
+            # commercial accepted row — recover only with explicit allow_revision
+            # of the latest pending (not leftover Logo/[ORG_1] detection).
+            owner_revision_empty = owner_revision_empty_token_latest_pending(
+                registry=reg,
+                accepting_snapshot=snap,
+                allow_revision=bool(allow_revision),
+                expected_token=expected_token,
+            )
+            if not (leftover_continue and expected_token == "") and not owner_revision_empty:
                 return False, "accept_concurrency_conflict", None, None
 
     # Idempotent identical accept (no version bump).

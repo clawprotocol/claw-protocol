@@ -20,6 +20,7 @@ from backend.services.accepted_review_snapshot import (
     get_review_hydration_snapshot,
     is_leftover_starter_accepted_row,
     leftover_accepted_vs_new_pending_continue,
+    owner_revision_empty_token_latest_pending,
     sha256_hex_text,
 )
 from backend.services.vs01_signing_envelope_provenance import (
@@ -1139,6 +1140,24 @@ def test_leftover_starter_row_classifier_is_logo_org1_not_painted_services():
         registry=commercial_reg, accepting_snapshot=painted
     ) is False
 
+    commercial["status"] = "accepted"
+    painted["status"] = "pending"
+    assert owner_revision_empty_token_latest_pending(
+        registry=commercial_reg,
+        accepting_snapshot=painted,
+        allow_revision=True,
+        expected_token="",
+    ) is True
+    assert owner_revision_empty_token_latest_pending(
+        registry=commercial_reg,
+        accepting_snapshot=painted,
+        allow_revision=False,
+        expected_token="",
+    ) is False
+    assert leftover_accepted_vs_new_pending_continue(
+        registry=commercial_reg, accepting_snapshot=painted
+    ) is False
+
 
 def test_accept_pending_persist_succeeds_over_leftover_accepted_logo_org1(
     monkeypatch, tmp_path
@@ -1257,6 +1276,136 @@ def test_real_commercial_accepted_still_blocks_empty_token_pending_accept(
     draft = load_draft(aid)
     assert draft["accepted_review_snapshot_v1"]["snapshotId"] == accepted["snapshot_id"]
     assert draft["accepted_review_snapshot_v1"]["corpusPlain"] == first.strip()
+
+
+def test_resume_continue_accepts_latest_pending_over_commercial_with_allow_revision(
+    monkeypatch, tmp_path
+):
+    """Resume Screen 2 Continue: persist+GET clears local token; allow_revision recovers."""
+    _env(monkeypatch, tmp_path)
+    client = TestClient(app)
+    aid = _create_agreement(client)
+    first = _corpus("COMMERCIAL")
+    accepted = _persist_and_accept(client, aid, first)
+    later = _corpus("SIGNER_APPLIED")
+    posted = client.post(
+        f"/api/agreements/{aid}/canonical-review-snapshot",
+        headers=_ORG_H,
+        json={"corpus_plain": later, "claimed_digest": sha256_hex_text(later)},
+    )
+    assert posted.status_code == 200, posted.text
+    later_snap = posted.json()["snapshot"]
+    assert posted.json().get("accepted_snapshot_id") == accepted["snapshot_id"]
+
+    got_pending = client.get(f"/api/agreements/{aid}/canonical-review-snapshot", headers=_ORG_H)
+    assert got_pending.status_code == 200, got_pending.text
+    pending_body = got_pending.json()
+    assert pending_body.get("status") == "pending"
+    assert pending_body["snapshot"]["snapshot_id"] == later_snap["snapshot_id"]
+    assert pending_body.get("accepted_snapshot_id") == accepted["snapshot_id"]
+
+    recovered = client.post(
+        f"/api/agreements/{aid}/canonical-review-snapshot/accept",
+        headers=_ORG_H,
+        json={
+            "snapshot_id": later_snap["snapshot_id"],
+            "expected_digest": later_snap["corpus_sha256"],
+            "expected_accepted_snapshot_id": "",
+            "allow_revision": True,
+            "display_snapshot_id": later_snap["snapshot_id"],
+            "display_digest": later_snap["corpus_sha256"],
+            "display_length": later_snap["corpus_length"],
+        },
+    )
+    assert recovered.status_code == 200, recovered.text
+    recovered_snap = recovered.json()["accepted"]
+    assert recovered_snap["snapshot_id"] == later_snap["snapshot_id"]
+    assert recovered_snap["status"] == "accepted"
+
+    got_accepted = client.get(f"/api/agreements/{aid}/canonical-review-snapshot", headers=_ORG_H)
+    assert got_accepted.status_code == 200, got_accepted.text
+    after = got_accepted.json()
+    assert after.get("status") == "accepted"
+    assert after["snapshot"]["snapshot_id"] == later_snap["snapshot_id"]
+    assert after.get("accepted_snapshot_id") == later_snap["snapshot_id"]
+    assert (after["snapshot"].get("corpus_plain") or "").strip() == later.strip()
+
+
+def test_resume_continue_accept_with_server_accepted_token_and_allow_revision(
+    monkeypatch, tmp_path
+):
+    """Client recovery: GET accepted_snapshot_id + allow_revision accepts latest pending."""
+    _env(monkeypatch, tmp_path)
+    client = TestClient(app)
+    aid = _create_agreement(client)
+    first = _corpus("COMMERCIAL")
+    accepted = _persist_and_accept(client, aid, first)
+    later = _corpus("RESUME_CONTINUE")
+    posted = client.post(
+        f"/api/agreements/{aid}/canonical-review-snapshot",
+        headers=_ORG_H,
+        json={"corpus_plain": later, "claimed_digest": sha256_hex_text(later)},
+    )
+    assert posted.status_code == 200, posted.text
+    later_snap = posted.json()["snapshot"]
+    got = client.get(f"/api/agreements/{aid}/canonical-review-snapshot", headers=_ORG_H)
+    assert got.status_code == 200
+    assert got.json().get("status") == "pending"
+    token = got.json().get("accepted_snapshot_id")
+    assert token == accepted["snapshot_id"]
+
+    recovered = client.post(
+        f"/api/agreements/{aid}/canonical-review-snapshot/accept",
+        headers=_ORG_H,
+        json={
+            "snapshot_id": later_snap["snapshot_id"],
+            "expected_digest": later_snap["corpus_sha256"],
+            "expected_accepted_snapshot_id": token,
+            "allow_revision": True,
+            "display_snapshot_id": later_snap["snapshot_id"],
+            "display_digest": later_snap["corpus_sha256"],
+            "display_length": later_snap["corpus_length"],
+        },
+    )
+    assert recovered.status_code == 200, recovered.text
+    assert recovered.json()["accepted"]["snapshot_id"] == later_snap["snapshot_id"]
+
+
+def test_owner_revision_empty_token_still_requires_latest_pending(monkeypatch, tmp_path):
+    """allow_revision + expected='' cannot accept a stale pending when a newer pending exists."""
+    _env(monkeypatch, tmp_path)
+    client = TestClient(app)
+    aid = _create_agreement(client)
+    first = _corpus("COMMERCIAL")
+    _persist_and_accept(client, aid, first)
+    mid = _corpus("MID")
+    mid_posted = client.post(
+        f"/api/agreements/{aid}/canonical-review-snapshot",
+        headers=_ORG_H,
+        json={"corpus_plain": mid, "claimed_digest": sha256_hex_text(mid)},
+    )
+    assert mid_posted.status_code == 200, mid_posted.text
+    mid_snap = mid_posted.json()["snapshot"]
+    later = _corpus("LATEST")
+    later_posted = client.post(
+        f"/api/agreements/{aid}/canonical-review-snapshot",
+        headers=_ORG_H,
+        json={"corpus_plain": later, "claimed_digest": sha256_hex_text(later)},
+    )
+    assert later_posted.status_code == 200, later_posted.text
+
+    blocked = client.post(
+        f"/api/agreements/{aid}/canonical-review-snapshot/accept",
+        headers=_ORG_H,
+        json={
+            "snapshot_id": mid_snap["snapshot_id"],
+            "expected_digest": mid_snap["corpus_sha256"],
+            "expected_accepted_snapshot_id": "",
+            "allow_revision": True,
+        },
+    )
+    assert blocked.status_code == 409, blocked.text
+    assert blocked.json()["detail"]["code"] == "accept_concurrency_conflict"
 
 
 def test_persist_route_still_refuses_true_12_then_14(monkeypatch, tmp_path):
