@@ -22,15 +22,20 @@ import {
   remountHasDualPartySignatureFields,
   remountPrepareShouldFailClosedWithoutCertifiedCorpus,
   remountSurfaceIsEmptySelfSignShell,
+  resolveRemountPrepareCorpusIncludingContent,
   resolveRemountPrepareCorpusText,
   restorePrepareFromFrozenSigningAuthority,
 } from "./vs01EsignRemountPrepareRestore";
 import {
   FIRST_FAILING_DOUBLE_CONTINUE_REMOUNT_LOADING_PREDICATE,
+  FIRST_FAILING_THIN_PERSIST_ACCEPTED_CRS_REMOUNT_PREDICATE,
   remountPrepareShouldPaintBeforeContentInspect,
+  remountReviewPlainFromAcceptedOrPersist,
+  resolveAcceptedCrsPlainForRemountPaint,
   resolveCertifiedReviewForEsignRemount,
 } from "./vs01EsignRemountReviewBind";
 import { signingPacketHasPaginatedCorpus } from "./vs01CanonicalPageRender";
+import { reviewCorpusLooksLikeLeftoverFusedNotices } from "./vs01CurrentReviewSotForSeed";
 import { VS01_SIGNING_CORPUS_MIN_LEN } from "./vs01SigningCorpus";
 
 const AGREEMENT_ID = "4e18814c-c8fe-4eb9-85ae-a3e694cb596e";
@@ -104,6 +109,24 @@ function twoAuthorizedFrozen(): FrozenSigningAuthoritySnapshotV1 {
       executionBlockHash: hashPaidProCorpus("witness"),
     },
   };
+}
+
+function leftoverLookingAcceptedCrs(): string {
+  return [
+    "SERVICES AGREEMENT",
+    "",
+    "This Agreement is between Cedar Peak Design LLC (Client) and Blue Harbor Media Inc (Service Provider).",
+    "",
+    "12. NOTICES",
+    "If to Cedar Peak Design LLC:",
+    "Address: 30 days notice at the registered office unless otherwise specified.",
+    "If to Blue Harbor Media Inc:",
+    "Attn: Jordan Lee",
+    "",
+    ...Array.from({ length: 28 }, () => "The parties agree to perform the stated commercial obligations in good faith."),
+    "",
+    "IN WITNESS WHEREOF, the Parties execute this Agreement electronically via LawDog.",
+  ].join("\n");
 }
 
 function hungFetchContent(): Promise<never> {
@@ -262,12 +285,133 @@ describe("double-Continue minted Prepare remount content load", () => {
     ).toBe(true);
   });
 
+  it("thin persist Review paints from accepted CRS + frozen SA without leftover inspect", async () => {
+    expect(FIRST_FAILING_THIN_PERSIST_ACCEPTED_CRS_REMOUNT_PREDICATE).toBe(
+      "esign_remount_fail_closes_thin_persist_despite_accepted_crs",
+    );
+    const acceptedCrs = leftoverLookingAcceptedCrs();
+    expect(acceptedCrs.length).toBeGreaterThanOrEqual(VS01_SIGNING_CORPUS_MIN_LEN);
+    expect(reviewCorpusLooksLikeLeftoverFusedNotices(acceptedCrs)).toBe(true);
+    expect(
+      remountReviewPlainFromAcceptedOrPersist(acceptedCrs, "too short pending persist"),
+    ).toBe(acceptedCrs);
+
+    const fetchContent = vi.fn(() => hungFetchContent());
+    const certified = await Promise.race([
+      resolveCertifiedReviewForEsignRemount({
+        documentId: DOUBLE_CONTINUE_DOC,
+        fetchDocumentMeta: async () => ({ agreementId: AGREEMENT_ID }),
+        fetchDraft: async () =>
+          ({
+            id: AGREEMENT_ID,
+            accepted_review_snapshot_v1: { status: "accepted", corpusPlain: acceptedCrs },
+          }) as never,
+        fetchAcceptedReviewCorpus: async () => "",
+        fetchPersistReviewGet: async () => "pending persist under floor",
+        fetchReviewPaintSot: async () => "",
+      }),
+      hungFetchContent().then(() => {
+        throw new Error("must not wait on GET /content");
+      }),
+    ]);
+    expect(fetchContent).not.toHaveBeenCalled();
+    const paintCorpus = await resolveAcceptedCrsPlainForRemountPaint({
+      agreementId: certified.agreementId,
+      draft: certified.draft,
+      persistReviewCorpus: certified.persistReviewCorpus,
+      fetchAcceptedReviewCorpus: async () => "",
+      fetchPersistReviewGet: async () => "pending persist under floor",
+    });
+    expect(paintCorpus).toBe(acceptedCrs);
+    expect(remountPrepareShouldPaintBeforeContentInspect(paintCorpus)).toBe(true);
+
+    const frozen = twoAuthorizedFrozen();
+    const restored = await restorePrepareFromFrozenSigningAuthority({
+      documentId: DOUBLE_CONTINUE_DOC,
+      hideStepper: true,
+      reviewCorpus: paintCorpus,
+      agreementId: certified.agreementId,
+      loadFrozen: async () => frozen,
+      fetchDocumentMeta: async () => {
+        throw new Error("must reuse certified agreementId");
+      },
+    });
+    expect(restored.ok).toBe(true);
+    if (!restored.ok) return;
+
+    const remountCorpus = await resolveRemountPrepareCorpusIncludingContent({
+      persistReviewCorpus: paintCorpus,
+      restoredBridgeCorpus: restored.bridge.agreementCorpusText,
+      fetchDocumentContentPlain: () => {
+        throw new Error("must not fetch GET /content when accepted CRS is ready");
+      },
+    });
+    expect(remountCorpus.ok).toBe(true);
+    if (!remountCorpus.ok) return;
+    const roles = buildVs01PrepareSigningRolesForBridge({
+      agreementId: AGREEMENT_ID,
+      creatorName: restored.bridge.creatorName,
+      creatorEmail: restored.bridge.creatorEmail,
+      ownerSignerName: restored.bridge.creatorSignerName,
+      ownerSignerTitle: restored.bridge.creatorSignerTitle,
+      counterparties: restored.bridge.counterparties,
+      bridge: restored.bridge,
+    });
+    const model = buildVs01SigningPacketModel({
+      mode: "guided_pro",
+      authoritativeCorpusPlain: remountCorpus.corpus,
+      roles,
+      bridge: restored.bridge,
+    });
+    expect(model.allowed).toBe(true);
+    expect(signingPacketHasPaginatedCorpus(model)).toBe(true);
+    const signatureFields = model.fields.filter((f) => f.type === "signature" && !f.autoInitials);
+    expect(signatureFields.length).toBeGreaterThanOrEqual(1);
+    expect(
+      remountPrepareShouldFailClosedWithoutCertifiedCorpus({
+        hideStepper: true,
+        seedDocumentId: DOUBLE_CONTINUE_DOC,
+        remountPrepareRestored: true,
+        corpus: remountCorpus,
+      }),
+    ).toBe(false);
+  });
+
+  it("thin persist + empty CRS paints from document content without seed POST", async () => {
+    const contentPlain = cedarBlueServicesAgreement();
+    const certified = await resolveCertifiedReviewForEsignRemount({
+      documentId: DOUBLE_CONTINUE_DOC,
+      fetchDocumentMeta: async () => ({ agreementId: AGREEMENT_ID }),
+      fetchDraft: async () => null,
+      fetchAcceptedReviewCorpus: async () => "",
+      fetchPersistReviewGet: async () => "short pending",
+      fetchReviewPaintSot: async () => "",
+    });
+    expect(certified.persistReviewCorpus).toBe("");
+    expect(remountPrepareShouldPaintBeforeContentInspect(certified.persistReviewCorpus)).toBe(false);
+
+    const fetchContentPlain = vi.fn(async () => contentPlain);
+    const remountCorpus = await resolveRemountPrepareCorpusIncludingContent({
+      persistReviewCorpus: certified.persistReviewCorpus,
+      restoredBridgeCorpus: "",
+      fetchDocumentContentPlain: fetchContentPlain,
+    });
+    expect(fetchContentPlain).toHaveBeenCalledTimes(1);
+    expect(remountCorpus.ok).toBe(true);
+    if (!remountCorpus.ok) return;
+    expect(remountCorpus.corpus).toBe(contentPlain);
+    expect(remountPrepareShouldPaintBeforeContentInspect(remountCorpus.corpus)).toBe(true);
+  });
+
   it("wizard leaves Loading from persist Review before fetchDocumentContent", () => {
     const wizard = readFileSync(join(__dirname, "Vs01Wizard.tsx"), "utf8");
     const start = wizard.indexOf("/** Deep link: /app/esign/:documentId");
     const persistAt = wizard.indexOf("resolveCertifiedReviewForEsignRemount", start);
     const shaAt = wizard.indexOf("setContentSha256(`corpus:${fingerprintAgreementBody(remountCorpus.corpus)}`)", start);
-    const paintGateAt = wizard.indexOf("remountPrepareShouldPaintBeforeContentInspect", start);
+    const paintGateAt = wizard.indexOf(
+      "const paintedFromPersistReview = remountPrepareShouldPaintBeforeContentInspect",
+      start,
+    );
     const fetchAt = wizard.indexOf("const blob = await fetchDocumentContent(sid)", start);
     expect(persistAt).toBeGreaterThan(start);
     expect(shaAt).toBeGreaterThan(persistAt);
@@ -275,5 +419,9 @@ describe("double-Continue minted Prepare remount content load", () => {
     expect(fetchAt).toBeGreaterThan(paintGateAt);
     expect(wizard).toContain("setVs01LinkedAgreementId(remountAgreementId)");
     expect(wizard).toContain("paintedFromPersistReview && hideStepper && sid.startsWith(\"doc_\")");
+    expect(wizard).toContain("resolveRemountPrepareCorpusIncludingContent");
+    expect(wizard).toContain("fetchRemountPaintPlainFromDocumentContent");
+    expect(wizard).toContain("resolveAcceptedCrsPlainForRemountPaint");
+    expect(wizard.slice(start, shaAt)).not.toContain("const blob = await fetchDocumentContent(sid)");
   });
 });

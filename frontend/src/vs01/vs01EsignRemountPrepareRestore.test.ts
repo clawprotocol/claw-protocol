@@ -378,13 +378,15 @@ describe("esign remount Prepare dual-party fields (not empty self-sign)", () => 
     expect(wizard).toContain("setPaidProAgreementBridgeSkip");
     expect(wizard).toContain("ensureReviewCorpusOnEsignEntry");
     expect(wizard).toContain("resolveCertifiedReviewForEsignRemount");
-    expect(wizard).toContain("resolveRemountPrepareCorpusText");
+    expect(wizard).toContain("resolveAcceptedCrsPlainForRemountPaint");
+    expect(wizard).toContain("resolveRemountPrepareCorpusIncludingContent");
+    expect(wizard).toContain("fetchRemountPaintPlainFromDocumentContent");
     expect(wizard).toContain("fetchRemountCertifiedReviewCorpus");
     const start = wizard.indexOf("/** Deep link: /app/esign/:documentId");
     const persistAt = wizard.indexOf("resolveCertifiedReviewForEsignRemount", start);
     const restoreAt = wizard.indexOf("restorePrepareFromFrozenSigningAuthority", persistAt);
     const crsAt = wizard.indexOf("fetchRemountCertifiedReviewCorpus", restoreAt);
-    const remountCorpusAt = wizard.indexOf("resolveRemountPrepareCorpusText", restoreAt);
+    const remountCorpusAt = wizard.indexOf("resolveRemountPrepareCorpusIncludingContent", restoreAt);
     const hydrateAt = wizard.indexOf("const hydrateLocalPaidProBridge", restoreAt);
     const leftoverAt = wizard.indexOf("ensureReviewCorpusOnEsignEntry", hydrateAt);
     expect(persistAt).toBeGreaterThan(start);
@@ -558,14 +560,22 @@ describe("esign remount Prepare dual-party fields (not empty self-sign)", () => 
 
     const leftover = leftoverFusedNoticesCorpus();
     const leftoverPacket = resolveRemountPrepareSigningPacket({
-      persistReviewCorpus: leftover,
-      restoredBridgeCorpus: leftover,
+      persistReviewCorpus: "",
+      restoredBridgeCorpus: "",
       roles: [],
       bridge: null,
     });
     expect(leftoverPacket.ok).toBe(false);
     if (leftoverPacket.ok) return;
-    expect(leftoverPacket.reason).toBe("leftover_fused");
+    expect(leftoverPacket.reason).toBe("empty_or_short");
+    const leftoverContent = resolveRemountPrepareCorpusText({
+      persistReviewCorpus: "",
+      restoredBridgeCorpus: "",
+      documentContentPlain: leftover,
+    });
+    expect(leftoverContent.ok).toBe(false);
+    if (leftoverContent.ok) return;
+    expect(leftoverContent.reason).toBe("leftover_fused");
   });
 
   it("short or empty remount corpus fail-closes after frozen restore", () => {
@@ -603,13 +613,21 @@ describe("esign remount Prepare dual-party fields (not empty self-sign)", () => 
     ).toBe(true);
   });
 
-  it("leftover fused Notices is refused as remount Prepare corpus", () => {
+  it("leftover fused Notices is refused as remount GET /content, not accepted CRS", () => {
     const leftover = leftoverFusedNoticesCorpus();
     expect(leftover.length).toBeGreaterThanOrEqual(1500);
     expect(reviewCorpusLooksLikeLeftoverFusedNotices(leftover)).toBe(true);
-    const refused = resolveRemountPrepareCorpusText({
+    const acceptedDespiteDetector = resolveRemountPrepareCorpusText({
       persistReviewCorpus: leftover,
-      restoredBridgeCorpus: leftover,
+      restoredBridgeCorpus: "",
+    });
+    expect(acceptedDespiteDetector.ok).toBe(true);
+    if (!acceptedDespiteDetector.ok) return;
+    expect(acceptedDespiteDetector.corpus).toBe(leftover);
+    const refused = resolveRemountPrepareCorpusText({
+      persistReviewCorpus: "",
+      restoredBridgeCorpus: "",
+      documentContentPlain: leftover,
     });
     expect(refused.ok).toBe(false);
     if (refused.ok) return;

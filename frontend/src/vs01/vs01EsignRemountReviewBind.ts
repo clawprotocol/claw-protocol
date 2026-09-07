@@ -86,6 +86,14 @@ export const FIRST_FAILING_ESIGN_REMOUNT_PREDICATE =
 export const FIRST_FAILING_DOUBLE_CONTINUE_REMOUNT_LOADING_PREDICATE =
   "esign_double_continue_minted_prepare_stuck_loading" as const;
 
+/**
+ * After #186, second-mint remount fail-closed “Could not load” when persist
+ * Review GET was missing/thin even though accepted CRS + frozen SA (+
+ * optional GET /content) were already 200. Paint from those bodies.
+ */
+export const FIRST_FAILING_THIN_PERSIST_ACCEPTED_CRS_REMOUNT_PREDICATE =
+  "esign_remount_fail_closes_thin_persist_despite_accepted_crs" as const;
+
 export type CertifiedReviewForEsignRemount = {
   agreementId: string;
   persistReviewCorpus: string;
@@ -174,6 +182,23 @@ function certifiedPlainOrEmpty(text: string | null | undefined): string {
     return "";
   }
   return resolveCertifiedReviewCorpusForSigningSeed(plain);
+}
+
+/**
+ * Remount Prepare paint body. Accepted CRS / persist Review GET must not be
+ * leftover-filtered — that detector is for GET /content packet bytes and
+ * false-positives commercial Notices ("Address:" + "30 days").
+ * Prefer the longer accepted body over a thin pending persist GET.
+ */
+export function remountReviewPlainFromAcceptedOrPersist(
+  current: string | null | undefined,
+  candidate: string | null | undefined,
+): string {
+  const have = persistReviewGetPlainForSigningSeed(current);
+  const next = persistReviewGetPlainForSigningSeed(candidate);
+  if (!next) return have;
+  if (!have) return next;
+  return next.length > have.length ? next : have;
 }
 
 async function defaultFetchAcceptedReviewCorpus(agreementId: string): Promise<string> {
@@ -351,6 +376,9 @@ export async function resolveCertifiedReviewForEsignRemount(
   // Resolve persist Review before leftover GET /content. Do not inspect
   // leftover GET as a success path while persist Review is still pending.
   // Persist Review GET 200 is the replace body — do not leftover-filter it.
+  // Leftover-looking session/hydrate stores stay leftover-filtered so seed
+  // does not POST leftover fused Notices. Remount paint uses
+  // resolveAcceptedCrsPlainForRemountPaint when this body is empty/thin.
   let certifiedReviewCorpus = resolveCertifiedReviewCorpusForSigningSeed(
     readAcceptedReviewCorpusFromDraftLike(draft),
   );
@@ -390,6 +418,49 @@ export async function resolveCertifiedReviewForEsignRemount(
     existingBridgeCorpus,
     draft,
   };
+}
+
+/**
+ * Remount Prepare paint SoT when leftover-filtered persist Review is empty
+ * or thin. Uses accepted CRS / persist Review GET bytes without leftover
+ * filter (commercial Notices false-positive). Prefer the longer accepted
+ * body over a thin pending persist GET. Does not invent a corpus.
+ */
+export async function resolveAcceptedCrsPlainForRemountPaint(
+  args: Pick<
+    ResolveCertifiedReviewForEsignRemountArgs,
+    "agreementId" | "draft" | "fetchPersistReviewGet" | "fetchAcceptedReviewCorpus"
+  > & {
+    persistReviewCorpus?: string | null;
+  },
+): Promise<string> {
+  const agreementId = (args.agreementId ?? "").trim();
+  let corpus = persistReviewGetPlainForSigningSeed(args.persistReviewCorpus);
+  corpus = remountReviewPlainFromAcceptedOrPersist(
+    corpus,
+    readAcceptedReviewCorpusFromDraftLike(args.draft),
+  );
+  if (agreementId) {
+    try {
+      corpus = remountReviewPlainFromAcceptedOrPersist(
+        corpus,
+        certifiedPlainOrEmpty(
+          await (args.fetchAcceptedReviewCorpus ?? defaultFetchAcceptedReviewCorpus)(agreementId),
+        ),
+      );
+    } catch {
+      /* keep draft accepted / persist already in hand */
+    }
+    try {
+      corpus = remountReviewPlainFromAcceptedOrPersist(
+        corpus,
+        await (args.fetchPersistReviewGet ?? defaultFetchPersistReviewGet)(agreementId),
+      );
+    } catch {
+      /* keep accepted CRS when persist GET is thin / missing */
+    }
+  }
+  return persistReviewGetPlainForSigningSeed(corpus);
 }
 
 /**

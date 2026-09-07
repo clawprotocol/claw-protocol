@@ -46,6 +46,7 @@ describe("Vs01Wizard agreement bridge (static)", () => {
     const s = readFileSync(join(__dirname, "Vs01Wizard.tsx"), "utf8");
     expect(s).toContain("ensureReviewCorpusOnEsignEntry");
     expect(s).toContain("resolveCertifiedReviewForEsignRemount");
+    expect(s).toContain("resolveAcceptedCrsPlainForRemountPaint");
     expect(s).toContain("remountPrepareShouldPaintBeforeContentInspect");
     expect(s).toContain('from "./vs01EsignRemountReviewBind"');
     const start = s.indexOf("/** Deep link: /app/esign/:documentId");
@@ -60,7 +61,7 @@ describe("Vs01Wizard agreement bridge (static)", () => {
     expect(s).toContain("leftoverGetContentRefuseFromError");
     expect(s).toContain("persistReviewCorpus");
     expect(s).toContain("bound.persistReviewCorpus");
-    expect(s).toContain("resolveRemountPrepareCorpusText");
+    expect(s).toContain("resolveRemountPrepareCorpusIncludingContent");
     expect(s).toContain("fetchRemountCertifiedReviewCorpus");
     expect(s).toContain("remountPrepareShouldFailClosedWithoutCertifiedCorpus");
     expect(s).toContain("leftoverGetContentRefuseFromError(e) && persistReviewCorpus");
