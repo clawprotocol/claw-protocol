@@ -822,6 +822,15 @@ export function isNonAuthoritativeFreezePartyName(name: string): boolean {
  * manifest (e.g. a 3-party recovery, a dropped Client, a phantom fifth party, or a "Party 1"
  * placeholder standing in for a legal entity).
  */
+function corpusMentionsLegalName(corpus: string, name: string): boolean {
+  const n = String(name || "").trim();
+  if (n.length < 2) return false;
+  if (corpus.includes(n)) return true;
+  const needle = n.replace(/[.,]/g, "").replace(/\s+/g, " ").trim().toLowerCase();
+  const hay = corpus.replace(/[.,]/g, "").toLowerCase();
+  return needle.length >= 4 && hay.includes(needle);
+}
+
 /**
  * True when a commercially usable corpus already names every intake-manifest legal party.
  * Leftover 2-party draft.parties / lagged prep.parties must not fail-close that 200 body.
@@ -839,7 +848,7 @@ export function commercialCorpusCarriesIntakeManifestParties(
     isAuthoritativeLegalEntityName,
   );
   if (intakeNames.length < intakeManifestCount) return false;
-  return intakeNames.slice(0, intakeManifestCount).every((name) => text.includes(name));
+  return intakeNames.slice(0, intakeManifestCount).every((name) => corpusMentionsLegalName(text, name));
 }
 
 export function assertPaidProFreezeCandidateManifestCountAgreement(

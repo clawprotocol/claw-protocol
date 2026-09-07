@@ -85,11 +85,9 @@ function buildUsableMultipartyCommercialCorpus(names: readonly string[], targetL
     "",
   ].join("\n");
   const tail = ["", "IN WITNESS WHEREOF, the parties have executed this Agreement.", "", signatures].join("\n");
-  const midTarget = Math.max(8_000, targetLen - tail.length - 80);
-  const mid = padOperative(midTarget, head);
-  const body = `${mid}${tail}`;
-  if (body.length >= targetLen) return body;
-  return `${mid}${padOperative(targetLen - tail.length, "")}${tail}`;
+  const midBudget = Math.max(8_500, Math.min(targetLen, 17_800) - tail.length);
+  const mid = padOperative(midBudget, head);
+  return `${mid}${tail}`;
 }
 
 function threePartyIntake(): string {
