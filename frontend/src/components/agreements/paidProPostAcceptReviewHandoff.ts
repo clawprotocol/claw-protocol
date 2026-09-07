@@ -11,6 +11,8 @@ import {
   selectGuidedSignatureTrackCorpus,
   type GuidedSignatureTrackCorpusSelection,
 } from "./guidedDealCompletion/guidedFinalReviewToSigning";
+import { GUIDED_SIGNING_AUTHORITATIVE_MIN_LEN } from "./guidedDealCompletion/guidedReviewSigningContinuity";
+import { GUIDED_PRO_VS01_BRIDGE_MIN_CORPUS_LEN } from "./guidedDealCompletion/guidedVs01SigningHandoff";
 import type { CanonicalFinalPartyManifest } from "./guidedDealCompletion/canonicalFinalPartyManifest";
 import { fingerprintAgreementBody } from "./guidedDealCompletion/guidedSigningPacketVersion";
 import {
@@ -20,6 +22,23 @@ import {
 
 export const POST_ACCEPT_CONTINUE_TO_SIGNATURE_LINKS_REASON =
   "dashboard_signer_setup_resume_complete";
+
+/**
+ * Live-proven on 4e18814c / index-A1PM84JJ.js: assertGuidedVs01SigningHandoffReady
+ * used hj=2000 (GUIDED_SIGNING_AUTHORITATIVE_MIN_LEN) while the commercial
+ * Prepare / VS01 bridge floor is 1500 (zGe/b3t). Accepted display 1831 and
+ * track body 1920 both failed closed. Decision-2 accepted resume uses this
+ * 1500 floor; default 2000 stays for non-accepted / hollow-starter paths.
+ */
+export const DECISION2_ACCEPTED_PREPARE_MIN_CORPUS_LEN = GUIDED_PRO_VS01_BRIDGE_MIN_CORPUS_LEN;
+
+export function resolveDecision2PrepareHandoffMinCorpusLen(
+  acceptedSnapshotEnabled: boolean,
+): number {
+  return acceptedSnapshotEnabled
+    ? DECISION2_ACCEPTED_PREPARE_MIN_CORPUS_LEN
+    : GUIDED_SIGNING_AUTHORITATIVE_MIN_LEN;
+}
 
 export type PostAcceptReviewHandoffCta = {
   label: string;
@@ -120,6 +139,7 @@ export function resolvePostAcceptPrepareTrackCorpus(args: {
     finalizedSignerApplied: args.finalizedSignerApplied,
     finalizedSigning: args.finalizedSigning,
     acceptedReview: args.acceptedReview,
+    minLen: DECISION2_ACCEPTED_PREPARE_MIN_CORPUS_LEN,
   });
 }
 
@@ -151,6 +171,7 @@ export function firstFailingPostAcceptPrepareTrackPredicate(args: {
     corpusSource: paintSelected.source,
     corpusBody: paintSelected.body,
     intakeText: args.intakeText,
+    minCorpusLen: DECISION2_ACCEPTED_PREPARE_MIN_CORPUS_LEN,
   });
   if (!paintAssert.ok) {
     return paintAssert.reason ?? POST_ACCEPT_PREPARE_TRACK_PAINT_RESELECT_REASON;
@@ -165,6 +186,7 @@ export function firstFailingPostAcceptPrepareTrackPredicate(args: {
     corpusSource: readySelected.source,
     corpusBody: readySelected.body,
     intakeText: args.intakeText,
+    minCorpusLen: DECISION2_ACCEPTED_PREPARE_MIN_CORPUS_LEN,
   });
   return readyAssert.ok ? null : readyAssert.reason ?? "handoff_assert_failed";
 }
@@ -254,6 +276,7 @@ export function resolveResumeAcceptedCommercialEsignHandoff(args: {
     corpusSource: selected.source,
     corpusBody: selected.body,
     intakeText: args.intakeText,
+    minCorpusLen: resolveDecision2PrepareHandoffMinCorpusLen(args.acceptedSnapshotEnabled),
   });
   if (!readyAssert.ok) {
     return { ok: false, reason: readyAssert.reason ?? "handoff_assert_failed" };

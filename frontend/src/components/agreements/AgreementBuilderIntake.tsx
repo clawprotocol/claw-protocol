@@ -887,6 +887,7 @@ import {
   resolvePostAcceptPrepareTrackCorpus,
   resolvePostAcceptReviewHandoffCta,
   resolveResumeAcceptedCommercialEsignHandoff,
+  resolveDecision2PrepareHandoffMinCorpusLen,
   shouldRecoverAcceptedCommercialPrepareTrack,
   shouldSkipReFinalizeBeforePostAcceptPrepare,
 } from "./paidProPostAcceptReviewHandoff";
@@ -30191,11 +30192,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         intakeText: currentPremiumMergedIntakeKey || intakeCombined,
         draftPartyNames: (draft?.parties ?? []).map((p) => String((p as { name?: string }).name ?? "").trim()),
       });
+      const decision2HandoffMinLen = resolveDecision2PrepareHandoffMinCorpusLen(acceptedEnabled);
       let handoffAssert = assertGuidedVs01SigningHandoffReady({
         manifest: signingHandoffManifest,
         corpusSource: selected.source,
         corpusBody: selected.body,
         intakeText: currentPremiumMergedIntakeKey || intakeCombined,
+        minCorpusLen: decision2HandoffMinLen,
       });
       if (!handoffAssert.ok && acceptedEnabled) {
         const vs01Gate = resolveFinalVs01CorpusOrBlock({
@@ -30233,6 +30236,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             corpusSource: selected.source,
             corpusBody: selected.body,
             intakeText: currentPremiumMergedIntakeKey || intakeCombined,
+            minCorpusLen: decision2HandoffMinLen,
           });
           if (handoffAssert.ok) {
             traceSigningAdvance("enterGuidedSignatureTrackRoute:accepted_snapshot_recover");
@@ -30303,6 +30307,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         identities: guidedSignerCanonicalIdentities,
         corpusText: selected.body,
         agreementId: persistedAgreementId,
+        minCorpusLen: decision2HandoffMinLen,
       });
       if (!mergedDraft) {
         traceSigningAdvance("enterGuidedSignatureTrackRoute:draft_missing");
@@ -30392,6 +30397,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             agreementId: id,
             corpusText,
             handoffReady: handoffAssert.ok,
+            minCorpusLen: decision2HandoffMinLen,
           }) &&
           isGuidedSignatureDraftPersistLocallyContinuable(
             signaturePersistFailure?.httpStatus,

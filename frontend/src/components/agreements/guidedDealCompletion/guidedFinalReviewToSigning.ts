@@ -711,6 +711,7 @@ export function resolveGuidedSignatureTrackHandoffDraft<
   identities: readonly CanonicalPartyIdentity[];
   corpusText: string;
   agreementId: string;
+  minCorpusLen?: number;
 }): T | null {
   const agreementId = (args.agreementId || "").trim();
   const corpusText = (args.corpusText || "").trim();
@@ -724,7 +725,8 @@ export function resolveGuidedSignatureTrackHandoffDraft<
     return withIdentities(base);
   }
 
-  if (!agreementId || corpusText.length < GUIDED_SIGNING_AUTHORITATIVE_MIN_LEN) return null;
+  const minLen = args.minCorpusLen ?? GUIDED_SIGNING_AUTHORITATIVE_MIN_LEN;
+  if (!agreementId || corpusText.length < minLen) return null;
 
   return withIdentities({
     id: agreementId,
@@ -786,6 +788,12 @@ export function assertGuidedVs01SigningHandoffReady(args: {
   corpusSource: GuidedSignatureTrackCorpusSource | "none";
   corpusBody?: string;
   intakeText?: string | null;
+  /**
+   * Decision-2 accepted commercial resume uses the 1500 Prepare/bridge floor.
+   * Default stays GUIDED_SIGNING_AUTHORITATIVE_MIN_LEN (2000) so hollow
+   * starters on non-accepted paths still fail closed.
+   */
+  minCorpusLen?: number;
 }): GuidedVs01HandoffAssertion {
   const parties = args.manifest.parties.filter((p) => p.partyName.trim().length >= 2);
   const partyCount = resolveSignerCountFromManifest(
@@ -807,7 +815,8 @@ export function assertGuidedVs01SigningHandoffReady(args: {
     return { ok: false, reason: "corpus_source_not_allowed" };
   }
   const body = (args.corpusBody || "").trim();
-  if (body.length < GUIDED_SIGNING_AUTHORITATIVE_MIN_LEN) {
+  const minLen = args.minCorpusLen ?? GUIDED_SIGNING_AUTHORITATIVE_MIN_LEN;
+  if (body.length < minLen) {
     return { ok: false, reason: "corpus_too_short" };
   }
   if (!corpusHasVisibleSignatureExecutionLines(body)) {
