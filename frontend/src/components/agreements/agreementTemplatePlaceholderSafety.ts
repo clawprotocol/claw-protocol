@@ -4,6 +4,7 @@
  */
 
 import {
+  bindUnusedFilledPartyNamesIntoLeftoverOrgSlots,
   extractAgreementEntityCandidates,
   substitutePartyPlaceholdersInUserFacingText,
 } from "../../agreement/partyPlaceholderDisplay";
@@ -1256,6 +1257,19 @@ function repairAgreementTemplatePlaceholdersUncached(
   }
   const resolution = resolvePlaceholderPartyNamesWithMeta(ctx, prepared);
   const names = resolution.names;
+  const leftoverBind = bindUnusedFilledPartyNamesIntoLeftoverOrgSlots(
+    out,
+    names,
+    ctx.intakeRaw,
+  );
+  if (leftoverBind.bound) {
+    out = leftoverBind.text;
+    repaired.push(
+      ...leftoverBind.boundTokens.map(
+        (tok, i) => `${tok}→${leftoverBind.unusedNamesBound[i] ?? "filled_party"}`,
+      ),
+    );
+  }
   const partyLine = [String(ctx.intakeRaw || ""), ...names].join("\n");
 
   if (/\[CASE_ID_\d+\]/i.test(out)) {

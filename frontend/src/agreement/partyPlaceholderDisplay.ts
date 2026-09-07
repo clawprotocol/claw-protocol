@@ -304,6 +304,123 @@ function isRealPartyName(name: string | null | undefined): boolean {
   return true;
 }
 
+/** Numbered leftover identity slots only — not insert / mustache / CLIENT LEGAL NAME. */
+const LEFTOVER_NUMBERED_ORG_TOKEN_RE = /\[\s*(?:ORG|PARTY)[_\s\-]*[1-9]\d*\s*\]/gi;
+
+function leftoverOrgTokenKey(token: string): string {
+  return token.replace(/\s+/g, "").toUpperCase();
+}
+
+function leftoverOrgTokenReplaceRe(token: string): RegExp | null {
+  const inner = token.replace(/^\[|\]$/g, "").replace(/\s+/g, "");
+  const kind = inner.match(/^(ORG|PARTY)/i)?.[1];
+  const slot = inner.match(/[1-9]\d*$/)?.[0];
+  if (!kind || !slot) return null;
+  return new RegExp(`\\[\\s*${kind}[_\\s\\-]*${slot}\\s*\\]`, "gi");
+}
+
+/** True when the corpus already carries this filled legal name (any casing / punctuation). */
+export function corpusAlreadyNamesFilledParty(text: string, name: string): boolean {
+  const n = String(name || "").replace(/\s+/g, " ").trim();
+  if (n.length < 2) return false;
+  if (text.includes(n)) return true;
+  const needle = n.replace(/[.,]/g, "").replace(/\s+/g, " ").trim().toLowerCase();
+  const hay = text.replace(/[.,]/g, "").toLowerCase();
+  return needle.length >= 4 && hay.includes(needle);
+}
+
+/** Unique leftover [ORG_n] / [PARTY_n] in first-appearance order. */
+export function listLeftoverNumberedOrgTokens(text: string): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  const re = new RegExp(LEFTOVER_NUMBERED_ORG_TOKEN_RE.source, "gi");
+  for (const m of String(text || "").matchAll(re)) {
+    const token = m[0];
+    const key = leftoverOrgTokenKey(token);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(token.replace(/\s+/g, " ").trim());
+  }
+  return out;
+}
+
+/**
+ * Party-prep / labeled Party N lines that must reach leftover [ORG_n] bind.
+ * Does not invent names — only reads filled rows already supplied by Create.
+ */
+export function collectFilledPartyNamesForLeftoverOrgBind(
+  authoritativePartyNames?: readonly (string | null | undefined)[] | null,
+  context?: string | null,
+): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  const push = (raw: string | null | undefined) => {
+    const t = String(raw ?? "").replace(/\s+/g, " ").trim();
+    if (!isRealPartyName(t)) return;
+    const low = t.toLowerCase();
+    if (seen.has(low)) return;
+    seen.add(low);
+    out.push(t);
+  };
+  for (const n of authoritativePartyNames || []) push(n);
+  const ctx = String(context || "");
+  for (const m of ctx.matchAll(/^\s*Party\s*[1-9]\s*[:\-]\s+(.+)$/gim)) {
+    push(m[1]);
+  }
+  for (const n of extractAgreementEntityCandidates(ctx)) push(n);
+  return out.slice(0, 4);
+}
+
+export type BindUnusedFilledPartyNamesResult = {
+  text: string;
+  bound: boolean;
+  boundTokens: string[];
+  unusedNamesBound: string[];
+};
+
+/**
+ * Live 4-party leftover hole: generate names Solo Design + BrightPay and leaves
+ * [ORG_1]/[ORG_2] while party-prep already filled CodeNest + Warehouse One.
+ * Slot-index repair maps [ORG_1]→party[0] (already named) and never binds the
+ * unused filled names. Bind leftover numbered [ORG_n]/[PARTY_n] to unused
+ * filled names in first-appearance / party-prep order. Leave leftover tokens
+ * unbound when no filled name remains (fail-closed).
+ */
+export function bindUnusedFilledPartyNamesIntoLeftoverOrgSlots(
+  text: string,
+  filledPartyNames?: readonly (string | null | undefined)[] | null,
+  context?: string | null,
+): BindUnusedFilledPartyNamesResult {
+  const original = text || "";
+  const leftoverTokens = listLeftoverNumberedOrgTokens(original);
+  if (leftoverTokens.length === 0) {
+    return { text: original, bound: false, boundTokens: [], unusedNamesBound: [] };
+  }
+  const filled = collectFilledPartyNamesForLeftoverOrgBind(filledPartyNames, context);
+  const unused = filled.filter((n) => !corpusAlreadyNamesFilledParty(original, n));
+  if (unused.length === 0) {
+    return { text: original, bound: false, boundTokens: [], unusedNamesBound: [] };
+  }
+  let out = original;
+  const boundTokens: string[] = [];
+  const unusedNamesBound: string[] = [];
+  for (let i = 0; i < leftoverTokens.length && i < unused.length; i += 1) {
+    const re = leftoverOrgTokenReplaceRe(leftoverTokens[i]);
+    if (!re) continue;
+    const next = out.replace(re, unused[i]);
+    if (next === out) continue;
+    out = next;
+    boundTokens.push(leftoverTokens[i]);
+    unusedNamesBound.push(unused[i]);
+  }
+  return {
+    text: out,
+    bound: boundTokens.length > 0 && out !== original,
+    boundTokens,
+    unusedNamesBound,
+  };
+}
+
 export type RepairKnownPartyPlaceholdersResult = {
   text: string;
   repaired: boolean;
@@ -372,6 +489,12 @@ export function repairKnownPartyPlaceholders(
       hasRemainingIdentityPlaceholder: false,
     };
   }
+  const leftoverBind = bindUnusedFilledPartyNamesIntoLeftoverOrgSlots(
+    original,
+    authoritativePartyNames,
+    context,
+  );
+  const working = leftoverBind.text;
   const auth = (authoritativePartyNames || []).map((n) => String(n ?? "").replace(/\s+/g, " ").trim());
   const candidates = context ? extractAgreementEntityCandidates(context) : [];
   const repairedSlots = new Set<number>();
@@ -401,11 +524,11 @@ export function repairKnownPartyPlaceholders(
       intakeHasFullLegalEntities: syntheticOverflowCollapse.intakeHasFullLegalEntities,
     });
   logOrgPlaceholderOriginsFromText({
-    text: original,
+    text: working,
     sourceModule: "repairKnownPartyPlaceholders",
     canonicalPartyCount,
   });
-  const out = original.replace(re, (match, offset, whole) => {
+  const out = working.replace(re, (match, offset, whole) => {
     const num = match.match(/([1-9]\d*)/);
     const slot = num ? parseInt(num[1], 10) : 1;
     const normalizedSlot = Number.isFinite(slot) && slot > 0 ? slot : 1;
@@ -451,7 +574,9 @@ export function repairKnownPartyPlaceholders(
 
   return {
     text: out,
-    repaired: (repairedSlots.size > 0 || collapsedExtraOrgSlots.size > 0) && out !== original,
+    repaired:
+      leftoverBind.bound ||
+      ((repairedSlots.size > 0 || collapsedExtraOrgSlots.size > 0) && out !== original),
     repairedSlots: [...repairedSlots].sort((a, b) => a - b),
     collapsedExtraOrgSlots: collapsedSlots,
     hasRemainingIdentityPlaceholder: textContainsUnresolvedIdentityPlaceholders(out),
