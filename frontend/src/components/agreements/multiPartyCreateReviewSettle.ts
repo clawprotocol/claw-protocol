@@ -682,6 +682,34 @@ export function shouldFailClosedPremiumProcessingWithoutPfd(input: {
   });
 }
 
+export type PremiumProcessingFailsafeOverlayHardDismiss = {
+  dismissOverlays: true;
+  premiumPostCheckoutPhase: null;
+  displayPhase: "intake";
+  createFlowPhase: "capturing_input";
+  clearInFlightFlags: true;
+};
+
+/**
+ * Live #221 miss: failsafe / quality-retry can latch Retry while Preparing /
+ * premiumPostCheckout `processing` stays mounted (Retry buried). When the
+ * without-pfd failsafe is true, hard-dismiss overlays — phase null, non-preparing
+ * display, clear in-flight flags — before or with the fail-closed terminal.
+ * Do not rely on render-time dismiss alone.
+ */
+export function planHardDismissPremiumProcessingOverlaysOnFailsafe(input: {
+  failClosed: boolean;
+}): PremiumProcessingFailsafeOverlayHardDismiss | { dismissOverlays: false } {
+  if (!input.failClosed) return { dismissOverlays: false };
+  return {
+    dismissOverlays: true,
+    premiumPostCheckoutPhase: null,
+    displayPhase: "intake",
+    createFlowPhase: "capturing_input",
+    clearInFlightFlags: true,
+  };
+}
+
 export function shouldFailClosedInFlightPipelineWithoutCorpus(input: {
   generatePipelineInFlight: boolean;
   hasAuthoritativeReviewBody: boolean;
