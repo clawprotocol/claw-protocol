@@ -52,6 +52,8 @@ const PARTY_BLOCK_HEADER_RE = /^\s*party\s*(\d+)\s*[:\-]?\s*$/i;
 const PARTY_BLOCK_WITH_ROLE_INLINE_RE =
   /^\s*party\s*(\d+)\s*\(\s*([^)]+?)\s*\)\s*:\s*(.+)$/i;
 const PARTY_BLOCK_WITH_ROLE_HEADER_RE = /^\s*party\s*(\d+)\s*\(\s*([^)]+?)\s*\)\s*:?\s*$/i;
+/** Party-prep upsert form: `Party 3: Summit Mesa LP` (name on the same line). */
+const PARTY_INLINE_ENTITY_RE = /^\s*party\s*(\d+)\s*[:\-]\s+(.+)$/i;
 const COORDINATOR_BLOCK_HEADER_RE = /^\s*coordinator\s*[:\-]?\s*$/i;
 
 const ROLE_LABEL_PARTY_HEADER_RE =
@@ -463,6 +465,25 @@ export function parseLabeledPartyBlocks(raw: string): LabeledPartyBlock[] {
       block.legalEntity = cleanFieldValue(roleInline[3]);
       blocksByIndex.set(currentIndex, block);
       continue;
+    }
+
+    const inlineEntity = line.match(PARTY_INLINE_ENTITY_RE);
+    if (inlineEntity?.[1] && inlineEntity?.[2] && !PARTY_BLOCK_WITH_ROLE_INLINE_RE.test(line)) {
+      const slot = Number.parseInt(inlineEntity[1], 10);
+      const entity = cleanFieldValue(inlineEntity[2]);
+      if (
+        Number.isFinite(slot) &&
+        slot >= 1 &&
+        entity.length >= 2 &&
+        !isPartyMetadataFieldLabelLine(entity) &&
+        !isIntakeSectionLabelLine(entity)
+      ) {
+        currentIndex = slot;
+        const block = blocksByIndex.get(slot) ?? emptyBlock(slot);
+        if (!block.legalEntity) block.legalEntity = entity;
+        blocksByIndex.set(slot, block);
+        continue;
+      }
     }
 
     const roleHeader = line.match(PARTY_BLOCK_WITH_ROLE_HEADER_RE);

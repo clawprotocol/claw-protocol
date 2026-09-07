@@ -5,18 +5,26 @@ import { shortIntakeFingerprint } from "../../lib/agreementGenerationId";
 import { normalizeIntakePartyEditorRows } from "./intakeContractingPartyEditor";
 import { evaluateIntentionalCreateDraftSubmit } from "./agreementIntakeCapabilityGate";
 import { shouldFailSafeEmptyAuthorityPreparation } from "./starterMultiPartyProGate";
+import { shouldTreatEntitledRewritePipelineResultAsGenerationFailure } from "./paidProEntitledRewriteLaunch";
+import { extractCleanPremiumParties } from "./premiumCompletionPipeline";
+import { GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN } from "./simpleProFinalReviewCorpus";
 import {
+  CREATE_FLOW_GENERATE_FAILED_CLEAR_MESSAGE,
   CREATE_FLOW_GENERATING_WITHOUT_PIPELINE_FAILSAFE_MS,
   CREATE_FLOW_PIPELINE_NO_CORPUS_FAILSAFE_MS,
   CREATE_FLOW_PREPARATION_FAILSAFE_GENERIC_MESSAGE,
   hasFilledPartyPrepForDeclaredCreate,
   mergePartyPrepIntoCreateSubmitText,
+  overlayDeclaredPartiesOnDraft,
   resolveCreateFlowPreparationFailsafeMessage,
+  resolvePartiesForPremiumGenerateRequest,
   resolvePartyPrepSlotCount,
   shouldDismissHomeCreateTransitionForIntakeRecovery,
   shouldFailClosedGeneratingWithoutPipeline,
   shouldFailClosedInFlightPipelineWithoutCorpus,
+  shouldFailCloseCreateAfterPremiumFullDraft,
   shouldInvokePremiumGenerateAfterPartyPrepCreate,
+  shouldSettleProReviewAfterPremiumFullDraft,
   shouldSkipEntitledRewriteForMatchingAcceptedSnapshot,
 } from "./multiPartyCreateReviewSettle";
 
@@ -268,5 +276,86 @@ describe("multi-party create → review settle or fail-closed", () => {
     expect(intake).toContain('handoffSource: "prep_failsafe_retry"');
     expect(intake).toContain("intakeClarification");
     expect(intake).toContain("emptyAuthorityPrepFailSafe");
+    expect(intake).toContain("shouldSettleProReviewAfterPremiumFullDraft");
+    expect(intake).toContain("overlayDeclaredPartiesOnDraft");
+    expect(intake).toContain("CREATE_FLOW_GENERATE_FAILED_CLEAR_MESSAGE");
+  });
+
+  it("premium-full-draft 200 + usable corpus settles Review and does not fail-close", () => {
+    const corpus = `${"Section 1. Parties.\n".repeat(80)}IN WITNESS WHEREOF the parties execute this Agreement.`;
+    expect(corpus.length).toBeGreaterThan(GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN);
+    const ok = {
+      winningPremiumBodyText: corpus,
+      premiumRenderSource: "server_full_draft" as const,
+      staleIntakeOrGeneration: false,
+    };
+    expect(shouldSettleProReviewAfterPremiumFullDraft(ok)).toBe(true);
+    expect(shouldFailCloseCreateAfterPremiumFullDraft(ok)).toBe(false);
+    expect(
+      shouldTreatEntitledRewritePipelineResultAsGenerationFailure({
+        premiumDraft: { parties: [] } as never,
+        premiumParties: [],
+        recipientCandidates: [],
+        winningPremiumBodyText: corpus,
+        premiumRenderSource: "server_full_draft",
+        premiumReview: null,
+        premiumFinalizeAudit: null,
+        premiumReviewRoute: null,
+        staleIntakeOrGeneration: false,
+        premiumGenerationRetryable: true,
+      }),
+    ).toBe(false);
+  });
+
+  it("503 / empty generate does not settle and uses a clear fail-closed message", () => {
+    const empty = {
+      winningPremiumBodyText: "",
+      premiumRenderSource: "premium_generation_retryable" as const,
+    };
+    expect(shouldSettleProReviewAfterPremiumFullDraft(empty)).toBe(false);
+    expect(shouldFailCloseCreateAfterPremiumFullDraft(empty)).toBe(true);
+    expect(CREATE_FLOW_GENERATE_FAILED_CLEAR_MESSAGE).toMatch(/Try again/);
+    expect(CREATE_FLOW_GENERATE_FAILED_CLEAR_MESSAGE).not.toMatch(/save your draft/i);
+  });
+
+  it("N=3 party-prep names survive leftover 2-party draft into the generate request", () => {
+    const threeRows = ["Cedar Ridge LLC", "Harbor Point Inc", "Summit Mesa LP"];
+    const leftoverTwo = ["Redwood LLC", "BlueHarbor Inc"];
+    const names = resolvePartiesForPremiumGenerateRequest({
+      intakeText: THREE_PARTY_DUMP,
+      partyRows: threeRows,
+      draftPartyNames: leftoverTwo,
+    });
+    expect(names).toEqual(threeRows);
+    const merged = mergePartyPrepIntoCreateSubmitText(THREE_PARTY_DUMP, threeRows);
+    const cleaned = extractCleanPremiumParties(merged, {
+      title: "Services Agreement",
+      jurisdiction: "Texas",
+      parties: leftoverTwo.map((name) => ({ name, role: "party" })),
+      purpose: "",
+      payment_terms: "",
+      duration: null,
+      due_date: null,
+      effective_date: null,
+      payment: { amount: null, cadence: null, valid: false },
+    });
+    expect(cleaned.map((p) => p.name)).toEqual(threeRows);
+    const overlaid = overlayDeclaredPartiesOnDraft(
+      { parties: leftoverTwo.map((name) => ({ name, role: "party" })) },
+      names,
+    );
+    expect(overlaid.parties?.map((p) => p.name)).toEqual(threeRows);
+  });
+
+  it("two-party named intake still resolves two parties only", () => {
+    const two =
+      "Consulting agreement between Acme LLC and Beta Corp. Payment: $5,000 per month. Term: 12 months. California law governs.";
+    expect(
+      resolvePartiesForPremiumGenerateRequest({
+        intakeText: two,
+        partyRows: ["Acme LLC", "Beta Corp"],
+        draftPartyNames: ["Acme LLC", "Beta Corp"],
+      }),
+    ).toEqual(["Acme LLC", "Beta Corp"]);
   });
 });

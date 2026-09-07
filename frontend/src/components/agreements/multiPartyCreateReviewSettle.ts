@@ -10,7 +10,11 @@ import {
   namedIntakeContractingParties,
   upsertLabeledPartyRows,
 } from "./intakeContractingPartyEditor";
+import { labeledPartyLegalEntities } from "./labeledPartyBlockParse";
 import { resolveDeclaredExplicitPartyCount } from "./partySlotIdentityNormalize";
+
+/** Matches GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN — inlined to avoid pipeline import cycles. */
+const SETTLE_PRO_REVIEW_MIN_CORPUS_LEN = 1500;
 
 /** Overlay may stay this long only when premium-full-draft / generate HTTP has actually started. */
 export const CREATE_FLOW_PIPELINE_NO_CORPUS_FAILSAFE_MS = 120_000;
@@ -68,6 +72,88 @@ export function shouldInvokePremiumGenerateAfterPartyPrepCreate(input: {
 
 export const CREATE_FLOW_PREPARATION_FAILSAFE_GENERIC_MESSAGE =
   "We couldn't prepare the review. Try again.";
+
+/** 503 / empty generate — not the persist-save footer, and not infinite Preparing. */
+export const CREATE_FLOW_GENERATE_FAILED_CLEAR_MESSAGE =
+  "We couldn't finish the Pro review. Your details are still here — tap Try again.";
+
+const SERVER_FULL_DRAFT_SETTLE_SOURCES = new Set([
+  "server_full_draft",
+  "server_full_draft_retry",
+  "server_full_draft_degraded",
+  "snapshot_server_full_draft",
+]);
+
+/**
+ * premium-full-draft 200 (or degraded 200-class) with a usable corpus must settle Review.
+ * Do not require SoT/committed/GET — first-create N≥3 was fail-closing on success.
+ */
+export function shouldSettleProReviewAfterPremiumFullDraft(input: {
+  winningPremiumBodyText?: string | null;
+  premiumRenderSource?: string | null;
+  staleIntakeOrGeneration?: boolean;
+}): boolean {
+  if (input.staleIntakeOrGeneration) return false;
+  const body = String(input.winningPremiumBodyText || "").trim();
+  if (body.length < SETTLE_PRO_REVIEW_MIN_CORPUS_LEN) return false;
+  return SERVER_FULL_DRAFT_SETTLE_SOURCES.has(String(input.premiumRenderSource || "").trim());
+}
+
+/** Fail-close only when generate produced no usable Review corpus. */
+export function shouldFailCloseCreateAfterPremiumFullDraft(input: {
+  winningPremiumBodyText?: string | null;
+  premiumRenderSource?: string | null;
+  staleIntakeOrGeneration?: boolean;
+}): boolean {
+  return !shouldSettleProReviewAfterPremiumFullDraft(input);
+}
+
+/**
+ * Party-prep + labeled Party N names for the generate request.
+ * Leftover 2-party draft rows must not silently drop declared party 3/4.
+ */
+export function resolvePartiesForPremiumGenerateRequest(input: {
+  intakeText: string;
+  partyRows?: readonly string[];
+  draftPartyNames?: readonly string[];
+}): string[] {
+  const merged = mergePartyPrepIntoCreateSubmitText(input.intakeText, input.partyRows ?? []);
+  const required = requiredCreatePartyNameCount(merged);
+  const fromRows = namedIntakeContractingParties(input.partyRows ?? []);
+  const fromLabeled = labeledPartyLegalEntities(merged)
+    .map((n) => n.replace(/\s+/g, " ").trim())
+    .filter((n) => n.length >= 2);
+  const fromDraft = (input.draftPartyNames ?? [])
+    .map((n) => String(n || "").replace(/\s+/g, " ").trim())
+    .filter((n) => n.length >= 2);
+  const declared = [fromRows, fromLabeled].reduce(
+    (best, cur) => (cur.length > best.length ? cur : best),
+    [] as string[],
+  );
+  if (declared.length >= required || declared.length >= 3) {
+    return declared.slice(0, 4);
+  }
+  if (fromDraft.length >= required) return fromDraft.slice(0, 4);
+  if (declared.length >= 2) return declared.slice(0, 4);
+  return fromDraft.slice(0, 4);
+}
+
+export function overlayDeclaredPartiesOnDraft<T extends { parties?: { name: string; role: string; id?: string; email?: string }[] }>(
+  draft: T,
+  partyNames: readonly string[],
+): T {
+  const names = partyNames.map((n) => n.replace(/\s+/g, " ").trim()).filter((n) => n.length >= 2).slice(0, 4);
+  if (names.length < 2) return draft;
+  const prior = draft.parties ?? [];
+  return {
+    ...draft,
+    parties: names.map((name, i) => ({
+      ...(prior[i] ?? {}),
+      name,
+      role: prior[i]?.role || "party",
+    })),
+  };
+}
 
 /** Party-names copy only when names are truly missing — not after filled party-prep. */
 export function resolveCreateFlowPreparationFailsafeMessage(input: {

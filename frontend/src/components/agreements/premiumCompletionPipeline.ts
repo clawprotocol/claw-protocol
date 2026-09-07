@@ -14,6 +14,7 @@ import { normalizeParsedDraftLegalConcepts } from "./intakeDraftLegalNormalize";
 import { runIntakeDefaultsAndRoles } from "./intakeFamilyShell";
 import { buildLiveDraftPreview } from "./liveDraftHeuristics";
 import { partyNameLooksLikeRawPrompt, tryExtractPartyPairFromPromptBlob } from "./agreementPreviewPartyLine";
+import { resolvePartiesForPremiumGenerateRequest } from "./multiPartyCreateReviewSettle";
 import { coercePartyNameForRecipientAutoFill } from "./partyNameConfidence";
 import type { IntakePartyRoleLabels } from "./partyRoleIntake";
 import {
@@ -1032,6 +1033,16 @@ function meetsPremiumSubstanceFloor(draft: ParsedDraftShape, rawIntake: string):
 export function extractCleanPremiumParties(intakeText: string, draft: ParsedDraftShape): { name: string; role: string }[] {
   const rawIntake = intakeText.trim();
   const fam = draft.agreement_family ?? null;
+  const declared = resolvePartiesForPremiumGenerateRequest({
+    intakeText: rawIntake,
+    draftPartyNames: (draft.parties || []).map((p) => nz(p.name)),
+  });
+  if (declared.length >= 3) {
+    return declared.map((name, idx) => ({
+      name: coercePartyNameForRecipientAutoFill(name, idx <= 1 ? (idx as 0 | 1) : 1, fam),
+      role: nz(draft.parties?.[idx]?.role) || "party",
+    }));
+  }
   if ((draft.parties?.length ?? 0) >= 2 && !draftHasPlaceholderParties(draft)) {
     return (draft.parties || []).map((p, idx) => ({
       name: coercePartyNameForRecipientAutoFill(nz(p.name), idx <= 1 ? (idx as 0 | 1) : 1, fam),
