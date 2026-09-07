@@ -141,25 +141,26 @@ function canonicalPartyNamesFromAcceptanceContext(
   const leftover = (draft?.parties ?? [])
     .map((p) => String(p?.name ?? "").trim())
     .filter((n) => n.length >= 2);
-  const preferred = resolvePartyNamesPreferringCommercialCorpus({
-    intakeText,
-    corpusPlain,
-    leftoverNames: leftover,
-  });
-  if (preferred.length >= 3) {
-    return preferred.slice(0, PAID_PRO_SIGNER_SETUP_MAX_UI_PARTIES);
-  }
-
-  const frozen = readFrozenCanonicalManifestPartyNames();
   const declared = resolveDeclaredExplicitPartyCount(String(intakeText ?? "")) ?? 0;
-  // Leftover 2-party frozen/intake must not beat a commercial N≥3 corpus.
-  if (frozen.length >= 2 && !(declared >= 3 && frozen.length < declared && preferred.length >= declared)) {
-    return frozen;
-  }
-
   const fromIntake = labeledPartyLegalEntities(intakeText ?? "")
     .map((n) => n.trim())
     .filter((n) => isAuthoritativeLegalEntityName(n));
+  const leftoverThin = declared >= 3 && leftover.length < declared && fromIntake.length < declared;
+  if (leftoverThin) {
+    const preferred = resolvePartyNamesPreferringCommercialCorpus({
+      intakeText,
+      corpusPlain,
+      leftoverNames: leftover,
+    });
+    if (preferred.length >= 3) {
+      return preferred.slice(0, PAID_PRO_SIGNER_SETUP_MAX_UI_PARTIES);
+    }
+  }
+
+  const frozen = readFrozenCanonicalManifestPartyNames();
+  if (frozen.length >= 2 && !(leftoverThin && frozen.length < declared)) {
+    return frozen;
+  }
   if (fromIntake.length >= 2) {
     return fromIntake.slice(0, PAID_PRO_SIGNER_SETUP_MAX_UI_PARTIES);
   }

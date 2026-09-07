@@ -466,7 +466,7 @@ export function resolveAcceptanceManifestRecordsForExecution(args: {
     if (fromBrandProse.length >= 4) return fromBrandProse;
   }
 
-  const declared = resolveDeclaredExplicitPartyCount(intakeText) ?? 0;
+  const declared = resolveDeclaredExplicitPartyCount(intakeText ?? "") ?? 0;
   const draftNames = (draft?.parties ?? [])
     .map((p) => String((p as { name?: string }).name ?? "").trim())
     .filter((n) => n.length >= 2 && isAuthoritativeLegalEntityName(n));

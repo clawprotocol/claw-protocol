@@ -173,13 +173,14 @@ export function resolvePartyNamesPreferringCommercialCorpus(args: {
   if (intakeNames.length >= 3 && need === 0) {
     return intakeNames.slice(0, PAID_PRO_AUTHORITY_MAX_PARTIES);
   }
-  if (need > 0 && corpusNames.length >= need) {
+  // Only steal authority from the 200 corpus when leftover prep actually wiped rows.
+  const leftoverThin =
+    (need > 0 && leftover.length < need && intakeNames.length < need) ||
+    (need > 0 && leftover.length < 3 && intakeNames.length < need);
+  if (leftoverThin && need > 0 && corpusNames.length >= need) {
     return corpusNames.slice(0, need);
   }
-  if (
-    corpusNames.length >= 3 &&
-    (leftover.length < corpusNames.length || intakeNames.length < corpusNames.length)
-  ) {
+  if (leftoverThin && corpusNames.length >= 3 && leftover.length < 3 && intakeNames.length < 3) {
     return corpusNames.slice(0, PAID_PRO_AUTHORITY_MAX_PARTIES);
   }
   if (intakeNames.length >= 2) return intakeNames;
