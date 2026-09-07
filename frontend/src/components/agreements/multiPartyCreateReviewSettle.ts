@@ -84,16 +84,6 @@ const SERVER_FULL_DRAFT_SETTLE_SOURCES = new Set([
   "snapshot_server_full_draft",
 ]);
 
-/** Sources that are never a commercially usable Review corpus. */
-const CREATE_REVIEW_SETTLE_BLOCKED_SOURCES = new Set([
-  "rejected_paid_corpus",
-  "fallback_preview",
-  "fallback_preview_error",
-  "live_generated_preview",
-  "stale_intake",
-  "premium_full_draft_cors_blocked",
-]);
-
 export type CreateReviewSettleCorpusInput = {
   winningPremiumBodyText?: string | null;
   premiumRenderSource?: string | null;
@@ -137,8 +127,8 @@ export function pickCreateReviewSettleCorpus(input: CreateReviewSettleCorpusInpu
 
 /**
  * premium-full-draft 200 (or degraded 200-class) with a usable corpus must settle Review.
- * Also settle when accepted server_full_draft or VS01 selected-final is commercially usable —
- * leftover `premium_generation_retryable` / missing source must not fail-close northline_2p.
+ * Also settle when accepted server_full_draft or VS01 selected-final is commercially usable.
+ * A retryable/missing source alone is not enough — remap salvage first on the live path.
  * Do not require SoT/committed/GET — first-create dump→create has no SoT yet.
  */
 export function shouldSettleProReviewAfterPremiumFullDraft(
@@ -146,19 +136,22 @@ export function shouldSettleProReviewAfterPremiumFullDraft(
 ): boolean {
   if (input.staleIntakeOrGeneration) return false;
   const source = String(input.premiumRenderSource || "").trim();
-  if (CREATE_REVIEW_SETTLE_BLOCKED_SOURCES.has(source)) {
-    const acceptedOrSelected = pickCreateReviewSettleCorpus({
-      ...input,
-      winningPremiumBodyText: "",
-      premiumRenderSource: "",
-    });
-    return Boolean(acceptedOrSelected);
+  const winning = String(input.winningPremiumBodyText || "").trim();
+  if (
+    SERVER_FULL_DRAFT_SETTLE_SOURCES.has(source) &&
+    winning.length >= SETTLE_PRO_REVIEW_MIN_CORPUS_LEN
+  ) {
+    return true;
   }
-  if (SERVER_FULL_DRAFT_SETTLE_SOURCES.has(source)) {
-    const body = String(input.winningPremiumBodyText || "").trim();
-    if (body.length >= SETTLE_PRO_REVIEW_MIN_CORPUS_LEN) return true;
+  const accepted = String(input.acceptedAuthoritativePlain || "").trim();
+  if (isCommerciallyUsableCreateReviewCorpus(accepted)) return true;
+  if (
+    input.vs01SelectedFinal &&
+    isCommerciallyUsableCreateReviewCorpus(input.selectedFinalCorpus || winning)
+  ) {
+    return true;
   }
-  return Boolean(pickCreateReviewSettleCorpus(input));
+  return false;
 }
 
 /**

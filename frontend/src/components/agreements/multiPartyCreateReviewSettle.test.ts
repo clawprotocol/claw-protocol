@@ -791,6 +791,20 @@ describe("multi-party create → review settle or fail-closed", () => {
         staleIntakeOrGeneration: false,
         premiumGenerationRetryable: true,
       }),
+    ).toBe(true);
+    expect(
+      shouldTreatEntitledRewritePipelineResultAsGenerationFailure({
+        premiumDraft: { parties: [] } as never,
+        premiumParties: [],
+        recipientCandidates: [],
+        winningPremiumBodyText: corpus,
+        premiumRenderSource: "server_full_draft_degraded",
+        premiumReview: null,
+        premiumFinalizeAudit: null,
+        premiumReviewRoute: null,
+        staleIntakeOrGeneration: false,
+        premiumGenerationRetryable: false,
+      }),
     ).toBe(false);
     expect(
       shouldRemapGenerationRetryableSalvageForCreateSettle({

@@ -7387,10 +7387,17 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         if (immediateSettleCorpus) {
           lastPremiumWinningCorpusRef.current = immediateSettleCorpus;
           premiumPipelineOutputBodyRef.current = immediateSettleCorpus;
+          if (!acceptedReviewCorpusRef.current) acceptedReviewCorpusRef.current = immediateSettleCorpus;
+          const src = String(result.premiumRenderSource || "").trim();
           lastPremiumPipelineRenderSourceRef.current =
-            result.premiumRenderSource ||
-            lastPremiumPipelineRenderSourceRef.current ||
-            "server_full_draft";
+            src === "server_full_draft" ||
+            src === "server_full_draft_retry" ||
+            src === "server_full_draft_degraded" ||
+            src === "snapshot_server_full_draft"
+              ? src
+              : src === "rejected_paid_corpus"
+                ? lastPremiumPipelineRenderSourceRef.current
+                : "server_full_draft_degraded";
         }
       }
       if (result.staleIntakeOrGeneration) {
