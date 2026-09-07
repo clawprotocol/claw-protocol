@@ -172,7 +172,12 @@ export function withCreatePipelineVs01CorpusGate<T extends CreatePipelineRejectO
     premiumInProgress?: boolean | null;
     premiumComplete?: boolean | null;
   },
-): T {
+): T & {
+  vs01CorpusGateAllowed: boolean;
+  vs01SelectedFinal: boolean;
+  vs01BlockReason: string | null;
+  vs01CorpusGateBlocked: boolean;
+} {
   const allowed = Boolean(gate.allowed);
   const blockReason = gate.blockReason ?? null;
   return {
