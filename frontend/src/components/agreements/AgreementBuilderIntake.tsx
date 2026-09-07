@@ -540,7 +540,7 @@ import {
   persistStarterReviewBeforeCheckout,
   readCheckoutBackRestoreSnapshot,
 } from "./checkoutBackRestore";
-import { buildConversionCheckoutReturnTo } from "../../launch/checkoutParams";
+import { buildCreateFlowCheckoutHref } from "../../launch/checkoutParams";
 import type { PremiumSendIntent } from "../../launch/simpleProduct/premiumSendIntent";
 import {
   clearPaidProEditReturnHandoff,
@@ -13034,16 +13034,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     const cadence = "monthly";
     emitPaidFunnelEvent("premium_checkout_opened", { extra: { checkout_surface: "create_flow_checkout" } });
     const checkoutAgreementId =
-      readPreAuthCheckoutAgreementId() ||
-      (reviewAgreementIdRef.current || readCreateReviewAgreementResumeId() || "").trim() ||
-      CREATE_FLOW_CHECKOUT_AGREEMENT_ID;
+      resolveExistingConversionAgreementId({
+        reviewAgreementId: reviewAgreementIdRef.current,
+        resumeId: readCreateReviewAgreementResumeId(),
+        preAuthId: readPreAuthCheckoutAgreementId(),
+      }) || CREATE_FLOW_CHECKOUT_AGREEMENT_ID;
     rememberPreAuthCheckoutAgreementId(checkoutAgreementId);
-    const returnTo = encodeURIComponent(buildConversionCheckoutReturnTo(checkoutAgreementId));
-    navigate(
-      `/app/checkout/${encodeURIComponent(checkoutAgreementId)}?tier=pro&cadence=${encodeURIComponent(
-        cadence,
-      )}&returnTo=${returnTo}`,
-    );
+    navigate(buildCreateFlowCheckoutHref({ cadence, persistAgreementId: checkoutAgreementId }));
   },
   [
     navigate,
@@ -13210,16 +13207,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     });
     setAdvancedFullDraftPaywallOpen(false);
     const cadence = "annual";
-    const persistId =
-      readPreAuthCheckoutAgreementId() ||
-      (reviewAgreementIdRef.current || readCreateReviewAgreementResumeId() || "").trim() ||
-      null;
-    const returnTo = encodeURIComponent(buildConversionCheckoutReturnTo(persistId));
-    navigate(
-      `/app/checkout/${encodeURIComponent(CREATE_FLOW_CHECKOUT_AGREEMENT_ID)}?tier=pro&cadence=${encodeURIComponent(
-        cadence,
-      )}&returnTo=${returnTo}`,
-    );
+    const persistId = resolveExistingConversionAgreementId({
+      reviewAgreementId: reviewAgreementIdRef.current,
+      resumeId: readCreateReviewAgreementResumeId(),
+      preAuthId: readPreAuthCheckoutAgreementId(),
+    });
+    rememberPreAuthCheckoutAgreementId(persistId);
+    navigate(buildCreateFlowCheckoutHref({ cadence, persistAgreementId: persistId }));
   }, [
     createProductionTwoPane,
     premiumOriginalWordingBuffer,

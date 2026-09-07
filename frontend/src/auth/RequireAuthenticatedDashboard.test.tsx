@@ -3,6 +3,10 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { RequireAuthenticatedDashboard } from "./RequireAuthenticatedDashboard";
 import {
+  clearPreAuthCheckoutAgreementId,
+  rememberPreAuthCheckoutAgreementId,
+} from "./preAuthCheckoutAgreement";
+import {
   CHECKOUT_SIGN_IN_BODY,
   CHECKOUT_SIGN_IN_CTA,
   CHECKOUT_SIGN_IN_HEADING,
@@ -39,6 +43,8 @@ vi.mock("../account/currentUser", async () => {
 describe("RequireAuthenticatedDashboard", () => {
   afterEach(() => {
     cleanup();
+    sessionStorage.clear();
+    clearPreAuthCheckoutAgreementId();
   });
 
   it("blocks anonymous /app access", () => {
@@ -70,6 +76,29 @@ describe("RequireAuthenticatedDashboard", () => {
       "/app/sign-in?next=%2Fapp%2Fcheckout%2F__claw_create_checkout__%3Ftier%3Dpro%26cadence%3Dmonthly%26returnTo%3D%252Fapp%252Fcreate%253Frestore%253DstarterReview",
     );
     expect(screen.queryByTestId("secret-checkout")).toBeNull();
+  });
+
+  it("does not embed restore=starterReview in OAuth next when persist is only in session", () => {
+    const persistId = "d0e90b0c-f301-4b18-a755-dea64b4ac6cd";
+    rememberPreAuthCheckoutAgreementId(persistId);
+    navState.pathname = "/app/checkout/__claw_create_checkout__";
+    navState.search = "?tier=pro&cadence=monthly&returnTo=%2Fapp%2Fcreate%3Frestore%3DstarterReview";
+    navState.navigate = vi.fn();
+    render(
+      <RequireAuthenticatedDashboard>
+        <div data-testid="secret-checkout">secret</div>
+      </RequireAuthenticatedDashboard>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: CHECKOUT_SIGN_IN_CTA }));
+    const dest = navState.navigate.mock.calls[0]?.[0] as string;
+    expect(dest.startsWith("/app/sign-in?next=")).toBe(true);
+    const next = decodeURIComponent(dest.slice("/app/sign-in?next=".length));
+    expect(next).toContain(persistId);
+    expect(next).not.toContain("__claw_create_checkout__");
+    expect(next).not.toContain("restore=starterReview");
+    expect(next).not.toContain("starterReview");
+    expect(screen.queryByTestId("secret-checkout")).toBeNull();
+    clearPreAuthCheckoutAgreementId();
   });
 
   it("does not embed restore=starterReview in OAuth next when a persist ID already exists", () => {
