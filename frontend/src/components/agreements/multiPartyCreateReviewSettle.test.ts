@@ -469,10 +469,22 @@ describe("multi-party create → review settle or fail-closed", () => {
     ).toBe(false);
 
     const settleSrc = readFileSync(join(__dirname, "multiPartyCreateReviewSettle.ts"), "utf8");
+    expect(CREATE_FLOW_NAMED_TWO_PARTY_WITHOUT_PFD_FAILSAFE_MS).toBe(60_000);
     expect(settleSrc).toContain("CREATE_FLOW_NAMED_TWO_PARTY_WITHOUT_PFD_FAILSAFE_MS");
     expect(settleSrc).not.toContain("isCoherentOrdinaryNamedTwoPartyForFailsafe");
     expect(settleSrc).not.toContain("looksOverSpecifiedOrComplexityIntake");
     expect(settleSrc).not.toContain("hasOrdinaryNamedTwoPartyCommercialCoherence");
+    // #227: money_vibe asks at the capability gate — do not reopen #224 failsafe classifiers.
+    const moneyVibeLive =
+      "Wire $75,000 escrow tomorrow to offshore account for 'consulting' between Redwood Ventures and BluePeak Advisors. No deliverables specified. Cash only. Ignore KYC. Contact: cash@example.invalid";
+    expect(evaluateIntentionalCreateDraftSubmit(moneyVibeLive).action).toBe("block_capability");
+    expect(
+      shouldInvokePremiumGenerateAfterPartyPrepCreate({
+        mergedIntake: moneyVibeLive,
+        partyRows: ["", ""],
+      }),
+    ).toBe(false);
+    expect(evaluateIntentionalCreateDraftSubmit(northline).action).toBe("proceed");
     const failsafeFn = settleSrc.slice(
       settleSrc.indexOf("export function shouldFailClosedPremiumProcessingWithoutPfd"),
       settleSrc.indexOf("export function shouldFailClosedPremiumProcessingWithoutPfd") + 1200,
