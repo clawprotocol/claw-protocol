@@ -26589,6 +26589,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     intakeText: intakeCombined || readOriginalUserIntakeRaw() || "",
     partyRows: intakePartyEditorRows,
   });
+  // Failsafe / overlay timer: current dump only. Leftover party-prep rows from a
+  // prior Northline walk must not make junk look named-2p ready.
+  const currentDumpIntakeOnlyNamedTwoPartyReady = shouldSkipPartyPrepForOrdinaryNamedTwoParty({
+    intakeText: intakeCombined || readOriginalUserIntakeRaw() || "",
+  });
   const vs01CorpusGateBlockedWithoutSelectedFinal = isVs01CorpusGateBlockedWithoutSelectedFinal({
     allowed: vs01FinalCorpusGate.allowed,
     blockReason: vs01FinalCorpusGate.blockReason,
@@ -26660,7 +26665,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     displayPhase === "generating_draft" ||
     displayPhase === "hydrating_generated";
   const premiumProcessingWithoutPfdFailClosed = shouldFailClosedPremiumProcessingWithoutPfd({
-    ordinaryNamedTwoPartyReady: ordinaryNamedTwoPartyReadyForSettle,
+    ordinaryNamedTwoPartyReady: currentDumpIntakeOnlyNamedTwoPartyReady,
     premiumPostCheckoutProcessing:
       premiumPostCheckoutPhase === "processing" ||
       premiumPostCheckoutPhase === "generation_retry",
@@ -26701,7 +26706,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     if (
       !premiumProcessingOrPreparingOverlay ||
       premiumGenerateCompleted ||
-      ordinaryNamedTwoPartyReadyForSettle ||
+      currentDumpIntakeOnlyNamedTwoPartyReady ||
       vs01FinalCorpusGate.allowed ||
       postGenerateCreateReviewSettlePlan.settleReview
     ) {
@@ -26718,7 +26723,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   }, [
     premiumProcessingOrPreparingOverlay,
     premiumGenerateCompleted,
-    ordinaryNamedTwoPartyReadyForSettle,
+    currentDumpIntakeOnlyNamedTwoPartyReady,
     vs01FinalCorpusGate.allowed,
     postGenerateCreateReviewSettlePlan.settleReview,
   ]);
@@ -26766,10 +26771,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       selectedFinalCorpus: vs01FinalCorpusGate.allowed ? vs01FinalCorpusGate.corpus : "",
     });
     const settle =
-      plan.settleReview ||
-      postGenerateAuthorityChurn.settleReview ||
-      vs01FinalCorpusGate.allowed ||
-      Boolean(plan.corpus);
+      !premiumProcessingWithoutPfdFailClosed &&
+      (plan.settleReview ||
+        postGenerateAuthorityChurn.settleReview ||
+        vs01FinalCorpusGate.allowed ||
+        Boolean(plan.corpus));
     if (settle) {
       if (plan.corpus) {
         lastPremiumWinningCorpusRef.current = plan.corpus;
