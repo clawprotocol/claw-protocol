@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
-import { describe, expect, it, vi } from "vitest";
-import { fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { RequireAuthenticatedDashboard } from "./RequireAuthenticatedDashboard";
 import {
   CHECKOUT_SIGN_IN_BODY,
@@ -37,6 +37,10 @@ vi.mock("../account/currentUser", async () => {
 });
 
 describe("RequireAuthenticatedDashboard", () => {
+  afterEach(() => {
+    cleanup();
+  });
+
   it("blocks anonymous /app access", () => {
     navState.pathname = "/app";
     navState.search = "";
