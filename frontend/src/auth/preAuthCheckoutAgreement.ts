@@ -4,6 +4,8 @@
  */
 
 import { CREATE_FLOW_CHECKOUT_AGREEMENT_ID } from "../components/agreements/agreementAdvancedDraftAccess";
+import { readCreateReviewAgreementResumeId } from "../components/agreements/agreementIntakeStorage";
+import { readSessionAgreementGenerationId } from "../lib/agreementGenerationId";
 
 export const PRE_AUTH_CHECKOUT_AGREEMENT_STORAGE_KEY = "claw_pre_auth_checkout_agreement_id_v1";
 const STORAGE_KEY = PRE_AUTH_CHECKOUT_AGREEMENT_STORAGE_KEY;
@@ -13,12 +15,30 @@ export function resolveExistingConversionAgreementId(args: {
   reviewAgreementId?: string | null;
   resumeId?: string | null;
   preAuthId?: string | null;
+  activeGenerationId?: string | null;
 }): string | null {
-  for (const raw of [args.preAuthId, args.resumeId, args.reviewAgreementId]) {
+  for (const raw of [args.preAuthId, args.resumeId, args.reviewAgreementId, args.activeGenerationId]) {
     const aid = (raw || "").trim();
     if (isRealCheckoutAgreementId(aid)) return aid;
   }
   return null;
+}
+
+/**
+ * Conversion persist already known in this tab: pre-auth, resume, then active generation.
+ * Peek only — never mint a second identity.
+ */
+export function readKnownConversionAgreementId(): string | null {
+  return resolveExistingConversionAgreementId({
+    preAuthId: readPreAuthCheckoutAgreementId(),
+    resumeId: readCreateReviewAgreementResumeId(),
+    activeGenerationId: readSessionAgreementGenerationId(),
+  });
+}
+
+/** Claim-time: pin pre-auth to the known conversion identity (first persist wins). */
+export function syncPreAuthFromKnownConversionAgreementId(): string | null {
+  return rememberPreAuthCheckoutAgreementId(readKnownConversionAgreementId());
 }
 
 export function shouldMintNewDraftForConversion(existingId: string | null | undefined): boolean {

@@ -1,7 +1,8 @@
 import {
   isRealCheckoutAgreementId,
   pinCheckoutPathToPreAuthAgreement,
-  readPreAuthCheckoutAgreementId,
+  readKnownConversionAgreementId,
+  rememberPreAuthCheckoutAgreementId,
 } from "../auth/preAuthCheckoutAgreement";
 import { CREATE_FLOW_CHECKOUT_AGREEMENT_ID } from "../components/agreements/agreementAdvancedDraftAccess";
 import type { PricingCadence } from "./pricingCadenceStorage";
@@ -91,8 +92,9 @@ export function buildConversionCheckoutReturnTo(persistAgreementId?: string | nu
 
 /**
  * Continue-with-Pro first hop.
- * When persist/resume / pre-auth is known (arg or session), thread the real AID and
- * omit restore=starterReview. Unpaid Back without a persist still uses the decoy.
+ * When persist/resume / pre-auth / active generation is known (arg or session),
+ * thread that same AID and omit restore=starterReview. Sync pre-auth from the
+ * known identity at claim time. Unpaid Back without any AID still uses the decoy.
  */
 export function buildCreateFlowCheckoutHref(args: {
   cadence: PricingCadence;
@@ -101,7 +103,8 @@ export function buildCreateFlowCheckoutHref(args: {
 }): string {
   const persist =
     (isRealCheckoutAgreementId(args.persistAgreementId) ? args.persistAgreementId!.trim() : null) ||
-    readPreAuthCheckoutAgreementId();
+    readKnownConversionAgreementId();
+  if (persist) rememberPreAuthCheckoutAgreementId(persist);
   const agreementId = persist || CREATE_FLOW_CHECKOUT_AGREEMENT_ID;
   const returnTo = buildConversionCheckoutReturnTo(persist);
   const tier = (args.tier || "pro").trim() || "pro";
@@ -147,8 +150,9 @@ export function sanitizeConversionCheckoutDest(args: {
   const persist =
     (isRealCheckoutAgreementId(args.persistAgreementId) ? args.persistAgreementId!.trim() : null) ||
     realAgreementIdFromCheckoutDest(dest) ||
-    readPreAuthCheckoutAgreementId();
+    readKnownConversionAgreementId();
   if (!isRealCheckoutAgreementId(persist)) return dest;
+  rememberPreAuthCheckoutAgreementId(persist);
   const pinned = pinCheckoutPathToPreAuthAgreement(dest, persist);
   try {
     const u = new URL(pinned, "http://localhost");

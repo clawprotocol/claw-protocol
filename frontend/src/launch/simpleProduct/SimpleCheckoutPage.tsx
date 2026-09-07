@@ -87,7 +87,7 @@ import { extractAgreementIdFromCheckoutPath } from "../../auth/safeRedirectResol
 import {
   isRealCheckoutAgreementId,
   pinCheckoutPathToPreAuthAgreement,
-  readPreAuthCheckoutAgreementId,
+  readKnownConversionAgreementId,
   rememberPreAuthCheckoutAgreementId,
 } from "../../auth/preAuthCheckoutAgreement";
 import { readCreateReviewAgreementResumeId } from "../../components/agreements/agreementIntakeStorage";
@@ -217,7 +217,7 @@ export function SimpleCheckoutPage(props: { agreementId: string }) {
 
   const persistAgreementId = useMemo(() => {
     if (isRealCheckoutAgreementId(agreementId)) return agreementId;
-    return readPreAuthCheckoutAgreementId() || readCreateReviewAgreementResumeId();
+    return readKnownConversionAgreementId() || readCreateReviewAgreementResumeId();
   }, [agreementId]);
 
   const returnTo = useMemo(
@@ -282,7 +282,7 @@ export function SimpleCheckoutPage(props: { agreementId: string }) {
   useLayoutEffect(() => {
     const currentPath = `/app/checkout/${encodeURIComponent(agreementId)}${search || ""}`;
     const persist =
-      readPreAuthCheckoutAgreementId() || readCreateReviewAgreementResumeId() || agreementId;
+      readKnownConversionAgreementId() || readCreateReviewAgreementResumeId() || agreementId;
     const pinned = pinCheckoutPathToPreAuthAgreement(currentPath, persist);
     const cleaned = sanitizeConversionCheckoutDest({
       dest: pinned,
