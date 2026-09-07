@@ -140,11 +140,15 @@ import {
   resolveCreateFlowPreparationFailsafeMessage,
   resolvePartiesForPremiumGenerateRequest,
   resolvePartyPrepSlotCount,
+  hasAuthoritativeCreateReviewBodyForPrepFailsafe,
+  isVs01CorpusGateBlockedWithoutSelectedFinal,
+  shouldDismissCreateOverlaysAfterRejectOrGate,
   shouldDismissHomeCreateTransitionForIntakeRecovery,
   shouldFailClosedCreateAfterRejectOrGate,
   shouldInvokePremiumGenerateAfterPartyPrepCreate,
   shouldSettleProReviewAfterPremiumFullDraft,
   shouldSkipEntitledRewriteForMatchingAcceptedSnapshot,
+  withCreatePipelineVs01CorpusGate,
 } from "./multiPartyCreateReviewSettle";
 import { StarterMultiPartyProGatePanel } from "./StarterMultiPartyProGatePanel";
 import { AgreementIntakeClarificationPanel } from "./AgreementIntakeClarificationPanel";
@@ -4839,6 +4843,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const proFullDraftQualityRetryRef = useRef(proFullDraftQualityRetry);
   const proUpgradeUseStarterViewRef = useRef(proUpgradeUseStarterView);
   const hardErrorRef = useRef(hardError);
+  /** Live VS01 dump→create gate — leftover paint is not authoritative unless selected-final. */
+  const vs01SelectedFinalRef = useRef(false);
+  const vs01CorpusGateBlockedWithoutSelectedFinalRef = useRef(false);
   createUiStageRef.current = createUiStage;
   createFlowPhaseRef.current = createFlowPhase;
   displayPhaseRef.current = displayPhase;
@@ -7483,6 +7490,27 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         setLoading(false);
         return;
       }
+      const vs01GateAfterGenerate = resolveFinalVs01CorpusOrBlock({
+        agreementCorpusText: (result.winningPremiumBodyText || "").trim(),
+        draft: (gateDraft ?? null) as unknown as AgreementDraft | null,
+        guidedPro: true,
+        premiumInProgress: false,
+        premiumComplete: (result.winningPremiumBodyText || "").trim().length >= VS01_CORPUS_PREFERRED_MIN_LEN,
+        acceptedAuthoritativePlain: (result.winningPremiumBodyText || "").trim() || null,
+        premiumAccepted: shouldSettleProReviewAfterPremiumFullDraft(result),
+        premiumPipelineRenderSource: result.premiumRenderSource,
+        intakeText: mergedIntake,
+        hydratedPremiumPlain: hydratedPremiumBodyRef.current,
+        premiumPipelinePlain: premiumPipelineOutputBodyRef.current,
+        lastKnownGoodPlain: lastKnownGoodAuthoritativeDraftRef.current,
+      });
+      vs01SelectedFinalRef.current = Boolean(vs01GateAfterGenerate.allowed);
+      vs01CorpusGateBlockedWithoutSelectedFinalRef.current = isVs01CorpusGateBlockedWithoutSelectedFinal({
+        allowed: vs01GateAfterGenerate.allowed,
+        blockReason: vs01GateAfterGenerate.blockReason,
+        selectedFinal: vs01GateAfterGenerate.allowed,
+      });
+      result = withCreatePipelineVs01CorpusGate(result, vs01GateAfterGenerate);
       if (shouldFailClosedCreateAfterRejectOrGate(result)) {
         logPaidProGenerationTerminalTransition({
           reason: "no_server_authority",
@@ -14699,10 +14727,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     }
     const startedAt = prepOverlayStartedAtRef.current;
     const id = window.setInterval(() => {
-      const hasAuthoritativeBody = Boolean(
+      const leftoverBody = Boolean(
         String(agreementDocumentTextRef.current || "").trim() ||
           String(hydratedPremiumBodyRef.current || "").trim(),
       );
+      const hasAuthoritativeBody = hasAuthoritativeCreateReviewBodyForPrepFailsafe({
+        leftoverBody,
+        vs01SelectedFinal: vs01SelectedFinalRef.current,
+      });
       const pipelineInFlight =
         premiumAuthoritativeRequestInFlightRef.current ||
         premiumGenerateHttpStartedRef.current ||
@@ -14744,6 +14776,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         emptyAuthorityPrepFailSafe,
         homeAutoGenerateConsumed: homeAutoGenerateConsumedRef.current,
         hardError,
+        rejectOrGateBlocked: vs01CorpusGateBlockedWithoutSelectedFinalRef.current,
       }) ||
       shouldDismissHomeCreateTransitionForIntakeRecovery({
         isGenerating,
@@ -14752,6 +14785,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         createFlowPhase,
         homeAutoGenerateConsumed: homeAutoGenerateConsumedRef.current,
         hardError,
+        rejectOrGateBlocked: vs01CorpusGateBlockedWithoutSelectedFinalRef.current,
       })
     ) {
       onHomeGuidedTransitionPhase("review_ready");
@@ -26221,6 +26255,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         }),
     });
     if (computed) vs01FinalCorpusGateFrozenRef.current = value;
+    vs01SelectedFinalRef.current = Boolean(value.allowed);
+    vs01CorpusGateBlockedWithoutSelectedFinalRef.current = isVs01CorpusGateBlockedWithoutSelectedFinal({
+      allowed: value.allowed,
+      blockReason: value.blockReason,
+      selectedFinal: value.allowed,
+    });
     return value;
   }, [
     draft,
@@ -26237,6 +26277,77 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     simpleProFinalReviewActive,
     paidProSignerMetadataEditGuardActive,
     paidProSigningCorpusFreezeActive,
+  ]);
+
+  const vs01CorpusGateBlockedWithoutSelectedFinal = isVs01CorpusGateBlockedWithoutSelectedFinal({
+    allowed: vs01FinalCorpusGate.allowed,
+    blockReason: vs01FinalCorpusGate.blockReason,
+    selectedFinal: vs01FinalCorpusGate.allowed,
+  });
+  const dismissCreateOverlaysAfterRejectOrGate = shouldDismissCreateOverlaysAfterRejectOrGate({
+    rejectOrGateBlocked: vs01CorpusGateBlockedWithoutSelectedFinal,
+    hardError,
+    emptyAuthorityPrepFailSafe,
+    corpusCommerciallyUsable: vs01FinalCorpusGate.allowed,
+  });
+
+  useEffect(() => {
+    if (!vs01CorpusGateBlockedWithoutSelectedFinal) return;
+    if (hardError || emptyAuthorityPrepFailSafe) return;
+    const overlayActive =
+      premiumPostCheckoutPhase === "processing" ||
+      premiumPostCheckoutPhase === "generation_retry";
+    if (!overlayActive) return;
+    const winning =
+      lastPremiumWinningCorpusRef.current ||
+      premiumPipelineOutputBodyRef.current ||
+      "";
+    const settle = shouldSettleProReviewAfterPremiumFullDraft({
+      winningPremiumBodyText: winning,
+      premiumRenderSource: lastPremiumPipelineRenderSourceRef.current,
+    });
+    if (settle || vs01FinalCorpusGate.allowed) {
+      setPremiumPostCheckoutPhase(null);
+      setPremiumPipelineUserMessage(null);
+      setDisplayPhase("review");
+      setCreateFlowPhase("draft_ready_for_review");
+      setCreateUiStage(CreateUiStage.DRAFT);
+      setLoading(false);
+      return;
+    }
+    const terminal = commitEntitledRewriteGenerationFailureTerminal({
+      reason: "no_server_authority",
+      dashboardRoute: isDashboardPaidCreateRouteActive(),
+      intakeNotes: (
+        failedCreateUserInputSnapshotRef.current ||
+        readOriginalUserIntakeRaw() ||
+        intakeCombinedRef.current ||
+        ""
+      ).trim(),
+      customMessage: CREATE_FLOW_GENERATE_FAILED_CLEAR_MESSAGE,
+    });
+    setProFullDraftQualityRetry(terminal.proFullDraftQualityRetry);
+    setProFullDraftCustomGateMessage(terminal.proFullDraftCustomGateMessage);
+    setPremiumPersistedFlowActive(terminal.premiumPersistedFlowActive);
+    setPremiumSendPathUnlocked(terminal.premiumSendPathUnlocked);
+    setPremiumPostCheckoutPhase(terminal.premiumPostCheckoutPhase);
+    setPremiumPipelineUserMessage(terminal.premiumPipelineUserMessage);
+    setHardError(terminal.hardError);
+    setCreateFlowPhase(terminal.createFlowPhase);
+    setDisplayPhase(terminal.displayPhase);
+    setCreateUiStage(terminal.createUiStage);
+    setLoading(false);
+    if (terminal.clearLocalDraft) {
+      setDraft(null);
+      setPreviewPaneRevealed(false);
+    }
+  }, [
+    vs01CorpusGateBlockedWithoutSelectedFinal,
+    vs01FinalCorpusGate.allowed,
+    hardError,
+    emptyAuthorityPrepFailSafe,
+    premiumPostCheckoutPhase,
+    displayPhase,
   ]);
 
   const canProceedGuidedFinalReviewToSigning = useMemo(
@@ -33469,7 +33580,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                 }}
               />
             ) : null}
-            {simpleProductFlow && createProductionTwoPane && premiumPostCheckoutPhase && premiumPostCheckoutPhase !== "premium_network_recoverable" ? (
+            {simpleProductFlow && createProductionTwoPane && premiumPostCheckoutPhase && premiumPostCheckoutPhase !== "premium_network_recoverable" && !dismissCreateOverlaysAfterRejectOrGate ? (
               <div
                 className="fixed inset-0 z-[220] flex items-center justify-center bg-[#0a0e18]/92 px-4 backdrop-blur-sm"
                 role="dialog"
@@ -38536,7 +38647,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         </div>
       ) : null}
 
-      {displayPhase === "preparing_review" && !emptyAuthorityPrepFailSafe ? (
+      {displayPhase === "preparing_review" && !emptyAuthorityPrepFailSafe && !dismissCreateOverlaysAfterRejectOrGate ? (
         <div
           className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/45 px-4"
           role="status"
