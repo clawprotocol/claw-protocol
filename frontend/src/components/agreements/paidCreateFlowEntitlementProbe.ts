@@ -55,14 +55,13 @@ export function resolveProvisionalWorkspaceProEntitledForCreate(): boolean {
   if (readPremiumCompletionSnapshotPremiumAcceptedForCreateProbe()) return true;
   if (peekAdvancedFullDraftCheckoutGrant()) return true;
 
-  // Anonymous homepage Starter authority — never provisional-paid before real entitlement.
-  if (isHomeAnonymousStarterAuthorityActive()) return false;
-
   // local-org / empty bootstrap must never resolve entitled.
   if (mustBlockPaidEntitlementForLegacyFallbackOrg()) return false;
 
-  // Anonymous/path orgs: never infer paid from dashboard marker or fail-closed path session.
-  if (!mustBlockPathInferredPaidEntitlement()) {
+  const homeAnonymousStarter = isHomeAnonymousStarterAuthorityActive();
+  // Homepage dump: never infer paid from dashboard/path markers. Real workspace /
+  // subscription entitlement still wins so entitled Pro named-2p can settle Review.
+  if (!homeAnonymousStarter && !mustBlockPathInferredPaidEntitlement()) {
     if (hasPaidDashboardCreateContextActive()) return true;
     if (shouldFailClosedBypassForAuthenticatedWorkspaceCreate()) return true;
   }

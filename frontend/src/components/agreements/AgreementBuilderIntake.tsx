@@ -12350,9 +12350,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       });
     if (fromHomeHandoff) {
       resetStalePaidReviewShellForFreeStarter("home_create_submit", {
-        // TEST547/549 — homepage hero handoff must always latch free starter before async entitlement probes settle.
-        skipFreeStarterLatch:
-          skipFreeStarterCreateSubmit && !isHeroFromHomeCreateEntry(),
+        // TEST547/549 latch-before-settle happens in the home layout effect.
+        // After entitlement is resolved, entitled Pro homepage dump must not
+        // re-latch free starter or the paid Review shell never mounts.
+        skipFreeStarterLatch: skipFreeStarterCreateSubmit,
       });
       clearCreateReviewAgreementResumeId();
       productionResumeHydratedRef.current = false;
@@ -12708,8 +12709,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     if (!homeHeroAutoGenerate || checkoutBackRestoreActive || homeAutoGenerateStartedRef.current) return;
     if (paidProEditReturnResumeActive) return;
     resetStalePaidReviewShellForFreeStarter("home_create_submit", {
+      // Latch free starter only when this session is not already entitled Pro.
+      // Anonymous homepage still latches (TEST547/549). Entitled dump must not.
       skipFreeStarterLatch:
-        tierAllowsAdvancedFullDraftReveal(tier) && !isHeroFromHomeCreateEntry(),
+        tierAllowsAdvancedFullDraftReveal(tier) ||
+        resolveCreateFlowWorkspaceProEntitled() ||
+        resolveProvisionalWorkspaceProEntitledForCreate(),
     });
   }, [homeHeroAutoGenerate, checkoutBackRestoreActive, paidProEditReturnResumeActive, tier]);
 
@@ -16423,7 +16428,17 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
   useEffect(() => {
     if (!simpleProductFlow || !createProductionTwoPane) return;
-    if (hasCurrentSessionFreeStarterIntent() || isHeroFromHomeCreateEntry()) return;
+    // Homepage dump latches free-starter for unsigned users. Entitled Pro must
+    // still auto-rewrite — #210 remap never ran when this returned early.
+    if (
+      (hasCurrentSessionFreeStarterIntent() || isHeroFromHomeCreateEntry()) &&
+      !resolveProvisionalWorkspaceProEntitledForCreate() &&
+      !workspaceProEntitled &&
+      !tierAllowsAdvancedFullDraftReveal(tier) &&
+      !resolveCreateFlowWorkspaceProEntitled()
+    ) {
+      return;
+    }
     const provisionalPaid =
       resolveProvisionalWorkspaceProEntitledForCreate() || workspaceProEntitled;
     if (!provisionalPaid) return;
@@ -16457,6 +16472,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     simpleProductFlow,
     createProductionTwoPane,
     workspaceProEntitled,
+    tier,
     authoritativeCreateFlowReviewShellInput,
     draft,
     createFlowPhase,

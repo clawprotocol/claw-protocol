@@ -316,6 +316,13 @@ describe("multi-party create → review settle or fail-closed", () => {
     expect(intake).toContain("pickCreateReviewSettleCorpus");
     expect(intake).toContain("shouldRemapGenerationRetryableSalvageForCreateSettle");
     expect(intake).toContain("shouldSkipPartyPrepForOrdinaryNamedTwoParty");
+    const parseResetIdx = intake.indexOf("if (fromHomeHandoff) {");
+    const parseResetBlock = intake.slice(parseResetIdx, parseResetIdx + 700);
+    expect(parseResetBlock).toContain("skipFreeStarterLatch: skipFreeStarterCreateSubmit");
+    expect(parseResetBlock).not.toContain("skipFreeStarterCreateSubmit && !isHeroFromHomeCreateEntry()");
+    expect(intake).toContain(
+      '(hasCurrentSessionFreeStarterIntent() || isHeroFromHomeCreateEntry()) &&',
+    );
     expect(intake).toContain("hasPremiumAuthorityShorterThanAcceptedChurn");
     expect(intake).toContain("premiumGenerateCompleted");
     expect(intake).not.toMatch(
@@ -950,7 +957,18 @@ describe("multi-party create → review settle or fail-closed", () => {
         generateComplete: false,
         vs01GateBlockedWithoutSelectedFinal: false,
       }),
-    ).toBe(false);
+    ).toBe(true);
+    const canonicalNorthline =
+      "Services agreement between Northline Robotics LLC (Jordan Lee) and Cedar Peak Analytics Inc (Sam Okonkwo). Northline delivers robotics integration; Cedar Peak provides analytics. Fee $12,500. Term 6 months. Governing law Texas.";
+    expect(extractListedSigningPartyNames(canonicalNorthline).length).toBe(2);
+    expect(evaluateIntentionalCreateDraftSubmit(canonicalNorthline).action).toBe("proceed");
+    expect(
+      shouldSkipPartyPrepForOrdinaryNamedTwoParty({
+        intakeText: canonicalNorthline,
+        partyRows: ["", ""],
+        generateComplete: false,
+      }),
+    ).toBe(true);
   });
 
   it("two-party named intake still resolves two parties only", () => {

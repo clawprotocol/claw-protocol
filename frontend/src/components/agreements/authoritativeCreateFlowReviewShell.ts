@@ -93,17 +93,40 @@ export function isCreateFlowPaidAcceptedOrAuthoritativeActive(
   return Boolean(readDisplayReviewSnapshotAuthority()?.snapshotId);
 }
 
+/** Real workspace/subscription Pro — not path-inferred dashboard/homepage markers. */
+function hasConfirmedWorkspaceProEntitlement(
+  input: ResolveAuthoritativeCreateFlowReviewShellInput = {},
+): boolean {
+  if (input.workspaceProEntitled) return true;
+  if (input.tier && tierAllowsAdvancedFullDraftReveal(input.tier)) return true;
+  return resolveCreateFlowWorkspaceProEntitled();
+}
+
 export function resolveAuthoritativeCreateFlowReviewShell(
   input: ResolveAuthoritativeCreateFlowReviewShellInput = {},
 ): AuthoritativeCreateFlowReviewShell {
-  // Anonymous homepage origin: Starter-first until checkout completion or session Pro entitlement.
+  // Homepage origin stays Starter for anonymous/free users. Entitled signed-in Pro
+  // (workspace/subscription) must still take paid Review — #210 remaps never mount
+  // when this branch forces free_starter despite workspaceProEntitled.
   if (isHomeAnonymousStarterAuthorityActive() && !hasCurrentSessionProEntitlement()) {
     if (input.premiumCheckoutCompleted) return "paid_pro";
+    if (
+      !mustBlockPaidEntitlementForLegacyFallbackOrg() &&
+      hasConfirmedWorkspaceProEntitlement(input)
+    ) {
+      return "paid_pro";
+    }
     return "free_starter";
   }
   if (hasCurrentSessionFreeStarterIntent() && !hasCurrentSessionProEntitlement()) {
     // In-session paid acceptance / upgrade completion supersedes the starter latch.
     if (input.premiumCheckoutCompleted) return "paid_pro";
+    if (
+      !mustBlockPaidEntitlementForLegacyFallbackOrg() &&
+      hasConfirmedWorkspaceProEntitlement(input)
+    ) {
+      return "paid_pro";
+    }
     if (hasPaidProSourceOfTruth()) return "paid_pro";
     if (hasAcceptedPaidCreateFlowFreezeLatch()) return "paid_pro";
     if (hasPaidCreateFlowPipelineAcceptance()) return "paid_pro";
@@ -166,10 +189,36 @@ export function resolveCreateFlowReviewShellTransitionReason(
 ): CreateFlowReviewShellTransitionReason {
   if (isHomeAnonymousStarterAuthorityActive() && !hasCurrentSessionProEntitlement()) {
     if (input.premiumCheckoutCompleted) return "premium_checkout_completed";
+    if (
+      !mustBlockPaidEntitlementForLegacyFallbackOrg() &&
+      (input.workspaceProEntitled || resolveCreateFlowWorkspaceProEntitled())
+    ) {
+      return "workspace_pro_entitled";
+    }
+    if (
+      !mustBlockPaidEntitlementForLegacyFallbackOrg() &&
+      input.tier &&
+      tierAllowsAdvancedFullDraftReveal(input.tier)
+    ) {
+      return "tier_advanced_full_draft";
+    }
     return "free_starter";
   }
   if (hasCurrentSessionFreeStarterIntent() && !hasCurrentSessionProEntitlement()) {
     if (input.premiumCheckoutCompleted) return "premium_checkout_completed";
+    if (
+      !mustBlockPaidEntitlementForLegacyFallbackOrg() &&
+      (input.workspaceProEntitled || resolveCreateFlowWorkspaceProEntitled())
+    ) {
+      return "workspace_pro_entitled";
+    }
+    if (
+      !mustBlockPaidEntitlementForLegacyFallbackOrg() &&
+      input.tier &&
+      tierAllowsAdvancedFullDraftReveal(input.tier)
+    ) {
+      return "tier_advanced_full_draft";
+    }
     if (hasPaidProSourceOfTruth()) return "paid_pro_source_of_truth";
     if (hasAcceptedPaidCreateFlowFreezeLatch()) return "paid_create_flow_freeze_latch";
     if (hasPaidCreateFlowPipelineAcceptance()) return "pipeline_acceptance";

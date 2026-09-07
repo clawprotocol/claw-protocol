@@ -410,8 +410,9 @@ export function planPostGenerateCreateReviewSettleOrFailClosed(input: {
 
 /**
  * Ordinary coherent 2-party dumps that already name both parties must not stop
- * at party-prep (Still needed / Create) when the corpus/gate path should settle
- * or fail-close. N≥3 unnamed dumps still use party-prep.
+ * at party-prep (Still needed / Create). First-create homepage dump→create must
+ * skip Create CTA immediately — do not wait for generateComplete (#210 miss).
+ * N≥3 unnamed dumps still use party-prep.
  */
 export function shouldSkipPartyPrepForOrdinaryNamedTwoParty(input: {
   intakeText: string;
@@ -423,9 +424,7 @@ export function shouldSkipPartyPrepForOrdinaryNamedTwoParty(input: {
   const intake = String(input.intakeText || "");
   if (requiredCreatePartyNameCount(intake) > 2) return false;
   if (countFilledCreatePartyNames(intake, input.partyRows ?? []) < 2) return false;
-  if (input.corpusCommerciallyUsable) return true;
-  if (input.generateComplete && input.vs01GateBlockedWithoutSelectedFinal) return true;
-  return Boolean(input.generateComplete);
+  return true;
 }
 
 /**
