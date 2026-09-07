@@ -6,6 +6,7 @@
 import {
   analyzeTemplatePlaceholderFragments,
   resolvePlaceholderPartyNames,
+  shouldAcceptPaidProCommercialFieldStubsAfterPfd200,
 } from "./agreementTemplatePlaceholderSafety";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 
@@ -160,6 +161,15 @@ export function rejectPremiumBodyForProRender(
   });
   const remainingFatal = remainingDetail.filter((d) => d.fatal).map((d) => d.token);
   if (remainingFatal.length > 0) {
+    if (
+      shouldAcceptPaidProCommercialFieldStubsAfterPfd200({
+        text: bodyTrim,
+        intakeRaw,
+        remainingDetail,
+      })
+    ) {
+      return { ok: true, reasons: [] };
+    }
     return {
       ok: false,
       reasons: remainingFatal.slice(0, 12).map((x) => `placeholder:${x.slice(0, 48)}`),
