@@ -4,8 +4,11 @@ import { writeAgreementVs01BridgeSession } from "../launch/simpleProduct/agreeme
 import { replacePaidProSourceOfTruth } from "../components/agreements/paidProSourceOfTruthState";
 import { clearPaidProSourceOfTruth, hashPaidProCorpus } from "../components/agreements/paidProSourceOfTruth";
 import {
+  FIRST_FAILING_DOUBLE_CONTINUE_REMOUNT_LOADING_PREDICATE,
   FIRST_FAILING_ESIGN_REMOUNT_PREDICATE,
   ensureReviewCorpusOnEsignEntry,
+  remountPrepareShouldPaintBeforeContentInspect,
+  resolveCertifiedReviewForEsignRemount,
   resolveEsignEntryReviewBindContext,
 } from "./vs01EsignRemountReviewBind";
 import { REPLACE_STALE_SERVER_TEMPLATE_CONTENT_REASON } from "./vs01ReviewCorpusServerContent";
@@ -204,6 +207,25 @@ describe("esign remount binds Review corpus before paint", () => {
     expect(seed.mock.calls[0][2]).toMatch(/12\.\s+NOTICES/i);
     expect(seed.mock.calls[0][2]).not.toMatch(/Draft Agreement \(non-binding template\)/i);
     expect(seed.mock.calls[0][4]).toBe(SEEDED_DOC);
+  });
+
+  it("resolves persist Review for a second-seeded doc without GET /content", async () => {
+    const review = reviewServicesAgreement();
+    expect(FIRST_FAILING_DOUBLE_CONTINUE_REMOUNT_LOADING_PREDICATE).toBe(
+      "esign_double_continue_minted_prepare_stuck_loading",
+    );
+    expect(resolveEsignEntryReviewBindContext("doc_64c3c8f219f2443085e40be8326ad814")).toBeNull();
+    const secondDoc = "doc_64c3c8f219f2443085e40be8326ad814";
+    const certified = await resolveCertifiedReviewForEsignRemount({
+      documentId: secondDoc,
+      fetchDocumentMeta: async () => ({ agreementId: AGREEMENT_ID }),
+      fetchDraft: async () => null,
+      fetchAcceptedReviewCorpus: async () => "",
+      fetchPersistReviewGet: async () => review,
+    });
+    expect(certified.agreementId).toBe(AGREEMENT_ID);
+    expect(certified.persistReviewCorpus).toMatch(/SERVICES AGREEMENT/);
+    expect(remountPrepareShouldPaintBeforeContentInspect(certified.persistReviewCorpus)).toBe(true);
   });
 
   it("409 still does not eject after remount bind", () => {

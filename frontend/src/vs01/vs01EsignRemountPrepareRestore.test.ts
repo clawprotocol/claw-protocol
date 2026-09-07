@@ -377,19 +377,23 @@ describe("esign remount Prepare dual-party fields (not empty self-sign)", () => 
     expect(wizard).toContain("restorePrepareFromFrozenSigningAuthority");
     expect(wizard).toContain("setPaidProAgreementBridgeSkip");
     expect(wizard).toContain("ensureReviewCorpusOnEsignEntry");
+    expect(wizard).toContain("resolveCertifiedReviewForEsignRemount");
     expect(wizard).toContain("resolveRemountPrepareCorpusText");
     expect(wizard).toContain("fetchRemountCertifiedReviewCorpus");
     const start = wizard.indexOf("/** Deep link: /app/esign/:documentId");
-    const leftoverAt = wizard.indexOf("ensureReviewCorpusOnEsignEntry", start);
-    const restoreAt = wizard.indexOf("restorePrepareFromFrozenSigningAuthority", leftoverAt);
+    const persistAt = wizard.indexOf("resolveCertifiedReviewForEsignRemount", start);
+    const restoreAt = wizard.indexOf("restorePrepareFromFrozenSigningAuthority", persistAt);
     const crsAt = wizard.indexOf("fetchRemountCertifiedReviewCorpus", restoreAt);
     const remountCorpusAt = wizard.indexOf("resolveRemountPrepareCorpusText", restoreAt);
     const hydrateAt = wizard.indexOf("const hydrateLocalPaidProBridge", restoreAt);
-    expect(leftoverAt).toBeGreaterThan(start);
-    expect(restoreAt).toBeGreaterThan(leftoverAt);
+    const leftoverAt = wizard.indexOf("ensureReviewCorpusOnEsignEntry", hydrateAt);
+    expect(persistAt).toBeGreaterThan(start);
+    expect(restoreAt).toBeGreaterThan(persistAt);
     expect(crsAt).toBeGreaterThan(restoreAt);
     expect(remountCorpusAt).toBeGreaterThan(crsAt);
     expect(hydrateAt).toBeGreaterThan(remountCorpusAt);
+    expect(leftoverAt).toBeGreaterThan(hydrateAt);
+    expect(wizard.slice(start, remountCorpusAt)).not.toContain("fetchDocumentContent(sid)");
     expect(wizard.slice(restoreAt, hydrateAt)).toContain("setPrepareCorpusText");
     expect(wizard.slice(restoreAt, hydrateAt)).not.toMatch(
       /bindAuthenticatedUserToWorkspace|workspaceBindingApi/,

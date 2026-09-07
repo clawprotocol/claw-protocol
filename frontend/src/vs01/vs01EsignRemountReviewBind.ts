@@ -76,6 +76,42 @@ import { VS01_SIGNING_CORPUS_MIN_LEN } from "./vs01SigningCorpus";
 export const FIRST_FAILING_ESIGN_REMOUNT_PREDICATE =
   "esign_remount_paints_template_content_without_bind" as const;
 
+/**
+ * Live stress-battery case 5: double-Continue minted `/app/esign/doc_*`
+ * remount stayed on “Loading your document…” because the seed effect awaited
+ * leftover GET /content inspect + vs01-signing-seed POST before setting
+ * contentSha256. Persist Review + frozen restore must unblock Prepare paint
+ * without that inspect.
+ */
+export const FIRST_FAILING_DOUBLE_CONTINUE_REMOUNT_LOADING_PREDICATE =
+  "esign_double_continue_minted_prepare_stuck_loading" as const;
+
+export type CertifiedReviewForEsignRemount = {
+  agreementId: string;
+  persistReviewCorpus: string;
+  existingBridgeCorpus: string | null;
+  draft: AgreementDraft | null;
+};
+
+export type ResolveCertifiedReviewForEsignRemountArgs = {
+  documentId: string;
+  agreementId?: string | null;
+  existingBridgeCorpus?: string | null;
+  draft?: AgreementDraft | null;
+  fetchDocumentMeta?: (id: string) => Promise<{ agreementId: string | null }>;
+  fetchDraft?: (agreementId: string) => Promise<AgreementDraft | null>;
+  fetchAcceptedReviewCorpus?: (agreementId: string) => Promise<string | null>;
+  fetchPersistReviewGet?: (agreementId: string) => Promise<string | null>;
+  fetchReviewPaintSot?: (agreementId: string) => Promise<string | null>;
+};
+
+/** Persist Review is enough to leave Loading — do not wait on GET /content. */
+export function remountPrepareShouldPaintBeforeContentInspect(
+  persistReviewCorpus: string | null | undefined,
+): boolean {
+  return Boolean(persistReviewGetPlainForSigningSeed(persistReviewCorpus));
+}
+
 export type EsignEntryReviewBindContext = {
   agreementId: string;
   existingBridgeCorpus: string | null;
@@ -268,35 +304,16 @@ function defaultFetchReviewPaintSot(
 }
 
 /**
- * Inspect GET /content and POST vs01-signing-seed with the persist Review
- * corpus when the painted blob is not that SoT. Same persist; prefer same vs01 id.
- * Leftover remount with an empty Incognito Review-paint session still
- * resolves persist Review GET (canonical-review-snapshot) — do not skip.
- * If GET /content is leftover fused, it does not match certified Review —
- * replace it. Fail-closed only when persist Review truly does not exist.
- * Leftover on screen is not a pass. Leftover fused blob is never the seed body.
+ * Persist Review for remount Prepare — no GET /content inspect or seed POST.
+ * Double-Continue minted doc_* remount must leave “Loading your document…”
+ * from this SoT even when leftover inspect / vs01-signing-seed hangs.
  */
-export async function ensureReviewCorpusOnEsignEntry(args: {
-  documentId: string;
-  agreementId?: string | null;
-  reviewCorpus?: string | null;
-  existingBridgeCorpus?: string | null;
-  draft?: AgreementDraft | null;
-  seed?: Vs01SigningSeedFn;
-  fetchContent?: (id: string) => Promise<FetchedDocumentContent>;
-  fetchDocumentMeta?: (id: string) => Promise<{ agreementId: string | null }>;
-  fetchDraft?: (agreementId: string) => Promise<AgreementDraft | null>;
-  fetchAcceptedReviewCorpus?: (agreementId: string) => Promise<string | null>;
-  fetchPersistReviewGet?: (agreementId: string) => Promise<string | null>;
-  fetchReviewPaintSot?: (agreementId: string) => Promise<string | null>;
-  signingCorpusSource?: string | null;
-}): Promise<
-  | BindReviewCorpusResult
-  | { ok: true; skipped: true; reason: string; documentId: string }
-> {
+export async function resolveCertifiedReviewForEsignRemount(
+  args: ResolveCertifiedReviewForEsignRemountArgs,
+): Promise<CertifiedReviewForEsignRemount> {
   const documentId = args.documentId.trim();
   if (!documentId || documentId.startsWith("local_doc_")) {
-    return { ok: true, skipped: true, reason: "local_or_missing", documentId };
+    return { agreementId: "", persistReviewCorpus: "", existingBridgeCorpus: null, draft: null };
   }
 
   const resolved = args.agreementId?.trim()
@@ -315,7 +332,7 @@ export async function ensureReviewCorpusOnEsignEntry(args: {
     }
   }
   if (!agreementId) {
-    return { ok: true, skipped: true, reason: "missing_agreement_id", documentId };
+    return { agreementId: "", persistReviewCorpus: "", existingBridgeCorpus: null, draft: null };
   }
 
   const existingBridgeCorpus =
@@ -366,6 +383,65 @@ export async function ensureReviewCorpusOnEsignEntry(args: {
       certifiedReviewCorpus = "";
     }
   }
+
+  return {
+    agreementId,
+    persistReviewCorpus: certifiedReviewCorpus,
+    existingBridgeCorpus,
+    draft,
+  };
+}
+
+/**
+ * Inspect GET /content and POST vs01-signing-seed with the persist Review
+ * corpus when the painted blob is not that SoT. Same persist; prefer same vs01 id.
+ * Leftover remount with an empty Incognito Review-paint session still
+ * resolves persist Review GET (canonical-review-snapshot) — do not skip.
+ * If GET /content is leftover fused, it does not match certified Review —
+ * replace it. Fail-closed only when persist Review truly does not exist.
+ * Leftover on screen is not a pass. Leftover fused blob is never the seed body.
+ */
+export async function ensureReviewCorpusOnEsignEntry(args: {
+  documentId: string;
+  agreementId?: string | null;
+  reviewCorpus?: string | null;
+  existingBridgeCorpus?: string | null;
+  draft?: AgreementDraft | null;
+  seed?: Vs01SigningSeedFn;
+  fetchContent?: (id: string) => Promise<FetchedDocumentContent>;
+  fetchDocumentMeta?: (id: string) => Promise<{ agreementId: string | null }>;
+  fetchDraft?: (agreementId: string) => Promise<AgreementDraft | null>;
+  fetchAcceptedReviewCorpus?: (agreementId: string) => Promise<string | null>;
+  fetchPersistReviewGet?: (agreementId: string) => Promise<string | null>;
+  fetchReviewPaintSot?: (agreementId: string) => Promise<string | null>;
+  signingCorpusSource?: string | null;
+}): Promise<
+  | BindReviewCorpusResult
+  | { ok: true; skipped: true; reason: string; documentId: string }
+> {
+  const documentId = args.documentId.trim();
+  if (!documentId || documentId.startsWith("local_doc_")) {
+    return { ok: true, skipped: true, reason: "local_or_missing", documentId };
+  }
+
+  const certified = await resolveCertifiedReviewForEsignRemount({
+    documentId,
+    agreementId: args.agreementId,
+    existingBridgeCorpus: args.existingBridgeCorpus,
+    draft: args.draft,
+    fetchDocumentMeta: args.fetchDocumentMeta,
+    fetchDraft: args.fetchDraft,
+    fetchAcceptedReviewCorpus: args.fetchAcceptedReviewCorpus,
+    fetchPersistReviewGet: args.fetchPersistReviewGet,
+    fetchReviewPaintSot: args.fetchReviewPaintSot,
+  });
+  const agreementId = certified.agreementId;
+  if (!agreementId) {
+    return { ok: true, skipped: true, reason: "missing_agreement_id", documentId };
+  }
+  const existingBridgeCorpus = certified.existingBridgeCorpus;
+  const certifiedReviewCorpus = certified.persistReviewCorpus;
+  const draft = args.draft ?? certified.draft;
 
   const painted = await inspectSeededDocumentServerContent(
     documentId,
