@@ -145,6 +145,7 @@ import {
   pickCreateReviewSettleCorpus,
   planPostGenerateCreateReviewSettleOrFailClosed,
   resolvePostGenerateAuthorityChurnOverlayDecision,
+  planHardDismissPremiumProcessingOverlaysOnFailsafe,
   shouldDismissCreateOverlaysAfterRejectOrGate,
   shouldDismissHomeCreateTransitionForIntakeRecovery,
   shouldFailClosedCreateAfterRejectOrGate,
@@ -26674,8 +26675,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       displayPhase === "generating_draft" ||
       displayPhase === "hydrating_generated",
     pfdHttpCompleted: premiumGenerateCompleted,
+    // Leftover settleReview / winning body from a prior Northline walk is not
+    // current-dump authority — do not suppress the junk failsafe on it.
     hasAuthoritativeReviewBody:
-      postGenerateCreateReviewSettlePlan.settleReview ||
       Boolean(vs01FinalCorpusGate.allowed) ||
       hasAuthoritativeCreateReviewBodyForPrepFailsafe({
         leftoverBody: Boolean(
@@ -26686,6 +26688,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       }),
     preparingStartedAtMs: premiumProcessingFailsafeStartedAtRef.current,
     nowMs: premiumProcessingFailsafeNowMs || Date.now(),
+  });
+  const premiumProcessingFailsafeOverlayDismiss = planHardDismissPremiumProcessingOverlaysOnFailsafe({
+    failClosed: premiumProcessingWithoutPfdFailClosed,
   });
   const dismissCreateOverlaysAfterRejectOrGate = shouldDismissCreateOverlaysAfterRejectOrGate({
     rejectOrGateBlocked:
@@ -26707,8 +26712,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       !premiumProcessingOrPreparingOverlay ||
       premiumGenerateCompleted ||
       currentDumpIntakeOnlyNamedTwoPartyReady ||
-      vs01FinalCorpusGate.allowed ||
-      postGenerateCreateReviewSettlePlan.settleReview
+      vs01FinalCorpusGate.allowed
     ) {
       premiumProcessingFailsafeStartedAtRef.current = null;
       return;
@@ -26725,7 +26729,6 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     premiumGenerateCompleted,
     currentDumpIntakeOnlyNamedTwoPartyReady,
     vs01FinalCorpusGate.allowed,
-    postGenerateCreateReviewSettlePlan.settleReview,
   ]);
 
   useEffect(() => {
@@ -26740,15 +26743,28 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     ) {
       return;
     }
-    if (hardError || emptyAuthorityPrepFailSafe) return;
+    // Quality-retry may already have latched hardError while Preparing is still
+    // mounted. Failsafe hard-dismiss must still run so Retry is not buried.
+    if ((hardError || emptyAuthorityPrepFailSafe) && !premiumProcessingFailsafeOverlayDismiss.dismissOverlays) {
+      return;
+    }
     const overlayActive =
       premiumPostCheckoutPhase === "processing" ||
       premiumPostCheckoutPhase === "generation_retry" ||
       displayPhase === "preparing_review" ||
       displayPhase === "generating_draft" ||
       displayPhase === "hydrating_generated";
-    if (!overlayActive && displayPhase === "review") return;
-    if (!overlayActive && displayPhase === "intake" && hardError) return;
+    if (!overlayActive && displayPhase === "review" && !premiumProcessingFailsafeOverlayDismiss.dismissOverlays) {
+      return;
+    }
+    if (
+      !overlayActive &&
+      displayPhase === "intake" &&
+      hardError &&
+      !premiumProcessingFailsafeOverlayDismiss.dismissOverlays
+    ) {
+      return;
+    }
     const plan = planPostGenerateCreateReviewSettleOrFailClosed({
       generateComplete: premiumGenerateCompleted,
       vs01GateBlockedWithoutSelectedFinal: vs01CorpusGateBlockedWithoutSelectedFinal,
@@ -26809,6 +26825,18 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     ) {
       return;
     }
+    if (premiumProcessingFailsafeOverlayDismiss.dismissOverlays) {
+      entitledPremiumRewriteInFlightRef.current = false;
+      setPremiumAuthoritativeRequestInFlight(false);
+      premiumGeneratePathCommittedRef.current = false;
+      premiumModalExtendedWaitActiveRef.current = false;
+      setPremiumCheckoutModalExtendedWait(false);
+      setPremiumReturnPatienceExtended(false);
+      setPremiumPostCheckoutPhase(premiumProcessingFailsafeOverlayDismiss.premiumPostCheckoutPhase);
+      setDisplayPhase(premiumProcessingFailsafeOverlayDismiss.displayPhase);
+      setCreateFlowPhase(premiumProcessingFailsafeOverlayDismiss.createFlowPhase);
+      setLoading(false);
+    }
     entitledRewritePfdHttpOutcomeRef.current = "fail_closed";
     entitledPremiumRewriteInFlightRef.current = false;
     const failedCreateRecoveryNotes = (
@@ -26862,6 +26890,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     postGenerateCreateReviewSettlePlan.settleReview,
     postGenerateCreateReviewSettlePlan.failClosed,
     premiumProcessingWithoutPfdFailClosed,
+    premiumProcessingFailsafeOverlayDismiss.dismissOverlays,
     ordinaryNamedTwoPartyReadyForSettle,
     premiumGenerateCompleted,
     premiumAuthorityChurnTick,
@@ -34098,7 +34127,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                 }}
               />
             ) : null}
-            {simpleProductFlow && createProductionTwoPane && premiumPostCheckoutPhase && premiumPostCheckoutPhase !== "premium_network_recoverable" && !dismissCreateOverlaysAfterRejectOrGate ? (
+            {simpleProductFlow && createProductionTwoPane && premiumPostCheckoutPhase && premiumPostCheckoutPhase !== "premium_network_recoverable" && !dismissCreateOverlaysAfterRejectOrGate && !premiumProcessingFailsafeOverlayDismiss.dismissOverlays ? (
               <div
                 className="fixed inset-0 z-[220] flex items-center justify-center bg-[#0a0e18]/92 px-4 backdrop-blur-sm"
                 role="dialog"
@@ -39166,7 +39195,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         </div>
       ) : null}
 
-      {displayPhase === "preparing_review" && !emptyAuthorityPrepFailSafe && !dismissCreateOverlaysAfterRejectOrGate ? (
+      {displayPhase === "preparing_review" && !emptyAuthorityPrepFailSafe && !dismissCreateOverlaysAfterRejectOrGate && !premiumProcessingFailsafeOverlayDismiss.dismissOverlays ? (
         <div
           className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/45 px-4"
           role="status"

@@ -34,6 +34,7 @@ import {
   isVs01CorpusGateBlockedWithoutSelectedFinal,
   isVs01CorpusGateNonTerminalBlockReason,
   pickCreateReviewSettleCorpus,
+  planHardDismissPremiumProcessingOverlaysOnFailsafe,
   planPostGenerateCreateReviewSettleOrFailClosed,
   shouldInvokePremiumGenerateAfterPartyPrepCreate,
   shouldRemapGenerationRetryableSalvageForCreateSettle,
@@ -253,6 +254,23 @@ describe("multi-party create → review settle or fail-closed", () => {
         corpusCommerciallyUsable: false,
       }),
     ).toBe(true);
+    const tooMuchFailsafe = shouldFailClosedPremiumProcessingWithoutPfd({
+      ...hangArgs,
+      ordinaryNamedTwoPartyReady: shouldSkipPartyPrepForOrdinaryNamedTwoParty({
+        intakeText: tooMuch,
+      }),
+    });
+    const tooMuchDismiss = planHardDismissPremiumProcessingOverlaysOnFailsafe({
+      failClosed: tooMuchFailsafe,
+    });
+    expect(tooMuchFailsafe).toBe(true);
+    expect(tooMuchDismiss.dismissOverlays).toBe(true);
+    if (tooMuchDismiss.dismissOverlays) {
+      expect(tooMuchDismiss.premiumPostCheckoutPhase).toBe(null);
+      expect(tooMuchDismiss.displayPhase).toBe("intake");
+      expect(tooMuchDismiss.createFlowPhase).toBe("capturing_input");
+      expect(tooMuchDismiss.clearInFlightFlags).toBe(true);
+    }
     expect(CREATE_FLOW_GENERATE_FAILED_CLEAR_MESSAGE).toMatch(/Try again/);
 
     // money_vibe-class: same family.
@@ -344,6 +362,91 @@ describe("multi-party create → review settle or fail-closed", () => {
         hasAuthoritativeReviewBody: selectedFinal.settleReview,
       }),
     ).toBe(false);
+  });
+
+  it("generic OOB + leftover partyRows failsafe hard-dismisses Preparing; Northline waits and settles", () => {
+    const genericIncomplete =
+      "exclusive forever revenue share lock every affiliate, no legal names, no scope, no payment workflow.";
+    const leftoverNorthlineRows = ["Northline Robotics LLC", "Cedar Peak Analytics Inc"];
+    const northline =
+      "Services agreement between Northline Robotics LLC (Jordan Lee) and Cedar Peak Analytics Inc (Sam Okonkwo). Northline delivers robotics integration; Cedar Peak provides analytics. Fee $12,500. Term 6 months. Governing law Texas.";
+    const hangArgs = {
+      premiumPostCheckoutProcessing: true,
+      preparingOrGenerating: true,
+      pfdHttpCompleted: false,
+      hasAuthoritativeReviewBody: false,
+      preparingStartedAtMs: 1_000,
+      nowMs: 1_000 + CREATE_FLOW_GENERATING_WITHOUT_PIPELINE_FAILSAFE_MS,
+    } as const;
+
+    expect(genericIncomplete.toLowerCase()).not.toContain("too_much");
+    expect(
+      shouldSkipPartyPrepForOrdinaryNamedTwoParty({
+        intakeText: genericIncomplete,
+        partyRows: leftoverNorthlineRows,
+      }),
+    ).toBe(true);
+    expect(shouldSkipPartyPrepForOrdinaryNamedTwoParty({ intakeText: genericIncomplete })).toBe(false);
+
+    const leftoverRowsWouldLookNamed = shouldSkipPartyPrepForOrdinaryNamedTwoParty({
+      intakeText: genericIncomplete,
+      partyRows: leftoverNorthlineRows,
+    });
+    expect(
+      shouldFailClosedPremiumProcessingWithoutPfd({
+        ...hangArgs,
+        ordinaryNamedTwoPartyReady: leftoverRowsWouldLookNamed,
+      }),
+    ).toBe(false);
+    const oobFailsafe = shouldFailClosedPremiumProcessingWithoutPfd({
+      ...hangArgs,
+      ordinaryNamedTwoPartyReady: shouldSkipPartyPrepForOrdinaryNamedTwoParty({
+        intakeText: genericIncomplete,
+      }),
+    });
+    expect(oobFailsafe).toBe(true);
+    const overlayDismiss = planHardDismissPremiumProcessingOverlaysOnFailsafe({
+      failClosed: oobFailsafe,
+    });
+    expect(overlayDismiss.dismissOverlays).toBe(true);
+    if (overlayDismiss.dismissOverlays) {
+      expect(overlayDismiss.premiumPostCheckoutPhase).toBe(null);
+      expect(overlayDismiss.displayPhase).not.toBe("preparing_review");
+      expect(overlayDismiss.displayPhase).not.toBe("generating_draft");
+      expect(overlayDismiss.displayPhase).not.toBe("hydrating_generated");
+      expect(overlayDismiss.clearInFlightFlags).toBe(true);
+    }
+    expect(
+      shouldDismissCreateOverlaysAfterRejectOrGate({
+        rejectOrGateBlocked: oobFailsafe,
+        corpusCommerciallyUsable: false,
+      }),
+    ).toBe(true);
+    expect(CREATE_FLOW_GENERATE_FAILED_CLEAR_MESSAGE).toMatch(/Try again/);
+    expect(planHardDismissPremiumProcessingOverlaysOnFailsafe({ failClosed: false }).dismissOverlays).toBe(
+      false,
+    );
+
+    expect(
+      shouldFailClosedPremiumProcessingWithoutPfd({
+        ...hangArgs,
+        ordinaryNamedTwoPartyReady: shouldSkipPartyPrepForOrdinaryNamedTwoParty({
+          intakeText: northline,
+        }),
+      }),
+    ).toBe(false);
+
+    const northlineCorpus = `${"Section 1. Parties.\n".repeat(80)}IN WITNESS WHEREOF the parties execute this Agreement.`;
+    const northlineSettle = planPostGenerateCreateReviewSettleOrFailClosed({
+      generateComplete: true,
+      vs01SelectedFinal: false,
+      winningPremiumBodyText: northlineCorpus,
+      premiumRenderSource: "server_full_draft",
+      ordinaryNamedTwoPartyReady: true,
+    });
+    expect(northlineSettle.settleReview).toBe(true);
+    expect(northlineSettle.failClosed).toBe(false);
+    expect(northlineSettle.corpus).toBe(northlineCorpus);
   });
 
   it("in-flight generate still fail-closes if no corpus after the pipeline bound", () => {
@@ -502,6 +605,8 @@ describe("multi-party create → review settle or fail-closed", () => {
     expect(intake).toContain("ordinaryNamedTwoPartyReady");
     expect(intake).toContain("shouldFailClosedPremiumProcessingWithoutPfd");
     expect(intake).toContain("premiumProcessingWithoutPfdFailClosed");
+    expect(intake).toContain("planHardDismissPremiumProcessingOverlaysOnFailsafe");
+    expect(intake).toContain("premiumProcessingFailsafeOverlayDismiss");
     expect(intake).toContain("ordinaryNamedTwoPartyReady: ordinaryNamedTwoPartyReadyForSettle");
     expect(intake).toContain("ordinaryNamedTwoPartyReady: currentDumpIntakeOnlyNamedTwoPartyReady");
     expect(intake).not.toContain("shouldFailClosedJunkPfdHangOrEmptyAfterChurn");
@@ -524,6 +629,29 @@ describe("multi-party create → review settle or fail-closed", () => {
     );
     expect(failsafeTimerBlock).toContain("currentDumpIntakeOnlyNamedTwoPartyReady");
     expect(failsafeTimerBlock).not.toContain("ordinaryNamedTwoPartyReadyForSettle");
+    expect(failsafeTimerBlock).not.toContain("postGenerateCreateReviewSettlePlan.settleReview");
+    const failsafeDismissIdx = intake.indexOf(
+      "const premiumProcessingFailsafeOverlayDismiss = planHardDismissPremiumProcessingOverlaysOnFailsafe({",
+    );
+    expect(failsafeDismissIdx).toBeGreaterThan(-1);
+    const failsafeDismissBlock = intake.slice(failsafeDismissIdx, failsafeDismissIdx + 180);
+    expect(failsafeDismissBlock).toContain("failClosed: premiumProcessingWithoutPfdFailClosed");
+    const hardDismissIdx = intake.indexOf("if (premiumProcessingFailsafeOverlayDismiss.dismissOverlays) {");
+    expect(hardDismissIdx).toBeGreaterThan(-1);
+    const hardDismissBlock = intake.slice(hardDismissIdx, hardDismissIdx + 900);
+    expect(hardDismissBlock).toContain("setPremiumPostCheckoutPhase(premiumProcessingFailsafeOverlayDismiss.premiumPostCheckoutPhase)");
+    expect(hardDismissBlock).toContain("setDisplayPhase(premiumProcessingFailsafeOverlayDismiss.displayPhase)");
+    expect(hardDismissBlock).toContain("setCreateFlowPhase(premiumProcessingFailsafeOverlayDismiss.createFlowPhase)");
+    expect(hardDismissBlock).toContain("setPremiumAuthoritativeRequestInFlight(false)");
+    expect(hardDismissBlock).toContain("premiumGeneratePathCommittedRef.current = false");
+    expect(hardDismissBlock).toContain("setLoading(false)");
+    expect(intake).toContain(
+      '!dismissCreateOverlaysAfterRejectOrGate && !premiumProcessingFailsafeOverlayDismiss.dismissOverlays',
+    );
+    const hardErrorEarlyReturn = intake.indexOf(
+      "if ((hardError || emptyAuthorityPrepFailSafe) && !premiumProcessingFailsafeOverlayDismiss.dismissOverlays)",
+    );
+    expect(hardErrorEarlyReturn).toBeGreaterThan(-1);
     const settleIdx = intake.indexOf("const settle =");
     const settleBlock = intake.slice(settleIdx, settleIdx + 280);
     expect(settleBlock).toContain("!premiumProcessingWithoutPfdFailClosed &&");

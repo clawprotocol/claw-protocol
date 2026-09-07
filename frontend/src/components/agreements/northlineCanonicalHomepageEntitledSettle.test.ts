@@ -16,6 +16,7 @@ import {
   CREATE_FLOW_GENERATE_FAILED_CLEAR_MESSAGE,
   CREATE_FLOW_GENERATING_WITHOUT_PIPELINE_FAILSAFE_MS,
   isCommerciallyUsableCreateReviewCorpus,
+  planHardDismissPremiumProcessingOverlaysOnFailsafe,
   planPostGenerateCreateReviewSettleOrFailClosed,
   shouldDismissCreateOverlaysAfterRejectOrGate,
   shouldFailClosedCreateAfterRejectOrGate,
@@ -306,6 +307,8 @@ describe("canonical Northline homepage dump → entitled Pro Review", () => {
     expect(intake).toContain("ordinaryNamedTwoPartyReadyForSettle");
     expect(intake).toContain("shouldFailClosedPremiumProcessingWithoutPfd");
     expect(intake).toContain("premiumProcessingWithoutPfdFailClosed");
+    expect(intake).toContain("planHardDismissPremiumProcessingOverlaysOnFailsafe");
+    expect(intake).toContain("premiumProcessingFailsafeOverlayDismiss");
     expect(intake).toContain("ordinaryNamedTwoPartyReady: ordinaryNamedTwoPartyReadyForSettle");
     expect(intake).toContain("ordinaryNamedTwoPartyReady: currentDumpIntakeOnlyNamedTwoPartyReady");
     expect(intake).not.toContain("shouldFailClosedJunkPfdHangOrEmptyAfterChurn");
@@ -328,6 +331,11 @@ describe("canonical Northline homepage dump → entitled Pro Review", () => {
     );
     expect(failsafeTimerBlock).toContain("currentDumpIntakeOnlyNamedTwoPartyReady");
     expect(failsafeTimerBlock).not.toContain("ordinaryNamedTwoPartyReadyForSettle");
+    expect(failsafeTimerBlock).not.toContain("postGenerateCreateReviewSettlePlan.settleReview");
+    expect(intake).toContain("planHardDismissPremiumProcessingOverlaysOnFailsafe");
+    expect(intake).toContain("setPremiumPostCheckoutPhase(premiumProcessingFailsafeOverlayDismiss.premiumPostCheckoutPhase)");
+    expect(intake).toContain("setDisplayPhase(premiumProcessingFailsafeOverlayDismiss.displayPhase)");
+    expect(intake).toContain("setPremiumAuthoritativeRequestInFlight(false)");
     const settleIdx = intake.indexOf("const settle =");
     const settleBlock = intake.slice(settleIdx, settleIdx + 280);
     expect(settleBlock).toContain("!premiumProcessingWithoutPfdFailClosed &&");
@@ -585,6 +593,30 @@ describe("canonical Northline homepage dump → entitled Pro Review", () => {
         corpusCommerciallyUsable: false,
       }),
     ).toBe(true);
+    const junkDismiss = planHardDismissPremiumProcessingOverlaysOnFailsafe({
+      failClosed: shouldFailClosedPremiumProcessingWithoutPfd({
+        ...hang,
+        ordinaryNamedTwoPartyReady: shouldSkipPartyPrepForOrdinaryNamedTwoParty({
+          intakeText: tooMuch,
+        }),
+      }),
+    });
+    expect(junkDismiss.dismissOverlays).toBe(true);
+    if (junkDismiss.dismissOverlays) {
+      expect(junkDismiss.premiumPostCheckoutPhase).toBe(null);
+      expect(junkDismiss.displayPhase).toBe("intake");
+      expect(junkDismiss.clearInFlightFlags).toBe(true);
+    }
+    expect(
+      planHardDismissPremiumProcessingOverlaysOnFailsafe({
+        failClosed: shouldFailClosedPremiumProcessingWithoutPfd({
+          ...hang,
+          ordinaryNamedTwoPartyReady: shouldSkipPartyPrepForOrdinaryNamedTwoParty({
+            intakeText: NORTHLINE_CANONICAL,
+          }),
+        }),
+      }).dismissOverlays,
+    ).toBe(false);
     expect(CREATE_FLOW_GENERATE_FAILED_CLEAR_MESSAGE).toMatch(/Try again/);
 
     const usable = planPostGenerateCreateReviewSettleOrFailClosed({
