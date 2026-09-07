@@ -390,11 +390,15 @@ export function planPostGenerateCreateReviewSettleOrFailClosed(input: {
     staleIntakeOrGeneration: input.staleIntakeOrGeneration,
   };
   const corpus = pickCreateReviewSettleCorpus(settleInput);
-  const usable =
-    Boolean(input.vs01SelectedFinal && corpus) ||
-    shouldSettleProReviewAfterPremiumFullDraft(settleInput);
+  // A commercially usable picked body must settle even when the pipeline source is
+  // leftover `premium_generation_retryable` / gate-blocked. Requiring
+  // server_full_draft | selected-final wiped Northline-class 200s and left
+  // Generating mounted on the entitled paid-shell path.
+  const usable = Boolean(corpus);
+  const generateDone =
+    Boolean(input.generateComplete) || Boolean(input.shorterThanAcceptedChurn);
   const churn = resolvePostGenerateAuthorityChurnOverlayDecision({
-    generateComplete: input.generateComplete,
+    generateComplete: generateDone,
     shorterThanAcceptedChurn: input.shorterThanAcceptedChurn,
     vs01GateBlockedWithoutSelectedFinal: input.vs01GateBlockedWithoutSelectedFinal,
     corpusCommerciallyUsable: usable,
@@ -402,7 +406,7 @@ export function planPostGenerateCreateReviewSettleOrFailClosed(input: {
   if (usable) {
     return { dismissOverlays: true, settleReview: true, failClosed: false, corpus };
   }
-  if (input.generateComplete && input.vs01GateBlockedWithoutSelectedFinal) {
+  if (generateDone && input.vs01GateBlockedWithoutSelectedFinal) {
     return { dismissOverlays: true, settleReview: false, failClosed: true, corpus: "" };
   }
   return { ...churn, corpus: "" };
