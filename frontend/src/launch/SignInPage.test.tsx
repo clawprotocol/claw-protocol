@@ -44,6 +44,20 @@ describe("SignInPage checkout continuation", () => {
     expect(navState.navigate).toHaveBeenCalledWith(dest);
   });
 
+  it("strips restore=starterReview from checkout next when persist exists", () => {
+    const persistId = "e5a71257-87bb-47cc-aa03-63adf6b61089";
+    const dest = `/app/checkout/${persistId}?tier=pro&cadence=monthly&returnTo=${encodeURIComponent(
+      "/app/create?restore=starterReview",
+    )}`;
+    navState.search = `?next=${encodeURIComponent(dest)}`;
+    navState.navigate = vi.fn();
+    authState.user = { id: "user-1" };
+    render(<SignInPage />);
+    expect(navState.navigate).toHaveBeenCalledWith(
+      `/app/checkout/${persistId}?tier=pro&cadence=monthly&returnTo=${encodeURIComponent("/app/create")}`,
+    );
+  });
+
   it("rejects unsafe external next destinations after authentication", () => {
     navState.search = "?next=https://evil.example";
     navState.navigate = vi.fn();

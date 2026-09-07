@@ -102,6 +102,29 @@ describe("safeRedirectResolver", () => {
     );
   });
 
+  it("drops restore=starterReview from checkout/OAuth dest when persist exists", () => {
+    const aid = "e5a71257-87bb-47cc-aa03-63adf6b61089";
+    const dest = `/app/checkout/${aid}?tier=pro&cadence=monthly&returnTo=${encodeURIComponent(
+      "/app/create?restore=starterReview",
+    )}`;
+    const cleaned = `/app/checkout/${aid}?tier=pro&cadence=monthly&returnTo=${encodeURIComponent("/app/create")}`;
+    expect(buildSignInContinuationPath(`/app/checkout/${aid}`, `?tier=pro&cadence=monthly&returnTo=${encodeURIComponent("/app/create?restore=starterReview")}`)).toBe(
+      `/app/sign-in?next=${encodeURIComponent(cleaned)}`,
+    );
+    expect(resolveSignInContinuationOpts(dest)).toEqual({
+      returningSignIn: false,
+      destinationPath: cleaned,
+      agreementId: aid,
+    });
+    const ctx = createAuthContinuationContext({
+      agreementId: aid,
+      sourcePath: `/app/checkout/${aid}`,
+      destinationPath: dest,
+      workflowStage: "claim",
+    });
+    expect(resolvePostAuthDestination(ctx)).toBe(cleaned);
+  });
+
   it("appends agreementId to create destination when present", () => {
     const ctx = createAuthContinuationContext({
       agreementId: "aid-99",

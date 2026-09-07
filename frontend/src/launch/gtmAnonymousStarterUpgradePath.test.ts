@@ -291,7 +291,8 @@ describe("GTM blocker — anonymous Starter → Upgrade → Pro", () => {
       expect(signInSrc).toContain("CHECKOUT_SIGN_IN_HEADING");
       expect(signInSrc).toContain("CHECKOUT_SIGN_IN_BODY");
       expect(signInSrc).toContain("resolveSignInNextDestination");
-      expect(signInSrc).toContain("navigate(pinCheckoutPathToPreAuthAgreement(destinationPath))");
+      expect(signInSrc).toContain("pinCheckoutPathToPreAuthAgreement(destinationPath)");
+      expect(signInSrc).toContain("sanitizeConversionCheckoutDest");
     });
   });
 });

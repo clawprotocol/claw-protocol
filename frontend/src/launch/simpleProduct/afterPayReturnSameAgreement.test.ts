@@ -13,6 +13,7 @@ describe("after-pay last-good handoff (static)", () => {
     expect(checkout).toContain("buildAfterPayStripeReturnTo({ agreementId, returnTo })");
     expect(params).toContain('appendReturnToQueryParam(dest, "premiumCompletion", "1")');
     expect(params).toContain("dropStarterReviewRestoreParam");
+    expect(params).toContain("buildConversionCheckoutReturnTo");
     expect(params).not.toContain("restoreAgreementId");
     const startIdx = checkout.indexOf("async function startStripeCheckout");
     expect(startIdx).toBeGreaterThan(-1);

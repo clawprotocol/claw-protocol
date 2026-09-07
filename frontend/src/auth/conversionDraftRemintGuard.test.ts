@@ -57,4 +57,11 @@ describe("conversion draft remint guard", () => {
     expect(billing).toContain("agreement_id: args.agreementId");
     expect(billing).not.toContain("__claw_create_checkout__");
   });
+
+  it("conversion checkout returnTo omits restore=starterReview when persist exists", () => {
+    expect(intake).toContain("buildConversionCheckoutReturnTo(checkoutAgreementId)");
+    expect(intake).toContain("buildConversionCheckoutReturnTo(persistId)");
+    expect(checkout).toContain("sanitizeConversionCheckoutDest");
+    expect(checkout).toContain("buildConversionCheckoutReturnTo(persistAgreementId)");
+  });
 });
