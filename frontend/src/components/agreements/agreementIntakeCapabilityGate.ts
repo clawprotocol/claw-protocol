@@ -1,7 +1,8 @@
 /**
  * Create-draft intake capability gate (product-wide).
  * Implementation lives in agreementIntakeClarification — guided remediation
- * for counsel-prep, sparse, low-signal/nonsensical, missing parties, and ambiguous intakes.
+ * for counsel-prep, sparse, low-signal/nonsensical, missing parties, material-gap /
+ * red-flag dumps, and ambiguous intakes.
  */
 export {
   assessAgreementIntakeCapability,

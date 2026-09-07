@@ -25,7 +25,13 @@ export type AgreementIntakeClarificationKind =
   /** Keyboard mash, spam, or long noise with almost no draftable commercial signal. */
   | "low_signal"
   /** 5+ signing entities / affiliates — GTM supports 2–4 only. */
-  | "party_count_cap";
+  | "party_count_cap"
+  /**
+   * Improper / incomplete / OOB commercial dump: missing deliverables/scope
+   * and/or payment-compliance red flags (cash-only, ignore-KYC, offshore escrow).
+   * Ask like a lawyer — do not silently draft a Pro Review.
+   */
+  | "material_gap";
 
 export type AgreementIntakeClarification = {
   kind: AgreementIntakeClarificationKind;
@@ -335,6 +341,166 @@ export function hasSubstantiveDealPurpose(raw: string): boolean {
     return t.length > 2 && !PURPOSE_STOPWORDS.has(t);
   });
   return content.length >= 2;
+}
+
+/**
+ * Explicit “no deliverables / no scope” language. A lawyer would not invent
+ * the missing work just because two names and a dollar amount appear.
+ */
+const EXPLICIT_SCOPE_GAP_RE =
+  /\bno\s+deliverables?\b|\bdeliverables?\s+(?:not\s+)?(?:specified|unspecified|missing|omitted|listed|described|defined|included|tbd|none)\b|\bno\s+scope\b|\bscope\s+(?:not\s+)?(?:specified|unspecified|missing|omitted|tbd|none)\b|\bno\s+work\s+(?:described|specified|defined|listed)\b|\bunspecified\s+(?:work|scope|deliverables?|services?)\b|\bno\s+coherent\s+(?:commercial\s+)?terms?\b/i;
+
+/**
+ * Payment / compliance red flags — not legitimate “source code escrow” or
+ * “offshore development team” commercial language.
+ */
+const COMPLIANCE_RED_FLAG_CHECKS: ReadonlyArray<[RegExp, string]> = [
+  [
+    /\b(?:ignore|skip|bypass|waive|without)\s+[- ]?(?:all\s+)?(?:kyc|aml|kyc\/aml|know\s+your\s+customer)\b|\bno\s+kyc\b/i,
+    "instruction to ignore KYC / AML / customer identification",
+  ],
+  [/\bcash\s+only\b|\bwires?\s+cash\b|\bcash\s+(?:payment|transfer)\s+only\b/i, "cash-only payment instruction"],
+  [
+    /\boffshore\s+account\b|\bwire\b[\s\S]{0,48}\boffshore\b|\boffshore\b[\s\S]{0,48}\b(?:wire|escrow|account)\b/i,
+    "offshore wire / escrow account",
+  ],
+  [
+    /\bescrow\s+tomorrow\b|\bwire\b[\s\S]{0,36}\btomorrow\b|\burgent\s+(?:wire|escrow|transfer)\b|\bwire\b[\s\S]{0,24}\bimmediately\b/i,
+    "same-day / urgent wire or escrow",
+  ],
+  [/\b\S+@\S+\.invalid\b/i, "non-deliverable contact address"],
+];
+
+const GENERIC_SCOPE_LABEL_RE =
+  /^(?:consulting|services?|work|business|a\s+deal|the\s+deal|stuff|things|misc(?:ellaneous)?|scope|deliverables?)$/i;
+
+const THIN_PURPOSE_TOKEN_RE =
+  /^(?:consulting|services?|service|work|deal|stuff|things|business|account|contact|cash|escrow|tomorrow|offshore|wire|ignore|kyc|aml|deliverables?|specified|unspecified|only|between|among|and|for|the|a|an)$/i;
+
+/** Real work / rights language — not a quoted generic label like 'consulting'. */
+const COHERENT_WORK_SIGNAL_RE =
+  /\b(?:deliver(?:s|ed|ing)\b(?!\s+ables?)|provid(?:e|es|ing)\b|design(?:s|ing)?\b|build(?:s|ing)?\b|implement(?:s|ing)?\b|develop(?:s|ing|ment)\b|integrat(?:e|es|ion)\b|automat(?:e|es|ion)\b|redesign\b|licen[cs]e\b|distribut(?:e|es|ion)\b|settlement\b|judgment\b|mortgage\b|revenue[-\s]?share\b|website\b|mobile\s+app\b|logo\b|brand\s+kit\b|analytics\b|workflow\b|platform\s+operations\b|robotics\b|inventory\b|dashboard\b|wholesale\b|subscription\b|software\b|extending\s+the\s+term\b|confidential\s+business\s+information\b|joint\s+integration\b)\b/i;
+
+function collectComplianceRedFlagSignals(raw: string): string[] {
+  const out: string[] = [];
+  for (const [re, label] of COMPLIANCE_RED_FLAG_CHECKS) {
+    if (re.test(raw)) out.push(label);
+  }
+  return out;
+}
+
+function looksLikeExplicitScopeGap(raw: string): boolean {
+  return EXPLICIT_SCOPE_GAP_RE.test(raw);
+}
+
+function stripQuotedGenericScopeLabels(raw: string): string {
+  return raw.replace(/['"]\s*(consulting|services?|work|business|a deal|the deal|stuff|things)\s*['"]/gi, " ");
+}
+
+/**
+ * True when the dump describes actual work, rights, or exchange — not just
+ * two names + a money token + a generic “consulting/services” label.
+ */
+export function hasCoherentCommercialWorkDescription(raw: string): boolean {
+  const text = String(raw || "").replace(/\s+/g, " ").trim();
+  if (text.length < 24) return false;
+  if (looksLikeExplicitScopeGap(text)) return false;
+
+  const withoutQuotedGeneric = stripQuotedGenericScopeLabels(text);
+  if (COHERENT_WORK_SIGNAL_RE.test(withoutQuotedGeneric)) return true;
+
+  const connector = PURPOSE_CONNECTOR_RE.exec(withoutQuotedGeneric);
+  if (!connector || connector.index == null) return false;
+  const body = withoutQuotedGeneric
+    .slice(connector.index + connector[0].length)
+    .replace(/\s+/g, " ")
+    .trim();
+  const words = body.split(/\s+/).filter(Boolean);
+  if (words.length < 3) return false;
+  if (words.length <= 8 && GENERIC_SCOPE_LABEL_RE.test(body.replace(/[.,;:'"]+/g, "").trim())) {
+    return false;
+  }
+  const content = words.filter((w) => {
+    const t = w.toLowerCase().replace(/[^a-z0-9']/g, "");
+    return t.length > 2 && !PURPOSE_STOPWORDS.has(t) && !THIN_PURPOSE_TOKEN_RE.test(t) && !/^\$?\d/.test(t);
+  });
+  return content.length >= 2;
+}
+
+export type MaterialGapAskReason = "red_flag_gap" | "incomplete_commercial";
+
+/**
+ * Pre-generate clarity gate: money + two names is not enough when scope is
+ * missing or the dump is a cash/KYC/offshore payment vibe.
+ * Northline-class dumps with real work + term stay draftable.
+ */
+export function resolveMaterialGapAskReason(raw: string): MaterialGapAskReason | null {
+  const text = String(raw || "").replace(/\s+/g, " ").trim();
+  if (text.length < 24) return null;
+  const flags = collectComplianceRedFlagSignals(text);
+  const explicitGap = looksLikeExplicitScopeGap(text);
+  const coherentWork = hasCoherentCommercialWorkDescription(text);
+  const listed = extractListedSigningPartyNames(text);
+  const hasMoney = MONEY_RE.test(text);
+  const hasTerm = TERM_RE.test(text) || EFFECTIVE_DATE_RE.test(text);
+  const hasGov = Boolean(extractGoverningLaw(text));
+
+  if (explicitGap && flags.length >= 1) return "red_flag_gap";
+  if (flags.length >= 2 && !coherentWork) return "red_flag_gap";
+  if (explicitGap && !coherentWork) return "red_flag_gap";
+  if (listed.length >= 2 && hasMoney && !coherentWork && !hasTerm && !hasGov) {
+    return flags.length > 0 ? "red_flag_gap" : "incomplete_commercial";
+  }
+  return null;
+}
+
+function buildMaterialGapSuggestedRewrite(raw: string): string {
+  const known = extractListedSigningPartyNames(raw).slice(0, CLARIFICATION_MAX_SIGNING_PARTIES);
+  const partyClause =
+    known.length >= 2 ? buildSigningPartyClause(2, known) : "between [Party 1 Legal Name] and [Party 2 Legal Name]";
+  const fee = extractMoneyPhrases(raw)[0] || "[fee amount]";
+  return (
+    `Draft a services agreement ${partyClause} for [describe the actual deliverables and scope], ` +
+    `fee ${fee}, term [duration]. Use lawful payment channels — do not instruct us to ignore KYC/AML ` +
+    `or to wire cash to an offshore escrow. Governing law: [State].`
+  );
+}
+
+function materialGapClarification(raw: string, reason: MaterialGapAskReason): AgreementIntakeClarification {
+  const flags = collectComplianceRedFlagSignals(raw);
+  const listed = extractListedSigningPartyNames(raw);
+  const money = extractMoneyPhrases(raw);
+  const heard: string[] = [];
+  if (listed.length >= 2) heard.push(`Named parties: ${listed.slice(0, 4).join("; ")}.`);
+  if (money.length) heard.push(`A payment amount was mentioned: ${money.join(", ")}.`);
+  if (looksLikeExplicitScopeGap(raw)) {
+    heard.push("The prompt itself says deliverables / scope are missing or unspecified.");
+  } else {
+    heard.push("No coherent deliverables, scope, or commercial exchange was described.");
+  }
+  for (const flag of flags) heard.push(`Red flag: ${flag}.`);
+
+  const redFlagAsk = reason === "red_flag_gap" || flags.length > 0;
+  return {
+    kind: "material_gap",
+    title: redFlagAsk
+      ? "I need material terms — and I cannot draft around those payment instructions"
+      : "I can draft this once I know what they are actually agreeing to",
+    why: redFlagAsk
+      ? "Two names and a dollar amount are not a deal. Missing scope plus cash/escrow/KYC-ignore " +
+        "instructions are material gaps — a lawyer would ask, not invent a Pro Review."
+      : "Two names and a fee are not enough. Add the actual work, rights, or exchange before I draft.",
+    whatWeHeard: heard,
+    guidedSteps: [
+      "Describe the actual deliverables or scope in plain sentences (not just “consulting” or “services”).",
+      "If money changes hands, say the lawful payment method, schedule, and what it buys.",
+      "Drop ignore-KYC, cash-only, or offshore-escrow instructions — we will not draft those.",
+      "Add term or effective date and governing law if you know them.",
+    ],
+    suggestedRewrite: buildMaterialGapSuggestedRewrite(raw),
+    primaryCtaLabel: "Use suggested draft request",
+    secondaryCtaLabel: "Keep editing",
+  };
 }
 
 function extractGoverningLaw(raw: string): string | null {
@@ -882,6 +1048,13 @@ export function buildAgreementIntakeClarification(rawIntake: string): AgreementI
       primaryCtaLabel: "Use suggested draft request",
       secondaryCtaLabel: "I’ll edit the party list",
     };
+  }
+
+  // Improper / incomplete / red-flag dumps (money_vibe class): ask before generate.
+  // Money + two names must not skip this — that was the live doctrine gap.
+  const materialGapReason = resolveMaterialGapAskReason(raw);
+  if (materialGapReason) {
+    return materialGapClarification(raw, materialGapReason);
   }
 
   // Draft-shaped prompts proceed when there is purpose/scope, economics, term, topics,
