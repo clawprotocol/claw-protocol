@@ -1420,6 +1420,19 @@ describe("repairKnownPartyPlaceholders (deterministic known-party repair)", () =
     expect(out.hasRemainingIdentityPlaceholder).toBe(true);
   });
 
+  it("binds unused filled party-prep names into leftover [ORG_n] before slot-index", () => {
+    const text =
+      'among Solo Design ("Solo Design"), [ORG_1] ("[ORG_1]"), BrightPay Ops ("BrightPay Ops"), and [ORG_2] ("[ORG_2]")';
+    const names = ["Solo Design", "CodeNest LLC", "BrightPay Ops", "Warehouse One Inc"];
+    const out = repairKnownPartyPlaceholders(text, names, names.map((n, i) => `Party ${i + 1}: ${n}`).join("\n"));
+    expect(out.repaired).toBe(true);
+    expect(out.text).toContain("CodeNest LLC");
+    expect(out.text).toContain("Warehouse One Inc");
+    expect(out.text).not.toMatch(/\[ORG_1\]|\[ORG_2\]/);
+    expect((out.text.match(/Solo Design/g) || []).length).toBeGreaterThanOrEqual(1);
+    expect(out.text).not.toMatch(/Solo Design \("Solo Design"\), Solo Design/);
+  });
+
   it("policy: a repaired, clean, section-complete body is authoritative", () => {
     expect(
       partyPlaceholderRepairYieldsAuthoritativePaidBody({

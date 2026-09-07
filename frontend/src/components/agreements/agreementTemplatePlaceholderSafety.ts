@@ -4,8 +4,10 @@
  */
 
 import {
+  bindUnusedFilledPartyNamesIntoLeftoverOrgSlots,
   extractAgreementEntityCandidates,
   substitutePartyPlaceholdersInUserFacingText,
+  textContainsUnresolvedIdentityPlaceholders,
 } from "../../agreement/partyPlaceholderDisplay";
 import { extractBetweenPartyNameList } from "./partyBetweenParse";
 import { resolveIntakeEmailForContactSlot } from "./paidProIntakeContactSubstitution";
@@ -389,6 +391,8 @@ function normPartyNames(partyNames?: readonly (string | null | undefined)[] | nu
 function pushUniqueParty(out: string[], seen: Set<string>, name: string) {
   const t = name.replace(/\s+/g, " ").trim();
   if (t.length < 2) return;
+  // Leftover [ORG_n] / [PARTY_n] in an among-clause is not a named party.
+  if (/^\s*\[/.test(t) || textContainsUnresolvedIdentityPlaceholders(t)) return;
   const low = t.toLowerCase();
   if (seen.has(low)) return;
   seen.add(low);
@@ -573,6 +577,8 @@ export function isSignatureOnlyFatalToken(token: string): boolean {
   const inner = bracketInner(token);
   if (/^CLIENT[\s_]*LEGAL[\s_]*NAME$/i.test(inner)) return false;
   if (/^CLIENT[\s_]*NAME$/i.test(inner)) return false;
+  // Leftover [ORG_n]/[PARTY_n] are identity slots, not signature field stubs.
+  if (/\b(?:ORG|PARTY)_\d+\b/i.test(token)) return false;
   if (isNumberedSignatureContactToken(token)) return true;
   if (isAllowlistedSignatureToken(token)) return true;
   if (isSignatureLineBracketToken(token)) return true;
@@ -876,6 +882,7 @@ function isSignatureFieldLabel(inner: string): boolean {
 }
 
 export function isSignatureLineBracketToken(token: string): boolean {
+  if (/\b(?:ORG|PARTY)_\d+\b/i.test(token)) return false;
   SIGNATURE_LINE_BRACKET_RE.lastIndex = 0;
   if (SIGNATURE_LINE_BRACKET_RE.test(token)) return true;
   SIGNATURE_PARTY_LABEL_BRACKET_RE.lastIndex = 0;
@@ -1256,6 +1263,19 @@ function repairAgreementTemplatePlaceholdersUncached(
   }
   const resolution = resolvePlaceholderPartyNamesWithMeta(ctx, prepared);
   const names = resolution.names;
+  const leftoverBind = bindUnusedFilledPartyNamesIntoLeftoverOrgSlots(
+    out,
+    names,
+    ctx.intakeRaw,
+  );
+  if (leftoverBind.bound) {
+    out = leftoverBind.text;
+    repaired.push(
+      ...leftoverBind.boundTokens.map(
+        (tok, i) => `${tok}→${leftoverBind.unusedNamesBound[i] ?? "filled_party"}`,
+      ),
+    );
+  }
   const partyLine = [String(ctx.intakeRaw || ""), ...names].join("\n");
 
   if (/\[CASE_ID_\d+\]/i.test(out)) {

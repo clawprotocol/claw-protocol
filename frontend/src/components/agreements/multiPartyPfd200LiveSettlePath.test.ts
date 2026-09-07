@@ -24,7 +24,10 @@ import {
   resolvePartyNamesPreferringCommercialCorpus,
 } from "./signerCountAuthority";
 import { assessLabeledPartyManifestIntegrity } from "./labeledPartyManifestIntegrity";
-import { repairKnownPartyPlaceholders } from "../../agreement/partyPlaceholderDisplay";
+import {
+  bindUnusedFilledPartyNamesIntoLeftoverOrgSlots,
+  repairKnownPartyPlaceholders,
+} from "../../agreement/partyPlaceholderDisplay";
 import { containsUnresolvedRenderTokens } from "./userVisibleRenderTokenAuthority";
 import {
   shouldFailCloseCreateAfterPremiumFullDraft,
@@ -43,6 +46,13 @@ const LEFTOVER_TWO = ["Redwood LLC", "BlueHarbor Inc"] as const;
 /** Live #197/#198 walk names — leftover 2-slot editor + Party 3 LoneStar. */
 const LIVE_THREE = ["Redwood LLC", "BlueHarbor Inc", "LoneStar LLC"] as const;
 const LIVE_FOUR = ["Redwood LLC", "BlueHarbor Inc", "LoneStar LLC", "IronGate LP"] as const;
+/** Live post-#202 4p leftover: generate named 1+3 and left [ORG_1]/[ORG_2] for 2+4. */
+const LIVE_FOUR_UNBOUND = [
+  "Solo Design",
+  "CodeNest LLC",
+  "BrightPay Ops",
+  "Warehouse One Inc",
+] as const;
 
 function padOperative(targetLen: number, already: string): string {
   const clause =
@@ -207,6 +217,58 @@ function buildLeftoverOverlayFourPartyRepeatedOrgCorpus(
     "\n",
   );
   const midBudget = Math.max(8_500, Math.min(targetLen, 17_800) - tail.length);
+  let mid = head;
+  while (mid.length < midBudget) mid += leftoverClause;
+  return `${mid.slice(0, midBudget)}${tail}`;
+}
+
+/**
+ * Live post-#202 pfd 200: opening names Solo Design + BrightPay only;
+ * leftover [ORG_1]×4 and [ORG_2]×3; CodeNest + Warehouse One never appear.
+ * Unique brackets are only those leftover [ORG_n] slots (text_len ≈ 9447).
+ */
+function buildLiveFourPartyUnboundOrgLeftoverCorpus(targetLen = 9_447): string {
+  const leftoverOpening =
+    'This Agreement is entered into by and among Solo Design ("Solo Design"), [ORG_1] ("[ORG_1]"), BrightPay Ops ("BrightPay Ops"), and [ORG_2] ("[ORG_2]").';
+  const head = [
+    "MULTI-PARTY SERVICES AGREEMENT",
+    "",
+    leftoverOpening,
+    "",
+    "1. SCOPE OF SERVICES",
+    "[ORG_1] shall perform the professional services described in this Agreement and the other parties shall cooperate.",
+    "2. PAYMENT",
+    "Fees total the amount stated in the intake and are payable in monthly installments.",
+    "3. TERM",
+    "The term begins on the Effective Date and continues for the stated duration unless earlier terminated.",
+    "4. CONFIDENTIALITY",
+    "[ORG_1] and [ORG_2] shall protect the others' confidential information using reasonable care.",
+    "5. INTELLECTUAL PROPERTY",
+    "Work product is assigned as set forth in this Agreement after payment of undisputed amounts.",
+    "6. INDEMNIFICATION",
+    "Each party shall indemnify the others against third-party claims arising from its material breach.",
+    "7. LIMITATION OF LIABILITY",
+    "No party is liable for indirect or consequential damages except for confidentiality or IP breach.",
+    "8. GOVERNING LAW",
+    "This Agreement is governed by the laws of the State of Texas, without regard to conflict-of-law rules.",
+    "9. NOTICES",
+    "Notices under this Agreement must be in writing.",
+    'If to Solo Design:\nEmail: notices@solodesign.example\nAddress: 100 Design Way',
+    'If to BrightPay Ops:\nEmail: notices@brightpay.example\nAddress: 200 Ops Blvd',
+    "10. GENERAL",
+    "This Agreement constitutes the entire agreement among the parties.",
+    "",
+  ].join("\n");
+  const leftoverClause =
+    "The parties shall perform their commercial obligations in good faith, keep accurate records, and cooperate on deliverables, reporting, and milestone acceptance. ";
+  const tail = [
+    "",
+    "IN WITNESS WHEREOF, the parties have executed this Agreement.",
+    "",
+    "Solo Design\nBy: _________________________\nName: _________________________\nTitle: _________________________\nDate: _________________________\n",
+    "BrightPay Ops\nBy: _________________________\nName: _________________________\nTitle: _________________________\nDate: _________________________\n",
+  ].join("\n");
+  const midBudget = Math.max(8_500, Math.min(targetLen, 12_000) - tail.length);
   let mid = head;
   while (mid.length < midBudget) mid += leftoverClause;
   return `${mid.slice(0, midBudget)}${tail}`;
@@ -1137,5 +1199,159 @@ describe("live pipeline sites after pfd 200 + leftover 2-party overlay", () => {
     expect(
       warnSpy.mock.calls.some((c) => String(c[0]).includes("[signer-count-authority]-mismatch")),
     ).toBe(false);
+  });
+
+  it("N=4 live leftover after #202: unused party-prep names bind into [ORG_n] and settle", () => {
+    // Live fail on tip 44dea121 / #202: pfd 200 named Solo Design + BrightPay only.
+    // [ORG_1]×4 / [ORG_2]×3 remain; CodeNest + Warehouse One never appear in the corpus.
+    // Leftover-[ORG_n] accept-when-corpus-names-N≥3 correctly refuses (only 2 named).
+    // Slot-index repair maps [ORG_1]→Solo Design (already named) and drops Warehouse One.
+    const leftover = leftoverTwoPartyDraft([LIVE_FOUR_UNBOUND[0], LIVE_FOUR_UNBOUND[2]]);
+    const intake = mergePartyPrepIntoCreateSubmitText(FOUR_PARTY_DUMP, [...LIVE_FOUR_UNBOUND]);
+    const overlaid = {
+      ...leftover,
+      parties: LIVE_FOUR_UNBOUND.map((name) => ({ name, role: "party" })),
+    };
+    const corpus = buildLiveFourPartyUnboundOrgLeftoverCorpus();
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    expect(corpus.length).toBeGreaterThanOrEqual(8_500);
+    expect((corpus.match(/\[ORG_1\]/g) || []).length).toBeGreaterThanOrEqual(4);
+    expect((corpus.match(/\[ORG_2\]/g) || []).length).toBeGreaterThanOrEqual(3);
+    expect(corpus).toContain("Solo Design");
+    expect(corpus).toContain("BrightPay Ops");
+    expect(corpus).not.toContain("CodeNest LLC");
+    expect(corpus).not.toContain("Warehouse One Inc");
+    expect(extractAuthoritativeLegalNamesFromCommercialCorpus(corpus).length).toBeLessThan(3);
+
+    const tipReject = rejectPremiumBodyForProRender(corpus, {
+      intakeText: intake,
+      partyNames: liveRejectPartyNames(overlaid),
+    });
+    expect(tipReject.ok, "tip 44dea121 must still refuse unbound leftover [ORG_n]").toBe(false);
+    expect(tipReject.reasons.some((r) => /\[ORG_[12]\]/.test(r))).toBe(true);
+
+    const tipSlotIndexOnly = repairKnownPartyPlaceholders(
+      corpus,
+      [LIVE_FOUR_UNBOUND[0], LIVE_FOUR_UNBOUND[2]],
+      "",
+    );
+    expect(tipSlotIndexOnly.text).not.toContain("CodeNest LLC");
+    expect(tipSlotIndexOnly.text).not.toContain("Warehouse One Inc");
+
+    const slotIndexTip = repairKnownPartyPlaceholders(
+      corpus,
+      [LIVE_FOUR_UNBOUND[0], LIVE_FOUR_UNBOUND[2]],
+      intake,
+    );
+    // Without unused-name bind, leftover 2-slot mapping cannot surface CodeNest + Warehouse.
+    // After the fix, Party N: lines on intake still bind those unused filled names.
+    expect(slotIndexTip.text).toContain("CodeNest LLC");
+    expect(slotIndexTip.text).toContain("Warehouse One Inc");
+    expect(slotIndexTip.text).not.toMatch(/\[ORG_1\]|\[ORG_2\]/);
+
+    const bindOnly = bindUnusedFilledPartyNamesIntoLeftoverOrgSlots(
+      corpus,
+      [...LIVE_FOUR_UNBOUND],
+      intake,
+    );
+    expect(bindOnly.bound).toBe(true);
+    expect(bindOnly.unusedNamesBound).toEqual(["CodeNest LLC", "Warehouse One Inc"]);
+    for (const name of LIVE_FOUR_UNBOUND) {
+      expect(bindOnly.text, `bind dropped ${name}`).toContain(name);
+    }
+    expect(bindOnly.text).not.toMatch(/\[ORG_1\]|\[ORG_2\]/);
+
+    const acc = rejectPremiumBodyForProRender(bindOnly.text, {
+      intakeText: intake,
+      partyNames: [...LIVE_FOUR_UNBOUND],
+    });
+    expect(acc.ok, acc.reasons.join("|")).toBe(true);
+
+    const fin = finalizeUserVisibleAgreementPlainText(corpus, {
+      intakeRaw: intake,
+      partyNames: [...LIVE_FOUR_UNBOUND],
+      surface: "premium_completion_pipeline",
+    });
+    expect(fin.ok, fin.remainingFatal.join("|")).toBe(true);
+    for (const name of LIVE_FOUR_UNBOUND) {
+      expect(fin.text, `finalize dropped ${name}`).toContain(name);
+    }
+    expect(fin.text).not.toMatch(/\[ORG_1\]|\[ORG_2\]/);
+
+    const freeze = resolvePaidProFreezeCommitText({
+      text: bindOnly.text,
+      source: "server_full_draft",
+      draft: overlaid,
+      intakeText: intake,
+      surface: "premium_completion_pipeline_accept",
+    });
+    expect(freeze.ok, freeze.rejectReason ?? "").toBe(true);
+    for (const name of LIVE_FOUR_UNBOUND) {
+      expect(freeze.text, `freeze dropped ${name}`).toContain(name);
+    }
+
+    const overlay = resolvePartiesForReviewRender({
+      draft: leftover,
+      intakeText: intake,
+      corpusPlain: freeze.text || bindOnly.text,
+    }).map((p) => p.partyLegalName.trim());
+    expect(overlay).toHaveLength(4);
+    for (const name of LIVE_FOUR_UNBOUND) {
+      expect(overlay, `overlay dropped ${name}`).toContain(name);
+    }
+
+    expect(
+      shouldSettleProReviewAfterPremiumFullDraft({
+        winningPremiumBodyText: freeze.text || bindOnly.text,
+        premiumRenderSource: "server_full_draft",
+      }),
+    ).toBe(true);
+    expect(
+      shouldTreatEntitledRewritePipelineResultAsGenerationFailure({
+        premiumDraft: leftover,
+        premiumParties: [],
+        recipientCandidates: [],
+        winningPremiumBodyText: freeze.text || bindOnly.text,
+        premiumRenderSource: "server_full_draft",
+        premiumReview: null,
+        premiumFinalizeAudit: null,
+        premiumReviewRoute: null,
+        staleIntakeOrGeneration: false,
+        premiumGenerationRetryable: true,
+      }),
+    ).toBe(false);
+    expect(warnSpy.mock.calls.some((c) => String(c[0]).includes("[placeholder-reject]"))).toBe(
+      false,
+    );
+  });
+
+  it("unresolved leftover [ORG_n] with no remaining filled party name still fail-closes", () => {
+    const leftover = leftoverTwoPartyDraft([LIVE_FOUR_UNBOUND[0], LIVE_FOUR_UNBOUND[2]]);
+    const intake = mergePartyPrepIntoCreateSubmitText(FOUR_PARTY_DUMP, [
+      LIVE_FOUR_UNBOUND[0],
+      LIVE_FOUR_UNBOUND[2],
+    ]);
+    const corpus = buildLiveFourPartyUnboundOrgLeftoverCorpus();
+    const bind = bindUnusedFilledPartyNamesIntoLeftoverOrgSlots(
+      corpus,
+      leftover.parties.map((p) => p.name),
+      intake,
+    );
+    expect(bind.bound).toBe(false);
+    expect(bind.text).toMatch(/\[ORG_1\]/);
+    expect(bind.text).toMatch(/\[ORG_2\]/);
+    expect(
+      shouldAcceptPaidProCommercialFieldStubsAfterPfd200({
+        text: corpus,
+        intakeRaw: intake,
+      }),
+    ).toBe(false);
+    const acc = rejectPremiumBodyForProRender(corpus, {
+      intakeText: intake,
+      partyNames: liveRejectPartyNames(leftover),
+    });
+    expect(acc.ok).toBe(false);
+    expect(acc.reasons.some((r) => /\[ORG_[12]\]/.test(r))).toBe(true);
   });
 });
