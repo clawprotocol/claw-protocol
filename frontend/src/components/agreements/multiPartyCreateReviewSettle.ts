@@ -114,16 +114,78 @@ export type CreatePipelineRejectOrGateInput = {
   staleIntakeOrGeneration?: boolean;
   proIntentGateMessage?: string | null;
   founderDetailsGateMessage?: string | null;
+  /** Terminal `vs01-corpus-gate-blocked` with no selected-final (dump→create). */
+  vs01CorpusGateBlocked?: boolean;
+  vs01CorpusGateAllowed?: boolean;
+  vs01SelectedFinal?: boolean;
+  vs01BlockReason?: string | null;
 };
+
+/** In-progress / deferred VS01 reasons must not fail-close a live generate. */
+export function isVs01CorpusGateNonTerminalBlockReason(
+  reason: string | null | undefined,
+): boolean {
+  const r = String(reason || "").trim();
+  if (!r) return true;
+  if (r === "premium_corpus_in_progress") return true;
+  if (r === "deferred_until_prepare_signature_links") return true;
+  return r.startsWith("vs01_checks_deferred");
+}
+
+/**
+ * `vs01-corpus-gate-blocked` with no selected-final — the live Northline/too_much miss.
+ * In-progress and prepare-deferred reasons stay non-terminal so generate can finish.
+ */
+export function isVs01CorpusGateBlockedWithoutSelectedFinal(input: {
+  allowed?: boolean | null;
+  blockReason?: string | null;
+  selectedFinal?: boolean | null;
+}): boolean {
+  if (input.selectedFinal || input.allowed) return false;
+  const reason = String(input.blockReason || "").trim();
+  if (!reason || isVs01CorpusGateNonTerminalBlockReason(reason)) return false;
+  return true;
+}
+
+/** Attach a VS01 gate resolution onto the create reject/gate input (#206 overlay path). */
+export function withCreatePipelineVs01CorpusGate<T extends CreatePipelineRejectOrGateInput>(
+  result: T,
+  gate: { allowed?: boolean | null; blockReason?: string | null },
+): T {
+  const allowed = Boolean(gate.allowed);
+  const blockReason = gate.blockReason ?? null;
+  return {
+    ...result,
+    vs01CorpusGateAllowed: allowed,
+    vs01SelectedFinal: allowed,
+    vs01BlockReason: blockReason,
+    vs01CorpusGateBlocked: isVs01CorpusGateBlockedWithoutSelectedFinal({
+      allowed,
+      blockReason,
+      selectedFinal: allowed,
+    }),
+  };
+}
 
 /**
  * Existing pipeline reject/gate decision (placeholder-reject / paid-corpus reject /
- * intent or founder gate). Do not invent a second SoT — this only reads the result.
+ * intent or founder gate / vs01-corpus-gate-blocked with no selected-final).
+ * Do not invent a second SoT — this only reads the result.
  */
 export function isCreatePipelineRejectOrGateDecision(
   result: CreatePipelineRejectOrGateInput | null | undefined,
 ): boolean {
   if (!result) return false;
+  if (
+    result.vs01CorpusGateBlocked ||
+    isVs01CorpusGateBlockedWithoutSelectedFinal({
+      allowed: result.vs01CorpusGateAllowed,
+      blockReason: result.vs01BlockReason,
+      selectedFinal: result.vs01SelectedFinal,
+    })
+  ) {
+    return true;
+  }
   const source = String(result.premiumRenderSource || "").trim();
   if (source === "rejected_paid_corpus") return true;
   return Boolean(result.proIntentGateMessage || result.founderDetailsGateMessage);
@@ -273,6 +335,14 @@ export function shouldSkipEntitledRewriteForMatchingAcceptedSnapshot(input: {
   if (!incoming) return true;
   if (!snapFp) return false;
   return snapFp === shortIntakeFingerprint(incoming);
+}
+
+/** Leftover paint must not suppress fail-closed unless VS01 selected a final corpus. */
+export function hasAuthoritativeCreateReviewBodyForPrepFailsafe(input: {
+  leftoverBody?: boolean;
+  vs01SelectedFinal?: boolean;
+}): boolean {
+  return Boolean(input.leftoverBody && input.vs01SelectedFinal);
 }
 
 export function shouldFailClosedGeneratingWithoutPipeline(input: {
