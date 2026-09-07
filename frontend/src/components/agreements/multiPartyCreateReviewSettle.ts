@@ -122,7 +122,7 @@ export function isCommerciallyUsableCreateReviewCorpus(text: string | null | und
   if (hasExecutionSignal) return true;
   const hasServicesTitle =
     /^\s*(?:(?:PROFESSIONAL|CONSULTING|MASTER|MUTUAL)\s+)?SERVICES AGREEMENT\b/im.test(t);
-  const namedEntities = (t.match(/\b(?:LLC|L\.L\.C\.|Inc\.|Corp\.|Ltd\.)\b/gi) || []).length;
+  const namedEntities = (t.match(/\b(?:LLC|L\.L\.C\.|Inc\.?|Corp\.?|Ltd\.?)\b/gi) || []).length;
   const hasCommercialTerms = /\b(?:fee|compensation|\$\s?\d|governing law|term)\b/i.test(t);
   return hasServicesTitle && namedEntities >= 2 && hasCommercialTerms;
 }

@@ -388,7 +388,7 @@ describe("canonical Northline homepage dump → entitled Pro Review", () => {
       "Northline delivers robotics integration; Cedar Peak provides analytics.",
       "Fee $12,500. Term 6 months. Governing law Texas.",
       `${"The parties agree to the commercial terms set out in this Agreement. ".repeat(40)}`,
-    ].join("\n");
+    ].join("\n").trim();
     expect(isCommerciallyUsableCreateReviewCorpus(northlineServices)).toBe(true);
 
     // Live #212 miss: churn + vs01-blocked + empty winning BEFORE pfd returns.
