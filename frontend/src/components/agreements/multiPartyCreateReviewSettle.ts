@@ -644,15 +644,26 @@ export function shouldFailClosedGeneratingWithoutPipeline(input: {
 }
 
 /**
+ * Current-dump intake-only named-2p hold for the universal entitled
+ * OOB/incomplete clarity failsafe. Leftover `partyRows` are ignored on purpose.
+ */
+export function isIntakeOnlyOrdinaryNamedTwoPartyReady(intakeText: string): boolean {
+  return shouldSkipPartyPrepForOrdinaryNamedTwoParty({ intakeText });
+}
+
+/**
  * `premiumPostCheckoutPhase=processing` bypasses the starter generating-without-pipeline
  * / prep failsafe: generate-path-committed looks in-flight, and the overlay is the
  * premium modal rather than STARTER_PREPARING_OVERLAY_DISPLAY_PHASES. Apply the same
- * 15s bound while Preparing/Generating and pfd HTTP has not completed — non
- * ordinary-named-2p only. Northline must keep waiting for pfd.
+ * 15s bound while Preparing/Generating and pfd HTTP has not completed — the
+ * universal entitled OOB/incomplete clarity gate. Any dump that is not
+ * ordinary named-2p on the *current intake text* may fail-close after the
+ * bound. Coherent named-2p (Northline-class) must keep waiting for pfd.
  *
- * Callers must pass *current-dump intake-only* named-2p readiness (no leftover
- * `partyRows`). Session party-prep rows from a prior Northline walk must not
- * suppress this failsafe for too_much / money_vibe.
+ * Callers must pass {@link isIntakeOnlyOrdinaryNamedTwoPartyReady} (no leftover
+ * `partyRows`). Session party-prep rows from a prior named-2p walk must not
+ * suppress this gate. Not a fixture-specific rule. Not a new guided Q&A surface
+ * — dismiss hang, then Retry / clarity ask.
  *
  * Not a planner churn rule. Do not fail-close on shorterThanAcceptedChurn alone
  * (#218). Do not latch generate-done from churn (#215).

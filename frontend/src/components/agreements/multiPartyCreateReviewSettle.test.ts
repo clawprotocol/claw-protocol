@@ -26,6 +26,7 @@ import {
   shouldFailClosedCreateAfterRejectOrGate,
   shouldFailClosedGeneratingWithoutPipeline,
   shouldFailClosedInFlightPipelineWithoutCorpus,
+  isIntakeOnlyOrdinaryNamedTwoPartyReady,
   shouldFailClosedPremiumProcessingWithoutPfd,
   shouldFailCloseCreateAfterPremiumFullDraft,
   hasAuthoritativeCreateReviewBodyForPrepFailsafe,
@@ -174,41 +175,35 @@ describe("multi-party create → review settle or fail-closed", () => {
     ).toBe(false);
   });
 
-  it("junk premium processing without pfd fail-closes; named 2p still waits", () => {
-    const tooMuch =
-      "Need a deal with way too much exclusivity forever, 40% equity, revenue share, every affiliate signs, and no legal names.";
-    const moneyVibe =
-      "money vibe only, exclusivity forever, 40 percent equity, revenue share, no parties named.";
+  it("entitled OOB/incomplete premium processing without pfd fail-closes; named 2p still waits", () => {
+    const incomplete =
+      "Need a services arrangement, fee later, term TBD, no legal names yet.";
+    const oobDump =
+      "sketch a deal from a vibe, revenue share TBD, affiliates maybe, names unknown.";
     const northline =
       "Services agreement between Northline Robotics LLC (Jordan Lee) and Cedar Peak Analytics Inc (Sam Okonkwo). Northline delivers robotics integration; Cedar Peak provides analytics. Fee $12,500. Term 6 months. Governing law Texas.";
-    expect(shouldSkipPartyPrepForOrdinaryNamedTwoParty({ intakeText: tooMuch, partyRows: ["", ""] })).toBe(
-      false,
+    expect(isIntakeOnlyOrdinaryNamedTwoPartyReady(incomplete)).toBe(false);
+    expect(isIntakeOnlyOrdinaryNamedTwoPartyReady(oobDump)).toBe(false);
+    expect(isIntakeOnlyOrdinaryNamedTwoPartyReady(northline)).toBe(true);
+    expect(shouldSkipPartyPrepForOrdinaryNamedTwoParty({ intakeText: northline, partyRows: ["", ""] })).toBe(
+      true,
     );
-    expect(
-      shouldSkipPartyPrepForOrdinaryNamedTwoParty({ intakeText: moneyVibe, partyRows: ["", ""] }),
-    ).toBe(false);
-    expect(
-      shouldSkipPartyPrepForOrdinaryNamedTwoParty({ intakeText: northline, partyRows: ["", ""] }),
-    ).toBe(true);
-    // Current-dump intake-only (no partyRows) — failsafe gate contract.
-    expect(shouldSkipPartyPrepForOrdinaryNamedTwoParty({ intakeText: tooMuch })).toBe(false);
-    expect(shouldSkipPartyPrepForOrdinaryNamedTwoParty({ intakeText: moneyVibe })).toBe(false);
-    expect(shouldSkipPartyPrepForOrdinaryNamedTwoParty({ intakeText: northline })).toBe(true);
 
-    const leftoverNorthlineRows = ["Northline Robotics LLC", "Cedar Peak Analytics Inc"];
+    const leftoverNamedTwoPartyRows = ["Prior Party Alpha LLC", "Prior Party Beta Inc"];
     expect(
       shouldSkipPartyPrepForOrdinaryNamedTwoParty({
-        intakeText: tooMuch,
-        partyRows: leftoverNorthlineRows,
+        intakeText: incomplete,
+        partyRows: leftoverNamedTwoPartyRows,
       }),
     ).toBe(true);
     expect(
       shouldSkipPartyPrepForOrdinaryNamedTwoParty({
-        intakeText: moneyVibe,
-        partyRows: leftoverNorthlineRows,
+        intakeText: oobDump,
+        partyRows: leftoverNamedTwoPartyRows,
       }),
     ).toBe(true);
-    expect(shouldSkipPartyPrepForOrdinaryNamedTwoParty({ intakeText: tooMuch })).toBe(false);
+    expect(isIntakeOnlyOrdinaryNamedTwoPartyReady(incomplete)).toBe(false);
+    expect(isIntakeOnlyOrdinaryNamedTwoPartyReady(oobDump)).toBe(false);
 
     const hangArgs = {
       premiumPostCheckoutProcessing: true,
@@ -219,32 +214,28 @@ describe("multi-party create → review settle or fail-closed", () => {
       nowMs: 1_000 + CREATE_FLOW_GENERATING_WITHOUT_PIPELINE_FAILSAFE_MS,
     } as const;
 
-    // too_much: processing + pfd never completes + elapsed ≥ failsafe → fail-closed.
+    // Incomplete / OOB: processing + pfd never completes + elapsed ≥ failsafe → fail-closed.
     expect(
       shouldFailClosedPremiumProcessingWithoutPfd({
         ...hangArgs,
-        ordinaryNamedTwoPartyReady: shouldSkipPartyPrepForOrdinaryNamedTwoParty({
-          intakeText: tooMuch,
-        }),
+        ordinaryNamedTwoPartyReady: isIntakeOnlyOrdinaryNamedTwoPartyReady(incomplete),
       }),
     ).toBe(true);
-    // Leftover Northline partyRows would look named-2p and suppress the failsafe;
-    // current-dump intake-only still fires, then overlays dismiss + Retry is visible.
+    // Leftover partyRows would look named-2p and suppress the failsafe;
+    // intake-only still fires, then overlays dismiss + Retry / clarity is visible.
     expect(
       shouldFailClosedPremiumProcessingWithoutPfd({
         ...hangArgs,
         ordinaryNamedTwoPartyReady: shouldSkipPartyPrepForOrdinaryNamedTwoParty({
-          intakeText: tooMuch,
-          partyRows: leftoverNorthlineRows,
+          intakeText: incomplete,
+          partyRows: leftoverNamedTwoPartyRows,
         }),
       }),
     ).toBe(false);
     expect(
       shouldFailClosedPremiumProcessingWithoutPfd({
         ...hangArgs,
-        ordinaryNamedTwoPartyReady: shouldSkipPartyPrepForOrdinaryNamedTwoParty({
-          intakeText: tooMuch,
-        }),
+        ordinaryNamedTwoPartyReady: isIntakeOnlyOrdinaryNamedTwoPartyReady(incomplete),
       }),
     ).toBe(true);
     expect(
@@ -255,13 +246,10 @@ describe("multi-party create → review settle or fail-closed", () => {
     ).toBe(true);
     expect(CREATE_FLOW_GENERATE_FAILED_CLEAR_MESSAGE).toMatch(/Try again/);
 
-    // money_vibe-class: same family.
     expect(
       shouldFailClosedPremiumProcessingWithoutPfd({
         ...hangArgs,
-        ordinaryNamedTwoPartyReady: shouldSkipPartyPrepForOrdinaryNamedTwoParty({
-          intakeText: moneyVibe,
-        }),
+        ordinaryNamedTwoPartyReady: isIntakeOnlyOrdinaryNamedTwoPartyReady(oobDump),
       }),
     ).toBe(true);
 
@@ -269,9 +257,7 @@ describe("multi-party create → review settle or fail-closed", () => {
     expect(
       shouldFailClosedPremiumProcessingWithoutPfd({
         ...hangArgs,
-        ordinaryNamedTwoPartyReady: shouldSkipPartyPrepForOrdinaryNamedTwoParty({
-          intakeText: northline,
-        }),
+        ordinaryNamedTwoPartyReady: isIntakeOnlyOrdinaryNamedTwoPartyReady(northline),
       }),
     ).toBe(false);
 
@@ -503,14 +489,16 @@ describe("multi-party create → review settle or fail-closed", () => {
     expect(intake).toContain("shouldFailClosedPremiumProcessingWithoutPfd");
     expect(intake).toContain("premiumProcessingWithoutPfdFailClosed");
     expect(intake).toContain("ordinaryNamedTwoPartyReady: ordinaryNamedTwoPartyReadyForSettle");
-    expect(intake).toContain("ordinaryNamedTwoPartyReady: currentDumpIntakeOnlyNamedTwoPartyReady");
+    expect(intake).toContain("ordinaryNamedTwoPartyReady: intakeOnlyOrdinaryNamedTwoPartyReady");
+    expect(intake).toContain("isIntakeOnlyOrdinaryNamedTwoPartyReady");
     expect(intake).not.toContain("shouldFailClosedJunkPfdHangOrEmptyAfterChurn");
     expect(intake).not.toContain("currentDumpOrdinaryNamedTwoPartyReady");
+    expect(intake).not.toContain("currentDumpIntakeOnlyNamedTwoPartyReady");
     expect(intake).toContain(
       "!plan.failClosed &&\n      !premiumProcessingWithoutPfdFailClosed &&\n      !postGenerateAuthorityChurn.failClosed",
     );
     const intakeOnlyReadyIdx = intake.indexOf(
-      "const currentDumpIntakeOnlyNamedTwoPartyReady = shouldSkipPartyPrepForOrdinaryNamedTwoParty({",
+      "const intakeOnlyOrdinaryNamedTwoPartyReady = isIntakeOnlyOrdinaryNamedTwoPartyReady(",
     );
     expect(intakeOnlyReadyIdx).toBeGreaterThan(-1);
     const intakeOnlyReadyBlock = intake.slice(intakeOnlyReadyIdx, intakeOnlyReadyIdx + 240);
@@ -522,7 +510,7 @@ describe("multi-party create → review settle or fail-closed", () => {
       intake.lastIndexOf("if (", failsafeTimerIdx),
       failsafeTimerIdx,
     );
-    expect(failsafeTimerBlock).toContain("currentDumpIntakeOnlyNamedTwoPartyReady");
+    expect(failsafeTimerBlock).toContain("intakeOnlyOrdinaryNamedTwoPartyReady");
     expect(failsafeTimerBlock).not.toContain("ordinaryNamedTwoPartyReadyForSettle");
     const settleIdx = intake.indexOf("const settle =");
     const settleBlock = intake.slice(settleIdx, settleIdx + 280);
