@@ -43,12 +43,14 @@ import {
   fetchRemountCertifiedReviewCorpus,
   leftoverRemountShouldFailClosedToast,
   remountPrepareShouldPaintBeforeContentInspect,
+  resolveAcceptedCrsPlainForRemountPaint,
   resolveCertifiedReviewForEsignRemount,
   resolveEsignEntryReviewBindContext,
 } from "./vs01EsignRemountReviewBind";
 import {
+  fetchRemountPaintPlainFromDocumentContent,
   remountPrepareShouldFailClosedWithoutCertifiedCorpus,
-  resolveRemountPrepareCorpusText,
+  resolveRemountPrepareCorpusIncludingContent,
   restorePrepareFromFrozenSigningAuthority,
 } from "./vs01EsignRemountPrepareRestore";
 import {
@@ -830,6 +832,14 @@ export function Vs01Wizard({
           const certified = await resolveCertifiedReviewForEsignRemount({ documentId: sid });
           remountAgreementId = certified.agreementId.trim();
           persistReviewCorpus = certified.persistReviewCorpus;
+          // Thin leftover-filtered persist must not hide accepted CRS bytes.
+          if (!remountPrepareShouldPaintBeforeContentInspect(persistReviewCorpus) && remountAgreementId) {
+            persistReviewCorpus = await resolveAcceptedCrsPlainForRemountPaint({
+              agreementId: remountAgreementId,
+              draft: certified.draft,
+              persistReviewCorpus,
+            });
+          }
         } catch {
           /* stay on placement; do not eject */
         }
@@ -879,12 +889,14 @@ export function Vs01Wizard({
         }
         if (cancelled) return;
 
-        // Always set prepareCorpusText from certified persist Review / restored
-        // bridge after ensure and/or frozen restore. Do not wait on
-        // hydrateLocalPaidProBridge corpus-length gate or a hung workspace bind.
-        const remountCorpus = resolveRemountPrepareCorpusText({
+        // Always set prepareCorpusText from accepted CRS / persist Review /
+        // restored bridge. When persist Review is missing/thin, paint from
+        // accepted CRS already resolved above, then optional GET /content
+        // bytes — never leftover inspect + vs01-signing-seed before paint.
+        const remountCorpus = await resolveRemountPrepareCorpusIncludingContent({
           persistReviewCorpus,
           restoredBridgeCorpus,
+          fetchDocumentContentPlain: () => fetchRemountPaintPlainFromDocumentContent(sid),
         });
         if (remountCorpus.ok) {
           persistReviewCorpus = remountCorpus.corpus;

@@ -35,7 +35,12 @@ import {
   persistReviewGetPlainForSigningSeed,
   reviewCorpusLooksLikeLeftoverFusedNotices,
 } from "./vs01CurrentReviewSotForSeed";
-import { fetchVs01DocumentMeta } from "./vs01Api";
+import { fetchDocumentContent, fetchVs01DocumentMeta } from "./vs01Api";
+import {
+  extractPlainTextFromDocumentContent,
+  leftoverGetContentRefuseFromError,
+  looksLikeUnreadableDocumentExtract,
+} from "./vs01ReviewCorpusServerContent";
 import { buildVs01PrepareSigningRolesForBridge } from "../components/agreements/paidProNPartySignerSetup";
 import type { Vs01PrepareSigningRole } from "./vs01SignerFieldAssignment";
 import { buildVs01SigningPacketModel, type Vs01SigningPacketModel } from "./buildVs01SigningPacketModel";
@@ -108,22 +113,81 @@ export type RemountPrepareCorpusTextResult =
   | { ok: false; reason: "empty_or_short" | "leftover_fused" };
 
 /**
- * Certified persist Review / restored bridge corpus for remount Prepare.
- * Same SoT as leftover remount (#155–#157). Does not invent a second corpus.
+ * Certified persist Review / accepted CRS / restored bridge for remount
+ * Prepare. Persist Review GET and accepted CRS must not leftover-filter —
+ * that detector is for GET /content packet bytes and false-positives
+ * commercial Notices. Optional document content is leftover-filtered.
  * Synchronous — must not wait on workspace bind completing.
  */
 export function resolveRemountPrepareCorpusText(args: {
   persistReviewCorpus?: string | null;
   restoredBridgeCorpus?: string | null;
+  documentContentPlain?: string | null;
 }): RemountPrepareCorpusTextResult {
   const persist = persistReviewGetPlainForSigningSeed(args.persistReviewCorpus);
+  if (persist) return { ok: true, corpus: persist };
   const restored = persistReviewGetPlainForSigningSeed(args.restoredBridgeCorpus);
-  const candidate = persist || restored;
-  if (!candidate) return { ok: false, reason: "empty_or_short" };
-  if (reviewCorpusLooksLikeLeftoverFusedNotices(candidate)) {
+  if (restored) return { ok: true, corpus: restored };
+  const content = persistReviewGetPlainForSigningSeed(args.documentContentPlain);
+  if (!content) return { ok: false, reason: "empty_or_short" };
+  if (
+    reviewCorpusLooksLikeLeftoverFusedNotices(content) ||
+    looksLikeUnreadableDocumentExtract(content)
+  ) {
     return { ok: false, reason: "leftover_fused" };
   }
-  return { ok: true, corpus: candidate };
+  return { ok: true, corpus: content };
+}
+
+/** GET /content paint bytes only — never leftover inspect + vs01-signing-seed. */
+export async function fetchRemountPaintPlainFromDocumentContent(
+  documentId: string,
+  fetchContent: (id: string) => Promise<Blob | string> = fetchDocumentContent,
+): Promise<string> {
+  const sid = documentId.trim();
+  if (!sid) return "";
+  try {
+    const blob = await fetchContent(sid);
+    const bytes =
+      typeof blob === "string"
+        ? new TextEncoder().encode(blob)
+        : new Uint8Array(await blob.arrayBuffer());
+    return extractPlainTextFromDocumentContent(bytes);
+  } catch (err) {
+    if (leftoverGetContentRefuseFromError(err)) return "";
+    return "";
+  }
+}
+
+/**
+ * Paint remount Prepare from persist / accepted CRS / frozen bridge first.
+ * Only fetch GET /content when those are missing/thin — do not await leftover
+ * inspect or vs01-signing-seed before paint.
+ */
+export async function resolveRemountPrepareCorpusIncludingContent(args: {
+  persistReviewCorpus?: string | null;
+  restoredBridgeCorpus?: string | null;
+  documentContentPlain?: string | null;
+  fetchDocumentContentPlain?: () => Promise<string | null>;
+}): Promise<RemountPrepareCorpusTextResult> {
+  const ready = resolveRemountPrepareCorpusText({
+    persistReviewCorpus: args.persistReviewCorpus,
+    restoredBridgeCorpus: args.restoredBridgeCorpus,
+  });
+  if (ready.ok) return ready;
+  let content = (args.documentContentPlain ?? "").trim();
+  if (!persistReviewGetPlainForSigningSeed(content) && args.fetchDocumentContentPlain) {
+    try {
+      content = ((await args.fetchDocumentContentPlain()) ?? "").trim();
+    } catch {
+      content = "";
+    }
+  }
+  return resolveRemountPrepareCorpusText({
+    persistReviewCorpus: args.persistReviewCorpus,
+    restoredBridgeCorpus: args.restoredBridgeCorpus,
+    documentContentPlain: content,
+  });
 }
 
 /**
