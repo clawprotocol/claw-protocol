@@ -533,7 +533,6 @@ import { applyAcceptedProCorpusSafeDisplay } from "./acceptedProCorpusSafeDispla
 import { stripPremiumIntelligenceCalloutsFromCorpus } from "./premiumDocumentIntelligenceStrip";
 import { commitPaidProAcceptanceStorageHygiene, resolveCreateFlowAcceptedPipelineCorpusPlain } from "./paidProAcceptanceRouting";
 import {
-  buildCreateReturnToWithStarterReviewRestore,
   logCheckoutBackRegenerationSkipped,
   logCheckoutBackRestoreApplied,
   logCheckoutBackRestoreMiss,
@@ -541,6 +540,7 @@ import {
   persistStarterReviewBeforeCheckout,
   readCheckoutBackRestoreSnapshot,
 } from "./checkoutBackRestore";
+import { buildConversionCheckoutReturnTo } from "../../launch/checkoutParams";
 import type { PremiumSendIntent } from "../../launch/simpleProduct/premiumSendIntent";
 import {
   clearPaidProEditReturnHandoff,
@@ -13032,13 +13032,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     });
     setAdvancedFullDraftPaywallOpen(false);
     const cadence = "monthly";
-    const returnTo = encodeURIComponent(buildCreateReturnToWithStarterReviewRestore());
     emitPaidFunnelEvent("premium_checkout_opened", { extra: { checkout_surface: "create_flow_checkout" } });
     const checkoutAgreementId =
       readPreAuthCheckoutAgreementId() ||
       (reviewAgreementIdRef.current || readCreateReviewAgreementResumeId() || "").trim() ||
       CREATE_FLOW_CHECKOUT_AGREEMENT_ID;
     rememberPreAuthCheckoutAgreementId(checkoutAgreementId);
+    const returnTo = encodeURIComponent(buildConversionCheckoutReturnTo(checkoutAgreementId));
     navigate(
       `/app/checkout/${encodeURIComponent(checkoutAgreementId)}?tier=pro&cadence=${encodeURIComponent(
         cadence,
@@ -13210,7 +13210,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     });
     setAdvancedFullDraftPaywallOpen(false);
     const cadence = "annual";
-    const returnTo = encodeURIComponent(buildCreateReturnToWithStarterReviewRestore());
+    const persistId =
+      readPreAuthCheckoutAgreementId() ||
+      (reviewAgreementIdRef.current || readCreateReviewAgreementResumeId() || "").trim() ||
+      null;
+    const returnTo = encodeURIComponent(buildConversionCheckoutReturnTo(persistId));
     navigate(
       `/app/checkout/${encodeURIComponent(CREATE_FLOW_CHECKOUT_AGREEMENT_ID)}?tier=pro&cadence=${encodeURIComponent(
         cadence,

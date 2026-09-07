@@ -24,15 +24,19 @@ describe("checkout back → starter review restore (static)", () => {
   it("AgreementBuilderIntake restores checkout snapshot before home auto-generate", () => {
     expect(intake).toContain("logCheckoutBackRestoreStart");
     expect(intake).toContain("persistStarterReviewBeforeCheckout");
-    expect(intake).toContain("buildCreateReturnToWithStarterReviewRestore");
+    expect(intake).toContain("buildConversionCheckoutReturnTo");
+    expect(intake).not.toMatch(
+      /const returnTo = encodeURIComponent\(buildCreateReturnToWithStarterReviewRestore\(\)\)/,
+    );
     expect(intake).toContain("clearCreateReviewAgreementResumeIdOnly");
     expect(intake).toMatch(
       /logCheckoutBackRestoreStart[\s\S]*useLayoutEffect\(\(\) => \{[\s\S]*checkoutBackRestoreActive[\s\S]*logHomeCreateSubmit/,
     );
   });
 
-  it("SimpleCheckoutPage Back navigates to create with restore marker", () => {
-    expect(checkout).toContain("buildCreateReturnToWithStarterReviewRestore");
+  it("SimpleCheckoutPage Back uses persist-aware conversion returnTo", () => {
+    expect(checkout).toContain("buildConversionCheckoutReturnTo(persistAgreementId)");
+    expect(checkout).not.toContain("buildCreateReturnToWithStarterReviewRestore");
     expect(checkout).not.toContain("onClick={() => window.history.back()}");
   });
 

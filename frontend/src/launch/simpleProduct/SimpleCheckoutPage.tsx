@@ -29,16 +29,16 @@ import { finalizeSettlementAndActivatePlan, finalizeSingleAgreementUnlock } from
 import {
   appendReturnToQueryParam,
   buildAfterPayStripeReturnTo,
+  buildConversionCheckoutReturnTo,
   extractAgreementIdFromSendReturnUrl,
   parseCadenceParam,
   parseTierIdParam,
   resolveCheckoutTier,
   safeReturnToForAgreement,
+  sanitizeConversionCheckoutDest,
+  sanitizeConversionCheckoutReturnTo,
 } from "../checkoutParams";
-import {
-  buildCreateReturnToWithStarterReviewRestore,
-  clearCheckoutBackRestoreSnapshot,
-} from "../../components/agreements/checkoutBackRestore";
+import { clearCheckoutBackRestoreSnapshot } from "../../components/agreements/checkoutBackRestore";
 import { checkoutInvoiceUsd, formatMoneyUsdWhole } from "../pricingKeyMath";
 import { CONTEXTUAL_ONE_TIME_UNLOCK_USD } from "../paywallMessaging";
 import { isSingleAgreementCheckoutIntent } from "../oneTimeAgreementUnlock";
@@ -85,6 +85,7 @@ import { syncDemoSubscriptionEntitlementIfApplicable } from "../billingCheckoutD
 import { resetCheckoutEntryScroll } from "./checkoutEntryScroll";
 import { extractAgreementIdFromCheckoutPath } from "../../auth/safeRedirectResolver";
 import {
+  isRealCheckoutAgreementId,
   pinCheckoutPathToPreAuthAgreement,
   readPreAuthCheckoutAgreementId,
   rememberPreAuthCheckoutAgreementId,
@@ -214,9 +215,18 @@ export function SimpleCheckoutPage(props: { agreementId: string }) {
   const cadenceFromUrl = parseCadenceParam(params.get("cadence"));
   const [cadence, setCadence] = useState<PricingCadence>(() => cadenceFromUrl ?? getPricingCadencePreference());
 
+  const persistAgreementId = useMemo(() => {
+    if (isRealCheckoutAgreementId(agreementId)) return agreementId;
+    return readPreAuthCheckoutAgreementId() || readCreateReviewAgreementResumeId();
+  }, [agreementId]);
+
   const returnTo = useMemo(
-    () => safeReturnToForAgreement(agreementId, params.get("returnTo")),
-    [agreementId, params],
+    () =>
+      sanitizeConversionCheckoutReturnTo({
+        returnTo: safeReturnToForAgreement(agreementId, params.get("returnTo")),
+        persistAgreementId,
+      }),
+    [agreementId, params, persistAgreementId],
   );
 
   const isCreateAgreementCheckout = isCreateFlowAgreementCheckout({
@@ -271,13 +281,20 @@ export function SimpleCheckoutPage(props: { agreementId: string }) {
 
   useLayoutEffect(() => {
     const currentPath = `/app/checkout/${encodeURIComponent(agreementId)}${search || ""}`;
-    const pinned = pinCheckoutPathToPreAuthAgreement(
-      currentPath,
-      readPreAuthCheckoutAgreementId() || readCreateReviewAgreementResumeId(),
-    );
-    const pinnedId = extractAgreementIdFromCheckoutPath(pinned);
+    const persist =
+      readPreAuthCheckoutAgreementId() || readCreateReviewAgreementResumeId() || agreementId;
+    const pinned = pinCheckoutPathToPreAuthAgreement(currentPath, persist);
+    const cleaned = sanitizeConversionCheckoutDest({
+      dest: pinned,
+      persistAgreementId: persist,
+    });
+    const pinnedId = extractAgreementIdFromCheckoutPath(cleaned);
+    if (cleaned !== currentPath) {
+      navigate(cleaned);
+      return;
+    }
     if (pinnedId && pinnedId !== agreementId) {
-      navigate(pinned);
+      navigate(cleaned);
       return;
     }
     rememberPreAuthCheckoutAgreementId(agreementId);
@@ -1016,11 +1033,16 @@ export function SimpleCheckoutPage(props: { agreementId: string }) {
           className="text-sm font-medium text-slate-400 underline-offset-2 hover:text-slate-200 hover:underline"
           onClick={() => {
             if (isCreateAgreementCheckout) {
-              navigate(buildCreateReturnToWithStarterReviewRestore());
+              navigate(buildConversionCheckoutReturnTo(persistAgreementId));
               return;
             }
             if (returnTo.startsWith("/app/create")) {
-              navigate(appendReturnToQueryParam(returnTo, "restore", "starterReview"));
+              navigate(
+                sanitizeConversionCheckoutReturnTo({
+                  returnTo,
+                  persistAgreementId,
+                }),
+              );
               return;
             }
             window.history.back();

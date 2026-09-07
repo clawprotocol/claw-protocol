@@ -106,4 +106,22 @@ describe("SimpleCheckoutPage create-flow chooser on real agreement ID", () => {
     expect(screen.queryByText(CREATE_FLOW_CHECKOUT_AGREEMENT_ID)).toBeNull();
     expect(navState.pathname).toBe(`/app/checkout/${REAL_AGREEMENT_ID}`);
   });
+
+  it("strips restore=starterReview from the checkout URL when persist exists", () => {
+    renderRealIdCheckout("?tier=pro&cadence=monthly&returnTo=%2Fapp%2Fcreate%3Frestore%3DstarterReview");
+    expect(navState.navigate).toHaveBeenCalled();
+    const dest = String(navState.navigate.mock.calls[0]?.[0] ?? "");
+    expect(dest).toContain(`/app/checkout/${REAL_AGREEMENT_ID}`);
+    expect(dest).not.toContain("starterReview");
+    expect(dest).toContain("returnTo=");
+  });
+
+  it("Back returns to /app/create without starterReview restore when persist exists", async () => {
+    const user = userEvent.setup();
+    renderRealIdCheckout("?tier=pro&cadence=monthly&returnTo=%2Fapp%2Fcreate%3Frestore%3DstarterReview");
+    navState.navigate.mockClear();
+    await user.click(screen.getByRole("button", { name: /^Back$/i }));
+    expect(navState.navigate).toHaveBeenCalledWith("/app/create");
+    expect(navState.navigate).not.toHaveBeenCalledWith("/app/create?restore=starterReview");
+  });
 });

@@ -1,3 +1,4 @@
+import { isRealCheckoutAgreementId } from "../auth/preAuthCheckoutAgreement";
 import type { PricingCadence } from "./pricingCadenceStorage";
 import type { LaunchPricingTier } from "./pricingTiersData";
 import { LAUNCH_PRICING_TIERS } from "./pricingTiersData";
@@ -69,6 +70,73 @@ export function dropStarterReviewRestoreParam(returnTo: string): string {
     return out || returnTo;
   } catch {
     return returnTo;
+  }
+}
+
+/**
+ * Conversion create returnTo.
+ * When a canonical persist/resume agreement ID already exists, do not inject
+ * restore=starterReview (pre-pay decoy for after-pay remint / Retry Pro draft).
+ * Unpaid checkout-Back without a persist still uses the starterReview snapshot.
+ */
+export function buildConversionCheckoutReturnTo(persistAgreementId?: string | null): string {
+  if (isRealCheckoutAgreementId(persistAgreementId)) return "/app/create";
+  return appendReturnToQueryParam("/app/create", "restore", "starterReview");
+}
+
+/** Strip starterReview restore from a create returnTo when persist/resume exists. */
+export function sanitizeConversionCheckoutReturnTo(args: {
+  returnTo: string;
+  persistAgreementId?: string | null;
+}): string {
+  const dest = (args.returnTo || "").trim();
+  if (!dest) return dest;
+  if (!isRealCheckoutAgreementId(args.persistAgreementId)) return dest;
+  if (!dest.startsWith("/app/create")) return dest;
+  return dropStarterReviewRestoreParam(dest);
+}
+
+function realAgreementIdFromCheckoutDest(dest: string): string | null {
+  const noQuery = dest.split("?")[0] || "";
+  const prefix = "/app/checkout/";
+  if (!noQuery.startsWith(prefix)) return null;
+  let id = noQuery.slice(prefix.length).split("/")[0] || "";
+  try {
+    id = decodeURIComponent(id).trim();
+  } catch {
+    id = id.trim();
+  }
+  return isRealCheckoutAgreementId(id) ? id : null;
+}
+
+/**
+ * Checkout / OAuth dest: drop returnTo restore=starterReview when the conversion
+ * persist ID is already in the path or supplied (session resume / pre-auth).
+ */
+export function sanitizeConversionCheckoutDest(args: {
+  dest: string;
+  persistAgreementId?: string | null;
+}): string {
+  const dest = (args.dest || "").trim();
+  const persist =
+    (isRealCheckoutAgreementId(args.persistAgreementId) ? args.persistAgreementId!.trim() : null) ||
+    realAgreementIdFromCheckoutDest(dest);
+  if (!isRealCheckoutAgreementId(persist)) return dest;
+  try {
+    const u = new URL(dest, "http://localhost");
+    const rt = u.searchParams.get("returnTo");
+    if (!rt) return dest;
+    const cleaned = sanitizeConversionCheckoutReturnTo({
+      returnTo: rt,
+      persistAgreementId: persist,
+    });
+    if (cleaned === rt) return dest;
+    if (cleaned) u.searchParams.set("returnTo", cleaned);
+    else u.searchParams.delete("returnTo");
+    const out = `${u.pathname}${u.search}${u.hash}`;
+    return out || dest;
+  } catch {
+    return dest;
   }
 }
 

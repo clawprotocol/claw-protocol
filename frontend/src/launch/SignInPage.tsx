@@ -11,10 +11,15 @@ import { resolveSignInNextDestination } from "./genesisReferral/genesisReferralC
 import {
   CHECKOUT_SIGN_IN_BODY,
   CHECKOUT_SIGN_IN_HEADING,
+  extractAgreementIdFromCheckoutPath,
   isSecureCheckoutPath,
   resolveSignInContinuationOpts,
 } from "../auth/safeRedirectResolver";
-import { pinCheckoutPathToPreAuthAgreement } from "../auth/preAuthCheckoutAgreement";
+import {
+  pinCheckoutPathToPreAuthAgreement,
+  readPreAuthCheckoutAgreementId,
+} from "../auth/preAuthCheckoutAgreement";
+import { sanitizeConversionCheckoutDest } from "./checkoutParams";
 import { getGenesisReferralCode } from "./genesisReferral/genesisReferralCapture";
 
 /** Sign-in — dashboard for returning users; checkout `?next=` claims the pre-auth agreement. */
@@ -43,7 +48,14 @@ export function SignInPage() {
   }
 
   if (user) {
-    navigate(pinCheckoutPathToPreAuthAgreement(destinationPath));
+    const pinned = pinCheckoutPathToPreAuthAgreement(destinationPath);
+    navigate(
+      sanitizeConversionCheckoutDest({
+        dest: pinned,
+        persistAgreementId:
+          extractAgreementIdFromCheckoutPath(pinned) || readPreAuthCheckoutAgreementId(),
+      }),
+    );
     return null;
   }
 

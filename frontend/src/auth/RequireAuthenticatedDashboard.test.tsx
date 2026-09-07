@@ -67,4 +67,24 @@ describe("RequireAuthenticatedDashboard", () => {
     );
     expect(screen.queryByTestId("secret-checkout")).toBeNull();
   });
+
+  it("does not embed restore=starterReview in OAuth next when a persist ID already exists", () => {
+    const persistId = "e5a71257-87bb-47cc-aa03-63adf6b61089";
+    navState.pathname = `/app/checkout/${persistId}`;
+    navState.search = "?tier=pro&cadence=monthly&returnTo=%2Fapp%2Fcreate%3Frestore%3DstarterReview";
+    navState.navigate = vi.fn();
+    render(
+      <RequireAuthenticatedDashboard>
+        <div data-testid="secret-checkout">secret</div>
+      </RequireAuthenticatedDashboard>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: CHECKOUT_SIGN_IN_CTA }));
+    const dest = navState.navigate.mock.calls[0]?.[0] as string;
+    expect(dest.startsWith("/app/sign-in?next=")).toBe(true);
+    const next = decodeURIComponent(dest.slice("/app/sign-in?next=".length));
+    expect(next).toContain(persistId);
+    expect(next).not.toContain("restore=starterReview");
+    expect(next).not.toContain("starterReview");
+    expect(screen.queryByTestId("secret-checkout")).toBeNull();
+  });
 });

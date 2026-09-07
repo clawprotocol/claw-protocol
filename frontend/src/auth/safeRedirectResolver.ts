@@ -3,6 +3,10 @@
  */
 
 import { CREATE_FLOW_CHECKOUT_AGREEMENT_ID } from "../components/agreements/agreementAdvancedDraftAccess";
+import {
+  sanitizeConversionCheckoutDest,
+  sanitizeConversionCheckoutReturnTo,
+} from "../launch/checkoutParams";
 import type { AuthContinuationContextV1 } from "./authContinuationContext";
 import {
   pinCheckoutPathToPreAuthAgreement,
@@ -83,16 +87,25 @@ export function resolveSignInContinuationOpts(destinationPath: string): SignInCo
   if (fromPath) rememberPreAuthCheckoutAgreementId(fromPath);
   const agreementId = fromPath ? readPreAuthCheckoutAgreementId() || fromPath : undefined;
   const pinned = agreementId ? pinCheckoutPathToPreAuthAgreement(dest, agreementId) : dest;
+  const destinationPathOut = sanitizeConversionCheckoutDest({
+    dest: pinned,
+    persistAgreementId: agreementId,
+  });
   return {
     returningSignIn: !checkout,
-    destinationPath: pinned,
+    destinationPath: destinationPathOut,
     ...(agreementId ? { agreementId } : {}),
   };
 }
 
 export function buildSignInContinuationPath(pathname: string, search = ""): string {
   const dest = `${(pathname || "").trim()}${(search || "").trim()}`;
-  const safe = resolveSafeRedirectPath(dest, "/app");
+  const persist = extractAgreementIdFromCheckoutPath(dest) ?? readPreAuthCheckoutAgreementId();
+  const sanitized = sanitizeConversionCheckoutDest({
+    dest,
+    persistAgreementId: persist,
+  });
+  const safe = resolveSafeRedirectPath(sanitized, "/app");
   return `/app/sign-in?next=${encodeURIComponent(safe)}`;
 }
 
@@ -112,12 +125,19 @@ export function resolvePostAuthDestination(ctx: AuthContinuationContextV1 | null
   const dest = resolveSafeRedirectPath(ctx.destinationPath, "/app");
   const aid = (ctx.agreementId || "").trim();
   if (aid && dest.startsWith("/app/create") && !dest.includes("agreementId=")) {
-    const sep = dest.includes("?") ? "&" : "?";
-    return `${dest}${sep}agreementId=${encodeURIComponent(aid)}`;
+    const cleaned = sanitizeConversionCheckoutReturnTo({
+      returnTo: dest,
+      persistAgreementId: aid,
+    });
+    const sep = cleaned.includes("?") ? "&" : "?";
+    return `${cleaned}${sep}agreementId=${encodeURIComponent(aid)}`;
   }
   if (aid && aid !== CREATE_FLOW_CHECKOUT_AGREEMENT_ID && dest.startsWith("/app/checkout/")) {
     rememberPreAuthCheckoutAgreementId(aid);
-    return pinCheckoutPathToPreAuthAgreement(dest, aid);
+    return sanitizeConversionCheckoutDest({
+      dest: pinCheckoutPathToPreAuthAgreement(dest, aid),
+      persistAgreementId: aid,
+    });
   }
   return dest;
 }

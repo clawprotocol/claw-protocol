@@ -2,10 +2,13 @@ import { describe, expect, it } from "vitest";
 import { CREATE_FLOW_CHECKOUT_AGREEMENT_ID } from "../components/agreements/agreementAdvancedDraftAccess";
 import {
   buildAfterPayStripeReturnTo,
+  buildConversionCheckoutReturnTo,
   extractAgreementIdFromSendReturnUrl,
   safeReturnToForAgreement,
   parseTierIdParam,
   resolveCheckoutTier,
+  sanitizeConversionCheckoutDest,
+  sanitizeConversionCheckoutReturnTo,
 } from "./checkoutParams";
 
 describe("checkoutParams", () => {
@@ -27,6 +30,63 @@ describe("checkoutParams", () => {
   it("resolveCheckoutTier maps legacy starter/plus deep links to Pro", () => {
     expect(resolveCheckoutTier(parseTierIdParam("starter")).id).toBe("pro");
     expect(resolveCheckoutTier(parseTierIdParam("plus")).id).toBe("pro");
+  });
+});
+
+describe("conversion checkout returnTo restore flags", () => {
+  const persistId = "e5a71257-87bb-47cc-aa03-63adf6b61089";
+
+  it("does not inject restore=starterReview when a persist/resume ID exists", () => {
+    expect(buildConversionCheckoutReturnTo(persistId)).toBe("/app/create");
+    expect(buildConversionCheckoutReturnTo(persistId)).not.toContain("restore=starterReview");
+  });
+
+  it("keeps unpaid starterReview restore when there is no persist ID", () => {
+    expect(buildConversionCheckoutReturnTo(null)).toBe("/app/create?restore=starterReview");
+    expect(buildConversionCheckoutReturnTo("")).toBe("/app/create?restore=starterReview");
+    expect(buildConversionCheckoutReturnTo(CREATE_FLOW_CHECKOUT_AGREEMENT_ID)).toBe(
+      "/app/create?restore=starterReview",
+    );
+  });
+
+  it("strips starterReview decoy from create returnTo when persist exists", () => {
+    expect(
+      sanitizeConversionCheckoutReturnTo({
+        returnTo: "/app/create?restore=starterReview",
+        persistAgreementId: persistId,
+      }),
+    ).toBe("/app/create");
+    expect(
+      sanitizeConversionCheckoutReturnTo({
+        returnTo: "/app/create?restore=starterReview",
+        persistAgreementId: null,
+      }),
+    ).toBe("/app/create?restore=starterReview");
+  });
+
+  it("strips restore=starterReview from checkout/OAuth dest when persist is in the path", () => {
+    const dest = `/app/checkout/${persistId}?tier=pro&cadence=monthly&returnTo=${encodeURIComponent(
+      "/app/create?restore=starterReview",
+    )}`;
+    const cleaned = sanitizeConversionCheckoutDest({ dest });
+    expect(cleaned).not.toContain("restore");
+    expect(cleaned).not.toContain("starterReview");
+    expect(cleaned).toContain(`returnTo=${encodeURIComponent("/app/create")}`);
+    expect(cleaned).toContain(persistId);
+  });
+
+  it("leaves sentinel checkout dest restore intact when no persist ID is supplied", () => {
+    const dest = `/app/checkout/${CREATE_FLOW_CHECKOUT_AGREEMENT_ID}?tier=pro&cadence=monthly&returnTo=${encodeURIComponent(
+      "/app/create?restore=starterReview",
+    )}`;
+    expect(sanitizeConversionCheckoutDest({ dest })).toBe(dest);
+  });
+
+  it("does not rewrite send-path returnTo on checkout dest", () => {
+    const dest = `/app/checkout/${persistId}?tier=pro&returnTo=${encodeURIComponent(
+      `/app/send/${persistId}?phase=send`,
+    )}`;
+    expect(sanitizeConversionCheckoutDest({ dest, persistAgreementId: persistId })).toBe(dest);
   });
 });
 
