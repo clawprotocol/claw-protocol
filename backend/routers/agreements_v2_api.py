@@ -104,7 +104,10 @@ from backend.agreements.premium_full_draft_quality_gate import (
     build_premium_full_draft_repair_user_payload,
     evaluate_premium_full_draft_quality,
     premium_full_draft_body_meets_substance_floor,
+    premium_full_draft_is_complex_or_multiparty,
+    premium_full_draft_max_tokens_for_context,
     premium_full_draft_repair_system_prompt,
+    salvage_premium_full_draft_document_text,
 )
 from backend.agreements.premium_simple_consulting_size_guard import enrich_user_payload_for_simple_consulting
 from backend.agreements.paid_pro_server_timing import (
@@ -4778,6 +4781,13 @@ def build_premium_full_draft_user_payload_for_airlock(
             "Delaware or swap states without intake support), notices, counterparts, e-sign, and full signature blocks."
         )
     user_payload = enrich_user_payload_for_simple_consulting(user_payload, intake_s, ctx_dict)
+    if premium_full_draft_is_complex_or_multiparty(intake_s, ctx_dict):
+        user_payload["multiparty_generation_directive"] = (
+            "N>=3 / complex draft: finish a complete signable `authoritative_draft` (every named "
+            "party in the opening recital and the signature block) BEFORE `agreement_intelligence`. "
+            "Do not stop mid-document or truncate the body to emit metadata. Prefer a complete "
+            "commercial corpus over unfinished intelligence."
+        )
     return user_payload, ctx_dict
 
 
@@ -4851,10 +4861,9 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Respo
     if not ok_txt:
         raise HTTPException(status_code=400, detail=msg_txt)
     request_ip = request.client.host if request.client else "unknown"
-    max_out = max(2000, int(os.environ.get("CLAW_PREMIUM_FULL_DRAFT_MAX_TOKENS", "8000")))
+    env_max = max(2000, int(os.environ.get("CLAW_PREMIUM_FULL_DRAFT_MAX_TOKENS", "8000")))
     _ablation_max = ablation_max_tokens_override()
-    if _ablation_max is not None:
-        max_out = _ablation_max
+    max_out = env_max
     sim_regen = bool(getattr(body, "similarity_regeneration", False))
     llm_model = resolve_llm_model_for_access_class("premium_regen" if sim_regen else "premium")
     if sim_regen:
@@ -4882,6 +4891,10 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Respo
         )
     prompt_assembly_started = time.perf_counter()
     intake_s = (body.intake_text or "").strip()
+    if _ablation_max is not None:
+        max_out = _ablation_max
+    else:
+        max_out = premium_full_draft_max_tokens_for_context(intake_s, ctx_dict, env_max=env_max)
     intent_key = resolve_premium_intent_key(intake_s, ctx_dict)
     intent_skeleton = build_premium_intent_skeleton(intent_key, intake_s)
     uga = (body.user_gap_answers or "").strip()
@@ -5009,28 +5022,75 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Respo
         )
         _primary_finish = str((dq_usage_primary[-1] if dq_usage_primary else {}).get("finish_reason") or "")
         if _primary_finish.strip().lower() == "length":
+            salvaged_doc = salvage_premium_full_draft_document_text(llm_text or "")
+            salvage_ok, salvage_reasons = premium_full_draft_body_meets_substance_floor(
+                salvaged_doc, intake=intake_s, context=ctx_dict
+            )
             log.error(
                 "[premium-full-draft] event=truncated_output finish_reason=length "
-                "session_hint=%s completion_tokens=%s",
+                "session_hint=%s completion_tokens=%s raw_len=%s salvaged_len=%s salvage_ok=%s",
                 session_hint,
                 (dq_usage_primary[-1] if dq_usage_primary else {}).get("completion_tokens"),
+                len((llm_text or "").strip()),
+                len(salvaged_doc),
+                int(bool(salvage_ok and salvaged_doc)),
             )
-            dm = _premium_full_draft_degraded_response(
-                intake_s=intake_s,
-                ctx_dict=ctx_dict,
-                failure_code="output_truncated",
-                failure_message=(
-                    "The draft was truncated before completion. No partial agreement was frozen. "
-                    "Tap Retry Pro draft."
-                ),
-            )
-            return _premium_full_draft_finalize_http_response(
-                dm,
-                intake_len=len(intake_s),
-                session_hint=session_hint,
-                server_timing=server_timing,
-                request=request,
-            )
+            if salvaged_doc and salvage_ok:
+                log.warning(
+                    "[premium-full-draft] event=truncated_output_salvaged session_hint=%s "
+                    "salvaged_len=%s",
+                    session_hint,
+                    len(salvaged_doc),
+                )
+                # Downstream authority still blocks finish_reason=length. After a floor-clearing
+                # salvage the persisted corpus is no longer an emptied partial — mark recovered.
+                if dq_usage_primary:
+                    dq_usage_primary[-1]["finish_reason"] = "stop"
+                    dq_usage_primary[-1]["truncated_output_salvaged"] = 1
+                try:
+                    parsed_trunc = _extract_json_object(llm_text)
+                    if not str(
+                        parsed_trunc.get("authoritative_draft") or parsed_trunc.get("document_text") or ""
+                    ).strip():
+                        parsed_trunc["authoritative_draft"] = salvaged_doc
+                        parsed_trunc["document_text"] = salvaged_doc
+                    llm_text = json.dumps(parsed_trunc, ensure_ascii=False)
+                except (json.JSONDecodeError, ValueError, TypeError):
+                    llm_text = json.dumps(
+                        {
+                            "title": str((ctx_dict or {}).get("title") or "").strip() or "Agreement",
+                            "agreement_family": str((ctx_dict or {}).get("agreement_family") or ""),
+                            "document_text": salvaged_doc,
+                            "authoritative_draft": salvaged_doc,
+                            "key_terms_found": [],
+                            "missing_material_info": [],
+                        },
+                        ensure_ascii=False,
+                    )
+            else:
+                log.warning(
+                    "[premium-full-draft] event=truncated_output_empty_or_hollow "
+                    "session_hint=%s salvaged_len=%s reasons=%s",
+                    session_hint,
+                    len(salvaged_doc),
+                    ",".join(salvage_reasons),
+                )
+                dm = _premium_full_draft_degraded_response(
+                    intake_s=intake_s,
+                    ctx_dict=ctx_dict,
+                    failure_code="output_truncated",
+                    failure_message=(
+                        "The draft was truncated before completion. No partial agreement was frozen. "
+                        "Tap Retry Pro draft."
+                    ),
+                )
+                return _premium_full_draft_finalize_http_response(
+                    dm,
+                    intake_len=len(intake_s),
+                    session_hint=session_hint,
+                    server_timing=server_timing,
+                    request=request,
+                )
         if dq_trace.enabled:
             u0 = dq_usage_primary[-1] if dq_usage_primary else {}
             if u0.get("model"):

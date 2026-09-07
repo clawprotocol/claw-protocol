@@ -28,8 +28,12 @@ from backend.agreements.premium_full_draft_quality_gate import (
     PREMIUM_FULL_DRAFT_BASE_MIN_LEN,
     PREMIUM_FULL_DRAFT_COMPLEX_MIN_LEN,
     PREMIUM_FULL_DRAFT_FRONTEND_FREEZE_MIN_LEN,
+    PREMIUM_FULL_DRAFT_MULTIPARTY_MAX_TOKENS,
+    PREMIUM_FULL_DRAFT_MULTIPARTY_NEAR_COMPLETE_MIN_LEN,
     premium_full_draft_body_meets_substance_floor,
+    premium_full_draft_max_tokens_for_context,
     premium_full_draft_substance_min_len_for_context,
+    salvage_premium_full_draft_document_text,
 )
 from backend.main import app
 from backend.usage_economics import store as usage_economics_store_mod
@@ -182,8 +186,88 @@ def _mid_length_four_party_body() -> str:
         "Guarantor: Northwind Capital Advisors LLC   By: ____  Name: __  Title: __",
     ]
     body = "\n\n".join(sections)
-    body += "\n\n" + ("Operative detail on scope and delivery. " * 180)
+    # Stay in the thin 6k–8.5k band (legacy TEST562). Live near-complete was 9119.
+    body += "\n\n" + ("Operative detail on scope and delivery. " * 150)
     return body
+
+
+def _near_threshold_four_party_body() -> str:
+    """
+    Live staging 4-party shape: structurally complete commercial corpus at ~9119 chars,
+    under the 10k frontend freeze target but above the near-complete BE accept floor.
+    """
+    sections = [
+        "MASTER SERVICES, RESELLER, AND GUARANTY AGREEMENT",
+        "This Agreement is entered into by Redwood Peak Ventures LLC (\"Client\"), "
+        "Atlas Harbor Technologies Inc. (\"Vendor\"), Silverline Integration Partners LLC "
+        "(\"Integrator\"), and Northwind Capital Advisors LLC (\"Guarantor\").",
+        "1. SCOPE AND SERVICES. Vendor and Integrator shall deliver the white-label platform, "
+        "onboarding, and support described in the statements of work, including acceptance "
+        "testing and commercially reasonable cooperation among all four parties.",
+        "2. FEES AND PAYMENT. Client shall pay total fees of $124,750 across milestone payments, "
+        "invoiced net thirty (30) days, with Guarantor backing unpaid amounts after notice.",
+        "3. CONFIDENTIALITY. Each party shall protect the other parties' non-public and "
+        "confidential information and use it only to perform this Agreement.",
+        "4. INTELLECTUAL PROPERTY AND WORK PRODUCT. Ownership of deliverables and work product "
+        "vests in Client upon payment; each party retains its pre-existing materials.",
+        "5. LIMITATION OF LIABILITY AND INDEMNIFICATION. Liability is limited except for gross "
+        "negligence or willful misconduct; each party shall indemnify the others for third-party claims.",
+        "6. INSURANCE. Vendor and Integrator shall maintain commercial general liability and "
+        "professional liability insurance in commercially reasonable amounts.",
+        "7. TERM AND TERMINATION. The initial term is eighteen (18) months; any party may terminate "
+        "for cause on written notice and an opportunity to cure.",
+        "8. DISPUTE RESOLUTION. The parties shall negotiate in good faith and then resolve disputes "
+        "in the courts of the governing jurisdiction.",
+        "9. GOVERNING LAW. This Agreement is governed by the laws of the State of Delaware.",
+        "10. NOTICES. Notices shall be sent to each party's designated email and mailing address.",
+        "11. GUARANTY. Guarantor guarantees Client's payment obligations under this Agreement.",
+        "12. MISCELLANEOUS. This Agreement is the entire agreement; it may be executed in "
+        "counterparts; electronic signatures are valid and binding.",
+    ]
+    sig = (
+        "IN WITNESS WHEREOF, the parties have executed this Agreement as of the Effective Date.\n\n"
+        "Client: Redwood Peak Ventures LLC   By: ____________  Name: ______  Title: ______  Date: ______\n"
+        "Vendor: Atlas Harbor Technologies Inc.   By: ____________  Name: ______  Title: ______  Date: ______\n"
+        "Integrator: Silverline Integration Partners LLC   By: ____________  Name: ______  Title: ______  Date: ______\n"
+        "Guarantor: Northwind Capital Advisors LLC   By: ____________  Name: ______  Title: ______  Date: ______"
+    )
+    body = "\n\n".join(sections)
+    filler = (
+        "Each party shall perform in good faith, keep commercially reasonable records, "
+        "and cooperate on notices, acceptance, and milestone delivery. "
+    )
+    target = 9119
+    while len(body) + 2 + len(sig) < target:
+        body += filler
+    return body + "\n\n" + sig
+
+
+def _near_threshold_corpus_json() -> Dict[str, Any]:
+    return {
+        "title": "Master Services, Reseller, and Guaranty Agreement",
+        "agreement_family": "services_agreement",
+        "document_text": _near_threshold_four_party_body(),
+        "key_terms_found": [
+            "$124,750 milestone fees",
+            "Confidentiality",
+            "IP ownership",
+            "Limitation of liability",
+            "Insurance",
+            "Notices",
+            "Delaware governing law",
+        ],
+        "missing_material_info": [],
+    }
+
+
+def _llm_with_usage(text: str, *, finish_reason: str = "stop", completion_tokens: int = 2_000):
+    def _fake(*args, **kwargs):
+        sink = kwargs.get("usage_sink")
+        if sink is not None:
+            sink.append({"finish_reason": finish_reason, "completion_tokens": completion_tokens})
+        return text
+
+    return _fake
 
 
 def _mid_length_corpus_json() -> Dict[str, Any]:
@@ -402,8 +486,9 @@ def test_simple_two_party_substance_floor_is_base_not_10k():
         "agreement_family": "services_agreement",
     }
     assert premium_full_draft_substance_min_len_for_context(intake, ctx) == PREMIUM_FULL_DRAFT_BASE_MIN_LEN
-    assert premium_full_draft_substance_min_len_for_context(FOUR_PARTY_INTAKE, _four_party_context()) >= (
-        PREMIUM_FULL_DRAFT_FRONTEND_FREEZE_MIN_LEN
+    assert (
+        premium_full_draft_substance_min_len_for_context(FOUR_PARTY_INTAKE, _four_party_context())
+        == PREMIUM_FULL_DRAFT_MULTIPARTY_NEAR_COMPLETE_MIN_LEN
     )
 
 
@@ -476,11 +561,11 @@ def test_simple_two_party_mid_length_corpus_meets_substance_floor():
 
 
 def test_mid_length_body_shape_matches_test562_symptom():
-    """The mid-length multiparty fixture clears the legacy floor but is below the frontend freeze floor."""
+    """Thin 6k–8.5k multiparty padding still fails; near-complete ~9k must not."""
     body = _mid_length_four_party_body()
     assert len(body) >= PREMIUM_FULL_DRAFT_COMPLEX_MIN_LEN
-    assert len(body) < PREMIUM_FULL_DRAFT_FRONTEND_FREEZE_MIN_LEN
-    # Under the aligned multiparty floor this body is NOT a returnable Pro corpus.
+    assert len(body) < PREMIUM_FULL_DRAFT_MULTIPARTY_NEAR_COMPLETE_MIN_LEN
+    # Under the near-complete multiparty floor this thin body is NOT a returnable Pro corpus.
     ok, reasons = premium_full_draft_body_meets_substance_floor(
         body, intake=FOUR_PARTY_INTAKE, context=_four_party_context()
     )
@@ -615,3 +700,190 @@ def test_diagnostics_log_emits_required_fields_on_degraded(monkeypatch, tmp_path
     assert diag, "expected a [premium-full-draft-diagnostics] log line"
     assert any("outcome=degraded" in line for line in diag)
     assert any("degraded_reason=premium_generation_insufficient" in line for line in diag)
+
+
+# --- staging FAIL: truncate→empty + insufficient-near-threshold multiparty --------------------
+
+
+def test_near_threshold_9119_multiparty_meets_substance_floor():
+    """Live 4-party 9119-char corpus must clear the tuned gate; thin 7k padding must not."""
+    near = _near_threshold_four_party_body()
+    assert 9_000 <= len(near) < PREMIUM_FULL_DRAFT_FRONTEND_FREEZE_MIN_LEN
+    ok, reasons = premium_full_draft_body_meets_substance_floor(
+        near, intake=FOUR_PARTY_INTAKE, context=_four_party_context()
+    )
+    assert ok is True, reasons
+    thin = _mid_length_four_party_body()
+    thin_ok, thin_reasons = premium_full_draft_body_meets_substance_floor(
+        thin, intake=FOUR_PARTY_INTAKE, context=_four_party_context()
+    )
+    assert thin_ok is False
+    assert any("below_premium_substantive_min_len" in r for r in thin_reasons)
+
+
+def test_near_threshold_multiparty_returns_200_not_insufficient(monkeypatch, tmp_path):
+    """A ~9119 structurally complete 4-party draft must be 200, not premium_generation_insufficient."""
+    monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
+
+    monkeypatch.setattr(av2, "call_legal_llm", lambda *a, **k: json.dumps(_near_threshold_corpus_json()))
+    client = TestClient(app)
+    res = _post(client, intake=FOUR_PARTY_INTAKE, context=_four_party_context())
+
+    assert res.status_code == 200
+    body = res.json()
+    assert body.get("generation_ok") is True
+    assert body.get("retryable") is False
+    assert body.get("server_generation_failure_code") in (None, "")
+    doc = (body.get("document_text") or "").strip()
+    assert len(doc) >= PREMIUM_FULL_DRAFT_MULTIPARTY_NEAR_COMPLETE_MIN_LEN
+    assert "Redwood Peak Ventures" in doc
+    assert (body.get("server_full_document_text") or "").strip() == doc
+
+
+def test_salvage_extracts_document_text_from_truncated_json():
+    corpus = _near_threshold_four_party_body()
+    truncated = (
+        '{"title":"Master Services, Reseller, and Guaranty Agreement",'
+        '"agreement_family":"services_agreement","document_text":'
+        + json.dumps(corpus)[:-1]
+    )
+    assert not truncated.endswith("}")
+    salvaged = salvage_premium_full_draft_document_text(truncated)
+    assert salvaged == corpus
+    assert salvage_premium_full_draft_document_text(
+        '{"title":"X","agreement_family":"y","agreement_intelligence":{"extracted_terms":{'
+    ) == ""
+
+
+def test_truncated_near_complete_multiparty_returns_200_not_empty(monkeypatch, tmp_path):
+    """finish_reason=length must salvage a usable corpus instead of emptying (3p staging FAIL)."""
+    monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
+
+    corpus = _near_threshold_four_party_body()
+    truncated = (
+        '{"title":"Master Services, Reseller, and Guaranty Agreement",'
+        '"agreement_family":"services_agreement","document_text":'
+        + json.dumps(corpus)[:-1]
+    )
+    calls = {"n": 0}
+
+    def fake_llm(*args, **kwargs):
+        calls["n"] += 1
+        sink = kwargs.get("usage_sink")
+        if calls["n"] == 1:
+            if sink is not None:
+                sink.append({"finish_reason": "length", "completion_tokens": 8000})
+            return truncated
+        if sink is not None:
+            sink.append({"finish_reason": "stop", "completion_tokens": 2_000})
+        return json.dumps(_near_threshold_corpus_json())
+
+    monkeypatch.setattr(av2, "call_legal_llm", fake_llm)
+    client = TestClient(app)
+    res = _post(client, intake=FOUR_PARTY_INTAKE, context=_four_party_context())
+
+    assert res.status_code == 200
+    body = res.json()
+    assert body.get("generation_ok") is True
+    doc = (body.get("document_text") or "").strip()
+    assert len(doc) >= PREMIUM_FULL_DRAFT_MULTIPARTY_NEAR_COMPLETE_MIN_LEN
+    assert "Redwood Peak Ventures" in doc
+    assert body.get("server_generation_failure_code") in (None, "")
+
+
+def test_truncated_empty_output_still_fail_closed(monkeypatch, tmp_path):
+    """Truncation with no salvageable body stays 503 output_truncated and empty (hollow fail-closed)."""
+    monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
+
+    hollow = '{"title":"Agreement","agreement_family":"generic","agreement_intelligence":{"extracted_terms":{'
+    monkeypatch.setattr(
+        av2,
+        "call_legal_llm",
+        _llm_with_usage(hollow, finish_reason="length", completion_tokens=8000),
+    )
+    client = TestClient(app)
+    res = _post(client, intake=FOUR_PARTY_INTAKE, context=_four_party_context())
+
+    assert res.status_code == 503
+    body = res.json()
+    assert body.get("server_generation_failure_code") == "output_truncated"
+    assert (body.get("document_text") or "").strip() == ""
+    assert (body.get("server_full_document_text") or "").strip() == ""
+    assert body.get("generation_ok") is False
+    assert body.get("retryable") is True
+
+
+def test_hollow_junk_still_fail_closed(monkeypatch, tmp_path):
+    """Short junk without clause families / execution still cannot pass as a Pro corpus."""
+    monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
+
+    junk = {
+        "title": "Agreement",
+        "agreement_family": "generic",
+        "document_text": "Hello parties. This is a note. " * 80,
+        "key_terms_found": [],
+        "missing_material_info": [],
+    }
+    monkeypatch.setattr(av2, "call_legal_llm", lambda *a, **k: json.dumps(junk))
+    client = TestClient(app)
+    res = _post(client, intake=FOUR_PARTY_INTAKE, context=_four_party_context())
+
+    assert res.status_code == 503
+    body = res.json()
+    assert body.get("server_generation_failure_code") == "premium_generation_insufficient"
+    assert (body.get("document_text") or "").strip() == ""
+    assert body.get("generation_ok") is False
+    assert body.get("retryable") is True
+
+
+def test_multiparty_token_budget_is_raised_two_party_is_not():
+    assert (
+        premium_full_draft_max_tokens_for_context(
+            FOUR_PARTY_INTAKE, _four_party_context(), env_max=8_000
+        )
+        == PREMIUM_FULL_DRAFT_MULTIPARTY_MAX_TOKENS
+    )
+    simple_intake = (
+        "I need a simple services agreement between me (Alex Rivera, freelance product designer) "
+        "and a small startup called PixelForge Labs. Flat fee of $4,500."
+    )
+    simple_ctx = {
+        "title": "Services Agreement",
+        "parties": [
+            {"name": "Alex Rivera", "role": "Service Provider"},
+            {"name": "PixelForge Labs", "role": "Client"},
+        ],
+        "purpose": "Mobile app UI design",
+        "payment_terms": "$4,500 50/50",
+        "agreement_family": "services_agreement",
+    }
+    assert premium_full_draft_max_tokens_for_context(simple_intake, simple_ctx, env_max=8_000) == 8_000
+
+
+def test_multiparty_route_requests_raised_token_budget(monkeypatch, tmp_path):
+    monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
+    monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
+
+    seen = {"max_tokens": None}
+
+    def fake_llm(*args, **kwargs):
+        seen["max_tokens"] = kwargs.get("max_tokens")
+        sink = kwargs.get("usage_sink")
+        if sink is not None:
+            sink.append({"finish_reason": "stop", "completion_tokens": 2_000})
+        return json.dumps(_full_corpus_json())
+
+    monkeypatch.setattr(av2, "call_legal_llm", fake_llm)
+    client = TestClient(app)
+    res = _post(client, intake=FOUR_PARTY_INTAKE, context=_four_party_context())
+    assert res.status_code == 200
+    assert seen["max_tokens"] == PREMIUM_FULL_DRAFT_MULTIPARTY_MAX_TOKENS
