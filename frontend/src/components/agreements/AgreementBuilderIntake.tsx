@@ -155,6 +155,10 @@ import {
   shouldSkipPartyPrepForOrdinaryNamedTwoParty,
   withCreatePipelineVs01CorpusGate,
 } from "./multiPartyCreateReviewSettle";
+import {
+  latchEntitledRewriteFailOpenReviewAuthority,
+  planEntitledRewriteFailOpenReviewMount,
+} from "./entitledRewriteFailOpenReviewMount";
 import { StarterMultiPartyProGatePanel } from "./StarterMultiPartyProGatePanel";
 import { AgreementIntakeClarificationPanel } from "./AgreementIntakeClarificationPanel";
 import type { AgreementIntakeClarification } from "./agreementIntakeClarification";
@@ -7649,6 +7653,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           result.premiumRenderSource ||
           "server_full_draft";
         setAgreementDocumentText(entitledPaidShellPlan.corpus);
+        latchEntitledRewriteFailOpenReviewAuthority({
+          corpusPlain: entitledPaidShellPlan.corpus,
+          pipelineSource: result.premiumRenderSource,
+          agreementId: agreementIdForPass,
+          reviewSessionId: result.agreementGenerationId ?? sessionGenForPass,
+        });
+        setReviewDocRefreshTick((n) => n + 1);
         setPremiumPostCheckoutPhase(null);
         setPremiumPipelineUserMessage(null);
         setHardError(null);
@@ -8085,6 +8096,17 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             acceptedReviewCorpusRef.current = entitledReviewCorpus;
             authoritativeAgreementSnapshotRef.current = entitledReviewCorpus;
             guidedFinalReviewExplicitlyUnlockedRef.current = true;
+            setAgreementDocumentText(entitledReviewCorpus);
+            latchEntitledRewriteFailOpenReviewAuthority({
+              corpusPlain: entitledReviewCorpus,
+              pipelineSource: result.premiumRenderSource,
+              agreementId: agreementIdForPass,
+              reviewSessionId: result.agreementGenerationId ?? sessionGenForPass,
+            });
+            setReviewDocRefreshTick((n) => n + 1);
+            setDisplayPhase("review");
+            setCreateFlowPhase("draft_ready_for_review");
+            setCreateUiStage(CreateUiStage.DRAFT);
           } else {
             logPaidProGenerationTerminalTransition({
               reason: "entitled_rewrite_snapshot_prepare_failed",
@@ -8245,12 +8267,26 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             })
         : false;
       if (!canonicalEntered) {
-        const canonicalSalvage = pickUsableGenerationRetrySalvageCorpus([
-          finalizePlan.corpusPlain,
-          entitledReviewCorpus,
-          winning,
-          snapshotPlain,
-        ]);
+        const failOpenPlan = planEntitledRewriteFailOpenReviewMount({
+          commerciallyUsableCorpus: entitledReviewCorpus,
+          winningPremiumBodyText: finalizePlan.corpusPlain || entitledReviewCorpus || winning,
+          premiumRenderSource: result.premiumRenderSource,
+          acceptedAuthoritativePlain: entitledReviewCorpus,
+          lastCommerciallyUsableCandidate: getLastCommerciallyUsableAuthorityCandidate(),
+          snapshotPrepareFailed: false,
+          canonicalBlocked: true,
+          shorterThanAcceptedChurn: hasPremiumAuthorityShorterThanAcceptedChurn(),
+        });
+        const canonicalSalvage =
+          failOpenPlan.paintReview && failOpenPlan.corpus
+            ? failOpenPlan.corpus
+            : pickUsableGenerationRetrySalvageCorpus([
+                finalizePlan.corpusPlain,
+                entitledReviewCorpus,
+                winning,
+                snapshotPlain,
+                getLastCommerciallyUsableAuthorityCandidate(),
+              ]);
         if (canonicalSalvage) {
           if (import.meta.env.MODE !== "test") {
             // eslint-disable-next-line no-console
@@ -8259,6 +8295,32 @@ const AgreementBuilderIntake: React.FC<Props> = ({
               blockedReason: finalizePlan.blockedReason ?? "canonical_entry_failed",
             });
           }
+          // Paint + latch first. SoT may throw (free-starter leftover / freeze gates)
+          // and must never leave hollow navy or Apply-revision-without-corpus.
+          setAgreementDocumentText(canonicalSalvage);
+          latchEntitledRewriteFailOpenReviewAuthority({
+            corpusPlain: canonicalSalvage,
+            pipelineSource: result.premiumRenderSource,
+            agreementId: agreementIdForPass,
+            reviewSessionId: result.agreementGenerationId ?? sessionGenForPass,
+          });
+          setReviewDocRefreshTick((n) => n + 1);
+          setPremiumPersistedFlowActive(true);
+          setPremiumSendPathUnlocked(true);
+          setProFullDraftQualityRetry(false);
+          setProFullDraftCustomGateMessage(null);
+          commitParsedDraftToReviewFlow(
+            {
+              ...mergedDraftPersist,
+              premium_full_document_text: canonicalSalvage,
+              premium_server_full_document_text: canonicalSalvage,
+            },
+            { forceReviewDisplay: true },
+          );
+          guidedFinalReviewExplicitlyUnlockedRef.current = true;
+          setDisplayPhase("review");
+          setCreateFlowPhase("draft_ready_for_review");
+          setCreateUiStage(CreateUiStage.DRAFT);
           try {
             establishPaidProSourceOfTruth({
               text: canonicalSalvage,
@@ -8274,32 +8336,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
               reviewSessionId: result.agreementGenerationId ?? sessionGenForPass,
               generationOutcome: result.serverGenerationDegraded ? "degraded" : "ok",
             });
-            setPremiumPersistedFlowActive(true);
-            setPremiumSendPathUnlocked(true);
-            setProFullDraftQualityRetry(false);
-            setAgreementDocumentText(canonicalSalvage);
-            commitParsedDraftToReviewFlow(
-              {
-                ...mergedDraftPersist,
-                premium_full_document_text: canonicalSalvage,
-                premium_server_full_document_text: canonicalSalvage,
-              },
-              { forceReviewDisplay: true },
-            );
-            guidedFinalReviewExplicitlyUnlockedRef.current = true;
           } catch (canonicalFailOpenErr) {
             if (import.meta.env.MODE !== "test") {
               // eslint-disable-next-line no-console
               console.warn("[premium-flow] entitled_rewrite_canonical_fail_open_sot_failed", canonicalFailOpenErr);
             }
-            logPaidProGenerationTerminalTransition({
-              reason: "entitled_rewrite_canonical_blocked",
-              outcome: "retry_recoverable",
-            });
-            setProFullDraftQualityRetry(true);
-            setProFullDraftCustomGateMessage(
-              "Your Pro agreement is still preparing. Tap **Retry Pro draft** if this does not update shortly.",
-            );
           }
         } else {
           logPaidProGenerationTerminalTransition({
@@ -26674,6 +26715,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         lastPremiumPipelineRenderSourceRef.current =
           lastPremiumPipelineRenderSourceRef.current || "server_full_draft";
         setAgreementDocumentText(plan.corpus);
+        latchEntitledRewriteFailOpenReviewAuthority({
+          corpusPlain: plan.corpus,
+          pipelineSource: lastPremiumPipelineRenderSourceRef.current,
+          agreementId: reviewAgreementIdRef.current,
+          reviewSessionId: getOrInitSessionAgreementGenerationId(),
+        });
       }
       setPremiumPostCheckoutPhase(null);
       setPremiumPipelineUserMessage(null);
