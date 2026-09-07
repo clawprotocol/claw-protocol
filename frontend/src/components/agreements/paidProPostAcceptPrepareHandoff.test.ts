@@ -14,6 +14,7 @@ import {
   resolvePostAcceptPrepareTrackCorpus,
   resolveResumeAcceptedCommercialEsignHandoff,
   shouldHandoffPostAcceptPrepareToSignatureLinks,
+  shouldRecoverAcceptedCommercialPrepareTrack,
   shouldSkipReFinalizeBeforePostAcceptPrepare,
 } from "./paidProPostAcceptReviewHandoff";
 import { resolvePaidProStickyCta } from "./paidProStickyCta";
@@ -28,7 +29,10 @@ import {
   type FrozenSigningAuthoritySnapshotV1,
 } from "./frozenSigningAuthoritySnapshot";
 import { hashPaidProCorpus } from "./paidProSourceOfTruth";
-import { resolvePaidProPrepareSignaturesHandler } from "./paidProReviewDecisionModel";
+import {
+  resolveDecision2AcceptedPrepareAction,
+  resolvePaidProPrepareSignaturesHandler,
+} from "./paidProReviewDecisionModel";
 import {
   isAuthoritativeSigningSnapshotReadyForPrepare,
   resolveFinalVs01CorpusOrBlock,
@@ -410,6 +414,108 @@ describe("post-accept Prepare for signing click / handoff", () => {
     expect(trackFrag).toContain("ensureAcceptedCommercialReviewForEsignHandoff");
     expect(trackFrag).toContain("executePaidProPostRecipientSetupHandoff");
     expect(trackFrag).toContain("enterGuidedSignatureTrackRoute:handoff_ok");
+    expect(trackFrag).not.toMatch(/resend|sendEmail|send_mail/i);
+    expect(trackFrag).not.toMatch(/\bstripe\b|checkout/i);
+  });
+
+  it("decision_2 Prepare after already-accepted GET snapshot recovers paint refs and would navigate", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue(
+        new Response(JSON.stringify({ snapshot: twoAuthorizedFrozen() }), { status: 200 }),
+      ),
+    );
+    await restoreFinalizedSignerStateFromPaidReturnPersist({
+      agreementId: AGREEMENT_ID,
+      persistAccepted: true,
+      corpus: PAINT_ONLY_CORPUS,
+    });
+    const gate = resolveFinalVs01CorpusOrBlock({
+      agreementCorpusText: PAINT_ONLY_CORPUS,
+      guidedPro: true,
+      signaturePreparationRequested: true,
+      prepareSignatureLinksRequested: true,
+    });
+    expect(gate.allowed).toBe(true);
+    const snap = getAuthoritativeSigningSnapshot();
+    expect(snap).not.toBeNull();
+
+    // Live #182 hole: Continue already painted Review, so transition.ok && corpusText.
+    // The old gate skipped recover; this click must still recover and be handoff-ready.
+    const oldGateWouldSkipRecover =
+      Boolean(true) && Boolean(PAINT_ONLY_CORPUS.trim());
+    expect(oldGateWouldSkipRecover).toBe(true);
+    expect(
+      shouldRecoverAcceptedCommercialPrepareTrack({
+        acceptedSnapshotEnabled: true,
+        transitionOk: true,
+        corpusText: PAINT_ONLY_CORPUS,
+      }),
+    ).toBe(true);
+    expect(
+      shouldRecoverAcceptedCommercialPrepareTrack({
+        acceptedSnapshotEnabled: false,
+        transitionOk: true,
+        corpusText: PAINT_ONLY_CORPUS,
+      }),
+    ).toBe(false);
+
+    const recovered = resolveResumeAcceptedCommercialEsignHandoff({
+      agreementId: "4e18814c-c8fe-4eb9-85ae-a3e694cb596e",
+      acceptedSnapshotEnabled: true,
+      verifiedDisplayCorpus: PAINT_ONLY_CORPUS,
+      signingSnapshotCorpus: PAINT_ONLY_CORPUS,
+      acceptedReviewCorpus: PAINT_ONLY_CORPUS,
+      rebuiltSigningCorpus: gate.corpus,
+      partyManifest: snap!.partyManifest,
+      signerCount: 2,
+    });
+    expect(recovered.ok).toBe(true);
+    if (!recovered.ok) throw new Error(recovered.reason);
+    expect(isSigningReadyPrepareTrackCorpus(recovered.body, 2)).toBe(true);
+    expect(
+      assertGuidedVs01SigningHandoffReady({
+        manifest: snap!.partyManifest,
+        corpusSource: recovered.source,
+        corpusBody: recovered.body,
+      }).ok,
+    ).toBe(true);
+
+    const emptySigners = resolveResumeAcceptedCommercialEsignHandoff({
+      agreementId: "4e18814c-c8fe-4eb9-85ae-a3e694cb596e",
+      acceptedSnapshotEnabled: true,
+      rebuiltSigningCorpus: gate.corpus,
+      partyManifest: { parties: [] },
+      signerCount: 2,
+    });
+    expect(emptySigners.ok).toBe(false);
+
+    expect(
+      resolveDecision2AcceptedPrepareAction({
+        phase: "decision_2",
+        acceptedSnapshotEnabled: true,
+        signerDetailsComplete: true,
+      }),
+    ).toBe("enter_esign_track");
+
+    expect(intakeSrc).toContain("shouldRecoverAcceptedCommercialPrepareTrack");
+    expect(intakeSrc).toContain("resolveDecision2AcceptedPrepareAction");
+    const prepareFrag = intakeSrc.slice(
+      intakeSrc.indexOf("const handlePaidProPrepareSignaturesFromFirstReview = React.useCallback"),
+      intakeSrc.indexOf("const handlePaidProPrepareSignaturesFromFirstReview = React.useCallback") + 5500,
+    );
+    const enterIdx = prepareFrag.indexOf('prepareAction === "enter_esign_track"');
+    const remountIdx = prepareFrag.indexOf("canMountPaidProInlineSignerSetupFromFirstReview");
+    expect(enterIdx).toBeGreaterThan(0);
+    expect(remountIdx).toBeGreaterThan(enterIdx);
+    expect(prepareFrag).toContain("void handleProSendForSignature()");
+    const trackStart = intakeSrc.indexOf("const enterGuidedSignatureTrackRoute");
+    const trackEnd = intakeSrc.indexOf("const completeGuidedSigningHandoff = React.useCallback", trackStart);
+    const trackFrag = intakeSrc.slice(trackStart, trackEnd > trackStart ? trackEnd : trackStart + 24000);
+    expect(trackFrag).toContain("shouldRecoverAcceptedCommercialPrepareTrack");
+    expect(trackFrag).toContain("enterGuidedSignatureTrackRoute:accepted_snapshot_recover");
+    expect(trackFrag).toContain("enterGuidedSignatureTrackRoute:handoff_ok");
+    expect(trackFrag).toContain("executePaidProPostRecipientSetupHandoff");
     expect(trackFrag).not.toMatch(/resend|sendEmail|send_mail/i);
     expect(trackFrag).not.toMatch(/\bstripe\b|checkout/i);
   });

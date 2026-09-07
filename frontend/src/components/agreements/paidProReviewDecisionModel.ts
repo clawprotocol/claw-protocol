@@ -78,3 +78,26 @@ export function resolvePaidProPrepareSignaturesHandler(args: {
   if (args.phase === "decision_2") return args.onDecision2;
   return args.onFallback;
 }
+
+export type Decision2AcceptedPrepareAction =
+  | "enter_esign_track"
+  | "remount_signer_setup"
+  | "fail_closed"
+  | "fallback";
+
+/**
+ * Decision-2 / already-accepted Prepare must enter the signature track — never
+ * remount Decision-1 signer setup (TEST570). Empty/invalid signers stay closed.
+ */
+export function resolveDecision2AcceptedPrepareAction(args: {
+  phase: PaidProReviewDecisionPhase;
+  acceptedSnapshotEnabled: boolean;
+  signerDetailsComplete: boolean;
+}): Decision2AcceptedPrepareAction {
+  if (args.phase === "decision_2" || args.acceptedSnapshotEnabled) {
+    if (!args.signerDetailsComplete) return "fail_closed";
+    return "enter_esign_track";
+  }
+  if (args.phase === "decision_1") return "remount_signer_setup";
+  return "fallback";
+}

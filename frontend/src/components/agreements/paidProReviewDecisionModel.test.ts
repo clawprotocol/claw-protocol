@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  resolveDecision2AcceptedPrepareAction,
   resolvePaidProReviewDecisionPhase,
   resolvePostFinalizeReviewDecisionActive,
   shouldHidePaidProReviewDecisionChromeForDashboardResume,
@@ -71,5 +72,29 @@ describe("paidProReviewDecisionModel", () => {
         signerMetadataFinalized: false,
       }),
     ).toBe(true);
+  });
+
+  it("Decision-2 / accepted Prepare enters esign track and does not remount signer setup", () => {
+    expect(
+      resolveDecision2AcceptedPrepareAction({
+        phase: "decision_2",
+        acceptedSnapshotEnabled: true,
+        signerDetailsComplete: true,
+      }),
+    ).toBe("enter_esign_track");
+    expect(
+      resolveDecision2AcceptedPrepareAction({
+        phase: "decision_2",
+        acceptedSnapshotEnabled: true,
+        signerDetailsComplete: false,
+      }),
+    ).toBe("fail_closed");
+    expect(
+      resolveDecision2AcceptedPrepareAction({
+        phase: "decision_1",
+        acceptedSnapshotEnabled: false,
+        signerDetailsComplete: false,
+      }),
+    ).toBe("remount_signer_setup");
   });
 });
