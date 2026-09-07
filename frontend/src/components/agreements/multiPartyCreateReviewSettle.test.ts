@@ -324,9 +324,14 @@ describe("multi-party create → review settle or fail-closed", () => {
     expect(intake).toContain("overlayElapsedMs");
     expect(intake).toContain("CREATE_FLOW_GENERATING_WITHOUT_PIPELINE_FAILSAFE_MS");
     expect(intake).toContain("if (!plan.failClosed && !junkPfdHangOrEmptyAfterChurn && !postGenerateAuthorityChurn.failClosed)");
-    expect(intake).not.toMatch(
-      /generateComplete:\s*\n?\s*premiumGenerateCompleted \|\| \(authorityChurnActive && !ordinaryNamedTwoPartyReadyForSettle\)/,
-    );
+    const renderPlanIdx = intake.indexOf("const postGenerateCreateReviewSettlePlan = planPostGenerateCreateReviewSettleOrFailClosed(");
+    const renderPlanBlock = intake.slice(renderPlanIdx, renderPlanIdx + 900);
+    expect(renderPlanBlock).toContain("generateComplete: premiumGenerateCompleted");
+    expect(renderPlanBlock).not.toContain("authorityChurnActive && !ordinaryNamedTwoPartyReadyForSettle");
+    const effectPlanIdx = intake.indexOf("const plan = planPostGenerateCreateReviewSettleOrFailClosed(");
+    const effectPlanBlock = intake.slice(effectPlanIdx, effectPlanIdx + 900);
+    expect(effectPlanBlock).toContain("generateComplete: premiumGenerateCompleted");
+    expect(effectPlanBlock).not.toContain("authorityChurnActive && !ordinaryNamedTwoPartyReadyForSettle");
     const namedSettleIdx = intake.indexOf(
       "const ordinaryNamedTwoPartyReadyForSettle = shouldSkipPartyPrepForOrdinaryNamedTwoParty({",
     );

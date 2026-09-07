@@ -324,9 +324,14 @@ describe("canonical Northline homepage dump → entitled Pro Review", () => {
     expect(intake).toContain("if (!plan.failClosed && !junkPfdHangOrEmptyAfterChurn && !postGenerateAuthorityChurn.failClosed)");
     expect(intake).toContain("currentDumpOrdinaryNamedTwoPartyReady");
     expect(intake).toContain("shouldFailClosedJunkPfdHangOrEmptyAfterChurn");
-    expect(intake).not.toMatch(
-      /generateComplete:\s*\n?\s*premiumGenerateCompleted \|\| \(authorityChurnActive && !ordinaryNamedTwoPartyReadyForSettle\)/,
-    );
+    const renderPlanIdx = intake.indexOf("const postGenerateCreateReviewSettlePlan = planPostGenerateCreateReviewSettleOrFailClosed(");
+    const renderPlanBlock = intake.slice(renderPlanIdx, renderPlanIdx + 900);
+    expect(renderPlanBlock).toContain("generateComplete: premiumGenerateCompleted");
+    expect(renderPlanBlock).not.toContain("authorityChurnActive && !ordinaryNamedTwoPartyReadyForSettle");
+    const effectPlanIdx = intake.indexOf("const plan = planPostGenerateCreateReviewSettleOrFailClosed(");
+    const effectPlanBlock = intake.slice(effectPlanIdx, effectPlanIdx + 900);
+    expect(effectPlanBlock).toContain("generateComplete: premiumGenerateCompleted");
+    expect(effectPlanBlock).not.toContain("authorityChurnActive && !ordinaryNamedTwoPartyReadyForSettle");
     const ensureIdx = intake.indexOf("let result = await ensurePremiumCompletion({");
     const ensureBlock = intake.slice(ensureIdx, ensureIdx + 3200);
     expect(ensureBlock).toContain("onPremiumFullDraftHttpComplete");
