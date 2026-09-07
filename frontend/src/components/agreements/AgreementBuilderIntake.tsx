@@ -26592,8 +26592,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     partyRows: intakePartyEditorRows,
   });
   // Failsafe / overlay timer: current dump only, and only coherent Northline-class
-  // named-2p. Two names in an over-specified / too_much dump must not wait for pfd.
-  // Leftover party-prep rows from a prior Northline walk must not make junk ready.
+  // named-2p. Over-specified / too_much named dumps must ask (failsafe dismiss),
+  // not wait for pfd. Leftover party-prep rows must not make junk look ready.
   const currentDumpIntakeOnlyNamedTwoPartyReady = isCoherentOrdinaryNamedTwoPartyForFailsafe({
     intakeText: intakeCombined || readOriginalUserIntakeRaw() || "",
   });

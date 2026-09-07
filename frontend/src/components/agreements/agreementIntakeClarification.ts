@@ -1104,7 +1104,8 @@ export function hasOrdinaryNamedTwoPartyCommercialCoherence(raw: string): boolea
 
 /**
  * Over-specified / too_much / complexity extras — not an ordinary named-2p dump.
- * Two legal names plus a clause dump must not inherit the Northline pfd wait.
+ * Two legal names plus a clause dump must not inherit the Northline pfd wait
+ * (land-the-plane: ask instead of hanging in a hallucinated draft loop).
  */
 export function looksOverSpecifiedOrComplexityIntake(raw: string): boolean {
   const text = String(raw || "");

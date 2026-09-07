@@ -504,6 +504,10 @@ export function shouldSkipPartyPrepForOrdinaryNamedTwoParty(input: {
  * named-2p (Northline-class: parties + scope + fee + term + law) that are not
  * complexity / too_much / over-specified.
  *
+ * Land-the-plane / universal Q&A: over-specified named dumps must failsafe-ask
+ * (dismiss Preparing) instead of hanging on pfd. This is not a guided OpenAI
+ * Q&A surface — only the wait-vs-ask classifier.
+ *
  * Intake-only — never pass leftover `partyRows`. Two names in an over-specified
  * dump must not inherit the Northline wait (#221/#223 classified those as ready).
  * Keep `shouldSkipPartyPrepForOrdinaryNamedTwoParty` + partyRows on settle.
