@@ -912,6 +912,7 @@ import {
   rememberPreAuthCheckoutAgreementId,
   readPreAuthCheckoutAgreementId,
   resolveExistingConversionAgreementId,
+  resolveContinueWithProCheckoutAgreementId,
   resolveAgreementIdAfterAuthRemount,
   shouldMintNewDraftForConversion,
 } from "../../auth/preAuthCheckoutAgreement";
@@ -5685,6 +5686,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       reviewAgreementId: reviewAgreementIdRef.current,
       resumeId: readCreateReviewAgreementResumeId(),
       preAuthId: readPreAuthCheckoutAgreementId(),
+      activeGenerationId: readSessionAgreementGenerationId(),
     });
     if (!shouldMintNewDraftForConversion(existingConversionId) && existingConversionId) {
       rememberPreAuthCheckoutAgreementId(existingConversionId);
@@ -5830,6 +5832,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       resumeId: readCreateReviewAgreementResumeId(),
       preAuthId: readPreAuthCheckoutAgreementId(),
       pendingReceiptCanonicalId: readOwnershipMigrationReceipt()?.canonicalAgreementId,
+      activeGenerationId: readSessionAgreementGenerationId(),
     });
     if (remount.agreementId && !remount.mustMint) {
       reviewAgreementIdRef.current = remount.agreementId;
@@ -7242,6 +7245,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       reviewAgreementId: reviewAgreementIdRef.current,
       resumeId: readCreateReviewAgreementResumeId(),
       preAuthId: readPreAuthCheckoutAgreementId(),
+      activeGenerationId: readSessionAgreementGenerationId(),
     });
     // Genesis / entitled create often has no prior draft id. Without minting one here, freeze can
     // succeed with a full Pro corpus and still land on Retry Pro draft (documentMounted=false)
@@ -9824,6 +9828,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             reviewAgreementId: reviewAgreementIdRef.current,
             resumeId: readCreateReviewAgreementResumeId(),
             preAuthId: readPreAuthCheckoutAgreementId(),
+            activeGenerationId: readSessionAgreementGenerationId(),
           }) || "";
           if (!agreementIdForSnapshot && snapshotPlain.trim().length >= 500) {
             try {
@@ -13034,7 +13039,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     const cadence = "monthly";
     emitPaidFunnelEvent("premium_checkout_opened", { extra: { checkout_surface: "create_flow_checkout" } });
     const checkoutAgreementId =
-      resolveExistingConversionAgreementId({
+      resolveContinueWithProCheckoutAgreementId({
         reviewAgreementId: reviewAgreementIdRef.current,
         resumeId: readCreateReviewAgreementResumeId(),
         preAuthId: readPreAuthCheckoutAgreementId(),
@@ -13208,7 +13213,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     });
     setAdvancedFullDraftPaywallOpen(false);
     const cadence = "annual";
-    const persistId = resolveExistingConversionAgreementId({
+    const persistId = resolveContinueWithProCheckoutAgreementId({
       reviewAgreementId: reviewAgreementIdRef.current,
       resumeId: readCreateReviewAgreementResumeId(),
       preAuthId: readPreAuthCheckoutAgreementId(),
@@ -13287,6 +13292,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         reviewAgreementId: reviewAgreementIdRef.current,
         resumeId: readCreateReviewAgreementResumeId(),
         preAuthId: readPreAuthCheckoutAgreementId(),
+        activeGenerationId: readSessionAgreementGenerationId(),
       });
       let id: string;
       let postDraft: AgreementDraft | null;
@@ -17839,7 +17845,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         hasReviewAgreementId: Boolean(
           reviewAgreementId?.trim() ||
             readCreateReviewAgreementResumeId() ||
-            readPreAuthCheckoutAgreementId(),
+            readPreAuthCheckoutAgreementId() ||
+            readSessionAgreementGenerationId(),
         ),
         skipFreeStarterCreateSubmit: skipFreeStarter,
         qualityRetryActive: proFullDraftQualityRetry,

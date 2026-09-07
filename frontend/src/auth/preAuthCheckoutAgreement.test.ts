@@ -9,6 +9,7 @@ import {
   readPreAuthCheckoutAgreementId,
   rememberPreAuthCheckoutAgreementId,
   resolveAgreementIdAfterAuthRemount,
+  resolveContinueWithProCheckoutAgreementId,
   resolveExistingConversionAgreementId,
   shouldMintNewDraftForConversion,
   syncPreAuthFromKnownConversionAgreementId,
@@ -110,6 +111,51 @@ describe("preAuthCheckoutAgreement", () => {
     });
     expect(remount.mustMint).toBe(false);
     expect(remount.agreementId).toBe(GUEST);
+  });
+
+  it("does not mint when only the active generation ID exists", () => {
+    const remount = resolveAgreementIdAfterAuthRemount({
+      reactRefId: null,
+      resumeId: null,
+      preAuthId: null,
+      activeGenerationId: ACTIVE_GEN,
+    });
+    expect(remount.mustMint).toBe(false);
+    expect(remount.agreementId).toBe(ACTIVE_GEN);
+    expect(shouldMintNewDraftForConversion(remount.agreementId)).toBe(false);
+  });
+
+  it("Continue-with-Pro hop uses active gen over a reminted resume when pre_auth is null", () => {
+    expect(
+      resolveContinueWithProCheckoutAgreementId({
+        reviewAgreementId: STALE,
+        resumeId: STALE,
+        preAuthId: null,
+        activeGenerationId: ACTIVE_GEN,
+      }),
+    ).toBe(ACTIVE_GEN);
+  });
+
+  it("Continue-with-Pro hop keeps pre_auth unchanged when it is already set", () => {
+    expect(
+      resolveContinueWithProCheckoutAgreementId({
+        reviewAgreementId: STALE,
+        resumeId: STALE,
+        preAuthId: GUEST,
+        activeGenerationId: ACTIVE_GEN,
+      }),
+    ).toBe(GUEST);
+  });
+
+  it("Continue-with-Pro hop has no persist when no AID exists", () => {
+    expect(
+      resolveContinueWithProCheckoutAgreementId({
+        reviewAgreementId: null,
+        resumeId: null,
+        preAuthId: null,
+        activeGenerationId: null,
+      }),
+    ).toBeNull();
   });
 
   it("mints exactly once on persist then remount then Google then checkout prep", () => {

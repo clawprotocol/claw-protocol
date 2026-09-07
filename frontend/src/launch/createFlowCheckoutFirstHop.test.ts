@@ -1,6 +1,7 @@
 /** @vitest-environment jsdom */
 import { beforeEach, describe, expect, it } from "vitest";
 import { CREATE_FLOW_CHECKOUT_AGREEMENT_ID } from "../components/agreements/agreementAdvancedDraftAccess";
+import { AGREEMENT_CREATE_REVIEW_RESUME_KEY } from "../components/agreements/agreementIntakeStorage";
 import {
   clearPreAuthCheckoutAgreementId,
   readPreAuthCheckoutAgreementId,
@@ -72,12 +73,44 @@ describe("placeholder __claw_create_checkout__ first hop + persist in session", 
     expect(readPreAuthCheckoutAgreementId()).toBeNull();
   });
 
-  it("pre_auth wins over a different active generation id", () => {
+  it("pre_auth already set is unchanged even when active gen differs", () => {
     rememberPreAuthCheckoutAgreementId(PERSIST_ID);
     sessionStorage.setItem(ACTIVE_AGREEMENT_GENERATION_STORAGE_KEY, ACTIVE_GEN_ID);
     const href = buildCreateFlowCheckoutHref({ cadence: "monthly" });
     expect(href).toContain(PERSIST_ID);
     expect(href).not.toContain(ACTIVE_GEN_ID);
     expect(readPreAuthCheckoutAgreementId()).toBe(PERSIST_ID);
+  });
+
+  it("active-only session hop UUID equals active and syncs pre_auth", () => {
+    sessionStorage.setItem(ACTIVE_AGREEMENT_GENERATION_STORAGE_KEY, ACTIVE_GEN_ID);
+    expect(readPreAuthCheckoutAgreementId()).toBeNull();
+    const href = buildCreateFlowCheckoutHref({ cadence: "monthly" });
+    expect(href).toBe(
+      `/app/checkout/${ACTIVE_GEN_ID}?tier=pro&cadence=monthly&returnTo=${encodeURIComponent("/app/create")}`,
+    );
+    expect(href).not.toContain("restore=starterReview");
+    expect(readPreAuthCheckoutAgreementId()).toBe(ACTIVE_GEN_ID);
+  });
+
+  it("reminted resume does not replace the active generation hop when pre_auth is null", () => {
+    sessionStorage.setItem(ACTIVE_AGREEMENT_GENERATION_STORAGE_KEY, ACTIVE_GEN_ID);
+    sessionStorage.setItem(AGREEMENT_CREATE_REVIEW_RESUME_KEY, PERSIST_ID);
+    expect(readPreAuthCheckoutAgreementId()).toBeNull();
+    const href = buildCreateFlowCheckoutHref({
+      cadence: "monthly",
+      persistAgreementId: PERSIST_ID,
+    });
+    expect(href).toBe(
+      `/app/checkout/${ACTIVE_GEN_ID}?tier=pro&cadence=monthly&returnTo=${encodeURIComponent("/app/create")}`,
+    );
+    expect(href).not.toContain(PERSIST_ID);
+    expect(href).not.toContain("restore=starterReview");
+    expect(readPreAuthCheckoutAgreementId()).toBe(ACTIVE_GEN_ID);
+  });
+
+  it("no AID keeps the unpaid restore=starterReview placeholder hop", () => {
+    expect(buildCreateFlowCheckoutHref({ cadence: "monthly" })).toBe(DIRTY_PLACEHOLDER_HOP);
+    expect(readPreAuthCheckoutAgreementId()).toBeNull();
   });
 });

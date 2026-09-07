@@ -46,20 +46,45 @@ export function shouldMintNewDraftForConversion(existingId: string | null | unde
 }
 
 /**
+ * Continue-with-Pro first hop identity.
+ * Pre-auth already claimed stays (first persist wins — do not remint).
+ * Else the active generation UUID is the hop / checkout object.
+ * A later resume/review remint must not replace that identity.
+ * No AID → caller keeps the unpaid restore=starterReview placeholder.
+ */
+export function resolveContinueWithProCheckoutAgreementId(args: {
+  reviewAgreementId?: string | null;
+  resumeId?: string | null;
+  preAuthId?: string | null;
+  activeGenerationId?: string | null;
+}): string | null {
+  if (isRealCheckoutAgreementId(args.preAuthId)) return args.preAuthId!.trim();
+  if (isRealCheckoutAgreementId(args.activeGenerationId)) return args.activeGenerationId!.trim();
+  return resolveExistingConversionAgreementId({
+    reviewAgreementId: args.reviewAgreementId,
+    resumeId: args.resumeId,
+    preAuthId: args.preAuthId,
+  });
+}
+
+/**
  * After React/auth remount, Google, route transition, or checkout prep:
- * reuse the canonical persist/resume ID. Never mint a replacement draft
- * when that ID exists — even if a pending remint receipt points elsewhere.
+ * reuse the canonical persist/resume / active-generation ID. Never mint a
+ * replacement draft when that ID exists — even if a pending remint receipt
+ * points elsewhere.
  */
 export function resolveAgreementIdAfterAuthRemount(args: {
   reactRefId?: string | null;
   resumeId?: string | null;
   preAuthId?: string | null;
   pendingReceiptCanonicalId?: string | null;
+  activeGenerationId?: string | null;
 }): { agreementId: string | null; mustMint: boolean } {
   const persist = resolveExistingConversionAgreementId({
     reviewAgreementId: args.reactRefId,
     resumeId: args.resumeId,
     preAuthId: args.preAuthId,
+    activeGenerationId: args.activeGenerationId,
   });
   if (persist) {
     return { agreementId: persist, mustMint: false };

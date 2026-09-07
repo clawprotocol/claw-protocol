@@ -27,10 +27,12 @@ describe("conversion draft remint guard", () => {
     expect(reuseIdx).toBeGreaterThan(fnIdx);
     expect(mintGuardIdx).toBeGreaterThan(fnIdx);
     expect(postIdx).toBeGreaterThan(mintGuardIdx);
+    const postBlock = intake.slice(fnIdx, postIdx);
+    expect(postBlock).toContain("activeGenerationId: readSessionAgreementGenerationId()");
     expect(shouldMintNewDraftForConversion("5e79c874-91bd-4d43-95f1-80a827e8b26a")).toBe(false);
   });
 
-  it("ensureReviewAgreementWorkspaceId cannot remint when persist/resume exists", () => {
+  it("ensureReviewAgreementWorkspaceId cannot remint when persist/resume/active exists", () => {
     const ensureIdx = intake.indexOf("const ensureReviewAgreementWorkspaceId = React.useCallback");
     expect(ensureIdx).toBeGreaterThan(-1);
     const remountIdx = intake.indexOf("resolveAgreementIdAfterAuthRemount", ensureIdx);
@@ -40,12 +42,14 @@ describe("conversion draft remint guard", () => {
     const ensureBlock = intake.slice(ensureIdx, postIdx);
     expect(ensureBlock).not.toContain("!isSupersededAgreementId(existingConversionId)");
     expect(ensureBlock).toContain("!remount.mustMint");
+    expect(ensureBlock).toContain("activeGenerationId: readSessionAgreementGenerationId()");
   });
 
-  it("auto-persist treats resume/pre-auth as an existing persist so it does not remint", () => {
+  it("auto-persist treats resume/pre-auth/active gen as an existing persist so it does not remint", () => {
     expect(intake).toContain("readPreAuthCheckoutAgreementId()");
     expect(intake).toContain("hasReviewAgreementId: Boolean(");
     expect(intake).toContain("readCreateReviewAgreementResumeId()");
+    expect(intake).toContain("readSessionAgreementGenerationId()");
   });
 
   it("Continue with Pro and checkout session body use the persist id, not the create sentinel", () => {
@@ -61,6 +65,7 @@ describe("conversion draft remint guard", () => {
   it("conversion checkout returnTo omits restore=starterReview when persist exists", () => {
     expect(intake).toContain("buildCreateFlowCheckoutHref({ cadence, persistAgreementId: checkoutAgreementId })");
     expect(intake).toContain("buildCreateFlowCheckoutHref({ cadence, persistAgreementId: persistId })");
+    expect(intake).toContain("resolveContinueWithProCheckoutAgreementId({");
     expect(intake).toContain("activeGenerationId: readSessionAgreementGenerationId()");
     expect(checkout).toContain("sanitizeConversionCheckoutDest");
     expect(checkout).toContain("buildConversionCheckoutReturnTo(persistAgreementId)");
