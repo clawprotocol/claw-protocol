@@ -367,7 +367,6 @@ export function collectFilledPartyNamesForLeftoverOrgBind(
   for (const m of ctx.matchAll(/^\s*Party\s*[1-9]\s*[:\-]\s+(.+)$/gim)) {
     push(m[1]);
   }
-  for (const n of extractAgreementEntityCandidates(ctx)) push(n);
   return out.slice(0, 4);
 }
 
@@ -499,6 +498,11 @@ export function repairKnownPartyPlaceholders(
   const candidates = context ? extractAgreementEntityCandidates(context) : [];
   const repairedSlots = new Set<number>();
   const collapsedExtraOrgSlots = new Set<number>();
+  for (const tok of leftoverBind.boundTokens) {
+    const num = tok.match(/([1-9]\d*)/);
+    const slot = num ? parseInt(num[1], 10) : 0;
+    if (Number.isFinite(slot) && slot > 0) repairedSlots.add(slot);
+  }
 
   const resolveSlot = (slot: number): string | null => {
     const idx = Math.max(0, slot - 1);

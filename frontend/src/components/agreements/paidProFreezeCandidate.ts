@@ -78,6 +78,7 @@ import {
   resolveDeclaredExplicitPartyCount,
   repairDraftPartiesFromIntakeAuthority,
 } from "./partySlotIdentityNormalize";
+import { labeledPartyLegalEntities } from "./labeledPartyBlockParse";
 import {
   readPremiumRecipientHandoff,
   resolveHandoffPartySlotCount,
@@ -876,6 +877,14 @@ export function commercialCorpusCarriesIntakeManifestParties(
   const text = String(corpus ?? "").trim();
   // Same commercial floor as signature-only placeholder demotion (BE N≥3 accept ≈8.5k).
   if (text.length < 8_500) return false;
+  const labeledPrepNames = labeledPartyLegalEntities(intakeText)
+    .map((n) => n.replace(/\s+/g, " ").trim())
+    .filter((n) => n.length >= 2 && !/^party\s*\d+$/i.test(n));
+  if (labeledPrepNames.length >= intakeManifestCount) {
+    return labeledPrepNames
+      .slice(0, intakeManifestCount)
+      .every((name) => corpusMentionsLegalName(text, name));
+  }
   const intakeNames = resolveAuthoritativeIntakePartyNames(intakeText).filter(
     isAuthoritativeLegalEntityName,
   );
