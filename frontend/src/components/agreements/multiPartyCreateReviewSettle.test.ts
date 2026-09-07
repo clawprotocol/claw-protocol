@@ -307,6 +307,12 @@ describe("multi-party create → review settle or fail-closed", () => {
     const rejectAfterVs01Idx = intake.indexOf("shouldFailClosedCreateAfterRejectOrGate(result)", vs01AttachIdx);
     expect(vs01AttachIdx).toBeGreaterThan(-1);
     expect(rejectAfterVs01Idx).toBeGreaterThan(vs01AttachIdx);
+    const generatingOverlayMount = intake.indexOf(
+      'premiumPostCheckoutPhase !== "premium_network_recoverable" && !dismissCreateOverlaysAfterRejectOrGate',
+    );
+    const waitPanelMount = intake.indexOf("<PremiumProGenerationWaitPanel");
+    expect(generatingOverlayMount).toBeGreaterThan(-1);
+    expect(waitPanelMount).toBeGreaterThan(generatingOverlayMount);
     expect(intake).toContain("overlayDeclaredPartiesOnDraft");
     expect(intake).toContain("CREATE_FLOW_GENERATE_FAILED_CLEAR_MESSAGE");
   });
@@ -358,6 +364,80 @@ describe("multi-party create → review settle or fail-closed", () => {
       }),
     ).toBe(true);
     expect(CREATE_FLOW_GENERATE_FAILED_CLEAR_MESSAGE).toMatch(/Try again/);
+  });
+
+  it("empty blockReason after generate is terminal and dismisses overlays", () => {
+    expect(isVs01CorpusGateNonTerminalBlockReason("")).toBe(false);
+    expect(isVs01CorpusGateNonTerminalBlockReason(null)).toBe(false);
+    expect(isVs01CorpusGateNonTerminalBlockReason(undefined)).toBe(false);
+    expect(
+      isVs01CorpusGateBlockedWithoutSelectedFinal({
+        allowed: false,
+        blockReason: "",
+        selectedFinal: false,
+      }),
+    ).toBe(true);
+    expect(
+      isVs01CorpusGateBlockedWithoutSelectedFinal({
+        allowed: false,
+        blockReason: undefined,
+        selectedFinal: false,
+      }),
+    ).toBe(true);
+    const emptyReasonBlocked = withCreatePipelineVs01CorpusGate(
+      {
+        winningPremiumBodyText: "",
+        premiumRenderSource: "premium_generation_retryable",
+      },
+      { allowed: false, blockReason: "", premiumInProgress: false, premiumComplete: true },
+    );
+    expect(emptyReasonBlocked.vs01CorpusGateBlocked).toBe(true);
+    expect(isCreatePipelineRejectOrGateDecision(emptyReasonBlocked)).toBe(true);
+    expect(shouldFailClosedCreateAfterRejectOrGate(emptyReasonBlocked)).toBe(true);
+    expect(
+      shouldDismissCreateOverlaysAfterRejectOrGate({
+        rejectOrGateBlocked: emptyReasonBlocked.vs01CorpusGateBlocked,
+        corpusCommerciallyUsable: false,
+      }),
+    ).toBe(true);
+  });
+
+  it("in-progress / deferred reasons stay non-terminal", () => {
+    expect(isVs01CorpusGateNonTerminalBlockReason("premium_corpus_in_progress")).toBe(true);
+    expect(isVs01CorpusGateNonTerminalBlockReason("deferred_until_prepare_signature_links")).toBe(
+      true,
+    );
+    expect(isVs01CorpusGateNonTerminalBlockReason("vs01_checks_deferred:premium_wait")).toBe(true);
+    expect(isVs01CorpusGateNonTerminalBlockReason("empty_corpus")).toBe(false);
+    expect(
+      isVs01CorpusGateBlockedWithoutSelectedFinal({
+        allowed: false,
+        blockReason: "premium_corpus_in_progress",
+        selectedFinal: false,
+      }),
+    ).toBe(false);
+    expect(
+      isVs01CorpusGateBlockedWithoutSelectedFinal({
+        allowed: false,
+        blockReason: "deferred_until_prepare_signature_links",
+        selectedFinal: false,
+      }),
+    ).toBe(false);
+    expect(
+      isVs01CorpusGateBlockedWithoutSelectedFinal({
+        allowed: false,
+        blockReason: "vs01_checks_deferred:premium_wait",
+        selectedFinal: false,
+      }),
+    ).toBe(false);
+    expect(
+      isVs01CorpusGateBlockedWithoutSelectedFinal({
+        allowed: false,
+        blockReason: "vs01_checks_deferred:paid_pro_first_review",
+        selectedFinal: false,
+        generateComplete: true,
+      }),
+    ).toBe(true);
   });
 
   it("corpus-gate-blocked + no selected-final dismisses overlays and fail-closes", () => {
@@ -420,6 +500,36 @@ describe("multi-party create → review settle or fail-closed", () => {
     expect(isCreatePipelineRejectOrGateDecision(usableButBlocked)).toBe(true);
     expect(shouldSettleProReviewAfterPremiumFullDraft(usableButBlocked)).toBe(true);
     expect(shouldFailClosedCreateAfterRejectOrGate(usableButBlocked)).toBe(false);
+    expect(
+      shouldDismissCreateOverlaysAfterRejectOrGate({
+        rejectOrGateBlocked: true,
+        corpusCommerciallyUsable: true,
+      }),
+    ).toBe(true);
+  });
+
+  it("usable corpus + empty-reason gate blocked settles Review (not infinite Generating)", () => {
+    const corpus = `${"Section 1. Parties.\n".repeat(80)}IN WITNESS WHEREOF the parties execute this Agreement.`;
+    const usableEmptyReason = withCreatePipelineVs01CorpusGate(
+      {
+        winningPremiumBodyText: corpus,
+        premiumRenderSource: "server_full_draft" as const,
+        staleIntakeOrGeneration: false,
+      },
+      { allowed: false, blockReason: "", premiumInProgress: false, premiumComplete: true },
+    );
+    expect(
+      isVs01CorpusGateBlockedWithoutSelectedFinal({
+        allowed: false,
+        blockReason: "",
+        selectedFinal: false,
+        generateComplete: true,
+      }),
+    ).toBe(true);
+    expect(usableEmptyReason.vs01CorpusGateBlocked).toBe(true);
+    expect(isCreatePipelineRejectOrGateDecision(usableEmptyReason)).toBe(true);
+    expect(shouldSettleProReviewAfterPremiumFullDraft(usableEmptyReason)).toBe(true);
+    expect(shouldFailClosedCreateAfterRejectOrGate(usableEmptyReason)).toBe(false);
     expect(
       shouldDismissCreateOverlaysAfterRejectOrGate({
         rejectOrGateBlocked: true,

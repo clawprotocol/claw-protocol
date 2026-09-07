@@ -121,37 +121,63 @@ export type CreatePipelineRejectOrGateInput = {
   vs01BlockReason?: string | null;
 };
 
-/** In-progress / deferred VS01 reasons must not fail-close a live generate. */
+/** Known in-progress / prepare-deferred reasons — empty is NOT one of these. */
 export function isVs01CorpusGateNonTerminalBlockReason(
   reason: string | null | undefined,
 ): boolean {
   const r = String(reason || "").trim();
-  if (!r) return true;
+  if (!r) return false;
   if (r === "premium_corpus_in_progress") return true;
   if (r === "deferred_until_prepare_signature_links") return true;
   return r.startsWith("vs01_checks_deferred");
 }
 
-/**
- * `vs01-corpus-gate-blocked` with no selected-final — the live Northline/too_much miss.
- * In-progress and prepare-deferred reasons stay non-terminal so generate can finish.
- */
-export function isVs01CorpusGateBlockedWithoutSelectedFinal(input: {
+export type Vs01CorpusGateBlockedInput = {
   allowed?: boolean | null;
   blockReason?: string | null;
   selectedFinal?: boolean | null;
-}): boolean {
+  /**
+   * After generate has completed / premium is not in-progress, empty (and
+   * first-review deferred) reasons are terminal for overlay dismiss.
+   */
+  generateComplete?: boolean | null;
+  premiumInProgress?: boolean | null;
+};
+
+/**
+ * `vs01-corpus-gate-blocked` with no selected-final — the live Northline/too_much miss.
+ * Only known in-progress / prepare-deferred reasons stay non-terminal.
+ * Empty `blockReason` is terminal once generate is done (the #207 hole:
+ * `if (!r) return true` kept live `vs01-corpus-gate-blocked` non-terminal).
+ */
+export function isVs01CorpusGateBlockedWithoutSelectedFinal(
+  input: Vs01CorpusGateBlockedInput,
+): boolean {
   if (input.selectedFinal || input.allowed) return false;
   const reason = String(input.blockReason || "").trim();
-  if (!reason || isVs01CorpusGateNonTerminalBlockReason(reason)) return false;
+  if (reason === "premium_corpus_in_progress") return false;
+  if (reason === "deferred_until_prepare_signature_links") return false;
+  const generateDone =
+    input.generateComplete === true || input.premiumInProgress === false;
+  if (reason.startsWith("vs01_checks_deferred") && !generateDone) return false;
   return true;
 }
 
 /** Attach a VS01 gate resolution onto the create reject/gate input (#206 overlay path). */
 export function withCreatePipelineVs01CorpusGate<T extends CreatePipelineRejectOrGateInput>(
   result: T,
-  gate: { allowed?: boolean | null; blockReason?: string | null },
-): T {
+  gate: {
+    allowed?: boolean | null;
+    blockReason?: string | null;
+    premiumInProgress?: boolean | null;
+    premiumComplete?: boolean | null;
+  },
+): T & {
+  vs01CorpusGateAllowed: boolean;
+  vs01SelectedFinal: boolean;
+  vs01BlockReason: string | null;
+  vs01CorpusGateBlocked: boolean;
+} {
   const allowed = Boolean(gate.allowed);
   const blockReason = gate.blockReason ?? null;
   return {
@@ -163,6 +189,8 @@ export function withCreatePipelineVs01CorpusGate<T extends CreatePipelineRejectO
       allowed,
       blockReason,
       selectedFinal: allowed,
+      premiumInProgress: gate.premiumInProgress,
+      generateComplete: gate.premiumComplete === true || gate.premiumInProgress === false,
     }),
   };
 }
