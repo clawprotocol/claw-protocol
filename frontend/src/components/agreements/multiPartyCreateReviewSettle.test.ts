@@ -12,6 +12,7 @@ import { GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN } from "./simpleProFinalReviewCorpus
 import {
   CREATE_FLOW_GENERATE_FAILED_CLEAR_MESSAGE,
   CREATE_FLOW_GENERATING_WITHOUT_PIPELINE_FAILSAFE_MS,
+  CREATE_FLOW_NAMED_TWO_PARTY_WITHOUT_PFD_FAILSAFE_MS,
   CREATE_FLOW_PIPELINE_NO_CORPUS_FAILSAFE_MS,
   CREATE_FLOW_PREPARATION_FAILSAFE_GENERIC_MESSAGE,
   hasFilledPartyPrepForDeclaredCreate,
@@ -364,6 +365,122 @@ describe("multi-party create → review settle or fail-closed", () => {
     ).toBe(false);
   });
 
+  it("absolute no-pfd bound fail-closes named-2p when pfd HTTP never completes; pfd complete keeps Northline wait", () => {
+    const namedTooMuch =
+      "Services agreement between Acme Robotics LLC and Cedar Peak Analytics Inc. Exclusive forever, 40% equity, every affiliate signs, revenue share, perpetual assignment, no termination.";
+    const northline =
+      "Services agreement between Northline Robotics LLC (Jordan Lee) and Cedar Peak Analytics Inc (Sam Okonkwo). Northline delivers robotics integration; Cedar Peak provides analytics. Fee $12,500. Term 6 months. Governing law Texas.";
+    expect(shouldSkipPartyPrepForOrdinaryNamedTwoParty({ intakeText: namedTooMuch })).toBe(true);
+    expect(shouldSkipPartyPrepForOrdinaryNamedTwoParty({ intakeText: northline })).toBe(true);
+
+    const overlayHang = {
+      premiumPostCheckoutProcessing: true,
+      preparingOrGenerating: true,
+      hasAuthoritativeReviewBody: false,
+      preparingStartedAtMs: 1_000,
+    } as const;
+
+    // (c) existing non-named 15s path still works.
+    expect(
+      shouldFailClosedPremiumProcessingWithoutPfd({
+        ...overlayHang,
+        ordinaryNamedTwoPartyReady: false,
+        pfdHttpCompleted: false,
+        nowMs: 1_000 + CREATE_FLOW_GENERATING_WITHOUT_PIPELINE_FAILSAFE_MS,
+      }),
+    ).toBe(true);
+    expect(
+      shouldFailClosedPremiumProcessingWithoutPfd({
+        ...overlayHang,
+        ordinaryNamedTwoPartyReady: false,
+        pfdHttpCompleted: false,
+        nowMs: 1_000 + CREATE_FLOW_GENERATING_WITHOUT_PIPELINE_FAILSAFE_MS - 1,
+      }),
+    ).toBe(false);
+
+    // Named-2p still waits through the 15s junk bound (Northline KEEP).
+    expect(
+      shouldFailClosedPremiumProcessingWithoutPfd({
+        ...overlayHang,
+        ordinaryNamedTwoPartyReady: true,
+        pfdHttpCompleted: false,
+        nowMs: 1_000 + CREATE_FLOW_GENERATING_WITHOUT_PIPELINE_FAILSAFE_MS,
+      }),
+    ).toBe(false);
+
+    // (a) named-2p + no pfd completed + elapsed ≥ absolute bound → failsafe + hard-dismiss.
+    const namedNoPfdFailsafe = shouldFailClosedPremiumProcessingWithoutPfd({
+      ...overlayHang,
+      ordinaryNamedTwoPartyReady: true,
+      pfdHttpCompleted: false,
+      nowMs: 1_000 + CREATE_FLOW_NAMED_TWO_PARTY_WITHOUT_PFD_FAILSAFE_MS,
+    });
+    expect(namedNoPfdFailsafe).toBe(true);
+    const namedNoPfdDismiss = planHardDismissPremiumProcessingOverlaysOnFailsafe({
+      failClosed: namedNoPfdFailsafe,
+    });
+    expect(namedNoPfdDismiss.dismissOverlays).toBe(true);
+    if (namedNoPfdDismiss.dismissOverlays) {
+      expect(namedNoPfdDismiss.premiumPostCheckoutPhase).toBe(null);
+      expect(namedNoPfdDismiss.displayPhase).toBe("intake");
+      expect(namedNoPfdDismiss.createFlowPhase).toBe("capturing_input");
+      expect(namedNoPfdDismiss.clearInFlightFlags).toBe(true);
+    }
+
+    // Just under the absolute bound: still wait.
+    expect(
+      shouldFailClosedPremiumProcessingWithoutPfd({
+        ...overlayHang,
+        ordinaryNamedTwoPartyReady: true,
+        pfdHttpCompleted: false,
+        nowMs: 1_000 + CREATE_FLOW_NAMED_TWO_PARTY_WITHOUT_PFD_FAILSAFE_MS - 1,
+      }),
+    ).toBe(false);
+
+    // (b) named-2p + pfdHttpCompleted → failsafe false even after the absolute bound.
+    expect(
+      shouldFailClosedPremiumProcessingWithoutPfd({
+        ...overlayHang,
+        ordinaryNamedTwoPartyReady: true,
+        pfdHttpCompleted: true,
+        nowMs: 1_000 + CREATE_FLOW_NAMED_TWO_PARTY_WITHOUT_PFD_FAILSAFE_MS,
+      }),
+    ).toBe(false);
+
+    const northlineCorpus = `${"Section 1. Parties.\n".repeat(80)}IN WITNESS WHEREOF the parties execute this Agreement.`;
+    const northlineSettle = planPostGenerateCreateReviewSettleOrFailClosed({
+      generateComplete: true,
+      vs01SelectedFinal: false,
+      winningPremiumBodyText: northlineCorpus,
+      premiumRenderSource: "server_full_draft",
+      ordinaryNamedTwoPartyReady: true,
+    });
+    expect(northlineSettle.settleReview).toBe(true);
+    expect(northlineSettle.failClosed).toBe(false);
+    expect(northlineSettle.corpus).toBe(northlineCorpus);
+    expect(
+      shouldFailClosedPremiumProcessingWithoutPfd({
+        ...overlayHang,
+        ordinaryNamedTwoPartyReady: true,
+        pfdHttpCompleted: true,
+        hasAuthoritativeReviewBody: northlineSettle.settleReview,
+        nowMs: 1_000 + CREATE_FLOW_NAMED_TWO_PARTY_WITHOUT_PFD_FAILSAFE_MS,
+      }),
+    ).toBe(false);
+
+    const settleSrc = readFileSync(join(__dirname, "multiPartyCreateReviewSettle.ts"), "utf8");
+    expect(settleSrc).toContain("CREATE_FLOW_NAMED_TWO_PARTY_WITHOUT_PFD_FAILSAFE_MS");
+    expect(settleSrc).not.toContain("isCoherentOrdinaryNamedTwoPartyForFailsafe");
+    expect(settleSrc).not.toContain("looksOverSpecifiedOrComplexityIntake");
+    expect(settleSrc).not.toContain("hasOrdinaryNamedTwoPartyCommercialCoherence");
+    const failsafeFn = settleSrc.slice(
+      settleSrc.indexOf("export function shouldFailClosedPremiumProcessingWithoutPfd"),
+      settleSrc.indexOf("export function shouldFailClosedPremiumProcessingWithoutPfd") + 1200,
+    );
+    expect(failsafeFn).toContain("if (input.pfdHttpCompleted) return false");
+    expect(failsafeFn).not.toMatch(/if \(input\.ordinaryNamedTwoPartyReady\) return false/);
+  });
+
   it("generic OOB + leftover partyRows failsafe hard-dismisses Preparing; Northline waits and settles", () => {
     const genericIncomplete =
       "exclusive forever revenue share lock every affiliate, no legal names, no scope, no payment workflow.";
@@ -627,9 +744,13 @@ describe("multi-party create → review settle or fail-closed", () => {
       intake.lastIndexOf("if (", failsafeTimerIdx),
       failsafeTimerIdx,
     );
-    expect(failsafeTimerBlock).toContain("currentDumpIntakeOnlyNamedTwoPartyReady");
+    expect(failsafeTimerBlock).toContain("premiumGenerateCompleted");
+    expect(failsafeTimerBlock).not.toContain("currentDumpIntakeOnlyNamedTwoPartyReady");
     expect(failsafeTimerBlock).not.toContain("ordinaryNamedTwoPartyReadyForSettle");
     expect(failsafeTimerBlock).not.toContain("postGenerateCreateReviewSettlePlan.settleReview");
+    expect(intake).not.toContain("isCoherentOrdinaryNamedTwoPartyForFailsafe");
+    expect(intake).not.toContain("looksOverSpecifiedOrComplexityIntake");
+    expect(intake).not.toContain("hasOrdinaryNamedTwoPartyCommercialCoherence");
     const failsafeDismissIdx = intake.indexOf(
       "const premiumProcessingFailsafeOverlayDismiss = planHardDismissPremiumProcessingOverlaysOnFailsafe({",
     );

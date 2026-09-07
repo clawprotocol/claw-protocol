@@ -26708,10 +26708,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   });
 
   useEffect(() => {
+    // Named-2p no longer skips the timer: over-specified dumps that name two
+    // companies still need the absolute no-pfd bound. Reset only when the
+    // overlay is gone, pfd HTTP completed, or VS01 selected a final corpus.
     if (
       !premiumProcessingOrPreparingOverlay ||
       premiumGenerateCompleted ||
-      currentDumpIntakeOnlyNamedTwoPartyReady ||
       vs01FinalCorpusGate.allowed
     ) {
       premiumProcessingFailsafeStartedAtRef.current = null;
@@ -26727,7 +26729,6 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   }, [
     premiumProcessingOrPreparingOverlay,
     premiumGenerateCompleted,
-    currentDumpIntakeOnlyNamedTwoPartyReady,
     vs01FinalCorpusGate.allowed,
   ]);
 

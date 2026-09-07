@@ -20,6 +20,13 @@ const SETTLE_PRO_REVIEW_MIN_CORPUS_LEN = 1500;
 export const CREATE_FLOW_PIPELINE_NO_CORPUS_FAILSAFE_MS = 120_000;
 /** Generating UI with no generate request — fail-closed well before the live 151s hang. */
 export const CREATE_FLOW_GENERATING_WITHOUT_PIPELINE_FAILSAFE_MS = 15_000;
+/**
+ * Absolute no-pfd HTTP bound for ordinary named-2p (Northline wait + too_much hang).
+ * Named-2p must keep waiting past the 15s junk bound so a live pfd POST can start.
+ * If premium-full-draft HTTP never completes, fail-close instead of infinite Preparing.
+ * HTTP-completion truth only — no #224 intake classifiers.
+ */
+export const CREATE_FLOW_NAMED_TWO_PARTY_WITHOUT_PFD_FAILSAFE_MS = 60_000;
 
 export function mergePartyPrepIntoCreateSubmitText(
   rawSubmit: string,
@@ -646,13 +653,20 @@ export function shouldFailClosedGeneratingWithoutPipeline(input: {
 /**
  * `premiumPostCheckoutPhase=processing` bypasses the starter generating-without-pipeline
  * / prep failsafe: generate-path-committed looks in-flight, and the overlay is the
- * premium modal rather than STARTER_PREPARING_OVERLAY_DISPLAY_PHASES. Apply the same
- * 15s bound while Preparing/Generating and pfd HTTP has not completed — non
- * ordinary-named-2p only. Northline must keep waiting for pfd.
+ * premium modal rather than STARTER_PREPARING_OVERLAY_DISPLAY_PHASES.
+ *
+ * Non-named dumps use the 15s bound. Ordinary named-2p (Northline) wait past that
+ * so a live pfd POST can start and settle. If pfd HTTP *never* completes, the
+ * absolute named-2p no-pfd bound still fail-closes — over-specified dumps that
+ * name two companies must not inherit an infinite Northline wait.
+ *
+ * `pfdHttpCompleted` always wins: once premium-full-draft HTTP finishes, return
+ * false and let settle paint Review (KEEP Northline). HTTP-completion truth
+ * only — no #224-class intake classifiers.
  *
  * Callers must pass *current-dump intake-only* named-2p readiness (no leftover
- * `partyRows`). Session party-prep rows from a prior Northline walk must not
- * suppress this failsafe for too_much / money_vibe.
+ * `partyRows`) so session party-prep rows from a prior Northline walk do not
+ * stretch unnamed junk to the named-2p bound.
  *
  * Not a planner churn rule. Do not fail-close on shorterThanAcceptedChurn alone
  * (#218). Do not latch generate-done from churn (#215).
@@ -667,17 +681,19 @@ export function shouldFailClosedPremiumProcessingWithoutPfd(input: {
   nowMs: number;
   timeoutMs?: number;
 }): boolean {
-  if (input.ordinaryNamedTwoPartyReady) return false;
   if (input.pfdHttpCompleted) return false;
   const overlayActive =
     Boolean(input.premiumPostCheckoutProcessing) || Boolean(input.preparingOrGenerating);
+  const boundMs = input.ordinaryNamedTwoPartyReady
+    ? (input.timeoutMs ?? CREATE_FLOW_NAMED_TWO_PARTY_WITHOUT_PFD_FAILSAFE_MS)
+    : (input.timeoutMs ?? CREATE_FLOW_GENERATING_WITHOUT_PIPELINE_FAILSAFE_MS);
   return shouldFailClosedGeneratingWithoutPipeline({
     isGenerating: overlayActive,
     generatePipelineInFlight: false,
     hasAuthoritativeReviewBody: Boolean(input.hasAuthoritativeReviewBody),
     preparingStartedAtMs: input.preparingStartedAtMs,
     nowMs: input.nowMs,
-    timeoutMs: input.timeoutMs,
+    timeoutMs: boundMs,
     ordinaryNamedTwoPartyReady: false,
   });
 }
