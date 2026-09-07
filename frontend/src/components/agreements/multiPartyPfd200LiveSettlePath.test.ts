@@ -86,12 +86,14 @@ function buildLiveMultipartyCorpus(names: readonly string[], targetLen = 15_381)
   return `${mid}${tail}`;
 }
 
-function leftoverTwoPartyDraft(): ParsedDraftShape {
+function leftoverTwoPartyDraft(
+  names: readonly string[] = LEFTOVER_TWO,
+): ParsedDraftShape {
   return {
     title: "Services Agreement",
     jurisdiction: "Texas",
     agreement_family: "services_agreement",
-    parties: LEFTOVER_TWO.map((name) => ({ name, role: "party" })),
+    parties: names.map((name) => ({ name, role: "party" })),
     purpose: "Services",
     payment_terms: "$24,000",
     duration: "12 months",
@@ -171,6 +173,133 @@ describe("live pipeline sites after pfd 200 + leftover 2-party overlay", () => {
         premiumGenerationRetryable: true,
       }),
     ).toBe(false);
+  });
+
+  it("N=4 leftover first-two prep + 4 live names: reject/finalize/freeze/consume settle", () => {
+    // Live leftover overlay: 2-slot editor still holds the first two of the four
+    // intake names. Reject/finalize use resolvePartiesForReviewRender (4 names),
+    // not leftover.parties. Consume sites often omit corpusPlain / manifest=4.
+    const leftoverFirstTwo = leftoverTwoPartyDraft([FOUR_NAMES[0], FOUR_NAMES[1]]);
+    const intake = mergePartyPrepIntoCreateSubmitText(FOUR_PARTY_DUMP, [...FOUR_NAMES]);
+    const corpus = buildLiveMultipartyCorpus(FOUR_NAMES);
+    const liveNames = liveFinalizePartyNames(leftoverFirstTwo, intake);
+
+    const acc = rejectPremiumBodyForProRender(corpus, {
+      intakeText: intake,
+      partyNames: liveNames,
+    });
+    expect(acc.ok, acc.reasons.join("|")).toBe(true);
+
+    const fin = finalizeUserVisibleAgreementPlainText(corpus, {
+      intakeRaw: intake,
+      partyNames: liveNames,
+      surface: "premium_completion_pipeline",
+    });
+    expect(fin.ok, fin.remainingFatal.join("|")).toBe(true);
+
+    const freeze = resolvePaidProFreezeCommitText({
+      text: corpus,
+      source: "server_full_draft",
+      draft: leftoverFirstTwo,
+      intakeText: intake,
+      surface: "premium_completion_pipeline_accept",
+    });
+    expect(freeze.ok, freeze.rejectReason ?? "").toBe(true);
+
+    const consumedEnforce = consumeAuthoritativeSignerCount(
+      "enforcePaidProSingleExecutionBlock",
+      {
+        intakeText: intake,
+        draftPartyNames: leftoverFirstTwo.parties.map((p) => p.name),
+        draftParties: leftoverFirstTwo.parties,
+        corpusPlain: corpus,
+      },
+      leftoverFirstTwo.parties.length,
+    );
+    expect(consumedEnforce).toBe(4);
+
+    const consumedSlots = consumeAuthoritativeSignerCount(
+      "guided_pre_review_signer_slots",
+      {
+        intakeText: intake,
+        draftPartyNames: leftoverFirstTwo.parties.map((p) => p.name),
+        rawPartyCount: 2,
+        userExpandedPartyCount: 2,
+      },
+      2,
+    );
+    expect(consumedSlots).toBe(4);
+    const consumedBlockers = consumeAuthoritativeSignerCount(
+      "guided_signer_setup_blockers",
+      {
+        intakeText: intake,
+        draftPartyNames: leftoverFirstTwo.parties.map((p) => p.name),
+        rawPartyCount: 2,
+        userExpandedPartyCount: 2,
+      },
+      2,
+    );
+    expect(consumedBlockers).toBe(4);
+
+    expect(
+      shouldSettleProReviewAfterPremiumFullDraft({
+        winningPremiumBodyText: freeze.text || corpus,
+        premiumRenderSource: "server_full_draft",
+      }),
+    ).toBe(true);
+  });
+
+  it("N=4 leftover 2-party prep overwrite still settles from the 200 corpus", () => {
+    // Leftover 2-party prep re-upserts only the first two names, wiping Party 3/4
+    // labels from intake. The 200 corpus still carries all four legal names.
+    const fourNamed = mergePartyPrepIntoCreateSubmitText(FOUR_PARTY_DUMP, [...FOUR_NAMES]);
+    const leftoverPrepIntake = mergePartyPrepIntoCreateSubmitText(fourNamed, [
+      FOUR_NAMES[0],
+      FOUR_NAMES[1],
+    ]);
+    const leftover = leftoverTwoPartyDraft([FOUR_NAMES[0], FOUR_NAMES[1]]);
+    const corpus = buildLiveMultipartyCorpus(FOUR_NAMES);
+
+    const acc = rejectPremiumBodyForProRender(corpus, {
+      intakeText: leftoverPrepIntake,
+      partyNames: liveFinalizePartyNames(leftover, leftoverPrepIntake),
+    });
+    expect(acc.ok, acc.reasons.join("|")).toBe(true);
+
+    const fin = finalizeUserVisibleAgreementPlainText(corpus, {
+      intakeRaw: leftoverPrepIntake,
+      partyNames: liveFinalizePartyNames(leftover, leftoverPrepIntake),
+      surface: "premium_completion_pipeline",
+    });
+    expect(fin.ok, fin.remainingFatal.join("|")).toBe(true);
+
+    const freeze = resolvePaidProFreezeCommitText({
+      text: corpus,
+      source: "server_full_draft",
+      draft: leftover,
+      intakeText: leftoverPrepIntake,
+      surface: "premium_completion_pipeline_accept",
+    });
+    expect(freeze.ok, freeze.rejectReason ?? "").toBe(true);
+
+    const consumed = consumeAuthoritativeSignerCount(
+      "enforcePaidProSingleExecutionBlock",
+      {
+        intakeText: leftoverPrepIntake,
+        draftPartyNames: leftover.parties.map((p) => p.name),
+        draftParties: leftover.parties,
+        corpusPlain: corpus,
+      },
+      leftover.parties.length,
+    );
+    expect(consumed).toBe(4);
+
+    expect(
+      shouldSettleProReviewAfterPremiumFullDraft({
+        winningPremiumBodyText: freeze.text || corpus,
+        premiumRenderSource: "server_full_draft",
+      }),
+    ).toBe(true);
   });
 
   it("N=4: live freeze + signer-count consume do not fire authority mismatch", () => {

@@ -616,7 +616,9 @@ export function demotePaidProSignatureOnlyFatals(
     return { decisions, demoted: false, demotedCount: 0 };
   }
   const fatals = decisions.filter((d) => d.fatal);
-  if (fatals.length === 0 || fatals.length > 24) {
+  // N=4 notice+signature field stubs are routinely 28 tokens; the old 24 cap
+  // demoted N=3 (~21) and false-rejected N=4 leftover-overlay 200 corpora.
+  if (fatals.length === 0 || fatals.length > 48) {
     return { decisions, demoted: false, demotedCount: 0 };
   }
   if (!fatals.every((d) => isSignatureOnlyFatalToken(d.token))) {

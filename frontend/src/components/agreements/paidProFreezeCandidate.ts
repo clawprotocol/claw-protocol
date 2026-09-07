@@ -123,7 +123,10 @@ import {
   relocatePostWitnessNumberedPaddingBeforeWitness,
   stripNumberedOperativeSectionsAfterExecution,
 } from "./paidProSupplementalProvisionsFillerGate";
-import { resolveAuthoritativeSignerCount } from "./signerCountAuthority";
+import {
+  extractAuthoritativeLegalNamesFromCommercialCorpus,
+  resolveAuthoritativeSignerCount,
+} from "./signerCountAuthority";
 
 function trim(s: string | null | undefined): string {
   return (s || "").trim();
@@ -848,8 +851,13 @@ export function commercialCorpusCarriesIntakeManifestParties(
   const intakeNames = resolveAuthoritativeIntakePartyNames(intakeText).filter(
     isAuthoritativeLegalEntityName,
   );
-  if (intakeNames.length < intakeManifestCount) return false;
-  return intakeNames.slice(0, intakeManifestCount).every((name) => corpusMentionsLegalName(text, name));
+  if (intakeNames.length >= intakeManifestCount) {
+    return intakeNames.slice(0, intakeManifestCount).every((name) => corpusMentionsLegalName(text, name));
+  }
+  // Leftover 2-party prep re-upserted only Party 1/2, wiping Party 3/4 labels from
+  // intake. The commercial 200 corpus still names the declared parties.
+  const corpusNames = extractAuthoritativeLegalNamesFromCommercialCorpus(text);
+  return corpusNames.length >= intakeManifestCount;
 }
 
 export function assertPaidProFreezeCandidateManifestCountAgreement(
