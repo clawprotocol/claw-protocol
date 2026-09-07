@@ -172,7 +172,7 @@ export function rejectPremiumBodyForProRender(
     }
     return {
       ok: false,
-      reasons: remainingFatal.slice(0, 12).map((x) => `placeholder:${x.slice(0, 48)}`),
+      reasons: [...new Set(remainingFatal)].slice(0, 12).map((x) => `placeholder:${x.slice(0, 48)}`),
     };
   }
   return { ok: true, reasons: [] };

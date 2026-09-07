@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   analyzeTemplatePlaceholderFragments,
   finalizeUserVisibleAgreementPlainText,
+  isPaidProCommercialFieldStubToken,
   shouldAcceptPaidProCommercialFieldStubsAfterPfd200,
 } from "./agreementTemplatePlaceholderSafety";
 import { rejectPremiumBodyForProRender } from "./premiumFullDraftClientAcceptance";
@@ -849,6 +850,185 @@ describe("live pipeline sites after pfd 200 + leftover 2-party overlay", () => {
       warnSpy.mock.calls.some((c) => String(c[0]).includes("[signer-count-authority]-mismatch")),
     ).toBe(false);
     expect(recovered.length).toBeGreaterThanOrEqual(2);
+  });
+
+  /**
+   * Live leftover 2-party overlay after #201: repeated [ORG_n] plus leftover role/alias
+   * slots finalize already rewrites ([CLIENT]/[PROVIDER]) and leftover [ENTITY NAME]
+   * (the counterpart of allowlisted [PARTY NAME]). Tip a2f1188e / #201 only allowlisted
+   * numbered leftover [ORG_n]/[PARTY_n] — these extra leftover identity tokens still
+   * fail-closed rejectPremiumBodyForProRender before finalize, so the harness never
+   * saw [placeholder-reject].
+   */
+  function buildLeftoverOverlayFourPartyRoleAliasCorpus(
+    names: readonly string[],
+    targetLen = 15_381,
+  ): string {
+    const leftoverOpening =
+      'This Agreement is entered into by and between [ORG_1] ("Client") and [ORG_2] ("Service Provider").';
+    const notices = names
+      .map((n) => `If to ${n}:\nEmail: [EMAIL]\nAddress: [ADDRESS]\n`)
+      .join("\n");
+    const signatures = names
+      .map(
+        (n) =>
+          `${n}\nBy: [SIGNATURE]\nName: [NAME]\nTitle: [TITLE]\nDate: [DATE]\nEmail: [EMAIL]\n`,
+      )
+      .join("\n");
+    const leftoverRoleNoise =
+      "[CLIENT] shall pay [PROVIDER]. [PARTY NAME] and [ENTITY NAME] remain leftover identity slots. ";
+    const head = [
+      "MULTI-PARTY SERVICES AGREEMENT",
+      "",
+      leftoverOpening,
+      leftoverRoleNoise,
+      "",
+      "1. SCOPE OF SERVICES",
+      "[ORG_1] shall perform the professional services described in this Agreement and [ORG_2] shall cooperate.",
+      "2. PAYMENT",
+      "[ORG_1] shall pay fees in monthly installments. [ORG_2] shall invoice in good faith.",
+      "3. TERM",
+      "The term begins on the Effective Date and continues for the stated duration unless earlier terminated.",
+      "4. CONFIDENTIALITY",
+      "[ORG_1] and [ORG_2] shall protect the others' confidential information using reasonable care.",
+      "5. INTELLECTUAL PROPERTY",
+      "Work product is assigned as set forth in this Agreement after payment of undisputed amounts.",
+      "6. INDEMNIFICATION",
+      "Each party shall indemnify the others against third-party claims arising from its material breach.",
+      "7. LIMITATION OF LIABILITY",
+      "No party is liable for indirect or consequential damages except for confidentiality or IP breach.",
+      "8. GOVERNING LAW",
+      "This Agreement is governed by the laws of the State of Texas, without regard to conflict-of-law rules.",
+      "9. NOTICES",
+      "Notices under this Agreement must be in writing.",
+      notices,
+      "10. GENERAL",
+      "This Agreement constitutes the entire agreement among the parties.",
+      "",
+    ].join("\n");
+    const leftoverClause =
+      "[ORG_1] shall perform commercial obligations and [ORG_2] shall keep accurate records, cooperate on deliverables, and accept milestones. ";
+    const tail = ["", "IN WITNESS WHEREOF, the parties have executed this Agreement.", "", signatures].join(
+      "\n",
+    );
+    const midBudget = Math.max(8_500, Math.min(targetLen, 17_800) - tail.length);
+    let mid = head;
+    while (mid.length < midBudget) mid += leftoverClause;
+    return `${mid.slice(0, midBudget)}${tail}`;
+  }
+
+  /** Tip a2f1188e leftover matcher — numbered identity only. */
+  function tipA2f1188eLeftoverIdentity(token: string): boolean {
+    const n = token
+      .replace(/^\[|\]$/g, "")
+      .replace(/_/g, " ")
+      .trim()
+      .replace(/[\s./-]+/g, "_")
+      .replace(/_+/g, "_")
+      .toUpperCase();
+    if (/^(?:ORG|PARTY|ENTITY|CLIENT|COMPANY|ORGANIZATION|PERSON)_\d+$/i.test(n)) return true;
+    if (/^(?:ORG|PARTY|ENTITY|CLIENT|COMPANY|ORGANIZATION|PERSON)\d+$/i.test(n)) return true;
+    return /^PARTY_[AB]\d*$/i.test(n);
+  }
+
+  it("N=4 leftover-overlay after #201: leftover [PROVIDER]/[ENTITY NAME] + repeated [ORG_n] settle", () => {
+    const leftover = leftoverTwoPartyDraft([LIVE_FOUR[0], LIVE_FOUR[1]]);
+    const fourNamed = mergePartyPrepIntoCreateSubmitText(FOUR_PARTY_DUMP, [...LIVE_FOUR]);
+    const leftoverPrepIntake = mergePartyPrepIntoCreateSubmitText(fourNamed, [
+      LIVE_FOUR[0],
+      LIVE_FOUR[1],
+    ]);
+    const corpus = buildLeftoverOverlayFourPartyRoleAliasCorpus(LIVE_FOUR);
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    expect(corpus).toMatch(/\[ORG_1\]/);
+    expect(corpus).toMatch(/\[PROVIDER\]/);
+    expect(corpus).toMatch(/\[ENTITY NAME\]/);
+    expect((corpus.match(/\[ORG_1\]/g) || []).length).toBeGreaterThan(8);
+
+    const leftoverFatals = analyzeTemplatePlaceholderFragments(corpus, {
+      intakeRaw: leftoverPrepIntake,
+      partyNames: liveRejectPartyNames(leftover),
+    }).filter((d) => d.fatal);
+    const uniqueFatals = [...new Set(leftoverFatals.map((d) => d.token))].sort();
+    // Exact unique remainingFatal from the same classifier rejectPremiumBodyForProRender uses.
+    expect(uniqueFatals).toEqual(
+      ["[CLIENT]", "[EMAIL]", "[ENTITY NAME]", "[ORG_1]", "[ORG_2]", "[PARTY NAME]", "[PROVIDER]"].sort(),
+    );
+    const tipA2f1188eUnacceptable = uniqueFatals.filter(
+      (t) => !isPaidProCommercialFieldStubToken(t) && !tipA2f1188eLeftoverIdentity(t),
+    );
+    // These are the tokens tip a2f1188e still fail-closed on after the 48-cap removal.
+    expect(tipA2f1188eUnacceptable).toEqual(["[ENTITY NAME]", "[PROVIDER]"]);
+    expect(extractAuthoritativeLegalNamesFromCommercialCorpus(corpus)).toEqual(
+      expect.arrayContaining([...LIVE_FOUR]),
+    );
+
+    const acc = rejectPremiumBodyForProRender(corpus, {
+      intakeText: leftoverPrepIntake,
+      partyNames: liveRejectPartyNames(leftover),
+    });
+    expect(acc.ok, acc.reasons.join("|")).toBe(true);
+
+    const fin = finalizeUserVisibleAgreementPlainText(corpus, {
+      intakeRaw: leftoverPrepIntake,
+      partyNames: liveRejectPartyNames(leftover),
+      surface: "premium_completion_pipeline",
+    });
+    expect(fin.ok, fin.remainingFatal.join("|")).toBe(true);
+
+    const freeze = resolvePaidProFreezeCommitText({
+      text: corpus,
+      source: "server_full_draft",
+      draft: leftover,
+      intakeText: leftoverPrepIntake,
+      surface: "premium_completion_pipeline_accept",
+    });
+    expect(freeze.ok, freeze.rejectReason ?? "").toBe(true);
+    for (const name of LIVE_FOUR) {
+      expect(freeze.text, `freeze dropped ${name}`).toContain(name);
+    }
+
+    expect(
+      shouldAcceptPaidProCommercialFieldStubsAfterPfd200({
+        text: corpus,
+        intakeRaw: leftoverPrepIntake,
+      }),
+    ).toBe(true);
+
+    const overlay = resolvePartiesForReviewRender({
+      draft: leftover,
+      intakeText: leftoverPrepIntake,
+      corpusPlain: freeze.text || corpus,
+    }).map((p) => p.partyLegalName.trim());
+    expect(overlay).toHaveLength(4);
+    for (const name of LIVE_FOUR) {
+      expect(overlay, `overlay dropped ${name}`).toContain(name);
+    }
+
+    expect(
+      shouldSettleProReviewAfterPremiumFullDraft({
+        winningPremiumBodyText: freeze.text || corpus,
+        premiumRenderSource: "server_full_draft",
+      }),
+    ).toBe(true);
+    expect(
+      shouldTreatEntitledRewritePipelineResultAsGenerationFailure({
+        premiumDraft: leftover,
+        premiumParties: [],
+        recipientCandidates: [],
+        winningPremiumBodyText: freeze.text || corpus,
+        premiumRenderSource: "server_full_draft",
+        premiumReview: null,
+        premiumFinalizeAudit: null,
+        premiumReviewRoute: null,
+        staleIntakeOrGeneration: false,
+        premiumGenerationRetryable: true,
+      }),
+    ).toBe(false);
+    expect(warnSpy.mock.calls.some((c) => String(c[0]).includes("[placeholder-reject]"))).toBe(
+      false,
+    );
   });
 
   it("N=4 leftover-overlay after #200: repeated leftover [ORG_n] + 4p field stubs settle", () => {
