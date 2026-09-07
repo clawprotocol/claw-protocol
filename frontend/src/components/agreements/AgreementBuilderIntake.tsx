@@ -26536,10 +26536,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const authorityChurnActive = Boolean(
     hasPremiumAuthorityShorterThanAcceptedChurn() && premiumAuthorityChurnTick >= 0,
   );
-  // Current dump only — leftover party-prep rows from a prior Northline walk
-  // must not inherit the #213 wait-before-pfd keep onto too_much / money_vibe.
   const ordinaryNamedTwoPartyReadyForSettle = shouldSkipPartyPrepForOrdinaryNamedTwoParty({
     intakeText: intakeCombined || readOriginalUserIntakeRaw() || "",
+    partyRows: intakePartyEditorRows,
   });
   const vs01CorpusGateBlockedWithoutSelectedFinal = isVs01CorpusGateBlockedWithoutSelectedFinal({
     allowed: vs01FinalCorpusGate.allowed,
@@ -26553,8 +26552,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       !vs01FinalCorpusGate.premiumInProgress,
   });
   const postGenerateCreateReviewSettlePlan = planPostGenerateCreateReviewSettleOrFailClosed({
-    generateComplete:
-      premiumGenerateCompleted || (authorityChurnActive && !ordinaryNamedTwoPartyReadyForSettle),
+    generateComplete: premiumGenerateCompleted,
     vs01GateBlockedWithoutSelectedFinal: vs01CorpusGateBlockedWithoutSelectedFinal,
     vs01SelectedFinal: vs01FinalCorpusGate.allowed,
     shorterThanAcceptedChurn: authorityChurnActive,
@@ -26641,8 +26639,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     if (!overlayActive && displayPhase === "review") return;
     if (!overlayActive && displayPhase === "intake" && hardError) return;
     const plan = planPostGenerateCreateReviewSettleOrFailClosed({
-      generateComplete:
-        premiumGenerateCompleted || (authorityChurnActive && !ordinaryNamedTwoPartyReadyForSettle),
+      generateComplete: premiumGenerateCompleted,
       vs01GateBlockedWithoutSelectedFinal: vs01CorpusGateBlockedWithoutSelectedFinal,
       vs01SelectedFinal: vs01FinalCorpusGate.allowed,
       shorterThanAcceptedChurn: hasPremiumAuthorityShorterThanAcceptedChurn(),
@@ -26713,11 +26710,6 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     setCreateFlowPhase(terminal.createFlowPhase);
     setDisplayPhase(terminal.displayPhase);
     setCreateUiStage(terminal.createUiStage);
-    setJourneyActionFeedback(
-      feedbackFailed("create_agreement", FAILED_CREATE_RECOVERY_TITLE, feedbackAfterModelFailure(), {
-        remedyLabel: "Retry",
-      }),
-    );
     setLoading(false);
     if (terminal.clearLocalDraft) {
       setDraft(null);

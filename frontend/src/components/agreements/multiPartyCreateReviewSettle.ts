@@ -405,9 +405,6 @@ export type PostGenerateCreateReviewSettlePlan = PostGenerateAuthorityChurnOverl
  * shorter-than-accepted churn as generate-done and fail-closed Northline before
  * premium-full-draft returned (live OPTIONS-only / couldn't-create).
  * After pfd HTTP completes, always settle (usable corpus) or fail-close (empty).
- * #214 only latched generateComplete on pfd HTTP finish — too_much / money_vibe
- * OPTIONS-only hangs never fired that latch. Non-named-2p empty + churn still
- * fail-closes when pfd HTTP never completes.
  */
 export function planPostGenerateCreateReviewSettleOrFailClosed(input: {
   generateComplete?: boolean;
@@ -472,14 +469,8 @@ export function planPostGenerateCreateReviewSettleOrFailClosed(input: {
   if (generateComplete) {
     return { dismissOverlays: true, settleReview: false, failClosed: true, corpus: "" };
   }
-  // #214 latched generateComplete only when pfd HTTP finished. Live too_much /
-  // money_vibe never get a pfd POST (OPTIONS-only hang), so that latch never
-  // fires. Leftover vs01 `premium_corpus_in_progress` also stays non-terminal
-  // until generateComplete — do not require it here.
-  // Junk / over-specified dumps: shorter-than-accepted + empty winning body
-  // fail-closes even if premium-full-draft HTTP never completes.
   const generateDone = generateComplete || Boolean(input.shorterThanAcceptedChurn);
-  if (generateDone) {
+  if (generateDone && input.vs01GateBlockedWithoutSelectedFinal) {
     return { dismissOverlays: true, settleReview: false, failClosed: true, corpus: "" };
   }
   return { ...churn, corpus: "" };
