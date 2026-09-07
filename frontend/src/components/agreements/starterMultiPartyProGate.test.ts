@@ -13,6 +13,7 @@ import {
   isThreePlusLegalPartyGate,
   resolveStarterMultiPartyProGatePresentation,
   shouldFailSafeEmptyAuthorityPreparation,
+  shouldResolveStarterHomeTransitionToReviewReady,
 } from "./starterMultiPartyProGate";
 import { TEST371_QUADRIPARTITE_LABELED_PARTIES_INTAKE } from "./paidProTest371QuadrpartiteFixtures";
 
@@ -249,8 +250,20 @@ describe("explicit unnamed three-party Pro gate", () => {
         hasAuthoritativeReviewBody: false,
         preparingStartedAtMs: 1_000,
         nowMs: 1_000 + 60_000,
+        generatePipelineInFlight: true,
       }),
     ).toBe(false);
+    expect(
+      shouldFailSafeEmptyAuthorityPreparation({
+        displayPhase: "generating_draft",
+        isGenerating: true,
+        hasDraft: true,
+        hasAuthoritativeReviewBody: false,
+        preparingStartedAtMs: 1_000,
+        nowMs: 1_000 + 15_000,
+        generatePipelineInFlight: false,
+      }),
+    ).toBe(true);
     expect(
       shouldFailSafeEmptyAuthorityPreparation({
         displayPhase: "preparing_review",
@@ -264,6 +277,27 @@ describe("explicit unnamed three-party Pro gate", () => {
     expect(CREATE_FLOW_PREPARATION_FAILSAFE_MESSAGE).toBe(
       "We couldn't prepare the review. Add the party names and try again.",
     );
+  });
+
+  it("home prepare overlay drops for party-prep clarification and fail-closed", () => {
+    expect(
+      shouldResolveStarterHomeTransitionToReviewReady({
+        draft: null,
+        createUiStage: "INPUT",
+        createFlowPhase: "capturing_input",
+        isGenerating: false,
+        intakeClarification: { kind: "missing_named_parties" },
+      }),
+    ).toBe(true);
+    expect(
+      shouldResolveStarterHomeTransitionToReviewReady({
+        draft: null,
+        createUiStage: "INPUT",
+        createFlowPhase: "capturing_input",
+        isGenerating: false,
+        emptyAuthorityPrepFailSafe: true,
+      }),
+    ).toBe(true);
   });
 
   it("create intake applies the explicit multi-party Pro gate before capability or generation", () => {

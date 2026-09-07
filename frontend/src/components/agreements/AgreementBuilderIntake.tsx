@@ -132,6 +132,11 @@ import {
   STARTER_PREPARING_OVERLAY_DISPLAY_PHASES,
   type StarterComplexityGateAssessment,
 } from "./starterMultiPartyProGate";
+import {
+  mergePartyPrepIntoCreateSubmitText,
+  resolvePartyPrepSlotCount,
+  shouldSkipEntitledRewriteForMatchingAcceptedSnapshot,
+} from "./multiPartyCreateReviewSettle";
 import { StarterMultiPartyProGatePanel } from "./StarterMultiPartyProGatePanel";
 import { AgreementIntakeClarificationPanel } from "./AgreementIntakeClarificationPanel";
 import type { AgreementIntakeClarification } from "./agreementIntakeClarification";
@@ -3787,6 +3792,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const fullDraftUpgradeBannerTimerRef = useRef(0);
   const optionalFullUpgradeInFlightRef = useRef(false);
   const entitledPremiumRewriteInFlightRef = useRef(false);
+  /** True only after entitled rewrite / model pass has invoked generate HTTP. */
+  const premiumGenerateHttpStartedRef = useRef(false);
   const paidCreateFlowAutoRewriteGenRef = useRef<string | null>(null);
   const premiumCheckoutRunGenRef = useRef(0);
   /** True while ~30s soft progress copy is shown (does not fail open or touch recovery flags). */
@@ -3797,6 +3804,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const premiumAuthoritativeRequestInFlightRef = useRef(false);
   const setPremiumAuthoritativeRequestInFlight = useCallback((inFlight: boolean) => {
     premiumAuthoritativeRequestInFlightRef.current = inFlight;
+    premiumGenerateHttpStartedRef.current = inFlight;
     setPremiumAuthoritativeRequestInFlightUi(inFlight);
   }, []);
   /** User hit escape on the post-checkout wait — do not apply a late `ensurePremiumCompletion` result. */
@@ -5177,7 +5185,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   useEffect(() => {
     if (intakePartyEditorTouchedRef.current) return;
     const extracted = parseIntakeToStructuredAgreement(intakeGuidanceCombined.trim()).parties;
-    setIntakePartyEditorRows(normalizeIntakePartyEditorRows(extracted));
+    const slotCount = resolvePartyPrepSlotCount(intakeGuidanceCombined, extracted.length);
+    setIntakePartyEditorRows(normalizeIntakePartyEditorRows(extracted, slotCount));
   }, [intakeGuidanceCombined]);
 
   useEffect(() => {
@@ -7144,12 +7153,22 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     // Reload race: in-memory SoT is empty until hydrate; never re-generate over an accepted snap.
     const acceptedSnap = readPremiumCompletionSnapshot();
     const validatedPaint = resolveValidatedPaidProReviewCorpus();
-    if (
-      hasPaidProSourceOfTruth() ||
-      hasAcceptedPaidCreateFlowFreezeLatch() ||
-      validatedPaint.len >= 500 ||
-      shouldBlockEntitledRewriteForAcceptedPaidProSnapshot(acceptedSnap)
-    ) {
+    const rewriteIncomingIntake = (
+      launch?.rawIntake ||
+      readOriginalUserIntakeRaw() ||
+      intakeCombinedRef.current ||
+      ""
+    ).trim();
+    const skipForMatchingAccepted = shouldSkipEntitledRewriteForMatchingAcceptedSnapshot({
+      incomingIntake: rewriteIncomingIntake,
+      snapshotIntakeFingerprint: acceptedSnap?.intakeTextFingerprint,
+      hasMatchingAcceptedAuthority:
+        hasPaidProSourceOfTruth() ||
+        hasAcceptedPaidCreateFlowFreezeLatch() ||
+        validatedPaint.len >= 500 ||
+        shouldBlockEntitledRewriteForAcceptedPaidProSnapshot(acceptedSnap),
+    });
+    if (skipForMatchingAccepted) {
       // Never hydrate review-ready state from local storage alone — layout reload
       // path must GET /canonical-review-snapshot first.
       logPremiumDuplicateRunBlocked({
@@ -7161,6 +7180,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           null,
       });
       return;
+    }
+    if (
+      rewriteIncomingIntake &&
+      (hasPaidProSourceOfTruth() ||
+        hasAcceptedPaidCreateFlowFreezeLatch() ||
+        shouldBlockEntitledRewriteForAcceptedPaidProSnapshot(acceptedSnap))
+    ) {
+      // New intake after a prior Pro review — do not reuse the old corpus; fire generate.
+      clearPriorPaidAuthorityForFreshCreateSubmit();
     }
     markCurrentSessionProIntent();
     markCurrentSessionProEntitlementComplete({ source: "entitled_rewrite" });
@@ -7281,6 +7309,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       raw,
     );
     try {
+      premiumGenerateHttpStartedRef.current = true;
+      setPremiumAuthoritativeRequestInFlight(true);
       let result = await ensurePremiumCompletion({
         intakeText: mergedIntake,
         originalUserIntakeRawForMerge: originalMergeHint,
@@ -8078,6 +8108,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       setLoading(false);
     } finally {
       entitledPremiumRewriteInFlightRef.current = false;
+      setPremiumAuthoritativeRequestInFlight(false);
       // Never leave the generate wait modal armed after entitled rewrite exits.
       setPremiumPostCheckoutPhase((prev) =>
         prev === "processing" || prev === "network_retry" || prev === "generation_retry"
@@ -8094,6 +8125,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     bumpPremiumSurfaceGateTick,
     enterCanonicalPaidProReviewFlow,
     ensureReviewAgreementWorkspaceId,
+    setPremiumAuthoritativeRequestInFlight,
   ]);
 
   useLayoutEffect(() => {
@@ -12460,7 +12492,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       homeAutoGenerateConsumedRef.current = true;
       return;
     }
-    const text = (initialIntakeText ?? intakeStepBufferRef.current ?? "").trim();
+    const text = mergePartyPrepIntoCreateSubmitText(
+      (initialIntakeText ?? intakeStepBufferRef.current ?? "").trim(),
+      intakePartyEditorRows,
+    );
     // Explicit 3+ party declarations must hit the Pro gate before capability clarification.
     if (commitStarterMultiPartyProGate(text)) {
       homeAutoGenerateConsumedRef.current = true;
@@ -12508,6 +12543,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     createFlowPhase,
     beginStarterDraftGeneration,
     commitStarterMultiPartyProGate,
+    intakePartyEditorRows,
   ]);
 
   const runPersistedRefineFromStepBuffer = React.useCallback(
@@ -14348,10 +14384,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           message: string;
           clarification?: AgreementIntakeClarification;
         } => {
-      if (commitStarterMultiPartyProGate(rawIntake)) {
+      const mergedIntake = mergePartyPrepIntoCreateSubmitText(rawIntake, intakePartyEditorRows);
+      if (commitStarterMultiPartyProGate(mergedIntake)) {
         return { ok: false, blocked: false, message: "" };
       }
-      const decision = evaluateIntentionalCreateDraftSubmit(rawIntake);
+      const decision = evaluateIntentionalCreateDraftSubmit(mergedIntake);
       if (decision.action === "noop") return { ok: false, blocked: false, message: "" };
       wipeInMemoryPaidCreatePaintBuffers();
       if (decision.action === "block_capability") {
@@ -14367,7 +14404,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       setIntakeClarification(null);
       return { ok: true, text: decision.text };
     },
-    [wipeInMemoryPaidCreatePaintBuffers, commitStarterMultiPartyProGate],
+    [wipeInMemoryPaidCreatePaintBuffers, commitStarterMultiPartyProGate, intakePartyEditorRows],
   );
 
   /** Fresh `/app/create`: textarea at click time wins; clears stale starter baseline before parse. */
@@ -14378,18 +14415,19 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       intakeBaselineCommitted,
       freshSimpleCreateUx,
     });
-    if (resolved.text.trim().length >= 6) {
+    const merged = mergePartyPrepIntoCreateSubmitText(resolved.text, intakePartyEditorRows);
+    if (merged.trim().length >= 6) {
       wipeInMemoryPaidCreatePaintBuffers();
     }
-    if (freshSimpleCreateUx && resolved.text.length > 0) {
-      logStarterCreateSubmit(resolved.text, resolved.source);
+    if (freshSimpleCreateUx && merged.length > 0) {
+      logStarterCreateSubmit(merged, resolved.source);
       setIntakeBaselineCommitted("");
-      setIntakeStepBuffer(resolved.text);
-      setDebouncedStepBuffer(resolved.text);
+      setIntakeStepBuffer(merged);
+      setDebouncedStepBuffer(merged);
       setBaselineActionAck(null);
     }
-    return resolved.text;
-  }, [freshSimpleCreateUx, intakeBaselineCommitted, wipeInMemoryPaidCreatePaintBuffers]);
+    return merged;
+  }, [freshSimpleCreateUx, intakeBaselineCommitted, wipeInMemoryPaidCreatePaintBuffers, intakePartyEditorRows]);
 
   const startFreshStarterDictation = React.useCallback(() => {
     setDictationStartNonce((n) => n + 1);
@@ -14495,7 +14533,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     const overlayActive = (STARTER_PREPARING_OVERLAY_DISPLAY_PHASES as readonly string[]).includes(
       displayPhase,
     );
-    if (!overlayActive || isGenerating || draft) {
+    const generatePipelineInFlight =
+      premiumAuthoritativeRequestInFlightUi || premiumGenerateHttpStartedRef.current;
+    // Keep the timer running while generating if generate HTTP never started (N≥3 hang).
+    if (!overlayActive || (draft && !isGenerating && !generatePipelineInFlight)) {
       prepOverlayStartedAtRef.current = null;
       return;
     }
@@ -14508,6 +14549,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         String(agreementDocumentTextRef.current || "").trim() ||
           String(hydratedPremiumBodyRef.current || "").trim(),
       );
+      const pipelineInFlight =
+        premiumAuthoritativeRequestInFlightRef.current || premiumGenerateHttpStartedRef.current;
       if (
         !shouldFailSafeEmptyAuthorityPreparation({
           displayPhase,
@@ -14516,6 +14559,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           hasAuthoritativeReviewBody: hasAuthoritativeBody,
           preparingStartedAtMs: startedAt,
           nowMs: Date.now(),
+          generatePipelineInFlight: pipelineInFlight,
         })
       ) {
         return;
@@ -14524,9 +14568,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       setDisplayPhase("intake");
       setLoading(false);
       setCreateFlowPhase("capturing_input");
+      setCreateUiStage(CreateUiStage.INPUT);
+      setPremiumPostCheckoutPhase(null);
+      setPremiumPipelineUserMessage(null);
     }, 1000);
     return () => window.clearInterval(id);
-  }, [createFlowPhase, displayPhase, isGenerating, draft]);
+  }, [createFlowPhase, displayPhase, isGenerating, draft, premiumAuthoritativeRequestInFlightUi]);
 
   useEffect(() => {
     if (!homeHeroAutoGenerate || !onHomeGuidedTransitionPhase) return;
@@ -14537,6 +14584,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         createFlowPhase,
         isGenerating,
         starterMultiPartyProGate,
+        intakeClarification,
+        emptyAuthorityPrepFailSafe,
+        homeAutoGenerateConsumed: homeAutoGenerateConsumedRef.current,
       })
     ) {
       onHomeGuidedTransitionPhase("review_ready");
@@ -14553,6 +14603,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     createFlowPhase,
     isGenerating,
     starterMultiPartyProGate,
+    intakeClarification,
+    emptyAuthorityPrepFailSafe,
   ]);
 
   /**
@@ -38282,9 +38334,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
               className="rounded-lg bg-emerald-500 px-4 py-2 text-sm font-semibold text-emerald-950"
               onClick={() => {
                 setEmptyAuthorityPrepFailSafe(false);
-                const raw = intakeCombined.trim();
+                const raw = mergePartyPrepIntoCreateSubmitText(
+                  intakeCombined.trim(),
+                  intakePartyEditorRows,
+                );
                 if (commitStarterMultiPartyProGate(raw)) return;
-                window.requestAnimationFrame(() => textareaRef.current?.focus());
+                void runProductionLocalDraftParse({
+                  rawOverride: raw,
+                  handoffSource: "prep_failsafe_retry",
+                });
               }}
             >
               {CREATE_FLOW_PREPARATION_FAILSAFE_RETRY_LABEL}

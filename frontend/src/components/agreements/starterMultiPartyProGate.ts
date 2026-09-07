@@ -2,6 +2,10 @@
  * Free Starter supports lightweight 1–2 party drafts only.
  * Complex intakes route to Pro before parseDraft, snapshots, or signer metadata.
  */
+import {
+  CREATE_FLOW_GENERATING_WITHOUT_PIPELINE_FAILSAFE_MS,
+  CREATE_FLOW_PIPELINE_NO_CORPUS_FAILSAFE_MS,
+} from "./multiPartyCreateReviewSettle";
 import { runIntakeDefaultsAndRoles } from "./intakeFamilyShell";
 import { defaultIntakePartyRoleLabels } from "./partyRoleIntake";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
@@ -480,7 +484,19 @@ export function shouldResolveStarterHomeTransitionToReviewReady(input: {
   createFlowPhase: string;
   isGenerating: boolean;
   starterMultiPartyProGate?: unknown;
+  intakeClarification?: unknown;
+  emptyAuthorityPrepFailSafe?: boolean;
+  homeAutoGenerateConsumed?: boolean;
 }): boolean {
+  if (input.emptyAuthorityPrepFailSafe) return true;
+  if (input.intakeClarification && !input.isGenerating) return true;
+  if (
+    input.homeAutoGenerateConsumed &&
+    !input.isGenerating &&
+    input.createFlowPhase === "capturing_input"
+  ) {
+    return true;
+  }
   if (
     input.createFlowPhase === "multi_party_pro_required" &&
     Boolean(input.starterMultiPartyProGate)
@@ -512,13 +528,30 @@ export function shouldFailSafeEmptyAuthorityPreparation(input: {
   preparingStartedAtMs: number | null;
   nowMs: number;
   timeoutMs?: number;
+  /** True only after premium-full-draft / generate HTTP has started. */
+  generatePipelineInFlight?: boolean;
+  generatingWithoutPipelineTimeoutMs?: number;
+  pipelineNoCorpusTimeoutMs?: number;
 }): boolean {
-  if (input.hasDraft || input.hasAuthoritativeReviewBody || input.isGenerating) return false;
+  if (input.hasAuthoritativeReviewBody) return false;
   if (input.preparingStartedAtMs == null) return false;
   if (!(STARTER_PREPARING_OVERLAY_DISPLAY_PHASES as readonly string[]).includes(input.displayPhase)) {
     return false;
   }
-  return input.nowMs - input.preparingStartedAtMs >= (input.timeoutMs ?? CREATE_FLOW_PREPARATION_FAILSAFE_MS);
+  const elapsed = input.nowMs - input.preparingStartedAtMs;
+  // Local parse may set a thin draft while generate never fires — still fail-closed.
+  if (input.isGenerating && !input.generatePipelineInFlight) {
+    return elapsed >= (
+      input.generatingWithoutPipelineTimeoutMs ??
+      input.timeoutMs ??
+      CREATE_FLOW_GENERATING_WITHOUT_PIPELINE_FAILSAFE_MS
+    );
+  }
+  if (input.generatePipelineInFlight) {
+    return elapsed >= (input.pipelineNoCorpusTimeoutMs ?? CREATE_FLOW_PIPELINE_NO_CORPUS_FAILSAFE_MS);
+  }
+  if (input.hasDraft) return false;
+  return elapsed >= (input.timeoutMs ?? CREATE_FLOW_PREPARATION_FAILSAFE_MS);
 }
 
 /** Safety: dismiss "Preparing your agreement" overlay once Pro gate is applied without a draft. */
