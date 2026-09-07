@@ -189,3 +189,64 @@ export function resolvePostAcceptPrepareRequestedCta(args: {
     reason: POST_ACCEPT_CONTINUE_TO_SIGNATURE_LINKS_REASON,
   };
 }
+
+/**
+ * Resume Decision-2 / Prepare after accept 200: local paint refs can be empty
+ * even though the verified GET + accepted snapshot exist. Recover a
+ * signing-ready packet so enterGuidedSignatureTrackRoute can navigate to
+ * /app/esign/doc_* instead of silent-returning. Empty/invalid signers stay closed.
+ */
+export type ResumeAcceptedCommercialEsignHandoff =
+  | {
+      ok: true;
+      body: string;
+      source: GuidedSignatureTrackCorpusSelection["source"];
+      hash: string;
+    }
+  | { ok: false; reason: string };
+
+export function resolveResumeAcceptedCommercialEsignHandoff(args: {
+  agreementId: string;
+  acceptedSnapshotEnabled: boolean;
+  verifiedDisplayCorpus?: string | null;
+  signingSnapshotCorpus?: string | null;
+  acceptedReviewCorpus?: string | null;
+  rebuiltSigningCorpus?: string | null;
+  partyManifest: CanonicalFinalPartyManifest;
+  signerCount?: number;
+  intakeText?: string | null;
+}): ResumeAcceptedCommercialEsignHandoff {
+  const agreementId = (args.agreementId || "").trim();
+  if (!agreementId) return { ok: false, reason: "agreement_id_missing" };
+  if (!args.acceptedSnapshotEnabled) return { ok: false, reason: "accepted_snapshot_missing" };
+  const signerCount = Math.max(2, args.signerCount ?? 2);
+  const selected = resolvePostAcceptPrepareTrackCorpus({
+    rebuiltSigningCorpus:
+      args.rebuiltSigningCorpus ||
+      args.signingSnapshotCorpus ||
+      args.verifiedDisplayCorpus ||
+      args.acceptedReviewCorpus,
+    rebuiltSignerCount: signerCount,
+    finalizedSignerApplied: args.signingSnapshotCorpus || args.rebuiltSigningCorpus,
+    finalizedSigning: args.signingSnapshotCorpus || args.rebuiltSigningCorpus,
+    acceptedReview: args.verifiedDisplayCorpus || args.acceptedReviewCorpus,
+  });
+  if (selected.source === "none" || !selected.body.trim()) {
+    return { ok: false, reason: "corpus_not_selected" };
+  }
+  const readyAssert = assertGuidedVs01SigningHandoffReady({
+    manifest: args.partyManifest,
+    corpusSource: selected.source,
+    corpusBody: selected.body,
+    intakeText: args.intakeText,
+  });
+  if (!readyAssert.ok) {
+    return { ok: false, reason: readyAssert.reason ?? "handoff_assert_failed" };
+  }
+  return {
+    ok: true,
+    body: selected.body,
+    source: selected.source,
+    hash: selected.hash,
+  };
+}

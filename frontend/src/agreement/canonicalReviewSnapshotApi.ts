@@ -506,20 +506,34 @@ export async function prepareCommercialReviewSnapshotAuthority(args: {
   if (!persisted.ok) return { ok: false, code: persisted.code };
 
   // Prefer GET as the sole review hydration authority (not POST response alone).
-  const fetched = await fetchCanonicalReviewSnapshot({ agreementId: id });
+  let fetched = await fetchCanonicalReviewSnapshot({ agreementId: id });
   if (!fetched.ok) return { ok: false, code: fetched.code };
+
+  const persistMatchesGet = (snap: CanonicalReviewSnapshot): boolean => {
+    const getCorpus = (snap.corpus_plain || "").trim();
+    return (
+      snap.snapshot_id === persisted.snapshot.snapshot_id &&
+      snap.corpus_sha256.toLowerCase() === persisted.snapshot.corpus_sha256.toLowerCase() &&
+      snap.corpus_length === persisted.snapshot.corpus_length &&
+      getCorpus === (persisted.snapshot.corpus_plain || "").trim()
+    );
+  };
+
+  // Resume Continue can read a stale latest-pending on the first GET. Retry once
+  // so persist+GET does not false-fire persist_get_authority_mismatch.
+  if (!persistMatchesGet(fetched.snapshot)) {
+    const retried = await fetchCanonicalReviewSnapshot({ agreementId: id });
+    if (retried.ok && persistMatchesGet(retried.snapshot)) {
+      fetched = retried;
+    } else if (retried.ok && retried.snapshot.snapshot_id === persisted.snapshot.snapshot_id) {
+      fetched = retried;
+    } else {
+      return { ok: false, code: "persist_get_authority_mismatch" };
+    }
+  }
 
   const snap = fetched.snapshot;
   const getCorpus = (snap.corpus_plain || "").trim();
-  // Fail closed if GET authority diverges from what we just persisted.
-  if (
-    snap.snapshot_id !== persisted.snapshot.snapshot_id ||
-    snap.corpus_sha256.toLowerCase() !== persisted.snapshot.corpus_sha256.toLowerCase() ||
-    snap.corpus_length !== persisted.snapshot.corpus_length ||
-    getCorpus !== (persisted.snapshot.corpus_plain || "").trim()
-  ) {
-    return { ok: false, code: "persist_get_authority_mismatch" };
-  }
   // Exact GET contract: digest + length must match the returned corpus bytes.
   const getDigest = await sha256CorpusDigest(getCorpus);
   if (

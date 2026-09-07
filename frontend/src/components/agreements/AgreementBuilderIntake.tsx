@@ -885,6 +885,7 @@ import {
   resolvePostAcceptPrepareRequestedCta,
   resolvePostAcceptPrepareTrackCorpus,
   resolvePostAcceptReviewHandoffCta,
+  resolveResumeAcceptedCommercialEsignHandoff,
   shouldSkipReFinalizeBeforePostAcceptPrepare,
 } from "./paidProPostAcceptReviewHandoff";
 import { restoreFinalizedSignerStateFromPaidReturnPersist } from "./paidProPaidReturnSignerFinalizedRestore";
@@ -30019,26 +30020,107 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         canonicalSignerManifestRef.current = canonicalSignerManifest;
       }
 
+      const trackAgreementId = (
+        readOwnershipMigrationReceipt()?.canonicalAgreementId?.trim() ||
+        resolveGuidedSigningPersistAgreementId({
+          postedId: reviewAgreementIdRef.current,
+          reviewAgreementIdRef: reviewAgreementIdRef.current,
+          reviewAgreementId,
+          productionSendBarAgreementId,
+          productionSendBarAgreementIdRef: productionSendBarAgreementIdRef.current,
+          draftAgreementId: (draft as { id?: string | null } | null)?.id ?? null,
+          resumeAgreementId: readCreateReviewAgreementResumeId(),
+        }) ||
+        ""
+      ).trim();
+      if (trackAgreementId && canEnableCommercialPrepareFromServerSnapshot(trackAgreementId)) {
+        const verified = readVerifiedCommercialDisplayCorpus(trackAgreementId);
+        if (verified?.corpusPlain) {
+          if (!(acceptedReviewCorpusRef.current || "").trim()) {
+            acceptedReviewCorpusRef.current = verified.corpusPlain;
+          }
+          if (!(authoritativeAgreementSnapshotRef.current || "").trim()) {
+            authoritativeAgreementSnapshotRef.current = verified.corpusPlain;
+          }
+        }
+        const snapModel = getAuthoritativeSigningSnapshot()?.signatureBlockModel;
+        if (
+          snapModel?.entries?.length &&
+          !(canonicalSignerManifestRef.current?.entries?.length)
+        ) {
+          canonicalSignerManifestRef.current = snapModel;
+        }
+      }
+
       const transition = assertGuidedTransitionReady("signing_confirm");
-      if (!transition.ok) {
-        traceSigningAdvance(`enterGuidedSignatureTrackRoute:blocked:${transition.reason ?? "transition_not_ready"}`);
-        logGuidedSignatureTrackFailed({ reason: transition.reason ?? "transition_not_ready" });
-        showModalIfSlow("blocked");
-        setGuidedFinalizeModalBlockedMessage(
-          "The final agreement snapshot is not ready. Return to final review before continuing.",
-        );
-        return;
+      let corpusText = transition.ok ? ensureGuidedSigningCorpusReady() : "";
+      if (!transition.ok || !corpusText) {
+        if (trackAgreementId && !canEnableCommercialPrepareFromServerSnapshot(trackAgreementId)) {
+          const acceptResult = await ensureAcceptedCommercialReviewForEsignHandoff({
+            agreementId: trackAgreementId,
+            acceptingSession: getOrInitSessionAgreementGenerationId(),
+          });
+          if (!acceptResult.ok) {
+            traceSigningAdvance(`enterGuidedSignatureTrackRoute:accept_blocked:${acceptResult.code}`);
+            logGuidedSignatureTrackFailed({ reason: acceptResult.code || "accept_blocked" });
+            showModalIfSlow("blocked");
+            setGuidedFinalizeModalBlockedMessage(
+              "Server acceptance of the reviewed agreement is required before opening signing.",
+            );
+            return;
+          }
+        }
+        const vs01Gate = resolveFinalVs01CorpusOrBlock({
+          agreementCorpusText: (
+            readAuthoritativeSigningCorpus() ||
+            readVerifiedCommercialDisplayCorpus(trackAgreementId)?.corpusPlain ||
+            acceptedReviewCorpusRef.current ||
+            ""
+          ).trim(),
+          guidedPro: true,
+          signaturePreparationRequested: true,
+          prepareSignatureLinksRequested: true,
+        });
+        const recovered = resolveResumeAcceptedCommercialEsignHandoff({
+          agreementId: trackAgreementId,
+          acceptedSnapshotEnabled: canEnableCommercialPrepareFromServerSnapshot(trackAgreementId),
+          verifiedDisplayCorpus: readVerifiedCommercialDisplayCorpus(trackAgreementId)?.corpusPlain,
+          signingSnapshotCorpus: readAuthoritativeSigningCorpus(),
+          acceptedReviewCorpus: acceptedReviewCorpusRef.current,
+          rebuiltSigningCorpus: vs01Gate.allowed ? vs01Gate.corpus : vs01Gate.corpus || corpusText,
+          partyManifest: resolvePaidProSigningHandoffPartyManifest({
+            fallbackManifest: guidedFinalPartyManifest,
+            intakeText: currentPremiumMergedIntakeKey || intakeCombined,
+            draftPartyNames: (draft?.parties ?? []).map((p) =>
+              String((p as { name?: string }).name ?? "").trim(),
+            ),
+          }),
+          signerCount: premiumSigningRecipientCount,
+          intakeText: currentPremiumMergedIntakeKey || intakeCombined,
+        });
+        if (!recovered.ok) {
+          traceSigningAdvance(
+            `enterGuidedSignatureTrackRoute:blocked:${!transition.ok ? transition.reason ?? "transition_not_ready" : "corpus_not_ready"}`,
+          );
+          logGuidedSignatureTrackFailed({
+            reason: !transition.ok ? transition.reason ?? "transition_not_ready" : "corpus_not_ready",
+          });
+          showModalIfSlow("blocked");
+          setGuidedFinalizeModalBlockedMessage(
+            !transition.ok
+              ? "The final agreement snapshot is not ready. Return to final review before continuing."
+              : GUIDED_VS01_HANDOFF_BLOCKED_USER_MESSAGE,
+          );
+          return;
+        }
+        corpusText = recovered.body;
+        acceptedReviewCorpusRef.current = recovered.body;
+        authoritativeAgreementSnapshotRef.current = recovered.body;
+        finalizedSigningCorpusRef.current = recovered.body;
+        traceSigningAdvance("enterGuidedSignatureTrackRoute:accepted_snapshot_recover");
       }
 
-      const corpusText = ensureGuidedSigningCorpusReady();
-      if (!corpusText) {
-        logGuidedSignatureTrackFailed({ reason: "corpus_not_ready" });
-        showModalIfSlow("blocked");
-        setGuidedFinalizeModalBlockedMessage(GUIDED_VS01_HANDOFF_BLOCKED_USER_MESSAGE);
-        return;
-      }
-
-      const selected = resolvePostAcceptPrepareTrackCorpus({
+      let selected = resolvePostAcceptPrepareTrackCorpus({
         rebuiltSigningCorpus: corpusText,
         rebuiltSignerCount: Math.max(2, premiumSigningRecipientCount),
         finalizedSignerApplied: finalizedSigningCorpusRef.current,
@@ -30046,6 +30128,39 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         acceptedReview:
           acceptedReviewCorpusRef.current || readAuthoritativeSigningCorpus(),
       });
+      if (selected.source === "none") {
+        const vs01Gate = resolveFinalVs01CorpusOrBlock({
+          agreementCorpusText: corpusText,
+          guidedPro: true,
+          signaturePreparationRequested: true,
+          prepareSignatureLinksRequested: true,
+        });
+        const recovered = resolveResumeAcceptedCommercialEsignHandoff({
+          agreementId: trackAgreementId,
+          acceptedSnapshotEnabled: canEnableCommercialPrepareFromServerSnapshot(trackAgreementId),
+          verifiedDisplayCorpus: readVerifiedCommercialDisplayCorpus(trackAgreementId)?.corpusPlain,
+          signingSnapshotCorpus: readAuthoritativeSigningCorpus(),
+          acceptedReviewCorpus: acceptedReviewCorpusRef.current,
+          rebuiltSigningCorpus: vs01Gate.allowed ? vs01Gate.corpus : corpusText,
+          partyManifest: resolvePaidProSigningHandoffPartyManifest({
+            fallbackManifest: guidedFinalPartyManifest,
+            intakeText: currentPremiumMergedIntakeKey || intakeCombined,
+            draftPartyNames: (draft?.parties ?? []).map((p) =>
+              String((p as { name?: string }).name ?? "").trim(),
+            ),
+          }),
+          signerCount: premiumSigningRecipientCount,
+          intakeText: currentPremiumMergedIntakeKey || intakeCombined,
+        });
+        if (recovered.ok) {
+          selected = {
+            source: recovered.source,
+            body: recovered.body,
+            hash: recovered.hash,
+          };
+          corpusText = recovered.body;
+        }
+      }
       if (selected.source === "none") {
         logGuidedSignatureTrackFailed({ reason: "corpus_not_selected" });
         showModalIfSlow("blocked");
@@ -31289,7 +31404,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         void finalizePaidProSignerMetadataAndOpenReviewDecision();
       }
       const signingReadyNow = postFinalizeSigningReady || stickySigningFinalized;
-      if (!signingReadyNow) {
+      const acceptedEsignAgreementId = (
+        reviewAgreementIdRef.current ||
+        readCreateReviewAgreementResumeId() ||
+        ""
+      ).trim();
+      const acceptedEsignReady =
+        Boolean(acceptedEsignAgreementId) &&
+        canEnableCommercialPrepareFromServerSnapshot(acceptedEsignAgreementId);
+      if (!signingReadyNow && !acceptedEsignReady) {
         traceSigningAdvance("handleProSendForSignature:finalize_incomplete");
         return;
       }
@@ -35081,7 +35204,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                                 phase: paidProReviewDecisionPhase,
                                                 onDecision1: () =>
                                                   void handlePaidProPrepareSignaturesFromFirstReview(),
-                                                onDecision2: () => void handleProSendForSignature(),
+                                                onDecision2: () =>
+                                                  void handlePaidProPrepareSignaturesFromFirstReview(),
                                                 onFallback: () => void handleProSendForSignature(),
                                               });
                                               handler();
@@ -35556,7 +35680,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                             const handler = resolvePaidProPrepareSignaturesHandler({
                                               phase: paidProReviewDecisionPhase,
                                               onDecision1: () => void handlePaidProPrepareSignaturesFromFirstReview(),
-                                              onDecision2: () => void handleProSendForSignature(),
+                                              onDecision2: () =>
+                                                void handlePaidProPrepareSignaturesFromFirstReview(),
                                               onFallback: () => void handleProSendForSignature(),
                                             });
                                             handler();
@@ -35714,7 +35839,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                                 phase: paidProReviewDecisionPhase,
                                                 onDecision1: () =>
                                                   void handlePaidProPrepareSignaturesFromFirstReview(),
-                                                onDecision2: () => void handleProSendForSignature(),
+                                                onDecision2: () =>
+                                                  void handlePaidProPrepareSignaturesFromFirstReview(),
                                                 onFallback: () => void handleProSendForSignature(),
                                               });
                                               handler();
