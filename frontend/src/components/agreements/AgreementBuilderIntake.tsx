@@ -142,11 +142,14 @@ import {
   resolvePartyPrepSlotCount,
   hasAuthoritativeCreateReviewBodyForPrepFailsafe,
   isVs01CorpusGateBlockedWithoutSelectedFinal,
+  pickCreateReviewSettleCorpus,
+  planPostGenerateCreateReviewSettleOrFailClosed,
   resolvePostGenerateAuthorityChurnOverlayDecision,
   shouldDismissCreateOverlaysAfterRejectOrGate,
   shouldDismissHomeCreateTransitionForIntakeRecovery,
   shouldFailClosedCreateAfterRejectOrGate,
   shouldInvokePremiumGenerateAfterPartyPrepCreate,
+  shouldRemapGenerationRetryableSalvageForCreateSettle,
   shouldSettleProReviewAfterPremiumFullDraft,
   shouldSkipEntitledRewriteForMatchingAcceptedSnapshot,
   shouldSkipPartyPrepForOrdinaryNamedTwoParty,
@@ -7375,6 +7378,28 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       });
       premiumGenerateCompletedRef.current = true;
       setPremiumGenerateCompleted(true);
+      {
+        const immediateSettleCorpus = pickCreateReviewSettleCorpus({
+          winningPremiumBodyText: result.winningPremiumBodyText,
+          premiumRenderSource: result.premiumRenderSource,
+          acceptedAuthoritativePlain: acceptedReviewCorpusRef.current,
+        });
+        if (immediateSettleCorpus) {
+          lastPremiumWinningCorpusRef.current = immediateSettleCorpus;
+          premiumPipelineOutputBodyRef.current = immediateSettleCorpus;
+          if (!acceptedReviewCorpusRef.current) acceptedReviewCorpusRef.current = immediateSettleCorpus;
+          const src = String(result.premiumRenderSource || "").trim();
+          lastPremiumPipelineRenderSourceRef.current =
+            src === "server_full_draft" ||
+            src === "server_full_draft_retry" ||
+            src === "server_full_draft_degraded" ||
+            src === "snapshot_server_full_draft"
+              ? src
+              : src === "rejected_paid_corpus"
+                ? lastPremiumPipelineRenderSourceRef.current
+                : "server_full_draft_degraded";
+        }
+      }
       if (result.staleIntakeOrGeneration) {
         setHardError("Your details changed while we were finishing. Try again when ready.");
         setPremiumPostCheckoutPhase(null);
@@ -7399,7 +7424,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             intakeText: mergedIntake,
           }),
         ]);
-        if (salvage && hasPaidProSourceOfTruth()) {
+        if (
+          shouldRemapGenerationRetryableSalvageForCreateSettle({
+            salvageCorpus: salvage,
+            hasExistingPaidSoT: hasPaidProSourceOfTruth(),
+          })
+        ) {
           if (import.meta.env.MODE !== "test") {
             // eslint-disable-next-line no-console
             console.warn("[premium-flow] entitled_rewrite_generation_retryable_salvage_mount", {
@@ -7408,6 +7438,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             });
           }
           result = remapGenerationRetryableResultToDegradedSalvage(result, salvage);
+          lastPremiumWinningCorpusRef.current = salvage;
+          premiumPipelineOutputBodyRef.current = salvage;
+          lastPremiumPipelineRenderSourceRef.current = "server_full_draft_degraded";
         } else {
           logPremiumRetryPreservedContext({
             context: "entitled_rewrite_generation_retryable",
@@ -7510,8 +7543,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         guidedPro: true,
         premiumInProgress: false,
         premiumComplete: (result.winningPremiumBodyText || "").trim().length >= VS01_CORPUS_PREFERRED_MIN_LEN,
-        acceptedAuthoritativePlain: (result.winningPremiumBodyText || "").trim() || null,
-        premiumAccepted: shouldSettleProReviewAfterPremiumFullDraft(result),
+        acceptedAuthoritativePlain:
+          acceptedReviewCorpusRef.current || (result.winningPremiumBodyText || "").trim() || null,
+        premiumAccepted: shouldSettleProReviewAfterPremiumFullDraft({
+          ...result,
+          acceptedAuthoritativePlain: acceptedReviewCorpusRef.current,
+        }),
         premiumPipelineRenderSource: result.premiumRenderSource,
         intakeText: mergedIntake,
         hydratedPremiumPlain: hydratedPremiumBodyRef.current,
@@ -7526,7 +7563,17 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         premiumInProgress: vs01GateAfterGenerate.premiumInProgress,
         generateComplete: true,
       });
-      result = withCreatePipelineVs01CorpusGate(result, vs01GateAfterGenerate);
+      result = withCreatePipelineVs01CorpusGate(
+        {
+          ...result,
+          acceptedAuthoritativePlain:
+            acceptedReviewCorpusRef.current || lastKnownGoodAuthoritativeDraftRef.current || "",
+        },
+        {
+          ...vs01GateAfterGenerate,
+          corpus: vs01GateAfterGenerate.corpus || result.winningPremiumBodyText,
+        },
+      );
       if (shouldFailClosedCreateAfterRejectOrGate(result)) {
         logPaidProGenerationTerminalTransition({
           reason: "no_server_authority",
@@ -7628,13 +7675,23 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         mergedIntake,
       );
       let winning = (result.winningPremiumBodyText || "").trim();
-      if (shouldSettleProReviewAfterPremiumFullDraft(result) && winning.length >= 500) {
-        // Latch before snapshot GET so the 15s no-corpus failsafe cannot fire on success.
-        lastPremiumWinningCorpusRef.current = winning;
-        premiumPipelineOutputBodyRef.current = winning;
-        hydratedPremiumBodyRef.current = winning;
-        lastKnownGoodAuthoritativeDraftRef.current = winning;
-        setAgreementDocumentText(winning);
+      {
+        const settleCorpus =
+          pickCreateReviewSettleCorpus(result) ||
+          (shouldSettleProReviewAfterPremiumFullDraft(result) && winning.length >= 500 ? winning : "");
+        if (settleCorpus) {
+          // Latch before snapshot GET so leftover gate/churn cannot fail-close a usable corpus.
+          winning = settleCorpus;
+          lastPremiumWinningCorpusRef.current = settleCorpus;
+          premiumPipelineOutputBodyRef.current = settleCorpus;
+          hydratedPremiumBodyRef.current = settleCorpus;
+          lastKnownGoodAuthoritativeDraftRef.current = settleCorpus;
+          lastPremiumPipelineRenderSourceRef.current =
+            result.premiumRenderSource ||
+            lastPremiumPipelineRenderSourceRef.current ||
+            "server_full_draft";
+          setAgreementDocumentText(settleCorpus);
+        }
       }
       let usePaidAuthoritativeBody =
         isAuthoritativePremiumPipelineRenderSource(result.premiumRenderSource) && winning.length >= 500;
@@ -26334,12 +26391,40 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       vs01FinalCorpusGate.premiumComplete ||
       !vs01FinalCorpusGate.premiumInProgress,
   });
+  const postGenerateCreateReviewSettlePlan = planPostGenerateCreateReviewSettleOrFailClosed({
+    generateComplete: premiumGenerateCompleted,
+    vs01GateBlockedWithoutSelectedFinal: vs01CorpusGateBlockedWithoutSelectedFinal,
+    vs01SelectedFinal: vs01FinalCorpusGate.allowed,
+    shorterThanAcceptedChurn: hasPremiumAuthorityShorterThanAcceptedChurn(),
+    winningPremiumBodyText:
+      lastPremiumWinningCorpusRef.current ||
+      premiumPipelineOutputBodyRef.current ||
+      hydratedPremiumBodyRef.current ||
+      lastKnownGoodAuthoritativeDraftRef.current ||
+      "",
+    premiumRenderSource: lastPremiumPipelineRenderSourceRef.current,
+    acceptedAuthoritativePlain:
+      acceptedReviewCorpusRef.current ||
+      acceptedPremiumCorpusPickOpts.acceptedAuthoritativeBody ||
+      "",
+    selectedFinalCorpus: vs01FinalCorpusGate.allowed ? vs01FinalCorpusGate.corpus : "",
+  });
   const vs01GateCorpusCommerciallyUsable =
     Boolean(vs01FinalCorpusGate.allowed) ||
+    postGenerateCreateReviewSettlePlan.settleReview ||
     shouldSettleProReviewAfterPremiumFullDraft({
       winningPremiumBodyText:
-        lastPremiumWinningCorpusRef.current || premiumPipelineOutputBodyRef.current || "",
+        lastPremiumWinningCorpusRef.current ||
+        premiumPipelineOutputBodyRef.current ||
+        acceptedReviewCorpusRef.current ||
+        "",
       premiumRenderSource: lastPremiumPipelineRenderSourceRef.current,
+      acceptedAuthoritativePlain:
+        acceptedReviewCorpusRef.current ||
+        acceptedPremiumCorpusPickOpts.acceptedAuthoritativeBody ||
+        "",
+      vs01SelectedFinal: vs01FinalCorpusGate.allowed,
+      selectedFinalCorpus: vs01FinalCorpusGate.allowed ? vs01FinalCorpusGate.corpus : "",
     });
   const postGenerateAuthorityChurn = resolvePostGenerateAuthorityChurnOverlayDecision({
     generateComplete: premiumGenerateCompleted,
@@ -26376,19 +26461,43 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       displayPhase === "hydrating_generated";
     if (!overlayActive && displayPhase === "review") return;
     if (!overlayActive && displayPhase === "intake" && hardError) return;
-    const winning =
-      lastPremiumWinningCorpusRef.current ||
-      premiumPipelineOutputBodyRef.current ||
-      "";
+    const plan = planPostGenerateCreateReviewSettleOrFailClosed({
+      generateComplete: premiumGenerateCompleted,
+      vs01GateBlockedWithoutSelectedFinal: vs01CorpusGateBlockedWithoutSelectedFinal,
+      vs01SelectedFinal: vs01FinalCorpusGate.allowed,
+      shorterThanAcceptedChurn: hasPremiumAuthorityShorterThanAcceptedChurn(),
+      winningPremiumBodyText:
+        lastPremiumWinningCorpusRef.current ||
+        premiumPipelineOutputBodyRef.current ||
+        hydratedPremiumBodyRef.current ||
+        lastKnownGoodAuthoritativeDraftRef.current ||
+        "",
+      premiumRenderSource: lastPremiumPipelineRenderSourceRef.current,
+      acceptedAuthoritativePlain:
+        acceptedReviewCorpusRef.current ||
+        acceptedPremiumCorpusPickOpts.acceptedAuthoritativeBody ||
+        "",
+      selectedFinalCorpus: vs01FinalCorpusGate.allowed ? vs01FinalCorpusGate.corpus : "",
+    });
     const settle =
+      plan.settleReview ||
       postGenerateAuthorityChurn.settleReview ||
-      shouldSettleProReviewAfterPremiumFullDraft({
-        winningPremiumBodyText: winning,
-        premiumRenderSource: lastPremiumPipelineRenderSourceRef.current,
-      });
-    if (settle || vs01FinalCorpusGate.allowed) {
+      vs01FinalCorpusGate.allowed ||
+      Boolean(plan.corpus);
+    if (settle) {
+      if (plan.corpus) {
+        lastPremiumWinningCorpusRef.current = plan.corpus;
+        premiumPipelineOutputBodyRef.current = plan.corpus;
+        hydratedPremiumBodyRef.current = plan.corpus;
+        lastKnownGoodAuthoritativeDraftRef.current = plan.corpus;
+        if (!acceptedReviewCorpusRef.current) acceptedReviewCorpusRef.current = plan.corpus;
+        lastPremiumPipelineRenderSourceRef.current =
+          lastPremiumPipelineRenderSourceRef.current || "server_full_draft";
+        setAgreementDocumentText(plan.corpus);
+      }
       setPremiumPostCheckoutPhase(null);
       setPremiumPipelineUserMessage(null);
+      setHardError(null);
       setDisplayPhase("review");
       setCreateFlowPhase("draft_ready_for_review");
       setCreateUiStage(CreateUiStage.DRAFT);
@@ -26424,6 +26533,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   }, [
     vs01CorpusGateBlockedWithoutSelectedFinal,
     vs01FinalCorpusGate.allowed,
+    vs01FinalCorpusGate.corpus,
     hardError,
     emptyAuthorityPrepFailSafe,
     premiumPostCheckoutPhase,
@@ -26431,6 +26541,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     postGenerateAuthorityChurn.dismissOverlays,
     postGenerateAuthorityChurn.settleReview,
     premiumGenerateCompleted,
+    acceptedPremiumCorpusPickOpts.acceptedAuthoritativeBody,
   ]);
 
   const canProceedGuidedFinalReviewToSigning = useMemo(

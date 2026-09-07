@@ -28,10 +28,14 @@ import {
   shouldFailClosedInFlightPipelineWithoutCorpus,
   shouldFailCloseCreateAfterPremiumFullDraft,
   hasAuthoritativeCreateReviewBodyForPrepFailsafe,
+  isCommerciallyUsableCreateReviewCorpus,
   isCreatePipelineRejectOrGateDecision,
   isVs01CorpusGateBlockedWithoutSelectedFinal,
   isVs01CorpusGateNonTerminalBlockReason,
+  pickCreateReviewSettleCorpus,
+  planPostGenerateCreateReviewSettleOrFailClosed,
   shouldInvokePremiumGenerateAfterPartyPrepCreate,
+  shouldRemapGenerationRetryableSalvageForCreateSettle,
   shouldSettleProReviewAfterPremiumFullDraft,
   shouldSkipEntitledRewriteForMatchingAcceptedSnapshot,
   shouldSkipPartyPrepForOrdinaryNamedTwoParty,
@@ -308,10 +312,16 @@ describe("multi-party create → review settle or fail-closed", () => {
     expect(intake).toContain("hasAuthoritativeCreateReviewBodyForPrepFailsafe");
     expect(intake).toContain("dismissCreateOverlaysAfterRejectOrGate");
     expect(intake).toContain("resolvePostGenerateAuthorityChurnOverlayDecision");
+    expect(intake).toContain("planPostGenerateCreateReviewSettleOrFailClosed");
+    expect(intake).toContain("pickCreateReviewSettleCorpus");
+    expect(intake).toContain("shouldRemapGenerationRetryableSalvageForCreateSettle");
     expect(intake).toContain("shouldSkipPartyPrepForOrdinaryNamedTwoParty");
     expect(intake).toContain("hasPremiumAuthorityShorterThanAcceptedChurn");
     expect(intake).toContain("premiumGenerateCompleted");
-    const vs01AttachIdx = intake.indexOf("withCreatePipelineVs01CorpusGate(result, vs01GateAfterGenerate)");
+    expect(intake).not.toMatch(
+      /if \(salvage && hasPaidProSourceOfTruth\(\)\) \{\s*if \(import\.meta\.env\.MODE !== "test"\)/,
+    );
+    const vs01AttachIdx = intake.indexOf("withCreatePipelineVs01CorpusGate(");
     const rejectAfterVs01Idx = intake.indexOf("shouldFailClosedCreateAfterRejectOrGate(result)", vs01AttachIdx);
     expect(vs01AttachIdx).toBeGreaterThan(-1);
     expect(rejectAfterVs01Idx).toBeGreaterThan(vs01AttachIdx);
@@ -731,6 +741,165 @@ describe("multi-party create → review settle or fail-closed", () => {
         corpusCommerciallyUsable: false,
       }).dismissOverlays,
     ).toBe(false);
+  });
+
+  it("named 2p usable corpus settles Review — not fail-closed couldn't-create", () => {
+    const northline =
+      "Priya Shah of Northline Studio is hiring Diego Alvarez of Harbor Marks LLC to design a logo and brand kit for $2,400, term 30 days, governing law Texas.";
+    const corpus = `${"Section 1. Parties.\n".repeat(80)}IN WITNESS WHEREOF the parties execute this Agreement.`;
+    expect(isCommerciallyUsableCreateReviewCorpus(corpus)).toBe(true);
+    expect(isCommerciallyUsableCreateReviewCorpus("")).toBe(false);
+    expect(isCommerciallyUsableCreateReviewCorpus("thin [ORG_1] stub")).toBe(false);
+
+    expect(
+      isVs01CorpusGateBlockedWithoutSelectedFinal({
+        allowed: false,
+        blockReason: "premium_corpus_in_progress",
+        selectedFinal: false,
+        generateComplete: true,
+      }),
+    ).toBe(true);
+
+    const retryableNamed2p = withCreatePipelineVs01CorpusGate(
+      {
+        winningPremiumBodyText: corpus,
+        premiumRenderSource: "premium_generation_retryable" as const,
+        acceptedAuthoritativePlain: corpus,
+        staleIntakeOrGeneration: false,
+      },
+      {
+        allowed: false,
+        blockReason: "premium_corpus_in_progress",
+        premiumInProgress: false,
+        premiumComplete: true,
+        corpus,
+      },
+    );
+    expect(isCreatePipelineRejectOrGateDecision(retryableNamed2p)).toBe(true);
+    expect(shouldSettleProReviewAfterPremiumFullDraft(retryableNamed2p)).toBe(true);
+    expect(shouldFailClosedCreateAfterRejectOrGate(retryableNamed2p)).toBe(false);
+    expect(
+      shouldTreatEntitledRewritePipelineResultAsGenerationFailure({
+        premiumDraft: { parties: [] } as never,
+        premiumParties: [],
+        recipientCandidates: [],
+        winningPremiumBodyText: corpus,
+        premiumRenderSource: "premium_generation_retryable",
+        premiumReview: null,
+        premiumFinalizeAudit: null,
+        premiumReviewRoute: null,
+        staleIntakeOrGeneration: false,
+        premiumGenerationRetryable: true,
+      }),
+    ).toBe(true);
+    expect(
+      shouldTreatEntitledRewritePipelineResultAsGenerationFailure({
+        premiumDraft: { parties: [] } as never,
+        premiumParties: [],
+        recipientCandidates: [],
+        winningPremiumBodyText: corpus,
+        premiumRenderSource: "server_full_draft_degraded",
+        premiumReview: null,
+        premiumFinalizeAudit: null,
+        premiumReviewRoute: null,
+        staleIntakeOrGeneration: false,
+        premiumGenerationRetryable: false,
+      }),
+    ).toBe(false);
+    expect(
+      shouldRemapGenerationRetryableSalvageForCreateSettle({
+        salvageCorpus: corpus,
+        hasExistingPaidSoT: false,
+      }),
+    ).toBe(true);
+    expect(
+      shouldSkipPartyPrepForOrdinaryNamedTwoParty({
+        intakeText: northline,
+        generateComplete: true,
+        corpusCommerciallyUsable: shouldSettleProReviewAfterPremiumFullDraft(retryableNamed2p),
+      }),
+    ).toBe(true);
+
+    const acceptedOnly = {
+      winningPremiumBodyText: "",
+      premiumRenderSource: "premium_generation_retryable" as const,
+      acceptedAuthoritativePlain: corpus,
+      staleIntakeOrGeneration: false,
+      vs01CorpusGateBlocked: true,
+    };
+    expect(shouldSettleProReviewAfterPremiumFullDraft(acceptedOnly)).toBe(true);
+    expect(shouldFailClosedCreateAfterRejectOrGate(acceptedOnly)).toBe(false);
+    expect(pickCreateReviewSettleCorpus(acceptedOnly)).toBe(corpus);
+
+    const selectedFinal = withCreatePipelineVs01CorpusGate(
+      {
+        winningPremiumBodyText: corpus,
+        premiumRenderSource: "" as const,
+        staleIntakeOrGeneration: false,
+      },
+      { allowed: true, blockReason: undefined, corpus },
+    );
+    expect(selectedFinal.vs01SelectedFinal).toBe(true);
+    expect(shouldSettleProReviewAfterPremiumFullDraft(selectedFinal)).toBe(true);
+    expect(shouldFailClosedCreateAfterRejectOrGate(selectedFinal)).toBe(false);
+
+    const plan = planPostGenerateCreateReviewSettleOrFailClosed({
+      generateComplete: true,
+      vs01GateBlockedWithoutSelectedFinal: true,
+      vs01SelectedFinal: false,
+      shorterThanAcceptedChurn: true,
+      winningPremiumBodyText: corpus,
+      premiumRenderSource: "premium_generation_retryable",
+      acceptedAuthoritativePlain: corpus,
+    });
+    expect(plan.dismissOverlays).toBe(true);
+    expect(plan.settleReview).toBe(true);
+    expect(plan.failClosed).toBe(false);
+    expect(plan.corpus).toBe(corpus);
+  });
+
+  it("too_much / no usable corpus fail-closes and dismisses overlays", () => {
+    const empty = withCreatePipelineVs01CorpusGate(
+      {
+        winningPremiumBodyText: "",
+        premiumRenderSource: "premium_generation_retryable" as const,
+      },
+      {
+        allowed: false,
+        blockReason: "premium_corpus_in_progress",
+        premiumInProgress: false,
+        premiumComplete: true,
+      },
+    );
+    expect(isCommerciallyUsableCreateReviewCorpus("")).toBe(false);
+    expect(shouldSettleProReviewAfterPremiumFullDraft(empty)).toBe(false);
+    expect(shouldFailClosedCreateAfterRejectOrGate(empty)).toBe(true);
+    expect(
+      shouldRemapGenerationRetryableSalvageForCreateSettle({
+        salvageCorpus: "",
+        hasExistingPaidSoT: false,
+      }),
+    ).toBe(false);
+    expect(
+      shouldDismissCreateOverlaysAfterRejectOrGate({
+        rejectOrGateBlocked: true,
+        corpusCommerciallyUsable: false,
+      }),
+    ).toBe(true);
+    const plan = planPostGenerateCreateReviewSettleOrFailClosed({
+      generateComplete: true,
+      vs01GateBlockedWithoutSelectedFinal: true,
+      vs01SelectedFinal: false,
+      shorterThanAcceptedChurn: true,
+      winningPremiumBodyText: "",
+      premiumRenderSource: "premium_generation_retryable",
+    });
+    expect(plan.dismissOverlays).toBe(true);
+    expect(plan.settleReview).toBe(false);
+    expect(plan.failClosed).toBe(true);
+    expect(plan.corpus).toBe("");
+    expect(CREATE_FLOW_GENERATE_FAILED_CLEAR_MESSAGE).toMatch(/Try again/);
+    expect(CREATE_FLOW_GENERATE_FAILED_CLEAR_MESSAGE).not.toMatch(/save your draft/i);
   });
 
   it("ordinary 2p named parties do not require party-prep when corpus/gate path should settle", () => {

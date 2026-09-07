@@ -84,19 +84,88 @@ const SERVER_FULL_DRAFT_SETTLE_SOURCES = new Set([
   "snapshot_server_full_draft",
 ]);
 
-/**
- * premium-full-draft 200 (or degraded 200-class) with a usable corpus must settle Review.
- * Do not require SoT/committed/GET — first-create N≥3 was fail-closing on success.
- */
-export function shouldSettleProReviewAfterPremiumFullDraft(input: {
+export type CreateReviewSettleCorpusInput = {
   winningPremiumBodyText?: string | null;
   premiumRenderSource?: string | null;
   staleIntakeOrGeneration?: boolean;
-}): boolean {
+  /** Latched / accepted server_full_draft (or equivalent) already held this session. */
+  acceptedAuthoritativePlain?: string | null;
+  /** VS01 selected-final — commercially usable even if leftover gate reason is sticky. */
+  vs01SelectedFinal?: boolean;
+  selectedFinalCorpus?: string | null;
+};
+
+/**
+ * Commercial Review corpus — long enough and not a starter/preview stub.
+ * Execution signal matches entitled-rewrite salvage so first-create dump→create
+ * can settle without an existing paid SoT.
+ */
+export function isCommerciallyUsableCreateReviewCorpus(text: string | null | undefined): boolean {
+  const t = String(text || "").trim();
+  if (t.length < SETTLE_PRO_REVIEW_MIN_CORPUS_LEN) return false;
+  if (/\b(?:starter preview|live preview|preview only|fallback preview|retry pro draft)\b/i.test(t)) {
+    return false;
+  }
+  const hasExecutionSignal =
+    /IN WITNESS WHEREOF|executed this Agreement|^\s*By:\s*_{2,}/im.test(t) ||
+    (/^\s*(?:CLIENT|SERVICE PROVIDER|PARTY\s+\d+)\s*:/im.test(t) && /_{3,}/.test(t)) ||
+    (t.match(/^\s*\d+\.\s+[A-Za-z]/gm) || []).length >= 4;
+  return hasExecutionSignal;
+}
+
+/** Longest commercially usable body among winning / accepted / selected-final. */
+export function pickCreateReviewSettleCorpus(input: CreateReviewSettleCorpusInput): string {
+  const selected = input.vs01SelectedFinal ? String(input.selectedFinalCorpus || "").trim() : "";
+  const accepted = String(input.acceptedAuthoritativePlain || "").trim();
+  const winning = String(input.winningPremiumBodyText || "").trim();
+  let best = "";
+  for (const c of [selected, accepted, winning]) {
+    if (isCommerciallyUsableCreateReviewCorpus(c) && c.length > best.length) best = c;
+  }
+  return best;
+}
+
+/**
+ * premium-full-draft 200 (or degraded 200-class) with a usable corpus must settle Review.
+ * Also settle when accepted server_full_draft or VS01 selected-final is commercially usable.
+ * A retryable/missing source alone is not enough — remap salvage first on the live path.
+ * Do not require SoT/committed/GET — first-create dump→create has no SoT yet.
+ */
+export function shouldSettleProReviewAfterPremiumFullDraft(
+  input: CreateReviewSettleCorpusInput,
+): boolean {
   if (input.staleIntakeOrGeneration) return false;
-  const body = String(input.winningPremiumBodyText || "").trim();
-  if (body.length < SETTLE_PRO_REVIEW_MIN_CORPUS_LEN) return false;
-  return SERVER_FULL_DRAFT_SETTLE_SOURCES.has(String(input.premiumRenderSource || "").trim());
+  const source = String(input.premiumRenderSource || "").trim();
+  const winning = String(input.winningPremiumBodyText || "").trim();
+  if (
+    SERVER_FULL_DRAFT_SETTLE_SOURCES.has(source) &&
+    winning.length >= SETTLE_PRO_REVIEW_MIN_CORPUS_LEN
+  ) {
+    return true;
+  }
+  const accepted = String(input.acceptedAuthoritativePlain || "").trim();
+  if (isCommerciallyUsableCreateReviewCorpus(accepted)) return true;
+  if (
+    input.vs01SelectedFinal &&
+    isCommerciallyUsableCreateReviewCorpus(input.selectedFinalCorpus || winning)
+  ) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * First-create dump→create must remap a commercially usable salvage even without
+ * an existing paid SoT. Returning paid create still remaps any quality-checked salvage.
+ */
+export function shouldRemapGenerationRetryableSalvageForCreateSettle(input: {
+  salvageCorpus?: string | null;
+  hasExistingPaidSoT?: boolean;
+}): boolean {
+  const salvage = String(input.salvageCorpus || "").trim();
+  if (!salvage) return false;
+  if (input.hasExistingPaidSoT) return salvage.length >= SETTLE_PRO_REVIEW_MIN_CORPUS_LEN;
+  return isCommerciallyUsableCreateReviewCorpus(salvage);
 }
 
 /** Fail-close only when generate produced no usable Review corpus. */
@@ -108,10 +177,7 @@ export function shouldFailCloseCreateAfterPremiumFullDraft(input: {
   return !shouldSettleProReviewAfterPremiumFullDraft(input);
 }
 
-export type CreatePipelineRejectOrGateInput = {
-  winningPremiumBodyText?: string | null;
-  premiumRenderSource?: string | null;
-  staleIntakeOrGeneration?: boolean;
+export type CreatePipelineRejectOrGateInput = CreateReviewSettleCorpusInput & {
   proIntentGateMessage?: string | null;
   founderDetailsGateMessage?: string | null;
   /** Terminal `vs01-corpus-gate-blocked` with no selected-final (dump→create). */
@@ -179,15 +245,21 @@ export function withCreatePipelineVs01CorpusGate<T extends CreatePipelineRejectO
     blockReason?: string | null;
     premiumInProgress?: boolean | null;
     premiumComplete?: boolean | null;
+    corpus?: string | null;
   },
 ): T & {
   vs01CorpusGateAllowed: boolean;
   vs01SelectedFinal: boolean;
   vs01BlockReason: string | null;
   vs01CorpusGateBlocked: boolean;
+  selectedFinalCorpus: string | null;
 } {
   const allowed = Boolean(gate.allowed);
   const blockReason = gate.blockReason ?? null;
+  const selectedFinalCorpus = allowed
+    ? String(gate.corpus || result.selectedFinalCorpus || result.winningPremiumBodyText || "").trim() ||
+      null
+    : result.selectedFinalCorpus ?? null;
   return {
     ...result,
     vs01CorpusGateAllowed: allowed,
@@ -200,6 +272,7 @@ export function withCreatePipelineVs01CorpusGate<T extends CreatePipelineRejectO
       premiumInProgress: gate.premiumInProgress,
       generateComplete: gate.premiumComplete === true || gate.premiumInProgress === false,
     }),
+    selectedFinalCorpus,
   };
 }
 
@@ -285,6 +358,54 @@ export function resolvePostGenerateAuthorityChurnOverlayDecision(input: {
     return { dismissOverlays: true, settleReview: true, failClosed: false };
   }
   return { dismissOverlays: true, settleReview: false, failClosed: true };
+}
+
+export type PostGenerateCreateReviewSettlePlan = PostGenerateAuthorityChurnOverlayDecision & {
+  corpus: string;
+};
+
+/**
+ * Live dump→create settle-or-fail-closed: mount accepted / selected-final / winning
+ * commercial corpus into Review. Fail-closed only when there is truly no usable corpus
+ * (too_much class). Leftover `premium_corpus_in_progress` after generate is not enough
+ * to wipe a commercially usable body.
+ */
+export function planPostGenerateCreateReviewSettleOrFailClosed(input: {
+  generateComplete?: boolean;
+  vs01GateBlockedWithoutSelectedFinal?: boolean;
+  vs01SelectedFinal?: boolean;
+  shorterThanAcceptedChurn?: boolean;
+  winningPremiumBodyText?: string | null;
+  premiumRenderSource?: string | null;
+  acceptedAuthoritativePlain?: string | null;
+  selectedFinalCorpus?: string | null;
+  staleIntakeOrGeneration?: boolean;
+}): PostGenerateCreateReviewSettlePlan {
+  const settleInput: CreateReviewSettleCorpusInput = {
+    winningPremiumBodyText: input.winningPremiumBodyText,
+    premiumRenderSource: input.premiumRenderSource,
+    acceptedAuthoritativePlain: input.acceptedAuthoritativePlain,
+    vs01SelectedFinal: input.vs01SelectedFinal,
+    selectedFinalCorpus: input.selectedFinalCorpus,
+    staleIntakeOrGeneration: input.staleIntakeOrGeneration,
+  };
+  const corpus = pickCreateReviewSettleCorpus(settleInput);
+  const usable =
+    Boolean(input.vs01SelectedFinal && corpus) ||
+    shouldSettleProReviewAfterPremiumFullDraft(settleInput);
+  const churn = resolvePostGenerateAuthorityChurnOverlayDecision({
+    generateComplete: input.generateComplete,
+    shorterThanAcceptedChurn: input.shorterThanAcceptedChurn,
+    vs01GateBlockedWithoutSelectedFinal: input.vs01GateBlockedWithoutSelectedFinal,
+    corpusCommerciallyUsable: usable,
+  });
+  if (usable) {
+    return { dismissOverlays: true, settleReview: true, failClosed: false, corpus };
+  }
+  if (input.generateComplete && input.vs01GateBlockedWithoutSelectedFinal) {
+    return { dismissOverlays: true, settleReview: false, failClosed: true, corpus: "" };
+  }
+  return { ...churn, corpus: "" };
 }
 
 /**
