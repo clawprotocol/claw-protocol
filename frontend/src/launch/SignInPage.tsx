@@ -17,7 +17,7 @@ import {
 } from "../auth/safeRedirectResolver";
 import {
   pinCheckoutPathToPreAuthAgreement,
-  readPreAuthCheckoutAgreementId,
+  readKnownConversionAgreementId,
 } from "../auth/preAuthCheckoutAgreement";
 import { sanitizeConversionCheckoutDest } from "./checkoutParams";
 import { getGenesisReferralCode } from "./genesisReferral/genesisReferralCapture";
@@ -53,7 +53,7 @@ export function SignInPage() {
       sanitizeConversionCheckoutDest({
         dest: pinned,
         persistAgreementId:
-          extractAgreementIdFromCheckoutPath(pinned) || readPreAuthCheckoutAgreementId(),
+          extractAgreementIdFromCheckoutPath(pinned) || readKnownConversionAgreementId(),
       }),
     );
     return null;

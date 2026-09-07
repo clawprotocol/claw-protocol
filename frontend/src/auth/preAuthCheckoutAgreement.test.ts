@@ -5,15 +5,20 @@ import {
   clearPreAuthCheckoutAgreementId,
   countConversionDraftMintsAfterFirstPersist,
   pinCheckoutPathToPreAuthAgreement,
+  readKnownConversionAgreementId,
   readPreAuthCheckoutAgreementId,
   rememberPreAuthCheckoutAgreementId,
   resolveAgreementIdAfterAuthRemount,
   resolveExistingConversionAgreementId,
   shouldMintNewDraftForConversion,
+  syncPreAuthFromKnownConversionAgreementId,
 } from "./preAuthCheckoutAgreement";
+import { ACTIVE_AGREEMENT_GENERATION_STORAGE_KEY } from "../lib/agreementGenerationId";
+import { AGREEMENT_CREATE_REVIEW_RESUME_KEY } from "../components/agreements/agreementIntakeStorage";
 
 const GUEST = "5e79c874-91bd-4d43-95f1-80a827e8b26a";
 const STALE = "36568b4c-1300-4d62-97eb-826bdf2dd6c0";
+const ACTIVE_GEN = "9216ed40-eb15-4356-9ba4-a7ada836a0d6";
 
 describe("preAuthCheckoutAgreement", () => {
   beforeEach(() => {
@@ -52,6 +57,31 @@ describe("preAuthCheckoutAgreement", () => {
     expect(shouldMintNewDraftForConversion(GUEST)).toBe(false);
     expect(shouldMintNewDraftForConversion(null)).toBe(true);
     expect(shouldMintNewDraftForConversion("__claw_create_checkout__")).toBe(true);
+    expect(
+      resolveExistingConversionAgreementId({
+        reviewAgreementId: null,
+        resumeId: null,
+        preAuthId: null,
+        activeGenerationId: ACTIVE_GEN,
+      }),
+    ).toBe(ACTIVE_GEN);
+  });
+
+  it("known conversion reader falls back to active generation when pre_auth is null", () => {
+    expect(readKnownConversionAgreementId()).toBeNull();
+    sessionStorage.setItem(ACTIVE_AGREEMENT_GENERATION_STORAGE_KEY, ACTIVE_GEN);
+    expect(readPreAuthCheckoutAgreementId()).toBeNull();
+    expect(readKnownConversionAgreementId()).toBe(ACTIVE_GEN);
+    expect(syncPreAuthFromKnownConversionAgreementId()).toBe(ACTIVE_GEN);
+    expect(readPreAuthCheckoutAgreementId()).toBe(ACTIVE_GEN);
+  });
+
+  it("known conversion reader prefers pre_auth over resume and active generation", () => {
+    rememberPreAuthCheckoutAgreementId(GUEST);
+    sessionStorage.setItem(AGREEMENT_CREATE_REVIEW_RESUME_KEY, STALE);
+    sessionStorage.setItem(ACTIVE_AGREEMENT_GENERATION_STORAGE_KEY, ACTIVE_GEN);
+    expect(readKnownConversionAgreementId()).toBe(GUEST);
+    expect(syncPreAuthFromKnownConversionAgreementId()).toBe(GUEST);
   });
 
   it("keeps claimed leftover persist when bind returns it after a stale dest", () => {

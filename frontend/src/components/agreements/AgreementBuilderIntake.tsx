@@ -1113,7 +1113,7 @@ import {
   shouldKeepReviewDisplayAfterProHydrate,
   shouldMinimalProSendRecipientChrome,
 } from "./sendHandoffAuthoritativeCorpus";
-import { getOrInitSessionAgreementGenerationId, shortIntakeFingerprint } from "../../lib/agreementGenerationId";
+import { getOrInitSessionAgreementGenerationId, readSessionAgreementGenerationId, shortIntakeFingerprint } from "../../lib/agreementGenerationId";
 import {
   PREMIUM_POST_CHECKOUT_EXTENDED_WAIT_COPY_MS,
   PREMIUM_POST_CHECKOUT_HARD_FAILOPEN_MS,
@@ -13038,6 +13038,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         reviewAgreementId: reviewAgreementIdRef.current,
         resumeId: readCreateReviewAgreementResumeId(),
         preAuthId: readPreAuthCheckoutAgreementId(),
+        activeGenerationId: readSessionAgreementGenerationId(),
       }) || CREATE_FLOW_CHECKOUT_AGREEMENT_ID;
     rememberPreAuthCheckoutAgreementId(checkoutAgreementId);
     navigate(buildCreateFlowCheckoutHref({ cadence, persistAgreementId: checkoutAgreementId }));
@@ -13211,6 +13212,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       reviewAgreementId: reviewAgreementIdRef.current,
       resumeId: readCreateReviewAgreementResumeId(),
       preAuthId: readPreAuthCheckoutAgreementId(),
+      activeGenerationId: readSessionAgreementGenerationId(),
     });
     rememberPreAuthCheckoutAgreementId(persistId);
     navigate(buildCreateFlowCheckoutHref({ cadence, persistAgreementId: persistId }));

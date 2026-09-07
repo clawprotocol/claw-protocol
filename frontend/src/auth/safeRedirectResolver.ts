@@ -10,7 +10,7 @@ import {
 import type { AuthContinuationContextV1 } from "./authContinuationContext";
 import {
   pinCheckoutPathToPreAuthAgreement,
-  readPreAuthCheckoutAgreementId,
+  readKnownConversionAgreementId,
   rememberPreAuthCheckoutAgreementId,
 } from "./preAuthCheckoutAgreement";
 
@@ -86,7 +86,7 @@ export function resolveSignInContinuationOpts(destinationPath: string): SignInCo
   const fromPath = extractAgreementIdFromCheckoutPath(dest) ?? undefined;
   if (fromPath) rememberPreAuthCheckoutAgreementId(fromPath);
   const agreementId = checkout
-    ? readPreAuthCheckoutAgreementId() || fromPath || undefined
+    ? readKnownConversionAgreementId() || fromPath || undefined
     : fromPath;
   const pinned = agreementId ? pinCheckoutPathToPreAuthAgreement(dest, agreementId) : dest;
   const destinationPathOut = sanitizeConversionCheckoutDest({
@@ -102,7 +102,7 @@ export function resolveSignInContinuationOpts(destinationPath: string): SignInCo
 
 export function buildSignInContinuationPath(pathname: string, search = ""): string {
   const dest = `${(pathname || "").trim()}${(search || "").trim()}`;
-  const persist = extractAgreementIdFromCheckoutPath(dest) ?? readPreAuthCheckoutAgreementId();
+  const persist = extractAgreementIdFromCheckoutPath(dest) ?? readKnownConversionAgreementId();
   const sanitized = sanitizeConversionCheckoutDest({
     dest,
     persistAgreementId: persist,

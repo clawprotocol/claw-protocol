@@ -78,6 +78,28 @@ describe("RequireAuthenticatedDashboard", () => {
     expect(screen.queryByTestId("secret-checkout")).toBeNull();
   });
 
+  it("does not embed restore=starterReview in OAuth next when only active generation is set", () => {
+    const activeGen = "9216ed40-eb15-4356-9ba4-a7ada836a0d6";
+    sessionStorage.setItem("claw_active_agreement_generation_id_v1", activeGen);
+    navState.pathname = "/app/checkout/__claw_create_checkout__";
+    navState.search = "?tier=pro&cadence=monthly&returnTo=%2Fapp%2Fcreate%3Frestore%3DstarterReview";
+    navState.navigate = vi.fn();
+    render(
+      <RequireAuthenticatedDashboard>
+        <div data-testid="secret-checkout">secret</div>
+      </RequireAuthenticatedDashboard>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: CHECKOUT_SIGN_IN_CTA }));
+    const dest = navState.navigate.mock.calls[0]?.[0] as string;
+    expect(dest.startsWith("/app/sign-in?next=")).toBe(true);
+    const next = decodeURIComponent(dest.slice("/app/sign-in?next=".length));
+    expect(next).toContain(activeGen);
+    expect(next).not.toContain("__claw_create_checkout__");
+    expect(next).not.toContain("restore=starterReview");
+    expect(next).not.toContain("starterReview");
+    expect(screen.queryByTestId("secret-checkout")).toBeNull();
+  });
+
   it("does not embed restore=starterReview in OAuth next when persist is only in session", () => {
     const persistId = "d0e90b0c-f301-4b18-a755-dea64b4ac6cd";
     rememberPreAuthCheckoutAgreementId(persistId);

@@ -61,6 +61,7 @@ describe("conversion draft remint guard", () => {
   it("conversion checkout returnTo omits restore=starterReview when persist exists", () => {
     expect(intake).toContain("buildCreateFlowCheckoutHref({ cadence, persistAgreementId: checkoutAgreementId })");
     expect(intake).toContain("buildCreateFlowCheckoutHref({ cadence, persistAgreementId: persistId })");
+    expect(intake).toContain("activeGenerationId: readSessionAgreementGenerationId()");
     expect(checkout).toContain("sanitizeConversionCheckoutDest");
     expect(checkout).toContain("buildConversionCheckoutReturnTo(persistAgreementId)");
   });

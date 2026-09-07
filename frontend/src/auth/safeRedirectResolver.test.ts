@@ -103,6 +103,26 @@ describe("safeRedirectResolver", () => {
     );
   });
 
+  it("pins placeholder checkout dest to active generation when pre_auth is null", () => {
+    const aid = "9216ed40-eb15-4356-9ba4-a7ada836a0d6";
+    sessionStorage.setItem("claw_active_agreement_generation_id_v1", aid);
+    const dest = `/app/checkout/__claw_create_checkout__?tier=pro&cadence=monthly&returnTo=${encodeURIComponent(
+      "/app/create?restore=starterReview",
+    )}`;
+    const cleaned = `/app/checkout/${aid}?tier=pro&cadence=monthly&returnTo=${encodeURIComponent("/app/create")}`;
+    expect(
+      buildSignInContinuationPath(
+        "/app/checkout/__claw_create_checkout__",
+        `?tier=pro&cadence=monthly&returnTo=${encodeURIComponent("/app/create?restore=starterReview")}`,
+      ),
+    ).toBe(`/app/sign-in?next=${encodeURIComponent(cleaned)}`);
+    expect(resolveSignInContinuationOpts(dest)).toEqual({
+      returningSignIn: false,
+      destinationPath: cleaned,
+      agreementId: aid,
+    });
+  });
+
   it("pins placeholder checkout dest to session persist and drops restore decoy", () => {
     const aid = "d0e90b0c-f301-4b18-a755-dea64b4ac6cd";
     sessionStorage.setItem("claw_pre_auth_checkout_agreement_id_v1", aid);

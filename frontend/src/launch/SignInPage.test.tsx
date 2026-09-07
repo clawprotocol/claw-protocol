@@ -48,6 +48,21 @@ describe("SignInPage checkout continuation", () => {
     expect(navState.navigate).toHaveBeenCalledWith(dest);
   });
 
+  it("pins placeholder next to active generation when pre_auth is null", () => {
+    const persistId = "9216ed40-eb15-4356-9ba4-a7ada836a0d6";
+    sessionStorage.setItem("claw_active_agreement_generation_id_v1", persistId);
+    const dest = `/app/checkout/__claw_create_checkout__?tier=pro&cadence=monthly&returnTo=${encodeURIComponent(
+      "/app/create?restore=starterReview",
+    )}`;
+    navState.search = `?next=${encodeURIComponent(dest)}`;
+    navState.navigate = vi.fn();
+    authState.user = { id: "user-1" };
+    render(<SignInPage />);
+    expect(navState.navigate).toHaveBeenCalledWith(
+      `/app/checkout/${persistId}?tier=pro&cadence=monthly&returnTo=${encodeURIComponent("/app/create")}`,
+    );
+  });
+
   it("pins placeholder next to session persist and drops restore decoy", () => {
     const persistId = "d0e90b0c-f301-4b18-a755-dea64b4ac6cd";
     sessionStorage.setItem("claw_pre_auth_checkout_agreement_id_v1", persistId);
