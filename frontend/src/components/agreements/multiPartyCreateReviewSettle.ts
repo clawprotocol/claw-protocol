@@ -93,36 +93,66 @@ export type CreateReviewSettleCorpusInput = {
   /** VS01 selected-final — commercially usable even if leftover gate reason is sticky. */
   vs01SelectedFinal?: boolean;
   selectedFinalCorpus?: string | null;
+  /** Rejected-but-usable pfd body from shorter-than-accepted churn. */
+  lastCommerciallyUsableCandidate?: string | null;
 };
+
+const CREATE_REVIEW_PREVIEW_STUB_RE =
+  /\b(?:starter preview|live preview|preview only|fallback preview|retry pro draft)\b/i;
+
+function isCreateReviewPreviewStub(text: string): boolean {
+  return CREATE_REVIEW_PREVIEW_STUB_RE.test(text);
+}
 
 /**
  * Commercial Review corpus — long enough and not a starter/preview stub.
  * Execution signal matches entitled-rewrite salvage so first-create dump→create
  * can settle without an existing paid SoT.
+ * Live Northline pfd may omit IN WITNESS / 4 numbered heads and still be a
+ * SERVICES AGREEMENT with two legal entities — treat that as usable too.
  */
 export function isCommerciallyUsableCreateReviewCorpus(text: string | null | undefined): boolean {
   const t = String(text || "").trim();
   if (t.length < SETTLE_PRO_REVIEW_MIN_CORPUS_LEN) return false;
-  if (/\b(?:starter preview|live preview|preview only|fallback preview|retry pro draft)\b/i.test(t)) {
-    return false;
-  }
+  if (isCreateReviewPreviewStub(t)) return false;
   const hasExecutionSignal =
     /IN WITNESS WHEREOF|executed this Agreement|^\s*By:\s*_{2,}/im.test(t) ||
     (/^\s*(?:CLIENT|SERVICE PROVIDER|PARTY\s+\d+)\s*:/im.test(t) && /_{3,}/.test(t)) ||
     (t.match(/^\s*\d+\.\s+[A-Za-z]/gm) || []).length >= 4;
-  return hasExecutionSignal;
+  if (hasExecutionSignal) return true;
+  const hasServicesTitle =
+    /^\s*(?:(?:PROFESSIONAL|CONSULTING|MASTER|MUTUAL)\s+)?SERVICES AGREEMENT\b/im.test(t);
+  const namedEntities = (t.match(/\b(?:LLC|L\.L\.C\.|Inc\.?|Corp\.?|Ltd\.?)\b/gi) || []).length;
+  const hasCommercialTerms = /\b(?:fee|compensation|\$\s?\d|governing law|term)\b/i.test(t);
+  return hasServicesTitle && namedEntities >= 2 && hasCommercialTerms;
 }
 
-/** Longest commercially usable body among winning / accepted / selected-final. */
+function longestCreateReviewSettleCandidate(
+  candidates: readonly string[],
+  predicate: (text: string) => boolean,
+): string {
+  let best = "";
+  for (const c of candidates) {
+    if (predicate(c) && c.length > best.length) best = c;
+  }
+  return best;
+}
+
+/** Longest commercially usable body among winning / accepted / selected-final / last usable. */
 export function pickCreateReviewSettleCorpus(input: CreateReviewSettleCorpusInput): string {
   const selected = input.vs01SelectedFinal ? String(input.selectedFinalCorpus || "").trim() : "";
   const accepted = String(input.acceptedAuthoritativePlain || "").trim();
   const winning = String(input.winningPremiumBodyText || "").trim();
-  let best = "";
-  for (const c of [selected, accepted, winning]) {
-    if (isCommerciallyUsableCreateReviewCorpus(c) && c.length > best.length) best = c;
-  }
-  return best;
+  const lastUsable = String(input.lastCommerciallyUsableCandidate || "").trim();
+  const candidates = [selected, accepted, winning, lastUsable];
+  const commercial = longestCreateReviewSettleCandidate(candidates, isCommerciallyUsableCreateReviewCorpus);
+  if (commercial) return commercial;
+  // server_full_draft ≥ 1500 must remount even if the execution-signal regex misses.
+  if (!shouldSettleProReviewAfterPremiumFullDraft(input)) return "";
+  return longestCreateReviewSettleCandidate(
+    candidates,
+    (c) => c.length >= SETTLE_PRO_REVIEW_MIN_CORPUS_LEN && !isCreateReviewPreviewStub(c),
+  );
 }
 
 /**
@@ -145,6 +175,7 @@ export function shouldSettleProReviewAfterPremiumFullDraft(
   }
   const accepted = String(input.acceptedAuthoritativePlain || "").trim();
   if (isCommerciallyUsableCreateReviewCorpus(accepted)) return true;
+  if (isCommerciallyUsableCreateReviewCorpus(input.lastCommerciallyUsableCandidate)) return true;
   if (
     input.vs01SelectedFinal &&
     isCommerciallyUsableCreateReviewCorpus(input.selectedFinalCorpus || winning)
@@ -369,6 +400,10 @@ export type PostGenerateCreateReviewSettlePlan = PostGenerateAuthorityChurnOverl
  * commercial corpus into Review. Fail-closed only when there is truly no usable corpus
  * (too_much class). Leftover `premium_corpus_in_progress` after generate is not enough
  * to wipe a commercially usable body.
+ *
+ * Named 2-party commercially complete dumps must wait for generate — #212 treated
+ * shorter-than-accepted churn as generate-done and fail-closed Northline before
+ * premium-full-draft returned (live OPTIONS-only / couldn't-create).
  */
 export function planPostGenerateCreateReviewSettleOrFailClosed(input: {
   generateComplete?: boolean;
@@ -379,6 +414,9 @@ export function planPostGenerateCreateReviewSettleOrFailClosed(input: {
   premiumRenderSource?: string | null;
   acceptedAuthoritativePlain?: string | null;
   selectedFinalCorpus?: string | null;
+  lastCommerciallyUsableCandidate?: string | null;
+  /** Ordinary named 2p dump — do not fail-close on churn before generate completes. */
+  ordinaryNamedTwoPartyReady?: boolean;
   staleIntakeOrGeneration?: boolean;
 }): PostGenerateCreateReviewSettlePlan {
   const settleInput: CreateReviewSettleCorpusInput = {
@@ -387,25 +425,43 @@ export function planPostGenerateCreateReviewSettleOrFailClosed(input: {
     acceptedAuthoritativePlain: input.acceptedAuthoritativePlain,
     vs01SelectedFinal: input.vs01SelectedFinal,
     selectedFinalCorpus: input.selectedFinalCorpus,
+    lastCommerciallyUsableCandidate: input.lastCommerciallyUsableCandidate,
     staleIntakeOrGeneration: input.staleIntakeOrGeneration,
   };
   const corpus = pickCreateReviewSettleCorpus(settleInput);
-  // A commercially usable picked body must settle even when the pipeline source is
-  // leftover `premium_generation_retryable` / gate-blocked. Requiring
-  // server_full_draft | selected-final wiped Northline-class 200s and left
-  // Generating mounted on the entitled paid-shell path.
-  const usable = Boolean(corpus);
-  const generateDone =
-    Boolean(input.generateComplete) || Boolean(input.shorterThanAcceptedChurn);
+  // Pick (retryable 200s / last usable) OR server_full_draft ≥ 1500. #212 dropped
+  // shouldSettle and required the execution-signal pick only — real Northline pfd
+  // then fail-closed after vs01-corpus-gate-blocked.
+  const usable = Boolean(corpus) || shouldSettleProReviewAfterPremiumFullDraft(settleInput);
+  const generateComplete = Boolean(input.generateComplete);
   const churn = resolvePostGenerateAuthorityChurnOverlayDecision({
-    generateComplete: generateDone,
+    generateComplete: generateComplete || Boolean(input.shorterThanAcceptedChurn),
     shorterThanAcceptedChurn: input.shorterThanAcceptedChurn,
     vs01GateBlockedWithoutSelectedFinal: input.vs01GateBlockedWithoutSelectedFinal,
     corpusCommerciallyUsable: usable,
   });
   if (usable) {
-    return { dismissOverlays: true, settleReview: true, failClosed: false, corpus };
+    const mounted =
+      corpus ||
+      longestCreateReviewSettleCandidate(
+        [
+          String(input.selectedFinalCorpus || "").trim(),
+          String(input.acceptedAuthoritativePlain || "").trim(),
+          String(input.winningPremiumBodyText || "").trim(),
+          String(input.lastCommerciallyUsableCandidate || "").trim(),
+        ],
+        (c) => c.length >= SETTLE_PRO_REVIEW_MIN_CORPUS_LEN && !isCreateReviewPreviewStub(c),
+      );
+    if (mounted) {
+      return { dismissOverlays: true, settleReview: true, failClosed: false, corpus: mounted };
+    }
   }
+  // Commercially complete named 2p: keep Preparing until generate actually
+  // completes. too_much / money_vibe omit this flag and still fail-close on churn.
+  if (input.ordinaryNamedTwoPartyReady && !generateComplete) {
+    return { dismissOverlays: false, settleReview: false, failClosed: false, corpus: "" };
+  }
+  const generateDone = generateComplete || Boolean(input.shorterThanAcceptedChurn);
   if (generateDone && input.vs01GateBlockedWithoutSelectedFinal) {
     return { dismissOverlays: true, settleReview: false, failClosed: true, corpus: "" };
   }

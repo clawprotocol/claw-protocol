@@ -7422,6 +7422,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       ) {
         const salvage = pickUsableGenerationRetrySalvageCorpus([
           result.winningPremiumBodyText,
+          getLastCommerciallyUsableAuthorityCandidate(),
           premiumPipelineOutputBodyRef.current,
           lastPremiumWinningCorpusRef.current,
           hydratedPremiumBodyRef.current,
@@ -7589,10 +7590,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         vs01SelectedFinal: Boolean(vs01GateAfterGenerate.allowed),
         shorterThanAcceptedChurn: hasPremiumAuthorityShorterThanAcceptedChurn(),
         winningPremiumBodyText:
-          result.winningPremiumBodyText ||
-          getLastCommerciallyUsableAuthorityCandidate() ||
-          lastPremiumWinningCorpusRef.current ||
-          "",
+          result.winningPremiumBodyText || lastPremiumWinningCorpusRef.current || "",
+        lastCommerciallyUsableCandidate: getLastCommerciallyUsableAuthorityCandidate(),
+        ordinaryNamedTwoPartyReady: shouldSkipPartyPrepForOrdinaryNamedTwoParty({
+          intakeText: mergedIntake || raw,
+          partyRows: launch?.partyRows ?? intakePartyEditorRows,
+        }),
         premiumRenderSource: result.premiumRenderSource,
         acceptedAuthoritativePlain:
           acceptedReviewCorpusRef.current ||
@@ -26501,6 +26504,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const authorityChurnActive = Boolean(
     hasPremiumAuthorityShorterThanAcceptedChurn() && premiumAuthorityChurnTick >= 0,
   );
+  const ordinaryNamedTwoPartyReadyForSettle = shouldSkipPartyPrepForOrdinaryNamedTwoParty({
+    intakeText: intakeCombined || lastPremiumWinningCorpusRef.current || "",
+    partyRows: intakePartyEditorRows,
+  });
   const vs01CorpusGateBlockedWithoutSelectedFinal = isVs01CorpusGateBlockedWithoutSelectedFinal({
     allowed: vs01FinalCorpusGate.allowed,
     blockReason: vs01FinalCorpusGate.blockReason,
@@ -26508,12 +26515,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     premiumInProgress: vs01FinalCorpusGate.premiumInProgress && !premiumGenerateCompleted,
     generateComplete:
       premiumGenerateCompleted ||
-      authorityChurnActive ||
+      (authorityChurnActive && !ordinaryNamedTwoPartyReadyForSettle) ||
       vs01FinalCorpusGate.premiumComplete ||
       !vs01FinalCorpusGate.premiumInProgress,
   });
   const postGenerateCreateReviewSettlePlan = planPostGenerateCreateReviewSettleOrFailClosed({
-    generateComplete: premiumGenerateCompleted || authorityChurnActive,
+    generateComplete: premiumGenerateCompleted,
     vs01GateBlockedWithoutSelectedFinal: vs01CorpusGateBlockedWithoutSelectedFinal,
     vs01SelectedFinal: vs01FinalCorpusGate.allowed,
     shorterThanAcceptedChurn: authorityChurnActive,
@@ -26522,8 +26529,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       premiumPipelineOutputBodyRef.current ||
       hydratedPremiumBodyRef.current ||
       lastKnownGoodAuthoritativeDraftRef.current ||
-      getLastCommerciallyUsableAuthorityCandidate() ||
       "",
+    lastCommerciallyUsableCandidate: getLastCommerciallyUsableAuthorityCandidate(),
+    ordinaryNamedTwoPartyReady: ordinaryNamedTwoPartyReadyForSettle,
     premiumRenderSource: lastPremiumPipelineRenderSourceRef.current,
     acceptedAuthoritativePlain:
       acceptedReviewCorpusRef.current ||
@@ -26551,7 +26559,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       selectedFinalCorpus: vs01FinalCorpusGate.allowed ? vs01FinalCorpusGate.corpus : "",
     });
   const postGenerateAuthorityChurn = resolvePostGenerateAuthorityChurnOverlayDecision({
-    generateComplete: premiumGenerateCompleted || authorityChurnActive,
+    generateComplete:
+      premiumGenerateCompleted || (authorityChurnActive && !ordinaryNamedTwoPartyReadyForSettle),
     shorterThanAcceptedChurn: authorityChurnActive,
     vs01GateBlockedWithoutSelectedFinal: vs01CorpusGateBlockedWithoutSelectedFinal,
     corpusCommerciallyUsable: vs01GateCorpusCommerciallyUsable,
@@ -26565,10 +26574,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   });
   const dismissCreateOverlaysAfterRejectOrGate = shouldDismissCreateOverlaysAfterRejectOrGate({
     rejectOrGateBlocked:
-      vs01CorpusGateBlockedWithoutSelectedFinal ||
-      postGenerateAuthorityChurn.dismissOverlays ||
       postGenerateCreateReviewSettlePlan.failClosed ||
-      postGenerateCreateReviewSettlePlan.dismissOverlays,
+      postGenerateAuthorityChurn.failClosed ||
+      postGenerateCreateReviewSettlePlan.dismissOverlays ||
+      postGenerateAuthorityChurn.dismissOverlays,
     hardError,
     emptyAuthorityPrepFailSafe,
     corpusCommerciallyUsable:
@@ -26579,11 +26588,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
   useEffect(() => {
     if (
-      !vs01CorpusGateBlockedWithoutSelectedFinal &&
-      !postGenerateAuthorityChurn.dismissOverlays &&
-      !postGenerateCreateReviewSettlePlan.dismissOverlays &&
       !postGenerateCreateReviewSettlePlan.settleReview &&
-      !postGenerateCreateReviewSettlePlan.failClosed
+      !postGenerateCreateReviewSettlePlan.failClosed &&
+      !postGenerateAuthorityChurn.settleReview &&
+      !postGenerateAuthorityChurn.failClosed &&
+      !postGenerateCreateReviewSettlePlan.dismissOverlays &&
+      !postGenerateAuthorityChurn.dismissOverlays
     ) {
       return;
     }
@@ -26597,8 +26607,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     if (!overlayActive && displayPhase === "review") return;
     if (!overlayActive && displayPhase === "intake" && hardError) return;
     const plan = planPostGenerateCreateReviewSettleOrFailClosed({
-      generateComplete:
-        premiumGenerateCompleted || hasPremiumAuthorityShorterThanAcceptedChurn(),
+      generateComplete: premiumGenerateCompleted,
       vs01GateBlockedWithoutSelectedFinal: vs01CorpusGateBlockedWithoutSelectedFinal,
       vs01SelectedFinal: vs01FinalCorpusGate.allowed,
       shorterThanAcceptedChurn: hasPremiumAuthorityShorterThanAcceptedChurn(),
@@ -26607,8 +26616,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         premiumPipelineOutputBodyRef.current ||
         hydratedPremiumBodyRef.current ||
         lastKnownGoodAuthoritativeDraftRef.current ||
-        getLastCommerciallyUsableAuthorityCandidate() ||
         "",
+      lastCommerciallyUsableCandidate: getLastCommerciallyUsableAuthorityCandidate(),
+      ordinaryNamedTwoPartyReady: ordinaryNamedTwoPartyReadyForSettle,
       premiumRenderSource: lastPremiumPipelineRenderSourceRef.current,
       acceptedAuthoritativePlain:
         acceptedReviewCorpusRef.current ||
@@ -26640,6 +26650,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       setCreateFlowPhase("draft_ready_for_review");
       setCreateUiStage(CreateUiStage.DRAFT);
       setLoading(false);
+      return;
+    }
+    if (!plan.failClosed && !postGenerateAuthorityChurn.failClosed) {
       return;
     }
     const terminal = commitEntitledRewriteGenerationFailureTerminal({
@@ -26678,9 +26691,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     displayPhase,
     postGenerateAuthorityChurn.dismissOverlays,
     postGenerateAuthorityChurn.settleReview,
+    postGenerateAuthorityChurn.failClosed,
     postGenerateCreateReviewSettlePlan.dismissOverlays,
     postGenerateCreateReviewSettlePlan.settleReview,
     postGenerateCreateReviewSettlePlan.failClosed,
+    ordinaryNamedTwoPartyReadyForSettle,
     premiumGenerateCompleted,
     premiumAuthorityChurnTick,
     acceptedPremiumCorpusPickOpts.acceptedAuthoritativeBody,

@@ -291,6 +291,8 @@ describe("canonical Northline homepage dump → entitled Pro Review", () => {
     expect(prepareIdx).toBeGreaterThan(entitledPlanIdx);
     const planBlock = intake.slice(entitledPlanIdx, entitledPlanIdx + 4200);
     expect(planBlock).toContain("getLastCommerciallyUsableAuthorityCandidate");
+    expect(planBlock).toContain("lastCommerciallyUsableCandidate");
+    expect(planBlock).toContain("ordinaryNamedTwoPartyReady");
     expect(planBlock).toContain("setPremiumPostCheckoutPhase(null)");
     expect(planBlock).toContain("setDisplayPhase(\"review\")");
     expect(planBlock).toContain("entitledPaidShellPlan.failClosed");
@@ -298,6 +300,8 @@ describe("canonical Northline homepage dump → entitled Pro Review", () => {
     expect(intake).toContain("subscribePremiumAuthorityShorterThanAcceptedChurn");
     expect(intake).toContain("postGenerateCreateReviewSettlePlan.settleReview");
     expect(intake).toContain("postGenerateCreateReviewSettlePlan.failClosed");
+    expect(intake).toContain("ordinaryNamedTwoPartyReadyForSettle");
+    expect(intake).toContain("if (!plan.failClosed && !postGenerateAuthorityChurn.failClosed)");
     const overlayMount = intake.indexOf(
       'premiumPostCheckoutPhase !== "premium_network_recoverable" && !dismissCreateOverlaysAfterRejectOrGate',
     );
@@ -374,6 +378,71 @@ describe("canonical Northline homepage dump → entitled Pro Review", () => {
     expect(failPlan.failClosed).toBe(true);
     expect(failPlan.settleReview).toBe(false);
     expect(CREATE_FLOW_GENERATE_FAILED_CLEAR_MESSAGE).toMatch(/Try again/);
+  });
+
+  it("named 2p waits through authority churn / vs01-blocked until generate; remounts last usable", () => {
+    const northlineServices = [
+      "SERVICES AGREEMENT",
+      "",
+      "This Agreement is between Northline Robotics LLC (Jordan Lee) and Cedar Peak Analytics Inc (Sam Okonkwo).",
+      "Northline delivers robotics integration; Cedar Peak provides analytics.",
+      "Fee $12,500. Term 6 months. Governing law Texas.",
+      `${"The parties agree to the commercial terms set out in this Agreement. ".repeat(40)}`,
+    ].join("\n").trim();
+    expect(isCommerciallyUsableCreateReviewCorpus(northlineServices)).toBe(true);
+
+    // Live #212 miss: churn + vs01-blocked + empty winning BEFORE pfd returns.
+    const waitForPfd = planPostGenerateCreateReviewSettleOrFailClosed({
+      generateComplete: false,
+      vs01GateBlockedWithoutSelectedFinal: true,
+      vs01SelectedFinal: false,
+      shorterThanAcceptedChurn: true,
+      winningPremiumBodyText: "",
+      premiumRenderSource: "premium_generation_retryable",
+      ordinaryNamedTwoPartyReady: true,
+    });
+    expect(waitForPfd.failClosed).toBe(false);
+    expect(waitForPfd.settleReview).toBe(false);
+    expect(waitForPfd.dismissOverlays).toBe(false);
+
+    const remountLastUsable = planPostGenerateCreateReviewSettleOrFailClosed({
+      generateComplete: false,
+      vs01GateBlockedWithoutSelectedFinal: true,
+      vs01SelectedFinal: false,
+      shorterThanAcceptedChurn: true,
+      winningPremiumBodyText: "Short preview stub",
+      lastCommerciallyUsableCandidate: northlineServices,
+      premiumRenderSource: "rejected_paid_corpus",
+      ordinaryNamedTwoPartyReady: true,
+    });
+    expect(remountLastUsable.settleReview).toBe(true);
+    expect(remountLastUsable.failClosed).toBe(false);
+    expect(remountLastUsable.corpus).toBe(northlineServices);
+
+    const retryableServerDraft = planPostGenerateCreateReviewSettleOrFailClosed({
+      generateComplete: true,
+      vs01GateBlockedWithoutSelectedFinal: true,
+      vs01SelectedFinal: false,
+      shorterThanAcceptedChurn: true,
+      winningPremiumBodyText: northlineServices,
+      premiumRenderSource: "premium_generation_retryable",
+      ordinaryNamedTwoPartyReady: true,
+    });
+    expect(retryableServerDraft.settleReview).toBe(true);
+    expect(retryableServerDraft.failClosed).toBe(false);
+    expect(retryableServerDraft.corpus).toBe(northlineServices);
+
+    const tooMuchStillFails = planPostGenerateCreateReviewSettleOrFailClosed({
+      generateComplete: false,
+      vs01GateBlockedWithoutSelectedFinal: true,
+      vs01SelectedFinal: false,
+      shorterThanAcceptedChurn: true,
+      winningPremiumBodyText: "",
+      ordinaryNamedTwoPartyReady: false,
+    });
+    expect(tooMuchStillFails.failClosed).toBe(true);
+    expect(tooMuchStillFails.settleReview).toBe(false);
+    expect(tooMuchStillFails.dismissOverlays).toBe(true);
   });
 
   it("intake live path no longer re-latches free starter after entitled homepage resolve", () => {
