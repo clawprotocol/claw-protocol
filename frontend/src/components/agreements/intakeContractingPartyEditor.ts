@@ -18,10 +18,21 @@ export type IntakeContractingPartyRow = {
   name: string;
 };
 
-export function normalizeIntakePartyEditorRows(extracted: readonly string[]): string[] {
+export function normalizeIntakePartyEditorRows(
+  extracted: readonly string[],
+  declaredOrMinCount?: number | null,
+): string[] {
   const names = extracted.map((n) => String(n || "").replace(/\s+/g, " ").trim()).filter(Boolean);
   const rows = names.slice(0, INTAKE_PARTY_EDITOR_MAX);
-  while (rows.length < INTAKE_PARTY_EDITOR_MIN) rows.push("");
+  const declared = Number(declaredOrMinCount);
+  const minRows = Math.min(
+    INTAKE_PARTY_EDITOR_MAX,
+    Math.max(
+      INTAKE_PARTY_EDITOR_MIN,
+      Number.isFinite(declared) && declared >= 3 ? Math.floor(declared) : INTAKE_PARTY_EDITOR_MIN,
+    ),
+  );
+  while (rows.length < minRows) rows.push("");
   return rows;
 }
 
