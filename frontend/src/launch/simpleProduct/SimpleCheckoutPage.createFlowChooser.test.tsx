@@ -107,6 +107,19 @@ describe("SimpleCheckoutPage create-flow chooser on real agreement ID", () => {
     expect(navState.pathname).toBe(`/app/checkout/${REAL_AGREEMENT_ID}`);
   });
 
+  it("rewrites placeholder hop + session persist to canonical AID without restore", () => {
+    const persistId = "d0e90b0c-f301-4b18-a755-dea64b4ac6cd";
+    sessionStorage.setItem("claw_pre_auth_checkout_agreement_id_v1", persistId);
+    navState.pathname = `/app/checkout/${CREATE_FLOW_CHECKOUT_AGREEMENT_ID}`;
+    navState.search = "?tier=pro&cadence=monthly&returnTo=%2Fapp%2Fcreate%3Frestore%3DstarterReview";
+    render(<SimpleCheckoutPage agreementId={CREATE_FLOW_CHECKOUT_AGREEMENT_ID} />);
+    expect(navState.navigate).toHaveBeenCalled();
+    const dest = String(navState.navigate.mock.calls[0]?.[0] ?? "");
+    expect(dest).toContain(`/app/checkout/${persistId}`);
+    expect(dest).not.toContain(CREATE_FLOW_CHECKOUT_AGREEMENT_ID);
+    expect(dest).not.toContain("starterReview");
+  });
+
   it("strips restore=starterReview from the checkout URL when persist exists", () => {
     renderRealIdCheckout("?tier=pro&cadence=monthly&returnTo=%2Fapp%2Fcreate%3Frestore%3DstarterReview");
     expect(navState.navigate).toHaveBeenCalled();

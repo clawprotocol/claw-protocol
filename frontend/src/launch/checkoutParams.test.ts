@@ -3,6 +3,7 @@ import { CREATE_FLOW_CHECKOUT_AGREEMENT_ID } from "../components/agreements/agre
 import {
   buildAfterPayStripeReturnTo,
   buildConversionCheckoutReturnTo,
+  buildCreateFlowCheckoutHref,
   extractAgreementIdFromSendReturnUrl,
   safeReturnToForAgreement,
   parseTierIdParam,
@@ -80,6 +81,41 @@ describe("conversion checkout returnTo restore flags", () => {
       "/app/create?restore=starterReview",
     )}`;
     expect(sanitizeConversionCheckoutDest({ dest })).toBe(dest);
+  });
+
+  it("pins placeholder dest to persist and drops restore when persist is supplied", () => {
+    const dest = `/app/checkout/${CREATE_FLOW_CHECKOUT_AGREEMENT_ID}?tier=pro&cadence=monthly&returnTo=${encodeURIComponent(
+      "/app/create?restore=starterReview",
+    )}`;
+    const cleaned = sanitizeConversionCheckoutDest({ dest, persistAgreementId: persistId });
+    expect(cleaned).toBe(
+      `/app/checkout/${persistId}?tier=pro&cadence=monthly&returnTo=${encodeURIComponent("/app/create")}`,
+    );
+    expect(cleaned).not.toContain("starterReview");
+    expect(cleaned).not.toContain(CREATE_FLOW_CHECKOUT_AGREEMENT_ID);
+  });
+
+  it("Continue-with-Pro first hop threads persist AID and omits restore decoy", () => {
+    const href = buildCreateFlowCheckoutHref({ cadence: "monthly", persistAgreementId: persistId });
+    expect(href).toBe(
+      `/app/checkout/${persistId}?tier=pro&cadence=monthly&returnTo=${encodeURIComponent("/app/create")}`,
+    );
+    expect(href).not.toContain("starterReview");
+    expect(href).not.toContain(CREATE_FLOW_CHECKOUT_AGREEMENT_ID);
+  });
+
+  it("Continue-with-Pro first hop keeps restore when there is no persist ID", () => {
+    expect(buildCreateFlowCheckoutHref({ cadence: "monthly" })).toBe(
+      `/app/checkout/${CREATE_FLOW_CHECKOUT_AGREEMENT_ID}?tier=pro&cadence=monthly&returnTo=${encodeURIComponent(
+        "/app/create?restore=starterReview",
+      )}`,
+    );
+    expect(
+      buildCreateFlowCheckoutHref({
+        cadence: "monthly",
+        persistAgreementId: CREATE_FLOW_CHECKOUT_AGREEMENT_ID,
+      }),
+    ).toContain("restore=starterReview");
   });
 
   it("does not rewrite send-path returnTo on checkout dest", () => {

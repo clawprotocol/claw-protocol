@@ -1,4 +1,9 @@
-import { isRealCheckoutAgreementId } from "../auth/preAuthCheckoutAgreement";
+import {
+  isRealCheckoutAgreementId,
+  pinCheckoutPathToPreAuthAgreement,
+  readPreAuthCheckoutAgreementId,
+} from "../auth/preAuthCheckoutAgreement";
+import { CREATE_FLOW_CHECKOUT_AGREEMENT_ID } from "../components/agreements/agreementAdvancedDraftAccess";
 import type { PricingCadence } from "./pricingCadenceStorage";
 import type { LaunchPricingTier } from "./pricingTiersData";
 import { LAUNCH_PRICING_TIERS } from "./pricingTiersData";
@@ -84,6 +89,27 @@ export function buildConversionCheckoutReturnTo(persistAgreementId?: string | nu
   return appendReturnToQueryParam("/app/create", "restore", "starterReview");
 }
 
+/**
+ * Continue-with-Pro first hop.
+ * When persist/resume / pre-auth is known (arg or session), thread the real AID and
+ * omit restore=starterReview. Unpaid Back without a persist still uses the decoy.
+ */
+export function buildCreateFlowCheckoutHref(args: {
+  cadence: PricingCadence;
+  persistAgreementId?: string | null;
+  tier?: string;
+}): string {
+  const persist =
+    (isRealCheckoutAgreementId(args.persistAgreementId) ? args.persistAgreementId!.trim() : null) ||
+    readPreAuthCheckoutAgreementId();
+  const agreementId = persist || CREATE_FLOW_CHECKOUT_AGREEMENT_ID;
+  const returnTo = buildConversionCheckoutReturnTo(persist);
+  const tier = (args.tier || "pro").trim() || "pro";
+  return `/app/checkout/${encodeURIComponent(agreementId)}?tier=${encodeURIComponent(
+    tier,
+  )}&cadence=${encodeURIComponent(args.cadence)}&returnTo=${encodeURIComponent(returnTo)}`;
+}
+
 /** Strip starterReview restore from a create returnTo when persist/resume exists. */
 export function sanitizeConversionCheckoutReturnTo(args: {
   returnTo: string;
@@ -120,23 +146,25 @@ export function sanitizeConversionCheckoutDest(args: {
   const dest = (args.dest || "").trim();
   const persist =
     (isRealCheckoutAgreementId(args.persistAgreementId) ? args.persistAgreementId!.trim() : null) ||
-    realAgreementIdFromCheckoutDest(dest);
+    realAgreementIdFromCheckoutDest(dest) ||
+    readPreAuthCheckoutAgreementId();
   if (!isRealCheckoutAgreementId(persist)) return dest;
+  const pinned = pinCheckoutPathToPreAuthAgreement(dest, persist);
   try {
-    const u = new URL(dest, "http://localhost");
+    const u = new URL(pinned, "http://localhost");
     const rt = u.searchParams.get("returnTo");
-    if (!rt) return dest;
+    if (!rt) return pinned;
     const cleaned = sanitizeConversionCheckoutReturnTo({
       returnTo: rt,
       persistAgreementId: persist,
     });
-    if (cleaned === rt) return dest;
+    if (cleaned === rt) return pinned;
     if (cleaned) u.searchParams.set("returnTo", cleaned);
     else u.searchParams.delete("returnTo");
     const out = `${u.pathname}${u.search}${u.hash}`;
-    return out || dest;
+    return out || pinned;
   } catch {
-    return dest;
+    return pinned;
   }
 }
 

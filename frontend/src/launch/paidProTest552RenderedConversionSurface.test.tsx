@@ -259,6 +259,6 @@ describe("TEST552 — rendered anonymous Free Starter conversion surface", () =>
     expect(block).toContain('const cadence = "monthly"');
     expect(block).not.toContain('const cadence = "annual"');
     expect(block).toContain("checkoutAgreementId");
-    expect(block).toMatch(/\/app\/checkout\/\$\{encodeURIComponent\(checkoutAgreementId\)\}/);
+    expect(block).toContain("buildCreateFlowCheckoutHref({ cadence, persistAgreementId: checkoutAgreementId })");
   });
 });

@@ -1,5 +1,5 @@
 /** @vitest-environment jsdom */
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { render } from "@testing-library/react";
 import { SignInPage } from "./SignInPage";
 
@@ -34,6 +34,10 @@ vi.mock("../auth/stagingAuthMagicLink", () => ({
 }));
 
 describe("SignInPage checkout continuation", () => {
+  afterEach(() => {
+    sessionStorage.clear();
+  });
+
   it("resumes the exact checkout destination after authentication", () => {
     const dest =
       "/app/checkout/__claw_create_checkout__?tier=pro&cadence=monthly&returnTo=%2Fapp%2Fcreate";
@@ -42,6 +46,22 @@ describe("SignInPage checkout continuation", () => {
     authState.user = { id: "user-1" };
     render(<SignInPage />);
     expect(navState.navigate).toHaveBeenCalledWith(dest);
+  });
+
+  it("pins placeholder next to session persist and drops restore decoy", () => {
+    const persistId = "d0e90b0c-f301-4b18-a755-dea64b4ac6cd";
+    sessionStorage.setItem("claw_pre_auth_checkout_agreement_id_v1", persistId);
+    const dest = `/app/checkout/__claw_create_checkout__?tier=pro&cadence=monthly&returnTo=${encodeURIComponent(
+      "/app/create?restore=starterReview",
+    )}`;
+    navState.search = `?next=${encodeURIComponent(dest)}`;
+    navState.navigate = vi.fn();
+    authState.user = { id: "user-1" };
+    render(<SignInPage />);
+    expect(navState.navigate).toHaveBeenCalledWith(
+      `/app/checkout/${persistId}?tier=pro&cadence=monthly&returnTo=${encodeURIComponent("/app/create")}`,
+    );
+    sessionStorage.clear();
   });
 
   it("strips restore=starterReview from checkout next when persist exists", () => {

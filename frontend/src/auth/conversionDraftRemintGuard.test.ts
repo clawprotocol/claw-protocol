@@ -49,7 +49,7 @@ describe("conversion draft remint guard", () => {
   });
 
   it("Continue with Pro and checkout session body use the persist id, not the create sentinel", () => {
-    expect(intake).toContain("readPreAuthCheckoutAgreementId() ||");
+    expect(intake).toContain("readPreAuthCheckoutAgreementId()");
     expect(intake).toContain("CREATE_FLOW_CHECKOUT_AGREEMENT_ID");
     expect(checkout).toContain("createBillingCheckoutSession({");
     expect(checkout).toContain("agreementId,");
@@ -59,8 +59,8 @@ describe("conversion draft remint guard", () => {
   });
 
   it("conversion checkout returnTo omits restore=starterReview when persist exists", () => {
-    expect(intake).toContain("buildConversionCheckoutReturnTo(checkoutAgreementId)");
-    expect(intake).toContain("buildConversionCheckoutReturnTo(persistId)");
+    expect(intake).toContain("buildCreateFlowCheckoutHref({ cadence, persistAgreementId: checkoutAgreementId })");
+    expect(intake).toContain("buildCreateFlowCheckoutHref({ cadence, persistAgreementId: persistId })");
     expect(checkout).toContain("sanitizeConversionCheckoutDest");
     expect(checkout).toContain("buildConversionCheckoutReturnTo(persistAgreementId)");
   });

@@ -24,7 +24,7 @@ describe("checkout back → starter review restore (static)", () => {
   it("AgreementBuilderIntake restores checkout snapshot before home auto-generate", () => {
     expect(intake).toContain("logCheckoutBackRestoreStart");
     expect(intake).toContain("persistStarterReviewBeforeCheckout");
-    expect(intake).toContain("buildConversionCheckoutReturnTo");
+    expect(intake).toContain("buildCreateFlowCheckoutHref");
     expect(intake).not.toMatch(
       /const returnTo = encodeURIComponent\(buildCreateReturnToWithStarterReviewRestore\(\)\)/,
     );

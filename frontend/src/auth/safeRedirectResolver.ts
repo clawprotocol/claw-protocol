@@ -85,7 +85,7 @@ export function resolveSignInContinuationOpts(destinationPath: string): SignInCo
   const checkout = isSecureCheckoutPath(dest);
   const fromPath = extractAgreementIdFromCheckoutPath(dest) ?? undefined;
   if (fromPath) rememberPreAuthCheckoutAgreementId(fromPath);
-  const agreementId = fromPath ? readPreAuthCheckoutAgreementId() || fromPath : undefined;
+  const agreementId = readPreAuthCheckoutAgreementId() || fromPath || undefined;
   const pinned = agreementId ? pinCheckoutPathToPreAuthAgreement(dest, agreementId) : dest;
   const destinationPathOut = sanitizeConversionCheckoutDest({
     dest: pinned,
