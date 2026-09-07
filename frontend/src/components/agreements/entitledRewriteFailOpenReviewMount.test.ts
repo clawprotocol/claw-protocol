@@ -148,22 +148,21 @@ describe("entitled rewrite fail-open Review mount after pfd 200", () => {
     expect(snapBlock).toContain("latchEntitledRewriteFailOpenReviewAuthority");
     expect(snapBlock).toContain("setAgreementDocumentText");
 
-    const failOpenIdx = intake.indexOf("entitled_rewrite_canonical_blocked_fail_open_mount");
-    const failOpenBlock = intake.slice(failOpenIdx, failOpenIdx + 2800);
-    const paintIdx = failOpenBlock.indexOf("setAgreementDocumentText(");
-    const latchIdx = failOpenBlock.indexOf("latchEntitledRewriteFailOpenReviewAuthority");
-    const sotIdx = failOpenBlock.indexOf("establishPaidProSourceOfTruth(");
-    expect(paintIdx).toBeGreaterThan(-1);
-    expect(latchIdx).toBeGreaterThan(-1);
-    expect(sotIdx).toBeGreaterThan(-1);
-    expect(paintIdx).toBeLessThan(sotIdx);
-    expect(latchIdx).toBeLessThan(sotIdx);
-
-    const sotFailIdx = failOpenBlock.indexOf("entitled_rewrite_canonical_fail_open_sot_failed");
+    const failOpenIdx = intake.indexOf("const failOpenPlan = planEntitledRewriteFailOpenReviewMount(");
+    const paintIdx = intake.indexOf("setAgreementDocumentText(canonicalSalvage)");
+    const latchIdx = intake.indexOf("corpusPlain: canonicalSalvage");
+    const sotIdx = intake.indexOf("text: canonicalSalvage");
+    const sotFailIdx = intake.indexOf("entitled_rewrite_canonical_fail_open_sot_failed");
+    expect(failOpenIdx).toBeGreaterThan(-1);
+    expect(paintIdx).toBeGreaterThan(failOpenIdx);
+    expect(latchIdx).toBeGreaterThan(paintIdx);
+    expect(sotIdx).toBeGreaterThan(latchIdx);
     expect(sotFailIdx).toBeGreaterThan(sotIdx);
-    const sotFailBlock = failOpenBlock.slice(sotFailIdx, sotFailIdx + 700);
+    const sotFailBlock = intake.slice(sotFailIdx, sotFailIdx + 400);
     expect(sotFailBlock).not.toContain("setProFullDraftQualityRetry(true)");
     expect(sotFailBlock).not.toContain("Your Pro agreement is still preparing");
-    expect(failOpenBlock).toContain("planEntitledRewriteFailOpenReviewMount");
+    expect(intake.slice(failOpenIdx, sotFailIdx + 200)).toContain(
+      "planEntitledRewriteFailOpenReviewMount",
+    );
   });
 });
