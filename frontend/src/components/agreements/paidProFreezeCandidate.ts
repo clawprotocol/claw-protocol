@@ -822,6 +822,35 @@ export function isNonAuthoritativeFreezePartyName(name: string): boolean {
  * manifest (e.g. a 3-party recovery, a dropped Client, a phantom fifth party, or a "Party 1"
  * placeholder standing in for a legal entity).
  */
+function corpusMentionsLegalName(corpus: string, name: string): boolean {
+  const n = String(name || "").trim();
+  if (n.length < 2) return false;
+  if (corpus.includes(n)) return true;
+  const needle = n.replace(/[.,]/g, "").replace(/\s+/g, " ").trim().toLowerCase();
+  const hay = corpus.replace(/[.,]/g, "").toLowerCase();
+  return needle.length >= 4 && hay.includes(needle);
+}
+
+/**
+ * True when a commercially usable corpus already names every intake-manifest legal party.
+ * Leftover 2-party draft.parties / lagged prep.parties must not fail-close that 200 body.
+ */
+export function commercialCorpusCarriesIntakeManifestParties(
+  corpus: string | null | undefined,
+  intakeText: string | null | undefined,
+  intakeManifestCount: number,
+): boolean {
+  if (intakeManifestCount < 3) return false;
+  const text = String(corpus ?? "").trim();
+  // Same commercial floor as signature-only placeholder demotion (BE N≥3 accept ≈8.5k).
+  if (text.length < 8_500) return false;
+  const intakeNames = resolveAuthoritativeIntakePartyNames(intakeText).filter(
+    isAuthoritativeLegalEntityName,
+  );
+  if (intakeNames.length < intakeManifestCount) return false;
+  return intakeNames.slice(0, intakeManifestCount).every((name) => corpusMentionsLegalName(text, name));
+}
+
 export function assertPaidProFreezeCandidateManifestCountAgreement(
   prep: PaidProFreezeCandidatePrepResult,
   args: PreparePaidProFreezeCandidateArgs,
@@ -831,6 +860,13 @@ export function assertPaidProFreezeCandidateManifestCountAgreement(
   if (isCreatorDashboardSignerSetupResumeActive()) return;
   const intakeManifestCount = resolveAuthoritativeIntakeManifestCount(args.intakeText);
   if (intakeManifestCount < 3) return;
+
+  const corpus = String(args.text ?? prep.text ?? "");
+  // Real N≥3 premium-full-draft 200: corpus has the declared parties even if prep lagged
+  // (leftover two-party draft overlay). Do not fail-close Review on that extraction mismatch.
+  if (commercialCorpusCarriesIntakeManifestParties(corpus, args.intakeText, intakeManifestCount)) {
+    return;
+  }
 
   const placeholder = prep.parties.find((p) => isNonAuthoritativeFreezePartyName(p.name));
   if (placeholder) {
