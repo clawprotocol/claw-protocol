@@ -30247,6 +30247,17 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         );
         return;
       }
+      // Recover reassignment widens selected.source back to include "none".
+      // assertGuidedVs01SigningHandoffReady already rejected "none"; re-narrow
+      // so mapTrackCorpusSourceToHandoffSource stays type-safe (TS2345).
+      if (selected.source === "none") {
+        logGuidedSignatureTrackFailed({ reason: "corpus_not_selected" });
+        showModalIfSlow("blocked");
+        setGuidedFinalizeModalBlockedMessage(
+          "The finalized agreement is not ready for signing. Return to final review and try again.",
+        );
+        return;
+      }
 
       logGuidedSignatureCorpusSelected({
         source: selected.source,
