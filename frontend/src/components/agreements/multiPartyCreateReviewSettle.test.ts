@@ -19,10 +19,13 @@ import {
   resolveCreateFlowPreparationFailsafeMessage,
   resolvePartiesForPremiumGenerateRequest,
   resolvePartyPrepSlotCount,
+  shouldDismissCreateOverlaysAfterRejectOrGate,
   shouldDismissHomeCreateTransitionForIntakeRecovery,
+  shouldFailClosedCreateAfterRejectOrGate,
   shouldFailClosedGeneratingWithoutPipeline,
   shouldFailClosedInFlightPipelineWithoutCorpus,
   shouldFailCloseCreateAfterPremiumFullDraft,
+  isCreatePipelineRejectOrGateDecision,
   shouldInvokePremiumGenerateAfterPartyPrepCreate,
   shouldSettleProReviewAfterPremiumFullDraft,
   shouldSkipEntitledRewriteForMatchingAcceptedSnapshot,
@@ -100,6 +103,18 @@ describe("multi-party create → review settle or fail-closed", () => {
         intakeClarification: { kind: "missing_named_parties" },
       }),
     ).toBe(false);
+    expect(
+      shouldDismissHomeCreateTransitionForIntakeRecovery({
+        isGenerating: true,
+        hardError: CREATE_FLOW_GENERATE_FAILED_CLEAR_MESSAGE,
+      }),
+    ).toBe(true);
+    expect(
+      shouldDismissHomeCreateTransitionForIntakeRecovery({
+        isGenerating: true,
+        rejectOrGateBlocked: true,
+      }),
+    ).toBe(true);
   });
 
   it("fail-closes generating overlay when generate HTTP never starts", () => {
@@ -277,6 +292,8 @@ describe("multi-party create → review settle or fail-closed", () => {
     expect(intake).toContain("intakeClarification");
     expect(intake).toContain("emptyAuthorityPrepFailSafe");
     expect(intake).toContain("shouldSettleProReviewAfterPremiumFullDraft");
+    expect(intake).toContain("shouldFailClosedCreateAfterRejectOrGate");
+    expect(intake).toContain("shouldDismissHomeCreateTransitionForIntakeRecovery");
     expect(intake).toContain("overlayDeclaredPartiesOnDraft");
     expect(intake).toContain("CREATE_FLOW_GENERATE_FAILED_CLEAR_MESSAGE");
   });
@@ -303,6 +320,63 @@ describe("multi-party create → review settle or fail-closed", () => {
         premiumReviewRoute: null,
         staleIntakeOrGeneration: false,
         premiumGenerationRetryable: true,
+      }),
+    ).toBe(false);
+  });
+
+  it("placeholder-reject / corpus-gate dismisses overlays and fail-closes when corpus is not usable", () => {
+    const rejected = {
+      winningPremiumBodyText: "thin [ORG_1] stub",
+      premiumRenderSource: "rejected_paid_corpus" as const,
+      proIntentGateMessage: "Unresolved drafting placeholders remain in the Pro agreement.",
+    };
+    expect(isCreatePipelineRejectOrGateDecision(rejected)).toBe(true);
+    expect(shouldFailClosedCreateAfterRejectOrGate(rejected)).toBe(true);
+    expect(shouldSettleProReviewAfterPremiumFullDraft(rejected)).toBe(false);
+    expect(
+      shouldDismissCreateOverlaysAfterRejectOrGate({
+        rejectOrGateBlocked: true,
+        corpusCommerciallyUsable: false,
+      }),
+    ).toBe(true);
+    expect(
+      shouldDismissCreateOverlaysAfterRejectOrGate({
+        hardError: CREATE_FLOW_GENERATE_FAILED_CLEAR_MESSAGE,
+      }),
+    ).toBe(true);
+    expect(CREATE_FLOW_GENERATE_FAILED_CLEAR_MESSAGE).toMatch(/Try again/);
+  });
+
+  it("usable 2-party dump still settles Review even when a gate message is present", () => {
+    const corpus = `${"Section 1. Parties.\n".repeat(80)}IN WITNESS WHEREOF the parties execute this Agreement.`;
+    const twoParty = {
+      winningPremiumBodyText: corpus,
+      premiumRenderSource: "server_full_draft" as const,
+      staleIntakeOrGeneration: false,
+      proIntentGateMessage: "Unresolved drafting placeholders remain in the Pro agreement.",
+    };
+    expect(isCreatePipelineRejectOrGateDecision(twoParty)).toBe(true);
+    expect(shouldSettleProReviewAfterPremiumFullDraft(twoParty)).toBe(true);
+    expect(shouldFailClosedCreateAfterRejectOrGate(twoParty)).toBe(false);
+    expect(
+      shouldDismissCreateOverlaysAfterRejectOrGate({
+        rejectOrGateBlocked: true,
+        corpusCommerciallyUsable: true,
+      }),
+    ).toBe(true);
+    expect(
+      shouldTreatEntitledRewritePipelineResultAsGenerationFailure({
+        premiumDraft: { parties: [] } as never,
+        premiumParties: [],
+        recipientCandidates: [],
+        winningPremiumBodyText: corpus,
+        premiumRenderSource: "server_full_draft",
+        premiumReview: null,
+        premiumFinalizeAudit: null,
+        premiumReviewRoute: null,
+        staleIntakeOrGeneration: false,
+        premiumGenerationRetryable: true,
+        proIntentGateMessage: twoParty.proIntentGateMessage,
       }),
     ).toBe(false);
   });

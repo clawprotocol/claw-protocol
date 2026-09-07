@@ -108,6 +108,54 @@ export function shouldFailCloseCreateAfterPremiumFullDraft(input: {
   return !shouldSettleProReviewAfterPremiumFullDraft(input);
 }
 
+export type CreatePipelineRejectOrGateInput = {
+  winningPremiumBodyText?: string | null;
+  premiumRenderSource?: string | null;
+  staleIntakeOrGeneration?: boolean;
+  proIntentGateMessage?: string | null;
+  founderDetailsGateMessage?: string | null;
+};
+
+/**
+ * Existing pipeline reject/gate decision (placeholder-reject / paid-corpus reject /
+ * intent or founder gate). Do not invent a second SoT — this only reads the result.
+ */
+export function isCreatePipelineRejectOrGateDecision(
+  result: CreatePipelineRejectOrGateInput | null | undefined,
+): boolean {
+  if (!result) return false;
+  const source = String(result.premiumRenderSource || "").trim();
+  if (source === "rejected_paid_corpus") return true;
+  return Boolean(result.proIntentGateMessage || result.founderDetailsGateMessage);
+}
+
+/**
+ * After reject/gate: fail-closed unless the same settle helper says the corpus is
+ * commercially usable (ordinary 2-party dump must still reach Review).
+ */
+export function shouldFailClosedCreateAfterRejectOrGate(
+  result: CreatePipelineRejectOrGateInput | null | undefined,
+): boolean {
+  if (!isCreatePipelineRejectOrGateDecision(result)) return false;
+  return !shouldSettleProReviewAfterPremiumFullDraft(result ?? {});
+}
+
+/**
+ * Home/Generating overlays must drop once reject/gate is terminal — even if
+ * `isGenerating` is still stale (same class of miss as helper-true / overlay-never-clears).
+ */
+export function shouldDismissCreateOverlaysAfterRejectOrGate(input: {
+  rejectOrGateBlocked?: boolean;
+  corpusCommerciallyUsable?: boolean;
+  hardError?: string | null;
+  emptyAuthorityPrepFailSafe?: boolean;
+}): boolean {
+  if (input.corpusCommerciallyUsable) return true;
+  if (input.emptyAuthorityPrepFailSafe) return true;
+  if (input.hardError) return true;
+  return Boolean(input.rejectOrGateBlocked);
+}
+
 /**
  * Party-prep + labeled Party N names for the generate request.
  * Leftover 2-party draft rows must not silently drop declared party 3/4.
@@ -182,9 +230,19 @@ export function shouldDismissHomeCreateTransitionForIntakeRecovery(input: {
   emptyAuthorityPrepFailSafe?: boolean;
   createFlowPhase?: string;
   homeAutoGenerateConsumed?: boolean;
+  hardError?: string | null;
+  rejectOrGateBlocked?: boolean;
 }): boolean {
+  if (
+    shouldDismissCreateOverlaysAfterRejectOrGate({
+      rejectOrGateBlocked: input.rejectOrGateBlocked,
+      hardError: input.hardError,
+      emptyAuthorityPrepFailSafe: input.emptyAuthorityPrepFailSafe,
+    })
+  ) {
+    return true;
+  }
   if (input.isGenerating) return false;
-  if (input.emptyAuthorityPrepFailSafe) return true;
   if (input.intakeClarification) return true;
   return Boolean(
     input.homeAutoGenerateConsumed && input.createFlowPhase === "capturing_input",

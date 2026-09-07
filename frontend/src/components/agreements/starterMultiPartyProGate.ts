@@ -487,8 +487,14 @@ export function shouldResolveStarterHomeTransitionToReviewReady(input: {
   intakeClarification?: unknown;
   emptyAuthorityPrepFailSafe?: boolean;
   homeAutoGenerateConsumed?: boolean;
+  /** Terminal fail-closed — dismiss even if `isGenerating` is stale. */
+  hardError?: string | null;
+  /** placeholder-reject / corpus-gate / paid-corpus reject already decided. */
+  rejectOrGateBlocked?: boolean;
 }): boolean {
   if (input.emptyAuthorityPrepFailSafe) return true;
+  if (input.hardError) return true;
+  if (input.rejectOrGateBlocked) return true;
   if (input.intakeClarification && !input.isGenerating) return true;
   if (
     input.homeAutoGenerateConsumed &&
