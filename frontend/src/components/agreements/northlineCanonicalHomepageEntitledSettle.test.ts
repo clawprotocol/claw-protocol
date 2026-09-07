@@ -19,6 +19,7 @@ import {
   planPostGenerateCreateReviewSettleOrFailClosed,
   shouldDismissCreateOverlaysAfterRejectOrGate,
   shouldFailClosedCreateAfterRejectOrGate,
+  isIntakeOnlyOrdinaryNamedTwoPartyReady,
   shouldFailClosedPremiumProcessingWithoutPfd,
   shouldInvokePremiumGenerateAfterPartyPrepCreate,
   shouldSkipPartyPrepForOrdinaryNamedTwoParty,
@@ -307,14 +308,16 @@ describe("canonical Northline homepage dump → entitled Pro Review", () => {
     expect(intake).toContain("shouldFailClosedPremiumProcessingWithoutPfd");
     expect(intake).toContain("premiumProcessingWithoutPfdFailClosed");
     expect(intake).toContain("ordinaryNamedTwoPartyReady: ordinaryNamedTwoPartyReadyForSettle");
-    expect(intake).toContain("ordinaryNamedTwoPartyReady: currentDumpIntakeOnlyNamedTwoPartyReady");
+    expect(intake).toContain("ordinaryNamedTwoPartyReady: intakeOnlyOrdinaryNamedTwoPartyReady");
+    expect(intake).toContain("isIntakeOnlyOrdinaryNamedTwoPartyReady");
     expect(intake).not.toContain("shouldFailClosedJunkPfdHangOrEmptyAfterChurn");
     expect(intake).not.toContain("currentDumpOrdinaryNamedTwoPartyReady");
+    expect(intake).not.toContain("currentDumpIntakeOnlyNamedTwoPartyReady");
     expect(intake).toContain(
       "!plan.failClosed &&\n      !premiumProcessingWithoutPfdFailClosed &&\n      !postGenerateAuthorityChurn.failClosed",
     );
     const intakeOnlyReadyIdx = intake.indexOf(
-      "const currentDumpIntakeOnlyNamedTwoPartyReady = shouldSkipPartyPrepForOrdinaryNamedTwoParty({",
+      "const intakeOnlyOrdinaryNamedTwoPartyReady = isIntakeOnlyOrdinaryNamedTwoPartyReady(",
     );
     expect(intakeOnlyReadyIdx).toBeGreaterThan(-1);
     const intakeOnlyReadyBlock = intake.slice(intakeOnlyReadyIdx, intakeOnlyReadyIdx + 240);
@@ -326,7 +329,7 @@ describe("canonical Northline homepage dump → entitled Pro Review", () => {
       intake.lastIndexOf("if (", failsafeTimerIdx),
       failsafeTimerIdx,
     );
-    expect(failsafeTimerBlock).toContain("currentDumpIntakeOnlyNamedTwoPartyReady");
+    expect(failsafeTimerBlock).toContain("intakeOnlyOrdinaryNamedTwoPartyReady");
     expect(failsafeTimerBlock).not.toContain("ordinaryNamedTwoPartyReadyForSettle");
     const settleIdx = intake.indexOf("const settle =");
     const settleBlock = intake.slice(settleIdx, settleIdx + 280);
@@ -533,7 +536,7 @@ describe("canonical Northline homepage dump → entitled Pro Review", () => {
     expect(namedAfterPfdWithUsable.corpus).toBe(northlineServices);
   });
 
-  it("premium processing failsafe waits on Northline and fail-closes junk without pfd", () => {
+  it("premium processing failsafe waits on Northline and fail-closes OOB/incomplete without pfd", () => {
     const hang = {
       premiumPostCheckoutProcessing: true,
       preparingOrGenerating: true,
@@ -542,41 +545,35 @@ describe("canonical Northline homepage dump → entitled Pro Review", () => {
       preparingStartedAtMs: 1_000,
       nowMs: 1_000 + CREATE_FLOW_GENERATING_WITHOUT_PIPELINE_FAILSAFE_MS,
     } as const;
-    expect(shouldSkipPartyPrepForOrdinaryNamedTwoParty({ intakeText: NORTHLINE_CANONICAL })).toBe(
-      true,
-    );
+    expect(isIntakeOnlyOrdinaryNamedTwoPartyReady(NORTHLINE_CANONICAL)).toBe(true);
     expect(
       shouldFailClosedPremiumProcessingWithoutPfd({
         ...hang,
-        ordinaryNamedTwoPartyReady: shouldSkipPartyPrepForOrdinaryNamedTwoParty({
-          intakeText: NORTHLINE_CANONICAL,
-        }),
+        ordinaryNamedTwoPartyReady: isIntakeOnlyOrdinaryNamedTwoPartyReady(NORTHLINE_CANONICAL),
       }),
     ).toBe(false);
-    const leftoverNorthlineRows = ["Northline Robotics LLC", "Cedar Peak Analytics Inc"];
-    const tooMuch =
-      "Need a deal with way too much exclusivity forever, 40% equity, revenue share, every affiliate signs, and no legal names.";
+    const leftoverNamedTwoPartyRows = ["Prior Party Alpha LLC", "Prior Party Beta Inc"];
+    const incomplete =
+      "Need a services arrangement, fee later, term TBD, no legal names yet.";
+    const oobDump =
+      "sketch a deal from a vibe, revenue share TBD, affiliates maybe, names unknown.";
     expect(
       shouldSkipPartyPrepForOrdinaryNamedTwoParty({
-        intakeText: tooMuch,
-        partyRows: leftoverNorthlineRows,
+        intakeText: incomplete,
+        partyRows: leftoverNamedTwoPartyRows,
       }),
     ).toBe(true);
-    expect(shouldSkipPartyPrepForOrdinaryNamedTwoParty({ intakeText: tooMuch })).toBe(false);
+    expect(isIntakeOnlyOrdinaryNamedTwoPartyReady(incomplete)).toBe(false);
     expect(
       shouldFailClosedPremiumProcessingWithoutPfd({
         ...hang,
-        ordinaryNamedTwoPartyReady: shouldSkipPartyPrepForOrdinaryNamedTwoParty({
-          intakeText: tooMuch,
-        }),
+        ordinaryNamedTwoPartyReady: isIntakeOnlyOrdinaryNamedTwoPartyReady(incomplete),
       }),
     ).toBe(true);
     expect(
       shouldFailClosedPremiumProcessingWithoutPfd({
         ...hang,
-        ordinaryNamedTwoPartyReady: shouldSkipPartyPrepForOrdinaryNamedTwoParty({
-          intakeText: "money vibe only, exclusivity forever, 40 percent equity, no parties named.",
-        }),
+        ordinaryNamedTwoPartyReady: isIntakeOnlyOrdinaryNamedTwoPartyReady(oobDump),
       }),
     ).toBe(true);
     expect(

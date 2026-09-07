@@ -148,6 +148,7 @@ import {
   shouldDismissCreateOverlaysAfterRejectOrGate,
   shouldDismissHomeCreateTransitionForIntakeRecovery,
   shouldFailClosedCreateAfterRejectOrGate,
+  isIntakeOnlyOrdinaryNamedTwoPartyReady,
   shouldFailClosedPremiumProcessingWithoutPfd,
   shouldInvokePremiumGenerateAfterPartyPrepCreate,
   shouldRemapGenerationRetryableSalvageForCreateSettle,
@@ -26589,11 +26590,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     intakeText: intakeCombined || readOriginalUserIntakeRaw() || "",
     partyRows: intakePartyEditorRows,
   });
-  // Failsafe / overlay timer: current dump only. Leftover party-prep rows from a
-  // prior Northline walk must not make junk look named-2p ready.
-  const currentDumpIntakeOnlyNamedTwoPartyReady = shouldSkipPartyPrepForOrdinaryNamedTwoParty({
-    intakeText: intakeCombined || readOriginalUserIntakeRaw() || "",
-  });
+  // Universal entitled OOB/incomplete clarity hold: current dump, intake only.
+  // Leftover party-prep rows from a prior named-2p walk must not suppress
+  // fail-close + Preparing dismiss for any other dump.
+  const intakeOnlyOrdinaryNamedTwoPartyReady = isIntakeOnlyOrdinaryNamedTwoPartyReady(
+    intakeCombined || readOriginalUserIntakeRaw() || "",
+  );
   const vs01CorpusGateBlockedWithoutSelectedFinal = isVs01CorpusGateBlockedWithoutSelectedFinal({
     allowed: vs01FinalCorpusGate.allowed,
     blockReason: vs01FinalCorpusGate.blockReason,
@@ -26665,7 +26667,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     displayPhase === "generating_draft" ||
     displayPhase === "hydrating_generated";
   const premiumProcessingWithoutPfdFailClosed = shouldFailClosedPremiumProcessingWithoutPfd({
-    ordinaryNamedTwoPartyReady: currentDumpIntakeOnlyNamedTwoPartyReady,
+    ordinaryNamedTwoPartyReady: intakeOnlyOrdinaryNamedTwoPartyReady,
     premiumPostCheckoutProcessing:
       premiumPostCheckoutPhase === "processing" ||
       premiumPostCheckoutPhase === "generation_retry",
@@ -26706,7 +26708,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     if (
       !premiumProcessingOrPreparingOverlay ||
       premiumGenerateCompleted ||
-      currentDumpIntakeOnlyNamedTwoPartyReady ||
+      intakeOnlyOrdinaryNamedTwoPartyReady ||
       vs01FinalCorpusGate.allowed ||
       postGenerateCreateReviewSettlePlan.settleReview
     ) {
@@ -26723,7 +26725,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   }, [
     premiumProcessingOrPreparingOverlay,
     premiumGenerateCompleted,
-    currentDumpIntakeOnlyNamedTwoPartyReady,
+    intakeOnlyOrdinaryNamedTwoPartyReady,
     vs01FinalCorpusGate.allowed,
     postGenerateCreateReviewSettlePlan.settleReview,
   ]);
