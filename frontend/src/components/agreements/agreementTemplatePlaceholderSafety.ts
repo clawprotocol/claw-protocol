@@ -78,8 +78,13 @@ export type PlaceholderTokenDecision = {
   isExecutionContext?: boolean;
 };
 
-/** Paid Pro bodies below this length do not get signature-only fatal demotion. */
-export const PAID_PRO_SIGNATURE_ACCEPT_MIN_BODY_LEN = 18_000;
+/**
+ * Signature-only fatal demotion floor for commercially usable Pro corpora.
+ * Aligns with the BE N≥3 accept floor (~8.5k). Salvaged multiparty drafts are
+ * routinely ~9–16k (live sfd_len≈15k) — the old 18k floor false-rejected those.
+ * Hollow / insert / mustache junk still stays fatal.
+ */
+export const PAID_PRO_SIGNATURE_ACCEPT_MIN_BODY_LEN = 8_500;
 
 export type PlaceholderPartyResolution = {
   names: string[];
@@ -1445,10 +1450,21 @@ export function analyzeTemplatePlaceholderFragments(
   ctx: Pick<PlaceholderSafetyContext, "intakeRaw" | "partyNames">,
 ): PlaceholderTokenDecision[] {
   const prepared = prepareAgreementTextForPlaceholderScan(text);
-  const partyNames = resolvePlaceholderPartyNames(ctx, prepared);
-  return scanTemplatePlaceholderMatches(prepared, ctx.intakeRaw).map(({ token, index }) =>
-    classifyTemplateFragment(token, prepared, index, { partyNames, intakeRaw: ctx.intakeRaw }),
+  const partyResolution = resolvePlaceholderPartyNamesWithMeta(ctx, prepared);
+  const classified = scanTemplatePlaceholderMatches(prepared, ctx.intakeRaw).map(({ token, index }) =>
+    classifyTemplateFragment(token, prepared, index, {
+      partyNames: partyResolution.names,
+      intakeRaw: ctx.intakeRaw,
+    }),
   );
+  // Same demotion as finalize / rejectPremiumBody — N≥3 ~15k corpora with
+  // notice/signature field stubs must not false-reject after premium-full-draft 200.
+  const signatureDemotion = demotePaidProSignatureOnlyFatals(
+    classified,
+    prepared.length,
+    partyResolution,
+  );
+  return demoteNoticeSignerSetupDraftingFatals(signatureDemotion.decisions).decisions;
 }
 
 /** Scan-only placeholder gate for starter/free surfaces — never mutates document text. */
