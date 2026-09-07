@@ -7492,7 +7492,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       }
       const vs01GateAfterGenerate = resolveFinalVs01CorpusOrBlock({
         agreementCorpusText: (result.winningPremiumBodyText || "").trim(),
-        draft: (gateDraft ?? null) as AgreementDraft | null,
+        draft: (gateDraft ?? null) as unknown as AgreementDraft | null,
         guidedPro: true,
         premiumInProgress: false,
         premiumComplete: (result.winningPremiumBodyText || "").trim().length >= VS01_CORPUS_PREFERRED_MIN_LEN,
