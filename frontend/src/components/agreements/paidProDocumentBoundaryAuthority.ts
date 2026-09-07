@@ -23,6 +23,10 @@ import {
 } from "./paidProAcceptanceExecutionBlockInvariant";
 import { scanUnresolvedRenderTokens } from "./userVisibleRenderTokenAuthority";
 import { paidProVerboseQaLogsEnabled } from "./paidProPerfLogging";
+import {
+  isLeftoverOverlayIdentitySlotToken,
+  shouldAcceptPaidProCommercialFieldStubsAfterPfd200,
+} from "./agreementTemplatePlaceholderSafety";
 
 export type PaidProDocumentBoundaryAuthorityOpts = PaidProNoticeContactAuthorityOpts & {
   /** When true (freeze path), unresolved boundary violations throw. */
@@ -70,16 +74,14 @@ function acceptCommercialFieldStubsOnMultipartyPfd200(
   text: string,
   intakeText?: string | null,
 ): boolean {
-  const body = String(text || "").trim();
-  if (body.length < 8_500) return false;
-  const tokens = scanUnresolvedRenderTokens(body);
-  if (tokens.length > 48) return false;
-  if (tokens.length > 0 && !tokens.every((m) => isCommercialFieldStubToken(m.token))) {
-    return false;
-  }
-  const intake = String(intakeText ?? "");
-  if (/(?:^|\n)\s*Party\s*[3-9]\s*:/im.test(intake)) return true;
-  return /\b(?:by and among|entered into by and among)\b/i.test(body);
+  return shouldAcceptPaidProCommercialFieldStubsAfterPfd200({
+    text,
+    intakeRaw: intakeText,
+  });
+}
+
+function isBoundaryAcceptablePfd200Token(token: string): boolean {
+  return isCommercialFieldStubToken(token) || isLeftoverOverlayIdentitySlotToken(token);
 }
 
 function lineHasInlineFusedTopLevelSection(line: string): boolean {
@@ -265,7 +267,7 @@ export function applyPaidProDocumentBoundaryAuthority(
     : [...new Set(scanUnresolvedRenderTokens(out).map((m) => m.token))];
   const commercialFieldStubsOnly =
     unresolvedRenderTokens.length > 0 &&
-    unresolvedRenderTokens.every((t) => isCommercialFieldStubToken(t)) &&
+    unresolvedRenderTokens.every((t) => isBoundaryAcceptablePfd200Token(t)) &&
     acceptCommercialFieldStubsOnMultipartyPfd200(out, opts?.intakeText);
   const contactOk = contact.ok || commercialFieldStubsOnly;
   const ok = violations.length === 0 && contactOk;
@@ -304,7 +306,7 @@ export function assertPaidProDocumentBoundaryAuthorityForFreeze(
       !result.ok &&
       result.violations.length === 0 &&
       lastUnresolvedTokens.length > 0 &&
-      lastUnresolvedTokens.every((t) => isCommercialFieldStubToken(t)) &&
+      lastUnresolvedTokens.every((t) => isBoundaryAcceptablePfd200Token(t)) &&
       acceptCommercialFieldStubsOnMultipartyPfd200(out, opts?.intakeText)
     ) {
       return out;
