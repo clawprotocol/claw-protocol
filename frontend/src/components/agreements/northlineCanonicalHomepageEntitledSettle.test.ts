@@ -15,6 +15,7 @@ import { assessStarterComplexityGate } from "./starterMultiPartyProGate";
 import {
   CREATE_FLOW_GENERATE_FAILED_CLEAR_MESSAGE,
   CREATE_FLOW_GENERATING_WITHOUT_PIPELINE_FAILSAFE_MS,
+  CREATE_FLOW_NAMED_TWO_PARTY_WITHOUT_PFD_FAILSAFE_MS,
   isCommerciallyUsableCreateReviewCorpus,
   planHardDismissPremiumProcessingOverlaysOnFailsafe,
   planPostGenerateCreateReviewSettleOrFailClosed,
@@ -329,9 +330,13 @@ describe("canonical Northline homepage dump → entitled Pro Review", () => {
       intake.lastIndexOf("if (", failsafeTimerIdx),
       failsafeTimerIdx,
     );
-    expect(failsafeTimerBlock).toContain("currentDumpIntakeOnlyNamedTwoPartyReady");
+    expect(failsafeTimerBlock).toContain("premiumGenerateCompleted");
+    expect(failsafeTimerBlock).not.toContain("currentDumpIntakeOnlyNamedTwoPartyReady");
     expect(failsafeTimerBlock).not.toContain("ordinaryNamedTwoPartyReadyForSettle");
     expect(failsafeTimerBlock).not.toContain("postGenerateCreateReviewSettlePlan.settleReview");
+    expect(intake).not.toContain("isCoherentOrdinaryNamedTwoPartyForFailsafe");
+    expect(intake).not.toContain("looksOverSpecifiedOrComplexityIntake");
+    expect(intake).not.toContain("hasOrdinaryNamedTwoPartyCommercialCoherence");
     expect(intake).toContain("planHardDismissPremiumProcessingOverlaysOnFailsafe");
     expect(intake).toContain("setPremiumPostCheckoutPhase(premiumProcessingFailsafeOverlayDismiss.premiumPostCheckoutPhase)");
     expect(intake).toContain("setDisplayPhase(premiumProcessingFailsafeOverlayDismiss.displayPhase)");
@@ -635,6 +640,47 @@ describe("canonical Northline homepage dump → entitled Pro Review", () => {
         ...hang,
         ordinaryNamedTwoPartyReady: true,
         hasAuthoritativeReviewBody: usable.settleReview,
+      }),
+    ).toBe(false);
+
+    const namedTooMuch =
+      "Services agreement between Acme Robotics LLC and Cedar Peak Analytics Inc. Exclusive forever, 40% equity, every affiliate signs, revenue share, perpetual assignment, no termination.";
+    expect(shouldSkipPartyPrepForOrdinaryNamedTwoParty({ intakeText: namedTooMuch })).toBe(true);
+    // (a) named-2p + no pfd + elapsed ≥ absolute bound → failsafe + hard-dismiss.
+    const namedAbsoluteHang = {
+      ...hang,
+      nowMs: 1_000 + CREATE_FLOW_NAMED_TWO_PARTY_WITHOUT_PFD_FAILSAFE_MS,
+    };
+    const namedNoPfd = shouldFailClosedPremiumProcessingWithoutPfd({
+      ...namedAbsoluteHang,
+      ordinaryNamedTwoPartyReady: true,
+      pfdHttpCompleted: false,
+    });
+    expect(namedNoPfd).toBe(true);
+    const namedDismiss = planHardDismissPremiumProcessingOverlaysOnFailsafe({
+      failClosed: namedNoPfd,
+    });
+    expect(namedDismiss.dismissOverlays).toBe(true);
+    if (namedDismiss.dismissOverlays) {
+      expect(namedDismiss.premiumPostCheckoutPhase).toBe(null);
+      expect(namedDismiss.clearInFlightFlags).toBe(true);
+    }
+    // (b) named-2p + pfdHttpCompleted → still wait / settle (KEEP Northline).
+    expect(
+      shouldFailClosedPremiumProcessingWithoutPfd({
+        ...namedAbsoluteHang,
+        ordinaryNamedTwoPartyReady: true,
+        pfdHttpCompleted: true,
+      }),
+    ).toBe(false);
+    // 15s named-2p without pfd still waits (do not collapse to junk bound).
+    expect(
+      shouldFailClosedPremiumProcessingWithoutPfd({
+        ...hang,
+        ordinaryNamedTwoPartyReady: shouldSkipPartyPrepForOrdinaryNamedTwoParty({
+          intakeText: NORTHLINE_CANONICAL,
+        }),
+        pfdHttpCompleted: false,
       }),
     ).toBe(false);
   });
