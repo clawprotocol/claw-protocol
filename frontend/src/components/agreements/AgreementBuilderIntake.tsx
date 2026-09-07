@@ -7509,6 +7509,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         allowed: vs01GateAfterGenerate.allowed,
         blockReason: vs01GateAfterGenerate.blockReason,
         selectedFinal: vs01GateAfterGenerate.allowed,
+        premiumInProgress: vs01GateAfterGenerate.premiumInProgress,
+        generateComplete: true,
       });
       result = withCreatePipelineVs01CorpusGate(result, vs01GateAfterGenerate);
       if (shouldFailClosedCreateAfterRejectOrGate(result)) {
@@ -26260,6 +26262,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       allowed: value.allowed,
       blockReason: value.blockReason,
       selectedFinal: value.allowed,
+      premiumInProgress: value.premiumInProgress,
+      generateComplete: value.premiumComplete || !value.premiumInProgress,
     });
     return value;
   }, [
@@ -26283,12 +26287,22 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     allowed: vs01FinalCorpusGate.allowed,
     blockReason: vs01FinalCorpusGate.blockReason,
     selectedFinal: vs01FinalCorpusGate.allowed,
+    premiumInProgress: vs01FinalCorpusGate.premiumInProgress,
+    generateComplete:
+      vs01FinalCorpusGate.premiumComplete || !vs01FinalCorpusGate.premiumInProgress,
   });
+  const vs01GateCorpusCommerciallyUsable =
+    Boolean(vs01FinalCorpusGate.allowed) ||
+    shouldSettleProReviewAfterPremiumFullDraft({
+      winningPremiumBodyText:
+        lastPremiumWinningCorpusRef.current || premiumPipelineOutputBodyRef.current || "",
+      premiumRenderSource: lastPremiumPipelineRenderSourceRef.current,
+    });
   const dismissCreateOverlaysAfterRejectOrGate = shouldDismissCreateOverlaysAfterRejectOrGate({
     rejectOrGateBlocked: vs01CorpusGateBlockedWithoutSelectedFinal,
     hardError,
     emptyAuthorityPrepFailSafe,
-    corpusCommerciallyUsable: vs01FinalCorpusGate.allowed,
+    corpusCommerciallyUsable: vs01GateCorpusCommerciallyUsable,
   });
 
   useEffect(() => {
