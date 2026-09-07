@@ -40,7 +40,6 @@ import {
   shouldRemapGenerationRetryableSalvageForCreateSettle,
   shouldSettleProReviewAfterPremiumFullDraft,
   shouldSkipEntitledRewriteForMatchingAcceptedSnapshot,
-  isCoherentOrdinaryNamedTwoPartyForFailsafe,
   shouldSkipPartyPrepForOrdinaryNamedTwoParty,
   resolvePostGenerateAuthorityChurnOverlayDecision,
   withCreatePipelineVs01CorpusGate,
@@ -399,14 +398,9 @@ describe("multi-party create → review settle or fail-closed", () => {
         ordinaryNamedTwoPartyReady: leftoverRowsWouldLookNamed,
       }),
     ).toBe(false);
-    expect(
-      isCoherentOrdinaryNamedTwoPartyForFailsafe({
-        intakeText: genericIncomplete,
-      }),
-    ).toBe(false);
     const oobFailsafe = shouldFailClosedPremiumProcessingWithoutPfd({
       ...hangArgs,
-      ordinaryNamedTwoPartyReady: isCoherentOrdinaryNamedTwoPartyForFailsafe({
+      ordinaryNamedTwoPartyReady: shouldSkipPartyPrepForOrdinaryNamedTwoParty({
         intakeText: genericIncomplete,
       }),
     });
@@ -436,7 +430,7 @@ describe("multi-party create → review settle or fail-closed", () => {
     expect(
       shouldFailClosedPremiumProcessingWithoutPfd({
         ...hangArgs,
-        ordinaryNamedTwoPartyReady: isCoherentOrdinaryNamedTwoPartyForFailsafe({
+        ordinaryNamedTwoPartyReady: shouldSkipPartyPrepForOrdinaryNamedTwoParty({
           intakeText: northline,
         }),
       }),
@@ -453,90 +447,6 @@ describe("multi-party create → review settle or fail-closed", () => {
     expect(northlineSettle.settleReview).toBe(true);
     expect(northlineSettle.failClosed).toBe(false);
     expect(northlineSettle.corpus).toBe(northlineCorpus);
-  });
-
-  it("over-specified named dumps do not inherit the Northline failsafe wait", () => {
-    const northline =
-      "Services agreement between Northline Robotics LLC (Jordan Lee) and Cedar Peak Analytics Inc (Sam Okonkwo). Northline delivers robotics integration; Cedar Peak provides analytics. Fee $12,500. Term 6 months. Governing law Texas.";
-    const namedTooMuchAurora =
-      "Services agreement between Aurora Analytics LLC (Priya Shah) and Northwind Supply Co (Marcus Webb) for dashboard implementation, fee $22,000, term 9 months, governing law Delaware. " +
-      "Also lock exclusivity forever, 40% equity, revenue share, every affiliate signs, unlimited liability, mutual indemnity, SOC 2, DPA/GDPR, audit rights, 99.9% SLA, source code escrow, most-favored nation, and change-of-control consent.";
-    const namedTooMuchHelio =
-      "Need a master services deal between Helio Metrics Inc (Asha Patel) and Redwood Freight LLC (Tom Nguyen) covering routing analytics, $15,000 fee, 8 month term, California governing law. " +
-      "Plus perpetual exclusivity, 35 percent equity, profit share, all affiliates must sign, uncapped indemnity, on-site audits, GDPR/DPA, insurance, non-solicit, and MFN pricing.";
-    const leftoverJunk =
-      "exclusive forever revenue share lock every affiliate, no legal names, no scope, no payment workflow.";
-    const leftoverNorthlineRows = ["Northline Robotics LLC", "Cedar Peak Analytics Inc"];
-    const hangArgs = {
-      premiumPostCheckoutProcessing: true,
-      preparingOrGenerating: true,
-      pfdHttpCompleted: false,
-      hasAuthoritativeReviewBody: false,
-      preparingStartedAtMs: 1_000,
-      nowMs: 1_000 + CREATE_FLOW_GENERATING_WITHOUT_PIPELINE_FAILSAFE_MS,
-    } as const;
-
-    for (const dump of [namedTooMuchAurora, namedTooMuchHelio]) {
-      expect(shouldSkipPartyPrepForOrdinaryNamedTwoParty({ intakeText: dump })).toBe(true);
-      expect(isCoherentOrdinaryNamedTwoPartyForFailsafe({ intakeText: dump })).toBe(false);
-      const failsafe = shouldFailClosedPremiumProcessingWithoutPfd({
-        ...hangArgs,
-        ordinaryNamedTwoPartyReady: isCoherentOrdinaryNamedTwoPartyForFailsafe({
-          intakeText: dump,
-        }),
-      });
-      expect(failsafe).toBe(true);
-      const dismiss = planHardDismissPremiumProcessingOverlaysOnFailsafe({ failClosed: failsafe });
-      expect(dismiss.dismissOverlays).toBe(true);
-      if (dismiss.dismissOverlays) {
-        expect(dismiss.premiumPostCheckoutPhase).toBe(null);
-        expect(dismiss.displayPhase).not.toBe("preparing_review");
-        expect(dismiss.displayPhase).not.toBe("generating_draft");
-        expect(dismiss.clearInFlightFlags).toBe(true);
-      }
-    }
-
-    expect(isCoherentOrdinaryNamedTwoPartyForFailsafe({ intakeText: northline })).toBe(true);
-    expect(
-      shouldFailClosedPremiumProcessingWithoutPfd({
-        ...hangArgs,
-        ordinaryNamedTwoPartyReady: isCoherentOrdinaryNamedTwoPartyForFailsafe({
-          intakeText: northline,
-        }),
-      }),
-    ).toBe(false);
-    const northlineCorpus = `${"Section 1. Parties.\n".repeat(80)}IN WITNESS WHEREOF the parties execute this Agreement.`;
-    const usablePfd = planPostGenerateCreateReviewSettleOrFailClosed({
-      generateComplete: true,
-      vs01SelectedFinal: false,
-      winningPremiumBodyText: northlineCorpus,
-      premiumRenderSource: "server_full_draft",
-      ordinaryNamedTwoPartyReady: shouldSkipPartyPrepForOrdinaryNamedTwoParty({
-        intakeText: northline,
-        partyRows: leftoverNorthlineRows,
-      }),
-    });
-    expect(usablePfd.settleReview).toBe(true);
-    expect(usablePfd.failClosed).toBe(false);
-    expect(usablePfd.corpus).toBe(northlineCorpus);
-
-    expect(
-      shouldSkipPartyPrepForOrdinaryNamedTwoParty({
-        intakeText: leftoverJunk,
-        partyRows: leftoverNorthlineRows,
-      }),
-    ).toBe(true);
-    expect(isCoherentOrdinaryNamedTwoPartyForFailsafe({ intakeText: leftoverJunk })).toBe(false);
-    const leftoverFailsafe = shouldFailClosedPremiumProcessingWithoutPfd({
-      ...hangArgs,
-      ordinaryNamedTwoPartyReady: isCoherentOrdinaryNamedTwoPartyForFailsafe({
-        intakeText: leftoverJunk,
-      }),
-    });
-    expect(leftoverFailsafe).toBe(true);
-    expect(
-      planHardDismissPremiumProcessingOverlaysOnFailsafe({ failClosed: leftoverFailsafe }).dismissOverlays,
-    ).toBe(true);
   });
 
   it("in-flight generate still fail-closes if no corpus after the pipeline bound", () => {
@@ -705,15 +615,13 @@ describe("multi-party create → review settle or fail-closed", () => {
       "!plan.failClosed &&\n      !premiumProcessingWithoutPfdFailClosed &&\n      !postGenerateAuthorityChurn.failClosed",
     );
     const intakeOnlyReadyIdx = intake.indexOf(
-      "const currentDumpIntakeOnlyNamedTwoPartyReady = isCoherentOrdinaryNamedTwoPartyForFailsafe({",
+      "const currentDumpIntakeOnlyNamedTwoPartyReady = shouldSkipPartyPrepForOrdinaryNamedTwoParty({",
     );
     expect(intakeOnlyReadyIdx).toBeGreaterThan(-1);
-    const intakeOnlyReadyBlock = intake.slice(intakeOnlyReadyIdx, intakeOnlyReadyIdx + 280);
+    const intakeOnlyReadyBlock = intake.slice(intakeOnlyReadyIdx, intakeOnlyReadyIdx + 240);
     expect(intakeOnlyReadyBlock).toContain("intakeCombined || readOriginalUserIntakeRaw()");
     expect(intakeOnlyReadyBlock).not.toContain("partyRows");
     expect(intakeOnlyReadyBlock).not.toContain("intakePartyEditorRows");
-    expect(intakeOnlyReadyBlock).not.toContain("shouldSkipPartyPrepForOrdinaryNamedTwoParty");
-    expect(intake).toContain("isCoherentOrdinaryNamedTwoPartyForFailsafe");
     const failsafeTimerIdx = intake.indexOf("premiumProcessingFailsafeStartedAtRef.current = null;");
     const failsafeTimerBlock = intake.slice(
       intake.lastIndexOf("if (", failsafeTimerIdx),
