@@ -3178,11 +3178,6 @@ async function runPremiumCompletionInner(
           shouldAcceptPaidProCommercialFieldStubsAfterPfd200({
             text: doc,
             intakeRaw: rawForSoT || rawIntake,
-            partyNames: resolvePremiumCompletionCanonicalPartyNames(
-              merged,
-              rawForSoT || rawIntake,
-              doc,
-            ),
             remainingDetail: ph.remainingDetail,
           });
         if (!ph.ok && !noticeScaffoldingOnlyBlock && !commercialFieldStubOnlyBlock) {

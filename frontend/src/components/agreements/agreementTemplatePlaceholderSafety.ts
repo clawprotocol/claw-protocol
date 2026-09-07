@@ -5,10 +5,7 @@
 
 import {
   bindUnusedFilledPartyNamesIntoLeftoverOrgSlots,
-  collectFilledPartyNamesForLeftoverOrgBind,
-  corpusAlreadyNamesFilledParty,
   extractAgreementEntityCandidates,
-  listLeftoverNumberedOrgTokens,
   substitutePartyPlaceholdersInUserFacingText,
   textContainsUnresolvedIdentityPlaceholders,
 } from "../../agreement/partyPlaceholderDisplay";
@@ -759,30 +756,6 @@ export function isLeftoverOverlayIdentitySlotToken(token: string): boolean {
   return /^ENTITY_NAME$/i.test(n);
 }
 
-/** Numbered leftover overlay stubs only — not insert / mustache / CLIENT LEGAL NAME. */
-export function isLeftoverNumberedOrgIdentityToken(token: string): boolean {
-  return /^(?:ORG|PARTY)_\d+$/i.test(normalizePlaceholderToken(token));
-}
-
-/**
- * After unused-name bind is a no-op: leftover [ORG_n] remain, no unused filled
- * names remain, and the commercial corpus already names all filled N≥3 party-prep
- * names. Restore #201/#202 leftover-overlay accept without treating leftover
- * tokens as named parties (extract can miss names like "BrightPay Ops").
- */
-export function shouldAcceptLeftoverNumberedOrgAfterUnusedBind(args: {
-  text: string;
-  intakeRaw?: string | null;
-  partyNames?: readonly (string | null | undefined)[] | null;
-}): boolean {
-  const text = String(args.text || "");
-  if (text.trim().length < PAID_PRO_SIGNATURE_ACCEPT_MIN_BODY_LEN) return false;
-  if (listLeftoverNumberedOrgTokens(text).length === 0) return false;
-  const filled = collectFilledPartyNamesForLeftoverOrgBind(args.partyNames, args.intakeRaw);
-  if (filled.length < 3) return false;
-  return filled.every((n) => corpusAlreadyNamesFilledParty(text, n));
-}
-
 export function isAcceptablePaidProPfd200LeftoverToken(
   token: string,
   commerciallyNamed: boolean,
@@ -810,7 +783,6 @@ export function remainingFatalsAreCommercialOrLeftoverOverlayOnly(
 export function shouldAcceptPaidProCommercialFieldStubsAfterPfd200(args: {
   text: string;
   intakeRaw?: string | null;
-  partyNames?: readonly (string | null | undefined)[] | null;
   remainingDetail?: readonly PlaceholderTokenDecision[];
 }): boolean {
   const text = String(args.text || "").trim();
@@ -819,16 +791,8 @@ export function shouldAcceptPaidProCommercialFieldStubsAfterPfd200(args: {
   const intakeNames = extractAgreementEntityCandidates(intake).filter(isAuthoritativeLegalEntityName);
   const corpusBetween = extractPartyNamesFromCorpusBetween(text);
   const corpusLegalNames = extractAuthoritativeLegalNamesFromCommercialCorpus(text);
-  const leftoverNamed = shouldAcceptLeftoverNumberedOrgAfterUnusedBind({
-    text,
-    intakeRaw: args.intakeRaw,
-    partyNames: args.partyNames,
-  });
   const commerciallyNamed =
-    leftoverNamed ||
-    intakeNames.length >= 3 ||
-    corpusBetween.length >= 3 ||
-    corpusLegalNames.length >= 3;
+    intakeNames.length >= 3 || corpusBetween.length >= 3 || corpusLegalNames.length >= 3;
   if (args.remainingDetail && args.remainingDetail.length > 0) {
     const fatals = args.remainingDetail.filter((d) => d.fatal);
     if (
@@ -1631,35 +1595,7 @@ export function analyzeTemplatePlaceholderFragments(
     prepared.length,
     partyResolution,
   );
-  const leftoverOrgDemotion = demoteLeftoverNumberedOrgAfterUnusedBind(
-    signatureDemotion.decisions,
-    prepared,
-    ctx.partyNames,
-    ctx.intakeRaw,
-  );
-  return demoteNoticeSignerSetupDraftingFatals(leftoverOrgDemotion.decisions).decisions;
-}
-
-function demoteLeftoverNumberedOrgAfterUnusedBind(
-  decisions: PlaceholderTokenDecision[],
-  text: string,
-  partyNames: readonly (string | null | undefined)[] | null | undefined,
-  intakeRaw: string | null | undefined,
-): { decisions: PlaceholderTokenDecision[]; demoted: boolean; demotedCount: number } {
-  if (!shouldAcceptLeftoverNumberedOrgAfterUnusedBind({ text, intakeRaw, partyNames })) {
-    return { decisions, demoted: false, demotedCount: 0 };
-  }
-  let demotedCount = 0;
-  const next = decisions.map((d) => {
-    if (!d.fatal || !isLeftoverNumberedOrgIdentityToken(d.token)) return d;
-    demotedCount += 1;
-    return {
-      ...d,
-      fatal: false,
-      category: "soft_field_label" as const,
-    };
-  });
-  return { decisions: next, demoted: demotedCount > 0, demotedCount };
+  return demoteNoticeSignerSetupDraftingFatals(signatureDemotion.decisions).decisions;
 }
 
 /** Scan-only placeholder gate for starter/free surfaces — never mutates document text. */
@@ -1822,7 +1758,6 @@ function finalizeUserVisibleAgreementPlainTextCore(
   const acceptCommercialFieldStubs = shouldAcceptPaidProCommercialFieldStubsAfterPfd200({
     text: finalText,
     intakeRaw,
-    partyNames: ctx.partyNames,
     remainingDetail,
   });
   const remainingFatalKept = acceptCommercialFieldStubs
