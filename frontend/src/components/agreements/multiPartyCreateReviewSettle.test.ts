@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { shortIntakeFingerprint } from "../../lib/agreementGenerationId";
 import { normalizeIntakePartyEditorRows } from "./intakeContractingPartyEditor";
 import { evaluateIntentionalCreateDraftSubmit } from "./agreementIntakeCapabilityGate";
+import { extractListedSigningPartyNames } from "./agreementIntakeClarification";
 import { shouldFailSafeEmptyAuthorityPreparation } from "./starterMultiPartyProGate";
 import { shouldTreatEntitledRewritePipelineResultAsGenerationFailure } from "./paidProEntitledRewriteLaunch";
 import { extractCleanPremiumParties } from "./premiumCompletionPipeline";
@@ -17,6 +18,7 @@ import {
   mergePartyPrepIntoCreateSubmitText,
   overlayDeclaredPartiesOnDraft,
   resolveCreateFlowPreparationFailsafeMessage,
+  requiredCreatePartyNameCount,
   resolvePartiesForPremiumGenerateRequest,
   resolvePartyPrepSlotCount,
   shouldDismissCreateOverlaysAfterRejectOrGate,
@@ -32,6 +34,8 @@ import {
   shouldInvokePremiumGenerateAfterPartyPrepCreate,
   shouldSettleProReviewAfterPremiumFullDraft,
   shouldSkipEntitledRewriteForMatchingAcceptedSnapshot,
+  shouldSkipPartyPrepForOrdinaryNamedTwoParty,
+  resolvePostGenerateAuthorityChurnOverlayDecision,
   withCreatePipelineVs01CorpusGate,
 } from "./multiPartyCreateReviewSettle";
 
@@ -303,6 +307,10 @@ describe("multi-party create → review settle or fail-closed", () => {
     expect(intake).toContain("isVs01CorpusGateBlockedWithoutSelectedFinal");
     expect(intake).toContain("hasAuthoritativeCreateReviewBodyForPrepFailsafe");
     expect(intake).toContain("dismissCreateOverlaysAfterRejectOrGate");
+    expect(intake).toContain("resolvePostGenerateAuthorityChurnOverlayDecision");
+    expect(intake).toContain("shouldSkipPartyPrepForOrdinaryNamedTwoParty");
+    expect(intake).toContain("hasPremiumAuthorityShorterThanAcceptedChurn");
+    expect(intake).toContain("premiumGenerateCompleted");
     const vs01AttachIdx = intake.indexOf("withCreatePipelineVs01CorpusGate(result, vs01GateAfterGenerate)");
     const rejectAfterVs01Idx = intake.indexOf("shouldFailClosedCreateAfterRejectOrGate(result)", vs01AttachIdx);
     expect(vs01AttachIdx).toBeGreaterThan(-1);
@@ -643,6 +651,137 @@ describe("multi-party create → review settle or fail-closed", () => {
       names,
     );
     expect(overlaid.parties?.map((p) => p.name)).toEqual(threeRows);
+  });
+
+  it("post-generate shorter-than-accepted churn + gate-blocked dismisses overlays and settle-or-fail-closes", () => {
+    expect(
+      isVs01CorpusGateBlockedWithoutSelectedFinal({
+        allowed: false,
+        blockReason: "premium_corpus_in_progress",
+        selectedFinal: false,
+        generateComplete: true,
+      }),
+    ).toBe(true);
+    expect(
+      isVs01CorpusGateBlockedWithoutSelectedFinal({
+        allowed: false,
+        blockReason: "premium_corpus_in_progress",
+        selectedFinal: false,
+        premiumInProgress: false,
+      }),
+    ).toBe(true);
+    expect(
+      isVs01CorpusGateBlockedWithoutSelectedFinal({
+        allowed: false,
+        blockReason: "premium_corpus_in_progress",
+        selectedFinal: false,
+      }),
+    ).toBe(false);
+    const leftoverProcessing = withCreatePipelineVs01CorpusGate(
+      {
+        winningPremiumBodyText: "",
+        premiumRenderSource: "premium_generation_retryable",
+      },
+      {
+        allowed: false,
+        blockReason: "premium_corpus_in_progress",
+        premiumInProgress: false,
+        premiumComplete: true,
+      },
+    );
+    expect(leftoverProcessing.vs01CorpusGateBlocked).toBe(true);
+    expect(isCreatePipelineRejectOrGateDecision(leftoverProcessing)).toBe(true);
+    expect(shouldFailClosedCreateAfterRejectOrGate(leftoverProcessing)).toBe(true);
+
+    const failClosedChurn = resolvePostGenerateAuthorityChurnOverlayDecision({
+      generateComplete: true,
+      shorterThanAcceptedChurn: true,
+      vs01GateBlockedWithoutSelectedFinal: true,
+      corpusCommerciallyUsable: false,
+    });
+    expect(failClosedChurn.dismissOverlays).toBe(true);
+    expect(failClosedChurn.settleReview).toBe(false);
+    expect(failClosedChurn.failClosed).toBe(true);
+    expect(
+      shouldDismissCreateOverlaysAfterRejectOrGate({
+        rejectOrGateBlocked: true,
+        corpusCommerciallyUsable: false,
+      }),
+    ).toBe(true);
+
+    const corpus = `${"Section 1. Parties.\n".repeat(80)}IN WITNESS WHEREOF the parties execute this Agreement.`;
+    const settleChurn = resolvePostGenerateAuthorityChurnOverlayDecision({
+      generateComplete: true,
+      shorterThanAcceptedChurn: true,
+      vs01GateBlockedWithoutSelectedFinal: true,
+      corpusCommerciallyUsable: shouldSettleProReviewAfterPremiumFullDraft({
+        winningPremiumBodyText: corpus,
+        premiumRenderSource: "server_full_draft",
+        staleIntakeOrGeneration: false,
+      }),
+    });
+    expect(settleChurn.dismissOverlays).toBe(true);
+    expect(settleChurn.settleReview).toBe(true);
+    expect(settleChurn.failClosed).toBe(false);
+    expect(
+      resolvePostGenerateAuthorityChurnOverlayDecision({
+        generateComplete: false,
+        shorterThanAcceptedChurn: true,
+        vs01GateBlockedWithoutSelectedFinal: true,
+        corpusCommerciallyUsable: false,
+      }).dismissOverlays,
+    ).toBe(false);
+  });
+
+  it("ordinary 2p named parties do not require party-prep when corpus/gate path should settle", () => {
+    const northline =
+      "Priya Shah of Northline Studio is hiring Diego Alvarez of Harbor Marks LLC to design a logo and brand kit for $2,400, term 30 days, governing law Texas.";
+    expect(extractListedSigningPartyNames(northline).length).toBeGreaterThanOrEqual(2);
+    expect(evaluateIntentionalCreateDraftSubmit(northline).action).toBe("proceed");
+    expect(hasFilledPartyPrepForDeclaredCreate(northline, ["", ""])).toBe(true);
+    expect(requiredCreatePartyNameCount(northline)).toBe(2);
+    expect(
+      shouldSkipPartyPrepForOrdinaryNamedTwoParty({
+        intakeText: northline,
+        partyRows: ["", ""],
+        generateComplete: true,
+        vs01GateBlockedWithoutSelectedFinal: true,
+        corpusCommerciallyUsable: false,
+      }),
+    ).toBe(true);
+    const corpus = `${"Section 1. Parties.\n".repeat(80)}IN WITNESS WHEREOF the parties execute this Agreement.`;
+    expect(
+      shouldSkipPartyPrepForOrdinaryNamedTwoParty({
+        intakeText: northline,
+        generateComplete: true,
+        corpusCommerciallyUsable: shouldSettleProReviewAfterPremiumFullDraft({
+          winningPremiumBodyText: corpus,
+          premiumRenderSource: "server_full_draft",
+        }),
+      }),
+    ).toBe(true);
+    expect(
+      shouldSkipPartyPrepForOrdinaryNamedTwoParty({
+        intakeText: THREE_PARTY_DUMP,
+        partyRows: ["", "", ""],
+        generateComplete: true,
+        vs01GateBlockedWithoutSelectedFinal: true,
+      }),
+    ).toBe(false);
+    expect(
+      shouldSkipPartyPrepForOrdinaryNamedTwoParty({
+        intakeText: "abc123",
+        generateComplete: true,
+        vs01GateBlockedWithoutSelectedFinal: true,
+      }),
+    ).toBe(false);
+    expect(
+      shouldSkipPartyPrepForOrdinaryNamedTwoParty({
+        intakeText: northline,
+        generateComplete: false,
+        vs01GateBlockedWithoutSelectedFinal: false,
+      }),
+    ).toBe(false);
   });
 
   it("two-party named intake still resolves two parties only", () => {

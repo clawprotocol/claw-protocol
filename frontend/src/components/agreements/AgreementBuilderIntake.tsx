@@ -142,12 +142,14 @@ import {
   resolvePartyPrepSlotCount,
   hasAuthoritativeCreateReviewBodyForPrepFailsafe,
   isVs01CorpusGateBlockedWithoutSelectedFinal,
+  resolvePostGenerateAuthorityChurnOverlayDecision,
   shouldDismissCreateOverlaysAfterRejectOrGate,
   shouldDismissHomeCreateTransitionForIntakeRecovery,
   shouldFailClosedCreateAfterRejectOrGate,
   shouldInvokePremiumGenerateAfterPartyPrepCreate,
   shouldSettleProReviewAfterPremiumFullDraft,
   shouldSkipEntitledRewriteForMatchingAcceptedSnapshot,
+  shouldSkipPartyPrepForOrdinaryNamedTwoParty,
   withCreatePipelineVs01CorpusGate,
 } from "./multiPartyCreateReviewSettle";
 import { StarterMultiPartyProGatePanel } from "./StarterMultiPartyProGatePanel";
@@ -748,7 +750,11 @@ import {
   getLatchedAcceptedServerFullDraftAuthority,
   resolvePremiumBodyAgainstSessionFreeze,
 } from "./premiumAcceptancePolicy";
-import { guardPaidProAcceptedServerFullDraftCommit } from "./paidProAcceptedServerFullDraftCommitGuard";
+import {
+  guardPaidProAcceptedServerFullDraftCommit,
+  hasPremiumAuthorityShorterThanAcceptedChurn,
+  resetPremiumAuthorityShorterThanAcceptedChurn,
+} from "./paidProAcceptedServerFullDraftCommitGuard";
 import {
   getAcceptedPremiumCanonicalCorpus,
   getAcceptedPremiumCanonicalText,
@@ -3809,6 +3815,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const premiumGenerateHttpStartedRef = useRef(false);
   /** True once Create committed to entitled generate (before parse/mint), so the 15s no-HTTP failsafe does not false-close filled party-prep. */
   const premiumGeneratePathCommittedRef = useRef(false);
+  /** Generate HTTP returned — leftover processing/preparing_review must not stay sticky (#209). */
+  const [premiumGenerateCompleted, setPremiumGenerateCompleted] = useState(false);
+  const premiumGenerateCompletedRef = useRef(false);
   const paidCreateFlowAutoRewriteGenRef = useRef<string | null>(null);
   const premiumCheckoutRunGenRef = useRef(0);
   /** True while ~30s soft progress copy is shown (does not fail open or touch recovery flags). */
@@ -7295,6 +7304,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     );
     const raw = launchCtx.rawIntake;
     console.info("[premium-flow] entitled_rewrite_start", { rawLen: raw.length });
+    premiumGenerateCompletedRef.current = false;
+    setPremiumGenerateCompleted(false);
+    resetPremiumAuthorityShorterThanAcceptedChurn();
     setPremiumPostCheckoutPhase("processing");
     setPremiumPipelineUserMessage(CLAW_PREMIUM_PREPARING_AGREEMENT_COPY);
     setHardError(null);
@@ -7361,6 +7373,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         isPremiumRequestStillValid: () => getOrInitSessionAgreementGenerationId() === sessionGenForPass,
         premiumGenerationCallReason: "entitled_rewrite",
       });
+      premiumGenerateCompletedRef.current = true;
+      setPremiumGenerateCompleted(true);
       if (result.staleIntakeOrGeneration) {
         setHardError("Your details changed while we were finishing. Try again when ready.");
         setPremiumPostCheckoutPhase(null);
@@ -8215,6 +8229,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       entitledPremiumRewriteInFlightRef.current = false;
       premiumGeneratePathCommittedRef.current = false;
       setPremiumAuthoritativeRequestInFlight(false);
+      premiumGenerateCompletedRef.current = true;
+      setPremiumGenerateCompleted(true);
       // Never leave the generate wait modal armed after entitled rewrite exits.
       setPremiumPostCheckoutPhase((prev) =>
         prev === "processing" || prev === "network_retry" || prev === "generation_retry"
@@ -11988,6 +12004,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     setPremiumPersistedFlowActive(true);
     // Keep send locked until prepare/GET authority succeeds.
     setPremiumSendPathUnlocked(false);
+    premiumGenerateCompletedRef.current = false;
+    setPremiumGenerateCompleted(false);
+    resetPremiumAuthorityShorterThanAcceptedChurn();
     setPremiumPostCheckoutPhase("processing");
     setPremiumPipelineUserMessage(CLAW_PREMIUM_PREPARING_AGREEMENT_COPY);
     setCreateFlowPhase("generating_draft");
@@ -14567,13 +14586,32 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           clarification?: AgreementIntakeClarification;
         } => {
       const mergedIntake = mergePartyPrepIntoCreateSubmitText(rawIntake, intakePartyEditorRows);
-      if (commitStarterMultiPartyProGate(mergedIntake)) {
+      if (
+        !shouldSkipPartyPrepForOrdinaryNamedTwoParty({
+          intakeText: mergedIntake,
+          partyRows: intakePartyEditorRows,
+          generateComplete: premiumGenerateCompletedRef.current,
+        }) &&
+        commitStarterMultiPartyProGate(mergedIntake)
+      ) {
         return { ok: false, blocked: false, message: "" };
       }
       const decision = evaluateIntentionalCreateDraftSubmit(mergedIntake);
       if (decision.action === "noop") return { ok: false, blocked: false, message: "" };
       wipeInMemoryPaidCreatePaintBuffers();
       if (decision.action === "block_capability") {
+        if (
+          decision.clarification.kind === "missing_named_parties" &&
+          shouldSkipPartyPrepForOrdinaryNamedTwoParty({
+            intakeText: mergedIntake,
+            partyRows: intakePartyEditorRows,
+            generateComplete: premiumGenerateCompletedRef.current,
+          })
+        ) {
+          writeOriginalUserIntakeRawAtDraftCommit(mergedIntake);
+          setIntakeClarification(null);
+          return { ok: true, text: mergedIntake };
+        }
         return {
           ok: false,
           blocked: true,
@@ -26236,7 +26274,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           draft: (draft ?? null) as unknown as AgreementDraft | null,
           guidedPro: paidProAuthoritative,
           freeBaselinePlain: paidProStarterPreviewPlain,
-          premiumInProgress: premiumCorpusInProgress,
+          premiumInProgress: premiumCorpusInProgress && !premiumGenerateCompleted,
           signatureRebuilt: guidedSignatureRebuiltRef.current,
           acceptedAuthoritativePlain: acceptedPremiumCorpusPickOpts.acceptedAuthoritativeBody,
           premiumAccepted: acceptedPremiumCorpusPickOpts.premiumAccepted,
@@ -26247,13 +26285,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           acceptedReviewPlain: acceptedReviewCorpusRef.current,
           allowDecorativeEsignCardMode: paidProAuthoritative,
           premiumComplete:
-            !premiumCorpusInProgress &&
-            Math.max(
-              hydratedPremiumBodyRef.current.trim().length,
-              premiumPipelineOutputBodyRef.current.trim().length,
-              lastKnownGoodAuthoritativeDraftRef.current.trim().length,
-              guidedSigningAuthoritativePlain.trim().length,
-            ) >= VS01_CORPUS_PREFERRED_MIN_LEN,
+            premiumGenerateCompleted ||
+            (!premiumCorpusInProgress &&
+              Math.max(
+                hydratedPremiumBodyRef.current.trim().length,
+                premiumPipelineOutputBodyRef.current.trim().length,
+                lastKnownGoodAuthoritativeDraftRef.current.trim().length,
+                guidedSigningAuthoritativePlain.trim().length,
+              ) >= VS01_CORPUS_PREFERRED_MIN_LEN),
         }),
     });
     if (computed) vs01FinalCorpusGateFrozenRef.current = value;
@@ -26262,8 +26301,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       allowed: value.allowed,
       blockReason: value.blockReason,
       selectedFinal: value.allowed,
-      premiumInProgress: value.premiumInProgress,
-      generateComplete: value.premiumComplete || !value.premiumInProgress,
+      premiumInProgress: value.premiumInProgress && !premiumGenerateCompleted,
+      generateComplete:
+        premiumGenerateCompleted || value.premiumComplete || !value.premiumInProgress,
     });
     return value;
   }, [
@@ -26274,6 +26314,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     renderedAgreementPreview,
     premiumPaidReadonlyPick.sourceUsed,
     premiumCorpusInProgress,
+    premiumGenerateCompleted,
     acceptedPremiumCorpusPickOpts,
     guidedAuthVersionNonce,
     reviewDocRefreshTick,
@@ -26287,9 +26328,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     allowed: vs01FinalCorpusGate.allowed,
     blockReason: vs01FinalCorpusGate.blockReason,
     selectedFinal: vs01FinalCorpusGate.allowed,
-    premiumInProgress: vs01FinalCorpusGate.premiumInProgress,
+    premiumInProgress: vs01FinalCorpusGate.premiumInProgress && !premiumGenerateCompleted,
     generateComplete:
-      vs01FinalCorpusGate.premiumComplete || !vs01FinalCorpusGate.premiumInProgress,
+      premiumGenerateCompleted ||
+      vs01FinalCorpusGate.premiumComplete ||
+      !vs01FinalCorpusGate.premiumInProgress,
   });
   const vs01GateCorpusCommerciallyUsable =
     Boolean(vs01FinalCorpusGate.allowed) ||
@@ -26298,28 +26341,51 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         lastPremiumWinningCorpusRef.current || premiumPipelineOutputBodyRef.current || "",
       premiumRenderSource: lastPremiumPipelineRenderSourceRef.current,
     });
+  const postGenerateAuthorityChurn = resolvePostGenerateAuthorityChurnOverlayDecision({
+    generateComplete: premiumGenerateCompleted,
+    shorterThanAcceptedChurn: hasPremiumAuthorityShorterThanAcceptedChurn(),
+    vs01GateBlockedWithoutSelectedFinal: vs01CorpusGateBlockedWithoutSelectedFinal,
+    corpusCommerciallyUsable: vs01GateCorpusCommerciallyUsable,
+  });
+  const skipPartyPrepForNamedTwoParty = shouldSkipPartyPrepForOrdinaryNamedTwoParty({
+    intakeText: intakeCombined || lastPremiumWinningCorpusRef.current || "",
+    partyRows: intakePartyEditorRows,
+    generateComplete: premiumGenerateCompleted,
+    corpusCommerciallyUsable: vs01GateCorpusCommerciallyUsable,
+    vs01GateBlockedWithoutSelectedFinal: vs01CorpusGateBlockedWithoutSelectedFinal,
+  });
   const dismissCreateOverlaysAfterRejectOrGate = shouldDismissCreateOverlaysAfterRejectOrGate({
-    rejectOrGateBlocked: vs01CorpusGateBlockedWithoutSelectedFinal,
+    rejectOrGateBlocked:
+      vs01CorpusGateBlockedWithoutSelectedFinal || postGenerateAuthorityChurn.dismissOverlays,
     hardError,
     emptyAuthorityPrepFailSafe,
-    corpusCommerciallyUsable: vs01GateCorpusCommerciallyUsable,
+    corpusCommerciallyUsable:
+      vs01GateCorpusCommerciallyUsable || postGenerateAuthorityChurn.settleReview,
   });
 
   useEffect(() => {
-    if (!vs01CorpusGateBlockedWithoutSelectedFinal) return;
+    if (!vs01CorpusGateBlockedWithoutSelectedFinal && !postGenerateAuthorityChurn.dismissOverlays) {
+      return;
+    }
     if (hardError || emptyAuthorityPrepFailSafe) return;
     const overlayActive =
       premiumPostCheckoutPhase === "processing" ||
-      premiumPostCheckoutPhase === "generation_retry";
-    if (!overlayActive) return;
+      premiumPostCheckoutPhase === "generation_retry" ||
+      displayPhase === "preparing_review" ||
+      displayPhase === "generating_draft" ||
+      displayPhase === "hydrating_generated";
+    if (!overlayActive && displayPhase === "review") return;
+    if (!overlayActive && displayPhase === "intake" && hardError) return;
     const winning =
       lastPremiumWinningCorpusRef.current ||
       premiumPipelineOutputBodyRef.current ||
       "";
-    const settle = shouldSettleProReviewAfterPremiumFullDraft({
-      winningPremiumBodyText: winning,
-      premiumRenderSource: lastPremiumPipelineRenderSourceRef.current,
-    });
+    const settle =
+      postGenerateAuthorityChurn.settleReview ||
+      shouldSettleProReviewAfterPremiumFullDraft({
+        winningPremiumBodyText: winning,
+        premiumRenderSource: lastPremiumPipelineRenderSourceRef.current,
+      });
     if (settle || vs01FinalCorpusGate.allowed) {
       setPremiumPostCheckoutPhase(null);
       setPremiumPipelineUserMessage(null);
@@ -26362,6 +26428,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     emptyAuthorityPrepFailSafe,
     premiumPostCheckoutPhase,
     displayPhase,
+    postGenerateAuthorityChurn.dismissOverlays,
+    postGenerateAuthorityChurn.settleReview,
+    premiumGenerateCompleted,
   ]);
 
   const canProceedGuidedFinalReviewToSigning = useMemo(
@@ -34365,7 +34434,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                   createFlowPhase === "capturing_input" &&
                   !isGenerating &&
                   !draftNowCommitted &&
-                  !draftPreCommitFreeze ? (
+                  !draftPreCommitFreeze &&
+                  !skipPartyPrepForNamedTwoParty ? (
                     <IntakeContractingPartyEditor
                       rows={intakePartyEditorRows}
                       disabled={whatWeUnderstoodInlineDisabled && !intakeClarification}

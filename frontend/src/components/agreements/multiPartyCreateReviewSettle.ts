@@ -149,16 +149,24 @@ export type Vs01CorpusGateBlockedInput = {
  * Only known in-progress / prepare-deferred reasons stay non-terminal.
  * Empty `blockReason` is terminal once generate is done (the #207 hole:
  * `if (!r) return true` kept live `vs01-corpus-gate-blocked` non-terminal).
+ *
+ * #209: leftover `premium_corpus_in_progress` after generate HTTP completed is
+ * terminal. Live too_much kept `premiumPostCheckoutPhase=processing`, so the
+ * render-time gate stayed `premium_corpus_in_progress` while
+ * `premium-authority-candidate-rejected-shorter-than-accepted` churned and
+ * overlays never dismissed.
  */
 export function isVs01CorpusGateBlockedWithoutSelectedFinal(
   input: Vs01CorpusGateBlockedInput,
 ): boolean {
   if (input.selectedFinal || input.allowed) return false;
   const reason = String(input.blockReason || "").trim();
-  if (reason === "premium_corpus_in_progress") return false;
   if (reason === "deferred_until_prepare_signature_links") return false;
   const generateDone =
     input.generateComplete === true || input.premiumInProgress === false;
+  if (reason === "premium_corpus_in_progress") {
+    return generateDone;
+  }
   if (reason.startsWith("vs01_checks_deferred") && !generateDone) return false;
   return true;
 }
@@ -244,6 +252,59 @@ export function shouldDismissCreateOverlaysAfterRejectOrGate(input: {
   if (input.emptyAuthorityPrepFailSafe) return true;
   if (input.hardError) return true;
   return Boolean(input.rejectOrGateBlocked);
+}
+
+export type PostGenerateAuthorityChurnOverlayDecision = {
+  dismissOverlays: boolean;
+  settleReview: boolean;
+  failClosed: boolean;
+};
+
+/**
+ * After generate completes, shorter-than-accepted authority churn +
+ * `vs01-corpus-gate-blocked` must not keep Generating / `preparing_review` sticky.
+ * Settle Review when a commercially usable corpus (including the latched accepted
+ * body the guard already returns) exists; otherwise fail-closed. No second SoT.
+ */
+export function resolvePostGenerateAuthorityChurnOverlayDecision(input: {
+  generateComplete?: boolean;
+  shorterThanAcceptedChurn?: boolean;
+  vs01GateBlockedWithoutSelectedFinal?: boolean;
+  corpusCommerciallyUsable?: boolean;
+}): PostGenerateAuthorityChurnOverlayDecision {
+  if (!input.generateComplete) {
+    return { dismissOverlays: false, settleReview: false, failClosed: false };
+  }
+  const terminalChurn =
+    Boolean(input.shorterThanAcceptedChurn) &&
+    Boolean(input.vs01GateBlockedWithoutSelectedFinal);
+  if (!terminalChurn) {
+    return { dismissOverlays: false, settleReview: false, failClosed: false };
+  }
+  if (input.corpusCommerciallyUsable) {
+    return { dismissOverlays: true, settleReview: true, failClosed: false };
+  }
+  return { dismissOverlays: true, settleReview: false, failClosed: true };
+}
+
+/**
+ * Ordinary coherent 2-party dumps that already name both parties must not stop
+ * at party-prep (Still needed / Create) when the corpus/gate path should settle
+ * or fail-close. N≥3 unnamed dumps still use party-prep.
+ */
+export function shouldSkipPartyPrepForOrdinaryNamedTwoParty(input: {
+  intakeText: string;
+  partyRows?: readonly string[];
+  generateComplete?: boolean;
+  corpusCommerciallyUsable?: boolean;
+  vs01GateBlockedWithoutSelectedFinal?: boolean;
+}): boolean {
+  const intake = String(input.intakeText || "");
+  if (requiredCreatePartyNameCount(intake) > 2) return false;
+  if (countFilledCreatePartyNames(intake, input.partyRows ?? []) < 2) return false;
+  if (input.corpusCommerciallyUsable) return true;
+  if (input.generateComplete && input.vs01GateBlockedWithoutSelectedFinal) return true;
+  return Boolean(input.generateComplete);
 }
 
 /**
