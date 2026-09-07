@@ -877,7 +877,7 @@ export function commercialCorpusCarriesIntakeManifestParties(
   const text = String(corpus ?? "").trim();
   // Same commercial floor as signature-only placeholder demotion (BE N≥3 accept ≈8.5k).
   if (text.length < 8_500) return false;
-  const labeledPrepNames = labeledPartyLegalEntities(intakeText)
+  const labeledPrepNames = labeledPartyLegalEntities(String(intakeText ?? ""))
     .map((n) => n.replace(/\s+/g, " ").trim())
     .filter((n) => n.length >= 2 && !/^party\s*\d+$/i.test(n));
   if (labeledPrepNames.length >= intakeManifestCount) {
