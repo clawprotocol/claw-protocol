@@ -405,6 +405,11 @@ export type PostGenerateCreateReviewSettlePlan = PostGenerateAuthorityChurnOverl
  * shorter-than-accepted churn as generate-done and fail-closed Northline before
  * premium-full-draft returned (live OPTIONS-only / couldn't-create).
  * After pfd HTTP completes, always settle (usable corpus) or fail-close (empty).
+ *
+ * Junk OPTIONS-only hang: leftover vs01 `premium_corpus_in_progress` stays
+ * non-terminal until generateComplete, so do not require vs01-blocked. Fail-close
+ * only the current-dump non-named-2p / empty path (timeout or empty-after-churn).
+ * #215's bare `if (generateDone)` wiped Northline selected-final — never repeat.
  */
 export function planPostGenerateCreateReviewSettleOrFailClosed(input: {
   generateComplete?: boolean;
@@ -418,6 +423,14 @@ export function planPostGenerateCreateReviewSettleOrFailClosed(input: {
   lastCommerciallyUsableCandidate?: string | null;
   /** Ordinary named 2p dump — do not fail-close on churn before generate completes. */
   ordinaryNamedTwoPartyReady?: boolean;
+  /**
+   * Current dump only (ignore leftover party-prep rows from a prior Northline
+   * walk). When set, this — not leftover rows — decides the wait-before-pfd keep.
+   */
+  currentDumpOrdinaryNamedTwoPartyReady?: boolean;
+  /** Overlay age; junk OPTIONS-only hang fail-closes after the 15s bound. */
+  overlayElapsedMs?: number;
+  pfdHangTimeoutMs?: number;
   staleIntakeOrGeneration?: boolean;
 }): PostGenerateCreateReviewSettlePlan {
   const settleInput: CreateReviewSettleCorpusInput = {
@@ -457,10 +470,12 @@ export function planPostGenerateCreateReviewSettleOrFailClosed(input: {
       return { dismissOverlays: true, settleReview: true, failClosed: false, corpus: mounted };
     }
   }
-  // Commercially complete named 2p: keep Preparing until pfd HTTP / generate
-  // actually completes. too_much / money_vibe omit this flag and still fail-close
-  // on churn before HTTP returns.
-  if (input.ordinaryNamedTwoPartyReady && !generateComplete) {
+  // Current dump named 2p: keep Preparing until pfd HTTP / generate completes.
+  // Leftover party-prep rows from a prior Northline walk must not inherit this
+  // keep onto too_much / money_vibe — prefer currentDumpOrdinaryNamedTwoPartyReady.
+  const named2pWait =
+    input.currentDumpOrdinaryNamedTwoPartyReady ?? input.ordinaryNamedTwoPartyReady;
+  if (named2pWait && !generateComplete) {
     return { dismissOverlays: false, settleReview: false, failClosed: false, corpus: "" };
   }
   // After pfd HTTP completes: settle already handled above. Empty / rejected
@@ -469,8 +484,21 @@ export function planPostGenerateCreateReviewSettleOrFailClosed(input: {
   if (generateComplete) {
     return { dismissOverlays: true, settleReview: false, failClosed: true, corpus: "" };
   }
-  const generateDone = generateComplete || Boolean(input.shorterThanAcceptedChurn);
-  if (generateDone && input.vs01GateBlockedWithoutSelectedFinal) {
+  // Junk / over-specified: OPTIONS-only hang or empty-after-churn. Do not require
+  // vs01-blocked (leftover premium_corpus_in_progress stays non-terminal). Do not
+  // bare `if (generateDone)` — that is the #215 Northline wipe.
+  if (
+    shouldFailClosedJunkPfdHangOrEmptyAfterChurn({
+      currentDumpOrdinaryNamedTwoPartyReady: named2pWait,
+      vs01SelectedFinal: input.vs01SelectedFinal,
+      commerciallyUsableCorpus: false,
+      generateComplete,
+      shorterThanAcceptedChurn: input.shorterThanAcceptedChurn,
+      pfdHttpNeverCompleted: !generateComplete,
+      overlayElapsedMs: input.overlayElapsedMs,
+      pfdHangTimeoutMs: input.pfdHangTimeoutMs,
+    })
+  ) {
     return { dismissOverlays: true, settleReview: false, failClosed: true, corpus: "" };
   }
   return { ...churn, corpus: "" };
@@ -638,6 +666,38 @@ export function shouldFailClosedGeneratingWithoutPipeline(input: {
     input.nowMs - input.preparingStartedAtMs >=
     (input.timeoutMs ?? CREATE_FLOW_GENERATING_WITHOUT_PIPELINE_FAILSAFE_MS)
   );
+}
+
+/**
+ * Junk / over-specified entitled dumps (too_much / money_vibe): terminal when
+ * premium-full-draft never completes (OPTIONS-only hang) or the body is empty
+ * after shorter-than-accepted churn.
+ *
+ * Must not fire on ordinary named-2p (Northline waits for pfd) or after
+ * selected-final / commercially usable corpus. #215 used bare `if (generateDone)`
+ * and wiped Northline selected-final — never repeat that.
+ */
+export function shouldFailClosedJunkPfdHangOrEmptyAfterChurn(input: {
+  currentDumpOrdinaryNamedTwoPartyReady?: boolean;
+  ordinaryNamedTwoPartyReady?: boolean;
+  vs01SelectedFinal?: boolean;
+  commerciallyUsableCorpus?: boolean;
+  generateComplete?: boolean;
+  shorterThanAcceptedChurn?: boolean;
+  pfdHttpNeverCompleted?: boolean;
+  overlayElapsedMs?: number;
+  pfdHangTimeoutMs?: number;
+}): boolean {
+  const named2p =
+    input.currentDumpOrdinaryNamedTwoPartyReady ?? input.ordinaryNamedTwoPartyReady;
+  if (named2p) return false;
+  if (input.vs01SelectedFinal) return false;
+  if (input.commerciallyUsableCorpus) return false;
+  if (input.generateComplete) return true;
+  if (input.shorterThanAcceptedChurn) return true;
+  if (input.pfdHttpNeverCompleted === false) return false;
+  const elapsed = input.overlayElapsedMs ?? 0;
+  return elapsed >= (input.pfdHangTimeoutMs ?? CREATE_FLOW_GENERATING_WITHOUT_PIPELINE_FAILSAFE_MS);
 }
 
 export function shouldFailClosedInFlightPipelineWithoutCorpus(input: {

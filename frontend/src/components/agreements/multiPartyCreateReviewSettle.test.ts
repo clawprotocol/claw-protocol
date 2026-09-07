@@ -26,6 +26,7 @@ import {
   shouldFailClosedCreateAfterRejectOrGate,
   shouldFailClosedGeneratingWithoutPipeline,
   shouldFailClosedInFlightPipelineWithoutCorpus,
+  shouldFailClosedJunkPfdHangOrEmptyAfterChurn,
   shouldFailCloseCreateAfterPremiumFullDraft,
   hasAuthoritativeCreateReviewBodyForPrepFailsafe,
   isCommerciallyUsableCreateReviewCorpus,
@@ -317,7 +318,29 @@ describe("multi-party create → review settle or fail-closed", () => {
     expect(intake).toContain("getLastCommerciallyUsableAuthorityCandidate");
     expect(intake).toContain("lastCommerciallyUsableCandidate");
     expect(intake).toContain("ordinaryNamedTwoPartyReady");
-    expect(intake).toContain("if (!plan.failClosed && !postGenerateAuthorityChurn.failClosed)");
+    expect(intake).toContain("currentDumpOrdinaryNamedTwoPartyReady");
+    expect(intake).toContain("shouldFailClosedJunkPfdHangOrEmptyAfterChurn");
+    expect(intake).toContain("junkPfdHangOrEmptyAfterChurn");
+    expect(intake).toContain("overlayElapsedMs");
+    expect(intake).toContain("CREATE_FLOW_GENERATING_WITHOUT_PIPELINE_FAILSAFE_MS");
+    expect(intake).toContain("if (!plan.failClosed && !junkPfdHangOrEmptyAfterChurn && !postGenerateAuthorityChurn.failClosed)");
+    const renderPlanIdx = intake.indexOf("const postGenerateCreateReviewSettlePlan = planPostGenerateCreateReviewSettleOrFailClosed(");
+    const renderPlanBlock = intake.slice(renderPlanIdx, renderPlanIdx + 900);
+    expect(renderPlanBlock).toContain("generateComplete: premiumGenerateCompleted");
+    expect(renderPlanBlock).not.toContain("authorityChurnActive && !ordinaryNamedTwoPartyReadyForSettle");
+    const effectPlanIdx = intake.indexOf("const plan = planPostGenerateCreateReviewSettleOrFailClosed(");
+    const effectPlanBlock = intake.slice(effectPlanIdx, effectPlanIdx + 900);
+    expect(effectPlanBlock).toContain("generateComplete: premiumGenerateCompleted");
+    expect(effectPlanBlock).not.toContain("authorityChurnActive && !ordinaryNamedTwoPartyReadyForSettle");
+    const namedSettleIdx = intake.indexOf(
+      "const ordinaryNamedTwoPartyReadyForSettle = shouldSkipPartyPrepForOrdinaryNamedTwoParty({",
+    );
+    const namedSettleBlock = intake.slice(namedSettleIdx, namedSettleIdx + 280);
+    expect(namedSettleBlock).toContain("intakePartyEditorRows");
+    const failCloseEffectRetry = intake.indexOf("entitledRewritePfdHttpOutcomeRef.current = \"fail_closed\"");
+    const failCloseEffectBlock = intake.slice(failCloseEffectRetry, failCloseEffectRetry + 1800);
+    expect(failCloseEffectBlock).toContain("setJourneyActionFeedback");
+    expect(failCloseEffectBlock).toContain('remedyLabel: "Retry"');
     expect(intake).toContain("onPremiumFullDraftHttpComplete");
     expect(intake).toContain("entitled_rewrite_pfd_http");
     expect(intake).toContain("pickCreateReviewSettleCorpus");
@@ -964,6 +987,80 @@ describe("multi-party create → review settle or fail-closed", () => {
     expect(afterPfdEmptyNoVs01.failClosed).toBe(true);
     expect(afterPfdEmptyNoVs01.settleReview).toBe(false);
     expect(afterPfdEmptyNoVs01.dismissOverlays).toBe(true);
+    // Live hole: OPTIONS-only / pfd POST never completes. Leftover vs01
+    // in_progress is non-terminal until generateComplete. Junk + churn + empty
+    // must fail-close without waiting for HTTP and without #215's bare generateDone.
+    const optionsOnlyPfdHang = planPostGenerateCreateReviewSettleOrFailClosed({
+      generateComplete: false,
+      vs01GateBlockedWithoutSelectedFinal: false,
+      vs01SelectedFinal: false,
+      shorterThanAcceptedChurn: true,
+      winningPremiumBodyText: "",
+      premiumRenderSource: "premium_generation_retryable",
+      ordinaryNamedTwoPartyReady: false,
+      currentDumpOrdinaryNamedTwoPartyReady: false,
+    });
+    expect(optionsOnlyPfdHang.failClosed).toBe(true);
+    expect(optionsOnlyPfdHang.settleReview).toBe(false);
+    expect(optionsOnlyPfdHang.dismissOverlays).toBe(true);
+    expect(optionsOnlyPfdHang.corpus).toBe("");
+    // OPTIONS hang before shorter-than-accepted churn — 15s terminal for junk.
+    const optionsOnlyTimeoutNoChurn = planPostGenerateCreateReviewSettleOrFailClosed({
+      generateComplete: false,
+      vs01GateBlockedWithoutSelectedFinal: false,
+      vs01SelectedFinal: false,
+      shorterThanAcceptedChurn: false,
+      winningPremiumBodyText: "",
+      ordinaryNamedTwoPartyReady: true,
+      currentDumpOrdinaryNamedTwoPartyReady: false,
+      overlayElapsedMs: CREATE_FLOW_GENERATING_WITHOUT_PIPELINE_FAILSAFE_MS,
+    });
+    expect(optionsOnlyTimeoutNoChurn.failClosed).toBe(true);
+    expect(optionsOnlyTimeoutNoChurn.settleReview).toBe(false);
+    expect(optionsOnlyTimeoutNoChurn.dismissOverlays).toBe(true);
+    expect(
+      shouldFailClosedJunkPfdHangOrEmptyAfterChurn({
+        currentDumpOrdinaryNamedTwoPartyReady: false,
+        vs01SelectedFinal: false,
+        commerciallyUsableCorpus: false,
+        generateComplete: false,
+        shorterThanAcceptedChurn: false,
+        pfdHttpNeverCompleted: true,
+        overlayElapsedMs: CREATE_FLOW_GENERATING_WITHOUT_PIPELINE_FAILSAFE_MS,
+      }),
+    ).toBe(true);
+    expect(
+      shouldFailClosedJunkPfdHangOrEmptyAfterChurn({
+        currentDumpOrdinaryNamedTwoPartyReady: true,
+        vs01SelectedFinal: false,
+        commerciallyUsableCorpus: false,
+        generateComplete: false,
+        shorterThanAcceptedChurn: true,
+        pfdHttpNeverCompleted: true,
+        overlayElapsedMs: CREATE_FLOW_GENERATING_WITHOUT_PIPELINE_FAILSAFE_MS,
+      }),
+    ).toBe(false);
+    expect(
+      shouldFailClosedJunkPfdHangOrEmptyAfterChurn({
+        currentDumpOrdinaryNamedTwoPartyReady: false,
+        vs01SelectedFinal: true,
+        commerciallyUsableCorpus: false,
+        generateComplete: false,
+        shorterThanAcceptedChurn: true,
+      }),
+    ).toBe(false);
+    // Leftover party-row named-2p keep must not block current-dump junk fail-close.
+    const leftoverRowsDoNotKeepJunk = planPostGenerateCreateReviewSettleOrFailClosed({
+      generateComplete: false,
+      vs01GateBlockedWithoutSelectedFinal: false,
+      vs01SelectedFinal: false,
+      shorterThanAcceptedChurn: true,
+      winningPremiumBodyText: "",
+      ordinaryNamedTwoPartyReady: true,
+      currentDumpOrdinaryNamedTwoPartyReady: false,
+    });
+    expect(leftoverRowsDoNotKeepJunk.failClosed).toBe(true);
+    expect(leftoverRowsDoNotKeepJunk.dismissOverlays).toBe(true);
   });
 
   it("ordinary 2p named parties do not require party-prep when corpus/gate path should settle", () => {

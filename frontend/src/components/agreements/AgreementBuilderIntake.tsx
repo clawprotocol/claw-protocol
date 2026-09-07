@@ -134,6 +134,7 @@ import {
 } from "./starterMultiPartyProGate";
 import {
   CREATE_FLOW_GENERATE_FAILED_CLEAR_MESSAGE,
+  CREATE_FLOW_GENERATING_WITHOUT_PIPELINE_FAILSAFE_MS,
   hasFilledPartyPrepForDeclaredCreate,
   mergePartyPrepIntoCreateSubmitText,
   overlayDeclaredPartiesOnDraft,
@@ -148,6 +149,7 @@ import {
   shouldDismissCreateOverlaysAfterRejectOrGate,
   shouldDismissHomeCreateTransitionForIntakeRecovery,
   shouldFailClosedCreateAfterRejectOrGate,
+  shouldFailClosedJunkPfdHangOrEmptyAfterChurn,
   shouldInvokePremiumGenerateAfterPartyPrepCreate,
   shouldRemapGenerationRetryableSalvageForCreateSettle,
   shouldSettleProReviewAfterPremiumFullDraft,
@@ -3829,6 +3831,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const premiumGenerateCompletedRef = useRef(false);
   /** Entitled rewrite: pfd HTTP completion (not full pipeline return) is generate-done. */
   const entitledRewritePfdHttpOutcomeRef = useRef<"idle" | "http_complete" | "fail_closed">("idle");
+  /** Junk OPTIONS-only hang: overlay start + tick so the 15s fail-close re-renders. */
+  const junkPremiumOverlayStartedAtRef = useRef<number | null>(null);
+  const [junkPfdHangNowMs, setJunkPfdHangNowMs] = useState(0);
   /** shorter-than-accepted is module-level; tick so entitled overlay plan re-renders. */
   const [premiumAuthorityChurnTick, setPremiumAuthorityChurnTick] = useState(0);
   useEffect(() => {
@@ -7631,6 +7636,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         ordinaryNamedTwoPartyReady: shouldSkipPartyPrepForOrdinaryNamedTwoParty({
           intakeText: mergedIntake || raw,
           partyRows: launch?.partyRows ?? intakePartyEditorRows,
+        }),
+        currentDumpOrdinaryNamedTwoPartyReady: shouldSkipPartyPrepForOrdinaryNamedTwoParty({
+          intakeText: mergedIntake || raw,
         }),
         premiumRenderSource: result.premiumRenderSource,
         acceptedAuthoritativePlain:
@@ -26581,6 +26589,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     intakeText: intakeCombined || readOriginalUserIntakeRaw() || "",
     partyRows: intakePartyEditorRows,
   });
+  // Current dump only — leftover party-prep rows from a prior Northline walk
+  // must not inherit the wait-before-pfd keep onto too_much / money_vibe.
+  const currentDumpOrdinaryNamedTwoPartyReady = shouldSkipPartyPrepForOrdinaryNamedTwoParty({
+    intakeText: intakeCombined || readOriginalUserIntakeRaw() || "",
+  });
   const vs01CorpusGateBlockedWithoutSelectedFinal = isVs01CorpusGateBlockedWithoutSelectedFinal({
     allowed: vs01FinalCorpusGate.allowed,
     blockReason: vs01FinalCorpusGate.blockReason,
@@ -26592,6 +26605,18 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       vs01FinalCorpusGate.premiumComplete ||
       !vs01FinalCorpusGate.premiumInProgress,
   });
+  const junkPremiumOverlayActive =
+    (premiumPostCheckoutPhase === "processing" ||
+      premiumPostCheckoutPhase === "generation_retry" ||
+      displayPhase === "preparing_review" ||
+      displayPhase === "generating_draft" ||
+      displayPhase === "hydrating_generated") &&
+    !premiumGenerateCompleted &&
+    !currentDumpOrdinaryNamedTwoPartyReady;
+  const junkPfdHangElapsedMs =
+    junkPremiumOverlayStartedAtRef.current == null
+      ? 0
+      : Math.max(0, (junkPfdHangNowMs || Date.now()) - junkPremiumOverlayStartedAtRef.current);
   const postGenerateCreateReviewSettlePlan = planPostGenerateCreateReviewSettleOrFailClosed({
     generateComplete: premiumGenerateCompleted,
     vs01GateBlockedWithoutSelectedFinal: vs01CorpusGateBlockedWithoutSelectedFinal,
@@ -26605,6 +26630,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       "",
     lastCommerciallyUsableCandidate: getLastCommerciallyUsableAuthorityCandidate(),
     ordinaryNamedTwoPartyReady: ordinaryNamedTwoPartyReadyForSettle,
+    currentDumpOrdinaryNamedTwoPartyReady,
+    overlayElapsedMs: junkPremiumOverlayActive ? junkPfdHangElapsedMs : 0,
+    pfdHangTimeoutMs: CREATE_FLOW_GENERATING_WITHOUT_PIPELINE_FAILSAFE_MS,
     premiumRenderSource: lastPremiumPipelineRenderSourceRef.current,
     acceptedAuthoritativePlain:
       acceptedReviewCorpusRef.current ||
@@ -26645,9 +26673,21 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     corpusCommerciallyUsable: vs01GateCorpusCommerciallyUsable,
     vs01GateBlockedWithoutSelectedFinal: vs01CorpusGateBlockedWithoutSelectedFinal,
   });
+  const junkPfdHangOrEmptyAfterChurn = shouldFailClosedJunkPfdHangOrEmptyAfterChurn({
+    currentDumpOrdinaryNamedTwoPartyReady,
+    vs01SelectedFinal: vs01FinalCorpusGate.allowed,
+    commerciallyUsableCorpus:
+      vs01GateCorpusCommerciallyUsable || postGenerateCreateReviewSettlePlan.settleReview,
+    generateComplete: premiumGenerateCompleted,
+    shorterThanAcceptedChurn: authorityChurnActive,
+    pfdHttpNeverCompleted: !premiumGenerateCompleted,
+    overlayElapsedMs: junkPremiumOverlayActive ? junkPfdHangElapsedMs : 0,
+    pfdHangTimeoutMs: CREATE_FLOW_GENERATING_WITHOUT_PIPELINE_FAILSAFE_MS,
+  });
   const dismissCreateOverlaysAfterRejectOrGate = shouldDismissCreateOverlaysAfterRejectOrGate({
     rejectOrGateBlocked:
       postGenerateCreateReviewSettlePlan.failClosed ||
+      junkPfdHangOrEmptyAfterChurn ||
       postGenerateAuthorityChurn.failClosed ||
       postGenerateCreateReviewSettlePlan.dismissOverlays ||
       postGenerateAuthorityChurn.dismissOverlays,
@@ -26661,8 +26701,35 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
   useEffect(() => {
     if (
+      !junkPremiumOverlayActive ||
+      premiumGenerateCompleted ||
+      currentDumpOrdinaryNamedTwoPartyReady ||
+      vs01FinalCorpusGate.allowed ||
+      postGenerateCreateReviewSettlePlan.settleReview
+    ) {
+      junkPremiumOverlayStartedAtRef.current = null;
+      return;
+    }
+    if (junkPremiumOverlayStartedAtRef.current == null) {
+      junkPremiumOverlayStartedAtRef.current = Date.now();
+    }
+    const id = window.setInterval(() => {
+      setJunkPfdHangNowMs(Date.now());
+    }, 1000);
+    return () => window.clearInterval(id);
+  }, [
+    junkPremiumOverlayActive,
+    premiumGenerateCompleted,
+    currentDumpOrdinaryNamedTwoPartyReady,
+    vs01FinalCorpusGate.allowed,
+    postGenerateCreateReviewSettlePlan.settleReview,
+  ]);
+
+  useEffect(() => {
+    if (
       !postGenerateCreateReviewSettlePlan.settleReview &&
       !postGenerateCreateReviewSettlePlan.failClosed &&
+      !junkPfdHangOrEmptyAfterChurn &&
       !postGenerateAuthorityChurn.settleReview &&
       !postGenerateAuthorityChurn.failClosed &&
       !postGenerateCreateReviewSettlePlan.dismissOverlays &&
@@ -26692,6 +26759,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         "",
       lastCommerciallyUsableCandidate: getLastCommerciallyUsableAuthorityCandidate(),
       ordinaryNamedTwoPartyReady: ordinaryNamedTwoPartyReadyForSettle,
+      currentDumpOrdinaryNamedTwoPartyReady,
+      overlayElapsedMs: junkPremiumOverlayActive ? junkPfdHangElapsedMs : 0,
+      pfdHangTimeoutMs: CREATE_FLOW_GENERATING_WITHOUT_PIPELINE_FAILSAFE_MS,
       premiumRenderSource: lastPremiumPipelineRenderSourceRef.current,
       acceptedAuthoritativePlain:
         acceptedReviewCorpusRef.current ||
@@ -26731,7 +26801,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       setLoading(false);
       return;
     }
-    if (!plan.failClosed && !postGenerateAuthorityChurn.failClosed) {
+    if (!plan.failClosed && !junkPfdHangOrEmptyAfterChurn && !postGenerateAuthorityChurn.failClosed) {
       return;
     }
     entitledRewritePfdHttpOutcomeRef.current = "fail_closed";
@@ -26757,6 +26827,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     setCreateFlowPhase(terminal.createFlowPhase);
     setDisplayPhase(terminal.displayPhase);
     setCreateUiStage(terminal.createUiStage);
+    setJourneyActionFeedback(
+      feedbackFailed("create_agreement", FAILED_CREATE_RECOVERY_TITLE, feedbackAfterModelFailure(), {
+        remedyLabel: "Retry",
+      }),
+    );
     setLoading(false);
     if (terminal.clearLocalDraft) {
       setDraft(null);
@@ -26776,7 +26851,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     postGenerateCreateReviewSettlePlan.dismissOverlays,
     postGenerateCreateReviewSettlePlan.settleReview,
     postGenerateCreateReviewSettlePlan.failClosed,
+    junkPfdHangOrEmptyAfterChurn,
     ordinaryNamedTwoPartyReadyForSettle,
+    currentDumpOrdinaryNamedTwoPartyReady,
+    junkPremiumOverlayActive,
+    junkPfdHangElapsedMs,
     premiumGenerateCompleted,
     premiumAuthorityChurnTick,
     acceptedPremiumCorpusPickOpts.acceptedAuthoritativeBody,
