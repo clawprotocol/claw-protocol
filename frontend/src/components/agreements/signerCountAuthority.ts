@@ -442,6 +442,28 @@ export function resolveAuthoritativeSignerCount(args: SignerCountAuthorityArgs):
  * Every downstream surface must call this (directly or via helpers) instead of
  * independently counting execution blocks, headings, or identity array length.
  */
+function leftoverTwoPartyConsumerOnCommercialMultipartyCorpus(
+  args: SignerCountAuthorityArgs,
+  authoritativeCount: number,
+  consumer: number,
+): boolean {
+  const high = Math.max(authoritativeCount, consumer);
+  const low = Math.min(authoritativeCount, consumer);
+  if (high < 3 || low !== 2) return false;
+  const corpus = String(args.corpusPlain ?? "").trim();
+  if (corpus.length < 8_500) return false;
+  const names = resolveAuthoritativeIntakePartyNames(args.intakeText).filter(
+    isAuthoritativeLegalEntityName,
+  );
+  if (names.length < high) return false;
+  return names.slice(0, high).every((name) => {
+    if (corpus.includes(name)) return true;
+    const needle = name.replace(/[.,]/g, "").replace(/\s+/g, " ").trim().toLowerCase();
+    const hay = corpus.replace(/[.,]/g, "").toLowerCase();
+    return needle.length >= 4 && hay.includes(needle);
+  });
+}
+
 export function consumeAuthoritativeSignerCount(
   surface: string,
   args: SignerCountAuthorityArgs,
@@ -452,13 +474,19 @@ export function consumeAuthoritativeSignerCount(
   const consumer = consumerCount ?? authoritativeCount;
   const matched = consumer === authoritativeCount;
   if (!matched) {
-    logSignerCountConsumerMismatch({
-      surface,
-      authoritativeCount,
-      consumerCount: consumer,
-      corpusBlockCount: resolution.corpusBlockCount,
-      source: resolution.source,
-    });
+    if (
+      leftoverTwoPartyConsumerOnCommercialMultipartyCorpus(args, authoritativeCount, consumer)
+    ) {
+      // Leftover 2-party prep overlay vs N≥3 200 corpus — not a fail-close mismatch.
+    } else {
+      logSignerCountConsumerMismatch({
+        surface,
+        authoritativeCount,
+        consumerCount: consumer,
+        corpusBlockCount: resolution.corpusBlockCount,
+        source: resolution.source,
+      });
+    }
   } else {
     logSignerCountConsumer({
       surface,

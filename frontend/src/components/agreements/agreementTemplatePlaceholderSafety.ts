@@ -697,6 +697,64 @@ export function remainingFatalsAreNoticeSignerSetupScaffoldingOnly(
   return fatals.every((d) => isNoticeSignerSetupDraftingToken(d.token, d.contextSnippet));
 }
 
+/**
+ * Notice / signature field stubs that signer setup fills later.
+ * Not insert / mustache / hollow drafting junk.
+ */
+export function isPaidProCommercialFieldStubToken(token: string): boolean {
+  const t = String(token || "").trim();
+  if (!t) return false;
+  if (/insert|mustache|\{\{|<\s*insert/i.test(t) && !isSignatureOnlyFatalToken(t)) {
+    if (/\[\s*INSERT\b/i.test(t) || /\{\{/.test(t) || /<\s*insert/i.test(t)) return false;
+  }
+  if (isSignatureOnlyFatalToken(t)) return true;
+  if (isAllowlistedSignatureToken(t)) return true;
+  if (isSignatureLineBracketToken(t)) return true;
+  const n = normalizePlaceholderToken(t);
+  return /^(?:(?:SIGNER|PARTY|CONTACT|ORG)_)?(?:EMAIL|ADDRESS|PARTY_ADDRESS|NAME|TITLE|DATE|SIGNATURE|INITIALS?|PARTY_NAME|SIGNER_NAME)(?:_\d+)?$/.test(
+    n,
+  );
+}
+
+export function remainingFatalsAreCommercialFieldStubsOnly(
+  remainingDetail: readonly PlaceholderTokenDecision[],
+): boolean {
+  const fatals = remainingDetail.filter((d) => d.fatal);
+  if (fatals.length === 0) return false;
+  if (fatals.length > 48) return false;
+  return fatals.every((d) => isPaidProCommercialFieldStubToken(d.token));
+}
+
+/**
+ * Live premium-full-draft 200: a commercially usable N≥3 corpus must not fail-close
+ * solely because notice/signature field stubs remain (signer setup owns those).
+ */
+export function shouldAcceptPaidProCommercialFieldStubsAfterPfd200(args: {
+  text: string;
+  intakeRaw?: string | null;
+  remainingDetail?: readonly PlaceholderTokenDecision[];
+}): boolean {
+  const text = String(args.text || "").trim();
+  if (text.length < PAID_PRO_SIGNATURE_ACCEPT_MIN_BODY_LEN) return false;
+  if (args.remainingDetail && args.remainingDetail.length > 0) {
+    const fatals = args.remainingDetail.filter((d) => d.fatal);
+    if (fatals.length > 0 && !remainingFatalsAreCommercialFieldStubsOnly(args.remainingDetail)) {
+      return false;
+    }
+  }
+  const tokens = scanUnresolvedRenderTokens(text);
+  if (tokens.length > 48) return false;
+  if (tokens.length > 0 && !tokens.every((m) => isPaidProCommercialFieldStubToken(m.token))) {
+    return false;
+  }
+  const intake = String(args.intakeRaw ?? "").trim();
+  const intakeNames = extractAgreementEntityCandidates(intake).filter(isAuthoritativeLegalEntityName);
+  const corpusNames = extractPartyNamesFromCorpusBetween(text);
+  if (intakeNames.length >= 3 || corpusNames.length >= 3) return true;
+  if (/(?:^|\n)\s*Party\s*[3-9]\s*:/im.test(intake)) return true;
+  return /\b(?:by and among|entered into by and among)\b/i.test(text) && intakeNames.length >= 2;
+}
+
 function contextSnippet(text: string, index: number, radius = 60): string {
   const start = Math.max(0, index - radius);
   const end = Math.min(text.length, index + radius);
@@ -1624,8 +1682,20 @@ function finalizeUserVisibleAgreementPlainTextCore(
   });
   let finalText = postTokenAuthority.text;
   const survivorTokens = scanUnresolvedRenderTokens(finalText).map((m) => m.token);
-  const fatalFromSurvivors = survivorTokens.filter((t) => !remainingFatal.includes(t));
-  const remainingFatalAll = [...remainingFatal, ...fatalFromSurvivors];
+  const acceptCommercialFieldStubs = shouldAcceptPaidProCommercialFieldStubsAfterPfd200({
+    text: finalText,
+    intakeRaw,
+    remainingDetail,
+  });
+  const remainingFatalKept = acceptCommercialFieldStubs
+    ? remainingFatal.filter((t) => !isPaidProCommercialFieldStubToken(t))
+    : remainingFatal;
+  const fatalFromSurvivors = survivorTokens.filter((t) => {
+    if (remainingFatalKept.includes(t)) return false;
+    if (acceptCommercialFieldStubs && isPaidProCommercialFieldStubToken(t)) return false;
+    return true;
+  });
+  const remainingFatalAll = [...remainingFatalKept, ...fatalFromSurvivors];
   // Fail closed when polish/notice rebuild silently drops hard unresolved identity slots.
   for (const tok of hardUnresolvedFromInput) {
     const norm = tok.replace(/\s+/g, "").toUpperCase();

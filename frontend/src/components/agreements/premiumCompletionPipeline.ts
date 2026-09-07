@@ -210,9 +210,11 @@ import { logPremiumGenerationRetryableFailure } from "./premiumGenerationRetryab
 import { resolvePremiumIntentPreflightPolicy, shouldEarlyNeedsDetailsForTierB } from "./premiumIntentPreflightPolicy";
 import {
   finalizeUserVisibleAgreementPlainText,
+  remainingFatalsAreCommercialFieldStubsOnly,
   remainingFatalsAreNoticeSignerSetupScaffoldingOnly,
   repairContextualDraftingStubPhrases,
   resolvePlaceholderPartyNamesWithMeta,
+  shouldAcceptPaidProCommercialFieldStubsAfterPfd200,
 } from "./agreementTemplatePlaceholderSafety";
 import {
   finalizeSubstantiveWireAfterWitnessCleanup,
@@ -1820,10 +1822,19 @@ async function runPremiumCompletionInner(
   const premiumRejectCtx = {
     intakeLower: intakeLowerGlobal,
     intakeText: rawForSoT || rawIntake,
-    partyNames:
-      (merged.parties || []).map((p) => String(p.name || "").trim()).filter(Boolean).length >= 2
-        ? merged.parties?.map((p) => p.name) ?? null
-        : null,
+    // Intake / labeled-party authority — leftover 2-party merged.parties must not
+    // starve N≥3 reject/finalize of the names the 200 corpus already carries.
+    partyNames: (() => {
+      const fromAuthority = resolvePremiumCompletionCanonicalPartyNames(
+        merged,
+        rawForSoT || rawIntake,
+      );
+      if (fromAuthority.length >= 2) return fromAuthority;
+      const leftover = (merged.parties || [])
+        .map((p) => String(p.name || "").trim())
+        .filter(Boolean);
+      return leftover.length >= 2 ? leftover : null;
+    })(),
   };
   let premiumRenderSource: PremiumRenderSource = "fallback_preview";
   let founderDetailsGateMessage: string | null = null;
@@ -3146,7 +3157,15 @@ async function runPremiumCompletionInner(
           !ph.ok &&
           remainingFatalsAreNoticeSignerSetupScaffoldingOnly(ph.remainingDetail) &&
           substantiveLenBeforePlaceholder >= SUBSTANTIVE_SERVER_DRAFT_MIN_LEN;
-        if (!ph.ok && !noticeScaffoldingOnlyBlock) {
+        const commercialFieldStubOnlyBlock =
+          !ph.ok &&
+          remainingFatalsAreCommercialFieldStubsOnly(ph.remainingDetail) &&
+          shouldAcceptPaidProCommercialFieldStubsAfterPfd200({
+            text: doc,
+            intakeRaw: rawForSoT || rawIntake,
+            remainingDetail: ph.remainingDetail,
+          });
+        if (!ph.ok && !noticeScaffoldingOnlyBlock && !commercialFieldStubOnlyBlock) {
           placeholderClientOk = false;
           if (!proIntentGateMessage) {
             proIntentGateMessage =
@@ -3181,11 +3200,13 @@ async function runPremiumCompletionInner(
           } else {
             doc = ph.text;
           }
-          if (noticeScaffoldingOnlyBlock) {
+          if (noticeScaffoldingOnlyBlock || commercialFieldStubOnlyBlock) {
             placeholderClientOk = true;
             fatalPlaceholderCount = 0;
             logPremiumCompletionDebug({
-              stage: "pipeline_placeholder_notice_scaffolding_warn_only",
+              stage: noticeScaffoldingOnlyBlock
+                ? "pipeline_placeholder_notice_scaffolding_warn_only"
+                : "pipeline_placeholder_commercial_field_stubs_warn_only",
               remaining_nonfatal: ph.remainingDetail.filter((d) => !d.fatal).map((d) => d.token),
               substantiveLen: substantiveLenBeforePlaceholder,
             });

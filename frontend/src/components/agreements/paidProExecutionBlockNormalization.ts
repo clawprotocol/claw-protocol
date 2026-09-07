@@ -532,6 +532,7 @@ export function enforcePaidProSingleExecutionBlock(
       intakeText: opts?.intakeText ?? null,
       draftPartyNames: opts?.draftPartyNames ?? authorityParties,
       manifestPartyCount: frozenNames.length >= 2 ? frozenNames.length : undefined,
+      corpusPlain: text,
     },
     Math.max(authorityParties.length, frozenNames.length, labeledNames.length, 2),
   );
