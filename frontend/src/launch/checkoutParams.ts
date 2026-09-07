@@ -2,9 +2,13 @@ import {
   isRealCheckoutAgreementId,
   pinCheckoutPathToPreAuthAgreement,
   readKnownConversionAgreementId,
+  readPreAuthCheckoutAgreementId,
   rememberPreAuthCheckoutAgreementId,
+  resolveContinueWithProCheckoutAgreementId,
 } from "../auth/preAuthCheckoutAgreement";
 import { CREATE_FLOW_CHECKOUT_AGREEMENT_ID } from "../components/agreements/agreementAdvancedDraftAccess";
+import { readCreateReviewAgreementResumeId } from "../components/agreements/agreementIntakeStorage";
+import { readSessionAgreementGenerationId } from "../lib/agreementGenerationId";
 import type { PricingCadence } from "./pricingCadenceStorage";
 import type { LaunchPricingTier } from "./pricingTiersData";
 import { LAUNCH_PRICING_TIERS } from "./pricingTiersData";
@@ -92,18 +96,21 @@ export function buildConversionCheckoutReturnTo(persistAgreementId?: string | nu
 
 /**
  * Continue-with-Pro first hop.
- * When persist/resume / pre-auth / active generation is known (arg or session),
- * thread that same AID and omit restore=starterReview. Sync pre-auth from the
- * known identity at claim time. Unpaid Back without any AID still uses the decoy.
+ * Pre-auth already claimed stays. Else the active generation UUID is the hop
+ * (a later reminted resume/review must not replace it). Sync pre-auth to that
+ * same id. Unpaid Back without any AID still uses restore=starterReview.
  */
 export function buildCreateFlowCheckoutHref(args: {
   cadence: PricingCadence;
   persistAgreementId?: string | null;
   tier?: string;
 }): string {
-  const persist =
-    (isRealCheckoutAgreementId(args.persistAgreementId) ? args.persistAgreementId!.trim() : null) ||
-    readKnownConversionAgreementId();
+  const persist = resolveContinueWithProCheckoutAgreementId({
+    reviewAgreementId: args.persistAgreementId,
+    resumeId: readCreateReviewAgreementResumeId(),
+    preAuthId: readPreAuthCheckoutAgreementId(),
+    activeGenerationId: readSessionAgreementGenerationId(),
+  });
   if (persist) rememberPreAuthCheckoutAgreementId(persist);
   const agreementId = persist || CREATE_FLOW_CHECKOUT_AGREEMENT_ID;
   const returnTo = buildConversionCheckoutReturnTo(persist);
