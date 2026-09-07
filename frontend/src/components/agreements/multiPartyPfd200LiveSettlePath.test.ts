@@ -18,7 +18,11 @@ import {
   extractAuthoritativeLegalNamesFromCommercialCorpus,
   resetSignerCountAuthorityDiagnosticsForTests,
   resolveAuthoritativeSignerCount,
+  resolvePartyNamesPreferringCommercialCorpus,
 } from "./signerCountAuthority";
+import { shouldAcceptPaidProCommercialFieldStubsAfterPfd200 } from "./agreementTemplatePlaceholderSafety";
+import { assessLabeledPartyManifestIntegrity } from "./labeledPartyManifestIntegrity";
+import { repairKnownPartyPlaceholders } from "../../agreement/partyPlaceholderDisplay";
 import { containsUnresolvedRenderTokens } from "./userVisibleRenderTokenAuthority";
 import {
   shouldFailCloseCreateAfterPremiumFullDraft,
@@ -87,6 +91,60 @@ function buildLiveMultipartyCorpus(names: readonly string[], targetLen = 15_381)
     "",
   ].join("\n");
   const tail = ["", "IN WITNESS WHEREOF, the parties have executed this Agreement.", "", signatures].join("\n");
+  const midBudget = Math.max(8_500, Math.min(targetLen, 17_800) - tail.length);
+  const mid = padOperative(midBudget, head);
+  return `${mid}${tail}`;
+}
+
+/**
+ * Live leftover-overlay 4p 200 after #199: leftover 2-party opening still has
+ * [ORG_1]/[ORG_2], Party 3/4 survive only in notices/signatures.
+ */
+function buildLeftoverOverlayFourPartyLiveCorpus(
+  names: readonly string[],
+  targetLen = 15_381,
+): string {
+  const leftoverOpening = "This Agreement is entered into by and between [ORG_1] and [ORG_2].";
+  const notices = names
+    .map((n) => `If to ${n}:\nEmail: [EMAIL]\nAddress: [ADDRESS]\n`)
+    .join("\n");
+  const signatures = names
+    .map(
+      (n) =>
+        `${n}\nBy: [SIGNATURE]\nName: [NAME]\nTitle: [TITLE]\nDate: [DATE]\nEmail: [EMAIL]\n`,
+    )
+    .join("\n");
+  const head = [
+    "MULTI-PARTY SERVICES AGREEMENT",
+    "",
+    leftoverOpening,
+    "",
+    "1. SCOPE OF SERVICES",
+    "The parties shall perform the professional services described in this Agreement for the fees stated herein.",
+    "2. PAYMENT",
+    "Fees total the amount stated in the intake and are payable in monthly installments.",
+    "3. TERM",
+    "The term begins on the Effective Date and continues for the stated duration unless earlier terminated.",
+    "4. CONFIDENTIALITY",
+    "Each party shall protect the others' confidential information using reasonable care.",
+    "5. INTELLECTUAL PROPERTY",
+    "Work product is assigned as set forth in this Agreement after payment of undisputed amounts.",
+    "6. INDEMNIFICATION",
+    "Each party shall indemnify the others against third-party claims arising from its material breach.",
+    "7. LIMITATION OF LIABILITY",
+    "No party is liable for indirect or consequential damages except for confidentiality or IP breach.",
+    "8. GOVERNING LAW",
+    "This Agreement is governed by the laws of the State of Texas, without regard to conflict-of-law rules.",
+    "9. NOTICES",
+    "Notices under this Agreement must be in writing.",
+    notices,
+    "10. GENERAL",
+    "This Agreement constitutes the entire agreement among the parties.",
+    "",
+  ].join("\n");
+  const tail = ["", "IN WITNESS WHEREOF, the parties have executed this Agreement.", "", signatures].join(
+    "\n",
+  );
   const midBudget = Math.max(8_500, Math.min(targetLen, 17_800) - tail.length);
   const mid = padOperative(midBudget, head);
   return `${mid}${tail}`;
@@ -574,5 +632,161 @@ describe("live pipeline sites after pfd 200 + leftover 2-party overlay", () => {
       expect(overlay, `overlay dropped ${name}: ${overlay.join("|")}`).toContain(name);
     }
     expect(overlay).toHaveLength(4);
+  });
+
+  it("N=4 leftover-overlay live path after #199: leftover [ORG_n] opening + 4 notice names settles", () => {
+    // Live fail after #199: leftover 2-party opening still has [ORG_1]/[ORG_2],
+    // leftover prep wiped Party 3/4 labels, notices already name all four.
+    // Overlay showed parties_visible=4 on fail-close UI; Review still did not settle.
+    const leftover = leftoverTwoPartyDraft([LIVE_FOUR[0], LIVE_FOUR[1]]);
+    const fourNamed = mergePartyPrepIntoCreateSubmitText(FOUR_PARTY_DUMP, [...LIVE_FOUR]);
+    const leftoverPrepIntake = mergePartyPrepIntoCreateSubmitText(fourNamed, [
+      LIVE_FOUR[0],
+      LIVE_FOUR[1],
+    ]);
+    const leftoverFusedIntake = `Party 1: ${LIVE_FOUR[0]}\nParty 2: ${LIVE_FOUR[1]}\nCollaboration leftover prep.`;
+    const corpus = buildLeftoverOverlayFourPartyLiveCorpus(LIVE_FOUR);
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    expect(corpus).toMatch(/\[ORG_1\]/);
+    expect(corpus).toMatch(/\[ORG_2\]/);
+    expect(extractAuthoritativeLegalNamesFromCommercialCorpus(corpus)).toEqual(
+      expect.arrayContaining([...LIVE_FOUR]),
+    );
+    expect(
+      resolvePartyNamesPreferringCommercialCorpus({
+        intakeText: leftoverPrepIntake,
+        corpusPlain: corpus,
+        leftoverNames: leftover.parties.map((p) => p.name),
+      }),
+    ).toEqual(expect.arrayContaining([...LIVE_FOUR]));
+    expect(
+      resolvePartyNamesPreferringCommercialCorpus({
+        intakeText: leftoverFusedIntake,
+        corpusPlain: corpus,
+        leftoverNames: leftover.parties.map((p) => p.name),
+      }).length,
+    ).toBeGreaterThanOrEqual(4);
+
+    const recovered = liveFinalizePartyNames(leftover, leftoverPrepIntake);
+    const recoveredWithCorpus = resolvePartiesForReviewRender({
+      draft: leftover,
+      intakeText: leftoverPrepIntake,
+      corpusPlain: corpus,
+    })
+      .map((p) => p.partyLegalName.trim())
+      .filter((name) => name.length >= 2);
+    expect(recoveredWithCorpus).toEqual(expect.arrayContaining([...LIVE_FOUR]));
+    expect(recoveredWithCorpus).toHaveLength(4);
+
+    const repair = repairKnownPartyPlaceholders(corpus, recoveredWithCorpus, leftoverPrepIntake);
+    expect(repair.text).not.toMatch(/\[ORG_1\]|\[ORG_2\]/);
+    for (const name of LIVE_FOUR) {
+      expect(repair.text).toContain(name);
+    }
+
+    const accLeftoverCtx = rejectPremiumBodyForProRender(corpus, {
+      intakeText: leftoverPrepIntake,
+      partyNames: liveRejectPartyNames(leftover),
+    });
+    expect(accLeftoverCtx.ok, accLeftoverCtx.reasons.join("|")).toBe(true);
+
+    const accRecovered = rejectPremiumBodyForProRender(repair.text, {
+      intakeText: leftoverPrepIntake,
+      partyNames: recoveredWithCorpus,
+    });
+    expect(accRecovered.ok, accRecovered.reasons.join("|")).toBe(true);
+
+    const fin = finalizeUserVisibleAgreementPlainText(corpus, {
+      intakeRaw: leftoverPrepIntake,
+      partyNames: liveRejectPartyNames(leftover),
+      surface: "premium_completion_pipeline",
+    });
+    expect(fin.ok, fin.remainingFatal.join("|")).toBe(true);
+
+    const freeze = resolvePaidProFreezeCommitText({
+      text: corpus,
+      source: "server_full_draft",
+      draft: leftover,
+      intakeText: leftoverPrepIntake,
+      surface: "premium_completion_pipeline_accept",
+    });
+    expect(freeze.ok, freeze.rejectReason ?? "").toBe(true);
+    for (const name of LIVE_FOUR) {
+      expect(freeze.text, `freeze dropped ${name}`).toContain(name);
+    }
+
+    const consumedEnforce = consumeAuthoritativeSignerCount(
+      "enforcePaidProSingleExecutionBlock",
+      {
+        intakeText: leftoverPrepIntake,
+        draftPartyNames: leftover.parties.map((p) => p.name),
+        draftParties: leftover.parties,
+        corpusPlain: corpus,
+      },
+      leftover.parties.length,
+    );
+    expect(consumedEnforce).toBe(4);
+    const consumedSlots = consumeAuthoritativeSignerCount(
+      "guided_pre_review_signer_slots",
+      {
+        intakeText: leftoverPrepIntake,
+        draftPartyNames: leftover.parties.map((p) => p.name),
+        rawPartyCount: 2,
+        userExpandedPartyCount: 2,
+      },
+      2,
+    );
+    expect(consumedSlots).toBe(4);
+    const consumedFused = consumeAuthoritativeSignerCount(
+      "enforcePaidProSingleExecutionBlock",
+      {
+        intakeText: leftoverFusedIntake,
+        draftPartyNames: leftover.parties.map((p) => p.name),
+        draftParties: leftover.parties,
+        corpusPlain: corpus,
+      },
+      leftover.parties.length,
+    );
+    expect(consumedFused).toBe(4);
+
+    expect(
+      shouldAcceptPaidProCommercialFieldStubsAfterPfd200({
+        text: corpus,
+        intakeRaw: leftoverPrepIntake,
+      }),
+    ).toBe(true);
+
+    const integrity = assessLabeledPartyManifestIntegrity({
+      intakeText: leftoverPrepIntake,
+      draftPartyNames: leftover.parties.map((p) => p.name),
+      documentText: corpus,
+    });
+    expect(integrity.reasons).not.toContain("document_fatal_org_email_placeholder");
+
+    expect(
+      shouldSettleProReviewAfterPremiumFullDraft({
+        winningPremiumBodyText: freeze.text || corpus,
+        premiumRenderSource: "server_full_draft",
+      }),
+    ).toBe(true);
+    expect(
+      shouldTreatEntitledRewritePipelineResultAsGenerationFailure({
+        premiumDraft: leftover,
+        premiumParties: [],
+        recipientCandidates: [],
+        winningPremiumBodyText: freeze.text || corpus,
+        premiumRenderSource: "server_full_draft",
+        premiumReview: null,
+        premiumFinalizeAudit: null,
+        premiumReviewRoute: null,
+        staleIntakeOrGeneration: false,
+        premiumGenerationRetryable: true,
+      }),
+    ).toBe(false);
+    expect(
+      warnSpy.mock.calls.some((c) => String(c[0]).includes("[signer-count-authority]-mismatch")),
+    ).toBe(false);
+    expect(recovered.length).toBeGreaterThanOrEqual(2);
   });
 });
