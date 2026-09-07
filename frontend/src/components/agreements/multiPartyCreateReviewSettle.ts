@@ -650,6 +650,10 @@ export function shouldFailClosedGeneratingWithoutPipeline(input: {
  * 15s bound while Preparing/Generating and pfd HTTP has not completed — non
  * ordinary-named-2p only. Northline must keep waiting for pfd.
  *
+ * Callers must pass *current-dump intake-only* named-2p readiness (no leftover
+ * `partyRows`). Session party-prep rows from a prior Northline walk must not
+ * suppress this failsafe for too_much / money_vibe.
+ *
  * Not a planner churn rule. Do not fail-close on shorterThanAcceptedChurn alone
  * (#218). Do not latch generate-done from churn (#215).
  */

@@ -190,6 +190,25 @@ describe("multi-party create → review settle or fail-closed", () => {
     expect(
       shouldSkipPartyPrepForOrdinaryNamedTwoParty({ intakeText: northline, partyRows: ["", ""] }),
     ).toBe(true);
+    // Current-dump intake-only (no partyRows) — failsafe gate contract.
+    expect(shouldSkipPartyPrepForOrdinaryNamedTwoParty({ intakeText: tooMuch })).toBe(false);
+    expect(shouldSkipPartyPrepForOrdinaryNamedTwoParty({ intakeText: moneyVibe })).toBe(false);
+    expect(shouldSkipPartyPrepForOrdinaryNamedTwoParty({ intakeText: northline })).toBe(true);
+
+    const leftoverNorthlineRows = ["Northline Robotics LLC", "Cedar Peak Analytics Inc"];
+    expect(
+      shouldSkipPartyPrepForOrdinaryNamedTwoParty({
+        intakeText: tooMuch,
+        partyRows: leftoverNorthlineRows,
+      }),
+    ).toBe(true);
+    expect(
+      shouldSkipPartyPrepForOrdinaryNamedTwoParty({
+        intakeText: moneyVibe,
+        partyRows: leftoverNorthlineRows,
+      }),
+    ).toBe(true);
+    expect(shouldSkipPartyPrepForOrdinaryNamedTwoParty({ intakeText: tooMuch })).toBe(false);
 
     const hangArgs = {
       premiumPostCheckoutProcessing: true,
@@ -206,7 +225,25 @@ describe("multi-party create → review settle or fail-closed", () => {
         ...hangArgs,
         ordinaryNamedTwoPartyReady: shouldSkipPartyPrepForOrdinaryNamedTwoParty({
           intakeText: tooMuch,
-          partyRows: ["", ""],
+        }),
+      }),
+    ).toBe(true);
+    // Leftover Northline partyRows would look named-2p and suppress the failsafe;
+    // current-dump intake-only still fires, then overlays dismiss + Retry is visible.
+    expect(
+      shouldFailClosedPremiumProcessingWithoutPfd({
+        ...hangArgs,
+        ordinaryNamedTwoPartyReady: shouldSkipPartyPrepForOrdinaryNamedTwoParty({
+          intakeText: tooMuch,
+          partyRows: leftoverNorthlineRows,
+        }),
+      }),
+    ).toBe(false);
+    expect(
+      shouldFailClosedPremiumProcessingWithoutPfd({
+        ...hangArgs,
+        ordinaryNamedTwoPartyReady: shouldSkipPartyPrepForOrdinaryNamedTwoParty({
+          intakeText: tooMuch,
         }),
       }),
     ).toBe(true);
@@ -216,6 +253,7 @@ describe("multi-party create → review settle or fail-closed", () => {
         corpusCommerciallyUsable: false,
       }),
     ).toBe(true);
+    expect(CREATE_FLOW_GENERATE_FAILED_CLEAR_MESSAGE).toMatch(/Try again/);
 
     // money_vibe-class: same family.
     expect(
@@ -223,7 +261,6 @@ describe("multi-party create → review settle or fail-closed", () => {
         ...hangArgs,
         ordinaryNamedTwoPartyReady: shouldSkipPartyPrepForOrdinaryNamedTwoParty({
           intakeText: moneyVibe,
-          partyRows: ["", ""],
         }),
       }),
     ).toBe(true);
@@ -234,7 +271,6 @@ describe("multi-party create → review settle or fail-closed", () => {
         ...hangArgs,
         ordinaryNamedTwoPartyReady: shouldSkipPartyPrepForOrdinaryNamedTwoParty({
           intakeText: northline,
-          partyRows: ["", ""],
         }),
       }),
     ).toBe(false);
@@ -467,11 +503,31 @@ describe("multi-party create → review settle or fail-closed", () => {
     expect(intake).toContain("shouldFailClosedPremiumProcessingWithoutPfd");
     expect(intake).toContain("premiumProcessingWithoutPfdFailClosed");
     expect(intake).toContain("ordinaryNamedTwoPartyReady: ordinaryNamedTwoPartyReadyForSettle");
+    expect(intake).toContain("ordinaryNamedTwoPartyReady: currentDumpIntakeOnlyNamedTwoPartyReady");
     expect(intake).not.toContain("shouldFailClosedJunkPfdHangOrEmptyAfterChurn");
     expect(intake).not.toContain("currentDumpOrdinaryNamedTwoPartyReady");
     expect(intake).toContain(
       "!plan.failClosed &&\n      !premiumProcessingWithoutPfdFailClosed &&\n      !postGenerateAuthorityChurn.failClosed",
     );
+    const intakeOnlyReadyIdx = intake.indexOf(
+      "const currentDumpIntakeOnlyNamedTwoPartyReady = shouldSkipPartyPrepForOrdinaryNamedTwoParty({",
+    );
+    expect(intakeOnlyReadyIdx).toBeGreaterThan(-1);
+    const intakeOnlyReadyBlock = intake.slice(intakeOnlyReadyIdx, intakeOnlyReadyIdx + 240);
+    expect(intakeOnlyReadyBlock).toContain("intakeCombined || readOriginalUserIntakeRaw()");
+    expect(intakeOnlyReadyBlock).not.toContain("partyRows");
+    expect(intakeOnlyReadyBlock).not.toContain("intakePartyEditorRows");
+    const failsafeTimerIdx = intake.indexOf("premiumProcessingFailsafeStartedAtRef.current = null;");
+    const failsafeTimerBlock = intake.slice(
+      intake.lastIndexOf("if (", failsafeTimerIdx),
+      failsafeTimerIdx,
+    );
+    expect(failsafeTimerBlock).toContain("currentDumpIntakeOnlyNamedTwoPartyReady");
+    expect(failsafeTimerBlock).not.toContain("ordinaryNamedTwoPartyReadyForSettle");
+    const settleIdx = intake.indexOf("const settle =");
+    const settleBlock = intake.slice(settleIdx, settleIdx + 280);
+    expect(settleBlock).toContain("!premiumProcessingWithoutPfdFailClosed &&");
+    expect(settleBlock).toContain("Boolean(plan.corpus)");
     const plannerCallSites = [
       intake.slice(
         intake.indexOf("const postGenerateCreateReviewSettlePlan = planPostGenerateCreateReviewSettleOrFailClosed("),

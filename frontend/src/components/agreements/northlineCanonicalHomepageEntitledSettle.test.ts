@@ -307,11 +307,31 @@ describe("canonical Northline homepage dump → entitled Pro Review", () => {
     expect(intake).toContain("shouldFailClosedPremiumProcessingWithoutPfd");
     expect(intake).toContain("premiumProcessingWithoutPfdFailClosed");
     expect(intake).toContain("ordinaryNamedTwoPartyReady: ordinaryNamedTwoPartyReadyForSettle");
+    expect(intake).toContain("ordinaryNamedTwoPartyReady: currentDumpIntakeOnlyNamedTwoPartyReady");
     expect(intake).not.toContain("shouldFailClosedJunkPfdHangOrEmptyAfterChurn");
     expect(intake).not.toContain("currentDumpOrdinaryNamedTwoPartyReady");
     expect(intake).toContain(
       "!plan.failClosed &&\n      !premiumProcessingWithoutPfdFailClosed &&\n      !postGenerateAuthorityChurn.failClosed",
     );
+    const intakeOnlyReadyIdx = intake.indexOf(
+      "const currentDumpIntakeOnlyNamedTwoPartyReady = shouldSkipPartyPrepForOrdinaryNamedTwoParty({",
+    );
+    expect(intakeOnlyReadyIdx).toBeGreaterThan(-1);
+    const intakeOnlyReadyBlock = intake.slice(intakeOnlyReadyIdx, intakeOnlyReadyIdx + 240);
+    expect(intakeOnlyReadyBlock).toContain("intakeCombined || readOriginalUserIntakeRaw()");
+    expect(intakeOnlyReadyBlock).not.toContain("partyRows");
+    expect(intakeOnlyReadyBlock).not.toContain("intakePartyEditorRows");
+    const failsafeTimerIdx = intake.indexOf("premiumProcessingFailsafeStartedAtRef.current = null;");
+    const failsafeTimerBlock = intake.slice(
+      intake.lastIndexOf("if (", failsafeTimerIdx),
+      failsafeTimerIdx,
+    );
+    expect(failsafeTimerBlock).toContain("currentDumpIntakeOnlyNamedTwoPartyReady");
+    expect(failsafeTimerBlock).not.toContain("ordinaryNamedTwoPartyReadyForSettle");
+    const settleIdx = intake.indexOf("const settle =");
+    const settleBlock = intake.slice(settleIdx, settleIdx + 280);
+    expect(settleBlock).toContain("!premiumProcessingWithoutPfdFailClosed &&");
+    expect(settleBlock).toContain("Boolean(plan.corpus)");
     const plannerGenerateCompleteSites = [
       intake.slice(
         intake.indexOf("const postGenerateCreateReviewSettlePlan = planPostGenerateCreateReviewSettleOrFailClosed("),
@@ -522,22 +542,32 @@ describe("canonical Northline homepage dump → entitled Pro Review", () => {
       preparingStartedAtMs: 1_000,
       nowMs: 1_000 + CREATE_FLOW_GENERATING_WITHOUT_PIPELINE_FAILSAFE_MS,
     } as const;
+    expect(shouldSkipPartyPrepForOrdinaryNamedTwoParty({ intakeText: NORTHLINE_CANONICAL })).toBe(
+      true,
+    );
     expect(
       shouldFailClosedPremiumProcessingWithoutPfd({
         ...hang,
         ordinaryNamedTwoPartyReady: shouldSkipPartyPrepForOrdinaryNamedTwoParty({
           intakeText: NORTHLINE_CANONICAL,
-          partyRows: ["", ""],
         }),
       }),
     ).toBe(false);
+    const leftoverNorthlineRows = ["Northline Robotics LLC", "Cedar Peak Analytics Inc"];
+    const tooMuch =
+      "Need a deal with way too much exclusivity forever, 40% equity, revenue share, every affiliate signs, and no legal names.";
+    expect(
+      shouldSkipPartyPrepForOrdinaryNamedTwoParty({
+        intakeText: tooMuch,
+        partyRows: leftoverNorthlineRows,
+      }),
+    ).toBe(true);
+    expect(shouldSkipPartyPrepForOrdinaryNamedTwoParty({ intakeText: tooMuch })).toBe(false);
     expect(
       shouldFailClosedPremiumProcessingWithoutPfd({
         ...hang,
         ordinaryNamedTwoPartyReady: shouldSkipPartyPrepForOrdinaryNamedTwoParty({
-          intakeText:
-            "Need a deal with way too much exclusivity forever, 40% equity, revenue share, every affiliate signs, and no legal names.",
-          partyRows: ["", ""],
+          intakeText: tooMuch,
         }),
       }),
     ).toBe(true);
@@ -546,7 +576,6 @@ describe("canonical Northline homepage dump → entitled Pro Review", () => {
         ...hang,
         ordinaryNamedTwoPartyReady: shouldSkipPartyPrepForOrdinaryNamedTwoParty({
           intakeText: "money vibe only, exclusivity forever, 40 percent equity, no parties named.",
-          partyRows: ["", ""],
         }),
       }),
     ).toBe(true);
@@ -556,6 +585,7 @@ describe("canonical Northline homepage dump → entitled Pro Review", () => {
         corpusCommerciallyUsable: false,
       }),
     ).toBe(true);
+    expect(CREATE_FLOW_GENERATE_FAILED_CLEAR_MESSAGE).toMatch(/Try again/);
 
     const usable = planPostGenerateCreateReviewSettleOrFailClosed({
       generateComplete: true,
