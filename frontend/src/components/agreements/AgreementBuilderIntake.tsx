@@ -133,11 +133,15 @@ import {
   type StarterComplexityGateAssessment,
 } from "./starterMultiPartyProGate";
 import {
+  CREATE_FLOW_GENERATE_FAILED_CLEAR_MESSAGE,
   hasFilledPartyPrepForDeclaredCreate,
   mergePartyPrepIntoCreateSubmitText,
+  overlayDeclaredPartiesOnDraft,
   resolveCreateFlowPreparationFailsafeMessage,
+  resolvePartiesForPremiumGenerateRequest,
   resolvePartyPrepSlotCount,
   shouldInvokePremiumGenerateAfterPartyPrepCreate,
+  shouldSettleProReviewAfterPremiumFullDraft,
   shouldSkipEntitledRewriteForMatchingAcceptedSnapshot,
 } from "./multiPartyCreateReviewSettle";
 import { StarterMultiPartyProGatePanel } from "./StarterMultiPartyProGatePanel";
@@ -7272,7 +7276,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       setLoading(false);
       return;
     }
-    const gateDraft = launchCtx.gateDraft;
+    const gateDraft = overlayDeclaredPartiesOnDraft(
+      launchCtx.gateDraft,
+      resolvePartiesForPremiumGenerateRequest({
+        intakeText: launchCtx.rawIntake,
+        partyRows: launch?.partyRows ?? intakePartyEditorRows,
+        draftPartyNames: (launchCtx.gateDraft.parties || []).map((p) => p.name),
+      }),
+    );
     const raw = launchCtx.rawIntake;
     console.info("[premium-flow] entitled_rewrite_start", { rawLen: raw.length });
     setPremiumPostCheckoutPhase("processing");
@@ -7347,7 +7358,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         setPremiumPipelineUserMessage(null);
         return;
       }
-      if (isPremiumGenerationRetryablePipelineResult(result)) {
+      if (
+        isPremiumGenerationRetryablePipelineResult(result) &&
+        !shouldSettleProReviewAfterPremiumFullDraft(result)
+      ) {
         const salvage = pickUsableGenerationRetrySalvageCorpus([
           result.winningPremiumBodyText,
           premiumPipelineOutputBodyRef.current,
@@ -7381,6 +7395,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             reason: "no_server_authority",
             dashboardRoute: isDashboardPaidCreateRouteActive(),
             intakeNotes: failedCreateRecoveryNotes,
+            customMessage: CREATE_FLOW_GENERATE_FAILED_CLEAR_MESSAGE,
           });
           setProFullDraftQualityRetry(terminal.proFullDraftQualityRetry);
           setProFullDraftCustomGateMessage(terminal.proFullDraftCustomGateMessage);
@@ -7484,6 +7499,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           reason: "no_server_authority",
           dashboardRoute: isDashboardPaidCreateRouteActive(),
           intakeNotes: failedCreateRecoveryNotes,
+          customMessage: CREATE_FLOW_GENERATE_FAILED_CLEAR_MESSAGE,
         });
         setProFullDraftQualityRetry(terminal.proFullDraftQualityRetry);
         setProFullDraftCustomGateMessage(terminal.proFullDraftCustomGateMessage);
@@ -7530,6 +7546,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         mergedIntake,
       );
       let winning = (result.winningPremiumBodyText || "").trim();
+      if (shouldSettleProReviewAfterPremiumFullDraft(result) && winning.length >= 500) {
+        // Latch before snapshot GET so the 15s no-corpus failsafe cannot fire on success.
+        lastPremiumWinningCorpusRef.current = winning;
+        premiumPipelineOutputBodyRef.current = winning;
+        hydratedPremiumBodyRef.current = winning;
+        lastKnownGoodAuthoritativeDraftRef.current = winning;
+        setAgreementDocumentText(winning);
+      }
       let usePaidAuthoritativeBody =
         isAuthoritativePremiumPipelineRenderSource(result.premiumRenderSource) && winning.length >= 500;
       let resolvedPersist = resolvePremiumRenderSource({
@@ -7768,9 +7792,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           jurisdiction: merged.draft?.jurisdiction,
         });
         if (!prepared.ok) {
-          // Fail-open only when a prior accepted Pro corpus already exists.
-          // First-create model/API failure must restore intake — never an empty review.
-          if (entitledReviewCorpus.length >= 500 && hasPaidProSourceOfTruth()) {
+          // First-create 200 + usable corpus must settle Review even if persist/GET fails.
+          // Empty first-create (no corpus) still restores intake.
+          if (entitledReviewCorpus.length >= 500) {
             if (import.meta.env.MODE !== "test") {
               // eslint-disable-next-line no-console
               console.warn("[premium-flow] entitled_rewrite_snapshot_prepare_failed_fail_open", {
@@ -11929,8 +11953,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         return false;
       }
       premiumGeneratePathCommittedRef.current = true;
+      const declaredParties = resolvePartiesForPremiumGenerateRequest({
+        intakeText: merged,
+        partyRows: intakePartyEditorRows,
+      });
       void runEntitledPremiumImprovementRewrite({
-        gateDraft: buildStarterProCheckoutPendingDraft(merged),
+        gateDraft: overlayDeclaredPartiesOnDraft(
+          buildStarterProCheckoutPendingDraft(merged),
+          declaredParties,
+        ),
         rawIntake: merged,
         partyRows: intakePartyEditorRows,
       });

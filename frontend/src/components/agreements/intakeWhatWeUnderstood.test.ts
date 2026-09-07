@@ -105,4 +105,23 @@ describe("buildWeCapturedSummaryBullets", () => {
     const termAfter = after.find((b) => b.kind === "term");
     expect(termAfter?.needsConfirmation).toBe(false);
   });
+
+  it("keeps all three labeled party-prep names in understood parties", () => {
+    const raw = `Three-party services agreement for $24,000. Governing law: Texas.
+
+Party 1: Cedar Ridge LLC
+Party 2: Harbor Point Inc
+Party 3: Summit Mesa LP`;
+    const model: LivePreviewModel = {
+      ...base,
+      docTitle: "Services Agreement",
+      partiesStructured: { party_1: "Cedar Ridge LLC", party_2: "Harbor Point Inc" },
+      partiesLine: "Cedar Ridge LLC and Harbor Point Inc",
+    };
+    const bullets = buildWeCapturedSummaryBullets(raw, model);
+    const parties = bullets.find((b) => b.kind === "parties");
+    expect(parties?.displayValue).toMatch(/Cedar Ridge LLC/);
+    expect(parties?.displayValue).toMatch(/Harbor Point Inc/);
+    expect(parties?.displayValue).toMatch(/Summit Mesa LP/);
+  });
 });
