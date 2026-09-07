@@ -518,6 +518,12 @@ describe("post-accept Prepare for signing click / handoff", () => {
     expect(trackFrag).toContain("executePaidProPostRecipientSetupHandoff");
     expect(trackFrag).not.toMatch(/resend|sendEmail|send_mail/i);
     expect(trackFrag).not.toMatch(/\bstripe\b|checkout/i);
+    // Recover reassignment widens selected.source; last "none" guard must
+    // precede mapTrackCorpusSourceToHandoffSource so TS2345 cannot return.
+    const lastNoneGuard = trackFrag.lastIndexOf('selected.source === "none"');
+    const mapHandoffSource = trackFrag.indexOf("mapTrackCorpusSourceToHandoffSource(selected.source)");
+    expect(lastNoneGuard).toBeGreaterThan(0);
+    expect(mapHandoffSource).toBeGreaterThan(lastNoneGuard);
   });
 
   it("decision_2 / Continue click still uses last-good Prepare → signature track", () => {
