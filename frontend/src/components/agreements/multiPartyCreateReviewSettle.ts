@@ -404,6 +404,7 @@ export type PostGenerateCreateReviewSettlePlan = PostGenerateAuthorityChurnOverl
  * Named 2-party commercially complete dumps must wait for generate — #212 treated
  * shorter-than-accepted churn as generate-done and fail-closed Northline before
  * premium-full-draft returned (live OPTIONS-only / couldn't-create).
+ * After pfd HTTP completes, always settle (usable corpus) or fail-close (empty).
  */
 export function planPostGenerateCreateReviewSettleOrFailClosed(input: {
   generateComplete?: boolean;
@@ -456,10 +457,17 @@ export function planPostGenerateCreateReviewSettleOrFailClosed(input: {
       return { dismissOverlays: true, settleReview: true, failClosed: false, corpus: mounted };
     }
   }
-  // Commercially complete named 2p: keep Preparing until generate actually
-  // completes. too_much / money_vibe omit this flag and still fail-close on churn.
+  // Commercially complete named 2p: keep Preparing until pfd HTTP / generate
+  // actually completes. too_much / money_vibe omit this flag and still fail-close
+  // on churn before HTTP returns.
   if (input.ordinaryNamedTwoPartyReady && !generateComplete) {
     return { dismissOverlays: false, settleReview: false, failClosed: false, corpus: "" };
+  }
+  // After pfd HTTP completes: settle already handled above. Empty / rejected
+  // body must fail-close even when leftover vs01 in_progress is non-terminal
+  // (#213 left Generating mounted after live 200 + vs01-blocked + shorter-than-accepted).
+  if (generateComplete) {
+    return { dismissOverlays: true, settleReview: false, failClosed: true, corpus: "" };
   }
   const generateDone = generateComplete || Boolean(input.shorterThanAcceptedChurn);
   if (generateDone && input.vs01GateBlockedWithoutSelectedFinal) {

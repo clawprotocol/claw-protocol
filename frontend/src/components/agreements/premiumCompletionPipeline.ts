@@ -289,6 +289,13 @@ import {
 } from "./premiumAcceptancePolicy";
 import type { PremiumCompletionOutcome, RecommendedClarifications } from "./agreementOutputQuality/types";
 
+export type PremiumFullDraftHttpCompleteInfo = {
+  ok: boolean;
+  documentText?: string;
+  serverFullDocumentText?: string;
+  errorCode?: string;
+};
+
 export type PremiumCompletionInput = {
   intakeText: string;
   structuredDraft: ParsedDraftShape;
@@ -312,6 +319,13 @@ export type PremiumCompletionInput = {
   premiumGenerationCallReason?: PremiumGenerationCallReason;
   /** When true, waterfall finishes after review surface visible (checkout path). */
   deferWaterfallFinish?: boolean;
+  /**
+   * Fired when premium-full-draft HTTP completes (200 or empty/reject body),
+   * before VS01 / placeholder / shorter-than-accepted post-processing.
+   * Entitled dump overlay must settle-or-fail-close here — not when the
+   * rest of ensurePremiumCompletion returns.
+   */
+  onPremiumFullDraftHttpComplete?: (info: PremiumFullDraftHttpCompleteInfo) => void;
 };
 
 export type PremiumRecipientCandidate = { name: string; email: string; role: string };
@@ -1890,6 +1904,17 @@ async function runPremiumCompletionInner(
   let premiumJsonParseDegradedAttemptCount = 0;
   let lastSubstantiveWireFreezeRejectReason: string | null = null;
   let lastSubstantiveWireFreezeBodyLen = 0;
+  let pfdHttpCompleteNotified = false;
+  const notifyPremiumFullDraftHttpComplete = (info: PremiumFullDraftHttpCompleteInfo) => {
+    if (pfdHttpCompleteNotified) return;
+    pfdHttpCompleteNotified = true;
+    if (!input.onPremiumFullDraftHttpComplete) return;
+    try {
+      input.onPremiumFullDraftHttpComplete(info);
+    } catch {
+      /* rewrite callback must not break the pipeline */
+    }
+  };
 
   try {
     const mergedForApi = stripClientPremiumArtifactBlocksFromDraft(merged);
@@ -1952,6 +1977,20 @@ async function runPremiumCompletionInner(
         networkCallReason: callReason as PremiumNetworkCallReason,
       });
     }
+    notifyPremiumFullDraftHttpComplete(
+      fullResp.ok
+        ? {
+            ok: true,
+            documentText: String(fullResp.result.document_text || "").trim(),
+            serverFullDocumentText: String(fullResp.result.server_full_document_text || "").trim(),
+          }
+        : {
+            ok: false,
+            documentText: String(fullResp.document_text || "").trim(),
+            serverFullDocumentText: "",
+            errorCode: fullResp.error_code,
+          },
+    );
     const premiumServerModelMs = Math.round(
       (typeof performance !== "undefined" ? performance.now() : Date.now()) - premiumRequestStartedAt,
     );
@@ -4699,6 +4738,12 @@ async function runPremiumCompletionInner(
       }
     }
   } catch (e) {
+    notifyPremiumFullDraftHttpComplete({
+      ok: false,
+      documentText: "",
+      serverFullDocumentText: "",
+      errorCode: "exception",
+    });
     const msg = e instanceof Error ? e.message : String(e);
     logPremiumCompletionDebug({
       stage: "premium_full_draft_try_catch",
