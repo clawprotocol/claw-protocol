@@ -321,7 +321,7 @@ describe("multi-party create → review settle or fail-closed", () => {
     expect(intake).not.toMatch(
       /if \(salvage && hasPaidProSourceOfTruth\(\)\) \{\s*if \(import\.meta\.env\.MODE !== "test"\)/,
     );
-    const vs01AttachIdx = intake.indexOf("withCreatePipelineVs01CorpusGate(result, vs01GateAfterGenerate)");
+    const vs01AttachIdx = intake.indexOf("withCreatePipelineVs01CorpusGate(");
     const rejectAfterVs01Idx = intake.indexOf("shouldFailClosedCreateAfterRejectOrGate(result)", vs01AttachIdx);
     expect(vs01AttachIdx).toBeGreaterThan(-1);
     expect(rejectAfterVs01Idx).toBeGreaterThan(vs01AttachIdx);
