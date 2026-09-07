@@ -140,6 +140,8 @@ import {
   resolveCreateFlowPreparationFailsafeMessage,
   resolvePartiesForPremiumGenerateRequest,
   resolvePartyPrepSlotCount,
+  shouldDismissHomeCreateTransitionForIntakeRecovery,
+  shouldFailClosedCreateAfterRejectOrGate,
   shouldInvokePremiumGenerateAfterPartyPrepCreate,
   shouldSettleProReviewAfterPremiumFullDraft,
   shouldSkipEntitledRewriteForMatchingAcceptedSnapshot,
@@ -7356,6 +7358,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         setHardError("Your details changed while we were finishing. Try again when ready.");
         setPremiumPostCheckoutPhase(null);
         setPremiumPipelineUserMessage(null);
+        setLoading(false);
         return;
       }
       if (
@@ -7480,14 +7483,49 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         setLoading(false);
         return;
       }
-      if (
-        (result.proIntentGateMessage || result.founderDetailsGateMessage) &&
-        !authoritativePremiumPipelineResultForUiApply(result)
-      ) {
-        setProFullDraftCustomGateMessage(result.proIntentGateMessage || result.founderDetailsGateMessage || null);
-        setProFullDraftQualityRetry(true);
-        setPremiumPostCheckoutPhase(null);
-        setPremiumPipelineUserMessage(null);
+      if (shouldFailClosedCreateAfterRejectOrGate(result)) {
+        logPaidProGenerationTerminalTransition({
+          reason: "no_server_authority",
+          outcome: "retry_recoverable",
+        });
+        const terminal = commitEntitledRewriteGenerationFailureTerminal({
+          reason: "no_server_authority",
+          dashboardRoute: isDashboardPaidCreateRouteActive(),
+          intakeNotes: failedCreateRecoveryNotes,
+          customMessage: CREATE_FLOW_GENERATE_FAILED_CLEAR_MESSAGE,
+        });
+        setProFullDraftQualityRetry(terminal.proFullDraftQualityRetry);
+        setProFullDraftCustomGateMessage(terminal.proFullDraftCustomGateMessage);
+        setPremiumPersistedFlowActive(terminal.premiumPersistedFlowActive);
+        setPremiumSendPathUnlocked(terminal.premiumSendPathUnlocked);
+        setPremiumPostCheckoutPhase(terminal.premiumPostCheckoutPhase);
+        setPremiumPipelineUserMessage(terminal.premiumPipelineUserMessage);
+        setHardError(terminal.hardError);
+        setCreateFlowPhase(terminal.createFlowPhase);
+        setDisplayPhase(terminal.displayPhase);
+        setCreateUiStage(terminal.createUiStage);
+        lastPremiumPipelineRenderSourceRef.current = result.premiumRenderSource;
+        setPremiumTruthPipelineSource(result.premiumRenderSource);
+        premiumPipelineOutputBodyRef.current = "";
+        lastPremiumWinningCorpusRef.current = "";
+        hydratedPremiumBodyRef.current = "";
+        setAgreementDocumentText("");
+        {
+          if (failedCreateRecoveryNotes) {
+            setIntakeStepBuffer(failedCreateRecoveryNotes);
+            setDebouncedStepBuffer(failedCreateRecoveryNotes);
+          }
+        }
+        setJourneyActionFeedback(
+          feedbackFailed("create_agreement", FAILED_CREATE_RECOVERY_TITLE, feedbackAfterModelFailure(), {
+            remedyLabel: "Retry",
+          }),
+        );
+        if (terminal.clearLocalDraft) {
+          setDraft(null);
+          setPreviewPaneRevealed(false);
+        }
+        setLoading(false);
         return;
       }
       if (shouldTreatEntitledRewritePipelineResultAsGenerationFailure(result)) {
@@ -14705,6 +14743,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         intakeClarification,
         emptyAuthorityPrepFailSafe,
         homeAutoGenerateConsumed: homeAutoGenerateConsumedRef.current,
+        hardError,
+      }) ||
+      shouldDismissHomeCreateTransitionForIntakeRecovery({
+        isGenerating,
+        intakeClarification,
+        emptyAuthorityPrepFailSafe,
+        createFlowPhase,
+        homeAutoGenerateConsumed: homeAutoGenerateConsumedRef.current,
+        hardError,
       })
     ) {
       onHomeGuidedTransitionPhase("review_ready");
@@ -14723,6 +14770,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     starterMultiPartyProGate,
     intakeClarification,
     emptyAuthorityPrepFailSafe,
+    hardError,
   ]);
 
   /**

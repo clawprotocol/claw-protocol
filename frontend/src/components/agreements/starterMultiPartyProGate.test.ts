@@ -298,6 +298,24 @@ describe("explicit unnamed three-party Pro gate", () => {
         emptyAuthorityPrepFailSafe: true,
       }),
     ).toBe(true);
+    expect(
+      shouldResolveStarterHomeTransitionToReviewReady({
+        draft: null,
+        createUiStage: "DRAFT",
+        createFlowPhase: "generating_draft",
+        isGenerating: true,
+        hardError: "We couldn't finish the Pro review. Your details are still here — tap Try again.",
+      }),
+    ).toBe(true);
+    expect(
+      shouldResolveStarterHomeTransitionToReviewReady({
+        draft: null,
+        createUiStage: "DRAFT",
+        createFlowPhase: "generating_draft",
+        isGenerating: true,
+        rejectOrGateBlocked: true,
+      }),
+    ).toBe(true);
   });
 
   it("create intake applies the explicit multi-party Pro gate before capability or generation", () => {
