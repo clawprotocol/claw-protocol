@@ -154,7 +154,6 @@ import {
   shouldRemapGenerationRetryableSalvageForCreateSettle,
   shouldSettleProReviewAfterPremiumFullDraft,
   shouldSkipEntitledRewriteForMatchingAcceptedSnapshot,
-  isCoherentOrdinaryNamedTwoPartyForFailsafe,
   shouldSkipPartyPrepForOrdinaryNamedTwoParty,
   withCreatePipelineVs01CorpusGate,
 } from "./multiPartyCreateReviewSettle";
@@ -26591,10 +26590,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     intakeText: intakeCombined || readOriginalUserIntakeRaw() || "",
     partyRows: intakePartyEditorRows,
   });
-  // Failsafe / overlay timer: current dump only, and only coherent Northline-class
-  // named-2p. Over-specified / too_much named dumps must ask (failsafe dismiss),
-  // not wait for pfd. Leftover party-prep rows must not make junk look ready.
-  const currentDumpIntakeOnlyNamedTwoPartyReady = isCoherentOrdinaryNamedTwoPartyForFailsafe({
+  // Failsafe / overlay timer: current dump only. Leftover party-prep rows from a
+  // prior Northline walk must not make junk look named-2p ready.
+  const currentDumpIntakeOnlyNamedTwoPartyReady = shouldSkipPartyPrepForOrdinaryNamedTwoParty({
     intakeText: intakeCombined || readOriginalUserIntakeRaw() || "",
   });
   const vs01CorpusGateBlockedWithoutSelectedFinal = isVs01CorpusGateBlockedWithoutSelectedFinal({
