@@ -57,6 +57,31 @@ export type PaidProDocumentBoundaryAuthorityResult = {
 
 const RECITAL_FUSED_SECTION_RE = /Parties\."\d+\./i;
 
+const COMMERCIAL_FIELD_STUB_RE =
+  /^\[?\s*(?:(?:SIGNER|PARTY|CONTACT|ORG)_)?(?:EMAIL|ADDRESS|PARTY_ADDRESS|NAME|TITLE|DATE|SIGNATURE|INITIALS?|PARTY_NAME|SIGNER_NAME)(?:_\d+)?\s*\]?$/i;
+
+function isCommercialFieldStubToken(token: string): boolean {
+  const t = String(token || "").trim();
+  if (/\[\s*INSERT\b/i.test(t) || /\{\{/.test(t) || /<\s*insert/i.test(t)) return false;
+  return COMMERCIAL_FIELD_STUB_RE.test(t.replace(/\s+/g, ""));
+}
+
+function acceptCommercialFieldStubsOnMultipartyPfd200(
+  text: string,
+  intakeText?: string | null,
+): boolean {
+  const body = String(text || "").trim();
+  if (body.length < 8_500) return false;
+  const tokens = scanUnresolvedRenderTokens(body);
+  if (tokens.length > 48) return false;
+  if (tokens.length > 0 && !tokens.every((m) => isCommercialFieldStubToken(m.token))) {
+    return false;
+  }
+  const intake = String(intakeText ?? "");
+  if (/(?:^|\n)\s*Party\s*[3-9]\s*:/im.test(intake)) return true;
+  return /\b(?:by and among|entered into by and among)\b/i.test(body);
+}
+
 function lineHasInlineFusedTopLevelSection(line: string): boolean {
   const trimmed = line.trim();
   if (!trimmed || /^\d+\.\s+/.test(trimmed)) return false;
@@ -238,7 +263,12 @@ export function applyPaidProDocumentBoundaryAuthority(
   const unresolvedRenderTokens = contact.ok
     ? []
     : [...new Set(scanUnresolvedRenderTokens(out).map((m) => m.token))];
-  const ok = violations.length === 0 && contact.ok;
+  const commercialFieldStubsOnly =
+    unresolvedRenderTokens.length > 0 &&
+    unresolvedRenderTokens.every((t) => isCommercialFieldStubToken(t)) &&
+    acceptCommercialFieldStubsOnMultipartyPfd200(out, opts?.intakeText);
+  const contactOk = contact.ok || commercialFieldStubsOnly;
+  const ok = violations.length === 0 && contactOk;
   if (opts?.blockOnViolation && violations.length > 0) {
     throw new Error(`[paid-pro-document-boundary-blocked] ${violations.join(",")}`);
   }
@@ -270,6 +300,15 @@ export function assertPaidProDocumentBoundaryAuthorityForFreeze(
     out = result.text;
     lastViolations = result.violations;
     lastUnresolvedTokens = result.unresolvedRenderTokens;
+    if (
+      !result.ok &&
+      result.violations.length === 0 &&
+      lastUnresolvedTokens.length > 0 &&
+      lastUnresolvedTokens.every((t) => isCommercialFieldStubToken(t)) &&
+      acceptCommercialFieldStubsOnMultipartyPfd200(out, opts?.intakeText)
+    ) {
+      return out;
+    }
     if (result.ok && result.violations.length === 0) {
       if (!opts?.deferClauseFamilyStructuralValidation) {
         assertClauseFamilyStructuralIntegrityForFreeze(out, {

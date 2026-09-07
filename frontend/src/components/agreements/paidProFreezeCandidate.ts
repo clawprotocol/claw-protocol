@@ -9,6 +9,7 @@ import { clearAcceptedProCorpusSafeDisplayCache } from "./paidProAcceptedCorpusS
 import {
   repairAgreementTemplatePlaceholders,
   repairPaidProFreezePlaceholderAuthority,
+  shouldAcceptPaidProCommercialFieldStubsAfterPfd200,
 } from "./agreementTemplatePlaceholderSafety";
 import {
   ensurePaidProAcceptanceExecutionBlockInvariant,
@@ -1096,7 +1097,19 @@ export function assertPaidProFreezeCandidateGates(
   assertPaidProFreezeCandidateManifestCountAgreement(prep, args);
 
   const freezeEntryText = trim(args.text);
-  if (containsUnresolvedRenderTokens(freezeEntryText)) {
+  // Live pfd 200 often still carries notice/signature field stubs. #196 demoted
+  // helpers; the freeze entry check is the runtime reject that still fail-closed.
+  if (
+    containsUnresolvedRenderTokens(freezeEntryText) &&
+    !shouldAcceptPaidProCommercialFieldStubsAfterPfd200({
+      text: freezeEntryText,
+      intakeRaw: args.intakeText,
+    }) &&
+    !shouldAcceptPaidProCommercialFieldStubsAfterPfd200({
+      text: trim(prep.text),
+      intakeRaw: args.intakeText,
+    })
+  ) {
     throw new Error(
       "[paid-pro-sot-freeze-blocked] unresolved_render_tokens_in_freeze_entry",
     );
@@ -1235,7 +1248,13 @@ export function assertPaidProFreezeCandidateGates(
     );
   }
 
-  if (containsUnresolvedRenderTokens(safeForCommit)) {
+  if (
+    containsUnresolvedRenderTokens(safeForCommit) &&
+    !shouldAcceptPaidProCommercialFieldStubsAfterPfd200({
+      text: safeForCommit,
+      intakeRaw: args.intakeText,
+    })
+  ) {
     throw new Error(
       "[paid-pro-sot-freeze-blocked] unresolved_render_tokens_after_notice_contact_authority",
     );
