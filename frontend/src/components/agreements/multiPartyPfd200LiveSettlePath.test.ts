@@ -12,9 +12,12 @@ import { rejectPremiumBodyForProRender } from "./premiumFullDraftClientAcceptanc
 import { resolvePaidProFreezeCommitText } from "./paidProFreezeCandidate";
 import { resolvePartiesForReviewRender } from "./paidProReviewRenderParties";
 import { mergePartyPrepIntoCreateSubmitText } from "./multiPartyCreateReviewSettle";
+import { sanitizeProReviewDisplayText } from "./polishProAgreementDisplayLayer";
 import {
   consumeAuthoritativeSignerCount,
+  extractAuthoritativeLegalNamesFromCommercialCorpus,
   resetSignerCountAuthorityDiagnosticsForTests,
+  resolveAuthoritativeSignerCount,
 } from "./signerCountAuthority";
 import { containsUnresolvedRenderTokens } from "./userVisibleRenderTokenAuthority";
 import {
@@ -31,6 +34,9 @@ const FOUR_PARTY_DUMP =
 const THREE_NAMES = ["Cedar Ridge LLC", "Harbor Point Inc", "Summit Mesa LP"] as const;
 const FOUR_NAMES = ["North Wind LLC", "East Dock Inc", "South Pier LP", "West Gate Corp"] as const;
 const LEFTOVER_TWO = ["Redwood LLC", "BlueHarbor Inc"] as const;
+/** Live #197/#198 walk names — leftover 2-slot editor + Party 3 LoneStar. */
+const LIVE_THREE = ["Redwood LLC", "BlueHarbor Inc", "LoneStar LLC"] as const;
+const LIVE_FOUR = ["Redwood LLC", "BlueHarbor Inc", "LoneStar LLC", "IronGate LP"] as const;
 
 function padOperative(targetLen: number, already: string): string {
   const clause =
@@ -281,6 +287,9 @@ describe("live pipeline sites after pfd 200 + leftover 2-party overlay", () => {
       surface: "premium_completion_pipeline_accept",
     });
     expect(freeze.ok, freeze.rejectReason ?? "").toBe(true);
+    for (const name of FOUR_NAMES) {
+      expect(freeze.text, `freeze dropped ${name}`).toContain(name);
+    }
 
     const consumed = consumeAuthoritativeSignerCount(
       "enforcePaidProSingleExecutionBlock",
@@ -428,5 +437,142 @@ describe("live pipeline sites after pfd 200 + leftover 2-party overlay", () => {
       surface: "premium_completion_pipeline_accept",
     });
     expect(freeze.ok).toBe(false);
+  });
+
+  it("N=3 leftover overlay: settled freeze + overlay still show all 3 legal names", () => {
+    const intake = mergePartyPrepIntoCreateSubmitText(THREE_PARTY_DUMP, [...LIVE_THREE]);
+    const leftover = leftoverTwoPartyDraft([LIVE_THREE[0], LIVE_THREE[1]]);
+    const corpus = buildLiveMultipartyCorpus(LIVE_THREE);
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    const freeze = resolvePaidProFreezeCommitText({
+      text: corpus,
+      source: "server_full_draft",
+      draft: leftover,
+      intakeText: intake,
+      surface: "premium_completion_pipeline_accept",
+    });
+    expect(freeze.ok, freeze.rejectReason ?? "").toBe(true);
+    expect(freeze.text).toContain(LIVE_THREE[0]);
+    expect(freeze.text).toContain(LIVE_THREE[1]);
+    expect(freeze.text).toContain(LIVE_THREE[2]);
+
+    const overlay = resolvePartiesForReviewRender({
+      draft: leftover,
+      intakeText: intake,
+    }).map((p) => p.partyLegalName.trim());
+    for (const name of LIVE_THREE) {
+      expect(overlay, overlay.join("|")).toContain(name);
+    }
+    expect(overlay).toHaveLength(3);
+
+    const display = sanitizeProReviewDisplayText(freeze.text || corpus, {
+      source: "pro_review_display",
+    });
+    expect(display.text).toContain(LIVE_THREE[0]);
+    expect(display.text).toContain(LIVE_THREE[1]);
+    expect(display.text).toContain(LIVE_THREE[2]);
+    expect(display.sanityBlocked).toBe(false);
+
+    const consumed = consumeAuthoritativeSignerCount(
+      "enforcePaidProSingleExecutionBlock",
+      {
+        intakeText: intake,
+        draftPartyNames: leftover.parties.map((p) => p.name),
+        draftParties: leftover.parties,
+        corpusPlain: corpus,
+      },
+      leftover.parties.length,
+    );
+    expect(consumed).toBe(3);
+    expect(
+      warnSpy.mock.calls.some((c) => String(c[0]).includes("[signer-count-authority]-mismatch")),
+    ).toBe(false);
+  });
+
+  it("N=3 leftover 2-party prep overwrite: do not silently drop BlueHarbor", () => {
+    const threeNamed = mergePartyPrepIntoCreateSubmitText(THREE_PARTY_DUMP, [...LIVE_THREE]);
+    const leftoverPrepIntake = mergePartyPrepIntoCreateSubmitText(threeNamed, [
+      LIVE_THREE[0],
+      LIVE_THREE[1],
+    ]);
+    const leftover = leftoverTwoPartyDraft([LIVE_THREE[0], LIVE_THREE[1]]);
+    const corpus = buildLiveMultipartyCorpus(LIVE_THREE);
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+
+    expect(leftoverPrepIntake).not.toMatch(/Party\s*3\s*:/i);
+    expect(extractAuthoritativeLegalNamesFromCommercialCorpus(corpus)).toEqual(
+      expect.arrayContaining([...LIVE_THREE]),
+    );
+    expect(
+      resolveAuthoritativeSignerCount({
+        intakeText: leftoverPrepIntake,
+        draftPartyNames: leftover.parties.map((p) => p.name),
+        draftParties: leftover.parties,
+        corpusPlain: corpus,
+      }).count,
+    ).toBe(3);
+
+    const freeze = resolvePaidProFreezeCommitText({
+      text: corpus,
+      source: "server_full_draft",
+      draft: leftover,
+      intakeText: leftoverPrepIntake,
+      surface: "premium_completion_pipeline_accept",
+    });
+    expect(freeze.ok, freeze.rejectReason ?? "").toBe(true);
+    for (const name of LIVE_THREE) {
+      expect(freeze.text, `freeze dropped ${name}`).toContain(name);
+    }
+
+    const overlay = resolvePartiesForReviewRender({
+      draft: leftover,
+      intakeText: leftoverPrepIntake,
+      corpusPlain: freeze.text || corpus,
+    }).map((p) => p.partyLegalName.trim());
+    for (const name of LIVE_THREE) {
+      expect(overlay, `overlay dropped ${name}: ${overlay.join("|")}`).toContain(name);
+    }
+    expect(overlay).toHaveLength(3);
+
+    const display = sanitizeProReviewDisplayText(freeze.text || corpus, {
+      source: "pro_review_display",
+    });
+    expect(display.text).toContain("BlueHarbor Inc");
+    expect(display.text).toContain("LoneStar LLC");
+    expect(
+      warnSpy.mock.calls.some((c) => String(c[0]).includes("[signer-count-authority]-mismatch")),
+    ).toBe(false);
+  });
+
+  it("N=4 leftover 2-party prep overwrite: freeze keeps middle parties", () => {
+    const fourNamed = mergePartyPrepIntoCreateSubmitText(FOUR_PARTY_DUMP, [...LIVE_FOUR]);
+    const leftoverPrepIntake = mergePartyPrepIntoCreateSubmitText(fourNamed, [
+      LIVE_FOUR[0],
+      LIVE_FOUR[1],
+    ]);
+    const leftover = leftoverTwoPartyDraft([LIVE_FOUR[0], LIVE_FOUR[1]]);
+    const corpus = buildLiveMultipartyCorpus(LIVE_FOUR);
+
+    const freeze = resolvePaidProFreezeCommitText({
+      text: corpus,
+      source: "server_full_draft",
+      draft: leftover,
+      intakeText: leftoverPrepIntake,
+      surface: "premium_completion_pipeline_accept",
+    });
+    expect(freeze.ok, freeze.rejectReason ?? "").toBe(true);
+    for (const name of LIVE_FOUR) {
+      expect(freeze.text, `freeze dropped ${name}`).toContain(name);
+    }
+    const overlay = resolvePartiesForReviewRender({
+      draft: leftover,
+      intakeText: leftoverPrepIntake,
+      corpusPlain: freeze.text || corpus,
+    }).map((p) => p.partyLegalName.trim());
+    for (const name of LIVE_FOUR) {
+      expect(overlay, `overlay dropped ${name}: ${overlay.join("|")}`).toContain(name);
+    }
+    expect(overlay).toHaveLength(4);
   });
 });

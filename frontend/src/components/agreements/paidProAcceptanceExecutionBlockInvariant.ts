@@ -26,6 +26,7 @@ import {
   intakePartyManifestIsAuthoritative,
 } from "./intakePartyManifestAuthority";
 import { readFrozenCanonicalManifestPartyNames } from "./frozenCanonicalManifestAuthority";
+import { resolveDeclaredExplicitPartyCount } from "./partySlotIdentityNormalize";
 import { readConsumedPaidProSignerMetadataAuthority } from "./paidProSignerMetadataAuthority";
 import {
   dedupeEntityCandidatesToLegalParties,
@@ -465,9 +466,22 @@ export function resolveAcceptanceManifestRecordsForExecution(args: {
     if (fromBrandProse.length >= 4) return fromBrandProse;
   }
 
+  const declared = resolveDeclaredExplicitPartyCount(intakeText ?? "") ?? 0;
+  const draftNames = (draft?.parties ?? [])
+    .map((p) => String((p as { name?: string }).name ?? "").trim())
+    .filter((n) => n.length >= 2 && isAuthoritativeLegalEntityName(n));
+
   const fromConsumedSignerAuthority = manifestRecordsFromConsumedSignerAuthority();
   if (fromConsumedSignerAuthority.length >= 2) {
-    return fromConsumedSignerAuthority;
+    if (
+      !(
+        declared >= 3 &&
+        fromConsumedSignerAuthority.length < declared &&
+        draftNames.length >= declared
+      )
+    ) {
+      return fromConsumedSignerAuthority;
+    }
   }
 
   // Authoritative intake party manifest (colon-role / numbered / bullet) is the single source
@@ -494,6 +508,13 @@ export function resolveAcceptanceManifestRecordsForExecution(args: {
   }
 
   const labeled = labeledPartyLegalEntities(intakeText ?? "").filter(isAuthoritativeLegalEntityName);
+  if (
+    declared >= 3 &&
+    draftNames.length >= declared &&
+    labeled.length < declared
+  ) {
+    return manifestRecordsFromPartyNames(draftNames.slice(0, declared), intakeText, draft);
+  }
   if (labeled.length >= 2) {
     return manifestRecordsFromPartyNames(labeled.slice(0, PAID_PRO_AUTHORITY_MAX_PARTIES), intakeText, draft);
   }
