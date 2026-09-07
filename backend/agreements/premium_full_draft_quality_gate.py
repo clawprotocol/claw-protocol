@@ -5,6 +5,7 @@ Used only as safety/rejection signals — one repair LLM pass may follow.
 
 from __future__ import annotations
 
+import json
 import re
 import unicodedata
 from difflib import SequenceMatcher
@@ -118,10 +119,30 @@ PREMIUM_FULL_DRAFT_FRONTEND_FREEZE_MIN_LEN = 10_000
 Frontend strong-length floor for complex / multi-party Pro corpora. Aligns with
 ``frontend/src/components/agreements/premiumAcceptancePolicy.ts`` ``SUBSTANTIVE_SERVER_DRAFT_MIN_LEN``.
 
-This is NOT a universal reject floor. Simple two-party commercial services drafts are routinely
-2.5k–8k chars; the frontend already freezes those via the concise / structurally-complete path.
-Clamping every intake to 10k made the API return ``premium_generation_insufficient`` (empty body)
-for usable Genesis Dog drafts and stranded create on Retry Pro draft.
+This is the generation *target*, not a universal reject floor. Simple two-party commercial
+services drafts are routinely 2.5k–8k chars; the frontend already freezes those via the concise
+/ structurally-complete path. Clamping every intake to 10k made the API return
+``premium_generation_insufficient`` (empty body) for usable Genesis Dog drafts and stranded
+create on Retry Pro draft.
+"""
+
+PREMIUM_FULL_DRAFT_MULTIPARTY_NEAR_COMPLETE_MIN_LEN = 8_500
+"""
+BE accept floor for structurally complete N≥3 / complex drafts.
+
+Staging rejected a 9119-char four-party corpus as ``premium_generation_insufficient`` solely
+because it sat ~9% under the 10k frontend freeze target. A near-complete multiparty draft
+that already has clause families + an execution mechanism must not be emptied. Hollow / junk
+still fail via those structural checks and this floor (well above the ~6–8k thin-shell band).
+"""
+
+PREMIUM_FULL_DRAFT_DEFAULT_MAX_TOKENS = 8_000
+"""Default ``max_tokens`` for simple two-party premium-full-draft (env may raise)."""
+
+PREMIUM_FULL_DRAFT_MULTIPARTY_MAX_TOKENS = 14_000
+"""
+N≥3 / complex stop budget. Staging 3-party Create hit ``finish_reason=length`` at exactly
+8000 completion tokens and the route emptied the body (``output_truncated``, document_text_len=0).
 """
 
 PREMIUM_FULL_DRAFT_MIN_CLAUSE_FAMILIES = 5
@@ -302,6 +323,33 @@ def premium_full_draft_multiparty_presence_reasons(
     return reasons
 
 
+def premium_full_draft_is_complex_or_multiparty(
+    intake: str,
+    context: Optional[Dict[str, Any]],
+) -> bool:
+    """True when the intake is N≥3, explicitly multi-party/complex, or requests 4+ clause families."""
+    party_count = _premium_intake_party_count(context)
+    complex_signal = bool(_COMPLEX_PREMIUM_INTAKE_RE.search(intake or ""))
+    family_requests = _premium_intake_clause_family_requests(intake or "")
+    return party_count >= 3 or complex_signal or family_requests >= 4
+
+
+def premium_full_draft_max_tokens_for_context(
+    intake: str,
+    context: Optional[Dict[str, Any]],
+    *,
+    env_max: int,
+) -> int:
+    """
+    Generation stop budget. Simple two-party keeps the env/default 8k cap.
+    N≥3 / complex is raised so a full commercial corpus is not cut off at 8000 tokens.
+    """
+    base = max(2_000, int(env_max))
+    if premium_full_draft_is_complex_or_multiparty(intake, context):
+        return max(base, PREMIUM_FULL_DRAFT_MULTIPARTY_MAX_TOKENS)
+    return base
+
+
 def premium_full_draft_substance_min_len_for_context(
     intake: str,
     context: Optional[Dict[str, Any]],
@@ -309,15 +357,15 @@ def premium_full_draft_substance_min_len_for_context(
     """
     Context-aware minimum length. Complex / multi-party intakes require a longer corpus.
 
-    Complex / multi-party stays clamped to the frontend strong freeze floor (10k).
+    Complex / multi-party uses the near-complete floor (8.5k), not a hard 10k reject.
     Simple two-party commercial services use the base floor (1.6k) plus clause-family /
     execution checks — matching the frontend concise authoritative acceptance path.
     """
-    party_count = _premium_intake_party_count(context)
-    complex_signal = bool(_COMPLEX_PREMIUM_INTAKE_RE.search(intake or ""))
-    family_requests = _premium_intake_clause_family_requests(intake or "")
-    if party_count >= 3 or complex_signal or family_requests >= 4:
-        return max(PREMIUM_FULL_DRAFT_COMPLEX_MIN_LEN, PREMIUM_FULL_DRAFT_FRONTEND_FREEZE_MIN_LEN)
+    if premium_full_draft_is_complex_or_multiparty(intake, context):
+        return max(
+            PREMIUM_FULL_DRAFT_COMPLEX_MIN_LEN,
+            PREMIUM_FULL_DRAFT_MULTIPARTY_NEAR_COMPLETE_MIN_LEN,
+        )
     return PREMIUM_FULL_DRAFT_BASE_MIN_LEN
 
 
@@ -345,6 +393,96 @@ def premium_full_draft_body_meets_substance_floor(
     if not _EXECUTION_MECHANISM_RE.search(doc):
         reasons.append("missing_execution_mechanism")
     return (len(reasons) == 0, reasons)
+
+
+_JSON_DRAFT_KEY_RE = re.compile(
+    r'"(?:authoritative_draft|document_text)"\s*:\s*"',
+    re.I,
+)
+_JSON_STRING_ESCAPES = {
+    "n": "\n",
+    "r": "\r",
+    "t": "\t",
+    '"': '"',
+    "\\": "\\",
+    "/": "/",
+}
+
+
+def _strip_optional_json_fences(raw: str) -> str:
+    text = (raw or "").strip()
+    if not text.startswith("```"):
+        return text
+    lines = text.splitlines()
+    if lines:
+        lines = lines[1:]
+    if lines and lines[-1].strip().startswith("```"):
+        lines = lines[:-1]
+    return "\n".join(lines).strip()
+
+
+def _unescape_truncated_json_string(chunk: str) -> str:
+    """Decode a JSON string body that may be missing its closing quote."""
+    out: List[str] = []
+    i = 0
+    n = len(chunk)
+    while i < n:
+        ch = chunk[i]
+        if ch == "\\" and i + 1 < n:
+            nxt = chunk[i + 1]
+            if nxt in _JSON_STRING_ESCAPES:
+                out.append(_JSON_STRING_ESCAPES[nxt])
+                i += 2
+                continue
+            if nxt == "u" and i + 5 < n:
+                try:
+                    out.append(chr(int(chunk[i + 2 : i + 6], 16)))
+                    i += 6
+                    continue
+                except ValueError:
+                    pass
+            out.append(nxt)
+            i += 2
+            continue
+        if ch == '"':
+            break
+        out.append(ch)
+        i += 1
+    return "".join(out).strip()
+
+
+def salvage_premium_full_draft_document_text(raw: str) -> str:
+    """
+    Recover ``authoritative_draft`` / ``document_text`` from a complete *or truncated* model
+    payload. ``finish_reason=length`` used to empty the wire body even when the cut-off JSON
+    already held a near-complete commercial corpus.
+    """
+    text = _strip_optional_json_fences(raw)
+    if not text:
+        return ""
+    candidate = text
+    if not candidate.startswith("{") or not candidate.endswith("}"):
+        start = candidate.find("{")
+        end = candidate.rfind("}")
+        if start >= 0 and end > start:
+            candidate = candidate[start : end + 1]
+    try:
+        parsed = json.loads(candidate)
+        if isinstance(parsed, dict):
+            doc = str(parsed.get("authoritative_draft") or parsed.get("document_text") or "").strip()
+            if doc:
+                return doc
+    except (json.JSONDecodeError, TypeError, ValueError):
+        pass
+    for match in _JSON_DRAFT_KEY_RE.finditer(text):
+        doc = _unescape_truncated_json_string(text[match.end() :])
+        if doc:
+            return doc
+    if text.lstrip().startswith("{"):
+        return ""
+    if re.search(r"(?i)\b(?:in\s+witness\s+whereof|this\s+agreement\s+is\s+entered)\b", text):
+        return text.strip()
+    return ""
 
 
 def _similarity_ratio(a: str, b: str) -> float:
