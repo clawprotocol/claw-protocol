@@ -124,11 +124,14 @@ describe("TEST570 dashboard paid-create review decision precedes signer setup", 
   it("AgreementBuilderIntake routes the delivery-track decision ahead of signer setup", () => {
     expect(intakeSrc).toContain("firstReviewDeliveryTrackDecisionActive");
     expect(intakeSrc).toContain("deliveryTrackDecisionActive: firstReviewDeliveryTrackDecisionActive");
-    // Prepare signature links mounts inline signer setup (arms the latch) rather than auto-finalizing.
+    // Decision-1 still mounts inline signer setup (TEST570 latch). Decision-2 / already-accepted
+    // Prepare enters the esign track first and does not remount.
     const prepareStart = intakeSrc.indexOf("const handlePaidProPrepareSignaturesFromFirstReview");
-    const prepareBlock = intakeSrc.slice(prepareStart, prepareStart + 4200);
+    const prepareBlock = intakeSrc.slice(prepareStart, prepareStart + 8000);
+    expect(prepareBlock).toContain("resolveDecision2AcceptedPrepareAction");
+    expect(prepareBlock).toContain('prepareAction === "enter_esign_track"');
     expect(prepareBlock).toContain("setPaidProInlineSignerSetupLatched(true)");
-    expect(prepareBlock).toContain("!paidProSignerMetadataFinalized");
+    expect(prepareBlock).toContain("canMountPaidProInlineSignerSetupFromFirstReview");
   });
 });
 
