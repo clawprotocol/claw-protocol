@@ -5,7 +5,11 @@
 
 import { shortIntakeFingerprint } from "../../lib/agreementGenerationId";
 import { evaluateIntentionalCreateDraftSubmit } from "./agreementIntakeCapabilityGate";
-import { extractListedSigningPartyNames } from "./agreementIntakeClarification";
+import {
+  extractListedSigningPartyNames,
+  hasOrdinaryNamedTwoPartyCommercialCoherence,
+  looksOverSpecifiedOrComplexityIntake,
+} from "./agreementIntakeClarification";
 import {
   namedIntakeContractingParties,
   upsertLabeledPartyRows,
@@ -496,6 +500,28 @@ export function shouldSkipPartyPrepForOrdinaryNamedTwoParty(input: {
 }
 
 /**
+ * Failsafe wait-for-pfd gate. True only for commercially coherent ordinary
+ * named-2p (Northline-class: parties + scope + fee + term + law) that are not
+ * complexity / too_much / over-specified.
+ *
+ * Land-the-plane / universal Q&A: over-specified named dumps must failsafe-ask
+ * (dismiss Preparing) instead of hanging on pfd. This is not a guided OpenAI
+ * Q&A surface — only the wait-vs-ask classifier.
+ *
+ * Intake-only — never pass leftover `partyRows`. Two names in an over-specified
+ * dump must not inherit the Northline wait (#221/#223 classified those as ready).
+ * Keep `shouldSkipPartyPrepForOrdinaryNamedTwoParty` + partyRows on settle.
+ */
+export function isCoherentOrdinaryNamedTwoPartyForFailsafe(input: {
+  intakeText: string;
+}): boolean {
+  const intakeText = String(input.intakeText || "");
+  if (!shouldSkipPartyPrepForOrdinaryNamedTwoParty({ intakeText })) return false;
+  if (looksOverSpecifiedOrComplexityIntake(intakeText)) return false;
+  return hasOrdinaryNamedTwoPartyCommercialCoherence(intakeText);
+}
+
+/**
  * Party-prep + labeled Party N names for the generate request.
  * Leftover 2-party draft rows must not silently drop declared party 3/4.
  */
@@ -650,9 +676,12 @@ export function shouldFailClosedGeneratingWithoutPipeline(input: {
  * 15s bound while Preparing/Generating and pfd HTTP has not completed — non
  * ordinary-named-2p only. Northline must keep waiting for pfd.
  *
- * Callers must pass *current-dump intake-only* named-2p readiness (no leftover
- * `partyRows`). Session party-prep rows from a prior Northline walk must not
- * suppress this failsafe for too_much / money_vibe.
+ * Callers must pass *current-dump intake-only coherent* named-2p readiness
+ * (`isCoherentOrdinaryNamedTwoPartyForFailsafe` — no leftover `partyRows`,
+ * not raw skip-party-prep on any two names). Over-specified / too_much dumps
+ * that happen to name two companies must not suppress this failsafe.
+ * Session party-prep rows from a prior Northline walk must not suppress it
+ * for too_much / money_vibe either.
  *
  * Not a planner churn rule. Do not fail-close on shorterThanAcceptedChurn alone
  * (#218). Do not latch generate-done from churn (#215).

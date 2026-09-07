@@ -1077,6 +1077,58 @@ export function buildAgreementIntakeClarification(rawIntake: string): AgreementI
   return null;
 }
 
+/**
+ * Northline-class commercial completeness: scope + fee + term + governing law.
+ * Used with named-2p extraction for the premium-processing failsafe wait.
+ * Does not itself count parties — callers still require ordinary named-2p.
+ */
+export function hasOrdinaryNamedTwoPartyCommercialCoherence(raw: string): boolean {
+  const text = String(raw || "");
+  if (!MONEY_RE.test(text)) return false;
+  if (!TERM_RE.test(text) && !EFFECTIVE_DATE_RE.test(text)) return false;
+  const hasLaw = Boolean(extractGoverningLaw(text)) || /\bgoverning\s+law\b/i.test(text);
+  if (!hasLaw) return false;
+  const hasScope =
+    hasSubstantiveDealPurpose(text) ||
+    SAAS_RE.test(text) ||
+    PILOT_RE.test(text) ||
+    SERVICES_RE.test(text) ||
+    NDA_RE.test(text) ||
+    LICENSE_RE.test(text) ||
+    EMPLOYMENT_RE.test(text) ||
+    LOAN_RE.test(text) ||
+    LEASE_RE.test(text) ||
+    /\b(?:deliver(?:s|ed|ing)?|provides?|scope)\b/i.test(text);
+  return hasScope;
+}
+
+/**
+ * Over-specified / too_much / complexity extras — not an ordinary named-2p dump.
+ * Two legal names plus a clause dump must not inherit the Northline pfd wait
+ * (land-the-plane: ask instead of hanging in a hallucinated draft loop).
+ */
+export function looksOverSpecifiedOrComplexityIntake(raw: string): boolean {
+  const text = String(raw || "");
+  if (!text.trim()) return false;
+  if (resolveSigningPartyCountSignals(text).overCap) return true;
+  const extras = extractTopicChips(text).filter((t) => t !== "governing law / dispute forum");
+  const hasRevenueShare =
+    /\b(?:revenue|profit)\s+share\b|\brevenue\s*(?:share|sharing|split|allocation)\b/i.test(text);
+  const hasEquityDump = /\b\d+(?:\.\d+)?%\s*(?:equity|ownership)\b|\bequity\s+grant\b/i.test(text);
+  const hasAffiliateDump =
+    /\b(?:every|all)\s+affiliates?\b|\baffiliates?\s+will\s+sign\b|\bevery\s+affiliate\b/i.test(text);
+  const hasExclusivityForever =
+    /\bexclusiv(?:e|ity)\b[\s\S]{0,32}\bforever\b|\bperpetual\s+exclusiv/i.test(text);
+  const complexityHits = [hasRevenueShare, hasEquityDump, hasAffiliateDump, hasExclusivityForever].filter(
+    Boolean,
+  ).length;
+  if (complexityHits >= 2) return true;
+  if (extras.length >= 6) return true;
+  if (text.length >= 700 && extras.length >= 3) return true;
+  if (COUNSEL_PREP_SIGNAL_RE.test(text) && extras.length >= 3) return true;
+  return false;
+}
+
 /** Backward-compatible boolean gate used by create-submit paths. */
 export type AgreementIntakeCapabilityDecision =
   | { ok: true }

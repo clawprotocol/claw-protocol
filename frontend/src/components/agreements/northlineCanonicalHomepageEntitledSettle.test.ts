@@ -22,6 +22,7 @@ import {
   shouldFailClosedCreateAfterRejectOrGate,
   shouldFailClosedPremiumProcessingWithoutPfd,
   shouldInvokePremiumGenerateAfterPartyPrepCreate,
+  isCoherentOrdinaryNamedTwoPartyForFailsafe,
   shouldSkipPartyPrepForOrdinaryNamedTwoParty,
   shouldSettleProReviewAfterPremiumFullDraft,
   withCreatePipelineVs01CorpusGate,
@@ -317,13 +318,15 @@ describe("canonical Northline homepage dump → entitled Pro Review", () => {
       "!plan.failClosed &&\n      !premiumProcessingWithoutPfdFailClosed &&\n      !postGenerateAuthorityChurn.failClosed",
     );
     const intakeOnlyReadyIdx = intake.indexOf(
-      "const currentDumpIntakeOnlyNamedTwoPartyReady = shouldSkipPartyPrepForOrdinaryNamedTwoParty({",
+      "const currentDumpIntakeOnlyNamedTwoPartyReady = isCoherentOrdinaryNamedTwoPartyForFailsafe({",
     );
     expect(intakeOnlyReadyIdx).toBeGreaterThan(-1);
-    const intakeOnlyReadyBlock = intake.slice(intakeOnlyReadyIdx, intakeOnlyReadyIdx + 240);
+    const intakeOnlyReadyBlock = intake.slice(intakeOnlyReadyIdx, intakeOnlyReadyIdx + 280);
     expect(intakeOnlyReadyBlock).toContain("intakeCombined || readOriginalUserIntakeRaw()");
     expect(intakeOnlyReadyBlock).not.toContain("partyRows");
     expect(intakeOnlyReadyBlock).not.toContain("intakePartyEditorRows");
+    expect(intakeOnlyReadyBlock).not.toContain("shouldSkipPartyPrepForOrdinaryNamedTwoParty");
+    expect(intake).toContain("isCoherentOrdinaryNamedTwoPartyForFailsafe");
     const failsafeTimerIdx = intake.indexOf("premiumProcessingFailsafeStartedAtRef.current = null;");
     const failsafeTimerBlock = intake.slice(
       intake.lastIndexOf("if (", failsafeTimerIdx),
@@ -553,10 +556,13 @@ describe("canonical Northline homepage dump → entitled Pro Review", () => {
     expect(shouldSkipPartyPrepForOrdinaryNamedTwoParty({ intakeText: NORTHLINE_CANONICAL })).toBe(
       true,
     );
+    expect(isCoherentOrdinaryNamedTwoPartyForFailsafe({ intakeText: NORTHLINE_CANONICAL })).toBe(
+      true,
+    );
     expect(
       shouldFailClosedPremiumProcessingWithoutPfd({
         ...hang,
-        ordinaryNamedTwoPartyReady: shouldSkipPartyPrepForOrdinaryNamedTwoParty({
+        ordinaryNamedTwoPartyReady: isCoherentOrdinaryNamedTwoPartyForFailsafe({
           intakeText: NORTHLINE_CANONICAL,
         }),
       }),
@@ -571,10 +577,16 @@ describe("canonical Northline homepage dump → entitled Pro Review", () => {
       }),
     ).toBe(true);
     expect(shouldSkipPartyPrepForOrdinaryNamedTwoParty({ intakeText: tooMuch })).toBe(false);
+    expect(isCoherentOrdinaryNamedTwoPartyForFailsafe({ intakeText: tooMuch })).toBe(false);
+    const namedTooMuch =
+      "Services agreement between Aurora Analytics LLC (Priya Shah) and Northwind Supply Co (Marcus Webb) for dashboard work, fee $18,000, term 12 months, governing law Delaware. " +
+      "Also exclusivity forever, 40% equity, revenue share, every affiliate signs, unlimited liability, indemnity, SOC 2, DPA, audit rights, SLA credits, and MFN pricing.";
+    expect(shouldSkipPartyPrepForOrdinaryNamedTwoParty({ intakeText: namedTooMuch })).toBe(true);
+    expect(isCoherentOrdinaryNamedTwoPartyForFailsafe({ intakeText: namedTooMuch })).toBe(false);
     expect(
       shouldFailClosedPremiumProcessingWithoutPfd({
         ...hang,
-        ordinaryNamedTwoPartyReady: shouldSkipPartyPrepForOrdinaryNamedTwoParty({
+        ordinaryNamedTwoPartyReady: isCoherentOrdinaryNamedTwoPartyForFailsafe({
           intakeText: tooMuch,
         }),
       }),
@@ -582,7 +594,15 @@ describe("canonical Northline homepage dump → entitled Pro Review", () => {
     expect(
       shouldFailClosedPremiumProcessingWithoutPfd({
         ...hang,
-        ordinaryNamedTwoPartyReady: shouldSkipPartyPrepForOrdinaryNamedTwoParty({
+        ordinaryNamedTwoPartyReady: isCoherentOrdinaryNamedTwoPartyForFailsafe({
+          intakeText: namedTooMuch,
+        }),
+      }),
+    ).toBe(true);
+    expect(
+      shouldFailClosedPremiumProcessingWithoutPfd({
+        ...hang,
+        ordinaryNamedTwoPartyReady: isCoherentOrdinaryNamedTwoPartyForFailsafe({
           intakeText: "money vibe only, exclusivity forever, 40 percent equity, no parties named.",
         }),
       }),
@@ -596,7 +616,7 @@ describe("canonical Northline homepage dump → entitled Pro Review", () => {
     const junkDismiss = planHardDismissPremiumProcessingOverlaysOnFailsafe({
       failClosed: shouldFailClosedPremiumProcessingWithoutPfd({
         ...hang,
-        ordinaryNamedTwoPartyReady: shouldSkipPartyPrepForOrdinaryNamedTwoParty({
+        ordinaryNamedTwoPartyReady: isCoherentOrdinaryNamedTwoPartyForFailsafe({
           intakeText: tooMuch,
         }),
       }),
@@ -611,7 +631,7 @@ describe("canonical Northline homepage dump → entitled Pro Review", () => {
       planHardDismissPremiumProcessingOverlaysOnFailsafe({
         failClosed: shouldFailClosedPremiumProcessingWithoutPfd({
           ...hang,
-          ordinaryNamedTwoPartyReady: shouldSkipPartyPrepForOrdinaryNamedTwoParty({
+          ordinaryNamedTwoPartyReady: isCoherentOrdinaryNamedTwoPartyForFailsafe({
             intakeText: NORTHLINE_CANONICAL,
           }),
         }),
