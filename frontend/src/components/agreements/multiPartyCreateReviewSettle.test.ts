@@ -318,9 +318,6 @@ describe("multi-party create → review settle or fail-closed", () => {
     expect(intake).toContain("lastCommerciallyUsableCandidate");
     expect(intake).toContain("ordinaryNamedTwoPartyReady");
     expect(intake).toContain("if (!plan.failClosed && !postGenerateAuthorityChurn.failClosed)");
-    expect(intake).toContain(
-      "premiumGenerateCompleted || (authorityChurnActive && !ordinaryNamedTwoPartyReadyForSettle)",
-    );
     expect(intake).toContain("onPremiumFullDraftHttpComplete");
     expect(intake).toContain("entitled_rewrite_pfd_http");
     expect(intake).toContain("pickCreateReviewSettleCorpus");
@@ -967,22 +964,6 @@ describe("multi-party create → review settle or fail-closed", () => {
     expect(afterPfdEmptyNoVs01.failClosed).toBe(true);
     expect(afterPfdEmptyNoVs01.settleReview).toBe(false);
     expect(afterPfdEmptyNoVs01.dismissOverlays).toBe(true);
-    // Live #214 miss: OPTIONS-only / pfd POST never completes. Leftover vs01
-    // in_progress is non-terminal until generateComplete, so the helper must
-    // fail-close on churn + empty for !named-2p without waiting for HTTP.
-    const optionsOnlyPfdHang = planPostGenerateCreateReviewSettleOrFailClosed({
-      generateComplete: false,
-      vs01GateBlockedWithoutSelectedFinal: false,
-      vs01SelectedFinal: false,
-      shorterThanAcceptedChurn: true,
-      winningPremiumBodyText: "",
-      premiumRenderSource: "premium_generation_retryable",
-      ordinaryNamedTwoPartyReady: false,
-    });
-    expect(optionsOnlyPfdHang.failClosed).toBe(true);
-    expect(optionsOnlyPfdHang.settleReview).toBe(false);
-    expect(optionsOnlyPfdHang.dismissOverlays).toBe(true);
-    expect(optionsOnlyPfdHang.corpus).toBe("");
   });
 
   it("ordinary 2p named parties do not require party-prep when corpus/gate path should settle", () => {

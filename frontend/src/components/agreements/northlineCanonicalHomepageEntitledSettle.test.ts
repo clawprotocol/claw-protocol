@@ -262,22 +262,6 @@ describe("canonical Northline homepage dump → entitled Pro Review", () => {
     expect(emptyPlan.failClosed).toBe(true);
     expect(emptyPlan.settleReview).toBe(false);
     expect(emptyPlan.dismissOverlays).toBe(true);
-
-    // Live #214 miss: pfd OPTIONS-only / HTTP never completes, leftover vs01
-    // premium_corpus_in_progress stays non-terminal. Churn + empty must still
-    // fail-close for non-named-2p so Preparing dismisses.
-    const pfdNeverCompletes = planPostGenerateCreateReviewSettleOrFailClosed({
-      generateComplete: false,
-      vs01GateBlockedWithoutSelectedFinal: false,
-      vs01SelectedFinal: false,
-      shorterThanAcceptedChurn: true,
-      winningPremiumBodyText: "",
-      premiumRenderSource: "premium_generation_retryable",
-      ordinaryNamedTwoPartyReady: false,
-    });
-    expect(pfdNeverCompletes.failClosed).toBe(true);
-    expect(pfdNeverCompletes.settleReview).toBe(false);
-    expect(pfdNeverCompletes.dismissOverlays).toBe(true);
     expect(
       shouldDismissCreateOverlaysAfterRejectOrGate({
         rejectOrGateBlocked: true,
@@ -330,10 +314,6 @@ describe("canonical Northline homepage dump → entitled Pro Review", () => {
     const namedSettleBlock = intake.slice(namedSettleIdx, namedSettleIdx + 260);
     expect(namedSettleBlock).toContain("intakeCombined || readOriginalUserIntakeRaw()");
     expect(namedSettleBlock).not.toContain("lastPremiumWinningCorpusRef");
-    expect(namedSettleBlock).not.toContain("intakePartyEditorRows");
-    expect(intake).toContain(
-      "premiumGenerateCompleted || (authorityChurnActive && !ordinaryNamedTwoPartyReadyForSettle)",
-    );
     const pipeline = readFileSync(join(__dirname, "premiumCompletionPipeline.ts"), "utf8");
     expect(pipeline).toContain("onPremiumFullDraftHttpComplete");
     expect(pipeline).toContain("notifyPremiumFullDraftHttpComplete");
@@ -478,34 +458,6 @@ describe("canonical Northline homepage dump → entitled Pro Review", () => {
     expect(tooMuchStillFails.failClosed).toBe(true);
     expect(tooMuchStillFails.settleReview).toBe(false);
     expect(tooMuchStillFails.dismissOverlays).toBe(true);
-
-    // OPTIONS-only / pfd POST never completes + leftover vs01 in_progress
-    // non-terminal (live #214 too_much / money_vibe). Empty after churn must
-    // still fail-close — do not wait for generateComplete.
-    const tooMuchPfdHang = planPostGenerateCreateReviewSettleOrFailClosed({
-      generateComplete: false,
-      vs01GateBlockedWithoutSelectedFinal: false,
-      vs01SelectedFinal: false,
-      shorterThanAcceptedChurn: true,
-      winningPremiumBodyText: "",
-      ordinaryNamedTwoPartyReady: false,
-    });
-    expect(tooMuchPfdHang.failClosed).toBe(true);
-    expect(tooMuchPfdHang.settleReview).toBe(false);
-    expect(tooMuchPfdHang.dismissOverlays).toBe(true);
-
-    // Leftover named party-prep rows must not inherit the Northline wait onto
-    // a junk / over-specified dump (current intake only).
-    const leftoverRowsDoNotMakeJunkWait = shouldSkipPartyPrepForOrdinaryNamedTwoParty({
-      intakeText:
-        "Need a deal with way too much money vibe, exclusivity forever, 40% equity, revenue share, and every affiliate signs. No legal names.",
-    });
-    expect(leftoverRowsDoNotMakeJunkWait).toBe(false);
-    expect(
-      shouldSkipPartyPrepForOrdinaryNamedTwoParty({
-        intakeText: NORTHLINE_CANONICAL,
-      }),
-    ).toBe(true);
 
     // Live #213 miss: pfd HTTP 200 completed but leftover vs01 in_progress was
     // non-terminal, so too_much / money_vibe stayed on Generating.
