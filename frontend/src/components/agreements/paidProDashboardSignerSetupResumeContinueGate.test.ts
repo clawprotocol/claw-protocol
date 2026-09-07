@@ -310,6 +310,11 @@ describe("resume_signer_setup Continue gate (4e18814c Screen 2)", () => {
     );
     expect(continueBlock).toContain("finalizePaidProSignerMetadataAndOpenReviewDecision");
     expect(continueBlock).toContain("handlePaidProPrepareSignaturesFromFirstReview()");
+    expect(intakeSrc).toContain("resolveResumeAcceptedCommercialEsignHandoff");
+    expect(intakeSrc).toContain("enterGuidedSignatureTrackRoute:accepted_snapshot_recover");
+    expect(intakeSrc).toMatch(
+      /onDecision2: \(\) =>\s*(?:\n\s*)?void handlePaidProPrepareSignaturesFromFirstReview\(\)/,
+    );
     const prepareFrag = intakeSrc.slice(
       intakeSrc.indexOf("const handlePaidProPrepareSignaturesFromFirstReview = React.useCallback"),
       intakeSrc.indexOf("const handlePaidProPrepareSignaturesFromFirstReview = React.useCallback") + 4500,

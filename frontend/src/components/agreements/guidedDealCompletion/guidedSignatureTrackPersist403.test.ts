@@ -185,9 +185,14 @@ describe("guided signature track persist 403 regression", () => {
     );
     expect(persistCatch).toContain("guidedSignaturePersistFailureRef");
     expect(persistCatch).not.toContain('setDisplayPhase("review")');
+    const trackStart403 = intake.indexOf("const enterGuidedSignatureTrackRoute = React.useCallback");
+    const trackEnd403 = intake.indexOf(
+      "const completeGuidedSigningHandoff = React.useCallback",
+      trackStart403,
+    );
     const trackBlock = intake.slice(
-      intake.indexOf("const enterGuidedSignatureTrackRoute = React.useCallback"),
-      intake.indexOf("const enterGuidedSignatureTrackRoute = React.useCallback") + 14000,
+      trackStart403,
+      trackEnd403 > trackStart403 ? trackEnd403 : trackStart403 + 28000,
     );
     expect(trackBlock).toContain("tryNavigateGuidedSignatureTrackLocalVs01Esign");
     expect(trackBlock).toContain("logGuidedSignatureRouteEntered");
