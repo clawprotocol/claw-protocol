@@ -42,6 +42,8 @@ import {
   ensureReviewCorpusOnEsignEntry,
   fetchRemountCertifiedReviewCorpus,
   leftoverRemountShouldFailClosedToast,
+  remountPrepareShouldPaintBeforeContentInspect,
+  resolveCertifiedReviewForEsignRemount,
   resolveEsignEntryReviewBindContext,
 } from "./vs01EsignRemountReviewBind";
 import {
@@ -817,30 +819,17 @@ export function Vs01Wizard({
     if (shouldDeferVs01SeedDocumentLoad({ authEnabled, authLoading })) return;
     let cancelled = false;
     void (async () => {
-      // Remount of leftover /app/esign/:id must replace leftover GET /content
-      // before paint. Leftover fused 200 is never a successful handoff when
-      // persist Review exists.
+      // Persist Review first — do not await leftover GET /content inspect or
+      // vs01-signing-seed POST before leaving “Loading your document…”.
+      // Double-Continue minted doc_* remount hangs on that inspect; #185
+      // healthy remount still paints from the same certified Review SoT.
       let persistReviewCorpus = "";
+      let remountAgreementId = "";
       if (!sid.startsWith("local_doc_")) {
         try {
-          const bound = await ensureReviewCorpusOnEsignEntry({ documentId: sid });
-          if (bound && !("skipped" in bound)) {
-            if (bound.ok && (bound.reviewCorpus ?? "").trim()) {
-              persistReviewCorpus = bound.reviewCorpus!.trim();
-            } else if (!bound.ok) {
-              persistReviewCorpus = (bound.persistReviewCorpus ?? "").trim();
-            }
-          }
-          if (bound && !bound.ok) {
-            if (cancelled) return;
-            // Fail-closed toast only when persist Review truly does not exist
-            // (404/empty). Bind {ok:false} on leftover packet is not a toast.
-            if (leftoverRemountShouldFailClosedToast(persistReviewCorpus)) {
-              setError("Could not load this document. Check the link or start a new packet.");
-              return;
-            }
-            setError(null);
-          }
+          const certified = await resolveCertifiedReviewForEsignRemount({ documentId: sid });
+          remountAgreementId = certified.agreementId.trim();
+          persistReviewCorpus = certified.persistReviewCorpus;
         } catch {
           /* stay on placement; do not eject */
         }
@@ -852,17 +841,17 @@ export function Vs01Wizard({
       // signing authority — do not land the empty self-sign Step-3 shell.
       let remountPrepareRestored = false;
       let restoredBridgeCorpus = "";
-      let remountAgreementId = "";
       if (hideStepper && sid.startsWith("doc_")) {
         try {
           const restored = await restorePrepareFromFrozenSigningAuthority({
             documentId: sid,
             hideStepper,
             reviewCorpus: persistReviewCorpus,
+            agreementId: remountAgreementId || undefined,
           });
           if (restored.ok) {
             remountPrepareRestored = true;
-            remountAgreementId = restored.agreementId.trim();
+            remountAgreementId = restored.agreementId.trim() || remountAgreementId;
             restoredBridgeCorpus = (restored.bridge.agreementCorpusText ?? "").trim();
             persistReviewCorpus = persistReviewCorpus || restoredBridgeCorpus;
           }
@@ -904,6 +893,7 @@ export function Vs01Wizard({
           setContentSha256(`corpus:${fingerprintAgreementBody(remountCorpus.corpus)}`);
           if (remountPrepareRestored) {
             setPaidProAgreementBridgeSkip(true);
+            if (remountAgreementId) setVs01LinkedAgreementId(remountAgreementId);
           }
         } else if (
           remountPrepareShouldFailClosedWithoutCertifiedCorpus({
@@ -1050,7 +1040,62 @@ export function Vs01Wizard({
         return true;
       };
 
-      if (hydrateLocalPaidProBridge()) return;
+      const paintedFromPersistReview = remountPrepareShouldPaintBeforeContentInspect(
+        persistReviewCorpus,
+      );
+
+      if (hydrateLocalPaidProBridge()) {
+        if (!sid.startsWith("local_doc_")) {
+          void ensureReviewCorpusOnEsignEntry({
+            documentId: sid,
+            agreementId: remountAgreementId || undefined,
+            reviewCorpus: persistReviewCorpus || undefined,
+          });
+        }
+        return;
+      }
+
+      // Double-Continue minted remount already left Loading from persist
+      // Review. Do not await leftover GET /content / seed POST — that inspect
+      // is what kept fields=0 / hasCommercial=false for ≥30s.
+      if (paintedFromPersistReview && hideStepper && sid.startsWith("doc_")) {
+        void ensureReviewCorpusOnEsignEntry({
+          documentId: sid,
+          agreementId: remountAgreementId || undefined,
+          reviewCorpus: persistReviewCorpus || undefined,
+        });
+        return;
+      }
+
+      if (!sid.startsWith("local_doc_")) {
+        try {
+          const bound = await ensureReviewCorpusOnEsignEntry({
+            documentId: sid,
+            agreementId: remountAgreementId || undefined,
+            reviewCorpus: persistReviewCorpus || undefined,
+          });
+          if (bound && !("skipped" in bound)) {
+            if (bound.ok && (bound.reviewCorpus ?? "").trim()) {
+              persistReviewCorpus = bound.reviewCorpus!.trim();
+            } else if (!bound.ok) {
+              persistReviewCorpus = (bound.persistReviewCorpus ?? "").trim();
+            }
+          }
+          if (bound && !bound.ok) {
+            if (cancelled) return;
+            // Fail-closed toast only when persist Review truly does not exist
+            // (404/empty). Bind {ok:false} on leftover packet is not a toast.
+            if (leftoverRemountShouldFailClosedToast(persistReviewCorpus)) {
+              setError("Could not load this document. Check the link or start a new packet.");
+              return;
+            }
+            setError(null);
+          }
+        } catch {
+          /* stay on placement; do not eject */
+        }
+        if (cancelled) return;
+      }
 
       try {
         const blob = await fetchDocumentContent(sid);

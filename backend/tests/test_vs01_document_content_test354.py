@@ -157,6 +157,59 @@ def test_vs01_seed_replaces_content_in_place_same_document_id(
     assert content.content == review_pdf
 
 
+def test_vs01_double_seed_second_document_content_loads(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    """Double Continue mints a second vs01 id — remount GET /content must still 200."""
+    pytest.importorskip("fitz")
+    _env_common(monkeypatch, tmp_path)
+    client = TestClient(app, raise_server_exceptions=False)
+    create_res = client.post(
+        "/api/agreements/draft",
+        headers=_ORG_H,
+        json={
+            "title": "VS01 Double Continue Seed",
+            "jurisdiction": "TX",
+            "parties": [
+                {"name": "Cedar Peak Design LLC", "role": "client", "email": "owner@example.com"},
+                {"name": "Blue Harbor Media Inc", "role": "service_provider", "email": "cp@example.com"},
+            ],
+            "purpose": "Brand website refresh with deposit and delivery payment terms.",
+            "payment_terms": "50% deposit on signing, 50% on delivery",
+            "duration": "4 weeks",
+            "due_date": None,
+            "effective_date": None,
+        },
+    )
+    assert create_res.status_code == 200, create_res.text
+    agreement_id = create_res.json()["id"]
+
+    first = client.post(
+        f"/api/agreements/{agreement_id}/vs01-signing-seed",
+        headers=_ORG_H,
+        json={},
+    )
+    assert first.status_code == 200, first.text
+    first_id = first.json()["document_id"]
+    assert first_id.startswith("doc_")
+
+    second = client.post(
+        f"/api/agreements/{agreement_id}/vs01-signing-seed",
+        headers=_ORG_H,
+        json={},
+    )
+    assert second.status_code == 200, second.text
+    second_id = second.json()["document_id"]
+    assert second_id.startswith("doc_")
+    assert second_id != first_id
+
+    content = client.get(f"/v1/documents/{second_id}/content", headers=_ORIGIN_H)
+    assert content.status_code == 200, content.text
+    assert content.content.startswith(b"%PDF")
+    meta = document_service.get_document_meta(second_id) or {}
+    assert meta.get("agreement_id") == agreement_id
+
+
 def test_vs01_seed_content_ok_under_commercial_mode(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
     """Resume finalize → esign bridge: seed must stamp owner_org_id; content requires owner headers."""
     from backend.storage.artifact_repository import reset_artifact_repository_singleton

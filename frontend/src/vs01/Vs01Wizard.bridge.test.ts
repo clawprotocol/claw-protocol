@@ -45,12 +45,15 @@ describe("Vs01Wizard agreement bridge (static)", () => {
   it("remount of leftover esign binds Review corpus before paint", () => {
     const s = readFileSync(join(__dirname, "Vs01Wizard.tsx"), "utf8");
     expect(s).toContain("ensureReviewCorpusOnEsignEntry");
+    expect(s).toContain("resolveCertifiedReviewForEsignRemount");
+    expect(s).toContain("remountPrepareShouldPaintBeforeContentInspect");
     expect(s).toContain('from "./vs01EsignRemountReviewBind"');
     const start = s.indexOf("/** Deep link: /app/esign/:documentId");
     const hydrateAt = s.indexOf("const hydrateLocalPaidProBridge", start);
     expect(start).toBeGreaterThanOrEqual(0);
     expect(hydrateAt).toBeGreaterThan(start);
-    expect(s.slice(start, hydrateAt)).toContain("ensureReviewCorpusOnEsignEntry");
+    expect(s.slice(start, hydrateAt)).toContain("resolveCertifiedReviewForEsignRemount");
+    expect(s.slice(start, hydrateAt)).not.toContain("fetchDocumentContent(sid)");
     expect(s).toContain("reviewCorpusLooksLikeLeftoverFusedNotices");
     expect(s).toContain("packetPlainMatchesPersistReviewCorpus");
     expect(s).toContain("leftoverRemountShouldFailClosedToast");
@@ -65,6 +68,7 @@ describe("Vs01Wizard agreement bridge (static)", () => {
     expect(s).toMatch(
       /if \(bound && !bound\.ok\)[\s\S]*leftoverRemountShouldFailClosedToast\(persistReviewCorpus\)/,
     );
+    expect(s).toContain("leftoverRemountShouldFailClosedToast");
     expect(s).toContain("Fail-closed toast only when persist Review truly does not exist");
   });
 });
