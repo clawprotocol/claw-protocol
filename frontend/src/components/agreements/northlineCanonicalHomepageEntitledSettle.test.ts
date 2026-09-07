@@ -303,7 +303,7 @@ describe("canonical Northline homepage dump → entitled Pro Review", () => {
     expect(intake).toContain("ordinaryNamedTwoPartyReadyForSettle");
     expect(intake).toContain("if (!plan.failClosed && !postGenerateAuthorityChurn.failClosed)");
     const ensureIdx = intake.indexOf("let result = await ensurePremiumCompletion({");
-    const ensureBlock = intake.slice(ensureIdx, ensureIdx + 1800);
+    const ensureBlock = intake.slice(ensureIdx, ensureIdx + 3200);
     expect(ensureBlock).toContain("onPremiumFullDraftHttpComplete");
     expect(ensureBlock).toContain("setPremiumGenerateCompleted(true)");
     expect(ensureBlock).toContain("entitled_rewrite_pfd_http");

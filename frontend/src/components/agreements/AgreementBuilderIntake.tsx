@@ -7413,7 +7413,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           setPremiumGenerateCompleted(true);
         },
       });
-      if (entitledRewritePfdHttpOutcomeRef.current === "fail_closed") {
+      if (String(entitledRewritePfdHttpOutcomeRef.current) === "fail_closed") {
         setLoading(false);
         return;
       }
