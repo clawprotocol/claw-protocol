@@ -210,7 +210,6 @@ import { logPremiumGenerationRetryableFailure } from "./premiumGenerationRetryab
 import { resolvePremiumIntentPreflightPolicy, shouldEarlyNeedsDetailsForTierB } from "./premiumIntentPreflightPolicy";
 import {
   finalizeUserVisibleAgreementPlainText,
-  remainingFatalsAreCommercialFieldStubsOnly,
   remainingFatalsAreNoticeSignerSetupScaffoldingOnly,
   repairContextualDraftingStubPhrases,
   resolvePlaceholderPartyNamesWithMeta,
@@ -3176,7 +3175,6 @@ async function runPremiumCompletionInner(
           substantiveLenBeforePlaceholder >= SUBSTANTIVE_SERVER_DRAFT_MIN_LEN;
         const commercialFieldStubOnlyBlock =
           !ph.ok &&
-          remainingFatalsAreCommercialFieldStubsOnly(ph.remainingDetail) &&
           shouldAcceptPaidProCommercialFieldStubsAfterPfd200({
             text: doc,
             intakeRaw: rawForSoT || rawIntake,

@@ -736,24 +736,32 @@ export function remainingFatalsAreCommercialFieldStubsOnly(
   return fatals.every((d) => isPaidProCommercialFieldStubToken(d.token));
 }
 
-/** Leftover 2-party overlay preamble slots — not insert/mustache/hollow junk. */
+/** Leftover 2-party overlay identity slots — not insert/mustache/hollow junk. */
 export function isLeftoverOverlayIdentitySlotToken(token: string): boolean {
   const n = normalizePlaceholderToken(token);
-  return /^(?:ORG|PARTY)_\d+$/i.test(n);
+  if (/^(?:ORG|PARTY|ENTITY|CLIENT|COMPANY|ORGANIZATION|PERSON)_\d+$/i.test(n)) return true;
+  if (/^(?:ORG|PARTY|ENTITY|CLIENT|COMPANY|ORGANIZATION|PERSON)\d+$/i.test(n)) return true;
+  return /^PARTY_[AB]\d*$/i.test(n);
 }
 
-function remainingFatalsAreCommercialOrLeftoverOverlayOnly(
+export function isAcceptablePaidProPfd200LeftoverToken(
+  token: string,
+  commerciallyNamed: boolean,
+): boolean {
+  if (isPaidProCommercialFieldStubToken(token)) return true;
+  return commerciallyNamed && isLeftoverOverlayIdentitySlotToken(token);
+}
+
+export function remainingFatalsAreCommercialOrLeftoverOverlayOnly(
   remainingDetail: readonly PlaceholderTokenDecision[],
   commerciallyNamed: boolean,
 ): boolean {
   const fatals = remainingDetail.filter((d) => d.fatal);
   if (fatals.length === 0) return false;
-  if (fatals.length > 48) return false;
-  return fatals.every(
-    (d) =>
-      isPaidProCommercialFieldStubToken(d.token) ||
-      (commerciallyNamed && isLeftoverOverlayIdentitySlotToken(d.token)),
-  );
+  // Do not cap allowlisted leftover [ORG_n] + N=4 notice/signature stubs.
+  // Live leftover 2-party overlay repeats [ORG_1]/[ORG_2] through the body;
+  // the old 48 cap accepted the token type but still fail-closed N=4.
+  return fatals.every((d) => isAcceptablePaidProPfd200LeftoverToken(d.token, commerciallyNamed));
 }
 
 /**
@@ -783,14 +791,9 @@ export function shouldAcceptPaidProCommercialFieldStubsAfterPfd200(args: {
     }
   }
   const tokens = scanUnresolvedRenderTokens(text);
-  if (tokens.length > 48) return false;
   if (
     tokens.length > 0 &&
-    !tokens.every(
-      (m) =>
-        isPaidProCommercialFieldStubToken(m.token) ||
-        (commerciallyNamed && isLeftoverOverlayIdentitySlotToken(m.token)),
-    )
+    !tokens.every((m) => isAcceptablePaidProPfd200LeftoverToken(m.token, commerciallyNamed))
   ) {
     return false;
   }
@@ -1732,11 +1735,18 @@ function finalizeUserVisibleAgreementPlainTextCore(
     remainingDetail,
   });
   const remainingFatalKept = acceptCommercialFieldStubs
-    ? remainingFatal.filter((t) => !isPaidProCommercialFieldStubToken(t))
+    ? remainingFatal.filter(
+        (t) => !isPaidProCommercialFieldStubToken(t) && !isLeftoverOverlayIdentitySlotToken(t),
+      )
     : remainingFatal;
   const fatalFromSurvivors = survivorTokens.filter((t) => {
     if (remainingFatalKept.includes(t)) return false;
-    if (acceptCommercialFieldStubs && isPaidProCommercialFieldStubToken(t)) return false;
+    if (
+      acceptCommercialFieldStubs &&
+      (isPaidProCommercialFieldStubToken(t) || isLeftoverOverlayIdentitySlotToken(t))
+    ) {
+      return false;
+    }
     return true;
   });
   const remainingFatalAll = [...remainingFatalKept, ...fatalFromSurvivors];
