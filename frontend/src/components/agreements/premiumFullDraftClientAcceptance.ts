@@ -165,7 +165,6 @@ export function rejectPremiumBodyForProRender(
       shouldAcceptPaidProCommercialFieldStubsAfterPfd200({
         text: bodyTrim,
         intakeRaw,
-        partyNames: opts?.partyNames ?? partyNames,
         remainingDetail,
       })
     ) {

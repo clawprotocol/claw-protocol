@@ -1149,12 +1149,10 @@ export function assertPaidProFreezeCandidateGates(
     !shouldAcceptPaidProCommercialFieldStubsAfterPfd200({
       text: freezeEntryText,
       intakeRaw: args.intakeText,
-      partyNames: (args.draft?.parties || []).map((p) => p.name),
     }) &&
     !shouldAcceptPaidProCommercialFieldStubsAfterPfd200({
       text: trim(prep.text),
       intakeRaw: args.intakeText,
-      partyNames: (args.draft?.parties || []).map((p) => p.name),
     })
   ) {
     throw new Error(
@@ -1300,7 +1298,6 @@ export function assertPaidProFreezeCandidateGates(
     !shouldAcceptPaidProCommercialFieldStubsAfterPfd200({
       text: safeForCommit,
       intakeRaw: args.intakeText,
-      partyNames: (args.draft?.parties || []).map((p) => p.name),
     })
   ) {
     throw new Error(
