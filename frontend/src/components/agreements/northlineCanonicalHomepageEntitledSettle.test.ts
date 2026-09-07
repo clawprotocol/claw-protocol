@@ -14,10 +14,12 @@ import { evaluateIntentionalCreateDraftSubmit } from "./agreementIntakeCapabilit
 import { assessStarterComplexityGate } from "./starterMultiPartyProGate";
 import {
   CREATE_FLOW_GENERATE_FAILED_CLEAR_MESSAGE,
+  CREATE_FLOW_GENERATING_WITHOUT_PIPELINE_FAILSAFE_MS,
   isCommerciallyUsableCreateReviewCorpus,
   planPostGenerateCreateReviewSettleOrFailClosed,
   shouldDismissCreateOverlaysAfterRejectOrGate,
   shouldFailClosedCreateAfterRejectOrGate,
+  shouldFailClosedJunkPfdHangOrEmptyAfterChurn,
   shouldInvokePremiumGenerateAfterPartyPrepCreate,
   shouldSkipPartyPrepForOrdinaryNamedTwoParty,
   shouldSettleProReviewAfterPremiumFullDraft,
@@ -262,6 +264,23 @@ describe("canonical Northline homepage dump → entitled Pro Review", () => {
     expect(emptyPlan.failClosed).toBe(true);
     expect(emptyPlan.settleReview).toBe(false);
     expect(emptyPlan.dismissOverlays).toBe(true);
+
+    // Live hole: pfd OPTIONS-only / HTTP never completes, leftover vs01
+    // premium_corpus_in_progress stays non-terminal. Churn + empty must still
+    // fail-close for the current junk dump so Preparing dismisses.
+    const pfdNeverCompletes = planPostGenerateCreateReviewSettleOrFailClosed({
+      generateComplete: false,
+      vs01GateBlockedWithoutSelectedFinal: false,
+      vs01SelectedFinal: false,
+      shorterThanAcceptedChurn: true,
+      winningPremiumBodyText: "",
+      premiumRenderSource: "premium_generation_retryable",
+      ordinaryNamedTwoPartyReady: false,
+      currentDumpOrdinaryNamedTwoPartyReady: false,
+    });
+    expect(pfdNeverCompletes.failClosed).toBe(true);
+    expect(pfdNeverCompletes.settleReview).toBe(false);
+    expect(pfdNeverCompletes.dismissOverlays).toBe(true);
     expect(
       shouldDismissCreateOverlaysAfterRejectOrGate({
         rejectOrGateBlocked: true,
@@ -293,6 +312,7 @@ describe("canonical Northline homepage dump → entitled Pro Review", () => {
     expect(planBlock).toContain("getLastCommerciallyUsableAuthorityCandidate");
     expect(planBlock).toContain("lastCommerciallyUsableCandidate");
     expect(planBlock).toContain("ordinaryNamedTwoPartyReady");
+    expect(planBlock).toContain("currentDumpOrdinaryNamedTwoPartyReady");
     expect(planBlock).toContain("setPremiumPostCheckoutPhase(null)");
     expect(planBlock).toContain("setDisplayPhase(\"review\")");
     expect(planBlock).toContain("entitledPaidShellPlan.failClosed");
@@ -301,7 +321,12 @@ describe("canonical Northline homepage dump → entitled Pro Review", () => {
     expect(intake).toContain("postGenerateCreateReviewSettlePlan.settleReview");
     expect(intake).toContain("postGenerateCreateReviewSettlePlan.failClosed");
     expect(intake).toContain("ordinaryNamedTwoPartyReadyForSettle");
-    expect(intake).toContain("if (!plan.failClosed && !postGenerateAuthorityChurn.failClosed)");
+    expect(intake).toContain("if (!plan.failClosed && !junkPfdHangOrEmptyAfterChurn && !postGenerateAuthorityChurn.failClosed)");
+    expect(intake).toContain("currentDumpOrdinaryNamedTwoPartyReady");
+    expect(intake).toContain("shouldFailClosedJunkPfdHangOrEmptyAfterChurn");
+    expect(intake).not.toMatch(
+      /generateComplete:\s*\n?\s*premiumGenerateCompleted \|\| \(authorityChurnActive && !ordinaryNamedTwoPartyReadyForSettle\)/,
+    );
     const ensureIdx = intake.indexOf("let result = await ensurePremiumCompletion({");
     const ensureBlock = intake.slice(ensureIdx, ensureIdx + 3200);
     expect(ensureBlock).toContain("onPremiumFullDraftHttpComplete");
@@ -311,8 +336,9 @@ describe("canonical Northline homepage dump → entitled Pro Review", () => {
     const namedSettleIdx = intake.indexOf(
       "const ordinaryNamedTwoPartyReadyForSettle = shouldSkipPartyPrepForOrdinaryNamedTwoParty({",
     );
-    const namedSettleBlock = intake.slice(namedSettleIdx, namedSettleIdx + 260);
+    const namedSettleBlock = intake.slice(namedSettleIdx, namedSettleIdx + 280);
     expect(namedSettleBlock).toContain("intakeCombined || readOriginalUserIntakeRaw()");
+    expect(namedSettleBlock).toContain("intakePartyEditorRows");
     expect(namedSettleBlock).not.toContain("lastPremiumWinningCorpusRef");
     const pipeline = readFileSync(join(__dirname, "premiumCompletionPipeline.ts"), "utf8");
     expect(pipeline).toContain("onPremiumFullDraftHttpComplete");
@@ -458,6 +484,70 @@ describe("canonical Northline homepage dump → entitled Pro Review", () => {
     expect(tooMuchStillFails.failClosed).toBe(true);
     expect(tooMuchStillFails.settleReview).toBe(false);
     expect(tooMuchStillFails.dismissOverlays).toBe(true);
+
+    // OPTIONS-only / pfd POST never completes + leftover vs01 in_progress
+    // non-terminal (live too_much / money_vibe). Empty after churn must
+    // still fail-close — do not wait for generateComplete.
+    const tooMuchPfdHang = planPostGenerateCreateReviewSettleOrFailClosed({
+      generateComplete: false,
+      vs01GateBlockedWithoutSelectedFinal: false,
+      vs01SelectedFinal: false,
+      shorterThanAcceptedChurn: true,
+      winningPremiumBodyText: "",
+      ordinaryNamedTwoPartyReady: false,
+      currentDumpOrdinaryNamedTwoPartyReady: false,
+    });
+    expect(tooMuchPfdHang.failClosed).toBe(true);
+    expect(tooMuchPfdHang.settleReview).toBe(false);
+    expect(tooMuchPfdHang.dismissOverlays).toBe(true);
+
+    // Leftover named party-prep rows must not inherit the Northline wait onto
+    // a junk / over-specified dump (current intake only).
+    const leftoverRowsDoNotMakeJunkWait = shouldSkipPartyPrepForOrdinaryNamedTwoParty({
+      intakeText:
+        "Need a deal with way too much money vibe, exclusivity forever, 40% equity, revenue share, and every affiliate signs. No legal names.",
+    });
+    expect(leftoverRowsDoNotMakeJunkWait).toBe(false);
+    expect(
+      shouldSkipPartyPrepForOrdinaryNamedTwoParty({
+        intakeText: NORTHLINE_CANONICAL,
+      }),
+    ).toBe(true);
+    const leftoverRowsStillFailCloseJunk = planPostGenerateCreateReviewSettleOrFailClosed({
+      generateComplete: false,
+      vs01GateBlockedWithoutSelectedFinal: false,
+      vs01SelectedFinal: false,
+      shorterThanAcceptedChurn: true,
+      winningPremiumBodyText: "",
+      ordinaryNamedTwoPartyReady: true,
+      currentDumpOrdinaryNamedTwoPartyReady: leftoverRowsDoNotMakeJunkWait,
+    });
+    expect(leftoverRowsStillFailCloseJunk.failClosed).toBe(true);
+    expect(leftoverRowsStillFailCloseJunk.dismissOverlays).toBe(true);
+
+    // OPTIONS hang timeout without churn — junk fail-closes; Northline still waits.
+    expect(
+      shouldFailClosedJunkPfdHangOrEmptyAfterChurn({
+        currentDumpOrdinaryNamedTwoPartyReady: false,
+        vs01SelectedFinal: false,
+        commerciallyUsableCorpus: false,
+        pfdHttpNeverCompleted: true,
+        overlayElapsedMs: CREATE_FLOW_GENERATING_WITHOUT_PIPELINE_FAILSAFE_MS,
+      }),
+    ).toBe(true);
+    const northlineTimeoutStillWaits = planPostGenerateCreateReviewSettleOrFailClosed({
+      generateComplete: false,
+      vs01GateBlockedWithoutSelectedFinal: false,
+      vs01SelectedFinal: false,
+      shorterThanAcceptedChurn: false,
+      winningPremiumBodyText: "",
+      ordinaryNamedTwoPartyReady: true,
+      currentDumpOrdinaryNamedTwoPartyReady: true,
+      overlayElapsedMs: CREATE_FLOW_GENERATING_WITHOUT_PIPELINE_FAILSAFE_MS,
+    });
+    expect(northlineTimeoutStillWaits.failClosed).toBe(false);
+    expect(northlineTimeoutStillWaits.settleReview).toBe(false);
+    expect(northlineTimeoutStillWaits.dismissOverlays).toBe(false);
 
     // Live #213 miss: pfd HTTP 200 completed but leftover vs01 in_progress was
     // non-terminal, so too_much / money_vibe stayed on Generating.
