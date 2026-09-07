@@ -501,4 +501,17 @@ describe("canonical Northline homepage dump → entitled Pro Review", () => {
       "(hasCurrentSessionFreeStarterIntent() || isHeroFromHomeCreateEntry()) &&",
     );
   });
+
+  it("fail-open snapshot / canonical / SoT still remounts usable pfd corpus on the live rewrite path", () => {
+    const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
+    expect(intake).toContain("latchEntitledRewriteFailOpenReviewAuthority");
+    expect(intake).toContain("planEntitledRewriteFailOpenReviewMount");
+    const failOpenIdx = intake.indexOf("entitled_rewrite_canonical_blocked_fail_open_mount");
+    const failOpenBlock = intake.slice(failOpenIdx, failOpenIdx + 2400);
+    expect(failOpenBlock.indexOf("setAgreementDocumentText(")).toBeLessThan(
+      failOpenBlock.indexOf("establishPaidProSourceOfTruth("),
+    );
+    const sotFail = failOpenBlock.slice(failOpenBlock.indexOf("entitled_rewrite_canonical_fail_open_sot_failed"));
+    expect(sotFail).not.toContain("setProFullDraftQualityRetry(true)");
+  });
 });
