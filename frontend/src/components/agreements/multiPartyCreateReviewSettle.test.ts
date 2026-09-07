@@ -318,6 +318,8 @@ describe("multi-party create → review settle or fail-closed", () => {
     expect(intake).toContain("lastCommerciallyUsableCandidate");
     expect(intake).toContain("ordinaryNamedTwoPartyReady");
     expect(intake).toContain("if (!plan.failClosed && !postGenerateAuthorityChurn.failClosed)");
+    expect(intake).toContain("onPremiumFullDraftHttpComplete");
+    expect(intake).toContain("entitled_rewrite_pfd_http");
     expect(intake).toContain("pickCreateReviewSettleCorpus");
     expect(intake).toContain("shouldRemapGenerationRetryableSalvageForCreateSettle");
     expect(intake).toContain("shouldSkipPartyPrepForOrdinaryNamedTwoParty");
@@ -950,6 +952,18 @@ describe("multi-party create → review settle or fail-closed", () => {
     expect(namedTwoPartyWaitsForPfd.failClosed).toBe(false);
     expect(namedTwoPartyWaitsForPfd.settleReview).toBe(false);
     expect(namedTwoPartyWaitsForPfd.dismissOverlays).toBe(false);
+    const afterPfdEmptyNoVs01 = planPostGenerateCreateReviewSettleOrFailClosed({
+      generateComplete: true,
+      vs01GateBlockedWithoutSelectedFinal: false,
+      vs01SelectedFinal: false,
+      shorterThanAcceptedChurn: true,
+      winningPremiumBodyText: "",
+      premiumRenderSource: "premium_generation_retryable",
+      ordinaryNamedTwoPartyReady: false,
+    });
+    expect(afterPfdEmptyNoVs01.failClosed).toBe(true);
+    expect(afterPfdEmptyNoVs01.settleReview).toBe(false);
+    expect(afterPfdEmptyNoVs01.dismissOverlays).toBe(true);
   });
 
   it("ordinary 2p named parties do not require party-prep when corpus/gate path should settle", () => {

@@ -3823,6 +3823,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   /** Generate HTTP returned — leftover processing/preparing_review must not stay sticky (#209). */
   const [premiumGenerateCompleted, setPremiumGenerateCompleted] = useState(false);
   const premiumGenerateCompletedRef = useRef(false);
+  /** Entitled rewrite: pfd HTTP completion (not full pipeline return) is generate-done. */
+  const entitledRewritePfdHttpOutcomeRef = useRef<"idle" | "http_complete" | "fail_closed">("idle");
   /** shorter-than-accepted is module-level; tick so entitled overlay plan re-renders. */
   const [premiumAuthorityChurnTick, setPremiumAuthorityChurnTick] = useState(0);
   useEffect(() => {
@@ -7318,6 +7320,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     console.info("[premium-flow] entitled_rewrite_start", { rawLen: raw.length });
     premiumGenerateCompletedRef.current = false;
     setPremiumGenerateCompleted(false);
+    entitledRewritePfdHttpOutcomeRef.current = "idle";
     resetPremiumAuthorityShorterThanAcceptedChurn();
     setPremiumPostCheckoutPhase("processing");
     setPremiumPipelineUserMessage(CLAW_PREMIUM_PREPARING_AGREEMENT_COPY);
@@ -7384,7 +7387,36 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         premiumRequestIntakeFingerprint: shortIntakeFingerprint(mergedIntake),
         isPremiumRequestStillValid: () => getOrInitSessionAgreementGenerationId() === sessionGenForPass,
         premiumGenerationCallReason: "entitled_rewrite",
+        onPremiumFullDraftHttpComplete: (info) => {
+          const pfdHttpBody = (info.serverFullDocumentText || info.documentText || "").trim();
+          if (pfdHttpBody) {
+            guardPaidProAcceptedServerFullDraftCommit({
+              candidateText: pfdHttpBody,
+              candidateSource: "server_full_draft",
+              renderSource: "server_full_draft",
+              reason: "entitled_rewrite_pfd_http",
+            });
+            const settlePick = pickCreateReviewSettleCorpus({
+              winningPremiumBodyText: pfdHttpBody,
+              premiumRenderSource: "server_full_draft",
+              lastCommerciallyUsableCandidate: getLastCommerciallyUsableAuthorityCandidate(),
+            });
+            if (settlePick) {
+              lastPremiumWinningCorpusRef.current = settlePick;
+              premiumPipelineOutputBodyRef.current = settlePick;
+              lastPremiumPipelineRenderSourceRef.current =
+                lastPremiumPipelineRenderSourceRef.current || "server_full_draft";
+            }
+          }
+          entitledRewritePfdHttpOutcomeRef.current = "http_complete";
+          premiumGenerateCompletedRef.current = true;
+          setPremiumGenerateCompleted(true);
+        },
       });
+      if (String(entitledRewritePfdHttpOutcomeRef.current) === "fail_closed") {
+        setLoading(false);
+        return;
+      }
       premiumGenerateCompletedRef.current = true;
       setPremiumGenerateCompleted(true);
       {
@@ -26505,7 +26537,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     hasPremiumAuthorityShorterThanAcceptedChurn() && premiumAuthorityChurnTick >= 0,
   );
   const ordinaryNamedTwoPartyReadyForSettle = shouldSkipPartyPrepForOrdinaryNamedTwoParty({
-    intakeText: intakeCombined || lastPremiumWinningCorpusRef.current || "",
+    intakeText: intakeCombined || readOriginalUserIntakeRaw() || "",
     partyRows: intakePartyEditorRows,
   });
   const vs01CorpusGateBlockedWithoutSelectedFinal = isVs01CorpusGateBlockedWithoutSelectedFinal({
@@ -26655,6 +26687,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     if (!plan.failClosed && !postGenerateAuthorityChurn.failClosed) {
       return;
     }
+    entitledRewritePfdHttpOutcomeRef.current = "fail_closed";
+    entitledPremiumRewriteInFlightRef.current = false;
     const terminal = commitEntitledRewriteGenerationFailureTerminal({
       reason: "no_server_authority",
       dashboardRoute: isDashboardPaidCreateRouteActive(),

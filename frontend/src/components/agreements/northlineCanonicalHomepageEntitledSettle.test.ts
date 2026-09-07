@@ -302,6 +302,21 @@ describe("canonical Northline homepage dump → entitled Pro Review", () => {
     expect(intake).toContain("postGenerateCreateReviewSettlePlan.failClosed");
     expect(intake).toContain("ordinaryNamedTwoPartyReadyForSettle");
     expect(intake).toContain("if (!plan.failClosed && !postGenerateAuthorityChurn.failClosed)");
+    const ensureIdx = intake.indexOf("let result = await ensurePremiumCompletion({");
+    const ensureBlock = intake.slice(ensureIdx, ensureIdx + 3200);
+    expect(ensureBlock).toContain("onPremiumFullDraftHttpComplete");
+    expect(ensureBlock).toContain("setPremiumGenerateCompleted(true)");
+    expect(ensureBlock).toContain("entitled_rewrite_pfd_http");
+    expect(ensureBlock).toContain("pickCreateReviewSettleCorpus");
+    const namedSettleIdx = intake.indexOf(
+      "const ordinaryNamedTwoPartyReadyForSettle = shouldSkipPartyPrepForOrdinaryNamedTwoParty({",
+    );
+    const namedSettleBlock = intake.slice(namedSettleIdx, namedSettleIdx + 260);
+    expect(namedSettleBlock).toContain("intakeCombined || readOriginalUserIntakeRaw()");
+    expect(namedSettleBlock).not.toContain("lastPremiumWinningCorpusRef");
+    const pipeline = readFileSync(join(__dirname, "premiumCompletionPipeline.ts"), "utf8");
+    expect(pipeline).toContain("onPremiumFullDraftHttpComplete");
+    expect(pipeline).toContain("notifyPremiumFullDraftHttpComplete");
     const overlayMount = intake.indexOf(
       'premiumPostCheckoutPhase !== "premium_network_recoverable" && !dismissCreateOverlaysAfterRejectOrGate',
     );
@@ -443,6 +458,35 @@ describe("canonical Northline homepage dump → entitled Pro Review", () => {
     expect(tooMuchStillFails.failClosed).toBe(true);
     expect(tooMuchStillFails.settleReview).toBe(false);
     expect(tooMuchStillFails.dismissOverlays).toBe(true);
+
+    // Live #213 miss: pfd HTTP 200 completed but leftover vs01 in_progress was
+    // non-terminal, so too_much / money_vibe stayed on Generating.
+    const tooMuchAfterPfdHttp = planPostGenerateCreateReviewSettleOrFailClosed({
+      generateComplete: true,
+      vs01GateBlockedWithoutSelectedFinal: false,
+      vs01SelectedFinal: false,
+      shorterThanAcceptedChurn: true,
+      winningPremiumBodyText: "",
+      ordinaryNamedTwoPartyReady: false,
+    });
+    expect(tooMuchAfterPfdHttp.failClosed).toBe(true);
+    expect(tooMuchAfterPfdHttp.settleReview).toBe(false);
+    expect(tooMuchAfterPfdHttp.dismissOverlays).toBe(true);
+
+    const namedAfterPfdWithUsable = planPostGenerateCreateReviewSettleOrFailClosed({
+      generateComplete: true,
+      vs01GateBlockedWithoutSelectedFinal: true,
+      vs01SelectedFinal: false,
+      shorterThanAcceptedChurn: true,
+      winningPremiumBodyText: "Short preview stub",
+      lastCommerciallyUsableCandidate: northlineServices,
+      premiumRenderSource: "rejected_paid_corpus",
+      ordinaryNamedTwoPartyReady: true,
+    });
+    expect(namedAfterPfdWithUsable.settleReview).toBe(true);
+    expect(namedAfterPfdWithUsable.failClosed).toBe(false);
+    expect(namedAfterPfdWithUsable.dismissOverlays).toBe(true);
+    expect(namedAfterPfdWithUsable.corpus).toBe(northlineServices);
   });
 
   it("intake live path no longer re-latches free starter after entitled homepage resolve", () => {
