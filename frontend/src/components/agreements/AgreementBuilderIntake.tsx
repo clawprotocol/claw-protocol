@@ -877,6 +877,7 @@ import {
 import {
   resolvePaidProReviewDecisionPhase,
   resolvePostFinalizeReviewDecisionActive,
+  resolveDecision2AcceptedPrepareAction,
   resolvePaidProPrepareSignaturesHandler,
   shouldHidePaidProReviewDecisionChromeForDashboardResume,
   shouldShowPaidProReviewDecisionChrome,
@@ -886,6 +887,7 @@ import {
   resolvePostAcceptPrepareTrackCorpus,
   resolvePostAcceptReviewHandoffCta,
   resolveResumeAcceptedCommercialEsignHandoff,
+  shouldRecoverAcceptedCommercialPrepareTrack,
   shouldSkipReFinalizeBeforePostAcceptPrepare,
 } from "./paidProPostAcceptReviewHandoff";
 import { restoreFinalizedSignerStateFromPaidReturnPersist } from "./paidProPaidReturnSignerFinalizedRestore";
@@ -30054,7 +30056,18 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
       const transition = assertGuidedTransitionReady("signing_confirm");
       let corpusText = transition.ok ? ensureGuidedSigningCorpusReady() : "";
-      if (!transition.ok || !corpusText) {
+      const acceptedEnabled = Boolean(
+        trackAgreementId && canEnableCommercialPrepareFromServerSnapshot(trackAgreementId),
+      );
+      // #182 only recovered when refs were empty. After Continue the accepted GET
+      // is already painted, so recover was skipped and Prepare silent-stalled.
+      if (
+        shouldRecoverAcceptedCommercialPrepareTrack({
+          acceptedSnapshotEnabled: acceptedEnabled,
+          transitionOk: transition.ok,
+          corpusText,
+        })
+      ) {
         if (trackAgreementId && !canEnableCommercialPrepareFromServerSnapshot(trackAgreementId)) {
           const acceptResult = await ensureAcceptedCommercialReviewForEsignHandoff({
             agreementId: trackAgreementId,
@@ -30099,25 +30112,28 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           intakeText: currentPremiumMergedIntakeKey || intakeCombined,
         });
         if (!recovered.ok) {
-          traceSigningAdvance(
-            `enterGuidedSignatureTrackRoute:blocked:${!transition.ok ? transition.reason ?? "transition_not_ready" : "corpus_not_ready"}`,
-          );
-          logGuidedSignatureTrackFailed({
-            reason: !transition.ok ? transition.reason ?? "transition_not_ready" : "corpus_not_ready",
-          });
-          showModalIfSlow("blocked");
-          setGuidedFinalizeModalBlockedMessage(
-            !transition.ok
-              ? "The final agreement snapshot is not ready. Return to final review before continuing."
-              : GUIDED_VS01_HANDOFF_BLOCKED_USER_MESSAGE,
-          );
-          return;
+          if (!transition.ok || !corpusText) {
+            traceSigningAdvance(
+              `enterGuidedSignatureTrackRoute:blocked:${!transition.ok ? transition.reason ?? "transition_not_ready" : "corpus_not_ready"}`,
+            );
+            logGuidedSignatureTrackFailed({
+              reason: !transition.ok ? transition.reason ?? "transition_not_ready" : "corpus_not_ready",
+            });
+            showModalIfSlow("blocked");
+            setGuidedFinalizeModalBlockedMessage(
+              !transition.ok
+                ? "The final agreement snapshot is not ready. Return to final review before continuing."
+                : GUIDED_VS01_HANDOFF_BLOCKED_USER_MESSAGE,
+            );
+            return;
+          }
+        } else {
+          corpusText = recovered.body;
+          acceptedReviewCorpusRef.current = recovered.body;
+          authoritativeAgreementSnapshotRef.current = recovered.body;
+          finalizedSigningCorpusRef.current = recovered.body;
+          traceSigningAdvance("enterGuidedSignatureTrackRoute:accepted_snapshot_recover");
         }
-        corpusText = recovered.body;
-        acceptedReviewCorpusRef.current = recovered.body;
-        authoritativeAgreementSnapshotRef.current = recovered.body;
-        finalizedSigningCorpusRef.current = recovered.body;
-        traceSigningAdvance("enterGuidedSignatureTrackRoute:accepted_snapshot_recover");
       }
 
       let selected = resolvePostAcceptPrepareTrackCorpus({
@@ -30175,12 +30191,54 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         intakeText: currentPremiumMergedIntakeKey || intakeCombined,
         draftPartyNames: (draft?.parties ?? []).map((p) => String((p as { name?: string }).name ?? "").trim()),
       });
-      const handoffAssert = assertGuidedVs01SigningHandoffReady({
+      let handoffAssert = assertGuidedVs01SigningHandoffReady({
         manifest: signingHandoffManifest,
         corpusSource: selected.source,
         corpusBody: selected.body,
         intakeText: currentPremiumMergedIntakeKey || intakeCombined,
       });
+      if (!handoffAssert.ok && acceptedEnabled) {
+        const vs01Gate = resolveFinalVs01CorpusOrBlock({
+          agreementCorpusText: (
+            selected.body ||
+            readAuthoritativeSigningCorpus() ||
+            readVerifiedCommercialDisplayCorpus(trackAgreementId)?.corpusPlain ||
+            acceptedReviewCorpusRef.current ||
+            ""
+          ).trim(),
+          guidedPro: true,
+          signaturePreparationRequested: true,
+          prepareSignatureLinksRequested: true,
+        });
+        const recovered = resolveResumeAcceptedCommercialEsignHandoff({
+          agreementId: trackAgreementId,
+          acceptedSnapshotEnabled: acceptedEnabled,
+          verifiedDisplayCorpus: readVerifiedCommercialDisplayCorpus(trackAgreementId)?.corpusPlain,
+          signingSnapshotCorpus: readAuthoritativeSigningCorpus(),
+          acceptedReviewCorpus: acceptedReviewCorpusRef.current,
+          rebuiltSigningCorpus: vs01Gate.allowed ? vs01Gate.corpus : selected.body,
+          partyManifest: signingHandoffManifest,
+          signerCount: premiumSigningRecipientCount,
+          intakeText: currentPremiumMergedIntakeKey || intakeCombined,
+        });
+        if (recovered.ok) {
+          selected = {
+            source: recovered.source,
+            body: recovered.body,
+            hash: recovered.hash,
+          };
+          corpusText = recovered.body;
+          handoffAssert = assertGuidedVs01SigningHandoffReady({
+            manifest: signingHandoffManifest,
+            corpusSource: selected.source,
+            corpusBody: selected.body,
+            intakeText: currentPremiumMergedIntakeKey || intakeCombined,
+          });
+          if (handoffAssert.ok) {
+            traceSigningAdvance("enterGuidedSignatureTrackRoute:accepted_snapshot_recover");
+          }
+        }
+      }
       if (!handoffAssert.ok) {
         logGuidedSignatureTrackFailed({ reason: handoffAssert.reason ?? "handoff_assert_failed" });
         showModalIfSlow("blocked");
@@ -31552,6 +31610,25 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       });
       handlePremiumSendModePick("signature");
       setPremiumSendModeTouched(true);
+      // Decision-2 / already-accepted: never remount TEST570 signer setup — enter esign track.
+      const prepareAction = resolveDecision2AcceptedPrepareAction({
+        phase: paidProReviewDecisionPhase,
+        acceptedSnapshotEnabled: canEnableCommercialPrepareFromServerSnapshot(agreementIdForAccept),
+        signerDetailsComplete:
+          paidProSignatureDetailsReady ||
+          hasAuthoritativeSigningSnapshot() ||
+          paidProSignerMetadataFinalizedLatch,
+      });
+      if (prepareAction === "fail_closed") {
+        setProFullDraftCustomGateMessage(
+          "Add a complete authorized signer for each contracting party before Prepare for signing.",
+        );
+        return;
+      }
+      if (prepareAction === "enter_esign_track") {
+        void handleProSendForSignature();
+        return;
+      }
       // TEST570: "Prepare signature links" is the point where signer setup mounts. From the review
       // decision surface we always mount the inline signer form for confirmation/edit before signing —
       // even when intake prefilled every signer name — and never auto-finalize or jump straight to
@@ -31593,6 +31670,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     acceptedPaidProAuthorityActive,
     paidProReviewDecisionLifecycleReady,
     paidProPostCheckoutFirstReviewActive,
+    paidProReviewDecisionPhase,
     paidProSignatureDetailsReady,
     paidProSignerMetadataFinalizedLatch,
     enterFinalReviewRecipientSetup,

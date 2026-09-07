@@ -205,6 +205,21 @@ export type ResumeAcceptedCommercialEsignHandoff =
     }
   | { ok: false; reason: string };
 
+/**
+ * #182 recovered only when `!transition.ok || !corpusText` (empty local refs).
+ * After Continue the accepted GET is already painted, so recover was skipped,
+ * `assertGuidedVs01SigningHandoffReady` failed, and Prepare silent-stalled with
+ * zero document network. Accepted snapshot must always recover — paint must not skip.
+ */
+export function shouldRecoverAcceptedCommercialPrepareTrack(args: {
+  acceptedSnapshotEnabled: boolean;
+  transitionOk: boolean;
+  corpusText?: string | null;
+}): boolean {
+  if (args.acceptedSnapshotEnabled) return true;
+  return !args.transitionOk || !(args.corpusText || "").trim();
+}
+
 export function resolveResumeAcceptedCommercialEsignHandoff(args: {
   agreementId: string;
   acceptedSnapshotEnabled: boolean;
