@@ -26,6 +26,7 @@ import {
   shouldFailClosedCreateAfterRejectOrGate,
   shouldFailClosedGeneratingWithoutPipeline,
   shouldFailClosedInFlightPipelineWithoutCorpus,
+  shouldFailClosedPremiumProcessingWithoutPfd,
   shouldFailCloseCreateAfterPremiumFullDraft,
   hasAuthoritativeCreateReviewBodyForPrepFailsafe,
   isCommerciallyUsableCreateReviewCorpus,
@@ -159,6 +160,152 @@ describe("multi-party create → review settle or fail-closed", () => {
         preparingStartedAtMs: 1_000,
         nowMs: 1_000 + 60_000,
         generatePipelineInFlight: true,
+      }),
+    ).toBe(false);
+    expect(
+      shouldFailClosedGeneratingWithoutPipeline({
+        isGenerating: true,
+        generatePipelineInFlight: false,
+        hasAuthoritativeReviewBody: false,
+        preparingStartedAtMs: 1_000,
+        nowMs: 1_000 + CREATE_FLOW_GENERATING_WITHOUT_PIPELINE_FAILSAFE_MS,
+        ordinaryNamedTwoPartyReady: true,
+      }),
+    ).toBe(false);
+  });
+
+  it("junk premium processing without pfd fail-closes; named 2p still waits", () => {
+    const tooMuch =
+      "Need a deal with way too much exclusivity forever, 40% equity, revenue share, every affiliate signs, and no legal names.";
+    const moneyVibe =
+      "money vibe only, exclusivity forever, 40 percent equity, revenue share, no parties named.";
+    const northline =
+      "Services agreement between Northline Robotics LLC (Jordan Lee) and Cedar Peak Analytics Inc (Sam Okonkwo). Northline delivers robotics integration; Cedar Peak provides analytics. Fee $12,500. Term 6 months. Governing law Texas.";
+    expect(shouldSkipPartyPrepForOrdinaryNamedTwoParty({ intakeText: tooMuch, partyRows: ["", ""] })).toBe(
+      false,
+    );
+    expect(
+      shouldSkipPartyPrepForOrdinaryNamedTwoParty({ intakeText: moneyVibe, partyRows: ["", ""] }),
+    ).toBe(false);
+    expect(
+      shouldSkipPartyPrepForOrdinaryNamedTwoParty({ intakeText: northline, partyRows: ["", ""] }),
+    ).toBe(true);
+
+    const hangArgs = {
+      premiumPostCheckoutProcessing: true,
+      preparingOrGenerating: true,
+      pfdHttpCompleted: false,
+      hasAuthoritativeReviewBody: false,
+      preparingStartedAtMs: 1_000,
+      nowMs: 1_000 + CREATE_FLOW_GENERATING_WITHOUT_PIPELINE_FAILSAFE_MS,
+    } as const;
+
+    // too_much: processing + pfd never completes + elapsed ≥ failsafe → fail-closed.
+    expect(
+      shouldFailClosedPremiumProcessingWithoutPfd({
+        ...hangArgs,
+        ordinaryNamedTwoPartyReady: shouldSkipPartyPrepForOrdinaryNamedTwoParty({
+          intakeText: tooMuch,
+          partyRows: ["", ""],
+        }),
+      }),
+    ).toBe(true);
+    expect(
+      shouldDismissCreateOverlaysAfterRejectOrGate({
+        rejectOrGateBlocked: true,
+        corpusCommerciallyUsable: false,
+      }),
+    ).toBe(true);
+
+    // money_vibe-class: same family.
+    expect(
+      shouldFailClosedPremiumProcessingWithoutPfd({
+        ...hangArgs,
+        ordinaryNamedTwoPartyReady: shouldSkipPartyPrepForOrdinaryNamedTwoParty({
+          intakeText: moneyVibe,
+          partyRows: ["", ""],
+        }),
+      }),
+    ).toBe(true);
+
+    // Northline named-2p: elapsed ≥ failsafe but pfd not complete → still waits.
+    expect(
+      shouldFailClosedPremiumProcessingWithoutPfd({
+        ...hangArgs,
+        ordinaryNamedTwoPartyReady: shouldSkipPartyPrepForOrdinaryNamedTwoParty({
+          intakeText: northline,
+          partyRows: ["", ""],
+        }),
+      }),
+    ).toBe(false);
+
+    // Do not fail-close solely on churn / before the bound / after pfd completes.
+    expect(
+      shouldFailClosedPremiumProcessingWithoutPfd({
+        ordinaryNamedTwoPartyReady: false,
+        premiumPostCheckoutProcessing: true,
+        pfdHttpCompleted: false,
+        hasAuthoritativeReviewBody: false,
+        preparingStartedAtMs: 1_000,
+        nowMs: 1_000 + CREATE_FLOW_GENERATING_WITHOUT_PIPELINE_FAILSAFE_MS - 1,
+      }),
+    ).toBe(false);
+    expect(
+      shouldFailClosedPremiumProcessingWithoutPfd({
+        ordinaryNamedTwoPartyReady: false,
+        premiumPostCheckoutProcessing: true,
+        pfdHttpCompleted: true,
+        hasAuthoritativeReviewBody: false,
+        preparingStartedAtMs: 1_000,
+        nowMs: 1_000 + CREATE_FLOW_GENERATING_WITHOUT_PIPELINE_FAILSAFE_MS,
+      }),
+    ).toBe(false);
+
+    const northlineCorpus = `${"Section 1. Parties.\n".repeat(80)}IN WITNESS WHEREOF the parties execute this Agreement.`;
+    const usablePfd = planPostGenerateCreateReviewSettleOrFailClosed({
+      generateComplete: true,
+      vs01SelectedFinal: false,
+      winningPremiumBodyText: northlineCorpus,
+      premiumRenderSource: "server_full_draft",
+      ordinaryNamedTwoPartyReady: true,
+    });
+    expect(usablePfd.settleReview).toBe(true);
+    expect(usablePfd.failClosed).toBe(false);
+    expect(usablePfd.corpus).toBe(northlineCorpus);
+    expect(
+      shouldFailClosedPremiumProcessingWithoutPfd({
+        ...hangArgs,
+        ordinaryNamedTwoPartyReady: true,
+        hasAuthoritativeReviewBody: usablePfd.settleReview,
+      }),
+    ).toBe(false);
+
+    const lastUsable = planPostGenerateCreateReviewSettleOrFailClosed({
+      generateComplete: false,
+      vs01GateBlockedWithoutSelectedFinal: true,
+      lastCommerciallyUsableCandidate: northlineCorpus,
+      winningPremiumBodyText: "Short preview stub",
+      ordinaryNamedTwoPartyReady: true,
+    });
+    expect(lastUsable.settleReview).toBe(true);
+    expect(lastUsable.failClosed).toBe(false);
+    expect(lastUsable.corpus).toBe(northlineCorpus);
+
+    const selectedFinal = planPostGenerateCreateReviewSettleOrFailClosed({
+      generateComplete: false,
+      vs01SelectedFinal: true,
+      selectedFinalCorpus: northlineCorpus,
+      winningPremiumBodyText: "",
+      ordinaryNamedTwoPartyReady: true,
+    });
+    expect(selectedFinal.settleReview).toBe(true);
+    expect(selectedFinal.failClosed).toBe(false);
+    expect(selectedFinal.corpus).toBe(northlineCorpus);
+    expect(
+      shouldFailClosedPremiumProcessingWithoutPfd({
+        ...hangArgs,
+        ordinaryNamedTwoPartyReady: true,
+        hasAuthoritativeReviewBody: selectedFinal.settleReview,
       }),
     ).toBe(false);
   });
@@ -317,7 +464,37 @@ describe("multi-party create → review settle or fail-closed", () => {
     expect(intake).toContain("getLastCommerciallyUsableAuthorityCandidate");
     expect(intake).toContain("lastCommerciallyUsableCandidate");
     expect(intake).toContain("ordinaryNamedTwoPartyReady");
-    expect(intake).toContain("if (!plan.failClosed && !postGenerateAuthorityChurn.failClosed)");
+    expect(intake).toContain("shouldFailClosedPremiumProcessingWithoutPfd");
+    expect(intake).toContain("premiumProcessingWithoutPfdFailClosed");
+    expect(intake).toContain("ordinaryNamedTwoPartyReady: ordinaryNamedTwoPartyReadyForSettle");
+    expect(intake).not.toContain("shouldFailClosedJunkPfdHangOrEmptyAfterChurn");
+    expect(intake).not.toContain("currentDumpOrdinaryNamedTwoPartyReady");
+    expect(intake).toContain(
+      "!plan.failClosed &&\n      !premiumProcessingWithoutPfdFailClosed &&\n      !postGenerateAuthorityChurn.failClosed",
+    );
+    const plannerCallSites = [
+      intake.slice(
+        intake.indexOf("const postGenerateCreateReviewSettlePlan = planPostGenerateCreateReviewSettleOrFailClosed("),
+        intake.indexOf("const postGenerateCreateReviewSettlePlan = planPostGenerateCreateReviewSettleOrFailClosed(") + 900,
+      ),
+      intake.slice(
+        intake.indexOf("const plan = planPostGenerateCreateReviewSettleOrFailClosed({"),
+        intake.indexOf("const plan = planPostGenerateCreateReviewSettleOrFailClosed({") + 900,
+      ),
+    ];
+    for (const site of plannerCallSites) {
+      expect(site).toContain("generateComplete: premiumGenerateCompleted");
+      expect(site).not.toContain("authorityChurnActive && !ordinaryNamedTwoPartyReadyForSettle");
+    }
+    const namedSettleIdx = intake.indexOf(
+      "const ordinaryNamedTwoPartyReadyForSettle = shouldSkipPartyPrepForOrdinaryNamedTwoParty({",
+    );
+    const namedSettleBlock = intake.slice(namedSettleIdx, namedSettleIdx + 280);
+    expect(namedSettleBlock).toContain("intakePartyEditorRows");
+    const failCloseEffectRetry = intake.indexOf('entitledRewritePfdHttpOutcomeRef.current = "fail_closed"');
+    const failCloseEffectBlock = intake.slice(failCloseEffectRetry, failCloseEffectRetry + 1800);
+    expect(failCloseEffectBlock).toContain("setJourneyActionFeedback");
+    expect(failCloseEffectBlock).toContain('remedyLabel: "Retry"');
     expect(intake).toContain("onPremiumFullDraftHttpComplete");
     expect(intake).toContain("entitled_rewrite_pfd_http");
     expect(intake).toContain("pickCreateReviewSettleCorpus");

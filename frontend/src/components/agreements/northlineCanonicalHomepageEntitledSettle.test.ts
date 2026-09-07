@@ -14,10 +14,12 @@ import { evaluateIntentionalCreateDraftSubmit } from "./agreementIntakeCapabilit
 import { assessStarterComplexityGate } from "./starterMultiPartyProGate";
 import {
   CREATE_FLOW_GENERATE_FAILED_CLEAR_MESSAGE,
+  CREATE_FLOW_GENERATING_WITHOUT_PIPELINE_FAILSAFE_MS,
   isCommerciallyUsableCreateReviewCorpus,
   planPostGenerateCreateReviewSettleOrFailClosed,
   shouldDismissCreateOverlaysAfterRejectOrGate,
   shouldFailClosedCreateAfterRejectOrGate,
+  shouldFailClosedPremiumProcessingWithoutPfd,
   shouldInvokePremiumGenerateAfterPartyPrepCreate,
   shouldSkipPartyPrepForOrdinaryNamedTwoParty,
   shouldSettleProReviewAfterPremiumFullDraft,
@@ -293,6 +295,7 @@ describe("canonical Northline homepage dump → entitled Pro Review", () => {
     expect(planBlock).toContain("getLastCommerciallyUsableAuthorityCandidate");
     expect(planBlock).toContain("lastCommerciallyUsableCandidate");
     expect(planBlock).toContain("ordinaryNamedTwoPartyReady");
+    expect(planBlock).not.toContain("currentDumpOrdinaryNamedTwoPartyReady");
     expect(planBlock).toContain("setPremiumPostCheckoutPhase(null)");
     expect(planBlock).toContain("setDisplayPhase(\"review\")");
     expect(planBlock).toContain("entitledPaidShellPlan.failClosed");
@@ -301,7 +304,28 @@ describe("canonical Northline homepage dump → entitled Pro Review", () => {
     expect(intake).toContain("postGenerateCreateReviewSettlePlan.settleReview");
     expect(intake).toContain("postGenerateCreateReviewSettlePlan.failClosed");
     expect(intake).toContain("ordinaryNamedTwoPartyReadyForSettle");
-    expect(intake).toContain("if (!plan.failClosed && !postGenerateAuthorityChurn.failClosed)");
+    expect(intake).toContain("shouldFailClosedPremiumProcessingWithoutPfd");
+    expect(intake).toContain("premiumProcessingWithoutPfdFailClosed");
+    expect(intake).toContain("ordinaryNamedTwoPartyReady: ordinaryNamedTwoPartyReadyForSettle");
+    expect(intake).not.toContain("shouldFailClosedJunkPfdHangOrEmptyAfterChurn");
+    expect(intake).not.toContain("currentDumpOrdinaryNamedTwoPartyReady");
+    expect(intake).toContain(
+      "!plan.failClosed &&\n      !premiumProcessingWithoutPfdFailClosed &&\n      !postGenerateAuthorityChurn.failClosed",
+    );
+    const plannerGenerateCompleteSites = [
+      intake.slice(
+        intake.indexOf("const postGenerateCreateReviewSettlePlan = planPostGenerateCreateReviewSettleOrFailClosed("),
+        intake.indexOf("const postGenerateCreateReviewSettlePlan = planPostGenerateCreateReviewSettleOrFailClosed(") + 900,
+      ),
+      intake.slice(
+        intake.indexOf("const plan = planPostGenerateCreateReviewSettleOrFailClosed({"),
+        intake.indexOf("const plan = planPostGenerateCreateReviewSettleOrFailClosed({") + 900,
+      ),
+    ];
+    for (const site of plannerGenerateCompleteSites) {
+      expect(site).toContain("generateComplete: premiumGenerateCompleted");
+      expect(site).not.toContain("authorityChurnActive && !ordinaryNamedTwoPartyReadyForSettle");
+    }
     const ensureIdx = intake.indexOf("let result = await ensurePremiumCompletion({");
     const ensureBlock = intake.slice(ensureIdx, ensureIdx + 3200);
     expect(ensureBlock).toContain("onPremiumFullDraftHttpComplete");
@@ -487,6 +511,70 @@ describe("canonical Northline homepage dump → entitled Pro Review", () => {
     expect(namedAfterPfdWithUsable.failClosed).toBe(false);
     expect(namedAfterPfdWithUsable.dismissOverlays).toBe(true);
     expect(namedAfterPfdWithUsable.corpus).toBe(northlineServices);
+  });
+
+  it("premium processing failsafe waits on Northline and fail-closes junk without pfd", () => {
+    const hang = {
+      premiumPostCheckoutProcessing: true,
+      preparingOrGenerating: true,
+      pfdHttpCompleted: false,
+      hasAuthoritativeReviewBody: false,
+      preparingStartedAtMs: 1_000,
+      nowMs: 1_000 + CREATE_FLOW_GENERATING_WITHOUT_PIPELINE_FAILSAFE_MS,
+    } as const;
+    expect(
+      shouldFailClosedPremiumProcessingWithoutPfd({
+        ...hang,
+        ordinaryNamedTwoPartyReady: shouldSkipPartyPrepForOrdinaryNamedTwoParty({
+          intakeText: NORTHLINE_CANONICAL,
+          partyRows: ["", ""],
+        }),
+      }),
+    ).toBe(false);
+    expect(
+      shouldFailClosedPremiumProcessingWithoutPfd({
+        ...hang,
+        ordinaryNamedTwoPartyReady: shouldSkipPartyPrepForOrdinaryNamedTwoParty({
+          intakeText:
+            "Need a deal with way too much exclusivity forever, 40% equity, revenue share, every affiliate signs, and no legal names.",
+          partyRows: ["", ""],
+        }),
+      }),
+    ).toBe(true);
+    expect(
+      shouldFailClosedPremiumProcessingWithoutPfd({
+        ...hang,
+        ordinaryNamedTwoPartyReady: shouldSkipPartyPrepForOrdinaryNamedTwoParty({
+          intakeText: "money vibe only, exclusivity forever, 40 percent equity, no parties named.",
+          partyRows: ["", ""],
+        }),
+      }),
+    ).toBe(true);
+    expect(
+      shouldDismissCreateOverlaysAfterRejectOrGate({
+        rejectOrGateBlocked: true,
+        corpusCommerciallyUsable: false,
+      }),
+    ).toBe(true);
+
+    const usable = planPostGenerateCreateReviewSettleOrFailClosed({
+      generateComplete: true,
+      vs01SelectedFinal: false,
+      winningPremiumBodyText: USABLE_SERVICES_CORPUS,
+      premiumRenderSource: "server_full_draft",
+      lastCommerciallyUsableCandidate: USABLE_SERVICES_CORPUS,
+      ordinaryNamedTwoPartyReady: true,
+    });
+    expect(usable.settleReview).toBe(true);
+    expect(usable.failClosed).toBe(false);
+    expect(usable.corpus).toBe(USABLE_SERVICES_CORPUS);
+    expect(
+      shouldFailClosedPremiumProcessingWithoutPfd({
+        ...hang,
+        ordinaryNamedTwoPartyReady: true,
+        hasAuthoritativeReviewBody: usable.settleReview,
+      }),
+    ).toBe(false);
   });
 
   it("intake live path no longer re-latches free starter after entitled homepage resolve", () => {
