@@ -741,7 +741,13 @@ export function isLeftoverOverlayIdentitySlotToken(token: string): boolean {
   const n = normalizePlaceholderToken(token);
   if (/^(?:ORG|PARTY|ENTITY|CLIENT|COMPANY|ORGANIZATION|PERSON)_\d+$/i.test(n)) return true;
   if (/^(?:ORG|PARTY|ENTITY|CLIENT|COMPANY|ORGANIZATION|PERSON)\d+$/i.test(n)) return true;
-  return /^PARTY_[AB]\d*$/i.test(n);
+  if (/^PARTY_[AB]\d*$/i.test(n)) return true;
+  // Leftover 2-party role / alias slots. Finalize already rewrites [CLIENT]/[PROVIDER].
+  // [ENTITY NAME] is the leftover counterpart of allowlisted [PARTY NAME].
+  // Unnumbered [ORG]/[PARTY]/[ENTITY] is leftover identity, not insert/mustache.
+  if (/^(?:CLIENT|PROVIDER|VENDOR|SERVICE_PROVIDER|CUSTOMER)$/i.test(n)) return true;
+  if (/^(?:ORG|PARTY|ENTITY|COMPANY|ORGANIZATION|PERSON)$/i.test(n)) return true;
+  return /^ENTITY_NAME$/i.test(n);
 }
 
 export function isAcceptablePaidProPfd200LeftoverToken(
