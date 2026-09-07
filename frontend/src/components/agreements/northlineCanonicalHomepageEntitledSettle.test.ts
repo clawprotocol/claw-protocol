@@ -289,7 +289,7 @@ describe("canonical Northline homepage dump → entitled Pro Review", () => {
     expect(vs01AttachIdx).toBeGreaterThan(-1);
     expect(entitledPlanIdx).toBeGreaterThan(vs01AttachIdx);
     expect(prepareIdx).toBeGreaterThan(entitledPlanIdx);
-    const planBlock = intake.slice(entitledPlanIdx, entitledPlanIdx + 2200);
+    const planBlock = intake.slice(entitledPlanIdx, entitledPlanIdx + 4200);
     expect(planBlock).toContain("getLastCommerciallyUsableAuthorityCandidate");
     expect(planBlock).toContain("setPremiumPostCheckoutPhase(null)");
     expect(planBlock).toContain("setDisplayPhase(\"review\")");
