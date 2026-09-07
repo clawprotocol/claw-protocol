@@ -146,6 +146,47 @@ export function extractAuthoritativeLegalNamesFromCommercialCorpus(
   );
 }
 
+/**
+ * Leftover 2-party prep may wipe Party 3/4 labels while the commercial 200 corpus
+ * still names every declared legal party. Prefer those corpus names over the thin
+ * leftover draft — do not 2-party-rewrite a settled N≥3 body.
+ */
+export function resolvePartyNamesPreferringCommercialCorpus(args: {
+  intakeText?: string | null;
+  corpusPlain?: string | null;
+  leftoverNames?: readonly string[];
+}): string[] {
+  const intake = String(args.intakeText ?? "").trim();
+  const declared = resolveDeclaredExplicitPartyCount(intake) ?? 0;
+  const intakeNames = resolveAuthoritativeIntakePartyNames(intake).filter(
+    isAuthoritativeLegalEntityName,
+  );
+  const leftover = (args.leftoverNames ?? [])
+    .map((n) => String(n || "").replace(/\s+/g, " ").trim())
+    .filter((n) => n.length >= 2 && isAuthoritativeLegalEntityName(n));
+  const corpusNames = extractAuthoritativeLegalNamesFromCommercialCorpus(args.corpusPlain);
+  const need = declared >= 3 ? Math.min(declared, PAID_PRO_AUTHORITY_MAX_PARTIES) : 0;
+
+  if (need > 0 && intakeNames.length >= need) {
+    return intakeNames.slice(0, need);
+  }
+  if (intakeNames.length >= 3 && need === 0) {
+    return intakeNames.slice(0, PAID_PRO_AUTHORITY_MAX_PARTIES);
+  }
+  if (need > 0 && corpusNames.length >= need) {
+    return corpusNames.slice(0, need);
+  }
+  if (
+    corpusNames.length >= 3 &&
+    (leftover.length < corpusNames.length || intakeNames.length < corpusNames.length)
+  ) {
+    return corpusNames.slice(0, PAID_PRO_AUTHORITY_MAX_PARTIES);
+  }
+  if (intakeNames.length >= 2) return intakeNames;
+  if (leftover.length >= 2) return leftover;
+  return corpusNames.length >= 2 ? corpusNames : leftover;
+}
+
 export function logSignerCountAuthority(
   resolution: SignerCountAuthorityResolution,
   context?: string,

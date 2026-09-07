@@ -126,7 +126,34 @@ import {
 import {
   extractAuthoritativeLegalNamesFromCommercialCorpus,
   resolveAuthoritativeSignerCount,
+  resolvePartyNamesPreferringCommercialCorpus,
 } from "./signerCountAuthority";
+
+function overlayLeftoverDraftFromCommercialCorpus(
+  args: PreparePaidProFreezeCandidateArgs,
+): PreparePaidProFreezeCandidateArgs {
+  const leftover = (args.draft?.parties ?? [])
+    .map((p) => String(p?.name ?? "").trim())
+    .filter((n) => n.length >= 2);
+  const names = resolvePartyNamesPreferringCommercialCorpus({
+    intakeText: args.intakeText,
+    corpusPlain: args.text,
+    leftoverNames: leftover,
+  });
+  if (!args.draft || names.length < 3 || leftover.length >= names.length) {
+    return args;
+  }
+  return {
+    ...args,
+    draft: {
+      ...args.draft,
+      parties: names.map((name, i) => ({
+        ...(args.draft?.parties?.[i] ?? { role: "party" }),
+        name,
+      })),
+    },
+  };
+}
 
 function trim(s: string | null | undefined): string {
   return (s || "").trim();
@@ -353,8 +380,9 @@ export function logPaidProFreezeCandidateDecision(payload: {
 
 /** Normalize server/prepared text through the same pre-freeze transform chain as SoT establishment. */
 export function preparePaidProFreezeCandidateText(
-  args: PreparePaidProFreezeCandidateArgs,
+  incoming: PreparePaidProFreezeCandidateArgs,
 ): PaidProFreezeCandidatePrepResult {
+  const args = overlayLeftoverDraftFromCommercialCorpus(incoming);
   const requestedSource = (args.source ?? "server_full_draft").trim();
   const surface = args.surface ?? "paid_pro_freeze_candidate";
   const repairs: string[] = [];
@@ -1683,8 +1711,9 @@ function extractPaidProFreezeRejectReason(message: string): string {
 
 /** Full prepare + gate — canonical acceptance / SoT freeze compatibility check. */
 export function buildPaidProFreezeCandidate(
-  args: PreparePaidProFreezeCandidateArgs,
+  incoming: PreparePaidProFreezeCandidateArgs,
 ): PaidProFreezeCandidateGateResult {
+  const args = overlayLeftoverDraftFromCommercialCorpus(incoming);
   const prep = preparePaidProFreezeCandidateText(args);
   tracePaidProAcceptancePipelineStage({
     stage: "validatePaidProOutput_validation_input",

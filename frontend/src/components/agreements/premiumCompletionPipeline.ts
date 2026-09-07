@@ -498,8 +498,9 @@ function alignTitleWithCanonical(parsed: ParsedDraftShape, rawIntake: string): P
 function resolvePremiumCompletionCanonicalPartyNames(
   draft: ParsedDraftShape,
   intakeText: string,
+  corpusPlain?: string | null,
 ): string[] {
-  return resolvePartiesForReviewRender({ draft, intakeText })
+  return resolvePartiesForReviewRender({ draft, intakeText, corpusPlain })
     .map((p) => p.partyLegalName.trim())
     .filter((name) => name.length >= 2);
 }
@@ -2257,6 +2258,7 @@ async function runPremiumCompletionInner(
           const canonicalPartyNamesForRepair = resolvePremiumCompletionCanonicalPartyNames(
             merged,
             preGateIntake,
+            doc,
           );
           const structuredPartyCount = (merged.parties || []).length;
           const canonicalIdentityCount = resolveCanonicalPartyIdentitiesFromSources({
@@ -3142,7 +3144,7 @@ async function runPremiumCompletionInner(
           typeof performance !== "undefined" ? performance.now() : Date.now();
         const ph = finalizeUserVisibleAgreementPlainText(doc, {
           intakeRaw: (rawForSoT || rawIntake || "").trim(),
-          partyNames: resolvePremiumCompletionCanonicalPartyNames(merged, rawForSoT || rawIntake),
+          partyNames: resolvePremiumCompletionCanonicalPartyNames(merged, rawForSoT || rawIntake, doc),
           agreementFamily: merged.agreement_family ?? null,
           surface: "premium_completion_pipeline",
         });
@@ -4435,7 +4437,11 @@ async function runPremiumCompletionInner(
           (doc || "").trim();
         const preservedPlaceholder = finalizeUserVisibleAgreementPlainText(preservedCandidate, {
           intakeRaw: (rawForSoT || rawIntake || "").trim(),
-          partyNames: resolvePremiumCompletionCanonicalPartyNames(merged, rawForSoT || rawIntake),
+          partyNames: resolvePremiumCompletionCanonicalPartyNames(
+            merged,
+            rawForSoT || rawIntake,
+            preservedCandidate,
+          ),
           agreementFamily: merged.agreement_family ?? null,
           surface: "premium_completion_pipeline:preserved_recovery",
         });
