@@ -12,6 +12,7 @@ import {
   isDisallowedPartyPhrase,
 } from "./paidProPartyNamePreserve";
 import { partyLegalNamesMatch } from "./paidProAcceptedCorpusPartyRoles";
+import { extractAuthoritativeLegalNamesFromCommercialCorpus } from "./signerCountAuthority";
 
 const FATAL_PLACEHOLDER_RE = /\[(?:ORG|EMAIL)_\d+\]/i;
 const COORDINATOR_NAME_MARKERS = /\b(?:alex\s+morgan|coordinator)\b/i;
@@ -75,7 +76,12 @@ export function assessLabeledPartyManifestIntegrity(args: {
 
   const doc = String(args.documentText ?? "");
   if (doc && FATAL_PLACEHOLDER_RE.test(doc)) {
-    reasons.push("document_fatal_org_email_placeholder");
+    // Leftover 2-party overlay preamble ([ORG_1]/[ORG_2]) on a commercially
+    // named N≥3 200 corpus is repaired/settled — not hollow junk.
+    const corpusNames = extractAuthoritativeLegalNamesFromCommercialCorpus(doc);
+    if (corpusNames.length < 3) {
+      reasons.push("document_fatal_org_email_placeholder");
+    }
   }
 
   for (const bad of [

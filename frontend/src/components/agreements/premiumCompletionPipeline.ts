@@ -1820,11 +1820,16 @@ async function runPremiumCompletionInner(
   let lastWireGenerationOutcome = "";
   let premiumBodyHardRejectedForDevContextLeak = false;
   const intakeLowerGlobal = (rawForSoT || rawIntake).toLowerCase();
-  const premiumRejectCtx = {
+  const premiumRejectCtx: {
+    intakeLower: string;
+    intakeText: string;
+    partyNames: string[] | null;
+  } = {
     intakeLower: intakeLowerGlobal,
     intakeText: rawForSoT || rawIntake,
     // Intake / labeled-party authority — leftover 2-party merged.parties must not
     // starve N≥3 reject/finalize of the names the 200 corpus already carries.
+    // Refreshed after pfd 200 so leftover overlay can recover Party 3/4 from the corpus.
     partyNames: (() => {
       const fromAuthority = resolvePremiumCompletionCanonicalPartyNames(
         merged,
@@ -1836,6 +1841,14 @@ async function runPremiumCompletionInner(
         .filter(Boolean);
       return leftover.length >= 2 ? leftover : null;
     })(),
+  };
+  const refreshPremiumRejectPartyNamesFromCorpus = (corpusPlain: string | null | undefined) => {
+    const fromAuthority = resolvePremiumCompletionCanonicalPartyNames(
+      merged,
+      rawForSoT || rawIntake,
+      corpusPlain,
+    );
+    if (fromAuthority.length >= 2) premiumRejectCtx.partyNames = fromAuthority;
   };
   let premiumRenderSource: PremiumRenderSource = "fallback_preview";
   let founderDetailsGateMessage: string | null = null;
@@ -2287,6 +2300,7 @@ async function runPremiumCompletionInner(
               ),
             },
           );
+          refreshPremiumRejectPartyNamesFromCorpus(doc);
           if (repair.repaired) {
             doc = repair.text;
             partyPlaceholderRepairApplied = true;
@@ -2932,6 +2946,7 @@ async function runPremiumCompletionInner(
           tierADiag.serverTextClearReason = "dev_context_leak_before_client_gates";
         }
       }
+      refreshPremiumRejectPartyNamesFromCorpus(doc);
       let acc = rejectPremiumBodyForProRender(doc, premiumRejectCtx);
       const intakeS = (rawForSoT || rawIntake).trim();
       const founderIntent = isFounderEquityVestingIntent(intakeS);

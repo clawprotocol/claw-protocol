@@ -32,6 +32,7 @@ import {
   resolveAuthoritativeSignerCount,
   resolvePartyNamesPreferringCommercialCorpus,
 } from "./signerCountAuthority";
+import { PAID_PRO_AUTHORITY_MAX_PARTIES } from "./paidProAuthorityLimits";
 import { resolveDeclaredExplicitPartyCount } from "./partySlotIdentityNormalize";
 import { isAuthoritativeLegalEntityName } from "./paidProPartyNamePreserve";
 import { isPaidProReviewSignerMetadataSessionActive } from "./paidProReviewRenderSessionGate";
@@ -290,17 +291,15 @@ function resolvePartiesForReviewRenderCore(
     commercialNames.length >= 3 &&
     (leftoverDraftTooThin || labeledAuthority.length < commercialNames.length)
   ) {
-    return mergeLabeledPartyAuthorityIntoParties(
-      commercialNames.map((partyLegalName, partyIndex) => ({
-        partyIndex,
-        partyLegalName,
-        signerEmail: "",
-        signerName: "",
-        signerTitle: "",
-        partyAddress: "",
-      })),
-      intakeRaw,
-    );
+    // Leftover 2-party labeled rows must not slot-merge back over recovered Party 3/4.
+    return commercialNames.slice(0, PAID_PRO_AUTHORITY_MAX_PARTIES).map((partyLegalName, partyIndex) => ({
+      partyIndex,
+      partyLegalName,
+      signerEmail: "",
+      signerName: "",
+      signerTitle: "",
+      partyAddress: "",
+    }));
   }
 
   const consumed = readConsumedPaidProSignerMetadataAuthority()?.parties;

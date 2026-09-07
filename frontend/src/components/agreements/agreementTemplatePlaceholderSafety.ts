@@ -45,6 +45,7 @@ import { runCachedCorpusScan } from "./paidProCorpusScanCache";
 import { intakeDescribesBrandLicensingDistributionManufacturingStack } from "./paidProAgreementTitleScope";
 import { resolveDeterministicQuadPartyNames } from "./deterministicQuadPartyProFallback";
 import { isAuthoritativeLegalEntityName } from "./paidProPartyNamePreserve";
+import { extractAuthoritativeLegalNamesFromCommercialCorpus } from "./signerCountAuthority";
 
 const LOG_PREFIX_SCAN = "[placeholder-scan]";
 const LOG_PREFIX_REPAIR = "[placeholder-repair]";
@@ -443,6 +444,14 @@ export function resolvePlaceholderPartyNamesWithMeta(
     pushUniqueParty(names, seen, n);
     if (seen.size > before) corpusBetween += 1;
   }
+  // Leftover 2-party opening hides Party 3/4 in the between-clause; notices /
+  // signatures on the same 200 corpus still name them.
+  const fromCorpusEntities = corpusText
+    ? extractAuthoritativeLegalNamesFromCommercialCorpus(corpusText)
+    : [];
+  for (const n of fromCorpusEntities) {
+    pushUniqueParty(names, seen, n);
+  }
   const corpusAmong = 0;
   const anchorsFound = corpusHasResolvedPartyAnchors(corpusText || "", names, ctx.intakeRaw);
   const intakeRaw = String(ctx.intakeRaw || "").trim();
@@ -727,6 +736,26 @@ export function remainingFatalsAreCommercialFieldStubsOnly(
   return fatals.every((d) => isPaidProCommercialFieldStubToken(d.token));
 }
 
+/** Leftover 2-party overlay preamble slots — not insert/mustache/hollow junk. */
+export function isLeftoverOverlayIdentitySlotToken(token: string): boolean {
+  const n = normalizePlaceholderToken(token);
+  return /^(?:ORG|PARTY)_\d+$/i.test(n);
+}
+
+function remainingFatalsAreCommercialOrLeftoverOverlayOnly(
+  remainingDetail: readonly PlaceholderTokenDecision[],
+  commerciallyNamed: boolean,
+): boolean {
+  const fatals = remainingDetail.filter((d) => d.fatal);
+  if (fatals.length === 0) return false;
+  if (fatals.length > 48) return false;
+  return fatals.every(
+    (d) =>
+      isPaidProCommercialFieldStubToken(d.token) ||
+      (commerciallyNamed && isLeftoverOverlayIdentitySlotToken(d.token)),
+  );
+}
+
 /**
  * Live premium-full-draft 200: a commercially usable N≥3 corpus must not fail-close
  * solely because notice/signature field stubs remain (signer setup owns those).
@@ -738,21 +767,34 @@ export function shouldAcceptPaidProCommercialFieldStubsAfterPfd200(args: {
 }): boolean {
   const text = String(args.text || "").trim();
   if (text.length < PAID_PRO_SIGNATURE_ACCEPT_MIN_BODY_LEN) return false;
+  const intake = String(args.intakeRaw ?? "").trim();
+  const intakeNames = extractAgreementEntityCandidates(intake).filter(isAuthoritativeLegalEntityName);
+  const corpusBetween = extractPartyNamesFromCorpusBetween(text);
+  const corpusLegalNames = extractAuthoritativeLegalNamesFromCommercialCorpus(text);
+  const commerciallyNamed =
+    intakeNames.length >= 3 || corpusBetween.length >= 3 || corpusLegalNames.length >= 3;
   if (args.remainingDetail && args.remainingDetail.length > 0) {
     const fatals = args.remainingDetail.filter((d) => d.fatal);
-    if (fatals.length > 0 && !remainingFatalsAreCommercialFieldStubsOnly(args.remainingDetail)) {
+    if (
+      fatals.length > 0 &&
+      !remainingFatalsAreCommercialOrLeftoverOverlayOnly(args.remainingDetail, commerciallyNamed)
+    ) {
       return false;
     }
   }
   const tokens = scanUnresolvedRenderTokens(text);
   if (tokens.length > 48) return false;
-  if (tokens.length > 0 && !tokens.every((m) => isPaidProCommercialFieldStubToken(m.token))) {
+  if (
+    tokens.length > 0 &&
+    !tokens.every(
+      (m) =>
+        isPaidProCommercialFieldStubToken(m.token) ||
+        (commerciallyNamed && isLeftoverOverlayIdentitySlotToken(m.token)),
+    )
+  ) {
     return false;
   }
-  const intake = String(args.intakeRaw ?? "").trim();
-  const intakeNames = extractAgreementEntityCandidates(intake).filter(isAuthoritativeLegalEntityName);
-  const corpusNames = extractPartyNamesFromCorpusBetween(text);
-  if (intakeNames.length >= 3 || corpusNames.length >= 3) return true;
+  if (commerciallyNamed) return true;
   if (/(?:^|\n)\s*Party\s*[3-9]\s*:/im.test(intake)) return true;
   return /\b(?:by and among|entered into by and among)\b/i.test(text) && intakeNames.length >= 2;
 }

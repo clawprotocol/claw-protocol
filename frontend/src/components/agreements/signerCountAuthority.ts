@@ -122,10 +122,26 @@ export function inferCorpusDerivedSignerCount(corpusPlain?: string | null): numb
   return findSignatureLineAnchorsFromCorpusText(corpus).length;
 }
 
+const NOTICE_IF_TO_NAME_RE = /\bIf to\s+([^:\n[\]]{2,160}):/gi;
+
+function extractNoticeIfToLegalNames(corpus: string): string[] {
+  const names: string[] = [];
+  NOTICE_IF_TO_NAME_RE.lastIndex = 0;
+  for (const m of corpus.matchAll(NOTICE_IF_TO_NAME_RE)) {
+    const n = String(m[1] || "").replace(/\s+/g, " ").trim();
+    if (n.length >= 2 && isAuthoritativeLegalEntityName(n)) names.push(n);
+  }
+  return dedupeEntityCandidatesToLegalParties(names);
+}
+
 /**
  * Legal-entity names already written into a commercially usable 200 corpus.
  * Leftover 2-party prep may have wiped Party 3/4 labels from intake — the corpus
  * is then the only remaining authority for those names.
+ *
+ * Prefer the longest commercially named set. A leftover 2-party opening
+ * ("between [ORG_1] and [ORG_2]" / leftover-rewritten among A, B, and C)
+ * must not hide Party 3/4 that notices and signatures already name.
  */
 export function extractAuthoritativeLegalNamesFromCommercialCorpus(
   corpusPlain?: string | null,
@@ -138,9 +154,16 @@ export function extractAuthoritativeLegalNamesFromCommercialCorpus(
   const fromBetween = extractBetweenPartyNameListForAuthority(corpus).filter(
     (n) => isBetweenClausePartyCandidate(n) || isAuthoritativeLegalEntityName(n),
   );
+  const fromNotices = extractNoticeIfToLegalNames(corpus);
+  // Leftover 2-party opening (between [ORG_1] and [ORG_2]) hides Party 3/4 in
+  // the between-clause. Notices still name every commercial party.
+  if (fromNotices.length >= 3 && fromNotices.length > fromBetween.length) {
+    return fromNotices.slice(0, PAID_PRO_AUTHORITY_MAX_PARTIES);
+  }
   if (fromBetween.length >= 3) return fromBetween.slice(0, PAID_PRO_AUTHORITY_MAX_PARTIES);
   if (fromEntities.length >= 3) return fromEntities.slice(0, PAID_PRO_AUTHORITY_MAX_PARTIES);
-  return dedupeEntityCandidatesToLegalParties([...fromBetween, ...fromEntities]).slice(
+  if (fromNotices.length >= 3) return fromNotices.slice(0, PAID_PRO_AUTHORITY_MAX_PARTIES);
+  return dedupeEntityCandidatesToLegalParties([...fromBetween, ...fromEntities, ...fromNotices]).slice(
     0,
     PAID_PRO_AUTHORITY_MAX_PARTIES,
   );
@@ -174,9 +197,12 @@ export function resolvePartyNamesPreferringCommercialCorpus(args: {
     return intakeNames.slice(0, PAID_PRO_AUTHORITY_MAX_PARTIES);
   }
   // Only steal authority from the 200 corpus when leftover prep actually wiped rows.
+  // Leftover fused overlay may also drop the "four-party" dump (need=0) while
+  // the 200 corpus still names all N legal parties.
   const leftoverThin =
     (need > 0 && leftover.length < need && intakeNames.length < need) ||
-    (need > 0 && leftover.length < 3 && intakeNames.length < need);
+    (need > 0 && leftover.length < 3 && intakeNames.length < need) ||
+    (need === 0 && leftover.length < 3 && intakeNames.length < 3 && corpusNames.length >= 3);
   if (leftoverThin && need > 0 && corpusNames.length >= need) {
     return corpusNames.slice(0, need);
   }
@@ -410,6 +436,19 @@ function resolveAuthoritativeSignerCountCore(args: SignerCountAuthorityArgs): Si
   // Leftover 2-party prep overlay on a declared 3/4-party dump must not clamp — Party 3/4
   // labels may have been wiped while the 200 corpus still carries all N names.
   const declaredExplicitPartyCount = resolveDeclaredExplicitPartyCount(intake) ?? 0;
+  const leftoverOverlayCorpusNames = extractAuthoritativeLegalNamesFromCommercialCorpus(
+    args.corpusPlain,
+  );
+  const leftoverOverlayNoticeNames = extractNoticeIfToLegalNames(String(args.corpusPlain ?? ""));
+  // Leftover overlay only: declared N≥3, or leftover 2-party prep plus N≥3 notice names.
+  // Decorative extra signature blocks on a 2-party corpus must not promote the count.
+  const leftoverOverlayOnCommercialMultiparty =
+    leftoverOverlayCorpusNames.length >= 3 &&
+    leftoverOverlayCorpusNames.length > Math.max(draftCount, authoritativeIntakeCount, 0) &&
+    (declaredExplicitPartyCount >= 3 ||
+      (leftoverOverlayNoticeNames.length >= 3 &&
+        draftCount <= 2 &&
+        authoritativeIntakeCount <= 2));
   const intakeClearlyTwoParty =
     betweenDeduped.length === 2 &&
     authoritativeIntakeCount <= 2 &&
@@ -418,7 +457,8 @@ function resolveAuthoritativeSignerCountCore(args: SignerCountAuthorityArgs): Si
     entityPool.length < 3 &&
     frozenManifestCount < 3 &&
     consumedManifestCount < 3 &&
-    declaredExplicitPartyCount < 3;
+    declaredExplicitPartyCount < 3 &&
+    !leftoverOverlayOnCommercialMultiparty;
   // Freelance sole-prop intakes ("between me (Alex Rivera, freelance product designer) and …")
   // must clamp to 2 even when notice repair briefly emits a third Party C slot.
   const draftClearlyTwoPartyCommercial =
@@ -432,7 +472,8 @@ function resolveAuthoritativeSignerCountCore(args: SignerCountAuthorityArgs): Si
     explicitManifestPartyCount < 3 &&
     declaredExplicitPartyCount < 3 &&
     betweenDeduped.length <= 2 &&
-    authoritativeDraftEntities.length <= 2;
+    authoritativeDraftEntities.length <= 2 &&
+    !leftoverOverlayOnCommercialMultiparty;
   if (
     (intakeClearlyTwoParty || draftClearlyTwoPartyCommercial) &&
     count > 2 &&
@@ -477,11 +518,16 @@ function resolveAuthoritativeSignerCountCore(args: SignerCountAuthorityArgs): Si
     const corpusNames = extractAuthoritativeLegalNamesFromCommercialCorpus(args.corpusPlain);
     if (
       corpusNames.length >= declaredExplicitPartyCount ||
-      partySlotCount >= declaredExplicitPartyCount
+      partySlotCount >= declaredExplicitPartyCount ||
+      leftoverOverlayOnCommercialMultiparty ||
+      (draftCount <= 2 && authoritativeIntakeCount <= 2)
     ) {
       count = declaredExplicitPartyCount;
       source = "party_slot_count";
     }
+  } else if (leftoverOverlayOnCommercialMultiparty && count < leftoverOverlayCorpusNames.length) {
+    count = Math.min(leftoverOverlayCorpusNames.length, PAID_PRO_AUTHORITY_MAX_PARTIES);
+    source = "party_slot_count";
   }
 
   let finalCount = Math.max(2, Math.min(count, PAID_PRO_AUTHORITY_MAX_PARTIES));
@@ -533,7 +579,8 @@ function leftoverTwoPartyConsumerOnCommercialMultipartyCorpus(
 ): boolean {
   const high = Math.max(authoritativeCount, consumer);
   const low = Math.min(authoritativeCount, consumer);
-  if (high < 3 || low !== 2) return false;
+  // Leftover overlay is leftover 2 (or leftover-rewritten 3) vs commercial N≥3.
+  if (high < 3 || low < 2 || low >= high) return false;
   const declared = resolveDeclaredExplicitPartyCount(String(args.intakeText ?? "")) ?? 0;
   const names = resolveAuthoritativeIntakePartyNames(args.intakeText).filter(
     isAuthoritativeLegalEntityName,
@@ -687,7 +734,10 @@ export function resolveReadonlyHtmlSignerCount(
 
   const derivedFromPartyNames = partyNameRows.length;
   const derivedFromCorpus = inferCorpusDerivedSignerCount(args.corpusPlain);
-  if (derivedFromPartyNames > count) {
+  if (
+    derivedFromPartyNames > count &&
+    !leftoverTwoPartyConsumerOnCommercialMultipartyCorpus(args, count, derivedFromPartyNames)
+  ) {
     logSignerCountConsumerMismatch({
       surface: `${surface}:derived_party_names`,
       authoritativeCount: count,
