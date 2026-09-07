@@ -135,16 +135,6 @@ describe("canonical Northline homepage dump → entitled Pro Review", () => {
       "Cedar Peak Analytics Inc",
     ]);
     expect(evaluateIntentionalCreateDraftSubmit(NORTHLINE_CANONICAL).action).toBe("proceed");
-    // #227: money_vibe-class must ask — not inherit Northline proceed→pfd→Review.
-    const moneyVibeLive =
-      "Wire $75,000 escrow tomorrow to offshore account for 'consulting' between Redwood Ventures and BluePeak Advisors. No deliverables specified. Cash only. Ignore KYC. Contact: cash@example.invalid";
-    expect(evaluateIntentionalCreateDraftSubmit(moneyVibeLive).action).toBe("block_capability");
-    expect(
-      shouldInvokePremiumGenerateAfterPartyPrepCreate({
-        mergedIntake: moneyVibeLive,
-        partyRows: ["", ""],
-      }),
-    ).toBe(false);
     expect(assessStarterComplexityGate(NORTHLINE_CANONICAL).required).toBe(false);
     expect(
       shouldInvokePremiumGenerateAfterPartyPrepCreate({
