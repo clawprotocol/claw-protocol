@@ -16,12 +16,18 @@ import {
   CREATE_FLOW_GENERATE_FAILED_CLEAR_MESSAGE,
   isCommerciallyUsableCreateReviewCorpus,
   planPostGenerateCreateReviewSettleOrFailClosed,
+  shouldDismissCreateOverlaysAfterRejectOrGate,
   shouldFailClosedCreateAfterRejectOrGate,
   shouldInvokePremiumGenerateAfterPartyPrepCreate,
   shouldSkipPartyPrepForOrdinaryNamedTwoParty,
   shouldSettleProReviewAfterPremiumFullDraft,
   withCreatePipelineVs01CorpusGate,
 } from "./multiPartyCreateReviewSettle";
+import {
+  getLastCommerciallyUsableAuthorityCandidate,
+  guardPaidProAcceptedServerFullDraftCommit,
+  resetPremiumAuthorityShorterThanAcceptedChurn,
+} from "./paidProAcceptedServerFullDraftCommitGuard";
 import { setOrgId } from "../../launch/orgContext";
 import { setCachedAccessToken, clearCachedAccessToken } from "../../auth/authAccessTokenCache";
 import { writeCachedSubscriptionEntitlement } from "../../access/subscriptionEntitlementCache";
@@ -205,6 +211,97 @@ describe("canonical Northline homepage dump → entitled Pro Review", () => {
         tier: "free",
       }),
     ).toBe("free_starter");
+  });
+
+  it("entitled paid-shell after pfd/gate-blocked settles usable corpus; fail-closes without one", () => {
+    // Live #211 path: pfd 200 + leftover in_progress + shorter-than-accepted.
+    // Retryable source must still settle when the body is commercially usable.
+    const retryableNoAccepted = withCreatePipelineVs01CorpusGate(
+      {
+        winningPremiumBodyText: USABLE_SERVICES_CORPUS,
+        premiumRenderSource: "premium_generation_retryable" as const,
+        staleIntakeOrGeneration: false,
+      },
+      {
+        allowed: false,
+        blockReason: "premium_corpus_in_progress",
+        premiumInProgress: true,
+        premiumComplete: false,
+        corpus: USABLE_SERVICES_CORPUS,
+      },
+    );
+    const settledOnPaidShell = planPostGenerateCreateReviewSettleOrFailClosed({
+      generateComplete: true,
+      vs01GateBlockedWithoutSelectedFinal: true,
+      vs01SelectedFinal: false,
+      shorterThanAcceptedChurn: true,
+      winningPremiumBodyText: retryableNoAccepted.winningPremiumBodyText,
+      premiumRenderSource: retryableNoAccepted.premiumRenderSource,
+    });
+    expect(settledOnPaidShell.settleReview).toBe(true);
+    expect(settledOnPaidShell.failClosed).toBe(false);
+    expect(settledOnPaidShell.dismissOverlays).toBe(true);
+    expect(settledOnPaidShell.corpus).toBe(USABLE_SERVICES_CORPUS);
+    expect(
+      shouldDismissCreateOverlaysAfterRejectOrGate({
+        rejectOrGateBlocked: true,
+        corpusCommerciallyUsable: settledOnPaidShell.settleReview,
+      }),
+    ).toBe(true);
+
+    // too_much / money_vibe: no usable corpus after pfd/churn — fail-closed even
+    // before generateComplete latches (shorter-than-accepted is the live signal).
+    const emptyPlan = planPostGenerateCreateReviewSettleOrFailClosed({
+      generateComplete: false,
+      vs01GateBlockedWithoutSelectedFinal: true,
+      vs01SelectedFinal: false,
+      shorterThanAcceptedChurn: true,
+      winningPremiumBodyText: "",
+      premiumRenderSource: "premium_generation_retryable",
+    });
+    expect(emptyPlan.failClosed).toBe(true);
+    expect(emptyPlan.settleReview).toBe(false);
+    expect(emptyPlan.dismissOverlays).toBe(true);
+    expect(
+      shouldDismissCreateOverlaysAfterRejectOrGate({
+        rejectOrGateBlocked: true,
+        corpusCommerciallyUsable: false,
+      }),
+    ).toBe(true);
+
+    resetPremiumAuthorityShorterThanAcceptedChurn();
+    const guarded = guardPaidProAcceptedServerFullDraftCommit({
+      candidateText: USABLE_SERVICES_CORPUS,
+      candidateSource: "server_full_draft",
+      renderSource: "server_full_draft",
+      reason: "entitled_paid_shell_pfd",
+    });
+    expect(getLastCommerciallyUsableAuthorityCandidate()).toBe(USABLE_SERVICES_CORPUS);
+    expect(guarded.candidateLen).toBe(USABLE_SERVICES_CORPUS.length);
+    resetPremiumAuthorityShorterThanAcceptedChurn();
+  });
+
+  it("intake applies settle/fail-closed on the live entitled rewrite path after pfd", () => {
+    const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
+    const vs01AttachIdx = intake.indexOf("withCreatePipelineVs01CorpusGate(");
+    const entitledPlanIdx = intake.indexOf("const entitledPaidShellPlan = planPostGenerateCreateReviewSettleOrFailClosed(");
+    const prepareIdx = intake.indexOf("prepareCommercialReviewSnapshotAuthority({");
+    expect(vs01AttachIdx).toBeGreaterThan(-1);
+    expect(entitledPlanIdx).toBeGreaterThan(vs01AttachIdx);
+    expect(prepareIdx).toBeGreaterThan(entitledPlanIdx);
+    const planBlock = intake.slice(entitledPlanIdx, entitledPlanIdx + 2200);
+    expect(planBlock).toContain("getLastCommerciallyUsableAuthorityCandidate");
+    expect(planBlock).toContain("setPremiumPostCheckoutPhase(null)");
+    expect(planBlock).toContain("setDisplayPhase(\"review\")");
+    expect(planBlock).toContain("entitledPaidShellPlan.failClosed");
+    expect(planBlock).toContain("CREATE_FLOW_GENERATE_FAILED_CLEAR_MESSAGE");
+    expect(intake).toContain("subscribePremiumAuthorityShorterThanAcceptedChurn");
+    expect(intake).toContain("postGenerateCreateReviewSettlePlan.settleReview");
+    expect(intake).toContain("postGenerateCreateReviewSettlePlan.failClosed");
+    const overlayMount = intake.indexOf(
+      'premiumPostCheckoutPhase !== "premium_network_recoverable" && !dismissCreateOverlaysAfterRejectOrGate',
+    );
+    expect(overlayMount).toBeGreaterThan(-1);
   });
 
   it("usable Northline corpus settles Review; too_much still fail-closes", () => {

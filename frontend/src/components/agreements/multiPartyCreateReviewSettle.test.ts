@@ -313,6 +313,8 @@ describe("multi-party create → review settle or fail-closed", () => {
     expect(intake).toContain("dismissCreateOverlaysAfterRejectOrGate");
     expect(intake).toContain("resolvePostGenerateAuthorityChurnOverlayDecision");
     expect(intake).toContain("planPostGenerateCreateReviewSettleOrFailClosed");
+    expect(intake).toContain("entitledPaidShellPlan");
+    expect(intake).toContain("getLastCommerciallyUsableAuthorityCandidate");
     expect(intake).toContain("pickCreateReviewSettleCorpus");
     expect(intake).toContain("shouldRemapGenerationRetryableSalvageForCreateSettle");
     expect(intake).toContain("shouldSkipPartyPrepForOrdinaryNamedTwoParty");
@@ -336,8 +338,12 @@ describe("multi-party create → review settle or fail-closed", () => {
       'premiumPostCheckoutPhase !== "premium_network_recoverable" && !dismissCreateOverlaysAfterRejectOrGate',
     );
     const waitPanelMount = intake.indexOf("<PremiumProGenerationWaitPanel");
+    const entitledPlanIdx = intake.indexOf("const entitledPaidShellPlan = planPostGenerateCreateReviewSettleOrFailClosed(");
+    const prepareIdx = intake.indexOf("prepareCommercialReviewSnapshotAuthority({");
     expect(generatingOverlayMount).toBeGreaterThan(-1);
     expect(waitPanelMount).toBeGreaterThan(generatingOverlayMount);
+    expect(entitledPlanIdx).toBeGreaterThan(-1);
+    expect(prepareIdx).toBeGreaterThan(entitledPlanIdx);
     expect(intake).toContain("overlayDeclaredPartiesOnDraft");
     expect(intake).toContain("CREATE_FLOW_GENERATE_FAILED_CLEAR_MESSAGE");
   });
@@ -863,6 +869,18 @@ describe("multi-party create → review settle or fail-closed", () => {
     expect(plan.settleReview).toBe(true);
     expect(plan.failClosed).toBe(false);
     expect(plan.corpus).toBe(corpus);
+
+    const retryableWinningOnly = planPostGenerateCreateReviewSettleOrFailClosed({
+      generateComplete: true,
+      vs01GateBlockedWithoutSelectedFinal: true,
+      vs01SelectedFinal: false,
+      shorterThanAcceptedChurn: true,
+      winningPremiumBodyText: corpus,
+      premiumRenderSource: "premium_generation_retryable",
+    });
+    expect(retryableWinningOnly.settleReview).toBe(true);
+    expect(retryableWinningOnly.failClosed).toBe(false);
+    expect(retryableWinningOnly.corpus).toBe(corpus);
   });
 
   it("too_much / no usable corpus fail-closes and dismisses overlays", () => {
@@ -905,6 +923,16 @@ describe("multi-party create → review settle or fail-closed", () => {
     expect(plan.settleReview).toBe(false);
     expect(plan.failClosed).toBe(true);
     expect(plan.corpus).toBe("");
+    const churnBeforeGenerateLatch = planPostGenerateCreateReviewSettleOrFailClosed({
+      generateComplete: false,
+      vs01GateBlockedWithoutSelectedFinal: true,
+      vs01SelectedFinal: false,
+      shorterThanAcceptedChurn: true,
+      winningPremiumBodyText: "",
+      premiumRenderSource: "premium_generation_retryable",
+    });
+    expect(churnBeforeGenerateLatch.failClosed).toBe(true);
+    expect(churnBeforeGenerateLatch.dismissOverlays).toBe(true);
     expect(CREATE_FLOW_GENERATE_FAILED_CLEAR_MESSAGE).toMatch(/Try again/);
     expect(CREATE_FLOW_GENERATE_FAILED_CLEAR_MESSAGE).not.toMatch(/save your draft/i);
   });
