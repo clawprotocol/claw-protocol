@@ -629,7 +629,10 @@ export function shouldFailClosedGeneratingWithoutPipeline(input: {
   preparingStartedAtMs: number | null;
   nowMs: number;
   timeoutMs?: number;
+  /** Ordinary named 2p (Northline) must wait for pfd — this failsafe must not fire. */
+  ordinaryNamedTwoPartyReady?: boolean;
 }): boolean {
+  if (input.ordinaryNamedTwoPartyReady) return false;
   if (input.hasAuthoritativeReviewBody) return false;
   if (!input.isGenerating) return false;
   if (input.generatePipelineInFlight) return false;
@@ -638,6 +641,41 @@ export function shouldFailClosedGeneratingWithoutPipeline(input: {
     input.nowMs - input.preparingStartedAtMs >=
     (input.timeoutMs ?? CREATE_FLOW_GENERATING_WITHOUT_PIPELINE_FAILSAFE_MS)
   );
+}
+
+/**
+ * `premiumPostCheckoutPhase=processing` bypasses the starter generating-without-pipeline
+ * / prep failsafe: generate-path-committed looks in-flight, and the overlay is the
+ * premium modal rather than STARTER_PREPARING_OVERLAY_DISPLAY_PHASES. Apply the same
+ * 15s bound while Preparing/Generating and pfd HTTP has not completed — non
+ * ordinary-named-2p only. Northline must keep waiting for pfd.
+ *
+ * Not a planner churn rule. Do not fail-close on shorterThanAcceptedChurn alone
+ * (#218). Do not latch generate-done from churn (#215).
+ */
+export function shouldFailClosedPremiumProcessingWithoutPfd(input: {
+  ordinaryNamedTwoPartyReady?: boolean;
+  premiumPostCheckoutProcessing?: boolean;
+  preparingOrGenerating?: boolean;
+  pfdHttpCompleted?: boolean;
+  hasAuthoritativeReviewBody?: boolean;
+  preparingStartedAtMs: number | null;
+  nowMs: number;
+  timeoutMs?: number;
+}): boolean {
+  if (input.ordinaryNamedTwoPartyReady) return false;
+  if (input.pfdHttpCompleted) return false;
+  const overlayActive =
+    Boolean(input.premiumPostCheckoutProcessing) || Boolean(input.preparingOrGenerating);
+  return shouldFailClosedGeneratingWithoutPipeline({
+    isGenerating: overlayActive,
+    generatePipelineInFlight: false,
+    hasAuthoritativeReviewBody: Boolean(input.hasAuthoritativeReviewBody),
+    preparingStartedAtMs: input.preparingStartedAtMs,
+    nowMs: input.nowMs,
+    timeoutMs: input.timeoutMs,
+    ordinaryNamedTwoPartyReady: false,
+  });
 }
 
 export function shouldFailClosedInFlightPipelineWithoutCorpus(input: {

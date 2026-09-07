@@ -148,6 +148,7 @@ import {
   shouldDismissCreateOverlaysAfterRejectOrGate,
   shouldDismissHomeCreateTransitionForIntakeRecovery,
   shouldFailClosedCreateAfterRejectOrGate,
+  shouldFailClosedPremiumProcessingWithoutPfd,
   shouldInvokePremiumGenerateAfterPartyPrepCreate,
   shouldRemapGenerationRetryableSalvageForCreateSettle,
   shouldSettleProReviewAfterPremiumFullDraft,
@@ -3829,6 +3830,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const premiumGenerateCompletedRef = useRef(false);
   /** Entitled rewrite: pfd HTTP completion (not full pipeline return) is generate-done. */
   const entitledRewritePfdHttpOutcomeRef = useRef<"idle" | "http_complete" | "fail_closed">("idle");
+  /**
+   * Junk premium-processing hang: overlay start + tick so the existing 15s
+   * generating-without-pipeline failsafe can fire when pfd HTTP never completes.
+   * Named 2p must not use this timer.
+   */
+  const premiumProcessingFailsafeStartedAtRef = useRef<number | null>(null);
+  const [premiumProcessingFailsafeNowMs, setPremiumProcessingFailsafeNowMs] = useState(0);
   /** shorter-than-accepted is module-level; tick so entitled overlay plan re-renders. */
   const [premiumAuthorityChurnTick, setPremiumAuthorityChurnTick] = useState(0);
   useEffect(() => {
@@ -26645,9 +26653,39 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     corpusCommerciallyUsable: vs01GateCorpusCommerciallyUsable,
     vs01GateBlockedWithoutSelectedFinal: vs01CorpusGateBlockedWithoutSelectedFinal,
   });
+  const premiumProcessingOrPreparingOverlay =
+    premiumPostCheckoutPhase === "processing" ||
+    premiumPostCheckoutPhase === "generation_retry" ||
+    displayPhase === "preparing_review" ||
+    displayPhase === "generating_draft" ||
+    displayPhase === "hydrating_generated";
+  const premiumProcessingWithoutPfdFailClosed = shouldFailClosedPremiumProcessingWithoutPfd({
+    ordinaryNamedTwoPartyReady: ordinaryNamedTwoPartyReadyForSettle,
+    premiumPostCheckoutProcessing:
+      premiumPostCheckoutPhase === "processing" ||
+      premiumPostCheckoutPhase === "generation_retry",
+    preparingOrGenerating:
+      displayPhase === "preparing_review" ||
+      displayPhase === "generating_draft" ||
+      displayPhase === "hydrating_generated",
+    pfdHttpCompleted: premiumGenerateCompleted,
+    hasAuthoritativeReviewBody:
+      postGenerateCreateReviewSettlePlan.settleReview ||
+      Boolean(vs01FinalCorpusGate.allowed) ||
+      hasAuthoritativeCreateReviewBodyForPrepFailsafe({
+        leftoverBody: Boolean(
+          String(lastPremiumWinningCorpusRef.current || "").trim() ||
+            String(hydratedPremiumBodyRef.current || "").trim(),
+        ),
+        vs01SelectedFinal: vs01FinalCorpusGate.allowed,
+      }),
+    preparingStartedAtMs: premiumProcessingFailsafeStartedAtRef.current,
+    nowMs: premiumProcessingFailsafeNowMs || Date.now(),
+  });
   const dismissCreateOverlaysAfterRejectOrGate = shouldDismissCreateOverlaysAfterRejectOrGate({
     rejectOrGateBlocked:
       postGenerateCreateReviewSettlePlan.failClosed ||
+      premiumProcessingWithoutPfdFailClosed ||
       postGenerateAuthorityChurn.failClosed ||
       postGenerateCreateReviewSettlePlan.dismissOverlays ||
       postGenerateAuthorityChurn.dismissOverlays,
@@ -26661,8 +26699,35 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
   useEffect(() => {
     if (
+      !premiumProcessingOrPreparingOverlay ||
+      premiumGenerateCompleted ||
+      ordinaryNamedTwoPartyReadyForSettle ||
+      vs01FinalCorpusGate.allowed ||
+      postGenerateCreateReviewSettlePlan.settleReview
+    ) {
+      premiumProcessingFailsafeStartedAtRef.current = null;
+      return;
+    }
+    if (premiumProcessingFailsafeStartedAtRef.current == null) {
+      premiumProcessingFailsafeStartedAtRef.current = Date.now();
+    }
+    const id = window.setInterval(() => {
+      setPremiumProcessingFailsafeNowMs(Date.now());
+    }, 1000);
+    return () => window.clearInterval(id);
+  }, [
+    premiumProcessingOrPreparingOverlay,
+    premiumGenerateCompleted,
+    ordinaryNamedTwoPartyReadyForSettle,
+    vs01FinalCorpusGate.allowed,
+    postGenerateCreateReviewSettlePlan.settleReview,
+  ]);
+
+  useEffect(() => {
+    if (
       !postGenerateCreateReviewSettlePlan.settleReview &&
       !postGenerateCreateReviewSettlePlan.failClosed &&
+      !premiumProcessingWithoutPfdFailClosed &&
       !postGenerateAuthorityChurn.settleReview &&
       !postGenerateAuthorityChurn.failClosed &&
       !postGenerateCreateReviewSettlePlan.dismissOverlays &&
@@ -26731,20 +26796,25 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       setLoading(false);
       return;
     }
-    if (!plan.failClosed && !postGenerateAuthorityChurn.failClosed) {
+    if (
+      !plan.failClosed &&
+      !premiumProcessingWithoutPfdFailClosed &&
+      !postGenerateAuthorityChurn.failClosed
+    ) {
       return;
     }
     entitledRewritePfdHttpOutcomeRef.current = "fail_closed";
     entitledPremiumRewriteInFlightRef.current = false;
+    const failedCreateRecoveryNotes = (
+      failedCreateUserInputSnapshotRef.current ||
+      readOriginalUserIntakeRaw() ||
+      intakeCombinedRef.current ||
+      ""
+    ).trim();
     const terminal = commitEntitledRewriteGenerationFailureTerminal({
       reason: "no_server_authority",
       dashboardRoute: isDashboardPaidCreateRouteActive(),
-      intakeNotes: (
-        failedCreateUserInputSnapshotRef.current ||
-        readOriginalUserIntakeRaw() ||
-        intakeCombinedRef.current ||
-        ""
-      ).trim(),
+      intakeNotes: failedCreateRecoveryNotes,
       customMessage: CREATE_FLOW_GENERATE_FAILED_CLEAR_MESSAGE,
     });
     setProFullDraftQualityRetry(terminal.proFullDraftQualityRetry);
@@ -26757,6 +26827,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     setCreateFlowPhase(terminal.createFlowPhase);
     setDisplayPhase(terminal.displayPhase);
     setCreateUiStage(terminal.createUiStage);
+    if (failedCreateRecoveryNotes) {
+      setIntakeStepBuffer(failedCreateRecoveryNotes);
+      setDebouncedStepBuffer(failedCreateRecoveryNotes);
+    }
+    setJourneyActionFeedback(
+      feedbackFailed("create_agreement", FAILED_CREATE_RECOVERY_TITLE, feedbackAfterModelFailure(), {
+        remedyLabel: "Retry",
+      }),
+    );
     setLoading(false);
     if (terminal.clearLocalDraft) {
       setDraft(null);
@@ -26776,6 +26855,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     postGenerateCreateReviewSettlePlan.dismissOverlays,
     postGenerateCreateReviewSettlePlan.settleReview,
     postGenerateCreateReviewSettlePlan.failClosed,
+    premiumProcessingWithoutPfdFailClosed,
     ordinaryNamedTwoPartyReadyForSettle,
     premiumGenerateCompleted,
     premiumAuthorityChurnTick,
