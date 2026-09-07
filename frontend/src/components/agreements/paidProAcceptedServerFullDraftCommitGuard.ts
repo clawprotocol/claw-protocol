@@ -96,6 +96,26 @@ export function shouldAutoEstablishPaidProSourceOfTruthFromRenderPath(args: {
   return hasPaidProPipelineSessionAcceptance({ text: body, source });
 }
 
+let premiumAuthorityShorterThanAcceptedChurnCount = 0;
+
+/** Live too_much / Northline: shorter-than-accepted loops after generate. Not a second SoT. */
+export function notePremiumAuthorityShorterThanAcceptedChurn(): void {
+  premiumAuthorityShorterThanAcceptedChurnCount += 1;
+}
+
+export function hasPremiumAuthorityShorterThanAcceptedChurn(): boolean {
+  return premiumAuthorityShorterThanAcceptedChurnCount > 0;
+}
+
+export function resetPremiumAuthorityShorterThanAcceptedChurn(): void {
+  premiumAuthorityShorterThanAcceptedChurnCount = 0;
+}
+
+/** @deprecated Use resetPremiumAuthorityShorterThanAcceptedChurn */
+export function resetPremiumAuthorityShorterThanAcceptedChurnForTests(): void {
+  resetPremiumAuthorityShorterThanAcceptedChurn();
+}
+
 export function logPremiumAuthorityCandidateRejectedShorterThanAccepted(payload: {
   acceptedLen: number;
   candidateLen: number;
@@ -105,6 +125,7 @@ export function logPremiumAuthorityCandidateRejectedShorterThanAccepted(payload:
   acceptedHash: string;
   candidateHash: string;
 }): void {
+  notePremiumAuthorityShorterThanAcceptedChurn();
   if (!paidProVerboseQaLogsEnabled()) return;
   // eslint-disable-next-line no-console
   console.info("[premium-authority-candidate-rejected-shorter-than-accepted]", payload);
