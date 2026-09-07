@@ -115,7 +115,11 @@ describe("conversion checkout returnTo restore flags", () => {
         cadence: "monthly",
         persistAgreementId: CREATE_FLOW_CHECKOUT_AGREEMENT_ID,
       }),
-    ).toContain("restore=starterReview");
+    ).toBe(
+      `/app/checkout/${CREATE_FLOW_CHECKOUT_AGREEMENT_ID}?tier=pro&cadence=monthly&returnTo=${encodeURIComponent(
+        "/app/create?restore=starterReview",
+      )}`,
+    );
   });
 
   it("does not rewrite send-path returnTo on checkout dest", () => {

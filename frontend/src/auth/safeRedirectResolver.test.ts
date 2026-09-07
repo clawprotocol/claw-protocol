@@ -75,7 +75,8 @@ describe("safeRedirectResolver", () => {
       ),
     ).toEqual({
       returningSignIn: false,
-      destinationPath: "/app/checkout/__claw_create_checkout__?tier=pro&cadence=monthly",
+      destinationPath: `/app/checkout/${aid}?tier=pro&cadence=monthly`,
+      agreementId: aid,
     });
   });
 
