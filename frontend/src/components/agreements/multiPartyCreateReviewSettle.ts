@@ -4,6 +4,8 @@
  */
 
 import { shortIntakeFingerprint } from "../../lib/agreementGenerationId";
+import { evaluateIntentionalCreateDraftSubmit } from "./agreementIntakeCapabilityGate";
+import { extractListedSigningPartyNames } from "./agreementIntakeClarification";
 import {
   namedIntakeContractingParties,
   upsertLabeledPartyRows,
@@ -22,6 +24,60 @@ export function mergePartyPrepIntoCreateSubmitText(
   const named = namedIntakeContractingParties(partyRows);
   if (named.length < 2) return String(rawSubmit || "");
   return upsertLabeledPartyRows(rawSubmit, named);
+}
+
+/** How many legal names Create must have for this dump (declared 3/4, otherwise 2). */
+export function requiredCreatePartyNameCount(intakeText: string): number {
+  const declared = resolveDeclaredExplicitPartyCount(intakeText) ?? 0;
+  if (declared >= 3) return Math.min(4, declared);
+  return 2;
+}
+
+/** Named party-prep rows plus labeled / between-clause names already in the submit text. */
+export function countFilledCreatePartyNames(
+  intakeText: string,
+  partyRows: readonly string[] = [],
+): number {
+  const fromRows = namedIntakeContractingParties(partyRows).length;
+  const fromIntake = extractListedSigningPartyNames(intakeText).length;
+  return Math.max(fromRows, fromIntake);
+}
+
+/** True when party-prep rows (or merged labeled lines) satisfy the declared party count. */
+export function hasFilledPartyPrepForDeclaredCreate(
+  intakeText: string,
+  partyRows: readonly string[] = [],
+): boolean {
+  const merged = mergePartyPrepIntoCreateSubmitText(intakeText, partyRows);
+  return countFilledCreatePartyNames(merged, partyRows) >= requiredCreatePartyNameCount(merged);
+}
+
+/**
+ * Filled N≥3 (or ordinary 2-party) Create must invoke premium-full-draft / generate.
+ * Empty / invalid names stay on the capability fail-closed path.
+ */
+export function shouldInvokePremiumGenerateAfterPartyPrepCreate(input: {
+  mergedIntake: string;
+  partyRows?: readonly string[];
+}): boolean {
+  const rows = input.partyRows ?? [];
+  const merged = mergePartyPrepIntoCreateSubmitText(input.mergedIntake, rows);
+  if (evaluateIntentionalCreateDraftSubmit(merged).action !== "proceed") return false;
+  return hasFilledPartyPrepForDeclaredCreate(merged, rows);
+}
+
+export const CREATE_FLOW_PREPARATION_FAILSAFE_GENERIC_MESSAGE =
+  "We couldn't prepare the review. Try again.";
+
+/** Party-names copy only when names are truly missing — not after filled party-prep. */
+export function resolveCreateFlowPreparationFailsafeMessage(input: {
+  intakeText: string;
+  partyRows?: readonly string[];
+}): string {
+  if (hasFilledPartyPrepForDeclaredCreate(input.intakeText, input.partyRows ?? [])) {
+    return CREATE_FLOW_PREPARATION_FAILSAFE_GENERIC_MESSAGE;
+  }
+  return "We couldn't prepare the review. Add the party names and try again.";
 }
 
 /** Declared 3/4-party dumps must open that many party-prep slots (not only 2). */
@@ -57,11 +113,20 @@ export function shouldSkipEntitledRewriteForMatchingAcceptedSnapshot(input: {
   incomingIntake: string;
   snapshotIntakeFingerprint?: string | null;
   hasMatchingAcceptedAuthority: boolean;
+  /**
+   * Intentional Create after party-prep rows were filled and merged.
+   * Leftover 2-party freeze/SoT must not skip generate unless this intake already settled.
+   */
+  partyPrepCreateReady?: boolean;
 }): boolean {
   if (!input.hasMatchingAcceptedAuthority) return false;
   const incoming = String(input.incomingIntake || "").trim();
-  if (!incoming) return true;
   const snapFp = String(input.snapshotIntakeFingerprint || "").trim();
+  if (input.partyPrepCreateReady) {
+    if (!incoming || !snapFp) return false;
+    return snapFp === shortIntakeFingerprint(incoming);
+  }
+  if (!incoming) return true;
   if (!snapFp) return false;
   return snapFp === shortIntakeFingerprint(incoming);
 }

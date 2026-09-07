@@ -8,11 +8,15 @@ import { shouldFailSafeEmptyAuthorityPreparation } from "./starterMultiPartyProG
 import {
   CREATE_FLOW_GENERATING_WITHOUT_PIPELINE_FAILSAFE_MS,
   CREATE_FLOW_PIPELINE_NO_CORPUS_FAILSAFE_MS,
+  CREATE_FLOW_PREPARATION_FAILSAFE_GENERIC_MESSAGE,
+  hasFilledPartyPrepForDeclaredCreate,
   mergePartyPrepIntoCreateSubmitText,
+  resolveCreateFlowPreparationFailsafeMessage,
   resolvePartyPrepSlotCount,
   shouldDismissHomeCreateTransitionForIntakeRecovery,
   shouldFailClosedGeneratingWithoutPipeline,
   shouldFailClosedInFlightPipelineWithoutCorpus,
+  shouldInvokePremiumGenerateAfterPartyPrepCreate,
   shouldSkipEntitledRewriteForMatchingAcceptedSnapshot,
 } from "./multiPartyCreateReviewSettle";
 
@@ -169,12 +173,97 @@ describe("multi-party create → review settle or fail-closed", () => {
     ).toBe(true);
   });
 
+  it("filled N≥3 party-prep invokes generate; empty names stay fail-closed", () => {
+    const threeRows = ["Cedar Ridge LLC", "Harbor Point Inc", "Summit Mesa LP"];
+    const fourRows = ["North Wind LLC", "East Dock Inc", "South Pier LP", "West Gate Corp"];
+    expect(
+      shouldInvokePremiumGenerateAfterPartyPrepCreate({
+        mergedIntake: THREE_PARTY_DUMP,
+        partyRows: threeRows,
+      }),
+    ).toBe(true);
+    expect(
+      shouldInvokePremiumGenerateAfterPartyPrepCreate({
+        mergedIntake: FOUR_PARTY_DUMP,
+        partyRows: fourRows,
+      }),
+    ).toBe(true);
+    expect(hasFilledPartyPrepForDeclaredCreate(THREE_PARTY_DUMP, threeRows)).toBe(true);
+    expect(
+      shouldInvokePremiumGenerateAfterPartyPrepCreate({
+        mergedIntake: THREE_PARTY_DUMP,
+        partyRows: ["", "", ""],
+      }),
+    ).toBe(false);
+    expect(hasFilledPartyPrepForDeclaredCreate(THREE_PARTY_DUMP, ["", "", ""])).toBe(false);
+    expect(evaluateIntentionalCreateDraftSubmit(THREE_PARTY_DUMP).action).toBe("block_capability");
+    expect(
+      resolveCreateFlowPreparationFailsafeMessage({
+        intakeText: THREE_PARTY_DUMP,
+        partyRows: threeRows,
+      }),
+    ).toBe(CREATE_FLOW_PREPARATION_FAILSAFE_GENERIC_MESSAGE);
+    expect(
+      resolveCreateFlowPreparationFailsafeMessage({
+        intakeText: THREE_PARTY_DUMP,
+        partyRows: ["", "", ""],
+      }),
+    ).toMatch(/Add the party names/);
+  });
+
+  it("two-party named intake still invokes generate and is unchanged", () => {
+    const two =
+      "Consulting agreement between Acme LLC and Beta Corp. Payment: $5,000 per month. Term: 12 months. California law governs.";
+    expect(evaluateIntentionalCreateDraftSubmit(two).action).toBe("proceed");
+    expect(
+      shouldInvokePremiumGenerateAfterPartyPrepCreate({
+        mergedIntake: two,
+        partyRows: ["Acme LLC", "Beta Corp"],
+      }),
+    ).toBe(true);
+    expect(
+      shouldSkipEntitledRewriteForMatchingAcceptedSnapshot({
+        incomingIntake: two,
+        snapshotIntakeFingerprint: shortIntakeFingerprint(two),
+        hasMatchingAcceptedAuthority: true,
+      }),
+    ).toBe(true);
+  });
+
+  it("leftover accepted SoT does not skip generate after filled N≥3 party-prep", () => {
+    const next = mergePartyPrepIntoCreateSubmitText(THREE_PARTY_DUMP, [
+      "Cedar Ridge LLC",
+      "Harbor Point Inc",
+      "Summit Mesa LP",
+    ]);
+    expect(
+      shouldSkipEntitledRewriteForMatchingAcceptedSnapshot({
+        incomingIntake: next,
+        snapshotIntakeFingerprint: "",
+        hasMatchingAcceptedAuthority: true,
+        partyPrepCreateReady: true,
+      }),
+    ).toBe(false);
+    expect(
+      shouldSkipEntitledRewriteForMatchingAcceptedSnapshot({
+        incomingIntake: "",
+        snapshotIntakeFingerprint: "prior-two-party",
+        hasMatchingAcceptedAuthority: true,
+        partyPrepCreateReady: true,
+      }),
+    ).toBe(false);
+  });
+
   it("intake wires party-prep merge and generate-HTTP fail-closed on Create", () => {
     const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
     expect(intake).toContain("mergePartyPrepIntoCreateSubmitText");
     expect(intake).toContain("resolvePartyPrepSlotCount");
     expect(intake).toContain("shouldSkipEntitledRewriteForMatchingAcceptedSnapshot");
+    expect(intake).toContain("shouldInvokePremiumGenerateAfterPartyPrepCreate");
+    expect(intake).toContain("launchEntitledGenerateAfterFilledPartyPrep");
+    expect(intake).toContain("partyPrepCreateReady");
     expect(intake).toContain("premiumGenerateHttpStartedRef");
+    expect(intake).toContain("premiumGeneratePathCommittedRef");
     expect(intake).toContain("generatePipelineInFlight");
     expect(intake).toContain('handoffSource: "prep_failsafe_retry"');
     expect(intake).toContain("intakeClarification");

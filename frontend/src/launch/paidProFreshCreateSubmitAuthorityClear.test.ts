@@ -16,6 +16,11 @@ import {
   readPremiumCompletionSnapshot,
 } from "../components/agreements/premiumCompletionStorage";
 import { getOrInitSessionAgreementGenerationId, getSessionAgreementGenerationId } from "../lib/agreementGenerationId";
+import {
+  clearAcceptedServerFullDraftLatchAndSessionFrozenBodies,
+  getLatchedAcceptedServerFullDraftAuthority,
+  latchAcceptedServerFullDraftAuthority,
+} from "../components/agreements/premiumAcceptancePolicy";
 import { clearPriorPaidAuthorityForFreshCreateSubmit } from "./newAgreementSessionReset";
 import { buildStarterIsolationSubstantiveProCorpus } from "./starterIsolationFixtures";
 
@@ -25,12 +30,14 @@ describe("clearPriorPaidAuthorityForFreshCreateSubmit", () => {
     vi.spyOn(console, "info").mockImplementation(() => {});
     clearPaidProSourceOfTruth();
     clearPremiumCompletionSnapshot();
+    clearAcceptedServerFullDraftLatchAndSessionFrozenBodies();
   });
 
   afterEach(() => {
     vi.restoreAllMocks();
     clearPaidProSourceOfTruth();
     clearPremiumCompletionSnapshot();
+    clearAcceptedServerFullDraftLatchAndSessionFrozenBodies();
     sessionStorage.clear();
   });
 
@@ -62,6 +69,7 @@ describe("clearPriorPaidAuthorityForFreshCreateSubmit", () => {
       paidProSourceOfTruthHash: "deadbeef",
       premiumAccepted: true,
     });
+    latchAcceptedServerFullDraftAuthority(corpus, "server_full_draft", { freezeEstablished: true });
     expect(hasPaidProSourceOfTruth()).toBe(true);
     expect(readPremiumCompletionSnapshot()?.paidProSourceOfTruthText).toBeTruthy();
     const beforeGen = getSessionAgreementGenerationId();
@@ -70,6 +78,7 @@ describe("clearPriorPaidAuthorityForFreshCreateSubmit", () => {
 
     expect(hasPaidProSourceOfTruth()).toBe(false);
     expect(readPremiumCompletionSnapshot()).toBeNull();
+    expect(getLatchedAcceptedServerFullDraftAuthority()).toBeNull();
     const afterGen = getSessionAgreementGenerationId();
     expect(afterGen).toBeTruthy();
     if (beforeGen) expect(afterGen).not.toBe(beforeGen);

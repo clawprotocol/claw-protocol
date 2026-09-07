@@ -31,6 +31,7 @@ import {
   markDirectAuthenticatedCreateBootstrapAttempted,
 } from "./paidDashboardCreateContext";
 import { clearHomeAnonymousCreateOrigin } from "./homeAnonymousCreateOrigin";
+import { clearAcceptedServerFullDraftLatchAndSessionFrozenBodies } from "../components/agreements/premiumAcceptancePolicy";
 import { clearPaidProPipelineAcceptedCorpusHash } from "../components/agreements/paidProPipelineAcceptedCorpus";
 import { clearPaidProPostAcceptanceValidatorCache } from "../components/agreements/paidProPostAcceptanceValidatorCache";
 import { clearPaidProPremiumRecipientHandoffReadGate } from "../components/agreements/paidProPremiumRecipientHandoffReadGate";
@@ -147,6 +148,8 @@ export function clearStalePaidProAuthorityForFreshFreeStarter(opts?: {
   clearPersistedGuidedSession();
   clearPaidProPipelineAcceptedCorpusHash();
   clearPaidProPostAcceptanceValidatorCache();
+  // Leftover 2-party FREEZE-PASS latch must not skip the next N-party generate.
+  clearAcceptedServerFullDraftLatchAndSessionFrozenBodies();
 }
 
 /**

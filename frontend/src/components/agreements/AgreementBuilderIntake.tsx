@@ -133,8 +133,11 @@ import {
   type StarterComplexityGateAssessment,
 } from "./starterMultiPartyProGate";
 import {
+  hasFilledPartyPrepForDeclaredCreate,
   mergePartyPrepIntoCreateSubmitText,
+  resolveCreateFlowPreparationFailsafeMessage,
   resolvePartyPrepSlotCount,
+  shouldInvokePremiumGenerateAfterPartyPrepCreate,
   shouldSkipEntitledRewriteForMatchingAcceptedSnapshot,
 } from "./multiPartyCreateReviewSettle";
 import { StarterMultiPartyProGatePanel } from "./StarterMultiPartyProGatePanel";
@@ -3794,6 +3797,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const entitledPremiumRewriteInFlightRef = useRef(false);
   /** True only after entitled rewrite / model pass has invoked generate HTTP. */
   const premiumGenerateHttpStartedRef = useRef(false);
+  /** True once Create committed to entitled generate (before parse/mint), so the 15s no-HTTP failsafe does not false-close filled party-prep. */
+  const premiumGeneratePathCommittedRef = useRef(false);
   const paidCreateFlowAutoRewriteGenRef = useRef<string | null>(null);
   const premiumCheckoutRunGenRef = useRef(0);
   /** True while ~30s soft progress copy is shown (does not fail open or touch recovery flags). */
@@ -7145,6 +7150,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const runEntitledPremiumImprovementRewrite = React.useCallback(async (launch?: {
     gateDraft?: ParsedDraftShape;
     rawIntake?: string;
+    partyRows?: readonly string[];
   }) => {
     // Canonical paid Pro review after pipeline success: planFinalizeCanonicalPaidProPipelineSuccess
     // then enterCanonicalPaidProReviewFlow (same contract as post_checkout_apply_success).
@@ -7153,12 +7159,17 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     // Reload race: in-memory SoT is empty until hydrate; never re-generate over an accepted snap.
     const acceptedSnap = readPremiumCompletionSnapshot();
     const validatedPaint = resolveValidatedPaidProReviewCorpus();
-    const rewriteIncomingIntake = (
+    const rewriteIncomingIntake = mergePartyPrepIntoCreateSubmitText(
       launch?.rawIntake ||
-      readOriginalUserIntakeRaw() ||
-      intakeCombinedRef.current ||
-      ""
+        readOriginalUserIntakeRaw() ||
+        intakeCombinedRef.current ||
+        "",
+      launch?.partyRows ?? intakePartyEditorRows,
     ).trim();
+    const partyPrepCreateReady = hasFilledPartyPrepForDeclaredCreate(
+      rewriteIncomingIntake,
+      launch?.partyRows ?? intakePartyEditorRows,
+    );
     const skipForMatchingAccepted = shouldSkipEntitledRewriteForMatchingAcceptedSnapshot({
       incomingIntake: rewriteIncomingIntake,
       snapshotIntakeFingerprint: acceptedSnap?.intakeTextFingerprint,
@@ -7167,6 +7178,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         hasAcceptedPaidCreateFlowFreezeLatch() ||
         validatedPaint.len >= 500 ||
         shouldBlockEntitledRewriteForAcceptedPaidProSnapshot(acceptedSnap),
+      partyPrepCreateReady,
     });
     if (skipForMatchingAccepted) {
       // Never hydrate review-ready state from local storage alone — layout reload
@@ -7181,6 +7193,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       });
       return;
     }
+    premiumGeneratePathCommittedRef.current = true;
     if (
       rewriteIncomingIntake &&
       (hasPaidProSourceOfTruth() ||
@@ -7206,7 +7219,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       draftSnapshot: draftSnapshotRef.current,
       draftState: draft,
       resumeDraft: readCreateComplexityResume()?.pending ?? null,
-      rawIntakeOverride: launch?.rawIntake ?? null,
+      rawIntakeOverride: rewriteIncomingIntake || launch?.rawIntake || null,
       resolveRawIntake: (d) => resolveRawIntakeForPremiumCheckout(d),
     });
     if (!launchCtx.ok) {
@@ -8108,6 +8121,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       setLoading(false);
     } finally {
       entitledPremiumRewriteInFlightRef.current = false;
+      premiumGeneratePathCommittedRef.current = false;
       setPremiumAuthoritativeRequestInFlight(false);
       // Never leave the generate wait modal armed after entitled rewrite exits.
       setPremiumPostCheckoutPhase((prev) =>
@@ -8126,6 +8140,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     enterCanonicalPaidProReviewFlow,
     ensureReviewAgreementWorkspaceId,
     setPremiumAuthoritativeRequestInFlight,
+    intakePartyEditorRows,
   ]);
 
   useLayoutEffect(() => {
@@ -11891,6 +11906,46 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     setJourneyActionFeedback(feedbackCreatingAgreement());
   }, []);
 
+  /** Filled N≥3 party-prep Create must start entitled generate now — do not wait for parse or leftover SoT. */
+  const launchEntitledGenerateAfterFilledPartyPrep = React.useCallback(
+    (raw: string): boolean => {
+      const entitled = Boolean(
+        planReturningPaidCreateSubmitBootstrap({
+          tier,
+          workspaceProEntitled:
+            workspaceProEntitled || resolveProvisionalWorkspaceProEntitledForCreate(),
+          premiumPersistedFlowActive,
+          premiumSendPathUnlocked,
+        }),
+      );
+      if (!entitled) return false;
+      const merged = mergePartyPrepIntoCreateSubmitText(raw, intakePartyEditorRows);
+      if (
+        !shouldInvokePremiumGenerateAfterPartyPrepCreate({
+          mergedIntake: merged,
+          partyRows: intakePartyEditorRows,
+        })
+      ) {
+        return false;
+      }
+      premiumGeneratePathCommittedRef.current = true;
+      void runEntitledPremiumImprovementRewrite({
+        gateDraft: buildStarterProCheckoutPendingDraft(merged),
+        rawIntake: merged,
+        partyRows: intakePartyEditorRows,
+      });
+      return true;
+    },
+    [
+      intakePartyEditorRows,
+      runEntitledPremiumImprovementRewrite,
+      tier,
+      workspaceProEntitled,
+      premiumPersistedFlowActive,
+      premiumSendPathUnlocked,
+    ],
+  );
+
   const beginStarterDraftGeneration = React.useCallback(() => {
     clearFailedCreateRecoveryLatch();
     if (
@@ -12145,8 +12200,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         return true;
       }
     }
+    const parseSubmitText = (opts?.rawOverride ?? intakeCombined).trim();
+    const partyPrepGenerateReady = shouldInvokePremiumGenerateAfterPartyPrepCreate({
+      mergedIntake: parseSubmitText,
+      partyRows: intakePartyEditorRows,
+    });
     if (
       !fromHomeHandoff &&
+      !partyPrepGenerateReady &&
       shouldBlockStarterRegenerationAfterPaidAuthority({
         draft: draft ?? null,
         intakeText: currentPremiumMergedIntakeKey || intakeCombined,
@@ -12313,6 +12374,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         void runEntitledPremiumImprovementRewrite({
           gateDraft: launchDraft,
           rawIntake: rawIntake,
+          partyRows: intakePartyEditorRows,
         });
         return true;
       }
@@ -12371,6 +12433,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     runEntitledPremiumImprovementRewrite,
     premiumSendPathUnlocked,
     premiumPersistedFlowActive,
+    intakePartyEditorRows,
   ]);
 
   useLayoutEffect(() => {
@@ -13966,8 +14029,28 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     console.log("[AgreementIntake] generate: submit clicked");
     setLoading(true);
     setHardError(null);
-    const rawIntake = intakeCombined.trim();
+    const rawIntake = mergePartyPrepIntoCreateSubmitText(
+      intakeCombined.trim(),
+      intakePartyEditorRows,
+    );
     await resolvePaidCreateSubmitEntitlement();
+    if (
+      planReturningPaidCreateSubmitBootstrap({
+        tier,
+        workspaceProEntitled:
+          workspaceProEntitled || resolveProvisionalWorkspaceProEntitledForCreate(),
+        premiumPersistedFlowActive,
+        premiumSendPathUnlocked,
+      }) &&
+      shouldInvokePremiumGenerateAfterPartyPrepCreate({
+        mergedIntake: rawIntake,
+        partyRows: intakePartyEditorRows,
+      })
+    ) {
+      beginReturningPaidProCreateGeneration();
+      launchEntitledGenerateAfterFilledPartyPrep(rawIntake);
+      return;
+    }
     if (
       (createProductionTwoPane || (simpleProductFlow && liveWorkspaceTwoPane)) &&
       commitStarterMultiPartyProGate(rawIntake)
@@ -14534,7 +14617,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       displayPhase,
     );
     const generatePipelineInFlight =
-      premiumAuthoritativeRequestInFlightUi || premiumGenerateHttpStartedRef.current;
+      premiumAuthoritativeRequestInFlightUi ||
+      premiumGenerateHttpStartedRef.current ||
+      premiumGeneratePathCommittedRef.current;
     // Keep the timer running while generating if generate HTTP never started (N≥3 hang).
     if (!overlayActive || (draft && !isGenerating && !generatePipelineInFlight)) {
       prepOverlayStartedAtRef.current = null;
@@ -14550,7 +14635,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           String(hydratedPremiumBodyRef.current || "").trim(),
       );
       const pipelineInFlight =
-        premiumAuthoritativeRequestInFlightRef.current || premiumGenerateHttpStartedRef.current;
+        premiumAuthoritativeRequestInFlightRef.current ||
+        premiumGenerateHttpStartedRef.current ||
+        premiumGeneratePathCommittedRef.current;
       if (
         !shouldFailSafeEmptyAuthorityPreparation({
           displayPhase,
@@ -32456,6 +32543,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                 max_step_reached: funnelMaxStepRef.current,
                 production_phase: "local_draft_parse",
               });
+              launchEntitledGenerateAfterFilledPartyPrep(guidedPrep.text);
               await runProductionLocalDraftParse({
                 rawOverride: guidedPrep.text,
                 handoffSource: "guided_input_generate",
@@ -32504,6 +32592,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                 });
                 if (returningPaidBootstrap) {
                   beginReturningPaidProCreateGeneration();
+                  launchEntitledGenerateAfterFilledPartyPrep(rawSubmitted);
                 } else {
                   beginStarterDraftGeneration();
                 }
@@ -32773,6 +32862,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             max_step_reached: funnelMaxStepRef.current,
             production_phase: "local_draft_parse",
           });
+          launchEntitledGenerateAfterFilledPartyPrep(guidedPrep.text);
           await runProductionLocalDraftParse({
             rawOverride: guidedPrep.text,
             handoffSource: "guided_input_generate",
@@ -38314,7 +38404,20 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           role="alert"
           data-testid="create-flow-prep-failsafe"
         >
-          <p className="text-sm font-medium text-amber-100">{CREATE_FLOW_PREPARATION_FAILSAFE_MESSAGE}</p>
+          <p className="text-sm font-medium text-amber-100">
+            {(() => {
+              const failsafeIntake = mergePartyPrepIntoCreateSubmitText(
+                intakeCombined.trim(),
+                intakePartyEditorRows,
+              );
+              return hasFilledPartyPrepForDeclaredCreate(failsafeIntake, intakePartyEditorRows)
+                ? resolveCreateFlowPreparationFailsafeMessage({
+                    intakeText: failsafeIntake,
+                    partyRows: intakePartyEditorRows,
+                  })
+                : CREATE_FLOW_PREPARATION_FAILSAFE_MESSAGE;
+            })()}
+          </p>
           <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:justify-center">
             <button
               type="button"
@@ -38339,10 +38442,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                   intakePartyEditorRows,
                 );
                 if (commitStarterMultiPartyProGate(raw)) return;
-                void runProductionLocalDraftParse({
-                  rawOverride: raw,
-                  handoffSource: "prep_failsafe_retry",
-                });
+                beginReturningPaidProCreateGeneration();
+                if (!launchEntitledGenerateAfterFilledPartyPrep(raw)) {
+                  void runProductionLocalDraftParse({
+                    rawOverride: raw,
+                    handoffSource: "prep_failsafe_retry",
+                  });
+                }
               }}
             >
               {CREATE_FLOW_PREPARATION_FAILSAFE_RETRY_LABEL}
