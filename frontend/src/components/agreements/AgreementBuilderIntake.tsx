@@ -38405,13 +38405,18 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           data-testid="create-flow-prep-failsafe"
         >
           <p className="text-sm font-medium text-amber-100">
-            {resolveCreateFlowPreparationFailsafeMessage({
-              intakeText: mergePartyPrepIntoCreateSubmitText(
+            {(() => {
+              const failsafeIntake = mergePartyPrepIntoCreateSubmitText(
                 intakeCombined.trim(),
                 intakePartyEditorRows,
-              ),
-              partyRows: intakePartyEditorRows,
-            })}
+              );
+              return hasFilledPartyPrepForDeclaredCreate(failsafeIntake, intakePartyEditorRows)
+                ? resolveCreateFlowPreparationFailsafeMessage({
+                    intakeText: failsafeIntake,
+                    partyRows: intakePartyEditorRows,
+                  })
+                : CREATE_FLOW_PREPARATION_FAILSAFE_MESSAGE;
+            })()}
           </p>
           <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:justify-center">
             <button
