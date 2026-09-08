@@ -14,11 +14,17 @@
  * first fetch died after OPTIONS. Single-flight owner never steals a live
  * OPTIONS/POST. Two sequential dumps both POST; cold-start first dump still POSTs.
  *
+ * #232 — tip 88ccb982 / index-C9gAXKv6.js run1 still OPTIONS-only after #231:
+ * `[CLAW] premium request start` ×1, `[CLAW] premium response` ×0, pfd OPTIONS
+ * 204 and no POST (~62s failsafe). Cold-start Bearer hydrate + one same-flight
+ * retry; never steal a live owner.
+ *
  * Oscillation (same entitled Pro Northline canonical dump, auth_ok, storage cleared):
  * | Tip | run1 | run2 |
  * | e8228a7f (#228≡#226) | FAIL OPTIONS-only | PASS pfd 200 |
  * | ffdb420e (#229) | PASS pfd 200 | FAIL OPTIONS-only |
  * | 80f9b93f (#230) | FAIL OPTIONS-only | PASS pfd 200 |
+ * | 88ccb982 (#231) | FAIL OPTIONS-only | PASS pfd 200 |
  *
  * The compiler `duplicate_payload_rejected` log is a local-preview scan, not the
  * generate-invoke gate. The gate is `recordPremiumFullDraftCall` /
@@ -419,6 +425,18 @@ describe("Northline generate-invoke duplicate payload (#229)", () => {
     const api = readFileSync(join(__dirname, "premiumFullDraftApi.ts"), "utf8");
     expect(api).toContain("markEntitledPremiumRewriteHttpStarted");
     expect(api.indexOf("markEntitledPremiumRewriteHttpStarted()")).toBeLessThan(api.indexOf("res = await fetch(requestUrl"));
+    expect(api).toContain("ensureCachedAccessToken");
+    expect(api).toContain("hydratePremiumFullDraftAccessToken");
+    expect(api).toContain("isPremiumFullDraftPreResponseRetryable");
+    expect(api.indexOf("await hydratePremiumFullDraftAccessToken()")).toBeLessThan(
+      api.indexOf("markEntitledPremiumRewriteHttpStarted()"),
+    );
+    const onceIdx = api.indexOf("export async function postPremiumFullDraftOnce");
+    const onceBody = api.slice(onceIdx, onceIdx + 6500);
+    expect(onceBody.indexOf("isPremiumFullDraftPreResponseRetryable")).toBeGreaterThan(-1);
+    expect(onceBody.indexOf("isPremiumFullDraftPreResponseRetryable")).toBeLessThan(
+      onceBody.indexOf("releasePremiumFullDraftCallIfHttpNeverFired"),
+    );
     const bump = readFileSync(join(__dirname, "paidProSessionEligibility.ts"), "utf8");
     expect(bump).toContain("clearPremiumGenerateLedgerPreservingLiveFlight");
     expect(bump).not.toContain("clearPremiumGenerationCallAudit()");

@@ -1,5 +1,5 @@
 import { clawAgreementHeaders } from "../../agreement/agreementOrgHeaders";
-import { refreshCachedAccessToken } from "../../auth/authAccessTokenCache";
+import { ensureCachedAccessToken, refreshCachedAccessToken } from "../../auth/authAccessTokenCache";
 import { shortIntakeFingerprint } from "../../lib/agreementGenerationId";
 import { apiUrl, isLawDogApiCrossOrigin } from "../../lib/clawApi";
 import { waitForBrowserOnline } from "./premiumBackendHealth";
@@ -388,6 +388,40 @@ export function isPremiumFullDraftCorsBlocked(error: unknown): boolean {
   if (error == null) return false;
   if (isPremiumFullDraftExplicitNetworkSignal(error)) return false;
   return isPremiumFullDraftExplicitCorsEvidence(error);
+}
+
+/**
+ * #232 — AbortError / Failed to fetch before a Response is same-flight retryable.
+ * Caller abort and explicit CORS stay fail-fast (do not start a second pipeline).
+ */
+export function isPremiumFullDraftPreResponseRetryable(
+  error: unknown,
+  signal?: AbortSignal,
+): boolean {
+  if (signal?.aborted) return false;
+  if (isPremiumFullDraftCorsBlocked(error)) return false;
+  const name = String((error as { name?: unknown } | null)?.name ?? "");
+  const msg = error instanceof Error ? error.message : String(error ?? "");
+  // jsdom DOMException is not always `instanceof Error`; still retry once so
+  // OPTIONS-only / aborted preflight can POST (tip 88ccb982 run1).
+  if (name === "AbortError" || /operation was aborted/i.test(msg)) return true;
+  return isPremiumFullDraftNetworkFailure(error);
+}
+
+/** Force Bearer from the hydrated token — do not depend on org prefix or sync cache. */
+export function buildPremiumFullDraftRequestHeaders(accessToken: string): HeadersInit {
+  const token = (accessToken || "").trim();
+  return clawAgreementHeaders({
+    "Content-Type": "application/json",
+    ...(paidProPerfTraceEnabled() ? { "X-Claw-Paid-Pro-Perf-Trace": "1" } : {}),
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  });
+}
+
+async function hydratePremiumFullDraftAccessToken(): Promise<string> {
+  let token = (await ensureCachedAccessToken()).trim();
+  if (!token) token = (await refreshCachedAccessToken()).trim();
+  return token;
 }
 
 export function logPremiumFullDraftAttemptStart(args: {
@@ -782,42 +816,67 @@ export async function postPremiumFullDraftOnce(args: {
   const fetchStartedAt = typeof performance !== "undefined" ? performance.now() : Date.now();
   // CRS / VS01 OPTIONS-only hole: attach a hydrated Bearer before preflight so the
   // browser sends POST after OPTIONS. Stale/empty cache produced OPTIONS with no POST.
-  await refreshCachedAccessToken();
+  // #232 — ensure (refresh + one empty retry) and force Authorization on the request
+  // so cold-start / local-org after storage clear still POSTs after OPTIONS.
+  let accessToken = await hydratePremiumFullDraftAccessToken();
   // Arm the single-flight HTTP bit before fetch() so a remount / new-gen steal
   // cannot treat OPTIONS-in-flight as never-fired and start a second pipeline.
   markEntitledPremiumRewriteHttpStarted();
+  const requestBody = JSON.stringify({
+    intake_text: args.intakeText,
+    context: args.context,
+    ...(uga ? { user_gap_answers: uga } : {}),
+    ...(args.similarityRegeneration ? { similarity_regeneration: true } : {}),
+    ...((args.agreementGenerationId || "").trim()
+      ? { agreement_generation_id: (args.agreementGenerationId || "").trim() }
+      : {}),
+    ...((args.intakeFingerprint || "").trim()
+      ? { intake_fingerprint: (args.intakeFingerprint || "").trim() }
+      : {}),
+    ...((args.agreementId || "").trim() ? { agreement_id: (args.agreementId || "").trim() } : {}),
+    ...(args.networkCallReason ? { network_call_reason: args.networkCallReason } : {}),
+  });
   let res: Response;
   try {
     res = await fetch(requestUrl, {
       method: "POST",
-      headers: clawAgreementHeaders({
-        "Content-Type": "application/json",
-        ...(paidProPerfTraceEnabled() ? { "X-Claw-Paid-Pro-Perf-Trace": "1" } : {}),
-      }),
-      body: JSON.stringify({
-        intake_text: args.intakeText,
-        context: args.context,
-        ...(uga ? { user_gap_answers: uga } : {}),
-        ...(args.similarityRegeneration ? { similarity_regeneration: true } : {}),
-        ...((args.agreementGenerationId || "").trim()
-          ? { agreement_generation_id: (args.agreementGenerationId || "").trim() }
-          : {}),
-        ...((args.intakeFingerprint || "").trim()
-          ? { intake_fingerprint: (args.intakeFingerprint || "").trim() }
-          : {}),
-        ...((args.agreementId || "").trim() ? { agreement_id: (args.agreementId || "").trim() } : {}),
-        ...(args.networkCallReason ? { network_call_reason: args.networkCallReason } : {}),
-      }),
+      headers: buildPremiumFullDraftRequestHeaders(accessToken),
+      body: requestBody,
       signal: args.signal,
     });
   } catch (fetchErr) {
-    // OPTIONS-only / aborted fetch never POSTed — drop the invoke latch so a
-    // remount or retry can send the legitimate first Northline generate.
-    releasePremiumFullDraftCallIfHttpNeverFired({
-      agreementGenerationId: args.agreementGenerationId,
-      intakeFingerprint: args.intakeFingerprint,
-    });
-    throw fetchErr;
+    // Same-flight retry: re-hydrate Bearer and POST again. Do not tryBegin a
+    // second owner — #231 never-steal; httpStarted stays latched.
+    if (!isPremiumFullDraftPreResponseRetryable(fetchErr, args.signal)) {
+      releasePremiumFullDraftCallIfHttpNeverFired({
+        agreementGenerationId: args.agreementGenerationId,
+        intakeFingerprint: args.intakeFingerprint,
+      });
+      throw fetchErr;
+    }
+    accessToken = (await ensureCachedAccessToken()) || accessToken;
+    if (import.meta.env.MODE !== "test" && paidProVerboseDetailLogsEnabled()) {
+      // eslint-disable-next-line no-console
+      console.info("[CLAW] premium pre-response retry", {
+        intake_fingerprint: shortIntakeFingerprint(args.intakeText),
+        network_call_reason: args.networkCallReason ?? "unknown",
+        had_bearer: Boolean(accessToken),
+      });
+    }
+    try {
+      res = await fetch(requestUrl, {
+        method: "POST",
+        headers: buildPremiumFullDraftRequestHeaders(accessToken),
+        body: requestBody,
+        signal: args.signal,
+      });
+    } catch (retryErr) {
+      releasePremiumFullDraftCallIfHttpNeverFired({
+        agreementGenerationId: args.agreementGenerationId,
+        intakeFingerprint: args.intakeFingerprint,
+      });
+      throw retryErr;
+    }
   }
   markPremiumFullDraftHttpFired({
     agreementGenerationId: args.agreementGenerationId,

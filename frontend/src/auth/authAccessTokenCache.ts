@@ -29,3 +29,15 @@ export async function refreshCachedAccessToken(): Promise<string> {
     return getCachedAccessToken();
   }
 }
+
+/**
+ * Token-on-request guarantee after storage clear / cold auth.
+ * First `getSession()` can be empty while AuthProvider is still hydrating;
+ * retry once so entitled pfd does not preflight without a Bearer.
+ */
+export async function ensureCachedAccessToken(): Promise<string> {
+  const first = (await refreshCachedAccessToken()).trim();
+  if (first) return first;
+  const second = (await refreshCachedAccessToken()).trim();
+  return second || getCachedAccessToken().trim();
+}

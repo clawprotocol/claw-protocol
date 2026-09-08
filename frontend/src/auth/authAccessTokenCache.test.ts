@@ -7,6 +7,7 @@ vi.mock("./supabaseAuthService", () => ({
 import { getAuthSession } from "./supabaseAuthService";
 import {
   clearCachedAccessToken,
+  ensureCachedAccessToken,
   getCachedAccessToken,
   refreshCachedAccessToken,
   setCachedAccessToken,
@@ -34,5 +35,34 @@ describe("refreshCachedAccessToken", () => {
 
     await expect(refreshCachedAccessToken()).resolves.toBe("fresh-access-token");
     expect(getCachedAccessToken()).toBe("fresh-access-token");
+  });
+});
+
+describe("ensureCachedAccessToken", () => {
+  afterEach(() => {
+    clearCachedAccessToken();
+    vi.restoreAllMocks();
+  });
+
+  it("retries getAuthSession once when the first cold-start read is empty", async () => {
+    clearCachedAccessToken();
+    vi.mocked(getAuthSession)
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({
+        access_token: "hydrated-on-second-read",
+      } as never);
+
+    await expect(ensureCachedAccessToken()).resolves.toBe("hydrated-on-second-read");
+    expect(getCachedAccessToken()).toBe("hydrated-on-second-read");
+    expect(getAuthSession).toHaveBeenCalledTimes(2);
+  });
+
+  it("returns the first hydrated token without a second session read", async () => {
+    vi.mocked(getAuthSession).mockResolvedValue({
+      access_token: "already-ready-token",
+    } as never);
+
+    await expect(ensureCachedAccessToken()).resolves.toBe("already-ready-token");
+    expect(getAuthSession).toHaveBeenCalledTimes(1);
   });
 });

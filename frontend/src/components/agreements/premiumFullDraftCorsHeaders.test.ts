@@ -30,18 +30,22 @@ describe("premium-full-draft CORS header contract", () => {
   it("backend allow-list includes every x-claw header sent by premiumFullDraftApi", () => {
     expect(premiumFullDraftApiSrc).toContain("clawAgreementHeaders");
     expect(premiumFullDraftApiSrc).toContain("refreshCachedAccessToken");
+    expect(premiumFullDraftApiSrc).toContain("ensureCachedAccessToken");
+    expect(premiumFullDraftApiSrc).toContain("hydratePremiumFullDraftAccessToken");
+    expect(premiumFullDraftApiSrc).toContain("buildPremiumFullDraftRequestHeaders");
     const onceIdx = premiumFullDraftApiSrc.indexOf("export async function postPremiumFullDraftOnce");
-    const onceBody = premiumFullDraftApiSrc.slice(onceIdx, onceIdx + 4200);
-    expect(onceBody.indexOf("await refreshCachedAccessToken()")).toBeGreaterThan(-1);
-    expect(onceBody.indexOf("await refreshCachedAccessToken()")).toBeLessThan(
-      onceBody.indexOf("headers: clawAgreementHeaders"),
+    const onceBody = premiumFullDraftApiSrc.slice(onceIdx, onceIdx + 6500);
+    expect(onceBody.indexOf("await hydratePremiumFullDraftAccessToken()")).toBeGreaterThan(-1);
+    expect(onceBody.indexOf("await hydratePremiumFullDraftAccessToken()")).toBeLessThan(
+      onceBody.indexOf("headers: buildPremiumFullDraftRequestHeaders"),
     );
     expect(onceBody.indexOf("markEntitledPremiumRewriteHttpStarted()")).toBeGreaterThan(
-      onceBody.indexOf("await refreshCachedAccessToken()"),
+      onceBody.indexOf("await hydratePremiumFullDraftAccessToken()"),
     );
     expect(onceBody.indexOf("markEntitledPremiumRewriteHttpStarted()")).toBeLessThan(
       onceBody.indexOf("res = await fetch(requestUrl"),
     );
+    expect(onceBody.indexOf("isPremiumFullDraftPreResponseRetryable")).toBeGreaterThan(-1);
     expect(premiumFullDraftApiSrc).toContain("X-Claw-Paid-Pro-Perf-Trace");
     expect(corsPolicySrc).toContain("X-Claw-Paid-Pro-Perf-Trace");
     expect(corsPolicySrc).toContain("X-Claw-Org-Id");
