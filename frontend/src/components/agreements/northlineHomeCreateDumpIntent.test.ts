@@ -141,7 +141,7 @@ describe("Northline homepage dump intent (OPTIONS-only remount)", () => {
       intakeText: NORTHLINE,
       context: minimalContext,
       signal: remountAbort.signal,
-      networkCallReason: "entitled_rewrite",
+      networkCallReason: "unknown",
     });
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -185,7 +185,7 @@ describe("Northline homepage dump intent (OPTIONS-only remount)", () => {
     const result = await postPremiumFullDraftOnce({
       intakeText: NORTHLINE,
       context: minimalContext,
-      networkCallReason: "entitled_rewrite",
+      networkCallReason: "unknown",
     });
     expect(result.document_text.length).toBeGreaterThanOrEqual(500);
     expect(calls).toBe(2);
@@ -256,7 +256,7 @@ describe("Northline homepage dump intent (OPTIONS-only remount)", () => {
     await postPremiumFullDraftOnce({
       intakeText: NORTHLINE,
       context: minimalContext,
-      networkCallReason: "entitled_rewrite",
+      networkCallReason: "unknown",
     });
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
@@ -286,7 +286,7 @@ describe("Northline homepage dump intent (OPTIONS-only remount)", () => {
     await postPremiumFullDraftOnce({
       intakeText: NORTHLINE,
       context: minimalContext,
-      networkCallReason: "entitled_rewrite",
+      networkCallReason: "unknown",
     });
 
     expect(getSession).toHaveBeenCalled();

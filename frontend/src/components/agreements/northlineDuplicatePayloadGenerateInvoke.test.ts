@@ -411,7 +411,7 @@ describe("Northline generate-invoke duplicate payload (#229)", () => {
     expect(intake).toContain("releasePremiumGenerateInvokeForNewGeneration");
     expect(intake).toContain("tryBeginEntitledPremiumRewriteProcessInFlight");
     expect(intake).toContain("never stolen on a new gen id");
-    expect(intake).toContain("shouldSkipSecondHomeCreateSubmit");
+    expect(intake).toContain("shouldJoinHomeCreateDumpSubmit");
     expect(intake).toContain("markHomeCreateDumpParseStarted");
     const audit = readFileSync(join(__dirname, "paidProPremiumGenerationCallAudit.ts"), "utf8");
     expect(audit).toContain("if (entitledPfdFlight) return false");
