@@ -32,7 +32,6 @@ import {
 } from "./pricingContent";
 import { LawdogBrand } from "../components/ui/LawdogBrand";
 import { PricingGuaranteePanel } from "./LaunchOfferBlocks";
-import { shortIntakeFingerprint } from "../lib/agreementGenerationId";
 import { logProductEvent } from "../lib/experimentation/productEvents";
 import { markLawdogFunnelStep } from "../tracking/lawdogSession";
 import { clearPaidDashboardCreateContext } from "./paidDashboardCreateContext";
@@ -56,7 +55,6 @@ import { ReEngagementBanner } from "./ReEngagementBanner";
 import { peekCreateOrHomeBanner, type CreateOrHomeBanner } from "./reEngagementStore";
 import { useInputConfidenceHint } from "./useInputConfidenceHint";
 import { HOME_EXAMPLE_PROMPTS, logHomeExampleSelected } from "./homeExamplePrompts";
-import { tryBeginHomeCreateDumpIntent } from "./homeCreateDumpIntent";
 import { logHomeCreateSubmit, meetsHomeDraftSubmitThreshold } from "./homeCreateSubmit";
 import { HomeCreateTransitionOverlay } from "./simpleProduct/HomeCreateTransitionOverlay";
 import {
@@ -198,7 +196,6 @@ export function LaunchHomePage() {
       logHomeAnonymousCreateOrigin({ action: "mark", reason: "home_create_submit" });
       setLawdogEntryContext("drafting");
       logHomeCreateSubmit(merged);
-      tryBeginHomeCreateDumpIntent({ fingerprint: shortIntakeFingerprint(merged) });
       stashHeroIntakePrefill(merged, { fromHomeSubmit: true, autoGenerate: true });
       navigate("/app/create", {
         heroIntake: merged,

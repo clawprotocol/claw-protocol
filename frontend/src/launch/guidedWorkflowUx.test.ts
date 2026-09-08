@@ -107,8 +107,6 @@ describe("SimpleCreatePage home transition (static)", () => {
 
   it("continues concierge overlay through auto-generate", () => {
     expect(page).toContain("HomeCreateTransitionOverlay");
-    expect(page).toContain("shouldKeepCreateEditorMountedForDump");
-    expect(page).toContain("keepEditorMounted: keepEditorMountedForDump");
     expect(page).toContain("onHomeGuidedTransitionPhase");
     expect(page).toContain("homeTransitionVisible");
   });

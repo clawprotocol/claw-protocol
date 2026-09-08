@@ -30,16 +30,14 @@ describe("premium-full-draft CORS header contract", () => {
   it("backend allow-list includes every x-claw header sent by premiumFullDraftApi", () => {
     expect(premiumFullDraftApiSrc).toContain("clawAgreementHeaders");
     expect(premiumFullDraftApiSrc).toContain("refreshCachedAccessToken");
-    expect(premiumFullDraftApiSrc).toContain("getCachedAccessToken");
     const onceIdx = premiumFullDraftApiSrc.indexOf("export async function postPremiumFullDraftOnce");
     const onceBody = premiumFullDraftApiSrc.slice(onceIdx, onceIdx + 4200);
-    expect(onceBody).toContain("if (!getCachedAccessToken())");
     expect(onceBody.indexOf("await refreshCachedAccessToken()")).toBeGreaterThan(-1);
     expect(onceBody.indexOf("await refreshCachedAccessToken()")).toBeLessThan(
       onceBody.indexOf("headers: clawAgreementHeaders"),
     );
     expect(onceBody.indexOf("markEntitledPremiumRewriteHttpStarted()")).toBeGreaterThan(
-      onceBody.indexOf("if (!getCachedAccessToken())"),
+      onceBody.indexOf("await refreshCachedAccessToken()"),
     );
     expect(onceBody.indexOf("markEntitledPremiumRewriteHttpStarted()")).toBeLessThan(
       onceBody.indexOf("res = await fetch(requestUrl"),

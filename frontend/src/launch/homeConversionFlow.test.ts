@@ -63,7 +63,6 @@ describe("LaunchHomePage routing (static)", () => {
   it("submits with text using heroAutoGenerate handoff", () => {
     expect(page).toContain("heroAutoGenerate: true");
     expect(page).toContain("logHomeCreateSubmit");
-    expect(page).toContain("tryBeginHomeCreateDumpIntent");
     expect(page).toContain("meetsHomeDraftSubmitThreshold");
     expect(page).not.toMatch(/navigate\("\/app\/create"[^)]*\)\s*;\s*\/\/\s*prefill only/i);
   });
@@ -165,10 +164,6 @@ describe("AgreementBuilderIntake home auto-generate (static)", () => {
     expect(intake).toContain("homeHeroAutoGenerate");
     expect(intake).toContain('handoffSource: "home_create_submit"');
     expect(intake).toContain("logHomeCreateSubmit");
-    expect(intake).toContain("shouldJoinHomeCreateDumpSubmit");
-    expect(intake).toContain("joinHomeCreateDumpFlight");
-    expect(intake).toContain("registerHomeCreateDumpFlight");
-    expect(intake).toContain("markHomeCreateDumpParseStarted");
     expect(intake).toContain("beginStarterDraftGeneration");
     expect(intake).not.toContain("deferDraftStageForFreshInput");
   });
