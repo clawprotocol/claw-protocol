@@ -44,6 +44,15 @@ describe("createEntitlementUi", () => {
         hasCheckoutPendingMarker: false,
       }),
     ).toBe(false);
+    expect(
+      shouldGateCreateEditorUntilEntitlementReady({
+        isAuthenticated: true,
+        commercialEntitlementReady: false,
+        isResumingOwnedAgreement: false,
+        hasCheckoutPendingMarker: false,
+        keepEditorMounted: true,
+      }),
+    ).toBe(false);
   });
 
   it("shows access-choice for unentitled signed-in users", () => {

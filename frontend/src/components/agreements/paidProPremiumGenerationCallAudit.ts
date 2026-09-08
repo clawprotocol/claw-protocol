@@ -4,6 +4,7 @@
  */
 
 import { readSessionAgreementGenerationId } from "../../lib/agreementGenerationId";
+import { clearHomeCreateDumpIntent } from "../../launch/homeCreateDumpIntent";
 import { paidProPerfTraceEnabled, paidProVerboseDetailLogsEnabled } from "./paidProPerfLogging";
 
 export type PremiumGenerationCallReason =
@@ -73,6 +74,7 @@ export function clearPremiumGenerationCallAudit(): void {
   networkRecords = [];
   explicitRetryArmed = false;
   entitledPfdFlight = null;
+  clearHomeCreateDumpIntent();
 }
 
 export function isEntitledPremiumRewriteProcessInFlight(): boolean {
@@ -128,6 +130,8 @@ export function releaseEntitledPremiumRewriteProcessInFlight(): void {
 export function releaseEntitledPremiumRewriteInFlightLatch(ref: { current: boolean }): void {
   ref.current = false;
   releaseEntitledPremiumRewriteProcessInFlight();
+  // Dump intent outlives remount; release with the rewrite so dump 2 can begin.
+  clearHomeCreateDumpIntent();
 }
 
 /**
