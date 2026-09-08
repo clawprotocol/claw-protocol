@@ -85,9 +85,10 @@ export function clearCurrentSessionProEntitlementMarkers(): void {
 }
 
 export function bumpAgreementGenerationIdForFreshSession(): string {
-  // Process-global generate-invoke ledger must not survive a fresh create.
-  // Leftover checkout/entitled_rewrite rows were mislabelling the next Northline
-  // dump as a duplicate before premium-full-draft POST could fire.
+  // Process-global generate-invoke ledger + in-flight latch must not survive
+  // a fresh create / Review→Home remount. Leftover checkout/entitled_rewrite
+  // rows were mislabelling the next Northline dump as a duplicate (run2
+  // OPTIONS-only after a successful first dump).
   clearPremiumGenerationCallAudit();
   return bumpAgreementGenerationId();
 }

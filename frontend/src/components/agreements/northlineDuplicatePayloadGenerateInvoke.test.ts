@@ -3,11 +3,15 @@
  * #229 — first entitled Northline dump died with `[duplicate_payload_rejected]`
  * then OPTIONS-only premium-full-draft (no POST) and the #226 60s no-pfd failsafe.
  *
+ * #230 — live after #229 (tip ffdb420e): run1 PASSed (pfd POST 200) but run2 in
+ * the same Chrome session was still OPTIONS-only / party-prep. Settled ledger +
+ * process-global in-flight leftover must release on settle, home bump, or a new
+ * generation id so the second dump can POST. True same-generation double-submit
+ * still dedupes.
+ *
  * The compiler `duplicate_payload_rejected` log is a local-preview scan, not the
  * generate-invoke gate. The gate is `recordPremiumFullDraftCall` /
- * `duplicate_checkout_premium_call`. A leftover fingerprint latch or a remount
- * that recorded an invoke before fetch() must not reject a fresh named-2p create.
- * True same-generation double-submits still dedupe after the first POST starts.
+ * `duplicate_checkout_premium_call`.
  */
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
@@ -21,11 +25,16 @@ import {
 } from "./multiPartyCreateReviewSettle";
 import {
   clearPremiumGenerationCallAudit,
+  isEntitledPremiumRewriteProcessInFlight,
   isPremiumGenerateDedupeReason,
   markPremiumFullDraftHttpFired,
   readPremiumGenerationCallRecords,
   recordPremiumFullDraftCall,
+  releaseEntitledPremiumRewriteProcessInFlight,
   releasePremiumFullDraftCallIfHttpNeverFired,
+  releasePremiumGenerateInvokeForNewGeneration,
+  releaseSettledPremiumGenerateInvokes,
+  tryBeginEntitledPremiumRewriteProcessInFlight,
 } from "./paidProPremiumGenerationCallAudit";
 import { bumpAgreementGenerationIdForFreshSession } from "./paidProSessionEligibility";
 import { runPremiumCompletion } from "./premiumCompletionPipeline";
@@ -172,6 +181,88 @@ describe("Northline generate-invoke duplicate payload (#229)", () => {
     expect(readPremiumGenerationCallRecords().filter((r) => r.reason === "entitled_rewrite")).toHaveLength(1);
   });
 
+  it("(a) two sequential entitled Northline invokes with distinct generation ids both POST", async () => {
+    const base = {
+      intakeText: NORTHLINE_CANONICAL,
+      originalUserIntakeRawForMerge: NORTHLINE_CANONICAL,
+      structuredDraft: structured,
+      simpleProductFlow: true,
+      partyRoleLabels: defaultIntakePartyRoleLabels(),
+      userGapAnswers: null,
+      premiumRequestIntakeFingerprint: NORTHLINE_FP,
+      isPremiumRequestStillValid: () => true,
+      parseDraft: async () => structured,
+      premiumGenerationCallReason: "entitled_rewrite" as const,
+    };
+    expect(
+      recordPremiumFullDraftCall({
+        reason: "entitled_rewrite",
+        intakeFingerprint: NORTHLINE_FP,
+        agreementGenerationId: "gen-northline-run1",
+      }).duplicateBlocked,
+    ).toBe(false);
+    markPremiumFullDraftHttpFired({
+      agreementGenerationId: "gen-northline-run1",
+      intakeFingerprint: NORTHLINE_FP,
+    });
+    releaseSettledPremiumGenerateInvokes();
+    expect(
+      recordPremiumFullDraftCall({
+        reason: "entitled_rewrite",
+        intakeFingerprint: NORTHLINE_FP,
+        agreementGenerationId: "gen-northline-run2",
+      }).duplicateBlocked,
+    ).toBe(false);
+    await runPremiumCompletion({ ...base, agreementGenerationId: "gen-northline-passx2-a" });
+    await runPremiumCompletion({ ...base, agreementGenerationId: "gen-northline-passx2-b" });
+    expect(h.posts).toBe(2);
+  });
+
+  it("settle release + new generation unblocks a second dump after a successful first POST", () => {
+    const args1 = {
+      reason: "entitled_rewrite" as const,
+      intakeFingerprint: NORTHLINE_FP,
+      agreementGenerationId: "gen-northline-settled",
+    };
+    expect(recordPremiumFullDraftCall(args1).duplicateBlocked).toBe(false);
+    markPremiumFullDraftHttpFired(args1);
+    expect(recordPremiumFullDraftCall(args1).duplicateBlocked).toBe(true);
+    releaseSettledPremiumGenerateInvokes();
+    expect(recordPremiumFullDraftCall(args1).duplicateBlocked).toBe(false);
+    markPremiumFullDraftHttpFired(args1);
+    releasePremiumGenerateInvokeForNewGeneration("gen-northline-home-remount");
+    expect(
+      recordPremiumFullDraftCall({
+        reason: "entitled_rewrite",
+        intakeFingerprint: NORTHLINE_FP,
+        agreementGenerationId: "gen-northline-home-remount",
+      }).duplicateBlocked,
+    ).toBe(false);
+  });
+
+  it("process-global in-flight blocks a remount start and releases on new generation / bump", () => {
+    expect(tryBeginEntitledPremiumRewriteProcessInFlight({ agreementGenerationId: "gen-run1" })).toBe(
+      true,
+    );
+    expect(isEntitledPremiumRewriteProcessInFlight()).toBe(true);
+    expect(tryBeginEntitledPremiumRewriteProcessInFlight({ agreementGenerationId: "gen-run1" })).toBe(
+      false,
+    );
+    expect(
+      tryBeginEntitledPremiumRewriteProcessInFlight({ agreementGenerationId: "gen-after-home" }),
+    ).toBe(true);
+    releaseEntitledPremiumRewriteProcessInFlight();
+    expect(tryBeginEntitledPremiumRewriteProcessInFlight({ agreementGenerationId: "gen-after-home" })).toBe(
+      true,
+    );
+    bumpAgreementGenerationIdForFreshSession();
+    expect(isEntitledPremiumRewriteProcessInFlight()).toBe(false);
+    expect(tryBeginEntitledPremiumRewriteProcessInFlight({ agreementGenerationId: "gen-after-bump" })).toBe(
+      true,
+    );
+    releaseEntitledPremiumRewriteProcessInFlight();
+  });
+
   it("#226 named-2p no-pfd bound and too_much failsafe stay in force", () => {
     expect(CREATE_FLOW_NAMED_TWO_PARTY_WITHOUT_PFD_FAILSAFE_MS).toBe(60_000);
     expect(
@@ -209,8 +300,14 @@ describe("Northline generate-invoke duplicate payload (#229)", () => {
     expect(intake).not.toContain("isCoherentOrdinaryNamedTwoPartyForFailsafe");
     expect(intake).not.toContain("looksOverSpecifiedOrComplexityIntake");
     expect(intake).not.toContain("material_gap");
+    expect(intake).toContain("releaseSettledPremiumGenerateInvokes");
+    expect(intake).toContain("releasePremiumGenerateInvokeForNewGeneration");
+    expect(intake).toContain("tryBeginEntitledPremiumRewriteProcessInFlight");
     const settle = readFileSync(join(__dirname, "multiPartyCreateReviewSettle.ts"), "utf8");
     expect(settle).toContain("if (input.pfdHttpCompleted) return false");
     expect(settle).toContain("CREATE_FLOW_NAMED_TWO_PARTY_WITHOUT_PFD_FAILSAFE_MS");
+    expect(settle).not.toContain("isCoherentOrdinaryNamedTwoPartyForFailsafe");
+    expect(settle).not.toContain("looksOverSpecifiedOrComplexityIntake");
+    expect(settle).not.toContain("material_gap");
   });
 });

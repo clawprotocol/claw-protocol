@@ -1190,6 +1190,11 @@ import {
 } from "./premiumFullDraftApi";
 import {
   armExplicitPremiumGenerationRetry,
+  isEntitledPremiumRewriteProcessInFlight,
+  releaseEntitledPremiumRewriteInFlightLatch,
+  releasePremiumGenerateInvokeForNewGeneration,
+  releaseSettledPremiumGenerateInvokes,
+  tryBeginEntitledPremiumRewriteProcessInFlight,
   type PremiumGenerationCallReason,
 } from "./paidProPremiumGenerationCallAudit";
 import { preflightPremiumBackendHealth } from "./premiumBackendHealth";
@@ -7204,10 +7209,18 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     // Canonical paid Pro review after pipeline success: planFinalizeCanonicalPaidProPipelineSuccess
     // then enterCanonicalPaidProReviewFlow (same contract as post_checkout_apply_success).
     const finalizeCanonicalPaidProPipelineSuccess = planFinalizeCanonicalPaidProPipelineSuccess;
+    const rewriteGenerationId = getOrInitSessionAgreementGenerationId();
+    releasePremiumGenerateInvokeForNewGeneration(rewriteGenerationId);
     if (entitledPremiumRewriteInFlightRef.current) return;
     // Latch before snapshot / party-prep work. Home auto-generate + entitled
     // rewrite effect otherwise both pass this check, start two pipelines
     // (parse 200×2), and the first premium-full-draft dies OPTIONS-only.
+    // Process-global latch covers Review→Home remount (#230): the instance
+    // ref is fresh but a leftover in-flight / settled ledger still aborted
+    // the second dump's first pfd POST.
+    if (!tryBeginEntitledPremiumRewriteProcessInFlight({ agreementGenerationId: rewriteGenerationId })) {
+      return;
+    }
     entitledPremiumRewriteInFlightRef.current = true;
     // Reload race: in-memory SoT is empty until hydrate; never re-generate over an accepted snap.
     const acceptedSnap = readPremiumCompletionSnapshot();
@@ -7234,7 +7247,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       partyPrepCreateReady,
     });
     if (skipForMatchingAccepted) {
-      entitledPremiumRewriteInFlightRef.current = false;
+      releaseEntitledPremiumRewriteInFlightLatch(entitledPremiumRewriteInFlightRef);
       // Never hydrate review-ready state from local storage alone — layout reload
       // path must GET /canonical-review-snapshot first.
       logPremiumDuplicateRunBlocked({
@@ -7276,7 +7289,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       resolveRawIntake: (d) => resolveRawIntakeForPremiumCheckout(d),
     });
     if (!launchCtx.ok) {
-      entitledPremiumRewriteInFlightRef.current = false;
+      releaseEntitledPremiumRewriteInFlightLatch(entitledPremiumRewriteInFlightRef);
       const terminal = commitEntitledRewriteGenerationFailureTerminal({
         reason: "entitled_rewrite_aborted",
         dashboardRoute: isDashboardPaidCreateRouteActive(),
@@ -8076,7 +8089,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           }),
         );
         setLoading(false);
-        entitledPremiumRewriteInFlightRef.current = false;
+        releaseEntitledPremiumRewriteInFlightLatch(entitledPremiumRewriteInFlightRef);
         return;
       }
       reviewAgreementIdRef.current = agreementIdForPass;
@@ -8159,7 +8172,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
               }),
             );
             setLoading(false);
-            entitledPremiumRewriteInFlightRef.current = false;
+            releaseEntitledPremiumRewriteInFlightLatch(entitledPremiumRewriteInFlightRef);
             return;
           }
         } else {
@@ -8203,7 +8216,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           }),
         );
         setLoading(false);
-        entitledPremiumRewriteInFlightRef.current = false;
+        releaseEntitledPremiumRewriteInFlightLatch(entitledPremiumRewriteInFlightRef);
         return;
       }
       const handoff = tryEstablishAcceptedPremiumCorpusForCreateFlowHandoff({
@@ -8423,6 +8436,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         paidReviewAuthorityEstablished: handoff.established,
         workspaceAgreementId: reviewAgreementIdRef.current || null,
       });
+      // #230 — settled first dump must not leftover-block the next homepage dump.
+      releaseSettledPremiumGenerateInvokes();
     } catch (e: unknown) {
       if (import.meta.env.DEV) {
         // eslint-disable-next-line no-console
@@ -8473,7 +8488,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       }
       setLoading(false);
     } finally {
-      entitledPremiumRewriteInFlightRef.current = false;
+      releaseEntitledPremiumRewriteInFlightLatch(entitledPremiumRewriteInFlightRef);
       premiumGeneratePathCommittedRef.current = false;
       setPremiumAuthoritativeRequestInFlight(false);
       premiumGenerateCompletedRef.current = true;
@@ -16634,6 +16649,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     if (!provisionalPaid) return;
     if (!shouldUsePaidProCreateFlowReviewShell(authoritativeCreateFlowReviewShellInput)) return;
     if (entitledPremiumRewriteInFlightRef.current) return;
+    if (isEntitledPremiumRewriteProcessInFlight()) return;
     if (hasPaidProSourceOfTruth()) return;
     // Freeze latch / validated corpus already accepted — a second entitled_rewrite
     // clears pipeline authority and blanks the just-painted Niceman/Waffle (etc.) body.
@@ -26821,6 +26837,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       setCreateFlowPhase("draft_ready_for_review");
       setCreateUiStage(CreateUiStage.DRAFT);
       setLoading(false);
+      releaseSettledPremiumGenerateInvokes();
       return;
     }
     if (
@@ -26831,7 +26848,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       return;
     }
     if (premiumProcessingFailsafeOverlayDismiss.dismissOverlays) {
-      entitledPremiumRewriteInFlightRef.current = false;
+      releaseEntitledPremiumRewriteInFlightLatch(entitledPremiumRewriteInFlightRef);
       setPremiumAuthoritativeRequestInFlight(false);
       premiumGeneratePathCommittedRef.current = false;
       premiumModalExtendedWaitActiveRef.current = false;
@@ -26843,7 +26860,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       setLoading(false);
     }
     entitledRewritePfdHttpOutcomeRef.current = "fail_closed";
-    entitledPremiumRewriteInFlightRef.current = false;
+    releaseEntitledPremiumRewriteInFlightLatch(entitledPremiumRewriteInFlightRef);
     const failedCreateRecoveryNotes = (
       failedCreateUserInputSnapshotRef.current ||
       readOriginalUserIntakeRaw() ||

@@ -47,6 +47,9 @@ export type PremiumNetworkCallRecord = {
 let records: PremiumGenerationCallRecord[] = [];
 let networkRecords: PremiumNetworkCallRecord[] = [];
 let explicitRetryArmed = false;
+/** Process-global entitled rewrite latch — a remounted instance's useRef is fresh. */
+let entitledPremiumRewriteProcessInFlight = false;
+let lastEntitledRewriteGenerationId: string | null = null;
 
 export function armExplicitPremiumGenerationRetry(): void {
   explicitRetryArmed = true;
@@ -56,6 +59,71 @@ export function clearPremiumGenerationCallAudit(): void {
   records = [];
   networkRecords = [];
   explicitRetryArmed = false;
+  entitledPremiumRewriteProcessInFlight = false;
+  lastEntitledRewriteGenerationId = null;
+}
+
+export function isEntitledPremiumRewriteProcessInFlight(): boolean {
+  return entitledPremiumRewriteProcessInFlight;
+}
+
+/**
+ * Latch generate across remounts. False if another instance already started
+ * the same generation. A new generation id steals a stuck leftover latch.
+ */
+export function tryBeginEntitledPremiumRewriteProcessInFlight(opts?: {
+  agreementGenerationId?: string | null;
+}): boolean {
+  const genId = (opts?.agreementGenerationId ?? "").trim();
+  if (
+    entitledPremiumRewriteProcessInFlight &&
+    genId &&
+    lastEntitledRewriteGenerationId !== genId
+  ) {
+    entitledPremiumRewriteProcessInFlight = false;
+  }
+  if (entitledPremiumRewriteProcessInFlight) return false;
+  entitledPremiumRewriteProcessInFlight = true;
+  if (genId) lastEntitledRewriteGenerationId = genId;
+  return true;
+}
+
+export function releaseEntitledPremiumRewriteProcessInFlight(): void {
+  entitledPremiumRewriteProcessInFlight = false;
+}
+
+export function releaseEntitledPremiumRewriteInFlightLatch(ref: { current: boolean }): void {
+  ref.current = false;
+  entitledPremiumRewriteProcessInFlight = false;
+}
+
+/**
+ * After Pro Review settle, drop generate rows that already POSTed so a second
+ * homepage dump is not leftover-blocked. Keep in-flight until rewrite `finally`
+ * so the auto-rewrite effect cannot re-enter mid-settle.
+ */
+export function releaseSettledPremiumGenerateInvokes(): void {
+  records = records.filter(
+    (r) => !(isPremiumGenerateDedupeReason(r.reason) && r.httpFired),
+  );
+}
+
+/**
+ * New generation / Review→Home remount: drop other-gen and fingerprint-only
+ * generate leftovers, and release a stuck process-global latch from the prior dump.
+ */
+export function releasePremiumGenerateInvokeForNewGeneration(
+  agreementGenerationId?: string | null,
+): void {
+  const genId = (agreementGenerationId ?? "").trim();
+  if (!genId) return;
+  records = records.filter((r) => {
+    if (!isPremiumGenerateDedupeReason(r.reason)) return true;
+    const rowId = resolveRecordedGenerationId(r);
+    if (!rowId) return false;
+    return rowId === genId;
+  });
+  lastEntitledRewriteGenerationId = genId;
 }
 
 export function recordPremiumNetworkCall(args: {
@@ -139,6 +207,10 @@ export function assertTest225PremiumNetworkCallBudget(): void {
  * leftover (no generation id) reject a fresh named-2p create that has a real generation id.
  * A recorded invoke that never started HTTP (OPTIONS-only / aborted) is released so the
  * legitimate first POST can still fire.
+ *
+ * #230 — after a successful first dump the ledger / process-global in-flight still blocked
+ * the second Northline dump in the same tab (OPTIONS-only). Release settled rows and
+ * other-generation leftovers on settle, home bump, or a new generation id.
  */
 export function isPremiumGenerateDedupeReason(reason: PremiumGenerationCallReason): boolean {
   return reason === "checkout_completion" || reason === "entitled_rewrite";
@@ -173,6 +245,9 @@ export function recordPremiumFullDraftCall(args: {
   agreementGenerationId?: string | null;
 }): { callIndex: number; duplicateBlocked: boolean } {
   const resolvedGenId = resolveNewCallGenerationId(args);
+  if (resolvedGenId) {
+    releasePremiumGenerateInvokeForNewGeneration(resolvedGenId);
+  }
   const identityKey = generationIdentityKey({
     agreementGenerationId: resolvedGenId,
     intakeFingerprint: args.intakeFingerprint,
