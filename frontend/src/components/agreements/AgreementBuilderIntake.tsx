@@ -213,6 +213,14 @@ import {
   shouldRefuseAfterPayPremiumCompletionForMissingGrant,
 } from "../../launch/checkoutReturnEntitlement";
 import { resumeAfterPayPersistForProGeneration } from "../../launch/afterPayPersistResume";
+import {
+  ensureHomeCreateDumpIntent,
+  joinHomeCreateDumpFlight,
+  markHomeCreateDumpParseStarted,
+  registerHomeCreateDumpFlight,
+  shouldJoinHomeCreateDumpSubmit,
+  tryBeginHomeCreateDumpIntent,
+} from "../../launch/homeCreateDumpIntent";
 import { logHomeCreateSubmit } from "../../launch/homeCreateSubmit";
 import {
   getStarterProRefineCtaExperiment,
@@ -7211,6 +7219,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     const finalizeCanonicalPaidProPipelineSuccess = planFinalizeCanonicalPaidProPipelineSuccess;
     const rewriteGenerationId = getOrInitSessionAgreementGenerationId();
     releasePremiumGenerateInvokeForNewGeneration(rewriteGenerationId);
+    ensureHomeCreateDumpIntent({ fingerprint: rewriteGenerationId });
     if (entitledPremiumRewriteInFlightRef.current) return;
     // Single-flight owner before snapshot / party-prep. Home auto-generate +
     // entitled rewrite effect otherwise both start (parse 200×2) and the first
@@ -12925,6 +12934,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   useLayoutEffect(() => {
     if (!homeHeroAutoGenerate || checkoutBackRestoreActive || homeAutoGenerateStartedRef.current) return;
     if (paidProEditReturnResumeActive) return;
+    // Remount / second submit: join the in-flight dump. Do not abort fetch
+    // and do not skip a generate that has not started (join only when a
+    // flight promise is already registered — #233 parseStarted skip was net-neg).
+    if (shouldJoinHomeCreateDumpSubmit()) {
+      homeAutoGenerateStartedRef.current = true;
+      void joinHomeCreateDumpFlight();
+      return;
+    }
     if (shouldSkipHomeAutoGenerateForStoredReview({ freshHomeHeroHandoff: true })) {
       homeAutoGenerateConsumedRef.current = true;
       return;
@@ -12971,15 +12988,19 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       return;
     }
     writeOriginalUserIntakeRawAtDraftCommit(homeDecision.text);
+    tryBeginHomeCreateDumpIntent({ fingerprint: shortIntakeFingerprint(homeDecision.text) });
+    markHomeCreateDumpParseStarted();
     homeAutoGenerateStartedRef.current = true;
     logHomeCreateSubmit(homeDecision.text);
     beginStarterDraftGeneration();
-    void (async () => {
+    const dumpFlight = (async () => {
       await runProductionLocalDraftParse({
         rawOverride: homeDecision.text,
         handoffSource: "home_create_submit",
       });
     })();
+    registerHomeCreateDumpFlight(dumpFlight);
+    void dumpFlight;
   }, [
     homeHeroAutoGenerate,
     checkoutBackRestoreActive,

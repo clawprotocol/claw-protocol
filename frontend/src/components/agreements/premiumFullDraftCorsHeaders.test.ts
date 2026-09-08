@@ -31,7 +31,7 @@ describe("premium-full-draft CORS header contract", () => {
     expect(premiumFullDraftApiSrc).toContain("clawAgreementHeaders");
     expect(premiumFullDraftApiSrc).toContain("refreshCachedAccessToken");
     const onceIdx = premiumFullDraftApiSrc.indexOf("export async function postPremiumFullDraftOnce");
-    const onceBody = premiumFullDraftApiSrc.slice(onceIdx, onceIdx + 4200);
+    const onceBody = premiumFullDraftApiSrc.slice(onceIdx, onceIdx + 6200);
     expect(onceBody.indexOf("await refreshCachedAccessToken()")).toBeGreaterThan(-1);
     expect(onceBody.indexOf("await refreshCachedAccessToken()")).toBeLessThan(
       onceBody.indexOf("headers: clawAgreementHeaders"),
