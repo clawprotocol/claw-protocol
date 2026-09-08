@@ -6,8 +6,8 @@
  * aborted before POST (request×1 / response×0). PASS was the same race when
  * the abort lost. Latch PRs #229–#231 never owned the dump AbortController.
  *
- * #233/#234 net-neg: `shouldSkipSecondHomeCreateSubmit` +
- * `home-auto-generate-skipped` skipped generate when parseStarted was true
+ * #233/#234 net-neg: a parseStarted-only skip plus
+ * `home-auto-generate-skipped` skipped generate when parse had been marked
  * but the flight promise was not registered yet — first generate ate itself
  * (0/2 POSTs). Do not re-land that skip.
  *

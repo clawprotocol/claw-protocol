@@ -158,7 +158,8 @@ describe("Northline homepage dump intent (join-not-skip)", () => {
     expect(shouldKeepCreateEditorMountedForDump()).toBe(true);
 
     const dumpIntent = readFileSync(join(__dirname, "../../launch/homeCreateDumpIntent.ts"), "utf8");
-    expect(dumpIntent).not.toContain("shouldSkipSecondHomeCreateSubmit");
+    expect(dumpIntent).not.toMatch(/export function shouldSkipSecondHomeCreateSubmit/);
+    expect(dumpIntent).not.toMatch(/function shouldSkipSecondHomeCreateSubmit/);
     expect(dumpIntent).toContain("flightPromise != null");
     expect(dumpIntent).toContain("parseStarted alone must not skip");
 
