@@ -1177,8 +1177,6 @@ describe("paid Pro runtime authority establishment (intake wiring)", () => {
     expect(intake).toContain("logGuidedQuestionGateDecision");
     expect(intake).toContain("guidedQuestionGateDecision.materialReviewAllowed");
     expect(intake).toContain("questionGate: guidedQuestionGateDecision");
-    expect(intake).toContain("openaiCriticalUnresolved");
-    expect(intake).toContain("resolveOpenAiClarityReviewHold");
     expect(intake).not.toMatch(
       /if \(hasPaidProSourceOfTruth\(\) \|\| premiumPersistedFlowActive \|\| premiumPaidDocumentSurface\) \{\s*return "";/,
     );

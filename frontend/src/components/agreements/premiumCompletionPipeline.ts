@@ -294,8 +294,6 @@ export type PremiumFullDraftHttpCompleteInfo = {
   documentText?: string;
   serverFullDocumentText?: string;
   errorCode?: string;
-  agreementIntelligence?: AgreementIntelligence | null;
-  missingMaterialInfo?: string[];
 };
 
 export type PremiumCompletionInput = {
@@ -1988,8 +1986,6 @@ async function runPremiumCompletionInner(
               ok: true,
               documentText: String(fullResp.result.document_text || "").trim(),
               serverFullDocumentText: String(fullResp.result.server_full_document_text || "").trim(),
-              agreementIntelligence: fullResp.result.agreement_intelligence ?? null,
-              missingMaterialInfo: fullResp.result.missing_material_info ?? [],
             }
           : {
               ok: false,
