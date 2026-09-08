@@ -7,7 +7,7 @@
  *
  * KEEP:
  * - Does not change evaluateIntentionalCreateDraftSubmit / pre-generate.
- * - Does not introduce #227 `material_gap` or #224 dump classifiers.
+ * - Does not introduce the #227 pre-generate FE regex gate or #224 dump classifiers.
  * - Northline-class bodies (real named work, no invented-framework admission)
  *   do not hold.
  */

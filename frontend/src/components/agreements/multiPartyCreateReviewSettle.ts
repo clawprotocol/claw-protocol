@@ -457,7 +457,7 @@ export function planPostGenerateCreateReviewSettleOrFailClosed(input: {
     vs01GateBlockedWithoutSelectedFinal: input.vs01GateBlockedWithoutSelectedFinal,
     corpusCommerciallyUsable: usable && !clarityHold,
   });
-  if (usable && clarityHold) {
+  if (clarityHold) {
     return {
       dismissOverlays: true,
       settleReview: false,

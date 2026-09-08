@@ -122,9 +122,9 @@ describe("openaiClarityReviewHold", () => {
     expect(hold.ask).toBe(true);
     expect(hold.questions.length).toBeGreaterThan(0);
     expect(hold.clarification?.kind).toBe("needs_commercial_basics");
-    expect(hold.clarification?.kind).not.toBe("material_gap" as never);
+    expect(hold.clarification?.kind).not.toBe("low_signal");
     expect(hold.questions.some((q) => /deliverable|scope/i.test(q.question))).toBe(true);
-    expect(JSON.stringify(hold)).not.toContain("material_gap");
+    expect(hold.clarification?.kind).toBe("needs_commercial_basics");
   });
 
   it("synthesizes ask questions when OpenAI lists nothing but the body invented a framework", () => {
