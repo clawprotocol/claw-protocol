@@ -365,6 +365,15 @@ describe("canonical Northline homepage dump → entitled Pro Review", () => {
     expect(ensureBlock).toContain("setPremiumGenerateCompleted(true)");
     expect(ensureBlock).toContain("entitled_rewrite_pfd_http");
     expect(ensureBlock).toContain("pickCreateReviewSettleCorpus");
+    const rewriteIdx = intake.indexOf("const runEntitledPremiumImprovementRewrite = React.useCallback");
+    const rewriteHead = intake.slice(rewriteIdx, rewriteIdx + 2800);
+    const latchCheck = rewriteHead.indexOf("if (entitledPremiumRewriteInFlightRef.current) return;");
+    const latchSet = rewriteHead.indexOf("entitledPremiumRewriteInFlightRef.current = true;");
+    const skipCheck = rewriteHead.indexOf("shouldSkipEntitledRewriteForMatchingAcceptedSnapshot");
+    expect(latchCheck).toBeGreaterThan(-1);
+    expect(latchSet).toBeGreaterThan(latchCheck);
+    expect(latchSet).toBeLessThan(skipCheck);
+    expect(rewriteHead).toContain("entitledPremiumRewriteInFlightRef.current = false");
     const namedSettleIdx = intake.indexOf(
       "const ordinaryNamedTwoPartyReadyForSettle = shouldSkipPartyPrepForOrdinaryNamedTwoParty({",
     );
@@ -374,6 +383,7 @@ describe("canonical Northline homepage dump → entitled Pro Review", () => {
     const pipeline = readFileSync(join(__dirname, "premiumCompletionPipeline.ts"), "utf8");
     expect(pipeline).toContain("onPremiumFullDraftHttpComplete");
     expect(pipeline).toContain("notifyPremiumFullDraftHttpComplete");
+    expect(pipeline).toContain("if (!genCall.duplicateBlocked)");
     const overlayMount = intake.indexOf(
       'premiumPostCheckoutPhase !== "premium_network_recoverable" && !dismissCreateOverlaysAfterRejectOrGate',
     );

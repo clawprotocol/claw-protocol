@@ -7205,6 +7205,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     // then enterCanonicalPaidProReviewFlow (same contract as post_checkout_apply_success).
     const finalizeCanonicalPaidProPipelineSuccess = planFinalizeCanonicalPaidProPipelineSuccess;
     if (entitledPremiumRewriteInFlightRef.current) return;
+    // Latch before snapshot / party-prep work. Home auto-generate + entitled
+    // rewrite effect otherwise both pass this check, start two pipelines
+    // (parse 200×2), and the first premium-full-draft dies OPTIONS-only.
+    entitledPremiumRewriteInFlightRef.current = true;
     // Reload race: in-memory SoT is empty until hydrate; never re-generate over an accepted snap.
     const acceptedSnap = readPremiumCompletionSnapshot();
     const validatedPaint = resolveValidatedPaidProReviewCorpus();
@@ -7230,6 +7234,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       partyPrepCreateReady,
     });
     if (skipForMatchingAccepted) {
+      entitledPremiumRewriteInFlightRef.current = false;
       // Never hydrate review-ready state from local storage alone — layout reload
       // path must GET /canonical-review-snapshot first.
       logPremiumDuplicateRunBlocked({
@@ -7254,7 +7259,6 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     }
     markCurrentSessionProIntent();
     markCurrentSessionProEntitlementComplete({ source: "entitled_rewrite" });
-    entitledPremiumRewriteInFlightRef.current = true;
     const failedCreateRecoveryNotes = (
       failedCreateUserInputSnapshotRef.current ||
       launch?.rawIntake ||

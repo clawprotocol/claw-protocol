@@ -3,6 +3,7 @@
  * Network ledger tracks each HTTP premium-full-draft request (including structural retries).
  */
 
+import { readSessionAgreementGenerationId } from "../../lib/agreementGenerationId";
 import { paidProPerfTraceEnabled, paidProVerboseDetailLogsEnabled } from "./paidProPerfLogging";
 
 export type PremiumGenerationCallReason =
@@ -26,6 +27,8 @@ export type PremiumGenerationCallRecord = {
   reason: PremiumGenerationCallReason;
   intakeFingerprint: string;
   agreementGenerationId: string | null;
+  /** True once fetch() for this orchestration actually started (OPTIONS/POST). */
+  httpFired?: boolean;
 };
 
 export type PremiumNetworkCallRecord = {
@@ -130,14 +133,38 @@ export function assertTest225PremiumNetworkCallBudget(): void {
  * collides when it belongs to the SAME generation id (or the same intake fingerprint when no id is
  * present). Same-generation double-fires (React re-mount / double-invoke) are still blocked; armed
  * explicit retries still bypass.
+ *
+ * #229 — entitled homepage dump uses `entitled_rewrite`. Treat that as the same generate-invoke
+ * family as checkout so a remount double-submit is deduped, but never let a fingerprint-only
+ * leftover (no generation id) reject a fresh named-2p create that has a real generation id.
+ * A recorded invoke that never started HTTP (OPTIONS-only / aborted) is released so the
+ * legitimate first POST can still fire.
  */
+export function isPremiumGenerateDedupeReason(reason: PremiumGenerationCallReason): boolean {
+  return reason === "checkout_completion" || reason === "entitled_rewrite";
+}
+
+function resolveRecordedGenerationId(row: {
+  agreementGenerationId?: string | null;
+}): string {
+  return (row.agreementGenerationId ?? "").trim();
+}
+
 function generationIdentityKey(row: {
   agreementGenerationId?: string | null;
   intakeFingerprint?: string | null;
 }): string {
-  const genId = (row.agreementGenerationId ?? "").trim();
+  const genId = resolveRecordedGenerationId(row);
   if (genId) return `gen:${genId}`;
   return `fp:${(row.intakeFingerprint ?? "").trim()}`;
+}
+
+function resolveNewCallGenerationId(args: {
+  agreementGenerationId?: string | null;
+}): string | null {
+  const explicit = (args.agreementGenerationId ?? "").trim();
+  if (explicit) return explicit;
+  return readSessionAgreementGenerationId();
 }
 
 export function recordPremiumFullDraftCall(args: {
@@ -145,20 +172,25 @@ export function recordPremiumFullDraftCall(args: {
   intakeFingerprint: string;
   agreementGenerationId?: string | null;
 }): { callIndex: number; duplicateBlocked: boolean } {
-  const identityKey = generationIdentityKey(args);
-  const priorCheckout = records.filter(
-    (r) => r.reason === "checkout_completion" && generationIdentityKey(r) === identityKey,
-  ).length;
+  const resolvedGenId = resolveNewCallGenerationId(args);
+  const identityKey = generationIdentityKey({
+    agreementGenerationId: resolvedGenId,
+    intakeFingerprint: args.intakeFingerprint,
+  });
+  const priorGenerate = records.filter(
+    (r) => isPremiumGenerateDedupeReason(r.reason) && generationIdentityKey(r) === identityKey,
+  );
   const isRetry = args.reason === "explicit_retry_pro_draft" || explicitRetryArmed;
   const duplicateBlocked =
-    args.reason === "checkout_completion" && priorCheckout >= 1 && !isRetry;
+    isPremiumGenerateDedupeReason(args.reason) && priorGenerate.length >= 1 && !isRetry;
 
   if (!duplicateBlocked) {
     records.push({
       at: Date.now(),
       reason: args.reason,
       intakeFingerprint: args.intakeFingerprint,
-      agreementGenerationId: args.agreementGenerationId ?? null,
+      agreementGenerationId: resolvedGenId,
+      httpFired: false,
     });
     if (args.reason === "explicit_retry_pro_draft") explicitRetryArmed = false;
   }
@@ -169,12 +201,52 @@ export function recordPremiumFullDraftCall(args: {
       reason: args.reason,
       callIndex: records.length,
       duplicateBlocked,
-      priorCheckout,
+      priorGenerate: priorGenerate.length,
+      identityKey,
       explicitRetryArmed,
     });
   }
 
   return { callIndex: records.length, duplicateBlocked };
+}
+
+/** Mark that fetch() actually started for this generation identity. */
+export function markPremiumFullDraftHttpFired(args: {
+  agreementGenerationId?: string | null;
+  intakeFingerprint?: string | null;
+}): void {
+  const key = generationIdentityKey({
+    agreementGenerationId: resolveNewCallGenerationId(args),
+    intakeFingerprint: args.intakeFingerprint,
+  });
+  for (let i = records.length - 1; i >= 0; i -= 1) {
+    if (generationIdentityKey(records[i]) === key) {
+      records[i].httpFired = true;
+      return;
+    }
+  }
+}
+
+/**
+ * Drop a same-identity generate invoke that never started HTTP so a remount / first
+ * Northline dump can POST. True double-submits that already called fetch stay recorded.
+ */
+export function releasePremiumFullDraftCallIfHttpNeverFired(args: {
+  agreementGenerationId?: string | null;
+  intakeFingerprint?: string | null;
+}): boolean {
+  const key = generationIdentityKey({
+    agreementGenerationId: resolveNewCallGenerationId(args),
+    intakeFingerprint: args.intakeFingerprint,
+  });
+  for (let i = records.length - 1; i >= 0; i -= 1) {
+    const row = records[i];
+    if (generationIdentityKey(row) !== key) continue;
+    if (row.httpFired) return false;
+    records.splice(i, 1);
+    return true;
+  }
+  return false;
 }
 
 export function readPremiumGenerationCallRecords(): readonly PremiumGenerationCallRecord[] {
