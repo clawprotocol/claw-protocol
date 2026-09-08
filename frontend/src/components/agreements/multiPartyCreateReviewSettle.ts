@@ -400,6 +400,8 @@ export function resolvePostGenerateAuthorityChurnOverlayDecision(input: {
 
 export type PostGenerateCreateReviewSettlePlan = PostGenerateAuthorityChurnOverlayDecision & {
   corpus: string;
+  /** OpenAI / invented-framework hold: show clarity questions instead of Review. */
+  askClarity?: boolean;
 };
 
 /**
@@ -426,6 +428,11 @@ export function planPostGenerateCreateReviewSettleOrFailClosed(input: {
   /** Ordinary named 2p dump — do not fail-close on churn before generate completes. */
   ordinaryNamedTwoPartyReady?: boolean;
   staleIntakeOrGeneration?: boolean;
+  /**
+   * Post-generate OpenAI clarity hold. Does not classify intake before pfd.
+   * When hold+ask, do not settle Review; when hold without questions, fail-close.
+   */
+  clarityHold?: { hold?: boolean; ask?: boolean } | null;
 }): PostGenerateCreateReviewSettlePlan {
   const settleInput: CreateReviewSettleCorpusInput = {
     winningPremiumBodyText: input.winningPremiumBodyText,
@@ -442,12 +449,23 @@ export function planPostGenerateCreateReviewSettleOrFailClosed(input: {
   // then fail-closed after vs01-corpus-gate-blocked.
   const usable = Boolean(corpus) || shouldSettleProReviewAfterPremiumFullDraft(settleInput);
   const generateComplete = Boolean(input.generateComplete);
+  const clarityHold = Boolean(input.clarityHold?.hold);
+  const clarityAsk = Boolean(input.clarityHold?.ask);
   const churn = resolvePostGenerateAuthorityChurnOverlayDecision({
     generateComplete: generateComplete || Boolean(input.shorterThanAcceptedChurn),
     shorterThanAcceptedChurn: input.shorterThanAcceptedChurn,
     vs01GateBlockedWithoutSelectedFinal: input.vs01GateBlockedWithoutSelectedFinal,
-    corpusCommerciallyUsable: usable,
+    corpusCommerciallyUsable: usable && !clarityHold,
   });
+  if (clarityHold) {
+    return {
+      dismissOverlays: true,
+      settleReview: false,
+      failClosed: !clarityAsk,
+      askClarity: clarityAsk,
+      corpus: "",
+    };
+  }
   if (usable) {
     const mounted =
       corpus ||
