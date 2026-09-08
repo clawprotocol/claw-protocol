@@ -25,6 +25,10 @@ import {
   shouldResetCommercialEntitlementReadyOnAuthRefresh,
 } from "../../launch/simpleProduct/createEntitlementUi";
 import {
+  shouldAwaitNetworkEntitlementOnCreateSubmit,
+  shouldStartRewriteFromEntitlementTransition,
+} from "./createFlowEntitlementTransition";
+import {
   CREATE_FLOW_NAMED_TWO_PARTY_WITHOUT_PFD_FAILSAFE_MS,
   shouldFailClosedPremiumProcessingWithoutPfd,
   shouldInvokePremiumGenerateAfterPartyPrepCreate,
@@ -163,6 +167,47 @@ describe("Northline keep-mounted refresh remount (#240)", () => {
     expect(setFalseIdx).toBeGreaterThan(resetIdx);
     expect(page).toContain("awaitingAuthWorkspace && !keepEditorMountedAcrossAuthRefresh");
     expect(page).not.toContain("homeCreateDumpIntent");
+  });
+
+  it("create-flow entitlement transition during in-flight generate cannot remount, re-submit, or abort pfd", () => {
+    expect(
+      shouldAwaitNetworkEntitlementOnCreateSubmit({
+        fromHomeHandoff: true,
+        generateInFlight: false,
+      }),
+    ).toBe(false);
+    expect(tryBeginEntitledPremiumRewriteProcessInFlight({ agreementGenerationId: "gen-transition" })).toBe(
+      true,
+    );
+    expect(
+      shouldAwaitNetworkEntitlementOnCreateSubmit({
+        fromHomeHandoff: false,
+        generateInFlight: true,
+      }),
+    ).toBe(false);
+    expect(
+      shouldStartRewriteFromEntitlementTransition({
+        generateInFlight: true,
+        paidGenerateAlreadyCommitted: false,
+      }),
+    ).toBe(false);
+    const keep = shouldKeepCreateEditorMountedAcrossAuthRefresh({
+      homeHeroAutoGenerate: true,
+      editorHasBeenShown: true,
+      entitledRewriteInFlight: true,
+    });
+    expect(keep).toBe(true);
+    expect(
+      shouldGateCreateEditorUntilEntitlementReady({
+        isAuthenticated: true,
+        commercialEntitlementReady: false,
+        isResumingOwnedAgreement: false,
+        hasCheckoutPendingMarker: false,
+        keepEditorMounted: keep,
+      }),
+    ).toBe(false);
+    expect(shouldResetCommercialEntitlementReadyOnAuthRefresh({ keepEditorMounted: keep })).toBe(false);
+    releaseEntitledPremiumRewriteProcessInFlight();
   });
 
   it("dual remount (token refresh + entitlement flip) does not gate or replace a live dump editor", () => {
