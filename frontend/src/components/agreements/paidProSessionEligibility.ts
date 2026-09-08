@@ -8,6 +8,7 @@ import {
   getOrInitSessionAgreementGenerationId,
   getSessionAgreementGenerationId,
 } from "../../lib/agreementGenerationId";
+import { clearPremiumGenerationCallAudit } from "./paidProPremiumGenerationCallAudit";
 
 const FREE_STARTER_SESSION_KEY = "claw_free_starter_session_v1";
 const PRO_INTENT_SESSION_KEY = "claw_pro_intent_session_v1";
@@ -84,6 +85,10 @@ export function clearCurrentSessionProEntitlementMarkers(): void {
 }
 
 export function bumpAgreementGenerationIdForFreshSession(): string {
+  // Process-global generate-invoke ledger must not survive a fresh create.
+  // Leftover checkout/entitled_rewrite rows were mislabelling the next Northline
+  // dump as a duplicate before premium-full-draft POST could fire.
+  clearPremiumGenerationCallAudit();
   return bumpAgreementGenerationId();
 }
 

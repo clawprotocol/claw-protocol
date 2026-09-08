@@ -1977,20 +1977,24 @@ async function runPremiumCompletionInner(
         networkCallReason: callReason as PremiumNetworkCallReason,
       });
     }
-    notifyPremiumFullDraftHttpComplete(
-      fullResp.ok
-        ? {
-            ok: true,
-            documentText: String(fullResp.result.document_text || "").trim(),
-            serverFullDocumentText: String(fullResp.result.server_full_document_text || "").trim(),
-          }
-        : {
-            ok: false,
-            documentText: String(fullResp.document_text || "").trim(),
-            serverFullDocumentText: "",
-            errorCode: fullResp.error_code,
-          },
-    );
+    // Duplicate suppress never POSTed — do not latch generate-done / pfdHttpCompleted
+    // from an empty body (live #229: first dump then died on 60s no-pfd failsafe).
+    if (!genCall.duplicateBlocked) {
+      notifyPremiumFullDraftHttpComplete(
+        fullResp.ok
+          ? {
+              ok: true,
+              documentText: String(fullResp.result.document_text || "").trim(),
+              serverFullDocumentText: String(fullResp.result.server_full_document_text || "").trim(),
+            }
+          : {
+              ok: false,
+              documentText: String(fullResp.document_text || "").trim(),
+              serverFullDocumentText: "",
+              errorCode: fullResp.error_code,
+            },
+      );
+    }
     const premiumServerModelMs = Math.round(
       (typeof performance !== "undefined" ? performance.now() : Date.now()) - premiumRequestStartedAt,
     );

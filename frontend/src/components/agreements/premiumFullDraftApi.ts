@@ -1,4 +1,5 @@
 import { clawAgreementHeaders } from "../../agreement/agreementOrgHeaders";
+import { refreshCachedAccessToken } from "../../auth/authAccessTokenCache";
 import { shortIntakeFingerprint } from "../../lib/agreementGenerationId";
 import { apiUrl, isLawDogApiCrossOrigin } from "../../lib/clawApi";
 import { waitForBrowserOnline } from "./premiumBackendHealth";
@@ -31,7 +32,9 @@ import { stripDevContextMarkersForModelRetry } from "./premiumOutputDevContextGu
 import { enrichPremiumContextWithOperationalSynthesis } from "./proOperationalSynthesis";
 import type { ProAgreementIntelligencePacket } from "./proAgreementIntelligence";
 import {
+  markPremiumFullDraftHttpFired,
   recordPremiumNetworkCall,
+  releasePremiumFullDraftCallIfHttpNeverFired,
   type PremiumNetworkCallReason,
 } from "./paidProPremiumGenerationCallAudit";
 import {
@@ -776,27 +779,45 @@ export async function postPremiumFullDraftOnce(args: {
   markPaidProPremiumRequestStartAt();
   const requestUrl = apiUrl("/api/agreements/premium-full-draft");
   const fetchStartedAt = typeof performance !== "undefined" ? performance.now() : Date.now();
-  const res = await fetch(requestUrl, {
-    method: "POST",
-    headers: clawAgreementHeaders({
-      "Content-Type": "application/json",
-      ...(paidProPerfTraceEnabled() ? { "X-Claw-Paid-Pro-Perf-Trace": "1" } : {}),
-    }),
-    body: JSON.stringify({
-      intake_text: args.intakeText,
-      context: args.context,
-      ...(uga ? { user_gap_answers: uga } : {}),
-      ...(args.similarityRegeneration ? { similarity_regeneration: true } : {}),
-      ...((args.agreementGenerationId || "").trim()
-        ? { agreement_generation_id: (args.agreementGenerationId || "").trim() }
-        : {}),
-      ...((args.intakeFingerprint || "").trim()
-        ? { intake_fingerprint: (args.intakeFingerprint || "").trim() }
-        : {}),
-      ...((args.agreementId || "").trim() ? { agreement_id: (args.agreementId || "").trim() } : {}),
-      ...(args.networkCallReason ? { network_call_reason: args.networkCallReason } : {}),
-    }),
-    signal: args.signal,
+  // CRS / VS01 OPTIONS-only hole: attach a hydrated Bearer before preflight so the
+  // browser sends POST after OPTIONS. Stale/empty cache produced OPTIONS with no POST.
+  await refreshCachedAccessToken();
+  let res: Response;
+  try {
+    res = await fetch(requestUrl, {
+      method: "POST",
+      headers: clawAgreementHeaders({
+        "Content-Type": "application/json",
+        ...(paidProPerfTraceEnabled() ? { "X-Claw-Paid-Pro-Perf-Trace": "1" } : {}),
+      }),
+      body: JSON.stringify({
+        intake_text: args.intakeText,
+        context: args.context,
+        ...(uga ? { user_gap_answers: uga } : {}),
+        ...(args.similarityRegeneration ? { similarity_regeneration: true } : {}),
+        ...((args.agreementGenerationId || "").trim()
+          ? { agreement_generation_id: (args.agreementGenerationId || "").trim() }
+          : {}),
+        ...((args.intakeFingerprint || "").trim()
+          ? { intake_fingerprint: (args.intakeFingerprint || "").trim() }
+          : {}),
+        ...((args.agreementId || "").trim() ? { agreement_id: (args.agreementId || "").trim() } : {}),
+        ...(args.networkCallReason ? { network_call_reason: args.networkCallReason } : {}),
+      }),
+      signal: args.signal,
+    });
+  } catch (fetchErr) {
+    // OPTIONS-only / aborted fetch never POSTed — drop the invoke latch so a
+    // remount or retry can send the legitimate first Northline generate.
+    releasePremiumFullDraftCallIfHttpNeverFired({
+      agreementGenerationId: args.agreementGenerationId,
+      intakeFingerprint: args.intakeFingerprint,
+    });
+    throw fetchErr;
+  }
+  markPremiumFullDraftHttpFired({
+    agreementGenerationId: args.agreementGenerationId,
+    intakeFingerprint: args.intakeFingerprint,
   });
   const fetchMs = Math.round(
     (typeof performance !== "undefined" ? performance.now() : Date.now()) - fetchStartedAt,
