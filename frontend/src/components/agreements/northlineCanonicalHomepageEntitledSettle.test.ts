@@ -366,14 +366,17 @@ describe("canonical Northline homepage dump → entitled Pro Review", () => {
     expect(ensureBlock).toContain("entitled_rewrite_pfd_http");
     expect(ensureBlock).toContain("pickCreateReviewSettleCorpus");
     const rewriteIdx = intake.indexOf("const runEntitledPremiumImprovementRewrite = React.useCallback");
-    const rewriteHead = intake.slice(rewriteIdx, rewriteIdx + 2800);
+    const rewriteHead = intake.slice(rewriteIdx, rewriteIdx + 3600);
     const latchCheck = rewriteHead.indexOf("if (entitledPremiumRewriteInFlightRef.current) return;");
+    const processLatch = rewriteHead.indexOf("tryBeginEntitledPremiumRewriteProcessInFlight");
     const latchSet = rewriteHead.indexOf("entitledPremiumRewriteInFlightRef.current = true;");
     const skipCheck = rewriteHead.indexOf("shouldSkipEntitledRewriteForMatchingAcceptedSnapshot");
     expect(latchCheck).toBeGreaterThan(-1);
-    expect(latchSet).toBeGreaterThan(latchCheck);
+    expect(processLatch).toBeGreaterThan(latchCheck);
+    expect(latchSet).toBeGreaterThan(processLatch);
     expect(latchSet).toBeLessThan(skipCheck);
-    expect(rewriteHead).toContain("entitledPremiumRewriteInFlightRef.current = false");
+    expect(rewriteHead).toContain("releasePremiumGenerateInvokeForNewGeneration");
+    expect(rewriteHead).toContain("releaseEntitledPremiumRewriteInFlightLatch");
     const namedSettleIdx = intake.indexOf(
       "const ordinaryNamedTwoPartyReadyForSettle = shouldSkipPartyPrepForOrdinaryNamedTwoParty({",
     );
