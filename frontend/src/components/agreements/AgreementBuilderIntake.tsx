@@ -217,7 +217,10 @@ import {
   clearHomeCreateDumpIntent,
   ensureHomeCreateDumpIntent,
   isHomeCreateDumpParseStarted,
+  joinHomeCreateDumpFlight,
   markHomeCreateDumpParseStarted,
+  registerHomeCreateDumpFlight,
+  shouldJoinHomeCreateDumpSubmit,
   shouldSkipSecondHomeCreateSubmit,
   tryBeginHomeCreateDumpIntent,
 } from "../../launch/homeCreateDumpIntent";
@@ -12561,9 +12564,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             premiumCompletionSnapshot: readPremiumCompletionSnapshot(),
           }),
       });
-    if (fromHomeHandoff && shouldSkipSecondHomeCreateSubmit()) {
+    if (fromHomeHandoff && shouldJoinHomeCreateDumpSubmit()) {
       logHomeAutoGenerateSkipped("already_consumed");
       homeAutoGenerateConsumedRef.current = true;
+      await joinHomeCreateDumpFlight();
       return true;
     }
     if (fromHomeHandoff) {
@@ -12942,11 +12946,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   useLayoutEffect(() => {
     if (!homeHeroAutoGenerate || checkoutBackRestoreActive || homeAutoGenerateStartedRef.current) return;
     if (paidProEditReturnResumeActive) return;
-    // Remount after entitlement re-probe: do not start a second parse/pfd.
-    if (shouldSkipSecondHomeCreateSubmit() || isHomeCreateDumpParseStarted()) {
+    // Remount / second submit: join the in-flight dump. Do not abort fetch.
+    if (shouldJoinHomeCreateDumpSubmit() || isHomeCreateDumpParseStarted()) {
       homeAutoGenerateStartedRef.current = true;
       homeAutoGenerateConsumedRef.current = true;
       logHomeAutoGenerateSkipped("already_consumed");
+      void joinHomeCreateDumpFlight();
       return;
     }
     if (shouldSkipHomeAutoGenerateForStoredReview({ freshHomeHeroHandoff: true })) {
@@ -13000,12 +13005,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     homeAutoGenerateStartedRef.current = true;
     logHomeCreateSubmit(homeDecision.text);
     beginStarterDraftGeneration();
-    void (async () => {
+    const dumpFlight = (async () => {
       await runProductionLocalDraftParse({
         rawOverride: homeDecision.text,
         handoffSource: "home_create_submit",
       });
     })();
+    registerHomeCreateDumpFlight(dumpFlight);
+    void dumpFlight;
   }, [
     homeHeroAutoGenerate,
     checkoutBackRestoreActive,

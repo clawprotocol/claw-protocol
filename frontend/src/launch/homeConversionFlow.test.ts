@@ -165,7 +165,9 @@ describe("AgreementBuilderIntake home auto-generate (static)", () => {
     expect(intake).toContain("homeHeroAutoGenerate");
     expect(intake).toContain('handoffSource: "home_create_submit"');
     expect(intake).toContain("logHomeCreateSubmit");
-    expect(intake).toContain("shouldSkipSecondHomeCreateSubmit");
+    expect(intake).toContain("shouldJoinHomeCreateDumpSubmit");
+    expect(intake).toContain("joinHomeCreateDumpFlight");
+    expect(intake).toContain("registerHomeCreateDumpFlight");
     expect(intake).toContain("markHomeCreateDumpParseStarted");
     expect(intake).toContain("beginStarterDraftGeneration");
     expect(intake).not.toContain("deferDraftStageForFreshInput");

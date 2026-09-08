@@ -23,10 +23,16 @@ import { shortIntakeFingerprint } from "../../lib/agreementGenerationId";
 import {
   clearHomeCreateDumpIntent,
   ensureHomeCreateDumpIntent,
+  getHomeCreateDumpFetchSignal,
+  isHomeCreateDumpFetchAborted,
   isHomeCreateDumpIntentActive,
   isHomeCreateDumpParseStarted,
+  joinHomeCreateDumpFlight,
   markHomeCreateDumpParseStarted,
   readHomeCreateDumpIntent,
+  registerHomeCreateDumpFlight,
+  resolveHomeCreateDumpFetchSignal,
+  shouldJoinHomeCreateDumpSubmit,
   shouldKeepCreateEditorMountedForDump,
   shouldSkipSecondHomeCreateSubmit,
   tryBeginHomeCreateDumpIntent,
@@ -43,7 +49,7 @@ import {
   releaseEntitledPremiumRewriteInFlightLatch,
   tryBeginEntitledPremiumRewriteProcessInFlight,
 } from "./paidProPremiumGenerationCallAudit";
-import { postPremiumFullDraftOnce } from "./premiumFullDraftApi";
+import { isOptionsOnlyGhostAbort, postPremiumFullDraftOnce } from "./premiumFullDraftApi";
 
 const NORTHLINE =
   "Services agreement between Northline Robotics LLC (Jordan Lee) and Cedar Peak Analytics Inc (Sam Okonkwo). Northline delivers robotics integration; Cedar Peak provides analytics. Fee $12,500. Term 6 months. Governing law Texas.";
@@ -80,6 +86,110 @@ describe("Northline homepage dump intent (OPTIONS-only remount)", () => {
     clearCachedAccessToken();
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
+  });
+
+  it("second home-create during OPTIONS joins the same promise and does not abort fetch", async () => {
+    expect(tryBeginHomeCreateDumpIntent({ fingerprint: NORTHLINE_FP })).toBe(true);
+    markHomeCreateDumpParseStarted();
+    let resolveFlight: (v: string) => void = () => undefined;
+    const flight = new Promise<string>((resolve) => {
+      resolveFlight = resolve;
+    });
+    registerHomeCreateDumpFlight(flight);
+    const dumpSignal = getHomeCreateDumpFetchSignal();
+    expect(dumpSignal?.aborted).toBe(false);
+
+    const remountAbort = new AbortController();
+    remountAbort.abort(new DOMException("The user aborted a request.", "AbortError"));
+    expect(resolveHomeCreateDumpFetchSignal(remountAbort.signal)).toBe(dumpSignal);
+    expect(dumpSignal?.aborted).toBe(false);
+    expect(isHomeCreateDumpFetchAborted()).toBe(false);
+
+    expect(shouldJoinHomeCreateDumpSubmit()).toBe(true);
+    const joined = joinHomeCreateDumpFlight();
+    expect(tryBeginHomeCreateDumpIntent({ fingerprint: NORTHLINE_FP })).toBe(false);
+
+    resolveFlight("dump1-settled");
+    await expect(joined).resolves.toBe("dump1-settled");
+    expect(getHomeCreateDumpFetchSignal()?.aborted).toBe(false);
+  });
+
+  it("Northline-shaped dump completes pfd POST after remount abort is dropped", async () => {
+    expect(tryBeginHomeCreateDumpIntent({ fingerprint: NORTHLINE_FP })).toBe(true);
+    markHomeCreateDumpParseStarted();
+    setCachedAccessToken("northline-session-token");
+    const remountAbort = new AbortController();
+    remountAbort.abort(new DOMException("The user aborted a request.", "AbortError"));
+    const fetchMock = vi.fn().mockImplementation((_url: string, init: RequestInit) => {
+      expect(init.method).toBe("POST");
+      expect((init.signal as AbortSignal | undefined)?.aborted).toBe(false);
+      return Promise.resolve({
+        ok: true,
+        status: 200,
+        headers: { get: () => null },
+        text: async () =>
+          JSON.stringify({
+            document_text: "x".repeat(900),
+            server_full_document_text: "x".repeat(900),
+            generation_outcome: "ok",
+          }),
+      });
+    });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await postPremiumFullDraftOnce({
+      intakeText: NORTHLINE,
+      context: minimalContext,
+      signal: remountAbort.signal,
+      networkCallReason: "entitled_rewrite",
+    });
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(result.document_text.length).toBeGreaterThanOrEqual(500);
+    expect(isHomeCreateDumpFetchAborted()).toBe(false);
+  });
+
+  it("request-start then remount AbortError retries to POST (never OPTIONS-only ghost)", async () => {
+    expect(tryBeginHomeCreateDumpIntent({ fingerprint: NORTHLINE_FP })).toBe(true);
+    markHomeCreateDumpParseStarted();
+    setCachedAccessToken("northline-session-token");
+    let calls = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockImplementation(() => {
+        calls += 1;
+        if (calls === 1) {
+          return Promise.reject(new DOMException("The user aborted a request.", "AbortError"));
+        }
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          headers: { get: () => null },
+          text: async () =>
+            JSON.stringify({
+              document_text: "x".repeat(900),
+              server_full_document_text: "x".repeat(900),
+              generation_outcome: "ok",
+            }),
+        });
+      }),
+    );
+
+    expect(isOptionsOnlyGhostAbort(new DOMException("The user aborted a request.", "AbortError"))).toBe(
+      true,
+    );
+    expect(
+      isOptionsOnlyGhostAbort(new DOMException("premium_full_draft_fetch_timeout", "AbortError")),
+    ).toBe(false);
+
+    const result = await postPremiumFullDraftOnce({
+      intakeText: NORTHLINE,
+      context: minimalContext,
+      networkCallReason: "entitled_rewrite",
+    });
+    expect(result.document_text.length).toBeGreaterThanOrEqual(500);
+    expect(calls).toBe(2);
+    expect(isHomeCreateDumpFetchAborted()).toBe(false);
   });
 
   it("second home-create-submit / remount cannot start another parse while dump1 pfd is in OPTIONS", () => {
@@ -214,10 +324,12 @@ describe("Northline homepage dump intent (OPTIONS-only remount)", () => {
 
   it("intake and create page single-flight the submit instead of a new steal latch", () => {
     const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
-    const autoGenIdx = intake.indexOf("if (shouldSkipSecondHomeCreateSubmit() || isHomeCreateDumpParseStarted())");
+    const autoGenIdx = intake.indexOf("if (shouldJoinHomeCreateDumpSubmit() || isHomeCreateDumpParseStarted())");
     const parseCallIdx = intake.indexOf('handoffSource: "home_create_submit"');
     expect(autoGenIdx).toBeGreaterThan(-1);
     expect(autoGenIdx).toBeLessThan(parseCallIdx);
+    expect(intake).toContain("joinHomeCreateDumpFlight");
+    expect(intake).toContain("registerHomeCreateDumpFlight");
     expect(intake).toContain("markHomeCreateDumpParseStarted()");
     expect(intake).toContain("ensureHomeCreateDumpIntent");
     expect(intake).not.toContain("isCoherentOrdinaryNamedTwoPartyForFailsafe");
@@ -237,6 +349,8 @@ describe("Northline homepage dump intent (OPTIONS-only remount)", () => {
 
     const api = readFileSync(join(__dirname, "premiumFullDraftApi.ts"), "utf8");
     expect(api).toContain("if (!getCachedAccessToken())");
+    expect(api).toContain("resolveHomeCreateDumpFetchSignal");
+    expect(api).toContain("isOptionsOnlyGhostAbort");
     expect(api.indexOf("if (!getCachedAccessToken())")).toBeLessThan(api.indexOf("res = await fetch(requestUrl"));
 
     const audit = readFileSync(join(__dirname, "paidProPremiumGenerationCallAudit.ts"), "utf8");
