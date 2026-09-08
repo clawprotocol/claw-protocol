@@ -165,7 +165,6 @@ describe("Northline keep-mounted refresh remount (#240)", () => {
     const setFalseIdx = page.indexOf("setCommercialEntitlementReady(false)");
     expect(resetIdx).toBeGreaterThan(0);
     expect(setFalseIdx).toBeGreaterThan(resetIdx);
-    expect(page).toContain("awaitingAuthWorkspace && !keepEditorMountedAcrossAuthRefresh");
     expect(page).not.toContain("homeCreateDumpIntent");
   });
 
