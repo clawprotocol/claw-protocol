@@ -1,5 +1,5 @@
 import { clawAgreementHeaders } from "../../agreement/agreementOrgHeaders";
-import { refreshCachedAccessToken } from "../../auth/authAccessTokenCache";
+import { getCachedAccessToken, refreshCachedAccessToken } from "../../auth/authAccessTokenCache";
 import { shortIntakeFingerprint } from "../../lib/agreementGenerationId";
 import { apiUrl, isLawDogApiCrossOrigin } from "../../lib/clawApi";
 import { waitForBrowserOnline } from "./premiumBackendHealth";
@@ -780,9 +780,13 @@ export async function postPremiumFullDraftOnce(args: {
   markPaidProPremiumRequestStartAt();
   const requestUrl = apiUrl("/api/agreements/premium-full-draft");
   const fetchStartedAt = typeof performance !== "undefined" ? performance.now() : Date.now();
-  // CRS / VS01 OPTIONS-only hole: attach a hydrated Bearer before preflight so the
-  // browser sends POST after OPTIONS. Stale/empty cache produced OPTIONS with no POST.
-  await refreshCachedAccessToken();
+  // Hydrate Bearer only when the cache is empty. Parse just POSTed with this
+  // token. A getAuthSession() refresh here emits TOKEN_REFRESHED, which used
+  // to remount SimpleCreatePage (entitlement re-probe) and dual-submit create
+  // while OPTIONS was in flight (OPTIONS-only, no POST).
+  if (!getCachedAccessToken()) {
+    await refreshCachedAccessToken();
+  }
   // Arm the single-flight HTTP bit before fetch() so a remount / new-gen steal
   // cannot treat OPTIONS-in-flight as never-fired and start a second pipeline.
   markEntitledPremiumRewriteHttpStarted();

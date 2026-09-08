@@ -22,6 +22,7 @@ import {
   readCheckoutBackRestoreSnapshot,
 } from "../../components/agreements/checkoutBackRestore";
 import { shouldSkipHomeAutoGenerateForStoredReview } from "../../components/agreements/createReviewRefreshRestore";
+import { isEntitledPremiumRewriteProcessInFlight } from "../../components/agreements/paidProPremiumGenerationCallAudit";
 import { setJoyFlash, emitActionCompleted } from "../../joy/joyTelemetry";
 import {
   clearHeroIntakeHandoffAfterApply,
@@ -78,6 +79,9 @@ import {
   formatGenesisAllowanceStatusCopy,
   formatProAllowanceStatusCopy,
   shouldGateCreateEditorUntilEntitlementReady,
+  shouldKeepCreateEditorMountedAcrossAuthRefresh,
+  shouldReplaceCreatePageWithAuthWorkspaceSettling,
+  shouldResetCommercialEntitlementReadyOnAuthRefresh,
   shouldShowCreateAccessChoiceScreen,
 } from "./createEntitlementUi";
 import { useFirstSessionHint } from "../../conversion/firstExposureHints";
@@ -327,11 +331,18 @@ export function SimpleCreatePage() {
   );
   const isResumingOwnedAgreement = Boolean(readCreateReviewAgreementResumeId());
   const hasCheckoutPendingMarker = Boolean(readCreateComplexityResume()?.awaitingProCheckout);
+  const createEditorHasBeenShownRef = useRef(false);
+  const keepEditorMountedAcrossAuthRefresh = shouldKeepCreateEditorMountedAcrossAuthRefresh({
+    homeHeroAutoGenerate,
+    editorHasBeenShown: createEditorHasBeenShownRef.current,
+    entitledRewriteInFlight: isEntitledPremiumRewriteProcessInFlight(),
+  });
   const editorGatedUntilEntitlement = shouldGateCreateEditorUntilEntitlementReady({
     isAuthenticated: createAuthAuthenticated,
     commercialEntitlementReady,
     isResumingOwnedAgreement,
     hasCheckoutPendingMarker,
+    keepEditorMounted: keepEditorMountedAcrossAuthRefresh,
   });
   const showAccessChoiceScreen =
     commercialEntitlementReady && shouldShowCreateAccessChoiceScreen(createAccessVerdict);
@@ -349,7 +360,10 @@ export function SimpleCreatePage() {
     editorGatedUntilEntitlement ||
     showAccessChoiceScreen ||
     entitlementProbeBlocked ||
-    awaitingAuthWorkspace;
+    (awaitingAuthWorkspace && !keepEditorMountedAcrossAuthRefresh);
+  if (!hideAgreementEditor) {
+    createEditorHasBeenShownRef.current = true;
+  }
   const intakeInteractionBlocked =
     creationBlockedForUi || entitlementProbeBlocked || awaitingAuthWorkspace;
   const genesisWithinAllowance =
@@ -419,7 +433,15 @@ export function SimpleCreatePage() {
     if (isReallyAuthenticated && !isUserWorkspaceOrgId(getOrgId())) return;
     if (authSession?.access_token) setCachedAccessToken(authSession.access_token);
     let cancelled = false;
-    setCommercialEntitlementReady(false);
+    // Mid-dump TOKEN_REFRESHED remounted intake and dual-submitted (OPTIONS-only).
+    // Keep the painted editor / in-flight generate mounted — do not reset ready.
+    if (
+      shouldResetCommercialEntitlementReadyOnAuthRefresh({
+        keepEditorMounted: keepEditorMountedAcrossAuthRefresh,
+      })
+    ) {
+      setCommercialEntitlementReady(false);
+    }
     void fetchWorkspaceProEntitlement().then((ok) => {
       if (!cancelled) setWorkspaceProEntitled(ok);
     });
@@ -431,7 +453,13 @@ export function SimpleCreatePage() {
     return () => {
       cancelled = true;
     };
-  }, [probesReady, isReallyAuthenticated, workspaceOrgId, authSession?.access_token]);
+  }, [
+    probesReady,
+    isReallyAuthenticated,
+    workspaceOrgId,
+    authSession?.access_token,
+    keepEditorMountedAcrossAuthRefresh,
+  ]);
 
   useEffect(() => {
     if (!consumeLawdogFocusCreateIntake()) return;
@@ -659,7 +687,12 @@ export function SimpleCreatePage() {
     );
   }
 
-  if (awaitingAuthWorkspace) {
+  if (
+    shouldReplaceCreatePageWithAuthWorkspaceSettling({
+      awaitingAuthWorkspace,
+      keepEditorMounted: keepEditorMountedAcrossAuthRefresh,
+    })
+  ) {
     // Already-signed-in create/resume must not flash OAuth "Finishing sign-in".
     // When signer-setup resume is armed, keep that chrome so the settle does not
     // look like a create-prompt hop before the agreement preview mounts.

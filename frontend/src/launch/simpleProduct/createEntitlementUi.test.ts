@@ -4,6 +4,9 @@ import {
   formatProAllowanceStatusCopy,
   guestMayCreateWithoutPaywall,
   shouldGateCreateEditorUntilEntitlementReady,
+  shouldKeepCreateEditorMountedAcrossAuthRefresh,
+  shouldReplaceCreatePageWithAuthWorkspaceSettling,
+  shouldResetCommercialEntitlementReadyOnAuthRefresh,
   shouldShowCreateAccessChoiceScreen,
 } from "./createEntitlementUi";
 
@@ -25,6 +28,64 @@ describe("createEntitlementUi", () => {
         hasCheckoutPendingMarker: false,
       }),
     ).toBe(false);
+  });
+
+  it("does not remount the editor while a homepage dump or in-flight generate is live", () => {
+    expect(
+      shouldKeepCreateEditorMountedAcrossAuthRefresh({
+        homeHeroAutoGenerate: true,
+        editorHasBeenShown: false,
+        entitledRewriteInFlight: false,
+      }),
+    ).toBe(true);
+    expect(
+      shouldKeepCreateEditorMountedAcrossAuthRefresh({
+        homeHeroAutoGenerate: false,
+        editorHasBeenShown: true,
+        entitledRewriteInFlight: false,
+      }),
+    ).toBe(true);
+    expect(
+      shouldKeepCreateEditorMountedAcrossAuthRefresh({
+        homeHeroAutoGenerate: false,
+        editorHasBeenShown: false,
+        entitledRewriteInFlight: true,
+      }),
+    ).toBe(true);
+    expect(
+      shouldKeepCreateEditorMountedAcrossAuthRefresh({
+        homeHeroAutoGenerate: false,
+        editorHasBeenShown: false,
+        entitledRewriteInFlight: false,
+      }),
+    ).toBe(false);
+    expect(
+      shouldGateCreateEditorUntilEntitlementReady({
+        isAuthenticated: true,
+        commercialEntitlementReady: false,
+        isResumingOwnedAgreement: false,
+        hasCheckoutPendingMarker: false,
+        keepEditorMounted: true,
+      }),
+    ).toBe(false);
+    expect(shouldResetCommercialEntitlementReadyOnAuthRefresh({ keepEditorMounted: true })).toBe(
+      false,
+    );
+    expect(shouldResetCommercialEntitlementReadyOnAuthRefresh({ keepEditorMounted: false })).toBe(
+      true,
+    );
+    expect(
+      shouldReplaceCreatePageWithAuthWorkspaceSettling({
+        awaitingAuthWorkspace: true,
+        keepEditorMounted: true,
+      }),
+    ).toBe(false);
+    expect(
+      shouldReplaceCreatePageWithAuthWorkspaceSettling({
+        awaitingAuthWorkspace: true,
+        keepEditorMounted: false,
+      }),
+    ).toBe(true);
   });
 
   it("does not gate guests or resume/checkout continuity", () => {
