@@ -9,6 +9,17 @@
  * generation id so the second dump can POST. True same-generation double-submit
  * still dedupes.
  *
+ * #231 — #230 flipped the pair (run1 OPTIONS-only, run2 PASS). Steal-on-new-gen
+ * + bump-clears-latch let home auto-gen and the rewrite effect dual-start; the
+ * first fetch died after OPTIONS. Single-flight owner never steals a live
+ * OPTIONS/POST. Two sequential dumps both POST; cold-start first dump still POSTs.
+ *
+ * Oscillation (same entitled Pro Northline canonical dump, auth_ok, storage cleared):
+ * | Tip | run1 | run2 |
+ * | e8228a7f (#228≡#226) | FAIL OPTIONS-only | PASS pfd 200 |
+ * | ffdb420e (#229) | PASS pfd 200 | FAIL OPTIONS-only |
+ * | 80f9b93f (#230) | FAIL OPTIONS-only | PASS pfd 200 |
+ *
  * The compiler `duplicate_payload_rejected` log is a local-preview scan, not the
  * generate-invoke gate. The gate is `recordPremiumFullDraftCall` /
  * `duplicate_checkout_premium_call`.
@@ -24,9 +35,12 @@ import {
   shouldSkipPartyPrepForOrdinaryNamedTwoParty,
 } from "./multiPartyCreateReviewSettle";
 import {
+  clearPremiumGenerateLedgerPreservingLiveFlight,
   clearPremiumGenerationCallAudit,
+  isEntitledPremiumRewriteHttpStarted,
   isEntitledPremiumRewriteProcessInFlight,
   isPremiumGenerateDedupeReason,
+  markEntitledPremiumRewriteHttpStarted,
   markPremiumFullDraftHttpFired,
   readPremiumGenerationCallRecords,
   recordPremiumFullDraftCall,
@@ -240,7 +254,7 @@ describe("Northline generate-invoke duplicate payload (#229)", () => {
     ).toBe(false);
   });
 
-  it("process-global in-flight blocks a remount start and releases on new generation / bump", () => {
+  it("process-global in-flight never steals; bump preserves a live OPTIONS/POST", () => {
     expect(tryBeginEntitledPremiumRewriteProcessInFlight({ agreementGenerationId: "gen-run1" })).toBe(
       true,
     );
@@ -248,17 +262,110 @@ describe("Northline generate-invoke duplicate payload (#229)", () => {
     expect(tryBeginEntitledPremiumRewriteProcessInFlight({ agreementGenerationId: "gen-run1" })).toBe(
       false,
     );
+    // #230 steal-on-new-gen aborted the first dump's fetch (OPTIONS-only).
     expect(
       tryBeginEntitledPremiumRewriteProcessInFlight({ agreementGenerationId: "gen-after-home" }),
-    ).toBe(true);
+    ).toBe(false);
+    markEntitledPremiumRewriteHttpStarted();
+    expect(isEntitledPremiumRewriteHttpStarted()).toBe(true);
+    bumpAgreementGenerationIdForFreshSession();
+    expect(isEntitledPremiumRewriteProcessInFlight()).toBe(true);
+    expect(isEntitledPremiumRewriteHttpStarted()).toBe(true);
+    expect(
+      tryBeginEntitledPremiumRewriteProcessInFlight({ agreementGenerationId: "gen-after-bump" }),
+    ).toBe(false);
     releaseEntitledPremiumRewriteProcessInFlight();
+    expect(isEntitledPremiumRewriteProcessInFlight()).toBe(false);
     expect(tryBeginEntitledPremiumRewriteProcessInFlight({ agreementGenerationId: "gen-after-home" })).toBe(
       true,
     );
+    releaseEntitledPremiumRewriteProcessInFlight();
     bumpAgreementGenerationIdForFreshSession();
     expect(isEntitledPremiumRewriteProcessInFlight()).toBe(false);
     expect(tryBeginEntitledPremiumRewriteProcessInFlight({ agreementGenerationId: "gen-after-bump" })).toBe(
       true,
+    );
+    releaseEntitledPremiumRewriteProcessInFlight();
+  });
+
+  it("cold-start first dump still POSTs after leftover latch + mid-rewrite bump", async () => {
+    // Simulate #230 dump1 FAIL: leftover in-memory latch + bump mid-rewrite
+    // cleared the owner so the rewrite effect started a second pipeline.
+    expect(tryBeginEntitledPremiumRewriteProcessInFlight({ agreementGenerationId: "gen-stale-leftover" })).toBe(
+      true,
+    );
+    // Home submit / leftover-SoT bump must not drop the live owner.
+    bumpAgreementGenerationIdForFreshSession();
+    expect(isEntitledPremiumRewriteProcessInFlight()).toBe(true);
+    expect(
+      tryBeginEntitledPremiumRewriteProcessInFlight({ agreementGenerationId: "gen-northline-cold" }),
+    ).toBe(false);
+    releaseEntitledPremiumRewriteProcessInFlight();
+    const base = {
+      intakeText: NORTHLINE_CANONICAL,
+      originalUserIntakeRawForMerge: NORTHLINE_CANONICAL,
+      structuredDraft: structured,
+      simpleProductFlow: true,
+      partyRoleLabels: defaultIntakePartyRoleLabels(),
+      userGapAnswers: null,
+      premiumRequestIntakeFingerprint: NORTHLINE_FP,
+      isPremiumRequestStillValid: () => true,
+      parseDraft: async () => structured,
+      premiumGenerationCallReason: "entitled_rewrite" as const,
+    };
+    expect(tryBeginEntitledPremiumRewriteProcessInFlight({ agreementGenerationId: "gen-northline-cold" })).toBe(
+      true,
+    );
+    await runPremiumCompletion({ ...base, agreementGenerationId: "gen-northline-cold" });
+    expect(h.posts).toBe(1);
+    releaseEntitledPremiumRewriteProcessInFlight();
+  });
+
+  it("two sequential homepage dumps both POST after #229+#230 helpers (PASS×2)", async () => {
+    const base = {
+      intakeText: NORTHLINE_CANONICAL,
+      originalUserIntakeRawForMerge: NORTHLINE_CANONICAL,
+      structuredDraft: structured,
+      simpleProductFlow: true,
+      partyRoleLabels: defaultIntakePartyRoleLabels(),
+      userGapAnswers: null,
+      premiumRequestIntakeFingerprint: NORTHLINE_FP,
+      isPremiumRequestStillValid: () => true,
+      parseDraft: async () => structured,
+      premiumGenerationCallReason: "entitled_rewrite" as const,
+    };
+    expect(tryBeginEntitledPremiumRewriteProcessInFlight({ agreementGenerationId: "gen-dump-1" })).toBe(
+      true,
+    );
+    await runPremiumCompletion({ ...base, agreementGenerationId: "gen-dump-1" });
+    expect(h.posts).toBe(1);
+    releaseSettledPremiumGenerateInvokes();
+    releaseEntitledPremiumRewriteProcessInFlight();
+    bumpAgreementGenerationIdForFreshSession();
+    expect(isEntitledPremiumRewriteProcessInFlight()).toBe(false);
+    expect(tryBeginEntitledPremiumRewriteProcessInFlight({ agreementGenerationId: "gen-dump-2" })).toBe(
+      true,
+    );
+    await runPremiumCompletion({ ...base, agreementGenerationId: "gen-dump-2" });
+    expect(h.posts).toBe(2);
+    releaseEntitledPremiumRewriteProcessInFlight();
+  });
+
+  it("OPTIONS-in-flight never-fired release cannot re-arm a second pipeline", () => {
+    const args = {
+      reason: "entitled_rewrite" as const,
+      intakeFingerprint: NORTHLINE_FP,
+      agreementGenerationId: "gen-northline-options-inflight",
+    };
+    expect(tryBeginEntitledPremiumRewriteProcessInFlight(args)).toBe(true);
+    expect(recordPremiumFullDraftCall(args).duplicateBlocked).toBe(false);
+    markEntitledPremiumRewriteHttpStarted();
+    expect(releasePremiumFullDraftCallIfHttpNeverFired(args)).toBe(false);
+    expect(recordPremiumFullDraftCall(args).duplicateBlocked).toBe(true);
+    clearPremiumGenerateLedgerPreservingLiveFlight();
+    expect(isEntitledPremiumRewriteProcessInFlight()).toBe(true);
+    expect(tryBeginEntitledPremiumRewriteProcessInFlight({ agreementGenerationId: "gen-steal" })).toBe(
+      false,
     );
     releaseEntitledPremiumRewriteProcessInFlight();
   });
@@ -303,6 +410,18 @@ describe("Northline generate-invoke duplicate payload (#229)", () => {
     expect(intake).toContain("releaseSettledPremiumGenerateInvokes");
     expect(intake).toContain("releasePremiumGenerateInvokeForNewGeneration");
     expect(intake).toContain("tryBeginEntitledPremiumRewriteProcessInFlight");
+    expect(intake).toContain("never stolen on a new gen id");
+    const audit = readFileSync(join(__dirname, "paidProPremiumGenerationCallAudit.ts"), "utf8");
+    expect(audit).toContain("if (entitledPfdFlight) return false");
+    expect(audit).not.toContain("lastEntitledRewriteGenerationId !== genId");
+    expect(audit).toContain("clearPremiumGenerateLedgerPreservingLiveFlight");
+    expect(audit).toContain("if (entitledPfdFlight?.httpStarted) return false");
+    const api = readFileSync(join(__dirname, "premiumFullDraftApi.ts"), "utf8");
+    expect(api).toContain("markEntitledPremiumRewriteHttpStarted");
+    expect(api.indexOf("markEntitledPremiumRewriteHttpStarted()")).toBeLessThan(api.indexOf("res = await fetch(requestUrl"));
+    const bump = readFileSync(join(__dirname, "paidProSessionEligibility.ts"), "utf8");
+    expect(bump).toContain("clearPremiumGenerateLedgerPreservingLiveFlight");
+    expect(bump).not.toContain("clearPremiumGenerationCallAudit()");
     const settle = readFileSync(join(__dirname, "multiPartyCreateReviewSettle.ts"), "utf8");
     expect(settle).toContain("if (input.pfdHttpCompleted) return false");
     expect(settle).toContain("CREATE_FLOW_NAMED_TWO_PARTY_WITHOUT_PFD_FAILSAFE_MS");

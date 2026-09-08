@@ -377,6 +377,7 @@ describe("canonical Northline homepage dump → entitled Pro Review", () => {
     expect(latchSet).toBeLessThan(skipCheck);
     expect(rewriteHead).toContain("releasePremiumGenerateInvokeForNewGeneration");
     expect(rewriteHead).toContain("releaseEntitledPremiumRewriteInFlightLatch");
+    expect(rewriteHead).toContain("never stolen on a new gen id");
     const namedSettleIdx = intake.indexOf(
       "const ordinaryNamedTwoPartyReadyForSettle = shouldSkipPartyPrepForOrdinaryNamedTwoParty({",
     );
