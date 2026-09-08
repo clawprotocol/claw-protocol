@@ -27,6 +27,18 @@ describe("createEntitlementUi", () => {
     ).toBe(false);
   });
 
+  it("does not remount the editor while a homepage dump is live", () => {
+    expect(
+      shouldGateCreateEditorUntilEntitlementReady({
+        isAuthenticated: true,
+        commercialEntitlementReady: false,
+        isResumingOwnedAgreement: false,
+        hasCheckoutPendingMarker: false,
+        keepEditorMounted: true,
+      }),
+    ).toBe(false);
+  });
+
   it("does not gate guests or resume/checkout continuity", () => {
     expect(
       shouldGateCreateEditorUntilEntitlementReady({

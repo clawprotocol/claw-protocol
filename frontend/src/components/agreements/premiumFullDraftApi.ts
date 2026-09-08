@@ -1,5 +1,6 @@
 import { clawAgreementHeaders } from "../../agreement/agreementOrgHeaders";
-import { refreshCachedAccessToken } from "../../auth/authAccessTokenCache";
+import { getCachedAccessToken, refreshCachedAccessToken } from "../../auth/authAccessTokenCache";
+import { resolveHomeCreateDumpFetchSignal } from "../../launch/homeCreateDumpIntent";
 import { shortIntakeFingerprint } from "../../lib/agreementGenerationId";
 import { apiUrl, isLawDogApiCrossOrigin } from "../../lib/clawApi";
 import { waitForBrowserOnline } from "./premiumBackendHealth";
@@ -366,6 +367,15 @@ export function isPremiumFullDraftExplicitNetworkSignal(error: unknown): boolean
   if (/browser offline/i.test(msg)) return true;
   if (name === "AbortError") return true;
   return false;
+}
+
+/** Remount / second-submit abort after request-start — OPTIONS fired, POST never left. */
+export function isOptionsOnlyGhostAbort(error: unknown): boolean {
+  if (error == null) return false;
+  const name = error instanceof Error ? error.name : "";
+  const msg = error instanceof Error ? error.message : String(error);
+  if (name !== "AbortError" && !/aborted|AbortError/i.test(msg)) return false;
+  return !/premium_full_draft_fetch_timeout/i.test(msg);
 }
 
 export function isPremiumFullDraftNetworkFailure(error: unknown): boolean {
@@ -780,44 +790,57 @@ export async function postPremiumFullDraftOnce(args: {
   markPaidProPremiumRequestStartAt();
   const requestUrl = apiUrl("/api/agreements/premium-full-draft");
   const fetchStartedAt = typeof performance !== "undefined" ? performance.now() : Date.now();
-  // CRS / VS01 OPTIONS-only hole: attach a hydrated Bearer before preflight so the
-  // browser sends POST after OPTIONS. Stale/empty cache produced OPTIONS with no POST.
-  await refreshCachedAccessToken();
+  // Hydrate only when the cache is empty. Parse just POSTed with this token.
+  // A getAuthSession() refresh here fires TOKEN_REFRESHED → SimpleCreatePage
+  // remounts intake → second home-create-submit while OPTIONS is in flight.
+  if (!getCachedAccessToken()) {
+    await refreshCachedAccessToken();
+  }
   // Arm the single-flight HTTP bit before fetch() so a remount / new-gen steal
   // cannot treat OPTIONS-in-flight as never-fired and start a second pipeline.
   markEntitledPremiumRewriteHttpStarted();
+  // Dump-owned signal wins. A remount-aborted caller signal is dropped so
+  // OPTIONS-in-flight cannot become an OPTIONS-only ghost.
+  const fetchSignal = resolveHomeCreateDumpFetchSignal(args.signal);
+  const requestInit: RequestInit = {
+    method: "POST",
+    headers: clawAgreementHeaders({
+      "Content-Type": "application/json",
+      ...(paidProPerfTraceEnabled() ? { "X-Claw-Paid-Pro-Perf-Trace": "1" } : {}),
+    }),
+    body: JSON.stringify({
+      intake_text: args.intakeText,
+      context: args.context,
+      ...(uga ? { user_gap_answers: uga } : {}),
+      ...(args.similarityRegeneration ? { similarity_regeneration: true } : {}),
+      ...((args.agreementGenerationId || "").trim()
+        ? { agreement_generation_id: (args.agreementGenerationId || "").trim() }
+        : {}),
+      ...((args.intakeFingerprint || "").trim()
+        ? { intake_fingerprint: (args.intakeFingerprint || "").trim() }
+        : {}),
+      ...((args.agreementId || "").trim() ? { agreement_id: (args.agreementId || "").trim() } : {}),
+      ...(args.networkCallReason ? { network_call_reason: args.networkCallReason } : {}),
+    }),
+    signal: fetchSignal,
+  };
   let res: Response;
   try {
-    res = await fetch(requestUrl, {
-      method: "POST",
-      headers: clawAgreementHeaders({
-        "Content-Type": "application/json",
-        ...(paidProPerfTraceEnabled() ? { "X-Claw-Paid-Pro-Perf-Trace": "1" } : {}),
-      }),
-      body: JSON.stringify({
-        intake_text: args.intakeText,
-        context: args.context,
-        ...(uga ? { user_gap_answers: uga } : {}),
-        ...(args.similarityRegeneration ? { similarity_regeneration: true } : {}),
-        ...((args.agreementGenerationId || "").trim()
-          ? { agreement_generation_id: (args.agreementGenerationId || "").trim() }
-          : {}),
-        ...((args.intakeFingerprint || "").trim()
-          ? { intake_fingerprint: (args.intakeFingerprint || "").trim() }
-          : {}),
-        ...((args.agreementId || "").trim() ? { agreement_id: (args.agreementId || "").trim() } : {}),
-        ...(args.networkCallReason ? { network_call_reason: args.networkCallReason } : {}),
-      }),
-      signal: args.signal,
-    });
+    res = await fetch(requestUrl, requestInit);
   } catch (fetchErr) {
-    // OPTIONS-only / aborted fetch never POSTed — drop the invoke latch so a
-    // remount or retry can send the legitimate first Northline generate.
-    releasePremiumFullDraftCallIfHttpNeverFired({
-      agreementGenerationId: args.agreementGenerationId,
-      intakeFingerprint: args.intakeFingerprint,
-    });
-    throw fetchErr;
+    // Request-start already logged / httpStarted armed. A remount AbortError
+    // after OPTIONS must not stay an OPTIONS-only ghost — retry on the dump-
+    // owned signal (never abort that controller from the second submit).
+    const dumpLive = resolveHomeCreateDumpFetchSignal(null);
+    if (isOptionsOnlyGhostAbort(fetchErr) && dumpLive && !dumpLive.aborted) {
+      res = await fetch(requestUrl, { ...requestInit, signal: dumpLive });
+    } else {
+      releasePremiumFullDraftCallIfHttpNeverFired({
+        agreementGenerationId: args.agreementGenerationId,
+        intakeFingerprint: args.intakeFingerprint,
+      });
+      throw fetchErr;
+    }
   }
   markPremiumFullDraftHttpFired({
     agreementGenerationId: args.agreementGenerationId,
@@ -1068,7 +1091,11 @@ export async function postPremiumFullDraftWithRetry(
   recordPaidProPremiumHttpFetchTimeoutMs(PREMIUM_FULL_DRAFT_FETCH_TIMEOUT_MS);
 
   while (networkAttempt < PREMIUM_FULL_DRAFT_MAX_NETWORK_ATTEMPTS) {
-    if (args.signal?.aborted) {
+    const dumpOwned = resolveHomeCreateDumpFetchSignal(args.signal);
+    // Remount abort after request-start is a ghost — retry. Only a live
+    // dump-owned (or caller) signal that is already aborted *before* any
+    // attempt, with no dump owner, is terminal.
+    if (args.signal?.aborted && !dumpOwned && totalAttempts === 0) {
       logPremiumNetworkClassification({
         cause: "request_aborted_user",
         recoverable: false,
@@ -1125,12 +1152,13 @@ export async function postPremiumFullDraftWithRetry(
         new DOMException("premium_full_draft_fetch_timeout", "AbortError"),
       );
     }, PREMIUM_FULL_DRAFT_FETCH_TIMEOUT_MS);
-    const fetchSignal = args.signal
+    const ownerSignal = resolveHomeCreateDumpFetchSignal(args.signal);
+    const fetchSignal = ownerSignal
       ? (() => {
           if (typeof AbortSignal !== "undefined" && "any" in AbortSignal) {
-            return AbortSignal.any([args.signal, fetchTimeoutController.signal]);
+            return AbortSignal.any([ownerSignal, fetchTimeoutController.signal]);
           }
-          return args.signal;
+          return ownerSignal;
         })()
       : fetchTimeoutController.signal;
     try {

@@ -44,6 +44,7 @@ import {
   bumpAgreementGenerationIdForFreshSession,
   clearCurrentSessionProEntitlementMarkers,
 } from "../components/agreements/paidProSessionEligibility";
+import { clearHomeCreateDumpIntent } from "./homeCreateDumpIntent";
 import { resetHeroHandoffForCreateNavigationWithoutPayload } from "./heroIntakePrefill";
 import { clearLawdogEntryContext, setLawdogEntryContext } from "./lawdogEntryContext";
 import { clearCreatorDashboardSignerSetupResume } from "./creatorDashboardReviewLinkRouting";
@@ -185,6 +186,8 @@ export function initializeNewAgreementSession(opts?: {
   bumpAgreementGenerationIdForFreshSession();
   clearCurrentSessionProEntitlementMarkers();
   clearHomeAnonymousCreateOrigin("new_agreement_session");
+  // Sequential homepage dump 2: drop dump 1 leftover so the next submit can POST.
+  clearHomeCreateDumpIntent();
 
   const clearedInMemoryModules: string[] = [];
   clearStalePaidProAuthorityForFreshFreeStarter({ preserveCheckoutReturn: false });
