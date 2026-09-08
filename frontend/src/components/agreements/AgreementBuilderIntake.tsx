@@ -7212,12 +7212,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     const rewriteGenerationId = getOrInitSessionAgreementGenerationId();
     releasePremiumGenerateInvokeForNewGeneration(rewriteGenerationId);
     if (entitledPremiumRewriteInFlightRef.current) return;
-    // Latch before snapshot / party-prep work. Home auto-generate + entitled
-    // rewrite effect otherwise both pass this check, start two pipelines
-    // (parse 200×2), and the first premium-full-draft dies OPTIONS-only.
-    // Process-global latch covers Review→Home remount (#230): the instance
-    // ref is fresh but a leftover in-flight / settled ledger still aborted
-    // the second dump's first pfd POST.
+    // Single-flight owner before snapshot / party-prep. Home auto-generate +
+    // entitled rewrite effect otherwise both start (parse 200×2) and the first
+    // premium-full-draft dies OPTIONS-only. Process-global owner survives
+    // remount (#230) and is never stolen on a new gen id (#231): steal +
+    // bump-clear aborted the cold-start first POST and flipped PASS×2.
     if (!tryBeginEntitledPremiumRewriteProcessInFlight({ agreementGenerationId: rewriteGenerationId })) {
       return;
     }

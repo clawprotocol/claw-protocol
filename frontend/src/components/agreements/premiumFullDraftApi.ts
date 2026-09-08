@@ -32,6 +32,7 @@ import { stripDevContextMarkersForModelRetry } from "./premiumOutputDevContextGu
 import { enrichPremiumContextWithOperationalSynthesis } from "./proOperationalSynthesis";
 import type { ProAgreementIntelligencePacket } from "./proAgreementIntelligence";
 import {
+  markEntitledPremiumRewriteHttpStarted,
   markPremiumFullDraftHttpFired,
   recordPremiumNetworkCall,
   releasePremiumFullDraftCallIfHttpNeverFired,
@@ -782,6 +783,9 @@ export async function postPremiumFullDraftOnce(args: {
   // CRS / VS01 OPTIONS-only hole: attach a hydrated Bearer before preflight so the
   // browser sends POST after OPTIONS. Stale/empty cache produced OPTIONS with no POST.
   await refreshCachedAccessToken();
+  // Arm the single-flight HTTP bit before fetch() so a remount / new-gen steal
+  // cannot treat OPTIONS-in-flight as never-fired and start a second pipeline.
+  markEntitledPremiumRewriteHttpStarted();
   let res: Response;
   try {
     res = await fetch(requestUrl, {
