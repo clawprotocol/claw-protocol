@@ -221,7 +221,6 @@ import {
   markHomeCreateDumpParseStarted,
   registerHomeCreateDumpFlight,
   shouldJoinHomeCreateDumpSubmit,
-  shouldSkipSecondHomeCreateSubmit,
   tryBeginHomeCreateDumpIntent,
 } from "../../launch/homeCreateDumpIntent";
 import { logHomeCreateSubmit } from "../../launch/homeCreateSubmit";
