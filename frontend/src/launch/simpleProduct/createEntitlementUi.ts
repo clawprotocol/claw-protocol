@@ -11,10 +11,7 @@ export function shouldGateCreateEditorUntilEntitlementReady(args: {
   commercialEntitlementReady: boolean;
   isResumingOwnedAgreement: boolean;
   hasCheckoutPendingMarker: boolean;
-  /** Live homepage dump / entitled rewrite — do not unmount the editor. */
-  keepEditorMounted?: boolean;
 }): boolean {
-  if (args.keepEditorMounted) return false;
   if (!args.isAuthenticated) return false;
   if (args.isResumingOwnedAgreement || args.hasCheckoutPendingMarker) return false;
   return !args.commercialEntitlementReady;

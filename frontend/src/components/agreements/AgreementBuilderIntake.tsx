@@ -213,16 +213,6 @@ import {
   shouldRefuseAfterPayPremiumCompletionForMissingGrant,
 } from "../../launch/checkoutReturnEntitlement";
 import { resumeAfterPayPersistForProGeneration } from "../../launch/afterPayPersistResume";
-import {
-  clearHomeCreateDumpIntent,
-  ensureHomeCreateDumpIntent,
-  isHomeCreateDumpParseStarted,
-  joinHomeCreateDumpFlight,
-  markHomeCreateDumpParseStarted,
-  registerHomeCreateDumpFlight,
-  shouldJoinHomeCreateDumpSubmit,
-  tryBeginHomeCreateDumpIntent,
-} from "../../launch/homeCreateDumpIntent";
 import { logHomeCreateSubmit } from "../../launch/homeCreateSubmit";
 import {
   getStarterProRefineCtaExperiment,
@@ -7221,7 +7211,6 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     const finalizeCanonicalPaidProPipelineSuccess = planFinalizeCanonicalPaidProPipelineSuccess;
     const rewriteGenerationId = getOrInitSessionAgreementGenerationId();
     releasePremiumGenerateInvokeForNewGeneration(rewriteGenerationId);
-    ensureHomeCreateDumpIntent({ fingerprint: rewriteGenerationId });
     if (entitledPremiumRewriteInFlightRef.current) return;
     // Single-flight owner before snapshot / party-prep. Home auto-generate +
     // entitled rewrite effect otherwise both start (parse 200×2) and the first
@@ -12563,12 +12552,6 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             premiumCompletionSnapshot: readPremiumCompletionSnapshot(),
           }),
       });
-    if (fromHomeHandoff && shouldJoinHomeCreateDumpSubmit()) {
-      logHomeAutoGenerateSkipped("already_consumed");
-      homeAutoGenerateConsumedRef.current = true;
-      await joinHomeCreateDumpFlight();
-      return true;
-    }
     if (fromHomeHandoff) {
       resetStalePaidReviewShellForFreeStarter("home_create_submit", {
         // TEST547/549 latch-before-settle happens in the home layout effect.
@@ -12791,9 +12774,6 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       });
       return true;
     } catch {
-      if (fromHomeHandoff) {
-        clearHomeCreateDumpIntent();
-      }
       setDisplayPhase("intake");
       setCreateFlowPhase("capturing_input");
       setCreateUiStage(CreateUiStage.INPUT);
@@ -12945,14 +12925,6 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   useLayoutEffect(() => {
     if (!homeHeroAutoGenerate || checkoutBackRestoreActive || homeAutoGenerateStartedRef.current) return;
     if (paidProEditReturnResumeActive) return;
-    // Remount / second submit: join the in-flight dump. Do not abort fetch.
-    if (shouldJoinHomeCreateDumpSubmit() || isHomeCreateDumpParseStarted()) {
-      homeAutoGenerateStartedRef.current = true;
-      homeAutoGenerateConsumedRef.current = true;
-      logHomeAutoGenerateSkipped("already_consumed");
-      void joinHomeCreateDumpFlight();
-      return;
-    }
     if (shouldSkipHomeAutoGenerateForStoredReview({ freshHomeHeroHandoff: true })) {
       homeAutoGenerateConsumedRef.current = true;
       return;
@@ -12999,19 +12971,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       return;
     }
     writeOriginalUserIntakeRawAtDraftCommit(homeDecision.text);
-    tryBeginHomeCreateDumpIntent({ fingerprint: shortIntakeFingerprint(homeDecision.text) });
-    markHomeCreateDumpParseStarted();
     homeAutoGenerateStartedRef.current = true;
     logHomeCreateSubmit(homeDecision.text);
     beginStarterDraftGeneration();
-    const dumpFlight = (async () => {
+    void (async () => {
       await runProductionLocalDraftParse({
         rawOverride: homeDecision.text,
         handoffSource: "home_create_submit",
       });
     })();
-    registerHomeCreateDumpFlight(dumpFlight);
-    void dumpFlight;
   }, [
     homeHeroAutoGenerate,
     checkoutBackRestoreActive,
