@@ -25,6 +25,8 @@ import {
 import {
   resolveCreateFlowEntitlementSyncForSubmit,
   shouldAwaitNetworkEntitlementOnCreateSubmit,
+  shouldRemountAgreementBuilderIntakeOnEntitlementTick,
+  shouldStartCreateFromPaidProShell,
   shouldStartRewriteFromEntitlementTransition,
 } from "./createFlowEntitlementTransition";
 
@@ -130,5 +132,45 @@ describe("create-flow entitlement transition (#240)", () => {
     expect(intake).not.toContain("homeCreateDumpIntent");
     expect(intake).not.toContain("shouldJoinHomeCreateDumpSubmit");
     expect(intake).not.toContain("shouldSkipSecondHomeCreateSubmit");
+  });
+
+  it("starts the create shell from paid_pro when the workspace is already entitled", () => {
+    expect(shouldStartCreateFromPaidProShell({ workspaceAlreadyEntitled: true })).toBe(true);
+    expect(shouldStartCreateFromPaidProShell({ workspaceAlreadyEntitled: false })).toBe(false);
+  });
+
+  it("does not remount AgreementBuilderIntake when an already-paid Pro entitlement tick overlays", () => {
+    expect(
+      shouldRemountAgreementBuilderIntakeOnEntitlementTick({
+        keepEditorMounted: true,
+        hideAgreementEditor: false,
+        previousIntakeKey: "create-intake-stable",
+        nextIntakeKey: "create-intake-stable",
+      }),
+    ).toBe(false);
+    expect(
+      shouldRemountAgreementBuilderIntakeOnEntitlementTick({
+        keepEditorMounted: true,
+        hideAgreementEditor: true,
+        previousIntakeKey: "create-intake-stable",
+        nextIntakeKey: "create-intake-stable",
+      }),
+    ).toBe(false);
+    expect(
+      shouldRemountAgreementBuilderIntakeOnEntitlementTick({
+        keepEditorMounted: false,
+        hideAgreementEditor: true,
+        previousIntakeKey: "create-intake-stable",
+        nextIntakeKey: "create-intake-stable",
+      }),
+    ).toBe(true);
+    expect(
+      shouldRemountAgreementBuilderIntakeOnEntitlementTick({
+        keepEditorMounted: false,
+        hideAgreementEditor: false,
+        previousIntakeKey: "create-intake-stable",
+        nextIntakeKey: "free",
+      }),
+    ).toBe(true);
   });
 });

@@ -3,7 +3,10 @@ import {
   formatGenesisAllowanceStatusCopy,
   formatProAllowanceStatusCopy,
   guestMayCreateWithoutPaywall,
+  resolveStableCreateIntakeMountKey,
+  shouldChangeCreateIntakeMountKeyOnEntitlementTick,
   shouldGateCreateEditorUntilEntitlementReady,
+  shouldHideAgreementEditor,
   shouldKeepCreateEditorMountedAcrossAuthRefresh,
   shouldReplaceCreatePageWithAuthWorkspaceSettling,
   shouldResetCommercialEntitlementReadyOnAuthRefresh,
@@ -57,6 +60,14 @@ describe("createEntitlementUi", () => {
         homeHeroAutoGenerate: false,
         editorHasBeenShown: false,
         entitledRewriteInFlight: false,
+        alreadyEntitledPro: true,
+      }),
+    ).toBe(true);
+    expect(
+      shouldKeepCreateEditorMountedAcrossAuthRefresh({
+        homeHeroAutoGenerate: false,
+        editorHasBeenShown: false,
+        entitledRewriteInFlight: false,
       }),
     ).toBe(false);
     expect(
@@ -83,6 +94,66 @@ describe("createEntitlementUi", () => {
     expect(
       shouldReplaceCreatePageWithAuthWorkspaceSettling({
         awaitingAuthWorkspace: true,
+        keepEditorMounted: false,
+      }),
+    ).toBe(true);
+  });
+
+  it("already-entitled Pro dump never hides ABI or changes its mount key on entitlement tick", () => {
+    const keep = shouldKeepCreateEditorMountedAcrossAuthRefresh({
+      homeHeroAutoGenerate: true,
+      editorHasBeenShown: false,
+      entitledRewriteInFlight: false,
+      alreadyEntitledPro: true,
+    });
+    expect(keep).toBe(true);
+    expect(
+      shouldHideAgreementEditor({
+        editorGatedUntilEntitlement: true,
+        showAccessChoiceScreen: false,
+        entitlementProbeBlocked: false,
+        awaitingAuthWorkspace: true,
+        keepEditorMounted: keep,
+      }),
+    ).toBe(false);
+    expect(
+      shouldHideAgreementEditor({
+        editorGatedUntilEntitlement: false,
+        showAccessChoiceScreen: true,
+        entitlementProbeBlocked: true,
+        awaitingAuthWorkspace: false,
+        keepEditorMounted: keep,
+      }),
+    ).toBe(false);
+    const beforeReady = resolveStableCreateIntakeMountKey({
+      usingTemplate: false,
+      pasteOnly: false,
+      heroHandoff: { text: "Northline Robotics LLC services", voiceFinalize: false },
+      alreadyEntitledPro: false,
+      homeHeroAutoGenerate: true,
+    });
+    const afterReady = resolveStableCreateIntakeMountKey({
+      usingTemplate: false,
+      pasteOnly: false,
+      heroHandoff: { text: "Northline Robotics LLC services", voiceFinalize: false },
+      alreadyEntitledPro: true,
+      homeHeroAutoGenerate: true,
+    });
+    expect(beforeReady).toBe("create-intake-stable");
+    expect(afterReady).toBe(beforeReady);
+    expect(
+      shouldChangeCreateIntakeMountKeyOnEntitlementTick({
+        previousKey: beforeReady,
+        nextKey: afterReady,
+        keepEditorMounted: keep,
+      }),
+    ).toBe(false);
+    expect(
+      shouldHideAgreementEditor({
+        editorGatedUntilEntitlement: true,
+        showAccessChoiceScreen: false,
+        entitlementProbeBlocked: false,
+        awaitingAuthWorkspace: false,
         keepEditorMounted: false,
       }),
     ).toBe(true);
