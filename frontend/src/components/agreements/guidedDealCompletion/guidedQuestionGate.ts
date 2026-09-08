@@ -143,29 +143,23 @@ export function resolveGuidedQuestionGateDecision(args: {
   intakeText?: string | null;
   bodyText?: string | null;
   draft?: ParsedDraftShape | null;
-  /** OpenAI critical missing terms — a long invented corpus must not override. */
-  openaiCriticalUnresolved?: boolean;
 }): GuidedQuestionGateDecision {
   const corpusLen = Math.max(0, args.corpusLen);
-  const openaiCriticalUnresolved = Boolean(args.openaiCriticalUnresolved);
   const minimumSubstancePassed = assessGuidedMinimumSubstance({
     bodyText: args.bodyText,
     intakeText: args.intakeText,
     draft: args.draft ?? null,
   });
   const materialReviewAllowed =
-    !openaiCriticalUnresolved &&
-    corpusLen >= SEND_HANDOFF_AUTHORITATIVE_MIN_LEN &&
-    minimumSubstancePassed;
+    corpusLen >= SEND_HANDOFF_AUTHORITATIVE_MIN_LEN && minimumSubstancePassed;
   const { fatalCount, optionalCount, fatalIds, optionalIds } = countUnresolvedGuidedQuestions(args.session);
   const reasons: string[] = [];
   if (fatalCount > 0) reasons.push(`fatal_unresolved:${fatalIds.join(",")}`);
   if (optionalCount > 0) reasons.push(`optional_unresolved:${optionalIds.join(",")}`);
   if (!minimumSubstancePassed) reasons.push("minimum_substance_failed");
   if (corpusLen < SEND_HANDOFF_AUTHORITATIVE_MIN_LEN) reasons.push("corpus_below_min");
-  if (openaiCriticalUnresolved) reasons.push("openai_critical_unresolved");
 
-  const blocked = openaiCriticalUnresolved || (fatalCount > 0 && !materialReviewAllowed);
+  const blocked = fatalCount > 0 && !materialReviewAllowed;
 
   return {
     blocked,

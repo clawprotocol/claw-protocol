@@ -293,13 +293,11 @@ describe("canonical Northline homepage dump → entitled Pro Review", () => {
     expect(vs01AttachIdx).toBeGreaterThan(-1);
     expect(entitledPlanIdx).toBeGreaterThan(vs01AttachIdx);
     expect(prepareIdx).toBeGreaterThan(entitledPlanIdx);
-    const planBlock = intake.slice(entitledPlanIdx, entitledPlanIdx + 6200);
+    const planBlock = intake.slice(entitledPlanIdx, entitledPlanIdx + 4200);
     expect(planBlock).toContain("getLastCommerciallyUsableAuthorityCandidate");
     expect(planBlock).toContain("lastCommerciallyUsableCandidate");
     expect(planBlock).toContain("ordinaryNamedTwoPartyReady");
     expect(planBlock).not.toContain("currentDumpOrdinaryNamedTwoPartyReady");
-    expect(planBlock).toContain("clarityHold: entitledClarityHold");
-    expect(planBlock).toContain("entitledPaidShellPlan.askClarity");
     expect(planBlock).toContain("setPremiumPostCheckoutPhase(null)");
     expect(planBlock).toContain("setDisplayPhase(\"review\")");
     expect(planBlock).toContain("entitledPaidShellPlan.failClosed");
@@ -344,10 +342,8 @@ describe("canonical Northline homepage dump → entitled Pro Review", () => {
     expect(intake).toContain("setDisplayPhase(premiumProcessingFailsafeOverlayDismiss.displayPhase)");
     expect(intake).toContain("setPremiumAuthoritativeRequestInFlight(false)");
     const settleIdx = intake.indexOf("const settle =");
-    const settleBlock = intake.slice(settleIdx, settleIdx + 520);
+    const settleBlock = intake.slice(settleIdx, settleIdx + 280);
     expect(settleBlock).toContain("!premiumProcessingWithoutPfdFailClosed &&");
-    expect(settleBlock).toContain("!plan.askClarity");
-    expect(settleBlock).toContain("openaiClarityHoldRef.current?.hold");
     expect(settleBlock).toContain("Boolean(plan.corpus)");
     const plannerGenerateCompleteSites = [
       intake.slice(
