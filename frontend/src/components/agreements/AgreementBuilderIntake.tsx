@@ -164,6 +164,11 @@ import {
 import { StarterMultiPartyProGatePanel } from "./StarterMultiPartyProGatePanel";
 import { AgreementIntakeClarificationPanel } from "./AgreementIntakeClarificationPanel";
 import type { AgreementIntakeClarification } from "./agreementIntakeClarification";
+import {
+  logOpenAiClarityReviewHold,
+  resolveOpenAiClarityReviewHold,
+  type OpenAiClarityReviewHold,
+} from "./openaiClarityReviewHold";
 import { looksLikeRefinementIntent } from "./reviewRefineIntent";
 import { mergeProPreservingRefineParsed } from "./reviewRefineMerge";
 import { PremiumProGenerationWaitPanel } from "./PremiumProGenerationWaitPanel";
@@ -3835,7 +3840,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   const [premiumGenerateCompleted, setPremiumGenerateCompleted] = useState(false);
   const premiumGenerateCompletedRef = useRef(false);
   /** Entitled rewrite: pfd HTTP completion (not full pipeline return) is generate-done. */
-  const entitledRewritePfdHttpOutcomeRef = useRef<"idle" | "http_complete" | "fail_closed">("idle");
+  const entitledRewritePfdHttpOutcomeRef = useRef<"idle" | "http_complete" | "fail_closed" | "clarity_ask">(
+    "idle",
+  );
+  const openaiClarityHoldRef = useRef<OpenAiClarityReviewHold | null>(null);
   /**
    * Junk premium-processing hang: overlay start + tick so the existing 15s
    * generating-without-pipeline failsafe can fire when pfd HTTP never completes.
@@ -7350,6 +7358,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     premiumGenerateCompletedRef.current = false;
     setPremiumGenerateCompleted(false);
     entitledRewritePfdHttpOutcomeRef.current = "idle";
+    openaiClarityHoldRef.current = null;
     resetPremiumAuthorityShorterThanAcceptedChurn();
     setPremiumPostCheckoutPhase("processing");
     setPremiumPipelineUserMessage(CLAW_PREMIUM_PREPARING_AGREEMENT_COPY);
@@ -7418,6 +7427,43 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         premiumGenerationCallReason: "entitled_rewrite",
         onPremiumFullDraftHttpComplete: (info) => {
           const pfdHttpBody = (info.serverFullDocumentText || info.documentText || "").trim();
+          const clarityHold = resolveOpenAiClarityReviewHold({
+            body: pfdHttpBody,
+            intakeText: mergedIntake || raw,
+            intelligence: info.agreementIntelligence,
+            missingMaterialInfo: info.missingMaterialInfo,
+          });
+          openaiClarityHoldRef.current = clarityHold;
+          logOpenAiClarityReviewHold(clarityHold);
+          if (clarityHold.hold) {
+            lastPremiumWinningCorpusRef.current = "";
+            premiumPipelineOutputBodyRef.current = "";
+            hydratedPremiumBodyRef.current = "";
+            lastKnownGoodAuthoritativeDraftRef.current = "";
+            entitledRewritePfdHttpOutcomeRef.current = clarityHold.ask ? "clarity_ask" : "fail_closed";
+            premiumGenerateCompletedRef.current = true;
+            setPremiumGenerateCompleted(true);
+            if (clarityHold.ask && clarityHold.clarification) {
+              setAgreementDocumentText("");
+              setIntakeClarification(clarityHold.clarification);
+              setHardError(null);
+              setPremiumPostCheckoutPhase(null);
+              setPremiumPipelineUserMessage(null);
+              setLoading(false);
+              setCreateFlowPhase("capturing_input");
+              setDisplayPhase("intake");
+              setCreateUiStage(CreateUiStage.INPUT);
+              setJourneyActionFeedback({
+                kind: "blocked",
+                actionId: "create_agreement",
+                title: clarityHold.clarification.title,
+                body: clarityHold.clarification.why,
+                remedyLabel: "Answer the questions",
+                focusSelector: "textarea",
+              });
+            }
+            return;
+          }
           if (pfdHttpBody) {
             guardPaidProAcceptedServerFullDraftCommit({
               candidateText: pfdHttpBody,
@@ -7442,19 +7488,32 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           setPremiumGenerateCompleted(true);
         },
       });
-      if (String(entitledRewritePfdHttpOutcomeRef.current) === "fail_closed") {
+      if (
+        String(entitledRewritePfdHttpOutcomeRef.current) === "fail_closed" ||
+        String(entitledRewritePfdHttpOutcomeRef.current) === "clarity_ask"
+      ) {
         setLoading(false);
         return;
       }
       premiumGenerateCompletedRef.current = true;
       setPremiumGenerateCompleted(true);
       {
+        const lateHold = resolveOpenAiClarityReviewHold({
+          body: result.winningPremiumBodyText,
+          intakeText: mergedIntake || raw,
+          intelligence: result.agreementIntelligence,
+          missingMaterialInfo: result.recommendedClarifications?.items,
+        });
+        if (lateHold.hold) {
+          openaiClarityHoldRef.current = lateHold;
+          logOpenAiClarityReviewHold(lateHold);
+        }
         const immediateSettleCorpus = pickCreateReviewSettleCorpus({
           winningPremiumBodyText: result.winningPremiumBodyText,
           premiumRenderSource: result.premiumRenderSource,
           acceptedAuthoritativePlain: acceptedReviewCorpusRef.current,
         });
-        if (immediateSettleCorpus) {
+        if (immediateSettleCorpus && !openaiClarityHoldRef.current?.hold) {
           lastPremiumWinningCorpusRef.current = immediateSettleCorpus;
           premiumPipelineOutputBodyRef.current = immediateSettleCorpus;
           if (!acceptedReviewCorpusRef.current) acceptedReviewCorpusRef.current = immediateSettleCorpus;
@@ -7645,6 +7704,16 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           corpus: vs01GateAfterGenerate.corpus || result.winningPremiumBodyText,
         },
       );
+      const entitledClarityHold =
+        openaiClarityHoldRef.current ||
+        resolveOpenAiClarityReviewHold({
+          body:
+            result.winningPremiumBodyText || lastPremiumWinningCorpusRef.current || "",
+          intakeText: mergedIntake || raw,
+          intelligence: result.agreementIntelligence,
+          missingMaterialInfo: result.recommendedClarifications?.items,
+        });
+      openaiClarityHoldRef.current = entitledClarityHold;
       const entitledPaidShellPlan = planPostGenerateCreateReviewSettleOrFailClosed({
         generateComplete: true,
         vs01GateBlockedWithoutSelectedFinal: vs01CorpusGateBlockedWithoutSelectedFinalRef.current,
@@ -7665,7 +7734,32 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         selectedFinalCorpus: vs01GateAfterGenerate.allowed
           ? vs01GateAfterGenerate.corpus || result.winningPremiumBodyText
           : "",
+        clarityHold: entitledClarityHold,
       });
+      if (entitledPaidShellPlan.askClarity && entitledClarityHold.clarification) {
+        lastPremiumWinningCorpusRef.current = "";
+        premiumPipelineOutputBodyRef.current = "";
+        hydratedPremiumBodyRef.current = "";
+        lastKnownGoodAuthoritativeDraftRef.current = "";
+        setAgreementDocumentText("");
+        setIntakeClarification(entitledClarityHold.clarification);
+        setHardError(null);
+        setPremiumPostCheckoutPhase(null);
+        setPremiumPipelineUserMessage(null);
+        setLoading(false);
+        setCreateFlowPhase("capturing_input");
+        setDisplayPhase("intake");
+        setCreateUiStage(CreateUiStage.INPUT);
+        setJourneyActionFeedback({
+          kind: "blocked",
+          actionId: "create_agreement",
+          title: entitledClarityHold.clarification.title,
+          body: entitledClarityHold.clarification.why,
+          remedyLabel: "Answer the questions",
+          focusSelector: "textarea",
+        });
+        return;
+      }
       if (entitledPaidShellPlan.settleReview && entitledPaidShellPlan.corpus) {
         // Dismiss Generating now — do not wait for persist/GET/canonical (#211 hang).
         lastPremiumWinningCorpusRef.current = entitledPaidShellPlan.corpus;
@@ -18608,6 +18702,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       intakeText: currentPremiumMergedIntakeKey || intakeCombined,
       bodyText: agreementDocumentText || lastKnownGoodAuthoritativeDraftRef.current,
       draft: (reviewDraft ?? draft) as ParsedDraftShape | null,
+      openaiCriticalUnresolved: Boolean(
+        openaiClarityHoldRef.current?.hold && openaiClarityHoldRef.current?.ask,
+      ),
     });
   }, [
     guidedCompletionSession,
@@ -26645,9 +26742,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       getLatchedAcceptedServerFullDraftAuthority()?.body ||
       "",
     selectedFinalCorpus: vs01FinalCorpusGate.allowed ? vs01FinalCorpusGate.corpus : "",
+    clarityHold: openaiClarityHoldRef.current,
   });
   const vs01GateCorpusCommerciallyUsable =
-    Boolean(vs01FinalCorpusGate.allowed) ||
+    !openaiClarityHoldRef.current?.hold &&
+    (Boolean(vs01FinalCorpusGate.allowed) ||
     postGenerateCreateReviewSettlePlan.settleReview ||
     shouldSettleProReviewAfterPremiumFullDraft({
       winningPremiumBodyText:
@@ -26663,7 +26762,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         "",
       vs01SelectedFinal: vs01FinalCorpusGate.allowed,
       selectedFinalCorpus: vs01FinalCorpusGate.allowed ? vs01FinalCorpusGate.corpus : "",
-    });
+    }));
   const postGenerateAuthorityChurn = resolvePostGenerateAuthorityChurnOverlayDecision({
     generateComplete:
       premiumGenerateCompleted || (authorityChurnActive && !ordinaryNamedTwoPartyReadyForSettle),
@@ -26805,9 +26904,28 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         getLatchedAcceptedServerFullDraftAuthority()?.body ||
         "",
       selectedFinalCorpus: vs01FinalCorpusGate.allowed ? vs01FinalCorpusGate.corpus : "",
+      clarityHold: openaiClarityHoldRef.current,
     });
+    if (plan.askClarity && openaiClarityHoldRef.current?.clarification) {
+      lastPremiumWinningCorpusRef.current = "";
+      premiumPipelineOutputBodyRef.current = "";
+      hydratedPremiumBodyRef.current = "";
+      lastKnownGoodAuthoritativeDraftRef.current = "";
+      setAgreementDocumentText("");
+      setIntakeClarification(openaiClarityHoldRef.current.clarification);
+      setHardError(null);
+      setPremiumPostCheckoutPhase(null);
+      setPremiumPipelineUserMessage(null);
+      setLoading(false);
+      setCreateFlowPhase("capturing_input");
+      setDisplayPhase("intake");
+      setCreateUiStage(CreateUiStage.INPUT);
+      return;
+    }
     const settle =
       !premiumProcessingWithoutPfdFailClosed &&
+      !plan.askClarity &&
+      !openaiClarityHoldRef.current?.hold &&
       (plan.settleReview ||
         postGenerateAuthorityChurn.settleReview ||
         vs01FinalCorpusGate.allowed ||

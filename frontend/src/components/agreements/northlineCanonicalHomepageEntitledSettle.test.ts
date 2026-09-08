@@ -342,8 +342,10 @@ describe("canonical Northline homepage dump → entitled Pro Review", () => {
     expect(intake).toContain("setDisplayPhase(premiumProcessingFailsafeOverlayDismiss.displayPhase)");
     expect(intake).toContain("setPremiumAuthoritativeRequestInFlight(false)");
     const settleIdx = intake.indexOf("const settle =");
-    const settleBlock = intake.slice(settleIdx, settleIdx + 280);
+    const settleBlock = intake.slice(settleIdx, settleIdx + 520);
     expect(settleBlock).toContain("!premiumProcessingWithoutPfdFailClosed &&");
+    expect(settleBlock).toContain("!plan.askClarity");
+    expect(settleBlock).toContain("openaiClarityHoldRef.current?.hold");
     expect(settleBlock).toContain("Boolean(plan.corpus)");
     const plannerGenerateCompleteSites = [
       intake.slice(
