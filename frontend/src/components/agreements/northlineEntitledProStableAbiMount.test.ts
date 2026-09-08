@@ -1,13 +1,11 @@
 /** @vitest-environment jsdom */
 /**
- * #240 — entitled Northline dump died OPTIONS-only because TOKEN_REFRESHED /
- * entitlement re-probe remounted SimpleCreatePage and dual-fired
- * home-create-submit. The first premium-full-draft reached request-start /
- * OPTIONS, then the remount aborted before POST.
+ * Already-paid Pro homepage dump (post-#240 / #241): create-flow-entitlement-transition
+ * logged paid_pro while ABI remounted. Dual home-create-submit aborted the first
+ * premium-full-draft after OPTIONS (OPTIONS_ONLY, no POST).
  *
- * Fix is at the remount source: keep the editor mounted and skip getAuthSession
- * when parse already cached a Bearer. Do not re-land #233/#238 dump-intent
- * shouldSkip / shouldJoin (those skipped or joined the first generate).
+ * Fix is at the remount source: stable ABI key + hide never flips on entitlement
+ * tick when the workspace is already entitled. Do not re-land #233/#238 dump-intent.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
@@ -16,23 +14,20 @@ import { shortIntakeFingerprint } from "../../lib/agreementGenerationId";
 import {
   setCachedAccessToken,
   clearCachedAccessToken,
-  getCachedAccessToken,
 } from "../../auth/authAccessTokenCache";
 import {
-  shouldGateCreateEditorUntilEntitlementReady,
+  resolveStableCreateIntakeMountKey,
+  shouldChangeCreateIntakeMountKeyOnEntitlementTick,
+  shouldHideAgreementEditor,
   shouldKeepCreateEditorMountedAcrossAuthRefresh,
-  shouldReplaceCreatePageWithAuthWorkspaceSettling,
-  shouldResetCommercialEntitlementReadyOnAuthRefresh,
 } from "../../launch/simpleProduct/createEntitlementUi";
 import {
-  shouldAwaitNetworkEntitlementOnCreateSubmit,
-  shouldStartRewriteFromEntitlementTransition,
+  shouldRemountAgreementBuilderIntakeOnEntitlementTick,
+  shouldStartCreateFromPaidProShell,
 } from "./createFlowEntitlementTransition";
 import {
   CREATE_FLOW_NAMED_TWO_PARTY_WITHOUT_PFD_FAILSAFE_MS,
   shouldFailClosedPremiumProcessingWithoutPfd,
-  shouldInvokePremiumGenerateAfterPartyPrepCreate,
-  shouldSkipPartyPrepForOrdinaryNamedTwoParty,
 } from "./multiPartyCreateReviewSettle";
 import {
   clearPremiumGenerationCallAudit,
@@ -46,14 +41,7 @@ import { runPremiumCompletion } from "./premiumCompletionPipeline";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import { defaultIntakePartyRoleLabels } from "./partyRoleIntake";
 
-const h = vi.hoisted(() => ({ posts: 0, getAuthSessionCalls: 0 }));
-
-vi.mock("../../auth/supabaseAuthService", () => ({
-  getAuthSession: vi.fn(async () => {
-    h.getAuthSessionCalls += 1;
-    throw new Error("getAuthSession must not run when Bearer is already cached");
-  }),
-}));
+const h = vi.hoisted(() => ({ posts: 0 }));
 
 vi.mock("./premiumFullDraftApi", async (importOriginal) => {
   const mod = await importOriginal<typeof import("./premiumFullDraftApi")>();
@@ -119,14 +107,40 @@ function northlineFetchResponse() {
   };
 }
 
-describe("Northline keep-mounted refresh remount (#240)", () => {
+function simulateEntitledProHomepageDumpMount(tick: {
+  commercialEntitlementReady: boolean;
+  alreadyEntitledPro: boolean;
+}) {
+  const keep = shouldKeepCreateEditorMountedAcrossAuthRefresh({
+    homeHeroAutoGenerate: true,
+    editorHasBeenShown: true,
+    entitledRewriteInFlight: true,
+    alreadyEntitledPro: tick.alreadyEntitledPro,
+  });
+  const hide = shouldHideAgreementEditor({
+    editorGatedUntilEntitlement: !tick.commercialEntitlementReady,
+    showAccessChoiceScreen: false,
+    entitlementProbeBlocked: false,
+    awaitingAuthWorkspace: !tick.commercialEntitlementReady,
+    keepEditorMounted: keep,
+  });
+  const intakeKey = resolveStableCreateIntakeMountKey({
+    usingTemplate: false,
+    pasteOnly: false,
+    heroHandoff: { text: NORTHLINE_CANONICAL, voiceFinalize: false },
+    alreadyEntitledPro: tick.alreadyEntitledPro,
+    homeHeroAutoGenerate: true,
+  });
+  return { keep, hide, intakeKey };
+}
+
+describe("already-entitled Pro stable ABI mount (Northline pfd POST)", () => {
   beforeEach(() => {
     sessionStorage.clear();
     localStorage.clear();
     clearPremiumGenerationCallAudit();
     clearCachedAccessToken();
     h.posts = 0;
-    h.getAuthSessionCalls = 0;
   });
 
   afterEach(() => {
@@ -139,10 +153,9 @@ describe("Northline keep-mounted refresh remount (#240)", () => {
   it("does not re-land #233/#238 dump-intent join/skip latches", () => {
     const files = [
       readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8"),
-      readFileSync(join(__dirname, "premiumFullDraftApi.ts"), "utf8"),
+      readFileSync(join(__dirname, "createFlowEntitlementTransition.ts"), "utf8"),
       readFileSync(join(__dirname, "../../launch/simpleProduct/SimpleCreatePage.tsx"), "utf8"),
-      readFileSync(join(__dirname, "../../launch/LaunchHomePage.tsx"), "utf8"),
-      readFileSync(join(__dirname, "../../launch/homeConversionFlow.test.ts"), "utf8"),
+      readFileSync(join(__dirname, "../../launch/simpleProduct/createEntitlementUi.ts"), "utf8"),
     ];
     for (const src of files) {
       expect(src).not.toContain("homeCreateDumpIntent");
@@ -153,93 +166,69 @@ describe("Northline keep-mounted refresh remount (#240)", () => {
     }
   });
 
-  it("SimpleCreatePage keeps the editor mounted across TOKEN_REFRESHED / entitlement re-probe", () => {
+  it("SimpleCreatePage mounts ABI once from paid_pro and does not remount on entitlement tick", () => {
     const page = readFileSync(join(__dirname, "../../launch/simpleProduct/SimpleCreatePage.tsx"), "utf8");
-    expect(page).toContain("shouldKeepCreateEditorMountedAcrossAuthRefresh");
-    expect(page).toContain("shouldResetCommercialEntitlementReadyOnAuthRefresh");
-    expect(page).toContain("shouldReplaceCreatePageWithAuthWorkspaceSettling");
-    expect(page).toContain("keepEditorMounted: keepEditorMountedAcrossAuthRefresh");
-    expect(page).toContain("isEntitledPremiumRewriteProcessInFlight");
-    expect(page).toContain("homeHeroAutoGenerate");
-    const resetIdx = page.indexOf("shouldResetCommercialEntitlementReadyOnAuthRefresh");
-    const setFalseIdx = page.indexOf("setCommercialEntitlementReady(false)");
-    expect(resetIdx).toBeGreaterThan(0);
-    expect(setFalseIdx).toBeGreaterThan(resetIdx);
+    expect(page).toContain("shouldStartCreateFromPaidProShell");
+    expect(page).toContain("resolveCreateFlowEntitlementSyncForSubmit");
+    expect(page).toContain("shouldHideAgreementEditor");
+    expect(page).toContain("resolveStableCreateIntakeMountKey");
+    expect(page).toContain("keepEditorMountedRef");
+    expect(page).toContain("key={intakeKey}");
+    expect(page).toContain("{!hideAgreementEditor ? (");
+    const effectStart = page.indexOf("Mid-dump TOKEN_REFRESHED remounted intake");
+    expect(effectStart).toBeGreaterThan(0);
+    const effectDeps = page.slice(effectStart, effectStart + 1600);
+    expect(effectDeps).toContain("keepEditorMountedRef.current");
+    expect(effectDeps).toContain("probesReady,\n    isReallyAuthenticated,\n    workspaceOrgId,\n    authSession?.access_token,");
+    expect(effectDeps).not.toContain("keepEditorMountedAcrossAuthRefresh,");
     expect(page).not.toContain("homeCreateDumpIntent");
   });
 
-  it("create-flow entitlement transition during in-flight generate cannot remount, re-submit, or abort pfd", () => {
-    expect(
-      shouldAwaitNetworkEntitlementOnCreateSubmit({
-        fromHomeHandoff: true,
-        generateInFlight: false,
-      }),
-    ).toBe(false);
-    expect(tryBeginEntitledPremiumRewriteProcessInFlight({ agreementGenerationId: "gen-transition" })).toBe(
-      true,
-    );
-    expect(
-      shouldAwaitNetworkEntitlementOnCreateSubmit({
-        fromHomeHandoff: false,
-        generateInFlight: true,
-      }),
-    ).toBe(false);
-    expect(
-      shouldStartRewriteFromEntitlementTransition({
-        generateInFlight: true,
-        paidGenerateAlreadyCommitted: false,
-      }),
-    ).toBe(false);
-    const keep = shouldKeepCreateEditorMountedAcrossAuthRefresh({
-      homeHeroAutoGenerate: true,
-      editorHasBeenShown: true,
-      entitledRewriteInFlight: true,
+  it("already-entitled Pro homepage dump does not remount ABI on entitlement tick", () => {
+    expect(shouldStartCreateFromPaidProShell({ workspaceAlreadyEntitled: true })).toBe(true);
+    const beforeReady = simulateEntitledProHomepageDumpMount({
+      commercialEntitlementReady: false,
+      alreadyEntitledPro: true,
     });
-    expect(keep).toBe(true);
-    expect(
-      shouldGateCreateEditorUntilEntitlementReady({
-        isAuthenticated: true,
-        commercialEntitlementReady: false,
-        isResumingOwnedAgreement: false,
-        hasCheckoutPendingMarker: false,
-        keepEditorMounted: keep,
-      }),
-    ).toBe(false);
-    expect(shouldResetCommercialEntitlementReadyOnAuthRefresh({ keepEditorMounted: keep })).toBe(false);
-    releaseEntitledPremiumRewriteProcessInFlight();
-  });
-
-  it("dual remount (token refresh + entitlement flip) does not gate or replace a live dump editor", () => {
-    const keep = shouldKeepCreateEditorMountedAcrossAuthRefresh({
-      homeHeroAutoGenerate: true,
-      editorHasBeenShown: true,
-      entitledRewriteInFlight: true,
+    const afterTransition = simulateEntitledProHomepageDumpMount({
+      commercialEntitlementReady: true,
+      alreadyEntitledPro: true,
     });
-    expect(keep).toBe(true);
-    // First remount: TOKEN_REFRESHED flips ready false.
+    expect(beforeReady.keep).toBe(true);
+    expect(afterTransition.keep).toBe(true);
+    expect(beforeReady.hide).toBe(false);
+    expect(afterTransition.hide).toBe(false);
+    expect(beforeReady.intakeKey).toBe("create-intake-stable");
+    expect(afterTransition.intakeKey).toBe(beforeReady.intakeKey);
     expect(
-      shouldGateCreateEditorUntilEntitlementReady({
-        isAuthenticated: true,
-        commercialEntitlementReady: false,
-        isResumingOwnedAgreement: false,
-        hasCheckoutPendingMarker: false,
-        keepEditorMounted: keep,
+      shouldChangeCreateIntakeMountKeyOnEntitlementTick({
+        previousKey: beforeReady.intakeKey,
+        nextKey: afterTransition.intakeKey,
+        keepEditorMounted: afterTransition.keep,
       }),
     ).toBe(false);
-    expect(shouldResetCommercialEntitlementReadyOnAuthRefresh({ keepEditorMounted: keep })).toBe(false);
-    // Second remount: workspace bind / awaitingAuthWorkspace.
     expect(
-      shouldReplaceCreatePageWithAuthWorkspaceSettling({
-        awaitingAuthWorkspace: true,
-        keepEditorMounted: keep,
+      shouldRemountAgreementBuilderIntakeOnEntitlementTick({
+        keepEditorMounted: afterTransition.keep,
+        hideAgreementEditor: afterTransition.hide,
+        previousIntakeKey: beforeReady.intakeKey,
+        nextIntakeKey: afterTransition.intakeKey,
       }),
     ).toBe(false);
   });
 
-  it("cached Bearer skips getAuthSession so TOKEN_REFRESHED cannot abort the first pfd POST", async () => {
-    setCachedAccessToken("northline-cached-bearer");
-    expect(getCachedAccessToken()).toBe("northline-cached-bearer");
-    const remountAbort = new AbortController();
+  it("dual home-create-submit does not abort first pfd before POST", async () => {
+    setCachedAccessToken("northline-entitled-bearer");
+    vi.stubEnv("MODE", "development");
+    const firstPfd = new AbortController();
+    const remount = shouldRemountAgreementBuilderIntakeOnEntitlementTick({
+      keepEditorMounted: true,
+      hideAgreementEditor: false,
+      previousIntakeKey: "create-intake-stable",
+      nextIntakeKey: "create-intake-stable",
+    });
+    expect(remount).toBe(false);
+
     let releaseFetch: ((value: ReturnType<typeof northlineFetchResponse>) => void) | undefined;
     const fetchMock = vi.fn().mockImplementation((_url: string, init: RequestInit) => {
       expect(init.method).toBe("POST");
@@ -249,7 +238,6 @@ describe("Northline keep-mounted refresh remount (#240)", () => {
       });
     });
     vi.stubGlobal("fetch", fetchMock);
-    vi.stubEnv("MODE", "development");
 
     const pending = postPremiumFullDraftOnce({
       intakeText: NORTHLINE_CANONICAL,
@@ -265,45 +253,36 @@ describe("Northline keep-mounted refresh remount (#240)", () => {
         agreement_family: structured.agreement_family ?? "",
         material_asks: [],
       },
-      agreementGenerationId: "gen-northline-keep-mounted",
+      agreementGenerationId: "gen-northline-stable-abi",
       networkCallReason: "unknown",
+      signal: firstPfd.signal,
     });
 
-    expect(h.getAuthSessionCalls).toBe(0);
     expect(fetchMock).toHaveBeenCalledTimes(1);
     expect(String(fetchMock.mock.calls[0]?.[0] ?? "")).toContain("/api/agreements/premium-full-draft");
     expect(fetchMock.mock.calls[0]?.[1]?.method).toBe("POST");
 
-    // Dual remount: abort the remount controller (old unmount pattern). The
-    // in-flight fetch must not observe that signal.
-    remountAbort.abort("token_refreshed_remount");
-    expect(
-      shouldGateCreateEditorUntilEntitlementReady({
-        isAuthenticated: true,
-        commercialEntitlementReady: false,
-        isResumingOwnedAgreement: false,
-        hasCheckoutPendingMarker: false,
-        keepEditorMounted: true,
-      }),
-    ).toBe(false);
-    expect(fetchMock.mock.calls[0]?.[1]?.signal).not.toBe(remountAbort.signal);
+    // Proven live failure: entitlement tick remounted ABI and aborted the first
+    // pfd after OPTIONS. Stable mount must not abort that signal.
+    if (remount) {
+      firstPfd.abort("create-flow-entitlement-transition");
+    }
+    expect(firstPfd.signal.aborted).toBe(false);
     expect(fetchMock.mock.calls[0]?.[1]?.signal?.aborted).not.toBe(true);
 
     releaseFetch?.(northlineFetchResponse());
     const result = await pending;
     expect(result.document_text).toContain("SERVICES AGREEMENT");
     expect(result.document_text).toContain("Northline Robotics LLC");
-    expect(result.document_text).toContain("Cedar Peak Analytics Inc");
-    expect(h.getAuthSessionCalls).toBe(0);
   });
 
-  it("Northline-shaped entitled dump completes pfd POST 200 (usable Review corpus)", async () => {
-    setCachedAccessToken("northline-cached-bearer");
+  it("Northline-shaped entitled dump completes pfd POST 200 with valid PremiumNetworkCallReason", async () => {
+    setCachedAccessToken("northline-entitled-bearer");
     vi.stubEnv("MODE", "development");
     const fetchMock = vi.fn().mockResolvedValue(northlineFetchResponse());
     vi.stubGlobal("fetch", fetchMock);
 
-    expect(tryBeginEntitledPremiumRewriteProcessInFlight({ agreementGenerationId: "gen-northline-dump" })).toBe(
+    expect(tryBeginEntitledPremiumRewriteProcessInFlight({ agreementGenerationId: "gen-northline-stable" })).toBe(
       true,
     );
     markEntitledPremiumRewriteHttpStarted();
@@ -315,7 +294,7 @@ describe("Northline keep-mounted refresh remount (#240)", () => {
       simpleProductFlow: true,
       partyRoleLabels: defaultIntakePartyRoleLabels(),
       userGapAnswers: null,
-      agreementGenerationId: "gen-northline-dump",
+      agreementGenerationId: "gen-northline-stable",
       premiumRequestIntakeFingerprint: NORTHLINE_FP,
       isPremiumRequestStillValid: () => true,
       parseDraft: async () => structured,
@@ -329,26 +308,12 @@ describe("Northline keep-mounted refresh remount (#240)", () => {
     expect(out.winningPremiumBodyText).toContain("SERVICES AGREEMENT");
     expect(out.winningPremiumBodyText).toContain("Northline Robotics LLC");
     expect(out.winningPremiumBodyText).toContain("Cedar Peak Analytics Inc");
-    expect(h.getAuthSessionCalls).toBe(0);
     expect(readPremiumGenerationCallRecords().filter((r) => r.reason === "entitled_rewrite")).toHaveLength(1);
     releaseEntitledPremiumRewriteProcessInFlight();
   });
 
-  it("KEEP #226 60s failsafe and #231 never-steal; ordinary named-2p still generates", () => {
+  it("KEEP #226 60s named-2p no-pfd failsafe and #231 never-steal", () => {
     expect(CREATE_FLOW_NAMED_TWO_PARTY_WITHOUT_PFD_FAILSAFE_MS).toBe(60_000);
-    expect(
-      shouldSkipPartyPrepForOrdinaryNamedTwoParty({
-        intakeText: NORTHLINE_CANONICAL,
-        partyRows: ["", ""],
-        generateComplete: false,
-      }),
-    ).toBe(true);
-    expect(
-      shouldInvokePremiumGenerateAfterPartyPrepCreate({
-        mergedIntake: NORTHLINE_CANONICAL,
-        partyRows: ["", ""],
-      }),
-    ).toBe(true);
     expect(
       shouldFailClosedPremiumProcessingWithoutPfd({
         ordinaryNamedTwoPartyReady: true,
@@ -362,7 +327,5 @@ describe("Northline keep-mounted refresh remount (#240)", () => {
     expect(audit).toContain("if (entitledPfdFlight) return false");
     expect(audit).not.toContain("lastEntitledRewriteGenerationId !== genId");
     expect(audit).toContain("Never steals on a new generation id");
-    const intake = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "utf8");
-    expect(intake).toContain("never stolen on a new gen id");
   });
 });

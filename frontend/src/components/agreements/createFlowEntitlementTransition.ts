@@ -59,3 +59,29 @@ export function shouldStartRewriteFromEntitlementTransition(args: {
   if (args.paidGenerateAlreadyCommitted) return false;
   return true;
 }
+
+/**
+ * Already-paid Pro homepage / create dump: start the paid_pro shell from sync
+ * cache. Do not enter a remount window that dual-fires home-create-submit.
+ */
+export function shouldStartCreateFromPaidProShell(args: {
+  workspaceAlreadyEntitled: boolean;
+}): boolean {
+  return Boolean(args.workspaceAlreadyEntitled);
+}
+
+/**
+ * Entitlement / handoff overlay may update chrome. It must not remount ABI
+ * (hide flip or React key change) while a homepage dump or first pfd is live.
+ */
+export function shouldRemountAgreementBuilderIntakeOnEntitlementTick(args: {
+  keepEditorMounted: boolean;
+  hideAgreementEditor: boolean;
+  previousIntakeKey: string;
+  nextIntakeKey: string;
+}): boolean {
+  if (args.keepEditorMounted) return false;
+  // `{!hideAgreementEditor ? <ABI key=…>}` — hide=true unmounts ABI (AbortSignal).
+  if (args.hideAgreementEditor) return true;
+  return args.previousIntakeKey !== args.nextIntakeKey;
+}
