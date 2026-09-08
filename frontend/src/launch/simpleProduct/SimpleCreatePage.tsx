@@ -22,6 +22,8 @@ import {
   readCheckoutBackRestoreSnapshot,
 } from "../../components/agreements/checkoutBackRestore";
 import { shouldSkipHomeAutoGenerateForStoredReview } from "../../components/agreements/createReviewRefreshRestore";
+import { isEntitledPremiumRewriteProcessInFlight } from "../../components/agreements/paidProPremiumGenerationCallAudit";
+import { shouldKeepCreateEditorMountedForDump } from "../homeCreateDumpIntent";
 import { setJoyFlash, emitActionCompleted } from "../../joy/joyTelemetry";
 import {
   clearHeroIntakeHandoffAfterApply,
@@ -327,11 +329,14 @@ export function SimpleCreatePage() {
   );
   const isResumingOwnedAgreement = Boolean(readCreateReviewAgreementResumeId());
   const hasCheckoutPendingMarker = Boolean(readCreateComplexityResume()?.awaitingProCheckout);
+  const keepEditorMountedForDump =
+    shouldKeepCreateEditorMountedForDump() || isEntitledPremiumRewriteProcessInFlight();
   const editorGatedUntilEntitlement = shouldGateCreateEditorUntilEntitlementReady({
     isAuthenticated: createAuthAuthenticated,
     commercialEntitlementReady,
     isResumingOwnedAgreement,
     hasCheckoutPendingMarker,
+    keepEditorMounted: keepEditorMountedForDump,
   });
   const showAccessChoiceScreen =
     commercialEntitlementReady && shouldShowCreateAccessChoiceScreen(createAccessVerdict);
@@ -419,7 +424,10 @@ export function SimpleCreatePage() {
     if (isReallyAuthenticated && !isUserWorkspaceOrgId(getOrgId())) return;
     if (authSession?.access_token) setCachedAccessToken(authSession.access_token);
     let cancelled = false;
-    setCommercialEntitlementReady(false);
+    // Mid-dump TOKEN_REFRESHED remounted intake and dual-submitted (OPTIONS-only).
+    if (!shouldKeepCreateEditorMountedForDump() && !isEntitledPremiumRewriteProcessInFlight()) {
+      setCommercialEntitlementReady(false);
+    }
     void fetchWorkspaceProEntitlement().then((ok) => {
       if (!cancelled) setWorkspaceProEntitled(ok);
     });
@@ -659,7 +667,7 @@ export function SimpleCreatePage() {
     );
   }
 
-  if (awaitingAuthWorkspace) {
+  if (awaitingAuthWorkspace && !keepEditorMountedForDump) {
     // Already-signed-in create/resume must not flash OAuth "Finishing sign-in".
     // When signer-setup resume is armed, keep that chrome so the settle does not
     // look like a create-prompt hop before the agreement preview mounts.

@@ -213,6 +213,14 @@ import {
   shouldRefuseAfterPayPremiumCompletionForMissingGrant,
 } from "../../launch/checkoutReturnEntitlement";
 import { resumeAfterPayPersistForProGeneration } from "../../launch/afterPayPersistResume";
+import {
+  clearHomeCreateDumpIntent,
+  ensureHomeCreateDumpIntent,
+  isHomeCreateDumpParseStarted,
+  markHomeCreateDumpParseStarted,
+  shouldSkipSecondHomeCreateSubmit,
+  tryBeginHomeCreateDumpIntent,
+} from "../../launch/homeCreateDumpIntent";
 import { logHomeCreateSubmit } from "../../launch/homeCreateSubmit";
 import {
   getStarterProRefineCtaExperiment,
@@ -7211,6 +7219,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     const finalizeCanonicalPaidProPipelineSuccess = planFinalizeCanonicalPaidProPipelineSuccess;
     const rewriteGenerationId = getOrInitSessionAgreementGenerationId();
     releasePremiumGenerateInvokeForNewGeneration(rewriteGenerationId);
+    ensureHomeCreateDumpIntent({ fingerprint: rewriteGenerationId });
     if (entitledPremiumRewriteInFlightRef.current) return;
     // Single-flight owner before snapshot / party-prep. Home auto-generate +
     // entitled rewrite effect otherwise both start (parse 200×2) and the first
@@ -12552,6 +12561,11 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             premiumCompletionSnapshot: readPremiumCompletionSnapshot(),
           }),
       });
+    if (fromHomeHandoff && shouldSkipSecondHomeCreateSubmit()) {
+      logHomeAutoGenerateSkipped("already_consumed");
+      homeAutoGenerateConsumedRef.current = true;
+      return true;
+    }
     if (fromHomeHandoff) {
       resetStalePaidReviewShellForFreeStarter("home_create_submit", {
         // TEST547/549 latch-before-settle happens in the home layout effect.
@@ -12774,6 +12788,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       });
       return true;
     } catch {
+      if (fromHomeHandoff) {
+        clearHomeCreateDumpIntent();
+      }
       setDisplayPhase("intake");
       setCreateFlowPhase("capturing_input");
       setCreateUiStage(CreateUiStage.INPUT);
@@ -12925,6 +12942,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   useLayoutEffect(() => {
     if (!homeHeroAutoGenerate || checkoutBackRestoreActive || homeAutoGenerateStartedRef.current) return;
     if (paidProEditReturnResumeActive) return;
+    // Remount after entitlement re-probe: do not start a second parse/pfd.
+    if (shouldSkipSecondHomeCreateSubmit() || isHomeCreateDumpParseStarted()) {
+      homeAutoGenerateStartedRef.current = true;
+      homeAutoGenerateConsumedRef.current = true;
+      logHomeAutoGenerateSkipped("already_consumed");
+      return;
+    }
     if (shouldSkipHomeAutoGenerateForStoredReview({ freshHomeHeroHandoff: true })) {
       homeAutoGenerateConsumedRef.current = true;
       return;
@@ -12971,6 +12995,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       return;
     }
     writeOriginalUserIntakeRawAtDraftCommit(homeDecision.text);
+    tryBeginHomeCreateDumpIntent({ fingerprint: shortIntakeFingerprint(homeDecision.text) });
+    markHomeCreateDumpParseStarted();
     homeAutoGenerateStartedRef.current = true;
     logHomeCreateSubmit(homeDecision.text);
     beginStarterDraftGeneration();
