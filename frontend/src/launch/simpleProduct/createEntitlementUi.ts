@@ -6,12 +6,46 @@
 import { formatPeriodEndsLabel } from "../../access/commercialEntitlement";
 import type { WorkspaceCreateAccessVerdict } from "../../access/authenticatedWorkspaceAccessPolicy";
 
+/**
+ * TOKEN_REFRESHED / entitlement re-probe used to flip commercialEntitlementReady
+ * false, unmount AgreementBuilderIntake, and dual-fire home-create-submit while
+ * premium-full-draft was in OPTIONS. Keep the editor mounted for a live homepage
+ * dump, an already-painted editor, or an in-flight entitled rewrite.
+ *
+ * Not a dump-intent latch: first generate is never skipped.
+ */
+export function shouldKeepCreateEditorMountedAcrossAuthRefresh(args: {
+  homeHeroAutoGenerate: boolean;
+  editorHasBeenShown: boolean;
+  entitledRewriteInFlight: boolean;
+}): boolean {
+  return Boolean(args.homeHeroAutoGenerate || args.editorHasBeenShown || args.entitledRewriteInFlight);
+}
+
+/** Token/org change must not hide a live dump editor (no remount, no second submit). */
+export function shouldResetCommercialEntitlementReadyOnAuthRefresh(args: {
+  keepEditorMounted: boolean;
+}): boolean {
+  return !args.keepEditorMounted;
+}
+
+/** Do not replace the create page with the auth-workspace settling shell mid-dump. */
+export function shouldReplaceCreatePageWithAuthWorkspaceSettling(args: {
+  awaitingAuthWorkspace: boolean;
+  keepEditorMounted: boolean;
+}): boolean {
+  return args.awaitingAuthWorkspace && !args.keepEditorMounted;
+}
+
 export function shouldGateCreateEditorUntilEntitlementReady(args: {
   isAuthenticated: boolean;
   commercialEntitlementReady: boolean;
   isResumingOwnedAgreement: boolean;
   hasCheckoutPendingMarker: boolean;
+  /** Live homepage dump / painted editor / in-flight rewrite — do not unmount. */
+  keepEditorMounted?: boolean;
 }): boolean {
+  if (args.keepEditorMounted) return false;
   if (!args.isAuthenticated) return false;
   if (args.isResumingOwnedAgreement || args.hasCheckoutPendingMarker) return false;
   return !args.commercialEntitlementReady;

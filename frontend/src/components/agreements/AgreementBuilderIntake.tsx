@@ -1813,6 +1813,11 @@ import {
   type ResolveAuthoritativeCreateFlowReviewShellInput,
 } from "./authoritativeCreateFlowReviewShell";
 import {
+  resolveCreateFlowEntitlementSyncForSubmit,
+  shouldAwaitNetworkEntitlementOnCreateSubmit,
+  shouldStartRewriteFromEntitlementTransition,
+} from "./createFlowEntitlementTransition";
+import {
   ensurePaidCreateEntitlementResolvedForSubmit,
   logFatalPaidCreateGateAfterProvisionalEntitlement,
   logReturningPaidCreateGateBypassDecision,
@@ -12508,15 +12513,24 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     const handoffSource = opts?.handoffSource ?? "runProductionLocalDraftParse";
     const fromHomeHandoff =
       handoffSource === "home_create_submit" || homeHeroAutoGenerateRef.current;
-    const workspaceProSync =
-      resolveCreateFlowWorkspaceProEntitled() || tierAllowsAdvancedFullDraftReveal(tier);
+    const workspaceProSync = resolveCreateFlowEntitlementSyncForSubmit({
+      workspaceProEntitledState: workspaceProEntitled,
+      tier,
+    });
     if (workspaceProSync) {
       setWorkspaceProEntitled(true);
     }
+    // Home dump must not await entitlement network. That yield remounted create
+    // (create-flow-entitlement-transition) and dual-fired home-create-submit
+    // while the first pfd was OPTIONS-only.
+    const awaitNetworkEntitlement = shouldAwaitNetworkEntitlementOnCreateSubmit({
+      fromHomeHandoff,
+    });
     const workspaceProForSubmit =
-      workspaceProSync ||
-      readCachedWorkspaceProEntitlement() ||
-      (await fetchWorkspaceProEntitlement());
+      workspaceProSync || (awaitNetworkEntitlement ? await fetchWorkspaceProEntitlement() : false);
+    if (workspaceProForSubmit) {
+      setWorkspaceProEntitled(true);
+    }
     logCreateFlowEntitlementTransition({
       workspaceProEntitled: workspaceProForSubmit,
       tier,
@@ -12605,7 +12619,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     }
     const rawIntake = (opts?.rawOverride ?? intakeCombined).trim();
     if (!rawIntake) return false;
-    await resolvePaidCreateSubmitEntitlement();
+    if (awaitNetworkEntitlement) {
+      await resolvePaidCreateSubmitEntitlement();
+    }
     const workspaceProAfterSubmitResolve =
       resolveProvisionalWorkspaceProEntitledForCreate() || readCachedWorkspaceProEntitlement();
     if (upgradeIntentDetectedRef.current &&
@@ -12814,6 +12830,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     premiumSendPathUnlocked,
     premiumPersistedFlowActive,
     intakePartyEditorRows,
+    workspaceProEntitled,
   ]);
 
   useLayoutEffect(() => {
@@ -16649,6 +16666,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     if (!shouldUsePaidProCreateFlowReviewShell(authoritativeCreateFlowReviewShellInput)) return;
     if (entitledPremiumRewriteInFlightRef.current) return;
     if (isEntitledPremiumRewriteProcessInFlight()) return;
+    if (
+      !shouldStartRewriteFromEntitlementTransition({
+        paidGenerateAlreadyCommitted: premiumGeneratePathCommittedRef.current,
+      })
+    ) {
+      return;
+    }
     if (hasPaidProSourceOfTruth()) return;
     // Freeze latch / validated corpus already accepted — a second entitled_rewrite
     // clears pipeline authority and blanks the just-painted Niceman/Waffle (etc.) body.

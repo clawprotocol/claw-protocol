@@ -33,6 +33,10 @@ describe("premium-full-draft CORS header contract", () => {
     const onceIdx = premiumFullDraftApiSrc.indexOf("export async function postPremiumFullDraftOnce");
     const onceBody = premiumFullDraftApiSrc.slice(onceIdx, onceIdx + 4200);
     expect(onceBody.indexOf("await refreshCachedAccessToken()")).toBeGreaterThan(-1);
+    expect(onceBody.indexOf("if (!getCachedAccessToken())")).toBeGreaterThan(-1);
+    expect(onceBody.indexOf("if (!getCachedAccessToken())")).toBeLessThan(
+      onceBody.indexOf("await refreshCachedAccessToken()"),
+    );
     expect(onceBody.indexOf("await refreshCachedAccessToken()")).toBeLessThan(
       onceBody.indexOf("headers: clawAgreementHeaders"),
     );
