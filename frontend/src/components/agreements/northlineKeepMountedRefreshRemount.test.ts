@@ -267,7 +267,7 @@ describe("Northline keep-mounted refresh remount (#240)", () => {
         material_asks: [],
       },
       agreementGenerationId: "gen-northline-keep-mounted",
-      networkCallReason: "entitled_rewrite",
+      networkCallReason: "unknown",
     });
 
     expect(h.getAuthSessionCalls).toBe(0);
