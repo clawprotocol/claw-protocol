@@ -178,7 +178,7 @@ describe("TEST511 — paid create skips legacy upgrade shell and renders canonic
 
   it("6 — paid generation uses premium model class (GPT-5.5 server path)", () => {
     const rewriteIdx = intake.indexOf("const runEntitledPremiumImprovementRewrite = React.useCallback");
-    const rewriteBlock = intake.slice(rewriteIdx, rewriteIdx + 10000);
+    const rewriteBlock = intake.slice(rewriteIdx, rewriteIdx + 12000);
     expect(rewriteBlock).toContain('aiModelClass: "premium"');
     expect(rewriteBlock).toContain("ensurePremiumCompletion");
     expect(rewriteBlock).toContain('premiumGenerationCallReason: "entitled_rewrite"');
