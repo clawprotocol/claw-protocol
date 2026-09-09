@@ -1728,6 +1728,11 @@ import {
   shouldClearCreateFlowDraftPersistErrorAfterDurableId,
 } from "./paidProFinalizeDurableAgreementId";
 import {
+  rememberImmutableFrozenLegalCorpus,
+  resolveExpectedFrozenHashForSignerFinalize,
+  shouldBlockSignerFinalizeFrozenMismatch,
+} from "./paidProFrozenLegalCorpus";
+import {
   shouldBlockFreeStarterReviewSurfaces,
   resolveCreateFlowPaidReviewDisplayPlain,
   tryEstablishAcceptedPremiumCorpusForCreateFlowHandoff,
@@ -6757,6 +6762,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       return false;
     }
     const serverCorpus = (hydrated.snapshot.corpus_plain || "").trim();
+    rememberImmutableFrozenLegalCorpus(serverCorpus, { agreementId });
     const serverCorpusHash = hashPaidProCorpus(serverCorpus);
     const currentSoT = getPaidProSourceOfTruth();
     const activeGenerationId = getOrInitSessionAgreementGenerationId();
@@ -32025,24 +32031,6 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       immutableSourceOfTruthOnly: !paidSessionSkipReviewHydrateWait,
     });
     const rawCorpus = rawCorpusResolution.corpus;
-    const hydrated = buildHydratedAuthoritativeSigningCorpusFromAuthority({
-      rawCorpus,
-      authority,
-      intakeRaw: intakeForHydration,
-      surface: "finalize_paid_pro_signer_metadata",
-      signatureRegionOnly: true,
-      repairRecital: false,
-      agreementId: reviewAgreementIdRef.current,
-      organizationId: getOrgId(),
-    });
-    auditPaidProSignerFinalizeCorpus(hydrated.corpus);
-    const signatureBlockModel = buildCanonicalSignerManifest({
-      identities: hydrated.identities,
-      signFirst: premiumSignatureSenderFirst,
-    });
-    const signerMetadata = authorityPartiesToRecipientMetadata(authority.parties, [
-      ...extraPartyReviewEmails,
-    ]);
     const rollbackFinalizeFailure = (message: string) => {
       clearAuthoritativeSigningSnapshot();
       clearPaidProPinnedSignerAppliedCorpus();
@@ -32055,27 +32043,6 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       bumpPremiumSurfaceGateTick();
       scrollGuidedSignerSetupIntoView();
     };
-    // After pay, a visible ≥200 rebuild on the card is enough to open existing
-    // SimpleProFinalReviewScreen. Do not wait for 1001-char SoT or a new agreement GET.
-    if (paidSessionSkipReviewHydrateWait) {
-      const visibleCorpus = (hydrated.corpus || rawCorpus || paidSessionVisibleRebuild).trim();
-      if (visibleCorpus.length >= PAID_PRO_FALLBACK_REBUILD_MIN_LEN) {
-        pinFinalizedSignerAppliedCorpus(visibleCorpus, "paid_pro_signer_metadata_finalize");
-      }
-      setPaidProInlineSignerSetupLatched(false);
-      setPaidProSignerMetadataFinalizedLatch(true);
-      setGuidedFinalReviewExplicitlyOpened(true);
-      guidedFinalReviewExplicitlyUnlockedRef.current = true;
-      setCreateFlowPhase("draft_ready_for_review");
-      setDisplayPhase("review");
-      setHardError(null);
-      setGuidedSigningConfirmationBlockMessage(null);
-      setLoading(false);
-      onHomeGuidedTransitionPhase?.("review_ready");
-      bumpPremiumSurfaceGateTick();
-      scrollPaidProReviewDecisionIntoView();
-      return true;
-    }
     // Paid create can paint a full review corpus before a workspace row exists. Mint/bind the
     // durable agreement id here so signer finalize does not dead-end on "reload from dashboard".
     const resolvedDurable = resolveFinalizeDurableAgreementId({
@@ -32113,6 +32080,66 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       setCreateFlowDraftPersistError(msg);
       rollbackFinalizeFailure(msg);
       return false;
+    }
+    const expectedFrozenHash = resolveExpectedFrozenHashForSignerFinalize({
+      agreementId: durableAgreementId,
+      rawCorpus,
+    });
+    if (!expectedFrozenHash) {
+      rollbackFinalizeFailure(
+        "LawDog could not confirm the frozen agreement before finalizing signers. Reload and try again.",
+      );
+      return false;
+    }
+    const hydrated = buildHydratedAuthoritativeSigningCorpusFromAuthority({
+      rawCorpus,
+      authority,
+      intakeRaw: intakeForHydration,
+      surface: "finalize_paid_pro_signer_metadata",
+      signatureRegionOnly: true,
+      repairRecital: false,
+      agreementId: durableAgreementId,
+      expectedFrozenHash,
+    });
+    if (
+      shouldBlockSignerFinalizeFrozenMismatch({
+        agreementId: durableAgreementId,
+        hydratedCorpus: hydrated.corpus,
+      })
+    ) {
+      rollbackFinalizeFailure(
+        "Signer finalization could not confirm the frozen legal corpus. Reload and try again.",
+      );
+      return false;
+    }
+    auditPaidProSignerFinalizeCorpus(hydrated.corpus);
+    const signatureBlockModel = buildCanonicalSignerManifest({
+      identities: hydrated.identities,
+      signFirst: premiumSignatureSenderFirst,
+    });
+    const signerMetadata = authorityPartiesToRecipientMetadata(authority.parties, [
+      ...extraPartyReviewEmails,
+    ]);
+    // After pay, a visible ≥200 rebuild on the card is enough to open existing
+    // SimpleProFinalReviewScreen. Do not wait for 1001-char SoT or a new agreement GET.
+    if (paidSessionSkipReviewHydrateWait) {
+      const visibleCorpus = (hydrated.corpus || rawCorpus || paidSessionVisibleRebuild).trim();
+      if (visibleCorpus.length >= PAID_PRO_FALLBACK_REBUILD_MIN_LEN) {
+        pinFinalizedSignerAppliedCorpus(visibleCorpus, "paid_pro_signer_metadata_finalize");
+      }
+      setPaidProInlineSignerSetupLatched(false);
+      setPaidProSignerMetadataFinalizedLatch(true);
+      setGuidedFinalReviewExplicitlyOpened(true);
+      guidedFinalReviewExplicitlyUnlockedRef.current = true;
+      setCreateFlowPhase("draft_ready_for_review");
+      setDisplayPhase("review");
+      setHardError(null);
+      setGuidedSigningConfirmationBlockMessage(null);
+      setLoading(false);
+      onHomeGuidedTransitionPhase?.("review_ready");
+      bumpPremiumSurfaceGateTick();
+      scrollPaidProReviewDecisionIntoView();
+      return true;
     }
     createAuthoritativeSigningSnapshot({
       corpus: hydrated.corpus,

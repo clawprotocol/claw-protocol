@@ -506,6 +506,10 @@ export async function hydrateCommercialReviewFromServerSnapshot(args: {
   if (!fetched.ok) return { ok: false, code: fetched.code };
   const snap = fetched.snapshot;
   const id = args.agreementId.trim();
+  const returnedId = String(snap.agreement_id || "").trim();
+  if (!id || !returnedId || returnedId !== id) {
+    return { ok: false, code: "agreement_id_mismatch" };
+  }
   const getCorpus = (snap.corpus_plain || "").trim();
   const getDigest = await sha256CorpusDigest(getCorpus);
   if (
