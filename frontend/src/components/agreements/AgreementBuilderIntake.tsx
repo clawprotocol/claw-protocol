@@ -33769,6 +33769,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                   await finalizeIntakeCapture();
                   return;
                 }
+                console.debug("[handoff-start]", {
+                  source: "executePrimaryCta_stageA",
+                  createUiStage,
+                  createFlowPhase_before: createFlowPhase,
+                  displayPhase_before: displayPhase,
+                });
                 const intakeCapability = evaluateIntentionalCreateDraftSubmit(rawSubmitted);
                 if (intakeCapability.action === "block_capability") {
                   applyIntakeCapabilityBlock(intakeCapability);
