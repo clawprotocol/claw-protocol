@@ -5,6 +5,7 @@ import {
   markWorkspaceProEntitlementResolvedForTests,
 } from "../../agreement/agreementProFunnelGate";
 import { getOrInitSessionAgreementGenerationId } from "../../lib/agreementGenerationId";
+import { setOrgId } from "../../launch/orgContext";
 import {
   clearCurrentSessionProEntitlementMarkers,
   markCurrentSessionFreeStarterIntent,
@@ -106,6 +107,7 @@ describe("TEST496 — paid acceptance hard invariant prevents split-brain starte
 
     markPaidProPipelineValidationPassed({ text: ACCEPTED_PAID_BODY, source: "server_full_draft" });
     markPaidProPipelineAcceptedCorpusHash(ACCEPTED_PAID_BODY);
+    setOrgId("user-test-496-paid");
     markWorkspaceProEntitlementResolvedForTests(true);
 
     const shellInput = { workspaceProEntitled: true };

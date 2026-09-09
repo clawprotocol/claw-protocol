@@ -72,6 +72,10 @@ describe("TEST501 — canonical paid Pro review entry (post-checkout + returning
   });
 
   it("2 — post-checkout and returning paid plans share the same review UI mount flags", () => {
+    markPaidProPipelineValidationPassed({
+      text: TEST501_ACCEPTED_PAID_BODY,
+      source: "server_full_draft",
+    });
     const draft = test501Draft(TEST501_STARTER_PREVIEW, TEST501_ACCEPTED_PAID_BODY);
     const baseArgs = {
       corpusPlain: TEST501_ACCEPTED_PAID_BODY,

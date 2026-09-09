@@ -182,6 +182,7 @@ describe("TEST500 — returning paid create must not dead-end on starter-shell v
   });
 
   it("final review corpus uses pipeline body when authoritative hydrated is starter-length", () => {
+    markPaidProPipelineValidationPassed({ text: PREMIUM_DELIVERABLE, source: "server_full_draft" });
     const res = resolveSimpleProFinalReviewCorpus({
       authoritativePlain: "",
       pickerPlain: STARTER_PREVIEW,

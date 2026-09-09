@@ -6,6 +6,7 @@ import {
   invalidateWorkspaceProEntitlementCache,
   markWorkspaceProEntitlementResolvedForTests,
 } from "../../agreement/agreementProFunnelGate";
+import { setOrgId } from "../../launch/orgContext";
 import {
   resolveAuthoritativeCreateFlowReviewShell,
   resolveCreateFlowAuthoritativeReviewPlain,
@@ -69,6 +70,7 @@ describe("TEST504 — returning paid corpus handoff promotes accepted Pro body b
     clearPaidProSourceOfTruth();
     clearPaidProPostAcceptanceValidatorCache();
     invalidateWorkspaceProEntitlementCache();
+    setOrgId("user-test-504-paid");
     markWorkspaceProEntitlementResolvedForTests(true);
     markCurrentSessionProEntitlementComplete({ source: "entitled_rewrite" });
   });
@@ -149,6 +151,10 @@ describe("TEST504 — returning paid corpus handoff promotes accepted Pro body b
   });
 
   it("5 — commitAcceptedPaidProCorpusHandoffSync + canonical entry plan mount SimpleProFinalReview", () => {
+    markPaidProPipelineValidationPassed({
+      text: TEST504_ACCEPTED_PAID_BODY,
+      source: "server_full_draft",
+    });
     const draft = test504Draft(TEST504_STARTER_PREVIEW, TEST504_ACCEPTED_PAID_BODY);
     const committed = commitAcceptedPaidProCorpusHandoffSync({
       corpusPlain: TEST504_ACCEPTED_PAID_BODY,

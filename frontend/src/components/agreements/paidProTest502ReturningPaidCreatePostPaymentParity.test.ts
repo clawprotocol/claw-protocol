@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { invalidateWorkspaceProEntitlementCache, markWorkspaceProEntitlementResolvedForTests } from "../../agreement/agreementProFunnelGate";
 import { getOrInitSessionAgreementGenerationId } from "../../lib/agreementGenerationId";
+import { setOrgId } from "../../launch/orgContext";
 import { resolveIntakeCreateReviewPostGenerationContext } from "./agreementPostGenerationPolicy";
 import {
   resolveAuthoritativeCreateFlowReviewShell,
@@ -81,6 +82,7 @@ describe("TEST502 — returning paid create reuses post-payment Pro journey", ()
   });
 
   it("2 — workspace-pro returning user resolves paid_pro shell, not free_starter", () => {
+    setOrgId("user-test-502-paid");
     markWorkspaceProEntitlementResolvedForTests(true);
     expect(
       resolveAuthoritativeCreateFlowReviewShell({ workspaceProEntitled: true }),
@@ -91,6 +93,7 @@ describe("TEST502 — returning paid create reuses post-payment Pro journey", ()
   });
 
   it("3 — returning paid bootstrap blocks AgreementReadySummaryCard degraded branch", () => {
+    setOrgId("user-test-502-paid");
     markWorkspaceProEntitlementResolvedForTests(true);
     expect(
       shouldSuppressIntakeCanonicalPostGeneration({
@@ -153,6 +156,7 @@ describe("TEST502 — returning paid create reuses post-payment Pro journey", ()
   });
 
   it("5 — returning paid submit bootstrap plan matches post-payment processing shape", () => {
+    setOrgId("user-test-502-paid");
     markWorkspaceProEntitlementResolvedForTests(true);
     const plan = planReturningPaidCreateSubmitBootstrap({ workspaceProEntitled: true, tier: "free" });
     expect(plan).toEqual({
@@ -173,6 +177,7 @@ describe("TEST502 — returning paid create reuses post-payment Pro journey", ()
   });
 
   it("6 — accepted paid corpus enables canonical entry with signer hydration", () => {
+    markPaidProPipelineValidationPassed({ text: TEST501_ACCEPTED_PAID_BODY, source: "server_full_draft" });
     const draft = test501Draft("", TEST501_ACCEPTED_PAID_BODY);
     const plan = planEnterCanonicalPaidProReviewFlow({
       source: "returning_paid_create",

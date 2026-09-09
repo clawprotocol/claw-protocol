@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { invalidateWorkspaceProEntitlementCache, markWorkspaceProEntitlementResolvedForTests } from "../../agreement/agreementProFunnelGate";
+import { setOrgId } from "../../launch/orgContext";
 import { resolveIntakeCreateReviewPostGenerationContext } from "./agreementPostGenerationPolicy";
 import { resolveAuthoritativeCreateFlowReviewShell } from "./authoritativeCreateFlowReviewShell";
 import {
@@ -49,6 +50,7 @@ describe("TEST503 — returning paid reuses first-time post-payment Pro review e
     clearPaidProSourceOfTruth();
     clearPaidProPostAcceptanceValidatorCache();
     invalidateWorkspaceProEntitlementCache();
+    setOrgId("user-test-503-paid");
     markWorkspaceProEntitlementResolvedForTests(true);
     markCurrentSessionProEntitlementComplete({ source: "entitled_rewrite" });
   });
