@@ -404,15 +404,33 @@ def merge_portable_packet_corpus(
     draft: Dict[str, Any],
     portable_packet: Optional[Dict[str, Any]],
 ) -> Dict[str, Any]:
+    """Merge recipient portable packet. Client cannot declare full execution.
+
+    ``fullyExecutedSnapshot`` on the portable is signing *data* the client may
+    send; it is never promoted to ``fully_executed_snapshot`` here. That field
+    is written only after authoritative ``signed`` / ``fully_executed`` audit
+    exists (``ensure_fully_executed_snapshot_on_draft``).
+    """
     if not isinstance(portable_packet, dict):
         return draft
     stored = draft.get("vs01_signing_packet_v1")
     if not isinstance(stored, dict):
         stored = {"v": 1}
-    next_stored = {**stored, "portable": portable_packet}
-    server_snap = extract_fully_executed_snapshot_from_portable(portable_packet)
-    if server_snap:
-        next_stored["fully_executed_snapshot"] = server_snap
+    portable_for_store = dict(portable_packet)
+    portable_for_store.pop("fullyExecutedSnapshot", None)
+    next_stored = {**stored, "portable": portable_for_store}
+    audit = draft.get("audit_log") or []
+    existing_snap = stored.get("fully_executed_snapshot")
+    keep_existing = (
+        isinstance(existing_snap, dict)
+        and fully_executed_signed_already_recorded(audit)
+        and all_signers_signed_from_audit(draft, audit)
+        and str(existing_snap.get("corpus_plain") or "").strip()
+    )
+    if keep_existing:
+        next_stored["fully_executed_snapshot"] = existing_snap
+    else:
+        next_stored.pop("fully_executed_snapshot", None)
     return {**draft, "vs01_signing_packet_v1": next_stored}
 
 

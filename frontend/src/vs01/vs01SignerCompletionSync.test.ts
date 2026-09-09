@@ -223,6 +223,33 @@ describe("recordVs01SignerCompletion (Test361)", () => {
     expect(post).not.toHaveBeenCalled();
   });
 
+  it("does not attach fullyExecutedSnapshot on the completion POST before the server finalizes", async () => {
+    writeSigningPacketStatus({
+      agreementId: AG,
+      updatedAt: new Date().toISOString(),
+      bySignerKey: { [OWNER_ROLE]: "signed", [CP_ROLE]: "waiting" },
+      fullySigned: false,
+    });
+    let posted: Record<string, unknown> | undefined;
+    vi.spyOn(agreementWorkspaceApi, "postVs01SignerComplete").mockImplementation(async (_aid, body) => {
+      posted = body as Record<string, unknown>;
+      return { ok: true, fully_executed: false, completion_emails_sent: false };
+    });
+
+    await recordVs01SignerCompletion({
+      agreementId: AG,
+      documentId: DOC,
+      signerRoleId: CP_ROLE,
+      partyIndex: 1,
+      participantId: "cp1",
+      signingDateIso: "2026-08-25",
+    });
+
+    const portable = posted?.portable_packet as { fullyExecutedSnapshot?: unknown } | undefined;
+    expect(portable?.fullyExecutedSnapshot).toBeUndefined();
+    expect(loadVs01CanonicalPacketPortable(DOC)?.fullyExecutedSnapshot).toBeUndefined();
+  });
+
   it("persists signer signature and date into portable corpus on finish", async () => {
     vi.spyOn(agreementWorkspaceApi, "postVs01SignerComplete").mockResolvedValue({
       ok: true,

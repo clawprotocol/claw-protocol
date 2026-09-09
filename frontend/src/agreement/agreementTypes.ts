@@ -53,6 +53,25 @@ export type AgreementDraft = {
   rendered_document_text?: string | null;
   /** Pro review redline v1 (server JSON); optional. */
   pro_redline_v1?: Record<string, unknown> | null;
+  /**
+   * Server VS01 packet record. Owner signed-artifact retrieval reads
+   * `fully_executed_snapshot` from this field — do not drop on normalize.
+   */
+  vs01_signing_packet_v1?: Vs01SigningPacketDraftRecordV1 | null;
   /** Creator/admin is coordinating only — not a legal party or signer. */
   creator_coordinator_only?: boolean;
+};
+
+/** Server-persisted fully executed snapshot (snake_case API keys). */
+export type Vs01FullyExecutedSnapshotDraftV1 = {
+  v?: number;
+  corpus_plain: string;
+  corpus_hash?: string;
+  saved_at?: string;
+  signer_role_ids?: string[];
+};
+
+/** Narrow packet wrapper required by owner executed-artifact retrieval. */
+export type Vs01SigningPacketDraftRecordV1 = {
+  fully_executed_snapshot?: Vs01FullyExecutedSnapshotDraftV1 | null;
 };

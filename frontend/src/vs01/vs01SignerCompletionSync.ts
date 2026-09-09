@@ -93,17 +93,6 @@ function ensureSnapshotForSigner(
   };
 }
 
-function willCompleteAllSignersAfterThis(agreementId: string, signerRoleId: string): boolean {
-  const keys = bootstrapSignerKeys(agreementId);
-  if (!keys.length) return false;
-  const snap = readSigningPacketStatus(agreementId);
-  for (const key of keys) {
-    if (key === signerRoleId) continue;
-    if (snap?.bySignerKey[key] !== "signed") return false;
-  }
-  return true;
-}
-
 function persistSignerCompletionToPortablePacket(args: {
   documentId: string;
   agreementId: string;
@@ -252,9 +241,6 @@ async function recordVs01SignerCompletionInner(
   const partyIndex = authoritative.partyIndex;
   const isLocalBridge = agreementId.startsWith("local_ag_");
 
-  const optimisticFinal =
-    willCompleteAllSignersAfterThis(agreementId, signerRoleId);
-
   let { portable, corpusStamped } = persistSignerCompletionToPortablePacket({
     documentId,
     agreementId,
@@ -263,7 +249,9 @@ async function recordVs01SignerCompletionInner(
     signingDateIso,
     displayName: args.displayName,
     recipientFields: args.recipientFields,
-    attachFinalSnapshot: optimisticFinal,
+    // Client must not declare full execution. Attach a local snapshot only after
+    // the server reports fully_executed (canonical all-signers finalization).
+    attachFinalSnapshot: false,
   });
 
   let serverSynced = false;

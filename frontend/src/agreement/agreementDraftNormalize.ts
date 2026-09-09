@@ -1,4 +1,8 @@
-import type { AgreementDraft, AgreementParty } from "./agreementTypes";
+import type {
+  AgreementDraft,
+  AgreementParty,
+  Vs01SigningPacketDraftRecordV1,
+} from "./agreementTypes";
 import type { PaymentRequestPayload } from "./paymentRequestTypes";
 import { normalizePaymentRequestFromApi } from "./paymentRequestTypes";
 import {
@@ -52,6 +56,35 @@ function fallbackRoleForPartyIndex(idx: number): string {
   if (idx === 0) return "Client";
   if (idx === 1) return "Service Provider";
   return "party";
+}
+
+/**
+ * Preserve only the server fully-executed snapshot authority needed by
+ * owner view-signed retrieval. Does not copy portable/packet chrome and
+ * does not rewrite corpus text.
+ */
+export function normalizeVs01SigningPacketFromApi(
+  raw: unknown,
+): Vs01SigningPacketDraftRecordV1 | undefined {
+  if (raw == null || typeof raw !== "object") return undefined;
+  const rec = raw as Record<string, unknown>;
+  const snapRaw = rec.fully_executed_snapshot;
+  if (snapRaw == null || typeof snapRaw !== "object") return undefined;
+  const snap = snapRaw as Record<string, unknown>;
+  const corpus_plain = coerceStr(snap.corpus_plain);
+  if (!corpus_plain) return undefined;
+  const signer_role_ids = Array.isArray(snap.signer_role_ids)
+    ? snap.signer_role_ids.map((id) => String(id ?? "").trim()).filter(Boolean)
+    : [];
+  return {
+    fully_executed_snapshot: {
+      v: typeof snap.v === "number" && Number.isFinite(snap.v) ? snap.v : 1,
+      corpus_plain,
+      corpus_hash: coerceStr(snap.corpus_hash) || undefined,
+      saved_at: coerceStr(snap.saved_at) || undefined,
+      ...(signer_role_ids.length ? { signer_role_ids } : {}),
+    },
+  };
 }
 
 /** Coerce API / LLM output into the workspace AgreementDraft shape with safe containers. */
@@ -151,6 +184,7 @@ export function normalizeAgreementDraftFromApi(
   const durationRaw = coerceNullStr(r.duration);
   const dueRaw = coerceNullStr(r.due_date);
   const effectiveRaw = coerceNullStr(r.effective_date);
+  const vs01SigningPacket = normalizeVs01SigningPacketFromApi(r.vs01_signing_packet_v1);
 
   return {
     id,
@@ -213,6 +247,7 @@ export function normalizeAgreementDraftFromApi(
       r.pro_redline_v1 != null && typeof r.pro_redline_v1 === "object"
         ? (r.pro_redline_v1 as Record<string, unknown>)
         : null,
+    ...(vs01SigningPacket ? { vs01_signing_packet_v1: vs01SigningPacket } : {}),
   };
 }
 
