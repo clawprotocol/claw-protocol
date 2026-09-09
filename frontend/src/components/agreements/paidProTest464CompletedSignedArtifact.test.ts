@@ -22,6 +22,7 @@ import { repairBareEntityOnlyNoticeStanzas } from "./paidProPartyNoticeDetails";
 import { repairJoinedTopLevelSectionHeadings } from "./sectionStructureAuthority";
 import { resolvePaidProSignerFinalizeRawCorpus } from "./paidProSignerFinalizeRawCorpus";
 import { resolvePaidProPostFinalizeReviewPlain } from "./paidProPostFinalizeReviewSurface";
+import { extractClauseBodyBeforeWitness } from "./paidProCompletedCorpusFrozenBodyCompare";
 import {
   clearPaidProSourceOfTruth,
   establishPaidProSourceOfTruth,
@@ -201,16 +202,19 @@ describe("TEST464 — completed signed artifact after four-party VS01 signing", 
     });
     setPaidProPinnedSignerAppliedCorpus(hydrated.corpus);
 
+    const frozen = getPaidProSourceOfTruthText();
+    const frozenClause = extractClauseBodyBeforeWitness(frozen);
     const handoffCorpus = polishTest464HandoffCorpus(resolvePaidProPostFinalizeReviewPlain(draft));
     const bridge = buildTest464BridgeSession(handoffCorpus);
     const roles = buildVs01PrepareSigningRolesForBridge(bridge);
     expect(roles.length).toBe(4);
+    expect(roles[0]?.signerName).toBe(TEST462_SIGNER_METADATA.partySignerNames[0]);
 
     const roleEntityNames = [...TEST462_ALL_PARTIES];
 
     const model = buildVs01SigningPacketModel({
       mode: "guided_pro",
-      authoritativeCorpusPlain: handoffCorpus,
+      authoritativeCorpusPlain: frozen,
       roles,
       initialsEnabled: true,
       bridge,
@@ -235,7 +239,7 @@ describe("TEST464 — completed signed artifact after four-party VS01 signing", 
         "",
       ]),
     ].join("\n");
-    const signingCorpus = `${"x".repeat(12000)}\n\n${witnessTail}`;
+    const signingCorpus = `${frozenClause}\n\n${witnessTail}`;
     const signerNames = TEST462_SIGNER_METADATA.partySignerNames;
 
     let corpusForSigning = signingCorpus;
@@ -321,6 +325,13 @@ describe("TEST464 — completed signed artifact after four-party VS01 signing", 
     for (const signer of signerNames) {
       expect(rebuilt!).toContain(signer);
     }
+    expect(extractClauseBodyBeforeWitness(rebuilt!)).toBe(frozenClause);
+    for (let i = 0; i < 4; i += 1) {
+      const entity = TEST462_ALL_PARTIES[i]!.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      const signer = signerNames[i]!.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      expect(rebuilt!).toMatch(new RegExp(`${entity}:[\\s\\S]*?By:\\s*${signer}`));
+      expect(rebuilt!).not.toMatch(new RegExp(`${entity}:[\\s\\S]*?By:\\s*${entity}`));
+    }
 
     const witnessCounts = countSignedWitnessBlocks(rebuilt!, TEST462_ALL_PARTIES);
     expect(witnessCounts.signed).toBe(4);
@@ -360,6 +371,8 @@ describe("TEST464 — completed signed artifact after four-party VS01 signing", 
     expect(resolved).not.toBeNull();
     expect(resolved!.source).toBe("fully_executed_snapshot");
     expect(resolved!.text).toContain("Evergreen Outdoor Brands LLC");
+    expect(resolved!.text).toContain("Eve Green");
+    expect(extractClauseBodyBeforeWitness(resolved!.text)).toBe(frozenClause);
 
     const snapAgain = buildFullyExecutedSignedSnapshot(portableWithSnap);
     expect(snapAgain?.corpusHash).toBe(snap!.corpusHash);
