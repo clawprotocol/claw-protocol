@@ -16,6 +16,7 @@ export const CUSTOMER_JOURNEY_STATE = {
   readyToCreateSigningLinks: "Ready to create signing links",
   creatingLinks: "Creating links",
   linksCreatedShareWhenReady: "Links created—share when ready",
+  reviewLinksAlreadyReady: "Review links are already ready.",
   waitingForReview: "Waiting for review",
   waitingForSignatures: "Waiting for signatures",
   fullyExecuted: "Fully executed",
@@ -41,6 +42,7 @@ export type CustomerJourneyInternalDimensions = {
   actionNeedsAttention: boolean;
   creatingAgreement?: boolean;
   creatingLinks?: boolean;
+  reviewLinksAlreadyReady?: boolean;
 };
 
 /**
@@ -55,6 +57,7 @@ export function resolveCustomerJourneyState(
   if (d.creatingLinks) return CUSTOMER_JOURNEY_STATE.creatingLinks;
   if (d.waitingForSignatures) return CUSTOMER_JOURNEY_STATE.waitingForSignatures;
   if (d.waitingForReview) return CUSTOMER_JOURNEY_STATE.waitingForReview;
+  if (d.reviewLinksAlreadyReady && d.linksCreated) return CUSTOMER_JOURNEY_STATE.reviewLinksAlreadyReady;
   if (d.linksCreated) return CUSTOMER_JOURNEY_STATE.linksCreatedShareWhenReady;
   if (!d.draftCreated) {
     if (d.creatingAgreement) return CUSTOMER_JOURNEY_STATE.creatingAgreement;

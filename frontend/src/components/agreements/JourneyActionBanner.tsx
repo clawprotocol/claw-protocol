@@ -1,4 +1,5 @@
 import type { JourneyActionFeedback } from "./journeyActionFeedback";
+import { resolveUserActionFeedback } from "./userActionFeedback";
 
 const KIND_CLASS: Record<JourneyActionFeedback["kind"], string> = {
   working: "border-sky-700/50 bg-sky-950/35 text-sky-100",
@@ -47,6 +48,20 @@ export function JourneyActionBanner(props: {
           </button>
         ) : null}
       </div>
+    </div>
+  );
+}
+
+/** Private review/sign link gate — same banner contract as owner actions. */
+export function RecipientLinkGateNotice(props: { phase: "loading" | "bad"; detail?: string | null }) {
+  const feedback = resolveUserActionFeedback({
+    actor: "recipient",
+    action: "open_review_link",
+    outcome: props.phase === "loading" ? "working" : "failed",
+  });
+  return (
+    <div className="mx-auto max-w-lg px-4 py-8" data-link-gate-detail={props.detail || undefined}>
+      <JourneyActionBanner feedback={feedback} />
     </div>
   );
 }
