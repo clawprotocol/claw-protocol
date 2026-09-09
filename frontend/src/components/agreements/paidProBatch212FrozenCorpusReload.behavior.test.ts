@@ -1,5 +1,6 @@
 /** @vitest-environment jsdom */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { setOrgId } from "../../launch/orgContext";
 
 const fetchMock = vi.fn();
 
@@ -14,13 +15,14 @@ vi.mock("../../lib/clawApi", async (importOriginal) => {
 
 vi.mock("../../agreement/agreementOrgHeaders", () => ({
   clawAgreementHeaders: () => ({
-    "X-Claw-Org-Id": "user-owner",
+    "X-Claw-Org-Id": "org_batch212_owner",
     Authorization: "Bearer test-owner",
   }),
 }));
 
 const AGREEMENT_A = "ag_frozen_legal_a";
 const AGREEMENT_B = "ag_frozen_legal_b";
+const ORGANIZATION_ID = "org_batch212_owner";
 
 function uniqueBody(tag: string): string {
   return [
@@ -74,6 +76,7 @@ describe("Batch 2.1.2 canonical-snapshot frozen corpus reload", () => {
     vi.stubGlobal("fetch", fetchMock);
     sessionStorage.clear();
     localStorage.clear();
+    setOrgId(ORGANIZATION_ID);
     const { clearImmutableFrozenLegalCorpus } = await import("./paidProFrozenLegalCorpus");
     clearImmutableFrozenLegalCorpus();
   });
@@ -96,6 +99,7 @@ describe("Batch 2.1.2 canonical-snapshot frozen corpus reload", () => {
     const first = await import("./paidProFrozenLegalCorpusFromCanonicalSnapshot");
     const seeded = await first.restoreImmutableFrozenLegalCorpusFromCanonicalSnapshot({
       agreementId: AGREEMENT_A,
+      organizationId: ORGANIZATION_ID,
       expectedSha256: digest,
     });
     expect(seeded.ok).toBe(true);
@@ -111,12 +115,14 @@ describe("Batch 2.1.2 canonical-snapshot frozen corpus reload", () => {
         signatureRegionOnly: true,
         repairRecital: false,
         agreementId: AGREEMENT_A,
+        organizationId: ORGANIZATION_ID,
       }),
     ).toBeNull();
 
     const restoredMod = await import("./paidProFrozenLegalCorpusFromCanonicalSnapshot");
     const restored = await restoredMod.restoreImmutableFrozenLegalCorpusFromCanonicalSnapshot({
       agreementId: AGREEMENT_A,
+      organizationId: ORGANIZATION_ID,
       expectedSha256: digest,
     });
     expect(restored).toMatchObject({ ok: true, body: corpus.trim(), sha256: digest });
@@ -129,6 +135,7 @@ describe("Batch 2.1.2 canonical-snapshot frozen corpus reload", () => {
         signatureRegionOnly: true,
         repairRecital: false,
         agreementId: AGREEMENT_A,
+        organizationId: ORGANIZATION_ID,
         expectedHash: restored.ok ? restored.hash : "",
       }),
     ).toBe(corpus.trim());
@@ -150,7 +157,10 @@ describe("Batch 2.1.2 canonical-snapshot frozen corpus reload", () => {
       body: { detail: { code: "forbidden" } },
     }));
     expect(
-      await restoreImmutableFrozenLegalCorpusFromCanonicalSnapshot({ agreementId: AGREEMENT_A }),
+      await restoreImmutableFrozenLegalCorpusFromCanonicalSnapshot({
+        agreementId: AGREEMENT_A,
+        organizationId: ORGANIZATION_ID,
+      }),
     ).toMatchObject({ ok: false, reason: "server_get_failed", code: "forbidden" });
 
     mockGetSnapshot(() => ({
@@ -158,7 +168,10 @@ describe("Batch 2.1.2 canonical-snapshot frozen corpus reload", () => {
       body: snapshotPayload({ agreementId: AGREEMENT_B, corpus, digest }),
     }));
     expect(
-      await restoreImmutableFrozenLegalCorpusFromCanonicalSnapshot({ agreementId: AGREEMENT_A }),
+      await restoreImmutableFrozenLegalCorpusFromCanonicalSnapshot({
+        agreementId: AGREEMENT_A,
+        organizationId: ORGANIZATION_ID,
+      }),
     ).toMatchObject({ ok: false, reason: "agreement_mismatch" });
 
     mockGetSnapshot(() => ({
@@ -170,7 +183,10 @@ describe("Batch 2.1.2 canonical-snapshot frozen corpus reload", () => {
       }),
     }));
     expect(
-      await restoreImmutableFrozenLegalCorpusFromCanonicalSnapshot({ agreementId: AGREEMENT_A }),
+      await restoreImmutableFrozenLegalCorpusFromCanonicalSnapshot({
+        agreementId: AGREEMENT_A,
+        organizationId: ORGANIZATION_ID,
+      }),
     ).toMatchObject({ ok: false, reason: "server_get_failed", code: "persist_get_authority_mismatch" });
 
     mockGetSnapshot(() => ({
@@ -183,7 +199,10 @@ describe("Batch 2.1.2 canonical-snapshot frozen corpus reload", () => {
       }),
     }));
     expect(
-      await restoreImmutableFrozenLegalCorpusFromCanonicalSnapshot({ agreementId: AGREEMENT_A }),
+      await restoreImmutableFrozenLegalCorpusFromCanonicalSnapshot({
+        agreementId: AGREEMENT_A,
+        organizationId: ORGANIZATION_ID,
+      }),
     ).toMatchObject({ ok: false, reason: "server_get_failed", code: "persist_get_authority_mismatch" });
 
     expect(
@@ -192,6 +211,7 @@ describe("Batch 2.1.2 canonical-snapshot frozen corpus reload", () => {
         signatureRegionOnly: true,
         repairRecital: false,
         agreementId: AGREEMENT_A,
+        organizationId: ORGANIZATION_ID,
       }),
     ).toBeNull();
   });
@@ -219,7 +239,10 @@ describe("Batch 2.1.2 canonical-snapshot frozen corpus reload", () => {
       "./paidProFrozenLegalCorpus"
     );
     expect(
-      (await restoreImmutableFrozenLegalCorpusFromCanonicalSnapshot({ agreementId: AGREEMENT_A })).ok,
+      (await restoreImmutableFrozenLegalCorpusFromCanonicalSnapshot({
+        agreementId: AGREEMENT_A,
+        organizationId: ORGANIZATION_ID,
+      })).ok,
     ).toBe(true);
     expect(
       resolveImmutableFrozenLegalCorpusOnSignerFinalize({
@@ -227,10 +250,14 @@ describe("Batch 2.1.2 canonical-snapshot frozen corpus reload", () => {
         signatureRegionOnly: true,
         repairRecital: false,
         agreementId: AGREEMENT_B,
+        organizationId: ORGANIZATION_ID,
       }),
     ).toBeNull();
     expect(
-      (await restoreImmutableFrozenLegalCorpusFromCanonicalSnapshot({ agreementId: AGREEMENT_B })).ok,
+      (await restoreImmutableFrozenLegalCorpusFromCanonicalSnapshot({
+        agreementId: AGREEMENT_B,
+        organizationId: ORGANIZATION_ID,
+      })).ok,
     ).toBe(true);
     expect(
       resolveImmutableFrozenLegalCorpusOnSignerFinalize({
@@ -238,6 +265,7 @@ describe("Batch 2.1.2 canonical-snapshot frozen corpus reload", () => {
         signatureRegionOnly: true,
         repairRecital: false,
         agreementId: AGREEMENT_A,
+        organizationId: ORGANIZATION_ID,
       }),
     ).toBe(a.trim());
     expect(
@@ -246,6 +274,7 @@ describe("Batch 2.1.2 canonical-snapshot frozen corpus reload", () => {
         signatureRegionOnly: true,
         repairRecital: false,
         agreementId: AGREEMENT_B,
+        organizationId: ORGANIZATION_ID,
       }),
     ).toBe(b.trim());
   });
@@ -269,7 +298,10 @@ describe("Batch 2.1.2 canonical-snapshot frozen corpus reload", () => {
       "./paidProFrozenLegalCorpus"
     );
     expect(
-      (await restoreImmutableFrozenLegalCorpusFromCanonicalSnapshot({ agreementId: AGREEMENT_A })).ok,
+      (await restoreImmutableFrozenLegalCorpusFromCanonicalSnapshot({
+        agreementId: AGREEMENT_A,
+        organizationId: ORGANIZATION_ID,
+      })).ok,
     ).toBe(true);
     expect(getCount).toBe(1);
 
@@ -281,11 +313,14 @@ describe("Batch 2.1.2 canonical-snapshot frozen corpus reload", () => {
         signatureRegionOnly: true,
         repairRecital: false,
         agreementId: AGREEMENT_A,
+        organizationId: ORGANIZATION_ID,
       }),
     ).toBeNull();
 
+    setOrgId(ORGANIZATION_ID);
     const again = await restoreImmutableFrozenLegalCorpusFromCanonicalSnapshot({
       agreementId: AGREEMENT_A,
+      organizationId: ORGANIZATION_ID,
       expectedSha256: digest,
     });
     expect(again.ok).toBe(true);
@@ -296,6 +331,7 @@ describe("Batch 2.1.2 canonical-snapshot frozen corpus reload", () => {
         signatureRegionOnly: true,
         repairRecital: false,
         agreementId: AGREEMENT_A,
+        organizationId: ORGANIZATION_ID,
       }),
     ).toBe(corpus.trim());
   });

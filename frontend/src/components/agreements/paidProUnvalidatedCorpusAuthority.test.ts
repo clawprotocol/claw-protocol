@@ -104,6 +104,8 @@ describe("unvalidated corpus fails closed", () => {
     const committed = commitAcceptedPaidProCorpusHandoffSync({
       corpusPlain: TEST501_ACCEPTED_PAID_BODY,
       pipelineSource: "server_full_draft",
+      agreementId: "ag_test501_validated_handoff",
+      organizationId: "org_test501_validated_handoff",
     });
     expect(committed).toBe(true);
     expect(readPaidProPipelineAcceptedCorpusHash()).not.toBeNull();

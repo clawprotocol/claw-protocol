@@ -34,6 +34,14 @@ describe("paidPro signer finalize durable agreement id (universal)", () => {
       block.indexOf("createAuthoritativeSigningSnapshot"),
     );
     expect(block).toContain("expectedFrozenHash");
+    expect(block).toContain("gateSignerFinalizeOnVerifiedFrozenAuthority");
+    expect(block.indexOf("gateSignerFinalizeOnVerifiedFrozenAuthority")).toBeLessThan(
+      block.indexOf("buildHydratedAuthoritativeSigningCorpusFromAuthority"),
+    );
+    expect(block.indexOf("if (!frozenGate.ok)")).toBeLessThan(
+      block.indexOf("buildHydratedAuthoritativeSigningCorpusFromAuthority"),
+    );
+    expect(block).not.toContain("resolveExpectedFrozenHashForSignerFinalize");
     expect(block).toMatch(/could not save this agreement before finalizing signers/i);
     expect(block).toMatch(/Tap Retry to save/i);
     expect(block).not.toMatch(/Reload from the dashboard and try again/i);

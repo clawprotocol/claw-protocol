@@ -64,6 +64,8 @@ describe("Batch 2 rewrite corpus handoff behavior", () => {
       commitValidatedPaidProRewriteCorpusHandoff({
         corpusPlain: TEST501_ACCEPTED_PAID_BODY,
         pipelineSource: "server_full_draft",
+        agreementId: "ag_batch2_rewrite_handoff",
+        organizationId: "org_batch2_rewrite_handoff",
       }),
     ).toBe(true);
     expect(readPaidProPipelineAcceptedCorpusHash()).not.toBeNull();

@@ -73,6 +73,8 @@ function seedReturningPaidAcceptance(body = TEST506_ACCEPTED_PAID_BODY): void {
   commitAcceptedPaidProCorpusHandoffSync({
     corpusPlain: body,
     pipelineSource: "server_full_draft",
+    agreementId: "ag_test506_returning_paid",
+    organizationId: "org_test506_returning_paid",
   });
   establishPaidProSourceOfTruth({
     text: body,

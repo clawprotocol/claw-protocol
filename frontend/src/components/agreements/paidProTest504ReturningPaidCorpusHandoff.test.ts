@@ -159,6 +159,8 @@ describe("TEST504 — returning paid corpus handoff promotes accepted Pro body b
     const committed = commitAcceptedPaidProCorpusHandoffSync({
       corpusPlain: TEST504_ACCEPTED_PAID_BODY,
       pipelineSource: "server_full_draft",
+      agreementId: "ag_test504_returning_paid",
+      organizationId: "org_test504_returning_paid",
     });
     expect(committed).toBe(true);
     const plan = planEnterCanonicalPaidProReviewFlow({

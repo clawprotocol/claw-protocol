@@ -34,6 +34,10 @@ import {
   buildTwoPartyProfessionalServicesCorpus,
 } from "./paidProSharedFixtureSystem";
 import { SUBSTANTIVE_SERVER_DRAFT_MIN_LEN } from "./premiumAcceptancePolicy";
+import { setOrgId } from "../../launch/orgContext";
+
+const BATCH21_AGREEMENT_ID = "ag_batch21_frozen_legal";
+const BATCH21_ORGANIZATION_ID = "org_batch21_frozen_legal";
 
 const CLIENT = SHARED_RED_MESA;
 const PROVIDER = SHARED_HARBOR_PEAK;
@@ -92,6 +96,7 @@ function liveAuthority(args: {
 function finalizeFromAuthority(
   authority: ReturnType<typeof buildLivePaidProSignerMetadataAuthority>,
   intakeRaw = "",
+  scope?: { agreementId: string; organizationId: string; expectedFrozenHash: string },
 ) {
   const raw = resolvePaidProSignerFinalizeRawCorpus({
     immutableSourceOfTruthOnly: true,
@@ -103,6 +108,9 @@ function finalizeFromAuthority(
     surface: "finalize_paid_pro_signer_metadata",
     signatureRegionOnly: true,
     repairRecital: false,
+    agreementId: scope?.agreementId,
+    organizationId: scope?.organizationId,
+    expectedFrozenHash: scope?.expectedFrozenHash,
   });
   const snapshot = createAuthoritativeSigningSnapshot({
     corpus: hydrated.corpus,
@@ -124,6 +132,7 @@ describe("Batch 2.1 frozen legal corpus vs signer metadata", () => {
     clearAuthoritativeSigningSnapshot();
     clearConsumedPaidProSignerMetadataAuthority();
     clearPaidProSourceOfTruth();
+    setOrgId(BATCH21_ORGANIZATION_ID);
   });
 
   afterEach(() => {
@@ -144,6 +153,8 @@ describe("Batch 2.1 frozen legal corpus vs signer metadata", () => {
       commitAcceptedPaidProCorpusHandoffSync({
         corpusPlain: accepted,
         pipelineSource: "server_full_draft",
+        agreementId: BATCH21_AGREEMENT_ID,
+        organizationId: BATCH21_ORGANIZATION_ID,
       }),
     ).toBe(true);
     establishPaidProSourceOfTruth({
@@ -152,12 +163,19 @@ describe("Batch 2.1 frozen legal corpus vs signer metadata", () => {
       intakeText: `Draft a services agreement between ${CLIENT} and ${PROVIDER}.`,
     });
 
+    const frozenScope = {
+      agreementId: BATCH21_AGREEMENT_ID,
+      organizationId: BATCH21_ORGANIZATION_ID,
+      expectedFrozenHash: frozenHash,
+    };
     const first = finalizeFromAuthority(
       liveAuthority({
         signerNames: [SIGNER_A, SIGNER_B],
         signerTitles: ["CEO", "President"],
         emails: [EMAIL_A1, EMAIL_B],
       }),
+      "",
+      frozenScope,
     );
     expect(first.hydrated.corpus).toBe(accepted.trim());
     expect(hashPaidProCorpus(first.hydrated.corpus)).toBe(frozenHash);
@@ -180,6 +198,8 @@ describe("Batch 2.1 frozen legal corpus vs signer metadata", () => {
         signerTitles: ["CEO", "President"],
         emails: [EMAIL_A2, EMAIL_B],
       }),
+      "",
+      frozenScope,
     );
     expect(second.hydrated.corpus).toBe(accepted.trim());
     expect(hashPaidProCorpus(second.hydrated.corpus)).toBe(frozenHash);
