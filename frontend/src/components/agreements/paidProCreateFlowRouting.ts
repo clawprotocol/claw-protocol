@@ -21,6 +21,7 @@ import { hasPaidDashboardCreateContextActive } from "../../launch/paidDashboardC
 import { PAID_PRO_AUTHORITY_MIN_LEN } from "./paidProAuthorityConstants";
 import { resolveCreateFlowAcceptedPipelineCorpusPlain } from "./paidProAcceptanceRouting";
 import { shouldUsePaidCreateFlowReviewFirstPersist } from "./paidProCreateFlowReviewHandoff";
+import type { ParsedDraftShape } from "./intakeSmartDefaults";
 
 export type ResolveSkipFreeStarterCreateSubmitInput = {
   tier: AccessTier;
@@ -84,11 +85,41 @@ export function hasPaidCreateFlowPersistableCorpus(
   return corpusLen >= PAID_PRO_AUTHORITY_MIN_LEN;
 }
 
+function resolvePaidCreateFlowProvidedCorpusPlain(args: {
+  draft?: ParsedDraftShape | null;
+  agreementDocumentText?: string;
+  pipelineWinningBody?: string | null;
+}): string {
+  const candidates = [
+    args.pipelineWinningBody,
+    args.agreementDocumentText,
+    args.draft?.premium_server_full_document_text,
+    args.draft?.premium_full_document_text,
+  ];
+  let best = "";
+  for (const candidate of candidates) {
+    const text = (candidate ?? "").trim();
+    if (text.length > best.length) best = text;
+  }
+  return best;
+}
+
 export function shouldAutoPersistReviewAgreementRow(args: ShouldAutoPersistReviewAgreementRowArgs): boolean {
   if (args.hasReviewAgreementId) return false;
   if (args.qualityRetryActive) return false;
   if (args.skipFreeStarterCreateSubmit) {
-    return hasPaidCreateFlowPersistableCorpus(args);
+    if (hasPaidCreateFlowPersistableCorpus(args)) return true;
+    // Paid create already skipped Free Starter — persist a professionally
+    // validated substantive corpus even before the accepted-hash latch
+    // (TEST490). Hash-only freeze-prep remains non-persistable.
+    const provided = resolvePaidCreateFlowProvidedCorpusPlain(args);
+    return (
+      provided.length >= PAID_PRO_AUTHORITY_MIN_LEN &&
+      hasPaidProPipelineSessionAcceptance({
+        text: provided,
+        source: "server_full_draft",
+      })
+    );
   }
   if (hasFreeStarterSessionWithoutProEntitlement()) return false;
   return true;
