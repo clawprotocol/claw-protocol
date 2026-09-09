@@ -22,11 +22,21 @@ import { resolveSimpleProFinalReviewActive } from "./simpleProFinalReviewPhase";
 import { runPaidProSignerMetadataAuthoritySeed } from "./paidProSignerMetadataSeed";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import { resolveLegalEntitiesForCanonicalMetadata } from "./canonicalLegalEntitiesForMetadata";
-import { markPaidProPipelineAcceptedCorpusHash, readPaidProPipelineAcceptedCorpusBody } from "./paidProPipelineAcceptedCorpus";
+import {
+  markPaidProPipelineAcceptedCorpusHash,
+  readPaidProPipelineAcceptedCorpusBody,
+  readPaidProPipelineAcceptedCorpusHash,
+} from "./paidProPipelineAcceptedCorpus";
 import {
   hasPaidProPipelineValidationForCorpus,
   markPaidProPipelineValidationPassed,
 } from "./paidProPostAcceptanceValidatorCache";
+import {
+  alignIntakeSignerMetadataToLegalEntities,
+  extractCanonicalIntakeSignerMetadata,
+  isLikelyHumanSignerName,
+} from "./intakeSignerMetadataAuthority";
+import { entitiesMatchForSignerMetadata } from "./universalSignerMetadataAuthority";
 
 export type CanonicalPaidProReviewEntrySource =
   | "post_checkout_apply_success"
@@ -161,9 +171,9 @@ export function planEnterCanonicalPaidProReviewFlow(
     return { ...baseBlocked, blockedReason: "create_flow_routing_gate" };
   }
 
-  // Returning paid-create and first-paid routes must not enter canonical review on a
-  // hash-only / unvalidated corpus (TEST515). Post-checkout apply still commits markers
-  // via commitAcceptedPaidProCorpusHandoffSync after evaluateFirstPaidCreatePipelineGate.
+  // Returning paid-create must not treat hash-only freeze-prep as acceptance
+  // (TEST515). An explicit guided-min corpus with no accepted-hash latch may
+  // still share the first-time review plan (TEST501/TEST502).
   if (
     !args.assumeFreshPipelineValidation &&
     args.source === "returning_paid_create"
@@ -172,7 +182,7 @@ export function planEnterCanonicalPaidProReviewFlow(
       text: corpusPlain,
       source: pipelineSource,
     });
-    if (!latched) {
+    if (!latched && readPaidProPipelineAcceptedCorpusHash() !== null) {
       return { ...baseBlocked, blockedReason: "validation_not_latched_for_corpus" };
     }
   }
@@ -249,16 +259,36 @@ export function planCanonicalPaidProSignerHandoff(args: {
     draft: args.draft,
     authoritativePartyCount: legalEntities.length,
   });
+  const aligned = alignIntakeSignerMetadataToLegalEntities(args.intakeText, legalEntities);
+  const authorizedBullets = extractCanonicalIntakeSignerMetadata(args.intakeText).filter(
+    (row) => row.source === "authorized_signers_bullet" && isLikelyHumanSignerName(row.signerName),
+  );
+  const signerNames = seed.names.slice();
+  const signerTitles = seed.titles.slice();
+  while (signerNames.length < legalEntities.length) signerNames.push("");
+  while (signerTitles.length < legalEntities.length) signerTitles.push("");
+  for (let i = 0; i < legalEntities.length; i++) {
+    const entity = legalEntities[i] ?? "";
+    const fromBullet =
+      authorizedBullets.find((row) => entitiesMatchForSignerMetadata(row.legalEntity, entity)) ??
+      authorizedBullets[i];
+    const humanName = (fromBullet?.signerName || aligned[i]?.signerName || "").trim();
+    const humanTitle = (fromBullet?.signerTitle || aligned[i]?.signerTitle || "").trim();
+    if (fromBullet && humanName && isLikelyHumanSignerName(humanName)) {
+      signerNames[i] = humanName;
+      if (humanTitle) signerTitles[i] = humanTitle;
+    }
+  }
   const hasIntakeEntitySignal = legalEntities.some(Boolean);
   const hasIntakeContactSignal =
     seed.addresses.some(Boolean) ||
     seed.emails.some(Boolean) ||
-    seed.names.some((n) => n.trim()) ||
-    seed.titles.some((t) => t.trim());
+    signerNames.some((n) => n.trim()) ||
+    signerTitles.some((t) => t.trim());
   if (!hasIntakeEntitySignal && !hasIntakeContactSignal) return null;
   return {
-    signerNames: seed.names,
-    signerTitles: seed.titles,
+    signerNames,
+    signerTitles,
     partyLegalNames: legalEntities,
     partyEmails: args.recipientCandidates?.map((c) => c.email ?? "") ?? seed.emails,
     partyAddresses: seed.addresses,
