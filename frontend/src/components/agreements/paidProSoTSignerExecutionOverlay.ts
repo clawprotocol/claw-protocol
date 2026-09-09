@@ -17,6 +17,15 @@ function splitFrozenOperativeAndExecution(text: string): { clause: string; tail:
   return { clause: text.slice(0, idx), tail: text.slice(idx) };
 }
 
+/** After freeze, keep the accepted clause and take only the overlaid execution tail. */
+export function preserveFrozenOperativeClause(frozenCorpus: string, overlaid: string): string {
+  const frozenParts = splitFrozenOperativeAndExecution(frozenCorpus);
+  const overlaidParts = splitFrozenOperativeAndExecution(overlaid);
+  if (overlaidParts.clause === frozenParts.clause) return overlaid;
+  if (!overlaidParts.tail) return frozenCorpus;
+  return `${frozenParts.clause}${overlaidParts.tail}`;
+}
+
 export function applyPaidProSoTSignerExecutionOverlay(
   frozenCorpus: string,
   parties: readonly PaidProSignerMetadataParty[],
@@ -43,12 +52,5 @@ export function applyPaidProSoTSignerExecutionOverlay(
     draftPartyNames: ctx.draftPartyNames ?? null,
   }).text;
   const finalized = finalizePaidProSigningCorpusText(text, hydrationParties, ctx);
-  const frozenParts = splitFrozenOperativeAndExecution(frozenCorpus);
-  const overlaidParts = splitFrozenOperativeAndExecution(finalized.text);
-  // After freeze, signer overlay may change execution/signature/date presentation only.
-  if (overlaidParts.clause !== frozenParts.clause) {
-    if (!overlaidParts.tail) return frozenCorpus;
-    return `${frozenParts.clause}${overlaidParts.tail}`;
-  }
-  return finalized.text;
+  return preserveFrozenOperativeClause(frozenCorpus, finalized.text);
 }

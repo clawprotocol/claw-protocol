@@ -20,7 +20,8 @@ export type RestoreFrozenLegalCorpusFromCanonicalResult =
         | "server_get_failed"
         | "agreement_mismatch"
         | "length_mismatch"
-        | "hash_mismatch";
+        | "hash_mismatch"
+        | "pending_snapshot";
       code?: string;
     };
 
@@ -56,6 +57,10 @@ export async function restoreImmutableFrozenLegalCorpusFromCanonicalSnapshot(arg
   }
 
   const snap = hydrated.snapshot;
+  const snapshotStatus = String(snap.status || hydrated.status || "").trim().toLowerCase();
+  if (!hydrated.accepted || snapshotStatus !== "accepted") {
+    return { ok: false, reason: "pending_snapshot" };
+  }
   const returnedId = String(snap.agreement_id || "").trim();
   const body = (snap.corpus_plain || "").trim();
   const sha256 = String(snap.corpus_sha256 || "").toLowerCase();

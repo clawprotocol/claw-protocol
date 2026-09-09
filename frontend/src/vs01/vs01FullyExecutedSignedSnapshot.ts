@@ -70,7 +70,13 @@ export function parseSignatureCompletedEventsFromAudit(
 export function signatureTextForSignerRole(
   fields: readonly Vs01RecipientPlacedField[],
   signerRoleId: string,
-  opts?: { partyIndex?: number; signerEmail?: string | null; auditDisplayName?: string | null; roleSignerName?: string | null },
+  opts?: {
+    partyIndex?: number;
+    signerEmail?: string | null;
+    auditDisplayName?: string | null;
+    roleSignerName?: string | null;
+    partyLegalName?: string | null;
+  },
 ): string {
   const resolved = resolveCompletedSignerByText({
     agreementId: "",
@@ -80,6 +86,7 @@ export function signatureTextForSignerRole(
     signerEmail: opts?.signerEmail,
     roleSignerName: opts?.roleSignerName,
     auditDisplayName: opts?.auditDisplayName,
+    partyLegalName: opts?.partyLegalName,
     fields,
   });
   return resolved.byText;
@@ -122,6 +129,7 @@ export function applySignerCompletionToPortablePacket(args: {
       partyIndex: args.partyIndex,
       signerEmail: role?.signerEmail ?? role?.reviewEmail,
       roleSignerName: role?.signerName,
+      partyLegalName: role?.entityName || role?.partyName,
     });
 
   const roleEntityNames = extractRoleEntityNamesFromPortableRoles(args.portable.roles);

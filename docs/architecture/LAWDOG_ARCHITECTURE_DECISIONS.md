@@ -155,7 +155,7 @@ This file records **why** LawDog is shaped the way it is. The root architecture 
 
 **Status:** Accepted
 
-**Decision:** Signer edits flow through signer setup, `paidProSignerMetadataAuthority`, and finalize into `AuthoritativeSigningSnapshot`. They must not rewrite the frozen canonical SoT body except through allowed post-finalize hydration paths audited by corpus lifecycle diff.
+**Decision:** Signer edits flow through signer setup, `paidProSignerMetadataAuthority`, and finalize into `AuthoritativeSigningSnapshot`. Human signer name, title, and delivery email are execution/routing metadata. They must not rewrite the frozen canonical SoT body — including operative Notices clauses. Execution-tail overlay (witness / signature / date) is the only post-freeze corpus delta. See ADR-001 and ADR-020.
 
 **Rationale:** Treating signer typing as draft editing would violate SoT immutability and trigger false parity failures or silent corpus drift.
 
@@ -167,19 +167,23 @@ This file records **why** LawDog is shaped the way it is. The root architecture 
 
 ---
 
-## ADR-010 — Notice/address hydration is allowed only when classified as notice/contact hydration
+## ADR-010 — Frozen Notices clauses are immutable after acceptance
 
-**Status:** Accepted
+**Status:** Accepted (amended 2026-09-09; ADR-001 and ADR-020 control)
 
-**Decision:** Threading party street addresses or notice contact fields into Notices stanzas after signer finalize is permitted only when `classifyPaidProCorpusLifecycleDiff` returns `notice_contact_hydration_only`. It is not a substantive clause change.
+**Decision:** After the accepted server snapshot is frozen, operative Notices clauses are frozen legal text. Agents and runtime must **not** thread party street addresses, notice emails, or Attn/Role/By labels into those stanzas after freeze.
 
-**Rationale:** Notices must reflect operable contact details for delivery; identical operative clauses with hydrated notice fields should not fail parity or block signing prep.
+Human signer name, title, and delivery email stay on signer/party/snapshot metadata and may overlay the execution tail only.
 
-**Regression history:** Post-finalize notice threading changed snapshot hash relative to frozen SoT; unclassified delta was misread as substantive drift (TEST576). Notice authority repairs required confined stanza edits (TEST542, TEST546).
+A notice address or contact that should change the agreement text must be present **before acceptance** or added through an **explicit owner-approved revision** (`commitPaidProUserApprovedRevision` / `replacePaidProPipelineAcceptedCorpusAfterApprovedRevision`). Silent post-freeze notice injection is forbidden even when `classifyPaidProCorpusLifecycleDiff` returns `notice_contact_hydration_only`. That classification is a parity label, not a mutation grant.
 
-**Enforcing modules:** `paidProCorpusLifecycleDiff.ts`, `paidProPartyNoticeDetails.ts`, `paidProNoticeContactAuthority.ts`, `paidProReviewSotParity.ts`
+**Rationale:** Notices are operative delivery terms. Post-freeze hydration created lifecycle conflicts (TEST406 vs TEST497) and taught agents to rewrite frozen legal bytes.
 
-**Related tests:** TEST576, TEST542, TEST546, TEST575
+**Regression history:** Post-finalize notice threading changed snapshot hash relative to frozen SoT; unclassified delta was misread as substantive drift (TEST576). Batch 2.2 closed TEST497 by keeping the frozen clause. Batch 2.2.1 withdraws notice-body mutation as an allowed repair.
+
+**Enforcing modules:** `paidProSoTSignerExecutionOverlay.ts`, `paidProReviewRenderCorpus.ts`, `paidProPartyNoticeDetails.ts`, `paidProPipelineAcceptedCorpus.ts`
+
+**Related tests:** TEST497, TEST406, TEST576 (parity label only), TEST542, TEST546
 
 ---
 
@@ -188,6 +192,8 @@ This file records **why** LawDog is shaped the way it is. The root architecture 
 **Status:** Accepted
 
 **Decision:** `auditPaidProReviewRenderSotParity` compares canonical freeze hash to review render plain text. Mismatches are violations unless classification is in the allowed set (`notice_contact_hydration_only`, `signer_metadata_only`, `execution_block_hydration_only`, `display_normalization_only`, `whitespace_or_line_width_only`, `identical`).
+
+`notice_contact_hydration_only` classifies a display/parity delta. It does **not** authorize writing notice text into the frozen SoT. ADR-001 and ADR-020 control; see amended ADR-010.
 
 **Rationale:** Silent render drift is how “looks fine in review, wrong on sign” bugs enter production. Unclassified deltas must surface, not auto-forgive.
 
@@ -342,7 +348,7 @@ This file records **why** LawDog is shaped the way it is. The root architecture 
 
 **Status:** Accepted (2026-07-11)
 
-**Decision:** After freeze, `projectPaidProFrozenSoTDisplayPlain` is the sole authorized presentation projection for paid review surfaces. It may apply deterministic line breaks, title/heading splits, witness blank-line separation, and collapsed-notice line expansion. It must **not** call `ensureOperativeIfToNoticeDelivery`, `repairBareEntityOnlyNoticeStanzas`, or other substantive notice/execution repair at display time.
+**Decision:** After freeze, `projectPaidProFrozenSoTDisplayPlain` is the sole authorized presentation projection for paid review surfaces. It may apply deterministic line breaks, title/heading splits, witness blank-line separation, and collapsed-notice line expansion. It must **not** call `ensureOperativeIfToNoticeDelivery`, `repairBareEntityOnlyNoticeStanzas`, or other substantive notice/execution repair at display time. Review and signing document-surface plain must keep the frozen operative clause, including Notices. Execution/signature/date overlay is the only allowed post-freeze corpus delta.
 
 **Semantic parity:** `legalTokenFingerprint(review) === legalTokenFingerprint(frozenSoT)` and byte equality when the frozen corpus is already display-ready (TEST336, TEST587).
 
