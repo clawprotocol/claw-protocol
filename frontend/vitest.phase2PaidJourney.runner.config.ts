@@ -15,12 +15,9 @@
  */
 import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
+import { PHASE1_ACCESS_CONTRACT_INCLUDE } from "./vitest.phase1AccessContract.include";
 
-export const PHASE2_PAID_JOURNEY_INCLUDE = [
-  "src/access/authenticatedWorkspaceAccessPolicy.test.ts",
-  "src/access/commercialEntitlement.test.ts",
-  "src/access/accessResolver.prodSafety.test.ts",
-  "src/auth/RequireAuthenticatedDashboard.test.tsx",
+const PHASE2_JOURNEY_ONLY = [
   "src/auth/safeRedirectResolver.test.ts",
   "src/auth/ownershipMigrationFinalize.test.ts",
   "src/auth/anonymousOwnerContext.test.ts",
@@ -48,6 +45,11 @@ export const PHASE2_PAID_JOURNEY_INCLUDE = [
   "src/vs01/vs01FullyExecutedSignedSnapshot.test.ts",
   "src/vs01/vs01SigningInviteDelivery.failClosed.test.ts",
   "src/vs01/StepReceipt.test.ts",
+] as const;
+
+export const PHASE2_PAID_JOURNEY_INCLUDE = [
+  ...PHASE1_ACCESS_CONTRACT_INCLUDE,
+  ...PHASE2_JOURNEY_ONLY,
 ] as const;
 
 export default defineConfig({
