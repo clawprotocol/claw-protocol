@@ -25,11 +25,9 @@ import { resolveLegalEntitiesForCanonicalMetadata } from "./canonicalLegalEntiti
 import {
   markPaidProPipelineAcceptedCorpusHash,
   readPaidProPipelineAcceptedCorpusBody,
-  readPaidProPipelineAcceptedCorpusHash,
 } from "./paidProPipelineAcceptedCorpus";
 import {
   hasPaidProPipelineValidationForCorpus,
-  markPaidProPipelineValidationPassed,
 } from "./paidProPostAcceptanceValidatorCache";
 import {
   alignIntakeSignerMetadataToLegalEntities,
@@ -171,9 +169,9 @@ export function planEnterCanonicalPaidProReviewFlow(
     return { ...baseBlocked, blockedReason: "create_flow_routing_gate" };
   }
 
-  // Returning paid-create must not treat hash-only freeze-prep as acceptance
-  // (TEST515). An explicit guided-min corpus with no accepted-hash latch may
-  // still share the first-time review plan (TEST501/TEST502).
+  // Returning paid-create must not enter on hash-only freeze-prep (TEST515)
+  // or merely because no accepted hash exists. Professional validation must
+  // already be latched for this corpus.
   if (
     !args.assumeFreshPipelineValidation &&
     args.source === "returning_paid_create"
@@ -182,7 +180,7 @@ export function planEnterCanonicalPaidProReviewFlow(
       text: corpusPlain,
       source: pipelineSource,
     });
-    if (!latched && readPaidProPipelineAcceptedCorpusHash() !== null) {
+    if (!latched) {
       return { ...baseBlocked, blockedReason: "validation_not_latched_for_corpus" };
     }
   }
@@ -387,7 +385,14 @@ export function commitAcceptedPaidProCorpusHandoffSync(args: {
   if (body.length < GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN) return false;
   const pipelineSource = (args.pipelineSource || "server_full_draft").trim();
   if (!isAuthoritativePremiumPipelineRenderSource(pipelineSource)) return false;
-  markPaidProPipelineValidationPassed({ text: body, source: pipelineSource });
+  if (
+    !hasPaidProPipelineValidationForCorpus({
+      text: body,
+      source: pipelineSource,
+    })
+  ) {
+    return false;
+  }
   markPaidProPipelineAcceptedCorpusHash(body);
   commitPaidProAcceptanceStorageHygiene();
   return (readPaidProPipelineAcceptedCorpusBody()?.trim().length ?? 0) >= GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN;
