@@ -176,6 +176,9 @@ export function buildHydratedAuthoritativeSigningCorpusFromAuthority(args: {
   signatureRegionOnly?: boolean;
   /** When true, run recital repair before hydration (finalize only — never during signer typing). */
   repairRecital?: boolean;
+  agreementId?: string | null;
+  organizationId?: string | null;
+  expectedFrozenHash?: string | null;
 }): HydratedAuthoritativeSigningCorpusResult {
   let rawCorpus = (args.rawCorpus || "").trim();
   const rawCorpusLenBeforeHydration = rawCorpus.length;
@@ -200,6 +203,9 @@ export function buildHydratedAuthoritativeSigningCorpusFromAuthority(args: {
     surface: args.surface,
     signatureRegionOnly: args.signatureRegionOnly,
     repairRecital: args.repairRecital,
+    agreementId: args.agreementId,
+    organizationId: args.organizationId,
+    expectedHash: args.expectedFrozenHash,
   });
   if (immutableFrozenLegal) {
     const identities = authorityPartiesToCanonicalPartyIdentities(args.authority.parties, {

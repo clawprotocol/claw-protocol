@@ -6958,6 +6958,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       commitAcceptedPaidProCorpusHandoffSync({
         corpusPlain: persistedPremiumBody,
         pipelineSource: snap.premiumPipelineRenderSource || "snapshot_server_full_draft",
+        agreementId: reviewAgreementIdRef.current,
+        organizationId: getOrgId(),
       });
     }
     setMobileWorkspacePane("preview");
@@ -7055,6 +7057,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       commitAcceptedPaidProCorpusHandoffSync({
         corpusPlain: finalPlain,
         pipelineSource,
+        agreementId: reviewAgreementIdRef.current,
+        organizationId: getOrgId(),
       });
       const staleUiReset = planCanonicalPaidProStaleUiReset(pipelineSource);
       setHardError(staleUiReset.hardError);
@@ -7236,7 +7240,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   }) => {
     const finalizeCanonicalPaidProPipelineSuccess = planFinalizeCanonicalPaidProPipelineSuccess; // enterCanonicalPaidProReviewFlow
     const commitValidatedRewriteHandoffBeforeCanonicalEntry = (finalPlain: string, src: string) => {
-      const committed = commitAcceptedPaidProCorpusHandoffSync({ corpusPlain: finalPlain, pipelineSource: src });
+      const committed = commitAcceptedPaidProCorpusHandoffSync({
+        corpusPlain: finalPlain,
+        pipelineSource: src,
+        agreementId: reviewAgreementIdRef.current,
+        organizationId: getOrgId(),
+      });
       if (committed) authoritativeAgreementSnapshotRef.current = finalPlain;
       return committed;
     };
@@ -32023,6 +32032,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       surface: "finalize_paid_pro_signer_metadata",
       signatureRegionOnly: true,
       repairRecital: false,
+      agreementId: reviewAgreementIdRef.current,
+      organizationId: getOrgId(),
     });
     auditPaidProSignerFinalizeCorpus(hydrated.corpus);
     const signatureBlockModel = buildCanonicalSignerManifest({

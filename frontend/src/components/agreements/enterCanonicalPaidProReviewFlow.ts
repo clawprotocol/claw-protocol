@@ -381,6 +381,8 @@ export function planCanonicalPaidProStaleUiReset(pipelineSource: string): Canoni
 export function commitAcceptedPaidProCorpusHandoffSync(args: {
   corpusPlain: string;
   pipelineSource: string;
+  agreementId?: string | null;
+  organizationId?: string | null;
 }): boolean {
   const body = args.corpusPlain.trim();
   if (body.length < GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN) return false;
@@ -395,7 +397,10 @@ export function commitAcceptedPaidProCorpusHandoffSync(args: {
     return false;
   }
   markPaidProPipelineAcceptedCorpusHash(body);
-  rememberImmutableFrozenLegalCorpus(body);
+  rememberImmutableFrozenLegalCorpus(body, {
+    agreementId: args.agreementId,
+    organizationId: args.organizationId,
+  });
   commitPaidProAcceptanceStorageHygiene();
   return (readPaidProPipelineAcceptedCorpusBody()?.trim().length ?? 0) >= GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN;
 }
