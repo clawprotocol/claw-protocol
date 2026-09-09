@@ -28,8 +28,12 @@ describe("paidPro signer finalize durable agreement id (universal)", () => {
     expect(block).toContain("ensureReviewAgreementWorkspaceId");
     expect(block).toContain("setCreateFlowDraftPersistError(null)");
     expect(block.indexOf("ensureReviewAgreementWorkspaceId")).toBeLessThan(
+      block.indexOf("buildHydratedAuthoritativeSigningCorpusFromAuthority"),
+    );
+    expect(block.indexOf("ensureReviewAgreementWorkspaceId")).toBeLessThan(
       block.indexOf("createAuthoritativeSigningSnapshot"),
     );
+    expect(block).toContain("expectedFrozenHash");
     expect(block).toMatch(/could not save this agreement before finalizing signers/i);
     expect(block).toMatch(/Tap Retry to save/i);
     expect(block).not.toMatch(/Reload from the dashboard and try again/i);

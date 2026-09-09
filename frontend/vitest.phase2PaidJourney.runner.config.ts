@@ -53,7 +53,7 @@ const PHASE2_JOURNEY_ONLY = [
   "src/components/agreements/paidProBatch2DurablePersist.behavior.test.ts",
   "src/components/agreements/paidProBatch2RewriteCorpusHandoff.behavior.test.ts",
   "src/components/agreements/paidProBatch21FrozenCorpusSignerMetadata.behavior.test.ts",
-  "src/components/agreements/paidProBatch211FrozenCorpusAuthority.behavior.test.ts",
+  "src/components/agreements/paidProBatch212FrozenCorpusReload.behavior.test.ts",
   "src/components/agreements/paidProSameAgreementGenerationHandoff.authority.test.ts",
   "src/agreement/commercialReviewSnapshotLifecycle.test.ts",
   "src/agreement/canonicalReviewSnapshotReloadAuthority.test.ts",

@@ -19,6 +19,8 @@ CRITICAL_BE=(
   backend/tests/test_paid_beta_release_gate.py
   backend/tests/test_commercial_p0_auth_boundary.py
   backend/tests/test_commercial_read_scope_fail_closed.py
+  backend/tests/test_accepted_review_snapshot_authority.py
+  backend/tests/test_dashboard_resume_freeze_canonical_auth.py
   backend/tests/test_subscription_authority.py
   backend/tests/test_anonymous_draft_claim.py
   backend/tests/test_vs01_signer_complete_api.py
