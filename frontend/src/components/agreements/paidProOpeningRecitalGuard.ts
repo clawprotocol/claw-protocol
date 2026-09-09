@@ -596,6 +596,22 @@ export function needsPaidProServicesOpeningTitleRepair(text: string): boolean {
   return false;
 }
 
+/** Competing leftover titles / recitals still need one pre-freeze repair. */
+function hasCompetingPaidProOpeningResidue(text: string): boolean {
+  const body = (text || "").replace(/\r\n/g, "\n").trim();
+  const sec1Idx = findOpeningSectionOneIndex(body);
+  const openingScanRegion = sec1Idx >= 0 ? openingSliceBeforeSection1(body) : body.slice(0, 4_000);
+  const titleCount = (openingScanRegion.match(PAID_PRO_CANONICAL_TITLE_RE) ?? []).length;
+  const enteredCount = (openingScanRegion.match(/\bentered\s+into\b/gi) ?? []).length;
+  const betweenCount = (openingScanRegion.match(/\bis\s+between\b/gi) ?? []).length;
+  if (titleCount > 1 || enteredCount > 1 || betweenCount > 1) return true;
+  if (/\bSERVICES\s+AGREEMENT\s+This\s+Agreement\b/i.test(openingScanRegion)) return true;
+  if (/This\s+[\w\s]+Agreement[\s\S]{0,160}?This\s+Agreement\s+is\s+between/i.test(openingScanRegion)) {
+    return true;
+  }
+  return false;
+}
+
 export function ensurePaidProServicesAgreementOpening(
   text: string,
   records: readonly CanonicalPartyIdentityRecord[],
@@ -614,17 +630,16 @@ export function ensurePaidProServicesAgreementOpening(
   if (!detectPaidProMalformedServicesOpening(working, records)) {
     return { text: working, repairs };
   }
-  // Preserve already-titled Pro corpora unless the canonical entered-into recital is absent.
-  // Title-only short-circuit previously left "is between" openers frozen as SoT.
+  // Already-titled corpora with a single canonical entered-into recital are byte-idempotent.
+  // Missing role appositives are not a reason to prepend a second opening.
+  // Competing leftover titles / "is between" residue still repair once before freeze.
   const head = working.slice(0, 4_000);
   const hasCanonicalEnteredInto =
     /entered\s+into\s+as\s+of\s+the\s+Effective\s+Date\s+by\s+and\s+between/i.test(head);
-  const client = records[0]?.fullLegalName.trim() ?? "";
-  const provider = records[1]?.fullLegalName.trim() ?? "";
   if (
     !needsPaidProServicesOpeningTitleRepair(working) &&
     hasCanonicalEnteredInto &&
-    openingHasExactAuthorityRoleBindings(head, client, provider)
+    !hasCompetingPaidProOpeningResidue(working)
   ) {
     return { text: working, repairs };
   }

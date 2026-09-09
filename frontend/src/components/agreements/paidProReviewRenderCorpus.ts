@@ -55,7 +55,6 @@ import { applySectionStructureIntegrity } from "./sectionStructureAuthority";
 import { applyContactAuthorityExecutionBlockIntegrity } from "./contactAuthorityExecutionBlockIntegrity";
 import {
   applyPaidProUserVisibleDisplayPrep,
-  projectPaidProFrozenSoTDisplayPlain,
 } from "./paidProDisplayPlainAuthority";
 import { enforceUserVisibleRenderTokenAuthority } from "./userVisibleRenderTokenAuthority";
 import { applyPaidProSignerMetadataMergeGate } from "./paidProSignerMetadataMergeGate";
@@ -108,7 +107,6 @@ import {
   repairExecutionBlockEntityHeadingLines,
 } from "./paidProExecutionBlockEntityHeading";
 import { applyPaidProSoTSignerExecutionOverlay } from "./paidProSoTSignerExecutionOverlay";
-import { projectPaidProVisibleTitleDisplayPlain } from "./paidProDocumentTitleOpeningRepair";
 import { sanitizePaidProDomainScopeContamination } from "./paidProDomainScopeGuard";
 
 const LABELED_SIGNATURE_BLOCK_START =
@@ -1008,12 +1006,9 @@ export function resolvePaidProReviewRenderPlain(
     // Frozen SoT display-only: presentation projection only. Fused-name signing repairs strip
     // Party Notice Details and can rewrite openings — never run them on accepted SoT display.
     if (shouldUsePaidProSourceOfTruthDisplayOnly()) {
-      if (args?.skipUserVisibleDisplayPrep) return body;
-      const titled = projectPaidProVisibleTitleDisplayPlain(body, {
-        intakeText: args?.intakeText ?? null,
-        fallbackTitle: args?.draft?.title ?? null,
-      });
-      return projectPaidProFrozenSoTDisplayPlain(titled);
+      // After freeze, review document-surface plain is the frozen corpus.
+      // Presentation overlays must not become new canonical legal text.
+      return body;
     }
     if (corpusContainsFusedPartyLegalName(body)) {
       const parties = resolvePartiesForReviewRender(args);
@@ -1085,10 +1080,7 @@ export function resolvePaidProReviewRenderPlain(
       () =>
         needsSignerOverlay
           ? resolvePaidProAuthoritativeDisplayPlain(args)
-          : projectPaidProVisibleTitleDisplayPlain(getPaidProSourceOfTruthText().trim(), {
-              intakeText: args?.intakeText ?? null,
-              fallbackTitle: args?.draft?.title ?? null,
-            }),
+          : getPaidProSourceOfTruthText().trim(),
     );
     logPostFreezeCorpusDrift({
       surface: "paid_pro_review_render",
