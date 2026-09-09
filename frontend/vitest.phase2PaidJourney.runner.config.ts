@@ -44,10 +44,16 @@ const PHASE2_JOURNEY_ONLY = [
   "src/components/agreements/paidProTest508FourPartyGuidedContinueBypass.test.ts",
   "src/components/agreements/paidCreateFlowWorkspaceEntitlementScope.test.ts",
   "src/components/agreements/paidProUnvalidatedCorpusAuthority.test.ts",
-  // paidProTest504ReturningPaidCorpusHandoff.test.ts stays out of this gate:
-  // TEST504-6 is a source-inspection contract for Batch 2 (commitAcceptedPaidProCorpusHandoffSync
-  // inside runEntitledPremiumImprovementRewrite). Do not add that file until 504-6 is
-  // resolved by correct rewrite-time corpus commit behavior.
+  "src/components/agreements/paidProSignerFinalizeDurableId.test.ts",
+  "src/components/agreements/paidProTest499ReturningPaidCreateDraftLimitPersist.test.ts",
+  "src/components/agreements/paidProTest504ReturningPaidCorpusHandoff.test.ts",
+  // paidProTest505ReturningPaidStaleUiAndSignerHandoff.test.ts stays out of this gate:
+  // TEST505 hash still fails isolated (SoT prepare rewrites frozen legal bytes). Overlay
+  // restore of the accepted body breaks TEST366/Alex signer hydration. Not a side-effect closure.
+  "src/components/agreements/paidProTest506ReturningPaidProfessionalCorpusRegression.test.ts",
+  "src/components/agreements/paidProTest521ReturningPaidDraftLimitTerminal.test.ts",
+  "src/components/agreements/paidProBatch2DurablePersist.behavior.test.ts",
+  "src/components/agreements/paidProBatch2RewriteCorpusHandoff.behavior.test.ts",
   "src/components/agreements/paidProSameAgreementGenerationHandoff.authority.test.ts",
   "src/agreement/commercialReviewSnapshotLifecycle.test.ts",
   "src/agreement/canonicalReviewSnapshotReloadAuthority.test.ts",

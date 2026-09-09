@@ -283,6 +283,7 @@ describe("TEST506 — paid SoT UI suppression, signer parsing, professional corp
   });
 
   it("G — first-time post-checkout and returning paid create share canonical review entry", () => {
+    seedReturningPaidAcceptance();
     const draft = test506Draft("", TEST506_ACCEPTED_PAID_BODY);
     for (const source of ["post_checkout_apply_success", "returning_paid_create"] as const) {
       const finalized = planFinalizeCanonicalPaidProPipelineSuccess({
