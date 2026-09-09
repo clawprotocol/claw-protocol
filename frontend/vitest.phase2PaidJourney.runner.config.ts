@@ -42,6 +42,8 @@ const PHASE2_JOURNEY_ONLY = [
   "src/components/agreements/paidProTest502ReturningPaidCreatePostPaymentParity.test.ts",
   "src/components/agreements/paidProTest503ReturningPaidPostPaymentReuse.test.ts",
   "src/components/agreements/paidProTest508FourPartyGuidedContinueBypass.test.ts",
+  "src/components/agreements/paidCreateFlowWorkspaceEntitlementScope.test.ts",
+  "src/components/agreements/paidProUnvalidatedCorpusAuthority.test.ts",
   // paidProTest504ReturningPaidCorpusHandoff.test.ts stays out of this gate:
   // TEST504-6 is a source-inspection contract for Batch 2 (commitAcceptedPaidProCorpusHandoffSync
   // inside runEntitledPremiumImprovementRewrite). Do not add that file until 504-6 is
