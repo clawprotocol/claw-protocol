@@ -3,15 +3,13 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 describe("vs01Api document content auth", () => {
-  it("fetchDocumentContent sends clawAgreementHeaders for commercial owner bind", () => {
+  it("fetchDocumentContent uses the canonical owner API boundary", () => {
     const src = readFileSync(join(__dirname, "vs01Api.ts"), "utf8");
-    expect(src).toContain('from "../agreement/agreementOrgHeaders"');
-    expect(src).toContain("clawAgreementHeaders");
+    expect(src).toContain('from "../lib/ownerApiClient"');
     const fnStart = src.indexOf("export async function fetchDocumentContent");
     expect(fnStart).toBeGreaterThanOrEqual(0);
     const fnBody = src.slice(fnStart, fnStart + 900);
-    expect(fnBody).toContain("clawAgreementHeaders");
-    expect(fnBody).toContain("refreshCachedAccessToken");
+    expect(fnBody).toContain("ownerApiFetch");
     expect(fnBody).toMatch(/method:\s*["']GET["']/);
   });
 });

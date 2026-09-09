@@ -12,10 +12,10 @@ import {
   type LayoutFieldCandidateEnriched,
   type ReviewAction,
   fetchLayoutAnalysis,
+  fetchOwnerDocumentContent,
   postFieldReviewOpen,
   putReviewManifest,
 } from "./documentLayoutApi";
-import { apiUrl } from "../../lib/clawApi";
 import { AI_ASSISTIVE_SHORT } from "../../compliance/disclosureCopy";
 
 pdfjs.GlobalWorkerOptions.workerSrc = pdfjsWorker;
@@ -111,6 +111,7 @@ export function FieldReviewPage(props: { analysisId: string }) {
   const [signerRole, setSignerRole] = useState("unknown");
   const [pdfPages, setPdfPages] = useState<number | null>(null);
   const [documentContentType, setDocumentContentType] = useState<string | null>(null);
+  const [documentPreviewUrl, setDocumentPreviewUrl] = useState<string | null>(null);
   const drawRef = useRef<{
     page: number;
     x: number;
@@ -119,7 +120,7 @@ export function FieldReviewPage(props: { analysisId: string }) {
   } | null>(null);
 
   const effectiveDocId = docIdParam || String(model?.document_id_ref || "").trim() || null;
-  const docUrl = effectiveDocId ? apiUrl(`/v1/documents/${encodeURIComponent(effectiveDocId)}/content`) : null;
+  const docUrl = documentPreviewUrl;
 
   const reload = useCallback(async () => {
     setLoadErr(null);
@@ -145,23 +146,31 @@ export function FieldReviewPage(props: { analysisId: string }) {
   }, [analysisId]);
 
   useEffect(() => {
+    setDocumentPreviewUrl(null);
+    setPdfPages(null);
     if (!effectiveDocId) {
       setDocumentContentType(null);
       return;
     }
     let cancel = false;
+    let objectUrl: string | null = null;
+    setDocumentContentType(null);
     void (async () => {
       try {
-        const res = await fetch(apiUrl(`/v1/documents/${encodeURIComponent(effectiveDocId)}`));
-        const j = (await res.json()) as { document?: { content_type?: string } };
-        const ct = String(j?.document?.content_type || "");
-        if (!cancel) setDocumentContentType(ct || "application/pdf");
-      } catch {
-        if (!cancel) setDocumentContentType("application/pdf");
+        const blob = await fetchOwnerDocumentContent(effectiveDocId);
+        if (cancel) return;
+        objectUrl = URL.createObjectURL(blob);
+        setDocumentContentType(blob.type || "application/pdf");
+        setDocumentPreviewUrl(objectUrl);
+      } catch (error) {
+        if (!cancel) {
+          setLoadErr(error instanceof Error ? error.message : "Could not load document preview.");
+        }
       }
     })();
     return () => {
       cancel = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
   }, [effectiveDocId]);
 
@@ -402,7 +411,7 @@ export function FieldReviewPage(props: { analysisId: string }) {
 
         <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:gap-6">
           <div className="min-w-0 flex-1 space-y-3">
-            {!docUrl ? (
+            {!effectiveDocId ? (
               <p className="text-sm text-slate-500">
                 Add <span className="text-slate-400">?documentId=…</span> to the URL (same id as in document store) to
                 show the page preview with overlays. You can still use detection data from the analysis record.
@@ -458,7 +467,7 @@ export function FieldReviewPage(props: { analysisId: string }) {
               </div>
             ) : null}
 
-            {docUrl && !documentContentType ? (
+            {effectiveDocId && !docUrl && !loadErr ? (
               <p className="text-sm text-slate-500">Loading document preview…</p>
             ) : null}
 

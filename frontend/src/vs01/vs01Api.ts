@@ -1,6 +1,5 @@
-import { clawAgreementHeaders } from "../agreement/agreementOrgHeaders";
-import { refreshCachedAccessToken } from "../auth/authAccessTokenCache";
-import { apiUrl, resolveApiBase } from "../lib/clawApi";
+import { resolveApiBase } from "../lib/clawApi";
+import { ownerApiFetch } from "../lib/ownerApiClient";
 
 function apiBase(): string {
   return resolveApiBase().replace(/\/$/, "");
@@ -122,16 +121,9 @@ export async function createSignSession(
  */
 export async function fetchDocumentContent(documentId: string): Promise<Blob> {
   const enc = encodeURIComponent(documentId.trim());
-  const url = apiUrl(`/v1/documents/${enc}/content`);
-
-  // Cold esign deep-links can mount before AuthProvider writes the in-memory token cache.
-  // Refresh from the Supabase session so commercial owner-bound GETs include Authorization.
-  await refreshCachedAccessToken();
-
-  // Commercial staging/prod require org + auth headers; seed docs are owner-bound.
-  const res = await fetch(url, {
+  const res = await ownerApiFetch(`/v1/documents/${enc}/content`, {
     method: "GET",
-    headers: clawAgreementHeaders({ Accept: "application/pdf, application/octet-stream, */*" }),
+    headers: { Accept: "application/pdf, application/octet-stream, */*" },
   });
 
   if (!res.ok) {
@@ -218,11 +210,8 @@ export type GetReceiptResponse = {
  * GET /v1/receipts/{receipt_id}
  */
 export async function getReceipt(receiptId: string): Promise<GetReceiptResponse> {
-  const base = apiBase();
   const enc = encodeURIComponent(receiptId);
-  const url = `${base}/v1/receipts/${enc}`;
-
-  const res = await fetch(url, {
+  const res = await ownerApiFetch(`/v1/receipts/${enc}`, {
     method: "GET",
     headers: { Accept: "application/json" },
   });
@@ -249,11 +238,11 @@ export async function getReceipt(receiptId: string): Promise<GetReceiptResponse>
  * GET /v1/receipts/{receipt_id}/bundle — verification zip bytes.
  */
 export async function downloadBundle(receiptId: string): Promise<Blob> {
-  const base = apiBase();
   const enc = encodeURIComponent(receiptId);
-  const url = `${base}/v1/receipts/${enc}/bundle`;
-
-  const res = await fetch(url, { method: "GET" });
+  const res = await ownerApiFetch(`/v1/receipts/${enc}/bundle`, {
+    method: "GET",
+    headers: { Accept: "application/zip, application/octet-stream" },
+  });
 
   if (!res.ok) {
     const text = await res.text();
