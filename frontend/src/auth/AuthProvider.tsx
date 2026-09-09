@@ -18,6 +18,7 @@ import {
   hasGenesisDogOnboardingIntent,
 } from "../launch/genesisReferral/genesisDogOnboardingCapture";
 import { readE2eAuthSessionForDev } from "./e2eAuthSessionBridge";
+import { clearLawdogUserSessionState } from "./userSessionState";
 
 export type AuthSignInOpts = {
   returningSignIn?: boolean;
@@ -94,6 +95,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     unsub = onAuthStateChange((s) => {
       setSession(s);
       if (s?.access_token) setCachedAccessToken(s.access_token);
+      else clearCachedAccessToken();
       if (s?.user && !isAuthCallbackPath()) {
         void finalizeUser(s.user, "session_restore");
       }
@@ -161,10 +163,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   );
 
   const signOut = useCallback(async () => {
-    await signOutAuth();
-    setSession(null);
-    finalizedUserRef.current = null;
-    clearCachedAccessToken();
+    try {
+      await signOutAuth();
+    } finally {
+      setSession(null);
+      finalizedUserRef.current = null;
+      clearLawdogUserSessionState();
+    }
   }, []);
 
   const value = useMemo(

@@ -1,6 +1,6 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { AppShell } from "./AppShell";
-import { getOrgId, setOrgId } from "./orgContext";
+import { getOrgId, setOrgId, subscribeToOrgContextChanges } from "./orgContext";
 import { fetchSubscription } from "./billingApi";
 import { featureFlags } from "../config/featureFlags";
 import { useLaunchNav } from "./LaunchNavContext";
@@ -36,6 +36,10 @@ function planLabelFromCode(code: string | undefined | null): string | null {
   return c.replace(/_/g, " ");
 }
 
+export function isBillingWorkspaceIdEditable(): boolean {
+  return Boolean(import.meta.env?.DEV) || String(import.meta.env?.VITE_CLAW_ACCESS_DEV_TOOLS || "").trim() === "1";
+}
+
 const OUTCOME_ROWS = [
   { title: "Create", detail: "Describe the deal in plain language — get a structured draft you can review in minutes." },
   { title: "Send", detail: "Turn drafts into real agreements: professional sends, signatures, and records you can stand behind." },
@@ -61,11 +65,16 @@ export function BillingPage() {
   const [org, setOrg] = useState(getOrgId());
   const [sub, setSub] = useState<Record<string, unknown> | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  const workspaceIdEditable = isBillingWorkspaceIdEditable();
   const returnToCreateFlow = Boolean(returnToSimpleSend && /^\/app\/create(\?|$)/.test(returnToSimpleSend));
   const upgradeCheckoutEcho = useMemo(
     () => (returnToCreateFlow ? readUpgradeCheckoutContext() : null),
     [returnToCreateFlow, returnToSimpleSend],
   );
+
+  useEffect(() => {
+    return subscribeToOrgContextChanges(setOrg);
+  }, []);
 
   useEffect(() => {
     if (pricingLogged.current) return;
@@ -268,25 +277,26 @@ export function BillingPage() {
         </div>
 
         <section className="vs01-card vs01-card--envelope space-y-4 border-slate-800/60">
-          <h3 className="text-sm font-semibold text-white">Your workspace</h3>
-          <div>
-            <label htmlFor="claw-org" className="text-xs font-semibold uppercase tracking-wide text-slate-500">
-              Workspace id
-            </label>
-            <input
-              id="claw-org"
-              className="mt-1 w-full max-w-md rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100"
-              value={org}
-              onChange={(e) => setOrg(e.target.value)}
-              onBlur={() => {
-                setOrgId(org);
-                setOrg(getOrgId());
-              }}
-            />
-            <p className="mt-1 text-xs text-slate-500">
-              Use the same workspace id in checkout so your plan applies to the right place.
-            </p>
-          </div>
+          <h3 className="text-sm font-semibold text-white">Your account</h3>
+          <p className="text-sm text-slate-400">Your plan is connected to the workspace for your signed-in account.</p>
+          {workspaceIdEditable ? (
+            <div>
+              <label htmlFor="claw-org" className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                Development workspace id
+              </label>
+              <input
+                id="claw-org"
+                className="mt-1 w-full max-w-md rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm text-slate-100"
+                value={org}
+                onChange={(e) => setOrg(e.target.value)}
+                onBlur={() => {
+                  setOrgId(org);
+                  setOrg(getOrgId());
+                }}
+              />
+              <p className="mt-1 text-xs text-slate-500">Development diagnostic only.</p>
+            </div>
+          ) : null}
 
           {!featureFlags.serverBilling ? (
             <p className="text-sm text-amber-200/90">
