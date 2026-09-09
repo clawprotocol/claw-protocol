@@ -33,83 +33,328 @@ export type AppSection =
   | { kind: "opsGenesisReferral" }
   | { kind: "adminConsole" };
 
-/** Operator Founder HQ — canonical path is `/app/admin`; aliases for bookmarks and ops links. */
-const ADMIN_CONSOLE_PATHS = new Set(["/app/admin", "/app/founder", "/founder", "/admin"]);
+export type AppRouteAccess =
+  | "public"
+  | "guest_workflow"
+  | "authenticated"
+  | "paid"
+  | "recipient_token"
+  | "admin";
+
+export type AppRouteMatch = {
+  routeId: string;
+  access: AppRouteAccess;
+  section: AppSection;
+};
+
+export type AppRouteDefinition = {
+  id: string;
+  pathPattern: string;
+  examplePaths: readonly string[];
+  access: AppRouteAccess;
+  match: (pathname: string) => AppSection | null;
+  resolveAccess?: (search: string) => AppRouteAccess;
+};
+
+function exactRoute(args: {
+  id: string;
+  paths: readonly string[];
+  access: AppRouteAccess;
+  section: () => AppSection;
+}): AppRouteDefinition {
+  return {
+    id: args.id,
+    pathPattern: args.paths.join(" | "),
+    examplePaths: args.paths,
+    access: args.access,
+    match: (pathname) => (args.paths.includes(pathname) ? args.section() : null),
+  };
+}
+
+function dynamicRoute(args: {
+  id: string;
+  pathPattern: string;
+  examplePath: string;
+  access: AppRouteAccess;
+  pattern: RegExp;
+  section: (capture: string) => AppSection;
+  resolveAccess?: (search: string) => AppRouteAccess;
+}): AppRouteDefinition {
+  return {
+    id: args.id,
+    pathPattern: args.pathPattern,
+    examplePaths: [args.examplePath],
+    access: args.access,
+    match: (pathname) => {
+      const result = args.pattern.exec(pathname);
+      return result ? args.section(decodeURIComponent(result[1])) : null;
+    },
+    resolveAccess: args.resolveAccess,
+  };
+}
+
+function hasRecipientAgreementToken(search: string): boolean {
+  const raw = search.startsWith("?") ? search.slice(1) : search;
+  const params = new URLSearchParams(raw);
+  return Boolean((params.get("token") || params.get("t") || "").trim());
+}
+
+/**
+ * Canonical application route and access manifest.
+ *
+ * Route matching, sitemap examples, and authentication policy must all consume
+ * this registry so a new screen cannot silently omit its access classification.
+ */
+export const APP_ROUTE_MANIFEST: readonly AppRouteDefinition[] = [
+  exactRoute({
+    id: "dashboard",
+    paths: ["/app", "/dashboard"],
+    access: "authenticated",
+    section: () => ({ kind: "dashboard" }),
+  }),
+  exactRoute({
+    id: "admin-console",
+    paths: ["/app/admin", "/app/founder", "/founder", "/admin"],
+    access: "admin",
+    section: () => ({ kind: "adminConsole" }),
+  }),
+  exactRoute({ id: "billing", paths: ["/app/billing"], access: "authenticated", section: () => ({ kind: "billing" }) }),
+  exactRoute({ id: "affiliate", paths: ["/app/affiliate"], access: "authenticated", section: () => ({ kind: "affiliate" }) }),
+  exactRoute({ id: "settings", paths: ["/app/settings"], access: "authenticated", section: () => ({ kind: "settings" }) }),
+  exactRoute({ id: "sign-in", paths: ["/app/sign-in"], access: "public", section: () => ({ kind: "signIn" }) }),
+  exactRoute({
+    id: "auth-callback",
+    paths: ["/app/auth/callback"],
+    access: "public",
+    section: () => ({ kind: "authCallback" }),
+  }),
+  exactRoute({
+    id: "signatures",
+    paths: ["/app/signatures"],
+    access: "authenticated",
+    section: () => ({ kind: "signatures" }),
+  }),
+  exactRoute({
+    id: "opportunity",
+    paths: ["/app/opportunity"],
+    access: "authenticated",
+    section: () => ({ kind: "opportunity" }),
+  }),
+  exactRoute({
+    id: "agreement-memory",
+    paths: ["/app/agreement-memory"],
+    access: "authenticated",
+    section: () => ({ kind: "agreementMemory" }),
+  }),
+  exactRoute({
+    id: "integrations",
+    paths: ["/app/integrations"],
+    access: "authenticated",
+    section: () => ({ kind: "integrations" }),
+  }),
+  exactRoute({
+    id: "work-product",
+    paths: ["/app/work-product"],
+    access: "paid",
+    section: () => ({ kind: "advancedWorkProduct" }),
+  }),
+  exactRoute({
+    id: "affiliate-payout-ops",
+    paths: ["/app/ops/affiliate-payouts"],
+    access: "admin",
+    section: () => ({ kind: "affiliatePayoutOps" }),
+  }),
+  exactRoute({ id: "ops-growth", paths: ["/app/ops/growth"], access: "admin", section: () => ({ kind: "opsGrowth" }) }),
+  exactRoute({
+    id: "ops-paid-funnel",
+    paths: ["/app/ops/paid-funnel"],
+    access: "admin",
+    section: () => ({ kind: "opsPaidFunnel" }),
+  }),
+  exactRoute({
+    id: "ops-starter-pro-refine",
+    paths: ["/app/ops/starter-pro-refine"],
+    access: "admin",
+    section: () => ({ kind: "opsStarterProRefine" }),
+  }),
+  exactRoute({
+    id: "genesis-referral",
+    paths: ["/app/genesis-referral"],
+    access: "authenticated",
+    section: () => ({ kind: "genesisReferral" }),
+  }),
+  exactRoute({
+    id: "ops-genesis-referral",
+    paths: ["/app/ops/genesis-referral"],
+    access: "admin",
+    section: () => ({ kind: "opsGenesisReferral" }),
+  }),
+  exactRoute({
+    id: "simple-create",
+    paths: ["/app/create"],
+    access: "authenticated",
+    section: () => ({ kind: "simpleCreate" }),
+  }),
+  exactRoute({
+    id: "quick-send",
+    paths: ["/app/quick"],
+    access: "guest_workflow",
+    section: () => ({ kind: "quickSend" }),
+  }),
+  dynamicRoute({
+    id: "simple-ready",
+    pathPattern: "/app/ready/:agreementId",
+    examplePath: "/app/ready/example-agreement",
+    access: "authenticated",
+    pattern: /^\/app\/ready\/([^/]+)$/,
+    section: (agreementId) => ({ kind: "simpleReady", agreementId }),
+  }),
+  dynamicRoute({
+    id: "simple-checkout",
+    pathPattern: "/app/checkout/:agreementId",
+    examplePath: "/app/checkout/example-agreement",
+    access: "authenticated",
+    pattern: /^\/app\/checkout\/([^/]+)$/,
+    section: (agreementId) => ({ kind: "simpleCheckout", agreementId }),
+  }),
+  dynamicRoute({
+    id: "simple-send",
+    pathPattern: "/app/send/:agreementId",
+    examplePath: "/app/send/example-agreement",
+    access: "authenticated",
+    pattern: /^\/app\/send\/([^/]+)$/,
+    section: (agreementId) => ({ kind: "simpleSend", agreementId }),
+  }),
+  dynamicRoute({
+    id: "simple-done",
+    pathPattern: "/app/done/:agreementId",
+    examplePath: "/app/done/example-agreement",
+    access: "authenticated",
+    pattern: /^\/app\/done\/([^/]+)$/,
+    section: (agreementId) => ({ kind: "simpleDone", agreementId }),
+  }),
+  dynamicRoute({
+    id: "owner-proposal-review",
+    pathPattern: "/app/review-changes/:agreementId",
+    examplePath: "/app/review-changes/example-agreement",
+    access: "authenticated",
+    pattern: /^\/app\/review-changes\/([^/]+)$/,
+    section: (agreementId) => ({ kind: "ownerProposalReview", agreementId }),
+  }),
+  dynamicRoute({
+    id: "owner-verification",
+    pathPattern: "/app/verification/:agreementId",
+    examplePath: "/app/verification/example-agreement",
+    access: "authenticated",
+    pattern: /^\/app\/verification\/([^/]+)$/,
+    section: (agreementId) => ({ kind: "simpleVerification", agreementId }),
+  }),
+  exactRoute({
+    id: "agreements-list",
+    paths: ["/app/agreements"],
+    access: "authenticated",
+    section: () => ({ kind: "agreements", sub: "list" }),
+  }),
+  exactRoute({
+    id: "agreements-new",
+    paths: ["/app/agreements/new"],
+    access: "authenticated",
+    section: () => ({ kind: "agreements", sub: "new" }),
+  }),
+  dynamicRoute({
+    id: "owner-agreement-view",
+    pathPattern: "/app/agreements/:agreementId/view",
+    examplePath: "/app/agreements/example-agreement/view",
+    access: "authenticated",
+    pattern: /^\/app\/agreements\/([^/]+)\/view$/,
+    section: (agreementId) => ({ kind: "ownerAgreementView", agreementId }),
+  }),
+  dynamicRoute({
+    id: "owner-signed-agreement-view",
+    pathPattern: "/app/agreements/:agreementId/view-signed",
+    examplePath: "/app/agreements/example-agreement/view-signed",
+    access: "authenticated",
+    pattern: /^\/app\/agreements\/([^/]+)\/view-signed$/,
+    section: (agreementId) => ({ kind: "ownerSignedAgreementView", agreementId }),
+  }),
+  dynamicRoute({
+    id: "owner-signing-status",
+    pathPattern: "/app/signing-status/:agreementId",
+    examplePath: "/app/signing-status/example-agreement",
+    access: "authenticated",
+    pattern: /^\/app\/signing-status\/([^/]+)$/,
+    section: (agreementId) => ({ kind: "ownerSigningStatus", agreementId }),
+  }),
+  dynamicRoute({
+    id: "agreement-detail",
+    pathPattern: "/app/agreements/:agreementId",
+    examplePath: "/app/agreements/example-agreement",
+    access: "authenticated",
+    pattern: /^\/app\/agreements\/([^/]+)$/,
+    section: (id) => ({ kind: "agreements", sub: { id } }),
+    resolveAccess: (search) => (hasRecipientAgreementToken(search) ? "recipient_token" : "authenticated"),
+  }),
+  exactRoute({
+    id: "esign-new",
+    paths: ["/app/esign", "/app/esign/new"],
+    access: "guest_workflow",
+    section: () => ({ kind: "esign", sub: "new" }),
+  }),
+  dynamicRoute({
+    id: "recipient-esign",
+    pathPattern: "/app/esign/:documentId",
+    examplePath: "/app/esign/example-document",
+    access: "recipient_token",
+    pattern: /^\/app\/esign\/([^/]+)$/,
+    section: (id) => ({ kind: "esign", sub: { id } }),
+  }),
+  dynamicRoute({
+    id: "usage-receipt",
+    pathPattern: "/app/receipts/:usageId",
+    examplePath: "/app/receipts/example-usage",
+    access: "authenticated",
+    pattern: /^\/app\/receipts\/([^/]+)$/,
+    section: (id) => ({ kind: "receipt", id }),
+  }),
+  dynamicRoute({
+    id: "field-review",
+    pathPattern: "/app/field-review/:analysisId",
+    examplePath: "/app/field-review/example-analysis",
+    access: "paid",
+    pattern: /^\/app\/field-review\/([^/]+)$/,
+    section: (analysisId) => ({ kind: "fieldReview", analysisId }),
+  }),
+];
+
+function normalizeLocation(pathname: string, explicitSearch?: string): { pathname: string; search: string } {
+  const raw = pathname || "/";
+  const queryIndex = raw.indexOf("?");
+  const embeddedSearch = queryIndex >= 0 ? raw.slice(queryIndex) : "";
+  const withoutSearch = queryIndex >= 0 ? raw.slice(0, queryIndex) : raw;
+  return {
+    pathname: withoutSearch.replace(/\/$/, "") || "/",
+    search: explicitSearch === undefined ? embeddedSearch : explicitSearch,
+  };
+}
+
+export function matchAppRoute(pathname: string, search?: string): AppRouteMatch | null {
+  const location = normalizeLocation(pathname, search);
+  for (const route of APP_ROUTE_MANIFEST) {
+    const section = route.match(location.pathname);
+    if (!section) continue;
+    return {
+      routeId: route.id,
+      access: route.resolveAccess?.(location.search) ?? route.access,
+      section,
+    };
+  }
+  return null;
+}
 
 export function matchAppPath(pathname: string): AppSection | null {
-  const p = (pathname.replace(/\/$/, "") || "/").split("?")[0];
-  if (p === "/dashboard") return { kind: "dashboard" };
-  if (ADMIN_CONSOLE_PATHS.has(p)) return { kind: "adminConsole" };
-  if (!p.startsWith("/app")) return null;
-  if (p === "/app") return { kind: "dashboard" };
-  if (p === "/app/billing") return { kind: "billing" };
-  if (p === "/app/affiliate") return { kind: "affiliate" };
-  if (p === "/app/settings") return { kind: "settings" };
-  if (p === "/app/sign-in") return { kind: "signIn" };
-  if (p === "/app/auth/callback") return { kind: "authCallback" };
-  if (p === "/app/signatures") return { kind: "signatures" };
-  if (p === "/app/opportunity") return { kind: "opportunity" };
-  if (p === "/app/agreement-memory") return { kind: "agreementMemory" };
-  if (p === "/app/integrations") return { kind: "integrations" };
-  if (p === "/app/work-product") return { kind: "advancedWorkProduct" };
-  if (p === "/app/ops/affiliate-payouts") return { kind: "affiliatePayoutOps" };
-  if (p === "/app/ops/growth") return { kind: "opsGrowth" };
-  if (p === "/app/ops/paid-funnel") return { kind: "opsPaidFunnel" };
-  if (p === "/app/ops/starter-pro-refine") return { kind: "opsStarterProRefine" };
-  if (p === "/app/genesis-referral") return { kind: "genesisReferral" };
-  if (p === "/app/ops/genesis-referral") return { kind: "opsGenesisReferral" };
-  if (p === "/app/create") return { kind: "simpleCreate" };
-  if (p === "/app/quick") return { kind: "quickSend" };
+  return matchAppRoute(pathname)?.section ?? null;
+}
 
-  const readyM = /^\/app\/ready\/([^/]+)$/.exec(p);
-  if (readyM) return { kind: "simpleReady", agreementId: decodeURIComponent(readyM[1]) };
-
-  const checkoutM = /^\/app\/checkout\/([^/]+)$/.exec(p);
-  if (checkoutM) return { kind: "simpleCheckout", agreementId: decodeURIComponent(checkoutM[1]) };
-
-  const sendM = /^\/app\/send\/([^/]+)$/.exec(p);
-  if (sendM) return { kind: "simpleSend", agreementId: decodeURIComponent(sendM[1]) };
-
-  const doneM = /^\/app\/done\/([^/]+)$/.exec(p);
-  if (doneM) return { kind: "simpleDone", agreementId: decodeURIComponent(doneM[1]) };
-
-  const reviewChangesM = /^\/app\/review-changes\/([^/]+)$/.exec(p);
-  if (reviewChangesM) {
-    return { kind: "ownerProposalReview", agreementId: decodeURIComponent(reviewChangesM[1]) };
-  }
-
-  const verM = /^\/app\/verification\/([^/]+)$/.exec(p);
-  if (verM) return { kind: "simpleVerification", agreementId: decodeURIComponent(verM[1]) };
-
-  if (p === "/app/agreements" || p === "/app/agreements/") return { kind: "agreements", sub: "list" };
-  if (p === "/app/agreements/new") return { kind: "agreements", sub: "new" };
-  const agreementViewM = /^\/app\/agreements\/([^/]+)\/view$/.exec(p);
-  if (agreementViewM) {
-    return { kind: "ownerAgreementView", agreementId: decodeURIComponent(agreementViewM[1]) };
-  }
-
-  const signedViewM = /^\/app\/agreements\/([^/]+)\/view-signed$/.exec(p);
-  if (signedViewM) {
-    return { kind: "ownerSignedAgreementView", agreementId: decodeURIComponent(signedViewM[1]) };
-  }
-
-  const signingStatusM = /^\/app\/signing-status\/([^/]+)$/.exec(p);
-  if (signingStatusM) {
-    return { kind: "ownerSigningStatus", agreementId: decodeURIComponent(signingStatusM[1]) };
-  }
-
-  const am = /^\/app\/agreements\/([^/]+)$/.exec(p);
-  if (am) return { kind: "agreements", sub: { id: decodeURIComponent(am[1]) } };
-
-  if (p === "/app/esign" || p === "/app/esign/new") return { kind: "esign", sub: "new" };
-  const em = /^\/app\/esign\/([^/]+)$/.exec(p);
-  if (em) return { kind: "esign", sub: { id: decodeURIComponent(em[1]) } };
-
-  const rm = /^\/app\/receipts\/([^/]+)$/.exec(p);
-  if (rm) return { kind: "receipt", id: decodeURIComponent(rm[1]) };
-
-  const fr = /^\/app\/field-review\/([^/]+)$/.exec(p);
-  if (fr) return { kind: "fieldReview", analysisId: decodeURIComponent(fr[1]) };
-
-  return null;
+export function routeRequiresAuthenticatedSession(access: AppRouteAccess): boolean {
+  return access === "authenticated" || access === "paid" || access === "admin";
 }

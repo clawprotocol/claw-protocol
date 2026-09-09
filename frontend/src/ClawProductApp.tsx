@@ -6,7 +6,7 @@ import { AppDashboard } from "./launch/AppDashboard";
 import { BillingPage } from "./launch/BillingPage";
 import { LaunchHomePage } from "./launch/LaunchHomePage";
 import { useLaunchNav } from "./launch/LaunchNavContext";
-import { matchAppPath } from "./launch/routes";
+import { matchAppRoute } from "./launch/routes";
 import { AgreementMemoryPage } from "./launch/AgreementMemoryPage";
 import { FieldReviewPage } from "./launch/documentLayout/FieldReviewPage";
 import { QuickSendPage } from "./launch/simpleProduct/QuickSendPage";
@@ -453,7 +453,7 @@ export function ClawProductApp() {
       ? parseClawPublicFeedPath(pathname)
       : false;
 
-  const appMatch = matchAppPath(pathname);
+  const appMatch = matchAppRoute(pathname, search)?.section ?? null;
   const pathNorm = (pathname.replace(/\/$/, "") || "/").split("?")[0];
   const affiliateLanding = parseAffiliateLandingPath(pathNorm);
   const lawdogReferralSlug = parseLawdogReferralPath(pathNorm);
@@ -770,6 +770,16 @@ export function ClawProductApp() {
 
   if (pathNorm === "/") {
     return <LaunchHomePage />;
+  }
+
+  if (pathNorm === "/app" || pathNorm.startsWith("/app/")) {
+    return (
+      <AppShell title="Page not found" subtitle="This LawDog page does not exist or is no longer available.">
+        <button type="button" className="vs01-btn vs01-btn--secondary" onClick={() => navigate("/app")}>
+          Back to dashboard
+        </button>
+      </AppShell>
+    );
   }
 
   return <LaunchHomePage />;

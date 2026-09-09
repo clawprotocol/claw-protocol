@@ -3,12 +3,9 @@
  */
 import React from "react";
 import { useAuth } from "./AuthProvider";
-import {
-  isAuthenticatedDashboardSurface,
-  isPublicTokenAgreementSurface,
-  resolveCurrentUser,
-} from "../account/currentUser";
+import { resolveCurrentUser } from "../account/currentUser";
 import { useLaunchNav } from "../launch/LaunchNavContext";
+import { matchAppRoute, routeRequiresAuthenticatedSession } from "../launch/routes";
 import {
   buildSignInContinuationPath,
   CHECKOUT_SIGN_IN_BODY,
@@ -34,11 +31,9 @@ export function RequireAuthenticatedDashboard({
   const { pathname, search, navigate } = useLaunchNav();
   const path = (pathname || "").replace(/\/$/, "") || "/";
   const checkoutContinuation = isSecureCheckoutPath(path);
+  const route = matchAppRoute(path, search);
 
-  if (isPublicTokenAgreementSurface(path)) {
-    return <>{children}</>;
-  }
-  if (!isAuthenticatedDashboardSurface(path)) {
+  if (!route || !routeRequiresAuthenticatedSession(route.access)) {
     return <>{children}</>;
   }
   if (path === "/app/create" && isHomeAnonymousStarterAuthorityActive()) {

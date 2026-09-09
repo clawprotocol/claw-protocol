@@ -80,6 +80,44 @@ describe("RequireAuthenticatedDashboard", () => {
     expect(screen.queryByTestId("secret-dashboard")).toBeNull();
   });
 
+  it.each([
+    "/app/signing-status/ag_123",
+    "/app/verification/ag_123",
+    "/app/field-review/analysis_123",
+    "/app/receipts/usage_123",
+  ])("blocks anonymous access to protected route %s", (pathname) => {
+    navState.pathname = pathname;
+    navState.search = "";
+    render(
+      <RequireAuthenticatedDashboard>
+        <div data-testid="protected-page">protected</div>
+      </RequireAuthenticatedDashboard>,
+    );
+    expect(screen.getByTestId("auth-dashboard-required")).toBeTruthy();
+    expect(screen.queryByTestId("protected-page")).toBeNull();
+  });
+
+  it("allows a recipient link while keeping the owner form of the same route protected", () => {
+    navState.pathname = "/app/agreements/ag_123";
+    navState.search = "?token=recipient-secret";
+    const { rerender } = render(
+      <RequireAuthenticatedDashboard>
+        <div data-testid="agreement-page">agreement</div>
+      </RequireAuthenticatedDashboard>,
+    );
+    expect(screen.getByTestId("agreement-page")).toBeTruthy();
+    expect(screen.queryByTestId("auth-dashboard-required")).toBeNull();
+
+    navState.search = "";
+    rerender(
+      <RequireAuthenticatedDashboard>
+        <div data-testid="agreement-page">agreement</div>
+      </RequireAuthenticatedDashboard>,
+    );
+    expect(screen.getByTestId("auth-dashboard-required")).toBeTruthy();
+    expect(screen.queryByTestId("agreement-page")).toBeNull();
+  });
+
   it("blocks anonymous /app/create access (direct URL without homepage handoff)", () => {
     navState.pathname = "/app/create";
     navState.search = "";

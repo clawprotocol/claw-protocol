@@ -10,6 +10,7 @@ import { getOrgId } from "../launch/orgContext";
 import { readE2eAuthSessionForDev } from "../auth/e2eAuthSessionBridge";
 import { isPublicProductionHostname } from "../launch/devPaymentBypass";
 import { readDemoSessionUser } from "../launch/guestCheckoutAuthority";
+import { matchAppRoute, routeRequiresAuthenticatedSession } from "../launch/routes";
 
 export type CurrentUserSource = "supabase_session" | "e2e_test_bridge" | "demo_checkout" | "anonymous";
 
@@ -128,39 +129,30 @@ export function resolveCurrentUser(args?: {
   };
 }
 
+function currentLocationSearch(pathname: string, explicitSearch?: string): string | undefined {
+  if (explicitSearch !== undefined) return explicitSearch;
+  if (pathname.includes("?")) return undefined;
+  if (typeof window !== "undefined") return window.location.search || "";
+  return "";
+}
+
 /** Dashboard/account routes that require a validated session. */
-export function isAuthenticatedDashboardSurface(pathname: string): boolean {
-  const p = (pathname || "").replace(/\/$/, "") || "/";
-  if (p === "/app" || p === "/dashboard") return true;
-  if (p === "/app/create") return true;
-  if (p === "/app/billing" || p === "/app/settings" || p === "/app/signatures") return true;
-  if (p === "/app/affiliate" || p === "/app/opportunity" || p === "/app/agreement-memory") return true;
-  if (p === "/app/integrations" || p === "/app/work-product") return true;
-  if (p === "/app/genesis-referral") return true;
-  if (p.startsWith("/app/ops/")) return true;
-  if (p === "/app/admin" || p === "/app/founder" || p === "/founder" || p === "/admin") return true;
-  if (p === "/app/agreements" || p.startsWith("/app/agreements/")) return true;
-  if (p.startsWith("/app/done/") || p.startsWith("/app/ready/") || p.startsWith("/app/send/")) return true;
-  if (p.startsWith("/app/checkout/") || p.startsWith("/app/review-changes/")) return true;
-  if (p.startsWith("/app/agreements/") && p.includes("/signing-status")) return true;
-  return false;
+export function isAuthenticatedDashboardSurface(pathname: string, search?: string): boolean {
+  const route = matchAppRoute(pathname, currentLocationSearch(pathname, search));
+  return route ? routeRequiresAuthenticatedSession(route.access) : false;
 }
 
 /** @deprecated Use isAuthenticatedDashboardSurface — kept for older call sites. */
-export function isDashboardAccountSurface(pathname: string): boolean {
-  return isAuthenticatedDashboardSurface(pathname);
+export function isDashboardAccountSurface(pathname: string, search?: string): boolean {
+  return isAuthenticatedDashboardSurface(pathname, search);
 }
 
 /** Reviewer and signer links stay public — no login redirect. */
-export function isPublicTokenAgreementSurface(pathname: string): boolean {
-  const p = (pathname || "").replace(/\/$/, "") || "/";
+export function isPublicTokenAgreementSurface(pathname: string, search?: string): boolean {
+  const rawPath = (pathname || "").split("?")[0];
+  const p = rawPath.replace(/\/$/, "") || "/";
   if (/^\/agreements\/[^/]+\/review$/i.test(p)) return true;
   if (/^\/verify\//i.test(p)) return true;
-  if (/^\/app\/esign\/[^/]+$/i.test(p) && p !== "/app/esign/new") return true;
-  if (typeof window !== "undefined") {
-    if (/^\/app\/agreements\/[^/]+$/i.test(p) && /\?.*(?:^|&)(?:t|token)=/i.test(window.location.search)) {
-      return true;
-    }
-  }
-  return false;
+  const route = matchAppRoute(pathname, currentLocationSearch(pathname, search));
+  return route?.access === "recipient_token";
 }

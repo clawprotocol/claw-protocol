@@ -43,8 +43,23 @@ describe("currentUser adapter", () => {
     expect(isDashboardAccountSurface("/app/create")).toBe(true);
   });
 
+  it.each([
+    "/app/signing-status/ag_123",
+    "/app/verification/ag_123",
+    "/app/field-review/analysis_123",
+    "/app/receipts/usage_123",
+  ])("protects owner and paid workspace route %s", (path) => {
+    expect(isAuthenticatedDashboardSurface(path)).toBe(true);
+  });
+
   it("does not treat public reviewer links as dashboard surfaces", () => {
     expect(isPublicTokenAgreementSurface("/agreements/ag_123/review")).toBe(true);
     expect(isAuthenticatedDashboardSurface("/agreements/ag_123/review")).toBe(false);
+  });
+
+  it("recognizes a legacy recipient token in first query position", () => {
+    expect(isPublicTokenAgreementSurface("/app/agreements/ag_123", "?token=secret")).toBe(true);
+    expect(isPublicTokenAgreementSurface("/app/agreements/ag_123", "?t=secret&return=1")).toBe(true);
+    expect(isPublicTokenAgreementSurface("/app/agreements/ag_123", "?token=")).toBe(false);
   });
 });
