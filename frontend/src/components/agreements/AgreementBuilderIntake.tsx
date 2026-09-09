@@ -33037,6 +33037,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   ]);
 
   const handleProSendForReview = React.useCallback(() => {
+    // TEST577: choosing "Send for review" (Option B / party redline) selects the review track —
+    // release any latched signature-prep intent so the delivery track resolves to review.
+    setPaidProSignaturePrepIntentLatched(false);
     setJourneyActionFeedback(
       resolveUserActionFeedback({
         actor: "owner",
@@ -33044,9 +33047,6 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         outcome: "succeeded",
       }),
     );
-    // TEST577: choosing "Send for review" (Option B / party redline) selects the review track —
-    // release any latched signature-prep intent so the delivery track resolves to review.
-    setPaidProSignaturePrepIntentLatched(false);
     const reviewBodyPlain =
       resolvePaidProPostFinalizeReviewPlain() ||
       simpleProFinalReviewDisplayPlain ||
