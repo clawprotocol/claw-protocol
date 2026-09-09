@@ -383,5 +383,5 @@ describe("same-agreement generation handoff authority", () => {
         `snapshotPrepareAgreementId=${snapshotPrepareAgreementId} ` +
         `snapshotPrepareLen=${snapshotPrepareCorpus.length} snapshotPrepareHash=${prepareHash}`,
     );
-  });
+  }, 30_000);
 });

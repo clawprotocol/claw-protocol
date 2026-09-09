@@ -16,6 +16,7 @@ export const PAID_PRO_PIPELINE_LONG_INCLUDE = [
   "src/components/agreements/paidProTest448BrandLicensingOrchestration.test.ts",
   "src/components/agreements/paidProTest517ServerDocumentTextAlias.test.ts",
   "src/components/agreements/premiumCompletionPipeline.test.ts",
+  "src/components/agreements/paidProSameAgreementGenerationHandoff.authority.test.ts",
   "src/components/agreements/premiumPaidCorpusFivePartyQa.test.ts",
 ] as const;
 
