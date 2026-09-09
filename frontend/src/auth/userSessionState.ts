@@ -1,4 +1,8 @@
 import { clearCachedSubscriptionEntitlement } from "../access/subscriptionEntitlementCache";
+import {
+  clearPersistedWorkspaceUsageTierCache,
+  invalidateWorkspaceProEntitlementCache,
+} from "../agreement/agreementProFunnelGate";
 import { clearPaidPremiumCompletionSession } from "../components/agreements/premiumCompletionStorage";
 import { clearCurrentSessionProEntitlementMarkers } from "../components/agreements/paidProSessionEligibility";
 import { clearAllGuestCheckoutAuthorities } from "../launch/guestCheckoutAuthority";
@@ -14,5 +18,7 @@ export function clearLawdogUserSessionState(): void {
   clearPaidPremiumCompletionSession();
   clearCurrentSessionProEntitlementMarkers();
   clearAllGuestCheckoutAuthorities();
+  invalidateWorkspaceProEntitlementCache();
+  clearPersistedWorkspaceUsageTierCache();
   setOrgId("");
 }

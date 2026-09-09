@@ -134,7 +134,7 @@ export function resolveAuthoritativeCreateFlowReviewShell(
   if (hasPaidProSourceOfTruth()) return "paid_pro";
   if (input.paidProAuthoritative) return "paid_pro";
   if (input.premiumPersistedFlowActive || input.premiumSendPathUnlocked) return "paid_pro";
-  if (input.workspaceProEntitled || resolveCreateFlowWorkspaceProEntitled()) return "paid_pro";
+  if (resolveCreateFlowWorkspaceProEntitled()) return "paid_pro";
   if (resolveProvisionalWorkspaceProEntitledForCreate()) return "paid_pro";
   if (input.tier && tierAllowsAdvancedFullDraftReveal(input.tier)) return "paid_pro";
   if (hasCurrentSessionProEntitlement()) return "paid_pro";
@@ -201,7 +201,7 @@ export function resolveCreateFlowReviewShellTransitionReason(
   if (input.premiumPersistedFlowActive || input.premiumSendPathUnlocked) {
     return "premium_persisted_or_send_unlocked";
   }
-  if (input.workspaceProEntitled || resolveCreateFlowWorkspaceProEntitled()) return "workspace_pro_entitled";
+  if (resolveCreateFlowWorkspaceProEntitled()) return "workspace_pro_entitled";
   if (resolveProvisionalWorkspaceProEntitledForCreate()) return "provisional_workspace_pro_entitled";
   if (input.tier && tierAllowsAdvancedFullDraftReveal(input.tier)) return "tier_advanced_full_draft";
   if (hasCurrentSessionProEntitlement()) return "session_pro_entitlement";
