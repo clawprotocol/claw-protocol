@@ -85,10 +85,18 @@ export default defineConfig({
     __PAID_PRO_CACHE_BUILD_ID__: JSON.stringify(resolvePaidProCacheBuildId()),
     __FRONTEND_BUILD_IDENTITY__: JSON.stringify(frontendBuildIdentity),
   },
+  // Keep Vitest's inline projects on the same automatic JSX runtime as the
+  // application tsconfig. Without this, TSX test files are emitted with the
+  // legacy React.createElement transform and fail unless every test imports
+  // the React namespace explicitly.
+  esbuild: {
+    jsx: "automatic",
+  },
   plugins: [react(), emitFrontendVersionJsonPlugin("dist")],
   test: {
     projects: [
       {
+        extends: true,
         test: {
           name: "default",
           include: ["src/**/*.test.ts", "src/**/*.test.tsx"],
@@ -97,6 +105,7 @@ export default defineConfig({
         },
       },
       {
+        extends: true,
         test: {
           name: "paid-pro-pipeline-long",
           include: [...PAID_PRO_PIPELINE_LONG_INCLUDE],
