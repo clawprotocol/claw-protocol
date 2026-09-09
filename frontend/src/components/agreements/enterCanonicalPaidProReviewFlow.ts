@@ -412,6 +412,8 @@ export function commitAcceptedPaidProCorpusHandoffSync(args: {
 export function commitValidatedPaidProRewriteCorpusHandoff(args: {
   corpusPlain: string;
   pipelineSource: string;
+  agreementId?: string | null;
+  organizationId?: string | null;
 }): boolean {
   return commitAcceptedPaidProCorpusHandoffSync(args);
 }

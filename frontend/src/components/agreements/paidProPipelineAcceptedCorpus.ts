@@ -8,6 +8,7 @@ import { hashPaidProCorpus } from "./paidProSourceOfTruthState";
 import {
   clearImmutableFrozenLegalCorpus,
   rememberImmutableFrozenLegalCorpus,
+  type FrozenLegalCorpusScope,
 } from "./paidProFrozenLegalCorpus";
 
 /** Matches guided final review minimum — inlined to avoid simpleProFinalReviewCorpus import cycle. */
@@ -36,13 +37,16 @@ export function markPaidProPipelineAcceptedCorpusHash(text: string): void {
  * Replace the accepted pipeline body after an explicit user-approved revision.
  * Normal pipeline acceptance remains longest-wins; approved edits may delete text.
  */
-export function replacePaidProPipelineAcceptedCorpusAfterApprovedRevision(text: string): void {
+export function replacePaidProPipelineAcceptedCorpusAfterApprovedRevision(
+  text: string,
+  scope?: FrozenLegalCorpusScope,
+): void {
   const t = (text || "").trim();
   pipelineAcceptedCorpusHash = paidProPipelineAcceptedCorpusHash(t);
   pipelineAcceptedCorpusBody =
     t.length >= PIPELINE_ACCEPTED_CORPUS_BODY_MIN_LEN ? t : null;
   if (pipelineAcceptedCorpusBody) {
-    rememberImmutableFrozenLegalCorpus(pipelineAcceptedCorpusBody);
+    rememberImmutableFrozenLegalCorpus(pipelineAcceptedCorpusBody, scope);
   } else {
     clearImmutableFrozenLegalCorpus();
   }

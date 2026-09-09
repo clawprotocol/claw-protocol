@@ -1729,9 +1729,9 @@ import {
 } from "./paidProFinalizeDurableAgreementId";
 import {
   rememberImmutableFrozenLegalCorpus,
-  resolveExpectedFrozenHashForSignerFinalize,
   shouldBlockSignerFinalizeFrozenMismatch,
 } from "./paidProFrozenLegalCorpus";
+import { gateSignerFinalizeOnVerifiedFrozenAuthority } from "./paidProFrozenLegalCorpusFromCanonicalSnapshot";
 import {
   shouldBlockFreeStarterReviewSurfaces,
   resolveCreateFlowPaidReviewDisplayPlain,
@@ -6762,7 +6762,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       return false;
     }
     const serverCorpus = (hydrated.snapshot.corpus_plain || "").trim();
-    rememberImmutableFrozenLegalCorpus(serverCorpus, { agreementId });
+    rememberImmutableFrozenLegalCorpus(serverCorpus, {
+      agreementId,
+      organizationId: getOrgId(),
+    });
     const serverCorpusHash = hashPaidProCorpus(serverCorpus);
     const currentSoT = getPaidProSourceOfTruth();
     const activeGenerationId = getOrInitSessionAgreementGenerationId();
@@ -6785,7 +6788,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           generationOutcome: "ok",
           allowShorterOverwrite: true,
         });
-        replacePaidProPipelineAcceptedCorpusAfterApprovedRevision(serverCorpus);
+        replacePaidProPipelineAcceptedCorpusAfterApprovedRevision(serverCorpus, {
+          agreementId,
+          organizationId: getOrgId(),
+        });
       } else {
         // Rematerialize live SoT from verified GET bytes only (local snap fields are not authority).
         rematerialized = hydratePaidProSourceOfTruth({
@@ -17733,7 +17739,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         return "";
       }
       const stable = prepared.snapshot.corpus_plain;
-      replacePaidProPipelineAcceptedCorpusAfterApprovedRevision(stable);
+      replacePaidProPipelineAcceptedCorpusAfterApprovedRevision(stable, {
+        agreementId: agreementIdForRevision,
+        organizationId: getOrgId(),
+      });
       const record = establishPaidProSourceOfTruth({
         text: stable,
         draft: draft ?? null,
@@ -32081,16 +32090,18 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       rollbackFinalizeFailure(msg);
       return false;
     }
-    const expectedFrozenHash = resolveExpectedFrozenHashForSignerFinalize({
+    const organizationId = (getOrgId() || "").trim();
+    const frozenGate = await gateSignerFinalizeOnVerifiedFrozenAuthority({
       agreementId: durableAgreementId,
-      rawCorpus,
+      organizationId,
     });
-    if (!expectedFrozenHash) {
+    if (!frozenGate.ok) {
       rollbackFinalizeFailure(
         "LawDog could not confirm the frozen agreement before finalizing signers. Reload and try again.",
       );
       return false;
     }
+    const expectedFrozenHash = frozenGate.hash;
     const hydrated = buildHydratedAuthoritativeSigningCorpusFromAuthority({
       rawCorpus,
       authority,
@@ -32099,11 +32110,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       signatureRegionOnly: true,
       repairRecital: false,
       agreementId: durableAgreementId,
+      organizationId,
       expectedFrozenHash,
     });
     if (
       shouldBlockSignerFinalizeFrozenMismatch({
         agreementId: durableAgreementId,
+        organizationId,
         hydratedCorpus: hydrated.corpus,
       })
     ) {
