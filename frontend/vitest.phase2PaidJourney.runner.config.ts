@@ -47,13 +47,12 @@ const PHASE2_JOURNEY_ONLY = [
   "src/components/agreements/paidProSignerFinalizeDurableId.test.ts",
   "src/components/agreements/paidProTest499ReturningPaidCreateDraftLimitPersist.test.ts",
   "src/components/agreements/paidProTest504ReturningPaidCorpusHandoff.test.ts",
-  // paidProTest505ReturningPaidStaleUiAndSignerHandoff.test.ts stays out of this gate:
-  // TEST505 hash still fails isolated (SoT prepare rewrites frozen legal bytes). Overlay
-  // restore of the accepted body breaks TEST366/Alex signer hydration. Not a side-effect closure.
+  "src/components/agreements/paidProTest505ReturningPaidStaleUiAndSignerHandoff.test.ts",
   "src/components/agreements/paidProTest506ReturningPaidProfessionalCorpusRegression.test.ts",
   "src/components/agreements/paidProTest521ReturningPaidDraftLimitTerminal.test.ts",
   "src/components/agreements/paidProBatch2DurablePersist.behavior.test.ts",
   "src/components/agreements/paidProBatch2RewriteCorpusHandoff.behavior.test.ts",
+  "src/components/agreements/paidProBatch21FrozenCorpusSignerMetadata.behavior.test.ts",
   "src/components/agreements/paidProSameAgreementGenerationHandoff.authority.test.ts",
   "src/agreement/commercialReviewSnapshotLifecycle.test.ts",
   "src/agreement/canonicalReviewSnapshotReloadAuthority.test.ts",
