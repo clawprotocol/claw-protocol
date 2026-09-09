@@ -112,15 +112,15 @@ export function resolveAuthoritativeCreateFlowReviewShell(
   }
   if (input.premiumCheckoutCompleted) return "paid_pro";
 
-  // local-org / empty bootstrap: never select paid_pro from path/dashboard inference alone.
-  // Explicit workspace Pro entitlement, checkout completion, and accepted corpora still win.
+  // local-org / empty bootstrap: never select paid_pro from path/dashboard inference
+  // or stale React workspaceProEntitled alone (Case F). Explicit in-memory billing
+  // resolution, checkout completion, and accepted corpora still win.
   if (mustBlockPaidEntitlementForLegacyFallbackOrg()) {
-    // local-org / empty bootstrap: never trust workspaceProEntitled alone (Case F).
-    // Accepted corpora, session Pro markers, and checkout completion still win.
     if (hasPaidProSourceOfTruth()) return "paid_pro";
     if (input.paidProAuthoritative) return "paid_pro";
     if (input.premiumPersistedFlowActive || input.premiumSendPathUnlocked) return "paid_pro";
     if (hasCurrentSessionProEntitlement()) return "paid_pro";
+    if (resolveCreateFlowWorkspaceProEntitled()) return "paid_pro";
     if (hasAcceptedPaidCreateFlowFreezeLatch()) return "paid_pro";
     if (hasPaidCreateFlowPipelineAcceptance()) return "paid_pro";
     if (readDisplayReviewSnapshotAuthority()?.snapshotId) return "paid_pro";
@@ -185,6 +185,7 @@ export function resolveCreateFlowReviewShellTransitionReason(
       return "premium_persisted_or_send_unlocked";
     }
     if (hasCurrentSessionProEntitlement()) return "session_pro_entitlement";
+    if (resolveCreateFlowWorkspaceProEntitled()) return "workspace_pro_entitled";
     if (hasAcceptedPaidCreateFlowFreezeLatch()) return "paid_create_flow_freeze_latch";
     if (hasPaidCreateFlowPipelineAcceptance()) return "pipeline_acceptance";
     const snap = readPremiumCompletionSnapshot();

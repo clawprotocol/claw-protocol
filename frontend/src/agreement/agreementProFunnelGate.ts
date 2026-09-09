@@ -74,6 +74,16 @@ export function readCachedWorkspaceProEntitlement(): boolean {
   return workspaceProResolved === true || readPersistedWorkspaceUsageTierPaid();
 }
 
+/**
+ * In-memory workspace billing resolution only. Does not apply the local-org
+ * access-policy guard used by `readCachedWorkspaceProEntitlement`.
+ * Create-flow review may honor an explicit resolved-paid flag; access-policy
+ * readers must keep using the guarded cache (Case F).
+ */
+export function readExplicitWorkspaceProBillingResolution(): boolean {
+  return workspaceProResolved === true;
+}
+
 /** Vitest: seed workspace billing resolution without network. */
 export function markWorkspaceProEntitlementResolvedForTests(entitled: boolean | null): void {
   workspaceProResolved = entitled;
