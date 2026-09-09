@@ -35,6 +35,17 @@ const PHASE2_JOURNEY_ONLY = [
   "src/components/agreements/paidProTest558Phase3COwnerSessionClosure.test.ts",
   "src/components/agreements/paidProTest496CreateFlowSplitBrainPrevention.test.ts",
   "src/components/agreements/paidProTest494AuthoritativeReviewShell.test.ts",
+  "src/components/agreements/paidProTest490CreateFlowRouting.test.ts",
+  "src/components/agreements/paidProTest492CreateFlowReviewHandoff.test.ts",
+  "src/components/agreements/paidProTest500CreateFlowStarterShellBypass.test.ts",
+  "src/components/agreements/paidProTest501CanonicalPaidProReviewEntry.test.ts",
+  "src/components/agreements/paidProTest502ReturningPaidCreatePostPaymentParity.test.ts",
+  "src/components/agreements/paidProTest503ReturningPaidPostPaymentReuse.test.ts",
+  "src/components/agreements/paidProTest508FourPartyGuidedContinueBypass.test.ts",
+  // paidProTest504ReturningPaidCorpusHandoff.test.ts stays out of this gate:
+  // TEST504-6 is a source-inspection contract for Batch 2 (commitAcceptedPaidProCorpusHandoffSync
+  // inside runEntitledPremiumImprovementRewrite). Do not add that file until 504-6 is
+  // resolved by correct rewrite-time corpus commit behavior.
   "src/components/agreements/paidProSameAgreementGenerationHandoff.authority.test.ts",
   "src/agreement/commercialReviewSnapshotLifecycle.test.ts",
   "src/agreement/canonicalReviewSnapshotReloadAuthority.test.ts",
