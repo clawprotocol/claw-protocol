@@ -17,6 +17,21 @@ import { US_STATE_NAMES_ENGLISH } from "./partyFormat";
 
 const IF_TO_NOTICE_HEADER_RE = /^If to\s+(.+?)\s*:?\s*$/i;
 
+/**
+ * Recognized operative-section headings. Shared with canonical party extraction so
+ * document titles such as "SCOPE OF SERVICES" can never become legal-entity authority.
+ * Numbered legal-party lines (`2. Summit AI Consulting LLC`) still match via entity suffix.
+ */
+const AGREEMENT_SECTION_HEADING_PARTY_PREFIX_RE =
+  /^(?:INDEPENDENT CONTRACTOR AND ACCESS|SCOPE OF SERVICES|WARRANTIES AND COMPLIANCE|LIMITATION OF LIABILITY|INTELLECTUAL PROPERTY|CONFIDENTIALITY|GOVERNING LAW|NOTICES|TERMINATION|ELECTRONIC SIGNATURES|ENTIRE AGREEMENT|MISCELLANEOUS|FEES AND PAYMENT|TERM\b|CLIENT\.)/i;
+
+/** True when a candidate is an agreement section heading, not a contractual party. */
+export function isAgreementSectionHeadingPartyName(name: string): boolean {
+  const t = (name || "").replace(/^\s*\d+(?:\.\d+)*\.?\s+/, "").replace(/\s+/g, " ").trim();
+  if (!t) return false;
+  return AGREEMENT_SECTION_HEADING_PARTY_PREFIX_RE.test(t);
+}
+
 export type PaidProNoticeBlockLogPayload = {
   partyId: string;
   legalEntity: string;
@@ -448,6 +463,7 @@ function looksLikeUsPostalAddressLine(name: string): boolean {
 /** True when the label looks like a full legal entity (intake-authoritative), not body prose or titles. */
 export function isAuthoritativeLegalEntityName(name: string): boolean {
   const raw = (name || "").replace(/\s+/g, " ").trim();
+  if (isAgreementSectionHeadingPartyName(raw)) return false;
   if (looksLikeAuthorizedSignersBulletLine(raw)) return false;
   // Human signer + title lines must never qualify as legal entities
   // (e.g. "Ethan Cole, Authorized Signatory." from "Acme LLC signer: …" intake).
