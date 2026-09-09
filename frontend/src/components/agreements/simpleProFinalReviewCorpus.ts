@@ -334,6 +334,7 @@ export function resolveSimpleProFinalReviewCorpus(args: {
       (hasPaidProSourceOfTruth() ||
         (pinned.length >= GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN && plainText === pinned)));
   const selectedExplicitPipelineWinning =
+    source === "picker_authoritative" &&
     explicitPipelineWinning.length >= GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN &&
     plainText === explicitPipelineWinning;
   if (
