@@ -84,6 +84,7 @@ import { PrivacyPage } from "./launch/legal/PrivacyPage";
 import { AffiliateTermsPage } from "./launch/legal/AffiliateTermsPage";
 import { PaidProReviewUxVisualPage } from "./qa/PaidProReviewUxVisualPage";
 import { handleCheckoutReturnEntitlement } from "./launch/checkoutReturnEntitlement";
+import { RecipientLinkGateNotice } from "./components/agreements/JourneyActionBanner";
 
 const RECIPIENT_SIGNING_HERO: Vs01LayoutHero = {
   title: "Review and sign",
@@ -174,15 +175,10 @@ function AgreementSignGate(props: {
   }, [agreementId, token, legacyVersionId, participantPartyId]);
 
   if (phase === "loading") {
-    return <p className="px-4 py-8 text-center text-sm text-slate-400">Validating link…</p>;
+    return <RecipientLinkGateNotice phase="loading" />;
   }
   if (phase === "bad") {
-    return (
-      <p className="px-4 py-8 text-center text-sm text-rose-300">
-        {badMessage?.trim() ||
-          "This link is invalid or expired. Request a new link from the sender."}
-      </p>
-    );
+    return <RecipientLinkGateNotice phase="bad" detail={badMessage} />;
   }
   const accessGate = token ? { lockedVersionId } : undefined;
   return (
@@ -349,15 +345,10 @@ function AgreementReviewGate(props: {
   }, [agreementId, token]);
 
   if (phase === "loading") {
-    return <p className="px-4 py-8 text-center text-sm text-slate-400">Validating link…</p>;
+    return <RecipientLinkGateNotice phase="loading" />;
   }
   if (phase === "bad") {
-    return (
-      <p className="px-4 py-8 text-center text-sm text-rose-300">
-        {badMessage?.trim() ||
-          "This link is invalid or expired. Request a new link from the sender."}
-      </p>
-    );
+    return <RecipientLinkGateNotice phase="bad" detail={badMessage} />;
   }
   const entry =
     gateVid && tokenValidated

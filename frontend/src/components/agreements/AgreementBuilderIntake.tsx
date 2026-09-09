@@ -283,7 +283,6 @@ import {
   feedbackAfterFailedCreate,
   feedbackAfterLinkFailure,
   feedbackAfterModelFailure,
-  feedbackAfterReviewLinksAlreadyReady,
   feedbackAfterReviewLinksCreated,
   feedbackAfterSigningLinksCreated,
   feedbackCreatingAgreement,
@@ -292,6 +291,7 @@ import {
   feedbackSucceeded,
   publishJourneyActionFlash,
 } from "./journeyActionFeedback";
+import { resolveUserActionFeedback } from "./userActionFeedback";
 import {
   namedIntakeContractingParties,
   normalizeIntakePartyEditorRows,
@@ -588,7 +588,6 @@ import {
   executePaidProPostRecipientSetupHandoff,
   shouldSkipPaidProPrepareReviewLinkInterstitial,
 } from "../../launch/simpleProduct/paidProPostRecipientSetupHandoff";
-import { REVIEW_LINKS_ALREADY_READY_MESSAGE } from "../../launch/simpleProduct/reviewLinkMintIdempotency";
 import {
   clearReviewFirstHandoffSource,
   clearReviewFirstMintInFlight,
@@ -15315,14 +15314,16 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       const focusParty = decision.clarification.kind === "missing_named_parties" || decision.clarification.kind === "too_sparse";
       const focusTextarea = decision.clarification.kind === "too_short";
       const focusSelector = focusTextarea ? "textarea" : focusParty ? '[data-testid="intake-party-1-name"]' : "textarea";
-      setJourneyActionFeedback({
-        kind: "blocked",
-        actionId: "create_agreement",
-        title: decision.clarification.title,
-        body: decision.message || decision.clarification.why,
-        remedyLabel: "Go to the first missing field",
-        focusSelector,
-      });
+      setJourneyActionFeedback(
+        resolveUserActionFeedback({
+          actor: "owner",
+          action: "create_agreement",
+          outcome: "blocked",
+          title: decision.clarification.title,
+          remainder: decision.message || decision.clarification.why,
+          focusSelector,
+        }),
+      );
       window.requestAnimationFrame(() => {
         const el = document.querySelector(focusSelector) as HTMLElement | null;
         el?.focus();
@@ -23725,6 +23726,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       intakeText.trim().length >= 20 ? repairCheckoutBackRestoreDraftParties(draft, intakeText) : draft;
     const agreementBodyText =
       getAuthoritativeAgreementText() ||
+      getPaidProSourceOfTruthText() ||
       paidProCardEditDraft ||
       agreementDocumentTextRef.current ||
       "";
@@ -23736,7 +23738,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       agreementBodyText,
       handoffSlots: ho,
     });
-  }, [draft, currentPremiumMergedIntakeKey, intakeCombined, paidProCardEditDraft]);
+  }, [
+    draft,
+    currentPremiumMergedIntakeKey,
+    intakeCombined,
+    paidProCardEditDraft,
+    reviewDocRefreshTick,
+    premiumSurfaceGateTick,
+  ]);
 
   useEffect(() => {
     if (signerSetupPartyIdentities.length < 1) return;
@@ -23756,6 +23765,27 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         corpusHash,
       });
       if (target1) setRecipient2Name(target1);
+    }
+    if (signerSetupPartyIdentities.length > 2) {
+      setExtraPartyLegalNames((prev) => {
+        const next = prev.slice();
+        let changed = false;
+        for (let i = 2; i < signerSetupPartyIdentities.length; i += 1) {
+          const extraIdx = i - 2;
+          const target = resolveSignerSetupAutoCorrectTarget({
+            slotIndex: i,
+            currentRecipientName: next[extraIdx] ?? "",
+            slotIdentities: signerSetupPartyIdentities,
+            corpusHash,
+          });
+          if (!target) continue;
+          while (next.length <= extraIdx) next.push("");
+          if (next[extraIdx] === target) continue;
+          next[extraIdx] = target;
+          changed = true;
+        }
+        return changed ? next : prev;
+      });
     }
   }, [signerSetupPartyIdentities, recipient1Name, recipient2Name]);
 
@@ -31263,13 +31293,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           },
           onReviewLinksReady: ({ alreadyReady }) => {
             publishJourneyActionFlash(
-              feedbackSucceeded(
-                "create_links",
-                alreadyReady ? REVIEW_LINKS_ALREADY_READY_MESSAGE : "Links created—share when ready",
-                alreadyReady
-                  ? feedbackAfterReviewLinksAlreadyReady()
-                  : feedbackAfterReviewLinksCreated(Math.max(1, paidProDistinctValidRecipientEmailCount)),
-              ),
+              resolveUserActionFeedback({
+                actor: "owner",
+                action: "create_review_links",
+                outcome: alreadyReady ? "already_complete" : "succeeded",
+                linkCount: Math.max(1, paidProDistinctValidRecipientEmailCount),
+              }),
             );
           },
           agreementId: id,
@@ -31297,13 +31326,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           canonicalHash: reviewTrackCanonicalHash,
         });
         setJourneyActionFeedback(
-          feedbackSucceeded(
-            "create_links",
-            result.alreadyReady ? REVIEW_LINKS_ALREADY_READY_MESSAGE : "Links created—share when ready",
-            result.alreadyReady
-              ? feedbackAfterReviewLinksAlreadyReady()
-              : feedbackAfterReviewLinksCreated(Math.max(1, paidProDistinctValidRecipientEmailCount)),
-          ),
+          resolveUserActionFeedback({
+            actor: "owner",
+            action: "create_review_links",
+            outcome: result.alreadyReady ? "already_complete" : "succeeded",
+            linkCount: Math.max(1, paidProDistinctValidRecipientEmailCount),
+          }),
         );
         logReviewFirstNavigateDone({ agreementId: id, path: result.ownerRoutePath, source });
         clearPremiumSendIntent();
@@ -32751,6 +32779,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   );
 
   const handleProSendForSignature = React.useCallback(() => {
+    setJourneyActionFeedback(
+      resolveUserActionFeedback({
+        actor: "owner",
+        action: "choose_signature_track",
+        outcome: "succeeded",
+      }),
+    );
     traceSigningAdvance("handleProSendForSignature:enter");
     // Visible click must never be silent. Toast first so a later gate cannot
     // look like a dead button (live #102 miss: no Creating signing links…).
@@ -33003,6 +33038,13 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   ]);
 
   const handleProSendForReview = React.useCallback(() => {
+    setJourneyActionFeedback(
+      resolveUserActionFeedback({
+        actor: "owner",
+        action: "choose_review_track",
+        outcome: "succeeded",
+      }),
+    );
     // TEST577: choosing "Send for review" (Option B / party redline) selects the review track —
     // release any latched signature-prep intent so the delivery track resolves to review.
     setPaidProSignaturePrepIntentLatched(false);

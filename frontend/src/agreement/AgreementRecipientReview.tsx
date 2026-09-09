@@ -124,6 +124,9 @@ import {
   type PostApprovalPanelActionKind,
   type RecipientPostApprovalPresentation,
 } from "./recipientApprovedWaitingPresentation";
+import { JourneyActionBanner } from "../components/agreements/JourneyActionBanner";
+import type { JourneyActionFeedback } from "../components/agreements/journeyActionFeedback";
+import { resolveUserActionFeedback } from "../components/agreements/userActionFeedback";
 import { deriveOwnerReviewPartyStatusRows } from "../launch/simpleProduct/ownerReviewPartyStatusChecklist";
 import { useLaunchNav } from "../launch/LaunchNavContext";
 import { navigateCreatorPrepareSignatureLinks } from "../launch/creatorDashboardPrepareSignatureLinks";
@@ -801,6 +804,7 @@ export function AgreementRecipientReview({
   const [workspaceTab, setWorkspaceTab] = useState<"read" | "revise">("read");
   const [approving, setApproving] = useState(false);
   const [approvedAck, setApprovedAck] = useState(false);
+  const [journeyActionFeedback, setJourneyActionFeedback] = useState<JourneyActionFeedback | null>(null);
   const [localApprovalAt, setLocalApprovalAt] = useState<string | null>(null);
   const [bundle, setBundle] = useState<AgreementVersionBundle | null>(null);
   const [externalAiPaste, setExternalAiPaste] = useState("");
@@ -3609,12 +3613,34 @@ export function AgreementRecipientReview({
 
   async function acceptCurrentDraft() {
     if (viewerLike) return;
+    if (approving) return;
+    if (recipientApprovedInAudit) {
+      setJourneyActionFeedback(
+        resolveUserActionFeedback({
+          actor: "recipient",
+          action: "approve_review",
+          outcome: "already_complete",
+        }),
+      );
+      return;
+    }
+    const blockApprove = (message: string) => {
+      setError(message);
+      setJourneyActionFeedback(
+        resolveUserActionFeedback({
+          actor: "recipient",
+          action: "approve_review",
+          outcome: "blocked",
+          remainder: message,
+        }),
+      );
+    };
     if (needsPersonalizedLink) {
-      setError("Use the personal review link from the sender (it includes your participant id).");
+      blockApprove("Use the personal review link from the sender (it includes your participant id).");
       return;
     }
     if (reviewerProposalAwaitingOwner) {
-      setError(REVIEWER_AWAITING_OWNER_APPROVE_BLOCKED_COPY);
+      blockApprove(REVIEWER_AWAITING_OWNER_APPROVE_BLOCKED_COPY);
       return;
     }
     if (
@@ -3625,7 +3651,7 @@ export function AgreementRecipientReview({
       return;
     }
     if (bundle && isSigningLockActive(bundle)) {
-      setError("Review is closed on this agreement — you can still read the document.");
+      blockApprove("Review is closed on this agreement — you can still read the document.");
       return;
     }
     const pidForApprove = await resolveParticipantIdForApprovalSubmit();
@@ -3640,11 +3666,14 @@ export function AgreementRecipientReview({
         agreementIdShort,
         reason: "missing_participant_id",
       });
-      setError(REVIEW_FIRST_SUBMIT_MISSING_PARTICIPANT_MESSAGE);
+      blockApprove(REVIEW_FIRST_SUBMIT_MISSING_PARTICIPANT_MESSAGE);
       return;
     }
     setApproving(true);
     setError(null);
+    setJourneyActionFeedback(
+      resolveUserActionFeedback({ actor: "recipient", action: "approve_review", outcome: "working" }),
+    );
     const localRecord = writeReviewerApprovalLocalState({
       agreementId,
       participantPartyId: pidForApprove,
@@ -3681,6 +3710,14 @@ export function AgreementRecipientReview({
         agreementIdShort,
         participantPartyId: pidForApprove || null,
       });
+      setJourneyActionFeedback(
+        resolveUserActionFeedback({
+          actor: "recipient",
+          action: "approve_review",
+          outcome: "succeeded",
+          allReviewsComplete: resolveAllReviewPartiesApproved(r.draft ? normalizeAgreementDraftFromApi(r.draft, { fallbackAgreementId: agreementId }) : draft),
+        }),
+      );
       if (import.meta.env.MODE !== "test") {
         // eslint-disable-next-line no-console
         console.info("[reviewer-approval-authoritative-server-success]", {
@@ -3698,7 +3735,16 @@ export function AgreementRecipientReview({
         agreementId,
       });
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Could not record approval.");
+      const message = e instanceof Error ? e.message : "Could not record approval.";
+      setError(message);
+      setJourneyActionFeedback(
+        resolveUserActionFeedback({
+          actor: "recipient",
+          action: "approve_review",
+          outcome: "failed",
+          remainder: message,
+        }),
+      );
     } finally {
       setApproving(false);
     }
@@ -5211,6 +5257,21 @@ export function AgreementRecipientReview({
           <div className="font-semibold">{statusBanner.title}</div>
           <p className="mt-1 text-xs opacity-95">{statusBanner.detail}</p>
         </div>
+      ) : null}
+
+      {journeyActionFeedback ? (
+        <JourneyActionBanner
+          feedback={journeyActionFeedback}
+          onDismiss={() => setJourneyActionFeedback(null)}
+          onRemedy={
+            journeyActionFeedback.kind === "failed"
+              ? () => {
+                  setJourneyActionFeedback(null);
+                  void acceptCurrentDraft();
+                }
+              : undefined
+          }
+        />
       ) : null}
 
       {entry.kind === "review" &&

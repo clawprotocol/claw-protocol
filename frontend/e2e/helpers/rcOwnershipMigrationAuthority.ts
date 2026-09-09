@@ -1,5 +1,10 @@
 /**
- * Ownership migration authority — production API boundaries with deterministic mocks.
+ * Ownership migration helpers — Playwright service mocks only.
+ *
+ * These routes must not be used as auth/claim authority proof. Mocked
+ * finalize-auth returns a canned owned ID and seedAnonymousAgreementContext
+ * writes sessionStorage only. Production claim:
+ * backend/tests/test_j7_auth_claim_authority.py
  */
 import { expect, type BrowserContext, type Page } from "@playwright/test";
 import { AGREEMENT_CREATE_REVIEW_RESUME_KEY } from "../../src/components/agreements/agreementIntakeStorage";

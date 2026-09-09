@@ -79,6 +79,8 @@ import type { Vs01RecipientIdentityAuthority } from "./vs01RecipientIdentityAuth
 import { logVs01LifecycleEvent } from "./vs01LifecycleAudit";
 import { readSigningPacketStatus } from "./vs01SigningPacketStatusStore";
 import { recordVs01SignerCompletion } from "./vs01SignerCompletionSync";
+import { JourneyActionBanner } from "../components/agreements/JourneyActionBanner";
+import { resolveUserActionFeedback } from "../components/agreements/userActionFeedback";
 import {
   clearVs01DraftState,
   loadVs01DraftState,
@@ -237,6 +239,7 @@ export function Vs01Wizard({
     boolean | null | undefined
   >(() => (RECIPIENT_NEEDS_SERVER_HYDRATION ? null : undefined));
   const [recipientSigningFinished, setRecipientSigningFinished] = useState(false);
+  const [signerAlreadyCompleteOnOpen, setSignerAlreadyCompleteOnOpen] = useState(false);
   const [senderPlacedFields, setSenderPlacedFields] = useState<PlacedSigningField[]>([]);
   const [senderSignatureRef, setSenderSignatureRef] = useState<Vs01SenderSignatureRef | null>(null);
   const [loading, setLoading] = useState<Vs01LoadingState>("idle");
@@ -313,6 +316,16 @@ export function Vs01Wizard({
       }
     }
   }, [seedDocumentId, hideStepper]);
+
+  useEffect(() => {
+    if (!RECIPIENT_SIGNER_DEEP_LINK) return;
+    const roleKey = (recipientLockedSignerRoleId || RECIPIENT_LOCKED_SIGNER_ROLE_ID || "").trim();
+    if (!RECIPIENT_AGREEMENT_ID || !roleKey) return;
+    if (readSigningPacketStatus(RECIPIENT_AGREEMENT_ID)?.bySignerKey?.[roleKey] === "signed") {
+      setRecipientSigningFinished(true);
+      setSignerAlreadyCompleteOnOpen(true);
+    }
+  }, [recipientLockedSignerRoleId]);
 
   useEffect(() => {
     if (!RECIPIENT_SIGNER_DEEP_LINK || !recipientLockedCpId) return;
@@ -1239,15 +1252,15 @@ export function Vs01Wizard({
       <>
         {error ? (
           <div className="vs01-error-banner" role="alert">
-            {error}
-            <button
-              type="button"
-              className="vs01-btn vs01-btn--secondary"
-              style={{ marginTop: "0.5rem", width: "auto" }}
-              onClick={() => setError(null)}
-            >
-              Dismiss
-            </button>
+            <JourneyActionBanner
+              feedback={resolveUserActionFeedback({
+                actor: "signer",
+                action: "complete_signature",
+                outcome: /could not be verified|different party|not your/i.test(error) ? "blocked" : "failed",
+                remainder: error,
+              })}
+              onDismiss={() => setError(null)}
+            />
           </div>
         ) : null}
 
@@ -1262,6 +1275,15 @@ export function Vs01Wizard({
               <h2 id="vs01-recipient-done-title" className="vs01-card-title">
                 {JOY_COPY.signLockedIn}
               </h2>
+              <div className="mb-3">
+                <JourneyActionBanner
+                  feedback={resolveUserActionFeedback({
+                    actor: "signer",
+                    action: "complete_signature",
+                    outcome: signerAlreadyCompleteOnOpen ? "already_complete" : "succeeded",
+                  })}
+                />
+              </div>
               <p className="vs01-card-help">
                 You're all set. A copy of the signed record will be available to the sender, and email
                 delivery will be used when enabled. The sender will be notified when all signatures are
