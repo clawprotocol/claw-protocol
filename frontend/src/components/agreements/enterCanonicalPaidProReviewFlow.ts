@@ -398,6 +398,17 @@ export function commitAcceptedPaidProCorpusHandoffSync(args: {
   return (readPaidProPipelineAcceptedCorpusBody()?.trim().length ?? 0) >= GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN;
 }
 
+/**
+ * Rewrite-time handoff after the exact corpus already passed professional validation.
+ * Does not manufacture a validation latch.
+ */
+export function commitValidatedPaidProRewriteCorpusHandoff(args: {
+  corpusPlain: string;
+  pipelineSource: string;
+}): boolean {
+  return commitAcceptedPaidProCorpusHandoffSync(args);
+}
+
 export const ACCEPTED_PAID_PRO_CORPUS_HANDOFF_HELPER = "commitAcceptedPaidProCorpusHandoffSync";
 
 export const CANONICAL_PAID_PRO_REVIEW_ENTRY_HELPER = "enterCanonicalPaidProReviewFlow";

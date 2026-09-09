@@ -1716,8 +1716,17 @@ import {
   formatPaidCreateFlowDraftPersistFailureMessage,
   isDraftLimitReachedPersistError,
   PAID_CREATE_FLOW_DRAFT_LIMIT_HEADLINE,
+  planPaidCreateFlowPersistFailureOutcome,
   resolvePaidCreateFlowDraftPersistFailureHeadline,
 } from "./paidProCreateFlowPersistTerminal";
+import {
+  buildMinimalDraftForPaidPersist,
+  resolveLongestPersistablePaidCorpus,
+} from "./paidCreateFlowPersistDraftSnapshot";
+import {
+  resolveFinalizeDurableAgreementId,
+  shouldClearCreateFlowDraftPersistErrorAfterDurableId,
+} from "./paidProFinalizeDurableAgreementId";
 import {
   shouldBlockFreeStarterReviewSurfaces,
   resolveCreateFlowPaidReviewDisplayPlain,
@@ -5847,201 +5856,48 @@ const AgreementBuilderIntake: React.FC<Props> = ({
 
   /** Create (or reuse) the persisted agreement row for review refine / inline field updates. Dedupes concurrent callers. */
   const ensureReviewAgreementWorkspaceId = React.useCallback(async (): Promise<string | null> => {
-    const pendingReceipt = readOwnershipMigrationReceipt();
-    if (pendingReceipt) {
-      const canonical = pendingReceipt.canonicalAgreementId.trim();
-      reviewAgreementIdRef.current = canonical;
-      setReviewAgreementId(canonical);
-      writeCreateReviewAgreementResumeId(canonical);
-      return canonical;
-    }
-    const cached = reviewAgreementIdRef.current?.trim();
-    // Demo+premiumCompletion sessions bypass superseded-cache and ownership-transition gates
-    // because they are fresh sessions that should never be blocked by stale state.
-    const demoSessionBypassCacheGates = hasDemoSessionUser() && hasPaidPremiumCompletionSession();
-    if (cached && isSupersededAgreementId(cached) && !demoSessionBypassCacheGates) {
-      const resume = readCreateReviewAgreementResumeId();
-      if (resume) {
-        reviewAgreementIdRef.current = resume;
-        setReviewAgreementId(resume);
-        return resume;
-      }
-      return null;
-    }
-    if (shouldBlockDraftWriteForOwnershipTransition(cached) && !demoSessionBypassCacheGates) return null;
-    if (cached) return cached;
-    if (reviewAgreementEnsurePromiseRef.current) return reviewAgreementEnsurePromiseRef.current;
-    const session = reviewWorkspaceSessionRef.current;
-    let snapshot = draft;
-    // Demo session post-POS: allow persist even without a draft if we have a valid Pro corpus.
-    // Build a minimal draft from the VISIBLE Pro corpus so the POST /draft can succeed.
-    // Try multiple sources: pipeline refs, Source of Truth, and visible display surface.
-    if (!snapshot && hasDemoSessionUser() && hasPaidPremiumCompletionSession()) {
-      // Priority order: pipeline refs -> SoT -> visible display surface
-      let pipelineCorpus = (
-        lastPremiumWinningCorpusRef.current ||
-        premiumPipelineOutputBodyRef.current ||
-        hydratedPremiumBodyRef.current ||
-        ""
-      ).trim();
-      // If pipeline refs are empty, try the Source of Truth (frozen corpus)
-      if (pipelineCorpus.length < PAID_PRO_AUTHORITY_MIN_LEN && hasPaidProSourceOfTruth()) {
-        const sotText = getPaidProSourceOfTruthText().trim();
-        if (sotText.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
-          pipelineCorpus = sotText;
-          console.info("[demo-session-user] using_sot_for_persist", { corpusLen: sotText.length });
-        }
-      }
-      // If SoT is empty, try the visible display surface (what the user actually sees)
-      if (pipelineCorpus.length < PAID_PRO_AUTHORITY_MIN_LEN) {
-        const displayDoc = getPaidProDocumentForSurface("display");
-        const displayCorpus = displayDoc?.text?.trim() || "";
-        if (displayCorpus.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
-          pipelineCorpus = displayCorpus;
-          console.info("[demo-session-user] using_visible_display_for_persist", { corpusLen: displayCorpus.length });
-        }
-      }
-      // Fallback: try review surface
-      if (pipelineCorpus.length < PAID_PRO_AUTHORITY_MIN_LEN) {
-        const reviewDoc = getPaidProDocumentForSurface("review");
-        const reviewCorpus = reviewDoc?.text?.trim() || "";
-        if (reviewCorpus.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
-          pipelineCorpus = reviewCorpus;
-          console.info("[demo-session-user] using_visible_review_for_persist", { corpusLen: reviewCorpus.length });
-        }
-      }
-      // Final fallback: try the premium completion snapshot (sessionStorage)
-      // This is where the visible corpus is stored for demo checkout sessions
-      // when SoT is not yet established.
-      if (pipelineCorpus.length < PAID_PRO_AUTHORITY_MIN_LEN) {
-        const completionSnap = readPremiumCompletionSnapshot();
-        const snapCorpus = (
-          completionSnap?.premiumWinningBodyText ||
-          completionSnap?.premiumReadonlyPlainText ||
-          completionSnap?.paidProSourceOfTruthText ||
-          completionSnap?.acceptedPremiumCanonicalText ||
-          ""
-        ).trim();
-        if (snapCorpus.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
-          pipelineCorpus = snapCorpus;
-          console.info("[demo-session-user] using_completion_snapshot_for_persist", {
-            corpusLen: snapCorpus.length,
-            source: completionSnap?.premiumWinningBodyText ? "premiumWinningBodyText" :
-                    completionSnap?.premiumReadonlyPlainText ? "premiumReadonlyPlainText" :
-                    completionSnap?.paidProSourceOfTruthText ? "paidProSourceOfTruthText" :
-                    "acceptedPremiumCanonicalText",
-          });
-        }
-      }
-      if (pipelineCorpus.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
-        snapshot = {
-          title: "Services Agreement",
-          jurisdiction: "",
-          parties: [
-            { name: recipient1Name || "Party 1", role: "Party", email: recipient1Email || "" },
-            { name: recipient2Name || "Party 2", role: "Party", email: recipient2Email || "" },
-          ],
-          purpose: pipelineCorpus,
-          payment_terms: "",
-          duration: null,
-          due_date: null,
-          effective_date: null,
-          payment: { amount: null, cadence: null, valid: true },
-          premium_full_document_text: pipelineCorpus,
-          premium_server_full_document_text: pipelineCorpus,
-        };
-        console.info("[demo-session-user] built_minimal_draft_for_persist", {
-          corpusLen: pipelineCorpus.length,
+    const persistReviewFirstWorkspaceRow = async (
+      snapshot: ParsedDraftShape,
+      session: unknown,
+    ): Promise<string | null> => {
+      const { n1: handoffParty1 } = getRecipientHandoffNamesFromDraft(snapshot);
+      const party = pickRecipientNameForHandoff(recipient1Name, handoffParty1).trim() || "Party";
+      const useReviewFirstPersist = shouldUsePaidCreateFlowReviewFirstPersist({
+        draft: snapshot,
+        agreementDocumentText: agreementDocumentTextRef.current,
+        pipelineWinningBody:
+          lastPremiumWinningCorpusRef.current || premiumPipelineOutputBodyRef.current,
+        hydratedPremiumBody: hydratedPremiumBodyRef.current,
+      });
+      let corpusPlain = resolveLongestPersistablePaidCorpus([
+        resolvePaidProReviewSessionAuthorityPersistPlain(),
+        resolveCreateFlowAcceptedPipelineCorpusPlain({
+          draft: snapshot,
+          agreementDocumentText: agreementDocumentTextRef.current,
+          pipelineWinningBody:
+            lastPremiumWinningCorpusRef.current || premiumPipelineOutputBodyRef.current,
+          hydratedPremiumBody: hydratedPremiumBodyRef.current,
+        }),
+        hasPaidProSourceOfTruth() ? getPaidProSourceOfTruthText() : "",
+      ]);
+      if (useReviewFirstPersist && !hasPaidProReviewSessionAuthority() && corpusPlain) {
+        ensurePaidProReviewSessionAuthorityFromVisibleCorpus({
+          corpusPlain,
+          source: "ensure_workspace_visible_corpus",
         });
-      } else {
-        const snapForDiag = readPremiumCompletionSnapshot();
-        console.warn("[demo-session-user] no_valid_corpus_for_persist", {
-          pipelineLen: (lastPremiumWinningCorpusRef.current || "").length,
-          outputLen: (premiumPipelineOutputBodyRef.current || "").length,
-          hydratedLen: (hydratedPremiumBodyRef.current || "").length,
-          sotLen: hasPaidProSourceOfTruth() ? getPaidProSourceOfTruthText().length : 0,
-          displayLen: getPaidProDocumentForSurface("display")?.text?.length || 0,
-          reviewLen: getPaidProDocumentForSurface("review")?.text?.length || 0,
-          snapWinningLen: snapForDiag?.premiumWinningBodyText?.length || 0,
-          snapReadonlyLen: snapForDiag?.premiumReadonlyPlainText?.length || 0,
-          snapSotLen: snapForDiag?.paidProSourceOfTruthText?.length || 0,
-          snapAcceptedLen: snapForDiag?.acceptedPremiumCanonicalText?.length || 0,
-        });
+        const latched = resolvePaidProReviewSessionAuthorityPersistPlain().trim();
+        if (latched.length >= PAID_PRO_AUTHORITY_MIN_LEN) corpusPlain = latched;
       }
-    }
-    if (!snapshot) return null;
-    const { n1: handoffParty1 } = getRecipientHandoffNamesFromDraft(snapshot);
-    const party = pickRecipientNameForHandoff(recipient1Name, handoffParty1).trim() || "Party";
-    const useReviewFirstPersist = shouldUsePaidCreateFlowReviewFirstPersist({
-      draft: snapshot,
-      agreementDocumentText: agreementDocumentTextRef.current,
-      pipelineWinningBody:
-        lastPremiumWinningCorpusRef.current || premiumPipelineOutputBodyRef.current,
-      hydratedPremiumBody: hydratedPremiumBodyRef.current,
-    });
-    const sessionAuthorityPlain = resolvePaidProReviewSessionAuthorityPersistPlain();
-    let corpusPlain =
-      sessionAuthorityPlain.trim().length >= PAID_PRO_AUTHORITY_MIN_LEN
-        ? sessionAuthorityPlain
-        : resolveCreateFlowAcceptedPipelineCorpusPlain({
-            draft: snapshot,
-            agreementDocumentText: agreementDocumentTextRef.current,
-            pipelineWinningBody:
-              lastPremiumWinningCorpusRef.current || premiumPipelineOutputBodyRef.current,
-            hydratedPremiumBody: hydratedPremiumBodyRef.current,
-          });
-    if (corpusPlain.trim().length < PAID_PRO_AUTHORITY_MIN_LEN && hasPaidProSourceOfTruth()) {
-      const sot = getPaidProSourceOfTruthText().trim();
-      if (sot.length >= PAID_PRO_AUTHORITY_MIN_LEN) corpusPlain = sot;
-    }
-    // Pipeline/SoT can paint review without session authority; latch authority from that
-    // visible corpus so workspace mint is not blocked (universal — any family / party count).
-    if (
-      useReviewFirstPersist &&
-      !hasPaidProReviewSessionAuthority() &&
-      corpusPlain.trim().length >= PAID_PRO_AUTHORITY_MIN_LEN
-    ) {
-      ensurePaidProReviewSessionAuthorityFromVisibleCorpus({
-        corpusPlain,
-        source: "ensure_workspace_visible_corpus",
-      });
-      const latched = resolvePaidProReviewSessionAuthorityPersistPlain().trim();
-      if (latched.length >= PAID_PRO_AUTHORITY_MIN_LEN) corpusPlain = latched;
-    }
-    const draftForPersist =
-      useReviewFirstPersist && corpusPlain.trim().length >= PAID_PRO_AUTHORITY_MIN_LEN
-        ? mergeDraftForPaidCreateFlowPersist(snapshot, corpusPlain)
-        : snapshot;
-    // Paid/Genesis: never POST /draft until review body paints from the same authority hash.
-    // EXCEPTION: demo session users post-POS bypass this gate when they already have a valid
-    // Pro corpus — their visible paint authority may not yet be latched, but we have a durable
-    // pipeline corpus from checkout that is authoritative enough to persist.
-    const demoSessionBypassPaintReadyGate =
-      hasDemoSessionUser() &&
-      hasPaidPremiumCompletionSession() &&
-      corpusPlain.trim().length >= PAID_PRO_AUTHORITY_MIN_LEN;
-    if (useReviewFirstPersist && !demoSessionBypassPaintReadyGate) {
-      const paintReady = isPaidProReviewBodyVisiblyPaintReady({
-        persistCorpusPlain: corpusPlain,
-      });
-      if (!paintReady.ready) {
-        if (import.meta.env.DEV || typeof console !== "undefined") {
-          // eslint-disable-next-line no-console
-          console.warn("[paid-pro-workspace-persist-blocked]", {
-            reason: paintReady.reason,
-            paintHash: paintReady.paintHash,
-            authorityHash: paintReady.authorityHash,
-          });
-        }
-        return null;
+      const draftForPersist =
+        useReviewFirstPersist && corpusPlain
+          ? mergeDraftForPaidCreateFlowPersist(snapshot, corpusPlain)
+          : snapshot;
+      const demoSessionBypassPaintReadyGate =
+        hasDemoSessionUser() && hasPaidPremiumCompletionSession() && Boolean(corpusPlain);
+      if (useReviewFirstPersist && !demoSessionBypassPaintReadyGate) {
+        const paintReady = isPaidProReviewBodyVisiblyPaintReady({ persistCorpusPlain: corpusPlain });
+        if (!paintReady.ready) return null;
       }
-    }
-    if (demoSessionBypassPaintReadyGate) {
-      console.info("[demo-session-user] bypassing_paint_ready_gate_for_persist", {
-        corpusLen: corpusPlain.trim().length,
-      });
-    }
-    const p = (async (): Promise<string | null> => {
       reviewWorkspaceBootstrapDepthRef.current += 1;
       if (reviewWorkspaceBootstrapDepthRef.current === 1) setReviewWorkspaceBootstrapping(true);
       try {
@@ -6050,8 +5906,6 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         });
         const tid = String(id || "").trim();
         if (tid && reviewWorkspaceSessionRef.current === session) {
-          // Sync ref + resume immediately so prepare/GET paint authority does not race
-          // the next React effect flush (displayContext must see the id).
           reviewAgreementIdRef.current = tid;
           writeCreateReviewAgreementResumeId(tid);
           setReviewAgreementId(tid);
@@ -6074,21 +5928,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           });
           setProFullDraftQualityRetry(true);
         }
-        // Demo sessions: rethrow the error so finalize can show http status + detail.
-        // Non-demo review-first sessions with recovery corpus can swallow and continue.
-        if (demoSessionBypassPaintReadyGate) {
-          console.error("[demo-session-user] postNewDraft_failed_rethrowing", {
-            message: e instanceof Error ? e.message : String(e),
-            httpStatus: (e as { httpStatus?: number })?.httpStatus,
-          });
-          throw e;
-        }
-        if (
-          useReviewFirstPersist &&
-          corpusPlain.trim().length >= PAID_PRO_RECOVERY_MIN_DISPLAY_LEN
-        ) {
-          return null;
-        }
+        if (demoSessionBypassPaintReadyGate) throw e;
         return null;
       } finally {
         reviewAgreementEnsurePromiseRef.current = null;
@@ -6098,7 +5938,110 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           setReviewWorkspaceBootstrapping(false);
         }
       }
-    })();
+    };
+    const pendingReceipt = readOwnershipMigrationReceipt();
+    if (pendingReceipt) {
+      const canonical = pendingReceipt.canonicalAgreementId.trim();
+      reviewAgreementIdRef.current = canonical;
+      setReviewAgreementId(canonical);
+      writeCreateReviewAgreementResumeId(canonical);
+      return canonical;
+    }
+    const cached = reviewAgreementIdRef.current?.trim();
+    const demoSessionBypassCacheGates = hasDemoSessionUser() && hasPaidPremiumCompletionSession();
+    if (cached && isSupersededAgreementId(cached) && !demoSessionBypassCacheGates) {
+      const resume = readCreateReviewAgreementResumeId();
+      if (resume) {
+        reviewAgreementIdRef.current = resume;
+        setReviewAgreementId(resume);
+        return resume;
+      }
+      return null;
+    }
+    if (shouldBlockDraftWriteForOwnershipTransition(cached) && !demoSessionBypassCacheGates) return null;
+    if (cached) return cached;
+    if (reviewAgreementEnsurePromiseRef.current) return reviewAgreementEnsurePromiseRef.current;
+    const session = reviewWorkspaceSessionRef.current;
+    let snapshot = draft;
+    if (!snapshot && hasDemoSessionUser() && hasPaidPremiumCompletionSession()) {
+      // Priority order: pipeline refs -> SoT -> visible display -> review -> completion snapshot
+      let pipelineCorpus = (
+        lastPremiumWinningCorpusRef.current ||
+        premiumPipelineOutputBodyRef.current ||
+        hydratedPremiumBodyRef.current ||
+        ""
+      ).trim();
+      if (pipelineCorpus.length < PAID_PRO_AUTHORITY_MIN_LEN && hasPaidProSourceOfTruth()) {
+        const sotText = getPaidProSourceOfTruthText().trim();
+        if (sotText.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
+          pipelineCorpus = sotText;
+          console.info("[demo-session-user] using_sot_for_persist", { corpusLen: sotText.length });
+        }
+      }
+      if (pipelineCorpus.length < PAID_PRO_AUTHORITY_MIN_LEN) {
+        const displayCorpus = getPaidProDocumentForSurface("display")?.text?.trim() || "";
+        if (displayCorpus.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
+          pipelineCorpus = displayCorpus;
+          console.info("[demo-session-user] using_visible_display_for_persist", {
+            corpusLen: displayCorpus.length,
+          });
+        }
+      }
+      if (pipelineCorpus.length < PAID_PRO_AUTHORITY_MIN_LEN) {
+        const reviewCorpus = getPaidProDocumentForSurface("review")?.text?.trim() || "";
+        if (reviewCorpus.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
+          pipelineCorpus = reviewCorpus;
+          console.info("[demo-session-user] using_visible_review_for_persist", {
+            corpusLen: reviewCorpus.length,
+          });
+        }
+      }
+      if (pipelineCorpus.length < PAID_PRO_AUTHORITY_MIN_LEN) {
+        const completionSnap = readPremiumCompletionSnapshot();
+        const snapCorpus = (
+          completionSnap?.premiumWinningBodyText ||
+          completionSnap?.premiumReadonlyPlainText ||
+          completionSnap?.paidProSourceOfTruthText ||
+          completionSnap?.acceptedPremiumCanonicalText ||
+          ""
+        ).trim();
+        if (snapCorpus.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
+          pipelineCorpus = snapCorpus;
+          console.info("[demo-session-user] using_completion_snapshot_for_persist", {
+            corpusLen: snapCorpus.length,
+          });
+        }
+      }
+      snapshot = buildMinimalDraftForPaidPersist({
+        corpusPlain: pipelineCorpus,
+        party1Name: recipient1Name,
+        party2Name: recipient2Name,
+        party1Email: recipient1Email,
+        party2Email: recipient2Email,
+      });
+      if (snapshot) {
+        console.info("[demo-session-user] built_minimal_draft_for_persist", {
+          corpusLen: pipelineCorpus.length,
+        });
+      } else {
+        const snapForDiag = readPremiumCompletionSnapshot();
+        console.warn("[demo-session-user] no_valid_corpus_for_persist", {
+          pipelineLen: (lastPremiumWinningCorpusRef.current || "").length,
+          outputLen: (premiumPipelineOutputBodyRef.current || "").length,
+          hydratedLen: (hydratedPremiumBodyRef.current || "").length,
+          sotLen: hasPaidProSourceOfTruth() ? getPaidProSourceOfTruthText().length : 0,
+          displayLen: getPaidProDocumentForSurface("display")?.text?.length || 0,
+          reviewLen: getPaidProDocumentForSurface("review")?.text?.length || 0,
+          completionLen: (
+            snapForDiag?.premiumWinningBodyText ||
+            snapForDiag?.premiumReadonlyPlainText ||
+            ""
+          ).length,
+        });
+      }
+    }
+    if (!snapshot) return null;
+    const p = persistReviewFirstWorkspaceRow(snapshot, session);
     reviewAgreementEnsurePromiseRef.current = p;
     return p;
   }, [draft, recipient1Name]);
@@ -7218,8 +7161,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         setPartySignerNames(handoff.signerNames);
         setPartySignerTitles(handoff.signerTitles);
         // Prefer handoff/intake legal names over disposable demo seeds (ABC LLC / Sample Corp).
-        if (legalNames[0]) setRecipient1Name(legalNames[0]!.trim());
-        if (legalNames[1]) setRecipient2Name(legalNames[1]!.trim());
+        if (legalNames[0]) setRecipient1Name((prev) => pickRecipientNameForHandoff(prev, legalNames[0]!));
+        if (legalNames[1]) setRecipient2Name((prev) => pickRecipientNameForHandoff(prev, legalNames[1]!));
         if (handoff.partyAddresses.some(Boolean)) {
           setPartyAddresses((prev) => {
             const next = prev.slice();
@@ -7266,6 +7209,23 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     ],
   );
 
+  const abortEntitledRewriteMintOnDraftLimit = (mintErr: unknown): boolean => {
+    const mintOutcome = planPaidCreateFlowPersistFailureOutcome(mintErr);
+    if (mintOutcome.reason !== "draft_limit_reached") return false;
+    setCreateFlowDraftPersistError(mintOutcome.message);
+    setProFullDraftQualityRetry(true);
+    setProFullDraftCustomGateMessage(
+      `${resolvePaidCreateFlowDraftPersistFailureHeadline(mintErr)}\n\n${mintOutcome.message}`,
+    );
+    logPaidProGenerationTerminalTransition({
+      reason: "draft_limit_reached",
+      outcome: "failed_recoverable",
+    });
+    entitledPremiumRewriteInFlightRef.current = false;
+    setLoading(false);
+    return true;
+  };
+
   /**
    * Already-paid Pro agreement: run POST /premium pipeline without Stripe when user taps “Improve draft” / upgrade CTAs.
    * Persists snapshot then reuses layout hydration so entitlement fields stay aligned with checkout success path.
@@ -7274,9 +7234,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     gateDraft?: ParsedDraftShape;
     rawIntake?: string;
   }) => {
-    // Canonical paid Pro review after pipeline success: planFinalizeCanonicalPaidProPipelineSuccess
-    // then enterCanonicalPaidProReviewFlow (same contract as post_checkout_apply_success).
-    const finalizeCanonicalPaidProPipelineSuccess = planFinalizeCanonicalPaidProPipelineSuccess;
+    const finalizeCanonicalPaidProPipelineSuccess = planFinalizeCanonicalPaidProPipelineSuccess; // enterCanonicalPaidProReviewFlow
+    const commitValidatedRewriteHandoffBeforeCanonicalEntry = (finalPlain: string, src: string) => {
+      const committed = commitAcceptedPaidProCorpusHandoffSync({ corpusPlain: finalPlain, pipelineSource: src });
+      if (committed) authoritativeAgreementSnapshotRef.current = finalPlain;
+      return committed;
+    };
     if (entitledPremiumRewriteInFlightRef.current) return;
     // Reload race: in-memory SoT is empty until hydrate; never re-generate over an accepted snap.
     const acceptedSnap = readPremiumCompletionSnapshot();
@@ -7403,6 +7366,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           // eslint-disable-next-line no-console
           console.warn("[premium-flow] entitled_rewrite_mint_agreement_failed", mintErr);
         }
+        if (abortEntitledRewriteMintOnDraftLimit(mintErr)) return;
       }
     }
     const guidedFlowId = resolveGuidedFlowId(mergedIntake, buildLiveDraftPreview(mergedIntake));
@@ -7427,9 +7391,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         gapResolverSkippedWithDefaults: true,
         agreementGenerationId: sessionGenForPass,
         agreementId: agreementIdForPass,
+        premiumGenerationCallReason: "entitled_rewrite",
         premiumRequestIntakeFingerprint: shortIntakeFingerprint(mergedIntake),
         isPremiumRequestStillValid: () => getOrInitSessionAgreementGenerationId() === sessionGenForPass,
-        premiumGenerationCallReason: "entitled_rewrite",
       });
       if (result.staleIntakeOrGeneration) {
         setHardError("Your details changed while we were finishing. Try again when ready.");
@@ -8026,6 +7990,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         generationOutcome: result.serverGenerationDegraded ? "degraded" : "ok",
         recipientCandidates,
       });
+      if (finalizePlan.canEnterCanonicalReview) {
+        commitValidatedRewriteHandoffBeforeCanonicalEntry(
+          finalizePlan.corpusPlain,
+          result.premiumRenderSource || "server_full_draft",
+        );
+      }
       const canonicalEntered = finalizePlan.canEnterCanonicalReview
         ? isDashboardPaidCreateRouteActive()
           ? enterCanonicalPaidProReviewFlow({
@@ -32097,14 +32067,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     }
     // Paid create can paint a full review corpus before a workspace row exists. Mint/bind the
     // durable agreement id here so signer finalize does not dead-end on "reload from dashboard".
-    let durableAgreementId = (
-      reviewAgreementIdRef.current ||
-      readCreateReviewAgreementResumeId() ||
-      productionSendBarAgreementIdRef.current ||
-      ""
-    ).trim();
+    const resolvedDurable = resolveFinalizeDurableAgreementId({
+      reviewAgreementId: reviewAgreementIdRef.current,
+      resumeAgreementId: readCreateReviewAgreementResumeId(),
+      productionSendBarAgreementId: productionSendBarAgreementIdRef.current,
+    });
+    let durableAgreementId = resolvedDurable.agreementId;
     let ensurePersistError: unknown = null;
-    if (!durableAgreementId) {
+    if (resolvedDurable.needsEnsure) {
       setProFullDraftQualityRetry(false);
       try {
         durableAgreementId = (await ensureReviewAgreementWorkspaceId())?.trim() || "";
@@ -32112,13 +32082,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         ensurePersistError = e;
         durableAgreementId = "";
       }
-      durableAgreementId = (
-        durableAgreementId ||
-        reviewAgreementIdRef.current ||
-        readCreateReviewAgreementResumeId() ||
-        productionSendBarAgreementIdRef.current ||
-        ""
-      ).trim();
+      durableAgreementId = resolveFinalizeDurableAgreementId({
+        reviewAgreementId: durableAgreementId || reviewAgreementIdRef.current,
+        resumeAgreementId: readCreateReviewAgreementResumeId(),
+        productionSendBarAgreementId: productionSendBarAgreementIdRef.current,
+      }).agreementId;
+    }
+    if (shouldClearCreateFlowDraftPersistErrorAfterDurableId(durableAgreementId)) {
+      setCreateFlowDraftPersistError(null);
     }
     if (!durableAgreementId) {
       // Surface the real failure if ensureReviewAgreementWorkspaceId threw or returned null.

@@ -36,3 +36,20 @@ export function resolvePaidCreateFlowDraftPersistFailureHeadline(error: unknown)
   if (isDraftLimitReachedPersistError(error)) return PAID_CREATE_FLOW_DRAFT_LIMIT_HEADLINE;
   return "Could not save draft";
 }
+
+export type PaidCreateFlowPersistFailureOutcome = {
+  treatAsSuccess: false;
+  reason: "draft_limit_reached" | "draft_persist_failed";
+  message: string;
+};
+
+/** Review-first persist still honors server quota — never treat draft_limit as success. */
+export function planPaidCreateFlowPersistFailureOutcome(
+  error: unknown,
+): PaidCreateFlowPersistFailureOutcome {
+  return {
+    treatAsSuccess: false,
+    reason: isDraftLimitReachedPersistError(error) ? "draft_limit_reached" : "draft_persist_failed",
+    message: formatPaidCreateFlowDraftPersistFailureMessage(error),
+  };
+}
