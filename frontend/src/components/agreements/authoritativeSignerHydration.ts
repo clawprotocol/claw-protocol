@@ -51,6 +51,7 @@ import {
   shouldPreserveFrozenCanonicalCorpusOnSignerFinalize,
   shouldUseFrozenServerFullSourceOfTruthMinimalHydration,
 } from "./paidProFrozenServerFullSignerHydration";
+import { resolveImmutableFrozenLegalCorpusOnSignerFinalize } from "./paidProFrozenLegalCorpus";
 import { analyzePaidProExecutionBlockInvariant } from "./paidProExecutionBlockAuthority";
 import {
   countBlankSignerMetadataLinesInExecutionBlock,
@@ -193,6 +194,25 @@ export function buildHydratedAuthoritativeSigningCorpusFromAuthority(args: {
       rawCorpus,
       openingRecords.length >= 2 ? openingRecords : undefined,
     ).text;
+  }
+
+  const immutableFrozenLegal = resolveImmutableFrozenLegalCorpusOnSignerFinalize({
+    surface: args.surface,
+    signatureRegionOnly: args.signatureRegionOnly,
+    repairRecital: args.repairRecital,
+  });
+  if (immutableFrozenLegal) {
+    const identities = authorityPartiesToCanonicalPartyIdentities(args.authority.parties, {
+      intakeText: args.intakeRaw,
+      acceptedCorpus: immutableFrozenLegal,
+    });
+    return {
+      corpus: immutableFrozenLegal,
+      identities,
+      signaturePolishCount: 0,
+      partyNoticeApplied: false,
+      rejected: false,
+    };
   }
 
   if (

@@ -23,6 +23,7 @@ import { clearPaidProGenerationAttemptAuthorityForTests } from "./paidProGenerat
 import { clearPaidProAuthorityHashContinuityForTests } from "./paidProAuthorityHashContinuity";
 import { clearAcceptedProCorpusSafeDisplayCacheForTests } from "./paidProAcceptedCorpusSafeDisplayCache";
 import { clearPaidProPipelineAcceptedCorpusHashForTests } from "./paidProPipelineAcceptedCorpus";
+import { clearImmutableFrozenLegalCorpus } from "./paidProFrozenLegalCorpus";
 import { resetPaidReviewSessionCorpusInvariantForTests } from "./paidProReviewSessionCorpusInvariantState";
 import { clearIntakeSignerMetadataExtractMemoForTests } from "./universalSignerMetadataAuthority";
 import { clearPaidProVisibleRenderMemoForTests } from "./paidProVisibleRenderMemo";
@@ -38,6 +39,7 @@ export function resetPaidProPipelineTestIsolation(): void {
   clearPaidProAuthorityHashContinuityForTests();
   clearAcceptedProCorpusSafeDisplayCacheForTests();
   clearPaidProPipelineAcceptedCorpusHashForTests();
+  clearImmutableFrozenLegalCorpus();
   clearPaidProCorpusScanCache();
   clearPaidProPostAcceptanceValidatorCache();
   clearPremiumParseSessionGuard();

@@ -29,6 +29,7 @@ import {
 import {
   hasPaidProPipelineValidationForCorpus,
 } from "./paidProPostAcceptanceValidatorCache";
+import { rememberImmutableFrozenLegalCorpus } from "./paidProFrozenLegalCorpus";
 import {
   alignIntakeSignerMetadataToLegalEntities,
   extractCanonicalIntakeSignerMetadata,
@@ -394,6 +395,7 @@ export function commitAcceptedPaidProCorpusHandoffSync(args: {
     return false;
   }
   markPaidProPipelineAcceptedCorpusHash(body);
+  rememberImmutableFrozenLegalCorpus(body);
   commitPaidProAcceptanceStorageHygiene();
   return (readPaidProPipelineAcceptedCorpusBody()?.trim().length ?? 0) >= GUIDED_FINAL_REVIEW_MIN_CORPUS_LEN;
 }
