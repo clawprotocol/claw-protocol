@@ -81,6 +81,7 @@ function existingPaidAgreementDraft(): ParsedDraftShape {
     duration: "12 months",
     due_date: null,
     effective_date: null,
+    payment: { amount: 96000, cadence: null, valid: true },
     agreement_family: "consulting_agreement",
   };
 }
@@ -243,7 +244,7 @@ describe("same-agreement generation handoff authority", () => {
             status: 200,
             headers: { get: () => null },
             text: async () => JSON.stringify(successfulPremiumFullDraftWire()),
-          } as Response;
+          } as unknown as Response;
         }
         if (url.includes("/canonical-review-snapshot") && method === "POST") {
           const raw = String(init?.body || "");
@@ -269,7 +270,7 @@ describe("same-agreement generation handoff authority", () => {
               registry_version: 1,
             }),
             text: async () => "",
-          } as Response;
+          } as unknown as Response;
         }
         if (url.includes("/canonical-review-snapshot") && method === "GET") {
           observed.snapshotGetCalls += 1;
@@ -295,7 +296,7 @@ describe("same-agreement generation handoff authority", () => {
               registry_version: 1,
             }),
             text: async () => "",
-          } as Response;
+          } as unknown as Response;
         }
         throw new Error(`unexpected fetch ${method} ${url}`);
       }),
