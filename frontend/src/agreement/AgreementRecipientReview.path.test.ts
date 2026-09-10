@@ -1,5 +1,10 @@
 import { describe, expect, it } from "vitest";
-import { agreementMagicLinkPath, parseAgreementReviewPath } from "./AgreementRecipientReview";
+import {
+  agreementMagicLinkPath,
+  agreementSigningPath,
+  parseAgreementReviewPath,
+  parseAgreementSignPath,
+} from "./AgreementRecipientReview";
 
 describe("Agreement recipient review path parsing", () => {
   it("parses canonical review route without token", () => {
@@ -31,5 +36,17 @@ describe("Agreement recipient review path parsing", () => {
       role: "reviewer",
       participantPartyId: "p-orion",
     });
+  });
+
+  it("builds and parses the canonical signing path with token and party", () => {
+    expect(agreementSigningPath("ag_1", "lv-1", "tok_sign", "p-orion")).toBe(
+      "/agreements/ag_1/sign?t=tok_sign&p=p-orion",
+    );
+    expect(parseAgreementSignPath("/agreements/ag_1/sign", "?t=tok_sign&p=p-orion")).toEqual({
+      agreementId: "ag_1",
+      token: "tok_sign",
+      participantPartyId: "p-orion",
+    });
+    expect(parseAgreementSignPath("/agreements/ag_1/sign", "")).toEqual({ agreementId: "ag_1" });
   });
 });

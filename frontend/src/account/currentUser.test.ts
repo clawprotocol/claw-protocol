@@ -54,7 +54,9 @@ describe("currentUser adapter", () => {
 
   it("does not treat public reviewer links as dashboard surfaces", () => {
     expect(isPublicTokenAgreementSurface("/agreements/ag_123/review")).toBe(true);
+    expect(isPublicTokenAgreementSurface("/agreements/ag_123/sign")).toBe(true);
     expect(isAuthenticatedDashboardSurface("/agreements/ag_123/review")).toBe(false);
+    expect(isAuthenticatedDashboardSurface("/agreements/ag_123/sign")).toBe(false);
   });
 
   it("recognizes a legacy recipient token in first query position", () => {
