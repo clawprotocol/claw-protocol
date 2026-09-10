@@ -1,10 +1,17 @@
 /** @vitest-environment jsdom */
+import React from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { render } from "@testing-library/react";
 import { armCreatorDashboardSignerSetupResume } from "../../launch/creatorDashboardReviewLinkRouting";
+import {
+  sha256CorpusDigest,
+  storeVerifiedCommercialDisplayCorpus,
+  clearDisplayReviewSnapshotAuthority,
+} from "../../agreement/canonicalReviewSnapshotApi";
+import { selectDashboardResumePaint } from "./paidProDashboardResumeAuthoritySelection";
 import {
   markPaidProPipelineAcceptedCorpusHash,
   clearPaidProPipelineAcceptedCorpusHashForTests,
@@ -40,7 +47,8 @@ function buildAcceptedServerDraft(len = 2200): string {
   ].join("\n\n");
   const head =
     "SERVICES AGREEMENT\n\nThis Agreement is between Acme Test Co and LawDog Demo LLC.\n\n";
-  return (head + body).padEnd(len, " ");
+  const built = head + body;
+  return built.length >= len ? built : `${built}\n${"Accepted server full draft clause. ".repeat(40)}`.slice(0, len);
 }
 
 describe("dashboard signer-setup resume paints accepted server_full_draft preview", () => {
@@ -48,13 +56,14 @@ describe("dashboard signer-setup resume paints accepted server_full_draft previe
     sessionStorage.clear();
     localStorage.clear();
     clearPaidProSourceOfTruth();
+    clearDisplayReviewSnapshotAuthority();
     clearPaidProPipelineAcceptedCorpusHashForTests();
     resetPaidProVisibleDocumentShellLogsForTests();
     resetPaidProDocumentBodyRouterLogsForTests();
     vi.restoreAllMocks();
   });
 
-  it("VisibleShell paints pipeline-accepted corpus when hasSoT is still false", () => {
+  it("pipeline-accepted corpus without verified GET cannot paint dashboard resume paper", () => {
     const corpus = buildAcceptedServerDraft(2400);
     markPaidProPipelineValidationPassed({ text: corpus, source: "server_full_draft" });
     markPaidProPipelineAcceptedCorpusHash(corpus);
@@ -62,11 +71,15 @@ describe("dashboard signer-setup resume paints accepted server_full_draft previe
     expect(readAcceptedPipelineReviewCorpusPlain().length).toBeGreaterThanOrEqual(
       PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN,
     );
-
+    armCreatorDashboardSignerSetupResume(AGREEMENT_ID);
+    const resume = selectDashboardResumePaint({
+      agreementId: AGREEMENT_ID,
+      resumeActive: true,
+      authenticatedOwner: true,
+    });
+    expect(resume.canPaintReview).toBe(false);
+    expect(resume.kind).toBe("paid_retry");
     const router = resolvePaidProDocumentBodyRouter();
-    expect(router.forced).toBe(true);
-    expect(router.sotLen).toBeGreaterThanOrEqual(PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN);
-
     const { container, unmount } = render(
       <PaidProDocumentBodyForcedRoute
         embedded
@@ -76,14 +89,11 @@ describe("dashboard signer-setup resume paints accepted server_full_draft previe
           paidProActive: true,
           premiumPaidDocumentSurface: true,
           premiumCheckoutCompleted: true,
+          agreementId: AGREEMENT_ID,
         }}
       />,
     );
-    const shell = container.querySelector('[data-testid="paid-pro-visible-document-shell"]');
-    expect(shell?.getAttribute("data-paid-pro-render-branch")).toBe("canonical_plain_forced");
-    expect(container.querySelector('[data-testid="paid-pro-visible-document-shell-empty"]')).toBeNull();
-    expect(shell?.textContent || "").toMatch(/Acme Test Co/);
-    expect(shell?.textContent || "").not.toMatch(/could not confirm the server-locked agreement/i);
+    expect(container.textContent || "").not.toMatch(/Acme Test Co/);
     unmount();
   });
 
@@ -111,8 +121,18 @@ describe("dashboard signer-setup resume paints accepted server_full_draft previe
     expect(forcedAfterResumeIdx).toBeGreaterThan(forcedInsideResumeIdx);
   });
 
-  it("ForcedRoute with resume plain paints document title h1 and bold section h2", () => {
+  it("ForcedRoute with resume plain paints document title h1 and bold section h2", async () => {
     const corpus = buildAcceptedServerDraft(2400);
+    const sha = await sha256CorpusDigest(corpus);
+    storeVerifiedCommercialDisplayCorpus({
+      agreementId: AGREEMENT_ID,
+      snapshotId: "crs_preview_title",
+      corpusSha256: sha,
+      corpusLength: corpus.length,
+      status: "pending",
+      corpusPlain: corpus,
+    });
+    armCreatorDashboardSignerSetupResume(AGREEMENT_ID);
     const router = resolvePaidProDocumentBodyRouter();
     const { container, unmount } = render(
       <PaidProDocumentBodyForcedRoute
@@ -123,6 +143,7 @@ describe("dashboard signer-setup resume paints accepted server_full_draft previe
           paidProActive: true,
           premiumPaidDocumentSurface: true,
           premiumCheckoutCompleted: true,
+          agreementId: AGREEMENT_ID,
           acceptedCanonicalPlain: corpus,
         }}
         authoritativeSource="server_full_draft"
@@ -138,7 +159,7 @@ describe("dashboard signer-setup resume paints accepted server_full_draft previe
     unmount();
   });
 
-  it("ForcedRoute injects display title when resume corpus opens at section 1", () => {
+  it("ForcedRoute injects display title when resume corpus opens at section 1", async () => {
     const body = [
       "1. Services and Project Term",
       "Designer will provide product design services for Client's new mobile app UI during the six-week period starting on the Effective Date.",
@@ -148,7 +169,17 @@ describe("dashboard signer-setup resume paints accepted server_full_draft previe
       "",
       ...Array.from({ length: 30 }, (_, i) => `Section ${i + 3}. Accepted server full draft clause.`),
     ].join("\n\n");
-    const corpus = body.padEnd(2400, " ");
+    const corpus = `${body}\n${"Accepted server full draft clause. ".repeat(40)}`.trim();
+    const sha = await sha256CorpusDigest(corpus);
+    storeVerifiedCommercialDisplayCorpus({
+      agreementId: AGREEMENT_ID,
+      snapshotId: "crs_preview_section1",
+      corpusSha256: sha,
+      corpusLength: corpus.length,
+      status: "pending",
+      corpusPlain: corpus,
+    });
+    armCreatorDashboardSignerSetupResume(AGREEMENT_ID);
     const router = resolvePaidProDocumentBodyRouter();
     const { container, unmount } = render(
       <PaidProDocumentBodyForcedRoute
@@ -159,6 +190,7 @@ describe("dashboard signer-setup resume paints accepted server_full_draft previe
           paidProActive: true,
           premiumPaidDocumentSurface: true,
           premiumCheckoutCompleted: true,
+          agreementId: AGREEMENT_ID,
           acceptedCanonicalPlain: corpus,
           draft: { title: "Services Agreement" } as never,
           intakeText:
@@ -175,7 +207,7 @@ describe("dashboard signer-setup resume paints accepted server_full_draft previe
     unmount();
   });
 
-  it("ForcedRoute paints employment title from intake when corpus has no title line", () => {
+  it("ForcedRoute paints employment title from intake when corpus has no title line", async () => {
     const body = [
       "1. Position and Duties",
       "Employee will perform the duties of Senior Engineer for Employer during the employment term.",
@@ -185,7 +217,17 @@ describe("dashboard signer-setup resume paints accepted server_full_draft previe
       "",
       ...Array.from({ length: 30 }, (_, i) => `Section ${i + 3}. Employment clause body text.`),
     ].join("\n\n");
-    const corpus = body.padEnd(2400, " ");
+    const corpus = `${body}\n${"Employment clause body text. ".repeat(40)}`.trim();
+    const sha = await sha256CorpusDigest(corpus);
+    storeVerifiedCommercialDisplayCorpus({
+      agreementId: AGREEMENT_ID,
+      snapshotId: "crs_preview_employment",
+      corpusSha256: sha,
+      corpusLength: corpus.length,
+      status: "pending",
+      corpusPlain: corpus,
+    });
+    armCreatorDashboardSignerSetupResume(AGREEMENT_ID);
     const router = resolvePaidProDocumentBodyRouter();
     const { container, unmount } = render(
       <PaidProDocumentBodyForcedRoute
@@ -196,6 +238,7 @@ describe("dashboard signer-setup resume paints accepted server_full_draft previe
           paidProActive: true,
           premiumPaidDocumentSurface: true,
           premiumCheckoutCompleted: true,
+          agreementId: AGREEMENT_ID,
           acceptedCanonicalPlain: corpus,
           intakeText: "Employment agreement between Acme Inc and Pat Lee. Full-time. California law.",
         }}

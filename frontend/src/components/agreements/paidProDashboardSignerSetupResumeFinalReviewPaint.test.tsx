@@ -1,9 +1,9 @@
 /** @vitest-environment jsdom */
 /**
- * Dashboard signer-setup resume → Continue must paint the finalized signer-hydrated
- * corpus (names/titles/emails), not blank Name/Title lines from a longer pre-signer SoT,
- * even when GET /canonical-review-snapshot 404s.
+ * Dashboard signer-setup resume paints only a verified owner-scoped GET corpus.
+ * Local/module finalized bytes cannot authorize resume paper.
  */
+import React from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -13,7 +13,13 @@ import {
   clearAcceptedReviewSnapshotRef,
   clearDisplayReviewSnapshotAuthority,
   hasVerifiedCommercialDisplayCorpus,
+  sha256CorpusDigest,
+  storeVerifiedCommercialDisplayCorpus,
 } from "../../agreement/canonicalReviewSnapshotApi";
+import { armCreatorDashboardSignerSetupResume } from "../../launch/creatorDashboardReviewLinkRouting";
+import {
+  selectDashboardResumePaint,
+} from "./paidProDashboardResumeAuthoritySelection";
 import { buildHydratedAuthoritativeSigningCorpus } from "./authoritativeSignerHydration";
 import {
   clearAuthoritativeSigningSnapshot,
@@ -65,7 +71,7 @@ const AGREEMENT_ID = "9d6d1be0-55dd-415a-bf61-fee9db743674";
 const ACME = "Acme Test Co";
 const LAWDOG = "LawDog Demo LLC";
 
-function buildPreSignerSoT(targetLen = 9705): string {
+function buildPreSignerSoT(targetLen = 10_464): string {
   const head = [
     "SERVICES AGREEMENT",
     "",
@@ -89,7 +95,14 @@ function buildPreSignerSoT(targetLen = 9705): string {
     "Title:",
     "Date:",
   ].join("\n");
-  return head.padEnd(targetLen, " ");
+  if (head.length >= targetLen) return head;
+  let body = head;
+  let i = 81;
+  while (body.length < targetLen) {
+    body += `\nSection ${i}. Operative clause for staging resume.`;
+    i += 1;
+  }
+  return body.slice(0, targetLen);
 }
 
 function finalizeTwoSigners(rawCorpus: string) {
@@ -153,64 +166,99 @@ describe("dashboard signer-setup resume → Continue paints finalized signer cor
     vi.restoreAllMocks();
   });
 
-  it("intake prefers post-finalize paint before verified GET gate and blocks on persist failure", () => {
-    const commercialBlock = intakeSrc.indexOf("if (commercialDisplayLocked)");
-    const postFinalizeIdx = intakeSrc.indexOf(
-      "if (isPaidProPostFinalizeHydratedCorpusLocked())",
-      commercialBlock,
-    );
-    const verifiedGateIdx = intakeSrc.indexOf(
-      "if (!hasVerifiedCommercialDisplayCorpus(agreementIdForDisplay)) return \"\";",
-      commercialBlock,
-    );
-    expect(commercialBlock).toBeGreaterThan(0);
-    expect(postFinalizeIdx).toBeGreaterThan(commercialBlock);
-    expect(verifiedGateIdx).toBeGreaterThan(postFinalizeIdx);
+  it("resume paint requires verified GET; persist failure stays a paid retry", () => {
+    expect(intakeSrc).toContain("hasVerifiedCommercialDisplayCorpus");
     expect(intakeSrc).toContain("prepareCommercialReviewSnapshotAuthority({");
     expect(intakeSrc).toContain("persistFrozenSigningAuthorityToBackendDetailed");
-    expect(intakeSrc).toContain("replacePaidProReviewSessionAuthorityAfterSignerFinalize");
     expect(intakeSrc).toContain("Could not persist the finalized agreement snapshot");
     expect(intakeSrc).toContain("Could not persist frozen signing authority");
     expect(intakeSrc).toContain("persistFrozenToBackend: false");
     expect(intakeSrc).toContain("agreementId: durableAgreementId");
     expect(snapSrc).toContain("args.agreementId");
+    expect(intakeSrc).toContain("hasVerifiedCommercialDisplayCorpus(");
   });
 
-  it("finalized snapshot paints signer names/titles/emails when GET corpus is absent", () => {
-    const sot = buildPreSignerSoT(9705);
+  it("local finalized corpus without verified GET does not authorize dashboard resume paper", () => {
+    const sot = buildPreSignerSoT();
     establishPaidProSourceOfTruth({ text: sot, source: "server_full_draft" });
-    const establishedSoT = getPaidProSourceOfTruthText();
-    expect(establishedSoT.length).toBeGreaterThan(2000);
-    expect(establishedSoT).toMatch(/Name:\s*$/m);
-
-    const snap = finalizeTwoSigners(establishedSoT);
+    const snap = finalizeTwoSigners(getPaidProSourceOfTruthText());
     expect(hasAuthoritativeSigningSnapshot()).toBe(true);
     expect(isPaidProPostFinalizeHydratedCorpusLocked()).toBe(true);
     expect(hasVerifiedCommercialDisplayCorpus(AGREEMENT_ID)).toBe(false);
-
-    const reviewPlain = resolvePaidProPostFinalizeReviewPlain();
-    expect(reviewPlain.length).toBeGreaterThan(0);
-    // Staging smoke: finalized signer corpus (~9637) diverges from pre-signer SoT (~9705).
-    expect(reviewPlain.length).not.toBe(establishedSoT.length);
-    expect(hashPaidProCorpus(reviewPlain)).toBe(snap.hash);
-    expect(reviewPlain).toMatch(/Name:\s*Alice Resume/i);
-    expect(reviewPlain).toMatch(/Title:\s*CEO/i);
-    expect(reviewPlain).toMatch(/Name:\s*Bob Resume/i);
-    expect(reviewPlain).toMatch(/Title:\s*General Counsel/i);
-    expect(reviewPlain).toMatch(/alice@acme\.test/i);
-    expect(reviewPlain).toMatch(/bob@lawdog\.test/i);
-    expect(reviewPlain).not.toMatch(/^Name:\s*$/m);
-    expect(reviewPlain).not.toMatch(/Authorized Signer/i);
-
+    expect(snap.corpus).toMatch(/Alice Resume/i);
+    armCreatorDashboardSignerSetupResume(AGREEMENT_ID);
+    const resume = selectDashboardResumePaint({
+      agreementId: AGREEMENT_ID,
+      resumeActive: true,
+      authenticatedOwner: true,
+    });
+    expect(resume.kind).toBe("paid_retry");
+    expect(resume.canPaintReview).toBe(false);
+    expect(resume.plain).toBe("");
     const frozen = readFrozenSigningAuthoritySnapshot();
     expect(frozen?.agreementId).toBe(AGREEMENT_ID);
   });
 
-  it("ForcedRoute prefers finalized signer corpus over longer blank SoT", () => {
-    const sot = buildPreSignerSoT(9705);
+  it("verified GET resume paints the frozen body and server signer metadata", async () => {
+    const sot = buildPreSignerSoT();
     establishPaidProSourceOfTruth({ text: sot, source: "server_full_draft" });
     const snap = finalizeTwoSigners(getPaidProSourceOfTruthText());
+    const sha = await sha256CorpusDigest(snap.corpus);
+    storeVerifiedCommercialDisplayCorpus({
+      agreementId: AGREEMENT_ID,
+      snapshotId: "crs_resume_final",
+      corpusSha256: sha,
+      corpusLength: snap.corpus.length,
+      status: "accepted",
+      corpusPlain: snap.corpus,
+    });
+    armCreatorDashboardSignerSetupResume(AGREEMENT_ID);
+    const resume = selectDashboardResumePaint({
+      agreementId: AGREEMENT_ID,
+      resumeActive: true,
+      authenticatedOwner: true,
+    });
+    expect(resume.canPaintReview).toBe(true);
+    expect(resume.agreementId).toBe(AGREEMENT_ID);
+    expect(resume.plain).toMatch(/Name:\s*Alice Resume/i);
+    expect(resume.plain).toMatch(/Title:\s*CEO/i);
+    expect(resume.plain).toMatch(/Name:\s*Bob Resume/i);
+    expect(resume.plain).toMatch(/alice@acme\.test/i);
+    expect(hashPaidProCorpus(resume.plain)).toBe(snap.hash);
+    expect(resume.plain).not.toMatch(/Authorized Signer/i);
+  });
 
+  it("ForcedRoute resume stays empty until verified GET, then paints signer metadata", async () => {
+    const sot = buildPreSignerSoT();
+    establishPaidProSourceOfTruth({ text: sot, source: "server_full_draft" });
+    const snap = finalizeTwoSigners(getPaidProSourceOfTruthText());
+    armCreatorDashboardSignerSetupResume(AGREEMENT_ID);
+    const routerEmpty = resolvePaidProDocumentBodyRouter();
+    const first = render(
+      <PaidProDocumentBodyForcedRoute
+        embedded
+        router={routerEmpty}
+        html=""
+        displayContext={{
+          paidProActive: true,
+          premiumPaidDocumentSurface: true,
+          premiumCheckoutCompleted: true,
+          agreementId: AGREEMENT_ID,
+        }}
+      />,
+    );
+    expect(first.container.textContent || "").not.toMatch(/Alice Resume/);
+    first.unmount();
+
+    const sha = await sha256CorpusDigest(snap.corpus);
+    storeVerifiedCommercialDisplayCorpus({
+      agreementId: AGREEMENT_ID,
+      snapshotId: "crs_resume_forced",
+      corpusSha256: sha,
+      corpusLength: snap.corpus.length,
+      status: "accepted",
+      corpusPlain: snap.corpus,
+    });
     const router = resolvePaidProDocumentBodyRouter();
     const { container, unmount } = render(
       <PaidProDocumentBodyForcedRoute
@@ -221,6 +269,7 @@ describe("dashboard signer-setup resume → Continue paints finalized signer cor
           paidProActive: true,
           premiumPaidDocumentSurface: true,
           premiumCheckoutCompleted: true,
+          agreementId: AGREEMENT_ID,
         }}
       />,
     );
@@ -228,15 +277,11 @@ describe("dashboard signer-setup resume → Continue paints finalized signer cor
     expect(text).toMatch(/Alice Resume/);
     expect(text).toMatch(/Bob Resume/);
     expect(text).toMatch(/alice@acme\.test/i);
-    expect(text).not.toMatch(/^Name:\s*$/m);
-    // Shell must not paint the longer blank SoT preferentially.
-    expect(text.includes("Alice Resume")).toBe(true);
-    expect(snap.corpus).toContain("Alice Resume");
     unmount();
   });
 
-  it("advances review-session authority from pre-signer SoT to finalized signer corpus", () => {
-    const sot = buildPreSignerSoT(9705);
+  it("review-session / pipeline corpus without verified GET cannot authorize dashboard resume", () => {
+    const sot = buildPreSignerSoT();
     establishPaidProSourceOfTruth({ text: sot, source: "server_full_draft" });
     const establishedSoT = getPaidProSourceOfTruthText();
     establishPaidProReviewSessionAuthority({
@@ -258,16 +303,15 @@ describe("dashboard signer-setup resume → Continue paints finalized signer cor
       agreementId: AGREEMENT_ID,
       reviewSessionId: AGREEMENT_ID,
     });
-    const next = readPaidProReviewSessionAuthority();
-    expect(next?.hash).toBe(snap.hash);
-    expect(next?.hash).not.toBe(priorHash);
-    expect(next?.source).toBe("paid_pro_signer_metadata_finalize");
-    expect(next?.corpusPlain).toMatch(/Alice Resume/);
-    expect(next?.corpusPlain).not.toMatch(/^Name:\s*$/m);
-    const invariant = readPaidReviewSessionCorpusInvariant(AGREEMENT_ID);
-    expect(invariant?.latchedCanonicalSoTHash).toBe(
-      fingerprintPaidReviewSessionCorpusBody(snap.corpus),
-    );
-    expect(invariant?.latchedReviewDisplayHash).toBeNull();
+    expect(readPaidProReviewSessionAuthority()?.hash).toBe(snap.hash);
+    expect(hasVerifiedCommercialDisplayCorpus(AGREEMENT_ID)).toBe(false);
+    armCreatorDashboardSignerSetupResume(AGREEMENT_ID);
+    const resume = selectDashboardResumePaint({
+      agreementId: AGREEMENT_ID,
+      resumeActive: true,
+      authenticatedOwner: true,
+    });
+    expect(resume.kind).toBe("paid_retry");
+    expect(resume.canPaintReview).toBe(false);
   });
 });
