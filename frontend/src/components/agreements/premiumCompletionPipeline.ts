@@ -5088,13 +5088,14 @@ async function runPremiumCompletionInner(
         !networkRecoveryPreview ||
         networkRecoveryPreview.blockReason === "duplicate_notice_stanza")
     ) {
-      const recoverySource = PREMIUM_NETWORK_LOCAL_RECOVERY_RENDER_SOURCE;
-      if (tierAEnabled) tierADiag.premiumPipelineSource = recoverySource;
+      // Labeled recovery display only. Network failure stays retryable and must
+      // not be claimed as completed premium generation or SoT.
+      if (tierAEnabled) tierADiag.premiumPipelineSource = "premium_network_retryable";
       logPremiumCompletionDebug({
-        stage: "premium_network_local_recovery",
+        stage: "premium_network_retryable_labeled_recovery_display",
         recoveryCandidateEligible: Boolean(networkRecoveryPreview?.eligible),
         rejectedReason: networkRecoveryPreview?.blockReason ?? undefined,
-        premiumRenderSource: recoverySource,
+        premiumRenderSource: "premium_network_retryable",
         bodyLen: localRecovery.body.length,
         displayPlainLen: networkRecoveryPreview?.displayPlainLen ?? localRecovery.body.length,
       });
@@ -5107,7 +5108,7 @@ async function runPremiumCompletionInner(
         premiumParties,
         recipientCandidates,
         winningPremiumBodyText: localRecovery.body,
-        premiumRenderSource: recoverySource,
+        premiumRenderSource: "premium_network_retryable",
         premiumReview,
         premiumFinalizeAudit,
         premiumReviewRoute,
@@ -5118,7 +5119,7 @@ async function runPremiumCompletionInner(
         proIntentGateMessage: null,
         serverGenerationDegraded: null,
         premiumNetworkRetryable: true,
-        premiumNetworkLocalRecovery: true,
+        premiumNetworkLocalRecovery: false,
         tierADiagnostic: tierADiag,
       };
     }

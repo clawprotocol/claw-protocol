@@ -70,6 +70,7 @@ import {
   resolvePaidProSignerStagingDisplayPlain,
   buildPaidProSignerStagingOverlayCacheKey,
 } from "./paidProSignerStagingDisplayCorpus";
+import { hasAuthoritativeSigningSnapshot } from "./authoritativeSigningSnapshot";
 import {
   resolvePaidProAuthoritativeDisplayPlain,
   shouldUsePaidProSourceOfTruthDisplayOnly,
@@ -1000,6 +1001,24 @@ export function resolvePaidProReviewRenderPlain(
   args?: ResolvePaidProReviewRenderPlainArgs,
 ): string {
   const surface = "paid_pro_review_render_plain";
+  const earlyParties = resolvePartiesForReviewRender(args);
+  const earlyNeedsOverlay = paidProReviewRenderNeedsSignerExecutionOverlay({
+    deferSignerMetadataRepair: args?.deferSignerMetadataRepair,
+    parties: earlyParties,
+    intakeText: args?.intakeText ?? null,
+  });
+  if (
+    hasPaidProSourceOfTruth() &&
+    !isPaidProPostFinalizeHydratedCorpusLocked() &&
+    !hasAuthoritativeSigningSnapshot() &&
+    !earlyNeedsOverlay
+  ) {
+    const sotExact = getPaidProSourceOfTruthText().trim();
+    if (sotExact.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
+      auditPaidProReviewRenderCorpus(sotExact);
+      return sotExact;
+    }
+  }
   const finishUserVisiblePlain = (plain: string): string => {
     let body = (plain || "").trim();
     if (body.length < PAID_PRO_AUTHORITY_MIN_LEN) return body;

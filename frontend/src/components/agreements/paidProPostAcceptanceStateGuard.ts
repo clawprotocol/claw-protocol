@@ -113,6 +113,10 @@ export function resolveProDeliveryTrackCanonicalCorpus(): ProDeliveryTrackCanoni
     };
   }
   const snap = readPremiumCompletionSnapshot();
+  const snapBody = String(
+    snap?.premiumWinningBodyText || snap?.premiumReadonlyPlainText || "",
+  ).trim();
+  const snapSource = String(snap?.premiumPipelineRenderSource || "").trim();
   const recovery = resolvePaidProPostCheckoutRecoveryDisplayPlain({
     draft: snap?.premiumDraft ?? null,
     intakeText: null,
@@ -121,7 +125,12 @@ export function resolveProDeliveryTrackCanonicalCorpus(): ProDeliveryTrackCanoni
     premiumDegradedServerLocalRecovery:
       snap?.premiumPipelineRenderSource === "premium_degraded_server_local_recovery",
   });
-  if (recovery.length > 0) {
+  const recoveryDisplay =
+    recovery ||
+    (isPaidProPostCheckoutRecoveryPipelineSource(snapSource) && snapBody.length >= PAID_PRO_AUTHORITY_MIN_LEN
+      ? snapBody
+      : "");
+  if (recoveryDisplay.length > 0) {
     const frozen = getFrozenCanonicalAgreementCorpus();
     if (frozen?.hash && frozen.frozen) {
       return {
@@ -132,7 +141,7 @@ export function resolveProDeliveryTrackCanonicalCorpus(): ProDeliveryTrackCanoni
     }
     return {
       hasCanonicalCorpus: true,
-      hash: fingerprintAgreementBody(recovery),
+      hash: fingerprintAgreementBody(recoveryDisplay),
       source: "post_checkout_recovery_display",
     };
   }

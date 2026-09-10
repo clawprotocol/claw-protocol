@@ -116,7 +116,20 @@ export function paidProReviewRenderNeedsSignerExecutionOverlay(args: {
   intakeText?: string | null;
 }): boolean {
   if (args.deferSignerMetadataRepair) return true;
-  return shouldApplyExecutionBlockSignerOverlay({
+  if (isPaidProReviewSignerMetadataSessionActive()) {
+    return shouldApplyExecutionBlockSignerOverlay({
+      parties: args.parties,
+      intakeText: args.intakeText,
+    });
+  }
+  if (shouldHydratePaidProReviewSurfacesFromConsumedAuthority(args.parties)) return true;
+  if (consumedAuthoritySignerMetadataComplete(args.parties)) {
+    return shouldApplyExecutionBlockSignerOverlay({
+      parties: args.parties,
+      intakeText: args.intakeText,
+    });
+  }
+  return shouldApplyLabeledPartyPartialExecutionHydration({
     parties: args.parties,
     intakeText: args.intakeText,
   });

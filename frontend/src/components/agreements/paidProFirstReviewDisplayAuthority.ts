@@ -123,6 +123,8 @@ function withIntakeAuthorityVisiblePlainSanitizer(
 ): PaidProFirstReviewVisibleDisplayResolution {
   const plain = trim(resolution.plain);
   if (plain.length < 80 || !trim(args.intakeText)) return resolution;
+  if (resolution.source === "paid_session_intake_rebuild") return resolution;
+  if (!hasPaidProSourceOfTruth() && hasPaidPremiumCompletionSession()) return resolution;
   const draft =
     args.draft && trim(args.intakeText)
       ? repairCheckoutBackRestoreDraftParties(args.draft, trim(args.intakeText))
@@ -243,7 +245,7 @@ function resolveAcceptedCanonicalPaintPlain(
   if (meetsFirstReviewPaintFloor(fromSoT.length, true)) {
     return { plain: fromSoT, source: PAID_PRO_ACCEPTED_CANONICAL_SOT_DISPLAY_SOURCE };
   }
-  if (fromParent.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
+  if (fromParent.length >= PAID_PRO_AUTHORITY_MIN_LEN && hasPaidProSourceOfTruth()) {
     return { plain: fromParent, source: PAID_PRO_ACCEPTED_CANONICAL_SOT_DISPLAY_SOURCE };
   }
   // Accepted authoritative document store (pre-SoT establish) must still paint review.

@@ -288,6 +288,22 @@ export function tryCommitPostCheckoutRecoveryToPaidProSourceOfTruth(args: {
     premiumRenderSource: args.premiumRenderSource,
     reviewSessionId: args.reviewSessionId,
   });
+  if (isAuthoritativeRecoveryPipelineSource(args.premiumRenderSource)) {
+    const display = preview.displayPlain || String(args.body || "").trim();
+    if (display.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
+      freezePaidProPostCheckoutRecoveryCanonicalSnapshot({
+        text: display,
+        draft: args.draft,
+        intakeText: args.intakeText,
+        reviewSessionId: args.reviewSessionId ?? null,
+      });
+    }
+    return {
+      committed: false,
+      reason: "recovery_cannot_seed_source_of_truth",
+      reviewCorpusLen: display.length,
+    };
+  }
   if (!preview.eligible) {
     return {
       committed: false,

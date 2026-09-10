@@ -27,7 +27,7 @@ import {
   shouldBlockPaidProLocalCorpusFallback,
 } from "./premiumGenerationApiAvailability";
 import { readCanonicalAgreementCorpusForSurface } from "./canonicalAgreementSnapshot";
-import { getPaidProSourceOfTruth, getPaidProDocumentForSurface, hasPaidProSourceOfTruth } from "./paidProSourceOfTruth";
+import { getPaidProSourceOfTruth, hasPaidProSourceOfTruth } from "./paidProSourceOfTruth";
 import { hasAuthoritativeSigningSnapshot } from "./authoritativeSigningSnapshot";
 import { resolvePaidProPostFinalizeReviewPlain } from "./paidProPostFinalizeReviewSurface";
 import { PAID_PRO_AUTHORITY_MIN_LEN } from "./paidProAgreementAuthority";
@@ -335,13 +335,7 @@ export function pickPremiumPaidReadonlyPlainText(args: {
   }
   const paidProRecord = getPaidProSourceOfTruth();
   if (paidProRecord) {
-    const reviewDoc = getPaidProDocumentForSurface("review", {
-      draft: args.draft,
-      intakeText: args.intakeText,
-    });
-    const display = (
-      reviewDoc?.signerMetadataApplied ? reviewDoc.text : paidProRecord.text
-    ).trim();
+    const display = paidProRecord.text.trim();
     const nonThin =
       display.length >= 1200 || premiumReadonlyCorpusSignalHits(display) >= 3;
     return {
@@ -356,9 +350,7 @@ export function pickPremiumPaidReadonlyPlainText(args: {
             len: display.length,
             nonThin,
             eligible: true,
-            reason: reviewDoc?.signerMetadataApplied
-              ? "paid_pro_review_hydrated"
-              : "paidProSourceOfTruth",
+            reason: "paidProSourceOfTruth",
           },
         ],
       },

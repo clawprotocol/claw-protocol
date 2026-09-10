@@ -195,6 +195,17 @@ function cleanPartyName(name: string): string {
  */
 function extractNamedPartiesFromIntake(intake: string): string[] {
   const names: string[] = [];
+
+  // "Marcus Thompson from Apex Consulting Group is engaging Elena Rodriguez of Brightwave..."
+  const engagingFromMatch = intake.match(
+    /\b([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)*)\s+(?:from|of)\s+([A-Z][A-Za-z][A-Za-z\s&.-]+?)\s+is\s+(?:engaging|retaining|hiring)\s+([A-Z][a-zA-Z]+(?:\s+[A-Z][a-zA-Z]+)*)\s+(?:of|from)\s+([A-Z][A-Za-z][A-Za-z\s&.-]+?)(?:\.|,|$)/i,
+  );
+  if (engagingFromMatch) {
+    const p1 = cleanPartyName(`${cleanPartyName(engagingFromMatch[1])} of ${cleanPartyName(engagingFromMatch[2])}`);
+    const p2 = cleanPartyName(`${cleanPartyName(engagingFromMatch[3])} of ${cleanPartyName(engagingFromMatch[4])}`);
+    if (p1 && !isHollowPartyName(p1)) names.push(p1);
+    if (p2 && !isHollowPartyName(p2)) names.push(p2);
+  }
   
   // Pattern: "Name of Company is hiring Name from Company"
   // Capture: "Priya Shah of Northline Studio" + "Diego Alvarez" (stop at "from")
@@ -679,6 +690,12 @@ function resolveRebuildBilateralPartyNames(
   draft: ParsedDraftShape | null,
 ): [string | null, string | null] {
   const intake = intakeText.trim();
+  // Recovery identity prefers human+entity units from the visitor dump so
+  // "Marcus Thompson from Apex…" remains visible. Entity-only authority is fallback.
+  const namedParties = extractNamedPartiesFromIntake(intake).filter(
+    (n) => n.length >= 2 && !isHollowPartyName(n),
+  );
+  if (namedParties.length >= 2) return [namedParties[0]!, namedParties[1]!];
   const repairedDraft =
     draft && intake ? repairCheckoutBackRestoreDraftParties(draft, intake) : draft;
   const fromRepair = (repairedDraft?.parties ?? [])
@@ -689,7 +706,6 @@ function resolveRebuildBilateralPartyNames(
     (n) => n.length >= 2 && !isHollowPartyName(n),
   );
   if (fromAuthority.length >= 2) return [fromAuthority[0]!, fromAuthority[1]!];
-  const namedParties = extractNamedPartiesFromIntake(intake);
   return [namedParties[0] ?? null, namedParties[1] ?? null];
 }
 

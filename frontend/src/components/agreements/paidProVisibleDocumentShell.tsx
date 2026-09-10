@@ -65,7 +65,11 @@ export function resolveCanonicalPlainForVisibleShell(
 ): { plain: string; source: string } {
   const resolution = resolvePaidProFirstReviewVisibleDisplayPlain(args);
   logTest310DisplaySource(resolution);
-  const skipTitleProjection = isPaidProPostFinalizeHydratedCorpusLocked();
+  const paidSessionActive = hasPaidPremiumCompletionSession();
+  const skipTitleProjection =
+    isPaidProPostFinalizeHydratedCorpusLocked() ||
+    resolution.source === "paid_session_intake_rebuild" ||
+    (!hasPaidProSourceOfTruth() && paidSessionActive);
   const projectedPlain =
     resolution.plain.length >= PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN && !skipTitleProjection
       ? projectPaidProVisibleTitleDisplayPlain(resolution.plain, {
@@ -78,6 +82,15 @@ export function resolveCanonicalPlainForVisibleShell(
   // Group LLC / said", "12. Don't / count", "13. 12 month deal") and meta lines like
   // "Commercial detail carried forward from user notes". Live leak from Harbor retest.
   const strippedPlain = stripPremiumInstructionNoiseForDocument(projectedPlain);
+  const mayPaintPaidPaper =
+    paidSessionActive ||
+    resolution.source === "verified_server_canonical_review_snapshot" ||
+    resolution.source === "paid_pro_accepted_canonical_source_of_truth" ||
+    resolution.source === "authoritative_signing_snapshot" ||
+    resolution.source === "review_session_authority";
+  if (!mayPaintPaidPaper) {
+    return { plain: "", source: resolution.source || "none" };
+  }
   if (strippedPlain.length >= PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN) {
     if (strippedPlain.length >= 80) {
       logTest310BlockClassification(strippedPlain);
