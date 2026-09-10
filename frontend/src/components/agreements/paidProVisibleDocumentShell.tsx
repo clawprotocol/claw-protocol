@@ -42,6 +42,7 @@ import {
   hashPaidProCorpus,
 } from "./paidProSourceOfTruth";
 import { stripPremiumInstructionNoiseForDocument } from "./premiumInstructionStrip";
+import { VERIFIED_PAID_REVIEW_PAPER_SOURCE } from "./paidProVerifiedReviewPaper";
 
 export const PAID_PRO_VISIBLE_SHELL_COMPONENT_NAME = "PaidProVisibleDocumentShell";
 /** SoT length threshold for synchronous canonical plain forced render (Test292). */
@@ -96,6 +97,9 @@ export function resolveCanonicalPlainForVisibleShell(
   const resolution = resolvePaidProFirstReviewVisibleDisplayPlain(args);
   logTest310DisplaySource(resolution);
   const paidSessionActive = hasPaidPremiumCompletionSession();
+  if (resolution.source === VERIFIED_PAID_REVIEW_PAPER_SOURCE && resolution.plain.trim()) {
+    return { plain: resolution.plain, source: resolution.source };
+  }
   const skipTitleProjection =
     isPaidProPostFinalizeHydratedCorpusLocked() ||
     resolution.source === "paid_session_intake_rebuild" ||

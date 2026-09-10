@@ -591,6 +591,7 @@ export function SimpleCreatePage() {
   const simplifyFirstSession = firstSessionLive;
 
   const [paidProReviewReadyShell, setPaidProReviewReadyShell] = useState(false);
+  const [paidProReviewContentReadyShell, setPaidProReviewContentReadyShell] = useState(false);
   const [freeStarterReviewShellActive, setFreeStarterReviewShellActive] = useState(false);
   const [shellLifecycleStage, setShellLifecycleStage] = useState<
     import("../../agreement/agreementLifecycleRail").AgreementLifecycleStageId
@@ -604,11 +605,13 @@ export function SimpleCreatePage() {
   const onSimpleCreateShellChrome = useCallback(
     (state: {
       paidProReviewReady: boolean;
+      paidProReviewContentReady?: boolean;
       freeStarterReviewShellActive: boolean;
       lifecycleStage: import("../../agreement/agreementLifecycleRail").AgreementLifecycleStageId;
       dashboardSignerSetupResumeActive?: boolean;
     }) => {
       setPaidProReviewReadyShell(state.paidProReviewReady);
+      setPaidProReviewContentReadyShell(Boolean(state.paidProReviewContentReady));
       setFreeStarterReviewShellActive(state.freeStarterReviewShellActive);
       setShellLifecycleStage(state.lifecycleStage);
       setDashboardSignerSetupResumeShell(Boolean(state.dashboardSignerSetupResumeActive));
@@ -629,9 +632,10 @@ export function SimpleCreatePage() {
       ? undefined
       : lifecycleStepForStage("draft");
   const shellProgressLabels = AGREEMENT_LIFECYCLE_PROGRESS_LABELS;
+  const paidProCompletedReviewShell = paidProReviewReadyShell && paidProReviewContentReadyShell;
   const shellTitle = dashboardSignerSetupResumeShell
     ? SIMPLE_CREATE_SIGNER_SETUP_RESUME_TITLE
-    : paidProReviewReadyShell
+    : paidProCompletedReviewShell
       ? SIMPLE_CREATE_PAID_PRO_REVIEW_TITLE
       : quickSendTypedArrival
         ? "Shape your draft"
@@ -640,7 +644,7 @@ export function SimpleCreatePage() {
           : "Describe your deal";
   const shellSubtitle = dashboardSignerSetupResumeShell
     ? SIMPLE_CREATE_SIGNER_SETUP_RESUME_SUBTITLE
-    : paidProReviewReadyShell
+    : paidProCompletedReviewShell
       ? SIMPLE_CREATE_PAID_PRO_REVIEW_SUBTITLE
       : quickSendTypedArrival
         ? "We turned your input into a structured draft for the same send/sign/proof workflow."

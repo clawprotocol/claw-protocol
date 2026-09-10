@@ -759,6 +759,7 @@ import {
   readDisplayReviewSnapshotAuthority,
   readVerifiedCommercialDisplayCorpus,
 } from "../../agreement/canonicalReviewSnapshotApi";
+import { selectVerifiedPaidReviewPaper } from "./paidProVerifiedReviewPaper";
 import {
   hasFrozenPaidProAuthoritativeSnapshot,
   isPaidProSoTEstablishmentFailure,
@@ -1902,6 +1903,8 @@ type Props = {
    */
   onSimpleCreateShellChrome?: (state: {
     paidProReviewReady: boolean;
+    /** Completed-review title/actions — false while verified paper is not paint-ready. */
+    paidProReviewContentReady?: boolean;
     freeStarterReviewShellActive: boolean;
     lifecycleStage: import("../../agreement/agreementLifecycleRail").AgreementLifecycleStageId;
     /** Dashboard Complete signer details resume — dedicated shell title/CTA, not review/recovery. */
@@ -19614,6 +19617,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     });
     onSimpleCreateShellChrome({
       paidProReviewReady: paidProReviewReady || dashboardSignerSetupResumeActive,
+      paidProReviewContentReady:
+        dashboardSignerSetupResumeActive ||
+        paidProReviewContentReady ||
+        Boolean(
+          selectVerifiedPaidReviewPaper({
+            agreementId: (reviewAgreementId || reviewAgreementIdRef.current || "").trim(),
+          }),
+        ),
       freeStarterReviewShellActive: dashboardSignerSetupResumeActive
         ? false
         : freeStarterReviewShellActive,
@@ -19632,12 +19643,15 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     return () =>
       onSimpleCreateShellChrome({
         paidProReviewReady: false,
+        paidProReviewContentReady: false,
         freeStarterReviewShellActive: false,
         lifecycleStage: "draft",
         dashboardSignerSetupResumeActive: false,
       });
   }, [
     paidProReviewReady,
+    paidProReviewContentReady,
+    reviewAgreementId,
     freeStarterReviewShellActive,
     simpleCreateShellLifecycleStage,
     onSimpleCreateShellChrome,
@@ -20698,7 +20712,22 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       let resolvedAcceptedPlain = "";
       if (hasPaidProSourceOfTruth()) {
         resolvedAcceptedPlain = getPaidProSourceOfTruthText().trim();
-      } else if (
+      } else {
+        const verifiedPaper = selectVerifiedPaidReviewPaper({
+          agreementId: (
+            reviewAgreementId ||
+            reviewAgreementIdRef.current ||
+            readCreateReviewAgreementResumeId() ||
+            readDisplayReviewSnapshotAuthority()?.agreementId ||
+            ""
+          ).trim(),
+        });
+        if (verifiedPaper) {
+          resolvedAcceptedPlain = verifiedPaper.plain;
+        }
+      }
+      if (
+        !resolvedAcceptedPlain &&
         hasPaidPremiumCompletionSession() &&
         resolvedIntakeText.length >= 20
       ) {
@@ -36712,6 +36741,23 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                             )}
                                           </div>
                                         ) : paidProForcedFirstReviewActive || paidProReviewRecipientSetupActive ? (
+                                          <>
+                                          {(
+                                            currentPremiumMergedIntakeKey ||
+                                            intakeCombined ||
+                                            ""
+                                          ).trim().length >= 20 ? (
+                                            <p
+                                              className="mb-3 text-xs leading-relaxed text-stone-500"
+                                              data-testid="paid-pro-review-originating-request"
+                                            >
+                                              {(
+                                                currentPremiumMergedIntakeKey ||
+                                                intakeCombined ||
+                                                ""
+                                              ).trim()}
+                                            </p>
+                                          ) : null}
                                           <PaidProDocumentBodyForcedRoute
                                             embedded
                                             router={paidProDocumentBodyRouter}
@@ -36731,6 +36777,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
                                                   }).source
                                             }
                                           />
+                                          </>
                                         ) : null}
                                         {showPaidProForcedFirstReviewTrackChooser &&
                                         !premiumReviewDocEditorOpen &&

@@ -59,17 +59,18 @@ export function RequireAuthenticatedDashboard({
       (user?.user_metadata as { full_name?: string } | undefined)?.full_name ?? null,
   });
 
+  // Only a validated session / e2e seed counts — never org headers alone.
+  // Known identity must win over the loading splash so reload cannot blank a ready review.
+  if (current.isAuthenticated) {
+    return <>{children}</>;
+  }
+
   if (loading && enabled) {
     return (
       <div className="mx-auto max-w-lg px-4 py-16 text-center text-sm text-stone-600" data-testid="auth-dashboard-loading">
         Checking your session…
       </div>
     );
-  }
-
-  // Only a validated session / e2e seed counts — never org headers alone.
-  if (current.isAuthenticated) {
-    return <>{children}</>;
   }
 
   return (

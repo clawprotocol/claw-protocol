@@ -6,7 +6,11 @@ import { computeReviewApprovalStatus } from "../../components/agreements/draftRe
 import { displayCreatorAgreementTitle } from "../creatorDashboardPresentation";
 import { CREATOR_MANAGE_RECIPIENTS_LABEL } from "../creatorDashboardCopy";
 import { useLaunchNav } from "../LaunchNavContext";
-import { loadOwnerAgreementReadOnlyPreview } from "../ownerAgreementReadOnlyView";
+import {
+  bootOwnerAgreementReadOnlyPreviewFromVerifiedPaper,
+  loadOwnerAgreementReadOnlyPreview,
+} from "../ownerAgreementReadOnlyView";
+import { selectVerifiedPaidReviewPaper } from "../../components/agreements/paidProVerifiedReviewPaper";
 import { AppShell } from "../AppShell";
 
 type Props = {
@@ -22,11 +26,15 @@ function recipientsPanelInitiallyOpen(search: string): boolean {
 export function OwnerAgreementReadOnlyPage(props: Props) {
   const { agreementId } = props;
   const { navigate, search } = useLaunchNav();
-  const [loading, setLoading] = useState(true);
+  const verifiedBoot = useMemo(
+    () => bootOwnerAgreementReadOnlyPreviewFromVerifiedPaper(agreementId),
+    [agreementId],
+  );
+  const [loading, setLoading] = useState(!verifiedBoot);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [title, setTitle] = useState("Agreement");
-  const [previewHtml, setPreviewHtml] = useState("");
-  const [usesPremiumDocument, setUsesPremiumDocument] = useState(false);
+  const [previewHtml, setPreviewHtml] = useState(verifiedBoot?.html ?? "");
+  const [usesPremiumDocument, setUsesPremiumDocument] = useState(Boolean(verifiedBoot?.usesPremiumDocument));
   const [progressLine, setProgressLine] = useState<string | null>(null);
   const [draft, setDraft] = useState<AgreementDraft | null>(null);
   const [manageRecipientsOpen, setManageRecipientsOpen] = useState(() =>
@@ -40,7 +48,9 @@ export function OwnerAgreementReadOnlyPage(props: Props) {
   }, [draft]);
 
   const load = useCallback(async () => {
-    setLoading(true);
+    if (!selectVerifiedPaidReviewPaper({ agreementId })) {
+      setLoading(true);
+    }
     setLoadError(null);
     const loaded = await loadOwnerAgreementReadOnlyPreview(agreementId);
     if (!loaded) {

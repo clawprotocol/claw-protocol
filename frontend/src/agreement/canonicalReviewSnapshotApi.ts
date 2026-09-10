@@ -11,6 +11,7 @@
  */
 
 import { apiUrl } from "../lib/clawApi";
+import { getOrgId } from "../launch/orgContext";
 import { sha256Hex } from "../utils/agreements/hash";
 import { clawAgreementHeaders } from "./agreementOrgHeaders";
 
@@ -54,6 +55,7 @@ export type StoredAcceptedReviewSnapshotRef = {
   snapshotId: string;
   corpusSha256: string;
   corpusLength: number;
+  orgId?: string;
 };
 
 export type StoredDisplayReviewSnapshotAuthority = {
@@ -62,15 +64,64 @@ export type StoredDisplayReviewSnapshotAuthority = {
   corpusSha256: string;
   corpusLength: number;
   status: string;
+  orgId?: string;
 };
 
 export type StoredVerifiedDisplayReviewCorpus = StoredDisplayReviewSnapshotAuthority & {
   corpusPlain: string;
 };
 
+function stampOrgId(explicit?: string | null): string {
+  return (explicit || "").trim() || getOrgId().trim();
+}
+
+function storedOrgMatches(storedOrg: string | null | undefined, expectedOrg?: string | null): boolean {
+  const stored = (storedOrg || "").trim();
+  if (!stored) return true;
+  const expected = (expectedOrg || getOrgId()).trim();
+  return !expected || stored === expected;
+}
+
+/**
+ * Accept production `{ snapshot: {...} }` and a flat snapshot body (snapshot_id at root).
+ * Envelope shape must not drop an otherwise valid persist/GET authority.
+ */
+export function coerceCanonicalReviewSnapshot(payload: unknown): CanonicalReviewSnapshot | null {
+  if (!payload || typeof payload !== "object") return null;
+  const root = payload as Record<string, unknown>;
+  const nested =
+    root.snapshot && typeof root.snapshot === "object"
+      ? (root.snapshot as Record<string, unknown>)
+      : null;
+  const src =
+    nested && String(nested.snapshot_id || "").trim()
+      ? nested
+      : String(root.snapshot_id || "").trim()
+        ? root
+        : null;
+  if (!src) return null;
+  const snapshot_id = String(src.snapshot_id || "").trim();
+  if (!snapshot_id) return null;
+  return {
+    snapshot_id,
+    agreement_id: String(src.agreement_id || "").trim(),
+    corpus_plain: String(src.corpus_plain ?? ""),
+    corpus_sha256: String(src.corpus_sha256 || "").trim().toLowerCase(),
+    corpus_length: Number(src.corpus_length || 0),
+    generation_session_id: (src.generation_session_id as string | null | undefined) ?? null,
+    created_at: (src.created_at as string | null | undefined) ?? null,
+    accepted_at: (src.accepted_at as string | null | undefined) ?? null,
+    schema_version: (src.schema_version as string | null | undefined) ?? null,
+    status: String(src.status || root.status || "pending"),
+  };
+}
+
 export function storeAcceptedReviewSnapshotRef(ref: StoredAcceptedReviewSnapshotRef): void {
   try {
-    sessionStorage.setItem(ACCEPTED_SESSION_KEY, JSON.stringify(ref));
+    sessionStorage.setItem(
+      ACCEPTED_SESSION_KEY,
+      JSON.stringify({ ...ref, orgId: stampOrgId(ref.orgId) }),
+    );
   } catch {
     /* ignore */
   }
@@ -85,6 +136,7 @@ export function readAcceptedReviewSnapshotRef(
     const parsed = JSON.parse(raw) as StoredAcceptedReviewSnapshotRef;
     if (!parsed?.snapshotId || !parsed?.corpusSha256) return null;
     if (agreementId && parsed.agreementId && parsed.agreementId !== agreementId.trim()) return null;
+    if (!storedOrgMatches(parsed.orgId)) return null;
     return parsed;
   } catch {
     return null;
@@ -103,7 +155,10 @@ export function storeDisplayReviewSnapshotAuthority(
   ref: StoredDisplayReviewSnapshotAuthority,
 ): void {
   try {
-    sessionStorage.setItem(DISPLAY_SESSION_KEY, JSON.stringify(ref));
+    sessionStorage.setItem(
+      DISPLAY_SESSION_KEY,
+      JSON.stringify({ ...ref, orgId: stampOrgId(ref.orgId) }),
+    );
   } catch {
     /* ignore */
   }
@@ -118,6 +173,7 @@ export function readDisplayReviewSnapshotAuthority(
     const parsed = JSON.parse(raw) as StoredDisplayReviewSnapshotAuthority;
     if (!parsed?.snapshotId || !parsed?.corpusSha256) return null;
     if (agreementId && parsed.agreementId && parsed.agreementId !== agreementId.trim()) return null;
+    if (!storedOrgMatches(parsed.orgId)) return null;
     return parsed;
   } catch {
     return null;
@@ -150,12 +206,14 @@ export function storeVerifiedCommercialDisplayCorpus(
   ) {
     return;
   }
+  const orgId = stampOrgId(ref.orgId);
   storeDisplayReviewSnapshotAuthority({
     agreementId: ref.agreementId.trim(),
     snapshotId: ref.snapshotId.trim(),
     corpusSha256: ref.corpusSha256.toLowerCase(),
     corpusLength: Number(ref.corpusLength),
     status: ref.status,
+    orgId,
   });
   try {
     sessionStorage.setItem(
@@ -166,6 +224,7 @@ export function storeVerifiedCommercialDisplayCorpus(
         corpusSha256: ref.corpusSha256.toLowerCase(),
         corpusLength: Number(ref.corpusLength),
         status: ref.status,
+        orgId,
         corpusPlain: corpus,
       } satisfies StoredVerifiedDisplayReviewCorpus),
     );
@@ -190,6 +249,9 @@ export function readVerifiedCommercialDisplayCorpus(
     const corpus = (parsed?.corpusPlain || "").trim();
     if (!corpus || !parsed?.snapshotId) return null;
     if (agreementId && parsed.agreementId && parsed.agreementId !== agreementId.trim()) {
+      return null;
+    }
+    if (!storedOrgMatches(parsed.orgId) || !storedOrgMatches(display.orgId)) {
       return null;
     }
     if (
@@ -295,12 +357,14 @@ export async function persistCanonicalReviewSnapshot(args: {
       const j = (await res.json().catch(() => ({}))) as { detail?: { code?: string } | string };
       return { ok: false, code: _errorCodeFromResponse(j, res.status) };
     }
-    const j = (await res.json()) as {
-      snapshot?: CanonicalReviewSnapshot;
-      registry_version?: number | null;
-    };
-    if (!j.snapshot?.snapshot_id) return { ok: false, code: "snapshot_missing" };
-    return { ok: true, snapshot: j.snapshot, registryVersion: j.registry_version ?? null };
+    const j = await res.json();
+    const snapshot = coerceCanonicalReviewSnapshot(j);
+    if (!snapshot?.snapshot_id) return { ok: false, code: "snapshot_missing" };
+    const registryVersion =
+      j && typeof j === "object" && "registry_version" in j
+        ? ((j as { registry_version?: number | null }).registry_version ?? null)
+        : null;
+    return { ok: true, snapshot, registryVersion };
   } catch {
     return { ok: false, code: "network_error" };
   }
@@ -323,17 +387,15 @@ export async function fetchCanonicalReviewSnapshot(args: {
       const j = (await res.json().catch(() => ({}))) as { detail?: { code?: string } | string };
       return { ok: false, code: _errorCodeFromResponse(j, res.status) };
     }
-    const j = (await res.json()) as {
-      status?: string;
-      snapshot?: CanonicalReviewSnapshot;
-      registry_version?: number | null;
-    };
-    if (!j.snapshot?.snapshot_id) return { ok: false, code: "snapshot_missing" };
+    const j = await res.json();
+    const snapshot = coerceCanonicalReviewSnapshot(j);
+    if (!snapshot?.snapshot_id) return { ok: false, code: "snapshot_missing" };
+    const root = j && typeof j === "object" ? (j as { status?: string; registry_version?: number | null }) : {};
     return {
       ok: true,
-      status: j.status || j.snapshot.status || "pending",
-      snapshot: j.snapshot,
-      registryVersion: j.registry_version ?? null,
+      status: root.status || snapshot.status || "pending",
+      snapshot,
+      registryVersion: root.registry_version ?? null,
     };
   } catch {
     return { ok: false, code: "network_error" };

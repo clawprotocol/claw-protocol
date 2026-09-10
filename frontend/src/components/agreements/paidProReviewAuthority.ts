@@ -30,6 +30,7 @@ import {
   resolvePaidProReviewState,
   type PaidProReviewState,
 } from "./paidProReviewStateMachine";
+import { selectVerifiedPaidReviewPaper } from "./paidProVerifiedReviewPaper";
 
 export const PAID_PRO_REVIEW_RECOVERING_TITLE = "Review your agreement draft";
 export const PAID_PRO_REVIEW_RECOVERING_SUBTITLE =
@@ -83,6 +84,10 @@ export function resolveValidatedPaidProReviewCorpus(): PaidProValidatedCorpus {
     })
   ) {
     return { plain: latchedBody, source: "latched_accepted", len: latchedBody.length };
+  }
+  const verified = selectVerifiedPaidReviewPaper();
+  if (verified && verified.plain.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
+    return { plain: verified.plain, source: verified.source, len: verified.plain.length };
   }
   return { plain: "", source: null, len: 0 };
 }

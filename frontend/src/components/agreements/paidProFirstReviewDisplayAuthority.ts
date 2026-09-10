@@ -79,6 +79,7 @@ import { getAuthoritativeAgreementDocument } from "./authoritativeAgreementDocum
 import { detectPaidProCorpusIntakeContamination } from "./paidProIntakeCorpusFidelity";
 import { sanitizePaidProReviewPlainForIntakeAuthority } from "./paidProReviewRenderCorpus";
 import { repairCheckoutBackRestoreDraftParties } from "./checkoutBackRestore";
+import { selectVerifiedPaidReviewPaper } from "./paidProVerifiedReviewPaper";
 
 export const PAID_PRO_ACCEPTED_CANONICAL_SOT_DISPLAY_SOURCE =
   "paid_pro_accepted_canonical_source_of_truth";
@@ -247,6 +248,12 @@ function resolveAcceptedCanonicalPaintPlain(
   }
   if (fromParent.length >= PAID_PRO_AUTHORITY_MIN_LEN && hasPaidProSourceOfTruth()) {
     return { plain: fromParent, source: PAID_PRO_ACCEPTED_CANONICAL_SOT_DISPLAY_SOURCE };
+  }
+  if (fromParent.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
+    const verifiedPaper = selectVerifiedPaidReviewPaper({ agreementId: args.agreementId });
+    if (verifiedPaper && verifiedPaper.plain === fromParent) {
+      return { plain: verifiedPaper.plain, source: verifiedPaper.source };
+    }
   }
   // Accepted authoritative document store (pre-SoT establish) must still paint review.
   const fromAuthoritativeDoc = trim(getAuthoritativeAgreementDocument()?.fullCorpusText);

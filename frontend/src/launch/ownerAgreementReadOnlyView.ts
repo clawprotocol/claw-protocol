@@ -2,6 +2,8 @@ import type { AgreementDraft } from "../agreement/agreementTypes";
 import { buildReviewFirstDocumentDisplayHtml } from "../agreement/reviewFirstDocumentDisplay";
 import { fetchAgreementDraft } from "../agreement/agreementWorkspaceApi";
 import { clawAgreementHeaders } from "../agreement/agreementOrgHeaders";
+import { hydrateCommercialReviewFromServerSnapshot } from "../agreement/canonicalReviewSnapshotApi";
+import { selectVerifiedPaidReviewPaper } from "../components/agreements/paidProVerifiedReviewPaper";
 import { getLawDogApiBase } from "../lib/clawApi";
 import {
   resolveReviewFirstDisplayCorpus,
@@ -81,6 +83,40 @@ async function fetchAgreementRenderHtml(agreementId: string): Promise<string> {
   }
 }
 
+/** Sync first paint from already-verified paper so reload cannot blank the article. */
+export function bootOwnerAgreementReadOnlyPreviewFromVerifiedPaper(agreementId: string): {
+  html: string;
+  corpusText: string;
+  usesPremiumDocument: boolean;
+} | null {
+  const id = String(agreementId || "").trim();
+  const verified = selectVerifiedPaidReviewPaper({ agreementId: id });
+  if (!verified) return null;
+  const stub: AgreementDraft = {
+    id,
+    title: "Agreement",
+    jurisdiction: "",
+    parties: [],
+    purpose: "",
+    payment_terms: "",
+    duration: null,
+    due_date: null,
+    effective_date: null,
+    created_at: "",
+    updated_at: "",
+    versions: [],
+    audit_log: [],
+  };
+  return buildOwnerAgreementReadOnlyDisplayHtml({
+    draft: stub,
+    corpus: {
+      text: verified.plain,
+      source: "verified_server_canonical_review_snapshot",
+      hash: verified.corpusSha256,
+    },
+  });
+}
+
 export async function loadOwnerAgreementReadOnlyPreview(
   agreementId: string,
 ): Promise<{
@@ -94,7 +130,16 @@ export async function loadOwnerAgreementReadOnlyPreview(
   const res = await fetchAgreementDraft(id);
   if (!res.ok || !res.draft) return null;
   const draft = res.draft as AgreementDraft;
-  const corpus = freezeOwnerReadOnlyCorpus(resolveReviewFirstDisplayCorpus(draft, "owner_done"));
+  let corpus = freezeOwnerReadOnlyCorpus(resolveReviewFirstDisplayCorpus(draft, "owner_done"));
+  // Snapshot GET is read-only recovery when the draft itself cannot paint.
+  // Do not fetch when accepted/server corpus is already on the draft.
+  if (
+    !selectVerifiedPaidReviewPaper({ agreementId: id }) &&
+    (!corpus || corpus.text.trim().length < MIN_CORPUS_FOR_PREMIUM_HTML)
+  ) {
+    await hydrateCommercialReviewFromServerSnapshot({ agreementId: id });
+    corpus = freezeOwnerReadOnlyCorpus(resolveReviewFirstDisplayCorpus(draft, "owner_done"));
+  }
   const serverHtml =
     !corpus || corpus.text.trim().length < MIN_CORPUS_FOR_PREMIUM_HTML
       ? await fetchAgreementRenderHtml(id)

@@ -31,6 +31,7 @@ import { hasPaidDashboardCreateContextActive, isAppCreatePath, shouldFailClosedB
 import { isHomeAnonymousStarterAuthorityActive } from "../../launch/homeAnonymousCreateOrigin";
 import { mustBlockPaidEntitlementForLegacyFallbackOrg } from "../../launch/fallbackOrgPaidEntitlementGuard";
 import { computeDashboardPaidCreateReviewShellReady, isDashboardPaidCreateRouteActive } from "./dashboardPaidCreateRoute";
+import { selectVerifiedPaidReviewPaper } from "./paidProVerifiedReviewPaper";
 
 export type AuthoritativeCreateFlowReviewShell = "paid_pro" | "free_starter";
 
@@ -369,7 +370,9 @@ export function computeCreateFlowPaidProReviewContentReady(
   if (hasPaidProSourceOfTruth()) {
     if (getPaidProSourceOfTruthText().trim().length >= PAID_PRO_AUTHORITY_MIN_LEN) return true;
   }
-  return readAcceptedPipelineReviewCorpusPlain().length >= PAID_PRO_AUTHORITY_MIN_LEN;
+  if (readAcceptedPipelineReviewCorpusPlain().length >= PAID_PRO_AUTHORITY_MIN_LEN) return true;
+  const verified = selectVerifiedPaidReviewPaper();
+  return Boolean(verified && verified.plain.length >= PAID_PRO_AUTHORITY_MIN_LEN);
 }
 
 /** Review plain text for paid create-flow shell when SoT is not yet frozen. */
