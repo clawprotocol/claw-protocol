@@ -17,4 +17,19 @@ describe("Agreement recipient review path parsing", () => {
   it("builds canonical recipient magic link path", () => {
     expect(agreementMagicLinkPath("ag_1", "tok_123")).toBe("/agreements/ag_1/review?t=tok_123");
   });
+
+  it("keeps recipient role and participant-party scope on both runtime-supported entries", () => {
+    expect(parseAgreementReviewPath("/agreements/ag_1/review", "?t=tok&role=reviewer&p=p-orion")).toEqual({
+      agreementId: "ag_1",
+      token: "tok",
+      role: "reviewer",
+      participantPartyId: "p-orion",
+    });
+    expect(parseAgreementReviewPath("/app/agreements/ag_1", "?token=tok&role=reviewer&p=p-orion")).toEqual({
+      agreementId: "ag_1",
+      token: "tok",
+      role: "reviewer",
+      participantPartyId: "p-orion",
+    });
+  });
 });
