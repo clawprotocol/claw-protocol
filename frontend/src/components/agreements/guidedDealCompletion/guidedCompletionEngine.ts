@@ -19,6 +19,22 @@ import {
 } from "./guidedVisibleQuestionAccounting";
 import { variableHasSelectableAnswerPath } from "./shouldRenderGuidedCompletionPanel";
 import { shouldShowGuidedSessionIntro } from "./userAnswerableGuidedQuestion";
+import { isServicesMigrationIntake } from "./servicesMigrationGuidedIntake";
+
+function preferSplitFeePhaseQuestionsForMigration(
+  variables: DealVariable[],
+  intakeRaw: string,
+  body: string,
+): DealVariable[] {
+  if (!isServicesMigrationIntake(intakeRaw, body)) return variables;
+  const ids = new Set(variables.map((v) => v.id));
+  const hasRequiredFeePhaseAsk =
+    ids.has("total_fee_confirmation") ||
+    ids.has("phase_payment_allocation") ||
+    ids.has("supplemental_schedule_confirmation");
+  if (!hasRequiredFeePhaseAsk) return variables;
+  return variables.filter((v) => v.id !== "project_fee_phase_confirmation");
+}
 
 export function buildGuidedSessionFromAgreement(args: {
   intakeRaw?: string | null;
@@ -37,6 +53,7 @@ export function buildGuidedSessionFromAgreement(args: {
     args.agreementFamily ?? variables[0]?.applicableAgreementFamilies[0] ?? "generic_business_agreement";
   variables = ensureRenderableGuidedVariables(variables, intake, body, family);
   variables = variables.filter((v) => !isGuidedVariableSatisfiedByIntake(v.id, intake, body));
+  variables = preferSplitFeePhaseQuestionsForMigration(variables, intake, body);
   if (!variables.length) return null;
   let session = createGuidedCompletionSession({
     variables,

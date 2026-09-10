@@ -1043,11 +1043,20 @@ export function buildAgreementIntakeClarification(rawIntake: string): AgreementI
     LEASE_RE.test(raw) ||
     signal >= 3;
 
-  // Skip the missing_named_parties block for thin dumps with draftable signal,
-  // UNLESS they explicitly mention multiple parties (e.g., "3 parties", "three-party").
-  // Let them fail-open to the starter; the five-tenet system will ask targeted questions.
-  const explicitMultiPartyRequest = (partySignals.declared != null && partySignals.declared >= 3) || /\b(?:three|four|3|4)[-\s]?part(?:y|ies)\b/i.test(raw);
-  if (looksCommercial && !hasBetweenParties && !(hasDraftableSignal && raw.length < 100 && !explicitMultiPartyRequest)) {
+  // Unidentified contracting parties are a blocking interview gap when the
+  // prompt is already commercial (fee, SaaS, or an explicit N-party request).
+  // Short personal dumps without economics may still fail-open to the starter
+  // five-tenet ask.
+  const explicitMultiPartyRequest =
+    (partySignals.declared != null && partySignals.declared >= 3) ||
+    /\b(?:three|four|3|4)[-\s]?part(?:y|ies)\b/i.test(raw);
+  const shortNonEconomicDraftable =
+    hasDraftableSignal &&
+    raw.length < 100 &&
+    !explicitMultiPartyRequest &&
+    !hasMoney &&
+    !SAAS_RE.test(raw);
+  if (looksCommercial && !hasBetweenParties && !shortNonEconomicDraftable) {
     const suggested = buildGenericSuggestedRewrite(raw);
     const heard: string[] = [];
     if (hasMoney) heard.push(`Fee / economics mentioned: ${extractMoneyPhrases(raw).join(", ") || "yes"}.`);

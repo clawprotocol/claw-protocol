@@ -158,7 +158,8 @@ export function resolvePaidSessionTwoSignerNamesEmailsComplete(args: {
 
 /**
  * After pay, a visible deal on the card + N signer names/emails (2–4) is enough
- * to open existing SimpleProFinalReviewScreen. Do not sit on Preparing.
+ * to reopen existing SimpleProFinalReviewScreen. Do not remount Free Starter
+ * questions. Send / sign / freeze still require verified authority.
  */
 export function canOpenPaidSessionFinalReviewAfterSigners(args: {
   paidSessionActive: boolean;
@@ -166,11 +167,8 @@ export function canOpenPaidSessionFinalReviewAfterSigners(args: {
   twoSignerNamesAndEmailsComplete: boolean;
   hasVerifiedPaidReviewAuthority?: boolean;
 }): boolean {
-  const verified =
-    args.hasVerifiedPaidReviewAuthority ?? canEnablePaidCommercialActions();
   return Boolean(
-    verified &&
-      args.paidSessionActive &&
+    args.paidSessionActive &&
       args.visibleDealBody &&
       args.twoSignerNamesAndEmailsComplete,
   );
@@ -203,12 +201,14 @@ export function shouldShowPaidSessionFinalReviewActions(args: {
   signaturePreparationRequested?: boolean;
   hasVerifiedPaidReviewAuthority?: boolean;
 }): boolean {
+  const verified =
+    args.hasVerifiedPaidReviewAuthority ?? canEnablePaidCommercialActions();
   return (
+    verified &&
     canOpenPaidSessionFinalReviewAfterSigners({
       paidSessionActive: args.paidSessionActive,
       visibleDealBody: args.visibleDealBody,
       twoSignerNamesAndEmailsComplete: args.twoSignerNamesAndEmailsComplete,
-      hasVerifiedPaidReviewAuthority: args.hasVerifiedPaidReviewAuthority,
     }) &&
     Boolean(args.signerMetadataFinalized) &&
     !args.signaturePreparationRequested
