@@ -23,6 +23,7 @@ const PHASE2_JOURNEY_ONLY = [
   "src/auth/anonymousOwnerContext.test.ts",
   "src/launch/checkoutParams.test.ts",
   "src/launch/routes.test.ts",
+  "src/launch/phase4aPaidSitemapCoverage.test.ts",
   "src/launch/homeFreeStarterFlowIsolation.test.ts",
   "src/launch/ownerAgreementReadOnlyDisplaySafety.test.ts",
   "src/launch/creatorDashboardAgreementCompletion.test.ts",
