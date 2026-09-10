@@ -94,6 +94,7 @@ function dumpCase(intake: string, names: [string, string]) {
   });
   expect(twoSigners).toBe(true);
   // Short rebuild is labeled recovery context only — not signable authority.
+  // The review surface may reopen; send / sign / freeze stay closed.
   expect(hasPaidProSourceOfTruth()).toBe(false);
   expect(
     canOpenPaidSessionFinalReviewAfterSigners({
@@ -101,7 +102,7 @@ function dumpCase(intake: string, names: [string, string]) {
       visibleDealBody: visible,
       twoSignerNamesAndEmailsComplete: twoSigners,
     }),
-  ).toBe(false);
+  ).toBe(true);
   expect(
     shouldSkipPaidSessionReviewHydrateWait({
       paidSessionActive: true,
@@ -288,7 +289,7 @@ agree that Harbor Marks will design a logo and brand kit for Northline for $2,40
         visibleDealBody: visible,
         twoSignerNamesAndEmailsComplete: threeSigners,
       }),
-    ).toBe(false);
+    ).toBe(true);
     expect(
       shouldShowPaidSessionFinalReviewActions({
         paidSessionActive: true,
@@ -337,7 +338,7 @@ agree that Harbor Marks will design a logo and brand kit for Northline for $2,40
         visibleDealBody: true,
         twoSignerNamesAndEmailsComplete: fourSigners,
       }),
-    ).toBe(false);
+    ).toBe(true);
     expect(
       canOpenPaidSessionFinalReviewAfterSigners({
         paidSessionActive: true,

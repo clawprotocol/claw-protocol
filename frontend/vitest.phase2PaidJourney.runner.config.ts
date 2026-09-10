@@ -86,6 +86,15 @@ const PHASE2_JOURNEY_ONLY = [
   "src/vs01/vs01FullyExecutedSignedSnapshot.test.ts",
   "src/vs01/vs01SigningInviteDelivery.failClosed.test.ts",
   "src/vs01/StepReceipt.test.ts",
+  "src/components/agreements/proAgreementFiveTenets.test.ts",
+  "src/components/agreements/proClarificationRouting.test.ts",
+  "src/components/agreements/postCheckoutMissingFactsGate.test.ts",
+  "src/components/agreements/premiumFinalizationFlow.test.ts",
+  "src/components/agreements/intakeClarificationPolicy.test.ts",
+  "src/components/agreements/proClarificationGuidedRepairUx.test.ts",
+  "src/components/agreements/paidProUniversalGtmPartyAuthorityRegression.test.ts",
+  "src/components/agreements/thinTwoPartyStatedScopeAsk.test.ts",
+  "src/components/agreements/guidedDealCompletion/servicesMigrationGuidedCompletion.test.ts",
 ] as const;
 
 export const PHASE2_PAID_JOURNEY_INCLUDE = [
