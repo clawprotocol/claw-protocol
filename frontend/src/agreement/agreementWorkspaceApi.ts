@@ -576,7 +576,12 @@ export async function postSigningCeremonyStart(
 
 export async function postSigningCeremonyComplete(
   agreementId: string,
-  body: { participant_id: string; typed_name: string; locked_version_id: string },
+  body: {
+    participant_id: string;
+    typed_name: string;
+    locked_version_id: string;
+    signer_role_id?: string;
+  },
   recipientAccessToken?: string | null
 ): Promise<{
   ok: boolean;

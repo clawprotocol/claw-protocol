@@ -119,14 +119,24 @@ function AgreementSignGate(props: {
   const [phase, setPhase] = useState<"loading" | "ready" | "bad">("loading");
   const [lockedVersionId, setLockedVersionId] = useState("");
   const [resolvedPartyId, setResolvedPartyId] = useState<string | undefined>(undefined);
+  const [resolvedSignerRoleId, setResolvedSignerRoleId] = useState("");
+  const [validatedAccessToken, setValidatedAccessToken] = useState("");
   const [badMessage, setBadMessage] = useState<string | null>(null);
+  const [retryable, setRetryable] = useState(false);
+  const [retryNonce, setRetryNonce] = useState(0);
 
   useEffect(() => {
     let cancel = false;
     void (async () => {
       const policy = await fetchRecipientAccessPolicy();
-      if (token) {
-        const vr = await validateRecipientAccessToken(token, agreementId);
+      const urlTok = (token || "").trim();
+      const sessionForAgreement = urlTok
+        ? loadRecipientMagicLinkSession(agreementId, urlTok)
+        : loadAnyRecipientMagicLinkSessionForAgreement(agreementId);
+      const effectiveToken = urlTok || sessionForAgreement?.token?.trim() || "";
+
+      if (effectiveToken) {
+        const vr = await validateRecipientAccessToken(effectiveToken, agreementId);
         if (cancel) return;
         if (
           vr.ok &&
@@ -134,61 +144,98 @@ function AgreementSignGate(props: {
           vr.data.agreement_id === agreementId &&
           vr.data.locked_version_id
         ) {
-          setBadMessage(null);
-          setLockedVersionId(vr.data.locked_version_id);
           const fromTok = (vr.data.recipient_party_id || "").trim();
           const fromUrl = (participantPartyId || "").trim();
-          setResolvedPartyId(fromTok || fromUrl || undefined);
-          stripRecipientAccessTokenQueryFromLocation();
+          if (fromUrl && fromTok && fromUrl !== fromTok) {
+            setRetryable(false);
+            setBadMessage("This link is invalid or expired. Request a new link from the sender.");
+            setPhase("bad");
+            return;
+          }
+          setRetryable(false);
+          setBadMessage(null);
+          setLockedVersionId(vr.data.locked_version_id);
+          setResolvedPartyId(fromTok || undefined);
+          setResolvedSignerRoleId(String(vr.data.signer_role_id || "").trim());
+          saveRecipientMagicLinkSession({
+            agreementId,
+            token: effectiveToken,
+            recipientPartyId: fromTok || undefined,
+            recipientLinkRole: "signer",
+          });
+          setValidatedAccessToken(effectiveToken);
+          if (urlTok) {
+            stripRecipientAccessTokenQueryFromLocation();
+          }
           setPhase("ready");
         } else {
-          setBadMessage(vr.ok ? null : vr.message);
+          setRetryable(!vr.ok && isRecipientAccessRetryableCode(vr.code));
+          setBadMessage(
+            vr.ok
+              ? "This link is invalid or expired. Request a new link from the sender."
+              : vr.message,
+          );
           setPhase("bad");
         }
         return;
       }
       if (policy?.recipient_link_token_required) {
         if (!cancel) {
-          setBadMessage(
-            "This link is invalid or expired. Request a new link from the sender."
-          );
+          setRetryable(false);
+          setBadMessage("This link is invalid or expired. Request a new link from the sender.");
           setPhase("bad");
         }
         return;
       }
       if (!legacyVersionId) {
         if (!cancel) {
-          setBadMessage(
-            "This link is invalid or expired. Request a new link from the sender."
-          );
+          setRetryable(false);
+          setBadMessage("This link is invalid or expired. Request a new link from the sender.");
           setPhase("bad");
         }
         return;
       }
+      setRetryable(false);
       setBadMessage(null);
       setLockedVersionId(legacyVersionId);
       setResolvedPartyId((participantPartyId || "").trim() || undefined);
+      setValidatedAccessToken("");
       if (!cancel) setPhase("ready");
     })();
     return () => {
       cancel = true;
     };
-  }, [agreementId, token, legacyVersionId, participantPartyId]);
+  }, [agreementId, token, legacyVersionId, participantPartyId, retryNonce]);
 
   if (phase === "loading") {
     return <RecipientLinkGateNotice phase="loading" />;
   }
   if (phase === "bad") {
-    return <RecipientLinkGateNotice phase="bad" detail={badMessage} />;
+    return (
+      <RecipientLinkGateNotice
+        phase="bad"
+        detail={badMessage}
+        retryable={retryable}
+        onRetry={() => {
+          setPhase("loading");
+          setRetryNonce((n) => n + 1);
+        }}
+      />
+    );
   }
-  const accessGate = token ? { lockedVersionId } : undefined;
+  const accessGate = validatedAccessToken || token ? { lockedVersionId } : undefined;
   return (
     <AgreementRecipientReview
       agreementId={agreementId}
-      entry={{ kind: "sign", lockedVersionId, accessGate }}
+      entry={{
+        kind: "sign",
+        lockedVersionId,
+        accessGate,
+        ...(resolvedSignerRoleId ? { signerRoleId: resolvedSignerRoleId } : {}),
+      }}
       recipientLinkRole="signer"
-      participantPartyId={resolvedPartyId || participantPartyId || ""}
-      recipientAccessToken={(token || "").trim()}
+      participantPartyId={resolvedPartyId || ""}
+      recipientAccessToken={validatedAccessToken || (token || "").trim()}
       onClose={onClose}
     />
   );

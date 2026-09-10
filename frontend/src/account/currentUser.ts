@@ -151,7 +151,7 @@ export function isDashboardAccountSurface(pathname: string, search?: string): bo
 export function isPublicTokenAgreementSurface(pathname: string, search?: string): boolean {
   const rawPath = (pathname || "").split("?")[0];
   const p = rawPath.replace(/\/$/, "") || "/";
-  if (/^\/agreements\/[^/]+\/review$/i.test(p)) return true;
+  if (/^\/agreements\/[^/]+\/(review|sign)$/i.test(p)) return true;
   if (/^\/verify\//i.test(p)) return true;
   const route = matchAppRoute(pathname, currentLocationSearch(pathname, search));
   return route?.access === "recipient_token";

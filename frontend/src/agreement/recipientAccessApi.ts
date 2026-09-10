@@ -32,6 +32,7 @@ export type ValidatedRecipientAccess = {
   mode: string;
   locked_version_id: string;
   role?: string;
+  signer_role_id?: string | null;
   recipient_party_id?: string | null;
   inviter_display_name?: string | null;
 };

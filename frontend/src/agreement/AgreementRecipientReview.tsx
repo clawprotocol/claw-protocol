@@ -125,6 +125,12 @@ import {
   parseAgreementReviewPath,
   type RecipientLinkRole,
 } from "./agreementRecipientReviewPaths";
+import { agreementSigningPath, parseAgreementSignPath } from "./agreementRecipientSigningPaths";
+import {
+  overlayAuthorizedSignerIdentity,
+  remountBundleToLockedVersion,
+  signPaperAuthorityClosed,
+} from "./recipientSigningLockedVersion";
 
 export type { RecipientLinkRole };
 export {
@@ -132,6 +138,8 @@ export {
   agreementReviewPath,
   agreementReviewPathWithParticipant,
   parseAgreementReviewPath,
+  agreementSigningPath,
+  parseAgreementSignPath,
 };
 import type { LawdogViewerContext } from "./lawdogViewerContext";
 import { RecipientApprovedWaitingPanel } from "./RecipientApprovedWaitingPanel";
@@ -688,7 +696,12 @@ function scheduleAExcerpt(text: string): string {
 
 export type AgreementRecipientEntry =
   | { kind: "review"; accessGate?: { lockedVersionId: string } }
-  | { kind: "sign"; lockedVersionId: string; accessGate?: { lockedVersionId: string } };
+  | {
+      kind: "sign";
+      lockedVersionId: string;
+      accessGate?: { lockedVersionId: string };
+      signerRoleId?: string;
+    };
 
 export type { RecipientRevisionLineage } from "./recipientRevisionLineage";
 
@@ -1282,14 +1295,11 @@ export function AgreementRecipientReview({
       setCeremonyPhase("done");
       return;
     }
-    if (ceremonyStartedRef.current) return;
-    ceremonyStartedRef.current = true;
     let cancel = false;
     void (async () => {
       const r = await postSigningCeremonyStart(agreementId, participantPid, recipientAccessToken);
       if (cancel) return;
       if (!r.ok) {
-        ceremonyStartedRef.current = false;
         setCeremonyError(r.error || "Could not start signing.");
         setCeremonyPhase("start_error");
         return;
@@ -1304,8 +1314,9 @@ export function AgreementRecipientReview({
     };
   }, [
     entry.kind,
-    draft,
-    bundle,
+    draft?.id,
+    draft?.updated_at,
+    bundle?.currentVersionId,
     signingLinkInvalidMessage,
     agreementId,
     participantPid,
@@ -2100,17 +2111,38 @@ export function AgreementRecipientReview({
           status?: string;
         } | null;
       };
-      const d = normalizeAgreementDraftFromApi(payload?.draft ?? null, {
+      let d = normalizeAgreementDraftFromApi(payload?.draft ?? null, {
         fallbackAgreementId: agreementId,
       });
+      if (d && entry.kind === "sign") {
+        d = overlayAuthorizedSignerIdentity(d, payload.draft);
+      }
+      const authorityMeta = selectRecipientReviewAuthorityMeta({
+        agreementId,
+        signingLock: payload.signing_lock,
+        acceptedReviewSnapshot: payload.accepted_review_snapshot,
+      });
+      const sl = payload.signing_lock;
+      if (entry.kind === "sign") {
+        const tokenLv = entry.lockedVersionId.trim();
+        if (
+          signPaperAuthorityClosed({
+            tokenLockedVersionId: tokenLv,
+            meta: authorityMeta,
+            lockSha: sl?.content_sha256,
+            snapSha: payload.accepted_review_snapshot?.corpus_sha256,
+          })
+        ) {
+          setDraft(null);
+          setRenderedHtml("");
+          setReviewAuthorityMeta(null);
+          setBundle(null);
+          setError("This link is invalid or expired. Request a new link from the sender.");
+          return;
+        }
+      }
       setDraft(d);
-      setReviewAuthorityMeta(
-        selectRecipientReviewAuthorityMeta({
-          agreementId,
-          signingLock: payload.signing_lock,
-          acceptedReviewSnapshot: payload.accepted_review_snapshot,
-        }),
-      );
+      setReviewAuthorityMeta(authorityMeta);
       if (!d) {
         setRenderedHtml("");
         setReviewAuthorityMeta(null);
@@ -2133,11 +2165,14 @@ export function AgreementRecipientReview({
       }
       const rp = JSON.parse(rrBody) as { rendered_html?: unknown };
       const html = String(rp?.rendered_html || "");
+      const snapPlain = String(payload.accepted_review_snapshot?.corpus_plain || "").trim();
       const reviewFirstCorpus = resolveReviewFirstDisplayCorpus(d, "reviewer");
       const effectiveHtml =
-        reviewFirstCorpus && reviewFirstCorpus.text.trim().length >= 500
-          ? renderReviewFirstCorpusHtml(reviewFirstCorpus.text)
-          : html;
+        entry.kind === "sign" && snapPlain
+          ? renderReviewFirstCorpusHtml(snapPlain)
+          : reviewFirstCorpus && reviewFirstCorpus.text.trim().length >= 500
+            ? renderReviewFirstCorpusHtml(reviewFirstCorpus.text)
+            : html;
       if (entry.kind === "review" && reviewFirstCorpus) {
         logReviewFirstDisplayCorpusSelected({
           agreementId,
@@ -2158,15 +2193,17 @@ export function AgreementRecipientReview({
         b = ensureInitialVersion(agreementId, d, effectiveHtml, recipientVersionStoreScope);
       }
       const signingLockPresentInPayload = Object.prototype.hasOwnProperty.call(payload, "signing_lock");
-      const sl = payload.signing_lock;
       const lv = typeof sl?.locked_version_id === "string" ? sl.locked_version_id.trim() : "";
-      if (lv) {
+      const signLv = entry.kind === "sign" ? entry.lockedVersionId.trim() : "";
+      const remountLv = lv || signLv;
+      if (remountLv && (lv || entry.kind === "sign")) {
+        b = remountBundleToLockedVersion(b, remountLv, effectiveHtml);
         b = {
           ...b,
           finalizedForSigning: true,
           signingLock: {
             locked: true,
-            lockedVersionId: lv,
+            lockedVersionId: remountLv,
             lockedAt: typeof sl?.locked_at === "string" ? sl.locked_at : undefined,
             lockedBy: "owner",
           },
@@ -2200,7 +2237,14 @@ export function AgreementRecipientReview({
     } finally {
       setLoading(false);
     }
-  }, [agreementId, entry.kind, recipientAccessToken, recipientVersionStoreScope, participantPid]);
+  }, [
+    agreementId,
+    entry.kind,
+    entry.kind === "sign" ? entry.lockedVersionId : "",
+    recipientAccessToken,
+    recipientVersionStoreScope,
+    participantPid,
+  ]);
 
   const draftSanitizeContext = useMemo(() => {
     if (!draft) return "";
@@ -4577,7 +4621,13 @@ export function AgreementRecipientReview({
   if (entry.kind === "sign" && bundle && !signingLinkInvalidMessage && draft) {
     const lockedVersionId = entry.lockedVersionId;
     const lockedVer = bundle.versions.find((v) => v.id === lockedVersionId)!;
-    const signingLine = ceremonySignerName || proposerDisplayNameForApi;
+    const intendedParty =
+      draft.parties?.find((p) => (p.id || "").trim() === participantPid) || null;
+    const signingLine =
+      ceremonySignerName ||
+      intendedParty?.signerName ||
+      intendedParty?.name ||
+      proposerDisplayNameForApi;
     const { pending, total } = pendingSignatureCount({
       draft,
       agreementFullySigned: agreementFullyExecuted,
@@ -4610,10 +4660,19 @@ export function AgreementRecipientReview({
           participant_id: participantPid,
           typed_name: typedConfirm.trim(),
           locked_version_id: lockedVersionId,
+          ...(entry.kind === "sign" && entry.signerRoleId
+            ? { signer_role_id: entry.signerRoleId }
+            : {}),
         },
         recipientAccessToken
       );
       if (!r.ok) {
+        const already = String(r.error || "").includes("already_signed");
+        if (already) {
+          setCeremonyPhase("done");
+          await refresh();
+          return;
+        }
         setCeremonyError(typeof r.error === "string" ? r.error : "Could not record signature.");
         setCeremonyPhase("ready");
         return;
@@ -4650,15 +4709,23 @@ export function AgreementRecipientReview({
     }
 
     return (
-      <div className="fixed inset-0 z-[200] flex flex-col overflow-y-auto bg-slate-950 text-slate-100">
+      <div
+        className="fixed inset-0 z-[200] flex flex-col overflow-y-auto bg-slate-950 text-slate-100"
+        data-testid="recipient-public-sign-route"
+      >
         <header className="sticky top-0 z-10 border-b border-slate-800/90 bg-slate-950/95 px-4 py-4 backdrop-blur sm:px-8">
           <div className="mx-auto max-w-3xl">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div className="min-w-0 flex-1">
-                <h1 className="text-lg font-semibold tracking-tight text-white sm:text-xl">
-                  {RECIPIENT_PUBLIC_HERO_TITLE}
+                <h1
+                  className="text-lg font-semibold tracking-tight text-white sm:text-xl"
+                  data-testid="recipient-sign-heading"
+                >
+                  Review and sign
                 </h1>
-                <p className="mt-1 max-w-xl text-sm leading-relaxed text-slate-400">{RECIPIENT_PUBLIC_HERO_SUBTITLE}</p>
+                <p className="mt-1 max-w-xl text-sm leading-relaxed text-slate-400">
+                  Read the locked agreement, then complete only your signature.
+                </p>
                 {recipientTrustCueStrip()}
               </div>
               {onClose ? (
@@ -4690,6 +4757,7 @@ export function AgreementRecipientReview({
                   : "border-sky-700/45 bg-sky-950/35 text-sky-50"
               }`}
               role="status"
+              data-testid="recipient-sign-complete-status"
             >
               <div className="flex flex-col items-center gap-3 sm:flex-row sm:items-start">
                 <JoyMilestoneMark className="shrink-0 scale-90" />
@@ -4740,7 +4808,32 @@ export function AgreementRecipientReview({
               1. Final agreement
             </h2>
             <p className="text-xs text-slate-500">Read-only — this is the version locked for signature.</p>
-            <div className="rounded-xl border border-slate-700 bg-white p-6 text-slate-900 shadow-lg sm:p-8">
+            {reviewAuthorityMeta ? (
+              <dl
+                className="grid gap-3 rounded-lg border border-slate-800 bg-slate-900/40 px-3 py-3 sm:grid-cols-3"
+                data-testid="recipient-review-authority-meta"
+                data-locked-version-id={reviewAuthorityMeta.lockedVersionId}
+                data-corpus-length={String(reviewAuthorityMeta.corpusLength)}
+                data-corpus-sha256={reviewAuthorityMeta.corpusSha256}
+              >
+                <div>
+                  <dt className="text-[11px] uppercase tracking-wide text-slate-500">Version</dt>
+                  <dd className="mt-1 break-all font-mono text-xs text-slate-100">{reviewAuthorityMeta.lockedVersionId}</dd>
+                </div>
+                <div>
+                  <dt className="text-[11px] uppercase tracking-wide text-slate-500">Length</dt>
+                  <dd className="mt-1 text-sm font-medium text-slate-100">{reviewAuthorityMeta.corpusLength}</dd>
+                </div>
+                <div>
+                  <dt className="text-[11px] uppercase tracking-wide text-slate-500">SHA-256</dt>
+                  <dd className="mt-1 break-all font-mono text-[11px] text-slate-100">{reviewAuthorityMeta.corpusSha256}</dd>
+                </div>
+              </dl>
+            ) : null}
+            <div
+              className="rounded-xl border border-slate-700 bg-white p-6 text-slate-900 shadow-lg sm:p-8"
+              data-testid="recipient-document-shell"
+            >
               <div className="text-xs font-semibold uppercase tracking-wide text-slate-600">Document</div>
               <div
                 className="prose mt-4 max-w-none text-[0.9375rem] leading-relaxed text-slate-900"
@@ -4755,11 +4848,25 @@ export function AgreementRecipientReview({
             <h2 id="sig-confirm-id" className="text-sm font-semibold text-slate-200">
               2. Participant confirmation
             </h2>
-            <div className="rounded-xl border border-slate-800 bg-slate-900/50 px-4 py-4 sm:px-5">
+            <div
+              className="rounded-xl border border-slate-800 bg-slate-900/50 px-4 py-4 sm:px-5"
+              data-testid="recipient-sign-identity"
+            >
               <p className="text-sm text-slate-200">
                 You are signing as:{" "}
                 <span className="font-semibold text-white">{signingLine || "Signer"}</span>
               </p>
+              {intendedParty ? (
+                <ul className="mt-2 space-y-1 text-xs text-slate-400">
+                  <li>Legal entity: {intendedParty.name}</li>
+                  {intendedParty.signerName ? <li>Name: {intendedParty.signerName}</li> : null}
+                  <li>
+                    Role: {intendedParty.signerTitle || intendedParty.role}
+                    {entry.kind === "sign" && entry.signerRoleId ? ` (${entry.signerRoleId})` : ""}
+                  </li>
+                  <li>Action: Sign this locked agreement</li>
+                </ul>
+              ) : null}
               {draft.parties?.some((p) => (p.id || "").trim()) ? (
                 <p className="mt-2 text-[11px] text-slate-500">
                   Record hash: <span className="font-mono text-slate-400">{shortHash}</span>
@@ -4775,10 +4882,42 @@ export function AgreementRecipientReview({
                     onChange={(e) => setTypedConfirm(e.target.value)}
                     placeholder={signingLine || "Full legal name"}
                     autoComplete="name"
+                    data-testid="recipient-sign-typed-name"
                   />
                 </label>
               ) : null}
             </div>
+            {draft.parties?.some((p) => (p.id || "").trim() && (p.id || "").trim() !== participantPid) ? (
+              <div
+                className="rounded-xl border border-slate-800 bg-slate-950/40 px-4 py-4 sm:px-5"
+                data-testid="recipient-sign-other-parties"
+              >
+                <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Other parties</p>
+                <ul className="mt-2 space-y-3">
+                  {draft.parties
+                    .filter((p) => (p.id || "").trim() && (p.id || "").trim() !== participantPid)
+                    .map((p) => (
+                      <li key={p.id} className="text-sm text-slate-300">
+                        <p className="font-medium text-slate-100">{p.name}</p>
+                        <p className="text-xs text-slate-500">
+                          {p.signerName || p.name}
+                          {p.signerTitle ? ` · ${p.signerTitle}` : ""}
+                          {p.role ? ` · ${p.role}` : ""}
+                        </p>
+                        <input
+                          type="text"
+                          disabled
+                          readOnly
+                          value=""
+                          aria-label={`Signing field for ${p.name} (read only)`}
+                          className="mt-2 w-full cursor-not-allowed rounded-lg border border-slate-800 bg-slate-900 px-3 py-2 text-sm text-slate-500"
+                          data-testid={`recipient-sign-other-field-${p.id}`}
+                        />
+                      </li>
+                    ))}
+                </ul>
+              </div>
+            ) : null}
           </section>
 
           <section className="space-y-3 pb-4 sm:pb-8" aria-labelledby="sig-action">
@@ -4799,6 +4938,7 @@ export function AgreementRecipientReview({
                     type="button"
                     className="inline-flex w-full items-center justify-center rounded-xl bg-emerald-600 px-4 py-3.5 text-base font-semibold text-white shadow-lg shadow-emerald-950/40 hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto sm:min-w-[14rem]"
                     disabled={signPrimaryDisabled}
+                    data-testid="recipient-sign-action"
                     onClick={() => void handleRecordSignature()}
                   >
                     {ceremonyPhase === "signing" ? "Signing…" : "Review and sign"}
@@ -4820,6 +4960,7 @@ export function AgreementRecipientReview({
               type="button"
               className="inline-flex w-full items-center justify-center rounded-xl bg-emerald-600 px-4 py-3.5 text-base font-semibold text-white shadow-lg shadow-emerald-950/40 hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-50"
               disabled={signPrimaryDisabled}
+              data-testid="recipient-sign-action"
               onClick={() => void handleRecordSignature()}
             >
               {ceremonyPhase === "signing" ? "Signing…" : "Review and sign"}
@@ -6511,49 +6652,3 @@ export function AgreementRecipientReview({
   );
 }
 
-/**
- * Handoff URL for signers. Production: pass ``accessToken`` (HMAC minted by API). Legacy: ``lockedVersionId`` query ``v=``.
- */
-export function agreementSigningPath(
-  agreementId: string,
-  lockedVersionId: string,
-  accessToken?: string | null,
-  participantPartyId?: string | null
-): string {
-  const a = encodeURIComponent(agreementId);
-  const q = new URLSearchParams();
-  if (accessToken && accessToken.trim()) {
-    q.set("t", accessToken.trim());
-    if (participantPartyId?.trim()) q.set("p", participantPartyId.trim());
-    return `/agreements/${a}/sign?${q.toString()}`;
-  }
-  q.set("v", lockedVersionId);
-  if (participantPartyId?.trim()) q.set("p", participantPartyId.trim());
-  return `/agreements/${a}/sign?${q.toString()}`;
-}
-
-export function parseAgreementSignPath(
-  pathname: string,
-  search: string
-): { agreementId: string; versionId?: string; token?: string; participantPartyId?: string } | null {
-  const m = pathname.replace(/\/$/, "").match(/^\/agreements\/([^/]+)\/sign$/);
-  if (!m) return null;
-  const agreementId = decodeURIComponent(m[1]);
-  const q = rawSearchToParams(search);
-  const t = q.get("t") || q.get("token");
-  const p = q.get("p")?.trim();
-  const participantPartyId = p || undefined;
-  if (t) return { agreementId, token: t, ...(participantPartyId ? { participantPartyId } : {}) };
-  const vid = q.get("v");
-  if (!vid) return null;
-  return {
-    agreementId,
-    versionId: decodeURIComponent(vid),
-    ...(participantPartyId ? { participantPartyId } : {}),
-  };
-}
-
-function rawSearchToParams(search: string): URLSearchParams {
-  const raw = search.startsWith("?") ? search.slice(1) : search;
-  return new URLSearchParams(raw);
-}
