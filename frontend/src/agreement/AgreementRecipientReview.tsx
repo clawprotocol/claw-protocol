@@ -114,6 +114,25 @@ import {
   RECIPIENT_SIGN_RECORD_SUBLINE,
 } from "./recipientReviewTrustCopy";
 import { RECIPIENT_APPROVED_LAWDOG_PROMO_LINE } from "./recipientPublicReviewChrome";
+import {
+  selectRecipientReviewAuthorityMeta,
+  type RecipientReviewAuthorityMeta,
+} from "./recipientReviewAuthorityMeta";
+import {
+  agreementMagicLinkPath,
+  agreementReviewPath,
+  agreementReviewPathWithParticipant,
+  parseAgreementReviewPath,
+  type RecipientLinkRole,
+} from "./agreementRecipientReviewPaths";
+
+export type { RecipientLinkRole };
+export {
+  agreementMagicLinkPath,
+  agreementReviewPath,
+  agreementReviewPathWithParticipant,
+  parseAgreementReviewPath,
+};
 import type { LawdogViewerContext } from "./lawdogViewerContext";
 import { RecipientApprovedWaitingPanel } from "./RecipientApprovedWaitingPanel";
 import {
@@ -671,8 +690,6 @@ export type AgreementRecipientEntry =
   | { kind: "review"; accessGate?: { lockedVersionId: string } }
   | { kind: "sign"; lockedVersionId: string; accessGate?: { lockedVersionId: string } };
 
-export type RecipientLinkRole = "signer" | "reviewer" | "counterparty";
-
 export type { RecipientRevisionLineage } from "./recipientRevisionLineage";
 
 type Props = {
@@ -840,6 +857,7 @@ export function AgreementRecipientReview({
   type CeremonyPhase = "idle" | "start_error" | "ready" | "signing" | "done";
   const [ceremonyPhase, setCeremonyPhase] = useState<CeremonyPhase>("idle");
   const [ceremonyError, setCeremonyError] = useState<string | null>(null);
+  const [reviewAuthorityMeta, setReviewAuthorityMeta] = useState<RecipientReviewAuthorityMeta | null>(null);
   const [ceremonyVersionHash, setCeremonyVersionHash] = useState("");
   const [ceremonySignerName, setCeremonySignerName] = useState("");
   const [typedConfirm, setTypedConfirm] = useState("");
@@ -2073,13 +2091,29 @@ export function AgreementRecipientReview({
           locked_by?: string;
           content_sha256?: string;
         } | null;
+        accepted_review_snapshot?: {
+          agreement_id?: string;
+          locked_version_id?: string;
+          corpus_sha256?: string;
+          corpus_length?: number;
+          corpus_plain?: string;
+          status?: string;
+        } | null;
       };
       const d = normalizeAgreementDraftFromApi(payload?.draft ?? null, {
         fallbackAgreementId: agreementId,
       });
       setDraft(d);
+      setReviewAuthorityMeta(
+        selectRecipientReviewAuthorityMeta({
+          agreementId,
+          signingLock: payload.signing_lock,
+          acceptedReviewSnapshot: payload.accepted_review_snapshot,
+        }),
+      );
       if (!d) {
         setRenderedHtml("");
+        setReviewAuthorityMeta(null);
         setError(
           "This agreement could not be loaded from this link. Ask the sender for a fresh link and confirm the full URL was copied.",
         );
@@ -2158,6 +2192,10 @@ export function AgreementRecipientReview({
         recipientApprovedInAudit: auditHasRecipientApprovalForParticipant(d.audit_log, participantPid),
       });
     } catch (e: unknown) {
+      setDraft(null);
+      setRenderedHtml("");
+      setReviewAuthorityMeta(null);
+      setBundle(null);
       setError(e instanceof Error ? e.message : "Could not load agreement.");
     } finally {
       setLoading(false);
@@ -3759,13 +3797,23 @@ export function AgreementRecipientReview({
   if (!draft) {
     return (
       <div className="vs01-agreement-review-inner p-6">
-        <p className="text-sm text-rose-300">{error || "Agreement not found."}</p>
+        <p className="text-sm text-rose-300" role="alert" data-testid="recipient-review-load-error">
+          {error || "Agreement not found."}
+        </p>
         <p className="mt-3 text-[11px] leading-relaxed text-slate-500">
           If you contact support, include this agreement ID:{" "}
           <span className="font-mono text-slate-400 break-all">{agreementId}</span>
         </p>
+        <button
+          type="button"
+          className="vs01-btn vs01-btn--secondary vs01-btn--compact mt-3"
+          data-testid="recipient-review-load-retry"
+          onClick={() => void refresh()}
+        >
+          Try again
+        </button>
         {onClose ? (
-          <button type="button" className="btn mt-3 text-xs" onClick={onClose}>
+          <button type="button" className="btn mt-3 ml-2 text-xs" onClick={onClose}>
             Close
           </button>
         ) : null}
@@ -5420,6 +5468,28 @@ export function AgreementRecipientReview({
           { label: "Parties", value: activeSummaryParties },
         ]}
       />
+      {reviewAuthorityMeta ? (
+        <dl
+          className="grid gap-3 px-1 py-1 text-left sm:grid-cols-3"
+          data-testid="recipient-review-authority-meta"
+          data-locked-version-id={reviewAuthorityMeta.lockedVersionId}
+          data-corpus-length={String(reviewAuthorityMeta.corpusLength)}
+          data-corpus-sha256={reviewAuthorityMeta.corpusSha256}
+        >
+          <div className="min-w-0">
+            <dt className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">Version</dt>
+            <dd className="mt-1 break-all font-mono text-xs text-slate-100">{reviewAuthorityMeta.lockedVersionId}</dd>
+          </div>
+          <div className="min-w-0">
+            <dt className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">Length</dt>
+            <dd className="mt-1 text-sm font-medium text-slate-100">{reviewAuthorityMeta.corpusLength}</dd>
+          </div>
+          <div className="min-w-0">
+            <dt className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">Corpus hash</dt>
+            <dd className="mt-1 break-all font-mono text-[11px] text-slate-100">{reviewAuthorityMeta.corpusSha256}</dd>
+          </div>
+        </dl>
+      ) : null}
 
       <ReviewDocumentFrame
         className="overflow-hidden"
@@ -6441,22 +6511,6 @@ export function AgreementRecipientReview({
   );
 }
 
-export function agreementReviewPath(agreementId: string): string {
-  return `/agreements/${encodeURIComponent(agreementId)}/review`;
-}
-
-/** Review link scoped to one participant (``?p=`` party id + ``?role=``). */
-export function agreementReviewPathWithParticipant(
-  agreementId: string,
-  partyId: string,
-  role: RecipientLinkRole = "reviewer"
-): string {
-  const q = new URLSearchParams();
-  q.set("p", partyId);
-  q.set("role", role);
-  return `${agreementReviewPath(agreementId)}?${q.toString()}`;
-}
-
 /**
  * Handoff URL for signers. Production: pass ``accessToken`` (HMAC minted by API). Legacy: ``lockedVersionId`` query ``v=``.
  */
@@ -6476,52 +6530,6 @@ export function agreementSigningPath(
   q.set("v", lockedVersionId);
   if (participantPartyId?.trim()) q.set("p", participantPartyId.trim());
   return `/agreements/${a}/sign?${q.toString()}`;
-}
-
-function parseRecipientRoleParam(search: string): RecipientLinkRole | undefined {
-  const q = search.startsWith("?") ? search.slice(1) : search;
-  const r = new URLSearchParams(q).get("role")?.trim().toLowerCase();
-  if (r === "signer") return "signer";
-  if (r === "reviewer") return "reviewer";
-  if (r === "counterparty" || r === "recipient" || r === "viewer") return "counterparty";
-  return undefined;
-}
-
-/** Primary recipient deep link: ``/agreements/{id}/review?t=…`` (no account required). */
-export function agreementMagicLinkPath(agreementId: string, token: string): string {
-  const a = encodeURIComponent(agreementId);
-  const t = encodeURIComponent(token.trim());
-  return `/agreements/${a}/review?t=${t}`;
-}
-
-export function parseAgreementReviewPath(
-  pathname: string,
-  search: string = ""
-): { agreementId: string; token?: string; role?: RecipientLinkRole; participantPartyId?: string } | null {
-  const path = pathname.replace(/\/$/, "");
-  const q = search.startsWith("?") ? search.slice(1) : search;
-  const params = new URLSearchParams(q);
-  const t = params.get("t") || params.get("token") || undefined;
-  let m = path.match(/^\/agreements\/([^/]+)\/review$/);
-  if (!m) {
-    /**
-     * Legacy recipient-link compatibility only:
-     * `/app/agreements/:id` without a token is now treated as owner workspace v1 route.
-     */
-    if (!t) return null;
-    m = path.match(/^\/app\/agreements\/([^/]+)$/);
-  }
-  if (!m) return null;
-  const agreementId = decodeURIComponent(m[1]);
-  const role = parseRecipientRoleParam(search);
-  const p = params.get("p");
-  const participantPartyId = p?.trim() ? p.trim() : undefined;
-  const base = {
-    agreementId,
-    ...(role ? { role } : {}),
-    ...(participantPartyId ? { participantPartyId } : {}),
-  };
-  return t ? { ...base, token: t } : base;
 }
 
 export function parseAgreementSignPath(

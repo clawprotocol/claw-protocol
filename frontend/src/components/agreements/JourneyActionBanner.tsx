@@ -53,15 +53,32 @@ export function JourneyActionBanner(props: {
 }
 
 /** Private review/sign link gate — same banner contract as owner actions. */
-export function RecipientLinkGateNotice(props: { phase: "loading" | "bad"; detail?: string | null }) {
+export function RecipientLinkGateNotice(props: {
+  phase: "loading" | "bad";
+  detail?: string | null;
+  retryable?: boolean;
+  onRetry?: () => void;
+}) {
   const feedback = resolveUserActionFeedback({
     actor: "recipient",
     action: "open_review_link",
     outcome: props.phase === "loading" ? "working" : "failed",
+    remainder: props.retryable ? props.detail || undefined : undefined,
   });
   return (
-    <div className="mx-auto max-w-lg px-4 py-8" data-link-gate-detail={props.detail || undefined}>
-      <JourneyActionBanner feedback={feedback} />
+    <div
+      className="mx-auto max-w-lg px-4 py-8"
+      data-link-gate-detail={props.detail || undefined}
+      data-link-gate-retryable={props.retryable ? "1" : undefined}
+    >
+      <JourneyActionBanner
+        feedback={
+          props.retryable && props.phase === "bad"
+            ? { ...feedback, remedyLabel: "Try again" }
+            : feedback
+        }
+        onRemedy={props.retryable && props.phase === "bad" ? props.onRetry : undefined}
+      />
     </div>
   );
 }

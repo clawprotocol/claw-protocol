@@ -253,7 +253,11 @@ export function resolveUserActionFeedback(input: UserActionFeedbackInput): Journ
       return feedbackWorking("open_review_link", "Validating link", "Checking this private link. This only takes a moment.");
     }
     if (input.outcome === "failed" || input.outcome === "blocked") {
-      return feedbackFailed("open_review_link", "This link cannot be used", RECIPIENT_LINK_INVALID_OR_EXPIRED_MESSAGE);
+      return feedbackFailed(
+        "open_review_link",
+        remainder ? "We couldn’t open this review" : "This link cannot be used",
+        remainder || RECIPIENT_LINK_INVALID_OR_EXPIRED_MESSAGE,
+      );
     }
     if (input.actor === "anonymous") {
       return feedbackSucceeded("open_review_link", CUSTOMER_JOURNEY_STATE.describe, ANON_RESTORE_BODY);

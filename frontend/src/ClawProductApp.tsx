@@ -55,6 +55,7 @@ import {
 import { AgreementWizardShell } from "./agreement/AgreementWizardShell";
 import {
   fetchRecipientAccessPolicy,
+  isRecipientAccessRetryableCode,
   validateRecipientAccessToken,
 } from "./agreement/recipientAccessApi";
 import {
@@ -248,6 +249,8 @@ function AgreementReviewGate(props: {
   const [inviterName, setInviterName] = useState<string | undefined>(undefined);
   const [badMessage, setBadMessage] = useState<string | null>(null);
   const [validatedAccessToken, setValidatedAccessToken] = useState("");
+  const [retryable, setRetryable] = useState(false);
+  const [retryNonce, setRetryNonce] = useState(0);
 
   useEffect(() => {
     let cancel = false;
@@ -271,6 +274,7 @@ function AgreementReviewGate(props: {
         const vr = await validateRecipientAccessToken(effectiveToken, agreementId);
         if (cancel) return;
         if (vr.ok && vr.data.mode === "review" && vr.data.agreement_id === agreementId) {
+          setRetryable(false);
           setBadMessage(null);
           const lv = (vr.data.locked_version_id || "").trim();
           setGateVid(lv || undefined);
@@ -312,7 +316,8 @@ function AgreementReviewGate(props: {
           });
           setPhase("ready");
         } else {
-          setBadMessage(vr.ok ? null : vr.message);
+          setRetryable(!vr.ok && isRecipientAccessRetryableCode(vr.code));
+          setBadMessage(vr.ok ? "This link is invalid or expired. Request a new link from the sender." : vr.message);
           setPhase("bad");
         }
         return;
@@ -324,6 +329,7 @@ function AgreementReviewGate(props: {
       setValidatedAccessToken("");
       if (policy?.recipient_link_token_required) {
         if (!cancel) {
+          setRetryable(false);
           setBadMessage(
             "This link is invalid or expired. Request a new link from the sender."
           );
@@ -342,13 +348,23 @@ function AgreementReviewGate(props: {
     return () => {
       cancel = true;
     };
-  }, [agreementId, token]);
+  }, [agreementId, token, retryNonce]);
 
   if (phase === "loading") {
     return <RecipientLinkGateNotice phase="loading" />;
   }
   if (phase === "bad") {
-    return <RecipientLinkGateNotice phase="bad" detail={badMessage} />;
+    return (
+      <RecipientLinkGateNotice
+        phase="bad"
+        detail={badMessage}
+        retryable={retryable}
+        onRetry={() => {
+          setPhase("loading");
+          setRetryNonce((n) => n + 1);
+        }}
+      />
+    );
   }
   const entry =
     gateVid && tokenValidated

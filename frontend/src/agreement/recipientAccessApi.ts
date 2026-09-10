@@ -81,6 +81,13 @@ export async function fetchRecipientAccessPolicy(): Promise<RecipientAccessPolic
   }
 }
 
+export const RECIPIENT_ACCESS_NETWORK_RETRY_MESSAGE =
+  "We couldn’t reach this review link. Try again in a moment.";
+
+export function isRecipientAccessRetryableCode(code: string | null | undefined): boolean {
+  return code === "network_retryable";
+}
+
 export async function validateRecipientAccessToken(
   token: string,
   agreementId?: string
@@ -90,13 +97,20 @@ export async function validateRecipientAccessToken(
   q.set("token", token);
   const aid = (agreementId || "").trim();
   if (aid) q.set("agreement_id", aid);
-  const res = await fetch(`${base}?${q.toString()}`);
-  const raw = await res.json().catch(() => ({}));
-  if (!res.ok) {
-    const { code, message } = parseAccessErrorBody(raw);
-    return { ok: false, code, message };
+  try {
+    const res = await fetch(`${base}?${q.toString()}`);
+    const raw = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      if (res.status >= 500) {
+        return { ok: false, code: "network_retryable", message: RECIPIENT_ACCESS_NETWORK_RETRY_MESSAGE };
+      }
+      const { code, message } = parseAccessErrorBody(raw);
+      return { ok: false, code, message };
+    }
+    return { ok: true, data: raw as ValidatedRecipientAccess };
+  } catch {
+    return { ok: false, code: "network_retryable", message: RECIPIENT_ACCESS_NETWORK_RETRY_MESSAGE };
   }
-  return { ok: true, data: raw as ValidatedRecipientAccess };
 }
 
 export type MintRecipientAccessTokenResult =
