@@ -33,6 +33,10 @@ import { hasAcceptedPaidCreateFlowFreezeLatch } from "./authoritativeCreateFlowR
 import { getLatchedAcceptedServerFullDraftAuthority } from "./premiumAcceptancePolicy";
 import { PAID_PRO_AUTHORITY_MIN_LEN } from "./paidProAuthorityConstants";
 import { getAuthoritativeAgreementDocument } from "./authoritativeAgreementDocument";
+import {
+  isDashboardResumeSurfaceActive,
+  selectDashboardResumePaint,
+} from "./paidProDashboardResumeAuthoritySelection";
 
 /** Minimum frozen SoT length to force visible document shell (inclusive). */
 export const PAID_PRO_DOCUMENT_BODY_SOT_MIN_LEN = 1000;
@@ -223,16 +227,24 @@ export function PaidProDocumentBodyForcedRoute({
   // Router may already force with pipeline/canonical sotLen while hasPaidProSourceOfTruth()
   // is still false — must still hand that plain to PaidProVisibleDocumentShell.
   // Post-finalize hydrated signing corpus wins over a longer pre-signer SoT (blank Name/Title).
-  const postFinalizePlain = isPaidProPostFinalizeHydratedCorpusLocked()
-    ? resolvePaidProPostFinalizeReviewPlain().trim()
-    : "";
+  const resumeActive = isDashboardResumeSurfaceActive({
+    agreementId: displayContext?.agreementId,
+  });
+  const resumePaint = resumeActive
+    ? selectDashboardResumePaint({ agreementId: displayContext?.agreementId })
+    : null;
+  const postFinalizePlain =
+    !resumeActive && isPaidProPostFinalizeHydratedCorpusLocked()
+      ? resolvePaidProPostFinalizeReviewPlain().trim()
+      : "";
   const authorityPlain = resolvePaidProReviewSessionAuthorityPaintPlain()?.plain.trim() || "";
   const sotPlain = hasPaidProSourceOfTruth() ? getPaidProSourceOfTruthText().trim() : "";
   const pipelinePlain = readAcceptedPipelineReviewCorpusPlain().trim();
   const parentPlain = (displayContext?.acceptedCanonicalPlain || "").trim();
   const authoritativeDocPlain = getAuthoritativeAgreementDocument()?.fullCorpusText?.trim() || "";
-  const acceptedCanonicalPlain =
-    postFinalizePlain.length >= PAID_PRO_DOCUMENT_BODY_SOT_MIN_LEN
+  const acceptedCanonicalPlain = resumeActive
+    ? resumePaint?.plain || ""
+    : postFinalizePlain.length >= PAID_PRO_DOCUMENT_BODY_SOT_MIN_LEN
       ? postFinalizePlain
       : [authorityPlain, sotPlain, pipelinePlain, authoritativeDocPlain, parentPlain].reduce(
           (best, t) => (t.length > best.length ? t : best),

@@ -18,6 +18,8 @@ export type WorkspaceIndexAgreement = {
   locked_version_id: string | null;
   workspace_archived_at: string | null;
   review_sent_at: string | null;
+  /** Owner-chosen delivery track (review | signature). Survives dashboard resume. */
+  owner_delivery_track?: "review" | "signature" | null;
   /** True when audit log includes recipient/participant approval (reviewer accepted on link). */
   reviewer_approved?: boolean;
   /** Distinct reviewer approvals counted via participant ids (when present). */

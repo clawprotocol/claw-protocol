@@ -852,6 +852,10 @@ import {
   resolveProDeliveryTrackSelected,
 } from "./proDeliveryTrackState";
 import {
+  hasPersistedOwnerDeliveryTrack,
+  persistOwnerDeliveryTrack,
+} from "./paidProOwnerDeliveryTrack";
+import {
   resolveProDeliveryTrackCanonicalCorpus,
   shouldBlockStarterRegenerationAfterPaidAuthority,
   shouldIgnoreLatePremiumPipelineResult,
@@ -20242,6 +20246,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     // TEST577: the delivery-track choice is authoritative. Latch the signature track so it survives
     // the inline signer-setup phase + finalize; clear it when the user picks the review track.
     setPaidProSignaturePrepIntentLatched(mode === "signature");
+    void persistOwnerDeliveryTrack(
+      reviewAgreementIdRef.current || readCreateReviewAgreementResumeId() || "",
+      mode === "signature" ? "signature" : "review",
+    );
     if (mode === "review") {
       clearPaidProStarterSignatureSendFromCreateFlow();
       setPremiumSignatureSenderFirst(false);
@@ -21119,7 +21127,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       paidProReviewDecisionStageReady &&
       !signaturePreparationRequested &&
       !paidProSignerMetadataFinalized &&
-      !paidProCanonicalReviewSignerSetupActive,
+      !paidProCanonicalReviewSignerSetupActive &&
+      !hasPersistedOwnerDeliveryTrack(
+        reviewAgreementIdRef.current || readCreateReviewAgreementResumeId() || "",
+      ),
   );
 
   const postFinalizeReviewDecisionActive = useMemo(
@@ -32800,6 +32811,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   );
 
   const handleProSendForSignature = React.useCallback(() => {
+    void persistOwnerDeliveryTrack(
+      reviewAgreementIdRef.current || readCreateReviewAgreementResumeId() || "",
+      "signature",
+    );
     setJourneyActionFeedback(
       resolveUserActionFeedback({
         actor: "owner",
@@ -33062,6 +33077,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     // TEST577: choosing "Send for review" (Option B / party redline) selects the review track —
     // release any latched signature-prep intent so the delivery track resolves to review.
     setPaidProSignaturePrepIntentLatched(false);
+    void persistOwnerDeliveryTrack(
+      reviewAgreementIdRef.current || readCreateReviewAgreementResumeId() || "",
+      "review",
+    );
     setJourneyActionFeedback(
       resolveUserActionFeedback({
         actor: "owner",

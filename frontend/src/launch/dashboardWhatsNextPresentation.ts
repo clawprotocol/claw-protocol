@@ -21,6 +21,7 @@ import {
   isAgreementPacketPrepared,
 } from "../vs01/vs01WorkspaceSigningStatus";
 import { formatCreatorReviewProgressLabel } from "./creatorDashboardReviewGate";
+import { rememberOwnerDeliveryTrack } from "../components/agreements/paidProOwnerDeliveryTrack";
 
 export type AgreementTimelineStepId =
   | "draft_created"
@@ -52,6 +53,11 @@ export type DashboardWhatsNextPresentation = {
 
 /** Review track if review links were sent; signature track if signing started without review. */
 export function resolveDashboardDeliveryTrack(row: WorkspaceIndexAgreement): DashboardDeliveryTrack {
+  const persisted = String(row.owner_delivery_track || "").trim().toLowerCase();
+  if (persisted === "review" || persisted === "signature") {
+    rememberOwnerDeliveryTrack(row.id, persisted);
+    return persisted;
+  }
   if ((row.review_sent_at || "").trim()) return "review";
   if (row.completed_signed || row.has_server_signing_lock || isAgreementPacketPrepared(row.id)) {
     return "signature";

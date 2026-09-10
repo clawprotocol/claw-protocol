@@ -105,6 +105,38 @@ function isStrictLegalEntityName(value: string): boolean {
   return isLegalEntityName(t);
 }
 
+/** Drop legal-entity / stem copies so signer slots stay human or empty. */
+export function scrubLegalEntityCopiedSignerNames(
+  signerNames: readonly string[],
+  legalEntities: readonly string[],
+): string[] {
+  const norm = (value: string) =>
+    String(value || "")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, " ")
+      .trim();
+  return signerNames.map((raw, index) => {
+    const name = String(raw || "").replace(/\s+/g, " ").trim();
+    if (!name) return "";
+    const slotEntity = String(legalEntities[index] || "").trim();
+    const slotIsLegalEntity = Boolean(slotEntity) && isStrictLegalEntityName(slotEntity);
+    if (slotIsLegalEntity && entitiesMatchForSignerMetadata(slotEntity, name)) return "";
+    const nNorm = norm(name);
+    if (
+      nNorm &&
+      legalEntities.some((entity) => {
+        const e = String(entity || "").trim();
+        if (!e || !isStrictLegalEntityName(e)) return false;
+        const eNorm = norm(e);
+        return eNorm === nNorm || eNorm.startsWith(`${nNorm} `);
+      })
+    ) {
+      return "";
+    }
+    return name;
+  });
+}
+
 /** Human signer names must never populate legal-entity authority fields. */
 export function isLikelyHumanSignerName(value: string): boolean {
   const t = value.replace(/\s+/g, " ").trim();

@@ -10,6 +10,10 @@ import {
   readCanonicalPartyMetadata,
 } from "./canonicalPartyMetadataAuthority";
 import { alignIntakeSignerMetadataToLegalEntities } from "./structuredIntakePartyContactParse";
+import {
+  isLikelyHumanSignerName,
+  scrubLegalEntityCopiedSignerNames,
+} from "./intakeSignerMetadataAuthority";
 import { splitAuthorizedSignerLabeledValue } from "./labeledPartyBlockParse";
 import { mergeCanonicalPartyAddresses } from "./canonicalPartyStructuredAddress";
 import { resolveLegalEntitiesForCanonicalMetadata } from "./canonicalLegalEntitiesForMetadata";
@@ -91,13 +95,16 @@ function buildUiPartiesFromSeedArgs(
       partyLegalName: legalEntities[i] || slot?.partyLegalName || "",
       signerName:
         (args.uiSignerNames?.[i] ?? "").trim() ||
-        uni?.signerName ||
-        slot?.signerName ||
+        (slot?.signerName &&
+        (scrubLegalEntityCopiedSignerNames([slot.signerName], [legalEntities[i] || ""])[0] || "")
+          ? slot.signerName
+          : "") ||
+        (uni?.signerName && isLikelyHumanSignerName(uni.signerName) ? uni.signerName : "") ||
         "",
       signerTitle:
         (args.uiSignerTitles?.[i] ?? "").trim() ||
-        uni?.signerTitle ||
         slot?.signerTitle ||
+        uni?.signerTitle ||
         "",
       signerEmail:
         (args.uiSignerEmails?.[i] ?? "").trim() ||
@@ -203,9 +210,16 @@ export function runPaidProSignerMetadataAuthoritySeed(
 
   const resolvedNames = resolved.map((r) => r.signerName);
   const resolvedTitles = resolved.map((r) => r.signerTitle);
-  const namesHydrated = hydrateStringArrayNonDestructive(names, resolvedNames, partyCount);
+  const namesHydrated = hydrateStringArrayNonDestructive(
+    scrubLegalEntityCopiedSignerNames(names, canonicalLegalEntities),
+    resolvedNames.map((name) => (isLikelyHumanSignerName(name) ? name : "")),
+    partyCount,
+  );
   const titlesHydrated = hydrateStringArrayNonDestructive(titles, resolvedTitles, partyCount);
-  const intakeNames = intakeAligned.map((s) => s.signerName);
+  const intakeNames = scrubLegalEntityCopiedSignerNames(
+    intakeAligned.map((s) => s.signerName),
+    canonicalLegalEntities,
+  );
   const intakeTitles = intakeAligned.map((s) => s.signerTitle);
   const finalNames = hydrateStringArrayNonDestructive(namesHydrated.values, intakeNames, partyCount);
   const finalTitles = hydrateStringArrayNonDestructive(titlesHydrated.values, intakeTitles, partyCount);
@@ -271,7 +285,7 @@ export function runPaidProSignerMetadataAuthoritySeed(
   logCanonicalPartyMetadataDiagnostics(canonicalStage, readCanonicalPartyMetadata() ?? bundle);
 
   return {
-    names: finalNames.values,
+    names: scrubLegalEntityCopiedSignerNames(finalNames.values, canonicalLegalEntities),
     titles: finalTitles.values,
     emails: cleanedEmails,
     addresses: finalAddresses,

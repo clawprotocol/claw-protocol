@@ -37,6 +37,10 @@ import {
   extractIntakePartyManifestRows,
   findIntakePartyManifestRowForEntity,
 } from "./intakePartyManifestAuthority";
+import {
+  isLikelyHumanSignerName,
+  scrubLegalEntityCopiedSignerNames,
+} from "./intakeSignerMetadataAuthority";
 
 export const CANONICAL_PARTY_METADATA_SESSION_KEY = "claw:canonical-party-metadata:v1";
 
@@ -250,14 +254,16 @@ function synchronizeIntakeSignerMetadataIntoRecords(
       mergeRecordFields(record, intakeRecordForSlot(aligned, i, record.partyId));
     }
     const uni = resolved[i];
-    if (uni?.signerName || uni?.signerTitle) {
+    const uniName = String(uni?.signerName || "").trim();
+    const uniTitle = String(uni?.signerTitle || "").trim();
+    if ((uniName && isLikelyHumanSignerName(uniName)) || uniTitle) {
       mergeRecordFields(
         record,
         intakeRecordForSlot(
           {
             partyLegalName: record.partyLegalName,
-            signerName: uni.signerName,
-            signerTitle: uni.signerTitle,
+            signerName: uniName && isLikelyHumanSignerName(uniName) ? uniName : "",
+            signerTitle: uniTitle,
             signerEmail: "",
             partyAddress: "",
           },
@@ -276,12 +282,13 @@ function synchronizeIntakeSignerMetadataIntoRecords(
       : undefined;
     if (!contact?.name.trim() && contacts[i]?.name.trim()) contact = contacts[i];
     if (contact?.name.trim() || contact?.title.trim() || contact?.email.trim()) {
+      const contactName = contact.name.trim();
       mergeRecordFields(
         record,
         intakeRecordForSlot(
           {
             partyLegalName: record.partyLegalName,
-            signerName: contact.name,
+            signerName: contactName && isLikelyHumanSignerName(contactName) ? contactName : "",
             signerTitle: contact.title,
             signerEmail: contact.email,
             partyAddress: "",
@@ -682,6 +689,24 @@ export function buildCanonicalPartyMetadataBundle(args: {
   else if (hasConsumedSignal) source = "freeze_snapshot";
   const mergedWithIds = args.existing ? preservePartyIdsOnMerge(args.existing, merged) : merged;
   const parties = partyCount >= 2 ? mergedWithIds.slice(0, partyCount) : mergedWithIds;
+  const entityNames = parties.map((p, i) => p.partyLegalName || legalEntities[i] || "");
+  const scrubbedSignerNames = scrubLegalEntityCopiedSignerNames(
+    parties.map((p) => p.signerName),
+    entityNames,
+  );
+  for (let i = 0; i < parties.length; i += 1) {
+    const party = parties[i];
+    if (!party) continue;
+    party.signerName = scrubbedSignerNames[i] || "";
+    const alignedName = String(intakeAligned[i]?.signerName || "").trim();
+    if (
+      !party.signerName &&
+      alignedName &&
+      (scrubLegalEntityCopiedSignerNames([alignedName], entityNames)[0] || "")
+    ) {
+      party.signerName = alignedName;
+    }
+  }
   const bundleId = args.existing?.bundleId ?? createBundleId();
   return {
     bundleId,

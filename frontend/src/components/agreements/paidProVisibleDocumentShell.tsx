@@ -20,6 +20,12 @@ import {
 } from "./paidProFirstReviewDisplayAuthority";
 import { hasPaidPremiumCompletionSession } from "./premiumCompletionStorage";
 import { projectPaidProVisibleTitleDisplayPlain } from "./paidProDocumentTitleOpeningRepair";
+import { resolvePaidProUniversalDisplayTitle } from "./paidProUniversalDisplayTitle";
+import { summarizePaidProDocumentBlockClassifications } from "./paidProDocumentBlockClassifier";
+import {
+  isDashboardResumeSurfaceActive,
+  selectDashboardResumePaint,
+} from "./paidProDashboardResumeAuthoritySelection";
 import {
   auditPaidProPostFinalizeVisibleSurface,
   logPaidProPostFinalizeVisibleSurfaceMismatch,
@@ -60,9 +66,33 @@ export function resetPaidProVisibleDocumentShellLogsForTests(): void {
   mountedLogKeys.clear();
 }
 
+export function resolvePaidProDisplayTitleChrome(args: {
+  corpusPlain: string;
+  draftTitle?: string | null;
+  intakeText?: string | null;
+  agreementFamily?: string | null;
+}): string {
+  const body = (args.corpusPlain || "").trim();
+  if (!body) return "";
+  if (summarizePaidProDocumentBlockClassifications(body).titleCount >= 1) return "";
+  return resolvePaidProUniversalDisplayTitle({
+    draftTitle: args.draftTitle,
+    intakeText: args.intakeText,
+    family: args.agreementFamily,
+    corpusPlain: body,
+  }).titleUpper;
+}
+
 export function resolveCanonicalPlainForVisibleShell(
   args: PaidProFirstReviewVisibleDisplayArgs = {},
 ): { plain: string; source: string } {
+  if (isDashboardResumeSurfaceActive({ agreementId: args.agreementId })) {
+    const resume = selectDashboardResumePaint({ agreementId: args.agreementId });
+    if (!resume.canPaintReview) {
+      return { plain: "", source: resume.source };
+    }
+    return { plain: resume.plain, source: resume.source };
+  }
   const resolution = resolvePaidProFirstReviewVisibleDisplayPlain(args);
   logTest310DisplaySource(resolution);
   const paidSessionActive = hasPaidPremiumCompletionSession();
@@ -271,14 +301,22 @@ export function PaidProVisibleDocumentShell({
   const paidSessionFallbackActive =
     hasPaidPremiumCompletionSession() &&
     meetsPaidSessionFallbackPaintFloor(canonicalPlain.plain, displayContext?.intakeText);
+  const resumeActive = isDashboardResumeSurfaceActive({
+    agreementId: displayContext?.agreementId,
+  });
+  const resumePaint = resumeActive
+    ? selectDashboardResumePaint({ agreementId: displayContext?.agreementId })
+    : null;
   const paintPlain =
-    canonicalPlain.plain.length >= PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN
-      ? canonicalPlain.plain
-      : authoritativePlain.length >= PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN
-        ? authoritativePlain
-        : paidSessionFallbackActive
-          ? canonicalPlain.plain
-          : "";
+    resumeActive && !resumePaint?.canPaintReview
+      ? ""
+      : canonicalPlain.plain.length >= PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN
+        ? canonicalPlain.plain
+        : !resumeActive && authoritativePlain.length >= PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN
+          ? authoritativePlain
+          : !resumeActive && paidSessionFallbackActive
+            ? canonicalPlain.plain
+            : "";
   const paintSource =
     canonicalPlain.plain.length >= PAID_PRO_VISIBLE_SHELL_SOT_MIN_LEN
       ? canonicalPlain.source
@@ -363,6 +401,12 @@ export function PaidProVisibleDocumentShell({
           tailPaddingClass="pb-12"
           compactTopPadding={compactDocumentTopPadding}
           authoritativeSource={renderSource}
+          displayTitleChrome={resolvePaidProDisplayTitleChrome({
+            corpusPlain: renderPlain,
+            draftTitle: displayContext?.draft?.title,
+            intakeText: displayContext?.intakeText,
+            agreementFamily: displayContext?.draft?.agreement_family,
+          })}
         />
       ) : branch === "html" ? (
         <PremiumAgreementReadonlyView

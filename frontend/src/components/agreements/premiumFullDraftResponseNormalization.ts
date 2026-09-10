@@ -13,7 +13,27 @@ import {
 import {
   isNonfatalGenerationFailureCode,
   PARSE_DEGRADED_PAID_AUTHORITATIVE_MIN_LEN,
+  SUBSTANTIVE_SERVER_DRAFT_MIN_LEN,
 } from "./premiumAcceptancePolicy";
+
+/** Degraded JSON intelligence with a professionally long server document_text is still server authority. */
+export function isSubstantiveDegradedJsonParseServerAuthority(args: {
+  generationOutcome?: string | null;
+  failureCode?: string | null;
+  documentTextLen?: number | null;
+  serverFullLen?: number | null;
+  authoritativeBodyLen?: number | null;
+}): boolean {
+  const outcome = String(args.generationOutcome || "").trim();
+  const fc = String(args.failureCode || "").trim();
+  if (outcome !== "degraded" || fc !== "json_parse") return false;
+  const len = Math.max(
+    Number(args.documentTextLen) || 0,
+    Number(args.serverFullLen) || 0,
+    Number(args.authoritativeBodyLen) || 0,
+  );
+  return len >= SUBSTANTIVE_SERVER_DRAFT_MIN_LEN;
+}
 
 const WIRE_DOCUMENT_FIELD_GROUPS: readonly (readonly string[])[] = [
   ["server_full_document_text", "serverFullDocumentText"],

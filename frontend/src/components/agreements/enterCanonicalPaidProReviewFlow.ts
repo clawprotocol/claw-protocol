@@ -34,6 +34,7 @@ import {
   alignIntakeSignerMetadataToLegalEntities,
   extractCanonicalIntakeSignerMetadata,
   isLikelyHumanSignerName,
+  scrubLegalEntityCopiedSignerNames,
 } from "./intakeSignerMetadataAuthority";
 import { entitiesMatchForSignerMetadata } from "./universalSignerMetadataAuthority";
 
@@ -262,7 +263,7 @@ export function planCanonicalPaidProSignerHandoff(args: {
   const authorizedBullets = extractCanonicalIntakeSignerMetadata(args.intakeText).filter(
     (row) => row.source === "authorized_signers_bullet" && isLikelyHumanSignerName(row.signerName),
   );
-  const signerNames = seed.names.slice();
+  const signerNames = scrubLegalEntityCopiedSignerNames(seed.names, legalEntities);
   const signerTitles = seed.titles.slice();
   while (signerNames.length < legalEntities.length) signerNames.push("");
   while (signerTitles.length < legalEntities.length) signerTitles.push("");
@@ -273,11 +274,13 @@ export function planCanonicalPaidProSignerHandoff(args: {
       authorizedBullets[i];
     const humanName = (fromBullet?.signerName || aligned[i]?.signerName || "").trim();
     const humanTitle = (fromBullet?.signerTitle || aligned[i]?.signerTitle || "").trim();
-    if (fromBullet && humanName && isLikelyHumanSignerName(humanName)) {
+    if (humanName && isLikelyHumanSignerName(humanName)) {
       signerNames[i] = humanName;
       if (humanTitle) signerTitles[i] = humanTitle;
     }
   }
+  const scrubbedNames = scrubLegalEntityCopiedSignerNames(signerNames, legalEntities);
+  for (let i = 0; i < signerNames.length; i++) signerNames[i] = scrubbedNames[i] ?? "";
   const hasIntakeEntitySignal = legalEntities.some(Boolean);
   const hasIntakeContactSignal =
     seed.addresses.some(Boolean) ||

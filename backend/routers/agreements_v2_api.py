@@ -754,6 +754,7 @@ class AgreementDraft(AgreementDraftCreate):
     versions: List[VersionSnapshot] = Field(default_factory=list)
     audit_log: List[AuditEvent] = Field(default_factory=list)
     review_sent_at: Optional[str] = None
+    owner_delivery_track: Optional[str] = None
     """Set when review invite Resend delivery orchestration completed (idempotent email guard)."""
     review_invite_emails_sent_at: Optional[str] = None
     """VS01 prepared signing packet for cross-browser recipient hydration (test346)."""
@@ -6993,6 +6994,12 @@ def get_agreements_workspace_index(request: Request) -> Dict[str, Any]:
                     "locked_version_id": lv,
                     "workspace_archived_at": d.get("workspace_archived_at"),
                     "review_sent_at": d.get("review_sent_at"),
+                    "owner_delivery_track": (
+                        str(d.get("owner_delivery_track") or "").strip().lower()
+                        if str(d.get("owner_delivery_track") or "").strip().lower()
+                        in ("review", "signature")
+                        else None
+                    ),
                     "reviewer_approved": reviewer_approved,
                     "review_approvals_completed": appr_done,
                     "review_approvals_required": appr_req,
@@ -9761,6 +9768,7 @@ def update_agreement_field(
         "feed_anchor_network",
         "payment_request",
         "payment_required",
+        "owner_delivery_track",
     }:
         raise HTTPException(status_code=400, detail="unsupported_field")
 
@@ -9819,6 +9827,11 @@ def update_agreement_field(
         if v not in ("private", "link_only", "public"):
             raise HTTPException(status_code=400, detail="invalid_feed_visibility")
         next_data[body.field] = v
+    elif body.field == "owner_delivery_track":
+        v = str(body.value or "").strip().lower()
+        if v not in ("review", "signature"):
+            raise HTTPException(status_code=400, detail="invalid_owner_delivery_track")
+        next_data["owner_delivery_track"] = v
     elif body.field == "feed_anchor_network":
         if body.value is None or body.value == "":
             next_data[body.field] = None
