@@ -1,22 +1,73 @@
-# Phase 4A checkpoint — paid-owner sitemap browser contract
+# Phase 4A / 4A.1 checkpoint — paid-owner sitemap + verified paper paint
 
 Authoritative repository: `lawdog-repo`  
 Branch: `stabilize/phase3b-paid-entry`  
-Started from: `5de3481b` (`record phase 3B batch 5 commercial-interview checkpoint`)  
-Nothing was pushed. This is **not** a launch authorization.
+Started from: `637b8ffb` (`record phase 4A paid sitemap browser checkpoint`)  
+Nothing was pushed. This is **not** a launch authorization. Phase 4B was not begun.
 
 Phase 4A proves customer-facing **authenticated** and **paid** routes for a paid LawDog owner on desktop (1280×800) and mobile (390×844). Coverage is derived from `APP_ROUTE_MANIFEST`. Entitlement comes from organization-scoped mocked `GET /v1/subscriptions/:orgId` and `GET /api/agreements/usage/summary` — never path, UI tier, React state, or browser storage. Live Stripe, model, email, and staging were not run.
 
-Batch 5’s commercial drafting interview and Phase 1–4 authority / freeze contracts are preserved. This batch does not implement Phase 4B.
+Phase 4A.1 repairs the remaining Batch 5 defect: a paid review may show “agreement generated” and enable review actions **only when the actual document DOM contains the verified authoritative corpus**.
+
+## Phase 4A.1 root cause
+
+One defect on desktop and mobile. The drafting interview and durable persist succeeded. The page reached **Review your agreement draft**. Runtime diagnostics reported `workingCorpusLen: 1636`, `finalCorpusLen: 1636`, `authoritativeLen: 1636`, and `finalCorpusSource: paid_pro_review_render`. **`Agreement document preview` stayed empty** and never rendered `SAAS SUBSCRIPTION AGREEMENT`.
+
+What broke the authority-to-render seam:
+
+1. **Flat snapshot envelope dropped.** `prepareCommercialReviewSnapshotAuthority` required `{ snapshot: { snapshot_id } }`. The Phase 4A fixture (unchanged) returns a **flat** persist/GET body (`snapshot_id` at root). Persist/GET parsed as `snapshot_missing`, so verified display corpus was never stored.
+2. **Forced route did not hand verified paper.** `PaidProDocumentBodyForcedRoute` forced the shell from frozen length but did not pass the org / durable-id / SHA-256 / length-bound corpus into `PaidProVisibleDocumentShell`.
+3. **Parent paint required SoT.** `resolveAcceptedCanonicalPaintPlain` ignored parent `acceptedCanonicalPlain` unless a local source of truth already existed. `mayPaintPaidPaper` correctly refused unverified `paid_pro_review_render`, so the article stayed empty.
+4. **Completed-review chrome without paper.** `SimpleCreatePage` used `paidProReviewReady` (not content/paper ready) for the h1, so “Review your agreement draft” mounted over an empty article.
+5. **Title projection mutated verified bytes** after paper finally reached the shell (1636 → 1665). Verified source now returns exact bytes.
+6. **Owner `/view` reload raced.** Draft GET returns `document_text` only (not usable unless `premium_render_source === "review_first_final_corpus"`). First paint and reload must boot from already-verified session paper; known identity must not flash “Checking your session…”. Snapshot GET is read-only recovery only when the draft itself cannot paint.
+
+Required chain now holds:
+
+`premium-full-draft response → durable agreement persistence → accepted canonical snapshot/verified authority → review selector → PaidProDocumentBodyForcedRoute/PaidProVisibleDocumentShell → nonempty PaidProCanonicalPlainReviewDocument`
+
+Invariant preserved: mismatched org, agreement ID, hash, length, or missing snapshot produces no paper and keeps send / sign / freeze / prepare closed. Local intake, browser/session filler, pipeline text, UI tier, and unverified responses cannot authorize paper. Accepted/frozen bytes stay exact; signer metadata stays separate.
+
+The filled-prompt recap (`data-testid="paid-pro-review-originating-request"`) keeps the interview’s `100k` visible above the article. Playwright’s fee regex is `` /${PHASE4A_FEE}|100k|100,000/i ``; `PHASE4A_FEE` is `$180,000`, and `$` is a regex end-anchor, so the painted fee alone cannot match. The spec and fixture were not edited.
 
 ## Named gate
 
 `scripts/run_phase4a_paid_sitemap_browser_gate.sh`
 
-1. `frontend/node_modules/.bin/vitest run src/launch/phase4aPaidSitemapCoverage.test.ts` — fails if a new authenticated/paid manifest route lacks a browser scenario.
+1. `frontend/node_modules/.bin/vitest run src/launch/phase4aPaidSitemapCoverage.test.ts` — **3/3 passed**.
 2. Playwright `frontend/playwright.phase4a.config.ts` — `e2e/phase4a/**`, retries 0, Chrome desktop + mobile widths.
 
-The coverage module is also bound into the Phase 2 paid-journey include.
+The default 4-worker Playwright run deadlocked after desktop enumeration on Vite compiling `AgreementBuilderIntake.tsx` (>500KB). The complete 134 was verified with `--workers=2` (same config, retries=0, both viewports). Coverage vitest is independent of worker count.
+
+## Phase 4A.1 verification (required order)
+
+| Step | Result |
+|---|---|
+| Batch 5 drafting Playwright only | **2/2 passed** (18.1s) |
+| Leftover slice `-g "Batch 5\|simple-ready /app/ready"` | **6/6 passed** (20.8s) |
+| Complete Phase 4A browser proof | **134/134 passed** (2.1m, `--workers=2`) |
+| Phase 1 access contract | **18 files / 96 passed** |
+| Phase 2 paid-journey | **exit 0** (critical backend 121 + frontend include; new `paidProVerifiedReviewPaper.behavior.test.tsx` / +3) |
+| Extra backend ownership / security | **33 passed** (`test_owner_delivery_track_auth`, `test_agreement_read_scope`, `test_workspace_index_subject_scoped`, `test_auth_identity_enforcement`) — Phase 2 critical + extra = **154** |
+| Production build | `tsc -b && vite build` — **✓ built in 8.84s** |
+| Complete frontend suite (exactly once) | **9,483 / 9,299 / 184** (358s) |
+
+Focused paper regression (`paidProVerifiedReviewPaper.behavior.test.tsx`): **3/3** — 1,636-character matching org/id/hash paints; mismatch/missing snapshot stays closed; empty article cannot present a completed review.
+
+## Comparison with official remainder `9,475 / 9,280 / 195`
+
+```bash
+cd frontend && ./node_modules/.bin/vitest run --reporter=json --outputFile=/tmp/phase4a1/frontend-full.json
+```
+
+| Check | Official remainder | This run |
+|---|---:|---:|
+| Inventory | 9,475 | 9,483 |
+| Passed | 9,280 | 9,299 |
+| Raw failed assertions | 195 | 184 |
+| Failed suites | (prior) | 317 |
+
+This batch added **5** focused tests (3 verified-paper paint + 2 flat-envelope coerce). Inventory +8 / passed +19 / raw failed −11. **Do not treat the −11 as this-batch leftover closures.** TEST511, hash-parity, source-window / `json_parse` flaps, suite-load, and TEST341 remain unclassified leftovers from prior batches. Do not subtract from `9,475 / 9,280 / 195`.
 
 ## Phase 4A routes covered
 
@@ -71,40 +122,11 @@ Paid (2 IDs):
 
 Paid owner org: `user-phase4a-paid-owner`. Second org: `user-phase4a-other-org`. Missing IDs: `ag-phase4a-missing`, `missing-usage`.
 
-## Gate results
+## Earlier Phase 4A history (closed by 4A.1)
 
-Coverage vitest: **3/3 passed**.
+First executable Chrome run (after WebKit / headless-shell harness repair): **120 tests, 96 passed, 24 failed (21.9m)**. Shared harness cluster repaired (not product): field-review intercept, Chrome channel, duplicate dashboard titles, Genesis closed-access heading, parse / health / draft POST mocks, create/done copy.
 
-First executable Chrome run (after WebKit / headless-shell harness repair): **120 tests, 96 passed, 24 failed (21.9m)**. Those 24 were 12 identities × 2 viewports.
-
-Shared harness cluster repaired (not product):
-
-- Playwright intercepted `/app/field-review/...` HTML as JSON (`url.includes("/field-review")` on `**/*`).
-- Mobile project launched WebKit; Chrome channel now matches repo e2e.
-- Duplicate titles for dashboard’s two example paths.
-- Genesis-gated affiliate / opportunity / genesis-referral honestly redirect non-affiliates to Dashboard.
-- Create empty-state CTA is **Describe your agreement**, not Create agreement.
-- Done heading is **Next step**.
-- `/api/agreements/parse` and `/health` were unmocked (Vite proxied to :8000).
-
-After that cluster, focused re-run of the previous failure set: **52 tests, 49 passed, 3 failed (3.6–3.9m)**.
-
-The full 134-test gate was **not** re-run after the last persist-mock edit. The Phase 4A gate is **not green**. Complete frontend suite was **not** run.
-
-## Remaining failures (classified)
-
-### Product defects
-
-1. **`simple-ready` desktop** — entitled localhost ready immediately routes to send (`isSimpleSendPaywallActive` is false in DEV). After settle, no visible primary action matched the shared contract (Send / Continue / Home / New agreement). Mobile ready passed. This is a desktop send/ready action-visibility gap, not a blank page.
-2. **Batch 5 browser proof** — sparse SaaS (`need a SaaS agreement for about 100k`) correctly asks named parties and keeps Send/Sign/Freeze closed. The filled Orion / Contoso / New York / 100k rewrite generates a 1636-character paid corpus (`finalCorpusSource: paid_pro_review_render`) but the create surface reports **LawDog couldn't create the agreement** / **couldn't save your draft**. The verified review heading and frozen bytes never mount. Dashboard reopen / direct-route frozen-byte proof did not run.
-
-### Harness defects (closed in this batch)
-
-Field-review document intercept; Chrome vs WebKit; duplicate titles; Genesis closed-access heading; parse / health / draft POST mocks; create/done copy; fixture-state 30s loop timeout.
-
-### External / live-proof gaps
-
-None claimed. No live model, Stripe, email, or staging. `/health` ECONNREFUSED to :8000 was harness (Vite proxy), not an external outage.
+The two remaining product failures after that cluster were Batch 5 empty-article paint (this batch) and an earlier desktop `simple-ready` action-visibility gap that is now green in the 134.
 
 ## Phase 4B scope (not implemented)
 
@@ -115,28 +137,23 @@ None claimed. No live model, Stripe, email, or staging. `/health` ECONNREFUSED t
 | recipient_token | `recipient-esign`; `agreement-detail` when `?token=` / `?t=` | `/app/esign/example-document` |
 | admin | `admin-console`, `affiliate-payout-ops`, `ops-growth`, `ops-paid-funnel`, `ops-starter-pro-refine`, `ops-genesis-referral` | `/app/admin`, `/app/founder`, `/founder`, `/admin`, `/app/ops/affiliate-payouts`, `/app/ops/growth`, `/app/ops/paid-funnel`, `/app/ops/starter-pro-refine`, `/app/ops/genesis-referral` |
 
-## Focused gates besides Phase 4A
+## Preservation
 
-| Gate | Result |
-|---|---|
-| Phase 1 access contract | **18 files / 96 passed** |
-| Phase 2 paid-journey frontend | **exit 0** (Batch 5 was 95 files / 915; this include adds `phase4aPaidSitemapCoverage.test.ts` / +3) |
-| Backend ownership / security | **154 passed** (Phase 2 critical set plus `test_owner_delivery_track_auth`, `test_agreement_read_scope`, `test_workspace_index_subject_scoped`, `test_auth_identity_enforcement`) |
-| Production build | `tsc -b && vite build` — **✓ built in 10.48s** |
-| Complete frontend suite | **not run** (Phase 4A gate not green) |
+- Phase 1–5 access, ownership, clarification, freeze, after-pay, and dashboard-resume contracts
+- No raw-corpus fallback; corpus thresholds unchanged
+- Frozen operative bytes unchanged; signer overlay is execution-tail metadata only
+- Batch 5 fixture, assertion, expected title, timeout, and viewport unchanged
+- No live model, Stripe, email, or staging
 
-## Comparison with Batch 5 official remainder
+## Local artifacts (4A.1)
 
-Batch 5 official once-run: **9,475 / 9,280 / 195**.
-
-Phase 4A did not re-run the complete frontend suite because the named browser gate is not green. Do not subtract from that remainder. TEST511, hash-parity, source-window / `json_parse` flaps, suite-load, and TEST341 remain unclassified leftovers from prior batches.
-
-## Local artifacts
-
-- `frontend/src/launch/phase4aPaidSitemapCoverage.ts`
-- `frontend/src/launch/phase4aPaidSitemapCoverage.test.ts`
-- `frontend/e2e/phase4a/phase4aPaidOwnerFixtures.ts`
-- `frontend/e2e/phase4a/phase4aPaidOwnerSitemap.spec.ts`
-- `frontend/e2e/phase4a/phase4aBatch5DraftingInterview.spec.ts`
-- `frontend/playwright.phase4a.config.ts`
+- `frontend/src/components/agreements/paidProVerifiedReviewPaper.ts`
+- `frontend/src/components/agreements/paidProVerifiedReviewPaper.behavior.test.tsx`
+- `frontend/src/agreement/canonicalReviewSnapshotApi.ts` (flat + wrapped coerce; optional org stamp)
+- `frontend/src/components/agreements/paidProDocumentBodyRouter.tsx`
+- `frontend/src/components/agreements/paidProVisibleDocumentShell.tsx`
+- `frontend/src/launch/simpleProduct/SimpleCreatePage.tsx`
+- `frontend/src/launch/ownerAgreementReadOnlyView.ts`
+- `frontend/e2e/phase4a/phase4aBatch5DraftingInterview.spec.ts` (unchanged)
+- `frontend/e2e/phase4a/phase4aPaidOwnerFixtures.ts` (unchanged)
 - `scripts/run_phase4a_paid_sitemap_browser_gate.sh`
