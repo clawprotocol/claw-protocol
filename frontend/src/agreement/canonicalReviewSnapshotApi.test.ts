@@ -5,6 +5,7 @@ import {
   acceptDisplayedCommercialReviewSnapshot,
   canEnableCommercialPrepareFromServerSnapshot,
   establishServerAcceptedReviewSnapshot,
+  coerceCanonicalReviewSnapshot,
   persistCanonicalReviewSnapshot,
   prepareCommercialReviewSnapshotAuthority,
   readAcceptedReviewSnapshotRef,
@@ -45,6 +46,55 @@ describe("canonicalReviewSnapshotApi", () => {
     });
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.code).toBe("fire_and_forget_commercial_accept_removed");
+  });
+
+  it("coerceCanonicalReviewSnapshot accepts wrapped and flat persist/GET envelopes", () => {
+    const flat = {
+      snapshot_id: "crs_flat",
+      agreement_id: "ag_flat",
+      corpus_plain: "OPERATIVE\n\n" + "x".repeat(600),
+      corpus_sha256: "a".repeat(64),
+      corpus_length: 612,
+      status: "accepted",
+    };
+    expect(coerceCanonicalReviewSnapshot(flat)?.snapshot_id).toBe("crs_flat");
+    expect(
+      coerceCanonicalReviewSnapshot({
+        ok: true,
+        snapshot: { ...flat, snapshot_id: "crs_wrapped" },
+        registry_version: 1,
+      })?.snapshot_id,
+    ).toBe("crs_wrapped");
+  });
+
+  it("prepareCommercialReviewSnapshotAuthority hydrates from a flat snapshot envelope", async () => {
+    const corpus = ("OPERATIVE\n\n" + "x".repeat(600)).trim();
+    const digest = await sha256CorpusDigest(corpus);
+    const flat = {
+      snapshot_id: "crs_flat",
+      agreement_id: "ag_flat",
+      corpus_plain: corpus,
+      corpus_sha256: digest,
+      corpus_length: corpus.length,
+      status: "accepted",
+    };
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => ({
+        ok: true,
+        status: 200,
+        json: async () => flat,
+      })),
+    );
+    const result = await prepareCommercialReviewSnapshotAuthority({
+      agreementId: "ag_flat",
+      corpusPlain: corpus,
+      generationSessionId: "gen_flat",
+    });
+    expect(result.ok).toBe(true);
+    if (!result.ok) throw new Error(result.code);
+    expect(result.snapshot.snapshot_id).toBe("crs_flat");
+    expect(readDisplayReviewSnapshotAuthority("ag_flat")?.snapshotId).toBe("crs_flat");
   });
 
   it("prepareCommercialReviewSnapshotAuthority persists then GETs and does not accept", async () => {

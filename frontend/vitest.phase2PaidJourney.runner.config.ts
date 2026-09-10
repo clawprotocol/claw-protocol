@@ -78,6 +78,7 @@ const PHASE2_JOURNEY_ONLY = [
   "src/components/agreements/paidProTest518DashboardCreateIntakeMetadataPrefill.test.ts",
   "src/components/agreements/paidProTest570DashboardReviewDecisionFlow.test.ts",
   "src/components/agreements/paidProSameAgreementGenerationHandoff.authority.test.ts",
+  "src/components/agreements/paidProVerifiedReviewPaper.behavior.test.tsx",
   "src/agreement/commercialReviewSnapshotLifecycle.test.ts",
   "src/agreement/canonicalReviewSnapshotReloadAuthority.test.ts",
   "src/agreement/recipientTokenSafetyStatic.test.ts",
