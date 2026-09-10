@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import { buildAgreementPreviewTextCore } from "./agreementPreviewFromDraft";
 import { validatePaidProCorpusCandidate } from "./paidProCorpusAuthority";
@@ -13,9 +13,18 @@ import {
   shouldBlockLivePreviewAsPaidProAuthority,
 } from "./premiumGenerationApiAvailability";
 import { pickPremiumPaidReadonlyPlainText } from "./premiumReadonlyRenderCorpus";
+import { padOperativeCorpusBeforeWitness } from "./paidProTestAcceptedQuadPartyCorpus";
+import { SUBSTANTIVE_SERVER_DRAFT_MIN_LEN } from "./premiumAcceptancePolicy";
+import { markPaidProPipelineValidationPassed } from "./paidProPostAcceptanceValidatorCache";
+import {
+  clearCurrentSessionProEntitlementMarkers,
+  markCurrentSessionProEntitlementComplete,
+  markCurrentSessionProIntent,
+} from "./paidProSessionEligibility";
 import {
   clearPaidProSourceOfTruth,
   establishPaidProSourceOfTruth,
+  getPaidProSourceOfTruthText,
   hasPaidProSourceOfTruth,
 } from "./paidProSourceOfTruth";
 import {
@@ -52,8 +61,15 @@ function redMesaStarterDraft(): ParsedDraftShape {
 }
 
 describe("premiumGenerationApiAvailability", () => {
+  beforeEach(() => {
+    clearCurrentSessionProEntitlementMarkers();
+    markCurrentSessionProIntent();
+    markCurrentSessionProEntitlementComplete({ source: "qa_bypass" });
+  });
+
   afterEach(() => {
     clearPaidProSourceOfTruth();
+    clearCurrentSessionProEntitlementMarkers();
     vi.unstubAllEnvs();
   });
 
@@ -162,9 +178,52 @@ describe("premiumGenerationApiAvailability", () => {
     expect(surface.mode).toBe("premium_unavailable_retry");
   });
 
+  it("rejects repeated-placeholder text labeled as server_full_draft", () => {
+    const filler = "Paid Pro server agreement. ".repeat(200);
+    expect(filler.length).toBeGreaterThan(5_000);
+    expect(filler.length).toBeLessThan(SUBSTANTIVE_SERVER_DRAFT_MIN_LEN);
+    expect(() =>
+      establishPaidProSourceOfTruth({ text: filler, source: "server_full_draft" }),
+    ).toThrow(/mislabeled_server_full_draft_below_substantive_min/);
+    expect(hasPaidProSourceOfTruth()).toBe(false);
+  });
+
   it("successful server draft establishes SoT and enables guided authority", () => {
-    const serverBody = "Paid Pro server agreement. ".repeat(200);
-    establishPaidProSourceOfTruth({ text: serverBody, source: "server_full_draft" });
+    const serverBody = padOperativeCorpusBeforeWitness(
+      [
+        "SERVICES AGREEMENT",
+        "",
+        "This Services Agreement is entered into between Red Mesa Logistics LLC (Client) and Harbor Peak Automation LLC (Service Provider).",
+        "",
+        "1. Scope. Service Provider shall implement AI workflow automation, documentation, training, and deployment support.",
+        "2. Payment. Client shall pay a total fee of $95,000, split 50/25/25, plus optional support of $4,500 per month.",
+        "3. Term. Either party may terminate on thirty days written notice.",
+        "4. Confidentiality. Each party shall protect non-public information.",
+        "5. Intellectual Property. Client owns deliverables after payment. Provider retains pre-existing tools.",
+        "6. Limitation of Liability. Except for willful misconduct, liability is limited to fees paid in the prior twelve months.",
+        "7. Governing Law. This Agreement is governed by the laws of the State of Texas.",
+        "8. Notices. Notices shall be sent to each party at its principal business address.",
+        "9. Entire Agreement. This Agreement is the entire agreement of the parties.",
+        "10. Electronic Signatures. The parties may execute this Agreement electronically.",
+        "",
+        "IN WITNESS WHEREOF, the Parties execute this Agreement.",
+        "CLIENT: Red Mesa Logistics LLC",
+        "By: __________________________",
+        "SERVICE PROVIDER: Harbor Peak Automation LLC",
+        "By: __________________________",
+      ].join("\n"),
+      SUBSTANTIVE_SERVER_DRAFT_MIN_LEN + 400,
+    );
+    markPaidProPipelineValidationPassed({
+      text: serverBody,
+      source: "server_full_draft",
+    });
+    establishPaidProSourceOfTruth({
+      text: serverBody,
+      source: "server_full_draft",
+      draft: redMesaStarterDraft(),
+      intakeText: RED_MESA_INTAKE,
+    });
     expect(hasPaidProSourceOfTruth()).toBe(true);
     const draft = redMesaStarterDraft();
     const starter = buildAgreementPreviewTextCore(draft, { starterPreview: true });
@@ -184,7 +243,7 @@ describe("premiumGenerationApiAvailability", () => {
       intakeText: RED_MESA_INTAKE,
       lastPremiumPipelineRenderSource: "server_full_draft",
     });
-    expect(pick.plainText).toBe(serverBody.trim());
+    expect(pick.plainText).toBe(getPaidProSourceOfTruthText().trim());
     expect(pick.sourceUsed).toBe("server_full_document_text");
   });
 

@@ -3,9 +3,16 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
+  sha256CorpusDigest,
+  storeVerifiedCommercialDisplayCorpus,
+} from "../../agreement/canonicalReviewSnapshotApi";
+import {
   rebuildBodyFromIntakeForProFailure,
   isNonHollowBody,
 } from "./freeStarterReviewBodyResolver";
+import { padOperativeCorpusBeforeWitness } from "./paidProTestAcceptedQuadPartyCorpus";
+import { SUBSTANTIVE_SERVER_DRAFT_MIN_LEN } from "./premiumAcceptancePolicy";
+import { resolvePaidProFirstReviewVisibleDisplayPlain } from "./paidProFirstReviewDisplayAuthority";
 import type { ParsedDraftShape } from "./intakeSmartDefaults";
 import {
   canMountPaidSessionFinalReviewShell,
@@ -71,7 +78,6 @@ const intakeSrc = readFileSync(join(__dirname, "AgreementBuilderIntake.tsx"), "u
 function dumpCase(intake: string, names: [string, string]) {
   const rebuilt = rebuildBodyFromIntakeForProFailure(intake, HOLLOW_DRAFT);
   expect(rebuilt.length).toBeGreaterThanOrEqual(200);
-  expect(rebuilt.length).toBeLessThan(1001);
   expect(isNonHollowBody(rebuilt, intake)).toBe(true);
   markPaidPremiumCompletionSession({ source: "settled_checkout" });
   const visible = resolvePaidSessionVisibleDealBody({
@@ -87,19 +93,21 @@ function dumpCase(intake: string, names: [string, string]) {
     signer2Email: `${names[1].split(" ")[0]!.toLowerCase()}.qa@example.com`,
   });
   expect(twoSigners).toBe(true);
+  // Short rebuild is labeled recovery context only — not signable authority.
+  expect(hasPaidProSourceOfTruth()).toBe(false);
   expect(
     canOpenPaidSessionFinalReviewAfterSigners({
       paidSessionActive: true,
       visibleDealBody: visible,
       twoSignerNamesAndEmailsComplete: twoSigners,
     }),
-  ).toBe(true);
+  ).toBe(false);
   expect(
     shouldSkipPaidSessionReviewHydrateWait({
       paidSessionActive: true,
       visibleDealBody: visible,
     }),
-  ).toBe(true);
+  ).toBe(false);
   expect(
     shouldShowPaidSessionGeneratingOverlay({
       phase: "processing",
@@ -111,51 +119,21 @@ function dumpCase(intake: string, names: [string, string]) {
       paidSessionActive: true,
       visibleDealBody: visible,
       twoSignerNamesAndEmailsComplete: twoSigners,
-      signerMetadataFinalized: false,
+      signerMetadataFinalized: true,
       signaturePreparationRequested: false,
     }),
   ).toBe(false);
   expect(
-    shouldShowPaidSessionFinalReviewActions({
-      paidSessionActive: true,
-      visibleDealBody: visible,
-      twoSignerNamesAndEmailsComplete: twoSigners,
-      signerMetadataFinalized: true,
-      signaturePreparationRequested: false,
-    }),
-  ).toBe(true);
-  expect(
-    shouldShowPaidSessionFinalReviewActions({
-      paidSessionActive: true,
-      visibleDealBody: visible,
-      twoSignerNamesAndEmailsComplete: twoSigners,
-      signerMetadataFinalized: true,
-      signaturePreparationRequested: true,
+    canStartPaidSessionSignatureTrackFromFinalReview({
+      namesAndEmailsComplete: twoSigners,
     }),
   ).toBe(false);
-  // After-pay finalize path: ≥200 rebuild is never 1001 SoT. Teardown must
-  // keep paidProSignerMetadataFinalizedLatch so final-review actions stay up.
-  expect(hasPaidProSourceOfTruth()).toBe(false);
-  const skipHydrateWait = shouldSkipPaidSessionReviewHydrateWait({
-    paidSessionActive: true,
-    visibleDealBody: visible,
-  });
-  expect(skipHydrateWait).toBe(true);
   expect(
     shouldTeardownPaidProSignerMetadataFinalizedLatch({
       latch: true,
       hasPaidProSourceOfTruth: false,
       paidSessionVisibleDealBody: visible,
-      shouldSkipPaidSessionReviewHydrateWait: skipHydrateWait,
-    }),
-  ).toBe(false);
-  expect(
-    shouldShowPaidSessionFinalReviewActions({
-      paidSessionActive: true,
-      visibleDealBody: visible,
-      twoSignerNamesAndEmailsComplete: twoSigners,
-      signerMetadataFinalized: true,
-      signaturePreparationRequested: false,
+      shouldSkipPaidSessionReviewHydrateWait: false,
     }),
   ).toBe(true);
   return rebuilt;
@@ -194,7 +172,7 @@ describe("after-pay review-screen gate — Continue after signers", () => {
     expect(gate.ctaLabel).not.toMatch(/title|address/i);
   });
 
-  it("sample dump 2 (Marcus/Elena/California): paid session + visible rebuild + two signers opens review gate", () => {
+  it("sample dump 2 (Marcus/Elena/California): paid session + visible rebuild + two signers opens review gate", async () => {
     const rebuilt = dumpCase(MARCUS_ELENA_INTAKE, ["Marcus Thompson", "Elena Rodriguez"]);
     expect(rebuilt).toContain("Marcus");
     expect(rebuilt).toContain("Elena");
@@ -213,6 +191,62 @@ describe("after-pay review-screen gate — Continue after signers", () => {
     });
     expect(gate.complete).toBe(true);
     expect(gate.blockers.some((b) => b.field === "signer_name")).toBe(false);
+
+    const verifiedPlain = padOperativeCorpusBeforeWitness(
+      [
+        "SERVICES AGREEMENT",
+        "",
+        "This Services Agreement is entered into between Apex Consulting Group (Client) and Brightwave Marketing Agency (Service Provider).",
+        "Marcus Thompson engages Elena Rodriguez for a strategic marketing campaign.",
+        "Payment: $5,500. Governing law: California.",
+        "Deliverables include market research, competitor analysis, and a comprehensive marketing plan over 8 weeks.",
+        "",
+        "IN WITNESS WHEREOF, the Parties execute this Agreement.",
+        "CLIENT: Apex Consulting Group",
+        "By: __________________________",
+        "Name: Marcus Thompson",
+        "SERVICE PROVIDER: Brightwave Marketing Agency",
+        "By: __________________________",
+        "Name: Elena Rodriguez",
+      ].join("\n"),
+      SUBSTANTIVE_SERVER_DRAFT_MIN_LEN + 200,
+    );
+    const sha = await sha256CorpusDigest(verifiedPlain);
+    storeVerifiedCommercialDisplayCorpus({
+      agreementId: "ag_marcus_elena",
+      snapshotId: "crs_marcus_elena",
+      corpusSha256: sha,
+      corpusLength: verifiedPlain.length,
+      status: "pending",
+      corpusPlain: verifiedPlain,
+    });
+    const painted = resolvePaidProFirstReviewVisibleDisplayPlain({
+      agreementId: "ag_marcus_elena",
+      intakeText: MARCUS_ELENA_INTAKE,
+      premiumPaidDocumentSurface: true,
+      premiumCheckoutCompleted: true,
+      paidProActive: true,
+    });
+    expect(painted.plain).toContain("Marcus Thompson");
+    expect(painted.plain).toContain("Elena Rodriguez");
+    expect(painted.source).toBe("verified_server_canonical_review_snapshot");
+    expect(
+      canOpenPaidSessionFinalReviewAfterSigners({
+        paidSessionActive: true,
+        visibleDealBody: true,
+        twoSignerNamesAndEmailsComplete: true,
+        hasVerifiedPaidReviewAuthority: true,
+      }),
+    ).toBe(true);
+    expect(
+      shouldShowPaidSessionFinalReviewActions({
+        paidSessionActive: true,
+        visibleDealBody: true,
+        twoSignerNamesAndEmailsComplete: true,
+        signerMetadataFinalized: true,
+        hasVerifiedPaidReviewAuthority: true,
+      }),
+    ).toBe(true);
   });
 
   it("3 complete names+emails (Priya/Diego/Maya) opens the same final-review gate", () => {
@@ -254,7 +288,7 @@ agree that Harbor Marks will design a logo and brand kit for Northline for $2,40
         visibleDealBody: visible,
         twoSignerNamesAndEmailsComplete: threeSigners,
       }),
-    ).toBe(true);
+    ).toBe(false);
     expect(
       shouldShowPaidSessionFinalReviewActions({
         paidSessionActive: true,
@@ -262,6 +296,14 @@ agree that Harbor Marks will design a logo and brand kit for Northline for $2,40
         twoSignerNamesAndEmailsComplete: threeSigners,
         signerMetadataFinalized: true,
         signaturePreparationRequested: false,
+      }),
+    ).toBe(false);
+    expect(
+      canOpenPaidSessionFinalReviewAfterSigners({
+        paidSessionActive: true,
+        visibleDealBody: visible,
+        twoSignerNamesAndEmailsComplete: threeSigners,
+        hasVerifiedPaidReviewAuthority: true,
       }),
     ).toBe(true);
     expect(
@@ -274,7 +316,7 @@ agree that Harbor Marks will design a logo and brand kit for Northline for $2,40
           visibleDealBody: visible,
         }),
       }),
-    ).toBe(false);
+    ).toBe(true);
   });
 
   it("4 complete names+emails opens the same final-review gate", () => {
@@ -295,6 +337,14 @@ agree that Harbor Marks will design a logo and brand kit for Northline for $2,40
         visibleDealBody: true,
         twoSignerNamesAndEmailsComplete: fourSigners,
       }),
+    ).toBe(false);
+    expect(
+      canOpenPaidSessionFinalReviewAfterSigners({
+        paidSessionActive: true,
+        visibleDealBody: true,
+        twoSignerNamesAndEmailsComplete: fourSigners,
+        hasVerifiedPaidReviewAuthority: true,
+      }),
     ).toBe(true);
     expect(
       shouldShowPaidSessionFinalReviewActions({
@@ -302,6 +352,7 @@ agree that Harbor Marks will design a logo and brand kit for Northline for $2,40
         visibleDealBody: true,
         twoSignerNamesAndEmailsComplete: fourSigners,
         signerMetadataFinalized: true,
+        hasVerifiedPaidReviewAuthority: true,
       }),
     ).toBe(true);
   });
@@ -636,20 +687,52 @@ describe("after-pay Send for signature — names+emails start the existing signi
     expect(two).toBe(true);
     expect(three).toBe(true);
     expect(four).toBe(true);
-    expect(canStartPaidSessionSignatureTrackFromFinalReview({ namesAndEmailsComplete: two })).toBe(true);
-    expect(canStartPaidSessionSignatureTrackFromFinalReview({ namesAndEmailsComplete: three })).toBe(true);
-    expect(canStartPaidSessionSignatureTrackFromFinalReview({ namesAndEmailsComplete: four })).toBe(true);
+    expect(canStartPaidSessionSignatureTrackFromFinalReview({ namesAndEmailsComplete: two })).toBe(false);
+    expect(canStartPaidSessionSignatureTrackFromFinalReview({ namesAndEmailsComplete: three })).toBe(false);
+    expect(canStartPaidSessionSignatureTrackFromFinalReview({ namesAndEmailsComplete: four })).toBe(false);
+    expect(
+      canStartPaidSessionSignatureTrackFromFinalReview({
+        namesAndEmailsComplete: two,
+        hasVerifiedPaidReviewAuthority: true,
+      }),
+    ).toBe(true);
+    expect(
+      canStartPaidSessionSignatureTrackFromFinalReview({
+        namesAndEmailsComplete: three,
+        hasVerifiedPaidReviewAuthority: true,
+      }),
+    ).toBe(true);
+    expect(
+      canStartPaidSessionSignatureTrackFromFinalReview({
+        namesAndEmailsComplete: four,
+        hasVerifiedPaidReviewAuthority: true,
+      }),
+    ).toBe(true);
   });
 
   it("does not require authorized-signer-name / title / address once names+emails are complete", () => {
     expect(
       canStartPaidSessionSignatureTrackFromFinalReview({ namesAndEmailsComplete: true }),
+    ).toBe(false);
+    expect(
+      canStartPaidSessionSignatureTrackFromFinalReview({
+        namesAndEmailsComplete: true,
+        hasVerifiedPaidReviewAuthority: true,
+      }),
     ).toBe(true);
     expect(
       shouldRelaxPaidSessionSignatureTrackGates({
         paidSessionActive: true,
         visibleDealBody: true,
         namesAndEmailsComplete: true,
+      }),
+    ).toBe(false);
+    expect(
+      shouldRelaxPaidSessionSignatureTrackGates({
+        paidSessionActive: true,
+        visibleDealBody: true,
+        namesAndEmailsComplete: true,
+        hasVerifiedPaidReviewAuthority: true,
       }),
     ).toBe(true);
     expect(intakeSrc).not.toMatch(
@@ -755,6 +838,14 @@ describe("after-pay Send for signature — names+emails start the existing signi
         paidSessionFinalReviewDecisionReady: true,
         visibleFinalReviewCorpusLen: 900,
       }),
+    ).toBe(true);
+    expect(
+      shouldBlockPaidSessionFinalReviewSendForCorpus({
+        corpusBlocked: true,
+        paidSessionFinalReviewDecisionReady: true,
+        visibleFinalReviewCorpusLen: 900,
+        hasVerifiedPaidReviewAuthority: true,
+      }),
     ).toBe(false);
     expect(
       shouldBlockPaidSessionFinalReviewSendForCorpus({
@@ -783,6 +874,14 @@ describe("after-pay Send for signature — names+emails start the existing signi
         namesAndEmailsComplete: true,
         finalReviewOpened: true,
       }),
+    ).toBe(false);
+    expect(
+      canMountPaidSessionFinalReviewShell({
+        paidSessionVisibleDealBody: true,
+        namesAndEmailsComplete: true,
+        finalReviewOpened: true,
+        hasVerifiedPaidReviewAuthority: true,
+      }),
     ).toBe(true);
     // Painted deal alone must keep the 1001-char block so Reviewer 2 stays typeable.
     expect(
@@ -810,6 +909,16 @@ describe("after-pay Send for signature — names+emails start the existing signi
         paidSessionVisibleDealBody: true,
         namesAndEmailsComplete: true,
         finalReviewOpened: true,
+      }),
+    ).toBe(true);
+    expect(
+      shouldBypassPaidProReviewShellWithoutCorpus({
+        blockWithoutCanonicalCorpus: true,
+        canonicalFirstReviewActive: false,
+        paidSessionVisibleDealBody: true,
+        namesAndEmailsComplete: true,
+        finalReviewOpened: true,
+        hasVerifiedPaidReviewAuthority: true,
       }),
     ).toBe(false);
     expect(

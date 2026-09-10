@@ -5,6 +5,7 @@ import { validatePaidProOutput } from "./paidProCorpusAcceptance";
 import { resolveAgreementIntentContract } from "./agreementIntentContract";
 import { pickPremiumPaidReadonlyPlainText } from "./premiumReadonlyRenderCorpus";
 import { tryBuildPaidProLocalDeterministicFallback } from "./paidProLocalDeterministicFallback";
+import { normalizePaidProCandidateCompareLen } from "./paidProFirstReviewAuthoritySelection";
 import {
   buildFreeStarterBaselinePlain,
   isAuthoritativePaidProCorpusForGuided,
@@ -69,7 +70,7 @@ describe("paid Pro render surface guards", () => {
     });
     expect(surface.mode).toBe("premium_unavailable_retry");
     if (surface.mode === "premium_unavailable_retry") {
-      expect(surface.attemptedLen).toBe(starter.length);
+      expect(surface.attemptedLen).toBe(normalizePaidProCandidateCompareLen(starter));
       expect(surface.reason).toMatch(/free_starter|all_authority_candidates_failed/);
     }
   });

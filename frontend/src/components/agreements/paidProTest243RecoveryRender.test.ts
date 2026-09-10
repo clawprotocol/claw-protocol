@@ -12,7 +12,6 @@ import { PREMIUM_NETWORK_LOCAL_RECOVERY_RENDER_SOURCE } from "./premiumNetworkRe
 import {
   clearPaidProSourceOfTruth,
   establishPaidProSourceOfTruth,
-  getPaidProSourceOfTruth,
   hashPaidProCorpus,
   hasPaidProSourceOfTruth,
 } from "./paidProSourceOfTruth";
@@ -177,8 +176,10 @@ describe("paidPro Test243 post-checkout recovery render handoff", () => {
       isPremiumRequestStillValid: () => true,
       parseDraft: async () => structured,
     });
-    expect(out.premiumNetworkLocalRecovery).toBe(true);
-    expect(out.premiumRenderSource).toBe(PREMIUM_NETWORK_LOCAL_RECOVERY_RENDER_SOURCE);
+    expect(out.premiumNetworkRetryable).toBe(true);
+    expect(out.premiumRenderSource).toBe("premium_network_retryable");
+    expect(out.premiumNetworkLocalRecovery).toBe(false);
+    expect(hasPaidProSourceOfTruth()).toBe(false);
     expect((out.winningPremiumBodyText || "").trim().length).toBeGreaterThan(4_000);
   });
 
@@ -195,14 +196,18 @@ describe("paidPro Test243 post-checkout recovery render handoff", () => {
       premiumRenderSource,
       reviewSessionId: "g-test243-net",
     });
-    expect(commit.committed).toBe(true);
-    if (!commit.committed) return;
+    expect(commit.committed).toBe(false);
+    expect(commit.reason).toBe("recovery_cannot_seed_source_of_truth");
+    expect(hasPaidProSourceOfTruth()).toBe(false);
 
-    const renderPlain = resolvePaidProReviewRenderPlain({
+    const recoveryPlain = resolvePaidProPostCheckoutRecoveryDisplayPlain({
       draft: premiumDraft,
       intakeText: TEST243_INTAKE,
+      winningPremiumBodyText: localWinning,
+      premiumRenderSource,
     });
-    expect(renderPlain.length).toBeGreaterThanOrEqual(500);
+    expect(recoveryPlain.length).toBeGreaterThanOrEqual(500);
+    expect(recoveryPlain).toMatch(/Blue Canyon Analytics LLC/i);
 
     const guided = resolveGuidedFinalReviewAuthoritativeBody({
       candidates: [
@@ -211,8 +216,8 @@ describe("paidPro Test243 post-checkout recovery render handoff", () => {
       ],
       signingCorpusReady: false,
     });
-    expect(guided.source).not.toBe("none");
-    expect(guided.len).toBeGreaterThanOrEqual(500);
+    expect(guided.source).toBe("none");
+    expect(hasPaidProSourceOfTruth()).toBe(false);
 
     expect(
       hasRenderablePaidProFirstReviewCorpus({
@@ -221,7 +226,7 @@ describe("paidPro Test243 post-checkout recovery render handoff", () => {
         premiumRenderSource,
         premiumCheckoutCompleted: true,
       }),
-    ).toBe(true);
+    ).toBe(false);
     expect(
       shouldBlockPaidProReviewShellWithoutCanonicalCorpus({
         draft: premiumDraft,
@@ -229,7 +234,7 @@ describe("paidPro Test243 post-checkout recovery render handoff", () => {
         premiumRenderSource,
         premiumCheckoutCompleted: true,
       }),
-    ).toBe(false);
+    ).toBe(true);
   });
 
   it("invalid/empty recovery body does not qualify for paid first-review shell", () => {
@@ -335,15 +340,16 @@ describe("paidPro Test243 post-checkout recovery render handoff", () => {
       intakeText: TEST243_INTAKE,
       premiumRenderSource,
     });
-    expect(commit.committed).toBe(true);
+    expect(commit.committed).toBe(false);
+    expect(hasPaidProSourceOfTruth()).toBe(false);
     persistPremiumCompletionSnapshot({
       premiumDraft,
       premiumParties: [],
       recipientCandidates: [],
-      premiumWinningBodyText: commit.committed ? commit.record.text : localWinning,
-      premiumReadonlyPlainText: commit.committed ? commit.record.text : localWinning,
+      premiumWinningBodyText: localWinning,
+      premiumReadonlyPlainText: localWinning,
       premiumPipelineRenderSource: premiumRenderSource,
-      premiumAccepted: true,
+      premiumAccepted: false,
     });
     markPaidPremiumCompletionSession();
     expect(
@@ -368,13 +374,8 @@ describe("paidPro Test243 post-checkout recovery render handoff", () => {
       intakeText: TEST243_INTAKE,
       premiumRenderSource,
     });
-    expect(commit.committed).toBe(true);
-    if (!commit.committed) return;
-    const renderPlain = resolvePaidProReviewRenderPlain({
-      draft: premiumDraft,
-      intakeText: TEST243_INTAKE,
-    });
-    expect(countPaidProExecutionBlocks(renderPlain)).toBe(1);
-    expect(countPaidProExecutionBlocks(getPaidProSourceOfTruth()!.text)).toBe(1);
+    expect(commit.committed).toBe(false);
+    expect(hasPaidProSourceOfTruth()).toBe(false);
+    expect(countPaidProExecutionBlocks(localWinning)).toBe(1);
   });
 });
