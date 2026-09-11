@@ -3,7 +3,8 @@
  */
 
 import { apiUrl, errorMessageFromResponse, readJson } from "../lib/clawApi";
-import { setOrgId } from "../launch/orgContext";
+import { getOrgId, setOrgId } from "../launch/orgContext";
+import { isUserWorkspaceOrgId } from "../launch/simpleProduct/createWorkspaceProbeReadiness";
 
 const TOKEN_KEY = "claw_anon_session_token_v1";
 const SESSION_ID_KEY = "claw_anon_session_id_v1";
@@ -31,7 +32,9 @@ export function writeAnonymousSession(args: {
   sessionId: string;
   token: string;
 }): void {
-  setOrgId(args.orgId);
+  if (!isUserWorkspaceOrgId(getOrgId())) {
+    setOrgId(args.orgId);
+  }
   if (typeof sessionStorage === "undefined") return;
   try {
     sessionStorage.setItem(TOKEN_KEY, args.token);

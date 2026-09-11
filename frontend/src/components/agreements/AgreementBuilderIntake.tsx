@@ -477,6 +477,7 @@ import {
   readFullDraftUpgradeMarkerAgreementId,
   writeFullDraftUpgradeMarkerAgreementId,
   readAgreementCreatorIntakeStorage,
+  parseCreateAgreementIdFromSearch,
   readCreateReviewAgreementResumeId,
   resolveIntakeBootstrap,
   writeAgreementCreatorIntakeStorage,
@@ -15992,6 +15993,19 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     }
     if (agreementDocumentDirtyRef.current) return;
     if (hasPaidProSourceOfTruth()) return;
+    if (hasMaterialPremiumPipelineCorpus(draft)) {
+      const serverPlain = [
+        String((draft as { server_full_document_text?: string }).server_full_document_text ?? "").trim(),
+        String((draft as { premium_full_document_text?: string }).premium_full_document_text ?? "").trim(),
+        String((draft as { premium_server_full_document_text?: string }).premium_server_full_document_text ?? "").trim(),
+      ].reduce((best, t) => (t.length > best.length ? t : best), "");
+      if (serverPlain.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
+        if (agreementDocumentTextRef.current.trim() !== serverPlain) {
+          setAgreementDocumentText(serverPlain);
+        }
+        return;
+      }
+    }
     // UNIVERSAL PAID SESSION GUARD: Never overwrite a ≥200 non-hollow body during paid session
     // with a potentially hollow preview. The early fallback body must be preserved while generate runs.
     if (hasPaidPremiumCompletionSession() && lastKnownGoodAuthoritativeDraftRef.current.trim().length >= 200) {
@@ -18623,6 +18637,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     const hid =
       (resumeSignerSetupAgreementId || "").trim() ||
       readCreateReviewAgreementResumeId() ||
+      parseCreateAgreementIdFromSearch() ||
       (peekCreatorDashboardSignerSetupResume() || "").trim();
     if (!hid) return;
     const signerSetupResume =
@@ -18636,6 +18651,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           partyNameContext: "Party",
         });
         if (!ok || !ad) {
+          if (import.meta.env.DEV) {
+            console.info("[paid-pro-hydrate-miss]", { hid, ok, hasDraft: Boolean(ad) });
+          }
           if (!signerSetupResume) clearCreateReviewAgreementResumeId();
           productionResumeHydratedRef.current = false;
           return;
@@ -18792,7 +18810,67 @@ const AgreementBuilderIntake: React.FC<Props> = ({
             source: signerSetupResume ? "dashboard_signer_setup_resume_hydrate" : "production_resume_hydrate",
           });
         }
-        setDisplayPhase(nextDisplay);
+        if (signerSetupResume || nextDisplay === "intake") {
+          setDisplayPhase(nextDisplay);
+        }
+        if (!signerSetupResume) {
+          const productionResumeCorpus = [
+            String((adForHydrate as { premium_full_document_text?: string }).premium_full_document_text ?? "").trim(),
+            String(
+              (adForHydrate as { premium_server_full_document_text?: string }).premium_server_full_document_text ?? "",
+            ).trim(),
+            String((adForHydrate as { server_full_document_text?: string }).server_full_document_text ?? "").trim(),
+            String((next as { server_full_document_text?: string }).server_full_document_text ?? "").trim(),
+          ].reduce((best, t) => (t.length > best.length ? t : best), "");
+          if (productionResumeCorpus.length >= PAID_PRO_AUTHORITY_MIN_LEN) {
+            markCurrentSessionProIntent();
+            markCurrentSessionProEntitlementComplete({ source: "entitled_rewrite" });
+            let verifiedResumeCorpus = "";
+            try {
+              const snapHydrated = await hydrateCommercialReviewFromServerSnapshot({ agreementId: hid });
+              if (snapHydrated.ok) {
+                verifiedResumeCorpus = String(snapHydrated.snapshot.corpus_plain || "").trim();
+              }
+            } catch {
+              /* GET draft paper remains the resume authority if snapshot hydrate misses. */
+            }
+            const resumeCorpus =
+              verifiedResumeCorpus.length >= PAID_PRO_AUTHORITY_MIN_LEN
+                ? verifiedResumeCorpus
+                : productionResumeCorpus;
+            hydratedPremiumBodyRef.current = resumeCorpus;
+            lastPremiumWinningCorpusRef.current = resumeCorpus;
+            premiumPipelineOutputBodyRef.current = resumeCorpus;
+            lastKnownGoodAuthoritativeDraftRef.current = resumeCorpus;
+            setAgreementDocumentText(resumeCorpus);
+            setPremiumPersistedFlowActive(true);
+            setProFullDraftQualityRetry(false);
+            setDisplayPhase("review");
+            try {
+              commitCanonicalPaidProReviewSessionMarkers({
+                corpusPlain: resumeCorpus,
+                pipelineSource: "server_full_draft",
+              });
+            } catch {
+              /* preview still paints from refs */
+            }
+            try {
+              establishPaidProSourceOfTruth({
+                text: resumeCorpus,
+                source: "server_full_draft",
+                draft: next,
+                intakeText: rawIntake,
+                allowShorterOverwrite: true,
+                generationOutcome: "ok",
+              });
+            } catch {
+              /* SoT is a wipe-guard; document text still paints from refs */
+            }
+            bumpPremiumSurfaceGateTick();
+          } else {
+            setDisplayPhase(nextDisplay);
+          }
+        }
         if (signerSetupResume) {
           setProFullDraftQualityRetry(false);
           setProFullDraftCustomGateMessage(null);

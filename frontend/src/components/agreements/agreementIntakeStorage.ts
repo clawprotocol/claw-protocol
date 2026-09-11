@@ -14,6 +14,16 @@ const REVIEW_DRAFT_SNAPSHOT_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 /** Session-only: agreement id whose draft was upgraded with full-draft expansion (API may omit `additional_terms`). */
 export const AGREEMENT_CREATE_FULL_DRAFT_MARKER_KEY = "claw_agreement_create_full_draft_marker_v1";
 
+export function parseCreateAgreementIdFromSearch(search?: string | null): string {
+  try {
+    const raw = (search ?? (typeof window !== "undefined" ? window.location.search : "")).trim();
+    const qs = raw.startsWith("?") ? raw.slice(1) : raw;
+    return (new URLSearchParams(qs).get("agreementId") || "").trim();
+  } catch {
+    return "";
+  }
+}
+
 export function readCreateReviewAgreementResumeId(): string | null {
   if (typeof sessionStorage === "undefined") return null;
   try {

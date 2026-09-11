@@ -8,6 +8,7 @@ import AgreementBuilderIntake, {
 } from "../../components/agreements/AgreementBuilderIntake";
 import {
   clearCreateReviewAgreementResumeId,
+  parseCreateAgreementIdFromSearch,
   readCreateReviewAgreementResumeId,
   writeCreateReviewAgreementResumeId,
 } from "../../components/agreements/agreementIntakeStorage";
@@ -233,6 +234,13 @@ export function SimpleCreatePage() {
     if (fromSearch) return fromSearch;
     return "";
   });
+  const [resumeAgreementIdFromQuery] = useState(() => {
+    const id = parseCreateAgreementIdFromSearch(
+      typeof window !== "undefined" ? window.location.search : search,
+    );
+    if (id) writeCreateReviewAgreementResumeId(id);
+    return id;
+  });
   const openSignerSetupOnResume = Boolean(resumeSignerSetupAgreementId);
 
   useEffect(() => {
@@ -283,7 +291,7 @@ export function SimpleCreatePage() {
         heroPrefillText: heroHandoff?.text,
         usingTemplate,
         persistedIntakeWillApply,
-        resumeNotice: null,
+        resumeNotice: resumeAgreementIdFromQuery || readCreateReviewAgreementResumeId(),
       }),
     [
       quickSendTypedArrival,
@@ -291,6 +299,7 @@ export function SimpleCreatePage() {
       heroHandoff?.text,
       usingTemplate,
       persistedIntakeWillApply,
+      resumeAgreementIdFromQuery,
     ],
   );
 
@@ -311,7 +320,7 @@ export function SimpleCreatePage() {
         }),
         entitlement: resolveEntitlementStateFromTier(access.tier),
         isStarterAnonymousSession: hasCurrentSessionFreeStarterIntent(),
-        isResumingOwnedAgreement: Boolean(readCreateReviewAgreementResumeId()),
+        isResumingOwnedAgreement: Boolean(readCreateReviewAgreementResumeId() || resumeAgreementIdFromQuery),
         hasCheckoutPendingMarker: Boolean(readCreateComplexityResume()?.awaitingProCheckout),
         workspaceProEntitledProbe: workspaceProEntitled,
         commercialEntitlement: commercialEntitlement
@@ -331,9 +340,16 @@ export function SimpleCreatePage() {
           : null,
         hasPaidDemoPremiumSession: paidDemoPremiumSession,
       }),
-    [access.tier, createAuthAuthenticated, workspaceProEntitled, commercialEntitlement, paidDemoPremiumSession],
+    [
+      access.tier,
+      createAuthAuthenticated,
+      workspaceProEntitled,
+      commercialEntitlement,
+      paidDemoPremiumSession,
+      resumeAgreementIdFromQuery,
+    ],
   );
-  const isResumingOwnedAgreement = Boolean(readCreateReviewAgreementResumeId());
+  const isResumingOwnedAgreement = Boolean(readCreateReviewAgreementResumeId() || resumeAgreementIdFromQuery);
   const hasCheckoutPendingMarker = Boolean(readCreateComplexityResume()?.awaitingProCheckout);
   const editorGatedUntilEntitlement = shouldGateCreateEditorUntilEntitlementReady({
     isAuthenticated: createAuthAuthenticated,

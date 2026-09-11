@@ -220,12 +220,13 @@ export function sanitizeVisibleSignInUrl(): void {
   }
 }
 
-export function stripSensitiveAuthCallbackUrl(): void {
+export function stripSensitiveAuthCallbackUrl(opts?: { keepContinuationId?: boolean }): void {
   if (typeof window === "undefined" || typeof window.history?.replaceState !== "function") return;
   try {
     const url = new URL(window.location.href);
     let changed = false;
     for (const key of SENSITIVE_CALLBACK_KEYS) {
+      if (opts?.keepContinuationId && key === "continuation_id") continue;
       if (url.searchParams.has(key)) {
         url.searchParams.delete(key);
         changed = true;

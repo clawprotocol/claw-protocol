@@ -2,6 +2,7 @@ import { paidProAuthorityBlocksStarterReviewRestore } from "./authoritativePaidP
 import { hasCheckoutBackRestoreSnapshot } from "./checkoutBackRestore";
 import {
   hasStoredCreateReviewState,
+  parseCreateAgreementIdFromSearch,
   readCreateReviewAgreementResumeId,
   readCreateReviewDraftReadyMarker,
 } from "./agreementIntakeStorage";
@@ -52,11 +53,7 @@ export function shouldRestoreStoredCreateReviewDraftSnapshot(): boolean {
 
 export function shouldHydrateStoredAgreementResumeId(opts?: SkipHomeAutoGenerateOptions): boolean {
   if (opts?.freshHomeHeroHandoff || hasCurrentSessionFreeStarterIntent()) return false;
-  // Signer-setup resume always hydrates the agreement id from workspace GET.
-  if (isCreatorDashboardSignerSetupResumeActive()) {
-    return Boolean(readCreateReviewAgreementResumeId());
-  }
-  return Boolean(readCreateReviewAgreementResumeId());
+  return Boolean(readCreateReviewAgreementResumeId() || parseCreateAgreementIdFromSearch());
 }
 
 export type SkipHomeAutoGenerateOptions = {

@@ -4,7 +4,7 @@ import type { User } from "@supabase/supabase-js";
 import { waitForAuthSession } from "../auth/supabaseAuthService";
 import { finalizeAuthenticatedSessionFromAuthCallback } from "../auth/authCallbackFinalizeDedup";
 import { logProductEvent } from "../lib/experimentation/productEvents";
-import { writeContinuationId } from "../auth/authContinuationApi";
+import { readContinuationId, writeContinuationId } from "../auth/authContinuationApi";
 import {
   resolveAuthCallbackDestination,
   stripSensitiveAuthCallbackUrl,
@@ -16,8 +16,9 @@ import {
 } from "../auth/authUserFacingCopy";
 import { bindAuthenticatedUserToWorkspace } from "../auth/workspaceBindingApi";
 import { displayNameFromUser } from "../auth/postAuthFinalizer";
-import { getOrgId } from "./orgContext";
+import { getOrgId, setOrgId } from "./orgContext";
 import { isStaleAnonymousOrgId, isUserWorkspaceOrgId } from "./simpleProduct/createWorkspaceProbeReadiness";
+import { writeCreateReviewAgreementResumeId } from "../components/agreements/agreementIntakeStorage";
 
 function inferClaimMethod(user: User): "magic_link" | "google" | "session_restore" {
   const provider =
@@ -36,24 +37,28 @@ export function AuthCallbackPage() {
   const { navigate, search } = useLaunchNav();
   const [error, setError] = useState<string | null>(null);
   const [phase, setPhase] = useState<"loading" | "success" | "unavailable">("loading");
+  const startedRef = useRef(false);
   const completedRef = useRef(false);
 
   useEffect(() => {
-    if (completedRef.current) return;
-    let cancel = false;
+    if (startedRef.current || completedRef.current) return;
+    startedRef.current = true;
     void (async () => {
       const params = new URLSearchParams(search.startsWith("?") ? search.slice(1) : search);
-      const continuationId = (params.get("continuation_id") || "").trim();
-      const callerNext = params.get("next");
-      stripSensitiveAuthCallbackUrl();
+      const windowParams =
+        typeof window !== "undefined" ? new URLSearchParams(window.location.search) : new URLSearchParams();
+      const continuationId =
+        (params.get("continuation_id") || "").trim() ||
+        (windowParams.get("continuation_id") || "").trim() ||
+        (readContinuationId() || "").trim();
+      const callerNext = params.get("next") ?? windowParams.get("next");
+      stripSensitiveAuthCallbackUrl({ keepContinuationId: true });
 
       try {
         const session = await waitForAuthSession();
         if (!session?.user) {
-          if (!cancel) {
-            setError(AUTH_UNAVAILABLE_COPY);
-            setPhase("unavailable");
-          }
+          setError(AUTH_UNAVAILABLE_COPY);
+          setPhase("unavailable");
           logProductEvent("authentication_failed", { reason: "no_session" });
           return;
         }
@@ -67,10 +72,8 @@ export function AuthCallbackPage() {
             continuationId: continuationId || null,
           });
         } catch (finalizeErr) {
-          if (!cancel) {
-            setError(AUTH_UNAVAILABLE_COPY);
-            setPhase("unavailable");
-          }
+          setError(AUTH_UNAVAILABLE_COPY);
+          setPhase("unavailable");
           logProductEvent("authentication_failed", { reason: "continuation_failed" });
           return;
         }
@@ -94,12 +97,14 @@ export function AuthCallbackPage() {
           logProductEvent("continuation_restored", { surface: "auth_callback" });
         }
 
-        if (!isUserWorkspaceOrgId(getOrgId())) {
-          if (!cancel) {
-            completedRef.current = true;
-            setPhase("success");
-            navigate("/app");
-          }
+        const serverOrg = (result.orgId || "").trim() || getOrgId();
+        if (isUserWorkspaceOrgId(serverOrg)) {
+          setOrgId(serverOrg);
+        }
+        if (!isUserWorkspaceOrgId(serverOrg)) {
+          completedRef.current = true;
+          setPhase("success");
+          navigate("/app");
           return;
         }
 
@@ -108,21 +113,23 @@ export function AuthCallbackPage() {
           usedContinuation: result.usedContinuation,
           callerNext,
         });
-        if (!cancel) {
-          completedRef.current = true;
-          setPhase("success");
-          navigate(destination);
+        try {
+          const destAid = new URL(destination, "http://lawdog.local").searchParams.get("agreementId")?.trim();
+          if (destAid) writeCreateReviewAgreementResumeId(destAid);
+        } catch {
+          /* Destination path is still navigated even if resume storage is unavailable. */
         }
+        completedRef.current = true;
+        setPhase("success");
+        navigate(destination);
       } catch {
-        if (!cancel) {
-          setError(AUTH_UNAVAILABLE_COPY);
-          setPhase("unavailable");
-          logProductEvent("authentication_failed", { reason: "callback_failed" });
-        }
+        setError(AUTH_UNAVAILABLE_COPY);
+        setPhase("unavailable");
+        logProductEvent("authentication_failed", { reason: "callback_failed" });
       }
     })();
     return () => {
-      cancel = true;
+      if (!completedRef.current) startedRef.current = false;
     };
   }, [navigate, search]);
 
