@@ -15,9 +15,20 @@ PLAYWRIGHT="${ROOT}/frontend/node_modules/.bin/playwright"
 VITE_LOG="${TMPDIR:-/tmp}/phase4c1-vite.log"
 VITE_PID=""
 
+kill_tree() {
+  local pid="${1:-}"
+  [[ -z "${pid}" ]] && return 0
+  local kids
+  kids="$(pgrep -P "${pid}" 2>/dev/null || true)"
+  for child in ${kids}; do
+    kill_tree "${child}"
+  done
+  kill -TERM "${pid}" 2>/dev/null || true
+}
+
 cleanup() {
-  if [[ -n "${VITE_PID}" ]] && kill -0 "${VITE_PID}" 2>/dev/null; then
-    kill "${VITE_PID}" 2>/dev/null || true
+  if [[ -n "${VITE_PID}" ]]; then
+    kill_tree "${VITE_PID}"
     wait "${VITE_PID}" 2>/dev/null || true
   fi
 }
