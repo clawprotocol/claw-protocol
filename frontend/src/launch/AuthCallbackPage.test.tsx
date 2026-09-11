@@ -65,6 +65,7 @@ describe("AuthCallbackPage", () => {
     } as never);
     vi.mocked(finalizeAuthenticatedSessionFromAuthCallback).mockResolvedValue({
       destinationPath: "/app/create?agreementId=ag-phase4b5-orion",
+      orgId: "user-phase4b5-owner",
       migratedAgreementCount: 1,
       migratedAgreementIds: ["ag-phase4b5-orion"],
       usedContinuation: true,
@@ -75,6 +76,16 @@ describe("AuthCallbackPage", () => {
       expect(navState.navigate).toHaveBeenCalledWith("/app/create?agreementId=ag-phase4b5-orion"),
     );
     expect(navState.navigate).not.toHaveBeenCalledWith("/app.evil");
+  });
+
+  it("shows unavailable after remount when there is no session", async () => {
+    navState.search = "?continuation_id=cont-expired";
+    vi.mocked(waitForAuthSession).mockResolvedValue(null);
+    const first = render(<AuthCallbackPage />);
+    first.unmount();
+    const { getByTestId } = render(<AuthCallbackPage />);
+    await waitFor(() => expect(getByTestId("auth-callback-unavailable")).toBeTruthy());
+    expect(navState.navigate).not.toHaveBeenCalled();
   });
 
   it("fails closed on a consumed continuation without following next", async () => {

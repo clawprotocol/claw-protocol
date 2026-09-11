@@ -65,3 +65,36 @@ describe("mergePaidProAuthoritativeDraftFieldsFromApi", () => {
     expect(mergePaidProAuthoritativeDraftFieldsFromApi(coerced, null)).toBe(coerced);
   });
 });
+
+import { normalizeAgreementDraftFromApi } from "../../agreement/agreementDraftNormalize";
+
+describe("phase4b51 GET draft normalize", () => {
+  it("keeps server paper on the fixture payload", () => {
+    const paper = `${"PHASE4B51 PAID ORION SAAS AGREEMENT\n"}${"x".repeat(600)}`;
+    const draft = normalizeAgreementDraftFromApi(
+      {
+        id: "ag-phase4b51-create",
+        title: "PHASE4B51 PAID ORION SAAS AGREEMENT",
+        jurisdiction: "New York",
+        parties: [
+          { name: "Orion Harbor LLC", role: "Provider" },
+          { name: "Northwind Retail Inc", role: "Customer" },
+        ],
+        purpose: "Hosted SaaS subscription.",
+        payment_terms: "$180,000 annual",
+        duration: "12 months",
+        document_text: paper,
+        server_full_document_text: paper,
+        premium_full_document_text: paper,
+        premium_render_source: "server_full_document_text",
+        created_at: "2026-09-01T00:00:00.000Z",
+        updated_at: "2026-09-01T00:00:00.000Z",
+        versions: [{ version: 1, created_at: "2026-09-01T00:00:00.000Z" }],
+        audit_log: [],
+      },
+      { fallbackAgreementId: "ag-phase4b51-create", partyNameContext: "Party" },
+    );
+    expect(draft).not.toBeNull();
+    expect(String(draft?.server_full_document_text || "").length).toBeGreaterThanOrEqual(500);
+  });
+});

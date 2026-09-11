@@ -18,7 +18,8 @@ echo ""
 echo "---- Route coverage (fail closed if /agreements/:id/sign loses public recipient-token treatment) ----"
 (cd frontend && "$VITEST" run src/launch/phase4b2RecipientSigningCoverage.test.ts --reporter=dot)
 echo ""
-echo "---- Recipient-signing browser proof (desktop + mobile, retries=0, workers=2) ----"
-(cd frontend && "$PLAYWRIGHT" test --config playwright.phase4b2.config.ts --workers=2 --reporter=line)
+echo "---- Recipient-signing browser proof (desktop + mobile, retries=0; deterministic workers=1 split) ----"
+(cd frontend && "$PLAYWRIGHT" test --config playwright.phase4b2.config.ts --workers=1 --grep-invert "retryable network" --reporter=line)
+(cd frontend && "$PLAYWRIGHT" test --config playwright.phase4b2.config.ts --workers=1 -g "retryable network" --reporter=line)
 echo ""
 echo "== Phase 4B.2 recipient-signing browser gate: PASS =="

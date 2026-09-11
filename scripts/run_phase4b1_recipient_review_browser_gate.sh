@@ -18,7 +18,7 @@ echo ""
 echo "---- Route coverage (fail closed if primary or legacy loses recipient-token classification) ----"
 (cd frontend && "$VITEST" run src/launch/phase4b1RecipientReviewCoverage.test.ts --reporter=dot)
 echo ""
-echo "---- Recipient-review browser proof (desktop + mobile, retries=0, workers=2) ----"
-(cd frontend && "$PLAYWRIGHT" test --config playwright.phase4b1.config.ts --workers=2 --reporter=line)
+echo "---- Recipient-review browser proof (desktop + mobile, retries=0, workers=1) ----"
+(cd frontend && "$PLAYWRIGHT" test --config playwright.phase4b1.config.ts --workers=1 --reporter=line)
 echo ""
 echo "== Phase 4B.1 recipient-review browser gate: PASS =="

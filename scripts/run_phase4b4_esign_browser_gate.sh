@@ -18,7 +18,7 @@ echo ""
 echo "---- Route coverage (fail closed if query-sensitive esign access is lost) ----"
 (cd frontend && "$VITEST" run src/launch/phase4b4EsignDualModeCoverage.test.ts --reporter=dot)
 echo ""
-echo "---- Esign dual-mode browser proof (desktop + mobile, retries=0, workers=2) ----"
-(cd frontend && "$PLAYWRIGHT" test --config playwright.phase4b4.config.ts --workers=2 --reporter=line)
+echo "---- Esign dual-mode browser proof (desktop + mobile, retries=0, workers=1) ----"
+(cd frontend && "$PLAYWRIGHT" test --config playwright.phase4b4.config.ts --workers=1 --reporter=line)
 echo ""
 echo "== Phase 4B.4 esign dual-mode browser gate: PASS =="

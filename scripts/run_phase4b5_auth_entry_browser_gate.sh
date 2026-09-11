@@ -18,7 +18,7 @@ echo ""
 echo "---- Route coverage (fail closed if prefix allowlist or next-over-server returns) ----"
 (cd frontend && "$VITEST" run src/launch/phase4b5AuthEntryCoverage.test.ts src/launch/AuthCallbackPage.test.tsx src/auth/safeRedirectResolver.test.ts --reporter=dot)
 echo ""
-echo "---- Auth entry browser proof (desktop + mobile, retries=0, workers=2) ----"
-(cd frontend && "$PLAYWRIGHT" test --config playwright.phase4b5.config.ts --workers=2 --reporter=line)
+echo "---- Auth entry browser proof (desktop + mobile, retries=0, workers=1) ----"
+(cd frontend && "$PLAYWRIGHT" test --config playwright.phase4b5.config.ts --workers=1 --reporter=line)
 echo ""
 echo "== Phase 4B.5 authenticated customer entry browser gate: PASS =="

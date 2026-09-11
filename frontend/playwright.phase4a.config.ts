@@ -7,6 +7,7 @@ export default defineConfig({
   testDir: "./e2e/phase4a",
   fullyParallel: true,
   retries: 0,
+  workers: 1,
   forbidOnly: true,
   use: {
     baseURL: "http://127.0.0.1:4173",

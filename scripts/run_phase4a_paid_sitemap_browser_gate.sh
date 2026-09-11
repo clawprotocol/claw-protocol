@@ -18,7 +18,7 @@ echo ""
 echo "---- Manifest coverage (fail closed if a new authenticated/paid route is uncovered) ----"
 (cd frontend && "$VITEST" run src/launch/phase4aPaidSitemapCoverage.test.ts --reporter=dot)
 echo ""
-echo "---- Paid-owner sitemap browser proof (desktop + mobile, retries=0) ----"
-(cd frontend && "$PLAYWRIGHT" test --config playwright.phase4a.config.ts --reporter=line)
+echo "---- Paid-owner sitemap browser proof (desktop + mobile, retries=0, workers=1) ----"
+(cd frontend && "$PLAYWRIGHT" test --config playwright.phase4a.config.ts --workers=1 --reporter=line)
 echo ""
 echo "== Phase 4A paid-owner sitemap browser gate: PASS =="

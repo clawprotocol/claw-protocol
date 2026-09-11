@@ -11,6 +11,7 @@ const mockUser = { id: "user-1", email: "u@example.com" } as User;
 
 const mockResult: PostAuthFinalizeResult = {
   destinationPath: "/app/dashboard",
+  orgId: "user-1",
   migratedAgreementCount: 1,
   migratedAgreementIds: ["ag-1"],
   usedContinuation: true,
@@ -51,7 +52,7 @@ describe("authCallbackFinalizeDedup", () => {
     expect(finalizeAuthenticatedSession).toHaveBeenCalledTimes(1);
   });
 
-  it("allows a new call after the prior promise settles", async () => {
+  it("reuses the settled result so remount does not claim twice", async () => {
     await finalizeAuthenticatedSessionFromAuthCallback({
       user: mockUser,
       claimMethod: "magic_link",
@@ -61,6 +62,20 @@ describe("authCallbackFinalizeDedup", () => {
       user: mockUser,
       claimMethod: "magic_link",
       continuationId: "cont-2",
+    });
+    expect(finalizeAuthenticatedSession).toHaveBeenCalledTimes(1);
+  });
+
+  it("starts a new claim for a different continuation", async () => {
+    await finalizeAuthenticatedSessionFromAuthCallback({
+      user: mockUser,
+      claimMethod: "magic_link",
+      continuationId: "cont-a",
+    });
+    await finalizeAuthenticatedSessionFromAuthCallback({
+      user: mockUser,
+      claimMethod: "magic_link",
+      continuationId: "cont-b",
     });
     expect(finalizeAuthenticatedSession).toHaveBeenCalledTimes(2);
   });

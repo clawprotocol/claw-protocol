@@ -18,7 +18,7 @@ echo ""
 echo "---- Route coverage (fail closed if public verify routes lose public treatment) ----"
 (cd frontend && "$VITEST" run src/launch/phase4b3PublicVerifyCoverage.test.ts --reporter=dot)
 echo ""
-echo "---- Public-verify browser proof (desktop + mobile, retries=0, workers=2) ----"
-(cd frontend && "$PLAYWRIGHT" test --config playwright.phase4b3.config.ts --workers=2 --reporter=line)
+echo "---- Public-verify browser proof (desktop + mobile, retries=0, workers=1) ----"
+(cd frontend && "$PLAYWRIGHT" test --config playwright.phase4b3.config.ts --workers=1 --reporter=line)
 echo ""
 echo "== Phase 4B.3 public-verify browser gate: PASS =="
