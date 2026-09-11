@@ -1,6 +1,11 @@
 """Phase 4B.5 — router-aware post-auth redirect validation."""
 
-from backend.security.safe_redirect import is_allowlisted_internal_path, resolve_safe_redirect_path
+from backend.security.safe_redirect import (
+    is_allowlisted_internal_path,
+    is_approved_server_quick_pdf_return,
+    resolve_safe_redirect_path,
+    resolve_server_auth_destination,
+)
 
 
 def test_valid_owner_workflow_destinations_are_preserved() -> None:
@@ -36,6 +41,7 @@ def test_prefix_tricks_and_open_redirects_fail_closed() -> None:
         "/review",
         "/sign",
         "/app/quick",
+        "/app/quick?start=pdf",
         "/app/admin",
         "/app/create?t=secret-token",
         "/agreements/ag-1/sign?t=secret-token",
@@ -47,3 +53,9 @@ def test_prefix_tricks_and_open_redirects_fail_closed() -> None:
     for path in rejected:
         assert is_allowlisted_internal_path(path) is False, path
         assert resolve_safe_redirect_path(path, "/app") == "/app", path
+
+
+def test_server_quick_pdf_return_does_not_open_caller_next() -> None:
+    assert is_approved_server_quick_pdf_return("/app/quick?start=pdf") is True
+    assert resolve_server_auth_destination("/app/quick?start=pdf", "/app") == "/app/quick?start=pdf"
+    assert resolve_safe_redirect_path("/app/quick?start=pdf", "/app") == "/app"

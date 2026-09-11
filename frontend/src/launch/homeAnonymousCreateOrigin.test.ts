@@ -46,18 +46,18 @@ describe("homeAnonymousCreateOrigin", () => {
     expect(isHomeAnonymousStarterAuthorityActive()).toBe(false);
   });
 
-  it("denies authority when only history.state.clawHeroFromHome exists (no session marker)", () => {
+  it("grants authority from history.state.clawHeroFromHome so remount keeps the same handoff", () => {
     window.history.replaceState({ clawHeroFromHome: true }, "", "/app/create");
-    expect(isHomeAnonymousStarterAuthorityActive()).toBe(false);
+    expect(isHomeAnonymousStarterAuthorityActive()).toBe(true);
   });
 
-  it("consumeHomeAnonymousCreateAuthority clears the session marker", () => {
+  it("consumeHomeAnonymousCreateAuthority clears the session marker without revoking the live history handoff", () => {
     markHomeAnonymousCreateOrigin();
     window.history.replaceState({ clawHeroFromHome: true }, "", "/app/create");
     expect(isHomeAnonymousStarterAuthorityActive()).toBe(true);
     consumeHomeAnonymousCreateAuthority();
     expect(hasHomeAnonymousCreateOrigin()).toBe(false);
-    expect(isHomeAnonymousStarterAuthorityActive()).toBe(false);
+    expect(isHomeAnonymousStarterAuthorityActive()).toBe(true);
   });
 
   it("typed URL / hard refresh without fresh homepage navigation denies authority", () => {

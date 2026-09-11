@@ -141,6 +141,20 @@ describe("safeRedirectResolver", () => {
         callerNext: "/app.evil",
       }),
     ).toBe("/app");
+    expect(
+      resolveAuthCallbackDestination({
+        serverDestination: "/app/quick?start=pdf",
+        usedContinuation: true,
+        callerNext: "/app/quick?start=pdf&t=secret",
+      }),
+    ).toBe("/app/quick?start=pdf");
+    expect(
+      resolveAuthCallbackDestination({
+        serverDestination: "",
+        usedContinuation: false,
+        callerNext: "/app/quick?start=pdf",
+      }),
+    ).toBe("/app");
   });
 });
 

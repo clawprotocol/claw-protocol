@@ -132,7 +132,7 @@ describe("RequireAuthenticatedDashboard", () => {
     expect(screen.queryByTestId("create-intake")).toBeNull();
   });
 
-  it("allows anonymous /app/create access when homepage handoff marker is active and consumes authority", () => {
+  it("allows anonymous /app/create access when homepage handoff is active without consuming on first paint", () => {
     navState.pathname = "/app/create";
     navState.search = "";
     navState.navigate = vi.fn();
@@ -144,7 +144,7 @@ describe("RequireAuthenticatedDashboard", () => {
     );
     expect(screen.queryByTestId("auth-dashboard-required")).toBeNull();
     expect(screen.getByTestId("create-intake")).toBeTruthy();
-    expect(mockConsumeAuthority).toHaveBeenCalledTimes(1);
+    expect(mockConsumeAuthority).not.toHaveBeenCalled();
   });
 
   it("does not consume authority when blocked (no handoff)", () => {
