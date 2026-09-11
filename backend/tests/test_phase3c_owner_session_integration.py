@@ -180,9 +180,17 @@ def test_phase3c_owner_session_independence_full_api_lifecycle(
     assert draft["frozen_signing_authority_v1"]["packetState"] == "active"
     assert draft["vs01_signing_packet_v1"]["packet_state"] == "active"
 
+    from backend.tests.vs01_packet_token_support import mint_vs01_packet_sign_token
+
+    packet_tok = mint_vs01_packet_sign_token(aid, "party_beta")
     public_packet = client.get(
         f"/api/agreements/public/{aid}/vs01-signing-packet",
-        params={"document_id": "doc_phase3c", "packet_revision": "rev_phase3c", "participant_id": "party_beta"},
+        params={
+            "document_id": "doc_phase3c",
+            "packet_revision": "rev_phase3c",
+            "participant_id": "party_beta",
+            "t": packet_tok,
+        },
     )
     assert public_packet.status_code == 200
     pub = public_packet.json()
@@ -194,7 +202,7 @@ def test_phase3c_owner_session_independence_full_api_lifecycle(
     assert cancel.status_code == 200
     blocked = client.get(
         f"/api/agreements/public/{aid}/vs01-signing-packet",
-        params={"document_id": "doc_phase3c", "packet_revision": "rev_phase3c"},
+        params={"document_id": "doc_phase3c", "packet_revision": "rev_phase3c", "t": packet_tok},
     )
     assert blocked.status_code == 403
 

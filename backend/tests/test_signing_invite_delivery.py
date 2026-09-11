@@ -255,9 +255,15 @@ def test_signing_links_sent_persists_vs01_portable_packet_for_public_hydration(
             json=body,
         )
     assert res.status_code == 200
+    from backend.tests.vs01_packet_token_support import mint_vs01_packet_sign_token
+
     get_res = client.get(
         f"/api/agreements/public/{aid}/vs01-signing-packet",
-        params={"document_id": "doc_test346", "packet_revision": "rev_test346"},
+        params={
+            "document_id": "doc_test346",
+            "packet_revision": "rev_test346",
+            "t": mint_vs01_packet_sign_token(aid, "p_owner"),
+        },
     )
     assert get_res.status_code == 200
     payload = get_res.json()

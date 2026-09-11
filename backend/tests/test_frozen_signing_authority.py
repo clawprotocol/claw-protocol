@@ -263,9 +263,15 @@ def test_cancelled_packet_public_endpoint_fails_closed(
     client.post(f"/api/agreements/{aid}/signing-links-sent", headers=_ORG_H, json=body)
     cancel = client.post(f"/api/agreements/{aid}/signing-packet/cancel", headers=_ORG_H, json={})
     assert cancel.status_code == 200
+    from backend.tests.vs01_packet_token_support import mint_vs01_packet_sign_token
+
     get_res = client.get(
         f"/api/agreements/public/{aid}/vs01-signing-packet",
-        params={"document_id": "doc_frozen", "packet_revision": "rev_cancel"},
+        params={
+            "document_id": "doc_frozen",
+            "packet_revision": "rev_cancel",
+            "t": mint_vs01_packet_sign_token(aid, "p_cp"),
+        },
     )
     assert get_res.status_code == 403
     detail = get_res.json().get("detail")

@@ -212,10 +212,13 @@ def test_superseded_signing_link_blocked_on_packet_fetch(
     # Email-only registry seed (no JTI bump): authorized test escape hatch.
     save_draft({**draft, "id": aid}, preserve_newer_recipient_delivery=False)
 
+    from backend.tests.vs01_packet_token_support import mint_vs01_packet_sign_token
+
     res = client.get(
         f"/api/agreements/public/{aid}/vs01-signing-packet"
         f"?document_id=doc_test&packet_revision=rev_test"
-        f"&recipient_email=wrong@example.com&participant_id={cp_id}",
+        f"&recipient_email=wrong@example.com&participant_id={cp_id}"
+        f"&t={mint_vs01_packet_sign_token(aid, cp_id)}",
     )
     assert res.status_code == 403
     detail = res.json().get("detail") or {}

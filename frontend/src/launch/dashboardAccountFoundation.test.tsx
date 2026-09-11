@@ -311,9 +311,13 @@ describe("dashboard account foundation", () => {
     expect(isDashboardAccountSurface("/app/verify/ag_1")).toBe(false);
   });
 
-  it("public signer esign route is not a dashboard account surface", () => {
-    expect(isPublicTokenAgreementSurface("/app/esign/doc_abc")).toBe(true);
+  it("esign document access is query-sensitive", () => {
+    expect(isPublicTokenAgreementSurface("/app/esign/doc_abc")).toBe(false);
     expect(isDashboardAccountSurface("/app/esign/doc_abc")).toBe(false);
+    expect(isPublicTokenAgreementSurface("/app/esign/doc_abc", "?vs01_recipient_sign=1")).toBe(true);
+    expect(isDashboardAccountSurface("/app/esign/doc_abc", "?vs01_recipient_sign=1")).toBe(false);
+    expect(isPublicTokenAgreementSurface("/app/esign/doc_abc", "?agreement_bridge=1")).toBe(false);
+    expect(isDashboardAccountSurface("/app/esign/doc_abc", "?agreement_bridge=1")).toBe(true);
   });
 
   it("agreement #2 creation does not alter agreement #1 review/signing state", () => {

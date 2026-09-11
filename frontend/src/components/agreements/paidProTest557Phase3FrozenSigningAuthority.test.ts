@@ -47,6 +47,8 @@ import {
 } from "../../vs01/paidProTest463Fixtures";
 import { resolveVs01RecipientIdentityFromAuthority } from "../../vs01/vs01RecipientIdentityAuthority";
 import { bootstrapVs01RecipientSigningAuthority } from "../../vs01/vs01RecipientAuthorityBootstrap";
+import * as recipientAccessApi from "../../agreement/recipientAccessApi";
+import * as vs01SigningPacketServer from "../../vs01/vs01SigningPacketServer";
 import { buildSigningInviteTargetsFromHandoff } from "../../vs01/vs01SigningInviteDelivery";
 import { resolveRecipientInitialsEnabled } from "../../vs01/vs01RecipientSignerMarksHydration";
 import { hashPaidProCorpus } from "./paidProSourceOfTruth";
@@ -314,15 +316,29 @@ describe("paidProTest557 Phase 3 frozen signing authority", () => {
     });
     expect(enabled).toBe(true);
     expect(portable.initialsPolicy.enabled).toBe(true);
+    vi.spyOn(recipientAccessApi, "validateRecipientAccessToken").mockResolvedValue({
+      ok: true,
+      data: {
+        ok: true,
+        agreement_id: TEST463_AG,
+        mode: "sign",
+        locked_version_id: "v1",
+        recipient_party_id: portable.roles[1]?.partyId ?? "",
+      },
+    });
+    vi.spyOn(vs01SigningPacketServer, "fetchPublicVs01SigningPacket").mockResolvedValue({
+      ok: true,
+      portable,
+    });
     const boot = await bootstrapVs01RecipientSigningAuthority({
       agreementId: TEST463_AG,
       documentId: portable.seed.documentId,
+      recipientAccessToken: "tok_557_initials",
       urlSignerRoleId: portable.roles[1]?.roleId ?? null,
       urlCounterpartyId: portable.roles[1]?.vs01CounterpartyId ?? portable.roles[1]?.partyId ?? "",
       urlRecipientIndex: 1,
       urlRecipientName: portable.roles[1]?.entityName ?? "",
       urlRecipientEmail: portable.roles[1]?.signerEmail ?? "",
-      cachedPortable: portable,
     });
     expect(boot.ok).toBe(true);
     if (!boot.ok || !("initialsEnabled" in boot)) return;
@@ -626,15 +642,29 @@ describe("paidProTest557 Phase 3 frozen signing authority", () => {
 
   it("Case 21 — VS01 lifecycle uses durable portable packet", async () => {
     const { portable } = buildTest463FourPartyPreparePacket();
+    vi.spyOn(recipientAccessApi, "validateRecipientAccessToken").mockResolvedValue({
+      ok: true,
+      data: {
+        ok: true,
+        agreement_id: TEST463_AG,
+        mode: "sign",
+        locked_version_id: "v1",
+        recipient_party_id: portable.roles[0]?.partyId ?? "",
+      },
+    });
+    vi.spyOn(vs01SigningPacketServer, "fetchPublicVs01SigningPacket").mockResolvedValue({
+      ok: true,
+      portable,
+    });
     const boot = await bootstrapVs01RecipientSigningAuthority({
       agreementId: TEST463_AG,
       documentId: portable.seed.documentId,
+      recipientAccessToken: "tok_557_lifecycle",
       urlSignerRoleId: portable.roles[0]?.roleId ?? null,
       urlCounterpartyId: portable.roles[0]?.vs01CounterpartyId ?? portable.roles[0]?.partyId ?? "",
       urlRecipientIndex: 0,
       urlRecipientName: portable.roles[0]?.entityName ?? "",
       urlRecipientEmail: portable.roles[0]?.signerEmail ?? "",
-      cachedPortable: portable,
     });
     expect(boot.ok).toBe(true);
   });

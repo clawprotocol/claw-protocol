@@ -64,6 +64,15 @@ describe("currentUser adapter", () => {
     expect(isAuthenticatedDashboardSurface("/app/verification/ag_123")).toBe(true);
   });
 
+  it("classifies /app/esign/:documentId by query, not path alone", () => {
+    expect(isPublicTokenAgreementSurface("/app/esign/doc_abc")).toBe(false);
+    expect(isAuthenticatedDashboardSurface("/app/esign/doc_abc")).toBe(false);
+    expect(isPublicTokenAgreementSurface("/app/esign/doc_abc", "?agreement_bridge=1")).toBe(false);
+    expect(isAuthenticatedDashboardSurface("/app/esign/doc_abc", "?agreement_bridge=1")).toBe(true);
+    expect(isPublicTokenAgreementSurface("/app/esign/doc_abc", "?vs01_recipient_sign=1")).toBe(true);
+    expect(isAuthenticatedDashboardSurface("/app/esign/doc_abc", "?vs01_recipient_sign=1")).toBe(false);
+  });
+
   it("recognizes a legacy recipient token in first query position", () => {
     expect(isPublicTokenAgreementSurface("/app/agreements/ag_123", "?token=secret")).toBe(true);
     expect(isPublicTokenAgreementSurface("/app/agreements/ag_123", "?t=secret&return=1")).toBe(true);
