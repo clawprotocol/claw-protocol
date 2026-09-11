@@ -43,13 +43,35 @@ export function buildAuthCallbackUrl(continuationDestination?: string, continuat
   return `${origin}/app/auth/callback?${q.toString()}`;
 }
 
+export function resolveBrowserAuthSession(supabaseSession?: Session | null): Session | null {
+  if (supabaseSession?.user) return supabaseSession;
+  return readE2eAuthSessionForDev();
+}
+
 export async function getAuthSession(): Promise<Session | null> {
-  const e2eSession = readE2eAuthSessionForDev();
-  if (e2eSession) return e2eSession;
+  const bridged = readE2eAuthSessionForDev();
+  if (bridged) return bridged;
   const client = getSupabaseBrowserClient();
   if (!client || !isSupabaseAuthEnabled()) return null;
   const { data } = await client.auth.getSession();
-  return data.session ?? null;
+  return resolveBrowserAuthSession(data.session);
+}
+
+/** Bounded wait for provider session settlement on /app/auth/callback. */
+export async function waitForAuthSession(args?: {
+  attempts?: number;
+  delayMs?: number;
+}): Promise<Session | null> {
+  const attempts = args?.attempts ?? 20;
+  const delayMs = args?.delayMs ?? 50;
+  for (let i = 0; i < attempts; i += 1) {
+    const session = await getAuthSession();
+    if (session?.user) return session;
+    if (i < attempts - 1) {
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+  }
+  return null;
 }
 
 export async function getAuthUser(): Promise<User | null> {

@@ -367,10 +367,9 @@ async def create_auth_continuation(request: Request, body: AuthContinuationIn) -
         provider=body.provider,
     )
     _log.info(
-        "auth_continuation_created continuation_id=%s org_id=%s agreement_id=%s",
-        cont["continuation_id"],
+        "auth_continuation_created org_id=%s has_agreement=%s",
         org_id,
-        body.agreement_id or "",
+        bool(body.agreement_id),
     )
     return {"ok": True, **cont, "org_id": org_id}
 

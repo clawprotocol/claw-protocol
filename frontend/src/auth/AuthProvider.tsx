@@ -4,6 +4,7 @@ import {
   getAuthSession,
   isSupabaseAuthEnabled,
   onAuthStateChange,
+  resolveBrowserAuthSession,
   signInWithEmailMagicLink,
   signInWithGoogle,
   signOutAuth,
@@ -85,19 +86,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     }
     let unsub: { unsubscribe: () => void } | null = null;
     void getAuthSession().then(async (s) => {
-      setSession(s);
-      if (s?.access_token) setCachedAccessToken(s.access_token);
-      if (s?.user && !isAuthCallbackPath()) {
-        await finalizeUser(s.user, "session_restore");
+      const next = resolveBrowserAuthSession(s);
+      setSession(next);
+      if (next?.access_token) setCachedAccessToken(next.access_token);
+      if (next?.user && !isAuthCallbackPath()) {
+        await finalizeUser(next.user, "session_restore");
       }
       setLoading(false);
     });
     unsub = onAuthStateChange((s) => {
-      setSession(s);
-      if (s?.access_token) setCachedAccessToken(s.access_token);
+      const next = resolveBrowserAuthSession(s);
+      setSession(next);
+      if (next?.access_token) setCachedAccessToken(next.access_token);
       else clearCachedAccessToken();
-      if (s?.user && !isAuthCallbackPath()) {
-        void finalizeUser(s.user, "session_restore");
+      if (next?.user && !isAuthCallbackPath()) {
+        void finalizeUser(next.user, "session_restore");
       }
     }) ?? null;
     return () => {

@@ -10,7 +10,7 @@ import {
   clearAuthContinuationContext,
   readAuthContinuationContext,
 } from "./authContinuationContext";
-import { resolvePostAuthDestination } from "./safeRedirectResolver";
+import { resolvePostAuthDestination, resolveSafeRedirectPath } from "./safeRedirectResolver";
 import { logProductEvent } from "../lib/experimentation/productEvents";
 import {
   clearContinuationId,
@@ -84,31 +84,35 @@ export async function finalizeAuthenticatedSession(args: {
         entitlementRepairCandidates: resolveEntitlementRepairOrgCandidates(),
       });
       setOrgId(server.org_id);
-      clearAnonymousSession();
-      await refreshSubscriptionEntitlement();
-      clearAuthContinuationContext();
-      clearContinuationId();
-      logProductEvent("authentication_completed", {
-        claim_method: args.claimMethod,
-        migrated_agreement_count: server.migrated_agreement_count,
-        continuation_restored: true,
-        continuation_fallback: false,
-        server_authoritative: true,
-      });
-      if (server.migrated_agreement_count > 0) {
-        logProductEvent("anonymous_draft_claim_completed", {
+      try {
+        clearAnonymousSession();
+        await refreshSubscriptionEntitlement();
+        clearAuthContinuationContext();
+        clearContinuationId();
+        logProductEvent("authentication_completed", {
           claim_method: args.claimMethod,
           migrated_agreement_count: server.migrated_agreement_count,
+          continuation_restored: true,
+          continuation_fallback: false,
+          server_authoritative: true,
         });
+        if (server.migrated_agreement_count > 0) {
+          logProductEvent("anonymous_draft_claim_completed", {
+            claim_method: args.claimMethod,
+            migrated_agreement_count: server.migrated_agreement_count,
+          });
+        }
+        logProductEvent("continuation_restored", { surface: "server_finalize" });
+        applyOwnershipMigrationFromServer({
+          migratedAgreementCount: server.migrated_agreement_count,
+          migratedAgreementIds: server.migrated_agreement_ids,
+          continuationAgreementId: readAuthContinuationContext()?.agreementId,
+        });
+      } catch {
+        /* Secondary restore work must not undo a successful server finalize. */
       }
-      logProductEvent("continuation_restored", { surface: "server_finalize" });
-      applyOwnershipMigrationFromServer({
-        migratedAgreementCount: server.migrated_agreement_count,
-        migratedAgreementIds: server.migrated_agreement_ids,
-        continuationAgreementId: readAuthContinuationContext()?.agreementId,
-      });
       return {
-        destinationPath: server.destination_path,
+        destinationPath: resolveSafeRedirectPath(server.destination_path, "/app"),
         migratedAgreementCount: server.migrated_agreement_count,
         migratedAgreementIds: server.migrated_agreement_ids ?? [],
         usedContinuation: true,
@@ -116,10 +120,10 @@ export async function finalizeAuthenticatedSession(args: {
       };
     } catch (e) {
       logAuthDiagnostic("auth_finalize_failed", {
-        reason: e instanceof Error ? e.message : "unknown",
+        reason: "finalize_failed",
       });
       logProductEvent("authentication_failed", {
-        reason: e instanceof Error ? e.message : "finalize_failed",
+        reason: "finalize_failed",
       });
       throw e;
     }
