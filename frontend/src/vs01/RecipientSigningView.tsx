@@ -68,6 +68,7 @@ import {
   logVs01CanonicalPacketSeedUse,
   logVs01RecipientCanonicalSource,
   wasVs01CanonicalPacketFromServer,
+  type Vs01CanonicalPacketPortableV1,
   type Vs01CanonicalPacketPortableRole,
 } from "./vs01CanonicalPacketSeed";
 
@@ -97,6 +98,8 @@ export type RecipientSigningViewProps = {
   authoritativeInitialsEnabled?: boolean | null;
   /** Prepare-time packet revision from signing URL (`{hash}_{0|1}_{count}`). */
   packetRevision?: string | null;
+  /** Server-attested portable from token + packet validation — not local/URL paper. */
+  serverPortablePacket?: Vs01CanonicalPacketPortableV1 | null;
 };
 
 function formatIsoDateDisplay(iso: string): string {
@@ -188,6 +191,7 @@ export function RecipientSigningView({
   serverHydrationPending = false,
   authoritativeInitialsEnabled = null,
   packetRevision = null,
+  serverPortablePacket = null,
 }: RecipientSigningViewProps) {
   const cpById = useMemo(() => {
     const m = new Map<string, Vs01Counterparty>();
@@ -201,7 +205,12 @@ export function RecipientSigningView({
     const aid = (recipientAgreementId ?? "").trim();
     if (!aid) return null;
     const did = documentId?.trim() ?? "";
-    const portable = did ? loadVs01CanonicalPacketPortable(did) : null;
+    const portable =
+      serverPortablePacket && serverPortablePacket.seed.documentId.trim() === did
+        ? serverPortablePacket
+        : did
+          ? loadVs01CanonicalPacketPortable(did)
+          : null;
     if (portable && portable.roles.length >= 2) {
       return portable.roles.map((r: Vs01CanonicalPacketPortableRole) => ({
         roleId: r.roleId,
@@ -276,6 +285,7 @@ export function RecipientSigningView({
     cpById,
     lockedCp,
     lockedSignerRoleId,
+    serverPortablePacket,
   ]);
 
   const [portableHydrationTick, setPortableHydrationTick] = useState(0);
@@ -287,10 +297,11 @@ export function RecipientSigningView({
   }, [serverHydrationPending]);
 
   const portablePacket = useMemo(() => {
+    if (serverPortablePacket?.seed.corpusPlain.trim()) return serverPortablePacket;
     const did = documentId?.trim() ?? "";
     return did ? loadVs01CanonicalPacketPortable(did) : null;
     // Re-read local portable after server authority bootstrap completes.
-  }, [documentId, portableHydrationTick]);
+  }, [documentId, portableHydrationTick, serverPortablePacket]);
 
   const initialsEnabledPending =
     serverHydrationPending || authoritativeInitialsEnabled === null;
@@ -329,6 +340,7 @@ export function RecipientSigningView({
         lockedSignerRoleId,
         canonicalModel: canonicalPacket?.model ?? null,
         packetRevision,
+        portablePacket,
       }),
     [
       documentId,
@@ -339,6 +351,7 @@ export function RecipientSigningView({
       lockedSignerRoleId,
       canonicalPacket?.model,
       packetRevision,
+      portablePacket,
     ],
   );
 
@@ -468,6 +481,18 @@ export function RecipientSigningView({
         return;
       }
 
+      const recipientAid = (recipientAgreementId ?? "").trim();
+      const portableCorpus = (portablePacket?.seed.corpusPlain ?? "").trim();
+      if (recipientAid) {
+        setPdfUrl(null);
+        setPageLayouts(null);
+        setPreviewError(null);
+        setPdfDocReady(Boolean(portableCorpus));
+        setNumPages(portableCorpus ? 1 : 0);
+        setPreviewLoading(false);
+        return;
+      }
+
       setPreviewLoading(true);
       setPreviewError(null);
       if (import.meta.env.MODE !== "test") {
@@ -512,7 +537,7 @@ export function RecipientSigningView({
       cancelled = true;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [documentId, useCanonicalDocument, canonicalPacket, recipientAgreementId, serverHydrationPending]);
+  }, [documentId, useCanonicalDocument, canonicalPacket, recipientAgreementId, serverHydrationPending, portablePacket]);
 
   useEffect(() => {
     const did = documentId?.trim() ?? "";
@@ -869,6 +894,51 @@ export function RecipientSigningView({
             <div className="vs01-sign-preview-fallback" role="status">
               {serverHydrationPending ? "Loading signing fields…" : "Loading document…"}
             </div>
+          ) : !useCanonicalDocument && (portablePacket?.seed.corpusPlain || "").trim() ? (
+            <div
+              className="vs01-sign-doc-pages-wrap vs01-sign-doc-surface w-full min-w-0 overflow-x-clip"
+              data-testid="vs01-recipient-canonical-render"
+            >
+              <pre className="w-full min-w-0 whitespace-pre-wrap break-words text-sm leading-relaxed text-stone-800">
+                {portablePacket?.seed.corpusPlain}
+              </pre>
+              <div className="mt-6 space-y-3" data-testid="esign-field-list">
+                {documentFieldsForView.map((field) => {
+                  const mine = recipientFieldBelongsToLockedSigner(
+                    field,
+                    lockedCp,
+                    lockedSignerRoleId,
+                  );
+                  const editable = mine && isRecipientSigningEditableType(field.type);
+                  const value = typeof field.value === "string" ? field.value : "";
+                  return (
+                    <div
+                      key={field.id}
+                      data-testid={editable ? "esign-assigned-field" : "esign-other-signer-field"}
+                      className="rounded-md border border-stone-200 p-3"
+                    >
+                      <p className="mb-1 text-xs font-medium uppercase tracking-wide text-stone-500">
+                        {labelForFieldType(field.type)}
+                        {mine ? "" : " (other signer)"}
+                      </p>
+                      {editable ? (
+                        <input
+                          type="text"
+                          className="vs01-sign-field-inline-input min-h-11 w-full"
+                          value={value}
+                          placeholder={field.type === "signature" ? "Type signature" : labelForFieldType(field.type)}
+                          autoComplete="off"
+                          aria-label={labelForFieldType(field.type)}
+                          onChange={(ev) => updateFieldValue(field.id, ev.target.value)}
+                        />
+                      ) : (
+                        <p className="min-h-11 text-sm text-stone-600">{value.trim() || "—"}</p>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
           ) : useCanonicalDocument && canonicalPacket ? (
             <div
               className="vs01-sign-doc-pages-wrap vs01-sign-doc-surface vs01-sign-doc-surface--bridge"
@@ -1146,7 +1216,8 @@ export function RecipientSigningView({
       <div className="vs01-recipient-signing-footer-actions">
         <button
           type="button"
-          className="vs01-btn vs01-btn--primary"
+          className="vs01-btn vs01-btn--primary min-h-11"
+          data-testid="esign-finish-signing"
           disabled={!allComplete}
           onClick={handleFinish}
         >

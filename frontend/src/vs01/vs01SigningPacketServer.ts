@@ -20,7 +20,7 @@ function isPortablePacket(value: unknown): value is Vs01CanonicalPacketPortableV
 /** Recipient: load prepared packet without creator browser storage. */
 export type FetchPublicVs01SigningPacketResult =
   | { ok: true; portable: Vs01CanonicalPacketPortableV1 }
-  | { ok: false; reason: "not_found" | "invite_superseded"; message?: string };
+  | { ok: false; reason: "not_found" | "invite_superseded" | "network_retryable"; message?: string };
 
 export async function fetchPublicVs01SigningPacket(args: {
   agreementId: string;
@@ -28,9 +28,11 @@ export async function fetchPublicVs01SigningPacket(args: {
   packetRevision?: string | null;
   recipientEmail?: string | null;
   participantId?: string | null;
+  recipientAccessToken?: string | null;
 }): Promise<FetchPublicVs01SigningPacketResult> {
   const agreementId = args.agreementId.trim();
   const documentId = args.documentId.trim();
+  const token = (args.recipientAccessToken ?? "").trim();
   if (!agreementId || !documentId) return { ok: false, reason: "not_found" };
   const params = new URLSearchParams({ document_id: documentId });
   const rev = (args.packetRevision ?? "").trim();
@@ -39,12 +41,16 @@ export async function fetchPublicVs01SigningPacket(args: {
   const pid = (args.participantId ?? "").trim();
   if (email) params.set("recipient_email", email);
   if (pid) params.set("participant_id", pid);
+  if (token) params.set("t", token);
   try {
     const res = await fetch(
       apiUrl(`/api/agreements/public/${encodeURIComponent(agreementId)}/vs01-signing-packet?${params}`),
       { method: "GET" },
     );
     if (!res.ok) {
+      if (res.status >= 500) {
+        return { ok: false, reason: "network_retryable", message: "We couldn’t reach this signing packet. Try again in a moment." };
+      }
       const j = (await res.json().catch(() => ({}))) as { detail?: { code?: string; message?: string } | string };
       const detail = j.detail;
       if (
@@ -69,6 +75,6 @@ export async function fetchPublicVs01SigningPacket(args: {
       ? { ok: true, portable: j.portable }
       : { ok: false, reason: "not_found" };
   } catch {
-    return { ok: false, reason: "not_found" };
+    return { ok: false, reason: "network_retryable", message: "We couldn’t reach this signing packet. Try again in a moment." };
   }
 }

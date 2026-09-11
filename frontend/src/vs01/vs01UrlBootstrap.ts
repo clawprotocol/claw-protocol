@@ -1,45 +1,11 @@
 import type { Vs01Counterparty, Vs01Step, Vs01RecipientPlacedField } from "./types";
-import { VS01_PACKET_MANIFEST_SCOPE, VS01_RECIPIENT_SIGN_QUERY, loadRecipientManifest } from "./StepReceipt";
-import {
-  computeVs01PacketRevision,
-  decodeVs01CanonicalPacketPortable,
-  loadVs01CanonicalPacketPortable,
-  storeVs01CanonicalPacketSeed,
-  type Vs01CanonicalPacketPortableV1,
-  VS01_CANONICAL_PACKET_QUERY,
-  VS01_CANONICAL_PACKET_STORED_QUERY,
-  VS01_PACKET_REVISION_QUERY,
-} from "./vs01CanonicalPacketSeed";
-
-function packetRevisionForPortable(packet: Vs01CanonicalPacketPortableV1): string {
-  return computeVs01PacketRevision({
-    corpusHash: packet.seed.corpusHash,
-    initialsEnabled: packet.initialsPolicy.enabled,
-    fieldCount: packet.fieldCount,
-  });
-}
-import {
-  counterpartiesFromRecipientManifestFields,
-  decodeRecipientManifestParam,
-  ensureRecipientFieldDefaults,
-  normalizeRecipientManifestCounterparties,
-  VS01_RECIPIENT_MANIFEST_QUERY,
-} from "./recipientManifestUrl";
-import { hydrateRecipientSigningFields, stripLockedSignerEditableValuesOnHydrate } from "./recipientSigningFieldUtils";
-import { normalizeVs01PortableInitialsPolicy, resolveRecipientInitialsEnabled } from "./vs01RecipientSignerMarksHydration";
-import { scopeRecipientManifestToLockedSigner } from "./vs01RecipientFieldScope";
+import { VS01_RECIPIENT_SIGN_QUERY } from "./StepReceipt";
+import { VS01_CANONICAL_PACKET_STORED_QUERY, VS01_PACKET_REVISION_QUERY } from "./vs01CanonicalPacketSeed";
 import { saveRecipientMagicLinkSession } from "../agreement/recipientMagicLinkSession";
 import { resolveReviewerEffectiveAccessToken } from "../agreement/reviewerTokenPersistence";
 
 function readRecipientAccessTokenFromSearchParams(params: URLSearchParams): string {
   return (params.get("t") || params.get("token") || "").trim();
-}
-
-function newCpId(): string {
-  if (typeof crypto !== "undefined" && "randomUUID" in crypto) {
-    return crypto.randomUUID();
-  }
-  return `cp_${Date.now()}_${Math.random().toString(36).slice(2, 9)}`;
 }
 
 /** Recipient signing step (complete assigned fields), not sender field placement. */
@@ -114,203 +80,16 @@ export function getVs01UrlBootstrap(): Vs01UrlBootstrapResult | null {
   const recipientLockedSignerRoleId = recipientLockedSignerRoleIdRaw || null;
   const recipientAccessTokenFromUrl = readRecipientAccessTokenFromSearchParams(params);
 
-  const lockedId = counterpartyIdFromUrl || newCpId();
+  const lockedId = counterpartyIdFromUrl;
 
-  const manifestRaw = params.get(VS01_RECIPIENT_MANIFEST_QUERY);
-  const manifestStored = params.get("vs01_rmanifest_stored") === "1";
-  const canonicalPacketStored = params.get(VS01_CANONICAL_PACKET_STORED_QUERY) === "1";
   const packetRevisionFromUrl = (params.get(VS01_PACKET_REVISION_QUERY) ?? "").trim();
-  const canonicalPacketRaw = params.get(VS01_CANONICAL_PACKET_QUERY);
-  let canonicalPacket = decodeVs01CanonicalPacketPortable(canonicalPacketRaw);
-  if (!canonicalPacket && canonicalPacketStored && documentId) {
-    const storedPortable = loadVs01CanonicalPacketPortable(documentId);
-    if (storedPortable) {
-      if (!packetRevisionFromUrl || packetRevisionFromUrl === packetRevisionForPortable(storedPortable)) {
-        canonicalPacket = storedPortable;
-      }
-    }
-  }
-  if (canonicalPacket) {
-    canonicalPacket = normalizeVs01PortableInitialsPolicy(canonicalPacket, {
-      packetRevision: packetRevisionFromUrl || null,
-    });
-    storeVs01CanonicalPacketSeed(canonicalPacket.seed);
-    // Recipient links defer portable persistence to server authority bootstrap.
-  }
-  const portableRoles = canonicalPacket?.roles;
-  const recipientManifestParamPresent =
-    manifestRaw !== null ||
-    manifestStored ||
-    canonicalPacketRaw !== null ||
-    canonicalPacketStored;
-
-  let recipientHydratedFields: Vs01RecipientPlacedField[] = [];
-  let recipientManifestDecodeError: string | null = null;
-  let hydrationSource: "url_manifest" | "stored_manifest" | "none" = "none";
-
-  if (manifestRaw) {
-    const decoded = decodeRecipientManifestParam(manifestRaw);
-    if (decoded.ok) {
-      const scoped = scopeRecipientManifestToLockedSigner({
-        fields: decoded.fields,
-        lockedCounterpartyId: lockedId,
-        lockedSignerRoleId: recipientLockedSignerRoleId,
-        portableRoles,
-      });
-      const normalized = normalizeRecipientManifestCounterparties(scoped, lockedId);
-      const cps = counterpartiesFromRecipientManifestFields(
-        normalized,
-        lockedId,
-        recipientName || "Recipient",
-        recipientEmail,
-      );
-      const cpMap = new Map(cps.map((c) => [c.id, c]));
-      recipientHydratedFields = hydrateRecipientSigningFields(
-        stripLockedSignerEditableValuesOnHydrate(
-          ensureRecipientFieldDefaults(
-            normalized,
-            recipientName || "Recipient",
-            recipientEmail || undefined,
-            { signerName: cps.find((c) => c.id === lockedId)?.signerName },
-          ),
-          recipientAgreementId,
-          recipientLockedSignerRoleId,
-        ),
-        cpMap,
-        { agreementId: recipientAgreementId },
-      );
-      hydrationSource = "url_manifest";
-    } else {
-      recipientManifestDecodeError = decoded.error;
-    }
-  } else if (canonicalPacket?.fields.length) {
-    const initialsEnabled = resolveRecipientInitialsEnabled({
-      portable: canonicalPacket,
-      packetRevision: packetRevisionFromUrl || null,
-    });
-    const manifestFields = initialsEnabled
-      ? canonicalPacket.fields
-      : canonicalPacket.fields.filter((f) => f.type !== "initials");
-    const scoped = scopeRecipientManifestToLockedSigner({
-      fields: manifestFields,
-      lockedCounterpartyId: lockedId,
-      lockedSignerRoleId: recipientLockedSignerRoleId,
-      portableRoles,
-    });
-    const normalized = normalizeRecipientManifestCounterparties(scoped, lockedId);
-    const cps = counterpartiesFromRecipientManifestFields(
-      normalized,
-      lockedId,
-      recipientName || "Recipient",
-      recipientEmail,
-    );
-    const cpMap = new Map(cps.map((c) => [c.id, c]));
-    recipientHydratedFields = hydrateRecipientSigningFields(
-      stripLockedSignerEditableValuesOnHydrate(
-        ensureRecipientFieldDefaults(
-          normalized,
-          recipientName || "Recipient",
-          recipientEmail || undefined,
-          { signerName: cps.find((c) => c.id === lockedId)?.signerName },
-        ),
-        recipientAgreementId,
-        recipientLockedSignerRoleId,
-      ),
-      cpMap,
-      { agreementId: recipientAgreementId },
-    );
-    hydrationSource = "url_manifest";
-  } else {
-    const lookupId = counterpartyIdFromUrl || lockedId;
-    const packetStored = loadRecipientManifest(documentId, VS01_PACKET_MANIFEST_SCOPE);
-    const stored = packetStored ?? loadRecipientManifest(documentId, lookupId);
-    if (stored && stored.length > 0) {
-      const scoped = scopeRecipientManifestToLockedSigner({
-        fields: stored,
-        lockedCounterpartyId: lockedId,
-        lockedSignerRoleId: recipientLockedSignerRoleId,
-        portableRoles,
-      });
-      const normalized = normalizeRecipientManifestCounterparties(scoped, lockedId);
-      const cps = counterpartiesFromRecipientManifestFields(
-        normalized,
-        lockedId,
-        recipientName || "Recipient",
-        recipientEmail,
-      );
-      const cpMap = new Map(cps.map((c) => [c.id, c]));
-      recipientHydratedFields = hydrateRecipientSigningFields(
-        stripLockedSignerEditableValuesOnHydrate(
-          ensureRecipientFieldDefaults(
-            normalized,
-            recipientName || "Recipient",
-            recipientEmail || undefined,
-            { signerName: cps.find((c) => c.id === lockedId)?.signerName },
-          ),
-          recipientAgreementId,
-          recipientLockedSignerRoleId,
-        ),
-        cpMap,
-        { agreementId: recipientAgreementId },
-      );
-      hydrationSource = "stored_manifest";
-    }
-  }
-
-  const counterparties: Vs01Counterparty[] =
-    recipientHydratedFields.length > 0
-      ? counterpartiesFromRecipientManifestFields(
-          recipientHydratedFields,
-          lockedId,
-          recipientName || "Recipient",
-          recipientEmail,
-        )
-      : (() => {
-          const legacy: Vs01Counterparty[] = [];
-          for (let i = 0; i < recipientIndex; i++) {
-            legacy.push({ id: newCpId(), name: "", email: "", phone: "" });
-          }
-          legacy.push({
-            id: lockedId,
-            name: recipientName || "Recipient",
-            email: recipientEmail,
-            phone: "",
-          });
-          return legacy;
-        })();
-
-  const diagEnabled =
-    typeof window !== "undefined" &&
-    (import.meta.env.DEV || window.localStorage?.getItem("lawdogVs01FieldDiag") === "1");
-
-  if (diagEnabled) {
-    // eslint-disable-next-line no-console
-    console.info("[vs01-recipient-hydration]", {
-      documentId,
-      recipientIndex,
-      counterpartyId: lockedId,
-      fieldCount: recipientHydratedFields.length,
-      hydrationSource,
-      manifestParamPresent: recipientManifestParamPresent,
-      manifestDecodeError: recipientManifestDecodeError,
-      urlCounterpartyId: counterpartyIdFromUrl || null,
-      hasAgreementId: Boolean(recipientAgreementId),
-      signerRoleIdShort: recipientLockedSignerRoleId ? recipientLockedSignerRoleId.slice(0, 16) : null,
-    });
-  }
-
-  if (recipientHydratedFields.length === 0 && !recipientManifestDecodeError && recipientManifestParamPresent) {
-    const canServerHydrate = Boolean(recipientAgreementId);
-    if (!canServerHydrate) {
-      // eslint-disable-next-line no-console
-      console.warn("[vs01-recipient-hydration-miss]", {
-        documentId,
-        counterpartyId: lockedId,
-        reason: manifestRaw ? "decode_returned_empty" : "storage_miss",
-        hint: "Fields were placed but could not be loaded. Recipient may see empty state.",
-      });
-    }
-  }
+  const canonicalPacketStored = params.get(VS01_CANONICAL_PACKET_STORED_QUERY) === "1";
+  const recipientHydratedFields: Vs01RecipientPlacedField[] = [];
+  const recipientManifestDecodeError: string | null = null;
+  const recipientManifestParamPresent = false;
+  const counterparties: Vs01Counterparty[] = lockedId
+    ? [{ id: lockedId, name: recipientName || "Recipient", email: recipientEmail, phone: "" }]
+    : [];
 
   const recipientAccessToken = recipientAgreementId
     ? resolveReviewerEffectiveAccessToken({
@@ -347,8 +126,21 @@ export function getVs01UrlBootstrap(): Vs01UrlBootstrapResult | null {
     recipientAccessToken,
   };
 
-  const path = window.location.pathname + window.location.hash;
-  window.history.replaceState({}, "", path);
+  const retained = new URLSearchParams();
+  retained.set(VS01_RECIPIENT_SIGN_QUERY, "1");
+  retained.set("document_id", documentId);
+  if (recipientAgreementId) retained.set("agreement_id", recipientAgreementId);
+  retained.set("recipient_index", String(recipientIndex));
+  if (lockedId) retained.set("counterparty_id", lockedId);
+  if (recipientLockedSignerRoleId) retained.set("signer_role_id", recipientLockedSignerRoleId);
+  if (packetRevisionFromUrl) retained.set(VS01_PACKET_REVISION_QUERY, packetRevisionFromUrl);
+  const nextSearch = retained.toString();
+  window.history.replaceState({}, "", `${window.location.pathname}?${nextSearch}${window.location.hash}`);
 
   return memo;
+}
+
+/** Test-only: clear one-time URL bootstrap memo. */
+export function resetVs01UrlBootstrapForTests(): void {
+  memo = undefined;
 }

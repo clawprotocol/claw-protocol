@@ -9608,11 +9608,44 @@ def get_public_vs01_signing_packet(
     packet_revision: Optional[str] = None,
     recipient_email: Optional[str] = None,
     participant_id: Optional[str] = None,
+    t: Optional[str] = None,
+    token: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Public VS01 signing packet for emailed recipient links (no auth; fields + corpus seed only)."""
+    """Recipient VS01 signing packet. Publicly reachable; readable only with a valid sign-mode token."""
     aid = (agreement_id or "").strip()
     did = (document_id or "").strip()
     if not aid or not did:
+        raise HTTPException(status_code=404, detail="not_found")
+    raw_token = (t or token or "").strip()
+    if not raw_token:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "recipient_token_required",
+                "message": RECIPIENT_LINK_INVALID_OR_EXPIRED,
+            },
+        )
+    try:
+        from backend.config.agreement_signing_token import resolve_signing_token_secret_raw
+
+        payload = verify_recipient_access_token(
+            token=raw_token,
+            secret=resolve_signing_token_secret_raw().encode("utf-8"),
+        )
+    except ValueError:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "code": "invalid_token",
+                "message": RECIPIENT_LINK_INVALID_OR_EXPIRED,
+            },
+        ) from None
+    token_aid = str(payload.get("aid") or "").strip()
+    token_mode = str(payload.get("m") or "").strip()
+    if token_aid != aid or token_mode != "sign":
+        raise HTTPException(status_code=404, detail="not_found")
+    token_pid = str(payload.get("pid") or "").strip()
+    if token_pid and (participant_id or "").strip() and token_pid != (participant_id or "").strip():
         raise HTTPException(status_code=404, detail="not_found")
     try:
         raw = load_draft(aid)

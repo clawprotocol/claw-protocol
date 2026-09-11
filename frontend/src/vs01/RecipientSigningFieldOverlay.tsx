@@ -129,6 +129,7 @@ export function RecipientSigningFieldOverlay({
     : boxClass;
 
   const fieldDataAttrs = {
+    "data-testid": editable ? "esign-assigned-field" : "esign-other-signer-field",
     "data-vs01-field-id": field.id,
     "data-vs01-field-type": field.type,
     "data-vs01-assigned-party-index": String(field.assignedPartyIndex ?? 0),

@@ -20,6 +20,7 @@ import { markAgreementFieldsPlacedCount, markAgreementPacketPrepared, isAgreemen
 import { fetchDocumentContent, getReceipt } from "./vs01Api";
 import { useAuth } from "../auth/AuthProvider";
 import { shouldDeferVs01SeedDocumentLoad } from "./vs01SeedDocumentAuthGate";
+import { ESIGN_UNAVAILABLE_MESSAGE } from "../launch/esignDocumentAccess";
 import { useLaunchNav } from "../launch/LaunchNavContext";
 import { stashHeroIntakePrefill } from "../launch/heroIntakePrefill";
 import { prepareFreshMarketingEntry } from "../launch/marketingSession";
@@ -40,7 +41,12 @@ import {
 import { resolvePrepareBridgeSigningCorpus } from "./vs01PrepareBridgeCorpus";
 import { VS01_SIGNING_CORPUS_MIN_LEN } from "./vs01SigningCorpus";
 import { fingerprintAgreementBody } from "../components/agreements/guidedDealCompletion/guidedSigningPacketVersion";
-import { buildVs01CanonicalPacketSeed, hasVs01CanonicalPacketCached, storeVs01CanonicalPacketSeed } from "./vs01CanonicalPacketSeed";
+import {
+  buildVs01CanonicalPacketSeed,
+  hasVs01CanonicalPacketCached,
+  storeVs01CanonicalPacketSeed,
+  type Vs01CanonicalPacketPortableV1,
+} from "./vs01CanonicalPacketSeed";
 import { buildVs01RecipientSigningUrl } from "./StepReceipt";
 import {
   clearPaidProVs01PostSignHandoff,
@@ -240,6 +246,11 @@ export function Vs01Wizard({
   >(() => (RECIPIENT_NEEDS_SERVER_HYDRATION ? null : undefined));
   const [recipientSigningFinished, setRecipientSigningFinished] = useState(false);
   const [signerAlreadyCompleteOnOpen, setSignerAlreadyCompleteOnOpen] = useState(false);
+  const [recipientAuthorityReady, setRecipientAuthorityReady] = useState(false);
+  const [recipientServerPortable, setRecipientServerPortable] =
+    useState<Vs01CanonicalPacketPortableV1 | null>(null);
+  const [recipientRetryable, setRecipientRetryable] = useState(false);
+  const [recipientRetryNonce, setRecipientRetryNonce] = useState(0);
   const [senderPlacedFields, setSenderPlacedFields] = useState<PlacedSigningField[]>([]);
   const [senderSignatureRef, setSenderSignatureRef] = useState<Vs01SenderSignatureRef | null>(null);
   const [loading, setLoading] = useState<Vs01LoadingState>("idle");
@@ -328,18 +339,26 @@ export function Vs01Wizard({
   }, [recipientLockedSignerRoleId]);
 
   useEffect(() => {
-    if (!RECIPIENT_SIGNER_DEEP_LINK || !recipientLockedCpId) return;
+    if (!RECIPIENT_SIGNER_DEEP_LINK) return;
     if (recipientAuthorityResolvedRef.current) return;
     const agreementId = RECIPIENT_AGREEMENT_ID;
     const did = (documentId ?? VS01_URL_BOOT?.documentId ?? "").trim();
     if (!agreementId || !did) {
       setRecipientServerHydrationPending(false);
       setRecipientAuthoritativeInitialsEnabled(null);
+      setError(ESIGN_UNAVAILABLE_MESSAGE);
+      return;
+    }
+    if (!RECIPIENT_ACCESS_TOKEN) {
+      setRecipientServerHydrationPending(false);
+      setRecipientAuthoritativeInitialsEnabled(null);
+      setError(ESIGN_UNAVAILABLE_MESSAGE);
       return;
     }
     let cancelled = false;
     setRecipientServerHydrationPending(true);
-    const lockedCp = recipientLockedCpId;
+    setRecipientRetryable(false);
+    const lockedCp = (recipientLockedCpId ?? "").trim();
     const recipientName =
       (VS01_URL_BOOT?.counterparties.find((c) => c.id === lockedCp)?.name ?? "").trim() ||
       (counterparties.find((c) => c.id === lockedCp)?.name ?? "").trim();
@@ -362,6 +381,8 @@ export function Vs01Wizard({
       if (result.ok) {
         recipientAuthorityResolvedRef.current = true;
         recipientAuthorityIdentityRef.current = result.identity;
+        setRecipientAuthorityReady(true);
+        setRecipientServerPortable(result.portable);
         setRecipientLockedSignerRoleId(result.identity.lockedSignerRoleId);
         setRecipientLockedCpId(result.identity.lockedCounterpartyId);
         setRecipientPlacedFields(result.fields);
@@ -372,43 +393,38 @@ export function Vs01Wizard({
         if (!vs01LinkedAgreementId) {
           setVs01LinkedAgreementId(agreementId);
         }
-        // eslint-disable-next-line no-console
-        console.info("[vs01-recipient-server-hydration]", {
-          agreementIdShort: agreementId.slice(0, 16),
-          documentIdShort: did.slice(0, 8),
-          fieldCount: result.fields.length,
-          source: "server_packet",
-          signerCount: result.signerCount,
-          initialsEnabled: result.initialsEnabled,
-          identitySource: result.identity.source,
-        });
+        setError(null);
+        return;
+      }
+      if ("retryable" in result && result.retryable) {
+        setRecipientAuthoritativeInitialsEnabled(null);
+        setRecipientServerPortable(null);
+        setRecipientRetryable(true);
+        setError(result.message);
         return;
       }
       if ("mismatch" in result && result.mismatch) {
         setRecipientAuthoritativeInitialsEnabled(null);
+        setRecipientServerPortable(null);
         setError(result.mismatch.message);
         return;
       }
       if ("inviteSuperseded" in result && result.inviteSuperseded) {
         setRecipientAuthoritativeInitialsEnabled(null);
+        setRecipientServerPortable(null);
         setError(
           result.message?.trim() || "This invite was replaced. Ask the sender for the latest link.",
         );
         return;
       }
       setRecipientAuthoritativeInitialsEnabled(null);
-      if (import.meta.env.DEV) {
-        // eslint-disable-next-line no-console
-        console.warn("[vs01-recipient-server-hydration-miss]", {
-          agreementIdShort: agreementId.slice(0, 16),
-          documentIdShort: did.slice(0, 8),
-        });
-      }
+      setRecipientServerPortable(null);
+      setError(ESIGN_UNAVAILABLE_MESSAGE);
     });
     return () => {
       cancelled = true;
     };
-  }, [documentId, recipientLockedCpId]);
+  }, [documentId, recipientLockedCpId, recipientRetryNonce]);
 
   useEffect(() => {
     bridgeHandoffSnapshotRef.current = null;
@@ -750,8 +766,7 @@ export function Vs01Wizard({
         const bridgeParams = new URLSearchParams(window.location.search);
         const agreementBridgeQuery = bridgeParams.get("agreement_bridge") === "1";
         // local_doc_* always; server doc_* when agreement_bridge=1 (session already has corpus).
-        const allowBridgeCorpusHydrate =
-          sid.startsWith("local_doc_") || (agreementBridgeQuery && sid.startsWith("doc_"));
+        const allowBridgeCorpusHydrate = sid.startsWith("local_doc_");
         if (!allowBridgeCorpusHydrate) return false;
         const rawBridge = readAgreementVs01BridgeSession();
         const bridge: AgreementVs01BridgeSession | null =
@@ -841,19 +856,6 @@ export function Vs01Wizard({
         const fs = (saved ? Math.max(nextStep, saved.furthestStep) : nextStep) as Vs01Step;
         setFurthestStep((prev) => ((fs > prev ? fs : prev) as Vs01Step));
         goToStep(nextStep);
-        bridgeParams.delete("agreement_bridge");
-        const qs = bridgeParams.toString();
-        window.setTimeout(() => {
-          try {
-            window.history.replaceState(
-              window.history.state,
-              "",
-              qs ? `${window.location.pathname}?${qs}` : window.location.pathname,
-            );
-          } catch {
-            /* ignore */
-          }
-        }, 0);
         return true;
       };
 
@@ -1017,19 +1019,6 @@ export function Vs01Wizard({
           const fs = (saved ? Math.max(nextStep, saved.furthestStep) : nextStep) as Vs01Step;
           setFurthestStep((prev) => ((fs > prev ? fs : prev) as Vs01Step));
           goToStep(nextStep);
-          bridgeParams.delete("agreement_bridge");
-          const qs = bridgeParams.toString();
-          window.setTimeout(() => {
-            try {
-              window.history.replaceState(
-                window.history.state,
-                "",
-                qs ? `${window.location.pathname}?${qs}` : window.location.pathname,
-              );
-            } catch {
-              /* ignore */
-            }
-          }, 0);
           return;
         }
 
@@ -1065,9 +1054,9 @@ export function Vs01Wizard({
           goToStep(1);
         }
       } catch (e) {
-        if (hydrateLocalPaidProBridge()) return;
+        if (sid.startsWith("local_doc_") && hydrateLocalPaidProBridge()) return;
         console.error("[Vs01Wizard] seed document load failed", e);
-        if (!cancelled) setError("Could not load this document. Check the link or start a new packet.");
+        if (!cancelled) setError(ESIGN_UNAVAILABLE_MESSAGE);
       }
     })();
     return () => {
@@ -1247,7 +1236,35 @@ export function Vs01Wizard({
   const esignGate = access.check("esign_flow");
   const signatureGate = access.check("signature_request");
 
-  if (RECIPIENT_SIGNER_DEEP_LINK && recipientLockedCpId) {
+  if (RECIPIENT_SIGNER_DEEP_LINK) {
+    if (!recipientAuthorityReady) {
+      return (
+        <div
+          className="mx-auto w-full min-w-0 max-w-lg px-4 py-16 text-center"
+          data-testid={error ? "esign-unavailable" : "esign-recipient-pending"}
+        >
+          <h1 className="text-xl font-semibold text-stone-900">
+            {error ? "Unavailable" : "Loading signing page"}
+          </h1>
+          <p className="mt-2 text-sm text-stone-600">{error || "Confirming your signing link…"}</p>
+          {recipientRetryable ? (
+            <button
+              type="button"
+              className="vs01-btn vs01-btn--primary mt-6 min-h-11"
+              data-testid="esign-retry"
+              onClick={() => {
+                setError(null);
+                setRecipientRetryable(false);
+                setRecipientServerHydrationPending(true);
+                setRecipientRetryNonce((n) => n + 1);
+              }}
+            >
+              Try again
+            </button>
+          ) : null}
+        </div>
+      );
+    }
     return (
       <>
         {error ? (
@@ -1266,12 +1283,17 @@ export function Vs01Wizard({
 
         <div
           className="vs01-card vs01-card--envelope vs01-recipient-signing-shell"
+          data-testid="esign-recipient-shell"
           data-vs01-receipt-id={receiptId ?? ""}
           data-vs01-receipt-hash={receiptHashSha256 ?? ""}
           data-vs01-receipt-present={receipt != null ? "1" : "0"}
         >
           {recipientSigningFinished ? (
-            <section className="vs01-recipient-signing-done" aria-labelledby="vs01-recipient-done-title">
+            <section
+              className="vs01-recipient-signing-done"
+              aria-labelledby="vs01-recipient-done-title"
+              data-testid="esign-recipient-complete"
+            >
               <h2 id="vs01-recipient-done-title" className="vs01-card-title">
                 {JOY_COPY.signLockedIn}
               </h2>
@@ -1294,7 +1316,7 @@ export function Vs01Wizard({
             <RecipientSigningView
               documentId={documentId}
               counterparties={counterparties}
-              lockedCounterpartyId={recipientLockedCpId}
+              lockedCounterpartyId={recipientLockedCpId || ""}
               recipientAgreementId={RECIPIENT_AGREEMENT_ID || null}
               lockedSignerRoleId={recipientLockedSignerRoleId}
               packetRevision={VS01_URL_BOOT?.packetRevision ?? null}
@@ -1370,6 +1392,7 @@ export function Vs01Wizard({
               manifestParamPresent={VS01_URL_BOOT?.recipientManifestParamPresent ?? false}
               serverHydrationPending={recipientServerHydrationPending}
               authoritativeInitialsEnabled={recipientAuthoritativeInitialsEnabled}
+              serverPortablePacket={recipientServerPortable}
             />
           )}
         </div>
@@ -1377,8 +1400,17 @@ export function Vs01Wizard({
     );
   }
 
+  if (error === ESIGN_UNAVAILABLE_MESSAGE && !contentSha256) {
+    return (
+      <div className="mx-auto w-full min-w-0 max-w-lg px-4 py-16 text-center" data-testid="esign-unavailable">
+        <h1 className="text-xl font-semibold text-stone-900">Unavailable</h1>
+        <p className="mt-2 text-sm text-stone-600">{ESIGN_UNAVAILABLE_MESSAGE}</p>
+      </div>
+    );
+  }
+
   return (
-    <>
+    <div data-testid={hideStepper ? "esign-owner-prepare" : undefined}>
       {error ? (
         <div className="vs01-error-banner" role="alert">
           {error}
@@ -1823,6 +1855,6 @@ export function Vs01Wizard({
           updatedAtMs={vs01DocumentsUpdatedMs}
         />
       ) : null}
-    </>
+    </div>
   );
 }

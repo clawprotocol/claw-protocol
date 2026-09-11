@@ -99,6 +99,21 @@ function hasRecipientAgreementToken(search: string): boolean {
   return Boolean((params.get("token") || params.get("t") || "").trim());
 }
 
+function resolveEsignDocumentRouteAccess(search: string): AppRouteAccess {
+  const raw = search.startsWith("?") ? search.slice(1) : search;
+  const params = new URLSearchParams(raw);
+  const flagOn = (key: string) => {
+    const value = (params.get(key) ?? "").trim().toLowerCase();
+    return value === "1" || value === "true" || value === "yes";
+  };
+  const ownerBridge = flagOn("agreement_bridge");
+  const recipientSign = flagOn("vs01_recipient_sign");
+  if (ownerBridge && recipientSign) return "authenticated";
+  if (ownerBridge) return "authenticated";
+  if (recipientSign) return "recipient_token";
+  return "public";
+}
+
 /**
  * Canonical application route and access manifest.
  *
@@ -307,6 +322,7 @@ export const APP_ROUTE_MANIFEST: readonly AppRouteDefinition[] = [
     access: "recipient_token",
     pattern: /^\/app\/esign\/([^/]+)$/,
     section: (id) => ({ kind: "esign", sub: { id } }),
+    resolveAccess: resolveEsignDocumentRouteAccess,
   }),
   dynamicRoute({
     id: "usage-receipt",
