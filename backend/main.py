@@ -110,6 +110,7 @@ from backend.routers.workflow_api import router as workflow_router
 from backend.routers.esign_api import router as esign_router
 from backend.routers.agreements_api import router as agreements_router
 from backend.routers.agreements_v2_api import router as agreements_v2_router
+from backend.routers.quick_pdf_envelope_api import router as quick_pdf_envelope_router
 from backend.routers.feed_api import router as feed_router
 from backend.routers.liability_api import router as liability_router
 from backend.routers.vs01_documents_api import router as vs01_documents_router
@@ -1545,6 +1546,7 @@ app.include_router(legal_analyst_router)
 app.include_router(workflow_router)
 app.include_router(esign_router)
 app.include_router(agreements_router)
+app.include_router(quick_pdf_envelope_router)
 app.include_router(agreements_v2_router)
 app.include_router(feed_router)
 app.include_router(liability_router)

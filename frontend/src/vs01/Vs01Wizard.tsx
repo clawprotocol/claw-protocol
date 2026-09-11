@@ -1393,6 +1393,7 @@ export function Vs01Wizard({
               serverHydrationPending={recipientServerHydrationPending}
               authoritativeInitialsEnabled={recipientAuthoritativeInitialsEnabled}
               serverPortablePacket={recipientServerPortable}
+              recipientAccessToken={RECIPIENT_ACCESS_TOKEN || null}
             />
           )}
         </div>

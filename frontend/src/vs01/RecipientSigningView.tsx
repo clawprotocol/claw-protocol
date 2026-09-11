@@ -12,7 +12,7 @@ import { Document, Page, pdfjs } from "react-pdf";
 import pdfjsWorker from "pdfjs-dist/build/pdf.worker.min.mjs?url";
 import "react-pdf/dist/Page/AnnotationLayer.css";
 import "react-pdf/dist/Page/TextLayer.css";
-import { fetchDocumentContent } from "./vs01Api";
+import { fetchDocumentContent, fetchRecipientDocumentContent } from "./vs01Api";
 import { setVs01DocumentPageLayouts } from "./vs01DocumentLayoutCache";
 import { extractPdfPageLayoutsFromBlob } from "./vs01PdfPageLayout";
 import type { Vs01PageTextLayout } from "./vs01PageTextLayout";
@@ -100,7 +100,13 @@ export type RecipientSigningViewProps = {
   packetRevision?: string | null;
   /** Server-attested portable from token + packet validation — not local/URL paper. */
   serverPortablePacket?: Vs01CanonicalPacketPortableV1 | null;
+  /** Sign-mode token for token-bound PDF fetch on uploaded-final-PDF envelopes. */
+  recipientAccessToken?: string | null;
 };
+
+function isUploadedFinalPdfPacket(packet: unknown): boolean {
+  return Boolean(packet && typeof packet === "object" && (packet as { kind?: unknown }).kind === "uploaded_final_pdf");
+}
 
 function formatIsoDateDisplay(iso: string): string {
   const t = iso.trim();
@@ -192,6 +198,7 @@ export function RecipientSigningView({
   authoritativeInitialsEnabled = null,
   packetRevision = null,
   serverPortablePacket = null,
+  recipientAccessToken = null,
 }: RecipientSigningViewProps) {
   const cpById = useMemo(() => {
     const m = new Map<string, Vs01Counterparty>();
@@ -483,6 +490,31 @@ export function RecipientSigningView({
 
       const recipientAid = (recipientAgreementId ?? "").trim();
       const portableCorpus = (portablePacket?.seed.corpusPlain ?? "").trim();
+      const uploadedFinalPdf = isUploadedFinalPdfPacket(portablePacket);
+      if (uploadedFinalPdf && documentId?.trim()) {
+        const token = (recipientAccessToken ?? "").trim();
+        if (!token) {
+          setPreviewLoading(false);
+          return;
+        }
+        setPreviewLoading(true);
+        setPreviewError(null);
+        try {
+          const blob = await fetchRecipientDocumentContent(documentId.trim(), token);
+          if (cancelled) return;
+          objectUrl = URL.createObjectURL(blob);
+          setPdfUrl(objectUrl);
+          setPdfDocReady(true);
+        } catch (e) {
+          if (!cancelled) {
+            setPdfUrl(null);
+            setPreviewError(e instanceof Error ? e.message : String(e));
+          }
+        } finally {
+          if (!cancelled) setPreviewLoading(false);
+        }
+        return;
+      }
       if (recipientAid) {
         setPdfUrl(null);
         setPageLayouts(null);
@@ -537,7 +569,7 @@ export function RecipientSigningView({
       cancelled = true;
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
-  }, [documentId, useCanonicalDocument, canonicalPacket, recipientAgreementId, serverHydrationPending, portablePacket]);
+  }, [documentId, useCanonicalDocument, canonicalPacket, recipientAgreementId, serverHydrationPending, portablePacket, recipientAccessToken]);
 
   useEffect(() => {
     const did = documentId?.trim() ?? "";
@@ -894,7 +926,19 @@ export function RecipientSigningView({
             <div className="vs01-sign-preview-fallback" role="status">
               {serverHydrationPending ? "Loading signing fields…" : "Loading document…"}
             </div>
-          ) : !useCanonicalDocument && (portablePacket?.seed.corpusPlain || "").trim() ? (
+          ) : isUploadedFinalPdfPacket(portablePacket) && pdfUrl ? (
+            <div className="vs01-sign-doc-pages-wrap vs01-sign-doc-surface w-full min-w-0 overflow-x-clip">
+              <object
+                data={pdfUrl}
+                type="application/pdf"
+                className="h-[70vh] w-full min-w-0"
+                data-testid="quick-pdf-locked-document"
+                aria-label="Locked uploaded PDF"
+              />
+            </div>
+          ) : !useCanonicalDocument &&
+            !isUploadedFinalPdfPacket(portablePacket) &&
+            (portablePacket?.seed.corpusPlain || "").trim() ? (
             <div
               className="vs01-sign-doc-pages-wrap vs01-sign-doc-surface w-full min-w-0 overflow-x-clip"
               data-testid="vs01-recipient-canonical-render"
@@ -1197,6 +1241,41 @@ export function RecipientSigningView({
             </div>
           )}
         </div>
+
+        {isUploadedFinalPdfPacket(portablePacket) && !docLoading ? (
+          <div className="mt-6 space-y-3" data-testid="esign-field-list">
+            {documentFieldsForView.map((field) => {
+              const mine = recipientFieldBelongsToLockedSigner(field, lockedCp, lockedSignerRoleId);
+              const editable = mine && isRecipientSigningEditableType(field.type);
+              const value = typeof field.value === "string" ? field.value : "";
+              return (
+                <div
+                  key={`quick-pdf-${field.id}`}
+                  data-testid={editable ? "esign-assigned-field" : "esign-other-signer-field"}
+                  className="rounded-md border border-stone-200 p-3"
+                >
+                  <p className="mb-1 text-xs font-medium uppercase tracking-wide text-stone-500">
+                    {labelForFieldType(field.type)}
+                    {mine ? "" : " (other signer)"}
+                  </p>
+                  {editable ? (
+                    <input
+                      type="text"
+                      className="vs01-sign-field-inline-input min-h-11 w-full"
+                      value={value}
+                      placeholder={field.type === "signature" ? "Type signature" : labelForFieldType(field.type)}
+                      autoComplete="off"
+                      aria-label={labelForFieldType(field.type)}
+                      onChange={(ev) => updateFieldValue(field.id, ev.target.value)}
+                    />
+                  ) : (
+                    <p className="min-h-11 text-sm text-stone-600">{value.trim() || "—"}</p>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        ) : null}
 
         {showEmptyFieldsHint && placementSurface && !docLoading ? (
           <p className="vs01-recipient-signing-empty" role="status">

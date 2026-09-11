@@ -1,9 +1,6 @@
-import { resolveApiBase } from "../lib/clawApi";
+import { apiUrl } from "../lib/clawApi";
 import { ownerApiFetch } from "../lib/ownerApiClient";
-
-function apiBase(): string {
-  return resolveApiBase().replace(/\/$/, "");
-}
+import { recipientAgreementReadHeaders } from "../agreement/recipientAccessApi";
 
 function messageFromJsonBody(data: unknown, fallback: string): string {
   if (typeof data !== "object" || data === null) return fallback;
@@ -83,14 +80,12 @@ export async function createSignSession(
   documentId: string,
   contentSha256: string
 ): Promise<CreateSignSessionResponse> {
-  const base = apiBase();
-  const url = `${base}/v1/sign-sessions`;
   const body = {
     document_id: documentId,
     content_sha256: contentSha256.toLowerCase(),
   };
 
-  const res = await fetch(url, {
+  const res = await ownerApiFetch("/v1/sign-sessions", {
     method: "POST",
     headers: { "Content-Type": "application/json", Accept: "application/json" },
     body: JSON.stringify(body),
@@ -139,6 +134,26 @@ export async function fetchDocumentContent(documentId: string): Promise<Blob> {
   return res.blob();
 }
 
+/** Token-bound GET of the locked PDF. Owner headers are not authority for this path. */
+export async function fetchRecipientDocumentContent(
+  documentId: string,
+  recipientAccessToken: string,
+): Promise<Blob> {
+  const enc = encodeURIComponent(documentId.trim());
+  const token = recipientAccessToken.trim();
+  const res = await fetch(apiUrl(`/v1/documents/${enc}/content`), {
+    method: "GET",
+    headers: {
+      Accept: "application/pdf, application/octet-stream, */*",
+      ...recipientAgreementReadHeaders("", token),
+    },
+  });
+  if (!res.ok) {
+    throw new Error("This PDF is not available for this signing link.");
+  }
+  return res.blob();
+}
+
 export type FieldManifestEntry = {
   field_id: string;
   page_index: number;
@@ -169,11 +184,8 @@ export async function completeSignSession(
   sessionId: string,
   payload: CompleteSignSessionPayload
 ): Promise<CompleteSignSessionResponse> {
-  const base = apiBase();
   const enc = encodeURIComponent(sessionId);
-  const url = `${base}/v1/sign-sessions/${enc}/complete`;
-
-  const res = await fetch(url, {
+  const res = await ownerApiFetch(`/v1/sign-sessions/${enc}/complete`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Accept: "application/json" },
     body: JSON.stringify(payload),

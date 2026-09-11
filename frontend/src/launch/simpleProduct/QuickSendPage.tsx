@@ -19,6 +19,7 @@ import {
   type QuickPdfBinding,
   type QuickPdfErrorCode,
 } from "./quickPdfUpload";
+import { QuickPdfCompletion } from "./QuickPdfCompletion";
 
 type QuickStart = "choice" | "type" | "speak" | "pdf";
 
@@ -61,6 +62,7 @@ export function QuickSendPage() {
   const [localError, setLocalError] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
   const [binding, setBinding] = useState<QuickPdfBinding | null>(null);
+  const [showCompletion, setShowCompletion] = useState(false);
   const uploadInFlightRef = useRef(false);
   const uploadedIdRef = useRef<string | null>(null);
 
@@ -120,6 +122,7 @@ export function QuickSendPage() {
       if (result.ok) {
         uploadedIdRef.current = result.binding.documentId;
         setBinding(result.binding);
+        setShowCompletion(true);
       } else {
         clearQuickPdfDocumentHint();
         if (result.code === "wrong_organization" || result.code === "forbidden") {
@@ -466,8 +469,18 @@ export function QuickSendPage() {
                 <p className="mt-3 text-xs text-emerald-100/80">
                   Placement and sending come next. This step only confirms the exact PDF you uploaded.
                 </p>
+                <button
+                  type="button"
+                  className="vs01-btn vs01-btn--primary mt-3 min-h-11"
+                  data-testid="quick-intake-pdf-continue"
+                  onClick={() => setShowCompletion(true)}
+                >
+                  Continue to placement
+                </button>
               </div>
             ) : null}
+
+            {binding && showCompletion ? <QuickPdfCompletion binding={binding} /> : null}
 
             {localError ? (
               <p className="text-sm text-rose-300" data-testid="quick-intake-pdf-error" role="alert">

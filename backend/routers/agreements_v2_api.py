@@ -786,6 +786,8 @@ class AgreementDraft(AgreementDraftCreate):
     explicit_acceptance_v1: Optional[Dict[str, Any]] = None
     """Completion evidence package for fully executed agreements (who signed, when, corpus hash, retrieval)."""
     completion_evidence_v1: Optional[Dict[str, Any]] = None
+    """Phase 4C.2 — owner-guarded uploaded-PDF envelope (not drafted paper)."""
+    quick_pdf_envelope_v1: Optional[Dict[str, Any]] = None
 
 
 def _merge_agreement_draft(base: AgreementDraft, **updates: Any) -> AgreementDraft:

@@ -274,6 +274,65 @@ def get_document_bytes(document_id: str) -> Optional[bytes]:
     return _read_legacy_body(document_id)
 
 
+def persist_document_meta(document_id: str, meta: Dict[str, Any]) -> Dict[str, Any]:
+    """Rewrite document metadata (owner bind). Does not change PDF bytes."""
+    did = (document_id or "").strip()
+    if not did or "/" in did or ".." in did:
+        raise ValueError("invalid_document_id")
+    payload = dict(meta)
+    payload["document_id"] = did
+    meta_json = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+    if unified_artifact_store_enabled():
+        from backend.storage.artifact_repository import get_artifact_repository
+
+        repo = get_artifact_repository()
+        repo.init_schema()
+        repo.put_artifact(
+            artifact_type="vs01_document_meta",
+            logical_ref=did,
+            data=meta_json,
+            content_type="application/json",
+            visibility="private",
+            agreement_id=str(payload.get("agreement_id") or "").strip() or None,
+            metadata={"role": "signed_document_meta"},
+        )
+    for base in _legacy_storage_bases():
+        path = base / did / "meta.json"
+        if path.parent.is_dir():
+            try:
+                path.write_text(meta_json.decode("utf-8"), encoding="utf-8")
+            except OSError:
+                continue
+    return payload
+
+
+def bind_document_agreement_id(
+    document_id: str,
+    agreement_id: str,
+    *,
+    owner_org_id: str,
+) -> Dict[str, Any]:
+    """Stamp ``agreement_id`` on an owner-held document. Idempotent for the same bind."""
+    did = (document_id or "").strip()
+    aid = (agreement_id or "").strip()
+    oid = (owner_org_id or "").strip()
+    if not did or not aid or not oid:
+        raise ValueError("document_bind_required")
+    meta = get_document_meta(did)
+    if not meta:
+        raise KeyError("document_not_found")
+    if str(meta.get("owner_org_id") or "").strip() != oid:
+        raise PermissionError("document_org_mismatch")
+    existing = str(meta.get("agreement_id") or "").strip()
+    if existing and existing != aid:
+        raise ValueError("document_already_bound")
+    if existing == aid:
+        return meta
+    next_meta = dict(meta)
+    next_meta["agreement_id"] = aid
+    return persist_document_meta(did, next_meta)
+
+
 def verify_content_sha256(document_id: str, claimed_sha256: str) -> bool:
     meta = get_document_meta(document_id)
     if not meta:
