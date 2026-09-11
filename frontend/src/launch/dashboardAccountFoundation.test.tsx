@@ -303,8 +303,12 @@ describe("dashboard account foundation", () => {
   it("public reviewer route is not a dashboard account surface", () => {
     expect(isPublicTokenAgreementSurface("/agreements/ag_1/review")).toBe(true);
     expect(isPublicTokenAgreementSurface("/agreements/ag_1/sign")).toBe(true);
+    expect(isPublicTokenAgreementSurface("/verify/ag_1")).toBe(true);
+    expect(isPublicTokenAgreementSurface("/app/verify/ag_1")).toBe(true);
     expect(isDashboardAccountSurface("/agreements/ag_1/review")).toBe(false);
     expect(isDashboardAccountSurface("/agreements/ag_1/sign")).toBe(false);
+    expect(isDashboardAccountSurface("/verify/ag_1")).toBe(false);
+    expect(isDashboardAccountSurface("/app/verify/ag_1")).toBe(false);
   });
 
   it("public signer esign route is not a dashboard account surface", () => {

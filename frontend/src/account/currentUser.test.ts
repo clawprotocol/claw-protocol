@@ -55,8 +55,13 @@ describe("currentUser adapter", () => {
   it("does not treat public reviewer links as dashboard surfaces", () => {
     expect(isPublicTokenAgreementSurface("/agreements/ag_123/review")).toBe(true);
     expect(isPublicTokenAgreementSurface("/agreements/ag_123/sign")).toBe(true);
+    expect(isPublicTokenAgreementSurface("/verify/ag_123")).toBe(true);
+    expect(isPublicTokenAgreementSurface("/app/verify/ag_123")).toBe(true);
     expect(isAuthenticatedDashboardSurface("/agreements/ag_123/review")).toBe(false);
     expect(isAuthenticatedDashboardSurface("/agreements/ag_123/sign")).toBe(false);
+    expect(isAuthenticatedDashboardSurface("/verify/ag_123")).toBe(false);
+    expect(isAuthenticatedDashboardSurface("/app/verify/ag_123")).toBe(false);
+    expect(isAuthenticatedDashboardSurface("/app/verification/ag_123")).toBe(true);
   });
 
   it("recognizes a legacy recipient token in first query position", () => {
