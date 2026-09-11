@@ -32,7 +32,12 @@ from backend.security.supabase_jwt import (
     verify_supabase_access_token,
 )
 from backend.security.workspace_identity import verify_anonymous_session_from_request, extract_anonymous_session_token
-from backend.security.safe_redirect import build_destination_with_agreement, resolve_safe_redirect_path
+from backend.security.safe_redirect import (
+    build_destination_with_agreement,
+    is_approved_server_quick_pdf_return,
+    canonicalize_quick_pdf_return,
+    resolve_safe_redirect_path,
+)
 from backend.config.deployment_runtime import claw_environment
 from backend.cors_policy import apply_cors_headers_to_response
 from backend.admin_console.store import get_admin_console_store
@@ -338,10 +343,17 @@ async def request_genesis_access(request: Request, body: GenesisAccessRequestIn)
 async def create_auth_continuation(request: Request, body: AuthContinuationIn) -> Dict[str, Any]:
     """Create durable server-side continuation for OAuth / magic-link round trips."""
     purpose = (body.auth_purpose or "").strip().lower()
-    dest = resolve_safe_redirect_path(body.destination_path, "/app")
+    if purpose == "quick_pdf_return":
+        dest = (
+            canonicalize_quick_pdf_return(body.destination_path)
+            if is_approved_server_quick_pdf_return(body.destination_path)
+            else "/app"
+        )
+    else:
+        dest = resolve_safe_redirect_path(body.destination_path, "/app")
     store = get_anonymous_session_store()
 
-    if purpose in ("returning_sign_in", "dashboard"):
+    if purpose in ("returning_sign_in", "dashboard", "quick_pdf_return"):
         cont = store.create_continuation(
             session_id="returning",
             org_id="",
@@ -435,7 +447,7 @@ async def finalize_auth(request: Request, body: FinalizeAuthIn) -> Dict[str, Any
     if token:
         anon_row = verify_anonymous_session_from_request(request)
     purpose = str(cont_row.get("auth_purpose") or "").strip().lower()
-    is_returning = purpose in ("returning_sign_in", "dashboard") or str(cont_row.get("session_id") or "") == "returning"
+    is_returning = purpose in ("returning_sign_in", "dashboard", "quick_pdf_return") or str(cont_row.get("session_id") or "") == "returning"
 
     prev_org = str(cont_row.get("org_id") or "").strip()
     ensure_organization(org_id, name=user_id)

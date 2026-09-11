@@ -53,7 +53,7 @@ def test_two_completes_same_doc_same_inputs_same_receipt_hash(
     _configure_artifacts(monkeypatch, tmp_path)
     client = TestClient(app)
 
-    raw = b"determinism-doc-bytes-fixed"
+    raw = b"%PDF-1.4 determinism-doc-bytes-fixed"
     fin = client.post(
         "/v1/documents",
         json={"content_base64": base64.b64encode(raw).decode("ascii")},
@@ -102,7 +102,7 @@ def test_verification_bundle_zip_bytes_identical_with_fixed_ids(
     _configure_artifacts(monkeypatch, tmp_path)
     client = TestClient(app)
 
-    raw = b"bundle-determinism"
+    raw = b"%PDF-1.4 bundle-determinism"
     fin = client.post(
         "/v1/documents",
         json={"content_base64": base64.b64encode(raw).decode("ascii")},
@@ -156,7 +156,7 @@ def test_stored_receipt_digests_match_proof_recompute(
     _configure_artifacts(monkeypatch, tmp_path)
     client = TestClient(app)
 
-    raw = b"golden-vs01-payload"
+    raw = b"%PDF-1.4 golden-vs01-payload"
     fin = client.post(
         "/v1/documents",
         json={"content_base64": base64.b64encode(raw).decode("ascii")},

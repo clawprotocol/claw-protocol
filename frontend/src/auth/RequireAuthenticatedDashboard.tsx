@@ -13,10 +13,7 @@ import {
   CHECKOUT_SIGN_IN_HEADING,
   isSecureCheckoutPath,
 } from "./safeRedirectResolver";
-import {
-  consumeHomeAnonymousCreateAuthority,
-  isHomeAnonymousStarterAuthorityActive,
-} from "../launch/homeAnonymousCreateOrigin";
+import { isHomeAnonymousStarterAuthorityActive } from "../launch/homeAnonymousCreateOrigin";
 import {
   hasDemoSessionUser,
   isGuestCheckoutAuthorityActiveForPath,
@@ -37,7 +34,6 @@ export function RequireAuthenticatedDashboard({
     return <>{children}</>;
   }
   if (path === "/app/create" && isHomeAnonymousStarterAuthorityActive()) {
-    consumeHomeAnonymousCreateAuthority();
     return <>{children}</>;
   }
 

@@ -22,6 +22,11 @@ import {
   isSecureCheckoutPath,
   sanitizeVisibleSignInUrl,
 } from "../auth/safeRedirectResolver";
+import {
+  QUICK_PDF_AUTH_PURPOSE,
+  QUICK_PDF_RETURN_PATH,
+  QUICK_PDF_SIGN_IN_INTENT,
+} from "./quickPdfReturnAuthority";
 import { getGenesisReferralCode } from "./genesisReferral/genesisReferralCapture";
 import { isPublicProductionHostname } from "./devPaymentBypass";
 
@@ -44,12 +49,27 @@ export function SignInPage() {
   const [status, setStatus] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [emailSent, setEmailSent] = useState(false);
-  const destinationPath = useMemo(() => resolveSignInNextDestination(search, "/app"), [search]);
+  const quickPdfReturn = useMemo(() => {
+    try {
+      const q = new URLSearchParams(search.startsWith("?") ? search.slice(1) : search || "");
+      return (q.get("intent") || "").trim().toLowerCase() === QUICK_PDF_SIGN_IN_INTENT;
+    } catch {
+      return false;
+    }
+  }, [search]);
+  const destinationPath = useMemo(
+    () => (quickPdfReturn ? QUICK_PDF_RETURN_PATH : resolveSignInNextDestination(search, "/app")),
+    [quickPdfReturn, search],
+  );
   const checkoutContinuation = isSecureCheckoutPath(destinationPath);
   const referralCode = useMemo(() => getGenesisReferralCode(), []);
   const signInOpts = useMemo(
-    () => ({ returningSignIn: true as const, destinationPath }),
-    [destinationPath],
+    () => ({
+      returningSignIn: true as const,
+      destinationPath,
+      ...(quickPdfReturn ? { authPurpose: QUICK_PDF_AUTH_PURPOSE } : {}),
+    }),
+    [destinationPath, quickPdfReturn],
   );
 
   useEffect(() => {
@@ -93,9 +113,11 @@ export function SignInPage() {
       <p className="mt-2 text-sm text-slate-400">
         {checkoutContinuation
           ? CHECKOUT_SIGN_IN_BODY
-          : referralCode
-            ? "Sign in to continue with your referral invite and open create."
-            : "Access your agreements and workspace."}
+          : quickPdfReturn
+            ? "Sign in to continue preparing your existing PDF for e-sign. After sign-in you’ll return to that step."
+            : referralCode
+              ? "Sign in to continue with your referral invite and open create."
+              : "Access your agreements and workspace."}
       </p>
       {isGoogleAuthConfigured() ? (
         <button

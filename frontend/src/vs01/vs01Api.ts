@@ -38,8 +38,6 @@ export async function finalizeDocument(
   contentBase64: string,
   contentType?: string
 ): Promise<FinalizeDocumentResponse> {
-  const base = apiBase();
-  const url = `${base}/v1/documents`;
   const body: { content_base64: string; content_type?: string } = {
     content_base64: contentBase64,
   };
@@ -47,7 +45,7 @@ export async function finalizeDocument(
     body.content_type = contentType.trim();
   }
 
-  const res = await fetch(url, {
+  const res = await ownerApiFetch("/v1/documents", {
     method: "POST",
     headers: { "Content-Type": "application/json", Accept: "application/json" },
     body: JSON.stringify(body),

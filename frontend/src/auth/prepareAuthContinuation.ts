@@ -19,7 +19,7 @@ export async function prepareAuthContinuation(args?: {
     workflowStage: (args?.workflowStage as never) ?? "unknown",
     destinationPath: args?.destinationPath,
   });
-  if (!args?.returningSignIn) {
+  if (!args?.returningSignIn && args?.authPurpose !== "quick_pdf_return") {
     await ensureAnonymousSession();
   }
   const path =
@@ -31,9 +31,9 @@ export async function prepareAuthContinuation(args?: {
     agreementId: args?.agreementId,
     destinationPath: path,
     workflowStage: (args?.workflowStage as never) ?? "unknown",
-    authPurpose: args?.returningSignIn ? "returning_sign_in" : args?.authPurpose ?? "claim",
+    authPurpose: args?.authPurpose ?? (args?.returningSignIn ? "returning_sign_in" : "claim"),
     provider: args?.provider,
-    returningSignIn: args?.returningSignIn,
+    returningSignIn: args?.returningSignIn || args?.authPurpose === "quick_pdf_return",
   });
   return cont.continuation_id;
 }

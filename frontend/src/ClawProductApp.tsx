@@ -7,6 +7,7 @@ import { BillingPage } from "./launch/BillingPage";
 import { LaunchHomePage } from "./launch/LaunchHomePage";
 import { useLaunchNav } from "./launch/LaunchNavContext";
 import { matchAppRoute } from "./launch/routes";
+import { canonicalizeEsignNewAliasPath } from "./launch/quickAliasCanonicalize";
 import { AgreementMemoryPage } from "./launch/AgreementMemoryPage";
 import { FieldReviewPage } from "./launch/documentLayout/FieldReviewPage";
 import { QuickSendPage } from "./launch/simpleProduct/QuickSendPage";
@@ -242,15 +243,12 @@ function AgreementSignGate(props: {
   );
 }
 
-/** Legacy `/app/esign/new` → unified Quick flow (compatibility). */
+/** Legacy `/app/esign` and `/app/esign/new` → Quick PDF intake (compatibility only). */
 function RedirectEsignNewToQuick({ search }: { search: string }) {
   const { navigate } = useLaunchNav();
   useEffect(() => {
-    const raw = search?.startsWith("?") ? search.slice(1) : search || "";
-    const sp = new URLSearchParams(raw);
-    if (!sp.get("start")) sp.set("start", "pdf");
-    const qs = sp.toString();
-    navigate(qs ? `/app/quick?${qs}` : "/app/quick?start=pdf");
+    const dest = canonicalizeEsignNewAliasPath("/app/esign/new", search) || "/app/quick?start=pdf";
+    navigate(dest);
   }, [navigate, search]);
   return (
     <div className="px-4 py-16 text-center text-sm text-slate-400" role="status">

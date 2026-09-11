@@ -117,7 +117,7 @@ def test_complete_sign_happy_path_http(
 ) -> None:
     _configure_artifacts(monkeypatch, tmp_path)
     client = TestClient(app)
-    raw = b"vs01 complete sign bytes"
+    raw = b"%PDF-1.4 vs01 complete sign bytes"
     fin = client.post(
         "/v1/documents",
         json={
@@ -174,7 +174,7 @@ def test_complete_sign_second_call_conflict(
     client = TestClient(app)
     fin = client.post(
         "/v1/documents",
-        json={"content_base64": base64.b64encode(b"x").decode("ascii")},
+        json={"content_base64": base64.b64encode(b"%PDF-1.4 x").decode("ascii")},
     )
     doc_id = fin.json()["document_id"]
     h = fin.json()["content_sha256"]
@@ -204,7 +204,7 @@ def test_complete_sign_invalid_manifest_400(
     client = TestClient(app)
     fin = client.post(
         "/v1/documents",
-        json={"content_base64": base64.b64encode(b"y").decode("ascii")},
+        json={"content_base64": base64.b64encode(b"%PDF-1.4 y").decode("ascii")},
     )
     doc_id = fin.json()["document_id"]
     h = fin.json()["content_sha256"]

@@ -10,7 +10,7 @@ import {
   clearAuthContinuationContext,
   readAuthContinuationContext,
 } from "./authContinuationContext";
-import { resolvePostAuthDestination, resolveSafeRedirectPath } from "./safeRedirectResolver";
+import { resolvePostAuthDestination, resolveServerAuthDestination } from "./safeRedirectResolver";
 import { logProductEvent } from "../lib/experimentation/productEvents";
 import {
   clearContinuationId,
@@ -134,7 +134,7 @@ export async function finalizeAuthenticatedSession(args: {
         /* Secondary restore work must not undo a successful server finalize. */
       }
       return {
-        destinationPath: resolveSafeRedirectPath(server.destination_path, "/app"),
+        destinationPath: resolveServerAuthDestination(server.destination_path, "/app"),
         orgId: String(server.org_id || "").trim(),
         migratedAgreementCount: server.migrated_agreement_count,
         migratedAgreementIds: server.migrated_agreement_ids ?? [],

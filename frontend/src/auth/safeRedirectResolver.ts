@@ -4,6 +4,10 @@
  */
 
 import { matchAppRoute } from "../launch/routes";
+import {
+  APPROVED_QUICK_ATTRIBUTION_KEYS,
+  QUICK_PDF_RETURN_PATH,
+} from "../launch/quickPdfReturnAuthority";
 import type { AuthContinuationContextV1 } from "./authContinuationContext";
 
 const CONTROL_CHARS = /[\u0000-\u001F\u007F]/;
@@ -137,6 +141,71 @@ export function isAllowlistedInternalPath(path: string, depth = 0): boolean {
   return true;
 }
 
+function quickPdfQueryIsApproved(search: string): boolean {
+  const raw = search.startsWith("?") ? search.slice(1) : search;
+  if (!raw) return false;
+  let params: URLSearchParams;
+  try {
+    params = new URLSearchParams(raw);
+  } catch {
+    return false;
+  }
+  const starts = params.getAll("start").map((v) => v.trim().toLowerCase());
+  if (starts.length === 0 || starts.some((v) => v !== "pdf")) return false;
+  for (const [key, value] of params.entries()) {
+    const k = key.trim().toLowerCase();
+    if (k === "start") continue;
+    if (
+      !k ||
+      FORBIDDEN_QUERY_KEYS.has(k) ||
+      !(APPROVED_QUICK_ATTRIBUTION_KEYS as readonly string[]).includes(k)
+    ) {
+      return false;
+    }
+    if (CONTROL_CHARS.test(value) || value.includes("\\") || value.includes("://")) return false;
+  }
+  return true;
+}
+
+export function canonicalizeQuickPdfReturn(path: string): string {
+  const parsed = parseInternalCandidate(path);
+  if (!parsed) return QUICK_PDF_RETURN_PATH;
+  const raw = parsed.search.startsWith("?") ? parsed.search.slice(1) : parsed.search;
+  let params: URLSearchParams;
+  try {
+    params = new URLSearchParams(raw);
+  } catch {
+    return QUICK_PDF_RETURN_PATH;
+  }
+  const kept: string[] = ["start=pdf"];
+  const seen = new Set<string>();
+  for (const key of APPROVED_QUICK_ATTRIBUTION_KEYS) {
+    const value = (params.get(key) || "").trim();
+    if (!value || seen.has(key)) continue;
+    if (CONTROL_CHARS.test(value) || value.includes("\\") || value.includes("://")) continue;
+    seen.add(key);
+    kept.push(`${encodeURIComponent(key)}=${encodeURIComponent(value)}`);
+  }
+  return kept.length === 1 ? QUICK_PDF_RETURN_PATH : `/app/quick?${kept.join("&")}`;
+}
+
+/** Server continuation may return here. Browser ``next`` must not. */
+export function isApprovedServerQuickPdfReturn(path: string): boolean {
+  const parsed = parseInternalCandidate(path);
+  if (!parsed || parsed.pathname !== "/app/quick") return false;
+  return quickPdfQueryIsApproved(parsed.search);
+}
+
+export function resolveServerAuthDestination(
+  candidate: string | null | undefined,
+  fallback = "/app",
+): string {
+  const c = (candidate || "").trim();
+  if (c && isApprovedServerQuickPdfReturn(c)) return canonicalizeQuickPdfReturn(c);
+  if (c && isAllowlistedInternalPath(c)) return canonicalizeInternalPath(c);
+  return fallback;
+}
+
 function canonicalizeInternalPath(path: string): string {
   const parsed = parseInternalCandidate(path);
   if (!parsed) return path;
@@ -158,7 +227,7 @@ export function resolveAuthCallbackDestination(args: {
   usedContinuation: boolean;
   callerNext?: string | null;
 }): string {
-  const server = resolveSafeRedirectPath(args.serverDestination, "");
+  const server = resolveServerAuthDestination(args.serverDestination, "");
   if (server) return server;
   if (args.usedContinuation) return "/app";
   return resolveSafeRedirectPath(args.callerNext, "/app");

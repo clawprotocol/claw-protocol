@@ -55,6 +55,10 @@ ALLOWED_QUERY_KEYS = frozenset(
     }
 )
 
+QUICK_PDF_RETURN_PATH = "/app/quick?start=pdf"
+APPROVED_QUICK_ATTRIBUTION_KEYS = frozenset({"src", "aff"})
+QUICK_PDF_QUERY_KEYS = frozenset({"start"}) | APPROVED_QUICK_ATTRIBUTION_KEYS
+
 
 def _looks_like_external_or_script(raw: str) -> bool:
     t = (raw or "").strip()
@@ -157,6 +161,77 @@ def is_allowlisted_internal_path(path: str, depth: int = 0) -> bool:
     return any(pattern.match(pathname) for pattern in ALLOWED_DYNAMIC_PATHS)
 
 
+def _quick_pdf_query_is_approved(search: str) -> bool:
+    raw = search[1:] if search.startswith("?") else search
+    if not raw:
+        return False
+    try:
+        pairs = parse_qsl(raw, keep_blank_values=True, strict_parsing=False)
+    except ValueError:
+        return False
+    if not pairs:
+        return False
+    start_values: list[str] = []
+    for key, value in pairs:
+        k = (key or "").strip().lower()
+        if not k or k in FORBIDDEN_QUERY_KEYS or k not in QUICK_PDF_QUERY_KEYS:
+            return False
+        if CONTROL_CHARS.search(value) or "\\" in value or "://" in value:
+            return False
+        if k == "start":
+            start_values.append((value or "").strip().lower())
+    return start_values == ["pdf"] or (len(start_values) >= 1 and all(v == "pdf" for v in start_values))
+
+
+def canonicalize_quick_pdf_return(path: str) -> str:
+    parsed = _parse_internal_candidate(path)
+    if not parsed:
+        return QUICK_PDF_RETURN_PATH
+    _pathname, search = parsed
+    raw = search[1:] if search.startswith("?") else search
+    try:
+        pairs = parse_qsl(raw, keep_blank_values=True, strict_parsing=False)
+    except ValueError:
+        return QUICK_PDF_RETURN_PATH
+    kept: list[tuple[str, str]] = []
+    seen: set[str] = set()
+    for key, value in pairs:
+        k = (key or "").strip().lower()
+        if k not in APPROVED_QUICK_ATTRIBUTION_KEYS:
+            continue
+        v = (value or "").strip()
+        if not v or k in seen:
+            continue
+        if CONTROL_CHARS.search(v) or "\\" in v or "://" in v:
+            continue
+        seen.add(k)
+        kept.append((k, v))
+    if not kept:
+        return QUICK_PDF_RETURN_PATH
+    return f"/app/quick?{urlencode([('start', 'pdf'), *kept])}"
+
+
+def is_approved_server_quick_pdf_return(path: str) -> bool:
+    """``/app/quick?start=pdf`` is server-continuation only — never a caller ``next``."""
+    parsed = _parse_internal_candidate(path)
+    if not parsed:
+        return False
+    pathname, search = parsed
+    if pathname != "/app/quick":
+        return False
+    return _quick_pdf_query_is_approved(search)
+
+
+def resolve_server_auth_destination(candidate: Optional[str], fallback: str = "/app") -> str:
+    """Destinations the auth server may issue, including Quick PDF return."""
+    c = (candidate or "").strip()
+    if c and is_approved_server_quick_pdf_return(c):
+        return canonicalize_quick_pdf_return(c)
+    if c and is_allowlisted_internal_path(c):
+        return _canonicalize_internal_path(c)
+    return fallback
+
+
 def _canonicalize_internal_path(path: str) -> str:
     parsed = _parse_internal_candidate(path)
     if not parsed:
@@ -175,7 +250,7 @@ def resolve_safe_redirect_path(candidate: Optional[str], fallback: str = "/app")
 
 
 def build_destination_with_agreement(*, destination_path: str, agreement_id: Optional[str]) -> str:
-    dest = resolve_safe_redirect_path(destination_path, "/app")
+    dest = resolve_server_auth_destination(destination_path, "/app")
     aid = (agreement_id or "").strip()
     if aid and dest.startswith("/app/create") and "agreementId=" not in dest:
         sep = "&" if "?" in dest else "?"

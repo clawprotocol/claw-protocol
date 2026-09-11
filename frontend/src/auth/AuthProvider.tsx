@@ -26,6 +26,8 @@ export type AuthSignInOpts = {
   stagingDirectOnly?: boolean;
   /** Allowlisted internal path (e.g. `/app/create?ref=CODE`). Overrides returning `/app` default. */
   destinationPath?: string;
+  /** Server continuation purpose. ``quick_pdf_return`` is the only way into Quick. */
+  authPurpose?: string;
 };
 
 export type AuthContextValue = {
@@ -143,6 +145,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         returningSignIn: opts?.returningSignIn,
         workflowStage: opts?.returningSignIn ? "dashboard" : "claim",
         destinationPath: resolveSignInDestination(opts),
+        authPurpose: opts?.authPurpose,
         provider: "email",
       });
       return signInWithEmailMagicLink(email, buildAuthCallbackUrl(undefined, continuationId), {
@@ -158,6 +161,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         returningSignIn: opts?.returningSignIn,
         workflowStage: opts?.returningSignIn ? "dashboard" : "claim",
         destinationPath: resolveSignInDestination(opts),
+        authPurpose: opts?.authPurpose,
         provider: "google",
       });
       await signInWithGoogle(buildAuthCallbackUrl(undefined, continuationId));
