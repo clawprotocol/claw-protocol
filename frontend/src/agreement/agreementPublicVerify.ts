@@ -40,11 +40,22 @@ export type PublicVerifyPayload = {
     signing_commitment_hash?: string | null;
   };
   signature_events: PublicVerifySignatureEvent[];
+  /** Explicit server opt-in only. Absent/false keeps public verify metadata-only. */
+  public_completed_pdf_distribution?: boolean;
   verification: {
     agreement_hash: string;
     signing_commitment_hash?: string | null;
     schema?: string;
     record_note?: string;
+    envelope_attestation_valid?: boolean;
+    envelope_attestation_reason?: string;
+    accepted_review_snapshot?: {
+      snapshot_id?: string;
+      corpus_sha256?: string;
+      corpus_length?: number;
+      schema?: string;
+    } | null;
+    public_completed_pdf_distribution?: boolean;
     /**
      * Optional VS01 signing-envelope provenance (packet → accepted SoT).
      * Digests are SHA-256; agreement_hash may remain a short display fingerprint.
@@ -86,14 +97,28 @@ export function parseAgreementVerifyPath(pathname: string): { agreementId: strin
   return { agreementId: decodeURIComponent(m[1]) };
 }
 
-export async function fetchPublicAgreementVerify(agreementId: string): Promise<PublicVerifyPayload | null> {
+export type PublicVerifyLoadResult =
+  | { ok: true; data: PublicVerifyPayload }
+  | { ok: false; retryable: boolean };
+
+export async function loadPublicAgreementVerify(agreementId: string): Promise<PublicVerifyLoadResult> {
   const id = (agreementId || "").trim();
-  if (!id) return null;
+  if (!id) return { ok: false, retryable: false };
   try {
     const res = await fetch(apiUrl(`/api/agreements/public/${encodeURIComponent(id)}/verify`));
-    if (!res.ok) return null;
-    return (await res.json()) as PublicVerifyPayload;
+    if (res.ok) {
+      const data = (await res.json()) as PublicVerifyPayload;
+      if (!data || typeof data !== "object") return { ok: false, retryable: false };
+      return { ok: true, data };
+    }
+    if (res.status >= 500) return { ok: false, retryable: true };
+    return { ok: false, retryable: false };
   } catch {
-    return null;
+    return { ok: false, retryable: true };
   }
+}
+
+export async function fetchPublicAgreementVerify(agreementId: string): Promise<PublicVerifyPayload | null> {
+  const result = await loadPublicAgreementVerify(agreementId);
+  return result.ok ? result.data : null;
 }

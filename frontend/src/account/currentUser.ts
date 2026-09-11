@@ -153,6 +153,7 @@ export function isPublicTokenAgreementSurface(pathname: string, search?: string)
   const p = rawPath.replace(/\/$/, "") || "/";
   if (/^\/agreements\/[^/]+\/(review|sign)$/i.test(p)) return true;
   if (/^\/verify\//i.test(p)) return true;
+  if (/^\/app\/verify\/[^/]+$/i.test(p)) return true;
   const route = matchAppRoute(pathname, currentLocationSearch(pathname, search));
   return route?.access === "recipient_token";
 }
