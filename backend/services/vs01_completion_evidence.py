@@ -82,6 +82,8 @@ def locked_packet_fields(draft: Dict[str, Any]) -> List[Dict[str, Any]]:
                     "field_type": _norm(raw.get("field_type") or raw.get("type") or "signature").lower(),
                     "signer_role_id": _norm(raw.get("signer_role_id") or raw.get("assignedSignerRoleId")),
                     "page_index": raw.get("page_index") if raw.get("page_index") is not None else raw.get("page"),
+                    "required": _field_required(raw, _norm(raw.get("field_type") or raw.get("type") or "signature").lower()),
+                    "counterparty_id": _norm(raw.get("counterparty_id") or raw.get("counterpartyId")),
                 }
             )
         if out:
@@ -97,15 +99,57 @@ def locked_packet_fields(draft: Dict[str, Any]) -> List[Dict[str, Any]]:
             fid = _norm(raw.get("id") or raw.get("field_id"))
             if not fid:
                 continue
+            ftype = _norm(raw.get("type") or raw.get("field_type") or "signature").lower()
             out.append(
                 {
                     "field_id": fid,
-                    "field_type": _norm(raw.get("type") or raw.get("field_type") or "signature").lower(),
+                    "field_type": ftype,
                     "signer_role_id": _norm(raw.get("assignedSignerRoleId") or raw.get("signer_role_id")),
                     "page_index": raw.get("page") if raw.get("page") is not None else raw.get("page_index"),
+                    "required": _field_required(raw, ftype),
+                    "counterparty_id": _norm(raw.get("counterpartyId") or raw.get("counterparty_id")),
                 }
             )
     return out
+
+
+def _field_required(raw: Dict[str, Any], field_type: str) -> bool:
+    if raw.get("optional") is True or raw.get("required") is False:
+        return False
+    if raw.get("required") is True:
+        return True
+    return field_type in SIGNATURE_FIELD_TYPES
+
+
+def owner_authorized_identity(draft: Dict[str, Any]) -> Tuple[str, str]:
+    """Owner may complete only this role and participant."""
+    env = draft.get("quick_pdf_envelope_v1")
+    if isinstance(env, dict) and (_norm(env.get("owner_role_id")) or _norm(env.get("owner_party_id"))):
+        return _norm(env.get("owner_role_id") or "qs_owner"), _norm(env.get("owner_party_id"))
+    stored = draft.get("vs01_signing_packet_v1")
+    portable = stored.get("portable") if isinstance(stored, dict) else None
+    roles = portable.get("roles") if isinstance(portable, dict) else None
+    owner_role = ""
+    if isinstance(roles, list):
+        for raw in roles:
+            if not isinstance(raw, dict):
+                continue
+            rid = _norm(raw.get("roleId") or raw.get("role_id"))
+            if rid in {"qs_owner", "role_owner", "owner"}:
+                owner_role = rid
+                break
+        if not owner_role and roles and isinstance(roles[0], dict):
+            owner_role = _norm(roles[0].get("roleId") or roles[0].get("role_id"))
+    owner_role = owner_role or "role_owner"
+    from backend.services.vs01_signer_completion import portable_party_id_for_signer_role
+
+    pid = portable_party_id_for_signer_role(draft, owner_role)
+    if not pid:
+        for row in locked_packet_fields(draft):
+            if row.get("signer_role_id") == owner_role and row.get("counterparty_id"):
+                pid = str(row.get("counterparty_id") or "")
+                break
+    return owner_role, pid
 
 
 def locked_packet_revision(draft: Dict[str, Any]) -> str:
@@ -247,16 +291,28 @@ def validate_assigned_fields(
                 "A submitted field belongs to another signer.",
                 status_code=403,
             )
-        ftype = _norm(raw.get("field_type") or raw.get("type") or (locked_row or {}).get("field_type") or "signature").lower()
+        locked_type = _norm((locked_row or {}).get("field_type"))
+        posted_type = _norm(raw.get("field_type") or raw.get("type"))
+        if locked_type and posted_type and posted_type != locked_type:
+            raise CompletionEvidenceError(
+                "field_type_mismatch",
+                "A submitted field type does not match the locked field manifest.",
+            )
+        ftype = locked_type or posted_type or "signature"
         value = str(raw.get("value") or "")
         if ftype in SIGNATURE_FIELD_TYPES and required and not value.strip():
             raise CompletionEvidenceError(
                 "signature_required",
                 "A required signature field is empty.",
             )
-        page = _page_int(raw.get("page_index") if raw.get("page_index") is not None else raw.get("page"))
-        if page is None and locked_row is not None:
-            page = _page_int(locked_row.get("page_index"))
+        posted_page = _page_int(raw.get("page_index") if raw.get("page_index") is not None else raw.get("page"))
+        locked_page = _page_int((locked_row or {}).get("page_index"))
+        if posted_page is not None and locked_page is not None and posted_page != locked_page:
+            raise CompletionEvidenceError(
+                "field_page_mismatch",
+                "A submitted field page does not match the locked field manifest.",
+            )
+        page = locked_page if locked_page is not None else posted_page
         out.append(
             ValidatedAssignedField(
                 field_id=fid,
@@ -267,24 +323,31 @@ def validate_assigned_fields(
             )
         )
     if required:
+        if not locked:
+            raise CompletionEvidenceError(
+                "locked_field_authority_missing",
+                "Completion requires a locked field manifest.",
+            )
         if assigned_to_signer:
             posted_ids = {row.field_id for row in out}
-            missing_sig = [
+            missing_required = [
                 row
                 for row in assigned_to_signer
-                if row["field_type"] == "signature" and row["field_id"] not in posted_ids
+                if row.get("required") is not False
+                and row["field_type"] in SIGNATURE_FIELD_TYPES
+                and row["field_id"] not in posted_ids
             ]
-            if missing_sig:
+            if missing_required:
                 raise CompletionEvidenceError(
                     "signature_required",
                     "Every assigned signature field must be completed.",
                 )
-            if not any(row.field_type == "signature" and row.value.strip() for row in out):
+            if not any(row.field_type in SIGNATURE_FIELD_TYPES and row.value.strip() for row in out):
                 raise CompletionEvidenceError(
                     "signature_required",
                     "A required signature field is empty.",
                 )
-        elif not any(row.field_type == "signature" and row.value.strip() for row in out):
+        elif not any(row.field_type in SIGNATURE_FIELD_TYPES and row.value.strip() for row in out):
             raise CompletionEvidenceError(
                 "signature_required",
                 "A signature is required to complete signing.",

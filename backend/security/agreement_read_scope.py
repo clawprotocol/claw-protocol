@@ -82,6 +82,22 @@ def _signer_completed_for_replay(draft_body: Dict[str, Any], party_id: str) -> b
     return has_participant_completion(aid, pid)
 
 
+def _completed_invitation_recovery(draft_body: Dict[str, Any], party_id: str, jti: str) -> bool:
+    """Completed-status recovery for the invitation that actually completed — not a replaced JTI."""
+    if not _signer_completed_for_replay(draft_body, party_id):
+        return False
+    aid = str(draft_body.get("id") or "").strip()
+    if not aid:
+        return True
+    from backend.services.vs01_completion_ledger import completing_invite_jti
+
+    stored = completing_invite_jti(aid, party_id)
+    token_jti = (jti or "").strip()
+    if stored and token_jti and stored != token_jti:
+        return False
+    return True
+
+
 def _recipient_party_id_on_draft(draft: Dict[str, Any], party_id: str) -> bool:
     pid = (party_id or "").strip()
     if not pid:
@@ -199,9 +215,10 @@ def validate_recipient_access_token_for_agreement(
     party_id = str(payload.get("pid") or "").strip()
     inviter = str(payload.get("inv") or "").strip()
     replay_ok = allow_completed_signer_replay and _signer_completed_for_replay(draft_body, party_id)
+    recovery_ok = _completed_invitation_recovery(draft_body, party_id, jti)
 
     if mode == "sign":
-        if _draft_dict_fully_executed(draft_body) and not replay_ok:
+        if _draft_dict_fully_executed(draft_body) and not replay_ok and not recovery_ok:
             raise HTTPException(
                 status_code=403,
                 detail={
@@ -235,7 +252,7 @@ def validate_recipient_access_token_for_agreement(
         commercial = _commercial_mode_enforced()
         if jti_invite_access_denied(
             draft_body, jti, phase, party_id, commercial=commercial
-        ) and not replay_ok:
+        ) and not replay_ok and not recovery_ok:
             raise HTTPException(
                 status_code=403,
                 detail={
@@ -258,6 +275,8 @@ def validate_recipient_access_token_for_agreement(
         "role": payload.get("r"),
         "recipient_party_id": party_id or None,
         "inviter_display_name": inviter or None,
+        "signer_already_completed": bool(recovery_ok or replay_ok),
+        "completion_status": "completed" if (recovery_ok or replay_ok) else None,
     }
 
 

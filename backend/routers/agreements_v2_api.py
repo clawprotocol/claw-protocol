@@ -6812,7 +6812,7 @@ def recipient_access_validate(token: str = "", agreement_id: str = "") -> Dict[s
         aid = str(out.get("agreement_id") or "").strip()
         pid = str(out.get("recipient_party_id") or "").strip()
         mode = str(out.get("mode") or "").strip()
-        if aid and pid and mode in ("review", "sign"):
+        if (not out.get("signer_already_completed")) and aid and pid and mode in ("review", "sign"):
             phase = "review" if mode == "review" else "signing"
             jti = extract_jti_from_token(token)
             # Authorized CAS path: open telemetry bumps registry revision and must
@@ -6846,6 +6846,8 @@ def recipient_access_validate(token: str = "", agreement_id: str = "") -> Dict[s
         "role": out["role"],
         "recipient_party_id": out["recipient_party_id"],
         "inviter_display_name": out["inviter_display_name"],
+        "signer_already_completed": bool(out.get("signer_already_completed")),
+        "completion_status": out.get("completion_status"),
     }
 
 
@@ -7298,6 +7300,10 @@ def post_signing_ceremony_complete(
             pass
     return {
         "ok": True,
+        "status": "fully_executed" if fully else "completed",
+        "agreement_id": agreement_id,
+        "participant_id": part_id,
+        "locked_version_id": lv,
         "participant_display_name": sp.name,
         "signed_at": now,
         "agreement_version_hash": fp,
@@ -8569,90 +8575,103 @@ def post_vs01_signer_complete(
 
     auth_mode: Optional[str] = None
     recipient_token_raw: Optional[str] = None
-    if _agreements_write_allowed():
+    from backend.config.agreement_signing_token import (
+        SigningTokenSecretMissingInProductionError,
+        resolve_signing_token_secret_raw,
+    )
+    from backend.security.agreement_read_scope import (
+        recipient_access_token_from_request,
+        validate_recipient_access_token_for_agreement,
+    )
+    from backend.services.vs01_completion_evidence import owner_authorized_identity
+    from backend.services.vs01_signer_completion import (
+        assert_recipient_signer_completion_binding,
+        resolve_participant_id_for_signer_role,
+        vs01_open_signing_link_completion_allowed,
+    )
+
+    tok = recipient_access_token_from_request(request)
+    if tok:
+        recipient_token_raw = tok
+        try:
+            secret_raw = resolve_signing_token_secret_raw()
+        except SigningTokenSecretMissingInProductionError as e:
+            raise HTTPException(
+                status_code=422,
+                detail={"code": "signing_token_secret_not_configured", "message": str(e)},
+            ) from e
+        draft_for_auth = _load_or_404(aid)
+        participant_id = resolve_participant_id_for_signer_role(
+            draft_for_auth.model_dump(),
+            signer_role_id,
+            body.participant_id or "",
+        )
+        token_out = validate_recipient_access_token_for_agreement(
+            token=tok,
+            path_agreement_id=aid,
+            query_agreement_id=None,
+            secret_raw=secret_raw,
+            consume_single_use=False,
+            log_validation=False,
+            allow_completed_signer_replay=True,
+        )
+        token_party_id = str(token_out.get("recipient_party_id") or "").strip()
+        assert_agreement_recipient_write_allowed(
+            request,
+            aid,
+            allowed_modes=("sign",),
+            bind_participant_id=participant_id or token_party_id or None,
+            allow_completed_signer_replay=True,
+        )
+        assert_recipient_signer_completion_binding(
+            draft_for_auth.model_dump(),
+            signer_role_id=signer_role_id,
+            participant_id=participant_id,
+            token_party_id=token_party_id,
+        )
+        auth_mode = "recipient"
+    elif _agreements_write_allowed():
         try:
             _owner_mutation_guards(request, aid, surface="vs01_signer_complete")
-            auth_mode = "owner"
-        except HTTPException:
-            auth_mode = None
-    if not auth_mode:
-        from backend.config.agreement_signing_token import (
-            SigningTokenSecretMissingInProductionError,
-            resolve_signing_token_secret_raw,
-        )
-        from backend.security.agreement_read_scope import (
-            recipient_access_token_from_request,
-            validate_recipient_access_token_for_agreement,
-        )
-        from backend.services.vs01_signer_completion import (
-            assert_recipient_signer_completion_binding,
-            resolve_participant_id_for_signer_role,
-            vs01_open_signing_link_completion_allowed,
-        )
-
-        tok = recipient_access_token_from_request(request)
-        if tok:
-            recipient_token_raw = tok
-            try:
-                secret_raw = resolve_signing_token_secret_raw()
-            except SigningTokenSecretMissingInProductionError as e:
-                raise HTTPException(
-                    status_code=422,
-                    detail={"code": "signing_token_secret_not_configured", "message": str(e)},
-                ) from e
             draft_for_auth = _load_or_404(aid)
-            participant_id = resolve_participant_id_for_signer_role(
-                draft_for_auth.model_dump(),
-                signer_role_id,
-                body.participant_id or "",
-            )
-            token_out = validate_recipient_access_token_for_agreement(
-                token=tok,
-                path_agreement_id=aid,
-                query_agreement_id=None,
-                secret_raw=secret_raw,
-                consume_single_use=False,
-                log_validation=False,
-                allow_completed_signer_replay=True,
-            )
-            token_party_id = str(token_out.get("recipient_party_id") or "").strip()
-            assert_agreement_recipient_write_allowed(
-                request,
-                aid,
-                allowed_modes=("sign",),
-                bind_participant_id=participant_id or token_party_id or None,
-                allow_completed_signer_replay=True,
-            )
-            assert_recipient_signer_completion_binding(
-                draft_for_auth.model_dump(),
-                signer_role_id=signer_role_id,
-                participant_id=participant_id,
-                token_party_id=token_party_id,
-            )
-            auth_mode = "recipient"
-        else:
-            from backend.security.commercial_auth import tokenless_signer_complete_allowed
-
-            draft_for_auth = _load_or_404(aid)
-            # Commercial / staging / production: never allow tokenless completion.
-            # Legacy opt-in only when CLAW_ALLOW_TOKENLESS_SIGNER_COMPLETE=1 in local/dev/test.
-            if tokenless_signer_complete_allowed() and vs01_open_signing_link_completion_allowed(
-                draft_for_auth.model_dump(),
-                signer_role_id=signer_role_id,
-                document_id=(body.document_id or "").strip(),
-            ):
-                auth_mode = "signing_link"
-            else:
+            owner_role, owner_pid = owner_authorized_identity(draft_for_auth.model_dump())
+            body_pid = (body.participant_id or "").strip()
+            if signer_role_id != owner_role or (owner_pid and body_pid and body_pid != owner_pid):
                 raise HTTPException(
                     status_code=403,
                     detail={
-                        "code": "signing_token_required",
-                        "message": (
-                            "Recipient completion requires a valid, unexpired, "
-                            "recipient-bound signing token."
-                        ),
+                        "code": "owner_cannot_complete_other_signer",
+                        "message": "Ownership cannot authorize signing another participant’s fields.",
                     },
                 )
+            auth_mode = "owner"
+        except HTTPException as exc:
+            detail = exc.detail
+            code = detail.get("code") if isinstance(detail, dict) else detail
+            if code == "owner_cannot_complete_other_signer":
+                raise
+            auth_mode = None
+    if not auth_mode:
+        from backend.security.commercial_auth import tokenless_signer_complete_allowed
+
+        draft_for_auth = _load_or_404(aid)
+        if tokenless_signer_complete_allowed() and vs01_open_signing_link_completion_allowed(
+            draft_for_auth.model_dump(),
+            signer_role_id=signer_role_id,
+            document_id=(body.document_id or "").strip(),
+        ):
+            auth_mode = "signing_link"
+        else:
+            raise HTTPException(
+                status_code=403,
+                detail={
+                    "code": "signing_token_required",
+                    "message": (
+                        "Recipient completion requires a valid, unexpired, "
+                        "recipient-bound signing token."
+                    ),
+                },
+            )
 
     from backend.services.vs01_signer_completion import (
         completion_emails_already_sent,
@@ -8668,6 +8687,7 @@ def post_vs01_signer_complete(
     )
     from backend.services.vs01_completion_ledger import (
         CompletionEvidenceConflict,
+        assert_completion_persistence_ready,
         claim_signer_completion,
         multi_worker_completion_ready,
     )
@@ -8764,7 +8784,8 @@ def post_vs01_signer_complete(
                 require_accepted_snapshot=False,
             )
 
-        require_evidence = auth_mode == "recipient"
+        require_evidence = auth_mode in ("recipient", "owner")
+        assert_completion_persistence_ready()
         try:
             evidence = validate_completion_evidence(
                 draft=draft.model_dump(),
@@ -8782,6 +8803,11 @@ def post_vs01_signer_complete(
         event_id = "evt_" + sha256_hex(
             f"{aid}|{signer_role_id}|{participant_id}".encode("utf-8")
         )[:20]
+        invite_jti = ""
+        if recipient_token_raw:
+            from backend.services.recipient_delivery_registry import extract_jti_from_token
+
+            invite_jti = extract_jti_from_token(recipient_token_raw) or ""
         claim = None
         if multi_worker_completion_ready():
             try:
@@ -8796,6 +8822,7 @@ def post_vs01_signer_complete(
                     packet_revision=evidence.packet_revision,
                     document_id=evidence.document_id or (body.document_id or "").strip(),
                     document_hash=fp or "",
+                    invite_jti=invite_jti,
                 )
             except CompletionEvidenceConflict:
                 raise HTTPException(
@@ -9061,6 +9088,7 @@ def post_vs01_signer_complete(
             "receipt": receipt_out,
             "completion": {
                 "status": completion_status,
+                "agreement_id": aid,
                 "signed_at": now,
                 "signature_artifact_digest": evidence.signature_artifact_digest
                 or (claim.signature_artifact_digest if claim else ""),
@@ -9932,18 +9960,17 @@ def get_public_vs01_signing_packet(
 
     token_pid = token_pid or pid
     already = False
-    for role_id in required_vs01_signer_role_ids(raw if isinstance(raw, dict) else draft.model_dump()):
-        party = portable_party_id_for_signer_role(
-            raw if isinstance(raw, dict) else draft.model_dump(),
-            role_id,
-        )
-        if token_pid and party and party == token_pid and signer_role_already_completed(draft.audit_log, role_id):
+    dump = raw if isinstance(raw, dict) else draft.model_dump()
+    audit = dump.get("audit_log")
+    for role_id in required_vs01_signer_role_ids(dump):
+        party = portable_party_id_for_signer_role(dump, role_id)
+        if token_pid and party and party == token_pid and signer_role_already_completed(audit, role_id):
             already = True
             break
-        env = draft.quick_pdf_envelope_v1 if isinstance(draft.quick_pdf_envelope_v1, dict) else {}
+        env = dump.get("quick_pdf_envelope_v1") if isinstance(dump.get("quick_pdf_envelope_v1"), dict) else {}
         if token_pid and str(env.get("recipient_party_id") or "") == token_pid:
             recip_role = str(env.get("recipient_role_id") or "").strip()
-            if recip_role and signer_role_already_completed(draft.audit_log, recip_role):
+            if recip_role and signer_role_already_completed(audit, recip_role):
                 already = True
                 break
     out["signer_already_completed"] = already

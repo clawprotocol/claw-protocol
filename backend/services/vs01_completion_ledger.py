@@ -52,9 +52,60 @@ def ledger_path() -> Optional[Path]:
     return None
 
 
+def completion_persistence_required() -> bool:
+    env = (os.environ.get("CLAW_ENVIRONMENT") or "").strip().lower()
+    if env in {"production", "prod", "staging"}:
+        return True
+    flag = (os.environ.get("CLAW_COMMERCIAL_MODE") or "").strip().lower()
+    return flag in {"1", "true", "yes"}
+
+
+def completion_persistence_ready() -> bool:
+    """True only when the supported shared-SQLite topology can be opened and queried.
+
+    Supported: workers share ``CLAW_DATA_DIR`` or ``CLAW_VS01_COMPLETION_LEDGER_PATH``
+    and this process can ``SELECT`` from ``signer_completions``. Path presence alone
+    is not readiness. Limits: unsynchronized disks are unsafe; a process ``RLock``
+    is never the uniqueness guarantee; this check does not prove a remote replica.
+    """
+    if ledger_path() is None:
+        return False
+    try:
+        cx = _connect()
+        try:
+            cx.execute("SELECT 1 FROM signer_completions LIMIT 1")
+            return True
+        finally:
+            cx.close()
+    except Exception:
+        return False
+
+
 def multi_worker_completion_ready() -> bool:
     """True only when a durable shared ledger file can be opened."""
-    return ledger_path() is not None
+    return completion_persistence_ready()
+
+
+def assert_completion_persistence_ready() -> None:
+    """Fail closed for commercial/production when the ledger topology is missing."""
+    if completion_persistence_ready():
+        return
+    if completion_persistence_required():
+        from fastapi import HTTPException
+
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "code": "completion_ledger_unconfigured",
+                "message": (
+                    "Recipient completion requires a shared CLAW_DATA_DIR or "
+                    "CLAW_VS01_COMPLETION_LEDGER_PATH. Multi-worker production is not ready."
+                ),
+            },
+        )
+    import logging
+
+    logging.getLogger(__name__).warning("vs01_completion_ledger_unconfigured")
 
 
 def _connect() -> sqlite3.Connection:
@@ -82,6 +133,7 @@ def _connect() -> sqlite3.Connection:
                   packet_revision TEXT NOT NULL,
                   document_id TEXT NOT NULL,
                   document_hash TEXT NOT NULL,
+                  invite_jti TEXT NOT NULL DEFAULT '',
                   PRIMARY KEY (agreement_id, signer_role_id, participant_id)
                 );
                 CREATE TABLE IF NOT EXISTS receipt_issuance (
@@ -92,6 +144,10 @@ def _connect() -> sqlite3.Connection:
                 );
                 """
             )
+            try:
+                cx.execute("ALTER TABLE signer_completions ADD COLUMN invite_jti TEXT NOT NULL DEFAULT ''")
+            except sqlite3.OperationalError:
+                pass
             _initialized.add(key)
     return cx
 
@@ -99,6 +155,45 @@ def _connect() -> sqlite3.Connection:
 def reset_vs01_completion_ledger_for_tests() -> None:
     with _init_lock:
         _initialized.clear()
+
+
+def completing_invite_jti(agreement_id: str, participant_id: str) -> str:
+    aid = (agreement_id or "").strip()
+    pid = (participant_id or "").strip()
+    if not aid or not pid or ledger_path() is None:
+        return ""
+    cx = _connect()
+    try:
+        row = cx.execute(
+            """
+            SELECT invite_jti FROM signer_completions
+            WHERE agreement_id = ? AND participant_id = ?
+            LIMIT 1
+            """,
+            (aid, pid),
+        ).fetchone()
+        return str(row["invite_jti"] or "") if row else ""
+    except sqlite3.OperationalError:
+        return ""
+    finally:
+        cx.close()
+
+
+def _claim_identity_matches(row: sqlite3.Row, *, packet_revision: str, document_id: str, document_hash: str, signature_artifact_digest: str, consent_artifact_digest: str) -> bool:
+    if str(row["signature_artifact_digest"] or "") != (signature_artifact_digest or ""):
+        return False
+    if str(row["consent_artifact_digest"] or "") != (consent_artifact_digest or ""):
+        return False
+    stored_rev = str(row["packet_revision"] or "")
+    if stored_rev and packet_revision and stored_rev != packet_revision:
+        return False
+    stored_doc = str(row["document_id"] or "")
+    if stored_doc and document_id and stored_doc != document_id:
+        return False
+    stored_hash = str(row["document_hash"] or "")
+    if stored_hash and document_hash and stored_hash != document_hash:
+        return False
+    return True
 
 
 def has_participant_completion(agreement_id: str, participant_id: str) -> bool:
@@ -134,6 +229,7 @@ def claim_signer_completion(
     packet_revision: str,
     document_id: str,
     document_hash: str,
+    invite_jti: str = "",
 ) -> CompletionClaim:
     aid = (agreement_id or "").strip()
     role = (signer_role_id or "").strip()
@@ -153,9 +249,13 @@ def claim_signer_completion(
             (aid, role, pid),
         ).fetchone()
         if row:
-            if (
-                str(row["signature_artifact_digest"] or "") != (signature_artifact_digest or "")
-                or str(row["consent_artifact_digest"] or "") != (consent_artifact_digest or "")
+            if not _claim_identity_matches(
+                row,
+                packet_revision=packet_revision or "",
+                document_id=document_id or "",
+                document_hash=document_hash or "",
+                signature_artifact_digest=signature_artifact_digest or "",
+                consent_artifact_digest=consent_artifact_digest or "",
             ):
                 cx.execute("ROLLBACK")
                 raise CompletionEvidenceConflict()
@@ -175,8 +275,8 @@ def claim_signer_completion(
             INSERT INTO signer_completions (
               agreement_id, signer_role_id, participant_id, event_id,
               signature_artifact_digest, consent_artifact_digest, signed_at,
-              packet_revision, document_id, document_hash
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+              packet_revision, document_id, document_hash, invite_jti
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 aid,
@@ -189,6 +289,7 @@ def claim_signer_completion(
                 packet_revision or "",
                 document_id or "",
                 document_hash or "",
+                (invite_jti or "").strip(),
             ),
         )
         cx.execute("COMMIT")
@@ -215,9 +316,13 @@ def claim_signer_completion(
         ).fetchone()
         if row is None:
             raise
-        if (
-            str(row["signature_artifact_digest"] or "") != (signature_artifact_digest or "")
-            or str(row["consent_artifact_digest"] or "") != (consent_artifact_digest or "")
+        if not _claim_identity_matches(
+            row,
+            packet_revision=packet_revision or "",
+            document_id=document_id or "",
+            document_hash=document_hash or "",
+            signature_artifact_digest=signature_artifact_digest or "",
+            consent_artifact_digest=consent_artifact_digest or "",
         ):
             raise CompletionEvidenceConflict()
         return CompletionClaim(

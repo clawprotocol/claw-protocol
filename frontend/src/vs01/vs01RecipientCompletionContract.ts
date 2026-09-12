@@ -28,6 +28,10 @@ export const FATAL_RECIPIENT_COMPLETION_CODES = new Set([
   "wrong_party",
   "packet_revision_mismatch",
   "document_mismatch",
+  "owner_cannot_complete_other_signer",
+  "field_page_mismatch",
+  "field_type_mismatch",
+  "locked_field_authority_missing",
 ]);
 
 export type Vs01ConsentIntent = {
@@ -46,6 +50,7 @@ export type Vs01AssignedFieldEvidence = {
 
 export type Vs01CompletionStatus = {
   status?: string;
+  agreement_id?: string;
   signed_at?: string;
   signature_artifact_digest?: string;
   consent_artifact_digest?: string;
@@ -58,6 +63,60 @@ export type Vs01CompletionStatus = {
   already_signed?: boolean;
   fully_executed?: boolean;
 };
+
+const CONFIRMED_COMPLETION_STATUSES = new Set(["completed", "already_signed", "fully_executed"]);
+
+export function confirmRecipientCompletionResponse(args: {
+  agreementId: string;
+  documentId: string;
+  signerRoleId: string;
+  participantId?: string;
+  packetRevision?: string;
+  completion?: Vs01CompletionStatus | null;
+}): boolean {
+  const completion = args.completion;
+  if (!completion) return false;
+  const status = String(completion.status || "").trim().toLowerCase();
+  if (!CONFIRMED_COMPLETION_STATUSES.has(status) && completion.already_signed !== true) {
+    return false;
+  }
+  if (!completion.agreement_id || completion.agreement_id !== args.agreementId) return false;
+  if (!completion.document_id || completion.document_id !== args.documentId) return false;
+  if (!completion.signer_role_id || completion.signer_role_id !== args.signerRoleId) return false;
+  if (args.participantId) {
+    if (!completion.participant_id || completion.participant_id !== args.participantId) return false;
+  }
+  if (args.packetRevision) {
+    if (!completion.packet_revision || completion.packet_revision !== args.packetRevision) return false;
+  }
+  return true;
+}
+
+export function confirmDraftedCeremonyCompletion(args: {
+  agreementId: string;
+  participantId: string;
+  lockedVersionId?: string;
+  response: {
+    ok?: boolean;
+    agreement_id?: string;
+    participant_id?: string;
+    locked_version_id?: string;
+    signed_at?: string;
+    status?: string;
+  };
+}): boolean {
+  const response = args.response;
+  if (!response.ok) return false;
+  const status = String(response.status || "").trim().toLowerCase();
+  if (status && !CONFIRMED_COMPLETION_STATUSES.has(status)) return false;
+  if (!response.agreement_id || response.agreement_id !== args.agreementId) return false;
+  if (!response.participant_id || response.participant_id !== args.participantId) return false;
+  if (!response.signed_at) return false;
+  if (args.lockedVersionId && response.locked_version_id && response.locked_version_id !== args.lockedVersionId) {
+    return false;
+  }
+  return true;
+}
 
 export type Vs01UploadedPdfReceiptPointer = {
   receipt_id?: string;
@@ -107,6 +166,7 @@ export function parseCompletionDetail(detail: unknown): { code: string; message:
 
 export function recipientCompletionIsRetryable(status: number, code: string): boolean {
   if (code === "network" || code === "network_retryable") return true;
+  if (code === "completion_confirmation_mismatch") return true;
   if (status === 503) return true;
   return status >= 500;
 }

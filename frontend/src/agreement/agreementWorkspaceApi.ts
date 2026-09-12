@@ -594,6 +594,10 @@ export async function postSigningCeremonyComplete(
   recipientAccessToken?: string | null
 ): Promise<{
   ok: boolean;
+  status?: string;
+  agreement_id?: string;
+  participant_id?: string;
+  locked_version_id?: string;
   signed_at?: string;
   agreement_version_hash?: string;
   participant_display_name?: string;
@@ -616,6 +620,10 @@ export async function postSigningCeremonyComplete(
     if (res.ok) {
       return {
         ok: true,
+        status: typeof j.status === "string" ? j.status : undefined,
+        agreement_id: typeof j.agreement_id === "string" ? j.agreement_id : undefined,
+        participant_id: typeof j.participant_id === "string" ? j.participant_id : undefined,
+        locked_version_id: typeof j.locked_version_id === "string" ? j.locked_version_id : undefined,
         signed_at: typeof j.signed_at === "string" ? j.signed_at : undefined,
         agreement_version_hash:
           typeof j.agreement_version_hash === "string" ? j.agreement_version_hash : undefined,

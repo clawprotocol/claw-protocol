@@ -1,6 +1,7 @@
 import { postVs01SignerComplete } from "../agreement/agreementWorkspaceApi";
 import {
   assignedFieldsFromRecipient,
+  confirmRecipientCompletionResponse,
   recipientCompletionIsRetryable,
   versionedRecipientConsentIntent,
   type Vs01ConsentIntent,
@@ -305,7 +306,17 @@ async function recordVs01SignerCompletionInner(
       receiptStatus = res.receipt_status;
       receipt = res.uploaded_final_pdf_receipt;
 
-      if (!res.ok) {
+      if (
+        !res.ok
+        || !confirmRecipientCompletionResponse({
+          agreementId,
+          documentId,
+          signerRoleId,
+          participantId,
+          packetRevision: (args.packetRevision ?? "").trim() || undefined,
+          completion,
+        })
+      ) {
         return {
           localSnapshot: readSigningPacketStatus(agreementId),
           fullySigned: false,
@@ -313,8 +324,8 @@ async function recordVs01SignerCompletionInner(
           serverFullyExecuted: false,
           completionEmailsSent: false,
           corpusStamped: false,
-          errorCode,
-          error,
+          errorCode: res.ok ? "completion_confirmation_mismatch" : errorCode,
+          error: res.ok ? "completion_confirmation_mismatch" : error,
           status,
           retryable,
         };

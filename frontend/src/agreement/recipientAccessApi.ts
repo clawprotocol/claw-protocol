@@ -35,6 +35,8 @@ export type ValidatedRecipientAccess = {
   signer_role_id?: string | null;
   recipient_party_id?: string | null;
   inviter_display_name?: string | null;
+  signer_already_completed?: boolean;
+  completion_status?: string | null;
 };
 
 export type RecipientAccessValidationResult =

@@ -59,7 +59,11 @@ import {
   PRODUCT_NOT_LAW_FIRM,
   RECORDS_DOWNLOAD_KEEP_COPY_SHORT,
 } from "../compliance/disclosureCopy";
-import { versionedRecipientConsentIntent } from "../vs01/vs01RecipientCompletionContract";
+import {
+  confirmDraftedCeremonyCompletion,
+  recipientCompletionUserMessage,
+  versionedRecipientConsentIntent,
+} from "../vs01/vs01RecipientCompletionContract";
 import { NegotiationTimelineView } from "../vs01/NegotiationTimelineView";
 import {
   buildNegotiationTimelineCurrentStatus,
@@ -4682,7 +4686,21 @@ export function AgreementRecipientReview({
           await refresh();
           return;
         }
-        setCeremonyError(typeof r.error === "string" ? r.error : "Could not record signature.");
+        setCeremonyError(
+          recipientCompletionUserMessage(0, typeof r.error === "string" ? r.error : "", typeof r.error === "string" ? r.error : undefined),
+        );
+        setCeremonyPhase("ready");
+        return;
+      }
+      if (
+        !confirmDraftedCeremonyCompletion({
+          agreementId,
+          participantId: participantPid,
+          lockedVersionId,
+          response: r,
+        })
+      ) {
+        setCeremonyError(recipientCompletionUserMessage(200, "completion_confirmation_mismatch"));
         setCeremonyPhase("ready");
         return;
       }
