@@ -549,10 +549,12 @@ async function fulfillPhase4c2Api(route: Route, state: Phase4c2FixtureState): Pr
       receipt_status: fully ? "issued" : "not_applicable",
       completion: {
         status: already ? "already_signed" : "completed",
+        agreement_id: PHASE4C2_AGREEMENT_ID,
         signed_at: "2026-09-11T18:00:00.000Z",
         signer_role_id: role,
         participant_id: pid,
         document_id: PHASE4C2_DOCUMENT_ID,
+        packet_revision: PHASE4C2_PACKET_REVISION,
       },
       uploaded_final_pdf_receipt: fully
         ? { receipt_id: PHASE4C2_RECEIPT_ID, receipt_hash_sha256: PHASE4C2_RECEIPT_DIGEST, kind: "uploaded_final_pdf_receipt.v1" }

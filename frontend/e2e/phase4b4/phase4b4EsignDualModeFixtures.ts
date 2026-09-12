@@ -423,6 +423,15 @@ export async function fulfillPhase4b4Api(
       ok: true,
       already_signed: already,
       fully_signed: false,
+      fully_executed: false,
+      completion: {
+        status: already ? "already_signed" : "completed",
+        agreement_id: PHASE4B4_AGREEMENT_ID,
+        document_id: PHASE4B4_DOCUMENT_ID,
+        signer_role_id: role,
+        participant_id: pid,
+        packet_revision: PHASE4B4_PACKET_REVISION,
+      },
     });
     return;
   }

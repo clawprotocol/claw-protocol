@@ -157,25 +157,69 @@ def _create_two_signer_agreement(client: TestClient) -> str:
     draft = load_draft(aid)
     draft["vs01_signing_packet_v1"] = _draft_with_vs01_packet(aid)
     save_draft({**draft, "id": aid})
+    from backend.services.agreement_signing_lock_store import write_signing_lock
+
+    write_signing_lock(aid, {"locked_version_id": "v1"})
     return aid
+
+
+def _evidence(role: str, pid: str, name: str) -> dict:
+    from backend.services.vs01_completion_evidence import (
+        CONSENT_ACTION,
+        CONSENT_INTENT_STATEMENT,
+        CONSENT_INTENT_VERSION,
+    )
+
+    field_id = "owner_sig" if role == "role_owner" else "cp_sig"
+    return {
+        "signer_role_id": role,
+        "participant_id": pid,
+        "document_id": "doc_vs01",
+        "assigned_fields": [
+            {"field_id": field_id, "field_type": "signature", "value": name, "page_index": 9}
+        ],
+        "consent": {
+            "accepted": True,
+            "intent_version": CONSENT_INTENT_VERSION,
+            "intent_statement": CONSENT_INTENT_STATEMENT,
+            "action": CONSENT_ACTION,
+        },
+    }
+
+
+def _cp_token(aid: str) -> str:
+    from backend.config.agreement_signing_token import resolve_signing_token_secret_raw
+    from backend.security.recipient_access_token import mint_recipient_access_token
+
+    return mint_recipient_access_token(
+        secret=resolve_signing_token_secret_raw().encode("utf-8"),
+        agreement_id=aid,
+        locked_version_id="v1",
+        mode="sign",
+        role="signer",
+        ttl_seconds=3600,
+        recipient_party_id="p2",
+    )
+
+
+def _complete(client: TestClient, aid: str, role: str, pid: str, *, token: str | None = None, name: str = "Signer"):
+    headers = {"X-Claw-Recipient-Access-Token": token} if token else _org_headers()
+    return client.post(
+        f"/api/agreements/{aid}/vs01-signer-complete",
+        headers=headers,
+        json=_evidence(role, pid, name),
+    )
 
 
 def test_vs01_signer_complete_final_signer_persists_before_email(client: TestClient) -> None:
     aid = _create_two_signer_agreement(client)
-    client.post(
-        f"/api/agreements/{aid}/vs01-signer-complete",
-        headers=_org_headers(),
-        json={"signer_role_id": "role_owner", "participant_id": "p1", "document_id": "doc_vs01"},
-    )
+    owner = _complete(client, aid, "role_owner", "p1", name="Owner Signer")
+    assert owner.status_code == 200, owner.text
     with patch(
         "backend.services.email.signing_completion_delivery.maybe_send_signing_completion_emails",
         return_value=None,
     ) as send_mock:
-        res = client.post(
-            f"/api/agreements/{aid}/vs01-signer-complete",
-            headers=_org_headers(),
-            json={"signer_role_id": "role_cp", "participant_id": "p2", "document_id": "doc_vs01"},
-        )
+        res = _complete(client, aid, "role_cp", "p2", token=_cp_token(aid), name="CP Signer")
     assert res.status_code == 200
     body = res.json()
     assert body["fully_executed"] is True
@@ -188,13 +232,10 @@ def test_vs01_signer_complete_final_signer_persists_before_email(client: TestCli
 
 def test_vs01_signer_complete_duplicate_final_signer_is_idempotent(client: TestClient) -> None:
     aid = _create_two_signer_agreement(client)
-    for role, pid in (("role_owner", "p1"), ("role_cp", "p2")):
-        r = client.post(
-            f"/api/agreements/{aid}/vs01-signer-complete",
-            headers=_org_headers(),
-            json={"signer_role_id": role, "participant_id": pid, "document_id": "doc_vs01"},
-        )
-        assert r.status_code == 200
+    token = _cp_token(aid)
+    for role, pid, tok in (("role_owner", "p1", None), ("role_cp", "p2", token)):
+        r = _complete(client, aid, role, pid, token=tok, name=role)
+        assert r.status_code == 200, r.text
 
     class _Ok:
         ok = True
@@ -209,16 +250,8 @@ def test_vs01_signer_complete_duplicate_final_signer_is_idempotent(client: TestC
         "backend.services.email.signing_completion_delivery.app_public_origin",
         return_value="https://app.example.test",
     ):
-        first = client.post(
-            f"/api/agreements/{aid}/vs01-signer-complete",
-            headers=_org_headers(),
-            json={"signer_role_id": "role_cp", "participant_id": "p2", "document_id": "doc_vs01"},
-        )
-        second = client.post(
-            f"/api/agreements/{aid}/vs01-signer-complete",
-            headers=_org_headers(),
-            json={"signer_role_id": "role_cp", "participant_id": "p2", "document_id": "doc_vs01"},
-        )
+        first = _complete(client, aid, "role_cp", "p2", token=token, name="role_cp")
+        second = _complete(client, aid, "role_cp", "p2", token=token, name="role_cp")
     assert first.json()["already_signed"] is True
     assert second.json()["already_signed"] is True
     draft = client.get(f"/api/agreements/{aid}", headers=_org_headers()).json()["draft"]
@@ -267,12 +300,8 @@ def test_test371_legacy_tokenless_opt_in_relaxed_noncommercial(
     monkeypatch.delenv("CLAW_COMMERCIAL_MODE", raising=False)
 
     aid = _create_two_signer_agreement(client)
-    owner = client.post(
-        f"/api/agreements/{aid}/vs01-signer-complete",
-        headers=_org_headers(),
-        json={"signer_role_id": "role_owner", "participant_id": "p1", "document_id": "doc_vs01"},
-    )
-    assert owner.status_code == 200
+    owner = _complete(client, aid, "role_owner", "p1", name="Owner Signer")
+    assert owner.status_code == 200, owner.text
 
     with patch(
         "backend.services.email.signing_completion_delivery.maybe_send_signing_completion_emails",
@@ -309,20 +338,12 @@ def test_vs01_signer_complete_rejects_unknown_role_without_token_when_strict(
 
 def test_vs01_signer_complete_email_failure_still_completed(client: TestClient) -> None:
     aid = _create_two_signer_agreement(client)
-    client.post(
-        f"/api/agreements/{aid}/vs01-signer-complete",
-        headers=_org_headers(),
-        json={"signer_role_id": "role_owner", "participant_id": "p1", "document_id": "doc_vs01"},
-    )
+    assert _complete(client, aid, "role_owner", "p1", name="Owner Signer").status_code == 200
     with patch(
         "backend.services.email.signing_completion_delivery.maybe_send_signing_completion_emails",
         return_value=None,
     ):
-        res = client.post(
-            f"/api/agreements/{aid}/vs01-signer-complete",
-            headers=_org_headers(),
-            json={"signer_role_id": "role_cp", "participant_id": "p2", "document_id": "doc_vs01"},
-        )
+        res = _complete(client, aid, "role_cp", "p2", token=_cp_token(aid), name="CP Signer")
     assert res.json()["fully_executed"] is True
     verify = client.get(f"/api/agreements/public/{aid}/verify").json()
     assert verify["signature_status"]["fully_executed"] is True
@@ -334,20 +355,13 @@ def test_vs01_signer_complete_email_failure_still_completed(client: TestClient) 
 
 def test_vs01_signer_complete_retries_email_after_prior_failure(client: TestClient) -> None:
     aid = _create_two_signer_agreement(client)
-    client.post(
-        f"/api/agreements/{aid}/vs01-signer-complete",
-        headers=_org_headers(),
-        json={"signer_role_id": "role_owner", "participant_id": "p1", "document_id": "doc_vs01"},
-    )
+    token = _cp_token(aid)
+    assert _complete(client, aid, "role_owner", "p1", name="Owner Signer").status_code == 200
     with patch(
         "backend.services.email.signing_completion_delivery.maybe_send_signing_completion_emails",
         return_value=None,
     ):
-        first = client.post(
-            f"/api/agreements/{aid}/vs01-signer-complete",
-            headers=_org_headers(),
-            json={"signer_role_id": "role_cp", "participant_id": "p2", "document_id": "doc_vs01"},
-        )
+        first = _complete(client, aid, "role_cp", "p2", token=token, name="CP Signer")
     assert first.json()["fully_executed"] is True
     assert first.json()["completion_emails_sent"] is False
 
@@ -364,11 +378,7 @@ def test_vs01_signer_complete_retries_email_after_prior_failure(client: TestClie
         "backend.services.email.signing_completion_delivery.app_public_origin",
         return_value="https://app.example.test",
     ):
-        retry = client.post(
-            f"/api/agreements/{aid}/vs01-signer-complete",
-            headers=_org_headers(),
-            json={"signer_role_id": "role_cp", "participant_id": "p2", "document_id": "doc_vs01"},
-        )
+        retry = _complete(client, aid, "role_cp", "p2", token=token, name="CP Signer")
     assert retry.json()["already_signed"] is True
     assert retry.json()["completion_emails_sent"] is True
     draft = client.get(f"/api/agreements/{aid}", headers=_org_headers()).json()["draft"]
@@ -388,11 +398,7 @@ def test_vs01_signer_complete_sends_email_for_owner_and_party_roles(client: Test
     ]
     save_draft({**draft, "id": aid})
 
-    client.post(
-        f"/api/agreements/{aid}/vs01-signer-complete",
-        headers=_org_headers(),
-        json={"signer_role_id": "role_owner", "participant_id": "p1", "document_id": "doc_vs01"},
-    )
+    assert _complete(client, aid, "role_owner", "p1", name="Owner Signer").status_code == 200
 
     class _Ok:
         ok = True
@@ -416,11 +422,7 @@ def test_vs01_signer_complete_sends_email_for_owner_and_party_roles(client: Test
         "backend.services.email.signing_completion_delivery.app_public_origin",
         return_value="https://app.example.test",
     ):
-        res = client.post(
-            f"/api/agreements/{aid}/vs01-signer-complete",
-            headers=_org_headers(),
-            json={"signer_role_id": "role_cp", "participant_id": "p2", "document_id": "doc_vs01"},
-        )
+        res = _complete(client, aid, "role_cp", "p2", token=_cp_token(aid), name="CP Signer")
     assert res.status_code == 200
     body = res.json()
     assert body["fully_executed"] is True
@@ -441,12 +443,9 @@ def test_vs01_ensure_signed_snapshot_retries_completion_email(client: TestClient
         {"id": "p2", "name": "Counterparty LLC", "role": "party", "email": "cp@example.test"},
     ]
     save_draft({**draft, "id": aid})
-    for role, pid in (("role_owner", "p1"), ("role_cp", "p2")):
-        client.post(
-            f"/api/agreements/{aid}/vs01-signer-complete",
-            headers=_org_headers(),
-            json={"signer_role_id": role, "participant_id": pid, "document_id": "doc_vs01"},
-        )
+    token = _cp_token(aid)
+    assert _complete(client, aid, "role_owner", "p1", name="Owner Signer").status_code == 200
+    assert _complete(client, aid, "role_cp", "p2", token=token, name="CP Signer").status_code == 200
 
     class _Ok:
         ok = True
@@ -455,11 +454,7 @@ def test_vs01_ensure_signed_snapshot_retries_completion_email(client: TestClient
         "backend.services.email.signing_completion_delivery.maybe_send_signing_completion_emails",
         return_value=None,
     ):
-        retry_signer = client.post(
-            f"/api/agreements/{aid}/vs01-signer-complete",
-            headers=_org_headers(),
-            json={"signer_role_id": "role_cp", "participant_id": "p2", "document_id": "doc_vs01"},
-        )
+        retry_signer = _complete(client, aid, "role_cp", "p2", token=token, name="CP Signer")
     assert retry_signer.json()["completion_emails_sent"] is False
 
     draft_after_sign = load_draft(aid)
@@ -502,11 +497,8 @@ def test_vs01_signer_complete_concurrent_final_signer_one_email_set(client: Test
     from concurrent.futures import ThreadPoolExecutor
 
     aid = _create_two_signer_agreement(client)
-    client.post(
-        f"/api/agreements/{aid}/vs01-signer-complete",
-        headers=_org_headers(),
-        json={"signer_role_id": "role_owner", "participant_id": "p1", "document_id": "doc_vs01"},
-    )
+    token = _cp_token(aid)
+    assert _complete(client, aid, "role_owner", "p1", name="Owner Signer").status_code == 200
 
     send_calls: list[str] = []
 
@@ -522,17 +514,13 @@ def test_vs01_signer_complete_concurrent_final_signer_one_email_set(client: Test
         "backend.services.email.signing_completion_delivery.maybe_send_signing_completion_emails",
         side_effect=_track_send,
     ):
-        payload = {
-            "signer_role_id": "role_cp",
-            "participant_id": "p2",
-            "document_id": "doc_vs01",
-        }
+        payload = _evidence("role_cp", "p2", "CP Signer")
         with ThreadPoolExecutor(max_workers=2) as pool:
             futures = [
                 pool.submit(
                     client.post,
                     f"/api/agreements/{aid}/vs01-signer-complete",
-                    headers=_org_headers(),
+                    headers={"X-Claw-Recipient-Access-Token": token},
                     json=payload,
                 )
                 for _ in range(2)

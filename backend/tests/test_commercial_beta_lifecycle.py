@@ -407,11 +407,8 @@ def test_completion_email_exactly_one_under_concurrent_finalize(life_env):
     client, _eco, _usage = life_env
     ensure_headers_entitled(mod._org_headers())
     aid = mod._create_two_signer_agreement(client)
-    client.post(
-        f"/api/agreements/{aid}/vs01-signer-complete",
-        headers=mod._org_headers(),
-        json={"signer_role_id": "role_owner", "participant_id": "p1", "document_id": "doc_vs01"},
-    )
+    token = mod._cp_token(aid)
+    assert mod._complete(client, aid, "role_owner", "p1", name="Owner Signer").status_code == 200
     sends: list[str] = []
 
     def _track(*, agreement_id: str, draft: dict, org_id: str | None = None):
@@ -426,17 +423,13 @@ def test_completion_email_exactly_one_under_concurrent_finalize(life_env):
         "backend.services.email.signing_completion_delivery.maybe_send_signing_completion_emails",
         side_effect=_track,
     ):
-        payload = {
-            "signer_role_id": "role_cp",
-            "participant_id": "p2",
-            "document_id": "doc_vs01",
-        }
+        payload = mod._evidence("role_cp", "p2", "CP Signer")
         with ThreadPoolExecutor(max_workers=6) as pool:
             futs = [
                 pool.submit(
                     client.post,
                     f"/api/agreements/{aid}/vs01-signer-complete",
-                    headers=mod._org_headers(),
+                    headers={"X-Claw-Recipient-Access-Token": token},
                     json=payload,
                 )
                 for _ in range(6)
@@ -453,11 +446,8 @@ def test_completion_email_zero_when_delivery_explicitly_skipped(life_env):
     client, _eco, _usage = life_env
     ensure_headers_entitled(mod._org_headers())
     aid = mod._create_two_signer_agreement(client)
-    client.post(
-        f"/api/agreements/{aid}/vs01-signer-complete",
-        headers=mod._org_headers(),
-        json={"signer_role_id": "role_owner", "participant_id": "p1", "document_id": "doc_vs01"},
-    )
+    token = mod._cp_token(aid)
+    assert mod._complete(client, aid, "role_owner", "p1", name="Owner Signer").status_code == 200
     sends: list[str] = []
 
     def _skip(*, agreement_id: str, draft: dict, org_id: str | None = None):
@@ -468,15 +458,7 @@ def test_completion_email_zero_when_delivery_explicitly_skipped(life_env):
         "backend.services.email.signing_completion_delivery.maybe_send_signing_completion_emails",
         side_effect=_skip,
     ):
-        res = client.post(
-            f"/api/agreements/{aid}/vs01-signer-complete",
-            headers=mod._org_headers(),
-            json={
-                "signer_role_id": "role_cp",
-                "participant_id": "p2",
-                "document_id": "doc_vs01",
-            },
-        )
+        res = mod._complete(client, aid, "role_cp", "p2", token=token, name="CP Signer")
         assert res.status_code == 200, res.text
     assert sends == []
 

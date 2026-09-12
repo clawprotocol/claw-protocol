@@ -418,6 +418,7 @@ export async function installAuthoritySigningChainRoutes(
       });
     }
     const allComplete = state.completions.length >= partyCount;
+    const participantId = String(body.participant_id ?? existing?.participantId ?? signerRoleId);
     await route.fulfill({
       status: 200,
       contentType: "application/json",
@@ -428,6 +429,13 @@ export async function installAuthoritySigningChainRoutes(
         completed_signers: state.completions.length,
         required_signers: partyCount,
         completion_emails_sent: allComplete,
+        completion: {
+          status: allComplete ? "fully_executed" : existing ? "already_signed" : "completed",
+          agreement_id: args.agreementId,
+          document_id: documentId,
+          signer_role_id: signerRoleId,
+          participant_id: participantId,
+        },
       }),
     });
     if (allComplete && !state.completion) {

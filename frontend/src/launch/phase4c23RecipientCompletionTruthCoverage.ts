@@ -13,6 +13,8 @@ import {
 import {
   RECIPIENT_COMPLETION_FATAL_MESSAGE,
   RECIPIENT_COMPLETION_RETRY_MESSAGE,
+  confirmDraftedCeremonyCompletion,
+  confirmRecipientCompletionResponse,
   recipientCompletionIsFatal,
   recipientCompletionIsRetryable,
   versionedRecipientConsentIntent,
@@ -66,12 +68,63 @@ export function assertPhase4c23RecipientCompletionTruthContracts(): void {
   if (!review.includes("Agree and sign") || !review.includes("recipient-sign-consent")) {
     throw new Error("AgreementRecipientReview lost affirmative consent or Agree and sign");
   }
+  if (!review.includes("confirmDraftedCeremonyCompletion")) {
+    throw new Error("AgreementRecipientReview no longer confirms the ceremony completion response");
+  }
 
   const sync = src("../vs01/vs01SignerCompletionSync.ts");
   if (!sync.includes("assigned_fields") || !sync.includes("consent")) {
     throw new Error("Completion sync no longer sends the typed field/consent contract");
   }
-  if (!sync.includes("if (!res.ok)")) {
-    throw new Error("Completion sync no longer fails closed before local signed state");
+  if (!sync.includes("confirmRecipientCompletionResponse")) {
+    throw new Error("Completion sync no longer validates the server completion confirmation");
+  }
+  if (
+    confirmRecipientCompletionResponse({
+      agreementId: "ag",
+      documentId: "doc",
+      signerRoleId: "role",
+      completion: { status: "completed", agreement_id: "other" },
+    })
+  ) {
+    throw new Error("4C.2.3 accepts a completion confirmation for the wrong agreement");
+  }
+  if (
+    confirmRecipientCompletionResponse({
+      agreementId: "ag",
+      documentId: "doc",
+      signerRoleId: "role",
+      completion: { status: "completed" },
+    })
+  ) {
+    throw new Error("4C.2.3 accepts HTTP 200 without matching agreement/document/signer confirmation");
+  }
+  if (
+    !confirmRecipientCompletionResponse({
+      agreementId: "ag",
+      documentId: "doc",
+      signerRoleId: "role",
+      participantId: "p1",
+      packetRevision: "qpk_1",
+      completion: {
+        status: "completed",
+        agreement_id: "ag",
+        document_id: "doc",
+        signer_role_id: "role",
+        participant_id: "p1",
+        packet_revision: "qpk_1",
+      },
+    })
+  ) {
+    throw new Error("4C.2.3 rejects a matching completion confirmation");
+  }
+  if (
+    confirmDraftedCeremonyCompletion({
+      agreementId: "ag",
+      participantId: "p1",
+      response: { ok: true, agreement_id: "ag" },
+    })
+  ) {
+    throw new Error("4C.2.3 accepts a drafted ceremony 200 without participant/signed_at confirmation");
   }
 }

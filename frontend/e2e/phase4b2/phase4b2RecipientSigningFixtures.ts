@@ -500,6 +500,10 @@ export async function fulfillPhase4b2Api(route: Route, state: Phase4b2FixtureSta
       state.signedParties.has(`${agreementId}:${PHASE4B2_PARTY_1}`);
     await json(route, {
       ok: true,
+      status: bothSigned ? "fully_executed" : "completed",
+      agreement_id: agreementId,
+      participant_id: auth.partyId,
+      locked_version_id: PHASE4B2_LOCKED_VERSION,
       signed_at: "2026-09-10T16:00:00.000Z",
       agreement_version_hash: PHASE4B2_FROZEN_SHA,
       participant_display_name: auth.partyId === PHASE4B2_PARTY_1 ? PHASE4B2_SIGNER_1_NAME : PHASE4B2_SIGNER_0_NAME,
