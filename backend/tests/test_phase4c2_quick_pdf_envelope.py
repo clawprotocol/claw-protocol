@@ -248,6 +248,8 @@ def test_prepare_does_not_sign_and_raw_token_is_not_persisted(client: TestClient
         },
     )
     assert complete.status_code == 200, complete.text
+    issued = complete.json().get("uploaded_final_pdf_receipt")
+    assert issued and issued.get("receipt_id") and issued.get("receipt_hash_sha256")
     replay = client.post(
         f"/api/agreements/{aid}/vs01-signer-complete",
         headers={"X-Claw-Recipient-Access-Token": new_token},
@@ -265,10 +267,14 @@ def test_prepare_does_not_sign_and_raw_token_is_not_persisted(client: TestClient
     assert done.status_code == 200
     assert done.json()["completion"]["fully_executed"] is True
     receipt_one = done.json()["receipt"]
-    assert receipt_one and receipt_one["receipt_id"] and receipt_one["receipt_digest"]
+    digest = receipt_one.get("receipt_digest") or receipt_one.get("receipt_hash_sha256")
+    assert receipt_one and receipt_one["receipt_id"] and digest
+    assert receipt_one["receipt_id"] == issued["receipt_id"]
+    assert digest == issued["receipt_hash_sha256"]
     refresh = client.get(f"/api/agreements/quick-pdf-envelope/receipt?document_id={doc['document_id']}", headers=headers)
     assert refresh.json()["receipt"]["receipt_id"] == receipt_one["receipt_id"]
-    assert refresh.json()["receipt"]["receipt_digest"] == receipt_one["receipt_digest"]
+    refresh_digest = refresh.json()["receipt"].get("receipt_digest") or refresh.json()["receipt"].get("receipt_hash_sha256")
+    assert refresh_digest == digest
     z = client.get(f"/api/agreements/quick-pdf-envelope/bundle?document_id={doc['document_id']}", headers=headers)
     assert z.status_code == 200
     with zipfile.ZipFile(BytesIO(z.content)) as archive:
@@ -276,7 +282,7 @@ def test_prepare_does_not_sign_and_raw_token_is_not_persisted(client: TestClient
         receipt_bytes = archive.read("receipt.json")
         persisted = json.loads(receipt_bytes)
         assert persisted["receipt_id"] == receipt_one["receipt_id"]
-        assert persisted["receipt_hash_sha256"] == receipt_one["receipt_digest"]
+        assert persisted["receipt_hash_sha256"] == digest
         manifest = json.loads(archive.read("manifest.json"))
         assert manifest["receipt_id"] == receipt_one["receipt_id"]
         assert "LAWDOG_QUICK_PDF_ENVELOPE_V1" not in receipt_bytes.decode("utf-8")

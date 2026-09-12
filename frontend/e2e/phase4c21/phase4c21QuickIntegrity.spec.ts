@@ -170,6 +170,7 @@ test.describe("Phase 4C.2.1 Quick integrity", () => {
     const state = createPhase4c2State({ envelopeCreated: true, fieldsSaved: true, prepared: true });
     state.signedRoles.add(OWNER_ROLE_ID);
     state.signedRoles.add(RECIPIENT_ROLE_ID);
+    state.receiptIssued = true;
     await installPhase4c2ApiMocks(page, state);
     await resumeDetails(page);
     await page.goto("/app/quick?start=pdf", { waitUntil: "domcontentloaded" });

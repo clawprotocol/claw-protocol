@@ -236,6 +236,7 @@ test.describe("Phase 4C.2 Quick completion", () => {
     await expect(page.getByTestId("quick-pdf-fully-executed")).toHaveCount(0);
 
     state.signedRoles.add(RECIPIENT_ROLE_ID);
+    state.receiptIssued = true;
     await page.reload({ waitUntil: "domcontentloaded" });
     await expect(page.getByTestId("quick-pdf-fully-executed")).toBeVisible({ timeout: 20_000 });
     await expect(page.getByTestId("quick-pdf-fully-executed")).toContainText(PHASE4C2_PDF_SHA);

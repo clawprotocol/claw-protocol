@@ -72,6 +72,8 @@ export type Phase4c2FixtureState = {
   contentHits: Array<{ hasOwnerAuth: boolean; hasRecipientToken: boolean }>;
   completeHits: Array<{ signerRoleId: string; participantId: string }>;
   signedRoles: Set<string>;
+  receiptIssued: boolean;
+  envelopeWrites: number;
   envelopeCreated: boolean;
   fieldsSaved: boolean;
   prepared: boolean;
@@ -100,6 +102,8 @@ export function createPhase4c2State(partial?: Partial<Phase4c2FixtureState>): Ph
     contentHits: [],
     completeHits: [],
     signedRoles: new Set(),
+    receiptIssued: false,
+    envelopeWrites: 0,
     envelopeCreated: false,
     fieldsSaved: false,
     prepared: false,
@@ -489,7 +493,16 @@ async function fulfillPhase4c2Api(route: Route, state: Phase4c2FixtureState): Pr
     state.signedRoles.add(role);
     state.completeHits.push({ signerRoleId: role, participantId: pid });
     const fully = state.signedRoles.has(OWNER_ROLE_ID) && state.signedRoles.has(RECIPIENT_ROLE_ID);
-    await json(route, { ok: true, already_signed: already, fully_signed: fully });
+    if (fully) state.receiptIssued = true;
+    await json(route, {
+      ok: true,
+      already_signed: already,
+      fully_signed: fully,
+      fully_executed: fully,
+      uploaded_final_pdf_receipt: fully
+        ? { receipt_id: PHASE4C2_RECEIPT_ID, receipt_hash_sha256: PHASE4C2_RECEIPT_DIGEST, kind: "uploaded_final_pdf_receipt.v1" }
+        : null,
+    });
     return;
   }
 
@@ -566,15 +579,18 @@ async function fulfillPhase4c2Api(route: Route, state: Phase4c2FixtureState): Pr
         return;
       }
       state.ownerCompleteHits += 1;
+      state.envelopeWrites += 1;
       const already = state.signedRoles.has(OWNER_ROLE_ID);
       state.signedRoles.add(OWNER_ROLE_ID);
+      const done = completion(state);
+      if (done.fully_executed) state.receiptIssued = true;
       await json(route, {
         ok: true,
         already_signed: already,
         envelope: envelope(state),
-        completion: completion(state),
-        receipt: completion(state).fully_executed
-          ? { receipt_id: PHASE4C2_RECEIPT_ID, receipt_digest: PHASE4C2_RECEIPT_DIGEST, kind: "uploaded_final_pdf_receipt_v1" }
+        completion: done,
+        receipt: done.fully_executed
+          ? { receipt_id: PHASE4C2_RECEIPT_ID, receipt_hash_sha256: PHASE4C2_RECEIPT_DIGEST, kind: "uploaded_final_pdf_receipt.v1" }
           : null,
       });
       return;
@@ -582,13 +598,18 @@ async function fulfillPhase4c2Api(route: Route, state: Phase4c2FixtureState): Pr
     if (url.includes("/receipt") && method === "GET") {
       state.receiptGets += 1;
       const done = completion(state);
+      if (done.fully_executed && !state.receiptIssued) {
+        await json(route, { detail: { code: "receipt_pending", completion: done, envelope: envelope(state) } }, 409);
+        return;
+      }
       await json(route, {
         ok: true,
         envelope: envelope(state),
         completion: done,
         document_kind: "uploaded_final_pdf",
-        receipt: done.fully_executed
-          ? { receipt_id: PHASE4C2_RECEIPT_ID, receipt_digest: PHASE4C2_RECEIPT_DIGEST, kind: "uploaded_final_pdf_receipt_v1" }
+        receipt_state: done.fully_executed && state.receiptIssued ? "issued" : null,
+        receipt: done.fully_executed && state.receiptIssued
+          ? { receipt_id: PHASE4C2_RECEIPT_ID, receipt_hash_sha256: PHASE4C2_RECEIPT_DIGEST, kind: "uploaded_final_pdf_receipt.v1" }
           : null,
       });
       return;
@@ -597,6 +618,10 @@ async function fulfillPhase4c2Api(route: Route, state: Phase4c2FixtureState): Pr
       state.bundleGets += 1;
       if (!completion(state).fully_executed) {
         await json(route, { detail: { code: "agreement_not_fully_executed" } }, 409);
+        return;
+      }
+      if (!state.receiptIssued) {
+        await json(route, { detail: { code: "receipt_pending" } }, 409);
         return;
       }
       await route.fulfill({
@@ -616,18 +641,21 @@ async function fulfillPhase4c2Api(route: Route, state: Phase4c2FixtureState): Pr
         return;
       }
       state.envelopeCreates += 1;
+      state.envelopeWrites += 1;
       state.envelopeCreated = true;
       await json(route, { ok: true, envelope: envelope(state) });
       return;
     }
     if (method === "GET") {
       const done = state.envelopeCreated ? completion(state) : undefined;
+      const issued = Boolean(done?.fully_executed && state.receiptIssued);
       await json(route, {
         ok: true,
         envelope: state.envelopeCreated ? envelope(state) : null,
         completion: done,
-        receipt: done?.fully_executed
-          ? { receipt_id: PHASE4C2_RECEIPT_ID, receipt_digest: PHASE4C2_RECEIPT_DIGEST, kind: "uploaded_final_pdf_receipt_v1" }
+        receipt_state: issued ? "issued" : done?.fully_executed ? "receipt_pending" : null,
+        receipt: issued
+          ? { receipt_id: PHASE4C2_RECEIPT_ID, receipt_hash_sha256: PHASE4C2_RECEIPT_DIGEST, kind: "uploaded_final_pdf_receipt.v1" }
           : null,
       });
       return;

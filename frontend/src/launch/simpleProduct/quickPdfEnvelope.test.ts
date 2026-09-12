@@ -6,6 +6,8 @@ describe("quickPdfEnvelope", () => {
   it("sanitizes backend codes and never echoes provider text", () => {
     expect(sanitizedEnvelopeMessage("document_hash_mismatch")).toMatch(/no longer matches/i);
     expect(sanitizedEnvelopeMessage("owner_ceremony_incomplete")).toMatch(/agree/i);
+    expect(sanitizedEnvelopeMessage("receipt_pending")).toMatch(/not available yet/i);
+    expect(sanitizedEnvelopeMessage("receipt_unavailable")).toMatch(/missing or no longer matches/i);
     expect(sanitizedEnvelopeMessage("Traceback")).not.toContain("Traceback");
   });
 
