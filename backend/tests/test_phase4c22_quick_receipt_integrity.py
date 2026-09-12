@@ -61,7 +61,13 @@ def _prepare(client: TestClient, headers: dict) -> tuple[dict, dict, str, str]:
     return doc, env, token, bind
 
 
-def _recipient_complete(client: TestClient, env: dict, doc: dict, token: str) -> object:
+def _recipient_complete(client: TestClient, env: dict, doc: dict, token: str, *, signature: str = "Riley Recipient") -> object:
+    from backend.services.vs01_completion_evidence import (
+        CONSENT_ACTION,
+        CONSENT_INTENT_STATEMENT,
+        CONSENT_INTENT_VERSION,
+    )
+
     return client.post(
         f"/api/agreements/{env['agreement_id']}/vs01-signer-complete",
         headers={"X-Claw-Recipient-Access-Token": token},
@@ -70,6 +76,22 @@ def _recipient_complete(client: TestClient, env: dict, doc: dict, token: str) ->
             "participant_id": env["recipient_party_id"],
             "document_id": doc["document_id"],
             "display_name": "Riley Recipient",
+            "signed_at": "1999-01-01T00:00:00Z",
+            "packet_revision": env.get("packet_revision") or "qpk_1",
+            "assigned_fields": [
+                {
+                    "field_id": "fld_r",
+                    "field_type": "signature",
+                    "value": signature,
+                    "page_index": 1,
+                }
+            ],
+            "consent": {
+                "accepted": True,
+                "intent_version": CONSENT_INTENT_VERSION,
+                "intent_statement": CONSENT_INTENT_STATEMENT,
+                "action": CONSENT_ACTION,
+            },
         },
     )
 

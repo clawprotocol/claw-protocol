@@ -207,6 +207,27 @@ describe("recordVs01SignerCompletion (Test361)", () => {
     expect(readSigningPacketStatus(AG)?.fullySigned).toBe(true);
   });
 
+  it("does not write local signed state when the server rejects completion", async () => {
+    vi.spyOn(agreementWorkspaceApi, "postVs01SignerComplete").mockResolvedValue({
+      ok: false,
+      error: "invalid_token",
+      errorCode: "invalid_token",
+      status: 403,
+      retryable: false,
+    });
+
+    const result = await recordVs01SignerCompletion({
+      agreementId: AG,
+      documentId: DOC,
+      signerRoleId: OWNER_ROLE,
+      partyIndex: 0,
+      participantId: "owner",
+    });
+
+    expect(result.serverSynced).toBe(false);
+    expect(readSigningPacketStatus(AG)?.bySignerKey[OWNER_ROLE]).not.toBe("signed");
+  });
+
   it("skips server sync for local_ag bridge agreements", async () => {
     const post = vi.spyOn(agreementWorkspaceApi, "postVs01SignerComplete").mockResolvedValue({
       ok: true,

@@ -84,6 +84,31 @@ def _fields(page: int = 1) -> list:
     ]
 
 
+def _recipient_complete_json(env: dict, doc: dict, *, signature: str = "Riley Recipient") -> dict:
+    from backend.services.vs01_completion_evidence import (
+        CONSENT_ACTION,
+        CONSENT_INTENT_STATEMENT,
+        CONSENT_INTENT_VERSION,
+    )
+
+    return {
+        "signer_role_id": RECIPIENT_ROLE_ID,
+        "participant_id": env["recipient_party_id"],
+        "document_id": doc["document_id"],
+        "display_name": "Riley Recipient",
+        "packet_revision": env.get("packet_revision") or "qpk_1",
+        "assigned_fields": [
+            {"field_id": "fld_r", "field_type": "signature", "value": signature, "page_index": 1}
+        ],
+        "consent": {
+            "accepted": True,
+            "intent_version": CONSENT_INTENT_VERSION,
+            "intent_statement": CONSENT_INTENT_STATEMENT,
+            "action": CONSENT_ACTION,
+        },
+    }
+
+
 def test_placeholder_parties_are_rejected() -> None:
     with pytest.raises(HTTPException):
         validate_party_identity("Owner", "you@email.com", label="owner")
@@ -226,26 +251,17 @@ def test_prepare_does_not_sign_and_raw_token_is_not_persisted(client: TestClient
     new_path = reissue.json()["recipient_open_path"]
     new_token = (parse_qs(urlparse(new_path).query).get("t") or [""])[0]
     assert new_token and new_token != token
+    complete_body = _recipient_complete_json(created.json()["envelope"], doc)
     old = client.post(
         f"/api/agreements/{aid}/vs01-signer-complete",
         headers={"X-Claw-Recipient-Access-Token": token},
-        json={
-            "signer_role_id": RECIPIENT_ROLE_ID,
-            "participant_id": created.json()["envelope"]["recipient_party_id"],
-            "document_id": doc["document_id"],
-            "display_name": "Riley Recipient",
-        },
+        json=complete_body,
     )
     assert old.status_code in (403, 409)
     complete = client.post(
         f"/api/agreements/{aid}/vs01-signer-complete",
         headers={"X-Claw-Recipient-Access-Token": new_token},
-        json={
-            "signer_role_id": RECIPIENT_ROLE_ID,
-            "participant_id": created.json()["envelope"]["recipient_party_id"],
-            "document_id": doc["document_id"],
-            "display_name": "Riley Recipient",
-        },
+        json=complete_body,
     )
     assert complete.status_code == 200, complete.text
     issued = complete.json().get("uploaded_final_pdf_receipt")
@@ -253,12 +269,7 @@ def test_prepare_does_not_sign_and_raw_token_is_not_persisted(client: TestClient
     replay = client.post(
         f"/api/agreements/{aid}/vs01-signer-complete",
         headers={"X-Claw-Recipient-Access-Token": new_token},
-        json={
-            "signer_role_id": RECIPIENT_ROLE_ID,
-            "participant_id": created.json()["envelope"]["recipient_party_id"],
-            "document_id": doc["document_id"],
-            "display_name": "Riley Recipient",
-        },
+        json=complete_body,
     )
     assert replay.status_code in (200, 403, 409)
     if replay.status_code == 200:

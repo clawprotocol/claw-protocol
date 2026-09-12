@@ -205,6 +205,7 @@ test.describe("Phase 4C.2 Quick completion", () => {
     expect(state.contentHits.some((row) => row.hasRecipientToken)).toBe(true);
 
     await page.getByTestId("esign-assigned-field").locator("input").first().fill(PHASE4C2_RECIPIENT.name);
+    await page.getByTestId("esign-recipient-consent").check();
     await page.getByTestId("esign-finish-signing").click();
     await expect(page.getByTestId("esign-recipient-complete")).toBeVisible();
     expect(state.completeHits).toHaveLength(1);
@@ -215,6 +216,7 @@ test.describe("Phase 4C.2 Quick completion", () => {
     await expect(page.getByTestId("esign-recipient-complete")).toBeVisible();
     if (await page.getByTestId("esign-finish-signing").count()) {
       await page.getByTestId("esign-assigned-field").locator("input").first().fill(PHASE4C2_RECIPIENT.name);
+      await page.getByTestId("esign-recipient-consent").check();
       await page.getByTestId("esign-finish-signing").click();
     }
     expect(state.completeHits.every((row) => row.signerRoleId === RECIPIENT_ROLE_ID)).toBe(true);

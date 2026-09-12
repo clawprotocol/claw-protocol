@@ -138,6 +138,7 @@ test.describe("Phase 4B.4 /app/esign dual-mode authority", () => {
     await page.goto(phase4b4RecipientHref(), { waitUntil: "domcontentloaded" });
     await expect(page.getByTestId("esign-assigned-field")).toBeVisible();
     await page.getByTestId("esign-assigned-field").locator("input").fill("Casey Contoso");
+    await page.getByTestId("esign-recipient-consent").check();
     await page.getByTestId("esign-finish-signing").click();
     await expect(page.getByTestId("esign-recipient-complete")).toBeVisible();
     expect(state.completeHits).toHaveLength(1);
@@ -149,6 +150,7 @@ test.describe("Phase 4B.4 /app/esign dual-mode authority", () => {
     await page.goto(phase4b4RecipientHref(), { waitUntil: "domcontentloaded" });
     if (await page.getByTestId("esign-finish-signing").count()) {
       await page.getByTestId("esign-assigned-field").locator("input").fill("Casey Contoso");
+      await page.getByTestId("esign-recipient-consent").check();
       await page.getByTestId("esign-finish-signing").click();
     }
     expect(state.completeHits.length).toBeGreaterThanOrEqual(1);

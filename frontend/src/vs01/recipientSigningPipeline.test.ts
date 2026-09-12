@@ -190,6 +190,8 @@ describe("Recipient signing pipeline — UX (no marketing headers in signing mod
   it("RecipientSigningView header says 'Review and sign' without generic landing copy", () => {
     const src = readFileSync(join(__dirname, "RecipientSigningView.tsx"), "utf8");
     expect(src).toContain("Review and sign");
+    expect(src).toContain("Agree and sign");
+    expect(src).toContain("esign-recipient-consent");
     expect(src).not.toContain("Sign a document");
     expect(src).not.toContain("Send a file, collect signatures");
   });
@@ -198,6 +200,8 @@ describe("Recipient signing pipeline — UX (no marketing headers in signing mod
     const src = readFileSync(join(__dirname, "Vs01Wizard.tsx"), "utf8");
     expect(src).toContain("recipientSigningFinished");
     expect(src).toContain("vs01-recipient-signing-done");
+    expect(src).toContain("if (!result.serverSynced)");
+    expect(src).toContain("recipientSigningSubmitting");
   });
 
   it("recipient completion screen uses recipient-safe copy (not internal process language)", () => {

@@ -104,6 +104,7 @@ test.describe("Phase 4C.2.2 Quick receipt integrity", () => {
     await recip.goto(phase4c2RecipientHref(PHASE4C2_TOKEN), { waitUntil: "domcontentloaded" });
     await expect(recip.getByTestId("esign-recipient-shell")).toBeVisible({ timeout: 20_000 });
     await recip.getByTestId("esign-assigned-field").locator("input").first().fill(PHASE4C2_RECIPIENT.name);
+    await recip.getByTestId("esign-recipient-consent").check();
     await recip.getByTestId("esign-finish-signing").click();
     await expect(recip.getByTestId("esign-recipient-complete")).toBeVisible();
     expect(state.completeHits[0]?.signerRoleId).toBe(RECIPIENT_ROLE_ID);

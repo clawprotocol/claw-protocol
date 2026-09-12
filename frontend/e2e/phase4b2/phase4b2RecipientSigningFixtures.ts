@@ -469,7 +469,13 @@ export async function fulfillPhase4b2Api(route: Route, state: Phase4b2FixtureSta
       typed_name: body.typed_name,
       locked_version_id: body.locked_version_id,
       signer_role_id: body.signer_role_id,
+      consent: (body as { consent?: { accepted?: boolean; action?: string } }).consent,
     });
+    const consent = (body as { consent?: { accepted?: boolean; action?: string } }).consent;
+    if (!consent || consent.accepted !== true || consent.action !== "agree_and_sign") {
+      await json(route, { detail: { code: "consent_required" } }, 400);
+      return;
+    }
     if (body.participant_id && body.participant_id !== auth.partyId) {
       await deny(route, "party_mismatch", "This link is invalid or expired. Request a new link from the sender.");
       return;

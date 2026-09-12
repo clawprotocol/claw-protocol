@@ -127,6 +127,8 @@ async function openValidSign(page: Page, href: string, token: string) {
   await expect(page.getByTestId("recipient-sign-other-parties")).toContainText(PHASE4B2_SIGNER_1_NAME);
   await expect(page.getByTestId(`recipient-sign-other-field-${PHASE4B2_PARTY_1}`)).toBeDisabled();
   await expect(signAction(page)).toBeVisible();
+  await expect(signAction(page)).toBeDisabled();
+  await page.getByTestId("recipient-sign-consent").check();
   await expect(signAction(page)).toBeEnabled();
   await assertNoOwnerChrome(page);
   await assertTokenHidden(page, token);
@@ -202,6 +204,7 @@ test.describe("Phase 4B.2 recipient agreement signing", () => {
 
     await page.goto(primarySignHref(token), { waitUntil: "domcontentloaded" });
     await expect(signAction(page)).toBeVisible();
+    await page.getByTestId("recipient-sign-consent").check();
     await expect(signAction(page)).toBeEnabled();
     await signAction(page).click();
     await expect(page.getByTestId("recipient-sign-complete-status")).toBeVisible();
@@ -297,6 +300,8 @@ test.describe("Phase 4B.2 recipient agreement signing", () => {
     await expect(page.getByTestId("recipient-document-shell")).toBeVisible();
     await assertExactFrozenPaper(page);
     await expect(signAction(page)).toBeVisible();
+    await expect(signAction(page)).toBeDisabled();
+    await page.getByTestId("recipient-sign-consent").check();
     await expect(signAction(page)).toBeEnabled();
     await assertTokenHidden(page, token);
     await assertMobileFit(page);

@@ -71,6 +71,8 @@ export type Phase4c2FixtureState = {
   validateHits: number;
   contentHits: Array<{ hasOwnerAuth: boolean; hasRecipientToken: boolean }>;
   completeHits: Array<{ signerRoleId: string; participantId: string }>;
+  completeBodies: Array<Record<string, unknown>>;
+  completeFailOnce: "503" | "403" | "network" | null;
   signedRoles: Set<string>;
   receiptIssued: boolean;
   envelopeWrites: number;
@@ -101,6 +103,8 @@ export function createPhase4c2State(partial?: Partial<Phase4c2FixtureState>): Ph
     validateHits: 0,
     contentHits: [],
     completeHits: [],
+    completeBodies: [],
+    completeFailOnce: null,
     signedRoles: new Set(),
     receiptIssued: false,
     envelopeWrites: 0,
@@ -472,12 +476,32 @@ async function fulfillPhase4c2Api(route: Route, state: Phase4c2FixtureState): Pr
       await json(route, { detail: "packet_document_mismatch" }, 404);
       return;
     }
-    await json(route, { ok: true, portable: portable(state) });
+    await json(route, {
+      ok: true,
+      portable: portable(state),
+      signer_already_completed: state.signedRoles.has(RECIPIENT_ROLE_ID),
+    });
     return;
   }
 
   if (url.includes("/vs01-signer-complete") && method === "POST") {
     const body = readJsonBody(route);
+    state.completeBodies.push(body);
+    if (state.completeFailOnce === "network") {
+      state.completeFailOnce = null;
+      await route.abort("failed");
+      return;
+    }
+    if (state.completeFailOnce === "503") {
+      state.completeFailOnce = null;
+      await json(route, { detail: { code: "network_retryable", message: "try again" } }, 503);
+      return;
+    }
+    if (state.completeFailOnce === "403") {
+      state.completeFailOnce = null;
+      await json(route, { detail: { code: "invalid_token", message: "This link is invalid or expired." } }, 403);
+      return;
+    }
     const token = recipTok;
     if (!token || token !== state.activeToken || state.revokeToken) {
       await json(route, { detail: { code: "invalid_token" } }, 403);
@@ -489,7 +513,30 @@ async function fulfillPhase4c2Api(route: Route, state: Phase4c2FixtureState): Pr
       await json(route, { detail: { code: "party_mismatch" } }, 403);
       return;
     }
+    const consent = body.consent as { accepted?: boolean; action?: string } | undefined;
+    const fields = Array.isArray(body.assigned_fields) ? body.assigned_fields : [];
+    const signature = fields.find((row) => String((row as { field_type?: string }).field_type || "") === "signature");
+    const foreign = fields.some((row) => String((row as { field_id?: string }).field_id || "") === "fld_o");
+    if (foreign) {
+      await json(route, { detail: { code: "foreign_field", message: "A submitted field belongs to another signer." } }, 403);
+      return;
+    }
+    if (!consent || consent.accepted !== true || String(consent.action || "") !== "agree_and_sign") {
+      await json(route, { detail: { code: "consent_required", message: "Affirmative electronic-signature consent is required." } }, 400);
+      return;
+    }
+    if (!signature || !String((signature as { value?: string }).value || "").trim()) {
+      await json(route, { detail: { code: "signature_required", message: "A required signature field is empty." } }, 400);
+      return;
+    }
     const already = state.signedRoles.has(role);
+    if (already) {
+      const prior = state.completeBodies[0]?.assigned_fields;
+      if (JSON.stringify(prior) !== JSON.stringify(fields)) {
+        await json(route, { detail: { code: "completion_evidence_mismatch" } }, 409);
+        return;
+      }
+    }
     state.signedRoles.add(role);
     state.completeHits.push({ signerRoleId: role, participantId: pid });
     const fully = state.signedRoles.has(OWNER_ROLE_ID) && state.signedRoles.has(RECIPIENT_ROLE_ID);
@@ -499,6 +546,14 @@ async function fulfillPhase4c2Api(route: Route, state: Phase4c2FixtureState): Pr
       already_signed: already,
       fully_signed: fully,
       fully_executed: fully,
+      receipt_status: fully ? "issued" : "not_applicable",
+      completion: {
+        status: already ? "already_signed" : "completed",
+        signed_at: "2026-09-11T18:00:00.000Z",
+        signer_role_id: role,
+        participant_id: pid,
+        document_id: PHASE4C2_DOCUMENT_ID,
+      },
       uploaded_final_pdf_receipt: fully
         ? { receipt_id: PHASE4C2_RECEIPT_ID, receipt_hash_sha256: PHASE4C2_RECEIPT_DIGEST, kind: "uploaded_final_pdf_receipt.v1" }
         : null,

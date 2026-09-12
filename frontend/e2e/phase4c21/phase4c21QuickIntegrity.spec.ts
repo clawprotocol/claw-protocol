@@ -158,6 +158,7 @@ test.describe("Phase 4C.2.1 Quick integrity", () => {
     await expect(recip.getByTestId("esign-assigned-field").locator("input").first()).toBeVisible();
     await expect(recip.getByTestId("esign-other-signer-field").locator("input")).toHaveCount(0);
     await recip.getByTestId("esign-assigned-field").locator("input").first().fill(PHASE4C2_RECIPIENT.name);
+    await recip.getByTestId("esign-recipient-consent").check();
     await recip.getByTestId("esign-finish-signing").click();
     await expect(recip.getByTestId("esign-recipient-complete")).toBeVisible();
     expect(state.completeHits[0]?.signerRoleId).toBe(RECIPIENT_ROLE_ID);

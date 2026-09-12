@@ -13,6 +13,20 @@ pytestmark = pytest.mark.unit
 
 _ORG_H = {"X-Claw-Org-Id": "test-org-api-v2", "X-Claw-Test-Auth-User-Id": "test-owner"}
 
+def _esign_consent() -> dict:
+    from backend.services.vs01_completion_evidence import (
+        CONSENT_ACTION,
+        CONSENT_INTENT_STATEMENT,
+        CONSENT_INTENT_VERSION,
+    )
+
+    return {
+        "accepted": True,
+        "intent_version": CONSENT_INTENT_VERSION,
+        "intent_statement": CONSENT_INTENT_STATEMENT,
+        "action": CONSENT_ACTION,
+    }
+
 
 @pytest.fixture(autouse=True)
 def _entitle_owner_org_after_env(tmp_path, monkeypatch):
@@ -305,6 +319,7 @@ def test_signing_ceremony_multi_signer_and_immutability(monkeypatch, tmp_path):
             "participant_id": "p-acme",
             "typed_name": "Acme Growth LLC",
             "locked_version_id": "lv-ceremony-1",
+            "consent": _esign_consent(),
         },
     )
     assert c1.status_code == 200
@@ -317,6 +332,7 @@ def test_signing_ceremony_multi_signer_and_immutability(monkeypatch, tmp_path):
             "participant_id": "p-acme",
             "typed_name": "Acme Growth LLC",
             "locked_version_id": "lv-ceremony-1",
+            "consent": _esign_consent(),
         },
     )
     assert replay.status_code in (403, 409), replay.text
@@ -332,6 +348,7 @@ def test_signing_ceremony_multi_signer_and_immutability(monkeypatch, tmp_path):
             "participant_id": "p-beta",
             "typed_name": "Beta LLC",
             "locked_version_id": "lv-ceremony-1",
+            "consent": _esign_consent(),
         },
     )
     assert cross.status_code == 403, cross.text
@@ -342,6 +359,7 @@ def test_signing_ceremony_multi_signer_and_immutability(monkeypatch, tmp_path):
             "participant_id": "p-beta",
             "typed_name": "Beta LLC",
             "locked_version_id": "lv-ceremony-1",
+            "consent": _esign_consent(),
         },
     )
     assert c2.status_code == 200

@@ -379,14 +379,19 @@ export async function fulfillPhase4b4Api(
     const portable = buildPhase4b4Portable({
       corpusHash: state.mismatchHash ? createHash("sha256").update("tampered").digest("hex") : PHASE4B4_FROZEN_SHA,
     });
-    await json(route, { ok: true, portable });
+    await json(route, { ok: true, portable, signer_already_completed: state.signedRoles.has(rec.signer_role_id) });
     return;
   }
 
   if (url.includes("/vs01-signer-complete") && method === "POST") {
-    let body: { signer_role_id?: string; participant_id?: string } = {};
+    let body: {
+      signer_role_id?: string;
+      participant_id?: string;
+      consent?: { accepted?: boolean; action?: string };
+      assigned_fields?: Array<{ field_id?: string; field_type?: string; value?: string }>;
+    } = {};
     try {
-      body = JSON.parse(req.postData() || "{}") as { signer_role_id?: string; participant_id?: string };
+      body = JSON.parse(req.postData() || "{}") as typeof body;
     } catch {
       body = {};
     }
@@ -400,6 +405,15 @@ export async function fulfillPhase4b4Api(
     const pid = (body.participant_id || "").trim();
     if (role !== rec.signer_role_id || pid !== rec.recipient_party_id) {
       await deny(route, "party_mismatch", "Signing could not be recorded for this party.");
+      return;
+    }
+    if (!body.consent || body.consent.accepted !== true || body.consent.action !== "agree_and_sign") {
+      await json(route, { detail: { code: "consent_required" } }, 400);
+      return;
+    }
+    const fields = body.assigned_fields || [];
+    if (!fields.some((row) => row.field_type === "signature" && String(row.value || "").trim())) {
+      await json(route, { detail: { code: "signature_required" } }, 400);
       return;
     }
     const already = state.signedRoles.has(role);
