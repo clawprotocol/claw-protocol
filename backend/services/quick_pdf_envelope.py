@@ -327,6 +327,7 @@ def public_envelope(env: Dict[str, Any], *, include_token: bool = False) -> Dict
     out = strip_raw_token_secrets(env)
     if include_token:
         raise RuntimeError("raw tokens are never persisted on the envelope")
+    out.pop("final_receipt", None)
     return out
 
 
@@ -541,77 +542,73 @@ def sign_packet_field_manifest(fields: List[Dict[str, Any]]) -> List[Dict[str, A
 
 def issue_uploaded_pdf_receipt(
     *,
+    draft: Any,
     env: Dict[str, Any],
-    status: Dict[str, Any],
-    signed_at: str,
-) -> Dict[str, Any]:
-    from backend.services.receipt_service import issue_and_persist_receipt
+    status: Optional[Dict[str, Any]] = None,
+    signed_at: str = "",
+) -> Optional[Dict[str, Any]]:
+    """Issue the typed uploaded-PDF receipt. Drafted-agreement receipt.v1 is unchanged."""
+    from backend.services.uploaded_final_pdf_receipt import issue_uploaded_final_pdf_receipt
 
-    existing_id = str(env.get("final_receipt_id") or "").strip()
-    if existing_id and env.get("final_receipt"):
-        return dict(env["final_receipt"])
-    packet = {
-        "schema_version": "sign_packet.v1",
-        "document_id": env["document_id"],
-        "document_content_sha256": env["content_sha256"],
-        "signer_ref": "uploaded_final_pdf_required_set",
-        "intent": "fully_executed_uploaded_final_pdf",
-        "signed_at": signed_at,
-        "field_manifest": sign_packet_field_manifest(list(env.get("fields") or [])),
-    }
-    receipt = issue_and_persist_receipt(sign_packet=packet, protocol_version="1.0.0", receipt_id=existing_id or None)
-    evidence = {
-        **receipt,
-        "kind": "uploaded_final_pdf_receipt_v1",
-        "document_kind": AUTHORITY_KIND,
-        "agreement_id": env["agreement_id"],
-        "packet_revision": env.get("packet_revision"),
-        "field_manifest_digest": env.get("field_manifest_digest") or field_manifest_digest(list(env.get("fields") or [])),
-        "required_signers": [env.get("owner_role_id") or OWNER_ROLE_ID, env.get("recipient_role_id") or RECIPIENT_ROLE_ID],
-        "completion_event_ids": list(status.get("completion_event_ids") or []),
-        "page_count": env.get("page_count"),
-        "size_bytes": env.get("size_bytes"),
-        "content_type": env.get("content_type"),
-        "label": "Uploaded final PDF signed through LawDog",
-    }
-    return evidence
+    _ = status, signed_at
+    return issue_uploaded_final_pdf_receipt(draft=draft, env=env)
 
 
 def public_receipt_fragment(evidence: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
     if not isinstance(evidence, dict):
         return None
+    events = evidence.get("completion_events") if isinstance(evidence.get("completion_events"), list) else []
+    event_ids = [
+        str(row.get("event_id") or "").strip()
+        for row in events
+        if isinstance(row, dict) and str(row.get("event_id") or "").strip()
+    ]
+    if not event_ids:
+        event_ids = [str(x) for x in (evidence.get("completion_event_ids") or []) if str(x).strip()]
     return {
         "receipt_id": evidence.get("receipt_id"),
-        "receipt_digest": evidence.get("receipt_hash_sha256"),
-        "kind": evidence.get("kind") or "uploaded_final_pdf_receipt_v1",
+        "receipt_digest": evidence.get("receipt_hash_sha256") or evidence.get("receipt_digest"),
+        "kind": evidence.get("kind") or evidence.get("schema") or "uploaded_final_pdf_receipt.v1",
         "document_kind": AUTHORITY_KIND,
         "content_sha256": evidence.get("document_content_sha256") or evidence.get("content_sha256"),
         "packet_revision": evidence.get("packet_revision"),
         "field_manifest_digest": evidence.get("field_manifest_digest"),
         "required_signers": evidence.get("required_signers"),
-        "completion_event_ids": evidence.get("completion_event_ids"),
+        "completion_event_ids": event_ids,
         "label": "Uploaded final PDF signed through LawDog",
     }
 
 
-def build_verification_bundle(*, pdf: bytes, evidence: Dict[str, Any], manifest: Optional[Dict[str, Any]] = None) -> bytes:
+def build_verification_bundle(
+    *,
+    pdf: bytes,
+    evidence: Dict[str, Any],
+    manifest: Optional[Dict[str, Any]] = None,
+    receipt_bytes: Optional[bytes] = None,
+) -> bytes:
+    from backend.services.uploaded_final_pdf_receipt import persistable_receipt_bytes
+
+    artifact = receipt_bytes if receipt_bytes is not None else persistable_receipt_bytes(evidence)
     buf = BytesIO()
     with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_DEFLATED) as zf:
         zf.writestr("document.pdf", pdf)
-        zf.writestr(
-            "receipt.json",
-            json.dumps(evidence, sort_keys=True, indent=2, ensure_ascii=False),
-        )
+        zf.writestr("receipt.json", artifact)
         zf.writestr(
             "manifest.json",
-            json.dumps(manifest or {
-                "kind": AUTHORITY_KIND,
-                "content_sha256": evidence.get("document_content_sha256") or evidence.get("content_sha256"),
-                "field_manifest_digest": evidence.get("field_manifest_digest"),
-                "packet_revision": evidence.get("packet_revision"),
-                "receipt_id": evidence.get("receipt_id"),
-                "receipt_digest": evidence.get("receipt_hash_sha256"),
-            }, sort_keys=True, indent=2, ensure_ascii=False),
+            json.dumps(
+                manifest
+                or {
+                    "kind": AUTHORITY_KIND,
+                    "content_sha256": evidence.get("document_content_sha256") or evidence.get("content_sha256"),
+                    "field_manifest_digest": evidence.get("field_manifest_digest"),
+                    "packet_revision": evidence.get("packet_revision"),
+                    "receipt_id": evidence.get("receipt_id"),
+                    "receipt_digest": evidence.get("receipt_hash_sha256"),
+                },
+                sort_keys=True,
+                indent=2,
+                ensure_ascii=False,
+            ),
         )
     return buf.getvalue()
 

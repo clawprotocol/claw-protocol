@@ -208,23 +208,22 @@ def _require_matching_envelope(request: Request, body: QuickEnvelopeActionBody) 
     return draft, env, raw
 
 
-def _persist_final_receipt_if_ready(draft: Any, env: Dict[str, Any], request: Request) -> tuple[Any, Dict[str, Any], Optional[Dict[str, Any]]]:
-    from backend.routers.agreements_v2_api import _merge_agreement_draft, _save_draft_sync, _utc_now_iso
+def _read_final_receipt(draft: Any, env: Dict[str, Any]) -> tuple[Optional[Dict[str, Any]], Optional[bytes], Optional[str]]:
+    from backend.services.uploaded_final_pdf_receipt import read_uploaded_final_pdf_receipt
 
-    dump = draft.model_dump() if hasattr(draft, "model_dump") else draft
-    status = completion_status(dump, env)
-    if not status.get("fully_executed"):
-        return draft, env, None
-    if env.get("final_receipt_id") and env.get("final_receipt"):
-        return draft, env, dict(env["final_receipt"])
-    now = _utc_now_iso()
-    evidence = issue_uploaded_pdf_receipt(env=env, status=status, signed_at=now)
-    env["final_receipt_id"] = evidence.get("receipt_id")
-    env["final_receipt_digest"] = evidence.get("receipt_hash_sha256")
-    env["final_receipt"] = evidence
-    next_draft = _merge_agreement_draft(draft, quick_pdf_envelope_v1=env, updated_at=now)
-    _save_draft_sync(next_draft.model_dump(), request)
-    return next_draft, env, evidence
+    return read_uploaded_final_pdf_receipt(draft=draft, env=env)
+
+
+def _receipt_pending_detail(code: str) -> Dict[str, str]:
+    if code == "receipt_pending":
+        return {
+            "code": "receipt_pending",
+            "message": "This agreement is fully signed, but the persisted receipt is not available yet. Retry shortly.",
+        }
+    return {
+        "code": code or "receipt_unavailable",
+        "message": "The persisted receipt is missing or no longer matches the uploaded PDF.",
+    }
 
 
 @router.post("/quick-pdf-envelope")
@@ -409,12 +408,14 @@ def get_quick_pdf_envelope(request: Request, document_id: str) -> Dict[str, Any]
     if not env:
         return {"ok": True, "envelope": None}
     status = completion_status(draft.model_dump(), env)
-    draft, env, evidence = _persist_final_receipt_if_ready(draft, env, request)
+    evidence, _raw, receipt_err = _read_final_receipt(draft, env)
+    receipt_state = "issued" if evidence else (receipt_err if status.get("fully_executed") else None)
     return {
         "ok": True,
         "envelope": public_envelope(env),
         "completion": status,
-        "receipt": public_receipt_fragment(evidence or env.get("final_receipt")),
+        "receipt": public_receipt_fragment(evidence),
+        "receipt_state": receipt_state,
     }
 
 
@@ -606,15 +607,25 @@ def owner_complete_quick_pdf(body: QuickOwnerCompleteBody, request: Request) -> 
             quick_pdf_envelope_v1=env,
             updated_at=now,
         )
+        status = completion_status(next_draft.model_dump(), env)
+        evidence = None
+        receipt_state = None
+        if status.get("fully_executed"):
+            try:
+                evidence = issue_uploaded_pdf_receipt(draft=next_draft, env=env)
+                receipt_state = "issued" if evidence else "receipt_pending"
+            except ValueError:
+                receipt_state = "receipt_pending"
+            next_draft = _merge_agreement_draft(next_draft, quick_pdf_envelope_v1=env, updated_at=now)
         _save_draft_sync(next_draft.model_dump(), request)
-        next_draft, env, evidence = _persist_final_receipt_if_ready(next_draft, env, request)
         status = completion_status(next_draft.model_dump(), env)
     return {
         "ok": True,
         "already_signed": pending.already_signed,
         "completion": status,
         "envelope": public_envelope(env),
-        "receipt": public_receipt_fragment(evidence),
+        "receipt": evidence,
+        "receipt_state": receipt_state,
     }
 
 
@@ -636,16 +647,25 @@ def get_quick_pdf_receipt(request: Request, document_id: str) -> Dict[str, Any]:
     if hashlib.sha256(raw).hexdigest() != env.get("content_sha256"):
         raise HTTPException(status_code=409, detail={"code": "receipt_hash_mismatch", "message": "This receipt no longer matches the uploaded PDF."})
     status = completion_status(draft.model_dump(), env)
-    evidence = None
-    if status.get("fully_executed"):
-        draft, env, evidence = _persist_final_receipt_if_ready(draft, env, request)
-        evidence = evidence or env.get("final_receipt")
+    evidence, raw, receipt_err = _read_final_receipt(draft, env)
+    if status.get("fully_executed") and receipt_err:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                **_receipt_pending_detail(receipt_err),
+                "completion": status,
+                "envelope": public_envelope(env),
+                "receipt_state": receipt_err,
+            },
+        )
     return {
         "ok": True,
         "completion": status,
-        "receipt": public_receipt_fragment(evidence),
+        "receipt": evidence,
+        "receipt_state": "issued" if evidence else None,
         "envelope": public_envelope(env),
         "document_kind": AUTHORITY_KIND,
+        "receipt_bytes_sha256": hashlib.sha256(raw).hexdigest() if raw else None,
     }
 
 
@@ -673,13 +693,13 @@ def get_quick_pdf_bundle(request: Request, document_id: str):
         )
     if hashlib.sha256(raw).hexdigest() != env.get("content_sha256"):
         raise HTTPException(status_code=409, detail={"code": "receipt_hash_mismatch", "message": "This receipt no longer matches the uploaded PDF."})
-    draft, env, evidence = _persist_final_receipt_if_ready(draft, env, request)
-    evidence = evidence or env.get("final_receipt")
-    if not evidence:
-        raise HTTPException(status_code=409, detail={"code": "receipt_unavailable", "message": "The persisted receipt is not available yet."})
+    evidence, receipt_bytes, receipt_err = _read_final_receipt(draft, env)
+    if receipt_err or not evidence or receipt_bytes is None:
+        raise HTTPException(status_code=409, detail=_receipt_pending_detail(receipt_err or "receipt_unavailable"))
     blob = build_verification_bundle(
         pdf=raw,
         evidence=evidence,
+        receipt_bytes=receipt_bytes,
         manifest={
             "kind": AUTHORITY_KIND,
             "content_sha256": env["content_sha256"],

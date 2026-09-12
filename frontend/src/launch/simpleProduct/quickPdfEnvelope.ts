@@ -57,6 +57,7 @@ export type QuickCompletion = {
 export type QuickReceipt = {
   receipt_id?: string;
   receipt_digest?: string;
+  receipt_hash_sha256?: string;
   kind?: string;
   document_kind?: string;
   content_sha256?: string;
@@ -64,6 +65,15 @@ export type QuickReceipt = {
   field_manifest_digest?: string;
   label?: string;
 };
+
+function asQuickReceipt(raw: unknown): QuickReceipt | null {
+  if (!raw || typeof raw !== "object") return null;
+  const row = raw as QuickReceipt;
+  const digest = String(row.receipt_digest || row.receipt_hash_sha256 || "").trim();
+  const id = String(row.receipt_id || "").trim();
+  if (!id && !digest) return null;
+  return { ...row, receipt_id: id || row.receipt_id, receipt_digest: digest || undefined };
+}
 
 export type QuickEnvelopeResult =
   | {
@@ -93,6 +103,8 @@ const MESSAGES: Record<string, string> = {
   network: "That step was not saved. Check your connection and try again.",
   unavailable: "We couldn’t continue with this PDF. Try again.",
   agreement_not_fully_executed: "The verification bundle is available after every required signer finishes.",
+  receipt_pending: "This agreement is fully signed, but the persisted receipt is not available yet. Retry shortly.",
+  receipt_unavailable: "The persisted receipt is missing or no longer matches the uploaded PDF.",
   receipt_hash_mismatch: "This receipt no longer matches the uploaded PDF.",
   owner_ceremony_incomplete: "Type or draw your signature and confirm you agree before signing.",
   page_count_mismatch: "Placement pages must match the uploaded PDF.",
@@ -179,7 +191,7 @@ export async function loadQuickPdfEnvelope(documentId: string): Promise<QuickEnv
     ok: true,
     envelope,
     completion: data.completion as QuickCompletion | undefined,
-    receipt: (data.receipt as QuickReceipt | null) || null,
+    receipt: asQuickReceipt(data.receipt),
   };
 }
 
@@ -250,7 +262,7 @@ export async function ownerCompleteQuickPdf(
     ok: true,
     envelope: data.envelope as QuickEnvelope,
     completion: data.completion as QuickCompletion,
-    receipt: (data.receipt as QuickReceipt | null) || null,
+    receipt: asQuickReceipt(data.receipt),
   };
 }
 
@@ -285,12 +297,22 @@ export async function loadQuickPdfReceipt(documentId: string): Promise<QuickEnve
     return { ok: false, code: "network", message: sanitizedEnvelopeMessage("network") };
   }
   const data = await readJson(res);
+  const code = detailCode(data);
+  if (res.status === 409 && (code === "receipt_pending" || code === "receipt_unavailable")) {
+    const detail = data.detail && typeof data.detail === "object" ? (data.detail as Record<string, unknown>) : data;
+    return {
+      ok: true,
+      envelope: (detail.envelope as QuickEnvelope) || (data.envelope as QuickEnvelope),
+      completion: (detail.completion as QuickCompletion) || (data.completion as QuickCompletion),
+      receipt: null,
+    };
+  }
   if (!res.ok) return fail(res, data);
   return {
     ok: true,
     envelope: data.envelope as QuickEnvelope,
     completion: data.completion as QuickCompletion,
-    receipt: (data.receipt as QuickReceipt | null) || null,
+    receipt: asQuickReceipt(data.receipt),
   };
 }
 

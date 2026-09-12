@@ -8897,6 +8897,37 @@ def post_vs01_signer_complete(
                             aid,
                         )
 
+        uploaded_final_pdf_receipt = None
+        from backend.services.quick_pdf_envelope import (
+            envelope_from_draft,
+            is_uploaded_final_pdf_authority,
+        )
+
+        reloaded_for_receipt = _load_or_404(aid)
+        if is_uploaded_final_pdf_authority(reloaded_for_receipt):
+            from backend.services.uploaded_final_pdf_receipt import issue_uploaded_final_pdf_receipt
+
+            env = envelope_from_draft(reloaded_for_receipt)
+            if env:
+                try:
+                    issued = issue_uploaded_final_pdf_receipt(draft=reloaded_for_receipt, env=env)
+                except ValueError:
+                    issued = None
+                if issued:
+                    stored = envelope_from_draft(reloaded_for_receipt) or {}
+                    if (
+                        stored.get("final_receipt_id") != issued.get("receipt_id")
+                        or stored.get("final_receipt_digest") != issued.get("receipt_hash_sha256")
+                        or stored.get("final_receipt")
+                    ):
+                        receipt_draft = _merge_agreement_draft(
+                            reloaded_for_receipt,
+                            updated_at=now,
+                            quick_pdf_envelope_v1=env,
+                        )
+                        _save_draft_sync(receipt_draft.model_dump(), request)
+                    uploaded_final_pdf_receipt = issued
+
         return {
             "ok": True,
             "already_signed": outcome.already_signed,
@@ -8904,6 +8935,7 @@ def post_vs01_signer_complete(
             "completion_evidence_created": completion_evidence_created,
             "completion_emails_sent": completion_emails_sent,
             "auth_mode": auth_mode,
+            "uploaded_final_pdf_receipt": uploaded_final_pdf_receipt,
         }
 
 
