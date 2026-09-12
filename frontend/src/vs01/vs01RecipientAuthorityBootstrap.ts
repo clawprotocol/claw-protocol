@@ -26,6 +26,7 @@ export type Vs01RecipientAuthorityBootstrapResult =
       counterparties: Vs01Counterparty[];
       initialsEnabled: boolean;
       signerCount: number;
+      signerAlreadyCompleted?: boolean;
     }
   | { ok: false; mismatch: Vs01RecipientIdentityMismatch }
   | { ok: false; inviteSuperseded: true; message?: string }
@@ -205,5 +206,6 @@ export async function bootstrapVs01RecipientSigningAuthority(args: {
     counterparties: hydration.counterparties,
     initialsEnabled,
     signerCount: hydratedPortable.roles.length,
+    signerAlreadyCompleted: fetchResult.signerAlreadyCompleted === true,
   };
 }

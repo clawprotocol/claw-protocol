@@ -1,4 +1,12 @@
 import { postVs01SignerComplete } from "../agreement/agreementWorkspaceApi";
+import {
+  assignedFieldsFromRecipient,
+  recipientCompletionIsRetryable,
+  versionedRecipientConsentIntent,
+  type Vs01ConsentIntent,
+  type Vs01CompletionStatus,
+  type Vs01UploadedPdfReceiptPointer,
+} from "./vs01RecipientCompletionContract";
 import { fingerprintAgreementBody } from "../components/agreements/guidedDealCompletion/guidedSigningPacketVersion";
 import {
   loadVs01CanonicalPacketPortable,
@@ -38,6 +46,8 @@ export type RecordVs01SignerCompletionArgs = {
   recipientFields?: readonly Vs01RecipientPlacedField[];
   recipientAccessToken?: string | null;
   signingDateIso?: string;
+  consent?: Vs01ConsentIntent | null;
+  packetRevision?: string | null;
 };
 
 export type RecordVs01SignerCompletionResult = {
@@ -47,6 +57,13 @@ export type RecordVs01SignerCompletionResult = {
   serverFullyExecuted: boolean;
   completionEmailsSent: boolean;
   corpusStamped: boolean;
+  errorCode?: string;
+  error?: string;
+  status?: number;
+  retryable?: boolean;
+  completion?: Vs01CompletionStatus;
+  receiptStatus?: string;
+  receipt?: Vs01UploadedPdfReceiptPointer | null;
 };
 
 const completionInFlight = new Map<string, Promise<RecordVs01SignerCompletionResult>>();
@@ -240,35 +257,39 @@ async function recordVs01SignerCompletionInner(
   const signedDateDisplay = formatSigningDateDisplayFromIso(signingDateIso);
   const partyIndex = authoritative.partyIndex;
   const isLocalBridge = agreementId.startsWith("local_ag_");
+  const consent = args.consent ?? versionedRecipientConsentIntent();
+  const assignedFields = assignedFieldsFromRecipient(args.recipientFields, signerRoleId);
+  const completionBody = {
+    signer_role_id: signerRoleId,
+    participant_id: participantId,
+    document_id: documentId,
+    display_name: (args.displayName ?? "").trim(),
+    signed_date_iso: signingDateIso,
+    signed_date_display: signedDateDisplay,
+    assigned_fields: assignedFields,
+    consent,
+    packet_revision: (args.packetRevision ?? "").trim() || undefined,
+  };
 
-  let { portable, corpusStamped } = persistSignerCompletionToPortablePacket({
-    documentId,
-    agreementId,
-    signerRoleId,
-    partyIndex,
-    signingDateIso,
-    displayName: args.displayName,
-    recipientFields: args.recipientFields,
-    // Client must not declare full execution. Attach a local snapshot only after
-    // the server reports fully_executed (canonical all-signers finalization).
-    attachFinalSnapshot: false,
-  });
-
-  let serverSynced = false;
+  let portable: Vs01CanonicalPacketPortableV1 | null = loadVs01CanonicalPacketPortable(documentId);
+  let corpusStamped = false;
+  let serverSynced = isLocalBridge;
   let serverFullyExecuted = false;
   let completionEmailsSent = false;
+  let errorCode: string | undefined;
+  let error: string | undefined;
+  let status: number | undefined;
+  let retryable = false;
+  let completion: Vs01CompletionStatus | undefined;
+  let receiptStatus: string | undefined;
+  let receipt: Vs01UploadedPdfReceiptPointer | null | undefined;
 
   if (agreementId && !isLocalBridge) {
     try {
       const res = await postVs01SignerComplete(
         agreementId,
         {
-          signer_role_id: signerRoleId,
-          participant_id: participantId,
-          document_id: documentId,
-          display_name: (args.displayName ?? "").trim(),
-          signed_date_iso: signingDateIso,
-          signed_date_display: signedDateDisplay,
+          ...completionBody,
           portable_packet: portable ? (portable as unknown as Record<string, unknown>) : undefined,
         },
         args.recipientAccessToken,
@@ -276,48 +297,83 @@ async function recordVs01SignerCompletionInner(
       serverSynced = res.ok;
       serverFullyExecuted = Boolean(res.fully_executed);
       completionEmailsSent = Boolean(res.completion_emails_sent);
+      errorCode = res.errorCode;
+      error = res.error;
+      status = res.status;
+      retryable = Boolean(res.retryable) || recipientCompletionIsRetryable(res.status ?? 0, res.errorCode ?? "");
+      completion = res.completion as Vs01CompletionStatus | undefined;
+      receiptStatus = res.receipt_status;
+      receipt = res.uploaded_final_pdf_receipt;
 
-      if (serverFullyExecuted && (!portable?.fullyExecutedSnapshot || !completionEmailsSent)) {
-        const finalized = persistSignerCompletionToPortablePacket({
-          documentId,
-          agreementId,
-          signerRoleId,
-          partyIndex,
-          signingDateIso,
-          displayName: args.displayName,
-          recipientFields: args.recipientFields,
-          attachFinalSnapshot: true,
-        });
-        portable = finalized.portable ?? portable;
-        corpusStamped = corpusStamped || finalized.corpusStamped;
-
-        if (portable?.fullyExecutedSnapshot || finalized.signatureStamped || finalized.corpusStamped) {
-          try {
-            const retry = await postVs01SignerComplete(
-              agreementId,
-              {
-                signer_role_id: signerRoleId,
-                participant_id: participantId,
-                document_id: documentId,
-                display_name: (args.displayName ?? "").trim(),
-                signed_date_iso: signingDateIso,
-                signed_date_display: signedDateDisplay,
-                portable_packet: portable as unknown as Record<string, unknown>,
-              },
-              args.recipientAccessToken,
-            );
-            if (retry.ok) {
-              serverSynced = true;
-              completionEmailsSent = Boolean(retry.completion_emails_sent) || completionEmailsSent;
-            }
-          } catch {
-            /* non-fatal snapshot/email retry */
-          }
-        }
+      if (!res.ok) {
+        return {
+          localSnapshot: readSigningPacketStatus(agreementId),
+          fullySigned: false,
+          serverSynced: false,
+          serverFullyExecuted: false,
+          completionEmailsSent: false,
+          corpusStamped: false,
+          errorCode,
+          error,
+          status,
+          retryable,
+        };
       }
+
+      const stamped = persistSignerCompletionToPortablePacket({
+        documentId,
+        agreementId,
+        signerRoleId,
+        partyIndex,
+        signingDateIso,
+        displayName: args.displayName,
+        recipientFields: args.recipientFields,
+        attachFinalSnapshot: serverFullyExecuted,
+      });
+      portable = stamped.portable ?? portable;
+      corpusStamped = stamped.corpusStamped;
     } catch {
-      serverSynced = false;
+      return {
+        localSnapshot: readSigningPacketStatus(agreementId),
+        fullySigned: false,
+        serverSynced: false,
+        serverFullyExecuted: false,
+        completionEmailsSent: false,
+        corpusStamped: false,
+        errorCode: "network",
+        error: "network",
+        status: 0,
+        retryable: true,
+      };
     }
+  } else if (isLocalBridge) {
+    const stamped = persistSignerCompletionToPortablePacket({
+      documentId,
+      agreementId,
+      signerRoleId,
+      partyIndex,
+      signingDateIso,
+      displayName: args.displayName,
+      recipientFields: args.recipientFields,
+      attachFinalSnapshot: false,
+    });
+    portable = stamped.portable ?? portable;
+    corpusStamped = stamped.corpusStamped;
+  }
+
+  if (!serverSynced && !isLocalBridge) {
+    return {
+      localSnapshot: readSigningPacketStatus(agreementId),
+      fullySigned: false,
+      serverSynced: false,
+      serverFullyExecuted: false,
+      completionEmailsSent: false,
+      corpusStamped: false,
+      errorCode,
+      error,
+      status,
+      retryable,
+    };
   }
 
   const snap = applyLocalSignerPacketStatus(agreementId, signerRoleId, serverFullyExecuted);
@@ -330,6 +386,13 @@ async function recordVs01SignerCompletionInner(
     serverFullyExecuted,
     completionEmailsSent,
     corpusStamped,
+    errorCode,
+    error,
+    status,
+    retryable,
+    completion,
+    receiptStatus,
+    receipt,
   };
 }
 

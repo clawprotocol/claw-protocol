@@ -54,6 +54,7 @@ def project_recipient_agreement_draft(
         "economics",
         "workspace_tags",
         "workspace_folder_id",
+        "vs01_signer_execution_v1",
     ):
         out.pop(key, None)
 
@@ -80,6 +81,8 @@ def project_recipient_agreement_draft(
                         rr["partyName"] = r.get("partyName") or r.get("party_name")
                     slim_roles.append(rr)
                 portable = {**portable, "roles": slim_roles}
-            out["vs01_signing_packet_v1"] = {**pkt, "portable": portable}
+            slim_pkt = {**pkt, "portable": portable}
+            slim_pkt.pop("signer_execution_v1", None)
+            out["vs01_signing_packet_v1"] = slim_pkt
 
     return out

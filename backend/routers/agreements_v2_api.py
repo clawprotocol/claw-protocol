@@ -790,6 +790,8 @@ class AgreementDraft(AgreementDraftCreate):
     quick_pdf_envelope_v1: Optional[Dict[str, Any]] = None
     """Phase 4C.2.1 — typed uploaded-PDF authority (never accepted-review corpus)."""
     uploaded_final_pdf_authority_v1: Optional[Dict[str, Any]] = None
+    """Phase 4C.2.3 — private raw signature/consent execution record (never on receipts)."""
+    vs01_signer_execution_v1: Optional[Dict[str, Any]] = None
 
 
 def _merge_agreement_draft(base: AgreementDraft, **updates: Any) -> AgreementDraft:
@@ -3159,10 +3161,26 @@ class SigningCeremonyStartBody(BaseModel):
     participant_id: str = ""
 
 
+class Vs01ConsentIntentBody(BaseModel):
+    accepted: bool = False
+    intent_version: str = ""
+    intent_statement: str = ""
+    action: str = ""
+
+
+class Vs01AssignedFieldBody(BaseModel):
+    field_id: str = ""
+    field_type: str = ""
+    value: str = ""
+    page_index: Optional[int] = None
+    page: Optional[int] = None
+
+
 class SigningCeremonyCompleteBody(BaseModel):
     participant_id: str = ""
     typed_name: str = ""
     locked_version_id: str = ""
+    consent: Optional[Vs01ConsentIntentBody] = None
 
 
 class SigningInviteTargetBody(BaseModel):
@@ -3246,6 +3264,9 @@ class Vs01SignerCompleteBody(BaseModel):
     signed_date_iso: str = ""
     signed_date_display: str = ""
     portable_packet: Optional[Dict[str, Any]] = None
+    assigned_fields: List[Vs01AssignedFieldBody] = Field(default_factory=list)
+    consent: Optional[Vs01ConsentIntentBody] = None
+    packet_revision: str = ""
 
 
 class ReviewRecipientEmailCorrectBody(BaseModel):
@@ -7182,6 +7203,15 @@ def post_signing_ceremony_complete(
         raise HTTPException(status_code=409, detail="already_signed")
     if not part_id and _has_legacy_signature_without_participant(draft.audit_log):
         raise HTTPException(status_code=409, detail="already_signed")
+    from backend.services.vs01_completion_evidence import (
+        CompletionEvidenceError,
+        parse_consent,
+    )
+
+    try:
+        parse_consent(body.consent.model_dump() if body.consent is not None else None, required=True)
+    except CompletionEvidenceError as exc:
+        raise HTTPException(status_code=exc.status_code, detail=exc.http_detail()) from exc
     now = _utc_now_iso()
     fp = _agreement_version_hash(agreement_id, lv, draft)
     typed = (body.typed_name or "").strip()
@@ -8583,6 +8613,7 @@ def post_vs01_signer_complete(
                 secret_raw=secret_raw,
                 consume_single_use=False,
                 log_validation=False,
+                allow_completed_signer_replay=True,
             )
             token_party_id = str(token_out.get("recipient_party_id") or "").strip()
             assert_agreement_recipient_write_allowed(
@@ -8590,6 +8621,7 @@ def post_vs01_signer_complete(
                 aid,
                 allowed_modes=("sign",),
                 bind_participant_id=participant_id or token_party_id or None,
+                allow_completed_signer_replay=True,
             )
             assert_recipient_signer_completion_binding(
                 draft_for_auth.model_dump(),
@@ -8629,6 +8661,17 @@ def post_vs01_signer_complete(
         resolve_participant_id_for_signer_role,
         vs01_signer_complete_lock,
     )
+    from backend.services.vs01_completion_evidence import (
+        CompletionEvidenceError,
+        append_private_execution_record,
+        validate_completion_evidence,
+    )
+    from backend.services.vs01_completion_ledger import (
+        CompletionEvidenceConflict,
+        claim_signer_completion,
+        multi_worker_completion_ready,
+    )
+    from backend.utils.canon_json import sha256_hex
 
     with vs01_signer_complete_lock(aid):
         draft = _load_or_404(aid)
@@ -8661,7 +8704,7 @@ def post_vs01_signer_complete(
                 },
             )
 
-        now = (body.signed_at or "").strip() or _utc_now_iso()
+        now = _utc_now_iso()
         signed_date_iso = (body.signed_date_iso or "").strip() or now[:10]
         signed_date_display = (body.signed_date_display or "").strip()
         if not signed_date_display and signed_date_iso:
@@ -8721,18 +8764,74 @@ def post_vs01_signer_complete(
                 require_accepted_snapshot=False,
             )
 
+        require_evidence = auth_mode == "recipient"
+        try:
+            evidence = validate_completion_evidence(
+                draft=draft.model_dump(),
+                signer_role_id=signer_role_id,
+                participant_id=participant_id,
+                document_id=(body.document_id or "").strip(),
+                packet_revision=(body.packet_revision or "").strip(),
+                assigned_fields=[row.model_dump() for row in (body.assigned_fields or [])],
+                consent=body.consent.model_dump() if body.consent is not None else None,
+                required=require_evidence,
+            )
+        except CompletionEvidenceError as exc:
+            raise HTTPException(status_code=exc.status_code, detail=exc.http_detail()) from exc
+
+        event_id = "evt_" + sha256_hex(
+            f"{aid}|{signer_role_id}|{participant_id}".encode("utf-8")
+        )[:20]
+        claim = None
+        if multi_worker_completion_ready():
+            try:
+                claim = claim_signer_completion(
+                    agreement_id=aid,
+                    signer_role_id=signer_role_id,
+                    participant_id=participant_id,
+                    event_id=event_id,
+                    signature_artifact_digest=evidence.signature_artifact_digest,
+                    consent_artifact_digest=evidence.consent_artifact_digest,
+                    signed_at=now,
+                    packet_revision=evidence.packet_revision,
+                    document_id=evidence.document_id or (body.document_id or "").strip(),
+                    document_hash=fp or "",
+                )
+            except CompletionEvidenceConflict:
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "code": "completion_evidence_mismatch",
+                        "message": "This signer already completed with different evidence.",
+                    },
+                ) from None
+        else:
+            logging.getLogger(__name__).warning(
+                "vs01_completion_ledger_unconfigured agreement_id=%s",
+                aid,
+            )
+        if claim is not None and claim.already:
+            now = claim.signed_at or now
+            event_id = claim.event_id or event_id
+
         pending = orchestrate_vs01_signer_complete(
             draft.model_dump(),
             signer_role_id=signer_role_id,
             participant_id=participant_id,
             display_name=display_name,
-            document_id=(body.document_id or "").strip(),
+            document_id=(body.document_id or "").strip() or evidence.document_id,
             signed_at=now,
             signed_date_iso=signed_date_iso,
             signed_date_display=signed_date_display,
             locked_version_id=lv,
             agreement_version_hash=fp,
             portable_packet=portable_packet,
+            event_id=event_id,
+            signature_artifact_digest=evidence.signature_artifact_digest
+            or (claim.signature_artifact_digest if claim else ""),
+            consent_artifact_digest=evidence.consent_artifact_digest
+            or (claim.consent_artifact_digest if claim else ""),
+            packet_revision=evidence.packet_revision or (claim.packet_revision if claim else ""),
         )
 
         fresh = _load_or_404(aid)
@@ -8749,6 +8848,11 @@ def post_vs01_signer_complete(
             from backend.services.recipient_delivery_registry import get_registry_revision
 
             draft_dict_to_save = outcome.draft_dict
+            if evidence.private_record and not outcome.already_signed:
+                draft_dict_to_save = append_private_execution_record(
+                    dict(draft_dict_to_save),
+                    {**evidence.private_record, "event_id": event_id, "signed_at": now},
+                )
             base_rev = get_registry_revision(draft_dict_to_save)
             registry_mutated = False
             # Replay protection: consume/supersede active signing invite JTI after recipient complete.
@@ -8773,6 +8877,7 @@ def post_vs01_signer_complete(
                 audit_log=draft_dict_to_save.get("audit_log") or outcome.audit,
                 vs01_signing_packet_v1=draft_dict_to_save.get("vs01_signing_packet_v1"),
                 recipient_delivery_v1=draft_dict_to_save.get("recipient_delivery_v1"),
+                vs01_signer_execution_v1=draft_dict_to_save.get("vs01_signer_execution_v1"),
             )
             if registry_mutated:
                 _save_draft_registry_cas_sync(
@@ -8928,6 +9033,22 @@ def post_vs01_signer_complete(
                         _save_draft_sync(receipt_draft.model_dump(), request)
                     uploaded_final_pdf_receipt = issued
 
+        receipt_status = "not_applicable"
+        receipt_out = None
+        if uploaded_final_pdf_receipt:
+            receipt_status = "issued"
+            receipt_out = {
+                "receipt_id": uploaded_final_pdf_receipt.get("receipt_id"),
+                "receipt_hash_sha256": uploaded_final_pdf_receipt.get("receipt_hash_sha256"),
+            }
+        elif outcome.fully_executed:
+            from backend.services.quick_pdf_envelope import is_uploaded_final_pdf_authority
+
+            if is_uploaded_final_pdf_authority(reloaded_for_receipt):
+                receipt_status = "pending"
+        completion_status = "already_signed" if outcome.already_signed else "completed"
+        if outcome.fully_executed:
+            completion_status = "fully_executed" if outcome.already_signed else "completed"
         return {
             "ok": True,
             "already_signed": outcome.already_signed,
@@ -8936,6 +9057,24 @@ def post_vs01_signer_complete(
             "completion_emails_sent": completion_emails_sent,
             "auth_mode": auth_mode,
             "uploaded_final_pdf_receipt": uploaded_final_pdf_receipt,
+            "receipt_status": receipt_status,
+            "receipt": receipt_out,
+            "completion": {
+                "status": completion_status,
+                "signed_at": now,
+                "signature_artifact_digest": evidence.signature_artifact_digest
+                or (claim.signature_artifact_digest if claim else ""),
+                "consent_artifact_digest": evidence.consent_artifact_digest
+                or (claim.consent_artifact_digest if claim else ""),
+                "signer_role_id": signer_role_id,
+                "participant_id": participant_id,
+                "document_id": evidence.document_id or (body.document_id or "").strip(),
+                "document_hash": fp or "",
+                "packet_revision": evidence.packet_revision or (claim.packet_revision if claim else ""),
+                "event_id": event_id,
+                "already_signed": outcome.already_signed,
+                "fully_executed": outcome.fully_executed,
+            },
         }
 
 
@@ -9785,6 +9924,29 @@ def get_public_vs01_signing_packet(
     out: Dict[str, Any] = {"ok": True, "portable": portable}
     if recipient_projection:
         out["recipient_projection"] = recipient_projection
+    from backend.services.vs01_signer_completion import (
+        portable_party_id_for_signer_role,
+        required_vs01_signer_role_ids,
+        signer_role_already_completed,
+    )
+
+    token_pid = token_pid or pid
+    already = False
+    for role_id in required_vs01_signer_role_ids(raw if isinstance(raw, dict) else draft.model_dump()):
+        party = portable_party_id_for_signer_role(
+            raw if isinstance(raw, dict) else draft.model_dump(),
+            role_id,
+        )
+        if token_pid and party and party == token_pid and signer_role_already_completed(draft.audit_log, role_id):
+            already = True
+            break
+        env = draft.quick_pdf_envelope_v1 if isinstance(draft.quick_pdf_envelope_v1, dict) else {}
+        if token_pid and str(env.get("recipient_party_id") or "") == token_pid:
+            recip_role = str(env.get("recipient_role_id") or "").strip()
+            if recip_role and signer_role_already_completed(draft.audit_log, recip_role):
+                already = True
+                break
+    out["signer_already_completed"] = already
     return out
 
 

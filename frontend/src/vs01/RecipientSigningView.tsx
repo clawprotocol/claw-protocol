@@ -22,6 +22,8 @@ import type {
   Vs01SenderSignatureRef,
 } from "./types";
 import {
+  ESIGN_CONSENT_CHECKBOX_LABEL,
+  ESIGN_CONSENT_INTENT_STATEMENT,
   ESIGN_INTENT_FINISH_SIGNING_ACTION,
   NOT_LEGAL_ADVICE,
   PRODUCT_NOT_LAW_FIRM,
@@ -87,7 +89,8 @@ export type RecipientSigningViewProps = {
   senderSignatureRef: Vs01SenderSignatureRef | null;
   onRecipientFieldsChange: Dispatch<SetStateAction<Vs01RecipientPlacedField[]>>;
   onError: (message: string | null) => void;
-  onFinishSigning: () => void;
+  onFinishSigning: () => void | Promise<void>;
+  signingSubmitting?: boolean;
   /** When set, layout data in the link could not be read — do not show a false “no fields” empty state. */
   manifestDecodeError?: string | null;
   /** True when the URL included a signing-layout manifest query param (`vs01_rmanifest`). */
@@ -192,6 +195,7 @@ export function RecipientSigningView({
   onRecipientFieldsChange,
   onError,
   onFinishSigning,
+  signingSubmitting = false,
   manifestDecodeError = null,
   manifestParamPresent = false,
   serverHydrationPending = false,
@@ -790,6 +794,8 @@ export function RecipientSigningView({
     ? "Your signing fields could not be loaded from this link. Ask the sender to resend the signing link, or try opening it in the same browser the sender used."
     : "This link does not include field placement data. Ask the sender to share an updated signing link after placing fields.";
 
+  const [consentAccepted, setConsentAccepted] = useState(false);
+
   const handleFinish = useCallback(() => {
     if (initialsEnabledPending) {
       onError("Your signing fields are still loading. Please wait a moment and try again.");
@@ -805,6 +811,11 @@ export function RecipientSigningView({
           ? "Your signing fields could not be loaded. Ask the sender to resend your signing link."
           : "No fields are assigned to you. Ask the sender for an updated signing link."
       );
+      return;
+    }
+    if (signingSubmitting) return;
+    if (!consentAccepted) {
+      onError("Confirm the electronic-signature consent before selecting Agree and sign.");
       return;
     }
     if (!allComplete) {
@@ -831,8 +842,8 @@ export function RecipientSigningView({
       return;
     }
     onError(null);
-    onFinishSigning();
-  }, [allComplete, editableMyFields, hydrationMiss, initialsEnabled, initialsEnabledPending, lockedSignerRoleId, manifestDecodeError, myFields.length, onError, onFinishSigning]);
+    void onFinishSigning();
+  }, [allComplete, consentAccepted, editableMyFields, hydrationMiss, initialsEnabled, initialsEnabledPending, lockedSignerRoleId, manifestDecodeError, myFields.length, onError, onFinishSigning, signingSubmitting]);
 
   const updateFieldValue = useCallback(
     (id: string, value: string) => updateField(id, { value }),
@@ -1294,14 +1305,25 @@ export function RecipientSigningView({
       </div>
 
       <div className="vs01-recipient-signing-footer-actions">
+        <label className="vs01-recipient-signing-consent" data-testid="esign-recipient-consent-label">
+          <input
+            type="checkbox"
+            data-testid="esign-recipient-consent"
+            checked={consentAccepted}
+            disabled={signingSubmitting}
+            onChange={(ev) => setConsentAccepted(ev.target.checked)}
+          />
+          <span>{ESIGN_CONSENT_CHECKBOX_LABEL}</span>
+        </label>
+        <p className="vs01-recipient-signing-consent-statement">{ESIGN_CONSENT_INTENT_STATEMENT}</p>
         <button
           type="button"
           className="vs01-btn vs01-btn--primary min-h-11"
           data-testid="esign-finish-signing"
-          disabled={!allComplete}
+          disabled={!allComplete || !consentAccepted || signingSubmitting}
           onClick={handleFinish}
         >
-          Finish signing
+          {signingSubmitting ? "Signing…" : "Agree and sign"}
         </button>
         {editableMyFields.length > 0 && !allComplete ? (
           <p className="vs01-recipient-signing-progress">

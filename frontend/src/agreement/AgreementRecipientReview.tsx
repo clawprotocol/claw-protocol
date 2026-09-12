@@ -52,11 +52,14 @@ import { VoiceAugmentedTextArea } from "../launch/VoiceAugmentedControl";
 import { buildRecipientNegotiationHints } from "../vs01/recipientNegotiationHints";
 import { featureFlags } from "../config/featureFlags";
 import {
+  ESIGN_CONSENT_CHECKBOX_LABEL,
+  ESIGN_CONSENT_INTENT_STATEMENT,
   ESIGN_INTENT_SIGN_AGREEMENT_ACTION,
   NOT_LEGAL_ADVICE,
   PRODUCT_NOT_LAW_FIRM,
   RECORDS_DOWNLOAD_KEEP_COPY_SHORT,
 } from "../compliance/disclosureCopy";
+import { versionedRecipientConsentIntent } from "../vs01/vs01RecipientCompletionContract";
 import { NegotiationTimelineView } from "../vs01/NegotiationTimelineView";
 import {
   buildNegotiationTimelineCurrentStatus,
@@ -874,6 +877,7 @@ export function AgreementRecipientReview({
   const [ceremonyVersionHash, setCeremonyVersionHash] = useState("");
   const [ceremonySignerName, setCeremonySignerName] = useState("");
   const [typedConfirm, setTypedConfirm] = useState("");
+  const [signConsentAccepted, setSignConsentAccepted] = useState(false);
   const [signedAtLabel, setSignedAtLabel] = useState<string | null>(null);
   const [fullyExecutedAtSign, setFullyExecutedAtSign] = useState(false);
   const ceremonyStartedRef = useRef(false);
@@ -4652,6 +4656,10 @@ export function AgreementRecipientReview({
 
     async function handleRecordSignature() {
       if (!draft) return;
+      if (!signConsentAccepted) {
+        setCeremonyError("Confirm the electronic-signature consent before selecting Agree and sign.");
+        return;
+      }
       setCeremonyPhase("signing");
       setCeremonyError(null);
       const r = await postSigningCeremonyComplete(
@@ -4660,6 +4668,7 @@ export function AgreementRecipientReview({
           participant_id: participantPid,
           typed_name: typedConfirm.trim(),
           locked_version_id: lockedVersionId,
+          consent: versionedRecipientConsentIntent(),
           ...(entry.kind === "sign" && entry.signerRoleId
             ? { signer_role_id: entry.signerRoleId }
             : {}),
@@ -4690,7 +4699,7 @@ export function AgreementRecipientReview({
       await refresh();
     }
 
-    const signPrimaryDisabled = ceremonyPhase !== "ready";
+    const signPrimaryDisabled = ceremonyPhase !== "ready" || !signConsentAccepted;
 
     if (ceremonyPhase === "start_error") {
       return (
@@ -4927,6 +4936,18 @@ export function AgreementRecipientReview({
             {!signDone ? (
               <>
                 <p className="text-sm leading-relaxed text-slate-300">{ESIGN_INTENT_SIGN_AGREEMENT_ACTION}</p>
+                <p className="text-sm leading-relaxed text-slate-400">{ESIGN_CONSENT_INTENT_STATEMENT}</p>
+                <label className="flex items-start gap-2 text-sm text-slate-300" data-testid="recipient-sign-consent-label">
+                  <input
+                    type="checkbox"
+                    className="mt-1"
+                    data-testid="recipient-sign-consent"
+                    checked={signConsentAccepted}
+                    disabled={ceremonyPhase === "signing"}
+                    onChange={(e) => setSignConsentAccepted(e.target.checked)}
+                  />
+                  <span>{ESIGN_CONSENT_CHECKBOX_LABEL}</span>
+                </label>
                 <p className="text-sm leading-relaxed text-slate-400">{RECORDS_DOWNLOAD_KEEP_COPY_SHORT}</p>
                 <p className="text-xs leading-relaxed text-slate-500">
                   {PRODUCT_NOT_LAW_FIRM} {NOT_LEGAL_ADVICE} This action is recorded with your participant identity, a
@@ -4941,7 +4962,7 @@ export function AgreementRecipientReview({
                     data-testid="recipient-sign-action"
                     onClick={() => void handleRecordSignature()}
                   >
-                    {ceremonyPhase === "signing" ? "Signing…" : "Review and sign"}
+                    {ceremonyPhase === "signing" ? "Signing…" : "Agree and sign"}
                   </button>
                 </div>
               </>
@@ -4963,7 +4984,7 @@ export function AgreementRecipientReview({
               data-testid="recipient-sign-action"
               onClick={() => void handleRecordSignature()}
             >
-              {ceremonyPhase === "signing" ? "Signing…" : "Review and sign"}
+              {ceremonyPhase === "signing" ? "Signing…" : "Agree and sign"}
             </button>
           </div>
         ) : null}

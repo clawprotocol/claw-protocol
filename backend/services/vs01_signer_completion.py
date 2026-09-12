@@ -445,22 +445,34 @@ def build_signature_completed_event(
     signed_date_display: str,
     locked_version_id: str | None,
     agreement_version_hash: str | None,
+    event_id: str = "",
+    signature_artifact_digest: str = "",
+    consent_artifact_digest: str = "",
+    packet_revision: str = "",
 ) -> Dict[str, Any]:
-    return {
+    value: Dict[str, Any] = {
+        "signer_role_id": signer_role_id,
+        "participant_id": participant_id or None,
+        "participant_display_name": display_name or None,
+        "document_id": document_id or None,
+        "signed_date_iso": signed_date_iso or None,
+        "signed_date_display": signed_date_display or None,
+        "locked_version_id": locked_version_id,
+        "agreement_version_hash": agreement_version_hash,
+        "packet_revision": packet_revision or None,
+        "signature_artifact_digest": signature_artifact_digest or None,
+        "consent_artifact_digest": consent_artifact_digest or None,
+    }
+    event: Dict[str, Any] = {
         "event_type": "signature_completed",
         "at": signed_at,
         "field": "vs01_signing",
-        "value": {
-            "signer_role_id": signer_role_id,
-            "participant_id": participant_id or None,
-            "participant_display_name": display_name or None,
-            "document_id": document_id or None,
-            "signed_date_iso": signed_date_iso or None,
-            "signed_date_display": signed_date_display or None,
-            "locked_version_id": locked_version_id,
-            "agreement_version_hash": agreement_version_hash,
-        },
+        "value": value,
     }
+    if event_id:
+        event["id"] = event_id
+        event["event_id"] = event_id
+    return event
 
 
 def build_fully_executed_signed_event(
@@ -504,6 +516,10 @@ def orchestrate_vs01_signer_complete(
     locked_version_id: str | None,
     agreement_version_hash: str | None,
     portable_packet: Optional[Dict[str, Any]] = None,
+    event_id: str = "",
+    signature_artifact_digest: str = "",
+    consent_artifact_digest: str = "",
+    packet_revision: str = "",
 ) -> Vs01SignerCompleteOutcome:
     """
     Single authoritative completion mutation path.
@@ -527,6 +543,10 @@ def orchestrate_vs01_signer_complete(
                 signed_date_display=signed_date_display,
                 locked_version_id=locked_version_id,
                 agreement_version_hash=agreement_version_hash,
+                event_id=event_id,
+                signature_artifact_digest=signature_artifact_digest,
+                consent_artifact_digest=consent_artifact_digest,
+                packet_revision=packet_revision,
             )
         )
 

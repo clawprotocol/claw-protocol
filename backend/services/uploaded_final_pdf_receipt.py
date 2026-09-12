@@ -94,6 +94,12 @@ def completion_events_from_draft(draft: Any, env: Dict[str, Any]) -> List[Dict[s
             "participant_id": str(val.get("participant_id") or "").strip(),
             "signed_at": str(event.get("at") or "").strip(),
             "signer_role_id": role,
+            "signature_artifact_digest": str(val.get("signature_artifact_digest") or "").strip(),
+            "consent_artifact_digest": str(val.get("consent_artifact_digest") or "").strip(),
+            "packet_revision": str(val.get("packet_revision") or "").strip(),
+            "document_content_sha256": str(
+                val.get("document_content_sha256") or val.get("agreement_version_hash") or ""
+            ).strip().lower(),
         }
         if row["event_id"] in seen:
             continue
@@ -134,11 +140,14 @@ def signature_artifacts_from_env(env: Dict[str, Any], events: List[Dict[str, Any
     recip_role = str(env.get("recipient_role_id") or "").strip()
     recip = by_role.get(recip_role)
     if recip:
-        material = "|".join([recip["event_id"], recip["signer_role_id"], recip["participant_id"], recip["signed_at"]])
+        sig = str(recip.get("signature_artifact_digest") or "").strip()
+        consent = str(recip.get("consent_artifact_digest") or "").strip()
+        if not sig or not consent:
+            raise ValueError("recipient_completion_digests_missing")
         artifacts.append(
             {
-                "artifact_hash": sha256_hex(material.encode("utf-8")),
-                "consent_hash": sha256_hex(b"recipient_completion"),
+                "artifact_hash": sig,
+                "consent_hash": consent,
                 "kind": "completion_event",
                 "participant_id": recip["participant_id"],
                 "signer_role_id": recip_role,
@@ -292,7 +301,7 @@ def bind_receipt_pointer(env: Dict[str, Any], receipt: Dict[str, Any]) -> Dict[s
 
 
 def issue_uploaded_final_pdf_receipt(*, draft: Any, env: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-    """Issue the canonical receipt once. Caller must hold vs01_signer_complete_lock."""
+    """Issue the canonical receipt once. Durable uniqueness is the completion ledger, not a process lock."""
     from backend.services.quick_pdf_envelope import completion_status
 
     dump = draft.model_dump() if hasattr(draft, "model_dump") else draft
@@ -321,6 +330,25 @@ def issue_uploaded_final_pdf_receipt(*, draft: Any, env: Dict[str, Any]) -> Opti
     digest = digest_for_receipt(body)
     if existing_digest and existing_digest != digest:
         raise ValueError("receipt_digest_mismatch")
+    from backend.services.vs01_completion_ledger import claim_receipt, multi_worker_completion_ready
+
+    if multi_worker_completion_ready():
+        claimed = claim_receipt(
+            agreement_id=agreement_id,
+            receipt_id=receipt_id,
+            receipt_digest=digest,
+            issued_at=str(body.get("issued_at") or ""),
+        )
+        if claimed.already:
+            raw_existing = load_artifact_bytes(claimed.receipt_id, agreement_id)
+            if raw_existing:
+                ok, _err, existing = verify_receipt_bytes(raw_existing)
+                if ok and existing is not None:
+                    bind_receipt_pointer(env, existing)
+                    return existing
+            receipt_id = claimed.receipt_id
+            digest = claimed.receipt_digest
+            body = receipt_body_without_digest(receipt_id, env, draft)
     complete = dict(body)
     complete[DIGEST_FIELD] = digest
     raw_out = persistable_receipt_bytes(complete)

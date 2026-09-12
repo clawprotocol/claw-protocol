@@ -65,6 +65,23 @@ def _draft_dict_fully_executed(draft_body: Dict[str, Any]) -> bool:
     return False
 
 
+def _signer_completed_for_replay(draft_body: Dict[str, Any], party_id: str) -> bool:
+    """Exact completion replay is allowed only after this participant already completed."""
+    pid = (party_id or "").strip()
+    if not pid:
+        return False
+    from backend.services.vs01_signer_completion import signature_completed_participant_ids
+
+    if pid in signature_completed_participant_ids(draft_body.get("audit_log")):
+        return True
+    aid = str(draft_body.get("id") or "").strip()
+    if not aid:
+        return False
+    from backend.services.vs01_completion_ledger import has_participant_completion
+
+    return has_participant_completion(aid, pid)
+
+
 def _recipient_party_id_on_draft(draft: Dict[str, Any], party_id: str) -> bool:
     pid = (party_id or "").strip()
     if not pid:
@@ -125,6 +142,7 @@ def validate_recipient_access_token_for_agreement(
     secret_raw: str,
     consume_single_use: bool,
     log_validation: bool,
+    allow_completed_signer_replay: bool = False,
 ) -> Dict[str, Any]:
     """
     Verify recipient/signer token for an agreement. Optionally consume single-use JTI (validate endpoint).
@@ -178,8 +196,12 @@ def validate_recipient_access_token_for_agreement(
     except Exception:
         raise HTTPException(status_code=404, detail="agreement_not_found") from None
 
+    party_id = str(payload.get("pid") or "").strip()
+    inviter = str(payload.get("inv") or "").strip()
+    replay_ok = allow_completed_signer_replay and _signer_completed_for_replay(draft_body, party_id)
+
     if mode == "sign":
-        if _draft_dict_fully_executed(draft_body):
+        if _draft_dict_fully_executed(draft_body) and not replay_ok:
             raise HTTPException(
                 status_code=403,
                 detail={
@@ -201,8 +223,6 @@ def validate_recipient_access_token_for_agreement(
         if tok_v and lock_v and tok_v != lock_v:
             raise _rfail("review_link_stale")
 
-    party_id = str(payload.get("pid") or "").strip()
-    inviter = str(payload.get("inv") or "").strip()
     if party_id:
         if not _recipient_party_id_on_draft(draft_body, party_id):
             raise _rfail("recipient_not_assigned")
@@ -215,7 +235,7 @@ def validate_recipient_access_token_for_agreement(
         commercial = _commercial_mode_enforced()
         if jti_invite_access_denied(
             draft_body, jti, phase, party_id, commercial=commercial
-        ):
+        ) and not replay_ok:
             raise HTTPException(
                 status_code=403,
                 detail={
@@ -247,6 +267,7 @@ def assert_agreement_recipient_write_allowed(
     *,
     allowed_modes: tuple[str, ...],
     bind_participant_id: Optional[str] = None,
+    allow_completed_signer_replay: bool = False,
 ) -> None:
     """
     Require a valid recipient access token for mutating recipient flows.
@@ -294,6 +315,7 @@ def assert_agreement_recipient_write_allowed(
         secret_raw=secret_raw,
         consume_single_use=False,
         log_validation=False,
+        allow_completed_signer_replay=allow_completed_signer_replay,
     )
     mode = str(out.get("mode") or "")
     if mode not in allowed_modes:

@@ -589,6 +589,7 @@ export async function postSigningCeremonyComplete(
     typed_name: string;
     locked_version_id: string;
     signer_role_id?: string;
+    consent?: { accepted: true; intent_version: string; intent_statement: string; action: string };
   },
   recipientAccessToken?: string | null
 ): Promise<{
@@ -681,6 +682,9 @@ export async function postVs01SignerComplete(
     signed_date_iso?: string;
     signed_date_display?: string;
     portable_packet?: Record<string, unknown> | null;
+    assigned_fields?: Array<{ field_id: string; field_type: string; value: string; page_index?: number }>;
+    consent?: { accepted: true; intent_version: string; intent_statement: string; action: string };
+    packet_revision?: string;
   },
   recipientAccessToken?: string | null,
 ): Promise<{
@@ -689,6 +693,12 @@ export async function postVs01SignerComplete(
   fully_executed?: boolean;
   completion_emails_sent?: boolean;
   error?: string;
+  errorCode?: string;
+  status?: number;
+  retryable?: boolean;
+  completion?: Record<string, unknown>;
+  receipt_status?: string;
+  uploaded_final_pdf_receipt?: { receipt_id?: string; receipt_hash_sha256?: string } | null;
 }> {
   try {
     const res = await fetch(
@@ -704,17 +714,41 @@ export async function postVs01SignerComplete(
     );
     const j = (await res.json().catch(() => ({}))) as Record<string, unknown>;
     if (res.ok) {
+      const receipt = j.uploaded_final_pdf_receipt;
       return {
         ok: true,
         already_signed: Boolean(j.already_signed),
         fully_executed: Boolean(j.fully_executed),
         completion_emails_sent: Boolean(j.completion_emails_sent),
+        status: res.status,
+        completion: j.completion && typeof j.completion === "object" ? (j.completion as Record<string, unknown>) : undefined,
+        receipt_status: typeof j.receipt_status === "string" ? j.receipt_status : undefined,
+        uploaded_final_pdf_receipt:
+          receipt && typeof receipt === "object"
+            ? (receipt as { receipt_id?: string; receipt_hash_sha256?: string })
+            : null,
       };
     }
-    const d = j.detail;
-    return { ok: false, error: typeof d === "string" ? d : `error_${res.status}` };
+    const parsed = (() => {
+      const d = j.detail;
+      if (typeof d === "string") return { code: d, message: d };
+      if (d && typeof d === "object") {
+        const rec = d as { code?: unknown; message?: unknown };
+        const code = typeof rec.code === "string" ? rec.code : `error_${res.status}`;
+        const message = typeof rec.message === "string" ? rec.message : code;
+        return { code, message };
+      }
+      return { code: `error_${res.status}`, message: `error_${res.status}` };
+    })();
+    return {
+      ok: false,
+      error: parsed.message,
+      errorCode: parsed.code,
+      status: res.status,
+      retryable: res.status === 503 || res.status >= 500,
+    };
   } catch {
-    return { ok: false, error: "network" };
+    return { ok: false, error: "network", errorCode: "network", status: 0, retryable: true };
   }
 }
 

@@ -19,7 +19,7 @@ function isPortablePacket(value: unknown): value is Vs01CanonicalPacketPortableV
 
 /** Recipient: load prepared packet without creator browser storage. */
 export type FetchPublicVs01SigningPacketResult =
-  | { ok: true; portable: Vs01CanonicalPacketPortableV1 }
+  | { ok: true; portable: Vs01CanonicalPacketPortableV1; signerAlreadyCompleted?: boolean }
   | { ok: false; reason: "not_found" | "invite_superseded" | "network_retryable"; message?: string };
 
 export async function fetchPublicVs01SigningPacket(args: {
@@ -70,9 +70,12 @@ export async function fetchPublicVs01SigningPacket(args: {
       }
       return { ok: false, reason: "not_found" };
     }
-    const j = (await res.json().catch(() => ({}))) as { portable?: unknown };
+    const j = (await res.json().catch(() => ({}))) as {
+      portable?: unknown;
+      signer_already_completed?: unknown;
+    };
     return isPortablePacket(j.portable)
-      ? { ok: true, portable: j.portable }
+      ? { ok: true, portable: j.portable, signerAlreadyCompleted: j.signer_already_completed === true }
       : { ok: false, reason: "not_found" };
   } catch {
     return { ok: false, reason: "network_retryable", message: "We couldn’t reach this signing packet. Try again in a moment." };
