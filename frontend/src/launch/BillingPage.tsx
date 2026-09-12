@@ -1,7 +1,7 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import { AppShell } from "./AppShell";
 import { getOrgId, setOrgId, subscribeToOrgContextChanges } from "./orgContext";
-import { fetchSubscription } from "./billingApi";
+import { useAuth } from "../auth/AuthProvider";
 import { featureFlags } from "../config/featureFlags";
 import { useLaunchNav } from "./LaunchNavContext";
 import {
@@ -13,28 +13,29 @@ import {
 } from "./pricingContent";
 import { SampleArtifactsPreview } from "./SampleArtifactsPreview";
 import { LawdogValueBulletsList, PricingGuaranteePanel } from "./LaunchOfferBlocks";
-import { LAUNCH_PRICING_TIERS, PRICING_FAQ, PRICING_PROOF_CALLOUT } from "./pricingTiersData";
+import { PRICING_FAQ, PRICING_PROOF_CALLOUT } from "./pricingTiersData";
 import { BillingTermsNotice } from "../compliance/BillingTermsNotice";
 import { ConsentAcknowledgement } from "../compliance/ConsentAcknowledgement";
 import { DOWNGRADE_ACCESS_SHORT, NOT_LEGAL_ADVICE, PRODUCT_NOT_LAW_FIRM } from "../compliance/disclosureCopy";
 import { PricingCadenceToggle } from "./PricingCadenceToggle";
 import { getPricingCadencePreference, setPricingCadencePreference, type PricingCadence } from "./pricingCadenceStorage";
 import { extractAgreementIdFromSendReturnUrl } from "./checkoutParams";
-import { applySimpleSendUnlockFromReturnPath } from "./simpleFlowSendUnlock";
 import { ConversionPricingTriad } from "./ConversionPricingTriad";
 import { logProductEvent } from "../lib/experimentation/productEvents";
 import { AgreementCompletionCheckoutContextPanel } from "../components/agreements/AgreementCompletionCheckoutContext";
 import { readUpgradeCheckoutContext } from "../components/agreements/upgradeCheckoutContextStorage";
-
-function planLabelFromCode(code: string | undefined | null): string | null {
-  const c = (code || "").trim().toLowerCase();
-  if (!c) return null;
-  const t = LAUNCH_PRICING_TIERS.find((x) => x.id === c);
-  if (t) return t.name;
-  if (c === "team") return LAUNCH_PRICING_TIERS.find((x) => x.id === "pro")?.name ?? "LawDog Pro";
-  if (c === "business") return "Enterprise";
-  return c.replace(/_/g, " ");
-}
+import { CREATE_FLOW_CHECKOUT_AGREEMENT_ID } from "../components/agreements/agreementAdvancedDraftAccess";
+import {
+  createBillingPortalSession,
+  fetchBillingStatus,
+  type BillingStatusPayload,
+} from "./billingStatusApi";
+import {
+  billingStatusDetail,
+  billingStatusHeadline,
+  shouldOfferProCheckout,
+  type BillingUiPhase,
+} from "./billingAccountDisplay";
 
 export function isBillingWorkspaceIdEditable(): boolean {
   return Boolean(import.meta.env?.DEV) || String(import.meta.env?.VITE_CLAW_ACCESS_DEV_TOOLS || "").trim() === "1";
@@ -53,8 +54,14 @@ const OUTCOME_ROWS = [
 
 export function BillingPage() {
   const { navigate, search } = useLaunchNav();
+  const { user, loading: authLoading } = useAuth();
   const faqBaseId = useId();
   const pricingLogged = useRef(false);
+  const requestSeq = useRef(0);
+  const checkoutInFlight = useRef(false);
+  const [checkoutBusy, setCheckoutBusy] = useState(false);
+  const [portalBusy, setPortalBusy] = useState(false);
+  const [portalError, setPortalError] = useState<string | null>(null);
   const returnToSimpleSend = useMemo(() => {
     const p = new URLSearchParams(search);
     const r = p.get("returnTo");
@@ -63,7 +70,8 @@ export function BillingPage() {
   }, [search]);
   const [cadence, setCadence] = useState<PricingCadence>(() => getPricingCadencePreference());
   const [org, setOrg] = useState(getOrgId());
-  const [sub, setSub] = useState<Record<string, unknown> | null>(null);
+  const [status, setStatus] = useState<BillingStatusPayload | null>(null);
+  const [uiPhase, setUiPhase] = useState<BillingUiPhase>("loading");
   const [err, setErr] = useState<string | null>(null);
   const workspaceIdEditable = isBillingWorkspaceIdEditable();
   const returnToCreateFlow = Boolean(returnToSimpleSend && /^\/app\/create(\?|$)/.test(returnToSimpleSend));
@@ -71,10 +79,23 @@ export function BillingPage() {
     () => (returnToCreateFlow ? readUpgradeCheckoutContext() : null),
     [returnToCreateFlow, returnToSimpleSend],
   );
+  const userId = user?.id ?? null;
 
   useEffect(() => {
-    return subscribeToOrgContextChanges(setOrg);
+    return subscribeToOrgContextChanges((next) => {
+      setOrg(next);
+      setStatus(null);
+      setErr(null);
+      setUiPhase("loading");
+    });
   }, []);
+
+  useEffect(() => {
+    setStatus(null);
+    setErr(null);
+    setPortalError(null);
+    setUiPhase(userId ? "loading" : authLoading ? "loading" : "signed_out");
+  }, [org, userId, authLoading]);
 
   useEffect(() => {
     if (pricingLogged.current) return;
@@ -83,44 +104,104 @@ export function BillingPage() {
   }, [returnToSimpleSend]);
 
   useEffect(() => {
-    let cancel = false;
+    const seq = ++requestSeq.current;
+    const contextOrg = org;
+    const contextUser = userId;
+    if (!userId) {
+      if (!authLoading) {
+        setStatus(null);
+        setUiPhase("signed_out");
+      }
+      return;
+    }
+    if (!featureFlags.serverBilling) {
+      setStatus(null);
+      setUiPhase("unavailable");
+      return;
+    }
+    setUiPhase("loading");
     void (async () => {
-      setErr(null);
-      if (!featureFlags.serverBilling) {
-        setSub(null);
+      const s = await fetchBillingStatus();
+      if (seq !== requestSeq.current) return;
+      if (contextOrg !== getOrgId() || contextUser !== userId) return;
+      if (s.anonymousExpected) {
+        setStatus(null);
+        setErr(null);
+        setUiPhase("signed_out");
         return;
       }
-      const s = await fetchSubscription(org);
-      if (cancel) return;
-      if (s.error) setErr(s.error);
-      setSub((s.data ?? null) as Record<string, unknown> | null);
+      if (s.authFailure) {
+        setStatus(null);
+        setErr(s.error);
+        setUiPhase(s.code === "wrong_org" ? "unavailable" : "signed_out");
+        return;
+      }
+      if (s.unavailable || s.error || !s.data) {
+        setStatus(null);
+        setErr(s.error);
+        setUiPhase("unavailable");
+        return;
+      }
+      setErr(null);
+      setStatus(s.data);
+      setUiPhase(s.data.display_state);
     })();
-    return () => {
-      cancel = true;
-    };
-  }, [org]);
+  }, [org, userId, authLoading]);
 
-  const currentPlanCode = typeof sub?.plan_code === "string" ? sub.plan_code : null;
-  const currentPlanLabel = planLabelFromCode(currentPlanCode);
+  function returnToAgreementOrStay(): void {
+    if (returnToSimpleSend) {
+      navigate(returnToSimpleSend);
+      return;
+    }
+  }
+
+  function startProCheckout(): void {
+    if (checkoutInFlight.current || checkoutBusy) return;
+    if (!shouldOfferProCheckout(status, uiPhase)) {
+      returnToAgreementOrStay();
+      return;
+    }
+    checkoutInFlight.current = true;
+    setCheckoutBusy(true);
+    const aid =
+      (returnToSimpleSend && extractAgreementIdFromSendReturnUrl(returnToSimpleSend)) ||
+      (returnToCreateFlow ? CREATE_FLOW_CHECKOUT_AGREEMENT_ID : null);
+    const returnTo = returnToSimpleSend || "/app/create";
+    if (aid) {
+      navigate(
+        `/app/checkout/${encodeURIComponent(aid)}?tier=pro&cadence=${encodeURIComponent(cadence)}&returnTo=${encodeURIComponent(returnTo)}`,
+      );
+      return;
+    }
+    navigate(
+      `/app/checkout/${encodeURIComponent(CREATE_FLOW_CHECKOUT_AGREEMENT_ID)}?tier=pro&cadence=${encodeURIComponent(cadence)}&returnTo=${encodeURIComponent(returnTo)}`,
+    );
+  }
 
   function ctaForTier(tierId: string) {
     if (tierId === "enterprise") {
       navigate("/app/create?intent=enterprise");
       return;
     }
-    if (returnToSimpleSend) {
-      const aid = extractAgreementIdFromSendReturnUrl(returnToSimpleSend);
-      if (aid) {
-        navigate(
-          `/app/checkout/${encodeURIComponent(aid)}?tier=${encodeURIComponent(tierId)}&cadence=${encodeURIComponent(cadence)}&returnTo=${encodeURIComponent(returnToSimpleSend)}`,
-        );
-        return;
+    startProCheckout();
+  }
+
+  async function openBillingPortal(): Promise<void> {
+    if (portalBusy || !status?.manage_available) return;
+    setPortalBusy(true);
+    setPortalError(null);
+    try {
+      const session = await createBillingPortalSession({
+        returnTo: returnToSimpleSend || "/app/billing",
+      });
+      if (!session.portal_url) {
+        throw new Error("Billing management did not return a destination.");
       }
-      applySimpleSendUnlockFromReturnPath(returnToSimpleSend);
-      navigate(returnToSimpleSend);
-      return;
+      window.location.assign(session.portal_url);
+    } catch (error) {
+      setPortalError(error instanceof Error ? error.message : "Could not open billing management.");
+      setPortalBusy(false);
     }
-    navigate("/app/create");
   }
 
   function setCadenceAndStore(next: PricingCadence): void {
@@ -185,6 +266,16 @@ export function BillingPage() {
             onStarter={() => ctaForTier("starter")}
             onPro={() => ctaForTier("pro")}
             onEnterprise={() => navigate("/app/create?intent=enterprise")}
+            proCtaDisabled={checkoutBusy || !shouldOfferProCheckout(status, uiPhase)}
+            proCtaLabel={
+              shouldOfferProCheckout(status, uiPhase)
+                ? returnToSimpleSend
+                  ? "Continue to checkout"
+                  : "Upgrade to Pro"
+                : status?.entitled
+                  ? "You’re on Pro"
+                  : "Upgrade to Pro"
+            }
           />
 
           <p className="mx-auto mt-6 max-w-2xl text-center text-xs font-medium leading-relaxed text-slate-400 sm:text-left">
@@ -276,9 +367,13 @@ export function BillingPage() {
           </button>
         </div>
 
-        <section className="vs01-card vs01-card--envelope space-y-4 border-slate-800/60">
+        <section
+          className="vs01-card vs01-card--envelope space-y-4 border-slate-800/60"
+          data-testid="billing-account-panel"
+          data-billing-state={uiPhase}
+        >
           <h3 className="text-sm font-semibold text-white">Your account</h3>
-          <p className="text-sm text-slate-400">Your plan is connected to the workspace for your signed-in account.</p>
+          <p className="text-sm text-slate-400">Subscription status comes from this signed-in workspace, not from the browser or a return link.</p>
           {workspaceIdEditable ? (
             <div>
               <label htmlFor="claw-org" className="text-xs font-semibold uppercase tracking-wide text-slate-500">
@@ -298,23 +393,51 @@ export function BillingPage() {
             </div>
           ) : null}
 
-          {!featureFlags.serverBilling ? (
-            <p className="text-sm text-amber-200/90">
-              Live plan lookup isn&apos;t enabled in this build. This page describes how LawDog is sold; connect billing in
-              production to link a plan to this workspace.
+          <p className="text-sm text-slate-200" data-testid="billing-status-headline">
+            {billingStatusHeadline(uiPhase, status?.plan_label ?? null)}
+          </p>
+          <p className="text-sm text-slate-400" data-testid="billing-status-detail">
+            {billingStatusDetail(status, uiPhase)}
+          </p>
+          {err ? (
+            <p className="text-sm text-rose-300" role="alert" data-testid="billing-status-error">
+              {err}
+            </p>
+          ) : null}
+          {portalError ? (
+            <p className="text-sm text-rose-300" role="alert" data-testid="billing-portal-error">
+              {portalError}
             </p>
           ) : null}
 
-          {featureFlags.serverBilling && currentPlanLabel ? (
-            <p className="text-sm text-slate-300">
-              Current plan: <strong className="text-white">{currentPlanLabel}</strong>
+          {status?.manage_available ? (
+            <button
+              type="button"
+              className="vs01-btn vs01-btn--secondary"
+              data-testid="billing-manage-portal"
+              disabled={portalBusy}
+              onClick={() => void openBillingPortal()}
+            >
+              {portalBusy ? "Opening billing portal…" : "Manage billing"}
+            </button>
+          ) : uiPhase !== "loading" && uiPhase !== "signed_out" && uiPhase !== "no_subscription" ? (
+            <p className="text-sm text-amber-200/90" data-testid="billing-manage-unavailable">
+              Billing management is not connected in this environment. This is a staging blocker until the Stripe customer
+              portal is configured.
             </p>
           ) : null}
-          {featureFlags.serverBilling && !currentPlanLabel && !err ? (
-            <p className="text-sm text-slate-500">No active plan on file for this workspace yet.</p>
+
+          {returnToSimpleSend ? (
+            <button
+              type="button"
+              className="vs01-btn vs01-btn--secondary"
+              data-testid="billing-return-agreement"
+              onClick={() => navigate(returnToSimpleSend)}
+            >
+              Return to your agreement
+            </button>
           ) : null}
 
-          {err ? <p className="text-sm text-rose-300" role="alert">{err}</p> : null}
           <p className="mt-3 text-sm leading-relaxed text-slate-400">{DOWNGRADE_ACCESS_SHORT}</p>
           <p className="text-xs text-slate-500">
             Enterprise: custom pricing — we align volume, APIs, compliance, and org-wide intelligence with your

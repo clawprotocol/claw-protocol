@@ -463,7 +463,14 @@ export function SimpleCheckoutPage(props: { agreementId: string }) {
       });
       window.location.assign(session.checkout_url);
     } catch (err) {
-      fail(err instanceof Error ? err.message : "Could not start Stripe checkout.");
+      const message = err instanceof Error ? err.message : "Could not start Stripe checkout.";
+      if (/already has an active subscription|already_subscribed/i.test(message)) {
+        inFlightRef.current = false;
+        setProcessing(false);
+        navigate(returnTo);
+        return;
+      }
+      fail(message);
     }
   }
 

@@ -248,6 +248,62 @@ async function fulfillPhase4aApi(route: Route, actor: Phase4aActor, knownDraftId
       return;
     }
 
+    if (url.includes("/v1/billing/status") && method === "GET") {
+      if (actor === "signed_out") {
+        await json(route, { error: "unauthorized" }, 401);
+        return;
+      }
+      if (actor === "free") {
+        await json(route, {
+          org_id: PHASE4A_ORG_A,
+          display_state: "no_subscription",
+          entitled: false,
+          plan_code: null,
+          plan_label: null,
+          status: null,
+          billing_interval: null,
+          current_period_end: null,
+          canceled_at: null,
+          cancel_at_period_end: false,
+          has_stripe_customer: false,
+          stripe_configured: false,
+          manage_available: false,
+        });
+        return;
+      }
+      await json(route, {
+        org_id: PHASE4A_ORG_A,
+        display_state: "active",
+        entitled: true,
+        plan_code: "pro",
+        plan_label: "LawDog Pro",
+        status: "active",
+        billing_interval: "month",
+        current_period_end: "2099-12-31T00:00:00Z",
+        canceled_at: null,
+        cancel_at_period_end: false,
+        has_stripe_customer: true,
+        stripe_configured: true,
+        manage_available: true,
+      });
+      return;
+    }
+
+    if (url.includes("/v1/billing/portal-session") && method === "POST") {
+      if (actor === "signed_out") {
+        await json(route, { error: "unauthorized" }, 401);
+        return;
+      }
+      await json(route, {
+        ok: true,
+        session_id: "bps_phase4a",
+        portal_url: "https://billing.stripe.com/p/session/phase4a-mock",
+        org_id: PHASE4A_ORG_A,
+        return_url: "http://127.0.0.1:4173/app/billing",
+      });
+      return;
+    }
+
     if (url.includes("/v1/subscriptions/") && method === "GET") {
       const requestedOrg = decodeURIComponent(url.split("/v1/subscriptions/")[1]?.split("?")[0] || "");
       if (actor === "signed_out") {

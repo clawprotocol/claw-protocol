@@ -28,6 +28,7 @@ from urllib.parse import unquote, urlparse
 import pytest
 from fastapi.testclient import TestClient
 
+from backend.economics.store import get_economics_store
 from backend.main import app
 from backend.security.anonymous_session_store import reset_anonymous_session_store_for_tests
 from backend.services.agreement_draft_store import load_draft
@@ -137,12 +138,19 @@ def test_owned_agreement_checkout_settlement_resumes_same_canonical_id(
         pre_checkout_agreement_id
     ]
 
+    # Fixture Pro is only for draft persist. Existing subscribers cannot start
+    # another Checkout Session — clear the grant before the purchase under test.
+    eco = get_economics_store()
+    eco.init_schema()
+    with eco._conn() as con:
+        con.execute("DELETE FROM subscriptions WHERE org_id = ?", (org_id,))
+
     # Production owned-agreement CTA return_to (SimpleReadyToSendPage / BillingPage).
     return_to = f"/app/send/{pre_checkout_agreement_id}?phase=send"
 
     stripe_state: Dict[str, Any] = {}
 
-    def _fake_stripe(method: str, path: str, data: Dict[str, Any]) -> Dict[str, Any]:
+    def _fake_stripe(method: str, path: str, data: Dict[str, Any], **_kwargs: Any) -> Dict[str, Any]:
         if method == "POST" and path == "/checkout/sessions":
             sid = "cs_test_same_agreement_authority"
             stripe_state["create_payload"] = dict(data)
@@ -224,8 +232,6 @@ def test_owned_agreement_checkout_settlement_resumes_same_canonical_id(
 
     decision = resolve_commercial_entitlement(f"org:{org_id}")
     assert decision["state"] == STATE_PRO
-    from backend.economics.store import get_economics_store
-
     eco_row = get_economics_store().get_subscription_by_org(org_id)
     assert eco_row is not None
     assert str(eco_row.get("plan_code") or "").lower() == "pro"

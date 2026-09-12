@@ -79,6 +79,7 @@ export async function fetchSubscription(orgId: string): Promise<SubscriptionFetc
       headers: await billingAuthHeaders(),
       credentials: "include",
     });
+    // Probe contract is 200 + null. 404 is retained only for legacy access-cache callers.
     if (res.status === 404) return { data: null, error: null, noSubscription: true };
     if (res.status === 401 || res.status === 403) {
       const msg = await errorMessageFromResponse(res, `Could not load subscription (HTTP ${res.status}).`);

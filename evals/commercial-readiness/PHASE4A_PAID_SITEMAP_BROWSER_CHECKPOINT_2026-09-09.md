@@ -155,5 +155,126 @@ The two remaining product failures after that cluster were Batch 5 empty-article
 - `frontend/src/launch/simpleProduct/SimpleCreatePage.tsx`
 - `frontend/src/launch/ownerAgreementReadOnlyView.ts`
 - `frontend/e2e/phase4a/phase4aBatch5DraftingInterview.spec.ts` (unchanged)
-- `frontend/e2e/phase4a/phase4aPaidOwnerFixtures.ts` (unchanged)
+- `frontend/e2e/phase4a/phase4aPaidOwnerFixtures.ts` (later also mocks `GET /v1/billing/status` for Billing acceptance)
 - `scripts/run_phase4a_paid_sitemap_browser_gate.sh`
+
+---
+
+## Billing customer acceptance — `/app/billing` (2026-09-12)
+
+Authoritative HEAD at start of this turn: `a7c8535f7a23fe7dafbdeda1ec5e99c7a7f1fb46`.  
+Dirty-state fingerprint of the working tree after this batch: `f2aa725f9b46cd3529caf9e977823f82161d00bf`.  
+Nothing was pushed or deployed. No live Stripe charges. **Not a launch authorization.** Settings/admin were not begun.
+
+Customer acceptance for Billing: a signed-in owner can see a **server-authoritative, org-scoped** subscription state, use **server-created Stripe Customer Portal** management when configured, and return to the same agreement without browser state, query parameters, or portal return granting entitlement.
+
+### Named gate
+
+`scripts/run_phase4_billing_acceptance_browser_gate.sh`
+
+| Step | Result | Provider label |
+|---|---|---|
+| Focused Billing vitest (coverage, display, status API, workspace policy) | **4 files / 11 passed** | n/a |
+| Production handlers; external Stripe mocked | display + portal + checkout-repeat + origin + probe + authority + sync + webhook-unsigned + commercial entitlement: **passed** | **mocked-provider** |
+| Playwright Billing desktop 1280×800 + mobile 390×844, workers=1 | **30/30 passed** | **mocked-provider** |
+| Phase 1 access | **18 files / 100 passed** | n/a |
+| Phase 2 paid-journey | **exit 0** (critical backend + 97 FE files / 932 passed) | n/a |
+| Auth-return 4B.5 | vitest **3/13**; Playwright **14/14** | mocked fixtures |
+| Production build | `tsc -b && vite build` — **✓ built in 8.51s** | n/a |
+| Full frontend suite | **not re-run**; retain unresolved inventory **9,505 / 9,309 / 196** | n/a |
+| Live Stripe / live-provider | **not run** | **live-provider: absent** |
+
+Mocked-provider evidence: `evals/commercial-readiness/results/phase4-billing-acceptance/a7c8535f7a23-dirty-bd9ad976-mocked-provider/`  
+Auth-return evidence: `evals/commercial-readiness/results/phase4-billing-acceptance/a7c8535f7a23-dirty-2ebbc981-auth-return-4b5/`  
+Prior untracked `evals/commercial-readiness/results/` live-run artifacts were preserved.
+
+### Billing status on `/app/billing`
+
+`GET /v1/billing/status` derives org from the verified principal. Display states: loading (client), confirmed no subscription, active, scheduled cancellation, expired/canceled, payment problem, unavailable. Dates and cadence render only from stored authoritative fields. Logout/org-switch clears prior-account paint and rejects late responses.
+
+`cancel_at_period_end` and `billing_interval` are persisted from Stripe sync for **display only**. `is_subscription_entitled` is unchanged (active + paid plan + period not ended). Scheduled cancel stays entitled through the paid period.
+
+### Promised management
+
+`POST /v1/billing/portal-session` creates a Stripe Customer Portal session from **server records**. Caller `customer_id` / `customer` / `stripe_customer_id` is rejected. Return URLs are allowlisted and stripped of payment-success query keys. Missing `STRIPE_SECRET_KEY` is **503 `stripe_portal_not_configured`** — an explicit staging blocker. Manage is not offered when no Stripe customer is on file.
+
+### Checkout return and repeat purchase
+
+Success URLs still return to the same allowlisted agreement path. Entitled workspaces get **409 `already_subscribed`** and cannot open a second Checkout Session. Billing CTAs do not unlock send from `returnTo` alone. Query params / portal return do not declare payment success.
+
+### Policy conflicts (reported, not invented)
+
+1. **Scheduled cancel vs internal status.** Stripe `cancel_at_period_end` is now stored for display. Entitlement still uses `status == active` and period end. Do not treat scheduled cancel as canceled access.
+2. **GET `/v1/subscriptions/{org}` is 200 + null, never 404.** Access-cache `fetchSubscription` still treats 404 as empty for legacy checkout-return callers. Billing display uses `/v1/billing/status` and treats 404 as unavailable.
+3. **Enterprise list prices** remain in `PLANS` ($499/$4990). Public Billing still routes Enterprise to talk-to-us. Not sold via self-serve checkout.
+4. **Checkout/disclosure copy** still says contact `support@lawdog.me` to cancel (`MANAGE_BILLING_FROM_BILLING_SHORT`). Billing now offers the portal when configured. Support copy was not rewritten in this batch.
+5. **J7 same-agreement checkout** needed fixture Pro to persist a draft, then a real checkout. Entitled orgs can no longer start checkout; the test now clears the fixture grant after persist. Same-agreement return is preserved.
+
+### Staging requirements (Billing not live-complete)
+
+- `STRIPE_SECRET_KEY` and Pro price IDs for checkout
+- Stripe Customer Portal configuration for manage/cancel/payment-method
+- Server-mapped `stripe_customer_id` per entitled org
+- Live-provider evidence is still required before calling Billing staging-ready
+- Do **not** mark Billing complete for live customers until those exist
+
+### Next customer surface
+
+**Settings** (`/app/settings`). Operator/admin remains out of scope.
+
+### Unresolved (retained)
+
+Full-suite inventory **9,505 / 9,309 / 196** was not re-run. Phase 4A sitemap 134 and later 4B/4C gates were not re-executed except the 4B.5 auth-return slice above. No overall launch claim.
+
+## Billing follow-up — checkout retry safety + cancellation preservation (2026-09-12)
+
+Authoritative HEAD while tested: `a7c8535f7a23fe7dafbdeda1ec5e99c7a7f1fb46`.  
+Source-content fingerprint of Billing files on disk (git hash-object of file contents, **not** a hash of `git status` filenames): `f3e53a490e83e75b37bee8645b69e190f91f4a11`.  
+Nothing was pushed or deployed. No live Stripe charges or external account changes. **Not a launch authorization.** Settings/admin were not begun.
+
+This follow-up continues the uncommitted Billing batch above. Two reproduced acceptance gaps are closed on mocked-provider proof only.
+
+### Closures
+
+1. **Checkout retry safety.** Identical authenticated `POST /v1/billing/checkout-session` from an unsubscribed owner now reuses one org/agreement/cadence checkout attempt and one Stripe Idempotency-Key. Duplicate, concurrent, and provider-success/local-response-loss recoveries return the same payable session. Expired or canceled attempts are closed so a later legitimate purchase can start a new session. Cadence change is a different pending purchase. `already_subscribed` and same-agreement return are unchanged. A disabled browser button is not the control.
+
+2. **Cancellation-state preservation.** `apply_invoice_paid_subscription_renewal` no longer writes `cancel_at_period_end=False` when the invoice has no cancellation instruction. `scheduled_cancellation → invoice update` stays `scheduled_cancellation` and remains entitled through the paid period. Only authoritative Stripe Subscription state may set or clear cancellation, including explicit reversal (`cancel_at_period_end=false`). Delayed/out-of-order invoices do not invent or re-arm cancellation. Pricing/refund policy and paid-period access are unchanged.
+
+### Named gate and required follow-up commands
+
+| Step | Result | Provider label |
+|---|---|---|
+| Focused Billing vitest | **4 files / 11 passed** | n/a |
+| Production handlers; Stripe mocked | display + portal + **checkout retry** + **cancel preservation** + origin + probe + authority + sync + webhook-unsigned + commercial entitlement + checkout payload: **92 passed** | **mocked-provider** |
+| Playwright Billing desktop + mobile, workers=1 | **30/30 passed** | **mocked-provider** |
+| Phase 1 access | **18 files / 100 passed** | n/a |
+| Phase 2 paid-journey | **exit 0** (critical backend **121** + frontend **97 files / 932 passed**) | n/a |
+| Production build | `tsc -b && vite build` — **✓ built in 8.83s** | n/a |
+| Full frontend suite | **not re-run**; retain unresolved inventory **9,505 / 9,309 / 196** | n/a |
+| Live Stripe / live-provider | **not run** | **live-provider: absent** |
+
+Commands:
+
+```bash
+bash scripts/run_phase4_billing_acceptance_browser_gate.sh
+bash scripts/run_phase1_access_contract_gate.sh
+bash scripts/run_phase2_paid_journey_release_gate.sh
+(cd frontend && ./node_modules/.bin/tsc -b && ./node_modules/.bin/vite build)
+```
+
+Unique mocked-provider evidence: `evals/commercial-readiness/results/phase4-billing-acceptance/a7c8535f7a23-src-f3e53a490e83-mocked-provider/`  
+Prior mocked-provider and auth-return evidence directories were preserved. Generated run artifacts are not part of the source checkpoint.
+
+### Remaining staging blockers (Billing not live-complete)
+
+- `STRIPE_SECRET_KEY` and Pro price IDs for checkout
+- Stripe Customer Portal configuration for manage/cancel/payment-method
+- Server-mapped `stripe_customer_id` per entitled org
+- Live-provider evidence is still required before calling Billing staging-ready
+- Checkout-attempt reuse + Stripe `Idempotency-Key` must hold under concurrent/retry against live Stripe
+- `cancel_at_period_end` must survive live `invoice.paid` without subscription authority
+- Do **not** mark Billing complete for live customers until those exist
+
+### Next customer surface
+
+**Settings** (`/app/settings`) follows acceptance of these results. Operator/admin remains out of scope. No overall launch claim.

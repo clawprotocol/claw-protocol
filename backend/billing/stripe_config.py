@@ -19,3 +19,8 @@ def stripe_price_pro_annual() -> str:
 
 def is_stripe_checkout_configured() -> bool:
     return bool(stripe_secret_key() and stripe_price_pro_monthly())
+
+
+def is_stripe_portal_configured() -> bool:
+    """Portal needs the secret key only — missing config is an explicit staging blocker."""
+    return bool(stripe_secret_key())

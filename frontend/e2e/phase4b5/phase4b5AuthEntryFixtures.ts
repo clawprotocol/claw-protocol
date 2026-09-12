@@ -233,6 +233,25 @@ async function fulfillPhase4b5Api(route: Route, state: Phase4b5FixtureState): Pr
       return;
     }
 
+    if (url.includes("/v1/billing/status")) {
+      await json(route, {
+        org_id: state.orgId,
+        display_state: "active",
+        entitled: true,
+        plan_code: "pro",
+        plan_label: "LawDog Pro",
+        status: "active",
+        billing_interval: "month",
+        current_period_end: "2099-12-31T00:00:00Z",
+        canceled_at: null,
+        cancel_at_period_end: false,
+        has_stripe_customer: true,
+        stripe_configured: true,
+        manage_available: true,
+      });
+      return;
+    }
+
     if (url.includes("/v1/subscriptions")) {
       await json(route, {
         ok: true,
