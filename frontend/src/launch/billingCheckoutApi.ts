@@ -64,7 +64,11 @@ export async function createBillingCheckoutSession(args: {
   if (!res.ok) {
     throw new Error(await errorMessageFromResponse(res, "Could not start checkout."));
   }
-  return (await readJson<CheckoutSessionResponse>(res)) as CheckoutSessionResponse;
+  const body = (await readJson<CheckoutSessionResponse>(res)) as CheckoutSessionResponse;
+  if (!body.checkout_url) {
+    throw new Error("Your payment is being processed. Do not pay again.");
+  }
+  return body;
 }
 
 export async function verifyBillingCheckoutSession(sessionId: string): Promise<VerifyCheckoutSessionResponse> {

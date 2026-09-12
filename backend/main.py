@@ -6,6 +6,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -140,7 +142,15 @@ from backend.routers.admin_console_api import router as admin_console_router
 # -------------------------------------------------
 # App + Middleware
 # -------------------------------------------------
-app = FastAPI(title="CLAW Backend")
+@asynccontextmanager
+async def _claw_lifespan(_app: FastAPI):
+    from backend.billing.schema_ready import ensure_billing_schema_ready
+
+    ensure_billing_schema_ready()
+    yield
+
+
+app = FastAPI(title="CLAW Backend", lifespan=_claw_lifespan)
 log_external_ai_policy_at_startup()
 
 from backend.config.env_bootstrap import log_env_warnings_at_startup  # noqa: E402

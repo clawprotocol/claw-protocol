@@ -27,6 +27,7 @@ from backend.billing.checkout_attempts import (
 from backend.billing.stripe_client import (
     create_billing_portal_session,
     create_checkout_session,
+    expire_checkout_session,
     retrieve_checkout_session,
 )
 from backend.billing.stripe_subscription_sync import sync_subscription_from_stripe_checkout_session
@@ -138,11 +139,32 @@ async def post_checkout_session(request: Request, body: CheckoutSessionIn) -> Di
             metadata=metadata,
             create_session=create_checkout_session,
             retrieve_session=retrieve_checkout_session,
+            expire_session=expire_checkout_session,
+            sync_session=sync_subscription_from_stripe_checkout_session,
         )
     except RuntimeError as exc:
         _log.exception("checkout_session_create_failed org=%s", org_id)
         raise HTTPException(status_code=503, detail=str(exc)) from exc
 
+    kind = str(session.get("kind") or "session")
+    if kind == "already_subscribed":
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "already_subscribed",
+                "message": "This workspace already has an active subscription.",
+                "session_id": session.get("session_id"),
+            },
+        )
+    if kind == "processing":
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "payment_processing",
+                "message": "Your payment is being processed. Do not pay again.",
+                "session_id": session.get("session_id"),
+            },
+        )
     session_id = str(session.get("id") or "")
     checkout_url = str(session.get("url") or "")
     if not session_id or not checkout_url:

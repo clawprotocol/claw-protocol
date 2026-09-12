@@ -68,6 +68,9 @@ export function assertPhase4BillingAcceptanceContracts(): void {
   if (!router.includes("already_subscribed")) {
     throw new Error("checkout no longer rejects an existing entitled subscriber");
   }
+  if (!router.includes("payment_processing")) {
+    throw new Error("checkout no longer reports an honest payment-processing state");
+  }
   if (!router.includes("require_verified_org_id(request)")) {
     throw new Error("billing status/portal no longer derive org from the verified principal");
   }
@@ -92,9 +95,19 @@ export function assertPhase4BillingAcceptanceContracts(): void {
   if (!attempts.includes("claim_or_reuse_checkout_attempt") || !attempts.includes("idempotency_key")) {
     throw new Error("checkout no longer reuses an org-scoped attempt with a durable idempotency key");
   }
+  if (!attempts.includes("canonical_checkout_request") || !attempts.includes("persist_checkout_attempt_request")) {
+    throw new Error("checkout no longer persists the canonical provider request for an idempotency key");
+  }
   const stripe = src("../../../backend/billing/stripe_client.py");
   if (!stripe.includes("Idempotency-Key")) {
     throw new Error("Stripe checkout no longer sends Idempotency-Key");
+  }
+  if (!stripe.includes("expire_checkout_session")) {
+    throw new Error("checkout no longer expires an unpaid session before a legitimate purchase change");
+  }
+  const ready = src("../../../backend/billing/schema_ready.py");
+  if (!ready.includes("ensure_billing_schema_ready")) {
+    throw new Error("production billing schema startup hook is missing");
   }
 
   if (shouldOfferProCheckout({ entitled: true } as never, "active")) {

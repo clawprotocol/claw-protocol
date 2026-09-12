@@ -2,12 +2,15 @@
 
 from __future__ import annotations
 
+import fcntl
 import json
 import os
 import sqlite3
+import threading
 import uuid
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, Iterator, List, Optional, Tuple
 
 from backend.config.runtime_environment import data_dir
 
@@ -35,6 +38,41 @@ def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
+_SCHEMA_THREAD_LOCK = threading.Lock()
+_CHECKOUT_PENDING_STATUSES = ("creating", "open", "complete", "reconciling")
+
+
+@contextmanager
+def _economics_schema_lock(db_path: str) -> Iterator[None]:
+    """Serialize schema init across threads and processes before serving traffic."""
+    with _SCHEMA_THREAD_LOCK:
+        lock_path = f"{db_path}.schema.lock"
+        os.makedirs(os.path.dirname(db_path) or ".", exist_ok=True)
+        with open(lock_path, "a+", encoding="utf-8") as handle:
+            try:
+                fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+            except OSError:
+                pass
+            try:
+                yield
+            finally:
+                try:
+                    fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+                except OSError:
+                    pass
+
+
+def _safe_add_column(con: sqlite3.Connection, table: str, column: str, decl: str) -> None:
+    cols = {str(row[1]) for row in con.execute(f"PRAGMA table_info({table})").fetchall()}
+    if column in cols:
+        return
+    try:
+        con.execute(f"ALTER TABLE {table} ADD COLUMN {column} {decl}")
+    except sqlite3.OperationalError as exc:
+        if "duplicate column" not in str(exc).lower():
+            raise
+
+
 def _checkout_attempt_expired(value: Optional[str]) -> bool:
     raw = str(value or "").strip()
     if not raw:
@@ -60,6 +98,10 @@ class EconomicsStore:
         return c
 
     def init_schema(self) -> None:
+        with _economics_schema_lock(self._path):
+            self._init_schema_unlocked()
+
+    def _init_schema_unlocked(self) -> None:
         with self._conn() as con:
             con.executescript(
                 """
@@ -173,12 +215,7 @@ class EconomicsStore:
                 );
                 """
             )
-            cols = [
-                r[1]
-                for r in con.execute("PRAGMA table_info(affiliates)").fetchall()
-            ]
-            if "owner_org_id" not in cols:
-                con.execute("ALTER TABLE affiliates ADD COLUMN owner_org_id TEXT")
+            _safe_add_column(con, "affiliates", "owner_org_id", "TEXT")
             ucols = [r[1] for r in con.execute("PRAGMA table_info(usage_events)").fetchall()]
             if "keys_balance_before" not in ucols:
                 con.execute(
@@ -521,11 +558,13 @@ class EconomicsStore:
             )
             """
         )
+        _safe_add_column(con, "billing_checkout_attempts", "provider_request_json", "TEXT")
+        con.execute("DROP INDEX IF EXISTS idx_billing_checkout_open")
         con.execute(
             """
-            CREATE UNIQUE INDEX IF NOT EXISTS idx_billing_checkout_open
-              ON billing_checkout_attempts (org_id, agreement_id, cadence)
-              WHERE status IN ('creating', 'open')
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_billing_checkout_pending_org
+              ON billing_checkout_attempts (org_id)
+              WHERE status IN ('creating', 'open', 'complete', 'reconciling')
             """
         )
         con.execute(
@@ -1739,28 +1778,73 @@ class EconomicsStore:
                 return str(mapped[0]).strip() or None
         return None
 
-    def get_open_checkout_attempt(
-        self, *, org_id: str, agreement_id: str, cadence: str
-    ) -> Optional[Dict[str, Any]]:
+    def get_pending_checkout_attempt_for_org(self, org_id: str) -> Optional[Dict[str, Any]]:
         oid = (org_id or "").strip()
-        aid = (agreement_id or "").strip()
-        cad = "annual" if str(cadence or "").strip().lower() == "annual" else "monthly"
-        if not oid or not aid:
+        if not oid:
             return None
         self.init_schema()
         with self._conn() as con:
             self._ensure_checkout_attempt_schema(con)
             row = con.execute(
-                """
+                f"""
                 SELECT * FROM billing_checkout_attempts
-                WHERE org_id = ? AND agreement_id = ? AND cadence = ?
-                  AND status IN ('creating', 'open')
+                WHERE org_id = ?
+                  AND status IN ({",".join("?" for _ in _CHECKOUT_PENDING_STATUSES)})
                 ORDER BY created_at DESC
                 LIMIT 1
                 """,
-                (oid, aid, cad),
+                (oid, *_CHECKOUT_PENDING_STATUSES),
             ).fetchone()
             return dict(row) if row else None
+
+    def get_open_checkout_attempt(
+        self, *, org_id: str, agreement_id: str, cadence: str
+    ) -> Optional[Dict[str, Any]]:
+        pending = self.get_pending_checkout_attempt_for_org(org_id)
+        if not pending:
+            return None
+        aid = (agreement_id or "").strip()
+        cad = "annual" if str(cadence or "").strip().lower() == "annual" else "monthly"
+        if pending.get("agreement_id") == aid and pending.get("cadence") == cad:
+            return pending
+        return None
+
+    def persist_checkout_attempt_request(
+        self, attempt_id: str, request: Dict[str, Any]
+    ) -> Dict[str, Any]:
+        """Persist the canonical Stripe request once. Later retries must reuse it."""
+        aid = (attempt_id or "").strip()
+        if not aid:
+            raise ValueError("attempt_id required")
+        payload = json.dumps(request, sort_keys=True, separators=(",", ":"))
+        self.init_schema()
+        con = self._conn()
+        try:
+            con.execute("BEGIN IMMEDIATE")
+            self._ensure_checkout_attempt_schema(con)
+            row = con.execute(
+                "SELECT provider_request_json FROM billing_checkout_attempts WHERE id = ?",
+                (aid,),
+            ).fetchone()
+            if row and row[0]:
+                con.commit()
+                return json.loads(str(row[0]))
+            now = _utc_now()
+            con.execute(
+                """
+                UPDATE billing_checkout_attempts
+                SET provider_request_json = ?, updated_at = ?
+                WHERE id = ?
+                """,
+                (payload, now, aid),
+            )
+            con.commit()
+            return json.loads(payload)
+        except Exception:
+            con.rollback()
+            raise
+        finally:
+            con.close()
 
     def claim_or_reuse_checkout_attempt(
         self,
@@ -1772,7 +1856,7 @@ class EconomicsStore:
         return_to: Optional[str] = None,
         price_id: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """Claim the single open checkout attempt for this org/agreement/cadence."""
+        """Claim the single pending checkout attempt for this org."""
         oid = (org_id or "").strip()
         aid = (agreement_id or "").strip()
         cad = "annual" if str(cadence or "").strip().lower() == "annual" else "monthly"
@@ -1788,29 +1872,18 @@ class EconomicsStore:
                 self._ensure_checkout_attempt_schema(con)
                 now = _utc_now()
                 row = con.execute(
-                    """
+                    f"""
                     SELECT * FROM billing_checkout_attempts
-                    WHERE org_id = ? AND agreement_id = ? AND cadence = ?
-                      AND status IN ('creating', 'open')
+                    WHERE org_id = ?
+                      AND status IN ({",".join("?" for _ in _CHECKOUT_PENDING_STATUSES)})
                     ORDER BY created_at DESC
                     LIMIT 1
                     """,
-                    (oid, aid, cad),
+                    (oid, *_CHECKOUT_PENDING_STATUSES),
                 ).fetchone()
                 if row:
-                    rec = dict(row)
-                    if _checkout_attempt_expired(rec.get("expires_at")):
-                        con.execute(
-                            """
-                            UPDATE billing_checkout_attempts
-                            SET status = 'expired', updated_at = ?
-                            WHERE id = ?
-                            """,
-                            (now, rec["id"]),
-                        )
-                    else:
-                        con.commit()
-                        return rec
+                    con.commit()
+                    return dict(row)
                 attempt_id = str(uuid.uuid4())
                 idem = f"claw:checkout:{oid}:{cad}:{aid}:{attempt_id}"[:255]
                 expires = (
@@ -1858,13 +1931,14 @@ class EconomicsStore:
                     "expires_at": expires,
                     "created_at": now,
                     "updated_at": now,
+                    "provider_request_json": None,
                 }
             except Exception:
                 con.rollback()
                 raise
             finally:
                 con.close()
-        existing = self.get_open_checkout_attempt(org_id=oid, agreement_id=aid, cadence=cad)
+        existing = self.get_pending_checkout_attempt_for_org(oid)
         if existing:
             return existing
         raise RuntimeError("checkout_attempt_claim_failed")

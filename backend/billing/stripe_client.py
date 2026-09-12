@@ -110,6 +110,14 @@ def retrieve_checkout_session(session_id: str) -> Dict[str, Any]:
     )
 
 
+def expire_checkout_session(session_id: str) -> Dict[str, Any]:
+    """Expire an unpaid Checkout Session so it cannot be completed."""
+    sid = (session_id or "").strip()
+    if not sid:
+        raise RuntimeError("missing_session_id")
+    return _stripe_request("POST", f"/checkout/sessions/{sid}/expire", {})
+
+
 def retrieve_subscription(subscription_id: str) -> Dict[str, Any]:
     sid = (subscription_id or "").strip()
     if not sid:

@@ -278,3 +278,57 @@ Prior mocked-provider and auth-return evidence directories were preserved. Gener
 ### Next customer surface
 
 **Settings** (`/app/settings`) follows acceptance of these results. Operator/admin remains out of scope. No overall launch claim.
+
+## Billing follow-up — checkout lifecycle safety (2026-09-12)
+
+Started from exact `5ca08140015c322060b0524dee7abf6d39618348`.  
+Source-content fingerprint of Billing files on disk (git hash-object of file contents, **not** a hash of `git status` filenames): `5c132dc24a92c80c09414c4275f27c03cdfc3619`.  
+Nothing was pushed or deployed. No live Stripe charges or external account changes. **Not a launch authorization.** Settings/admin were not begun. The core paid journey was not begun.
+
+Cancellation preservation from the previous checkpoint remains accepted for its demonstrated local cases.
+
+### Closures
+
+1. **Completed-provider / pending-local-authority.** If Stripe session A is complete/paid and local subscription is still unresolved, repeated `POST /v1/billing/checkout-session` and refresh return `409 payment_processing` with A's session id. They do not mint session B or return a payable checkout URL. When the completed session can be reconciled through server authority, the handler writes the subscription and returns `409 already_subscribed`. Entitlement is not granted from browser state.
+
+2. **Identical retry payload.** Each attempt persists `provider_request_json` once. Provider-success/local-response-loss replays that exact request and Idempotency-Key. The Stripe mock now rejects the same key with different parameters. Changed email, return URL, or attribution cannot rebuild the provider call. A legitimate cadence change expires the previous **unpaid** session before opening the next one, so two payable subscriptions are not left live. A cadence change after A is complete/unresolved is blocked as `payment_processing`.
+
+3. **Startup concurrency.** `EconomicsStore.init_schema` is serialized with a process/thread lock and safe ALTERs. Production startup uses FastAPI lifespan → `ensure_billing_schema_ready()`. Concurrent `init_schema` on an empty DB no longer raises `duplicate column name: owner_org_id`. Concurrent checkout is proven both after the production hook and without test-only schema pre-init.
+
+### Named gate and required follow-up commands
+
+| Step | Result | Provider label |
+|---|---|---|
+| Focused Billing vitest | **4 files / 11 passed** | n/a |
+| Production handlers; Stripe mocked | previous set + checkout lifecycle + schema startup: **99 passed** | **mocked-provider** |
+| Playwright Billing desktop + mobile, workers=1 | **30/30 passed** | **mocked-provider** |
+| Phase 1 access | **18 files / 100 passed** | n/a |
+| Phase 2 paid-journey | **exit 0** (critical backend **121** + frontend **97 files / 932 passed**) | n/a |
+| Production build | `tsc -b && vite build` — **✓ built in 9.00s** | n/a |
+| Full frontend suite | **not re-run**; retain unresolved inventory **9,505 / 9,309 / 196** | n/a |
+| Live Stripe / live-provider | **not run** | **live-provider: absent** |
+
+Commands:
+
+```bash
+bash scripts/run_phase4_billing_acceptance_browser_gate.sh
+bash scripts/run_phase1_access_contract_gate.sh
+bash scripts/run_phase2_paid_journey_release_gate.sh
+(cd frontend && ./node_modules/.bin/tsc -b && ./node_modules/.bin/vite build)
+```
+
+Unique mocked-provider evidence: `evals/commercial-readiness/results/phase4-billing-acceptance/5ca08140015c-src-5c132dc24a92-mocked-provider/`  
+Prior Billing evidence directories were preserved. Generated run artifacts are not part of the source checkpoint.
+
+### Remaining staging blockers (Billing not live-complete)
+
+- `STRIPE_SECRET_KEY` and Pro price IDs for checkout
+- Stripe Customer Portal configuration
+- Server-mapped `stripe_customer_id` per entitled org
+- Live-provider evidence that attempt reuse, exact-payload idempotency, completed-session blocking, and schema startup hold against real Stripe
+- `cancel_at_period_end` must survive live `invoice.paid` without subscription authority
+- Do **not** mark Billing complete for live customers until those exist
+
+### Next acceptance priority (not started)
+
+Core paid journey: intake → targeted clarifications → substantive commercial agreement visibly rendered → owner chooses recipient review or direct e-signing. Both branches must preserve the same agreement/version and survive refresh. Settings remains later. No overall launch claim.

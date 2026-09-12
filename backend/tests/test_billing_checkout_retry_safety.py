@@ -44,6 +44,15 @@ def _checkout_body(*, agreement_id: str = "__claw_create_checkout__", cadence: s
     }
 
 
+def _canonical_params(data: Dict[str, Any]) -> str:
+    items = sorted((str(k), str(v)) for k, v in data.items())
+    return repr(items)
+
+
+def _public_session(rec: Dict[str, Any]) -> Dict[str, Any]:
+    return {k: v for k, v in rec.items() if not str(k).startswith("_")}
+
+
 def _install_idempotent_stripe(
     monkeypatch: pytest.MonkeyPatch,
     *,
@@ -55,17 +64,35 @@ def _install_idempotent_stripe(
     state: Dict[str, Any] = {
         "creates": creates if creates is not None else [],
         "retrieves": retrieves if retrieves is not None else [],
+        "expires": [],
         "sessions": sessions if sessions is not None else {},
         "by_key": {},
         "seq": 0,
+        "mismatches": [],
     }
 
     def _fake_stripe(method: str, path: str, data: Dict[str, Any], **kwargs: Any) -> Dict[str, Any]:
+        if method == "POST" and path.endswith("/expire"):
+            sid = path.split("/")[-2]
+            state["expires"].append(sid)
+            rec = state["sessions"].get(sid)
+            if not rec:
+                raise RuntimeError("stripe_api_404")
+            rec["status"] = "expired"
+            return _public_session(rec)
         if method == "POST" and path == "/checkout/sessions":
             key = str(kwargs.get("idempotency_key") or "").strip()
-            state["creates"].append({"idempotency_key": key, "data": dict(data)})
+            params = _canonical_params(data)
+            state["creates"].append({"idempotency_key": key, "data": dict(data), "params": params})
             if key and key in state["by_key"]:
-                return dict(state["by_key"][key])
+                existing = state["by_key"][key]
+                stored = existing.get("_params")
+                if stored is None:
+                    existing["_params"] = params
+                elif stored != params:
+                    state["mismatches"].append({"key": key, "stored": stored, "got": params})
+                    raise RuntimeError("stripe_api_400")
+                return _public_session(existing)
             state["seq"] += 1
             sid = f"cs_retry_{state['seq']}"
             rec = {
@@ -73,11 +100,12 @@ def _install_idempotent_stripe(
                 "url": f"https://checkout.stripe.com/c/pay/{sid}",
                 "status": "open",
                 "expires_at": int((datetime.now(timezone.utc) + timedelta(hours=23)).timestamp()),
+                "_params": params,
             }
             state["sessions"][sid] = rec
             if key:
                 state["by_key"][key] = rec
-            return dict(rec)
+            return _public_session(rec)
         if method == "GET" and path.startswith("/checkout/sessions/"):
             sid = path.rsplit("/", 1)[-1]
             state["retrieves"].append(sid)
@@ -85,7 +113,7 @@ def _install_idempotent_stripe(
             if not rec:
                 raise RuntimeError("stripe_api_404")
             rec["status"] = rec.get("status") or session_status
-            return rec
+            return _public_session(rec)
         raise AssertionError(f"unexpected Stripe call {method} {path}")
 
     monkeypatch.setattr("backend.billing.stripe_client._stripe_request", _fake_stripe)
@@ -121,8 +149,9 @@ def test_concurrent_checkout_requests_share_one_payable_session(
 ) -> None:
     state = _install_idempotent_stripe(monkeypatch)
     headers = owner_headers_production_like(user_id="concurrent-owner")
-    eco = get_economics_store()
-    eco.init_schema()
+    from backend.billing.schema_ready import ensure_billing_schema_ready
+
+    ensure_billing_schema_ready()
     payload = _checkout_body()
 
     def _post() -> dict:
@@ -267,7 +296,7 @@ def test_canceled_open_attempt_does_not_block_later_purchase(
     assert state["creates"][0]["idempotency_key"] != prior["idempotency_key"]
 
 
-def test_cadence_change_is_a_different_pending_purchase(
+def test_cadence_change_supersedes_the_previous_unpaid_session(
     client: TestClient, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     state = _install_idempotent_stripe(monkeypatch)
@@ -285,7 +314,13 @@ def test_cadence_change_is_a_different_pending_purchase(
     assert monthly.status_code == 200, monthly.text
     assert annual.status_code == 200, annual.text
     assert monthly.json()["session_id"] != annual.json()["session_id"]
-    assert len(state["creates"]) == 2
+    assert monthly.json()["session_id"] in state["expires"]
+    assert state["sessions"][monthly.json()["session_id"]]["status"] == "expired"
+    assert state["sessions"][annual.json()["session_id"]]["status"] == "open"
+    pending = get_economics_store().get_pending_checkout_attempt_for_org(headers["X-Claw-Org-Id"])
+    assert pending is not None
+    assert pending["cadence"] == "annual"
+    assert pending["stripe_session_id"] == annual.json()["session_id"]
 
 
 def test_already_subscribed_still_blocks_retry_after_attempt_reuse(
@@ -320,3 +355,150 @@ def test_already_subscribed_still_blocks_retry_after_attempt_reuse(
     assert res.status_code == 409, res.text
     assert res.json()["detail"]["code"] == "already_subscribed"
     assert state["creates"] == []
+
+
+def _post_checkout(client: TestClient, headers: dict, **overrides: Any):
+    body = _checkout_body()
+    body.update(overrides)
+    return client.post(
+        "/v1/billing/checkout-session",
+        headers={**headers, "Content-Type": "application/json"},
+        json=body,
+    )
+
+
+def test_completed_unresolved_session_cannot_mint_a_second_payable_session(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    state = _install_idempotent_stripe(monkeypatch)
+    headers = owner_headers_production_like(user_id="complete-pending")
+    first = _post_checkout(client, headers)
+    assert first.status_code == 200, first.text
+    sid = first.json()["session_id"]
+    state["sessions"][sid]["status"] = "complete"
+    state["sessions"][sid]["payment_status"] = "paid"
+    second = _post_checkout(client, headers)
+    third = _post_checkout(client, headers, customer_email="other@example.test", return_to="/app/create")
+    assert second.status_code == 409, second.text
+    assert second.json()["detail"]["code"] == "payment_processing"
+    assert second.json()["detail"]["session_id"] == sid
+    assert third.status_code == 409, third.text
+    assert third.json()["detail"]["code"] == "payment_processing"
+    assert {row["id"] for row in state["sessions"].values() if not str(row.get("id", "")).startswith("_")} == {sid}
+    assert len(state["creates"]) == 1
+    assert get_economics_store().get_subscription_by_org(headers["X-Claw-Org-Id"]) is None
+
+
+def test_completed_paid_session_reconciles_through_server_authority(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    state = _install_idempotent_stripe(monkeypatch)
+    headers = owner_headers_production_like(user_id="complete-recover")
+    first = _post_checkout(client, headers)
+    assert first.status_code == 200, first.text
+    sid = first.json()["session_id"]
+    org_id = headers["X-Claw-Org-Id"]
+    period_ts = int((datetime.now(timezone.utc) + timedelta(days=30)).timestamp())
+    state["sessions"][sid].update(
+        {
+            "status": "complete",
+            "payment_status": "paid",
+            "customer": "cus_complete_recover",
+            "metadata": {
+                "org_id": org_id,
+                "claw_org_id": org_id,
+                "plan_code": "pro",
+                "agreement_id": "__claw_create_checkout__",
+            },
+            "subscription": {
+                "id": "sub_complete_recover",
+                "status": "active",
+                "customer": "cus_complete_recover",
+                "current_period_end": period_ts,
+                "metadata": {"org_id": org_id, "plan_code": "pro"},
+            },
+        }
+    )
+    second = _post_checkout(client, headers)
+    assert second.status_code == 409, second.text
+    assert second.json()["detail"]["code"] == "already_subscribed"
+    assert len(state["creates"]) == 1
+    row = get_economics_store().get_subscription_by_org(org_id)
+    assert row is not None
+    assert row["status"] == "active"
+
+
+def test_response_loss_replays_stored_request_not_changed_optional_inputs(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    state = _install_idempotent_stripe(monkeypatch)
+    headers = owner_headers_production_like(user_id="replay-owner")
+    first = _post_checkout(client, headers, customer_email="first@example.test")
+    assert first.status_code == 200, first.text
+    sid = first.json()["session_id"]
+    eco = get_economics_store()
+    pending = eco.get_pending_checkout_attempt_for_org(headers["X-Claw-Org-Id"])
+    assert pending is not None
+    with eco._conn() as con:
+        con.execute(
+            """
+            UPDATE billing_checkout_attempts
+            SET stripe_session_id = NULL, checkout_url = NULL, status = 'creating'
+            WHERE id = ?
+            """,
+            (pending["id"],),
+        )
+    second = _post_checkout(
+        client,
+        headers,
+        customer_email="changed@example.test",
+        return_to="/app/create?restore=other",
+        referral_code="CHANGEDCODE",
+        visitor_id="vis-changed",
+    )
+    assert second.status_code == 200, second.text
+    assert second.json()["session_id"] == sid
+    assert state["mismatches"] == []
+    assert [row["params"] for row in state["creates"]] == [state["creates"][0]["params"], state["creates"][0]["params"]]
+    assert state["creates"][1]["data"].get("customer_email") == "first@example.test"
+    assert "CHANGEDCODE" not in str(state["creates"][1]["data"])
+
+
+def test_cadence_change_after_completed_unresolved_session_is_blocked(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    state = _install_idempotent_stripe(monkeypatch)
+    headers = owner_headers_production_like(user_id="complete-cadence")
+    first = _post_checkout(client, headers, cadence="monthly")
+    assert first.status_code == 200, first.text
+    sid = first.json()["session_id"]
+    state["sessions"][sid]["status"] = "complete"
+    state["sessions"][sid]["payment_status"] = "paid"
+    changed = _post_checkout(client, headers, cadence="annual")
+    assert changed.status_code == 409, changed.text
+    assert changed.json()["detail"]["code"] == "payment_processing"
+    assert len(state["creates"]) == 1
+    assert state["expires"] == []
+
+
+def test_concurrent_checkout_without_test_schema_preinit(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    state = _install_idempotent_stripe(monkeypatch)
+    headers = owner_headers_production_like(user_id="race-owner")
+    payload = _checkout_body()
+
+    def _post() -> dict:
+        res = client.post(
+            "/v1/billing/checkout-session",
+            headers={**headers, "Content-Type": "application/json"},
+            json=payload,
+        )
+        assert res.status_code == 200, res.text
+        return res.json()
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        bodies = list(pool.map(lambda _i: _post(), range(2)))
+    assert {body["session_id"] for body in bodies} == {bodies[0]["session_id"]}
+    assert len({row["idempotency_key"] for row in state["creates"]}) == 1
+    assert state["mismatches"] == []

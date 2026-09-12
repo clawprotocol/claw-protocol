@@ -470,6 +470,10 @@ export function SimpleCheckoutPage(props: { agreementId: string }) {
         navigate(returnTo);
         return;
       }
+      if (/payment_processing|being processed|do not pay again/i.test(message)) {
+        fail("Your payment is being processed. Do not pay again.");
+        return;
+      }
       fail(message);
     }
   }
