@@ -259,6 +259,21 @@ def call_legal_llm(
             "[claw-llm] call_legal_llm dropping unexpected kwargs keys=%s",
             sorted(kwargs.keys()),
         )
+    from backend.llm_acceptance_stub import acceptance_stub_enabled, stub_legal_llm_completion
+
+    if acceptance_stub_enabled():
+        text = stub_legal_llm_completion(messages, call_purpose=call_purpose)
+        if usage_sink is not None:
+            usage_sink.append(
+                {
+                    "call_purpose": (call_purpose or airlock_log_context or "acceptance_stub"),
+                    "requested_model": model or DEFAULT_MODEL,
+                    "returned_model": "acceptance-stub",
+                    "finish_reason": "stop",
+                    "status": "ok",
+                }
+            )
+        return text
     profile: AirlockPolicyProfile = airlock_profile
     outbound_messages = _messages_after_user_airlock(
         messages,

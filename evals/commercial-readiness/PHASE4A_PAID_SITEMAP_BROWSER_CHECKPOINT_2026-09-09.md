@@ -1,3 +1,64 @@
+# Core Paid Journey acceptance checkpoint — 2026-09-12
+
+Authoritative repository: `lawdog-repo`  
+Branch: `stabilize/phase3b-paid-entry`  
+Required start HEAD: `648791f965c46ee3234686530aed8da69947f6a5` (`Record Billing unresolved-purchase safety checkpoint.`)  
+Working tested identity: same SHA + local uncommitted Core Paid Journey sources.  
+Latest named-gate content fingerprint: `b7a73cc3fb93867dc57b0b044fcf9b23b3b02e80`  
+Latest result dir: `evals/commercial-readiness/results/core-paid-journey-acceptance/648791f965c4-src-b7a73cc3fb93-live-4188-4189-stub-model`  
+Nothing was pushed. No deployment, live Stripe, live email, or live-model calls. Settings/admin was not started. **This is not a launch claim.**
+
+Customer matrix (`frontend/src/launch/corePaidJourneyAcceptanceMatrix.ts`) was written before production-handler edits. Isolated `CLAW_DATA_DIR`. Model boundary is the test-only acceptance stub (`CLAW_LLM_ACCEPTANCE_STUB=1`). External identity JWKS is the test-only local document (`CLAW_JWT_ACCEPTANCE_JWKS_PATH`). Stub output proves workflow + “pipeline painted declared facts,” not live-model quality.
+
+Live-model proposal (approval required, not run): Harbor/Ironvale consulting plus one extra named two-party SaaS; max 2 primary draft calls + 2 repair calls.
+
+## Per-row results (latest named desktop/mobile gate)
+
+| Row | Result | Evidence |
+|---|---|---|
+| I1 sparse targeted questions | **pass** | Clarification panel after sparse intake |
+| I2 retains answers / no re-ask | **pass** | Filled Harbor/Ironvale intake dismissed clarification |
+| I3 missing facts not invented | **pass** | Sparse path did not invent Harbor/Ironvale or offer send/sign |
+| Q1 article matches expected facts | **fail** | Painted article exists (server IDs `fee6af16-…`, `87a17565-…`, `9edf8cfe-…`, `97908b32-…`). Latest miss was `startDate` because `October 1,` and `2026` split across lines. Preamble also remaps Harbor to “Client” / Ironvale to “Service Provider” while the signature block still labels Harbor Consultant. |
+| Q2 placeholders / filler | **pass** | No `[insert]`, lorem, TBD, or invented Orion/Contoso/Acme counterparties |
+| A1–A4 review path | **not completed** | After owner view, `/app/create` hid intake and did not mount `simple-pro-send-for-review` in time. Recipient review / propose / owner revision were not exercised. |
+| B1 direct sign skips review | **pass** | Owner clicked Send for signature without opening recipient review |
+| B2 signer completes locked version | **fail** | Click did not mint `POST /recipient-access-token` `mode=sign` (likely missing accepted snapshot / signing lock) |
+| B3 owner final record | **fail** | Direct-sign path not reached |
+| C1 refresh / C2 dashboard | **partial / unpersisted** | Desktop Journey A reached refresh + dashboard + `/view` (Harbor present, no Free Starter) before the create-reopen throw. Worker restart dropped those rows from `matrix-rows.json`. |
+
+Document copies: `article-*.txt` in the result dir. Length/hash/title were not used as quality proof.
+
+## Remaining customer-impacting failures
+
+1. **Owner delivery CTAs after painted paper.** `simple-pro-send-for-review` / durable sign-token mint are not completing the live paid create handoff. Signer setup often stays unmounted (`email: no`) while the shell title says Complete signer details.
+2. **Role remapping on the visible HTML article.** Stub corpus is Harbor=Consultant / Ironvale=Client; the painted preamble says Harbor=Client / Ironvale=Service Provider. Contradictory party labels.
+3. **Direct e-sign token.** Send for signature does not produce a server sign token without the established snapshot-accept + lock workflow succeeding in this live path.
+4. **Live model unevaluated.** Acceptance stub does not prove commercial drafting quality of a real model.
+
+## Live-service limitations
+
+- No live OpenAI, Stripe, Supabase JWKS, or outbound email.
+- Commercial mode stays on; HS256 is not used. ES256 is verified against a local JWKS file in test/dev only.
+- Prior billing unresolved-purchase evidence under `evals/commercial-readiness/results/phase4-billing-acceptance/` was preserved and not re-run as a launch claim.
+
+## Verification run with this source
+
+| Gate | Result |
+|---|---|
+| Named `scripts/run_core_paid_journey_acceptance_gate.sh` | Playwright 2 passed / 4 failed (coverage-only green). Matrix failed rows recorded above. |
+| Backend `test_core_paid_journey_acceptance.py` | **passed** (stub + ES256 bind/usage Pro) |
+| Coverage vitest | **passed** |
+| Phase 1 `scripts/run_phase1_access_contract_gate.sh` | **18 files / 100 passed** |
+| Production build | `tsc -b && vite build` — **✓ built** |
+| Phase 2 `scripts/run_phase2_paid_journey_release_gate.sh` | **exit 0** — backend 121 dots + frontend **97 files / 932 passed** |
+| Phase 4A sitemap browser | **134/134 passed** |
+| Phase 4B.1 recipient review | **16/16 passed** |
+| Phase 4B.2 recipient signing | **16/16 passed** (14 + 2 retry split) |
+| Phase 4C.2.3 signing acceptance | **PASS** — TestClient + 4 live browser tests |
+
+---
+
 # Phase 4A / 4A.1 checkpoint — paid-owner sitemap + verified paper paint
 
 Authoritative repository: `lawdog-repo`  

@@ -87,15 +87,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       return;
     }
     let unsub: { unsubscribe: () => void } | null = null;
-    void getAuthSession().then(async (s) => {
-      const next = resolveBrowserAuthSession(s);
-      setSession(next);
-      if (next?.access_token) setCachedAccessToken(next.access_token);
-      if (next?.user && !isAuthCallbackPath()) {
-        await finalizeUser(next.user, "session_restore");
-      }
-      setLoading(false);
-    });
+    void getAuthSession()
+      .then(async (s) => {
+        const next = resolveBrowserAuthSession(s);
+        setSession(next);
+        if (next?.access_token) setCachedAccessToken(next.access_token);
+        if (next?.user && !isAuthCallbackPath()) {
+          await finalizeUser(next.user, "session_restore");
+        }
+      })
+      .finally(() => {
+        setLoading(false);
+      });
     unsub = onAuthStateChange((s) => {
       const next = resolveBrowserAuthSession(s);
       setSession(next);

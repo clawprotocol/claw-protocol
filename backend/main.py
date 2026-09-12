@@ -145,7 +145,9 @@ from backend.routers.admin_console_api import router as admin_console_router
 @asynccontextmanager
 async def _claw_lifespan(_app: FastAPI):
     from backend.billing.schema_ready import ensure_billing_schema_ready
+    from backend.jwt_acceptance_jwks import install_acceptance_jwks_fetch_if_configured
 
+    install_acceptance_jwks_fetch_if_configured()
     ensure_billing_schema_ready()
     yield
 
