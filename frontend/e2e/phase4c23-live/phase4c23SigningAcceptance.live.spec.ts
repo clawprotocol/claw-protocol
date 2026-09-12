@@ -11,6 +11,9 @@ import {
 
 const CONSOLE_NOISE = /Download the React DevTools|favicon|Failed to load resource|\[vs01-recipient-identity-authority\]/i;
 const RECOVERED = /There was an error during concurrent rendering but React was able to recover/;
+const DRAFTED_TITLE = "Phase 4C.2.3 live drafted";
+const DRAFTED_PAPER = "Live drafted signing paper — Phase 4C.2.3 locked corpus.";
+const DRAFTED_SIGNER = "Acme Growth LLC";
 
 function attachGuards(page: Page, secrets: string[]) {
   const pageErrors: string[] = [];
@@ -110,43 +113,79 @@ test.describe("Phase 4C.2.3 live signing acceptance", () => {
     guards.assertClean();
   });
 
-  test("drafted recipient ceremony uses the token, not owner headers", async ({ page }) => {
+  test("drafted recipient signs the unsigned locked paper through the UI", async ({ page }) => {
     const seeded = await seedDraftedCeremony();
     const impersonate = await liveJson("POST", `/api/agreements/${seeded.agreementId}/signing-ceremony/complete`, {
       body: {
         participant_id: "p-acme",
-        typed_name: "Acme Growth LLC",
+        typed_name: DRAFTED_SIGNER,
         locked_version_id: seeded.lockedVersionId,
         consent: LIVE_CONSENT,
       },
     });
     expect(impersonate.status, JSON.stringify(impersonate.body)).toBe(403);
 
-    const start = await liveJson("POST", `/api/agreements/${seeded.agreementId}/signing-ceremony/start`, {
-      headers: {
-        "Content-Type": "application/json",
-        "X-Claw-Recipient-Access-Token": seeded.token,
-      },
-      body: { participant_id: "p-acme" },
+    const unsigned = await liveJson("GET", "/api/agreements/access/validate", {
+      headers: { Accept: "application/json" },
+      query: { token: seeded.token, agreement_id: seeded.agreementId },
     });
-    expect(start.status, JSON.stringify(start.body)).toBe(200);
+    expect(unsigned.status, JSON.stringify(unsigned.body)).toBe(200);
+    expect(unsigned.body.signer_already_completed).not.toBe(true);
+    expect(unsigned.body.agreement_id).toBe(seeded.agreementId);
+    expect(unsigned.body.locked_version_id).toBe(seeded.lockedVersionId);
 
-    const done = await liveJson("POST", `/api/agreements/${seeded.agreementId}/signing-ceremony/complete`, {
-      headers: {
-        "Content-Type": "application/json",
-        "X-Claw-Recipient-Access-Token": seeded.token,
-      },
-      body: {
-        participant_id: "p-acme",
-        typed_name: "Acme Growth LLC",
-        locked_version_id: seeded.lockedVersionId,
-        consent: LIVE_CONSENT,
-      },
+    const completePosts: string[] = [];
+    page.on("request", (req) => {
+      if (req.method() === "POST" && req.url().includes("/signing-ceremony/complete")) {
+        completePosts.push(req.url());
+      }
     });
-    expect(done.status, JSON.stringify(done.body)).toBe(200);
-    expect(done.body.agreement_id).toBe(seeded.agreementId);
-    expect(done.body.participant_id).toBe("p-acme");
-    expect(done.body.status).toMatch(/completed|fully_executed/);
+
+    const guards = attachGuards(page, [seeded.token]);
+    await page.goto(seeded.signHref, { waitUntil: "domcontentloaded" });
+    await expect(page.getByTestId("recipient-public-sign-route")).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByTestId("recipient-document-shell")).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByTestId("recipient-document-shell")).toContainText(DRAFTED_TITLE);
+    await expect(page.getByTestId("recipient-document-shell")).toContainText(DRAFTED_PAPER);
+    await expect(page.getByTestId("recipient-document-shell")).toContainText(DRAFTED_SIGNER);
+    const paperBefore = (await page.getByTestId("recipient-document-shell").innerText()).trim();
+    expect(paperBefore.length).toBeGreaterThan(40);
+    const authority = page.getByTestId("recipient-review-authority-meta");
+    await expect(authority).toBeVisible();
+    await expect(authority).toHaveAttribute("data-locked-version-id", seeded.lockedVersionId);
+    const paperSha = await authority.getAttribute("data-corpus-sha256");
+    const paperLen = await authority.getAttribute("data-corpus-length");
+    expect(paperSha).toMatch(/^[0-9a-f]{64}$/);
+    expect(Number(paperLen)).toBeGreaterThan(0);
+
+    await expect(page.getByTestId("recipient-sign-complete-status")).toHaveCount(0);
+    const signAction = page.locator('[data-testid="recipient-sign-action"]:visible');
+    await expect(signAction).toBeVisible({ timeout: 20_000 });
+    await expect(signAction).toBeDisabled();
+    await page.getByTestId("recipient-sign-typed-name").fill(DRAFTED_SIGNER);
+    await page.getByTestId("recipient-sign-consent").check();
+    await expect(signAction).toBeEnabled();
+    await signAction.click();
+
+    await expect(page.getByTestId("recipient-sign-complete-status")).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByTestId("recipient-sign-complete-status")).toContainText(/signed/i);
+    await expect(page.getByTestId("recipient-sign-action")).toHaveCount(0);
+    await expect(page.getByTestId("recipient-document-shell")).toContainText(DRAFTED_TITLE);
+    await expect(page.getByTestId("recipient-document-shell")).toContainText(DRAFTED_PAPER);
+    expect((await page.getByTestId("recipient-document-shell").innerText()).trim()).toBe(paperBefore);
+    await expect(page.getByTestId("recipient-review-authority-meta")).toHaveAttribute(
+      "data-locked-version-id",
+      seeded.lockedVersionId,
+    );
+    await expect(page.getByTestId("recipient-review-authority-meta")).toHaveAttribute(
+      "data-corpus-sha256",
+      paperSha || "",
+    );
+    await expect(page.getByTestId("recipient-review-authority-meta")).toHaveAttribute(
+      "data-corpus-length",
+      paperLen || "",
+    );
+    expect(completePosts, "UI must post exactly one ceremony completion").toHaveLength(1);
 
     const validated = await liveJson("GET", "/api/agreements/access/validate", {
       headers: { Accept: "application/json" },
@@ -154,12 +193,24 @@ test.describe("Phase 4C.2.3 live signing acceptance", () => {
     });
     expect(validated.status, JSON.stringify(validated.body)).toBe(200);
     expect(validated.body.signer_already_completed).toBe(true);
+    expect(validated.body.agreement_id).toBe(seeded.agreementId);
+    expect(validated.body.recipient_party_id).toBe("p-acme");
+    expect(validated.body.locked_version_id).toBe(seeded.lockedVersionId);
+    expect(String(validated.body.completion_status || "")).toMatch(/completed|already_signed|fully_executed/);
 
-    const guards = attachGuards(page, [seeded.token]);
-    await page.goto(seeded.signHref, { waitUntil: "domcontentloaded" });
-    await expect(
-      page.getByTestId("recipient-public-sign-route").or(page.getByTestId("recipient-document-shell")).or(page.getByText(/signed|all set|already/i)),
-    ).toBeVisible({ timeout: 30_000 });
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await expect(page.getByTestId("recipient-sign-complete-status")).toBeVisible({ timeout: 20_000 });
+    await expect(page.getByTestId("recipient-sign-complete-status")).toContainText(/signed/i);
+    await expect(page.getByTestId("recipient-sign-action")).toHaveCount(0);
+    await expect(page.getByTestId("recipient-document-shell")).toBeVisible();
+    await expect(page.getByTestId("recipient-document-shell")).toContainText(DRAFTED_TITLE);
+    await expect(page.getByTestId("recipient-document-shell")).toContainText(DRAFTED_PAPER);
+    expect((await page.getByTestId("recipient-document-shell").innerText()).trim()).toBe(paperBefore);
+    await expect(page.getByTestId("recipient-review-authority-meta")).toHaveAttribute(
+      "data-corpus-sha256",
+      paperSha || "",
+    );
+    expect(completePosts, "refresh must not post another completion").toHaveLength(1);
     await expect(page.getByText(/invalid or expired/i)).toHaveCount(0);
     guards.assertClean();
   });

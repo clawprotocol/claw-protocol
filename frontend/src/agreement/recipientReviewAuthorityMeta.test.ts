@@ -35,6 +35,15 @@ describe("selectRecipientReviewAuthorityMeta", () => {
     ).toEqual({ lockedVersionId: "lv-snap", corpusSha256: SHA, corpusLength: 20 });
   });
 
+  it("accepts lock-only sha and length when no accepted snapshot is projected", () => {
+    expect(
+      selectRecipientReviewAuthorityMeta({
+        agreementId: "ag-a",
+        signingLock: { locked_version_id: "lv-1", content_sha256: SHA, content_length: 42 },
+      }),
+    ).toEqual({ lockedVersionId: "lv-1", corpusSha256: SHA, corpusLength: 42 });
+  });
+
   it("rejects other-agreement snapshot, pending status, or length mismatch", () => {
     expect(
       selectRecipientReviewAuthorityMeta({

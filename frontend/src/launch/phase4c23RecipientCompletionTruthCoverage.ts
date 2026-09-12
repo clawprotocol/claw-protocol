@@ -13,6 +13,7 @@ import {
 import {
   RECIPIENT_COMPLETION_FATAL_MESSAGE,
   RECIPIENT_COMPLETION_RETRY_MESSAGE,
+  confirmDraftedCeremonyAuthorizedState,
   confirmDraftedCeremonyCompletion,
   confirmRecipientCompletionResponse,
   recipientCompletionIsFatal,
@@ -71,6 +72,12 @@ export function assertPhase4c23RecipientCompletionTruthContracts(): void {
   if (!review.includes("confirmDraftedCeremonyCompletion")) {
     throw new Error("AgreementRecipientReview no longer confirms the ceremony completion response");
   }
+  if (review.includes('String(r.error || "").includes("already_signed")')) {
+    throw new Error("AgreementRecipientReview still treats already_signed error text as local success");
+  }
+  if (!review.includes("recoverDraftedCeremonyCompletion")) {
+    throw new Error("AgreementRecipientReview no longer recovers drafted completion from authorized server state");
+  }
 
   const sync = src("../vs01/vs01SignerCompletionSync.ts");
   if (!sync.includes("assigned_fields") || !sync.includes("consent")) {
@@ -126,5 +133,122 @@ export function assertPhase4c23RecipientCompletionTruthContracts(): void {
     })
   ) {
     throw new Error("4C.2.3 accepts a drafted ceremony 200 without participant/signed_at confirmation");
+  }
+  if (
+    confirmDraftedCeremonyCompletion({
+      agreementId: "ag",
+      participantId: "p1",
+      lockedVersionId: "lv-1",
+      response: {
+        ok: true,
+        agreement_id: "ag",
+        participant_id: "p1",
+        signed_at: "2026-09-12T12:00:00Z",
+      },
+    })
+  ) {
+    throw new Error("4C.2.3 accepts a drafted ceremony 200 without status or locked_version_id");
+  }
+  if (
+    confirmDraftedCeremonyCompletion({
+      agreementId: "ag",
+      participantId: "p1",
+      lockedVersionId: "lv-1",
+      response: {
+        ok: true,
+        status: "completed",
+        agreement_id: "ag",
+        participant_id: "p1",
+        signed_at: "2026-09-12T12:00:00Z",
+      },
+    })
+  ) {
+    throw new Error("4C.2.3 accepts a drafted ceremony 200 without the expected locked_version_id");
+  }
+  if (
+    confirmDraftedCeremonyCompletion({
+      agreementId: "ag",
+      participantId: "p1",
+      lockedVersionId: "lv-1",
+      response: {
+        ok: true,
+        status: "completed",
+        agreement_id: "ag",
+        participant_id: "p1",
+        locked_version_id: "lv-other",
+        signed_at: "2026-09-12T12:00:00Z",
+      },
+    })
+  ) {
+    throw new Error("4C.2.3 accepts a drafted ceremony 200 for the wrong locked version");
+  }
+  if (
+    !confirmDraftedCeremonyCompletion({
+      agreementId: "ag",
+      participantId: "p1",
+      lockedVersionId: "lv-1",
+      response: {
+        ok: true,
+        status: "completed",
+        agreement_id: "ag",
+        participant_id: "p1",
+        locked_version_id: "lv-1",
+        signed_at: "2026-09-12T12:00:00Z",
+      },
+    })
+  ) {
+    throw new Error("4C.2.3 rejects a matching drafted ceremony confirmation");
+  }
+  if (
+    confirmDraftedCeremonyAuthorizedState({
+      agreementId: "ag",
+      participantId: "p1",
+      lockedVersionId: "lv-1",
+      validate: {
+        ok: true,
+        agreement_id: "ag",
+        recipient_party_id: "p1",
+        locked_version_id: "lv-1",
+        signer_already_completed: true,
+      },
+    })
+  ) {
+    throw new Error("4C.2.3 recovers drafted completion without an explicit completion_status");
+  }
+  if (
+    confirmDraftedCeremonyAuthorizedState({
+      agreementId: "ag",
+      participantId: "p1",
+      lockedVersionId: "lv-1",
+      validate: {
+        ok: true,
+        agreement_id: "ag",
+        recipient_party_id: "p-other",
+        locked_version_id: "lv-1",
+        signer_already_completed: true,
+        completion_status: "completed",
+      },
+      signingLockVersionId: "lv-1",
+    })
+  ) {
+    throw new Error("4C.2.3 recovers drafted completion for the wrong participant");
+  }
+  if (
+    !confirmDraftedCeremonyAuthorizedState({
+      agreementId: "ag",
+      participantId: "p1",
+      lockedVersionId: "lv-1",
+      validate: {
+        ok: true,
+        agreement_id: "ag",
+        recipient_party_id: "p1",
+        locked_version_id: "lv-1",
+        signer_already_completed: true,
+        completion_status: "already_signed",
+      },
+      signingLockVersionId: "lv-1",
+    })
+  ) {
+    throw new Error("4C.2.3 rejects matching token-authorized drafted completion recovery");
   }
 }

@@ -188,7 +188,7 @@ export async function seedDraftedCeremony(): Promise<{
         { name: "Owner LLC", role: "owner" },
         { name: "Acme Growth LLC", role: "signer" },
       ],
-      purpose: "Live acceptance",
+      purpose: "Live drafted signing paper — Phase 4C.2.3 locked corpus.",
       payment_terms: "Net 30",
       duration: null,
       due_date: null,
