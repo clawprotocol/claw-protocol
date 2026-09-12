@@ -7114,6 +7114,7 @@ def put_agreement_signing_lock(
         "locked_at": body.locked_at,
         "locked_by": body.locked_by,
         "content_sha256": content_sha256,
+        "content_length": len(canon_json_bytes(_signing_snapshot_dict(draft_full))),
     }
     write_signing_lock(agreement_id, payload)
     record_public_feed_event_if_applicable(
@@ -9985,11 +9986,21 @@ def get_agreement_draft(agreement_id: str, request: Request) -> Dict[str, Any]:
     lv = str((lock or {}).get("locked_version_id") or "").strip()
     signing_lock_out: Optional[Dict[str, Any]] = None
     if lock and lv:
+        stored_len = lock.get("content_length")
+        try:
+            content_length = int(stored_len) if stored_len is not None else 0
+        except (TypeError, ValueError):
+            content_length = 0
+        stored_sha = str(lock.get("content_sha256") or "").strip().lower()
+        current_sha = _draft_locked_content_sha256(draft)
+        if content_length < 1 and stored_sha and stored_sha == current_sha:
+            content_length = len(canon_json_bytes(_signing_snapshot_dict(draft)))
         signing_lock_out = {
             "locked_version_id": lv,
             "locked_at": lock.get("locked_at"),
             "locked_by": lock.get("locked_by"),
             "content_sha256": lock.get("content_sha256"),
+            "content_length": content_length or None,
         }
     draft_out = _draft_with_sanitized_parties(draft).model_dump()
     # Recipient tokens receive a minimum projection (no unrelated-party PII / delivery JTIs).

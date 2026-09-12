@@ -108,12 +108,43 @@ export function confirmDraftedCeremonyCompletion(args: {
   const response = args.response;
   if (!response.ok) return false;
   const status = String(response.status || "").trim().toLowerCase();
-  if (status && !CONFIRMED_COMPLETION_STATUSES.has(status)) return false;
+  if (!CONFIRMED_COMPLETION_STATUSES.has(status)) return false;
   if (!response.agreement_id || response.agreement_id !== args.agreementId) return false;
   if (!response.participant_id || response.participant_id !== args.participantId) return false;
   if (!response.signed_at) return false;
-  if (args.lockedVersionId && response.locked_version_id && response.locked_version_id !== args.lockedVersionId) {
-    return false;
+  const expectedLock = String(args.lockedVersionId || "").trim();
+  const gotLock = String(response.locked_version_id || "").trim();
+  if (!expectedLock || !gotLock || gotLock !== expectedLock) return false;
+  return true;
+}
+
+export function confirmDraftedCeremonyAuthorizedState(args: {
+  agreementId: string;
+  participantId: string;
+  lockedVersionId: string;
+  validate: {
+    ok?: boolean;
+    agreement_id?: string;
+    recipient_party_id?: string | null;
+    locked_version_id?: string;
+    signer_already_completed?: boolean;
+    completion_status?: string | null;
+  };
+  signingLockVersionId?: string | null;
+}): boolean {
+  const validate = args.validate;
+  if (validate.ok === false) return false;
+  if (validate.signer_already_completed !== true) return false;
+  const status = String(validate.completion_status || "").trim().toLowerCase();
+  if (!CONFIRMED_COMPLETION_STATUSES.has(status)) return false;
+  if (!validate.agreement_id || validate.agreement_id !== args.agreementId) return false;
+  if (!validate.recipient_party_id || validate.recipient_party_id !== args.participantId) return false;
+  const expectedLock = String(args.lockedVersionId || "").trim();
+  const validateLock = String(validate.locked_version_id || "").trim();
+  if (!expectedLock || !validateLock || validateLock !== expectedLock) return false;
+  if (args.signingLockVersionId !== undefined) {
+    const lock = String(args.signingLockVersionId || "").trim();
+    if (!lock || lock !== expectedLock) return false;
   }
   return true;
 }

@@ -14,6 +14,7 @@ export function selectRecipientReviewAuthorityMeta(args: {
   signingLock?: {
     locked_version_id?: string | null;
     content_sha256?: string | null;
+    content_length?: number | null;
   } | null;
   acceptedReviewSnapshot?: {
     agreement_id?: string | null;
@@ -38,7 +39,8 @@ export function selectRecipientReviewAuthorityMeta(args: {
     .trim()
     .toLowerCase();
   const plain = String(snap?.corpus_plain || "").trim();
-  const corpusLength = Number(snap?.corpus_length || 0) || plain.length;
+  const corpusLength =
+    Number(snap?.corpus_length || args.signingLock?.content_length || 0) || plain.length;
   if (!lockedVersionId || !/^[0-9a-f]{64}$/.test(corpusSha256) || corpusLength < 1) {
     return null;
   }

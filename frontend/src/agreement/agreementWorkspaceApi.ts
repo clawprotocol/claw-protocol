@@ -2,7 +2,8 @@ import type { AgreementDraft } from "./agreementTypes";
 import { normalizeAgreementDraftFromApi } from "./agreementDraftNormalize";
 import { clawAgreementHeaders } from "./agreementOrgHeaders";
 import { getCachedAccessToken, refreshCachedAccessToken } from "../auth/authAccessTokenCache";
-import { recipientAgreementReadHeaders } from "./recipientAccessApi";
+import { recipientAgreementReadHeaders, validateRecipientAccessToken } from "./recipientAccessApi";
+import { confirmDraftedCeremonyAuthorizedState } from "../vs01/vs01RecipientCompletionContract";
 import { apiUrl, logClawClientWarning, resolveApiBase } from "../lib/clawApi";
 
 export type WorkspaceIndexAgreement = {
@@ -643,6 +644,57 @@ export async function postSigningCeremonyComplete(
     return { ok: false, error: typeof d === "string" ? d : `error_${res.status}` };
   } catch {
     return { ok: false, error: "network" };
+  }
+}
+
+/** Token-authorized recovery: validate + GET lock, never error-text matching. */
+export async function recoverDraftedCeremonyCompletion(
+  agreementId: string,
+  args: { participantId: string; lockedVersionId: string },
+  recipientAccessToken?: string | null,
+): Promise<{
+  ok: boolean;
+  status?: string;
+  signed_at?: string;
+  fully_executed?: boolean;
+}> {
+  const token = String(recipientAccessToken || "").trim();
+  if (!token) return { ok: false };
+  const validated = await validateRecipientAccessToken(token, agreementId);
+  if (!validated.ok) return { ok: false };
+  try {
+    const res = await fetch(`${base()}/api/agreements/${encodeURIComponent(agreementId)}`, {
+      headers: {
+        ...clawAgreementHeaders(),
+        ...recipientAgreementReadHeaders(agreementId, token),
+      },
+    });
+    if (!res.ok) return { ok: false };
+    const payload = (await res.json().catch(() => ({}))) as {
+      id?: string;
+      signing_lock?: { locked_version_id?: string } | null;
+    };
+    const gotId = String(payload.id || "").trim();
+    if (gotId && gotId !== agreementId) return { ok: false };
+    if (
+      !confirmDraftedCeremonyAuthorizedState({
+        agreementId,
+        participantId: args.participantId,
+        lockedVersionId: args.lockedVersionId,
+        validate: validated.data,
+        signingLockVersionId: payload.signing_lock?.locked_version_id ?? "",
+      })
+    ) {
+      return { ok: false };
+    }
+    const status = String(validated.data.completion_status || "").trim().toLowerCase();
+    return {
+      ok: true,
+      status,
+      fully_executed: status === "fully_executed",
+    };
+  } catch {
+    return { ok: false };
   }
 }
 

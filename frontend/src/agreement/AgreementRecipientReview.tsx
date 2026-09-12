@@ -76,6 +76,7 @@ import {
   finalizeRecipientProposalApi,
   postSigningCeremonyComplete,
   postSigningCeremonyStart,
+  recoverDraftedCeremonyCompletion,
   recipientApproveCurrentApi,
   stageRecipientProposalApi,
   type RecipientProposalSubmitBody,
@@ -1305,6 +1306,17 @@ export function AgreementRecipientReview({
     }
     let cancel = false;
     void (async () => {
+      const recovered = await recoverDraftedCeremonyCompletion(
+        agreementId,
+        { participantId: participantPid, lockedVersionId: entry.lockedVersionId },
+        recipientAccessToken,
+      );
+      if (cancel) return;
+      if (recovered.ok) {
+        setFullyExecutedAtSign(Boolean(recovered.fully_executed));
+        setCeremonyPhase("done");
+        return;
+      }
       const r = await postSigningCeremonyStart(agreementId, participantPid, recipientAccessToken);
       if (cancel) return;
       if (!r.ok) {
@@ -1322,6 +1334,7 @@ export function AgreementRecipientReview({
     };
   }, [
     entry.kind,
+    entry.kind === "sign" ? entry.lockedVersionId : "",
     draft?.id,
     draft?.updated_at,
     bundle?.currentVersionId,
@@ -4680,8 +4693,13 @@ export function AgreementRecipientReview({
         recipientAccessToken
       );
       if (!r.ok) {
-        const already = String(r.error || "").includes("already_signed");
-        if (already) {
+        const recovered = await recoverDraftedCeremonyCompletion(
+          agreementId,
+          { participantId: participantPid, lockedVersionId },
+          recipientAccessToken,
+        );
+        if (recovered.ok) {
+          setFullyExecutedAtSign(Boolean(recovered.fully_executed));
           setCeremonyPhase("done");
           await refresh();
           return;
