@@ -28,6 +28,7 @@ SNAPSHOT_SCHEMA_VERSION = "claw.canonical_review_snapshot/v1"
 REGISTRY_SCHEMA_VERSION = "claw.canonical_review_snapshots/v1"
 AUTHORITY_MODE_ACCEPTED_SNAPSHOT = "accepted_review_snapshot"
 AUTHORITY_MODE_LEGACY_PACKET = "legacy_packet_pre_snapshot"
+AUTHORITY_MODE_UPLOADED_FINAL_PDF = "uploaded_final_pdf"
 
 STATUS_PENDING = "pending"
 STATUS_ACCEPTED = "accepted"
@@ -145,9 +146,14 @@ def classify_authority_mode(draft: Any) -> str:
     """
     Return authority mode for commercial operations.
 
-    - ``accepted_review_snapshot``: trusted commercial path
+    - ``uploaded_final_pdf``: uploaded final PDF (never drafted corpus)
+    - ``accepted_review_snapshot``: trusted commercial drafted-paper path
     - ``legacy_packet_pre_snapshot``: pre-existing sealed packet without accepted snapshot
     """
+    from backend.services.quick_pdf_envelope import is_uploaded_final_pdf_authority
+
+    if is_uploaded_final_pdf_authority(draft):
+        return AUTHORITY_MODE_UPLOADED_FINAL_PDF
     accepted = get_accepted_snapshot_record(draft)
     if accepted:
         return AUTHORITY_MODE_ACCEPTED_SNAPSHOT
@@ -178,8 +184,13 @@ def is_pure_legacy_pre_cutover(draft: Any) -> bool:
 def requires_accepted_snapshot_for_continuation(draft: Any) -> bool:
     """
     Post-cutover commercial: always require accepted snapshot for reissue/signer-complete.
+    Uploaded final PDFs use their own authority and must not invent a drafted snapshot.
     Pure pre-cutover sealed packets may continue until deliberate re-attestation.
     """
+    from backend.services.quick_pdf_envelope import is_uploaded_final_pdf_authority
+
+    if is_uploaded_final_pdf_authority(draft):
+        return False
     return not is_pure_legacy_pre_cutover(draft)
 
 
@@ -536,6 +547,14 @@ def bind_portable_to_accepted_snapshot(
     aid = _clean(agreement_id)
     if not isinstance(portable, dict):
         return False, "portable_required", None, None
+
+    from backend.services.quick_pdf_envelope import (
+        bind_uploaded_final_pdf_portable,
+        is_uploaded_final_pdf_authority,
+    )
+
+    if is_uploaded_final_pdf_authority(draft):
+        return bind_uploaded_final_pdf_portable(agreement_id=aid, draft=draft, portable=portable)
 
     accepted = get_accepted_snapshot_record(draft)
     mode = classify_authority_mode(draft)

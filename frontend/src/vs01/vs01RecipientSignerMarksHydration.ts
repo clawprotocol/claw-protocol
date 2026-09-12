@@ -117,6 +117,7 @@ export function hydratePortableSignerMarksForRecipientView(args: {
   const documentId = args.documentId.trim();
   const viewingRole = (args.viewingSignerRoleId ?? "").trim();
   if (!agreementId || !documentId) return args.portable;
+  if ((args.portable as { kind?: string }).kind === "uploaded_final_pdf") return args.portable;
 
   let portable = args.portable;
   const roleKeys = portable.roles.map((r) => r.roleId).filter(Boolean);

@@ -40,6 +40,9 @@ export type QuickEnvelope = {
   fields: QuickPdfField[];
   packet_revision: string;
   delivery_state?: string;
+  recipient_link_ready?: boolean;
+  recipient_token_jti?: string;
+  max_recipients?: number;
 };
 
 export type QuickCompletion = {
@@ -51,8 +54,26 @@ export type QuickCompletion = {
   completed_signer_count: number;
 };
 
+export type QuickReceipt = {
+  receipt_id?: string;
+  receipt_digest?: string;
+  kind?: string;
+  document_kind?: string;
+  content_sha256?: string;
+  packet_revision?: string;
+  field_manifest_digest?: string;
+  label?: string;
+};
+
 export type QuickEnvelopeResult =
-  | { ok: true; envelope: QuickEnvelope; completion?: QuickCompletion; recipientOpenPath?: string; delivery?: { state: string; email: string } }
+  | {
+      ok: true;
+      envelope: QuickEnvelope;
+      completion?: QuickCompletion;
+      recipientOpenPath?: string;
+      delivery?: { state: string; email: string };
+      receipt?: QuickReceipt | null;
+    }
   | { ok: false; code: string; message: string };
 
 const MESSAGES: Record<string, string> = {
@@ -73,6 +94,9 @@ const MESSAGES: Record<string, string> = {
   unavailable: "We couldn’t continue with this PDF. Try again.",
   agreement_not_fully_executed: "The verification bundle is available after every required signer finishes.",
   receipt_hash_mismatch: "This receipt no longer matches the uploaded PDF.",
+  owner_ceremony_incomplete: "Type or draw your signature and confirm you agree before signing.",
+  page_count_mismatch: "Placement pages must match the uploaded PDF.",
+  packet_revision_mismatch: "This signing packet changed. Reload and sign again.",
 };
 
 export function sanitizedEnvelopeMessage(code: string): string {
@@ -112,31 +136,8 @@ function bindingBody(binding: QuickPdfBinding) {
   };
 }
 
-export function defaultOwnerRecipientFields(): QuickPdfField[] {
-  return [
-    {
-      field_id: "fld_owner_sig",
-      signer_role_id: OWNER_ROLE_ID,
-      field_type: "signature",
-      page_index: 0,
-      x: 0.12,
-      y: 0.72,
-      w: 0.32,
-      h: 0.1,
-      required: true,
-    },
-    {
-      field_id: "fld_recipient_sig",
-      signer_role_id: RECIPIENT_ROLE_ID,
-      field_type: "signature",
-      page_index: 0,
-      x: 0.56,
-      y: 0.72,
-      w: 0.32,
-      h: 0.1,
-      required: true,
-    },
-  ];
+export function ownerAndRecipientPlaced(fields: QuickPdfField[]): boolean {
+  return fields.some((f) => f.signer_role_id === OWNER_ROLE_ID) && fields.some((f) => f.signer_role_id === RECIPIENT_ROLE_ID);
 }
 
 export async function createQuickPdfEnvelope(
@@ -174,7 +175,12 @@ export async function loadQuickPdfEnvelope(documentId: string): Promise<QuickEnv
   if (!res.ok) return fail(res, data);
   const envelope = (data.envelope as QuickEnvelope | null) || null;
   if (!envelope) return { ok: true, envelope: null };
-  return { ok: true, envelope, completion: data.completion as QuickCompletion | undefined };
+  return {
+    ok: true,
+    envelope,
+    completion: data.completion as QuickCompletion | undefined,
+    receipt: (data.receipt as QuickReceipt | null) || null,
+  };
 }
 
 export async function saveQuickPdfFields(
@@ -218,10 +224,40 @@ export async function prepareQuickPdfEnvelope(binding: QuickPdfBinding): Promise
   };
 }
 
-export async function ownerCompleteQuickPdf(binding: QuickPdfBinding): Promise<QuickEnvelopeResult> {
+export async function ownerCompleteQuickPdf(
+  binding: QuickPdfBinding,
+  ceremony: { signatureText: string; signatureDraw?: string; consent: boolean; packetRevision: string },
+): Promise<QuickEnvelopeResult> {
   let res: Response;
   try {
     res = await ownerApiFetch("/api/agreements/quick-pdf-envelope/owner-complete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Accept: "application/json" },
+      body: JSON.stringify({
+        ...bindingBody(binding),
+        signature_text: ceremony.signatureText,
+        signature_draw: ceremony.signatureDraw || "",
+        consent: ceremony.consent,
+        packet_revision: ceremony.packetRevision,
+      }),
+    });
+  } catch {
+    return { ok: false, code: "network", message: sanitizedEnvelopeMessage("network") };
+  }
+  const data = await readJson(res);
+  if (!res.ok) return fail(res, data);
+  return {
+    ok: true,
+    envelope: data.envelope as QuickEnvelope,
+    completion: data.completion as QuickCompletion,
+    receipt: (data.receipt as QuickReceipt | null) || null,
+  };
+}
+
+export async function reissueQuickPdfEnvelope(binding: QuickPdfBinding): Promise<QuickEnvelopeResult> {
+  let res: Response;
+  try {
+    res = await ownerApiFetch("/api/agreements/quick-pdf-envelope/reissue", {
       method: "POST",
       headers: { "Content-Type": "application/json", Accept: "application/json" },
       body: JSON.stringify(bindingBody(binding)),
@@ -231,7 +267,12 @@ export async function ownerCompleteQuickPdf(binding: QuickPdfBinding): Promise<Q
   }
   const data = await readJson(res);
   if (!res.ok) return fail(res, data);
-  return { ok: true, envelope: data.envelope as QuickEnvelope, completion: data.completion as QuickCompletion };
+  return {
+    ok: true,
+    envelope: data.envelope as QuickEnvelope,
+    recipientOpenPath: String(data.recipient_open_path || ""),
+    delivery: data.delivery as { state: string; email: string } | undefined,
+  };
 }
 
 export async function loadQuickPdfReceipt(documentId: string): Promise<QuickEnvelopeResult> {
@@ -245,7 +286,12 @@ export async function loadQuickPdfReceipt(documentId: string): Promise<QuickEnve
   }
   const data = await readJson(res);
   if (!res.ok) return fail(res, data);
-  return { ok: true, envelope: data.envelope as QuickEnvelope, completion: data.completion as QuickCompletion };
+  return {
+    ok: true,
+    envelope: data.envelope as QuickEnvelope,
+    completion: data.completion as QuickCompletion,
+    receipt: (data.receipt as QuickReceipt | null) || null,
+  };
 }
 
 export function tokenHiddenFromText(text: string, openPath: string): boolean {

@@ -76,7 +76,12 @@ export function resolveRecipientCanonicalSigningPacket(args: {
   const portable =
     args.portablePacket ??
     loadVs01CanonicalPacketPortable(documentId);
-  if (portable && portable.seed.agreementId === agreementId) {
+  if (
+    portable &&
+    portable.seed.agreementId === agreementId &&
+    typeof portable.seed.corpusPlain === "string" &&
+    (portable as { kind?: string }).kind !== "uploaded_final_pdf"
+  ) {
     const fromPortable = tryBuild(portable.seed.corpusPlain, "portable_packet");
     if (fromPortable) return fromPortable;
   }

@@ -43,6 +43,14 @@ export type WorkspaceIndexAgreement = {
     accepted_at?: string | null;
     status?: string | null;
   } | null;
+  document_kind?: "uploaded_final_pdf" | "lawdog_drafted" | string | null;
+  uploaded_final_pdf?: {
+    kind?: string | null;
+    document_id?: string | null;
+    content_sha256?: string | null;
+    page_count?: number | null;
+    label?: string | null;
+  } | null;
 };
 
 const base = () => resolveApiBase().replace(/\/$/, "");

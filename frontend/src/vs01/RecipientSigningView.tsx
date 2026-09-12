@@ -304,7 +304,8 @@ export function RecipientSigningView({
   }, [serverHydrationPending]);
 
   const portablePacket = useMemo(() => {
-    if (serverPortablePacket?.seed.corpusPlain.trim()) return serverPortablePacket;
+    if (isUploadedFinalPdfPacket(serverPortablePacket)) return serverPortablePacket;
+    if ((serverPortablePacket?.seed.corpusPlain || "").trim()) return serverPortablePacket;
     const did = documentId?.trim() ?? "";
     return did ? loadVs01CanonicalPacketPortable(did) : null;
     // Re-read local portable after server authority bootstrap completes.

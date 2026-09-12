@@ -55,6 +55,14 @@ export type PublicVerifyPayload = {
       corpus_length?: number;
       schema?: string;
     } | null;
+    document_kind?: string | null;
+    uploaded_final_pdf?: {
+      kind?: string;
+      document_id?: string;
+      content_sha256?: string;
+      page_count?: number;
+      label?: string;
+    } | null;
     public_completed_pdf_distribution?: boolean;
     /**
      * Optional VS01 signing-envelope provenance (packet → accepted SoT).

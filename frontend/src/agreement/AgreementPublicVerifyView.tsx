@@ -177,6 +177,12 @@ export function AgreementPublicVerify({ agreementId, onClose }: Props) {
         <h1 className="text-xl font-semibold tracking-tight text-white sm:text-2xl" data-testid="public-verify-title">
           {(data.summary.title || "").trim() || "Agreement"}
         </h1>
+        {vfy.uploaded_final_pdf || vfy.document_kind === "uploaded_final_pdf" ? (
+          <p className="text-xs leading-relaxed text-slate-400" data-testid="public-verify-uploaded-final-pdf">
+            {vfy.uploaded_final_pdf?.label ||
+              "Uploaded final PDF signed through LawDog — not a LawDog-drafted agreement."}
+          </p>
+        ) : null}
         <p className="text-[11px] leading-snug text-slate-500">{PROOF_LADDER_SUBTITLE}</p>
         {recordPending ? (
           <p

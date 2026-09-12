@@ -788,6 +788,8 @@ class AgreementDraft(AgreementDraftCreate):
     completion_evidence_v1: Optional[Dict[str, Any]] = None
     """Phase 4C.2 — owner-guarded uploaded-PDF envelope (not drafted paper)."""
     quick_pdf_envelope_v1: Optional[Dict[str, Any]] = None
+    """Phase 4C.2.1 — typed uploaded-PDF authority (never accepted-review corpus)."""
+    uploaded_final_pdf_authority_v1: Optional[Dict[str, Any]] = None
 
 
 def _merge_agreement_draft(base: AgreementDraft, **updates: Any) -> AgreementDraft:
@@ -7012,6 +7014,24 @@ def get_agreements_workspace_index(request: Request) -> Dict[str, Any]:
                     "dashboard_source": "draft",
                     "content_unavailable": False,
                     "accepted_review_snapshot": accepted_public,
+                    "uploaded_final_pdf": (
+                        {
+                            "kind": "uploaded_final_pdf",
+                            "document_id": str((d.get("quick_pdf_envelope_v1") or {}).get("document_id") or "").strip() or None,
+                            "content_sha256": str((d.get("quick_pdf_envelope_v1") or {}).get("content_sha256") or "").strip().lower() or None,
+                            "page_count": (d.get("quick_pdf_envelope_v1") or {}).get("page_count"),
+                            "label": "Uploaded final PDF signed through LawDog",
+                        }
+                        if isinstance(d.get("quick_pdf_envelope_v1"), dict)
+                        and str((d.get("quick_pdf_envelope_v1") or {}).get("kind") or "") == "uploaded_final_pdf"
+                        else None
+                    ),
+                    "document_kind": (
+                        "uploaded_final_pdf"
+                        if isinstance(d.get("quick_pdf_envelope_v1"), dict)
+                        and str((d.get("quick_pdf_envelope_v1") or {}).get("kind") or "") == "uploaded_final_pdf"
+                        else "lawdog_drafted"
+                    ),
                 }
             )
         except Exception as exc:
@@ -7575,6 +7595,10 @@ def _attest_portable_envelope_or_400(
                 ),
             },
         )
+    from backend.services.quick_pdf_envelope import is_uploaded_final_pdf_authority
+
+    if is_uploaded_final_pdf_authority(draft_obj):
+        return bound_portable
 
     if stored_portable is not None:
         ok, err, attested = validate_portable_against_stored_attested_sot(
@@ -9472,6 +9496,16 @@ def _public_agreement_verify_payload(aid: str, draft: AgreementDraft) -> Dict[st
                 verification["accepted_review_snapshot"] = None
                 verification["accepted_review_snapshot_reason"] = snap_err
         else:
+            verification["accepted_review_snapshot"] = None
+        from backend.services.quick_pdf_envelope import (
+            envelope_from_draft,
+            public_uploaded_pdf_verify_fragment,
+        )
+
+        uploaded = public_uploaded_pdf_verify_fragment(envelope_from_draft(draft))
+        verification["uploaded_final_pdf"] = uploaded
+        if uploaded:
+            verification["document_kind"] = "uploaded_final_pdf"
             verification["accepted_review_snapshot"] = None
     except Exception:
         logging.getLogger(__name__).exception(

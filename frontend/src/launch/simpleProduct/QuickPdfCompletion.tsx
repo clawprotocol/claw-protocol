@@ -1,31 +1,38 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { QuickPdfBinding } from "./quickPdfUpload";
+import { QuickPdfPlacement } from "./QuickPdfPlacement";
 import {
   OWNER_ROLE_ID,
-  RECIPIENT_ROLE_ID,
   createQuickPdfEnvelope,
-  defaultOwnerRecipientFields,
   loadQuickPdfEnvelope,
   loadQuickPdfReceipt,
+  ownerAndRecipientPlaced,
   ownerCompleteQuickPdf,
   prepareQuickPdfEnvelope,
+  reissueQuickPdfEnvelope,
   saveQuickPdfFields,
   tokenHiddenFromText,
   type QuickCompletion,
   type QuickEnvelope,
   type QuickParty,
+  type QuickPdfField,
+  type QuickReceipt,
 } from "./quickPdfEnvelope";
 
-type Step = "parties" | "place" | "deliver" | "receipt";
+type Step = "parties" | "place" | "owner-sign" | "deliver" | "receipt";
 
 export function QuickPdfCompletion(props: { binding: QuickPdfBinding }) {
   const { binding } = props;
   const [step, setStep] = useState<Step>("parties");
   const [owner, setOwner] = useState<QuickParty>({ name: "", email: "" });
   const [recipient, setRecipient] = useState<QuickParty>({ name: "", email: "" });
+  const [fields, setFields] = useState<QuickPdfField[]>([]);
   const [envelope, setEnvelope] = useState<QuickEnvelope | null>(null);
   const [completion, setCompletion] = useState<QuickCompletion | null>(null);
+  const [receipt, setReceipt] = useState<QuickReceipt | null>(null);
   const [openPath, setOpenPath] = useState("");
+  const [signatureText, setSignatureText] = useState("");
+  const [consent, setConsent] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const inflight = useRef(false);
@@ -39,10 +46,13 @@ export function QuickPdfCompletion(props: { binding: QuickPdfBinding }) {
       setEnvelope(result.envelope);
       setOwner({ name: result.envelope.owner_name, email: result.envelope.owner_email });
       setRecipient({ name: result.envelope.recipient_name, email: result.envelope.recipient_email });
+      setFields(result.envelope.fields || []);
       if (result.completion) setCompletion(result.completion);
+      if (result.receipt) setReceipt(result.receipt);
       if (result.completion?.fully_executed) setStep("receipt");
-      else if (result.envelope.locked) setStep("deliver");
-      else if ((result.envelope.fields || []).length >= 2) setStep("place");
+      else if (result.envelope.recipient_link_ready || result.envelope.recipient_token_jti) setStep("deliver");
+      else if (result.completion?.owner_signed) setStep("deliver");
+      else if ((result.envelope.fields || []).length >= 2) setStep("owner-sign");
     });
     return () => {
       cancel = true;
@@ -70,18 +80,40 @@ export function QuickPdfCompletion(props: { binding: QuickPdfBinding }) {
         return;
       }
       setEnvelope(result.envelope);
+      setFields(result.envelope.fields || []);
       setStep("place");
     });
 
   const onPlace = () =>
     void run(async () => {
-      const fields = defaultOwnerRecipientFields();
-      const saved = await saveQuickPdfFields(binding, fields, 1);
+      if (!ownerAndRecipientPlaced(fields)) {
+        setError("Place a signature for you and for the recipient on the PDF.");
+        return;
+      }
+      const saved = await saveQuickPdfFields(binding, fields, envelope?.page_count || 0);
       if (!saved.ok) {
         setError(saved.message);
         return;
       }
       setEnvelope(saved.envelope);
+      setFields(saved.envelope.fields || fields);
+      setStep("owner-sign");
+    });
+
+  const onOwnerSign = () =>
+    void run(async () => {
+      const result = await ownerCompleteQuickPdf(binding, {
+        signatureText,
+        consent,
+        packetRevision: envelope?.packet_revision || "qpk_1",
+      });
+      if (!result.ok) {
+        setError(result.message);
+        return;
+      }
+      setEnvelope(result.envelope);
+      setCompletion(result.completion || null);
+      setReceipt(result.receipt || null);
       setStep("deliver");
     });
 
@@ -94,12 +126,18 @@ export function QuickPdfCompletion(props: { binding: QuickPdfBinding }) {
       }
       preparedOnce.current = true;
       setEnvelope(result.envelope);
-      setOpenPath(result.recipientOpenPath || "");
-      const signed = await ownerCompleteQuickPdf(binding);
-      if (signed.ok) {
-        setEnvelope(signed.envelope);
-        setCompletion(signed.completion || null);
+      if (result.recipientOpenPath) setOpenPath(result.recipientOpenPath);
+    });
+
+  const onReissue = () =>
+    void run(async () => {
+      const result = await reissueQuickPdfEnvelope(binding);
+      if (!result.ok) {
+        setError(result.message);
+        return;
       }
+      setEnvelope(result.envelope);
+      setOpenPath(result.recipientOpenPath || "");
     });
 
   const onCopy = () =>
@@ -123,6 +161,7 @@ export function QuickPdfCompletion(props: { binding: QuickPdfBinding }) {
       }
       setEnvelope(result.envelope);
       setCompletion(result.completion || null);
+      setReceipt(result.receipt || null);
       setStep("receipt");
     });
 
@@ -178,6 +217,7 @@ export function QuickPdfCompletion(props: { binding: QuickPdfBinding }) {
               onChange={(e) => setRecipient((p) => ({ ...p, email: e.target.value }))}
             />
           </label>
+          <p className="text-xs text-slate-500">One recipient only in this workflow.</p>
           <button type="submit" className="vs01-btn vs01-btn--primary min-h-11" data-testid="quick-pdf-parties-save" disabled={busy}>
             {busy ? "Saving…" : "Save signers & continue"}
           </button>
@@ -185,22 +225,69 @@ export function QuickPdfCompletion(props: { binding: QuickPdfBinding }) {
       ) : null}
 
       {step === "place" ? (
-        <div data-testid="quick-pdf-place" className="flex min-w-0 flex-col gap-3">
-          <p className="text-sm text-slate-300">
-            Place one signature for you ({OWNER_ROLE_ID}) and one for the recipient ({RECIPIENT_ROLE_ID}) on page 1.
-          </p>
-          <div className="relative min-h-48 w-full overflow-hidden rounded-lg border border-slate-700 bg-slate-900" data-testid="quick-pdf-page">
-            <div className="absolute left-[12%] top-[72%] h-[10%] w-[32%] rounded border border-emerald-400/80 bg-emerald-500/20 text-center text-[10px] text-emerald-100">
-              Your signature
-            </div>
-            <div className="absolute left-[56%] top-[72%] h-[10%] w-[32%] rounded border border-sky-400/80 bg-sky-500/20 text-center text-[10px] text-sky-100">
-              Recipient signature
-            </div>
-          </div>
-          <button type="button" className="vs01-btn vs01-btn--primary min-h-11" data-testid="quick-pdf-place-save" disabled={busy} onClick={onPlace}>
+        <div className="flex min-w-0 flex-col gap-3">
+          <QuickPdfPlacement
+            documentId={binding.documentId}
+            pageCount={envelope?.page_count || 1}
+            fields={fields}
+            ownerName={owner.name}
+            recipientName={recipient.name}
+            busy={busy}
+            onChange={setFields}
+          />
+          <button
+            type="button"
+            className="vs01-btn vs01-btn--primary min-h-11"
+            data-testid="quick-pdf-place-save"
+            disabled={busy || !ownerAndRecipientPlaced(fields)}
+            onClick={onPlace}
+          >
             {busy ? "Saving…" : "Save placements & continue"}
           </button>
         </div>
+      ) : null}
+
+      {step === "owner-sign" ? (
+        <form
+          className="flex min-w-0 flex-col gap-3"
+          data-testid="quick-pdf-owner-sign"
+          onSubmit={(e) => {
+            e.preventDefault();
+            onOwnerSign();
+          }}
+        >
+          <p className="text-sm text-slate-300">
+            Sign as {owner.name || "the owner"} ({OWNER_ROLE_ID}). Preparing a recipient link will not sign for you.
+          </p>
+          <label className="text-sm text-slate-300">
+            Type your signature
+            <input
+              data-testid="quick-pdf-owner-signature"
+              className="mt-1 w-full min-w-0 rounded-lg border border-slate-700 bg-slate-950 px-3 py-2 text-sm"
+              value={signatureText}
+              autoComplete="off"
+              onChange={(e) => setSignatureText(e.target.value)}
+            />
+          </label>
+          <label className="flex items-start gap-2 text-sm text-slate-300">
+            <input
+              type="checkbox"
+              className="mt-1"
+              data-testid="quick-pdf-owner-consent"
+              checked={consent}
+              onChange={(e) => setConsent(e.target.checked)}
+            />
+            I agree to electronically sign this uploaded final PDF. LawDog did not draft it.
+          </label>
+          <button
+            type="submit"
+            className="vs01-btn vs01-btn--primary min-h-11"
+            data-testid="quick-pdf-owner-agree-sign"
+            disabled={busy || !consent || signatureText.trim().length < 2}
+          >
+            {busy ? "Signing…" : "Agree and sign"}
+          </button>
+        </form>
       ) : null}
 
       {step === "deliver" ? (
@@ -221,15 +308,20 @@ export function QuickPdfCompletion(props: { binding: QuickPdfBinding }) {
             disabled={busy}
             onClick={onPrepare}
           >
-            {busy ? "Preparing…" : preparedOnce.current ? "Recipient link is ready" : "Prepare recipient link"}
+            {busy ? "Preparing…" : preparedOnce.current || envelope?.recipient_link_ready ? "Recipient link is ready" : "Prepare recipient link"}
           </button>
+          {envelope?.recipient_link_ready ? (
+            <button type="button" className="vs01-btn vs01-btn--secondary min-h-11" data-testid="quick-pdf-reissue" disabled={busy} onClick={onReissue}>
+              Reissue recipient link
+            </button>
+          ) : null}
           {openPath ? (
             <button type="button" className="vs01-btn vs01-btn--secondary min-h-11" data-testid="quick-pdf-copy-link" onClick={onCopy}>
               Copy recipient link
             </button>
           ) : null}
           <p className="text-xs text-slate-500" data-testid="quick-pdf-delivery-state">
-            {openPath ? "Link prepared. Email unavailable." : "Link not prepared yet."}
+            {envelope?.recipient_link_ready || openPath ? "Link prepared. Email unavailable." : "Link not prepared yet."}
           </p>
           {envelope?.content_sha256 ? (
             <p className="break-all text-xs text-slate-500" data-testid="quick-pdf-locked-hash">
@@ -247,7 +339,19 @@ export function QuickPdfCompletion(props: { binding: QuickPdfBinding }) {
           {completion?.fully_executed ? (
             <div data-testid="quick-pdf-fully-executed">
               <p className="font-semibold text-emerald-100">Fully executed</p>
-              <p className="text-sm text-slate-300">Every required signer has completed. Hash {envelope?.content_sha256}</p>
+              <p className="text-sm text-slate-300">
+                Uploaded final PDF signed through LawDog. Hash {envelope?.content_sha256}
+              </p>
+              {receipt?.receipt_id ? (
+                <p className="break-all text-xs text-slate-500" data-testid="quick-pdf-receipt-id">
+                  Receipt {receipt.receipt_id}
+                </p>
+              ) : null}
+              {receipt?.receipt_digest ? (
+                <p className="break-all text-xs text-slate-500" data-testid="quick-pdf-receipt-digest">
+                  Digest {receipt.receipt_digest}
+                </p>
+              ) : null}
               <button
                 type="button"
                 className="vs01-btn vs01-btn--primary mt-3 min-h-11"
