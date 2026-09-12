@@ -15,13 +15,16 @@ export type BillingFixtureMode =
   | BillingDisplayState
   | "wrong_org"
   | "provider_fail"
-  | "delayed_active";
+  | "delayed_active"
+  | "checkout_unresolved"
+  | "checkout_processing";
 
 export type BillingFixtureState = {
   mode: BillingFixtureMode;
   delayMs: number;
   statusHits: number;
   portalHits: number;
+  checkoutHits: number;
   lastPortalBody: Record<string, unknown> | null;
 };
 
@@ -31,6 +34,7 @@ export function createBillingFixtureState(mode: BillingFixtureMode = "active"): 
     delayMs: mode === "delayed_active" ? 1200 : 0,
     statusHits: 0,
     portalHits: 0,
+    checkoutHits: 0,
     lastPortalBody: null,
   };
 }
@@ -192,6 +196,35 @@ export async function installBillingApiMocks(page: Page, state: BillingFixtureSt
     }
 
     if (url.includes("/v1/billing/checkout-session")) {
+      state.checkoutHits += 1;
+      if (state.mode === "checkout_unresolved") {
+        await json(
+          route,
+          {
+            detail: {
+              code: "purchase_unresolved",
+              message: "We could not confirm the previous checkout. Do not pay again.",
+              session_id: "cs_unresolved_a",
+            },
+          },
+          409,
+        );
+        return;
+      }
+      if (state.mode === "checkout_processing") {
+        await json(
+          route,
+          {
+            detail: {
+              code: "payment_processing",
+              message: "Your payment is being processed. Do not pay again.",
+              session_id: "cs_processing_a",
+            },
+          },
+          409,
+        );
+        return;
+      }
       await json(route, { detail: { code: "already_subscribed", message: "already subscribed" } }, 409);
       return;
     }

@@ -332,3 +332,75 @@ Prior Billing evidence directories were preserved. Generated run artifacts are n
 ### Next acceptance priority (not started)
 
 Core paid journey: intake → targeted clarifications → substantive commercial agreement visibly rendered → owner chooses recipient review or direct e-signing. Both branches must preserve the same agreement/version and survive refresh. Settings remains later. No overall launch claim.
+
+## Billing follow-up — unresolved previous purchase (2026-09-12)
+
+Started from exact `144699685fbc17cd81aaf0569c3971000cafaf59`.  
+Source-content fingerprint of Billing files on disk (git hash-object of file contents, **not** a hash of `git status` filenames): `913cf3fd405cd0f380c338e59b7a9e96d2788376`.  
+Nothing was pushed or deployed. No live Stripe charges or external account changes. **Not a launch authorization.** Settings/admin were not begun. The core paid journey was not begun.
+
+Exact-payload retries, completed-session blocking, `already_subscribed`, cancellation preservation (demonstrated local cases), and startup safety remain retained.
+
+### Invariant
+
+An unresolved previous purchase must never authorize a second payable checkout.
+
+Failed/uncertain expiration does not mark an attempt superseded. A local deadline plus a failed lookup is not proof the provider session expired unpaid. Provider confirmation is required before retiring A. If completion races expiration, the original purchase is reconciled. The customer sees an honest recoverable status and is not asked to pay again, granted entitlement, or told payment succeeded.
+
+### Bounded matrix (written before the handler change)
+
+Production `POST /v1/billing/checkout-session`; Stripe simulated. The matrix mock does not auto-succeed expiration.
+
+| Row | Result |
+|---|---|
+| A expire 503 on monthly→annual | **pass** — A stays pending; no B; `409 purchase_unresolved` |
+| B local TTL + retrieve 503 + provider complete | **pass** — A not expired/superseded; no B; unresolved/processing |
+| C confirmed unpaid expiration | **pass** — A superseded; only B payable |
+| D completion during plan change | **pass** — reconcile A; no B |
+| D2 expire returns complete | **pass** — reconcile A; no B |
+| E repeated annual retry after expire fail | **pass** — still no B; same unresolved |
+| F refresh original monthly after expire fail | **pass** — still no B |
+| G retrieve malformed (no status) | **pass** — A kept; no B |
+| H expire 200 still open | **pass** — A kept; no B |
+| I expire malformed empty body | **pass** — A kept; no B |
+| J expire 400 + retrieve 503 | **pass** — A kept; no B |
+
+**Remaining failed matrix rows: none.** Do not treat Billing/Playwright happy-path totals as this invariant.
+
+### Named gate and required follow-up commands
+
+| Step | Result | Provider label |
+|---|---|---|
+| Focused Billing vitest | **4 files / 11 passed** | n/a |
+| Production handlers; Stripe mocked | previous set + unresolved-purchase matrix: **111 passed** | **mocked-provider** |
+| Playwright Billing desktop + mobile, workers=1 | **34/34 passed** | **mocked-provider** |
+| Phase 1 access | **18 files / 100 passed** | n/a |
+| Phase 2 paid-journey | **exit 0** (critical backend **121**) | n/a |
+| Production build | `tsc -b && vite build` — **✓ built in 9.03s** | n/a |
+| Full frontend suite | **not re-run**; retain unresolved inventory **9,505 / 9,309 / 196** | n/a |
+| Live Stripe / live-provider | **not run** | **live-provider: absent** |
+
+Commands:
+
+```bash
+bash scripts/run_phase4_billing_acceptance_browser_gate.sh
+bash scripts/run_phase1_access_contract_gate.sh
+bash scripts/run_phase2_paid_journey_release_gate.sh
+(cd frontend && ./node_modules/.bin/tsc -b && ./node_modules/.bin/vite build)
+```
+
+Unique mocked-provider evidence: `evals/commercial-readiness/results/phase4-billing-acceptance/144699685fbc-src-913cf3fd405c-mocked-provider/`  
+Prior Billing evidence directories were preserved. Generated run artifacts are not part of the source checkpoint.
+
+### Remaining staging blockers (Billing not live-complete)
+
+- `STRIPE_SECRET_KEY` and Pro price IDs for checkout
+- Stripe Customer Portal configuration
+- Server-mapped `stripe_customer_id` per entitled org
+- Live-provider evidence that attempt reuse, exact-payload idempotency, completed-session blocking, unresolved-purchase refusal, and schema startup hold against real Stripe
+- `cancel_at_period_end` must survive live `invoice.paid` without subscription authority
+- Do **not** mark Billing complete for live customers until those exist
+
+### Next acceptance priority (not started)
+
+Core paid journey: intake → targeted clarifications → substantive commercial agreement visibly rendered → owner chooses recipient review or direct e-signing. Both branches must preserve the same agreement/version and survive refresh. Settings remains later. No overall launch claim.

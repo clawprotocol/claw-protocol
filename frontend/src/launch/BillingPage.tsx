@@ -26,6 +26,10 @@ import { AgreementCompletionCheckoutContextPanel } from "../components/agreement
 import { readUpgradeCheckoutContext } from "../components/agreements/upgradeCheckoutContextStorage";
 import { CREATE_FLOW_CHECKOUT_AGREEMENT_ID } from "../components/agreements/agreementAdvancedDraftAccess";
 import {
+  checkoutStartErrorCode,
+  createBillingCheckoutSession,
+} from "./billingCheckoutApi";
+import {
   createBillingPortalSession,
   fetchBillingStatus,
   type BillingStatusPayload,
@@ -60,6 +64,7 @@ export function BillingPage() {
   const requestSeq = useRef(0);
   const checkoutInFlight = useRef(false);
   const [checkoutBusy, setCheckoutBusy] = useState(false);
+  const [checkoutRecovery, setCheckoutRecovery] = useState<{ code: string; message: string } | null>(null);
   const [portalBusy, setPortalBusy] = useState(false);
   const [portalError, setPortalError] = useState<string | null>(null);
   const returnToSimpleSend = useMemo(() => {
@@ -86,6 +91,7 @@ export function BillingPage() {
       setOrg(next);
       setStatus(null);
       setErr(null);
+      setCheckoutRecovery(null);
       setUiPhase("loading");
     });
   }, []);
@@ -94,6 +100,7 @@ export function BillingPage() {
     setStatus(null);
     setErr(null);
     setPortalError(null);
+    setCheckoutRecovery(null);
     setUiPhase(userId ? "loading" : authLoading ? "loading" : "signed_out");
   }, [org, userId, authLoading]);
 
@@ -155,7 +162,13 @@ export function BillingPage() {
     }
   }
 
-  function startProCheckout(): void {
+  function goToLocalCheckout(agreementId: string, returnTo: string): void {
+    navigate(
+      `/app/checkout/${encodeURIComponent(agreementId)}?tier=pro&cadence=${encodeURIComponent(cadence)}&returnTo=${encodeURIComponent(returnTo)}`,
+    );
+  }
+
+  async function startProCheckout(): Promise<void> {
     if (checkoutInFlight.current || checkoutBusy) return;
     if (!shouldOfferProCheckout(status, uiPhase)) {
       returnToAgreementOrStay();
@@ -163,19 +176,71 @@ export function BillingPage() {
     }
     checkoutInFlight.current = true;
     setCheckoutBusy(true);
+    setCheckoutRecovery(null);
     const aid =
       (returnToSimpleSend && extractAgreementIdFromSendReturnUrl(returnToSimpleSend)) ||
-      (returnToCreateFlow ? CREATE_FLOW_CHECKOUT_AGREEMENT_ID : null);
+      CREATE_FLOW_CHECKOUT_AGREEMENT_ID;
     const returnTo = returnToSimpleSend || "/app/create";
-    if (aid) {
-      navigate(
-        `/app/checkout/${encodeURIComponent(aid)}?tier=pro&cadence=${encodeURIComponent(cadence)}&returnTo=${encodeURIComponent(returnTo)}`,
-      );
-      return;
+    try {
+      const session = await createBillingCheckoutSession({
+        agreementId: aid,
+        cadence,
+        returnTo,
+        customerEmail: user?.email ?? null,
+      });
+      if (!session.checkout_url) {
+        setCheckoutRecovery({
+          code: "payment_processing",
+          message: "Your payment is being processed. Do not pay again.",
+        });
+        checkoutInFlight.current = false;
+        setCheckoutBusy(false);
+        return;
+      }
+      window.location.assign(session.checkout_url);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Could not start checkout.";
+      const code = checkoutStartErrorCode(error);
+      if (code === "already_subscribed" || /already_subscribed|already has an active subscription/i.test(message)) {
+        const refreshed = await fetchBillingStatus();
+        if (!refreshed.unavailable && refreshed.data) {
+          setStatus(refreshed.data);
+          setUiPhase(refreshed.data.display_state);
+          setErr(null);
+        }
+        checkoutInFlight.current = false;
+        setCheckoutBusy(false);
+        return;
+      }
+      if (code === "purchase_unresolved" || /purchase_unresolved|could not confirm the previous checkout/i.test(message)) {
+        setCheckoutRecovery({
+          code: "purchase_unresolved",
+          message: "We could not confirm the previous checkout. Do not pay again.",
+        });
+        checkoutInFlight.current = false;
+        setCheckoutBusy(false);
+        return;
+      }
+      if (code === "payment_processing" || /payment_processing|being processed|do not pay again/i.test(message)) {
+        setCheckoutRecovery({
+          code: "payment_processing",
+          message: "Your payment is being processed. Do not pay again.",
+        });
+        checkoutInFlight.current = false;
+        setCheckoutBusy(false);
+        return;
+      }
+      if (code === "stripe_checkout_not_configured" || /stripe_checkout_not_configured/i.test(message)) {
+        goToLocalCheckout(aid, returnTo);
+        return;
+      }
+      setCheckoutRecovery({
+        code: code || "checkout_failed",
+        message,
+      });
+      checkoutInFlight.current = false;
+      setCheckoutBusy(false);
     }
-    navigate(
-      `/app/checkout/${encodeURIComponent(CREATE_FLOW_CHECKOUT_AGREEMENT_ID)}?tier=pro&cadence=${encodeURIComponent(cadence)}&returnTo=${encodeURIComponent(returnTo)}`,
-    );
   }
 
   function ctaForTier(tierId: string) {
@@ -264,7 +329,7 @@ export function BillingPage() {
             sendReturnFlow={Boolean(returnToSimpleSend)}
             onFree={() => navigate("/app/create")}
             onStarter={() => ctaForTier("starter")}
-            onPro={() => ctaForTier("pro")}
+            onPro={() => void ctaForTier("pro")}
             onEnterprise={() => navigate("/app/create?intent=enterprise")}
             proCtaDisabled={checkoutBusy || !shouldOfferProCheckout(status, uiPhase)}
             proCtaLabel={
@@ -407,6 +472,16 @@ export function BillingPage() {
           {portalError ? (
             <p className="text-sm text-rose-300" role="alert" data-testid="billing-portal-error">
               {portalError}
+            </p>
+          ) : null}
+          {checkoutRecovery ? (
+            <p
+              className="text-sm text-amber-100"
+              role="alert"
+              data-testid="billing-checkout-recovery"
+              data-checkout-recovery={checkoutRecovery.code}
+            >
+              {checkoutRecovery.message}
             </p>
           ) : null}
 

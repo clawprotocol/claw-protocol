@@ -147,6 +147,56 @@ test.describe("Phase 4 billing acceptance", () => {
     await expect(page).not.toHaveURL(/premiumCompletion=1/);
   });
 
+  test("unresolved previous purchase does not start another payment", async ({ page }) => {
+    const state = createBillingFixtureState("checkout_unresolved");
+    const guards = attachGuards(page);
+    await seedBillingOwner(page, state);
+    await page.route("https://checkout.stripe.com/**", () => {
+      throw new Error("must not open a second payable checkout");
+    });
+    await openBilling(page);
+    await expect(page.getByTestId("billing-account-panel")).toHaveAttribute("data-billing-state", "no_subscription");
+    await page.getByTestId("billing-pro-cta").click();
+    await expect(page.getByTestId("billing-checkout-recovery")).toBeVisible();
+    await expect(page.getByTestId("billing-checkout-recovery")).toHaveAttribute(
+      "data-checkout-recovery",
+      "purchase_unresolved",
+    );
+    await expect(page.getByTestId("billing-checkout-recovery")).toContainText(/could not confirm the previous checkout/i);
+    await expect(page.getByTestId("billing-checkout-recovery")).toContainText(/do not pay again/i);
+    await expect(page).toHaveURL(/\/app\/billing/);
+    await expect(page).not.toHaveURL(/checkout\.stripe\.com/);
+    await expect(page.locator("body")).not.toContainText(/payment successful|you're subscribed|checkout complete/i);
+    await expect(page.getByTestId("billing-account-panel")).toHaveAttribute("data-billing-state", "no_subscription");
+    await page.getByTestId("billing-pro-cta").click();
+    await expect.poll(() => state.checkoutHits).toBe(2);
+    await expect(page.getByTestId("billing-checkout-recovery")).toBeVisible();
+    await expect(page).toHaveURL(/\/app\/billing/);
+    guards.assertClean();
+  });
+
+  test("processing purchase does not start another payment", async ({ page }) => {
+    const state = createBillingFixtureState("checkout_processing");
+    const guards = attachGuards(page);
+    await seedBillingOwner(page, state);
+    await page.route("https://checkout.stripe.com/**", () => {
+      throw new Error("must not open a second payable checkout");
+    });
+    await openBilling(page);
+    await page.getByTestId("billing-pro-cta").click();
+    await expect(page.getByTestId("billing-checkout-recovery")).toBeVisible();
+    await expect(page.getByTestId("billing-checkout-recovery")).toHaveAttribute(
+      "data-checkout-recovery",
+      "payment_processing",
+    );
+    await expect(page.getByTestId("billing-checkout-recovery")).toContainText(/being processed/i);
+    await expect(page.getByTestId("billing-checkout-recovery")).toContainText(/do not pay again/i);
+    await expect(page).toHaveURL(/\/app\/billing/);
+    await expect(page.locator("body")).not.toContainText(/payment successful|you're subscribed/i);
+    await expect(page.getByTestId("billing-account-panel")).toHaveAttribute("data-billing-state", "no_subscription");
+    guards.assertClean();
+  });
+
   test("portal or checkout query params do not declare payment success", async ({ page }) => {
     const state = createBillingFixtureState("no_subscription");
     await seedBillingOwner(page, state);

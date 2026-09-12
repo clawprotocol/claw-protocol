@@ -52,6 +52,13 @@ export function assertPhase4BillingAcceptanceContracts(): void {
   if (!page.includes("requestSeq") || !page.includes("contextOrg") || !page.includes("contextUser")) {
     throw new Error("Billing page lost late-response / org-switch rejection");
   }
+  if (!page.includes("billing-checkout-recovery") || !page.includes("createBillingCheckoutSession")) {
+    throw new Error("Billing page no longer consults the server or paints checkout recovery");
+  }
+  const checkoutPage = src("./simpleProduct/SimpleCheckoutPage.tsx");
+  if (!checkoutPage.includes("checkout-recovery-alert") || !checkoutPage.includes("purchase_unresolved")) {
+    throw new Error("checkout page no longer paints an honest unresolved-purchase recovery");
+  }
   const api = src("./billingStatusApi.ts");
   const portalFn = api.slice(api.indexOf("export async function createBillingPortalSession"));
   if (portalFn.includes("customer_id") || portalFn.includes("stripe_customer_id")) {
@@ -70,6 +77,9 @@ export function assertPhase4BillingAcceptanceContracts(): void {
   }
   if (!router.includes("payment_processing")) {
     throw new Error("checkout no longer reports an honest payment-processing state");
+  }
+  if (!router.includes("purchase_unresolved")) {
+    throw new Error("checkout no longer reports an honest unresolved previous purchase");
   }
   if (!router.includes("require_verified_org_id(request)")) {
     throw new Error("billing status/portal no longer derive org from the verified principal");
@@ -97,6 +107,12 @@ export function assertPhase4BillingAcceptanceContracts(): void {
   }
   if (!attempts.includes("canonical_checkout_request") || !attempts.includes("persist_checkout_attempt_request")) {
     throw new Error("checkout no longer persists the canonical provider request for an idempotency key");
+  }
+  if (!attempts.includes("_retire_unpaid_attempt") || !attempts.includes("_confirmed_session_status")) {
+    throw new Error("checkout no longer requires provider confirmation before retiring an unpaid attempt");
+  }
+  if (!attempts.includes("purchase_unresolved") && !attempts.includes('"unresolved"')) {
+    throw new Error("checkout no longer preserves an unresolved previous purchase");
   }
   const stripe = src("../../../backend/billing/stripe_client.py");
   if (!stripe.includes("Idempotency-Key")) {

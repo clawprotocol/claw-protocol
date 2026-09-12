@@ -161,10 +161,10 @@ def _resolve_attempt(
             retrieve_session=retrieve_session,
             sync_session=sync_session,
         )
-    if materialized.get("kind") in {"processing", "already_subscribed"}:
+    if materialized.get("kind") in {"processing", "already_subscribed", "unresolved"}:
         return materialized
     if materialized.get("kind") == "session" and not same_purchase:
-        live_status = str(materialized.get("provider_status") or "open").strip().lower()
+        live_status = str(materialized.get("provider_status") or "").strip().lower()
         if live_status == "complete":
             return _reconcile_completed_attempt(
                 eco,
@@ -172,15 +172,22 @@ def _resolve_attempt(
                 retrieve_session=retrieve_session,
                 sync_session=sync_session,
             )
-        if live_status not in _UNUSABLE_SESSION_STATUSES:
-            _supersede_unpaid_attempt(
-                eco, attempt, expire_session=expire_session, session_id=str(materialized.get("id") or "")
-            )
-        else:
+        if live_status in _UNUSABLE_SESSION_STATUSES:
             eco.mark_checkout_attempt_status(
                 str(attempt["id"]),
                 "expired" if live_status == "expired" else "canceled",
             )
+        else:
+            retired = _retire_unpaid_attempt(
+                eco,
+                attempt,
+                expire_session=expire_session,
+                retrieve_session=retrieve_session,
+                sync_session=sync_session,
+                session_id=str(materialized.get("id") or ""),
+            )
+            if retired.get("kind") != "superseded":
+                return retired
         replacement = eco.claim_or_reuse_checkout_attempt(
             org_id=org_id,
             user_id=user_id,
@@ -317,7 +324,7 @@ def _reuse_existing_session(
         return None
     try:
         live = retrieve_session(session_id)
-        live_status = str(live.get("status") or "").strip().lower()
+        live_status = _confirmed_session_status(live)
         live_url = str(live.get("url") or checkout_url).strip() or checkout_url
         live_expires = stripe_expires_at_iso(live)
     except RuntimeError:
@@ -332,17 +339,12 @@ def _reuse_existing_session(
                 "session_id": session_id,
                 "attempt_id": attempt.get("id"),
             }
-        if _checkout_attempt_expired(attempt.get("expires_at")):
-            eco.mark_checkout_attempt_status(str(attempt["id"]), "expired")
-            return {"kind": "unusable", "attempt_id": attempt.get("id")}
-        return {
-            "kind": "session",
-            "id": session_id,
-            "url": checkout_url,
-            "attempt_id": attempt["id"],
-            "reused": True,
-            "provider_status": "open",
-        }
+        # A local deadline plus a failed lookup is not proof the provider
+        # session expired unpaid. Keep A and refuse a replacement.
+        return _unresolved_outcome(attempt, session_id)
+
+    if live_status is None:
+        return _unresolved_outcome(attempt, session_id)
 
     if live_status in _UNUSABLE_SESSION_STATUSES:
         eco.mark_checkout_attempt_status(
@@ -412,17 +414,83 @@ def _reconcile_completed_attempt(
     }
 
 
-def _supersede_unpaid_attempt(
+def _confirmed_session_status(payload: Any) -> Optional[str]:
+    if not isinstance(payload, dict):
+        return None
+    status = str(payload.get("status") or "").strip().lower()
+    if not status:
+        return None
+    if status == "cancelled":
+        return "canceled"
+    if status in {"expired", "canceled", "complete", "open"}:
+        return status
+    return None
+
+
+def _unresolved_outcome(attempt: Dict[str, Any], session_id: Optional[str] = None) -> Dict[str, Any]:
+    sid = str(session_id or attempt.get("stripe_session_id") or "").strip() or None
+    return {
+        "kind": "unresolved",
+        "session_id": sid,
+        "attempt_id": attempt.get("id"),
+    }
+
+
+def _retire_unpaid_attempt(
     eco: EconomicsStore,
     attempt: Dict[str, Any],
     *,
     expire_session: Optional[ExpireSession],
+    retrieve_session: RetrieveSession,
+    sync_session: Optional[SyncSession],
     session_id: str,
-) -> None:
+) -> Dict[str, Any]:
+    """Retire A only after the provider confirms unpaid expiration.
+
+    Failed, malformed, or still-open expire/retrieve responses keep A and
+    refuse a replacement. A completion that races expiration reconciles A.
+    """
     sid = session_id or str(attempt.get("stripe_session_id") or "").strip()
-    if sid and expire_session is not None:
-        try:
-            expire_session(sid)
-        except RuntimeError:
-            _log.info("checkout_attempt_expire_failed attempt=%s session=%s", attempt.get("id"), sid)
-    eco.mark_checkout_attempt_status(str(attempt["id"]), "superseded")
+    if not sid or expire_session is None:
+        return _unresolved_outcome(attempt, sid)
+
+    expire_payload: Optional[Dict[str, Any]] = None
+    expire_status: Optional[str] = None
+    try:
+        expire_payload = expire_session(sid)
+        expire_status = _confirmed_session_status(expire_payload)
+    except RuntimeError:
+        _log.info("checkout_attempt_expire_failed attempt=%s session=%s", attempt.get("id"), sid)
+
+    if expire_status == "complete":
+        return _reconcile_completed_attempt(
+            eco,
+            attempt,
+            retrieve_session=retrieve_session,
+            sync_session=sync_session,
+            live=expire_payload,
+        )
+    if expire_status in _UNUSABLE_SESSION_STATUSES:
+        eco.mark_checkout_attempt_status(str(attempt["id"]), "superseded")
+        return {"kind": "superseded", "session_id": sid, "attempt_id": attempt.get("id")}
+
+    live: Optional[Dict[str, Any]] = None
+    live_status: Optional[str] = None
+    try:
+        live = retrieve_session(sid)
+        live_status = _confirmed_session_status(live)
+    except RuntimeError:
+        return _unresolved_outcome(attempt, sid)
+
+    if live_status == "complete":
+        return _reconcile_completed_attempt(
+            eco,
+            attempt,
+            retrieve_session=retrieve_session,
+            sync_session=sync_session,
+            live=live,
+        )
+    if live_status in _UNUSABLE_SESSION_STATUSES:
+        eco.mark_checkout_attempt_status(str(attempt["id"]), "superseded")
+        return {"kind": "superseded", "session_id": sid, "attempt_id": attempt.get("id")}
+    return _unresolved_outcome(attempt, sid)

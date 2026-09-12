@@ -32,6 +32,7 @@ BILLING_SOURCES=(
   backend/routers/billing_checkout_api.py
   backend/tests/test_billing_cancellation_preservation.py
   backend/tests/test_billing_checkout_retry_safety.py
+  backend/tests/test_billing_unresolved_purchase_matrix.py
   backend/tests/test_billing_schema_startup.py
   backend/tests/test_billing_customer_portal.py
   backend/tests/test_billing_display.py
@@ -83,6 +84,7 @@ echo "---- Production billing handlers (external Stripe mocked) ----"
   backend/tests/test_billing_display.py \
   backend/tests/test_billing_customer_portal.py \
   backend/tests/test_billing_checkout_retry_safety.py \
+  backend/tests/test_billing_unresolved_purchase_matrix.py \
   backend/tests/test_billing_schema_startup.py \
   backend/tests/test_billing_cancellation_preservation.py \
   backend/tests/test_checkout_app_origin.py \

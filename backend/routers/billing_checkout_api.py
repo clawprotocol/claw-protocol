@@ -165,6 +165,15 @@ async def post_checkout_session(request: Request, body: CheckoutSessionIn) -> Di
                 "session_id": session.get("session_id"),
             },
         )
+    if kind == "unresolved":
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "purchase_unresolved",
+                "message": "We could not confirm the previous checkout. Do not pay again.",
+                "session_id": session.get("session_id"),
+            },
+        )
     session_id = str(session.get("id") or "")
     checkout_url = str(session.get("url") or "")
     if not session_id or not checkout_url:
