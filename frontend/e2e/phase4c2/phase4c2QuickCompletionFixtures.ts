@@ -25,10 +25,34 @@ export const PHASE4C2_OWNER_PARTY_ID = "party_qs_owner";
 export const PHASE4C2_RECIPIENT_PARTY_ID = "party_qs_recipient";
 export const PHASE4C2_TOKEN = "tok-phase4c2-sign-recipient-secret";
 export const PHASE4C2_REVOKED = "tok-phase4c2-revoked-secret";
-export const PHASE4C2_PDF = Buffer.from("%PDF-1.4 phase4c2-small-owner-bytes\n", "utf8");
+export const PHASE4C2_REISSUED = "tok-phase4c2-reissued-secret";
+export const PHASE4C2_PDF = Buffer.from(
+  [
+    "%PDF-1.1",
+    "1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj",
+    "2 0 obj<</Type/Pages/Kids[3 0 R 4 0 R]/Count 2>>endobj",
+    "3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 612 792]>>endobj",
+    "4 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 612 792]>>endobj",
+    "xref",
+    "0 5",
+    "0000000000 65535 f ",
+    "0000000009 00000 n ",
+    "0000000058 00000 n ",
+    "0000000115 00000 n ",
+    "0000000184 00000 n ",
+    "trailer<</Size 5/Root 1 0 R>>",
+    "startxref",
+    "253",
+    "%%EOF",
+    "",
+  ].join("\n"),
+  "utf8",
+);
 export const PHASE4C2_PDF_SHA = createHash("sha256").update(PHASE4C2_PDF).digest("hex");
 export const PHASE4C2_PDF_TYPE = "application/pdf";
 export const PHASE4C2_PACKET_REVISION = "qpk_1";
+export const PHASE4C2_RECEIPT_ID = "rcpt_phase4c2_uploaded_pdf";
+export const PHASE4C2_RECEIPT_DIGEST = createHash("sha256").update("phase4c2-uploaded-pdf-receipt").digest("hex");
 
 export type Phase4c2FixtureState = {
   entitlement: "paid" | "guest" | "auth_fail";
@@ -39,8 +63,10 @@ export type Phase4c2FixtureState = {
   prepareHits: number;
   copyHits: number;
   ownerCompleteHits: number;
+  reissueHits: number;
   receiptGets: number;
   bundleGets: number;
+  activeToken: string;
   packetHits: number;
   validateHits: number;
   contentHits: Array<{ hasOwnerAuth: boolean; hasRecipientToken: boolean }>;
@@ -65,7 +91,9 @@ export function createPhase4c2State(partial?: Partial<Phase4c2FixtureState>): Ph
     prepareHits: 0,
     copyHits: 0,
     ownerCompleteHits: 0,
+    reissueHits: 0,
     receiptGets: 0,
+    activeToken: PHASE4C2_TOKEN,
     bundleGets: 0,
     packetHits: 0,
     validateHits: 0,
@@ -141,15 +169,17 @@ function envelope(state: Phase4c2FixtureState) {
     recipient_party_id: PHASE4C2_RECIPIENT_PARTY_ID,
     owner_role_id: OWNER_ROLE_ID,
     recipient_role_id: RECIPIENT_ROLE_ID,
-    locked: state.prepared,
-    page_count: 1,
+    kind: "uploaded_final_pdf",
+    locked: state.prepared || state.signedRoles.has(OWNER_ROLE_ID),
+    page_count: 2,
+    max_recipients: 1,
     fields: state.fieldsSaved
       ? [
           {
             field_id: "fld_owner_sig",
             signer_role_id: OWNER_ROLE_ID,
             field_type: "signature",
-            page_index: 0,
+            page_index: 1,
             x: 0.12,
             y: 0.72,
             w: 0.32,
@@ -160,7 +190,7 @@ function envelope(state: Phase4c2FixtureState) {
             field_id: "fld_recipient_sig",
             signer_role_id: RECIPIENT_ROLE_ID,
             field_type: "signature",
-            page_index: 0,
+            page_index: 1,
             x: 0.56,
             y: 0.72,
             w: 0.32,
@@ -171,6 +201,8 @@ function envelope(state: Phase4c2FixtureState) {
       : [],
     packet_revision: PHASE4C2_PACKET_REVISION,
     delivery_state: state.prepared ? "link_prepared" : "not_prepared",
+    recipient_link_ready: state.prepared,
+    recipient_token_jti: state.prepared ? "jti-phase4c2-active" : undefined,
   };
 }
 
@@ -193,12 +225,12 @@ function portable(state: Phase4c2FixtureState) {
     v: 1,
     schema: "vs01_signing_packet_v1",
     kind: "uploaded_final_pdf",
+    authorityMode: "uploaded_final_pdf",
     seed: {
       v: 1,
       documentId: PHASE4C2_DOCUMENT_ID,
       agreementId: PHASE4C2_AGREEMENT_ID,
-      corpusPlain: "LAWDOG_QUICK_PDF_ENVELOPE_V1 lock identity — not drafted paper",
-      corpusHash: PHASE4C2_PDF_SHA,
+      contentSha256: PHASE4C2_PDF_SHA,
       savedAt: "2026-09-11T18:00:00.000Z",
     },
     roles: [
@@ -227,7 +259,7 @@ function portable(state: Phase4c2FixtureState) {
       {
         id: "fld_owner_sig",
         type: "signature",
-        page: 0,
+        page: 1,
         x: 0.12,
         y: 0.72,
         width: 0.32,
@@ -239,7 +271,7 @@ function portable(state: Phase4c2FixtureState) {
       {
         id: "fld_recipient_sig",
         type: "signature",
-        page: 0,
+        page: 1,
         x: 0.56,
         y: 0.72,
         width: 0.32,
@@ -249,7 +281,7 @@ function portable(state: Phase4c2FixtureState) {
         counterpartyId: PHASE4C2_RECIPIENT_PARTY_ID,
       },
     ],
-    pageCount: 1,
+    pageCount: 2,
     fieldCount: 2,
     witnessPageIndex: 0,
     initialsPolicy: { enabled: false, bodyPagesOnly: true },
@@ -408,7 +440,7 @@ async function fulfillPhase4c2Api(route: Route, state: Phase4c2FixtureState): Pr
       await json(route, { detail: { code: "invalid_token", message: "This link is invalid or expired." } }, 403);
       return;
     }
-    if (token !== PHASE4C2_TOKEN) {
+    if (token !== state.activeToken) {
       await json(route, { detail: { code: "invalid_token", message: "This link is invalid or expired." } }, 403);
       return;
     }
@@ -428,7 +460,7 @@ async function fulfillPhase4c2Api(route: Route, state: Phase4c2FixtureState): Pr
     const parsed = new URL(url);
     const token = (parsed.searchParams.get("t") || recipTok || "").trim();
     const documentId = (parsed.searchParams.get("document_id") || "").trim();
-    if (!token || token === PHASE4C2_REVOKED || state.revokeToken || token !== PHASE4C2_TOKEN) {
+    if (!token || token === PHASE4C2_REVOKED || state.revokeToken || token !== state.activeToken) {
       await json(route, { detail: { code: "invalid_token" } }, 403);
       return;
     }
@@ -443,7 +475,7 @@ async function fulfillPhase4c2Api(route: Route, state: Phase4c2FixtureState): Pr
   if (url.includes("/vs01-signer-complete") && method === "POST") {
     const body = readJsonBody(route);
     const token = recipTok;
-    if (!token || token !== PHASE4C2_TOKEN || state.revokeToken) {
+    if (!token || token !== state.activeToken || state.revokeToken) {
       await json(route, { detail: { code: "invalid_token" } }, 403);
       return;
     }
@@ -481,20 +513,39 @@ async function fulfillPhase4c2Api(route: Route, state: Phase4c2FixtureState): Pr
     }
 
     if (url.includes("/fields") && method === "POST") {
+      const posted = Array.isArray(body.fields) ? (body.fields as Array<{ page_index?: number }>) : [];
+      if (posted.some((field) => Number(field.page_index) < 0 || Number(field.page_index) > 1)) {
+        await json(route, { detail: { code: "off_page_field" } }, 400);
+        return;
+      }
       state.fieldSaves += 1;
       state.fieldsSaved = true;
       await json(route, { ok: true, envelope: envelope(state) });
       return;
     }
+    if (url.includes("/reissue") && method === "POST") {
+      state.reissueHits += 1;
+      state.prepared = true;
+      state.activeToken = PHASE4C2_REISSUED;
+      await json(route, {
+        ok: true,
+        reissued: true,
+        envelope: envelope(state),
+        delivery: { state: "link_prepared", email: "unavailable", copied_manually: false },
+        recipient_open_path: phase4c2RecipientHref(PHASE4C2_REISSUED),
+      });
+      return;
+    }
     if (url.includes("/prepare") && method === "POST") {
       state.prepareHits += 1;
+      const first = !state.prepared;
       state.prepared = true;
       await json(route, {
         ok: true,
-        idempotent: state.prepareHits > 1,
+        idempotent: !first,
         envelope: envelope(state),
         delivery: { state: "link_prepared", email: "unavailable", copied_manually: false },
-        recipient_open_path: phase4c2RecipientHref(),
+        ...(first ? { recipient_open_path: phase4c2RecipientHref(state.activeToken) } : {}),
       });
       return;
     }
@@ -508,6 +559,12 @@ async function fulfillPhase4c2Api(route: Route, state: Phase4c2FixtureState): Pr
       return;
     }
     if (url.includes("/owner-complete") && method === "POST") {
+      const typed = String(body.signature_text || "").trim();
+      const consent = body.consent === true;
+      if (!consent || typed.length < 2) {
+        await json(route, { detail: { code: "owner_ceremony_incomplete" } }, 400);
+        return;
+      }
       state.ownerCompleteHits += 1;
       const already = state.signedRoles.has(OWNER_ROLE_ID);
       state.signedRoles.add(OWNER_ROLE_ID);
@@ -516,12 +573,24 @@ async function fulfillPhase4c2Api(route: Route, state: Phase4c2FixtureState): Pr
         already_signed: already,
         envelope: envelope(state),
         completion: completion(state),
+        receipt: completion(state).fully_executed
+          ? { receipt_id: PHASE4C2_RECEIPT_ID, receipt_digest: PHASE4C2_RECEIPT_DIGEST, kind: "uploaded_final_pdf_receipt_v1" }
+          : null,
       });
       return;
     }
     if (url.includes("/receipt") && method === "GET") {
       state.receiptGets += 1;
-      await json(route, { ok: true, envelope: envelope(state), completion: completion(state) });
+      const done = completion(state);
+      await json(route, {
+        ok: true,
+        envelope: envelope(state),
+        completion: done,
+        document_kind: "uploaded_final_pdf",
+        receipt: done.fully_executed
+          ? { receipt_id: PHASE4C2_RECEIPT_ID, receipt_digest: PHASE4C2_RECEIPT_DIGEST, kind: "uploaded_final_pdf_receipt_v1" }
+          : null,
+      });
       return;
     }
     if (url.includes("/bundle") && method === "GET") {
@@ -552,13 +621,74 @@ async function fulfillPhase4c2Api(route: Route, state: Phase4c2FixtureState): Pr
       return;
     }
     if (method === "GET") {
+      const done = state.envelopeCreated ? completion(state) : undefined;
       await json(route, {
         ok: true,
         envelope: state.envelopeCreated ? envelope(state) : null,
-        completion: state.envelopeCreated ? completion(state) : undefined,
+        completion: done,
+        receipt: done?.fully_executed
+          ? { receipt_id: PHASE4C2_RECEIPT_ID, receipt_digest: PHASE4C2_RECEIPT_DIGEST, kind: "uploaded_final_pdf_receipt_v1" }
+          : null,
       });
       return;
     }
+  }
+
+  if (url.includes("/api/agreements/workspace-index")) {
+    await json(route, {
+      ok: true,
+      agreements: [
+        {
+          id: PHASE4C2_AGREEMENT_ID,
+          title: "Uploaded final PDF — e-sign preparation",
+          created_at: "2026-09-11T18:00:00.000Z",
+          updated_at: "2026-09-11T18:00:00.000Z",
+          party_count: 2,
+          signer_count: 2,
+          version_ledger_count: 0,
+          completed_signed: false,
+          has_server_signing_lock: true,
+          locked_version_id: "lv-phase4c2-quick-pdf",
+          workspace_archived_at: null,
+          review_sent_at: null,
+          document_kind: "uploaded_final_pdf",
+          uploaded_final_pdf: {
+            kind: "uploaded_final_pdf",
+            document_id: PHASE4C2_DOCUMENT_ID,
+            content_sha256: PHASE4C2_PDF_SHA,
+            page_count: 2,
+            label: "Uploaded final PDF signed through LawDog",
+          },
+          accepted_review_snapshot: null,
+        },
+      ],
+      skipped: [],
+    });
+    return;
+  }
+
+  if (url.includes("/api/agreements/public/") && url.includes("/verify")) {
+    await json(route, {
+      agreement_id: PHASE4C2_AGREEMENT_ID,
+      summary: { title: "Uploaded final PDF — e-sign preparation", status: "partially_signed" },
+      participants: [],
+      version_history: [],
+      signature_status: { fully_executed: false, signatures_recorded: 1, signer_party_count: 2 },
+      signature_events: [],
+      verification: {
+        agreement_hash: "",
+        document_kind: "uploaded_final_pdf",
+        accepted_review_snapshot: null,
+        uploaded_final_pdf: {
+          kind: "uploaded_final_pdf",
+          document_id: PHASE4C2_DOCUMENT_ID,
+          content_sha256: PHASE4C2_PDF_SHA,
+          page_count: 2,
+          label: "Uploaded final PDF signed through LawDog — not a LawDog-drafted agreement.",
+        },
+      },
+    });
+    return;
   }
 
   if (url.includes("/v1/sign-sessions") && method === "POST") {

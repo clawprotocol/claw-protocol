@@ -1,19 +1,27 @@
 import { describe, expect, it } from "vitest";
-import { defaultOwnerRecipientFields, sanitizedEnvelopeMessage, tokenHiddenFromText } from "./quickPdfEnvelope";
+import { ownerAndRecipientPlaced, sanitizedEnvelopeMessage, tokenHiddenFromText } from "./quickPdfEnvelope";
+import { OWNER_ROLE_ID, RECIPIENT_ROLE_ID } from "./quickPdfEnvelope";
 
 describe("quickPdfEnvelope", () => {
   it("sanitizes backend codes and never echoes provider text", () => {
     expect(sanitizedEnvelopeMessage("document_hash_mismatch")).toMatch(/no longer matches/i);
+    expect(sanitizedEnvelopeMessage("owner_ceremony_incomplete")).toMatch(/agree/i);
     expect(sanitizedEnvelopeMessage("Traceback")).not.toContain("Traceback");
   });
 
-  it("binds owner and recipient fields on page 0 without overlap", () => {
-    const fields = defaultOwnerRecipientFields();
-    expect(fields).toHaveLength(2);
-    const [a, b] = fields;
-    expect(a.page_index).toBe(0);
-    expect(b.page_index).toBe(0);
-    expect(a.x + a.w).toBeLessThanOrEqual(b.x + 0.0001);
+  it("requires owner-chosen owner and recipient fields instead of a static default page-1 layout", () => {
+    expect(ownerAndRecipientPlaced([])).toBe(false);
+    expect(
+      ownerAndRecipientPlaced([
+        { field_id: "a", signer_role_id: OWNER_ROLE_ID, field_type: "signature", page_index: 1, x: 0.1, y: 0.2, w: 0.3, h: 0.1, required: true },
+      ]),
+    ).toBe(false);
+    expect(
+      ownerAndRecipientPlaced([
+        { field_id: "a", signer_role_id: OWNER_ROLE_ID, field_type: "signature", page_index: 1, x: 0.1, y: 0.2, w: 0.3, h: 0.1, required: true },
+        { field_id: "b", signer_role_id: RECIPIENT_ROLE_ID, field_type: "signature", page_index: 1, x: 0.5, y: 0.2, w: 0.3, h: 0.1, required: true },
+      ]),
+    ).toBe(true);
   });
 
   it("treats clipboard URL tokens as hidden from visible copy", () => {

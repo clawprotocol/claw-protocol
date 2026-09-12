@@ -2,7 +2,7 @@
  * Phase 4C.2 Quick completion contracts — behavioral, not source windows.
  */
 import { buildVs01RecipientSignEsignPath, parseEsignDocumentPath, resolveEsignDocumentMode } from "./esignDocumentAccess";
-import { OWNER_ROLE_ID, RECIPIENT_ROLE_ID, defaultOwnerRecipientFields, tokenHiddenFromText } from "./simpleProduct/quickPdfEnvelope";
+import { OWNER_ROLE_ID, RECIPIENT_ROLE_ID, ownerAndRecipientPlaced, tokenHiddenFromText } from "./simpleProduct/quickPdfEnvelope";
 
 export function assertPhase4c2QuickCompletionContracts(): void {
   if (parseEsignDocumentPath("/app/esign/doc_phase4c2")?.documentId !== "doc_phase4c2") {
@@ -27,9 +27,12 @@ export function assertPhase4c2QuickCompletionContracts(): void {
   if (href.includes("recipient_name=") || href.includes("recipient_email=") || href.includes("vs01_rmanifest") || href.includes("vs01_cpacket")) {
     throw new Error("recipient link carried names, emails, or paper authority");
   }
-  const fields = defaultOwnerRecipientFields();
-  if (!fields.some((f) => f.signer_role_id === OWNER_ROLE_ID) || !fields.some((f) => f.signer_role_id === RECIPIENT_ROLE_ID)) {
-    throw new Error("default placements must bind owner and recipient roles");
+  const fields = [
+    { field_id: "fld_owner_sig", signer_role_id: OWNER_ROLE_ID, field_type: "signature" as const, page_index: 1, x: 0.1, y: 0.2, w: 0.32, h: 0.1, required: true },
+    { field_id: "fld_recipient_sig", signer_role_id: RECIPIENT_ROLE_ID, field_type: "signature" as const, page_index: 1, x: 0.5, y: 0.2, w: 0.32, h: 0.1, required: true },
+  ];
+  if (!ownerAndRecipientPlaced(fields) || fields.some((f) => f.page_index !== 1)) {
+    throw new Error("placements must bind owner and recipient roles on a chosen page");
   }
   if (!tokenHiddenFromText("Link prepared. Email unavailable.", href)) {
     throw new Error("token leaked into customer-visible copy");

@@ -7,8 +7,11 @@ import {
   PHASE4C2_OTHER_ORG,
   PHASE4C2_OWNER,
   PHASE4C2_PDF_SHA,
+  PHASE4C2_RECEIPT_DIGEST,
+  PHASE4C2_RECEIPT_ID,
   PHASE4C2_RECIPIENT,
   PHASE4C2_RECIPIENT_PARTY_ID,
+  PHASE4C2_REISSUED,
   PHASE4C2_REVOKED,
   PHASE4C2_TOKEN,
   createPhase4c2State,
@@ -85,6 +88,23 @@ async function fillValidParties(page: Page) {
   await page.getByTestId("quick-pdf-recipient-email").fill(PHASE4C2_RECIPIENT.email);
 }
 
+async function placeOnPageTwo(page: Page) {
+  await expect(page.getByTestId("quick-pdf-page-1")).toBeVisible();
+  await page.getByTestId("quick-pdf-place-role-owner").click();
+  await page.getByTestId("quick-pdf-page-surface-1").click({ position: { x: 80, y: 80 } });
+  await page.getByTestId("quick-pdf-place-role-recipient").click();
+  await page.getByTestId("quick-pdf-page-surface-1").click({ position: { x: 220, y: 80 } });
+  await expect(page.getByTestId("quick-pdf-placed-qs_owner")).toBeVisible();
+  await expect(page.getByTestId("quick-pdf-placed-qs_recipient")).toBeVisible();
+}
+
+async function ownerCeremony(page: Page) {
+  await expect(page.getByTestId("quick-pdf-owner-sign")).toBeVisible();
+  await page.getByTestId("quick-pdf-owner-signature").fill(PHASE4C2_OWNER.name);
+  await page.getByTestId("quick-pdf-owner-consent").check();
+  await page.getByTestId("quick-pdf-owner-agree-sign").click();
+}
+
 test.describe("Phase 4C.2 Quick completion", () => {
   test("fails closed if Quick completion contracts are lost", () => {
     expect(() => assertPhase4c2QuickCompletionContracts()).not.toThrow();
@@ -113,8 +133,9 @@ test.describe("Phase 4C.2 Quick completion", () => {
     await Promise.all([save.click(), save.click()]);
     await expect(page.getByTestId("quick-pdf-place")).toBeVisible();
     expect(state.envelopeCreates).toBe(1);
+    await placeOnPageTwo(page);
     await page.getByTestId("quick-pdf-place-save").click();
-    await expect(page.getByTestId("quick-pdf-deliver")).toBeVisible();
+    await expect(page.getByTestId("quick-pdf-owner-sign")).toBeVisible();
     expect(state.fieldSaves).toBe(1);
     await assertFit(page);
     guards.assertClean();
@@ -131,9 +152,13 @@ test.describe("Phase 4C.2 Quick completion", () => {
       await page.getByTestId("quick-pdf-parties-save").click();
     }
     if (await page.getByTestId("quick-pdf-place").count()) {
+      await placeOnPageTwo(page);
       await page.getByTestId("quick-pdf-place-save").click();
     }
+    await ownerCeremony(page);
     await expect(page.getByTestId("quick-pdf-deliver")).toBeVisible();
+    expect(state.ownerCompleteHits).toBeGreaterThanOrEqual(1);
+    const signedBeforePrepare = state.ownerCompleteHits;
     const prepare = page.getByTestId("quick-pdf-prepare");
     await Promise.all([prepare.click(), prepare.click()]);
     await expect(page.getByTestId("quick-pdf-owner-only-receipt")).toBeVisible();
@@ -144,7 +169,7 @@ test.describe("Phase 4C.2 Quick completion", () => {
     expect(body).not.toContain(PHASE4C2_TOKEN);
     expect(page.url()).not.toContain(PHASE4C2_TOKEN);
     expect(state.prepareHits).toBeGreaterThanOrEqual(1);
-    expect(state.ownerCompleteHits).toBeGreaterThanOrEqual(1);
+    expect(state.ownerCompleteHits).toBe(signedBeforePrepare);
     expect(state.signedRoles.has(OWNER_ROLE_ID)).toBe(true);
     expect(state.signedRoles.has(RECIPIENT_ROLE_ID)).toBe(false);
     await page.getByTestId("quick-pdf-goto-receipt").click();
@@ -214,10 +239,13 @@ test.describe("Phase 4C.2 Quick completion", () => {
     await page.reload({ waitUntil: "domcontentloaded" });
     await expect(page.getByTestId("quick-pdf-fully-executed")).toBeVisible({ timeout: 20_000 });
     await expect(page.getByTestId("quick-pdf-fully-executed")).toContainText(PHASE4C2_PDF_SHA);
+    await expect(page.getByTestId("quick-pdf-receipt-id")).toHaveText(`Receipt ${PHASE4C2_RECEIPT_ID}`);
+    await expect(page.getByTestId("quick-pdf-receipt-digest")).toHaveText(`Digest ${PHASE4C2_RECEIPT_DIGEST}`);
     await page.getByTestId("quick-pdf-bundle").click();
     await expect.poll(() => state.bundleGets).toBeGreaterThan(0);
     await page.getByTestId("quick-pdf-receipt-refresh").click();
-    await expect(page.getByTestId("quick-pdf-fully-executed")).toBeVisible();
+    await expect(page.getByTestId("quick-pdf-receipt-id")).toHaveText(`Receipt ${PHASE4C2_RECEIPT_ID}`);
+    await expect(page.getByTestId("quick-pdf-receipt-digest")).toHaveText(`Digest ${PHASE4C2_RECEIPT_DIGEST}`);
     expect(state.receiptGets).toBeGreaterThan(0);
     await assertFit(page);
     guards.assertClean();
