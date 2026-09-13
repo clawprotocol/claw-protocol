@@ -26,7 +26,11 @@ HARBOR_INTAKE = (
     "Client signer Jordan Hale, jordan.hale@ironvale.test."
 )
 
-SAVED = (
+FIXTURE = (
+    Path(__file__).resolve().parents[2]
+    / "evals/commercial-readiness/fixtures/consulting-unconfirmed-payment-replay.json"
+)
+SAVED_LIVE = (
     Path(__file__).resolve().parents[2]
     / "evals/commercial-readiness/results/quality-eval-live/20260913T231438Z-12993"
     / "consulting-premium-result.json"
@@ -34,7 +38,8 @@ SAVED = (
 
 
 def _saved() -> dict:
-    return json.loads(SAVED.read_text())
+    path = SAVED_LIVE if SAVED_LIVE.is_file() else FIXTURE
+    return json.loads(path.read_text())
 
 
 def test_saved_live_response_invented_timing_without_asking() -> None:
@@ -73,8 +78,9 @@ def test_supplied_timing_is_retained_and_not_reasked() -> None:
         missing_material_info=[],
     )
     assert UNCONFIRMED_PAYMENT_TIMING_QUESTION not in missing
-    assert "installment" in kept.lower()
-    assert "thirty" in kept.lower()
+    assert "one or more installments" not in kept.lower()
+    assert "net 30" in kept.lower()
+    assert "one installment" in kept.lower() or "invoice the $48,000 fee in one installment" in gap.lower()
 
 
 def test_automatic_repair_output_still_surfaces_unconfirmed_timing() -> None:
@@ -195,4 +201,5 @@ def test_production_handler_replays_saved_response_without_inventing_timing(
     confirmed_doc = str(confirmed_body.get("document_text") or "")
     confirmed_missing = confirmed_body.get("missing_material_info") or []
     assert UNCONFIRMED_PAYMENT_TIMING_QUESTION not in confirmed_missing
-    assert "installment" in confirmed_doc.lower()
+    assert "one or more installments" not in confirmed_doc.lower()
+    assert "net 30" in confirmed_doc.lower()

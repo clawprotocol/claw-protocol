@@ -165,6 +165,13 @@ describe("proAgreementCompleteness — multi-family regression", () => {
       body: invented,
     });
     expect(retained.some((i) => i.question === UNCONFIRMED_PAYMENT_TIMING_QUESTION)).toBe(false);
+    const monthly = buildMaterialMissingItems({
+      intakeRaw: CORE_PAID_JOURNEY_FILLED_INTAKE,
+      userGapAnswers: "Invoice monthly",
+      body: invented,
+    });
+    expect(monthly.some((i) => i.question === "When is payment due?")).toBe(true);
+    expect(monthly.some((i) => i.question === UNCONFIRMED_PAYMENT_TIMING_QUESTION)).toBe(false);
   });
 
   it("catastrophic only for extremely short corrupt body", () => {

@@ -17,16 +17,22 @@ import {
 import { clearAuthoritativeSigningSnapshot } from "./authoritativeSigningSnapshot";
 import { buildLivePaidProSignerMetadataAuthority } from "./paidProSignerMetadataAuthority";
 import {
+  UNCONFIRMED_INVOICE_CADENCE_QUESTION,
+  UNCONFIRMED_PAYMENT_DUE_QUESTION,
   UNCONFIRMED_PAYMENT_TIMING_QUESTION,
   buildMaterialMissingItems,
 } from "./proAgreementCompleteness";
 
-function evidenceDir(): string {
-  const rel = "evals/commercial-readiness/results/quality-eval-live/20260913T231438Z-12993";
+function replayFixture(): {
+  authoritative_draft: string;
+  visible_agreement?: string;
+  missing_material_info?: string[];
+} {
+  const rel = "evals/commercial-readiness/fixtures/consulting-unconfirmed-payment-replay.json";
   const candidates = [resolve(process.cwd(), rel), resolve(process.cwd(), "..", rel)];
   const found = candidates.find((p) => existsSync(p));
-  if (!found) throw new Error(`saved consulting evidence missing; looked in ${candidates.join(", ")}`);
-  return found;
+  if (!found) throw new Error(`sanitized consulting replay fixture missing; looked in ${candidates.join(", ")}`);
+  return JSON.parse(readFileSync(found, "utf8"));
 }
 
 function harborParties() {
@@ -68,15 +74,14 @@ describe("consulting saved-evidence notice order and payment timing", () => {
   });
 
   it("reproduces the live 13. NOTICES before 11/12 defect", () => {
-    const visible = readFileSync(resolve(evidenceDir(), "consulting-visible-agreement.txt"), "utf8");
+    const visible = String(replayFixture().visible_agreement || "");
     expect(visible.indexOf("13. NOTICES")).toBeGreaterThan(-1);
     expect(visible.indexOf("13. NOTICES")).toBeLessThan(visible.indexOf("11. Governing Law"));
     expect(visible.indexOf("11. Governing Law")).toBeLessThan(visible.indexOf("12. Miscellaneous"));
   });
 
   it("working-draft hydrate places notices in coherent section order", () => {
-    const raw = JSON.parse(readFileSync(resolve(evidenceDir(), "consulting-premium-result.json"), "utf8"));
-    const server = String(raw.authoritative_draft || raw.document_text || "");
+    const server = String(replayFixture().authoritative_draft || "");
     expect(server).not.toMatch(/^\s*13\.\s+NOTICES/m);
     const inserted = repairIncompleteIfToNoticeStanzas(server, harborParties());
     const headed = ensureCanonicalNoticesSectionHeadingForFreeze(inserted.text);
@@ -96,7 +101,7 @@ describe("consulting saved-evidence notice order and payment timing", () => {
   });
 
   it("refresh/reopen of accepted paper does not rewrite notice order or signer blocks", () => {
-    const accepted = readFileSync(resolve(evidenceDir(), "consulting-visible-agreement.txt"), "utf8");
+    const accepted = String(replayFixture().visible_agreement || "");
     const acceptedHash = fingerprintAgreementBody(accepted);
     establishPaidProSourceOfTruth({ text: accepted, source: "server_full_draft" });
     expect(shouldBlockPaidProStructuralMutationAfterAcceptance()).toBe(true);
@@ -109,22 +114,57 @@ describe("consulting saved-evidence notice order and payment timing", () => {
     expect(relocated.text).toContain("Jordan Hale");
   });
 
-  it("missing payment timing from the saved body becomes a visible clarification", () => {
-    const raw = JSON.parse(readFileSync(resolve(evidenceDir(), "consulting-premium-result.json"), "utf8"));
+  it("targeted payment question appears and partial answers keep the remaining ask", () => {
+    const raw = replayFixture();
     const body = String(raw.authoritative_draft || "");
     expect(CORE_PAID_JOURNEY_FILLED_INTAKE).not.toMatch(/net\s*[- ]?30|installment/i);
-    const items = buildMaterialMissingItems({
+    const missing = buildMaterialMissingItems({
       intakeRaw: CORE_PAID_JOURNEY_FILLED_INTAKE,
       body,
       serverMissing: raw.missing_material_info,
     });
-    expect(items.some((i) => i.question === UNCONFIRMED_PAYMENT_TIMING_QUESTION)).toBe(true);
+    expect(missing.some((i) => i.question === UNCONFIRMED_PAYMENT_TIMING_QUESTION)).toBe(true);
+    expect(missing.find((i) => i.question === UNCONFIRMED_PAYMENT_TIMING_QUESTION)?.canProceedWithoutAnswer).toBe(
+      true,
+    );
+    const monthly = buildMaterialMissingItems({
+      intakeRaw: CORE_PAID_JOURNEY_FILLED_INTAKE,
+      userGapAnswers: "Invoice monthly",
+      body,
+      serverMissing: [],
+    });
+    expect(monthly.some((i) => i.question === UNCONFIRMED_PAYMENT_DUE_QUESTION)).toBe(true);
+    expect(monthly.some((i) => i.question === UNCONFIRMED_PAYMENT_TIMING_QUESTION)).toBe(false);
+    expect(monthly.some((i) => i.question === UNCONFIRMED_INVOICE_CADENCE_QUESTION)).toBe(false);
+    const tbd = buildMaterialMissingItems({
+      intakeRaw: CORE_PAID_JOURNEY_FILLED_INTAKE,
+      userGapAnswers: "Payment timing is TBD",
+      body,
+      serverMissing: [],
+    });
+    expect(tbd.some((i) => i.question === UNCONFIRMED_PAYMENT_TIMING_QUESTION)).toBe(true);
+    const pay = missing.find((i) => i.question === UNCONFIRMED_PAYMENT_TIMING_QUESTION);
+    expect(pay?.canProceedWithoutAnswer).toBe(true);
+    expect(pay?.severity).toBe("material");
+  });
+
+  it("complete answers are not re-asked and refresh keeps the same document identity", () => {
+    const raw = replayFixture();
+    const body = String(raw.authoritative_draft || "");
+    const answers = "Invoice once on October 1, 2026. Payment due net 30.";
     const confirmed = buildMaterialMissingItems({
       intakeRaw: CORE_PAID_JOURNEY_FILLED_INTAKE,
-      userGapAnswers: "Invoice once on October 1, 2026. Payment due net 30.",
+      userGapAnswers: answers,
       body,
       serverMissing: [],
     });
     expect(confirmed.some((i) => i.question === UNCONFIRMED_PAYMENT_TIMING_QUESTION)).toBe(false);
+    expect(confirmed.some((i) => i.question === UNCONFIRMED_PAYMENT_DUE_QUESTION)).toBe(false);
+    const working = repairIncompleteIfToNoticeStanzas(body, harborParties()).text;
+    const first = fingerprintAgreementBody(working);
+    const second = fingerprintAgreementBody(
+      repairIncompleteIfToNoticeStanzas(working, harborParties()).text,
+    );
+    expect(second).toBe(first);
   });
 });

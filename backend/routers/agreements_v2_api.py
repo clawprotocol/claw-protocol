@@ -96,8 +96,8 @@ from backend.agreements.explicit_acceptance_authority import (
     establish_explicit_acceptance,
 )
 from backend.agreements.premium_full_draft_quality_gate import (
-    UNCONFIRMED_PAYMENT_TIMING_QUESTION,
     apply_unconfirmed_payment_timing_guard,
+    unconfirmed_payment_questions_present,
     build_free_reference_blob,
     build_premium_full_draft_repair_user_payload,
     evaluate_premium_full_draft_quality,
@@ -5945,7 +5945,7 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Respo
             document_text=doc,
             missing_material_info=list(out.missing_material_info or []),
         )
-        if UNCONFIRMED_PAYMENT_TIMING_QUESTION in miss:
+        if unconfirmed_payment_questions_present(miss):
             generation_outcome = "needs_details"
         out = out.model_copy(
             update={

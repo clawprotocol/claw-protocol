@@ -684,46 +684,162 @@ def premium_full_draft_repair_system_prompt() -> str:
 UNCONFIRMED_PAYMENT_TIMING_QUESTION = (
     "How should the fixed fee be invoiced, and when is payment due?"
 )
+UNCONFIRMED_INVOICE_CADENCE_QUESTION = "How should the fixed fee be invoiced?"
+UNCONFIRMED_PAYMENT_DUE_QUESTION = "When is payment due?"
 
 _FEE_AMOUNT_RE = re.compile(
     r"\$\s?\d|\bfixed\s+fee\b|\bfee\s+of\b|\b\d[\d,]+\s*(?:usd|dollars)\b",
     re.I,
 )
-_SUPPLIED_PAYMENT_TIMING_RE = re.compile(
-    r"\b(?:net\s*[- ]?\d+|due\s+within|invoice(?:d)?\s+(?:on|upon|monthly|weekly|at|once)|"
-    r"lump[\s-]?sum|upon\s+(?:signing|execution|completion)|one\s+installment|"
-    r"monthly\s+invoic|payment\s+(?:due|timing)|payable\s+(?:on|upon|within)|"
-    r"due\s+(?:on|upon|net))\b",
+_UNRESOLVED_PAYMENT_RE = re.compile(
+    r"\b(?:tbd|to be (?:agreed|confirmed|determined)|unknown|undecided|not sure|later)\b",
     re.I,
 )
-_INVENTED_PAYMENT_TIMING_RE = re.compile(
-    r"(?:one\s+or\s+more\s+installments|"
-    r"within\s+thirty\s*(?:\(\s*30\s*\))?\s*days\s+after\s+receipt\s+of\s+invoice|"
-    r"\bnet\s*[- ]?(?:30|thirty)\b|"
-    r"invoices?\s+are\s+due\s+net|"
-    r"pay\s+undisputed\s+amounts\s+within)",
+_WORD_DAYS = {
+    "seven": 7,
+    "ten": 10,
+    "fourteen": 14,
+    "fifteen": 15,
+    "thirty": 30,
+    "forty-five": 45,
+    "sixty": 60,
+    "ninety": 90,
+}
+_DAY_TOKEN = r"(?:\d{1,3}|" + "|".join(re.escape(k) for k in _WORD_DAYS) + r")"
+_NET_DEADLINE_RE = re.compile(rf"\bnet\s*[- ]?({_DAY_TOKEN})\b", re.I)
+_DUE_WITHIN_RE = re.compile(
+    rf"\b(?:due|payable|paid)\s+(?:within|in)\s+({_DAY_TOKEN})\s*(?:\(\s*\d+\s*\))?\s*days\b",
     re.I,
 )
+_AFTER_INVOICE_RE = re.compile(
+    rf"\bwithin\s+({_DAY_TOKEN})\s*(?:\(\s*\d+\s*\))?\s*days\s+after\s+receipt\s+of\s+invoice\b",
+    re.I,
+)
+_CADENCE_MONTHLY_RE = re.compile(r"\binvoice(?:d|s)?\s+monthly\b|\bmonthly\s+invoic", re.I)
+_CADENCE_WEEKLY_RE = re.compile(r"\binvoice(?:d|s)?\s+weekly\b|\bweekly\s+invoic", re.I)
+_CADENCE_ONCE_RE = re.compile(
+    r"\b(?:invoice(?:d)?\s+(?:once|in\s+one\s+installment)|one\s+installment|lump[\s-]?sum|"
+    r"single\s+invoice)\b",
+    re.I,
+)
+_CADENCE_ON_DATE_RE = re.compile(
+    r"\binvoice(?:d)?\s+on\s+([A-Za-z]+\s+\d{1,2},\s+\d{4})\b",
+    re.I,
+)
+_CADENCE_UPON_RE = re.compile(
+    r"\b(?:invoice(?:d)?\s+)?upon\s+(signing|execution|completion)\b",
+    re.I,
+)
+_CADENCE_INSTALLMENTS_RE = re.compile(r"\bone\s+or\s+more\s+installments\b|\binstallments\s+during\b", re.I)
 _PAYMENT_SECTION_HEADING_RE = re.compile(
-    r"(?m)^(\d+)\.\s+(?:Fees?(?:\s+and\s+Payment)?|Payment|Compensation|Invoicing)\b[^\n]*",
+    r"(?m)^(\d+)\.\s+(?:Fees?(?:\s+and\s+Payment)?|Payment|Compensation|Invoicing)\b\.?",
     re.I,
 )
 _NEXT_TOP_LEVEL_SECTION_RE = re.compile(r"(?m)^\d+\.(?!\d)\s+\S")
-_INVENTED_PAYMENT_CLAUSE_RE = re.compile(
-    r"\s*(?:Unless the parties otherwise agree(?: in writing)?,?\s*)?"
-    r"(?:Consultant may invoice the fixed fee in one or more installments[^.]*)"
-    r"(?:,?\s*and\s+Client will pay undisputed amounts within thirty[^.]*)?"
-    r"\.?",
+_TIMING_ONLY_SENTENCE_RE = re.compile(
+    r"^\s*(?:unless the parties otherwise agree(?: in writing)?,?\s*)?"
+    r"(?:consultant may invoice the fixed fee[^.]*|"
+    r"invoices?\s+are\s+(?:due|payable)\b[^.]*|"
+    r"(?:client will )?pay undisputed amounts within[^.]*|"
+    r"payment is due\b[^.]*|"
+    r"due\s+net\b[^.]*)\.?\s*$",
     re.I,
 )
+_UNCONFIRMED_TIMING_PHRASE_RES = [
+    re.compile(r"\s*,?\s*net\s*[- ]?(?:\d{1,3}|thirty|sixty|fifteen|ninety|ten|seven|fourteen|forty-five)\b", re.I),
+    re.compile(
+        rf"\s*,?\s*(?:and\s+)?"
+        rf"(?:client will )?pay undisputed amounts within\s+{_DAY_TOKEN}\s*"
+        rf"(?:\(\s*\d+\s*\))?\s*days after receipt of invoice",
+        re.I,
+    ),
+    re.compile(
+        rf"\s*,?\s*(?:invoices?\s+are\s+)?(?:due|payable)\s+"
+        rf"(?:within|in|net)\s+{_DAY_TOKEN}\s*(?:\(\s*\d+\s*\))?\s*days"
+        rf"(?:\s+after\s+receipt\s+of\s+invoice)?",
+        re.I,
+    ),
+    re.compile(
+        rf"\s*,?\s*within\s+{_DAY_TOKEN}\s*(?:\(\s*\d+\s*\))?\s*days\s+after\s+receipt\s+of\s+invoice",
+        re.I,
+    ),
+    re.compile(r"\s*,?\s*in\s+one\s+or\s+more\s+installments(?:\s+during\s+the\s+term)?", re.I),
+    re.compile(
+        r"\s*(?:unless the parties otherwise agree(?: in writing)?,?\s*)?"
+        r"consultant may invoice the fixed fee[^.]*\.?",
+        re.I,
+    ),
+]
 
 
-def materials_supply_payment_timing(intake: str, user_gap_answers: str = "") -> bool:
-    return bool(_SUPPLIED_PAYMENT_TIMING_RE.search(f"{intake}\n{user_gap_answers}"))
+def _day_value(token: str) -> Optional[int]:
+    raw = (token or "").strip().lower().replace(" ", "")
+    if raw.isdigit():
+        return int(raw)
+    return _WORD_DAYS.get(raw)
+
+
+def _clause_is_unresolved(text: str) -> bool:
+    for sent in re.split(r"(?<=[.!?])\s+", text or ""):
+        if _UNRESOLVED_PAYMENT_RE.search(sent) and re.search(
+            r"\b(?:payment|invoice|due|net|timing)\b", sent, re.I
+        ):
+            return True
+    return False
+
+
+def extract_payment_deadline_days(text: str) -> Optional[int]:
+    if _clause_is_unresolved(text):
+        return None
+    for cre in (_NET_DEADLINE_RE, _AFTER_INVOICE_RE, _DUE_WITHIN_RE):
+        hit = cre.search(text or "")
+        if hit:
+            days = _day_value(hit.group(1))
+            if days is not None:
+                return days
+    return None
+
+
+def extract_payment_cadence(text: str) -> Optional[str]:
+    if _clause_is_unresolved(text):
+        return None
+    blob = text or ""
+    if _CADENCE_ONCE_RE.search(blob) or _CADENCE_ON_DATE_RE.search(blob):
+        return "once"
+    if _CADENCE_MONTHLY_RE.search(blob):
+        return "monthly"
+    if _CADENCE_WEEKLY_RE.search(blob):
+        return "weekly"
+    upon = _CADENCE_UPON_RE.search(blob)
+    if upon:
+        return f"upon_{upon.group(1).lower()}"
+    if _CADENCE_INSTALLMENTS_RE.search(blob):
+        return "installments"
+    return None
 
 
 def materials_have_fee_amount(intake: str, user_gap_answers: str = "") -> bool:
     return bool(_FEE_AMOUNT_RE.search(f"{intake}\n{user_gap_answers}"))
+
+
+def materials_supply_payment_timing(intake: str, user_gap_answers: str = "") -> bool:
+    """True only when both invoicing cadence and a payment deadline are explicit facts."""
+    blob = f"{intake}\n{user_gap_answers}"
+    if _clause_is_unresolved(blob):
+        return False
+    return extract_payment_cadence(blob) not in {None, "installments"} and extract_payment_deadline_days(blob) is not None
+
+
+def unconfirmed_payment_questions_present(missing: Optional[List[str]]) -> bool:
+    asked = set(missing or [])
+    return bool(
+        asked
+        & {
+            UNCONFIRMED_PAYMENT_TIMING_QUESTION,
+            UNCONFIRMED_INVOICE_CADENCE_QUESTION,
+            UNCONFIRMED_PAYMENT_DUE_QUESTION,
+        }
+    )
 
 
 def _payment_section_span(doc: str) -> Optional[Tuple[int, int]]:
@@ -736,37 +852,89 @@ def _payment_section_span(doc: str) -> Optional[Tuple[int, int]]:
     return heading.start(), end
 
 
-def _strip_invented_timing_from_payment_section(doc: str) -> str:
+def _split_payment_heading(section: str) -> Tuple[str, str, str]:
+    match = _PAYMENT_SECTION_HEADING_RE.match(section)
+    if not match:
+        return "", section, ""
+    heading = match.group(0).rstrip()
+    after = section[match.end() :]
+    sep = ""
+    if after.startswith("\r\n"):
+        sep = "\r\n"
+        after = after[2:]
+    elif after.startswith("\n"):
+        sep = "\n"
+        after = after[1:]
+    elif after[:1] in " \t":
+        sep = after[:1]
+        after = after[1:]
+    return heading, sep or "\n", after
+
+
+def _strip_unconfirmed_timing_phrases(body: str) -> str:
+    out = body
+    for cre in _UNCONFIRMED_TIMING_PHRASE_RES:
+        out = cre.sub("", out)
+    kept: List[str] = []
+    for sentence in re.split(r"(?<=[.])\s+", out):
+        piece = sentence.strip()
+        if not piece:
+            continue
+        if _TIMING_ONLY_SENTENCE_RE.match(piece):
+            continue
+        kept.append(piece)
+    cleaned = " ".join(kept)
+    cleaned = re.sub(r"[ \t]{2,}", " ", cleaned)
+    cleaned = re.sub(r"\s+,", ",", cleaned)
+    cleaned = re.sub(r",\s*\.", ".", cleaned)
+    cleaned = re.sub(r"\.\s*\.", ".", cleaned)
+    cleaned = cleaned.strip(" ,")
+    if cleaned and _FEE_AMOUNT_RE.search(cleaned) and not cleaned.endswith("."):
+        cleaned += "."
+    return cleaned
+
+
+def _apply_supplied_payment_facts(body: str, *, cadence: Optional[str], deadline: Optional[int]) -> str:
+    text = (body or "").rstrip()
+    additions: List[str] = []
+    if cadence == "monthly" and not _CADENCE_MONTHLY_RE.search(text):
+        additions.append("Consultant will invoice the fixed fee monthly.")
+    elif cadence == "weekly" and not _CADENCE_WEEKLY_RE.search(text):
+        additions.append("Consultant will invoice the fixed fee weekly.")
+    elif cadence == "once" and not _CADENCE_ONCE_RE.search(text):
+        additions.append("Consultant will invoice the fixed fee in one installment.")
+    elif cadence and cadence.startswith("upon_") and cadence.split("_", 1)[1] not in text.lower():
+        additions.append(f"Consultant will invoice the fixed fee upon {cadence.split('_', 1)[1]}.")
+    if deadline is not None and extract_payment_deadline_days(text) != deadline:
+        additions.append(f"Payment is due net {deadline}.")
+    if not additions:
+        return text
+    if text and not text.endswith("."):
+        text += "."
+    return f"{text} {' '.join(additions)}".strip()
+
+
+def _rewrite_payment_section(
+    doc: str,
+    *,
+    cadence: Optional[str],
+    deadline: Optional[int],
+    strip_timing: bool,
+    apply_supplied: bool,
+) -> str:
     span = _payment_section_span(doc)
     if not span:
         return doc
     start, end = span
-    section = doc[start:end]
-    sentences = re.split(r"(?<=[.])\s+", section)
-    kept: List[str] = []
-    for sentence in sentences:
-        if not _INVENTED_PAYMENT_TIMING_RE.search(sentence):
-            kept.append(sentence)
-            continue
-        cleaned = _INVENTED_PAYMENT_CLAUSE_RE.sub("", sentence)
-        cleaned = re.sub(
-            r"\s*(?:and\s+)?(?:Client will )?pay undisputed amounts within thirty"
-            r"\s*(?:\(\s*30\s*\))?\s*days after receipt of invoice\.?",
-            "",
-            cleaned,
-            flags=re.I,
-        )
-        cleaned = re.sub(r"\s{2,}", " ", cleaned).strip(" ,")
-        if cleaned and _FEE_AMOUNT_RE.search(cleaned) and not _INVENTED_PAYMENT_TIMING_RE.search(cleaned):
-            if not cleaned.endswith("."):
-                cleaned += "."
-            kept.append(cleaned)
-    new_section = " ".join(kept)
-    new_section = re.sub(r"[ \t]+\n", "\n", new_section)
-    new_section = re.sub(r"\n{3,}", "\n\n", new_section)
-    if not new_section.endswith("\n") and doc[end : end + 1] == "\n":
-        new_section += "\n"
-    return f"{doc[:start]}{new_section}{doc[end:]}"
+    heading, sep, body = _split_payment_heading(doc[start:end])
+    working = _strip_unconfirmed_timing_phrases(body) if strip_timing else body.strip()
+    if apply_supplied:
+        working = _apply_supplied_payment_facts(working, cadence=cadence, deadline=deadline)
+    rebuilt = heading
+    if working:
+        rebuilt = f"{heading}{sep}{working}"
+    trailing = "\n" if doc[end : end + 1] == "\n" or doc[start:end].endswith("\n") else ""
+    return f"{doc[:start]}{rebuilt}{trailing}{doc[end:]}"
 
 
 def apply_unconfirmed_payment_timing_guard(
@@ -776,25 +944,61 @@ def apply_unconfirmed_payment_timing_guard(
     document_text: str,
     missing_material_info: Optional[List[str]] = None,
 ) -> Tuple[str, List[str]]:
-    """Strip invented payment timing and surface a targeted clarification.
+    """Keep supplied payment facts, ask only what is still missing, and refuse invented terms.
 
     Deterministic post-pass. Does not reject the draft or trigger another LLM repair.
     """
     missing = [str(x).strip() for x in (missing_material_info or []) if str(x).strip()]
+    payment_qs = {
+        UNCONFIRMED_PAYMENT_TIMING_QUESTION,
+        UNCONFIRMED_INVOICE_CADENCE_QUESTION,
+        UNCONFIRMED_PAYMENT_DUE_QUESTION,
+    }
+    missing = [m for m in missing if m not in payment_qs]
     doc = document_text or ""
     if not materials_have_fee_amount(intake, user_gap_answers):
         return doc, missing
-    if materials_supply_payment_timing(intake, user_gap_answers):
-        missing = [m for m in missing if m != UNCONFIRMED_PAYMENT_TIMING_QUESTION]
-        return doc, missing
+    materials = f"{intake}\n{user_gap_answers}"
+    supplied_cadence = extract_payment_cadence(materials)
+    if supplied_cadence == "installments":
+        supplied_cadence = None
+    supplied_deadline = extract_payment_deadline_days(materials)
     payment_span = _payment_section_span(doc)
-    invented = bool(
-        payment_span and _INVENTED_PAYMENT_TIMING_RE.search(doc[payment_span[0] : payment_span[1]])
+    draft_slice = doc[payment_span[0] : payment_span[1]] if payment_span else ""
+    draft_cadence = extract_payment_cadence(draft_slice)
+    draft_deadline = extract_payment_deadline_days(draft_slice)
+    cadence_conflict = bool(supplied_cadence and draft_cadence and supplied_cadence != draft_cadence)
+    deadline_conflict = bool(
+        supplied_deadline is not None and draft_deadline is not None and supplied_deadline != draft_deadline
     )
-    if invented:
-        doc = _strip_invented_timing_from_payment_section(doc)
-    if UNCONFIRMED_PAYMENT_TIMING_QUESTION not in missing:
+    cadence_ok = bool(supplied_cadence and draft_cadence and supplied_cadence == draft_cadence)
+    deadline_ok = bool(
+        supplied_deadline is not None and draft_deadline is not None and supplied_deadline == draft_deadline
+    )
+    both_supplied = bool(supplied_cadence and supplied_deadline is not None)
+    if both_supplied and cadence_ok and deadline_ok:
+        return doc, missing
+    strip_timing = True
+    apply_supplied = bool(supplied_cadence or supplied_deadline is not None)
+    if both_supplied and (cadence_conflict or deadline_conflict):
+        # Safe rewrite of the payment section from supplied facts; do not keep contradictory paper.
+        apply_supplied = True
+    elif not supplied_cadence and not supplied_deadline:
+        apply_supplied = False
+    doc = _rewrite_payment_section(
+        doc,
+        cadence=supplied_cadence,
+        deadline=supplied_deadline,
+        strip_timing=strip_timing,
+        apply_supplied=apply_supplied,
+    )
+    if not supplied_cadence and supplied_deadline is None:
         missing.append(UNCONFIRMED_PAYMENT_TIMING_QUESTION)
+    else:
+        if not supplied_cadence:
+            missing.append(UNCONFIRMED_INVOICE_CADENCE_QUESTION)
+        if supplied_deadline is None:
+            missing.append(UNCONFIRMED_PAYMENT_DUE_QUESTION)
     return doc, missing
 
 

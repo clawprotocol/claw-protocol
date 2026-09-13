@@ -13,14 +13,66 @@ const VAGUE_COMMERCIAL_RE =
   /\b(to be agreed|tbd|as discussed|standard terms|mutually agreed|confirm in writing|supplemental schedule|to be confirmed)\b/i;
 
 const FEE_AMOUNT_RE = /\$\s?\d|\bfixed\s+fee\b|\bfee\s+of\b|\b\d[\d,]+\s*(?:usd|dollars)\b/i;
-const SUPPLIED_PAYMENT_TIMING_RE =
-  /\b(?:net\s*[- ]?\d+|due\s+within|invoice(?:d)?\s+(?:on|upon|monthly|weekly|at|once)|lump[\s-]?sum|upon\s+(?:signing|execution|completion)|one\s+installment|monthly\s+invoic|payment\s+(?:due|timing)|payable\s+(?:on|upon|within)|due\s+(?:on|upon|net))\b/i;
+const UNRESOLVED_PAYMENT_RE =
+  /\b(?:tbd|to be (?:agreed|confirmed|determined)|unknown|undecided|not sure|later)\b/i;
+const NET_DEADLINE_RE = /\bnet\s*[- ]?(\d{1,3}|thirty|sixty|fifteen|ninety|ten|seven|fourteen)\b/i;
+const CADENCE_ONCE_RE =
+  /\b(?:invoice(?:d)?\s+(?:once|in\s+one\s+installment)|one\s+installment|lump[\s-]?sum|single\s+invoice)\b/i;
+const CADENCE_MONTHLY_RE = /\binvoice(?:d|s)?\s+monthly\b|\bmonthly\s+invoic/i;
+const CADENCE_WEEKLY_RE = /\binvoice(?:d|s)?\s+weekly\b|\bweekly\s+invoic/i;
+const CADENCE_UPON_RE = /\b(?:invoice(?:d)?\s+)?upon\s+(signing|execution|completion)\b/i;
 
 export const UNCONFIRMED_PAYMENT_TIMING_QUESTION =
   "How should the fixed fee be invoiced, and when is payment due?";
+export const UNCONFIRMED_INVOICE_CADENCE_QUESTION = "How should the fixed fee be invoiced?";
+export const UNCONFIRMED_PAYMENT_DUE_QUESTION = "When is payment due?";
 
-function materialsHaveUnconfirmedFeeTiming(materials: string): boolean {
-  return FEE_AMOUNT_RE.test(materials) && !SUPPLIED_PAYMENT_TIMING_RE.test(materials);
+function paymentClauseIsUnresolved(text: string): boolean {
+  return text.split(/(?<=[.!?])\s+/).some(
+    (sent) => UNRESOLVED_PAYMENT_RE.test(sent) && /\b(?:payment|invoice|due|net|timing)\b/i.test(sent),
+  );
+}
+
+function materialsSupplyInvoiceCadence(materials: string): boolean {
+  if (paymentClauseIsUnresolved(materials)) return false;
+  return (
+    CADENCE_ONCE_RE.test(materials) ||
+    CADENCE_MONTHLY_RE.test(materials) ||
+    CADENCE_WEEKLY_RE.test(materials) ||
+    CADENCE_UPON_RE.test(materials)
+  );
+}
+
+function materialsSupplyPaymentDeadline(materials: string): boolean {
+  if (paymentClauseIsUnresolved(materials)) return false;
+  return NET_DEADLINE_RE.test(materials) || /\b(?:due|payable)\s+(?:within|in|net)\b/i.test(materials);
+}
+
+function paymentQuestionsForMaterials(materials: string): Array<{
+  id: "payment_timing" | "payment_due" | "invoice_cadence";
+  question: string;
+  label: string;
+}> {
+  if (!FEE_AMOUNT_RE.test(materials)) return [];
+  const cadence = materialsSupplyInvoiceCadence(materials);
+  const deadline = materialsSupplyPaymentDeadline(materials);
+  if (cadence && deadline) return [];
+  if (!cadence && !deadline) {
+    return [{ id: "payment_timing", question: UNCONFIRMED_PAYMENT_TIMING_QUESTION, label: "Payment timing" }];
+  }
+  const out: Array<{ id: "payment_timing" | "payment_due" | "invoice_cadence"; question: string; label: string }> =
+    [];
+  if (!cadence) {
+    out.push({
+      id: "invoice_cadence",
+      question: UNCONFIRMED_INVOICE_CADENCE_QUESTION,
+      label: "Invoice cadence",
+    });
+  }
+  if (!deadline) {
+    out.push({ id: "payment_due", question: UNCONFIRMED_PAYMENT_DUE_QUESTION, label: "Payment due date" });
+  }
+  return out;
 }
 
 function detectCommercialFamilyHint(intake: string, body: string): CommercialFamilyHint {
@@ -63,7 +115,7 @@ function familyQuestions(
   if (consultingDev) {
     const vaguePayment =
       !/\b(?:hourly|fixed fee|retainer|milestone|per hour|project fee)\b/i.test(low) ||
-      VAGUE_COMMERCIAL_RE.test(intakeLow) ||
+      (VAGUE_COMMERCIAL_RE.test(intakeLow) && !FEE_AMOUNT_RE.test(intakeLow)) ||
       /\b(?:fee structure|payment structure)\b/i.test(intakeLow);
     if (vaguePayment) {
       pushItem(
@@ -129,28 +181,27 @@ function familyQuestions(
   const needsPayment =
     !/\b(?:invoice|due within|net\s+\d+|payment|fee|compensation)\b/i.test(low) ||
     VAGUE_COMMERCIAL_RE.test(intakeLow);
-  if (
-    materialsHaveUnconfirmedFeeTiming(intakeLow) &&
-    !seen.has("payment_structure") &&
-    !seen.has("payment_timing")
-  ) {
-    pushItem(
-      items,
-      seen,
-      {
-        id: "payment_timing",
-        severity: "material",
-        label: "Payment timing",
-        question: UNCONFIRMED_PAYMENT_TIMING_QUESTION,
-        whyItMatters:
-          "A fee amount without an invoicing schedule or due date is not an agreed payment term.",
-        suggestedAnswerFormat: "e.g. one invoice on October 1, 2026, due Net 30",
-        affectsSections: ["Payment", "Fees", "Invoicing"],
-        canProceedWithoutAnswer: true,
-      },
-      family,
-    );
-  } else if (needsPayment && !seen.has("payment_structure")) {
+  const paymentAsks = paymentQuestionsForMaterials(intakeLow);
+  if (paymentAsks.length && !seen.has("payment_structure") && !seen.has("payment_timing")) {
+    for (const ask of paymentAsks) {
+      pushItem(
+        items,
+        seen,
+        {
+          id: ask.id,
+          severity: "material",
+          label: ask.label,
+          question: ask.question,
+          whyItMatters:
+            "A fee amount without an invoicing schedule or due date is not an agreed payment term.",
+          suggestedAnswerFormat: "e.g. one invoice on October 1, 2026, due Net 30",
+          affectsSections: ["Payment", "Fees", "Invoicing"],
+          canProceedWithoutAnswer: true,
+        },
+        family,
+      );
+    }
+  } else if (needsPayment && !seen.has("payment_structure") && !paymentAsks.length) {
     pushItem(
       items,
       seen,
