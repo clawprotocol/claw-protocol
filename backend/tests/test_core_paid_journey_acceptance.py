@@ -776,10 +776,13 @@ def test_direct_signature_mints_and_owner_ceremony_without_prior_approval(client
     assert done_c.status_code == 200, done_c.text
     assert done_c.json().get("fully_executed") is True
     issued = done_c.json().get("finalized_receipt") or {}
+    assert issued.get("status") == "bound"
+    assert issued.get("bound") is True
     assert str(issued.get("receipt_id") or "").startswith("agr_rcpt_")
     first = client.get(f"/api/agreements/{aid}/proof-status", headers=_headers())
     assert first.status_code == 200, first.text
     first_rec = first.json().get("finalized_receipt") or {}
+    assert first_rec.get("status") == "bound"
     assert first_rec.get("receipt_id") == issued.get("receipt_id")
     assert first_rec.get("agreement_id") == aid
     assert first_rec.get("locked_version_id") == "lv-direct-2"
@@ -1229,3 +1232,392 @@ def test_duplicate_completion_events_cannot_substitute_required_signers() -> Non
     assert set(packet["completionEvents"][0]["participantId"] for ev in packet["completionEvents"]) != set(
         packet["requiredParticipantIds"]
     )
+
+
+def _signature_completed_count(draft: dict) -> int:
+    return sum(
+        1
+        for ev in (draft.get("audit_log") or [])
+        if isinstance(ev, dict) and ev.get("event_type") == "signature_completed"
+    )
+
+
+def _direct_lock_and_mint(client: TestClient, aid: str, lv: str) -> tuple[str, str, str, str]:
+    client.post(
+        f"/api/agreements/{aid}/update-field",
+        headers=_headers(),
+        json={"field": "owner_delivery_track", "value": "signature"},
+    )
+    snap_id, digest = _accept_snapshot(client, aid)
+    lock = client.put(
+        f"/api/agreements/{aid}/signing-lock",
+        headers=_headers(),
+        json={"locked_version_id": lv, "locked_at": "2026-09-13T00:00:00Z", "locked_by": "owner"},
+    )
+    assert lock.status_code == 200, lock.text
+    owner_mint = client.post(
+        f"/api/agreements/{aid}/recipient-access-token",
+        headers=_headers(),
+        json={"mode": "sign", "role": "signer", "recipient_party_id": "p-owner"},
+    )
+    client_mint = client.post(
+        f"/api/agreements/{aid}/recipient-access-token",
+        headers=_headers(),
+        json={"mode": "sign", "role": "signer", "recipient_party_id": "p-client"},
+    )
+    assert owner_mint.status_code == 200 and client_mint.status_code == 200
+    return snap_id, digest, owner_mint.json()["token"], client_mint.json()["token"]
+
+
+def _complete_participant(client: TestClient, aid: str, token: str, pid: str, name: str, lv: str):
+    hdr = {"X-Claw-Recipient-Access-Token": token}
+    start = client.post(
+        f"/api/agreements/{aid}/signing-ceremony/start",
+        headers=hdr,
+        json={"participant_id": pid},
+    )
+    assert start.status_code == 200, start.text
+    return client.post(
+        f"/api/agreements/{aid}/signing-ceremony/complete",
+        headers=hdr,
+        json={
+            "participant_id": pid,
+            "typed_name": name,
+            "locked_version_id": lv,
+            "consent": _esign_consent(),
+        },
+    )
+
+
+def test_foreign_snapshot_is_rejected_by_isolated_and_production_handlers(client: TestClient) -> None:
+    from backend.services.accepted_review_snapshot import (
+        accept_snapshot,
+        assert_production_signing_lock_authority,
+        create_pending_snapshot,
+        empty_registry,
+        sha256_hex_text,
+    )
+    from backend.services.agreement_draft_store import load_draft, save_draft
+    from backend.services.agreement_signing_lock_store import read_signing_lock, write_signing_lock
+
+    corpus = _snapshot_corpus()
+    ok, err, snap_a, reg = create_pending_snapshot(
+        agreement_id="ag-foreign-a",
+        corpus_plain=corpus,
+        registry=empty_registry(),
+    )
+    assert ok and snap_a and not err
+    ok, err, snap_a, _reg = accept_snapshot(
+        agreement_id="ag-foreign-a",
+        snapshot_id=snap_a["snapshotId"],
+        expected_digest=sha256_hex_text(corpus),
+        accepting_principal="owner",
+        registry=reg,
+    )
+    assert ok and snap_a and not err
+    lock_a = {
+        "agreement_id": "ag-foreign-b",
+        "locked_version_id": "lv-foreign",
+        "accepted_snapshot_id": snap_a["snapshotId"],
+        "accepted_snapshot_digest": snap_a["corpusSha256"],
+    }
+    foreign_draft = {"id": "ag-foreign-b", "accepted_review_snapshot_v1": snap_a}
+    ok, code, mode = assert_production_signing_lock_authority(foreign_draft, "ag-foreign-b", lock_a)
+    assert ok is False
+    assert code == "snapshot_agreement_mismatch"
+    assert mode == "accepted_review_snapshot"
+    native = {"id": "ag-foreign-a", "accepted_review_snapshot_v1": snap_a}
+    native_lock = {**lock_a, "agreement_id": "ag-foreign-a"}
+    ok, code, _mode = assert_production_signing_lock_authority(native, "ag-foreign-a", native_lock)
+    assert ok is True and code is None
+
+    create_a = client.post("/api/agreements/draft", headers=_headers(), json=_harbor_ironvale_payload())
+    create_b = client.post("/api/agreements/draft", headers=_headers(), json=_harbor_ironvale_payload())
+    assert create_a.status_code == 200 and create_b.status_code == 200
+    aid_a, aid_b = create_a.json()["id"], create_b.json()["id"]
+    client.post(
+        f"/api/agreements/{aid_a}/update-field",
+        headers=_headers(),
+        json={"field": "owner_delivery_track", "value": "signature"},
+    )
+    client.post(
+        f"/api/agreements/{aid_b}/update-field",
+        headers=_headers(),
+        json={"field": "owner_delivery_track", "value": "signature"},
+    )
+    snap_id, digest = _accept_snapshot(client, aid_a)
+    draft_b = load_draft(aid_b)
+    draft_b["accepted_review_snapshot_v1"] = load_draft(aid_a)["accepted_review_snapshot_v1"]
+    save_draft(draft_b)
+    before_lock = read_signing_lock(aid_b)
+    put_b = client.put(
+        f"/api/agreements/{aid_b}/signing-lock",
+        headers=_headers(),
+        json={"locked_version_id": "lv-b-foreign", "locked_at": "2026-09-13T00:00:00Z", "locked_by": "owner"},
+    )
+    assert put_b.status_code == 400, put_b.text
+    assert _detail_code(put_b) == "snapshot_agreement_mismatch"
+    assert read_signing_lock(aid_b) == before_lock
+
+    create_c = client.post("/api/agreements/draft", headers=_headers(), json=_harbor_ironvale_payload())
+    assert create_c.status_code == 200, create_c.text
+    aid_c = create_c.json()["id"]
+    snap_c, digest_c, owner_tok, client_tok = _direct_lock_and_mint(client, aid_c, "lv-c-native")
+    write_signing_lock(
+        aid_c,
+        {
+            "agreement_id": aid_c,
+            "locked_version_id": "lv-c-native",
+            "accepted_snapshot_id": snap_id,
+            "accepted_snapshot_digest": digest,
+        },
+    )
+    planted = load_draft(aid_c)
+    planted["accepted_review_snapshot_v1"] = load_draft(aid_a)["accepted_review_snapshot_v1"]
+    save_draft(planted)
+    before_events = _signature_completed_count(load_draft(aid_c))
+    mint_foreign = client.post(
+        f"/api/agreements/{aid_c}/recipient-access-token",
+        headers=_headers(),
+        json={"mode": "sign", "role": "signer", "recipient_party_id": "p-client"},
+    )
+    assert mint_foreign.status_code == 400, mint_foreign.text
+    assert _detail_code(mint_foreign) == "snapshot_agreement_mismatch"
+    assert "token" not in mint_foreign.json()
+    complete_foreign = client.post(
+        f"/api/agreements/{aid_c}/signing-ceremony/complete",
+        headers={"X-Claw-Recipient-Access-Token": client_tok},
+        json={
+            "participant_id": "p-client",
+            "typed_name": "Jordan Hale",
+            "locked_version_id": "lv-c-native",
+            "consent": _esign_consent(),
+        },
+    )
+    assert complete_foreign.status_code == 400, complete_foreign.text
+    assert _detail_code(complete_foreign) == "snapshot_agreement_mismatch"
+    assert _signature_completed_count(load_draft(aid_c)) == before_events
+    assert snap_c and digest_c and owner_tok
+
+
+def test_receipt_pending_recovers_without_new_signature_or_new_identity(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
+    import backend.routers.agreements_v2_api as av2
+    from backend.services.agreement_draft_store import load_draft
+    from backend.utils.timeline_store import TimelineStore
+
+    create = client.post("/api/agreements/draft", headers=_headers(), json=_harbor_ironvale_payload())
+    aid = create.json()["id"]
+    _snap_id, _digest, owner_tok, client_tok = _direct_lock_and_mint(client, aid, "lv-recover")
+    owner_done = _complete_participant(client, aid, owner_tok, "p-owner", "Maya Chen", "lv-recover")
+    assert owner_done.status_code == 200, owner_done.text
+
+    persist_calls = {"n": 0}
+    real_persist = av2._persist_agreement_execution_packet_artifact
+
+    def fail_first_packet(**kwargs):
+        persist_calls["n"] += 1
+        if persist_calls["n"] == 1:
+            raise RuntimeError("injected packet write failure")
+        return real_persist(**kwargs)
+
+    monkeypatch.setattr(av2, "_persist_agreement_execution_packet_artifact", fail_first_packet)
+    first = _complete_participant(client, aid, client_tok, "p-client", "Jordan Hale", "lv-recover")
+    assert first.status_code == 200, first.text
+    assert first.json().get("fully_executed") is True
+    pending = first.json().get("finalized_receipt") or {}
+    assert pending.get("status") == "receipt_pending"
+    assert pending.get("bound") is False
+    draft_after = load_draft(aid)
+    assert _signature_completed_count(draft_after) == 2
+    assert any(
+        isinstance(ev, dict) and ev.get("event_type") == "signed" for ev in (draft_after.get("audit_log") or [])
+    )
+
+    create_calls = {"n": 0}
+    real_create = TimelineStore.create_receipt
+
+    def count_create(self, *args, **kwargs):
+        create_calls["n"] += 1
+        return real_create(self, *args, **kwargs)
+
+    monkeypatch.setattr(TimelineStore, "create_receipt", count_create)
+    proof_pending = client.get(f"/api/agreements/{aid}/proof-status", headers=_headers())
+    assert proof_pending.status_code == 200, proof_pending.text
+    pending_get = proof_pending.json().get("finalized_receipt") or {}
+    assert pending_get.get("status") == "receipt_pending"
+    assert pending_get.get("bound") is False
+    assert "accepted_snapshot_id" not in pending_get
+    assert "required_participant_ids" not in pending_get
+    assert create_calls["n"] == 0
+
+    monkeypatch.setattr(av2, "_persist_agreement_execution_packet_artifact", real_persist)
+    retry = client.post(
+        f"/api/agreements/{aid}/signing-ceremony/complete",
+        headers={"X-Claw-Recipient-Access-Token": client_tok},
+        json={
+            "participant_id": "p-client",
+            "typed_name": "Jordan Hale",
+            "locked_version_id": "lv-recover",
+            "consent": _esign_consent(),
+        },
+    )
+    assert retry.status_code == 200, retry.text
+    recovered = retry.json().get("finalized_receipt") or {}
+    assert recovered.get("status") == "bound"
+    assert recovered.get("bound") is True
+    receipt_id = recovered.get("receipt_id")
+    assert str(receipt_id or "").startswith("agr_rcpt_")
+    assert _signature_completed_count(load_draft(aid)) == 2
+
+    store_fail = {"n": 0}
+    real_store_create = TimelineStore.create_receipt
+
+    def fail_first_store(self, *args, **kwargs):
+        store_fail["n"] += 1
+        if store_fail["n"] == 1:
+            raise RuntimeError("injected receipt store failure")
+        return real_store_create(self, *args, **kwargs)
+
+    # Bound receipt already exists; a later store failure on a fresh agreement is covered below.
+    create2 = client.post("/api/agreements/draft", headers=_headers(), json=_harbor_ironvale_payload())
+    aid2 = create2.json()["id"]
+    _s2, _d2, owner2, client2 = _direct_lock_and_mint(client, aid2, "lv-store")
+    assert _complete_participant(client, aid2, owner2, "p-owner", "Maya Chen", "lv-store").status_code == 200
+    monkeypatch.setattr(TimelineStore, "create_receipt", fail_first_store)
+    store_first = _complete_participant(client, aid2, client2, "p-client", "Jordan Hale", "lv-store")
+    assert store_first.status_code == 200, store_first.text
+    assert (store_first.json().get("finalized_receipt") or {}).get("status") == "receipt_pending"
+    assert _signature_completed_count(load_draft(aid2)) == 2
+    monkeypatch.setattr(TimelineStore, "create_receipt", real_store_create)
+    store_retry = client.post(
+        f"/api/agreements/{aid2}/signing-ceremony/complete",
+        headers={"X-Claw-Recipient-Access-Token": client2},
+        json={
+            "participant_id": "p-client",
+            "typed_name": "Jordan Hale",
+            "locked_version_id": "lv-store",
+            "consent": _esign_consent(),
+        },
+    )
+    assert store_retry.status_code == 200, store_retry.text
+    store_bound = store_retry.json().get("finalized_receipt") or {}
+    assert store_bound.get("status") == "bound"
+    second_id = store_bound.get("receipt_id")
+    restart = client.post(
+        f"/api/agreements/{aid2}/signing-ceremony/complete",
+        headers=_headers(),
+        json={
+            "participant_id": "p-client",
+            "typed_name": "Jordan Hale",
+            "locked_version_id": "lv-store",
+            "consent": _esign_consent(),
+        },
+    )
+    assert restart.status_code == 200, restart.text
+    assert (restart.json().get("finalized_receipt") or {}).get("receipt_id") == second_id
+    assert _signature_completed_count(load_draft(aid2)) == 2
+    assert (client.get(f"/api/agreements/{aid}/proof-status", headers=_headers()).json().get("finalized_receipt") or {}).get(
+        "receipt_id"
+    ) == receipt_id
+
+
+def test_proof_status_fails_closed_on_missing_replaced_or_corrupted_packet(client: TestClient) -> None:
+    import json
+
+    from backend.proof.agreement_receipt import verify_drafted_finalized_receipt
+    from backend.services.accepted_review_snapshot import sha256_hex_text
+    from backend.storage.artifact_repository import get_artifact_repository
+
+    create = client.post("/api/agreements/draft", headers=_headers(), json=_harbor_ironvale_payload())
+    aid = create.json()["id"]
+    snap_id, digest, owner_tok, client_tok = _direct_lock_and_mint(client, aid, "lv-integrity")
+    assert _complete_participant(client, aid, owner_tok, "p-owner", "Maya Chen", "lv-integrity").status_code == 200
+    done = _complete_participant(client, aid, client_tok, "p-client", "Jordan Hale", "lv-integrity")
+    assert done.status_code == 200, done.text
+    bound = done.json().get("finalized_receipt") or {}
+    assert bound.get("status") == "bound"
+    receipt_id = bound["receipt_id"]
+    repo = get_artifact_repository()
+    raw = repo.get_bytes_by_logical_ref(artifact_type="agreement_execution_packet", logical_ref=receipt_id)
+    assert raw
+    packet = json.loads(raw.decode("utf-8"))
+
+    repo.delete_logical_latest(artifact_type="agreement_execution_packet", logical_ref=receipt_id)
+    missing = client.get(f"/api/agreements/{aid}/proof-status", headers=_headers())
+    missing_rec = missing.json().get("finalized_receipt") or {}
+    assert missing_rec.get("status") == "receipt_unavailable"
+    assert missing_rec.get("bound") is False
+    assert "accepted_snapshot_digest" not in missing_rec
+    assert missing_rec.get("receipt_id") == receipt_id
+
+    tampered_time = dict(packet)
+    events = [dict(ev) for ev in (packet.get("completionEvents") or [])]
+    if events:
+        events[0]["at"] = "1999-01-01T00:00:00Z"
+    tampered_time["completionEvents"] = events
+    tampered_time["finalizedAt"] = "1999-01-01T00:00:00Z"
+    repo.put_artifact(
+        artifact_type="agreement_execution_packet",
+        logical_ref=receipt_id,
+        data=json.dumps(tampered_time, separators=(",", ":")).encode("utf-8"),
+        content_type="application/json",
+        agreement_id=aid,
+        version_id="lv-integrity",
+    )
+    changed_time = client.get(f"/api/agreements/{aid}/proof-status", headers=_headers())
+    time_rec = changed_time.json().get("finalized_receipt") or {}
+    assert time_rec.get("status") == "receipt_unavailable"
+    assert time_rec.get("bound") is False
+    assert "required_participant_ids" not in time_rec
+
+    tampered_snap = dict(packet)
+    tampered_snap["acceptedSnapshotId"] = "crs-replaced-other"
+    tampered_snap["acceptedSnapshotDigest"] = sha256_hex_text("other paper " * 40)
+    repo.put_artifact(
+        artifact_type="agreement_execution_packet",
+        logical_ref=receipt_id,
+        data=json.dumps(tampered_snap, separators=(",", ":")).encode("utf-8"),
+        content_type="application/json",
+        agreement_id=aid,
+        version_id="lv-integrity",
+    )
+    changed_snap = client.get(f"/api/agreements/{aid}/proof-status", headers=_headers())
+    snap_rec = changed_snap.json().get("finalized_receipt") or {}
+    assert snap_rec.get("status") == "receipt_unavailable"
+    assert snap_rec.get("bound") is False
+
+    repo.put_artifact(
+        artifact_type="agreement_execution_packet",
+        logical_ref=receipt_id,
+        data=b"{not-json",
+        content_type="application/json",
+        agreement_id=aid,
+        version_id="lv-integrity",
+    )
+    corrupt = client.get(f"/api/agreements/{aid}/proof-status", headers=_headers())
+    assert (corrupt.json().get("finalized_receipt") or {}).get("status") == "receipt_unavailable"
+
+    ok, err = verify_drafted_finalized_receipt(
+        receipt={"receipt_id": receipt_id, "receipt_hash_sha256": "a" * 64, "timeline_id": f"agreement:{aid}"},
+        packet=packet,
+        agreement_id=aid,
+    )
+    assert ok is False
+    assert err in {"receipt_hash_mismatch", "receipt_unavailable"}
+
+    recovered = client.post(
+        f"/api/agreements/{aid}/signing-ceremony/complete",
+        headers=_headers(),
+        json={
+            "participant_id": "p-client",
+            "typed_name": "Jordan Hale",
+            "locked_version_id": "lv-integrity",
+            "consent": _esign_consent(),
+        },
+    )
+    assert recovered.status_code == 200, recovered.text
+    recovered_rec = recovered.json().get("finalized_receipt") or {}
+    assert recovered_rec.get("status") == "bound"
+    assert recovered_rec.get("receipt_id") == receipt_id
+    assert recovered_rec.get("accepted_snapshot_id") == snap_id
+    assert recovered_rec.get("accepted_snapshot_digest") == digest

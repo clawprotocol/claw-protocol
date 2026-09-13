@@ -212,7 +212,10 @@ export function assertCorePaidJourneyAcceptanceContracts(): void {
     !routerApi.includes("recipient_review_revision_with_corpus") ||
     !routerApi.includes("_require_production_signing_lock_authority") ||
     !routerApi.includes("_issue_or_reuse_drafted_finalized_receipt") ||
-    !routerApi.includes("legacy_pre_cutover")
+    !routerApi.includes("legacy_pre_cutover") ||
+    !routerApi.includes("verify_drafted_finalized_receipt") ||
+    !routerApi.includes("receipt_pending") ||
+    !routerApi.includes("receipt_unavailable")
   ) {
     throw new Error("signing lock no longer binds accepted snapshot id/digest onto the server lock");
   }
@@ -225,6 +228,7 @@ export function assertCorePaidJourneyAcceptanceContracts(): void {
     !snap.includes("if resolve_err:") ||
     !snap.includes("assert_signing_lock_bound_to_snapshot") ||
     !snap.includes("assert_production_signing_lock_authority") ||
+    !snap.includes("snapshot_agreement_mismatch") ||
     !snap.includes("is_pure_legacy_pre_cutover") ||
     !snap.includes("lock_authority_from_accepted_snapshot") ||
     !snap.includes("recipient_review_revision_with_corpus")
@@ -287,7 +291,8 @@ export function assertCorePaidJourneyAcceptanceContracts(): void {
     !spec.includes("finalized_receipt") ||
     !spec.includes("required_participant_ids") ||
     !spec.includes("receiptBound") ||
-    !spec.includes("accepted_snapshot")
+    !spec.includes("accepted_snapshot") ||
+    !spec.includes('status === "bound"')
   ) {
     throw new Error("core paid journey live spec no longer verifies the persisted receipt separately from the completed-document view");
   }

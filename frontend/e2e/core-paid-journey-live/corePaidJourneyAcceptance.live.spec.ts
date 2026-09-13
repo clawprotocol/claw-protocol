@@ -1359,6 +1359,8 @@ test.describe("Core paid journey acceptance", () => {
       });
       const body = (await res.json().catch(() => ({}))) as {
         finalized_receipt?: {
+          status?: string;
+          bound?: boolean;
           receipt_id?: string;
           receipt_hash_sha256?: string;
           agreement_id?: string;
@@ -1389,6 +1391,9 @@ test.describe("Core paid journey acceptance", () => {
       firstReceipt.ok &&
       refreshedReceipt.ok &&
       ownerDraftRes.ok() &&
+      first.status === "bound" &&
+      first.bound === true &&
+      second.status === "bound" &&
       firstId.length > 8 &&
       firstId === String(second.receipt_id || "").trim() &&
       /^[0-9a-f]{64}$/.test(firstHash) &&

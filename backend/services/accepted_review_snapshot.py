@@ -659,6 +659,12 @@ def assert_signing_lock_bound_to_snapshot(
     return True, None
 
 
+def _draft_agreement_id(draft: Any) -> str:
+    if isinstance(draft, dict):
+        return _clean(draft.get("id") or draft.get("agreement_id"))
+    return _clean(getattr(draft, "id", None) or getattr(draft, "agreement_id", None))
+
+
 def assert_production_signing_lock_authority(
     draft: Any,
     agreement_id: str,
@@ -669,12 +675,21 @@ def assert_production_signing_lock_authority(
 
     Uses server-authoritative classification. Pure pre-cutover sealed packets may
     continue without a snapshot bind. Malformed modern records are never treated
-    as legacy.
+    as legacy. A valid snapshot for another agreement is never authority here.
     """
-    _ = _clean(agreement_id)
+    aid = _clean(agreement_id)
     mode = classify_authority_mode(draft)
     from backend.services.quick_pdf_envelope import is_uploaded_final_pdf_authority
 
+    if not aid:
+        return False, "agreement_id_required", mode
+    draft_id = _draft_agreement_id(draft)
+    if draft_id and draft_id != aid:
+        return False, "snapshot_agreement_mismatch", mode
+    if isinstance(lock, dict):
+        lock_aid = _clean(lock.get("agreement_id"))
+        if lock_aid and lock_aid != aid:
+            return False, "snapshot_agreement_mismatch", mode
     if is_uploaded_final_pdf_authority(draft):
         return True, None, AUTHORITY_MODE_UPLOADED_FINAL_PDF
     if is_pure_legacy_pre_cutover(draft):
@@ -682,6 +697,9 @@ def assert_production_signing_lock_authority(
     accepted = get_accepted_snapshot_record(draft)
     if not isinstance(accepted, dict):
         return False, "accepted_review_snapshot_required", mode
+    snap_aid = _clean(accepted.get("agreementId") or accepted.get("agreement_id"))
+    if not snap_aid or snap_aid != aid:
+        return False, "snapshot_agreement_mismatch", mode
     ok, err = verify_snapshot_integrity(accepted)
     if not ok:
         return False, err or "accepted_snapshot_invalid", mode

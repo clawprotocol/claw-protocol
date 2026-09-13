@@ -36,6 +36,7 @@ from backend.handlers.verifier_api_handler import get_batch
 from backend.proof.agreement_receipt import (
     build_drafted_ceremony_execution_packet,
     create_agreement_receipt_response,
+    verify_drafted_finalized_receipt,
 )
 from backend.security.agreement_read_scope import (
     assert_agreement_full_draft_read_allowed,
@@ -7154,6 +7155,7 @@ def put_agreement_signing_lock(
             )
     content_sha256 = _draft_locked_content_sha256(draft_full)
     payload = {
+        "agreement_id": agreement_id,
         "locked_version_id": body.locked_version_id,
         "locked_at": body.locked_at,
         "locked_by": body.locked_by,
@@ -7185,6 +7187,7 @@ def put_agreement_signing_lock(
                 status_code=400,
                 detail={"code": bound_err or "lock_snapshot_binding_missing"},
             )
+    _require_production_signing_lock_authority(draft_full, agreement_id, payload)
     write_signing_lock(agreement_id, payload)
     record_public_feed_event_if_applicable(
         draft_dict=draft_full.model_dump(),
@@ -7249,6 +7252,33 @@ def post_signing_ceremony_start(
     }
 
 
+def _ceremony_lock_row_or_400(agreement_id: str, draft: AgreementDraft) -> Tuple[str, Dict[str, Any]]:
+    lock_row = read_signing_lock(agreement_id) or {}
+    lv = str(lock_row.get("locked_version_id") or "").strip()
+    if not lv:
+        raise HTTPException(status_code=400, detail="not_ready_for_signature")
+    stored_sha = str(lock_row.get("content_sha256") or "").strip()
+    if stored_sha and _draft_locked_content_sha256(draft) != stored_sha:
+        raise HTTPException(status_code=409, detail="stale_locked_version")
+    return lv, lock_row
+
+
+def _authorize_ceremony_complete_or_recovery(
+    request: Request, agreement_id: str, participant_id: str
+) -> None:
+    try:
+        assert_agreement_recipient_write_allowed(
+            request,
+            agreement_id,
+            allowed_modes=("sign",),
+            bind_participant_id=participant_id or None,
+        )
+        return
+    except HTTPException:
+        pass
+    _owner_mutation_guards(request, agreement_id, surface="signing_ceremony_complete")
+
+
 @router.post("/{agreement_id}/signing-ceremony/complete")
 def post_signing_ceremony_complete(
     agreement_id: str, body: SigningCeremonyCompleteBody, request: Request
@@ -7256,6 +7286,35 @@ def post_signing_ceremony_complete(
     """Record signature_completed; append legacy signed when every signer has completed."""
     assert_free_incomplete_draft_not_expired(agreement_id, surface="signing_ceremony_complete")
     draft = _load_or_404(agreement_id)
+    if _agreement_draft_fully_executed(draft):
+        lv, lock_row = _ceremony_lock_row_or_400(agreement_id, draft)
+        req_lv = str(body.locked_version_id or "").strip()
+        if req_lv != lv:
+            raise HTTPException(status_code=400, detail="locked_version_mismatch")
+        _require_production_signing_lock_authority(draft, agreement_id, lock_row)
+        part_id, sp = _resolve_signing_participant_for_ceremony(draft, body.participant_id)
+        _authorize_ceremony_complete_or_recovery(request, agreement_id, part_id)
+        finalized_receipt = _issue_or_reuse_drafted_finalized_receipt(
+            agreement_id=agreement_id,
+            draft=draft,
+            lock=lock_row,
+            finalized_at=_finalized_at_from_draft(draft) or _utc_now_iso(),
+        )
+        if _receipt_view_is_bound(finalized_receipt):
+            _maybe_supersede_completing_invite(draft.model_dump(), request, part_id, persist=True)
+        return {
+            "ok": True,
+            "status": "fully_executed",
+            "agreement_id": agreement_id,
+            "participant_id": part_id,
+            "locked_version_id": lv,
+            "participant_display_name": sp.name,
+            "signed_at": _finalized_at_from_draft(draft),
+            "agreement_version_hash": _agreement_version_hash(agreement_id, lv, draft),
+            "fully_executed": True,
+            "finalized_receipt": finalized_receipt,
+            "recovered": True,
+        }
     lv, draft = _signing_ceremony_guards_lv(draft, agreement_id)
     req_lv = str(body.locked_version_id or "").strip()
     if req_lv != lv:
@@ -7316,31 +7375,7 @@ def post_signing_ceremony_complete(
         )
     next_draft = _merge_agreement_draft(draft, updated_at=now, audit_log=audit)
     dump = next_draft.model_dump()
-    # Replay protection: consume the completing party's active signing invite JTI.
-    # Generic save_draft cannot mutate recipient_delivery_v1 — CAS when registry changes.
-    from backend.security.agreement_read_scope import recipient_access_token_from_request
-    from backend.services.recipient_delivery_registry import (
-        extract_jti_from_token,
-        get_registry_revision,
-        supersede_active_invite,
-    )
-
-    base_rev = get_registry_revision(dump)
-    recipient_tok = recipient_access_token_from_request(request)
-    registry_mutated = False
-    if part_id and recipient_tok:
-        dump = supersede_active_invite(
-            dump,
-            phase="signing",
-            participant_id=part_id,
-            jti=extract_jti_from_token(recipient_tok),
-            audit_log=list(dump.get("audit_log") or []),
-        )
-        registry_mutated = True
-    if registry_mutated and get_registry_revision(dump) > base_rev:
-        _save_draft_registry_cas_sync(dump, request, expected_revision=base_rev)
-    else:
-        _save_draft_sync(dump, request)
+    _save_draft_sync(dump, request)
     finalized_receipt = None
     if fully:
         record_agreement_finalized(agreement_id=agreement_id)
@@ -7351,6 +7386,10 @@ def post_signing_ceremony_complete(
             finalized_at=now,
         )
         record_public_feed_event_if_applicable(draft_dict=dump, event_type="signed", at=now)
+        if _receipt_view_is_bound(finalized_receipt):
+            dump = _maybe_supersede_completing_invite(dump, request, part_id, persist=True)
+    else:
+        dump = _maybe_supersede_completing_invite(dump, request, part_id, persist=True)
         try:
             from backend.integrations.hooks_emit import (
                 claw_emit_integration_event,
@@ -10076,6 +10115,7 @@ def get_agreement_draft(agreement_id: str, request: Request) -> Dict[str, Any]:
         if content_length < 1 and stored_sha and stored_sha == current_sha:
             content_length = len(canon_json_bytes(_signing_snapshot_dict(draft)))
         signing_lock_out = {
+            "agreement_id": lock.get("agreement_id") or agreement_id,
             "locked_version_id": lv,
             "locked_at": lock.get("locked_at"),
             "locked_by": lock.get("locked_by"),
@@ -12303,6 +12343,75 @@ def _authority_classification_public(draft: AgreementDraft) -> Dict[str, Any]:
     }
 
 
+def _finalized_at_from_draft(draft: Any) -> Optional[str]:
+    raw = draft.model_dump() if hasattr(draft, "model_dump") else draft
+    audit = (raw or {}).get("audit_log") if isinstance(raw, dict) else getattr(draft, "audit_log", None)
+    signed_at = None
+    completed_at = None
+    for ev in audit or []:
+        row = ev.model_dump() if hasattr(ev, "model_dump") else ev
+        if not isinstance(row, dict):
+            continue
+        et = str(row.get("event_type") or "")
+        at = str(row.get("at") or "").strip()
+        val = row.get("value") if isinstance(row.get("value"), dict) else {}
+        if et == "signed" and val.get("fully_executed") and at:
+            signed_at = at
+        if et == "signature_completed" and at:
+            completed_at = at
+    return signed_at or completed_at
+
+
+def _receipt_view_is_bound(view: Optional[Dict[str, Any]]) -> bool:
+    return bool(isinstance(view, dict) and view.get("status") == "bound" and view.get("bound") is True)
+
+
+def _pending_or_unavailable_receipt_view(
+    *,
+    status: str,
+    agreement_id: str = "",
+    locked_version_id: str = "",
+    receipt_id: Optional[str] = None,
+    code: Optional[str] = None,
+) -> Dict[str, Any]:
+    out: Dict[str, Any] = {
+        "status": status,
+        "bound": False,
+        "agreement_id": agreement_id or None,
+        "locked_version_id": locked_version_id or None,
+        "receipt_id": receipt_id,
+    }
+    if code:
+        out["code"] = code
+    return {k: v for k, v in out.items() if v is not None or k in {"bound", "status"}}
+
+
+def _maybe_supersede_completing_invite(
+    dump: Dict[str, Any], request: Request, part_id: str, *, persist: bool
+) -> Dict[str, Any]:
+    from backend.security.agreement_read_scope import recipient_access_token_from_request
+    from backend.services.recipient_delivery_registry import (
+        extract_jti_from_token,
+        get_registry_revision,
+        supersede_active_invite,
+    )
+
+    recipient_tok = recipient_access_token_from_request(request)
+    if not part_id or not recipient_tok:
+        return dump
+    base_rev = get_registry_revision(dump)
+    next_dump = supersede_active_invite(
+        dump,
+        phase="signing",
+        participant_id=part_id,
+        jti=extract_jti_from_token(recipient_tok),
+        audit_log=list(dump.get("audit_log") or []),
+    )
+    if persist and get_registry_revision(next_dump) > base_rev:
+        _save_draft_registry_cas_sync(next_dump, request, expected_revision=base_rev)
+    return next_dump
+
+
 def _require_production_signing_lock_authority(
     draft: AgreementDraft, agreement_id: str, lock: Any
 ) -> None:
@@ -13394,6 +13503,8 @@ def _drafted_finalized_receipt_view(
     rec: Dict[str, Any], packet: Optional[Dict[str, Any]]
 ) -> Dict[str, Any]:
     out: Dict[str, Any] = {
+        "status": "bound",
+        "bound": True,
         "receipt_id": rec.get("receipt_id"),
         "receipt_hash_sha256": rec.get("receipt_hash_sha256"),
         "timeline_id": rec.get("timeline_id"),
@@ -13431,13 +13542,23 @@ def _issue_or_reuse_drafted_finalized_receipt(
 
     accepted = get_accepted_snapshot_record(draft)
     if not isinstance(accepted, dict):
-        return None
+        return _pending_or_unavailable_receipt_view(
+            status="receipt_pending",
+            agreement_id=agreement_id,
+            locked_version_id=str((lock or {}).get("locked_version_id") or ""),
+            code="accepted_review_snapshot_required",
+        )
     sid = str(accepted.get("snapshotId") or "").strip()
     digest = str(accepted.get("corpusSha256") or "").strip().lower()
     lv = str((lock or {}).get("locked_version_id") or "").strip()
     required = _required_signing_participant_ids(draft)
-    if not sid or len(digest) != 64 or not lv or not required:
-        return None
+    stable_finalized_at = _finalized_at_from_draft(draft) or finalized_at
+    if not sid or len(digest) != 64 or not lv or not required or not stable_finalized_at:
+        return _pending_or_unavailable_receipt_view(
+            status="receipt_pending",
+            agreement_id=agreement_id,
+            locked_version_id=lv,
+        )
     packet = build_drafted_ceremony_execution_packet(
         agreement_id=agreement_id,
         locked_version_id=lv,
@@ -13445,18 +13566,20 @@ def _issue_or_reuse_drafted_finalized_receipt(
         accepted_snapshot_digest=digest,
         required_participant_ids=required,
         completion_events=_signature_completion_event_bindings(draft.audit_log, lv),
+        finalized_at=stable_finalized_at,
     )
     packet_sha = execution_packet_digest_sha256(packet)
     store = _agreements_timeline_store()
     receipt, _artifact_body = create_agreement_receipt_response(
         agreement_id=agreement_id,
         finalized_version_id=lv,
-        finalized_at=finalized_at,
+        finalized_at=stable_finalized_at,
         content_sha256=digest,
         execution_packet_sha256=packet_sha,
         signer_count=len(required),
         anchor_network="bitcoin-testnet",
     )
+    packet_ok = False
     try:
         _persist_agreement_execution_packet_artifact(
             agreement_id=agreement_id,
@@ -13465,31 +13588,75 @@ def _issue_or_reuse_drafted_finalized_receipt(
             execution_packet_sha256=packet_sha,
             execution_packet=packet,
         )
-    except ValueError:
+        packet_ok = True
+    except Exception:
         logging.getLogger(__name__).exception(
-            "drafted_finalized_receipt_packet_invalid agreement_id=%s", agreement_id
+            "drafted_finalized_receipt_packet_persist_failed agreement_id=%s", agreement_id
         )
-        return None
+    receipt_row = None
     try:
-        existing = store.get_receipt(receipt["receipt_id"])
-        return _drafted_finalized_receipt_view(existing, packet)
+        receipt_row = store.get_receipt(receipt["receipt_id"])
     except KeyError:
-        pass
-    store.create_receipt(
-        receipt_id=receipt["receipt_id"],
-        timeline_id=receipt["timeline_id"],
-        protocol_version=receipt["protocol_version"],
-        network=receipt["network"],
-        epoch_id=receipt.get("epoch_id"),
-        btc_txid=receipt["btc_txid"],
-        commitment=receipt["commitment"],
-        merkle_proof=receipt["merkle_proof"],
-        zk_proof_refs=receipt.get("zk_proof_refs"),
-        issued_at=receipt["issued_at"],
-        receipt_hash_sha256=receipt.get("receipt_hash_sha256"),
+        if not packet_ok:
+            return _pending_or_unavailable_receipt_view(
+                status="receipt_pending",
+                agreement_id=agreement_id,
+                locked_version_id=lv,
+                code="receipt_pending",
+            )
+        try:
+            store.create_receipt(
+                receipt_id=receipt["receipt_id"],
+                timeline_id=receipt["timeline_id"],
+                protocol_version=receipt["protocol_version"],
+                network=receipt["network"],
+                epoch_id=receipt.get("epoch_id"),
+                btc_txid=receipt["btc_txid"],
+                commitment=receipt["commitment"],
+                merkle_proof=receipt["merkle_proof"],
+                zk_proof_refs=receipt.get("zk_proof_refs"),
+                issued_at=receipt["issued_at"],
+                receipt_hash_sha256=receipt.get("receipt_hash_sha256"),
+            )
+            receipt_row = store.get_receipt(receipt["receipt_id"])
+        except Exception:
+            logging.getLogger(__name__).exception(
+                "drafted_finalized_receipt_store_failed agreement_id=%s", agreement_id
+            )
+            receipt_row = None
+    if receipt_row and packet_ok:
+        ok, err = verify_drafted_finalized_receipt(
+            receipt=receipt_row,
+            packet=packet,
+            agreement_id=agreement_id,
+            lock=lock,
+            accepted_snapshot_id=sid,
+            accepted_snapshot_digest=digest,
+        )
+        if ok:
+            return _drafted_finalized_receipt_view(receipt_row, packet)
+        return _pending_or_unavailable_receipt_view(
+            status="receipt_unavailable",
+            agreement_id=agreement_id,
+            locked_version_id=lv,
+            receipt_id=str(receipt_row.get("receipt_id") or ""),
+            code=err,
+        )
+    if receipt_row and not packet_ok:
+        return _pending_or_unavailable_receipt_view(
+            status="receipt_unavailable",
+            agreement_id=agreement_id,
+            locked_version_id=lv,
+            receipt_id=str(receipt_row.get("receipt_id") or ""),
+            code="receipt_unavailable",
+        )
+    return _pending_or_unavailable_receipt_view(
+        status="receipt_pending",
+        agreement_id=agreement_id,
+        locked_version_id=lv,
+        receipt_id=str(receipt.get("receipt_id") or "") or None,
+        code="receipt_pending",
     )
-    out = store.get_receipt(receipt["receipt_id"])
-    return _drafted_finalized_receipt_view(out, packet)
 
 
 def _agreement_anchor_proof_view(
@@ -13639,21 +13806,54 @@ def get_agreement_proof_status(agreement_id: str, request: Request):
     if subject_is_guest(subject):
         assert_guest_workflow_denied(subject_ref=subject, surface="proof")
     assert_agreement_full_draft_read_allowed(request, agreement_id)
+    draft = _load_or_404(agreement_id)
+    lock = read_signing_lock(agreement_id) or {}
     store = _agreements_timeline_store()
     timeline_id = f"agreement:{agreement_id}"
     rec = store.get_latest_receipt_for_timeline(timeline_id)
+    cadence = anchor_cadence_summary()
     if not rec:
-        return {
-            "proof": None,
-            "cadence_defaults": anchor_cadence_summary(),
-            "finalized_receipt": None,
-        }
+        if _agreement_draft_fully_executed(draft):
+            return {
+                "proof": None,
+                "cadence_defaults": cadence,
+                "finalized_receipt": _pending_or_unavailable_receipt_view(
+                    status="receipt_pending",
+                    agreement_id=agreement_id,
+                    locked_version_id=str(lock.get("locked_version_id") or ""),
+                    code="receipt_pending",
+                ),
+            }
+        return {"proof": None, "cadence_defaults": cadence, "finalized_receipt": None}
 
     batch = _batch_row_for_receipt(store, rec)
     packet = _load_agreement_execution_packet(str(rec.get("receipt_id") or ""))
+    from backend.services.accepted_review_snapshot import get_accepted_snapshot_record
+
+    accepted = get_accepted_snapshot_record(draft)
+    ok, err = verify_drafted_finalized_receipt(
+        receipt=rec,
+        packet=packet,
+        agreement_id=agreement_id,
+        lock=lock,
+        accepted_snapshot_id=str((accepted or {}).get("snapshotId") or "") if accepted else None,
+        accepted_snapshot_digest=str((accepted or {}).get("corpusSha256") or "") if accepted else None,
+    )
+    if not ok:
+        return {
+            "proof": _agreement_anchor_proof_view(rec, batch),
+            "cadence_defaults": cadence,
+            "finalized_receipt": _pending_or_unavailable_receipt_view(
+                status="receipt_unavailable",
+                agreement_id=agreement_id,
+                locked_version_id=str(lock.get("locked_version_id") or ""),
+                receipt_id=str(rec.get("receipt_id") or ""),
+                code=err or "receipt_unavailable",
+            ),
+        }
 
     return {
         "proof": _agreement_anchor_proof_view(rec, batch),
-        "cadence_defaults": anchor_cadence_summary(),
+        "cadence_defaults": cadence,
         "finalized_receipt": _drafted_finalized_receipt_view(rec, packet),
     }
