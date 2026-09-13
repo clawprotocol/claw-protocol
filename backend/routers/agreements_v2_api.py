@@ -7388,8 +7388,6 @@ def post_signing_ceremony_complete(
         record_public_feed_event_if_applicable(draft_dict=dump, event_type="signed", at=now)
         if _receipt_view_is_bound(finalized_receipt):
             dump = _maybe_supersede_completing_invite(dump, request, part_id, persist=True)
-    else:
-        dump = _maybe_supersede_completing_invite(dump, request, part_id, persist=True)
         try:
             from backend.integrations.hooks_emit import (
                 claw_emit_integration_event,
@@ -7415,6 +7413,8 @@ def post_signing_ceremony_complete(
                 )
         except Exception:
             pass
+    else:
+        dump = _maybe_supersede_completing_invite(dump, request, part_id, persist=True)
     return {
         "ok": True,
         "status": "fully_executed" if fully else "completed",

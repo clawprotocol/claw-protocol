@@ -1621,3 +1621,156 @@ def test_proof_status_fails_closed_on_missing_replaced_or_corrupted_packet(clien
     assert recovered_rec.get("receipt_id") == receipt_id
     assert recovered_rec.get("accepted_snapshot_id") == snap_id
     assert recovered_rec.get("accepted_snapshot_digest") == digest
+
+
+def _intercept_outbound_integrations(monkeypatch: pytest.MonkeyPatch) -> list:
+    captured: list = []
+
+    def capture(org_id, event_type, object_type, object_id, summary):
+        captured.append(
+            {
+                "org_id": org_id,
+                "event_type": event_type,
+                "object_type": object_type,
+                "object_id": object_id,
+                "summary": dict(summary or {}),
+            }
+        )
+
+    monkeypatch.setattr(
+        "backend.integrations.hooks_emit.dispatch_webhook_event_async",
+        capture,
+    )
+    monkeypatch.setattr(
+        "backend.integrations.hooks_emit.claw_org_id_for_registered_agreement",
+        lambda _aid: ORG,
+    )
+    return captured
+
+
+def _agreement_level_completion_events(captured: list) -> list:
+    return [
+        ev
+        for ev in captured
+        if ev.get("event_type") in {"agreement.signed", "agreement.completed"}
+    ]
+
+
+def test_ceremony_complete_emits_agreement_completion_only_after_all_required_signers(
+    client: TestClient, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    import backend.routers.agreements_v2_api as av2
+    from backend.services.agreement_draft_store import load_draft
+
+    outbound = _intercept_outbound_integrations(monkeypatch)
+    create = client.post("/api/agreements/draft", headers=_headers(), json=_harbor_ironvale_payload())
+    assert create.status_code == 200, create.text
+    aid = create.json()["id"]
+    _snap_id, _digest, owner_tok, client_tok = _direct_lock_and_mint(client, aid, "lv-events")
+
+    owner_done = _complete_participant(client, aid, owner_tok, "p-owner", "Maya Chen", "lv-events")
+    assert owner_done.status_code == 200, owner_done.text
+    assert owner_done.json().get("fully_executed") is not True
+    assert _agreement_level_completion_events(outbound) == []
+    assert _signature_completed_count(load_draft(aid)) == 1
+
+    replay_owner = _complete_participant(client, aid, owner_tok, "p-owner", "Maya Chen", "lv-events")
+    assert replay_owner.status_code == 409, replay_owner.text
+    assert _detail_code(replay_owner) == "already_signed"
+    assert _agreement_level_completion_events(outbound) == []
+
+    rejected = client.post(
+        f"/api/agreements/{aid}/signing-ceremony/complete",
+        headers={"X-Claw-Recipient-Access-Token": client_tok},
+        json={
+            "participant_id": "p-client",
+            "typed_name": "Jordan Hale",
+            "locked_version_id": "lv-wrong",
+            "consent": _esign_consent(),
+        },
+    )
+    assert rejected.status_code == 400, rejected.text
+    assert _agreement_level_completion_events(outbound) == []
+    assert _signature_completed_count(load_draft(aid)) == 1
+
+    last = _complete_participant(client, aid, client_tok, "p-client", "Jordan Hale", "lv-events")
+    assert last.status_code == 200, last.text
+    assert last.json().get("fully_executed") is True
+    bound = last.json().get("finalized_receipt") or {}
+    assert bound.get("status") == "bound"
+    assert bound.get("bound") is True
+    receipt_id = bound.get("receipt_id")
+    assert str(receipt_id or "").startswith("agr_rcpt_")
+    milestone = _agreement_level_completion_events(outbound)
+    assert [ev["event_type"] for ev in milestone] == ["agreement.signed", "agreement.completed"]
+    for ev in milestone:
+        assert ev["org_id"] == ORG
+        assert ev["object_type"] == "agreement"
+        assert ev["object_id"] == aid
+        assert ev["summary"].get("locked_version_id") == "lv-events"
+    assert milestone[1]["summary"].get("lifecycle") == "fully_executed"
+    assert _signature_completed_count(load_draft(aid)) == 2
+
+    replay = client.post(
+        f"/api/agreements/{aid}/signing-ceremony/complete",
+        headers=_headers(),
+        json={
+            "participant_id": "p-client",
+            "typed_name": "Jordan Hale",
+            "locked_version_id": "lv-events",
+            "consent": _esign_consent(),
+        },
+    )
+    assert replay.status_code == 200, replay.text
+    assert replay.json().get("recovered") is True
+    assert (replay.json().get("finalized_receipt") or {}).get("receipt_id") == receipt_id
+    assert _agreement_level_completion_events(outbound) == milestone
+    assert _signature_completed_count(load_draft(aid)) == 2
+
+    persist_calls = {"n": 0}
+    real_persist = av2._persist_agreement_execution_packet_artifact
+
+    def fail_first_packet(**kwargs):
+        persist_calls["n"] += 1
+        if persist_calls["n"] == 1:
+            raise RuntimeError("injected packet write failure")
+        return real_persist(**kwargs)
+
+    create2 = client.post("/api/agreements/draft", headers=_headers(), json=_harbor_ironvale_payload())
+    aid2 = create2.json()["id"]
+    _s2, _d2, owner2, client2 = _direct_lock_and_mint(client, aid2, "lv-pending-events")
+    assert _complete_participant(client, aid2, owner2, "p-owner", "Maya Chen", "lv-pending-events").status_code == 200
+    before_last = len(_agreement_level_completion_events(outbound))
+    monkeypatch.setattr(av2, "_persist_agreement_execution_packet_artifact", fail_first_packet)
+    pending_complete = _complete_participant(client, aid2, client2, "p-client", "Jordan Hale", "lv-pending-events")
+    assert pending_complete.status_code == 200, pending_complete.text
+    pending_rec = pending_complete.json().get("finalized_receipt") or {}
+    assert pending_rec.get("status") == "receipt_pending"
+    assert pending_rec.get("bound") is False
+    after_pending = _agreement_level_completion_events(outbound)
+    assert [ev["event_type"] for ev in after_pending[before_last:]] == [
+        "agreement.signed",
+        "agreement.completed",
+    ]
+    assert after_pending[-1]["object_id"] == aid2
+    assert after_pending[-1]["summary"].get("locked_version_id") == "lv-pending-events"
+    assert _signature_completed_count(load_draft(aid2)) == 2
+    monkeypatch.setattr(av2, "_persist_agreement_execution_packet_artifact", real_persist)
+    recover = client.post(
+        f"/api/agreements/{aid2}/signing-ceremony/complete",
+        headers={"X-Claw-Recipient-Access-Token": client2},
+        json={
+            "participant_id": "p-client",
+            "typed_name": "Jordan Hale",
+            "locked_version_id": "lv-pending-events",
+            "consent": _esign_consent(),
+        },
+    )
+    assert recover.status_code == 200, recover.text
+    recovered_rec = recover.json().get("finalized_receipt") or {}
+    assert recovered_rec.get("status") == "bound"
+    assert recovered_rec.get("bound") is True
+    assert recovered_rec.get("receipt_id")
+    assert recovered_rec.get("receipt_id") != receipt_id
+    assert _agreement_level_completion_events(outbound) == after_pending
+    assert _signature_completed_count(load_draft(aid2)) == 2
