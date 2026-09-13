@@ -322,4 +322,28 @@ describe("paidProPartyNoticeDetails", () => {
     expect(relocated.text).toMatch(/10\. TERM[\s\S]*11\. NOTICES[\s\S]*12\. GOVERNING LAW/);
     expect(relocated.text.indexOf("11. NOTICES")).toBeLessThan(relocated.text.indexOf("12. GOVERNING LAW"));
   });
+
+  it("does not move a later-numbered Notices section in front of Governing Law", () => {
+    const corpus = [
+      "10. TERMINATION",
+      "Term text.",
+      "",
+      "11. GOVERNING LAW",
+      "Delaware law.",
+      "",
+      "12. MISCELLANEOUS",
+      "Entire agreement.",
+      "",
+      "13. NOTICES",
+      "",
+      "If to Harbor Peak Analytics LLC:",
+      "Harbor Peak Analytics LLC",
+      "",
+      "IN WITNESS WHEREOF, the Parties execute this Agreement.",
+    ].join("\n");
+    const relocated = relocateMisplacedNoticesSectionBeforeGoverningLaw(corpus);
+    expect(relocated.repairs).toEqual([]);
+    expect(relocated.text.indexOf("11. GOVERNING LAW")).toBeLessThan(relocated.text.indexOf("12. MISCELLANEOUS"));
+    expect(relocated.text.indexOf("12. MISCELLANEOUS")).toBeLessThan(relocated.text.indexOf("13. NOTICES"));
+  });
 });

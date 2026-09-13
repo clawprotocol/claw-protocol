@@ -1548,11 +1548,8 @@ export function removeRedundantNoticesSubheading(text: string): { text: string; 
 function resolveNoticesHeadingInsertIndex(head: string): number {
   const governingIdx = head.search(/(?:^|\n)\s*\d+\.\s+GOVERNING LAW\b/im);
   const firstIfTo = head.search(/(?:^|\n)If to\s+/i);
-  if (governingIdx >= 0) {
-    if (firstIfTo >= 0 && firstIfTo < governingIdx) return firstIfTo;
-    return governingIdx;
-  }
   if (firstIfTo >= 0) return firstIfTo;
+  if (governingIdx >= 0) return governingIdx;
   return head.length;
 }
 
@@ -1615,6 +1612,15 @@ export function relocateMisplacedNoticesSectionBeforeGoverningLaw(corpus: string
   if (noticesHeadingIdx < 0) return { text: corpus, repairs: [] };
   const governingIdx = head.search(/(?:^|\n)\s*\d+\.\s+GOVERNING LAW\b/im);
   if (governingIdx < 0 || noticesHeadingIdx < governingIdx) return { text: corpus, repairs: [] };
+  const noticesNum = Number(head.slice(noticesHeadingIdx).match(/\d+/)?.[0]);
+  const governingNum = Number(head.slice(governingIdx).match(/\d+/)?.[0]);
+  if (
+    Number.isFinite(noticesNum) &&
+    Number.isFinite(governingNum) &&
+    noticesNum >= governingNum
+  ) {
+    return { text: corpus, repairs: [] };
+  }
   const prefix = head.slice(0, governingIdx).trimEnd();
   const suffix = head.slice(governingIdx, noticesHeadingIdx).trimEnd();
   const noticesBlock = head.slice(noticesHeadingIdx).trimStart();

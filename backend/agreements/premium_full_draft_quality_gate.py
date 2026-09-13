@@ -681,6 +681,123 @@ def premium_full_draft_repair_system_prompt() -> str:
     )
 
 
+UNCONFIRMED_PAYMENT_TIMING_QUESTION = (
+    "How should the fixed fee be invoiced, and when is payment due?"
+)
+
+_FEE_AMOUNT_RE = re.compile(
+    r"\$\s?\d|\bfixed\s+fee\b|\bfee\s+of\b|\b\d[\d,]+\s*(?:usd|dollars)\b",
+    re.I,
+)
+_SUPPLIED_PAYMENT_TIMING_RE = re.compile(
+    r"\b(?:net\s*[- ]?\d+|due\s+within|invoice(?:d)?\s+(?:on|upon|monthly|weekly|at|once)|"
+    r"lump[\s-]?sum|upon\s+(?:signing|execution|completion)|one\s+installment|"
+    r"monthly\s+invoic|payment\s+(?:due|timing)|payable\s+(?:on|upon|within)|"
+    r"due\s+(?:on|upon|net))\b",
+    re.I,
+)
+_INVENTED_PAYMENT_TIMING_RE = re.compile(
+    r"(?:one\s+or\s+more\s+installments|"
+    r"within\s+thirty\s*(?:\(\s*30\s*\))?\s*days\s+after\s+receipt\s+of\s+invoice|"
+    r"\bnet\s*[- ]?(?:30|thirty)\b|"
+    r"invoices?\s+are\s+due\s+net|"
+    r"pay\s+undisputed\s+amounts\s+within)",
+    re.I,
+)
+_PAYMENT_SECTION_HEADING_RE = re.compile(
+    r"(?m)^(\d+)\.\s+(?:Fees?(?:\s+and\s+Payment)?|Payment|Compensation|Invoicing)\b[^\n]*",
+    re.I,
+)
+_NEXT_TOP_LEVEL_SECTION_RE = re.compile(r"(?m)^\d+\.(?!\d)\s+\S")
+_INVENTED_PAYMENT_CLAUSE_RE = re.compile(
+    r"\s*(?:Unless the parties otherwise agree(?: in writing)?,?\s*)?"
+    r"(?:Consultant may invoice the fixed fee in one or more installments[^.]*)"
+    r"(?:,?\s*and\s+Client will pay undisputed amounts within thirty[^.]*)?"
+    r"\.?",
+    re.I,
+)
+
+
+def materials_supply_payment_timing(intake: str, user_gap_answers: str = "") -> bool:
+    return bool(_SUPPLIED_PAYMENT_TIMING_RE.search(f"{intake}\n{user_gap_answers}"))
+
+
+def materials_have_fee_amount(intake: str, user_gap_answers: str = "") -> bool:
+    return bool(_FEE_AMOUNT_RE.search(f"{intake}\n{user_gap_answers}"))
+
+
+def _payment_section_span(doc: str) -> Optional[Tuple[int, int]]:
+    heading = _PAYMENT_SECTION_HEADING_RE.search(doc)
+    if not heading:
+        return None
+    rest = doc[heading.end() :]
+    nxt = _NEXT_TOP_LEVEL_SECTION_RE.search(rest)
+    end = heading.end() + (nxt.start() if nxt else len(rest))
+    return heading.start(), end
+
+
+def _strip_invented_timing_from_payment_section(doc: str) -> str:
+    span = _payment_section_span(doc)
+    if not span:
+        return doc
+    start, end = span
+    section = doc[start:end]
+    sentences = re.split(r"(?<=[.])\s+", section)
+    kept: List[str] = []
+    for sentence in sentences:
+        if not _INVENTED_PAYMENT_TIMING_RE.search(sentence):
+            kept.append(sentence)
+            continue
+        cleaned = _INVENTED_PAYMENT_CLAUSE_RE.sub("", sentence)
+        cleaned = re.sub(
+            r"\s*(?:and\s+)?(?:Client will )?pay undisputed amounts within thirty"
+            r"\s*(?:\(\s*30\s*\))?\s*days after receipt of invoice\.?",
+            "",
+            cleaned,
+            flags=re.I,
+        )
+        cleaned = re.sub(r"\s{2,}", " ", cleaned).strip(" ,")
+        if cleaned and _FEE_AMOUNT_RE.search(cleaned) and not _INVENTED_PAYMENT_TIMING_RE.search(cleaned):
+            if not cleaned.endswith("."):
+                cleaned += "."
+            kept.append(cleaned)
+    new_section = " ".join(kept)
+    new_section = re.sub(r"[ \t]+\n", "\n", new_section)
+    new_section = re.sub(r"\n{3,}", "\n\n", new_section)
+    if not new_section.endswith("\n") and doc[end : end + 1] == "\n":
+        new_section += "\n"
+    return f"{doc[:start]}{new_section}{doc[end:]}"
+
+
+def apply_unconfirmed_payment_timing_guard(
+    *,
+    intake: str,
+    user_gap_answers: str,
+    document_text: str,
+    missing_material_info: Optional[List[str]] = None,
+) -> Tuple[str, List[str]]:
+    """Strip invented payment timing and surface a targeted clarification.
+
+    Deterministic post-pass. Does not reject the draft or trigger another LLM repair.
+    """
+    missing = [str(x).strip() for x in (missing_material_info or []) if str(x).strip()]
+    doc = document_text or ""
+    if not materials_have_fee_amount(intake, user_gap_answers):
+        return doc, missing
+    if materials_supply_payment_timing(intake, user_gap_answers):
+        missing = [m for m in missing if m != UNCONFIRMED_PAYMENT_TIMING_QUESTION]
+        return doc, missing
+    payment_span = _payment_section_span(doc)
+    invented = bool(
+        payment_span and _INVENTED_PAYMENT_TIMING_RE.search(doc[payment_span[0] : payment_span[1]])
+    )
+    if invented:
+        doc = _strip_invented_timing_from_payment_section(doc)
+    if UNCONFIRMED_PAYMENT_TIMING_QUESTION not in missing:
+        missing.append(UNCONFIRMED_PAYMENT_TIMING_QUESTION)
+    return doc, missing
+
+
 def build_premium_full_draft_repair_user_payload(
     *,
     intake: str,
@@ -692,6 +809,7 @@ def build_premium_full_draft_repair_user_payload(
     context: Optional[Dict[str, Any]],
     deterministic_premium_intent_skeleton: Optional[Dict[str, Any]] = None,
     premium_intent_key: Optional[str] = None,
+    user_gap_answers: str = "",
 ) -> Dict[str, Any]:
     asks: List[str] = []
     if context and isinstance(context.get("material_asks"), list):
@@ -714,6 +832,9 @@ def build_premium_full_draft_repair_user_payload(
         "scenario_category_signals": scenario_signals[:12],
         "missing_material_asks": missing_asks,
     }
+    uga = (user_gap_answers or "").strip()
+    if uga:
+        out["user_gap_answers"] = uga
     if premium_intent_key:
         out["premium_intent_key"] = premium_intent_key
     if deterministic_premium_intent_skeleton:

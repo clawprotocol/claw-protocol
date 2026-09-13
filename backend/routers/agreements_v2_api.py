@@ -96,6 +96,8 @@ from backend.agreements.explicit_acceptance_authority import (
     establish_explicit_acceptance,
 )
 from backend.agreements.premium_full_draft_quality_gate import (
+    UNCONFIRMED_PAYMENT_TIMING_QUESTION,
+    apply_unconfirmed_payment_timing_guard,
     build_free_reference_blob,
     build_premium_full_draft_repair_user_payload,
     evaluate_premium_full_draft_quality,
@@ -5752,6 +5754,7 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Respo
                 context=ctx_dict,
                 deterministic_premium_intent_skeleton=intent_skeleton,
                 premium_intent_key=(intent_key.value if intent_key is not None else None),
+                user_gap_answers=uga,
             )
             if len(json.dumps(repair_payload, ensure_ascii=False)) > 260_000:
                 raise ValueError("repair_payload_too_large")
@@ -5936,6 +5939,21 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Respo
             )
         validation_started = time.perf_counter()
         generation_outcome: Literal["ok", "needs_details", "degraded"] = "ok" if ok_final else "needs_details"
+        doc, miss = apply_unconfirmed_payment_timing_guard(
+            intake=intake_s,
+            user_gap_answers=uga,
+            document_text=doc,
+            missing_material_info=list(out.missing_material_info or []),
+        )
+        if UNCONFIRMED_PAYMENT_TIMING_QUESTION in miss:
+            generation_outcome = "needs_details"
+        out = out.model_copy(
+            update={
+                "document_text": doc,
+                "authoritative_draft": doc,
+                "missing_material_info": miss,
+            }
+        )
         if not ok_final:
             log.info(
                 "premium_full_draft event=validator_reject category=quality_or_intent_schema needs_details=1 "

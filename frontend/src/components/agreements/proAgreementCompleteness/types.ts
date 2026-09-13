@@ -43,6 +43,7 @@ export type ProAgreementCompletenessResult = {
 
 export type ProCompletenessContext = {
   intakeRaw?: string | null;
+  userGapAnswers?: string | null;
   partyNames?: readonly string[];
   agreementFamily?: AgreementFamily | null;
   surface: string;

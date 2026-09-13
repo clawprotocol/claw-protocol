@@ -12,6 +12,17 @@ import type { CommercialFamilyHint, MaterialMissingItem } from "./types";
 const VAGUE_COMMERCIAL_RE =
   /\b(to be agreed|tbd|as discussed|standard terms|mutually agreed|confirm in writing|supplemental schedule|to be confirmed)\b/i;
 
+const FEE_AMOUNT_RE = /\$\s?\d|\bfixed\s+fee\b|\bfee\s+of\b|\b\d[\d,]+\s*(?:usd|dollars)\b/i;
+const SUPPLIED_PAYMENT_TIMING_RE =
+  /\b(?:net\s*[- ]?\d+|due\s+within|invoice(?:d)?\s+(?:on|upon|monthly|weekly|at|once)|lump[\s-]?sum|upon\s+(?:signing|execution|completion)|one\s+installment|monthly\s+invoic|payment\s+(?:due|timing)|payable\s+(?:on|upon|within)|due\s+(?:on|upon|net))\b/i;
+
+export const UNCONFIRMED_PAYMENT_TIMING_QUESTION =
+  "How should the fixed fee be invoiced, and when is payment due?";
+
+function materialsHaveUnconfirmedFeeTiming(materials: string): boolean {
+  return FEE_AMOUNT_RE.test(materials) && !SUPPLIED_PAYMENT_TIMING_RE.test(materials);
+}
+
 function detectCommercialFamilyHint(intake: string, body: string): CommercialFamilyHint {
   const low = `${intake}\n${body}`.toLowerCase();
   if (/\b(?:saas|software as a service|msa|master\s+services)\b/.test(low)) return "saas_msa";
@@ -118,7 +129,28 @@ function familyQuestions(
   const needsPayment =
     !/\b(?:invoice|due within|net\s+\d+|payment|fee|compensation)\b/i.test(low) ||
     VAGUE_COMMERCIAL_RE.test(intakeLow);
-  if (needsPayment && !seen.has("payment_structure")) {
+  if (
+    materialsHaveUnconfirmedFeeTiming(intakeLow) &&
+    !seen.has("payment_structure") &&
+    !seen.has("payment_timing")
+  ) {
+    pushItem(
+      items,
+      seen,
+      {
+        id: "payment_timing",
+        severity: "material",
+        label: "Payment timing",
+        question: UNCONFIRMED_PAYMENT_TIMING_QUESTION,
+        whyItMatters:
+          "A fee amount without an invoicing schedule or due date is not an agreed payment term.",
+        suggestedAnswerFormat: "e.g. one invoice on October 1, 2026, due Net 30",
+        affectsSections: ["Payment", "Fees", "Invoicing"],
+        canProceedWithoutAnswer: true,
+      },
+      family,
+    );
+  } else if (needsPayment && !seen.has("payment_structure")) {
     pushItem(
       items,
       seen,
@@ -547,8 +579,9 @@ export function buildMaterialMissingItems(args: {
   body: string;
   structuralIssues?: readonly { code: string; message: string }[];
   serverMissing?: readonly string[];
+  userGapAnswers?: string | null;
 }): MaterialMissingItem[] {
-  const intake = (args.intakeRaw || "").trim();
+  const intake = [args.intakeRaw || "", args.userGapAnswers || ""].join("\n").trim();
   const body = (args.body || "").trim();
   const family = detectCommercialFamilyHint(intake, body);
   const items = familyQuestions(family, body, intake);

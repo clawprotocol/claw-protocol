@@ -1,9 +1,11 @@
 import { describe, expect, it } from "vitest";
 import { finalizeAgreementOutput } from "../agreementOutputQuality";
 import {
+  UNCONFIRMED_PAYMENT_TIMING_QUESTION,
   applyProAgreementCompletenessPipeline,
   buildMaterialMissingItems,
 } from "./index";
+import { CORE_PAID_JOURNEY_FILLED_INTAKE } from "../../../launch/corePaidJourneyAcceptanceMatrix";
 
 const PARTY_A = "Acme Analytics LLC";
 const PARTY_B = "Beta Ventures Inc";
@@ -137,6 +139,32 @@ describe("proAgreementCompleteness — multi-family regression", () => {
     expect(PLACEHOLDER_RE.test(fin.text)).toBe(false);
     expect((fin.materialMissingItems ?? []).length).toBeGreaterThan(0);
     expect(fin.structuralCatastrophic).not.toBe(true);
+  });
+
+  it("Harbor filled intake without payment timing still asks after invented net-30 body", () => {
+    expect(CORE_PAID_JOURNEY_FILLED_INTAKE).toMatch(/\$48,000/);
+    expect(CORE_PAID_JOURNEY_FILLED_INTAKE).not.toMatch(/net\s*[- ]?30|installment|due within/i);
+    const invented = proBody(
+      [
+        "1. Services",
+        "AI workflow implementation.",
+        "3. Fees and Payment",
+        "Client will pay Consultant a fixed fee of $48,000. Unless the parties otherwise agree in writing, Consultant may invoice the fixed fee in one or more installments during the Term, and Client will pay undisputed amounts within thirty (30) days after receipt of invoice.",
+        "11. Governing Law",
+        "Delaware.",
+      ].join("\n"),
+    );
+    const missing = buildMaterialMissingItems({
+      intakeRaw: CORE_PAID_JOURNEY_FILLED_INTAKE,
+      body: invented,
+    });
+    expect(missing.some((i) => i.question === UNCONFIRMED_PAYMENT_TIMING_QUESTION)).toBe(true);
+    const retained = buildMaterialMissingItems({
+      intakeRaw: CORE_PAID_JOURNEY_FILLED_INTAKE,
+      userGapAnswers: "Invoice once on October 1, 2026. Payment due net 30.",
+      body: invented,
+    });
+    expect(retained.some((i) => i.question === UNCONFIRMED_PAYMENT_TIMING_QUESTION)).toBe(false);
   });
 
   it("catastrophic only for extremely short corrupt body", () => {

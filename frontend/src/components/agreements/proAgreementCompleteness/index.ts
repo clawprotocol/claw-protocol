@@ -11,6 +11,7 @@ export {
   completenessClarificationsForClassification,
 } from "./proAgreementCompletenessPipeline";
 export {
+  UNCONFIRMED_PAYMENT_TIMING_QUESTION,
   buildMaterialMissingItems,
   formatMaterialItemsForRevisePanel,
   materialItemsToClarificationStrings,

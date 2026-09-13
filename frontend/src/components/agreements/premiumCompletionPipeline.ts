@@ -2471,6 +2471,7 @@ async function runPremiumCompletionInner(
         });
         materialMissingItems = buildMaterialMissingItems({
           intakeRaw: preGateIntake,
+          userGapAnswers: gapAns || null,
           body: doc,
           structuralIssues,
           serverMissing: effectiveFull.missing_material_info ?? undefined,
