@@ -31,6 +31,8 @@ export const PHASE4B2_SIGNER_1_TITLE = "General Counsel";
 export const PHASE4B2_FROZEN_BODY = PHASE4A_FROZEN_BODY;
 export const PHASE4B2_FROZEN_SHA = PHASE4A_FROZEN_SHA;
 export const PHASE4B2_FROZEN_LENGTH = PHASE4A_FROZEN_BODY.length;
+export const PHASE4B2_SNAPSHOT_ID = "crs-phase4b2-orion";
+export const PHASE4B2_OTHER_SNAPSHOT_ID = "crs-phase4b2-other";
 
 export const PHASE4B2_OTHER_BODY = [
   "OTHER-ORG SERVICES AGREEMENT",
@@ -296,15 +298,20 @@ function draftRecord(agreementId: string, state: Phase4b2FixtureState, hashMisma
       locked_at: "2026-09-10T15:00:00.000Z",
       locked_by: "owner",
       content_sha256: isA ? PHASE4B2_FROZEN_SHA : PHASE4B2_OTHER_SHA,
+      accepted_snapshot_id: isA ? PHASE4B2_SNAPSHOT_ID : PHASE4B2_OTHER_SNAPSHOT_ID,
+      accepted_snapshot_digest: sha,
     },
     accepted_review_snapshot: {
       agreement_id: agreementId,
+      snapshot_id: isA ? PHASE4B2_SNAPSHOT_ID : PHASE4B2_OTHER_SNAPSHOT_ID,
       locked_version_id: lockedVersionId,
       corpus_sha256: sha,
       corpus_length: body.length,
       corpus_plain: body,
       status: "accepted",
     },
+    authority_mode: "accepted_review_snapshot",
+    legacy_pre_cutover: false,
   };
 }
 

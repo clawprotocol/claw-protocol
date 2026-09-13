@@ -68,7 +68,7 @@ describe("recipient signing locked version", () => {
     ).toBe(false);
   });
 
-  it("fails closed on incomplete lock snapshot binding, and keeps pre-cutover locks open", () => {
+  it("fails closed on incomplete lock snapshot binding, and does not infer legacy from absent fields", () => {
     const meta = {
       snapshotId: "crs-1",
       lockedVersionId: "lv-1",
@@ -91,6 +91,16 @@ describe("recipient signing locked version", () => {
         meta,
         lockSha: SHA_B,
         snapSha: SHA_A,
+      }),
+    ).toBe(true);
+    expect(
+      signPaperAuthorityClosed({
+        tokenLockedVersionId: "lv-1",
+        meta,
+        lockSha: SHA_B,
+        snapSha: SHA_A,
+        legacyPreCutover: true,
+        authorityMode: "legacy_packet_pre_snapshot",
       }),
     ).toBe(false);
   });

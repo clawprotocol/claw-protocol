@@ -1308,48 +1308,107 @@ test.describe("Core paid journey acceptance", () => {
       completedDoc.includes(FACTS.economics);
 
     const api = configuredLiveApiBase();
-    const verifyUrl = `${api}/api/agreements/public/${encodeURIComponent(drafted.agreementId)}/verify`;
-    const readVerify = async () => {
-      const res = await page.request.get(verifyUrl);
+    const runtime = loadCorePaidJourneyRuntime();
+    const ownerDraftRes = await page.request.get(
+      `${api}/api/agreements/${encodeURIComponent(drafted.agreementId)}`,
+      {
+        headers: {
+          Authorization: `Bearer ${runtime.access_token}`,
+          "X-Claw-Org-Id": runtime.org_id,
+        },
+      },
+    );
+    const ownerDraftBody = (await ownerDraftRes.json().catch(() => ({}))) as {
+      draft?: {
+        parties?: OwnerAgreementParty[];
+        accepted_review_snapshot_v1?: { snapshotId?: string; corpusSha256?: string; status?: string };
+      };
+      signing_lock?: {
+        locked_version_id?: string;
+        accepted_snapshot_id?: string;
+        accepted_snapshot_digest?: string;
+      } | null;
+    };
+    const expectedSnapId = String(
+      ownerDraftBody.signing_lock?.accepted_snapshot_id ||
+        ownerDraftBody.draft?.accepted_review_snapshot_v1?.snapshotId ||
+        "",
+    ).trim();
+    const expectedSnapDigest = String(
+      ownerDraftBody.signing_lock?.accepted_snapshot_digest ||
+        ownerDraftBody.draft?.accepted_review_snapshot_v1?.corpusSha256 ||
+        "",
+    )
+      .trim()
+      .toLowerCase();
+    const expectedRequired = (ownerDraftBody.draft?.parties || [])
+      .filter((party) => {
+        const role = String(party.role || "").trim().toLowerCase();
+        return role === "owner" || role === "signer" || role === "reviewer" || role === "party";
+      })
+      .map((party) => String(party.id || "").trim())
+      .filter(Boolean)
+      .sort();
+    const proofUrl = `${api}/api/agreements/${encodeURIComponent(drafted.agreementId)}/proof-status`;
+    const readReceipt = async () => {
+      const res = await page.request.get(proofUrl, {
+        headers: {
+          Authorization: `Bearer ${runtime.access_token}`,
+          "X-Claw-Org-Id": runtime.org_id,
+        },
+      });
       const body = (await res.json().catch(() => ({}))) as {
-        agreement_id?: string;
-        participants?: Array<{ name?: string }>;
-        signature_status?: { fully_executed?: boolean; locked_version_id?: string | null };
-        signature_events?: Array<{ event_type?: string; participant_id?: string }>;
-        verification?: {
-          agreement_hash?: string;
-          accepted_review_snapshot?: { snapshot_id?: string; corpus_sha256?: string } | null;
-        };
+        finalized_receipt?: {
+          receipt_id?: string;
+          receipt_hash_sha256?: string;
+          agreement_id?: string;
+          locked_version_id?: string;
+          accepted_snapshot_id?: string;
+          accepted_snapshot_digest?: string;
+          required_participant_ids?: string[];
+          completion_events?: Array<{ participantId?: string; participant_id?: string }>;
+        } | null;
       };
       return { ok: res.ok(), status: res.status(), body };
     };
-    const firstReceipt = await readVerify();
-    const refreshedReceipt = await readVerify();
-    const firstHash = String(firstReceipt.body.verification?.agreement_hash || "").trim();
-    const firstSnap = String(firstReceipt.body.verification?.accepted_review_snapshot?.snapshot_id || "").trim();
-    const firstDigest = String(firstReceipt.body.verification?.accepted_review_snapshot?.corpus_sha256 || "").trim();
-    const receiptParticipants = (firstReceipt.body.participants || []).map((row) => String(row.name || ""));
-    const completedEvents = (firstReceipt.body.signature_events || []).filter(
-      (row) => String(row.event_type || "") === "signature_completed" && String(row.participant_id || "").trim(),
-    );
+    const firstReceipt = await readReceipt();
+    await page.reload({ waitUntil: "domcontentloaded" });
+    const refreshedReceipt = await readReceipt();
+    const first = firstReceipt.body.finalized_receipt || {};
+    const second = refreshedReceipt.body.finalized_receipt || {};
+    const firstId = String(first.receipt_id || "").trim();
+    const firstHash = String(first.receipt_hash_sha256 || "").trim().toLowerCase();
+    const firstSnap = String(first.accepted_snapshot_id || "").trim();
+    const firstDigest = String(first.accepted_snapshot_digest || "").trim().toLowerCase();
+    const requiredSet = [...new Set((first.required_participant_ids || []).map((id) => String(id || "").trim()).filter(Boolean))].sort();
+    const completedIds = (first.completion_events || [])
+      .map((row) => String(row.participantId || row.participant_id || "").trim())
+      .filter(Boolean);
+    const uniqueCompleted = [...new Set(completedIds)].sort();
     const receiptOk =
       firstReceipt.ok &&
       refreshedReceipt.ok &&
-      firstReceipt.body.agreement_id === drafted.agreementId &&
-      firstHash.length > 8 &&
-      firstHash === String(refreshedReceipt.body.verification?.agreement_hash || "").trim() &&
+      ownerDraftRes.ok() &&
+      firstId.length > 8 &&
+      firstId === String(second.receipt_id || "").trim() &&
+      /^[0-9a-f]{64}$/.test(firstHash) &&
+      firstHash === String(second.receipt_hash_sha256 || "").trim().toLowerCase() &&
+      String(first.agreement_id || "") === drafted.agreementId &&
+      String(first.locked_version_id || "") === version &&
       firstSnap.length > 4 &&
-      firstSnap === String(refreshedReceipt.body.verification?.accepted_review_snapshot?.snapshot_id || "").trim() &&
+      firstSnap === expectedSnapId &&
+      firstSnap === String(second.accepted_snapshot_id || "").trim() &&
       /^[0-9a-f]{64}$/.test(firstDigest) &&
-      firstDigest === String(refreshedReceipt.body.verification?.accepted_review_snapshot?.corpus_sha256 || "").trim() &&
-      String(firstReceipt.body.signature_status?.locked_version_id || "") === version &&
-      firstReceipt.body.signature_status?.fully_executed === true &&
-      FACTS.parties.every((party) => receiptParticipants.some((name) => name.includes(party.name))) &&
-      completedEvents.length >= 2;
+      firstDigest === expectedSnapDigest &&
+      firstDigest === String(second.accepted_snapshot_digest || "").trim().toLowerCase() &&
+      requiredSet.length >= 2 &&
+      requiredSet.join("|") === expectedRequired.join("|") &&
+      uniqueCompleted.join("|") === requiredSet.join("|") &&
+      completedIds.length === uniqueCompleted.length;
     record(
       "B3_owner_final_record_after_direct_sign",
       completedDocOk && receiptOk && ceremonyOk ? "pass" : "fail",
-      `completedDocument=${completedDocOk} receiptBound=${receiptOk} final=${finalCompare.diff} agreement=${drafted.agreementId} version=${version || "unset"} lockAfter=${lockAfter || "unset"} receiptHash=${firstHash || "unset"} snapshot=${firstSnap || "unset"} recovered=${firstHash === String(refreshedReceipt.body.verification?.agreement_hash || "").trim()}`,
+      `completedDocument=${completedDocOk} receiptBound=${receiptOk} final=${finalCompare.diff} agreement=${drafted.agreementId} version=${version || "unset"} lockAfter=${lockAfter || "unset"} receiptId=${firstId || "unset"} receiptHash=${firstHash || "unset"} snapshot=${firstSnap || "unset"} recovered=${firstId === String(second.receipt_id || "").trim()}`,
     );
     expect(ceremonyOk, "every required signer ceremony must be durable, version-bound, and operatively identical").toBeTruthy();
     expect(completedDocOk && receiptOk, "completed document and persisted receipt must both bind the locked authority").toBeTruthy();

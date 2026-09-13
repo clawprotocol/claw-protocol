@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 from utils.canon_json import canon_sha256_hex
 
@@ -78,6 +78,62 @@ def _parse_rfc3339(s: str) -> None:
 def agreement_commitment_sha256_from_body(body: Dict[str, Any]) -> str:
     """Deterministic digest of the finalized artifact (hashed object only)."""
     return canon_sha256_hex(dict(sorted(body.items())))
+
+
+def build_drafted_ceremony_execution_packet(
+    *,
+    agreement_id: str,
+    locked_version_id: str,
+    accepted_snapshot_id: str,
+    accepted_snapshot_digest: str,
+    required_participant_ids: List[str],
+    completion_events: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """
+    Durable execution-packet bindings for a drafted ceremony receipt.
+
+    Distinct required participant ids are stored as a set. Duplicate completion
+    events cannot substitute for a missing required signer.
+    """
+    required: List[str] = []
+    seen_required = set()
+    for raw in required_participant_ids:
+        pid = str(raw or "").strip()
+        if not pid or pid in seen_required:
+            continue
+        seen_required.add(pid)
+        required.append(pid)
+    required.sort()
+    events: List[Dict[str, Any]] = []
+    seen_events = set()
+    for raw in completion_events:
+        if not isinstance(raw, dict):
+            continue
+        pid = str(raw.get("participantId") or raw.get("participant_id") or "").strip()
+        if not pid or pid in seen_events:
+            continue
+        seen_events.add(pid)
+        events.append(
+            {
+                "eventType": str(raw.get("eventType") or raw.get("event_type") or "signature_completed"),
+                "participantId": pid,
+                "at": raw.get("at"),
+                "lockedVersionId": str(
+                    raw.get("lockedVersionId") or raw.get("locked_version_id") or locked_version_id
+                ).strip(),
+            }
+        )
+    digest = (accepted_snapshot_digest or "").strip().lower()
+    return {
+        "schema": "agreement_execution_packet.v1",
+        "agreementId": str(agreement_id or "").strip(),
+        "finalizedVersionId": str(locked_version_id or "").strip(),
+        "lockedVersionId": str(locked_version_id or "").strip(),
+        "acceptedSnapshotId": str(accepted_snapshot_id or "").strip(),
+        "acceptedSnapshotDigest": digest,
+        "requiredParticipantIds": required,
+        "completionEvents": events,
+    }
 
 
 def create_agreement_receipt_response(

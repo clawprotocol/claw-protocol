@@ -33,7 +33,10 @@ from backend.config.runtime_environment import (
     recipient_token_ttl_min_seconds,
 )
 from backend.handlers.verifier_api_handler import get_batch
-from backend.proof.agreement_receipt import create_agreement_receipt_response
+from backend.proof.agreement_receipt import (
+    build_drafted_ceremony_execution_packet,
+    create_agreement_receipt_response,
+)
 from backend.security.agreement_read_scope import (
     assert_agreement_full_draft_read_allowed,
     assert_agreement_recipient_write_allowed,
@@ -3787,6 +3790,16 @@ def _purpose_looks_like_full_client_agreement_text(purpose: str) -> bool:
     return False
 
 
+def _document_lifecycle_banner(draft: AgreementDraft) -> str:
+    """Presentation-only label. Does not rewrite accepted document bytes."""
+    if _agreement_draft_fully_executed(draft):
+        return "Completed agreement"
+    aid = str(getattr(draft, "id", "") or "").strip()
+    if aid and _signing_lock_active(aid):
+        return "Agreement locked for signature"
+    return "Draft Agreement (non-binding template)"
+
+
 def _render_html(draft: AgreementDraft, *, watermark: bool = False) -> str:
     review_first_corpus, review_first_source = _review_first_final_corpus_from_draft(draft)
     if review_first_corpus:
@@ -3807,10 +3820,11 @@ def _render_html(draft: AgreementDraft, *, watermark: bool = False) -> str:
         )
         body = html.escape(purpose_for_body)
         wm = html.escape(WATERMARK_LABEL)
+        banner = html.escape(_document_lifecycle_banner(draft))
         article = (
             "<article style='position:relative;max-width:720px;margin:0 auto'>"
             "<p style='text-align:center;color:#475569;font-size:12px;margin-bottom:12px'>"
-            "Draft Agreement (non-binding template)</p>"
+            f"{banner}</p>"
             "<pre style='white-space:pre-wrap;font-family:Georgia,serif;font-size:15px;line-height:1.65;"
             "color:#0f172a;margin:0;padding:0;border:0;background:transparent'>"
             f"{body}</pre>"
@@ -3829,10 +3843,11 @@ def _render_html(draft: AgreementDraft, *, watermark: bool = False) -> str:
             purpose_for_body = purpose_raw
         body = html.escape(purpose_for_body)
         wm = html.escape(WATERMARK_LABEL)
+        banner = html.escape(_document_lifecycle_banner(draft))
         article = (
             "<article style='position:relative;max-width:720px;margin:0 auto'>"
             "<p style='text-align:center;color:#475569;font-size:12px;margin-bottom:12px'>"
-            "Draft Agreement (non-binding template)</p>"
+            f"{banner}</p>"
             "<pre style='white-space:pre-wrap;font-family:Georgia,serif;font-size:15px;line-height:1.65;"
             "color:#0f172a;margin:0;padding:0;border:0;background:transparent'>"
             f"{body}</pre>"
@@ -3867,10 +3882,11 @@ def _render_html(draft: AgreementDraft, *, watermark: bool = False) -> str:
     party_a_role = html.escape(party_a_role_raw)
     party_b_role = html.escape(party_b_role_raw)
     wm = html.escape(WATERMARK_LABEL)
+    banner = html.escape(_document_lifecycle_banner(draft))
     article = (
         "<article style='position:relative'>"
         f"<h1 style='text-align:center;margin-bottom:6px'>{title}</h1>"
-        "<p style='text-align:center;margin-top:0;color:#475569'>Draft Agreement (non-binding template)</p>"
+        f"<p style='text-align:center;margin-top:0;color:#475569'>{banner}</p>"
         f"<p>This {title} (the \"Agreement\") is made effective as of {effective_date}, by and between "
         f"{party_a_name} ({party_a_role}) and {party_b_name} ({party_b_role}). The parties agree as follows:</p>"
         "<h2>1. Scope of Services</h2>"
@@ -7144,11 +7160,31 @@ def put_agreement_signing_lock(
         "content_sha256": content_sha256,
         "content_length": len(canon_json_bytes(_signing_snapshot_dict(draft_full))),
     }
-    from backend.services.accepted_review_snapshot import lock_authority_from_draft
+    from backend.services.accepted_review_snapshot import (
+        assert_signing_lock_bound_to_snapshot,
+        is_pure_legacy_pre_cutover,
+        lock_authority_from_accepted_snapshot,
+    )
+    from backend.services.quick_pdf_envelope import is_uploaded_final_pdf_authority
 
-    snap_bind = lock_authority_from_draft(draft_full)
-    if snap_bind:
+    if not (is_uploaded_final_pdf_authority(draft_full) or is_pure_legacy_pre_cutover(draft_full)):
+        snap_bind = lock_authority_from_accepted_snapshot(draft_full)
+        if not snap_bind:
+            raise HTTPException(
+                status_code=400,
+                detail={"code": "accepted_review_snapshot_required"},
+            )
         payload.update(snap_bind)
+        bound_ok, bound_err = assert_signing_lock_bound_to_snapshot(
+            payload,
+            snap_bind["accepted_snapshot_id"],
+            snap_bind["accepted_snapshot_digest"],
+        )
+        if not bound_ok:
+            raise HTTPException(
+                status_code=400,
+                detail={"code": bound_err or "lock_snapshot_binding_missing"},
+            )
     write_signing_lock(agreement_id, payload)
     record_public_feed_event_if_applicable(
         draft_dict=draft_full.model_dump(),
@@ -7228,6 +7264,7 @@ def post_signing_ceremony_complete(
     stored_sha = str((lock_row or {}).get("content_sha256") or "").strip()
     if stored_sha and _draft_locked_content_sha256(draft) != stored_sha:
         raise HTTPException(status_code=409, detail="stale_locked_version")
+    _require_production_signing_lock_authority(draft, agreement_id, lock_row)
     part_id, sp = _resolve_signing_participant_for_ceremony(draft, body.participant_id)
     assert_agreement_recipient_write_allowed(
         request,
@@ -7304,8 +7341,15 @@ def post_signing_ceremony_complete(
         _save_draft_registry_cas_sync(dump, request, expected_revision=base_rev)
     else:
         _save_draft_sync(dump, request)
+    finalized_receipt = None
     if fully:
         record_agreement_finalized(agreement_id=agreement_id)
+        finalized_receipt = _issue_or_reuse_drafted_finalized_receipt(
+            agreement_id=agreement_id,
+            draft=next_draft,
+            lock=lock_row or {},
+            finalized_at=now,
+        )
         record_public_feed_event_if_applicable(draft_dict=dump, event_type="signed", at=now)
         try:
             from backend.integrations.hooks_emit import (
@@ -7342,6 +7386,7 @@ def post_signing_ceremony_complete(
         "signed_at": now,
         "agreement_version_hash": fp,
         "fully_executed": fully,
+        "finalized_receipt": finalized_receipt,
     }
 
 
@@ -7386,10 +7431,12 @@ def post_recipient_access_token(
     env_ttl = os.getenv("CLAW_RECIPIENT_TOKEN_TTL_SECONDS", "").strip()
     raw_ttl = int(env_ttl) if env_ttl else int(body.ttl_seconds)
     ttl = clamp_recipient_token_ttl_seconds(raw_ttl)
+    draft_for_authority = _load_or_404(agreement_id)
 
     if body.mode == "sign":
         if not lock or not lock.get("locked_version_id"):
             raise HTTPException(status_code=409, detail="signing_not_finalized_server_side")
+        _require_production_signing_lock_authority(draft_for_authority, agreement_id, lock)
         lv = str(lock["locked_version_id"])
     else:
         lv = str((lock or {}).get("locked_version_id") or "")
@@ -10085,12 +10132,14 @@ def get_agreement_draft(agreement_id: str, request: Request) -> Dict[str, Any]:
             "accepted_review_snapshot": (
                 review_revision if review_revision and review_revision.get("status") == "accepted" else None
             ),
+            **_authority_classification_public(draft),
         }
     return {
         "id": agreement_id,
         "draft": draft_out,
         "economics": economics_overlay_for_agreement(agreement_id),
         "signing_lock": signing_lock_out,
+        **_authority_classification_public(draft),
     }
 
 
@@ -12242,6 +12291,68 @@ def _signer_party_by_participant_id(draft: AgreementDraft, participant_id: str) 
     return None
 
 
+def _authority_classification_public(draft: AgreementDraft) -> Dict[str, Any]:
+    from backend.services.accepted_review_snapshot import (
+        classify_authority_mode,
+        is_pure_legacy_pre_cutover,
+    )
+
+    return {
+        "authority_mode": classify_authority_mode(draft),
+        "legacy_pre_cutover": is_pure_legacy_pre_cutover(draft),
+    }
+
+
+def _require_production_signing_lock_authority(
+    draft: AgreementDraft, agreement_id: str, lock: Any
+) -> None:
+    from backend.services.accepted_review_snapshot import assert_production_signing_lock_authority
+
+    ok, err, _mode = assert_production_signing_lock_authority(draft, agreement_id, lock)
+    if not ok:
+        raise HTTPException(
+            status_code=400,
+            detail={"code": err or "accepted_review_snapshot_required"},
+        )
+
+
+def _required_signing_participant_ids(draft: AgreementDraft) -> List[str]:
+    out: List[str] = []
+    seen = set()
+    for party in _required_signing_parties(draft):
+        pid = str(getattr(party, "id", "") or "").strip()
+        if not pid or pid in seen:
+            continue
+        seen.add(pid)
+        out.append(pid)
+    return out
+
+
+def _signature_completion_event_bindings(audit: Any, locked_version_id: str) -> List[Dict[str, Any]]:
+    events: List[Dict[str, Any]] = []
+    seen = set()
+    for raw in audit or []:
+        ev = raw.model_dump() if hasattr(raw, "model_dump") else raw
+        if not isinstance(ev, dict):
+            continue
+        if str(ev.get("event_type") or "") != "signature_completed":
+            continue
+        val = ev.get("value") if isinstance(ev.get("value"), dict) else {}
+        pid = str(val.get("participant_id") or "").strip()
+        if not pid or pid in seen:
+            continue
+        seen.add(pid)
+        events.append(
+            {
+                "eventType": "signature_completed",
+                "participantId": pid,
+                "at": ev.get("at"),
+                "lockedVersionId": str(val.get("locked_version_id") or locked_version_id).strip(),
+            }
+        )
+    return events
+
+
 def _signing_ceremony_guards_lv(draft: AgreementDraft, agreement_id: str) -> Tuple[str, AgreementDraft]:
     draft = _persist_party_id_backfill(draft)
     if _agreement_draft_fully_executed(draft):
@@ -13260,6 +13371,127 @@ def _persist_agreement_execution_packet_artifact(
     )
 
 
+def _load_agreement_execution_packet(receipt_id: str) -> Optional[Dict[str, Any]]:
+    from backend.config.storage_runtime import unified_artifact_store_enabled
+    from backend.storage.artifact_repository import get_artifact_repository
+
+    rid = (receipt_id or "").strip()
+    if not rid or not unified_artifact_store_enabled():
+        return None
+    raw = get_artifact_repository().get_bytes_by_logical_ref(
+        artifact_type="agreement_execution_packet", logical_ref=rid
+    )
+    if not raw:
+        return None
+    try:
+        parsed = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return None
+    return parsed if isinstance(parsed, dict) else None
+
+
+def _drafted_finalized_receipt_view(
+    rec: Dict[str, Any], packet: Optional[Dict[str, Any]]
+) -> Dict[str, Any]:
+    out: Dict[str, Any] = {
+        "receipt_id": rec.get("receipt_id"),
+        "receipt_hash_sha256": rec.get("receipt_hash_sha256"),
+        "timeline_id": rec.get("timeline_id"),
+    }
+    if isinstance(packet, dict):
+        out.update(
+            {
+                "agreement_id": packet.get("agreementId"),
+                "locked_version_id": packet.get("lockedVersionId") or packet.get("finalizedVersionId"),
+                "accepted_snapshot_id": packet.get("acceptedSnapshotId"),
+                "accepted_snapshot_digest": packet.get("acceptedSnapshotDigest"),
+                "required_participant_ids": list(packet.get("requiredParticipantIds") or []),
+                "completion_events": list(packet.get("completionEvents") or []),
+                "execution_packet_sha256": None,
+            }
+        )
+        try:
+            from backend.proof.execution_packet_digest import execution_packet_digest_sha256
+
+            out["execution_packet_sha256"] = execution_packet_digest_sha256(packet)
+        except Exception:
+            out["execution_packet_sha256"] = None
+    return out
+
+
+def _issue_or_reuse_drafted_finalized_receipt(
+    *,
+    agreement_id: str,
+    draft: AgreementDraft,
+    lock: Dict[str, Any],
+    finalized_at: str,
+) -> Optional[Dict[str, Any]]:
+    from backend.proof.execution_packet_digest import execution_packet_digest_sha256
+    from backend.services.accepted_review_snapshot import get_accepted_snapshot_record
+
+    accepted = get_accepted_snapshot_record(draft)
+    if not isinstance(accepted, dict):
+        return None
+    sid = str(accepted.get("snapshotId") or "").strip()
+    digest = str(accepted.get("corpusSha256") or "").strip().lower()
+    lv = str((lock or {}).get("locked_version_id") or "").strip()
+    required = _required_signing_participant_ids(draft)
+    if not sid or len(digest) != 64 or not lv or not required:
+        return None
+    packet = build_drafted_ceremony_execution_packet(
+        agreement_id=agreement_id,
+        locked_version_id=lv,
+        accepted_snapshot_id=sid,
+        accepted_snapshot_digest=digest,
+        required_participant_ids=required,
+        completion_events=_signature_completion_event_bindings(draft.audit_log, lv),
+    )
+    packet_sha = execution_packet_digest_sha256(packet)
+    store = _agreements_timeline_store()
+    receipt, _artifact_body = create_agreement_receipt_response(
+        agreement_id=agreement_id,
+        finalized_version_id=lv,
+        finalized_at=finalized_at,
+        content_sha256=digest,
+        execution_packet_sha256=packet_sha,
+        signer_count=len(required),
+        anchor_network="bitcoin-testnet",
+    )
+    try:
+        _persist_agreement_execution_packet_artifact(
+            agreement_id=agreement_id,
+            receipt_id=receipt["receipt_id"],
+            finalized_version_id=lv,
+            execution_packet_sha256=packet_sha,
+            execution_packet=packet,
+        )
+    except ValueError:
+        logging.getLogger(__name__).exception(
+            "drafted_finalized_receipt_packet_invalid agreement_id=%s", agreement_id
+        )
+        return None
+    try:
+        existing = store.get_receipt(receipt["receipt_id"])
+        return _drafted_finalized_receipt_view(existing, packet)
+    except KeyError:
+        pass
+    store.create_receipt(
+        receipt_id=receipt["receipt_id"],
+        timeline_id=receipt["timeline_id"],
+        protocol_version=receipt["protocol_version"],
+        network=receipt["network"],
+        epoch_id=receipt.get("epoch_id"),
+        btc_txid=receipt["btc_txid"],
+        commitment=receipt["commitment"],
+        merkle_proof=receipt["merkle_proof"],
+        zk_proof_refs=receipt.get("zk_proof_refs"),
+        issued_at=receipt["issued_at"],
+        receipt_hash_sha256=receipt.get("receipt_hash_sha256"),
+    )
+    out = store.get_receipt(receipt["receipt_id"])
+    return _drafted_finalized_receipt_view(out, packet)
+
+
 def _agreement_anchor_proof_view(
     receipt: Dict[str, Any], batch: Optional[Dict[str, Any]]
 ) -> Dict[str, Any]:
@@ -13411,11 +13643,17 @@ def get_agreement_proof_status(agreement_id: str, request: Request):
     timeline_id = f"agreement:{agreement_id}"
     rec = store.get_latest_receipt_for_timeline(timeline_id)
     if not rec:
-        return {"proof": None, "cadence_defaults": anchor_cadence_summary()}
+        return {
+            "proof": None,
+            "cadence_defaults": anchor_cadence_summary(),
+            "finalized_receipt": None,
+        }
 
     batch = _batch_row_for_receipt(store, rec)
+    packet = _load_agreement_execution_packet(str(rec.get("receipt_id") or ""))
 
     return {
         "proof": _agreement_anchor_proof_view(rec, batch),
         "cadence_defaults": anchor_cadence_summary(),
+        "finalized_receipt": _drafted_finalized_receipt_view(rec, packet),
     }

@@ -47,7 +47,7 @@ describe("core paid journey article inspectors", () => {
 
   it("treats document chrome as presentation-only, not an operative mismatch", () => {
     const base = consultingPositiveSnippet();
-    const chrome = `Document\nDraft Agreement (non-binding template)\n${base}`;
+    const chrome = `Document\nDraft Agreement (non-binding template)\nAgreement locked for signature\nCompleted agreement\n${base}`;
     const compare = describeOperativeArticleCompare("owner", base, "maya", chrome);
     expect(compare.sameOperative).toBe(true);
     expect(compare.presentationOnly).toBe(true);

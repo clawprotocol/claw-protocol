@@ -204,7 +204,9 @@ export function stripPresentationChromeForOperativeCompare(article: string): str
   const withoutBanner = (article || "")
     .replace(/\r\n/g, "\n")
     .replace(/^\s*Document\s*$/gim, "")
-    .replace(/Draft Agreement\s*\(non-binding template\)/gi, "");
+    .replace(/Draft Agreement\s*\(non-binding template\)/gi, "")
+    .replace(/Agreement locked for signature/gi, "")
+    .replace(/Completed agreement/gi, "");
   return stripSignatureMetadataForOperativeCompare(withoutBanner);
 }
 

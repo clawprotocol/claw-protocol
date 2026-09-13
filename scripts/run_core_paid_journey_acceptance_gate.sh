@@ -38,6 +38,7 @@ CONTENT_FP="$(
       frontend/src/agreement/AgreementRecipientReview.tsx \
       backend/services/accepted_review_snapshot.py \
       backend/services/recipient_draft_projection.py \
+      backend/proof/agreement_receipt.py \
       backend/routers/agreements_v2_api.py \
       frontend/src/components/agreements/paidProOpeningRecitalGuard.ts \
       frontend/src/components/agreements/paidProAcceptedCorpusPartyRoles.ts \

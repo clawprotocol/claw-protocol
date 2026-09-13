@@ -91,6 +91,8 @@ export function signPaperAuthorityClosed(args: {
   snapSha?: string | null;
   acceptedSnapshotId?: string | null;
   acceptedSnapshotDigest?: string | null;
+  authorityMode?: string | null;
+  legacyPreCutover?: boolean | null;
 }): boolean {
   const tokenLv = args.tokenLockedVersionId.trim();
   if (!tokenLv || !args.meta) return true;
@@ -100,13 +102,21 @@ export function signPaperAuthorityClosed(args: {
   const metaSha = String(args.meta.corpusSha256 || "").trim().toLowerCase();
   const boundId = String(args.acceptedSnapshotId || "").trim();
   const boundDigest = String(args.acceptedSnapshotDigest || "").trim().toLowerCase();
-  if (boundId || boundDigest) {
-    if (!boundId || !/^[0-9a-f]{64}$/.test(boundDigest)) return true;
-    if (args.meta.snapshotId && boundId !== args.meta.snapshotId) return true;
-    if (snapSha && snapSha !== boundDigest) return true;
-    if (metaSha && metaSha !== boundDigest) return true;
+  const mode = String(args.authorityMode || "").trim();
+  const explicitLegacy = args.legacyPreCutover === true;
+  if (explicitLegacy) {
+    if (snapSha && metaSha && snapSha !== metaSha) return true;
+    if (lockSha && metaSha && lockSha === metaSha) return false;
+    return false;
   }
+  if (mode === "uploaded_final_pdf") {
+    return false;
+  }
+  // Modern or unclassified: require server-bound snapshot. Never infer legacy from absent fields.
+  if (!boundId || !/^[0-9a-f]{64}$/.test(boundDigest)) return true;
+  if (args.meta.snapshotId && boundId !== args.meta.snapshotId) return true;
+  if (snapSha && snapSha !== boundDigest) return true;
+  if (metaSha && metaSha !== boundDigest) return true;
   if (snapSha && metaSha && snapSha !== metaSha) return true;
-  if (lockSha && metaSha && lockSha === metaSha) return false;
   return false;
 }

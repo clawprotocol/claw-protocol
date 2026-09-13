@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Optional
 
 import pytest
 from fastapi.testclient import TestClient
@@ -37,6 +38,9 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> TestClient:
 
     monkeypatch.setattr(av2, "OPENAI_API_KEY", "sk-acceptance-stub-not-live")
     eco_store.reset_economics_store_for_tests()
+    from backend.storage.artifact_repository import reset_artifact_repository_singleton
+
+    reset_artifact_repository_singleton()
     ensure_org_pro_entitlement(ORG, user_id=OWNER)
     return TestClient(app, raise_server_exceptions=False)
 
@@ -608,6 +612,44 @@ def _harbor_ironvale_payload() -> dict:
     }
 
 
+def _snapshot_corpus() -> str:
+    return (
+        "CONSULTING SERVICES AGREEMENT\nHarbor Peak Analytics LLC (Consultant) "
+        "and Ironvale Manufacturing Inc. (Client). Fixed fee $48,000. Term twelve months.\n"
+        * 8
+    ).strip()
+
+
+def _accept_snapshot(client: TestClient, aid: str, corpus: Optional[str] = None) -> tuple[str, str]:
+    body = corpus or _snapshot_corpus()
+    snap = client.post(
+        f"/api/agreements/{aid}/canonical-review-snapshot",
+        headers=_headers(),
+        json={"corpus_plain": body},
+    )
+    assert snap.status_code == 200, snap.text
+    snapshot_id = str(snap.json().get("snapshot_id") or snap.json().get("snapshotId") or "")
+    digest = str(snap.json().get("corpus_sha256") or snap.json().get("corpusSha256") or "")
+    if not snapshot_id:
+        frag = snap.json().get("snapshot") or {}
+        snapshot_id = str(frag.get("snapshot_id") or frag.get("snapshotId") or "")
+        digest = str(frag.get("corpus_sha256") or frag.get("corpusSha256") or digest)
+    acc = client.post(
+        f"/api/agreements/{aid}/canonical-review-snapshot/accept",
+        headers=_headers(),
+        json={"snapshot_id": snapshot_id, "expected_digest": digest},
+    )
+    assert acc.status_code == 200, acc.text
+    return snapshot_id, digest
+
+
+def _detail_code(res) -> str:
+    detail = res.json().get("detail")
+    if isinstance(detail, dict):
+        return str(detail.get("code") or "")
+    return str(detail or "")
+
+
 def _esign_consent() -> dict:
     from backend.services.vs01_completion_evidence import (
         CONSENT_ACTION,
@@ -640,6 +682,17 @@ def test_direct_signature_track_lock_without_review_approval(client: TestClient)
         json={"field": "owner_delivery_track", "value": "signature"},
     )
     assert track.status_code == 200, track.text
+    missing_bind = client.put(
+        f"/api/agreements/{aid}/signing-lock",
+        headers=_headers(),
+        json={"locked_version_id": "lv-direct-1", "locked_at": "2026-09-13T00:00:00Z", "locked_by": "owner"},
+    )
+    assert missing_bind.status_code == 400, missing_bind.text
+    assert _detail_code(missing_bind) == "accepted_review_snapshot_required"
+    from backend.services.agreement_signing_lock_store import read_signing_lock
+
+    assert read_signing_lock(aid) is None
+    snap_id, digest = _accept_snapshot(client, aid)
     lock = client.put(
         f"/api/agreements/{aid}/signing-lock",
         headers=_headers(),
@@ -647,7 +700,12 @@ def test_direct_signature_track_lock_without_review_approval(client: TestClient)
     )
     assert lock.status_code == 200, lock.text
     got = client.get(f"/api/agreements/{aid}", headers=_headers())
-    assert (got.json().get("signing_lock") or {}).get("locked_version_id") == "lv-direct-1"
+    bound = got.json().get("signing_lock") or {}
+    assert bound.get("locked_version_id") == "lv-direct-1"
+    assert bound.get("accepted_snapshot_id") == snap_id
+    assert bound.get("accepted_snapshot_digest") == digest
+    assert got.json().get("authority_mode") == "accepted_review_snapshot"
+    assert got.json().get("legacy_pre_cutover") is False
 
 
 def test_direct_signature_mints_and_owner_ceremony_without_prior_approval(client: TestClient) -> None:
@@ -660,6 +718,7 @@ def test_direct_signature_mints_and_owner_ceremony_without_prior_approval(client
         json={"field": "owner_delivery_track", "value": "signature"},
     )
     assert track.status_code == 200, track.text
+    _accept_snapshot(client, aid)
     lock = client.put(
         f"/api/agreements/{aid}/signing-lock",
         headers=_headers(),
@@ -716,6 +775,29 @@ def test_direct_signature_mints_and_owner_ceremony_without_prior_approval(client
     )
     assert done_c.status_code == 200, done_c.text
     assert done_c.json().get("fully_executed") is True
+    issued = done_c.json().get("finalized_receipt") or {}
+    assert str(issued.get("receipt_id") or "").startswith("agr_rcpt_")
+    first = client.get(f"/api/agreements/{aid}/proof-status", headers=_headers())
+    assert first.status_code == 200, first.text
+    first_rec = first.json().get("finalized_receipt") or {}
+    assert first_rec.get("receipt_id") == issued.get("receipt_id")
+    assert first_rec.get("agreement_id") == aid
+    assert first_rec.get("locked_version_id") == "lv-direct-2"
+    assert first_rec.get("accepted_snapshot_id")
+    assert len(str(first_rec.get("accepted_snapshot_digest") or "")) == 64
+    required = first_rec.get("required_participant_ids") or []
+    completed = [
+        str(ev.get("participantId") or ev.get("participant_id") or "")
+        for ev in (first_rec.get("completion_events") or [])
+    ]
+    assert sorted(required) == ["p-client", "p-owner"]
+    assert sorted(set(completed)) == sorted(required)
+    second = client.get(f"/api/agreements/{aid}/proof-status", headers=_headers())
+    second_rec = second.json().get("finalized_receipt") or {}
+    assert second_rec.get("receipt_id") == first_rec.get("receipt_id")
+    assert second_rec.get("receipt_hash_sha256") == first_rec.get("receipt_hash_sha256")
+    assert second_rec.get("accepted_snapshot_id") == first_rec.get("accepted_snapshot_id")
+    assert second_rec.get("accepted_snapshot_digest") == first_rec.get("accepted_snapshot_digest")
 
 
 def test_direct_signature_owner_and_reviewer_roles_become_fully_executed(client: TestClient) -> None:
@@ -729,6 +811,7 @@ def test_direct_signature_owner_and_reviewer_roles_become_fully_executed(client:
         headers=_headers(),
         json={"field": "owner_delivery_track", "value": "signature"},
     )
+    _accept_snapshot(client, aid)
     client.put(
         f"/api/agreements/{aid}/signing-lock",
         headers=_headers(),
@@ -793,7 +876,16 @@ def test_review_track_ceremony_still_requires_signer_approval(client: TestClient
     )
     from backend.services.agreement_signing_lock_store import write_signing_lock
 
-    write_signing_lock(aid, {"locked_version_id": "lv-review-1", "content_sha256": ""})
+    snap_id, digest = _accept_snapshot(client, aid)
+    write_signing_lock(
+        aid,
+        {
+            "locked_version_id": "lv-review-1",
+            "content_sha256": "",
+            "accepted_snapshot_id": snap_id,
+            "accepted_snapshot_digest": digest,
+        },
+    )
     minted = client.post(
         f"/api/agreements/{aid}/recipient-access-token",
         headers=_headers(),
@@ -917,3 +1009,223 @@ def test_direct_signature_lock_binds_snapshot_and_survives_clause_change(client:
 
     assert assert_signing_lock_bound_to_snapshot(lock_out, snapshot_id, digest) == (True, None)
     assert assert_signing_lock_bound_to_snapshot(lock_out, snapshot_id, sha256_hex_text(corpus_b))[0] is False
+
+
+def test_modern_lock_mint_complete_reject_missing_mismatched_and_invalid_authority(client: TestClient) -> None:
+    from backend.services.agreement_draft_store import load_draft, save_draft
+    from backend.services.agreement_signing_lock_store import read_signing_lock, write_signing_lock
+
+    create = client.post("/api/agreements/draft", headers=_headers(), json=_harbor_ironvale_payload())
+    assert create.status_code == 200, create.text
+    aid = create.json()["id"]
+    client.post(
+        f"/api/agreements/{aid}/update-field",
+        headers=_headers(),
+        json={"field": "owner_delivery_track", "value": "signature"},
+    )
+    missing = client.put(
+        f"/api/agreements/{aid}/signing-lock",
+        headers=_headers(),
+        json={"locked_version_id": "lv-missing", "locked_at": "2026-09-13T00:00:00Z", "locked_by": "owner"},
+    )
+    assert missing.status_code == 400, missing.text
+    assert _detail_code(missing) == "accepted_review_snapshot_required"
+    assert read_signing_lock(aid) is None
+
+    write_signing_lock(aid, {"locked_version_id": "lv-unbound", "content_sha256": "a" * 64})
+    unbound_mint = client.post(
+        f"/api/agreements/{aid}/recipient-access-token",
+        headers=_headers(),
+        json={"mode": "sign", "role": "signer", "recipient_party_id": "p-client"},
+    )
+    assert unbound_mint.status_code == 400, unbound_mint.text
+    assert _detail_code(unbound_mint) == "accepted_review_snapshot_required"
+    assert "token" not in unbound_mint.json()
+
+    snap_id, digest = _accept_snapshot(client, aid)
+    lock = client.put(
+        f"/api/agreements/{aid}/signing-lock",
+        headers=_headers(),
+        json={"locked_version_id": "lv-bound", "locked_at": "2026-09-13T00:00:00Z", "locked_by": "owner"},
+    )
+    assert lock.status_code == 200, lock.text
+    write_signing_lock(
+        aid,
+        {
+            **(read_signing_lock(aid) or {}),
+            "accepted_snapshot_id": "crs-other-agreement",
+        },
+    )
+    id_mismatch = client.post(
+        f"/api/agreements/{aid}/recipient-access-token",
+        headers=_headers(),
+        json={"mode": "sign", "role": "signer", "recipient_party_id": "p-client"},
+    )
+    assert id_mismatch.status_code == 400, id_mismatch.text
+    assert _detail_code(id_mismatch) == "lock_snapshot_id_mismatch"
+    assert "token" not in id_mismatch.json()
+
+    write_signing_lock(
+        aid,
+        {
+            **(read_signing_lock(aid) or {}),
+            "accepted_snapshot_id": snap_id,
+            "accepted_snapshot_digest": "b" * 64,
+        },
+    )
+    digest_mismatch = client.post(
+        f"/api/agreements/{aid}/recipient-access-token",
+        headers=_headers(),
+        json={"mode": "sign", "role": "signer", "recipient_party_id": "p-client"},
+    )
+    assert digest_mismatch.status_code == 400, digest_mismatch.text
+    assert _detail_code(digest_mismatch) == "lock_snapshot_digest_mismatch"
+
+    write_signing_lock(
+        aid,
+        {
+            **(read_signing_lock(aid) or {}),
+            "accepted_snapshot_id": snap_id,
+            "accepted_snapshot_digest": digest,
+        },
+    )
+    ok_mint = client.post(
+        f"/api/agreements/{aid}/recipient-access-token",
+        headers=_headers(),
+        json={"mode": "sign", "role": "signer", "recipient_party_id": "p-client"},
+    )
+    assert ok_mint.status_code == 200, ok_mint.text
+    write_signing_lock(
+        aid,
+        {
+            **(read_signing_lock(aid) or {}),
+            "accepted_snapshot_digest": "c" * 64,
+        },
+    )
+    rh = {"X-Claw-Recipient-Access-Token": ok_mint.json()["token"]}
+    complete = client.post(
+        f"/api/agreements/{aid}/signing-ceremony/complete",
+        headers=rh,
+        json={
+            "participant_id": "p-client",
+            "typed_name": "Jordan Hale",
+            "locked_version_id": "lv-bound",
+            "consent": _esign_consent(),
+        },
+    )
+    assert complete.status_code == 400, complete.text
+    assert _detail_code(complete) == "lock_snapshot_digest_mismatch"
+    after = load_draft(aid)
+    assert not any(
+        str((ev or {}).get("event_type") if isinstance(ev, dict) else "") == "signature_completed"
+        for ev in (after.get("audit_log") or [])
+    )
+
+    draft = load_draft(aid)
+    accepted = dict(draft.get("accepted_review_snapshot_v1") or {})
+    accepted["corpusPlain"] = str(accepted.get("corpusPlain") or "") + "\nCORRUPT"
+    draft["accepted_review_snapshot_v1"] = accepted
+    save_draft(draft)
+    write_signing_lock(
+        aid,
+        {
+            "locked_version_id": "lv-bound",
+            "accepted_snapshot_id": snap_id,
+            "accepted_snapshot_digest": digest,
+        },
+    )
+    invalid = client.post(
+        f"/api/agreements/{aid}/recipient-access-token",
+        headers=_headers(),
+        json={"mode": "sign", "role": "signer", "recipient_party_id": "p-client"},
+    )
+    assert invalid.status_code == 400, invalid.text
+    assert _detail_code(invalid) in {
+        "accepted_snapshot_digest_mismatch",
+        "accepted_snapshot_length_mismatch",
+        "accepted_snapshot_invalid",
+    }
+    got = client.get(f"/api/agreements/{aid}", headers=_headers())
+    assert got.json().get("legacy_pre_cutover") is False
+    assert got.json().get("authority_mode") == "accepted_review_snapshot"
+
+
+def test_genuine_legacy_pre_cutover_keeps_explicit_continuation(client: TestClient) -> None:
+    from backend.services.accepted_review_snapshot import is_pure_legacy_pre_cutover
+    from backend.services.agreement_draft_store import load_draft, save_draft
+    from backend.services.agreement_signing_lock_store import read_signing_lock
+
+    create = client.post("/api/agreements/draft", headers=_headers(), json=_harbor_ironvale_payload())
+    assert create.status_code == 200, create.text
+    aid = create.json()["id"]
+    draft = load_draft(aid)
+    draft["vs01_signing_packet_v1"] = {
+        "portable": {"seed": {"corpusPlain": "legacy sealed consulting paper " * 40}}
+    }
+    save_draft(draft)
+    assert is_pure_legacy_pre_cutover(load_draft(aid)) is True
+    client.post(
+        f"/api/agreements/{aid}/update-field",
+        headers=_headers(),
+        json={"field": "owner_delivery_track", "value": "signature"},
+    )
+    classified = client.get(f"/api/agreements/{aid}", headers=_headers())
+    assert classified.json().get("legacy_pre_cutover") is True
+    assert classified.json().get("authority_mode") == "legacy_packet_pre_snapshot"
+    lock = client.put(
+        f"/api/agreements/{aid}/signing-lock",
+        headers=_headers(),
+        json={"locked_version_id": "lv-legacy-1", "locked_at": "2026-09-13T00:00:00Z", "locked_by": "owner"},
+    )
+    assert lock.status_code == 200, lock.text
+    stored = read_signing_lock(aid) or {}
+    assert stored.get("locked_version_id") == "lv-legacy-1"
+    assert not stored.get("accepted_snapshot_id")
+    owner_mint = client.post(
+        f"/api/agreements/{aid}/recipient-access-token",
+        headers=_headers(),
+        json={"mode": "sign", "role": "signer", "recipient_party_id": "p-owner"},
+    )
+    assert owner_mint.status_code == 200, owner_mint.text
+    owner_hdr = {"X-Claw-Recipient-Access-Token": owner_mint.json()["token"]}
+    start = client.post(
+        f"/api/agreements/{aid}/signing-ceremony/start",
+        headers=owner_hdr,
+        json={"participant_id": "p-owner"},
+    )
+    assert start.status_code == 200, start.text
+    done = client.post(
+        f"/api/agreements/{aid}/signing-ceremony/complete",
+        headers=owner_hdr,
+        json={
+            "participant_id": "p-owner",
+            "typed_name": "Maya Chen",
+            "locked_version_id": "lv-legacy-1",
+            "consent": _esign_consent(),
+        },
+    )
+    assert done.status_code == 200, done.text
+    assert done.json().get("participant_id") == "p-owner"
+    after = client.get(f"/api/agreements/{aid}", headers=_headers())
+    assert after.json().get("legacy_pre_cutover") is True
+
+
+def test_duplicate_completion_events_cannot_substitute_required_signers() -> None:
+    from backend.proof.agreement_receipt import build_drafted_ceremony_execution_packet
+
+    packet = build_drafted_ceremony_execution_packet(
+        agreement_id="ag-dup",
+        locked_version_id="lv-1",
+        accepted_snapshot_id="crs-1",
+        accepted_snapshot_digest="a" * 64,
+        required_participant_ids=["p-owner", "p-client", "p-owner"],
+        completion_events=[
+            {"participantId": "p-owner", "at": "2026-09-13T00:00:00Z"},
+            {"participantId": "p-owner", "at": "2026-09-13T00:01:00Z"},
+        ],
+    )
+    assert packet["requiredParticipantIds"] == ["p-client", "p-owner"]
+    assert [ev["participantId"] for ev in packet["completionEvents"]] == ["p-owner"]
+    assert set(packet["completionEvents"][0]["participantId"] for ev in packet["completionEvents"]) != set(
+        packet["requiredParticipantIds"]
+    )

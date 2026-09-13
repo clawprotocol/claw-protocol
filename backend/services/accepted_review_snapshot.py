@@ -582,9 +582,8 @@ def current_review_revision_public(draft: Any, agreement_id: str) -> Optional[Di
     return rev if not err else None
 
 
-def lock_authority_from_draft(draft: Any) -> Optional[Dict[str, Any]]:
+def lock_authority_from_snapshot_record(snap: Any) -> Optional[Dict[str, Any]]:
     """Ids/digests to persist on the signing lock. Never a live-draft rewrite."""
-    snap = get_accepted_snapshot_record(draft) or latest_pending_snapshot_record(draft)
     if not isinstance(snap, dict):
         return None
     ok, _err = verify_snapshot_integrity(snap)
@@ -604,6 +603,17 @@ def lock_authority_from_draft(draft: Any) -> Optional[Dict[str, Any]]:
         "accepted_snapshot_length": length,
         "accepted_snapshot_status": _clean(snap.get("status")),
     }
+
+
+def lock_authority_from_accepted_snapshot(draft: Any) -> Optional[Dict[str, Any]]:
+    """Modern lock authority is the accepted snapshot only. Pending is not enough."""
+    return lock_authority_from_snapshot_record(get_accepted_snapshot_record(draft))
+
+
+def lock_authority_from_draft(draft: Any) -> Optional[Dict[str, Any]]:
+    """Ids/digests to persist on the signing lock. Never a live-draft rewrite."""
+    snap = get_accepted_snapshot_record(draft) or latest_pending_snapshot_record(draft)
+    return lock_authority_from_snapshot_record(snap)
 
 
 def recipient_review_revision_with_corpus(
@@ -647,6 +657,45 @@ def assert_signing_lock_bound_to_snapshot(
     if not want_digest or want_digest != digest:
         return False, "lock_snapshot_digest_mismatch"
     return True, None
+
+
+def assert_production_signing_lock_authority(
+    draft: Any,
+    agreement_id: str,
+    lock: Any,
+) -> Tuple[bool, Optional[str], str]:
+    """
+    Production lock/mint/complete gate.
+
+    Uses server-authoritative classification. Pure pre-cutover sealed packets may
+    continue without a snapshot bind. Malformed modern records are never treated
+    as legacy.
+    """
+    _ = _clean(agreement_id)
+    mode = classify_authority_mode(draft)
+    from backend.services.quick_pdf_envelope import is_uploaded_final_pdf_authority
+
+    if is_uploaded_final_pdf_authority(draft):
+        return True, None, AUTHORITY_MODE_UPLOADED_FINAL_PDF
+    if is_pure_legacy_pre_cutover(draft):
+        return True, None, AUTHORITY_MODE_LEGACY_PACKET
+    accepted = get_accepted_snapshot_record(draft)
+    if not isinstance(accepted, dict):
+        return False, "accepted_review_snapshot_required", mode
+    ok, err = verify_snapshot_integrity(accepted)
+    if not ok:
+        return False, err or "accepted_snapshot_invalid", mode
+    bind = lock_authority_from_snapshot_record(accepted)
+    if not bind:
+        return False, "accepted_snapshot_invalid", mode
+    bound_ok, bound_err = assert_signing_lock_bound_to_snapshot(
+        lock,
+        bind["accepted_snapshot_id"],
+        bind["accepted_snapshot_digest"],
+    )
+    if not bound_ok:
+        return False, bound_err or "lock_snapshot_binding_missing", mode
+    return True, None, mode
 
 
 def assert_review_revision_binding(

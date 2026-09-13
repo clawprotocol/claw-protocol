@@ -207,9 +207,12 @@ export function assertCorePaidJourneyAcceptanceContracts(): void {
 
   const routerApi = src("../../../backend/routers/agreements_v2_api.py");
   if (
-    !routerApi.includes("lock_authority_from_draft") ||
+    !routerApi.includes("lock_authority_from_accepted_snapshot") ||
     !routerApi.includes("accepted_snapshot_digest") ||
-    !routerApi.includes("recipient_review_revision_with_corpus")
+    !routerApi.includes("recipient_review_revision_with_corpus") ||
+    !routerApi.includes("_require_production_signing_lock_authority") ||
+    !routerApi.includes("_issue_or_reuse_drafted_finalized_receipt") ||
+    !routerApi.includes("legacy_pre_cutover")
   ) {
     throw new Error("signing lock no longer binds accepted snapshot id/digest onto the server lock");
   }
@@ -221,7 +224,9 @@ export function assertCorePaidJourneyAcceptanceContracts(): void {
     !snap.includes("review_snapshot_authority_required") ||
     !snap.includes("if resolve_err:") ||
     !snap.includes("assert_signing_lock_bound_to_snapshot") ||
-    !snap.includes("lock_authority_from_draft") ||
+    !snap.includes("assert_production_signing_lock_authority") ||
+    !snap.includes("is_pure_legacy_pre_cutover") ||
+    !snap.includes("lock_authority_from_accepted_snapshot") ||
     !snap.includes("recipient_review_revision_with_corpus")
   ) {
     throw new Error("server review revision binding still bypasses missing snapshot authority");
@@ -278,11 +283,25 @@ export function assertCorePaidJourneyAcceptanceContracts(): void {
     throw new Error("core paid journey live spec no longer fails closed on unresolved operative differences");
   }
   if (
-    !spec.includes("/public/") ||
+    !spec.includes("/proof-status") ||
+    !spec.includes("finalized_receipt") ||
+    !spec.includes("required_participant_ids") ||
     !spec.includes("receiptBound") ||
-    !spec.includes("accepted_review_snapshot")
+    !spec.includes("accepted_snapshot")
   ) {
     throw new Error("core paid journey live spec no longer verifies the persisted receipt separately from the completed-document view");
+  }
+  if (spec.includes("/api/agreements/public/")) {
+    throw new Error("core paid journey live spec still treats public verify as persisted receipt proof");
+  }
+
+  const recipientReview = src("../agreement/AgreementRecipientReview.tsx");
+  if (
+    !recipientReview.includes('renderReviewFirstCorpusHtml(snapPlain, "sign")') ||
+    !recipientReview.includes("Agreement locked for signature") ||
+    !recipientReview.includes("documentLifecycleBanner")
+  ) {
+    throw new Error("signing surface still hard-codes non-binding template chrome");
   }
 
   const signedView = src("./ownerSignedAgreementView.ts");
@@ -306,5 +325,11 @@ export function assertCorePaidJourneyAcceptanceContracts(): void {
 
   if (signAuth.includes("if (!boundId || !/^[0-9a-f]{64}$/.test(boundDigest)) return true;") === false) {
     throw new Error("sign paper authority still treats locked_version_id alone as sufficient");
+  }
+  if (
+    !signAuth.includes("legacyPreCutover") ||
+    !signAuth.includes("Never infer legacy from absent fields")
+  ) {
+    throw new Error("sign paper authority still infers legacy from absent snapshot binding");
   }
 }

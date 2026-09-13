@@ -493,10 +493,18 @@ function escapeReviewFirstCorpusHtml(text: string): string {
     .replace(/"/g, "&quot;");
 }
 
-function renderReviewFirstCorpusHtml(text: string): string {
+function documentLifecycleBanner(surface: "review" | "sign" | "completed"): string {
+  if (surface === "completed") return "Completed agreement";
+  if (surface === "sign") return "Agreement locked for signature";
+  return "Draft Agreement (non-binding template)";
+}
+
+function renderReviewFirstCorpusHtml(text: string, surface: "review" | "sign" | "completed" = "review"): string {
   return (
     "<article style='position:relative;max-width:720px;margin:0 auto'>" +
-    "<p style='text-align:center;color:#475569;font-size:12px;margin-bottom:12px'>Draft Agreement (non-binding template)</p>" +
+    "<p style='text-align:center;color:#475569;font-size:12px;margin-bottom:12px'>" +
+    escapeReviewFirstCorpusHtml(documentLifecycleBanner(surface)) +
+    "</p>" +
     "<pre style='white-space:pre-wrap;font-family:Georgia,serif;font-size:15px;line-height:1.65;color:#0f172a;margin:0;padding:0;border:0;background:transparent'>" +
     escapeReviewFirstCorpusHtml(text) +
     "</pre></article>"
@@ -2135,6 +2143,8 @@ export function AgreementRecipientReview({
           status?: string;
           participant_id?: string;
         } | null;
+        authority_mode?: string;
+        legacy_pre_cutover?: boolean;
         review_revision?: {
           agreement_id?: string;
           snapshot_id?: string;
@@ -2169,6 +2179,8 @@ export function AgreementRecipientReview({
             snapSha: payload.accepted_review_snapshot?.corpus_sha256,
             acceptedSnapshotId: sl?.accepted_snapshot_id,
             acceptedSnapshotDigest: sl?.accepted_snapshot_digest,
+            authorityMode: payload.authority_mode,
+            legacyPreCutover: payload.legacy_pre_cutover,
           })
         ) {
           setDraft(null);
@@ -2209,9 +2221,9 @@ export function AgreementRecipientReview({
       const reviewFirstCorpus = resolveReviewFirstDisplayCorpus(d, "reviewer");
       const effectiveHtml =
         entry.kind === "sign" && snapPlain
-          ? renderReviewFirstCorpusHtml(snapPlain)
+          ? renderReviewFirstCorpusHtml(snapPlain, "sign")
           : reviewFirstCorpus && reviewFirstCorpus.text.trim().length >= 500
-            ? renderReviewFirstCorpusHtml(reviewFirstCorpus.text)
+            ? renderReviewFirstCorpusHtml(reviewFirstCorpus.text, "review")
             : html;
       if (entry.kind === "review" && reviewFirstCorpus) {
         logReviewFirstDisplayCorpusSelected({
