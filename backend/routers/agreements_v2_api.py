@@ -3138,6 +3138,8 @@ class RecipientProposalRequest(BaseModel):
     rendered_html: str = ""
     proposer_id: str = ""
     proposer_display_name: str = ""
+    snapshot_id: str = ""
+    expected_digest: str = ""
 
 
 class RecipientProposalResolveBody(BaseModel):
@@ -3155,6 +3157,8 @@ class RecipientApproveBody(BaseModel):
     message: str = ""
     participant_id: str = ""
     participant_display_name: str = ""
+    snapshot_id: str = ""
+    expected_digest: str = ""
 
 
 class SigningCeremonyStartBody(BaseModel):
@@ -4531,6 +4535,27 @@ def _load_or_404(agreement_id: str) -> AgreementDraft:
         return AgreementDraft.model_validate(raw)
     except KeyError:
         raise HTTPException(status_code=404, detail="agreement_not_found")
+
+
+def _assert_review_revision_binding(
+    draft: AgreementDraft,
+    agreement_id: str,
+    snapshot_id: Optional[str],
+    expected_digest: Optional[str],
+) -> Optional[Dict[str, Any]]:
+    from backend.services.accepted_review_snapshot import assert_review_revision_binding
+
+    ok, err, rev = assert_review_revision_binding(draft, agreement_id, snapshot_id, expected_digest)
+    if ok:
+        return rev
+    status = 409 if err in {"stale_review_revision", "snapshot_agreement_mismatch"} else 400
+    raise HTTPException(
+        status_code=status,
+        detail={
+            "code": err or "review_revision_required",
+            "message": "Approval and proposals must target the owner-authorized review revision.",
+        },
+    )
 
 
 def _load_draft_dict_or_404(agreement_id: str) -> Dict[str, Any]:
@@ -7099,15 +7124,18 @@ def put_agreement_signing_lock(
         raise HTTPException(status_code=404, detail="agreement_not_found")
     draft_full = _load_or_404(agreement_id)
     draft_full = _persist_party_id_backfill(draft_full)
-    missing_signer_approvals = _signing_approval_gate_errors(draft_full)
-    if missing_signer_approvals:
-        raise HTTPException(
-            status_code=400,
-            detail={
-                "code": "approvals_incomplete",
-                "missing_signer_approvals": missing_signer_approvals,
-            },
-        )
+    # Owner-chosen direct signature locks the confirmed paper. Review-first
+    # still requires each signer approval before lock.
+    if _owner_delivery_track_value(draft_full) != "signature":
+        missing_signer_approvals = _signing_approval_gate_errors(draft_full)
+        if missing_signer_approvals:
+            raise HTTPException(
+                status_code=400,
+                detail={
+                    "code": "approvals_incomplete",
+                    "missing_signer_approvals": missing_signer_approvals,
+                },
+            )
     content_sha256 = _draft_locked_content_sha256(draft_full)
     payload = {
         "locked_version_id": body.locked_version_id,
@@ -7116,6 +7144,11 @@ def put_agreement_signing_lock(
         "content_sha256": content_sha256,
         "content_length": len(canon_json_bytes(_signing_snapshot_dict(draft_full))),
     }
+    from backend.services.accepted_review_snapshot import lock_authority_from_draft
+
+    snap_bind = lock_authority_from_draft(draft_full)
+    if snap_bind:
+        payload.update(snap_bind)
     write_signing_lock(agreement_id, payload)
     record_public_feed_event_if_applicable(
         draft_dict=draft_full.model_dump(),
@@ -10001,6 +10034,10 @@ def get_agreement_draft(agreement_id: str, request: Request) -> Dict[str, Any]:
             "locked_by": lock.get("locked_by"),
             "content_sha256": lock.get("content_sha256"),
             "content_length": content_length or None,
+            "accepted_snapshot_id": lock.get("accepted_snapshot_id") or None,
+            "accepted_snapshot_digest": lock.get("accepted_snapshot_digest") or None,
+            "accepted_snapshot_length": lock.get("accepted_snapshot_length") or None,
+            "accepted_snapshot_status": lock.get("accepted_snapshot_status") or None,
         }
     draft_out = _draft_with_sanitized_parties(draft).model_dump()
     # Recipient tokens receive a minimum projection (no unrelated-party PII / delivery JTIs).
@@ -10029,12 +10066,25 @@ def get_agreement_draft(agreement_id: str, request: Request) -> Dict[str, Any]:
             draft_out,
             recipient_party_id=recipient_party_id,
         )
+        from backend.services.accepted_review_snapshot import recipient_review_revision_with_corpus
+
+        review_revision = recipient_review_revision_with_corpus(
+            draft,
+            agreement_id,
+            locked_version_id=lv,
+        )
+        if review_revision and recipient_party_id:
+            review_revision = {**review_revision, "participant_id": recipient_party_id}
         return {
             "id": agreement_id,
             "draft": draft_out,
             "economics": None,
             "signing_lock": signing_lock_out,
             "recipient_projection": True,
+            "review_revision": review_revision,
+            "accepted_review_snapshot": (
+                review_revision if review_revision and review_revision.get("status") == "accepted" else None
+            ),
         }
     return {
         "id": agreement_id,
@@ -12073,6 +12123,34 @@ def _workspace_review_approval_rollups(d: Dict[str, Any]) -> tuple[int, int, boo
     return approved, required, all_done
 
 
+def _owner_delivery_track_value(draft: AgreementDraft) -> str:
+    return str(getattr(draft, "owner_delivery_track", None) or "").strip().lower()
+
+
+def _party_eligible_for_signing_ceremony(party: AgreementParty, track: str) -> bool:
+    """Owner, signer, and reviewer may complete a ceremony. Direct-sign also allows other non-viewers."""
+    n = _normalize_workflow_role(party.role)
+    if n in ("signer", "owner", "reviewer"):
+        return True
+    if track == "signature" and n not in ("viewer",):
+        return True
+    return False
+
+
+def _signing_party_by_participant_id(
+    draft: AgreementDraft, participant_id: str, track: str
+) -> Optional[AgreementParty]:
+    pid = (participant_id or "").strip()
+    if not pid:
+        return None
+    for p in draft.parties or []:
+        if (p.id or "").strip() != pid:
+            continue
+        if _party_eligible_for_signing_ceremony(p, track):
+            return p
+    return None
+
+
 def _signing_approval_gate_errors(draft: AgreementDraft) -> List[str]:
     """Each signer must have participant_approved / recipient_approved with matching participant_id once IDs exist."""
     parties = draft.parties or []
@@ -12183,33 +12261,49 @@ def _resolve_signing_participant_for_ceremony(
     """Returns (participant_id_for_audit, signer_party)."""
     part_id = (participant_id or "").strip()
     parties_have_ids = any((p.id or "").strip() for p in draft.parties or [])
-    signer_parties = [p for p in draft.parties or [] if _normalize_workflow_role(p.role) == "signer"]
-    if not signer_parties:
+    track = _owner_delivery_track_value(draft)
+    eligible = [p for p in draft.parties or [] if _party_eligible_for_signing_ceremony(p, track)]
+    if not eligible:
         raise HTTPException(status_code=400, detail="no_signers_on_agreement")
     if parties_have_ids:
         if not part_id:
             raise HTTPException(status_code=400, detail="participant_id_required")
-        sp = _signer_party_by_participant_id(draft, part_id)
+        sp = _signing_party_by_participant_id(draft, part_id, track)
         if not sp:
             raise HTTPException(status_code=403, detail="signer_not_found")
+        role_n = _normalize_workflow_role(sp.role)
         approved = _approved_participant_ids(draft.audit_log)
-        if part_id not in approved:
+        requires_prior_review_approval = role_n != "owner" and track != "signature"
+        if requires_prior_review_approval and part_id not in approved:
             raise HTTPException(status_code=403, detail="participant_not_approved")
         return part_id, sp
     miss = _signing_approval_gate_errors(draft)
-    if miss:
+    if miss and track != "signature":
         raise HTTPException(
             status_code=403,
             detail={"code": "approvals_incomplete", "missing_signer_approvals": miss},
         )
-    if len(signer_parties) != 1:
+    if len(eligible) != 1:
         raise HTTPException(status_code=400, detail="participant_id_required")
-    sp = signer_parties[0]
+    sp = eligible[0]
     return (sp.id or "").strip(), sp
 
 
+def _required_signing_parties(draft: AgreementDraft) -> List[Any]:
+    """Owner, signer, and reviewer parties must complete on the signature track.
+    Viewers never count. Role=signer remains the review-then-sign subset."""
+    required = []
+    for p in draft.parties or []:
+        wr = _normalize_workflow_role(p.role)
+        if wr == "viewer":
+            continue
+        if wr in ("owner", "signer", "reviewer", "party"):
+            required.append(p)
+    return required
+
+
 def _all_signers_signed_from_audit(draft: AgreementDraft, audit: List[Any]) -> bool:
-    signers = [p for p in draft.parties or [] if _normalize_workflow_role(p.role) == "signer"]
+    signers = _required_signing_parties(draft)
     if not signers:
         return False
     done = _signature_completed_participant_ids(audit)
@@ -12679,6 +12773,12 @@ def stage_recipient_proposal(
         lock = read_signing_lock(agreement_id)
         if lock and bool((lock or {}).get("locked_version_id")):
             raise HTTPException(status_code=400, detail="negotiation_locked")
+        _assert_review_revision_binding(
+            draft,
+            agreement_id,
+            body.snapshot_id,
+            body.expected_digest,
+        )
         draft = _persist_party_id_backfill(draft)
         proposer, proposer_source = _resolve_recipient_proposer_with_source(
             request, agreement_id, draft, body.proposer_id
@@ -12713,6 +12813,8 @@ def stage_recipient_proposal(
             "staged_at": now,
             "proposer_id": proposer_id,
             "proposer_display_name": dname,
+            "snapshot_id": (body.snapshot_id or "").strip(),
+            "expected_digest": (body.expected_digest or "").strip().lower(),
         }
         log.info(
             "[recipient-proposal-stage] payload summary agreement_id=%s proposal_id=%s instruction_len=%s proposed_purpose_len=%s rendered_html_len=%s canonical_purpose_len=%s",
@@ -12765,6 +12867,12 @@ def submit_recipient_proposal(
     staged = _pop_staged_recipient_proposal(draft, proposal_id, request)
     if not staged:
         raise HTTPException(status_code=400, detail="proposal_not_staged")
+    _assert_review_revision_binding(
+        draft,
+        agreement_id,
+        str(staged.get("snapshot_id") or ""),
+        str(staged.get("expected_digest") or ""),
+    )
     proposer_id = str(staged.get("proposer_id") or "").strip()
     assert_agreement_recipient_write_allowed(
         request,
@@ -12919,15 +13027,18 @@ def apply_recipient_proposal(
             "persisted_at": now,
             "explicit_acceptance_v1": acceptance.as_dict(),
         }
-    next_draft = AgreementDraft(
-        id=current.id,
-        created_at=current.created_at,
+    next_versions = [*(current.versions or [])]
+    next_versions.append(
+        VersionSnapshot(
+            version=len(next_versions) + 1,
+            created_at=now,
+            note="Owner accepted recipient proposal",
+        )
+    )
+    next_draft = _merge_agreement_draft(
+        current,
         updated_at=now,
-        versions=list(current.versions or []),
-        review_sent_at=current.review_sent_at,
-        workspace_archived_at=current.workspace_archived_at,
-        workspace_folder_id=current.workspace_folder_id,
-        workspace_tags=list(current.workspace_tags or []),
+        versions=next_versions,
         audit_log=[*(current.audit_log or []), *[e for e in tail_events]],
         title=body_create.title,
         jurisdiction=body_create.jurisdiction,
@@ -12937,9 +13048,15 @@ def apply_recipient_proposal(
         duration=body_create.duration,
         due_date=body_create.due_date,
         effective_date=body_create.effective_date,
-        payment_request=current.payment_request,
-        payment_required=current.payment_required,
         pro_redline_v1=pro_redline if pro_redline else current.pro_redline_v1,
+        **(
+            {
+                "server_full_document_text": accepted_corpus,
+                "document_text": accepted_corpus,
+            }
+            if len(accepted_corpus) >= 80
+            else {}
+        ),
     )
     _save_draft_sync(next_draft.model_dump(), request)
     previous_hash = _corpus_fingerprint(current.purpose or "")
@@ -12989,6 +13106,12 @@ def recipient_approve_agreement(
     lock = read_signing_lock(agreement_id)
     if lock and bool((lock or {}).get("locked_version_id")):
         raise HTTPException(status_code=400, detail="negotiation_locked")
+    bound = _assert_review_revision_binding(
+        draft,
+        agreement_id,
+        body.snapshot_id,
+        body.expected_digest,
+    )
     draft = _persist_party_id_backfill(draft)
     now = _utc_now_iso()
     msg = (body.message or "").strip()
@@ -13013,6 +13136,9 @@ def recipient_approve_agreement(
         raise HTTPException(status_code=400, detail="participant_id_required")
     audit = [*(draft.audit_log or [])]
     approve_val: Dict[str, Any] = {"message": msg or "approved_current_draft"}
+    if bound:
+        approve_val["snapshot_id"] = bound.get("snapshot_id")
+        approve_val["corpus_sha256"] = bound.get("corpus_sha256")
     if part_id:
         approve_val["participant_id"] = part_id
         approve_val["participant_display_name"] = part_name

@@ -58,6 +58,11 @@ export type AgreementDraft = {
    * `fully_executed_snapshot` from this field — do not drop on normalize.
    */
   vs01_signing_packet_v1?: Vs01SigningPacketDraftRecordV1 | null;
+  /**
+   * Accepted review snapshot. Owner signed-view and lock binding read this
+   * corpus as-is — never placeholder-scrub already-accepted paper.
+   */
+  accepted_review_snapshot_v1?: AcceptedReviewSnapshotDraftV1 | null;
   /** Creator/admin is coordinating only — not a legal party or signer. */
   creator_coordinator_only?: boolean;
 };
@@ -74,4 +79,14 @@ export type Vs01FullyExecutedSnapshotDraftV1 = {
 /** Narrow packet wrapper required by owner executed-artifact retrieval. */
 export type Vs01SigningPacketDraftRecordV1 = {
   fully_executed_snapshot?: Vs01FullyExecutedSnapshotDraftV1 | null;
+};
+
+/** Server-accepted review snapshot. Corpus bytes are authority, not display copy. */
+export type AcceptedReviewSnapshotDraftV1 = {
+  status?: string;
+  snapshotId?: string;
+  corpusSha256?: string;
+  corpusLength?: number;
+  corpusPlain?: string;
+  acceptedAt?: string;
 };

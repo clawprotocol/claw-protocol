@@ -24,6 +24,9 @@ import {
   peekPremiumSenderSignFirst,
   type PremiumSendIntent,
 } from "./premiumSendIntent";
+import { resolvePremiumSenderFirstSigningPath } from "./premiumSenderFirstSigningRoute";
+import { lockAuthoritativeVersionAndMintSigningInvites } from "./paidProDirectSigningLockAndInvite";
+import { mintRecipientAccessTokenResult } from "../../agreement/recipientAccessApi";
 import {
   mintSimpleDoneReviewRecipientLinkRows,
   reviewLinkMintFailureUserCopy,
@@ -65,12 +68,21 @@ export type PaidProPostRecipientSetupFailure = {
 export type PaidProPostRecipientSetupResult =
   | {
       ok: true;
-      destination: "vs01" | "done" | "dashboard";
+      destination: "vs01" | "done" | "dashboard" | "professional_sign";
       ownerRoutePath: string;
       alreadyReady?: boolean;
       userMessage?: string;
     }
   | { ok: false; failure: PaidProPostRecipientSetupFailure };
+
+/** Owner signing party is the draft party whose workflow role is owner — never array position. */
+export function resolveOwnerSigningPartyId(draft: AgreementDraft | null | undefined): string | null {
+  const parties = Array.isArray(draft?.parties) ? draft.parties : [];
+  const owners = parties.filter((party) => String(party.role ?? "").trim().toLowerCase() === "owner");
+  if (owners.length !== 1) return null;
+  const id = String(owners[0]?.id ?? "").trim();
+  return id || null;
+}
 
 /** Paid/pro paths that already confirmed recipients in intake — skip `/app/send` “Prepare review link”. */
 export function shouldSkipPaidProPrepareReviewLinkInterstitial(params: {
@@ -452,6 +464,62 @@ export async function executePaidProPostRecipientSetupHandoff(options: {
     } finally {
       clearReviewFirstMintInFlight();
     }
+  }
+
+  const lockedInvite = await lockAuthoritativeVersionAndMintSigningInvites({
+    agreementId: id,
+    draft: options.draft,
+    recipientSetup: options.recipientSetup ?? null,
+  });
+  if (!lockedInvite.ok) {
+    return {
+      ok: false,
+      failure: {
+        agreementId: id,
+        reason: "vs01_seed",
+        userMessage:
+          "We could not lock this version or create participant-bound signing invitations. Confirm the required signer details and try again.",
+        premiumSendIntent: options.premiumSendIntent,
+      },
+    };
+  }
+  const ownerPartyId = lockedInvite.ownerPartyId;
+  const professional = await resolvePremiumSenderFirstSigningPath({
+    agreementId: id,
+    ownerPartyId,
+  });
+  const mintKey =
+    (import.meta as unknown as { env?: { VITE_RECIPIENT_LINK_MINT_KEY?: string } }).env
+      ?.VITE_RECIPIENT_LINK_MINT_KEY || "";
+  for (const participantId of lockedInvite.requiredParticipantIds) {
+    if (participantId === ownerPartyId) continue;
+    const minted = await mintRecipientAccessTokenResult(
+      id,
+      { mode: "sign", role: "signer", recipient_party_id: participantId },
+      mintKey,
+    );
+    if (!minted.ok) {
+      return {
+        ok: false,
+        failure: {
+          agreementId: id,
+          reason: "vs01_seed",
+          userMessage:
+            "We could not create a participant-bound signing invitation. Confirm the required signer details and try again.",
+          premiumSendIntent: options.premiumSendIntent,
+        },
+      };
+    }
+  }
+  if (professional?.path) {
+    markSimpleFlowSent(id);
+    emitActionCompleted("send", { agreementId: id });
+    void options.navigate(professional.path);
+    return {
+      ok: true,
+      destination: "professional_sign",
+      ownerRoutePath: professional.path,
+    };
   }
 
   const handoff = resolveGuidedVs01SigningHandoffForBridge(options.guidedSigningHandoff);

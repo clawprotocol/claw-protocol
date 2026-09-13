@@ -29,6 +29,7 @@ import { repairPaidProSignatureSectionOrdering } from "./paidProSignatureSection
 import {
   buildCorpusRoleIdentitiesForExecutionReconcile,
   detectExecutionBlockRoleInversion,
+  overlayCorpusDeclaredRoleLabels,
 } from "./paidProAcceptedCorpusPartyRoles";
 import { enforcePaidProSingleExecutionBlock } from "./paidProExecutionBlockNormalization";
 import { analyzePaidProExecutionBlockInvariant } from "./paidProExecutionBlockAuthority";
@@ -118,17 +119,19 @@ function resolvePaidProSafeDisplayPartyRecords(
   intakeRaw: string | null | undefined,
   partyNames: readonly string[],
   draft: ParsedDraftShape | null | undefined,
+  corpus?: string,
 ): ReturnType<typeof resolveCanonicalPartyIdentitiesFromSources> {
   if (!paidProSafeDisplayHasAuthoritativeParties(intakeRaw, partyNames)) return [];
   const roleLabels = (draft?.parties ?? [])
     .map((p) => String(p?.role ?? "").trim())
     .filter((r) => r.length >= 2);
-  return resolveCanonicalPartyIdentitiesFromSources({
+  const resolved = resolveCanonicalPartyIdentitiesFromSources({
     rawIntake: intakeRaw,
     starterNames: partyNames,
-    generatedBody: null,
+    generatedBody: corpus ?? null,
     roleLabels: roleLabels.length >= 2 ? roleLabels : undefined,
   });
+  return overlayCorpusDeclaredRoleLabels(resolved, corpus ?? "");
 }
 
 function canonicalPartyNamesFromAcceptanceContext(
@@ -235,7 +238,7 @@ function applyAcceptedProCorpusSafeDisplayCore(
 
   const partyNames = canonicalPartyNamesFromAcceptanceContext(opts?.draft, intakeRaw);
   const hasAuthoritativeParties = paidProSafeDisplayHasAuthoritativeParties(intakeRaw, partyNames);
-  const records = resolvePaidProSafeDisplayPartyRecords(intakeRaw, partyNames, opts?.draft);
+  const records = resolvePaidProSafeDisplayPartyRecords(intakeRaw, partyNames, opts?.draft, out);
 
   if (hasAuthoritativeParties && records.length >= 2) {
     const partyRepair = repairFullAgreementPartyIdentity({

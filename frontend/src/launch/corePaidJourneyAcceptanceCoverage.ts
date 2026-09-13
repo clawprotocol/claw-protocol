@@ -33,6 +33,15 @@ export function assertCorePaidJourneyAcceptanceContracts(): void {
   if (!stub.includes("acceptance_stub_enabled") || !stub.includes("Harbor Peak Analytics LLC")) {
     throw new Error("acceptance stub no longer binds to the declared Harbor/Ironvale facts");
   }
+  if (!stub.includes("consulting_corpus_padded") || !stub.includes("PADDED_FILLER_REPEAT")) {
+    throw new Error("padded stub negative fixture is missing");
+  }
+  if (!stub.includes("def _full_draft_response") || !stub.includes("_consulting_corpus()")) {
+    throw new Error("acceptance stub no longer uses the non-padded positive corpus at the model boundary");
+  }
+  if (!stub.includes("def stub_legal_llm_completion")) {
+    throw new Error("acceptance stub lost its completion entrypoint");
+  }
   const jwks = src("../../../backend/jwt_acceptance_jwks.py");
   if (!jwks.includes("install_acceptance_jwks_fetch_if_configured") || !jwks.includes("ES256")) {
     throw new Error("acceptance JWKS stub no longer mocks the external identity boundary");
@@ -55,5 +64,247 @@ export function assertCorePaidJourneyAcceptanceContracts(): void {
   }
   if (!spec.includes("simple-pro-send-for-review") || !spec.includes("simple-pro-send-for-signature")) {
     throw new Error("core paid journey live spec no longer exercises both owner choices");
+  }
+  if (!spec.includes("browser.newContext") || !spec.includes("/review?t=") || !spec.includes("/sign?t=")) {
+    throw new Error("core paid journey live spec no longer opens recipient contexts with minted tokens");
+  }
+  if (!spec.includes("persistCorePaidJourneyRow") || !spec.includes("project:")) {
+    throw new Error("core paid journey live spec no longer persists rows by project/test");
+  }
+  if (!spec.includes("operativeArticleFingerprint") || !spec.includes("recipient-approve")) {
+    throw new Error("core paid journey live spec no longer compares operative hashes or server approval");
+  }
+  if (!spec.includes("data-snapshot-id") || !spec.includes("data-corpus-sha256") || !spec.includes("displayCompare")) {
+    throw new Error("core paid journey live spec no longer binds review to snapshot id and server digest");
+  }
+  if (!spec.includes("timed_out_unexercised") || !spec.includes("CORE_PAID_RECIPIENT_VIEWPORTS")) {
+    throw new Error("core paid journey live spec no longer instruments review timings or recipient viewports");
+  }
+  if (!spec.includes("mintedTokenForParticipant") || !spec.includes("first_unmet")) {
+    throw new Error("core paid journey live spec no longer requires a participant-bound sign token");
+  }
+  if (
+    !spec.includes("verifiedParticipantId") ||
+    !spec.includes("CORE_PAID_JOURNEY_LIVE_API") ||
+    !spec.includes("FACTS.parties[1].name") ||
+    !spec.includes("FACTS.signers[1].name") ||
+    spec.includes("[...byParty.values()][1]")
+  ) {
+    throw new Error("core paid journey live spec no longer selects Ironvale/Jordan by verified participant id");
+  }
+  if (!spec.includes("owner review token must not approve") || !spec.includes("priorOwnerTokenA1=partial_document_integrity_only")) {
+    throw new Error("core paid journey live spec no longer preserves owner-approval rejection");
+  }
+  if (!spec.includes("recipient-accepted-awaiting-lock-root") || !spec.includes("Couldn't record approval")) {
+    throw new Error("core paid journey live spec no longer asserts the post-approval confirmation surface");
+  }
+  if (!spec.includes("recipient-send-suggested-edits-confirm") || !spec.includes("Submit proposed update")) {
+    throw new Error("core paid journey live spec no longer submits the painted proposal confirmation");
+  }
+  if (
+    !spec.includes("awaitingOwner") ||
+    !spec.includes("proposalId") ||
+    !spec.includes("fetchOwnerPersistedProposalIds") ||
+    spec.includes("submittedAck && serverProposal")
+  ) {
+    throw new Error("core paid journey live spec no longer asserts submitted/awaiting-owner state, proposal id, and persistence");
+  }
+  if (!spec.includes("owner-proposal-review-load-error") || !spec.includes("data-error-code")) {
+    throw new Error("core paid journey live spec no longer records sanitized owner-review load errors");
+  }
+  if (!spec.includes("completeRequiredSignerCeremony") || !spec.includes("owner_sign_token_not_minted")) {
+    throw new Error("core paid journey live spec no longer completes every required signer ceremony");
+  }
+  if (!spec.includes("ownerAlreadyOnSigningInvite") || !spec.includes("existingInvitationPage")) {
+    throw new Error("core paid journey live spec no longer completes the owner ceremony on the actual signing invitation");
+  }
+  if (!spec.includes("Finalize signer details and continue to signing")) {
+    throw new Error("core paid journey live spec no longer waits for the signing confirmation CTA");
+  }
+  if (
+    !spec.includes("owner-proposal-accept-success") ||
+    !spec.includes('expect(page.getByTestId("owner-proposal-accept-success")).toBeVisible') ||
+    !spec.includes("expect(a4Pass")
+  ) {
+    throw new Error("core paid journey live spec no longer waits for owner apply success before refresh");
+  }
+  if (!spec.includes("/recipient-proposal") || !spec.includes("/signing-ceremony/complete")) {
+    throw new Error("core paid journey live spec no longer requires durable proposal or signing server confirmation");
+  }
+  if (
+    !spec.includes("/view-signed") ||
+    !spec.includes("owner-signed-agreement-page") ||
+    !spec.includes("data-completed-document-view")
+  ) {
+    throw new Error("core paid journey live spec no longer inspects the completed-document view");
+  }
+  if (!spec.includes("status: \"success\"") || !spec.includes("required fields absent")) {
+    throw new Error("core paid journey live spec no longer returns explicit signer-setup results");
+  }
+
+  const meta = src("../agreement/recipientReviewAuthorityMeta.ts");
+  if (!meta.includes("status !== \"pending\"") || meta.includes("if (!lockedVersionId ||")) {
+    throw new Error("review authority meta still requires a signing lock for pre-lock review");
+  }
+
+  const signAuth = src("../agreement/recipientSigningLockedVersion.ts");
+  if (signAuth.includes("if (lockSha && snapSha && lockSha !== snapSha)")) {
+    throw new Error("sign paper authority still treats lock vs snapshot encoding mismatch as an expired invite");
+  }
+
+  const projection = src("../../../backend/services/recipient_draft_projection.py");
+  if (
+    !projection.includes("_recipient_visible_approval_audit") ||
+    !projection.includes("_current_approval_revision_binding") ||
+    !projection.includes('out["audit_log"] = approval_audit')
+  ) {
+    throw new Error("recipient projection no longer preserves the bound current-revision participant approval");
+  }
+
+  const normalize = src("../agreement/agreementDraftNormalize.ts");
+  if (
+    !normalize.includes("normalizeAcceptedReviewSnapshotFromApi") ||
+    !normalize.includes("accepted_review_snapshot_v1") ||
+    !normalize.includes("Placeholder scrub would")
+  ) {
+    throw new Error("draft normalize no longer preserves accepted snapshot corpus for signed-view authority");
+  }
+
+  const fetchDraft = src("../agreement/agreementWorkspaceApi.ts");
+  if (
+    !fetchDraft.includes("classifyFetchAgreementDraftFailure") ||
+    !fetchDraft.includes("normalize_failed") ||
+    !fetchDraft.includes("http_401")
+  ) {
+    throw new Error("fetchAgreementDraft no longer distinguishes HTTP, network, and normalize failures");
+  }
+  const lockFetch = fetchDraft.slice(fetchDraft.indexOf("export async function fetchAgreementDraftWithSigningLock"));
+  if (!lockFetch.includes("refreshCachedAccessToken") || !lockFetch.includes("Authorization")) {
+    throw new Error("signing-lock draft fetch no longer authenticates the owner the same way as draft GET");
+  }
+
+  const reviewPage = src("./simpleProduct/OwnerProposalReviewPage.tsx");
+  if (!reviewPage.includes("authLoading") || !reviewPage.includes("data-error-code")) {
+    throw new Error("owner proposal review no longer waits for auth or surfaces sanitized load errors");
+  }
+
+  const confirmation = src("../components/agreements/paidProSignatureConfirmationAuthority.ts");
+  if (
+    !confirmation.includes("emails_only") ||
+    !confirmation.includes("missing_participant") ||
+    !confirmation.includes("stale_agreement")
+  ) {
+    throw new Error("signature confirmation authority no longer rejects emails-only or stale bindings");
+  }
+
+  const intake = src("../components/agreements/AgreementBuilderIntake.tsx");
+  if (
+    !intake.includes("resolvePaidProSignatureConfirmationAuthority") ||
+    /namesAndEmailsComplete:\s*[\s\S]{0,180}emailsReady/.test(intake)
+  ) {
+    throw new Error("direct signing still treats emailsReady as namesAndEmailsComplete");
+  }
+
+  const routerApi = src("../../../backend/routers/agreements_v2_api.py");
+  if (
+    !routerApi.includes("lock_authority_from_draft") ||
+    !routerApi.includes("accepted_snapshot_digest") ||
+    !routerApi.includes("recipient_review_revision_with_corpus")
+  ) {
+    throw new Error("signing lock no longer binds accepted snapshot id/digest onto the server lock");
+  }
+
+  const snap = src("../../../backend/services/accepted_review_snapshot.py");
+  if (
+    !snap.includes("current_review_revision_public") ||
+    !snap.includes("assert_review_revision_binding") ||
+    !snap.includes("review_snapshot_authority_required") ||
+    !snap.includes("if resolve_err:") ||
+    !snap.includes("assert_signing_lock_bound_to_snapshot") ||
+    !snap.includes("lock_authority_from_draft") ||
+    !snap.includes("recipient_review_revision_with_corpus")
+  ) {
+    throw new Error("server review revision binding still bypasses missing snapshot authority");
+  }
+
+  const handoff = src("./simpleProduct/paidProPostRecipientSetupHandoff.ts");
+  if (!handoff.includes("resolveOwnerSigningPartyId") || handoff.includes("for (const party of parties)")) {
+    throw new Error("owner signing party id is no longer resolved from owner role");
+  }
+  if (!handoff.includes("lockAuthoritativeVersionAndMintSigningInvites")) {
+    throw new Error("direct signing no longer locks then mints participant-bound invitations");
+  }
+
+  const lockInvite = src("./simpleProduct/paidProDirectSigningLockAndInvite.ts");
+  if (
+    !lockInvite.includes("isDurableSigningParticipantId") ||
+    !lockInvite.includes("party_0") ||
+    !lockInvite.includes("putSigningLock")
+  ) {
+    throw new Error("direct signing lock helper no longer rejects synthetic ids or locks before mint");
+  }
+  if (!handoff.includes('mode: "sign"') || !handoff.includes("requiredParticipantIds")) {
+    throw new Error("direct signing no longer mints remaining participant-bound invitations after lock");
+  }
+
+  const persist = src("../../e2e/core-paid-journey-live/corePaidJourneyRowPersist.ts");
+  if (
+    !persist.includes("CORE_PAID_JOURNEY_REQUIRED_PROJECTS") ||
+    !persist.includes("viewport_incomplete") ||
+    !persist.includes("persistCorePaidJourneyArticleCompare")
+  ) {
+    throw new Error("row persist no longer requires desktop and mobile separately");
+  }
+
+  const matrix = src("./corePaidJourneyAcceptanceMatrix.ts");
+  if (!matrix.includes("party_role:") || !matrix.includes("repetitive_filler:")) {
+    throw new Error("article inspectors no longer verify party-to-role bindings or repetitive filler");
+  }
+  if (!matrix.includes("normalizeArticleWhitespace") || !matrix.includes("articlePresentationIssues")) {
+    throw new Error("date presentation is no longer assessed separately from semantic fact checks");
+  }
+  if (!matrix.includes("operativeArticleFingerprint") || !matrix.includes("stripSignatureMetadataForOperativeCompare")) {
+    throw new Error("article inspectors no longer fingerprint operative paper separately from signature metadata");
+  }
+  if (!matrix.includes("stripPresentationChromeForOperativeCompare") || !matrix.includes("describeOperativeArticleCompare")) {
+    throw new Error("article inspectors no longer separate presentation chrome from operative wording");
+  }
+
+  if (
+    !spec.includes("persistCorePaidJourneyArticleCompare") ||
+    !spec.includes("describeOperativeArticleCompare") ||
+    !spec.includes("sameOperative &&")
+  ) {
+    throw new Error("core paid journey live spec no longer fails closed on unresolved operative differences");
+  }
+  if (
+    !spec.includes("/public/") ||
+    !spec.includes("receiptBound") ||
+    !spec.includes("accepted_review_snapshot")
+  ) {
+    throw new Error("core paid journey live spec no longer verifies the persisted receipt separately from the completed-document view");
+  }
+
+  const signedView = src("./ownerSignedAgreementView.ts");
+  if (
+    !signedView.includes("accepted_snapshot") ||
+    !signedView.includes("accepted_snapshot_digest") ||
+    signedView.includes("if (fallback.length >= 80) {") ||
+    signedView.includes('String(raw.corpusPlain || "").trim()')
+  ) {
+    throw new Error("owner signed view no longer requires lock-bound document authority");
+  }
+
+  const signedPage = src("./simpleProduct/OwnerSignedAgreementPage.tsx");
+  if (
+    !signedPage.includes("owner-signed-agreement-unavailable") ||
+    !signedPage.includes("data-completed-document-view") ||
+    !signedPage.includes("data-completed-view-surface")
+  ) {
+    throw new Error("owner signed page no longer labels the completed-document view or recovery");
+  }
+
+  if (signAuth.includes("if (!boundId || !/^[0-9a-f]{64}$/.test(boundDigest)) return true;") === false) {
+    throw new Error("sign paper authority still treats locked_version_id alone as sufficient");
   }
 }

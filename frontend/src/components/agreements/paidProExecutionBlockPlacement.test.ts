@@ -144,4 +144,33 @@ describe("paidProExecutionBlockPlacement", () => {
     expect(hashPaidProCorpus(sanitized.text)).toBe(sotHash);
     expect(detectProReviewDisplaySanityViolations(renderPlain)).toEqual([]);
   });
+
+  it("does not remap a declared Harbor Consultant / Ironvale Client tail to Client/SP", () => {
+    const corpus = [
+      "CONSULTING SERVICES AGREEMENT",
+      "",
+      'This Consulting Services Agreement (the "Agreement") is entered into as of October 1, 2026 by and between Harbor Peak Analytics LLC ("Consultant") and Ironvale Manufacturing Inc. ("Client").',
+      "",
+      "1. PARTIES AND ROLES. Consultant is Harbor Peak Analytics LLC. Client is Ironvale Manufacturing Inc.",
+      "",
+      "IN WITNESS WHEREOF, the parties have executed this Agreement as of the Effective Date.",
+      "",
+      "Consultant: Harbor Peak Analytics LLC   By: Maya Chen   Title: Principal   Date: ________",
+      "",
+      "Client: Ironvale Manufacturing Inc.   By: Jordan Hale   Title: Operations Lead   Date: ________",
+    ].join("\n");
+    const { text } = enforcePaidProSingleExecutionBlock(corpus, {
+      authorityParties: [
+        { partyLegalName: "Harbor Peak Analytics LLC" },
+        { partyLegalName: "Ironvale Manufacturing Inc." },
+      ],
+      intakeText:
+        "Draft a consulting services agreement between Harbor Peak Analytics LLC (Consultant) and Ironvale Manufacturing Inc. (Client).",
+      draftPartyNames: ["Harbor Peak Analytics LLC", "Ironvale Manufacturing Inc."],
+    });
+    expect(text).toMatch(/Consultant:\s*Harbor Peak Analytics LLC/i);
+    expect(text).toMatch(/Client:\s*Ironvale Manufacturing Inc/i);
+    expect(text).not.toMatch(/CLIENT:\s*\n\s*Harbor Peak Analytics LLC/i);
+    expect(text).not.toMatch(/SERVICE PROVIDER:\s*\n\s*Ironvale Manufacturing Inc/i);
+  });
 });

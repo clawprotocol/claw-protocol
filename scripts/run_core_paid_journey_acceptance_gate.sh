@@ -21,7 +21,42 @@ CONTENT_FP="$(
   {
     for f in \
       frontend/src/launch/corePaidJourneyAcceptanceMatrix.ts \
+      frontend/src/launch/corePaidJourneyAcceptanceCoverage.ts \
       frontend/e2e/core-paid-journey-live/corePaidJourneyAcceptance.live.spec.ts \
+      frontend/e2e/core-paid-journey-live/corePaidJourneyRowPersist.ts \
+      frontend/playwright.core-paid-journey-live.config.ts \
+      frontend/src/agreement/agreementWorkspaceApi.ts \
+      frontend/src/agreement/agreementDraftNormalize.ts \
+      frontend/src/launch/simpleProduct/OwnerProposalReviewPage.tsx \
+      frontend/src/launch/ownerSignedAgreementView.ts \
+      frontend/src/launch/simpleProduct/OwnerSignedAgreementPage.tsx \
+      frontend/src/agreement/pendingSignatureDerive.ts \
+      frontend/src/components/agreements/paidProSignatureConfirmationAuthority.ts \
+      frontend/src/components/agreements/paidProStickyCta.ts \
+      frontend/src/agreement/recipientReviewAuthorityMeta.ts \
+      frontend/src/agreement/recipientSigningLockedVersion.ts \
+      frontend/src/agreement/AgreementRecipientReview.tsx \
+      backend/services/accepted_review_snapshot.py \
+      backend/services/recipient_draft_projection.py \
+      backend/routers/agreements_v2_api.py \
+      frontend/src/components/agreements/paidProOpeningRecitalGuard.ts \
+      frontend/src/components/agreements/paidProAcceptedCorpusPartyRoles.ts \
+      frontend/src/components/agreements/paidProReviewRenderCorpus.ts \
+      frontend/src/components/agreements/paidProExecutionBlockNormalization.ts \
+      frontend/src/launch/corePaidJourneyAcceptanceFixtures.ts \
+      frontend/src/launch/simpleProduct/paidProPostRecipientSetupHandoff.ts \
+      frontend/src/launch/simpleProduct/paidProDirectSigningLockAndInvite.ts \
+      frontend/src/components/agreements/AgreementBuilderIntake.tsx \
+      frontend/src/launch/simpleProduct/premiumSenderFirstSigningRoute.ts \
+      frontend/src/launch/simpleProduct/reviewFirstDisplayCorpus.ts \
+      frontend/src/launch/simpleProduct/reviewReadyHydratedDisplayCorpus.ts \
+      frontend/src/agreement/reviewFirstDocumentDisplay.ts \
+      frontend/src/components/agreements/paidProDeclaredConsultantClientPaper.ts \
+      frontend/src/components/agreements/paidProAgreementRecitalRepair.ts \
+      frontend/src/components/agreements/paidProOpeningRoleLabelConsistency.ts \
+      frontend/src/components/agreements/canonicalPartyIdentityResolver.ts \
+      frontend/e2e/core-paid-journey-live/corePaidJourneyLiveAuth.ts \
+      backend/tests/test_core_paid_journey_acceptance.py \
       backend/llm_acceptance_stub.py \
       backend/llm_router.py \
       backend/jwt_acceptance_jwks.py \
@@ -35,7 +70,9 @@ CONTENT_FP="$(
   } | git hash-object --stdin
 )"
 CONFIG="live-4188-4189-stub-model"
-RESULT_DIR="${ROOT}/evals/commercial-readiness/results/core-paid-journey-acceptance/${COMMIT}-src-${CONTENT_FP:0:12}-${CONFIG}"
+RUN_LABEL="${CORE_PAID_JOURNEY_RUN_LABEL:-run}"
+RUN_STAMP="$(date -u +%Y%m%dT%H%M%SZ)-$$"
+RESULT_DIR="${ROOT}/evals/commercial-readiness/results/core-paid-journey-acceptance/${COMMIT}-src-${CONTENT_FP:0:12}-${CONFIG}-${RUN_LABEL}-${RUN_STAMP}"
 mkdir -p "${RESULT_DIR}"
 DATA_DIR="${RESULT_DIR}/claw-data"
 mkdir -p "${DATA_DIR}"
@@ -75,13 +112,33 @@ trap cleanup EXIT
 echo "== Core Paid Journey acceptance gate =="
 echo "sha: $(git rev-parse HEAD)"
 echo "source_content_fingerprint: ${CONTENT_FP}"
+echo "run_stamp: ${RUN_STAMP}"
 echo "result_dir=${RESULT_DIR}"
 echo "model_label: acceptance-stub"
 echo "live_model: not_run"
 echo ""
 
+"$PY" - <<PY
+import json, subprocess
+from pathlib import Path
+root = Path(r"""${RESULT_DIR}""")
+root.mkdir(parents=True, exist_ok=True)
+identity = {
+  "git_head": subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip(),
+  "git_head_short": subprocess.check_output(["git", "rev-parse", "--short=12", "HEAD"], text=True).strip(),
+  "source_content_fingerprint": "${CONTENT_FP}",
+  "run_stamp": "${RUN_STAMP}",
+  "tested_source_identity": subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip() + "+src-${CONTENT_FP}+run-${RUN_STAMP}",
+  "model_label": "acceptance-stub",
+  "live_model": "not_run",
+  "live_model_quality": "unproven_approval_only",
+}
+(root / "source-identity.json").write_text(json.dumps(identity, indent=2) + "\n")
+print("tested_source_identity=" + identity["tested_source_identity"])
+PY
+
 echo "---- Matrix / coverage contracts ----"
-(cd frontend && "$VITEST" run src/launch/corePaidJourneyAcceptanceCoverage.test.ts --reporter=dot)
+(cd frontend && "$VITEST" run src/launch/corePaidJourneyAcceptanceCoverage.test.ts src/launch/corePaidJourneyAcceptanceMatrix.test.ts src/agreement/recipientReviewAuthorityMeta.test.ts src/agreement/recipientSigningLockedVersion.test.ts --reporter=dot)
 echo ""
 
 echo "---- Isolated local API (${API_URL}) ----"
@@ -164,23 +221,49 @@ curl -sf "${VITE_URL}" >/dev/null
 export CORE_PAID_JOURNEY_LIVE_API="${API_URL}"
 export CORE_PAID_JOURNEY_LIVE_ORIGIN="${VITE_URL}"
 export CORE_PAID_JOURNEY_LIVE_OUTPUT="${RESULT_DIR}/playwright"
+export CORE_PAID_JOURNEY_RESULT_DIR="${RESULT_DIR}"
 export CORE_PAID_JOURNEY_ROW_RESULTS="${RESULT_DIR}/matrix-rows.json"
 echo ""
 echo "---- Live browser acceptance (desktop + mobile) ----"
+PW_EXTRA=()
+if [[ -n "${CORE_PAID_JOURNEY_PLAYWRIGHT_GREP:-}" ]]; then
+  PW_EXTRA+=(--grep "${CORE_PAID_JOURNEY_PLAYWRIGHT_GREP}")
+fi
+if [[ -n "${CORE_PAID_JOURNEY_PLAYWRIGHT_PROJECT:-}" ]]; then
+  PW_EXTRA+=(--project "${CORE_PAID_JOURNEY_PLAYWRIGHT_PROJECT}")
+fi
 set +e
-(cd frontend && "$PLAYWRIGHT" test --config playwright.core-paid-journey-live.config.ts --workers=1 --retries=0 --reporter=line)
+(cd frontend && "$PLAYWRIGHT" test --config playwright.core-paid-journey-live.config.ts --workers=1 --retries=0 --reporter=line ${PW_EXTRA[@]+"${PW_EXTRA[@]}"})
 PW_RC=$?
 set -e
 echo "playwright_exit=${PW_RC}"
 echo "matrix_rows=${CORE_PAID_JOURNEY_ROW_RESULTS}"
-MATRIX_FAILED=0
-if [[ -f "${CORE_PAID_JOURNEY_ROW_RESULTS}" ]]; then
-  MATRIX_FAILED="$("$PY" -c 'import json,sys; d=json.load(open(sys.argv[1])); print(len(d.get("failed") or []))' "${CORE_PAID_JOURNEY_ROW_RESULTS}")"
-  echo "matrix_failed_rows=${MATRIX_FAILED}"
-fi
+GATE_BLOCKED=0
+MATRIX_JSON="${CORE_PAID_JOURNEY_ROW_RESULTS}" "$PY" - <<'PY' || GATE_BLOCKED=$?
+import json, os, sys
+from pathlib import Path
+p = Path(os.environ["MATRIX_JSON"])
+if not p.exists():
+    print("matrix_aggregate=missing")
+    sys.exit(2)
+d = json.loads(p.read_text())
+missing = d.get("missing") or []
+failed = d.get("failed") or []
+blocked = d.get("blocked") or []
+unknown = d.get("unknown") or []
+viewport_incomplete = d.get("viewport_incomplete") or []
+print(f"matrix_missing_rows={len(missing)}")
+print(f"matrix_failed_rows={len(failed)}")
+print(f"matrix_blocked_rows={len(blocked)}")
+print(f"matrix_unknown_rows={len(unknown)}")
+print(f"matrix_viewport_incomplete={len(viewport_incomplete)}")
+print("gate_green=" + str(bool(d.get("gate_green"))))
+if missing or failed or blocked or unknown or viewport_incomplete or not d.get("gate_green"):
+    sys.exit(1)
+PY
 echo "== Core Paid Journey acceptance gate finished =="
 echo "result_dir=${RESULT_DIR}"
-if [[ "${PW_RC}" != "0" || "${MATRIX_FAILED}" != "0" ]]; then
+if [[ "${PW_RC}" != "0" || "${GATE_BLOCKED}" != "0" ]]; then
   exit 1
 fi
 exit 0

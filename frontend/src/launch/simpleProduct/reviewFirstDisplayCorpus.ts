@@ -14,6 +14,7 @@ import { resolvePaidProPostFinalizeReviewPlain } from "../../components/agreemen
 import { readConsumedPaidProSignerMetadataAuthority } from "../../components/agreements/paidProSignerMetadataAuthority";
 import { getPaidProDocumentForSurface, hashPaidProCorpus } from "../../components/agreements/paidProSourceOfTruth";
 import { applyPaidProUserVisibleDisplayPrep } from "../../components/agreements/paidProDisplayPlainAuthority";
+import { restoreDeclaredConsultantClientPaper } from "../../components/agreements/paidProDeclaredConsultantClientPaper";
 import { selectVerifiedPaidReviewPaper } from "../../components/agreements/paidProVerifiedReviewPaper";
 import { isAuthoritativePremiumPipelineRenderSource } from "../../components/agreements/premiumRenderSourceResolver";
 import { peekReviewFirstPinnedCorpus } from "./reviewFirstSendSurface";
@@ -129,7 +130,10 @@ function finalizeReviewFirstCorpusText(
     hydrated = repairExecutionBlockEntityHeadingLines(hydrated, parties).text.trim();
   }
 
-  return applyReviewTrackDisplayFormatting(hydrated);
+  return restoreDeclaredConsultantClientPaper(
+    applyReviewTrackDisplayFormatting(hydrated),
+    body,
+  );
 }
 
 function wrapReviewFirstCorpus(

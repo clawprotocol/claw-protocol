@@ -78,20 +78,35 @@ export function remountBundleToLockedVersion(
   };
 }
 
-/** Fail closed when the token lock, snapshot, and lock hash do not describe one paper. */
+/**
+ * Fail closed when the token lock version is missing or does not match server lock
+ * authority. Review-snapshot digest is plain corpus; lock digest is the JSON signing
+ * snapshot. After owner confirmation + lock they describe one paper, so encoding
+ * mismatch must not render a valid invitation expired.
+ */
 export function signPaperAuthorityClosed(args: {
   tokenLockedVersionId: string;
   meta: RecipientReviewAuthorityMeta | null;
   lockSha?: string | null;
   snapSha?: string | null;
+  acceptedSnapshotId?: string | null;
+  acceptedSnapshotDigest?: string | null;
 }): boolean {
   const tokenLv = args.tokenLockedVersionId.trim();
   if (!tokenLv || !args.meta) return true;
   if (args.meta.lockedVersionId !== tokenLv) return true;
   const lockSha = String(args.lockSha || "").trim().toLowerCase();
   const snapSha = String(args.snapSha || "").trim().toLowerCase();
-  if (lockSha && snapSha && lockSha !== snapSha) return true;
-  if (lockSha && lockSha !== args.meta.corpusSha256) return true;
-  if (snapSha && snapSha !== args.meta.corpusSha256) return true;
+  const metaSha = String(args.meta.corpusSha256 || "").trim().toLowerCase();
+  const boundId = String(args.acceptedSnapshotId || "").trim();
+  const boundDigest = String(args.acceptedSnapshotDigest || "").trim().toLowerCase();
+  if (boundId || boundDigest) {
+    if (!boundId || !/^[0-9a-f]{64}$/.test(boundDigest)) return true;
+    if (args.meta.snapshotId && boundId !== args.meta.snapshotId) return true;
+    if (snapSha && snapSha !== boundDigest) return true;
+    if (metaSha && metaSha !== boundDigest) return true;
+  }
+  if (snapSha && metaSha && snapSha !== metaSha) return true;
+  if (lockSha && metaSha && lockSha === metaSha) return false;
   return false;
 }

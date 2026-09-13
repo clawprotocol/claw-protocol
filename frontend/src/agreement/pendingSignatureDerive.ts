@@ -82,8 +82,8 @@ function signatureCompletedDetailForParticipant(
 
 export function isParticipantSignatureComplete(draft: AgreementDraft | null, participantId: string): boolean {
   const pid = (participantId || "").trim();
-  if (pid) return signatureCompletedParticipantIds(draft).has(pid);
-  return hasLegacySignatureWithoutParticipant(draft);
+  if (!pid) return false;
+  return signatureCompletedParticipantIds(draft).has(pid);
 }
 
 export function pendingSignatureCount(args: {

@@ -68,10 +68,12 @@ export function buildCanonicalPaidProServicesOpeningRecital(
   const providerName = provider.fullLegalName.trim();
   const title = resolvePaidProServicesAgreementTitle(intakeText);
   const phrase = recitalAgreementPhrase(title);
+  const clientRole = client.roleLabel.replace(/\s+/g, " ").trim() || "Client";
+  const providerRole = provider.roleLabel.replace(/\s+/g, " ").trim() || "Service Provider";
   return [
     title,
     "",
-    `This ${phrase} (this "Agreement") is entered into as of the Effective Date by and between ${clientName} ("Client") and ${providerName} ("Service Provider"). Client and Service Provider may be referred to individually as a "Party" and collectively as the "Parties."`,
+    `This ${phrase} (this "Agreement") is entered into as of the Effective Date by and between ${clientName} ("${clientRole}") and ${providerName} ("${providerRole}"). ${clientRole} and ${providerRole} may be referred to individually as a "Party" and collectively as the "Parties."`,
     "",
   ].join("\n");
 }
@@ -129,23 +131,61 @@ function escapeOpeningRegex(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+function roleBindingAlternation(roleLabel: string): string {
+  const role = roleLabel.replace(/\s+/g, " ").trim();
+  if (/^service\s+provider$/i.test(role) || /^provider$/i.test(role)) {
+    return "(?:Service\\s+Provider|Provider)";
+  }
+  return escapeOpeningRegex(role);
+}
+
 /** A role label is valid only when it is bound directly to the authority name for that slot. */
 function openingHasExactAuthorityRoleBindings(
   opening: string,
-  client: string,
-  provider: string,
+  records: readonly CanonicalPartyIdentityRecord[],
 ): boolean {
-  if (!client || !provider) return false;
+  const pair = records.slice(0, 2);
+  if (pair.length < 2) return false;
   const quote = `["'“”‘’]?`;
-  const clientBinding = new RegExp(
-    `${escapeOpeningRegex(client)}\\s*\\(\\s*${quote}Client${quote}\\s*\\)`,
-    "i",
+  return pair.every((rec) => {
+    const name = rec.fullLegalName.trim();
+    const role = rec.roleLabel.replace(/\s+/g, " ").trim();
+    if (!name || !role) return false;
+    return new RegExp(
+      `${escapeOpeningRegex(name)}\\s*\\(\\s*${quote}${roleBindingAlternation(role)}${quote}\\s*\\)`,
+      "i",
+    ).test(opening);
+  });
+}
+
+function openingHasDeclaredCommercialRoleBindings(
+  opening: string,
+  records: readonly CanonicalPartyIdentityRecord[],
+): boolean {
+  const quote = `["'“”‘’]?`;
+  return records.slice(0, 2).every((rec) => {
+    const name = rec.fullLegalName.trim();
+    if (!name) return false;
+    return new RegExp(
+      `${escapeOpeningRegex(name)}\\s*\\(\\s*${quote}[A-Za-z][A-Za-z\\s-]{1,40}${quote}\\s*\\)`,
+      "i",
+    ).test(opening);
+  });
+}
+
+/** Index-default Client/SP (or missing labels) must not rewrite an already-declared Consultant/Client opening. */
+function openingRecordsAreIndexDefaultOrUnspecified(
+  records: readonly CanonicalPartyIdentityRecord[],
+): boolean {
+  const explicitRoles = records
+    .slice(0, 2)
+    .map((r) => r.roleLabel.replace(/\s+/g, " ").trim())
+    .filter((r) => r && !/^party(?:\s+\d+)?$/i.test(r));
+  if (explicitRoles.length < 2) return true;
+  return (
+    /^client$/i.test(explicitRoles[0] ?? "") &&
+    /^(?:service\s+provider|provider)$/i.test(explicitRoles[1] ?? "")
   );
-  const providerBinding = new RegExp(
-    `${escapeOpeningRegex(provider)}\\s*\\(\\s*${quote}(?:Service\\s+Provider|Provider)${quote}\\s*\\)`,
-    "i",
-  );
-  return clientBinding.test(opening) && providerBinding.test(opening);
 }
 
 /**
@@ -309,15 +349,29 @@ export function detectPaidProMalformedServicesOpening(
   if (provider && !preSec1.includes(provider)) {
     return true;
   }
-  if (client && provider && !openingHasExactAuthorityRoleBindings(preSec1, client, provider)) {
-    return true;
-  }
-  if (!/\(\s*["']?Client["']?\s*\)/i.test(preSec1)) {
-    return true;
-  }
-  // Accept intake role aliases (Provider / Service Provider) — commercial role-alias preserve.
-  if (!/\(\s*["']?(?:Service\s+Provider|Provider)["']?\s*\)/i.test(preSec1)) {
-    return true;
+  if (records && records.length >= 2) {
+    if (openingHasExactAuthorityRoleBindings(preSec1, records)) {
+      // Declared party-to-role bindings already match the manifest.
+    } else if (openingHasDeclaredCommercialRoleBindings(preSec1, records)) {
+      // Preserve Consultant/Client openings when slots are empty or still
+      // index-default Client/Service Provider. Ordinary Client/SP openings
+      // still repair when they disagree with a non-default manifest.
+      const preserveDeclaredNonDefault =
+        openingRecordsAreIndexDefaultOrUnspecified(records) &&
+        /\(\s*["']?Consultant["']?\s*\)/i.test(preSec1);
+      if (!preserveDeclaredNonDefault) {
+        return true;
+      }
+    } else {
+      return true;
+    }
+  } else {
+    if (!/\(\s*["']?Client["']?\s*\)/i.test(preSec1)) {
+      return true;
+    }
+    if (!/\(\s*["']?(?:Service\s+Provider|Provider)["']?\s*\)/i.test(preSec1)) {
+      return true;
+    }
   }
   if (/Effective\s+Date\s+This\s+Agreement\s+is\s+between/i.test(preSec1)) {
     return true;
@@ -355,11 +409,24 @@ export function isPaidProOpeningStructurallyValid(
   if (!head.includes(client) || !head.includes(provider)) {
     return false;
   }
-  if (!openingHasExactAuthorityRoleBindings(head, client, provider)) {
-    return false;
-  }
-  if (!/\(\s*["']?Client["']?\s*\)/i.test(head) || !/\(\s*["']?Service Provider["']?\s*\)/i.test(head)) {
-    return false;
+  if (!openingHasExactAuthorityRoleBindings(head, records)) {
+    if (
+      !openingHasDeclaredCommercialRoleBindings(head, records) ||
+      !openingRecordsAreIndexDefaultOrUnspecified(records) ||
+      !/\(\s*["']?Consultant["']?\s*\)/i.test(head)
+    ) {
+      return false;
+    }
+  } else {
+    const firstRole = records[0]!.roleLabel.replace(/\s+/g, " ").trim() || "Client";
+    const secondRole = records[1]!.roleLabel.replace(/\s+/g, " ").trim() || "Service Provider";
+    const quote = `["'“”‘’]?`;
+    if (
+      !new RegExp(`\\(\\s*${quote}${roleBindingAlternation(firstRole)}${quote}\\s*\\)`, "i").test(head) ||
+      !new RegExp(`\\(\\s*${quote}${roleBindingAlternation(secondRole)}${quote}\\s*\\)`, "i").test(head)
+    ) {
+      return false;
+    }
   }
 
   const first = meaningfulLines(body, 1)[0] ?? "";

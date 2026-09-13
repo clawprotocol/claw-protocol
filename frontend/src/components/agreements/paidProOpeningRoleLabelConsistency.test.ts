@@ -146,6 +146,29 @@ describe("paidProOpeningRoleLabelConsistency", () => {
     expect(text).toContain('Peak Fitness Studio LLC ("Tenant")');
   });
 
+  it("does not rewrite Harbor Consultant / Ironvale Client to index-default Client/SP", () => {
+    const harbor = "Harbor Peak Analytics LLC";
+    const ironvale = "Ironvale Manufacturing Inc.";
+    const records = [
+      { fullLegalName: harbor, roleLabel: "Client", displayAlias: harbor, signerName: null, signerTitle: null },
+      { fullLegalName: ironvale, roleLabel: "Service Provider", displayAlias: ironvale, signerName: null, signerTitle: null },
+    ];
+    const body = [
+      "CONSULTING SERVICES AGREEMENT",
+      "",
+      `This Consulting Services Agreement (the "Agreement") is entered into as of October 1, 2026 by and between ${harbor} ("Consultant") and ${ironvale} ("Client").`,
+      "",
+      "1. PARTIES AND ROLES",
+    ].join("\n");
+    expect(detectOpeningRecitalRoleLabelInversion(body, records)).toBe(false);
+    const { text, repairs } = repairOpeningRecitalRoleLabelsFromManifest(body, records);
+    expect(repairs).toEqual([]);
+    expect(text).toContain(`${harbor} ("Consultant")`);
+    expect(text).toContain(`${ironvale} ("Client")`);
+    expect(text).not.toContain(`${harbor} ("Client")`);
+    expect(text).not.toContain(`${ironvale} ("Service Provider")`);
+  });
+
   it("leaves already-correct consulting labels unchanged", () => {
     const records = resolveCanonicalPartyIdentitiesFromIntake(
       CONSULTING_INTAKE,

@@ -91,6 +91,17 @@ def _sparse_response() -> str:
     )
 
 
+PADDED_FILLER = (
+    "Operative consulting detail on discovery, implementation, acceptance, and handoff. "
+)
+PADDED_FILLER_REPEAT = 220
+
+
+def consulting_corpus_padded() -> str:
+    """Failing negative fixture — repetitive filler must not pass quality."""
+    return _consulting_corpus() + "\n\n" + (PADDED_FILLER * PADDED_FILLER_REPEAT)
+
+
 def _consulting_corpus() -> str:
     sections = [
         "CONSULTING SERVICES AGREEMENT",
@@ -124,12 +135,15 @@ def _consulting_corpus() -> str:
         "IN WITNESS WHEREOF, the parties have executed this Agreement as of the Effective Date.",
         f"Consultant: {HARBOR}   By: {CONSULTANT_SIGNER}   Title: Principal   Date: ________",
         f"Client: {IRONVALE}   By: {CLIENT_SIGNER}   Title: Operations Lead   Date: ________",
+        "13. ADDITIONAL OPERATIVE TERMS. Consultant shall complete discovery, implementation, "
+        "acceptance testing, and knowledge-transfer handoff for the AI workflow. Client shall "
+        "nominate a single operational owner, furnish existing process documentation, and accept "
+        "or reject each milestone in writing within ten business days. The parties will hold a "
+        "monthly steering review. Neither party may assign this Agreement without prior written "
+        "consent except to a surviving affiliate. Force majeure suspends performance only while "
+        "the event continues. Notices are effective on the next business day after email send.",
     ]
-    body = "\n\n".join(sections)
-    body += "\n\n" + (
-        "Operative consulting detail on discovery, implementation, acceptance, and handoff. " * 220
-    )
-    return body
+    return "\n\n".join(sections)
 
 
 def _full_draft_response() -> str:

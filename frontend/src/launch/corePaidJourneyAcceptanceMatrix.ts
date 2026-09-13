@@ -171,6 +171,128 @@ export const CORE_PAID_JOURNEY_MATRIX: readonly CorePaidJourneyRow[] = [
   },
 ] as const;
 
+/** Stub padding retained as a failing negative case — never a quality pass. */
+export const CORE_PAID_JOURNEY_REPETITIVE_FILLER_PHRASE =
+  "Operative consulting detail on discovery, implementation, acceptance, and handoff.";
+
+export type ArticlePresentationIssue = {
+  code: "date_line_broken" | "section_order";
+  detail: string;
+};
+
+function escapeRe(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+export function normalizeArticleWhitespace(article: string): string {
+  return (article || "").replace(/\s+/g, " ").trim();
+}
+
+/** Signature/ceremony lines are compared separately from the operative paper. */
+export function stripSignatureMetadataForOperativeCompare(article: string): string {
+  const withoutWitness = (article || "").replace(/\r\n/g, "\n").replace(/\bIN WITNESS WHEREOF[\s\S]*$/i, "");
+  return normalizeArticleWhitespace(
+    withoutWitness.replace(/^\s*(?:By|Name|Title|Date)\s*:\s*.*$/gim, ""),
+  );
+}
+
+/**
+ * UI chrome and the non-binding template banner are presentation, not operative wording.
+ * Do not treat them as a passing integrity result unless this strip is applied.
+ */
+export function stripPresentationChromeForOperativeCompare(article: string): string {
+  const withoutBanner = (article || "")
+    .replace(/\r\n/g, "\n")
+    .replace(/^\s*Document\s*$/gim, "")
+    .replace(/Draft Agreement\s*\(non-binding template\)/gi, "");
+  return stripSignatureMetadataForOperativeCompare(withoutBanner);
+}
+
+export function operativeArticleFingerprint(article: string): string {
+  const body = stripPresentationChromeForOperativeCompare(article);
+  let h = 2166136261;
+  for (let i = 0; i < body.length; i += 1) {
+    h ^= body.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return `${body.length}:${(h >>> 0).toString(16).padStart(8, "0")}`;
+}
+
+export function describeOperativeArticleCompare(
+  leftLabel: string,
+  left: string,
+  rightLabel: string,
+  right: string,
+): {
+  sameOperative: boolean;
+  presentationOnly: boolean;
+  rawEqual: boolean;
+  leftFingerprint: string;
+  rightFingerprint: string;
+  diff: string;
+} {
+  const leftOp = stripPresentationChromeForOperativeCompare(left);
+  const rightOp = stripPresentationChromeForOperativeCompare(right);
+  const leftFingerprint = operativeArticleFingerprint(left);
+  const rightFingerprint = operativeArticleFingerprint(right);
+  const sameOperative = leftFingerprint === rightFingerprint && leftOp.length > 4;
+  const rawEqual = normalizeArticleWhitespace(left) === normalizeArticleWhitespace(right);
+  const leftWords = leftOp.split(" ");
+  const rightWords = rightOp.split(" ");
+  const first = leftWords.findIndex((word, idx) => word !== rightWords[idx]);
+  const snippet = (words: string[], at: number) =>
+    words.slice(Math.max(0, at - 6), at + 10).join(" ");
+  const diff = sameOperative
+    ? rawEqual
+      ? `${leftLabel} === ${rightLabel} (raw and operative)`
+      : `${leftLabel} vs ${rightLabel}: presentation-only (${leftFingerprint}); chrome/signature metadata stripped`
+    : [
+        `${leftLabel} ${leftFingerprint}`,
+        `${rightLabel} ${rightFingerprint}`,
+        first >= 0
+          ? `first operative mismatch near: «${snippet(leftWords, first)}» vs «${snippet(rightWords, first)}»`
+          : `operative length ${leftOp.length} vs ${rightOp.length}`,
+      ].join("\n");
+  return {
+    sameOperative,
+    presentationOnly: !rawEqual && sameOperative,
+    rawEqual,
+    leftFingerprint,
+    rightFingerprint,
+    diff,
+  };
+}
+
+function nameRoleBindingPresent(text: string, name: string, role: string): boolean {
+  const n = escapeRe(name);
+  const r = escapeRe(role);
+  const paren = new RegExp(`${n}\\s*\\(\\s*["'“”]?${r}["'“”]?\\s*\\)`, "i");
+  const labeled = new RegExp(`${r}\\s*:\\s*${n}`, "i");
+  const prose = new RegExp(`${n}[\\s\\S]{0,48}${r}|${r}[\\s\\S]{0,48}${n}`, "i");
+  return paren.test(text) || labeled.test(text) || prose.test(normalizeArticleWhitespace(text));
+}
+
+function nameBoundToRole(text: string, name: string, role: string): boolean {
+  const n = escapeRe(name);
+  const r = escapeRe(role);
+  return new RegExp(`${n}\\s*\\(\\s*["'“”]?${r}["'“”]?\\s*\\)`, "i").test(text);
+}
+
+export function articlePresentationIssues(
+  article: string,
+  facts = CORE_PAID_JOURNEY_EXPECTED_FACTS,
+): ArticlePresentationIssue[] {
+  const issues: ArticlePresentationIssue[] = [];
+  const raw = article || "";
+  if (/October\s*1,?\s*\n+\s*2026/i.test(raw) && /October\s+1,?\s*2026/i.test(normalizeArticleWhitespace(raw))) {
+    issues.push({
+      code: "date_line_broken",
+      detail: `${facts.startDate} is semantically present but split across lines`,
+    });
+  }
+  return issues;
+}
+
 export const CORE_PAID_JOURNEY_LIVE_MODEL_PROPOSAL = {
   needed: true,
   reason:
@@ -184,33 +306,80 @@ export const CORE_PAID_JOURNEY_LIVE_MODEL_PROPOSAL = {
   approvalRequired: true,
 } as const;
 
+export function countRepetitiveFiller(
+  article: string,
+  phrase = CORE_PAID_JOURNEY_REPETITIVE_FILLER_PHRASE,
+): number {
+  if (!article || !phrase) return 0;
+  return (article.match(new RegExp(escapeRe(phrase), "gi")) || []).length;
+}
+
 export function articleContainsExpectedFacts(article: string, facts = CORE_PAID_JOURNEY_EXPECTED_FACTS): string[] {
   const missing: string[] = [];
   const text = article || "";
-  if (!new RegExp(facts.titleCue, "i").test(text)) missing.push("title");
+  const semantic = normalizeArticleWhitespace(text);
+  if (!new RegExp(facts.titleCue, "i").test(semantic)) missing.push("title");
   for (const party of facts.parties) {
-    if (!text.includes(party.name)) missing.push(`party:${party.name}`);
-    if (!new RegExp(party.role, "i").test(text)) missing.push(`role:${party.role}`);
+    if (!semantic.includes(party.name)) missing.push(`party:${party.name}`);
+    const contradicted = ["Client", "Service Provider", "Consultant", "Customer", "Provider"].some(
+      (role) => role.toLowerCase() !== party.role.toLowerCase() && nameBoundToRole(text, party.name, role),
+    );
+    if (contradicted || !nameRoleBindingPresent(text, party.name, party.role)) {
+      missing.push(`party_role:${party.name}->${party.role}`);
+    }
   }
-  if (!new RegExp(facts.scope, "i").test(text)) missing.push("scope");
-  if (!text.includes(facts.economics)) missing.push("economics");
-  if (!new RegExp(facts.duration, "i").test(text)) missing.push("duration");
-  if (!/October\s*1,?\s*2026/i.test(text)) missing.push("startDate");
-  if (!new RegExp(facts.governingLaw, "i").test(text)) missing.push("governingLaw");
-  if (!new RegExp(facts.ipConsultant, "i").test(text)) missing.push("ipConsultant");
-  if (!new RegExp(facts.ipClient, "i").test(text)) missing.push("ipClient");
+  for (const signer of facts.signers) {
+    if (!semantic.includes(signer.name)) missing.push(`signer:${signer.name}`);
+    if (!nameRoleBindingPresent(text, signer.name, signer.party) && !semantic.includes(signer.party)) {
+      missing.push(`signer_party:${signer.name}->${signer.party}`);
+    }
+  }
+  if (!new RegExp(facts.scope, "i").test(semantic)) missing.push("scope");
+  if (!semantic.includes(facts.economics)) missing.push("economics");
+  if (!new RegExp(facts.duration, "i").test(semantic)) missing.push("duration");
+  if (!/October\s+1,?\s*2026/i.test(semantic)) missing.push("startDate");
+  if (!new RegExp(facts.governingLaw, "i").test(semantic)) missing.push("governingLaw");
+  if (!new RegExp(facts.ipConsultant, "i").test(semantic)) missing.push("ipConsultant");
+  if (!new RegExp(facts.ipClient, "i").test(semantic)) missing.push("ipClient");
   return missing;
 }
 
 export function articleQualityDefects(article: string, facts = CORE_PAID_JOURNEY_EXPECTED_FACTS): string[] {
   const defects: string[] = [];
   const text = article || "";
-  if (text.trim().length < 800) defects.push("too_short_for_commercial_article");
+  const semantic = normalizeArticleWhitespace(text);
+  if (!semantic) {
+    defects.push("empty_article");
+    return defects;
+  }
   for (const re of facts.forbiddenPlaceholders) {
     if (re.test(text)) defects.push(`placeholder:${re.source}`);
   }
   for (const name of facts.forbiddenInventedParties) {
     if (text.includes(name)) defects.push(`invented:${name}`);
+  }
+  const fillerCount = countRepetitiveFiller(text);
+  if (fillerCount >= 8) {
+    defects.push(`repetitive_filler:${CORE_PAID_JOURNEY_REPETITIVE_FILLER_PHRASE.slice(0, 32)}×${fillerCount}`);
+  }
+  const otherRoles = ["Client", "Service Provider", "Consultant", "Customer", "Provider"];
+  for (const party of facts.parties) {
+    for (const role of otherRoles) {
+      if (role.toLowerCase() === party.role.toLowerCase()) continue;
+      if (nameBoundToRole(text, party.name, role)) {
+        defects.push(`role_contradiction:${party.name}->${role}`);
+      }
+    }
+  }
+  const harbor = facts.parties[0]?.name ?? "";
+  const ironvale = facts.parties[1]?.name ?? "";
+  if (harbor && ironvale) {
+    if (facts.signers[0] && nameRoleBindingPresent(text, facts.signers[0].name, ironvale) && !nameRoleBindingPresent(text, facts.signers[0].name, harbor)) {
+      defects.push(`signer_party_mismatch:${facts.signers[0].name}->${ironvale}`);
+    }
+    if (facts.signers[1] && nameRoleBindingPresent(text, facts.signers[1].name, harbor) && !nameRoleBindingPresent(text, facts.signers[1].name, ironvale)) {
+      defects.push(`signer_party_mismatch:${facts.signers[1].name}->${harbor}`);
+    }
   }
   return defects;
 }

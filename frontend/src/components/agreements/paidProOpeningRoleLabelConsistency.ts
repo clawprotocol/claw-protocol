@@ -44,6 +44,17 @@ function entityRoleParentheticalRe(legalName: string): RegExp {
   );
 }
 
+function isIndexDefaultClientOrProvider(role: string): boolean {
+  return /^client$/i.test(role) || /^(?:service\s+provider|provider)$/i.test(role);
+}
+
+/** Index-default Client/SP manifests must not overwrite a declared Consultant/Client opening. */
+function preserveDeclaredConsultantClientBinding(slice: string, foundRole: string, canonicalRoleLabel: string): boolean {
+  if (!isIndexDefaultClientOrProvider(canonicalRoleLabel)) return false;
+  if (!/\(\s*["'“”‘’]?Consultant["'“”‘’]?\s*\)/i.test(slice)) return false;
+  return /^(?:consultant|client)$/i.test(foundRole);
+}
+
 function repairEntityRoleParentheticalsInSlice(
   slice: string,
   legalName: string,
@@ -54,6 +65,9 @@ function repairEntityRoleParentheticalsInSlice(
   const next = slice.replace(re, (full, namePart, quote, foundRole) => {
     const found = String(foundRole || "").trim();
     if (!found || openingRoleLabelsMatch(canonicalRoleLabel, found)) {
+      return full;
+    }
+    if (preserveDeclaredConsultantClientBinding(slice, found, canonicalRoleLabel)) {
       return full;
     }
     const q = quote || '"';
@@ -143,6 +157,7 @@ export function detectOpeningRecitalRoleLabelInversion(
     while ((m = re.exec(slice)) !== null) {
       const found = (m[3] || "").trim();
       if (found && !openingRoleLabelsMatch(role, found)) {
+        if (preserveDeclaredConsultantClientBinding(slice, found, role)) continue;
         return true;
       }
     }

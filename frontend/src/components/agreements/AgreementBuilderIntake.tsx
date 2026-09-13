@@ -366,6 +366,7 @@ import {
   DASHBOARD_SIGNER_SETUP_RESUME_COMPLETE_CTA,
   DASHBOARD_SIGNER_SETUP_RESUME_INCOMPLETE_CTA,
   PAID_PRO_SIGNER_DETAILS_COMPLETE_CTA,
+  PAID_PRO_SIGNER_DETAILS_COMPLETE_SIGNING_CTA,
   PAID_PRO_SIGNER_DETAILS_INCOMPLETE_CTA,
   PAID_PRO_PREPARE_ESIGN_DECISION_CTA,
   resolveSignerSetupAutoCorrectTarget,
@@ -1202,6 +1203,7 @@ import {
   PAID_PRO_SIGNER_EMAIL_FIELD_WRAPPER_CLASS,
   PAID_PRO_SIGNER_EMAIL_INPUT_CLASS,
 } from "./paidProPaidSessionLanding";
+import { resolvePaidProSignatureConfirmationAuthority } from "./paidProSignatureConfirmationAuthority";
 import {
   effectivePremiumRefineApplyLogRevisionIntent,
   pickAuthoritativeProCorpusForRefine,
@@ -4423,6 +4425,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   // of signature preparation. This latch pins the signature choice across signer setup + finalize; it
   // is cleared only when the user picks the review track or the source of truth is torn down.
   const [paidProSignaturePrepIntentLatched, setPaidProSignaturePrepIntentLatched] = useState(false);
+  const paidProSignatureConfirmationAnchorRef = useRef<{
+    agreementId: string;
+    organizationId: string;
+    sessionId: string;
+    participantIds: string[];
+  } | null>(null);
   /** Frozen party manifest / identities captured at signer-metadata session entry — never recompute on keystroke. */
   const frozenSignerMetadataPartyManifestRef = useRef<CanonicalFinalPartyManifest | null>(null);
   const frozenSignerMetadataIdentitiesRef = useRef<
@@ -19641,11 +19649,16 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   }, [draft, agreementDocumentText, intakeCombined, hasAnyValidRecipientEmail, premiumForkPrimedNonce, getDraftFirstReviewBlockerForFork]);
 
   const effectivePremiumSendMode = useMemo((): PremiumSendIntent => {
+    const signatureIntentLatched =
+      Boolean(paidProSignaturePrepIntentLatched) || finalReviewSendIntentRef.current === "signature";
+    if (signatureIntentLatched) {
+      return "signature";
+    }
     if (
       paidProReviewDefaultsToReviewTrack({
         paidProAuthoritative,
         signaturePreparationRequested,
-        signaturePrepIntentLatched: paidProSignaturePrepIntentLatched,
+        signaturePrepIntentLatched: signatureIntentLatched,
       })
     ) {
       return "review";
@@ -19970,10 +19983,43 @@ const AgreementBuilderIntake: React.FC<Props> = ({
   // TEST577: tear down the sticky signature-track latch when the paid Pro source of truth is gone
   // (new session / reset) so a fresh review starts review-first-neutral, not pre-latched to signature.
   useEffect(() => {
-    if (paidProSignaturePrepIntentLatched && !hasPaidProSourceOfTruth()) {
+    if (!paidProSignaturePrepIntentLatched) return;
+    if (finalReviewSendIntentRef.current === "signature" || paidProInlineSignerSetupLatched) {
+      return;
+    }
+    if (!hasPaidProSourceOfTruth()) {
       setPaidProSignaturePrepIntentLatched(false);
     }
-  }, [paidProSignaturePrepIntentLatched, premiumSurfaceGateTick, reviewDocRefreshTick]);
+  }, [
+    paidProSignaturePrepIntentLatched,
+    paidProInlineSignerSetupLatched,
+    premiumSurfaceGateTick,
+    reviewDocRefreshTick,
+  ]);
+
+  useEffect(() => {
+    const agreementId = (
+      reviewAgreementIdRef.current ||
+      reviewAgreementId ||
+      readCreateReviewAgreementResumeId() ||
+      ""
+    ).trim();
+    const organizationId = (getOrgId() || "").trim();
+    const sessionId = (getOrInitSessionAgreementGenerationId() || "").trim();
+    const ids = (draftSnapshotRef.current?.parties ?? draft?.parties ?? [])
+      .map((party) => String((party as { id?: string }).id || "").trim())
+      .filter(Boolean);
+    const prev = paidProSignatureConfirmationAnchorRef.current;
+    if (!agreementId || ids.length < 2) return;
+    if (!prev || prev.agreementId !== agreementId) {
+      paidProSignatureConfirmationAnchorRef.current = {
+        agreementId,
+        organizationId,
+        sessionId,
+        participantIds: ids,
+      };
+    }
+  }, [draft, reviewAgreementId, premiumSurfaceGateTick]);
 
   const guidedSignerFinalVersionLines = useMemo(() => {
     if (!guidedPreReviewSignerSlots.complete) return [];
@@ -21631,6 +21677,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       signerDetailsComplete: signerDetailsAreComplete,
       inlineSignerSetupLatched: paidProInlineSignerSetupLatched,
       signaturePreparationRequested,
+      signatureContinuationRequested:
+        paidProSignaturePrepIntentLatched ||
+        finalReviewSendIntentRef.current === "signature" ||
+        effectivePremiumSendMode === "signature",
       sendSurfaceReady: Boolean(
         paidProRecipientSetupOnDraft && productionReadyForPersist && signaturePreparationRequested,
       ),
@@ -21646,6 +21696,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     signerDetailsAreComplete,
     paidProInlineSignerSetupLatched,
     signaturePreparationRequested,
+    paidProSignaturePrepIntentLatched,
+    effectivePremiumSendMode,
     paidProRecipientSetupOnDraft,
     productionReadyForPersist,
   ]);
@@ -24474,7 +24526,10 @@ const AgreementBuilderIntake: React.FC<Props> = ({
           effectivePremiumSendMode === "signature" &&
           mapped.reason === "paid_pro_signer_details_required"
             ? "Create signing links"
-            : mapped.label,
+            : effectivePremiumSendMode === "signature" &&
+                mapped.reason === "paid_pro_signer_details_complete"
+              ? PAID_PRO_SIGNER_DETAILS_COMPLETE_SIGNING_CTA
+              : mapped.label,
         reason: assertCanonicalPaidProSignerCtaReason({
           reason: mapped.reason,
           canonicalSignerFlowActive: Boolean(
@@ -32269,6 +32324,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       setLoading(false);
       onHomeGuidedTransitionPhase?.("review_ready");
       bumpPremiumSurfaceGateTick();
+      if (paidProSignaturePrepIntentLatched || finalReviewSendIntentRef.current === "signature") {
+        markSigningPreparationRequested();
+        setSignaturePreparationRequested(true);
+        setPaidProInlineSignerSetupLatched(false);
+        handlePremiumSendModePick("signature");
+        void enterGuidedSignatureTrackRoute();
+        return true;
+      }
       scrollPaidProReviewDecisionIntoView();
       return true;
     }
@@ -32378,6 +32441,14 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     setGuidedSigningConfirmationBlockMessage(null);
     setLoading(false);
     bumpPremiumSurfaceGateTick();
+    if (paidProSignaturePrepIntentLatched || finalReviewSendIntentRef.current === "signature") {
+      markSigningPreparationRequested();
+      setSignaturePreparationRequested(true);
+      setPaidProInlineSignerSetupLatched(false);
+      handlePremiumSendModePick("signature");
+      void enterGuidedSignatureTrackRoute();
+      return true;
+    }
     scrollPaidProReviewDecisionIntoView();
     return true;
   }, [
@@ -32410,6 +32481,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     pinFinalizedSignerAppliedCorpus,
     createFlowPhase,
     ensureReviewAgreementWorkspaceId,
+    paidProSignaturePrepIntentLatched,
+    handlePremiumSendModePick,
+    enterGuidedSignatureTrackRoute,
   ]);
 
   finalizePaidProSignerMetadataAndOpenReviewDecisionRef.current =
@@ -32940,14 +33014,63 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       hasAuthoritativeSigningSnapshot() || paidProSignerMetadataFinalizedLatch;
     const postFinalizeSigningReady =
       paidProSignerMetadataFinalized || stickySigningFinalized;
-    // After-pay names+emails (2–4) or an already-finalized Continue latch:
-    // start the existing signing track. Extra signer title or address is not
-    // required, and the click must not be swallowed as an incomplete finalize
-    // or a dead signer-setup remount.
+    const confirmationAnchor = paidProSignatureConfirmationAnchorRef.current;
+    const confirmationParties = (draftSnapshotRef.current?.parties ?? draft?.parties ?? []) as Array<{
+      id?: string;
+    }>;
+    const currentParticipantIds = confirmationParties
+      .map((party) => String(party.id || "").trim())
+      .filter(Boolean);
+    const confirmationSlots = [
+      {
+        name: resolveSignerNameForInlineSetupReadiness({
+          partyIndex: 0,
+          partySignerNames,
+          recipientLegalEntityName: recipient1Name,
+        }),
+        email: recipient1Email,
+        participantId: String(confirmationParties[0]?.id || "").trim(),
+      },
+      {
+        name: resolveSignerNameForInlineSetupReadiness({
+          partyIndex: 1,
+          partySignerNames,
+          recipientLegalEntityName: recipient2Name,
+        }),
+        email: recipient2Email,
+        participantId: String(confirmationParties[1]?.id || "").trim(),
+      },
+    ];
+    const confirmationAgreementId = (
+      reviewAgreementIdRef.current ||
+      reviewAgreementId ||
+      readCreateReviewAgreementResumeId() ||
+      ""
+    ).trim();
+    const signatureConfirmation = resolvePaidProSignatureConfirmationAuthority({
+      slots: confirmationSlots,
+      expectedParticipantIds: (confirmationAnchor?.participantIds ?? currentParticipantIds).slice(
+        0,
+        confirmationSlots.length,
+      ),
+      currentAgreementId: confirmationAgreementId,
+      expectedAgreementId: confirmationAnchor?.agreementId || confirmationAgreementId,
+      currentOrganizationId: getOrgId(),
+      expectedOrganizationId: confirmationAnchor?.organizationId,
+      currentSessionId: getOrInitSessionAgreementGenerationId(),
+      expectedSessionId: confirmationAnchor?.sessionId,
+      hasVerifiedAuthority: Boolean(
+        acceptedPaidProAuthorityActive ||
+          (confirmationAgreementId &&
+            canEnableCommercialPrepareFromServerSnapshot(confirmationAgreementId)),
+      ),
+    });
+    // Names, emails, durable participant bindings, and agreement authority are all
+    // required. Emails alone never count as namesAndEmailsComplete.
     if (
+      signatureConfirmation.ok &&
       canStartPaidSessionSignatureTrackFromFinalReview({
-        namesAndEmailsComplete:
-          paidSessionTwoSignersReady || paidProSignerMetadataFinalizedLatch,
+        namesAndEmailsComplete: paidSessionTwoSignersReady,
       })
     ) {
       traceSigningAdvance("handleProSendForSignature:names_emails_complete");
@@ -32961,6 +33084,22 @@ const AgreementBuilderIntake: React.FC<Props> = ({
       handlePremiumSendModePick("signature");
       setJourneyActionFeedback(feedbackCreatingLinks("signing"));
       void enterGuidedSignatureTrackRoute();
+      return;
+    }
+    if (!signatureConfirmation.ok) {
+      traceSigningAdvance(`handleProSendForSignature:confirmation_${signatureConfirmation.reason}`);
+      if (
+        signatureConfirmation.reason === "emails_only" ||
+        signatureConfirmation.reason === "names_incomplete" ||
+        signatureConfirmation.reason === "emails_incomplete" ||
+        signatureConfirmation.reason === "missing_participant"
+      ) {
+        enterFinalReviewRecipientSetup("signature");
+        return;
+      }
+      setGuidedSigningConfirmationBlockMessage(
+        "Signer confirmation no longer matches this agreement. Reload and confirm the required signer details before creating signing links.",
+      );
       return;
     }
     if (
@@ -33052,6 +33191,12 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     paidProAuthoritative,
     guidedAuthoritativeBodyPlain,
     enterFinalReviewRecipientSetup,
+    recipient1Email,
+    recipient2Email,
+    recipient1Name,
+    recipient2Name,
+    partySignerNames,
+    draft,
   ]);
 
   const handlePaidProPrepareSignaturesFromFirstReview = React.useCallback(() => {
@@ -33131,6 +33276,7 @@ const AgreementBuilderIntake: React.FC<Props> = ({
         source: paidProForcedFirstReviewActive ? "forced_first_review" : "paid_pro_first_review",
         selectedTrack: "signature",
       });
+      finalReviewSendIntentRef.current = "signature";
       handlePremiumSendModePick("signature");
       setPremiumSendModeTouched(true);
       // TEST570: "Prepare signature links" is the point where signer setup mounts. From the review
@@ -33206,6 +33352,9 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     });
     if (acceptedPaidProAuthorityActive || paidProAuthoritative) {
       enterFinalReviewRecipientSetup("review_only");
+      if (looksLikeEmail(recipient1Email) && looksLikeEmail(recipient2Email)) {
+        void completeGuidedPaidProReviewFirstHandoff("simple_pro_send_for_review");
+      }
       return;
     }
     const canProceedReviewHandoff = canProceedPaidProReviewFirstHandoffAfterFinalize({
@@ -33255,6 +33404,8 @@ const AgreementBuilderIntake: React.FC<Props> = ({
     acceptedPaidProAuthorityActive,
     paidProAuthoritative,
     enterFinalReviewRecipientSetup,
+    recipient1Email,
+    recipient2Email,
   ]);
 
   const handleFinalizeRoutePrimaryAction = React.useCallback(

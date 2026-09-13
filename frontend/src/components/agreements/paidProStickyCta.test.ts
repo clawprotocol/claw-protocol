@@ -10,7 +10,10 @@ import {
   shouldClearSigningSnapshotOnSignerMetadataDrift,
 } from "./paidProStickyCta";
 import { PAID_PRO_REVIEW_DECISION_SCROLL_REASON } from "./paidProSignerFinalizeRouting";
-import { PAID_PRO_SIGNER_DETAILS_COMPLETE_CTA } from "./signerSetupPartyIdentity";
+import {
+  PAID_PRO_SIGNER_DETAILS_COMPLETE_CTA,
+  PAID_PRO_SIGNER_DETAILS_COMPLETE_SIGNING_CTA,
+} from "./signerSetupPartyIdentity";
 
 describe("paidProStickyCta", () => {
   it("progresses phases in canonical order", () => {
@@ -85,6 +88,22 @@ describe("paidProStickyCta", () => {
     expect(mapped.label).toBe(PAID_PRO_SIGNER_DETAILS_COMPLETE_CTA);
     expect(mapped.action).toBe("guided_continue");
     expect(mapped.disabled).toBe(false);
+  });
+
+  it("signature continuation keeps confirmation on the signing track", () => {
+    const mapped = mapPaidProStickyCtaToPrimaryCta(
+      resolvePaidProStickyCta({
+        hasAuthoritativeSigningSnapshot: false,
+        signerDetailsComplete: true,
+        inlineSignerSetupLatched: true,
+        signaturePreparationRequested: false,
+        sendSurfaceReady: false,
+        signatureContinuationRequested: true,
+      }),
+    );
+    expect(mapped.reason).toBe("paid_pro_signer_details_complete");
+    expect(mapped.label).toBe(PAID_PRO_SIGNER_DETAILS_COMPLETE_SIGNING_CTA);
+    expect(mapped.label).not.toMatch(/review decision/i);
   });
 
   it("prepare_signing phase when signing requested with finalized snapshot", () => {

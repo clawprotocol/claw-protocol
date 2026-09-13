@@ -7,4 +7,8 @@ describe("core paid journey acceptance coverage", () => {
     expect(CORE_PAID_JOURNEY_MATRIX.map((row) => row.id)).toHaveLength(14);
     expect(() => assertCorePaidJourneyAcceptanceContracts()).not.toThrow();
   });
+
+  it("is not itself a customer-journey pass", () => {
+    expect(CORE_PAID_JOURNEY_MATRIX.every((row) => row.proof !== "coverage")).toBe(true);
+  });
 });

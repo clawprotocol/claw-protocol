@@ -125,6 +125,10 @@ def test_owner_apply_updates_corpus_and_preserves_audit(monkeypatch, isolated_ag
     event_types = [e.get("event_type") for e in draft.get("audit_log") or []]
     assert "recipient_proposal_pending" in event_types
     assert "recipient_proposal_applied" in event_types
+    assert any(
+        (row.get("note") or "") == "Owner accepted recipient proposal"
+        for row in draft.get("versions") or []
+    )
 
 
 def test_owner_reject_preserves_corpus_and_marks_rejected(monkeypatch, isolated_agreement_env):

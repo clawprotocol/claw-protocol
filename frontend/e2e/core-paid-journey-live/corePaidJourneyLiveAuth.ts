@@ -47,15 +47,35 @@ export async function seedCorePaidJourneyOwner(page: Page, runtime = loadCorePai
   );
 }
 
-export function captureRecipientMints(page: Page): Array<Record<string, unknown>> {
-  const minted: Array<Record<string, unknown>> = [];
+export type RecipientTokenEvent = {
+  ok: boolean;
+  status: number;
+  url: string;
+  request?: Record<string, unknown>;
+  body?: Record<string, unknown> | string;
+};
+
+export function captureRecipientMints(page: Page): RecipientTokenEvent[] {
+  const minted: RecipientTokenEvent[] = [];
   page.on("response", async (res) => {
     if (!res.url().includes("/recipient-access-token") || res.request().method() !== "POST") return;
-    if (!res.ok()) return;
+    let request: Record<string, unknown> | undefined;
     try {
-      minted.push((await res.json()) as Record<string, unknown>);
+      request = res.request().postDataJSON() as Record<string, unknown>;
     } catch {
-      /* ignore */
+      request = undefined;
+    }
+    try {
+      const body = (await res.json()) as Record<string, unknown>;
+      minted.push({ ok: res.ok(), status: res.status(), url: res.url(), request, body });
+    } catch {
+      minted.push({
+        ok: res.ok(),
+        status: res.status(),
+        url: res.url(),
+        request,
+        body: await res.text().catch(() => ""),
+      });
     }
   });
   return minted;

@@ -2122,14 +2122,28 @@ export function AgreementRecipientReview({
           locked_at?: string;
           locked_by?: string;
           content_sha256?: string;
+          accepted_snapshot_id?: string;
+          accepted_snapshot_digest?: string;
         } | null;
         accepted_review_snapshot?: {
           agreement_id?: string;
+          snapshot_id?: string;
           locked_version_id?: string;
           corpus_sha256?: string;
           corpus_length?: number;
           corpus_plain?: string;
           status?: string;
+          participant_id?: string;
+        } | null;
+        review_revision?: {
+          agreement_id?: string;
+          snapshot_id?: string;
+          locked_version_id?: string;
+          corpus_sha256?: string;
+          corpus_length?: number;
+          corpus_plain?: string;
+          status?: string;
+          participant_id?: string;
         } | null;
       };
       let d = normalizeAgreementDraftFromApi(payload?.draft ?? null, {
@@ -2141,6 +2155,7 @@ export function AgreementRecipientReview({
       const authorityMeta = selectRecipientReviewAuthorityMeta({
         agreementId,
         signingLock: payload.signing_lock,
+        reviewRevision: payload.review_revision,
         acceptedReviewSnapshot: payload.accepted_review_snapshot,
       });
       const sl = payload.signing_lock;
@@ -2152,6 +2167,8 @@ export function AgreementRecipientReview({
             meta: authorityMeta,
             lockSha: sl?.content_sha256,
             snapSha: payload.accepted_review_snapshot?.corpus_sha256,
+            acceptedSnapshotId: sl?.accepted_snapshot_id,
+            acceptedSnapshotDigest: sl?.accepted_snapshot_digest,
           })
         ) {
           setDraft(null);
@@ -2186,7 +2203,9 @@ export function AgreementRecipientReview({
       }
       const rp = JSON.parse(rrBody) as { rendered_html?: unknown };
       const html = String(rp?.rendered_html || "");
-      const snapPlain = String(payload.accepted_review_snapshot?.corpus_plain || "").trim();
+      const snapPlain = String(
+        payload.accepted_review_snapshot?.corpus_plain || payload.review_revision?.corpus_plain || "",
+      ).trim();
       const reviewFirstCorpus = resolveReviewFirstDisplayCorpus(d, "reviewer");
       const effectiveHtml =
         entry.kind === "sign" && snapPlain
@@ -3422,6 +3441,8 @@ export function AgreementRecipientReview({
       instruction: preview.revisionText,
       proposer_id: proposerId,
       proposer_display_name: proposerDisplayNameForApi,
+      snapshot_id: reviewAuthorityMeta?.snapshotId || "",
+      expected_digest: reviewAuthorityMeta?.corpusSha256 || "",
       draft: {
         title: d.title,
         jurisdiction: d.jurisdiction,
@@ -3717,7 +3738,7 @@ export function AgreementRecipientReview({
   async function acceptCurrentDraft() {
     if (viewerLike) return;
     if (approving) return;
-    if (recipientApprovedInAudit) {
+    if (recipientApprovedInAudit || approvedAck) {
       setJourneyActionFeedback(
         resolveUserActionFeedback({
           actor: "recipient",
@@ -3793,6 +3814,8 @@ export function AgreementRecipientReview({
       const r = await recipientApproveCurrentApi(agreementId, {
         participant_id: partiesHaveIds ? pidForApprove : undefined,
         participant_display_name: partiesHaveIds ? proposerDisplayNameForApi : undefined,
+        snapshot_id: reviewAuthorityMeta?.snapshotId || "",
+        expected_digest: reviewAuthorityMeta?.corpusSha256 || "",
         recipientAccessToken,
       });
       if (!r.ok) {
@@ -3833,10 +3856,16 @@ export function AgreementRecipientReview({
         participantPid: pidForApprove || null,
         hasResponseDraft: Boolean(r.draft),
       });
-      await refresh();
-      recipientAcceptTransitionDiag("post_approve_refresh_dispatched", {
-        agreementId,
-      });
+      try {
+        await refresh();
+        recipientAcceptTransitionDiag("post_approve_refresh_dispatched", {
+          agreementId,
+        });
+      } catch {
+        recipientAcceptTransitionDiag("post_approve_refresh_failed", {
+          agreementId,
+        });
+      }
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : "Could not record approval.";
       setError(message);
@@ -4710,11 +4739,17 @@ export function AgreementRecipientReview({
         setCeremonyPhase("ready");
         return;
       }
+      const recordedPid = String(r.participant_id || "").trim();
+      if (participantPid && recordedPid && recordedPid !== participantPid) {
+        setCeremonyError(recipientCompletionUserMessage(200, "completion_confirmation_mismatch"));
+        setCeremonyPhase("ready");
+        return;
+      }
       if (
         !confirmDraftedCeremonyCompletion({
           agreementId,
-          participantId: participantPid,
-          lockedVersionId,
+          participantId: recordedPid || participantPid,
+          lockedVersionId: String(r.locked_version_id || lockedVersionId).trim(),
           response: r,
         })
       ) {
@@ -4857,6 +4892,9 @@ export function AgreementRecipientReview({
               <dl
                 className="grid gap-3 rounded-lg border border-slate-800 bg-slate-900/40 px-3 py-3 sm:grid-cols-3"
                 data-testid="recipient-review-authority-meta"
+                data-snapshot-id={reviewAuthorityMeta.snapshotId}
+                data-participant-id={reviewAuthorityMeta.participantId}
+                data-review-status={reviewAuthorityMeta.status}
                 data-locked-version-id={reviewAuthorityMeta.lockedVersionId}
                 data-corpus-length={String(reviewAuthorityMeta.corpusLength)}
                 data-corpus-sha256={reviewAuthorityMeta.corpusSha256}
@@ -4875,13 +4913,11 @@ export function AgreementRecipientReview({
                 </div>
               </dl>
             ) : null}
-            <div
-              className="rounded-xl border border-slate-700 bg-white p-6 text-slate-900 shadow-lg sm:p-8"
-              data-testid="recipient-document-shell"
-            >
+            <div className="rounded-xl border border-slate-700 bg-white p-6 text-slate-900 shadow-lg sm:p-8">
               <div className="text-xs font-semibold uppercase tracking-wide text-slate-600">Document</div>
               <div
                 className="prose mt-4 max-w-none text-[0.9375rem] leading-relaxed text-slate-900"
+                data-testid="recipient-document-shell"
                 dangerouslySetInnerHTML={{
                   __html: scrubAgreementHtml(lockedVer.rendered_html || "") || "<p>No preview yet.</p>",
                 }}
@@ -5670,6 +5706,9 @@ export function AgreementRecipientReview({
         <dl
           className="grid gap-3 px-1 py-1 text-left sm:grid-cols-3"
           data-testid="recipient-review-authority-meta"
+          data-snapshot-id={reviewAuthorityMeta.snapshotId}
+          data-participant-id={reviewAuthorityMeta.participantId}
+          data-review-status={reviewAuthorityMeta.status}
           data-locked-version-id={reviewAuthorityMeta.lockedVersionId}
           data-corpus-length={String(reviewAuthorityMeta.corpusLength)}
           data-corpus-sha256={reviewAuthorityMeta.corpusSha256}

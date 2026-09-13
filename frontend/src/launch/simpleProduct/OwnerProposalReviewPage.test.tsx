@@ -3,9 +3,11 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import type { AgreementDraft } from "../../agreement/agreementTypes";
 import * as agreementWorkspaceApi from "../../agreement/agreementWorkspaceApi";
+import { clearCachedAccessToken } from "../../auth/authAccessTokenCache";
 import { OwnerProposalReviewPage } from "./OwnerProposalReviewPage";
 
 const mockNavigate = vi.fn();
+const authState = { loading: false, session: { access_token: "test-token" }, user: { id: "u1" } };
 
 vi.mock("../LaunchNavContext", () => ({
   useLaunchNav: () => ({
@@ -14,6 +16,10 @@ vi.mock("../LaunchNavContext", () => ({
     hash: "",
     navigate: mockNavigate,
   }),
+}));
+
+vi.mock("../../auth/AuthProvider", () => ({
+  useAuth: () => authState,
 }));
 
 function draftWithOpenProposal(): AgreementDraft {
@@ -66,6 +72,44 @@ describe("OwnerProposalReviewPage", () => {
     cleanup();
     vi.restoreAllMocks();
     mockNavigate.mockClear();
+    authState.loading = false;
+    authState.session = { access_token: "test-token" };
+    clearCachedAccessToken();
+  });
+
+  it("fetches with a session token even while auth is still finalizing", async () => {
+    authState.loading = true;
+    authState.session = { access_token: "test-token" };
+    const fetchSpy = vi.spyOn(agreementWorkspaceApi, "fetchAgreementDraft").mockResolvedValue({
+      ok: false,
+      draft: null,
+      status: 401,
+      error: "http_401",
+    });
+
+    render(<OwnerProposalReviewPage agreementId="ag_rev" />);
+
+    await waitFor(() => {
+      expect(fetchSpy).toHaveBeenCalledTimes(1);
+      expect(screen.getByTestId("owner-proposal-review-load-error").getAttribute("data-error-code")).toBe(
+        "http_401",
+      );
+    });
+    expect(screen.getByText("Could not load this agreement.")).toBeTruthy();
+  });
+
+  it("does not fetch while auth is loading and no session token exists", async () => {
+    clearCachedAccessToken();
+    authState.loading = true;
+    authState.session = { access_token: "" };
+    const fetchSpy = vi.spyOn(agreementWorkspaceApi, "fetchAgreementDraft").mockResolvedValue({
+      ok: false,
+      draft: null,
+      error: "http_401",
+    });
+
+    render(<OwnerProposalReviewPage agreementId="ag_rev" />);
+    expect(fetchSpy).not.toHaveBeenCalled();
   });
 
   it("renders proposal diff and accept/decline actions", async () => {
@@ -133,6 +177,7 @@ describe("OwnerProposalReviewPage", () => {
 
     await waitFor(() => {
       expect(applySpy).toHaveBeenCalledWith("ag_rev", "prop-1");
+      expect(screen.getByTestId("owner-proposal-accept-success")).toBeTruthy();
     });
   });
 

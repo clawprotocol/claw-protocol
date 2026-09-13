@@ -408,6 +408,7 @@ export function buildCanonicalFinalPartyManifestFromIdentities(
 function blockHeadingForManifestParty(p: CanonicalFinalPartyEntry): string {
   const label = (p.roleLabel || "").toLowerCase();
   if (label.includes("analytics") && label.includes("provider")) return "ANALYTICS PROVIDER";
+  if (label === "consultant") return "CONSULTANT";
   if (p.role === "client" || label === "client") return "CLIENT";
   if (p.role === "service_provider" || (label.includes("service") && label.includes("provider"))) {
     return "SERVICE PROVIDER";

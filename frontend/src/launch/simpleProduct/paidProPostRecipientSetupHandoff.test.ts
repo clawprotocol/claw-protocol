@@ -1,7 +1,11 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { shouldSkipPaidProPrepareReviewLinkInterstitial } from "./paidProPostRecipientSetupHandoff";
+import {
+  resolveOwnerSigningPartyId,
+  shouldSkipPaidProPrepareReviewLinkInterstitial,
+} from "./paidProPostRecipientSetupHandoff";
+import type { AgreementDraft } from "../../agreement/agreementTypes";
 
 describe("paidProPostRecipientSetupHandoff", () => {
   it("exports send-flow diagnostics and VS01 bridge wiring", () => {
@@ -18,6 +22,9 @@ describe("paidProPostRecipientSetupHandoff", () => {
     expect(s).toContain("resolveReviewFirstMintPolicyGate");
     expect(s).toContain("postReviewSentServer");
     expect(s).toContain("maybePostReviewSentAfterReviewFirstHandoff");
+    expect(s).toContain("resolvePremiumSenderFirstSigningPath");
+    expect(s).toContain("lockAuthoritativeVersionAndMintSigningInvites");
+    expect(s).toContain("professional_sign");
     expect(s).not.toContain('path: "/app/done/');
     expect(s).not.toContain("/app/send/");
   });
@@ -52,6 +59,41 @@ describe("paidProPostRecipientSetupHandoff", () => {
     const sendIdx = block.indexOf("/app/send/");
     expect(handoffIdx).toBeGreaterThanOrEqual(0);
     expect(sendIdx === -1 || sendIdx > handoffIdx).toBe(true);
+  });
+});
+
+describe("resolveOwnerSigningPartyId", () => {
+  const harbor = {
+    id: "party-harbor",
+    name: "Harbor Peak Analytics LLC",
+    role: "owner",
+    email: "maya.chen@harborpeak.test",
+  };
+  const ironvale = {
+    id: "party-ironvale",
+    name: "Ironvale Manufacturing Inc.",
+    role: "reviewer",
+    email: "jordan.hale@ironvale.test",
+  };
+
+  it("selects the owner role, not the first party with an id", () => {
+    const reversed = { parties: [ironvale, harbor] } as AgreementDraft;
+    expect(resolveOwnerSigningPartyId(reversed)).toBe("party-harbor");
+    const listed = { parties: [harbor, ironvale] } as AgreementDraft;
+    expect(resolveOwnerSigningPartyId(listed)).toBe("party-harbor");
+  });
+
+  it("does not fall back to array position when owner is missing or ambiguous", () => {
+    expect(resolveOwnerSigningPartyId({ parties: [ironvale] } as AgreementDraft)).toBeNull();
+    expect(
+      resolveOwnerSigningPartyId({
+        parties: [
+          { ...harbor, role: "owner" },
+          { ...ironvale, id: "party-other", role: "owner" },
+        ],
+      } as AgreementDraft),
+    ).toBeNull();
+    expect(resolveOwnerSigningPartyId({ parties: [{ ...harbor, id: "" }] } as AgreementDraft)).toBeNull();
   });
 });
 

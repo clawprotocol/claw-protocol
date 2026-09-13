@@ -597,7 +597,7 @@ export function canonicalPartyRecordsFromSignerIdentities(
       });
       return {
         fullLegalName,
-        roleLabel: id.blockHeading?.trim() || roleLabelForIndex(index),
+        roleLabel: roleLabelForIndex(index, id.blockHeading?.replace(/:$/, "").trim()),
         displayAlias: definedShortNameFromLegalEntity(fullLegalName),
         signerName: id.representativeName?.trim() || null,
         signerTitle: id.title?.trim() || null,

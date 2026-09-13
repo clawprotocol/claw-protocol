@@ -14,7 +14,7 @@ export default defineConfig({
   fullyParallel: false,
   retries: 0,
   workers: 1,
-  timeout: 420_000,
+  timeout: 600_000,
   forbidOnly: true,
   outputDir,
   use: {

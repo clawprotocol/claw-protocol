@@ -36,7 +36,7 @@ describe("recipient signing locked version", () => {
     expect(next.versions[0]?.rendered_html).toBe("<p>frozen</p>");
   });
 
-  it("fails closed on missing meta, version mismatch, or hash mismatch", () => {
+  it("fails closed on missing meta, version mismatch, or snapshot-digest disagreement", () => {
     expect(
       signPaperAuthorityClosed({
         tokenLockedVersionId: "lv-1",
@@ -46,23 +46,102 @@ describe("recipient signing locked version", () => {
     expect(
       signPaperAuthorityClosed({
         tokenLockedVersionId: "lv-1",
-        meta: { lockedVersionId: "lv-other", corpusSha256: SHA_A, corpusLength: 10 },
+        meta: { snapshotId: "crs-1", lockedVersionId: "lv-other", corpusSha256: SHA_A, corpusLength: 10, participantId: "p1", status: "accepted" },
       }),
     ).toBe(true);
     expect(
       signPaperAuthorityClosed({
         tokenLockedVersionId: "lv-1",
-        meta: { lockedVersionId: "lv-1", corpusSha256: SHA_A, corpusLength: 10 },
-        lockSha: SHA_A,
+        meta: { snapshotId: "crs-1", lockedVersionId: "lv-1", corpusSha256: SHA_A, corpusLength: 10, participantId: "p1", status: "accepted" },
         snapSha: SHA_B,
       }),
     ).toBe(true);
     expect(
       signPaperAuthorityClosed({
         tokenLockedVersionId: "lv-1",
-        meta: { lockedVersionId: "lv-1", corpusSha256: SHA_A, corpusLength: 10 },
+        meta: { snapshotId: "crs-1", lockedVersionId: "lv-1", corpusSha256: SHA_A, corpusLength: 10, participantId: "p1", status: "accepted" },
         lockSha: SHA_A,
         snapSha: SHA_A,
+        acceptedSnapshotId: "crs-1",
+        acceptedSnapshotDigest: SHA_A,
+      }),
+    ).toBe(false);
+  });
+
+  it("fails closed on incomplete lock snapshot binding, and keeps pre-cutover locks open", () => {
+    const meta = {
+      snapshotId: "crs-1",
+      lockedVersionId: "lv-1",
+      corpusSha256: SHA_A,
+      corpusLength: 10,
+      participantId: "p1",
+      status: "accepted",
+    };
+    expect(
+      signPaperAuthorityClosed({
+        tokenLockedVersionId: "lv-1",
+        meta,
+        snapSha: SHA_A,
+        acceptedSnapshotId: "crs-1",
+      }),
+    ).toBe(true);
+    expect(
+      signPaperAuthorityClosed({
+        tokenLockedVersionId: "lv-1",
+        meta,
+        lockSha: SHA_B,
+        snapSha: SHA_A,
+      }),
+    ).toBe(false);
+  });
+
+  it("fails closed when lock-bound snapshot id or digest disagrees with the rendered body", () => {
+    const meta = {
+      snapshotId: "crs-1",
+      lockedVersionId: "lv-1",
+      corpusSha256: SHA_A,
+      corpusLength: 10,
+      participantId: "p1",
+      status: "accepted",
+    };
+    expect(
+      signPaperAuthorityClosed({
+        tokenLockedVersionId: "lv-1",
+        meta,
+        snapSha: SHA_A,
+        acceptedSnapshotId: "crs-other",
+        acceptedSnapshotDigest: SHA_A,
+      }),
+    ).toBe(true);
+    expect(
+      signPaperAuthorityClosed({
+        tokenLockedVersionId: "lv-1",
+        meta,
+        snapSha: SHA_B,
+        acceptedSnapshotId: "crs-1",
+        acceptedSnapshotDigest: SHA_A,
+      }),
+    ).toBe(true);
+    expect(
+      signPaperAuthorityClosed({
+        tokenLockedVersionId: "lv-1",
+        meta,
+        snapSha: SHA_A,
+        acceptedSnapshotId: "crs-1",
+        acceptedSnapshotDigest: SHA_A,
+      }),
+    ).toBe(false);
+  });
+
+  it("keeps a matching lock version open when lock and review-snapshot use different encodings", () => {
+    expect(
+      signPaperAuthorityClosed({
+        tokenLockedVersionId: "lv-1",
+        meta: { snapshotId: "crs-1", lockedVersionId: "lv-1", corpusSha256: SHA_A, corpusLength: 10, participantId: "p1", status: "accepted" },
+        lockSha: SHA_B,
+        snapSha: SHA_A,
+        acceptedSnapshotId: "crs-1",
+        acceptedSnapshotDigest: SHA_A,
       }),
     ).toBe(false);
   });

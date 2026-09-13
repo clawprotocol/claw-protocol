@@ -10,6 +10,11 @@ import {
 import {
   canonicalPartyRecordsFromSignerIdentities,
 } from "./canonicalPartyIdentityResolver";
+import { overlayCorpusDeclaredRoleLabels } from "./paidProAcceptedCorpusPartyRoles";
+import {
+  corpusDeclaresConsultantClientOpening,
+  restoreDeclaredConsultantClientPaper,
+} from "./paidProDeclaredConsultantClientPaper";
 import { ensurePaidProServicesAgreementOpening } from "./paidProOpeningRecitalGuard";
 import { repairDuplicateAgreementOpening } from "./canonicalPartyIdentityResolver";
 import { repairMalformedPaidProAgreementRecital } from "./paidProAgreementRecitalRepair";
@@ -143,6 +148,15 @@ function normLegalNames(
   return authorityPartiesToCanonicalPartyIdentities(parties, roleContext)
     .map((id) => id.partyDisplayName.trim())
     .filter((n) => n.length >= 2);
+}
+
+function roleLabelFromExecutionHeading(heading: string | undefined, index: number): string {
+  const h = (heading || "").replace(/:$/, "").replace(/\s+/g, " ").trim();
+  if (/^consultant$/i.test(h)) return "Consultant";
+  if (/^client$/i.test(h)) return "Client";
+  if (/^service\s+provider$/i.test(h)) return "Service Provider";
+  if (h) return h;
+  return index === 0 ? "Client" : "Service Provider";
 }
 
 /** Remove a lone legal-entity line between the title and the opening recital. */
@@ -501,8 +515,7 @@ export function applyPaidProReviewRenderSanitizer(
       const identity = identities[index];
       return {
         fullLegalName,
-        roleLabel:
-          identity?.blockHeading?.trim() || (index === 0 ? "Client" : "Service Provider"),
+        roleLabel: roleLabelFromExecutionHeading(identity?.blockHeading, index),
         displayAlias: fullLegalName,
         signerName: party.signerName?.trim() || null,
         signerTitle: party.signerTitle?.trim() || null,
@@ -510,6 +523,10 @@ export function applyPaidProReviewRenderSanitizer(
       };
     })
     .filter((record): record is NonNullable<typeof record> => record != null);
+  const roleAwareRecords = overlayCorpusDeclaredRoleLabels(
+    partyRecords,
+    ctx?.acceptedCorpus || text,
+  );
 
   if (legalNames.length >= 2) {
     const stray = stripStrayStandalonePartyEntityLinesBeforeRecital(text, legalNames);
@@ -517,7 +534,7 @@ export function applyPaidProReviewRenderSanitizer(
       text = stray.text;
       repaired = true;
     }
-    const dupOpen = repairDuplicateAgreementOpening(text, partyRecords);
+    const dupOpen = repairDuplicateAgreementOpening(text, roleAwareRecords);
     if (dupOpen.repairs.length > 0) {
       text = dupOpen.text;
       repaired = true;
@@ -609,8 +626,13 @@ export function applyPaidProReviewRenderSanitizer(
       repaired = true;
     }
   }
-  if (parties.length >= 2 && partyRecords.length >= 2) {
-    out = ensurePaidProServicesAgreementOpening(out, partyRecords, ctx?.intakeText ?? null).text;
+  const preserveDeclaredOpening = corpusDeclaresConsultantClientOpening(ctx?.acceptedCorpus || corpus || out);
+  if (!preserveDeclaredOpening && parties.length >= 2 && partyRecords.length >= 2) {
+    out = ensurePaidProServicesAgreementOpening(
+      out,
+      overlayCorpusDeclaredRoleLabels(partyRecords, ctx?.acceptedCorpus || out),
+      ctx?.intakeText ?? null,
+    ).text;
   }
   const execution = enforcePaidProSingleExecutionBlock(out, {
     authorityParties: parties,
@@ -668,16 +690,22 @@ export function applyPaidProReviewRenderSanitizer(
 
   // Seal the opening after every lower-authority formatter/hydrator has run. No later display
   // transform may reintroduce a stale, shortened, or scope-contaminated legal party label.
-  if (parties.length >= 2 && partyRecords.length >= 2) {
+  if (!preserveDeclaredOpening && parties.length >= 2 && partyRecords.length >= 2) {
     const sealedOpening = ensurePaidProServicesAgreementOpening(
       out,
-      partyRecords,
+      overlayCorpusDeclaredRoleLabels(partyRecords, ctx?.acceptedCorpus || out),
       ctx?.intakeText ?? null,
     );
     if (sealedOpening.text !== out) {
       out = sealedOpening.text;
       repaired = true;
     }
+  }
+
+  const restored = restoreDeclaredConsultantClientPaper(out, ctx?.acceptedCorpus || corpus);
+  if (restored !== out) {
+    out = restored;
+    repaired = true;
   }
 
   return {

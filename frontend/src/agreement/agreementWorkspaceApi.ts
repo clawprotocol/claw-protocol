@@ -71,7 +71,12 @@ export type WorkspaceIndexResult = {
 export async function fetchWorkspaceIndex(): Promise<WorkspaceIndexResult> {
   const url = apiUrl("/api/agreements/workspace-index");
   try {
-    const res = await fetch(url, { headers: clawAgreementHeaders() });
+    const token = (await refreshCachedAccessToken()) || getCachedAccessToken();
+    const headers = {
+      ...(clawAgreementHeaders() as Record<string, string>),
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    };
+    const res = await fetch(url, { headers });
     if (!res.ok) {
       logClawClientWarning("agreements.workspace-index", { status: res.status, url });
       return {
@@ -253,28 +258,81 @@ export async function postDraftFromPriorAgreement(sourceAgreementId: string): Pr
   }
 }
 
+export type FetchAgreementDraftError =
+  | "missing_id"
+  | "http_401"
+  | "http_403"
+  | "http_404"
+  | "http_409"
+  | "http_5xx"
+  | "http_other"
+  | "network"
+  | "normalize_failed";
+
+export type FetchAgreementDraftResult = {
+  ok: boolean;
+  draft: AgreementDraft | null;
+  status?: number;
+  error?: FetchAgreementDraftError;
+};
+
+export function classifyFetchAgreementDraftFailure(args: {
+  missingId?: boolean;
+  network?: boolean;
+  normalizeFailed?: boolean;
+  status?: number;
+}): FetchAgreementDraftError {
+  if (args.missingId) return "missing_id";
+  if (args.network) return "network";
+  if (args.normalizeFailed) return "normalize_failed";
+  const status = args.status ?? 0;
+  if (status === 401) return "http_401";
+  if (status === 403) return "http_403";
+  if (status === 404) return "http_404";
+  if (status === 409) return "http_409";
+  if (status >= 500) return "http_5xx";
+  if (status > 0) return "http_other";
+  return "network";
+}
+
 export async function fetchAgreementDraft(
   agreementId: string,
   opts?: { partyNameContext?: string },
-): Promise<{
-  ok: boolean;
-  draft: AgreementDraft | null;
-}> {
+): Promise<FetchAgreementDraftResult> {
   const id = String(agreementId || "").trim();
-  if (!id) return { ok: false, draft: null };
+  if (!id) return { ok: false, draft: null, error: classifyFetchAgreementDraftFailure({ missingId: true }) };
   try {
+    const token = (await refreshCachedAccessToken()) || getCachedAccessToken();
     const res = await fetch(`${base()}/api/agreements/${encodeURIComponent(id)}`, {
-      headers: clawAgreementHeaders(),
+      headers: {
+        ...(clawAgreementHeaders() as Record<string, string>),
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
     });
-    if (!res.ok) return { ok: false, draft: null };
+    if (!res.ok) {
+      return {
+        ok: false,
+        draft: null,
+        status: res.status,
+        error: classifyFetchAgreementDraftFailure({ status: res.status }),
+      };
+    }
     const j = (await res.json()) as { draft?: unknown };
     const draft = normalizeAgreementDraftFromApi(j?.draft ?? null, {
       fallbackAgreementId: id,
       partyNameContext: opts?.partyNameContext,
     });
-    return { ok: draft != null, draft };
+    if (!draft) {
+      return {
+        ok: false,
+        draft: null,
+        status: res.status,
+        error: classifyFetchAgreementDraftFailure({ normalizeFailed: true, status: res.status }),
+      };
+    }
+    return { ok: true, draft, status: res.status };
   } catch {
-    return { ok: false, draft: null };
+    return { ok: false, draft: null, error: classifyFetchAgreementDraftFailure({ network: true }) };
   }
 }
 
@@ -286,26 +344,48 @@ export async function fetchAgreementDraftWithSigningLock(
   ok: boolean;
   draft: AgreementDraft | null;
   lockedVersionId: string | null;
+  signingLock?: {
+    locked_version_id?: string;
+    content_sha256?: string;
+    accepted_snapshot_id?: string;
+    accepted_snapshot_digest?: string;
+    accepted_snapshot_length?: number;
+  } | null;
 }> {
   const id = String(agreementId || "").trim();
-  if (!id) return { ok: false, draft: null, lockedVersionId: null };
+  if (!id) return { ok: false, draft: null, lockedVersionId: null, signingLock: null };
   try {
+    const token = (await refreshCachedAccessToken()) || getCachedAccessToken();
     const res = await fetch(`${base()}/api/agreements/${encodeURIComponent(id)}`, {
-      headers: clawAgreementHeaders(),
+      headers: {
+        ...(clawAgreementHeaders() as Record<string, string>),
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      },
     });
-    if (!res.ok) return { ok: false, draft: null, lockedVersionId: null };
+    if (!res.ok) return { ok: false, draft: null, lockedVersionId: null, signingLock: null };
     const j = (await res.json()) as {
       draft?: unknown;
-      signing_lock?: { locked_version_id?: string } | null;
+      signing_lock?: {
+        locked_version_id?: string;
+        content_sha256?: string;
+        accepted_snapshot_id?: string;
+        accepted_snapshot_digest?: string;
+        accepted_snapshot_length?: number;
+      } | null;
     };
     const draft = normalizeAgreementDraftFromApi(j?.draft ?? null, {
       fallbackAgreementId: id,
       partyNameContext: opts?.partyNameContext,
     });
     const lv = String(j?.signing_lock?.locked_version_id || "").trim();
-    return { ok: draft != null, draft, lockedVersionId: lv || null };
+    return {
+      ok: draft != null,
+      draft,
+      lockedVersionId: lv || null,
+      signingLock: j?.signing_lock || null,
+    };
   } catch {
-    return { ok: false, draft: null, lockedVersionId: null };
+    return { ok: false, draft: null, lockedVersionId: null, signingLock: null };
   }
 }
 
@@ -366,6 +446,8 @@ export type RecipientProposalSubmitBody = {
   instruction: string;
   proposer_id: string;
   proposer_display_name?: string;
+  snapshot_id?: string;
+  expected_digest?: string;
   draft: {
     title: string;
     jurisdiction: string;
@@ -476,9 +558,17 @@ export async function rejectRecipientProposalApi(
   proposalId: string
 ): Promise<{ ok: boolean; draft?: unknown; error?: string }> {
   try {
+    const token = (await refreshCachedAccessToken()) || getCachedAccessToken();
     const res = await fetch(
       `${base()}/api/agreements/${encodeURIComponent(agreementId)}/recipient-proposal/${encodeURIComponent(proposalId)}/reject`,
-      { method: "POST", headers: clawAgreementHeaders({ "Content-Type": "application/json" }), body: "{}" }
+      {
+        method: "POST",
+        headers: {
+          ...(clawAgreementHeaders({ "Content-Type": "application/json" }) as Record<string, string>),
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: "{}",
+      }
     );
     const j = (await res.json().catch(() => ({}))) as { draft?: unknown; detail?: string };
     if (res.ok) return { ok: true, draft: j.draft };
@@ -493,9 +583,17 @@ export async function applyRecipientProposalApi(
   proposalId: string
 ): Promise<{ ok: boolean; draft?: unknown; error?: string }> {
   try {
+    const token = (await refreshCachedAccessToken()) || getCachedAccessToken();
     const res = await fetch(
       `${base()}/api/agreements/${encodeURIComponent(agreementId)}/recipient-proposal/${encodeURIComponent(proposalId)}/apply`,
-      { method: "POST", headers: clawAgreementHeaders({ "Content-Type": "application/json" }), body: "{}" }
+      {
+        method: "POST",
+        headers: {
+          ...(clawAgreementHeaders({ "Content-Type": "application/json" }) as Record<string, string>),
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: "{}",
+      }
     );
     const j = (await res.json().catch(() => ({}))) as { draft?: unknown; detail?: string };
     if (res.ok) return { ok: true, draft: j.draft };
@@ -511,6 +609,8 @@ export async function recipientApproveCurrentApi(
     message?: string;
     participant_id?: string;
     participant_display_name?: string;
+    snapshot_id?: string;
+    expected_digest?: string;
     recipientAccessToken?: string | null;
   }
 ): Promise<{ ok: boolean; error?: string; draft?: unknown }> {
@@ -525,6 +625,8 @@ export async function recipientApproveCurrentApi(
         message: opts?.message || "",
         participant_id: opts?.participant_id || "",
         participant_display_name: opts?.participant_display_name || "",
+        snapshot_id: opts?.snapshot_id || "",
+        expected_digest: opts?.expected_digest || "",
       }),
     });
     if (res.ok) {
@@ -535,8 +637,8 @@ export async function recipientApproveCurrentApi(
         return { ok: true };
       }
     }
-    const j = (await res.json().catch(() => ({}))) as { detail?: string };
-    return { ok: false, error: j.detail || `error_${res.status}` };
+    const parsed = parseRecipientProposalApiError(res.status, await res.json().catch(() => ({})));
+    return { ok: false, error: parsed.error };
   } catch {
     return { ok: false, error: "network" };
   }

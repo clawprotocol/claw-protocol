@@ -59,6 +59,32 @@ function fallbackRoleForPartyIndex(idx: number): string {
 }
 
 /**
+ * Preserve accepted snapshot corpus bytes exactly. Placeholder scrub would
+ * change the digest and make lock-bound owner signed-view fail closed.
+ */
+export function normalizeAcceptedReviewSnapshotFromApi(
+  raw: unknown,
+): AgreementDraft["accepted_review_snapshot_v1"] | undefined {
+  if (raw == null || typeof raw !== "object") return undefined;
+  const rec = raw as Record<string, unknown>;
+  if (String(rec.status || "").toLowerCase() !== "accepted") return undefined;
+  const corpusPlain = typeof rec.corpusPlain === "string" ? rec.corpusPlain : "";
+  const snapshotId = coerceStr(rec.snapshotId);
+  const corpusSha256 = coerceStr(rec.corpusSha256).toLowerCase();
+  const corpusLength = Number(rec.corpusLength || 0) || corpusPlain.length;
+  if (!snapshotId || !/^[0-9a-f]{64}$/.test(corpusSha256) || corpusPlain.length < 80) return undefined;
+  if (corpusLength && corpusLength !== corpusPlain.length) return undefined;
+  return {
+    status: "accepted",
+    snapshotId,
+    corpusSha256,
+    corpusLength,
+    corpusPlain,
+    acceptedAt: coerceStr(rec.acceptedAt) || undefined,
+  };
+}
+
+/**
  * Preserve only the server fully-executed snapshot authority needed by
  * owner view-signed retrieval. Does not copy portable/packet chrome and
  * does not rewrite corpus text.
@@ -185,6 +211,7 @@ export function normalizeAgreementDraftFromApi(
   const dueRaw = coerceNullStr(r.due_date);
   const effectiveRaw = coerceNullStr(r.effective_date);
   const vs01SigningPacket = normalizeVs01SigningPacketFromApi(r.vs01_signing_packet_v1);
+  const acceptedReviewSnapshot = normalizeAcceptedReviewSnapshotFromApi(r.accepted_review_snapshot_v1);
 
   return {
     id,
@@ -248,6 +275,7 @@ export function normalizeAgreementDraftFromApi(
         ? (r.pro_redline_v1 as Record<string, unknown>)
         : null,
     ...(vs01SigningPacket ? { vs01_signing_packet_v1: vs01SigningPacket } : {}),
+    ...(acceptedReviewSnapshot ? { accepted_review_snapshot_v1: acceptedReviewSnapshot } : {}),
   };
 }
 

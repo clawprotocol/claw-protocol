@@ -117,6 +117,9 @@ export const PAID_PRO_SIGNER_DETAILS_INCOMPLETE_CTA = "Complete signer details";
 /** Green CTA on inline signer setup — finalizes metadata and opens review/decision, not e-sign placement. */
 export const PAID_PRO_SIGNER_DETAILS_COMPLETE_CTA =
   "Finalize signer details and continue to review decision";
+/** Green CTA after the owner already chose signing — confirmation continues into the signing track. */
+export const PAID_PRO_SIGNER_DETAILS_COMPLETE_SIGNING_CTA =
+  "Finalize signer details and continue to signing";
 /** Explicit signing decision on the review/decision screen (sets signaturePreparationRequested). */
 export const PAID_PRO_PREPARE_ESIGN_DECISION_CTA = "Prepare for signing";
 

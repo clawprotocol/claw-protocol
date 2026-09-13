@@ -68,6 +68,41 @@ const PARTY_N_SIGNER_IS_RE =
 const FOR_ROLE_SIGNER_RE =
   /\bFor\s+(Client|Service\s+Provider|Vendor|Contractor|Consultant|Party\s+\d+)\s*:\s*([^.\n]+?)(?:\.|$)/gi;
 
+/** "Consultant signer Maya Chen, maya.chen@harborpeak.test" */
+const ROLE_SIGNER_NAME_EMAIL_RE =
+  /\b(Consultant|Client|Service\s+Provider|Provider|Vendor|Contractor)\s+signer\s+([A-Z][A-Za-z'.-]+(?:\s+[A-Z][A-Za-z'.-]+)+)\s*,\s*([A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,})/gi;
+
+const ROLE_PAREN_ENTITY_RE =
+  /([A-Z][A-Za-z0-9&'.-]+(?:\s+[A-Z][A-Za-z0-9&'.-]+)*\s+(?:LLC|L\.L\.C\.|Inc\.?|Incorporated|Corp\.?|Corporation|Ltd\.?|Limited))\s*\(\s*["']?(Consultant|Client|Service\s+Provider|Provider)["']?\s*\)/gi;
+
+function lastLegalEntityPhrase(raw: string): string {
+  const t = String(raw || "").trim();
+  const titled = t.match(
+    /([A-Z][A-Za-z0-9&'.-]+(?:\s+[A-Z][A-Za-z0-9&'.-]+)+\s+(?:LLC|L\.L\.C\.|Inc\.?|Incorporated|Corp\.?|Corporation|Ltd\.?|Limited))\s*$/,
+  );
+  return sanitizePartyLegalNameFromIntakeFragment((titled?.[1] || t).trim());
+}
+
+function roleEntitiesFromIntakeParentheticals(raw: string): Record<string, string> {
+  const map: Record<string, string> = {};
+  ROLE_PAREN_ENTITY_RE.lastIndex = 0;
+  for (const m of raw.matchAll(ROLE_PAREN_ENTITY_RE)) {
+    const entity = lastLegalEntityPhrase((m[1] ?? "").trim());
+    const role = (m[2] ?? "").replace(/\s+/g, " ").trim().toLowerCase();
+    if (entity && role) map[role] = entity;
+  }
+  return map;
+}
+
+function legalEntityForDeclaredRole(role: string, roleEntities: Record<string, string>): string {
+  const key = role.replace(/\s+/g, " ").trim().toLowerCase();
+  if (roleEntities[key]) return roleEntities[key];
+  if (key === "provider") return roleEntities["service provider"] || "";
+  if (key === "service provider") return roleEntities.provider || roleEntities.consultant || "";
+  if (key === "consultant") return roleEntities["service provider"] || roleEntities.provider || "";
+  return "";
+}
+
 /** "Signed by Joe Doe, CEO" — slot order only. */
 const SIGNED_BY_RE = /\bSigned\s+by\s+([^,\n]+?)(?:,\s*([^.\n]+?))?(?:\.|$)/gi;
 
@@ -399,6 +434,7 @@ export function extractCanonicalIntakeSignerMetadata(
     });
   }
 
+  const roleEntities = roleEntitiesFromIntakeParentheticals(raw);
   FOR_ROLE_SIGNER_RE.lastIndex = 0;
   for (const m of raw.matchAll(FOR_ROLE_SIGNER_RE)) {
     const role = (m[1] ?? "").trim();
@@ -412,8 +448,29 @@ export function extractCanonicalIntakeSignerMetadata(
       if (partyM?.[1]) partyNumber = Number.parseInt(partyM[1], 10);
     }
     pushExtracted(out, {
-      legalEntity: "",
+      legalEntity: legalEntityForDeclaredRole(role, roleEntities),
       ...parsed,
+      partyNumber,
+      source: "for_role_signer",
+    });
+  }
+
+  ROLE_SIGNER_NAME_EMAIL_RE.lastIndex = 0;
+  for (const m of raw.matchAll(ROLE_SIGNER_NAME_EMAIL_RE)) {
+    const role = (m[1] ?? "").trim();
+    const legalEntity = legalEntityForDeclaredRole(role, roleEntities);
+    const roleLower = role.toLowerCase();
+    let partyNumber: number | undefined;
+    if (!legalEntity) {
+      if (roleLower === "client") partyNumber = 1;
+      else if (roleLower.includes("service") && roleLower.includes("provider")) partyNumber = 2;
+    }
+    pushExtracted(out, {
+      legalEntity,
+      signerName: cleanSignerField(m[2], "signerName"),
+      signerTitle: "",
+      signerEmail: cleanEmail(m[3]),
+      partyAddress: "",
       partyNumber,
       source: "for_role_signer",
     });

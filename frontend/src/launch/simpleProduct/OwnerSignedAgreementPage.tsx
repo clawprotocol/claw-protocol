@@ -46,7 +46,7 @@ export function OwnerSignedAgreementPage(props: Props) {
   const [verify, setVerify] = useState<PublicVerifyPayload | null>(null);
   const [draft, setDraft] = useState<AgreementDraft | null>(null);
   const [corpusSource, setCorpusSource] = useState<
-    "fully_executed_snapshot" | "reconstructed" | "portable_packet" | "local_portable" | null
+    "fully_executed_snapshot" | "accepted_snapshot" | "reconstructed" | "portable_packet" | "local_portable" | null
   >(null);
   const [pdfBusy, setPdfBusy] = useState(false);
   const [pdfError, setPdfError] = useState<string | null>(null);
@@ -108,6 +108,7 @@ export function OwnerSignedAgreementPage(props: Props) {
         data-agreement-id={agreementId}
         data-corpus-source={corpusSource ?? undefined}
         data-completed-view-surface={viewContext.surface}
+        data-completed-document-view="true"
       >
         <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
           <span
@@ -145,8 +146,12 @@ export function OwnerSignedAgreementPage(props: Props) {
           <div
             className="rounded-xl border border-amber-800/40 bg-amber-950/25 px-4 py-3 text-sm text-amber-100"
             role="alert"
+            data-testid="owner-signed-agreement-unavailable"
           >
             <p>{loadError}</p>
+            <p className="mt-2 text-xs text-amber-100/80">
+              The completed document is unavailable until locked snapshot authority can be recovered.
+            </p>
           </div>
         ) : null}
 

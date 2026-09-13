@@ -17,6 +17,7 @@ import { isDeterministicQuadPartyProFallbackSurface } from "./agreementDocumentS
 import { tracePaidProAcceptancePipelineStage } from "./paidProAcceptancePipelineTrace";
 import { tracePaidProQaPassWithText } from "./paidProQaPerfTrace";
 import { detectPaidProMalformedServicesOpening } from "./paidProOpeningRecitalGuard";
+import { overlayCorpusDeclaredRoleLabels } from "./paidProAcceptedCorpusPartyRoles";
 import { repairOpeningRecitalRoleLabelsFromManifest } from "./paidProOpeningRoleLabelConsistency";
 import { applyMutualConsultingProfessionalQualityFloor } from "./paidProMutualConsultingQualityFloor";
 import { applyPaidProDomainScopeGuard } from "./paidProDomainScopeGuard";
@@ -532,12 +533,14 @@ function preparePaidProServerDocumentForAcceptanceCore(
     draft: draft ?? null,
     intakeText,
   });
-  const records =
+  const records = overlayCorpusDeclaredRoleLabels(
     manifestRecords.length >= 3
       ? manifestRecords
       : resolved.length >= 2
         ? resolved
-        : manifestRecords;
+        : manifestRecords,
+    out,
+  );
   const expectedParties = Math.max(
     records.length,
     draftPartyNames.length,

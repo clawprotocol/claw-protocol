@@ -37,11 +37,11 @@ export type AcceptedCorpusPartyRole = "client" | "service_provider";
 export type AcceptedCorpusRoleAssignment = {
   legalName: string;
   role: AcceptedCorpusPartyRole;
-  roleLabel: "Client" | "Service Provider";
+  roleLabel: "Client" | "Service Provider" | "Consultant";
 };
 
 const ROLE_PAREN_RE =
-  /([A-Za-z0-9][^("\n]{2,140}?)\s*\(\s*["']?(Client|Service\s+Provider)["']?\s*\)/gi;
+  /([A-Za-z0-9][^("\n]{2,140}?)\s*\(\s*["']?(Client|Service\s+Provider|Consultant|Contractor|Vendor|Provider|Customer)["']?\s*\)/gi;
 
 /** Entity line in execution tail: `Blue Canyon Analytics LLC (Service Provider)`. */
 const EXECUTION_ENTITY_PAREN_ROLE_RE =
@@ -53,6 +53,13 @@ const BETWEEN_CLIENT_PROVIDER_RE =
 /** Provider-first openings: LawDog ("Service Provider") and Acme ("Client"). */
 const BETWEEN_PROVIDER_CLIENT_RE =
   /(?:\bbetween|\bby\s+and\s+between)\s+(.+?)\s*\(\s*["']?Service\s+Provider["']?\s*\)\s+and\s+(.+?)\s*\(\s*["']?Client["']?\s*\)/i;
+
+/** Consultant/Client openings must not be read as missing roles. */
+const BETWEEN_CONSULTANT_CLIENT_RE =
+  /(?:\bbetween|\bby\s+and\s+between)\s+(.+?)\s*\(\s*["']?Consultant["']?\s*\)\s+and\s+(.+?)\s*\(\s*["']?Client["']?\s*\)/i;
+
+const BETWEEN_CLIENT_CONSULTANT_RE =
+  /(?:\bbetween|\bby\s+and\s+between)\s+(.+?)\s*\(\s*["']?Client["']?\s*\)\s+and\s+(.+?)\s*\(\s*["']?Consultant["']?\s*\)/i;
 
 function normalizedKey(name: string): string {
   return name
@@ -80,6 +87,49 @@ export function resolvePaidProPartyRolesFromAcceptedCorpus(
   const head = witnessIdx >= 0 ? body.slice(0, witnessIdx) : body.slice(0, 12_000);
   const seen = new Set<string>();
   const out: AcceptedCorpusRoleAssignment[] = [];
+
+  const betweenConsultantFirst = head.match(BETWEEN_CONSULTANT_CLIENT_RE);
+  const betweenClientConsultant =
+    !betweenConsultantFirst ? head.match(BETWEEN_CLIENT_CONSULTANT_RE) : null;
+  if (betweenConsultantFirst?.[1] && betweenConsultantFirst?.[2]) {
+    const consultantLegal = acceptCorpusRoleLegalName(betweenConsultantFirst[1]);
+    const clientLegal = acceptCorpusRoleLegalName(betweenConsultantFirst[2]);
+    if (clientLegal) {
+      seen.add(normalizedKey(clientLegal));
+      out.push({
+        legalName: clientLegal,
+        role: "client",
+        roleLabel: "Client",
+      });
+    }
+    if (consultantLegal) {
+      seen.add(normalizedKey(consultantLegal));
+      out.push({
+        legalName: consultantLegal,
+        role: "service_provider",
+        roleLabel: "Consultant",
+      });
+    }
+  } else if (betweenClientConsultant?.[1] && betweenClientConsultant?.[2]) {
+    const clientLegal = acceptCorpusRoleLegalName(betweenClientConsultant[1]);
+    const consultantLegal = acceptCorpusRoleLegalName(betweenClientConsultant[2]);
+    if (clientLegal) {
+      seen.add(normalizedKey(clientLegal));
+      out.push({
+        legalName: clientLegal,
+        role: "client",
+        roleLabel: "Client",
+      });
+    }
+    if (consultantLegal) {
+      seen.add(normalizedKey(consultantLegal));
+      out.push({
+        legalName: consultantLegal,
+        role: "service_provider",
+        roleLabel: "Consultant",
+      });
+    }
+  }
 
   const betweenClientFirst = head.match(BETWEEN_CLIENT_PROVIDER_RE);
   const betweenProviderFirst =
@@ -132,14 +182,39 @@ export function resolvePaidProPartyRolesFromAcceptedCorpus(
     if (!key || seen.has(key)) continue;
     seen.add(key);
     const role: AcceptedCorpusPartyRole =
-      roleRaw === "client" ? "client" : "service_provider";
+      roleRaw === "client" || roleRaw === "customer" ? "client" : "service_provider";
+    const roleLabel: AcceptedCorpusRoleAssignment["roleLabel"] =
+      roleRaw === "consultant"
+        ? "Consultant"
+        : role === "client"
+          ? "Client"
+          : "Service Provider";
     out.push({
       legalName: legal,
       role,
-      roleLabel: role === "client" ? "Client" : "Service Provider",
+      roleLabel,
     });
   }
   return out;
+}
+
+/** Prefer opening-declared Consultant/Client bindings over index-default Client/SP slots. */
+export function overlayCorpusDeclaredRoleLabels<T extends { fullLegalName: string; roleLabel: string }>(
+  records: readonly T[],
+  corpus: string,
+): T[] {
+  const declared = resolvePaidProPartyRolesFromAcceptedCorpus(corpus);
+  if (declared.length < 2) return [...records];
+  const declaredHasNonDefaultRole = declared.some(
+    (row) =>
+      !/^client$/i.test(row.roleLabel) &&
+      !/^(?:service\s+provider|provider)$/i.test(row.roleLabel),
+  );
+  if (!declaredHasNonDefaultRole) return [...records];
+  return records.map((rec) => {
+    const hit = declared.find((row) => partyLegalNamesMatch(row.legalName, rec.fullLegalName));
+    return hit ? { ...rec, roleLabel: hit.roleLabel } : rec;
+  });
 }
 
 export function resolveAcceptedCorpusRoleLabelForLegalName(
@@ -157,6 +232,7 @@ export function resolveAcceptedCorpusRoleLabelForLegalName(
 function roleLabelToBlockHeading(roleLabel: string): string {
   const r = roleLabel.trim().toLowerCase();
   if (r === "client") return "CLIENT";
+  if (r === "consultant") return "CONSULTANT";
   if (r.includes("service") && r.includes("provider")) return "SERVICE PROVIDER";
   return roleLabel.trim().toUpperCase();
 }
@@ -208,9 +284,9 @@ export function detectExecutionBlockRoleInversion(corpus: string): boolean {
   const tail = corpus.slice(witnessIdx);
 
   const clientBlock = tail.match(/^\s*CLIENT\s*:\s*\n([^\n]+)/im);
-  const providerBlock = tail.match(/^\s*SERVICE\s+PROVIDER\s*:\s*\n([^\n]+)/im);
+  const providerBlock = tail.match(/^\s*(?:SERVICE\s+PROVIDER|CONSULTANT)\s*:\s*\n([^\n]+)/im);
   const clientInline = tail.match(/^\s*CLIENT\s*:\s*([^\n]+)/im);
-  const providerInline = tail.match(/^\s*SERVICE\s+PROVIDER\s*:\s*([^\n]+)/im);
+  const providerInline = tail.match(/^\s*(?:SERVICE\s+PROVIDER|CONSULTANT)\s*:\s*([^\n]+)/im);
 
   const underClient = (clientBlock?.[1] ?? clientInline?.[1] ?? "").trim();
   const underProvider = (providerBlock?.[1] ?? providerInline?.[1] ?? "").trim();

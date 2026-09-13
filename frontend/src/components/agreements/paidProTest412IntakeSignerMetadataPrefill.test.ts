@@ -219,4 +219,19 @@ describe("TEST412_INTAKE_SIGNER_METADATA_PREFILL", () => {
     expect(aligned.filter((s) => s.signerName.trim()).length).toBe(4);
     expect(aligned.filter((s) => s.signerEmail.trim()).length).toBe(4);
   });
+
+  it("binds Consultant/Client signer emails to the matching parenthetical entities", () => {
+    const intake = [
+      "Draft a consulting services agreement between Harbor Peak Analytics LLC (Consultant) and Ironvale Manufacturing Inc. (Client).",
+      "Consultant signer Maya Chen, maya.chen@harborpeak.test. Client signer Jordan Hale, jordan.hale@ironvale.test.",
+    ].join(" ");
+    const aligned = alignIntakeSignerMetadataToLegalEntities(intake, [
+      "Harbor Peak Analytics LLC",
+      "Ironvale Manufacturing Inc.",
+    ]);
+    expect(aligned[0]?.signerName).toBe("Maya Chen");
+    expect(aligned[0]?.signerEmail).toBe("maya.chen@harborpeak.test");
+    expect(aligned[1]?.signerName).toBe("Jordan Hale");
+    expect(aligned[1]?.signerEmail).toBe("jordan.hale@ironvale.test");
+  });
 });

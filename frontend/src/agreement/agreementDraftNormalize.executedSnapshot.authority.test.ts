@@ -92,6 +92,29 @@ describe("normalizeAgreementDraftFromApi — executed snapshot authority", () =>
     expect(resolved?.text).toBe(CORPUS);
   });
 
+  it("preserves accepted review snapshot corpus without placeholder rewrite", () => {
+    const accepted = `${CORPUS}\n\nDo not rewrite [ORG_1] in accepted paper.`;
+    const digest = createHash("sha256").update(accepted, "utf8").digest("hex");
+    const raw = {
+      id: "ag_accepted_lock",
+      title: "Consulting Services Agreement",
+      jurisdiction: "Delaware",
+      parties: [{ name: "Harbor Peak Analytics LLC", role: "owner" }],
+      accepted_review_snapshot_v1: {
+        status: "accepted",
+        snapshotId: "crs_locked",
+        corpusSha256: digest,
+        corpusLength: accepted.length,
+        corpusPlain: accepted,
+        acceptedAt: "2026-09-13T12:00:00Z",
+      },
+    };
+    const normalized = normalizeAgreementDraftFromApi(raw, { fallbackAgreementId: "ag_accepted_lock" });
+    expect(normalized?.accepted_review_snapshot_v1?.corpusPlain).toBe(accepted);
+    expect(normalized?.accepted_review_snapshot_v1?.corpusSha256).toBe(digest);
+    expect(normalized?.accepted_review_snapshot_v1?.snapshotId).toBe("crs_locked");
+  });
+
   it("normalizes an ordinary agreement without a signing packet", () => {
     const raw = {
       id: "ag_plain",

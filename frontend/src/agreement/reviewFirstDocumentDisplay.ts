@@ -6,6 +6,7 @@ import {
   repairExecutionBlockEntityHeadingLines,
 } from "../components/agreements/paidProExecutionBlockEntityHeading";
 import { polishProAgreementDisplayLayer } from "../components/agreements/polishProAgreementDisplayLayer";
+import { restoreDeclaredConsultantClientPaper } from "../components/agreements/paidProDeclaredConsultantClientPaper";
 import { isPaidProPostFinalizeHydratedCorpusLocked } from "../components/agreements/paidProSignerMetadataCommitPolicy";
 import { readConsumedPaidProSignerMetadataAuthority } from "../components/agreements/paidProSignerMetadataAuthority";
 import { repairDuplicatedEntityPunctuationInDisplay } from "./partyPlaceholderDisplay";
@@ -78,10 +79,13 @@ export function buildReviewFirstDocumentDisplayHtml(args: {
     args.draft &&
     isReviewTrackHydrationSurface(surface)
   ) {
-    corpus = applyReviewReadyMetadataBackfill(corpus, args.draft, {
-      surface,
-      selectedSource: args.selectedCorpusSource ?? "review_first_document_display",
-    });
+    corpus = restoreDeclaredConsultantClientPaper(
+      applyReviewReadyMetadataBackfill(corpus, args.draft, {
+        surface,
+        selectedSource: args.selectedCorpusSource ?? "review_first_document_display",
+      }),
+      inputCorpus,
+    );
   }
 
   const authorityParties = readConsumedPaidProSignerMetadataAuthority()?.parties;

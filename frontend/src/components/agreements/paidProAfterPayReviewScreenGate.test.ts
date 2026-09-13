@@ -466,7 +466,8 @@ describe("after-pay review-screen gate — intake wiring", () => {
     expect(finalize).toContain("setGuidedFinalReviewExplicitlyOpened(true)");
     expect(finalize).toContain('setCreateFlowPhase("draft_ready_for_review")');
     expect(finalize).toContain("onHomeGuidedTransitionPhase?.(\"review_ready\")");
-    expect(finalize).not.toContain("enterGuidedSignatureTrackRoute");
+    expect(finalize).toContain('paidProSignaturePrepIntentLatched || finalReviewSendIntentRef.current === "signature"');
+    expect(finalize).toContain("scrollPaidProReviewDecisionIntoView");
     expect(finalize).not.toContain("/app/esign");
 
     const completeStart = intakeSrc.indexOf('case "complete_recipient_details"');
@@ -958,6 +959,8 @@ describe("after-pay Send for signature — names+emails start the existing signi
     const sendBlock = intakeSrc.slice(sendStart, sendEnd > sendStart ? sendEnd : sendStart + 4500);
     expect(sendBlock).toContain("canStartPaidSessionSignatureTrackFromFinalReview");
     expect(sendBlock).toContain("paidSessionTwoSignersReady");
+    expect(sendBlock).toContain("resolvePaidProSignatureConfirmationAuthority");
+    expect(sendBlock).not.toMatch(/namesAndEmailsComplete:\s*[\s\S]*emailsReady/);
     expect(sendBlock).toContain('traceSigningAdvance("handleProSendForSignature:names_emails_complete")');
     expect(sendBlock).toContain("feedbackCreatingLinks(\"signing\")");
     expect(sendBlock).toContain("publishJourneyActionFlash(creatingSigningLinks)");
