@@ -1116,14 +1116,6 @@ def _classify_premium_full_draft_failure(exc: BaseException) -> tuple[str, str]:
     return "unknown", f"{et}"
 
 
-PREMIUM_TRUNCATED_KEEP_MIN_LEN = 1_600
-"""
-Minimum length to keep truncated/insufficient model text. Lower than the full substance floor
-because a truncated draft that the model actually wrote is more useful to the user than an
-empty skeleton with Retry.
-"""
-
-
 def _premium_full_draft_degraded_response(
     *,
     intake_s: str,
@@ -1144,30 +1136,27 @@ def _premium_full_draft_degraded_response(
       * there is no substantive body — return an EMPTY body with ``generation_ok=False`` +
         ``retryable=True`` so the client shows an explicit retry, not local text.
 
-    When ``use_truncated_keep_floor=True`` (for output_truncated / premium_generation_insufficient),
-    the body is kept if it is >= PREMIUM_TRUNCATED_KEEP_MIN_LEN (1600 chars), bypassing the full
-    substance floor check. This ensures that truncated model output the user paid for is not
-    discarded in favor of an empty paid shell.
+    Length alone never grants authority. The legacy ``use_truncated_keep_floor`` argument
+    remains call-compatible but cannot bypass completion, substance, or validation checks.
+    A truncated response (including complete-looking prose inside incomplete JSON) stays
+    retryable. Raw JSON is diagnostics, not agreement paper.
     """
     preserved = (preserved_substantive_body or "").strip()
     keep_body = False
-    if preserved:
-        if use_truncated_keep_floor:
-            # For truncated/insufficient cases: keep if >= 1600 chars (lower floor).
-            # The model wrote real text; discarding it and showing an empty skeleton is worse.
-            keep_body = len(preserved) >= PREMIUM_TRUNCATED_KEEP_MIN_LEN
-            if keep_body:
-                log.info(
-                    "[premium-full-draft] event=truncated_keep_floor_passed doc_len=%s min=%s failure_code=%s",
-                    len(preserved),
-                    PREMIUM_TRUNCATED_KEEP_MIN_LEN,
-                    failure_code,
-                )
-        else:
-            floor_ok, _floor_reasons = premium_full_draft_body_meets_substance_floor(
-                preserved, intake=intake_s, context=ctx_dict
-            )
-            keep_body = floor_ok
+    if preserved and failure_code != "output_truncated" and not preserved.startswith(("{", "[", "```")):
+        floor_ok, _floor_reasons = premium_full_draft_body_meets_substance_floor(
+            preserved, intake=intake_s, context=ctx_dict
+        )
+        keep_body = floor_ok
+    doc = preserved if keep_body else ""
+    empty_intelligence = AgreementIntelligence()
+    agreement_validation = _validate_and_log_premium_agreement_draft(
+        authoritative_draft=doc,
+        agreement_intelligence=empty_intelligence,
+        original_intake=intake_s,
+        stage=f"degraded:{failure_code}",
+    )
+    keep_body = keep_body and bool(agreement_validation.passed)
     doc = preserved if keep_body else ""
     fam = ""
     if ctx_dict:
@@ -1190,13 +1179,6 @@ def _premium_full_draft_degraded_response(
             "[CLAW] premium generation blocked category=%s stage=model_path suppress_fallback_document=1",
             failure_code,
         )
-    empty_intelligence = AgreementIntelligence()
-    agreement_validation = _validate_and_log_premium_agreement_draft(
-        authoritative_draft=doc,
-        agreement_intelligence=empty_intelligence,
-        original_intake=intake_s,
-        stage=f"degraded:{failure_code}",
-    )
     log.info(
         "[premium-full-draft-diagnostics] outcome=degraded raw_model_len=%s primary_document_text_len=%s "
         "document_text_len=%s server_full_document_text_len=%s agreement_validation_passed=%s "
@@ -1302,6 +1284,15 @@ def _premium_full_draft_finalize_http_response(
     Single JSON serialization to bytes — avoids streaming/partial frames and catches wire-unsafe text
     before any response bytes are committed.
     """
+    if model.generation_ok and model.agreement_validation is not None and not model.agreement_validation.passed:
+        # Final boundary: neither normal nor degraded paths may contradict validation.
+        # Keep questions/diagnostics, never put rejected bytes in an authority alias.
+        model = model.model_copy(update={
+            "generation_ok": False, "retryable": True, "generation_outcome": "degraded",
+            "document_text": "", "authoritative_draft": "", "server_full_document_text": "",
+            "server_repair_document_text": "", "server_generation_failure_code": "agreement_validation_failed",
+            "server_generation_failure_message": "The draft did not pass document checks. Your Pro access is saved. Please retry; no rejected agreement was frozen.",
+        })
     serialize_started = time.perf_counter()
     try:
         wire = _premium_full_draft_model_to_wire_dict(model)
@@ -1842,7 +1833,9 @@ def _premium_full_draft_system_prompt() -> str:
         "Output ONLY a single JSON object (no markdown, no code fences) with EXACT keys:\n"
         '{ "title": string, "agreement_family": string, "authoritative_draft": string, "agreement_intelligence": object, "key_terms_found": string array, "missing_material_info": string array }\n'
         "- `authoritative_draft` is the full agreement in plain text, not a summary. This must be a complete first-pass draft a user can review. "
-        "For backward compatibility you may also include `document_text` with the exact same value, but `authoritative_draft` is required.\n"
+        "Emit the full agreement ONCE, only in `authoritative_draft`. Do not emit `document_text`, "
+        "HTML, or any second copy of the paper. The server creates compatibility fields. "
+        "Keep intelligence and labels concise so the entire JSON object finishes within the output budget.\n"
         "- `key_terms_found`: 6–20 short labels for the major commercial points you actually included (including key standard protections you added).\n"
         "- `missing_material_info`: only material items still unknown after a fair read of the user materials, else [].\n"
         "- `agreement_family`: short human label of deal type, e.g. 'Marketing services retainer' or 'Referral commission'—use it to calibrate which standard clauses to emphasize.\n"
@@ -6000,10 +5993,7 @@ def premium_full_draft(request: Request, body: PremiumFullDraftRequest) -> Respo
                     qualityOk=bool(ok_final),
                     substanceOk=False,
                 )
-            # Pass the model's doc with use_truncated_keep_floor=True so that if the doc
-            # is >= 1600 chars, we return 200 with that text instead of 503 with empty body.
-            # A truncated/insufficient draft the model actually wrote is more useful to the
-            # user than an empty paid shell with Retry.
+            # Failed substance checks remain retryable; length alone cannot grant authority.
             dm = _premium_full_draft_degraded_response(
                 intake_s=intake_s,
                 ctx_dict=ctx_dict,

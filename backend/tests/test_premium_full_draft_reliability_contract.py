@@ -524,18 +524,8 @@ def test_thin_primary_repaired_to_substantive_returns_full_server_full(monkeypat
     assert server_full == doc
 
 
-def test_persistently_thin_keeps_body_above_truncated_floor(monkeypatch, tmp_path):
-    """
-    Updated from TEST562: a body between the legacy floor and the frontend freeze floor (6k-10k)
-    is NOW kept when >= 1600 chars. The truncated keep floor takes precedence over the full
-    substance floor because a truncated/insufficient draft the user paid for is more useful
-    than an empty paid shell with Retry.
-
-    The original TEST562 concern (mislabeled_server_full_draft_below_substantive_min) is now
-    handled differently: the body is returned with generation_outcome=degraded and
-    server_generation_failure_code=premium_generation_insufficient, so the frontend knows
-    it's not a "full" corpus but can still display it.
-    """
+def test_persistently_thin_is_retryable_not_authority(monkeypatch, tmp_path):
+    """A failed substance gate cannot be bypassed merely because the body is long."""
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
     monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
@@ -546,15 +536,14 @@ def test_persistently_thin_keeps_body_above_truncated_floor(monkeypatch, tmp_pat
     client = TestClient(app)
     res = _post(client, intake=FOUR_PARTY_INTAKE, context=_four_party_context())
 
-    # Now returns 200 with the body preserved, not 503 with empty
-    assert res.status_code == 200
+    assert res.status_code == 503
     body = res.json()
     assert body.get("generation_outcome") == "degraded"
     assert body.get("server_generation_failure_code") == "premium_generation_insufficient"
-    assert body.get("generation_ok") is True
-    assert body.get("retryable") is False
+    assert body.get("generation_ok") is False
+    assert body.get("retryable") is True
     doc = (body.get("document_text") or "").strip()
-    assert len(doc) >= 1600
+    assert doc == body.get("authoritative_draft") == body.get("server_full_document_text") == ""
 
 
 def test_json_parse_thin_regenerates_then_recovers_substantive(monkeypatch, tmp_path):
@@ -610,19 +599,18 @@ def test_diagnostics_log_emits_required_fields_on_success(monkeypatch, tmp_path,
 
 
 def test_diagnostics_log_emits_required_fields_on_degraded(monkeypatch, tmp_path, caplog):
-    """Diagnostics must also be emitted on the degraded path (with body kept via truncated floor)."""
+    """Diagnostics remain available when inadequate paper is withheld from authority."""
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
     monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
 
-    # With the truncated keep floor, a body >= 1600 chars is now kept (returns 200),
-    # but still with generation_outcome=degraded and the failure code logged.
+    # The insufficient body must remain a retry, with a diagnostic failure code.
     monkeypatch.setattr(av2, "call_legal_llm", lambda *a, **k: json.dumps(_mid_length_corpus_json()))
     client = TestClient(app)
     with caplog.at_level("INFO"):
         res = _post(client, intake=FOUR_PARTY_INTAKE, context=_four_party_context())
 
-    assert res.status_code == 200  # Now 200 because body >= 1600 chars
+    assert res.status_code == 503
     diag = [r.getMessage() for r in caplog.records if "[premium-full-draft-diagnostics]" in r.getMessage()]
     assert diag, "expected a [premium-full-draft-diagnostics] log line"
     assert any("outcome=degraded" in line for line in diag)
@@ -667,11 +655,8 @@ def _truncated_usable_corpus_json() -> dict:
     }
 
 
-def test_output_truncated_keeps_body_above_1600_chars(monkeypatch, tmp_path):
-    """
-    When finish_reason=length (truncated), if the model returned >= 1600 chars, keep that body
-    and return HTTP 200 instead of 503-empty. A truncated draft is more useful than an empty shell.
-    """
+def test_output_truncated_long_body_is_not_authoritative(monkeypatch, tmp_path):
+    """Even complete-looking JSON is not success when the provider reports truncation."""
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
     monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
@@ -691,16 +676,14 @@ def test_output_truncated_keeps_body_above_1600_chars(monkeypatch, tmp_path):
     client = TestClient(app)
     res = _post(client, intake="Simple two-party Harbor services agreement.", context=None)
 
-    # Should get 200 with the body, not 503 with empty
-    assert res.status_code == 200
+    assert res.status_code == 503
     body = res.json()
     assert body.get("generation_outcome") == "degraded"
     assert body.get("server_generation_failure_code") == "output_truncated"
-    assert body.get("generation_ok") is True
-    assert body.get("retryable") is False
+    assert body.get("generation_ok") is False
+    assert body.get("retryable") is True
     doc = (body.get("document_text") or "").strip()
-    assert len(doc) >= 1600
-    assert "Harbor Pool & Patio" in doc or "Services Agreement" in doc
+    assert doc == body.get("authoritative_draft") == body.get("server_full_document_text") == ""
 
 
 def test_output_truncated_with_short_body_returns_503_empty(monkeypatch, tmp_path):
@@ -735,11 +718,8 @@ def test_output_truncated_with_short_body_returns_503_empty(monkeypatch, tmp_pat
     assert doc == ""
 
 
-def test_insufficient_substance_keeps_body_above_1600_chars(monkeypatch, tmp_path):
-    """
-    When the model output fails the full substance floor (missing clause families, etc.) but is
-    >= 1600 chars, keep that body and return HTTP 200 instead of 503-empty.
-    """
+def test_insufficient_substance_is_not_success_despite_length(monkeypatch, tmp_path):
+    """Missing required substance remains retryable; repetition/length is not authority."""
     monkeypatch.setenv("CLAW_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("CLAW_USAGE_ECONOMICS_DB_PATH", str(tmp_path / "usage.sqlite3"))
     monkeypatch.setenv("CLAW_ECONOMICS_DB_PATH", str(tmp_path / "economics.sqlite3"))
@@ -762,12 +742,11 @@ def test_insufficient_substance_keeps_body_above_1600_chars(monkeypatch, tmp_pat
     # Use four-party intake to trigger substance floor failure (needs more clause families)
     res = _post(client, intake=FOUR_PARTY_INTAKE, context=_four_party_context())
 
-    # Should get 200 with the body preserved, not 503 with empty
-    assert res.status_code == 200
+    assert res.status_code == 503
     body = res.json()
     assert body.get("generation_outcome") == "degraded"
     assert body.get("server_generation_failure_code") == "premium_generation_insufficient"
-    assert body.get("generation_ok") is True
-    assert body.get("retryable") is False
+    assert body.get("generation_ok") is False
+    assert body.get("retryable") is True
     doc = (body.get("document_text") or "").strip()
-    assert len(doc) >= 1600
+    assert doc == body.get("authoritative_draft") == body.get("server_full_document_text") == ""

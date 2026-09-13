@@ -11,6 +11,8 @@ process.env.VITE_CLAW_SUPPRESS_API_BASE_LOG ??= "1";
 
 export default defineConfig({
   testDir: "./e2e/core-paid-journey-live",
+  // Provider-quality diagnostics have their own explicit runner and evidence directory.
+  testMatch: "corePaidJourneyAcceptance.live.spec.ts",
   fullyParallel: false,
   retries: 0,
   workers: 1,

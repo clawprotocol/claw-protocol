@@ -143,6 +143,18 @@ def _has_named_parties(draft: str, original_intake: str, agreement_intelligence:
         hits = sum(1 for n in names if re.search(re.escape(n), draft, re.I))
         if hits >= 2:
             return True
+    # Named recital with intervening role labels: "between Acme LLC (\"Consultant\")
+    # and Beta Inc. (\"Client\")". Verify both identities against the intake; adding
+    # Consultant to the generic role-only fallback would not prove named parties.
+    declared = re.search(
+        r'\bbetween\s+([A-Z][A-Za-z0-9 &\'.,-]{2,100}?)\s*\(["“][^()\n]{1,48}?["”]\)'
+        r'\s+and\s+([A-Z][A-Za-z0-9 &\'.,-]{2,100}?)\s*\(["“][^()\n]{1,48}?["”]\)', draft,
+    )
+    if declared:
+        first, second = (name.strip().rstrip(".") for name in declared.groups())
+        if (first.casefold() != second.casefold()
+                and all(re.search(rf"\b{re.escape(name)}\b", original_intake, re.I) for name in (first, second))):
+            return True
     if re.search(r"\bbetween\s+[A-Z][A-Za-z0-9 &'.,-]{2,80}\s+and\s+[A-Z][A-Za-z0-9 &'.,-]{2,80}", draft):
         return True
     return bool(
@@ -465,4 +477,3 @@ def validate_premium_agreement_draft(
         agreementIntelligence=agreement_intelligence,
         originalIntake=original_intake,
     )
-

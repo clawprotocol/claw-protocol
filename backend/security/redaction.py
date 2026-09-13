@@ -194,6 +194,7 @@ def _find_spans(text: str) -> list[_Span]:
 def _assign_placeholders(
     text: str,
     spans: list[_Span],
+    identity_bindings: dict[str, str] | None = None,
 ) -> tuple[str, dict[str, int], list[str]]:
     """Build redacted text and counts; stable numbering per category per normalized value."""
     if not spans:
@@ -203,6 +204,14 @@ def _assign_placeholders(
     counters: dict[str, int] = {}
     value_to_idx: dict[tuple[str, str], int] = {}
     replacements: list[tuple[int, int, str]] = []
+    # Optional caller-owned, request-local bindings. Never included in result/repr/logs.
+    if identity_bindings is not None:
+        for token, value in identity_bindings.items():
+            for category, prefix in _PLACEHOLDER_PREFIX.items():
+                if token.startswith(f"[{prefix}_"):
+                    idx = int(token.rsplit("_", 1)[1][:-1])
+                    counters[category] = max(counters.get(category, 0), idx)
+                    value_to_idx[(category, re.sub(r"\s+", " ", value.lower()))] = idx
 
     def placeholder_for(category: str, norm_key: str) -> str:
         key = (category, norm_key)
@@ -235,6 +244,8 @@ def _assign_placeholders(
             nk = segment.lower()
 
         ph = placeholder_for(sp.category, nk)
+        if identity_bindings is not None:
+            identity_bindings.setdefault(ph, segment)
         replacements.append((sp.start, sp.end, ph))
 
     # Apply from end to start
@@ -246,7 +257,7 @@ def _assign_placeholders(
     return out, {k: counters[k] for k in categories_sorted}, categories_sorted
 
 
-def redact_text(raw: str) -> RedactionResult:
+def redact_text(raw: str, *, identity_bindings: dict[str, str] | None = None) -> RedactionResult:
     """
     Redact sensitive-looking spans from raw text.
 
@@ -258,7 +269,7 @@ def redact_text(raw: str) -> RedactionResult:
 
     spans = _find_spans(raw)
     merged = _merge_spans(spans)
-    redacted, counts, cats = _assign_placeholders(raw, merged)
+    redacted, counts, cats = _assign_placeholders(raw, merged, identity_bindings)
     return RedactionResult(
         redacted_text=redacted,
         redaction_counts=counts,

@@ -60,6 +60,12 @@ CONTENT_FP="$(
       backend/tests/test_core_paid_journey_acceptance.py \
       backend/llm_acceptance_stub.py \
       backend/llm_router.py \
+      backend/security/ai_airlock.py \
+      backend/security/redaction.py \
+      backend/security/agreement_identity.py \
+      backend/agreements/premium_agreement_validation.py \
+      backend/tests/test_live_drafting_output_boundary.py \
+      backend/quality_eval_budget.py \
       backend/jwt_acceptance_jwks.py \
       scripts/run_core_paid_journey_acceptance_gate.sh
     do
